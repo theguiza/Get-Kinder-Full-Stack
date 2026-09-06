@@ -20276,3 +20276,28 @@ Current requirement assessments operate on generic organization-scope requiremen
 **Final Phase-12 capability status:** Data Dictionary Entries PRESENT. Graph Relationships PRESENT. Phase 12 Impact Evidence Library repository closure is established locally after this package.
 
 **Prohibited actions not performed:** no schema or migration; no database access or mutation beyond non-listening sentinel configuration; no production/shared/staging access or mutation; no cloud/configuration/credential/secret access; no feature-flag, tenant, or environment change; no real client data; no push; no deploy; no `00_KAI_CURRENT_STATE.md` update.
+
+## Final bounded Phase-12 residual proof hardening - Data Dictionary Entries + Graph Relationships
+
+**Date:** 2026-09-06
+**Starting state:** branch `main`; starting HEAD `b0cf2e7247b054be3d5e15f5ff82a6e9f6e5c493`; working tree clean. Root `AGENTS.md` read and followed. Scope remained limited to the two owner-authorized residual capabilities: Data Dictionary Entries and Graph Relationships. The already-closed Source Locators, Review Decisions, and Citation Links conclusions were preserved as `USER_CONFIRMED` and were not reopened.
+
+**Data Dictionary Entries:** current repository inspection confirmed the existing governed entry-level read path:
+`migrations/kai_sprint2_p1_04_data_dictionary_and_quality.sql` (`kai.data_dictionary_fields`) -> `Backend/kai/dictionary/postgresDataDictionaryRepository.js#listDataDictionaryEntries` -> `Backend/kai/services/kaiDataDictionaryService.js#listDataDictionaryEntries` -> `Backend/kai/routes/sprint2IntakeApi.js` `GET /admin/organizations/:organizationId/data-dictionaries/:dataDictionaryId/entries`. The path is organization-scoped, read-only/repeatable-read, service-authorized for mapped human GK reviewer/admin/operator roles, and allowlists only governed field-entry DTO keys. Added focused boundary proof for cross-tenant denial before repository access and read-only field-query source proof.
+
+**Graph Relationships:** current repository inspection confirmed the repository-defined representation is explicit identifier-only relational graph relationship DTOs composed from the canonical claim traceability edge set, not a `kai.graph_relationships` persistence table and not Neo4j. The implementation path is `Backend/kai/validators/kaiGraphRelationshipValidators.js` -> `Backend/kai/dictionary/postgresClaimTraceabilityRepository.js#evaluateClaimTraceabilityInTransaction` -> `Backend/kai/services/kaiClaimTraceabilityService.js` -> route/tool consumers including `Backend/kai/services/kaiAssistantClaimTraceabilityTool.js`. `validateGraphRelationshipEndpoints` enforces the relationship vocabulary and endpoint type/id pairing; `validateGraphTraceCompleteness` enforces required trace completeness and feeds the existing `traceability_incomplete` blocker. Added focused boundary proof for cross-tenant graph traceability denial before repository access.
+
+**Tests/verification:** `DATABASE_URL=postgres://kai_sentinel@127.0.0.1:9/kai_sentinel` was set on every Node/npm command in this run.
+- `node --test __tests__/kai-sprint2-p1-04-data-dictionary-quality-boundary.spec.js` -> 19/19 passing.
+- `node --test __tests__/kai-sprint2-p2-06-claim-traceability-boundary.spec.js` -> 10/10 passing.
+- `node --test __tests__/kai-sprint2-p2-07-assistant-claim-traceability-tool-boundary.spec.js` -> 16/16 passing.
+- `node --test __tests__/kai-sprint2-impact-evidence-library.spec.js` -> first sandbox run failed on local `127.0.0.1` bind permission; unsandboxed rerun passed 102/102.
+- `node --test __tests__/kai-sprint2-p2-08-eligible-claims-for-audience-boundary.spec.js` -> 13/13 passing.
+- `node --test __tests__/kai-sprint2-p2-06-claim-traceability-missing-log-regression.spec.js` -> 1/1 passing.
+- `node --test __tests__/kai-sprint2-p1-04-data-dictionary-quality-schema-contract.spec.js` -> 13/13 passing.
+- `node --test __tests__/kai-sprint2-pass2-api-contract.spec.js` -> 23/23 passing.
+- `npm run test:kai-sprint2` -> failed in the sandbox and outside the sandbox; outside-sandbox summary was 3078 tests, 3012 passing, 10 failing, 56 skipped. Failure names were unrelated to the two residual capabilities: `kai-sprint2-batch-files-route.spec.js`, `kai-sprint2-file-detail-route.spec.js`, and P3 export-review route source-contract tests.
+
+**Final Phase-12 residual capability status:** Data Dictionary Entries PRESENT. Graph Relationships PRESENT. Phase 12 Impact Evidence Library residual repository closure remains established locally for these two capabilities.
+
+**Prohibited actions not performed:** no production infrastructure, Render, PostgreSQL runtime state, GCS, feature flags, credentials, real client data, production/shared/staging mutation, schema execution, database mutation, cloud mutation, deployment, push, destructive action, Neo4j work, Phase-13 generation work, Phase-14 export work, or `00_KAI_CURRENT_STATE.md` update.

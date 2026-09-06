@@ -21,6 +21,7 @@ const migrationSource = readFileSync(new URL(`../${MIGRATION_PATH}`, import.meta
 const kaiBarrelSource = readFileSync(new URL("../Backend/kai/index.js", import.meta.url), "utf8");
 
 const ORG = "00000000-0000-4000-8000-000000000001";
+const OTHER_ORG = "00000000-0000-4000-8000-000000000002";
 const FILE_PROFILE = "50000000-0000-4000-8000-000000000001";
 const DATA_DICTIONARY = "60000000-0000-4000-8000-000000000001";
 const NOW = "2026-08-04T10:00:00.000Z";
@@ -192,6 +193,25 @@ test("P1-04 dictionary-entry read service rejects disabled, malformed, non-human
   assert.equal(calls, 0);
 });
 
+test("P1-04 dictionary-entry read service blocks cross-tenant reads before repository access", async () => {
+  let calls = 0;
+  const repository = {
+    async listDataDictionaryEntries() {
+      calls += 1;
+      throw new Error("must not call");
+    },
+  };
+
+  const result = await listDataDictionaryEntries(
+    { organizationId: OTHER_ORG, dataDictionaryId: DATA_DICTIONARY, actorContext },
+    { env: { KAI_SPRINT2_ENABLED: "true" }, dataDictionaryRepository: repository },
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "authorization_denied");
+  assert.equal(calls, 0);
+});
+
 test("P1-04 dictionary-entry read service fails closed on unsafe or non-allowlisted repository output", async () => {
   const enabled = { KAI_SPRINT2_ENABLED: "true" };
   const unsafeRows = [
@@ -233,6 +253,8 @@ test("P1-04 dictionary-entry read service fails closed on unsafe or non-allowlis
 
 test("P1-04 repository: is the only place SQL and row locking for these tables appear, and never imports storage/parsers/LLM clients", () => {
   assert.match(repositorySource, /\bINSERT INTO kai\.data_dictionaries\b/);
+  assert.match(repositorySource, /\bFROM kai\.data_dictionary_fields\b/);
+  assert.match(repositorySource, /SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY/);
   assert.match(repositorySource, /\bFOR UPDATE\b/);
   assert.doesNotMatch(repositorySource, /anthropic|openai|localProfilingKernel|pdfAssessorWorkerBoundary/i);
   assert.doesNotMatch(repositorySource, /\bfrom\s+["'].*storage.*["']/i);

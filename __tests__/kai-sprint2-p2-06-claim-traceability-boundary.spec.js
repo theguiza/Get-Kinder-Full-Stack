@@ -11,6 +11,7 @@ import {
 } from "../Backend/kai/validators/kaiGraphRelationshipValidators.js";
 
 const ORG = "00000000-0000-4000-8000-000000000001";
+const OTHER_ORG = "00000000-0000-4000-8000-000000000002";
 const CLAIM = "00000000-0000-4000-8000-000000000101";
 const actorContext = {
   actorType: "human",
@@ -33,6 +34,25 @@ test("P2-06 service: disabled, invalid, and unauthorized calls do not load or ca
   assert.equal((await getClaimTraceabilitySummary(input({ requestedAudience: "partner" }), { env: { KAI_SPRINT2_ENABLED: "true" }, claimTraceabilityRepository: repository })).error.code, "validation_blocker");
   assert.equal((await getClaimTraceabilitySummary(input({ actorContext: { actorType: "system", actorUserId: actorContext.actorUserId } }), { env: { KAI_SPRINT2_ENABLED: "true" }, claimTraceabilityRepository: repository })).error.code, "authorization_denied");
   assert.equal((await getClaimTraceabilitySummary(input({ actorContext: { ...actorContext, organizationMemberships: [] } }), { env: { KAI_SPRINT2_ENABLED: "true" }, claimTraceabilityRepository: repository })).error.code, "authorization_denied");
+  assert.equal(calls, 0);
+});
+
+test("P2-06 service blocks cross-tenant graph traceability reads before repository access", async () => {
+  let calls = 0;
+  const repository = {
+    async getClaimTraceabilitySummary() {
+      calls += 1;
+      throw new Error("must not call");
+    },
+  };
+
+  const result = await getClaimTraceabilitySummary(input({ organizationId: OTHER_ORG }), {
+    env: { KAI_SPRINT2_ENABLED: "true" },
+    claimTraceabilityRepository: repository,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "authorization_denied");
   assert.equal(calls, 0);
 });
 
