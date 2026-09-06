@@ -86,7 +86,7 @@ function deriveDecidedByRole(actorContext, organizationId, decisionType) {
   return membership ? requiredRole : null;
 }
 
-async function loadExportCandidateForAuthority(tx, { organizationId, exportCandidateId }) {
+export async function loadExportCandidateForAuthority(tx, { organizationId, exportCandidateId }) {
   const { rows } = await tx.query(
     `SELECT export_candidate_id::text AS export_candidate_id,
             organization_id::text AS organization_id,
