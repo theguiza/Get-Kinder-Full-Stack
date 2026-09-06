@@ -102,6 +102,7 @@ try {
   psqlFile("migrations/kai_sprint2_p3_13_export_review_completion.sql");
   psqlFile("migrations/kai_sprint2_p3_16_export_candidate_foundation.sql");
   psqlFile("migrations/kai_sprint2_p3_17_human_authority_decision_ledger.sql");
+  psqlFile("migrations/kai_sprint2_p3_17_authority_audit_gate_a_operation_repair.sql");
   psqlFile("scripts/kai-sprint2-p3-04-generated-content-review-completion-verifier.sql");
   // As with P3-13's/P3-16's/P3-17's own runners, the earlier two-state
   // verifiers this package's prerequisites already superseded are not
