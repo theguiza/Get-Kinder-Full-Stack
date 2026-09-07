@@ -1,0 +1,76 @@
+BEGIN;
+
+INSERT INTO kai.intake_files (
+  intake_file_id,
+  intake_batch_id,
+  organization_id,
+  original_filename,
+  safe_filename,
+  checksum,
+  hash_algorithm,
+  force_new_version,
+  upload_state,
+  upload_state_changed_at,
+  upload_expires_at,
+  object_version_id,
+  verified_checksum,
+  verified_size_bytes,
+  verified_at,
+  created_at
+) VALUES
+  (
+    '20000000-0000-4000-8000-000000000101',
+    '10000000-0000-4000-8000-000000000101',
+    '00000000-0000-4000-8000-000000000101',
+    'gate-a-required-index-valid-primary.pdf',
+    'gate-a-required-index-valid-primary.pdf',
+    repeat('1', 64),
+    'sha256',
+    false,
+    'confirmed',
+    '2026-08-20T12:00:00Z',
+    '2026-08-21T12:00:00Z',
+    'provider-object:required-index-valid-primary#1',
+    repeat('1', 64),
+    101,
+    '2026-08-20T12:01:00Z',
+    '2026-08-20T12:00:00Z'
+  ),
+  (
+    '20000000-0000-4000-8000-000000000102',
+    '10000000-0000-4000-8000-000000000101',
+    '00000000-0000-4000-8000-000000000101',
+    'gate-a-required-index-valid-forced.pdf',
+    'gate-a-required-index-valid-forced.pdf',
+    repeat('1', 64),
+    'sha256',
+    true,
+    'uploaded_unconfirmed',
+    '2026-08-20T12:02:00Z',
+    '2026-08-21T12:02:00Z',
+    'provider-object:required-index-valid-forced#1',
+    NULL,
+    NULL,
+    NULL,
+    '2026-08-20T12:02:00Z'
+  ),
+  (
+    '20000000-0000-4000-8000-000000000103',
+    '10000000-0000-4000-8000-000000000102',
+    '00000000-0000-4000-8000-000000000102',
+    'gate-a-required-index-valid-other-org.pdf',
+    'gate-a-required-index-valid-other-org.pdf',
+    repeat('1', 64),
+    'sha256',
+    false,
+    'reserved',
+    '2026-08-20T12:03:00Z',
+    '2026-08-21T12:03:00Z',
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    '2026-08-20T12:03:00Z'
+  );
+
+COMMIT;

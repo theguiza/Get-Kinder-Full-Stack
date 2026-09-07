@@ -14,6 +14,7 @@
     "verify:kai-sprint2-schema-contract": "node --test __tests__/kai-sprint2-p0-repository-contract.spec.js",
     "verify:kai-sprint2-gate-a-p0": "node scripts/kai-sprint2-gate-a-local-postgres.js",
     "verify:kai-sprint2-gate-a-upload-lifecycle-enforcement-repair": "node scripts/kai-sprint2-gate-a-upload-lifecycle-enforcement-repair-local-postgres.js",
+    "verify:kai-sprint2-gate-a-required-index-repair": "node scripts/kai-sprint2-gate-a-required-index-local-postgres.js",
     "verify:kai-sprint2-p1-parser-run-file-profile": "node scripts/kai-sprint2-p1-parser-run-and-file-profile-local-postgres.js",
     "verify:kai-sprint2-p1-03-parser-profile-worker": "node scripts/kai-sprint2-p1-03-parser-profile-worker-runner.js",
     "verify:kai-sprint2-p1-04-data-dictionary-quality": "node scripts/kai-sprint2-p1-04-data-dictionary-quality-runner.js",

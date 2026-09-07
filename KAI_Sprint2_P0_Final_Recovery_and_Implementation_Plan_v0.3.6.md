@@ -20626,3 +20626,69 @@ schema object fingerprint changed, runs the focused verifier/failure checks,
 existing Gate A verifier/failure checks/smoke verifier, Gate C-1 verifier/
 smoke verifier, and replays the repair idempotently. Production action:
 NONE. Push/deploy: NOT PERFORMED.
+
+## Gate A Required Index Forward Repair
+
+**Date:** 2026-09-07
+
+**Owner authorization (bounded, local-only):** exactly one additive forward
+schema repair migration restoring only these current-required Gate A indexes:
+`ux_intake_files_gate_a_org_declared_checksum`,
+`ix_intake_files_gate_a_tenant_upload_state`, and
+`ix_intake_files_gate_a_object_version`; verification SQL; rollback draft;
+synthetic smoke fixture/seed; smoke verification; read-only failure checks;
+patch notes; runbook; focused local/ephemeral PostgreSQL proof; directly
+affected Gate-A/Gate-C verification; one local commit if acceptance passes.
+Explicitly not authorized: production/staging database mutation, deployment,
+push, feature flags, credentials/secrets, real client data, P3-04 or any
+downstream migration, changes to the original Gate-A migration, changes to
+the already-applied Gate-A function/trigger repair migration, or Gate C-1
+changes.
+
+**Starting context:** USER_CONFIRMED production pgAdmin evidence established
+all three current-required indexes are missing, while the Gate-A function and
+lifecycle trigger were already repaired and are out of scope. TOOL_VERIFIED
+repository inspection at `475ad346766cd31aa3371f76269c830dfb6e6b64` on
+branch `main` established current HEAD still requires all three indexes in
+`migrations/kai_sprint2_gate_a_p0_upload_lifecycle.sql`; the exact names
+appeared only in the original Gate-A migration, its rollback, and verifiers,
+so no complete existing forward repair was found.
+
+**Package artifacts:** new migration
+`migrations/kai_sprint2_gate_a_p0_required_index_forward_repair.sql` fails
+closed unless `kai.intake_files` exists and the exact index-referenced column
+shapes are present, then recreates only the three authoritative index
+definitions from the original Gate-A migration without changing names,
+uniqueness, key order, predicates, or access method. Rollback draft
+`migrations/kai_sprint2_gate_a_p0_required_index_forward_repair.rollback.sql`
+removes only this repair's three indexes and states that rollback is an
+operational draft, not automatic production instruction. Focused verifier,
+read-only failure checks, local-only missing-index drift fixture, valid-state
+smoke seed/verifier, conflicting unique-state seed/fail-closed verifier,
+patch notes, runbook, and loopback-only PostgreSQL proof runner were added
+under `scripts/`. The existing Gate-A enforcement-repair verifier, existing
+Gate-A verifier/failure checks, and Gate C-1 verifier are reused unchanged.
+
+**Verification:** initial sandbox run of `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel
+npm run verify:kai-sprint2-gate-a-required-index-repair` failed during
+PostgreSQL `initdb` on the known sandbox shared-memory restriction; the
+runner removed the temporary workdir and retained no database target. The
+same sentinel-protected command then passed outside the sandbox using a
+runner-owned ephemeral PostgreSQL 16 database
+`kai_gate_a_required_index_repair_synthetic` bound to loopback
+`127.0.0.1:57467`; it applied the original Gate-A migration, the already-
+applied function/trigger repair migration, policy replay, and Gate C-1;
+dropped only the three required indexes; proved pre-repair missing-index
+detection; applied the required-index forward repair over valid synthetic
+state; proved all three exact index contracts; proved the unique contract
+rejects same-tenant non-forced declared-checksum duplicates; ran the Gate-A
+enforcement-repair verifier, existing Gate-A verifier/failure checks, and
+Gate C-1 verifier; replayed the repair idempotently; then dropped the three
+indexes again, inserted conflicting synthetic rows, and proved PostgreSQL
+rejected the unique index while leaving rows untouched and creating no
+partial index repair. Separate affected checks also passed:
+`verify:kai-sprint2-gate-a-upload-lifecycle-enforcement-repair`,
+`verify:kai-sprint2-gate-a-p0`,
+`verify:kai-sprint2-gate-c1-gcs-generation-binding`, and
+`verify:kai-sprint2-schema-contract`. Production action: NONE. Push/deploy:
+NOT PERFORMED.
