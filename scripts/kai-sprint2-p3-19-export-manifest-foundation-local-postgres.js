@@ -47,6 +47,58 @@ function psqlFile(path) {
   return run(psql, ["-v", "ON_ERROR_STOP=1", "-d", dbName, "-f", path], { capture: true }).stdout;
 }
 
+const P3_19_EXPECTED_VERIFIER_CHECKS = [
+  "export_manifests_table_present",
+  "candidate_fk_present",
+  "authority_decision_fk_present",
+  "decision_type_check_present",
+  "fingerprint_contract_version_check_present",
+  "canonical_fingerprint_check_present",
+  "created_by_type_check_present",
+  "replay_convergence_unique_present",
+  "append_only_trigger_present",
+  "no_requested_audience_or_draft_id_column",
+  "no_artifact_or_storage_columns",
+  "generated_content_draft_status_locked_column_unchanged",
+  "upload_lifecycle_audit_operation_allowlist_unchanged",
+];
+
+function psqlFileAndProveP3_19VerifierOutputContract(path) {
+  const csv = run(psql, ["-v", "ON_ERROR_STOP=1", "-q", "-d", dbName, "--csv", "-f", path], { capture: true }).stdout;
+  const lines = csv.trim().split("\n").filter((line) => line.length > 0);
+  const header = lines[0];
+  if (header !== "check_name,status,detail") {
+    throw new Error(`P3-19 verifier output contract violated: unexpected final result header "${header}"`);
+  }
+  const dataRows = lines.slice(1);
+  if (dataRows.length !== P3_19_EXPECTED_VERIFIER_CHECKS.length) {
+    throw new Error(`P3-19 verifier output contract violated: expected ${P3_19_EXPECTED_VERIFIER_CHECKS.length} rows, got ${dataRows.length}`);
+  }
+  const seenCheckNames = new Set();
+  for (const row of dataRows) {
+    const [checkName, status] = row.split(",");
+    if (seenCheckNames.has(checkName)) {
+      throw new Error(`P3-19 verifier output contract violated: duplicate check_name "${checkName}"`);
+    }
+    seenCheckNames.add(checkName);
+    if (status !== "PASS") {
+      throw new Error(`P3-19 verifier output contract violated: check "${checkName}" is not PASS (${status})`);
+    }
+  }
+  for (const expectedCheckName of P3_19_EXPECTED_VERIFIER_CHECKS) {
+    if (!seenCheckNames.has(expectedCheckName)) {
+      throw new Error(`P3-19 verifier output contract violated: missing expected check "${expectedCheckName}"`);
+    }
+  }
+  for (const checkName of seenCheckNames) {
+    if (!P3_19_EXPECTED_VERIFIER_CHECKS.includes(checkName)) {
+      throw new Error(`P3-19 verifier output contract violated: unexpected check "${checkName}"`);
+    }
+  }
+  console.log(`P3-19 verifier output contract proven: exactly ${dataRows.length} PASS rows, exact expected check-name set, no duplicates.`);
+  return csv;
+}
+
 async function proveRunnerOwnedTarget() {
   const parsed = new URL(targetUrl);
   if (!["127.0.0.1", "localhost", "::1"].includes(parsed.hostname.toLowerCase())) {
@@ -119,7 +171,7 @@ try {
   // (kai-sprint2-p3-19-export-manifest-foundation-verifier.sql) asserts that
   // exact replacement instead, exactly as the P3-13/P3-16/P3-17 exclusions
   // already established this pattern.
-  psqlFile("scripts/kai-sprint2-p3-19-export-manifest-foundation-verifier.sql");
+  psqlFileAndProveP3_19VerifierOutputContract("scripts/kai-sprint2-p3-19-export-manifest-foundation-verifier.sql");
   psqlFile("scripts/kai-sprint2-gate-a-smoke-seed.sql");
   psqlFile("scripts/kai-sprint2-p1-04-data-dictionary-quality-smoke-seed.sql");
   psqlFile("scripts/kai-sprint2-p1-05-intake-sensitivity-profile-smoke-seed.sql");

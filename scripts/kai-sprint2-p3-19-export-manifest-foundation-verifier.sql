@@ -1,4 +1,26 @@
 DROP TABLE IF EXISTS p3_19_results;
+DROP TABLE IF EXISTS p3_19_expected_checks;
+
+CREATE TEMP TABLE p3_19_expected_checks (
+  check_name text PRIMARY KEY
+);
+
+INSERT INTO p3_19_expected_checks (check_name)
+VALUES
+  ('export_manifests_table_present'),
+  ('candidate_fk_present'),
+  ('authority_decision_fk_present'),
+  ('decision_type_check_present'),
+  ('fingerprint_contract_version_check_present'),
+  ('canonical_fingerprint_check_present'),
+  ('created_by_type_check_present'),
+  ('replay_convergence_unique_present'),
+  ('append_only_trigger_present'),
+  ('no_requested_audience_or_draft_id_column'),
+  ('no_artifact_or_storage_columns'),
+  ('generated_content_draft_status_locked_column_unchanged'),
+  ('upload_lifecycle_audit_operation_allowlist_unchanged');
+
 CREATE TEMP TABLE p3_19_results (
   check_name text PRIMARY KEY,
   status text NOT NULL,
@@ -142,7 +164,33 @@ SELECT 'upload_lifecycle_audit_operation_allowlist_unchanged',
             THEN 'PASS' ELSE 'FAIL' END,
        'P3-19 does not widen kai.upload_lifecycle_audit''s operation allowlist - export_manifest_created is an kai.audit_events action, never an upload_lifecycle_audit operation';
 
-SELECT * FROM p3_19_results ORDER BY check_name;
+DO $$
+DECLARE
+  expected_count integer := 13;
+BEGIN
+  IF (SELECT COUNT(*) FROM p3_19_expected_checks) <> expected_count
+     OR (SELECT COUNT(*) FROM p3_19_results) <> expected_count
+     OR EXISTS (
+          SELECT 1
+            FROM p3_19_results r
+           GROUP BY r.check_name
+          HAVING COUNT(*) <> 1
+        )
+     OR EXISTS (
+          SELECT 1
+            FROM p3_19_expected_checks e
+            LEFT JOIN p3_19_results r ON r.check_name = e.check_name
+           WHERE r.check_name IS NULL
+        )
+     OR EXISTS (
+          SELECT 1
+            FROM p3_19_results r
+            LEFT JOIN p3_19_expected_checks e ON e.check_name = r.check_name
+           WHERE e.check_name IS NULL
+        ) THEN
+    RAISE EXCEPTION 'P3-19 export-manifest-foundation verifier result construction failed';
+  END IF;
+END $$;
 
 DO $$
 BEGIN
@@ -150,3 +198,10 @@ BEGIN
     RAISE EXCEPTION 'P3-19 export-manifest-foundation verifier failed';
   END IF;
 END $$;
+
+SELECT
+  check_name,
+  status,
+  detail
+FROM p3_19_results
+ORDER BY check_name;
