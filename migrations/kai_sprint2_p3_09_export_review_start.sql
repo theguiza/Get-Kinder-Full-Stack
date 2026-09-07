@@ -54,34 +54,46 @@ ALTER TABLE kai.review_queue_items
       )
     );
 
-ALTER TABLE kai.upload_lifecycle_audit
-  DROP CONSTRAINT IF EXISTS upload_lifecycle_audit_gate_a_operation_check,
-  ADD CONSTRAINT upload_lifecycle_audit_gate_a_operation_check
-    CHECK (operation IN (
-      'reserve_upload',
-      'start_upload',
-      'complete_object_version',
-      'confirm_upload',
-      'block_upload',
-      'abandon_upload',
-      'expire_upload',
-      'policy_decision_compare_and_set',
-      'parser_run_recorded',
-      'file_profile_persisted',
-      'data_dictionary_draft_persisted',
-      'intake_sensitivity_profile_persisted',
-      'sensitivity_review_queue_item_created',
-      'intake_source_candidate_persisted',
-      'source_promotion_decision_persisted',
-      'evidence_lineage_extracted',
-      'claim_proposed',
-      'claim_gap_and_followup_generated',
-      'conflict_review_candidate_created',
-      'generated_content_draft_created',
-      'generated_content_review_completed',
-      'export_review_requested',
-      'export_review_started'
-    ));
+-- Preserve the validated predecessor audit-operation predicate exactly and
+-- add only the P3-09 start operation, following the same monotonic
+-- predecessor-preservation approach established by the repaired P3-04 and
+-- P3-05 migrations (and later reaffirmed by P3-17): reconstructing a static
+-- historical allowlist here would silently drop any operation the actual
+-- validated predecessor predicate admits but this file's author did not
+-- enumerate, which is exactly the defect that caused the production
+-- SQLSTATE 23514 failure this migration now guards against.
+DO $$
+DECLARE
+  existing_predicate text;
+BEGIN
+  SELECT pg_get_expr(c.conbin, c.conrelid)
+    INTO existing_predicate
+    FROM pg_constraint c
+    JOIN pg_class r ON r.oid = c.conrelid
+    JOIN pg_namespace n ON n.oid = r.relnamespace
+   WHERE n.nspname = 'kai'
+     AND r.relname = 'upload_lifecycle_audit'
+     AND c.conname = 'upload_lifecycle_audit_gate_a_operation_check'
+     AND c.convalidated;
+
+  IF existing_predicate IS NULL THEN
+    RAISE EXCEPTION 'validated kai.upload_lifecycle_audit_gate_a_operation_check is required before P3-09 export-review-start migration';
+  END IF;
+
+  IF position('export_review_started' IN existing_predicate) = 0 THEN
+    EXECUTE format(
+      'ALTER TABLE kai.upload_lifecycle_audit ADD CONSTRAINT upload_lifecycle_audit_gate_a_operation_check_p3_09 CHECK ((%s) OR operation = ''export_review_started'') NOT VALID',
+      existing_predicate
+    );
+    ALTER TABLE kai.upload_lifecycle_audit
+      VALIDATE CONSTRAINT upload_lifecycle_audit_gate_a_operation_check_p3_09;
+    ALTER TABLE kai.upload_lifecycle_audit
+      DROP CONSTRAINT upload_lifecycle_audit_gate_a_operation_check;
+    ALTER TABLE kai.upload_lifecycle_audit
+      RENAME CONSTRAINT upload_lifecycle_audit_gate_a_operation_check_p3_09
+      TO upload_lifecycle_audit_gate_a_operation_check;
+  END IF;
+END $$;
 
 ALTER TABLE kai.upload_lifecycle_audit
   DROP CONSTRAINT IF EXISTS upload_lifecycle_audit_p3_09_metadata_object_check,
