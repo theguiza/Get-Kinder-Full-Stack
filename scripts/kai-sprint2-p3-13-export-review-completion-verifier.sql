@@ -1,4 +1,20 @@
 DROP TABLE IF EXISTS p3_13_results;
+DROP TABLE IF EXISTS p3_13_expected_checks;
+
+CREATE TEMP TABLE p3_13_expected_checks (
+  check_name text PRIMARY KEY
+);
+
+INSERT INTO p3_13_expected_checks (check_name)
+VALUES
+  ('export_review_contract_admits_completion_lifecycle'),
+  ('export_review_p3_09_two_state_contract_removed'),
+  ('export_review_identity_unique_index_present'),
+  ('audit_operation_allowed'),
+  ('audit_metadata_safe_contract'),
+  ('no_export_authority_or_final_gate_state'),
+  ('audit_metadata_forbids_approval_and_authority_keys');
+
 CREATE TEMP TABLE p3_13_results (
   check_name text PRIMARY KEY,
   status text NOT NULL,
@@ -85,7 +101,33 @@ SELECT 'audit_metadata_forbids_approval_and_authority_keys',
             THEN 'PASS' ELSE 'FAIL' END,
        'P3-13 completion audit metadata contract explicitly forbids approval/export-authority/final-gate keys';
 
-SELECT * FROM p3_13_results ORDER BY check_name;
+DO $$
+DECLARE
+  expected_count integer := 7;
+BEGIN
+  IF (SELECT COUNT(*) FROM p3_13_expected_checks) <> expected_count
+     OR (SELECT COUNT(*) FROM p3_13_results) <> expected_count
+     OR EXISTS (
+          SELECT 1
+            FROM p3_13_results r
+           GROUP BY r.check_name
+          HAVING COUNT(*) <> 1
+        )
+     OR EXISTS (
+          SELECT 1
+            FROM p3_13_expected_checks e
+            LEFT JOIN p3_13_results r ON r.check_name = e.check_name
+           WHERE r.check_name IS NULL
+        )
+     OR EXISTS (
+          SELECT 1
+            FROM p3_13_results r
+            LEFT JOIN p3_13_expected_checks e ON e.check_name = r.check_name
+           WHERE e.check_name IS NULL
+        ) THEN
+    RAISE EXCEPTION 'P3-13 export-review-completion verifier result construction failed';
+  END IF;
+END $$;
 
 DO $$
 BEGIN
@@ -93,3 +135,10 @@ BEGIN
     RAISE EXCEPTION 'P3-13 export-review-completion verifier failed';
   END IF;
 END $$;
+
+SELECT
+  check_name,
+  status,
+  detail
+FROM p3_13_results
+ORDER BY check_name;
