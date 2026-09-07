@@ -20740,3 +20740,38 @@ validated resulting constraint; then it ran the committed P3-04 verifier and
 `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run
 test:kai-sprint2-p3-04-generated-content-review-completion` passed with 22
 subtests. Production action: NONE. Push/deploy: NOT PERFORMED.
+
+## P3-04 Verifier Single-Result-Set Contract Repair
+
+**Date:** 2026-09-07
+
+**Owner authorization (bounded, local-only):** repair only
+`scripts/kai-sprint2-p3-04-generated-content-review-completion-verifier.sql`
+and directly coupled P3-04 runner/test assets so the P3-04 verifier emits one
+client-visible result set only after fail-closed assertions complete.
+Explicitly not authorized: production/staging database access or mutation,
+P3-04 migration changes, credential/secret inspection, Gate-A reopening,
+P3-05 or later work, push, deploy, or `00_KAI_CURRENT_STATE.md` updates.
+
+**Repair:** the P3-04 verifier now initializes rerunnable TEMP bookkeeping,
+records the existing five P3-04 checks with the required
+`result_type | check_name | object_name | status | detail` result shape,
+asserts the exact expected check set before any visible result is returned,
+raises the preserved
+`P3-04 generated-content-review-completion verifier failed` exception for any
+non-PASS CHECK row, and ends with the only client-visible SELECT. The local
+runner now executes the actual verifier file, parses the actual final psql
+result, requires exactly one accepted result set, requires all five expected
+checks exactly once with PASS status, proves malformed/empty output rejection,
+and proves the fail-closed error against an invalid synthetic P3-04 state.
+
+**Verification:** `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run
+verify:kai-sprint2-p3-04-generated-content-review-completion` passed outside
+the sandbox after the sandbox PostgreSQL shared-memory restriction. The proof
+reported verifier result-set count 1, actual row count 5, complete expected
+check set, duplicate expected checks none, all statuses PASS, fail-closed case
+passed, and empty/missing/malformed output rejected. Separate affected test
+`DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run
+test:kai-sprint2-p3-04-generated-content-review-completion` passed with 22
+subtests. `git diff --check` passed. Production action: NONE. Push/deploy:
+NOT PERFORMED.

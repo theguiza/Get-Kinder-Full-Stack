@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -21,6 +21,10 @@ const logFile = join(workDir, "postgres.log");
 const port = String(64000 + Math.floor(Math.random() * 1000));
 const user = process.env.USER || "postgres";
 const sentinelUrl = "postgres://127.0.0.1:9/kai_sentinel";
+const verifierPath = "scripts/kai-sprint2-p3-04-generated-content-review-completion-verifier.sql";
+const verifierColumns = ["result_type", "check_name", "object_name", "status", "detail"];
+const verifierHeader = verifierColumns.join("\t");
+const expectedP3_04CheckNames = extractExpectedP3_04CheckNames();
 
 function targetUrlFor(dbName) {
   return `postgresql://${user}@127.0.0.1:${port}/${dbName}`;
@@ -49,7 +53,37 @@ function run(command, args, options = {}) {
 }
 
 function psqlFile(dbName, path) {
-  return run(psql, ["-v", "ON_ERROR_STOP=1", "-d", dbName, "-f", path], { capture: true, dbName }).stdout;
+  const result = psqlFileResult(dbName, path);
+  if (result.status !== 0) {
+    const detail = [result.stdout, result.stderr].filter(Boolean).join("\n");
+    throw new Error(`${psql} -f ${path} failed${detail ? `\n${detail}` : ""}`);
+  }
+  return result.stdout;
+}
+
+function psqlFileResult(dbName, path) {
+  return spawnSync(psql, [
+    "-X",
+    "-q",
+    "-A",
+    "-F", "\t",
+    "-P", "footer=off",
+    "-v", "ON_ERROR_STOP=1",
+    "-d", dbName,
+    "-f", path,
+  ], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+    env: {
+      ...process.env,
+      DATABASE_URL: sentinelUrl,
+      PGHOST: "127.0.0.1",
+      PGPORT: port,
+      PGDATABASE: dbName,
+      PGUSER: user,
+    },
+  });
 }
 
 function psqlCommand(dbName, sql) {
@@ -58,6 +92,101 @@ function psqlCommand(dbName, sql) {
 
 function psqlScalar(dbName, sql) {
   return psqlCommand(dbName, `COPY (${sql}) TO STDOUT`).trim();
+}
+
+function extractExpectedP3_04CheckNames() {
+  const verifierSql = readFileSync(join(repoRoot, verifierPath), "utf8");
+  const expectedInsert = verifierSql.match(/INSERT INTO p3_04_expected_checks[\s\S]*?VALUES([\s\S]*?);/);
+  if (!expectedInsert) throw new Error("P3-04 verifier expected-check insert was not found");
+  const checkNames = [...expectedInsert[1].matchAll(/\('([^']+)'\)/g)].map((match) => match[1]);
+  if (checkNames.length === 0) throw new Error("P3-04 verifier expected-check insert produced no check names");
+  return checkNames;
+}
+
+function parseVerifierResultSets(output) {
+  const lines = output.split(/\r?\n/).filter((line) => line.length > 0);
+  const headerIndexes = lines.flatMap((line, index) => (line === verifierHeader ? [index] : []));
+  return headerIndexes.map((headerIndex, ordinal) => {
+    const nextHeaderIndex = headerIndexes[ordinal + 1] ?? lines.length;
+    return lines.slice(headerIndex + 1, nextHeaderIndex).map((line) => {
+      const values = line.split("\t");
+      if (values.length !== verifierColumns.length) {
+        throw new Error(`P3-04 verifier emitted malformed result row: ${line}`);
+      }
+      return Object.fromEntries(verifierColumns.map((column, index) => [column, values[index]]));
+    });
+  });
+}
+
+function assertVerifierOutput(output) {
+  const resultSets = parseVerifierResultSets(output);
+  if (resultSets.length !== 1) {
+    throw new Error(`P3-04 verifier emitted ${resultSets.length} accepted result sets; expected exactly 1`);
+  }
+  const rows = resultSets[0];
+  if (rows.length !== expectedP3_04CheckNames.length) {
+    throw new Error(`P3-04 verifier emitted ${rows.length} rows; expected ${expectedP3_04CheckNames.length}`);
+  }
+  const counts = new Map();
+  for (const row of rows) {
+    if (row.result_type !== "CHECK") throw new Error(`P3-04 verifier emitted non-CHECK result_type: ${row.result_type}`);
+    if (row.status !== "PASS") throw new Error(`P3-04 verifier emitted non-PASS status for ${row.check_name}: ${row.status}`);
+    for (const column of verifierColumns) {
+      if (!row[column]) throw new Error(`P3-04 verifier emitted empty ${column} for ${row.check_name || "<missing check_name>"}`);
+    }
+    counts.set(row.check_name, (counts.get(row.check_name) || 0) + 1);
+  }
+  for (const checkName of expectedP3_04CheckNames) {
+    const count = counts.get(checkName) || 0;
+    if (count !== 1) throw new Error(`P3-04 verifier expected check ${checkName} appeared ${count} times`);
+  }
+  for (const checkName of counts.keys()) {
+    if (!expectedP3_04CheckNames.includes(checkName)) throw new Error(`P3-04 verifier emitted unexpected check: ${checkName}`);
+  }
+  return { resultSetCount: resultSets.length, rows };
+}
+
+function assertVerifierOutputRejected(output, expectedPattern) {
+  try {
+    assertVerifierOutput(output);
+  } catch (error) {
+    if (expectedPattern && !expectedPattern.test(error.message)) throw error;
+    return;
+  }
+  throw new Error("P3-04 verifier output parser accepted malformed output");
+}
+
+function proveVerifierOutputRejections() {
+  const completeRows = expectedP3_04CheckNames.map((checkName) => (
+    ["CHECK", checkName, "object", "PASS", "detail"].join("\t")
+  ));
+  assertVerifierOutputRejected("", /0 accepted result sets/);
+  assertVerifierOutputRejected(`${verifierHeader}\n`, /0 rows/);
+  assertVerifierOutputRejected(`${verifierHeader}\n${completeRows.slice(1).join("\n")}\n`, /4 rows/);
+  assertVerifierOutputRejected(`${verifierHeader}\nCHECK\t${expectedP3_04CheckNames[0]}\tobject\tPASS\n`, /malformed result row/);
+}
+
+function runAndAssertVerifier(dbName) {
+  const result = psqlFileResult(dbName, verifierPath);
+  if (result.status !== 0) {
+    const detail = [result.stdout, result.stderr].filter(Boolean).join("\n");
+    throw new Error(`P3-04 verifier failed unexpectedly${detail ? `\n${detail}` : ""}`);
+  }
+  return assertVerifierOutput(result.stdout);
+}
+
+function runAndAssertVerifierFailure(dbName) {
+  psqlCommand(dbName, `
+    ALTER TABLE kai.review_queue_items
+      DROP CONSTRAINT review_queue_items_p3_04_generated_content_review_contract_check
+  `);
+  const result = psqlFileResult(dbName, verifierPath);
+  if (result.status === 0) throw new Error("P3-04 verifier succeeded against invalid synthetic state");
+  const detail = [result.stdout, result.stderr].filter(Boolean).join("\n");
+  if (!detail.includes("P3-04 generated-content-review-completion verifier failed")) {
+    throw new Error(`P3-04 verifier did not preserve the expected fail-closed error\n${detail}`);
+  }
+  assertVerifierOutputRejected(result.stdout, /0 accepted result sets/);
 }
 
 async function proveRunnerOwnedTarget(dbName) {
@@ -339,7 +468,7 @@ try {
 
   const cleanRowsAfterP3_04 = proveCleanPredecessorCase(cleanDbName);
   proveReplayConvergence(cleanDbName, cleanRowsAfterP3_04);
-  psqlFile(cleanDbName, "scripts/kai-sprint2-p3-04-generated-content-review-completion-verifier.sql");
+  const cleanVerifierProof = runAndAssertVerifier(cleanDbName);
   psqlFile(cleanDbName, "scripts/kai-sprint2-gate-a-smoke-seed.sql");
   psqlFile(cleanDbName, "scripts/kai-sprint2-p1-04-data-dictionary-quality-smoke-seed.sql");
   psqlFile(cleanDbName, "scripts/kai-sprint2-p1-05-intake-sensitivity-profile-smoke-seed.sql");
@@ -360,7 +489,14 @@ try {
   applyExpandedProductionLikePredecessor(expandedDbName, productionLikeOperations);
   const expandedRowsAfterP3_04 = proveExpandedProductionLikePredecessorCase(expandedDbName, productionLikeOperations);
   proveReplayConvergence(expandedDbName, expandedRowsAfterP3_04);
-  psqlFile(expandedDbName, "scripts/kai-sprint2-p3-04-generated-content-review-completion-verifier.sql");
+  const expandedVerifierProof = runAndAssertVerifier(expandedDbName);
+  runAndAssertVerifierFailure(expandedDbName);
+  proveVerifierOutputRejections();
+  console.log(`P3-04 actual verifier result-set count: ${cleanVerifierProof.resultSetCount}`);
+  console.log(`P3-04 actual verifier row count: ${cleanVerifierProof.rows.length}`);
+  console.log(`P3-04 expanded verifier row count: ${expandedVerifierProof.rows.length}`);
+  console.log("P3-04 verifier expected check set complete; duplicate expected checks: none; all statuses: PASS.");
+  console.log("P3-04 verifier fail-closed case passed; empty/missing/malformed output rejected.");
   console.log("P3-04 monotonic audit constraint proof passed for clean, expanded, and replay cases.");
 
   const testResult = spawnSync("node", [
