@@ -20572,3 +20572,57 @@ rendering, Markdown/PDF/DOCX, artifact bytes/storage, signed URL, download/
 retrieval, reuse) — not authorized and not started by this entry.
 
 **Files changed in this reconciliation:** this ExecPlan document only. No product code, test, schema, or migration file was changed.
+
+## Gate A Upload Lifecycle Enforcement Forward Repair
+
+**Date:** 2026-09-07
+
+**Owner authorization (bounded, local-only):** exactly one additive forward
+schema repair migration restoring only
+`kai.enforce_gate_a_p0_upload_lifecycle()` and
+`trg_gate_a_p0_upload_lifecycle` on `kai.intake_files`; verification SQL;
+rollback draft; synthetic smoke seed/fixture; synthetic smoke verification;
+read-only failure checks; patch notes; runbook; focused local/ephemeral
+PostgreSQL proof; directly affected Gate-A/Gate-C verification; one local
+commit if acceptance passes. Explicitly not authorized: production/staging
+database mutation, production/staging psql access, `DATABASE_URL` discovery,
+`.env` inspection, credential/secret inspection, deployment, push,
+feature-flag changes, tenant/environment changes, real client data, P3-04/
+P3-05/P3-09/P3-13/P3-16/P3-17/P3-19 implementation or production execution,
+or reopening the migration dependency investigation.
+
+**Starting context:** USER_CONFIRMED production pgAdmin inspection reported
+`kai.enforce_gate_a_p0_upload_lifecycle()` missing and
+`trg_gate_a_p0_upload_lifecycle` missing, with surrounding Gate-A/P1/P2/
+P3-01 schema materially present and `kai.review_queue_items.priority` already
+resolved out of scope. TOOL_VERIFIED repository inspection at
+`e6a51a089e340f8cd6024ef36a0ad3c445094a72` established current HEAD still
+requires both objects in
+`migrations/kai_sprint2_gate_a_p0_upload_lifecycle.sql`, and no existing
+forward repair restored them.
+
+**Package artifacts:** new migration
+`migrations/kai_sprint2_gate_a_p0_upload_lifecycle_enforcement_forward_repair.sql`
+fails closed unless `kai.intake_files` and the authoritative function-
+referenced column shapes are present, then recreates the authoritative
+current Gate A trigger function and trigger without changing lifecycle,
+expiry, immutable-field, active-upload-limit, tenant, or Gate C-1 semantics.
+Rollback draft
+`migrations/kai_sprint2_gate_a_p0_upload_lifecycle_enforcement_forward_repair.rollback.sql`
+removes only this repair's function and trigger and states that rollback is
+an operational draft, not automatic production instruction. Focused verifier,
+read-only failure checks, local-only drift fixture, focused smoke verifier,
+patch notes, runbook, and loopback-only PostgreSQL proof runner were added
+under `scripts/`. The existing canonical Gate A smoke seed/verifier and Gate
+C-1 verifier/smoke assets are reused.
+
+**Verification:** `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run
+verify:kai-sprint2-gate-a-upload-lifecycle-enforcement-repair` creates a
+runner-owned ephemeral PostgreSQL 16 database, applies the original Gate A,
+policy replay, and Gate C-1 migrations, applies the local-only drift fixture
+that drops only the missing Gate A function/trigger, proves the focused
+verifier fails before repair, applies the forward repair, proves no unrelated
+schema object fingerprint changed, runs the focused verifier/failure checks,
+existing Gate A verifier/failure checks/smoke verifier, Gate C-1 verifier/
+smoke verifier, and replays the repair idempotently. Production action:
+NONE. Push/deploy: NOT PERFORMED.
