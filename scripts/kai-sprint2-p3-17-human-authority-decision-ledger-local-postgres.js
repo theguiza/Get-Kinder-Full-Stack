@@ -47,6 +47,61 @@ function psqlFile(path) {
   return run(psql, ["-v", "ON_ERROR_STOP=1", "-d", dbName, "-f", path], { capture: true }).stdout;
 }
 
+const P3_17_EXPECTED_VERIFIER_CHECKS = [
+  "human_authority_decisions_table_present",
+  "decision_type_check_present",
+  "decision_action_check_present",
+  "role_by_type_check_present",
+  "root_is_grant_check_present",
+  "candidate_binding_fk_present",
+  "audience_compatibility_trigger_present",
+  "no_forward_pointer_column_present",
+  "supersedes_decision_id_backward_pointer_present",
+  "predecessor_scoped_to_org_candidate_type",
+  "root_per_lineage_unique_index_present",
+  "single_successor_unique_index_present",
+  "append_only_trigger_present",
+  "no_export_authority_or_final_gate_state",
+  "no_export_manifest_or_event_tables",
+  "p3_16_candidate_and_snapshot_tables_unchanged",
+];
+
+function psqlFileAndProveP3_17VerifierOutputContract(path) {
+  const csv = run(psql, ["-v", "ON_ERROR_STOP=1", "-q", "-d", dbName, "--csv", "-f", path], { capture: true }).stdout;
+  const lines = csv.trim().split("\n").filter((line) => line.length > 0);
+  const header = lines[0];
+  if (header !== "check_name,status,detail") {
+    throw new Error(`P3-17 verifier output contract violated: unexpected final result header "${header}"`);
+  }
+  const dataRows = lines.slice(1);
+  if (dataRows.length !== P3_17_EXPECTED_VERIFIER_CHECKS.length) {
+    throw new Error(`P3-17 verifier output contract violated: expected ${P3_17_EXPECTED_VERIFIER_CHECKS.length} rows, got ${dataRows.length}`);
+  }
+  const seenCheckNames = new Set();
+  for (const row of dataRows) {
+    const [checkName, status] = row.split(",");
+    if (seenCheckNames.has(checkName)) {
+      throw new Error(`P3-17 verifier output contract violated: duplicate check_name "${checkName}"`);
+    }
+    seenCheckNames.add(checkName);
+    if (status !== "PASS") {
+      throw new Error(`P3-17 verifier output contract violated: check "${checkName}" is not PASS (${status})`);
+    }
+  }
+  for (const expectedCheckName of P3_17_EXPECTED_VERIFIER_CHECKS) {
+    if (!seenCheckNames.has(expectedCheckName)) {
+      throw new Error(`P3-17 verifier output contract violated: missing expected check "${expectedCheckName}"`);
+    }
+  }
+  for (const checkName of seenCheckNames) {
+    if (!P3_17_EXPECTED_VERIFIER_CHECKS.includes(checkName)) {
+      throw new Error(`P3-17 verifier output contract violated: unexpected check "${checkName}"`);
+    }
+  }
+  console.log(`P3-17 verifier output contract proven: exactly ${dataRows.length} PASS rows, exact expected check-name set, no duplicates.`);
+  return csv;
+}
+
 async function proveRunnerOwnedTarget() {
   const parsed = new URL(targetUrl);
   if (!["127.0.0.1", "localhost", "::1"].includes(parsed.hostname.toLowerCase())) {
@@ -109,7 +164,7 @@ try {
   // superseding package's own verifier asserts that replacement.
   psqlFile("scripts/kai-sprint2-p3-13-export-review-completion-verifier.sql");
   psqlFile("scripts/kai-sprint2-p3-16-export-candidate-foundation-verifier.sql");
-  psqlFile("scripts/kai-sprint2-p3-17-human-authority-decision-ledger-verifier.sql");
+  psqlFileAndProveP3_17VerifierOutputContract("scripts/kai-sprint2-p3-17-human-authority-decision-ledger-verifier.sql");
   psqlFile("scripts/kai-sprint2-gate-a-smoke-seed.sql");
   psqlFile("scripts/kai-sprint2-p1-04-data-dictionary-quality-smoke-seed.sql");
   psqlFile("scripts/kai-sprint2-p1-05-intake-sensitivity-profile-smoke-seed.sql");

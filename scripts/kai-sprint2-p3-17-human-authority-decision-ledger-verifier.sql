@@ -1,4 +1,29 @@
 DROP TABLE IF EXISTS p3_17_results;
+DROP TABLE IF EXISTS p3_17_expected_checks;
+
+CREATE TEMP TABLE p3_17_expected_checks (
+  check_name text PRIMARY KEY
+);
+
+INSERT INTO p3_17_expected_checks (check_name)
+VALUES
+  ('human_authority_decisions_table_present'),
+  ('decision_type_check_present'),
+  ('decision_action_check_present'),
+  ('role_by_type_check_present'),
+  ('root_is_grant_check_present'),
+  ('candidate_binding_fk_present'),
+  ('audience_compatibility_trigger_present'),
+  ('no_forward_pointer_column_present'),
+  ('supersedes_decision_id_backward_pointer_present'),
+  ('predecessor_scoped_to_org_candidate_type'),
+  ('root_per_lineage_unique_index_present'),
+  ('single_successor_unique_index_present'),
+  ('append_only_trigger_present'),
+  ('no_export_authority_or_final_gate_state'),
+  ('no_export_manifest_or_event_tables'),
+  ('p3_16_candidate_and_snapshot_tables_unchanged');
+
 CREATE TEMP TABLE p3_17_results (
   check_name text PRIMARY KEY,
   status text NOT NULL,
@@ -168,7 +193,33 @@ SELECT 'p3_16_candidate_and_snapshot_tables_unchanged',
             THEN 'PASS' ELSE 'FAIL' END,
        'P3-16 export-candidate and limitation-snapshot constraints remain exactly as accepted';
 
-SELECT * FROM p3_17_results ORDER BY check_name;
+DO $$
+DECLARE
+  expected_count integer := 16;
+BEGIN
+  IF (SELECT COUNT(*) FROM p3_17_expected_checks) <> expected_count
+     OR (SELECT COUNT(*) FROM p3_17_results) <> expected_count
+     OR EXISTS (
+          SELECT 1
+            FROM p3_17_results r
+           GROUP BY r.check_name
+          HAVING COUNT(*) <> 1
+        )
+     OR EXISTS (
+          SELECT 1
+            FROM p3_17_expected_checks e
+            LEFT JOIN p3_17_results r ON r.check_name = e.check_name
+           WHERE r.check_name IS NULL
+        )
+     OR EXISTS (
+          SELECT 1
+            FROM p3_17_results r
+            LEFT JOIN p3_17_expected_checks e ON e.check_name = r.check_name
+           WHERE e.check_name IS NULL
+        ) THEN
+    RAISE EXCEPTION 'P3-17 human-authority-decision-ledger verifier result construction failed';
+  END IF;
+END $$;
 
 DO $$
 BEGIN
@@ -176,3 +227,10 @@ BEGIN
     RAISE EXCEPTION 'P3-17 human-authority-decision-ledger verifier failed';
   END IF;
 END $$;
+
+SELECT
+  check_name,
+  status,
+  detail
+FROM p3_17_results
+ORDER BY check_name;
