@@ -20692,3 +20692,51 @@ partial index repair. Separate affected checks also passed:
 `verify:kai-sprint2-gate-c1-gcs-generation-binding`, and
 `verify:kai-sprint2-schema-contract`. Production action: NONE. Push/deploy:
 NOT PERFORMED.
+
+## P3-04 Audit Constraint Compatibility Repair
+
+**Date:** 2026-09-07
+
+**Owner authorization (bounded, local-only):** repair only the P3-04
+`upload_lifecycle_audit_gate_a_operation_check` handling and directly coupled
+P3-04 verification assets so P3-04 preserves the validated predecessor audit
+operation predicate and adds only `generated_content_review_completed`.
+Explicitly not authorized: production/staging database access or mutation,
+credential/secret inspection, push, deploy, P3-05 work, or
+`00_KAI_CURRENT_STATE.md` updates.
+
+**Starting context:** USER_CONFIRMED production P3-04 execution failed with
+SQLSTATE 23514 while replacing the validated
+`upload_lifecycle_audit_gate_a_operation_check` because existing audit rows
+used six operation values accepted by the installed predecessor predicate but
+rejected by the static committed P3-04 predicate.
+
+**Repair:** `migrations/kai_sprint2_p3_04_generated_content_review_completion.sql`
+now reads the validated predecessor CHECK predicate with
+`pg_get_expr(c.conbin, c.conrelid)`, fails closed if that validated
+constraint is absent, and, only when needed, installs a `NOT VALID`
+temporary CHECK of `(<predecessor predicate>) OR operation =
+'generated_content_review_completed'`, validates it, drops the old
+constraint, and renames the validated replacement back to
+`upload_lifecycle_audit_gate_a_operation_check`. If the P3-04 operation is
+already present, replay skips the operation-constraint replacement and does
+not narrow the existing predicate. No existing audit row mutation is used.
+
+**Verification:** `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run
+verify:kai-sprint2-p3-04-generated-content-review-completion` passed outside
+the sandbox after the known sandbox PostgreSQL shared-memory restriction. The
+runner-owned loopback PostgreSQL proof now covers a clean ordinary P3-04
+predecessor, an expanded validated production-like predecessor containing
+`claim_review_completed_internal_approval`, `client_followup_completed`,
+`coverage_review_decision_accepted_funder_with_limitation`,
+`coverage_review_decision_accepted_internal_with_limitation`,
+`evidence_review_completed`, and
+`sensitivity_review_decision_recorded`, and P3-04 replay/convergence. It
+proved migration commit, preservation of predecessor and expanded operation
+values, acceptance of `generated_content_review_completed`, rejection of a
+later unrelated operation in the clean case, no audit-row mutation, and a
+validated resulting constraint; then it ran the committed P3-04 verifier and
+68 focused P3-01/P3-02/P3-03/P3-04 subtests. Separate affected test
+`DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run
+test:kai-sprint2-p3-04-generated-content-review-completion` passed with 22
+subtests. Production action: NONE. Push/deploy: NOT PERFORMED.
