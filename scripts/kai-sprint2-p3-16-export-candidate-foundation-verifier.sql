@@ -1,4 +1,36 @@
 DROP TABLE IF EXISTS p3_16_results;
+DROP TABLE IF EXISTS p3_16_expected_checks;
+
+CREATE TEMP TABLE p3_16_expected_checks (
+  check_name text PRIMARY KEY
+);
+
+INSERT INTO p3_16_expected_checks (check_name)
+VALUES
+  ('limitation_snapshots_table_present'),
+  ('limitation_snapshot_entries_table_present'),
+  ('export_candidates_table_present'),
+  ('root_snapshot_per_draft_unique_index_present'),
+  ('single_successor_unique_index_present'),
+  ('no_forward_pointer_column_present'),
+  ('supersedes_snapshot_id_backward_pointer_present'),
+  ('predecessor_scoped_to_org_and_draft'),
+  ('limitation_snapshots_append_only_trigger_present'),
+  ('limitation_snapshot_entries_append_only_trigger_present'),
+  ('export_candidate_snapshot_binding_scoped_to_draft'),
+  ('limitation_snapshot_entries_identity_unique_present'),
+  ('limitation_snapshot_entries_codes_check_present'),
+  ('export_candidates_replay_convergence_unique_present'),
+  ('export_candidates_fingerprint_contract_pinned'),
+  ('export_candidates_does_not_reuse_generation_runs_fingerprint_column'),
+  ('audit_operations_present'),
+  ('limitation_snapshot_audit_metadata_safe_contract'),
+  ('export_candidate_audit_metadata_safe_contract'),
+  ('audit_metadata_forbids_content_and_authority_keys'),
+  ('no_export_authority_or_final_gate_state'),
+  ('draft_status_review_status_columns_unchanged'),
+  ('no_client_reviewed_or_finalize_export_tables');
+
 CREATE TEMP TABLE p3_16_results (
   check_name text PRIMARY KEY,
   status text NOT NULL,
@@ -223,7 +255,33 @@ SELECT 'no_client_reviewed_or_finalize_export_tables',
             THEN 'PASS' ELSE 'FAIL' END,
        'P3-16 creates no client_reviewed/funder_ready/public_ready/export_authority_granted/manifest/final-export artifact or event tables';
 
-SELECT * FROM p3_16_results ORDER BY check_name;
+DO $$
+DECLARE
+  expected_count integer := 23;
+BEGIN
+  IF (SELECT COUNT(*) FROM p3_16_expected_checks) <> expected_count
+     OR (SELECT COUNT(*) FROM p3_16_results) <> expected_count
+     OR EXISTS (
+          SELECT 1
+            FROM p3_16_results r
+           GROUP BY r.check_name
+          HAVING COUNT(*) <> 1
+        )
+     OR EXISTS (
+          SELECT 1
+            FROM p3_16_expected_checks e
+            LEFT JOIN p3_16_results r ON r.check_name = e.check_name
+           WHERE r.check_name IS NULL
+        )
+     OR EXISTS (
+          SELECT 1
+            FROM p3_16_results r
+            LEFT JOIN p3_16_expected_checks e ON e.check_name = r.check_name
+           WHERE e.check_name IS NULL
+        ) THEN
+    RAISE EXCEPTION 'P3-16 export-candidate-foundation verifier result construction failed';
+  END IF;
+END $$;
 
 DO $$
 BEGIN
@@ -231,3 +289,10 @@ BEGIN
     RAISE EXCEPTION 'P3-16 export-candidate-foundation verifier failed';
   END IF;
 END $$;
+
+SELECT
+  check_name,
+  status,
+  detail
+FROM p3_16_results
+ORDER BY check_name;

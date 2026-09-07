@@ -47,6 +47,68 @@ function psqlFile(path) {
   return run(psql, ["-v", "ON_ERROR_STOP=1", "-d", dbName, "-f", path], { capture: true }).stdout;
 }
 
+const P3_16_EXPECTED_VERIFIER_CHECKS = [
+  "limitation_snapshots_table_present",
+  "limitation_snapshot_entries_table_present",
+  "export_candidates_table_present",
+  "root_snapshot_per_draft_unique_index_present",
+  "single_successor_unique_index_present",
+  "no_forward_pointer_column_present",
+  "supersedes_snapshot_id_backward_pointer_present",
+  "predecessor_scoped_to_org_and_draft",
+  "limitation_snapshots_append_only_trigger_present",
+  "limitation_snapshot_entries_append_only_trigger_present",
+  "export_candidate_snapshot_binding_scoped_to_draft",
+  "limitation_snapshot_entries_identity_unique_present",
+  "limitation_snapshot_entries_codes_check_present",
+  "export_candidates_replay_convergence_unique_present",
+  "export_candidates_fingerprint_contract_pinned",
+  "export_candidates_does_not_reuse_generation_runs_fingerprint_column",
+  "audit_operations_present",
+  "limitation_snapshot_audit_metadata_safe_contract",
+  "export_candidate_audit_metadata_safe_contract",
+  "audit_metadata_forbids_content_and_authority_keys",
+  "no_export_authority_or_final_gate_state",
+  "draft_status_review_status_columns_unchanged",
+  "no_client_reviewed_or_finalize_export_tables",
+];
+
+function psqlFileAndProveP3_16VerifierOutputContract(path) {
+  const csv = run(psql, ["-v", "ON_ERROR_STOP=1", "-q", "-d", dbName, "--csv", "-f", path], { capture: true }).stdout;
+  const lines = csv.trim().split("\n").filter((line) => line.length > 0);
+  const header = lines[0];
+  if (header !== "check_name,status,detail") {
+    throw new Error(`P3-16 verifier output contract violated: unexpected final result header "${header}"`);
+  }
+  const dataRows = lines.slice(1);
+  if (dataRows.length !== P3_16_EXPECTED_VERIFIER_CHECKS.length) {
+    throw new Error(`P3-16 verifier output contract violated: expected ${P3_16_EXPECTED_VERIFIER_CHECKS.length} rows, got ${dataRows.length}`);
+  }
+  const seenCheckNames = new Set();
+  for (const row of dataRows) {
+    const [checkName, status] = row.split(",");
+    if (seenCheckNames.has(checkName)) {
+      throw new Error(`P3-16 verifier output contract violated: duplicate check_name "${checkName}"`);
+    }
+    seenCheckNames.add(checkName);
+    if (status !== "PASS") {
+      throw new Error(`P3-16 verifier output contract violated: check "${checkName}" is not PASS (${status})`);
+    }
+  }
+  for (const expectedCheckName of P3_16_EXPECTED_VERIFIER_CHECKS) {
+    if (!seenCheckNames.has(expectedCheckName)) {
+      throw new Error(`P3-16 verifier output contract violated: missing expected check "${expectedCheckName}"`);
+    }
+  }
+  for (const checkName of seenCheckNames) {
+    if (!P3_16_EXPECTED_VERIFIER_CHECKS.includes(checkName)) {
+      throw new Error(`P3-16 verifier output contract violated: unexpected check "${checkName}"`);
+    }
+  }
+  console.log(`P3-16 verifier output contract proven: exactly ${dataRows.length} PASS rows, exact expected check-name set, no duplicates.`);
+  return csv;
+}
+
 async function proveRunnerOwnedTarget() {
   const parsed = new URL(targetUrl);
   if (!["127.0.0.1", "localhost", "::1"].includes(parsed.hostname.toLowerCase())) {
@@ -106,7 +168,7 @@ try {
   // re-run once P3-13 has replaced their contract check with the three-state
   // one; the P3-13 verifier itself asserts that replacement.
   psqlFile("scripts/kai-sprint2-p3-13-export-review-completion-verifier.sql");
-  psqlFile("scripts/kai-sprint2-p3-16-export-candidate-foundation-verifier.sql");
+  psqlFileAndProveP3_16VerifierOutputContract("scripts/kai-sprint2-p3-16-export-candidate-foundation-verifier.sql");
   psqlFile("scripts/kai-sprint2-gate-a-smoke-seed.sql");
   psqlFile("scripts/kai-sprint2-p1-04-data-dictionary-quality-smoke-seed.sql");
   psqlFile("scripts/kai-sprint2-p1-05-intake-sensitivity-profile-smoke-seed.sql");
