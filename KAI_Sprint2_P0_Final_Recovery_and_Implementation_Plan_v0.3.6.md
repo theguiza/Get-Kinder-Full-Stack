@@ -20394,7 +20394,181 @@ No mock was substituted for any service/repository call across STATE A-D; the on
 - STATE C (revoke) and STATE D (stale candidate/limitation snapshot) each independently reach BLOCKED under the real currentness/effectiveness evaluators.
 - REAL PERSISTED PRE-ARTIFACT FINAL ELIGIBILITY is repository-closed. VAL-EXP-001, P3-16 candidate/currentness, P3-17 human release authority/effectiveness, and P3-18 final eligibility composition remain accepted and closed; none of these findings are reopened by this reconciliation.
 
-**NEXT PHASE-14 IMPLEMENTATION PACKAGE:**
+**NEXT PHASE-14 IMPLEMENTATION PACKAGE (as of the entry above):**
 NOT YET DEFINED IN THIS EXECPLAN. No export-manifest table, final-output table, artifact schema, renderer, storage, signed-URL, download, or reuse work is authorized or scoped by this entry or by any prior entry. Any such package requires a separate, future owner authorization.
+
+## Phase-14 (Export Track) — Export Manifest Persistence Foundation (P3-19)
+
+**Naming note:** this repository already has an unrelated, completed section
+titled `## Phase-14 — KAI governed internal-analysis availability
+decoupling` (above, governed-claims tool-dispatch decoupling; unrelated to
+export). This section continues the real export-track migration sequence
+(P3-01…P3-18) as **P3-19**; it does not reopen, rename, or renumber that
+earlier, unrelated Phase-14 section.
+
+**Owner authorization (bounded, local-only):** additive local schema/
+migration for an export-manifest identity foundation; matching rollback;
+schema verifier; minimum repository/service implementation; behavior-
+preserving P3-18 transaction-composition refactor; minimum P3-17 read
+projection needed to identify the effective authority decision; minimum
+audit vocabulary/schema correction if required; focused tests; runner-owned
+ephemeral local PostgreSQL verification; living ExecPlan evidence; one local
+commit if all attributable acceptance checks pass. Explicitly **not**
+authorized: production/shared/staging database mutation, push, deploy,
+feature-flag changes, cloud/configuration changes, credential/secret access,
+real-client-data handling, artifact rendering, artifact bytes, object
+storage, storage keys, signed URLs, download/retrieval, public sharing,
+reuse, `generated_content_drafts` lifecycle changes, `draft_status` changes,
+or `00_KAI_CURRENT_STATE.md` changes.
+
+**Schema (additive only):** `migrations/kai_sprint2_p3_19_export_manifest_foundation.sql`
+creates `kai.export_manifests` — `export_manifest_id` (PK), `organization_id`,
+`export_candidate_id` (FK to `kai.export_candidates`), a compound FK to
+`kai.human_authority_decisions` on `(effective_authority_decision_id,
+organization_id, export_candidate_id, effective_authority_decision_type)`
+pinned to `effective_authority_decision_type = 'export_authority_granted'`,
+`fingerprint_contract_version` pinned to
+`'kai-sprint2-p3-19-export-manifest-fingerprint-v1'`, `canonical_fingerprint`
+(lowercase 64-hex sha256), `created_by`, `created_by_type` pinned to
+`'human'`, `created_at`; a replay-convergence unique constraint on
+`(organization_id, export_candidate_id, canonical_fingerprint)`; and an
+append-only `BEFORE UPDATE OR DELETE` trigger
+(`kai.p3_19_reject_authority_mutation`). No existing table, column,
+constraint, or lifecycle from Gate A through P3-18 is altered. No
+`kai.upload_lifecycle_audit` change is made by this migration (see the audit-
+sink finding below).
+
+**Finding 1 — the manifest write must run the exact authoritative P3-18/
+VAL-EXP-001 composition, never a reduced reconstruction.** Repository
+inspection of `Backend/kai/services/kaiFinalExportEligibilityGateService.js`
+found the public `evaluateFinalExportEligibility` composed candidate load,
+packet evaluation, and P3-17 effectiveness across two *separate*
+transactions (the effectiveness check via the repository's own
+`evaluateEffectiveness` wrapper, which opens its own transaction). Reusing
+only that public function would not let the manifest INSERT share a single
+transaction with the authority check it depends on. Resolution (additive,
+behavior-preserving): the function was split into an internal,
+transaction-scoped `evaluateFinalExportEligibilityInTransaction(tx, input,
+dependencies)` (candidate load + packet + P3-17 effectiveness + VAL-EXP-001,
+all against one passed-in `tx`; returns one additional internal-only field,
+`effectiveAuthorityDecisionId`) and an unchanged-contract public
+`evaluateFinalExportEligibility`, which now builds its return object via an
+**explicit allowlist projection** of exactly the seven historically-existing
+fields — never a passthrough spread — so the public route/API contract is
+pinned by construction, not convention. `postgresHumanAuthorityDecisionRepository.js`'s
+already-correct private `evaluateHumanAuthorityEffectivenessInTransaction`
+was exported (visibility change only) so the manifest write's own
+transaction can call it directly instead of the repository's separate-
+transaction wrapper — closing the TOCTOU gap between "authority checked" and
+"manifest written." The new `postgresExportManifestRepository.js#createExportManifest`
+opens one read-write transaction, runs this shared composition inside it, and
+inserts the manifest only when `finalExportEligible === true`, using the
+`effectiveAuthorityDecisionId` read in that same transaction (no re-query).
+No P3-16 currentness, P3-17 effectiveness, or VAL-EXP-001 logic is
+duplicated anywhere in the new repository.
+
+**Finding 2 — `kai.upload_lifecycle_audit` is not a valid audit sink for
+this operation.** That table's `intake_file_id` column is `NOT NULL`, and
+inspection of P3-16's/P3-17's own audit-file-context resolution found they
+already pick the *first* cited file (`ORDER BY ordinal, claim_id LIMIT 1`)
+when a draft's citation graph spans multiple source files — a pre-existing,
+already-shipped imprecision this package does not repeat or fix. An export
+manifest, bound to a whole export candidate, has no more claim to a single
+truthful `intake_file_id` than the candidate or a P3-17 decision already do.
+`kai.audit_events` requires no file identity at all and is already the sink
+every other non-file-scoped export-track object uses
+(`createProductionMetadataOnlyAuditForGeneratedDraftExportCandidate`,
+`createProductionMetadataOnlyAuditForHumanFinalReleaseAuthority`). Resolution:
+the new `createProductionMetadataOnlyAuditForExportManifest` composition uses
+`kai.audit_events` only, correctly labeling the audited object as the
+manifest itself (`object_type: "export_manifest"`, `object_id` = the
+manifest's own id — never the candidate's id, and never taken as a
+constructor parameter, since the manifest's id doesn't exist until inside the
+repository's own transaction; derived from `payload.export_manifest_id` at
+prepare time instead, mirroring the P2-03/P2-11 adapters' identity
+discipline). `Backend/kai/db/kaiAuditQueries.js`'s `SAFE_AUDIT_METADATA_KEYS`
+gained exactly two new literal entries (`export_manifest_id`,
+`export_candidate_id`) — the minimal audit-vocabulary correction this
+authorization anticipated — so both identifiers are carried by name. No
+change was made to `kai.upload_lifecycle_audit`'s operation allowlist or any
+per-operation metadata CHECK constraint.
+
+**Finding 3 — real audit persistence, not a test double.** `kai.audit_events`/
+`kai.object_type_enum` are externally-owned production objects (no migration
+in this repository creates them), and the export-track ephemeral test
+harness does not bootstrap them either — which is why every prior P3-17
+"real-persisted" proof injects a test-double `auditRecorder()` rather than
+exercising a real insert. This package instead reuses the exact precedent
+`scripts/kai-sprint2-organization-enablement-bootstrap-synthetic-schema.sql`
+already established: a byte-for-byte copy of that same minimal synthetic
+`kai.audit_events`/`kai.object_type_enum` mirror (declaring only the
+`'other'` fallback label — never asserting an `'export_manifest'` label
+exists in the real, externally-owned production enum), applied only by this
+package's own runner. The real-persisted integration suite exercises the
+real `createProductionMetadataOnlyAuditForExportManifest` composition and a
+real `INSERT INTO kai.audit_events`, inside the same transaction as the
+manifest row, and asserts the persisted row directly. **REAL AUDIT
+PERSISTENCE: CONFIRMED** — via this synthetic, test-only, runner-owned
+mirror, not via any change to the real production `kai.audit_events`/
+`kai.object_type_enum`, and not via a test-double callback.
+
+**Real-persisted acceptance evidence** (runner-owned ephemeral local
+PostgreSQL, `npm run verify:kai-sprint2-p3-19-export-manifest-foundation`,
+305/305 focused tests passed, including the full P3-16/P3-17/P3-18
+regression suites unmodified):
+
+- PASS — authoritative P3-18/VAL-EXP-001 PASS executed *inside* the manifest
+  write transaction → manifest row created, FK'd to the exact effective
+  P3-17 grant decision read in that same transaction, plus a real
+  `kai.audit_events` row persisted in the same transaction.
+- No authority decision at all → BLOCKED (`validation_blocker`), no
+  manifest, no audit row.
+- Authority revoked after an earlier grant → BLOCKED (`validation_blocker`),
+  no manifest.
+- Stale candidate (superseded limitation snapshot, real P3-16 currentness
+  rules) → BLOCKED (`validation_blocker`), no manifest.
+- Cross-tenant object (export candidate scoped to a different organization)
+  → BLOCKED (`not_found`), never leaking existence across tenants.
+- `client_reviewer`, `gk_reviewer`, and an AI/system actor are each denied
+  (`authorization_denied` at the service layer; `validation_blocker` at the
+  repository's own non-human-actor input guard, defense in depth) before the
+  repository is ever reached.
+- Client-supplied `requestedAudience`/`finalGate`/
+  `affirmativeHumanExportAuthority`/an invented eligibility or currentness
+  field is rejected at the input-contract boundary, before any database
+  access.
+- Replay (the same eligible state submitted twice) converges to exactly one
+  manifest row and exactly one `kai.audit_events` row (the audit publish
+  only runs on the real-insert branch).
+- `kai.generated_content_drafts.draft_status` remains `'draft'` throughout —
+  asserted directly against the real row before and after manifest creation.
+- No artifact/render/storage/download/reuse code path exists anywhere in
+  this package (verified by absence — no such module, dependency, or route
+  was added).
+
+One pre-existing regression test
+(`__tests__/kai-sprint2-p3-17-human-authority-decision-ledger.integration.spec.js`,
+"P3-17 creates no finalGate/VAL-EXP/manifest/export-artifact state anywhere
+in kai schema") asserted, among other things, that no `export_manifests`
+table existed — an invariant this package's migration authorizedly
+supersedes. That one clause was updated to reflect the supersession
+(`export_events`/`export_artifacts` and every finalGate/eligibility/
+manifest-content column remain asserted absent, unchanged). No other
+pre-existing test, in this package's own regression run or in the full
+repository `npm test` suite (3333/3341 non-pre-existing-failure tests
+passing; the 5 pre-existing failures — `kai-sprint2-pass2-route-runtime`,
+child-file read model, batch-files collection, file-detail contract ×2 —
+were independently confirmed present on a clean `git stash` checkout before
+this package's changes, and are unrelated to the export track), regressed.
+
+**Contradiction check:** repository inspection did not surface any closed
+product semantic or materially different schema capability blocking this
+design. Both findings above were genuine gaps surfaced by inspection, not
+evidence of a deeper contradiction, and both were resolved additively within
+this authorization's stated scope.
+
+**Remaining work beyond this foundation:** ARTIFACT CREATION (manifest
+rendering, Markdown/PDF/DOCX, artifact bytes/storage, signed URL, download/
+retrieval, reuse) — not authorized and not started by this entry.
 
 **Files changed in this reconciliation:** this ExecPlan document only. No product code, test, schema, or migration file was changed.

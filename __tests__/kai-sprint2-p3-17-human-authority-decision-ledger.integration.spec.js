@@ -401,7 +401,14 @@ async function runP317IntegrationSuite() {
     assert.equal(effectiveness.data.reason, "no_decision");
   });
 
-  test("P3-17 creates no finalGate/VAL-EXP/manifest/export-artifact state anywhere in kai schema", async () => {
+  // P3-19 (kai_sprint2_p3_19_export_manifest_foundation.sql) is the
+  // authorized, documented supersession of this assertion's
+  // `export_manifests` clause: it adds exactly that one table as an
+  // immutable manifest-identity foundation, FK'd to the exact effective
+  // P3-17 export_authority_granted decision. `export_events`/
+  // `export_artifacts` and every finalGate/eligibility/manifest-content
+  // column below remain absent, unchanged by P3-17 or P3-19 alike.
+  test("P3-17 creates no finalGate/VAL-EXP/export-artifact state anywhere in kai schema (export_manifests is P3-19's authorized, documented supersession)", async () => {
     const columnRows = await query(
       `SELECT column_name FROM information_schema.columns
         WHERE table_schema = 'kai'
@@ -410,7 +417,7 @@ async function runP317IntegrationSuite() {
     assert.equal(columnRows.length, 0);
     const tableRows = await query(
       `SELECT table_name FROM information_schema.tables
-        WHERE table_schema = 'kai' AND table_name IN ('export_manifests', 'export_events', 'export_artifacts')`,
+        WHERE table_schema = 'kai' AND table_name IN ('export_events', 'export_artifacts')`,
     );
     assert.equal(tableRows.length, 0);
   });

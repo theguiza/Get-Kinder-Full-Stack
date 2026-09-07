@@ -1,0 +1,278 @@
+import crypto from "node:crypto";
+
+import { withTransaction } from "../db/kaiDb.js";
+import { evaluateFinalExportEligibilityInTransaction } from "../services/kaiFinalExportEligibilityGateService.js";
+import {
+  EXPORT_MANIFEST_FINGERPRINT_CONTRACT_VERSION,
+  EXPORT_MANIFEST_CREATED_OPERATION,
+  EXPORT_MANIFEST_AUDIT_CONTRACT,
+} from "./exportManifestContract.js";
+
+const RESULT_STATUS = Object.freeze({
+  validation_blocker: 422,
+  conflict_current_state_changed: 409,
+  not_found: 404,
+  system_error: 500,
+});
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+function failure(code) {
+  return { ok: false, data: null, error: { code, status: RESULT_STATUS[code] || 500 } };
+}
+
+function success(data) {
+  return { ok: true, data, error: null };
+}
+
+export class ExportManifestRollbackResultError extends Error {
+  constructor(result) {
+    super("rollback export-manifest transaction");
+    this.name = "ExportManifestRollbackResultError";
+    this.result = result;
+  }
+}
+
+function rollbackFailure(code) {
+  throw new ExportManifestRollbackResultError(failure(code));
+}
+
+function canonicalJson(value) {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value);
+}
+
+// Manifest identity is a deterministic hash over the export candidate and
+// the exact effective P3-17 grant decision read inside the SAME transaction
+// as this insert (never re-queried afterward) - this is what gives replay
+// (the same eligible state submitted twice) exactly one manifest row.
+function canonicalFingerprint(representation) {
+  return crypto.createHash("sha256").update(canonicalJson(representation)).digest("hex");
+}
+
+function hasExactKeys(value, allowed) {
+  return Boolean(value)
+    && typeof value === "object"
+    && !Array.isArray(value)
+    && Object.keys(value).length === allowed.size
+    && Object.keys(value).every((key) => allowed.has(key));
+}
+
+function isCanonicalUtcTimestamp(value) {
+  if (typeof value !== "string") return false;
+  let normalized = null;
+  try {
+    normalized = new Date(value).toISOString();
+  } catch {
+    return false;
+  }
+  return normalized === value;
+}
+
+function isMappedHumanActor(actorContext) {
+  return actorContext?.actorType === "human"
+    && typeof actorContext?.actorUserId === "string"
+    && actorContext.actorUserId.length > 0;
+}
+
+// Exact-keys input contract: no requestedAudience, finalGate,
+// affirmativeHumanExportAuthority, eligibility, or currentness field is
+// accepted from a caller - audience/authority/eligibility are always
+// derived, inside this same transaction, from the shared P3-18/VAL-EXP-001
+// composition, never taken on faith from the request.
+function isCreateExportManifestInput(input) {
+  return hasExactKeys(input, new Set([
+    "organizationId",
+    "exportCandidateId",
+    "exportReviewQueueItemId",
+    "actorContext",
+    "now",
+  ]))
+    && UUID_PATTERN.test(input.organizationId)
+    && UUID_PATTERN.test(input.exportCandidateId)
+    && UUID_PATTERN.test(input.exportReviewQueueItemId)
+    && isMappedHumanActor(input.actorContext)
+    && isCanonicalUtcTimestamp(input.now);
+}
+
+async function createDefaultEligibilityDependencies() {
+  const { evaluateGeneratedDraftExportReviewPacketInTransaction } = await import(
+    "./postgresGeneratedContentRepository.js"
+  );
+  const { evaluateClaimTraceabilityInTransaction } = await import("./postgresClaimTraceabilityRepository.js");
+  const {
+    loadExportCandidateForAuthority,
+    evaluateHumanAuthorityEffectivenessInTransaction,
+  } = await import("./postgresHumanAuthorityDecisionRepository.js");
+  const { evaluateExportCandidateCurrentnessInTransaction } = await import("./postgresExportCandidateRepository.js");
+  return {
+    evaluatePacket: evaluateGeneratedDraftExportReviewPacketInTransaction,
+    evaluator: evaluateClaimTraceabilityInTransaction,
+    loadCandidate: loadExportCandidateForAuthority,
+    // The genuinely transaction-scoped P3-17 evaluator (not the repository's
+    // evaluateEffectiveness() wrapper, which opens its own separate
+    // transaction) - this is what closes the TOCTOU gap between "authority
+    // checked" and "manifest written".
+    evaluateAuthorityEffectiveness: evaluateHumanAuthorityEffectivenessInTransaction,
+    evaluateCandidateCurrentness: evaluateExportCandidateCurrentnessInTransaction,
+  };
+}
+
+async function insertExportManifest(tx, { manifestId, input, effectiveAuthorityDecisionId, fingerprint }) {
+  const { rows } = await tx.query(
+    `INSERT INTO kai.export_manifests (
+       export_manifest_id, organization_id, export_candidate_id,
+       effective_authority_decision_id, effective_authority_decision_type,
+       fingerprint_contract_version, canonical_fingerprint, created_by, created_by_type, created_at
+     )
+     VALUES ($1::uuid,$2::uuid,$3::uuid,$4::uuid,'export_authority_granted',$5,$6,$7::uuid,'human',$8::timestamptz)
+     ON CONFLICT (organization_id, export_candidate_id, canonical_fingerprint) DO NOTHING
+     RETURNING export_manifest_id::text AS export_manifest_id`,
+    [
+      manifestId,
+      input.organizationId,
+      input.exportCandidateId,
+      effectiveAuthorityDecisionId,
+      EXPORT_MANIFEST_FINGERPRINT_CONTRACT_VERSION,
+      fingerprint,
+      input.actorContext.actorUserId,
+      input.now,
+    ],
+  );
+  return rows[0] || null;
+}
+
+async function loadExistingExportManifest(tx, { organizationId, exportCandidateId, fingerprint }) {
+  const { rows } = await tx.query(
+    `SELECT export_manifest_id::text AS export_manifest_id
+       FROM kai.export_manifests
+      WHERE organization_id = $1::uuid AND export_candidate_id = $2::uuid AND canonical_fingerprint = $3`,
+    [organizationId, exportCandidateId, fingerprint],
+  );
+  return rows[0] || null;
+}
+
+export function createPostgresExportManifestRepository({ runInTransaction = withTransaction } = {}) {
+  return Object.freeze({
+    async createExportManifest(input, dependencies = {}) {
+      if (!isCreateExportManifestInput(input)) return failure("validation_blocker");
+      if (!dependencies.metadataOnlyAudit) return failure("validation_blocker");
+
+      const needsDefaults = !dependencies.evaluatePacket
+        || !dependencies.evaluator
+        || !dependencies.loadCandidate
+        || !dependencies.evaluateAuthorityEffectiveness
+        || !dependencies.evaluateCandidateCurrentness;
+      const defaults = needsDefaults ? await createDefaultEligibilityDependencies() : null;
+      const eligibilityDependencies = {
+        evaluatePacket: dependencies.evaluatePacket || defaults.evaluatePacket,
+        evaluator: dependencies.evaluator || defaults.evaluator,
+        loadCandidate: dependencies.loadCandidate || defaults.loadCandidate,
+        evaluateAuthorityEffectiveness:
+          dependencies.evaluateAuthorityEffectiveness || defaults.evaluateAuthorityEffectiveness,
+        evaluateCandidateCurrentness:
+          dependencies.evaluateCandidateCurrentness || defaults.evaluateCandidateCurrentness,
+      };
+
+      try {
+        return await runInTransaction(async (tx) => {
+          // Single authoritative composition - the SAME function the public,
+          // read-only evaluateFinalExportEligibility uses - executed inside
+          // this write transaction. No P3-16 currentness, P3-17
+          // effectiveness, or VAL-EXP-001 check is re-derived here.
+          const eligibility = await evaluateFinalExportEligibilityInTransaction(
+            tx,
+            {
+              organizationId: input.organizationId,
+              exportCandidateId: input.exportCandidateId,
+              exportReviewQueueItemId: input.exportReviewQueueItemId,
+            },
+            eligibilityDependencies,
+          );
+          if (!eligibility.ok) return eligibility;
+          if (eligibility.data.finalExportEligible !== true) return failure("validation_blocker");
+
+          const effectiveAuthorityDecisionId = eligibility.data.effectiveAuthorityDecisionId;
+          if (!effectiveAuthorityDecisionId) rollbackFailure("system_error");
+
+          const fingerprint = canonicalFingerprint({
+            organizationId: input.organizationId,
+            exportCandidateId: input.exportCandidateId,
+            effectiveAuthorityDecisionId,
+          });
+
+          const manifestId = crypto.randomUUID();
+          const insertedRow = await insertExportManifest(tx, {
+            manifestId,
+            input,
+            effectiveAuthorityDecisionId,
+            fingerprint,
+          });
+
+          let exportManifestId;
+          let replayed;
+          if (insertedRow) {
+            exportManifestId = insertedRow.export_manifest_id;
+            replayed = false;
+          } else {
+            const existing = await loadExistingExportManifest(tx, {
+              organizationId: input.organizationId,
+              exportCandidateId: input.exportCandidateId,
+              fingerprint,
+            });
+            if (!existing) rollbackFailure("system_error");
+            exportManifestId = existing.export_manifest_id;
+            replayed = true;
+          }
+
+          if (!replayed) {
+            const preparedAudit = dependencies.metadataOnlyAudit.prepareMetadataOnlyAudit?.({
+              payload: {
+                attempted_operation: EXPORT_MANIFEST_CREATED_OPERATION,
+                actor_type: "human",
+                object_type: "export_manifest",
+                contract: EXPORT_MANIFEST_AUDIT_CONTRACT,
+                export_manifest_id: exportManifestId,
+                export_candidate_id: input.exportCandidateId,
+              },
+              // Same transaction as the manifest insert - the audit-event
+              // write must be atomic with it, not a separate connection/pool.
+              db: tx,
+            });
+            if (!preparedAudit || preparedAudit.ok !== true || typeof preparedAudit.publish !== "function") {
+              rollbackFailure("system_error");
+            }
+            await preparedAudit.publish();
+          }
+
+          return success({
+            exportManifestId,
+            exportCandidateId: input.exportCandidateId,
+            effectiveAuthorityDecisionId,
+            fingerprintContractVersion: EXPORT_MANIFEST_FINGERPRINT_CONTRACT_VERSION,
+            canonicalFingerprint: fingerprint,
+            replayed,
+          });
+        });
+      } catch (error) {
+        if (error instanceof ExportManifestRollbackResultError) return error.result;
+        if (error?.code === "23505" || error?.code === "25001") return failure("conflict_current_state_changed");
+        if (error?.code === "23503" || error?.code === "22P02" || error?.code === "23514") {
+          return failure("validation_blocker");
+        }
+        return failure("system_error");
+      }
+    },
+  });
+}
+
+export const __exportManifestRepositoryTestables = Object.freeze({
+  isCreateExportManifestInput,
+  canonicalFingerprint,
+});

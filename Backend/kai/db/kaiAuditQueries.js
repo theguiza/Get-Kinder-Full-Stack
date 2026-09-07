@@ -63,6 +63,8 @@ const SAFE_AUDIT_METADATA_KEYS = new Set([
   "previous_membership_status",
   "resulting_membership_status",
   "authority_source",
+  "export_manifest_id",
+  "export_candidate_id",
 ]);
 
 const FORCED_FALSE_METADATA_FLAGS = [

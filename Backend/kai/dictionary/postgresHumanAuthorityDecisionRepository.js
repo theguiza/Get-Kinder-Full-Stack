@@ -214,7 +214,7 @@ async function isExportCandidateCurrentForAuthority(
 // candidate. Not wired into VAL-EXP-001, any human grant/revoke operation
 // (none exists in this package), or any route.
 // ---------------------------------------------------------------------------
-async function evaluateHumanAuthorityEffectivenessInTransaction(
+export async function evaluateHumanAuthorityEffectivenessInTransaction(
   tx,
   input,
   evaluateCurrentness = evaluateExportCandidateCurrentnessInTransaction,

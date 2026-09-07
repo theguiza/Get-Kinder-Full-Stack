@@ -1056,6 +1056,97 @@ export function createProductionMetadataOnlyAuditForHumanFinalReleaseAuthority({
 }
 
 /**
+ * Production composition of the `metadataOnlyAudit` contract required by
+ * P3-19's export-manifest write
+ * (Backend/kai/dictionary/postgresExportManifestRepository.js). Bound at
+ * construction only to `organizationId`/`exportCandidateId` - the route's own
+ * resource identity, known before the manifest row exists - mirroring the
+ * P2-03/P2-11 adapters' identity discipline exactly: the manifest's own id
+ * does not exist yet at construction time (it is generated inside the
+ * repository's own transaction), so it is never taken as a constructor
+ * parameter; the generic audit object identity
+ * (`object_type`/`object_id`/`export_manifest_id`) is derived exclusively
+ * from `payload.export_manifest_id` at prepare time, and a payload whose
+ * `export_candidate_id` does not match this adapter's own bound
+ * `exportCandidateId` is refused, as is a payload with no valid
+ * `export_manifest_id` at all.
+ *
+ * The audited object is the manifest itself - never the parent export
+ * candidate - so `object_type`/`object_id` identify the manifest
+ * (`object_type: "export_manifest"`, requested as a semantic label; the
+ * existing `resolveAuditObjectType` falls back to the real live
+ * `kai.object_type_enum`'s `'other'` member if `'export_manifest'` isn't a
+ * current production label - this package neither assumes nor mutates that
+ * enum's membership). Both identifiers are carried by name
+ * (`export_manifest_id`/`export_candidate_id`, both `SAFE_AUDIT_METADATA_KEYS`
+ * entries), never conflated with each other.
+ */
+export function createProductionMetadataOnlyAuditForExportManifest({
+  organizationId,
+  exportCandidateId,
+  actorContext,
+  now,
+  insertAuditEvent = insertRequiredSuccessfulAuditEvent,
+} = {}) {
+  if (typeof organizationId !== "string" || organizationId.length === 0) {
+    throw new TypeError("createProductionMetadataOnlyAuditForExportManifest requires organizationId.");
+  }
+  if (typeof exportCandidateId !== "string" || !CLAIM_ID_PATTERN.test(exportCandidateId)) {
+    throw new TypeError("createProductionMetadataOnlyAuditForExportManifest requires exportCandidateId.");
+  }
+
+  function isPlainObject(value) {
+    return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  }
+
+  return Object.freeze({
+    prepareMetadataOnlyAudit({ payload, db } = {}) {
+      if (!isPlainObject(payload)) return { ok: false };
+      const payloadManifestId = payload.export_manifest_id;
+      if (typeof payloadManifestId !== "string" || !CLAIM_ID_PATTERN.test(payloadManifestId)) return { ok: false };
+      const payloadCandidateId = payload.export_candidate_id;
+      if (typeof payloadCandidateId !== "string" || payloadCandidateId !== exportCandidateId) return { ok: false };
+
+      const metadata = {
+        organization_id: organizationId,
+        object_type: "export_manifest",
+        target_object_type: "export_manifest",
+        object_id: payloadManifestId,
+        export_manifest_id: payloadManifestId,
+        export_candidate_id: payloadCandidateId,
+        operation: typeof payload.attempted_operation === "string" ? payload.attempted_operation : "export_manifest_created",
+        operation_type: typeof payload.attempted_operation === "string" ? payload.attempted_operation : "export_manifest_created",
+        validator_key: typeof payload.validator_key === "string" ? payload.validator_key : null,
+        actor_type: actorContext?.actorType || "human",
+        actor_user_id: actorContext?.actorUserId || null,
+        request_id: actorContext?.requestId || null,
+        route: "p3_19_export_manifest_foundation",
+        created_at: typeof now === "string" ? now : new Date().toISOString(),
+        metadata_only: true,
+        contains_raw_file_content: false,
+        contains_raw_parsed_rows: false,
+        contains_client_pii: false,
+        contains_prompt_text: false,
+        contains_unsafe_generated_text: false,
+        contains_signed_urls: false,
+        contains_storage_credentials: false,
+      };
+
+      return {
+        ok: true,
+        async publish() {
+          const result = await insertAuditEvent(metadata, db);
+          if (!result || result.ok !== true) {
+            throw new Error("p3_19_export_manifest_metadata_only_audit_publish_failed");
+          }
+          return result;
+        },
+      };
+    },
+  });
+}
+
+/**
  * Production composition of the `metadataOnlyAudit` contract for the KAI
  * organization-enablement package (Get Kinder organization -> KAI
  * organization/binding/initial-engagement provisioning). Bound at
