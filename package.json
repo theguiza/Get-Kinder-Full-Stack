@@ -69,6 +69,7 @@
     "verify:kai-sprint2-p3-03-export-manifest-eligibility": "node scripts/kai-sprint2-p3-03-export-manifest-eligibility-local-postgres.js",
     "verify:kai-sprint2-p3-04-generated-content-review-completion": "node scripts/kai-sprint2-p3-04-generated-content-review-completion-local-postgres.js",
     "verify:kai-sprint2-p3-05-export-review-request": "node scripts/kai-sprint2-p3-05-export-review-request-local-postgres.js",
+    "verify:kai-sprint2-p3-05-export-review-request-predecessor-proof": "node scripts/kai-sprint2-p3-05-export-review-request-predecessor-proof.js",
     "verify:kai-sprint2-p3-06-export-review-packet": "node scripts/kai-sprint2-p3-06-export-review-packet-local-postgres.js",
     "verify:kai-sprint2-p3-09-export-review-start": "node scripts/kai-sprint2-p3-09-export-review-start-local-postgres.js",
     "verify:kai-sprint2-p3-13-export-review-completion": "node scripts/kai-sprint2-p3-13-export-review-completion-local-postgres.js",

@@ -21,10 +21,37 @@ BEGIN
   END IF;
 END $$;
 
+-- Fail closed unless the validated predecessor review_queue_items queue_type
+-- contract actually admits 'export_review'. This proves the assumption behind
+-- the P3-05 per-queue_type constraints below by inspection of the live
+-- predicate, rather than by comment.
+DO $$
+DECLARE
+  existing_predicate text;
+BEGIN
+  SELECT pg_get_expr(c.conbin, c.conrelid)
+    INTO existing_predicate
+    FROM pg_constraint c
+    JOIN pg_class r ON r.oid = c.conrelid
+    JOIN pg_namespace n ON n.oid = r.relnamespace
+   WHERE n.nspname = 'kai'
+     AND r.relname = 'review_queue_items'
+     AND c.conname = 'review_queue_items_p1_06_queue_type_check'
+     AND c.convalidated;
+
+  IF existing_predicate IS NULL THEN
+    RAISE EXCEPTION 'validated kai.review_queue_items_p1_06_queue_type_check is required before P3-05 export-review-request migration';
+  END IF;
+
+  IF position('''export_review''' IN existing_predicate) = 0 THEN
+    RAISE EXCEPTION 'kai.review_queue_items_p1_06_queue_type_check does not admit export_review; refusing P3-05 export-review-request migration';
+  END IF;
+END $$;
+
 -- 'export_review' is already an admitted kai.review_queue_items.queue_type value
--- (see review_queue_items_p1_06_queue_type_check). This migration adds the
--- per-queue_type identity and static-contract constraints P3-05 requires,
--- following the exact pattern P3-01/P3-04 established for
+-- (see review_queue_items_p1_06_queue_type_check, proven above). This migration
+-- adds the per-queue_type identity and static-contract constraints P3-05
+-- requires, following the exact pattern P3-01/P3-04 established for
 -- 'generated_content_review'.
 CREATE UNIQUE INDEX IF NOT EXISTS ux_review_queue_items_p3_05_export_review_identity
   ON kai.review_queue_items (organization_id, queue_type, target_object_type, target_object_id)
@@ -51,33 +78,43 @@ ALTER TABLE kai.review_queue_items
       )
     );
 
-ALTER TABLE kai.upload_lifecycle_audit
-  DROP CONSTRAINT IF EXISTS upload_lifecycle_audit_gate_a_operation_check,
-  ADD CONSTRAINT upload_lifecycle_audit_gate_a_operation_check
-    CHECK (operation IN (
-      'reserve_upload',
-      'start_upload',
-      'complete_object_version',
-      'confirm_upload',
-      'block_upload',
-      'abandon_upload',
-      'expire_upload',
-      'policy_decision_compare_and_set',
-      'parser_run_recorded',
-      'file_profile_persisted',
-      'data_dictionary_draft_persisted',
-      'intake_sensitivity_profile_persisted',
-      'sensitivity_review_queue_item_created',
-      'intake_source_candidate_persisted',
-      'source_promotion_decision_persisted',
-      'evidence_lineage_extracted',
-      'claim_proposed',
-      'claim_gap_and_followup_generated',
-      'conflict_review_candidate_created',
-      'generated_content_draft_created',
-      'generated_content_review_completed',
-      'export_review_requested'
-    ));
+-- Preserve the validated predecessor audit-operation predicate exactly and add
+-- only the P3-05 request operation, following the same monotonic
+-- predecessor-preservation approach established by the repaired P3-04
+-- migration. This keeps P3-05 correct whether the predecessor is the ordinary
+-- P3-01/P3-04 vocabulary or an already-expanded valid predecessor.
+DO $$
+DECLARE
+  existing_predicate text;
+BEGIN
+  SELECT pg_get_expr(c.conbin, c.conrelid)
+    INTO existing_predicate
+    FROM pg_constraint c
+    JOIN pg_class r ON r.oid = c.conrelid
+    JOIN pg_namespace n ON n.oid = r.relnamespace
+   WHERE n.nspname = 'kai'
+     AND r.relname = 'upload_lifecycle_audit'
+     AND c.conname = 'upload_lifecycle_audit_gate_a_operation_check'
+     AND c.convalidated;
+
+  IF existing_predicate IS NULL THEN
+    RAISE EXCEPTION 'validated kai.upload_lifecycle_audit_gate_a_operation_check is required before P3-05 export-review-request migration';
+  END IF;
+
+  IF position('export_review_requested' IN existing_predicate) = 0 THEN
+    EXECUTE format(
+      'ALTER TABLE kai.upload_lifecycle_audit ADD CONSTRAINT upload_lifecycle_audit_gate_a_operation_check_p3_05 CHECK ((%s) OR operation = ''export_review_requested'') NOT VALID',
+      existing_predicate
+    );
+    ALTER TABLE kai.upload_lifecycle_audit
+      VALIDATE CONSTRAINT upload_lifecycle_audit_gate_a_operation_check_p3_05;
+    ALTER TABLE kai.upload_lifecycle_audit
+      DROP CONSTRAINT upload_lifecycle_audit_gate_a_operation_check;
+    ALTER TABLE kai.upload_lifecycle_audit
+      RENAME CONSTRAINT upload_lifecycle_audit_gate_a_operation_check_p3_05
+      TO upload_lifecycle_audit_gate_a_operation_check;
+  END IF;
+END $$;
 
 ALTER TABLE kai.upload_lifecycle_audit
   DROP CONSTRAINT IF EXISTS upload_lifecycle_audit_p3_05_metadata_object_check,
