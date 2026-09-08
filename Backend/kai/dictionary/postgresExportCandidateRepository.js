@@ -323,6 +323,17 @@ async function loadCurrentSnapshotWithEntries(tx, { organizationId, generatedCon
   return { limitationSnapshotId: snapshot.limitation_snapshot_id, entries: entryRows.rows };
 }
 
+async function loadSnapshotEntries(tx, { limitationSnapshotId }) {
+  const entryRows = await tx.query(
+    `SELECT claim_id::text AS claim_id, evidence_item_id::text AS evidence_item_id, limitation_codes
+       FROM kai.limitation_snapshot_entries
+      WHERE limitation_snapshot_id = $1::uuid
+      ORDER BY claim_id ASC, evidence_item_id ASC`,
+    [limitationSnapshotId],
+  );
+  return entryRows.rows;
+}
+
 async function loadCanonicalGraph(tx, { organizationId, generatedContentDraftId }) {
   const blockRows = await tx.query(
     `SELECT generated_content_block_id::text AS generated_content_block_id, ordinal, text
@@ -545,6 +556,65 @@ export async function evaluateExportCandidateCurrentnessInTransaction(tx, { orga
     return success({ current: false, reason: "fingerprint_mismatch" });
   }
   return success({ current: true, reason: null });
+}
+
+export async function loadExportCandidateCanonicalRepresentationInTransaction(
+  tx,
+  { organizationId, exportCandidateId },
+) {
+  const { rows } = await tx.query(
+    `SELECT export_candidate_id::text AS export_candidate_id,
+            organization_id::text AS organization_id,
+            generated_content_draft_id::text AS generated_content_draft_id,
+            content_type,
+            requested_audience,
+            limitation_snapshot_id::text AS limitation_snapshot_id,
+            fingerprint_contract_version,
+            canonical_fingerprint
+       FROM kai.export_candidates
+      WHERE organization_id = $1::uuid AND export_candidate_id = $2::uuid`,
+    [organizationId, exportCandidateId],
+  );
+  const candidate = rows[0];
+  if (!candidate) return failure("not_found");
+
+  const draftRow = await loadDraftRow(tx, {
+    organizationId: candidate.organization_id,
+    generatedContentDraftId: candidate.generated_content_draft_id,
+  });
+  if (!draftRow) return success({ representation: null, fingerprint: null, reason: "draft_missing" });
+
+  const blocks = await loadCanonicalGraph(tx, {
+    organizationId: candidate.organization_id,
+    generatedContentDraftId: candidate.generated_content_draft_id,
+  });
+  const snapshotEntries = await loadSnapshotEntries(tx, {
+    limitationSnapshotId: candidate.limitation_snapshot_id,
+  });
+  const representation = buildCanonicalRepresentation({
+    organizationId: candidate.organization_id,
+    generatedContentDraftId: candidate.generated_content_draft_id,
+    contentType: draftRow.content_type,
+    requestedAudience: draftRow.requested_audience,
+    blocks,
+    snapshotEntries,
+  });
+  if (!representation) return success({ representation: null, fingerprint: null, reason: "cited_pair_mismatch" });
+
+  return success({
+    candidate: {
+      exportCandidateId: candidate.export_candidate_id,
+      generatedContentDraftId: candidate.generated_content_draft_id,
+      contentType: candidate.content_type,
+      requestedAudience: candidate.requested_audience,
+      limitationSnapshotId: candidate.limitation_snapshot_id,
+      fingerprintContractVersion: candidate.fingerprint_contract_version,
+      canonicalFingerprint: candidate.canonical_fingerprint,
+    },
+    representation,
+    fingerprint: canonicalFingerprint(representation),
+    reason: null,
+  });
 }
 
 export function createPostgresExportCandidateRepository({ runInTransaction = withTransaction } = {}) {
@@ -790,6 +860,7 @@ export const __exportCandidateRepositoryTestables = Object.freeze({
   canonicalFingerprint,
   deriveConfirmedByRole,
   evaluateExportCandidateCurrentnessInTransaction,
+  loadExportCandidateCanonicalRepresentationInTransaction,
 });
 
 export const __exportCandidateRepositoryContract = Object.freeze({

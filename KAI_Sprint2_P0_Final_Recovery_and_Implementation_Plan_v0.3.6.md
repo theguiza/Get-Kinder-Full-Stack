@@ -20573,6 +20573,101 @@ retrieval, reuse) — not authorized and not started by this entry.
 
 **Files changed in this reconciliation:** this ExecPlan document only. No product code, test, schema, or migration file was changed.
 
+## Export Manifest Render Model Composition
+
+**Owner authorization (bounded, local-only):** compose a persisted P3-19
+export manifest into one deterministic, citation-complete, manifest-bound
+render-model DTO suitable for later format-specific rendering. Authorized
+scope: manifest-bound read-model/service composition; authoritative P3-16
+canonical candidate representation reuse; authoritative P3-16
+fingerprint/currentness protection; deterministic ordered content blocks;
+deterministic citation-reference composition; citation appendix
+representation from bound traceability; bound limitation/method-note
+representation; safe manifest/candidate/authority trace; tenant-safe lookup;
+focused and affected regression tests; living ExecPlan evidence; complete
+diff inspection; one local commit if all acceptance checks pass.
+
+**Out of scope:** Markdown serialization, PDF, DOCX, CSV artifact generation,
+artifact bytes, export-artifact schema/table, object-storage writes, storage
+keys, signed URLs, download/retrieval, public sharing, reuse/output-project
+integration, changing `generated_content_drafts.draft_status`, redefining
+P3-16/P3-17/P3-18/P3-19 semantics, database migration, production
+execution, push, deployment, cloud/storage configuration, secrets,
+credentials, real client data, feature-flag mutation, `00_KAI_CURRENT_STATE.md`,
+and `KAI_CURRENT_IMPLEMENTATION_BASELINE.md`.
+
+**Starting repository evidence:** branch `main`, HEAD
+`867e59fa325fee19257efb387502a90943c5b550`, working tree clean. The
+repository inspection did not contradict the accepted package: P3-19 remains
+manifest identity persistence only; P3-16 remains the canonical
+export-candidate/currentness authority; storage/retrieval/rendered artifact
+work remains outside this package.
+
+**Implementation evidence:** added a read-only
+`postgresExportManifestRenderModelRepository` and service-level
+`composeExportManifestRenderModel` operation. The repository loads the
+tenant-scoped P3-19 manifest row, follows its exact
+`export_candidate_id`, calls the authoritative P3-16
+`evaluateExportCandidateCurrentnessInTransaction`, then calls a new
+visibility-only P3-16 helper,
+`loadExportCandidateCanonicalRepresentationInTransaction`, which reuses the
+existing P3-16 canonical graph loader, `buildCanonicalRepresentation`, and
+`canonicalFingerprint`. The render DTO contains manifest identity,
+candidate identity/fingerprint trace, bound effective authority decision
+trace, ordered content blocks, deterministic `CIT-###` citation references,
+citation appendix entries, and limitation/method-note entries. It contains
+no Markdown/PDF/DOCX, artifact bytes, storage key/path, signed/download URL,
+route, migration, audit write, or generated-draft lifecycle mutation.
+
+**Currentness/immutability evidence:** a manifest render attempt fails closed
+with `conflict_current_state_changed` when the bound P3-16 candidate is no
+longer current under P3-16 semantics (`fingerprint_mismatch`,
+`limitation_snapshot_superseded`, or equivalent P3-16 reason). The renderer
+never substitutes a newer draft, content block, citation, limitation
+snapshot, candidate, authority decision, or manifest row. Current review
+status, current eligibility status, live blockers, mutable affected-
+dimension state, audit metadata beyond the manifest/candidate/authority
+trace, and later authority status are excluded from the render payload.
+
+**Authority/authorization semantics:** no live reauthorization gate was
+invented for this read-only in-memory composition. The manifest-bound
+`effective_authority_decision_id` / `effective_authority_decision_type` are
+carried as trace metadata, and candidate currentness is enforced through
+P3-16. The service reuses the existing P3-19 feature flags
+(`KAI_SPRINT2_ENABLED`, `KAI_GENERATION_ENABLED`,
+`KAI_PUBLIC_EXPORT_ENABLED`) and existing P3-19 `gk_admin` human
+authorization gate (`CREATE_EXPORT_MANIFEST_OPERATION` /
+`CREATE_EXPORT_MANIFEST_ALLOWED_ROLES`); no gate was removed or widened.
+
+**TOOL_VERIFIED:**
+  - `DATABASE_URL=postgres://kai_sentinel:kai_sentinel@127.0.0.1:9/kai_sentinel DATABASE_URL_LOCAL= PGURL_LOCAL= RENDER_DATABASE_URL= PROD_DATABASE_URL= npm run test:kai-sprint2-export-manifest-render-model-composition`
+    -> 10/10 passed.
+  - Same sentinel/clearing convention,
+    `npm run test:kai-sprint2-p3-16-export-candidate-foundation`
+    -> 16/16 passed, proving the P3-16 boundary behavior remains unchanged.
+  - Same sentinel/clearing convention,
+    `node --test __tests__/kai-sprint2-p3-19-export-manifest-foundation-boundary.spec.js`
+    -> 10/10 passed, proving existing P3-19 boundary behavior remains
+    unchanged.
+  - Same sentinel/clearing convention,
+    `npm run verify:kai-sprint2-p3-19-export-manifest-foundation` first
+    failed in the sandbox before repository assertions because PostgreSQL
+    `initdb` could not create a shared-memory segment; the identical command
+    was rerun with approved escalation for the runner-owned loopback
+    PostgreSQL process and passed 305/305, including the P3-16/P3-17/P3-18
+    regression pack and P3-19 integration/boundary proof.
+  - `git diff --check` -> PASS.
+
+**Final diff review:** confined to
+`Backend/kai/dictionary/postgresExportCandidateRepository.js`,
+`Backend/kai/dictionary/postgresExportManifestRenderModelRepository.js`,
+`Backend/kai/services/kaiExportManifestRenderModelService.js`,
+`__tests__/kai-sprint2-export-manifest-render-model-composition-boundary.spec.js`,
+`package.json`, and this ExecPlan. No migration, route, schema, production/
+runtime/cloud configuration, Current State, Implementation Baseline,
+storage/retrieval/download/reuse, rendered artifact, or unrelated work was
+added.
+
 ## Gate A Upload Lifecycle Enforcement Forward Repair
 
 **Date:** 2026-09-07
