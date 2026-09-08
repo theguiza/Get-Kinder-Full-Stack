@@ -173,11 +173,22 @@ export function toRenderModel(data) {
     // field is rendered by this page - see gkExportReviewDetail.jsx.
     exportReviewQueueStatus: data.exportReviewQueueStatus,
     exportReviewUpdatedAt: data.exportReviewUpdatedAt,
-    // Durable read recovery: the exact, backend-persisted exportManifestId
-    // for this review item's governed finalization, or null if none is
-    // exactly recoverable. Never computed here - see toRenderModel's own
-    // caller for how this restores the Download Markdown control on reload.
+    // Compatibility-only: the singular backend field collapses to null
+    // whenever more than one manifest exists for this review item. This
+    // page no longer uses this field to restore active workflow state - see
+    // exportManifestHistory below for the authoritative persisted history.
     exportManifestId: data.exportManifestId ?? null,
+    // Authoritative persisted history: every exact manifest ever finalized
+    // for this review item (0 -> [], 1 -> [A], N -> all N). Projected as
+    // exactly exportManifestId/exportCandidateId/createdAt per entry - never
+    // derived, re-ordered, or filtered down to a single "current" one here.
+    exportManifestHistory: Array.isArray(data.exportManifestHistory)
+      ? data.exportManifestHistory.map((entry) => ({
+        exportManifestId: entry?.exportManifestId,
+        exportCandidateId: entry?.exportCandidateId,
+        createdAt: entry?.createdAt,
+      }))
+      : [],
     validatorSeverity: validatorResult.severity,
     validatorFailedGate: validatorResult.blocking_reason ?? null,
     blocks: blocks.map((block) => ({

@@ -106,6 +106,7 @@ test("P3-08 success renders only allowlisted P3-06 fields and drops everything e
     exportReviewQueueStatus: "open",
     exportReviewUpdatedAt: "2026-08-06T09:00:00.000Z",
     exportManifestId: null,
+    exportManifestHistory: [],
     validatorSeverity: "blocker",
     validatorFailedGate: "claim_review_incomplete",
     blocks: [
@@ -147,6 +148,47 @@ test("durable read recovery: toRenderModel reports null (never a fabricated iden
   const outcome = decideOutcome({ statusCode: 200, body: { ok: true, data: validDto, warnings: [] } });
   assert.equal(outcome.kind, "success");
   assert.equal(outcome.model.exportManifestId, null);
+});
+
+test("exportManifestHistory projection: zero/one/two/three packet history entries project to zero/one/two/three render-model entries, in the exact given order", () => {
+  const entryA = { exportManifestId: "00000000-0000-4000-8000-000000000901", exportCandidateId: "00000000-0000-4000-8000-000000000801", createdAt: "2026-09-08T10:00:00.000Z" };
+  const entryB = { exportManifestId: "00000000-0000-4000-8000-000000000902", exportCandidateId: "00000000-0000-4000-8000-000000000802", createdAt: "2026-09-08T10:05:00.000Z" };
+  const entryC = { exportManifestId: "00000000-0000-4000-8000-000000000903", exportCandidateId: "00000000-0000-4000-8000-000000000803", createdAt: "2026-09-08T10:10:00.000Z" };
+
+  assert.deepEqual(decideOutcome({ statusCode: 200, body: { ok: true, data: { ...validDto, exportManifestHistory: [] } } }).model.exportManifestHistory, []);
+  assert.deepEqual(decideOutcome({ statusCode: 200, body: { ok: true, data: { ...validDto, exportManifestHistory: [entryA] } } }).model.exportManifestHistory, [entryA]);
+  assert.deepEqual(decideOutcome({ statusCode: 200, body: { ok: true, data: { ...validDto, exportManifestHistory: [entryA, entryB] } } }).model.exportManifestHistory, [entryA, entryB]);
+  assert.deepEqual(decideOutcome({ statusCode: 200, body: { ok: true, data: { ...validDto, exportManifestHistory: [entryA, entryB, entryC] } } }).model.exportManifestHistory, [entryA, entryB, entryC]);
+});
+
+test("exportManifestHistory projection: only exportManifestId/exportCandidateId/createdAt survive per entry, and a missing field on the packet is never invented", () => {
+  const outcome = decideOutcome({
+    statusCode: 200,
+    body: {
+      ok: true,
+      data: {
+        ...validDto,
+        exportManifestHistory: [{
+          exportManifestId: "00000000-0000-4000-8000-000000000901",
+          exportCandidateId: "00000000-0000-4000-8000-000000000801",
+          createdAt: "2026-09-08T10:00:00.000Z",
+          isLatest: true,
+          isCurrent: true,
+          preferred: true,
+        }],
+      },
+    },
+  });
+  assert.deepEqual(outcome.model.exportManifestHistory, [{
+    exportManifestId: "00000000-0000-4000-8000-000000000901",
+    exportCandidateId: "00000000-0000-4000-8000-000000000801",
+    createdAt: "2026-09-08T10:00:00.000Z",
+  }]);
+});
+
+test("exportManifestHistory projection: a non-array packet field never produces a fabricated non-empty history", () => {
+  const outcome = decideOutcome({ statusCode: 200, body: { ok: true, data: { ...validDto, exportManifestHistory: null } } });
+  assert.deepEqual(outcome.model.exportManifestHistory, []);
 });
 
 test("P3-12 P3-08 projection retains exportReviewQueueStatus and exportReviewUpdatedAt internally for Start Review control-state logic only", () => {

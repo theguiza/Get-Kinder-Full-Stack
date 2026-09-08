@@ -21608,3 +21608,118 @@ or render `exportManifestHistory` - it still reads only the compatibility
 history in the UI (the disclosed multi-manifest-per-review-item edge case)
 is the deferred next dependency this package makes possible - explicitly not
 implemented here, per owner authorization scope.
+
+## Export Manifest History UI + Current Workflow State Separation
+
+**Date:** 2026-09-08
+
+**Owner authorization (bounded, local-only, frontend-only):** the prior
+package added the authoritative `exportManifestHistory` read-model field to
+the packet DTO, but the existing GK export-review frontend still only reads
+the compatibility `exportManifestId` field, and used that field's durable
+read recovery to restore Download Markdown into active current-session
+manifest state - a state that also suppressed Prepare/Grant/Finalize once a
+historical manifest existed. This package closes that gap: it makes the
+frontend consume `exportManifestHistory`, renders every persisted manifest's
+own exact Download Markdown link, and separates persisted history from
+active current-session workflow state so history alone can never suppress
+Prepare/Grant/Finalize. Authorized: frontend render-model and component
+changes, their directly coupled tests, this ExecPlan update, `git diff`
+inspection, and one bounded local commit. Not authorized: schema/migration
+changes, P3-20 write changes, P3-19 replay changes, backend history-model
+changes, a new page, production access, push/deploy, PDF/DOCX/CSV/storage,
+or Current State/Baseline changes.
+
+**Starting repository evidence:** branch `main`, HEAD `07c64d4a76c01d68dec45cf9b4dba99f9065a58f`
+(the exact commit the prior Exact Export Manifest History Read Model package
+produced), working tree clean.
+
+**Design decision:** `frontend/gkExportReviewDetailLogic.js`'s
+`toRenderModel` now also projects `data.exportManifestHistory` into the
+render model as an array of exactly `{ exportManifestId, exportCandidateId,
+createdAt }` entries (0 -> `[]`, 1 -> `[A]`, N -> all N, in the exact given
+order) - any other field on a history entry, or a non-array packet field, is
+dropped, never invented. The compatibility `exportManifestId` field is
+still projected (for backward source compatibility) but is no longer read
+anywhere in the component to restore active workflow state.
+`frontend/gkExportReviewDetail.jsx`'s durable-read-recovery `useEffect` -
+which restored the packet's `exportManifestId` into the current-session
+`exportManifestId` state on every load, and thereby suppressed
+Prepare/Grant/Finalize once any historical manifest existed - is removed
+outright. Current-session state (`exportCandidateId`, `authorityEffective`,
+`exportManifestId`) is now populated only by this session's own P3-16/P3-17/
+P3-19 mutation responses, never by anything read from the packet; a
+successful current-session Finalize still uses its own exact returned
+`exportManifestId` to suppress a second current-session Finalize (unrelated
+to persisted history). A new `HistoricalManifests` component renders every
+`exportManifestHistory` entry unconditionally and separately, each with its
+own exact `exportManifestMarkdownPath(organizationId,
+entry.exportManifestId)` Download Markdown link and its `createdAt` shown
+only as metadata - no entry is ever selected, hidden, or labeled latest/
+current/preferred/active, and stale entries continue to route through the
+existing, unmodified backend markdown-delivery currentness checks. After a
+successful current-session Finalize, the component retains the exact
+returned manifest id for immediate same-session Download Markdown, then
+calls the existing `loadPacket()` once so the new manifest appears in
+`exportManifestHistory` on next render - no history entry is ever
+fabricated client-side. No P3-16 (currentness), P3-17 (authority
+effectiveness), P3-18 (eligibility), or P3-19 (replay/finalization)
+semantics were implemented or duplicated client-side; every governed
+mutation call site, request body, and success/conflict/error decision
+function is unchanged.
+
+**Tests:** `__tests__/kai-sprint2-p3-08-gk-export-review-detail.spec.js`
+gained `exportManifestHistory` projection coverage (0/1/2/3-entry ordering,
+allowlist-only-field projection dropping any extra/invented field such as
+`isLatest`/`isCurrent`/`preferred`, and a non-array packet field never
+producing a fabricated non-empty history) and its existing full-render-model
+`deepEqual` assertion was extended with `exportManifestHistory: []`.
+`__tests__/kai-sprint2-gk-export-review-governed-finalization-control.spec.js`'s
+prior durable-read-recovery restoration test (which asserted
+`setExportManifestId(recovered)` existed) was replaced with a test asserting
+that restoration is now absent (no `setExportManifestId(recovered)` call, no
+restoration of the packet's compatibility `exportManifestId` into
+current-session state), plus a new test asserting every
+`exportManifestHistory` entry renders its own exact
+`exportManifestMarkdownPath(organizationId, entry.exportManifestId)` link
+with no latest/current/preferred/active selection. The existing
+Prepare/Grant-controls-stay-suppressed-once-`exportManifestId`-is-known test
+was left in place unchanged, since it now exercises only same-session
+suppression.
+
+**Verification:** `DATABASE_URL=postgres://sentinel:sentinel@127.0.0.1:1/sentinel_do_not_connect`
+for every Node/npm command (no database was reached). Focused run
+(`kai-sprint2-p3-08-gk-export-review-detail.spec.js`,
+`kai-sprint2-gk-export-review-governed-finalization-control.spec.js`,
+`kai-sprint2-p3-12-gk-export-review-start-control.spec.js`,
+`kai-sprint2-p3-15-gk-export-review-complete-control.spec.js`) -> 64 passed,
+0 failed. Directly affected regression run
+(`kai-sprint2-authorized-markdown-export-delivery-route.spec.js`,
+`kai-sprint2-governed-export-finalization-route.spec.js`,
+`kai-sprint2-p3-export-operational-composition-route.spec.js`,
+`kai-sprint2-p3-05-export-review-request-boundary.spec.js`,
+`kai-sprint2-p3-09-export-review-start-boundary.spec.js`,
+`kai-sprint2-p3-13-export-review-completion-boundary.spec.js`,
+`kai-sprint2-p3-18-assembled-pre-artifact-release-proof.spec.js`) -> 116
+passed, 0 failed. Backend durable-read-recovery/packet-boundary suites
+(`kai-sprint2-durable-export-manifest-read-recovery-boundary.spec.js`,
+`kai-sprint2-durable-export-manifest-read-recovery.integration.spec.js`,
+`kai-sprint2-p3-06-export-review-packet-boundary.spec.js`) re-run
+unmodified as an interface check -> 37 passed, 0 failed, 1 skipped
+(runner-owned-database integration case, skipped without that separately
+authorized database target, as expected) - confirming this package made no
+backend interface change. `npm run build` (Vite) succeeded with no errors.
+`git diff --check` passed.
+
+**Final diff review:** confined to `frontend/gkExportReviewDetail.jsx`,
+`frontend/gkExportReviewDetailLogic.js`, `public/js/bundles/entry.js` (Vite
+rebuild), two updated test files, and this ExecPlan. No schema or migration
+file was created or edited; no backend file, route, feature flag, cloud
+configuration, Current State, Implementation Baseline, credential/secret, or
+artifact-persistence/storage change was made; no PDF/DOCX/CSV path exists
+anywhere in this diff; no new page was added. No production database was
+accessed, mutated, or migrated; nothing was pushed or deployed.
+
+**Remaining work:** the assembled closure proof for this UI/history package
+was not run in this turn, per explicit instruction - deferred to a
+separately authorized follow-up turn.

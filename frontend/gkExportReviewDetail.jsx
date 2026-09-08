@@ -44,8 +44,15 @@ import {
  * authority, VAL-EXP-001/finalGate, and manifest identity are all decided by
  * the backend; this component never re-derives or overrides those decisions,
  * never grants authority itself, never selects a historical manifest, and
- * never trusts a mutation response as the new packet. Download Markdown uses
- * only the exact exportManifestId returned by that finalization call.
+ * never trusts a mutation response as the new packet. Download Markdown for
+ * the active current-session finalization uses only the exact
+ * exportManifestId returned by that finalization call - the packet's
+ * compatibility exportManifestId field is never restored into that
+ * current-session state. Every entry in the packet's own
+ * exportManifestHistory is rendered separately, each with its own exact
+ * Download Markdown link; persisted history is never used to suppress
+ * Prepare/Grant/Finalize, and no history entry is ever labeled
+ * latest/current/preferred/active.
  */
 
 function FieldRow({ label, value }) {
@@ -84,6 +91,31 @@ function BlockDetail({ block }) {
       <ul>
         {block.citations.map((citation, index) => (
           <CitationDetail key={`${citation.claimId}-${citation.evidenceItemId}-${index}`} citation={citation} />
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+// Renders every persisted history entry exactly as returned - no entry is
+// ever selected, hidden, or labeled latest/current/preferred/active.
+// createdAt is shown as history metadata only.
+function HistoricalManifests({ organizationId, exportManifestHistory }) {
+  if (!exportManifestHistory || exportManifestHistory.length === 0) return null;
+  return (
+    <section className="gk-export-review-manifest-history">
+      <h3>Export manifest history</h3>
+      <ul>
+        {exportManifestHistory.map((entry) => (
+          <li key={entry.exportManifestId} className="gk-export-review-manifest-history-entry">
+            <FieldRow label="Created at" value={entry.createdAt} />
+            <a
+              className="gk-export-review-download-markdown-link"
+              href={exportManifestMarkdownPath(organizationId, entry.exportManifestId)}
+            >
+              Download Markdown
+            </a>
+          </li>
         ))}
       </ul>
     </section>
@@ -165,23 +197,6 @@ export default function GkExportReviewDetail({
     loadPacket();
     // loadPacket depends only on the identifiers already covered below.
   }, [identifiersMissing, loadPacket]);
-
-  // Durable read recovery: after a page reload or later return, restore
-  // Download Markdown from the exact, backend-persisted exportManifestId the
-  // packet now carries (see gkExportReviewDetailLogic.js's toRenderModel) -
-  // never recomputed, never a historical search, never a substitute for an
-  // already-known id. A packet with no exact recoverable identity (no
-  // finalization yet, or more than one historical finalization for this
-  // review item) reports exportManifestId as null and this component shows
-  // no Download Markdown control, exactly as it does before any finalization
-  // in the same session.
-  useEffect(() => {
-    if (outcome?.kind !== "success" || !outcome.model) return;
-    const recovered = outcome.model.exportManifestId;
-    if (recovered && recovered !== exportManifestId) {
-      setExportManifestId(recovered);
-    }
-  }, [outcome, exportManifestId]);
 
   const handleStartReview = useCallback(async () => {
     if (startPending || outcome?.kind !== "success" || !outcome.model) return;
@@ -281,7 +296,12 @@ export default function GkExportReviewDetail({
       );
       const decided = decideCreateExportManifestResult(result);
       if (decided.kind === "success") {
+        // Retain the exact returned manifest id for immediate same-session
+        // Download Markdown, then reload the authoritative packet so the
+        // new manifest appears in exportManifestHistory. This id is never
+        // fabricated into a history entry client-side.
         if (mountedRef.current) setExportManifestId(decided.exportManifestId);
+        await loadPacket();
       } else {
         setManifestErrorMessage(decided.message);
       }
@@ -290,7 +310,7 @@ export default function GkExportReviewDetail({
     } finally {
       if (mountedRef.current) setManifestPending(false);
     }
-  }, [manifestPending, exportCandidateId, authorityEffective, organizationId, exportReviewQueueItemId]);
+  }, [manifestPending, exportCandidateId, authorityEffective, organizationId, exportReviewQueueItemId, loadPacket]);
 
   const model = outcome?.kind === "success" ? outcome.model : null;
   const showStartControl = canStartReview(model);
@@ -379,6 +399,8 @@ export default function GkExportReviewDetail({
               </a>
             ) : null}
           </section>
+
+          <HistoricalManifests organizationId={organizationId} exportManifestHistory={model.exportManifestHistory} />
 
           <PacketDetail model={model} />
         </>
