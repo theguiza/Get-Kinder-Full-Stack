@@ -228,6 +228,15 @@ function makeTx(state) {
         const [blockIds] = params;
         return { rows: state.citations.filter((c) => blockIds.includes(c.generated_content_block_id)) };
       }
+      if (s.includes("FROM kai.review_queue_items") && s.includes("queue_type = $2") && s.includes("target_object_type = $3")) {
+        const [organizationId, queueType, targetType, targetId] = params;
+        return {
+          rows: state.exportReviewQueues.filter((q) => q.organization_id === organizationId
+            && q.queue_type === queueType
+            && q.target_object_type === targetType
+            && q.target_object_id === targetId),
+        };
+      }
       if (s.includes("FROM kai.review_queue_items") && s.includes("review_queue_item_id = $2::uuid")) {
         const [organizationId, queueId] = params;
         return { rows: state.exportReviewQueues.filter((q) => q.organization_id === organizationId && q.review_queue_item_id === queueId) };

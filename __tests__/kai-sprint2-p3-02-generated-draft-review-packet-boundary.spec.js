@@ -48,6 +48,9 @@ function dto(overrides = {}) {
     reviewStatus: "needs_gk_review",
     reviewUpdatedAt: "2026-08-06T09:00:00.000Z",
     currentUseEligible: true,
+    exportReviewQueueItemId: null,
+    exportReviewQueueStatus: null,
+    exportReviewStatus: null,
     blocks: [{
       ordinal: 1,
       text: "Visible draft text.",
@@ -126,6 +129,7 @@ function state(overrides = {}) {
       required_action: "Review citations, audience eligibility, limitations, unsupported claims, and numeric or causal assertions before any use.",
       updated_at: "2026-08-06T09:00:00.000Z",
     }],
+    exportReviewQueues: [],
     ...overrides,
   };
 }
@@ -182,6 +186,7 @@ function txForReviewPacketState(packetState = state()) {
       if (/FROM kai\.generated_content_drafts\s+WHERE generation_run_id/.test(sql)) return { rows: packetState.siblingDrafts };
       if (/FROM kai\.generated_content_blocks/.test(sql)) return { rows: packetState.blocks };
       if (/FROM kai\.generated_content_citations/.test(sql)) return { rows: packetState.citations };
+      if (/FROM kai\.review_queue_items/.test(sql) && /blocked_reason/.test(sql)) return { rows: packetState.exportReviewQueues || [] };
       if (/FROM kai\.review_queue_items/.test(sql)) return { rows: packetState.queues };
       throw new Error(`unexpected query in review-packet boundary test: ${sql}`);
     },

@@ -410,6 +410,13 @@ async function readReviewPacketState(tx, { organizationId, generatedContentDraft
       ORDER BY review_queue_item_id ASC`,
     [organizationId, REVIEW_TARGET_TYPE, generatedContentDraftId, REVIEW_QUEUE_TYPE],
   );
+  // Durable read recovery: the same exact-cardinality export_review lookup
+  // requestGeneratedDraftExportReview already relies on
+  // (ux_review_queue_items_p3_05_export_review_identity guarantees at most
+  // one row per organization_id/generated_content_draft_id) - never a
+  // latest/LIMIT-1 guess, and 0 rows is a legitimate, real state (no export
+  // review requested yet), not an error.
+  const exportReviewQueueRows = await loadExportReviewQueueRows(tx, { organizationId, generatedContentDraftId });
   return {
     run: runRows.rows[0] || null,
     draft,
@@ -417,6 +424,7 @@ async function readReviewPacketState(tx, { organizationId, generatedContentDraft
     blocks: blockRows.rows,
     citations: citationRows.rows,
     queues: queueRows.rows,
+    exportReviewQueues: exportReviewQueueRows,
   };
 }
 
@@ -519,11 +527,33 @@ function validateGeneratedContentReviewQueueRows(state, { organizationId, genera
   return true;
 }
 
+// 0 or 1 row only - the same ux_review_queue_items_p3_05_export_review_identity
+// unique index requestGeneratedDraftExportReview relies on guarantees this is
+// never ambiguous. More than 1 row is a genuine system_error, not a pick.
+function validateExportReviewQueueRows(state, { organizationId, generatedContentDraftId }) {
+  const queueKeys = new Set([
+    "review_queue_item_id", "organization_id", "queue_type", "target_object_type",
+    "target_object_id", "priority", "queue_status", "review_status", "blocked_reason",
+    "assigned_to", "due_at", "summary", "required_action", "queue_metadata",
+    "created_by", "created_by_type", "updated_at",
+  ]);
+  if (!state.exportReviewQueues.every((queue) => hasOnlyAllowedKeys(queue, queueKeys))) return "system_error";
+  if (state.exportReviewQueues.length > 1) return "system_error";
+  if (state.exportReviewQueues.length === 0) return true;
+  return isExportReviewQueueContractRow(state.exportReviewQueues[0], {
+    organizationId,
+    targetObjectId: generatedContentDraftId,
+    allowedLifecycleProfiles: EXPORT_REVIEW_LIFECYCLE_PROFILES,
+  });
+}
+
 function validateReviewPacketRows(state, { organizationId, generatedContentDraftId }, allowedLifecycleProfiles = [GENERATED_CONTENT_REVIEW_LIFECYCLE_PROFILES[0]]) {
   const graph = validateImmutableGraphRows(state, { organizationId, generatedContentDraftId });
   if (graph === false || graph === "system_error") return graph;
   const queueValidation = validateGeneratedContentReviewQueueRows(state, { organizationId, generatedContentDraftId }, allowedLifecycleProfiles);
   if (queueValidation === false || queueValidation === "system_error") return queueValidation;
+  const exportReviewValidation = validateExportReviewQueueRows(state, { organizationId, generatedContentDraftId });
+  if (exportReviewValidation === false || exportReviewValidation === "system_error") return exportReviewValidation;
   return graph;
 }
 
@@ -616,6 +646,13 @@ async function toReviewPacket(tx, state, input, validation, evaluator) {
     reviewStatus: state.queues[0].review_status,
     reviewUpdatedAt: asCanonicalUtcTimestamp(state.queues[0].updated_at),
     currentUseEligible: [...evaluatedByClaim.values()].every((evaluated) => evaluated.eligible === true),
+    // Durable read recovery (minimum safe, allowlisted export-review
+    // projection only): identity/state, never the export-review packet's
+    // own blocks/citations/validatorResult, which stay behind the existing
+    // gk_admin-only get_generated_draft_export_review_packet read.
+    exportReviewQueueItemId: state.exportReviewQueues[0]?.review_queue_item_id ?? null,
+    exportReviewQueueStatus: state.exportReviewQueues[0]?.queue_status ?? null,
+    exportReviewStatus: state.exportReviewQueues[0]?.review_status ?? null,
     blocks,
   });
 }
@@ -2326,6 +2363,7 @@ export const __generatedContentRepositoryTestables = Object.freeze({
   validateInput,
   validateReviewPacketInput,
   validateReviewPacketRows,
+  validateExportReviewQueueRows,
   validateCompleteReviewInput,
   fingerprintEvidenceSummaryRequest,
   fingerprintImpactNarrativeRequest,

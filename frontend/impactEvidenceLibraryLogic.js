@@ -724,6 +724,26 @@ export function canRequestGeneratedDraftExportReview(packet) {
   return !!packet && packet.queueStatus === "resolved" && packet.reviewStatus === "resolved";
 }
 
+// Durable read recovery: classifies the packet's own already-recovered
+// export-review state (never the transient post-POST result) into exactly
+// the states the card renders, so "no review yet" and "not visible to your
+// role" can never be conflated - one reload-safe read replaces what used to
+// only exist as in-memory POST-response state.
+export const EXPORT_REVIEW_DISPLAY_STATES = Object.freeze({
+  restricted: "restricted",
+  existing: "existing",
+  requestable: "requestable",
+  notRequestable: "not_requestable",
+});
+
+export function generatedDraftExportReviewDisplayState(packet) {
+  if (!packet || packet.exportReviewVisible !== true) return EXPORT_REVIEW_DISPLAY_STATES.restricted;
+  if (typeof packet.exportReviewQueueItemId === "string") return EXPORT_REVIEW_DISPLAY_STATES.existing;
+  return canRequestGeneratedDraftExportReview(packet)
+    ? EXPORT_REVIEW_DISPLAY_STATES.requestable
+    : EXPORT_REVIEW_DISPLAY_STATES.notRequestable;
+}
+
 // Projects the exact seven-key export-review-request result DTO
 // (kaiExportReviewService.js's EXPORT_REVIEW_RESULT_KEYS) into the minimal
 // shape this page renders - never a passthrough spread.
@@ -1173,6 +1193,16 @@ export function projectGeneratedDraftPacket(dto) {
     reviewStatus: dto.reviewStatus,
     reviewUpdatedAt: dto.reviewUpdatedAt,
     currentUseEligible: dto.currentUseEligible === true,
+    // Durable read recovery: the server's own already-recovered export-review
+    // identity/state, allowlisted straight from this same read - never
+    // re-derived from a prior POST response. `exportReviewVisible` is a
+    // distinct, preserved "restricted" state (server withheld it because
+    // this actor lacks export-review authority) - it must never be treated
+    // the same as "no export review requested yet".
+    exportReviewVisible: dto.exportReviewVisible === true,
+    exportReviewQueueItemId: typeof dto.exportReviewQueueItemId === "string" ? dto.exportReviewQueueItemId : null,
+    exportReviewQueueStatus: typeof dto.exportReviewQueueStatus === "string" ? dto.exportReviewQueueStatus : null,
+    exportReviewStatus: typeof dto.exportReviewStatus === "string" ? dto.exportReviewStatus : null,
     blocks: asArray(dto.blocks).map((block) => ({
       ordinal: block?.ordinal,
       text: block?.text,

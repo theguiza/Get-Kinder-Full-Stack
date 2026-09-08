@@ -208,6 +208,9 @@ test("P13-01 review-packet DTO contract accepts impact_narrative alongside evide
     reviewStatus: "needs_gk_review",
     reviewUpdatedAt: NOW,
     currentUseEligible: true,
+    exportReviewQueueItemId: null,
+    exportReviewQueueStatus: null,
+    exportReviewStatus: null,
     blocks: [{
       ordinal: 1,
       text: "Narrative text.",

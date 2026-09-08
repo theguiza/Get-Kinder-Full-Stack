@@ -517,6 +517,12 @@ test("P3-06 real packet reports resolved/resolved, exportEligible=false, draftSt
       if (s.includes("FROM kai.review_queue_items") && s.includes("target_object_type = $2") && s.includes("queue_type = $4")) {
         return { rows: [{ review_queue_item_id: "00000000-0000-4000-8000-000000000809", organization_id: ORG, queue_type: "generated_content_review", target_object_type: "generated_content_draft", target_object_id: DRAFT, priority: "medium", queue_status: "resolved", review_status: "resolved", assigned_to: null, due_at: null, summary: "Generated draft requires human review.", required_action: "Review citations, audience eligibility, limitations, unsupported claims, and numeric or causal assertions before any use." }] };
       }
+      if (s.includes("FROM kai.review_queue_items") && s.includes("queue_type = $2") && s.includes("target_object_type = $3")) {
+        const [organizationId, , , targetId] = params;
+        const row = state.queueRow;
+        const match = row && row.organization_id === organizationId && row.target_object_id === targetId;
+        return { rows: match ? [row] : [] };
+      }
       return baseTx.query(sql, params);
     },
   };

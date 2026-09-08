@@ -22508,3 +22508,157 @@ than expanded here beyond the smallest coherent link.
 
 **Local commit:** one bounded commit created after all required checks
 passed.
+
+## Generated Draft read-path export-review reload/reselection recovery
+
+**Date:** 2026-09-08
+
+**Owner authorization (bounded, local-only):** make an already-existing
+export review recoverable through the authoritative Generated Draft read
+path (`GET .../generated-content-drafts/:id/review-packet`) after reload or
+reselection, instead of only existing as in-memory state from the prior
+`export-review-request` POST response (lost on reload, and never durable
+across a draft reselection). No POST replay, no new page, route, schema, or
+export-governance path. Starting HEAD: `58c540bdb42989122cc0a295420bfa2e998262b2`
+(USER_CONFIRMED); working tree clean.
+
+**Authoritative cardinality (established, not assumed):** at most one
+`export_review` `kai.review_queue_items` row exists per
+(`organization_id`, `generated_content_draft_id`) - enforced by the existing
+`ux_review_queue_items_p3_05_export_review_identity` partial unique index
+(migration `kai_sprint2_p3_05_export_review_request.sql`), the same
+invariant `requestGeneratedDraftExportReview`'s own replay logic already
+relies on (`existingRows.length > 1` is treated as `conflict_current_state_changed`,
+never a pick). This is a genuine 1:0-or-1:1 relationship, never a
+latest/`LIMIT 1` guess: the new `loadExportReviewQueueRows`-backed read in
+`readReviewPacketState` reuses the exact existing query, and the new
+`validateExportReviewQueueRows` treats more than one row as `system_error`
+rather than selecting one.
+
+**Role-visibility finding:** the generated-content review packet
+(`getGeneratedDraftReviewPacket`, `GENERATED_CONTENT_REVIEW_ALLOWED_ROLES` =
+`gk_admin`+`gk_reviewer`) is readable by a broader role set than every
+export-review operation in `kaiExportReviewService.js`
+(`EXPORT_REVIEW_ALLOWED_ROLES` = `gk_admin` only, no `combineGlobalRoles`).
+Projecting export-review identity/state onto the shared packet unconditionally
+would have handed `gk_reviewer` passive visibility into export-review
+existence/state that the accepted architecture never grants that role
+anywhere else (an actual authorization-boundary weakening, not a display
+choice) - so this was not done. Instead, `getGeneratedDraftReviewPacket`
+now separately evaluates the actor against the identical
+`EXPORT_REVIEW_ALLOWED_ROLES` gate (`PROJECT_EXPORT_REVIEW_VISIBILITY_OPERATION`,
+imported from `kaiExportReviewService.js`'s own
+`__exportReviewServiceContract`, not re-declared) and forces the three
+export-review fields to `null` plus a new `exportReviewVisible: false` flag
+when the actor is not `gk_admin` - a distinct, preserved "restricted" state
+that the frontend never conflates with the real "no export review
+requested yet" absence (`exportReviewVisible: true`,
+`exportReviewQueueItemId: null`).
+
+**Read path (backend, no new route):**
+`Backend/kai/dictionary/postgresGeneratedContentRepository.js` -
+`readReviewPacketState` now also loads the export_review row via the
+existing `loadExportReviewQueueRows` (organization/queue_type/target-scoped,
+0 or 1 result), the new `validateExportReviewQueueRows` validates it
+against the existing `isExportReviewQueueContractRow` accepting all three
+`EXPORT_REVIEW_LIFECYCLE_PROFILES` (open/needs_gk_review,
+in_progress/needs_gk_review, resolved/resolved - the packet must reflect
+whichever state actually exists), and `toReviewPacket` now attaches
+`exportReviewQueueItemId`/`exportReviewQueueStatus`/`exportReviewStatus`
+(null when no row) to its existing 11-field DTO.
+`Backend/kai/services/kaiGeneratedContentService.js` extends `PACKET_KEYS`
+with the same three fields, extends `isGeneratedDraftReviewPacketDto`'s
+validation, and layers a new `isGeneratedDraftReviewPacketWithExportReviewVisibilityDto`
+(mirrors the existing P3-20 `...WithManifestDto` layering convention in
+`kaiExportReviewService.js`) around the actor-gated projection described
+above. `evaluateGeneratedDraftExportReviewPacketInTransaction` (the
+existing gk_admin-only full export-review packet) builds its own result by
+explicit field list, never a spread of the P3-02 packet, so it is
+unaffected by the new fields.
+
+**Frontend (no new page):** `frontend/impactEvidenceLibraryLogic.js`'s
+`projectGeneratedDraftPacket` carries the four new allowlisted fields
+straight from the read (never re-derived from any POST response); a new
+pure `generatedDraftExportReviewDisplayState`/`EXPORT_REVIEW_DISPLAY_STATES`
+classifies the packet into exactly `restricted`/`existing`/`requestable`/
+`not_requestable`. `frontend/ImpactEvidenceLibrary.jsx`'s Generated draft
+card now renders from this authoritative classification instead of the
+transient `exportReviewRequestResult`: an existing review shows its
+recovered state and the exact "Open GK Export Review" link (built from the
+packet's own `exportReviewQueueItemId`, not the POST body); "restricted"
+renders a preserved unavailable-for-role row; `requestExportReview`'s POST
+handler now calls the existing `refetchGeneratedDraftPacket` after an
+accepted request instead of retaining `result.body.data` as UI truth
+(`exportReviewRequestResult` is kept only for the blocked-request case,
+which creates no durable row to recover). Organization/draft-switch reset
+of `generatedDraftPacket` (pre-existing, unchanged) is the same mechanism
+that now also guarantees export-review identity can never leak across a
+switch, since it lives inside that same packet object.
+
+**Preserved:** GK-only Start Review/Complete Review/Prepare/Grant/Finalize
+authority is untouched (no role set, gate, or route was loosened); no
+schema/migration, new route, new page, or export-governance/manifest-
+semantics change exists anywhere in this diff.
+
+**Tests:** one new file,
+`__tests__/kai-sprint2-generated-draft-export-review-read-recovery-boundary.spec.js`
+(7 tests: gk_admin recovers an existing review's identity/state on a fresh
+read; gk_admin recovers a genuine zero-review state as null, not
+restricted; gk_reviewer never receives identity/state even when the row
+exists, forced null with `exportReviewVisible: false`; the service DTO
+rejects a repository result that fabricates export-review fields while
+claiming `exportReviewVisible: false`; the repository validator accepts 0
+or exactly 1 export_review row and rejects >1 as `system_error`; the
+frontend display-state classifier never conflates the four states;
+`projectGeneratedDraftPacket` defaults safely for a malformed/absent DTO) -
+all passing. Four existing coupled test files updated additively (fixture
+shape only - no assertion weakened or removed):
+`__tests__/kai-sprint2-p3-02-generated-draft-review-packet-boundary.spec.js`,
+`__tests__/kai-sprint2-p13-01-impact-narrative-boundary.spec.js`,
+`__tests__/kai-sprint2-p3-06-export-review-packet-boundary.spec.js`, and
+`__tests__/kai-sprint2-p3-13-export-review-completion-boundary.spec.js`
+(each gained the three new packet fields in its `dto()`/state fixtures and
+a fake-transaction query branch for the new export-review-row read; no
+existing assertion was changed or removed).
+
+**Verification:** `DATABASE_URL` set to a non-listening loopback sentinel
+for every Node/npm command (no database reached). New-package focused run
+(the new file) -> 7 passed, 0 failed. Directly affected regression run (all
+Generated Draft/export-review/export-manifest/Impact Library non-integration
+spec files, 541 tests across `kai-sprint2-p3-02-...`,
+`kai-sprint2-p3-06-...`, `kai-sprint2-p3-13-...`,
+`kai-sprint2-p13-01-...`, `kai-sprint2-impact-evidence-library.spec.js`,
+`kai-sprint2-impact-library-export-review-link-boundary.spec.js`,
+`kai-sprint2-generated-drafts-library.spec.js`, every
+`export-manifest-*`/`export-review-*` boundary/route/control spec, Package
+4 impact-library specs) -> 541 passed, 0 failed. Full repository suite
+(`npm test`) -> 3501 passed, 7 failed (the exact same 4 distinct
+pre-existing failures already confirmed present and unrelated to
+export/KAI code in every prior package in this track - `the child-file
+read model is tenant-scoped...`, `assembled production middleware and
+router enforce the batch-files collection contract`, `the direct
+file-detail service returns exactly the 15-field allowlist`, `assembled
+production middleware and router enforce the file-detail contract` - 0
+newly introduced failures), 61 skipped. `npm run build` (Vite) succeeded
+with no errors. `git diff --check` passed with no whitespace errors.
+
+**Final diff review:** confined to
+`Backend/kai/dictionary/postgresGeneratedContentRepository.js`,
+`Backend/kai/services/kaiGeneratedContentService.js`,
+`frontend/ImpactEvidenceLibrary.jsx`, `frontend/impactEvidenceLibraryLogic.js`,
+`public/js/bundles/entry.js` (Vite rebuild), one new test file, four
+additively-updated test files, and this ExecPlan. No route, schema,
+migration, or export-governance/manifest-semantics file was created or
+edited; no production database was accessed, mutated, or migrated; nothing
+was pushed or deployed.
+
+**Remaining work:** the durable identity is now recoverable only for
+`gk_admin` (the only role with export-review authority anywhere in the
+accepted architecture); surfacing export-review state in the Generated
+Drafts list view itself (rather than only inside the selected-draft packet
+card), composite exports (grant response packet, board summary), and
+whether persistent/reusable artifact handling is ever required all remain
+unstarted/NOT_CONFIRMED and were not invented here.
+
+**Local commit:** one bounded commit created after all required checks
+passed.

@@ -6,6 +6,10 @@
   import { buildKaiError } from "../errors/kaiErrors.js";
   import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationService.js";
   import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
+  import { EXPORT_REVIEW_LIFECYCLE_PROFILES } from "../dictionary/exportReviewQueueContract.js";
+  import { __exportReviewServiceContract } from "./kaiExportReviewService.js";
+
+  const { EXPORT_REVIEW_ALLOWED_ROLES } = __exportReviewServiceContract;
 
   const GENERATED_CONTENT_ALLOWED_ROLES = new Set(["gk_admin", "gk_operator", "gk_reviewer"]);
   const GENERATED_CONTENT_REVIEW_ALLOWED_ROLES = new Set(["gk_admin", "gk_reviewer"]);
@@ -13,6 +17,14 @@
   const CREATE_EVIDENCE_SUMMARY_OPERATION = "create_evidence_summary_draft";
   const CREATE_IMPACT_NARRATIVE_OPERATION = "create_impact_narrative_draft";
   const GET_GENERATED_DRAFT_REVIEW_PACKET_OPERATION = "get_generated_draft_review_packet";
+  // Determines only whether the actor may see the export-review identity/
+  // state this same read projects (below) - the identical role gate
+  // kaiExportReviewService.js's own read/request/start/complete export-
+  // review operations already enforce (gk_admin only, no combineGlobalRoles).
+  // This is deliberately NOT the operation gating the read itself (that
+  // remains GENERATED_CONTENT_REVIEW_ALLOWED_ROLES, unchanged) - it only
+  // decides which of the two allowlisted DTO shapes below is returned.
+  const PROJECT_EXPORT_REVIEW_VISIBILITY_OPERATION = "project_export_review_visibility_on_generated_draft_packet";
   const START_GENERATED_CONTENT_REVIEW_OPERATION = "start_generated_content_review";
   const COMPLETE_GENERATED_CONTENT_REVIEW_OPERATION = "complete_generated_content_review";
   const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -203,6 +215,9 @@
     "reviewStatus",
     "reviewUpdatedAt",
     "currentUseEligible",
+    "exportReviewQueueItemId",
+    "exportReviewQueueStatus",
+    "exportReviewStatus",
     "blocks",
   ]);
   const BLOCK_KEYS = new Set(["ordinal", "text", "citations"]);
@@ -239,6 +254,14 @@
     ].includes(`${data.queueStatus}/${data.reviewStatus}`)) return false;
     if (!isCanonicalUtcTimestamp(data.reviewUpdatedAt)) return false;
     if (typeof data.currentUseEligible !== "boolean") return false;
+    if (data.exportReviewQueueItemId === null) {
+      if (data.exportReviewQueueStatus !== null || data.exportReviewStatus !== null) return false;
+    } else {
+      if (!UUID_PATTERN.test(data.exportReviewQueueItemId)) return false;
+      if (!EXPORT_REVIEW_LIFECYCLE_PROFILES.some(
+        (profile) => data.exportReviewQueueStatus === profile.queueStatus && data.exportReviewStatus === profile.reviewStatus,
+      )) return false;
+    }
     if (!Array.isArray(data.blocks) || data.blocks.length < 1 || data.blocks.length > 20) return false;
     for (const [index, block] of data.blocks.entries()) {
       if (!hasExactKeys(block, BLOCK_KEYS)) return false;
@@ -258,6 +281,30 @@
       }
     }
     return true;
+  }
+
+  // Durable read recovery: the export-review identity/state toReviewPacket
+  // now attaches is only ever surfaced to an actor who independently holds
+  // export-review authority (the same EXPORT_REVIEW_ALLOWED_ROLES gate
+  // kaiExportReviewService.js's own read/request/start/complete operations
+  // enforce) - never to gk_reviewer, who may read this same packet but has
+  // no export-review authority anywhere else in the accepted architecture.
+  // When the actor lacks that authority, exportReviewVisible is false and
+  // the three export-review fields are forced null - a distinct,
+  // preserved "restricted" state, never conflated with the real "no export
+  // review requested yet" absence.
+  const PACKET_WITH_EXPORT_REVIEW_VISIBILITY_KEYS = new Set([...PACKET_KEYS, "exportReviewVisible"]);
+
+  function isGeneratedDraftReviewPacketWithExportReviewVisibilityDto(data) {
+    if (!hasExactKeys(data, PACKET_WITH_EXPORT_REVIEW_VISIBILITY_KEYS)) return false;
+    if (typeof data.exportReviewVisible !== "boolean") return false;
+    if (!data.exportReviewVisible) {
+      if (data.exportReviewQueueItemId !== null || data.exportReviewQueueStatus !== null || data.exportReviewStatus !== null) {
+        return false;
+      }
+    }
+    const { exportReviewVisible, ...innerPacket } = data;
+    return isGeneratedDraftReviewPacketDto(innerPacket);
   }
 
   export async function getGeneratedDraftReviewPacket(input, dependencies = {}) {
@@ -288,6 +335,14 @@
       return buildKaiError("tenant_boundary_violation", { blockers: [tenant], data: null });
     }
 
+    const exportReviewAuth = validateActorCanPerformOperation(
+      input.actorContext,
+      PROJECT_EXPORT_REVIEW_VISIBILITY_OPERATION,
+      input.organizationId,
+      { allowedRoles: EXPORT_REVIEW_ALLOWED_ROLES },
+    );
+    const exportReviewVisible = exportReviewAuth.ok;
+
     const repository =
       dependencies.generatedContentRepository || (await createDefaultGeneratedContentRepository());
     const result = await repository.getGeneratedDraftReviewPacket({
@@ -296,7 +351,18 @@
     });
     if (!result.ok) return buildKaiError(result.error.code, { status: result.error.status, data: null });
     if (!isGeneratedDraftReviewPacketDto(result.data)) return buildKaiError("system_error", { data: null });
-    return { ok: true, data: result.data, error: null };
+
+    const projected = {
+      ...result.data,
+      exportReviewVisible,
+      exportReviewQueueItemId: exportReviewVisible ? result.data.exportReviewQueueItemId : null,
+      exportReviewQueueStatus: exportReviewVisible ? result.data.exportReviewQueueStatus : null,
+      exportReviewStatus: exportReviewVisible ? result.data.exportReviewStatus : null,
+    };
+    if (!isGeneratedDraftReviewPacketWithExportReviewVisibilityDto(projected)) {
+      return buildKaiError("system_error", { data: null });
+    }
+    return { ok: true, data: projected, error: null };
   }
 
   export async function startGeneratedContentReview(input, dependencies = {}) {
@@ -374,6 +440,7 @@
     CREATE_EVIDENCE_SUMMARY_OPERATION,
     CREATE_IMPACT_NARRATIVE_OPERATION,
     GET_GENERATED_DRAFT_REVIEW_PACKET_OPERATION,
+    PROJECT_EXPORT_REVIEW_VISIBILITY_OPERATION,
     START_GENERATED_CONTENT_REVIEW_OPERATION,
     COMPLETE_GENERATED_CONTENT_REVIEW_OPERATION,
     ALLOWED_GENERATED_CONTENT_TYPES,
@@ -381,6 +448,7 @@
 
   export const __generatedContentReviewPacketServiceTestables = Object.freeze({
     isGeneratedDraftReviewPacketDto,
+    isGeneratedDraftReviewPacketWithExportReviewVisibilityDto,
     isGeneratedDraftReviewPacketInput,
   });
 

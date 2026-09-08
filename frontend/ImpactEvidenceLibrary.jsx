@@ -32,8 +32,10 @@ import {
   evidenceReviewDecisionBody,
   evidenceReviewDecisionValidationError,
   canRequestGeneratedDraftExportReview,
+  EXPORT_REVIEW_DISPLAY_STATES,
   exportReviewRequestBody,
   exportReviewRequestPath,
+  generatedDraftExportReviewDisplayState,
   gkExportReviewDetailPagePath,
   projectExportReviewRequestResult,
   generatedContentReviewCompletePath,
@@ -896,13 +898,23 @@ export default function ImpactEvidenceLibrary() {
       exportReviewRequestPath(organizationId, generatedDraftPacket.generatedContentDraftId),
       exportReviewRequestBody(generatedDraftPacket.requestedAudience),
     );
-    setExportReviewRequestPending(false);
     if (result.statusCode !== 200 && result.statusCode !== 201) {
+      setExportReviewRequestPending(false);
       setMessage(errorText(result));
       return;
     }
-    setExportReviewRequestResult(projectExportReviewRequestResult(result.body?.data));
-  }, [generatedDraftPacket, organizationId, exportReviewRequestPending]);
+    const projected = projectExportReviewRequestResult(result.body?.data);
+    if (projected?.accepted) {
+      // The durable identity now comes from the authoritative Generated
+      // Draft read path (refetched below), never retained from this POST
+      // response as UI truth.
+      setExportReviewRequestResult(null);
+      await refetchGeneratedDraftPacket(generatedDraftPacket.generatedContentDraftId);
+    } else {
+      setExportReviewRequestResult(projected);
+    }
+    setExportReviewRequestPending(false);
+  }, [generatedDraftPacket, organizationId, exportReviewRequestPending, refetchGeneratedDraftPacket]);
 
   const runExtractEvidence = useCallback(async () => {
     if (!organizationId || !sourceVersionId || workflowPending) return;
@@ -2331,7 +2343,25 @@ export default function ImpactEvidenceLibrary() {
                   Complete Review
                 </button>
               ) : null}
-              {canRequestGeneratedDraftExportReview(generatedDraftPacket) ? (
+              {generatedDraftExportReviewDisplayState(generatedDraftPacket) === EXPORT_REVIEW_DISPLAY_STATES.existing ? (
+                <>
+                  <ValueRow
+                    label="Export review state"
+                    value={`${generatedDraftPacket.exportReviewQueueStatus} / ${generatedDraftPacket.exportReviewStatus}`}
+                  />
+                  <a
+                    className="btn btn-sm btn-outline-secondary mt-2"
+                    href={gkExportReviewDetailPagePath(
+                      organizationId,
+                      generatedDraftPacket.generatedContentDraftId,
+                      generatedDraftPacket.exportReviewQueueItemId,
+                    )}
+                  >
+                    Open GK Export Review
+                  </a>
+                </>
+              ) : null}
+              {generatedDraftExportReviewDisplayState(generatedDraftPacket) === EXPORT_REVIEW_DISPLAY_STATES.requestable ? (
                 <button
                   type="button"
                   className="btn btn-sm btn-outline-primary mt-2"
@@ -2341,17 +2371,8 @@ export default function ImpactEvidenceLibrary() {
                   Request Export Review
                 </button>
               ) : null}
-              {exportReviewRequestResult?.accepted && exportReviewRequestResult.exportReviewQueueItemId ? (
-                <a
-                  className="btn btn-sm btn-outline-secondary mt-2 ms-2"
-                  href={gkExportReviewDetailPagePath(
-                    organizationId,
-                    generatedDraftPacket.generatedContentDraftId,
-                    exportReviewRequestResult.exportReviewQueueItemId,
-                  )}
-                >
-                  Open GK Export Review
-                </a>
+              {generatedDraftExportReviewDisplayState(generatedDraftPacket) === EXPORT_REVIEW_DISPLAY_STATES.restricted ? (
+                <ValueRow label="Export review" value="Unavailable for your role" />
               ) : null}
               {exportReviewRequestResult && !exportReviewRequestResult.accepted ? (
                 <ValueRow
