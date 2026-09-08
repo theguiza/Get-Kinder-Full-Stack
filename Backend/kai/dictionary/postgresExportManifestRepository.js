@@ -191,6 +191,40 @@ export async function loadExportManifestIdentityForReviewQueueItemInTransaction(
   return { exportManifestId: rows[0].export_manifest_id };
 }
 
+// Exact export-manifest history (read-model cardinality repair): a review
+// item may legitimately back MULTIPLE historical manifests (see the
+// accepted FUNCTIONAL_DEPENDENCY_PROOF/DIRECT_MANIFEST_REVIEW_BINDING
+// model, proven for real by the P3-20 revoke/re-grant integration case).
+// This function returns every one of them - never LIMIT 1, never a
+// latest/current/active selection, never dropping a row because more than
+// one exists. `created_at ASC, export_manifest_id ASC` is presentation
+// ordering only; it does not mark any entry as current.
+function isLoadExportManifestHistoryInput(input) {
+  return hasExactKeys(input, new Set(["organizationId", "exportReviewQueueItemId"]))
+    && UUID_PATTERN.test(input.organizationId)
+    && UUID_PATTERN.test(input.exportReviewQueueItemId);
+}
+
+export async function loadExportManifestHistoryForReviewQueueItemInTransaction(tx, input) {
+  if (!isLoadExportManifestHistoryInput(input)) return { exportManifestHistory: [] };
+  const { rows } = await tx.query(
+    `SELECT export_manifest_id::text AS export_manifest_id,
+            export_candidate_id::text AS export_candidate_id,
+            created_at
+       FROM kai.export_manifests
+      WHERE organization_id = $1::uuid AND export_review_queue_item_id = $2::uuid
+      ORDER BY created_at ASC, export_manifest_id ASC`,
+    [input.organizationId, input.exportReviewQueueItemId],
+  );
+  return {
+    exportManifestHistory: rows.map((row) => ({
+      exportManifestId: row.export_manifest_id,
+      exportCandidateId: row.export_candidate_id,
+      createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at,
+    })),
+  };
+}
+
 export function createPostgresExportManifestRepository({ runInTransaction = withTransaction } = {}) {
   return Object.freeze({
     async createExportManifest(input, dependencies = {}) {
@@ -310,4 +344,5 @@ export const __exportManifestRepositoryTestables = Object.freeze({
   isCreateExportManifestInput,
   canonicalFingerprint,
   isLoadExportManifestIdentityInput,
+  isLoadExportManifestHistoryInput,
 });

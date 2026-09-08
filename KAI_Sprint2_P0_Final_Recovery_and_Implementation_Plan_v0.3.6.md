@@ -21485,3 +21485,126 @@ Markdown delivery path. The next, still-undertaken dependency is broader
 UI/UX polish around the disclosed multi-manifest-per-review-item edge case
 (currently: no recovery, not an error) - explicitly out of scope here and
 not started.
+
+## Exact Export Manifest History Read Model
+
+**Date:** 2026-09-08
+
+**Owner authorization (bounded, local-only, backend-only):** the prior
+package's `loadExportManifestIdentityForReviewQueueItemInTransaction`
+correctly refuses to guess between multiple legitimate historical manifests
+for one review item, but it does so by discarding the entire 2+ case down to
+`null` - collapsing the accepted P3-20 one-review-item-to-many-manifests
+cardinality into an exactly-one-or-none read. This package repairs that
+read-model cardinality: it does not touch persistence, the P3-20 write path,
+or any P3-16 through P3-19 semantics. Authorized: repository preflight, a
+minimal manifest repository read addition, an export-review packet/service
+DTO change, focused backend tests, directly affected regressions, this
+ExecPlan update, `git diff` inspection, and one bounded local commit. Not
+authorized: schema/migration changes, P3-20 write changes, P3-16 through
+P3-19 semantic changes, frontend/UI changes, production access, push/deploy,
+PDF/DOCX/CSV/storage, or Current State/Baseline changes.
+
+**Starting repository evidence:** branch `main`, HEAD
+`75754819ccbf77b0e846e7288c23d4a65f88d549` (the exact commit the prior
+Durable Export Finalization Recovery + UI Closure package produced), working
+tree clean.
+
+**Read-model design decision:** added
+`loadExportManifestHistoryForReviewQueueItemInTransaction` to
+`Backend/kai/dictionary/postgresExportManifestRepository.js`, querying the
+same exact P3-20 FK'd columns (`organization_id`,
+`export_review_queue_item_id`) as the existing singular lookup, but
+returning **every** matching row - `0 -> []`, `1 -> [A]`, `N -> all N`- with
+no `LIMIT`, no `latest`/`current`/`active`/`preferred` flag, and no
+`MAX(created_at)`. Each entry carries only safe, already-persisted metadata
+useful for later history presentation: `exportManifestId`,
+`exportCandidateId`, `createdAt` - no fingerprint, authority, audit, raw
+content, storage path, or credential field is exposed. Rows are ordered
+`created_at ASC, export_manifest_id ASC` for stable presentation only; this
+ordering never confers currentness, and no entry is ever dropped because
+more than one row matched. The existing singular
+`loadExportManifestIdentityForReviewQueueItemInTransaction` (0 -> null,
+1 -> exact id, 2+ -> null) is unchanged and kept only as a backend
+compatibility field for the existing, unmodified frontend read path - it is
+no longer the authoritative shape.
+
+**Backend:** `Backend/kai/services/kaiExportReviewService.js`'s
+`getGeneratedDraftExportReviewPacket` now also runs the new history lookup,
+in the exact same `REPEATABLE READ READ ONLY` transaction as the existing,
+unmodified packet composer and the existing singular manifest-identity
+lookup, and only once the packet composition itself succeeds. The projected
+packet DTO gains one new, authoritative, plural field,
+`exportManifestHistory` (validated by a new `isExportManifestHistoryDto`/
+`isExportManifestHistoryEntryDto` pair, composed into the existing
+`isGeneratedDraftExportReviewPacketWithManifestDto`), alongside the
+unchanged, now-compatibility-only `exportManifestId` field. No frontend file
+was read for behavior or modified; the existing frontend read path is
+unaffected because `exportManifestId` retains its exact prior semantics.
+
+**Tests:** `__tests__/kai-sprint2-durable-export-manifest-read-recovery-boundary.spec.js`
+gained repository-level coverage for `loadExportManifestHistoryForReviewQueueItemInTransaction`
+(0/1/2/3-row cases, stable ordering, Date-to-ISO conversion, malformed-input
+short-circuit, and a source-scan proving no `LIMIT 1`/`MAX(created_at)`/
+`ORDER BY ... DESC` selection exists in the new query) and service-level
+composition coverage (`exportManifestHistory` present alongside the
+compatibility `exportManifestId`, both fields skipped when the underlying
+packet composition fails, cross-tenant scoping, and DTO-shape rejection of a
+malformed history array/entry).
+`__tests__/kai-sprint2-durable-export-manifest-read-recovery.integration.spec.js`
+gained a real-database case that revokes then re-grants export authority on
+the same candidate (as the existing P3-20 integration suite already proves
+is legitimate) and asserts the resulting packet's `exportManifestHistory`
+contains **both** distinct manifests in stable order, while the
+compatibility `exportManifestId` correctly collapses to `null` for that same
+2-manifest case; cross-tenant and two-independent-candidate cases were
+extended with matching history assertions.
+`__tests__/kai-sprint2-p3-06-export-review-packet-boundary.spec.js`'s two
+existing pinned call-log/shape tests were extended to also supply and assert
+the new `loadManifestHistory` dependency (mirroring the exact pattern the
+prior package used for `loadManifestIdentity`).
+
+**Verification:** `DATABASE_URL=postgres://sentinel:sentinel@127.0.0.1:1/sentinel_do_not_connect`
+for every Node/npm command (no database was reached). Focused run
+(`kai-sprint2-durable-export-manifest-read-recovery-boundary.spec.js`,
+`kai-sprint2-durable-export-manifest-read-recovery.integration.spec.js`,
+`kai-sprint2-p3-06-export-review-packet-boundary.spec.js`,
+`kai-sprint2-p3-06-export-review-packet.integration.spec.js`,
+`kai-sprint2-p3-07-export-review-packet-route.spec.js`,
+`kai-sprint2-p3-20-export-manifest-review-binding.integration.spec.js`) ->
+47 passed, 0 failed, 3 skipped (the runner-owned-database integration cases,
+skipped without that separately authorized database target, as expected).
+Directly affected regression run
+(`kai-sprint2-authorized-markdown-export-delivery-route.spec.js`,
+`kai-sprint2-governed-export-finalization-route.spec.js`,
+`kai-sprint2-p3-export-operational-composition-route.spec.js`,
+`kai-sprint2-p3-05-export-review-request-boundary.spec.js`,
+`kai-sprint2-p3-09-export-review-start-boundary.spec.js`,
+`kai-sprint2-p3-13-export-review-completion-boundary.spec.js`,
+`kai-sprint2-p3-18-assembled-pre-artifact-release-proof.spec.js`) -> 116
+passed, 0 failed. Full repository suite (`npm test`) -> 3408 passed, 7
+failed (the exact same 4 distinct pre-existing failures already confirmed
+present and unrelated to export/KAI code in every prior package in this
+track - `the child-file read model is tenant-scoped...`, `assembled
+production middleware and router enforce the batch-files collection
+contract`, `the direct file-detail service returns exactly the 15-field
+allowlist`, `assembled production middleware and router enforce the
+file-detail contract` - 0 newly introduced failures), 61 skipped. `git diff
+--check` passed.
+
+**Final diff review:** confined to
+`Backend/kai/dictionary/postgresExportManifestRepository.js`,
+`Backend/kai/services/kaiExportReviewService.js`, three updated test files,
+and this ExecPlan. No schema or migration file was created or edited; no
+frontend/UI file, route, feature flag, cloud configuration, Current State,
+Implementation Baseline, credential/secret, or artifact-persistence/storage
+change was made; no PDF/DOCX/CSV path exists anywhere in this diff. No
+production database was accessed, mutated, or migrated; nothing was pushed
+or deployed.
+
+**Remaining work:** the existing GK export-review frontend does not yet read
+or render `exportManifestHistory` - it still reads only the compatibility
+`exportManifestId` field, unaffected by this package. Surfacing the full
+history in the UI (the disclosed multi-manifest-per-review-item edge case)
+is the deferred next dependency this package makes possible - explicitly not
+implemented here, per owner authorization scope.

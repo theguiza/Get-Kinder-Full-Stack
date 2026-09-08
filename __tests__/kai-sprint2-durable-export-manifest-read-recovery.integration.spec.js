@@ -287,6 +287,7 @@ async function runReadRecoverySuite() {
     const before = await fetchPacket(seed);
     assert.equal(before.ok, true, JSON.stringify(before));
     assert.equal(before.data.exportManifestId, null);
+    assert.deepEqual(before.data.exportManifestHistory, []);
 
     const grant = await humanAuthorityDecisionRepository.recordDecision({
       organizationId: ORG, exportCandidateId: seed.exportCandidateId, decisionType: "export_authority_granted",
@@ -314,6 +315,7 @@ async function runReadRecoverySuite() {
     const afterFirstReload = await fetchPacket(seed);
     assert.equal(afterFirstReload.ok, true, JSON.stringify(afterFirstReload));
     assert.equal(afterFirstReload.data.exportManifestId, finalized.data.exportManifestId);
+    assert.deepEqual(afterFirstReload.data.exportManifestHistory.map((entry) => entry.exportManifestId), [finalized.data.exportManifestId]);
 
     // A second, independent "later return" fetch recovers the exact same
     // identity again - historical identity is never silently replaced.
@@ -326,6 +328,66 @@ async function runReadRecoverySuite() {
     const result = await fetchPacket(seed);
     assert.equal(result.ok, true, JSON.stringify(result));
     assert.equal(result.data.exportManifestId, null);
+    assert.deepEqual(result.data.exportManifestHistory, []);
+  });
+
+  test("2 legitimate manifests on the SAME review item (revoke then re-grant): exportManifestId collapses to null, but exportManifestHistory returns BOTH, in stable created_at order", async () => {
+    const seed = await seedFullExportCandidatePipeline();
+    const REVOKE_AT = "2026-09-08T11:20:00.000Z";
+    const RE_GRANT_AT = "2026-09-08T11:25:00.000Z";
+
+    const grant = await humanAuthorityDecisionRepository.recordDecision({
+      organizationId: ORG, exportCandidateId: seed.exportCandidateId, decisionType: "export_authority_granted",
+      decisionAction: "grant", requestedAudience: "internal", actorContext: gkAdmin, now: GRANT_AT,
+    }, { metadataOnlyAudit: auditRecorder() });
+    assert.equal(grant.ok, true, JSON.stringify(grant));
+
+    const first = await exportManifestRepository.createExportManifest(
+      { organizationId: ORG, exportCandidateId: seed.exportCandidateId, exportReviewQueueItemId: seed.exportReviewQueueItemId, actorContext: gkAdmin, now: GRANT_AT },
+      {
+        metadataOnlyAudit: createProductionMetadataOnlyAuditForExportManifest({ organizationId: ORG, exportCandidateId: seed.exportCandidateId, actorContext: gkAdmin, now: GRANT_AT }),
+        evaluator: currentUseEvaluator(seed.evidenceId, { eligible: true }),
+      },
+    );
+    assert.equal(first.ok, true, JSON.stringify(first));
+
+    const revoke = await humanAuthorityDecisionRepository.recordDecision({
+      organizationId: ORG, exportCandidateId: seed.exportCandidateId, decisionType: "export_authority_granted",
+      decisionAction: "revoke", requestedAudience: "internal", actorContext: gkAdmin, now: REVOKE_AT,
+    }, { metadataOnlyAudit: auditRecorder() });
+    assert.equal(revoke.ok, true);
+
+    const regrant = await humanAuthorityDecisionRepository.recordDecision({
+      organizationId: ORG, exportCandidateId: seed.exportCandidateId, decisionType: "export_authority_granted",
+      decisionAction: "grant", requestedAudience: "internal", actorContext: gkAdmin, now: RE_GRANT_AT,
+    }, { metadataOnlyAudit: auditRecorder() });
+    assert.equal(regrant.ok, true);
+
+    const second = await exportManifestRepository.createExportManifest(
+      { organizationId: ORG, exportCandidateId: seed.exportCandidateId, exportReviewQueueItemId: seed.exportReviewQueueItemId, actorContext: gkAdmin, now: RE_GRANT_AT },
+      {
+        metadataOnlyAudit: createProductionMetadataOnlyAuditForExportManifest({ organizationId: ORG, exportCandidateId: seed.exportCandidateId, actorContext: gkAdmin, now: RE_GRANT_AT }),
+        evaluator: currentUseEvaluator(seed.evidenceId, { eligible: true }),
+      },
+    );
+    assert.equal(second.ok, true, JSON.stringify(second));
+    assert.notEqual(second.data.exportManifestId, first.data.exportManifestId);
+
+    const result = await fetchPacket(seed);
+    assert.equal(result.ok, true, JSON.stringify(result));
+    // Two legitimate manifests for one review item: the compatibility
+    // singular field intentionally collapses to null (never a guess), but
+    // the authoritative plural history drops NEITHER row.
+    assert.equal(result.data.exportManifestId, null);
+    assert.equal(result.data.exportManifestHistory.length, 2);
+    assert.deepEqual(
+      result.data.exportManifestHistory.map((entry) => entry.exportManifestId),
+      [first.data.exportManifestId, second.data.exportManifestId],
+      "history must be ordered by created_at ASC (first grant, then re-grant) - never latest-first, never dropped",
+    );
+    for (const entry of result.data.exportManifestHistory) {
+      assert.equal(entry.exportCandidateId, seed.exportCandidateId);
+    }
   });
 
   test("a cross-tenant read leaks no manifest identity", async () => {
@@ -347,13 +409,23 @@ async function runReadRecoverySuite() {
     // The real repository lookup, called directly with a different
     // organizationId (as a cross-tenant packet fetch would), must find
     // nothing - the manifest belongs to ORG, not OTHER_ORG.
-    const { loadExportManifestIdentityForReviewQueueItemInTransaction } = await import("../Backend/kai/dictionary/postgresExportManifestRepository.js");
+    const {
+      loadExportManifestIdentityForReviewQueueItemInTransaction,
+      loadExportManifestHistoryForReviewQueueItemInTransaction,
+    } = await import("../Backend/kai/dictionary/postgresExportManifestRepository.js");
     const leaked = await withRunnerOwnedTransaction((tx) =>
       loadExportManifestIdentityForReviewQueueItemInTransaction(tx, {
         organizationId: OTHER_ORG,
         exportReviewQueueItemId: seed.exportReviewQueueItemId,
       }));
     assert.equal(leaked.exportManifestId, null, "a cross-tenant lookup must never return a real manifest id belonging to a different organization");
+
+    const leakedHistory = await withRunnerOwnedTransaction((tx) =>
+      loadExportManifestHistoryForReviewQueueItemInTransaction(tx, {
+        organizationId: OTHER_ORG,
+        exportReviewQueueItemId: seed.exportReviewQueueItemId,
+      }));
+    assert.deepEqual(leakedHistory.exportManifestHistory, [], "a cross-tenant history lookup must never return manifests belonging to a different organization");
   });
 
   test("a real, unambiguous single manifest per review item is recovered for a second, independent candidate - no shared/cross-candidate state", async () => {
@@ -390,5 +462,7 @@ async function runReadRecoverySuite() {
     const packetB = await fetchPacket(seedB);
     assert.equal(packetA.data.exportManifestId, finalizedA.data.exportManifestId);
     assert.equal(packetB.data.exportManifestId, finalizedB.data.exportManifestId);
+    assert.deepEqual(packetA.data.exportManifestHistory.map((entry) => entry.exportManifestId), [finalizedA.data.exportManifestId]);
+    assert.deepEqual(packetB.data.exportManifestHistory.map((entry) => entry.exportManifestId), [finalizedB.data.exportManifestId]);
   });
 }

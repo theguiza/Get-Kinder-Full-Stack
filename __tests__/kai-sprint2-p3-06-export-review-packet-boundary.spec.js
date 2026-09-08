@@ -351,12 +351,18 @@ test("P3-06 service runs both shared evaluators, and the P3-20 durable-recovery 
       assert.deepEqual(seenInput, { organizationId: ORG, exportReviewQueueItemId: EXPORT_REVIEW_QUEUE });
       return { exportManifestId: null };
     },
+    loadManifestHistory: async (seenTx, seenInput) => {
+      calls.push("loadManifestHistory");
+      assert.equal(seenTx, tx);
+      assert.deepEqual(seenInput, { organizationId: ORG, exportReviewQueueItemId: EXPORT_REVIEW_QUEUE });
+      return { exportManifestHistory: [] };
+    },
   });
   assert.equal(result.ok, true);
-  assert.deepEqual(calls, ["SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY", "evaluatePacket", "loadManifestIdentity"]);
+  assert.deepEqual(calls, ["SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY", "evaluatePacket", "loadManifestIdentity", "loadManifestHistory"]);
 });
 
-test("P3-06 service never runs the P3-20 manifest-identity lookup when the packet composition itself fails - no separate best-effort follow-up", async () => {
+test("P3-06 service never runs the P3-20 manifest-identity or manifest-history lookups when the packet composition itself fails - no separate best-effort follow-up", async () => {
   const calls = [];
   const tx = { async query(sql) { calls.push(sql); return { rows: [] }; } };
   const result = await getGeneratedDraftExportReviewPacket(input(), {
@@ -365,6 +371,7 @@ test("P3-06 service never runs the P3-20 manifest-identity lookup when the packe
     evaluatePacket: async () => { calls.push("evaluatePacket"); return { ok: false, error: { code: "not_found" } }; },
     evaluator,
     loadManifestIdentity: async () => { throw new Error("must not call"); },
+    loadManifestHistory: async () => { throw new Error("must not call"); },
   });
   assert.equal(result.ok, false);
   assert.deepEqual(calls, ["SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY", "evaluatePacket"]);
@@ -562,10 +569,12 @@ test("P3-11 an authentic exportReviewUpdatedAt still passes the full service DTO
     evaluatePacket: evaluateGeneratedDraftExportReviewPacketInTransaction,
     evaluator: evaluator(state),
     loadManifestIdentity: async () => ({ exportManifestId: null }),
+    loadManifestHistory: async () => ({ exportManifestHistory: [] }),
   });
   assert.equal(result.ok, true);
   assert.equal(result.data.exportReviewUpdatedAt, "2026-08-06T09:00:00.000Z");
   assert.equal(result.data.exportManifestId, null);
+  assert.deepEqual(result.data.exportManifestHistory, []);
 });
 
 test("P3-06 read path has no write, audit publication, queue transition, authority, final gate, manifest, file, route, UI, or listener wiring", () => {

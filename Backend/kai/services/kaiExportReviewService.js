@@ -127,12 +127,14 @@ async function createDefaultExportReviewPacketDependencies() {
   );
   const {
     loadExportManifestIdentityForReviewQueueItemInTransaction,
+    loadExportManifestHistoryForReviewQueueItemInTransaction,
   } = await import("../dictionary/postgresExportManifestRepository.js");
   return {
     runInTransaction: withTransaction,
     evaluatePacket: evaluateGeneratedDraftExportReviewPacketInTransaction,
     evaluator: evaluateClaimTraceabilityInTransaction,
     loadManifestIdentity: loadExportManifestIdentityForReviewQueueItemInTransaction,
+    loadManifestHistory: loadExportManifestHistoryForReviewQueueItemInTransaction,
   };
 }
 
@@ -259,22 +261,46 @@ function isValidatorResultDto(value, generatedContentDraftId) {
 }
 
 // Durable read recovery (P3-20 binding): the packet this page loads on
-// mount/reload gains exactly one new, optional field beyond the accepted
+// mount/reload gains one new, optional field beyond the accepted
 // EXPORT_REVIEW_PACKET_KEYS shape - exportManifestId - populated only from
 // the exact P3-20 FK'd relationship, never re-derived, never a latest/
 // current/timestamp selection. It is null whenever no exact single
 // governed finalization is recoverable for this review item (none exists
 // yet, or more than one exists and picking between them is not this
-// package's decision to make).
+// package's decision to make). It is kept, unchanged, only for backend
+// compatibility with the existing frontend read path (not modified by this
+// package) - it is NOT authoritative history.
+//
+// Exact export-manifest history (read-model cardinality repair): the
+// authoritative field is the plural exportManifestHistory - every manifest
+// legitimately bound to this review item, in presentation order only
+// (created_at ASC, exportManifestId ASC - never a currentness signal).
+// 0 manifests -> []; N manifests -> all N exact identities. No entry is
+// ever dropped because more than one exists.
+const EXPORT_MANIFEST_HISTORY_ENTRY_KEYS = new Set(["exportManifestId", "exportCandidateId", "createdAt"]);
+
+function isExportManifestHistoryEntryDto(entry) {
+  if (!hasExactKeys(entry, EXPORT_MANIFEST_HISTORY_ENTRY_KEYS)) return false;
+  if (!UUID_PATTERN.test(entry.exportManifestId)) return false;
+  if (!UUID_PATTERN.test(entry.exportCandidateId)) return false;
+  return isCanonicalUtcTimestamp(entry.createdAt);
+}
+
+function isExportManifestHistoryDto(value) {
+  return Array.isArray(value) && value.every(isExportManifestHistoryEntryDto);
+}
+
 const EXPORT_REVIEW_PACKET_WITH_MANIFEST_KEYS = new Set([
   ...EXPORT_REVIEW_PACKET_KEYS,
   "exportManifestId",
+  "exportManifestHistory",
 ]);
 
 function isGeneratedDraftExportReviewPacketWithManifestDto(data) {
   if (!hasExactKeys(data, EXPORT_REVIEW_PACKET_WITH_MANIFEST_KEYS)) return false;
   if (!(data.exportManifestId === null || UUID_PATTERN.test(data.exportManifestId))) return false;
-  const { exportManifestId, ...innerPacket } = data;
+  if (!isExportManifestHistoryDto(data.exportManifestHistory)) return false;
+  const { exportManifestId, exportManifestHistory, ...innerPacket } = data;
   return isGeneratedDraftExportReviewPacketDto(innerPacket);
 }
 
@@ -422,15 +448,18 @@ export async function getGeneratedDraftExportReviewPacket(input, dependencies = 
   const needsDefaults = !dependencies.runInTransaction
     || !dependencies.evaluatePacket
     || !dependencies.evaluator
-    || !dependencies.loadManifestIdentity;
+    || !dependencies.loadManifestIdentity
+    || !dependencies.loadManifestHistory;
   const defaults = needsDefaults ? await createDefaultExportReviewPacketDependencies() : null;
   const runInTransaction = dependencies.runInTransaction || defaults.runInTransaction;
   const evaluatePacket = dependencies.evaluatePacket || defaults.evaluatePacket;
   const evaluator = dependencies.evaluator || defaults.evaluator;
   const loadManifestIdentity = dependencies.loadManifestIdentity || defaults.loadManifestIdentity;
+  const loadManifestHistory = dependencies.loadManifestHistory || defaults.loadManifestHistory;
 
   let packetResult;
   let manifestIdentity;
+  let manifestHistory;
   try {
     packetResult = await runInTransaction(async (tx) => {
       await tx.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY");
@@ -448,6 +477,13 @@ export async function getGeneratedDraftExportReviewPacket(input, dependencies = 
         organizationId: input.organizationId,
         exportReviewQueueItemId: input.exportReviewQueueItemId,
       });
+      // Exact export-manifest history (read-model cardinality repair): same
+      // read-only transaction, same reachability rule as manifestIdentity
+      // above - every legitimate historical manifest, never a guess.
+      manifestHistory = await loadManifestHistory(tx, {
+        organizationId: input.organizationId,
+        exportReviewQueueItemId: input.exportReviewQueueItemId,
+      });
       return inner;
     });
   } catch (error) {
@@ -461,7 +497,11 @@ export async function getGeneratedDraftExportReviewPacket(input, dependencies = 
   if (!isGeneratedDraftExportReviewPacketDto(packetResult.data)) {
     return buildKaiError("system_error", { data: null });
   }
-  const projected = { ...packetResult.data, exportManifestId: manifestIdentity?.exportManifestId ?? null };
+  const projected = {
+    ...packetResult.data,
+    exportManifestId: manifestIdentity?.exportManifestId ?? null,
+    exportManifestHistory: manifestHistory?.exportManifestHistory ?? [],
+  };
   if (!isGeneratedDraftExportReviewPacketWithManifestDto(projected)) {
     return buildKaiError("system_error", { data: null });
   }
@@ -485,6 +525,7 @@ export const __exportReviewServiceTestables = Object.freeze({
   isRequestExportReviewResultDto,
   isGeneratedDraftExportReviewPacketDto,
   isGeneratedDraftExportReviewPacketWithManifestDto,
+  isExportManifestHistoryDto,
   isStartExportReviewResultDto,
   isCompleteExportReviewResultDto,
 });
