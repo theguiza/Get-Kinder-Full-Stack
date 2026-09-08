@@ -129,9 +129,10 @@ async function insertExportManifest(tx, { manifestId, input, effectiveAuthorityD
     `INSERT INTO kai.export_manifests (
        export_manifest_id, organization_id, export_candidate_id,
        effective_authority_decision_id, effective_authority_decision_type,
-       fingerprint_contract_version, canonical_fingerprint, created_by, created_by_type, created_at
+       fingerprint_contract_version, canonical_fingerprint, export_review_queue_item_id,
+       created_by, created_by_type, created_at
      )
-     VALUES ($1::uuid,$2::uuid,$3::uuid,$4::uuid,'export_authority_granted',$5,$6,$7::uuid,'human',$8::timestamptz)
+     VALUES ($1::uuid,$2::uuid,$3::uuid,$4::uuid,'export_authority_granted',$5,$6,$7::uuid,$8::uuid,'human',$9::timestamptz)
      ON CONFLICT (organization_id, export_candidate_id, canonical_fingerprint) DO NOTHING
      RETURNING export_manifest_id::text AS export_manifest_id`,
     [
@@ -141,6 +142,7 @@ async function insertExportManifest(tx, { manifestId, input, effectiveAuthorityD
       effectiveAuthorityDecisionId,
       EXPORT_MANIFEST_FINGERPRINT_CONTRACT_VERSION,
       fingerprint,
+      input.exportReviewQueueItemId,
       input.actorContext.actorUserId,
       input.now,
     ],
@@ -254,6 +256,7 @@ export function createPostgresExportManifestRepository({ runInTransaction = with
           return success({
             exportManifestId,
             exportCandidateId: input.exportCandidateId,
+            exportReviewQueueItemId: input.exportReviewQueueItemId,
             effectiveAuthorityDecisionId,
             fingerprintContractVersion: EXPORT_MANIFEST_FINGERPRINT_CONTRACT_VERSION,
             canonicalFingerprint: fingerprint,

@@ -99,6 +99,54 @@ function psqlFileAndProveP3_19VerifierOutputContract(path) {
   return csv;
 }
 
+const P3_20_EXPECTED_VERIFIER_CHECKS = [
+  "export_review_queue_item_id_column_present",
+  "export_review_queue_item_id_not_null",
+  "review_queue_item_fk_present",
+  "review_queue_items_id_org_unique_present",
+  "no_unique_constraint_on_review_queue_item_id_alone",
+  "lookup_index_present",
+  "append_only_trigger_still_present",
+  "replay_convergence_key_unchanged",
+  "no_latest_or_current_column",
+];
+
+function psqlFileAndProveP3_20VerifierOutputContract(path) {
+  const csv = run(psql, ["-v", "ON_ERROR_STOP=1", "-q", "-d", dbName, "--csv", "-f", path], { capture: true }).stdout;
+  const lines = csv.trim().split("\n").filter((line) => line.length > 0);
+  const header = lines[0];
+  if (header !== "check_name,status,detail") {
+    throw new Error(`P3-20 verifier output contract violated: unexpected final result header "${header}"`);
+  }
+  const dataRows = lines.slice(1);
+  if (dataRows.length !== P3_20_EXPECTED_VERIFIER_CHECKS.length) {
+    throw new Error(`P3-20 verifier output contract violated: expected ${P3_20_EXPECTED_VERIFIER_CHECKS.length} rows, got ${dataRows.length}`);
+  }
+  const seenCheckNames = new Set();
+  for (const row of dataRows) {
+    const [checkName, status] = row.split(",");
+    if (seenCheckNames.has(checkName)) {
+      throw new Error(`P3-20 verifier output contract violated: duplicate check_name "${checkName}"`);
+    }
+    seenCheckNames.add(checkName);
+    if (status !== "PASS") {
+      throw new Error(`P3-20 verifier output contract violated: check "${checkName}" is not PASS (${status})`);
+    }
+  }
+  for (const expectedCheckName of P3_20_EXPECTED_VERIFIER_CHECKS) {
+    if (!seenCheckNames.has(expectedCheckName)) {
+      throw new Error(`P3-20 verifier output contract violated: missing expected check "${expectedCheckName}"`);
+    }
+  }
+  for (const checkName of seenCheckNames) {
+    if (!P3_20_EXPECTED_VERIFIER_CHECKS.includes(checkName)) {
+      throw new Error(`P3-20 verifier output contract violated: unexpected check "${checkName}"`);
+    }
+  }
+  console.log(`P3-20 verifier output contract proven: exactly ${dataRows.length} PASS rows, exact expected check-name set, no duplicates.`);
+  return csv;
+}
+
 async function proveRunnerOwnedTarget() {
   const parsed = new URL(targetUrl);
   if (!["127.0.0.1", "localhost", "::1"].includes(parsed.hostname.toLowerCase())) {
@@ -190,8 +238,30 @@ try {
   psqlFile("scripts/kai-sprint2-p3-19-export-manifest-foundation-smoke-verifier.sql");
   psqlFile("scripts/kai-sprint2-p3-19-export-manifest-foundation-failure-checks.sql");
 
+  // P3-20 (kai_sprint2_p3_20_export_manifest_review_binding.sql) is applied
+  // here, after every P3-19 step above has already run against the
+  // pre-P3-20 schema. This means kai-sprint2-p3-19-export-manifest-
+  // foundation-smoke-verifier.sql's own manifest1 row (inserted above,
+  // before this migration existed in this runner's timeline) is a genuine
+  // pre-P3-20 legacy row - P3-20's own deterministic backfill is proven
+  // against it directly, not against a fabricated fixture. Because this
+  // runner is the one place that exercises
+  // Backend/kai/dictionary/postgresExportManifestRepository.js#createExportManifest
+  // against a real database, and that repository now always writes the P3-20
+  // column, this runner - exactly as it already folded in
+  // kai_sprint2_p3_17_authority_audit_gate_a_operation_repair.sql for the
+  // same reason - must apply P3-20 too for its own P3-19 integration suite
+  // below to keep passing.
+  psqlFile("migrations/kai_sprint2_p3_20_export_manifest_review_binding.sql");
+  psqlFileAndProveP3_20VerifierOutputContract("scripts/kai-sprint2-p3-20-export-manifest-review-binding-verifier.sql");
+  psqlFile("scripts/kai-sprint2-p3-20-export-manifest-review-binding-smoke-seed.sql");
+  psqlFile("scripts/kai-sprint2-p3-20-export-manifest-review-binding-smoke-verifier.sql");
+  psqlFile("scripts/kai-sprint2-p3-20-export-manifest-review-binding-failure-checks.sql");
+
   const testResult = spawnSync("node", [
     "--test",
+    "__tests__/kai-sprint2-p3-20-export-manifest-review-binding.integration.spec.js",
+    "__tests__/kai-sprint2-p3-20-export-manifest-review-binding-boundary.spec.js",
     "__tests__/kai-sprint2-p3-19-export-manifest-foundation.integration.spec.js",
     "__tests__/kai-sprint2-p3-19-export-manifest-foundation-boundary.spec.js",
     "__tests__/kai-sprint2-p3-18-real-persisted-final-gate-proof.integration.spec.js",
@@ -229,6 +299,7 @@ try {
       DB_NAME: dbName,
       DB_USER: user,
       DB_PASSWORD: "",
+      KAI_P3_20_EXPORT_MANIFEST_REVIEW_BINDING_DATABASE_URL: targetUrl,
       KAI_P3_19_EXPORT_MANIFEST_FOUNDATION_DATABASE_URL: targetUrl,
       KAI_P3_18_REAL_PERSISTED_FINAL_GATE_DATABASE_URL: targetUrl,
       KAI_P3_17_HUMAN_AUTHORITY_DECISION_LEDGER_DATABASE_URL: targetUrl,
@@ -236,8 +307,8 @@ try {
       KAI_P3_13_EXPORT_REVIEW_COMPLETION_DATABASE_URL: targetUrl,
     },
   });
-  if (testResult.status !== 0) throw new Error("P3-19 export-manifest-foundation tests failed");
-  console.log("P3-19 export-manifest-foundation focused tests passed.");
+  if (testResult.status !== 0) throw new Error("P3-19/P3-20 export-manifest tests failed");
+  console.log("P3-19/P3-20 export-manifest focused tests passed.");
 } finally {
   if (started) spawnSync(pgCtl, ["-D", dataDir, "stop", "-m", "fast"], { encoding: "utf8", stdio: "ignore" });
   rmSync(workDir, { recursive: true, force: true });

@@ -21218,3 +21218,133 @@ next dependency requiring its own owner authorization; its shape is not
 invented in this package. The immediate same-session finalize-then-download
 flow implemented here does not depend on that recovery and required no
 schema change.
+
+## Durable Export Finalization Persistence (P3-20)
+
+**Date:** 2026-09-08
+
+**Owner authorization (bounded, local-only):** implement the durable
+finalization persistence model established by two prior owner-authorized
+inspection-only prompts in this same session -
+`DURABLE_FINALIZATION_CARDINALITY` (proved P3-16 candidate→P3-19 manifest is
+one-to-many, that `exportReviewQueueItemId` is absent from the P3-19 replay
+key, and returned `SCHEMA_BINDING_DECISION_REQUIRED`) and the follow-up
+`FUNCTIONAL_DEPENDENCY_PROOF` (traced the real P3-18 eligibility control flow
+and the P3-05 `ux_review_queue_items_p3_05_export_review_identity` unique
+index to prove exactly one `exportReviewQueueItemId` can ever legitimately
+pass P3-18 for a given candidate, resolving the decision to
+`SELECTED_MODEL: DIRECT_MANIFEST_REVIEW_BINDING`). Authorized: additive
+schema/migration work, the repository change needed for atomic binding, the
+complete migration verification pack, local/synthetic PostgreSQL proof, and
+focused/affected regressions. Not authorized: production access/mutation,
+frontend/UI/read-recovery work, push, deploy, PDF/DOCX/CSV, artifact
+storage, feature-flag/cloud changes, or Current State/Baseline changes.
+
+**Starting repository evidence:** branch `main`, HEAD
+`f20cbf3a3c3999691f95089a26aa503797accbc4`, working tree clean - the same
+commit both inspection prompts examined.
+
+**Schema:** `migrations/kai_sprint2_p3_20_export_manifest_review_binding.sql`
+/ `.rollback.sql` adds `kai.review_queue_items_p3_20_id_org_unique` (the same
+tenant-safe `(id, organization_id)` identity pattern already used by every
+other FK-target table in this schema - `review_queue_items` had none, its
+own PK being `review_queue_item_id` alone), adds
+`kai.export_manifests.export_review_queue_item_id` (added nullable, backed
+by a fail-closed deterministic backfill loop, then set `NOT NULL`), adds the
+tenant-safe `export_manifests_p3_20_review_queue_item_fk` (RESTRICT), and
+adds one non-unique lookup index. No `UNIQUE(export_review_queue_item_id)`
+or `latest`/`current`/`active` column was added - one review item
+legitimately backs multiple historical manifests, proven directly (not
+merely asserted) by this package's own smoke-verifier and integration
+suite via a P3-17 revoke-then-re-grant cycle on the same candidate. The
+backfill disables/re-enables the existing P3-19 append-only trigger only
+for the duration of its own `UPDATE`, inside the migration transaction; no
+application code path can mutate an existing manifest row after the
+migration completes. No P3-16 currentness/fingerprint, P3-17 effectiveness,
+P3-18/VAL-EXP-001, or P3-19 replay/fingerprint key
+(`UNIQUE (organization_id, export_candidate_id, canonical_fingerprint)`) was
+touched.
+
+**Repository:** `Backend/kai/dictionary/postgresExportManifestRepository.js`'s
+`insertExportManifest` now also writes `export_review_queue_item_id` (the
+exact value `evaluateFinalExportEligibilityInTransaction` already required
+for PASS, in the same write transaction); the success object now also
+carries `exportReviewQueueItemId`. No eligibility, fingerprint, replay, or
+authorization logic changed. Binding failure (a nonexistent or tenant-
+mismatched review item, or a real-but-wrong-draft review item rejected by
+the unchanged P3-18 gate) rolls back the whole transaction - proven directly
+by a new integration test - so it can never return a fabricated success.
+
+**Runner:** `scripts/kai-sprint2-p3-19-export-manifest-foundation-local-postgres.js`
+was extended, in place (no existing step edited or reordered), to apply the
+P3-20 migration and its own verifier/smoke-seed/smoke-verifier/failure-
+checks after every existing P3-19 step, and to run the two new P3-20 spec
+files alongside the existing P3-16 through P3-19 regression list. This was
+required (not optional) because this runner is the one place that exercises
+`createExportManifest` against a real database, and following this
+runner's own established precedent (it already folds in
+`kai_sprint2_p3_17_authority_audit_gate_a_operation_repair.sql` for the same
+reason). Because P3-20 is applied only after the existing, unedited P3-19
+smoke-verifier has already inserted its own real `manifest1` row, that row
+served as a genuine pre-P3-20 legacy row for the migration's own backfill
+proof - not a fabricated fixture. `package.json` gained one alias script,
+`verify:kai-sprint2-p3-20-export-manifest-review-binding`, pointing at the
+same, now-extended, runner file.
+
+**New tests:**
+`__tests__/kai-sprint2-p3-20-export-manifest-review-binding-boundary.spec.js`
+(fake-tx proof: the INSERT always names/binds the exact caller-supplied
+`exportReviewQueueItemId`; the success object carries it unchanged for two
+otherwise-identical calls with distinct values; no latest/current-shaped
+method exists on the repository's public surface) and
+`__tests__/kai-sprint2-p3-20-export-manifest-review-binding.integration.spec.js`
+(real database: returned `exportManifestId`'s persisted row matches the
+caller-supplied binding; a revoke-then-re-grant cycle produces a second,
+distinct manifest bound to the SAME review item; replay is unaffected;
+cross-tenant candidates are still rejected; a real-but-mismatched review
+item fails the real P3-18 gate and persists neither a manifest nor a
+binding).
+
+**Verification:** `DATABASE_URL=postgres://sentinel:sentinel@127.0.0.1:1/sentinel_do_not_connect`
+(non-listening loopback sentinel; no database was reached) for every
+Node/npm command. `npm run verify:kai-sprint2-p3-20-export-manifest-review-binding`
+(ephemeral loopback PostgreSQL 16) -> forward migration applied cleanly
+against the real, pre-existing P3-19 smoke-verifier row; P3-20's own 9-check
+catalog verifier proved (exact check-name set, no duplicates, all PASS);
+P3-20 smoke-verifier and failure-checks both passed (embedded fail-closed
+`RAISE EXCEPTION` guards - a non-zero exit would have surfaced any FAIL);
+combined `node --test` run across the full P3-16 through P3-20 regression
+list -> 314/314 passed, 0 failed. Separately ran
+`__tests__/kai-sprint2-authorized-markdown-export-delivery-route.spec.js`,
+`kai-sprint2-governed-export-finalization-route.spec.js`,
+`kai-sprint2-gk-export-review-governed-finalization-control.spec.js`,
+`kai-sprint2-p3-export-operational-composition-route.spec.js`,
+`kai-sprint2-pass2-route-runtime.spec.js` -> 74/74 passed (these routes have
+no database dependency and were unaffected, as expected - no route file was
+changed by this package). Full repository suite (`npm test`) -> 3383
+passed, 7 failed (the exact same 4 distinct pre-existing failures already
+confirmed present and unrelated to export/KAI code in the prior "Governed
+Export Finalization + Exact Manifest Handoff" package's own verification -
+`the child-file read model is tenant-scoped...`, `assembled production
+middleware and router enforce the batch-files collection contract`, `the
+direct file-detail service returns exactly the 15-field allowlist`,
+`assembled production middleware and router enforce the file-detail
+contract` - 0 newly introduced failures), 60 skipped. `git diff --check`
+passed.
+
+**Final diff review:** confined to
+`Backend/kai/dictionary/postgresExportManifestRepository.js`,
+`scripts/kai-sprint2-p3-19-export-manifest-foundation-local-postgres.js`,
+`package.json`, one new migration + rollback, five new
+`scripts/kai-sprint2-p3-20-*` files (verifier, smoke-seed, smoke-verifier,
+failure-checks, patch-notes, runbook), two new test files, and this
+ExecPlan. No frontend/UI/route file, feature flag, cloud configuration,
+Current State, Implementation Baseline, credential/secret, or artifact-
+persistence/storage change was made. No production database was accessed,
+mutated, or migrated; nothing was pushed or deployed.
+
+**Remaining work (unchanged from the prior package's own disclosure):**
+frontend/UI read-path recovery of a candidate's/manifest's identity after a
+page reload or later return, using this package's new durable binding, is
+the deferred next dependency this package makes possible - explicitly not
+implemented here, per owner authorization scope.
