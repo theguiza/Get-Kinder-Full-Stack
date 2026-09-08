@@ -79,6 +79,7 @@
     "verify:kai-sprint2-p3-19-export-manifest-foundation": "node scripts/kai-sprint2-p3-19-export-manifest-foundation-local-postgres.js",
     "test:kai-sprint2-export-manifest-render-model-composition": "node --test __tests__/kai-sprint2-export-manifest-render-model-composition-boundary.spec.js",
     "test:kai-sprint2-export-manifest-markdown-representation": "node --test __tests__/kai-sprint2-export-manifest-markdown-representation-boundary.spec.js",
+    "test:kai-sprint2-authorized-markdown-export-delivery": "node --test __tests__/kai-sprint2-authorized-markdown-export-delivery-route.spec.js",
     "verify:kai-sprint2-gate-c1-gcs-generation-binding": "node scripts/kai-sprint2-gate-c1-gcs-generation-binding-local-postgres.js",
     "verify:kai-sprint2-gk-organization-tenant-binding": "node scripts/kai-sprint2-gk-organization-tenant-binding-local-postgres.js",
     "verify:kai-sprint2-organization-enablement": "node scripts/kai-sprint2-organization-enablement-local-postgres.js",

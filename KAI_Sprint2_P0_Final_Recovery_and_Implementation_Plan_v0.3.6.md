@@ -20751,6 +20751,115 @@ Baseline, P3-16 canonical/currentness duplication, render-model bypass,
 live-state query, authorization duplication inside the serializer, feature-flag
 evaluation inside the serializer, or unrelated work was added.
 
+## Authorized Markdown Export Delivery
+
+**Owner authorization (bounded, local-only):** implement the smallest
+user-usable Phase-14 Markdown export delivery path if current repository
+contracts support authorized human -> existing export authority/currentness
+path -> deterministic Markdown -> HTTP attachment download, without artifact
+persistence, artifact table/schema, object storage, storage keys, signed URLs,
+generalized artifact descriptor, PDF, or DOCX. Frontend wiring was authorized
+only if an existing generated-content/export-review/generated-output surface
+already carried the correct state.
+
+**Starting repository evidence:** branch `main`, HEAD
+`25e1a6c639a82ec00e5623f12b4a2cbda00166e0`, working tree clean. Current
+inspection confirmed Export Manifest Render Model Composition and
+Deterministic Markdown Representation were the completed accepted export-track
+boundaries, with no accepted successor after them.
+
+**Implementation evidence:** added one ephemeral authenticated route on the
+existing Sprint 2 intake API:
+`GET /api/kai/sprint2/intake/admin/organizations/:organizationId/export-manifests/:exportManifestId/markdown`.
+The route validates only canonical lowercase UUID path identifiers, resolves
+the existing Sprint 2 actor context through `sprint2ActorContextMiddleware`,
+delegates exactly once to the existing governed
+`serializeExportManifestToMarkdown(input, dependencies)` wrapper, and emits an
+attachment only after an `ok:true` wrapper result. The route contains no SQL,
+no direct `kai.*` access, no KAI DB-helper access, no storage calls, and no
+artifact framework. The response body is exactly `result.data.markdown`;
+`Content-Type` is `text/markdown; charset=utf-8`; `Content-Disposition` is
+`attachment; filename="kai-export-manifest.md"`, a fixed server-generated
+safe filename that does not include client-controlled query/body/path material
+or internal identifiers.
+
+**Authority/currentness/audit semantics:** delivery of an already-created
+P3-19 manifest reuses the existing governed Markdown wrapper and render-model
+service. That path reuses the existing P3-19 feature flags
+(`KAI_SPRINT2_ENABLED`, `KAI_GENERATION_ENABLED`,
+`KAI_PUBLIC_EXPORT_ENABLED`) and the existing `create_export_manifest`
+`gk_admin` human authorization operation; no live P3-17 reauthorization or
+new authority gate was invented. Currentness is enforced by the existing
+render-model repository through the P3-19 manifest row's bound
+`export_candidate_id`, the authoritative P3-16
+`evaluateExportCandidateCurrentnessInTransaction`, and the existing P3-16
+canonical representation/fingerprint path. Upstream structured failures
+(`not_found`, `authorization_denied`, `feature_disabled`,
+`conflict_current_state_changed`, and validation blockers) propagate through
+the existing KAI API error convention, and no attachment is emitted on
+failure. Audit remains the existing P3-19 manifest-creation audit event; the
+repository contract did not require successful read/download delivery to
+write a duplicate audit event, so no new audit schema, row, body capture, or
+metadata vocabulary was added.
+
+**UI evidence:** the only existing relevant UI surface is
+`/gk-admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/export-review-queue/:exportReviewQueueItemId`
+(`views/gk-export-review-detail.ejs`, `frontend/gkExportReviewDetail.jsx`,
+and `frontend/gkExportReviewDetailLogic.js`). It is explicitly an
+export-review packet page, receives only `organizationId`,
+`generatedContentDraftId`, and `exportReviewQueueItemId`, and its allowlisted
+packet projection does not include `exportManifestId` or manifest-created
+state. No generated-output/export-manifest UI surface exists. Therefore no UI
+wiring was added in this package.
+
+**TOOL_VERIFIED:**
+  - `DATABASE_URL=postgres://kai_sentinel:kai_sentinel@127.0.0.1:9/kai_sentinel DATABASE_URL_LOCAL= PGURL_LOCAL= RENDER_DATABASE_URL= PROD_DATABASE_URL= npm run test:kai-sprint2-authorized-markdown-export-delivery`
+    first failed in the sandbox only because localhost listen was blocked
+    (`listen EPERM: operation not permitted 127.0.0.1`); the identical command
+    was rerun with approved escalation and passed 8/8.
+  - Same sentinel/clearing convention,
+    `npm run test:kai-sprint2-export-manifest-markdown-representation`
+    -> 12/12 passed.
+  - Same sentinel/clearing convention,
+    `npm run test:kai-sprint2-export-manifest-render-model-composition`
+    -> 10/10 passed.
+  - Same sentinel/clearing convention,
+    `npm run test:kai-sprint2-p3-16-export-candidate-foundation`
+    -> 16/16 passed.
+  - Same sentinel/clearing convention,
+    `node --test __tests__/kai-sprint2-p3-19-export-manifest-foundation-boundary.spec.js`
+    -> 10/10 passed.
+  - Same sentinel/clearing convention,
+    `npm run verify:kai-sprint2-api-contract` first failed in the sandbox only
+    because localhost listen was blocked and because the Pass 2 route
+    inventory assertion had not yet been updated for already-mounted P3 export
+    routes plus this package's new route; after updating the exact inventory,
+    the identical command was rerun with approved escalation and passed 71/71.
+  - Same sentinel/clearing convention,
+    `npm run test:kai-sprint2-p3-17-human-authority-decision-ledger` first
+    failed in the sandbox only because localhost listen was blocked; the
+    identical command was rerun with approved escalation and passed 27/27.
+  - Same sentinel/clearing convention,
+    `node --test __tests__/kai-sprint2-p3-18-final-export-eligibility-gate-boundary.spec.js`
+    -> 12/12 passed.
+  - Same sentinel/clearing convention,
+    `node --test __tests__/kai-sprint2-p3-export-operational-composition-route.spec.js`
+    first failed in the sandbox because localhost listen was blocked and a
+    source-slice assertion included the new Markdown helper before it was moved
+    next to the Markdown route; after the isolation move, the rerun with
+    approved escalation passed 13/13.
+
+**Final diff review:** confined to
+`Backend/kai/routes/sprint2IntakeApi.js`,
+`__tests__/kai-sprint2-authorized-markdown-export-delivery-route.spec.js`,
+`__tests__/kai-sprint2-pass2-route-runtime.spec.js`, `package.json`, and this
+ExecPlan. No migration, schema/table, artifact persistence, object storage,
+storage key/path, signed URL, generalized payload descriptor, PDF/DOCX/CSV
+renderer, production/runtime/cloud configuration, Current State,
+Implementation Baseline, assistant tool exposure, P3-16 currentness
+recomputation, independent generated-content graph query, or duplicate audit
+write was added.
+
 ## Gate A Upload Lifecycle Enforcement Forward Repair
 
 **Date:** 2026-09-07

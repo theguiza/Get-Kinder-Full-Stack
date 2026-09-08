@@ -172,6 +172,11 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // KAI P2-09 human evidence-review completion surface (additive; every
     // prior entry preserved verbatim).
     "/admin/organizations/:organizationId/evidence-items/:evidenceItemId/evidence-review/:reviewQueueItemId/complete",
+    // KAI P3-17 human final-release authority and Phase-14 ephemeral
+    // governed Markdown delivery surfaces; both are service-delegated and
+    // actor-context guarded on the Sprint 2 router.
+    "/admin/organizations/:organizationId/export-candidates/:exportCandidateId/final-release-authority",
+    "/admin/organizations/:organizationId/export-manifests/:exportManifestId/markdown",
     // KAI structured external requirement-set registration: catalogue-only
     // write into requirement_sources/framework_versions/sets/requirements;
     // no applicability or assessment authority is created.
@@ -179,9 +184,11 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // Generated Drafts library index: read-only, additive, and every prior
     // entry preserved verbatim.
     "/admin/organizations/:organizationId/generated-content-drafts",
+    "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/export-candidates",
     "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/export-review-queue/:exportReviewQueueItemId/complete",
     "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/export-review-queue/:exportReviewQueueItemId/packet",
     "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/export-review-queue/:exportReviewQueueItemId/start",
+    "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/export-review-request",
     "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/generated-content-review-queue/:reviewQueueItemId/complete",
     "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/generated-content-review-queue/:reviewQueueItemId/start",
     // KAI P3-01/P3-02 internal evidence-summary generation and generated-draft

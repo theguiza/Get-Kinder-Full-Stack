@@ -62,6 +62,7 @@ let reviewCockpitServicePromise = null;
 let exportReviewServicePromise = null;
 let exportCandidateServicePromise = null;
 let humanAuthorityDecisionServicePromise = null;
+let exportManifestMarkdownServicePromise = null;
 let evidenceLineageServicePromise = null;
 let evidenceCoverageAssessmentServicePromise = null;
 let claimProposalServicePromise = null;
@@ -218,6 +219,20 @@ function sanitizeServiceData(data) {
     if (typeof data[key] === "boolean") sanitized[key] = data[key];
   }
   return Object.keys(sanitized).length > 0 ? sanitized : null;
+}
+
+const EXPORT_MANIFEST_MARKDOWN_ATTACHMENT_FILENAME = "kai-export-manifest.md";
+const EXPORT_MANIFEST_MARKDOWN_CONTENT_TYPE = "text/markdown; charset=utf-8";
+
+function sendMarkdownAttachment(res, result) {
+  if (!result?.ok) return sendServiceResult(res, result);
+  const markdown = typeof result.data?.markdown === "string" ? result.data.markdown : null;
+  if (markdown == null) return sendKaiError(res, "system_error");
+
+  res.status(200);
+  res.setHeader("Content-Type", EXPORT_MANIFEST_MARKDOWN_CONTENT_TYPE);
+  res.setHeader("Content-Disposition", `attachment; filename="${EXPORT_MANIFEST_MARKDOWN_ATTACHMENT_FILENAME}"`);
+  return res.send(markdown);
 }
 
 function safeAuthenticatedUser(req = {}) {
@@ -1224,6 +1239,46 @@ router.post(
         }),
       });
     }, 201);
+  },
+);
+
+async function getExportManifestMarkdownService() {
+  if (intakeServiceOverride?.serializeExportManifestToMarkdown) return intakeServiceOverride;
+  exportManifestMarkdownServicePromise ||= import("../services/kaiExportManifestMarkdownSerializer.js");
+  return exportManifestMarkdownServicePromise;
+}
+
+function exportManifestIdentifiers(req = {}) {
+  const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
+  const exportManifestId = typeof req.params?.exportManifestId === "string"
+    ? req.params.exportManifestId
+    : "";
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId) || organizationId !== organizationId.toLowerCase()) return null;
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(exportManifestId) || exportManifestId !== exportManifestId.toLowerCase()) return null;
+  return { organizationId, exportManifestId };
+}
+
+router.get(
+  "/admin/organizations/:organizationId/export-manifests/:exportManifestId/markdown",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    const identifiers = exportManifestIdentifiers(req);
+    if (!identifiers) {
+      return sendKaiError(res, "validation_blocker", {
+        blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id_or_export_manifest_id")],
+      });
+    }
+    try {
+      const service = await getExportManifestMarkdownService();
+      return sendMarkdownAttachment(res, await service.serializeExportManifestToMarkdown({
+        organizationId: identifiers.organizationId,
+        exportManifestId: identifiers.exportManifestId,
+        actorContext: sprint2MappedActorContext(req),
+      }));
+    } catch (error) {
+      console.error("[kai-sprint2-intake] system_error", error);
+      return sendKaiError(res, "system_error");
+    }
   },
 );
 
@@ -3314,6 +3369,8 @@ export const __testables = {
   validateRequestExportReviewRequestOrSend,
   validateCreateExportCandidateRequestOrSend,
   validateHumanFinalReleaseAuthorityRequestOrSend,
+  exportManifestIdentifiers,
+  sendMarkdownAttachment,
   exportReviewPacketIdentifiers,
   sprint2MappedActorContext,
   validateStartExportReviewRequestOrSend,
