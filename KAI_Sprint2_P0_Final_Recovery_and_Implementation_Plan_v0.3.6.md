@@ -22662,3 +22662,119 @@ unstarted/NOT_CONFIRMED and were not invented here.
 
 **Local commit:** one bounded commit created after all required checks
 passed.
+
+## Generated Drafts list export-review state surfacing
+
+**Date:** 2026-09-08
+
+**Owner authorization (bounded, local-only):** surface each Generated
+Draft's authoritative export-review state directly in the existing
+Generated Drafts list (Impact Evidence Library), closing the exact gap the
+prior package's Remaining work left open. Starting HEAD:
+`e890a8c31b173a7b0edf286873855abb8e8f247f` (USER_CONFIRMED); working tree
+clean.
+
+**Authoritative relationship reused, not reinvented:** the list read model
+(`Backend/kai/db/kaiGeneratedDraftLibraryReadModels.js`,
+`listGeneratedDraftLibraryIndex`) already joins each draft to its
+`generated_content_review` queue row in one query; it now also `LEFT JOIN`s
+the identical organization + `generated_content_draft_id` -> 0-or-1-row
+`export_review` queue relationship the single-draft read path
+(`loadExportReviewQueueRows`) established at e890a8c - batched across the
+whole page in that same query (`queue_type`/`target_object_type` inlined as
+literals, mirroring this file's existing convention for the sibling join,
+not a new parameterized model). This is one additional join on an existing
+query, not a second read or a per-draft follow-up call: zero N+1 was added,
+and the existing keyset pagination/ordering (`d.generated_content_draft_id
+> $3::uuid`, `ORDER BY ... ASC`, `LIMIT $2::int`) is untouched.
+
+**Role boundary reused:** `Backend/kai/services/kaiGeneratedDraftLibraryService.js`
+now evaluates the actor once per request (not per row) against the
+identical `EXPORT_REVIEW_ALLOWED_ROLES` (`gk_admin` only, imported from
+`kaiExportReviewService.js`'s own `__exportReviewServiceContract`) via the
+same `PROJECT_EXPORT_REVIEW_VISIBILITY_OPERATION` `kaiGeneratedContentService.js`
+already exports for this exact purpose - no new operation constant, no
+second role list. An authorized actor gets each row's real
+`exportReviewQueueItemId`/`exportReviewQueueStatus`/`exportReviewStatus`
+(all three null when no export_review row exists); a restricted actor gets
+all three forced null with `exportReviewVisible: false` - a preserved,
+distinct state a genuine zero-review draft (`exportReviewVisible: true`,
+id `null`) is never confused with. A new `isValidExportReviewRowFields`
+rejects any row whose id/status combination doesn't match `null`/`null` or
+a genuine `EXPORT_REVIEW_LIFECYCLE_PROFILES` member as `system_error`,
+mirroring `validateExportReviewQueueRows`'s existing invariant that more
+than one shape is a system error, never a pick.
+
+**Frontend (no new page, no N+1 browser read):**
+`frontend/impactEvidenceLibraryLogic.js`'s `projectGeneratedDraftLibraryItems`
+now carries the same four allowlisted export-review fields
+`projectGeneratedDraftPacket` already carries for the single-draft card.
+`frontend/ImpactEvidenceLibrary.jsx`'s Generated Drafts list now classifies
+each row with the existing, already-tested
+`generatedDraftExportReviewDisplayState` classifier (unchanged, reused
+verbatim - its `restricted`/`existing`/other states map directly onto "no
+export review"/open/in-progress/resolved/restricted) and, for an existing
+review, renders the existing `gkExportReviewDetailPagePath`-built "Open GK
+Export Review" link using that row's own `exportReviewQueueItemId` - never
+a shared/most-recent id. The per-row link is a plain anchor rendered
+alongside (not inside) the existing row-select button, so selecting a
+draft and opening its export review remain independent actions. Start/
+Complete Review, Prepare Export Candidate, Grant Final Authority, and
+Finalize Export were not touched or moved. `requestExportReview` now
+refetches both the authoritative selected-draft packet (pre-existing) and
+the authoritative Generated Draft index (`loadGeneratedDrafts`, newly
+added) after an accepted request, instead of only the former - the list
+row is never patched from the POST response.
+
+**Preserved:** GK export-review and the Markdown/CSV/PDF/DOCX export
+delivery paths are untouched; no schema/migration, new route, new page, or
+export-governance/manifest-semantics change exists anywhere in this diff.
+
+**Tests:** the existing coupled file,
+`__tests__/kai-sprint2-generated-drafts-library.spec.js`, gained the
+`export_review_*` fixture fields (additive - no existing assertion
+weakened or removed) plus four new tests: gk_reviewer never receives
+export-review identity/state even when a row exists (forced null,
+`exportReviewVisible: false`); gk_admin recovers a genuine zero-review
+state as null, never fabricating an id; gk_admin recovers open/
+in_progress/resolved export-review state correctly per draft across four
+distinct drafts with no cross-wiring of queue ids between them; and a
+fabricated id/status combination is rejected as `system_error`. The read-
+model SQL test gained assertions for the new `LEFT JOIN`, its exact join
+predicate, and the new selected columns.
+
+**Verification:** `DATABASE_URL` set to a non-listening loopback sentinel
+for every Node/npm command (no database reached). New-package focused run
+(`kai-sprint2-generated-drafts-library.spec.js`) -> 14 passed, 0 failed.
+Directly affected regression run (the same 15 files verified in the prior
+package plus `kai-sprint2-p3-02-generated-draft-review-packet-boundary.spec.js`
+and `kai-sprint2-p13-01-impact-narrative-boundary.spec.js`) -> 339 passed,
+0 failed. Full repository suite (`npm test`) -> 3505 passed, 7 failed (the
+exact same 4 distinct pre-existing failures already confirmed present and
+unrelated to export/KAI code in every prior package in this track - `the
+child-file read model is tenant-scoped...`, `assembled production
+middleware and router enforce the batch-files collection contract`, `the
+direct file-detail service returns exactly the 15-field allowlist`,
+`assembled production middleware and router enforce the file-detail
+contract` - 0 newly introduced failures), 61 skipped. `npm run build`
+(Vite) succeeded with no errors. `git diff --check` passed with no
+whitespace errors.
+
+**Final diff review:** confined to
+`Backend/kai/db/kaiGeneratedDraftLibraryReadModels.js`,
+`Backend/kai/services/kaiGeneratedDraftLibraryService.js`,
+`frontend/ImpactEvidenceLibrary.jsx`, `frontend/impactEvidenceLibraryLogic.js`,
+`public/js/bundles/entry.js` (Vite rebuild), one additively-updated test
+file, and this ExecPlan. No new route, schema, migration, or export-
+governance/manifest-semantics file was created or edited; no production
+database was accessed, mutated, or migrated; nothing was pushed or
+deployed; no Current State or Implementation Baseline update was made.
+
+**Remaining work:** composite exports (grant response packet, board
+summary) remain unstarted; whether persistent/reusable artifact handling
+is ever required remains NOT_CONFIRMED and was not invented here. No
+further repository-supported gap in the website export/review UX track was
+identified.
+
+**Local commit:** one bounded commit created after all required checks
+passed.

@@ -1228,6 +1228,15 @@ export function projectGeneratedDraftLibraryItems(dto) {
     queueStatus: item.queueStatus,
     reviewStatus: item.reviewStatus,
     createdAt: item.createdAt,
+    // Same allowlisted, server-already-recovered export-review identity/state
+    // the single-draft packet carries (projectGeneratedDraftPacket above) -
+    // never re-derived from any POST response, and exportReviewVisible stays
+    // a distinct "restricted" state from the genuine "no export review yet"
+    // absence (visible=true, id=null).
+    exportReviewVisible: item.exportReviewVisible === true,
+    exportReviewQueueItemId: typeof item.exportReviewQueueItemId === "string" ? item.exportReviewQueueItemId : null,
+    exportReviewQueueStatus: typeof item.exportReviewQueueStatus === "string" ? item.exportReviewQueueStatus : null,
+    exportReviewStatus: typeof item.exportReviewStatus === "string" ? item.exportReviewStatus : null,
   })).filter((item) => typeof item.generatedContentDraftId === "string");
 }
 

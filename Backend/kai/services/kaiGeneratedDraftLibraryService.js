@@ -5,11 +5,15 @@ import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationServic
 import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
 import { listGeneratedDraftLibraryIndex as readGeneratedDraftLibraryIndex } from "../db/kaiGeneratedDraftLibraryReadModels.js";
 import { __generatedContentServiceContract } from "./kaiGeneratedContentService.js";
+import { __exportReviewServiceContract } from "./kaiExportReviewService.js";
+import { EXPORT_REVIEW_LIFECYCLE_PROFILES } from "../dictionary/exportReviewQueueContract.js";
 
 const {
   GET_GENERATED_DRAFT_REVIEW_PACKET_OPERATION: GENERATED_DRAFT_LIBRARY_READ_OPERATION,
   GENERATED_CONTENT_REVIEW_ALLOWED_ROLES: GENERATED_DRAFT_LIBRARY_READ_ROLES,
+  PROJECT_EXPORT_REVIEW_VISIBILITY_OPERATION,
 } = __generatedContentServiceContract;
+const { EXPORT_REVIEW_ALLOWED_ROLES } = __exportReviewServiceContract;
 
 const GENERATED_DRAFT_LIBRARY_DEFAULT_LIMIT = 25;
 const GENERATED_DRAFT_LIBRARY_MAX_LIMIT = 25;
@@ -46,7 +50,22 @@ function isCanonicalUtcTimestamp(value) {
   return normalized === value;
 }
 
-function responseDraftSummary(row, organizationId) {
+// Same 0-or-1-row shape validateExportReviewQueueRows enforces on the
+// single-draft read path: no export_review row is null/null, exactly one
+// is a genuine EXPORT_REVIEW_LIFECYCLE_PROFILES member - never a pick among
+// several, since the batched LEFT JOIN can return at most one such row per
+// draft by the same unique-index invariant.
+function isValidExportReviewRowFields(row) {
+  if (row.export_review_queue_item_id === null) {
+    return row.export_review_queue_status === null && row.export_review_status === null;
+  }
+  return canonicalUuid(row.export_review_queue_item_id)
+    && EXPORT_REVIEW_LIFECYCLE_PROFILES.some(
+      (profile) => row.export_review_queue_status === profile.queueStatus && row.export_review_status === profile.reviewStatus,
+    );
+}
+
+function responseDraftSummary(row, organizationId, exportReviewVisible) {
   if (
     !isPlainObject(row)
     || !canonicalUuid(row.generated_content_draft_id)
@@ -59,6 +78,7 @@ function responseDraftSummary(row, organizationId) {
     || !REVIEW_QUEUE_STATUSES.has(row.queue_status)
     || !REVIEW_STATUSES.has(row.review_status)
     || !isCanonicalUtcTimestamp(row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at)
+    || !isValidExportReviewRowFields(row)
   ) {
     return null;
   }
@@ -71,6 +91,15 @@ function responseDraftSummary(row, organizationId) {
     queueStatus: row.queue_status,
     reviewStatus: row.review_status,
     createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at,
+    // Same restricted/existing distinction e890a8c established for the
+    // single-draft packet, projected per row here instead: an actor without
+    // export-review authority gets exportReviewVisible=false and every
+    // export-review field forced null, never conflated with the genuine
+    // "no export review requested yet" absence (visible=true, id=null).
+    exportReviewVisible,
+    exportReviewQueueItemId: exportReviewVisible ? row.export_review_queue_item_id : null,
+    exportReviewQueueStatus: exportReviewVisible ? row.export_review_queue_status : null,
+    exportReviewStatus: exportReviewVisible ? row.export_review_status : null,
   };
 }
 
@@ -112,13 +141,26 @@ export async function listGeneratedDraftLibraryIndex(input = {}, dependencies = 
     return buildKaiError("tenant_boundary_violation", { blockers: [tenant] });
   }
 
+  // Identical export-review authority gate e890a8c enforces on the
+  // single-draft packet read (kaiExportReviewService.js's own
+  // EXPORT_REVIEW_ALLOWED_ROLES, gk_admin only, no combineGlobalRoles) -
+  // evaluated once for the whole page, not per row, since actor authority
+  // never varies per draft.
+  const exportReviewAuth = validateActorCanPerformOperation(
+    input.actorContext,
+    PROJECT_EXPORT_REVIEW_VISIBILITY_OPERATION,
+    organizationId,
+    { allowedRoles: EXPORT_REVIEW_ALLOWED_ROLES },
+  );
+  const exportReviewVisible = exportReviewAuth.ok;
+
   const readIndex = dependencies.listGeneratedDraftLibraryIndex || readGeneratedDraftLibraryIndex;
   const rows = await readIndex(organizationId, { limit, afterGeneratedContentDraftId });
   if (!Array.isArray(rows) || rows.length > limit + 1) return buildKaiError("system_error");
 
   const summaries = [];
   for (const row of rows) {
-    const summary = responseDraftSummary(row, organizationId);
+    const summary = responseDraftSummary(row, organizationId, exportReviewVisible);
     if (!summary) return buildKaiError("system_error");
     summaries.push(summary);
   }

@@ -910,11 +910,12 @@ export default function ImpactEvidenceLibrary() {
       // response as UI truth.
       setExportReviewRequestResult(null);
       await refetchGeneratedDraftPacket(generatedDraftPacket.generatedContentDraftId);
+      await loadGeneratedDrafts();
     } else {
       setExportReviewRequestResult(projected);
     }
     setExportReviewRequestPending(false);
-  }, [generatedDraftPacket, organizationId, exportReviewRequestPending, refetchGeneratedDraftPacket]);
+  }, [generatedDraftPacket, organizationId, exportReviewRequestPending, refetchGeneratedDraftPacket, loadGeneratedDrafts]);
 
   const runExtractEvidence = useCallback(async () => {
     if (!organizationId || !sourceVersionId || workflowPending) return;
@@ -1764,20 +1765,51 @@ export default function ImpactEvidenceLibrary() {
               <div className="text-muted">No persisted generated drafts for this organization yet.</div>
             ) : null}
             <div className="list-group">
-              {generatedDrafts.map((draft) => (
-                <button
-                  type="button"
-                  key={draft.generatedContentDraftId}
-                  className={`list-group-item list-group-item-action ${draft.generatedContentDraftId === selectedGeneratedDraftId ? "active" : ""}`}
-                  onClick={() => selectGeneratedDraft(draft.generatedContentDraftId)}
-                >
-                  <div className="d-flex justify-content-between gap-2">
-                    <span>Evidence Summary · Internal</span>
-                    <span className="badge text-bg-secondary">{generatedDraftReviewLabel(draft.queueStatus, draft.reviewStatus)}</span>
+              {generatedDrafts.map((draft) => {
+                const draftExportReviewState = generatedDraftExportReviewDisplayState(draft);
+                return (
+                  <div
+                    key={draft.generatedContentDraftId}
+                    className={`list-group-item ${draft.generatedContentDraftId === selectedGeneratedDraftId ? "active" : ""}`}
+                  >
+                    <button
+                      type="button"
+                      className="btn btn-link p-0 border-0 text-start w-100"
+                      onClick={() => selectGeneratedDraft(draft.generatedContentDraftId)}
+                    >
+                      <div className="d-flex justify-content-between gap-2">
+                        <span>Evidence Summary · Internal</span>
+                        <span className="badge text-bg-secondary">{generatedDraftReviewLabel(draft.queueStatus, draft.reviewStatus)}</span>
+                      </div>
+                      <div className="small mt-1">Created {draft.createdAt}</div>
+                    </button>
+                    {draftExportReviewState === EXPORT_REVIEW_DISPLAY_STATES.existing ? (
+                      <div className="d-flex justify-content-between align-items-center gap-2 mt-1">
+                        <span className="badge text-bg-info">
+                          Export review: {draft.exportReviewQueueStatus} / {draft.exportReviewStatus}
+                        </span>
+                        <a
+                          className="btn btn-sm btn-outline-secondary"
+                          href={gkExportReviewDetailPagePath(
+                            organizationId,
+                            draft.generatedContentDraftId,
+                            draft.exportReviewQueueItemId,
+                          )}
+                        >
+                          Open GK Export Review
+                        </a>
+                      </div>
+                    ) : null}
+                    {draftExportReviewState === EXPORT_REVIEW_DISPLAY_STATES.restricted ? (
+                      <div className="small text-muted mt-1">Export review unavailable for your role</div>
+                    ) : null}
+                    {draftExportReviewState !== EXPORT_REVIEW_DISPLAY_STATES.existing
+                      && draftExportReviewState !== EXPORT_REVIEW_DISPLAY_STATES.restricted ? (
+                      <div className="small text-muted mt-1">No export review</div>
+                    ) : null}
                   </div>
-                  <div className="small mt-1">Created {draft.createdAt}</div>
-                </button>
-              ))}
+                );
+              })}
             </div>
           </div>
         </div>

@@ -58,6 +58,9 @@ function draftRow(overrides = {}) {
     queue_status: "open",
     review_status: "needs_gk_review",
     created_at: "2026-08-15T10:00:00.000Z",
+    export_review_queue_item_id: null,
+    export_review_queue_status: null,
+    export_review_status: null,
     raw_content: "must not render",
     signed_url: "must not render",
     ...overrides,
@@ -346,6 +349,125 @@ test("Generated Drafts library service authorizes like the existing generated-dr
   assert.equal(calls, 0);
 });
 
+test("Generated Drafts library index reuses e890a8c's export-review role boundary: gk_reviewer never receives identity/state even when a row exists", async () => {
+  const deps = {
+    env: enabledEnv,
+    async listGeneratedDraftLibraryIndex() {
+      return [draftRow({
+        export_review_queue_item_id: "00000000-0000-4000-8000-000000000901",
+        export_review_queue_status: "open",
+        export_review_status: "needs_gk_review",
+      })];
+    },
+  };
+  const result = await listGeneratedDraftLibraryIndex(
+    { organizationId, limit: 25, afterGeneratedContentDraftId: null, actorContext },
+    deps,
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.data.items[0].exportReviewVisible, false);
+  assert.equal(result.data.items[0].exportReviewQueueItemId, null);
+  assert.equal(result.data.items[0].exportReviewQueueStatus, null);
+  assert.equal(result.data.items[0].exportReviewStatus, null);
+});
+
+test("Generated Drafts library index recovers a genuine zero-export-review-state as null (not restricted) for an authorized actor, and never fabricates an id", async () => {
+  const gkAdminActor = {
+    ...actorContext,
+    organizationMemberships: [{ organization_id: organizationId, membership_status: "active", role_name: "gk_admin" }],
+  };
+  const deps = {
+    env: enabledEnv,
+    async listGeneratedDraftLibraryIndex() {
+      return [draftRow()];
+    },
+  };
+  const result = await listGeneratedDraftLibraryIndex(
+    { organizationId, limit: 25, afterGeneratedContentDraftId: null, actorContext: gkAdminActor },
+    deps,
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.data.items[0].exportReviewVisible, true);
+  assert.equal(result.data.items[0].exportReviewQueueItemId, null);
+  assert.equal(result.data.items[0].exportReviewQueueStatus, null);
+  assert.equal(result.data.items[0].exportReviewStatus, null);
+});
+
+test("Generated Drafts library index recovers open/in_progress/resolved export-review state per draft for an authorized actor without cross-wiring queue ids across drafts", async () => {
+  const gkAdminActor = {
+    ...actorContext,
+    organizationMemberships: [{ organization_id: organizationId, membership_status: "active", role_name: "gk_admin" }],
+  };
+  const draftIdOpen = "00000000-0000-4000-8000-000000000801";
+  const draftIdInProgress = "00000000-0000-4000-8000-000000000802";
+  const draftIdResolved = "00000000-0000-4000-8000-000000000803";
+  const queueIdOpen = "00000000-0000-4000-8000-000000000811";
+  const queueIdInProgress = "00000000-0000-4000-8000-000000000812";
+  const queueIdResolved = "00000000-0000-4000-8000-000000000813";
+  const deps = {
+    env: enabledEnv,
+    async listGeneratedDraftLibraryIndex() {
+      return [
+        draftRow({
+          generated_content_draft_id: draftIdOpen,
+          export_review_queue_item_id: queueIdOpen,
+          export_review_queue_status: "open",
+          export_review_status: "needs_gk_review",
+        }),
+        draftRow({
+          generated_content_draft_id: draftIdInProgress,
+          export_review_queue_item_id: queueIdInProgress,
+          export_review_queue_status: "in_progress",
+          export_review_status: "needs_gk_review",
+        }),
+        draftRow({
+          generated_content_draft_id: draftIdResolved,
+          export_review_queue_item_id: queueIdResolved,
+          export_review_queue_status: "resolved",
+          export_review_status: "resolved",
+        }),
+        draftRow({ generated_content_draft_id: draftId }),
+      ];
+    },
+  };
+  const result = await listGeneratedDraftLibraryIndex(
+    { organizationId, limit: 25, afterGeneratedContentDraftId: null, actorContext: gkAdminActor },
+    deps,
+  );
+  assert.equal(result.ok, true);
+  const byDraftId = Object.fromEntries(result.data.items.map((item) => [item.generatedContentDraftId, item]));
+  assert.equal(byDraftId[draftIdOpen].exportReviewQueueItemId, queueIdOpen);
+  assert.equal(byDraftId[draftIdOpen].exportReviewQueueStatus, "open");
+  assert.equal(byDraftId[draftIdInProgress].exportReviewQueueItemId, queueIdInProgress);
+  assert.equal(byDraftId[draftIdInProgress].exportReviewQueueStatus, "in_progress");
+  assert.equal(byDraftId[draftIdResolved].exportReviewQueueItemId, queueIdResolved);
+  assert.equal(byDraftId[draftIdResolved].exportReviewQueueStatus, "resolved");
+  assert.equal(byDraftId[draftId].exportReviewQueueItemId, null);
+});
+
+test("Generated Drafts library index export-review row validator rejects a fabricated id/state combination as system_error", async () => {
+  const gkAdminActor = {
+    ...actorContext,
+    organizationMemberships: [{ organization_id: organizationId, membership_status: "active", role_name: "gk_admin" }],
+  };
+  const deps = {
+    env: enabledEnv,
+    async listGeneratedDraftLibraryIndex() {
+      return [draftRow({
+        export_review_queue_item_id: "00000000-0000-4000-8000-000000000901",
+        export_review_queue_status: "not_a_real_status",
+        export_review_status: "needs_gk_review",
+      })];
+    },
+  };
+  const result = await listGeneratedDraftLibraryIndex(
+    { organizationId, limit: 25, afterGeneratedContentDraftId: null, actorContext: gkAdminActor },
+    deps,
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "system_error");
+});
+
 test("Generated Drafts library service pins draftStatus=draft even for a resolved review lifecycle", async () => {
   const deps = {
     env: enabledEnv,
@@ -388,6 +510,17 @@ test("Generated Drafts read model is bounded, organization-scoped, deterministic
   assert.match(observed.sql, /LIMIT \$2::int/);
   assert.deepEqual(observed.params, [organizationId, 26, draftId]);
   assert.doesNotMatch(observed.sql, /\bINSERT\b|\bUPDATE\b|\bDELETE\b|\bTRUNCATE\b|FOR UPDATE/i);
+
+  // The batched export_review LEFT JOIN reuses the exact same organization +
+  // generated_content_draft_id -> 0-or-1-row relationship the single-draft
+  // read path (loadExportReviewQueueRows) already established, joined once
+  // across the whole page instead of a per-draft follow-up call.
+  assert.match(observed.sql, /LEFT JOIN kai\.review_queue_items eq/);
+  assert.match(observed.sql, /ON eq\.organization_id = d\.organization_id/);
+  assert.match(observed.sql, /AND eq\.queue_type = 'export_review'/);
+  assert.match(observed.sql, /AND eq\.target_object_type = 'generated_content_draft'/);
+  assert.match(observed.sql, /AND eq\.target_object_id = d\.generated_content_draft_id/);
+  assert.match(observed.sql, /eq\.review_queue_item_id::text AS export_review_queue_item_id/);
 });
 
 test("Generated Drafts review-label mapping reflects open/in_progress/resolved server states", () => {
