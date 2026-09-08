@@ -688,6 +688,54 @@ export function generatedContentReviewCompletePath(organizationId, generatedCont
     + `/generated-content-review-queue/${encodeURIComponent(reviewQueueItemId)}/complete`;
 }
 
+// P3-08's gk_admin-only export-review packet/start/complete/finalization
+// surface (frontend/gkExportReviewDetail.jsx) is a real, already-built page,
+// but it is only reachable by a caller who already holds its three path
+// identifiers - it is deliberately kept out of general navigation. The
+// export-review-request route below is the existing, accepted, gk_admin-only
+// way to obtain the third identifier (exportReviewQueueItemId) for a draft
+// whose generated-content review is already resolved/resolved: this
+// generates (or replays) the export_review queue row without duplicating
+// any P3-16/P3-17/P3-18/P3-19 eligibility logic. `gkExportReviewDetailPagePath`
+// below builds the exact page route (not an API path) index.js already
+// serves for that page, so the Impact Evidence Library can link straight to
+// it once the id is known.
+
+export function exportReviewRequestPath(organizationId, generatedContentDraftId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}`
+    + `/generated-content-drafts/${encodeURIComponent(generatedContentDraftId)}/export-review-request`;
+}
+
+export function exportReviewRequestBody(requestedExportAudience) {
+  return { requested_export_audience: requestedExportAudience };
+}
+
+export function gkExportReviewDetailPagePath(organizationId, generatedContentDraftId, exportReviewQueueItemId) {
+  return `/gk-admin/organizations/${encodeURIComponent(organizationId)}`
+    + `/generated-content-drafts/${encodeURIComponent(generatedContentDraftId)}`
+    + `/export-review-queue/${encodeURIComponent(exportReviewQueueItemId)}`;
+}
+
+// Mirrors canCompleteGeneratedContentReview's pattern: a pure, server-state-
+// only readiness gate. Export review can only ever be requested once the
+// generated-content review itself is fully resolved - never derived from
+// draftStatus or any other field.
+export function canRequestGeneratedDraftExportReview(packet) {
+  return !!packet && packet.queueStatus === "resolved" && packet.reviewStatus === "resolved";
+}
+
+// Projects the exact seven-key export-review-request result DTO
+// (kaiExportReviewService.js's EXPORT_REVIEW_RESULT_KEYS) into the minimal
+// shape this page renders - never a passthrough spread.
+export function projectExportReviewRequestResult(dto) {
+  if (!dto || typeof dto !== "object") return null;
+  return {
+    accepted: dto.exportReviewRequestAccepted === true,
+    exportReviewQueueItemId: typeof dto.reviewQueueItemId === "string" ? dto.reviewQueueItemId : null,
+    validatorResult: dto.validatorResult ?? null,
+  };
+}
+
 // KAI B1A-3B: Phase-5 sensitivity/consent/allowed-use review, reusing the
 // existing B1A-2/B1A-2R review-cockpit backend authority as-is. These three
 // routes take `organization_id` as a QUERY STRING parameter (the review-

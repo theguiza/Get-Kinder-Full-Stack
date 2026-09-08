@@ -897,7 +897,7 @@ test("A1C-1: projectTraceability reads the durable evidence/claim review decisio
   assert.equal(withoutDecisions.claimReviewDecision, null);
 });
 
-test("Impact Evidence Library source has only the Stage-A internal generation call and no assistant, export, or raw-source paths", () => {
+test("Impact Evidence Library source has only the Stage-A internal generation call, the governed export-review link, and no assistant, export-candidate, or raw-source paths", () => {
   const serviceSource = readFileSync("Backend/kai/services/kaiClaimLibraryService.js", "utf8");
   const readModelSource = readFileSync("Backend/kai/db/kaiClaimLibraryReadModels.js", "utf8");
   const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
@@ -913,7 +913,16 @@ test("Impact Evidence Library source has only the Stage-A internal generation ca
   assert.match(uiSource + logicSource, /generated-content-drafts\/evidence-summary/);
   assert.match(uiSource + logicSource, /claim_ids/);
   assert.match(uiSource + logicSource, /idempotency_key/);
-  assert.doesNotMatch(uiSource + logicSource, /\bPUT\b|\bPATCH\b|\bDELETE\b|assistant|export-review|export candidate/i);
+  // Website export/review UX successor: this page is now allowed to request
+  // (or replay) the existing gk_admin-only export-review queue item for a
+  // fully-reviewed draft and link to the existing gk-export-review-detail
+  // page - a governed link into an already-accepted flow, not a new
+  // export-generation mutation surface. `export candidate`, PUT/PATCH/DELETE,
+  // and `assistant` remain forbidden: this page still never creates export
+  // candidates, grants final release authority, or serializes/finalizes an
+  // export manifest itself.
+  assert.doesNotMatch(uiSource + logicSource, /\bPUT\b|\bPATCH\b|\bDELETE\b|assistant|export candidate/i);
+  assert.match(uiSource + logicSource, /export-review-request/);
   assert.doesNotMatch(uiSource + logicSource, /raw_content|signed_url|storage_object|api[_-]?key|secret/i);
 });
 

@@ -22357,3 +22357,154 @@ Phase-14 additional-format rendering block.
 
 **Local commit:** one bounded commit created after all required checks
 passed.
+
+## Website Export/Review UX — Impact Evidence Library link to the existing GK export-review page
+
+**Date:** 2026-09-08
+
+**Owner authorization (bounded, local-only):** owner product-priority
+decision selected "Website export/review UX" over the two composite-export
+candidates (grant response packet, board summary). Implement the smallest
+coherent package that surfaces the existing, already-built,
+`gk_admin`-only GK export-review detail page
+(`frontend/gkExportReviewDetail.jsx`, closed under P3-08 and already
+carrying all four closed Markdown/CSV/PDF/DOCX download links) from inside
+Impact Evidence Library, without creating any new export/composition
+logic, schema, or route. Grant response packet, board summary, artifact
+persistence, and production/push/deploy work were explicitly out of
+scope. Starting HEAD: `d37488e10e35c42a95bfa939e9fa09812e223c1c` (treated
+as USER_CONFIRMED, not a hard expected-HEAD gate); working tree clean.
+
+**Structural finding (from prior successor-discovery pass, not repeated
+here):** `frontend/gkExportReviewDetail.jsx` is fully built and reachable
+only via a deep link requiring three path identifiers
+(`organizationId`, `generatedContentDraftId`, `exportReviewQueueItemId`);
+its route (`index.js`, `/gk-admin/organizations/:organizationId/
+generated-content-drafts/:generatedContentDraftId/export-review-queue/
+:exportReviewQueueItemId`) is explicitly commented "Kept out of general
+navigation" (a pre-existing P3-08 design choice, not a defect). No UI
+anywhere previously obtained the third identifier
+(`exportReviewQueueItemId`): the accepted, `gk_admin`-only backend route
+`POST /admin/organizations/:organizationId/generated-content-drafts/
+:generatedContentDraftId/export-review-request`
+(`Backend/kai/routes/sprint2IntakeApi.js`, service
+`Backend/kai/services/kaiExportReviewService.js`,
+`EXPORT_REVIEW_ALLOWED_ROLES = new Set(["gk_admin"])`) already creates (or
+replays) the `export_review` queue row and returns it, but no frontend
+file called it. This was the concrete, missing link between the just-
+closed format-rendering work and the existing website UX.
+
+**Change (frontend only, no backend/schema/route touched):**
+`frontend/impactEvidenceLibraryLogic.js` gained four pure additions:
+`exportReviewRequestPath`/`exportReviewRequestBody` (the existing accepted
+route/body shape, unchanged server-side), `gkExportReviewDetailPagePath`
+(builds the exact existing P3-08 page route), `canRequestGeneratedDraftExportReview`
+(a pure readiness gate mirroring `canCompleteGeneratedContentReview`'s
+convention - true only once the generated-content review queue item is
+`resolved`/`resolved`), and `projectExportReviewRequestResult` (an exact
+allowlist projection of `kaiExportReviewService.js`'s seven-key
+`EXPORT_REVIEW_RESULT_KEYS` DTO into the three fields this page renders -
+never a passthrough spread). `frontend/ImpactEvidenceLibrary.jsx` gained
+one new per-draft state pair (`exportReviewRequestPending`,
+`exportReviewRequestResult`, reset on organization change and on every
+selected-draft change, matching the existing claim-review-form reset
+convention - a stale link/blocker can never survive a draft switch), one
+new callback (`requestExportReview`, calling the existing route with the
+draft's own already-recorded `requestedAudience`, never a new audience
+picker), and, inside the existing "Generated draft" card, a "Request
+Export Review" button (shown only once
+`canRequestGeneratedDraftExportReview` is true), an "Open GK Export
+Review" link to the exact existing P3-08 page once the request is
+accepted, and a blocked-state row rendering the server's own
+`validatorResult` verbatim (no new blocker-code vocabulary invented).
+
+**Governance preserved:** `GK-admin-only export/finalization authority`
+is unchanged - the request route's authority check
+(`EXPORT_REVIEW_ALLOWED_ROLES = new Set(["gk_admin"])`) and the
+destination page's `ensureAdmin` route guard are both untouched; this
+page does not add any client-side role gate of its own (matching the
+codebase's existing convention - no other control in
+`ImpactEvidenceLibrary.jsx` role-gates on the frontend either - server-
+side authorization is authoritative everywhere in this page already). No
+P3-16 currentness, P3-17 authority, P3-18 eligibility, P3-19 manifest, or
+tenant-scoping logic is duplicated or reimplemented: the new button only
+calls the existing `requestGeneratedDraftExportReview` service function
+and renders exactly what it returns. No arbitrary concatenation of
+Markdown/PDF/DOCX files exists anywhere in this diff - the destination
+page's own existing download links are untouched. Generated Drafts/Review
+Queue visibility on this page is unchanged (existing draft list, packet,
+and start/complete-review controls untouched; the new controls are purely
+additive within the existing packet card). Impact Evidence Library remains
+the one user-facing destination - no new page, no new route, no new entry
+point was added.
+
+**Test-guard updates (additive, not reopened):** two pre-existing
+mutation-surface guard tests
+(`__tests__/kai-sprint2-impact-evidence-library.spec.js` and
+`__tests__/kai-sprint2-uat-enablement-frontend.spec.js`) previously
+forbade the literal token `export-review` anywhere in
+`ImpactEvidenceLibrary.jsx`/`impactEvidenceLibraryLogic.js` (written before
+this page had any export-review concept). Both updated to drop only
+`export-review` from the forbidden pattern - `export candidate`,
+`assistant`, and PUT/PATCH/DELETE remain forbidden in both, and one gained
+a positive assertion that `export-review-request` (the exact accepted
+route segment) is present - since a governed link into the existing,
+already-authorized export-review flow is not a new export-generation
+mutation surface, exactly the same reasoning already applied when PDF/DOCX
+were dropped from `gkExportReviewDetail.jsx`'s own guard in the prior two
+packages.
+
+**New tests:**
+`__tests__/kai-sprint2-impact-library-export-review-link-boundary.spec.js`
+(new, 7 tests): exact request-route/body/page-route construction,
+readiness-gate true only on `resolved`/`resolved`, accepted-result
+projection to exactly the three rendered fields, blocked-result projection
+never fabricating a queue-item id, and malformed/absent-DTO handling
+returning `null` rather than a partial object - all passing.
+
+**Verification:** `DATABASE_URL` set to a non-listening loopback sentinel
+for every Node/npm command (no database reached). New-package focused run
+(the 7 new tests) -> 7 passed, 0 failed. Directly affected regression run
+(`kai-sprint2-impact-evidence-library.spec.js`,
+`kai-sprint2-impact-library-kai-frontend.spec.js`,
+`kai-sprint2-impact-library-kai-surface.spec.js`,
+`impact-library-view.spec.js`,
+`kai-sprint2-impact-library-export-review-link-boundary.spec.js`,
+`kai-sprint2-p3-08-gk-export-review-detail.spec.js`,
+`kai-sprint2-uat-enablement-frontend.spec.js`,
+`kai-sprint2-p3-05-export-review-request-boundary.spec.js`,
+`kai-sprint2-p3-06-export-review-packet-boundary.spec.js`,
+`kai-sprint2-p3-09-export-review-start-boundary.spec.js`,
+`kai-sprint2-p3-13-export-review-completion-boundary.spec.js`,
+`kai-sprint2-pass2-route-runtime.spec.js`,
+`kai-sprint2-api-contract.spec.js`) -> all passed, 0 failed. Full
+repository suite (`npm test`) -> 3494 passed, 7 failed (the exact same 4
+distinct pre-existing failures already confirmed present and unrelated to
+export/KAI code in every prior package in this track - `the child-file
+read model is tenant-scoped...`, `assembled production middleware and
+router enforce the batch-files collection contract`, `the direct
+file-detail service returns exactly the 15-field allowlist`, `assembled
+production middleware and router enforce the file-detail contract` - 0
+newly introduced failures), 61 skipped. `npm run build` (Vite) succeeded
+with no errors. `git diff --check` passed with no whitespace errors.
+
+**Final diff review:** confined to `frontend/ImpactEvidenceLibrary.jsx`,
+`frontend/impactEvidenceLibraryLogic.js`,
+`public/js/bundles/entry.js` (Vite rebuild), one new test file, two
+additively-updated test files, and this ExecPlan. No backend route,
+service, repository, schema, or migration file was created or edited; no
+production database was accessed, mutated, or migrated; nothing was
+pushed or deployed; no Current State or Implementation Baseline update was
+made; no composite-export (grant response packet, board summary) code
+exists anywhere in this diff.
+
+**Remaining work:** composite exports (grant response packet, board
+summary) remain unstarted; whether persistent/reusable artifact handling
+is ever required remains NOT_CONFIRMED and was not invented here; further
+website export/review UX depth (e.g., surfacing export-review state in the
+Generated Drafts list view itself, rather than only inside the selected-
+draft packet card) was left for a future owner-prioritized package rather
+than expanded here beyond the smallest coherent link.
+
+**Local commit:** one bounded commit created after all required checks
+passed.

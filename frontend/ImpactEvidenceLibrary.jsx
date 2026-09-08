@@ -31,6 +31,11 @@ import {
   evidenceReviewCompletePath,
   evidenceReviewDecisionBody,
   evidenceReviewDecisionValidationError,
+  canRequestGeneratedDraftExportReview,
+  exportReviewRequestBody,
+  exportReviewRequestPath,
+  gkExportReviewDetailPagePath,
+  projectExportReviewRequestResult,
   generatedContentReviewCompletePath,
   generatedContentReviewStartPath,
   generatedDraftLibraryIndexPath,
@@ -167,6 +172,13 @@ export default function ImpactEvidenceLibrary() {
   const [loadingTraceability, setLoadingTraceability] = useState(false);
   const [generatingDraft, setGeneratingDraft] = useState(false);
   const [reviewTransitionPending, setReviewTransitionPending] = useState(false);
+  // Website export/review UX successor: this is a client-side memo of the
+  // gk_admin-only export-review-request result for the currently selected
+  // draft only - never persisted, never treated as durable state, and
+  // always reset whenever the selected draft (or organization) changes so
+  // a stale link/blocker can never survive a draft switch.
+  const [exportReviewRequestPending, setExportReviewRequestPending] = useState(false);
+  const [exportReviewRequestResult, setExportReviewRequestResult] = useState(null);
   const [message, setMessage] = useState("");
   const [sourceVersionId, setSourceVersionId] = useState("");
   const [coverageAssessment, setCoverageAssessment] = useState(null);
@@ -385,6 +397,8 @@ export default function ImpactEvidenceLibrary() {
     setSelectedGenerationClaimIds(next.selectedGenerationClaimIds);
     setTraceability(next.traceability);
     setGeneratedDraftPacket(next.generatedDraftPacket);
+    setExportReviewRequestPending(false);
+    setExportReviewRequestResult(null);
     setSensitivityCapability(null);
     setSensitivityCapabilityRequestState("idle");
     setSensitivityDetail(null);
@@ -661,6 +675,14 @@ export default function ImpactEvidenceLibrary() {
     if (organizationId) loadGeneratedDrafts();
   }, [organizationId, loadGeneratedDrafts]);
 
+  // A different selected draft must never carry over a previous draft's
+  // export-review-request outcome (link or blockers) - same convention as
+  // the claim-review form reset on selectedClaimId above.
+  useEffect(() => {
+    setExportReviewRequestPending(false);
+    setExportReviewRequestResult(null);
+  }, [selectedGeneratedDraftId]);
+
   const loadRequirementsReadiness = useCallback(async () => {
     if (!organizationId) return;
     setLoadingRequirementsReadiness(true);
@@ -858,6 +880,29 @@ export default function ImpactEvidenceLibrary() {
     await loadGeneratedDrafts();
     setReviewTransitionPending(false);
   }, [generatedDraftPacket, organizationId, refetchGeneratedDraftPacket, loadGeneratedDrafts, reviewTransitionPending]);
+
+  // Requests (or replays) the existing gk_admin-only export-review queue
+  // item for the currently selected, fully-reviewed draft. This never
+  // recomputes P3-16/P3-17/P3-18/P3-19 eligibility itself - it only calls
+  // the accepted requestGeneratedDraftExportReview route and renders exactly
+  // what it returns: either the identifier needed to reach the existing
+  // gk-export-review-detail page, or the server's own blocker payload.
+  const requestExportReview = useCallback(async () => {
+    if (!generatedDraftPacket || exportReviewRequestPending) return;
+    if (!canRequestGeneratedDraftExportReview(generatedDraftPacket)) return;
+    setExportReviewRequestPending(true);
+    setMessage("");
+    const result = await postJson(
+      exportReviewRequestPath(organizationId, generatedDraftPacket.generatedContentDraftId),
+      exportReviewRequestBody(generatedDraftPacket.requestedAudience),
+    );
+    setExportReviewRequestPending(false);
+    if (result.statusCode !== 200 && result.statusCode !== 201) {
+      setMessage(errorText(result));
+      return;
+    }
+    setExportReviewRequestResult(projectExportReviewRequestResult(result.body?.data));
+  }, [generatedDraftPacket, organizationId, exportReviewRequestPending]);
 
   const runExtractEvidence = useCallback(async () => {
     if (!organizationId || !sourceVersionId || workflowPending) return;
@@ -2285,6 +2330,34 @@ export default function ImpactEvidenceLibrary() {
                 >
                   Complete Review
                 </button>
+              ) : null}
+              {canRequestGeneratedDraftExportReview(generatedDraftPacket) ? (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-outline-primary mt-2"
+                  onClick={requestExportReview}
+                  disabled={exportReviewRequestPending}
+                >
+                  Request Export Review
+                </button>
+              ) : null}
+              {exportReviewRequestResult?.accepted && exportReviewRequestResult.exportReviewQueueItemId ? (
+                <a
+                  className="btn btn-sm btn-outline-secondary mt-2 ms-2"
+                  href={gkExportReviewDetailPagePath(
+                    organizationId,
+                    generatedDraftPacket.generatedContentDraftId,
+                    exportReviewRequestResult.exportReviewQueueItemId,
+                  )}
+                >
+                  Open GK Export Review
+                </a>
+              ) : null}
+              {exportReviewRequestResult && !exportReviewRequestResult.accepted ? (
+                <ValueRow
+                  label="Export review blocked"
+                  value={JSON.stringify(exportReviewRequestResult.validatorResult)}
+                />
               ) : null}
               <h6 className="mt-3">Blocks</h6>
               {generatedDraftPacket.blocks.map((block) => (

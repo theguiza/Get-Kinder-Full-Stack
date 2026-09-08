@@ -366,7 +366,7 @@ test("KAI UAT-enablement evidence/claim review controls send only the server-sup
   );
 });
 
-test("KAI UAT-enablement new frontend surfaces add no export, assistant, eligibility, or unsafe-field composition", () => {
+test("KAI UAT-enablement new frontend surfaces add no export-candidate, assistant, eligibility, or unsafe-field composition", () => {
   const nonUploadSources = [
     readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8"),
     readFileSync("frontend/impactEvidenceLibraryLogic.js", "utf8"),
@@ -385,7 +385,13 @@ test("KAI UAT-enablement new frontend surfaces add no export, assistant, eligibi
   assert.doesNotMatch(nonUploadSources, /\bPUT\b|\bPATCH\b|\bDELETE\b/);
   assert.doesNotMatch(uploadSources, /\bPATCH\b|\bDELETE\b/);
 
-  assert.doesNotMatch(allSources, /export-review|export candidate|assistant/i);
+  // Website export/review UX successor: ImpactEvidenceLibrary.jsx/
+  // impactEvidenceLibraryLogic.js are now allowed to request (or replay) the
+  // existing gk_admin-only export-review queue item for a fully-reviewed
+  // draft and link to the existing gk-export-review-detail page - a link
+  // into an already-accepted flow, not a new export-generation mutation
+  // surface. `export candidate` and `assistant` remain forbidden everywhere.
+  assert.doesNotMatch(allSources, /export candidate|assistant/i);
   assert.doesNotMatch(allSources, /raw_content|storage_object|storage_uri|storage_bucket|api[_-]?key|secret/i);
   assert.doesNotMatch(allSources, /computeEligibility|calculateEligibility|isEligible\s*=\s*(?!.*server)/i);
   assert.doesNotMatch(allSources, /console\.(log|warn|error)\([^)]*(upload_url|uploadUrl|signed)/i);
