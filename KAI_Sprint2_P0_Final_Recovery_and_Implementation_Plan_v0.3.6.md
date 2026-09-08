@@ -21974,3 +21974,187 @@ passed.
 **Remaining work (unchanged):** PDF and DOCX evidence-format rendering are
 the next Phase-14 additional-format candidates; this closure does not
 start either.
+
+## PDF Evidence Export — second Phase-14 additional export format
+
+**Date:** 2026-09-08
+
+**Owner authorization (bounded, local-only):** implement the first governed
+PDF export path by reusing the existing exact export-manifest/render-model
+architecture (`composeExportManifestRenderModel` -> PDF-specific
+serializer -> governed exact-manifest PDF delivery route -> same-session
+and historical exact PDF download links), matching the accepted Markdown/
+CSV pattern. DOCX, composite exports, artifact persistence, schema/
+migration, and production/push/deploy work were explicitly out of scope.
+
+**Starting repository evidence:** branch `main`, HEAD `de87ef4` (the exact
+commit the CSV formula-injection closure produced), working tree clean.
+
+**PDF library:** `pdfkit@0.20.2` (MIT license) was added as a new
+`dependencies` entry — no existing repository dependency renders PDFs
+from structured content; the only prior PDF-adjacent dependency,
+`mupdf`, is a PDF *reader*/assessor used exclusively by the upload
+malware/structure-assessment worker
+(`Backend/kai/validators/pdfAssessorWorkerThread.js`) and has no
+document-authoring API suited to headings/wrapped text/page breaks.
+pdfkit is pure-JS (no headless browser, no external/cloud conversion
+service), ships its own built-in Helvetica fonts (no custom font asset
+needed), and natively supports margins, heading hierarchy, wrapped body
+text, and automatic page breaks. `mupdf` was reused, not duplicated, as a
+read-side verification tool in the new PDF tests (structured-text
+extraction to assert visible content/ordering) — no second PDF-generation
+dependency was introduced.
+
+**Render-model reuse:** `Backend/kai/services/kaiExportManifestPdfSerializer.js`
+(new) exports `serializeExportManifestRenderModelToPdf(renderModel)` (pure,
+one-argument, throws `TypeError` on a malformed render-model DTO, returns a
+`Buffer`) and the thin wrapper `serializeExportManifestToPdf(input,
+dependencies)`, which calls the existing, untouched
+`composeExportManifestRenderModel` and returns PDF bytes only after
+governed success — structurally identical to
+`kaiExportManifestMarkdownSerializer.js`/`kaiExportManifestCsvSerializer.js`.
+No KAI table is queried, no raw file is read, no claim/evidence eligibility
+is recomputed, the Markdown route is never called, and no currentness/
+authority/tenant logic is duplicated - the serializer only reads the
+already-composed render-model DTO's `content.blocks`, `citations`,
+`methodNotes.limitationEntries`, and `exportCandidate.contentType`/
+`requestedAudience` (never `exportCandidateId`, `generatedContentDraftId`,
+`limitationSnapshotId`, `canonicalFingerprint`, `manifest`, or `authority`
+- the same internal-metadata boundary the accepted Markdown/CSV serializers
+already enforce).
+
+**PDF content and layout:** Title, contract/content-type/audience header
+lines, a "Content" section with one heading per block in ordinal order
+(body text wrapped, citation markers rendered inline as
+`References: [CIT-###] ...`), a "Citation Appendix" section (one bulleted
+entry per citation, `none` when empty), and a "Limitations and Method
+Notes" section (one bulleted entry per limitation, `none` when empty) -
+the same section structure and hidden-field boundary as the Markdown
+serializer, using 54pt margins, Helvetica/Helvetica-Bold at two heading
+levels, and pdfkit's built-in automatic page-break/text-wrapping (`bufferPages:
+true`, `pdfVersion: "1.7"`).
+
+**Determinism:** `PDFSecurity.generateFileID` (pdfkit's internal trailer
+`/ID` generator) hashes only the PDF `Info` dictionary's own key/value
+pairs - no random bytes, timestamp-of-render, or process state - so fixing
+`CreationDate` to a constant (`new Date(0)`) plus fixed `Producer`/
+`Creator` values made file-ID generation, and therefore the entire byte
+stream (object ordering, xref offsets, deflate-compressed stream bytes),
+fully reproducible for a given render model. Verified empirically:
+serializing the same render-model DTO twice produced `Buffer.equals ===
+true` in every test run (single-block and 80-block/multi-page cases).
+`PDF_SEMANTIC_DETERMINISM: PASS`, `PDF_BYTE_DETERMINISM: PASS` (confirmed,
+not merely asserted - see verification below).
+
+**Delivery route:** `GET /admin/organizations/:organizationId/export-manifests/:exportManifestId/pdf`
+added immediately after the existing CSV route in
+`Backend/kai/routes/sprint2IntakeApi.js`, reusing the existing Sprint-2
+actor-context middleware, the existing `exportManifestIdentifiers` exact
+UUID validator, and the existing `sendServiceResult`/`sendKaiError`
+convention. `sendPdfAttachment` mirrors `sendMarkdownAttachment`/
+`sendCsvAttachment`: `Content-Type: application/pdf`, a fixed
+`Content-Disposition: attachment; filename="kai-export-manifest.pdf"` (no
+client-supplied filename/query value ever reaches the header), no bytes
+persisted, no signed/artifact URL. Route source contains no SQL and no
+direct `kai.*` access (proved by the same route-slice regression assertion
+used for Markdown/CSV).
+
+**Frontend:** `exportManifestPdfPath` added to
+`frontend/gkExportReviewDetailLogic.js`; `frontend/gkExportReviewDetail.jsx`
+renders a "Download PDF" link next to the existing Markdown/CSV links for
+both the current-session finalization (`exportManifestId` state, gated
+identically to the existing links) and every entry in
+`exportManifestHistory` (one link per exact `entry.exportManifestId`, no
+latest/current/preferred selection, no change to Prepare/Grant/Finalize
+gating).
+
+**Tests:** three new files -
+`__tests__/kai-sprint2-export-manifest-pdf-representation-boundary.spec.js`
+(13 tests: malformed-input rejection, valid-PDF-signature/byte-determinism,
+block order, citation markers + appendix, limitations/method notes,
+80-block multi-page non-truncation via `mupdf` page-count/structured-text
+verification, hidden-field/private-material boundary, pure-source
+boundary, wrapper reuse, stale-currentness propagation, AI/system-actor
+denial), `__tests__/kai-sprint2-authorized-pdf-export-delivery-route.spec.js`
+(8 tests: exact single route, correct content-type/disposition/bytes,
+client-filename immunity, upstream-error propagation with no attachment,
+auth/malformed-identifier rejection before service call, AI/system-actor
+denial, malformed-success no-attachment, no-SQL/no-artifact source
+boundary), `__tests__/kai-sprint2-export-manifest-pdf-frontend-download-links.spec.js`
+(5 tests: exact path, current-session and per-history-entry link
+presence alongside the untouched Markdown/CSV links, unchanged
+Prepare/Grant/Finalize gating, no client-side selection logic) - 26 new
+tests, all passing.
+
+**Regressions repaired additively (pre-existing test surface, not
+reopened):** `__tests__/kai-sprint2-p3-08-gk-export-review-detail.spec.js`'s
+frontend-mutation-surface guard previously forbade the literal token `pdf`
+in `gkExportReviewDetail.jsx` (written before PDF was an accepted format);
+updated to drop only `pdf` from the forbidden pattern (docx/artifact-bytes/
+signed-url remain forbidden) since a governed PDF *download link* is not a
+new mutation surface. `__tests__/kai-sprint2-pass2-route-runtime.spec.js`'s
+full-route-inventory contract test added the new PDF route path
+additively (every prior entry preserved verbatim). Neither Markdown nor
+CSV serializer/route/test content was changed.
+
+**Verification:** `DATABASE_URL` set to a non-listening loopback sentinel
+for every Node/npm command (no database reached). New-package focused run
+(three new PDF test files) -> 26 passed, 0 failed. Directly affected
+regression run (`kai-sprint2-export-manifest-render-model-composition-boundary.spec.js`,
+`kai-sprint2-export-manifest-markdown-representation-boundary.spec.js`,
+`kai-sprint2-authorized-markdown-export-delivery-route.spec.js`,
+`kai-sprint2-export-manifest-csv-representation-boundary.spec.js`,
+`kai-sprint2-authorized-csv-export-delivery-route.spec.js`,
+`kai-sprint2-formula-injection-boundary.spec.js`,
+`kai-sprint2-p3-08-gk-export-review-detail.spec.js`,
+`kai-sprint2-gk-export-review-governed-finalization-control.spec.js`,
+`kai-sprint2-p3-20-export-manifest-review-binding-boundary.spec.js`,
+`kai-sprint2-durable-export-manifest-read-recovery-boundary.spec.js`,
+`kai-sprint2-governed-export-finalization-route.spec.js`,
+`kai-sprint2-p3-export-operational-composition-route.spec.js`, plus the
+three new PDF files) -> 159 passed, 0 failed. Full repository suite
+(`npm test`) -> 3459 passed, 7 failed (the exact same 4 distinct
+pre-existing failures already confirmed present and unrelated to
+export/KAI code in every prior package in this track - `the child-file
+read model is tenant-scoped...`, `assembled production middleware and
+router enforce the batch-files collection contract`, `the direct
+file-detail service returns exactly the 15-field allowlist`, `assembled
+production middleware and router enforce the file-detail contract` - 0
+newly introduced failures), 61 skipped. `npm run build` (Vite) succeeded
+with no errors. `git diff --check` passed with no whitespace errors.
+
+**Final diff review:** confined to
+`Backend/kai/routes/sprint2IntakeApi.js`,
+`Backend/kai/services/kaiExportManifestPdfSerializer.js` (new),
+`frontend/gkExportReviewDetail.jsx`, `frontend/gkExportReviewDetailLogic.js`,
+`package.json`/`package-lock.json` (one new dependency, `pdfkit@0.20.2`),
+`public/js/bundles/entry.js` (Vite rebuild), three new test files, two
+additively-updated test files, and this ExecPlan. No schema or migration
+file was created or edited; no artifact-persistence/storage, cloud
+configuration, Current State, Implementation Baseline, credential/secret,
+or second export-governance path exists anywhere in this diff; no DOCX or
+composite-export path exists anywhere in this diff; no new page was
+added; the Website Export/Review UX block was not touched; Markdown and
+CSV serializer/route behavior is byte-for-byte unchanged. No production
+database was accessed, mutated, or migrated; nothing was pushed or
+deployed.
+
+**Governance preserved:** `KAI_SPRINT2_ENABLED`/`KAI_GENERATION_ENABLED`/
+`KAI_PUBLIC_EXPORT_ENABLED`, P3-16 currentness, P3-17 authority, P3-18
+final eligibility, P3-19 export-manifest semantics, P3-20 manifest
+history/binding, tenant isolation, human-only release authority,
+service-layer boundaries, structured blockers, and metadata-only audit
+boundaries are all unchanged - the PDF wrapper calls the same
+`composeExportManifestRenderModel` gate every other format calls, so an
+AI/system actor or a stale/superseded candidate is rejected before any PDF
+byte is produced, proved by dedicated tests.
+
+**Remaining work:** DOCX evidence-format rendering (same render-model-reuse
+pattern, a structurally independent peer of the Markdown/CSV/PDF
+packages); the complete website export/review UX block (Impact Evidence
+Library Generated Drafts/Review Queue); composite exports (grant response
+packet, board summary); and whether persistent/reusable artifact handling
+is ever required remains NOT_CONFIRMED and was not invented here.
+
+**Local commit:** one bounded commit created after all required checks
+passed.

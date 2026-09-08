@@ -17,6 +17,7 @@ import {
   exportCandidatePath,
   exportManifestCsvPath,
   exportManifestMarkdownPath,
+  exportManifestPdfPath,
   exportManifestsPath,
   finalReleaseAuthorityPath,
   getJson,
@@ -121,6 +122,12 @@ function HistoricalManifests({ organizationId, exportManifestHistory }) {
               href={exportManifestCsvPath(organizationId, entry.exportManifestId)}
             >
               Download CSV Evidence Appendix
+            </a>
+            <a
+              className="gk-export-review-download-pdf-link"
+              href={exportManifestPdfPath(organizationId, entry.exportManifestId)}
+            >
+              Download PDF
             </a>
           </li>
         ))}
@@ -411,6 +418,14 @@ export default function GkExportReviewDetail({
                 href={exportManifestCsvPath(organizationId, exportManifestId)}
               >
                 Download CSV Evidence Appendix
+              </a>
+            ) : null}
+            {exportManifestId ? (
+              <a
+                className="gk-export-review-download-pdf-link"
+                href={exportManifestPdfPath(organizationId, exportManifestId)}
+              >
+                Download PDF
               </a>
             ) : null}
           </section>

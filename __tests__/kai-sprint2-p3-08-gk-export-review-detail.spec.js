@@ -290,7 +290,11 @@ test("P3-08 frontend source issues only the accepted queue-transition and govern
   assert.doesNotMatch(source, /\bmethod:\s*["'](PUT|PATCH|DELETE)["']/i);
   assert.doesNotMatch(source, /putJson|patchJson|deleteJson/i);
   assert.doesNotMatch(source, /\b(approve|reject|mark-ready|markReady)\b/i);
-  assert.doesNotMatch(source, /finalGate\s*=\s*true|VAL-EXP-001.*=.*(true|false)|pdf|docx|artifact_bytes|signed_url/i);
+  // "pdf" is no longer a forbidden token here: the governed PDF export
+  // delivery route (same render-model-reuse pattern as the existing
+  // Markdown/CSV download links) was accepted as a Phase-14 format. "docx",
+  // artifact-byte, and signed-url surfaces remain forbidden - none exist.
+  assert.doesNotMatch(source, /finalGate\s*=\s*true|VAL-EXP-001.*=.*(true|false)|docx|artifact_bytes|signed_url/i);
   assert.match(source, /Why can KAI say this\?/);
 });
 

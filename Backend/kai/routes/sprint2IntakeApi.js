@@ -67,6 +67,7 @@ let humanAuthorityDecisionServicePromise = null;
 let exportManifestServicePromise = null;
 let exportManifestMarkdownServicePromise = null;
 let exportManifestCsvServicePromise = null;
+let exportManifestPdfServicePromise = null;
 let evidenceLineageServicePromise = null;
 let evidenceCoverageAssessmentServicePromise = null;
 let claimProposalServicePromise = null;
@@ -229,6 +230,8 @@ const EXPORT_MANIFEST_MARKDOWN_ATTACHMENT_FILENAME = "kai-export-manifest.md";
 const EXPORT_MANIFEST_MARKDOWN_CONTENT_TYPE = "text/markdown; charset=utf-8";
 const EXPORT_MANIFEST_CSV_ATTACHMENT_FILENAME = "kai-export-manifest-evidence-appendix.csv";
 const EXPORT_MANIFEST_CSV_CONTENT_TYPE = "text/csv; charset=utf-8";
+const EXPORT_MANIFEST_PDF_ATTACHMENT_FILENAME = "kai-export-manifest.pdf";
+const EXPORT_MANIFEST_PDF_CONTENT_TYPE = "application/pdf";
 
 function sendMarkdownAttachment(res, result) {
   if (!result?.ok) return sendServiceResult(res, result);
@@ -250,6 +253,17 @@ function sendCsvAttachment(res, result) {
   res.setHeader("Content-Type", EXPORT_MANIFEST_CSV_CONTENT_TYPE);
   res.setHeader("Content-Disposition", `attachment; filename="${EXPORT_MANIFEST_CSV_ATTACHMENT_FILENAME}"`);
   return res.send(csv);
+}
+
+function sendPdfAttachment(res, result) {
+  if (!result?.ok) return sendServiceResult(res, result);
+  const pdf = Buffer.isBuffer(result.data?.pdf) ? result.data.pdf : null;
+  if (pdf == null) return sendKaiError(res, "system_error");
+
+  res.status(200);
+  res.setHeader("Content-Type", EXPORT_MANIFEST_PDF_CONTENT_TYPE);
+  res.setHeader("Content-Disposition", `attachment; filename="${EXPORT_MANIFEST_PDF_ATTACHMENT_FILENAME}"`);
+  return res.send(pdf);
 }
 
 function safeAuthenticatedUser(req = {}) {
@@ -1326,6 +1340,12 @@ async function getExportManifestCsvService() {
   return exportManifestCsvServicePromise;
 }
 
+async function getExportManifestPdfService() {
+  if (intakeServiceOverride?.serializeExportManifestToPdf) return intakeServiceOverride;
+  exportManifestPdfServicePromise ||= import("../services/kaiExportManifestPdfSerializer.js");
+  return exportManifestPdfServicePromise;
+}
+
 function exportManifestIdentifiers(req = {}) {
   const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
   const exportManifestId = typeof req.params?.exportManifestId === "string"
@@ -1373,6 +1393,30 @@ router.get(
     try {
       const service = await getExportManifestCsvService();
       return sendCsvAttachment(res, await service.serializeExportManifestToCsv({
+        organizationId: identifiers.organizationId,
+        exportManifestId: identifiers.exportManifestId,
+        actorContext: sprint2MappedActorContext(req),
+      }));
+    } catch (error) {
+      console.error("[kai-sprint2-intake] system_error", error);
+      return sendKaiError(res, "system_error");
+    }
+  },
+);
+
+router.get(
+  "/admin/organizations/:organizationId/export-manifests/:exportManifestId/pdf",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    const identifiers = exportManifestIdentifiers(req);
+    if (!identifiers) {
+      return sendKaiError(res, "validation_blocker", {
+        blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id_or_export_manifest_id")],
+      });
+    }
+    try {
+      const service = await getExportManifestPdfService();
+      return sendPdfAttachment(res, await service.serializeExportManifestToPdf({
         organizationId: identifiers.organizationId,
         exportManifestId: identifiers.exportManifestId,
         actorContext: sprint2MappedActorContext(req),
@@ -3474,6 +3518,7 @@ export const __testables = {
   exportManifestIdentifiers,
   sendMarkdownAttachment,
   sendCsvAttachment,
+  sendPdfAttachment,
   exportReviewPacketIdentifiers,
   sprint2MappedActorContext,
   validateStartExportReviewRequestOrSend,

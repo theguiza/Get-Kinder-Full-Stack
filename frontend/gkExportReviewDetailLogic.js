@@ -68,6 +68,11 @@ export function exportManifestCsvPath(organizationId, exportManifestId) {
     + `/export-manifests/${exportManifestId}/csv`;
 }
 
+export function exportManifestPdfPath(organizationId, exportManifestId) {
+  return `${BASE_PATH}/admin/organizations/${organizationId}`
+    + `/export-manifests/${exportManifestId}/pdf`;
+}
+
 async function readJson(response) {
   try {
     return await response.json();
