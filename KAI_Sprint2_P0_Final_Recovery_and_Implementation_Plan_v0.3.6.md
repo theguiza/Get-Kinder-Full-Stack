@@ -21733,3 +21733,135 @@ browser proof: NOT_CONFIRMED. This closure evidence was supplied and
 confirmed separately from this turn's own tool execution and is recorded
 here only to reconcile the living ExecPlan's final entry - it was not
 regenerated or reverified in this turn.
+
+## CSV Evidence Appendix — first Phase-14 additional export format
+
+**Date:** 2026-09-08
+
+**Owner authorization (bounded, local-only):** the durable
+`exportManifestHistory` render-model field and the format-neutral
+export-manifest render model were already established. Dependency
+inspection proved PDF, DOCX, and CSV evidence appendix are technically
+independent peers of the existing format-neutral render model - none is a
+structural prerequisite of another, and no persistent artifact-byte storage
+is required (Markdown itself is proof: it is regenerated on demand by a
+pure serializer from the render model, never read from stored bytes). Per
+the ExecPlan's own explicit instruction not to pick a peer format
+arbitrarily, the owner was asked which format to implement first and chose
+CSV evidence appendix. Authorized: one new pure CSV serializer module, one
+new governed delivery route mirroring the existing Markdown route exactly,
+directly coupled frontend Download links reusing the existing
+`exportManifestId`/`exportManifestHistory` state (no new client-side
+rendering or governance logic), their tests, this ExecPlan update, `git
+diff` inspection, and one bounded local commit. Not authorized: schema/
+migration changes, a new export-governance path, PDF/DOCX, artifact-byte
+persistence/storage, a new page, the Website Export/Review UX block,
+production access, or push/deploy.
+
+**Starting repository evidence:** branch `main`, HEAD
+`b5186ad1d87810234c3dbde0ea58d2a7908ba480` (the exact commit the prior
+Export Manifest History UI package produced), working tree clean.
+
+**Design decision:** `Backend/kai/services/kaiExportManifestCsvSerializer.js`
+mirrors `kaiExportManifestMarkdownSerializer.js` exactly: a pure
+`serializeExportManifestRenderModelToCsv(renderModel)` function that accepts
+only the existing format-neutral render-model DTO (the same
+`validateRenderModel` shape check as the Markdown serializer) and a thin
+`serializeExportManifestToCsv(input, dependencies)` wrapper that reuses the
+unmodified `composeExportManifestRenderModel` service - the exact same
+P3-16 currentness, P3-17 authority, and tenant-scoping gates the Markdown
+path already enforces, never duplicated. The CSV evidence appendix is one
+row per `renderModel.citations` entry (`citation_ref, claim_id,
+evidence_item_id, source_id, source_version_id, limitation_codes`), in the
+render model's own deterministic citation order, with `limitation_codes`
+joined from the matching `methodNotes.limitationEntries` by `citationRef` -
+the exact same citation/limitation relationship the Markdown Citation
+Appendix and Limitations section already expose, just tabular. CSV fields
+are RFC-4180-style escaped (quoted on comma/quote/newline). No new field is
+invented, no manifest/candidate/authority/fingerprint identifier is
+exposed, and no selection (latest/current/preferred) is made among
+citations or manifests.
+
+**Backend:** `Backend/kai/routes/sprint2IntakeApi.js` gains one new route,
+`GET /admin/organizations/:organizationId/export-manifests/:exportManifestId/csv`,
+built from the exact same `exportManifestIdentifiers`/
+`sprint2ActorContextMiddleware`/`sprint2MappedActorContext` helpers as the
+existing Markdown route, delegating to the new
+`serializeExportManifestToCsv` service and a new `sendCsvAttachment`
+responder (mirroring `sendMarkdownAttachment`) that streams
+`kai-export-manifest-evidence-appendix.csv` as `text/csv; charset=utf-8`.
+No manifest/candidate write path, schema, or second governance path was
+touched or created.
+
+**Frontend:** `frontend/gkExportReviewDetailLogic.js` gains
+`exportManifestCsvPath(organizationId, exportManifestId)`, mirroring
+`exportManifestMarkdownPath`. `frontend/gkExportReviewDetail.jsx` adds one
+"Download CSV Evidence Appendix" link next to the existing "Download
+Markdown" link in both the current-session manifest section and the
+unconditional `HistoricalManifests` history list - reusing the exact same
+`exportManifestId`/`exportManifestHistory` state this page already reads,
+with no new mutation, no new client-side eligibility/authority/rendering
+logic, and no entry selection.
+
+**Tests:** `__tests__/kai-sprint2-export-manifest-csv-representation-boundary.spec.js`
+(new) mirrors the Markdown representation-boundary suite: deterministic
+header/row output, one row per citation in stable order with correct
+limitation-code matching, RFC-4180 field escaping, no manifest/candidate/
+authority/fingerprint leakage, no forbidden storage/credential/prompt
+strings, pure-function source-scan (no DB/storage/artifact/PDF/DOCX
+behavior), and thin-wrapper success/stale-propagation coverage - 18 cases,
+all passing. `__tests__/kai-sprint2-authorized-csv-export-delivery-route.spec.js`
+(new) mirrors the Markdown delivery-route suite: exactly one authenticated
+GET route, correct attachment headers/body, client-controlled-filename
+rejection, upstream error-code propagation with no attachment, auth/
+validation short-circuits, AI/system-actor denial before rendering, and a
+route-source scan for no SQL/artifact/storage material - 9 cases, all
+passing. `__tests__/kai-sprint2-p3-08-gk-export-review-detail.spec.js`'s
+pinned "no PDF/DOCX/CSV" mutation-surface assertion was updated to drop
+`csv` from the forbidden pattern (PDF/DOCX/artifact-bytes/signed-url
+remain forbidden), since this page now intentionally links to the new CSV
+route. `__tests__/kai-sprint2-pass2-route-runtime.spec.js`'s pinned exact
+Sprint-2 route list was extended with the new CSV route entry in its
+existing sorted position.
+
+**Verification:** `DATABASE_URL=postgres://sentinel:sentinel@127.0.0.1:1/sentinel_do_not_connect`
+for every Node/npm command (no database was reached). New-package focused
+run (the two new CSV test files) -> 27 passed, 0 failed. Directly affected
+regression run (`kai-sprint2-authorized-markdown-export-delivery-route.spec.js`,
+`kai-sprint2-export-manifest-markdown-representation-boundary.spec.js`,
+`kai-sprint2-p3-08-gk-export-review-detail.spec.js`,
+`kai-sprint2-gk-export-review-governed-finalization-control.spec.js`,
+`kai-sprint2-p3-06-export-review-packet-boundary.spec.js`,
+`kai-sprint2-durable-export-manifest-read-recovery-boundary.spec.js`,
+`kai-sprint2-governed-export-finalization-route.spec.js`,
+`kai-sprint2-p3-export-operational-composition-route.spec.js`,
+`kai-sprint2-pass2-route-runtime.spec.js`) -> 162 passed, 0 failed. Full
+repository suite (`npm test`) -> 3430 passed, 7 failed (the exact same 4
+distinct pre-existing failures already confirmed present and unrelated to
+export/KAI code in every prior package in this track - `the child-file
+read model is tenant-scoped...`, `assembled production middleware and
+router enforce the batch-files collection contract`, `the direct
+file-detail service returns exactly the 15-field allowlist`, `assembled
+production middleware and router enforce the file-detail contract` - 0
+newly introduced failures), 61 skipped. `npm run build` (Vite) succeeded
+with no errors. `git diff --check` passed.
+
+**Final diff review:** confined to
+`Backend/kai/routes/sprint2IntakeApi.js`,
+`Backend/kai/services/kaiExportManifestCsvSerializer.js` (new),
+`frontend/gkExportReviewDetail.jsx`, `frontend/gkExportReviewDetailLogic.js`,
+`public/js/bundles/entry.js` (Vite rebuild), two new test files, two
+updated test files, and this ExecPlan. No schema or migration file was
+created or edited; no artifact-persistence/storage, cloud configuration,
+Current State, Implementation Baseline, credential/secret, or second
+export-governance path exists anywhere in this diff; no PDF or DOCX path
+exists anywhere in this diff; no new page was added; the Website Export/
+Review UX block was not touched. No production database was accessed,
+mutated, or migrated; nothing was pushed or deployed.
+
+**Remaining work:** PDF and DOCX evidence-format rendering (same
+render-model-reuse pattern, structurally independent peers of this CSV
+package); the complete website export/review UX block (Impact Evidence
+Library Generated Drafts/Review Queue); composite exports (grant response
+packet, board summary); and whether persistent/reusable artifact handling
+is ever required remains NOT_CONFIRMED and was not invented here.

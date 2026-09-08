@@ -277,16 +277,20 @@ test("P3-08 toRenderModel never reads raw evidence text, filenames, storage path
 // issues exactly the P3-12/P3-15 queue transitions plus the P3-16 candidate,
 // P3-17 authority-grant, and P3-19 manifest-finalization mutations, and links
 // to Download Markdown - each an existing, separately-authorized backend
-// operation invoked one at a time by explicit GK-admin action. What remains
-// pinned: no PUT/PATCH/DELETE, no raw approve/reject/mark-ready wording, no
-// client-side eligibility/authority/finalGate derivation, and no PDF/DOCX/CSV
-// or artifact-byte handling.
+// operation invoked one at a time by explicit GK-admin action. Further
+// superseded by the CSV evidence appendix package: this page now also links
+// to Download CSV Evidence Appendix, reusing the exact same governed
+// exportManifestId identity and delivery-route pattern as Download Markdown
+// - no new mutation, no client-side rendering, no artifact-byte handling.
+// What remains pinned: no PUT/PATCH/DELETE, no raw approve/reject/mark-ready
+// wording, no client-side eligibility/authority/finalGate derivation, and no
+// PDF/DOCX or artifact-byte handling.
 test("P3-08 frontend source issues only the accepted queue-transition and governed-finalization mutations, never a broader mutation surface", () => {
   const source = readFileSync("frontend/gkExportReviewDetail.jsx", "utf8");
   assert.doesNotMatch(source, /\bmethod:\s*["'](PUT|PATCH|DELETE)["']/i);
   assert.doesNotMatch(source, /putJson|patchJson|deleteJson/i);
   assert.doesNotMatch(source, /\b(approve|reject|mark-ready|markReady)\b/i);
-  assert.doesNotMatch(source, /finalGate\s*=\s*true|VAL-EXP-001.*=.*(true|false)|pdf|docx|csv|artifact_bytes|signed_url/i);
+  assert.doesNotMatch(source, /finalGate\s*=\s*true|VAL-EXP-001.*=.*(true|false)|pdf|docx|artifact_bytes|signed_url/i);
   assert.match(source, /Why can KAI say this\?/);
 });
 

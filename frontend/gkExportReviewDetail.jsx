@@ -15,6 +15,7 @@ import {
   decideOutcome,
   decideStartResult,
   exportCandidatePath,
+  exportManifestCsvPath,
   exportManifestMarkdownPath,
   exportManifestsPath,
   finalReleaseAuthorityPath,
@@ -114,6 +115,12 @@ function HistoricalManifests({ organizationId, exportManifestHistory }) {
               href={exportManifestMarkdownPath(organizationId, entry.exportManifestId)}
             >
               Download Markdown
+            </a>
+            <a
+              className="gk-export-review-download-csv-link"
+              href={exportManifestCsvPath(organizationId, entry.exportManifestId)}
+            >
+              Download CSV Evidence Appendix
             </a>
           </li>
         ))}
@@ -396,6 +403,14 @@ export default function GkExportReviewDetail({
                 href={exportManifestMarkdownPath(organizationId, exportManifestId)}
               >
                 Download Markdown
+              </a>
+            ) : null}
+            {exportManifestId ? (
+              <a
+                className="gk-export-review-download-csv-link"
+                href={exportManifestCsvPath(organizationId, exportManifestId)}
+              >
+                Download CSV Evidence Appendix
               </a>
             ) : null}
           </section>
