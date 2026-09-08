@@ -131,11 +131,17 @@ test("P3-15 exportReviewUpdatedAt remains internal and is never rendered via Fie
   assert.equal(occurrences.length, 2, "exportReviewUpdatedAt must appear exactly twice: the startReviewRequest and completeReviewRequest arguments");
 });
 
-test("P3-15 frontend source still contains no approve/export/finalize/publish/manifest/download or other post-review authority tokens", () => {
-  const forbidden = /\b(approve|reject|finalize|mark-ready|markReady|download|affirmativeHumanExportAuthority|finalGate|clientReviewed|client-reviewed|funder-ready|funderReady|public-ready|publicReady|manifest)\b/i;
+// Superseded by the governed export finalization package: Finalize Export and
+// the P3-19 manifest identity are now explicit, separately-authorized
+// controls (see kai-sprint2-gk-export-review-governed-finalization-control.spec.js).
+// What remains pinned is that no raw approve/reject/mark-ready/publish or
+// client-derived authority (affirmativeHumanExportAuthority, finalGate,
+// clientReviewed, funder-ready/public-ready flags) tokens exist.
+test("P3-15 frontend source still contains no approve/reject/publish or client-derived post-review authority tokens", () => {
+  const forbidden = /\b(approve|reject|mark-ready|markReady|affirmativeHumanExportAuthority|clientReviewed|client-reviewed|funder-ready|funderReady|public-ready|publicReady)\b/i;
   assert.doesNotMatch(jsxSource, forbidden);
   assert.doesNotMatch(logicSource, forbidden);
-  assert.equal((jsxSource.match(/<button/g) || []).length, 2);
+  assert.equal((jsxSource.match(/<button/g) || []).length, 5);
 });
 
 test("P3-15 P3-08 citation rendering ('Why can KAI say this?') is unchanged", () => {

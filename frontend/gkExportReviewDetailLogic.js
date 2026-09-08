@@ -36,6 +36,33 @@ export function completePath(organizationId, generatedContentDraftId, exportRevi
     + `/export-review-queue/${exportReviewQueueItemId}/complete`;
 }
 
+// Governed export finalization: three existing, separately-authorized
+// operations chained in the UI - P3-16 candidate preparation, the explicit
+// human P3-17 final-release-authority grant, and the P3-19 manifest
+// finalization (which enforces VAL-EXP-001/finalGate inside its own
+// transaction). Each route below is the exact accepted backend route; none of
+// these paths encodes eligibility, authority, or manifest-selection logic.
+
+export function exportCandidatePath(organizationId, generatedContentDraftId) {
+  return `${BASE_PATH}/admin/organizations/${organizationId}`
+    + `/generated-content-drafts/${generatedContentDraftId}/export-candidates`;
+}
+
+export function finalReleaseAuthorityPath(organizationId, exportCandidateId) {
+  return `${BASE_PATH}/admin/organizations/${organizationId}`
+    + `/export-candidates/${exportCandidateId}/final-release-authority`;
+}
+
+export function exportManifestsPath(organizationId, exportCandidateId) {
+  return `${BASE_PATH}/admin/organizations/${organizationId}`
+    + `/export-candidates/${exportCandidateId}/export-manifests`;
+}
+
+export function exportManifestMarkdownPath(organizationId, exportManifestId) {
+  return `${BASE_PATH}/admin/organizations/${organizationId}`
+    + `/export-manifests/${exportManifestId}/markdown`;
+}
+
 async function readJson(response) {
   try {
     return await response.json();
@@ -75,6 +102,48 @@ export async function completeReviewRequest(path, expectedUpdatedAt) {
     credentials: "same-origin",
     headers: { Accept: "application/json", "Content-Type": "application/json" },
     body: JSON.stringify({ expected_updated_at: expectedUpdatedAt }),
+  });
+  return { statusCode: response.status, body: await readJson(response) };
+}
+
+// The candidate-preparation request body is fixed to exactly {} - no
+// client-supplied audience, fingerprint, or currentness data ever leaves this
+// call; the existing P3-16 service derives all of that itself.
+export async function createExportCandidateRequest(path) {
+  const response = await fetch(path, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify({}),
+  });
+  return { statusCode: response.status, body: await readJson(response) };
+}
+
+// The authority-grant request body is fixed to exactly
+// { requested_audience, decision_action: "grant" } - this is the one place
+// this page ever asks a human to explicitly grant P3-17 final-release
+// authority; it is never inferred or granted automatically.
+export async function grantFinalReleaseAuthorityRequest(path, requestedAudience) {
+  const response = await fetch(path, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify({ requested_audience: requestedAudience, decision_action: "grant" }),
+  });
+  return { statusCode: response.status, body: await readJson(response) };
+}
+
+// The manifest-finalization request body is fixed to exactly
+// { export_review_queue_item_id } - no client-supplied finalGate, authority,
+// or eligibility data ever leaves this call; the existing P3-19
+// createExportManifest transaction is the sole authority for whether a
+// manifest is created, and for the exact exportManifestId returned.
+export async function createExportManifestRequest(path, exportReviewQueueItemId) {
+  const response = await fetch(path, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify({ export_review_queue_item_id: exportReviewQueueItemId }),
   });
   return { statusCode: response.status, body: await readJson(response) };
 }
@@ -179,6 +248,49 @@ export function decideCompleteResult(result) {
   }
   if (result?.body?.error?.code === "conflict_current_state_changed") {
     return { kind: "conflict" };
+  }
+  return { kind: "error", message: errorText(result) };
+}
+
+// Governed export finalization only ever becomes reachable once the
+// existing packet already reports exportEligible - this is a UI-only
+// display gate, never the P3-18/VAL-EXP-001 authority itself, which is
+// re-evaluated inside the P3-19 manifest-creation transaction regardless of
+// what this flag says.
+export function canPrepareExportCandidate(model) {
+  return !!model && model.exportEligible === true;
+}
+
+// P3-16 candidate preparation: success returns the exact exportCandidateId
+// this page then carries into the P3-17 and P3-19 steps; nothing here is
+// ever discovered by re-querying historical candidates.
+export function decideCreateExportCandidateResult(result) {
+  if (result?.statusCode === 201 && result?.body?.ok === true) {
+    return { kind: "success", exportCandidateId: result.body.data?.exportCandidateId ?? null };
+  }
+  return { kind: "error", message: errorText(result) };
+}
+
+// P3-17 final-release authority: success reports whether the grant is
+// currently effective; this page never infers effectiveness itself.
+export function decideGrantFinalReleaseAuthorityResult(result) {
+  if (result?.statusCode === 201 && result?.body?.ok === true) {
+    return { kind: "success", effective: result.body.data?.effective === true };
+  }
+  return { kind: "error", message: errorText(result) };
+}
+
+// P3-19 manifest finalization: success returns the exact exportManifestId
+// this finalization produced; that id is what Download Markdown uses, never
+// a manifest discovered afterward by any other means. A conflict means the
+// existing P3-18/VAL-EXP-001 gate or currentness check inside the manifest
+// transaction rejected the attempt - no manifest was created.
+export function decideCreateExportManifestResult(result) {
+  if (result?.statusCode === 201 && result?.body?.ok === true) {
+    return { kind: "success", exportManifestId: result.body.data?.exportManifestId ?? null };
+  }
+  if (result?.body?.error?.code === "conflict_current_state_changed") {
+    return { kind: "conflict", message: errorText(result) };
   }
   return { kind: "error", message: errorText(result) };
 }

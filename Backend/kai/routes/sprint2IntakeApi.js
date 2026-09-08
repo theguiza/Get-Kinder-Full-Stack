@@ -22,6 +22,7 @@ import {
   validateCompleteEvidenceReviewRequest,
   validateCompleteExportReviewRequest,
   validateCreateExportCandidateRequest,
+  validateCreateExportManifestRequest,
   validateHumanFinalReleaseAuthorityRequest,
   validateIntakeBatchFilesQuery,
   validateFilePolicyBlockRequest,
@@ -48,6 +49,7 @@ import {
   createProductionMetadataOnlyAuditForGeneratedContentReview,
   createProductionMetadataOnlyAuditForGeneratedDraftExportCandidate,
   createProductionMetadataOnlyAuditForGeneratedDraftExportReview,
+  createProductionMetadataOnlyAuditForExportManifest,
   createProductionMetadataOnlyAuditForHumanFinalReleaseAuthority,
   createProductionMetadataOnlyAuditForRequirementAssessment,
   createProductionMetadataOnlyAuditForSourceVersion,
@@ -62,6 +64,7 @@ let reviewCockpitServicePromise = null;
 let exportReviewServicePromise = null;
 let exportCandidateServicePromise = null;
 let humanAuthorityDecisionServicePromise = null;
+let exportManifestServicePromise = null;
 let exportManifestMarkdownServicePromise = null;
 let evidenceLineageServicePromise = null;
 let evidenceCoverageAssessmentServicePromise = null;
@@ -1232,6 +1235,61 @@ router.post(
         now,
       }, {
         metadataOnlyAudit: createProductionMetadataOnlyAuditForHumanFinalReleaseAuthority({
+          organizationId: identifiers.organizationId,
+          exportCandidateId: identifiers.exportCandidateId,
+          actorContext,
+          now,
+        }),
+      });
+    }, 201);
+  },
+);
+
+async function getExportManifestService() {
+  if (intakeServiceOverride?.createExportManifest) return intakeServiceOverride;
+  exportManifestServicePromise ||= import("../services/kaiExportManifestService.js");
+  return exportManifestServicePromise;
+}
+
+function validateCreateExportManifestRequestOrSend(req, res) {
+  if (!metadataContentTypeIsSupported(req)) {
+    sendKaiError(res, "unsupported_media_type");
+    return null;
+  }
+  const identifiers = exportCandidateIdentifiers(req);
+  if (!identifiers) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id_or_export_candidate_id")],
+    });
+    return null;
+  }
+  const result = validateCreateExportManifestRequest(req.body);
+  if (!result.ok) {
+    sendKaiError(res, "validation_blocker", { blockers: result.blockers });
+    return null;
+  }
+  return identifiers;
+}
+
+router.post(
+  "/admin/organizations/:organizationId/export-candidates/:exportCandidateId/export-manifests",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    const identifiers = validateCreateExportManifestRequestOrSend(req, res);
+    if (!identifiers) return;
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    const payload = requestPayload(req);
+    return invokeService(res, async () => {
+      const service = await getExportManifestService();
+      return service.createExportManifest({
+        organizationId: identifiers.organizationId,
+        exportCandidateId: identifiers.exportCandidateId,
+        exportReviewQueueItemId: payload.export_review_queue_item_id,
+        actorContext,
+        now,
+      }, {
+        metadataOnlyAudit: createProductionMetadataOnlyAuditForExportManifest({
           organizationId: identifiers.organizationId,
           exportCandidateId: identifiers.exportCandidateId,
           actorContext,

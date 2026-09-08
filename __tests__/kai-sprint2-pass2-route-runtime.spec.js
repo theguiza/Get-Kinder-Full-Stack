@@ -172,9 +172,11 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // KAI P2-09 human evidence-review completion surface (additive; every
     // prior entry preserved verbatim).
     "/admin/organizations/:organizationId/evidence-items/:evidenceItemId/evidence-review/:reviewQueueItemId/complete",
-    // KAI P3-17 human final-release authority and Phase-14 ephemeral
-    // governed Markdown delivery surfaces; both are service-delegated and
-    // actor-context guarded on the Sprint 2 router.
+    // KAI P3-17 human final-release authority, governed P3-19 export-manifest
+    // finalization, and Phase-14 ephemeral governed Markdown delivery
+    // surfaces; all are service-delegated and actor-context guarded on the
+    // Sprint 2 router.
+    "/admin/organizations/:organizationId/export-candidates/:exportCandidateId/export-manifests",
     "/admin/organizations/:organizationId/export-candidates/:exportCandidateId/final-release-authority",
     "/admin/organizations/:organizationId/export-manifests/:exportManifestId/markdown",
     // KAI structured external requirement-set registration: catalogue-only

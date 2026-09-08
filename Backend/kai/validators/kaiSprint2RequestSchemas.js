@@ -69,6 +69,9 @@ const HUMAN_FINAL_RELEASE_AUTHORITY_REQUEST_KEYS = new Set([
   "requested_audience",
   "decision_action",
 ]);
+const CREATE_EXPORT_MANIFEST_REQUEST_KEYS = new Set([
+  "export_review_queue_item_id",
+]);
 const EXPORT_REVIEW_AUDIENCES = new Set(["internal", "funder", "public"]);
 const COMPLETE_EVIDENCE_REVIEW_REQUEST_KEYS = new Set([
   "expected_updated_at",
@@ -572,6 +575,34 @@ export function validateHumanFinalReleaseAuthorityRequest(payload) {
   }
   if (!["grant", "revoke"].includes(payload.decision_action)) {
     return { ok: false, blockers: [requestBlocker("invalid_decision_action", "body.decision_action")] };
+  }
+
+  return { ok: true, blockers: [] };
+}
+
+export function validateCreateExportManifestRequest(payload) {
+  if (!isPlainObject(payload)) {
+    return { ok: false, blockers: [requestBlocker("request_body_must_be_object", "body")] };
+  }
+
+  const keys = Object.keys(payload);
+  for (const key of keys) {
+    if (!CREATE_EXPORT_MANIFEST_REQUEST_KEYS.has(key)) {
+      return { ok: false, blockers: [requestBlocker("unknown_field", `body.${key}`)] };
+    }
+  }
+
+  for (const key of CREATE_EXPORT_MANIFEST_REQUEST_KEYS) {
+    if (!Object.hasOwn(payload, key)) {
+      return { ok: false, blockers: [requestBlocker("required_field_missing", `body.${key}`)] };
+    }
+  }
+
+  if (
+    typeof payload.export_review_queue_item_id !== "string"
+    || !KAI_SPRINT2_P0_PATTERNS.uuid.test(payload.export_review_queue_item_id)
+  ) {
+    return { ok: false, blockers: [requestBlocker("invalid_uuid_field", "body.export_review_queue_item_id")] };
   }
 
   return { ok: true, blockers: [] };

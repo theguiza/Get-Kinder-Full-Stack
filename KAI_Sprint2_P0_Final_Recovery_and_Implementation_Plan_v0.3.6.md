@@ -21062,3 +21062,159 @@ passed, and empty/missing/malformed output rejected. Separate affected test
 test:kai-sprint2-p3-04-generated-content-review-completion` passed with 22
 subtests. `git diff --check` passed. Production action: NONE. Push/deploy:
 NOT PERFORMED.
+
+## Governed Export Finalization + Exact Manifest Handoff
+
+**Date:** 2026-09-08
+
+**Owner authorization (bounded, local-only):** operationalize governed final
+export by mounting the existing, previously-unmounted P3-19
+`createExportManifest` (`Backend/kai/services/kaiExportManifestService.js`)
+behind a new route, and hand the exact returned `exportManifestId` to the
+existing GK export-review page for Download Markdown, using the exact
+manifest identity returned by that governed finalization call rather than any
+historical-manifest lookup. Explicitly not authorized: schema/migration
+changes, production database mutation/access, push, deploy, feature-flag
+mutation, cloud/storage configuration, or `00_KAI_CURRENT_STATE.md` updates.
+
+**Starting repository evidence:** branch `main`, HEAD
+`fef7499a272f05dab69dfcc2ceb6203dbdcfae94`, working tree clean. Fresh
+inspection (not carried over from any prior session) confirmed: the
+export-review page already carried `generatedContentDraftId` and
+`exportReviewQueueItemId` but neither `exportCandidateId` nor
+`exportManifestId`; P3-16 (`createGeneratedDraftExportCandidate`) and P3-17
+(`recordHumanFinalReleaseAuthorityDecision`) were already mounted as
+`POST .../generated-content-drafts/:generatedContentDraftId/export-candidates`
+and
+`POST .../export-candidates/:exportCandidateId/final-release-authority`
+respectively; `kaiExportManifestService.js#createExportManifest` existed
+complete (feature-flag guard, human-actor guard, `gk_admin`-only
+authorization via `CREATE_EXPORT_MANIFEST_OPERATION`/
+`CREATE_EXPORT_MANIFEST_ALLOWED_ROLES`, then full delegation to the
+repository) but was not wired to any route; and the existing Markdown
+delivery route already worked against any valid `exportManifestId` with no
+hidden lookup.
+
+**P3-16/P3-17/P3-18/P3-19 semantics preserved verbatim:** no new
+candidate-selection, authority-granting, or eligibility logic was added
+anywhere. The new route supplies only
+`{ organizationId, exportCandidateId, exportReviewQueueItemId, actorContext,
+now }` to the existing service, which derives `finalGate`,
+`affirmativeHumanExportAuthority`, eligibility, and currentness itself inside
+its own transaction via the existing
+`evaluateFinalExportEligibilityInTransaction` (VAL-EXP-001, run inside the
+manifest-insert transaction, not pre-evaluated separately). P3-17 remains an
+explicit, separately-invoked human `gk_admin` action (`grant`/`revoke`); the
+new UI never infers or auto-grants it. No `latest manifest`/`current=true`/
+`ORDER BY ... DESC LIMIT 1` selection was added anywhere; the manifest
+identity used by the page is exactly the `exportManifestId` returned by the
+one finalization call that created it.
+
+**Backend implementation evidence:** added
+`POST /api/kai/sprint2/intake/admin/organizations/:organizationId/export-candidates/:exportCandidateId/export-manifests`
+to `Backend/kai/routes/sprint2IntakeApi.js`, delegating exactly once to
+`kaiExportManifestService.js#createExportManifest` with the exact body
+`{ export_review_queue_item_id }` (added
+`validateCreateExportManifestRequest` in
+`Backend/kai/validators/kaiSprint2RequestSchemas.js`, an exact-one-key
+schema requiring a canonical-lowercase-UUID `export_review_queue_item_id`
+and rejecting any other field, including `finalGate`/`manifest`/`authority`).
+The route contains no SQL, no direct `kai.*`/`repository`/`pool`/`kaiDb`
+access, and reuses the existing `createProductionMetadataOnlyAuditForExportManifest`
+audit composer already defined for this exact service. The route-source
+helper functions (`getExportManifestService`, the new validator, and the
+route body) were placed after the existing P3-17 final-release-authority
+route to keep the pre-existing P3-16/P3-17 operational-composition
+route-slice test (which asserts no `manifest`/`finalGate`/`artifact` token
+leaks into that composition) unaffected. `__tests__/kai-sprint2-pass2-route-runtime.spec.js`'s
+exhaustive route-path inventory was updated additively with the one new path.
+
+**Frontend implementation evidence:** `frontend/gkExportReviewDetailLogic.js`
+gained pure route builders (`exportCandidatePath`, `finalReleaseAuthorityPath`,
+`exportManifestsPath`, `exportManifestMarkdownPath`), pure request functions
+with fixed request bodies (`createExportCandidateRequest` sends exactly `{}`;
+`grantFinalReleaseAuthorityRequest` sends exactly
+`{ requested_audience, decision_action: "grant" }`;
+`createExportManifestRequest` sends exactly `{ export_review_queue_item_id }`),
+a UI-only display gate (`canPrepareExportCandidate`, keyed only off the
+existing packet's `exportEligible` flag - never itself the P3-18 authority),
+and outcome decoders that surface the exact returned `exportCandidateId`,
+authority `effective` flag, and `exportManifestId`, treating a P3-19 conflict
+as "no manifest created." `frontend/gkExportReviewDetail.jsx` added three
+explicit, one-at-a-time GK-admin action buttons - "Prepare Export Candidate,"
+"Grant Final Release Authority," "Finalize Export" - each gated on the
+completion of the previous step via component state only (no client-side
+eligibility/authority/finalGate derivation), plus a "Download Markdown" link
+that appears only once `exportManifestId` is set and points at
+`exportManifestMarkdownPath(organizationId, exportManifestId)` - the exact id
+this page's own Finalize Export call produced, never a historical lookup, and
+never re-derived from any other source. No manifest is created or selected on
+page load; nothing is fetched, computed, or authorized client-side. Existing
+Start Review/Complete Review controls and packet rendering are unchanged.
+
+**Test/pinning-assertion evidence:** three pre-existing pinning tests written
+when this page was read-only-plus-queue-transitions
+(`kai-sprint2-p3-08-gk-export-review-detail.spec.js`,
+`kai-sprint2-p3-12-gk-export-review-start-control.spec.js`,
+`kai-sprint2-p3-15-gk-export-review-complete-control.spec.js`) asserted no
+finalize/manifest/download control existed; each was updated to instead pin
+the new, narrower boundary this package establishes (no PUT/PATCH/DELETE, no
+raw approve/reject/mark-ready wording, no client-derived
+finalGate/authority/PDF/DOCX/CSV/artifact-byte handling, and an exact expected
+button count), rather than loosened generically. Two new spec files were
+added: `kai-sprint2-governed-export-finalization-route.spec.js` (route
+delegation, exact-field validation, P3-19 blocker propagation without a
+manifest, authentication requirement, single-mount and service-only-body
+proof, no timestamp/latest-selection logic) and
+`kai-sprint2-gk-export-review-governed-finalization-control.spec.js` (exact
+route paths, exact fixed request bodies for all three new mutations, the
+`exportEligible`-only display gate, exact outcome decoding including P3-19
+conflict handling, and a page-source proof that Download Markdown uses only
+the exact returned `exportManifestId`).
+
+**Verification:** `DATABASE_URL=postgres://sentinel:sentinel@127.0.0.1:1/sentinel_do_not_connect`
+(non-listening loopback sentinel; no database was reached), then:
+`node --test __tests__/kai-sprint2-governed-export-finalization-route.spec.js`
+-> 6/6 passed; `node --test __tests__/kai-sprint2-gk-export-review-governed-finalization-control.spec.js`
+-> 9/9 passed; `node --test __tests__/kai-sprint2-p3-export-operational-composition-route.spec.js`
+-> 13/13 passed; `node --test __tests__/kai-sprint2-pass2-route-runtime.spec.js`
+-> 56/56 passed; `node --test __tests__/kai-sprint2-p3-17-human-final-release-authority-write.spec.js`
+-> 7/7 passed; `node --test __tests__/kai-sprint2-p3-19-export-manifest-foundation-boundary.spec.js`,
+`kai-sprint2-p3-16-export-candidate-foundation-boundary.spec.js`,
+`kai-sprint2-authorized-markdown-export-delivery-route.spec.js` -> all
+passed; `node --test __tests__/kai-sprint2-p3-08-gk-export-review-detail.spec.js`,
+`kai-sprint2-p3-12-gk-export-review-start-control.spec.js`,
+`kai-sprint2-p3-15-gk-export-review-complete-control.spec.js` -> 55/55
+passed after updating their pinning assertions. `npm run build` (Vite)
+succeeded with no errors. Full repository suite
+(`npm test`, 3445 tests) ran with 3379 passed, 7 failed (4 distinct pre-
+existing failures - `the child-file read model is tenant-scoped...`,
+`assembled production middleware and router enforce the batch-files
+collection contract`, `the direct file-detail service returns exactly the
+15-field allowlist`, `assembled production middleware and router enforce the
+file-detail contract` - confirmed present and unchanged on the unmodified
+`fef7499` tree before this package's changes, unrelated to export/KAI code),
+59 skipped, 0 newly introduced failures. `git diff --check` passed.
+
+**Final diff review:** confined to
+`Backend/kai/routes/sprint2IntakeApi.js`,
+`Backend/kai/validators/kaiSprint2RequestSchemas.js`,
+`frontend/gkExportReviewDetail.jsx`, `frontend/gkExportReviewDetailLogic.js`,
+`public/js/bundles/entry.js` (Vite rebuild), `package.json` (two new named
+test scripts), three updated pinning test files, one updated route-inventory
+test file, two new test files, and this ExecPlan. No schema/migration file,
+production/runtime/cloud configuration, Current State, Implementation
+Baseline, credential/secret, or artifact-persistence/storage change was made.
+
+**Durable page-reload/history recovery:** NOT_CONFIRMED. No existing schema
+relationship lets the page recover its exact `exportCandidateId`/
+`exportManifestId` after a reload or later return without an arbitrary
+historical-row selection - the export-review packet does not carry either
+id, and no `current`/`latest` selection is authorized. A durable binding (for
+example, an `exportReviewQueueItemId` -> most-recent-finalization association
+persisted at write time) would require schema/migration work, which is
+explicitly out of scope for this package and is reported here as a separate
+next dependency requiring its own owner authorization; its shape is not
+invented in this package. The immediate same-session finalize-then-download
+flow implemented here does not depend on that recovery and required no
+schema change.

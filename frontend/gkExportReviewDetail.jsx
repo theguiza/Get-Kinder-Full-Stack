@@ -2,13 +2,24 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   canCompleteReview,
+  canPrepareExportCandidate,
   canStartReview,
   completePath,
   completeReviewRequest,
+  createExportCandidateRequest,
+  createExportManifestRequest,
   decideCompleteResult,
+  decideCreateExportCandidateResult,
+  decideCreateExportManifestResult,
+  decideGrantFinalReleaseAuthorityResult,
   decideOutcome,
   decideStartResult,
+  exportCandidatePath,
+  exportManifestMarkdownPath,
+  exportManifestsPath,
+  finalReleaseAuthorityPath,
   getJson,
+  grantFinalReleaseAuthorityRequest,
   packetPath,
   startPath,
   startReviewRequest,
@@ -22,13 +33,19 @@ import {
  * The only write requests it can issue are the P3-12 "Start Review" transition
  * against the accepted P3-10 route and the P3-15 "Complete Review" transition
  * against the accepted P3-14 route, each sent with exactly
- * { expected_updated_at } and no other client-supplied authority data. It
+ * { expected_updated_at } and no other client-supplied authority data, plus
+ * the governed export-finalization chain: P3-16 candidate preparation, the
+ * explicit human P3-17 final-release-authority grant, and the P3-19
+ * manifest finalization, each its own existing, separately-authorized
+ * backend operation invoked one at a time by explicit GK-admin action. It
  * holds no other queue-transition or final-gate control. gk_admin
  * authorization, tenant membership, feature-flag state, packet validation,
- * citation authority, export eligibility, and the start/complete transitions
- * themselves are all decided by the backend; this component never re-derives
- * or overrides those decisions and never trusts a mutation response as the
- * new packet.
+ * citation authority, export eligibility, candidate currentness, final-release
+ * authority, VAL-EXP-001/finalGate, and manifest identity are all decided by
+ * the backend; this component never re-derives or overrides those decisions,
+ * never grants authority itself, never selects a historical manifest, and
+ * never trusts a mutation response as the new packet. Download Markdown uses
+ * only the exact exportManifestId returned by that finalization call.
  */
 
 function FieldRow({ label, value }) {
@@ -107,6 +124,15 @@ export default function GkExportReviewDetail({
   const [startErrorMessage, setStartErrorMessage] = useState(null);
   const [completePending, setCompletePending] = useState(false);
   const [completeErrorMessage, setCompleteErrorMessage] = useState(null);
+  const [exportCandidateId, setExportCandidateId] = useState(null);
+  const [candidatePending, setCandidatePending] = useState(false);
+  const [candidateErrorMessage, setCandidateErrorMessage] = useState(null);
+  const [authorityEffective, setAuthorityEffective] = useState(false);
+  const [authorityPending, setAuthorityPending] = useState(false);
+  const [authorityErrorMessage, setAuthorityErrorMessage] = useState(null);
+  const [exportManifestId, setExportManifestId] = useState(null);
+  const [manifestPending, setManifestPending] = useState(false);
+  const [manifestErrorMessage, setManifestErrorMessage] = useState(null);
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -184,9 +210,77 @@ export default function GkExportReviewDetail({
     }
   }, [completePending, outcome, organizationId, generatedContentDraftId, exportReviewQueueItemId, loadPacket]);
 
+  const handlePrepareExportCandidate = useCallback(async () => {
+    if (candidatePending || outcome?.kind !== "success" || !outcome.model) return;
+    setCandidatePending(true);
+    setCandidateErrorMessage(null);
+    try {
+      const result = await createExportCandidateRequest(
+        exportCandidatePath(organizationId, generatedContentDraftId),
+      );
+      const decided = decideCreateExportCandidateResult(result);
+      if (decided.kind === "success") {
+        if (mountedRef.current) setExportCandidateId(decided.exportCandidateId);
+      } else {
+        setCandidateErrorMessage(decided.message);
+      }
+    } catch {
+      if (mountedRef.current) setCandidateErrorMessage("Request failed (network error).");
+    } finally {
+      if (mountedRef.current) setCandidatePending(false);
+    }
+  }, [candidatePending, outcome, organizationId, generatedContentDraftId]);
+
+  const handleGrantFinalReleaseAuthority = useCallback(async () => {
+    if (authorityPending || !exportCandidateId || outcome?.kind !== "success" || !outcome.model) return;
+    setAuthorityPending(true);
+    setAuthorityErrorMessage(null);
+    try {
+      const result = await grantFinalReleaseAuthorityRequest(
+        finalReleaseAuthorityPath(organizationId, exportCandidateId),
+        outcome.model.requestedExportAudience,
+      );
+      const decided = decideGrantFinalReleaseAuthorityResult(result);
+      if (decided.kind === "success") {
+        if (mountedRef.current) setAuthorityEffective(decided.effective);
+      } else {
+        setAuthorityErrorMessage(decided.message);
+      }
+    } catch {
+      if (mountedRef.current) setAuthorityErrorMessage("Request failed (network error).");
+    } finally {
+      if (mountedRef.current) setAuthorityPending(false);
+    }
+  }, [authorityPending, exportCandidateId, outcome, organizationId]);
+
+  const handleFinalizeExport = useCallback(async () => {
+    if (manifestPending || !exportCandidateId || !authorityEffective) return;
+    setManifestPending(true);
+    setManifestErrorMessage(null);
+    try {
+      const result = await createExportManifestRequest(
+        exportManifestsPath(organizationId, exportCandidateId),
+        exportReviewQueueItemId,
+      );
+      const decided = decideCreateExportManifestResult(result);
+      if (decided.kind === "success") {
+        if (mountedRef.current) setExportManifestId(decided.exportManifestId);
+      } else {
+        setManifestErrorMessage(decided.message);
+      }
+    } catch {
+      if (mountedRef.current) setManifestErrorMessage("Request failed (network error).");
+    } finally {
+      if (mountedRef.current) setManifestPending(false);
+    }
+  }, [manifestPending, exportCandidateId, authorityEffective, organizationId, exportReviewQueueItemId]);
+
   const model = outcome?.kind === "success" ? outcome.model : null;
   const showStartControl = canStartReview(model);
   const showCompleteControl = canCompleteReview(model);
+  const showPrepareCandidateControl = canPrepareExportCandidate(model) && !exportCandidateId;
+  const showGrantAuthorityControl = !!exportCandidateId && !authorityEffective;
+  const showFinalizeExportControl = !!exportCandidateId && authorityEffective && !exportManifestId;
 
   return (
     <div className="gk-export-review-page">
@@ -220,6 +314,55 @@ export default function GkExportReviewDetail({
             </button>
           ) : null}
           {completeErrorMessage ? <p className="gk-export-review-note">{completeErrorMessage}</p> : null}
+
+          <section className="gk-export-review-finalization">
+            <h3>Governed export finalization</h3>
+            {showPrepareCandidateControl ? (
+              <button
+                type="button"
+                className="gk-export-review-prepare-candidate-button"
+                onClick={handlePrepareExportCandidate}
+                disabled={candidatePending}
+              >
+                Prepare Export Candidate
+              </button>
+            ) : null}
+            {candidateErrorMessage ? <p className="gk-export-review-note">{candidateErrorMessage}</p> : null}
+
+            {showGrantAuthorityControl ? (
+              <button
+                type="button"
+                className="gk-export-review-grant-authority-button"
+                onClick={handleGrantFinalReleaseAuthority}
+                disabled={authorityPending}
+              >
+                Grant Final Release Authority
+              </button>
+            ) : null}
+            {authorityErrorMessage ? <p className="gk-export-review-note">{authorityErrorMessage}</p> : null}
+
+            {showFinalizeExportControl ? (
+              <button
+                type="button"
+                className="gk-export-review-finalize-export-button"
+                onClick={handleFinalizeExport}
+                disabled={manifestPending}
+              >
+                Finalize Export
+              </button>
+            ) : null}
+            {manifestErrorMessage ? <p className="gk-export-review-note">{manifestErrorMessage}</p> : null}
+
+            {exportManifestId ? (
+              <a
+                className="gk-export-review-download-markdown-link"
+                href={exportManifestMarkdownPath(organizationId, exportManifestId)}
+              >
+                Download Markdown
+              </a>
+            ) : null}
+          </section>
+
           <PacketDetail model={model} />
         </>
       ) : null}
