@@ -20668,6 +20668,89 @@ runtime/cloud configuration, Current State, Implementation Baseline,
 storage/retrieval/download/reuse, rendered artifact, or unrelated work was
 added.
 
+## Deterministic Markdown Representation
+
+**Owner authorization (bounded, local-only):** serialize the authoritative
+Export Manifest Render Model into one deterministic Markdown representation
+suitable for a later artifact-generation/persistence layer. Authorized scope:
+deterministic Markdown serialization, deterministic document structure,
+authoritative content-block ordering, stable citation-marker serialization,
+citation appendix serialization, limitation/method-note serialization, safe
+output metadata already contained in and intended for output by the
+render-model contract, focused tests, directly affected regressions, complete
+diff inspection, and one local commit if all acceptance checks pass.
+
+**Out of scope:** querying P3-16/P3-19 data independently, reconstructing
+export candidates, recomputing fingerprints/currentness, live eligibility/
+review/authority queries, PDF, DOCX, CSV artifact generation, artifact
+persistence, artifact schema/table, object storage, storage keys, signed URLs,
+retrieval/download, public sharing, reuse/output-project behavior, draft-status
+mutation, new authority semantics, migration, production execution, push,
+deployment, cloud/storage configuration, secrets, credentials, real client
+data, feature-flag mutation, `00_KAI_CURRENT_STATE.md`, and
+`KAI_CURRENT_IMPLEMENTATION_BASELINE.md`.
+
+**Accepted starting evidence:** USER_CONFIRMED prior package
+`833483afa91d93e41fcf6c8bba1a7b270fc0851b` completed Export Manifest Render
+Model Composition and left the working tree clean. Current preflight confirmed
+branch `main`, HEAD `833483afa91d93e41fcf6c8bba1a7b270fc0851b`, and a clean
+working tree, with no repository evidence contradicting the dependency chain
+Export Manifest Render Model Composition -> Deterministic Markdown
+Representation.
+
+**Implementation evidence:** added
+`serializeExportManifestRenderModelToMarkdown(renderModel)` in
+`kaiExportManifestMarkdownSerializer.js` as a pure deterministic serializer
+that accepts only the completed authoritative render-model DTO and returns an
+in-memory Markdown string. Added a thin
+`serializeExportManifestToMarkdown(input, dependencies)` wrapper that calls the
+existing `composeExportManifestRenderModel` service, propagates upstream
+structured failures unchanged, and invokes the pure serializer only after a
+successful render-model result. The serializer emits the Markdown contract,
+render-model contract, content type, requested audience, ordered content
+blocks with render-model-supplied citation markers, citation appendix entries,
+and limitation/method-note entries. Manifest id, export-candidate id,
+generated-draft id, limitation-snapshot id, authority decision id,
+fingerprints, storage paths/keys, signed/download URLs, credentials, prompts,
+raw rows, and runtime diagnostics remain unprinted internal trace data.
+
+**Boundary evidence:** no database/repository handle, tenant id,
+export-manifest id, actor context, storage configuration, feature flag, route,
+schema/table, migration, PDF/DOCX/CSV artifact generation, artifact
+persistence, object storage, signed URL, retrieval/download, reuse behavior,
+P3-16 canonical/fingerprint/currentness recomputation, P3-17/P3-19 authority
+query, review-state query, eligibility query, or authorization gate was added
+to the pure serializer. The thin wrapper reuses the existing render-model
+service's upstream P3-19 feature flags and `gk_admin` human authorization
+behavior without widening or replacing them.
+
+**TOOL_VERIFIED:**
+  - `DATABASE_URL=postgres://kai_sentinel:kai_sentinel@127.0.0.1:9/kai_sentinel DATABASE_URL_LOCAL= PGURL_LOCAL= RENDER_DATABASE_URL= PROD_DATABASE_URL= npm run test:kai-sprint2-export-manifest-markdown-representation`
+    -> 12/12 passed.
+  - Same sentinel/clearing convention,
+    `npm run test:kai-sprint2-export-manifest-render-model-composition`
+    -> 10/10 passed, proving the authoritative render-model behavior remains
+    unchanged.
+  - Same sentinel/clearing convention,
+    `npm run test:kai-sprint2-p3-16-export-candidate-foundation`
+    -> 16/16 passed, proving the P3-16 candidate/currentness boundary remains
+    unchanged.
+  - Same sentinel/clearing convention,
+    `node --test __tests__/kai-sprint2-p3-19-export-manifest-foundation-boundary.spec.js`
+    -> 10/10 passed, proving the P3-19 manifest service boundary remains
+    unchanged.
+  - `git diff --check` -> PASS.
+
+**Final diff review:** confined to
+`Backend/kai/services/kaiExportManifestMarkdownSerializer.js`,
+`__tests__/kai-sprint2-export-manifest-markdown-representation-boundary.spec.js`,
+`package.json`, and this ExecPlan. No duplicate ExecPlan entry, migration,
+schema change, route, storage/retrieval/download/reuse implementation,
+production/runtime/cloud configuration, Current State, Implementation
+Baseline, P3-16 canonical/currentness duplication, render-model bypass,
+live-state query, authorization duplication inside the serializer, feature-flag
+evaluation inside the serializer, or unrelated work was added.
+
 ## Gate A Upload Lifecycle Enforcement Forward Repair
 
 **Date:** 2026-09-07
