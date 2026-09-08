@@ -21865,3 +21865,112 @@ package); the complete website export/review UX block (Impact Evidence
 Library Generated Drafts/Review Queue); composite exports (grant response
 packet, board summary); and whether persistent/reusable artifact handling
 is ever required remains NOT_CONFIRMED and was not invented here.
+
+## CSV Evidence Appendix — formula-injection security closure
+
+**Date:** 2026-09-08
+
+**Owner authorization (bounded, local-only):** inspect the committed CSV
+serializer against the controlling requirement that any cell beginning
+with `=`, `+`, `-`, `@`, TAB, or CR be protected against spreadsheet
+formula-injection before export, and repair the cell-serialization
+boundary only if that protection was absent or incomplete. PDF/DOCX,
+schema/migration, artifact persistence, and production/push/deploy work
+were explicitly out of scope.
+
+**Starting repository evidence:** branch `main`, HEAD `a4644d3` (the exact
+commit the prior CSV Evidence Appendix package produced), working tree
+clean.
+
+**Finding:** `FORMULA_INJECTION_PROTECTION_BEFORE = ABSENT`.
+`Backend/kai/services/kaiExportManifestCsvSerializer.js`'s `csvField`
+applied only RFC-4180 quoting (`/[",\n\r]/`) with no prefix-neutralization
+step; a citation field whose value began with `=`, `+`, `-`, `@`, TAB, or
+CR reached the downloaded CSV unmodified (quoted only if it also
+contained a comma/quote/newline), which is spreadsheet-executable in
+Excel/Sheets/LibreOffice on open. Ordinary CSV quoting alone does not
+neutralize a leading formula trigger, confirming the controlling
+requirement's premise.
+
+**Control reused, not duplicated:** a P0-05 authoritative helper already
+existed at `Backend/kai/validators/formulaInjectionBoundary.js`
+(`hasFormulaInjectionDangerousPrefix` / `escapeFormulaInjectionDangerousPrefix`),
+built during file-intake hardening and detecting/escaping exactly the six
+required first bytes (`0x3D =`, `0x2B +`, `0x2D -`, `0x40 @`, `0x09 TAB`,
+`0x0D CR`) by prepending a leading ASCII apostrophe — the standard
+spreadsheet-safe text-literal escape, applied only once (idempotent on an
+already-escaped value) and only to real strings. Its own test file
+(`__tests__/kai-sprint2-formula-injection-boundary.spec.js`) explicitly
+documents CR-prefix detection as "available for future output paths," and
+its `P0_OUTPUT_BOUNDARY_FILES` deny-list (which forbids *intake*-side
+files from referencing this helper) does not include the CSV serializer -
+this output path was the intended reuse site, not a misuse. No new
+formula-injection detection/escaping primitive was created; the
+alternative `csvRowLimitDetector.js`/`p0FileTypeAgreementDetector.js`
+validators are intake-time gates unrelated to output escaping and were
+left untouched.
+
+**Repair (smallest coherent change):** `csvField` in
+`kaiExportManifestCsvSerializer.js` now calls
+`escapeFormulaInjectionDangerousPrefix` on the normalized string value
+*before* the existing RFC-4180 quote/escape test and wrap, so the
+boundary order is: formula-injection protection -> ordinary CSV
+escaping/quoting -> output. Only that one function changed (plus the new
+import); `serializeExportManifestRenderModelToCsv`,
+`serializeExportManifestToCsv`, `validateRenderModel`, the render model,
+and every route/service caller are untouched.
+
+**Verification:** `DATABASE_URL=postgres://localhost:1/nonexistent_sentinel`
+for every Node command (no database reached). All six required prefixes
+(`=SUM(A1:A2)`, `+cmd`, `-1+2`, `@SUM(A1:A2)`, leading TAB, leading CR)
+proved escaped with a leading apostrophe and never reaching the cell
+unescaped. Formula-leading values additionally containing a comma
+(`=SUM(A1),A2`), a quote (`=cmd("x")`), and a newline (`=cmd\nX`) proved
+both formula-safe (leading apostrophe present) and valid RFC-4180 CSV
+(comma/quote/newline still trigger correct quoting/doubling on the
+already-escaped value). Ordinary text (commas, quotes, embedded newlines,
+and a plain UUID claim id) proved unchanged from the pre-existing
+behavior. New tests added to
+`__tests__/kai-sprint2-export-manifest-csv-representation-boundary.spec.js`
+(3 new cases; 13 total in that file, up from 10, all passing).
+
+**Regression run (unchanged behavior confirmed):**
+`kai-sprint2-authorized-csv-export-delivery-route.spec.js` (8 passed),
+`kai-sprint2-formula-injection-boundary.spec.js` (9 passed),
+`kai-sprint2-p0-repository-contract.spec.js` (21 passed),
+`kai-sprint2-export-manifest-render-model-composition-boundary.spec.js`
+(10 passed), `kai-sprint2-export-manifest-markdown-representation-boundary.spec.js`
+(12 passed), `kai-sprint2-authorized-markdown-export-delivery-route.spec.js`
+(8 passed), `kai-sprint2-gk-export-review-governed-finalization-control.spec.js`
+(12 passed), `kai-sprint2-p3-20-export-manifest-review-binding-boundary.spec.js`
+(4 passed) - 0 failures, 0 newly introduced failures. Full repository
+suite and frontend build were not required: the change is confined to one
+pure backend serializer function reusing an existing validator import,
+with no route, render-model, schema, or frontend file touched. `git diff
+--check` passed with no whitespace errors.
+
+**Governance preserved:** no change to render-model semantics, P3-16
+currentness, P3-17 authority, P3-18 eligibility, P3-19 manifest/
+finalization semantics, P3-20 history/binding, tenant scoping, or route/
+service boundaries. Stale/currentness and authorization failures continue
+to propagate unchanged through `serializeExportManifestToCsv`'s existing
+early-return (proved by the pre-existing, untouched
+"thin wrapper propagates stale/current-state failures unchanged" test).
+No manifest fingerprint, authority internals, storage/private
+infrastructure, or prompt/raw-diagnostic material was introduced. The
+authoritative control remains backend-only; no frontend rendering or
+sanitization logic was added.
+
+**Final diff:** `Backend/kai/services/kaiExportManifestCsvSerializer.js`
+(1 new import, `csvField` reordered to escape before quoting) and
+`__tests__/kai-sprint2-export-manifest-csv-representation-boundary.spec.js`
+(3 new tests). No schema/migration, artifact-persistence, cloud, PDF/DOCX,
+composite-export, new-page, or production/push/deploy change exists
+anywhere in this diff.
+
+**Local commit:** one bounded commit created after all required checks
+passed.
+
+**Remaining work (unchanged):** PDF and DOCX evidence-format rendering are
+the next Phase-14 additional-format candidates; this closure does not
+start either.

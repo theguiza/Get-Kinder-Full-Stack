@@ -1,4 +1,5 @@
 import { composeExportManifestRenderModel } from "./kaiExportManifestRenderModelService.js";
+import { escapeFormulaInjectionDangerousPrefix } from "../validators/formulaInjectionBoundary.js";
 
 const CSV_CONTRACT_VERSION = "kai-sprint2-export-manifest-csv-v1";
 const CSV_HEADER = ["citation_ref", "claim_id", "evidence_item_id", "source_id", "source_version_id", "limitation_codes"];
@@ -21,10 +22,11 @@ function validateRenderModel(renderModel) {
 
 function csvField(value) {
   const normalized = String(value ?? "");
-  if (/[",\n\r]/.test(normalized)) {
-    return `"${normalized.replaceAll('"', '""')}"`;
+  const formulaSafe = escapeFormulaInjectionDangerousPrefix(normalized);
+  if (/[",\n\r]/.test(formulaSafe)) {
+    return `"${formulaSafe.replaceAll('"', '""')}"`;
   }
-  return normalized;
+  return formulaSafe;
 }
 
 function csvRow(fields) {

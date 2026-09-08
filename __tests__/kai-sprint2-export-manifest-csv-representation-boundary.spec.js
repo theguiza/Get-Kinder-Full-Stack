@@ -187,6 +187,59 @@ test("thin wrapper reuses render-model service and returns CSV only after succes
   assert.equal(result.data.csvContractVersion, "kai-sprint2-export-manifest-csv-v1");
 });
 
+function csvFor(claimId) {
+  const model = renderModel({
+    citations: [
+      { citationRef: "CIT-001", claimId, evidenceItemId: EVIDENCE_A, sourceId: SOURCE_A, sourceVersionId: SOURCE_VERSION_A },
+    ],
+    methodNotes: { limitationSnapshotId: SNAPSHOT, limitationEntries: [] },
+  });
+  return serializeExportManifestRenderModelToCsv(model);
+}
+
+test("cells with a leading formula-injection-dangerous prefix are escaped with a leading apostrophe before CSV escaping", () => {
+  const dangerous = [
+    ["equals", "=SUM(A1:A2)"],
+    ["plus", "+cmd"],
+    ["minus", "-1+2"],
+    ["at", "@SUM(A1:A2)"],
+    ["tab", "\t=SUM(A1:A2)"],
+    ["carriage return", "\r=SUM(A1:A2)"],
+  ];
+
+  for (const [label, value] of dangerous) {
+    const csv = csvFor(value);
+    assert.equal(csv.includes(`,${value},`), false, `${label}: raw dangerous value must not reach the cell unescaped`);
+    assert.match(csv, new RegExp(`(,|")'${value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(,|")`), label);
+  }
+});
+
+test("formula-leading values with a comma, quote, or newline remain both formula-safe and valid CSV", () => {
+  const withComma = csvFor("=SUM(A1),A2");
+  assert.match(withComma, /"'=SUM\(A1\),A2"/);
+  assert.equal(withComma.includes(",=SUM(A1),A2,"), false);
+
+  const withQuote = csvFor('=cmd("x")');
+  assert.match(withQuote, /"'=cmd\(""x""\)"/);
+
+  const withNewline = csvFor("=cmd\nX");
+  assert.match(withNewline, /"'=cmd\nX"/);
+});
+
+test("ordinary text cells are preserved unchanged and standard comma/quote/newline escaping is unaffected", () => {
+  const csv = csvFor("claim,with,commas");
+  assert.match(csv, /"claim,with,commas"/);
+
+  const quotedCsv = csvFor('evidence"with"quotes');
+  assert.match(quotedCsv, /"evidence""with""quotes"/);
+
+  const newlineCsv = csvFor("source\nwith\nnewline");
+  assert.match(newlineCsv, /"source\nwith\nnewline"/);
+
+  const ordinaryCsv = csvFor(CLAIM_A);
+  assert.match(ordinaryCsv, new RegExp(`,${CLAIM_A},`));
+});
+
 test("thin wrapper propagates stale/current-state failures unchanged and does not serialize", async () => {
   let serializerInputTouched = false;
   const stale = {
