@@ -327,7 +327,7 @@ test("P3-06 service lazy-loads database-capable modules only after gates, per so
   assert.ok(source.indexOf("isKaiSprint2Enabled") < source.indexOf("createDefaultExportReviewPacketDependencies"));
 });
 
-test("P3-06 service runs both shared evaluators in the same repeatable-read read-only snapshot", async () => {
+test("P3-06 service runs both shared evaluators, and the P3-20 durable-recovery manifest-identity lookup, in the same repeatable-read read-only snapshot", async () => {
   const calls = [];
   const tx = { async query(sql) { calls.push(sql); return { rows: [] }; } };
   const result = await getGeneratedDraftExportReviewPacket(input(), {
@@ -345,8 +345,28 @@ test("P3-06 service runs both shared evaluators in the same repeatable-read read
       return { ok: true, data: packetDto(), error: null };
     },
     evaluator,
+    loadManifestIdentity: async (seenTx, seenInput) => {
+      calls.push("loadManifestIdentity");
+      assert.equal(seenTx, tx);
+      assert.deepEqual(seenInput, { organizationId: ORG, exportReviewQueueItemId: EXPORT_REVIEW_QUEUE });
+      return { exportManifestId: null };
+    },
   });
   assert.equal(result.ok, true);
+  assert.deepEqual(calls, ["SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY", "evaluatePacket", "loadManifestIdentity"]);
+});
+
+test("P3-06 service never runs the P3-20 manifest-identity lookup when the packet composition itself fails - no separate best-effort follow-up", async () => {
+  const calls = [];
+  const tx = { async query(sql) { calls.push(sql); return { rows: [] }; } };
+  const result = await getGeneratedDraftExportReviewPacket(input(), {
+    env: enabledEnv,
+    runInTransaction: async (callback) => callback(tx),
+    evaluatePacket: async () => { calls.push("evaluatePacket"); return { ok: false, error: { code: "not_found" } }; },
+    evaluator,
+    loadManifestIdentity: async () => { throw new Error("must not call"); },
+  });
+  assert.equal(result.ok, false);
   assert.deepEqual(calls, ["SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY", "evaluatePacket"]);
 });
 
@@ -541,9 +561,11 @@ test("P3-11 an authentic exportReviewUpdatedAt still passes the full service DTO
     runInTransaction: async (callback) => callback(makeTx(state)),
     evaluatePacket: evaluateGeneratedDraftExportReviewPacketInTransaction,
     evaluator: evaluator(state),
+    loadManifestIdentity: async () => ({ exportManifestId: null }),
   });
   assert.equal(result.ok, true);
   assert.equal(result.data.exportReviewUpdatedAt, "2026-08-06T09:00:00.000Z");
+  assert.equal(result.data.exportManifestId, null);
 });
 
 test("P3-06 read path has no write, audit publication, queue transition, authority, final gate, manifest, file, route, UI, or listener wiring", () => {

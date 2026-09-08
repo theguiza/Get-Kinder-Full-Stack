@@ -160,6 +160,37 @@ async function loadExistingExportManifest(tx, { organizationId, exportCandidateI
   return rows[0] || null;
 }
 
+// Durable read recovery (P3-20 binding): a tenant-scoped lookup of the exact
+// persisted exportManifestId this review item's governed finalization
+// produced, using only the exact FK'd relationship P3-20 added
+// (export_manifests.export_review_queue_item_id) - no join, no ORDER BY, no
+// created_at/timestamp of any kind. If zero rows match, no finalization has
+// happened yet for this review item - there is nothing to recover, never a
+// fabricated identity. If more than one row matches (a review item may
+// legitimately back multiple historical manifests - see the accepted
+// FUNCTIONAL_DEPENDENCY_PROOF/DIRECT_MANIFEST_REVIEW_BINDING model), this
+// function refuses to pick one: recovering a single "exact" identity out of
+// several independently valid governed finalizations would require an
+// owner decision this package does not make, so it returns null exactly as
+// it does when none exist - never a newest/latest/best-effort substitute.
+function isLoadExportManifestIdentityInput(input) {
+  return hasExactKeys(input, new Set(["organizationId", "exportReviewQueueItemId"]))
+    && UUID_PATTERN.test(input.organizationId)
+    && UUID_PATTERN.test(input.exportReviewQueueItemId);
+}
+
+export async function loadExportManifestIdentityForReviewQueueItemInTransaction(tx, input) {
+  if (!isLoadExportManifestIdentityInput(input)) return { exportManifestId: null };
+  const { rows } = await tx.query(
+    `SELECT export_manifest_id::text AS export_manifest_id
+       FROM kai.export_manifests
+      WHERE organization_id = $1::uuid AND export_review_queue_item_id = $2::uuid`,
+    [input.organizationId, input.exportReviewQueueItemId],
+  );
+  if (rows.length !== 1) return { exportManifestId: null };
+  return { exportManifestId: rows[0].export_manifest_id };
+}
+
 export function createPostgresExportManifestRepository({ runInTransaction = withTransaction } = {}) {
   return Object.freeze({
     async createExportManifest(input, dependencies = {}) {
@@ -278,4 +309,5 @@ export function createPostgresExportManifestRepository({ runInTransaction = with
 export const __exportManifestRepositoryTestables = Object.freeze({
   isCreateExportManifestInput,
   canonicalFingerprint,
+  isLoadExportManifestIdentityInput,
 });

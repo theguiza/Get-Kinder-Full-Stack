@@ -125,10 +125,14 @@ async function createDefaultExportReviewPacketDependencies() {
   const { evaluateClaimTraceabilityInTransaction } = await import(
     "../dictionary/postgresClaimTraceabilityRepository.js"
   );
+  const {
+    loadExportManifestIdentityForReviewQueueItemInTransaction,
+  } = await import("../dictionary/postgresExportManifestRepository.js");
   return {
     runInTransaction: withTransaction,
     evaluatePacket: evaluateGeneratedDraftExportReviewPacketInTransaction,
     evaluator: evaluateClaimTraceabilityInTransaction,
+    loadManifestIdentity: loadExportManifestIdentityForReviewQueueItemInTransaction,
   };
 }
 
@@ -252,6 +256,26 @@ function isValidatorResultDto(value, generatedContentDraftId) {
   if (!(value.blocking_reason === null || typeof value.blocking_reason === "string")) return false;
   if (!(value.required_fix === null || typeof value.required_fix === "string")) return false;
   return Boolean(value.evidence) && typeof value.evidence === "object" && !Array.isArray(value.evidence);
+}
+
+// Durable read recovery (P3-20 binding): the packet this page loads on
+// mount/reload gains exactly one new, optional field beyond the accepted
+// EXPORT_REVIEW_PACKET_KEYS shape - exportManifestId - populated only from
+// the exact P3-20 FK'd relationship, never re-derived, never a latest/
+// current/timestamp selection. It is null whenever no exact single
+// governed finalization is recoverable for this review item (none exists
+// yet, or more than one exists and picking between them is not this
+// package's decision to make).
+const EXPORT_REVIEW_PACKET_WITH_MANIFEST_KEYS = new Set([
+  ...EXPORT_REVIEW_PACKET_KEYS,
+  "exportManifestId",
+]);
+
+function isGeneratedDraftExportReviewPacketWithManifestDto(data) {
+  if (!hasExactKeys(data, EXPORT_REVIEW_PACKET_WITH_MANIFEST_KEYS)) return false;
+  if (!(data.exportManifestId === null || UUID_PATTERN.test(data.exportManifestId))) return false;
+  const { exportManifestId, ...innerPacket } = data;
+  return isGeneratedDraftExportReviewPacketDto(innerPacket);
 }
 
 function isGeneratedDraftExportReviewPacketDto(data) {
@@ -395,21 +419,36 @@ export async function getGeneratedDraftExportReviewPacket(input, dependencies = 
     return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers, data: null });
   }
 
-  const needsDefaults = !dependencies.runInTransaction || !dependencies.evaluatePacket || !dependencies.evaluator;
+  const needsDefaults = !dependencies.runInTransaction
+    || !dependencies.evaluatePacket
+    || !dependencies.evaluator
+    || !dependencies.loadManifestIdentity;
   const defaults = needsDefaults ? await createDefaultExportReviewPacketDependencies() : null;
   const runInTransaction = dependencies.runInTransaction || defaults.runInTransaction;
   const evaluatePacket = dependencies.evaluatePacket || defaults.evaluatePacket;
   const evaluator = dependencies.evaluator || defaults.evaluator;
+  const loadManifestIdentity = dependencies.loadManifestIdentity || defaults.loadManifestIdentity;
 
   let packetResult;
+  let manifestIdentity;
   try {
     packetResult = await runInTransaction(async (tx) => {
       await tx.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY");
-      return evaluatePacket(tx, {
+      const inner = await evaluatePacket(tx, {
         organizationId: input.organizationId,
         generatedContentDraftId: input.generatedContentDraftId,
         exportReviewQueueItemId: input.exportReviewQueueItemId,
       }, evaluator);
+      if (!inner?.ok) return inner;
+      // Durable read recovery (P3-20 binding), same read-only transaction as
+      // the unchanged packet composition above - never a separate best-
+      // effort follow-up, and only reached once that composition itself
+      // succeeds.
+      manifestIdentity = await loadManifestIdentity(tx, {
+        organizationId: input.organizationId,
+        exportReviewQueueItemId: input.exportReviewQueueItemId,
+      });
+      return inner;
     });
   } catch (error) {
     return buildKaiError(error?.code === "22P02" ? "validation_blocker" : "system_error", { data: null });
@@ -422,7 +461,11 @@ export async function getGeneratedDraftExportReviewPacket(input, dependencies = 
   if (!isGeneratedDraftExportReviewPacketDto(packetResult.data)) {
     return buildKaiError("system_error", { data: null });
   }
-  return { ok: true, data: packetResult.data, error: null };
+  const projected = { ...packetResult.data, exportManifestId: manifestIdentity?.exportManifestId ?? null };
+  if (!isGeneratedDraftExportReviewPacketWithManifestDto(projected)) {
+    return buildKaiError("system_error", { data: null });
+  }
+  return { ok: true, data: projected, error: null };
 }
 
 export const __exportReviewServiceContract = Object.freeze({
@@ -441,6 +484,7 @@ export const __exportReviewServiceTestables = Object.freeze({
   isMappedHumanActor,
   isRequestExportReviewResultDto,
   isGeneratedDraftExportReviewPacketDto,
+  isGeneratedDraftExportReviewPacketWithManifestDto,
   isStartExportReviewResultDto,
   isCompleteExportReviewResultDto,
 });

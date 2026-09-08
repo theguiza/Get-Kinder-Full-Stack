@@ -173,6 +173,11 @@ export function toRenderModel(data) {
     // field is rendered by this page - see gkExportReviewDetail.jsx.
     exportReviewQueueStatus: data.exportReviewQueueStatus,
     exportReviewUpdatedAt: data.exportReviewUpdatedAt,
+    // Durable read recovery: the exact, backend-persisted exportManifestId
+    // for this review item's governed finalization, or null if none is
+    // exactly recoverable. Never computed here - see toRenderModel's own
+    // caller for how this restores the Download Markdown control on reload.
+    exportManifestId: data.exportManifestId ?? null,
     validatorSeverity: validatorResult.severity,
     validatorFailedGate: validatorResult.blocking_reason ?? null,
     blocks: blocks.map((block) => ({

@@ -166,6 +166,23 @@ export default function GkExportReviewDetail({
     // loadPacket depends only on the identifiers already covered below.
   }, [identifiersMissing, loadPacket]);
 
+  // Durable read recovery: after a page reload or later return, restore
+  // Download Markdown from the exact, backend-persisted exportManifestId the
+  // packet now carries (see gkExportReviewDetailLogic.js's toRenderModel) -
+  // never recomputed, never a historical search, never a substitute for an
+  // already-known id. A packet with no exact recoverable identity (no
+  // finalization yet, or more than one historical finalization for this
+  // review item) reports exportManifestId as null and this component shows
+  // no Download Markdown control, exactly as it does before any finalization
+  // in the same session.
+  useEffect(() => {
+    if (outcome?.kind !== "success" || !outcome.model) return;
+    const recovered = outcome.model.exportManifestId;
+    if (recovered && recovered !== exportManifestId) {
+      setExportManifestId(recovered);
+    }
+  }, [outcome, exportManifestId]);
+
   const handleStartReview = useCallback(async () => {
     if (startPending || outcome?.kind !== "success" || !outcome.model) return;
     setStartPending(true);
@@ -278,8 +295,8 @@ export default function GkExportReviewDetail({
   const model = outcome?.kind === "success" ? outcome.model : null;
   const showStartControl = canStartReview(model);
   const showCompleteControl = canCompleteReview(model);
-  const showPrepareCandidateControl = canPrepareExportCandidate(model) && !exportCandidateId;
-  const showGrantAuthorityControl = !!exportCandidateId && !authorityEffective;
+  const showPrepareCandidateControl = canPrepareExportCandidate(model) && !exportCandidateId && !exportManifestId;
+  const showGrantAuthorityControl = !!exportCandidateId && !authorityEffective && !exportManifestId;
   const showFinalizeExportControl = !!exportCandidateId && authorityEffective && !exportManifestId;
 
   return (

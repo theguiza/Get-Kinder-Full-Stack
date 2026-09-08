@@ -144,3 +144,14 @@ test("the export-review page never derives finalGate/eligibility/authority itsel
   assert.match(jsxSource, /exportManifestMarkdownPath\(organizationId, exportManifestId\)/);
   assert.match(jsxSource, /decideCreateExportManifestResult/);
 });
+
+test("durable read recovery: the page restores exportManifestId from the packet's own recovered identity, never a historical search or timestamp lookup", () => {
+  assert.doesNotMatch(jsxSource, /ORDER BY|LIMIT 1|latest manifest|is_current|isLatest/i);
+  assert.match(jsxSource, /outcome\.model\.exportManifestId/);
+  assert.match(jsxSource, /setExportManifestId\(recovered\)/);
+});
+
+test("durable read recovery: Prepare/Grant controls do not reappear once an exact exportManifestId is already known (recovered or same-session)", () => {
+  assert.match(jsxSource, /showPrepareCandidateControl\s*=\s*canPrepareExportCandidate\(model\)\s*&&\s*!exportCandidateId\s*&&\s*!exportManifestId/);
+  assert.match(jsxSource, /showGrantAuthorityControl\s*=\s*!!exportCandidateId\s*&&\s*!authorityEffective\s*&&\s*!exportManifestId/);
+});

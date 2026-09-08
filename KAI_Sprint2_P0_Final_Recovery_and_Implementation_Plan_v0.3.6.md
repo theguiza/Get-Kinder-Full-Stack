@@ -21348,3 +21348,140 @@ frontend/UI read-path recovery of a candidate's/manifest's identity after a
 page reload or later return, using this package's new durable binding, is
 the deferred next dependency this package makes possible - explicitly not
 implemented here, per owner authorization scope.
+
+## Durable Export Finalization Recovery + UI Closure
+
+**Date:** 2026-09-08
+
+**Owner authorization (bounded, local-only):** using the exact P3-20 durable
+relationship (`kai.export_manifests.export_review_queue_item_id`), let the
+existing GK export-review page recover the exact persisted `exportManifestId`
+after a page reload or later return, and restore Download Markdown against
+the existing, unmodified Markdown route. Authorized: the smallest backend
+read-model/projection change, an existing export-review frontend change,
+focused/affected tests, a frontend build, ExecPlan evidence, and one bounded
+local commit. Not authorized: schema/migration changes (none were made or
+needed), production access, push/deploy, PDF/DOCX/CSV, artifact
+storage/persistence, a new page, or Current State/Baseline changes.
+
+**Starting repository evidence:** branch `main`, HEAD
+`b06a94889eadbdf8d302ee9e6811d47ac6e0580a` (the exact commit the prior
+Durable Export Finalization Persistence package produced), working tree
+clean.
+
+**Read-model design decision (no ambiguous selection, ever):** the review
+item's own draft may accumulate multiple candidates over time, and a single
+candidate may accumulate multiple historical manifests across a P3-17
+grant/revoke/re-grant lineage (proven in the prior package). Rather than
+inventing any selection rule between multiple valid manifests for one review
+item, the new read model (`loadExportManifestIdentityForReviewQueueItemInTransaction`
+in `Backend/kai/dictionary/postgresExportManifestRepository.js`) queries
+`kai.export_manifests` by the exact P3-20 FK'd column
+(`organization_id`, `export_review_queue_item_id`) and returns the manifest
+id only when **exactly one** row matches; zero or more than one both resolve
+to `null` - "nothing exactly recoverable" - never a guess, never
+`ORDER BY`/`LIMIT 1`/a `latest`/`current`/`active` flag. This is the smallest
+rule that cannot silently replace one legitimate historical identity with
+another.
+
+**Backend:** `Backend/kai/services/kaiExportReviewService.js`'s
+`getGeneratedDraftExportReviewPacket` (the service the existing P3-07 packet
+route already calls on every page load) now also runs the new read-only
+lookup, in the exact same `REPEATABLE READ READ ONLY` transaction as the
+existing, completely unmodified `evaluateGeneratedDraftExportReviewPacketInTransaction`
+composer - and only once that composition itself succeeds, never as a
+separate best-effort follow-up. The projected packet DTO gains exactly one
+new field, `exportManifestId` (validated by a new
+`isGeneratedDraftExportReviewPacketWithManifestDto`, wrapping the unchanged
+`isGeneratedDraftExportReviewPacketDto` for the original field set). The
+lower-level composer function itself - also used, via a completely separate
+call path, by the P3-18 eligibility gate inside the P3-19 manifest-write
+transaction - was not touched, so that write path is provably unaffected.
+
+**Frontend:** `frontend/gkExportReviewDetailLogic.js`'s `toRenderModel`
+(an explicit allowlist projection) now also surfaces `exportManifestId`.
+`frontend/gkExportReviewDetail.jsx` gained one `useEffect` that restores
+`exportManifestId` component state from the packet's own recovered value
+whenever it differs from what is already known (never overwritten with
+`null`, never re-derived, never a historical search) - this alone restores
+the existing "Download Markdown" link and existing
+`exportManifestMarkdownPath` on reload, using the exact same, completely
+unmodified Markdown route and render-model/currentness re-check this page
+already had. `showPrepareCandidateControl`/`showGrantAuthorityControl` were
+additionally gated on `!exportManifestId`, so a recovered manifest also
+prevents the now-redundant Prepare/Grant controls from confusingly
+reappearing on reload (a UX-only refinement; P3-16/P3-16 replay-safety and
+P3-17 grant/revoke semantics make re-clicking them harmless regardless).
+
+**Assembled proof (`__tests__/kai-sprint2-durable-export-manifest-read-recovery.integration.spec.js`,
+real database):** governed finalization -> durable binding -> exact
+`exportManifestId` -> two independent, later `getGeneratedDraftExportReviewPacket`
+calls (simulating reload/later return, with no client state carried over)
+each recover the exact same `exportManifestId`; no finalization -> `null`
+recovered (never fabricated); a cross-tenant lookup (via the real repository
+function, a different `organizationId`) never returns the real manifest id;
+two independent candidates/review items each recover their own distinct,
+correct manifest id with no cross-candidate bleed. "Stale bound manifest
+fails closed" and "same-session flow remains green" are proven by the
+existing, unmodified `kai-sprint2-authorized-markdown-export-delivery-route.spec.js`
+(P3-16 currentness re-check at render/download time, untouched by this
+package) and `kai-sprint2-gk-export-review-governed-finalization-control.spec.js`/
+`kai-sprint2-p3-08-gk-export-review-detail.spec.js` (same-session finalize-
+then-download flow, untouched button/link wiring), both re-run green below.
+New boundary coverage
+(`__tests__/kai-sprint2-durable-export-manifest-read-recovery-boundary.spec.js`)
+proves the exactly-one-or-none rule directly (fake-tx, 0/1/2-row cases), that
+the lookup never runs when the packet composition itself fails, and that its
+own scoping argument is always the exact caller-supplied `organizationId`.
+
+**Verification:** `DATABASE_URL=postgres://sentinel:sentinel@127.0.0.1:1/sentinel_do_not_connect`
+for every Node/npm command. `npm run verify:kai-sprint2-p3-20-export-manifest-review-binding`
+(the same runner the prior package extended, now also running the two new
+read-recovery spec files) -> 328/328 passed, run twice for stability (a
+known, pre-existing, unrelated P3-16 concurrency-race test flaked once
+across many runs in this session and passed on every other run - not caused
+by this package, which touches no P3-16 file). Two existing pinning tests
+in `__tests__/kai-sprint2-p3-06-export-review-packet-boundary.spec.js`
+were updated (one call-log assertion extended to include the new, same-
+transaction lookup call; one malformed-timestamp fixture given an explicit
+stub for the new dependency) plus one new test added, proving the lookup
+is skipped whenever the underlying packet composition fails.
+`__tests__/kai-sprint2-p3-08-gk-export-review-detail.spec.js`'s exact-shape
+pinning test was extended with `exportManifestId: null` plus two new
+recovery-specific tests; `__tests__/kai-sprint2-gk-export-review-governed-finalization-control.spec.js`
+gained two new source-text proofs (no latest/current/timestamp wording, and
+the new `!exportManifestId` button-gating clauses). Combined focused run
+(`kai-sprint2-p3-08-gk-export-review-detail.spec.js`,
+`kai-sprint2-gk-export-review-governed-finalization-control.spec.js`,
+`kai-sprint2-p3-12-gk-export-review-start-control.spec.js`,
+`kai-sprint2-p3-15-gk-export-review-complete-control.spec.js`,
+`kai-sprint2-p3-07-export-review-packet-route.spec.js`,
+`kai-sprint2-authorized-markdown-export-delivery-route.spec.js`,
+`kai-sprint2-governed-export-finalization-route.spec.js`) -> 82/82 passed.
+`npm run build` (Vite) succeeded with no errors. Full repository suite
+(`npm test`) -> 3397 passed, 7 failed (the exact same 4 distinct pre-
+existing, unrelated failures documented in every prior package in this
+export track), 61 skipped - 0 newly introduced failures. `git diff --check`
+passed.
+
+**Final diff review:** confined to
+`Backend/kai/dictionary/postgresExportManifestRepository.js`,
+`Backend/kai/services/kaiExportReviewService.js`,
+`frontend/gkExportReviewDetail.jsx`, `frontend/gkExportReviewDetailLogic.js`,
+`public/js/bundles/entry.js` (Vite rebuild),
+`scripts/kai-sprint2-p3-19-export-manifest-foundation-local-postgres.js`
+(two new spec files added to its own `node --test` list only), three
+updated test files, two new test files, and this ExecPlan. No schema or
+migration file was created or edited; no route, feature flag, cloud
+configuration, Current State, Implementation Baseline, credential/secret, or
+artifact-persistence/storage change was made; no PDF/DOCX/CSV path exists
+anywhere in this diff.
+
+**Durable finalization identity: CLOSED.** The exact persisted
+`exportManifestId` now survives a page reload or later return through the
+existing GK export-review page, using only the exact P3-20 relationship, an
+unambiguous zero-or-one selection rule, and the existing, unmodified
+Markdown delivery path. The next, still-undertaken dependency is broader
+UI/UX polish around the disclosed multi-manifest-per-review-item edge case
+(currently: no recovery, not an error) - explicitly out of scope here and
+not started.

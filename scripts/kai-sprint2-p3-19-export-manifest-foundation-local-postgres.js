@@ -260,6 +260,8 @@ try {
 
   const testResult = spawnSync("node", [
     "--test",
+    "__tests__/kai-sprint2-durable-export-manifest-read-recovery.integration.spec.js",
+    "__tests__/kai-sprint2-durable-export-manifest-read-recovery-boundary.spec.js",
     "__tests__/kai-sprint2-p3-20-export-manifest-review-binding.integration.spec.js",
     "__tests__/kai-sprint2-p3-20-export-manifest-review-binding-boundary.spec.js",
     "__tests__/kai-sprint2-p3-19-export-manifest-foundation.integration.spec.js",

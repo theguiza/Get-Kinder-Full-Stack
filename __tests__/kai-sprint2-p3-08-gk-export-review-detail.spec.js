@@ -105,6 +105,7 @@ test("P3-08 success renders only allowlisted P3-06 fields and drops everything e
     exportEligible: false,
     exportReviewQueueStatus: "open",
     exportReviewUpdatedAt: "2026-08-06T09:00:00.000Z",
+    exportManifestId: null,
     validatorSeverity: "blocker",
     validatorFailedGate: "claim_review_incomplete",
     blocks: [
@@ -133,6 +134,19 @@ test("P3-08 success renders only allowlisted P3-06 fields and drops everything e
   assert.equal(rendered.includes("must not render"), false);
   assert.equal(rendered.includes("generationRunId"), false);
   assert.equal(rendered.includes("secret_internal_note"), false);
+});
+
+test("durable read recovery: toRenderModel surfaces the exact backend-persisted exportManifestId when the packet carries one", () => {
+  const withManifest = { ...validDto, exportManifestId: "00000000-0000-4000-8000-000000000901" };
+  const outcome = decideOutcome({ statusCode: 200, body: { ok: true, data: withManifest, warnings: [] } });
+  assert.equal(outcome.kind, "success");
+  assert.equal(outcome.model.exportManifestId, "00000000-0000-4000-8000-000000000901");
+});
+
+test("durable read recovery: toRenderModel reports null (never a fabricated identity) when the packet carries no exportManifestId", () => {
+  const outcome = decideOutcome({ statusCode: 200, body: { ok: true, data: validDto, warnings: [] } });
+  assert.equal(outcome.kind, "success");
+  assert.equal(outcome.model.exportManifestId, null);
 });
 
 test("P3-12 P3-08 projection retains exportReviewQueueStatus and exportReviewUpdatedAt internally for Start Review control-state logic only", () => {
