@@ -22158,3 +22158,202 @@ is ever required remains NOT_CONFIRMED and was not invented here.
 
 **Local commit:** one bounded commit created after all required checks
 passed.
+
+## DOCX Evidence Export — third and final ordinary Phase-14 additional export format
+
+**Date:** 2026-09-08
+
+**Owner authorization (bounded, local-only):** implement the DOCX export
+path by reusing the existing exact export-manifest/render-model
+architecture (`composeExportManifestRenderModel` -> DOCX-specific
+serializer -> governed exact-manifest DOCX delivery route -> same-session
++ historical exact-DOCX links), structurally identical to the accepted
+Markdown/CSV/PDF closures. No render-model/storage architecture
+investigation was repeated. HEAD at start:
+`518e7162a6cce2880651f44bb92d3db92891740d` (treated as USER_CONFIRMED, not
+a hard expected-HEAD gate).
+
+**Dependency:** no existing server-side DOCX library was present in the
+repository. Added `docx@9.7.1` (exact-pinned), a pure-JS OOXML-generation
+library with no external conversion service/browser automation/
+LibreOffice/Google Cloud dependency and no Markdown-as-source-of-truth
+step. Narrow attributable dependency check: `npm install docx@9.7.1
+--package-lock-only && npm audit` in an isolated scratch directory reported
+0 vulnerabilities across the full 23-package `docx` dependency tree
+(`@types/node`, `hash.js`, `jszip`, `nanoid@5.1.16`, `xml`, `xml-js`, and
+their transitives). Installed into the main tree, the repository-wide
+`npm audit` still reports one `nanoid` advisory (GHSA-28wg-ghj8-5hjv and
+siblings, range `<=3.3.17`); this resolves to the pre-existing
+`node_modules/nanoid@3.3.11` brought in by `vite`/`postcss` (confirmed via
+`npm ls nanoid`), not to `docx`'s own `node_modules/docx/node_modules/
+nanoid@5.1.16`, which is outside the vulnerable range. No `npm audit fix`
+or unrelated package upgrade was run. `DOCX_DEPENDENCY_RISK:
+NO_NEW_MATERIAL_RISK`. No pdfkit-attributable advisory was found in the
+repository-wide audit (`pdfkit` has no entry in `npm audit --json`
+vulnerabilities); `PDFKIT_NEW_CONTRADICTORY_RISK_FOUND: NO` — the existing
+PDF closure stands unchanged.
+
+**Serializer:** `Backend/kai/services/kaiExportManifestDocxSerializer.js`
+(new) exposes the pure function `serializeExportManifestRenderModelToDocx
+(renderModel)` (render-model DTO in, `Promise<Buffer>` DOCX bytes out via
+`docx`'s `Packer.toBuffer`) and the thin wrapper
+`serializeExportManifestToDocx(input, dependencies)`, which calls the
+existing, untouched `composeExportManifestRenderModel` and returns DOCX
+bytes only after governed success — structurally identical to
+`kaiExportManifestMarkdownSerializer.js`/`kaiExportManifestCsvSerializer.js`/
+`kaiExportManifestPdfSerializer.js`. No KAI table is queried, no raw file
+is read, no claim/evidence eligibility is recomputed, no other format route
+is called, and no currentness/authority/tenant logic is duplicated - the
+serializer only reads the already-composed render-model DTO's
+`content.blocks`, `citations`, `methodNotes.limitationEntries`, and
+`exportCandidate.contentType`/`requestedAudience` (never
+`exportCandidateId`, `generatedContentDraftId`, `limitationSnapshotId`,
+`canonicalFingerprint`, `manifest`, or `authority` - the same
+internal-metadata boundary the accepted Markdown/CSV/PDF serializers
+already enforce). `RENDER_MODEL_REUSED: YES`.
+
+**DOCX content and structure:** Title heading, contract/content-type/
+audience header paragraphs, a "Content" section with one Heading-2
+paragraph per block in ordinal order (multi-line block text split into
+separate paragraphs to preserve authored line breaks, citation markers
+rendered inline as an italic `References: [CIT-###] ...` paragraph), a
+"Citation Appendix" section (one bulleted paragraph per citation, `none`
+when empty), and a "Limitations and Method Notes" section (one bulleted
+paragraph per limitation entry, `none` when empty) - the same section
+structure and hidden-field boundary as the Markdown/PDF serializers.
+
+**Determinism:** the `docx` package hardcodes `new Date()` into
+`docProps/core.xml` (`dcterms:created`/`dcterms:modified`) with no
+override hook exposed anywhere in its public API (confirmed by reading
+`node_modules/docx/dist/index.iife.js`'s `TimestampElement` class) - unlike
+pdfkit, which exposes `Info.CreationDate` and let the PDF closure force
+full byte determinism. Verified empirically: serializing the same
+render-model DTO twice produces `word/document.xml` content that is
+byte-identical (`DOCX_SEMANTIC_DETERMINISM: PASS`), but the full DOCX
+package bytes differ because `docProps/core.xml`'s embedded timestamps
+differ between the two calls (`DOCX_BYTE_DETERMINISM: FAIL` - classified
+truthfully rather than forced; this is a `docx`-library limitation, not an
+implementation defect, and does not affect content correctness since no
+consumer of this export reads `docProps/core.xml` for authoritative
+content).
+
+**Delivery route:** `GET /admin/organizations/:organizationId/export-manifests/:exportManifestId/docx`
+added immediately after the existing PDF route in
+`Backend/kai/routes/sprint2IntakeApi.js`, reusing the existing Sprint-2
+actor-context middleware, the existing `exportManifestIdentifiers` exact
+UUID validator, and the existing `sendServiceResult`/`sendKaiError`
+convention. `sendDocxAttachment` mirrors `sendMarkdownAttachment`/
+`sendCsvAttachment`/`sendPdfAttachment`: `Content-Type:
+application/vnd.openxmlformats-officedocument.wordprocessingml.document`,
+a fixed `Content-Disposition: attachment; filename="kai-export-manifest.docx"`
+(no client-supplied filename/query value ever reaches the header), no
+bytes persisted, no signed/artifact URL. Route source contains no SQL and
+no direct `kai.*` access (proved by the same route-slice regression
+assertion used for Markdown/CSV/PDF).
+
+**Frontend:** `exportManifestDocxPath` added to
+`frontend/gkExportReviewDetailLogic.js`; `frontend/gkExportReviewDetail.jsx`
+renders a "Download DOCX" link next to the existing Markdown/CSV/PDF links
+for both the current-session finalization (`exportManifestId` state, gated
+identically to the existing links) and every entry in
+`exportManifestHistory` (one link per exact `entry.exportManifestId`, no
+latest/current/preferred selection, no change to Prepare/Grant/Finalize
+gating).
+
+**Tests:** three new files -
+`__tests__/kai-sprint2-export-manifest-docx-representation-boundary.spec.js`
+(15 tests: malformed-input rejection, valid-OOXML-package/required-parts
+verification via `jszip`, block order, citation markers + appendix,
+limitations/method notes, 80-block long-content non-truncation,
+hidden-field/private-material boundary, `document.xml` semantic
+determinism, full-package byte non-determinism classified truthfully, pure-source
+boundary, wrapper reuse, stale-currentness propagation, AI/system-actor
+denial), `__tests__/kai-sprint2-authorized-docx-export-delivery-route.spec.js`
+(8 tests: exact single route, correct content-type/disposition/bytes,
+client-filename immunity, upstream-error propagation with no attachment,
+auth/malformed-identifier rejection before service call, AI/system-actor
+denial, malformed-success no-attachment, no-SQL/no-artifact source
+boundary), `__tests__/kai-sprint2-export-manifest-docx-frontend-download-links.spec.js`
+(5 tests: exact path, current-session and per-history-entry link presence
+alongside the untouched Markdown/CSV/PDF links, unchanged
+Prepare/Grant/Finalize gating, no client-side selection logic) - 28 new
+tests, all passing.
+
+**Regressions repaired additively (pre-existing test surface, not
+reopened):** `__tests__/kai-sprint2-p3-08-gk-export-review-detail.spec.js`'s
+frontend-mutation-surface guard previously forbade the literal token
+`docx` in `gkExportReviewDetail.jsx` (written before DOCX was an accepted
+format); updated to drop `docx` from the forbidden pattern alongside the
+already-dropped `pdf` (artifact-bytes/signed-url remain forbidden) since a
+governed DOCX *download link* is not a new mutation surface.
+`__tests__/kai-sprint2-pass2-route-runtime.spec.js`'s full-route-inventory
+contract test added the new DOCX route path additively (every prior entry
+preserved verbatim, comparison is order-independent via `.sort()`).
+Neither Markdown, CSV, nor PDF serializer/route/test content was changed.
+
+**Verification:** `DATABASE_URL` set to a non-listening loopback sentinel
+for every Node/npm command (no database reached). New-package focused run
+(three new DOCX test files) -> 28 passed, 0 failed. Directly affected
+regression run (`kai-sprint2-pass2-route-runtime.spec.js`,
+`kai-sprint2-p3-08-gk-export-review-detail.spec.js`,
+`kai-sprint2-export-manifest-render-model-composition-boundary.spec.js`,
+`kai-sprint2-export-manifest-markdown-representation-boundary.spec.js`,
+`kai-sprint2-authorized-markdown-export-delivery-route.spec.js`,
+`kai-sprint2-export-manifest-csv-representation-boundary.spec.js`,
+`kai-sprint2-authorized-csv-export-delivery-route.spec.js`,
+`kai-sprint2-export-manifest-pdf-representation-boundary.spec.js`,
+`kai-sprint2-authorized-pdf-export-delivery-route.spec.js`,
+`kai-sprint2-export-manifest-pdf-frontend-download-links.spec.js`,
+`kai-sprint2-formula-injection-boundary.spec.js`,
+`kai-sprint2-gk-export-review-governed-finalization-control.spec.js`,
+`kai-sprint2-p3-20-export-manifest-review-binding-boundary.spec.js`,
+`kai-sprint2-durable-export-manifest-read-recovery-boundary.spec.js`,
+`kai-sprint2-governed-export-finalization-route.spec.js`,
+`kai-sprint2-p3-export-operational-composition-route.spec.js`,
+`kai-sprint2-p3-18-assembled-pre-artifact-release-proof.spec.js`, plus the
+three new DOCX files) -> 214 passed, 0 failed. Full repository suite
+(`npm test`) -> 3487 passed, 7 failed (the exact same 4 distinct
+pre-existing failures already confirmed present and unrelated to
+export/KAI code in every prior package in this track - `the child-file
+read model is tenant-scoped...`, `assembled production middleware and
+router enforce the batch-files collection contract`, `the direct
+file-detail service returns exactly the 15-field allowlist`, `assembled
+production middleware and router enforce the file-detail contract` - 0
+newly introduced failures), 61 skipped. `npm run build` (Vite) succeeded
+with no errors. `git diff --check` passed with no whitespace errors.
+
+**Final diff review:** confined to
+`Backend/kai/routes/sprint2IntakeApi.js`,
+`Backend/kai/services/kaiExportManifestDocxSerializer.js` (new),
+`frontend/gkExportReviewDetail.jsx`, `frontend/gkExportReviewDetailLogic.js`,
+`package.json`/`package-lock.json` (one new dependency, `docx@9.7.1`),
+`public/js/bundles/entry.js` (Vite rebuild), three new test files, two
+additively-updated test files, and this ExecPlan. No schema or migration
+file was created or edited; no artifact-persistence/storage, cloud
+configuration, Current State, Implementation Baseline, credential/secret,
+or second export-governance path exists anywhere in this diff; no
+composite-export path exists anywhere in this diff; no new page was added;
+the Website Export/Review UX block was not touched; Markdown, CSV, and PDF
+serializer/route behavior is byte-for-byte unchanged. No production
+database was accessed, mutated, or migrated; nothing was pushed or
+deployed.
+
+**Governance preserved:** `KAI_SPRINT2_ENABLED`/`KAI_GENERATION_ENABLED`/
+`KAI_PUBLIC_EXPORT_ENABLED`, P3-16 currentness, P3-17 authority, P3-18
+final eligibility, P3-19 export-manifest semantics, P3-20 manifest
+history/binding, tenant isolation, human-only release authority,
+service-layer boundaries, structured blockers, and metadata-only audit
+boundaries are all unchanged - the DOCX wrapper calls the same
+`composeExportManifestRenderModel` gate every other format calls, so an
+AI/system actor or a stale/superseded candidate is rejected before any
+DOCX byte is produced, proved by dedicated tests.
+
+**Remaining work:** the complete website export/review UX block (Impact
+Evidence Library Generated Drafts/Review Queue); composite exports (grant
+response packet, board summary); and whether persistent/reusable artifact
+handling is ever required remains NOT_CONFIRMED and was not invented here.
+With Markdown, CSV, and PDF already closed, DOCX closes the ordinary
+Phase-14 additional-format rendering block.
+
+**Local commit:** one bounded commit created after all required checks
+passed.

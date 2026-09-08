@@ -284,17 +284,17 @@ test("P3-08 toRenderModel never reads raw evidence text, filenames, storage path
 // - no new mutation, no client-side rendering, no artifact-byte handling.
 // What remains pinned: no PUT/PATCH/DELETE, no raw approve/reject/mark-ready
 // wording, no client-side eligibility/authority/finalGate derivation, and no
-// PDF/DOCX or artifact-byte handling.
+// artifact-byte handling.
 test("P3-08 frontend source issues only the accepted queue-transition and governed-finalization mutations, never a broader mutation surface", () => {
   const source = readFileSync("frontend/gkExportReviewDetail.jsx", "utf8");
   assert.doesNotMatch(source, /\bmethod:\s*["'](PUT|PATCH|DELETE)["']/i);
   assert.doesNotMatch(source, /putJson|patchJson|deleteJson/i);
   assert.doesNotMatch(source, /\b(approve|reject|mark-ready|markReady)\b/i);
-  // "pdf" is no longer a forbidden token here: the governed PDF export
-  // delivery route (same render-model-reuse pattern as the existing
-  // Markdown/CSV download links) was accepted as a Phase-14 format. "docx",
-  // artifact-byte, and signed-url surfaces remain forbidden - none exist.
-  assert.doesNotMatch(source, /finalGate\s*=\s*true|VAL-EXP-001.*=.*(true|false)|docx|artifact_bytes|signed_url/i);
+  // "pdf" and "docx" are no longer forbidden tokens here: the governed
+  // PDF/DOCX export delivery routes (same render-model-reuse pattern as the
+  // existing Markdown/CSV download links) were accepted as Phase-14 formats.
+  // artifact-byte and signed-url surfaces remain forbidden - none exist.
+  assert.doesNotMatch(source, /finalGate\s*=\s*true|VAL-EXP-001.*=.*(true|false)|artifact_bytes|signed_url/i);
   assert.match(source, /Why can KAI say this\?/);
 });
 
