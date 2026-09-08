@@ -19,6 +19,15 @@ import pool from "./kaiDb.js";
  * 'generated_content_draft'), matching this file's existing convention of
  * inlining the sibling `generated_content_review` join above rather than
  * importing a contract constant.
+ *
+ * The joined export_review row's full internal field set (priority,
+ * blocked_reason, assigned_to, due_at, summary, required_action,
+ * queue_metadata, created_by, created_by_type, plus organization_id/
+ * queue_type/target_object_type/target_object_id) is selected here too -
+ * not because the list DTO exposes them, but because the service layer
+ * validates the joined row against the same authoritative
+ * isExportReviewQueueContractRow static-contract + lifecycle check the
+ * selected-draft read applies, and that check needs the whole row.
  */
 export async function listGeneratedDraftLibraryIndex(
   organizationId,
@@ -40,8 +49,21 @@ export async function listGeneratedDraftLibraryIndex(
             q.review_status,
             d.created_at,
             eq.review_queue_item_id::text AS export_review_queue_item_id,
+            eq.organization_id::text AS export_review_organization_id,
+            eq.queue_type AS export_review_queue_type,
+            eq.target_object_type AS export_review_target_object_type,
+            eq.target_object_id::text AS export_review_target_object_id,
+            eq.priority AS export_review_priority,
             eq.queue_status AS export_review_queue_status,
-            eq.review_status AS export_review_status
+            eq.review_status AS export_review_status,
+            eq.blocked_reason AS export_review_blocked_reason,
+            eq.assigned_to::text AS export_review_assigned_to,
+            eq.due_at AS export_review_due_at,
+            eq.summary AS export_review_summary,
+            eq.required_action AS export_review_required_action,
+            eq.queue_metadata AS export_review_queue_metadata,
+            eq.created_by::text AS export_review_created_by,
+            eq.created_by_type AS export_review_created_by_type
        FROM kai.generated_content_drafts d
        JOIN kai.review_queue_items q
          ON q.organization_id = d.organization_id

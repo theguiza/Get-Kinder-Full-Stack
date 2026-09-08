@@ -6,7 +6,10 @@ import { validateTenantBoundaryConsistency } from "../validators/tenantValidator
 import { listGeneratedDraftLibraryIndex as readGeneratedDraftLibraryIndex } from "../db/kaiGeneratedDraftLibraryReadModels.js";
 import { __generatedContentServiceContract } from "./kaiGeneratedContentService.js";
 import { __exportReviewServiceContract } from "./kaiExportReviewService.js";
-import { EXPORT_REVIEW_LIFECYCLE_PROFILES } from "../dictionary/exportReviewQueueContract.js";
+import {
+  EXPORT_REVIEW_LIFECYCLE_PROFILES,
+  isExportReviewQueueContractRow,
+} from "../dictionary/exportReviewQueueContract.js";
 
 const {
   GET_GENERATED_DRAFT_REVIEW_PACKET_OPERATION: GENERATED_DRAFT_LIBRARY_READ_OPERATION,
@@ -50,19 +53,56 @@ function isCanonicalUtcTimestamp(value) {
   return normalized === value;
 }
 
+// Every joined export_review internal field the static contract inspects -
+// when the LEFT JOIN found no row, ALL of these must be null together
+// (a partially populated LEFT JOIN result - some null, some not - fails
+// closed rather than being treated as a genuine absence).
+const EXPORT_REVIEW_ROW_NULLABLE_FIELDS = [
+  "export_review_queue_item_id", "export_review_organization_id", "export_review_queue_type",
+  "export_review_target_object_type", "export_review_target_object_id", "export_review_priority",
+  "export_review_queue_status", "export_review_status", "export_review_blocked_reason",
+  "export_review_assigned_to", "export_review_due_at", "export_review_summary",
+  "export_review_required_action", "export_review_queue_metadata", "export_review_created_by",
+  "export_review_created_by_type",
+];
+
+function toExportReviewQueueContractRow(row) {
+  return {
+    review_queue_item_id: row.export_review_queue_item_id,
+    organization_id: row.export_review_organization_id,
+    queue_type: row.export_review_queue_type,
+    target_object_type: row.export_review_target_object_type,
+    target_object_id: row.export_review_target_object_id,
+    priority: row.export_review_priority,
+    queue_status: row.export_review_queue_status,
+    review_status: row.export_review_status,
+    blocked_reason: row.export_review_blocked_reason,
+    assigned_to: row.export_review_assigned_to,
+    due_at: row.export_review_due_at,
+    summary: row.export_review_summary,
+    required_action: row.export_review_required_action,
+    queue_metadata: row.export_review_queue_metadata,
+    created_by: row.export_review_created_by,
+    created_by_type: row.export_review_created_by_type,
+  };
+}
+
 // Same 0-or-1-row shape validateExportReviewQueueRows enforces on the
-// single-draft read path: no export_review row is null/null, exactly one
-// is a genuine EXPORT_REVIEW_LIFECYCLE_PROFILES member - never a pick among
-// several, since the batched LEFT JOIN can return at most one such row per
-// draft by the same unique-index invariant.
-function isValidExportReviewRowFields(row) {
+// single-draft read path: no export_review row is a genuine zero-review
+// state (every joined field null together), exactly one row must pass the
+// same isExportReviewQueueContractRow static-contract + lifecycle check the
+// single-draft read applies - never a second, parallel validator, since the
+// batched LEFT JOIN can return at most one such row per draft by the same
+// unique-index invariant.
+function isValidExportReviewRowFields(row, { organizationId, generatedContentDraftId }) {
   if (row.export_review_queue_item_id === null) {
-    return row.export_review_queue_status === null && row.export_review_status === null;
+    return EXPORT_REVIEW_ROW_NULLABLE_FIELDS.every((key) => row[key] === null);
   }
-  return canonicalUuid(row.export_review_queue_item_id)
-    && EXPORT_REVIEW_LIFECYCLE_PROFILES.some(
-      (profile) => row.export_review_queue_status === profile.queueStatus && row.export_review_status === profile.reviewStatus,
-    );
+  return isExportReviewQueueContractRow(toExportReviewQueueContractRow(row), {
+    organizationId,
+    targetObjectId: generatedContentDraftId,
+    allowedLifecycleProfiles: EXPORT_REVIEW_LIFECYCLE_PROFILES,
+  });
 }
 
 function responseDraftSummary(row, organizationId, exportReviewVisible) {
@@ -78,7 +118,7 @@ function responseDraftSummary(row, organizationId, exportReviewVisible) {
     || !REVIEW_QUEUE_STATUSES.has(row.queue_status)
     || !REVIEW_STATUSES.has(row.review_status)
     || !isCanonicalUtcTimestamp(row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at)
-    || !isValidExportReviewRowFields(row)
+    || !isValidExportReviewRowFields(row, { organizationId, generatedContentDraftId: row.generated_content_draft_id })
   ) {
     return null;
   }

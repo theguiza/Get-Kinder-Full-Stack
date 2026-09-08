@@ -47,6 +47,54 @@ const actorContext = Object.freeze({
   ],
 });
 
+// Every joined export_review internal field the static contract inspects,
+// defaulted to the genuine zero-review absence (all null together).
+function zeroExportReviewFields() {
+  return {
+    export_review_queue_item_id: null,
+    export_review_organization_id: null,
+    export_review_queue_type: null,
+    export_review_target_object_type: null,
+    export_review_target_object_id: null,
+    export_review_priority: null,
+    export_review_queue_status: null,
+    export_review_status: null,
+    export_review_blocked_reason: null,
+    export_review_assigned_to: null,
+    export_review_due_at: null,
+    export_review_summary: null,
+    export_review_required_action: null,
+    export_review_queue_metadata: null,
+    export_review_created_by: null,
+    export_review_created_by_type: null,
+  };
+}
+
+// An authentic export_review row matching EXPORT_REVIEW_QUEUE_STATIC_CONTRACT
+// exactly, for the given draft id and lifecycle pair - the same shape the
+// single-draft read path's loadExportReviewQueueRows persists/reads.
+function authenticExportReviewFields(forDraftId, queueItemId, { queueStatus, reviewStatus }) {
+  return {
+    export_review_queue_item_id: queueItemId,
+    export_review_organization_id: organizationId,
+    export_review_queue_type: "export_review",
+    export_review_target_object_type: "generated_content_draft",
+    export_review_target_object_id: forDraftId,
+    export_review_priority: "medium",
+    export_review_queue_status: queueStatus,
+    export_review_status: reviewStatus,
+    export_review_blocked_reason: null,
+    export_review_assigned_to: null,
+    export_review_due_at: null,
+    export_review_summary: "Generated draft requires export review.",
+    export_review_required_action:
+      "Review audience authority, current eligibility, citations, and the final export gate before any export.",
+    export_review_queue_metadata: {},
+    export_review_created_by: null,
+    export_review_created_by_type: "system",
+  };
+}
+
 function draftRow(overrides = {}) {
   return {
     generated_content_draft_id: draftId,
@@ -58,9 +106,7 @@ function draftRow(overrides = {}) {
     queue_status: "open",
     review_status: "needs_gk_review",
     created_at: "2026-08-15T10:00:00.000Z",
-    export_review_queue_item_id: null,
-    export_review_queue_status: null,
-    export_review_status: null,
+    ...zeroExportReviewFields(),
     raw_content: "must not render",
     signed_url: "must not render",
     ...overrides,
@@ -353,11 +399,10 @@ test("Generated Drafts library index reuses e890a8c's export-review role boundar
   const deps = {
     env: enabledEnv,
     async listGeneratedDraftLibraryIndex() {
-      return [draftRow({
-        export_review_queue_item_id: "00000000-0000-4000-8000-000000000901",
-        export_review_queue_status: "open",
-        export_review_status: "needs_gk_review",
-      })];
+      return [draftRow(authenticExportReviewFields(draftId, "00000000-0000-4000-8000-000000000901", {
+        queueStatus: "open",
+        reviewStatus: "needs_gk_review",
+      }))];
     },
   };
   const result = await listGeneratedDraftLibraryIndex(
@@ -410,21 +455,15 @@ test("Generated Drafts library index recovers open/in_progress/resolved export-r
       return [
         draftRow({
           generated_content_draft_id: draftIdOpen,
-          export_review_queue_item_id: queueIdOpen,
-          export_review_queue_status: "open",
-          export_review_status: "needs_gk_review",
+          ...authenticExportReviewFields(draftIdOpen, queueIdOpen, { queueStatus: "open", reviewStatus: "needs_gk_review" }),
         }),
         draftRow({
           generated_content_draft_id: draftIdInProgress,
-          export_review_queue_item_id: queueIdInProgress,
-          export_review_queue_status: "in_progress",
-          export_review_status: "needs_gk_review",
+          ...authenticExportReviewFields(draftIdInProgress, queueIdInProgress, { queueStatus: "in_progress", reviewStatus: "needs_gk_review" }),
         }),
         draftRow({
           generated_content_draft_id: draftIdResolved,
-          export_review_queue_item_id: queueIdResolved,
-          export_review_queue_status: "resolved",
-          export_review_status: "resolved",
+          ...authenticExportReviewFields(draftIdResolved, queueIdResolved, { queueStatus: "resolved", reviewStatus: "resolved" }),
         }),
         draftRow({ generated_content_draft_id: draftId }),
       ];
@@ -453,11 +492,10 @@ test("Generated Drafts library index export-review row validator rejects a fabri
   const deps = {
     env: enabledEnv,
     async listGeneratedDraftLibraryIndex() {
-      return [draftRow({
-        export_review_queue_item_id: "00000000-0000-4000-8000-000000000901",
-        export_review_queue_status: "not_a_real_status",
-        export_review_status: "needs_gk_review",
-      })];
+      return [draftRow(authenticExportReviewFields(draftId, "00000000-0000-4000-8000-000000000901", {
+        queueStatus: "not_a_real_status",
+        reviewStatus: "needs_gk_review",
+      }))];
     },
   };
   const result = await listGeneratedDraftLibraryIndex(
@@ -466,6 +504,56 @@ test("Generated Drafts library index export-review row validator rejects a fabri
   );
   assert.equal(result.ok, false);
   assert.equal(result.error.code, "system_error");
+});
+
+test("Generated Drafts library index export-review validator reuses the exact single-draft static contract + lifecycle check: authentic rows pass, mutations fail closed", async () => {
+  const gkAdminActor = {
+    ...actorContext,
+    organizationMemberships: [{ organization_id: organizationId, membership_status: "active", role_name: "gk_admin" }],
+  };
+  const queueItemId = "00000000-0000-4000-8000-000000000901";
+  const authentic = () => authenticExportReviewFields(draftId, queueItemId, { queueStatus: "open", reviewStatus: "needs_gk_review" });
+
+  async function evaluate(rowOverrides) {
+    const deps = {
+      env: enabledEnv,
+      async listGeneratedDraftLibraryIndex() {
+        return [draftRow(rowOverrides)];
+      },
+    };
+    return listGeneratedDraftLibraryIndex(
+      { organizationId, limit: 25, afterGeneratedContentDraftId: null, actorContext: gkAdminActor },
+      deps,
+    );
+  }
+
+  const cases = [
+    { name: "authentic open row", overrides: authentic(), expectOk: true },
+    { name: "authentic in_progress row", overrides: authenticExportReviewFields(draftId, queueItemId, { queueStatus: "in_progress", reviewStatus: "needs_gk_review" }), expectOk: true },
+    { name: "authentic resolved row", overrides: authenticExportReviewFields(draftId, queueItemId, { queueStatus: "resolved", reviewStatus: "resolved" }), expectOk: true },
+    { name: "genuine zero-review absence", overrides: zeroExportReviewFields(), expectOk: true },
+    { name: "wrong priority", overrides: { ...authentic(), export_review_priority: "high" }, expectOk: false },
+    { name: "non-null blocked_reason", overrides: { ...authentic(), export_review_blocked_reason: "blocked" }, expectOk: false },
+    { name: "wrong summary", overrides: { ...authentic(), export_review_summary: "tampered summary" }, expectOk: false },
+    { name: "wrong required_action", overrides: { ...authentic(), export_review_required_action: "tampered action" }, expectOk: false },
+    { name: "non-empty queue_metadata", overrides: { ...authentic(), export_review_queue_metadata: { note: "x" } }, expectOk: false },
+    { name: "non-null created_by", overrides: { ...authentic(), export_review_created_by: "90000000-0000-4000-8000-000000000009" }, expectOk: false },
+    { name: "wrong created_by_type", overrides: { ...authentic(), export_review_created_by_type: "human" }, expectOk: false },
+    { name: "wrong queue_type", overrides: { ...authentic(), export_review_queue_type: "generated_content_review" }, expectOk: false },
+    { name: "wrong target_object_type", overrides: { ...authentic(), export_review_target_object_type: "claim" }, expectOk: false },
+    { name: "target_object_id mismatch (cross-draft)", overrides: { ...authentic(), export_review_target_object_id: "00000000-0000-4000-8000-000000000999" }, expectOk: false },
+    { name: "organization_id mismatch (cross-tenant)", overrides: { ...authentic(), export_review_organization_id: otherOrganizationId }, expectOk: false },
+    { name: "invalid lifecycle pair", overrides: { ...authentic(), export_review_queue_status: "blocked", export_review_status: "needs_gk_review" }, expectOk: false },
+    { name: "mismatched lifecycle pair (open queue, resolved review)", overrides: { ...authentic(), export_review_queue_status: "open", export_review_status: "resolved" }, expectOk: false },
+    { name: "partially populated LEFT JOIN (id present, rest null)", overrides: { ...zeroExportReviewFields(), export_review_queue_item_id: queueItemId }, expectOk: false },
+    { name: "partially populated LEFT JOIN (id absent, one field leaks)", overrides: { ...zeroExportReviewFields(), export_review_priority: "medium" }, expectOk: false },
+  ];
+
+  for (const { name, overrides, expectOk } of cases) {
+    const result = await evaluate(overrides);
+    assert.equal(result.ok, expectOk, `${name}: expected ok=${expectOk}, got ${JSON.stringify(result.error || result.data)}`);
+    if (!expectOk) assert.equal(result.error.code, "system_error", `${name}: expected system_error`);
+  }
 });
 
 test("Generated Drafts library service pins draftStatus=draft even for a resolved review lifecycle", async () => {
@@ -521,6 +609,24 @@ test("Generated Drafts read model is bounded, organization-scoped, deterministic
   assert.match(observed.sql, /AND eq\.target_object_type = 'generated_content_draft'/);
   assert.match(observed.sql, /AND eq\.target_object_id = d\.generated_content_draft_id/);
   assert.match(observed.sql, /eq\.review_queue_item_id::text AS export_review_queue_item_id/);
+
+  // The full internal export_review contract field set is selected too - not
+  // for the public list DTO, but so the service can validate the joined row
+  // against the same isExportReviewQueueContractRow static contract the
+  // single-draft read applies.
+  assert.match(observed.sql, /eq\.organization_id::text AS export_review_organization_id/);
+  assert.match(observed.sql, /eq\.queue_type AS export_review_queue_type/);
+  assert.match(observed.sql, /eq\.target_object_type AS export_review_target_object_type/);
+  assert.match(observed.sql, /eq\.target_object_id::text AS export_review_target_object_id/);
+  assert.match(observed.sql, /eq\.priority AS export_review_priority/);
+  assert.match(observed.sql, /eq\.blocked_reason AS export_review_blocked_reason/);
+  assert.match(observed.sql, /eq\.assigned_to::text AS export_review_assigned_to/);
+  assert.match(observed.sql, /eq\.due_at AS export_review_due_at/);
+  assert.match(observed.sql, /eq\.summary AS export_review_summary/);
+  assert.match(observed.sql, /eq\.required_action AS export_review_required_action/);
+  assert.match(observed.sql, /eq\.queue_metadata AS export_review_queue_metadata/);
+  assert.match(observed.sql, /eq\.created_by::text AS export_review_created_by/);
+  assert.match(observed.sql, /eq\.created_by_type AS export_review_created_by_type/);
 });
 
 test("Generated Drafts review-label mapping reflects open/in_progress/resolved server states", () => {

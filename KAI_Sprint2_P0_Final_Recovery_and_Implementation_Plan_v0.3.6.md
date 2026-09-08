@@ -22778,3 +22778,115 @@ identified.
 
 **Local commit:** one bounded commit created after all required checks
 passed.
+
+## Generated Drafts list export-review contract-parity repair
+
+**Date:** 2026-09-08
+
+**Owner authorization (bounded, local-only):** repair one contract-parity
+defect in the just-shipped Generated Drafts list export-review surfacing -
+the list validated an existing joined `export_review` row against a
+second, home-grown lifecycle-only check (`isValidExportReviewRowFields`)
+instead of the same authoritative `isExportReviewQueueContractRow` static-
+contract + lifecycle validator the selected-draft read
+(`validateExportReviewQueueRows` in `postgresGeneratedContentRepository.js`)
+already applies. That prior check only compared `export_review_queue_item_id`
+shape and the `(queue_status, review_status)` pair against
+`EXPORT_REVIEW_LIFECYCLE_PROFILES`; it never selected or inspected the
+static-contract fields (`priority`, `blocked_reason`, `assigned_to`,
+`due_at`, `summary`, `required_action`, `queue_metadata`, `created_by`,
+`created_by_type`, `organization_id`, `queue_type`, `target_object_type`,
+`target_object_id`), so a persisted row that matched a real lifecycle pair
+but had a tampered/malformed static-contract field would have passed list
+validation while the identical row would fail-closed on the selected-draft
+read - a contract-parity gap between the two paths reading the same
+table. Starting HEAD: `baf41ce45a4f8d564b76426c13f661acb482a61c`
+(USER_CONFIRMED); working tree clean. No architecture, role boundary,
+navigation, no-N+1 design, pagination/order, selected-draft recovery, or
+request-refresh behavior from the prior package was reopened.
+
+**Fix, no second validator:** `Backend/kai/db/kaiGeneratedDraftLibraryReadModels.js`'s
+existing single batched `LEFT JOIN eq` now also selects the joined row's
+full internal `export_review` field set (`eq.organization_id`,
+`eq.queue_type`, `eq.target_object_type`, `eq.target_object_id`,
+`eq.priority`, `eq.blocked_reason`, `eq.assigned_to`, `eq.due_at`,
+`eq.summary`, `eq.required_action`, `eq.queue_metadata`, `eq.created_by`,
+`eq.created_by_type`) alongside the three fields already selected - one
+additional set of join columns on the existing query, not a new join,
+second query, or per-draft follow-up. `Backend/kai/services/kaiGeneratedDraftLibraryService.js`
+now imports `isExportReviewQueueContractRow` (alongside the already-
+imported `EXPORT_REVIEW_LIFECYCLE_PROFILES`) directly from
+`../dictionary/exportReviewQueueContract.js` - the same dictionary module
+`validateExportReviewQueueRows` itself calls - and maps the raw
+`export_review_*`-prefixed joined columns into the exact row shape that
+function expects before calling it with the same
+`{ organizationId, targetObjectId: generatedContentDraftId,
+allowedLifecycleProfiles: EXPORT_REVIEW_LIFECYCLE_PROFILES }` options the
+selected-draft read passes. No lifecycle/static-contract constant or
+validator function is redefined or duplicated in service code. The genuine
+zero-review absence (no row joined) is still recognized explicitly - all
+sixteen joined export-review fields null together - and any partially
+populated LEFT JOIN result (some null, some not) fails closed rather than
+being read as a real absence. The public list DTO is unchanged: only
+`exportReviewQueueItemId`/`exportReviewQueueStatus`/`exportReviewStatus`/
+`exportReviewVisible` are ever projected; none of the newly selected
+validation-only internal fields reach the response, and the existing
+gk_admin-only visibility gate/projection and restricted-actor forced-null
+behavior are untouched.
+
+**Tests:** the existing coupled file,
+`__tests__/kai-sprint2-generated-drafts-library.spec.js`, gained an
+`authenticExportReviewFields` fixture helper building a row that matches
+`EXPORT_REVIEW_QUEUE_STATIC_CONTRACT` exactly for a given draft id and
+lifecycle pair (mirroring what `loadExportReviewQueueRows` actually
+persists/reads), a `zeroExportReviewFields` helper for the genuine-absence
+shape, and one new table-driven test asserting: authentic open/
+in_progress/resolved rows and the genuine zero-review absence all pass;
+and mutating any single static-contract field (`priority`, `blocked_reason`,
+`summary`, `required_action`, `queue_metadata`, `created_by`,
+`created_by_type`, `queue_type`, `target_object_type`, cross-draft
+`target_object_id`, cross-tenant `organization_id`), an invalid or
+mismatched lifecycle pair, or a partially populated LEFT JOIN result (id
+present with everything else null, or one field leaking with the id
+absent) each fail closed as `system_error`. The three pre-existing tests
+that constructed an "existing export_review row" inline were updated to
+use the new authentic-row fixture instead of a partial, lifecycle-only
+stub (no assertion weakened). The read-model SQL test gained assertions
+for every newly selected `eq.*` column.
+
+**Verification:** `DATABASE_URL` set to a non-listening loopback sentinel
+for every Node/npm command (no database reached). Focused re-run
+(`kai-sprint2-generated-drafts-library.spec.js`) -> 15 passed, 0 failed.
+Directly affected regression run (`kai-sprint2-generated-draft-export-
+review-read-recovery-boundary.spec.js`, `kai-sprint2-gk-export-review-
+governed-finalization-control.spec.js`, `kai-sprint2-impact-library-
+export-review-link-boundary.spec.js`, and the P3-02/P3-05/P3-06/P3-07/
+P3-08/P3-09/P3-10/P3-12/P3-13/P3-14/P3-15 export-review boundary/route/
+control specs) -> 196 passed (across those 13 files), 0 failed. Full
+repository suite (`npm test`) -> 3506 passed, 7 failed - the same 7 pre-
+existing failures confirmed present on unmodified `baf41ce` (`the
+child-file read model is tenant-scoped...`, `assembled production
+middleware and router enforce the batch-files collection contract`, `the
+direct file-detail service returns exactly the 15-field allowlist`,
+`assembled production middleware and router enforce the file-detail
+contract`, plus their nested subtests), 0 newly introduced failures, 61
+skipped. No frontend/generated-bundle file changed, so no frontend build
+was run. `git diff --check` passed with no whitespace errors.
+
+**Final diff review:** confined to
+`Backend/kai/db/kaiGeneratedDraftLibraryReadModels.js`,
+`Backend/kai/services/kaiGeneratedDraftLibraryService.js`, one
+additively-updated test file, and this ExecPlan. No schema/migration, new
+route/page, new authority model, composite export, or artifact-persistence
+change exists anywhere in this diff; no production database was accessed,
+mutated, or migrated; nothing was pushed or deployed; no Current State or
+Implementation Baseline update was made.
+
+**Remaining work:** unchanged from the prior package - composite exports
+(grant response packet, board summary) remain unstarted; whether
+persistent/reusable artifact handling is ever required remains
+NOT_CONFIRMED. No further repository-supported gap in the website export/
+review UX track was identified.
+
+**Local commit:** one bounded commit created after all required checks
+passed.
