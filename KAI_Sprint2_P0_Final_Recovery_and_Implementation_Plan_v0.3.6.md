@@ -24341,3 +24341,104 @@ backend route, serializer, schema, or persistence change.
 
 **Local commit:** one bounded commit created after all required checks
 passed.
+
+## Phase-14 (Grant Response Packet Track) — Export Identity Foundation
+## (P14-02; LOCAL_ONLY schema + persistence; no workflow wiring)
+
+**Date:** 2026-09-09
+
+**Owner authorization (bounded, local-only):** make LOCAL-ONLY schema and
+persistence changes required to implement the durable Grant Response Packet
+composite export identity foundation, limited to local repository code,
+local migration/schema artifacts, and synthetic/local database tests and
+migration proof — no production/shared database changes, no production
+access or mutation, no deployment, no push or remote-repository mutation, no
+cloud changes, no feature-flag changes, no credential changes or handling,
+no real client data, no destructive production/shared-database migration
+execution. Closed areas remained closed: no P14-01, membership, composition,
+preview, frontend, or member-level export work was reopened, and no member
+`exportCandidateId`/`exportManifestId` was used as the packet's identity.
+
+**Authority finding (unchanged from the prior PREVIEW_READ_ONLY package):**
+current governed final export authority remains single-draft/export-
+candidate based; no current repository identity represented a finalized
+`organizationId + engagementId` composite packet before this package. This
+package adds exactly that missing durable identity — nothing more. It does
+not create a governed final packet export, does not bind any export
+candidate/manifest/authority-decision to a packet, does not add a route,
+service call site, or UI affordance, and does not grant any approval or
+finalization authority.
+
+**Identity shape decision:** unlike `kai.export_candidates` /
+`kai.export_manifests` (content-fingerprint convergence, because the same
+draft/authority content can legitimately recur), a Grant Response Packet is
+already uniquely determined by its `(organization_id, engagement_id,
+packet_audience)` triple — that structural triple is the durable identity
+key. `packet_audience` is pinned to `'funder'`, the existing packet DTO's
+only supported audience.
+
+**Implementation:** added
+`migrations/kai_sprint2_p14_02_grant_response_packet_export_identity_foundation.sql`
+/ `.rollback.sql`, creating `kai.grant_response_packet_export_identities`
+with a tenant-safe composite FK into `kai.engagements`, the `UNIQUE
+(organization_id, engagement_id, packet_audience)` replay-convergence key,
+and an append-only `BEFORE UPDATE OR DELETE` trigger
+(`kai.p14_02_reject_identity_mutation`), mirroring the P3-19 export-manifest
+immutability convention. Preflight requires `kai.engagements`,
+`kai.generation_runs`, and the P14-01 `generation_runs.engagement_id` column
+to already exist. Added
+`Backend/kai/dictionary/postgresGrantResponsePacketExportIdentityRepository.js`
+exposing one idempotent `getOrCreateGrantResponsePacketExportIdentity`
+(exact-keys `organizationId` + `engagementId` + `actorContext`;
+`packetAudience` is never accepted from the caller) and a read-only
+`loadGrantResponsePacketExportIdentityInTransaction` that never mints a row.
+Neither function is called from any service, route, or the existing packet
+DTO in this package — wiring is explicitly deferred to a later, separately
+authorized package. A natural constraint name
+(`..._p14_02_created_by_type_check`, 68 bytes) exceeded Postgres's 63-byte
+identifier limit and would have silently truncated; it was shortened to
+`..._p14_02_created_by_chk` (61 bytes) so the migration, verifier, and live
+catalog name agree exactly, confirmed with no truncation notice on a live
+`CREATE TABLE`.
+
+**Verification:** added
+`scripts/kai-sprint2-p14-02-grant-response-packet-export-identity-foundation-{verifier,smoke-seed,smoke-verifier,failure-checks}.sql`
+and `-local-postgres.js` (registered as
+`npm run verify:kai-sprint2-p14-02-grant-response-packet-export-identity-foundation`),
+proving against a runner-owned, loopback-only ephemeral Postgres 16
+instance: catalog verifier (9/9 checks), smoke-seed/verifier (3/3: exactly
+one row survives two seed attempts for the same triple, the replay attempt
+never created a second row, the first-minted id is the survivor),
+failure-checks (6/6: fabricated engagement rejected, cross-tenant
+engagement/organization pair rejected, non-`funder` audience rejected,
+`NULL` engagement rejected, append-only UPDATE rejected, append-only DELETE
+rejected). Added focused tests
+`__tests__/kai-sprint2-p14-02-grant-response-packet-export-identity-foundation.integration.spec.js`
+(real-persisted get-or-create convergence, tenant-safety, the read-only
+loader, immutability; gated on a loopback-validated
+`KAI_P14_02_GRANT_RESPONSE_PACKET_EXPORT_IDENTITY_FOUNDATION_DATABASE_URL`)
+and `__tests__/kai-grant-response-packet-export-identity-boundary.spec.js`
+(no-DB input-contract proof, including rejection of a client-supplied
+`packetAudience`, `grantResponsePacketExportIdentityId`,
+`exportCandidateId`, or `exportManifestId`) — 15/15 and 10/10 passed.
+Forward migration → rollback → forward re-application was proven idempotent
+and clean against a separate ephemeral Postgres instance, with no
+identifier-truncation notice. `DATABASE_URL` was set to the non-listening
+loopback sentinel `postgres://127.0.0.1:9/kai_sentinel` for every Node/npm
+command.
+
+**Full suite:** `npm test` returned 3587 passed, 7 failed, 62 skipped. The 7
+failures are the pre-existing, unrelated batch/file-detail baseline already
+documented earlier in this ExecPlan (child-file read model, batch-files
+collection contract, file-detail 15-field allowlist, file-detail contract).
+No new full-suite failure was introduced.
+
+**Final diff review:** confined to the two new migration files, the one new
+repository file, five new `scripts/kai-sprint2-p14-02-*` artifacts plus
+patch-notes/runbook, one `package.json` script entry, two new test files,
+and this ExecPlan entry. `git diff --check` passed. No frontend file, route,
+existing service, or existing packet DTO changed; no frontend build
+required.
+
+**Local commit:** one bounded commit created after all required checks
+passed.
