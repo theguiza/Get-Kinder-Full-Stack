@@ -24161,3 +24161,107 @@ this ExecPlan entry. No backend file changed.
 
 **Local commit:** one bounded commit created after all required checks
 passed.
+
+## Grant Response Packet: governed packet-level Markdown delivery
+## (PREVIEW_READ_ONLY; composite render model reused; no composite manifest)
+
+**Date:** 2026-09-09
+
+**Owner authorization (bounded, local-only):** continue Phase-14 Grant
+Response Packet development from starting HEAD
+`eceb7b8a72b6f91f5ae98e460759a882fb680138` (USER_CONFIRMED, working tree
+clean) by advancing the accepted authoritative packet through the existing
+composite render model into the smallest repository-supported packet-level
+delivery representation. Closed areas remained closed: no P14-01,
+engagement-lineage, membership/boundedness, historical local-Postgres debt,
+Board Summary, unrelated intake/evidence, schema, persistence, generation,
+production access, database mutation, push, deploy, Current State, or
+Implementation Baseline work was performed.
+
+**Authority finding:** current governed final export authority is
+single-draft/export-candidate based. The existing final path requires
+`exportCandidateId` + `exportReviewQueueItemId`, gk_admin final-release
+authority (`export_authority_granted`), the final eligibility gate, and
+manifest creation keyed by that exact candidate. No current repository
+identity represents a finalized `organizationId + engagementId` composite
+packet. Therefore this package deliberately does **not** create a governed
+final packet export, does **not** assign any member `exportManifestId` or
+`exportCandidateId` as a packet identity, and does **not** create packet
+persistence. The repository does safely support deterministic packet
+rendering from the composite model, so the implemented class is explicitly
+`PREVIEW_READ_ONLY`.
+
+**Implementation:** added
+`Backend/kai/services/kaiGrantResponsePacketMarkdownSerializer.js`, a thin
+Markdown serializer/wrapper that consumes only
+`composeGrantResponsePacketRenderModel(input, dependencies)`. The emitted
+representation carries the Markdown contract
+`kai-sprint2-grant-response-packet-markdown-preview-v1`, delivery class
+`PREVIEW_READ_ONLY`, exact `organizationId`, exact `engagementId`, packet
+audience `funder`, every member in composite order, each member's identity,
+review/current-use/export-review metadata, each block id/ordinal/text in
+block order, each citation id/claim/evidence/source/source-version identity,
+and citation limitation/blocker fields. It exposes no raw evidence/source
+bodies, storage locations, signed URLs, artifact fields, AI generation, audit
+write, mutation, final-release, packet manifest, or packet candidate
+behavior.
+
+Added the read-only route
+`GET /api/kai/sprint2/intake/admin/organizations/:organizationId/engagements/:engagementId/grant-response-packet/markdown`
+in `Backend/kai/routes/sprint2IntakeApi.js`. The route is
+`KAI_SPRINT2_ENABLED`/authenticated like sibling Sprint 2 admin routes,
+validates exact lowercase UUID `organizationId + engagementId`, rejects all
+query parameters (so clients cannot submit member ids or filenames), contains
+no SQL/direct repository access, delegates to the serializer service, and
+returns a fixed `text/markdown; charset=utf-8` attachment filename
+`kai-grant-response-packet.md`. Existing per-member Request Export Review,
+Open GK Export Review, per-member export-manifest history, and per-member
+Markdown/CSV/PDF/DOCX export reuse remain unchanged.
+
+**Verification:** focused new suites passed with `DATABASE_URL` set to the
+non-listening loopback sentinel `postgres://127.0.0.1:9/kai_sentinel`:
+`__tests__/kai-grant-response-packet-markdown-delivery-boundary.spec.js` +
+`__tests__/kai-grant-response-packet-markdown-delivery-route.spec.js` (9/9).
+They prove composite-render-model consumption, exact organization/engagement
+identity preservation, `packetAudience=funder`, distinct multiple members,
+deterministic member/block ordering, block and citation identity
+preservation, no cross-member citation substitution, limitation/blocker
+preservation, no latest/newest/first-member selection, no member manifest or
+candidate promoted to packet identity, no raw evidence/source exposure, no AI
+generation path, tenant/actor authorization fail-closed behavior, existing
+final-export authority left untouched, fixed MIME/filename, no SQL in the
+route, and no client-selected membership.
+
+Affected regressions passed: Grant Response Packet backend boundary
+`__tests__/kai-grant-response-packet-boundary.spec.js` (19/19), Grant
+Response Packet render model
+`__tests__/kai-grant-response-packet-render-model-boundary.spec.js` (7/7),
+Impact Evidence Library Grant Packet regression
+`__tests__/kai-sprint2-impact-library-grant-response-packet.spec.js`, all
+existing Markdown/CSV/PDF/DOCX export delivery route regressions, governed
+export finalization route, GK finalization control, P3-17 human
+final-release authority write, P3-18 final eligibility/authority-state
+boundary suites, pass2 route runtime, and existing export-manifest
+Markdown/CSV/PDF/DOCX/render-model/durable-read representation regressions.
+The formula-injection output-boundary suite passed after removing a route-file
+comment/filename use of the standalone word "preview"; the service-level
+contract still explicitly returns `PREVIEW_READ_ONLY`.
+
+**Full suite:** `npm test` ran with the same loopback sentinel and returned
+3571 passed, 7 failed, 61 skipped. The remaining failures are the documented
+pre-existing batch/file-detail baseline only:
+`the child-file read model is tenant-scoped, bounded, ordered, and uses the
+exclusive keyset predicate`, `assembled production middleware and router
+enforce the batch-files collection contract`, `the direct file-detail service
+returns exactly the 15-field allowlist`, and `assembled production middleware
+and router enforce the file-detail contract` plus nested subtest failures.
+No new full-suite failure remains.
+
+**Final diff review:** confined to the new packet Markdown serializer, the
+single read-only Markdown route in `Backend/kai/routes/sprint2IntakeApi.js`,
+the route-runtime allowlist entry, two focused new tests, and this ExecPlan
+entry. `git diff --check` passed. No frontend source or bundle changed, so
+frontend build was not required.
+
+**Local commit:** one bounded commit created after all required checks
+passed.

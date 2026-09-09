@@ -69,6 +69,7 @@ let exportManifestMarkdownServicePromise = null;
 let exportManifestCsvServicePromise = null;
 let exportManifestPdfServicePromise = null;
 let exportManifestDocxServicePromise = null;
+let grantResponsePacketMarkdownServicePromise = null;
 let evidenceLineageServicePromise = null;
 let evidenceCoverageAssessmentServicePromise = null;
 let claimProposalServicePromise = null;
@@ -229,6 +230,7 @@ function sanitizeServiceData(data) {
 
 const EXPORT_MANIFEST_MARKDOWN_ATTACHMENT_FILENAME = "kai-export-manifest.md";
 const EXPORT_MANIFEST_MARKDOWN_CONTENT_TYPE = "text/markdown; charset=utf-8";
+const GRANT_RESPONSE_PACKET_MARKDOWN_ATTACHMENT_FILENAME = "kai-grant-response-packet.md";
 const EXPORT_MANIFEST_CSV_ATTACHMENT_FILENAME = "kai-export-manifest-evidence-appendix.csv";
 const EXPORT_MANIFEST_CSV_CONTENT_TYPE = "text/csv; charset=utf-8";
 const EXPORT_MANIFEST_PDF_ATTACHMENT_FILENAME = "kai-export-manifest.pdf";
@@ -245,6 +247,17 @@ function sendMarkdownAttachment(res, result) {
   res.status(200);
   res.setHeader("Content-Type", EXPORT_MANIFEST_MARKDOWN_CONTENT_TYPE);
   res.setHeader("Content-Disposition", `attachment; filename="${EXPORT_MANIFEST_MARKDOWN_ATTACHMENT_FILENAME}"`);
+  return res.send(markdown);
+}
+
+function sendGrantResponsePacketMarkdownAttachment(res, result) {
+  if (!result?.ok) return sendServiceResult(res, result);
+  const markdown = typeof result.data?.markdown === "string" ? result.data.markdown : null;
+  if (markdown == null) return sendKaiError(res, "system_error");
+
+  res.status(200);
+  res.setHeader("Content-Type", EXPORT_MANIFEST_MARKDOWN_CONTENT_TYPE);
+  res.setHeader("Content-Disposition", `attachment; filename="${GRANT_RESPONSE_PACKET_MARKDOWN_ATTACHMENT_FILENAME}"`);
   return res.send(markdown);
 }
 
@@ -2843,6 +2856,12 @@ async function getGrantResponsePacketService() {
   return grantResponsePacketServicePromise;
 }
 
+async function getGrantResponsePacketMarkdownService() {
+  if (intakeServiceOverride?.serializeGrantResponsePacketToMarkdown) return intakeServiceOverride;
+  grantResponsePacketMarkdownServicePromise ||= import("../services/kaiGrantResponsePacketMarkdownSerializer.js");
+  return grantResponsePacketMarkdownServicePromise;
+}
+
 /**
  * Grant Response Packet: a read-only, engagement-scoped regrouping of
  * already-governed generated-draft review packets. Membership resolves
@@ -2874,6 +2893,40 @@ router.get(
         actorContext: sprint2MappedActorContext(req),
       });
     });
+  },
+);
+
+/**
+ * Grant Response Packet Markdown delivery: deterministic, read-only
+ * packet-level representation composed exclusively from
+ * composeGrantResponsePacketRenderModel(authoritative packet result).
+ * Contains no SQL, no mutation, no final-release claim, no client-selected
+ * membership, and no packet candidate/manifest identity.
+ */
+router.get(
+  "/admin/organizations/:organizationId/engagements/:engagementId/grant-response-packet/markdown",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    const identifiers = grantResponsePacketIdentifier(req);
+    if (!identifiers || Object.keys(req.query || {}).length !== 0) {
+      return sendKaiError(res, "validation_blocker", {
+        blockers: [routeValidationBlocker(
+          "invalid_organization_id_engagement_id_or_query",
+          "organization_id_engagement_id",
+        )],
+      });
+    }
+    try {
+      const service = await getGrantResponsePacketMarkdownService();
+      return sendGrantResponsePacketMarkdownAttachment(res, await service.serializeGrantResponsePacketToMarkdown({
+        organizationId: identifiers.organizationId,
+        engagementId: identifiers.engagementId,
+        actorContext: sprint2MappedActorContext(req),
+      }));
+    } catch (error) {
+      console.error("[kai-sprint2-intake] system_error", error);
+      return sendKaiError(res, "system_error");
+    }
   },
 );
 
@@ -3621,6 +3674,7 @@ export const __testables = {
   validateHumanFinalReleaseAuthorityRequestOrSend,
   exportManifestIdentifiers,
   sendMarkdownAttachment,
+  sendGrantResponsePacketMarkdownAttachment,
   sendCsvAttachment,
   sendPdfAttachment,
   sendDocxAttachment,
