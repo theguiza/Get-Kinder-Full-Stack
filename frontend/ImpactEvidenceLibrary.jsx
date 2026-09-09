@@ -98,6 +98,12 @@ import {
   blockerDisplayText,
   projectSensitivityDetail,
 } from "./impactEvidenceLibraryLogic.js";
+import {
+  exportManifestCsvPath,
+  exportManifestDocxPath,
+  exportManifestMarkdownPath,
+  exportManifestPdfPath,
+} from "./gkExportReviewDetailLogic.js";
 import { organizationsPath } from "./kaiWebIntakeLogic.js";
 import { engagementsPath } from "./kaiWebIntakeLogic.js";
 import KaiWebIntake from "./KaiWebIntake.jsx";
@@ -1884,6 +1890,52 @@ export default function ImpactEvidenceLibrary() {
                             {draft.exportReviewVisible && !draft.exportReviewQueueItemId ? (
                               <div className="small text-muted mt-1">No export review</div>
                             ) : null}
+                            <div className="mt-2">
+                              <h6 className="mb-1">Existing exports</h6>
+                              {!draft.exportReviewVisible ? (
+                                <div className="small text-muted">Export history unavailable for your role</div>
+                              ) : null}
+                              {draft.exportReviewVisible && draft.exportManifestHistory.length === 0 ? (
+                                <div className="small text-muted">
+                                  No finalized export manifests for this packet member
+                                </div>
+                              ) : null}
+                              {draft.exportReviewVisible && draft.exportManifestHistory.length > 0 ? (
+                                <ul className="list-unstyled small mb-0">
+                                  {draft.exportManifestHistory.map((entry) => (
+                                    <li key={`${draft.generatedContentDraftId}-${entry.exportManifestId}`} className="mb-1">
+                                      <div className="text-muted">Created {entry.createdAt}</div>
+                                      <div className="d-flex flex-wrap gap-2">
+                                        <a
+                                          className="grant-response-packet-download-markdown-link"
+                                          href={exportManifestMarkdownPath(organizationId, entry.exportManifestId)}
+                                        >
+                                          Markdown
+                                        </a>
+                                        <a
+                                          className="grant-response-packet-download-csv-link"
+                                          href={exportManifestCsvPath(organizationId, entry.exportManifestId)}
+                                        >
+                                          CSV evidence appendix
+                                        </a>
+                                        <a
+                                          className="grant-response-packet-download-pdf-link"
+                                          href={exportManifestPdfPath(organizationId, entry.exportManifestId)}
+                                        >
+                                          PDF
+                                        </a>
+                                        <a
+                                          className="grant-response-packet-download-docx-link"
+                                          href={exportManifestDocxPath(organizationId, entry.exportManifestId)}
+                                        >
+                                          DOCX
+                                        </a>
+                                      </div>
+                                    </li>
+                                  ))}
+                                </ul>
+                              ) : null}
+                            </div>
                             <h6 className="mt-2 mb-1">Blocks</h6>
                             {draft.blocks.map((block) => (
                               <div key={block.ordinal} className="border rounded p-2 mb-2">

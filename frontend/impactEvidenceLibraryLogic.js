@@ -144,6 +144,16 @@ export function projectGrantResponsePacket(dto) {
       exportReviewQueueItemId: typeof draft?.exportReviewQueueItemId === "string" ? draft.exportReviewQueueItemId : null,
       exportReviewQueueStatus: typeof draft?.exportReviewQueueStatus === "string" ? draft.exportReviewQueueStatus : null,
       exportReviewStatus: typeof draft?.exportReviewStatus === "string" ? draft.exportReviewStatus : null,
+      exportManifestId: draft?.exportReviewVisible === true && typeof draft?.exportManifestId === "string"
+        ? draft.exportManifestId
+        : null,
+      exportManifestHistory: draft?.exportReviewVisible === true
+        ? asArray(draft?.exportManifestHistory).map((entry) => ({
+          exportManifestId: entry?.exportManifestId,
+          exportCandidateId: entry?.exportCandidateId,
+          createdAt: entry?.createdAt,
+        }))
+        : [],
       blocks: asArray(draft?.blocks).map((block) => ({
         ordinal: block?.ordinal,
         text: block?.text,

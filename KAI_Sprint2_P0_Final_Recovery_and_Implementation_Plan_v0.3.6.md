@@ -23914,3 +23914,77 @@ never a new one.
 
 **Local commit:** one bounded commit created after all required checks
 passed.
+
+## Grant Response Packet: Impact Evidence Library per-member existing
+## export-manifest downloads (read-only UX; no composite manifest)
+
+**Date:** 2026-09-09
+
+**Owner authorization (bounded, local-only):** expose the existing per-member
+`exportManifestId`/`exportManifestHistory` linkage added at
+`d4d7a03e884c5f187c8d97977e8be825fc9c19ad` through the existing Impact
+Evidence Library Grant Response Packet card. Starting HEAD:
+`d4d7a03e884c5f187c8d97977e8be825fc9c19ad` (USER_CONFIRMED, working tree
+clean). This was a read-only frontend UX package only: no backend Grant
+Packet membership, endpoint, schema, persistence, generation, packet-level
+composite manifest, approval/finalization authority, Board Summary,
+production access, database mutation, push, deploy, Current State, or
+Implementation Baseline change was made.
+
+**Implementation:** `frontend/impactEvidenceLibraryLogic.js`
+`projectGrantResponsePacket` now allowlist-projects each member draft's
+separately returned `exportManifestId` plus the complete
+`exportManifestHistory` records (`exportManifestId`/`exportCandidateId`/
+`createdAt`) when and only when the server-returned `exportReviewVisible`
+is true. When `exportReviewVisible` is false, frontend-visible manifest
+state is forced to `exportManifestId: null` and `exportManifestHistory: []`;
+hidden identity/history is never reconstructed or inferred. History order is
+preserved exactly as supplied by the server; no browser sorting or
+latest/newest/current/preferred/canonical selection was introduced, and
+`exportManifestId` is not collapsed into history or duplicated.
+
+`frontend/ImpactEvidenceLibrary.jsx` imports the existing
+`exportManifestMarkdownPath`/`exportManifestCsvPath`/
+`exportManifestPdfPath`/`exportManifestDocxPath` builders from
+`frontend/gkExportReviewDetailLogic.js` and renders an "Existing exports"
+section inside each Grant Response Packet member. Restricted actors see
+"Export history unavailable for your role"; authorized members with empty
+history see "No finalized export manifests for this packet member";
+authorized members with history render every history entry separately in the
+DTO order with Markdown, CSV evidence appendix, PDF, and DOCX links. Each
+link is keyed only by the page `organizationId` plus that exact history
+entry's `exportManifestId`. The existing "Open GK Export Review" navigation
+is unchanged. No new POST, per-member fetch, Request/Start/Complete Export
+Review control, Create Export Candidate/Manifest control, approval control,
+or finalization control exists in the Grant Response Packet card.
+
+**Verification:** focused Grant Response Packet frontend tests
+(`__tests__/kai-sprint2-impact-library-grant-response-packet.spec.js` plus
+`__tests__/kai-sprint2-impact-evidence-library.spec.js`) passed 124/124
+after rerunning outside the sandbox for localhost route binding; the first
+sandboxed attempt had 5 `listen EPERM 127.0.0.1` route-test failures only,
+while all new Grant Packet assertions passed. Existing Grant Response Packet
+backend boundary regression `__tests__/kai-grant-response-packet-boundary.spec.js`
+passed 19/19. Affected Impact Evidence Library and export-manifest frontend/
+download-link regressions passed 124/125 with 1 expected skip:
+`impact-library-view.spec.js`, both Package 4 engagement funder-requirements
+suites, client followup workflows, Impact Library KAI frontend/surface, data
+sources, organization evidence gaps, Impact Library export-review link,
+P3-08 GK export-review detail, governed finalization control, and PDF/DOCX
+frontend download-link suites. `DATABASE_URL` was set to a non-listening
+loopback sentinel for every Node/npm command. `npm run build` passed (`vite
+build`, 56 modules transformed). `git diff --check` passed. Broader/full
+suite was not required because the change is limited to the existing
+frontend card, pure projection, tests, and rebuilt bundle; backend contract
+and affected route/download regressions were covered.
+
+**Final diff review:** confined to `frontend/impactEvidenceLibraryLogic.js`
+(Grant Response Packet allowlist projection extended with gated manifest
+fields), `frontend/ImpactEvidenceLibrary.jsx` (read-only per-member existing
+exports display using existing download builders), the rebuilt
+`public/js/bundles/entry.js`, the extended coupled frontend test
+`__tests__/kai-sprint2-impact-library-grant-response-packet.spec.js`, and
+this ExecPlan entry. No backend file changed.
+
+**Local commit:** one bounded commit created after all required checks
+passed.

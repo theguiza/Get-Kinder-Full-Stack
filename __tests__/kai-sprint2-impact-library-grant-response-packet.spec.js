@@ -8,6 +8,12 @@ import {
   shouldApplyGrantResponsePacketResponse,
   gkExportReviewDetailPagePath,
 } from "../frontend/impactEvidenceLibraryLogic.js";
+import {
+  exportManifestCsvPath,
+  exportManifestDocxPath,
+  exportManifestMarkdownPath,
+  exportManifestPdfPath,
+} from "../frontend/gkExportReviewDetailLogic.js";
 
 const organizationId = "00000000-0000-4000-8000-000000000001";
 const engagementIdA = "00000000-0000-4000-8000-000000000401";
@@ -19,6 +25,11 @@ const claimId = "00000000-0000-4000-8000-000000000101";
 const evidenceItemId = "00000000-0000-4000-8000-000000000201";
 const sourceId = "00000000-0000-4000-8000-000000000501";
 const sourceVersionId = "00000000-0000-4000-8000-000000000601";
+const exportManifestIdA = "00000000-0000-4000-8000-000000000a01";
+const exportManifestIdB = "00000000-0000-4000-8000-000000000a02";
+const exportManifestIdOtherMember = "00000000-0000-4000-8000-000000000a03";
+const exportCandidateIdA = "00000000-0000-4000-8000-000000000b01";
+const exportCandidateIdB = "00000000-0000-4000-8000-000000000b02";
 
 // ---------------------------------------------------------------------------
 // Pure logic: route identity, response projection, late-response protection
@@ -148,6 +159,89 @@ test("projectGrantResponsePacket preserves the server's own restricted-vs-absent
   assert.equal(visibleWithExportReview.drafts[0].exportReviewQueueItemId, exportReviewQueueItemId);
 });
 
+test("projectGrantResponsePacket preserves authorized exportManifestId separately from the exact exportManifestHistory records", () => {
+  const history = [
+    { exportManifestId: exportManifestIdA, exportCandidateId: exportCandidateIdA, createdAt: "2026-09-01T00:00:00.000Z" },
+    { exportManifestId: exportManifestIdB, exportCandidateId: exportCandidateIdB, createdAt: "2026-09-02T00:00:00.000Z" },
+  ];
+  const projected = projectGrantResponsePacket({
+    organizationId,
+    engagementId: engagementIdA,
+    packetAudience: "funder",
+    drafts: [{
+      generatedContentDraftId: draftId,
+      exportReviewVisible: true,
+      exportManifestId: exportManifestIdB,
+      exportManifestHistory: history,
+      blocks: [],
+    }],
+  });
+
+  assert.equal(projected.drafts[0].exportManifestId, exportManifestIdB);
+  assert.deepEqual(projected.drafts[0].exportManifestHistory, history);
+  assert.equal(projected.drafts[0].exportManifestHistory.length, 2);
+});
+
+test("projectGrantResponsePacket removes manifest identity/history for restricted actors, distinct from authorized empty history", () => {
+  const restricted = projectGrantResponsePacket({
+    organizationId,
+    engagementId: engagementIdA,
+    packetAudience: "funder",
+    drafts: [{
+      generatedContentDraftId: draftId,
+      exportReviewVisible: false,
+      exportManifestId: exportManifestIdA,
+      exportManifestHistory: [
+        { exportManifestId: exportManifestIdA, exportCandidateId: exportCandidateIdA, createdAt: "2026-09-01T00:00:00.000Z" },
+      ],
+      blocks: [],
+    }],
+  });
+  assert.equal(restricted.drafts[0].exportReviewVisible, false);
+  assert.equal(restricted.drafts[0].exportManifestId, null);
+  assert.deepEqual(restricted.drafts[0].exportManifestHistory, []);
+
+  const authorizedEmpty = projectGrantResponsePacket({
+    organizationId,
+    engagementId: engagementIdA,
+    packetAudience: "funder",
+    drafts: [{
+      generatedContentDraftId: draftId,
+      exportReviewVisible: true,
+      exportManifestId: null,
+      exportManifestHistory: [],
+      blocks: [],
+    }],
+  });
+  assert.equal(authorizedEmpty.drafts[0].exportReviewVisible, true);
+  assert.equal(authorizedEmpty.drafts[0].exportManifestId, null);
+  assert.deepEqual(authorizedEmpty.drafts[0].exportManifestHistory, []);
+});
+
+test("projectGrantResponsePacket preserves multiple manifest-history entries in server order and does not manufacture a duplicate for exportManifestId", () => {
+  const projected = projectGrantResponsePacket({
+    organizationId,
+    engagementId: engagementIdA,
+    packetAudience: "funder",
+    drafts: [{
+      generatedContentDraftId: draftId,
+      exportReviewVisible: true,
+      exportManifestId: exportManifestIdB,
+      exportManifestHistory: [
+        { exportManifestId: exportManifestIdB, exportCandidateId: exportCandidateIdB, createdAt: "2026-09-02T00:00:00.000Z" },
+        { exportManifestId: exportManifestIdA, exportCandidateId: exportCandidateIdA, createdAt: "2026-09-01T00:00:00.000Z" },
+      ],
+      blocks: [],
+    }],
+  });
+
+  assert.deepEqual(
+    projected.drafts[0].exportManifestHistory.map((entry) => entry.exportManifestId),
+    [exportManifestIdB, exportManifestIdA],
+  );
+  assert.equal(projected.drafts[0].exportManifestHistory.length, 2);
+});
+
 test("projectGrantResponsePacket on a successful empty membership returns drafts: [] (distinct from any error, which never reaches this projector)", () => {
   const projected = projectGrantResponsePacket({
     organizationId,
@@ -185,6 +279,29 @@ test("ImpactEvidenceLibrary.jsx calls grantResponsePacketPath exactly once - one
   assert.equal(matches.length, 1);
 });
 
+test("ImpactEvidenceLibrary.jsx imports and reuses the exact existing export-manifest download route builders", () => {
+  assert.match(uiSource, /exportManifestMarkdownPath/);
+  assert.match(uiSource, /exportManifestCsvPath/);
+  assert.match(uiSource, /exportManifestPdfPath/);
+  assert.match(uiSource, /exportManifestDocxPath/);
+  assert.equal(
+    exportManifestMarkdownPath(organizationId, exportManifestIdA),
+    `/api/kai/sprint2/intake/admin/organizations/${organizationId}/export-manifests/${exportManifestIdA}/markdown`,
+  );
+  assert.equal(
+    exportManifestCsvPath(organizationId, exportManifestIdA),
+    `/api/kai/sprint2/intake/admin/organizations/${organizationId}/export-manifests/${exportManifestIdA}/csv`,
+  );
+  assert.equal(
+    exportManifestPdfPath(organizationId, exportManifestIdA),
+    `/api/kai/sprint2/intake/admin/organizations/${organizationId}/export-manifests/${exportManifestIdA}/pdf`,
+  );
+  assert.equal(
+    exportManifestDocxPath(organizationId, exportManifestIdA),
+    `/api/kai/sprint2/intake/admin/organizations/${organizationId}/export-manifests/${exportManifestIdA}/docx`,
+  );
+});
+
 test("ImpactEvidenceLibrary.jsx never issues a POST for the Grant Response Packet section - it is a read-only surface with no approval/finalization control", () => {
   const sectionStart = uiSource.indexOf('<h5 className="mb-0">Grant Response Packet</h5>');
   const sectionEnd = uiSource.indexOf('<h5 className="mb-0">Generated Drafts</h5>');
@@ -192,7 +309,7 @@ test("ImpactEvidenceLibrary.jsx never issues a POST for the Grant Response Packe
   assert.notEqual(sectionEnd, -1);
   const section = uiSource.slice(sectionStart, sectionEnd);
   assert.doesNotMatch(section, /postJson/);
-  assert.doesNotMatch(section, /Approve|Finalize|Start Review|Complete Review|Request Export Review/);
+  assert.doesNotMatch(section, /Approve|Finalize|Start Review|Complete Review|Request Export Review|Start Export Review|Complete Export Review|Create Export Candidate|Create Export Manifest/);
 });
 
 test("ImpactEvidenceLibrary.jsx Grant Response Packet section reuses gkExportReviewDetailPagePath with the exact organizationId/generatedContentDraftId/exportReviewQueueItemId identity, and renders it only when exportReviewQueueItemId is present", () => {
@@ -216,6 +333,79 @@ test("ImpactEvidenceLibrary.jsx Grant Response Packet section distinguishes the 
   );
   assert.match(section, /grantResponsePacketRequestState === "error"/);
   assert.match(section, /grantResponsePacketRequestState === "success" && grantResponsePacket/);
+});
+
+test("ImpactEvidenceLibrary.jsx Grant Response Packet section renders restricted and authorized-empty export history states distinctly", () => {
+  const sectionStart = uiSource.indexOf('<h5 className="mb-0">Grant Response Packet</h5>');
+  const sectionEnd = uiSource.indexOf('<h5 className="mb-0">Generated Drafts</h5>');
+  const section = uiSource.slice(sectionStart, sectionEnd);
+  assert.match(section, /Existing exports/);
+  assert.match(section, /Export history unavailable for your role/);
+  assert.match(section, /No finalized export manifests for this packet member/);
+  assert.match(section, /!draft\.exportReviewVisible/);
+  assert.match(section, /draft\.exportReviewVisible && draft\.exportManifestHistory\.length === 0/);
+});
+
+test("ImpactEvidenceLibrary.jsx Grant Response Packet section renders every manifest-history entry in server order without latest/newest/current selection labels", () => {
+  const sectionStart = uiSource.indexOf('<h5 className="mb-0">Grant Response Packet</h5>');
+  const sectionEnd = uiSource.indexOf('<h5 className="mb-0">Generated Drafts</h5>');
+  const section = uiSource.slice(sectionStart, sectionEnd);
+  assert.match(section, /draft\.exportManifestHistory\.map\(\(entry\) =>/);
+  assert.doesNotMatch(section, /sort\(/);
+  const existingExportsStart = section.indexOf("Existing exports");
+  const blocksStart = section.indexOf("Blocks", existingExportsStart);
+  const existingExportsSection = section.slice(existingExportsStart, blocksStart);
+  assert.doesNotMatch(existingExportsSection, /latest|newest|current|preferred|canonical/i);
+});
+
+test("ImpactEvidenceLibrary.jsx Grant Response Packet download links use each history entry's exact exportManifestId for Markdown, CSV, PDF, and DOCX", () => {
+  const sectionStart = uiSource.indexOf('<h5 className="mb-0">Grant Response Packet</h5>');
+  const sectionEnd = uiSource.indexOf('<h5 className="mb-0">Generated Drafts</h5>');
+  const section = uiSource.slice(sectionStart, sectionEnd);
+  assert.match(section, /href=\{exportManifestMarkdownPath\(organizationId, entry\.exportManifestId\)\}/);
+  assert.match(section, /href=\{exportManifestCsvPath\(organizationId, entry\.exportManifestId\)\}/);
+  assert.match(section, /href=\{exportManifestPdfPath\(organizationId, entry\.exportManifestId\)\}/);
+  assert.match(section, /href=\{exportManifestDocxPath\(organizationId, entry\.exportManifestId\)\}/);
+  assert.doesNotMatch(section, /exportManifestMarkdownPath\(organizationId, draft\.exportManifestId\)/);
+  assert.doesNotMatch(section, /exportManifestCsvPath\(organizationId, draft\.exportManifestId\)/);
+  assert.doesNotMatch(section, /exportManifestPdfPath\(organizationId, draft\.exportManifestId\)/);
+  assert.doesNotMatch(section, /exportManifestDocxPath\(organizationId, draft\.exportManifestId\)/);
+  assert.doesNotMatch(section, /exportManifest(?:Markdown|Csv|Pdf|Docx)Path\(organizationId,\s*(?:draft\.generatedContentDraftId|draft\.engagementId|engagementId|index|0|1)\)/);
+});
+
+test("projectGrantResponsePacket keeps one packet member from substituting another member's manifest id", () => {
+  const draftIdB = "00000000-0000-4000-8000-000000000778";
+  const projected = projectGrantResponsePacket({
+    organizationId,
+    engagementId: engagementIdA,
+    packetAudience: "funder",
+    drafts: [
+      {
+        generatedContentDraftId: draftId,
+        exportReviewVisible: true,
+        exportManifestId: exportManifestIdA,
+        exportManifestHistory: [
+          { exportManifestId: exportManifestIdA, exportCandidateId: exportCandidateIdA, createdAt: "2026-09-01T00:00:00.000Z" },
+        ],
+        blocks: [],
+      },
+      {
+        generatedContentDraftId: draftIdB,
+        exportReviewVisible: true,
+        exportManifestId: exportManifestIdOtherMember,
+        exportManifestHistory: [
+          { exportManifestId: exportManifestIdOtherMember, exportCandidateId: exportCandidateIdB, createdAt: "2026-09-03T00:00:00.000Z" },
+        ],
+        blocks: [],
+      },
+    ],
+  });
+
+  assert.deepEqual(
+    projected.drafts.map((draft) => draft.exportManifestHistory.map((entry) => entry.exportManifestId)),
+    [[exportManifestIdA], [exportManifestIdOtherMember]],
+  );
+  assert.notEqual(projected.drafts[0].exportManifestHistory[0].exportManifestId, projected.drafts[1].exportManifestHistory[0].exportManifestId);
 });
 
 // ---------------------------------------------------------------------------
