@@ -3,8 +3,13 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import {
+  EXPORT_REVIEW_DISPLAY_STATES,
+  exportReviewRequestBody,
+  exportReviewRequestPath,
+  generatedDraftExportReviewDisplayState,
   grantResponsePacketPath,
   projectGrantResponsePacket,
+  projectExportReviewRequestResult,
   shouldApplyGrantResponsePacketResponse,
   gkExportReviewDetailPagePath,
 } from "../frontend/impactEvidenceLibraryLogic.js";
@@ -30,6 +35,7 @@ const exportManifestIdB = "00000000-0000-4000-8000-000000000a02";
 const exportManifestIdOtherMember = "00000000-0000-4000-8000-000000000a03";
 const exportCandidateIdA = "00000000-0000-4000-8000-000000000b01";
 const exportCandidateIdB = "00000000-0000-4000-8000-000000000b02";
+const requestedExportAudience = "funder";
 
 // ---------------------------------------------------------------------------
 // Pure logic: route identity, response projection, late-response protection
@@ -267,6 +273,30 @@ test("shouldApplyGrantResponsePacketResponse: late-response protection requires 
   assert.equal(shouldApplyGrantResponsePacketResponse({ ...base, currentOrganizationId: "00000000-0000-4000-8000-000000000999" }), false);
 });
 
+test("Grant Response Packet request-control authority reuses the existing Generated Draft export-review display state exactly", () => {
+  const requestable = {
+    exportReviewVisible: true,
+    exportReviewQueueItemId: null,
+    queueStatus: "resolved",
+    reviewStatus: "resolved",
+  };
+  assert.equal(generatedDraftExportReviewDisplayState(requestable), EXPORT_REVIEW_DISPLAY_STATES.requestable);
+
+  const restricted = { ...requestable, exportReviewVisible: false };
+  assert.equal(generatedDraftExportReviewDisplayState(restricted), EXPORT_REVIEW_DISPLAY_STATES.restricted);
+
+  const existing = { ...requestable, exportReviewQueueItemId };
+  assert.equal(generatedDraftExportReviewDisplayState(existing), EXPORT_REVIEW_DISPLAY_STATES.existing);
+});
+
+test("Grant Response Packet Request Export Review uses the existing exact single-draft endpoint and funder audience body", () => {
+  assert.equal(
+    exportReviewRequestPath(organizationId, draftId),
+    `/api/kai/sprint2/intake/admin/organizations/${organizationId}/generated-content-drafts/${draftId}/export-review-request`,
+  );
+  assert.deepEqual(exportReviewRequestBody(requestedExportAudience), { requested_export_audience: "funder" });
+});
+
 // ---------------------------------------------------------------------------
 // Component wiring: exact single request, no per-member fan-out, no new
 // approval/finalization authority, exact GK export-review nav reuse.
@@ -274,9 +304,9 @@ test("shouldApplyGrantResponsePacketResponse: late-response protection requires 
 
 const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
 
-test("ImpactEvidenceLibrary.jsx calls grantResponsePacketPath exactly once - one bounded packet request, never a per-member/per-draft fetch", () => {
+test("ImpactEvidenceLibrary.jsx calls grantResponsePacketPath from the initial packet load and the post-request authoritative refetch only - never a per-member/per-draft fetch loop", () => {
   const matches = uiSource.match(/grantResponsePacketPath\(/g) || [];
-  assert.equal(matches.length, 1);
+  assert.equal(matches.length, 2);
 });
 
 test("ImpactEvidenceLibrary.jsx imports and reuses the exact existing export-manifest download route builders", () => {
@@ -302,14 +332,96 @@ test("ImpactEvidenceLibrary.jsx imports and reuses the exact existing export-man
   );
 });
 
-test("ImpactEvidenceLibrary.jsx never issues a POST for the Grant Response Packet section - it is a read-only surface with no approval/finalization control", () => {
+test("ImpactEvidenceLibrary.jsx Grant Response Packet section adds only Request Export Review, no start/complete/finalize/create authority", () => {
   const sectionStart = uiSource.indexOf('<h5 className="mb-0">Grant Response Packet</h5>');
   const sectionEnd = uiSource.indexOf('<h5 className="mb-0">Generated Drafts</h5>');
   assert.notEqual(sectionStart, -1);
   assert.notEqual(sectionEnd, -1);
   const section = uiSource.slice(sectionStart, sectionEnd);
-  assert.doesNotMatch(section, /postJson/);
-  assert.doesNotMatch(section, /Approve|Finalize|Start Review|Complete Review|Request Export Review|Start Export Review|Complete Export Review|Create Export Candidate|Create Export Manifest/);
+  assert.match(section, /Request Export Review/);
+  assert.doesNotMatch(section, /Approve|Finalize|Start Review|Complete Review|Start Export Review|Complete Export Review|Create Export Candidate|Create Export Manifest/);
+});
+
+test("ImpactEvidenceLibrary.jsx Grant Response Packet Request Export Review renders only for the existing requestable display state", () => {
+  const sectionStart = uiSource.indexOf('<h5 className="mb-0">Grant Response Packet</h5>');
+  const sectionEnd = uiSource.indexOf('<h5 className="mb-0">Generated Drafts</h5>');
+  const section = uiSource.slice(sectionStart, sectionEnd);
+  assert.match(
+    section,
+    /generatedDraftExportReviewDisplayState\(draft\) === EXPORT_REVIEW_DISPLAY_STATES\.requestable/,
+  );
+  assert.match(section, /onClick=\{\(\) => requestGrantResponsePacketMemberExportReview\(draft\)\}/);
+  assert.match(section, /disabled=\{grantResponsePacketExportReviewRequestPendingDraftId === draft\.generatedContentDraftId\}/);
+  assert.doesNotMatch(section, /setGrantResponsePacket\([^)]*exportReviewQueueItemId/);
+});
+
+function grantPacketRequestHandlerSource() {
+  const start = uiSource.indexOf("const requestGrantResponsePacketMemberExportReview = useCallback(async (draft) => {");
+  assert.notEqual(start, -1, "could not locate Grant Response Packet member request handler");
+  const endMarker = "  // Runs (or replays) the server-governed assessment";
+  const end = uiSource.indexOf(endMarker, start);
+  assert.notEqual(end, -1, "could not locate end of Grant Response Packet member request handler block");
+  return uiSource.slice(start, end);
+}
+
+test("Grant Response Packet member request handler targets the exact member draft and current organization, not engagement or a derived draft", () => {
+  const handler = grantPacketRequestHandlerSource();
+  assert.match(handler, /const requestOrganizationId = organizationId;/);
+  assert.match(handler, /const requestEngagementId = engagementId;/);
+  assert.match(
+    handler,
+    /postJson\(\s*exportReviewRequestPath\(requestOrganizationId, draft\.generatedContentDraftId\),\s*exportReviewRequestBody\(draft\.requestedAudience\),?\s*\)/,
+  );
+  assert.doesNotMatch(handler, /exportReviewRequestPath\([^)]*engagementId/);
+  assert.doesNotMatch(handler, /selectedGeneratedDraftId|generatedDraftPacket\.generatedContentDraftId/);
+});
+
+test("Grant Response Packet member request handler makes one mutation and uses the POST response only for accepted/blocker branching", () => {
+  const handler = grantPacketRequestHandlerSource();
+  assert.equal((handler.match(/postJson\(/g) || []).length, 1);
+  assert.match(handler, /const projected = projectExportReviewRequestResult\(result\.body\?\.data\);/);
+  assert.match(handler, /if \(projected\?\.accepted\) \{/);
+  assert.match(handler, /await refetchGrantResponsePacketAfterMemberExportReviewRequest\(requestOrganizationId, requestEngagementId\);/);
+  assert.doesNotMatch(handler, /setGrantResponsePacket\(/);
+  assert.doesNotMatch(handler, /setGrantResponsePacket\([^)]*(reviewQueueItemId|exportReviewQueueItemId|queueStatus|reviewStatus)/);
+});
+
+test("Grant Response Packet member request handler keeps failed mutations local, preserves current packet state, and fabricates no queue state", () => {
+  const handler = grantPacketRequestHandlerSource();
+  assert.match(handler, /if \(result\.statusCode !== 200 && result\.statusCode !== 201\) \{/);
+  assert.match(handler, /setMessage\(errorText\(result\)\);/);
+  assert.doesNotMatch(handler, /setGrantResponsePacket\(null\)[\s\S]*setMessage\(errorText\(result\)\)/);
+  assert.doesNotMatch(handler, /setGrantResponsePacket\([^)]*(queue|review|manifest)/i);
+});
+
+test("Grant Response Packet authoritative refetch uses the existing organization/engagement late-response protection and supplies durable queue identity", () => {
+  const refetchStart = uiSource.indexOf("const refetchGrantResponsePacketAfterMemberExportReviewRequest = useCallback(async (requestOrganizationId, requestEngagementId) => {");
+  assert.notEqual(refetchStart, -1);
+  const refetchEnd = uiSource.indexOf("const requestGrantResponsePacketMemberExportReview = useCallback", refetchStart);
+  assert.notEqual(refetchEnd, -1);
+  const refetch = uiSource.slice(refetchStart, refetchEnd);
+  assert.match(refetch, /const requestGeneration = \+\+grantPacketRequestGenerationRef\.current;/);
+  assert.match(refetch, /getJson\(grantResponsePacketPath\(requestOrganizationId, requestEngagementId\)\)/);
+  assert.match(refetch, /shouldApplyGrantResponsePacketResponse\(\{/);
+  assert.match(refetch, /currentOrganizationId: organizationIdRef\.current/);
+  assert.match(refetch, /currentEngagementId: engagementIdRef\.current/);
+  assert.match(refetch, /setGrantResponsePacket\(projectGrantResponsePacket\(result\.body\.data\)\)/);
+  assert.doesNotMatch(refetch, /postJson|exportReviewRequestPath/);
+});
+
+test("Grant Response Packet request accepted DTO projection remains non-authoritative queue state for the packet card", () => {
+  const projected = projectExportReviewRequestResult({
+    exportReviewRequestAccepted: true,
+    reviewQueueItemId: exportReviewQueueItemId,
+    queueStatus: "open",
+    reviewStatus: "needs_export_review",
+    validatorResult: null,
+  });
+  assert.equal(projected.accepted, true);
+  assert.equal(projected.exportReviewQueueItemId, exportReviewQueueItemId);
+  const handler = grantPacketRequestHandlerSource();
+  assert.doesNotMatch(handler, /projected\.exportReviewQueueItemId/);
+  assert.doesNotMatch(handler, /projected\.(queueStatus|reviewStatus)/);
 });
 
 test("ImpactEvidenceLibrary.jsx Grant Response Packet section reuses gkExportReviewDetailPagePath with the exact organizationId/generatedContentDraftId/exportReviewQueueItemId identity, and renders it only when exportReviewQueueItemId is present", () => {
@@ -455,6 +567,7 @@ function buildEffect({
   const setGrantResponsePacket = (value) => { setGrantResponsePacketCalls.push(value); stateLog.push(["packet", value]); };
   const setGrantResponsePacketError = (value) => stateLog.push(["error", value]);
   const setGrantResponsePacketRequestState = (value) => stateLog.push(["requestState", value]);
+  const setGrantResponsePacketExportReviewRequestPendingDraftId = (value) => stateLog.push(["memberRequestPending", value]);
   const setLoadingGrantResponsePacket = (value) => stateLog.push(["loading", value]);
 
   const buildUseEffect = new Function(
@@ -465,6 +578,7 @@ function buildEffect({
     "setGrantResponsePacket",
     "setGrantResponsePacketError",
     "setGrantResponsePacketRequestState",
+    "setGrantResponsePacketExportReviewRequestPendingDraftId",
     "setLoadingGrantResponsePacket",
     "getJson",
     "grantResponsePacketPath",
@@ -483,6 +597,7 @@ function buildEffect({
     setGrantResponsePacket,
     setGrantResponsePacketError,
     setGrantResponsePacketRequestState,
+    setGrantResponsePacketExportReviewRequestPendingDraftId,
     setLoadingGrantResponsePacket,
     getJsonImpl,
     grantResponsePacketPath,

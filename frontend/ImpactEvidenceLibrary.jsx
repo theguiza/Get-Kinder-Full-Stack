@@ -270,6 +270,7 @@ export default function ImpactEvidenceLibrary() {
   const [loadingGrantResponsePacket, setLoadingGrantResponsePacket] = useState(false);
   const [grantResponsePacketError, setGrantResponsePacketError] = useState("");
   const [grantResponsePacketRequestState, setGrantResponsePacketRequestState] = useState("idle");
+  const [grantResponsePacketExportReviewRequestPendingDraftId, setGrantResponsePacketExportReviewRequestPendingDraftId] = useState("");
   const grantPacketRequestGenerationRef = useRef(0);
   const engagementIdRef = useRef(engagementId);
   engagementIdRef.current = engagementId;
@@ -769,6 +770,7 @@ export default function ImpactEvidenceLibrary() {
     setGrantResponsePacket(null);
     setGrantResponsePacketError("");
     setGrantResponsePacketRequestState("idle");
+    setGrantResponsePacketExportReviewRequestPendingDraftId("");
     setLoadingGrantResponsePacket(false);
     if (!organizationId || !engagementId) return;
     let cancelled = false;
@@ -803,6 +805,75 @@ export default function ImpactEvidenceLibrary() {
       cancelled = true;
     };
   }, [organizationId, engagementId]);
+
+  const refetchGrantResponsePacketAfterMemberExportReviewRequest = useCallback(async (requestOrganizationId, requestEngagementId) => {
+    const requestGeneration = ++grantPacketRequestGenerationRef.current;
+    setLoadingGrantResponsePacket(true);
+    setGrantResponsePacketRequestState("loading");
+    const result = await getJson(grantResponsePacketPath(requestOrganizationId, requestEngagementId));
+    if (!shouldApplyGrantResponsePacketResponse({
+      requestGeneration,
+      currentGeneration: grantPacketRequestGenerationRef.current,
+      requestOrganizationId,
+      currentOrganizationId: organizationIdRef.current,
+      requestEngagementId,
+      currentEngagementId: engagementIdRef.current,
+    })) return false;
+    setLoadingGrantResponsePacket(false);
+    if (result.statusCode !== 200 || !result.body?.ok) {
+      setGrantResponsePacket(null);
+      setGrantResponsePacketError(errorText(result));
+      setGrantResponsePacketRequestState("error");
+      return true;
+    }
+    setGrantResponsePacket(projectGrantResponsePacket(result.body.data));
+    setGrantResponsePacketError("");
+    setGrantResponsePacketRequestState("success");
+    return true;
+  }, []);
+
+  const requestGrantResponsePacketMemberExportReview = useCallback(async (draft) => {
+    if (!organizationId || !engagementId || grantResponsePacketExportReviewRequestPendingDraftId) return;
+    if (generatedDraftExportReviewDisplayState(draft) !== EXPORT_REVIEW_DISPLAY_STATES.requestable) return;
+    const requestOrganizationId = organizationId;
+    const requestEngagementId = engagementId;
+    setGrantResponsePacketExportReviewRequestPendingDraftId(draft.generatedContentDraftId);
+    setMessage("");
+    const result = await postJson(
+      exportReviewRequestPath(requestOrganizationId, draft.generatedContentDraftId),
+      exportReviewRequestBody(draft.requestedAudience),
+    );
+    if (result.statusCode !== 200 && result.statusCode !== 201) {
+      if (
+        requestOrganizationId === organizationIdRef.current
+        && requestEngagementId === engagementIdRef.current
+      ) {
+        setMessage(errorText(result));
+        setGrantResponsePacketExportReviewRequestPendingDraftId("");
+      }
+      return;
+    }
+    const projected = projectExportReviewRequestResult(result.body?.data);
+    if (projected?.accepted) {
+      await refetchGrantResponsePacketAfterMemberExportReviewRequest(requestOrganizationId, requestEngagementId);
+    } else if (
+      requestOrganizationId === organizationIdRef.current
+      && requestEngagementId === engagementIdRef.current
+    ) {
+      setMessage(JSON.stringify(projected?.validatorResult ?? null));
+    }
+    if (
+      requestOrganizationId === organizationIdRef.current
+      && requestEngagementId === engagementIdRef.current
+    ) {
+      setGrantResponsePacketExportReviewRequestPendingDraftId("");
+    }
+  }, [
+    organizationId,
+    engagementId,
+    grantResponsePacketExportReviewRequestPendingDraftId,
+    refetchGrantResponsePacketAfterMemberExportReviewRequest,
+  ]);
 
   // Runs (or replays) the server-governed assessment for exactly one
   // requirement, then refetches the whole readiness rollup - the POST
@@ -1889,6 +1960,16 @@ export default function ImpactEvidenceLibrary() {
                             ) : null}
                             {draft.exportReviewVisible && !draft.exportReviewQueueItemId ? (
                               <div className="small text-muted mt-1">No export review</div>
+                            ) : null}
+                            {generatedDraftExportReviewDisplayState(draft) === EXPORT_REVIEW_DISPLAY_STATES.requestable ? (
+                              <button
+                                type="button"
+                                className="btn btn-sm btn-outline-primary mt-2"
+                                onClick={() => requestGrantResponsePacketMemberExportReview(draft)}
+                                disabled={grantResponsePacketExportReviewRequestPendingDraftId === draft.generatedContentDraftId}
+                              >
+                                Request Export Review
+                              </button>
                             ) : null}
                             <div className="mt-2">
                               <h6 className="mb-1">Existing exports</h6>

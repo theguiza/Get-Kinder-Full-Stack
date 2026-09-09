@@ -21971,6 +21971,85 @@ anywhere in this diff.
 **Local commit:** one bounded commit created after all required checks
 passed.
 
+## Grant Response Packet: Impact Evidence Library Request Export Review
+## reuse (per-member existing single-draft workflow only)
+
+**Date:** 2026-09-09
+
+**Owner authorization (bounded, local-only):** add "Request Export Review"
+for eligible Grant Response Packet members in the existing Impact Evidence
+Library card. Starting HEAD:
+`13926cffd2f1209f4aecf55b53a68d066efeb3c5` (USER_CONFIRMED, working tree
+clean). This package did not inspect packet member/claim volume bounds and
+did not implement packet-level composite export, generation changes,
+backend review/export behavior, schema/migrations, persistence, production
+access, database mutation, push, deploy, Current State, or Implementation
+Baseline changes.
+
+**Implementation:** `frontend/ImpactEvidenceLibrary.jsx` now renders a
+per-member "Request Export Review" button inside the existing Grant
+Response Packet card only when
+`generatedDraftExportReviewDisplayState(draft) ===
+EXPORT_REVIEW_DISPLAY_STATES.requestable`. That is the exact existing
+Generated Drafts frontend authority/display rule: `exportReviewVisible`
+must be true, `exportReviewQueueItemId` must be absent, and
+`canRequestGeneratedDraftExportReview` must see the generated-content review
+as `resolved`/`resolved`. No new role rule was created. The click handler
+calls the existing single-draft
+`exportReviewRequestPath(organizationId, draft.generatedContentDraftId)`
+endpoint with `exportReviewRequestBody(draft.requestedAudience)`, which is
+the Grant Packet member's funder audience value. It never targets
+`engagementId`, never derives a different draft, and never creates a new
+route. Once a queue item already exists, the existing "Open GK Export
+Review" link remains the only review cockpit affordance in the packet card.
+
+**Durable state / stale-response behavior:** a successful request does not
+treat the POST response as durable packet truth and does not copy
+`reviewQueueItemId`, queue status, or review status into local packet state.
+Instead, it refetches the authoritative Grant Response Packet using the
+currently selected `organizationId` + `engagementId` and applies the result
+only through the existing generation/organization/engagement
+`shouldApplyGrantResponsePacketResponse` protection. Late mutation/refetch
+completion from engagement A cannot overwrite engagement B. Failed requests
+use the existing `errorText(result)` message convention, leave the current
+packet visible, preserve existing manifest history/download links, and
+fabricate no queue/review state. No per-member packet GET/fetch was added;
+the only new packet GET is the single authoritative post-request refetch.
+
+**Verification:** focused Grant Response Packet Impact Library and existing
+export-review link tests passed:
+`DATABASE_URL=postgres://kai_sentinel:kai_sentinel@127.0.0.1:9/kai_sentinel
+node --test __tests__/kai-sprint2-impact-library-grant-response-packet.spec.js
+__tests__/kai-sprint2-impact-library-export-review-link-boundary.spec.js`
+-> 37/37. Existing Impact Evidence Library Request Export Review and route
+regressions passed after rerunning outside the sandbox for localhost route
+binding:
+`DATABASE_URL=postgres://kai_sentinel:kai_sentinel@127.0.0.1:9/kai_sentinel
+node --test __tests__/kai-sprint2-impact-evidence-library.spec.js` -> 102/102
+(the sandboxed attempt failed only with `listen EPERM 127.0.0.1` route-test
+binding errors). Existing GK Export Review navigation/finalization and
+manifest download-link regressions passed:
+`DATABASE_URL=postgres://kai_sentinel:kai_sentinel@127.0.0.1:9/kai_sentinel
+node --test __tests__/kai-sprint2-gk-export-review-governed-finalization-control.spec.js
+__tests__/kai-sprint2-export-manifest-pdf-frontend-download-links.spec.js
+__tests__/kai-sprint2-export-manifest-docx-frontend-download-links.spec.js`
+-> 22/22. Frontend build passed:
+`DATABASE_URL=postgres://kai_sentinel:kai_sentinel@127.0.0.1:9/kai_sentinel
+npm run build` (`vite build`, 56 modules transformed). Grant Packet backend
+regression and full `npm test` were not required because no backend/API DTO
+contract or shared backend file changed.
+
+**Final diff review:** confined to `frontend/ImpactEvidenceLibrary.jsx`
+(packet-member request pending state, exact existing request mutation, and
+authoritative packet refetch using the existing stale-response guard),
+`__tests__/kai-sprint2-impact-library-grant-response-packet.spec.js`
+(focused authority/target/refetch/failure/no-new-controls assertions), the
+rebuilt `public/js/bundles/entry.js`, and this ExecPlan entry. Existing
+manifest history, Markdown/CSV/PDF/DOCX download links, member ordering,
+membership, citation traceability, funder audience, and GK Export Review
+navigation remain unchanged. New governance controls: Request Export Review
+only.
+
 **Remaining work (unchanged):** PDF and DOCX evidence-format rendering are
 the next Phase-14 additional-format candidates; this closure does not
 start either.
