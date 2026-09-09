@@ -25,7 +25,7 @@ function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
     cwd: repoRoot,
     encoding: "utf8",
-    stdio: options.capture ? ["ignore", "pipe", "pipe"] : "inherit",
+    stdio: options.capture || options.allowFail ? ["ignore", "pipe", "pipe"] : "inherit",
     env: {
       ...process.env,
       DATABASE_URL: "postgres://127.0.0.1:9/kai_sentinel",
@@ -35,15 +35,19 @@ function run(command, args, options = {}) {
       PGUSER: user,
     },
   });
-  if (result.status !== 0) {
+  if (!options.allowFail && result.status !== 0) {
     const detail = [result.stdout, result.stderr].filter(Boolean).join("\n");
     throw new Error(`${command} ${args.join(" ")} failed${detail ? `\n${detail}` : ""}`);
   }
   return result;
 }
 
-function psqlFile(path) {
-  return run(psql, ["-v", "ON_ERROR_STOP=1", "-d", dbName, "-f", path], { capture: true }).stdout;
+function psqlFile(path, options = {}) {
+  return run(psql, ["-v", "ON_ERROR_STOP=1", "-d", dbName, "-f", path], { capture: true, ...options });
+}
+
+function psqlExec(sql) {
+  return run(psql, ["-v", "ON_ERROR_STOP=1", "-d", dbName, "-c", sql], { capture: true }).stdout;
 }
 
 async function proveRunnerOwnedTarget() {
@@ -81,6 +85,22 @@ try {
   run(createdb, ["-h", "127.0.0.1", "-p", port, dbName], { capture: true });
   await proveRunnerOwnedTarget();
 
+  // P14-01 hard precondition: kai.generation_runs.engagement_id FK's to
+  // kai.engagements(engagement_id, organization_id), so the organization/
+  // engagement foundation (shared by the existing organization-enablement
+  // local-Postgres runner) must exist before P3-01's own migration creates
+  // kai.generation_runs.
+  psqlFile("scripts/kai-sprint2-organization-enablement-bootstrap-synthetic-schema.sql");
+  // Runner-local accommodation only (never a modification of the shared
+  // bootstrap SQL file itself): the P14-01 engagement-side FK targets
+  // kai.engagements (engagement_id, organization_id), a composite unique
+  // constraint the organization-enablement bootstrap schema does not itself
+  // declare - the same runner-local accommodation the B1.1/C2.1 runners each
+  // apply for this identical composite FK shape.
+  psqlExec(
+    "ALTER TABLE kai.engagements ADD CONSTRAINT kai_p3_01_engagements_id_org_unique UNIQUE (engagement_id, organization_id);",
+  );
+
   psqlFile("scripts/kai-sprint2-gate-a-bootstrap-synthetic-schema.sql");
   psqlFile("migrations/kai_sprint2_gate_a_p0_upload_lifecycle.sql");
   psqlFile("migrations/kai_sprint2_gate_a_p0_policy_decision_replay.sql");
@@ -96,7 +116,9 @@ try {
   psqlFile("migrations/kai_sprint2_p2_05_conflict_review_candidate.sql");
   psqlFile("migrations/kai_sprint2_p2_10_coverage_review_decision.sql");
   psqlFile("migrations/kai_sprint2_p3_01_generated_content_drafts.sql");
+  psqlFile("migrations/kai_sprint2_p14_01_generation_run_engagement_binding.sql");
   psqlFile("scripts/kai-sprint2-p3-01-generated-content-drafts-verifier.sql");
+  psqlFile("scripts/kai-sprint2-p14-01-generation-run-engagement-binding-verifier.sql");
   psqlFile("scripts/kai-sprint2-gate-a-smoke-seed.sql");
   psqlFile("scripts/kai-sprint2-p1-04-data-dictionary-quality-smoke-seed.sql");
   psqlFile("scripts/kai-sprint2-p1-05-intake-sensitivity-profile-smoke-seed.sql");
@@ -104,6 +126,20 @@ try {
   psqlFile("scripts/kai-sprint2-p1-07-source-candidate-smoke-seed.sql");
   psqlFile("scripts/kai-sprint2-p1-08-source-promotion-smoke-seed.sql");
   psqlFile("scripts/kai-sprint2-p2-01-evidence-lineage-smoke-seed.sql");
+
+  // Real kai.organizations/kai.engagements rows the P3-01/P13-01 integration
+  // suites' createEvidenceSummaryDraft/createImpactNarrativeDraft calls now
+  // require as the requested engagementId (P14-01 write contract).
+  psqlExec(
+    "INSERT INTO kai.organizations (organization_id, name, organization_code) VALUES ('00000000-0000-4000-8000-000000000001', 'P3-01 Smoke Org', 'p3-01-smoke-org') ON CONFLICT (organization_id) DO NOTHING;",
+  );
+  psqlExec(
+    "INSERT INTO kai.engagements (engagement_id, organization_id, engagement_code) VALUES ('00000000-0000-4000-8000-000000000901', '00000000-0000-4000-8000-000000000001', 'p3-01-smoke-engagement') ON CONFLICT (engagement_id) DO NOTHING;",
+  );
+
+  psqlFile("scripts/kai-sprint2-p14-01-generation-run-engagement-binding-smoke-seed.sql");
+  psqlFile("scripts/kai-sprint2-p14-01-generation-run-engagement-binding-smoke-verifier.sql");
+  psqlFile("scripts/kai-sprint2-p14-01-generation-run-engagement-binding-failure-checks.sql");
 
   const testResult = spawnSync("node", [
     "--test",
@@ -130,6 +166,19 @@ try {
   });
   if (testResult.status !== 0) throw new Error("P3-01 generated-content tests failed");
   console.log("P3-01 generated-content focused tests passed.");
+
+  // P14-01 rollback safety proof: non-null engagement_id rows now exist
+  // (from this run's own smoke-seed and the integration suite above), so
+  // the P14-01 rollback must refuse to drop the column rather than silently
+  // discarding real engagement bindings.
+  const incompatibleRollback = psqlFile(
+    "migrations/kai_sprint2_p14_01_generation_run_engagement_binding.rollback.sql",
+    { allowFail: true },
+  );
+  if (incompatibleRollback.status === 0) {
+    throw new Error("P14-01 rollback unexpectedly succeeded while non-null engagement_id rows exist");
+  }
+  console.log("P14-01 rollback correctly refused to drop engagement_id while non-null bindings exist.");
 } finally {
   if (started) spawnSync(pgCtl, ["-D", dataDir, "stop", "-m", "fast"], { encoding: "utf8", stdio: "ignore" });
   rmSync(workDir, { recursive: true, force: true });

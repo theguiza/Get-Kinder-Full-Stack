@@ -22890,3 +22890,164 @@ review UX track was identified.
 
 **Local commit:** one bounded commit created after all required checks
 passed.
+
+## Generated Content -> Engagement Binding Foundation (Grant Response Packet, step 1)
+
+**Date:** 2026-09-09
+
+**Owner authorization (bounded, local-only):** repository inspection
+established that no cross-draft Grant Response Packet membership
+relationship exists yet (returned to the owner as a STOP in the prior
+package), and that the owner-confirmed MVP project/use-case container is the
+pre-existing, externally-owned `kai.engagements` (never created or altered
+by any migration in this repository - `KEEP_SHARED_IN_KAI`). This package
+establishes the smallest authoritative relationship by which NEW generated
+content becomes engagement-bound, so a later package can resolve packet
+membership by engagement rather than by heuristic selection. Starting HEAD:
+`3c0da6bd441eba29a94d5e5c12719efdb1455d2a` (USER_CONFIRMED); working tree
+clean. Do not invent `grant_application`/`funder_request`/`packet`/
+`workspace`; do not touch `kai.generated_content_drafts` or
+`kai.engagements`; do not tighten `engagement_id` to `NOT NULL`; do not
+backfill; no new approval/finalization authority; no artifact persistence;
+no Board Summary.
+
+**Target lineage confirmed and implemented exactly as specified:**
+`kai.engagements -> kai.generation_runs.engagement_id -> kai.generated_content_drafts`
+(via the existing `generation_run_id` FK). A generated draft's engagement is
+obtained transitively through its generation run - no new column on
+`generated_content_drafts`.
+
+**Migration (`migrations/kai_sprint2_p14_01_generation_run_engagement_binding.sql`):**
+adds exactly one new, additive, nullable column,
+`kai.generation_runs.engagement_id uuid`, plus a tenant-safe composite
+foreign key `(engagement_id, organization_id) -> kai.engagements
+(engagement_id, organization_id) ON DELETE RESTRICT`, following the
+repository's established engagement-binding convention (e.g.
+`kai_sprint2_a1_1_impact_outcome_context.sql`). Historical NULL is
+intentional and permanent, never a `system_error`. No speculative index was
+added (no current access pattern in this package needs one). The rollback
+(`...rollback.sql`) refuses to drop the column while any non-null
+`engagement_id` row exists.
+
+**New generation requires engagement (service/write-contract layer):**
+`Backend/kai/dictionary/postgresGeneratedContentRepository.js`'s
+`validateInput` now requires `engagementId` (canonical UUID) as an exact key
+alongside the existing contract; `insertRunReservation`/`readExistingState`/
+`validateExistingState` persist and verify it exactly; `readReviewPacketState`'s
+internal run row now also selects `engagement_id` (never projected into the
+public review-packet DTO), proving `organizationId + generatedContentDraftId
+-> generationRunId -> engagementId` is internally resolvable without
+widening any browser/public DTO. `Backend/kai/services/kaiGeneratedContentService.js`'s
+`createEvidenceSummaryDraft`/`createImpactNarrativeDraft` now require
+`engagementId` in the public input contract, resolve it through the
+existing authoritative `getEngagementForOrganization` tenant-scoped lookup
+(`Backend/kai/db/kaiQueries.js`), and reuse the existing
+`validateTenantBoundaryConsistency` validator (already used identically
+elsewhere for engagement/tenant consistency) - a missing, fabricated, or
+cross-tenant engagement fails closed as `tenant_boundary_violation`/
+`validation_blocker` before any repository write. `Backend/kai/routes/sprint2IntakeApi.js`'s
+two creation routes now require `engagement_id` (wire) in the request body,
+validated as a canonical lowercase UUID identically to `claim_ids`.
+
+**Request fingerprint/replay identity (no idempotency-key schema change):**
+`fingerprintEvidenceSummaryRequest`/`fingerprintImpactNarrativeRequest` now
+include `engagementId`. The controlling database identity remains exactly
+`organization_id + idempotency_key` (unchanged) - a request reusing the same
+idempotency key with a different engagement never replays the original
+engagement's generation; it fails closed as `duplicate_conflict` through the
+existing fingerprint-mismatch mechanism, with no widening of database
+uniqueness to include engagement. This did not require a new product/
+contract decision: the existing controlling contract already treated any
+fingerprint-changing field this way.
+
+**Review queue / audit propagation: unchanged, by design.** `review_queue_items.engagement_id`
+is not populated for `generated_content_review` rows - the existing queue
+contract's CHECK constraint does not permit or require non-null engagement
+scope for this queue type, and the generated draft already carries
+engagement transitively through its generation run. The generated-content
+audit metadata's exact-key CHECK constraint has no `engagement_id` slot, so
+none was added (no audit vocabulary redesign).
+
+**Tests:** `kai-sprint2-p3-01-generated-content-drafts-boundary.spec.js` and
+`kai-sprint2-p13-01-impact-narrative-boundary.spec.js` gained an `ENGAGEMENT`
+fixture, a same-tenant `getEngagementForOrganization` stub, and a fingerprint
+assertion that changing only `engagementId` changes the fingerprint.
+`kai-sprint2-impact-evidence-library.spec.js` and
+`kai-sprint2-p3-18-assembled-pre-artifact-release-proof.spec.js` gained the
+now-required `engagement_id`/`engagementId` and (for the latter) a same-tenant
+lookup stub, plus one new negative case (missing `engagement_id` -> 422).
+`kai-sprint2-p3-01-generated-content-drafts.integration.spec.js` gained a
+real-database `engagementLookup` helper (reusing the runner-owned pool) wired
+into every `createEvidenceSummaryDraft`/`createImpactNarrativeDraft` call.
+New migration-package artifacts: `scripts/kai-sprint2-p14-01-generation-run-engagement-binding-{verifier,smoke-seed,smoke-verifier,failure-checks}.sql`
+prove (against real local PostgreSQL) the column/FK shape, engagement-bound
+and legacy-NULL resolution, transitive draft lineage for both, fabricated-
+engagement rejection, cross-tenant rejection, and NULL acceptance (the
+failure-checks probe transaction is rolled back, so nothing persists).
+`scripts/kai-sprint2-p3-01-generated-content-drafts-local-postgres.js` and
+`scripts/kai-sprint2-p13-01-impact-narrative-content-type-local-postgres.js`
+now bootstrap the organization/engagement foundation (the shared
+organization-enablement synthetic schema, plus the same runner-local
+composite-unique accommodation the B1.1/C2.1 runners already apply), seed one
+real organization/engagement pair, and run the full P14-01 package before
+their own focused tests; the P3-01 runner additionally proves the rollback
+refuses to run while non-null `engagement_id` rows exist.
+
+**Verification:** `DATABASE_URL` set to a non-listening loopback sentinel for
+every ordinary Node/npm command. Both real-Postgres runners
+(`kai-sprint2-p3-01-generated-content-drafts-local-postgres.js`,
+`kai-sprint2-p13-01-impact-narrative-content-type-local-postgres.js`) were
+executed end to end: the full P14-01 migration/verifier/smoke-seed/smoke-
+verifier/failure-checks package passed with zero FAIL rows in both, and every
+focused test that exercises the new engagement requirement (real and
+injected-repository paths, replay, cross-engagement-key conflict, impact-
+narrative parity) passed - 18/19 tests in the P3-01 runner, 28/29 in the
+P13-01 runner. The sole failure in each (`Package 14-05: P3-01 real service
+path allows an internally governed but currently ineligible claim...`,
+`relation "kai.evidence_review_decisions" does not exist`) is a pre-existing
+gap confirmed identical at each runner's pre-P14-01 HEAD (neither runner's
+migration chain includes `migrations/kai_sprint2_p2_12_human_review_decision_ledger.sql`)
+and is unrelated to engagement binding - not introduced or fixed by this
+package. Full repository suite (`npm test`) -> 3506 passed, 7 failed (the
+same 4 distinct pre-existing failures confirmed present in every prior
+package in this track), 61 skipped - 0 newly introduced failures. `npm run
+build` was not run (no frontend file changed). `git diff --check` passed
+with no whitespace errors.
+
+**Scope decision, disclosed:** the ~10 other already-closed packages'
+`.integration.spec.js` files that call `createEvidenceSummaryDraft`/
+`createImpactNarrativeDraft` purely as incidental fixture setup (P3-04
+review completion, P3-05/06/09/13 export-review, P3-16/17/18/19/20 export
+candidate/manifest, durable-export-manifest-read-recovery) were **not**
+patched or exercised via their own dedicated local-Postgres runners in this
+package. Each already skips cleanly under plain `npm test` (proven green,
+confirmed above) because none of them sets its own database-URL env var
+outside its own runner script; none is named in this package's owner-
+authorized coupled-test list. If any of those runners is invoked later
+without first adding `engagementId` to its fixture calls, it will fail on
+the new required key - this is a known, disclosed residual and the exact
+next continuation item, not a silent gap.
+
+**Final diff review:** confined to
+`migrations/kai_sprint2_p14_01_generation_run_engagement_binding.sql`,
+`migrations/kai_sprint2_p14_01_generation_run_engagement_binding.rollback.sql`,
+`Backend/kai/dictionary/postgresGeneratedContentRepository.js`,
+`Backend/kai/services/kaiGeneratedContentService.js`,
+`Backend/kai/routes/sprint2IntakeApi.js`, five new
+`scripts/kai-sprint2-p14-01-*` artifacts (verifier, smoke-seed, smoke-
+verifier, failure-checks, patch-notes, runbook), two additively-updated
+`*-local-postgres.js` runner scripts, five additively-updated test files, and
+this ExecPlan. No schema/migration file for any other table was created or
+edited; `kai.generated_content_drafts` and `kai.engagements` were not
+altered; no production database was accessed, mutated, or migrated; nothing
+was pushed or deployed; no Current State or Implementation Baseline update
+was made.
+
+**Remaining work:** engagement-scoped deterministic generated-draft
+membership and composition (the actual Grant Response Packet grouping query/
+read model) remains unstarted. The disclosed residual above (other packages'
+integration-runner fixtures) remains open. Board Summary and artifact
+persistence remain out of scope and unconfirmed.
+
+**Local commit:** one bounded commit created after all required checks
+passed.

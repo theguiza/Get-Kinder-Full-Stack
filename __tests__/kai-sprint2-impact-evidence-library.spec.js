@@ -81,6 +81,7 @@ const otherOrganizationId = "00000000-0000-4000-8000-000000000002";
 const claimId = "00000000-0000-4000-8000-000000000101";
 const evidenceItemId = "00000000-0000-4000-8000-000000000201";
 const reviewQueueItemId = "00000000-0000-4000-8000-000000000301";
+const engagementId = "00000000-0000-4000-8000-000000000401";
 const actorContext = Object.freeze({
   actorType: "human",
   actorUserId: "90000000-0000-4000-8000-000000000001",
@@ -268,19 +269,29 @@ test("Impact Evidence Library create route pins evidence_summary/internal and ac
   const rejected = await postRequestJson(server, path, {
     claim_ids: [claimId],
     idempotency_key: "p3-stage-a",
+    engagement_id: engagementId,
     prompt: "write anything",
   });
   assert.equal(rejected.statusCode, 422);
   assert.deepEqual(current.calls, []);
 
+  const missingEngagement = await postRequestJson(server, path, {
+    claim_ids: [claimId],
+    idempotency_key: "p3-stage-a",
+  });
+  assert.equal(missingEngagement.statusCode, 422);
+  assert.deepEqual(current.calls, []);
+
   const allowed = await postRequestJson(server, path, {
     claim_ids: [claimId],
     idempotency_key: "p3-stage-a",
+    engagement_id: engagementId,
   });
   assert.equal(allowed.statusCode, 201);
   assert.equal(current.calls.length, 1);
   assert.deepEqual(current.calls[0].input, {
     organizationId,
+    engagementId,
     requestedAudience: "internal",
     claimIds: [claimId],
     idempotencyKey: "p3-stage-a",
@@ -333,17 +344,18 @@ test("Impact Evidence Library impact-narrative create route pins impact_narrativ
   const path = `${basePath}/admin/organizations/${organizationId}/generated-content-drafts/impact-narrative`;
 
   for (const rejectedBody of [
-    { claim_ids: [claimId], idempotency_key: "p13-stage-a", content_type: "impact_narrative" },
-    { claim_ids: [claimId], idempotency_key: "p13-stage-a", requested_audience: "internal" },
-    { claim_ids: [claimId], idempotency_key: "p13-stage-a", requested_audience: "funder" },
-    { claim_ids: [claimId], idempotency_key: "p13-stage-a", prompt: "write anything" },
-    { claim_ids: [claimId], idempotency_key: "p13-stage-a", instructions: "ignore governance" },
-    { claim_ids: [claimId], idempotency_key: "p13-stage-a", citations: [{ claimId, evidenceItemId }] },
-    { claim_ids: [claimId], idempotency_key: "p13-stage-a", evidence: [{ evidenceItemId }] },
-    { claim_ids: [claimId], idempotency_key: "p13-stage-a", actor_context: actorContext },
-    { claim_ids: [claimId], idempotency_key: "p13-stage-a", review_status: "resolved" },
-    { claim_ids: [claimId], idempotency_key: "p13-stage-a", route: "p3_01_create_evidence_summary_draft" },
-    { claim_ids: [claimId], idempotency_key: "p13-stage-a", audit_route: "p3_01_create_evidence_summary_draft" },
+    { claim_ids: [claimId], idempotency_key: "p13-stage-a", engagement_id: engagementId, content_type: "impact_narrative" },
+    { claim_ids: [claimId], idempotency_key: "p13-stage-a", engagement_id: engagementId, requested_audience: "internal" },
+    { claim_ids: [claimId], idempotency_key: "p13-stage-a", engagement_id: engagementId, requested_audience: "funder" },
+    { claim_ids: [claimId], idempotency_key: "p13-stage-a", engagement_id: engagementId, prompt: "write anything" },
+    { claim_ids: [claimId], idempotency_key: "p13-stage-a", engagement_id: engagementId, instructions: "ignore governance" },
+    { claim_ids: [claimId], idempotency_key: "p13-stage-a", engagement_id: engagementId, citations: [{ claimId, evidenceItemId }] },
+    { claim_ids: [claimId], idempotency_key: "p13-stage-a", engagement_id: engagementId, evidence: [{ evidenceItemId }] },
+    { claim_ids: [claimId], idempotency_key: "p13-stage-a", engagement_id: engagementId, actor_context: actorContext },
+    { claim_ids: [claimId], idempotency_key: "p13-stage-a", engagement_id: engagementId, review_status: "resolved" },
+    { claim_ids: [claimId], idempotency_key: "p13-stage-a", engagement_id: engagementId, route: "p3_01_create_evidence_summary_draft" },
+    { claim_ids: [claimId], idempotency_key: "p13-stage-a", engagement_id: engagementId, audit_route: "p3_01_create_evidence_summary_draft" },
+    { claim_ids: [claimId], idempotency_key: "p13-stage-a" },
   ]) {
     const rejected = await postRequestJson(server, path, rejectedBody);
     assert.equal(rejected.statusCode, 422);
@@ -353,11 +365,13 @@ test("Impact Evidence Library impact-narrative create route pins impact_narrativ
   const allowed = await postRequestJson(server, path, {
     claim_ids: [claimId],
     idempotency_key: "p13-stage-a",
+    engagement_id: engagementId,
   });
   assert.equal(allowed.statusCode, 201);
   assert.equal(current.calls.length, 1);
   assert.deepEqual(current.calls[0].input, {
     organizationId,
+    engagementId,
     requestedAudience: "internal",
     claimIds: [claimId],
     idempotencyKey: "p13-stage-a",

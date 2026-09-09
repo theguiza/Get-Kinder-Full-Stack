@@ -47,8 +47,19 @@ async function runP301IntegrationSuite() {
   const { listGeneratedDraftLibraryIndex: readGeneratedDraftLibraryIndex } = await import("../Backend/kai/db/kaiGeneratedDraftLibraryReadModels.js");
 
   const ORG = "00000000-0000-4000-8000-000000000001";
+  const ENGAGEMENT = "00000000-0000-4000-8000-000000000901";
   const NOW = "2026-08-06T10:00:00.000Z";
   const pool = new Pool({ connectionString: RUNNER_OWNED_DATABASE_URL, ssl: false, max: 20 });
+
+  async function engagementLookup({ organizationId, engagementId }) {
+    const { rows } = await pool.query(
+      `SELECT engagement_id::text AS engagement_id, organization_id::text AS organization_id
+         FROM kai.engagements
+        WHERE organization_id = $1::uuid AND engagement_id = $2::uuid`,
+      [organizationId, engagementId],
+    );
+    return rows[0] || null;
+  }
 
   async function withRunnerOwnedTransaction(callback) {
     const client = await pool.connect();
@@ -177,6 +188,7 @@ async function runP301IntegrationSuite() {
   function serviceInput(claim, idempotencyKey) {
     return {
       organizationId: ORG,
+      engagementId: ENGAGEMENT,
       requestedAudience: "internal",
       claimIds: [claim.claim_id],
       idempotencyKey,
@@ -259,6 +271,7 @@ async function runP301IntegrationSuite() {
       serviceInput(claim, key),
       {
         env: { KAI_SPRINT2_ENABLED: "true", KAI_GENERATION_ENABLED: "true" },
+        getEngagementForOrganization: engagementLookup,
         generatedContentRepository: createPostgresGeneratedContentRepository({
           runInTransaction: withRunnerOwnedTransaction,
         }),
@@ -346,6 +359,7 @@ async function runP301IntegrationSuite() {
       serviceInput(claim, "fresh-ok-1"),
       {
         env: { KAI_SPRINT2_ENABLED: "true", KAI_GENERATION_ENABLED: "true" },
+        getEngagementForOrganization: engagementLookup,
         generatedContentRepository: generatedRepo(),
         draftGenerator: generator({ calls }),
         metadataOnlyAudit: auditRecorder({ published }),
@@ -375,6 +389,7 @@ async function runP301IntegrationSuite() {
       serviceInput(claim, "fresh-ok-1"),
       {
         env: { KAI_SPRINT2_ENABLED: "true", KAI_GENERATION_ENABLED: "true" },
+        getEngagementForOrganization: engagementLookup,
         generatedContentRepository: generatedRepo(),
         draftGenerator: generator({ calls }),
         metadataOnlyAudit: auditRecorder(),
@@ -393,6 +408,7 @@ async function runP301IntegrationSuite() {
       { ...serviceInput(claim, "fresh-ok-1"), claimIds: ["00000000-0000-4000-8000-000000000999"] },
       {
         env: { KAI_SPRINT2_ENABLED: "true", KAI_GENERATION_ENABLED: "true" },
+        getEngagementForOrganization: engagementLookup,
         generatedContentRepository: generatedRepo(),
         draftGenerator() {
           calls += 1;
@@ -417,6 +433,7 @@ async function runP301IntegrationSuite() {
       request,
       {
         env: { KAI_SPRINT2_ENABLED: "true", KAI_GENERATION_ENABLED: "true" },
+        getEngagementForOrganization: engagementLookup,
         generatedContentRepository: generatedRepo(),
         draftGenerator: generator(),
         metadataOnlyAudit: auditRecorder(),
@@ -433,6 +450,7 @@ async function runP301IntegrationSuite() {
     const request = serviceInput(claim, "concurrent-ok");
     const deps = {
       env: { KAI_SPRINT2_ENABLED: "true", KAI_GENERATION_ENABLED: "true" },
+      getEngagementForOrganization: engagementLookup,
       generatedContentRepository: repo,
       draftGenerator: generator({ calls }),
       metadataOnlyAudit: auditRecorder(),
@@ -463,6 +481,7 @@ async function runP301IntegrationSuite() {
         serviceInput(claim, key),
         {
           env: { KAI_SPRINT2_ENABLED: "true", KAI_GENERATION_ENABLED: "true" },
+          getEngagementForOrganization: engagementLookup,
           generatedContentRepository: overrides.repository || generatedRepo(),
           draftGenerator: overrides.draftGenerator,
           metadataOnlyAudit: overrides.metadataOnlyAudit || auditRecorder(),
@@ -483,6 +502,7 @@ async function runP301IntegrationSuite() {
       serviceInput(claim, key),
       {
         env: { KAI_SPRINT2_ENABLED: "true", KAI_GENERATION_ENABLED: "true" },
+        getEngagementForOrganization: engagementLookup,
         generatedContentRepository: generatedRepo(),
         draftGenerator: generator({ calls }),
         metadataOnlyAudit: auditRecorder({ published }),
@@ -528,6 +548,7 @@ async function runP301IntegrationSuite() {
       serviceInput(claim, "p13-01-impact-narrative-fresh"),
       {
         env: { KAI_SPRINT2_ENABLED: "true", KAI_GENERATION_ENABLED: "true" },
+        getEngagementForOrganization: engagementLookup,
         generatedContentRepository: generatedRepo(),
         draftGenerator: generator({ calls }),
         metadataOnlyAudit: auditRecorder(),
@@ -547,6 +568,7 @@ async function runP301IntegrationSuite() {
       serviceInput(claim, key),
       {
         env: { KAI_SPRINT2_ENABLED: "true", KAI_GENERATION_ENABLED: "true" },
+        getEngagementForOrganization: engagementLookup,
         generatedContentRepository: generatedRepo(),
         draftGenerator: generator(),
         metadataOnlyAudit: auditRecorder(),
@@ -560,6 +582,7 @@ async function runP301IntegrationSuite() {
       serviceInput(claim, key),
       {
         env: { KAI_SPRINT2_ENABLED: "true", KAI_GENERATION_ENABLED: "true" },
+        getEngagementForOrganization: engagementLookup,
         generatedContentRepository: generatedRepo(),
         draftGenerator: async () => {
           impactNarrativeGeneratorCalls += 1;
@@ -592,6 +615,7 @@ async function runP301IntegrationSuite() {
       serviceInput(claim, key),
       {
         env: { KAI_SPRINT2_ENABLED: "true", KAI_GENERATION_ENABLED: "true" },
+        getEngagementForOrganization: engagementLookup,
         generatedContentRepository: generatedRepo(),
         draftGenerator: async (generatorInput) => ({
           blocks: [{

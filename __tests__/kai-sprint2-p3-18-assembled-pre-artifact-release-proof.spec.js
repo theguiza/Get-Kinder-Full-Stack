@@ -66,6 +66,7 @@ import {
 const { buildCanonicalRepresentation, canonicalFingerprint } = __exportCandidateRepositoryTestables;
 
 const ORG = "00000000-0000-4000-8000-000000000001";
+const ENGAGEMENT = "00000000-0000-4000-8000-000000000900";
 const DRAFT = "00000000-0000-4000-8000-000000000702";
 const GC_QUEUE = "00000000-0000-4000-8000-000000000703";
 const EXPORT_QUEUE = "00000000-0000-4000-8000-000000000710";
@@ -296,13 +297,23 @@ test("ASSEMBLED PRE-ARTIFACT RELEASE PROOF: generated draft -> ... -> P3-17 auth
     const result = await createEvidenceSummaryDraft(
       {
         organizationId: ORG,
+        engagementId: ENGAGEMENT,
         requestedAudience: "internal",
         claimIds: [CLAIM],
         idempotencyKey: "assembled-proof-idem-key-0001",
         actorContext,
         now: t(0),
       },
-      { env: enabledEnv, generatedContentRepository },
+      {
+        env: enabledEnv,
+        generatedContentRepository,
+        async getEngagementForOrganization({ organizationId, engagementId }) {
+          if (organizationId === ORG && engagementId === ENGAGEMENT) {
+            return { engagement_id: ENGAGEMENT, organization_id: ORG };
+          }
+          return null;
+        },
+      },
     );
     assert.equal(result.ok, true);
     assert.equal(result.data.generatedContentDraftId, DRAFT);

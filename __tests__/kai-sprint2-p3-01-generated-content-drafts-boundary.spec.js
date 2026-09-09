@@ -15,6 +15,7 @@ import {
 
 const ORG = "00000000-0000-4000-8000-000000000001";
 const OTHER_ORG = "00000000-0000-4000-8000-000000000002";
+const ENGAGEMENT = "00000000-0000-4000-8000-000000000501";
 const CLAIM = "00000000-0000-4000-8000-000000000101";
 const EVIDENCE = "00000000-0000-4000-8000-000000000201";
 const NOW = "2026-08-06T10:00:00.000Z";
@@ -31,6 +32,7 @@ const actorContext = Object.freeze({
 function input(overrides = {}) {
   return {
     organizationId: ORG,
+    engagementId: ENGAGEMENT,
     requestedAudience: "internal",
     claimIds: [CLAIM],
     idempotencyKey: "p3-01-key",
@@ -38,6 +40,13 @@ function input(overrides = {}) {
     now: NOW,
     ...overrides,
   };
+}
+
+async function stubGetEngagementForOrganization({ organizationId, engagementId }) {
+  if (organizationId === ORG && engagementId === ENGAGEMENT) {
+    return { engagement_id: ENGAGEMENT, organization_id: ORG };
+  }
+  return null;
 }
 
 function eligibleClaim(overrides = {}) {
@@ -78,6 +87,7 @@ test("P3-01 service gates: disabled, generation-disabled, malformed, unauthorize
   };
   const deps = {
     generatedContentRepository: repository,
+    getEngagementForOrganization: stubGetEngagementForOrganization,
     draftGenerator() {
       generatorCalls += 1;
       throw new Error("must not call");
@@ -174,13 +184,17 @@ test("P3-01 validators VAL-GEN-001 through VAL-GEN-005 enforce generation revali
   }).ok, true);
 });
 
-test("P3-01 request fingerprint is deterministic and sensitive only to content type, audience, and ordered claim ids", () => {
+test("P3-01 request fingerprint is deterministic and sensitive only to content type, audience, ordered claim ids, and engagement", () => {
   assert.equal(
     fingerprintEvidenceSummaryRequest(input({ actorContext: { different: true }, idempotencyKey: "different" })),
     fingerprintEvidenceSummaryRequest(input()),
   );
   assert.notEqual(
     fingerprintEvidenceSummaryRequest(input({ requestedAudience: "public" })),
+    fingerprintEvidenceSummaryRequest(input()),
+  );
+  assert.notEqual(
+    fingerprintEvidenceSummaryRequest(input({ engagementId: "00000000-0000-4000-8000-000000000502" })),
     fingerprintEvidenceSummaryRequest(input()),
   );
 });

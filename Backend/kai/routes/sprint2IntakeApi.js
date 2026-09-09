@@ -2671,8 +2671,11 @@ function validateCreateEvidenceSummaryRequestOrSend(req, res) {
   const keys = Object.keys(payload);
   if (
     !identifiers
-    || keys.length !== 2
-    || !keys.every((key) => key === "claim_ids" || key === "idempotency_key")
+    || keys.length !== 3
+    || !keys.every((key) => key === "claim_ids" || key === "idempotency_key" || key === "engagement_id")
+    || typeof payload.engagement_id !== "string"
+    || !KAI_SPRINT2_P0_PATTERNS.uuid.test(payload.engagement_id)
+    || payload.engagement_id !== payload.engagement_id.toLowerCase()
     || !Array.isArray(payload.claim_ids)
     || payload.claim_ids.length < 1
     || payload.claim_ids.length > 20
@@ -2685,7 +2688,7 @@ function validateCreateEvidenceSummaryRequestOrSend(req, res) {
     sendKaiError(res, "validation_blocker", {
       blockers: [routeValidationBlocker(
         "invalid_internal_evidence_summary_generation_request",
-        "organization_id_claim_ids_or_idempotency_key",
+        "organization_id_claim_ids_idempotency_key_or_engagement_id",
       )],
     });
     return null;
@@ -2694,6 +2697,7 @@ function validateCreateEvidenceSummaryRequestOrSend(req, res) {
     organizationId: identifiers.organizationId,
     claimIds: [...payload.claim_ids].sort(),
     idempotencyKey: payload.idempotency_key,
+    engagementId: payload.engagement_id,
   };
 }
 
@@ -2710,6 +2714,7 @@ router.post(
       const { createProductionEvidenceSummaryDraftGenerator } = await import("../services/kaiEvidenceSummaryDraftGenerator.js");
       return service.createEvidenceSummaryDraft({
         organizationId: parsed.organizationId,
+        engagementId: parsed.engagementId,
         requestedAudience: "internal",
         claimIds: parsed.claimIds,
         idempotencyKey: parsed.idempotencyKey,
@@ -2737,8 +2742,11 @@ function validateCreateImpactNarrativeRequestOrSend(req, res) {
   const keys = Object.keys(payload);
   if (
     !identifiers
-    || keys.length !== 2
-    || !keys.every((key) => key === "claim_ids" || key === "idempotency_key")
+    || keys.length !== 3
+    || !keys.every((key) => key === "claim_ids" || key === "idempotency_key" || key === "engagement_id")
+    || typeof payload.engagement_id !== "string"
+    || !KAI_SPRINT2_P0_PATTERNS.uuid.test(payload.engagement_id)
+    || payload.engagement_id !== payload.engagement_id.toLowerCase()
     || !Array.isArray(payload.claim_ids)
     || payload.claim_ids.length < 1
     || payload.claim_ids.length > 20
@@ -2751,7 +2759,7 @@ function validateCreateImpactNarrativeRequestOrSend(req, res) {
     sendKaiError(res, "validation_blocker", {
       blockers: [routeValidationBlocker(
         "invalid_internal_impact_narrative_generation_request",
-        "organization_id_claim_ids_or_idempotency_key",
+        "organization_id_claim_ids_idempotency_key_or_engagement_id",
       )],
     });
     return null;
@@ -2760,6 +2768,7 @@ function validateCreateImpactNarrativeRequestOrSend(req, res) {
     organizationId: identifiers.organizationId,
     claimIds: [...payload.claim_ids].sort(),
     idempotencyKey: payload.idempotency_key,
+    engagementId: payload.engagement_id,
   };
 }
 
@@ -2776,6 +2785,7 @@ router.post(
       const { createProductionImpactNarrativeDraftGenerator } = await import("../services/kaiImpactNarrativeDraftGenerator.js");
       return service.createImpactNarrativeDraft({
         organizationId: parsed.organizationId,
+        engagementId: parsed.engagementId,
         requestedAudience: "internal",
         claimIds: parsed.claimIds,
         idempotencyKey: parsed.idempotencyKey,

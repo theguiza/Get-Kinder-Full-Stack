@@ -151,6 +151,22 @@ try {
   run(createdb, ["-h", "127.0.0.1", "-p", port, dbName], { capture: true });
   await proveRunnerOwnedTarget();
 
+  // P14-01 hard precondition: kai.generation_runs.engagement_id FK's to
+  // kai.engagements(engagement_id, organization_id), so the organization/
+  // engagement foundation (shared by the existing organization-enablement
+  // local-Postgres runner) must exist before P3-01's own migration creates
+  // kai.generation_runs.
+  psqlFile("scripts/kai-sprint2-organization-enablement-bootstrap-synthetic-schema.sql");
+  // Runner-local accommodation only (never a modification of the shared
+  // bootstrap SQL file itself): the P14-01 engagement-side FK targets
+  // kai.engagements (engagement_id, organization_id), a composite unique
+  // constraint the organization-enablement bootstrap schema does not itself
+  // declare - the same runner-local accommodation the B1.1/C2.1 runners each
+  // apply for this identical composite FK shape.
+  psqlScalar(
+    "ALTER TABLE kai.engagements ADD CONSTRAINT kai_p13_01_engagements_id_org_unique UNIQUE (engagement_id, organization_id);",
+  );
+
   psqlFile("scripts/kai-sprint2-gate-a-bootstrap-synthetic-schema.sql");
   psqlFile("migrations/kai_sprint2_gate_a_p0_upload_lifecycle.sql");
   psqlFile("migrations/kai_sprint2_gate_a_p0_policy_decision_replay.sql");
@@ -166,12 +182,17 @@ try {
   psqlFile("migrations/kai_sprint2_p2_05_conflict_review_candidate.sql");
   psqlFile("migrations/kai_sprint2_p2_10_coverage_review_decision.sql");
   psqlFile("migrations/kai_sprint2_p3_01_generated_content_drafts.sql");
+  psqlFile("migrations/kai_sprint2_p14_01_generation_run_engagement_binding.sql");
   psqlFile("migrations/kai_sprint2_p13_01_impact_narrative_content_type.sql");
   console.log("P13-01 forward migration applied.");
 
   const verifierOutput = psqlFile("scripts/kai-sprint2-p13-01-impact-narrative-content-type-verifier.sql").stdout;
   assertNoFail(verifierOutput, "P13-01 verifier");
   console.log(verifierOutput);
+
+  const p1401VerifierOutput = psqlFile("scripts/kai-sprint2-p14-01-generation-run-engagement-binding-verifier.sql").stdout;
+  assertNoFail(p1401VerifierOutput, "P14-01 verifier");
+  console.log(p1401VerifierOutput);
 
   psqlFile("scripts/kai-sprint2-gate-a-smoke-seed.sql");
   psqlFile("scripts/kai-sprint2-p1-04-data-dictionary-quality-smoke-seed.sql");
@@ -188,6 +209,25 @@ try {
   const failureOutput = psqlFile("scripts/kai-sprint2-p13-01-impact-narrative-content-type-failure-checks.sql").stdout;
   assertNoFail(failureOutput, "P13-01 failure checks");
   console.log(failureOutput);
+
+  // Real kai.organizations/kai.engagements rows the P3-01/P13-01 integration
+  // suites' createEvidenceSummaryDraft/createImpactNarrativeDraft calls now
+  // require as the requested engagementId (P14-01 write contract).
+  psqlScalar(
+    "INSERT INTO kai.organizations (organization_id, name, organization_code) VALUES ('00000000-0000-4000-8000-000000000001', 'P13-01 Smoke Org', 'p13-01-smoke-org') ON CONFLICT (organization_id) DO NOTHING;",
+  );
+  psqlScalar(
+    "INSERT INTO kai.engagements (engagement_id, organization_id, engagement_code) VALUES ('00000000-0000-4000-8000-000000000901', '00000000-0000-4000-8000-000000000001', 'p13-01-smoke-engagement') ON CONFLICT (engagement_id) DO NOTHING;",
+  );
+
+  const p1401SmokeSeedOutput = psqlFile("scripts/kai-sprint2-p14-01-generation-run-engagement-binding-smoke-seed.sql").stdout;
+  console.log(p1401SmokeSeedOutput);
+  const p1401SmokeVerifierOutput = psqlFile("scripts/kai-sprint2-p14-01-generation-run-engagement-binding-smoke-verifier.sql").stdout;
+  assertNoFail(p1401SmokeVerifierOutput, "P14-01 smoke verifier");
+  console.log(p1401SmokeVerifierOutput);
+  const p1401FailureOutput = psqlFile("scripts/kai-sprint2-p14-01-generation-run-engagement-binding-failure-checks.sql").stdout;
+  assertNoFail(p1401FailureOutput, "P14-01 failure checks");
+  console.log(p1401FailureOutput);
 
   const testResult = spawnSync("node", [
     "--test",

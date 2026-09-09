@@ -16,6 +16,7 @@ import { createProductionMetadataOnlyAuditForGeneratedContentDraft } from "../Ba
 
 const ORG = "00000000-0000-4000-8000-000000000001";
 const OTHER_ORG = "00000000-0000-4000-8000-000000000002";
+const ENGAGEMENT = "00000000-0000-4000-8000-000000000601";
 const CLAIM = "00000000-0000-4000-8000-000000000101";
 const EVIDENCE = "00000000-0000-4000-8000-000000000201";
 const NOW = "2026-08-06T10:00:00.000Z";
@@ -32,6 +33,7 @@ const actorContext = Object.freeze({
 function input(overrides = {}) {
   return {
     organizationId: ORG,
+    engagementId: ENGAGEMENT,
     requestedAudience: "internal",
     claimIds: [CLAIM],
     idempotencyKey: "p13-01-key",
@@ -39,6 +41,13 @@ function input(overrides = {}) {
     now: NOW,
     ...overrides,
   };
+}
+
+async function stubGetEngagementForOrganization({ organizationId, engagementId }) {
+  if (organizationId === ORG && engagementId === ENGAGEMENT) {
+    return { engagement_id: ENGAGEMENT, organization_id: ORG };
+  }
+  return null;
 }
 
 test("P13-01 metadata-only audit identity keeps P3-01 evidence-summary route by default and gives impact-narrative its server-owned distinct route", async () => {
@@ -142,6 +151,7 @@ test("P13-01 service gates: disabled, generation-disabled, malformed, non-intern
   };
   const deps = {
     generatedContentRepository: repository,
+    getEngagementForOrganization: stubGetEngagementForOrganization,
     draftGenerator() {
       generatorCalls += 1;
       throw new Error("must not call");

@@ -112,19 +112,19 @@ function canonicalJson(value) {
   return JSON.stringify(value);
 }
 
-function fingerprintGeneratedContentRequest(contentType, { requestedAudience, claimIds }) {
+function fingerprintGeneratedContentRequest(contentType, { requestedAudience, claimIds, engagementId }) {
   return crypto
     .createHash("sha256")
-    .update(canonicalJson({ contentType, requestedAudience, claimIds }))
+    .update(canonicalJson({ contentType, requestedAudience, claimIds, engagementId }))
     .digest("hex");
 }
 
-export function fingerprintEvidenceSummaryRequest({ requestedAudience, claimIds }) {
-  return fingerprintGeneratedContentRequest(CONTENT_TYPE, { requestedAudience, claimIds });
+export function fingerprintEvidenceSummaryRequest({ requestedAudience, claimIds, engagementId }) {
+  return fingerprintGeneratedContentRequest(CONTENT_TYPE, { requestedAudience, claimIds, engagementId });
 }
 
-export function fingerprintImpactNarrativeRequest({ requestedAudience, claimIds }) {
-  return fingerprintGeneratedContentRequest(IMPACT_NARRATIVE_CONTENT_TYPE, { requestedAudience, claimIds });
+export function fingerprintImpactNarrativeRequest({ requestedAudience, claimIds, engagementId }) {
+  return fingerprintGeneratedContentRequest(IMPACT_NARRATIVE_CONTENT_TYPE, { requestedAudience, claimIds, engagementId });
 }
 
 function hasExactKeys(value, allowed) {
@@ -142,8 +142,9 @@ function validateInput(input) {
   } catch {
     return false;
   }
-  return hasExactKeys(input, new Set(["organizationId", "requestedAudience", "claimIds", "idempotencyKey", "actorContext", "now"]))
+  return hasExactKeys(input, new Set(["organizationId", "engagementId", "requestedAudience", "claimIds", "idempotencyKey", "actorContext", "now"]))
     && UUID_PATTERN.test(input.organizationId)
+    && UUID_PATTERN.test(input.engagementId)
     && AUDIENCES.has(input.requestedAudience)
     && Array.isArray(input.claimIds)
     && input.claimIds.length >= 1
@@ -268,13 +269,13 @@ function prepareRequiredAudit(metadataOnlyAudit, payload) {
 async function insertRunReservation(tx, input, requestFingerprint, contentType) {
   const { rows } = await tx.query(
     `INSERT INTO kai.generation_runs (
-       organization_id, idempotency_key, request_fingerprint, content_type,
+       organization_id, engagement_id, idempotency_key, request_fingerprint, content_type,
        requested_audience, created_by_type, created_at
      )
-     VALUES ($1::uuid,$2,$3,$4,$5,'system',$6::timestamptz)
+     VALUES ($1::uuid,$2::uuid,$3,$4,$5,$6,'system',$7::timestamptz)
      ON CONFLICT (organization_id, idempotency_key) DO NOTHING
      RETURNING generation_run_id::text AS generation_run_id`,
-    [input.organizationId, input.idempotencyKey, requestFingerprint, contentType, input.requestedAudience, input.now],
+    [input.organizationId, input.engagementId, input.idempotencyKey, requestFingerprint, contentType, input.requestedAudience, input.now],
   );
   return rows[0] || null;
 }
@@ -282,6 +283,7 @@ async function insertRunReservation(tx, input, requestFingerprint, contentType) 
 async function readExistingState(tx, { organizationId, idempotencyKey }) {
   const runRows = await tx.query(
     `SELECT generation_run_id::text AS generation_run_id, organization_id::text AS organization_id,
+            engagement_id::text AS engagement_id,
             idempotency_key, request_fingerprint, content_type, requested_audience,
             created_by_type, created_at
        FROM kai.generation_runs
@@ -355,8 +357,8 @@ async function readReviewPacketState(tx, { organizationId, generatedContentDraft
   const draft = draftRows.rows[0];
   const runRows = await tx.query(
     `SELECT generation_run_id::text AS generation_run_id,
-            organization_id::text AS organization_id, request_fingerprint,
-            content_type, requested_audience
+            organization_id::text AS organization_id, engagement_id::text AS engagement_id,
+            request_fingerprint, content_type, requested_audience
        FROM kai.generation_runs
       WHERE generation_run_id = $1::uuid`,
     [draft.generation_run_id],
@@ -428,10 +430,11 @@ async function readReviewPacketState(tx, { organizationId, generatedContentDraft
   };
 }
 
-function validateExistingState(state, requestFingerprint, requestedAudience, contentType) {
+function validateExistingState(state, requestFingerprint, requestedAudience, contentType, engagementId) {
   if (!state?.run) return false;
   if (state.run.request_fingerprint !== requestFingerprint) return "duplicate_conflict";
   if (state.run.content_type !== contentType || state.run.requested_audience !== requestedAudience || state.run.created_by_type !== "system") return false;
+  if (state.run.engagement_id !== engagementId) return false;
   if (state.drafts.length !== 1 || state.queues.length !== 1 || state.blocks.length < 1) return false;
   const draft = state.drafts[0];
   if (
@@ -462,7 +465,7 @@ function hasOnlyAllowedKeys(value, allowedKeys) {
 }
 
 function validateImmutableGraphRows(state, { organizationId, generatedContentDraftId }) {
-  const runKeys = new Set(["generation_run_id", "organization_id", "request_fingerprint", "content_type", "requested_audience"]);
+  const runKeys = new Set(["generation_run_id", "organization_id", "engagement_id", "request_fingerprint", "content_type", "requested_audience"]);
   const draftKeys = new Set(["generated_content_draft_id", "generation_run_id", "organization_id", "content_type", "requested_audience", "draft_status", "review_status"]);
   const blockKeys = new Set(["generated_content_block_id", "generated_content_draft_id", "organization_id", "ordinal", "text"]);
   const citationKeys = new Set(["generated_content_citation_id", "generated_content_block_id", "organization_id", "claim_id", "evidence_item_id", "block_ordinal"]);
@@ -967,7 +970,7 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
 
 async function rereadAsResult(tx, input, requestFingerprint, replayed, contentType) {
   const state = await readExistingState(tx, input);
-  const validation = validateExistingState(state, requestFingerprint, input.requestedAudience, contentType);
+  const validation = validateExistingState(state, requestFingerprint, input.requestedAudience, contentType, input.engagementId);
   if (validation === "duplicate_conflict") return failure("duplicate_conflict");
   if (validation !== true) return failure("conflict_current_state_changed");
   return success(toResult(state, replayed));

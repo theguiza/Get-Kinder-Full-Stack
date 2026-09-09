@@ -6,6 +6,7 @@
   import { buildKaiError } from "../errors/kaiErrors.js";
   import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationService.js";
   import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
+  import { getEngagementForOrganization } from "../db/kaiQueries.js";
   import { EXPORT_REVIEW_LIFECYCLE_PROFILES } from "../dictionary/exportReviewQueueContract.js";
   import { __exportReviewServiceContract } from "./kaiExportReviewService.js";
 
@@ -40,7 +41,7 @@
   }
 
   function isCreateEvidenceSummaryDraftInput(input) {
-    if (!hasExactKeys(input, new Set(["organizationId", "requestedAudience", "claimIds", "idempotencyKey", "actorContext", "now"]))) {
+    if (!hasExactKeys(input, new Set(["organizationId", "engagementId", "requestedAudience", "claimIds", "idempotencyKey", "actorContext", "now"]))) {
       return false;
     }
     let normalizedNow = null;
@@ -50,6 +51,7 @@
       return false;
     }
     return UUID_PATTERN.test(input.organizationId)
+      && UUID_PATTERN.test(input.engagementId)
       && AUDIENCES.has(input.requestedAudience)
       && Array.isArray(input.claimIds)
       && input.claimIds.length >= 1
@@ -145,9 +147,16 @@
       return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers });
     }
 
+    const readEngagement = dependencies.getEngagementForOrganization || getEngagementForOrganization;
+    const engagementRecord = await readEngagement({
+      organizationId: input.organizationId,
+      engagementId: input.engagementId,
+    });
+
     const tenant = validateTenantBoundaryConsistency({
       expectedOrganizationId: input.organizationId,
-      payload: { organization_id: input.organizationId },
+      payload: { organization_id: input.organizationId, engagement_id: input.engagementId },
+      engagementRecord,
     });
     if (tenant.severity === "blocker") {
       return buildKaiError("tenant_boundary_violation", { blockers: [tenant] });
@@ -186,9 +195,16 @@
       return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers });
     }
 
+    const readEngagement = dependencies.getEngagementForOrganization || getEngagementForOrganization;
+    const engagementRecord = await readEngagement({
+      organizationId: input.organizationId,
+      engagementId: input.engagementId,
+    });
+
     const tenant = validateTenantBoundaryConsistency({
       expectedOrganizationId: input.organizationId,
-      payload: { organization_id: input.organizationId },
+      payload: { organization_id: input.organizationId, engagement_id: input.engagementId },
+      engagementRecord,
     });
     if (tenant.severity === "blocker") {
       return buildKaiError("tenant_boundary_violation", { blockers: [tenant] });
