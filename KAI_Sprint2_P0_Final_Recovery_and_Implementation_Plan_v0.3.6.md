@@ -21971,6 +21971,99 @@ anywhere in this diff.
 **Local commit:** one bounded commit created after all required checks
 passed.
 
+
+## Phase-14 (Grant Response Packet Track) - P14-06D Authoritative Grant
+## Response Packet Export-Candidate / Export-Review State Read
+
+**Date:** 2026-09-09
+
+**Owner authorization (bounded, local-only):** implement one read-only
+authoritative server contract that lets the existing engagement-scoped
+Grant Response Packet read surface recover the exact current packet export
+candidate and its export-review state after a fresh load. No frontend
+rehydration, final eligibility, final release, manifest, final packet
+generation, schema/migration, production/shared database, push, deploy,
+cloud/config/feature-flag, credential, or real-client-data work was
+performed.
+
+**Read surface:** extended the existing
+`GET /admin/organizations/:organizationId/engagements/:engagementId/grant-response-packet`
+DTO rather than adding a sibling endpoint. The route remains SQL-free and
+delegates only through `kaiGrantResponsePacketService`; existing
+`KAI_SPRINT2_ENABLED`/generation gates, tenant checks, read visibility, and
+structured KAI error handling remain intact.
+
+**Current-candidate resolution:** added
+`readCurrentGrantResponsePacketExportCandidateReviewState` to
+`postgresGrantResponsePacketExportCandidateRepository.js`. It composes the
+current packet render model, computes the existing P14-03 canonical
+fingerprint, reads only an already-existing P14-02 identity, reads only an
+already-existing candidate by the exact
+`(organization_id, grant_response_packet_export_identity_id,
+canonical_fingerprint)` key, and then reads that exact candidate's
+`export_review` queue row if present. It does not create an identity,
+candidate, member snapshot, audit row, review row, review transition,
+final-release authority, or manifest. The lookup uses no latest/newest/
+oldest/created_at/updated_at/preferred selection and accepts no browser-
+supplied candidate id.
+
+**DTO / visibility:** `getGrantResponsePacket` now projects safe top-level
+packet review state:
+`exportReviewVisible`, `grantResponsePacketExportCandidateId`,
+`reviewQueueItemId`, `queueStatus`, `reviewStatus`, and `reviewUpdatedAt`.
+When the caller lacks the existing export-review visibility authority, the
+service does not call the packet candidate repository and all packet-level
+candidate/review identity fields are forced to `null`. The read grants no
+write authority and does not broaden `gk_admin` mutation authority. Member
+content, block text, evidence/source bodies, raw citations, PII, storage
+locations, signed URLs, credentials, internal DB details, final-release
+state, and manifest data are not exposed by this projection.
+
+**Verification:** added
+`__tests__/kai-sprint2-p14-06d-grant-response-packet-authoritative-read.spec.js`
+(11/11) proving: no current candidate returns null state; exact current
+candidate with no review returns that candidate and no queue state; open,
+in_progress, and resolved review rows return the exact candidate id, queue
+id, queue/review status, and `reviewUpdatedAt`; changed packet fingerprint
+excludes an older candidate; wrong organization and wrong engagement expose
+no state; restricted actors receive no packet candidate/review identity and
+trigger no candidate repository read; the read uses the existing GET route
+surface; and the source contains no latest/newest/created_at/updated_at
+candidate selection. Existing packet boundary and render-model fixtures were
+updated only for the new safe top-level DTO fields.
+
+**Affected regressions passed:** focused P14-06D suite; P14-03 candidate/
+fingerprint boundary; P14-05 request, P14-06A start, and P14-06B complete
+suites; P14-04 candidate service/route/audit suites; Grant Response Packet
+backend, render-model, Markdown delivery, route/runtime, API contract, and
+Impact Library packet suites; member-level P3-05/P3-06/P3-09/P3-13 export-
+review/read-recovery/finalization-link boundary suites. P14-02/P14-03
+runner-owned integration specs were invoked under the sentinel and skipped
+as designed without a runner-owned database.
+
+**Full suite:** sandboxed `npm test` failed on listener permissions
+(`listen EPERM`) for local route tests, so it was rerun outside the sandbox
+with the same non-listening loopback `DATABASE_URL` sentinel. The escalated
+full suite returned 3740 passed, 7 failed, 63 skipped - the same
+pre-existing, unrelated batch/file-detail baseline failures documented in
+prior Phase-14 entries. No new full-suite failure was introduced.
+
+**Frontend build:** not run - no frontend source or built bundle was
+changed, and frontend rehydration is explicitly deferred to P14-06E.
+
+**Final diff review:** edits confined to
+`Backend/kai/dictionary/postgresGrantResponsePacketExportCandidateRepository.js`,
+`Backend/kai/services/kaiGrantResponsePacketService.js`,
+`__tests__/kai-sprint2-p14-06d-grant-response-packet-authoritative-read.spec.js`,
+two existing Grant Response Packet backend test files updated for the safe
+DTO shape/harness, and this ExecPlan entry. `git diff --check` passed with
+no whitespace errors. No schema/migration file, frontend file, packet
+manifest/final-release/approval file, production/shared database, cloud
+configuration, credential, push, or deployment was touched.
+
+**Local commit:** one bounded commit created after all required checks
+passed.
+
 ## Grant Response Packet: Composite Render Model (read-only packet-level
 ## representation; no packet persistence, manifest, candidate, finalization,
 ## file, or delivery route)

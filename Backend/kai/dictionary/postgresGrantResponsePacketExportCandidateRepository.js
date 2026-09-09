@@ -365,6 +365,17 @@ function isCompleteGrantResponsePacketExportReviewInput(input) {
     && isCanonicalUtcTimestamp(input.now);
 }
 
+// P14-06D authoritative READ ONLY current-candidate state: exact-keys input
+// contract mirrors the authoritative packet/render-model chain it uses, but
+// accepts no candidate id, queue id, timestamp, fingerprint, member list, or
+// authority/finalization-shaped field from a caller.
+function isReadCurrentGrantResponsePacketExportCandidateReviewStateInput(input) {
+  return hasExactKeys(input, new Set(["organizationId", "engagementId", "actorContext"]))
+    && UUID_PATTERN.test(input.organizationId)
+    && UUID_PATTERN.test(input.engagementId)
+    && isMappedHumanActor(input.actorContext);
+}
+
 async function loadGrantResponsePacketExportReviewQueueRowById(tx, { organizationId, exportReviewQueueItemId }) {
   const { rows } = await tx.query(
     `SELECT review_queue_item_id::text AS review_queue_item_id, organization_id::text AS organization_id,
@@ -899,6 +910,110 @@ export function createPostgresGrantResponsePacketExportCandidateRepository({ run
         return failure("system_error");
       }
     },
+
+    // P14-06D: READ ONLY authoritative state for the current semantic Grant
+    // Response Packet. It composes the current render model, computes the
+    // existing P14-03 fingerprint, reads an already-existing P14-02 identity,
+    // reads an already-existing exact candidate by (identity, fingerprint),
+    // and then reads that candidate's governed export_review row if present.
+    // It never creates/replays a candidate, never requests/starts/completes a
+    // review, never chooses latest/newest/preferred rows, and never touches
+    // final-release/manifest state.
+    async readCurrentGrantResponsePacketExportCandidateReviewState(input, dependencies = {}) {
+      if (!isReadCurrentGrantResponsePacketExportCandidateReviewStateInput(input)) return failure("validation_blocker");
+
+      const composeRenderModel = dependencies.composeRenderModel || defaultComposeRenderModel;
+      const renderModelResult = await composeRenderModel(input, dependencies.renderModelDependencies || dependencies);
+      if (!renderModelResult?.ok) {
+        return {
+          ok: false,
+          data: null,
+          error: renderModelResult?.error || { code: "system_error", status: 500 },
+        };
+      }
+
+      const { fingerprint, error: fingerprintError } =
+        composeGrantResponsePacketExportCandidateFingerprint(renderModelResult.data);
+      if (!fingerprint) {
+        const isNoCurrentCandidateState = fingerprintError === "no_eligible_members";
+        return isNoCurrentCandidateState
+          ? success({
+            organizationId: input.organizationId,
+            engagementId: input.engagementId,
+            grantResponsePacketExportCandidateId: null,
+            reviewQueueItemId: null,
+            queueStatus: null,
+            reviewStatus: null,
+            reviewUpdatedAt: null,
+          })
+          : failure(fingerprintError === "not_funder_audience" ? "validation_blocker" : "system_error");
+      }
+
+      try {
+        return await runInTransaction(async (tx) => {
+          const identity = await loadExistingIdentity(tx, {
+            organizationId: input.organizationId,
+            engagementId: input.engagementId,
+          });
+          if (!identity) {
+            return success({
+              organizationId: input.organizationId,
+              engagementId: input.engagementId,
+              grantResponsePacketExportCandidateId: null,
+              reviewQueueItemId: null,
+              queueStatus: null,
+              reviewStatus: null,
+              reviewUpdatedAt: null,
+            });
+          }
+
+          const candidate = await loadExistingCandidate(tx, {
+            organizationId: input.organizationId,
+            identityId: identity.grant_response_packet_export_identity_id,
+            fingerprint,
+          });
+          if (!candidate) {
+            return success({
+              organizationId: input.organizationId,
+              engagementId: input.engagementId,
+              grantResponsePacketExportCandidateId: null,
+              reviewQueueItemId: null,
+              queueStatus: null,
+              reviewStatus: null,
+              reviewUpdatedAt: null,
+            });
+          }
+
+          const grantResponsePacketExportCandidateId = candidate.grant_response_packet_export_candidate_id;
+          const queueRow = await loadGrantResponsePacketExportReviewQueueRow(tx, {
+            organizationId: input.organizationId,
+            candidateId: grantResponsePacketExportCandidateId,
+          });
+          if (queueRow && !isValidGrantResponsePacketExportReviewQueueRow(queueRow, {
+            organizationId: input.organizationId,
+            candidateId: grantResponsePacketExportCandidateId,
+          })) {
+            rollbackFailure("conflict_current_state_changed");
+          }
+
+          return success({
+            organizationId: input.organizationId,
+            engagementId: input.engagementId,
+            grantResponsePacketExportCandidateId,
+            reviewQueueItemId: queueRow?.review_queue_item_id ?? null,
+            queueStatus: queueRow?.queue_status ?? null,
+            reviewStatus: queueRow?.review_status ?? null,
+            reviewUpdatedAt: asCanonicalUtcTimestamp(queueRow?.updated_at),
+          });
+        });
+      } catch (error) {
+        if (error instanceof GrantResponsePacketExportCandidateRollbackResultError) return error.result;
+        if (error?.code === "23503" || error?.code === "22P02" || error?.code === "23514") {
+          return failure("validation_blocker");
+        }
+        return failure("system_error");
+      }
+    },
   });
 }
 
@@ -907,6 +1022,7 @@ export const __grantResponsePacketExportCandidateRepositoryTestables = Object.fr
   isRequestGrantResponsePacketExportReviewInput,
   isStartGrantResponsePacketExportReviewInput,
   isCompleteGrantResponsePacketExportReviewInput,
+  isReadCurrentGrantResponsePacketExportCandidateReviewStateInput,
   isValidGrantResponsePacketExportReviewQueueRow,
   UUID_PATTERN,
 });

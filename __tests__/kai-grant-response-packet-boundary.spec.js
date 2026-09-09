@@ -863,6 +863,23 @@ test("Grant Response Packet service projects export-review fields only for an ac
       return { ok: true, data: { organizationId: ORG, engagementId: ENGAGEMENT, packetAudience: "funder", drafts: [repositoryPacket] }, error: null };
     },
   };
+  const currentPacketCandidateRepository = {
+    async readCurrentGrantResponsePacketExportCandidateReviewState() {
+      return {
+        ok: true,
+        data: {
+          organizationId: ORG,
+          engagementId: ENGAGEMENT,
+          grantResponsePacketExportCandidateId: null,
+          reviewQueueItemId: null,
+          queueStatus: null,
+          reviewStatus: null,
+          reviewUpdatedAt: null,
+        },
+        error: null,
+      };
+    },
+  };
 
   const reviewerResult = await getGrantResponsePacket(serviceInput({ actorContext: reviewerActor }), { env: enabledEnv, generatedContentRepository: repository });
   assert.equal(reviewerResult.ok, true);
@@ -873,7 +890,11 @@ test("Grant Response Packet service projects export-review fields only for an ac
   assert.equal(reviewerResult.data.drafts[0].exportManifestId, null);
   assert.deepEqual(reviewerResult.data.drafts[0].exportManifestHistory, []);
 
-  const adminResult = await getGrantResponsePacket(serviceInput({ actorContext: adminActor }), { env: enabledEnv, generatedContentRepository: repository });
+  const adminResult = await getGrantResponsePacket(serviceInput({ actorContext: adminActor }), {
+    env: enabledEnv,
+    generatedContentRepository: repository,
+    grantResponsePacketExportCandidateRepository: currentPacketCandidateRepository,
+  });
   assert.equal(adminResult.ok, true);
   assert.equal(adminResult.data.drafts[0].exportReviewVisible, true);
   assert.equal(adminResult.data.drafts[0].exportReviewQueueItemId, "00000000-0000-4000-8000-000000000801");

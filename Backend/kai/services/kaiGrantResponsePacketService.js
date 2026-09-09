@@ -50,6 +50,20 @@ async function createDefaultGeneratedContentRepository() {
   return createPostgresGeneratedContentRepository();
 }
 
+async function createDefaultGrantResponsePacketExportCandidateRepository() {
+  const { createPostgresGrantResponsePacketExportCandidateRepository } = await import(
+    "../dictionary/postgresGrantResponsePacketExportCandidateRepository.js"
+  );
+  return createPostgresGrantResponsePacketExportCandidateRepository();
+}
+
+async function composeCurrentGrantResponsePacketRenderModel(packet) {
+  const { composeGrantResponsePacketRenderModelFromPacket } = await import(
+    "./kaiGrantResponsePacketRenderModelService.js"
+  );
+  return composeGrantResponsePacketRenderModelFromPacket(packet);
+}
+
 // The composite grants no approval/finalization authority of its own - it
 // is a read-only regrouping of drafts each already individually eligible
 // per the existing single-draft review-packet contract
@@ -93,19 +107,61 @@ function isGrantResponsePacketDto(data) {
   if (!(Boolean(data)
     && typeof data === "object"
     && !Array.isArray(data)
-    && Object.keys(data).length === 4
+    && Object.keys(data).length === 10
     && Object.keys(data).every((key) => (
       key === "organizationId"
       || key === "engagementId"
       || key === "packetAudience"
       || key === "drafts"
+      || key === "exportReviewVisible"
+      || key === "grantResponsePacketExportCandidateId"
+      || key === "reviewQueueItemId"
+      || key === "queueStatus"
+      || key === "reviewStatus"
+      || key === "reviewUpdatedAt"
     ))
     && UUID_PATTERN.test(data.organizationId)
     && UUID_PATTERN.test(data.engagementId)
     && data.packetAudience === "funder"
+    && typeof data.exportReviewVisible === "boolean"
+    && (
+      data.grantResponsePacketExportCandidateId === null
+      || UUID_PATTERN.test(data.grantResponsePacketExportCandidateId)
+    )
+    && (
+      data.reviewQueueItemId === null
+      || UUID_PATTERN.test(data.reviewQueueItemId)
+    )
+    && (data.queueStatus === null || ["open", "in_progress", "resolved"].includes(data.queueStatus))
+    && (data.reviewStatus === null || ["needs_gk_review", "resolved"].includes(data.reviewStatus))
+    && (
+      data.reviewUpdatedAt === null
+      || (typeof data.reviewUpdatedAt === "string" && !Number.isNaN(Date.parse(data.reviewUpdatedAt)))
+    )
     && Array.isArray(data.drafts))) {
     return false;
   }
+  if (!data.exportReviewVisible) {
+    if (data.grantResponsePacketExportCandidateId !== null) return false;
+    if (data.reviewQueueItemId !== null) return false;
+    if (data.queueStatus !== null) return false;
+    if (data.reviewStatus !== null) return false;
+    if (data.reviewUpdatedAt !== null) return false;
+  }
+  if (data.grantResponsePacketExportCandidateId === null) {
+    if (data.reviewQueueItemId !== null) return false;
+    if (data.queueStatus !== null) return false;
+    if (data.reviewStatus !== null) return false;
+    if (data.reviewUpdatedAt !== null) return false;
+  }
+  if (data.reviewQueueItemId === null) {
+    if (data.queueStatus !== null) return false;
+    if (data.reviewStatus !== null) return false;
+    if (data.reviewUpdatedAt !== null) return false;
+  }
+  if (data.queueStatus === "open" && data.reviewStatus !== "needs_gk_review") return false;
+  if (data.queueStatus === "in_progress" && data.reviewStatus !== "needs_gk_review") return false;
+  if (data.queueStatus === "resolved" && data.reviewStatus !== "resolved") return false;
   for (const draft of data.drafts) {
     if (!(Boolean(draft)
       && typeof draft === "object"
@@ -175,10 +231,58 @@ export async function getGrantResponsePacket(input, dependencies = {}) {
     drafts.push(projected);
   }
 
+  let currentExportCandidateReviewState = {
+    grantResponsePacketExportCandidateId: null,
+    reviewQueueItemId: null,
+    queueStatus: null,
+    reviewStatus: null,
+    reviewUpdatedAt: null,
+  };
+  if (exportReviewVisible) {
+    const currentRenderModel = await composeCurrentGrantResponsePacketRenderModel({
+      organizationId: result.data.organizationId,
+      engagementId: result.data.engagementId,
+      packetAudience: result.data.packetAudience,
+      exportReviewVisible,
+      grantResponsePacketExportCandidateId: null,
+      reviewQueueItemId: null,
+      queueStatus: null,
+      reviewStatus: null,
+      reviewUpdatedAt: null,
+      drafts,
+    });
+    if (!currentRenderModel) return buildKaiError("system_error", { data: null });
+    const candidateRepository = dependencies.grantResponsePacketExportCandidateRepository
+      || (await createDefaultGrantResponsePacketExportCandidateRepository());
+    const candidateStateResult = await candidateRepository.readCurrentGrantResponsePacketExportCandidateReviewState({
+      organizationId: input.organizationId,
+      engagementId: input.engagementId,
+      actorContext: input.actorContext,
+    }, {
+      composeRenderModel: dependencies.composeRenderModel || (async () => ({ ok: true, data: currentRenderModel, error: null })),
+      renderModelDependencies: dependencies.renderModelDependencies,
+    });
+    if (!candidateStateResult.ok) {
+      return buildKaiError(candidateStateResult.error.code, {
+        status: candidateStateResult.error.status,
+        data: null,
+      });
+    }
+    currentExportCandidateReviewState = {
+      grantResponsePacketExportCandidateId: candidateStateResult.data.grantResponsePacketExportCandidateId,
+      reviewQueueItemId: candidateStateResult.data.reviewQueueItemId,
+      queueStatus: candidateStateResult.data.queueStatus,
+      reviewStatus: candidateStateResult.data.reviewStatus,
+      reviewUpdatedAt: candidateStateResult.data.reviewUpdatedAt,
+    };
+  }
+
   const data = {
     organizationId: result.data.organizationId,
     engagementId: result.data.engagementId,
     packetAudience: result.data.packetAudience,
+    exportReviewVisible,
+    ...currentExportCandidateReviewState,
     drafts,
   };
   if (!isGrantResponsePacketDto(data)) return buildKaiError("system_error", { data: null });

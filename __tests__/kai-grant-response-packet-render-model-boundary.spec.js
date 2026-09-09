@@ -107,6 +107,12 @@ function packet(overrides = {}) {
     organizationId: ORG,
     engagementId: ENGAGEMENT,
     packetAudience: "funder",
+    exportReviewVisible: true,
+    grantResponsePacketExportCandidateId: null,
+    reviewQueueItemId: null,
+    queueStatus: null,
+    reviewStatus: null,
+    reviewUpdatedAt: null,
     drafts: [
       member(),
       member({
