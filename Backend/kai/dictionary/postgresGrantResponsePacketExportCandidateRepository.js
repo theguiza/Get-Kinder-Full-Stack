@@ -10,6 +10,7 @@ import {
   GRANT_RESPONSE_PACKET_EXPORT_CANDIDATE_AUDIT_CONTRACT,
   GRANT_RESPONSE_PACKET_EXPORT_REVIEW_QUEUE_STATIC_CONTRACT,
   GRANT_RESPONSE_PACKET_EXPORT_REVIEW_REQUESTED_OPERATION,
+  GRANT_RESPONSE_PACKET_EXPORT_REVIEW_STARTED_OPERATION,
 } from "./grantResponsePacketExportCandidateContract.js";
 
 const PACKET_EXPORT_REVIEW_LIFECYCLE_PROFILES = Object.freeze([
@@ -17,6 +18,8 @@ const PACKET_EXPORT_REVIEW_LIFECYCLE_PROFILES = Object.freeze([
   Object.freeze({ queueStatus: "in_progress", reviewStatus: "needs_gk_review" }),
   Object.freeze({ queueStatus: "resolved", reviewStatus: "resolved" }),
 ]);
+const PACKET_EXPORT_REVIEW_OPEN_LIFECYCLE_PROFILE = PACKET_EXPORT_REVIEW_LIFECYCLE_PROFILES[0];
+const PACKET_EXPORT_REVIEW_START_LIFECYCLE_PROFILE = PACKET_EXPORT_REVIEW_LIFECYCLE_PROFILES[1];
 
 const RESULT_STATUS = Object.freeze({
   validation_blocker: 422,
@@ -271,7 +274,11 @@ async function loadGrantResponsePacketExportReviewQueueRow(tx, { organizationId,
   return rows[0] || null;
 }
 
-function isValidGrantResponsePacketExportReviewQueueRow(row, { organizationId, candidateId }) {
+function isValidGrantResponsePacketExportReviewQueueRow(
+  row,
+  { organizationId, candidateId },
+  allowedLifecycleProfiles = PACKET_EXPORT_REVIEW_LIFECYCLE_PROFILES,
+) {
   const contract = GRANT_RESPONSE_PACKET_EXPORT_REVIEW_QUEUE_STATIC_CONTRACT;
   if (!row) return false;
   if (row.organization_id !== organizationId) return false;
@@ -288,9 +295,49 @@ function isValidGrantResponsePacketExportReviewQueueRow(row, { organizationId, c
   if (row.created_by_type !== contract.createdByType) return false;
   if (!row.queue_metadata || typeof row.queue_metadata !== "object" || Array.isArray(row.queue_metadata)) return false;
   if (Object.keys(row.queue_metadata).length !== 0) return false;
-  return PACKET_EXPORT_REVIEW_LIFECYCLE_PROFILES.some(
+  return allowedLifecycleProfiles.some(
     (profile) => row.queue_status === profile.queueStatus && row.review_status === profile.reviewStatus,
   );
+}
+
+// P14-06A packet export-review START: exact-keys input contract -
+// organizationId + engagementId + grantResponsePacketExportCandidateId +
+// exportReviewQueueItemId + expectedUpdatedAt + actorContext + now, and
+// NOTHING else. No members, no fingerprint, no memberCount, no manifest
+// identity, and no approval/final-release decision is ever accepted from a
+// caller.
+function isStartGrantResponsePacketExportReviewInput(input) {
+  return hasExactKeys(input, new Set([
+    "organizationId",
+    "engagementId",
+    "grantResponsePacketExportCandidateId",
+    "exportReviewQueueItemId",
+    "expectedUpdatedAt",
+    "actorContext",
+    "now",
+  ]))
+    && UUID_PATTERN.test(input.organizationId)
+    && UUID_PATTERN.test(input.engagementId)
+    && UUID_PATTERN.test(input.grantResponsePacketExportCandidateId)
+    && UUID_PATTERN.test(input.exportReviewQueueItemId)
+    && isCanonicalUtcTimestamp(input.expectedUpdatedAt)
+    && isMappedHumanActor(input.actorContext)
+    && isCanonicalUtcTimestamp(input.now);
+}
+
+async function loadGrantResponsePacketExportReviewQueueRowById(tx, { organizationId, exportReviewQueueItemId }) {
+  const { rows } = await tx.query(
+    `SELECT review_queue_item_id::text AS review_queue_item_id, organization_id::text AS organization_id,
+            engagement_id::text AS engagement_id, queue_type, target_object_type,
+            target_object_id::text AS target_object_id, priority, queue_status, review_status,
+            blocked_reason, assigned_to::text AS assigned_to, due_at, summary, required_action,
+            queue_metadata, created_by::text AS created_by, created_by_type, updated_at
+       FROM kai.review_queue_items
+      WHERE organization_id = $1::uuid
+        AND review_queue_item_id = $2::uuid`,
+    [organizationId, exportReviewQueueItemId],
+  );
+  return rows[0] || null;
 }
 
 export function createPostgresGrantResponsePacketExportCandidateRepository({ runInTransaction = withTransaction } = {}) {
@@ -514,12 +561,157 @@ export function createPostgresGrantResponsePacketExportCandidateRepository({ run
         return failure("system_error");
       }
     },
+
+    // P14-06A: START ONLY - transitions the EXACT existing governed
+    // 'export_review' queue row identified by exportReviewQueueItemId from
+    // open/needs_gk_review to in_progress/needs_gk_review, for the EXACT
+    // existing, immutable P14-03 packet export candidate identified by
+    // grantResponsePacketExportCandidateId. Never a client-supplied
+    // membership/fingerprint/manifest identity, never a client-selected
+    // latest/newest/preferred candidate or queue item. Reuses the optimistic
+    // expectedUpdatedAt CAS contract - a stale expectedUpdatedAt fails
+    // closed with conflict_current_state_changed, and a caller that already
+    // observed the started state may safely replay. Starting review grants
+    // no final eligibility evaluation, no approval, no funder/public
+    // readiness, no export authority, no final release, and no manifest -
+    // no such table is read or written here.
+    async startGrantResponsePacketExportReview(input, dependencies = {}) {
+      if (!isStartGrantResponsePacketExportReviewInput(input)) return failure("validation_blocker");
+      if (!dependencies.metadataOnlyAudit) return failure("validation_blocker");
+
+      try {
+        return await runInTransaction(async (tx) => {
+          const candidate = await loadGrantResponsePacketExportCandidateForReview(tx, {
+            organizationId: input.organizationId,
+            engagementId: input.engagementId,
+            grantResponsePacketExportCandidateId: input.grantResponsePacketExportCandidateId,
+          });
+          if (!candidate) rollbackFailure("not_found");
+
+          const contract = GRANT_RESPONSE_PACKET_EXPORT_REVIEW_QUEUE_STATIC_CONTRACT;
+          const queueRow = await loadGrantResponsePacketExportReviewQueueRowById(tx, {
+            organizationId: input.organizationId,
+            exportReviewQueueItemId: input.exportReviewQueueItemId,
+          });
+          if (!queueRow) rollbackFailure("not_found");
+          if (
+            queueRow.target_object_type !== contract.targetObjectType
+            || queueRow.target_object_id !== input.grantResponsePacketExportCandidateId
+            || queueRow.engagement_id !== input.engagementId
+          ) {
+            rollbackFailure("conflict_current_state_changed");
+          }
+
+          const updateResult = await tx.query(
+            `UPDATE kai.review_queue_items
+                SET queue_status = $1,
+                    updated_at = $2::timestamptz
+              WHERE organization_id = $3::uuid
+                AND review_queue_item_id = $4::uuid
+                AND engagement_id = $5::uuid
+                AND queue_type = $6
+                AND target_object_type = $7
+                AND target_object_id = $8::uuid
+                AND queue_status = $9
+                AND review_status = $10
+                AND date_trunc('milliseconds', updated_at) = date_trunc('milliseconds', $11::timestamptz)
+              RETURNING review_queue_item_id::text AS review_queue_item_id`,
+            [
+              PACKET_EXPORT_REVIEW_START_LIFECYCLE_PROFILE.queueStatus,
+              input.now,
+              input.organizationId,
+              input.exportReviewQueueItemId,
+              input.engagementId,
+              contract.queueType,
+              contract.targetObjectType,
+              input.grantResponsePacketExportCandidateId,
+              PACKET_EXPORT_REVIEW_OPEN_LIFECYCLE_PROFILE.queueStatus,
+              PACKET_EXPORT_REVIEW_OPEN_LIFECYCLE_PROFILE.reviewStatus,
+              input.expectedUpdatedAt,
+            ],
+          );
+
+          if (updateResult.rowCount !== 1) {
+            const currentRow = await loadGrantResponsePacketExportReviewQueueRowById(tx, {
+              organizationId: input.organizationId,
+              exportReviewQueueItemId: input.exportReviewQueueItemId,
+            });
+            if (!currentRow) rollbackFailure("not_found");
+            if (!isValidGrantResponsePacketExportReviewQueueRow(currentRow, {
+              organizationId: input.organizationId,
+              candidateId: input.grantResponsePacketExportCandidateId,
+            }, [PACKET_EXPORT_REVIEW_START_LIFECYCLE_PROFILE])) {
+              rollbackFailure("conflict_current_state_changed");
+            }
+            return success({
+              organizationId: input.organizationId,
+              engagementId: input.engagementId,
+              grantResponsePacketExportCandidateId: input.grantResponsePacketExportCandidateId,
+              reviewQueueItemId: input.exportReviewQueueItemId,
+              queueStatus: currentRow.queue_status,
+              reviewStatus: currentRow.review_status,
+              replayed: true,
+            });
+          }
+
+          const postWriteRow = await loadGrantResponsePacketExportReviewQueueRowById(tx, {
+            organizationId: input.organizationId,
+            exportReviewQueueItemId: input.exportReviewQueueItemId,
+          });
+          if (!postWriteRow) rollbackFailure("system_error");
+          if (!isValidGrantResponsePacketExportReviewQueueRow(postWriteRow, {
+            organizationId: input.organizationId,
+            candidateId: input.grantResponsePacketExportCandidateId,
+          }, [PACKET_EXPORT_REVIEW_START_LIFECYCLE_PROFILE])) {
+            rollbackFailure("conflict_current_state_changed");
+          }
+
+          const preparedAudit = dependencies.metadataOnlyAudit.prepareMetadataOnlyAudit?.({
+            payload: {
+              attempted_operation: GRANT_RESPONSE_PACKET_EXPORT_REVIEW_STARTED_OPERATION,
+              actor_type: "human",
+              object_type: "grant_response_packet_export_candidate",
+              grant_response_packet_export_candidate_id: input.grantResponsePacketExportCandidateId,
+              engagement_id: input.engagementId,
+              review_queue_item_id: input.exportReviewQueueItemId,
+              expected_updated_at: input.expectedUpdatedAt,
+              previous_queue_status: PACKET_EXPORT_REVIEW_OPEN_LIFECYCLE_PROFILE.queueStatus,
+              resulting_queue_status: PACKET_EXPORT_REVIEW_START_LIFECYCLE_PROFILE.queueStatus,
+              previous_review_status: PACKET_EXPORT_REVIEW_OPEN_LIFECYCLE_PROFILE.reviewStatus,
+              resulting_review_status: PACKET_EXPORT_REVIEW_START_LIFECYCLE_PROFILE.reviewStatus,
+            },
+            db: tx,
+          });
+          if (!preparedAudit || preparedAudit.ok !== true || typeof preparedAudit.publish !== "function") {
+            rollbackFailure("system_error");
+          }
+          await preparedAudit.publish();
+
+          return success({
+            organizationId: input.organizationId,
+            engagementId: input.engagementId,
+            grantResponsePacketExportCandidateId: input.grantResponsePacketExportCandidateId,
+            reviewQueueItemId: postWriteRow.review_queue_item_id,
+            queueStatus: postWriteRow.queue_status,
+            reviewStatus: postWriteRow.review_status,
+            replayed: false,
+          });
+        });
+      } catch (error) {
+        if (error instanceof GrantResponsePacketExportCandidateRollbackResultError) return error.result;
+        if (error?.code === "23503" || error?.code === "22P02" || error?.code === "23514") {
+          return failure("validation_blocker");
+        }
+        return failure("system_error");
+      }
+    },
   });
 }
 
 export const __grantResponsePacketExportCandidateRepositoryTestables = Object.freeze({
   isCreateGrantResponsePacketExportCandidateInput,
   isRequestGrantResponsePacketExportReviewInput,
+  isStartGrantResponsePacketExportReviewInput,
   isValidGrantResponsePacketExportReviewQueueRow,
   UUID_PATTERN,
 });

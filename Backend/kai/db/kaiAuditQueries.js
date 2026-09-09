@@ -67,6 +67,12 @@ const SAFE_AUDIT_METADATA_KEYS = new Set([
   "export_candidate_id",
   "canonical_fingerprint",
   "member_count",
+  "review_queue_item_id",
+  "expected_updated_at",
+  "previous_queue_status",
+  "resulting_queue_status",
+  "previous_review_status",
+  "resulting_review_status",
 ]);
 
 const FORCED_FALSE_METADATA_FLAGS = [
@@ -125,11 +131,14 @@ function normalizeAuditMetadataValue(key, value) {
   if (["operation", "validator_key", "blocker_code", "object_type", "target_object_type", "actor_type", "created_by_service", "p0_pass", "assessment_category"].includes(key)) {
     return normalizeIdentifier(value);
   }
-  if (["operation_type", "blocking_reason_code", "reason_code", "from_state", "to_state", "prior_status", "new_status"].includes(key)) {
+  if ([
+    "operation_type", "blocking_reason_code", "reason_code", "from_state", "to_state", "prior_status", "new_status",
+    "previous_queue_status", "resulting_queue_status", "previous_review_status", "resulting_review_status",
+  ].includes(key)) {
     return normalizeIdentifier(value);
   }
   if (key === "blocker_codes" || key === "validator_keys") return normalizeStringArray(value);
-  if (key === "created_at") {
+  if (key === "created_at" || key === "expected_updated_at") {
     const normalized = normalizeSafeText(value, null, 64);
     if (!normalized || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(normalized)) return null;
     const parsed = new Date(normalized);

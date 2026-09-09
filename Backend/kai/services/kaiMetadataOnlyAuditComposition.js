@@ -1814,13 +1814,43 @@ export function createProductionMetadataOnlyAuditForGrantResponsePacketExportRev
   }
 
   const UUID_PATTERN_LOCAL = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+  const REVIEW_STATUS_PATTERN = /^[a-z_]{1,32}$/;
+
+  function safeReviewStatus(value) {
+    return typeof value === "string" && REVIEW_STATUS_PATTERN.test(value) ? value : null;
+  }
+
+  function isCanonicalUtcTimestampLocal(value) {
+    if (typeof value !== "string") return false;
+    try {
+      return new Date(value).toISOString() === value;
+    } catch {
+      return false;
+    }
+  }
 
   return Object.freeze({
+    // Reused for both the P14-05 REQUEST transition and the P14-06A START
+    // transition on the same governed 'export_review' queue row - never a
+    // second review-authority adapter for the packet target. The optional
+    // review_queue_item_id/expected_updated_at/previous_*/resulting_* fields
+    // are forwarded only when present and well-formed (never fabricated),
+    // and are additionally re-checked against the shared
+    // SAFE_AUDIT_METADATA_KEYS allowlist before storage, exactly like every
+    // other field on this object.
     prepareMetadataOnlyAudit({ payload, db } = {}) {
       if (!isPlainObject(payload)) return { ok: false };
       const payloadCandidateId = payload.grant_response_packet_export_candidate_id;
       if (typeof payloadCandidateId !== "string" || !UUID_PATTERN_LOCAL.test(payloadCandidateId)) return { ok: false };
       if (payload.engagement_id !== undefined && payload.engagement_id !== engagementId) return { ok: false };
+
+      const reviewQueueItemId = typeof payload.review_queue_item_id === "string"
+        && UUID_PATTERN_LOCAL.test(payload.review_queue_item_id)
+        ? payload.review_queue_item_id
+        : null;
+      const expectedUpdatedAt = isCanonicalUtcTimestampLocal(payload.expected_updated_at)
+        ? payload.expected_updated_at
+        : null;
 
       const metadata = {
         organization_id: organizationId,
@@ -1831,6 +1861,12 @@ export function createProductionMetadataOnlyAuditForGrantResponsePacketExportRev
         operation: typeof payload.attempted_operation === "string" ? payload.attempted_operation : "grant_response_packet_export_review_requested",
         operation_type: typeof payload.attempted_operation === "string" ? payload.attempted_operation : "grant_response_packet_export_review_requested",
         validator_key: typeof payload.validator_key === "string" ? payload.validator_key : null,
+        review_queue_item_id: reviewQueueItemId,
+        expected_updated_at: expectedUpdatedAt,
+        previous_queue_status: safeReviewStatus(payload.previous_queue_status),
+        resulting_queue_status: safeReviewStatus(payload.resulting_queue_status),
+        previous_review_status: safeReviewStatus(payload.previous_review_status),
+        resulting_review_status: safeReviewStatus(payload.resulting_review_status),
         actor_type: actorContext?.actorType || "human",
         actor_user_id: actorContext?.actorUserId || null,
         request_id: actorContext?.requestId || null,

@@ -67,6 +67,9 @@ const REQUEST_EXPORT_REVIEW_REQUEST_KEYS = new Set([
 const CREATE_EXPORT_CANDIDATE_REQUEST_KEYS = new Set([]);
 const CREATE_GRANT_RESPONSE_PACKET_EXPORT_CANDIDATE_REQUEST_KEYS = new Set([]);
 const REQUEST_GRANT_RESPONSE_PACKET_EXPORT_REVIEW_REQUEST_KEYS = new Set([]);
+const START_GRANT_RESPONSE_PACKET_EXPORT_REVIEW_REQUEST_KEYS = new Set([
+  "expected_updated_at",
+]);
 const HUMAN_FINAL_RELEASE_AUTHORITY_REQUEST_KEYS = new Set([
   "requested_audience",
   "decision_action",
@@ -570,6 +573,40 @@ export function validateCreateGrantResponsePacketExportCandidateRequest(payload)
 // body only, exactly like validateCreateGrantResponsePacketExportCandidateRequest
 // above. In particular this rejects members, canonicalFingerprint,
 // memberCount, manifest identity, and any approval/final-release decision.
+// The packet START route requires the client to send back the exact
+// expected_updated_at it last observed on the queue item - the same
+// optimistic CAS contract validateStartExportReviewRequest already enforces
+// for the single-draft workflow. No membership, fingerprint, memberCount,
+// manifest identity, or approval/final-release decision is accepted.
+export function validateStartGrantResponsePacketExportReviewRequest(payload) {
+  if (!isPlainObject(payload)) {
+    return { ok: false, blockers: [requestBlocker("request_body_must_be_object", "body")] };
+  }
+
+  const keys = Object.keys(payload);
+  for (const key of keys) {
+    if (!START_GRANT_RESPONSE_PACKET_EXPORT_REVIEW_REQUEST_KEYS.has(key)) {
+      return { ok: false, blockers: [requestBlocker("unknown_field", `body.${key}`)] };
+    }
+    const value = payload[key];
+    if (value === null) return { ok: false, blockers: [requestBlocker("null_field_not_allowed", `body.${key}`)] };
+    if (Array.isArray(value)) return { ok: false, blockers: [requestBlocker("array_field_not_allowlisted", `body.${key}`)] };
+    if (isPlainObject(value)) return { ok: false, blockers: [requestBlocker("nested_object_not_allowed", `body.${key}`)] };
+    if (typeof value !== "string") return { ok: false, blockers: [requestBlocker("invalid_string_field", `body.${key}`)] };
+    if (!canonicalIsoTimestamp(value)) {
+      return { ok: false, blockers: [requestBlocker("invalid_expected_updated_at", `body.${key}`)] };
+    }
+  }
+
+  for (const key of START_GRANT_RESPONSE_PACKET_EXPORT_REVIEW_REQUEST_KEYS) {
+    if (!Object.hasOwn(payload, key)) {
+      return { ok: false, blockers: [requestBlocker("required_field_missing", `body.${key}`)] };
+    }
+  }
+
+  return { ok: true, blockers: [] };
+}
+
 export function validateRequestGrantResponsePacketExportReviewRequest(payload) {
   if (!isPlainObject(payload)) {
     return { ok: false, blockers: [requestBlocker("request_body_must_be_object", "body")] };

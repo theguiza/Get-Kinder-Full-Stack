@@ -34,6 +34,7 @@ import {
   validateReviewQueueStatusRequest,
   validateSensitivityProfileDecisionRequest,
   validateStartExportReviewRequest,
+  validateStartGrantResponsePacketExportReviewRequest,
 } from "../validators/kaiSprint2RequestSchemas.js";
 import {
   validateReviewCockpitQueueQuery,
@@ -3019,11 +3020,27 @@ function grantResponsePacketExportCandidateReviewIdentifier(req = {}) {
 }
 
 async function getGrantResponsePacketExportReviewService() {
-  if (intakeServiceOverride?.requestGrantResponsePacketExportReview) return intakeServiceOverride;
+  if (
+    intakeServiceOverride?.requestGrantResponsePacketExportReview
+    || intakeServiceOverride?.startGrantResponsePacketExportReview
+  ) return intakeServiceOverride;
   grantResponsePacketExportReviewServicePromise ||= import(
     "../services/kaiGrantResponsePacketExportReviewService.js"
   );
   return grantResponsePacketExportReviewServicePromise;
+}
+
+function grantResponsePacketExportReviewStartIdentifier(req = {}) {
+  const root = grantResponsePacketExportCandidateReviewIdentifier(req);
+  const exportReviewQueueItemId = typeof req.params?.exportReviewQueueItemId === "string"
+    ? req.params.exportReviewQueueItemId
+    : "";
+  if (!root) return null;
+  if (
+    !KAI_SPRINT2_P0_PATTERNS.uuid.test(exportReviewQueueItemId)
+    || exportReviewQueueItemId !== exportReviewQueueItemId.toLowerCase()
+  ) return null;
+  return { ...root, exportReviewQueueItemId };
 }
 
 function validateRequestGrantResponsePacketExportReviewRequestOrSend(req, res) {
@@ -3088,6 +3105,76 @@ router.post(
         }),
       });
     }, 201);
+  },
+);
+
+function validateStartGrantResponsePacketExportReviewRequestOrSend(req, res) {
+  if (!metadataContentTypeIsSupported(req)) {
+    sendKaiError(res, "unsupported_media_type");
+    return null;
+  }
+  const identifiers = grantResponsePacketExportReviewStartIdentifier(req);
+  if (!identifiers) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker(
+        "invalid_uuid_field",
+        "organization_id_engagement_id_grant_response_packet_export_candidate_id_or_export_review_queue_item_id",
+      )],
+    });
+    return null;
+  }
+  const result = validateStartGrantResponsePacketExportReviewRequest(req.body);
+  if (!result.ok) {
+    sendKaiError(res, "validation_blocker", { blockers: result.blockers });
+    return null;
+  }
+  return identifiers;
+}
+
+/**
+ * Grant Response Packet export-review binding (P14-06A): starts governed
+ * export review for the EXACT existing 'export_review' queue row identified
+ * by the route's own exportReviewQueueItemId, targeting the EXACT existing,
+ * immutable P14-03 packet export candidate identified by the route's own
+ * grantResponsePacketExportCandidateId - never a client-selected latest/
+ * newest/preferred candidate or queue item, and never client-supplied
+ * membership, fingerprint, memberCount, or manifest identity. Transitions
+ * open/needs_gk_review to in_progress/needs_gk_review only, reusing the
+ * same optimistic expected_updated_at CAS/replay contract the single-draft
+ * P3-09 start route already uses. Contains no SQL and no direct database
+ * access - delegates once to kaiGrantResponsePacketExportReviewService.
+ * Starting review grants no final eligibility evaluation, no approval, no
+ * funder/public readiness, no export authority, no final
+ * release, and no manifest.
+ */
+router.post(
+  "/admin/organizations/:organizationId/engagements/:engagementId/grant-response-packet/export-candidates/:grantResponsePacketExportCandidateId/export-review-queue/:exportReviewQueueItemId/start",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    const identifiers = validateStartGrantResponsePacketExportReviewRequestOrSend(req, res);
+    if (!identifiers) return;
+    const payload = requestPayload(req);
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    return invokeService(res, async () => {
+      const service = await getGrantResponsePacketExportReviewService();
+      return service.startGrantResponsePacketExportReview({
+        organizationId: identifiers.organizationId,
+        engagementId: identifiers.engagementId,
+        grantResponsePacketExportCandidateId: identifiers.grantResponsePacketExportCandidateId,
+        exportReviewQueueItemId: identifiers.exportReviewQueueItemId,
+        expectedUpdatedAt: payload.expected_updated_at,
+        actorContext,
+        now,
+      }, {
+        metadataOnlyAudit: createProductionMetadataOnlyAuditForGrantResponsePacketExportReview({
+          organizationId: identifiers.organizationId,
+          engagementId: identifiers.engagementId,
+          actorContext,
+          now,
+        }),
+      });
+    });
   },
 );
 
@@ -3840,6 +3927,8 @@ export const __testables = {
   validateCreateGrantResponsePacketExportCandidateRequestOrSend,
   grantResponsePacketExportCandidateReviewIdentifier,
   validateRequestGrantResponsePacketExportReviewRequestOrSend,
+  grantResponsePacketExportReviewStartIdentifier,
+  validateStartGrantResponsePacketExportReviewRequestOrSend,
   sendCsvAttachment,
   sendPdfAttachment,
   sendDocxAttachment,

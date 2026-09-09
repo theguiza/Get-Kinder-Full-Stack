@@ -42,3 +42,15 @@ export const GRANT_RESPONSE_PACKET_EXPORT_REVIEW_REQUESTED_OPERATION =
 
 export const GRANT_RESPONSE_PACKET_EXPORT_REVIEW_AUDIT_CONTRACT =
   "p14_05_grant_response_packet_export_review_v1";
+
+// P14-06A packet export-review START: the packet-level analogue of the
+// existing single-draft P3-09 start_generated_draft_export_review operation
+// - transitions the SAME 'export_review' queue row created above from
+// open/needs_gk_review to in_progress/needs_gk_review only. No new
+// queue_type, no new lifecycle, no approval, no funder-readiness, no
+// final-release authority, and no manifest.
+export const GRANT_RESPONSE_PACKET_EXPORT_REVIEW_STARTED_OPERATION =
+  "grant_response_packet_export_review_started";
+
+export const GRANT_RESPONSE_PACKET_EXPORT_REVIEW_START_AUDIT_CONTRACT =
+  "p14_06_grant_response_packet_export_review_start_v1";

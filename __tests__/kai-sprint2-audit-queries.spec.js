@@ -130,6 +130,36 @@ test("sanitizeAuditMetadataForStorage never lets member_count/canonical_fingerpr
   assert.equal(sanitized.citations, undefined);
 });
 
+// P14-06A: the packet export-review START transition's safe scalar fields -
+// same allowlist discipline as canonical_fingerprint/member_count above.
+test("sanitizeAuditMetadataForStorage retains valid P14-06A start-transition fields", () => {
+  const sanitized = sanitizeAuditMetadataForStorage({
+    review_queue_item_id: "14060000-0000-4000-8000-0000000000a1",
+    expected_updated_at: "2026-09-09T12:00:00.000Z",
+    previous_queue_status: "open",
+    resulting_queue_status: "in_progress",
+    previous_review_status: "needs_gk_review",
+    resulting_review_status: "needs_gk_review",
+  });
+  assert.equal(sanitized.review_queue_item_id, "14060000-0000-4000-8000-0000000000a1");
+  assert.equal(sanitized.expected_updated_at, "2026-09-09T12:00:00.000Z");
+  assert.equal(sanitized.previous_queue_status, "open");
+  assert.equal(sanitized.resulting_queue_status, "in_progress");
+  assert.equal(sanitized.previous_review_status, "needs_gk_review");
+  assert.equal(sanitized.resulting_review_status, "needs_gk_review");
+});
+
+test("sanitizeAuditMetadataForStorage drops malformed P14-06A start-transition fields", () => {
+  const badId = sanitizeAuditMetadataForStorage({ review_queue_item_id: "not-a-uuid" });
+  assert.equal(badId.review_queue_item_id, undefined);
+
+  const badTimestamp = sanitizeAuditMetadataForStorage({ expected_updated_at: "not-a-timestamp" });
+  assert.equal(badTimestamp.expected_updated_at, undefined);
+
+  const badStatus = sanitizeAuditMetadataForStorage({ previous_queue_status: "DROP TABLE kai.review_queue_items" });
+  assert.equal(badStatus.previous_queue_status, undefined);
+});
+
 test("blocked audit insert skips when object_type enum cannot confirm a safe value", async () => {
   const calls = [];
   const db = {
