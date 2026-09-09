@@ -81,6 +81,90 @@ export const ENGAGEMENT_FUNDER_REQUIREMENTS_STATES = Object.freeze({
   applicableRequirementSetAssessmentNotAvailable: "applicable_requirement_set_assessment_not_available",
 });
 
+// Grant Response Packet: the accepted read-only, engagement-scoped route
+// (Backend/kai/routes/sprint2IntakeApi.js) - authoritative membership is
+// resolved entirely server-side (generation_runs.engagement_id lineage,
+// funder-audience filter, resolved review + currentUseEligible gating). This
+// path is never assembled from individually-fetched member drafts.
+export function grantResponsePacketPath(organizationId, engagementId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}`
+    + `/engagements/${encodeURIComponent(engagementId)}/grant-response-packet`;
+}
+
+// A Grant Response Packet response may be applied only if it belongs to the
+// generation, organization, AND engagement still current when it resolves -
+// same late-response-protection convention as
+// shouldApplyCandidateResponse/shouldApplyEligibilityResponse above, so a
+// late response for a previously selected engagement can never overwrite the
+// newly selected engagement's packet.
+export function shouldApplyGrantResponsePacketResponse({
+  requestGeneration,
+  currentGeneration,
+  requestOrganizationId,
+  currentOrganizationId,
+  requestEngagementId,
+  currentEngagementId,
+}) {
+  return (
+    requestGeneration === currentGeneration
+    && requestOrganizationId === currentOrganizationId
+    && requestEngagementId === currentEngagementId
+  );
+}
+
+// Explicit allowlist projection of the accepted Grant Response Packet DTO
+// (kaiGrantResponsePacketService.js#getGrantResponsePacket): each member
+// draft carries exactly the same governed single-draft review-packet fields
+// projectGeneratedDraftPacket already trusts, plus the full per-citation
+// traceability field set the gk-export-review detail page already renders
+// (gkExportReviewDetailLogic.js#toRenderModel) - no new packet-shape
+// vocabulary, no raw source/evidence content, no client-side eligibility
+// recomputation.
+export function projectGrantResponsePacket(dto) {
+  if (!dto || typeof dto !== "object") return null;
+  return {
+    organizationId: dto.organizationId,
+    engagementId: dto.engagementId,
+    packetAudience: dto.packetAudience,
+    drafts: asArray(dto.drafts).map((draft) => ({
+      generatedContentDraftId: draft?.generatedContentDraftId,
+      generationRunId: draft?.generationRunId,
+      contentType: draft?.contentType,
+      draftStatus: draft?.draftStatus,
+      requestedAudience: draft?.requestedAudience,
+      reviewQueueItemId: draft?.reviewQueueItemId,
+      queueStatus: draft?.queueStatus,
+      reviewStatus: draft?.reviewStatus,
+      reviewUpdatedAt: draft?.reviewUpdatedAt,
+      currentUseEligible: draft?.currentUseEligible === true,
+      // Same durable "restricted" vs "no export review yet" distinction as
+      // projectGeneratedDraftPacket - exportReviewVisible===false must never
+      // be conflated with a genuine absence of export review.
+      exportReviewVisible: draft?.exportReviewVisible === true,
+      exportReviewQueueItemId: typeof draft?.exportReviewQueueItemId === "string" ? draft.exportReviewQueueItemId : null,
+      exportReviewQueueStatus: typeof draft?.exportReviewQueueStatus === "string" ? draft.exportReviewQueueStatus : null,
+      exportReviewStatus: typeof draft?.exportReviewStatus === "string" ? draft.exportReviewStatus : null,
+      blocks: asArray(draft?.blocks).map((block) => ({
+        ordinal: block?.ordinal,
+        text: block?.text,
+        citations: asArray(block?.citations).map((citation) => ({
+          claimId: citation?.claimId,
+          evidenceItemId: citation?.evidenceItemId,
+          sourceId: citation?.sourceId,
+          sourceVersionId: citation?.sourceVersionId,
+          supportStrength: citation?.supportStrength,
+          claimReviewStatus: citation?.claimReviewStatus,
+          evidenceReviewStatus: citation?.evidenceReviewStatus,
+          currentEligible: citation?.currentEligible === true,
+          blockerCodes: asArray(citation?.blockerCodes),
+          affectedDimensionKeys: asArray(citation?.affectedDimensionKeys),
+          affectedObjectIds: asArray(citation?.affectedObjectIds),
+        })),
+      })),
+    })).filter((draft) => typeof draft.generatedContentDraftId === "string"),
+  };
+}
+
 // Projects the Package 4 composition DTO into exactly what the Funder
 // Requirements card renders: the applicability state, the engagement's
 // current target (for display only - never editable here), and, only for

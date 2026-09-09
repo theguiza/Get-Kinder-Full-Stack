@@ -56,6 +56,9 @@ import {
   engagementFunderRequirementsPath,
   projectEngagementFunderRequirements,
   ENGAGEMENT_FUNDER_REQUIREMENTS_STATES,
+  grantResponsePacketPath,
+  projectGrantResponsePacket,
+  shouldApplyGrantResponsePacketResponse,
   postJson,
   potentialConflictsPath,
   projectCandidateClaims,
@@ -248,6 +251,22 @@ export default function ImpactEvidenceLibrary() {
   const [funderRequirements, setFunderRequirements] = useState({ state: null, target: {}, requirements: [] });
   const [loadingFunderRequirements, setLoadingFunderRequirements] = useState(false);
   const [funderRequirementsError, setFunderRequirementsError] = useState("");
+
+  // Grant Response Packet: engagement-scoped, read-only regrouping of
+  // already-governed funder-audience generated drafts (see
+  // Backend/kai/services/kaiGrantResponsePacketService.js). Keyed by
+  // organizationId + engagementId exactly like Funder Requirements above -
+  // never populated from any per-draft/per-member fetch. `grantResponsePacketRequestState`
+  // keeps "not yet requested"/"loading"/"error" distinct from a genuine,
+  // successful zero-eligible-draft result, matching the review-queue/
+  // eligibility request-state convention used elsewhere on this page.
+  const [grantResponsePacket, setGrantResponsePacket] = useState(null);
+  const [loadingGrantResponsePacket, setLoadingGrantResponsePacket] = useState(false);
+  const [grantResponsePacketError, setGrantResponsePacketError] = useState("");
+  const [grantResponsePacketRequestState, setGrantResponsePacketRequestState] = useState("idle");
+  const grantPacketRequestGenerationRef = useRef(0);
+  const engagementIdRef = useRef(engagementId);
+  engagementIdRef.current = engagementId;
 
   // Review Queue: organization-scope current-attention rollup. This is a
   // product PROJECTION of already-governed state (see
@@ -731,6 +750,53 @@ export default function ImpactEvidenceLibrary() {
     setFunderRequirementsError("");
     if (organizationId && engagementId) loadFunderRequirements();
   }, [organizationId, engagementId, loadFunderRequirements]);
+
+  // Grant Response Packet: changing the selected engagement (or organization)
+  // must discard the previous engagement's visible packet state immediately
+  // - before the new request is even issued - and a late response for a
+  // previously selected engagement must never overwrite the newly selected
+  // engagement's packet (see shouldApplyGrantResponsePacketResponse). Exactly
+  // one request per engagement selection; membership itself is never
+  // reconstructed client-side or fetched per member draft.
+  useEffect(() => {
+    grantPacketRequestGenerationRef.current += 1;
+    setGrantResponsePacket(null);
+    setGrantResponsePacketError("");
+    setGrantResponsePacketRequestState("idle");
+    setLoadingGrantResponsePacket(false);
+    if (!organizationId || !engagementId) return;
+    let cancelled = false;
+    (async () => {
+      const requestGeneration = ++grantPacketRequestGenerationRef.current;
+      const requestOrganizationId = organizationId;
+      const requestEngagementId = engagementId;
+      setLoadingGrantResponsePacket(true);
+      setGrantResponsePacketRequestState("loading");
+      const result = await getJson(grantResponsePacketPath(organizationId, engagementId));
+      if (cancelled) return;
+      if (!shouldApplyGrantResponsePacketResponse({
+        requestGeneration,
+        currentGeneration: grantPacketRequestGenerationRef.current,
+        requestOrganizationId,
+        currentOrganizationId: organizationIdRef.current,
+        requestEngagementId,
+        currentEngagementId: engagementIdRef.current,
+      })) return;
+      setLoadingGrantResponsePacket(false);
+      if (result.statusCode !== 200 || !result.body?.ok) {
+        setGrantResponsePacket(null);
+        setGrantResponsePacketError(errorText(result));
+        setGrantResponsePacketRequestState("error");
+        return;
+      }
+      setGrantResponsePacket(projectGrantResponsePacket(result.body.data));
+      setGrantResponsePacketError("");
+      setGrantResponsePacketRequestState("success");
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [organizationId, engagementId]);
 
   // Runs (or replays) the server-governed assessment for exactly one
   // requirement, then refetches the whole readiness rollup - the POST
@@ -1750,6 +1816,103 @@ export default function ImpactEvidenceLibrary() {
                       </li>
                     ))}
                   </ul>
+                ) : null}
+              </>
+            )}
+          </div>
+
+          <div className="admin-card mt-3">
+            <div className="d-flex justify-content-between align-items-center mb-2">
+              <h5 className="mb-0">Grant Response Packet</h5>
+              <span className="badge text-bg-secondary">Audience: Funder</span>
+            </div>
+            <div className="text-muted small mb-2">
+              A read-only, engagement-scoped regrouping of already-governed, funder-audience
+              generated drafts for the selected engagement - membership, review state, and
+              eligibility are all resolved server-side; this section grants no approval or
+              export/finalization authority of its own.
+            </div>
+            {!engagementId ? (
+              <div className="text-muted small">Select an engagement to see its Grant Response Packet.</div>
+            ) : (
+              <>
+                {loadingGrantResponsePacket ? <div className="text-muted small">Loading Grant Response Packet...</div> : null}
+                {!loadingGrantResponsePacket && grantResponsePacketRequestState === "error" ? (
+                  <div className="alert alert-warning py-2 small">{grantResponsePacketError}</div>
+                ) : null}
+                {!loadingGrantResponsePacket && grantResponsePacketRequestState === "success" && grantResponsePacket ? (
+                  <>
+                    <ValueRow label="Eligible generated drafts" value={grantResponsePacket.drafts.length} />
+                    {grantResponsePacket.drafts.length === 0 ? (
+                      <div className="text-muted small">
+                        No reviewed funder-ready generated content is currently eligible for this Grant Response Packet.
+                      </div>
+                    ) : (
+                      <div className="list-group mt-2">
+                        {grantResponsePacket.drafts.map((draft) => (
+                          <div key={draft.generatedContentDraftId} className="list-group-item">
+                            <div className="d-flex justify-content-between gap-2">
+                              <span className="small fw-semibold">{draft.contentType}</span>
+                              <span className="badge text-bg-secondary">
+                                {generatedDraftReviewLabel(draft.queueStatus, draft.reviewStatus)}
+                              </span>
+                            </div>
+                            <ValueRow label="Draft id" value={draft.generatedContentDraftId} />
+                            <ValueRow label="Requested audience" value={draft.requestedAudience} />
+                            <ValueRow label="Draft status" value={draft.draftStatus} />
+                            <ValueRow label="Current-use eligible" value={String(draft.currentUseEligible)} />
+                            {draft.exportReviewVisible && draft.exportReviewQueueItemId ? (
+                              <div className="d-flex justify-content-between align-items-center gap-2 mt-1">
+                                <span className="badge text-bg-info">
+                                  Export review: {draft.exportReviewQueueStatus} / {draft.exportReviewStatus}
+                                </span>
+                                <a
+                                  className="btn btn-sm btn-outline-secondary"
+                                  href={gkExportReviewDetailPagePath(
+                                    organizationId,
+                                    draft.generatedContentDraftId,
+                                    draft.exportReviewQueueItemId,
+                                  )}
+                                >
+                                  Open GK Export Review
+                                </a>
+                              </div>
+                            ) : null}
+                            {!draft.exportReviewVisible ? (
+                              <div className="small text-muted mt-1">Export review unavailable for your role</div>
+                            ) : null}
+                            {draft.exportReviewVisible && !draft.exportReviewQueueItemId ? (
+                              <div className="small text-muted mt-1">No export review</div>
+                            ) : null}
+                            <h6 className="mt-2 mb-1">Blocks</h6>
+                            {draft.blocks.map((block) => (
+                              <div key={block.ordinal} className="border rounded p-2 mb-2">
+                                <div className="small fw-semibold">Block {block.ordinal}</div>
+                                <p className="small mb-2">{block.text}</p>
+                                <div className="small fw-semibold">Why can KAI say this?</div>
+                                {block.citations.map((citation, index) => (
+                                  <div
+                                    key={`${citation.claimId}-${citation.evidenceItemId}-${index}`}
+                                    className="border rounded p-2 mb-1"
+                                  >
+                                    <ValueRow label="Claim" value={citation.claimId} />
+                                    <ValueRow label="Evidence item" value={citation.evidenceItemId} />
+                                    <ValueRow label="Source" value={citation.sourceId} />
+                                    <ValueRow label="Source version" value={citation.sourceVersionId} />
+                                    <ValueRow label="Support strength" value={citation.supportStrength} />
+                                    <ValueRow label="Claim review status" value={citation.claimReviewStatus} />
+                                    <ValueRow label="Evidence review status" value={citation.evidenceReviewStatus} />
+                                    <ValueRow label="Currently eligible" value={String(citation.currentEligible)} />
+                                    <ValueRow label="Blocker codes" value={citation.blockerCodes.join(", ") || "none"} />
+                                  </div>
+                                ))}
+                              </div>
+                            ))}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </>
                 ) : null}
               </>
             )}

@@ -23652,3 +23652,132 @@ continuation once that decision is made.
 
 **Local commit:** one bounded commit created after all required checks
 passed.
+
+## Grant Response Packet: Impact Evidence Library Product Surface (read-only
+## frontend UX on the existing, now-closed membership/composition foundation)
+
+**Date:** 2026-09-09
+
+**Owner authorization (bounded, local-only):** implement the Grant Response
+Packet product surface in the EXISTING `/impact-library` UI, on top of the
+now-closed engagement-scoped/funder-audience/bounded-execution membership and
+composition foundation. Starting HEAD: `0f9ff66bc7d534b3b7d6027fc22dba9532e78014`
+(USER_CONFIRMED, working tree clean). The member/claim-volume bound decision
+(`GRANT_PACKET_MEMBER_BOUND_DECISION_REQUIRED: YES`) remains open and out of
+this package's scope - nothing about caps, truncation, or pagination was
+investigated or implemented here.
+
+**Route reuse (no new endpoint, no reconstruction in the browser):** the
+existing, accepted, read-only
+`GET /admin/organizations/:organizationId/engagements/:engagementId/grant-response-packet`
+route is called exactly once per selected engagement, with exactly
+`organizationId` (page-level selection, already used by every other
+organization-scoped card) and the already-lifted `engagementId` (the same
+engagement-selection state the Funder Requirements card already consumes).
+No member draft is ever fetched individually.
+
+**Frontend additions:**
+`frontend/impactEvidenceLibraryLogic.js` gains `grantResponsePacketPath`
+(exact route builder), `shouldApplyGrantResponsePacketResponse` (late-
+response protection keyed on request generation + organizationId +
+engagementId, the same convention as the existing
+`shouldApplyCandidateResponse`/`shouldApplyEligibilityResponse`), and
+`projectGrantResponsePacket` (an explicit allowlist projection reusing the
+exact per-draft/per-block/per-citation field set the existing
+`projectGeneratedDraftPacket`/gk-export-review detail page already trust -
+no new packet-shape vocabulary, no raw source/evidence content, no client-
+side eligibility recomputation). `frontend/ImpactEvidenceLibrary.jsx` adds
+one new "Grant Response Packet" card (between the existing Funder
+Requirements and Generated Drafts cards): a single `useEffect` keyed on
+`[organizationId, engagementId]` clears the previous engagement's visible
+packet state synchronously, then issues exactly one request; a distinct
+`grantResponsePacketRequestState` ("idle"/"loading"/"success"/"error") keeps
+a genuine, successful zero-eligible-draft result ("No reviewed funder-ready
+generated content is currently eligible for this Grant Response Packet.")
+distinct from any unauthorized/not-found/server-error outcome (surfaced via
+the existing `errorText` convention). Each eligible draft renders its
+content type, review state (via the existing `generatedDraftReviewLabel`),
+requested audience (always `funder`), current-use eligibility, blocks, and
+per-citation "Why can KAI say this?" traceability (claim/evidence/source/
+source-version identity, support strength, claim/evidence review status,
+current eligibility, blocker codes) - the same safe UI convention the
+existing Generated Drafts / gk-export-review detail page already use. The
+existing "Open GK Export Review" navigation is reused verbatim, with the
+exact `organizationId`/`generatedContentDraftId`/`exportReviewQueueItemId`
+the DTO supplies - never derived or guessed - and rendered only when the
+DTO's own `exportReviewVisible`/`exportReviewQueueItemId` say it is
+authorized; no approval, finalization, or new mutation control was added.
+
+**Attributable test-source update:** one existing whole-file assertion in
+`__tests__/kai-sprint2-impact-evidence-library.spec.js`
+("needs_more_information and review-work-start never render as .../funder-
+ready/...") was scoped down to the Sensitivity & allowed-use review card it
+actually targets, because the Grant Response Packet's own required, unrelated
+empty-state copy legitimately contains the substring "funder-ready" ("No
+reviewed funder-ready generated content..."). No other existing test file was
+modified.
+
+**Verification (new `__tests__/kai-sprint2-impact-library-grant-response-packet.spec.js`,
+14/14 passing):** exact route identity (`organizationId` + `engagementId`,
+nothing else); DTO projection preserves funder audience, draft/block/
+citation traceability fields, and the restricted-vs-absent export-review
+distinction; a successful empty membership projects `drafts: []`; late-
+response protection requires generation AND organization AND engagement
+identity all still current; the component source calls
+`grantResponsePacketPath` exactly once (no per-member/per-draft fetch); the
+Grant Response Packet section issues no `postJson` and renders no approval/
+finalization control; the GK export-review link reuses the exact three-
+identifier route only when authorized; the zero-drafts message and the
+error path are asserted distinct. The exact committed `useEffect` is also
+extracted via string slicing (the established convention already used
+elsewhere in this suite - this repository has no DOM/component rendering
+harness) and executed for real via `new Function` against its precise
+captured identifiers, proving: exactly one request per engagement selection;
+the previous engagement's state is cleared synchronously before the request
+resolves; a late response for an abandoned engagement is correctly rejected
+once shared identity refs have moved on; a non-200/non-ok response is
+reported as a distinct error state; and no organization/engagement selected
+issues no request at all.
+
+**Regression run:** `__tests__/kai-sprint2-impact-evidence-library.spec.js`
+(102/102), `impact-library-view.spec.js`,
+`kai-sprint2-package-4-impact-library-engagement-funder-requirements(.integration).spec.js`,
+`kai-impact-library-client-followup-workflows.spec.js`,
+`kai-sprint2-impact-library-kai-frontend.spec.js`,
+`kai-sprint2-impact-library-kai-surface.spec.js`,
+`kai-impact-library-data-sources.spec.js`,
+`kai-impact-library-organization-evidence-gaps.spec.js`,
+`kai-sprint2-impact-library-export-review-link-boundary.spec.js`,
+`kai-grant-response-packet-boundary.spec.js`, and the route-runtime
+allowlist suite all pass unmodified alongside the new suite (256 passed, 1
+skipped, 0 failed). `DATABASE_URL` set to a non-listening loopback sentinel
+for every Node/npm command. The historical P14-01/local-Postgres/
+boundedness suites were not rerun (out of this package's scope).
+
+**`npm run build`:** passed (`vite build`, 56 modules transformed).
+
+**Final diff review:** confined to `frontend/impactEvidenceLibraryLogic.js`
+(three additive functions), `frontend/ImpactEvidenceLibrary.jsx` (one
+additive state block, one additive effect, one additive card - no existing
+state, effect, or control touched), the new
+`__tests__/kai-sprint2-impact-library-grant-response-packet.spec.js`, one
+narrowed (not weakened-in-intent) assertion in
+`__tests__/kai-sprint2-impact-evidence-library.spec.js`, the rebuilt
+`public/js/bundles/entry.js`, and this ExecPlan. No backend Grant Response
+Packet code (route/service/repository) was touched - no blocking DTO defect
+was found. No packet cap/truncation/pagination, no Board Summary, no packet
+persistence/schema, no new generation type, no packet file export, and no
+new approval/finalization authority were added. `git diff --check` passed
+with no whitespace errors. No production or shared database was accessed,
+mutated, or migrated; nothing was pushed or deployed; no feature flags
+changed; no Current State or Implementation Baseline update was made.
+
+**Remaining gap / next continuation:** the Grant Response Packet Impact
+Library product/frontend UX is now closed. The still-open, separately
+authorized items are: the member/claim-volume bound decision
+(`GRANT_PACKET_MEMBER_BOUND_DECISION_REQUIRED: YES`, unresolved) and the
+six-runner historical export-manifest migration-chain debt (P3-06/09/13/16/
+17/18) - neither is this package's engagement work.
+
+**Local commit:** one bounded commit created after all required checks
+passed.

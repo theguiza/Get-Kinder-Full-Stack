@@ -2266,7 +2266,19 @@ test("KAI B1A-3B UI: a stale OCC conflict on the decision POST is not auto-retri
 
 test("KAI B1A-3B: needs_more_information and review-work-start never render as approved/complete/funder-ready/public-ready/release-ready", () => {
   const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
-  assert.doesNotMatch(uiSource, /funder-ready|public-ready|release-ready/i);
+  // Scoped to the Sensitivity & allowed-use review card itself (this test's
+  // own subject - see the KAI B1A-3B-R1 tests below): the Grant Response
+  // Packet section elsewhere on this page legitimately uses the words
+  // "funder" and "eligible" together in its own, unrelated required empty-
+  // state copy ("No reviewed funder-ready generated content is currently
+  // eligible..."), which is not a mislabeled sensitivity/allowed-use state
+  // and must not be flagged by this assertion.
+  const sensitivitySection = uiSource.slice(
+    uiSource.indexOf('<h5 className="mb-0">Sensitivity &amp; allowed-use review</h5>'),
+    uiSource.indexOf('<div className="admin-card mt-3">', uiSource.indexOf('<h5 className="mb-0">Sensitivity &amp; allowed-use review</h5>')),
+  );
+  assert.notEqual(sensitivitySection.length, 0);
+  assert.doesNotMatch(sensitivitySection, /funder-ready|public-ready|release-ready/i);
 });
 
 // --- KAI B1A-3B-R1: pre-claim Phase-5 reachability repair ---
