@@ -60,6 +60,10 @@ import {
   grantResponsePacketMarkdownPath,
   grantResponsePacketExportCandidatesPath,
   grantResponsePacketExportReviewRequestPath,
+  grantResponsePacketExportReviewStartPath,
+  grantResponsePacketExportReviewCompletePath,
+  grantResponsePacketExportReviewLifecycleState,
+  GRANT_RESPONSE_PACKET_EXPORT_REVIEW_LIFECYCLE_STATES,
   projectGrantResponsePacket,
   projectGrantResponsePacketExportCandidateResult,
   projectGrantResponsePacketExportReviewResult,
@@ -293,6 +297,19 @@ export default function ImpactEvidenceLibrary() {
   const [grantResponsePacketExportReviewPending, setGrantResponsePacketExportReviewPending] = useState(false);
   const [grantResponsePacketExportReviewResult, setGrantResponsePacketExportReviewResult] = useState(null);
   const [grantResponsePacketExportReviewError, setGrantResponsePacketExportReviewError] = useState("");
+  // P14-06 closure: START/COMPLETE act on the exact
+  // grantResponsePacketExportReviewResult identity above (candidate id,
+  // review-queue-item id, current reviewUpdatedAt CAS token) - never a
+  // latest/newest/preferred guess. Both write their success result back into
+  // the SAME grantResponsePacketExportReviewResult slot (it is one review
+  // resource progressing through its lifecycle, not three independent
+  // results), so the lifecycle-state helper always sees the current
+  // authoritative queueStatus/reviewStatus pair. Same reset discipline as
+  // every other action on this card.
+  const [grantResponsePacketExportReviewStartPending, setGrantResponsePacketExportReviewStartPending] = useState(false);
+  const [grantResponsePacketExportReviewStartError, setGrantResponsePacketExportReviewStartError] = useState("");
+  const [grantResponsePacketExportReviewCompletePending, setGrantResponsePacketExportReviewCompletePending] = useState(false);
+  const [grantResponsePacketExportReviewCompleteError, setGrantResponsePacketExportReviewCompleteError] = useState("");
   const grantPacketRequestGenerationRef = useRef(0);
   const engagementIdRef = useRef(engagementId);
   engagementIdRef.current = engagementId;
@@ -799,6 +816,10 @@ export default function ImpactEvidenceLibrary() {
     setGrantResponsePacketExportReviewPending(false);
     setGrantResponsePacketExportReviewResult(null);
     setGrantResponsePacketExportReviewError("");
+    setGrantResponsePacketExportReviewStartPending(false);
+    setGrantResponsePacketExportReviewStartError("");
+    setGrantResponsePacketExportReviewCompletePending(false);
+    setGrantResponsePacketExportReviewCompleteError("");
     setLoadingGrantResponsePacket(false);
     if (!organizationId || !engagementId) return;
     let cancelled = false;
@@ -976,6 +997,10 @@ export default function ImpactEvidenceLibrary() {
     setGrantResponsePacketExportReviewPending(false);
     setGrantResponsePacketExportReviewResult(null);
     setGrantResponsePacketExportReviewError("");
+    setGrantResponsePacketExportReviewStartPending(false);
+    setGrantResponsePacketExportReviewStartError("");
+    setGrantResponsePacketExportReviewCompletePending(false);
+    setGrantResponsePacketExportReviewCompleteError("");
     const result = await postJson(
       grantResponsePacketExportCandidatesPath(requestOrganizationId, requestEngagementId),
       {},
@@ -1047,6 +1072,121 @@ export default function ImpactEvidenceLibrary() {
     engagementId,
     grantResponsePacketExportCandidateResult,
     grantResponsePacketExportReviewPending,
+    refetchGrantResponsePacketAfterMemberExportReviewRequest,
+  ]);
+
+  // P14-06A: starts governed export review for the EXACT candidate id +
+  // EXACT review-queue-item id + EXACT reviewUpdatedAt CAS token the server
+  // already returned above (grantResponsePacketExportReviewResult) - never a
+  // latest/newest/preferred guess of any of the three. Sends only
+  // {expected_updated_at}; every other piece of transition state is
+  // resolved server-side. On a failed or conflicting POST, no queue state is
+  // manufactured - grantResponsePacketExportReviewResult is left exactly as
+  // it was until a genuinely successful transition (or a fresh reload)
+  // replaces it. Starting review does not determine export eligibility and
+  // grants no approval, no funder/public readiness signal, no export
+  // authority, and no manifest.
+  const startGrantResponsePacketExportReview = useCallback(async () => {
+    const candidateId = grantResponsePacketExportReviewResult?.grantResponsePacketExportCandidateId;
+    const queueItemId = grantResponsePacketExportReviewResult?.reviewQueueItemId;
+    const expectedUpdatedAt = grantResponsePacketExportReviewResult?.reviewUpdatedAt;
+    if (
+      !organizationId || !engagementId || !candidateId || !queueItemId || !expectedUpdatedAt
+      || grantResponsePacketExportReviewStartPending
+    ) return;
+    if (
+      grantResponsePacketExportReviewLifecycleState(grantResponsePacketExportReviewResult)
+      !== GRANT_RESPONSE_PACKET_EXPORT_REVIEW_LIFECYCLE_STATES.startable
+    ) return;
+    const requestOrganizationId = organizationId;
+    const requestEngagementId = engagementId;
+    setGrantResponsePacketExportReviewStartPending(true);
+    setGrantResponsePacketExportReviewStartError("");
+    const result = await postJson(
+      grantResponsePacketExportReviewStartPath(requestOrganizationId, requestEngagementId, candidateId, queueItemId),
+      reviewTransitionBody(expectedUpdatedAt),
+    );
+    const stillCurrent = requestOrganizationId === organizationIdRef.current
+      && requestEngagementId === engagementIdRef.current;
+    if (result.statusCode !== 200 && result.statusCode !== 201) {
+      if (stillCurrent) {
+        setGrantResponsePacketExportReviewStartError(errorText(result));
+        setGrantResponsePacketExportReviewStartPending(false);
+      }
+      return;
+    }
+    if (stillCurrent) {
+      setGrantResponsePacketExportReviewResult(
+        projectGrantResponsePacketExportReviewResult(result.body?.data),
+      );
+    }
+    await refetchGrantResponsePacketAfterMemberExportReviewRequest(requestOrganizationId, requestEngagementId);
+    if (stillCurrent) {
+      setGrantResponsePacketExportReviewStartPending(false);
+    }
+  }, [
+    organizationId,
+    engagementId,
+    grantResponsePacketExportReviewResult,
+    grantResponsePacketExportReviewStartPending,
+    refetchGrantResponsePacketAfterMemberExportReviewRequest,
+  ]);
+
+  // P14-06B: completes governed export review for the EXACT candidate id +
+  // EXACT review-queue-item id + EXACT reviewUpdatedAt CAS token the server
+  // already returned above (grantResponsePacketExportReviewResult, refreshed
+  // by the START transition immediately above) - never a latest/newest/
+  // preferred guess of any of the three. Sends only {expected_updated_at}.
+  // On a failed or conflicting POST, no queue state is manufactured - same
+  // discipline as startGrantResponsePacketExportReview above. Completing
+  // review means only that a gk_admin completed the governed human export
+  // review of this exact immutable packet candidate: it does not determine
+  // export eligibility, does not clear it for external use, does not signal
+  // funder-readiness or export authorization, and does not create a
+  // manifest.
+  const completeGrantResponsePacketExportReview = useCallback(async () => {
+    const candidateId = grantResponsePacketExportReviewResult?.grantResponsePacketExportCandidateId;
+    const queueItemId = grantResponsePacketExportReviewResult?.reviewQueueItemId;
+    const expectedUpdatedAt = grantResponsePacketExportReviewResult?.reviewUpdatedAt;
+    if (
+      !organizationId || !engagementId || !candidateId || !queueItemId || !expectedUpdatedAt
+      || grantResponsePacketExportReviewCompletePending
+    ) return;
+    if (
+      grantResponsePacketExportReviewLifecycleState(grantResponsePacketExportReviewResult)
+      !== GRANT_RESPONSE_PACKET_EXPORT_REVIEW_LIFECYCLE_STATES.completable
+    ) return;
+    const requestOrganizationId = organizationId;
+    const requestEngagementId = engagementId;
+    setGrantResponsePacketExportReviewCompletePending(true);
+    setGrantResponsePacketExportReviewCompleteError("");
+    const result = await postJson(
+      grantResponsePacketExportReviewCompletePath(requestOrganizationId, requestEngagementId, candidateId, queueItemId),
+      reviewTransitionBody(expectedUpdatedAt),
+    );
+    const stillCurrent = requestOrganizationId === organizationIdRef.current
+      && requestEngagementId === engagementIdRef.current;
+    if (result.statusCode !== 200 && result.statusCode !== 201) {
+      if (stillCurrent) {
+        setGrantResponsePacketExportReviewCompleteError(errorText(result));
+        setGrantResponsePacketExportReviewCompletePending(false);
+      }
+      return;
+    }
+    if (stillCurrent) {
+      setGrantResponsePacketExportReviewResult(
+        projectGrantResponsePacketExportReviewResult(result.body?.data),
+      );
+    }
+    await refetchGrantResponsePacketAfterMemberExportReviewRequest(requestOrganizationId, requestEngagementId);
+    if (stillCurrent) {
+      setGrantResponsePacketExportReviewCompletePending(false);
+    }
+  }, [
+    organizationId,
+    engagementId,
+    grantResponsePacketExportReviewResult,
+    grantResponsePacketExportReviewCompletePending,
     refetchGrantResponsePacketAfterMemberExportReviewRequest,
   ]);
 
@@ -2078,22 +2218,27 @@ export default function ImpactEvidenceLibrary() {
                 ) : null}
                 {grantResponsePacketExportCandidateResult ? (
                   <div className="mt-2">
-                    <button
-                      type="button"
-                      className="btn btn-sm btn-outline-secondary grant-response-packet-export-review-request-button"
-                      disabled={grantResponsePacketExportReviewPending}
-                      onClick={requestGrantResponsePacketExportReview}
-                    >
-                      {grantResponsePacketExportReviewPending
-                        ? "Requesting export review..."
-                        : "Request export review"}
-                    </button>
-                    <div className="text-muted mt-1">
-                      Requests governed export review for this exact export candidate.
-                      Grants no approval, export authority, final release, or manifest.
-                    </div>
-                    {grantResponsePacketExportReviewError ? (
-                      <div className="alert alert-warning py-2 small mt-1">{grantResponsePacketExportReviewError}</div>
+                    {grantResponsePacketExportReviewLifecycleState(grantResponsePacketExportReviewResult)
+                      === GRANT_RESPONSE_PACKET_EXPORT_REVIEW_LIFECYCLE_STATES.requestable ? (
+                      <>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline-secondary grant-response-packet-export-review-request-button"
+                          disabled={grantResponsePacketExportReviewPending}
+                          onClick={requestGrantResponsePacketExportReview}
+                        >
+                          {grantResponsePacketExportReviewPending
+                            ? "Requesting export review..."
+                            : "Request export review"}
+                        </button>
+                        <div className="text-muted mt-1">
+                          Requests governed export review for this exact export candidate.
+                          Grants no approval, export authority, final release, or manifest.
+                        </div>
+                        {grantResponsePacketExportReviewError ? (
+                          <div className="alert alert-warning py-2 small mt-1">{grantResponsePacketExportReviewError}</div>
+                        ) : null}
+                      </>
                     ) : null}
                     {grantResponsePacketExportReviewResult ? (
                       <div className="small mt-1">
@@ -2113,6 +2258,66 @@ export default function ImpactEvidenceLibrary() {
                           label="Reused existing review request"
                           value={String(grantResponsePacketExportReviewResult.replayed)}
                         />
+                      </div>
+                    ) : null}
+                    {grantResponsePacketExportReviewLifecycleState(grantResponsePacketExportReviewResult)
+                      === GRANT_RESPONSE_PACKET_EXPORT_REVIEW_LIFECYCLE_STATES.startable ? (
+                      <div className="mt-2">
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline-secondary grant-response-packet-export-review-start-button"
+                          disabled={grantResponsePacketExportReviewStartPending}
+                          onClick={startGrantResponsePacketExportReview}
+                        >
+                          {grantResponsePacketExportReviewStartPending
+                            ? "Starting export review..."
+                            : "Start export review"}
+                        </button>
+                        <div className="text-muted mt-1">
+                          Starts the governed human export review of this exact packet export
+                          candidate. Grants no final eligibility evaluation, approval, export
+                          authority, final release, or manifest.
+                        </div>
+                        {grantResponsePacketExportReviewStartError ? (
+                          <div className="alert alert-warning py-2 small mt-1">{grantResponsePacketExportReviewStartError}</div>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    {grantResponsePacketExportReviewLifecycleState(grantResponsePacketExportReviewResult)
+                      === GRANT_RESPONSE_PACKET_EXPORT_REVIEW_LIFECYCLE_STATES.completable ? (
+                      <div className="mt-2">
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline-secondary grant-response-packet-export-review-complete-button"
+                          disabled={grantResponsePacketExportReviewCompletePending}
+                          onClick={completeGrantResponsePacketExportReview}
+                        >
+                          {grantResponsePacketExportReviewCompletePending
+                            ? "Completing export review..."
+                            : "Complete export review"}
+                        </button>
+                        <div className="text-muted mt-1">
+                          Completes the governed human export review of this exact packet
+                          export candidate - review complete only. Not final export
+                          eligibility, approval for external use, funder-readiness,
+                          final-release authorization, or a manifest.
+                        </div>
+                        {grantResponsePacketExportReviewCompleteError ? (
+                          <div className="alert alert-warning py-2 small mt-1">{grantResponsePacketExportReviewCompleteError}</div>
+                        ) : null}
+                      </div>
+                    ) : null}
+                    {grantResponsePacketExportReviewLifecycleState(grantResponsePacketExportReviewResult)
+                      === GRANT_RESPONSE_PACKET_EXPORT_REVIEW_LIFECYCLE_STATES.resolved ? (
+                      <div className="mt-2">
+                        <span className="badge text-bg-success grant-response-packet-export-review-resolved-badge">
+                          Export review complete
+                        </span>
+                        <div className="text-muted mt-1">
+                          Review complete only - not final export eligibility, approval for
+                          external use, funder-readiness, final-release authorization, or a
+                          manifest.
+                        </div>
                       </div>
                     ) : null}
                   </div>

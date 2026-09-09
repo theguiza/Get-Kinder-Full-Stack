@@ -108,6 +108,7 @@ function makeFakeTx({ candidateExists = true, candidateEngagementId = ENGAGEMENT
             review_queue_item_id: QUEUE_ITEM,
             queue_status: "open",
             review_status: "needs_gk_review",
+            updated_at: NOW,
           }],
         };
       }
@@ -137,6 +138,7 @@ function validQueueRow(overrides = {}) {
     queue_metadata: {},
     created_by: null,
     created_by_type: "system",
+    updated_at: NOW,
     ...overrides,
   };
 }
@@ -257,6 +259,7 @@ test("P14-05 service propagates a real successful repository result end to end",
           reviewQueueItemId: QUEUE_ITEM,
           queueStatus: "open",
           reviewStatus: "needs_gk_review",
+          reviewUpdatedAt: NOW,
           replayed: false,
         },
         error: null,
@@ -273,9 +276,11 @@ test("P14-05 service propagates a real successful repository result end to end",
     "replayed",
     "reviewQueueItemId",
     "reviewStatus",
+    "reviewUpdatedAt",
   ].sort());
   assert.equal(result.data.reviewQueueItemId, QUEUE_ITEM);
   assert.equal(result.data.replayed, false);
+  assert.equal(result.data.reviewUpdatedAt, NOW);
 });
 
 // --- Repository-layer proofs (real production repository, fake tx) ---
@@ -313,6 +318,9 @@ test("P14-05 repository creates a new review-queue row and publishes exactly one
   assert.equal(result.data.reviewQueueItemId, QUEUE_ITEM);
   assert.equal(result.data.queueStatus, "open");
   assert.equal(result.data.reviewStatus, "needs_gk_review");
+  // Frontend contract-defect fix: the exact CAS token a caller must echo
+  // back as expectedUpdatedAt on the next START call.
+  assert.equal(result.data.reviewUpdatedAt, NOW);
   assert.equal(audit.calls.length, 1);
   assert.equal(audit.calls[0].payload.grant_response_packet_export_candidate_id, CANDIDATE);
   assert.equal(audit.calls[0].payload.attempted_operation, "grant_response_packet_export_review_requested");

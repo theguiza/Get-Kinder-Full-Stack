@@ -154,7 +154,7 @@ function makeFakeTx({
       }
       if (sql.startsWith("UPDATE kai.review_queue_items")) {
         if (!casSucceeds || !currentRow) return { rowCount: 0, rows: [] };
-        currentRow = { ...currentRow, queue_status: "resolved", review_status: "resolved" };
+        currentRow = { ...currentRow, queue_status: "resolved", review_status: "resolved", updated_at: NOW };
         return { rowCount: 1, rows: [{ review_queue_item_id: currentRow.review_queue_item_id }] };
       }
       if (sql.includes("engagement_id::text AS engagement_id, queue_type, target_object_type")) {
@@ -288,6 +288,7 @@ test("P14-06B service propagates a real successful repository result end to end 
           reviewQueueItemId: input.exportReviewQueueItemId,
           queueStatus: "resolved",
           reviewStatus: "resolved",
+          reviewUpdatedAt: NOW,
           replayed: false,
         },
         error: null,
@@ -304,9 +305,11 @@ test("P14-06B service propagates a real successful repository result end to end 
     "replayed",
     "reviewQueueItemId",
     "reviewStatus",
+    "reviewUpdatedAt",
   ].sort());
   assert.equal(result.data.queueStatus, "resolved");
   assert.equal(result.data.reviewStatus, "resolved");
+  assert.equal(result.data.reviewUpdatedAt, NOW);
   for (const key of Object.keys(result.data)) {
     assert.doesNotMatch(key, /manifest|approval|finalRelease|final_release|eligib/i);
   }
@@ -391,6 +394,9 @@ test("P14-06B repository transitions in_progress/needs_gk_review to resolved/res
   assert.equal(result.data.reviewQueueItemId, QUEUE_ITEM);
   assert.equal(result.data.queueStatus, "resolved");
   assert.equal(result.data.reviewStatus, "resolved");
+  // Frontend contract-defect fix: proves reviewUpdatedAt is threaded
+  // through the completed transaction's own committed row, not fabricated.
+  assert.equal(result.data.reviewUpdatedAt, NOW);
 
   assert.equal(audit.calls.length, 1);
   const payload = audit.calls[0].payload;

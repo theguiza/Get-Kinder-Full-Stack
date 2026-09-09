@@ -428,14 +428,16 @@ test("ImpactEvidenceLibrary.jsx Grant Response Packet packet-level preview link 
   assert.doesNotMatch(previewBlock, /exportManifestMarkdownPath/);
 });
 
-test("ImpactEvidenceLibrary.jsx Grant Response Packet section adds only Request Export Review, no start/complete/finalize/create authority", () => {
+test("ImpactEvidenceLibrary.jsx Grant Response Packet section adds Request/Start/Complete for the packet's own governed review lifecycle (P14-05/P14-06A/P14-06B), but no finalize/manifest/approval authority", () => {
   const sectionStart = uiSource.indexOf('<h5 className="mb-0">Grant Response Packet</h5>');
   const sectionEnd = uiSource.indexOf('<h5 className="mb-0">Generated Drafts</h5>');
   assert.notEqual(sectionStart, -1);
   assert.notEqual(sectionEnd, -1);
   const section = uiSource.slice(sectionStart, sectionEnd);
-  assert.match(section, /Request Export Review/);
-  assert.doesNotMatch(section, /Approve|Finalize|Start Review|Complete Review|Start Export Review|Complete Export Review|Create Export Candidate|Create Export Manifest/);
+  assert.match(section, /Request export review/);
+  assert.match(section, /Start export review/);
+  assert.match(section, /Complete export review/);
+  assert.doesNotMatch(section, /Approve|Finalize|Create Export Manifest/);
 });
 
 test("ImpactEvidenceLibrary.jsx Grant Response Packet Request Export Review renders only for the existing requestable display state", () => {
@@ -675,6 +677,12 @@ function buildEffect({
   const setGrantResponsePacketExportReviewPending = (value) => stateLog.push(["exportReviewPending", value]);
   const setGrantResponsePacketExportReviewResult = (value) => stateLog.push(["exportReviewResult", value]);
   const setGrantResponsePacketExportReviewError = (value) => stateLog.push(["exportReviewError", value]);
+  // P14-06 closure: the packet START/COMPLETE workflow state the same reset
+  // effect now also clears on every engagement/organization switch.
+  const setGrantResponsePacketExportReviewStartPending = (value) => stateLog.push(["exportReviewStartPending", value]);
+  const setGrantResponsePacketExportReviewStartError = (value) => stateLog.push(["exportReviewStartError", value]);
+  const setGrantResponsePacketExportReviewCompletePending = (value) => stateLog.push(["exportReviewCompletePending", value]);
+  const setGrantResponsePacketExportReviewCompleteError = (value) => stateLog.push(["exportReviewCompleteError", value]);
 
   const buildUseEffect = new Function(
     "React",
@@ -691,6 +699,10 @@ function buildEffect({
     "setGrantResponsePacketExportReviewPending",
     "setGrantResponsePacketExportReviewResult",
     "setGrantResponsePacketExportReviewError",
+    "setGrantResponsePacketExportReviewStartPending",
+    "setGrantResponsePacketExportReviewStartError",
+    "setGrantResponsePacketExportReviewCompletePending",
+    "setGrantResponsePacketExportReviewCompleteError",
     "setLoadingGrantResponsePacket",
     "getJson",
     "grantResponsePacketPath",
@@ -716,6 +728,10 @@ function buildEffect({
     setGrantResponsePacketExportReviewPending,
     setGrantResponsePacketExportReviewResult,
     setGrantResponsePacketExportReviewError,
+    setGrantResponsePacketExportReviewStartPending,
+    setGrantResponsePacketExportReviewStartError,
+    setGrantResponsePacketExportReviewCompletePending,
+    setGrantResponsePacketExportReviewCompleteError,
     setLoadingGrantResponsePacket,
     getJsonImpl,
     grantResponsePacketPath,

@@ -142,10 +142,42 @@ export function grantResponsePacketExportReviewRequestPath(organizationId, engag
     + `/${encodeURIComponent(grantResponsePacketExportCandidateId)}/export-review-request`;
 }
 
-// Explicit allowlist projection of the export-review-request response
-// (kaiGrantResponsePacketExportReviewService.js) - safe review-queue
-// identity/status metadata only, never approval/final-release/manifest
-// state.
+// Grant Response Packet export-review START (P14-06A): the authenticated
+// POST sibling of grantResponsePacketExportReviewRequestPath above. Keyed by
+// exactly organizationId + engagementId + the EXACT existing candidate id +
+// the EXACT existing review-queue item id the server already returned -
+// never a latest/newest/preferred guess of either. Transitions
+// open/needs_gk_review to in_progress/needs_gk_review only.
+export function grantResponsePacketExportReviewStartPath(organizationId, engagementId, grantResponsePacketExportCandidateId, exportReviewQueueItemId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}`
+    + `/engagements/${encodeURIComponent(engagementId)}/grant-response-packet/export-candidates`
+    + `/${encodeURIComponent(grantResponsePacketExportCandidateId)}/export-review-queue`
+    + `/${encodeURIComponent(exportReviewQueueItemId)}/start`;
+}
+
+// Grant Response Packet export-review COMPLETE (P14-06B): the authenticated
+// POST sibling of grantResponsePacketExportReviewStartPath above. Same exact
+// identity discipline. Transitions in_progress/needs_gk_review to
+// resolved/resolved only - review complete, never final eligibility,
+// approval, funder-readiness, final-release authority, or a manifest.
+export function grantResponsePacketExportReviewCompletePath(organizationId, engagementId, grantResponsePacketExportCandidateId, exportReviewQueueItemId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}`
+    + `/engagements/${encodeURIComponent(engagementId)}/grant-response-packet/export-candidates`
+    + `/${encodeURIComponent(grantResponsePacketExportCandidateId)}/export-review-queue`
+    + `/${encodeURIComponent(exportReviewQueueItemId)}/complete`;
+}
+
+// The packet START/COMPLETE request body reuses the existing
+// reviewTransitionBody({expected_updated_at}) helper below unchanged - no
+// actorContext, no now, no other client-supplied authority data ever leaves
+// this call.
+
+// Explicit allowlist projection of the export-review-request/start/complete
+// response (kaiGrantResponsePacketExportReviewService.js) - safe review-queue
+// identity/status/CAS metadata only, never approval/final-release/manifest
+// state. `reviewUpdatedAt` is the exact CAS token the next START/COMPLETE
+// call must echo back as expectedUpdatedAt - never guessed, never derived
+// from a client-side clock.
 export function projectGrantResponsePacketExportReviewResult(dto) {
   if (!dto || typeof dto !== "object") return null;
   return {
@@ -155,8 +187,41 @@ export function projectGrantResponsePacketExportReviewResult(dto) {
     reviewQueueItemId: dto.reviewQueueItemId,
     queueStatus: dto.queueStatus,
     reviewStatus: dto.reviewStatus,
+    reviewUpdatedAt: typeof dto.reviewUpdatedAt === "string" ? dto.reviewUpdatedAt : null,
     replayed: dto.replayed === true,
   };
+}
+
+// P14-06 closure: the packet-level export-review lifecycle UI state
+// machine, driven entirely by the exact server-returned
+// queueStatus/reviewStatus pair on the current
+// grantResponsePacketExportReviewResult (never client-derived, never a
+// latest/newest/preferred guess). "requestable" only applies once the
+// packet's own P14-04 candidate already exists (see the existing candidate
+// card/state) but no review has been requested for it yet - the Request
+// control itself predates this package and is unchanged. Mirrors
+// gkExportReviewDetailLogic.js#canStartReview/canCompleteReview's one-state-
+// one-control discipline: every combination shows at most one control.
+export const GRANT_RESPONSE_PACKET_EXPORT_REVIEW_LIFECYCLE_STATES = Object.freeze({
+  requestable: "requestable",
+  startable: "startable",
+  completable: "completable",
+  resolved: "resolved",
+  unknown: "unknown",
+});
+
+export function grantResponsePacketExportReviewLifecycleState(reviewResult) {
+  if (!reviewResult) return GRANT_RESPONSE_PACKET_EXPORT_REVIEW_LIFECYCLE_STATES.requestable;
+  if (reviewResult.queueStatus === "open" && reviewResult.reviewStatus === "needs_gk_review") {
+    return GRANT_RESPONSE_PACKET_EXPORT_REVIEW_LIFECYCLE_STATES.startable;
+  }
+  if (reviewResult.queueStatus === "in_progress" && reviewResult.reviewStatus === "needs_gk_review") {
+    return GRANT_RESPONSE_PACKET_EXPORT_REVIEW_LIFECYCLE_STATES.completable;
+  }
+  if (reviewResult.queueStatus === "resolved" && reviewResult.reviewStatus === "resolved") {
+    return GRANT_RESPONSE_PACKET_EXPORT_REVIEW_LIFECYCLE_STATES.resolved;
+  }
+  return GRANT_RESPONSE_PACKET_EXPORT_REVIEW_LIFECYCLE_STATES.unknown;
 }
 
 // A Grant Response Packet response may be applied only if it belongs to the

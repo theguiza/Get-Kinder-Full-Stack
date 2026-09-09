@@ -172,6 +172,7 @@ export async function requestGrantResponsePacketExportReview(input, dependencies
     reviewQueueItemId: result.data.reviewQueueItemId,
     queueStatus: result.data.queueStatus,
     reviewStatus: result.data.reviewStatus,
+    reviewUpdatedAt: result.data.reviewUpdatedAt,
     replayed: result.data.replayed,
   };
 
@@ -225,6 +226,7 @@ export async function startGrantResponsePacketExportReview(input, dependencies =
     reviewQueueItemId: result.data.reviewQueueItemId,
     queueStatus: result.data.queueStatus,
     reviewStatus: result.data.reviewStatus,
+    reviewUpdatedAt: result.data.reviewUpdatedAt,
     replayed: result.data.replayed,
   };
 
@@ -279,6 +281,7 @@ export async function completeGrantResponsePacketExportReview(input, dependencie
     reviewQueueItemId: result.data.reviewQueueItemId,
     queueStatus: result.data.queueStatus,
     reviewStatus: result.data.reviewStatus,
+    reviewUpdatedAt: result.data.reviewUpdatedAt,
     replayed: result.data.replayed,
   };
 

@@ -77,6 +77,18 @@ function hasExactKeys(value, allowed) {
     && Object.keys(value).every((key) => allowed.has(key));
 }
 
+// Frontend contract-defect fix: the packet review-queue row's own
+// `updated_at` is the exact CAS token a caller must echo back as
+// `expectedUpdatedAt` on the next START/COMPLETE call - without it, no
+// caller of requestGrantResponsePacketExportReview or
+// startGrantResponsePacketExportReview could ever construct a valid
+// follow-on START/COMPLETE request. Mirrors the existing single-draft
+// `asCanonicalUtcTimestamp` helper in postgresGeneratedContentRepository.js.
+function asCanonicalUtcTimestamp(value) {
+  if (value === null || value === undefined) return null;
+  return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
+}
+
 // Exact-keys input contract: organizationId + engagementId + actorContext +
 // now, and NOTHING else. In particular, no memberIds,
 // generatedContentDraftIds, exportCandidateId(s), exportManifestId(s), or
@@ -242,7 +254,7 @@ async function insertGrantResponsePacketExportReviewQueueRow(tx, { reviewQueueIt
      VALUES ($1::uuid,$2::uuid,$3::uuid,$4,$5,$6::uuid,$7,'open','needs_gk_review',$8,$9,'{}'::jsonb,NULL,$10)
      ON CONFLICT (organization_id, queue_type, target_object_type, target_object_id) WHERE queue_type = 'export_review'
      DO NOTHING
-     RETURNING review_queue_item_id::text AS review_queue_item_id, queue_status, review_status`,
+     RETURNING review_queue_item_id::text AS review_queue_item_id, queue_status, review_status, updated_at`,
     [
       reviewQueueItemId,
       organizationId,
@@ -265,7 +277,8 @@ async function loadGrantResponsePacketExportReviewQueueRow(tx, { organizationId,
     `SELECT review_queue_item_id::text AS review_queue_item_id, organization_id::text AS organization_id,
             queue_type, target_object_type, target_object_id::text AS target_object_id,
             priority, queue_status, review_status, summary, required_action, blocked_reason,
-            assigned_to::text AS assigned_to, due_at, queue_metadata, created_by::text AS created_by, created_by_type
+            assigned_to::text AS assigned_to, due_at, queue_metadata, created_by::text AS created_by, created_by_type,
+            updated_at
        FROM kai.review_queue_items
       WHERE organization_id = $1::uuid
         AND queue_type = $2
@@ -577,6 +590,7 @@ export function createPostgresGrantResponsePacketExportCandidateRepository({ run
             reviewQueueItemId: queueRow.review_queue_item_id,
             queueStatus: queueRow.queue_status,
             reviewStatus: queueRow.review_status,
+            reviewUpdatedAt: asCanonicalUtcTimestamp(queueRow.updated_at),
             replayed,
           });
         });
@@ -677,6 +691,7 @@ export function createPostgresGrantResponsePacketExportCandidateRepository({ run
               reviewQueueItemId: input.exportReviewQueueItemId,
               queueStatus: currentRow.queue_status,
               reviewStatus: currentRow.review_status,
+              reviewUpdatedAt: asCanonicalUtcTimestamp(currentRow.updated_at),
               replayed: true,
             });
           }
@@ -721,6 +736,7 @@ export function createPostgresGrantResponsePacketExportCandidateRepository({ run
             reviewQueueItemId: postWriteRow.review_queue_item_id,
             queueStatus: postWriteRow.queue_status,
             reviewStatus: postWriteRow.review_status,
+            reviewUpdatedAt: asCanonicalUtcTimestamp(postWriteRow.updated_at),
             replayed: false,
           });
         });
@@ -826,6 +842,7 @@ export function createPostgresGrantResponsePacketExportCandidateRepository({ run
               reviewQueueItemId: input.exportReviewQueueItemId,
               queueStatus: currentRow.queue_status,
               reviewStatus: currentRow.review_status,
+              reviewUpdatedAt: asCanonicalUtcTimestamp(currentRow.updated_at),
               replayed: true,
             });
           }
@@ -870,6 +887,7 @@ export function createPostgresGrantResponsePacketExportCandidateRepository({ run
             reviewQueueItemId: postWriteRow.review_queue_item_id,
             queueStatus: postWriteRow.queue_status,
             reviewStatus: postWriteRow.review_status,
+            reviewUpdatedAt: asCanonicalUtcTimestamp(postWriteRow.updated_at),
             replayed: false,
           });
         });

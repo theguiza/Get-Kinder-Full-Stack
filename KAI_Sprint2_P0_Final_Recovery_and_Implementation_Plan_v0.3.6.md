@@ -25316,3 +25316,185 @@ accessed or mutated.
 
 **Local commit:** one bounded commit created after all required checks
 passed.
+
+
+## Phase-14 (Grant Response Packet Track) — P14-06 Closure: Grant Response
+## Packet Export-Review Lifecycle UX
+
+**Date:** 2026-09-09
+
+**Owner authorization (bounded, local-only):** expose the now-complete
+packet review lifecycle (P14-05 REQUEST, P14-06A START, P14-06B COMPLETE)
+in the existing Impact Evidence Library Grant Response Packet card, plus
+the one proven, minimal backend contract-defect fix required to make START/
+COMPLETE callable at all (see Finding below). No final eligibility, no
+approve-packet control, no funder-ready control, no final-release grant, no
+manifest creation, and no final packet download were added anywhere. No
+other backend semantics were touched.
+
+**Finding (the one authorized backend change):** none of the P14-05/P14-06A/
+P14-06B REQUEST/START/COMPLETE result DTOs returned the review-queue row's
+own `updated_at` value. Every START/COMPLETE call requires the caller to
+echo back the row's current `updated_at` as `expectedUpdatedAt` for its
+optimistic-CAS contract (exactly like the existing single-draft P3-09/P3-13
+workflow) - without exposing it somewhere, no frontend caller could ever
+construct a valid follow-on START call after REQUEST, or a valid COMPLETE
+call after START. This is the "concrete frontend-consumed contract defect"
+the owner authorization allowed a bounded backend fix for; the existing
+single-draft workflow avoids this by keeping a separate, dedicated
+"packet"-read endpoint that the Grant Response Packet track does not have
+(and this package does not add one - adding a new read endpoint was judged
+larger than the one-field fix below).
+
+**Backend fix (bounded, additive only, no semantics/authority/CAS-contract
+change):** (1)
+`Backend/kai/dictionary/postgresGrantResponsePacketExportCandidateRepository.js`
+- added the `asCanonicalUtcTimestamp` helper (mirrors the existing
+single-draft helper of the same name in
+`postgresGeneratedContentRepository.js`); added `updated_at` to the
+`insertGrantResponsePacketExportReviewQueueRow` RETURNING clause and the
+`loadGrantResponsePacketExportReviewQueueRow` SELECT list (both previously
+omitted it); added `reviewUpdatedAt: asCanonicalUtcTimestamp(...)` to all
+six existing success() result objects across
+`requestGrantResponsePacketExportReview`/`startGrantResponsePacketExportReview`/
+`completeGrantResponsePacketExportReview` (both the fresh-transition and the
+replay branch of each) - no query predicate, CAS WHERE clause, lifecycle
+profile, authority check, or audit contract was changed. (2)
+`Backend/kai/services/kaiGrantResponsePacketExportReviewService.js` - added
+`reviewUpdatedAt: result.data.reviewUpdatedAt` to the `data` object returned
+by all three exported functions - purely additive pass-through, no new
+validation, authorization, or transition logic. Regression: this DTO
+addition changed the exact-`Object.keys()` shape asserted by one
+"service propagates a real successful repository result end to end" test
+per package (P14-05/P14-06A/P14-06B); each was updated to include
+`reviewUpdatedAt` in its expected key list and its fake repository stub, and
+one repository-level "creates/transitions" test per package gained a direct
+assertion that `result.data.reviewUpdatedAt` reflects the underlying queue
+row's `updated_at` - proving the fix actually works, not merely that the
+key exists.
+
+**Frontend implementation:** (1) `frontend/impactEvidenceLibraryLogic.js` -
+added `grantResponsePacketExportReviewStartPath`/
+`grantResponsePacketExportReviewCompletePath` (exact P14-06A/P14-06B route
+builders, identical identity discipline to the existing
+`grantResponsePacketExportReviewRequestPath`); extended
+`projectGrantResponsePacketExportReviewResult` to retain the new
+`reviewUpdatedAt` field (string or null, never fabricated); added the pure
+`grantResponsePacketExportReviewLifecycleState`/
+`GRANT_RESPONSE_PACKET_EXPORT_REVIEW_LIFECYCLE_STATES` state machine
+(`requestable`/`startable`/`completable`/`resolved`/`unknown`), driven
+exclusively by the exact server-returned `queueStatus`/`reviewStatus` pair -
+mirrors `gkExportReviewDetailLogic.js#canStartReview`/`canCompleteReview`'s
+one-state-one-control discipline. The existing `reviewTransitionBody`
+helper is reused unchanged for both new POST bodies - no new body-shape
+helper was added. (2) `frontend/ImpactEvidenceLibrary.jsx` - added
+`startGrantResponsePacketExportReview`/`completeGrantResponsePacketExportReview`
+callbacks, structurally identical to the existing
+`requestGrantResponsePacketExportReview`/`createGrantResponsePacketExportCandidate`
+callbacks on this same card: each reads candidate id/queue item id/CAS
+token exclusively from the current `grantResponsePacketExportReviewResult`
+(never a latest/newest/preferred guess), is gated by the pure lifecycle-
+state check so it can only fire from its own exact state, makes exactly one
+`postJson` call, applies its success result to the SAME
+`grantResponsePacketExportReviewResult` slot only when the
+organizationId/engagementId selection is still current (`stillCurrent`,
+the existing `organizationIdRef`/`engagementIdRef` guard), and then
+refetches the authoritative packet member list via the existing
+`refetchGrantResponsePacketAfterMemberExportReviewRequest` regardless of
+outcome. A failed or conflicting POST never touches
+`grantResponsePacketExportReviewResult` - the prior authoritative state (or
+`null`) is left exactly as it was. Four new state slots
+(`grantResponsePacketExportReviewStartPending`/`StartError`/
+`CompletePending`/`CompleteError`) were added and are reset both by the
+existing engagement/organization-switch effect and by
+`createGrantResponsePacketExportCandidate` (a new candidate discards any
+prior review-lifecycle progress), matching every other action already on
+this card. The render block now shows the Request control only in the
+`requestable` state, a Start control only in `startable`, a Complete
+control only in `completable`, and a static "Export review complete" badge
+(no control, no onClick) in `resolved` - each carrying prose that
+explicitly disclaims final eligibility, approval, funder-readiness,
+export/final-release authorization, and manifest creation. No packet
+Markdown preview, packet candidate-creation, member-level Request Export
+Review, member-level GK Export Review link, or member manifest-history/
+download code was touched.
+
+**Verification:** added
+`__tests__/kai-sprint2-p14-06-grant-response-packet-export-review-lifecycle-frontend.spec.js`
+(29/29: exact route builders for START/COMPLETE distinct from REQUEST,
+`reviewTransitionBody` sends only `expected_updated_at`,
+`projectGrantResponsePacketExportReviewResult` retains/never-fabricates
+`reviewUpdatedAt`, the lifecycle-state machine maps every
+queueStatus/reviewStatus pair to exactly one of four states with no overlap,
+static source-slice proofs that each handler acts on the exact
+candidate/queue-item/CAS identity, is gated to its own exact lifecycle
+state, makes exactly one mutation, fabricates no state on a failed/
+conflicting POST, and only applies success under the existing engagement-
+switch/stale-response `stillCurrent` guard; the reset effect and the
+candidate-creation handler both clear the new START/COMPLETE state; the
+render block shows one control per state, the resolved state is a static
+display with no `onClick`/`<button>`, Start/Complete are structurally
+distinct from the member-level GK Export Review link, and the packet
+Markdown-preview/candidate-creation affordances are untouched and
+unconditioned on review-lifecycle state). Updated
+`__tests__/kai-sprint2-impact-library-grant-response-packet.spec.js`'s
+pre-existing "adds only Request Export Review, no start/complete/finalize/
+create authority" test (renamed and re-scoped: this package's whole purpose
+is to add the packet's own governed Start/Complete controls, so the ban was
+narrowed to the finalize/manifest/approval vocabulary that remains
+forbidden) and extended its `buildEffect` engagement-switch-effect harness
+with the four new state setters (both as `new Function` parameters and stub
+implementations) so the harness continues to real-execute the exact
+committed reset effect without a `ReferenceError`. One pre-existing whole-
+file word-ban regression was found and repaired during this package: the
+`kai-sprint2-generated-drafts-library.spec.js` `/\bfinal\b|export-ready|
+\breleased?\b|\bapproved\b/i` Generated-Drafts-hooks-region ban (the same
+region repaired once before, during A1C-2, for unrelated reasons) now also
+spans this package's two new callbacks purely because of their physical
+position in the file between the two region-boundary markers used by that
+test; the callback doc comments were reworded to avoid the literal words
+"final"/"release"/"approved" (the underlying "no eligibility determination/
+approval/funder-readiness/export authorization/manifest" meaning is
+unchanged) and the suite now passes clean - the JSX render text (inside the
+Grant Response Packet section itself, which that test's boundaries do not
+scan) was left as originally written.
+
+**Affected regressions passed:** P14-05/P14-06A/P14-06B backend suites (all
+cases, including the new `reviewUpdatedAt` proofs), P14-04 candidate
+service/route/audit suites, `kai-sprint2-audit-queries.spec.js`,
+`kai-sprint2-pass2-route-runtime.spec.js`,
+`kai-sprint2-impact-library-grant-response-packet.spec.js` (all 36 cases,
+including every pre-existing packet-effect real-execution test),
+`kai-sprint2-impact-evidence-library.spec.js`,
+`kai-sprint2-uat-enablement-frontend.spec.js`,
+`kai-sprint2-generated-drafts-library.spec.js`,
+`kai-sprint2-impact-library-kai-frontend.spec.js`,
+`kai-sprint2-review-queue.spec.js`,
+`kai-sprint2-p1-09-review-cockpit-boundary.spec.js`,
+`kai-grant-response-packet-markdown-delivery-route.spec.js` - all passed,
+no behavior changed beyond this package's own additions.
+
+**Full suite:** `npm test` returned 3729 passed, 7 failed, 63 skipped - the
+same 7 pre-existing, unrelated batch/file-detail baseline failures
+documented in every prior Phase-14 entry above. No new full-suite failure
+was introduced.
+
+**Frontend build:** `npm run build` (vite build) succeeded; the built
+`public/js/bundles/entry.js` is included in this commit per repository
+convention (tracked, not gitignored).
+
+**Final diff review:** edits confined to
+`Backend/kai/dictionary/postgresGrantResponsePacketExportCandidateRepository.js`,
+`Backend/kai/services/kaiGrantResponsePacketExportReviewService.js`,
+`frontend/ImpactEvidenceLibrary.jsx`, `frontend/impactEvidenceLibraryLogic.js`,
+one new focused frontend test file, three existing backend test files
+extended only for the `reviewUpdatedAt` DTO addition, one existing frontend
+test file extended/re-scoped for the new lifecycle controls, the built
+bundle, and this ExecPlan entry. `git diff --check` passed with no
+whitespace errors. No migration file, no P14-01 through P14-06B repository/
+schema/authority/CAS-contract file logic changed beyond the one additive
+`reviewUpdatedAt` field, no packet manifest/final-release/approval file
+touched, and no production/shared database accessed or mutated.
+
+**Local commit:** one bounded commit created after all required checks
+passed.
