@@ -21971,6 +21971,100 @@ anywhere in this diff.
 **Local commit:** one bounded commit created after all required checks
 passed.
 
+## Grant Response Packet: Composite Render Model (read-only packet-level
+## representation; no packet persistence, manifest, candidate, finalization,
+## file, or delivery route)
+
+**Date:** 2026-09-09
+
+**Owner authorization (bounded, local-only):** implement the smallest
+deterministic server-side Grant Response Packet composite render model from
+the existing authoritative Grant Response Packet result only. Starting HEAD:
+`c35b1f7b9630eef96484aaf49895d44eb5c42d19` (USER_CONFIRMED, working tree
+clean). This package did not reopen P14-01, membership, frontend workflow,
+per-member export review, manifest-history UX, volume/cap policy, or
+historical runner debt.
+
+**Implementation:** added
+`Backend/kai/services/kaiGrantResponsePacketRenderModelService.js` with
+`composeGrantResponsePacketRenderModel`, which composes exactly one
+contract-versioned composite object from `getGrantResponsePacket`:
+`organizationId`, `engagementId`, `packetAudience: "funder"`, and ordered
+`members`. Member order, block order, and citation order are preserved as
+supplied by the authoritative packet DTO. The model keeps each member as a
+separate object and preserves member identity/state, ordered blocks, block
+text, attached citations, traceability identities, current eligibility, and
+blocker/limitation arrays. Per-member `exportManifestId` and
+`exportManifestHistory` remain member metadata only when present in the safe
+packet DTO; no packet-level manifest or candidate identity is created.
+
+The existing safe single-draft packet DTO validators in
+`kaiGeneratedContentService.js` and `kaiExportReviewService.js` now accept
+the already-loaded row identities `generatedContentBlockId` and
+`generatedContentCitationId` as an exact optional superset, while preserving
+the prior exact shape for older injected fixtures. The repository projection
+in `postgresGeneratedContentRepository.js` supplies those IDs from the
+already-loaded generated-content block/citation rows. The Grant Response
+Packet service now exposes an explicit `isGrantResponsePacketDto` validator
+and validates the final packet root before returning it. No new SQL query,
+schema, migration, route, persistence, export candidate, export manifest,
+audit write, authority, finalization, or download/file path was added.
+
+**Verification:** new focused render-model boundary tests
+(`__tests__/kai-grant-response-packet-render-model-boundary.spec.js`) passed
+7/7 and prove one authoritative packet becomes one composite render model;
+organization, engagement, and funder audience are preserved; multiple drafts
+remain multiple members; member/block/citation order and identities are
+preserved; blockers/limitations remain attached; an empty packet produces a
+valid empty model; non-funder content and malformed packets fail closed; raw
+evidence/source bodies and rendered/download fields are absent; per-member
+manifest history cannot become packet identity; composition has no
+latest/newest/preferred selection and no mutation path; repeated composition
+is semantically identical. Existing Grant Response Packet backend boundary
+tests passed 19/19, including a new assertion that the authoritative packet
+DTO now carries the loaded block/citation row IDs. Existing export-manifest
+render-model composition regression passed 10/10. Existing Markdown/CSV/PDF/
+DOCX serializer regressions passed 53/53. Existing Grant Response Packet
+Impact Library regression passed 30/30, and the broader Impact Evidence
+Library regression passed 102/102 after rerunning outside the sandbox for
+localhost listener binding (the sandboxed attempt failed only on five
+`listen EPERM 127.0.0.1` route tests). `DATABASE_URL` was set to a
+non-listening loopback sentinel for every Node/npm command.
+
+**Full suite:** required because shared backend DTO validators changed.
+Sandboxed `npm test` failed with localhost listener permission failures.
+Rerun outside the sandbox with the same non-listening loopback
+`DATABASE_URL` sentinel completed at the known baseline shape: 3562 passed,
+7 failed, 61 skipped. The seven failures are the pre-existing child-file
+read-model/batch-files-collection/file-detail-service/file-detail-contract
+baseline failures; the new Grant Packet composite tests passed in the full
+run.
+
+**Final diff review:** confined to
+`Backend/kai/dictionary/postgresGeneratedContentRepository.js` (safe row IDs
+added to already-composed block/citation DTOs),
+`Backend/kai/services/kaiGeneratedContentService.js` and
+`Backend/kai/services/kaiExportReviewService.js` (exact optional block/
+citation ID DTO superset validation),
+`Backend/kai/services/kaiGrantResponsePacketService.js` (packet-root safe
+DTO validator and final validation),
+`Backend/kai/services/kaiGrantResponsePacketRenderModelService.js` (new
+read-only composite composer),
+`__tests__/kai-grant-response-packet-boundary.spec.js`,
+`__tests__/kai-grant-response-packet-render-model-boundary.spec.js`, and
+this ExecPlan entry. No frontend source or bundle changed. No production or
+shared database was accessed, mutated, or migrated; nothing was pushed or
+deployed; no feature flags, Current State, Implementation Baseline, or Board
+Summary were changed.
+
+**Remaining gap / next continuation:** packet-level governed delivery and
+finalization integration remains the next Phase-14 continuation, separately
+scoped from this package. The packet-volume bound contract remains
+`NOT_CONFIRMED / DEFERRED`.
+
+**Local commit:** one bounded commit created after all required checks
+passed.
+
 ## Grant Response Packet: Impact Evidence Library Request Export Review
 ## reuse (per-member existing single-draft workflow only)
 

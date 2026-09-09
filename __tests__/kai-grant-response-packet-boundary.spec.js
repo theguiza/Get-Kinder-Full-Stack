@@ -370,7 +370,9 @@ test("Grant Response Packet composition preserves exact citation identity and su
     sharedEvaluator,
   );
   const [packet] = result.data.drafts;
+  assert.equal(packet.blocks[0].generatedContentBlockId, DRAFT_A.blocks[0].generated_content_block_id);
   const [citation] = packet.blocks[0].citations;
+  assert.equal(citation.generatedContentCitationId, DRAFT_A.citations[0].generated_content_citation_id);
   assert.equal(citation.claimId, DRAFT_A.claimId);
   assert.equal(citation.evidenceItemId, DRAFT_A.evidenceId);
   assert.equal(citation.sourceId, DRAFT_A.sourceId);

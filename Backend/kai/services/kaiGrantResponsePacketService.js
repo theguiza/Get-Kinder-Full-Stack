@@ -89,6 +89,41 @@ function projectPacketDraft(packet, exportReviewVisible) {
   return { ...projected, exportManifestId, exportManifestHistory, exportReviewVisible };
 }
 
+function isGrantResponsePacketDto(data) {
+  if (!(Boolean(data)
+    && typeof data === "object"
+    && !Array.isArray(data)
+    && Object.keys(data).length === 4
+    && Object.keys(data).every((key) => (
+      key === "organizationId"
+      || key === "engagementId"
+      || key === "packetAudience"
+      || key === "drafts"
+    ))
+    && UUID_PATTERN.test(data.organizationId)
+    && UUID_PATTERN.test(data.engagementId)
+    && data.packetAudience === "funder"
+    && Array.isArray(data.drafts))) {
+    return false;
+  }
+  for (const draft of data.drafts) {
+    if (!(Boolean(draft)
+      && typeof draft === "object"
+      && !Array.isArray(draft)
+      && typeof draft.exportReviewVisible === "boolean"
+      && (
+        draft.exportManifestId === null
+        || UUID_PATTERN.test(draft.exportManifestId)
+      )
+      && isExportManifestHistoryDto(draft.exportManifestHistory))) {
+      return false;
+    }
+    const { exportManifestId, exportManifestHistory, exportReviewVisible, ...singleDraftPacket } = draft;
+    if (!isGeneratedDraftReviewPacketDto(singleDraftPacket)) return false;
+  }
+  return true;
+}
+
 export async function getGrantResponsePacket(input, dependencies = {}) {
   const env = dependencies.env || process.env;
   if (!isKaiSprint2Enabled(env)) return buildKaiError("feature_disabled", { data: null });
@@ -140,14 +175,17 @@ export async function getGrantResponsePacket(input, dependencies = {}) {
     drafts.push(projected);
   }
 
+  const data = {
+    organizationId: result.data.organizationId,
+    engagementId: result.data.engagementId,
+    packetAudience: result.data.packetAudience,
+    drafts,
+  };
+  if (!isGrantResponsePacketDto(data)) return buildKaiError("system_error", { data: null });
+
   return {
     ok: true,
-    data: {
-      organizationId: result.data.organizationId,
-      engagementId: result.data.engagementId,
-      packetAudience: result.data.packetAudience,
-      drafts,
-    },
+    data,
     error: null,
   };
 }
@@ -160,5 +198,6 @@ export const __grantResponsePacketServiceContract = Object.freeze({
 export const __grantResponsePacketServiceTestables = Object.freeze({
   isGetGrantResponsePacketInput,
   isMappedHumanActor,
+  isGrantResponsePacketDto,
   projectPacketDraft,
 });

@@ -237,6 +237,7 @@
     "blocks",
   ]);
   const BLOCK_KEYS = new Set(["ordinal", "text", "citations"]);
+  const BLOCK_KEYS_WITH_ID = new Set(["generatedContentBlockId", ...BLOCK_KEYS]);
   const CITATION_KEYS = new Set([
     "claimId",
     "evidenceItemId",
@@ -250,6 +251,7 @@
     "affectedDimensionKeys",
     "affectedObjectIds",
   ]);
+  const CITATION_KEYS_WITH_ID = new Set(["generatedContentCitationId", ...CITATION_KEYS]);
 
   function isStringArray(value) {
     return Array.isArray(value) && value.every((item) => typeof item === "string");
@@ -280,12 +282,16 @@
     }
     if (!Array.isArray(data.blocks) || data.blocks.length < 1 || data.blocks.length > 20) return false;
     for (const [index, block] of data.blocks.entries()) {
-      if (!hasExactKeys(block, BLOCK_KEYS)) return false;
+      const blockHasId = Object.prototype.hasOwnProperty.call(block, "generatedContentBlockId");
+      if (!hasExactKeys(block, blockHasId ? BLOCK_KEYS_WITH_ID : BLOCK_KEYS)) return false;
+      if (blockHasId && !UUID_PATTERN.test(block.generatedContentBlockId)) return false;
       if (block.ordinal !== index + 1) return false;
       if (typeof block.text !== "string" || block.text.length < 1 || block.text.length > 4000) return false;
       if (!Array.isArray(block.citations) || block.citations.length < 1) return false;
       for (const citation of block.citations) {
-        if (!hasExactKeys(citation, CITATION_KEYS)) return false;
+        const citationHasId = Object.prototype.hasOwnProperty.call(citation, "generatedContentCitationId");
+        if (!hasExactKeys(citation, citationHasId ? CITATION_KEYS_WITH_ID : CITATION_KEYS)) return false;
+        if (citationHasId && !UUID_PATTERN.test(citation.generatedContentCitationId)) return false;
         if (!UUID_PATTERN.test(citation.claimId) || !UUID_PATTERN.test(citation.evidenceItemId)) return false;
         if (!UUID_PATTERN.test(citation.sourceId) || !UUID_PATTERN.test(citation.sourceVersionId)) return false;
         if (typeof citation.supportStrength !== "string") return false;

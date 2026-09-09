@@ -639,6 +639,7 @@ async function toReviewPacket(tx, state, input, validation, evaluator) {
         throw new RollbackResultError(failure("conflict_current_state_changed"));
       }
       return {
+        generatedContentCitationId: citation.generated_content_citation_id,
         claimId: citation.claim_id,
         evidenceItemId: citation.evidence_item_id,
         sourceId: evaluated.source.source_id,
@@ -652,7 +653,12 @@ async function toReviewPacket(tx, state, input, validation, evaluator) {
         affectedObjectIds: evaluated.affectedObjectIds,
       };
     });
-    return { ordinal: block.ordinal, text: block.text, citations };
+    return {
+      generatedContentBlockId: block.generated_content_block_id,
+      ordinal: block.ordinal,
+      text: block.text,
+      citations,
+    };
   });
   return success({
     generationRunId: state.run.generation_run_id,
