@@ -1193,6 +1193,28 @@ async function readReviewPacketStatesBatch(tx, { organizationId, generatedConten
   return statesByDraftId;
 }
 
+// toReviewPacket's own per-draft evaluator memoization (evaluatedByClaim)
+// only dedupes repeat citations of the same claim within one draft - it
+// does not see across drafts. A claim cited by more than one member draft
+// in the same engagement would otherwise be re-evaluated once per citing
+// draft. Because the whole membership read runs inside one
+// REPEATABLE READ READ ONLY transaction, evaluator(tx, {claimId,
+// requestedAudience}) is a pure function of that fixed snapshot - reusing
+// a prior result for the same (claimId, requestedAudience) pair across
+// drafts is exactly the same read, never a weaker or staler one. This
+// wrapper is the only cross-draft reuse added; the evaluator's own
+// authoritative per-claim traceability computation is untouched.
+function memoizeEvaluatorAcrossDrafts(evaluator) {
+  const cache = new Map();
+  return async (tx, args) => {
+    const key = `${args.claimId}::${args.requestedAudience}`;
+    if (cache.has(key)) return cache.get(key);
+    const result = await evaluator(tx, args);
+    cache.set(key, result);
+    return result;
+  };
+}
+
 // Reuses the exact same governed single-draft packet validators/projection
 // (validateReviewPacketRows/toReviewPacket - review status, queue status,
 // per-citation current-use eligibility/blocker codes) this file already
@@ -1206,6 +1228,15 @@ async function readReviewPacketStatesBatch(tx, { organizationId, generatedConten
 // can never become valid packet membership. State is read once, batched
 // across every member draft id (readReviewPacketStatesBatch) rather than
 // once per draft, so query count never scales with membership size.
+// The claim-traceability evaluator invoked by toReviewPacket is NOT part
+// of that batched structural read - it authoritatively recomputes
+// current-use eligibility per unique claim id and still does real,
+// non-batchable SQL work per claim (see
+// postgresClaimTraceabilityRepository.js). This function reuses that
+// exact evaluator unmodified (no weaker eligibility rule) but shares one
+// memoized wrapper across every member draft in the loop below so a claim
+// cited by multiple drafts in the same engagement is evaluated at most
+// once per packet read, never once per citing draft.
 export async function evaluateGrantResponsePacketMembershipInTransaction(tx, input, evaluator = evaluateClaimTraceabilityInTransaction) {
   if (!validateGrantResponsePacketMembershipInput(input)) return failure("validation_blocker");
   const { organizationId, engagementId } = input;
@@ -1215,6 +1246,7 @@ export async function evaluateGrantResponsePacketMembershipInTransaction(tx, inp
 
   const draftIds = await loadGrantResponsePacketMemberDraftIds(tx, { organizationId, engagementId });
   const statesByDraftId = await readReviewPacketStatesBatch(tx, { organizationId, generatedContentDraftIds: draftIds });
+  const memoizedEvaluator = memoizeEvaluatorAcrossDrafts(evaluator);
 
   const drafts = [];
   for (const generatedContentDraftId of draftIds) {
@@ -1234,7 +1266,7 @@ export async function evaluateGrantResponsePacketMembershipInTransaction(tx, inp
     // skipped.
     if (validation === false) return failure("conflict_current_state_changed");
 
-    const packetResult = await toReviewPacket(tx, state, { organizationId, generatedContentDraftId }, validation, evaluator);
+    const packetResult = await toReviewPacket(tx, state, { organizationId, generatedContentDraftId }, validation, memoizedEvaluator);
     if (!packetResult.ok) return packetResult;
     const packet = packetResult.data;
     const resolvedProfile = GENERATED_CONTENT_REVIEW_LIFECYCLE_PROFILES[2];

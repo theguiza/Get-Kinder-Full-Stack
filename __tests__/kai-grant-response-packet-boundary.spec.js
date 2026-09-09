@@ -422,6 +422,150 @@ test("Grant Response Packet membership issues a fixed, bounded query count that 
   assert.equal(largeCount, 9);
 });
 
+test("Grant Response Packet membership evaluates a claim cited by more than one member draft at most once, never once per citing draft", async () => {
+  // A dedicated two-draft engagement where both drafts cite the exact same
+  // claim/evidence/source/source-version - the only way to prove the
+  // evaluator itself (not just the batched structural read) stays flat
+  // as membership grows, since the shared module-level fixtures above
+  // never let two eligible packet members share a claim.
+  const org = "00000000-0000-4000-8000-000000000001";
+  const engagementId = "00000000-0000-4000-8000-000000000801";
+  const sharedClaimId = "00000000-0000-4000-8000-000000000811";
+  const sharedEvidenceId = "00000000-0000-4000-8000-000000000812";
+  const sharedSourceId = "00000000-0000-4000-8000-000000000813";
+  const sharedSourceVersionId = "00000000-0000-4000-8000-000000000814";
+
+  function sharedClaimDraft(n) {
+    const draftId = `00000000-0000-4000-8000-0000000082${n}1`;
+    const runId = `00000000-0000-4000-8000-0000000082${n}2`;
+    const blockId = `00000000-0000-4000-8000-0000000082${n}3`;
+    const citationId = `00000000-0000-4000-8000-0000000082${n}4`;
+    const queueId = `00000000-0000-4000-8000-0000000082${n}5`;
+    const draft = {
+      generated_content_draft_id: draftId,
+      generation_run_id: runId,
+      organization_id: org,
+      content_type: "evidence_summary",
+      requested_audience: "funder",
+      draft_status: "draft",
+      review_status: "needs_gk_review",
+    };
+    return {
+      draftId,
+      runId,
+      draft,
+      run: { generation_run_id: runId, organization_id: org, request_fingerprint: "a".repeat(64), content_type: "evidence_summary", requested_audience: "funder" },
+      siblingDrafts: [draft],
+      blocks: [{ generated_content_block_id: blockId, generated_content_draft_id: draftId, organization_id: org, ordinal: 1, text: `Shared-claim draft ${n}.` }],
+      citations: [{
+        generated_content_citation_id: citationId,
+        generated_content_block_id: blockId,
+        organization_id: org,
+        claim_id: sharedClaimId,
+        evidence_item_id: sharedEvidenceId,
+        block_ordinal: 1,
+      }],
+      queues: [{
+        review_queue_item_id: queueId,
+        organization_id: org,
+        queue_type: "generated_content_review",
+        target_object_type: "generated_content_draft",
+        target_object_id: draftId,
+        priority: "medium",
+        queue_status: "resolved",
+        review_status: "resolved",
+        assigned_to: null,
+        due_at: null,
+        summary: "Generated draft requires human review.",
+        required_action:
+          "Review citations, audience eligibility, limitations, unsupported claims, and numeric or causal assertions before any use.",
+        updated_at: "2026-08-06T09:00:00.000Z",
+      }],
+      exportReviewQueues: [],
+    };
+  }
+
+  const sharedDraft1 = sharedClaimDraft(1);
+  const sharedDraft2 = sharedClaimDraft(2);
+  const fixturesById = { [sharedDraft1.draftId]: sharedDraft1, [sharedDraft2.draftId]: sharedDraft2 };
+  const allDraftIds = [sharedDraft1.draftId, sharedDraft2.draftId];
+
+  const tx = {
+    async query(sql, params) {
+      if (/FROM kai\.engagements\b/.test(sql)) {
+        return { rows: [{ engagement_id: engagementId, organization_id: org }] };
+      }
+      if (/JOIN kai\.generation_runs r\b/.test(sql)) {
+        return { rows: allDraftIds.map((id) => ({ generated_content_draft_id: id })) };
+      }
+      if (/FROM kai\.generated_content_drafts\b/.test(sql) && /WHERE organization_id/.test(sql) && /ANY/.test(sql)) {
+        const draftIds = firstArrayParam(params);
+        return { rows: draftIds.map((id) => fixturesById[id].draft) };
+      }
+      if (/FROM kai\.generated_content_drafts\b/.test(sql) && /WHERE generation_run_id = ANY/.test(sql)) {
+        const runIds = firstArrayParam(params);
+        return { rows: Object.values(fixturesById).filter((f) => runIds.includes(f.runId)).flatMap((f) => f.siblingDrafts) };
+      }
+      if (/FROM kai\.generation_runs\b/.test(sql) && !/JOIN/.test(sql)) {
+        const runIds = firstArrayParam(params);
+        return { rows: Object.values(fixturesById).filter((f) => runIds.includes(f.runId)).map((f) => f.run) };
+      }
+      if (/FROM kai\.generated_content_blocks\b/.test(sql)) {
+        const draftIds = firstArrayParam(params);
+        return { rows: draftIds.flatMap((id) => fixturesById[id].blocks) };
+      }
+      if (/FROM kai\.generated_content_citations\b/.test(sql)) {
+        const blockIds = firstArrayParam(params);
+        return { rows: Object.values(fixturesById).flatMap((f) => f.citations.filter((c) => blockIds.includes(c.generated_content_block_id))) };
+      }
+      if (/FROM kai\.review_queue_items\b/.test(sql) && /blocked_reason/.test(sql)) {
+        const draftIds = firstArrayParam(params);
+        return { rows: draftIds.flatMap((id) => fixturesById[id].exportReviewQueues) };
+      }
+      if (/FROM kai\.review_queue_items\b/.test(sql)) {
+        const draftIds = firstArrayParam(params);
+        return { rows: draftIds.flatMap((id) => fixturesById[id].queues) };
+      }
+      throw new Error(`unexpected query in shared-claim boundary test: ${sql}`);
+    },
+  };
+
+  let evaluatorCalls = 0;
+  const countingEvaluator = async (tx2, args) => {
+    evaluatorCalls += 1;
+    assert.equal(args.claimId, sharedClaimId);
+    return {
+      ok: true,
+      data: {
+        claim: { claim_id: sharedClaimId, claim_type: "finding", claim_status: "proposed", claim_review_status: "approved", claim_strength: "strong", audience_gates: {} },
+        evidence: { evidence_item_id: sharedEvidenceId, evidence_review_status: "approved", support_strength: "strong", review_queue_item_id: "00000000-0000-4000-8000-000000000901", review_queue_status: "closed", review_status: "approved", updated_at: "2026-08-06T09:00:00.000Z", sensitivity_level: "unknown" },
+        locator: { source_locator_id: "00000000-0000-4000-8000-000000000902" },
+        source: { source_id: sharedSourceId, source_code: null },
+        source_version: { source_version_id: sharedSourceVersionId, is_current: true },
+        claim_review: { review_queue_item_id: "00000000-0000-4000-8000-000000000903", queue_status: "closed", review_status: "approved" },
+        candidate: { intake_source_candidate_id: "00000000-0000-4000-8000-000000000904" },
+        promotion_decision: { intake_promotion_decision_id: "00000000-0000-4000-8000-000000000905" },
+        dimensions: {},
+        gap_items: [],
+        client_followup_workflows: [],
+        potential_conflict_groups: [],
+        requestedAudience: "funder",
+        eligible: true,
+        blockerCodes: [],
+        affectedDimensionKeys: [],
+        affectedObjectIds: [],
+        truncated: false,
+      },
+      error: null,
+    };
+  };
+
+  const result = await evaluateGrantResponsePacketMembershipInTransaction(tx, { organizationId: org, engagementId }, countingEvaluator);
+  assert.equal(result.ok, true);
+  assert.equal(result.data.drafts.length, 2);
+  assert.equal(evaluatorCalls, 1, "the shared claim must be evaluated once per packet read, not once per citing draft");
+});
+
 test("Grant Response Packet membership never calls the single-draft per-draft read-packet evaluator", () => {
   const source = readFileSync(
     new URL("../Backend/kai/dictionary/postgresGeneratedContentRepository.js", import.meta.url),

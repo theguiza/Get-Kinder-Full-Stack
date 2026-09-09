@@ -23537,3 +23537,118 @@ this now-closed membership/composition foundation.
 
 **Local commit:** one bounded commit created after all required checks
 passed.
+
+## Grant Response Packet: Bounded-Execution Contract Correction (evaluator
+## fan-out reuse; member/claim-volume bound decision surfaced, not resolved)
+
+The preceding package's closing claim - "the architecture is bounded by
+query count, not by a row-count limit, so no
+GRANT_PACKET_MEMBER_BOUND_DECISION_REQUIRED stop applied" and "fixed 9 total
+queries regardless of membership size" - was proved **incomplete** by tracing
+the complete production execution path (not the boundary test's mocked
+evaluator, which never issues `tx.query` and so cannot speak to the
+evaluator's own SQL work at all).
+
+**1. Actual query/work shape.** The "fixed 9 queries" claim is exactly true,
+but only for the batched *structural* read (`readReviewPacketStatesBatch`
+plus the engagement/membership-listing queries) traced in
+`evaluateGrantResponsePacketMembershipInTransaction`. That same function
+also calls `toReviewPacket` once per member draft, and `toReviewPacket`
+invokes the injected claim-traceability evaluator
+(`evaluateClaimTraceabilityInTransaction` in
+`postgresClaimTraceabilityRepository.js`) once per unique claim id cited by
+that draft. That evaluator is not SQL-free: per claim it reads the claim,
+claim-evidence link, evidence item, source locator, source, source version,
+promotion decision, review-queue rows, data-dictionary fields, gap-log rows,
+and quality-coverage findings - real, non-batchable SQL work, by design
+identical to the single-draft P3-02 read path's own evaluator call. So total
+DB work for one Grant Response Packet read scales as 9 (fixed) plus real
+per-claim evaluator work, and - because `toReviewPacket`'s own
+`evaluatedByClaim` memoization is local to one draft call - a claim cited by
+more than one member draft in the same engagement was being re-evaluated
+once per citing draft, not once per packet read. This duplication was
+attributable and provable directly from source, independent of any test
+fixture's claim overlap.
+
+**Repair (smallest coherent reuse, no eligibility change):** a
+`memoizeEvaluatorAcrossDrafts` wrapper in
+`Backend/kai/dictionary/postgresGeneratedContentRepository.js` now caches
+the evaluator's result by `claimId::requestedAudience` across the whole
+membership loop and is passed to every `toReviewPacket` call in place of the
+raw evaluator. Reuse is exact, not approximate: the entire membership read
+runs inside one `REPEATABLE READ READ ONLY` transaction, so
+`evaluator(tx, {claimId, requestedAudience})` is a pure function of that
+fixed snapshot - a cached result for the same key is the identical read, not
+a staler or weaker one. `evaluateClaimTraceabilityInTransaction` itself, its
+blocker/eligibility computation, and every other caller of it
+(`evaluateGeneratedDraftReviewPacketInTransaction`,
+`evaluateGeneratedDraftExportReviewPacketInTransaction`, the organization-
+scope Review Queue rollup) are untouched - the fix is confined to the Grant
+Response Packet membership loop's own reuse of an unmodified evaluator.
+Verified by a new boundary test constructing two member drafts that cite the
+same claim/evidence/source/source-version: a counting evaluator is invoked
+exactly once (was 2, proved by reverting the fix and re-running).
+
+**2. Membership/claim-volume bound: no repository-supported bound exists for
+this read.** `loadGrantResponsePacketMemberDraftIds` carries no `LIMIT`, and
+neither does the per-draft claim set the evaluator is invoked over. The one
+existing repository precedent for capping evaluator fan-out -
+`REVIEW_QUEUE_CLAIM_LIMIT = 500` with a disclosed `truncated: true` flag, in
+`postgresClaimTraceabilityRepository.js`'s `listOrganizationReviewQueue` -
+is scoped to an organization-wide rollup with its own disclosure contract,
+not to one engagement's Grant Response Packet; reusing its number here would
+be inventing a limit, not reusing an authoritative one. No bound or
+pagination convention scoped to "one engagement's packet" or "one packet
+read's total cited-claim set" exists anywhere in the repository today. Per
+task instruction, this is surfaced as an open owner decision
+(`GRANT_PACKET_MEMBER_BOUND_DECISION_REQUIRED: YES`) rather than resolved
+with an invented number - no numeric cap, pagination, or truncation
+disclosure was added in this package. Today's real-world exposure is
+narrow (a Grant Response Packet's membership is already restricted to one
+engagement's `funder`-audience, `resolved`/`resolved`,
+`currentUseEligible` drafts) but is not contractually bounded.
+
+**Preserved unchanged:** `packetAudience = "funder"`, deterministic
+engagement membership, `generated_content_draft_id` ordering, legacy `NULL`
+engagement exclusion, review/`currentUseEligible` semantics (evaluator
+itself untouched), citation identities/blockers, role-safe export-review
+projection, tenant isolation, no new persistence.
+
+**Verification:** `__tests__/kai-grant-response-packet-boundary.spec.js`,
+19/19 passing (up from 18/18; one new test added). Directly coupled P3-01/
+P13-01/P3-02/P3-05 through P3-20/export-manifest/export-review-link boundary
+and integration suites unaffected (no change to any function outside the
+Grant Response Packet membership loop). `git diff --check` passed with no
+whitespace errors.
+
+**Full suite:** `npm test` -> 3524 passed, 7 failed, 61 skipped (the same
+4 pre-existing child-file-read-model/batch-files-collection/file-detail-
+service/file-detail-contract failures and their nested subtests as the
+USER_CONFIRMED 3523/7/61 baseline, plus the one net-new passing test from
+this package; 0 newly introduced failures).
+
+**Final diff review:** confined to
+`Backend/kai/dictionary/postgresGeneratedContentRepository.js` (the
+`memoizeEvaluatorAcrossDrafts` helper and its use in
+`evaluateGrantResponsePacketMembershipInTransaction`, additive/replacement
+only - no other function touched), `__tests__/kai-grant-response-packet-boundary.spec.js`
+(one new test), and this ExecPlan. No migration, route, Current State,
+Implementation Baseline, Board Summary, export/review authority, or
+frontend UX code was touched. No production or shared database was
+accessed, mutated, or migrated; nothing was pushed or deployed; no feature
+flags changed.
+
+**Remaining gap / next continuation:** the member/claim-volume bound
+decision (`GRANT_PACKET_MEMBER_BOUND_DECISION_REQUIRED: YES`) remains open
+and must be resolved by the owner before this read is treated as fully
+bounded; current safe options are (a) leave unbounded, accepted as a known
+risk given today's narrow real-world membership size, (b) add an explicit
+per-engagement draft/claim cap mirroring the `REVIEW_QUEUE_CLAIM_LIMIT`
+pattern with a disclosed `truncated` flag on the packet envelope, or (c)
+require pagination on the Grant Response Packet read itself. None of these
+was selected or implemented here. The Impact Evidence Library Grant
+Response Packet product/frontend UX remains the separately authorized next
+continuation once that decision is made.
+
+**Local commit:** one bounded commit created after all required checks
+passed.
