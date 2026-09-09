@@ -255,10 +255,23 @@ export function shouldApplyGrantResponsePacketResponse({
 // recomputation.
 export function projectGrantResponsePacket(dto) {
   if (!dto || typeof dto !== "object") return null;
+  const exportReviewVisible = dto.exportReviewVisible === true;
+  const grantResponsePacketExportCandidateId = exportReviewVisible && typeof dto.grantResponsePacketExportCandidateId === "string"
+    ? dto.grantResponsePacketExportCandidateId
+    : null;
+  const reviewQueueItemId = grantResponsePacketExportCandidateId && typeof dto.reviewQueueItemId === "string"
+    ? dto.reviewQueueItemId
+    : null;
   return {
     organizationId: dto.organizationId,
     engagementId: dto.engagementId,
     packetAudience: dto.packetAudience,
+    exportReviewVisible,
+    grantResponsePacketExportCandidateId,
+    reviewQueueItemId,
+    queueStatus: reviewQueueItemId && typeof dto.queueStatus === "string" ? dto.queueStatus : null,
+    reviewStatus: reviewQueueItemId && typeof dto.reviewStatus === "string" ? dto.reviewStatus : null,
+    reviewUpdatedAt: reviewQueueItemId && typeof dto.reviewUpdatedAt === "string" ? dto.reviewUpdatedAt : null,
     drafts: asArray(dto.drafts).map((draft) => ({
       generatedContentDraftId: draft?.generatedContentDraftId,
       generationRunId: draft?.generationRunId,
@@ -305,6 +318,57 @@ export function projectGrantResponsePacket(dto) {
         })),
       })),
     })).filter((draft) => typeof draft.generatedContentDraftId === "string"),
+  };
+}
+
+// P14-06E1: deterministic read-model hydration from the authoritative
+// P14-06D Grant Response Packet GET projection only. This helper accepts no
+// prior browser candidate/review state, never scans members/manifests for a
+// latest/newest/preferred candidate, and treats authoritative null/hidden
+// identity as null.
+export function hydrateGrantResponsePacketExportReviewReadModel(projectedPacket) {
+  if (!projectedPacket || typeof projectedPacket !== "object") {
+    return {
+      packet: null,
+      candidateResult: null,
+      exportReviewResult: null,
+    };
+  }
+
+  const candidateId = typeof projectedPacket.grantResponsePacketExportCandidateId === "string"
+    ? projectedPacket.grantResponsePacketExportCandidateId
+    : null;
+  if (!candidateId) {
+    return {
+      packet: projectedPacket,
+      candidateResult: null,
+      exportReviewResult: null,
+    };
+  }
+
+  const candidateResult = {
+    organizationId: projectedPacket.organizationId,
+    engagementId: projectedPacket.engagementId,
+    grantResponsePacketExportCandidateId: candidateId,
+  };
+  const reviewQueueItemId = typeof projectedPacket.reviewQueueItemId === "string"
+    ? projectedPacket.reviewQueueItemId
+    : null;
+
+  return {
+    packet: projectedPacket,
+    candidateResult,
+    exportReviewResult: reviewQueueItemId
+      ? {
+        organizationId: projectedPacket.organizationId,
+        engagementId: projectedPacket.engagementId,
+        grantResponsePacketExportCandidateId: candidateId,
+        reviewQueueItemId,
+        queueStatus: projectedPacket.queueStatus,
+        reviewStatus: projectedPacket.reviewStatus,
+        reviewUpdatedAt: typeof projectedPacket.reviewUpdatedAt === "string" ? projectedPacket.reviewUpdatedAt : null,
+      }
+      : null,
   };
 }
 

@@ -25591,3 +25591,77 @@ touched, and no production/shared database accessed or mutated.
 
 **Local commit:** one bounded commit created after all required checks
 passed.
+
+
+## Phase-14 (Grant Response Packet Track) - P14-06E1: Frontend
+## Authoritative Packet Export-Review Hydration Primitive
+
+**Date:** 2026-09-09
+
+**Owner authorization (bounded, local-only):** implement only the first
+bounded frontend read-model primitive for P14-06E: project and hydrate the
+exact current Grant Response Packet export candidate and packet-level export
+review state already returned by the authoritative P14-06D GET. Starting
+HEAD: `8d79aefeb1a63785d808d4bba76dbb3435b9c115` (USER_CONFIRMED, working
+tree clean). No backend DTO behavior, schema, request/start/complete
+callbacks, initial-load effect, post-mutation refetch, lifecycle buttons,
+final eligibility, final release, manifest, final packet work, production
+access, database mutation, push, or deployment was performed.
+
+**Implementation:** extended the existing
+`frontend/impactEvidenceLibraryLogic.js#projectGrantResponsePacket`
+allowlist to preserve only the safe P14-06D packet-level lifecycle fields:
+`exportReviewVisible`, `grantResponsePacketExportCandidateId`,
+`reviewQueueItemId`, `queueStatus`, `reviewStatus`, and
+`reviewUpdatedAt`. Restricted or hidden packet identity (`exportReviewVisible`
+not true) projects all candidate/review identity and status fields as
+`null`, even if unsafe input contains values. A current candidate is
+recognized only from the top-level authoritative
+`grantResponsePacketExportCandidateId`; review state is recognized only from
+top-level `reviewQueueItemId` plus the exact queue/review status and
+`reviewUpdatedAt` returned by the GET.
+
+Added the pure
+`hydrateGrantResponsePacketExportReviewReadModel(projectedPacket)` helper.
+It maps one projected authoritative packet into `{ packet, candidateResult,
+exportReviewResult }` without accepting previous browser state. No current
+candidate maps both result slots to `null`; candidate/no-review maps the
+exact candidate id with a null review; open and in-progress reviews map to
+`needs_gk_review`; resolved maps to `resolved`; all review mappings preserve
+the exact queue id and exact `reviewUpdatedAt`. The helper never scans
+member drafts, generated drafts, manifest history, timestamps, URL state, or
+mutation responses, and it introduces no latest/newest/preferred candidate
+selection.
+
+**Verification:** added
+`__tests__/kai-sprint2-p14-06e1-grant-response-packet-frontend-hydration.spec.js`
+(13/13) proving: no current candidate; candidate with no review; open,
+in_progress, and resolved review states; exact candidate id preservation;
+exact queue id preservation; exact `reviewUpdatedAt` preservation;
+authoritative null clears candidate; authoritative null clears review;
+restricted/hidden identity remains null; member/manifest/latest/newest/
+preferred fields are not inferred; unknown/unapproved fields are not
+promoted; deterministic same-input/same-output behavior; and null packet
+projection hydrates to null packet/candidate/review.
+
+**Affected regressions passed:** directly coupled packet projection and
+Impact Library Grant Response Packet regression
+`__tests__/kai-sprint2-impact-library-grant-response-packet.spec.js` (36/36)
+and lifecycle-state helper regression
+`__tests__/kai-sprint2-p14-06-grant-response-packet-export-review-lifecycle-frontend.spec.js`
+(29/29). Every Node command used the non-listening loopback `DATABASE_URL`
+sentinel. Frontend build was not run because repository instructions did
+not require it for this frontend logic-only primitive and no built bundle was
+requested by this package.
+
+**Final diff review:** edits confined to
+`frontend/impactEvidenceLibraryLogic.js`, the new focused frontend logic
+test file, and this ExecPlan entry. `git diff --check` passed with no
+whitespace errors. No backend file, schema/migration file,
+`frontend/ImpactEvidenceLibrary.jsx`, request/start/complete callback,
+initial-load effect, post-mutation refetch, lifecycle-button render path,
+manifest/final-release/final-packet file, or production configuration was
+changed.
+
+**Local commit:** one bounded commit created after all required checks
+passed.
