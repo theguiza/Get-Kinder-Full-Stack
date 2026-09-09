@@ -166,6 +166,19 @@ test("composeGrantResponsePacketExportCandidateFingerprint refuses a non-funder 
   assert.equal(result.orderedGeneratedContentDraftIds, null);
 });
 
+test("rejects a render model with zero eligible members - no_eligible_members, not a fingerprint", () => {
+  const result = buildGrantResponsePacketExportCandidateRepresentation(baseRenderModel({ members: [] }));
+  assert.equal(result.representation, null);
+  assert.equal(result.error, GRANT_RESPONSE_PACKET_EXPORT_CANDIDATE_RENDER_MODEL_ERROR.NO_ELIGIBLE_MEMBERS);
+});
+
+test("composeGrantResponsePacketExportCandidateFingerprint refuses a zero-eligible-member render model", () => {
+  const result = composeGrantResponsePacketExportCandidateFingerprint(baseRenderModel({ members: [] }));
+  assert.equal(result.fingerprint, null);
+  assert.equal(result.orderedGeneratedContentDraftIds, null);
+  assert.equal(result.error, GRANT_RESPONSE_PACKET_EXPORT_CANDIDATE_RENDER_MODEL_ERROR.NO_ELIGIBLE_MEMBERS);
+});
+
 test("identical semantic state converges to the identical fingerprint", () => {
   const first = composeGrantResponsePacketExportCandidateFingerprint(baseRenderModel());
   const second = composeGrantResponsePacketExportCandidateFingerprint(baseRenderModel());

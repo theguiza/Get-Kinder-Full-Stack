@@ -17,6 +17,7 @@ import {
   __grantResponsePacketExportCandidateServiceContract,
   __grantResponsePacketExportCandidateServiceTestables,
 } from "../Backend/kai/services/kaiGrantResponsePacketExportCandidateService.js";
+import { createPostgresGrantResponsePacketExportCandidateRepository } from "../Backend/kai/dictionary/postgresGrantResponsePacketExportCandidateRepository.js";
 
 const ORG = "00000000-0000-4000-8000-000000000001";
 const OTHER_ORG = "00000000-0000-4000-8000-000000000002";
@@ -271,4 +272,81 @@ test("the service returns only safe candidate metadata - never the raw member li
   assert.equal(result.data.memberGeneratedContentDraftIds, undefined);
   assert.equal(result.data.members, undefined);
   assert.equal(result.data.blocks, undefined);
+});
+
+// ---------------------------------------------------------------------------
+// P14-04 closure repair: a Grant Response Packet with zero eligible members
+// must not create or reuse an export candidate. These tests exercise the
+// REAL production repository (createPostgresGrantResponsePacketExportCandidateRepository)
+// and the real fingerprint service - only composeRenderModel is faked, to
+// stand in for an authoritative getGrantResponsePacket/render-model result -
+// so this proves actual service/repository control flow, not an inference
+// from memberCount. A `runInTransaction` that throws proves no durable
+// candidate/member-snapshot write, and a `metadataOnlyAudit` spy proves no
+// candidate-created audit is ever prepared.
+// ---------------------------------------------------------------------------
+
+function authoritativeRenderModel(overrides = {}) {
+  return {
+    ok: true,
+    data: {
+      renderModelContractVersion: "kai-sprint2-grant-response-packet-render-model-v1",
+      organizationId: ORG,
+      engagementId: ENGAGEMENT,
+      packetAudience: "funder",
+      members: [],
+      ...overrides,
+    },
+    error: null,
+  };
+}
+
+function realRepositoryRefusingTransactions() {
+  let transactionCalls = 0;
+  const repository = createPostgresGrantResponsePacketExportCandidateRepository({
+    runInTransaction: async () => {
+      transactionCalls += 1;
+      throw new Error("runInTransaction must not be called for this authoritative packet state");
+    },
+  });
+  return { repository, transactionCalls: () => transactionCalls };
+}
+
+function auditSpy() {
+  let prepareCalls = 0;
+  return {
+    calls: () => prepareCalls,
+    prepareMetadataOnlyAudit() {
+      prepareCalls += 1;
+      return { ok: true, async publish() {} };
+    },
+  };
+}
+
+test("a Grant Response Packet with zero eligible members fails closed, never reaches a transaction, and publishes no audit", async () => {
+  const { repository, transactionCalls } = realRepositoryRefusingTransactions();
+  const audit = auditSpy();
+  const result = await createGrantResponsePacketExportCandidate(candidateInput(), deps({
+    grantResponsePacketExportCandidateRepository: repository,
+    composeRenderModel: async () => authoritativeRenderModel({ members: [] }),
+    metadataOnlyAudit: audit,
+  }));
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "validation_blocker");
+  assert.equal(transactionCalls(), 0);
+  assert.equal(audit.calls(), 0);
+});
+
+test("NOT_APPLICABLE_EXISTING_CONTRACT: an unsupported authoritative render-model state (e.g. render-model composition failure) propagates its existing system_error unchanged and creates no candidate", async () => {
+  const { repository, transactionCalls } = realRepositoryRefusingTransactions();
+  const audit = auditSpy();
+  const result = await createGrantResponsePacketExportCandidate(candidateInput(), deps({
+    grantResponsePacketExportCandidateRepository: repository,
+    composeRenderModel: async () => ({ ok: false, data: null, error: { code: "system_error", status: 500 } }),
+    metadataOnlyAudit: audit,
+  }));
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "system_error");
+  assert.equal(transactionCalls(), 0);
+  assert.equal(audit.calls(), 0);
 });

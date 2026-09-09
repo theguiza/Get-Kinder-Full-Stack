@@ -205,7 +205,14 @@ export function createPostgresGrantResponsePacketExportCandidateRepository({ run
       const { fingerprint, orderedGeneratedContentDraftIds, error: fingerprintError } =
         composeGrantResponsePacketExportCandidateFingerprint(renderModelResult.data);
       if (!fingerprint) {
-        return failure(fingerprintError === "not_funder_audience" ? "validation_blocker" : "system_error");
+        // "not_funder_audience" and "no_eligible_members" are both
+        // legitimate, expected authoritative packet states (wrong audience,
+        // or a packet with nothing currently eligible to export) - the
+        // existing validation_blocker vocabulary, not a system_error. Any
+        // other fingerprint error means the render model was structurally
+        // malformed, which stays a system_error.
+        const isExpectedBlocker = fingerprintError === "not_funder_audience" || fingerprintError === "no_eligible_members";
+        return failure(isExpectedBlocker ? "validation_blocker" : "system_error");
       }
 
       try {

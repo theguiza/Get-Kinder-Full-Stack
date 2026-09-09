@@ -24717,3 +24717,100 @@ model, or packet Markdown serializer changed.
 
 **Local commit:** one bounded commit created after all required checks
 passed.
+
+
+## Phase-14 (Grant Response Packet Track) — P14-04 Zero-Eligible-Member
+## Closure Repair (bounded; fail-closed guard only, no schema/authority change)
+
+**Date:** 2026-09-09
+
+**Owner authorization (bounded, local-only):** close the one missing P14-04
+acceptance condition — a Grant Response Packet with zero eligible members
+must not create or reuse an export candidate as though it were a valid
+exportable packet, and an unsupported authoritative packet state must
+continue to fail closed through the existing structured KAI error/blocker
+vocabulary — limited to the fingerprint/repository fail-closed check, focused
+tests, and this ExecPlan entry; no schema/migration work, no new blocker
+vocabulary, no P14-01/P14-02/P14-03 membership/fingerprint/identity redesign,
+no packet manifest, no final-release authority, no frontend change, no
+production/shared database access.
+
+**Finding:** the accepted P14-03 fingerprint layer
+(`buildGrantResponsePacketExportCandidateRepresentation` in
+`Backend/kai/services/kaiGrantResponsePacketExportCandidateFingerprintService.js`)
+accepted a render model with an empty `members` array as a valid,
+fingerprintable representation. Because `getGrantResponsePacket`/
+`composeGrantResponsePacketRenderModel` only ever include already-eligible
+drafts (ineligible drafts are filtered out upstream in
+`evaluateGrantResponsePacketMembershipInTransaction`), a packet with zero
+eligible members produces `members: []`, which is a structurally valid but
+semantically empty render model. The existing code fingerprinted this empty
+state and let `postgresGrantResponsePacketExportCandidateRepository` insert a
+real export candidate (and an empty member snapshot, and a candidate-created
+audit) for it — a zero-member "export candidate" that is not a valid
+exportable packet.
+
+**Repair:** added one guard in
+`buildGrantResponsePacketExportCandidateRepresentation`, after the existing
+funder-only-audience check and before any representation is built: a render
+model with `members.length === 0` is refused with a new internal fingerprint-
+service reason (`GRANT_RESPONSE_PACKET_EXPORT_CANDIDATE_RENDER_MODEL_ERROR.NO_ELIGIBLE_MEMBERS`),
+exactly parallel to the existing `not_funder_audience` reason — no
+representation, no fingerprint, and no `orderedGeneratedContentDraftIds` are
+produced. `postgresGrantResponsePacketExportCandidateRepository` was updated
+to map this new reason to the existing `validation_blocker` KAI error, the
+same client-facing code `not_funder_audience` already used — no new
+client-facing blocker vocabulary was introduced. Because this refusal happens
+before `composeGrantResponsePacketExportCandidateFingerprint` returns a
+fingerprint, the repository returns before ever entering
+`runInTransaction`: no identity resolution, no candidate insert, no member-
+snapshot insert, and no candidate-created audit publication occur for a
+zero-eligible-member packet. Member count is still derived exclusively from
+the authoritative render model (`renderModel.members`, itself derived only
+from `getGrantResponsePacket`) — never from a client-supplied value; no
+dummy member and no manufactured fingerprint were introduced. The existing
+render-model-composition failure path (`composeGrantResponsePacketRenderModel`
+returning `{ok:false, error:{code:"system_error"}}` for a structurally
+unsupported/invalid packet) was inspected and already propagates unchanged
+through the repository's existing `if (!renderModelResult?.ok) return
+{...renderModelResult.error}` passthrough with no candidate created — no new
+unsupported-packet-state vocabulary was invented (`UNSUPPORTED_PACKET_STATE_PROOF:
+NOT_APPLICABLE_EXISTING_CONTRACT`, proven by regression instead).
+
+**Verification:** extended
+`__tests__/kai-grant-response-packet-export-candidate-boundary.spec.js` with
+2 new fingerprint-layer cases (zero-member render model refused with
+`NO_ELIGIBLE_MEMBERS`, both at `buildGrantResponsePacketExportCandidateRepresentation`
+and `composeGrantResponsePacketExportCandidateFingerprint`); extended
+`__tests__/kai-sprint2-p14-04-grant-response-packet-export-candidate-service.spec.js`
+with 2 new cases exercising the real production repository
+(`createPostgresGrantResponsePacketExportCandidateRepository`, not a fake)
+with only `composeRenderModel` faked to stand in for an authoritative
+zero-member packet result — proving `validation_blocker`, zero
+`runInTransaction` calls, and zero audit `prepareMetadataOnlyAudit` calls —
+plus one case proving an unsupported render-model-composition failure
+(`system_error`) propagates unchanged with the same zero writes; extended
+`__tests__/kai-sprint2-p14-04-grant-response-packet-export-candidate-route.spec.js`
+with 1 new case proving the same zero-member fail-closed behavior through the
+real HTTP route (422 `validation_blocker`, zero `runInTransaction` calls). All
+41 tests across these three files, plus 7 pre-existing tests in the render-
+model boundary suite
+(`kai-grant-response-packet-render-model-boundary.spec.js`, unaffected),
+passed. `kai-sprint2-p14-03-grant-response-packet-export-candidate-foundation.integration.spec.js`
+was left to its own runner-owned-database skip guard (not exercised) per the
+existing "no local-Postgres migration runners for reassurance" instruction.
+
+**Full suite:** not run — no shared/production backend code path outside the
+two files above changed; this repair is a fingerprint/repository-internal
+error-mapping refinement.
+
+**Final diff review:** two production files touched
+(`Backend/kai/services/kaiGrantResponsePacketExportCandidateFingerprintService.js`,
+`Backend/kai/dictionary/postgresGrantResponsePacketExportCandidateRepository.js`),
+three existing test files extended, and this ExecPlan entry. `git diff
+--check` passed with no whitespace errors. No schema, migration,
+P14-02/P14-03 identity/member-snapshot table, packet manifest, approval, or
+final-release file changed. No frontend file changed.
+
+**Local commit:** one bounded commit created after all required checks
+passed.

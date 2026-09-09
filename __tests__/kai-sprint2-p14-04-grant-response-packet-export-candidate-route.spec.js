@@ -23,6 +23,7 @@ import {
   setKaiSprint2NoStore,
 } from "../Backend/kai/middleware/kaiSprint2RequestSafety.js";
 import { createGrantResponsePacketExportCandidate } from "../Backend/kai/services/kaiGrantResponsePacketExportCandidateService.js";
+import { createPostgresGrantResponsePacketExportCandidateRepository } from "../Backend/kai/dictionary/postgresGrantResponsePacketExportCandidateRepository.js";
 
 const basePath = "/api/kai/sprint2/intake";
 const routePath = "/admin/organizations/:organizationId/engagements/:engagementId/grant-response-packet/export-candidates";
@@ -281,6 +282,51 @@ test("export-candidates route delegates to the existing P14-04 service, deriving
     assert.equal(response.body.error.code, "validation_blocker");
     assert.deepEqual(scenario.serviceCalls, []);
   });
+});
+
+test("export-candidates route fails closed for a zero-eligible-member packet through the existing structured KAI error, creating no candidate", async (t) => {
+  const restoreFeatureFlag = withFeatureFlagEnabled();
+  let transactionCalls = 0;
+  const realRepository = createPostgresGrantResponsePacketExportCandidateRepository({
+    runInTransaction: async () => {
+      transactionCalls += 1;
+      throw new Error("runInTransaction must not be called for a zero-member packet");
+    },
+  });
+  const restoreService = intakeRouteTestables.setIntakeServiceForTest({
+    async createGrantResponsePacketExportCandidate(input, dependencies) {
+      return createGrantResponsePacketExportCandidate(input, {
+        ...dependencies,
+        env: enabledEnv,
+        grantResponsePacketExportCandidateRepository: realRepository,
+        composeRenderModel: async () => ({
+          ok: true,
+          data: {
+            renderModelContractVersion: "kai-sprint2-grant-response-packet-render-model-v1",
+            organizationId: input.organizationId,
+            engagementId: input.engagementId,
+            packetAudience: "funder",
+            members: [],
+          },
+          error: null,
+        }),
+      });
+    },
+  });
+  const scenario = { authenticated: true, actorContext };
+  const app = createApplication(() => scenario);
+  const server = await listen(app);
+
+  t.after(async () => {
+    restoreService();
+    restoreFeatureFlag();
+    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  });
+
+  const response = await requestJson(server, candidatesPath(), { body: {} });
+  assert.equal(response.statusCode, 422);
+  assert.equal(response.body.error.code, "validation_blocker");
+  assert.equal(transactionCalls, 0);
 });
 
 test("grant-response-packet export-candidates route contains no SQL, no direct DB access, and no client-selected membership/fingerprint/manifest authority", () => {

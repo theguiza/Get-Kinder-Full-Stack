@@ -39,6 +39,7 @@ import crypto from "node:crypto";
 
 export const GRANT_RESPONSE_PACKET_EXPORT_CANDIDATE_RENDER_MODEL_ERROR = Object.freeze({
   NOT_FUNDER_AUDIENCE: "not_funder_audience",
+  NO_ELIGIBLE_MEMBERS: "no_eligible_members",
   INVALID_RENDER_MODEL: "invalid_render_model",
 });
 
@@ -116,6 +117,16 @@ export function buildGrantResponsePacketExportCandidateRepresentation(renderMode
   }
   if (renderModel.packetAudience !== "funder") {
     return { representation: null, error: GRANT_RESPONSE_PACKET_EXPORT_CANDIDATE_RENDER_MODEL_ERROR.NOT_FUNDER_AUDIENCE };
+  }
+  // A packet with zero currently-eligible members (getGrantResponsePacket /
+  // the render model only ever include already-eligible drafts - see
+  // evaluateGrantResponsePacketMembershipInTransaction) is not a valid
+  // exportable packet: there is nothing to fingerprint or snapshot. Refusing
+  // here, before any representation/fingerprint is built, is what stops the
+  // repository from ever reaching its candidate/member-snapshot/audit write
+  // for this state.
+  if (renderModel.members.length === 0) {
+    return { representation: null, error: GRANT_RESPONSE_PACKET_EXPORT_CANDIDATE_RENDER_MODEL_ERROR.NO_ELIGIBLE_MEMBERS };
   }
   const members = renderModel.members.map(projectMember);
   if (members.some((member) => member === null)) {
