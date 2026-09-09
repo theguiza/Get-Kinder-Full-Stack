@@ -23781,3 +23781,136 @@ six-runner historical export-manifest migration-chain debt (P3-06/09/13/16/
 
 **Local commit:** one bounded commit created after all required checks
 passed.
+
+## Grant Response Packet: Export/Reuse Foundation (per-member existing
+## single-draft export-manifest linkage; no composite manifest, no schema
+## change, no new approval authority)
+
+**Date:** 2026-09-09
+
+**Owner authorization (bounded, local-only):** advance the existing,
+read-only Grant Response Packet into the existing Phase-14 governed
+export/reuse pipeline. Starting HEAD:
+`8f25414f0b2eb39f82ddd46698ea2aa86f44e2e0` (USER_CONFIRMED, working tree
+clean). The member/claim-volume bound decision
+(`GRANT_PACKET_MEMBER_BOUND_DECISION_REQUIRED: YES`) remained out of scope
+- nothing about caps, truncation, or pagination was investigated here.
+
+**Fresh-inspection finding (the one design stop this package proves does
+NOT apply):** the existing single-draft export pipeline
+(`kai.export_candidates` unique per `generated_content_draft_id`/audience/
+fingerprint, `kai.export_manifests` unique per `export_candidate_id`, and
+every Markdown/CSV/PDF/DOCX render route keyed by one `exportManifestId`)
+is genuinely single-draft schema with no composite/packet-level manifest
+identity anywhere in the repository. Inventing one would require new
+schema, a new durable packet-persistence identity, and new
+finalization-authority semantics for that identity - exactly the
+`ONLY DESIGN STOP` this task defines. But the repository already carries
+the precedent for exposing an existing single-draft export identity from
+inside a *different* packet read without any of that: the P3-20 durable-read
+recovery already used by the single-draft export-review packet
+(`getGeneratedDraftExportReviewPacket` in `kaiExportReviewService.js`) reads
+`loadExportManifestIdentityForReviewQueueItemInTransaction` /
+`loadExportManifestHistoryForReviewQueueItemInTransaction`
+(`postgresExportManifestRepository.js`) keyed only by that draft's own
+`exportReviewQueueItemId`, inside the same read-only transaction as the
+packet composition, refusing to guess when zero or more-than-one manifest
+matches. That exact, unmodified recovery is reusable per Grant Response
+Packet member - so no schema change, no new packet-persistence decision, and
+no new authority semantics were required; the `ONLY DESIGN STOP` does not
+apply to this package's scope.
+
+**Implementation (smallest coherent reuse):**
+`evaluateGrantResponsePacketMembershipInTransaction`
+(`Backend/kai/dictionary/postgresGeneratedContentRepository.js`) gains a new
+optional `manifestReaders` parameter defaulting to the exact unmodified
+`loadExportManifestIdentityForReviewQueueItemInTransaction`/
+`loadExportManifestHistoryForReviewQueueItemInTransaction` functions. For
+each packet-eligible member, a new `loadPacketMemberExportManifestLinkage`
+helper looks up that member's own `exportManifestId`/`exportManifestHistory`
+by its own `exportReviewQueueItemId`, in the SAME `REPEATABLE READ READ ONLY`
+transaction as the rest of the membership scan - never a query, and never a
+fabricated identity, for a member with no `exportReviewQueueItemId` at all
+(nothing submitted for export review yet). `kaiGrantResponsePacketService.js`
+projects these two fields through `projectPacketDraft` exactly like the
+existing `exportReviewQueueItemId`/`exportReviewQueueStatus`/
+`exportReviewStatus` fields: nulled/emptied whenever the requesting actor
+lacks independent export-review visibility (`exportReviewVisible`), reusing
+the exact P3-20 `isExportManifestHistoryDto` validator
+(`kaiExportReviewService.js`'s own testable) rather than inventing a second
+manifest-history shape. This grants no new authority: it only lets an actor
+who can already see one member's export-review state also see which
+already-governed single-draft export manifest(s), if any, that member's own
+export-review history produced, so the EXISTING single-draft
+`/export-manifests/:exportManifestId/{markdown,csv,pdf,docx}` render/export
+routes can be reached per member without a second, composite manifest
+identity ever being invented. Packet identity
+(`organizationId`+`engagementId`), membership, ordering, citation identity,
+and the funder-only/current-use-eligible eligibility gate are completely
+untouched.
+
+**Verification:** new
+`__tests__/kai-grant-response-packet-boundary.spec.js` coverage (19/19
+passing, up from 18/18): one new repository-level test proves the linkage is
+recovered exactly (identity + full history) for a member with an
+`exportReviewQueueItemId`, and that the manifest readers are invoked zero
+times (never a fabricated identity) for a sibling member with none; the
+existing export-review-visibility-gating service test was extended in place
+to assert `exportManifestId`/`exportManifestHistory` are nulled/emptied for
+a reviewer lacking export-review authority and passed through exactly for
+gk_admin. All 18 previously-passing tests in that file (membership scope,
+funder-only audience, citation traceability, deterministic ordering,
+fixed/bounded query count, cross-draft evaluator reuse, service gating,
+prohibited-field rejection) pass unmodified - every existing fixture in that
+file has an empty `exportReviewQueues`, so the new manifest-reader calls
+were never reached by any of them, proving zero added queries for the
+existing fixed-query-count assertion.
+
+**Regression run:** `__tests__/kai-grant-response-packet-boundary.spec.js`
+(19/19), `__tests__/kai-sprint2-impact-library-grant-response-packet.spec.js`
++ `__tests__/kai-sprint2-impact-evidence-library.spec.js` (116/116), every
+non-integration export-review/export-manifest boundary suite (323/323), and
+every non-integration generated-content/review-packet/P3-01/P3-02 boundary
+suite (62/62) - all pass unmodified. `DATABASE_URL` set to a non-listening
+loopback sentinel for every Node/npm command.
+
+**Full suite:** `npm test` -> 3539 passed, 7 failed, 61 skipped (the same
+4 pre-existing child-file-read-model/batch-files-collection/file-detail-
+service/file-detail-contract failures and their nested subtests as the
+USER_CONFIRMED baseline, plus 2 net-new passing tests from this package; 0
+newly introduced failures).
+
+**Final diff review:** confined to
+`Backend/kai/dictionary/postgresGeneratedContentRepository.js` (one new
+static import, one new helper function, one new default-reader constant,
+and the four-argument signature/loop change to
+`evaluateGrantResponsePacketMembershipInTransaction` - additive only, every
+other exported function untouched),
+`Backend/kai/services/kaiGrantResponsePacketService.js` (one new import,
+`projectPacketDraft` extended to compute/validate/project the two new
+fields), `__tests__/kai-grant-response-packet-boundary.spec.js` (one new
+test, one existing test extended in place), and this ExecPlan. No route,
+validator, frontend, Current State, Implementation Baseline, Board Summary,
+migration, or export/review authority code was touched. No new schema, no
+new persistence, no composite/packet-level export manifest, no packet
+cap/truncation/pagination, and no new approval/finalization authority were
+added. `git diff --check` passed with no whitespace errors. No production or
+shared database was accessed, mutated, or migrated; nothing was pushed or
+deployed; no feature flags changed; no Current State or Implementation
+Baseline update was made.
+
+**Remaining gap / next continuation:** the member/claim-volume bound
+decision (`GRANT_PACKET_MEMBER_BOUND_DECISION_REQUIRED: YES`) remains open.
+A genuinely separate, larger continuation - out of this package's scope and
+not started here - is exposing this per-member export-manifest linkage
+through the Grant Response Packet's read route and the Impact Evidence
+Library product UX (an "Open export manifest" affordance per member,
+reusing the existing single-draft Markdown/CSV/PDF/DOCX download links
+verbatim), and/or wiring the existing single-draft
+`request`/`start`/`complete` export-review actions to be reachable from the
+packet surface for a member that has none yet - both remain governed by the
+existing gk_admin-only single-draft export-review/finalization authority,
+never a new one.
+
+**Local commit:** one bounded commit created after all required checks
+passed.

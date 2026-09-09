@@ -17,6 +17,10 @@ import {
   EXPORT_REVIEW_LIFECYCLE_PROFILES,
   isExportReviewQueueContractRow,
 } from "./exportReviewQueueContract.js";
+import {
+  loadExportManifestIdentityForReviewQueueItemInTransaction,
+  loadExportManifestHistoryForReviewQueueItemInTransaction,
+} from "./postgresExportManifestRepository.js";
 
 const RESULT_STATUS = Object.freeze({
   validation_blocker: 422,
@@ -1237,7 +1241,38 @@ function memoizeEvaluatorAcrossDrafts(evaluator) {
 // memoized wrapper across every member draft in the loop below so a claim
 // cited by multiple drafts in the same engagement is evaluated at most
 // once per packet read, never once per citing draft.
-export async function evaluateGrantResponsePacketMembershipInTransaction(tx, input, evaluator = evaluateClaimTraceabilityInTransaction) {
+// Per-member export-manifest identity/history recovery (export/reuse
+// foundation): reuses the exact P3-20 durable-read functions the single-
+// draft export-review packet already exposes
+// (loadExportManifestIdentityForReviewQueueItemInTransaction /
+// loadExportManifestHistoryForReviewQueueItemInTransaction) - never a new
+// manifest lookup, never a latest/current selection, never a query when a
+// member has no exportReviewQueueItemId at all (nothing has been submitted
+// for export review yet, so there is nothing to recover). Reads happen in
+// the SAME REPEATABLE READ READ ONLY transaction as the rest of the
+// membership scan - an exact snapshot-consistent recovery, not a separate
+// best-effort follow-up.
+async function loadPacketMemberExportManifestLinkage(tx, { organizationId, exportReviewQueueItemId }, manifestReaders) {
+  if (exportReviewQueueItemId === null) return { exportManifestId: null, exportManifestHistory: [] };
+  const identity = await manifestReaders.loadManifestIdentity(tx, { organizationId, exportReviewQueueItemId });
+  const history = await manifestReaders.loadManifestHistory(tx, { organizationId, exportReviewQueueItemId });
+  return {
+    exportManifestId: identity?.exportManifestId ?? null,
+    exportManifestHistory: history?.exportManifestHistory ?? [],
+  };
+}
+
+const DEFAULT_GRANT_RESPONSE_PACKET_MANIFEST_READERS = Object.freeze({
+  loadManifestIdentity: loadExportManifestIdentityForReviewQueueItemInTransaction,
+  loadManifestHistory: loadExportManifestHistoryForReviewQueueItemInTransaction,
+});
+
+export async function evaluateGrantResponsePacketMembershipInTransaction(
+  tx,
+  input,
+  evaluator = evaluateClaimTraceabilityInTransaction,
+  manifestReaders = DEFAULT_GRANT_RESPONSE_PACKET_MANIFEST_READERS,
+) {
   if (!validateGrantResponsePacketMembershipInput(input)) return failure("validation_blocker");
   const { organizationId, engagementId } = input;
 
@@ -1272,7 +1307,12 @@ export async function evaluateGrantResponsePacketMembershipInTransaction(tx, inp
     const resolvedProfile = GENERATED_CONTENT_REVIEW_LIFECYCLE_PROFILES[2];
     if (packet.queueStatus !== resolvedProfile.queueStatus || packet.reviewStatus !== resolvedProfile.reviewStatus) continue;
     if (packet.currentUseEligible !== true) continue;
-    drafts.push(packet);
+    const manifestLinkage = await loadPacketMemberExportManifestLinkage(
+      tx,
+      { organizationId, exportReviewQueueItemId: packet.exportReviewQueueItemId },
+      manifestReaders,
+    );
+    drafts.push({ ...packet, ...manifestLinkage });
   }
 
   return success({ organizationId, engagementId, packetAudience: GRANT_RESPONSE_PACKET_AUDIENCE, drafts });

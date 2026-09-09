@@ -566,6 +566,220 @@ test("Grant Response Packet membership evaluates a claim cited by more than one 
   assert.equal(evaluatorCalls, 1, "the shared claim must be evaluated once per packet read, not once per citing draft");
 });
 
+test("Grant Response Packet membership recovers each member's own already-governed export-manifest identity/history exactly, and never queries for a member that has no exportReviewQueueItemId", async () => {
+  // A dedicated two-draft engagement: one member has already been submitted
+  // for export review (non-null exportReviewQueueItemId) and has an
+  // existing governed manifest to recover; the other has never been
+  // submitted for export review at all. Proves the export/reuse foundation
+  // reuses the exact P3-20 durable-read functions per member, keyed only by
+  // that member's own exportReviewQueueItemId - never a query issued (and
+  // never a fabricated identity returned) for a member with none.
+  const org = "00000000-0000-4000-8000-000000000001";
+  const engagementId = "00000000-0000-4000-8000-000000000851";
+  const withManifestQueueItemId = "00000000-0000-4000-8000-000000000861";
+  const existingExportManifestId = "00000000-0000-4000-8000-000000000862";
+  const existingExportCandidateId = "00000000-0000-4000-8000-000000000863";
+
+  function memberDraft(n, { exportReviewQueueItemId }) {
+    const draftId = `00000000-0000-4000-8000-0000000085${n}1`;
+    const runId = `00000000-0000-4000-8000-0000000085${n}2`;
+    const blockId = `00000000-0000-4000-8000-0000000085${n}3`;
+    const citationId = `00000000-0000-4000-8000-0000000085${n}4`;
+    const queueId = `00000000-0000-4000-8000-0000000085${n}5`;
+    const claimId = `00000000-0000-4000-8000-0000000085${n}6`;
+    const evidenceId = `00000000-0000-4000-8000-0000000085${n}7`;
+    const draft = {
+      generated_content_draft_id: draftId,
+      generation_run_id: runId,
+      organization_id: org,
+      content_type: "evidence_summary",
+      requested_audience: "funder",
+      draft_status: "draft",
+      review_status: "needs_gk_review",
+    };
+    return {
+      draftId,
+      runId,
+      claimId,
+      evidenceId,
+      draft,
+      run: { generation_run_id: runId, organization_id: org, request_fingerprint: "a".repeat(64), content_type: "evidence_summary", requested_audience: "funder" },
+      siblingDrafts: [draft],
+      blocks: [{ generated_content_block_id: blockId, generated_content_draft_id: draftId, organization_id: org, ordinal: 1, text: `Export-linkage draft ${n}.` }],
+      citations: [{
+        generated_content_citation_id: citationId,
+        generated_content_block_id: blockId,
+        organization_id: org,
+        claim_id: claimId,
+        evidence_item_id: evidenceId,
+        block_ordinal: 1,
+      }],
+      queues: [{
+        review_queue_item_id: queueId,
+        organization_id: org,
+        queue_type: "generated_content_review",
+        target_object_type: "generated_content_draft",
+        target_object_id: draftId,
+        priority: "medium",
+        queue_status: "resolved",
+        review_status: "resolved",
+        assigned_to: null,
+        due_at: null,
+        summary: "Generated draft requires human review.",
+        required_action:
+          "Review citations, audience eligibility, limitations, unsupported claims, and numeric or causal assertions before any use.",
+        updated_at: "2026-08-06T09:00:00.000Z",
+      }],
+      exportReviewQueues: exportReviewQueueItemId ? [{
+        review_queue_item_id: exportReviewQueueItemId,
+        organization_id: org,
+        queue_type: "export_review",
+        target_object_type: "generated_content_draft",
+        target_object_id: draftId,
+        priority: "medium",
+        queue_status: "resolved",
+        review_status: "resolved",
+        blocked_reason: null,
+        assigned_to: null,
+        due_at: null,
+        summary: "Generated draft requires export review.",
+        required_action:
+          "Review audience authority, current eligibility, citations, and the final export gate before any export.",
+        queue_metadata: {},
+        created_by: null,
+        created_by_type: "system",
+        updated_at: "2026-08-06T09:00:00.000Z",
+      }] : [],
+    };
+  }
+
+  const draftWithManifest = memberDraft(1, { exportReviewQueueItemId: withManifestQueueItemId });
+  const draftWithoutExportReview = memberDraft(2, { exportReviewQueueItemId: null });
+  const fixturesById = {
+    [draftWithManifest.draftId]: draftWithManifest,
+    [draftWithoutExportReview.draftId]: draftWithoutExportReview,
+  };
+  const allDraftIds = [draftWithManifest.draftId, draftWithoutExportReview.draftId];
+
+  const evidenceIdByClaimId = {
+    [draftWithManifest.claimId]: draftWithManifest.evidenceId,
+    [draftWithoutExportReview.claimId]: draftWithoutExportReview.evidenceId,
+  };
+  const eligibleEvaluator = async (tx2, args) => ({
+    ok: true,
+    data: {
+      claim: { claim_id: args.claimId, claim_type: "finding", claim_status: "proposed", claim_review_status: "approved", claim_strength: "strong", audience_gates: {} },
+      evidence: { evidence_item_id: evidenceIdByClaimId[args.claimId], evidence_review_status: "approved", support_strength: "strong", review_queue_item_id: "00000000-0000-4000-8000-000000000871", review_queue_status: "closed", review_status: "approved", updated_at: "2026-08-06T09:00:00.000Z", sensitivity_level: "unknown" },
+      locator: { source_locator_id: "00000000-0000-4000-8000-000000000872" },
+      source: { source_id: "00000000-0000-4000-8000-000000000873", source_code: null },
+      source_version: { source_version_id: "00000000-0000-4000-8000-000000000874", is_current: true },
+      claim_review: { review_queue_item_id: "00000000-0000-4000-8000-000000000875", queue_status: "closed", review_status: "approved" },
+      candidate: { intake_source_candidate_id: "00000000-0000-4000-8000-000000000876" },
+      promotion_decision: { intake_promotion_decision_id: "00000000-0000-4000-8000-000000000877" },
+      dimensions: {},
+      gap_items: [],
+      client_followup_workflows: [],
+      potential_conflict_groups: [],
+      requestedAudience: "funder",
+      eligible: true,
+      blockerCodes: [],
+      affectedDimensionKeys: [],
+      affectedObjectIds: [],
+      truncated: false,
+    },
+    error: null,
+  });
+
+  const tx = {
+    async query(sql, params) {
+      if (/FROM kai\.engagements\b/.test(sql)) {
+        return { rows: [{ engagement_id: engagementId, organization_id: org }] };
+      }
+      if (/JOIN kai\.generation_runs r\b/.test(sql)) {
+        return { rows: allDraftIds.map((id) => ({ generated_content_draft_id: id })) };
+      }
+      if (/FROM kai\.generated_content_drafts\b/.test(sql) && /WHERE organization_id/.test(sql) && /ANY/.test(sql)) {
+        const draftIds = firstArrayParam(params);
+        return { rows: draftIds.map((id) => fixturesById[id].draft) };
+      }
+      if (/FROM kai\.generated_content_drafts\b/.test(sql) && /WHERE generation_run_id = ANY/.test(sql)) {
+        const runIds = firstArrayParam(params);
+        return { rows: Object.values(fixturesById).filter((f) => runIds.includes(f.runId)).flatMap((f) => f.siblingDrafts) };
+      }
+      if (/FROM kai\.generation_runs\b/.test(sql) && !/JOIN/.test(sql)) {
+        const runIds = firstArrayParam(params);
+        return { rows: Object.values(fixturesById).filter((f) => runIds.includes(f.runId)).map((f) => f.run) };
+      }
+      if (/FROM kai\.generated_content_blocks\b/.test(sql)) {
+        const draftIds = firstArrayParam(params);
+        return { rows: draftIds.flatMap((id) => fixturesById[id].blocks) };
+      }
+      if (/FROM kai\.generated_content_citations\b/.test(sql)) {
+        const blockIds = firstArrayParam(params);
+        return { rows: Object.values(fixturesById).flatMap((f) => f.citations.filter((c) => blockIds.includes(c.generated_content_block_id))) };
+      }
+      if (/FROM kai\.review_queue_items\b/.test(sql) && /blocked_reason/.test(sql)) {
+        const draftIds = firstArrayParam(params);
+        return { rows: draftIds.flatMap((id) => fixturesById[id].exportReviewQueues) };
+      }
+      if (/FROM kai\.review_queue_items\b/.test(sql)) {
+        const draftIds = firstArrayParam(params);
+        return { rows: draftIds.flatMap((id) => fixturesById[id].queues) };
+      }
+      throw new Error(`unexpected query in export-manifest-linkage boundary test: ${sql}`);
+    },
+  };
+
+  const identityCalls = [];
+  const historyCalls = [];
+  const manifestReaders = {
+    async loadManifestIdentity(tx2, args) {
+      identityCalls.push(args);
+      assert.equal(args.organizationId, org);
+      assert.equal(args.exportReviewQueueItemId, withManifestQueueItemId);
+      return { exportManifestId: existingExportManifestId };
+    },
+    async loadManifestHistory(tx2, args) {
+      historyCalls.push(args);
+      assert.equal(args.organizationId, org);
+      assert.equal(args.exportReviewQueueItemId, withManifestQueueItemId);
+      return {
+        exportManifestHistory: [{
+          exportManifestId: existingExportManifestId,
+          exportCandidateId: existingExportCandidateId,
+          createdAt: "2026-08-06T09:00:00.000Z",
+        }],
+      };
+    },
+  };
+
+  const result = await evaluateGrantResponsePacketMembershipInTransaction(
+    tx,
+    { organizationId: org, engagementId },
+    eligibleEvaluator,
+    manifestReaders,
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.data.drafts.length, 2);
+
+  // Never a query (or a fabricated identity) for the member with no
+  // exportReviewQueueItemId at all.
+  assert.equal(identityCalls.length, 1);
+  assert.equal(historyCalls.length, 1);
+
+  const withManifestPacket = result.data.drafts.find((d) => d.generatedContentDraftId === draftWithManifest.draftId);
+  assert.equal(withManifestPacket.exportManifestId, existingExportManifestId);
+  assert.deepEqual(withManifestPacket.exportManifestHistory, [{
+    exportManifestId: existingExportManifestId,
+    exportCandidateId: existingExportCandidateId,
+    createdAt: "2026-08-06T09:00:00.000Z",
+  }]);
+
+  const withoutExportReviewPacket = result.data.drafts.find((d) => d.generatedContentDraftId === draftWithoutExportReview.draftId);
+  assert.equal(withoutExportReviewPacket.exportManifestId, null);
+  assert.deepEqual(withoutExportReviewPacket.exportManifestHistory, []);
+});
+
 test("Grant Response Packet membership never calls the single-draft per-draft read-packet evaluator", () => {
   const source = readFileSync(
     new URL("../Backend/kai/dictionary/postgresGeneratedContentRepository.js", import.meta.url),
@@ -618,6 +832,12 @@ test("Grant Response Packet service projects export-review fields only for an ac
     exportReviewQueueItemId: "00000000-0000-4000-8000-000000000801",
     exportReviewQueueStatus: "open",
     exportReviewStatus: "needs_gk_review",
+    exportManifestId: "00000000-0000-4000-8000-000000000802",
+    exportManifestHistory: [{
+      exportManifestId: "00000000-0000-4000-8000-000000000802",
+      exportCandidateId: "00000000-0000-4000-8000-000000000803",
+      createdAt: "2026-08-06T09:00:00.000Z",
+    }],
     blocks: [{
       ordinal: 1,
       text: "Visible draft text.",
@@ -648,11 +868,19 @@ test("Grant Response Packet service projects export-review fields only for an ac
   assert.equal(reviewerResult.data.drafts[0].exportReviewQueueItemId, null);
   assert.equal(reviewerResult.data.drafts[0].exportReviewQueueStatus, null);
   assert.equal(reviewerResult.data.drafts[0].exportReviewStatus, null);
+  assert.equal(reviewerResult.data.drafts[0].exportManifestId, null);
+  assert.deepEqual(reviewerResult.data.drafts[0].exportManifestHistory, []);
 
   const adminResult = await getGrantResponsePacket(serviceInput({ actorContext: adminActor }), { env: enabledEnv, generatedContentRepository: repository });
   assert.equal(adminResult.ok, true);
   assert.equal(adminResult.data.drafts[0].exportReviewVisible, true);
   assert.equal(adminResult.data.drafts[0].exportReviewQueueItemId, "00000000-0000-4000-8000-000000000801");
+  assert.equal(adminResult.data.drafts[0].exportManifestId, "00000000-0000-4000-8000-000000000802");
+  assert.deepEqual(adminResult.data.drafts[0].exportManifestHistory, [{
+    exportManifestId: "00000000-0000-4000-8000-000000000802",
+    exportCandidateId: "00000000-0000-4000-8000-000000000803",
+    createdAt: "2026-08-06T09:00:00.000Z",
+  }]);
 });
 
 test("Grant Response Packet service rejects injected repository packets containing raw or prohibited fields with system_error", async () => {

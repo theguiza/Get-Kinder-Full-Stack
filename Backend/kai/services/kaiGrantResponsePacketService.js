@@ -3,7 +3,7 @@ import { buildKaiError } from "../errors/kaiErrors.js";
 import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationService.js";
 import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
 import { __generatedContentServiceContract, __generatedContentReviewPacketServiceTestables } from "./kaiGeneratedContentService.js";
-import { __exportReviewServiceContract } from "./kaiExportReviewService.js";
+import { __exportReviewServiceContract, __exportReviewServiceTestables } from "./kaiExportReviewService.js";
 
 const {
   GENERATED_CONTENT_REVIEW_ALLOWED_ROLES,
@@ -11,6 +11,10 @@ const {
 } = __generatedContentServiceContract;
 const { isGeneratedDraftReviewPacketDto } = __generatedContentReviewPacketServiceTestables;
 const { EXPORT_REVIEW_ALLOWED_ROLES } = __exportReviewServiceContract;
+// Reuses the exact P3-20 export-manifest-history shape/validator the
+// single-draft export-review packet already exposes - no second manifest
+// vocabulary invented for the Grant Response Packet.
+const { isExportManifestHistoryDto } = __exportReviewServiceTestables;
 
 // Deliberately reuses the exact single-draft review-packet operation/role
 // gate (GENERATED_CONTENT_REVIEW_ALLOWED_ROLES, gk_admin/gk_reviewer) - a
@@ -52,15 +56,37 @@ async function createDefaultGeneratedContentRepository() {
 // (isGeneratedDraftReviewPacketDto), never a second packet-shape
 // vocabulary. Membership order is exactly the repository's deterministic
 // generated_content_draft_id ASC order - never re-sorted here.
+//
+// Export/reuse foundation: each member additionally carries exportManifestId
+// / exportManifestHistory - the exact P3-20 durable-read recovery
+// (loadExportManifestIdentityForReviewQueueItemInTransaction /
+// loadExportManifestHistoryForReviewQueueItemInTransaction) the single-draft
+// export-review packet already exposes, reused unmodified. This grants no
+// new export/finalization authority: it only lets an actor who can already
+// see a member's export-review state (exportReviewVisible) also see which
+// already-governed single-draft export manifest(s), if any, that member's
+// own export-review history has produced - so the existing single-draft
+// Markdown/CSV/PDF/DOCX render/export routes
+// (/export-manifests/:exportManifestId/{markdown,csv,pdf,docx}) can be
+// reached per member without inventing a second, composite manifest
+// identity. Nulled/emptied whenever exportReviewVisible is false, exactly
+// like the other export-review-scoped fields above.
 function projectPacketDraft(packet, exportReviewVisible) {
+  const exportManifestId = exportReviewVisible ? (packet.exportManifestId ?? null) : null;
+  const exportManifestHistory = exportReviewVisible ? (packet.exportManifestHistory ?? []) : [];
+  if (!(exportManifestId === null || UUID_PATTERN.test(exportManifestId))) return null;
+  if (!isExportManifestHistoryDto(exportManifestHistory)) return null;
+
   const projected = {
     ...packet,
     exportReviewQueueItemId: exportReviewVisible ? packet.exportReviewQueueItemId : null,
     exportReviewQueueStatus: exportReviewVisible ? packet.exportReviewQueueStatus : null,
     exportReviewStatus: exportReviewVisible ? packet.exportReviewStatus : null,
   };
+  delete projected.exportManifestId;
+  delete projected.exportManifestHistory;
   if (!isGeneratedDraftReviewPacketDto(projected)) return null;
-  return { ...projected, exportReviewVisible };
+  return { ...projected, exportManifestId, exportManifestHistory, exportReviewVisible };
 }
 
 export async function getGrantResponsePacket(input, dependencies = {}) {
