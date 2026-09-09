@@ -24265,3 +24265,79 @@ frontend build was not required.
 
 **Local commit:** one bounded commit created after all required checks
 passed.
+
+## Grant Response Packet: Impact Evidence Library Markdown preview affordance
+## (PREVIEW_READ_ONLY; existing route reused; no new route, no mutation)
+
+**Date:** 2026-09-09
+
+**Owner authorization (bounded, local-only):** continue Phase-14 Grant
+Response Packet development from starting HEAD
+`7fac4ffb04cb53d945c3a179598473b61ded943a` (USER_CONFIRMED, working tree
+clean) by adding the packet-level Markdown preview affordance to the existing
+Impact Evidence Library Grant Response Packet card, consuming only the
+already-accepted read-only route
+`GET /api/kai/sprint2/intake/admin/organizations/:organizationId/engagements/:engagementId/grant-response-packet/markdown`.
+Closed areas remained closed: no P14-01, engagement-lineage, membership,
+composite render-model internals, packet-volume/cap work, durable packet
+identity, Board Summary, backend route/serializer/schema/persistence change,
+production access, database mutation, push, or deploy was performed.
+
+**Implementation:** added `grantResponsePacketMarkdownPath(organizationId,
+engagementId)` to `frontend/impactEvidenceLibraryLogic.js`, mirroring the
+existing `grantResponsePacketPath` builder exactly (same two identifiers,
+same encoding, no member/manifest/candidate id). Added one plain `<a href>`
+"Download Markdown preview" action to the existing Grant Response Packet card
+in `frontend/ImpactEvidenceLibrary.jsx`, rendered under the same
+`engagementId` truthiness gate the rest of the card already uses (no new
+packet-selection state), with an explicit "Preview only - a read-only draft
+representation. Downloading it grants no export or release authority."
+caption. The link targets exactly `organizationId` + the currently selected
+`engagementId`; changing the selected engagement changes the href on the next
+render like every other identifier-keyed link in this component. No
+`generatedContentDraftId`, `exportManifestId`, or `exportCandidateId` is used
+to build this URL. No POST, no new endpoint, no new authorization rule - the
+backend route's own `sprint2ActorContextMiddleware` authorization remains the
+only gate. Existing per-member Request Export Review, Open GK Export Review,
+per-member export-manifest history, and per-member
+Markdown/CSV/PDF/DOCX export links are unchanged.
+
+**Verification:** extended
+`__tests__/kai-sprint2-impact-library-grant-response-packet.spec.js` (36/36
+passing) with new coverage proving: the exact route builder output for two
+distinct engagement ids; the link renders inside the Grant Response Packet
+section keyed by exactly `organizationId, engagementId`; the link element
+contains no `generatedContentDraftId`/`exportManifestId`/`exportCandidateId`/
+`draft.`/`entry.` reference; the caption text is explicit about preview
+status and contains no `Final`/`Approved`/`Funder-ready export`/`Finalized
+packet`/`Export manifest` wording and no `postJson`; the link is gated by the
+same `engagementId` truthiness check as the rest of the card; and the new
+link stays distinct (different class, no `exportManifestId`/`entry` usage)
+from the existing per-member `grant-response-packet-download-markdown-link`.
+
+**Affected regressions passed:** Grant Response Packet backend boundary
+`__tests__/kai-grant-response-packet-boundary.spec.js` (19/19), Grant
+Response Packet render model
+`__tests__/kai-grant-response-packet-render-model-boundary.spec.js` (7/7),
+packet Markdown delivery boundary/route
+`__tests__/kai-grant-response-packet-markdown-delivery-boundary.spec.js` (4/4)
+and `__tests__/kai-grant-response-packet-markdown-delivery-route.spec.js`
+(5/5), Impact Evidence Library regression
+`__tests__/kai-sprint2-impact-evidence-library.spec.js` (102/102), and
+per-member export-manifest frontend download-link regressions
+`__tests__/kai-sprint2-export-manifest-docx-frontend-download-links.spec.js`
+(5/5) and
+`__tests__/kai-sprint2-export-manifest-pdf-frontend-download-links.spec.js`
+(5/5). All runs used `DATABASE_URL` set to the non-listening loopback
+sentinel `postgres://127.0.0.1:9/kai_sentinel`. `npm run build` (vite build)
+succeeded; the frontend source change rebuilt `public/js/bundles/entry.js`,
+consistent with prior Grant Response Packet frontend packages.
+
+**Final diff review:** confined to `frontend/impactEvidenceLibraryLogic.js`
+(one new path builder), `frontend/ImpactEvidenceLibrary.jsx` (one new import,
+one new additive JSX block), the rebuilt `public/js/bundles/entry.js`, one
+extended test file, and this ExecPlan entry. `git diff --check` passed. No
+backend route, serializer, schema, or persistence change.
+
+**Local commit:** one bounded commit created after all required checks
+passed.

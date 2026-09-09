@@ -91,6 +91,18 @@ export function grantResponsePacketPath(organizationId, engagementId) {
     + `/engagements/${encodeURIComponent(engagementId)}/grant-response-packet`;
 }
 
+// Grant Response Packet Markdown preview: the existing, accepted
+// PREVIEW_READ_ONLY packet-level delivery route
+// (Backend/kai/routes/sprint2IntakeApi.js). Keyed by exactly the same
+// organizationId + engagementId as grantResponsePacketPath above - never a
+// member generatedContentDraftId, exportManifestId, or exportCandidateId.
+// This is a distinct, additive artifact from any per-member export-manifest
+// download link and grants no export/finalization authority.
+export function grantResponsePacketMarkdownPath(organizationId, engagementId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}`
+    + `/engagements/${encodeURIComponent(engagementId)}/grant-response-packet/markdown`;
+}
+
 // A Grant Response Packet response may be applied only if it belongs to the
 // generation, organization, AND engagement still current when it resolves -
 // same late-response-protection convention as

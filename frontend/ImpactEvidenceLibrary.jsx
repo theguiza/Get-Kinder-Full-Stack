@@ -57,6 +57,7 @@ import {
   projectEngagementFunderRequirements,
   ENGAGEMENT_FUNDER_REQUIREMENTS_STATES,
   grantResponsePacketPath,
+  grantResponsePacketMarkdownPath,
   projectGrantResponsePacket,
   shouldApplyGrantResponsePacketResponse,
   postJson,
@@ -1909,6 +1910,20 @@ export default function ImpactEvidenceLibrary() {
               eligibility are all resolved server-side; this section grants no approval or
               export/finalization authority of its own.
             </div>
+            {engagementId ? (
+              <div className="small mb-2">
+                <a
+                  className="btn btn-sm btn-outline-secondary grant-response-packet-preview-markdown-link"
+                  href={grantResponsePacketMarkdownPath(organizationId, engagementId)}
+                >
+                  Download Markdown preview
+                </a>
+                <div className="text-muted mt-1">
+                  Preview only - a read-only draft representation. Downloading it grants no
+                  export or release authority.
+                </div>
+              </div>
+            ) : null}
             {!engagementId ? (
               <div className="text-muted small">Select an engagement to see its Grant Response Packet.</div>
             ) : (

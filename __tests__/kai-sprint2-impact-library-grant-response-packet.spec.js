@@ -8,6 +8,7 @@ import {
   exportReviewRequestPath,
   generatedDraftExportReviewDisplayState,
   grantResponsePacketPath,
+  grantResponsePacketMarkdownPath,
   projectGrantResponsePacket,
   projectExportReviewRequestResult,
   shouldApplyGrantResponsePacketResponse,
@@ -46,6 +47,19 @@ test("grantResponsePacketPath builds the exact accepted route with organizationI
     grantResponsePacketPath(organizationId, engagementIdA),
     `/api/kai/sprint2/intake/admin/organizations/${organizationId}`
       + `/engagements/${engagementIdA}/grant-response-packet`,
+  );
+});
+
+test("grantResponsePacketMarkdownPath builds the exact existing PREVIEW_READ_ONLY packet-level Markdown route with organizationId + engagementId, nothing else", () => {
+  assert.equal(
+    grantResponsePacketMarkdownPath(organizationId, engagementIdA),
+    `/api/kai/sprint2/intake/admin/organizations/${organizationId}`
+      + `/engagements/${engagementIdA}/grant-response-packet/markdown`,
+  );
+  assert.equal(
+    grantResponsePacketMarkdownPath(organizationId, engagementIdB),
+    `/api/kai/sprint2/intake/admin/organizations/${organizationId}`
+      + `/engagements/${engagementIdB}/grant-response-packet/markdown`,
   );
 });
 
@@ -330,6 +344,88 @@ test("ImpactEvidenceLibrary.jsx imports and reuses the exact existing export-man
     exportManifestDocxPath(organizationId, exportManifestIdA),
     `/api/kai/sprint2/intake/admin/organizations/${organizationId}/export-manifests/${exportManifestIdA}/docx`,
   );
+});
+
+test("ImpactEvidenceLibrary.jsx imports and reuses grantResponsePacketMarkdownPath for the packet-level Markdown preview affordance", () => {
+  assert.match(uiSource, /grantResponsePacketMarkdownPath/);
+});
+
+test("ImpactEvidenceLibrary.jsx Grant Response Packet section renders a packet-level Download Markdown preview action keyed by exactly organizationId + engagementId, never a member/manifest/candidate id", () => {
+  const sectionStart = uiSource.indexOf('<h5 className="mb-0">Grant Response Packet</h5>');
+  const sectionEnd = uiSource.indexOf('<h5 className="mb-0">Generated Drafts</h5>');
+  assert.notEqual(sectionStart, -1);
+  assert.notEqual(sectionEnd, -1);
+  const section = uiSource.slice(sectionStart, sectionEnd);
+
+  assert.match(section, /Download Markdown preview/);
+  assert.match(
+    section,
+    /href=\{grantResponsePacketMarkdownPath\(organizationId,\s*engagementId\)\}/,
+  );
+
+  const previewLinkIdx = section.indexOf("Download Markdown preview");
+  const previewBlockStart = section.lastIndexOf("<a", previewLinkIdx);
+  const previewBlockEnd = section.indexOf("</a>", previewLinkIdx) + "</a>".length;
+  const previewBlock = section.slice(previewBlockStart, previewBlockEnd);
+  assert.doesNotMatch(previewBlock, /generatedContentDraftId/);
+  assert.doesNotMatch(previewBlock, /exportManifestId/);
+  assert.doesNotMatch(previewBlock, /exportCandidateId/);
+  assert.doesNotMatch(previewBlock, /draft\./);
+  assert.doesNotMatch(previewBlock, /entry\./);
+});
+
+test("ImpactEvidenceLibrary.jsx Grant Response Packet packet-level preview affordance is explicit that it is a preview/draft, never final/approved/finalized wording, and issues no POST", () => {
+  const sectionStart = uiSource.indexOf('<h5 className="mb-0">Grant Response Packet</h5>');
+  const sectionEnd = uiSource.indexOf('<h5 className="mb-0">Generated Drafts</h5>');
+  const section = uiSource.slice(sectionStart, sectionEnd);
+
+  const previewLinkIdx = section.indexOf("Download Markdown preview");
+  assert.notEqual(previewLinkIdx, -1);
+  const previewBlockStart = section.lastIndexOf("<div", section.lastIndexOf("<a", previewLinkIdx));
+  const previewBlockEnd = section.indexOf("</div>", section.indexOf("</a>", previewLinkIdx)) + "</div>".length;
+  const previewBlock = section.slice(previewBlockStart, previewBlockEnd);
+
+  assert.match(previewBlock, /[Pp]review/);
+  assert.doesNotMatch(previewBlock, /\bFinal\b/);
+  assert.doesNotMatch(previewBlock, /Final export/i);
+  assert.doesNotMatch(previewBlock, /Approved/i);
+  assert.doesNotMatch(previewBlock, /Funder-ready export/i);
+  assert.doesNotMatch(previewBlock, /Finalized packet/i);
+  assert.doesNotMatch(previewBlock, /Export manifest/i);
+  assert.doesNotMatch(previewBlock, /postJson/);
+});
+
+test("ImpactEvidenceLibrary.jsx Grant Response Packet packet-level preview link renders whenever an engagement is selected (reuses the card's own engagement-selected visibility, no separate packet-selection state)", () => {
+  const sectionStart = uiSource.indexOf('<h5 className="mb-0">Grant Response Packet</h5>');
+  const sectionEnd = uiSource.indexOf('<h5 className="mb-0">Generated Drafts</h5>');
+  const section = uiSource.slice(sectionStart, sectionEnd);
+
+  const engagementGateIdx = section.indexOf("{engagementId ? (");
+  const previewLinkIdx = section.indexOf("Download Markdown preview");
+  assert.notEqual(engagementGateIdx, -1);
+  assert.ok(
+    engagementGateIdx < previewLinkIdx,
+    "the Download Markdown preview link must be gated by the same engagementId truthiness check as the rest of the card",
+  );
+});
+
+test("ImpactEvidenceLibrary.jsx Grant Response Packet packet-level preview link stays distinct from per-member export download links (different class, no exportManifestId/entry usage)", () => {
+  const sectionStart = uiSource.indexOf('<h5 className="mb-0">Grant Response Packet</h5>');
+  const sectionEnd = uiSource.indexOf('<h5 className="mb-0">Generated Drafts</h5>');
+  const section = uiSource.slice(sectionStart, sectionEnd);
+
+  assert.match(section, /grant-response-packet-preview-markdown-link/);
+  assert.match(section, /grant-response-packet-download-markdown-link/);
+  assert.notEqual(
+    (section.match(/grant-response-packet-preview-markdown-link/g) || []).length,
+    0,
+  );
+
+  const previewLinkIdx = section.indexOf("grant-response-packet-preview-markdown-link");
+  const previewBlockEnd = section.indexOf("</a>", previewLinkIdx) + "</a>".length;
+  const previewBlock = section.slice(previewLinkIdx, previewBlockEnd);
+  assert.doesNotMatch(previewBlock, /entry\.exportManifestId/);
+  assert.doesNotMatch(previewBlock, /exportManifestMarkdownPath/);
 });
 
 test("ImpactEvidenceLibrary.jsx Grant Response Packet section adds only Request Export Review, no start/complete/finalize/create authority", () => {
