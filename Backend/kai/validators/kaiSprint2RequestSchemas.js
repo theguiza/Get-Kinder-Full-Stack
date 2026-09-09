@@ -65,6 +65,7 @@ const REQUEST_EXPORT_REVIEW_REQUEST_KEYS = new Set([
   "requested_export_audience",
 ]);
 const CREATE_EXPORT_CANDIDATE_REQUEST_KEYS = new Set([]);
+const CREATE_GRANT_RESPONSE_PACKET_EXPORT_CANDIDATE_REQUEST_KEYS = new Set([]);
 const HUMAN_FINAL_RELEASE_AUTHORITY_REQUEST_KEYS = new Set([
   "requested_audience",
   "decision_action",
@@ -542,6 +543,21 @@ export function validateCreateExportCandidateRequest(payload) {
   }
   const keys = Object.keys(payload);
   if (keys.some((key) => !CREATE_EXPORT_CANDIDATE_REQUEST_KEYS.has(key))) {
+    return { ok: false, blockers: [requestBlocker("unknown_field", "body")] };
+  }
+  return { ok: true, blockers: [] };
+}
+
+// Browser must send no candidate composition - membership, ordering,
+// fingerprint, and candidate identity are all server-derived, so this
+// route accepts an empty body only, exactly like
+// validateCreateExportCandidateRequest above.
+export function validateCreateGrantResponsePacketExportCandidateRequest(payload) {
+  if (!isPlainObject(payload)) {
+    return { ok: false, blockers: [requestBlocker("request_body_must_be_object", "body")] };
+  }
+  const keys = Object.keys(payload);
+  if (keys.some((key) => !CREATE_GRANT_RESPONSE_PACKET_EXPORT_CANDIDATE_REQUEST_KEYS.has(key))) {
     return { ok: false, blockers: [requestBlocker("unknown_field", "body")] };
   }
   return { ok: true, blockers: [] };

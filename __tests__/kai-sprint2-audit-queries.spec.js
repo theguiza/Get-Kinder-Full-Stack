@@ -89,6 +89,47 @@ test("blocked audit insert maps conceptual event type to action and event metada
   assert.equal(storedMetadata.contains_storage_credentials, false);
 });
 
+test("sanitizeAuditMetadataForStorage retains a valid canonical_fingerprint and member_count", () => {
+  const sanitized = sanitizeAuditMetadataForStorage({
+    canonical_fingerprint: "a".repeat(64),
+    member_count: 3,
+  });
+  assert.equal(sanitized.canonical_fingerprint, "a".repeat(64));
+  assert.equal(sanitized.member_count, 3);
+});
+
+test("sanitizeAuditMetadataForStorage drops a malformed canonical_fingerprint or member_count", () => {
+  const notHex = sanitizeAuditMetadataForStorage({ canonical_fingerprint: "not-a-hex-digest" });
+  assert.equal(notHex.canonical_fingerprint, undefined);
+
+  const tooShort = sanitizeAuditMetadataForStorage({ canonical_fingerprint: "a".repeat(63) });
+  assert.equal(tooShort.canonical_fingerprint, undefined);
+
+  const negativeCount = sanitizeAuditMetadataForStorage({ member_count: -1 });
+  assert.equal(negativeCount.member_count, undefined);
+
+  const nonIntegerCount = sanitizeAuditMetadataForStorage({ member_count: 1.5 });
+  assert.equal(nonIntegerCount.member_count, undefined);
+
+  const nonNumericString = sanitizeAuditMetadataForStorage({ member_count: "not-a-number" });
+  assert.equal(nonNumericString.member_count, undefined);
+});
+
+test("sanitizeAuditMetadataForStorage never lets member_count/canonical_fingerprint carry raw content", () => {
+  const sanitized = sanitizeAuditMetadataForStorage({
+    canonical_fingerprint: "a".repeat(64),
+    member_count: 2,
+    members: [{ generatedContentDraftId: "should-not-persist" }],
+    blocks: [{ text: "raw block text should not persist" }],
+    citations: [{ claimId: "should-not-persist" }],
+  });
+  assert.equal(sanitized.canonical_fingerprint, "a".repeat(64));
+  assert.equal(sanitized.member_count, 2);
+  assert.equal(sanitized.members, undefined);
+  assert.equal(sanitized.blocks, undefined);
+  assert.equal(sanitized.citations, undefined);
+});
+
 test("blocked audit insert skips when object_type enum cannot confirm a safe value", async () => {
   const calls = [];
   const db = {

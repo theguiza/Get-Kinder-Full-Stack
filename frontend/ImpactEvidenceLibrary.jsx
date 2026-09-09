@@ -58,7 +58,9 @@ import {
   ENGAGEMENT_FUNDER_REQUIREMENTS_STATES,
   grantResponsePacketPath,
   grantResponsePacketMarkdownPath,
+  grantResponsePacketExportCandidatesPath,
   projectGrantResponsePacket,
+  projectGrantResponsePacketExportCandidateResult,
   shouldApplyGrantResponsePacketResponse,
   postJson,
   potentialConflictsPath,
@@ -272,6 +274,15 @@ export default function ImpactEvidenceLibrary() {
   const [grantResponsePacketError, setGrantResponsePacketError] = useState("");
   const [grantResponsePacketRequestState, setGrantResponsePacketRequestState] = useState("idle");
   const [grantResponsePacketExportReviewRequestPendingDraftId, setGrantResponsePacketExportReviewRequestPendingDraftId] = useState("");
+  // P14-04: the export-candidate workflow-wiring action on this same card.
+  // Creating/reusing a candidate grants no approval, export authority, final
+  // release, or manifest - this is a client-side memo of the last create/reuse
+  // result for the currently selected engagement only, never persisted, and
+  // always reset whenever the selected engagement (or organization) changes,
+  // matching exportReviewRequestResult's discipline above.
+  const [grantResponsePacketExportCandidatePending, setGrantResponsePacketExportCandidatePending] = useState(false);
+  const [grantResponsePacketExportCandidateResult, setGrantResponsePacketExportCandidateResult] = useState(null);
+  const [grantResponsePacketExportCandidateError, setGrantResponsePacketExportCandidateError] = useState("");
   const grantPacketRequestGenerationRef = useRef(0);
   const engagementIdRef = useRef(engagementId);
   engagementIdRef.current = engagementId;
@@ -772,6 +783,9 @@ export default function ImpactEvidenceLibrary() {
     setGrantResponsePacketError("");
     setGrantResponsePacketRequestState("idle");
     setGrantResponsePacketExportReviewRequestPendingDraftId("");
+    setGrantResponsePacketExportCandidatePending(false);
+    setGrantResponsePacketExportCandidateResult(null);
+    setGrantResponsePacketExportCandidateError("");
     setLoadingGrantResponsePacket(false);
     if (!organizationId || !engagementId) return;
     let cancelled = false;
@@ -931,6 +945,49 @@ export default function ImpactEvidenceLibrary() {
     setOrganizationSources([]);
     if (organizationId) loadOrganizationSources();
   }, [organizationId, loadOrganizationSources]);
+
+  // P14-04: creates (or reuses, on replay) the export-candidate for exactly
+  // the selected engagement. Sends no candidate composition of its own - the
+  // POST body is empty and every piece of candidate state (membership,
+  // ordering, fingerprint, candidate identity) is resolved server-side. On
+  // success this never manufactures durable candidate state client-side - it
+  // refetches the authoritative Grant Response Packet via the same
+  // engagement-switch-isolated/stale-response-protected refetch already used
+  // after a member export-review request.
+  const createGrantResponsePacketExportCandidate = useCallback(async () => {
+    if (!organizationId || !engagementId || grantResponsePacketExportCandidatePending) return;
+    const requestOrganizationId = organizationId;
+    const requestEngagementId = engagementId;
+    setGrantResponsePacketExportCandidatePending(true);
+    setGrantResponsePacketExportCandidateError("");
+    const result = await postJson(
+      grantResponsePacketExportCandidatesPath(requestOrganizationId, requestEngagementId),
+      {},
+    );
+    const stillCurrent = requestOrganizationId === organizationIdRef.current
+      && requestEngagementId === engagementIdRef.current;
+    if (result.statusCode !== 200 && result.statusCode !== 201) {
+      if (stillCurrent) {
+        setGrantResponsePacketExportCandidateError(errorText(result));
+        setGrantResponsePacketExportCandidatePending(false);
+      }
+      return;
+    }
+    if (stillCurrent) {
+      setGrantResponsePacketExportCandidateResult(
+        projectGrantResponsePacketExportCandidateResult(result.body?.data),
+      );
+    }
+    await refetchGrantResponsePacketAfterMemberExportReviewRequest(requestOrganizationId, requestEngagementId);
+    if (stillCurrent) {
+      setGrantResponsePacketExportCandidatePending(false);
+    }
+  }, [
+    organizationId,
+    engagementId,
+    grantResponsePacketExportCandidatePending,
+    refetchGrantResponsePacketAfterMemberExportReviewRequest,
+  ]);
 
   const runAssessRequirement = useCallback(async (requirementId) => {
     if (!organizationId || assessingRequirementId) return;
@@ -1922,6 +1979,42 @@ export default function ImpactEvidenceLibrary() {
                   Preview only - a read-only draft representation. Downloading it grants no
                   export or release authority.
                 </div>
+              </div>
+            ) : null}
+            {engagementId ? (
+              <div className="small mb-2">
+                <button
+                  type="button"
+                  className="btn btn-sm btn-outline-secondary grant-response-packet-export-candidate-button"
+                  disabled={grantResponsePacketExportCandidatePending}
+                  onClick={createGrantResponsePacketExportCandidate}
+                >
+                  {grantResponsePacketExportCandidatePending ? "Creating export candidate..." : "Create export candidate"}
+                </button>
+                <div className="text-muted mt-1">
+                  Creates (or reuses, if nothing has changed) a packet export candidate.
+                  Grants no approval, funder/public readiness, export authority, final
+                  release, or manifest.
+                </div>
+                {grantResponsePacketExportCandidateError ? (
+                  <div className="alert alert-warning py-2 small mt-1">{grantResponsePacketExportCandidateError}</div>
+                ) : null}
+                {grantResponsePacketExportCandidateResult ? (
+                  <div className="small mt-1">
+                    <ValueRow
+                      label="Export candidate id"
+                      value={grantResponsePacketExportCandidateResult.grantResponsePacketExportCandidateId}
+                    />
+                    <ValueRow
+                      label="Member count"
+                      value={grantResponsePacketExportCandidateResult.memberCount}
+                    />
+                    <ValueRow
+                      label="Reused existing candidate"
+                      value={String(grantResponsePacketExportCandidateResult.replayed)}
+                    />
+                  </div>
+                ) : null}
               </div>
             ) : null}
             {!engagementId ? (

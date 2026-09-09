@@ -65,6 +65,8 @@ const SAFE_AUDIT_METADATA_KEYS = new Set([
   "authority_source",
   "export_manifest_id",
   "export_candidate_id",
+  "canonical_fingerprint",
+  "member_count",
 ]);
 
 const FORCED_FALSE_METADATA_FLAGS = [
@@ -80,6 +82,7 @@ const FORCED_FALSE_METADATA_FLAGS = [
 const SENSITIVE_TEXT_PATTERN = /(?:BEGIN\s+(?:RSA\s+)?PRIVATE\s+KEY|X-Goog-Signature|X-Amz-Signature|X-Goog-Credential|AWSAccessKeyId|storage_credentials?|signed_?urls?|prompt_text|raw_file|raw_parsed|client_pii|unsafe_generated|password|secret|token=)/i;
 const SAFE_IDENTIFIER_PATTERN = /^[a-z0-9_:-]{1,96}$/i;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const SHA256_HEX_PATTERN = /^[0-9a-f]{64}$/;
 
 function normalizeIdentifier(value, fallback = null) {
   if (typeof value !== "string") return fallback;
@@ -138,6 +141,13 @@ function normalizeAuditMetadataValue(key, value) {
     return Number.isInteger(status) && status >= 100 && status <= 599 ? status : null;
   }
   if (key === "route") return normalizeRoute(value);
+  if (key === "canonical_fingerprint") {
+    return typeof value === "string" && SHA256_HEX_PATTERN.test(value) ? value : null;
+  }
+  if (key === "member_count") {
+    const count = Number(value);
+    return Number.isInteger(count) && count >= 0 ? count : null;
+  }
   if (key === "safe_message") return normalizeSafeText(value, "KAI validator blocked the operation.");
   if (FORCED_FALSE_METADATA_FLAGS.includes(key)) return false;
   return normalizeSafeText(value, null, 128);

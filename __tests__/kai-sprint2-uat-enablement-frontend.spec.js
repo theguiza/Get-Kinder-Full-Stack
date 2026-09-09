@@ -390,8 +390,34 @@ test("KAI UAT-enablement new frontend surfaces add no export-candidate, assistan
   // existing gk_admin-only export-review queue item for a fully-reviewed
   // draft and link to the existing gk-export-review-detail page - a link
   // into an already-accepted flow, not a new export-generation mutation
-  // surface. `export candidate` and `assistant` remain forbidden everywhere.
-  assert.doesNotMatch(allSources, /export candidate|assistant/i);
+  // surface. `assistant` remains forbidden everywhere - no KAI/assistant
+  // actor gains authority on any of these pages.
+  assert.doesNotMatch(allSources, /assistant/i);
+  // P14-04 carves out one narrow, governed exception to the `export
+  // candidate` prohibition: the Grant Response Packet card's own "create
+  // export candidate" action in ImpactEvidenceLibrary.jsx (server-derived
+  // membership/fingerprint, grants no approval/export/final-release
+  // authority - see kai-sprint2-p14-04-grant-response-packet-export-candidate-*.spec.js
+  // and kai-sprint2-impact-library-grant-response-packet.spec.js). The
+  // phrase is only excused inside that one card's own JSX section, sliced
+  // out here by its section heading markers - every other file/section,
+  // including impactEvidenceLibraryLogic.js and the client-followup review
+  // surfaces, must still never mention it.
+  const impactLibrarySource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+  const grantResponsePacketSectionStart = impactLibrarySource.indexOf('<h5 className="mb-0">Grant Response Packet</h5>');
+  const grantResponsePacketSectionEnd = impactLibrarySource.indexOf('<h5 className="mb-0">Generated Drafts</h5>');
+  assert.notEqual(grantResponsePacketSectionStart, -1);
+  assert.notEqual(grantResponsePacketSectionEnd, -1);
+  const impactLibrarySourceOutsideGrantResponsePacketSection =
+    impactLibrarySource.slice(0, grantResponsePacketSectionStart) + impactLibrarySource.slice(grantResponsePacketSectionEnd);
+  const allSourcesOutsideGrantResponsePacketSection = [
+    impactLibrarySourceOutsideGrantResponsePacketSection,
+    readFileSync("frontend/impactEvidenceLibraryLogic.js", "utf8"),
+    readFileSync("frontend/KaiClientFollowupReview.jsx", "utf8"),
+    readFileSync("frontend/kaiClientFollowupReviewLogic.js", "utf8"),
+    uploadSources,
+  ].join("\n");
+  assert.doesNotMatch(allSourcesOutsideGrantResponsePacketSection, /export candidate/i);
   assert.doesNotMatch(allSources, /raw_content|storage_object|storage_uri|storage_bucket|api[_-]?key|secret/i);
   assert.doesNotMatch(allSources, /computeEligibility|calculateEligibility|isEligible\s*=\s*(?!.*server)/i);
   assert.doesNotMatch(allSources, /console\.(log|warn|error)\([^)]*(upload_url|uploadUrl|signed)/i);

@@ -103,6 +103,33 @@ export function grantResponsePacketMarkdownPath(organizationId, engagementId) {
     + `/engagements/${encodeURIComponent(engagementId)}/grant-response-packet/markdown`;
 }
 
+// Grant Response Packet export-candidate workflow wiring (P14-04): the
+// authenticated POST sibling of grantResponsePacketPath above. Keyed by
+// exactly the same organizationId + engagementId - the browser sends no
+// candidate composition (no packetAudience, membership, ordering, or
+// fingerprint) and this path carries none either.
+export function grantResponsePacketExportCandidatesPath(organizationId, engagementId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}`
+    + `/engagements/${encodeURIComponent(engagementId)}/grant-response-packet/export-candidates`;
+}
+
+// Explicit allowlist projection of the export-candidate creation response
+// (kaiGrantResponsePacketExportCandidateService.js) - safe candidate
+// metadata only, never a member list or ordering.
+export function projectGrantResponsePacketExportCandidateResult(dto) {
+  if (!dto || typeof dto !== "object") return null;
+  return {
+    organizationId: dto.organizationId,
+    engagementId: dto.engagementId,
+    grantResponsePacketExportCandidateId: dto.grantResponsePacketExportCandidateId,
+    grantResponsePacketExportIdentityId: dto.grantResponsePacketExportIdentityId,
+    fingerprintContractVersion: dto.fingerprintContractVersion,
+    canonicalFingerprint: dto.canonicalFingerprint,
+    memberCount: typeof dto.memberCount === "number" ? dto.memberCount : null,
+    replayed: dto.replayed === true,
+  };
+}
+
 // A Grant Response Packet response may be applied only if it belongs to the
 // generation, organization, AND engagement still current when it resolves -
 // same late-response-protection convention as

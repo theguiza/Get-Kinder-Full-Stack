@@ -665,6 +665,11 @@ function buildEffect({
   const setGrantResponsePacketRequestState = (value) => stateLog.push(["requestState", value]);
   const setGrantResponsePacketExportReviewRequestPendingDraftId = (value) => stateLog.push(["memberRequestPending", value]);
   const setLoadingGrantResponsePacket = (value) => stateLog.push(["loading", value]);
+  // P14-04: the export-candidate workflow-wiring state the same reset effect
+  // now also clears on every engagement/organization switch.
+  const setGrantResponsePacketExportCandidatePending = (value) => stateLog.push(["exportCandidatePending", value]);
+  const setGrantResponsePacketExportCandidateResult = (value) => stateLog.push(["exportCandidateResult", value]);
+  const setGrantResponsePacketExportCandidateError = (value) => stateLog.push(["exportCandidateError", value]);
 
   const buildUseEffect = new Function(
     "React",
@@ -675,6 +680,9 @@ function buildEffect({
     "setGrantResponsePacketError",
     "setGrantResponsePacketRequestState",
     "setGrantResponsePacketExportReviewRequestPendingDraftId",
+    "setGrantResponsePacketExportCandidatePending",
+    "setGrantResponsePacketExportCandidateResult",
+    "setGrantResponsePacketExportCandidateError",
     "setLoadingGrantResponsePacket",
     "getJson",
     "grantResponsePacketPath",
@@ -694,6 +702,9 @@ function buildEffect({
     setGrantResponsePacketError,
     setGrantResponsePacketRequestState,
     setGrantResponsePacketExportReviewRequestPendingDraftId,
+    setGrantResponsePacketExportCandidatePending,
+    setGrantResponsePacketExportCandidateResult,
+    setGrantResponsePacketExportCandidateError,
     setLoadingGrantResponsePacket,
     getJsonImpl,
     grantResponsePacketPath,

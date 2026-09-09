@@ -212,7 +212,12 @@ test("Grant Response Packet Markdown preview route contains no SQL, mutation, fi
   const routeSource = readFileSync("Backend/kai/routes/sprint2IntakeApi.js", "utf8");
   const routeStart = routeSource.indexOf(`"${routePath}"`);
   assert.notEqual(routeStart, -1);
-  const routeEnd = routeSource.indexOf("function generatedContentReviewQueueIdentifier", routeStart);
+  // Bound the slice to exactly this route registration's own closing
+  // "\n);\n" (the bare top-level router.get(...) call's close) rather than
+  // the next unrelated function - this keeps the slice stable regardless of
+  // what other routes are later added after this one in the file.
+  const routeEnd = routeSource.indexOf("\n);\n", routeStart);
+  assert.notEqual(routeEnd, -1);
   const routeSlice = routeSource.slice(routeStart, routeEnd);
 
   assert.match(routeSlice, /serializeGrantResponsePacketToMarkdown/);

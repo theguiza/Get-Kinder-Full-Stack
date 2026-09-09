@@ -22,6 +22,7 @@ import {
   validateCompleteEvidenceReviewRequest,
   validateCompleteExportReviewRequest,
   validateCreateExportCandidateRequest,
+  validateCreateGrantResponsePacketExportCandidateRequest,
   validateCreateExportManifestRequest,
   validateHumanFinalReleaseAuthorityRequest,
   validateIntakeBatchFilesQuery,
@@ -49,6 +50,7 @@ import {
   createProductionMetadataOnlyAuditForGeneratedContentReview,
   createProductionMetadataOnlyAuditForGeneratedDraftExportCandidate,
   createProductionMetadataOnlyAuditForGeneratedDraftExportReview,
+  createProductionMetadataOnlyAuditForGrantResponsePacketExportCandidate,
   createProductionMetadataOnlyAuditForExportManifest,
   createProductionMetadataOnlyAuditForHumanFinalReleaseAuthority,
   createProductionMetadataOnlyAuditForRequirementAssessment,
@@ -70,6 +72,7 @@ let exportManifestCsvServicePromise = null;
 let exportManifestPdfServicePromise = null;
 let exportManifestDocxServicePromise = null;
 let grantResponsePacketMarkdownServicePromise = null;
+let grantResponsePacketExportCandidateServicePromise = null;
 let evidenceLineageServicePromise = null;
 let evidenceCoverageAssessmentServicePromise = null;
 let claimProposalServicePromise = null;
@@ -2862,6 +2865,34 @@ async function getGrantResponsePacketMarkdownService() {
   return grantResponsePacketMarkdownServicePromise;
 }
 
+async function getGrantResponsePacketExportCandidateService() {
+  if (intakeServiceOverride?.createGrantResponsePacketExportCandidate) return intakeServiceOverride;
+  grantResponsePacketExportCandidateServicePromise ||= import(
+    "../services/kaiGrantResponsePacketExportCandidateService.js"
+  );
+  return grantResponsePacketExportCandidateServicePromise;
+}
+
+function validateCreateGrantResponsePacketExportCandidateRequestOrSend(req, res) {
+  if (!metadataContentTypeIsSupported(req)) {
+    sendKaiError(res, "unsupported_media_type");
+    return null;
+  }
+  const identifiers = grantResponsePacketIdentifier(req);
+  if (!identifiers) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id_or_engagement_id")],
+    });
+    return null;
+  }
+  const result = validateCreateGrantResponsePacketExportCandidateRequest(req.body);
+  if (!result.ok) {
+    sendKaiError(res, "validation_blocker", { blockers: result.blockers });
+    return null;
+  }
+  return identifiers;
+}
+
 /**
  * Grant Response Packet: a read-only, engagement-scoped regrouping of
  * already-governed generated-draft review packets. Membership resolves
@@ -2927,6 +2958,47 @@ router.get(
       console.error("[kai-sprint2-intake] system_error", error);
       return sendKaiError(res, "system_error");
     }
+  },
+);
+
+/**
+ * Grant Response Packet export-candidate workflow wiring (P14-04): creates
+ * or reuses (on replay) the P14-03 packet-candidate + authoritative member
+ * snapshot for the route's own organizationId/engagementId. The browser
+ * supplies no candidate composition - no packetAudience, packet identity
+ * id, candidate id, member ids, ordering, or fingerprint - actorContext is
+ * derived exclusively from the authenticated server context, and every
+ * piece of candidate state is resolved server-side through the one
+ * existing P14-03 service/repository path. Contains no SQL and no direct
+ * database access - delegates once to
+ * kaiGrantResponsePacketExportCandidateService. Creating/reusing a
+ * candidate grants no approval, no funder/public readiness, no export
+ * authority, no final release, and no manifest.
+ */
+router.post(
+  "/admin/organizations/:organizationId/engagements/:engagementId/grant-response-packet/export-candidates",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    const identifiers = validateCreateGrantResponsePacketExportCandidateRequestOrSend(req, res);
+    if (!identifiers) return;
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    return invokeService(res, async () => {
+      const service = await getGrantResponsePacketExportCandidateService();
+      return service.createGrantResponsePacketExportCandidate({
+        organizationId: identifiers.organizationId,
+        engagementId: identifiers.engagementId,
+        actorContext,
+        now,
+      }, {
+        metadataOnlyAudit: createProductionMetadataOnlyAuditForGrantResponsePacketExportCandidate({
+          organizationId: identifiers.organizationId,
+          engagementId: identifiers.engagementId,
+          actorContext,
+          now,
+        }),
+      });
+    }, 201);
   },
 );
 
@@ -3675,6 +3747,8 @@ export const __testables = {
   exportManifestIdentifiers,
   sendMarkdownAttachment,
   sendGrantResponsePacketMarkdownAttachment,
+  grantResponsePacketIdentifier,
+  validateCreateGrantResponsePacketExportCandidateRequestOrSend,
   sendCsvAttachment,
   sendPdfAttachment,
   sendDocxAttachment,

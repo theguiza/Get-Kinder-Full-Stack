@@ -161,6 +161,7 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // exclusively through generation_runs.engagement_id). Grants no
     // approval/export/finalization authority of its own.
     "/admin/organizations/:organizationId/engagements/:engagementId/grant-response-packet",
+    "/admin/organizations/:organizationId/engagements/:engagementId/grant-response-packet/export-candidates",
     "/admin/organizations/:organizationId/engagements/:engagementId/grant-response-packet/markdown",
     // KAI Package 2B-A: non-authoritative proposal that an external, governed
     // requirement set applies to this engagement.

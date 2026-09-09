@@ -24580,3 +24580,140 @@ required.
 
 **Local commit:** one bounded commit created after all required checks
 passed.
+
+## Phase-14 (Grant Response Packet Track) — Export Candidate Workflow
+## Wiring (P14-04; service + authenticated route + Impact Library action)
+
+**Date:** 2026-09-09
+
+**Owner authorization (bounded, local-only):** wire the existing, accepted
+P14-03 packet-candidate repository through a service, an authenticated POST
+route, and the Impact Evidence Library's Grant Response Packet card, plus
+fix the known P14-03 audit-metadata gap (`canonical_fingerprint`/
+`member_count` dropped) — limited to service/route/validator/audit/frontend
+code, focused tests, an ExecPlan entry, and one local commit; no schema/
+migration work, no P14-02/P14-03 redesign, no packet manifest, no
+final-release authority, no Board Summary, no production/shared database,
+no production access, no cloud/config/feature-flag changes, no credentials,
+no real client data. Closed areas remained closed: P14-01 lineage, packet
+membership/composition, funder-only membership, the packet render model,
+the packet Markdown preview, the existing Impact Evidence Library packet
+surface, P14-02 structural identity, and P14-03's own schema/migrations,
+fingerprint contract, member snapshot, and replay convergence were none of
+them reopened or reimplemented — P14-04 calls the one existing P14-03
+repository function and nothing else derives membership or a fingerprint.
+
+**Implementation:** (1) Audit fix — added `canonical_fingerprint` (sha256-
+hex-validated) and `member_count` (non-negative-integer-validated) to the
+shared `SAFE_AUDIT_METADATA_KEYS` allowlist and `normalizeAuditMetadataValue`
+in `Backend/kai/db/kaiAuditQueries.js`, and to the metadata object built by
+`createProductionMetadataOnlyAuditForGrantResponsePacketExportCandidate` in
+`Backend/kai/services/kaiMetadataOnlyAuditComposition.js` — both scalar
+fields now survive end-to-end while every raw/content-bearing field
+(members, blocks, citations, evidence, source, credentials, signed URLs,
+client PII) is still excluded, matching every other field on this audit
+object. (2) Service — added
+`Backend/kai/services/kaiGrantResponsePacketExportCandidateService.js`
+exposing one `createGrantResponsePacketExportCandidate(input, dependencies)`
+accepting exact-keys `{organizationId, engagementId, actorContext, now}`
+only (no packetAudience/identity id/candidate id/member ids/ordering/
+exportCandidateIds/exportManifestIds/canonicalFingerprint/memberCount/
+blocks/citations/limitations), gated on `KAI_SPRINT2_ENABLED`/
+`KAI_GENERATION_ENABLED`, authorized via `validateActorCanPerformOperation`
+against the existing P3-16 `EXPORT_CANDIDATE_ALLOWED_ROLES` (`gk_admin`
+only) plus a tenant-boundary check, delegating once to the existing P14-03
+`postgresGrantResponsePacketExportCandidateRepository` and projecting its
+result down to safe candidate metadata only (organizationId, engagementId,
+candidate id, identity id, fingerprint-contract-version,
+canonicalFingerprint, memberCount, replayed — never the raw ordered member
+list). (3) Route — added the authenticated
+`POST /admin/organizations/:organizationId/engagements/:engagementId/grant-response-packet/export-candidates`
+sibling of the existing GET routes in `Backend/kai/routes/sprint2IntakeApi.js`,
+gated by the existing `requireKaiSprint2Enabled`, deriving actorContext from
+`sprint2MappedActorContext(req)` and `now` server-side, requiring an empty
+JSON body via a new `validateCreateGrantResponsePacketExportCandidateRequest`
+in `Backend/kai/validators/kaiSprint2RequestSchemas.js`, and delegating once
+to the new service with no SQL/repository/direct-DB access in the route
+itself. (4) Frontend — added `grantResponsePacketExportCandidatesPath` and
+`projectGrantResponsePacketExportCandidateResult` to
+`frontend/impactEvidenceLibraryLogic.js`, and a "Create export candidate"
+button + result display to the existing Grant Response Packet card in
+`frontend/ImpactEvidenceLibrary.jsx`, reusing the card's existing selected
+organization/engagement state; the POST body is always empty, and on
+success the handler refetches authoritative server state via the existing
+`refetchGrantResponsePacketAfterMemberExportReviewRequest` (same
+generation-ref/organizationIdRef/engagementIdRef staleness guard as every
+other mutation on this card), rather than manufacturing candidate state
+client-side. No review/approval, Start/Complete review, final-release
+authority, manifest creation, final export, or latest/newest/preferred
+candidate guessing was added anywhere.
+
+**Verification:** added focused tests
+`__tests__/kai-sprint2-p14-04-grant-response-packet-export-candidate-audit.spec.js`
+(4/4: canonical_fingerprint/member_count retained end-to-end through
+sanitizeAuditMetadataForStorage, raw/content-bearing fields excluded even
+when a caller attempts to smuggle them through the same payload, malformed
+values dropped not fabricated, missing-candidate-id refusal unchanged),
+`__tests__/kai-sprint2-p14-04-grant-response-packet-export-candidate-service.spec.js`
+(15/15: gk_admin-only role boundary, feature-flag gating, exact-keys input
+contract rejecting every client-supplied composition field, system/assistant
+actor rejection, gk_reviewer rejection, cross-tenant-membership rejection,
+fabricated-engagement not_found propagation, replay convergence and
+changed-state-new-candidate through the service, safe-metadata-only output
+shape), and
+`__tests__/kai-sprint2-p14-04-grant-response-packet-export-candidate-route.spec.js`
+(8/8: route mounted exactly once, feature-flag gate, actorContext/now
+derived server-side, non-empty body rejected before the service runs,
+unauthorized-role and cross-tenant rejection via the real service, malformed
+route identifiers never reach the service, no-SQL/no-direct-DB source-slice
+proof). Extended `__tests__/kai-sprint2-audit-queries.spec.js` with 3 new
+focused cases for the two new allowlist keys.
+
+**Affected regressions passed:** P14-03 integration/boundary
+(`kai-sprint2-p14-03-grant-response-packet-export-candidate-foundation.integration.spec.js`
+14/14, `kai-grant-response-packet-export-candidate-boundary.spec.js` 20/20),
+P14-02 identity boundary (10/10), Grant Response Packet backend/render-
+model/markdown-delivery/Impact-Library boundary suites (36/36 in
+`kai-sprint2-impact-library-grant-response-packet.spec.js` after adding the
+three new P14-04 setters this file's real-execution effect harness now
+calls; markdown-delivery route/boundary suites unaffected in behavior — only
+`kai-grant-response-packet-markdown-delivery-route.spec.js`'s route-source
+slice boundary was hardened to stop at its own route's closing `);` instead
+of the next function, since P14-04 now inserts a route between them), the
+P3-16/P3-17/P3-18/P3-19/P3-20 single-draft export-path suites, and the
+Pass-2 route-runtime inventory (`kai-sprint2-pass2-route-runtime.spec.js`,
+updated to list the one new route path) — all passed, no behavior changed.
+Two pre-existing whole-page/whole-surface source scans
+(`kai-sprint2-impact-evidence-library.spec.js` and
+`kai-sprint2-uat-enablement-frontend.spec.js`) carried a blanket "no `export
+candidate` wording anywhere" assertion predating this package; both were
+narrowed to carve out only the Grant Response Packet card's own JSX section
+(sliced out by its existing section-heading markers, the same technique
+already used for the export-review carve-out on the same line) — every
+other surface on those pages must still never mention it, and both suites
+pass in full.
+
+**Full suite:** `npm test` returned 3636 passed, 7 failed, 63 skipped — the
+same 7 pre-existing, unrelated batch/file-detail baseline failures
+documented in the P14-03 entry above (child-file read model, batch-files
+collection contract, file-detail 15-field allowlist, file-detail contract).
+No new full-suite failure was introduced.
+
+**Frontend build:** `npm run build` (vite build) succeeded; the built
+`public/js/bundles/entry.js` is included in this commit per repository
+convention (tracked, not gitignored).
+
+**Final diff review:** one new `Backend/kai/services/` file, three new
+`__tests__/kai-sprint2-p14-04-*` files, and edits confined to
+`Backend/kai/db/kaiAuditQueries.js`, `Backend/kai/services/
+kaiMetadataOnlyAuditComposition.js`, `Backend/kai/validators/
+kaiSprint2RequestSchemas.js`, `Backend/kai/routes/sprint2IntakeApi.js`,
+`frontend/ImpactEvidenceLibrary.jsx`, `frontend/impactEvidenceLibraryLogic.js`,
+the built bundle, five existing test files (three adapted only to
+accommodate this package's own additions, as described above), and this
+ExecPlan entry. `git diff --check` passed with no whitespace errors. No
+migration file, P14-01/P14-02/P14-03 repository/schema file, packet render
+model, or packet Markdown serializer changed.
+
+**Local commit:** one bounded commit created after all required checks
+passed.

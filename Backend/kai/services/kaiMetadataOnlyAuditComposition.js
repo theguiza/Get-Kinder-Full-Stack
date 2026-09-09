@@ -1711,12 +1711,14 @@ export function createProductionMetadataOnlyAuditForEngagementRequirementAssessm
  * `payload.grant_response_packet_export_candidate_id` at prepare time, and a
  * payload missing that id, or whose `engagement_id` does not match this
  * adapter's own bound `engagementId`, is refused. No block text, citation
- * text, evidence body, or member list is ever accepted onto this object -
- * only its own id and the two bound identity ids are recorded here; any
- * fingerprint or member-count value a caller passes is silently dropped by
- * the existing, unmodified `SAFE_AUDIT_METADATA_KEYS` allowlist
- * (`Backend/kai/db/kaiAuditQueries.js`), exactly as it already does for
- * every other non-file-scoped export-track audit composed in this module.
+ * text, evidence body, member object, credential, signed URL, storage path,
+ * or raw PII is ever accepted onto this object - only its own id, the two
+ * bound identity ids, and the two safe scalar fields `canonical_fingerprint`
+ * (validated as a sha256 hex digest) and `member_count` (validated as a
+ * non-negative integer) are recorded here; both are additionally re-checked
+ * by the shared `SAFE_AUDIT_METADATA_KEYS` allowlist
+ * (`Backend/kai/db/kaiAuditQueries.js`) before storage, exactly as every
+ * other field on this object already is.
  */
 export function createProductionMetadataOnlyAuditForGrantResponsePacketExportCandidate({
   organizationId,
@@ -1736,12 +1738,22 @@ export function createProductionMetadataOnlyAuditForGrantResponsePacketExportCan
     return Boolean(value) && typeof value === "object" && !Array.isArray(value);
   }
 
+  const SHA256_HEX_PATTERN = /^[0-9a-f]{64}$/;
+
   return Object.freeze({
     prepareMetadataOnlyAudit({ payload, db } = {}) {
       if (!isPlainObject(payload)) return { ok: false };
       const payloadCandidateId = payload.grant_response_packet_export_candidate_id;
       if (typeof payloadCandidateId !== "string" || payloadCandidateId.length === 0) return { ok: false };
       if (payload.engagement_id !== undefined && payload.engagement_id !== engagementId) return { ok: false };
+
+      const canonicalFingerprint = typeof payload.canonical_fingerprint === "string"
+        && SHA256_HEX_PATTERN.test(payload.canonical_fingerprint)
+        ? payload.canonical_fingerprint
+        : null;
+      const memberCount = Number.isInteger(payload.member_count) && payload.member_count >= 0
+        ? payload.member_count
+        : null;
 
       const metadata = {
         organization_id: organizationId,
@@ -1752,6 +1764,8 @@ export function createProductionMetadataOnlyAuditForGrantResponsePacketExportCan
         operation: typeof payload.attempted_operation === "string" ? payload.attempted_operation : "grant_response_packet_export_candidate_created",
         operation_type: typeof payload.attempted_operation === "string" ? payload.attempted_operation : "grant_response_packet_export_candidate_created",
         validator_key: typeof payload.validator_key === "string" ? payload.validator_key : null,
+        canonical_fingerprint: canonicalFingerprint,
+        member_count: memberCount,
         actor_type: actorContext?.actorType || "human",
         actor_user_id: actorContext?.actorUserId || null,
         request_id: actorContext?.requestId || null,

@@ -931,11 +931,29 @@ test("Impact Evidence Library source has only the Stage-A internal generation ca
   // (or replay) the existing gk_admin-only export-review queue item for a
   // fully-reviewed draft and link to the existing gk-export-review-detail
   // page - a governed link into an already-accepted flow, not a new
-  // export-generation mutation surface. `export candidate`, PUT/PATCH/DELETE,
-  // and `assistant` remain forbidden: this page still never creates export
-  // candidates, grants final release authority, or serializes/finalizes an
-  // export manifest itself.
-  assert.doesNotMatch(uiSource + logicSource, /\bPUT\b|\bPATCH\b|\bDELETE\b|assistant|export candidate/i);
+  // export-generation mutation surface. PUT/PATCH/DELETE and `assistant`
+  // remain forbidden everywhere on this page - no method beyond POST, and no
+  // assistant/KAI actor authority, is introduced anywhere here.
+  //
+  // P14-04 additionally carves out one narrow, governed exception to the
+  // `export candidate` prohibition: the Grant Response Packet card's own
+  // "create export candidate" action (server-derived membership/fingerprint,
+  // grants no approval/export/final-release authority - see
+  // kai-sprint2-p14-04-grant-response-packet-export-candidate-*.spec.js and
+  // kai-sprint2-impact-library-grant-response-packet.spec.js for its focused
+  // proof). Every OTHER surface on this page (Claim Library, generation,
+  // review) must still never mention it, so the phrase is only excused
+  // inside that one card's own JSX section, sliced out here by its section
+  // heading markers - never from logicSource, which must still say
+  // `export-candidate` only in hyphenated, non-matching form.
+  const grantResponsePacketSectionStart = uiSource.indexOf('<h5 className="mb-0">Grant Response Packet</h5>');
+  const grantResponsePacketSectionEnd = uiSource.indexOf('<h5 className="mb-0">Generated Drafts</h5>');
+  assert.notEqual(grantResponsePacketSectionStart, -1);
+  assert.notEqual(grantResponsePacketSectionEnd, -1);
+  const uiSourceOutsideGrantResponsePacketSection =
+    uiSource.slice(0, grantResponsePacketSectionStart) + uiSource.slice(grantResponsePacketSectionEnd);
+  assert.doesNotMatch(uiSourceOutsideGrantResponsePacketSection + logicSource, /\bPUT\b|\bPATCH\b|\bDELETE\b|assistant|export candidate/i);
+  assert.doesNotMatch(uiSource, /\bPUT\b|\bPATCH\b|\bDELETE\b|assistant/i);
   assert.match(uiSource + logicSource, /export-review-request/);
   assert.doesNotMatch(uiSource + logicSource, /raw_content|signed_url|storage_object|api[_-]?key|secret/i);
 });
