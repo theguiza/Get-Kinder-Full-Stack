@@ -25160,3 +25160,159 @@ changed. No production/shared database accessed or mutated.
 
 **Local commit:** one bounded commit created after all required checks
 passed.
+
+
+## Phase-14 (Grant Response Packet Track) — P14-06B Grant Response Packet
+## Export-Review COMPLETE (bounded; packet-native transition only, no
+## eligibility/manifest/frontend)
+
+**Date:** 2026-09-09
+
+**Owner authorization (bounded, local-only):** implement ONLY the
+packet-native COMPLETE transition (in_progress/needs_gk_review ->
+resolved/resolved) on the EXACT existing governed 'export_review' queue row
+the P14-05/P14-06A packages already bind/start against the EXACT existing,
+immutable P14-03 grant-response-packet export candidate. No schema/
+migration change, no final eligibility evaluation, no approval, no funder/
+public readiness, no export authority, no final release, no manifest, no
+frontend/lifecycle wiring, and no P14-01 through P14-06A membership/
+fingerprint/identity/queue-binding/START redesign.
+
+**Finding:** the P14-05 schema widening already admits the packet target
+through the full resolved/resolved lifecycle profile, and P14-06A only
+implemented the START transition (open/needs_gk_review ->
+in_progress/needs_gk_review). No packet-native COMPLETE existed; only the
+single-draft P3-13 `completeGeneratedDraftExportReview` implemented the
+analogous in_progress -> resolved transition, and that function performs no
+generated-draft-specific readiness evaluation of its own during COMPLETE
+(readiness is only evaluated once, at REQUEST time, in the single-draft
+workflow) - COMPLETE is purely a governed CAS state transition plus audit in
+both the single-draft and packet cases. No schema change was required or
+made.
+
+**Implementation:** (1) Contract constants — added
+`GRANT_RESPONSE_PACKET_EXPORT_REVIEW_COMPLETED_OPERATION` and
+`GRANT_RESPONSE_PACKET_EXPORT_REVIEW_COMPLETE_AUDIT_CONTRACT` to
+`Backend/kai/dictionary/grantResponsePacketExportCandidateContract.js`,
+parallel to the existing P14-06A STARTED constants and to the P3-09/P3-13
+START/COMPLETE constant split. (2) Repository — added
+`completeGrantResponsePacketExportReview(input, dependencies)` to the
+existing `postgresGrantResponsePacketExportCandidateRepository.js` (never a
+new repository file, and the existing `createGrantResponsePacketExportCandidate`/
+`requestGrantResponsePacketExportReview`/`startGrantResponsePacketExportReview`
+methods were not touched): accepts exact keys `{organizationId,
+engagementId, grantResponsePacketExportCandidateId, exportReviewQueueItemId,
+expectedUpdatedAt, actorContext, now}` only - the identical shape to the
+P14-06A START input; re-proves the EXACT existing candidate/queue-item/
+engagement targeting via the same helpers P14-06A already added
+(`loadGrantResponsePacketExportCandidateForReview`,
+`loadGrantResponsePacketExportReviewQueueRowById`); performs one optimistic
+CAS `UPDATE ... SET queue_status = 'resolved', review_status = 'resolved'
+WHERE ... AND queue_status = 'in_progress' AND review_status =
+'needs_gk_review' AND date_trunc('milliseconds', updated_at) =
+date_trunc('milliseconds', $expectedUpdatedAt)` - the same optimistic-
+concurrency shape P3-13's `completeGeneratedDraftExportReview` and P14-06A's
+own START transition already use; because the WHERE clause requires the
+row to already be at in_progress/needs_gk_review, a row still at
+open/needs_gk_review cannot match and the CAS fails closed with
+`conflict_current_state_changed` on reload (proving open cannot skip
+directly to resolved under the current lifecycle); on any other CAS miss,
+reloads the row and returns a safe replay (`replayed:true`) only if it is
+already validly at the resolved/resolved packet static contract, otherwise
+fails closed the same way (a stale `expectedUpdatedAt` case); publishes
+exactly one metadata-only audit event on the real (non-replayed) transition
+only. (3) Audit composition — reused the existing P14-05/P14-06A
+`createProductionMetadataOnlyAuditForGrantResponsePacketExportReview` in
+`Backend/kai/services/kaiMetadataOnlyAuditComposition.js` unchanged (already
+forwards `review_queue_item_id`/`expected_updated_at`/the four previous/
+resulting queue+review status fields when present and well-formed, added
+during P14-06A) - no new audit adapter, no new `SAFE_AUDIT_METADATA_KEYS`
+entries were needed. (4) Service — added
+`completeGrantResponsePacketExportReview` to the existing
+`kaiGrantResponsePacketExportReviewService.js` (never a new service file),
+gated on `KAI_SPRINT2_ENABLED`/`KAI_GENERATION_ENABLED`, authorized via the
+exact existing P3-16/P14-05/P14-06A `EXPORT_CANDIDATE_ALLOWED_ROLES`
+(`gk_admin` only — never broadened, never a second review authority), plus
+the existing tenant-boundary validator, delegating once to the repository
+above. (5) Validator — added
+`validateCompleteGrantResponsePacketExportReviewRequest` (accepts only
+`expected_updated_at`, identical shape to the existing P14-06A
+`validateStartGrantResponsePacketExportReviewRequest` and the existing P3-13
+`validateCompleteExportReviewRequest`) to
+`Backend/kai/validators/kaiSprint2RequestSchemas.js`. (6) Route — added the
+authenticated
+`POST /admin/organizations/:organizationId/engagements/:engagementId/grant-response-packet/export-candidates/:grantResponsePacketExportCandidateId/export-review-queue/:exportReviewQueueItemId/complete`
+sibling of the existing P14-06A start route in
+`Backend/kai/routes/sprint2IntakeApi.js`, reusing the existing P14-06A
+`grantResponsePacketExportReviewStartIdentifier` route-identifier helper
+unchanged (identical route-path shape, mirroring how the single-draft
+`exportReviewPacketIdentifiers` helper is already reused across its own
+GET/start/complete routes), gated by the existing feature check, deriving
+actorContext/now server-side, requiring only `expected_updated_at` in the
+body, resolving every other identifier from the route path only, with no
+SQL/repository/direct-DB access in the route itself. No frontend file was
+touched - this package implements the backend COMPLETE transition only; no
+Complete-review button, lifecycle wiring, or client polling was added.
+
+**Verification:** added
+`__tests__/kai-sprint2-p14-06b-grant-response-packet-export-review-complete.spec.js`
+(21/21: exact-keys input contract rejects every client-supplied
+composition/authority field and requires exportReviewQueueItemId/
+expectedUpdatedAt, gk_admin-only role boundary, assistant/system-actor and
+cross-tenant-actor rejection, feature-flag gating, service pass-through of a
+real repository result with no manifest/approval/eligibility-shaped output
+field, repository not_found for a nonexistent candidate/cross-engagement
+candidate/nonexistent queue item, repository fails closed for a queue item
+targeting a different candidate or a different engagement, repository
+performs the in_progress -> resolved transition and publishes exactly one
+metadata-only audit with the exact previous/resulting queue+review status
+fields, repository replays a valid already-resolved row with zero
+additional audits, repository fails closed with
+`conflict_current_state_changed` for a stale `expectedUpdatedAt`, repository
+fails closed with `conflict_current_state_changed` when the row is still
+open/needs_gk_review (proving open cannot skip directly to resolved),
+repository never evaluates final eligibility/approval/manifest state, route
+no-SQL/no-direct-DB source-slice proof, route mounted exactly once).
+Extended `__tests__/kai-sprint2-pass2-route-runtime.spec.js` (new route path
+added to the route inventory) - no other existing test file required
+adaptation this time (unlike P14-06A, no doc-comment source-slice boundary
+test was crossed, since this new route was inserted after the P14-06A start
+route and before the unrelated P14-04-era
+`function generatedContentReviewQueueIdentifier` marker in a region no
+existing boundary test slices through).
+
+**Affected regressions passed:** P14-05 packet export-review binding suite,
+P14-06A packet START suite, P14-04 candidate service/route/audit suites,
+P3-05/P3-09/P3-10/P3-12/P3-13/P3-14/P3-15 single-draft export-review
+request/start/complete suites, `kai-sprint2-audit-queries.spec.js`,
+`kai-sprint2-pass2-route-runtime.spec.js`,
+`kai-sprint2-impact-library-grant-response-packet.spec.js`,
+`kai-sprint2-impact-evidence-library.spec.js`,
+`kai-sprint2-uat-enablement-frontend.spec.js`,
+`kai-grant-response-packet-markdown-delivery-route.spec.js` — all passed, no
+behavior changed.
+
+**Full suite:** `npm test` returned 3700 passed, 7 failed, 63 skipped - the
+same 7 pre-existing, unrelated batch/file-detail baseline failures
+documented in the P14-03/P14-04/P14-05/P14-06A entries above. No new
+full-suite failure was introduced.
+
+**Frontend build:** not run - no frontend file was touched by this package.
+
+**Final diff review:** edits confined to
+`Backend/kai/dictionary/grantResponsePacketExportCandidateContract.js`,
+`Backend/kai/dictionary/postgresGrantResponsePacketExportCandidateRepository.js`,
+`Backend/kai/services/kaiGrantResponsePacketExportReviewService.js`,
+`Backend/kai/validators/kaiSprint2RequestSchemas.js`,
+`Backend/kai/routes/sprint2IntakeApi.js`, one new focused test file, one
+existing test file extended only to accommodate this package's own route
+addition, and this ExecPlan entry. `git diff --check` passed with no
+whitespace errors. No migration file, no
+P14-01/P14-02/P14-03/P14-04/P14-05/P14-06A repository/schema/fingerprint/
+membership/START file logic changed (only additive new methods/constants
+alongside the unchanged existing ones), no packet manifest/final-release/
+approval file, and no frontend file changed. No production/shared database
+accessed or mutated.
+
+**Local commit:** one bounded commit created after all required checks
+passed.

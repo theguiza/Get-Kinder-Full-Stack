@@ -18,6 +18,7 @@ import {
 } from "../middleware/kaiSprint2RequestSafety.js";
 import {
   validateCompleteClaimReviewRequest,
+  validateCompleteGrantResponsePacketExportReviewRequest,
   validateCompleteClientFollowupRequest,
   validateCompleteEvidenceReviewRequest,
   validateCompleteExportReviewRequest,
@@ -3023,6 +3024,7 @@ async function getGrantResponsePacketExportReviewService() {
   if (
     intakeServiceOverride?.requestGrantResponsePacketExportReview
     || intakeServiceOverride?.startGrantResponsePacketExportReview
+    || intakeServiceOverride?.completeGrantResponsePacketExportReview
   ) return intakeServiceOverride;
   grantResponsePacketExportReviewServicePromise ||= import(
     "../services/kaiGrantResponsePacketExportReviewService.js"
@@ -3159,6 +3161,78 @@ router.post(
     return invokeService(res, async () => {
       const service = await getGrantResponsePacketExportReviewService();
       return service.startGrantResponsePacketExportReview({
+        organizationId: identifiers.organizationId,
+        engagementId: identifiers.engagementId,
+        grantResponsePacketExportCandidateId: identifiers.grantResponsePacketExportCandidateId,
+        exportReviewQueueItemId: identifiers.exportReviewQueueItemId,
+        expectedUpdatedAt: payload.expected_updated_at,
+        actorContext,
+        now,
+      }, {
+        metadataOnlyAudit: createProductionMetadataOnlyAuditForGrantResponsePacketExportReview({
+          organizationId: identifiers.organizationId,
+          engagementId: identifiers.engagementId,
+          actorContext,
+          now,
+        }),
+      });
+    });
+  },
+);
+
+function validateCompleteGrantResponsePacketExportReviewRequestOrSend(req, res) {
+  if (!metadataContentTypeIsSupported(req)) {
+    sendKaiError(res, "unsupported_media_type");
+    return null;
+  }
+  const identifiers = grantResponsePacketExportReviewStartIdentifier(req);
+  if (!identifiers) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker(
+        "invalid_uuid_field",
+        "organization_id_engagement_id_grant_response_packet_export_candidate_id_or_export_review_queue_item_id",
+      )],
+    });
+    return null;
+  }
+  const result = validateCompleteGrantResponsePacketExportReviewRequest(req.body);
+  if (!result.ok) {
+    sendKaiError(res, "validation_blocker", { blockers: result.blockers });
+    return null;
+  }
+  return identifiers;
+}
+
+/**
+ * Grant Response Packet export-review binding (P14-06B): completes governed
+ * export review for the EXACT existing 'export_review' queue row identified
+ * by the route's own exportReviewQueueItemId, targeting the EXACT existing,
+ * immutable P14-03 packet export candidate identified by the route's own
+ * grantResponsePacketExportCandidateId - never a client-selected latest/
+ * newest/preferred candidate or queue item, and never client-supplied
+ * membership, fingerprint, memberCount, or manifest identity. Transitions
+ * in_progress/needs_gk_review to resolved/resolved only, reusing the same
+ * optimistic expected_updated_at CAS/replay contract the single-draft
+ * P3-13 complete route already uses. Contains no SQL and no direct
+ * database access - delegates once to
+ * kaiGrantResponsePacketExportReviewService. Completing review means only
+ * that a gk_admin completed the governed human export review of this exact
+ * immutable packet candidate - it grants no final eligibility evaluation,
+ * no approval, no funder/public readiness, no export authority, no final
+ * release, and no manifest.
+ */
+router.post(
+  "/admin/organizations/:organizationId/engagements/:engagementId/grant-response-packet/export-candidates/:grantResponsePacketExportCandidateId/export-review-queue/:exportReviewQueueItemId/complete",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    const identifiers = validateCompleteGrantResponsePacketExportReviewRequestOrSend(req, res);
+    if (!identifiers) return;
+    const payload = requestPayload(req);
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    return invokeService(res, async () => {
+      const service = await getGrantResponsePacketExportReviewService();
+      return service.completeGrantResponsePacketExportReview({
         organizationId: identifiers.organizationId,
         engagementId: identifiers.engagementId,
         grantResponsePacketExportCandidateId: identifiers.grantResponsePacketExportCandidateId,
@@ -3929,6 +4003,7 @@ export const __testables = {
   validateRequestGrantResponsePacketExportReviewRequestOrSend,
   grantResponsePacketExportReviewStartIdentifier,
   validateStartGrantResponsePacketExportReviewRequestOrSend,
+  validateCompleteGrantResponsePacketExportReviewRequestOrSend,
   sendCsvAttachment,
   sendPdfAttachment,
   sendDocxAttachment,

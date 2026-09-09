@@ -162,6 +162,16 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // approval/export/finalization authority of its own.
     "/admin/organizations/:organizationId/engagements/:engagementId/grant-response-packet",
     "/admin/organizations/:organizationId/engagements/:engagementId/grant-response-packet/export-candidates",
+    // P14-06B: completes governed export review (in_progress/needs_gk_review
+    // -> resolved/resolved only) for the exact existing 'export_review'
+    // queue row identified by the path's own exportReviewQueueItemId,
+    // targeting the exact existing P14-03 packet export candidate
+    // identified by the path's own grantResponsePacketExportCandidateId.
+    // Completion means only that a gk_admin completed the governed human
+    // export review of this exact immutable packet candidate - it grants
+    // no final eligibility evaluation, no approval, no export authority, no
+    // final release, and no manifest.
+    "/admin/organizations/:organizationId/engagements/:engagementId/grant-response-packet/export-candidates/:grantResponsePacketExportCandidateId/export-review-queue/:exportReviewQueueItemId/complete",
     // P14-06A: starts governed export review (open/needs_gk_review ->
     // in_progress/needs_gk_review only) for the exact existing
     // 'export_review' queue row identified by the path's own

@@ -54,3 +54,19 @@ export const GRANT_RESPONSE_PACKET_EXPORT_REVIEW_STARTED_OPERATION =
 
 export const GRANT_RESPONSE_PACKET_EXPORT_REVIEW_START_AUDIT_CONTRACT =
   "p14_06_grant_response_packet_export_review_start_v1";
+
+// P14-06B packet export-review COMPLETE: the packet-level analogue of the
+// existing single-draft P3-13 complete_generated_draft_export_review
+// operation - transitions the SAME 'export_review' queue row from
+// in_progress/needs_gk_review to resolved/resolved only. Completion means
+// only that a gk_admin completed the governed human export review of this
+// exact immutable packet candidate - it does NOT mean final export
+// eligible, approved for external use, funder-ready, final-release
+// authorized, manifested, or finalized. No new queue_type, no new
+// lifecycle, no approval, no funder-readiness, no final-release authority,
+// and no manifest.
+export const GRANT_RESPONSE_PACKET_EXPORT_REVIEW_COMPLETED_OPERATION =
+  "grant_response_packet_export_review_completed";
+
+export const GRANT_RESPONSE_PACKET_EXPORT_REVIEW_COMPLETE_AUDIT_CONTRACT =
+  "p14_06_grant_response_packet_export_review_complete_v1";
