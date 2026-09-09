@@ -24442,3 +24442,141 @@ required.
 
 **Local commit:** one bounded commit created after all required checks
 passed.
+
+## Phase-14 (Grant Response Packet Track) — Export Candidate + Authoritative
+## Member Snapshot Foundation (P14-03; LOCAL_ONLY schema + persistence)
+
+**Date:** 2026-09-09
+
+**Owner authorization (bounded, local-only):** make LOCAL-ONLY schema and
+persistence changes required to implement a fingerprint-convergent Grant
+Response Packet export candidate bound to the existing P14-02 durable packet
+identity, plus a server-derived, ordered member snapshot of exactly which
+generated_content_draft rows made up that candidate — limited to local
+repository code, local migration/schema artifacts, metadata-only audit
+integration, and synthetic/local database tests and migration proof — no
+production/shared database changes, no production access or mutation, no
+deployment, no push or remote-repository mutation, no cloud changes, no
+feature-flag changes, no credential changes or handling, no real client
+data, no packet manifest creation, no packet final-release authority/
+finalization, no PDF/DOCX work, no Board Summary work. Closed areas remained
+closed: no P14-01/P14-02 functional behavior was reopened or modified, and
+no member `exportCandidateId`/`exportManifestId` was used as, or added as a
+column on, this package's tables.
+
+**Identity shape decision:** unlike P14-02 (fully structural identity — the
+`(organization_id, engagement_id, packet_audience)` triple alone determines
+a packet's identity), a packet's content can legitimately change as member
+drafts are reviewed/revised, so — exactly like `kai.export_candidates` —
+this candidate's identity converges on a `canonical_fingerprint` hash of the
+packet's own semantic render-model state, FK'd under the existing P14-02
+structural identity. The fingerprint is derived exclusively from
+`getGrantResponsePacket` → `composeGrantResponsePacketRenderModel` output:
+it covers `packetAudience === 'funder'` (funder-only), the ordered member
+`generatedContentDraftId`s, ordered block/citation identities, and material
+limitation/blocker state, while explicitly excluding every presentation
+timestamp and the entire single-draft export-review/export-manifest track.
+
+**Implementation:** added
+`migrations/kai_sprint2_p14_03_grant_response_packet_export_candidate_foundation.sql`
+/ `.rollback.sql`, creating `kai.grant_response_packet_export_candidates`
+(tenant-safe composite FK into the existing P14-02 identity table, `UNIQUE
+(organization_id, grant_response_packet_export_identity_id,
+canonical_fingerprint)` replay-convergence key, pinned fingerprint-contract-
+version and SHA-256-format CHECKs, append-only trigger) and
+`kai.grant_response_packet_export_candidate_members` (tenant-safe composite
+FKs into the candidate table and `kai.generated_content_drafts`, `UNIQUE
+(candidate, draft)`, `UNIQUE (candidate, ordinal)`, append-only trigger; no
+block text, evidence/source content, or artifact bytes; no
+`exportCandidateId`/`exportManifestId` column). Added
+`Backend/kai/dictionary/grantResponsePacketExportCandidateContract.js`
+(static contract constants),
+`Backend/kai/services/kaiGrantResponsePacketExportCandidateFingerprintService.js`
+(the fingerprint composer described above), and
+`Backend/kai/dictionary/postgresGrantResponsePacketExportCandidateRepository.js`
+exposing one `createGrantResponsePacketExportCandidate(input, dependencies)`
+accepting exact-keys `{organizationId, engagementId, actorContext, now}`
+only — no membership, draft id, candidate id, manifest id, or fingerprint is
+ever accepted from a caller. Inside one transaction it composes the render
+model, computes the fingerprint, resolves (get-or-create, converging) the
+P14-02 identity inline, finds-or-creates the candidate, derives the ordered
+member list exclusively from the render model's own order, persists the
+member snapshot, and writes one metadata-only audit event via a new
+`createProductionMetadataOnlyAuditForGrantResponsePacketExportCandidate`
+adapter added to `Backend/kai/services/kaiMetadataOnlyAuditComposition.js`
+(mirroring the existing non-file-scoped `kai.audit_events` discipline
+`createProductionMetadataOnlyAuditForExportManifest` already established;
+the existing, unmodified `SAFE_AUDIT_METADATA_KEYS` allowlist silently drops
+any field beyond ids/operation, exactly as it already does for every other
+non-file-scoped export-track audit in that module). No route, service, or
+the existing packet DTO calls this repository — wiring is explicitly
+deferred to a later, separately authorized package. Several natural
+constraint/trigger names on the member table (and the candidate table's
+convergence-unique constraint) exceeded Postgres's 63-byte identifier limit
+and were shortened (e.g. `..._p14_03_convergence_unique` →
+`..._p14_03_converge_unq`; member-table constraints use a
+`grppec_members_p14_03_*` prefix), confirmed with no truncation notice on a
+live forward → rollback → forward re-application.
+
+**Verification:** added
+`scripts/kai-sprint2-p14-03-grant-response-packet-export-candidate-foundation-{verifier,smoke-seed,smoke-verifier,failure-checks}.sql`
+and `-local-postgres.js` (registered as
+`npm run verify:kai-sprint2-p14-03-grant-response-packet-export-candidate-foundation`),
+proving against a runner-owned, loopback-only ephemeral Postgres 16 instance
+bootstrapped with the full Gate-A-through-P14-02 migration chain (plus
+schema-only P3-17/P3-19, so `kai.human_authority_decisions`/
+`kai.export_manifests` exist for this package's own "creates no approval/
+manifest rows" proof): catalog verifier (16/16 checks), smoke-seed/verifier
+(4/4), failure-checks (11/11: fabricated packet identity rejected,
+cross-tenant packet identity rejected, non-pinned fingerprint-contract-
+version rejected, malformed fingerprint rejected, fabricated member draft
+rejected, duplicate (candidate, draft) member rejected, duplicate ordinal
+within a candidate rejected, append-only UPDATE/DELETE rejected on both
+tables). Added focused tests
+`__tests__/kai-sprint2-p14-03-grant-response-packet-export-candidate-foundation.integration.spec.js`
+(14/14: packet structural identity reuse, funder-only enforcement, replay
+convergence, changed-state new candidate, fabricated/cross-tenant identity
+and member rejection, candidate-id/identity-id distinctness, no
+`export_manifest_id` column, duplicate ordinal/member rejection, append-only
+UPDATE/DELETE rejection, zero rows created in any approval/manifest table)
+and `__tests__/kai-grant-response-packet-export-candidate-boundary.spec.js`
+(20/20: exact-keys input-contract proof including rejection of
+`memberIds`/`generatedContentDraftIds`/`exportCandidateId`/
+`exportManifestId`/`canonicalFingerprint`, and fingerprint-composition proof
+— funder-only, convergence, member-order/citation/blocker-state sensitivity,
+timestamp/manifest-track exclusion). Forward migration → rollback → forward
+re-application was proven idempotent and clean against a separate ephemeral
+Postgres instance, with no identifier-truncation notice. `DATABASE_URL` was
+set to the non-listening loopback sentinel `postgres://127.0.0.1:9/kai_sentinel`
+for every Node/npm command.
+
+**Affected regressions passed:** P14-02 identity foundation boundary/
+integration (`__tests__/kai-grant-response-packet-export-identity-boundary.spec.js`,
+10/10) and Grant Response Packet backend/render-model/markdown-delivery/
+Impact-Library boundary suites (101/101 combined across
+`kai-grant-response-packet-boundary.spec.js`,
+`kai-grant-response-packet-render-model-boundary.spec.js`,
+`kai-grant-response-packet-markdown-delivery-boundary.spec.js`,
+`kai-grant-response-packet-markdown-delivery-route.spec.js`, and
+`kai-sprint2-impact-library-grant-response-packet.spec.js`), and the P3-16/
+P3-17/P3-18/P3-19/P3-20 single-draft export-path boundary suites (103/103
+combined) — none changed behavior. All runs used the non-listening loopback
+sentinel `DATABASE_URL`.
+
+**Full suite:** `npm test` returned 3607 passed, 7 failed, 63 skipped. The 7
+failures are the pre-existing, unrelated batch/file-detail baseline already
+documented earlier in this ExecPlan (child-file read model, batch-files
+collection contract, file-detail 15-field allowlist, file-detail contract).
+No new full-suite failure was introduced.
+
+**Final diff review:** confined to the two new migration files, three new
+`Backend/kai/{dictionary,services}` files, one addition to the existing
+`kaiMetadataOnlyAuditComposition.js` (new export only, no existing export
+changed), six new `scripts/kai-sprint2-p14-03-*` artifacts plus patch-notes/
+runbook, one `package.json` script entry, two new test files, and this
+ExecPlan entry. `git diff --check` passed. No frontend file, route,
+P14-01/P14-02 file, or existing packet DTO changed; no frontend build
+required.
+
+**Local commit:** one bounded commit created after all required checks
+passed.
