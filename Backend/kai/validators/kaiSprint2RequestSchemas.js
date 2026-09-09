@@ -66,6 +66,7 @@ const REQUEST_EXPORT_REVIEW_REQUEST_KEYS = new Set([
 ]);
 const CREATE_EXPORT_CANDIDATE_REQUEST_KEYS = new Set([]);
 const CREATE_GRANT_RESPONSE_PACKET_EXPORT_CANDIDATE_REQUEST_KEYS = new Set([]);
+const REQUEST_GRANT_RESPONSE_PACKET_EXPORT_REVIEW_REQUEST_KEYS = new Set([]);
 const HUMAN_FINAL_RELEASE_AUTHORITY_REQUEST_KEYS = new Set([
   "requested_audience",
   "decision_action",
@@ -558,6 +559,23 @@ export function validateCreateGrantResponsePacketExportCandidateRequest(payload)
   }
   const keys = Object.keys(payload);
   if (keys.some((key) => !CREATE_GRANT_RESPONSE_PACKET_EXPORT_CANDIDATE_REQUEST_KEYS.has(key))) {
+    return { ok: false, blockers: [requestBlocker("unknown_field", "body")] };
+  }
+  return { ok: true, blockers: [] };
+}
+
+// Browser must send no packet review composition - organizationId,
+// engagementId, and the exact candidate id all come from the route path,
+// and actorContext/now are server-derived, so this route accepts an empty
+// body only, exactly like validateCreateGrantResponsePacketExportCandidateRequest
+// above. In particular this rejects members, canonicalFingerprint,
+// memberCount, manifest identity, and any approval/final-release decision.
+export function validateRequestGrantResponsePacketExportReviewRequest(payload) {
+  if (!isPlainObject(payload)) {
+    return { ok: false, blockers: [requestBlocker("request_body_must_be_object", "body")] };
+  }
+  const keys = Object.keys(payload);
+  if (keys.some((key) => !REQUEST_GRANT_RESPONSE_PACKET_EXPORT_REVIEW_REQUEST_KEYS.has(key))) {
     return { ok: false, blockers: [requestBlocker("unknown_field", "body")] };
   }
   return { ok: true, blockers: [] };

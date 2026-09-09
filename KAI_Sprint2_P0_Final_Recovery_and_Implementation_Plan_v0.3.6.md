@@ -24814,3 +24814,195 @@ final-release file changed. No frontend file changed.
 
 **Local commit:** one bounded commit created after all required checks
 passed.
+
+
+## Phase-14 (Grant Response Packet Track) — P14-05 Grant Response Packet
+## Export-Review Binding (bounded; additive schema widening + service/route/
+## frontend wiring)
+
+**Date:** 2026-09-09
+
+**Owner authorization (bounded, local-only):** make the local-only schema/
+migration change required to bind the existing, immutable P14-03 Grant
+Response Packet export candidate into the existing governed `export_review`
+workflow, plus the repository/service/route/frontend changes directly
+required for that binding, affected tests, this ExecPlan entry, and a bounded
+local commit. No production/shared database access, no push, no deploy.
+
+**Finding (established the prior turn, not reopened):** the existing
+`kai.review_queue_items` `export_review` CHECK contract
+(`review_queue_items_p3_13_export_review_contract_check`) hard-required
+`target_object_type = 'generated_content_draft'` plus the exact single-draft
+static summary/required_action text whenever `queue_type = 'export_review'`,
+which structurally rejected any row targeting a
+`grant_response_packet_export_candidate`.
+
+**Schema change:** added migration
+`migrations/kai_sprint2_p14_05_grant_response_packet_export_review_binding.sql`
+(+ `.rollback.sql`), which additively widens that one CHECK constraint
+(replacing it with `review_queue_items_p14_05_export_review_contract_check`)
+so `queue_type = 'export_review'` admits EITHER the existing, byte-for-byte
+unchanged `generated_content_draft` target/lifecycle/static-text contract, OR
+a new `grant_response_packet_export_candidate` target with its own pinned
+static summary/required_action text, both sharing the exact same existing
+open/needs_gk_review → in_progress/needs_gk_review → resolved/resolved
+lifecycle matrix. No new `queue_type` value, no new table, no new lifecycle
+enum, no polymorphic FK on `target_object_id` (following the table's existing
+P1-06 convention: tenant/existence binding is proven transactionally by the
+application layer, not by a table-wide FK). Proven forward → rollback →
+forward against a real, runner-owned, loopback-only synthetic local
+PostgreSQL instance via
+`scripts/kai-sprint2-p14-05-grant-response-packet-export-review-binding-local-postgres.js`
+(`npm run verify:kai-sprint2-p14-05-grant-response-packet-export-review-binding`),
+which also runs
+`scripts/kai-sprint2-p14-05-grant-response-packet-export-review-binding-verifier.sql`
+(9/9 PASS: both target-object-type shapes admitted, wrong target_object_type/
+summary still rejected, the P3-05 partial unique identity index preserved,
+no new `queue_type` value, no new polymorphic FK) both before and after the
+rollback/re-forward cycle, then runs the new focused suite plus the directly
+coupled P3-05/P3-09/P3-13/P14-03/P14-04 regressions against the same
+database.
+
+**Implementation:** (1) Contract constants — added
+`GRANT_RESPONSE_PACKET_EXPORT_REVIEW_QUEUE_STATIC_CONTRACT`,
+`GRANT_RESPONSE_PACKET_EXPORT_REVIEW_REQUESTED_OPERATION`, and
+`GRANT_RESPONSE_PACKET_EXPORT_REVIEW_AUDIT_CONTRACT` to
+`Backend/kai/dictionary/grantResponsePacketExportCandidateContract.js`. (2)
+Repository — added `requestGrantResponsePacketExportReview(input,
+dependencies)` to the existing
+`postgresGrantResponsePacketExportCandidateRepository.js` (never a new
+repository file): accepts exact keys `{organizationId, engagementId,
+grantResponsePacketExportCandidateId, actorContext, now}` only; transactionally
+resolves the EXACT existing, immutable P14-03 candidate row and proves it
+belongs to `organizationId` and that its P14-02 identity belongs to
+`engagementId` (never trusting a client-supplied pairing); inserts (or, on a
+convergent conflict, reuses) exactly one `review_queue_items` row via the
+existing `ux_review_queue_items_p3_05_export_review_identity` partial unique
+index, reusing that one existing index/queue_type rather than inventing new
+replay logic; validates any reused row against the exact packet static
+contract before trusting it (fails closed with `conflict_current_state_changed`
+otherwise); publishes exactly one metadata-only audit event on first
+acceptance only (via `kai.audit_events`, the same general path P14-03/P14-04
+already use — never `upload_lifecycle_audit`, which is intake-file-scoped and
+inapplicable to a packet). (3) Service — added
+`Backend/kai/services/kaiGrantResponsePacketExportReviewService.js` exposing
+`requestGrantResponsePacketExportReview`, gated on
+`KAI_SPRINT2_ENABLED`/`KAI_GENERATION_ENABLED`, authorized via
+`validateActorCanPerformOperation` against the existing P3-16
+`EXPORT_CANDIDATE_ALLOWED_ROLES` (`gk_admin` only — the exact existing
+export-candidate/export-review authority, never broadened), plus the existing
+tenant-boundary validator, delegating once to the repository above and
+projecting down to safe review-queue identity/status metadata only. (4)
+Audit composition — added
+`createProductionMetadataOnlyAuditForGrantResponsePacketExportReview` to
+`Backend/kai/services/kaiMetadataOnlyAuditComposition.js`, following the
+existing P14-03 packet-candidate audit adapter's shape exactly (metadata-only,
+`kai.audit_events`, no raw/content field ever included). (5) Validator — added
+`validateRequestGrantResponsePacketExportReviewRequest` (empty-body-only
+contract, identical shape to the existing P14-04 candidate-creation
+validator) to `Backend/kai/validators/kaiSprint2RequestSchemas.js`. (6) Route
+— added the authenticated
+`POST /admin/organizations/:organizationId/engagements/:engagementId/grant-response-packet/export-candidates/:grantResponsePacketExportCandidateId/export-review-request`
+sibling of the existing P14-04 export-candidates POST route in
+`Backend/kai/routes/sprint2IntakeApi.js`, gated by the existing
+`requireKaiSprint2Enabled`, deriving actorContext/now server-side, requiring
+an empty JSON body, resolving organizationId + engagementId +
+grantResponsePacketExportCandidateId from the route path only (never a
+client-selected latest/newest/preferred candidate, never client-supplied
+membership/fingerprint/memberCount/manifest/approval), with no SQL/
+repository/direct-DB access in the route itself. (7) Frontend — added
+`grantResponsePacketExportReviewRequestPath` and
+`projectGrantResponsePacketExportReviewResult` to
+`frontend/impactEvidenceLibraryLogic.js`, and a "Request export review"
+button + status display to the existing Grant Response Packet card in
+`frontend/ImpactEvidenceLibrary.jsx`, visible only once
+`grantResponsePacketExportCandidateResult` (the server-returned candidate
+identity from the existing P14-04 action) is present, acting on that exact
+candidate id, sending an empty body, and refetching authoritative packet
+state via the existing
+`refetchGrantResponsePacketAfterMemberExportReviewRequest` on success (same
+staleness guard as every other mutation on this card). Creating a new
+candidate resets any prior review-request state for the previous candidate.
+No Start/Complete review, approval, final-release authority, manifest
+creation, or final export control was added anywhere — this package
+implements REQUEST only. **Remaining, explicitly deferred contradiction:**
+the existing single-draft Start/Complete export-review repository functions
+(`startGeneratedDraftExportReview`/`completeGeneratedDraftExportReview` in
+`postgresGeneratedContentRepository.js`) gate on
+`evaluateGeneratedDraftReviewPacketInTransaction`/`evaluateExportReviewReadiness`
+— genuine single-draft-only semantics (generated-content-review completion,
+draft status, requested-audience match) that do not apply to an
+already-fingerprinted, immutable packet candidate whose eligibility is
+established entirely upstream by P14-03's own zero-eligible-member fail-closed
+guard. Generalizing Start/Complete to the packet target requires defining a
+distinct packet-appropriate readiness contract, which is a separate, later
+product decision this package does not make.
+
+**Verification:** added
+`__tests__/kai-sprint2-p14-05-grant-response-packet-export-review-binding.spec.js`
+(16/16: exact-keys input contract rejects every client-supplied membership/
+fingerprint/memberCount/manifest/approval field, gk_admin-only role boundary,
+assistant/system-actor and cross-tenant-actor rejection, feature-flag gating,
+service pass-through of a real repository result, repository not_found for a
+nonexistent candidate and for a candidate belonging to a different
+engagement, repository creates exactly one review-queue row and publishes
+exactly one audit on first request, repository replays a valid existing row
+with zero additional audits, repository fails closed
+(`conflict_current_state_changed`) when an existing row no longer matches the
+packet static contract, repository exact-keys input rejection, route
+no-SQL/no-direct-DB source-slice proof, route mounted exactly once, service
+output carries no manifest/approval/final-release-shaped field). Extended
+`__tests__/kai-sprint2-pass2-route-runtime.spec.js` (new route path added to
+the route inventory) and
+`__tests__/kai-sprint2-impact-library-grant-response-packet.spec.js` (added
+the three new P14-05 setters this file's real-execution effect harness now
+calls, mirroring the P14-04 precedent).
+
+**Affected regressions passed:** P3-05/P3-09/P3-13 export-review boundary
+suites, P14-03 packet-candidate boundary suite, P14-04 candidate service/
+route/audit suites, `kai-sprint2-audit-queries.spec.js`,
+`kai-sprint2-pass2-route-runtime.spec.js`,
+`kai-sprint2-impact-evidence-library.spec.js` (the existing Grant Response
+Packet JSX carve-out already excuses this card's own section; `logicSource`
+still carries no literal `export candidate` phrase),
+`kai-sprint2-uat-enablement-frontend.spec.js`,
+`kai-grant-response-packet-markdown-delivery-route.spec.js` — all passed, no
+behavior changed. One test-wording regression was found and repaired during
+this package: the new frontend JSDoc comment above
+`requestGrantResponsePacketExportReview` initially used the literal words
+"final"/"release", which the existing
+`kai-sprint2-generated-drafts-library.spec.js` source-scan (banning
+final/export-ready/released/approved wording from the Generated-Drafts hooks
+region) correctly flagged, since that comment sits among the component's
+`useCallback` hooks alongside the Generated Drafts hooks; reworded to avoid
+those literal words (the underlying "no approval/no export authority/no
+manifest" meaning is unchanged) and the suite now passes clean.
+
+**Full suite:** `npm test` returned 3657 passed, 7 failed, 63 skipped — the
+same 7 pre-existing, unrelated batch/file-detail baseline failures documented
+in the P14-03/P14-04 entries above. No new full-suite failure was
+introduced.
+
+**Frontend build:** `npm run build` (vite build) succeeded; the built
+`public/js/bundles/entry.js` is included in this commit per repository
+convention (tracked, not gitignored).
+
+**Final diff review:** one new service file
+(`Backend/kai/services/kaiGrantResponsePacketExportReviewService.js`), one
+new focused test file, one new migration + rollback pair, one new verifier
+script + one new local-Postgres runner script, and edits confined to
+`Backend/kai/dictionary/grantResponsePacketExportCandidateContract.js`,
+`Backend/kai/dictionary/postgresGrantResponsePacketExportCandidateRepository.js`,
+`Backend/kai/services/kaiMetadataOnlyAuditComposition.js`,
+`Backend/kai/validators/kaiSprint2RequestSchemas.js`,
+`Backend/kai/routes/sprint2IntakeApi.js`, `frontend/ImpactEvidenceLibrary.jsx`,
+`frontend/impactEvidenceLibraryLogic.js`, `package.json` (one new `verify:`
+script), the built bundle, two existing test files (extended only to
+accommodate this package's own additions), and this ExecPlan entry. `git diff
+--check` passed with no whitespace errors. No P14-01/P14-02/P14-03/P14-04
+repository/schema/fingerprint/membership file changed, no packet manifest/
+final-release/approval file changed, no production/shared database accessed
+or mutated.
+
+**Local commit:** one bounded commit created after all required checks
+passed.

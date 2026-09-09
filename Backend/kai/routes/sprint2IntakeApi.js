@@ -29,6 +29,7 @@ import {
   validateFilePolicyBlockRequest,
   validateKaiSprint2MutationRequest,
   validateRequestExportReviewRequest,
+  validateRequestGrantResponsePacketExportReviewRequest,
   validateReviewQueueQuery,
   validateReviewQueueStatusRequest,
   validateSensitivityProfileDecisionRequest,
@@ -51,6 +52,7 @@ import {
   createProductionMetadataOnlyAuditForGeneratedDraftExportCandidate,
   createProductionMetadataOnlyAuditForGeneratedDraftExportReview,
   createProductionMetadataOnlyAuditForGrantResponsePacketExportCandidate,
+  createProductionMetadataOnlyAuditForGrantResponsePacketExportReview,
   createProductionMetadataOnlyAuditForExportManifest,
   createProductionMetadataOnlyAuditForHumanFinalReleaseAuthority,
   createProductionMetadataOnlyAuditForRequirementAssessment,
@@ -73,6 +75,7 @@ let exportManifestPdfServicePromise = null;
 let exportManifestDocxServicePromise = null;
 let grantResponsePacketMarkdownServicePromise = null;
 let grantResponsePacketExportCandidateServicePromise = null;
+let grantResponsePacketExportReviewServicePromise = null;
 let evidenceLineageServicePromise = null;
 let evidenceCoverageAssessmentServicePromise = null;
 let claimProposalServicePromise = null;
@@ -3002,6 +3005,92 @@ router.post(
   },
 );
 
+function grantResponsePacketExportCandidateReviewIdentifier(req = {}) {
+  const root = grantResponsePacketIdentifier(req);
+  const grantResponsePacketExportCandidateId = typeof req.params?.grantResponsePacketExportCandidateId === "string"
+    ? req.params.grantResponsePacketExportCandidateId
+    : "";
+  if (!root) return null;
+  if (
+    !KAI_SPRINT2_P0_PATTERNS.uuid.test(grantResponsePacketExportCandidateId)
+    || grantResponsePacketExportCandidateId !== grantResponsePacketExportCandidateId.toLowerCase()
+  ) return null;
+  return { ...root, grantResponsePacketExportCandidateId };
+}
+
+async function getGrantResponsePacketExportReviewService() {
+  if (intakeServiceOverride?.requestGrantResponsePacketExportReview) return intakeServiceOverride;
+  grantResponsePacketExportReviewServicePromise ||= import(
+    "../services/kaiGrantResponsePacketExportReviewService.js"
+  );
+  return grantResponsePacketExportReviewServicePromise;
+}
+
+function validateRequestGrantResponsePacketExportReviewRequestOrSend(req, res) {
+  if (!metadataContentTypeIsSupported(req)) {
+    sendKaiError(res, "unsupported_media_type");
+    return null;
+  }
+  const identifiers = grantResponsePacketExportCandidateReviewIdentifier(req);
+  if (!identifiers) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker(
+        "invalid_uuid_field",
+        "organization_id_engagement_id_or_grant_response_packet_export_candidate_id",
+      )],
+    });
+    return null;
+  }
+  const result = validateRequestGrantResponsePacketExportReviewRequest(req.body);
+  if (!result.ok) {
+    sendKaiError(res, "validation_blocker", { blockers: result.blockers });
+    return null;
+  }
+  return identifiers;
+}
+
+/**
+ * Grant Response Packet export-review binding (P14-05): requests governed
+ * export review for the EXACT existing, immutable P14-03 packet export
+ * candidate identified by the route's own organizationId/engagementId/
+ * grantResponsePacketExportCandidateId - never a client-selected latest/
+ * newest/preferred candidate, and never client-supplied membership,
+ * fingerprint, memberCount, or manifest identity. Reuses the one existing
+ * governed 'export_review' queue_type/lifecycle via the P14-05 widened
+ * review_queue_items contract - no parallel packet review state machine.
+ * Contains no SQL and no direct database access - delegates once to
+ * kaiGrantResponsePacketExportReviewService. Requesting review grants no
+ * approval, no funder/public readiness, no export authority, no final
+ * release, and no manifest.
+ */
+router.post(
+  "/admin/organizations/:organizationId/engagements/:engagementId/grant-response-packet/export-candidates/:grantResponsePacketExportCandidateId/export-review-request",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    const identifiers = validateRequestGrantResponsePacketExportReviewRequestOrSend(req, res);
+    if (!identifiers) return;
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    return invokeService(res, async () => {
+      const service = await getGrantResponsePacketExportReviewService();
+      return service.requestGrantResponsePacketExportReview({
+        organizationId: identifiers.organizationId,
+        engagementId: identifiers.engagementId,
+        grantResponsePacketExportCandidateId: identifiers.grantResponsePacketExportCandidateId,
+        actorContext,
+        now,
+      }, {
+        metadataOnlyAudit: createProductionMetadataOnlyAuditForGrantResponsePacketExportReview({
+          organizationId: identifiers.organizationId,
+          engagementId: identifiers.engagementId,
+          actorContext,
+          now,
+        }),
+      });
+    }, 201);
+  },
+);
+
 function generatedContentReviewQueueIdentifier(req = {}) {
   const root = generatedContentDraftIdentifier(req);
   const reviewQueueItemId = typeof req.params?.reviewQueueItemId === "string" ? req.params.reviewQueueItemId : "";
@@ -3749,6 +3838,8 @@ export const __testables = {
   sendGrantResponsePacketMarkdownAttachment,
   grantResponsePacketIdentifier,
   validateCreateGrantResponsePacketExportCandidateRequestOrSend,
+  grantResponsePacketExportCandidateReviewIdentifier,
+  validateRequestGrantResponsePacketExportReviewRequestOrSend,
   sendCsvAttachment,
   sendPdfAttachment,
   sendDocxAttachment,

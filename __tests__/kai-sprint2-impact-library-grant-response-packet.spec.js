@@ -670,6 +670,11 @@ function buildEffect({
   const setGrantResponsePacketExportCandidatePending = (value) => stateLog.push(["exportCandidatePending", value]);
   const setGrantResponsePacketExportCandidateResult = (value) => stateLog.push(["exportCandidateResult", value]);
   const setGrantResponsePacketExportCandidateError = (value) => stateLog.push(["exportCandidateError", value]);
+  // P14-05: the export-review-request workflow state the same reset effect
+  // now also clears on every engagement/organization switch.
+  const setGrantResponsePacketExportReviewPending = (value) => stateLog.push(["exportReviewPending", value]);
+  const setGrantResponsePacketExportReviewResult = (value) => stateLog.push(["exportReviewResult", value]);
+  const setGrantResponsePacketExportReviewError = (value) => stateLog.push(["exportReviewError", value]);
 
   const buildUseEffect = new Function(
     "React",
@@ -683,6 +688,9 @@ function buildEffect({
     "setGrantResponsePacketExportCandidatePending",
     "setGrantResponsePacketExportCandidateResult",
     "setGrantResponsePacketExportCandidateError",
+    "setGrantResponsePacketExportReviewPending",
+    "setGrantResponsePacketExportReviewResult",
+    "setGrantResponsePacketExportReviewError",
     "setLoadingGrantResponsePacket",
     "getJson",
     "grantResponsePacketPath",
@@ -705,6 +713,9 @@ function buildEffect({
     setGrantResponsePacketExportCandidatePending,
     setGrantResponsePacketExportCandidateResult,
     setGrantResponsePacketExportCandidateError,
+    setGrantResponsePacketExportReviewPending,
+    setGrantResponsePacketExportReviewResult,
+    setGrantResponsePacketExportReviewError,
     setLoadingGrantResponsePacket,
     getJsonImpl,
     grantResponsePacketPath,

@@ -130,6 +130,35 @@ export function projectGrantResponsePacketExportCandidateResult(dto) {
   };
 }
 
+// Grant Response Packet export-review binding (P14-05): the authenticated
+// POST sibling of grantResponsePacketExportCandidatesPath above. Keyed by
+// exactly organizationId + engagementId + the EXACT existing candidate id
+// the server already returned - never a latest/newest/preferred candidate
+// guess, and the browser sends no membership, fingerprint, memberCount, or
+// manifest/approval identity either.
+export function grantResponsePacketExportReviewRequestPath(organizationId, engagementId, grantResponsePacketExportCandidateId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}`
+    + `/engagements/${encodeURIComponent(engagementId)}/grant-response-packet/export-candidates`
+    + `/${encodeURIComponent(grantResponsePacketExportCandidateId)}/export-review-request`;
+}
+
+// Explicit allowlist projection of the export-review-request response
+// (kaiGrantResponsePacketExportReviewService.js) - safe review-queue
+// identity/status metadata only, never approval/final-release/manifest
+// state.
+export function projectGrantResponsePacketExportReviewResult(dto) {
+  if (!dto || typeof dto !== "object") return null;
+  return {
+    organizationId: dto.organizationId,
+    engagementId: dto.engagementId,
+    grantResponsePacketExportCandidateId: dto.grantResponsePacketExportCandidateId,
+    reviewQueueItemId: dto.reviewQueueItemId,
+    queueStatus: dto.queueStatus,
+    reviewStatus: dto.reviewStatus,
+    replayed: dto.replayed === true,
+  };
+}
+
 // A Grant Response Packet response may be applied only if it belongs to the
 // generation, organization, AND engagement still current when it resolves -
 // same late-response-protection convention as

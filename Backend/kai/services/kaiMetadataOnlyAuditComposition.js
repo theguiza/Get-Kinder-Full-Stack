@@ -1795,6 +1795,71 @@ export function createProductionMetadataOnlyAuditForGrantResponsePacketExportCan
   });
 }
 
+export function createProductionMetadataOnlyAuditForGrantResponsePacketExportReview({
+  organizationId,
+  engagementId,
+  actorContext,
+  now,
+  insertAuditEvent = insertRequiredSuccessfulAuditEvent,
+} = {}) {
+  if (typeof organizationId !== "string" || organizationId.length === 0) {
+    throw new TypeError("createProductionMetadataOnlyAuditForGrantResponsePacketExportReview requires organizationId.");
+  }
+  if (typeof engagementId !== "string" || engagementId.length === 0) {
+    throw new TypeError("createProductionMetadataOnlyAuditForGrantResponsePacketExportReview requires engagementId.");
+  }
+
+  function isPlainObject(value) {
+    return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  }
+
+  const UUID_PATTERN_LOCAL = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+  return Object.freeze({
+    prepareMetadataOnlyAudit({ payload, db } = {}) {
+      if (!isPlainObject(payload)) return { ok: false };
+      const payloadCandidateId = payload.grant_response_packet_export_candidate_id;
+      if (typeof payloadCandidateId !== "string" || !UUID_PATTERN_LOCAL.test(payloadCandidateId)) return { ok: false };
+      if (payload.engagement_id !== undefined && payload.engagement_id !== engagementId) return { ok: false };
+
+      const metadata = {
+        organization_id: organizationId,
+        engagement_id: engagementId,
+        object_type: "grant_response_packet_export_candidate",
+        target_object_type: "grant_response_packet_export_candidate",
+        object_id: payloadCandidateId,
+        operation: typeof payload.attempted_operation === "string" ? payload.attempted_operation : "grant_response_packet_export_review_requested",
+        operation_type: typeof payload.attempted_operation === "string" ? payload.attempted_operation : "grant_response_packet_export_review_requested",
+        validator_key: typeof payload.validator_key === "string" ? payload.validator_key : null,
+        actor_type: actorContext?.actorType || "human",
+        actor_user_id: actorContext?.actorUserId || null,
+        request_id: actorContext?.requestId || null,
+        route: "p14_05_grant_response_packet_export_review_binding",
+        created_at: typeof now === "string" ? now : new Date().toISOString(),
+        metadata_only: true,
+        contains_raw_file_content: false,
+        contains_raw_parsed_rows: false,
+        contains_client_pii: false,
+        contains_prompt_text: false,
+        contains_unsafe_generated_text: false,
+        contains_signed_urls: false,
+        contains_storage_credentials: false,
+      };
+
+      return {
+        ok: true,
+        async publish() {
+          const result = await insertAuditEvent(metadata, db);
+          if (!result || result.ok !== true) {
+            throw new Error("p14_05_grant_response_packet_export_review_metadata_only_audit_publish_failed");
+          }
+          return result;
+        },
+      };
+    },
+  });
+}
+
 export const __testables = Object.freeze({
   createProductionMetadataOnlyAudit,
   createProductionMetadataOnlyAuditForSensitivityAllowedUseDecision,
@@ -1819,4 +1884,5 @@ export const __testables = Object.freeze({
   createProductionMetadataOnlyAuditForRequirementAssessment,
   createProductionMetadataOnlyAuditForEngagementRequirementAssessment,
   createProductionMetadataOnlyAuditForGrantResponsePacketExportCandidate,
+  createProductionMetadataOnlyAuditForGrantResponsePacketExportReview,
 });

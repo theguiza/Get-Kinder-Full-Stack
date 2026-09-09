@@ -162,6 +162,11 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // approval/export/finalization authority of its own.
     "/admin/organizations/:organizationId/engagements/:engagementId/grant-response-packet",
     "/admin/organizations/:organizationId/engagements/:engagementId/grant-response-packet/export-candidates",
+    // P14-05: requests governed export review for the exact existing P14-03
+    // packet export candidate identified by the path's own
+    // grantResponsePacketExportCandidateId. Grants no approval, no export
+    // authority, no final release, and no manifest.
+    "/admin/organizations/:organizationId/engagements/:engagementId/grant-response-packet/export-candidates/:grantResponsePacketExportCandidateId/export-review-request",
     "/admin/organizations/:organizationId/engagements/:engagementId/grant-response-packet/markdown",
     // KAI Package 2B-A: non-authoritative proposal that an external, governed
     // requirement set applies to this engagement.
