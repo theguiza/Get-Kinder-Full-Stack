@@ -112,6 +112,7 @@ async function runP318RealPersistedFinalGateProof() {
   const { evaluateFinalExportEligibility } = await import("../Backend/kai/services/kaiFinalExportEligibilityGateService.js");
 
   const ORG = "00000000-0000-4000-8000-000000000001";
+  const ENGAGEMENT = "00000000-0000-4000-8000-000000000918";
   const CLAIM = "10000000-0000-4000-8000-000000000970";
   const CLAIM_D = "10000000-0000-4000-8000-000000000990";
   const EVIDENCE_D = "10000000-0000-4000-8000-000000000991";
@@ -142,6 +143,16 @@ async function runP318RealPersistedFinalGateProof() {
   async function query(sql, params = []) {
     const result = await pool.query(sql, params);
     return result.rows;
+  }
+
+  async function getEngagementForOrganization({ organizationId, engagementId }) {
+    const rows = await query(
+      `SELECT engagement_id::text AS engagement_id, organization_id::text AS organization_id
+         FROM kai.engagements
+        WHERE organization_id = $1::uuid AND engagement_id = $2::uuid`,
+      [organizationId, engagementId],
+    );
+    return rows[0] || null;
   }
 
   test.after(async () => {
@@ -302,6 +313,7 @@ async function runP318RealPersistedFinalGateProof() {
     const created = await createEvidenceSummaryDraft(
       {
         organizationId: ORG,
+        engagementId: ENGAGEMENT,
         requestedAudience: "internal",
         claimIds: [claimId],
         idempotencyKey,
@@ -310,6 +322,7 @@ async function runP318RealPersistedFinalGateProof() {
       },
       {
         env: enabledEnv,
+        getEngagementForOrganization,
         generatedContentRepository: generatedContentRepository(creationEvaluator()),
         draftGenerator: draftGenerator(),
         metadataOnlyAudit: auditRecorder(),

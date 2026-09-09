@@ -37,6 +37,7 @@ async function runP306IntegrationSuite() {
   const { requestGeneratedDraftExportReview, getGeneratedDraftExportReviewPacket } = await import("../Backend/kai/services/kaiExportReviewService.js");
 
   const ORG = "00000000-0000-4000-8000-000000000001";
+  const ENGAGEMENT = "00000000-0000-4000-8000-000000000906";
   const CLAIM = "10000000-0000-4000-8000-000000000060";
   const NOW = "2026-08-06T10:00:00.000Z";
   const enabledEnv = { KAI_SPRINT2_ENABLED: "true", KAI_GENERATION_ENABLED: "true", KAI_PUBLIC_EXPORT_ENABLED: "true" };
@@ -64,6 +65,16 @@ async function runP306IntegrationSuite() {
   async function query(sql, params = []) {
     const result = await pool.query(sql, params);
     return result.rows;
+  }
+
+  async function getEngagementForOrganization({ organizationId, engagementId }) {
+    const rows = await query(
+      `SELECT engagement_id::text AS engagement_id, organization_id::text AS organization_id
+         FROM kai.engagements
+        WHERE organization_id = $1::uuid AND engagement_id = $2::uuid`,
+      [organizationId, engagementId],
+    );
+    return rows[0] || null;
   }
 
   const gkAdminActorContext = {
@@ -187,6 +198,7 @@ async function runP306IntegrationSuite() {
     const createResult = await createEvidenceSummaryDraft(
       {
         organizationId: ORG,
+        engagementId: ENGAGEMENT,
         requestedAudience: "internal",
         claimIds: [CLAIM],
         idempotencyKey: "p3-06-created-by-p3-01",
@@ -195,6 +207,7 @@ async function runP306IntegrationSuite() {
       },
       {
         env: enabledEnv,
+        getEngagementForOrganization,
         generatedContentRepository: createPostgresGeneratedContentRepository({ runInTransaction: withRunnerOwnedTransaction, evaluator: p301Evaluator() }),
         draftGenerator: draftGenerator(),
         metadataOnlyAudit: auditRecorder(),

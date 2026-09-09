@@ -53,6 +53,7 @@ async function runReadRecoverySuite() {
 
   const ORG = "00000000-0000-4000-8000-000000000001";
   const OTHER_ORG = "00000000-0000-4000-8000-000000000002";
+  const ENGAGEMENT = "00000000-0000-4000-8000-000000000920";
   const NOW = "2026-09-08T11:00:00.000Z";
   const LATER = "2026-09-08T11:05:00.000Z";
   const EVEN_LATER = "2026-09-08T11:10:00.000Z";
@@ -78,6 +79,16 @@ async function runReadRecoverySuite() {
   async function query(sql, params = []) {
     const result = await pool.query(sql, params);
     return result.rows;
+  }
+
+  async function getEngagementForOrganization({ organizationId, engagementId }) {
+    const rows = await query(
+      `SELECT engagement_id::text AS engagement_id, organization_id::text AS organization_id
+         FROM kai.engagements
+        WHERE organization_id = $1::uuid AND engagement_id = $2::uuid`,
+      [organizationId, engagementId],
+    );
+    return rows[0] || null;
   }
 
   function auditRecorder() {
@@ -196,9 +207,10 @@ async function runReadRecoverySuite() {
     );
 
     const created = await createEvidenceSummaryDraft(
-      { organizationId: ORG, requestedAudience: "internal", claimIds: [claimId], idempotencyKey: `durable-read-recovery-${n}`, actorContext: gkAdmin, now: NOW },
+      { organizationId: ORG, engagementId: ENGAGEMENT, requestedAudience: "internal", claimIds: [claimId], idempotencyKey: `durable-read-recovery-${n}`, actorContext: gkAdmin, now: NOW },
       {
         env: enabledEnv,
+        getEngagementForOrganization,
         generatedContentRepository: generatedContentRepository(creationEvaluator()),
         draftGenerator: async (genInput) => ({
           blocks: [{ ordinal: 1, text: genInput.claims[0].claimStatement, citations: [{ claimId: genInput.claims[0].claimId, evidenceItemId: genInput.claims[0].evidenceItemId }] }],

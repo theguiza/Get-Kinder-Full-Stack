@@ -23051,3 +23051,144 @@ persistence remain out of scope and unconfirmed.
 
 **Local commit:** one bounded commit created after all required checks
 passed.
+
+## P14-01 Downstream Fixture-Parity Closure (test/fixture only)
+
+**Date:** 2026-09-09
+
+**Owner authorization (bounded, local-only):** close exactly the disclosed
+residual named at the end of the prior package - the downstream test/
+fixture parity gap `createEvidenceSummaryDraft`/`createImpactNarrativeDraft`
+callers were left with once new generation began requiring `engagementId`.
+Starting HEAD: `78b48b268e7665d6b72ef2cebc8c47fae413b98d` (USER_CONFIRMED);
+working tree clean. Do not reopen `generation_runs.engagement_id` design,
+the nullable historical-row posture, the tenant-safe FK, the "engagement
+required for new generation" rule, fingerprint/idempotency behavior, or the
+transitive Generated Draft -> generation_run -> engagement lineage; do not
+modify the P14-01 migration or `createEvidenceSummaryDraft`/
+`createImpactNarrativeDraft` themselves absent an attributable bug (none was
+found).
+
+**Inventory (re-verified, not merely re-used):** the owner-supplied 19-file
+list (`__tests__` + `scripts/`) matching
+`createEvidenceSummaryDraft`/`createImpactNarrativeDraft` was opened file by
+file and every call site classified. Five test files
+(`kai-sprint2-impact-evidence-library.spec.js`,
+`kai-sprint2-p13-01-impact-narrative-boundary.spec.js`,
+`kai-sprint2-p3-01-generated-content-drafts-boundary.spec.js`,
+`kai-sprint2-p3-01-generated-content-drafts.integration.spec.js`,
+`kai-sprint2-p3-18-assembled-pre-artifact-release-proof.spec.js`) and both
+named scripts
+(`kai-sprint2-p3-01-generated-content-drafts-local-postgres.js`,
+`kai-sprint2-p13-01-impact-narrative-content-type-local-postgres.js`) were
+confirmed already fully engagement-parity compliant by the prior package's
+own commit - no changes were needed or made to any of these seven files.
+`kai-sprint2-generated-drafts-library.spec.js` and
+`kai-sprint2-p3-02-generated-draft-review-packet-boundary.spec.js` each
+reference the function name only as a source-text/string boundary marker
+(a regex assertion and a `source.indexOf(...)` slice point, respectively),
+never as a call - classified (d), left alone.
+`kai-sprint2-p3-01-generated-content-drafts-boundary.spec.js` and
+`kai-sprint2-p13-01-impact-narrative-boundary.spec.js` were re-verified
+directly against the diff that added their `ENGAGEMENT` fixture and
+same-tenant `getEngagementForOrganization` stub - confirmed (a), not (b).
+`kai-sprint2-impact-evidence-library.spec.js`'s two `async
+createEvidenceSummaryDraft(...)`/`async createImpactNarrativeDraft(...)`
+occurrences are the test's own injected mock double (route-level HTTP test
+against a fake service dependency), not the real function - (d).
+
+**Genuine (b) gap found and repaired - 11 files, 0 boundary/mock files
+touched:** `kai-sprint2-p3-02-generated-draft-review-packet.integration.spec.js`,
+`kai-sprint2-p3-03-export-manifest-eligibility.integration.spec.js`,
+`kai-sprint2-p3-04-generated-content-review-completion.integration.spec.js`
+(2 call sites), `kai-sprint2-p3-05-export-review-request.integration.spec.js`
+(2 call sites), `kai-sprint2-p3-06-export-review-packet.integration.spec.js`,
+`kai-sprint2-p3-09-export-review-start.integration.spec.js`,
+`kai-sprint2-p3-13-export-review-completion.integration.spec.js`,
+`kai-sprint2-p3-18-real-persisted-final-gate-proof.integration.spec.js`,
+`kai-sprint2-p3-19-export-manifest-foundation.integration.spec.js`,
+`kai-sprint2-p3-20-export-manifest-review-binding.integration.spec.js`, and
+`kai-sprint2-durable-export-manifest-read-recovery.integration.spec.js` -
+exactly the set the prior package's "Scope decision, disclosed" note named
+as its known residual. Each file already had its own real-Postgres `pool`/
+`query(sql, params)` helper (the same pattern
+`kai-sprint2-p3-01-generated-content-drafts.integration.spec.js`'s own
+`engagementLookup` already established); each gained one added
+`ENGAGEMENT` UUID constant, one added `getEngagementForOrganization({
+organizationId, engagementId })` helper querying `kai.engagements` through
+that existing pool/query helper (byte-for-byte the same query shape as the
+P3-01 precedent), and, at every real `createEvidenceSummaryDraft` call site,
+`engagementId: ENGAGEMENT` added to the input and `getEngagementForOrganization`
+added to the deps - with every existing claim/evidence/audience/idempotency-
+key/actor/review-state/authority-state detail and every existing assertion
+left untouched. No intentional missing-engagement or legacy-NULL test exists
+among these 19 files - `NONE` found; none of the P14-01 boundary suites'
+already-compliant negative cases were altered.
+
+**Scope boundary held, disclosed:** repairing these 11 fixtures true-to-real-
+Postgres would additionally require adding the same organization-enablement/
+engagement-bootstrap + `kai_sprint2_p14_01_generation_run_engagement_binding.sql`
+application to roughly a dozen *other* packages' own dedicated
+`scripts/*-local-postgres.js` runners (e.g. `kai-sprint2-p3-19-export-
+manifest-foundation-local-postgres.js`, `kai-sprint2-p3-02-generated-draft-
+review-packet-local-postgres.js`, and similarly for P3-03/04/05/06/09/13/18,
+several of which also cross-run P3-13/P3-09 integration specs from
+`kai-sprint2-p3-16-export-candidate-foundation-local-postgres.js` and
+`kai-sprint2-p3-17-human-authority-decision-ledger-local-postgres.js`) -
+none of which is one of the two `scripts/` files this package was
+authorized to touch, and several of which belong to already-closed,
+already-shipped packages outside this package's boundary. Per this
+package's explicit authorization (only the two named runner scripts, both
+already compliant and requiring no change) and per the instruction to stop
+rather than guess on scope, these dozen runners were **not** modified. This
+means the 11 repaired fixture files are now contract-correct (matching the
+established real-DB `getEngagementForOrganization` pattern exactly) and
+provably safe under plain `npm test` (each still skips cleanly without its
+own database-URL env var, confirmed below), but would still fail with
+"relation kai.engagements does not exist" / FK-violation if run today
+through their still-unmodified dedicated runners, because those runners
+never bootstrap `kai.engagements` or apply the P14-01 migration. This is the
+same disclosed-residual pattern the prior package used, narrowed by exactly
+the 11 files closed here - the remaining gap is now the *runner* side only,
+not the fixture-code side, and is enumerated precisely above for the next
+continuation package.
+
+**Verification:** `DATABASE_URL` set to a non-listening loopback sentinel
+for every Node/npm command. `node --check` passed on all 11 changed files.
+Each of the 11 changed integration specs was run individually via `node
+--test` and skipped cleanly (1 skipped, 0 failed) exactly as before, except
+where the file also contains already-passing non-DB-gated subtests (P3-02/
+03/04/05/06/09/13/18-real-persisted each: 2 passed, 1 skipped, 0 failed).
+The two named local-Postgres runners (`kai-sprint2-p3-01-generated-content-
+drafts-local-postgres.js`, `kai-sprint2-p13-01-impact-narrative-content-
+type-local-postgres.js`) were re-run end to end against real ephemeral
+PostgreSQL though neither was modified: 18/19 and 28/29 respectively, the
+same single pre-existing failure in each as the prior package documented
+("P3-01/P13-01 human-review-decision migration-chain failure" - explicitly
+out of scope, unrelated to this package, unchanged). Full repository suite
+(`npm test`) -> 3506 passed, 7 failed (the same pre-existing failures:
+`the child-file read model is tenant-scoped...`, `assembled production
+middleware and router enforce the batch-files collection contract`, `the
+direct file-detail service returns exactly the 15-field allowlist`,
+`assembled production middleware and router enforce the file-detail
+contract`, plus their nested subtests), 61 skipped - identical to the
+USER_CONFIRMED pre-package baseline, 0 newly introduced failures. `npm run
+build` was not run (no frontend file changed). `git diff --check` passed
+with no whitespace errors.
+
+**Final diff review:** confined to the 11 `__tests__/*.integration.spec.js`
+files listed above and this ExecPlan. No migration, no service/repository/
+route code, no schema, no runner script, and no other test file was
+touched; no production or shared database was accessed, mutated, or
+migrated; nothing was pushed or deployed; no Current State or
+Implementation Baseline update was made.
+
+**Remaining work:** the runner-side half of the disclosed residual above
+(bootstrapping `kai.engagements` + the P14-01 migration inside roughly a
+dozen other packages' own `scripts/*-local-postgres.js` runners) remains
+open and is the exact next continuation item if those runners are ever
+invoked directly. Engagement-scoped Grant Response Packet composition
+remains unstarted and out of scope.
+
+**Local commit:** one bounded commit created after all required checks
+passed.
