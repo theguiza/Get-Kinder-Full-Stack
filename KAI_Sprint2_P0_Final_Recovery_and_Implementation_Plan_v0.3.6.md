@@ -25746,3 +25746,73 @@ production configuration changed.
 
 **Local commit:** one bounded commit created after all required checks
 passed.
+
+
+## Phase-14 (Grant Response Packet Track) - P14-06E3: Post-Mutation
+## Authoritative Packet Export-Review Rehydration and P14-06 Closure
+
+**Date:** 2026-09-09
+
+**Owner authorization (bounded, local-only):** wire the existing Grant
+Response Packet create-candidate, request-review, start-review, and
+complete-review success paths so the mutation response is never durable
+frontend lifecycle truth. Starting HEAD:
+`c0036e83ef30750ec1985ddd12f03fb671225fdf` (P14-06E2 FINAL_HEAD, working
+tree clean). No backend, schema, candidate/review mutation contract, CAS
+semantics, initial-load effect, final eligibility, final release, manifest,
+production access, database mutation, push, or deploy work was performed.
+
+**Implementation:** `frontend/ImpactEvidenceLibrary.jsx` now routes the
+existing post-mutation authoritative refetch through the P14-06E1
+`hydrateGrantResponsePacketExportReviewReadModel(projectGrantResponsePacket(...))`
+primitive. The shared refetch helper accepts only the current
+organization/engagement through the existing stale-response guard, then
+coherently applies the hydrated packet, exact current candidate, and exact
+packet export-review result from the authoritative P14-06D GET. GET failure
+clears packet/candidate/review state and does not fall back to POST data.
+
+The create-candidate, request-review, start-review, and complete-review
+callbacks still issue exactly one POST each on success, and still perform the
+same exact CAS body for start/complete:
+`{ expected_updated_at: grantResponsePacketExportReviewResult.reviewUpdatedAt }`.
+Their successful POST responses are no longer projected into durable browser
+candidate/review lifecycle state; the immediately following authoritative GET
+wins even if the POST response is stale or contradictory. Mutation failures
+continue to fabricate no candidate or review state and perform no
+authoritative refetch.
+
+**Verification:** added
+`__tests__/kai-sprint2-p14-06e3-grant-response-packet-post-mutation-rehydration.spec.js`
+(12/12) executing the committed callbacks/refetch helper through the existing
+frontend source-slice harness convention. It proves exact one-POST/one-GET
+success sequencing for create/request/start/complete; exact candidate id,
+queue item id, lifecycle status, and `reviewUpdatedAt` rehydration from GET;
+CAS body preservation; contradictory POST versus GET resolution in favor of
+GET; mutation failure and GET failure behavior; engagement-switch isolation;
+late-response protection; and no finalization controls or packet
+Markdown/member workflow changes.
+
+**Affected regressions passed:** E1 hydration, E2 initial-load rehydration,
+E3 post-mutation rehydration, packet export-review lifecycle frontend,
+existing packet projection/frontend, Impact Evidence Library coupled
+frontend, UAT enablement frontend, generated drafts library, and Impact
+Library KAI frontend regressions. Suites requiring a local `127.0.0.1` test
+server were rerun with local bind permission after the sandbox returned the
+known `listen EPERM` limitation. Every Node/npm command used the
+non-listening loopback `DATABASE_URL` sentinel.
+
+**Frontend build:** `npm run build` (vite build) passed and updated the
+tracked `public/js/bundles/entry.js` bundle per repository convention.
+
+**Final diff review:** edits confined to
+`frontend/ImpactEvidenceLibrary.jsx`,
+`__tests__/kai-sprint2-impact-library-grant-response-packet.spec.js`,
+`__tests__/kai-sprint2-p14-06-grant-response-packet-export-review-lifecycle-frontend.spec.js`,
+the new focused E3 frontend test file, the rebuilt
+`public/js/bundles/entry.js`, and this ExecPlan entry. `git diff --check`
+passed with no whitespace errors. No backend file, schema/migration file,
+initial-load effect, lifecycle button render path, packet finalization,
+final eligibility, manifest, or production configuration changed.
+
+**Local commit:** one bounded commit created after all required checks
+passed.

@@ -504,7 +504,10 @@ test("Grant Response Packet authoritative refetch uses the existing organization
   assert.match(refetch, /shouldApplyGrantResponsePacketResponse\(\{/);
   assert.match(refetch, /currentOrganizationId: organizationIdRef\.current/);
   assert.match(refetch, /currentEngagementId: engagementIdRef\.current/);
-  assert.match(refetch, /setGrantResponsePacket\(projectGrantResponsePacket\(result\.body\.data\)\)/);
+  assert.match(refetch, /hydrateGrantResponsePacketExportReviewReadModel\(projectGrantResponsePacket\(result\.body\.data\)\)/);
+  assert.match(refetch, /setGrantResponsePacket\(hydrated\.packet\);/);
+  assert.match(refetch, /setGrantResponsePacketExportCandidateResult\(hydrated\.candidateResult\);/);
+  assert.match(refetch, /setGrantResponsePacketExportReviewResult\(hydrated\.exportReviewResult\);/);
   assert.doesNotMatch(refetch, /postJson|exportReviewRequestPath/);
 });
 

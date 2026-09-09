@@ -66,8 +66,6 @@ import {
   GRANT_RESPONSE_PACKET_EXPORT_REVIEW_LIFECYCLE_STATES,
   hydrateGrantResponsePacketExportReviewReadModel,
   projectGrantResponsePacket,
-  projectGrantResponsePacketExportCandidateResult,
-  projectGrantResponsePacketExportReviewResult,
   shouldApplyGrantResponsePacketResponse,
   postJson,
   potentialConflictsPath,
@@ -875,11 +873,16 @@ export default function ImpactEvidenceLibrary() {
     setLoadingGrantResponsePacket(false);
     if (result.statusCode !== 200 || !result.body?.ok) {
       setGrantResponsePacket(null);
+      setGrantResponsePacketExportCandidateResult(null);
+      setGrantResponsePacketExportReviewResult(null);
       setGrantResponsePacketError(errorText(result));
       setGrantResponsePacketRequestState("error");
       return true;
     }
-    setGrantResponsePacket(projectGrantResponsePacket(result.body.data));
+    const hydrated = hydrateGrantResponsePacketExportReviewReadModel(projectGrantResponsePacket(result.body.data));
+    setGrantResponsePacket(hydrated.packet);
+    setGrantResponsePacketExportCandidateResult(hydrated.candidateResult);
+    setGrantResponsePacketExportReviewResult(hydrated.exportReviewResult);
     setGrantResponsePacketError("");
     setGrantResponsePacketRequestState("success");
     return true;
@@ -1018,11 +1021,6 @@ export default function ImpactEvidenceLibrary() {
       }
       return;
     }
-    if (stillCurrent) {
-      setGrantResponsePacketExportCandidateResult(
-        projectGrantResponsePacketExportCandidateResult(result.body?.data),
-      );
-    }
     await refetchGrantResponsePacketAfterMemberExportReviewRequest(requestOrganizationId, requestEngagementId);
     if (stillCurrent) {
       setGrantResponsePacketExportCandidatePending(false);
@@ -1061,11 +1059,6 @@ export default function ImpactEvidenceLibrary() {
         setGrantResponsePacketExportReviewPending(false);
       }
       return;
-    }
-    if (stillCurrent) {
-      setGrantResponsePacketExportReviewResult(
-        projectGrantResponsePacketExportReviewResult(result.body?.data),
-      );
     }
     await refetchGrantResponsePacketAfterMemberExportReviewRequest(requestOrganizationId, requestEngagementId);
     if (stillCurrent) {
@@ -1119,11 +1112,6 @@ export default function ImpactEvidenceLibrary() {
       }
       return;
     }
-    if (stillCurrent) {
-      setGrantResponsePacketExportReviewResult(
-        projectGrantResponsePacketExportReviewResult(result.body?.data),
-      );
-    }
     await refetchGrantResponsePacketAfterMemberExportReviewRequest(requestOrganizationId, requestEngagementId);
     if (stillCurrent) {
       setGrantResponsePacketExportReviewStartPending(false);
@@ -1176,11 +1164,6 @@ export default function ImpactEvidenceLibrary() {
         setGrantResponsePacketExportReviewCompletePending(false);
       }
       return;
-    }
-    if (stillCurrent) {
-      setGrantResponsePacketExportReviewResult(
-        projectGrantResponsePacketExportReviewResult(result.body?.data),
-      );
     }
     await refetchGrantResponsePacketAfterMemberExportReviewRequest(requestOrganizationId, requestEngagementId);
     if (stillCurrent) {

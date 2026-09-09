@@ -189,10 +189,11 @@ test("startGrantResponsePacketExportReview fabricates no queue state on a failed
   assert.match(failureBranch, /setGrantResponsePacketExportReviewStartError\(errorText\(result\)\);/);
 });
 
-test("startGrantResponsePacketExportReview only applies its own success state when the engagement/organization selection is still current (engagement-switch/late-response isolation)", () => {
+test("startGrantResponsePacketExportReview uses the authoritative refetch as durable success state when the engagement/organization selection is still current", () => {
   const handler = startHandlerSource();
   assert.match(handler, /const stillCurrent = requestOrganizationId === organizationIdRef\.current\s*\n?\s*&& requestEngagementId === engagementIdRef\.current;/);
-  assert.match(handler, /if \(stillCurrent\) \{\s*\n\s*setGrantResponsePacketExportReviewResult\(/);
+  assert.match(handler, /await refetchGrantResponsePacketAfterMemberExportReviewRequest\(requestOrganizationId, requestEngagementId\);/);
+  assert.doesNotMatch(handler, /projectGrantResponsePacketExportReviewResult\(result\.body\?\.data\)/);
 });
 
 test("completeGrantResponsePacketExportReview acts on the exact candidate id, queue item id, and reviewUpdatedAt CAS token from grantResponsePacketExportReviewResult - never a guess", () => {
@@ -231,10 +232,11 @@ test("completeGrantResponsePacketExportReview fabricates no queue state on a fai
   assert.match(failureBranch, /setGrantResponsePacketExportReviewCompleteError\(errorText\(result\)\);/);
 });
 
-test("completeGrantResponsePacketExportReview only applies its own success state when the engagement/organization selection is still current (engagement-switch/late-response isolation)", () => {
+test("completeGrantResponsePacketExportReview uses the authoritative refetch as durable success state when the engagement/organization selection is still current", () => {
   const handler = completeHandlerSource();
   assert.match(handler, /const stillCurrent = requestOrganizationId === organizationIdRef\.current\s*\n?\s*&& requestEngagementId === engagementIdRef\.current;/);
-  assert.match(handler, /if \(stillCurrent\) \{\s*\n\s*setGrantResponsePacketExportReviewResult\(/);
+  assert.match(handler, /await refetchGrantResponsePacketAfterMemberExportReviewRequest\(requestOrganizationId, requestEngagementId\);/);
+  assert.doesNotMatch(handler, /projectGrantResponsePacketExportReviewResult\(result\.body\?\.data\)/);
 });
 
 test("the engagement-switch reset effect also clears START/COMPLETE pending/error state (no stale control survives an engagement switch)", () => {
