@@ -64,6 +64,7 @@ import {
   grantResponsePacketExportReviewCompletePath,
   grantResponsePacketExportReviewLifecycleState,
   GRANT_RESPONSE_PACKET_EXPORT_REVIEW_LIFECYCLE_STATES,
+  hydrateGrantResponsePacketExportReviewReadModel,
   projectGrantResponsePacket,
   projectGrantResponsePacketExportCandidateResult,
   projectGrantResponsePacketExportReviewResult,
@@ -846,7 +847,10 @@ export default function ImpactEvidenceLibrary() {
         setGrantResponsePacketRequestState("error");
         return;
       }
-      setGrantResponsePacket(projectGrantResponsePacket(result.body.data));
+      const hydrated = hydrateGrantResponsePacketExportReviewReadModel(projectGrantResponsePacket(result.body.data));
+      setGrantResponsePacket(hydrated.packet);
+      setGrantResponsePacketExportCandidateResult(hydrated.candidateResult);
+      setGrantResponsePacketExportReviewResult(hydrated.exportReviewResult);
       setGrantResponsePacketError("");
       setGrantResponsePacketRequestState("success");
     })();

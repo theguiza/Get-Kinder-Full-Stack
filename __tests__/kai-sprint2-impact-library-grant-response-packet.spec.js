@@ -9,6 +9,7 @@ import {
   generatedDraftExportReviewDisplayState,
   grantResponsePacketPath,
   grantResponsePacketMarkdownPath,
+  hydrateGrantResponsePacketExportReviewReadModel,
   projectGrantResponsePacket,
   projectExportReviewRequestResult,
   shouldApplyGrantResponsePacketResponse,
@@ -711,6 +712,7 @@ function buildEffect({
     "engagementIdRef",
     "errorText",
     "projectGrantResponsePacket",
+    "hydrateGrantResponsePacketExportReviewReadModel",
     `return (${effectSource});`,
   );
   const effect = buildUseEffect(
@@ -740,6 +742,7 @@ function buildEffect({
     engagementIdRef,
     (result) => result?.body?.error?.message || `Request failed (${result?.statusCode ?? "unknown"}).`,
     projectGrantResponsePacket,
+    hydrateGrantResponsePacketExportReviewReadModel,
   );
   return { effect, stateLog, setGrantResponsePacketCalls, organizationIdRef, engagementIdRef };
 }

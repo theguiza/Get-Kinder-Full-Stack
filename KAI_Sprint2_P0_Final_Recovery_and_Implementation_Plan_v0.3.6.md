@@ -25665,3 +25665,84 @@ changed.
 
 **Local commit:** one bounded commit created after all required checks
 passed.
+
+
+## Phase-14 (Grant Response Packet Track) - P14-06E2: Initial-Load
+## Authoritative Packet Export-Review Rehydration
+
+**Date:** 2026-09-09
+
+**Owner authorization (bounded, local-only):** wire the existing
+Impact Evidence Library Grant Response Packet initial-load path to the
+P14-06E1 hydration primitive so a fresh browser session reconstructs the
+exact current packet export candidate and packet export-review lifecycle
+from the authoritative P14-06D GET. Starting HEAD:
+`69745cf61d66eaf2d909334f754f61afb0705adb` (P14-06E1 FINAL_HEAD, working
+tree clean). No backend, schema, request/start/complete success flow,
+post-mutation refetch helper, candidate/review mutation contract, CAS
+semantics, final eligibility, final release, manifest, production access,
+database mutation, push, or deploy work was performed.
+
+**Implementation:** `frontend/ImpactEvidenceLibrary.jsx` now imports
+`hydrateGrantResponsePacketExportReviewReadModel` and uses it only in the
+existing Grant Response Packet initial-load GET success branch. The existing
+organization/engagement-change effect still invalidates
+`grantPacketRequestGenerationRef`, clears the prior packet, clears the prior
+packet candidate state, clears the prior packet export-review state, starts
+the same authoritative `grantResponsePacketPath(organizationId, engagementId)`
+GET, and accepts the response only through the existing generation +
+organizationId + engagementId stale-response guard. On success, the exact
+GET data is projected and hydrated once, then applied coherently to
+`grantResponsePacket`, `grantResponsePacketExportCandidateResult`, and
+`grantResponsePacketExportReviewResult`.
+
+Fresh-load behavior now follows the existing lifecycle-state helper and
+existing controls without a second UI state machine: no current candidate
+leaves only "Create export candidate"; current candidate/no review exposes
+"Request export review"; `open`/`needs_gk_review` exposes "Start export
+review"; `in_progress`/`needs_gk_review` exposes "Complete export review";
+and `resolved`/`resolved` exposes the existing "Export review complete"
+display. Hidden/restricted GET identity hydrates to null and is not recovered
+from member review state, URLs, timestamps, or manifest history.
+
+**Verification:** added
+`__tests__/kai-sprint2-p14-06e2-grant-response-packet-initial-load-rehydration.spec.js`
+(12/12) executing the committed initial-load effect via the repository's
+existing source-slice harness convention. It proves fresh load/no candidate,
+candidate-no-review, open, in_progress, and resolved states; exact candidate
+id, review queue item id, and `reviewUpdatedAt` preservation from GET; a
+no-candidate response clears old candidate/review; a no-review response
+clears old review while preserving the current candidate; engagement A to B
+switch immediately clears old state, applies B as authoritative, and rejects
+late A for packet/candidate/review as one hydration result; restricted
+identity remains hidden despite member/manifest/timestamp data; the initial
+load source uses the E1 helper; and packet Markdown/member workflows plus
+the no-finalization-control guarantee remain unchanged.
+
+**Affected regressions passed:** E1 hydration regression
+`__tests__/kai-sprint2-p14-06e1-grant-response-packet-frontend-hydration.spec.js`
+(13/13), existing packet frontend regression
+`__tests__/kai-sprint2-impact-library-grant-response-packet.spec.js` (36/36),
+packet export-review lifecycle regression
+`__tests__/kai-sprint2-p14-06-grant-response-packet-export-review-lifecycle-frontend.spec.js`
+(29/29), and Impact Evidence Library coupled frontend regression
+`__tests__/kai-sprint2-impact-evidence-library.spec.js` (102/102 after
+rerunning outside the sandbox for the known local `listen EPERM 127.0.0.1`
+route-test limitation). Every Node/npm command used the non-listening
+loopback `DATABASE_URL` sentinel.
+
+**Frontend build:** `npm run build` (vite build) passed and updated the
+tracked `public/js/bundles/entry.js` bundle per repository convention.
+
+**Final diff review:** edits confined to
+`frontend/ImpactEvidenceLibrary.jsx`,
+`__tests__/kai-sprint2-impact-library-grant-response-packet.spec.js`, the
+new focused E2 frontend test file, the rebuilt
+`public/js/bundles/entry.js`, and this ExecPlan entry. `git diff --check`
+passed with no whitespace errors. No backend file, schema/migration file,
+request/start/complete callback, post-mutation refetch helper, lifecycle
+button render path, packet finalization, final eligibility, manifest, or
+production configuration changed.
+
+**Local commit:** one bounded commit created after all required checks
+passed.
