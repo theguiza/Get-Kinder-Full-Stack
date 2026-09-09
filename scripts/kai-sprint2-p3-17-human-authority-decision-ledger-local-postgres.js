@@ -47,6 +47,10 @@ function psqlFile(path) {
   return run(psql, ["-v", "ON_ERROR_STOP=1", "-d", dbName, "-f", path], { capture: true }).stdout;
 }
 
+function psqlExec(sql) {
+  return run(psql, ["-v", "ON_ERROR_STOP=1", "-d", dbName, "-c", sql], { capture: true }).stdout;
+}
+
 const P3_17_EXPECTED_VERIFIER_CHECKS = [
   "human_authority_decisions_table_present",
   "decision_type_check_present",
@@ -137,6 +141,23 @@ try {
   run(createdb, ["-h", "127.0.0.1", "-p", port, dbName], { capture: true });
   await proveRunnerOwnedTarget();
 
+  // P14-01 hard precondition: kai.generation_runs.engagement_id FK's to
+  // kai.engagements(engagement_id, organization_id), so the organization/
+  // engagement foundation (shared by the existing organization-enablement
+  // local-Postgres runner) must exist before the P3-01/P14-01 migrations
+  // below create/extend kai.generation_runs. Mirrors the P3-01 runner's own
+  // precedent byte-for-byte.
+  psqlFile("scripts/kai-sprint2-organization-enablement-bootstrap-synthetic-schema.sql");
+  // Runner-local accommodation only (never a modification of the shared
+  // bootstrap SQL file itself): the P14-01 engagement-side FK targets
+  // kai.engagements (engagement_id, organization_id), a composite unique
+  // constraint the organization-enablement bootstrap schema does not itself
+  // declare - the same runner-local accommodation the P3-01 runner applies
+  // for this identical composite FK shape.
+  psqlExec(
+    "ALTER TABLE kai.engagements ADD CONSTRAINT kai_p3_17_engagements_id_org_unique UNIQUE (engagement_id, organization_id);",
+  );
+
   psqlFile("scripts/kai-sprint2-gate-a-bootstrap-synthetic-schema.sql");
   psqlFile("migrations/kai_sprint2_gate_a_p0_upload_lifecycle.sql");
   psqlFile("migrations/kai_sprint2_gate_a_p0_policy_decision_replay.sql");
@@ -151,6 +172,7 @@ try {
   psqlFile("migrations/kai_sprint2_p2_04_claim_gap_followup.sql");
   psqlFile("migrations/kai_sprint2_p2_05_conflict_review_candidate.sql");
   psqlFile("migrations/kai_sprint2_p3_01_generated_content_drafts.sql");
+  psqlFile("migrations/kai_sprint2_p14_01_generation_run_engagement_binding.sql");
   psqlFile("migrations/kai_sprint2_p3_04_generated_content_review_completion.sql");
   psqlFile("migrations/kai_sprint2_p3_05_export_review_request.sql");
   psqlFile("migrations/kai_sprint2_p3_09_export_review_start.sql");
@@ -179,6 +201,23 @@ try {
   psqlFile("scripts/kai-sprint2-p3-17-human-authority-decision-ledger-smoke-seed.sql");
   psqlFile("scripts/kai-sprint2-p3-17-human-authority-decision-ledger-smoke-verifier.sql");
   psqlFile("scripts/kai-sprint2-p3-17-human-authority-decision-ledger-failure-checks.sql");
+
+  // Real kai.organizations/kai.engagements rows the cross-run P3-13/P3-09
+  // integration suites' createEvidenceSummaryDraft/createImpactNarrativeDraft
+  // calls now require as the requested engagementId (P14-01 write contract),
+  // reusing the exact UUID constants
+  // __tests__/kai-sprint2-p3-13-export-review-completion.integration.spec.js
+  // and __tests__/kai-sprint2-p3-09-export-review-start.integration.spec.js
+  // each hardcode.
+  psqlExec(
+    "INSERT INTO kai.organizations (organization_id, name, organization_code) VALUES ('00000000-0000-4000-8000-000000000001', 'P3-17 Smoke Org', 'p3-17-smoke-org') ON CONFLICT (organization_id) DO NOTHING;",
+  );
+  psqlExec(
+    "INSERT INTO kai.engagements (engagement_id, organization_id, engagement_code) VALUES ('00000000-0000-4000-8000-000000000913', '00000000-0000-4000-8000-000000000001', 'p3-13-smoke-engagement') ON CONFLICT (engagement_id) DO NOTHING;",
+  );
+  psqlExec(
+    "INSERT INTO kai.engagements (engagement_id, organization_id, engagement_code) VALUES ('00000000-0000-4000-8000-000000000909', '00000000-0000-4000-8000-000000000001', 'p3-09-smoke-engagement') ON CONFLICT (engagement_id) DO NOTHING;",
+  );
 
   const testResult = spawnSync("node", [
     "--test",

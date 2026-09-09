@@ -47,6 +47,10 @@ function psqlFile(path) {
   return run(psql, ["-v", "ON_ERROR_STOP=1", "-d", dbName, "-f", path], { capture: true }).stdout;
 }
 
+function psqlExec(sql) {
+  return run(psql, ["-v", "ON_ERROR_STOP=1", "-d", dbName, "-c", sql], { capture: true }).stdout;
+}
+
 const P3_19_EXPECTED_VERIFIER_CHECKS = [
   "export_manifests_table_present",
   "candidate_fk_present",
@@ -189,6 +193,33 @@ try {
   // organization-enablement precedent. Applied only by this runner, never by
   // any product migration.
   psqlFile("scripts/kai-sprint2-p3-19-export-manifest-foundation-audit-events-bootstrap-synthetic-schema.sql");
+  // P14-01 hard precondition: kai.generation_runs.engagement_id FK's to
+  // kai.engagements(engagement_id, organization_id). This runner already
+  // bootstraps its own kai.audit_events/kai.object_type_enum mirror above
+  // (byte-for-byte the organization-enablement precedent's audit slice), so
+  // the full organization-enablement bootstrap SQL file is not reapplied
+  // here (it would recreate that same audit_events/object_type_enum shape
+  // and collide) - only the missing kai.organizations/kai.engagements
+  // minimal mirror this runner does not otherwise have is added, inline,
+  // reusing the exact same column shapes the organization-enablement
+  // bootstrap declares.
+  psqlExec(`
+    CREATE TYPE kai.engagement_status_enum AS ENUM ('active', 'draft');
+    CREATE TABLE kai.organizations (
+      organization_id  uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      name             text NOT NULL CHECK (length(trim(name)) > 0),
+      organization_code text UNIQUE,
+      status           kai.engagement_status_enum NOT NULL DEFAULT 'active'
+    );
+    CREATE TABLE kai.engagements (
+      engagement_id     uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+      organization_id   uuid NOT NULL REFERENCES kai.organizations (organization_id),
+      engagement_code   text NOT NULL,
+      engagement_status kai.engagement_status_enum NOT NULL DEFAULT 'draft',
+      UNIQUE (organization_id, engagement_code),
+      UNIQUE (engagement_id, organization_id)
+    );
+  `);
   psqlFile("migrations/kai_sprint2_gate_a_p0_upload_lifecycle.sql");
   psqlFile("migrations/kai_sprint2_gate_a_p0_policy_decision_replay.sql");
   psqlFile("migrations/kai_sprint2_p1_parser_run_and_file_profile.sql");
@@ -202,6 +233,7 @@ try {
   psqlFile("migrations/kai_sprint2_p2_04_claim_gap_followup.sql");
   psqlFile("migrations/kai_sprint2_p2_05_conflict_review_candidate.sql");
   psqlFile("migrations/kai_sprint2_p3_01_generated_content_drafts.sql");
+  psqlFile("migrations/kai_sprint2_p14_01_generation_run_engagement_binding.sql");
   psqlFile("migrations/kai_sprint2_p3_04_generated_content_review_completion.sql");
   psqlFile("migrations/kai_sprint2_p3_05_export_review_request.sql");
   psqlFile("migrations/kai_sprint2_p3_09_export_review_start.sql");
@@ -257,6 +289,26 @@ try {
   psqlFile("scripts/kai-sprint2-p3-20-export-manifest-review-binding-smoke-seed.sql");
   psqlFile("scripts/kai-sprint2-p3-20-export-manifest-review-binding-smoke-verifier.sql");
   psqlFile("scripts/kai-sprint2-p3-20-export-manifest-review-binding-failure-checks.sql");
+
+  // Real kai.organizations/kai.engagements rows the durable-export-manifest-
+  // read-recovery/P3-20/P3-19/P3-18/P3-13 integration suites'
+  // createEvidenceSummaryDraft/createImpactNarrativeDraft calls now require
+  // as the requested engagementId (P14-01 write contract), reusing the exact
+  // UUID constants each of those integration spec files hardcodes.
+  psqlExec(
+    "INSERT INTO kai.organizations (organization_id, name, organization_code) VALUES ('00000000-0000-4000-8000-000000000001', 'P3-19 Smoke Org', 'p3-19-smoke-org') ON CONFLICT (organization_id) DO NOTHING;",
+  );
+  for (const [engagementId, engagementCode] of [
+    ["00000000-0000-4000-8000-000000000920", "p3-durable-manifest-read-recovery-smoke-engagement"],
+    ["00000000-0000-4000-8000-000000000921", "p3-20-smoke-engagement"],
+    ["00000000-0000-4000-8000-000000000919", "p3-19-smoke-engagement"],
+    ["00000000-0000-4000-8000-000000000918", "p3-18-smoke-engagement"],
+    ["00000000-0000-4000-8000-000000000913", "p3-13-smoke-engagement"],
+  ]) {
+    psqlExec(
+      `INSERT INTO kai.engagements (engagement_id, organization_id, engagement_code) VALUES ('${engagementId}', '00000000-0000-4000-8000-000000000001', '${engagementCode}') ON CONFLICT (engagement_id) DO NOTHING;`,
+    );
+  }
 
   const testResult = spawnSync("node", [
     "--test",

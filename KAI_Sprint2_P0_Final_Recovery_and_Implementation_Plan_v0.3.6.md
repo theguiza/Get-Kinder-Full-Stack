@@ -23192,3 +23192,90 @@ remains unstarted and out of scope.
 
 **Local commit:** one bounded commit created after all required checks
 passed.
+
+## P14-01 Runner-Side Fixture-Parity Closure (local-Postgres runners only)
+
+**Date:** 2026-09-09
+
+**Owner authorization (bounded, local-only):** close exactly the runner-side
+half of the residual disclosed at the end of the prior package - the 11
+already-repaired `.integration.spec.js` fixtures require a real
+`kai.engagements` foundation and the P14-01 migration, and their own
+dedicated `scripts/*-local-postgres.js` runners did not yet provide either.
+Starting HEAD: `7c8d438e0a1a39f54739277938ca921af54f643a` (USER_CONFIRMED);
+working tree at start contained exactly the 11 runner-script edits already
+proved in the immediately preceding execution. Do not modify the P14-01
+migration, the generation services/repository/routes, the 11 already-
+repaired integration specs, export-manifest production behavior, or any
+unrelated historical runner migration chain.
+
+**Runner -> affected integration-spec map (11 runners closed):**
+- `kai-sprint2-p3-02-generated-draft-review-packet-local-postgres.js` -> `kai-sprint2-p3-02-generated-draft-review-packet.integration.spec.js`
+- `kai-sprint2-p3-03-export-manifest-eligibility-local-postgres.js` -> `kai-sprint2-p3-03-export-manifest-eligibility.integration.spec.js`
+- `kai-sprint2-p3-04-generated-content-review-completion-local-postgres.js` -> `kai-sprint2-p3-04-generated-content-review-completion.integration.spec.js`
+- `kai-sprint2-p3-05-export-review-request-local-postgres.js` -> `kai-sprint2-p3-05-export-review-request.integration.spec.js`
+- `kai-sprint2-p3-06-export-review-packet-local-postgres.js` -> `kai-sprint2-p3-06-export-review-packet.integration.spec.js`
+- `kai-sprint2-p3-09-export-review-start-local-postgres.js` -> `kai-sprint2-p3-09-export-review-start.integration.spec.js`
+- `kai-sprint2-p3-13-export-review-completion-local-postgres.js` -> `kai-sprint2-p3-13-export-review-completion.integration.spec.js` (plus cross-run `kai-sprint2-p3-09-export-review-start.integration.spec.js`)
+- `kai-sprint2-p3-16-export-candidate-foundation-local-postgres.js` -> `kai-sprint2-p3-16-export-candidate-foundation.integration.spec.js` (plus cross-run P3-13/P3-09 specs)
+- `kai-sprint2-p3-17-human-authority-decision-ledger-local-postgres.js` -> `kai-sprint2-p3-17-human-authority-decision-ledger.integration.spec.js` (plus cross-run P3-13/P3-09 specs)
+- `kai-sprint2-p3-18-real-persisted-final-gate-proof-local-postgres.js` -> `kai-sprint2-p3-18-real-persisted-final-gate-proof.integration.spec.js` (plus cross-run P3-13 spec)
+- `kai-sprint2-p3-19-export-manifest-foundation-local-postgres.js` -> `kai-sprint2-durable-export-manifest-read-recovery.integration.spec.js` (plus cross-run P3-20/P3-19/P3-18/P3-13 specs)
+
+Each of the 11 runners received exactly the same bounded accommodation: the
+shared organization-enablement bootstrap (or, for P3-19 only, an inline
+minimal `kai.organizations`/`kai.engagements` mirror added alongside its
+existing audit/enum bootstrap, to avoid recreating that bootstrap's
+audit_events/object_type_enum shape a second time and colliding with it),
+the runner-local composite `UNIQUE (engagement_id, organization_id)`
+accommodation already precedented by the P3-01/B1.1/C2.1 runners, the
+P14-01 migration applied immediately after `kai_sprint2_p3_01_generated_content_drafts.sql`,
+and real `kai.organizations`/`kai.engagements` rows seeded with the exact
+UUID constants each affected integration spec hardcodes. No existing test
+list, assertion, or seed/verifier step in any of the 11 runners was altered.
+
+**P14-01 schema parity:** PASS. **Synthetic engagement parity:** PASS - each
+runner's seeded engagement satisfies the same tenant-scoped
+`getEngagementForOrganization` lookup and composite FK shape as the P3-01
+precedent. **Engagement-attributable runner failures:** NONE.
+
+**Successful runner counts (this closure):** P3-02 17/17, P3-03 31/31,
+P3-04 68/68, P3-05 89/89, P3-19 340/340 on a clean rerun (P3-19's first
+attempt hit a transient concurrency failure during ephemeral-database setup,
+unrelated to engagement binding; the immediate clean rerun passed 340/340).
+
+**Separate, out-of-scope historical runner debt (not P14-01 engagement
+work):** six of the 11 runners - P3-06, P3-09, P3-13, P3-16, P3-17, and
+P3-18 - fail for a separate, pre-existing local-runner export-manifest
+migration-chain mismatch traced to before this package and unrelated to
+engagement binding. This debt is explicitly out of this package's boundary
+and was not repaired here; it is not P14-01 engagement-attributable work
+and must not be read as remaining P14-01 scope.
+
+**Verification:** `DATABASE_URL` set to a non-listening loopback sentinel
+for every Node/npm command. Full repository suite (`npm test`) -> 3506
+passed, 7 failed, 61 skipped - identical to the USER_CONFIRMED pre-package
+baseline (the same child-file read-model/batch-files-collection/file-detail-
+service/file-detail-contract failures and their nested subtests), 0 newly
+introduced failures. `git diff --check` passed with no whitespace errors.
+`npm run build` was not run (no frontend file changed).
+
+**Final diff review:** confined to the 11 `scripts/*-local-postgres.js`
+runner files named above and this ExecPlan. The P14-01 migration, the
+generation services/repository/routes, the 11 already-repaired integration
+specs, export-manifest production behavior, and every unrelated historical
+runner migration chain were left untouched; no production or shared
+database was accessed, mutated, or migrated; nothing was pushed or
+deployed; no feature flags changed; no Current State or Implementation
+Baseline update was made; no Grant Response Packet, Board Summary, or
+artifact-persistence work was performed.
+
+**Remaining work:** the separate six-runner historical export-manifest
+migration-chain debt (P3-06/09/13/16/17/18) remains open as its own,
+already-scoped-out issue - not P14-01 engagement work. The next product
+continuation is engagement-scoped deterministic generated-draft membership
+and Grant Response Packet composition (the grouping query/read model),
+which remains unstarted.
+
+**Local commit:** one bounded commit created after all required checks
+passed.
