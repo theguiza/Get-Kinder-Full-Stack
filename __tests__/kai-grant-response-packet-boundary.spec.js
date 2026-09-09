@@ -29,12 +29,12 @@ function actorWithRole(role) {
 const reviewerActor = actorWithRole("gk_reviewer");
 const adminActor = actorWithRole("gk_admin");
 
-// One coherent per-draft immutable graph, parameterized only by the ids and
-// review/eligibility state a test needs to vary - shaped identically to the
-// existing P3-02 review-packet boundary test's own `state()`/`dto()`
-// fixtures, since a Grant Response Packet member is exactly that same
-// governed packet, never a second shape.
-function draftFixture(n, { queueStatus, reviewStatus, eligible = true }) {
+// One coherent per-draft immutable graph, parameterized only by the ids,
+// review/eligibility state, and requested_audience a test needs to vary -
+// shaped identically to the existing P3-02 review-packet boundary test's own
+// `state()`/`dto()` fixtures, since a Grant Response Packet member is
+// exactly that same governed packet, never a second shape.
+function draftFixture(n, { queueStatus, reviewStatus, eligible = true, audience = "funder" }) {
   const draftId = `00000000-0000-4000-8000-0000000009${n}1`;
   const runId = `00000000-0000-4000-8000-0000000009${n}2`;
   const blockId = `00000000-0000-4000-8000-0000000009${n}3`;
@@ -54,23 +54,25 @@ function draftFixture(n, { queueStatus, reviewStatus, eligible = true }) {
     generation_run_id: runId,
     organization_id: ORG,
     content_type: "evidence_summary",
-    requested_audience: "internal",
+    requested_audience: audience,
     draft_status: "draft",
     review_status: "needs_gk_review",
   };
   return {
     draftId,
+    runId,
     claimId,
     evidenceId,
     sourceId,
     sourceVersionId,
+    audience,
     draft,
     run: {
       generation_run_id: runId,
       organization_id: ORG,
       request_fingerprint: "a".repeat(64),
       content_type: "evidence_summary",
-      requested_audience: "internal",
+      requested_audience: audience,
     },
     siblingDrafts: [draft],
     blocks: [{
@@ -109,16 +111,26 @@ function draftFixture(n, { queueStatus, reviewStatus, eligible = true }) {
   };
 }
 
-const DRAFT_A = draftFixture(1, { queueStatus: "resolved", reviewStatus: "resolved", eligible: true });
-const DRAFT_B = draftFixture(2, { queueStatus: "open", reviewStatus: "needs_gk_review", eligible: true });
-const DRAFT_C = draftFixture(3, { queueStatus: "resolved", reviewStatus: "resolved", eligible: false });
-const DRAFT_D = draftFixture(4, { queueStatus: "resolved", reviewStatus: "resolved", eligible: true });
+const DRAFT_A = draftFixture(1, { queueStatus: "resolved", reviewStatus: "resolved", eligible: true, audience: "funder" });
+const DRAFT_B = draftFixture(2, { queueStatus: "open", reviewStatus: "needs_gk_review", eligible: true, audience: "funder" });
+const DRAFT_C = draftFixture(3, { queueStatus: "resolved", reviewStatus: "resolved", eligible: false, audience: "funder" });
+const DRAFT_D = draftFixture(4, { queueStatus: "resolved", reviewStatus: "resolved", eligible: true, audience: "funder" });
+// Identical resolved/eligible state to DRAFT_A, same engagement, differing
+// only by requested_audience - proves funder-only membership: neither
+// "internal" nor "public" is ever treated as equivalent to "funder", no
+// matter how eligible/resolved the underlying draft is.
+const DRAFT_E_INTERNAL = draftFixture(5, { queueStatus: "resolved", reviewStatus: "resolved", eligible: true, audience: "internal" });
+const DRAFT_F_PUBLIC = draftFixture(6, { queueStatus: "resolved", reviewStatus: "resolved", eligible: true, audience: "public" });
 
-const FIXTURES_BY_DRAFT_ID = Object.fromEntries(
-  [DRAFT_A, DRAFT_B, DRAFT_C, DRAFT_D].map((fixture) => [fixture.draftId, fixture]),
-);
+const ALL_FIXTURES = [DRAFT_A, DRAFT_B, DRAFT_C, DRAFT_D, DRAFT_E_INTERNAL, DRAFT_F_PUBLIC];
+const FIXTURES_BY_DRAFT_ID = Object.fromEntries(ALL_FIXTURES.map((fixture) => [fixture.draftId, fixture]));
+// Mirrors what the real `generated_content_drafts JOIN generation_runs`
+// membership query would itself return before any content_type/draft_status/
+// requested_audience/organization filtering is applied by the mock query
+// handler below - exactly like the live SQL's own WHERE clause, not a
+// pre-filtered fixture list.
 const MEMBERSHIP_BY_ENGAGEMENT = {
-  [ENGAGEMENT]: [DRAFT_A.draftId, DRAFT_B.draftId, DRAFT_C.draftId],
+  [ENGAGEMENT]: [DRAFT_A.draftId, DRAFT_B.draftId, DRAFT_C.draftId, DRAFT_E_INTERNAL.draftId, DRAFT_F_PUBLIC.draftId],
   [OTHER_ENGAGEMENT]: [DRAFT_D.draftId],
 };
 const ENGAGEMENT_ROWS = [
@@ -158,7 +170,7 @@ function evaluatorFor(fixture) {
       gap_items: [],
       client_followup_workflows: [],
       potential_conflict_groups: [],
-      requestedAudience: "internal",
+      requestedAudience: fixture.audience,
       eligible: fixture.eligible,
       blockerCodes: fixture.eligible ? [] : ["evidence_superseded"],
       affectedDimensionKeys: [],
@@ -170,16 +182,25 @@ function evaluatorFor(fixture) {
 }
 
 // One evaluator dispatching by claimId to whichever fixture owns that claim -
-// evaluateGeneratedDraftReviewPacketInTransaction is reused unmodified per
-// draft, so a single shared evaluator function must serve every draft in
-// the same membership scan.
+// toReviewPacket is reused unmodified per draft, so a single shared evaluator
+// function must serve every draft composed in the same membership scan.
 const sharedEvaluator = async (tx, args) => {
-  const fixture = [DRAFT_A, DRAFT_B, DRAFT_C, DRAFT_D].find((f) => f.claimId === args.claimId);
+  const fixture = ALL_FIXTURES.find((f) => f.claimId === args.claimId);
   return evaluatorFor(fixture)(tx, args);
 };
 
+function firstArrayParam(params) {
+  return params.find((param) => Array.isArray(param));
+}
+
+// Models the bounded/batched read architecture exactly: a fixed, small
+// number of queries regardless of membership size (engagement existence +
+// membership listing + one batched query per row group), each expressed as
+// `= ANY($n::uuid[])` over every member draft id / generation run id / block
+// id at once - never a query issued per member draft. No "current draft"
+// pointer exists in this mock because the production code no longer reads
+// one draft's graph at a time.
 function makeTx() {
-  let current = null;
   return {
     async query(sql, params = []) {
       if (/FROM kai\.engagements\b/.test(sql)) {
@@ -188,28 +209,78 @@ function makeTx() {
         return { rows: row ? [row] : [] };
       }
       if (/JOIN kai\.generation_runs r\b/.test(sql)) {
-        const [, engagementId] = params;
+        const [organizationId, engagementId, contentTypes, draftStatus, audience] = params;
         const ids = MEMBERSHIP_BY_ENGAGEMENT[engagementId] || [];
-        return { rows: ids.map((id) => ({ generated_content_draft_id: id })) };
+        const rows = ids
+          .map((id) => FIXTURES_BY_DRAFT_ID[id])
+          .filter((fixture) => fixture
+            && fixture.draft.organization_id === organizationId
+            && contentTypes.includes(fixture.draft.content_type)
+            && fixture.draft.draft_status === draftStatus
+            && fixture.draft.requested_audience === audience)
+          .map((fixture) => ({ generated_content_draft_id: fixture.draftId }));
+        return { rows };
       }
-      if (/FROM kai\.generated_content_drafts\s+WHERE organization_id/.test(sql)) {
-        const [, generatedContentDraftId] = params;
-        current = FIXTURES_BY_DRAFT_ID[generatedContentDraftId] || null;
-        return { rows: current ? [current.draft] : [] };
+      if (/FROM kai\.generated_content_drafts\b/.test(sql) && /WHERE organization_id/.test(sql) && /ANY/.test(sql)) {
+        const [organizationId] = params;
+        const draftIds = firstArrayParam(params);
+        const rows = draftIds
+          .map((id) => FIXTURES_BY_DRAFT_ID[id])
+          .filter((fixture) => fixture && fixture.draft.organization_id === organizationId)
+          .map((fixture) => fixture.draft);
+        return { rows };
       }
-      if (!current) throw new Error(`unexpected query with no active draft context: ${sql}`);
-      if (/FROM kai\.generation_runs\b/.test(sql) && !/JOIN/.test(sql)) return { rows: [current.run] };
-      if (/FROM kai\.generated_content_drafts\s+WHERE generation_run_id/.test(sql)) return { rows: current.siblingDrafts };
-      if (/FROM kai\.generated_content_blocks/.test(sql)) return { rows: current.blocks };
-      if (/FROM kai\.generated_content_citations/.test(sql)) return { rows: current.citations };
-      if (/FROM kai\.review_queue_items/.test(sql) && /blocked_reason/.test(sql)) return { rows: current.exportReviewQueues };
-      if (/FROM kai\.review_queue_items/.test(sql)) return { rows: current.queues };
+      if (/FROM kai\.generated_content_drafts\b/.test(sql) && /WHERE generation_run_id = ANY/.test(sql)) {
+        const runIds = firstArrayParam(params);
+        const rows = ALL_FIXTURES.filter((fixture) => runIds.includes(fixture.runId)).flatMap((fixture) => fixture.siblingDrafts);
+        return { rows };
+      }
+      if (/FROM kai\.generation_runs\b/.test(sql) && !/JOIN/.test(sql)) {
+        const runIds = firstArrayParam(params);
+        const rows = ALL_FIXTURES.filter((fixture) => runIds.includes(fixture.runId)).map((fixture) => fixture.run);
+        return { rows };
+      }
+      if (/FROM kai\.generated_content_blocks\b/.test(sql)) {
+        const draftIds = firstArrayParam(params);
+        const rows = draftIds.flatMap((id) => FIXTURES_BY_DRAFT_ID[id]?.blocks || []);
+        return { rows };
+      }
+      if (/FROM kai\.generated_content_citations\b/.test(sql)) {
+        const blockIds = firstArrayParam(params);
+        const rows = ALL_FIXTURES.flatMap((fixture) => fixture.citations.filter((citation) => blockIds.includes(citation.generated_content_block_id)));
+        return { rows };
+      }
+      if (/FROM kai\.review_queue_items\b/.test(sql) && /blocked_reason/.test(sql)) {
+        const draftIds = firstArrayParam(params);
+        const rows = draftIds.flatMap((id) => FIXTURES_BY_DRAFT_ID[id]?.exportReviewQueues || []);
+        return { rows };
+      }
+      if (/FROM kai\.review_queue_items\b/.test(sql)) {
+        const draftIds = firstArrayParam(params);
+        const rows = draftIds.flatMap((id) => FIXTURES_BY_DRAFT_ID[id]?.queues || []);
+        return { rows };
+      }
       throw new Error(`unexpected query in grant-response-packet boundary test: ${sql}`);
     },
   };
 }
 
-test("Grant Response Packet membership includes only the requesting engagement's own eligible drafts", async () => {
+// Counting variant of makeTx() - proves the read architecture issues a
+// query count that never scales with membership size (no per-draft
+// SQL/read-packet fan-out).
+function makeCountingTx() {
+  const base = makeTx();
+  const counts = { total: 0 };
+  return {
+    counts,
+    async query(sql, params) {
+      counts.total += 1;
+      return base.query(sql, params);
+    },
+  };
+}
+
+test("Grant Response Packet membership includes only the requesting engagement's own eligible funder-audience drafts", async () => {
   const result = await evaluateGrantResponsePacketMembershipInTransaction(
     makeTx(),
     { organizationId: ORG, engagementId: ENGAGEMENT },
@@ -218,6 +289,8 @@ test("Grant Response Packet membership includes only the requesting engagement's
   assert.equal(result.ok, true);
   assert.equal(result.data.drafts.length, 1);
   assert.equal(result.data.drafts[0].generatedContentDraftId, DRAFT_A.draftId);
+  assert.equal(result.data.drafts[0].requestedAudience, "funder");
+  assert.equal(result.data.packetAudience, "funder");
 });
 
 test("Grant Response Packet membership excludes drafts belonging to a different engagement", async () => {
@@ -252,6 +325,28 @@ test("Grant Response Packet membership excludes not-yet-reviewed and blocked/ine
   const ids = result.data.drafts.map((d) => d.generatedContentDraftId);
   assert.ok(!ids.includes(DRAFT_B.draftId), "not-yet-reviewed draft must never become packet membership");
   assert.ok(!ids.includes(DRAFT_C.draftId), "currentUseEligible=false draft must never become packet membership");
+});
+
+test("Grant Response Packet membership excludes an identical internal-audience draft in the same engagement", async () => {
+  const result = await evaluateGrantResponsePacketMembershipInTransaction(
+    makeTx(),
+    { organizationId: ORG, engagementId: ENGAGEMENT },
+    sharedEvaluator,
+  );
+  assert.equal(result.ok, true);
+  const ids = result.data.drafts.map((d) => d.generatedContentDraftId);
+  assert.ok(!ids.includes(DRAFT_E_INTERNAL.draftId), "requested_audience=internal must never be treated as equivalent to funder");
+});
+
+test("Grant Response Packet membership excludes an identical public-audience draft in the same engagement", async () => {
+  const result = await evaluateGrantResponsePacketMembershipInTransaction(
+    makeTx(),
+    { organizationId: ORG, engagementId: ENGAGEMENT },
+    sharedEvaluator,
+  );
+  assert.equal(result.ok, true);
+  const ids = result.data.drafts.map((d) => d.generatedContentDraftId);
+  assert.ok(!ids.includes(DRAFT_F_PUBLIC.draftId), "requested_audience=public must never be treated as equivalent to funder");
 });
 
 test("Grant Response Packet membership is deterministic across repeated evaluation of the same governed state", async () => {
@@ -298,6 +393,45 @@ test("Grant Response Packet membership query resolves engagement_id by plain equ
   assert.ok(!/COALESCE/.test(fn));
   assert.ok(!/ORDER BY.*created_at/.test(fn));
   assert.ok(!/LIMIT 1/.test(fn));
+  assert.ok(/requested_audience\s*=\s*\$5/.test(fn), "membership must require an exact requested_audience match");
+});
+
+test("Grant Response Packet membership issues a fixed, bounded query count that never scales with membership size (no per-draft SQL fan-out)", async () => {
+  const smallTx = makeCountingTx();
+  await evaluateGrantResponsePacketMembershipInTransaction(
+    smallTx,
+    { organizationId: ORG, engagementId: OTHER_ENGAGEMENT },
+    sharedEvaluator,
+  );
+  const smallCount = smallTx.counts.total;
+
+  const largeTx = makeCountingTx();
+  await evaluateGrantResponsePacketMembershipInTransaction(
+    largeTx,
+    { organizationId: ORG, engagementId: ENGAGEMENT },
+    sharedEvaluator,
+  );
+  const largeCount = largeTx.counts.total;
+
+  // OTHER_ENGAGEMENT has 1 candidate draft, ENGAGEMENT has 5 - a per-draft
+  // fan-out would issue strictly more queries for the larger membership set.
+  // The bounded/batched architecture issues the same fixed query count
+  // (engagement check + membership listing + 7 batched row-group reads)
+  // regardless.
+  assert.equal(smallCount, 9);
+  assert.equal(largeCount, 9);
+});
+
+test("Grant Response Packet membership never calls the single-draft per-draft read-packet evaluator", () => {
+  const source = readFileSync(
+    new URL("../Backend/kai/dictionary/postgresGeneratedContentRepository.js", import.meta.url),
+    "utf8",
+  );
+  const start = source.indexOf("export async function evaluateGrantResponsePacketMembershipInTransaction");
+  const end = source.indexOf("\n}\n", start);
+  const fn = source.slice(start, end);
+  assert.ok(!/evaluateGeneratedDraftReviewPacketInTransaction/.test(fn), "membership composition must not fan out per draft into the single-draft read-packet path");
+  assert.ok(/readReviewPacketStatesBatch/.test(fn), "membership composition must read draft graph state via the batched reader");
 });
 
 function serviceInput(overrides = {}) {
@@ -309,7 +443,7 @@ test("Grant Response Packet service gates: both flags, exact input, mapped human
   const repository = {
     async getGrantResponsePacket() {
       repositoryCalls += 1;
-      return { ok: true, data: { organizationId: ORG, engagementId: ENGAGEMENT, drafts: [] }, error: null };
+      return { ok: true, data: { organizationId: ORG, engagementId: ENGAGEMENT, packetAudience: "funder", drafts: [] }, error: null };
     },
   };
   assert.equal((await getGrantResponsePacket(serviceInput(), { env: {}, generatedContentRepository: repository })).error.code, "feature_disabled");
@@ -319,7 +453,9 @@ test("Grant Response Packet service gates: both flags, exact input, mapped human
   assert.equal((await getGrantResponsePacket(serviceInput({ organizationId: OTHER_ORG }), { env: enabledEnv, generatedContentRepository: repository })).error.code, "authorization_denied");
   assert.equal((await getGrantResponsePacket(serviceInput({ actorContext: actorWithRole("gk_operator") }), { env: enabledEnv, generatedContentRepository: repository })).error.code, "authorization_denied");
   assert.equal(repositoryCalls, 0);
-  assert.equal((await getGrantResponsePacket(serviceInput(), { env: enabledEnv, generatedContentRepository: repository })).ok, true);
+  const okResult = await getGrantResponsePacket(serviceInput(), { env: enabledEnv, generatedContentRepository: repository });
+  assert.equal(okResult.ok, true);
+  assert.equal(okResult.data.packetAudience, "funder");
   assert.equal(repositoryCalls, 1);
 });
 
@@ -329,7 +465,7 @@ test("Grant Response Packet service projects export-review fields only for an ac
     generatedContentDraftId: DRAFT_A.draftId,
     contentType: "evidence_summary",
     draftStatus: "draft",
-    requestedAudience: "internal",
+    requestedAudience: "funder",
     reviewQueueItemId: DRAFT_A.queues[0].review_queue_item_id,
     queueStatus: "resolved",
     reviewStatus: "resolved",
@@ -358,7 +494,7 @@ test("Grant Response Packet service projects export-review fields only for an ac
   };
   const repository = {
     async getGrantResponsePacket() {
-      return { ok: true, data: { organizationId: ORG, engagementId: ENGAGEMENT, drafts: [repositoryPacket] }, error: null };
+      return { ok: true, data: { organizationId: ORG, engagementId: ENGAGEMENT, packetAudience: "funder", drafts: [repositoryPacket] }, error: null };
     },
   };
 
@@ -383,12 +519,13 @@ test("Grant Response Packet service rejects injected repository packets containi
         data: {
           organizationId: ORG,
           engagementId: ENGAGEMENT,
+          packetAudience: "funder",
           drafts: [{
             generationRunId: DRAFT_A.run.generation_run_id,
             generatedContentDraftId: DRAFT_A.draftId,
             contentType: "evidence_summary",
             draftStatus: "draft",
-            requestedAudience: "internal",
+            requestedAudience: "funder",
             reviewQueueItemId: DRAFT_A.queues[0].review_queue_item_id,
             queueStatus: "resolved",
             reviewStatus: "resolved",

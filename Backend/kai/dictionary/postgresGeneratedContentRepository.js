@@ -39,6 +39,12 @@ const AUDIT_OPERATION = "generated_content_draft_created";
 const AUDIT_CONTRACT = "p3_01_generated_content_draft_v1";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const AUDIENCES = new Set(["internal", "funder", "public"]);
+// Grant Response Packet membership is funder-oriented only - "internal" and
+// "public" requested-audience content is never packet-eligible, no matter
+// how eligible/resolved it is. Reuses the existing requested_audience
+// vocabulary already governing generation/traceability; no second audience
+// concept.
+const GRANT_RESPONSE_PACKET_AUDIENCE = "funder";
 const EVIDENCE_SENSITIVITY_LEVELS = new Set(["unknown"]);
 const SHA256_LOWER_PATTERN = /^[0-9a-f]{64}$/;
 
@@ -1029,22 +1035,177 @@ async function loadGrantResponsePacketMemberDraftIds(tx, { organizationId, engag
         AND r.engagement_id = $2::uuid
         AND d.content_type = ANY($3::text[])
         AND d.draft_status = $4
+        AND d.requested_audience = $5
       ORDER BY d.generated_content_draft_id ASC`,
-    [organizationId, engagementId, [...ALLOWED_GENERATED_CONTENT_TYPES], DRAFT_STATUS],
+    [organizationId, engagementId, [...ALLOWED_GENERATED_CONTENT_TYPES], DRAFT_STATUS, GRANT_RESPONSE_PACKET_AUDIENCE],
   );
   return rows.map((row) => row.generated_content_draft_id);
 }
 
-// Reuses the exact same governed single-draft packet (review status,
-// queue status, per-citation current-use eligibility/blocker codes) this
-// file already authoritatively computes for the P3-02 review-packet read -
-// no second eligibility vocabulary. A draft is packet-eligible only when
-// its generated_content_review queue is fully resolved (the
+async function loadExportReviewQueueRowsBatch(tx, { organizationId, generatedContentDraftIds }) {
+  if (generatedContentDraftIds.length === 0) return [];
+  const { rows } = await tx.query(
+    `SELECT review_queue_item_id::text AS review_queue_item_id,
+            organization_id::text AS organization_id, queue_type, target_object_type,
+            target_object_id::text AS target_object_id, priority, queue_status, review_status,
+            blocked_reason, assigned_to::text AS assigned_to, due_at, summary, required_action,
+            queue_metadata, created_by::text AS created_by, created_by_type
+       FROM kai.review_queue_items
+      WHERE organization_id = $1::uuid
+        AND queue_type = $2
+        AND target_object_type = $3
+        AND target_object_id = ANY($4::uuid[])`,
+    [organizationId, EXPORT_REVIEW_QUEUE_TYPE, EXPORT_REVIEW_TARGET_TYPE, generatedContentDraftIds],
+  );
+  return rows;
+}
+
+// Bounded/batched replacement for the per-draft read-packet fan-out: exactly
+// the same six row groups readReviewPacketState reads for one draft
+// (draft/run/siblingDrafts/blocks/citations/queues/exportReviewQueues), read
+// once each across every member draft id via `= ANY($ids::uuid[])` instead
+// of once per draft. Query count stays fixed regardless of membership size.
+// Returns a Map keyed by generated_content_draft_id, each value shaped
+// identically to readReviewPacketState's per-draft return so the existing
+// validateReviewPacketRows/toReviewPacket validators need no second
+// contract.
+async function readReviewPacketStatesBatch(tx, { organizationId, generatedContentDraftIds }) {
+  const statesByDraftId = new Map();
+  if (generatedContentDraftIds.length === 0) return statesByDraftId;
+
+  const draftRows = await tx.query(
+    `SELECT generated_content_draft_id::text AS generated_content_draft_id,
+            generation_run_id::text AS generation_run_id, organization_id::text AS organization_id,
+            content_type, requested_audience, draft_status, review_status
+       FROM kai.generated_content_drafts
+      WHERE organization_id = $1::uuid
+        AND generated_content_draft_id = ANY($2::uuid[])`,
+    [organizationId, generatedContentDraftIds],
+  );
+  const draftsById = new Map(draftRows.rows.map((row) => [row.generated_content_draft_id, row]));
+  if (draftsById.size === 0) return statesByDraftId;
+  const memberDraftIds = [...draftsById.keys()];
+
+  const runIds = [...new Set(draftRows.rows.map((row) => row.generation_run_id))];
+  const runRows = await tx.query(
+    `SELECT generation_run_id::text AS generation_run_id,
+            organization_id::text AS organization_id, engagement_id::text AS engagement_id,
+            request_fingerprint, content_type, requested_audience
+       FROM kai.generation_runs
+      WHERE generation_run_id = ANY($1::uuid[])`,
+    [runIds],
+  );
+  const runsById = new Map(runRows.rows.map((row) => [row.generation_run_id, row]));
+
+  const siblingDraftRows = await tx.query(
+    `SELECT generated_content_draft_id::text AS generated_content_draft_id,
+            generation_run_id::text AS generation_run_id, organization_id::text AS organization_id,
+            content_type, requested_audience, draft_status, review_status
+       FROM kai.generated_content_drafts
+      WHERE generation_run_id = ANY($1::uuid[])
+      ORDER BY generation_run_id ASC, generated_content_draft_id ASC`,
+    [runIds],
+  );
+  const siblingDraftsByRunId = new Map();
+  for (const row of siblingDraftRows.rows) {
+    if (!siblingDraftsByRunId.has(row.generation_run_id)) siblingDraftsByRunId.set(row.generation_run_id, []);
+    siblingDraftsByRunId.get(row.generation_run_id).push(row);
+  }
+
+  const blockRows = await tx.query(
+    `SELECT generated_content_block_id::text AS generated_content_block_id,
+            generated_content_draft_id::text AS generated_content_draft_id,
+            organization_id::text AS organization_id, ordinal, text
+       FROM kai.generated_content_blocks
+      WHERE generated_content_draft_id = ANY($1::uuid[])
+      ORDER BY generated_content_draft_id ASC, ordinal ASC, generated_content_block_id ASC`,
+    [memberDraftIds],
+  );
+  const blocksByDraftId = new Map();
+  for (const row of blockRows.rows) {
+    if (!blocksByDraftId.has(row.generated_content_draft_id)) blocksByDraftId.set(row.generated_content_draft_id, []);
+    blocksByDraftId.get(row.generated_content_draft_id).push(row);
+  }
+
+  const blockIds = blockRows.rows.map((row) => row.generated_content_block_id);
+  const citationRows = blockIds.length === 0
+    ? { rows: [] }
+    : await tx.query(
+        `SELECT c.generated_content_citation_id::text AS generated_content_citation_id,
+                c.generated_content_block_id::text AS generated_content_block_id,
+                c.organization_id::text AS organization_id,
+                c.claim_id::text AS claim_id,
+                c.evidence_item_id::text AS evidence_item_id,
+                b.ordinal AS block_ordinal
+           FROM kai.generated_content_citations c
+           JOIN kai.generated_content_blocks b
+             ON b.generated_content_block_id = c.generated_content_block_id
+          WHERE c.generated_content_block_id = ANY($1::uuid[])
+          ORDER BY b.ordinal ASC, c.claim_id ASC, c.evidence_item_id ASC, c.generated_content_citation_id ASC`,
+        [blockIds],
+      );
+  const citationsByBlockId = new Map();
+  for (const row of citationRows.rows) {
+    if (!citationsByBlockId.has(row.generated_content_block_id)) citationsByBlockId.set(row.generated_content_block_id, []);
+    citationsByBlockId.get(row.generated_content_block_id).push(row);
+  }
+
+  const queueRows = await tx.query(
+    `SELECT review_queue_item_id::text AS review_queue_item_id,
+            organization_id::text AS organization_id, queue_type, target_object_type,
+            target_object_id::text AS target_object_id, priority, queue_status,
+            review_status, assigned_to, due_at, summary, required_action,
+            updated_at
+       FROM kai.review_queue_items
+      WHERE organization_id = $1::uuid
+        AND target_object_type = $2
+        AND target_object_id = ANY($3::uuid[])
+        AND queue_type = $4
+      ORDER BY target_object_id ASC, review_queue_item_id ASC`,
+    [organizationId, REVIEW_TARGET_TYPE, memberDraftIds, REVIEW_QUEUE_TYPE],
+  );
+  const queuesByDraftId = new Map();
+  for (const row of queueRows.rows) {
+    if (!queuesByDraftId.has(row.target_object_id)) queuesByDraftId.set(row.target_object_id, []);
+    queuesByDraftId.get(row.target_object_id).push(row);
+  }
+
+  const exportReviewQueueRows = await loadExportReviewQueueRowsBatch(tx, { organizationId, generatedContentDraftIds: memberDraftIds });
+  const exportReviewQueuesByDraftId = new Map();
+  for (const row of exportReviewQueueRows) {
+    if (!exportReviewQueuesByDraftId.has(row.target_object_id)) exportReviewQueuesByDraftId.set(row.target_object_id, []);
+    exportReviewQueuesByDraftId.get(row.target_object_id).push(row);
+  }
+
+  for (const [draftId, draft] of draftsById.entries()) {
+    const blocks = blocksByDraftId.get(draftId) || [];
+    statesByDraftId.set(draftId, {
+      run: runsById.get(draft.generation_run_id) || null,
+      draft,
+      siblingDrafts: siblingDraftsByRunId.get(draft.generation_run_id) || [],
+      blocks,
+      citations: blocks.flatMap((block) => citationsByBlockId.get(block.generated_content_block_id) || []),
+      queues: queuesByDraftId.get(draftId) || [],
+      exportReviewQueues: exportReviewQueuesByDraftId.get(draftId) || [],
+    });
+  }
+
+  return statesByDraftId;
+}
+
+// Reuses the exact same governed single-draft packet validators/projection
+// (validateReviewPacketRows/toReviewPacket - review status, queue status,
+// per-citation current-use eligibility/blocker codes) this file already
+// authoritatively computes for the P3-02 review-packet read - no second
+// eligibility vocabulary. A draft is packet-eligible only when its
+// generated_content_review queue is fully resolved (the
 // GENERATED_CONTENT_REVIEW_LIFECYCLE_PROFILES[2] "resolved/resolved"
 // profile) and every one of its cited claims is currently eligible
 // (currentUseEligible === true, the same blocked/superseded-evidence gate
 // toReviewPacket already enforces) - blocked or not-yet-reviewed content
-// can never become valid packet membership.
+// can never become valid packet membership. State is read once, batched
+// across every member draft id (readReviewPacketStatesBatch) rather than
+// once per draft, so query count never scales with membership size.
 export async function evaluateGrantResponsePacketMembershipInTransaction(tx, input, evaluator = evaluateClaimTraceabilityInTransaction) {
   if (!validateGrantResponsePacketMembershipInput(input)) return failure("validation_blocker");
   const { organizationId, engagementId } = input;
@@ -1053,18 +1214,28 @@ export async function evaluateGrantResponsePacketMembershipInTransaction(tx, inp
   if (!engagement) return failure("not_found");
 
   const draftIds = await loadGrantResponsePacketMemberDraftIds(tx, { organizationId, engagementId });
+  const statesByDraftId = await readReviewPacketStatesBatch(tx, { organizationId, generatedContentDraftIds: draftIds });
+
   const drafts = [];
   for (const generatedContentDraftId of draftIds) {
-    const packetResult = await evaluateGeneratedDraftReviewPacketInTransaction(
-      tx,
+    const state = statesByDraftId.get(generatedContentDraftId);
+    if (!state) continue;
+    const validation = validateReviewPacketRows(
+      state,
       { organizationId, generatedContentDraftId },
-      evaluator,
-      { allowedLifecycleProfiles: GENERATED_CONTENT_REVIEW_LIFECYCLE_PROFILES },
+      GENERATED_CONTENT_REVIEW_LIFECYCLE_PROFILES,
     );
-    if (!packetResult.ok) {
-      if (packetResult.error.code === "not_found") continue;
-      return packetResult;
-    }
+    if (validation === "system_error") return failure("system_error");
+    // Matches the single-draft review-packet read's own validation
+    // contract exactly: a structurally invalid draft/queue graph is a
+    // conflict_current_state_changed failure that aborts the whole
+    // membership evaluation, never a silent per-draft skip - only a
+    // genuinely absent draft (handled by the `!state` check above) is
+    // skipped.
+    if (validation === false) return failure("conflict_current_state_changed");
+
+    const packetResult = await toReviewPacket(tx, state, { organizationId, generatedContentDraftId }, validation, evaluator);
+    if (!packetResult.ok) return packetResult;
     const packet = packetResult.data;
     const resolvedProfile = GENERATED_CONTENT_REVIEW_LIFECYCLE_PROFILES[2];
     if (packet.queueStatus !== resolvedProfile.queueStatus || packet.reviewStatus !== resolvedProfile.reviewStatus) continue;
@@ -1072,7 +1243,7 @@ export async function evaluateGrantResponsePacketMembershipInTransaction(tx, inp
     drafts.push(packet);
   }
 
-  return success({ organizationId, engagementId, drafts });
+  return success({ organizationId, engagementId, packetAudience: GRANT_RESPONSE_PACKET_AUDIENCE, drafts });
 }
 
 async function lockImmutableDraftRoot(tx, { organizationId, generatedContentDraftId }) {

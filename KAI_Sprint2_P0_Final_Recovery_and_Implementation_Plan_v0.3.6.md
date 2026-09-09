@@ -23422,3 +23422,118 @@ boundary.
 
 **Local commit:** one bounded commit created after all required checks
 passed.
+
+## Grant Response Packet: Funder-Audience Membership Contract + Bounded
+## Batched Composition (closes both disclosed membership defects)
+
+**Date:** 2026-09-09
+
+**Owner authorization (bounded, local-only):** close exactly the two exact
+membership contract defects the prior package's own foundation left open -
+(1) the composition had no funder-audience requirement at all (any
+`requested_audience` was eligible), and (2) membership composition was a
+per-draft fan-out (one call to `evaluateGeneratedDraftReviewPacketInTransaction`,
+and its own six SQL queries, per member draft id) rather than a bounded read.
+Starting HEAD: `470e0bb73139c6b238c46209668c3b2921a6e334` (USER_CONFIRMED).
+Frontend Grant Packet UX, P14-01 engagement lineage, fixture/runner parity,
+packet persistence, existing per-draft review/export authority, and
+Markdown/CSV/PDF/DOCX/website export-review UX were explicitly out of
+bounds and untouched.
+
+**1. Funder audience contract:** `loadGrantResponsePacketMemberDraftIds` in
+`Backend/kai/dictionary/postgresGeneratedContentRepository.js` now requires
+`d.requested_audience = $5` (a new `GRANT_RESPONSE_PACKET_AUDIENCE = "funder"`
+constant) as one more exact-equality filter alongside the existing
+organization/engagement/content-type/draft-status filters - reusing the
+same `requested_audience` vocabulary/column the P3-02 traceability contract
+already governs, no second audience concept. `internal` and `public` drafts
+are excluded by the same equality, never treated as equivalent to `funder`,
+regardless of how eligible/resolved they are (proved for an `internal` and a
+`public` draft otherwise identical to an included `funder` draft). The
+repository's success envelope and the service's returned envelope both now
+carry `packetAudience: "funder"` (added at the top-level Grant Response
+Packet envelope, not inside the existing exact-keys single-draft packet DTO,
+since `isGeneratedDraftReviewPacketDto` validates that shape by exact key
+set and already exposes the per-draft `requestedAudience` field, which
+reads `"funder"` for every composed member by construction).
+
+**2. Bounded/batched membership read (removes per-draft fan-out):** a new
+`readReviewPacketStatesBatch` reads the same six row groups the existing
+single-draft `readReviewPacketState` reads (draft/run/sibling-drafts/blocks/
+citations/queues/export-review-queues), but once each across every member
+draft id via `= ANY($ids::uuid[])`, instead of once per draft - a fixed
+7-query batch (plus the existing engagement-existence check and membership-
+id listing query, 9 total) regardless of membership size, proved by an
+identical query count across a 1-draft and a 5-candidate-draft engagement.
+`evaluateGrantResponsePacketMembershipInTransaction` now calls the existing
+`validateReviewPacketRows`/`toReviewPacket` validators/projection directly
+against the batched state per member id, reusing them unmodified - no second
+eligibility/validation contract - and no longer calls
+`evaluateGeneratedDraftReviewPacketInTransaction` at all (proved by a
+static source check). The single-draft read path itself
+(`evaluateGeneratedDraftReviewPacketInTransaction`, `readReviewPacketState`)
+is untouched and still serves the existing P3-02 single-draft read/review/
+export-review flows unmodified. Exact preserved semantics carried over
+unchanged: tenant scoping, engagement lineage (`generation_runs.engagement_id`
+plain equality, legacy `NULL` rows excluded), resolved-review validation,
+`currentUseEligible` gating, citation identity/blocker preservation,
+deterministic `generated_content_draft_id ASC` ordering, and the exact
+`conflict_current_state_changed`-aborts-the-whole-evaluation contract a
+structurally invalid draft/queue graph already carried (only a genuinely
+absent draft, i.e. deleted between listing and read, is skipped - never a
+validation failure). No member-bound/pagination decision was required: the
+architecture is bounded by query count, not by a row-count limit, so no
+`GRANT_PACKET_MEMBER_BOUND_DECISION_REQUIRED` stop applied.
+
+**Verification (`__tests__/kai-grant-response-packet-boundary.spec.js`,
+rewritten to a batched-query mock transaction, 17/17 passing, up from
+13/13):** funder-eligible/resolved draft included; identical `internal`
+draft excluded; identical `public` draft excluded; different-engagement
+exclusion; cross-tenant `not_found` fail-closed; not-yet-reviewed and
+blocked/ineligible exclusion; deterministic repeated evaluation; citation
+identity/support/eligibility preservation with no cross-draft substitution;
+plain-equality-only engagement/audience membership query source check;
+fixed bounded query count proof (no per-draft fan-out); static source proof
+that the single-draft evaluator is never called; service gating/projection/
+rejection/lazy-load tests unchanged in intent.
+
+**Regression run:** the same P3-01/P13-01/P3-02/P3-05/P3-06/P3-07/P3-08/
+P3-09/P3-10/P3-12/P3-13/P3-14/P3-15/P3-16/P3-19/export-manifest-render-
+model-composition/generated-draft-export-review-read-recovery/gk-export-
+review-governed-finalization-control/impact-library-export-review-link/
+export-operational-composition-route boundary and integration suites (341
+tests, 333 pass, 8 skipped, 0 failed) plus the route-runtime allowlist suite
+pass unmodified. `DATABASE_URL` set to a non-listening loopback sentinel for
+every Node/npm command.
+
+**Full suite:** `npm test` -> 3523 passed, 7 failed, 61 skipped (3519/7/61
+USER_CONFIRMED baseline plus the 4 new Grant Response Packet boundary tests,
+all passing) - the same 4 pre-existing child-file read-model/batch-files-
+collection/file-detail-service/file-detail-contract failures and their
+nested subtests, 0 newly introduced failures.
+
+**`npm run build`:** not run (no frontend/generated-bundle file changed).
+
+**Final diff review:** confined to `Backend/kai/dictionary/postgresGeneratedContentRepository.js`
+(the funder-audience filter, the new batched reader, and the rewritten
+membership-evaluation body - additive/replacement within the existing
+Grant Response Packet functions only, no other function touched),
+`Backend/kai/services/kaiGrantResponsePacketService.js` (one additive
+`packetAudience` pass-through line), the rewritten
+`__tests__/kai-grant-response-packet-boundary.spec.js`, and this ExecPlan.
+No migration, no route, no Current State, no Implementation Baseline, no
+Board Summary, no artifact-persistence, no export/review authority code,
+and no Markdown/CSV/PDF/DOCX/website export path was touched. `git diff
+--check` passed with no whitespace errors. No production or shared database
+was accessed, mutated, or migrated; nothing was pushed or deployed; no
+feature flags changed.
+
+**Remaining gap / next continuation:** none open within this package's
+bounded scope - both disclosed membership contract defects (funder-audience
+requirement, per-draft fan-out) are closed. The next Grant Response Packet
+continuation (separately authorized, not started here) is the Impact
+Evidence Library Grant Response Packet product/frontend UX built on top of
+this now-closed membership/composition foundation.
+
+**Local commit:** one bounded commit created after all required checks
+passed.

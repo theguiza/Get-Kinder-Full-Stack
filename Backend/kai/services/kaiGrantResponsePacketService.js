@@ -119,6 +119,7 @@ export async function getGrantResponsePacket(input, dependencies = {}) {
     data: {
       organizationId: result.data.organizationId,
       engagementId: result.data.engagementId,
+      packetAudience: result.data.packetAudience,
       drafts,
     },
     error: null,
