@@ -23272,10 +23272,153 @@ artifact-persistence work was performed.
 
 **Remaining work:** the separate six-runner historical export-manifest
 migration-chain debt (P3-06/09/13/16/17/18) remains open as its own,
-already-scoped-out issue - not P14-01 engagement work. The next product
-continuation is engagement-scoped deterministic generated-draft membership
-and Grant Response Packet composition (the grouping query/read model),
-which remains unstarted.
+already-scoped-out issue - not P14-01 engagement work.
+
+**Local commit:** one bounded commit created after all required checks
+passed.
+
+## Grant Response Packet: Engagement-Scoped Deterministic Generated-Draft
+## Membership + Composition (repository/service foundation)
+
+**Date:** 2026-09-09
+
+**Owner authorization (bounded, local-only):** implement the smallest
+coherent repository package for engagement-scoped deterministic
+generated-draft membership and Grant Response Packet composition, the
+continuation this ExecPlan's own prior package named as unstarted. Starting
+HEAD: `d874211469444a3c76ad5050d13beb652d6da186` (USER_CONFIRMED closed;
+`git show --check` on that commit passed clean, confined to the 11
+`scripts/*-local-postgres.js` runners and this ExecPlan, with no
+production/migration/integration-spec/Current-State/Implementation-Baseline
+change - `ENGAGEMENT_BINDING_REPOSITORY_CLOSED: YES`).
+
+**Authoritative packet scope:** `organizationId + engagementId`. Membership
+resolves exclusively through `engagement -> generation_runs.engagement_id
+-> generated_content_drafts.generation_run_id` (transitively - the P14-01
+migration deliberately left `generated_content_drafts` without its own
+`engagement_id` column). Never latest/newest/preferred/timestamp/browser
+selection. A `generation_runs.engagement_id IS NULL` legacy row is real,
+permanent state per the P14-01 migration's own comment; plain `=` equality
+against the requested engagement id already never matches `NULL`, so legacy
+runs are excluded with no special-case guess.
+
+**Eligible-content rule (no second vocabulary):** a draft is packet-eligible
+only when (a) its `content_type` is one of the two governed types
+(`evidence_summary`, `impact_narrative`) and `draft_status = 'draft'` (the
+only values that exist), and (b) the exact same governed single-draft
+review packet this file already computes for the P3-02 read
+(`evaluateGeneratedDraftReviewPacketInTransaction` / `toReviewPacket`)
+reports its `generated_content_review` queue fully resolved (the
+`GENERATED_CONTENT_REVIEW_LIFECYCLE_PROFILES[2]` "resolved/resolved"
+profile) AND `currentUseEligible === true` (every cited claim's
+traceability evaluation currently eligible - the same blocked/superseded-
+evidence gate P3-02 already enforces). No new eligibility rule engine,
+review-state contract, or citation/support/limitation vocabulary was
+introduced. Both governed content types are included with no genuine
+ambiguity: repository evidence gives no basis to admit one and exclude the
+other, since both already pass through the identical review/eligibility
+contract.
+
+**Membership/composition read path:** new repository functions in
+`Backend/kai/dictionary/postgresGeneratedContentRepository.js` -
+`loadGrantResponsePacketEngagement` (tenant existence check, fails closed
+`not_found` for a wrong-organization or nonexistent engagement id, so a
+caller cannot distinguish "empty engagement" from "wrong tenant" by
+response shape), `loadGrantResponsePacketMemberDraftIds` (one deterministic
+`generated_content_draft_id ASC`-ordered membership query), and
+`evaluateGrantResponsePacketMembershipInTransaction` (reuses
+`evaluateGeneratedDraftReviewPacketInTransaction` per member draft, unmodified,
+inside the same `REPEATABLE READ READ ONLY` transaction as the membership
+query for a single consistent snapshot), exposed as
+`createPostgresGeneratedContentRepository().getGrantResponsePacket`. New
+service `Backend/kai/services/kaiGrantResponsePacketService.js` -
+`getGrantResponsePacket` - reuses the existing P3-02
+`GENERATED_CONTENT_REVIEW_ALLOWED_ROLES`/`PROJECT_EXPORT_REVIEW_VISIBILITY_OPERATION`
+authority gates verbatim (a Grant Response Packet grants no broader read
+authority than reading the same drafts one at a time already permits), and
+validates every composed draft against the existing
+`isGeneratedDraftReviewPacketDto` contract (no new packet-shape
+vocabulary) before returning. New read-only route
+`GET /admin/organizations/:organizationId/engagements/:engagementId/grant-response-packet`
+in `Backend/kai/routes/sprint2IntakeApi.js` contains no SQL, delegating
+once to the service. Composes from governed eligible generated content
+(drafts/blocks/citations/queue state) only - never rendered Markdown/PDF/
+DOCX/CSV bytes, never frontend state. No new persistence/schema was added
+or found necessary - this is a read-only regrouping of already-persisted,
+already-governed rows, and the composite itself grants no approval/export/
+finalization authority. All existing per-draft review/export authority is
+preserved untouched (verified by the unmodified P3-02/P3-03/P3-05/P3-06/
+P3-09/P3-13/P3-16/P3-19/export-manifest-render-model regression suites
+below, plus the full suite).
+
+**Limitations/method notes:** NOT_APPLICABLE at this composition layer -
+limitation snapshots/entries are export-candidate-scoped
+(`kai.limitation_snapshots`/`kai.limitation_snapshot_entries`, keyed by
+`export_candidate_id`, populated only once export-candidate work begins on
+a draft) and the governed single-draft review packet this package composes
+from carries no limitation data of its own. Nothing at this layer reads,
+alters, or fabricates limitation data, so there is nothing to verify
+preservation of; this is not a gap in the membership/composition path
+itself, only a boundary noted for the next continuation (see below).
+
+**Verification (new boundary suite
+`__tests__/kai-grant-response-packet-boundary.spec.js`, 13/13 passing):**
+correct engagement includes only its own eligible drafts; a different
+engagement's drafts are excluded; an engagement id that does not belong to
+the requesting organization fails closed `not_found`; a not-yet-reviewed
+draft and a `currentUseEligible=false` (blocked/superseded-evidence) draft
+in the same engagement never become packet membership; repeated evaluation
+of the same governed state is byte-for-byte deterministic; composed
+citation identity/support/eligibility fields are preserved with no cross-
+draft substitution; a static-source check confirms the membership query
+uses plain `engagement_id = $2::uuid` equality only (no
+`IS NOT DISTINCT FROM`/`COALESCE`/`ORDER BY ... created_at`/`LIMIT 1`
+latest-row guess); service-layer auth/tenant/feature-flag gating precedes
+repository loading; export-review field projection is gated by the same
+independent export-review authority check P3-02 already applies; injected
+repository data carrying prohibited/raw fields is rejected `system_error`.
+
+**Regression run:** the full P3-01/P13-01/P3-02/P3-04/library/P3-03/P3-05/
+P3-06/P3-09/P3-13/P3-16/P3-19/export-manifest-render-model-composition/
+export-operational-composition-route boundary suites (231 tests) pass
+unmodified. `DATABASE_URL` set to a non-listening loopback sentinel for
+every Node/npm command.
+
+**Full suite:** `npm test` -> 3519 passed, 7 failed, 61 skipped (3506/7/61
+USER_CONFIRMED baseline plus the 13 new Grant Response Packet boundary
+tests, all passing) - the same 5 pre-existing child-file read-model/batch-
+files-collection/file-detail-service/file-detail-contract failures and
+their nested subtests, 0 newly introduced failures.
+
+**Route-allowlist regression (attributable, expected update):** the new
+route required one additive line in the existing exact-route-allowlist
+assertion in
+`__tests__/kai-sprint2-pass2-route-runtime.spec.js` (alphabetically
+inserted, every prior entry preserved verbatim) - the only test file
+changed by this package; confirmed green in isolation and in the full
+suite above.
+
+**`npm run build`:** not run (no frontend/generated-bundle file changed).
+
+**Final diff review:** confined to `Backend/kai/dictionary/postgresGeneratedContentRepository.js`
+(additive functions only), `Backend/kai/routes/sprint2IntakeApi.js`
+(one additive route), the new `Backend/kai/services/kaiGrantResponsePacketService.js`,
+the new `__tests__/kai-grant-response-packet-boundary.spec.js`, one additive
+line in `__tests__/kai-sprint2-pass2-route-runtime.spec.js`, and this
+ExecPlan. No migration, no Current State, no Implementation Baseline, no
+Board Summary, no artifact-persistence, and no historical runner-debt file
+was touched. `git diff --check` passed with no whitespace errors. No
+production or shared database was accessed, mutated, or migrated; nothing
+was pushed or deployed; no feature flags changed.
+
+**Remaining gap / next continuation:** none open within this package's
+bounded scope. The next Grant Response Packet continuation (separately
+authorized, not started here) is deciding whether/how limitation-snapshot
+data should surface in a Grant Response Packet once export-candidate work
+exists for engagement-scoped drafts, and whether a client-facing
+render/export path should be built on top of this read-only
+membership/composition foundation - both explicitly out of this package's
+boundary.
 
 **Local commit:** one bounded commit created after all required checks
 passed.

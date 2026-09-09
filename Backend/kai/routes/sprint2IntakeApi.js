@@ -2828,6 +2828,55 @@ router.get(
   },
 );
 
+function grantResponsePacketIdentifier(req = {}) {
+  const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
+  const engagementId = typeof req.params?.engagementId === "string" ? req.params.engagementId : "";
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId) || organizationId !== organizationId.toLowerCase()) return null;
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(engagementId) || engagementId !== engagementId.toLowerCase()) return null;
+  return { organizationId, engagementId };
+}
+
+let grantResponsePacketServicePromise = null;
+async function getGrantResponsePacketService() {
+  if (intakeServiceOverride?.getGrantResponsePacket) return intakeServiceOverride;
+  grantResponsePacketServicePromise ||= import("../services/kaiGrantResponsePacketService.js");
+  return grantResponsePacketServicePromise;
+}
+
+/**
+ * Grant Response Packet: a read-only, engagement-scoped regrouping of
+ * already-governed generated-draft review packets. Membership resolves
+ * exclusively through generation_runs.engagement_id (never latest/newest/
+ * preferred draft selection); each member draft is exactly the same
+ * governed single-draft packet the /review-packet route above already
+ * authorizes reading one at a time. Contains no SQL and no direct
+ * database access - delegates once to kaiGrantResponsePacketService.
+ * Grants no approval/export/finalization authority.
+ */
+router.get(
+  "/admin/organizations/:organizationId/engagements/:engagementId/grant-response-packet",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    const identifiers = grantResponsePacketIdentifier(req);
+    if (!identifiers || Object.keys(req.query || {}).length !== 0) {
+      return sendKaiError(res, "validation_blocker", {
+        blockers: [routeValidationBlocker(
+          "invalid_organization_id_engagement_id_or_query",
+          "organization_id_engagement_id",
+        )],
+      });
+    }
+    return invokeService(res, async () => {
+      const service = await getGrantResponsePacketService();
+      return service.getGrantResponsePacket({
+        organizationId: identifiers.organizationId,
+        engagementId: identifiers.engagementId,
+        actorContext: sprint2MappedActorContext(req),
+      });
+    });
+  },
+);
+
 function generatedContentReviewQueueIdentifier(req = {}) {
   const root = generatedContentDraftIdentifier(req);
   const reviewQueueItemId = typeof req.params?.reviewQueueItemId === "string" ? req.params.reviewQueueItemId : "";

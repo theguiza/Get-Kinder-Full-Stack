@@ -167,6 +167,12 @@ function validateReviewPacketInput(input) {
     && UUID_PATTERN.test(input.generatedContentDraftId);
 }
 
+function validateGrantResponsePacketMembershipInput(input) {
+  return hasExactKeys(input, new Set(["organizationId", "engagementId"]))
+    && UUID_PATTERN.test(input.organizationId)
+    && UUID_PATTERN.test(input.engagementId);
+}
+
 function isCanonicalUtcTimestamp(value) {
   if (typeof value !== "string") return false;
   let normalized = null;
@@ -991,6 +997,84 @@ export async function evaluateGeneratedDraftReviewPacketInTransaction(
   return toReviewPacket(tx, state, input, validation, evaluator);
 }
 
+// Grant Response Packet membership resolves EXCLUSIVELY through
+// generation_runs.engagement_id (never latest/newest/preferred draft
+// selection, never browser state). A generation run with engagement_id
+// IS NULL is real, permanent legacy state per the P14-01 migration comment
+// - plain equality against $2::uuid already never matches NULL, so legacy
+// runs are excluded here without any special-case guess. An engagementId
+// belonging to a different organization_id, or that does not exist at all,
+// resolves to zero membership rows below (never a cross-tenant read),
+// and is rejected up front as not_found so callers cannot distinguish
+// "empty engagement" from "wrong tenant" by response shape alone.
+async function loadGrantResponsePacketEngagement(tx, { organizationId, engagementId }) {
+  const { rows } = await tx.query(
+    `SELECT engagement_id::text AS engagement_id, organization_id::text AS organization_id
+       FROM kai.engagements
+      WHERE organization_id = $1::uuid
+        AND engagement_id = $2::uuid`,
+    [organizationId, engagementId],
+  );
+  return rows[0] || null;
+}
+
+async function loadGrantResponsePacketMemberDraftIds(tx, { organizationId, engagementId }) {
+  const { rows } = await tx.query(
+    `SELECT d.generated_content_draft_id::text AS generated_content_draft_id
+       FROM kai.generated_content_drafts d
+       JOIN kai.generation_runs r
+         ON r.generation_run_id = d.generation_run_id
+        AND r.organization_id = d.organization_id
+      WHERE d.organization_id = $1::uuid
+        AND r.engagement_id = $2::uuid
+        AND d.content_type = ANY($3::text[])
+        AND d.draft_status = $4
+      ORDER BY d.generated_content_draft_id ASC`,
+    [organizationId, engagementId, [...ALLOWED_GENERATED_CONTENT_TYPES], DRAFT_STATUS],
+  );
+  return rows.map((row) => row.generated_content_draft_id);
+}
+
+// Reuses the exact same governed single-draft packet (review status,
+// queue status, per-citation current-use eligibility/blocker codes) this
+// file already authoritatively computes for the P3-02 review-packet read -
+// no second eligibility vocabulary. A draft is packet-eligible only when
+// its generated_content_review queue is fully resolved (the
+// GENERATED_CONTENT_REVIEW_LIFECYCLE_PROFILES[2] "resolved/resolved"
+// profile) and every one of its cited claims is currently eligible
+// (currentUseEligible === true, the same blocked/superseded-evidence gate
+// toReviewPacket already enforces) - blocked or not-yet-reviewed content
+// can never become valid packet membership.
+export async function evaluateGrantResponsePacketMembershipInTransaction(tx, input, evaluator = evaluateClaimTraceabilityInTransaction) {
+  if (!validateGrantResponsePacketMembershipInput(input)) return failure("validation_blocker");
+  const { organizationId, engagementId } = input;
+
+  const engagement = await loadGrantResponsePacketEngagement(tx, { organizationId, engagementId });
+  if (!engagement) return failure("not_found");
+
+  const draftIds = await loadGrantResponsePacketMemberDraftIds(tx, { organizationId, engagementId });
+  const drafts = [];
+  for (const generatedContentDraftId of draftIds) {
+    const packetResult = await evaluateGeneratedDraftReviewPacketInTransaction(
+      tx,
+      { organizationId, generatedContentDraftId },
+      evaluator,
+      { allowedLifecycleProfiles: GENERATED_CONTENT_REVIEW_LIFECYCLE_PROFILES },
+    );
+    if (!packetResult.ok) {
+      if (packetResult.error.code === "not_found") continue;
+      return packetResult;
+    }
+    const packet = packetResult.data;
+    const resolvedProfile = GENERATED_CONTENT_REVIEW_LIFECYCLE_PROFILES[2];
+    if (packet.queueStatus !== resolvedProfile.queueStatus || packet.reviewStatus !== resolvedProfile.reviewStatus) continue;
+    if (packet.currentUseEligible !== true) continue;
+    drafts.push(packet);
+  }
+
+  return success({ organizationId, engagementId, drafts });
+}
+
 async function lockImmutableDraftRoot(tx, { organizationId, generatedContentDraftId }) {
   const { rows } = await tx.query(
     `SELECT generated_content_draft_id::text AS generated_content_draft_id
@@ -1721,6 +1805,20 @@ export function createPostgresGeneratedContentRepository({
         return failure("system_error");
       }
     },
+    async getGrantResponsePacket(input) {
+      if (!validateGrantResponsePacketMembershipInput(input)) return failure("validation_blocker");
+      try {
+        return await runInTransaction(async (tx) => {
+          await tx.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY");
+          return evaluateGrantResponsePacketMembershipInTransaction(tx, input, evaluator);
+        });
+      } catch (error) {
+        if (error instanceof RollbackResultError) return error.result;
+        if (error?.code === "22P02") return failure("validation_blocker");
+        if (error?.code === "25001") return failure("conflict_current_state_changed");
+        return failure("system_error");
+      }
+    },
     async createEvidenceSummaryDraft(input, dependencies = {}) {
       return createGeneratedContentDraft(
         CONTENT_TYPE,
@@ -2376,4 +2474,5 @@ export const __generatedContentRepositoryTestables = Object.freeze({
   isExportReviewQueueContractRow,
   validateStartExportReviewInput,
   validateCompleteExportReviewInput,
+  validateGrantResponsePacketMembershipInput,
 });

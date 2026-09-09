@@ -156,6 +156,11 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // KAI engagement Funder Requirements state foundation: read-only
     // classifier, no applicability write.
     "/admin/organizations/:organizationId/engagements/:engagementId/funder-requirements-state",
+    // Grant Response Packet: read-only, engagement-scoped regrouping of
+    // already-governed generated-draft review packets (membership resolved
+    // exclusively through generation_runs.engagement_id). Grants no
+    // approval/export/finalization authority of its own.
+    "/admin/organizations/:organizationId/engagements/:engagementId/grant-response-packet",
     // KAI Package 2B-A: non-authoritative proposal that an external, governed
     // requirement set applies to this engagement.
     "/admin/organizations/:organizationId/engagements/:engagementId/requirement-set-applicability-proposals",
