@@ -72,6 +72,48 @@ const TRACEABILITY_RESULT_CONTRACT_VALIDATOR_KEY = "VAL-GEN-TRACE-P0-001";
 const GENERATOR_RESULT_CONTRACT_VALIDATOR_KEY = "VAL-GEN-RESULT-P0-001";
 const PERSISTENCE_VALIDATION_VALIDATOR_KEY = "VAL-GEN-PERSIST-P0-001";
 
+// P14-09-FUND-GEN-RESULT-001: closed, metadata-only subreason vocabulary for
+// the single VAL-GEN-RESULT-P0-001 / generator_result_contract_invalid
+// boundary. The validator_key and HTTP/error semantics never change - only
+// which of these bounded strings is attached as blocking_reason. Every value
+// here traces to an actual predicate in classifyGeneratorResult below (or,
+// for the first five, to a point inside the production generator where the
+// same predicate would otherwise already be destroyed before reaching this
+// file - see GENERATOR_RESULT_REASON). None of these values, or anything
+// derived from them, may ever carry raw model/provider text, prompts, claim
+// or evidence content, citation values, or database internals.
+export const GENERATOR_RESULT_REASONS = Object.freeze({
+  // Preserved from inside the generator, before normalization would
+  // otherwise collapse each of these into the same empty-blocks shape.
+  INPUT_CONTRACT_REJECTED: "generator_result_input_contract_rejected",
+  PROVIDER_TEXT_MISSING: "generator_result_provider_text_missing",
+  JSON_PARSE_FAILED: "generator_result_json_parse_failed",
+  JSON_ROOT_INVALID: "generator_result_json_root_invalid",
+  BLOCKS_FIELD_INVALID: "generator_result_blocks_field_invalid",
+  // Classified directly from validateGeneratorResult's own predicates below,
+  // against values that are still current/undestroyed at this stage.
+  RESULT_SHAPE_INVALID: "generator_result_shape_invalid",
+  BLOCKS_EMPTY: "generator_result_blocks_empty",
+  BLOCKS_TOO_MANY: "generator_result_blocks_too_many",
+  BLOCK_ORDINAL_INVALID: "generator_result_block_ordinal_invalid",
+  BLOCK_SHAPE_INVALID: "generator_result_block_shape_invalid",
+  BLOCK_TEXT_INVALID: "generator_result_block_text_invalid",
+  BLOCK_TEXT_TOO_LONG: "generator_result_block_text_too_long",
+  CITATIONS_MISSING: "generator_result_citations_missing",
+  CITATION_SHAPE_INVALID: "generator_result_citation_shape_invalid",
+  CITATION_ID_INVALID: "generator_result_citation_id_invalid",
+  CITATION_DUPLICATE: "generator_result_citation_duplicate",
+  TEXT_TOTAL_TOO_LONG: "generator_result_text_total_too_long",
+});
+
+// Non-enumerable carrier for the generator-side early-loss reason (see
+// kaiEvidenceSummaryDraftGenerator.js). Using a symbol key that the
+// generator attaches via Object.defineProperty(..., { enumerable: false })
+// means Object.keys/JSON.stringify/spread/hasExactKeys of the generator
+// result are byte-for-byte unchanged whether or not the tag is present -
+// only classifyGeneratorResult below ever reads it.
+export const GENERATOR_RESULT_REASON = Symbol("kai.generatorResultReason");
+
 function stageBlocker(validatorKey, blockingReason) {
   return [{ validator_key: validatorKey, severity: "blocker", blocking_reason: blockingReason }];
 }
@@ -276,27 +318,71 @@ function validateGeneratorInput(input) {
   return true;
 }
 
-function validateGeneratorResult(result) {
-  if (!hasExactKeys(result, new Set(["blocks"])) || !Array.isArray(result.blocks)) return false;
-  if (result.blocks.length < 1 || result.blocks.length > 20) return false;
-  let totalText = 0;
+// Pure classification: identical acceptance semantics to the original
+// validateGeneratorResult (every predicate below, and its order, is
+// unchanged from that function) - the only difference is that each
+// rejection now also returns which closed subreason fired, instead of a
+// bare boolean. validateGeneratorResult (still exported for existing
+// callers) is now a thin projection of this.
+function classifyGeneratorResult(result) {
+  if (!hasExactKeys(result, new Set(["blocks"])) || !Array.isArray(result?.blocks)) {
+    return { ok: false, reason: GENERATOR_RESULT_REASONS.RESULT_SHAPE_INVALID };
+  }
+  if (result.blocks.length < 1) {
+    // The one point where several generator-side conditions (missing
+    // provider text, JSON parse failure, invalid JSON root, missing/invalid
+    // blocks field, a generator input-contract rejection, or the model
+    // genuinely returning zero blocks) have always collapsed into the same
+    // `{ blocks: [] }` shape. If the generator preserved a more specific
+    // early-loss reason on this exact object (see GENERATOR_RESULT_REASON),
+    // surface that instead of the generic "blocks empty" classification.
+    return { ok: false, reason: result[GENERATOR_RESULT_REASON] || GENERATOR_RESULT_REASONS.BLOCKS_EMPTY };
+  }
+  if (result.blocks.length > 20) {
+    return { ok: false, reason: GENERATOR_RESULT_REASONS.BLOCKS_TOO_MANY };
+  }
   const ordinals = result.blocks.map((block) => block.ordinal);
-  if (!ordinals.every((ordinal, index) => ordinal === index + 1)) return false;
+  if (!ordinals.every((ordinal, index) => ordinal === index + 1)) {
+    return { ok: false, reason: GENERATOR_RESULT_REASONS.BLOCK_ORDINAL_INVALID };
+  }
+  let totalText = 0;
   for (const block of result.blocks) {
-    if (!hasExactKeys(block, new Set(["ordinal", "text", "citations"]))) return false;
-    if (typeof block.text !== "string" || block.text.length < 1 || block.text.length > 4000) return false;
+    if (!hasExactKeys(block, new Set(["ordinal", "text", "citations"]))) {
+      return { ok: false, reason: GENERATOR_RESULT_REASONS.BLOCK_SHAPE_INVALID };
+    }
+    if (typeof block.text !== "string" || block.text.length < 1) {
+      return { ok: false, reason: GENERATOR_RESULT_REASONS.BLOCK_TEXT_INVALID };
+    }
+    if (block.text.length > 4000) {
+      return { ok: false, reason: GENERATOR_RESULT_REASONS.BLOCK_TEXT_TOO_LONG };
+    }
     totalText += block.text.length;
-    if (!Array.isArray(block.citations) || block.citations.length < 1) return false;
+    if (!Array.isArray(block.citations) || block.citations.length < 1) {
+      return { ok: false, reason: GENERATOR_RESULT_REASONS.CITATIONS_MISSING };
+    }
     const seen = new Set();
     for (const citation of block.citations) {
-      if (!hasExactKeys(citation, new Set(["claimId", "evidenceItemId"]))) return false;
-      if (!UUID_PATTERN.test(citation.claimId) || !UUID_PATTERN.test(citation.evidenceItemId)) return false;
+      if (!hasExactKeys(citation, new Set(["claimId", "evidenceItemId"]))) {
+        return { ok: false, reason: GENERATOR_RESULT_REASONS.CITATION_SHAPE_INVALID };
+      }
+      if (!UUID_PATTERN.test(citation.claimId) || !UUID_PATTERN.test(citation.evidenceItemId)) {
+        return { ok: false, reason: GENERATOR_RESULT_REASONS.CITATION_ID_INVALID };
+      }
       const key = `${citation.claimId}:${citation.evidenceItemId}`;
-      if (seen.has(key)) return false;
+      if (seen.has(key)) {
+        return { ok: false, reason: GENERATOR_RESULT_REASONS.CITATION_DUPLICATE };
+      }
       seen.add(key);
     }
   }
-  return totalText <= 20000;
+  if (totalText > 20000) {
+    return { ok: false, reason: GENERATOR_RESULT_REASONS.TEXT_TOTAL_TOO_LONG };
+  }
+  return { ok: true, reason: null };
+}
+
+function validateGeneratorResult(result) {
+  return classifyGeneratorResult(result).ok;
 }
 
 function prepareRequiredAudit(metadataOnlyAudit, payload) {
@@ -1000,10 +1086,11 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
 
       const generatorInput = toGeneratorInput({ requestedAudience: input.requestedAudience, projections, contentType });
       const generatorResult = await dependencies.draftGenerator(generatorInput);
-      if (!validateGeneratorResult(generatorResult)) {
+      const generatorResultClassification = classifyGeneratorResult(generatorResult);
+      if (!generatorResultClassification.ok) {
         rollbackFailure(
           "validation_blocker",
-          stageBlocker(GENERATOR_RESULT_CONTRACT_VALIDATOR_KEY, "generator_result_contract_invalid"),
+          stageBlocker(GENERATOR_RESULT_CONTRACT_VALIDATOR_KEY, generatorResultClassification.reason),
         );
       }
 
@@ -2821,4 +2908,7 @@ export const __generatedContentRepositoryTestables = Object.freeze({
   TRACEABILITY_RESULT_CONTRACT_VALIDATOR_KEY,
   GENERATOR_RESULT_CONTRACT_VALIDATOR_KEY,
   PERSISTENCE_VALIDATION_VALIDATOR_KEY,
+  classifyGeneratorResult,
+  GENERATOR_RESULT_REASONS,
+  GENERATOR_RESULT_REASON,
 });

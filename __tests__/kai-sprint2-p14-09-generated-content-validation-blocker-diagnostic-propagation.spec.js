@@ -432,7 +432,7 @@ test("P14-09 diagnostic propagation CASE E: an invalid generator result (e.g. em
   assert.deepEqual(result.blockers, [{
     validator_key: GENERATOR_RESULT_CONTRACT_VALIDATOR_KEY,
     severity: "blocker",
-    blocking_reason: "generator_result_contract_invalid",
+    blocking_reason: "generator_result_blocks_empty",
   }]);
   assert.equal(state.generationRuns.length, 0);
   assert.equal(state.generatedContentDrafts.length, 0);
