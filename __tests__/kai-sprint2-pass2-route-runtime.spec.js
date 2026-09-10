@@ -162,6 +162,13 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // approval/export/finalization authority of its own.
     "/admin/organizations/:organizationId/engagements/:engagementId/grant-response-packet",
     "/admin/organizations/:organizationId/engagements/:engagementId/grant-response-packet/export-candidates",
+    // P14-08B: governed Grant Response Packet export-manifest create/reuse
+    // for the exact existing, immutable P14-03 packet export candidate
+    // identified by the path's own grantResponsePacketExportCandidateId -
+    // gated on the real P14-07 eligibility evaluator and the real P14-07B1
+    // effectiveness check. Creates no final packet Markdown/PDF/DOCX/CSV
+    // bytes and publishes nothing externally.
+    "/admin/organizations/:organizationId/engagements/:engagementId/grant-response-packet/export-candidates/:grantResponsePacketExportCandidateId/export-manifests",
     // P14-06B: completes governed export review (in_progress/needs_gk_review
     // -> resolved/resolved only) for the exact existing 'export_review'
     // queue row identified by the path's own exportReviewQueueItemId,

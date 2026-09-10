@@ -26359,3 +26359,137 @@ package is the persistence foundation only.
 
 **Local commit:** one bounded commit created after all required checks
 passed.
+
+## Phase-14 (Grant Response Packet Track) - P14-08B: Governed Grant Response
+## Packet Manifest Create/Reuse Service + Route
+
+**Date:** 2026-09-09
+
+**Owner authorization (bounded, local-only):** add the minimum packet
+manifest creation service and HTTP route wired around the existing P14-08A
+`postgresGrantResponsePacketExportManifestRepository.js`. Starting HEAD:
+`1cc56cbdb7f2f1c550183bb4323c024033723a56` (working tree clean). Does not
+implement final Markdown delivery, frontend, or any other packet byte format
+- this package is service/route wiring only, and creates no manifest
+service/repository/validation logic beyond what P14-08A already established.
+
+**Service:** new
+`Backend/kai/services/kaiGrantResponsePacketExportManifestService.js`
+exporting `createGrantResponsePacketExportManifest`, structurally mirroring
+the existing P3-19 `kaiExportManifestService.js` (feature-flag guard -
+`KAI_SPRINT2_ENABLED`/`KAI_GENERATION_ENABLED`/`KAI_PUBLIC_EXPORT_ENABLED` -
+human-actor guard, gk_admin-only `validateActorCanPerformOperation`
+authorization using the exact P14-08A
+`CREATE_GRANT_RESPONSE_PACKET_EXPORT_MANIFEST_ALLOWED_ROLES`/`_OPERATION`
+contract) plus a `validateTenantBoundaryConsistency` tenant check (mirroring
+the packet-level P14-07 authority service's convention, since a packet
+route's tenant boundary is checked explicitly rather than relying solely on
+the FK). Required exact-key input:
+organizationId + engagementId + grantResponsePacketExportCandidateId (all
+route-path-derived) + actorContext (server-derived); `now` is supplied
+separately by the caller/dependencies exactly like the P3-19 service - no
+eligibility, authority, fingerprint, member, memberCount, review state,
+requestedAudience, effective-authority, or manifest identity is ever
+accepted. The service delegates the ENTIRE
+eligibility(P14-07)+authority(P14-07B1)+write composition to the P14-08A
+repository - it reimplements none of that logic, and its own default-
+dependency wiring uses the real `createPostgresGrantResponsePacketExportManifestRepository()`
+and the new `createProductionMetadataOnlyAuditForGrantResponsePacketExportManifest`
+audit adapter. On success it returns an explicit six-field allowlist
+projection (`grantResponsePacketExportManifestId`,
+`grantResponsePacketExportCandidateId`, `effectiveAuthorityDecisionId`,
+`fingerprintContractVersion`, `canonicalFingerprint`, `replayed`) - never a
+passthrough spread - so no final-artifact-bytes or publication field can
+ever appear in the response by construction.
+
+**Route:** new `POST /admin/organizations/:organizationId/engagements/:engagementId/grant-response-packet/export-candidates/:grantResponsePacketExportCandidateId/export-manifests`
+in `sprint2IntakeApi.js`, following the existing Sprint-2 route convention
+exactly (KAI_SPRINT2_ENABLED gate via the service, server-derived
+actorContext, structured KAI errors, one delegation into the service layer,
+no SQL/repository access in the route file). New request-schema function
+`validateCreateGrantResponsePacketExportManifestRequest` (and its backing
+empty `CREATE_GRANT_RESPONSE_PACKET_EXPORT_MANIFEST_REQUEST_KEYS` set) in
+`kaiSprint2RequestSchemas.js` accepts an empty body only - unlike the
+member-level P3-19 route (which requires `export_review_queue_item_id`),
+there is no packet-level review-queue-item binding concept to accept (per
+the P14-08A migration notes), so this route needs no body field at all.
+Reuses the existing `grantResponsePacketExportCandidateReviewIdentifier`
+path-parameter parser (already used by the P14-07 final-release-authority
+route) for organizationId/engagementId/grantResponsePacketExportCandidateId.
+
+**Route placement (regression-boundary text-slicing repair, no behavior
+change):** the existing P14-07
+`kai-sprint2-p14-07-grant-response-packet-human-final-release-authority.spec.js`
+boundary test locates the end of that route's own source slice via a
+fragile "next `router.post(`" search; placing this package's new route
+immediately after it (as originally drafted) shifted that slice to capture
+part of this new route's own JSDoc prose, and a plain-English "create" in
+that prose false-matched the test's `\bCREATE\b` SQL-keyword guard. Fixed -
+exactly as the same class of issue was resolved in the P14-07 package
+itself - by relocating the new route/helper functions to the very end of
+`sprint2IntakeApi.js` (immediately before `export default router;`, after
+every existing route) rather than altering the P14-07 test's intent; this
+package's own new route-boundary test was written against an explicit
+`"export default router;"` end-anchor from the start rather than the same
+fragile pattern, so it is not itself fragile to future insertions.
+
+**Audit:** the P14-08A
+`createProductionMetadataOnlyAuditForGrantResponsePacketExportManifest`
+adapter (added in that package) is reused unmodified here as the route's
+metadata-only audit dependency.
+
+**Verification:** added
+`__tests__/kai-sprint2-p14-08-b-grant-response-packet-export-manifest-service-route.spec.js`
+(11/11, pure-function/no-database - the P14-08A repository is faked at the
+service level) proving: the exact contract constants; the exact-keys input
+contract (rejects `now`, `finalExportEligible`, `effectiveHumanExportAuthority`,
+`canonicalFingerprint`, `members`, `memberCount`, `reviewResolved`,
+`requestedAudience`, and any manifest-identity field); gk_admin can
+create/reuse a manifest and the repository receives exactly the given
+candidate id (proven never substituted for a different one); gk_reviewer/
+assistant-system/cross-tenant actors fail closed with zero repository
+calls; eligibility BLOCKED, no/revoked authority, and a stale/`not_found`
+candidate (each surfaced verbatim by the repository, never reimplemented
+here) all create no manifest and no audit; replay converges
+(`replayed:true`) end-to-end; the service is metadata-only (no bytes/
+artifact/markdown/pdf/docx/csv field on its response); the full HTTP route
+(feature flag, authentication, request-body rejection of any field at all,
+exact single-route mounting, no SQL/repository access in the route slice,
+no wiring of `createWriteStream`/`writeFileSync`/any packet-serializer
+function) behaves identically to the accepted P3-19/P14-07 route patterns.
+Because the P14-08A repository itself already fully proves (28/28, real
+Postgres) organization/engagement/cross-tenant failure, stale-fingerprint
+rejection, candidate-A-cannot-bind-candidate-B, and member-candidate/
+member-authority substitution rejection, this package's own tests prove
+delegation-correctness (the service forwards the exact given identifiers,
+verbatim, to that already-proven repository) rather than re-deriving those
+same database-level proofs a second time.
+
+**Affected regressions passed (278/278, plus 3 pre-existing skips requiring
+a runner-owned database):** P14-08A packet-manifest-foundation boundary
+suite, P14-07 final-export-eligibility and human-final-release-authority
+suites, P14-06A/B/D and E1/E2/E3 packet suites, P3-18
+final-export-eligibility-gate boundary suite, P3-19/P3-20 export-manifest
+boundary suites, the governed export-finalization route suite, and the
+Pass-2 route-runtime suite (route list extended with the one new route path
+in its exact alphabetical position).
+
+**Frontend build:** not run - no frontend source or built bundle was
+changed.
+
+**Final diff review:** new files -
+`Backend/kai/services/kaiGrantResponsePacketExportManifestService.js` and
+its test file; edited files - `Backend/kai/routes/sprint2IntakeApi.js` (two
+new imports, one new service-promise variable, one new route plus its two
+helper functions, appended at the very end of the file before `export
+default router;`), `Backend/kai/validators/kaiSprint2RequestSchemas.js` (one
+new empty-body request-schema key set plus its validator function), and
+`__tests__/kai-sprint2-pass2-route-runtime.spec.js` (one new route path
+inserted in its exact alphabetical position). `git diff --check` passed
+with no whitespace errors. No migration, no schema change, no P14-08A
+repository/contract logic change, no P14-07/P14-07B1 eligibility/authority
+logic change, no final Markdown/PDF/DOCX/CSV bytes, and no production/
+shared-database file was touched.
+
+**Local commit:** one bounded commit created after all required checks
+passed.

@@ -24,6 +24,7 @@ import {
   validateCompleteExportReviewRequest,
   validateCreateExportCandidateRequest,
   validateCreateGrantResponsePacketExportCandidateRequest,
+  validateCreateGrantResponsePacketExportManifestRequest,
   validateCreateExportManifestRequest,
   validateGrantResponsePacketHumanFinalReleaseAuthorityRequest,
   validateHumanFinalReleaseAuthorityRequest,
@@ -55,6 +56,7 @@ import {
   createProductionMetadataOnlyAuditForGeneratedDraftExportCandidate,
   createProductionMetadataOnlyAuditForGeneratedDraftExportReview,
   createProductionMetadataOnlyAuditForGrantResponsePacketExportCandidate,
+  createProductionMetadataOnlyAuditForGrantResponsePacketExportManifest,
   createProductionMetadataOnlyAuditForGrantResponsePacketExportReview,
   createProductionMetadataOnlyAuditForGrantResponsePacketHumanAuthorityDecision,
   createProductionMetadataOnlyAuditForExportManifest,
@@ -81,6 +83,7 @@ let grantResponsePacketMarkdownServicePromise = null;
 let grantResponsePacketExportCandidateServicePromise = null;
 let grantResponsePacketExportReviewServicePromise = null;
 let grantResponsePacketHumanFinalReleaseAuthorityServicePromise = null;
+let grantResponsePacketExportManifestServicePromise = null;
 let evidenceLineageServicePromise = null;
 let evidenceCoverageAssessmentServicePromise = null;
 let claimProposalServicePromise = null;
@@ -4046,6 +4049,82 @@ router.get(
         actorContext: sprint2MappedActorContext(req),
       });
     });
+  },
+);
+
+async function getGrantResponsePacketExportManifestService() {
+  if (intakeServiceOverride?.createGrantResponsePacketExportManifest) return intakeServiceOverride;
+  grantResponsePacketExportManifestServicePromise ||= import(
+    "../services/kaiGrantResponsePacketExportManifestService.js"
+  );
+  return grantResponsePacketExportManifestServicePromise;
+}
+
+function validateCreateGrantResponsePacketExportManifestRequestOrSend(req, res) {
+  if (!metadataContentTypeIsSupported(req)) {
+    sendKaiError(res, "unsupported_media_type");
+    return null;
+  }
+  const identifiers = grantResponsePacketExportCandidateReviewIdentifier(req);
+  if (!identifiers) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker(
+        "invalid_uuid_field",
+        "organization_id_engagement_id_or_grant_response_packet_export_candidate_id",
+      )],
+    });
+    return null;
+  }
+  const result = validateCreateGrantResponsePacketExportManifestRequest(req.body);
+  if (!result.ok) {
+    sendKaiError(res, "validation_blocker", { blockers: result.blockers });
+    return null;
+  }
+  return identifiers;
+}
+
+/**
+ * P14-08B: governed Grant Response Packet export-manifest persistence for
+ * the EXACT existing, immutable P14-03 packet export candidate identified by
+ * the route's own grantResponsePacketExportCandidateId - never a
+ * client-selected latest/newest/preferred candidate. organizationId,
+ * engagementId, and the candidate id all come from the route path;
+ * actorContext/now are always server-derived. The request body is empty -
+ * no eligibility, authority, fingerprint, member, review-state, or manifest-
+ * identity field is ever accepted. Contains no SQL and no direct database
+ * access - delegates once to kaiGrantResponsePacketExportManifestService,
+ * which itself delegates to the P14-08A
+ * postgresGrantResponsePacketExportManifestRepository.js (real P14-07
+ * eligibility + real P14-07B1 effectiveness, reimplemented nowhere). Produces
+ * no final packet Markdown/PDF/DOCX/CSV bytes and publishes nothing
+ * externally.
+ */
+router.post(
+  "/admin/organizations/:organizationId/engagements/:engagementId/grant-response-packet/export-candidates/:grantResponsePacketExportCandidateId/export-manifests",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    const identifiers = validateCreateGrantResponsePacketExportManifestRequestOrSend(req, res);
+    if (!identifiers) return;
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    return invokeService(res, async () => {
+      const service = await getGrantResponsePacketExportManifestService();
+      return service.createGrantResponsePacketExportManifest({
+        organizationId: identifiers.organizationId,
+        engagementId: identifiers.engagementId,
+        grantResponsePacketExportCandidateId: identifiers.grantResponsePacketExportCandidateId,
+        actorContext,
+      }, {
+        now,
+        metadataOnlyAudit: createProductionMetadataOnlyAuditForGrantResponsePacketExportManifest({
+          organizationId: identifiers.organizationId,
+          engagementId: identifiers.engagementId,
+          grantResponsePacketExportCandidateId: identifiers.grantResponsePacketExportCandidateId,
+          actorContext,
+          now,
+        }),
+      });
+    }, 201);
   },
 );
 

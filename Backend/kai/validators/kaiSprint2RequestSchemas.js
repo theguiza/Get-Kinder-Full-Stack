@@ -84,6 +84,13 @@ const HUMAN_FINAL_RELEASE_AUTHORITY_REQUEST_KEYS = new Set([
 const GRANT_RESPONSE_PACKET_HUMAN_FINAL_RELEASE_AUTHORITY_REQUEST_KEYS = new Set([
   "decision_action",
 ]);
+// P14-08B: organizationId, engagementId, and the exact candidate id all come
+// from the route path, and actorContext/now are server-derived - unlike
+// CREATE_EXPORT_MANIFEST_REQUEST_KEYS below, there is no packet-level
+// export_review_queue_item_id concept to bind to (see the P14-08A migration
+// notes), so this route accepts an empty body only, exactly like
+// CREATE_GRANT_RESPONSE_PACKET_EXPORT_CANDIDATE_REQUEST_KEYS above.
+const CREATE_GRANT_RESPONSE_PACKET_EXPORT_MANIFEST_REQUEST_KEYS = new Set([]);
 const CREATE_EXPORT_MANIFEST_REQUEST_KEYS = new Set([
   "export_review_queue_item_id",
 ]);
@@ -729,6 +736,23 @@ export function validateGrantResponsePacketHumanFinalReleaseAuthorityRequest(pay
     return { ok: false, blockers: [requestBlocker("invalid_decision_action", "body.decision_action")] };
   }
 
+  return { ok: true, blockers: [] };
+}
+
+// P14-08B: the packet-level analogue of validateCreateExportManifestRequest
+// below. Browser must send no manifest composition - organizationId,
+// engagementId, and the exact candidate id all come from the route path,
+// and actorContext/now are server-derived, so this route accepts an empty
+// body only. In particular this rejects any eligibility, authority,
+// fingerprint, member, review-state, or manifest-identity field.
+export function validateCreateGrantResponsePacketExportManifestRequest(payload) {
+  if (!isPlainObject(payload)) {
+    return { ok: false, blockers: [requestBlocker("request_body_must_be_object", "body")] };
+  }
+  const keys = Object.keys(payload);
+  if (keys.some((key) => !CREATE_GRANT_RESPONSE_PACKET_EXPORT_MANIFEST_REQUEST_KEYS.has(key))) {
+    return { ok: false, blockers: [requestBlocker("unknown_field", "body")] };
+  }
   return { ok: true, blockers: [] };
 }
 
