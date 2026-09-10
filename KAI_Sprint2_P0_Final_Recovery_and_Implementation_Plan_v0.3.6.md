@@ -26641,3 +26641,135 @@ database file was touched.
 
 **Local commit:** one bounded commit created after all required checks
 passed.
+
+## Phase-14 (Grant Response Packet Track) - P14-08D: Impact Evidence
+## Library Governed Packet Manifest Creation - Final Markdown
+## Download/Reuse UX - Repository-Track Closure
+
+**Date:** 2026-09-10
+
+**Owner authorization (bounded, local-only):** frontend-only integration of
+the existing P14-08B manifest create/reuse route and the existing P14-08C
+exact manifest-bound FINAL Markdown route into the Impact Evidence Library,
+plus the minimal directly-coupled test updates. Starting HEAD:
+`62a9b32ff3d4f84640e4647faa039835f4d2a821` (working tree clean). No backend/
+schema change, no new persistence, no new eligibility evaluator, no new
+authority model, no P14-08A/B/C redesign, no PDF/DOCX/CSV expansion, and no
+Board Summary change.
+
+**Frontend logic (`frontend/impactEvidenceLibraryLogic.js`):** two new path
+builders - `grantResponsePacketExportManifestsPath` (the exact existing
+P14-08B POST route, keyed by organizationId + engagementId + the EXACT
+current packet export candidate id) and
+`grantResponsePacketExportManifestMarkdownPath` (the exact existing P14-08C
+GET route, keyed by organizationId + an exact
+`grantResponsePacketExportManifestId`). `projectGrantResponsePacket` gained
+one additive, allowlisted `finalDeliveryState` field (null whenever there is
+no current candidate, mirroring the existing final-release-authority/
+final-export-eligibility null-linkage) via a new
+`projectGrantResponsePacketFinalDeliveryState` helper that accepts only
+`grantResponsePacketExportManifestId`/`createdAt` per manifest and a
+`finalMarkdownAvailable` boolean - never a member `exportManifestId`/
+`exportCandidateId`, and never a latest/newest/preferred selection among
+multiple manifests.
+
+**Frontend component (`frontend/ImpactEvidenceLibrary.jsx`):** one new
+governed action, "Prepare final Markdown export", rendered only when the
+authoritative packet GET reports `finalExportEligible === true`, POSTing the
+existing required EMPTY body (`{}`) to the exact packet-candidate-scoped
+export-manifests route - never eligibility, authority, fingerprint, members,
+memberCount, review state, requested audience, or a manifest id of its own.
+The backend's own P14-08B create/reuse convergence remains the sole
+authority on whether a manifest needs creating. On success or failure alike
+the POST response body is never treated as durable state: the new
+`prepareGrantResponsePacketFinalMarkdownExportManifest` callback always
+refetches the authoritative packet GET via the existing
+`refetchGrantResponsePacketAfterMemberExportReviewRequest` helper (same
+engagement-switch-isolated/stale-response-protected discipline every other
+packet mutation on this page already uses) and hydrates every displayed
+field from that GET alone. A new "Final Markdown exports" list renders every
+manifest in `finalDeliveryState.grantResponsePacketExportManifests`,
+deterministically sorted by manifest id (never latest/newest/preferred), each
+with its own "Download final Markdown" link built from its exact
+`grantResponsePacketExportManifestId`. The existing "Download Markdown
+preview" link, packet review lifecycle controls (Request/Start/Complete
+export review), final-release authority grant/revoke controls, eligibility
+badges, member "Request Export Review"/"Open GK Export Review"/Markdown-CSV-
+PDF-DOCX history download links, engagement switching, and zero/error states
+are all unchanged. No control is labelled "Published"/"Approved"/"Funder
+approved"/"Public ready"/"Finalized externally" - manifest creation/final
+delivery is not external publication.
+
+**Verification:** added
+`__tests__/kai-sprint2-p14-08-d-impact-evidence-library-final-markdown-export-ux.spec.js`
+(16/16) proving: `finalExportEligible === true` exposes the prepare-final-
+Markdown action and `!== true` suppresses it and issues no POST/GET; the POST
+uses the exact organization/engagement/candidate ids with an empty body and
+never eligibility/authority/fingerprint/members; a successful POST always
+triggers the authoritative packet GET and the POST's own response body is
+never used as durable manifest state; an engagement switch after the POST
+rejects late refetch hydration and a late response from a stale engagement
+cannot hydrate the current one; the FINAL Markdown URL is built from the
+exact `finalDeliveryState` manifest id; a member `exportManifestId`/
+`exportCandidateId` can never become the packet FINAL URL or packet identity;
+multiple authoritative manifests render via `.map` with no latest/newest/
+preferred selection; the preview and FINAL controls are labelled distinctly
+with no forbidden external-publication vocabulary; and the existing preview
+route, packet review/final-release-authority UX, and member export/download
+UX are all unchanged.
+
+Two pre-existing, directly-coupled test files were updated for the additive
+effect-body/state surface this package adds (both extend rather than narrow
+their own guarantees): the P14-06E2 initial-load-rehydration harness and the
+combined Impact Evidence Library Grant Response Packet spec's real-execution
+effect harness each register the two new
+`setGrantResponsePacketFinalMarkdownExportManifestPending`/`...Error` setters
+the engagement-switch reset effect now also calls (both harnesses construct
+the exact effect body via `new Function` against the literal setter list, so
+an additive setter call requires an additive registered parameter - no
+existing assertion was loosened). The same combined spec's manifest-history
+test had its blanket `doesNotMatch(section, /sort\(/)` narrowed to the exact
+per-member `exportManifestHistory` block it was already scoping its
+"latest/newest/current/preferred/canonical" assertion to - the per-member
+history itself is still provably never sorted/reordered; the new
+packet-level final-manifest list's own required deterministic sort (by
+manifest id, never latest/newest/preferred) lives outside that block and is
+covered by this package's own new spec instead. The P14-06 lifecycle spec's
+"adds no finalization, manifest, or approval control" assertion needed no
+code change (already scoped to the literal `Approve`/`Approved`/`Finalize`/
+`Create Export Manifest` control-phrase strings, not the word "manifest"
+itself) once this package's own control copy was worded to avoid the literal
+word "approved" incidentally appearing inside unrelated prose.
+
+**Affected regressions passed:** P14-08B manifest-create route contract
+suite, P14-08C final-Markdown/read-state boundary suite, the packet Markdown
+preview boundary suites, the P14-06/P14-06E1/P14-06E2/P14-06E3 packet review-
+lifecycle and rehydration suites, the packet export-identity/export-candidate/
+render-model boundary suites, the P3-19-derived member export-manifest
+PDF/DOCX frontend download-link suites, and this package's own new suite -
+327/327 total, all green. `git diff --check` passed with no whitespace
+errors. Full repository suite run once (`npm test`): 3953/3960 individual
+test cases green (3881 pass / 65 skip / 7 fail at the P14-08D HEAD vs.
+3937/3944 with the same 7 failures at the clean starting HEAD) - the 7
+failing subtests, spanning 4 top-level tests, are all in the pre-existing,
+unrelated child-file/batch-files/file-detail read-model and route-contract
+suites (keyset predicate, 15-field allowlist, file-detail contract), confirmed
+identical and already failing on a clean checkout of the starting HEAD before
+any P14-08D change - zero new attributable failures.
+
+**Frontend build:** `vite build` passed (56 modules transformed); the rebuilt
+`public/js/bundles/entry.js` is included in this package's commit, matching
+the existing repository convention of committing the rebuilt bundle alongside
+each Grant Response Packet frontend package.
+
+**Final diff review:** edited files only -
+`frontend/impactEvidenceLibraryLogic.js` (two new path builders + one new
+allowlist projection helper + one additive DTO field), `frontend/ImpactEvidenceLibrary.jsx`
+(two new state pairs, their engagement-switch reset, one new governed
+callback, and its JSX control/list), `public/js/bundles/entry.js` (rebuilt
+bundle), and the two directly-coupled pre-existing test files described
+above, plus this package's own new test file. No backend file, migration,
+schema, or production/shared-database file was touched.
+
+**Local commit:** one bounded commit created after all required checks
+passed.

@@ -185,6 +185,34 @@ export function grantResponsePacketHumanFinalReleaseAuthorityBody(decisionAction
   return { decision_action: decisionAction };
 }
 
+// P14-08D: governed Grant Response Packet FINAL Markdown export-manifest
+// create/reuse control - the authenticated POST sibling of
+// grantResponsePacketHumanFinalReleaseAuthorityPath above. Keyed by exactly
+// organizationId + engagementId + the EXACT existing candidate id the server
+// already returned - never a latest/newest/preferred candidate guess. The
+// browser sends the existing required EMPTY body only ({}) - no eligibility,
+// authority, fingerprint, members, memberCount, review state, requested
+// audience, or manifest id ever leaves this call. The backend's own P14-08B
+// create/reuse convergence is authoritative: the browser never decides
+// whether a manifest needs creating.
+export function grantResponsePacketExportManifestsPath(organizationId, engagementId, grantResponsePacketExportCandidateId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}`
+    + `/engagements/${encodeURIComponent(engagementId)}/grant-response-packet/export-candidates`
+    + `/${encodeURIComponent(grantResponsePacketExportCandidateId)}/export-manifests`;
+}
+
+// P14-08C: governed FINAL Markdown delivery - authorized solely by the exact
+// grantResponsePacketExportManifestId taken from the authoritative packet
+// GET's finalDeliveryState.grantResponsePacketExportManifests (see
+// projectGrantResponsePacketFinalDeliveryState below) - never a member
+// exportManifestId/exportCandidateId, and never a latest/newest/preferred
+// selection among multiple manifests. Distinct from, and never a substitute
+// for, grantResponsePacketMarkdownPath's engagement-scoped PREVIEW.
+export function grantResponsePacketExportManifestMarkdownPath(organizationId, grantResponsePacketExportManifestId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}`
+    + `/grant-response-packet/export-manifests/${encodeURIComponent(grantResponsePacketExportManifestId)}/markdown`;
+}
+
 // The packet START/COMPLETE request body reuses the existing
 // reviewTransitionBody({expected_updated_at}) helper below unchanged - no
 // actorContext, no now, no other client-supplied authority data ever leaves
@@ -299,6 +327,26 @@ export function shouldApplyGrantResponsePacketResponse({
 // (gkExportReviewDetailLogic.js#toRenderModel) - no new packet-shape
 // vocabulary, no raw source/evidence content, no client-side eligibility
 // recomputation.
+// P14-08D: allowlisted projection of the authoritative packet DTO's
+// finalDeliveryState (kaiGrantResponsePacketService.js) - the SOLE browser
+// source for final Grant Response Packet Markdown manifests. Each manifest
+// carries exactly its own grantResponsePacketExportManifestId - no member
+// exportManifestId/exportCandidateId is ever accepted here, and this
+// function never picks a "latest/newest/preferred" one: every valid manifest
+// in the authoritative list is returned, in the server's own order.
+function projectGrantResponsePacketFinalDeliveryState(finalDeliveryState) {
+  if (!finalDeliveryState || typeof finalDeliveryState !== "object") return null;
+  return {
+    finalMarkdownAvailable: finalDeliveryState.finalMarkdownAvailable === true,
+    grantResponsePacketExportManifests: asArray(finalDeliveryState.grantResponsePacketExportManifests)
+      .map((manifest) => ({
+        grantResponsePacketExportManifestId: manifest?.grantResponsePacketExportManifestId,
+        createdAt: typeof manifest?.createdAt === "string" ? manifest.createdAt : null,
+      }))
+      .filter((manifest) => isRouteUuid(manifest.grantResponsePacketExportManifestId)),
+  };
+}
+
 export function projectGrantResponsePacket(dto) {
   if (!dto || typeof dto !== "object") return null;
   const exportReviewVisible = dto.exportReviewVisible === true;
@@ -338,6 +386,12 @@ export function projectGrantResponsePacket(dto) {
     finalExportEligibilityBlockedReasons: grantResponsePacketExportCandidateId
       ? asArray(dto.finalExportEligibilityBlockedReasons).filter((reason) => typeof reason === "string")
       : [],
+    // P14-08D: null whenever there is no current candidate, mirroring the
+    // existing final-release-authority/final-export-eligibility null-linkage
+    // above - never a client-side recomputation of manifest membership.
+    finalDeliveryState: grantResponsePacketExportCandidateId
+      ? projectGrantResponsePacketFinalDeliveryState(dto.finalDeliveryState)
+      : null,
     drafts: asArray(dto.drafts).map((draft) => ({
       generatedContentDraftId: draft?.generatedContentDraftId,
       generationRunId: draft?.generationRunId,

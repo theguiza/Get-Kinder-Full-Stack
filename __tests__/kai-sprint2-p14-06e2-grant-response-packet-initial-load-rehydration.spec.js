@@ -90,6 +90,8 @@ function buildEffect({
     setGrantResponsePacketExportReviewCompleteError: (value) => stateLog.push(["reviewCompleteError", value]),
     setGrantResponsePacketFinalReleaseAuthorityPending: (value) => stateLog.push(["finalReleaseAuthorityPending", value]),
     setGrantResponsePacketFinalReleaseAuthorityError: (value) => stateLog.push(["finalReleaseAuthorityError", value]),
+    setGrantResponsePacketFinalMarkdownExportManifestPending: (value) => stateLog.push(["finalMarkdownExportManifestPending", value]),
+    setGrantResponsePacketFinalMarkdownExportManifestError: (value) => stateLog.push(["finalMarkdownExportManifestError", value]),
     setLoadingGrantResponsePacket: (value) => stateLog.push(["loading", value]),
   };
   const getJson = async (path) => {

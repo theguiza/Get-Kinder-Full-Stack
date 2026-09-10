@@ -68,6 +68,8 @@ import {
   grantResponsePacketHumanFinalReleaseAuthorityBody,
   grantResponsePacketFinalReleaseAuthorityControlState,
   GRANT_RESPONSE_PACKET_FINAL_RELEASE_AUTHORITY_CONTROL_STATES,
+  grantResponsePacketExportManifestsPath,
+  grantResponsePacketExportManifestMarkdownPath,
   hydrateGrantResponsePacketExportReviewReadModel,
   projectGrantResponsePacket,
   shouldApplyGrantResponsePacketResponse,
@@ -321,6 +323,15 @@ export default function ImpactEvidenceLibrary() {
   // hydrate every displayed authority/eligibility field from that response.
   const [grantResponsePacketFinalReleaseAuthorityPending, setGrantResponsePacketFinalReleaseAuthorityPending] = useState(false);
   const [grantResponsePacketFinalReleaseAuthorityError, setGrantResponsePacketFinalReleaseAuthorityError] = useState("");
+  // P14-08D: the governed FINAL Markdown export-manifest create/reuse control
+  // for the exact current grantResponsePacket candidate. This never trusts
+  // its own POST response body as durable truth - on success it always
+  // refetches the authoritative packet GET (see
+  // refetchGrantResponsePacketAfterMemberExportReviewRequest below) and every
+  // rendered final manifest comes only from that GET's
+  // finalDeliveryState.grantResponsePacketExportManifests.
+  const [grantResponsePacketFinalMarkdownExportManifestPending, setGrantResponsePacketFinalMarkdownExportManifestPending] = useState(false);
+  const [grantResponsePacketFinalMarkdownExportManifestError, setGrantResponsePacketFinalMarkdownExportManifestError] = useState("");
   const grantPacketRequestGenerationRef = useRef(0);
   const engagementIdRef = useRef(engagementId);
   engagementIdRef.current = engagementId;
@@ -833,6 +844,8 @@ export default function ImpactEvidenceLibrary() {
     setGrantResponsePacketExportReviewCompleteError("");
     setGrantResponsePacketFinalReleaseAuthorityPending(false);
     setGrantResponsePacketFinalReleaseAuthorityError("");
+    setGrantResponsePacketFinalMarkdownExportManifestPending(false);
+    setGrantResponsePacketFinalMarkdownExportManifestError("");
     setLoadingGrantResponsePacket(false);
     if (!organizationId || !engagementId) return;
     let cancelled = false;
@@ -1372,6 +1385,51 @@ export default function ImpactEvidenceLibrary() {
     engagementId,
     grantResponsePacket,
     grantResponsePacketFinalReleaseAuthorityPending,
+    refetchGrantResponsePacketAfterMemberExportReviewRequest,
+  ]);
+
+  // P14-08D: governed FINAL Markdown export-manifest create/reuse for the
+  // EXACT current grantResponsePacket candidate id - never a latest/newest/
+  // preferred guess, and only reachable once the authoritative packet GET
+  // already reports finalExportEligible === true. Sends the existing
+  // required EMPTY body only ({}) - never eligibility, authority,
+  // fingerprint, members, memberCount, review state, requested audience, or
+  // a manifest id of its own; the backend's own P14-08B create/reuse
+  // convergence decides whether a manifest needs creating, never this
+  // browser. On success or failure alike, this never trusts its own POST
+  // response body as durable truth: it always refetches the authoritative
+  // packet GET afterward and every rendered final manifest comes only from
+  // that response's finalDeliveryState.
+  const prepareGrantResponsePacketFinalMarkdownExportManifest = useCallback(async () => {
+    const candidateId = grantResponsePacket?.grantResponsePacketExportCandidateId;
+    if (!organizationId || !engagementId || !candidateId || grantResponsePacketFinalMarkdownExportManifestPending) return;
+    if (grantResponsePacket?.finalExportEligible !== true) return;
+    const requestOrganizationId = organizationId;
+    const requestEngagementId = engagementId;
+    setGrantResponsePacketFinalMarkdownExportManifestPending(true);
+    setGrantResponsePacketFinalMarkdownExportManifestError("");
+    const result = await postJson(
+      grantResponsePacketExportManifestsPath(requestOrganizationId, requestEngagementId, candidateId),
+      {},
+    );
+    const stillCurrent = requestOrganizationId === organizationIdRef.current
+      && requestEngagementId === engagementIdRef.current;
+    if (result.statusCode !== 200 && result.statusCode !== 201) {
+      if (stillCurrent) {
+        setGrantResponsePacketFinalMarkdownExportManifestError(errorText(result));
+        setGrantResponsePacketFinalMarkdownExportManifestPending(false);
+      }
+      return;
+    }
+    await refetchGrantResponsePacketAfterMemberExportReviewRequest(requestOrganizationId, requestEngagementId);
+    if (stillCurrent) {
+      setGrantResponsePacketFinalMarkdownExportManifestPending(false);
+    }
+  }, [
+    organizationId,
+    engagementId,
+    grantResponsePacket,
+    grantResponsePacketFinalMarkdownExportManifestPending,
     refetchGrantResponsePacketAfterMemberExportReviewRequest,
   ]);
 
@@ -2434,6 +2492,58 @@ export default function ImpactEvidenceLibrary() {
                                 ))}
                               </ul>
                             ) : null}
+                          </div>
+                        ) : null}
+                        {grantResponsePacket?.finalExportEligible === true ? (
+                          <div className="mt-2">
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-outline-primary grant-response-packet-prepare-final-markdown-export-button"
+                              disabled={grantResponsePacketFinalMarkdownExportManifestPending}
+                              onClick={prepareGrantResponsePacketFinalMarkdownExportManifest}
+                            >
+                              {grantResponsePacketFinalMarkdownExportManifestPending
+                                ? "Preparing final Markdown export..."
+                                : "Prepare final Markdown export"}
+                            </button>
+                            <div className="text-muted mt-1">
+                              Creates (or reuses, if nothing has changed) the governed FINAL
+                              Markdown export manifest for this exact packet export candidate.
+                              This is not external publication and grants no external readiness
+                              or release status of its own.
+                            </div>
+                            {grantResponsePacketFinalMarkdownExportManifestError ? (
+                              <div className="alert alert-warning py-2 small mt-1">
+                                {grantResponsePacketFinalMarkdownExportManifestError}
+                              </div>
+                            ) : null}
+                          </div>
+                        ) : null}
+                        {grantResponsePacket?.finalDeliveryState?.grantResponsePacketExportManifests?.length ? (
+                          <div className="mt-2 grant-response-packet-final-markdown-exports">
+                            <div className="fw-semibold small">Final Markdown exports</div>
+                            <ul className="small mb-0 ps-3">
+                              {[...grantResponsePacket.finalDeliveryState.grantResponsePacketExportManifests]
+                                .sort((a, b) => a.grantResponsePacketExportManifestId.localeCompare(
+                                  b.grantResponsePacketExportManifestId,
+                                ))
+                                .map((manifest) => (
+                                  <li key={manifest.grantResponsePacketExportManifestId}>
+                                    <a
+                                      className="grant-response-packet-final-markdown-download-link"
+                                      href={grantResponsePacketExportManifestMarkdownPath(
+                                        organizationId,
+                                        manifest.grantResponsePacketExportManifestId,
+                                      )}
+                                    >
+                                      Download final Markdown
+                                    </a>{" "}
+                                    <span className="text-muted">
+                                      ({manifest.grantResponsePacketExportManifestId})
+                                    </span>
+                                  </li>
+                                ))}
+                            </ul>
                           </div>
                         ) : null}
                       </div>

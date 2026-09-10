@@ -565,10 +565,17 @@ test("ImpactEvidenceLibrary.jsx Grant Response Packet section renders every mani
   const sectionEnd = uiSource.indexOf('<h5 className="mb-0">Generated Drafts</h5>');
   const section = uiSource.slice(sectionStart, sectionEnd);
   assert.match(section, /draft\.exportManifestHistory\.map\(\(entry\) =>/);
-  assert.doesNotMatch(section, /sort\(/);
   const existingExportsStart = section.indexOf("Existing exports");
   const blocksStart = section.indexOf("Blocks", existingExportsStart);
   const existingExportsSection = section.slice(existingExportsStart, blocksStart);
+  // The per-member manifest-history list itself is never sorted/reordered -
+  // it renders in exactly the server's own order. (P14-08D separately adds a
+  // packet-LEVEL final-manifest list, sorted deterministically by manifest id
+  // - never latest/newest/preferred - see
+  // kai-sprint2-p14-08-d-impact-evidence-library-final-markdown-export-ux.spec.js;
+  // that sort lives outside this member-history block and is not covered by
+  // this assertion.)
+  assert.doesNotMatch(existingExportsSection, /sort\(/);
   assert.doesNotMatch(existingExportsSection, /latest|newest|current|preferred|canonical/i);
 });
 
@@ -692,6 +699,11 @@ function buildEffect({
   const setGrantResponsePacketFinalReleaseAuthorityPending = (value) => stateLog.push(["finalReleaseAuthorityPending", value]);
   const setGrantResponsePacketFinalReleaseAuthorityError = (value) => stateLog.push(["finalReleaseAuthorityError", value]);
 
+  // P14-08D: the FINAL Markdown export-manifest workflow state the same
+  // reset effect now also clears on every engagement/organization switch.
+  const setGrantResponsePacketFinalMarkdownExportManifestPending = (value) => stateLog.push(["finalMarkdownExportManifestPending", value]);
+  const setGrantResponsePacketFinalMarkdownExportManifestError = (value) => stateLog.push(["finalMarkdownExportManifestError", value]);
+
   const buildUseEffect = new Function(
     "React",
     "organizationId",
@@ -713,6 +725,8 @@ function buildEffect({
     "setGrantResponsePacketExportReviewCompleteError",
     "setGrantResponsePacketFinalReleaseAuthorityPending",
     "setGrantResponsePacketFinalReleaseAuthorityError",
+    "setGrantResponsePacketFinalMarkdownExportManifestPending",
+    "setGrantResponsePacketFinalMarkdownExportManifestError",
     "setLoadingGrantResponsePacket",
     "getJson",
     "grantResponsePacketPath",
@@ -745,6 +759,8 @@ function buildEffect({
     setGrantResponsePacketExportReviewCompleteError,
     setGrantResponsePacketFinalReleaseAuthorityPending,
     setGrantResponsePacketFinalReleaseAuthorityError,
+    setGrantResponsePacketFinalMarkdownExportManifestPending,
+    setGrantResponsePacketFinalMarkdownExportManifestError,
     setLoadingGrantResponsePacket,
     getJsonImpl,
     grantResponsePacketPath,
