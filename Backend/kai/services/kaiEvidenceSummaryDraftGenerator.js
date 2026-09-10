@@ -17,6 +17,43 @@ const FUNDER_REQUESTED_AUDIENCE = "funder";
 const ALLOWED_REQUESTED_AUDIENCES = Object.freeze(new Set([REQUESTED_AUDIENCE, FUNDER_REQUESTED_AUDIENCE]));
 const MODEL = "claude-haiku-4-5-20251001";
 
+// P14-09-FUND-GEN-RESULT-001: bounded provider-side output schema. This
+// mirrors only the shapes the generator adapter already normalizes
+// (normalizeGeneratorOutput below) - it does not encode any KAI governance
+// (citation authorization, UUID validity, VAL-GEN rules, duplicate/text
+// limits). Those checks remain downstream in validateGeneratorResult /
+// validateGeneratedContentDraft, unchanged.
+const EVIDENCE_SUMMARY_OUTPUT_SCHEMA = Object.freeze({
+  type: "object",
+  required: ["blocks"],
+  additionalProperties: false,
+  properties: {
+    blocks: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["text", "citations"],
+        additionalProperties: false,
+        properties: {
+          text: { type: "string" },
+          citations: {
+            type: "array",
+            items: {
+              type: "object",
+              required: ["claimId", "evidenceItemId"],
+              additionalProperties: false,
+              properties: {
+                claimId: { type: "string" },
+                evidenceItemId: { type: "string" },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+});
+
 const anthropic = new Anthropic();
 
 // P14-09-FUND-GEN-RESULT-001: attaches the closed, metadata-only reason a
@@ -83,7 +120,6 @@ export function createProductionEvidenceSummaryDraftGenerator({
           ? "You generate funder-facing evidence summaries for Get Kinder."
           : "You generate internal evidence summaries for Get Kinder.",
         "Use only the supplied governed claim projection.",
-        "Return strict JSON only, with shape: {\"blocks\":[{\"text\":\"...\",\"citations\":[{\"claimId\":\"...\",\"evidenceItemId\":\"...\"}]}]}.",
         "Every block must cite at least one supplied claim/evidence pair.",
         "Do not add numbers or causal language unless it appears in a cited claim statement.",
       ].join(" "),
@@ -95,6 +131,12 @@ export function createProductionEvidenceSummaryDraftGenerator({
           claims: generatorInput.claims,
         }),
       }],
+      output_config: {
+        format: {
+          type: "json_schema",
+          schema: EVIDENCE_SUMMARY_OUTPUT_SCHEMA,
+        },
+      },
     });
 
     const text = extractText(response);
@@ -127,4 +169,5 @@ export const __evidenceSummaryDraftGeneratorContract = Object.freeze({
   FUNDER_REQUESTED_AUDIENCE,
   ALLOWED_REQUESTED_AUDIENCES,
   MODEL,
+  EVIDENCE_SUMMARY_OUTPUT_SCHEMA,
 });
