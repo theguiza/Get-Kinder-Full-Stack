@@ -25968,3 +25968,224 @@ manifest, frontend, or production/shared-database file was touched.
 
 **Local commit:** one bounded commit created after all required checks
 passed.
+
+
+## Phase-14 (Grant Response Packet Track) - P14-07: Grant Response Packet
+## Final-Export Eligibility Evaluation + Governed Human Final-Release
+## Authority Application (pre-manifest governance closure)
+
+**Date:** 2026-09-09
+
+**Owner authorization (bounded, local-only):** implement BOTH (A) packet
+final-export eligibility evaluation (read/evaluation only - no manifest, no
+bytes, no new authority decisions created by evaluation itself) and (B)
+governed human final-release authority application wiring (service + HTTP
+mutation route + authoritative read projection + minimal frontend UX) built
+around the existing P14-07B1
+`postgresGrantResponsePacketHumanAuthorityDecisionRepository.js`. Starting
+HEAD: `84614ddadf4eb484b660f8dc90371b42b75bd680` (working tree clean). Does
+not create the packet manifest or final packet bytes, does not redesign B1,
+does not reopen P14-06's own review lifecycle, and does not change any
+Current State/Implementation Baseline section.
+
+**Packet final-export eligibility (A):** new
+`Backend/kai/services/kaiGrantResponsePacketFinalExportEligibilityGateService.js`
+exporting `evaluateGrantResponsePacketFinalExportEligibility`. This is the
+packet-level analogue of the existing single-draft P3-18
+`evaluateFinalExportEligibility`/VAL-EXP-001 gate, which the P14-07B1 finding
+proved cannot be reused directly (its mandatory
+`affirmativeHumanExportAuthority` input is only sourceable from
+`kai.human_authority_decisions`, a table structurally disjoint from
+`kai.grant_response_packet_export_candidates`). This evaluator instead
+reuses the exact same pure `validateExportManifestEligibility` (VAL-EXP-001)
+gate-logic function from `Backend/kai/validators/kaiExportManifestEligibilityValidators.js`
+unmodified, and reuses B1's real `evaluateEffectiveness` for the
+`export_authority_granted` decision type - it does not reimplement
+effectiveness logic. For the exact `grantResponsePacketExportCandidateId`
+given (always resolved server-side through the existing P14-06D
+authoritative current-candidate lookup, never a latest/newest/preferred
+selection, never accepted from an HTTP client), it checks: organization
+ownership + engagement ownership + current canonical fingerprint (all
+folded into B1's own `evaluateEffectiveness` org/engagement/fingerprint-scoped
+query - a `candidate_missing` reason fails closed as `not_found`, a
+`packet_candidate_superseded` reason is treated as an honest BLOCKED state,
+never a fabricated live-member/review value for a row this evaluator does
+not recompute state for); packet-level `export_review` resolved/resolved
+(read via a new, minimal, fully-reused-SQL repository method
+`readGrantResponsePacketExportCandidateReviewStateById` added to the
+existing `postgresGrantResponsePacketExportCandidateRepository.js`, keyed to
+the exact given candidate id, never "current"); funder audience and
+member-level `currentUseEligible` (from the same already-composed
+authoritative render model P14-06D already builds - never a second
+fingerprint/membership recomputation); and the real B1
+`export_authority_granted` effectiveness. No P3-18/VAL-EXP-001 mandatory
+gate was found to have no truthful packet-level equivalent - the "packet
+candidate still current" gate (which the single-draft flow expresses
+differently, via a pre-validator audience-mismatch check) is expressed here
+as an explicit `packetCandidateCurrent` field alongside the reused validator
+result, rather than forcing a synthetic value into VAL-EXP-001's own
+audience-mismatch gate. This evaluator creates no manifest, no bytes, and no
+new authority row - it is read/evaluation only.
+
+**Human final-release authority application (B):** new
+`Backend/kai/services/kaiGrantResponsePacketHumanFinalReleaseAuthorityService.js`
+exporting `recordGrantResponsePacketHumanFinalReleaseAuthorityDecision`,
+structurally mirroring the existing P3-17
+`kaiHumanAuthorityDecisionService.js` (feature flags, exact-keys input,
+gk_admin-only `validateActorCanPerformOperation` authorization, tenant
+boundary check, one delegation to the repository) but wrapped around the
+existing P14-07B1 repository instead of a second persistence path - it
+duplicates no persistence/replay/supersession logic. Required inputs:
+organizationId + engagementId + grantResponsePacketExportCandidateId (all
+route-path-derived) + decisionAction (grant|revoke, request-body-derived) +
+actorContext/now (server-derived) - no requestedAudience (a Grant Response
+Packet's audience is always exactly `funder`, matching B1's own contract),
+fingerprint, members, memberCount, review state, eligibility, authority
+state, or manifest identity is ever accepted. New request-schema function
+`validateGrantResponsePacketHumanFinalReleaseAuthorityRequest` in
+`kaiSprint2RequestSchemas.js` accepts only `decision_action` in the body. New
+route `POST /admin/organizations/:organizationId/engagements/:engagementId/grant-response-packet/export-candidates/:grantResponsePacketExportCandidateId/final-release-authority`
+in `sprint2IntakeApi.js` follows the existing Sprint-2 route convention
+exactly (KAI_SPRINT2_ENABLED gate via the service, server-derived
+actorContext, structured KAI errors, one delegation into the service layer,
+no SQL/repository access in the route file) and reuses the
+`createProductionMetadataOnlyAuditForGrantResponsePacketHumanAuthorityDecision`
+audit adapter B1 already built. Preserves B1's replay/supersession semantics
+exactly (proven by a real test exercising a repeated-grant replay); a failed
+repository result never reaches audit preparation.
+
+**Authoritative read:** the existing P14-06D authoritative packet read
+(`getGrantResponsePacket` in `kaiGrantResponsePacketService.js`, reached via
+the existing `GET .../grant-response-packet` route) is extended with four
+new fields, gated on the exact same `exportReviewVisible` (gk_admin-only)
+condition the existing candidate/review fields already use, and null
+whenever there is no current candidate: `finalReleaseAuthorityEffective`
+(boolean), `finalReleaseAuthorityReason` (string|null), `finalExportEligible`
+(boolean), `finalExportEligibilityBlockedReasons` (string[]). These are
+computed from one call into the new eligibility evaluator per request,
+reusing the already-composed render model/candidate state - no second
+fingerprint/membership recomputation, and the raw validator result's
+internal `object_type`/`object_id`/`message` fields are never exposed. No
+standalone eligibility HTTP route was added - matching the existing
+single-draft P3-18 convention, where `evaluateFinalExportEligibility` has no
+route of its own and is only ever consumed from inside another operation
+(there, P3-19 manifest creation; here, this package's own authoritative
+read, since there is no packet manifest step yet to consume it instead). A
+changed fingerprint makes a prior candidate's authority state absent from
+this read (superseded candidates are never resolved as "current").
+
+**Frontend:** `frontend/impactEvidenceLibraryLogic.js` gains
+`grantResponsePacketHumanFinalReleaseAuthorityPath`/`...Body`,
+`grantResponsePacketFinalReleaseAuthorityControlState` (a
+none/grantable/revocable one-state-one-control decision function mirroring
+`grantResponsePacketExportReviewLifecycleState`), and `projectGrantResponsePacket`
+now carries the four new authoritative fields (null-linked to candidate
+presence, exactly like the existing review-state fields). The Impact
+Evidence Library Grant Response Packet card
+(`frontend/ImpactEvidenceLibrary.jsx`) gains, inside the existing
+review-resolved branch: a "Grant final release authority" button when not
+yet effective; an authoritative "Final release authority granted" badge plus
+a "Revoke final release authority" button once effective (B1 genuinely
+supports `revoke` through the identical governed workflow, so this control
+is included); and an "Eligible for final export"/"Not yet eligible for final
+export" (with blocker list) badge from the authoritative
+`finalExportEligible`/`finalExportEligibilityBlockedReasons` fields. No
+packet manifest UI, download, or automatic funder-ready/publication labeling
+was added. Both grant and revoke always refetch the authoritative packet GET
+afterward via the existing `refetchGrantResponsePacketAfterMemberExportReviewRequest`
+helper and hydrate every displayed field from that response only - neither
+ever trusts its own POST response body as durable truth. The existing
+engagement-switch reset effect and late-response race-protection pattern
+were extended to cover the two new pieces of state
+(`grantResponsePacketFinalReleaseAuthorityPending`/`...Error`) unchanged in
+structure.
+
+**Regression-boundary text-slicing repairs (no behavior change):** several
+existing tests assert on raw source-text slices of
+`postgresGrantResponsePacketExportCandidateRepository.js`,
+`kaiGrantResponsePacketService.js`, and `ImpactEvidenceLibrary.jsx` located
+by adjacent-function/marker boundaries; adding new functions/callbacks
+immediately adjacent to those markers shifted several slice boundaries.
+Fixed by relocating the new repository method, the new route, and the new
+frontend callback to sit outside every such marker pair (verified against
+each affected test individually) rather than altering any test's intent,
+and by extending three pre-existing fixture-shape assertions
+(`kai-sprint2-p14-06d-...`, `kai-grant-response-packet-render-model-boundary.spec.js`,
+`kai-sprint2-p14-06e2-...`, `kai-sprint2-impact-library-grant-response-packet.spec.js`)
+whose packet DTO fixtures needed the four new fields added, and one
+`kai-sprint2-p14-06-grant-response-packet-export-review-lifecycle-frontend.spec.js`
+assertion that explicitly banned "final release authority" text before this
+package existed to authorize it (narrowed to still ban
+Approve/Approved/Finalize/Create Export Manifest). One
+`kai-sprint2-pass2-route-runtime.spec.js` route-list assertion was extended
+with the one new route path in its existing alphabetical position.
+
+**Verification:** new
+`__tests__/kai-sprint2-p14-07-grant-response-packet-final-export-eligibility-boundary.spec.js`
+(15/15, pure-function/no-database) proves: client-supplied
+fingerprint/members/memberCount/review/eligibility/authority/requestedAudience
+fields rejected outright; assistant/system actor fails closed;
+nonexistent/cross-org/cross-engagement candidate fails closed as
+`not_found`; stale fingerprint -> BLOCKED without fabricating a live
+review/member value for the superseded row; no/open/in_progress review ->
+BLOCKED; resolved review + no authority -> BLOCKED; resolved + effective
+grant + all gates satisfied -> PASS; revoked authority -> BLOCKED;
+member-level `currentUseEligible:false` -> BLOCKED; candidate A's authority
+evaluation never leaks into an independent candidate B evaluation (proven
+by two calls sharing one authority-repository fake); no
+ORDER BY/LIMIT-based selection exists in the evaluator; evaluation calls no
+write method; and the shared VAL-EXP-001 validator is imported, not
+reimplemented. New
+`__tests__/kai-sprint2-p14-07-grant-response-packet-human-final-release-authority.spec.js`
+(11/11) proves: the exact-keys input contract; gk_admin can grant and revoke
+the exact candidate; gk_reviewer/assistant-system/cross-tenant actors fail
+closed with zero repository calls; a repository failure produces zero
+audit-preparation calls; B1 replay (`replayed:true`) is preserved
+end-to-end; the service is metadata-only (no manifest/bytes/artifact key on
+its response); and the full HTTP route (feature flag, authentication,
+request-body rejection of `requested_audience`, exact single-route
+mounting, no SQL/repository access in the route slice) behaves identically
+to the accepted P3-17 route pattern.
+
+**Affected regressions passed (394/394, plus 7 pre-existing skips requiring
+a runner-owned database):** P14-07B1 human-authority-decision-ledger
+boundary suite, P14-06D authoritative-read boundary suite (extended, still
+green), P14-03 packet-candidate boundary suite, P14-04/P14-05/P14-06A/P14-06B
+packet service/route suites, P3-17 human-authority-decision-ledger boundary
+suite, P3-18 final-export-eligibility-gate boundary suite (proves the
+single-draft gate/route/repository are completely untouched), P3-19
+export-manifest-foundation suite (proves no premature manifest creation),
+packet frontend/rehydration suites (P14-06/P14-06E1/E2/E3, impact-library
+grant-response-packet suite), and the render-model boundary suite.
+
+**Frontend build:** `npx vite build` succeeded (`public/js/bundles/entry.js`
+rebuilt and committed alongside the source change, consistent with every
+prior Phase-14 frontend package).
+
+**Full suite:** sandboxed `npm test` (same non-listening loopback
+`DATABASE_URL` sentinel) returned 3818 passed, 7 failed, 64 skipped - the
+same four pre-existing, unrelated batch/file-detail baseline failures
+documented in every prior Phase-14 entry (`the child-file read model...`,
+`...batch-files collection contract`, `...file-detail service returns
+exactly the 15-field allowlist`, `...file-detail contract`). No new full-suite
+failure was introduced.
+
+**Final diff review:** new files -
+`Backend/kai/services/kaiGrantResponsePacketFinalExportEligibilityGateService.js`,
+`Backend/kai/services/kaiGrantResponsePacketHumanFinalReleaseAuthorityService.js`,
+and the two new test files above; edited files -
+`Backend/kai/dictionary/postgresGrantResponsePacketExportCandidateRepository.js`
+(one new read-only method), `Backend/kai/services/kaiGrantResponsePacketService.js`
+(DTO widening + one new eligibility/authority read branch),
+`Backend/kai/validators/kaiSprint2RequestSchemas.js` (one new validator),
+`Backend/kai/routes/sprint2IntakeApi.js` (one new route), five existing test
+files extended as described above, `frontend/ImpactEvidenceLibrary.jsx`,
+`frontend/impactEvidenceLibraryLogic.js`, and `public/js/bundles/entry.js`
+(build output), and this ExecPlan entry. `git diff --check` passed with no
+whitespace errors. No migration, no schema change, no
+`kai.grant_response_packet_human_authority_decisions` table/repository
+persistence-logic change, no packet manifest, no final packet bytes, and no
+production/shared-database file was touched.
+
+**Local commit:** one bounded commit created after all required checks
+passed.
