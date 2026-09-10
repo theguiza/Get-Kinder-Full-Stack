@@ -893,10 +893,30 @@ export function createPostgresClaimTraceabilityRepository({ runInTransaction } =
   });
 }
 
+// The exact, and only, blocker codes approvalForAudience (above) can add -
+// i.e. the effective-audience-authority verdict for requestedAudience,
+// distinct from every other P2-06 blocker (evidence/claim review
+// completeness, coverage, follow-ups, conflicts, traceability). A claim's
+// blockerCodes excludes all three if and only if approvalForAudience granted
+// authority for that requestedAudience in this same evaluation. Exposed so
+// other callers that already hold a fresh per-claim P2-06 result for the
+// exact claim/requestedAudience they care about (e.g. generated-content
+// generation's audienceAuthority projection) can read the same authority
+// verdict directly off it, instead of re-deriving authority from a
+// different, unrelated signal (such as the legacy claims.funder_use_allowed
+// column, or the aggregate `eligible` flag, which also reflects unrelated
+// blockers).
+export const AUDIENCE_AUTHORITY_BLOCKER_CODES = Object.freeze([
+  "claim_not_approved_for_requested_audience",
+  "audience_gate_closed",
+  "requirement_authority_absent",
+]);
+
 export const __claimTraceabilityRepositoryContract = Object.freeze({
   BLOCKER_ORDER,
   DIMENSION_KEYS,
   REVIEW_QUEUE_CLAIM_LIMIT,
+  AUDIENCE_AUTHORITY_BLOCKER_CODES,
 });
 
 // Exposed so other read-only Package 4 capabilities that must reach the same

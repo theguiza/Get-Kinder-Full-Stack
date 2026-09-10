@@ -1,7 +1,10 @@
 import crypto from "node:crypto";
 
 import { withTransaction } from "../db/kaiDb.js";
-import { evaluateClaimTraceabilityInTransaction } from "./postgresClaimTraceabilityRepository.js";
+import {
+  evaluateClaimTraceabilityInTransaction,
+  AUDIENCE_AUTHORITY_BLOCKER_CODES,
+} from "./postgresClaimTraceabilityRepository.js";
 import { validateGeneratedContentDraft } from "../validators/kaiGeneratedContentValidators.js";
 import {
   validateExportManifestEligibility,
@@ -687,7 +690,7 @@ async function toReviewPacket(tx, state, input, validation, evaluator) {
   });
 }
 
-async function loadGenerationProjection(tx, { organizationId, claimIds, requestedAudience }) {
+async function loadGenerationProjection(tx, { organizationId, claimIds, requestedAudience }, funderAuthorityByClaimId) {
   const { rows } = await tx.query(
     `SELECT c.claim_id::text AS claim_id,
             c.statement AS claim_statement,
@@ -719,6 +722,7 @@ async function loadGenerationProjection(tx, { organizationId, claimIds, requeste
     [organizationId, claimIds],
   );
   if (rows.length !== claimIds.length) return null;
+
   return rows.map((row) => ({
     claimId: row.claim_id,
     claimStatement: row.claim_statement,
@@ -732,7 +736,18 @@ async function loadGenerationProjection(tx, { organizationId, claimIds, requeste
     uploadState: row.upload_state,
     audienceAuthority: {
       internal: row.internal_only === true,
-      funder: row.funder_use_allowed === true,
+      // The funder key must reflect the exact same effective funder
+      // authority verdict P2-06 (evaluateClaimTraceabilityInTransaction, via
+      // approvalForAudience) already computed for this exact claim/audience
+      // in the fresh per-claim evaluation this function's caller performed
+      // just above it - never the legacy claims.funder_use_allowed column,
+      // which is schema-pinned false and carries no authority. Only
+      // computed when the request is actually for the funder audience;
+      // internal/public generation never depend on this value (see
+      // audienceAllowed in kaiGeneratedContentValidators.js).
+      funder: requestedAudience === "funder"
+        ? funderAuthorityByClaimId?.get(row.claim_id) === true
+        : row.funder_use_allowed === true,
       public: row.public_use_allowed === true,
     },
   }));
@@ -911,6 +926,23 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
         traceabilityResults.push(result.data);
       }
 
+      // Authority-source repair: derive generation-time funder audience
+      // authority from the SAME fresh per-claim P2-06 result just computed
+      // above, for this exact claim/requestedAudience - never from the
+      // legacy claims.funder_use_allowed column. A claim's blockerCodes
+      // excludes every AUDIENCE_AUTHORITY_BLOCKER_CODES entry if and only if
+      // P2-06's approvalForAudience granted authority; this is a strictly
+      // narrower signal than `eligible` (which also reflects unrelated
+      // blockers such as evidence/coverage/follow-up state), so authority
+      // and current-use eligibility remain distinct even though both derive
+      // from the same evaluation.
+      const funderAuthorityByClaimId = new Map(
+        traceabilityResults.map((traceability) => [
+          traceability.claim.claim_id,
+          !AUDIENCE_AUTHORITY_BLOCKER_CODES.some((code) => (traceability.blockerCodes || []).includes(code)),
+        ]),
+      );
+
       // P14-09: governed FUNDER draft generation additionally requires every
       // requested claim's fresh P2-06 traceability evaluation (just above,
       // for this exact transaction) to be currently funder-eligible. Unlike
@@ -925,7 +957,7 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
         rollbackFailure("funder_use_not_currently_eligible");
       }
 
-      const projections = await loadGenerationProjection(tx, input);
+      const projections = await loadGenerationProjection(tx, input, funderAuthorityByClaimId);
       if (!projections) rollbackFailure("conflict_current_state_changed");
       const projectionByClaim = new Map(projections.map((claim) => [claim.claimId, claim]));
       const traceabilityByClaimId = new Map(traceabilityResults.map((traceability) => [traceability.claim.claim_id, traceability]));
@@ -2751,4 +2783,5 @@ export const __generatedContentRepositoryTestables = Object.freeze({
   validateStartExportReviewInput,
   validateCompleteExportReviewInput,
   validateGrantResponsePacketMembershipInput,
+  loadGenerationProjection,
 });

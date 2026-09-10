@@ -28,6 +28,7 @@
     "verify:kai-sprint2-p2-04-claim-gap-followup": "node scripts/kai-sprint2-p2-04-claim-gap-followup-local-postgres.js",
     "verify:kai-sprint2-p2-05-conflict-review-candidate": "node scripts/kai-sprint2-p2-05-conflict-review-candidate-local-postgres.js",
     "verify:kai-sprint2-p2-06-claim-traceability": "node scripts/kai-sprint2-p2-06-claim-traceability-local-postgres.js",
+    "verify:kai-sprint2-p14-09-funder-authority-source-repair": "node scripts/kai-sprint2-p14-09-funder-authority-source-repair-local-postgres.js",
     "verify:kai-sprint2-a2-impact-evaluation": "node scripts/kai-sprint2-a2-impact-evaluation-local-postgres.js",
     "verify:kai-sprint2-b1-1-baseline-impact-requirements": "node scripts/kai-sprint2-b1-1-baseline-impact-requirements-local-postgres.js",
     "test:kai-sprint2-b1-1-baseline-impact-requirements": "node --test __tests__/kai-sprint2-b1-1-baseline-impact-requirements-schema-contract.spec.js",
