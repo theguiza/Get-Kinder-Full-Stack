@@ -1,0 +1,2490 @@
+===== REPOSITORY STATE =====
+requested commit: ce31697898f2ce5bb1e7a84d5d06e4ade1696ef4
+current HEAD:     ce31697898f2ce5bb1e7a84d5d06e4ade1696ef4
+
+working tree:
+## main...origin/main
+?? P14_PRODUCTION_CANARY_BUNDLE.txt
+
+===== MATCHED CANARY FILES =====
+scripts/kai-sprint2-p14-02-grant-response-packet-export-identity-foundation-failure-checks.sql
+scripts/kai-sprint2-p14-02-grant-response-packet-export-identity-foundation-runbook.md
+scripts/kai-sprint2-p14-02-grant-response-packet-export-identity-foundation-smoke-seed.sql
+scripts/kai-sprint2-p14-02-grant-response-packet-export-identity-foundation-smoke-verifier.sql
+scripts/kai-sprint2-p14-02-grant-response-packet-export-identity-foundation-verifier.sql
+scripts/kai-sprint2-p14-03-grant-response-packet-export-candidate-foundation-failure-checks.sql
+scripts/kai-sprint2-p14-03-grant-response-packet-export-candidate-foundation-runbook.md
+scripts/kai-sprint2-p14-03-grant-response-packet-export-candidate-foundation-smoke-seed.sql
+scripts/kai-sprint2-p14-03-grant-response-packet-export-candidate-foundation-smoke-verifier.sql
+scripts/kai-sprint2-p14-03-grant-response-packet-export-candidate-foundation-verifier.sql
+scripts/kai-sprint2-p14-05-grant-response-packet-export-review-binding-verifier.sql
+scripts/kai-sprint2-p14-07-b1-grant-response-packet-human-authority-decision-ledger-failure-checks.sql
+scripts/kai-sprint2-p14-07-b1-grant-response-packet-human-authority-decision-ledger-smoke-seed.sql
+scripts/kai-sprint2-p14-07-b1-grant-response-packet-human-authority-decision-ledger-smoke-verifier.sql
+scripts/kai-sprint2-p14-07-b1-grant-response-packet-human-authority-decision-ledger-verifier.sql
+scripts/kai-sprint2-p14-08-a-grant-response-packet-export-manifest-foundation-failure-checks.sql
+scripts/kai-sprint2-p14-08-a-grant-response-packet-export-manifest-foundation-smoke-seed.sql
+scripts/kai-sprint2-p14-08-a-grant-response-packet-export-manifest-foundation-smoke-verifier.sql
+scripts/kai-sprint2-p14-08-a-grant-response-packet-export-manifest-foundation-verifier.sql
+
+
+============================================================
+FILE: scripts/kai-sprint2-p14-02-grant-response-packet-export-identity-foundation-failure-checks.sql
+============================================================
+DROP TABLE IF EXISTS p14_02_failure_results;
+CREATE TEMP TABLE p14_02_failure_results (
+  check_name text PRIMARY KEY,
+  status text NOT NULL,
+  detail text NOT NULL
+);
+
+BEGIN;
+
+DO $$
+DECLARE
+  rejected boolean;
+BEGIN
+  -- A fabricated engagement_id (no matching kai.engagements row at all) must
+  -- be rejected by the tenant-safe composite FK.
+  rejected := false;
+  BEGIN
+    INSERT INTO kai.grant_response_packet_export_identities (
+      organization_id, engagement_id, packet_audience, created_by
+    )
+    VALUES (
+      '00000000-0000-4000-8000-000000000001',
+      '99999999-0000-4000-8000-000000000001',
+      'funder',
+      '00000000-0000-4000-8000-000000000901'
+    );
+  EXCEPTION WHEN foreign_key_violation THEN
+    rejected := true;
+  END;
+  INSERT INTO p14_02_failure_results
+  VALUES ('fabricated_engagement_rejected', CASE WHEN rejected THEN 'PASS' ELSE 'FAIL' END, 'an engagement_id with no matching kai.engagements row is rejected by the composite FK');
+
+  -- A real engagement that belongs to a DIFFERENT organization must be
+  -- rejected: the composite FK requires both engagement_id and
+  -- organization_id to match the same kai.engagements row.
+  rejected := false;
+  BEGIN
+    INSERT INTO kai.grant_response_packet_export_identities (
+      organization_id, engagement_id, packet_audience, created_by
+    )
+    VALUES (
+      '00000000-0000-4000-8000-000000000002',
+      '14020000-0000-4000-8000-000000000001',
+      'funder',
+      '00000000-0000-4000-8000-000000000901'
+    );
+  EXCEPTION WHEN foreign_key_violation THEN
+    rejected := true;
+  END;
+  INSERT INTO p14_02_failure_results
+  VALUES ('cross_tenant_engagement_organization_pair_rejected', CASE WHEN rejected THEN 'PASS' ELSE 'FAIL' END, 'an engagement_id that exists but belongs to a different organization_id is rejected by the composite FK');
+
+  -- packet_audience is pinned to the single existing supported value;
+  -- anything else must be rejected by the CHECK constraint.
+  rejected := false;
+  BEGIN
+    INSERT INTO kai.grant_response_packet_export_identities (
+      organization_id, engagement_id, packet_audience, created_by
+    )
+    VALUES (
+      '00000000-0000-4000-8000-000000000001',
+      '14020000-0000-4000-8000-000000000001',
+      'internal',
+      '00000000-0000-4000-8000-000000000901'
+    );
+  EXCEPTION WHEN check_violation THEN
+    rejected := true;
+  END;
+  INSERT INTO p14_02_failure_results
+  VALUES ('non_funder_audience_rejected', CASE WHEN rejected THEN 'PASS' ELSE 'FAIL' END, 'packet_audience values other than funder are rejected by the audience CHECK constraint');
+
+  -- A NULL engagement_id must be rejected: unlike P14-01's optional lineage
+  -- column, this identity table's engagement_id is NOT NULL - a packet is
+  -- never identified without an engagement.
+  rejected := false;
+  BEGIN
+    INSERT INTO kai.grant_response_packet_export_identities (
+      organization_id, engagement_id, packet_audience, created_by
+    )
+    VALUES (
+      '00000000-0000-4000-8000-000000000001',
+      NULL,
+      'funder',
+      '00000000-0000-4000-8000-000000000901'
+    );
+  EXCEPTION WHEN not_null_violation THEN
+    rejected := true;
+  END;
+  INSERT INTO p14_02_failure_results
+  VALUES ('null_engagement_rejected', CASE WHEN rejected THEN 'PASS' ELSE 'FAIL' END, 'a NULL engagement_id is rejected - this identity is always engagement-scoped');
+END $$;
+
+ROLLBACK;
+
+-- Immutability must be proven against a row that actually persists, so this
+-- part runs outside the rolled-back probe transaction above, against the
+-- real seeded row from the smoke-seed script.
+DO $$
+DECLARE
+  rejected boolean;
+BEGIN
+  rejected := false;
+  BEGIN
+    UPDATE kai.grant_response_packet_export_identities
+       SET created_by = '00000000-0000-4000-8000-000000000999'
+     WHERE grant_response_packet_export_identity_id = '14020000-0000-4000-8000-000000000301';
+  EXCEPTION WHEN OTHERS THEN
+    rejected := true;
+  END;
+  INSERT INTO p14_02_failure_results
+  VALUES ('update_rejected_append_only', CASE WHEN rejected THEN 'PASS' ELSE 'FAIL' END, 'UPDATE on an existing identity row is rejected by the append-only trigger');
+
+  rejected := false;
+  BEGIN
+    DELETE FROM kai.grant_response_packet_export_identities
+     WHERE grant_response_packet_export_identity_id = '14020000-0000-4000-8000-000000000301';
+  EXCEPTION WHEN OTHERS THEN
+    rejected := true;
+  END;
+  INSERT INTO p14_02_failure_results
+  VALUES ('delete_rejected_append_only', CASE WHEN rejected THEN 'PASS' ELSE 'FAIL' END, 'DELETE on an existing identity row is rejected by the append-only trigger');
+END $$;
+
+SELECT * FROM p14_02_failure_results ORDER BY check_name;
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM p14_02_failure_results WHERE status <> 'PASS') THEN
+    RAISE EXCEPTION 'P14-02 grant-response-packet-export-identity-foundation failure-checks verifier failed';
+  END IF;
+END $$;
+
+
+============================================================
+FILE: scripts/kai-sprint2-p14-02-grant-response-packet-export-identity-foundation-runbook.md
+============================================================
+# KAI P14-02 Grant Response Packet Export Identity Foundation Runbook
+
+Run:
+
+```sh
+DATABASE_URL="postgres://127.0.0.1:9/kai_sentinel" \
+  npm run verify:kai-sprint2-p14-02-grant-response-packet-export-identity-foundation
+```
+
+The runner creates its own ephemeral PostgreSQL 16 target bound only to
+`127.0.0.1`, on a randomly chosen high port, in a temp data directory. It
+bootstraps only the minimal `kai.organizations` / `kai.engagements` /
+`kai.generation_runs` shape this migration's own composite FK and preflight
+require (not the full Gate A-through-P3-19 chain — this table has no
+dependency on `kai.export_candidates`, `kai.export_manifests`, or
+`kai.human_authority_decisions`), then applies the P14-02 forward migration.
+
+It then runs, in order:
+
+- the P14-02 catalog verifier (9 checks: table present, tenant-safe
+  composite engagement FK, audience/created-by-type CHECKs, the
+  `(organization_id, engagement_id, packet_audience)` replay-convergence
+  UNIQUE, the append-only trigger, no member `exportCandidateId`/
+  `exportManifestId` column, and that `kai.export_candidates`/
+  `kai.export_manifests` — where present — carry no P14-02-owned
+  constraint);
+- the P14-02 synthetic smoke seed (one identity mint, one same-triple replay
+  attempt) and smoke verifier (exactly one row survives; the replay attempt
+  never created a second row; the first-minted id is the one that survived);
+- the P14-02 failure checks (fabricated engagement rejected, cross-tenant
+  engagement/organization pair rejected, non-`funder` audience rejected,
+  `NULL` engagement rejected, append-only UPDATE rejected, append-only
+  DELETE rejected);
+- the focused integration suite
+  (`__tests__/kai-sprint2-p14-02-grant-response-packet-export-identity-foundation.integration.spec.js`)
+  and the no-DB boundary suite
+  (`__tests__/kai-grant-response-packet-export-identity-boundary.spec.js`),
+  against the runner-owned database via
+  `KAI_P14_02_GRANT_RESPONSE_PACKET_EXPORT_IDENTITY_FOUNDATION_DATABASE_URL`
+  (validated loopback-only before any connection).
+
+It tears down Postgres and the temp directory afterward, on both success and
+failure.
+
+## Forward delta
+
+One new table, `kai.grant_response_packet_export_identities`:
+
+- `grant_response_packet_export_identity_id uuid PRIMARY KEY DEFAULT gen_random_uuid()`
+- `organization_id uuid NOT NULL`
+- `engagement_id uuid NOT NULL` — composite FK to
+  `kai.engagements (engagement_id, organization_id)`, `ON DELETE RESTRICT`
+- `packet_audience text NOT NULL` — `CHECK (packet_audience = 'funder')`
+- `created_by uuid NOT NULL`, `created_by_type text NOT NULL DEFAULT 'human'`
+  — `CHECK (created_by_type IN ('human', 'system'))`
+- `created_at timestamptz NOT NULL DEFAULT now()`
+- `UNIQUE (grant_response_packet_export_identity_id, organization_id)` —
+  tenant-safe FK-target shape, following repository convention
+- `UNIQUE (organization_id, engagement_id, packet_audience)` — the durable
+  composite identity key
+- `BEFORE UPDATE OR DELETE` trigger rejecting any mutation (append-only)
+
+No existing table (`kai.engagements`, `kai.generation_runs`,
+`kai.export_candidates`, `kai.export_manifests`) is altered.
+
+## Repository
+
+`Backend/kai/dictionary/postgresGrantResponsePacketExportIdentityRepository.js`
+exposes `getOrCreateGrantResponsePacketExportIdentity` (idempotent
+get-or-create, `INSERT ... ON CONFLICT (organization_id, engagement_id,
+packet_audience) DO NOTHING` + re-select) and
+`loadGrantResponsePacketExportIdentityInTransaction` (read-only, never
+mints). Neither is called anywhere else in the repository yet — wiring a
+route, service, or the existing packet DTO to this identity is explicitly
+left to a later, separately authorized package.
+
+## Rollback
+
+`migrations/kai_sprint2_p14_02_grant_response_packet_export_identity_foundation.rollback.sql`
+unconditionally drops the trigger, table, and function — this is a brand-new
+table with no legacy/shared-column data-loss concern (unlike P14-01's
+`ALTER TABLE` rollback, which must refuse while non-null bindings exist).
+Proven locally: forward → rollback → forward re-application, against a
+separate ephemeral Postgres instance, completed cleanly with no error and no
+identifier-truncation notice.
+
+## Known constraint-naming adjustment
+
+The natural constraint name `..._p14_02_created_by_type_check` is 68 bytes,
+over Postgres's 63-byte `NAMEDATALEN` limit; Postgres would silently
+truncate it on `CREATE TABLE` to `..._created_by_type_` with no error. The
+migration instead names it `..._p14_02_created_by_chk` (61 bytes) so the
+name in the migration, the verifier, and the live catalog all agree
+exactly, with no silent truncation. Every other constraint and trigger name
+on this table was measured and confirmed to fit within the limit.
+
+## Production migration
+
+Not performed. Not authorized. This runbook documents local, synthetic-
+database proof only.
+
+
+============================================================
+FILE: scripts/kai-sprint2-p14-02-grant-response-packet-export-identity-foundation-smoke-seed.sql
+============================================================
+BEGIN;
+
+INSERT INTO kai.organizations (organization_id, name, organization_code)
+VALUES ('00000000-0000-4000-8000-000000000001', 'P14-02 Smoke Org', 'p14-02-smoke-org')
+ON CONFLICT (organization_id) DO NOTHING;
+
+INSERT INTO kai.organizations (organization_id, name, organization_code)
+VALUES ('00000000-0000-4000-8000-000000000002', 'P14-02 Smoke Other Org', 'p14-02-smoke-other-org')
+ON CONFLICT (organization_id) DO NOTHING;
+
+INSERT INTO kai.engagements (engagement_id, organization_id, engagement_code)
+VALUES ('14020000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'p14-02-smoke-engagement')
+ON CONFLICT (engagement_id) DO NOTHING;
+
+-- First mint for (org, engagement, funder).
+INSERT INTO kai.grant_response_packet_export_identities (
+  grant_response_packet_export_identity_id, organization_id, engagement_id, packet_audience, created_by
+)
+VALUES (
+  '14020000-0000-4000-8000-000000000301',
+  '00000000-0000-4000-8000-000000000001',
+  '14020000-0000-4000-8000-000000000001',
+  'funder',
+  '00000000-0000-4000-8000-000000000901'
+)
+ON CONFLICT (organization_id, engagement_id, packet_audience) DO NOTHING;
+
+-- Replay of the exact same (org, engagement, funder) triple must converge to
+-- the SAME row above, never mint a second identity.
+INSERT INTO kai.grant_response_packet_export_identities (
+  grant_response_packet_export_identity_id, organization_id, engagement_id, packet_audience, created_by
+)
+VALUES (
+  '14020000-0000-4000-8000-000000000302',
+  '00000000-0000-4000-8000-000000000001',
+  '14020000-0000-4000-8000-000000000001',
+  'funder',
+  '00000000-0000-4000-8000-000000000902'
+)
+ON CONFLICT (organization_id, engagement_id, packet_audience) DO NOTHING;
+
+COMMIT;
+
+
+============================================================
+FILE: scripts/kai-sprint2-p14-02-grant-response-packet-export-identity-foundation-smoke-verifier.sql
+============================================================
+DROP TABLE IF EXISTS p14_02_smoke_results;
+CREATE TEMP TABLE p14_02_smoke_results (
+  check_name text PRIMARY KEY,
+  status text NOT NULL,
+  detail text NOT NULL
+);
+
+INSERT INTO p14_02_smoke_results
+SELECT 'exactly_one_row_for_the_seeded_triple',
+       CASE WHEN (
+              SELECT count(*) FROM kai.grant_response_packet_export_identities
+               WHERE organization_id = '00000000-0000-4000-8000-000000000001'
+                 AND engagement_id = '14020000-0000-4000-8000-000000000001'
+                 AND packet_audience = 'funder'
+            ) = 1
+            THEN 'PASS' ELSE 'FAIL' END,
+       'exactly one durable identity row exists for the (organization, engagement, funder) triple after two seed attempts';
+
+INSERT INTO p14_02_smoke_results
+SELECT 'replay_converged_to_first_minted_identity',
+       CASE WHEN EXISTS (
+              SELECT 1 FROM kai.grant_response_packet_export_identities
+               WHERE grant_response_packet_export_identity_id = '14020000-0000-4000-8000-000000000301'
+                 AND organization_id = '00000000-0000-4000-8000-000000000001'
+                 AND engagement_id = '14020000-0000-4000-8000-000000000001'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'the first-minted identity id (...301) survived; the replay attempt (...302) was a no-op, never a second row';
+
+INSERT INTO p14_02_smoke_results
+SELECT 'second_seed_attempt_did_not_create_a_row',
+       CASE WHEN NOT EXISTS (
+              SELECT 1 FROM kai.grant_response_packet_export_identities
+               WHERE grant_response_packet_export_identity_id = '14020000-0000-4000-8000-000000000302'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'the replay-seed row (...302) was never inserted; ON CONFLICT DO NOTHING converged on the existing identity';
+
+SELECT * FROM p14_02_smoke_results ORDER BY check_name;
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM p14_02_smoke_results WHERE status <> 'PASS') THEN
+    RAISE EXCEPTION 'P14-02 grant-response-packet-export-identity-foundation smoke verifier failed';
+  END IF;
+END $$;
+
+
+============================================================
+FILE: scripts/kai-sprint2-p14-02-grant-response-packet-export-identity-foundation-verifier.sql
+============================================================
+DROP TABLE IF EXISTS p14_02_results;
+CREATE TEMP TABLE p14_02_results (
+  check_name text PRIMARY KEY,
+  status text NOT NULL,
+  detail text NOT NULL
+);
+
+INSERT INTO p14_02_results
+SELECT 'grant_response_packet_export_identities_table_present',
+       CASE WHEN to_regclass('kai.grant_response_packet_export_identities') IS NOT NULL
+            THEN 'PASS' ELSE 'FAIL' END,
+       'kai.grant_response_packet_export_identities exists';
+
+INSERT INTO p14_02_results
+SELECT 'id_org_unique_present',
+       CASE WHEN EXISTS (
+              SELECT 1 FROM pg_constraint
+               WHERE conname = 'grant_response_packet_export_identities_p14_02_id_org_unique'
+                 AND conrelid = 'kai.grant_response_packet_export_identities'::regclass
+                 AND contype = 'u'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'UNIQUE (grant_response_packet_export_identity_id, organization_id) is present, following the repository tenant-safe-FK-target convention';
+
+INSERT INTO p14_02_results
+SELECT 'engagement_fk_is_tenant_safe_composite',
+       CASE WHEN EXISTS (
+              SELECT 1
+                FROM pg_constraint c
+               WHERE c.conname = 'grant_response_packet_export_identities_p14_02_engagement_fk'
+                 AND c.conrelid = 'kai.grant_response_packet_export_identities'::regclass
+                 AND c.contype = 'f'
+                 AND c.confrelid = 'kai.engagements'::regclass
+                 AND pg_get_constraintdef(c.oid) LIKE '%FOREIGN KEY (engagement_id, organization_id)%'
+                 AND pg_get_constraintdef(c.oid) LIKE '%REFERENCES kai.engagements(engagement_id, organization_id)%'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'the engagement FK is a composite (engagement_id, organization_id) FK into kai.engagements, preventing cross-tenant attachment';
+
+INSERT INTO p14_02_results
+SELECT 'audience_check_present',
+       CASE WHEN EXISTS (
+              SELECT 1 FROM pg_constraint
+               WHERE conname = 'grant_response_packet_export_identities_p14_02_audience_check'
+                 AND conrelid = 'kai.grant_response_packet_export_identities'::regclass
+                 AND contype = 'c'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'packet_audience is checked to the single existing supported value (funder)';
+
+INSERT INTO p14_02_results
+SELECT 'created_by_type_check_present',
+       CASE WHEN EXISTS (
+              SELECT 1 FROM pg_constraint
+               WHERE conname = 'grant_response_packet_export_identities_p14_02_created_by_chk'
+                 AND conrelid = 'kai.grant_response_packet_export_identities'::regclass
+                 AND contype = 'c'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'created_by_type is checked to human/system';
+
+INSERT INTO p14_02_results
+SELECT 'identity_replay_convergence_unique_present',
+       CASE WHEN EXISTS (
+              SELECT 1
+                FROM pg_constraint c
+               WHERE c.conname = 'grant_response_packet_export_identities_p14_02_identity_unique'
+                 AND c.conrelid = 'kai.grant_response_packet_export_identities'::regclass
+                 AND c.contype = 'u'
+                 AND pg_get_constraintdef(c.oid) = 'UNIQUE (organization_id, engagement_id, packet_audience)'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'UNIQUE (organization_id, engagement_id, packet_audience) is the durable composite identity key - the same triple always converges to one row';
+
+INSERT INTO p14_02_results
+SELECT 'append_only_trigger_present',
+       CASE WHEN EXISTS (
+              SELECT 1 FROM pg_trigger
+               WHERE tgname = 'trg_p14_02_grant_response_packet_export_identities_append_only'
+                 AND tgrelid = 'kai.grant_response_packet_export_identities'::regclass
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'the append-only BEFORE UPDATE OR DELETE trigger is present, mirroring the P3-19 export-manifest immutability convention';
+
+INSERT INTO p14_02_results
+SELECT 'no_export_candidate_or_manifest_column',
+       CASE WHEN NOT EXISTS (
+              SELECT 1 FROM information_schema.columns
+               WHERE table_schema = 'kai' AND table_name = 'grant_response_packet_export_identities'
+                 AND column_name IN ('export_candidate_id', 'export_manifest_id')
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'no member exportCandidateId/exportManifestId column exists on this table - packet identity is independent of per-member export identity';
+
+INSERT INTO p14_02_results
+SELECT 'export_candidates_and_manifests_not_altered',
+       CASE WHEN NOT EXISTS (
+              SELECT 1 FROM pg_constraint c
+               WHERE c.conrelid IN (
+                       SELECT oid FROM (
+                         SELECT to_regclass('kai.export_candidates') AS oid
+                         UNION ALL SELECT to_regclass('kai.export_manifests')
+                       ) present WHERE oid IS NOT NULL
+                     )
+                 AND c.conname LIKE 'p14_02%'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'kai.export_candidates and kai.export_manifests (where present) carry no P14-02-owned constraint (neither table is altered by this migration)';
+
+SELECT * FROM p14_02_results ORDER BY check_name;
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM p14_02_results WHERE status <> 'PASS') THEN
+    RAISE EXCEPTION 'P14-02 grant-response-packet-export-identity-foundation verifier failed';
+  END IF;
+END $$;
+
+
+============================================================
+FILE: scripts/kai-sprint2-p14-03-grant-response-packet-export-candidate-foundation-failure-checks.sql
+============================================================
+DROP TABLE IF EXISTS p14_03_failure_results;
+CREATE TEMP TABLE p14_03_failure_results (
+  check_name text PRIMARY KEY,
+  status text NOT NULL,
+  detail text NOT NULL
+);
+
+BEGIN;
+
+DO $$
+DECLARE
+  rejected boolean;
+BEGIN
+  -- A fabricated grant_response_packet_export_identity_id (no matching row
+  -- at all) must be rejected by the tenant-safe composite FK.
+  rejected := false;
+  BEGIN
+    INSERT INTO kai.grant_response_packet_export_candidates (
+      organization_id, grant_response_packet_export_identity_id, fingerprint_contract_version,
+      canonical_fingerprint, created_by
+    )
+    VALUES (
+      '00000000-0000-4000-8000-000000000001',
+      '99999999-0000-4000-8000-000000000001',
+      'kai-sprint2-p14-03-grant-response-packet-export-candidate-fingerprint-v1',
+      repeat('c', 64),
+      '00000000-0000-4000-8000-000000000901'
+    );
+  EXCEPTION WHEN foreign_key_violation THEN
+    rejected := true;
+  END;
+  INSERT INTO p14_03_failure_results
+  VALUES ('fabricated_packet_identity_rejected', CASE WHEN rejected THEN 'PASS' ELSE 'FAIL' END, 'a grant_response_packet_export_identity_id with no matching row is rejected by the composite FK');
+
+  -- A real packet identity that belongs to a DIFFERENT organization must be
+  -- rejected: the composite FK requires both identity id and organization_id
+  -- to match the same identity row.
+  rejected := false;
+  BEGIN
+    INSERT INTO kai.grant_response_packet_export_candidates (
+      organization_id, grant_response_packet_export_identity_id, fingerprint_contract_version,
+      canonical_fingerprint, created_by
+    )
+    VALUES (
+      '00000000-0000-4000-8000-000000000002',
+      '14030000-0000-4000-8000-000000000201',
+      'kai-sprint2-p14-03-grant-response-packet-export-candidate-fingerprint-v1',
+      repeat('d', 64),
+      '00000000-0000-4000-8000-000000000901'
+    );
+  EXCEPTION WHEN foreign_key_violation THEN
+    rejected := true;
+  END;
+  INSERT INTO p14_03_failure_results
+  VALUES ('cross_tenant_packet_identity_rejected', CASE WHEN rejected THEN 'PASS' ELSE 'FAIL' END, 'a grant_response_packet_export_identity_id belonging to a different organization_id is rejected by the composite FK');
+
+  -- A fingerprint_contract_version other than the single pinned value must
+  -- be rejected.
+  rejected := false;
+  BEGIN
+    INSERT INTO kai.grant_response_packet_export_candidates (
+      organization_id, grant_response_packet_export_identity_id, fingerprint_contract_version,
+      canonical_fingerprint, created_by
+    )
+    VALUES (
+      '00000000-0000-4000-8000-000000000001',
+      '14030000-0000-4000-8000-000000000201',
+      'some-other-contract-version',
+      repeat('e', 64),
+      '00000000-0000-4000-8000-000000000901'
+    );
+  EXCEPTION WHEN check_violation THEN
+    rejected := true;
+  END;
+  INSERT INTO p14_03_failure_results
+  VALUES ('non_pinned_fingerprint_contract_version_rejected', CASE WHEN rejected THEN 'PASS' ELSE 'FAIL' END, 'a fingerprint_contract_version other than the single pinned value is rejected');
+
+  -- A canonical_fingerprint that is not a lower-case 64-hex-char SHA-256
+  -- must be rejected.
+  rejected := false;
+  BEGIN
+    INSERT INTO kai.grant_response_packet_export_candidates (
+      organization_id, grant_response_packet_export_identity_id, fingerprint_contract_version,
+      canonical_fingerprint, created_by
+    )
+    VALUES (
+      '00000000-0000-4000-8000-000000000001',
+      '14030000-0000-4000-8000-000000000201',
+      'kai-sprint2-p14-03-grant-response-packet-export-candidate-fingerprint-v1',
+      'not-a-fingerprint',
+      '00000000-0000-4000-8000-000000000901'
+    );
+  EXCEPTION WHEN check_violation THEN
+    rejected := true;
+  END;
+  INSERT INTO p14_03_failure_results
+  VALUES ('malformed_fingerprint_rejected', CASE WHEN rejected THEN 'PASS' ELSE 'FAIL' END, 'a canonical_fingerprint that is not a lower-case 64-hex-char SHA-256 is rejected');
+
+  -- A fabricated generated_content_draft_id (no matching row) on a member
+  -- row must be rejected by the tenant-safe composite FK.
+  rejected := false;
+  BEGIN
+    INSERT INTO kai.grant_response_packet_export_candidate_members (
+      grant_response_packet_export_candidate_id, organization_id, generated_content_draft_id, ordinal
+    )
+    VALUES (
+      '14030000-0000-4000-8000-000000000501',
+      '00000000-0000-4000-8000-000000000001',
+      '99999999-0000-4000-8000-000000000002',
+      99
+    );
+  EXCEPTION WHEN foreign_key_violation THEN
+    rejected := true;
+  END;
+  INSERT INTO p14_03_failure_results
+  VALUES ('fabricated_member_draft_rejected', CASE WHEN rejected THEN 'PASS' ELSE 'FAIL' END, 'a generated_content_draft_id with no matching row is rejected by the composite FK');
+
+  -- A duplicate (candidate, draft) member is rejected.
+  rejected := false;
+  BEGIN
+    INSERT INTO kai.grant_response_packet_export_candidate_members (
+      grant_response_packet_export_candidate_id, organization_id, generated_content_draft_id, ordinal
+    )
+    VALUES (
+      '14030000-0000-4000-8000-000000000501',
+      '00000000-0000-4000-8000-000000000001',
+      '14030000-0000-4000-8000-000000000401',
+      1
+    );
+  EXCEPTION WHEN unique_violation THEN
+    rejected := true;
+  END;
+  INSERT INTO p14_03_failure_results
+  VALUES ('duplicate_candidate_draft_member_rejected', CASE WHEN rejected THEN 'PASS' ELSE 'FAIL' END, 'a duplicate (candidate, draft) member row is rejected by the unique constraint');
+
+  -- A duplicate ordinal within the same candidate is rejected, even for a
+  -- different draft.
+  rejected := false;
+  BEGIN
+    INSERT INTO kai.generated_content_drafts (
+      generated_content_draft_id, generation_run_id, organization_id, content_type, requested_audience, validator_results
+    )
+    VALUES (
+      '14030000-0000-4000-8000-000000000402',
+      '14030000-0000-4000-8000-000000000301',
+      '00000000-0000-4000-8000-000000000001',
+      'evidence_summary',
+      'funder',
+      '[]'::jsonb
+    )
+    ON CONFLICT (generated_content_draft_id) DO NOTHING;
+  EXCEPTION WHEN OTHERS THEN
+    NULL;
+  END;
+  BEGIN
+    INSERT INTO kai.grant_response_packet_export_candidate_members (
+      grant_response_packet_export_candidate_id, organization_id, generated_content_draft_id, ordinal
+    )
+    VALUES (
+      '14030000-0000-4000-8000-000000000501',
+      '00000000-0000-4000-8000-000000000001',
+      '14030000-0000-4000-8000-000000000402',
+      0
+    );
+  EXCEPTION WHEN unique_violation THEN
+    rejected := true;
+  END;
+  INSERT INTO p14_03_failure_results
+  VALUES ('duplicate_ordinal_within_candidate_rejected', CASE WHEN rejected THEN 'PASS' ELSE 'FAIL' END, 'a duplicate ordinal within the same candidate is rejected by the unique constraint, even for a different draft');
+END $$;
+
+ROLLBACK;
+
+-- Immutability must be proven against rows that actually persist, so this
+-- part runs outside the rolled-back probe transaction above, against the
+-- real seeded rows from the smoke-seed script.
+DO $$
+DECLARE
+  rejected boolean;
+  member_id uuid;
+BEGIN
+  rejected := false;
+  BEGIN
+    UPDATE kai.grant_response_packet_export_candidates
+       SET created_by = '00000000-0000-4000-8000-000000000999'
+     WHERE grant_response_packet_export_candidate_id = '14030000-0000-4000-8000-000000000501';
+  EXCEPTION WHEN OTHERS THEN
+    rejected := true;
+  END;
+  INSERT INTO p14_03_failure_results
+  VALUES ('candidate_update_rejected_append_only', CASE WHEN rejected THEN 'PASS' ELSE 'FAIL' END, 'UPDATE on an existing candidate row is rejected by the append-only trigger');
+
+  SELECT grant_response_packet_export_candidate_member_id INTO member_id
+    FROM kai.grant_response_packet_export_candidate_members
+   WHERE grant_response_packet_export_candidate_id = '14030000-0000-4000-8000-000000000501'
+   LIMIT 1;
+
+  rejected := false;
+  BEGIN
+    UPDATE kai.grant_response_packet_export_candidate_members
+       SET ordinal = 42
+     WHERE grant_response_packet_export_candidate_member_id = member_id;
+  EXCEPTION WHEN OTHERS THEN
+    rejected := true;
+  END;
+  INSERT INTO p14_03_failure_results
+  VALUES ('member_update_rejected_append_only', CASE WHEN rejected THEN 'PASS' ELSE 'FAIL' END, 'UPDATE on an existing member snapshot row is rejected by the append-only trigger');
+
+  rejected := false;
+  BEGIN
+    DELETE FROM kai.grant_response_packet_export_candidate_members
+     WHERE grant_response_packet_export_candidate_member_id = member_id;
+  EXCEPTION WHEN OTHERS THEN
+    rejected := true;
+  END;
+  INSERT INTO p14_03_failure_results
+  VALUES ('member_delete_rejected_append_only', CASE WHEN rejected THEN 'PASS' ELSE 'FAIL' END, 'DELETE on an existing member snapshot row is rejected by the append-only trigger');
+
+  rejected := false;
+  BEGIN
+    DELETE FROM kai.grant_response_packet_export_candidates
+     WHERE grant_response_packet_export_candidate_id = '14030000-0000-4000-8000-000000000501';
+  EXCEPTION WHEN OTHERS THEN
+    rejected := true;
+  END;
+  INSERT INTO p14_03_failure_results
+  VALUES ('candidate_delete_rejected_append_only', CASE WHEN rejected THEN 'PASS' ELSE 'FAIL' END, 'DELETE on an existing candidate row is rejected by the append-only trigger (member row still FK-referencing it also proves ON DELETE RESTRICT would otherwise block this)');
+END $$;
+
+SELECT * FROM p14_03_failure_results ORDER BY check_name;
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM p14_03_failure_results WHERE status <> 'PASS') THEN
+    RAISE EXCEPTION 'P14-03 grant-response-packet-export-candidate-foundation failure-checks verifier failed';
+  END IF;
+END $$;
+
+
+============================================================
+FILE: scripts/kai-sprint2-p14-03-grant-response-packet-export-candidate-foundation-runbook.md
+============================================================
+# KAI P14-03 Grant Response Packet Export Candidate Foundation Runbook
+
+Run:
+
+```sh
+DATABASE_URL="postgres://127.0.0.1:9/kai_sentinel" \
+  npm run verify:kai-sprint2-p14-03-grant-response-packet-export-candidate-foundation
+```
+
+The runner creates its own ephemeral PostgreSQL 16 target bound only to
+`127.0.0.1`, on a randomly chosen high port, in a temp data directory. It
+bootstraps the organization-enablement + Gate-A schema, then the full
+P1/P2/P3-01/P14-01/P3-04/P3-05/P3-09/P3-13/P3-16/P3-17/P3-19/P14-02 migration
+chain (this package's member table FKs into the real
+`kai.generated_content_drafts`, which itself requires a real
+`kai.generation_runs` row bound to a real `kai.engagements` row; P3-17/P3-19
+are applied schema-only, with nothing seeded or exercised, purely so
+`kai.human_authority_decisions`/`kai.export_manifests` exist for this
+package's own "creates no approval/manifest rows" proof to query a real
+table rather than a `to_regclass` no-op), then applies the P14-03 forward
+migration.
+
+It then runs, in order:
+
+- the P14-03 catalog verifier (16 checks: both tables present, tenant-safe
+  composite FKs — candidate → P14-02 identity, member → candidate, member →
+  `kai.generated_content_drafts` — fingerprint contract/format CHECKs,
+  replay-convergence UNIQUE, both append-only triggers, member `UNIQUE
+  (candidate, draft)` / `UNIQUE (candidate, ordinal)`, no member
+  `exportCandidateId`/`exportManifestId` column, and that
+  `kai.export_candidates`/`kai.export_manifests` carry no P14-03-owned
+  constraint);
+- the P14-03 synthetic smoke seed (one candidate mint, one same-triple
+  replay attempt, one member row) and smoke verifier (4 checks: exactly one
+  candidate row survives; the replay attempt never created a second row; the
+  first-minted id is the survivor; exactly one member row exists);
+- the P14-03 failure checks (11 checks: fabricated packet identity rejected,
+  cross-tenant packet identity rejected, non-pinned fingerprint-contract-
+  version rejected, malformed fingerprint rejected, fabricated member draft
+  rejected, duplicate (candidate, draft) member rejected, duplicate ordinal
+  within a candidate rejected, append-only UPDATE rejected, append-only
+  DELETE rejected — proven against both the candidate and member tables);
+- the focused integration suite
+  (`__tests__/kai-sprint2-p14-03-grant-response-packet-export-candidate-foundation.integration.spec.js`,
+  14 tests) and the no-DB boundary suite
+  (`__tests__/kai-grant-response-packet-export-candidate-boundary.spec.js`,
+  20 tests), against the runner-owned database via
+  `KAI_P14_03_GRANT_RESPONSE_PACKET_EXPORT_CANDIDATE_FOUNDATION_DATABASE_URL`
+  (validated loopback-only before any connection).
+
+It tears down Postgres and the temp directory afterward, on both success and
+failure.
+
+## Forward delta
+
+Two new tables.
+
+`kai.grant_response_packet_export_candidates`:
+
+- `grant_response_packet_export_candidate_id uuid PRIMARY KEY DEFAULT gen_random_uuid()`
+- `organization_id uuid NOT NULL`
+- `grant_response_packet_export_identity_id uuid NOT NULL` — composite FK to
+  `kai.grant_response_packet_export_identities (grant_response_packet_export_identity_id, organization_id)`,
+  `ON DELETE RESTRICT`
+- `fingerprint_contract_version text NOT NULL` — pinned to
+  `kai-sprint2-p14-03-grant-response-packet-export-candidate-fingerprint-v1`
+- `canonical_fingerprint text NOT NULL` — `CHECK (~ '^[a-f0-9]{64}$')`
+- `created_by uuid NOT NULL`, `created_by_type text NOT NULL DEFAULT 'human'`
+- `created_at timestamptz NOT NULL DEFAULT now()`
+- `UNIQUE (grant_response_packet_export_candidate_id, organization_id)`
+- `UNIQUE (organization_id, grant_response_packet_export_identity_id, canonical_fingerprint)`
+  — the replay-convergence key
+- `BEFORE UPDATE OR DELETE` trigger rejecting any mutation (append-only)
+
+`kai.grant_response_packet_export_candidate_members`:
+
+- `grant_response_packet_export_candidate_member_id uuid PRIMARY KEY DEFAULT gen_random_uuid()`
+- `grant_response_packet_export_candidate_id uuid NOT NULL` — composite FK to
+  the candidate table, `ON DELETE RESTRICT`
+- `organization_id uuid NOT NULL`
+- `generated_content_draft_id uuid NOT NULL` — composite FK to
+  `kai.generated_content_drafts (generated_content_draft_id, organization_id)`,
+  `ON DELETE RESTRICT`
+- `ordinal integer NOT NULL` — `CHECK (ordinal >= 0)`
+- `created_at timestamptz NOT NULL DEFAULT now()`
+- `UNIQUE (grant_response_packet_export_candidate_member_id, organization_id)`
+- `UNIQUE (grant_response_packet_export_candidate_id, generated_content_draft_id)`
+- `UNIQUE (grant_response_packet_export_candidate_id, ordinal)`
+- `BEFORE UPDATE OR DELETE` trigger rejecting any mutation (append-only)
+
+No existing table (`kai.grant_response_packet_export_identities`,
+`kai.generated_content_drafts`, `kai.export_candidates`,
+`kai.export_manifests`) is altered.
+
+## Repository
+
+`Backend/kai/dictionary/postgresGrantResponsePacketExportCandidateRepository.js`
+exposes `createGrantResponsePacketExportCandidate(input, dependencies)`.
+`input` accepts **only** `{organizationId, engagementId, actorContext, now}`.
+Inside one transaction: composes the render model (via
+`composeGrantResponsePacketRenderModel`, injectable as
+`dependencies.composeRenderModel` for tests) → computes the canonical
+fingerprint (`kaiGrantResponsePacketExportCandidateFingerprintService.js`) →
+resolves (get-or-create) the P14-02 identity inline (targeting the literal
+P14-02 table and its literal replay-convergence key, so identity resolution
+and candidate creation are atomic) → inserts the candidate with
+`ON CONFLICT ... DO NOTHING` (replay convergence) → on a genuine insert,
+persists the ordered member snapshot rows and writes one metadata-only audit
+event; on a replay, re-reads the existing member snapshot instead. Not
+called from any route, service, or the existing packet DTO in this package —
+wiring is explicitly deferred to a later, separately authorized package.
+
+## Rollback
+
+`migrations/kai_sprint2_p14_03_grant_response_packet_export_candidate_foundation.rollback.sql`
+unconditionally drops both triggers, both tables, and the shared trigger
+function — both are brand-new tables with no legacy/shared-column
+data-loss concern. Proven locally: forward → rollback → forward
+re-application, against a separate ephemeral Postgres instance, completed
+cleanly with no error and no identifier-truncation notice.
+
+## Known constraint-naming adjustment
+
+Several natural names on the member table (and the candidate table's
+convergence-unique constraint) exceeded Postgres's 63-byte `NAMEDATALEN`
+limit and would have silently truncated. Renamed to fit (see patch notes for
+the exact mapping); the migration, verifier, and failure-checks files all
+agree on the shortened names, confirmed with no truncation notice on a live
+forward → rollback → forward re-application.
+
+## Production migration
+
+Not performed. Not authorized. This runbook documents local, synthetic-
+database proof only.
+
+
+============================================================
+FILE: scripts/kai-sprint2-p14-03-grant-response-packet-export-candidate-foundation-smoke-seed.sql
+============================================================
+BEGIN;
+
+INSERT INTO kai.organizations (organization_id, name, organization_code)
+VALUES ('00000000-0000-4000-8000-000000000001', 'P14-03 Smoke Org', 'p14-03-smoke-org')
+ON CONFLICT (organization_id) DO NOTHING;
+
+INSERT INTO kai.organizations (organization_id, name, organization_code)
+VALUES ('00000000-0000-4000-8000-000000000002', 'P14-03 Smoke Other Org', 'p14-03-smoke-other-org')
+ON CONFLICT (organization_id) DO NOTHING;
+
+INSERT INTO kai.engagements (engagement_id, organization_id, engagement_code)
+VALUES ('14030000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'p14-03-smoke-engagement')
+ON CONFLICT (engagement_id) DO NOTHING;
+
+INSERT INTO kai.grant_response_packet_export_identities (
+  grant_response_packet_export_identity_id, organization_id, engagement_id, packet_audience, created_by
+)
+VALUES (
+  '14030000-0000-4000-8000-000000000201',
+  '00000000-0000-4000-8000-000000000001',
+  '14030000-0000-4000-8000-000000000001',
+  'funder',
+  '00000000-0000-4000-8000-000000000901'
+)
+ON CONFLICT (organization_id, engagement_id, packet_audience) DO NOTHING;
+
+INSERT INTO kai.generation_runs (
+  generation_run_id, organization_id, idempotency_key, request_fingerprint, content_type, requested_audience
+)
+VALUES (
+  '14030000-0000-4000-8000-000000000301',
+  '00000000-0000-4000-8000-000000000001',
+  'p14-03-smoke-generation-run',
+  repeat('a', 64),
+  'evidence_summary',
+  'funder'
+)
+ON CONFLICT (organization_id, idempotency_key) DO NOTHING;
+
+INSERT INTO kai.generated_content_drafts (
+  generated_content_draft_id, generation_run_id, organization_id, content_type, requested_audience, validator_results
+)
+VALUES (
+  '14030000-0000-4000-8000-000000000401',
+  '14030000-0000-4000-8000-000000000301',
+  '00000000-0000-4000-8000-000000000001',
+  'evidence_summary',
+  'funder',
+  '[]'::jsonb
+)
+ON CONFLICT (generated_content_draft_id) DO NOTHING;
+
+-- First mint for (org, identity, fingerprint).
+INSERT INTO kai.grant_response_packet_export_candidates (
+  grant_response_packet_export_candidate_id, organization_id, grant_response_packet_export_identity_id,
+  fingerprint_contract_version, canonical_fingerprint, created_by
+)
+VALUES (
+  '14030000-0000-4000-8000-000000000501',
+  '00000000-0000-4000-8000-000000000001',
+  '14030000-0000-4000-8000-000000000201',
+  'kai-sprint2-p14-03-grant-response-packet-export-candidate-fingerprint-v1',
+  repeat('b', 64),
+  '00000000-0000-4000-8000-000000000901'
+)
+ON CONFLICT (organization_id, grant_response_packet_export_identity_id, canonical_fingerprint) DO NOTHING;
+
+-- Replay of the exact same (org, identity, fingerprint) triple must converge
+-- to the SAME row above, never mint a second candidate.
+INSERT INTO kai.grant_response_packet_export_candidates (
+  grant_response_packet_export_candidate_id, organization_id, grant_response_packet_export_identity_id,
+  fingerprint_contract_version, canonical_fingerprint, created_by
+)
+VALUES (
+  '14030000-0000-4000-8000-000000000502',
+  '00000000-0000-4000-8000-000000000001',
+  '14030000-0000-4000-8000-000000000201',
+  'kai-sprint2-p14-03-grant-response-packet-export-candidate-fingerprint-v1',
+  repeat('b', 64),
+  '00000000-0000-4000-8000-000000000902'
+)
+ON CONFLICT (organization_id, grant_response_packet_export_identity_id, canonical_fingerprint) DO NOTHING;
+
+INSERT INTO kai.grant_response_packet_export_candidate_members (
+  grant_response_packet_export_candidate_id, organization_id, generated_content_draft_id, ordinal
+)
+VALUES (
+  '14030000-0000-4000-8000-000000000501',
+  '00000000-0000-4000-8000-000000000001',
+  '14030000-0000-4000-8000-000000000401',
+  0
+)
+ON CONFLICT (grant_response_packet_export_candidate_id, generated_content_draft_id) DO NOTHING;
+
+COMMIT;
+
+
+============================================================
+FILE: scripts/kai-sprint2-p14-03-grant-response-packet-export-candidate-foundation-smoke-verifier.sql
+============================================================
+DROP TABLE IF EXISTS p14_03_smoke_results;
+CREATE TEMP TABLE p14_03_smoke_results (
+  check_name text PRIMARY KEY,
+  status text NOT NULL,
+  detail text NOT NULL
+);
+
+INSERT INTO p14_03_smoke_results
+SELECT 'exactly_one_candidate_row_for_the_seeded_triple',
+       CASE WHEN (
+              SELECT count(*) FROM kai.grant_response_packet_export_candidates
+               WHERE organization_id = '00000000-0000-4000-8000-000000000001'
+                 AND grant_response_packet_export_identity_id = '14030000-0000-4000-8000-000000000201'
+                 AND canonical_fingerprint = repeat('b', 64)
+            ) = 1
+            THEN 'PASS' ELSE 'FAIL' END,
+       'exactly one candidate row exists for the (organization, identity, fingerprint) triple after two seed attempts';
+
+INSERT INTO p14_03_smoke_results
+SELECT 'replay_converged_to_first_minted_candidate',
+       CASE WHEN EXISTS (
+              SELECT 1 FROM kai.grant_response_packet_export_candidates
+               WHERE grant_response_packet_export_candidate_id = '14030000-0000-4000-8000-000000000501'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'the first-minted candidate id (...501) survived; the replay attempt (...502) was a no-op';
+
+INSERT INTO p14_03_smoke_results
+SELECT 'second_seed_attempt_did_not_create_a_candidate_row',
+       CASE WHEN NOT EXISTS (
+              SELECT 1 FROM kai.grant_response_packet_export_candidates
+               WHERE grant_response_packet_export_candidate_id = '14030000-0000-4000-8000-000000000502'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'the replay-seed candidate row (...502) was never inserted';
+
+INSERT INTO p14_03_smoke_results
+SELECT 'exactly_one_member_row_for_the_candidate',
+       CASE WHEN (
+              SELECT count(*) FROM kai.grant_response_packet_export_candidate_members
+               WHERE grant_response_packet_export_candidate_id = '14030000-0000-4000-8000-000000000501'
+            ) = 1
+            THEN 'PASS' ELSE 'FAIL' END,
+       'exactly one member snapshot row exists for the seeded candidate';
+
+SELECT * FROM p14_03_smoke_results ORDER BY check_name;
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM p14_03_smoke_results WHERE status <> 'PASS') THEN
+    RAISE EXCEPTION 'P14-03 grant-response-packet-export-candidate-foundation smoke verifier failed';
+  END IF;
+END $$;
+
+
+============================================================
+FILE: scripts/kai-sprint2-p14-03-grant-response-packet-export-candidate-foundation-verifier.sql
+============================================================
+DROP TABLE IF EXISTS p14_03_results;
+CREATE TEMP TABLE p14_03_results (
+  check_name text PRIMARY KEY,
+  status text NOT NULL,
+  detail text NOT NULL
+);
+
+INSERT INTO p14_03_results
+SELECT 'grant_response_packet_export_candidates_table_present',
+       CASE WHEN to_regclass('kai.grant_response_packet_export_candidates') IS NOT NULL
+            THEN 'PASS' ELSE 'FAIL' END,
+       'kai.grant_response_packet_export_candidates exists';
+
+INSERT INTO p14_03_results
+SELECT 'grant_response_packet_export_candidate_members_table_present',
+       CASE WHEN to_regclass('kai.grant_response_packet_export_candidate_members') IS NOT NULL
+            THEN 'PASS' ELSE 'FAIL' END,
+       'kai.grant_response_packet_export_candidate_members exists';
+
+INSERT INTO p14_03_results
+SELECT 'candidate_id_org_unique_present',
+       CASE WHEN EXISTS (
+              SELECT 1 FROM pg_constraint
+               WHERE conname = 'grant_response_packet_export_candidates_p14_03_id_org_unique'
+                 AND conrelid = 'kai.grant_response_packet_export_candidates'::regclass
+                 AND contype = 'u'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'UNIQUE (grant_response_packet_export_candidate_id, organization_id) is present';
+
+INSERT INTO p14_03_results
+SELECT 'candidate_identity_fk_is_tenant_safe_composite',
+       CASE WHEN EXISTS (
+              SELECT 1
+                FROM pg_constraint c
+               WHERE c.conname = 'grant_response_packet_export_candidates_p14_03_identity_fk'
+                 AND c.conrelid = 'kai.grant_response_packet_export_candidates'::regclass
+                 AND c.contype = 'f'
+                 AND c.confrelid = 'kai.grant_response_packet_export_identities'::regclass
+                 AND pg_get_constraintdef(c.oid) LIKE '%FOREIGN KEY (grant_response_packet_export_identity_id, organization_id)%'
+                 AND pg_get_constraintdef(c.oid) LIKE '%REFERENCES kai.grant_response_packet_export_identities(grant_response_packet_export_identity_id, organization_id)%'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'the candidate FK is a composite (grant_response_packet_export_identity_id, organization_id) FK into the existing P14-02 identity table - packet structural identity is reused, never re-minted';
+
+INSERT INTO p14_03_results
+SELECT 'candidate_fingerprint_contract_version_check_present',
+       CASE WHEN EXISTS (
+              SELECT 1 FROM pg_constraint
+               WHERE conname = 'grant_response_packet_export_candidates_p14_03_fp_contract_chk'
+                 AND conrelid = 'kai.grant_response_packet_export_candidates'::regclass
+                 AND contype = 'c'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'fingerprint_contract_version is pinned to the single P14-03 fingerprint contract';
+
+INSERT INTO p14_03_results
+SELECT 'candidate_fingerprint_format_check_present',
+       CASE WHEN EXISTS (
+              SELECT 1 FROM pg_constraint
+               WHERE conname = 'grant_response_packet_export_candidates_p14_03_fp_check'
+                 AND conrelid = 'kai.grant_response_packet_export_candidates'::regclass
+                 AND contype = 'c'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'canonical_fingerprint is checked to a lower-case SHA-256 hex string';
+
+INSERT INTO p14_03_results
+SELECT 'candidate_convergence_unique_present',
+       CASE WHEN EXISTS (
+              SELECT 1
+                FROM pg_constraint c
+               WHERE c.conname = 'grant_response_packet_export_candidates_p14_03_converge_unq'
+                 AND c.conrelid = 'kai.grant_response_packet_export_candidates'::regclass
+                 AND c.contype = 'u'
+                 AND pg_get_constraintdef(c.oid) = 'UNIQUE (organization_id, grant_response_packet_export_identity_id, canonical_fingerprint)'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'UNIQUE (organization_id, grant_response_packet_export_identity_id, canonical_fingerprint) is the replay-convergence key - identical semantic state always converges to one row';
+
+INSERT INTO p14_03_results
+SELECT 'candidate_append_only_trigger_present',
+       CASE WHEN EXISTS (
+              SELECT 1 FROM pg_trigger
+               WHERE tgname = 'trg_p14_03_grant_response_packet_export_candidates_append_only'
+                 AND tgrelid = 'kai.grant_response_packet_export_candidates'::regclass
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'the append-only BEFORE UPDATE OR DELETE trigger is present on the candidate table';
+
+INSERT INTO p14_03_results
+SELECT 'member_id_org_unique_present',
+       CASE WHEN EXISTS (
+              SELECT 1 FROM pg_constraint
+               WHERE conname = 'grppec_members_p14_03_id_org_unique'
+                 AND conrelid = 'kai.grant_response_packet_export_candidate_members'::regclass
+                 AND contype = 'u'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'UNIQUE (grant_response_packet_export_candidate_member_id, organization_id) is present';
+
+INSERT INTO p14_03_results
+SELECT 'member_candidate_fk_is_tenant_safe_composite',
+       CASE WHEN EXISTS (
+              SELECT 1
+                FROM pg_constraint c
+               WHERE c.conname = 'grppec_members_p14_03_candidate_fk'
+                 AND c.conrelid = 'kai.grant_response_packet_export_candidate_members'::regclass
+                 AND c.contype = 'f'
+                 AND c.confrelid = 'kai.grant_response_packet_export_candidates'::regclass
+                 AND pg_get_constraintdef(c.oid) LIKE '%FOREIGN KEY (grant_response_packet_export_candidate_id, organization_id)%'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'the member FK into the candidate table is a tenant-safe composite FK';
+
+INSERT INTO p14_03_results
+SELECT 'member_draft_fk_is_tenant_safe_composite',
+       CASE WHEN EXISTS (
+              SELECT 1
+                FROM pg_constraint c
+               WHERE c.conname = 'grppec_members_p14_03_draft_fk'
+                 AND c.conrelid = 'kai.grant_response_packet_export_candidate_members'::regclass
+                 AND c.contype = 'f'
+                 AND c.confrelid = 'kai.generated_content_drafts'::regclass
+                 AND pg_get_constraintdef(c.oid) LIKE '%FOREIGN KEY (generated_content_draft_id, organization_id)%'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'the member FK into kai.generated_content_drafts is a tenant-safe composite FK - membership can never cross tenant';
+
+INSERT INTO p14_03_results
+SELECT 'member_draft_unique_present',
+       CASE WHEN EXISTS (
+              SELECT 1
+                FROM pg_constraint c
+               WHERE c.conname = 'grppec_members_p14_03_draft_unique'
+                 AND c.conrelid = 'kai.grant_response_packet_export_candidate_members'::regclass
+                 AND c.contype = 'u'
+                 AND pg_get_constraintdef(c.oid) = 'UNIQUE (grant_response_packet_export_candidate_id, generated_content_draft_id)'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'a draft is a member of a given candidate at most once';
+
+INSERT INTO p14_03_results
+SELECT 'member_ordinal_unique_present',
+       CASE WHEN EXISTS (
+              SELECT 1
+                FROM pg_constraint c
+               WHERE c.conname = 'grppec_members_p14_03_ordinal_unique'
+                 AND c.conrelid = 'kai.grant_response_packet_export_candidate_members'::regclass
+                 AND c.contype = 'u'
+                 AND pg_get_constraintdef(c.oid) = 'UNIQUE (grant_response_packet_export_candidate_id, ordinal)'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'ordinal position within a candidate is unique - the render model order is preserved exactly';
+
+INSERT INTO p14_03_results
+SELECT 'member_append_only_trigger_present',
+       CASE WHEN EXISTS (
+              SELECT 1 FROM pg_trigger
+               WHERE tgname = 'trg_p14_03_grppec_members_append_only'
+                 AND tgrelid = 'kai.grant_response_packet_export_candidate_members'::regclass
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'the append-only BEFORE UPDATE OR DELETE trigger is present on the member table';
+
+INSERT INTO p14_03_results
+SELECT 'no_export_manifest_or_export_candidate_column_on_member_table',
+       CASE WHEN NOT EXISTS (
+              SELECT 1 FROM information_schema.columns
+               WHERE table_schema = 'kai' AND table_name = 'grant_response_packet_export_candidate_members'
+                 AND column_name IN ('export_candidate_id', 'export_manifest_id')
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'no member exportCandidateId/exportManifestId column exists on the member snapshot table';
+
+INSERT INTO p14_03_results
+SELECT 'export_candidates_and_manifests_not_altered',
+       CASE WHEN NOT EXISTS (
+              SELECT 1 FROM pg_constraint c
+               WHERE c.conrelid IN (
+                       SELECT oid FROM (
+                         SELECT to_regclass('kai.export_candidates') AS oid
+                         UNION ALL SELECT to_regclass('kai.export_manifests')
+                       ) present WHERE oid IS NOT NULL
+                     )
+                 AND c.conname LIKE 'p14_03%'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'kai.export_candidates and kai.export_manifests (where present) carry no P14-03-owned constraint';
+
+SELECT * FROM p14_03_results ORDER BY check_name;
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM p14_03_results WHERE status <> 'PASS') THEN
+    RAISE EXCEPTION 'P14-03 grant-response-packet-export-candidate-foundation verifier failed';
+  END IF;
+END $$;
+
+
+============================================================
+FILE: scripts/kai-sprint2-p14-05-grant-response-packet-export-review-binding-verifier.sql
+============================================================
+DROP TABLE IF EXISTS p14_05_results;
+DROP TABLE IF EXISTS p14_05_expected_checks;
+
+CREATE TEMP TABLE p14_05_expected_checks (
+  check_name text PRIMARY KEY
+);
+
+INSERT INTO p14_05_expected_checks (check_name)
+VALUES
+  ('export_review_contract_admits_both_target_object_types'),
+  ('export_review_p3_13_contract_removed'),
+  ('export_review_identity_unique_index_present'),
+  ('single_draft_row_still_valid_under_widened_contract'),
+  ('packet_candidate_row_valid_under_widened_contract'),
+  ('packet_row_wrong_target_object_type_rejected'),
+  ('packet_row_wrong_summary_rejected'),
+  ('no_new_queue_type_introduced'),
+  ('no_polymorphic_fk_on_target_object_id');
+
+CREATE TEMP TABLE p14_05_results (
+  check_name text PRIMARY KEY,
+  status text NOT NULL,
+  detail text NOT NULL
+);
+
+INSERT INTO p14_05_results
+SELECT 'export_review_contract_admits_both_target_object_types',
+       CASE WHEN EXISTS (
+              SELECT 1
+                FROM pg_constraint
+               WHERE conname = 'review_queue_items_p14_05_export_review_contract_check'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'the widened export_review contract admits both generated_content_draft and grant_response_packet_export_candidate targets';
+
+INSERT INTO p14_05_results
+SELECT 'export_review_p3_13_contract_removed',
+       CASE WHEN NOT EXISTS (
+              SELECT 1
+                FROM pg_constraint
+               WHERE conname = 'review_queue_items_p3_13_export_review_contract_check'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'the single-target P3-13 contract check is replaced (not duplicated) by the P14-05 two-target check';
+
+INSERT INTO p14_05_results
+SELECT 'export_review_identity_unique_index_present',
+       CASE WHEN EXISTS (
+              SELECT 1
+                FROM pg_indexes
+               WHERE schemaname = 'kai'
+                 AND indexname = 'ux_review_queue_items_p3_05_export_review_identity'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'the P3-05 partial unique index enforcing at most one export_review row per organization/target is preserved unchanged';
+
+DO $$
+DECLARE
+  org_id uuid := '00000000-0000-4000-8000-0000000000f1';
+  other_org_id uuid := '00000000-0000-4000-8000-0000000000f2';
+  draft_target uuid := '00000000-0000-4000-8000-0000000000f3';
+  packet_candidate_target uuid := '00000000-0000-4000-8000-0000000000f4';
+  ok boolean;
+BEGIN
+  BEGIN
+    INSERT INTO kai.review_queue_items (
+      organization_id, queue_type, target_object_type, target_object_id,
+      priority, queue_status, review_status, summary, required_action,
+      created_by, created_by_type
+    ) VALUES (
+      org_id, 'export_review', 'generated_content_draft', draft_target,
+      'medium', 'open', 'needs_gk_review',
+      'Generated draft requires export review.',
+      'Review audience authority, current eligibility, citations, and the final export gate before any export.',
+      NULL, 'system'
+    );
+    ok := TRUE;
+  EXCEPTION WHEN OTHERS THEN
+    ok := FALSE;
+  END;
+  INSERT INTO p14_05_results
+    VALUES ('single_draft_row_still_valid_under_widened_contract',
+            CASE WHEN ok THEN 'PASS' ELSE 'FAIL' END,
+            'an existing-shape generated_content_draft export_review row is still admitted after widening');
+
+  BEGIN
+    INSERT INTO kai.review_queue_items (
+      organization_id, queue_type, target_object_type, target_object_id,
+      priority, queue_status, review_status, summary, required_action,
+      created_by, created_by_type
+    ) VALUES (
+      org_id, 'export_review', 'grant_response_packet_export_candidate', packet_candidate_target,
+      'medium', 'open', 'needs_gk_review',
+      'Grant Response Packet export candidate requires export review.',
+      'Review packet membership, funder audience, and export authority before any export.',
+      NULL, 'system'
+    );
+    ok := TRUE;
+  EXCEPTION WHEN OTHERS THEN
+    ok := FALSE;
+  END;
+  INSERT INTO p14_05_results
+    VALUES ('packet_candidate_row_valid_under_widened_contract',
+            CASE WHEN ok THEN 'PASS' ELSE 'FAIL' END,
+            'a grant_response_packet_export_candidate export_review row using the packet static contract is admitted');
+
+  BEGIN
+    INSERT INTO kai.review_queue_items (
+      organization_id, queue_type, target_object_type, target_object_id,
+      priority, queue_status, review_status, summary, required_action,
+      created_by, created_by_type
+    ) VALUES (
+      other_org_id, 'export_review', 'some_other_object_type', packet_candidate_target,
+      'medium', 'open', 'needs_gk_review',
+      'Grant Response Packet export candidate requires export review.',
+      'Review packet membership, funder audience, and export authority before any export.',
+      NULL, 'system'
+    );
+    ok := TRUE;
+  EXCEPTION WHEN OTHERS THEN
+    ok := FALSE;
+  END;
+  INSERT INTO p14_05_results
+    VALUES ('packet_row_wrong_target_object_type_rejected',
+            CASE WHEN NOT ok THEN 'PASS' ELSE 'FAIL' END,
+            'an export_review row with an unrecognized target_object_type is still rejected by the widened contract');
+
+  BEGIN
+    INSERT INTO kai.review_queue_items (
+      organization_id, queue_type, target_object_type, target_object_id,
+      priority, queue_status, review_status, summary, required_action,
+      created_by, created_by_type
+    ) VALUES (
+      other_org_id, 'export_review', 'grant_response_packet_export_candidate', packet_candidate_target,
+      'medium', 'open', 'needs_gk_review',
+      'wrong summary',
+      'Review packet membership, funder audience, and export authority before any export.',
+      NULL, 'system'
+    );
+    ok := TRUE;
+  EXCEPTION WHEN OTHERS THEN
+    ok := FALSE;
+  END;
+  INSERT INTO p14_05_results
+    VALUES ('packet_row_wrong_summary_rejected',
+            CASE WHEN NOT ok THEN 'PASS' ELSE 'FAIL' END,
+            'a packet export_review row with anything other than the pinned static summary/required_action is rejected');
+END $$;
+
+INSERT INTO p14_05_results
+SELECT 'no_new_queue_type_introduced',
+       CASE WHEN EXISTS (
+              SELECT 1
+                FROM pg_constraint
+               WHERE conname = 'review_queue_items_p1_06_queue_type_check'
+                 AND pg_get_constraintdef(oid) LIKE '%''export_review''%'
+            )
+            AND NOT EXISTS (
+              SELECT 1
+                FROM pg_constraint
+               WHERE conname = 'review_queue_items_p1_06_queue_type_check'
+                 AND (
+                   pg_get_constraintdef(oid) LIKE '%packet_export_review%'
+                   OR pg_get_constraintdef(oid) LIKE '%grant_packet_review%'
+                 )
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'the queue_type enum is unchanged: the existing export_review value is reused, no new queue_type value was added';
+
+INSERT INTO p14_05_results
+SELECT 'no_polymorphic_fk_on_target_object_id',
+       CASE WHEN NOT EXISTS (
+              SELECT 1
+                FROM pg_constraint c
+               WHERE c.conrelid = 'kai.review_queue_items'::regclass
+                 AND c.contype = 'f'
+                 AND pg_get_constraintdef(c.oid) LIKE '%target_object_id%'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'no table-wide foreign key was added on the polymorphic target_object_id column - tenant/existence binding stays an application-layer transactional proof, per the existing P1-06 convention';
+
+DO $$
+DECLARE
+  expected_count integer := 9;
+BEGIN
+  IF (SELECT COUNT(*) FROM p14_05_expected_checks) <> expected_count
+     OR (SELECT COUNT(*) FROM p14_05_results) <> expected_count
+     OR EXISTS (
+          SELECT 1
+            FROM p14_05_results r
+           GROUP BY r.check_name
+          HAVING COUNT(*) <> 1
+        )
+     OR EXISTS (
+          SELECT 1
+            FROM p14_05_expected_checks e
+            LEFT JOIN p14_05_results r ON r.check_name = e.check_name
+           WHERE r.check_name IS NULL
+        )
+     OR EXISTS (
+          SELECT 1
+            FROM p14_05_results r
+            LEFT JOIN p14_05_expected_checks e ON e.check_name = r.check_name
+           WHERE e.check_name IS NULL
+        ) THEN
+    RAISE EXCEPTION 'P14-05 grant-response-packet-export-review-binding verifier result construction failed';
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM p14_05_results WHERE status <> 'PASS') THEN
+    RAISE EXCEPTION 'P14-05 grant-response-packet-export-review-binding verifier failed';
+  END IF;
+END $$;
+
+SELECT
+  check_name,
+  status,
+  detail
+FROM p14_05_results
+ORDER BY check_name;
+
+
+============================================================
+FILE: scripts/kai-sprint2-p14-07-b1-grant-response-packet-human-authority-decision-ledger-failure-checks.sql
+============================================================
+DROP TABLE IF EXISTS p14_07b1_failure_results;
+CREATE TEMP TABLE p14_07b1_failure_results (
+  check_name text PRIMARY KEY,
+  status text NOT NULL,
+  detail text NOT NULL
+);
+
+BEGIN;
+
+DO $$
+DECLARE
+  org1 uuid := '00000000-0000-4000-8000-000000000001';
+  candidate_a uuid := '14030000-0000-4000-8000-000000000501';
+  candidate_b uuid := '14070000-0000-4000-8000-000000000503';
+  self_id uuid := gen_random_uuid();
+  rejected boolean;
+BEGIN
+  -- 1. A malformed decision_type is rejected.
+  rejected := false;
+  BEGIN
+    INSERT INTO kai.grant_response_packet_human_authority_decisions (organization_id, grant_response_packet_export_candidate_id, decision_type, decision_action, decided_by, decided_by_role)
+    VALUES (org1, candidate_a, 'packet_approved', 'grant', org1, 'gk_admin');
+  EXCEPTION WHEN check_violation THEN
+    rejected := true;
+  END;
+  INSERT INTO p14_07b1_failure_results VALUES ('malformed_decision_type_rejected', CASE WHEN rejected THEN 'PASS' ELSE 'FAIL' END, 'decision_type outside export_authority_granted is rejected');
+
+  -- 2. A malformed decision_action is rejected.
+  rejected := false;
+  BEGIN
+    INSERT INTO kai.grant_response_packet_human_authority_decisions (organization_id, grant_response_packet_export_candidate_id, decision_type, decision_action, decided_by, decided_by_role)
+    VALUES (org1, candidate_a, 'export_authority_granted', 'approve', org1, 'gk_admin');
+  EXCEPTION WHEN check_violation THEN
+    rejected := true;
+  END;
+  INSERT INTO p14_07b1_failure_results VALUES ('malformed_decision_action_rejected', CASE WHEN rejected THEN 'PASS' ELSE 'FAIL' END, 'decision_action outside grant/revoke is rejected');
+
+  -- 3. A non-gk_admin role is rejected.
+  rejected := false;
+  BEGIN
+    INSERT INTO kai.grant_response_packet_human_authority_decisions (organization_id, grant_response_packet_export_candidate_id, decision_type, decision_action, decided_by, decided_by_role)
+    VALUES (org1, candidate_a, 'export_authority_granted', 'grant', org1, 'client_reviewer');
+  EXCEPTION WHEN check_violation THEN
+    rejected := true;
+  END;
+  INSERT INTO p14_07b1_failure_results VALUES ('non_gk_admin_role_rejected', CASE WHEN rejected THEN 'PASS' ELSE 'FAIL' END, 'export_authority_granted cannot be decided by any role other than gk_admin');
+
+  -- 4. A root (no predecessor) revoke is rejected.
+  rejected := false;
+  BEGIN
+    INSERT INTO kai.grant_response_packet_human_authority_decisions (organization_id, grant_response_packet_export_candidate_id, decision_type, decision_action, decided_by, decided_by_role)
+    VALUES (org1, candidate_b, 'export_authority_granted', 'revoke', org1, 'gk_admin');
+  EXCEPTION WHEN check_violation THEN
+    rejected := true;
+  END;
+  INSERT INTO p14_07b1_failure_results VALUES ('root_revoke_rejected', CASE WHEN rejected THEN 'PASS' ELSE 'FAIL' END, 'the first decision in a lineage can never be a revoke');
+
+  -- 5. A decision cannot supersede itself.
+  rejected := false;
+  BEGIN
+    INSERT INTO kai.grant_response_packet_human_authority_decisions (decision_id, organization_id, grant_response_packet_export_candidate_id, decision_type, decision_action, decided_by, decided_by_role, supersedes_decision_id)
+    VALUES (self_id, org1, candidate_b, 'export_authority_granted', 'grant', org1, 'gk_admin', self_id);
+  EXCEPTION WHEN check_violation THEN
+    rejected := true;
+  END;
+  INSERT INTO p14_07b1_failure_results VALUES ('self_superseding_decision_rejected', CASE WHEN rejected THEN 'PASS' ELSE 'FAIL' END, 'a decision cannot name itself as its own predecessor');
+
+  -- 6. Predecessor lineage cannot cross packet candidates (A -> B). Caught
+  -- broadly: depending on whether the referenced predecessor already has a
+  -- successor elsewhere, Postgres may report this as either a
+  -- foreign_key_violation (the composite lineage-target FK requires the
+  -- predecessor to belong to candidate_b, but it belongs to candidate_a) or
+  -- a unique_violation (the single-successor index) - both outcomes equally
+  -- prove the cross-candidate attempt is rejected.
+  rejected := false;
+  BEGIN
+    INSERT INTO kai.grant_response_packet_human_authority_decisions (organization_id, grant_response_packet_export_candidate_id, decision_type, decision_action, decided_by, decided_by_role, supersedes_decision_id)
+    VALUES (org1, candidate_b, 'export_authority_granted', 'revoke', org1, 'gk_admin', '14070000-0000-4000-8000-000000000601');
+  EXCEPTION WHEN foreign_key_violation OR unique_violation THEN
+    rejected := true;
+  END;
+  INSERT INTO p14_07b1_failure_results VALUES ('cross_candidate_predecessor_lineage_rejected', CASE WHEN rejected THEN 'PASS' ELSE 'FAIL' END, 'a decision for candidate A can never supersede or be superseded within candidate B''s lineage');
+
+  -- 7. A decision cannot reference a nonexistent packet candidate.
+  rejected := false;
+  BEGIN
+    INSERT INTO kai.grant_response_packet_human_authority_decisions (organization_id, grant_response_packet_export_candidate_id, decision_type, decision_action, decided_by, decided_by_role)
+    VALUES (org1, gen_random_uuid(), 'export_authority_granted', 'grant', org1, 'gk_admin');
+  EXCEPTION WHEN foreign_key_violation THEN
+    rejected := true;
+  END;
+  INSERT INTO p14_07b1_failure_results VALUES ('missing_candidate_reference_rejected', CASE WHEN rejected THEN 'PASS' ELSE 'FAIL' END, 'a decision cannot reference a nonexistent packet export candidate');
+
+  -- 8. A decision cannot reference a member-level export_candidates row in
+  -- place of a packet candidate (the two tables are structurally disjoint;
+  -- a member export_candidate_id can never satisfy this FK).
+  rejected := false;
+  BEGIN
+    INSERT INTO kai.grant_response_packet_human_authority_decisions (organization_id, grant_response_packet_export_candidate_id, decision_type, decision_action, decided_by, decided_by_role)
+    SELECT org1, export_candidate_id, 'export_authority_granted', 'grant', org1, 'gk_admin'
+      FROM kai.export_candidates
+     WHERE organization_id = org1
+     LIMIT 1;
+    IF NOT FOUND THEN
+      -- No P3-16 member candidate exists in this synthetic database; prove
+      -- the same rejection with a fabricated id from that id-space instead.
+      INSERT INTO kai.grant_response_packet_human_authority_decisions (organization_id, grant_response_packet_export_candidate_id, decision_type, decision_action, decided_by, decided_by_role)
+      VALUES (org1, gen_random_uuid(), 'export_authority_granted', 'grant', org1, 'gk_admin');
+    END IF;
+  EXCEPTION WHEN foreign_key_violation THEN
+    rejected := true;
+  END;
+  INSERT INTO p14_07b1_failure_results VALUES ('member_export_candidate_cannot_substitute_packet_candidate', CASE WHEN rejected THEN 'PASS' ELSE 'FAIL' END, 'a member-level kai.export_candidates id can never satisfy the packet candidate FK');
+
+  -- 9. created_by_type outside human is rejected.
+  rejected := false;
+  BEGIN
+    INSERT INTO kai.grant_response_packet_human_authority_decisions (organization_id, grant_response_packet_export_candidate_id, decision_type, decision_action, decided_by, decided_by_role, created_by_type)
+    VALUES (org1, candidate_b, 'export_authority_granted', 'grant', org1, 'gk_admin', 'system');
+  EXCEPTION WHEN check_violation THEN
+    rejected := true;
+  END;
+  INSERT INTO p14_07b1_failure_results VALUES ('non_human_created_by_type_rejected', CASE WHEN rejected THEN 'PASS' ELSE 'FAIL' END, 'only created_by_type = human may be recorded');
+
+  -- 10. The append-only trigger rejects UPDATE and DELETE.
+  rejected := false;
+  BEGIN
+    UPDATE kai.grant_response_packet_human_authority_decisions SET decision_action = 'revoke' WHERE decision_id = '14070000-0000-4000-8000-000000000601';
+  EXCEPTION WHEN OTHERS THEN
+    rejected := true;
+  END;
+  INSERT INTO p14_07b1_failure_results VALUES ('append_only_update_rejected', CASE WHEN rejected THEN 'PASS' ELSE 'FAIL' END, 'UPDATE of an existing decision row is rejected');
+
+  rejected := false;
+  BEGIN
+    DELETE FROM kai.grant_response_packet_human_authority_decisions WHERE decision_id = '14070000-0000-4000-8000-000000000601';
+  EXCEPTION WHEN OTHERS THEN
+    rejected := true;
+  END;
+  INSERT INTO p14_07b1_failure_results VALUES ('append_only_delete_rejected', CASE WHEN rejected THEN 'PASS' ELSE 'FAIL' END, 'DELETE of an existing decision row is rejected');
+END $$;
+
+COMMIT;
+
+SELECT * FROM p14_07b1_failure_results ORDER BY check_name;
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM p14_07b1_failure_results WHERE status <> 'PASS') THEN
+    RAISE EXCEPTION 'P14-07B1 grant-response-packet-human-authority-decision-ledger failure-checks verifier failed';
+  END IF;
+END $$;
+
+
+============================================================
+FILE: scripts/kai-sprint2-p14-07-b1-grant-response-packet-human-authority-decision-ledger-smoke-seed.sql
+============================================================
+BEGIN;
+
+INSERT INTO kai.organizations (organization_id, name, organization_code)
+VALUES ('00000000-0000-4000-8000-000000000001', 'P14-03 Smoke Org', 'p14-03-smoke-org')
+ON CONFLICT (organization_id) DO NOTHING;
+
+INSERT INTO kai.organizations (organization_id, name, organization_code)
+VALUES ('00000000-0000-4000-8000-000000000002', 'P14-03 Smoke Other Org', 'p14-03-smoke-other-org')
+ON CONFLICT (organization_id) DO NOTHING;
+
+INSERT INTO kai.engagements (engagement_id, organization_id, engagement_code)
+VALUES ('14030000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'p14-03-smoke-engagement')
+ON CONFLICT (engagement_id) DO NOTHING;
+
+INSERT INTO kai.grant_response_packet_export_identities (
+  grant_response_packet_export_identity_id, organization_id, engagement_id, packet_audience, created_by
+)
+VALUES (
+  '14030000-0000-4000-8000-000000000201',
+  '00000000-0000-4000-8000-000000000001',
+  '14030000-0000-4000-8000-000000000001',
+  'funder',
+  '00000000-0000-4000-8000-000000000901'
+)
+ON CONFLICT (organization_id, engagement_id, packet_audience) DO NOTHING;
+
+-- Candidate A - the exact packet export candidate this package's lineage
+-- proofs are bound to. Same row the P14-03 smoke-seed mints for the same
+-- (org, identity, fingerprint) triple, so running after or independently of
+-- that package's own smoke-seed converges on the same row.
+INSERT INTO kai.grant_response_packet_export_candidates (
+  grant_response_packet_export_candidate_id, organization_id, grant_response_packet_export_identity_id,
+  fingerprint_contract_version, canonical_fingerprint, created_by
+)
+VALUES (
+  '14030000-0000-4000-8000-000000000501',
+  '00000000-0000-4000-8000-000000000001',
+  '14030000-0000-4000-8000-000000000201',
+  'kai-sprint2-p14-03-grant-response-packet-export-candidate-fingerprint-v1',
+  repeat('b', 64),
+  '00000000-0000-4000-8000-000000000901'
+)
+ON CONFLICT (organization_id, grant_response_packet_export_identity_id, canonical_fingerprint) DO NOTHING;
+
+-- Candidate B - a second, distinct candidate under the SAME packet identity
+-- (a different semantic/fingerprint state), used to prove a decision for
+-- candidate A can never attach to, or be read as authorizing, candidate B.
+INSERT INTO kai.grant_response_packet_export_candidates (
+  grant_response_packet_export_candidate_id, organization_id, grant_response_packet_export_identity_id,
+  fingerprint_contract_version, canonical_fingerprint, created_by
+)
+VALUES (
+  '14070000-0000-4000-8000-000000000503',
+  '00000000-0000-4000-8000-000000000001',
+  '14030000-0000-4000-8000-000000000201',
+  'kai-sprint2-p14-03-grant-response-packet-export-candidate-fingerprint-v1',
+  repeat('c', 64),
+  '00000000-0000-4000-8000-000000000901'
+)
+ON CONFLICT (organization_id, grant_response_packet_export_identity_id, canonical_fingerprint) DO NOTHING;
+
+-- Root grant on candidate A only.
+INSERT INTO kai.grant_response_packet_human_authority_decisions (
+  decision_id, organization_id, grant_response_packet_export_candidate_id, decision_type, decision_action,
+  decided_by, decided_by_role
+)
+VALUES (
+  '14070000-0000-4000-8000-000000000601',
+  '00000000-0000-4000-8000-000000000001',
+  '14030000-0000-4000-8000-000000000501',
+  'export_authority_granted',
+  'grant',
+  '00000000-0000-4000-8000-000000000901',
+  'gk_admin'
+)
+ON CONFLICT DO NOTHING;
+
+COMMIT;
+
+
+============================================================
+FILE: scripts/kai-sprint2-p14-07-b1-grant-response-packet-human-authority-decision-ledger-smoke-verifier.sql
+============================================================
+DROP TABLE IF EXISTS p14_07b1_smoke_results;
+CREATE TEMP TABLE p14_07b1_smoke_results (
+  check_name text PRIMARY KEY,
+  status text NOT NULL,
+  detail text NOT NULL
+);
+
+INSERT INTO p14_07b1_smoke_results
+SELECT 'candidate_a_root_grant_is_current_head',
+       CASE WHEN EXISTS (
+              SELECT 1
+                FROM kai.grant_response_packet_human_authority_decisions d
+               WHERE d.grant_response_packet_export_candidate_id = '14030000-0000-4000-8000-000000000501'
+                 AND d.decision_id = '14070000-0000-4000-8000-000000000601'
+                 AND d.decision_action = 'grant'
+                 AND NOT EXISTS (
+                       SELECT 1 FROM kai.grant_response_packet_human_authority_decisions s
+                        WHERE s.supersedes_decision_id = d.decision_id
+                     )
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'the seeded root grant on candidate A is the exact current lineage head';
+
+INSERT INTO p14_07b1_smoke_results
+SELECT 'candidate_b_has_no_decision',
+       CASE WHEN NOT EXISTS (
+              SELECT 1 FROM kai.grant_response_packet_human_authority_decisions
+               WHERE grant_response_packet_export_candidate_id = '14070000-0000-4000-8000-000000000503'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'a decision on candidate A creates no decision row on candidate B';
+
+INSERT INTO kai.grant_response_packet_human_authority_decisions (
+  organization_id, grant_response_packet_export_candidate_id, decision_type, decision_action,
+  decided_by, decided_by_role, supersedes_decision_id
+)
+VALUES (
+  '00000000-0000-4000-8000-000000000001',
+  '14030000-0000-4000-8000-000000000501',
+  'export_authority_granted',
+  'revoke',
+  '00000000-0000-4000-8000-000000000901',
+  'gk_admin',
+  '14070000-0000-4000-8000-000000000601'
+);
+
+INSERT INTO p14_07b1_smoke_results
+SELECT 'revoke_supersedes_grant_and_becomes_new_head',
+       CASE WHEN EXISTS (
+              SELECT 1
+                FROM kai.grant_response_packet_human_authority_decisions d
+               WHERE d.grant_response_packet_export_candidate_id = '14030000-0000-4000-8000-000000000501'
+                 AND d.decision_action = 'revoke'
+                 AND d.supersedes_decision_id = '14070000-0000-4000-8000-000000000601'
+                 AND NOT EXISTS (SELECT 1 FROM kai.grant_response_packet_human_authority_decisions s WHERE s.supersedes_decision_id = d.decision_id)
+            ) THEN 'PASS' ELSE 'FAIL' END,
+       'a revoke recorded as a successor becomes the new current head, and the old grant is no longer the head';
+
+INSERT INTO p14_07b1_smoke_results
+SELECT 'old_grant_head_is_no_longer_current',
+       CASE WHEN NOT EXISTS (
+              SELECT 1
+                FROM kai.grant_response_packet_human_authority_decisions d
+               WHERE d.decision_id = '14070000-0000-4000-8000-000000000601'
+                 AND NOT EXISTS (SELECT 1 FROM kai.grant_response_packet_human_authority_decisions s WHERE s.supersedes_decision_id = d.decision_id)
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'the superseded grant row is never mutated, but it is no longer the lineage head';
+
+SELECT * FROM p14_07b1_smoke_results ORDER BY check_name;
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM p14_07b1_smoke_results WHERE status <> 'PASS') THEN
+    RAISE EXCEPTION 'P14-07B1 grant-response-packet-human-authority-decision-ledger smoke verifier failed';
+  END IF;
+END $$;
+
+
+============================================================
+FILE: scripts/kai-sprint2-p14-07-b1-grant-response-packet-human-authority-decision-ledger-verifier.sql
+============================================================
+DROP TABLE IF EXISTS p14_07b1_results;
+CREATE TEMP TABLE p14_07b1_results (
+  check_name text PRIMARY KEY,
+  status text NOT NULL,
+  detail text NOT NULL
+);
+
+INSERT INTO p14_07b1_results
+SELECT 'grant_response_packet_human_authority_decisions_table_present',
+       CASE WHEN to_regclass('kai.grant_response_packet_human_authority_decisions') IS NOT NULL
+            THEN 'PASS' ELSE 'FAIL' END,
+       'kai.grant_response_packet_human_authority_decisions exists';
+
+INSERT INTO p14_07b1_results
+SELECT 'id_org_unique_present',
+       CASE WHEN EXISTS (
+              SELECT 1 FROM pg_constraint
+               WHERE conname = 'grppehad_p14_07b1_id_org_unique'
+                 AND conrelid = 'kai.grant_response_packet_human_authority_decisions'::regclass
+                 AND contype = 'u'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'UNIQUE (decision_id, organization_id) is present';
+
+INSERT INTO p14_07b1_results
+SELECT 'id_org_candidate_type_unique_present',
+       CASE WHEN EXISTS (
+              SELECT 1 FROM pg_constraint
+               WHERE conname = 'grppehad_p14_07b1_id_org_candidate_type_unique'
+                 AND conrelid = 'kai.grant_response_packet_human_authority_decisions'::regclass
+                 AND contype = 'u'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'UNIQUE (decision_id, organization_id, grant_response_packet_export_candidate_id, decision_type) lineage-target key is present';
+
+INSERT INTO p14_07b1_results
+SELECT 'candidate_fk_is_tenant_safe_composite_into_p14_03_table',
+       CASE WHEN EXISTS (
+              SELECT 1
+                FROM pg_constraint c
+               WHERE c.conname = 'grppehad_p14_07b1_candidate_fk'
+                 AND c.conrelid = 'kai.grant_response_packet_human_authority_decisions'::regclass
+                 AND c.contype = 'f'
+                 AND c.confrelid = 'kai.grant_response_packet_export_candidates'::regclass
+                 AND pg_get_constraintdef(c.oid) LIKE '%FOREIGN KEY (grant_response_packet_export_candidate_id, organization_id)%'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'the candidate FK is a tenant-safe composite FK into kai.grant_response_packet_export_candidates (P14-03), never kai.export_candidates';
+
+INSERT INTO p14_07b1_results
+SELECT 'supersedes_fk_pins_org_candidate_and_type',
+       CASE WHEN EXISTS (
+              SELECT 1
+                FROM pg_constraint c
+               WHERE c.conname = 'grppehad_p14_07b1_supersedes_fk'
+                 AND c.conrelid = 'kai.grant_response_packet_human_authority_decisions'::regclass
+                 AND c.contype = 'f'
+                 AND c.confrelid = 'kai.grant_response_packet_human_authority_decisions'::regclass
+                 AND pg_get_constraintdef(c.oid) LIKE '%FOREIGN KEY (supersedes_decision_id, organization_id, grant_response_packet_export_candidate_id, decision_type)%'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'the supersession lineage FK pins organization/candidate/decision-type together - lineage can never fork across candidates or decision types';
+
+INSERT INTO p14_07b1_results
+SELECT 'not_self_superseding_check_present',
+       CASE WHEN EXISTS (
+              SELECT 1 FROM pg_constraint
+               WHERE conname = 'grppehad_p14_07b1_not_self_superseding'
+                 AND conrelid = 'kai.grant_response_packet_human_authority_decisions'::regclass
+                 AND contype = 'c'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'a decision can never supersede itself';
+
+INSERT INTO p14_07b1_results
+SELECT 'decision_type_pinned_to_export_authority_granted',
+       CASE WHEN EXISTS (
+              SELECT 1 FROM pg_constraint
+               WHERE conname = 'grppehad_p14_07b1_decision_type_check'
+                 AND conrelid = 'kai.grant_response_packet_human_authority_decisions'::regclass
+                 AND contype = 'c'
+                 AND pg_get_constraintdef(oid) = 'CHECK ((decision_type = ''export_authority_granted''::text))'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'no packet_approved/packet_funder_ready/packet_finalized vocabulary - only export_authority_granted exists';
+
+INSERT INTO p14_07b1_results
+SELECT 'decision_action_vocabulary_check_present',
+       CASE WHEN EXISTS (
+              SELECT 1 FROM pg_constraint
+               WHERE conname = 'grppehad_p14_07b1_decision_action_check'
+                 AND conrelid = 'kai.grant_response_packet_human_authority_decisions'::regclass
+                 AND contype = 'c'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'decision_action is checked to grant/revoke';
+
+INSERT INTO p14_07b1_results
+SELECT 'role_pinned_to_gk_admin',
+       CASE WHEN EXISTS (
+              SELECT 1 FROM pg_constraint
+               WHERE conname = 'grppehad_p14_07b1_role_check'
+                 AND conrelid = 'kai.grant_response_packet_human_authority_decisions'::regclass
+                 AND contype = 'c'
+                 AND pg_get_constraintdef(oid) = 'CHECK ((decided_by_role = ''gk_admin''::text))'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'export_authority_granted is decided by gk_admin only, mirroring the existing P3-17 role contract';
+
+INSERT INTO p14_07b1_results
+SELECT 'root_is_grant_check_present',
+       CASE WHEN EXISTS (
+              SELECT 1 FROM pg_constraint
+               WHERE conname = 'grppehad_p14_07b1_root_is_grant_check'
+                 AND conrelid = 'kai.grant_response_packet_human_authority_decisions'::regclass
+                 AND contype = 'c'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'a root (no predecessor) decision can never be a revoke';
+
+INSERT INTO p14_07b1_results
+SELECT 'created_by_type_pinned_to_human',
+       CASE WHEN EXISTS (
+              SELECT 1 FROM pg_constraint
+               WHERE conname = 'grppehad_p14_07b1_created_by_type_check'
+                 AND conrelid = 'kai.grant_response_packet_human_authority_decisions'::regclass
+                 AND contype = 'c'
+                 AND pg_get_constraintdef(oid) = 'CHECK ((created_by_type = ''human''::text))'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'no assistant/system actor can ever create a row here';
+
+INSERT INTO p14_07b1_results
+SELECT 'root_per_lineage_unique_index_present',
+       CASE WHEN EXISTS (
+              SELECT 1 FROM pg_indexes
+               WHERE schemaname = 'kai' AND indexname = 'ux_grppehad_p14_07b1_root_per_lineage'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'at most one root decision per (organization, candidate, decision_type) lineage';
+
+INSERT INTO p14_07b1_results
+SELECT 'single_successor_unique_index_present',
+       CASE WHEN EXISTS (
+              SELECT 1 FROM pg_indexes
+               WHERE schemaname = 'kai' AND indexname = 'ux_grppehad_p14_07b1_single_successor'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'at most one direct successor per predecessor decision';
+
+INSERT INTO p14_07b1_results
+SELECT 'append_only_trigger_present',
+       CASE WHEN EXISTS (
+              SELECT 1 FROM pg_trigger
+               WHERE tgname = 'trg_p14_07b1_grppehad_append_only'
+                 AND tgrelid = 'kai.grant_response_packet_human_authority_decisions'::regclass
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'the append-only BEFORE UPDATE OR DELETE trigger is present';
+
+INSERT INTO p14_07b1_results
+SELECT 'no_requested_audience_column',
+       CASE WHEN NOT EXISTS (
+              SELECT 1 FROM information_schema.columns
+               WHERE table_schema = 'kai' AND table_name = 'grant_response_packet_human_authority_decisions'
+                 AND column_name = 'requested_audience'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'no requested_audience column - a Grant Response Packet audience is always exactly funder';
+
+INSERT INTO p14_07b1_results
+SELECT 'human_authority_decisions_p3_17_unaltered',
+       CASE WHEN EXISTS (
+              SELECT 1 FROM pg_constraint
+               WHERE conname = 'human_authority_decisions_p3_17_candidate_fk'
+                 AND conrelid = 'kai.human_authority_decisions'::regclass
+                 AND confrelid = 'kai.export_candidates'::regclass
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'the existing P3-17 kai.human_authority_decisions -> kai.export_candidates FK is completely unchanged';
+
+SELECT * FROM p14_07b1_results ORDER BY check_name;
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM p14_07b1_results WHERE status <> 'PASS') THEN
+    RAISE EXCEPTION 'P14-07B1 grant-response-packet-human-authority-decision-ledger verifier failed';
+  END IF;
+END $$;
+
+
+============================================================
+FILE: scripts/kai-sprint2-p14-08-a-grant-response-packet-export-manifest-foundation-failure-checks.sql
+============================================================
+DROP TABLE IF EXISTS p14_08a_failure_results;
+CREATE TEMP TABLE p14_08a_failure_results (
+  check_name text PRIMARY KEY,
+  status text NOT NULL,
+  detail text NOT NULL
+);
+
+BEGIN;
+
+DO $$
+DECLARE
+  org1 uuid := '00000000-0000-4000-8000-000000000001';
+  candidate_a uuid := '14030000-0000-4000-8000-000000000501';
+  candidate_b uuid := '14070000-0000-4000-8000-000000000503';
+  decision_a uuid := '14070000-0000-4000-8000-000000000601';
+  rejected boolean;
+BEGIN
+  -- 1. A malformed effective_authority_decision_type is rejected.
+  rejected := false;
+  BEGIN
+    INSERT INTO kai.grant_response_packet_export_manifests (organization_id, grant_response_packet_export_candidate_id, effective_authority_decision_id, effective_authority_decision_type, fingerprint_contract_version, canonical_fingerprint, created_by)
+    VALUES (org1, candidate_a, decision_a, 'packet_approved', 'kai-sprint2-p14-08a-grant-response-packet-export-manifest-fingerprint-v1', repeat('1', 64), org1);
+  EXCEPTION WHEN check_violation THEN
+    rejected := true;
+  END;
+  INSERT INTO p14_08a_failure_results VALUES ('malformed_decision_type_rejected', CASE WHEN rejected THEN 'PASS' ELSE 'FAIL' END, 'effective_authority_decision_type outside export_authority_granted is rejected');
+
+  -- 2. A malformed fingerprint_contract_version is rejected.
+  rejected := false;
+  BEGIN
+    INSERT INTO kai.grant_response_packet_export_manifests (organization_id, grant_response_packet_export_candidate_id, effective_authority_decision_id, effective_authority_decision_type, fingerprint_contract_version, canonical_fingerprint, created_by)
+    VALUES (org1, candidate_a, decision_a, 'export_authority_granted', 'wrong-version', repeat('2', 64), org1);
+  EXCEPTION WHEN check_violation THEN
+    rejected := true;
+  END;
+  INSERT INTO p14_08a_failure_results VALUES ('malformed_fingerprint_contract_version_rejected', CASE WHEN rejected THEN 'PASS' ELSE 'FAIL' END, 'fingerprint_contract_version outside the exact P14-08A version string is rejected');
+
+  -- 3. A malformed canonical_fingerprint (not 64 hex chars) is rejected.
+  rejected := false;
+  BEGIN
+    INSERT INTO kai.grant_response_packet_export_manifests (organization_id, grant_response_packet_export_candidate_id, effective_authority_decision_id, effective_authority_decision_type, fingerprint_contract_version, canonical_fingerprint, created_by)
+    VALUES (org1, candidate_a, decision_a, 'export_authority_granted', 'kai-sprint2-p14-08a-grant-response-packet-export-manifest-fingerprint-v1', 'not-a-fingerprint', org1);
+  EXCEPTION WHEN check_violation THEN
+    rejected := true;
+  END;
+  INSERT INTO p14_08a_failure_results VALUES ('malformed_canonical_fingerprint_rejected', CASE WHEN rejected THEN 'PASS' ELSE 'FAIL' END, 'canonical_fingerprint must be a 64-hex-char sha256 digest');
+
+  -- 4. created_by_type outside human is rejected.
+  rejected := false;
+  BEGIN
+    INSERT INTO kai.grant_response_packet_export_manifests (organization_id, grant_response_packet_export_candidate_id, effective_authority_decision_id, effective_authority_decision_type, fingerprint_contract_version, canonical_fingerprint, created_by, created_by_type)
+    VALUES (org1, candidate_a, decision_a, 'export_authority_granted', 'kai-sprint2-p14-08a-grant-response-packet-export-manifest-fingerprint-v1', repeat('3', 64), org1, 'system');
+  EXCEPTION WHEN check_violation THEN
+    rejected := true;
+  END;
+  INSERT INTO p14_08a_failure_results VALUES ('non_human_created_by_type_rejected', CASE WHEN rejected THEN 'PASS' ELSE 'FAIL' END, 'only created_by_type = human may be recorded');
+
+  -- 5. A manifest cannot reference a nonexistent packet candidate.
+  rejected := false;
+  BEGIN
+    INSERT INTO kai.grant_response_packet_export_manifests (organization_id, grant_response_packet_export_candidate_id, effective_authority_decision_id, effective_authority_decision_type, fingerprint_contract_version, canonical_fingerprint, created_by)
+    VALUES (org1, gen_random_uuid(), decision_a, 'export_authority_granted', 'kai-sprint2-p14-08a-grant-response-packet-export-manifest-fingerprint-v1', repeat('4', 64), org1);
+  EXCEPTION WHEN foreign_key_violation THEN
+    rejected := true;
+  END;
+  INSERT INTO p14_08a_failure_results VALUES ('missing_candidate_reference_rejected', CASE WHEN rejected THEN 'PASS' ELSE 'FAIL' END, 'a manifest cannot reference a nonexistent packet export candidate');
+
+  -- 6. A manifest cannot reference a member-level kai.export_candidates row
+  -- in place of a packet candidate (the two tables are structurally
+  -- disjoint; a member export_candidate_id can never satisfy this FK).
+  rejected := false;
+  BEGIN
+    INSERT INTO kai.grant_response_packet_export_manifests (organization_id, grant_response_packet_export_candidate_id, effective_authority_decision_id, effective_authority_decision_type, fingerprint_contract_version, canonical_fingerprint, created_by)
+    SELECT org1, export_candidate_id, decision_a, 'export_authority_granted', 'kai-sprint2-p14-08a-grant-response-packet-export-manifest-fingerprint-v1', repeat('5', 64), org1
+      FROM kai.export_candidates
+     WHERE organization_id = org1
+     LIMIT 1;
+    IF NOT FOUND THEN
+      INSERT INTO kai.grant_response_packet_export_manifests (organization_id, grant_response_packet_export_candidate_id, effective_authority_decision_id, effective_authority_decision_type, fingerprint_contract_version, canonical_fingerprint, created_by)
+      VALUES (org1, gen_random_uuid(), decision_a, 'export_authority_granted', 'kai-sprint2-p14-08a-grant-response-packet-export-manifest-fingerprint-v1', repeat('5', 64), org1);
+    END IF;
+  EXCEPTION WHEN foreign_key_violation THEN
+    rejected := true;
+  END;
+  INSERT INTO p14_08a_failure_results VALUES ('member_export_candidate_cannot_substitute_packet_candidate', CASE WHEN rejected THEN 'PASS' ELSE 'FAIL' END, 'a member-level kai.export_candidates id can never satisfy the packet candidate FK');
+
+  -- 7. A manifest cannot reference a nonexistent authority decision.
+  rejected := false;
+  BEGIN
+    INSERT INTO kai.grant_response_packet_export_manifests (organization_id, grant_response_packet_export_candidate_id, effective_authority_decision_id, effective_authority_decision_type, fingerprint_contract_version, canonical_fingerprint, created_by)
+    VALUES (org1, candidate_a, gen_random_uuid(), 'export_authority_granted', 'kai-sprint2-p14-08a-grant-response-packet-export-manifest-fingerprint-v1', repeat('6', 64), org1);
+  EXCEPTION WHEN foreign_key_violation THEN
+    rejected := true;
+  END;
+  INSERT INTO p14_08a_failure_results VALUES ('missing_authority_decision_reference_rejected', CASE WHEN rejected THEN 'PASS' ELSE 'FAIL' END, 'a manifest cannot reference a nonexistent effective authority decision');
+
+  -- 8. A manifest cannot reference a member-level kai.human_authority_decisions
+  -- row in place of a packet authority decision.
+  rejected := false;
+  BEGIN
+    INSERT INTO kai.grant_response_packet_export_manifests (organization_id, grant_response_packet_export_candidate_id, effective_authority_decision_id, effective_authority_decision_type, fingerprint_contract_version, canonical_fingerprint, created_by)
+    SELECT org1, candidate_a, decision_id, 'export_authority_granted', 'kai-sprint2-p14-08a-grant-response-packet-export-manifest-fingerprint-v1', repeat('7', 64), org1
+      FROM kai.human_authority_decisions
+     WHERE organization_id = org1
+     LIMIT 1;
+    IF NOT FOUND THEN
+      INSERT INTO kai.grant_response_packet_export_manifests (organization_id, grant_response_packet_export_candidate_id, effective_authority_decision_id, effective_authority_decision_type, fingerprint_contract_version, canonical_fingerprint, created_by)
+      VALUES (org1, candidate_a, gen_random_uuid(), 'export_authority_granted', 'kai-sprint2-p14-08a-grant-response-packet-export-manifest-fingerprint-v1', repeat('7', 64), org1);
+    END IF;
+  EXCEPTION WHEN foreign_key_violation THEN
+    rejected := true;
+  END;
+  INSERT INTO p14_08a_failure_results VALUES ('member_authority_decision_cannot_substitute_packet_authority', CASE WHEN rejected THEN 'PASS' ELSE 'FAIL' END, 'a member-level kai.human_authority_decisions id can never satisfy the packet authority-decision FK');
+
+  -- 9. Candidate A's own decision cannot bind a manifest declared under
+  -- candidate B (the composite FK pins organization + candidate + decision
+  -- type together, so the decision's own candidate must match).
+  rejected := false;
+  BEGIN
+    INSERT INTO kai.grant_response_packet_export_manifests (organization_id, grant_response_packet_export_candidate_id, effective_authority_decision_id, effective_authority_decision_type, fingerprint_contract_version, canonical_fingerprint, created_by)
+    VALUES (org1, candidate_b, decision_a, 'export_authority_granted', 'kai-sprint2-p14-08a-grant-response-packet-export-manifest-fingerprint-v1', repeat('8', 64), org1);
+  EXCEPTION WHEN foreign_key_violation THEN
+    rejected := true;
+  END;
+  INSERT INTO p14_08a_failure_results VALUES ('cross_candidate_authority_decision_rejected', CASE WHEN rejected THEN 'PASS' ELSE 'FAIL' END, 'candidate A''s effective authority decision can never bind a manifest declared under candidate B');
+END $$;
+
+COMMIT;
+
+-- 10. Replay convergence: a second manifest for the same (organization,
+-- candidate, fingerprint) triple with a genuinely different id is rejected
+-- by the unique constraint (the repository itself avoids this by using
+-- ON CONFLICT DO NOTHING; a bare INSERT proves the constraint is real).
+DO $$
+DECLARE
+  org1 uuid := '00000000-0000-4000-8000-000000000001';
+  candidate_a uuid := '14030000-0000-4000-8000-000000000501';
+  decision_a uuid := '14070000-0000-4000-8000-000000000601';
+  rejected boolean := false;
+BEGIN
+  BEGIN
+    INSERT INTO kai.grant_response_packet_export_manifests (organization_id, grant_response_packet_export_candidate_id, effective_authority_decision_id, effective_authority_decision_type, fingerprint_contract_version, canonical_fingerprint, created_by)
+    VALUES (org1, candidate_a, decision_a, 'export_authority_granted', 'kai-sprint2-p14-08a-grant-response-packet-export-manifest-fingerprint-v1', repeat('d', 64), org1);
+  EXCEPTION WHEN unique_violation THEN
+    rejected := true;
+  END;
+  INSERT INTO p14_08a_failure_results VALUES ('replay_convergence_unique_rejects_duplicate_insert', CASE WHEN rejected THEN 'PASS' ELSE 'FAIL' END, 'a bare duplicate INSERT for the same (organization, candidate, fingerprint) triple is rejected by the convergence-unique constraint');
+END $$;
+
+-- 11/12. The append-only trigger rejects UPDATE and DELETE.
+DO $$
+DECLARE
+  rejected boolean;
+BEGIN
+  rejected := false;
+  BEGIN
+    UPDATE kai.grant_response_packet_export_manifests SET canonical_fingerprint = repeat('9', 64) WHERE grant_response_packet_export_manifest_id = '14080000-0000-4000-8000-000000000701';
+  EXCEPTION WHEN OTHERS THEN
+    rejected := true;
+  END;
+  INSERT INTO p14_08a_failure_results VALUES ('append_only_update_rejected', CASE WHEN rejected THEN 'PASS' ELSE 'FAIL' END, 'UPDATE of an existing manifest row is rejected');
+
+  rejected := false;
+  BEGIN
+    DELETE FROM kai.grant_response_packet_export_manifests WHERE grant_response_packet_export_manifest_id = '14080000-0000-4000-8000-000000000701';
+  EXCEPTION WHEN OTHERS THEN
+    rejected := true;
+  END;
+  INSERT INTO p14_08a_failure_results VALUES ('append_only_delete_rejected', CASE WHEN rejected THEN 'PASS' ELSE 'FAIL' END, 'DELETE of an existing manifest row is rejected');
+END $$;
+
+SELECT * FROM p14_08a_failure_results ORDER BY check_name;
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM p14_08a_failure_results WHERE status <> 'PASS') THEN
+    RAISE EXCEPTION 'P14-08A grant-response-packet-export-manifest-foundation failure-checks verifier failed';
+  END IF;
+END $$;
+
+
+============================================================
+FILE: scripts/kai-sprint2-p14-08-a-grant-response-packet-export-manifest-foundation-smoke-seed.sql
+============================================================
+BEGIN;
+
+INSERT INTO kai.organizations (organization_id, name, organization_code)
+VALUES ('00000000-0000-4000-8000-000000000001', 'P14-03 Smoke Org', 'p14-03-smoke-org')
+ON CONFLICT (organization_id) DO NOTHING;
+
+INSERT INTO kai.organizations (organization_id, name, organization_code)
+VALUES ('00000000-0000-4000-8000-000000000002', 'P14-03 Smoke Other Org', 'p14-03-smoke-other-org')
+ON CONFLICT (organization_id) DO NOTHING;
+
+INSERT INTO kai.engagements (engagement_id, organization_id, engagement_code)
+VALUES ('14030000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000001', 'p14-03-smoke-engagement')
+ON CONFLICT (engagement_id) DO NOTHING;
+
+INSERT INTO kai.grant_response_packet_export_identities (
+  grant_response_packet_export_identity_id, organization_id, engagement_id, packet_audience, created_by
+)
+VALUES (
+  '14030000-0000-4000-8000-000000000201',
+  '00000000-0000-4000-8000-000000000001',
+  '14030000-0000-4000-8000-000000000001',
+  'funder',
+  '00000000-0000-4000-8000-000000000901'
+)
+ON CONFLICT (organization_id, engagement_id, packet_audience) DO NOTHING;
+
+-- Candidate A - the exact packet export candidate this package's manifest
+-- proofs are bound to (the same row P14-03/P14-07B1's own smoke-seeds mint).
+INSERT INTO kai.grant_response_packet_export_candidates (
+  grant_response_packet_export_candidate_id, organization_id, grant_response_packet_export_identity_id,
+  fingerprint_contract_version, canonical_fingerprint, created_by
+)
+VALUES (
+  '14030000-0000-4000-8000-000000000501',
+  '00000000-0000-4000-8000-000000000001',
+  '14030000-0000-4000-8000-000000000201',
+  'kai-sprint2-p14-03-grant-response-packet-export-candidate-fingerprint-v1',
+  repeat('b', 64),
+  '00000000-0000-4000-8000-000000000901'
+)
+ON CONFLICT (organization_id, grant_response_packet_export_identity_id, canonical_fingerprint) DO NOTHING;
+
+-- Candidate B - a second, distinct candidate under the SAME packet identity,
+-- used to prove a manifest bound to candidate A can never represent
+-- candidate B.
+INSERT INTO kai.grant_response_packet_export_candidates (
+  grant_response_packet_export_candidate_id, organization_id, grant_response_packet_export_identity_id,
+  fingerprint_contract_version, canonical_fingerprint, created_by
+)
+VALUES (
+  '14070000-0000-4000-8000-000000000503',
+  '00000000-0000-4000-8000-000000000001',
+  '14030000-0000-4000-8000-000000000201',
+  'kai-sprint2-p14-03-grant-response-packet-export-candidate-fingerprint-v1',
+  repeat('c', 64),
+  '00000000-0000-4000-8000-000000000901'
+)
+ON CONFLICT (organization_id, grant_response_packet_export_identity_id, canonical_fingerprint) DO NOTHING;
+
+-- Root grant on candidate A only - the exact effective authority decision
+-- this package's manifest FK binds to.
+INSERT INTO kai.grant_response_packet_human_authority_decisions (
+  decision_id, organization_id, grant_response_packet_export_candidate_id, decision_type, decision_action,
+  decided_by, decided_by_role
+)
+VALUES (
+  '14070000-0000-4000-8000-000000000601',
+  '00000000-0000-4000-8000-000000000001',
+  '14030000-0000-4000-8000-000000000501',
+  'export_authority_granted',
+  'grant',
+  '00000000-0000-4000-8000-000000000901',
+  'gk_admin'
+)
+ON CONFLICT DO NOTHING;
+
+-- Candidate A's manifest, bound to candidate A's own effective decision.
+INSERT INTO kai.grant_response_packet_export_manifests (
+  grant_response_packet_export_manifest_id, organization_id, grant_response_packet_export_candidate_id,
+  effective_authority_decision_id, effective_authority_decision_type,
+  fingerprint_contract_version, canonical_fingerprint, created_by
+)
+VALUES (
+  '14080000-0000-4000-8000-000000000701',
+  '00000000-0000-4000-8000-000000000001',
+  '14030000-0000-4000-8000-000000000501',
+  '14070000-0000-4000-8000-000000000601',
+  'export_authority_granted',
+  'kai-sprint2-p14-08a-grant-response-packet-export-manifest-fingerprint-v1',
+  repeat('d', 64),
+  '00000000-0000-4000-8000-000000000901'
+)
+ON CONFLICT (organization_id, grant_response_packet_export_candidate_id, canonical_fingerprint) DO NOTHING;
+
+COMMIT;
+
+
+============================================================
+FILE: scripts/kai-sprint2-p14-08-a-grant-response-packet-export-manifest-foundation-smoke-verifier.sql
+============================================================
+DROP TABLE IF EXISTS p14_08a_smoke_results;
+CREATE TEMP TABLE p14_08a_smoke_results (
+  check_name text PRIMARY KEY,
+  status text NOT NULL,
+  detail text NOT NULL
+);
+
+INSERT INTO p14_08a_smoke_results
+SELECT 'candidate_a_manifest_bound_to_candidate_a_own_decision',
+       CASE WHEN EXISTS (
+              SELECT 1
+                FROM kai.grant_response_packet_export_manifests m
+               WHERE m.grant_response_packet_export_manifest_id = '14080000-0000-4000-8000-000000000701'
+                 AND m.grant_response_packet_export_candidate_id = '14030000-0000-4000-8000-000000000501'
+                 AND m.effective_authority_decision_id = '14070000-0000-4000-8000-000000000601'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'the seeded manifest is bound to exactly candidate A and its own effective decision';
+
+INSERT INTO p14_08a_smoke_results
+SELECT 'candidate_b_has_no_manifest',
+       CASE WHEN NOT EXISTS (
+              SELECT 1 FROM kai.grant_response_packet_export_manifests
+               WHERE grant_response_packet_export_candidate_id = '14070000-0000-4000-8000-000000000503'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'candidate A''s manifest creates no manifest row for candidate B';
+
+-- Replay: the same effective decision for the same candidate converges to
+-- the SAME row via ON CONFLICT DO NOTHING - no second row is ever created.
+INSERT INTO kai.grant_response_packet_export_manifests (
+  organization_id, grant_response_packet_export_candidate_id,
+  effective_authority_decision_id, effective_authority_decision_type,
+  fingerprint_contract_version, canonical_fingerprint, created_by
+)
+VALUES (
+  '00000000-0000-4000-8000-000000000001',
+  '14030000-0000-4000-8000-000000000501',
+  '14070000-0000-4000-8000-000000000601',
+  'export_authority_granted',
+  'kai-sprint2-p14-08a-grant-response-packet-export-manifest-fingerprint-v1',
+  repeat('d', 64),
+  '00000000-0000-4000-8000-000000000901'
+)
+ON CONFLICT (organization_id, grant_response_packet_export_candidate_id, canonical_fingerprint) DO NOTHING;
+
+INSERT INTO p14_08a_smoke_results
+SELECT 'replay_converges_to_exactly_one_row',
+       CASE WHEN (
+              SELECT COUNT(*) FROM kai.grant_response_packet_export_manifests
+               WHERE grant_response_packet_export_candidate_id = '14030000-0000-4000-8000-000000000501'
+            ) = 1
+            THEN 'PASS' ELSE 'FAIL' END,
+       'resubmitting the same effective-authority state for the same candidate never creates a second manifest row';
+
+SELECT * FROM p14_08a_smoke_results ORDER BY check_name;
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM p14_08a_smoke_results WHERE status <> 'PASS') THEN
+    RAISE EXCEPTION 'P14-08A grant-response-packet-export-manifest-foundation smoke verifier failed';
+  END IF;
+END $$;
+
+
+============================================================
+FILE: scripts/kai-sprint2-p14-08-a-grant-response-packet-export-manifest-foundation-verifier.sql
+============================================================
+DROP TABLE IF EXISTS p14_08a_results;
+CREATE TEMP TABLE p14_08a_results (
+  check_name text PRIMARY KEY,
+  status text NOT NULL,
+  detail text NOT NULL
+);
+
+INSERT INTO p14_08a_results
+SELECT 'grant_response_packet_export_manifests_table_present',
+       CASE WHEN to_regclass('kai.grant_response_packet_export_manifests') IS NOT NULL
+            THEN 'PASS' ELSE 'FAIL' END,
+       'kai.grant_response_packet_export_manifests exists';
+
+INSERT INTO p14_08a_results
+SELECT 'id_org_unique_present',
+       CASE WHEN EXISTS (
+              SELECT 1 FROM pg_constraint
+               WHERE conname = 'grppem_p14_08a_id_org_unique'
+                 AND conrelid = 'kai.grant_response_packet_export_manifests'::regclass
+                 AND contype = 'u'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'UNIQUE (grant_response_packet_export_manifest_id, organization_id) is present';
+
+INSERT INTO p14_08a_results
+SELECT 'replay_convergence_unique_present',
+       CASE WHEN EXISTS (
+              SELECT 1 FROM pg_constraint
+               WHERE conname = 'grppem_p14_08a_replay_convergence_unique'
+                 AND conrelid = 'kai.grant_response_packet_export_manifests'::regclass
+                 AND contype = 'u'
+                 AND pg_get_constraintdef(oid) LIKE '%UNIQUE (organization_id, grant_response_packet_export_candidate_id, canonical_fingerprint)%'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'the same effective-authority state submitted twice for the same packet candidate converges to exactly one manifest row';
+
+INSERT INTO p14_08a_results
+SELECT 'candidate_fk_is_tenant_safe_composite_into_p14_03_table',
+       CASE WHEN EXISTS (
+              SELECT 1
+                FROM pg_constraint c
+               WHERE c.conname = 'grppem_p14_08a_candidate_fk'
+                 AND c.conrelid = 'kai.grant_response_packet_export_manifests'::regclass
+                 AND c.contype = 'f'
+                 AND c.confrelid = 'kai.grant_response_packet_export_candidates'::regclass
+                 AND pg_get_constraintdef(c.oid) LIKE '%FOREIGN KEY (grant_response_packet_export_candidate_id, organization_id)%'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'the candidate FK is a tenant-safe composite FK into kai.grant_response_packet_export_candidates (P14-03), never kai.export_candidates';
+
+INSERT INTO p14_08a_results
+SELECT 'authority_decision_fk_is_tenant_and_candidate_safe_into_p14_07b1_table',
+       CASE WHEN EXISTS (
+              SELECT 1
+                FROM pg_constraint c
+               WHERE c.conname = 'grppem_p14_08a_authority_decision_fk'
+                 AND c.conrelid = 'kai.grant_response_packet_export_manifests'::regclass
+                 AND c.contype = 'f'
+                 AND c.confrelid = 'kai.grant_response_packet_human_authority_decisions'::regclass
+                 AND pg_get_constraintdef(c.oid) LIKE '%FOREIGN KEY (effective_authority_decision_id, organization_id, grant_response_packet_export_candidate_id, effective_authority_decision_type)%'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'the authority-decision FK is a tenant/candidate-safe composite FK into kai.grant_response_packet_human_authority_decisions (P14-07B1), never kai.human_authority_decisions';
+
+INSERT INTO p14_08a_results
+SELECT 'decision_type_pinned_to_export_authority_granted',
+       CASE WHEN EXISTS (
+              SELECT 1 FROM pg_constraint
+               WHERE conname = 'grppem_p14_08a_decision_type_check'
+                 AND conrelid = 'kai.grant_response_packet_export_manifests'::regclass
+                 AND contype = 'c'
+                 AND pg_get_constraintdef(oid) = 'CHECK ((effective_authority_decision_type = ''export_authority_granted''::text))'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'no packet_approved/packet_funder_ready/packet_finalized vocabulary - only export_authority_granted exists';
+
+INSERT INTO p14_08a_results
+SELECT 'fingerprint_contract_version_check_present',
+       CASE WHEN EXISTS (
+              SELECT 1 FROM pg_constraint
+               WHERE conname = 'grppem_p14_08a_fingerprint_contract_version_check'
+                 AND conrelid = 'kai.grant_response_packet_export_manifests'::regclass
+                 AND contype = 'c'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'fingerprint_contract_version is pinned to the exact P14-08A version string';
+
+INSERT INTO p14_08a_results
+SELECT 'canonical_fingerprint_check_present',
+       CASE WHEN EXISTS (
+              SELECT 1 FROM pg_constraint
+               WHERE conname = 'grppem_p14_08a_canonical_fingerprint_check'
+                 AND conrelid = 'kai.grant_response_packet_export_manifests'::regclass
+                 AND contype = 'c'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'canonical_fingerprint is checked as a 64-hex-char sha256 digest';
+
+INSERT INTO p14_08a_results
+SELECT 'created_by_type_pinned_to_human',
+       CASE WHEN EXISTS (
+              SELECT 1 FROM pg_constraint
+               WHERE conname = 'grppem_p14_08a_created_by_type_check'
+                 AND conrelid = 'kai.grant_response_packet_export_manifests'::regclass
+                 AND contype = 'c'
+                 AND pg_get_constraintdef(oid) = 'CHECK ((created_by_type = ''human''::text))'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'no assistant/system actor can ever create a manifest row here';
+
+INSERT INTO p14_08a_results
+SELECT 'append_only_trigger_present',
+       CASE WHEN EXISTS (
+              SELECT 1 FROM pg_trigger
+               WHERE tgname = 'trg_p14_08a_grppem_append_only'
+                 AND tgrelid = 'kai.grant_response_packet_export_manifests'::regclass
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'the append-only BEFORE UPDATE OR DELETE trigger is present';
+
+INSERT INTO p14_08a_results
+SELECT 'no_requested_audience_column',
+       CASE WHEN NOT EXISTS (
+              SELECT 1 FROM information_schema.columns
+               WHERE table_schema = 'kai' AND table_name = 'grant_response_packet_export_manifests'
+                 AND column_name = 'requested_audience'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'no requested_audience column - a Grant Response Packet audience is always exactly funder';
+
+INSERT INTO p14_08a_results
+SELECT 'no_export_review_queue_item_column',
+       CASE WHEN NOT EXISTS (
+              SELECT 1 FROM information_schema.columns
+               WHERE table_schema = 'kai' AND table_name = 'grant_response_packet_export_manifests'
+                 AND column_name = 'export_review_queue_item_id'
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'no export_review_queue_item_id column - no packet-level review-queue-item binding concept exists here';
+
+INSERT INTO p14_08a_results
+SELECT 'export_manifests_p3_19_unaltered',
+       CASE WHEN EXISTS (
+              SELECT 1 FROM pg_constraint
+               WHERE conname = 'export_manifests_p3_19_candidate_fk'
+                 AND conrelid = 'kai.export_manifests'::regclass
+                 AND confrelid = 'kai.export_candidates'::regclass
+            )
+            THEN 'PASS' ELSE 'FAIL' END,
+       'the existing P3-19 kai.export_manifests -> kai.export_candidates FK is completely unchanged';
+
+SELECT * FROM p14_08a_results ORDER BY check_name;
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM p14_08a_results WHERE status <> 'PASS') THEN
+    RAISE EXCEPTION 'P14-08A grant-response-packet-export-manifest-foundation verifier failed';
+  END IF;
+END $$;
