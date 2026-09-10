@@ -1230,13 +1230,14 @@ export default function ImpactEvidenceLibrary() {
   }, [organizationId]);
 
   const generateDraft = useCallback(async (pathBuilder, idempotencyPrefix) => {
-    if (audience !== "internal" || selectedGenerationClaimIds.length === 0) return;
+    if (audience !== "internal" || selectedGenerationClaimIds.length === 0 || !engagementId) return;
     setGeneratingDraft(true);
     setMessage("");
     setGeneratedDraftPacket(null);
     const createResult = await postJson(pathBuilder(organizationId), {
       claim_ids: selectedGenerationClaimIds,
       idempotency_key: `${idempotencyPrefix}-${selectedGenerationClaimIds.join("-")}`,
+      engagement_id: engagementId,
     });
     if (createResult.statusCode !== 201 && createResult.statusCode !== 200) {
       setGeneratingDraft(false);
@@ -1258,7 +1259,7 @@ export default function ImpactEvidenceLibrary() {
       return;
     }
     setGeneratedDraftPacket(projectGeneratedDraftPacket(packetResult.body.data));
-  }, [audience, organizationId, selectedGenerationClaimIds, loadGeneratedDrafts]);
+  }, [audience, organizationId, engagementId, selectedGenerationClaimIds, loadGeneratedDrafts]);
 
   const generateEvidenceSummary = useCallback(
     () => generateDraft(createEvidenceSummaryPath, "evidence-summary"),
@@ -2093,7 +2094,7 @@ export default function ImpactEvidenceLibrary() {
                 type="button"
                 className="btn btn-sm btn-primary mt-3 w-100"
                 onClick={generateEvidenceSummary}
-                disabled={generatingDraft || selectedGenerationClaimIds.length === 0}
+                disabled={generatingDraft || selectedGenerationClaimIds.length === 0 || !engagementId}
               >
                 {generatingDraft ? "Generating..." : "Generate evidence summary"}
               </button>
@@ -2103,7 +2104,7 @@ export default function ImpactEvidenceLibrary() {
                 type="button"
                 className="btn btn-sm btn-outline-primary mt-2 w-100"
                 onClick={generateImpactNarrative}
-                disabled={generatingDraft || selectedGenerationClaimIds.length === 0}
+                disabled={generatingDraft || selectedGenerationClaimIds.length === 0 || !engagementId}
               >
                 {generatingDraft ? "Generating..." : "Generate Impact Narrative"}
               </button>

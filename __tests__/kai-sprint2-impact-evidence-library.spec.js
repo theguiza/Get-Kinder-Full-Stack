@@ -37,9 +37,11 @@ import {
   coverageFunderAcceptancePath,
   coverageInternalAcceptancePath,
   createEvidenceSummaryPath,
+  createImpactNarrativePath,
   decisionRequiresApprovedAudiences,
   decisionRequiresLimitationNotes,
   eligibleClaimsPath,
+  errorText,
   evidenceReviewDecisionBody,
   evidenceReviewDecisionValidationError,
   generatedContentReviewCompletePath,
@@ -927,6 +929,7 @@ test("Impact Evidence Library source has only the Stage-A internal generation ca
   assert.match(uiSource + logicSource, /generated-content-drafts\/evidence-summary/);
   assert.match(uiSource + logicSource, /claim_ids/);
   assert.match(uiSource + logicSource, /idempotency_key/);
+  assert.match(uiSource + logicSource, /engagement_id/);
   // Website export/review UX successor: this page is now allowed to request
   // (or replay) the existing gk_admin-only export-review queue item for a
   // fully-reviewed draft and link to the existing gk-export-review-detail
@@ -956,6 +959,148 @@ test("Impact Evidence Library source has only the Stage-A internal generation ca
   assert.doesNotMatch(uiSource, /\bPUT\b|\bPATCH\b|\bDELETE\b|assistant/i);
   assert.match(uiSource + logicSource, /export-review-request/);
   assert.doesNotMatch(uiSource + logicSource, /raw_content|signed_url|storage_object|api[_-]?key|secret/i);
+});
+
+// KAI P13->P14 engagement-binding repair: extracts the exact, unmodified
+// `generateDraft` useCallback body from the committed JSX via string slicing
+// and executes it for real via `new Function`, passing in only the free
+// identifiers the real closure captures. Because `new Function` resolves
+// free identifiers against nothing but its declared parameters and true
+// globals, successful execution is itself proof the handler references
+// nothing beyond the declared list - no requestedAudience, no fabricated
+// engagement fallback, no other new browser-controlled field.
+function extractGenerateDraftHandlerSource(uiSource) {
+  const openMarker = "const generateDraft = useCallback(async (pathBuilder, idempotencyPrefix) => {";
+  const openIdx = uiSource.indexOf(openMarker);
+  assert.notEqual(openIdx, -1, "could not locate the generateDraft useCallback handler");
+  const bodyStart = openIdx + "const generateDraft = useCallback(".length;
+  const tailMarker = "\n  }, [audience, organizationId, engagementId, selectedGenerationClaimIds, loadGeneratedDrafts]);";
+  const tailIdx = uiSource.indexOf(tailMarker, openIdx);
+  assert.notEqual(tailIdx, -1, "could not locate the end of the generateDraft useCallback handler");
+  const bodyEnd = tailIdx + "\n  }".length;
+  return uiSource.slice(bodyStart, bodyEnd);
+}
+
+function buildGenerateDraft(handlerSource, overrides = {}) {
+  const factory = new Function(
+    "audience", "organizationId", "engagementId", "selectedGenerationClaimIds",
+    "setGeneratingDraft", "setMessage", "setGeneratedDraftPacket",
+    "postJson", "getJson", "errorText", "loadGeneratedDrafts", "setSelectedGeneratedDraftId",
+    "generatedDraftReviewPacketPath", "projectGeneratedDraftPacket",
+    `return (${handlerSource});`,
+  );
+  const state = {
+    generatingDraft: null,
+    message: null,
+    generatedDraftPacket: null,
+    selectedGeneratedDraftId: null,
+    loadGeneratedDraftsCalls: 0,
+    postJsonCalls: [],
+    getJsonCalls: [],
+  };
+  const defaults = {
+    audience: "internal",
+    organizationId,
+    engagementId,
+    selectedGenerationClaimIds: [claimId],
+    setGeneratingDraft: (value) => { state.generatingDraft = value; },
+    setMessage: (value) => { state.message = value; },
+    setGeneratedDraftPacket: (value) => { state.generatedDraftPacket = value; },
+    postJson: async (path, body) => {
+      state.postJsonCalls.push({ path, body });
+      return {
+        statusCode: 201,
+        body: { ok: true, data: { generatedContentDraftId: "00000000-0000-4000-8000-000000000999" } },
+      };
+    },
+    getJson: async (path) => {
+      state.getJsonCalls.push({ path });
+      return { statusCode: 200, body: { ok: true, data: { generatedContentDraftId: "00000000-0000-4000-8000-000000000999" } } };
+    },
+    errorText,
+    loadGeneratedDrafts: async () => { state.loadGeneratedDraftsCalls += 1; },
+    setSelectedGeneratedDraftId: (value) => { state.selectedGeneratedDraftId = value; },
+    generatedDraftReviewPacketPath,
+    projectGeneratedDraftPacket,
+    ...overrides,
+  };
+  const generateDraft = factory(
+    defaults.audience, defaults.organizationId, defaults.engagementId, defaults.selectedGenerationClaimIds,
+    defaults.setGeneratingDraft, defaults.setMessage, defaults.setGeneratedDraftPacket,
+    defaults.postJson, defaults.getJson, defaults.errorText, defaults.loadGeneratedDrafts, defaults.setSelectedGeneratedDraftId,
+    defaults.generatedDraftReviewPacketPath, defaults.projectGeneratedDraftPacket,
+  );
+  return { generateDraft, state };
+}
+
+test("Impact Evidence Library 'generateDraft' handler: exact extracted source is a real, standalone async function referencing only its declared closure identifiers", () => {
+  const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+  const handlerSource = extractGenerateDraftHandlerSource(uiSource);
+  assert.doesNotThrow(() => new Function(
+    "audience", "organizationId", "engagementId", "selectedGenerationClaimIds",
+    "setGeneratingDraft", "setMessage", "setGeneratedDraftPacket",
+    "postJson", "getJson", "errorText", "loadGeneratedDrafts", "setSelectedGeneratedDraftId",
+    "generatedDraftReviewPacketPath", "projectGeneratedDraftPacket",
+    `return (${handlerSource});`,
+  ));
+});
+
+test("Impact Evidence Library internal evidence-summary generation request: real handler execution sends claim_ids, idempotency_key, and engagement_id only", async () => {
+  const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+  const handlerSource = extractGenerateDraftHandlerSource(uiSource);
+  const { generateDraft, state } = buildGenerateDraft(handlerSource);
+  await generateDraft(createEvidenceSummaryPath, "evidence-summary");
+  assert.equal(state.postJsonCalls.length, 1);
+  assert.equal(state.postJsonCalls[0].path, createEvidenceSummaryPath(organizationId));
+  assert.deepEqual(Object.keys(state.postJsonCalls[0].body).sort(), ["claim_ids", "engagement_id", "idempotency_key"]);
+  assert.deepEqual(state.postJsonCalls[0].body.claim_ids, [claimId]);
+  assert.equal(state.postJsonCalls[0].body.engagement_id, engagementId);
+  assert.equal(typeof state.postJsonCalls[0].body.idempotency_key, "string");
+  assert.doesNotMatch(JSON.stringify(state.postJsonCalls[0].body), /requested_audience|requestedAudience/);
+});
+
+test("Impact Evidence Library internal impact-narrative generation request: real handler execution sends claim_ids, idempotency_key, and engagement_id only", async () => {
+  const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+  const handlerSource = extractGenerateDraftHandlerSource(uiSource);
+  const { generateDraft, state } = buildGenerateDraft(handlerSource);
+  await generateDraft(createImpactNarrativePath, "impact-narrative");
+  assert.equal(state.postJsonCalls.length, 1);
+  assert.equal(state.postJsonCalls[0].path, createImpactNarrativePath(organizationId));
+  assert.deepEqual(Object.keys(state.postJsonCalls[0].body).sort(), ["claim_ids", "engagement_id", "idempotency_key"]);
+  assert.deepEqual(state.postJsonCalls[0].body.claim_ids, [claimId]);
+  assert.equal(state.postJsonCalls[0].body.engagement_id, engagementId);
+  assert.equal(typeof state.postJsonCalls[0].body.idempotency_key, "string");
+  assert.doesNotMatch(JSON.stringify(state.postJsonCalls[0].body), /requested_audience|requestedAudience/);
+});
+
+test("Impact Evidence Library generation handler: no request is issued (evidence-summary or impact-narrative) without an explicit selected engagement, and no latest/default/fallback engagement is inferred", async () => {
+  const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+  const handlerSource = extractGenerateDraftHandlerSource(uiSource);
+
+  const { generateDraft: generateEvidenceSummaryNoEngagement, state: evidenceSummaryState } = buildGenerateDraft(handlerSource, { engagementId: "" });
+  await generateEvidenceSummaryNoEngagement(createEvidenceSummaryPath, "evidence-summary");
+  assert.deepEqual(evidenceSummaryState.postJsonCalls, []);
+  assert.deepEqual(evidenceSummaryState.getJsonCalls, []);
+  assert.equal(evidenceSummaryState.generatingDraft, null);
+
+  const { generateDraft: generateImpactNarrativeNoEngagement, state: impactNarrativeState } = buildGenerateDraft(handlerSource, { engagementId: "" });
+  await generateImpactNarrativeNoEngagement(createImpactNarrativePath, "impact-narrative");
+  assert.deepEqual(impactNarrativeState.postJsonCalls, []);
+  assert.deepEqual(impactNarrativeState.getJsonCalls, []);
+  assert.equal(impactNarrativeState.generatingDraft, null);
+
+  // Sanity: the same handler DOES issue a request once an explicit engagement
+  // is selected, proving the prior assertions are a genuine guard and not an
+  // artifact of some other missing precondition.
+  const { generateDraft: generateWithEngagement, state: withEngagementState } = buildGenerateDraft(handlerSource);
+  await generateWithEngagement(createEvidenceSummaryPath, "evidence-summary");
+  assert.equal(withEngagementState.postJsonCalls.length, 1);
+});
+
+test("Impact Evidence Library generation buttons: disabled whenever no explicit engagement is selected", () => {
+  const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+  const disabledMatches = uiSource.match(/disabled=\{generatingDraft \|\| selectedGenerationClaimIds\.length === 0 \|\| !engagementId\}/g) || [];
+  assert.equal(disabledMatches.length, 2);
 });
 
 test("Impact Evidence Library bootstraps its organization selection from the server, never from a typed or fabricated id", () => {
