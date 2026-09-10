@@ -25,6 +25,7 @@ import {
   validateCreateExportCandidateRequest,
   validateCreateGrantResponsePacketExportCandidateRequest,
   validateCreateExportManifestRequest,
+  validateGrantResponsePacketHumanFinalReleaseAuthorityRequest,
   validateHumanFinalReleaseAuthorityRequest,
   validateIntakeBatchFilesQuery,
   validateFilePolicyBlockRequest,
@@ -55,6 +56,7 @@ import {
   createProductionMetadataOnlyAuditForGeneratedDraftExportReview,
   createProductionMetadataOnlyAuditForGrantResponsePacketExportCandidate,
   createProductionMetadataOnlyAuditForGrantResponsePacketExportReview,
+  createProductionMetadataOnlyAuditForGrantResponsePacketHumanAuthorityDecision,
   createProductionMetadataOnlyAuditForExportManifest,
   createProductionMetadataOnlyAuditForHumanFinalReleaseAuthority,
   createProductionMetadataOnlyAuditForRequirementAssessment,
@@ -78,6 +80,7 @@ let exportManifestDocxServicePromise = null;
 let grantResponsePacketMarkdownServicePromise = null;
 let grantResponsePacketExportCandidateServicePromise = null;
 let grantResponsePacketExportReviewServicePromise = null;
+let grantResponsePacketHumanFinalReleaseAuthorityServicePromise = null;
 let evidenceLineageServicePromise = null;
 let evidenceCoverageAssessmentServicePromise = null;
 let claimProposalServicePromise = null;
@@ -3260,6 +3263,86 @@ function generatedContentReviewQueueIdentifier(req = {}) {
   return { ...root, reviewQueueItemId };
 }
 
+async function getGrantResponsePacketHumanFinalReleaseAuthorityService() {
+  if (intakeServiceOverride?.recordGrantResponsePacketHumanFinalReleaseAuthorityDecision) return intakeServiceOverride;
+  grantResponsePacketHumanFinalReleaseAuthorityServicePromise ||= import(
+    "../services/kaiGrantResponsePacketHumanFinalReleaseAuthorityService.js"
+  );
+  return grantResponsePacketHumanFinalReleaseAuthorityServicePromise;
+}
+
+function validateGrantResponsePacketHumanFinalReleaseAuthorityRequestOrSend(req, res) {
+  if (!metadataContentTypeIsSupported(req)) {
+    sendKaiError(res, "unsupported_media_type");
+    return null;
+  }
+  const identifiers = grantResponsePacketExportCandidateReviewIdentifier(req);
+  if (!identifiers) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker(
+        "invalid_uuid_field",
+        "organization_id_engagement_id_or_grant_response_packet_export_candidate_id",
+      )],
+    });
+    return null;
+  }
+  const result = validateGrantResponsePacketHumanFinalReleaseAuthorityRequest(req.body);
+  if (!result.ok) {
+    sendKaiError(res, "validation_blocker", { blockers: result.blockers });
+    return null;
+  }
+  return identifiers;
+}
+
+/**
+ * P14-07: governed human final-release authority application for the EXACT
+ * existing, immutable P14-03 packet export candidate identified by the
+ * route's own grantResponsePacketExportCandidateId - never a client-selected
+ * latest/newest/preferred candidate. organizationId, engagementId, and the
+ * candidate id all come from the route path; actorContext/now are always
+ * server-derived. The request body carries only decision_action
+ * (grant|revoke) - never requested_audience (a Grant Response Packet's
+ * audience is always exactly "funder"), fingerprint, members, memberCount,
+ * review state, eligibility, authority state, or manifest identity. Contains
+ * no SQL and no direct database access - delegates once to
+ * kaiGrantResponsePacketHumanFinalReleaseAuthorityService, which itself
+ * delegates once to the existing P14-07B1
+ * postgresGrantResponsePacketHumanAuthorityDecisionRepository.js. Recording a
+ * decision here grants only the same "human final-release authority"
+ * concept the existing single-draft P3-17 route already grants - no final
+ * packet manifest and no final packet bytes are ever produced by this
+ * route.
+ */
+router.post(
+  "/admin/organizations/:organizationId/engagements/:engagementId/grant-response-packet/export-candidates/:grantResponsePacketExportCandidateId/final-release-authority",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    const identifiers = validateGrantResponsePacketHumanFinalReleaseAuthorityRequestOrSend(req, res);
+    if (!identifiers) return;
+    const payload = requestPayload(req);
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    return invokeService(res, async () => {
+      const service = await getGrantResponsePacketHumanFinalReleaseAuthorityService();
+      return service.recordGrantResponsePacketHumanFinalReleaseAuthorityDecision({
+        organizationId: identifiers.organizationId,
+        engagementId: identifiers.engagementId,
+        grantResponsePacketExportCandidateId: identifiers.grantResponsePacketExportCandidateId,
+        decisionAction: payload.decision_action,
+        actorContext,
+        now,
+      }, {
+        metadataOnlyAudit: createProductionMetadataOnlyAuditForGrantResponsePacketHumanAuthorityDecision({
+          organizationId: identifiers.organizationId,
+          engagementId: identifiers.engagementId,
+          actorContext,
+          now,
+        }),
+      });
+    }, 201);
+  },
+);
+
 function validateGeneratedContentReviewTransitionRequestOrSend(req, res) {
   if (!metadataContentTypeIsSupported(req)) {
     sendKaiError(res, "unsupported_media_type");
@@ -4004,6 +4087,7 @@ export const __testables = {
   grantResponsePacketExportReviewStartIdentifier,
   validateStartGrantResponsePacketExportReviewRequestOrSend,
   validateCompleteGrantResponsePacketExportReviewRequestOrSend,
+  validateGrantResponsePacketHumanFinalReleaseAuthorityRequestOrSend,
   sendCsvAttachment,
   sendPdfAttachment,
   sendDocxAttachment,

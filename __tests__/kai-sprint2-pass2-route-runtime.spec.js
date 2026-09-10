@@ -186,6 +186,14 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // grantResponsePacketExportCandidateId. Grants no approval, no export
     // authority, no final release, and no manifest.
     "/admin/organizations/:organizationId/engagements/:engagementId/grant-response-packet/export-candidates/:grantResponsePacketExportCandidateId/export-review-request",
+    // P14-07: governed human final-release authority grant/revoke for the
+    // exact existing P14-03 packet export candidate identified by the
+    // path's own grantResponsePacketExportCandidateId, wrapped around the
+    // existing P14-07B1 postgresGrantResponsePacketHumanAuthorityDecisionRepository.js.
+    // Grants only the same metadata-only "human final-release authority"
+    // concept the existing single-draft P3-17 route already grants - no
+    // packet manifest and no final packet bytes.
+    "/admin/organizations/:organizationId/engagements/:engagementId/grant-response-packet/export-candidates/:grantResponsePacketExportCandidateId/final-release-authority",
     "/admin/organizations/:organizationId/engagements/:engagementId/grant-response-packet/markdown",
     // KAI Package 2B-A: non-authoritative proposal that an external, governed
     // requirement set applies to this engagement.

@@ -39,6 +39,10 @@ function packetDto(overrides = {}) {
     queueStatus: null,
     reviewStatus: null,
     reviewUpdatedAt: null,
+    finalReleaseAuthorityEffective: null,
+    finalReleaseAuthorityReason: null,
+    finalExportEligible: null,
+    finalExportEligibilityBlockedReasons: null,
     drafts: [],
     ...overrides,
   };
@@ -84,6 +88,8 @@ function buildEffect({
     setGrantResponsePacketExportReviewStartError: (value) => stateLog.push(["reviewStartError", value]),
     setGrantResponsePacketExportReviewCompletePending: (value) => stateLog.push(["reviewCompletePending", value]),
     setGrantResponsePacketExportReviewCompleteError: (value) => stateLog.push(["reviewCompleteError", value]),
+    setGrantResponsePacketFinalReleaseAuthorityPending: (value) => stateLog.push(["finalReleaseAuthorityPending", value]),
+    setGrantResponsePacketFinalReleaseAuthorityError: (value) => stateLog.push(["finalReleaseAuthorityError", value]),
     setLoadingGrantResponsePacket: (value) => stateLog.push(["loading", value]),
   };
   const getJson = async (path) => {

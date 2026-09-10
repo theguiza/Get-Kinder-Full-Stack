@@ -113,6 +113,10 @@ function packet(overrides = {}) {
     queueStatus: null,
     reviewStatus: null,
     reviewUpdatedAt: null,
+    finalReleaseAuthorityEffective: null,
+    finalReleaseAuthorityReason: null,
+    finalExportEligible: null,
+    finalExportEligibilityBlockedReasons: null,
     drafts: [
       member(),
       member({

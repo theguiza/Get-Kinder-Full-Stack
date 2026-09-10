@@ -57,6 +57,20 @@ async function createDefaultGrantResponsePacketExportCandidateRepository() {
   return createPostgresGrantResponsePacketExportCandidateRepository();
 }
 
+async function createDefaultGrantResponsePacketHumanAuthorityDecisionRepository() {
+  const { createPostgresGrantResponsePacketHumanAuthorityDecisionRepository } = await import(
+    "../dictionary/postgresGrantResponsePacketHumanAuthorityDecisionRepository.js"
+  );
+  return createPostgresGrantResponsePacketHumanAuthorityDecisionRepository();
+}
+
+async function defaultEvaluateGrantResponsePacketFinalExportEligibility(input, dependencies) {
+  const { evaluateGrantResponsePacketFinalExportEligibility } = await import(
+    "./kaiGrantResponsePacketFinalExportEligibilityGateService.js"
+  );
+  return evaluateGrantResponsePacketFinalExportEligibility(input, dependencies);
+}
+
 async function composeCurrentGrantResponsePacketRenderModel(packet) {
   const { composeGrantResponsePacketRenderModelFromPacket } = await import(
     "./kaiGrantResponsePacketRenderModelService.js"
@@ -107,7 +121,7 @@ function isGrantResponsePacketDto(data) {
   if (!(Boolean(data)
     && typeof data === "object"
     && !Array.isArray(data)
-    && Object.keys(data).length === 10
+    && Object.keys(data).length === 14
     && Object.keys(data).every((key) => (
       key === "organizationId"
       || key === "engagementId"
@@ -119,6 +133,10 @@ function isGrantResponsePacketDto(data) {
       || key === "queueStatus"
       || key === "reviewStatus"
       || key === "reviewUpdatedAt"
+      || key === "finalReleaseAuthorityEffective"
+      || key === "finalReleaseAuthorityReason"
+      || key === "finalExportEligible"
+      || key === "finalExportEligibilityBlockedReasons"
     ))
     && UUID_PATTERN.test(data.organizationId)
     && UUID_PATTERN.test(data.engagementId)
@@ -138,6 +156,14 @@ function isGrantResponsePacketDto(data) {
       data.reviewUpdatedAt === null
       || (typeof data.reviewUpdatedAt === "string" && !Number.isNaN(Date.parse(data.reviewUpdatedAt)))
     )
+    && (data.finalReleaseAuthorityEffective === null || typeof data.finalReleaseAuthorityEffective === "boolean")
+    && (data.finalReleaseAuthorityReason === null || typeof data.finalReleaseAuthorityReason === "string")
+    && (data.finalExportEligible === null || typeof data.finalExportEligible === "boolean")
+    && (
+      data.finalExportEligibilityBlockedReasons === null
+      || (Array.isArray(data.finalExportEligibilityBlockedReasons)
+        && data.finalExportEligibilityBlockedReasons.every((reason) => typeof reason === "string"))
+    )
     && Array.isArray(data.drafts))) {
     return false;
   }
@@ -153,6 +179,14 @@ function isGrantResponsePacketDto(data) {
     if (data.queueStatus !== null) return false;
     if (data.reviewStatus !== null) return false;
     if (data.reviewUpdatedAt !== null) return false;
+    if (data.finalReleaseAuthorityEffective !== null) return false;
+    if (data.finalReleaseAuthorityReason !== null) return false;
+    if (data.finalExportEligible !== null) return false;
+    if (data.finalExportEligibilityBlockedReasons !== null) return false;
+  } else {
+    if (typeof data.finalReleaseAuthorityEffective !== "boolean") return false;
+    if (typeof data.finalExportEligible !== "boolean") return false;
+    if (!Array.isArray(data.finalExportEligibilityBlockedReasons)) return false;
   }
   if (data.reviewQueueItemId === null) {
     if (data.queueStatus !== null) return false;
@@ -238,6 +272,18 @@ export async function getGrantResponsePacket(input, dependencies = {}) {
     reviewStatus: null,
     reviewUpdatedAt: null,
   };
+  // P14-07: final-release authority state/effectiveness and final-export
+  // eligibility PASS/BLOCKED for the exact current candidate above - null
+  // whenever no exportReviewVisible actor, or no current candidate exists,
+  // mirroring the existing review-state null-linkage exactly. Computed from
+  // the SAME already-composed authoritative render model/candidate state
+  // below - never a second fingerprint/membership recomputation, and never
+  // exposes the raw validatorResult object (object_type/object_id/message)
+  // this package's evaluator produces internally.
+  let finalReleaseAuthorityEffective = null;
+  let finalReleaseAuthorityReason = null;
+  let finalExportEligible = null;
+  let finalExportEligibilityBlockedReasons = null;
   if (exportReviewVisible) {
     const currentRenderModel = await composeCurrentGrantResponsePacketRenderModel({
       organizationId: result.data.organizationId,
@@ -249,17 +295,23 @@ export async function getGrantResponsePacket(input, dependencies = {}) {
       queueStatus: null,
       reviewStatus: null,
       reviewUpdatedAt: null,
+      finalReleaseAuthorityEffective: null,
+      finalReleaseAuthorityReason: null,
+      finalExportEligible: null,
+      finalExportEligibilityBlockedReasons: null,
       drafts,
     });
     if (!currentRenderModel) return buildKaiError("system_error", { data: null });
     const candidateRepository = dependencies.grantResponsePacketExportCandidateRepository
       || (await createDefaultGrantResponsePacketExportCandidateRepository());
+    const composeRenderModelForCurrentState = dependencies.composeRenderModel
+      || (async () => ({ ok: true, data: currentRenderModel, error: null }));
     const candidateStateResult = await candidateRepository.readCurrentGrantResponsePacketExportCandidateReviewState({
       organizationId: input.organizationId,
       engagementId: input.engagementId,
       actorContext: input.actorContext,
     }, {
-      composeRenderModel: dependencies.composeRenderModel || (async () => ({ ok: true, data: currentRenderModel, error: null })),
+      composeRenderModel: composeRenderModelForCurrentState,
       renderModelDependencies: dependencies.renderModelDependencies,
     });
     if (!candidateStateResult.ok) {
@@ -275,6 +327,36 @@ export async function getGrantResponsePacket(input, dependencies = {}) {
       reviewStatus: candidateStateResult.data.reviewStatus,
       reviewUpdatedAt: candidateStateResult.data.reviewUpdatedAt,
     };
+
+    if (currentExportCandidateReviewState.grantResponsePacketExportCandidateId) {
+      const authorityRepository = dependencies.grantResponsePacketHumanAuthorityDecisionRepository
+        || (await createDefaultGrantResponsePacketHumanAuthorityDecisionRepository());
+      const evaluateEligibility = dependencies.evaluateGrantResponsePacketFinalExportEligibility
+        || defaultEvaluateGrantResponsePacketFinalExportEligibility;
+      const eligibilityResult = await evaluateEligibility({
+        organizationId: input.organizationId,
+        engagementId: input.engagementId,
+        grantResponsePacketExportCandidateId: currentExportCandidateReviewState.grantResponsePacketExportCandidateId,
+        actorContext: input.actorContext,
+      }, {
+        candidateRepository,
+        authorityRepository,
+        composeRenderModel: composeRenderModelForCurrentState,
+        renderModelDependencies: dependencies.renderModelDependencies,
+      });
+      if (!eligibilityResult.ok) {
+        return buildKaiError(eligibilityResult.error.code, {
+          status: eligibilityResult.error.status,
+          data: null,
+        });
+      }
+      finalReleaseAuthorityEffective = eligibilityResult.data.effectiveHumanExportAuthority;
+      finalReleaseAuthorityReason = eligibilityResult.data.effectivenessReason;
+      finalExportEligible = eligibilityResult.data.finalExportEligible;
+      finalExportEligibilityBlockedReasons = Array.isArray(eligibilityResult.data.validatorResult?.evidence?.failed_gates)
+        ? eligibilityResult.data.validatorResult.evidence.failed_gates
+        : [];
+    }
   }
 
   const data = {
@@ -283,6 +365,10 @@ export async function getGrantResponsePacket(input, dependencies = {}) {
     packetAudience: result.data.packetAudience,
     exportReviewVisible,
     ...currentExportCandidateReviewState,
+    finalReleaseAuthorityEffective,
+    finalReleaseAuthorityReason,
+    finalExportEligible,
+    finalExportEligibilityBlockedReasons,
     drafts,
   };
   if (!isGrantResponsePacketDto(data)) return buildKaiError("system_error", { data: null });

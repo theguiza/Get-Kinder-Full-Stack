@@ -687,6 +687,10 @@ function buildEffect({
   const setGrantResponsePacketExportReviewStartError = (value) => stateLog.push(["exportReviewStartError", value]);
   const setGrantResponsePacketExportReviewCompletePending = (value) => stateLog.push(["exportReviewCompletePending", value]);
   const setGrantResponsePacketExportReviewCompleteError = (value) => stateLog.push(["exportReviewCompleteError", value]);
+  // P14-07: the final-release-authority workflow state the same reset effect
+  // now also clears on every engagement/organization switch.
+  const setGrantResponsePacketFinalReleaseAuthorityPending = (value) => stateLog.push(["finalReleaseAuthorityPending", value]);
+  const setGrantResponsePacketFinalReleaseAuthorityError = (value) => stateLog.push(["finalReleaseAuthorityError", value]);
 
   const buildUseEffect = new Function(
     "React",
@@ -707,6 +711,8 @@ function buildEffect({
     "setGrantResponsePacketExportReviewStartError",
     "setGrantResponsePacketExportReviewCompletePending",
     "setGrantResponsePacketExportReviewCompleteError",
+    "setGrantResponsePacketFinalReleaseAuthorityPending",
+    "setGrantResponsePacketFinalReleaseAuthorityError",
     "setLoadingGrantResponsePacket",
     "getJson",
     "grantResponsePacketPath",
@@ -737,6 +743,8 @@ function buildEffect({
     setGrantResponsePacketExportReviewStartError,
     setGrantResponsePacketExportReviewCompletePending,
     setGrantResponsePacketExportReviewCompleteError,
+    setGrantResponsePacketFinalReleaseAuthorityPending,
+    setGrantResponsePacketFinalReleaseAuthorityError,
     setLoadingGrantResponsePacket,
     getJsonImpl,
     grantResponsePacketPath,

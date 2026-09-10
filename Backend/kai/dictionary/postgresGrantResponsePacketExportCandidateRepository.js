@@ -376,6 +376,19 @@ function isReadCurrentGrantResponsePacketExportCandidateReviewStateInput(input) 
     && isMappedHumanActor(input.actorContext);
 }
 
+// P14-07 final-export eligibility: exact-keys input contract for reading the
+// governed export_review queue state of an EXACT, already-identified packet
+// export candidate id (never "current" - the literal candidate row the
+// caller identifies, which may or may not still be the current one). No
+// fingerprint, member list, or authority/finalization-shaped field is ever
+// accepted from a caller.
+function isReadGrantResponsePacketExportCandidateReviewStateByIdInput(input) {
+  return hasExactKeys(input, new Set(["organizationId", "engagementId", "grantResponsePacketExportCandidateId"]))
+    && UUID_PATTERN.test(input.organizationId)
+    && UUID_PATTERN.test(input.engagementId)
+    && UUID_PATTERN.test(input.grantResponsePacketExportCandidateId);
+}
+
 async function loadGrantResponsePacketExportReviewQueueRowById(tx, { organizationId, exportReviewQueueItemId }) {
   const { rows } = await tx.query(
     `SELECT review_queue_item_id::text AS review_queue_item_id, organization_id::text AS organization_id,
@@ -911,6 +924,63 @@ export function createPostgresGrantResponsePacketExportCandidateRepository({ run
       }
     },
 
+    // P14-07 final-export eligibility: READ ONLY governed export_review queue
+    // state for the EXACT existing, immutable packet export candidate id the
+    // caller identifies - reuses the exact existing
+    // loadGrantResponsePacketExportCandidateForReview +
+    // loadGrantResponsePacketExportReviewQueueRow +
+    // isValidGrantResponsePacketExportReviewQueueRow helpers this file already
+    // uses for REQUEST/START/COMPLETE/current-read - no new SQL. Unlike
+    // readCurrentGrantResponsePacketExportCandidateReviewState below, this
+    // never recomposes a render model/fingerprint and never resolves the
+    // current candidate - it proves org/engagement ownership of the exact
+    // given candidate id and returns that exact candidate's own review-queue
+    // state (or nulls if none exists), whether or not it is still the
+    // current candidate for its packet identity. Never creates/replays a
+    // candidate, never requests/starts/completes a review, never selects a
+    // preferred row, and never touches final-release/manifest state.
+    async readGrantResponsePacketExportCandidateReviewStateById(input) {
+      if (!isReadGrantResponsePacketExportCandidateReviewStateByIdInput(input)) return failure("validation_blocker");
+
+      try {
+        return await runInTransaction(async (tx) => {
+          const candidate = await loadGrantResponsePacketExportCandidateForReview(tx, {
+            organizationId: input.organizationId,
+            engagementId: input.engagementId,
+            grantResponsePacketExportCandidateId: input.grantResponsePacketExportCandidateId,
+          });
+          if (!candidate) return failure("not_found");
+
+          const queueRow = await loadGrantResponsePacketExportReviewQueueRow(tx, {
+            organizationId: input.organizationId,
+            candidateId: input.grantResponsePacketExportCandidateId,
+          });
+          if (queueRow && !isValidGrantResponsePacketExportReviewQueueRow(queueRow, {
+            organizationId: input.organizationId,
+            candidateId: input.grantResponsePacketExportCandidateId,
+          })) {
+            rollbackFailure("conflict_current_state_changed");
+          }
+
+          return success({
+            organizationId: input.organizationId,
+            engagementId: input.engagementId,
+            grantResponsePacketExportCandidateId: input.grantResponsePacketExportCandidateId,
+            reviewQueueItemId: queueRow?.review_queue_item_id ?? null,
+            queueStatus: queueRow?.queue_status ?? null,
+            reviewStatus: queueRow?.review_status ?? null,
+            reviewUpdatedAt: asCanonicalUtcTimestamp(queueRow?.updated_at),
+          });
+        });
+      } catch (error) {
+        if (error instanceof GrantResponsePacketExportCandidateRollbackResultError) return error.result;
+        if (error?.code === "23503" || error?.code === "22P02" || error?.code === "23514") {
+          return failure("validation_blocker");
+        }
+        return failure("system_error");
+      }
+    },
+
     // P14-06D: READ ONLY authoritative state for the current semantic Grant
     // Response Packet. It composes the current render model, computes the
     // existing P14-03 fingerprint, reads an already-existing P14-02 identity,
@@ -1023,6 +1093,7 @@ export const __grantResponsePacketExportCandidateRepositoryTestables = Object.fr
   isStartGrantResponsePacketExportReviewInput,
   isCompleteGrantResponsePacketExportReviewInput,
   isReadCurrentGrantResponsePacketExportCandidateReviewStateInput,
+  isReadGrantResponsePacketExportCandidateReviewStateByIdInput,
   isValidGrantResponsePacketExportReviewQueueRow,
   UUID_PATTERN,
 });

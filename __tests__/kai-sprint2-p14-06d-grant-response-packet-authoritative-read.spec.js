@@ -307,7 +307,11 @@ test("P14-06D packet GET exposes current candidate/review state to the export-re
         error: null,
       };
     },
+    async readGrantResponsePacketExportCandidateReviewStateById() {
+      throw new Error("must not be called by this test's fake eligibility evaluator");
+    },
   };
+  let eligibilityCalls = 0;
   const result = await getGrantResponsePacket({
     organizationId: ORG,
     engagementId: ENGAGEMENT,
@@ -316,16 +320,40 @@ test("P14-06D packet GET exposes current candidate/review state to the export-re
     env: enabledEnv,
     generatedContentRepository,
     grantResponsePacketExportCandidateRepository: candidateRepository,
+    grantResponsePacketHumanAuthorityDecisionRepository: {},
+    evaluateGrantResponsePacketFinalExportEligibility: async (evaluateInput) => {
+      eligibilityCalls += 1;
+      assert.equal(evaluateInput.grantResponsePacketExportCandidateId, CANDIDATE);
+      return {
+        ok: true,
+        data: {
+          grantResponsePacketExportCandidateId: CANDIDATE,
+          packetCandidateCurrent: true,
+          reviewResolved: false,
+          memberCurrentUseEligible: true,
+          effectiveHumanExportAuthority: false,
+          effectivenessReason: "no_decision",
+          finalExportEligible: false,
+          validatorResult: { severity: "blocker", evidence: { failed_gates: ["generated_content_review_unresolved"] } },
+        },
+        error: null,
+      };
+    },
   });
   assert.equal(result.ok, true);
+  assert.equal(eligibilityCalls, 1);
   assert.equal(result.data.exportReviewVisible, true);
   assert.equal(result.data.grantResponsePacketExportCandidateId, CANDIDATE);
   assert.equal(result.data.reviewQueueItemId, QUEUE);
   assert.equal(result.data.queueStatus, "open");
   assert.equal(result.data.reviewStatus, "needs_gk_review");
   assert.equal(result.data.reviewUpdatedAt, UPDATED_AT);
+  assert.equal(result.data.finalReleaseAuthorityEffective, false);
+  assert.equal(result.data.finalReleaseAuthorityReason, "no_decision");
+  assert.equal(result.data.finalExportEligible, false);
+  assert.deepEqual(result.data.finalExportEligibilityBlockedReasons, ["generated_content_review_unresolved"]);
   for (const key of Object.keys(result.data)) {
-    assert.doesNotMatch(key, /manifest|finalRelease|approval/i);
+    assert.doesNotMatch(key, /manifest|approval/i);
   }
 });
 

@@ -77,6 +77,13 @@ const HUMAN_FINAL_RELEASE_AUTHORITY_REQUEST_KEYS = new Set([
   "requested_audience",
   "decision_action",
 ]);
+// P14-07: a Grant Response Packet's audience is always exactly "funder", so
+// unlike HUMAN_FINAL_RELEASE_AUTHORITY_REQUEST_KEYS above this accepts no
+// requested_audience field at all - matching the exact P14-07B1 repository
+// contract, which never accepts one from a caller either.
+const GRANT_RESPONSE_PACKET_HUMAN_FINAL_RELEASE_AUTHORITY_REQUEST_KEYS = new Set([
+  "decision_action",
+]);
 const CREATE_EXPORT_MANIFEST_REQUEST_KEYS = new Set([
   "export_review_queue_item_id",
 ]);
@@ -681,6 +688,43 @@ export function validateHumanFinalReleaseAuthorityRequest(payload) {
   if (!EXPORT_REVIEW_AUDIENCES.has(payload.requested_audience)) {
     return { ok: false, blockers: [requestBlocker("invalid_requested_audience", "body.requested_audience")] };
   }
+  if (!["grant", "revoke"].includes(payload.decision_action)) {
+    return { ok: false, blockers: [requestBlocker("invalid_decision_action", "body.decision_action")] };
+  }
+
+  return { ok: true, blockers: [] };
+}
+
+// P14-07: the packet-level analogue of validateHumanFinalReleaseAuthorityRequest
+// above - organizationId, engagementId, and the exact candidate id all come
+// from the route path, and actorContext/now are server-derived, so this
+// route accepts only decision_action, never requested_audience (a Grant
+// Response Packet's audience is always exactly "funder"). Rejects any
+// fingerprint, members, memberCount, review state, eligibility, authority
+// state, or manifest identity.
+export function validateGrantResponsePacketHumanFinalReleaseAuthorityRequest(payload) {
+  if (!isPlainObject(payload)) {
+    return { ok: false, blockers: [requestBlocker("request_body_must_be_object", "body")] };
+  }
+
+  const keys = Object.keys(payload);
+  for (const key of keys) {
+    if (!GRANT_RESPONSE_PACKET_HUMAN_FINAL_RELEASE_AUTHORITY_REQUEST_KEYS.has(key)) {
+      return { ok: false, blockers: [requestBlocker("unknown_field", `body.${key}`)] };
+    }
+    const value = payload[key];
+    if (value === null) return { ok: false, blockers: [requestBlocker("null_field_not_allowed", `body.${key}`)] };
+    if (Array.isArray(value)) return { ok: false, blockers: [requestBlocker("array_field_not_allowlisted", `body.${key}`)] };
+    if (isPlainObject(value)) return { ok: false, blockers: [requestBlocker("nested_object_not_allowed", `body.${key}`)] };
+    if (typeof value !== "string") return { ok: false, blockers: [requestBlocker("invalid_string_field", `body.${key}`)] };
+  }
+
+  for (const key of GRANT_RESPONSE_PACKET_HUMAN_FINAL_RELEASE_AUTHORITY_REQUEST_KEYS) {
+    if (!Object.hasOwn(payload, key)) {
+      return { ok: false, blockers: [requestBlocker("required_field_missing", `body.${key}`)] };
+    }
+  }
+
   if (!["grant", "revoke"].includes(payload.decision_action)) {
     return { ok: false, blockers: [requestBlocker("invalid_decision_action", "body.decision_action")] };
   }

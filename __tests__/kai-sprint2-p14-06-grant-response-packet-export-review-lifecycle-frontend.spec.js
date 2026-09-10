@@ -312,7 +312,14 @@ test("the resolved lifecycle state renders a static display only - no onClick ha
 
 test("the packet card adds no finalization, manifest, or approval control anywhere in its own section", () => {
   const section = grantResponsePacketSection();
-  assert.doesNotMatch(section, /\bApprove\b|\bApproved\b|\bFinalize\b|Create Export Manifest|grant.*final.*release.*authority/i);
+  // P14-07 explicitly and bounded-ly adds a governed human final-release
+  // authority grant/revoke control (see the
+  // grant-response-packet-final-release-authority-{grant,revoke}-button
+  // classes) - so "final release authority" text is now expected, and this
+  // assertion no longer bans it. It still guards that no packet manifest
+  // creation/download or approval/finalization control was added alongside
+  // it.
+  assert.doesNotMatch(section, /\bApprove\b|\bApproved\b|\bFinalize\b|Create Export Manifest/i);
 });
 
 test("packet-level Start/Complete controls are visually and structurally distinct from member-level Request Export Review / GK export review links", () => {

@@ -64,6 +64,10 @@ import {
   grantResponsePacketExportReviewCompletePath,
   grantResponsePacketExportReviewLifecycleState,
   GRANT_RESPONSE_PACKET_EXPORT_REVIEW_LIFECYCLE_STATES,
+  grantResponsePacketHumanFinalReleaseAuthorityPath,
+  grantResponsePacketHumanFinalReleaseAuthorityBody,
+  grantResponsePacketFinalReleaseAuthorityControlState,
+  GRANT_RESPONSE_PACKET_FINAL_RELEASE_AUTHORITY_CONTROL_STATES,
   hydrateGrantResponsePacketExportReviewReadModel,
   projectGrantResponsePacket,
   shouldApplyGrantResponsePacketResponse,
@@ -309,6 +313,14 @@ export default function ImpactEvidenceLibrary() {
   const [grantResponsePacketExportReviewStartError, setGrantResponsePacketExportReviewStartError] = useState("");
   const [grantResponsePacketExportReviewCompletePending, setGrantResponsePacketExportReviewCompletePending] = useState(false);
   const [grantResponsePacketExportReviewCompleteError, setGrantResponsePacketExportReviewCompleteError] = useState("");
+  // P14-07: governed human final-release authority grant/revoke for the
+  // exact current grantResponsePacket candidate. Neither control ever trusts
+  // its own POST response body as durable truth - both always refetch the
+  // authoritative packet GET afterward (see
+  // refetchGrantResponsePacketAfterMemberExportReviewRequest below) and
+  // hydrate every displayed authority/eligibility field from that response.
+  const [grantResponsePacketFinalReleaseAuthorityPending, setGrantResponsePacketFinalReleaseAuthorityPending] = useState(false);
+  const [grantResponsePacketFinalReleaseAuthorityError, setGrantResponsePacketFinalReleaseAuthorityError] = useState("");
   const grantPacketRequestGenerationRef = useRef(0);
   const engagementIdRef = useRef(engagementId);
   engagementIdRef.current = engagementId;
@@ -819,6 +831,8 @@ export default function ImpactEvidenceLibrary() {
     setGrantResponsePacketExportReviewStartError("");
     setGrantResponsePacketExportReviewCompletePending(false);
     setGrantResponsePacketExportReviewCompleteError("");
+    setGrantResponsePacketFinalReleaseAuthorityPending(false);
+    setGrantResponsePacketFinalReleaseAuthorityError("");
     setLoadingGrantResponsePacket(false);
     if (!organizationId || !engagementId) return;
     let cancelled = false;
@@ -1316,6 +1330,50 @@ export default function ImpactEvidenceLibrary() {
       ? `Evidence extracted: ${(result.body?.data?.evidenceItems || []).length} evidence item(s).`
       : errorText(result));
   }, [organizationId, sourceVersionId, workflowPending]);
+
+  // P14-07: governed human final-release authority grant/revoke for the
+  // EXACT current grantResponsePacket candidate id - never a latest/newest/
+  // preferred guess. Only reachable once export review is resolved/resolved
+  // (see grantResponsePacketFinalReleaseAuthorityControlState), mirroring
+  // the one-state-one-control discipline every other action on this card
+  // already follows. Sends only {decision_action} - never a fingerprint,
+  // members, memberCount, review state, eligibility, authority state,
+  // requestedAudience, or manifest identity. On success or failure alike,
+  // this never trusts its own POST response body as durable truth: it
+  // always refetches the authoritative packet GET afterward and hydrates
+  // every displayed authority/eligibility field from that response only.
+  const recordGrantResponsePacketHumanFinalReleaseAuthority = useCallback(async (decisionAction) => {
+    const candidateId = grantResponsePacket?.grantResponsePacketExportCandidateId;
+    if (!organizationId || !engagementId || !candidateId || grantResponsePacketFinalReleaseAuthorityPending) return;
+    if (grantResponsePacketFinalReleaseAuthorityControlState(grantResponsePacket) === GRANT_RESPONSE_PACKET_FINAL_RELEASE_AUTHORITY_CONTROL_STATES.none) return;
+    const requestOrganizationId = organizationId;
+    const requestEngagementId = engagementId;
+    setGrantResponsePacketFinalReleaseAuthorityPending(true);
+    setGrantResponsePacketFinalReleaseAuthorityError("");
+    const result = await postJson(
+      grantResponsePacketHumanFinalReleaseAuthorityPath(requestOrganizationId, requestEngagementId, candidateId),
+      grantResponsePacketHumanFinalReleaseAuthorityBody(decisionAction),
+    );
+    const stillCurrent = requestOrganizationId === organizationIdRef.current
+      && requestEngagementId === engagementIdRef.current;
+    if (result.statusCode !== 200 && result.statusCode !== 201) {
+      if (stillCurrent) {
+        setGrantResponsePacketFinalReleaseAuthorityError(errorText(result));
+        setGrantResponsePacketFinalReleaseAuthorityPending(false);
+      }
+      return;
+    }
+    await refetchGrantResponsePacketAfterMemberExportReviewRequest(requestOrganizationId, requestEngagementId);
+    if (stillCurrent) {
+      setGrantResponsePacketFinalReleaseAuthorityPending(false);
+    }
+  }, [
+    organizationId,
+    engagementId,
+    grantResponsePacket,
+    grantResponsePacketFinalReleaseAuthorityPending,
+    refetchGrantResponsePacketAfterMemberExportReviewRequest,
+  ]);
 
   const runCoverageAssessment = useCallback(async () => {
     if (!organizationId || !sourceVersionId || workflowPending) return;
@@ -2305,6 +2363,79 @@ export default function ImpactEvidenceLibrary() {
                           external use, funder-readiness, final-release authorization, or a
                           manifest.
                         </div>
+                      </div>
+                    ) : null}
+                    {grantResponsePacketExportReviewLifecycleState(grantResponsePacketExportReviewResult)
+                      === GRANT_RESPONSE_PACKET_EXPORT_REVIEW_LIFECYCLE_STATES.resolved ? (
+                      <div className="mt-2">
+                        {grantResponsePacketFinalReleaseAuthorityControlState(grantResponsePacket)
+                          === GRANT_RESPONSE_PACKET_FINAL_RELEASE_AUTHORITY_CONTROL_STATES.grantable ? (
+                          <>
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-outline-secondary grant-response-packet-final-release-authority-grant-button"
+                              disabled={grantResponsePacketFinalReleaseAuthorityPending}
+                              onClick={() => recordGrantResponsePacketHumanFinalReleaseAuthority("grant")}
+                            >
+                              {grantResponsePacketFinalReleaseAuthorityPending
+                                ? "Granting final release authority..."
+                                : "Grant final release authority"}
+                            </button>
+                            <div className="text-muted mt-1">
+                              Records governed gk_admin final-release authority for this exact
+                              packet export candidate. Grants no manifest or final packet bytes.
+                            </div>
+                          </>
+                        ) : null}
+                        {grantResponsePacketFinalReleaseAuthorityControlState(grantResponsePacket)
+                          === GRANT_RESPONSE_PACKET_FINAL_RELEASE_AUTHORITY_CONTROL_STATES.revocable ? (
+                          <>
+                            <span className="badge text-bg-success grant-response-packet-final-release-authority-granted-badge">
+                              Final release authority granted
+                            </span>
+                            <div className="mt-2">
+                              <button
+                                type="button"
+                                className="btn btn-sm btn-outline-secondary grant-response-packet-final-release-authority-revoke-button"
+                                disabled={grantResponsePacketFinalReleaseAuthorityPending}
+                                onClick={() => recordGrantResponsePacketHumanFinalReleaseAuthority("revoke")}
+                              >
+                                {grantResponsePacketFinalReleaseAuthorityPending
+                                  ? "Revoking final release authority..."
+                                  : "Revoke final release authority"}
+                              </button>
+                            </div>
+                            <div className="text-muted mt-1">
+                              Revoking supersedes this exact grant through the same governed
+                              workflow - the prior grant row itself is never rewritten or
+                              removed.
+                            </div>
+                          </>
+                        ) : null}
+                        {grantResponsePacketFinalReleaseAuthorityError ? (
+                          <div className="alert alert-warning py-2 small mt-1">{grantResponsePacketFinalReleaseAuthorityError}</div>
+                        ) : null}
+                        {grantResponsePacket?.finalExportEligible === true ? (
+                          <div className="mt-2">
+                            <span className="badge text-bg-success grant-response-packet-final-export-eligible-badge">
+                              Eligible for final export
+                            </span>
+                          </div>
+                        ) : null}
+                        {grantResponsePacket?.finalExportEligible === false ? (
+                          <div className="mt-2">
+                            <span className="badge text-bg-warning grant-response-packet-final-export-blocked-badge">
+                              Not yet eligible for final export
+                            </span>
+                            {grantResponsePacket.finalExportEligibilityBlockedReasons?.length ? (
+                              <ul className="small text-muted mb-0 mt-1">
+                                {grantResponsePacket.finalExportEligibilityBlockedReasons.map((reason) => (
+                                  <li key={reason}>{reason}</li>
+                                ))}
+                              </ul>
+                            ) : null}
+                          </div>
+                        ) : null}
                       </div>
                     ) : null}
                   </div>

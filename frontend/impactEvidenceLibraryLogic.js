@@ -167,6 +167,24 @@ export function grantResponsePacketExportReviewCompletePath(organizationId, enga
     + `/${encodeURIComponent(exportReviewQueueItemId)}/complete`;
 }
 
+// P14-07: governed human final-release authority application - the
+// authenticated POST sibling of grantResponsePacketExportReviewCompletePath
+// above. Keyed by exactly organizationId + engagementId + the EXACT existing
+// candidate id the server already returned - never a latest/newest/
+// preferred candidate guess. The browser sends only decision_action
+// (grant|revoke) - never a fingerprint, members, memberCount, review state,
+// eligibility, authority state, requestedAudience (a Grant Response
+// Packet's audience is always exactly funder), or manifest identity.
+export function grantResponsePacketHumanFinalReleaseAuthorityPath(organizationId, engagementId, grantResponsePacketExportCandidateId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}`
+    + `/engagements/${encodeURIComponent(engagementId)}/grant-response-packet/export-candidates`
+    + `/${encodeURIComponent(grantResponsePacketExportCandidateId)}/final-release-authority`;
+}
+
+export function grantResponsePacketHumanFinalReleaseAuthorityBody(decisionAction) {
+  return { decision_action: decisionAction };
+}
+
 // The packet START/COMPLETE request body reuses the existing
 // reviewTransitionBody({expected_updated_at}) helper below unchanged - no
 // actorContext, no now, no other client-supplied authority data ever leaves
@@ -224,6 +242,34 @@ export function grantResponsePacketExportReviewLifecycleState(reviewResult) {
   return GRANT_RESPONSE_PACKET_EXPORT_REVIEW_LIFECYCLE_STATES.unknown;
 }
 
+// P14-07: the packet-level final-release-authority control state, driven
+// entirely by the exact server-returned queueStatus/reviewStatus/
+// finalReleaseAuthorityEffective fields on the current projectGrantResponsePacket
+// result (never client-derived, never a latest/newest/preferred guess).
+// "none" whenever there is no current candidate or its export review is not
+// yet resolved/resolved - "grantable" once review is resolved and no
+// effective grant exists - "revocable" once an effective grant exists. Every
+// combination shows at most one control, mirroring
+// grantResponsePacketExportReviewLifecycleState's one-state-one-control
+// discipline above.
+export const GRANT_RESPONSE_PACKET_FINAL_RELEASE_AUTHORITY_CONTROL_STATES = Object.freeze({
+  none: "none",
+  grantable: "grantable",
+  revocable: "revocable",
+});
+
+export function grantResponsePacketFinalReleaseAuthorityControlState(packet) {
+  if (!packet || typeof packet.grantResponsePacketExportCandidateId !== "string") {
+    return GRANT_RESPONSE_PACKET_FINAL_RELEASE_AUTHORITY_CONTROL_STATES.none;
+  }
+  if (packet.queueStatus !== "resolved" || packet.reviewStatus !== "resolved") {
+    return GRANT_RESPONSE_PACKET_FINAL_RELEASE_AUTHORITY_CONTROL_STATES.none;
+  }
+  return packet.finalReleaseAuthorityEffective === true
+    ? GRANT_RESPONSE_PACKET_FINAL_RELEASE_AUTHORITY_CONTROL_STATES.revocable
+    : GRANT_RESPONSE_PACKET_FINAL_RELEASE_AUTHORITY_CONTROL_STATES.grantable;
+}
+
 // A Grant Response Packet response may be applied only if it belongs to the
 // generation, organization, AND engagement still current when it resolves -
 // same late-response-protection convention as
@@ -262,6 +308,18 @@ export function projectGrantResponsePacket(dto) {
   const reviewQueueItemId = grantResponsePacketExportCandidateId && typeof dto.reviewQueueItemId === "string"
     ? dto.reviewQueueItemId
     : null;
+  // P14-07: final-release authority state/effectiveness and final-export
+  // eligibility PASS/BLOCKED for the exact current candidate above - null
+  // whenever there is no current candidate, mirroring the existing
+  // review-state null-linkage exactly. Never a client-side recomputation:
+  // these are exactly the server's own authoritative fields.
+  const finalReleaseAuthorityEffective = grantResponsePacketExportCandidateId
+    && typeof dto.finalReleaseAuthorityEffective === "boolean"
+    ? dto.finalReleaseAuthorityEffective
+    : null;
+  const finalExportEligible = grantResponsePacketExportCandidateId && typeof dto.finalExportEligible === "boolean"
+    ? dto.finalExportEligible
+    : null;
   return {
     organizationId: dto.organizationId,
     engagementId: dto.engagementId,
@@ -272,6 +330,14 @@ export function projectGrantResponsePacket(dto) {
     queueStatus: reviewQueueItemId && typeof dto.queueStatus === "string" ? dto.queueStatus : null,
     reviewStatus: reviewQueueItemId && typeof dto.reviewStatus === "string" ? dto.reviewStatus : null,
     reviewUpdatedAt: reviewQueueItemId && typeof dto.reviewUpdatedAt === "string" ? dto.reviewUpdatedAt : null,
+    finalReleaseAuthorityEffective,
+    finalReleaseAuthorityReason: grantResponsePacketExportCandidateId && typeof dto.finalReleaseAuthorityReason === "string"
+      ? dto.finalReleaseAuthorityReason
+      : null,
+    finalExportEligible,
+    finalExportEligibilityBlockedReasons: grantResponsePacketExportCandidateId
+      ? asArray(dto.finalExportEligibilityBlockedReasons).filter((reason) => typeof reason === "string")
+      : [],
     drafts: asArray(dto.drafts).map((draft) => ({
       generatedContentDraftId: draft?.generatedContentDraftId,
       generationRunId: draft?.generationRunId,
