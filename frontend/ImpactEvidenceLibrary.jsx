@@ -7,6 +7,7 @@ import {
   EVIDENCE_REVIEW_DECISIONS,
   annotateGovernedAvailability,
   canSelectClaimForInternalGeneration,
+  canSelectClaimForFunderGeneration,
   canCompleteClaimReview,
   canCompleteEvidenceReview,
   canCompleteGeneratedContentReview,
@@ -21,6 +22,7 @@ import {
   coverageInternalAcceptancePath,
   coverageFunderAcceptancePath,
   createEvidenceSummaryPath,
+  createFunderEvidenceSummaryPath,
   createImpactNarrativePath,
   decisionRequiresApprovedAudiences,
   decisionRequiresLimitationNotes,
@@ -189,6 +191,13 @@ export default function ImpactEvidenceLibrary() {
   audienceRef.current = audience;
   const [selectedClaimId, setSelectedClaimId] = useState("");
   const [selectedGenerationClaimIds, setSelectedGenerationClaimIds] = useState([]);
+  // P14-09: the funder Evidence Summary generation selection is a distinct
+  // piece of state from the internal generation selection above - it is
+  // gated by the stricter canSelectClaimForFunderGeneration admission rule
+  // (governed AND currently funder-eligible), never by
+  // canSelectClaimForInternalGeneration's "governed but not currently
+  // eligible" internal semantics.
+  const [selectedFunderGenerationClaimIds, setSelectedFunderGenerationClaimIds] = useState([]);
   const [generatedDraftPacket, setGeneratedDraftPacket] = useState(null);
   const [generatedDrafts, setGeneratedDrafts] = useState([]);
   const [selectedGeneratedDraftId, setSelectedGeneratedDraftId] = useState("");
@@ -484,6 +493,7 @@ export default function ImpactEvidenceLibrary() {
     setLoadingEligibleClaims(next.loadingEligibleClaims);
     setSelectedClaimId(next.selectedClaimId);
     setSelectedGenerationClaimIds(next.selectedGenerationClaimIds);
+    setSelectedFunderGenerationClaimIds([]);
     setTraceability(next.traceability);
     setGeneratedDraftPacket(next.generatedDraftPacket);
     setExportReviewRequestPending(false);
@@ -687,6 +697,10 @@ export default function ImpactEvidenceLibrary() {
 
   useEffect(() => {
     setSelectedGenerationClaimIds((current) => current.filter((claimId) => claims.some((claim) => claim.claimId === claimId && canSelectClaimForInternalGeneration(claim, audience))));
+    // P14-09: prune the funder generation selection using the distinct,
+    // stricter canSelectClaimForFunderGeneration admission rule - never the
+    // internal helper above.
+    setSelectedFunderGenerationClaimIds((current) => current.filter((claimId) => claims.some((claim) => claim.claimId === claimId && canSelectClaimForFunderGeneration(claim, audience))));
     setSelectedClaimId((current) => (claims.some((claim) => claim.claimId === current) ? current : claims[0]?.claimId || ""));
   }, [claims, audience]);
 
@@ -737,6 +751,18 @@ export default function ImpactEvidenceLibrary() {
   const toggleGenerationClaim = useCallback((claim) => {
     if (!canSelectClaimForInternalGeneration(claim, audience)) return;
     setSelectedGenerationClaimIds((current) => (
+      current.includes(claim.claimId)
+        ? current.filter((claimId) => claimId !== claim.claimId)
+        : [...current, claim.claimId].sort()
+    ));
+  }, [audience]);
+
+  // P14-09: the funder Evidence Summary generation selection toggle - admits
+  // exactly the claims canSelectClaimForFunderGeneration admits (governed
+  // AND currently funder-eligible), never the internal admission rule above.
+  const toggleFunderGenerationClaim = useCallback((claim) => {
+    if (!canSelectClaimForFunderGeneration(claim, audience)) return;
+    setSelectedFunderGenerationClaimIds((current) => (
       current.includes(claim.claimId)
         ? current.filter((claimId) => claimId !== claim.claimId)
         : [...current, claim.claimId].sort()
@@ -1270,6 +1296,46 @@ export default function ImpactEvidenceLibrary() {
     () => generateDraft(createImpactNarrativePath, "impact-narrative"),
     [generateDraft],
   );
+
+  // P14-09: governed FUNDER Evidence Summary generation for an explicit
+  // engagement. Mirrors generateDraft above exactly in shape (requires an
+  // explicit selected engagement, sends claim_ids/idempotency_key/
+  // engagement_id only) but acts on the distinct
+  // selectedFunderGenerationClaimIds selection and the distinct funder
+  // route - it never reuses generateDraft's audience==="internal" gate or
+  // selectedGenerationClaimIds, and there is deliberately no funder Impact
+  // Narrative generation control anywhere on this page.
+  const generateFunderEvidenceSummary = useCallback(async () => {
+    if (audience !== "funder" || selectedFunderGenerationClaimIds.length === 0 || !engagementId) return;
+    setGeneratingDraft(true);
+    setMessage("");
+    setGeneratedDraftPacket(null);
+    const createResult = await postJson(createFunderEvidenceSummaryPath(organizationId), {
+      claim_ids: selectedFunderGenerationClaimIds,
+      idempotency_key: `funder-evidence-summary-${selectedFunderGenerationClaimIds.join("-")}`,
+      engagement_id: engagementId,
+    });
+    if (createResult.statusCode !== 201 && createResult.statusCode !== 200) {
+      setGeneratingDraft(false);
+      setMessage(errorText(createResult));
+      return;
+    }
+    const draftId = createResult.body?.data?.generatedContentDraftId;
+    if (!draftId) {
+      setGeneratingDraft(false);
+      setMessage("Generated draft response did not include a draft id.");
+      return;
+    }
+    await loadGeneratedDrafts();
+    setSelectedGeneratedDraftId(draftId);
+    const packetResult = await getJson(generatedDraftReviewPacketPath(organizationId, draftId));
+    setGeneratingDraft(false);
+    if (packetResult.statusCode !== 200 || !packetResult.body?.ok) {
+      setMessage(errorText(packetResult));
+      return;
+    }
+    setGeneratedDraftPacket(projectGeneratedDraftPacket(packetResult.body.data));
+  }, [audience, organizationId, engagementId, selectedFunderGenerationClaimIds, loadGeneratedDrafts]);
 
   const refetchGeneratedDraftPacket = useCallback(async (draftId) => {
     const packetResult = await getJson(generatedDraftReviewPacketPath(organizationId, draftId));
@@ -2067,6 +2133,17 @@ export default function ImpactEvidenceLibrary() {
                       <span className="form-check-label">Include in evidence summary</span>
                     </div>
                   ) : null}
+                  {canSelectClaimForFunderGeneration(claim, audience) ? (
+                    <div className="form-check small mt-2" onClick={(event) => event.stopPropagation()}>
+                      <input
+                        className="form-check-input"
+                        type="checkbox"
+                        checked={selectedFunderGenerationClaimIds.includes(claim.claimId)}
+                        onChange={() => toggleFunderGenerationClaim(claim)}
+                      />
+                      <span className="form-check-label">Include in funder evidence summary</span>
+                    </div>
+                  ) : null}
                   <div className="small mt-1">
                     {claim.claimType || "claim"} · {claim.claimReviewStatus || claim.claimStatus || "status unknown"}
                   </div>
@@ -2107,6 +2184,16 @@ export default function ImpactEvidenceLibrary() {
                 disabled={generatingDraft || selectedGenerationClaimIds.length === 0 || !engagementId}
               >
                 {generatingDraft ? "Generating..." : "Generate Impact Narrative"}
+              </button>
+            ) : null}
+            {audience === "funder" ? (
+              <button
+                type="button"
+                className="btn btn-sm btn-primary mt-3 w-100"
+                onClick={generateFunderEvidenceSummary}
+                disabled={generatingDraft || selectedFunderGenerationClaimIds.length === 0 || !engagementId}
+              >
+                {generatingDraft ? "Generating..." : "Generate funder evidence summary"}
               </button>
             ) : null}
           </div>

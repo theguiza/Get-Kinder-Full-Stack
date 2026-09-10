@@ -25,6 +25,16 @@ export function createEvidenceSummaryPath(organizationId) {
   return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/generated-content-drafts/evidence-summary`;
 }
 
+// P14-09 frontend wiring: the governed FUNDER evidence-summary generation
+// route (Backend/kai/routes/sprint2IntakeApi.js) - a distinct, additive
+// sibling of createEvidenceSummaryPath above. The accepted request body is
+// identical in shape (claim_ids, idempotency_key, engagement_id only); the
+// browser never sends requested_audience or any other field, and the
+// backend alone sets requestedAudience to "funder".
+export function createFunderEvidenceSummaryPath(organizationId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/generated-content-drafts/evidence-summary/funder`;
+}
+
 export function createImpactNarrativePath(organizationId) {
   return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/generated-content-drafts/impact-narrative`;
 }
@@ -1445,6 +1455,24 @@ export function annotateGovernedAvailability(mergedClaims, candidateClaims, elig
 // strength, blocker count, coverage state, or client-followup state.
 export function canSelectClaimForInternalGeneration(claim, audience) {
   return audience === "internal" && claim?.governedAvailable === true;
+}
+
+// P14-09: funder Evidence Summary generation admission is DELIBERATELY
+// stricter than canSelectClaimForInternalGeneration above and must never
+// reuse its "governed but not currently eligible" semantics. A claim is
+// selectable for funder generation only when it is BOTH present in the
+// governed Claim Library (governedAvailable) AND reported as currently
+// eligible by the real, authoritative funder eligible-claims response
+// (audienceEligibility === "eligible", derived in annotateGovernedAvailability
+// solely from the server's own eligible-claims result) - never inferred from
+// libraryStatus, display status, review strings, blocker counts, or any
+// other frontend-computed authority.
+export function canSelectClaimForFunderGeneration(claim, audience) {
+  return (
+    audience === "funder"
+    && claim?.governedAvailable === true
+    && claim?.audienceEligibility === "eligible"
+  );
 }
 
 // Organization change invalidates both the governed Claim Library and the

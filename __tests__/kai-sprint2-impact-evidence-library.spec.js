@@ -28,6 +28,7 @@ import {
   reviewQueueBlockerActionability,
   canCompleteGeneratedContentReview,
   canSelectClaimForInternalGeneration,
+  canSelectClaimForFunderGeneration,
   canStartGeneratedContentReview,
   claimLibraryCandidatesPath,
   claimReviewDecisionBody,
@@ -37,6 +38,7 @@ import {
   coverageFunderAcceptancePath,
   coverageInternalAcceptancePath,
   createEvidenceSummaryPath,
+  createFunderEvidenceSummaryPath,
   createImpactNarrativePath,
   decisionRequiresApprovedAudiences,
   decisionRequiresLimitationNotes,
@@ -1479,6 +1481,257 @@ test("Package 14-05 wiring: the component's three admission locations delegate t
   );
   // 3. generation-checkbox/control admission
   assert.match(uiSource, /\{canSelectClaimForInternalGeneration\(claim, audience\) \? \(/);
+});
+
+// P14-09: frontend funder Evidence Summary generation wiring. The funder
+// admission rule is DELIBERATELY stricter than, and distinct from,
+// canSelectClaimForInternalGeneration above (Package 14-05) - it requires
+// currently-eligible (audienceEligibility === "eligible", the real
+// authoritative funder eligible-claims response), never merely governed
+// availability.
+
+test("P14-09 case A: a governed AND currently funder-eligible claim is selectable for funder generation", () => {
+  assert.equal(canSelectClaimForFunderGeneration(
+    { claimId, governedAvailable: true, audienceEligibility: "eligible" },
+    "funder",
+  ), true);
+});
+
+test("P14-09 case B: a governed but currently funder-INELIGIBLE claim is NOT selectable for funder generation", () => {
+  assert.equal(canSelectClaimForFunderGeneration(
+    { claimId, governedAvailable: true, audienceEligibility: "not_eligible" },
+    "funder",
+  ), false);
+  assert.equal(canSelectClaimForFunderGeneration(
+    { claimId, governedAvailable: true, audienceEligibility: "eligibility_unavailable" },
+    "funder",
+  ), false);
+});
+
+test("P14-09 case C: a non-governed claim is NOT selectable for funder generation, even if reported eligible", () => {
+  assert.equal(canSelectClaimForFunderGeneration(
+    { claimId, governedAvailable: false, audienceEligibility: "eligible" },
+    "funder",
+  ), false);
+});
+
+test("P14-09 case D: the internal and public audiences never admit funder generation, regardless of governed/eligible state", () => {
+  assert.equal(canSelectClaimForFunderGeneration(
+    { claimId, governedAvailable: true, audienceEligibility: "eligible" },
+    "internal",
+  ), false);
+  assert.equal(canSelectClaimForFunderGeneration(
+    { claimId, governedAvailable: true, audienceEligibility: "eligible" },
+    "public",
+  ), false);
+});
+
+test("P14-09: canSelectClaimForFunderGeneration never derives admission from libraryStatus, eligible, review status, support strength, or blocker count - only governedAvailable + audienceEligibility", () => {
+  assert.equal(canSelectClaimForFunderGeneration({
+    claimId,
+    governedAvailable: true,
+    audienceEligibility: "eligible",
+    libraryStatus: "blocked",
+    eligible: false,
+    claimReviewStatus: "needs_gk_review",
+    supportStrength: "unassessed",
+    blockerCodes: ["claim_review_unresolved"],
+  }, "funder"), true);
+  assert.equal(canSelectClaimForFunderGeneration({
+    claimId,
+    governedAvailable: true,
+    audienceEligibility: "not_eligible",
+    libraryStatus: "usable",
+    eligible: true,
+  }, "funder"), false);
+});
+
+test("P14-09: canSelectClaimForInternalGeneration is untouched by the new funder helper (Package 14-05 semantics remain intact)", () => {
+  // A governed-but-currently-ineligible claim must still be admitted for
+  // INTERNAL generation - this is the exact opposite of the funder rule
+  // above, and proves the two helpers were not accidentally merged.
+  assert.equal(canSelectClaimForInternalGeneration(
+    { claimId, governedAvailable: true, audienceEligibility: "not_eligible" },
+    "internal",
+  ), true);
+  assert.equal(canSelectClaimForFunderGeneration(
+    { claimId, governedAvailable: true, audienceEligibility: "not_eligible" },
+    "internal",
+  ), false);
+});
+
+test("P14-09: createFunderEvidenceSummaryPath matches the governed P14-09 funder evidence-summary route exactly", () => {
+  const funderMatches = sprint2IntakeApiRouter.stack
+    .filter((layer) => layer.route?.path === "/admin/organizations/:organizationId/generated-content-drafts/evidence-summary/funder" && layer.route?.methods?.post);
+  assert.equal(funderMatches.length, 1);
+  assert.deepEqual(Object.keys(funderMatches[0].route.methods), ["post"]);
+  assert.equal(
+    createFunderEvidenceSummaryPath(organizationId),
+    `${basePath}/admin/organizations/${organizationId}/generated-content-drafts/evidence-summary/funder`,
+  );
+});
+
+// Component wiring (source-pattern assertions only): these prove the funder
+// admission/selection/action wiring exists and is distinct from the
+// internal wiring. They do NOT prove the admission decision is correct -
+// that is proven exclusively by the executed cases A-D above.
+
+test("P14-09 wiring: the funder claim checkbox and toggle are gated by canSelectClaimForFunderGeneration, distinct from the internal helper/state", () => {
+  const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+  assert.match(uiSource, /import \{[\s\S]*?canSelectClaimForFunderGeneration[\s\S]*?\} from "\.\/impactEvidenceLibraryLogic\.js";/);
+  assert.match(uiSource, /\{canSelectClaimForFunderGeneration\(claim, audience\) \? \(/);
+  assert.match(
+    uiSource,
+    /const toggleFunderGenerationClaim = useCallback\(\(claim\) => \{\s*if \(!canSelectClaimForFunderGeneration\(claim, audience\)\) return;/,
+  );
+  assert.match(uiSource, /checked=\{selectedFunderGenerationClaimIds\.includes\(claim\.claimId\)\}/);
+  assert.match(uiSource, /onChange=\{\(\) => toggleFunderGenerationClaim\(claim\)\}/);
+});
+
+test("P14-09 wiring: exactly one funder Evidence Summary generation button exists, requires an explicit engagement and at least one valid selected claim, and no funder Impact Narrative control exists anywhere", () => {
+  const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+  const funderButtonMatches = uiSource.match(/onClick=\{generateFunderEvidenceSummary\}/g) || [];
+  assert.equal(funderButtonMatches.length, 1);
+  assert.match(
+    uiSource,
+    /audience === "funder" \? \(\s*<button[\s\S]{0,200}onClick=\{generateFunderEvidenceSummary\}[\s\S]{0,200}disabled=\{generatingDraft \|\| selectedFunderGenerationClaimIds\.length === 0 \|\| !engagementId\}/,
+  );
+  assert.doesNotMatch(uiSource, /generateFunderImpactNarrative/);
+  assert.doesNotMatch(uiSource, /funder impact narrative/i);
+});
+
+test("P14-09 wiring: every generation button in the component is gated by audience === \"internal\" or audience === \"funder\" only - public exposes no generation controls", () => {
+  const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+  const generationButtonGates = uiSource.match(/audience === "(internal|funder|public)" \? \(\s*<button/g) || [];
+  assert.ok(generationButtonGates.length >= 3, "expected at least the two internal buttons plus the one funder button");
+  assert.ok(generationButtonGates.every((gate) => gate.includes('"internal"') || gate.includes('"funder"')));
+  assert.doesNotMatch(uiSource, /audience === "public"[\s\S]{0,200}<button/);
+});
+
+// Real handler execution (same extraction-and-execute technique as
+// generateDraft above): proves the funder generation request sends exactly
+// claim_ids/idempotency_key/engagement_id, never requested_audience, to the
+// exact funder route, and refuses to fire without an explicit engagement or
+// a non-empty selection.
+
+function extractGenerateFunderEvidenceSummaryHandlerSource(uiSource) {
+  const openMarker = "const generateFunderEvidenceSummary = useCallback(async () => {";
+  const openIdx = uiSource.indexOf(openMarker);
+  assert.notEqual(openIdx, -1, "could not locate the generateFunderEvidenceSummary useCallback handler");
+  const bodyStart = openIdx + "const generateFunderEvidenceSummary = useCallback(".length;
+  const tailMarker = "\n  }, [audience, organizationId, engagementId, selectedFunderGenerationClaimIds, loadGeneratedDrafts]);";
+  const tailIdx = uiSource.indexOf(tailMarker, openIdx);
+  assert.notEqual(tailIdx, -1, "could not locate the end of the generateFunderEvidenceSummary useCallback handler");
+  const bodyEnd = tailIdx + "\n  }".length;
+  return uiSource.slice(bodyStart, bodyEnd);
+}
+
+function buildGenerateFunderEvidenceSummary(handlerSource, overrides = {}) {
+  const factory = new Function(
+    "audience", "organizationId", "engagementId", "selectedFunderGenerationClaimIds",
+    "setGeneratingDraft", "setMessage", "setGeneratedDraftPacket",
+    "postJson", "getJson", "errorText", "loadGeneratedDrafts", "setSelectedGeneratedDraftId",
+    "createFunderEvidenceSummaryPath", "generatedDraftReviewPacketPath", "projectGeneratedDraftPacket",
+    `return (${handlerSource});`,
+  );
+  const state = {
+    generatingDraft: null,
+    message: null,
+    generatedDraftPacket: null,
+    selectedGeneratedDraftId: null,
+    loadGeneratedDraftsCalls: 0,
+    postJsonCalls: [],
+    getJsonCalls: [],
+  };
+  const defaults = {
+    audience: "funder",
+    organizationId,
+    engagementId,
+    selectedFunderGenerationClaimIds: [claimId],
+    setGeneratingDraft: (value) => { state.generatingDraft = value; },
+    setMessage: (value) => { state.message = value; },
+    setGeneratedDraftPacket: (value) => { state.generatedDraftPacket = value; },
+    postJson: async (path, body) => {
+      state.postJsonCalls.push({ path, body });
+      return {
+        statusCode: 201,
+        body: { ok: true, data: { generatedContentDraftId: "00000000-0000-4000-8000-000000000998" } },
+      };
+    },
+    getJson: async (path) => {
+      state.getJsonCalls.push({ path });
+      return { statusCode: 200, body: { ok: true, data: { generatedContentDraftId: "00000000-0000-4000-8000-000000000998" } } };
+    },
+    errorText,
+    loadGeneratedDrafts: async () => { state.loadGeneratedDraftsCalls += 1; },
+    setSelectedGeneratedDraftId: (value) => { state.selectedGeneratedDraftId = value; },
+    createFunderEvidenceSummaryPath,
+    generatedDraftReviewPacketPath,
+    projectGeneratedDraftPacket,
+    ...overrides,
+  };
+  const generateFunderEvidenceSummary = factory(
+    defaults.audience, defaults.organizationId, defaults.engagementId, defaults.selectedFunderGenerationClaimIds,
+    defaults.setGeneratingDraft, defaults.setMessage, defaults.setGeneratedDraftPacket,
+    defaults.postJson, defaults.getJson, defaults.errorText, defaults.loadGeneratedDrafts, defaults.setSelectedGeneratedDraftId,
+    defaults.createFunderEvidenceSummaryPath, defaults.generatedDraftReviewPacketPath, defaults.projectGeneratedDraftPacket,
+  );
+  return { generateFunderEvidenceSummary, state };
+}
+
+test("P14-09 'generateFunderEvidenceSummary' handler: exact extracted source is a real, standalone async function referencing only its declared closure identifiers", () => {
+  const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+  const handlerSource = extractGenerateFunderEvidenceSummaryHandlerSource(uiSource);
+  assert.doesNotThrow(() => new Function(
+    "audience", "organizationId", "engagementId", "selectedFunderGenerationClaimIds",
+    "setGeneratingDraft", "setMessage", "setGeneratedDraftPacket",
+    "postJson", "getJson", "errorText", "loadGeneratedDrafts", "setSelectedGeneratedDraftId",
+    "createFunderEvidenceSummaryPath", "generatedDraftReviewPacketPath", "projectGeneratedDraftPacket",
+    `return (${handlerSource});`,
+  ));
+});
+
+test("P14-09 funder generation request: real handler execution sends claim_ids, idempotency_key, and engagement_id only, to exactly the funder route, and never sends requested_audience", async () => {
+  const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+  const handlerSource = extractGenerateFunderEvidenceSummaryHandlerSource(uiSource);
+  const { generateFunderEvidenceSummary, state } = buildGenerateFunderEvidenceSummary(handlerSource);
+  await generateFunderEvidenceSummary();
+  assert.equal(state.postJsonCalls.length, 1);
+  assert.equal(state.postJsonCalls[0].path, createFunderEvidenceSummaryPath(organizationId));
+  assert.deepEqual(Object.keys(state.postJsonCalls[0].body).sort(), ["claim_ids", "engagement_id", "idempotency_key"]);
+  assert.deepEqual(state.postJsonCalls[0].body.claim_ids, [claimId]);
+  assert.equal(state.postJsonCalls[0].body.engagement_id, engagementId);
+  assert.equal(typeof state.postJsonCalls[0].body.idempotency_key, "string");
+  assert.doesNotMatch(JSON.stringify(state.postJsonCalls[0].body), /requested_audience|requestedAudience/);
+});
+
+test("P14-09 funder generation handler: no request is issued without an explicit selected engagement, and no latest/default/fallback engagement is inferred", async () => {
+  const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+  const handlerSource = extractGenerateFunderEvidenceSummaryHandlerSource(uiSource);
+
+  const { generateFunderEvidenceSummary: noEngagement, state: noEngagementState } =
+    buildGenerateFunderEvidenceSummary(handlerSource, { engagementId: "" });
+  await noEngagement();
+  assert.deepEqual(noEngagementState.postJsonCalls, []);
+  assert.deepEqual(noEngagementState.getJsonCalls, []);
+  assert.equal(noEngagementState.generatingDraft, null);
+
+  const { generateFunderEvidenceSummary: withEngagement, state: withEngagementState } =
+    buildGenerateFunderEvidenceSummary(handlerSource);
+  await withEngagement();
+  assert.equal(withEngagementState.postJsonCalls.length, 1);
+});
+
+test("P14-09 funder generation handler: no request is issued with zero selected claims", async () => {
+  const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+  const handlerSource = extractGenerateFunderEvidenceSummaryHandlerSource(uiSource);
+
+  const { generateFunderEvidenceSummary: noClaims, state: noClaimsState } =
+    buildGenerateFunderEvidenceSummary(handlerSource, { selectedFunderGenerationClaimIds: [] });
+  await noClaims();
+  assert.deepEqual(noClaimsState.postJsonCalls, []);
+  assert.deepEqual(noClaimsState.getJsonCalls, []);
+  assert.equal(noClaimsState.generatingDraft, null);
 });
 
 test("14-04 closure case H: 14-04 governed availability / audience eligibility semantics remain intact", () => {
