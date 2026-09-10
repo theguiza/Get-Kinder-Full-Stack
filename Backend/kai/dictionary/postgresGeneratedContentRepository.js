@@ -60,6 +60,22 @@ const GRANT_RESPONSE_PACKET_AUDIENCE = "funder";
 const EVIDENCE_SENSITIVITY_LEVELS = new Set(["unknown"]);
 const SHA256_LOWER_PATTERN = /^[0-9a-f]{64}$/;
 
+// P14-09 diagnostic propagation only: bounded, metadata-safe stage
+// discriminators for the two createGeneratedContentDraft validation_blocker
+// branches that previously carried no structured detail at all (unlike the
+// VAL-GEN-001..005 branch, which already produces one and merely needed it
+// preserved through to rollbackFailure below). These never change whether a
+// branch blocks, and never carry generated text, claim/evidence content, or
+// database internals - only which already-fail-closed stage produced the
+// response.
+const TRACEABILITY_RESULT_CONTRACT_VALIDATOR_KEY = "VAL-GEN-TRACE-P0-001";
+const GENERATOR_RESULT_CONTRACT_VALIDATOR_KEY = "VAL-GEN-RESULT-P0-001";
+const PERSISTENCE_VALIDATION_VALIDATOR_KEY = "VAL-GEN-PERSIST-P0-001";
+
+function stageBlocker(validatorKey, blockingReason) {
+  return [{ validator_key: validatorKey, severity: "blocker", blocking_reason: blockingReason }];
+}
+
 const COMPLETE_REVIEW_FRESH_PROFILE = GENERATED_CONTENT_REVIEW_LIFECYCLE_PROFILES[1];
 const COMPLETE_REVIEW_RESOLVED_PROFILE = GENERATED_CONTENT_REVIEW_LIFECYCLE_PROFILES[2];
 const START_REVIEW_FRESH_PROFILE = GENERATED_CONTENT_REVIEW_LIFECYCLE_PROFILES[0];
@@ -99,8 +115,13 @@ const EXPORT_REVIEW_COMPLETE_AUDIT_OPERATION = "export_review_completed";
 const EXPORT_REVIEW_COMPLETE_AUDIT_CONTRACT = "p3_13_export_review_completion_v1";
 const EXPORT_REVIEW_COMPLETE_VALIDATOR_KEYS = Object.freeze(["VAL-EXP-003"]);
 
-function failure(code) {
-  return { ok: false, data: null, error: { code, status: RESULT_STATUS[code] || 500 } };
+function failure(code, blockers) {
+  return {
+    ok: false,
+    data: null,
+    error: { code, status: RESULT_STATUS[code] || 500 },
+    ...(blockers ? { blockers } : {}),
+  };
 }
 
 function success(data) {
@@ -115,8 +136,8 @@ export class RollbackResultError extends Error {
   }
 }
 
-function rollbackFailure(code) {
-  throw new RollbackResultError(failure(code));
+function rollbackFailure(code, blockers) {
+  throw new RollbackResultError(failure(code, blockers));
 }
 
 function canonicalJson(value) {
@@ -921,7 +942,10 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
           || result.data?.claim?.claim_id !== claimId
           || !result.data?.evidence?.evidence_item_id
         ) {
-          rollbackFailure("validation_blocker");
+          rollbackFailure(
+            "validation_blocker",
+            stageBlocker(TRACEABILITY_RESULT_CONTRACT_VALIDATOR_KEY, "traceability_result_contract_invalid"),
+          );
         }
         traceabilityResults.push(result.data);
       }
@@ -976,7 +1000,12 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
 
       const generatorInput = toGeneratorInput({ requestedAudience: input.requestedAudience, projections, contentType });
       const generatorResult = await dependencies.draftGenerator(generatorInput);
-      if (!validateGeneratorResult(generatorResult)) rollbackFailure("validation_blocker");
+      if (!validateGeneratorResult(generatorResult)) {
+        rollbackFailure(
+          "validation_blocker",
+          stageBlocker(GENERATOR_RESULT_CONTRACT_VALIDATOR_KEY, "generator_result_contract_invalid"),
+        );
+      }
 
       const validation = validateGeneratedContentDraft({
         requestedAudience: input.requestedAudience,
@@ -988,7 +1017,7 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
         blocks: generatorResult.blocks,
         draftAudience: input.requestedAudience,
       });
-      if (!validation.ok) rollbackFailure("validation_blocker");
+      if (!validation.ok) rollbackFailure("validation_blocker", validation.blockers);
 
       // Post-generation revalidation remains a current-state/lineage
       // integrity check only: it must still fail closed if traceability
@@ -1044,7 +1073,12 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
   } catch (error) {
     if (error instanceof RollbackResultError) return error.result;
     if (error?.code === "23505") return failure("conflict_current_state_changed");
-    if (error?.code === "23503" || error?.code === "22P02" || error?.code === "23514") return failure("validation_blocker");
+    if (error?.code === "23503" || error?.code === "22P02" || error?.code === "23514") {
+      return failure(
+        "validation_blocker",
+        stageBlocker(PERSISTENCE_VALIDATION_VALIDATOR_KEY, "persistence_validation_rejected"),
+      );
+    }
     return failure("system_error");
   }
 }
@@ -2784,4 +2818,7 @@ export const __generatedContentRepositoryTestables = Object.freeze({
   validateCompleteExportReviewInput,
   validateGrantResponsePacketMembershipInput,
   loadGenerationProjection,
+  TRACEABILITY_RESULT_CONTRACT_VALIDATOR_KEY,
+  GENERATOR_RESULT_CONTRACT_VALIDATOR_KEY,
+  PERSISTENCE_VALIDATION_VALIDATOR_KEY,
 });

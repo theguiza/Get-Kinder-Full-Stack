@@ -168,7 +168,12 @@
       draftGenerator: dependencies.draftGenerator,
       metadataOnlyAudit: dependencies.metadataOnlyAudit,
     });
-    if (!result.ok) return buildKaiError(result.error.code, { status: result.error.status });
+    if (!result.ok) {
+      return buildKaiError(result.error.code, {
+        status: result.error.status,
+        ...(result.blockers ? { blockers: result.blockers } : {}),
+      });
+    }
     return { ok: true, data: result.data, error: null };
   }
 
@@ -216,7 +221,12 @@
       draftGenerator: dependencies.draftGenerator,
       metadataOnlyAudit: dependencies.metadataOnlyAudit,
     });
-    if (!result.ok) return buildKaiError(result.error.code, { status: result.error.status });
+    if (!result.ok) {
+      return buildKaiError(result.error.code, {
+        status: result.error.status,
+        ...(result.blockers ? { blockers: result.blockers } : {}),
+      });
+    }
     return { ok: true, data: result.data, error: null };
   }
 
