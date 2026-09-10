@@ -26189,3 +26189,173 @@ production/shared-database file was touched.
 
 **Local commit:** one bounded commit created after all required checks
 passed.
+
+## Phase-14 (Grant Response Packet Track) - P14-08A: Grant Response Packet
+## Export Manifest Persistence Foundation
+
+**Date:** 2026-09-09
+
+**Owner authorization (bounded, local-only):** add the smallest additive
+local schema/persistence foundation needed to bind an export manifest to an
+exact, existing, immutable P14-03 Grant Response Packet export candidate.
+Starting HEAD: `1fbe41712598c6d3a40c2eee55ddd8391d4de80f` (working tree
+clean). Limited to a local migration/schema artifact, a new packet-specific
+manifest persistence object, its repository/contract primitives, synthetic
+runner-owned local PostgreSQL migration verification, and directly coupled
+tests. No manifest service/route, final download, frontend, or packet
+byte-format work was performed.
+
+**Finding that authorized this package:** the existing P3-19/P3-20
+`kai.export_manifests` table cannot represent a Grant Response Packet
+manifest without schema change: its mandatory
+`export_manifests_p3_19_candidate_fk` and
+`export_manifests_p3_19_authority_decision_fk` both hard-reference
+`kai.export_candidates` and `kai.human_authority_decisions` - member-level
+tables structurally disjoint from `kai.grant_response_packet_export_candidates`
+and `kai.grant_response_packet_human_authority_decisions` (P14-03/P14-07B1).
+Neither FK could be widened without weakening a tenant-safe composite
+constraint, so this package adds one packet-scoped sibling table instead,
+exactly mirroring how P14-07B1 added
+`kai.grant_response_packet_human_authority_decisions` as a sibling to
+`kai.human_authority_decisions` rather than altering it.
+
+**Schema:** new migration
+`migrations/kai_sprint2_p14_08_a_grant_response_packet_export_manifest_foundation.sql`
+(+ `.rollback.sql`) adds exactly one new table,
+`kai.grant_response_packet_export_manifests`, mirroring the existing P3-19
+`kai.export_manifests` shape/semantics exactly (UUID manifest identity,
+organization scope, a replay-convergence-unique constraint on
+`(organization_id, grant_response_packet_export_candidate_id,
+canonical_fingerprint)`, and a `BEFORE UPDATE OR DELETE` append-only
+trigger), but bound instead to the packet-level tables: a tenant-safe
+composite `FOREIGN KEY (grant_response_packet_export_candidate_id,
+organization_id) REFERENCES kai.grant_response_packet_export_candidates(...)`
+and a tenant/candidate-safe composite `FOREIGN KEY
+(effective_authority_decision_id, organization_id,
+grant_response_packet_export_candidate_id, effective_authority_decision_type)
+REFERENCES kai.grant_response_packet_human_authority_decisions(...)`, the
+latter pinned to `effective_authority_decision_type =
+'export_authority_granted'` exactly as P14-07B1 established. No
+`requested_audience` column (a Grant Response Packet's audience is always
+exactly `funder`) and no `export_review_queue_item_id`-equivalent column
+exist here - no packet-level review-queue-item binding concept exists to
+bind to; the packet's own review state is read directly off its candidate by
+the existing P14-07 evaluator, not off a review-queue-item row. No
+`packet_approved`/`packet_published`/`packet_funder_ready`/
+`latest_manifest`/`preferred_manifest` vocabulary was invented.
+`kai.export_manifests` and its existing P3-19/P3-20 constraints are
+completely untouched.
+
+**Repository:** new
+`Backend/kai/dictionary/postgresGrantResponsePacketExportManifestRepository.js`
+exposing `createExportManifest`, `readExportManifestById`, and
+`resolveExportManifestStateForCandidate`. `createExportManifest` accepts
+only `{organizationId, engagementId, grantResponsePacketExportCandidateId,
+actorContext, now}` - no fingerprint, member list, requestedAudience, review
+state, eligibility, authority state, or manifest identity is ever accepted
+from a caller. It invokes the real, unmodified P14-07
+`evaluateGrantResponsePacketFinalExportEligibility` and requires
+`finalExportEligible === true` before ever writing a row; it then calls the
+real P14-07B1 `authorityRepository.evaluateEffectiveness` (never
+reimplementing B1's own lineage logic) to recover the exact effective
+`export_authority_granted` decision id the eligibility composition already
+proved effective, folding its `candidate_missing` reason into the same
+`not_found` outcome the eligibility evaluator itself uses (covering a
+nonexistent, cross-organization, or cross-engagement candidate). Because a
+packet's current state can only be recomposed through the same
+render-model-composition chain P14-06D/P14-07B1/P14-07 already document as
+unable to run inside an open transaction, eligibility and effectiveness are
+both resolved before the write transaction; the transaction itself re-loads
+the exact candidate row and re-checks organization/engagement ownership
+before ever inserting, closing the same TOCTOU gap P14-07B1's own
+`recordDecision` closes. The manifest identity is a deterministic
+sha256 fingerprint over exactly `{organizationId,
+grantResponsePacketExportCandidateId, effectiveAuthorityDecisionId}`
+(mirroring P3-19's fingerprint shape), and create-or-reuse uses the same
+`INSERT ... ON CONFLICT (organization_id,
+grant_response_packet_export_candidate_id, canonical_fingerprint) DO
+NOTHING` plus fallback-`SELECT` pattern P3-19 established, returning
+`replayed: true|false`. A metadata-only audit event (via a new
+`createProductionMetadataOnlyAuditForGrantResponsePacketExportManifest`
+adapter) is published only on a fresh insert, never on replay. Creates no
+final artifact bytes and publishes nothing externally.
+
+**Audit:** new
+`createProductionMetadataOnlyAuditForGrantResponsePacketExportManifest` in
+`kaiMetadataOnlyAuditComposition.js`, mirroring the existing P3-19
+`createProductionMetadataOnlyAuditForExportManifest` adapter's non-file-scoped
+discipline (`kai.audit_events` via `insertRequiredSuccessfulAuditEvent`,
+never `kai.upload_lifecycle_audit`), bound at construction to
+organizationId/engagementId/grantResponsePacketExportCandidateId.
+`Backend/kai/db/kaiAuditQueries.js`'s `SAFE_AUDIT_METADATA_KEYS` allowlist
+was additively widened by exactly two safe scalar fields this audit row
+carries (`grant_response_packet_export_manifest_id`,
+`grant_response_packet_export_candidate_id`); no existing key's handling
+changed.
+
+**Verification:** added
+`__tests__/kai-sprint2-p14-08-a-grant-response-packet-export-manifest-foundation-boundary.spec.js`
+(17/17, pure-function/no-database) and
+`__tests__/kai-sprint2-p14-08-a-grant-response-packet-export-manifest-foundation.integration.spec.js`
+(11/11 against a real runner-owned local PostgreSQL, skipped without it)
+proving: no candidate/wrong organization/wrong engagement/cross-tenant
+candidate all fail closed as `not_found`; eligibility BLOCKED and stale
+fingerprint create no manifest; no/revoked authority creates no manifest;
+eligibility PASS creates or reuses a manifest; replay for the same exact
+eligible candidate converges to exactly one row with no additional audit;
+candidate A's manifest can never represent candidate B (proven both via
+fingerprint-input sensitivity and via two independently granted candidates
+converging to independent manifest rows); a member-level
+`kai.export_candidates` id can never substitute the packet candidate id;
+client-supplied eligibility/authority/fingerprint/member/manifest-identity
+fields are refused outright by the exact-keys input contract; and manifest
+creation returns metadata only (no artifact-bytes field) and publishes
+nothing externally. The full migration/schema pack -
+`scripts/kai-sprint2-p14-08-a-grant-response-packet-export-manifest-foundation-{verifier,smoke-seed,smoke-verifier,failure-checks,local-postgres}.{sql,js}`
+- proves (13/13 schema checks, run twice across a forward -> rollback ->
+reapply -> re-verify cycle against the same ephemeral instance): table/
+constraint/index/trigger presence; both FKs are tenant/candidate-safe
+composites into the P14-03/P14-07B1 packet tables only (never
+`kai.export_candidates` or `kai.human_authority_decisions`); a member-level
+export-candidate or human-authority-decision id can never substitute the
+packet-level FK target; candidate A's own effective decision can never bind
+a manifest declared under candidate B; malformed decision-type/fingerprint-
+contract-version/canonical-fingerprint/created-by-type values are rejected;
+the replay-convergence-unique constraint rejects a bare duplicate insert;
+append-only UPDATE/DELETE are rejected; and `kai.export_manifests` is
+completely unaltered.
+
+**Affected regressions passed (61/61 combined):** P3-19
+export-manifest-foundation boundary suite, P3-20
+export-manifest-review-binding boundary suite, P14-07B1
+human-authority-decision-ledger boundary suite, P14-07 packet
+final-export-eligibility boundary suite, and this package's own boundary
+suite - proving the original P3-19/P3-20 single-draft manifest model, the
+P14-07B1 authority ledger, and the P14-07 eligibility evaluator are all
+completely untouched.
+
+**Frontend build:** not run - no frontend source or built bundle was
+changed.
+
+**Final diff review:** new files -
+`migrations/kai_sprint2_p14_08_a_grant_response_packet_export_manifest_foundation.sql`
+(+ `.rollback.sql`),
+`Backend/kai/dictionary/grantResponsePacketExportManifestContract.js`,
+`Backend/kai/dictionary/postgresGrantResponsePacketExportManifestRepository.js`,
+the boundary/integration test files, and the five
+`scripts/kai-sprint2-p14-08-a-*` schema-pack files; edited files -
+`Backend/kai/db/kaiAuditQueries.js` (allowlist widening only),
+`Backend/kai/services/kaiMetadataOnlyAuditComposition.js` (one new adapter
+function plus its `__testables` export), `package.json` (two new scripts).
+`git diff --check` passed with no whitespace errors. No
+`kai.export_manifests`, `kai.export_candidates`,
+`kai.human_authority_decisions`,
+`kai.grant_response_packet_export_candidates`/`_members`,
+`kai.grant_response_packet_human_authority_decisions`, final-eligibility
+evaluator, manifest service/route, frontend, or production/shared-database
+file was touched. No manifest service, HTTP route, final download, or
+packet byte-format (Markdown/PDF/DOCX/CSV) work was performed - this
+package is the persistence foundation only.
+
+**Local commit:** one bounded commit created after all required checks
+passed.

@@ -81,6 +81,8 @@ const SAFE_AUDIT_METADATA_KEYS = new Set([
   "effective",
   "effectiveness_reason",
   "head_decision_id",
+  "grant_response_packet_export_manifest_id",
+  "grant_response_packet_export_candidate_id",
 ]);
 
 const FORCED_FALSE_METADATA_FLAGS = [
