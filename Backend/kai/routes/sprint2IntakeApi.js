@@ -84,6 +84,7 @@ let grantResponsePacketExportCandidateServicePromise = null;
 let grantResponsePacketExportReviewServicePromise = null;
 let grantResponsePacketHumanFinalReleaseAuthorityServicePromise = null;
 let grantResponsePacketExportManifestServicePromise = null;
+let grantResponsePacketExportManifestMarkdownServicePromise = null;
 let evidenceLineageServicePromise = null;
 let evidenceCoverageAssessmentServicePromise = null;
 let claimProposalServicePromise = null;
@@ -245,6 +246,8 @@ function sanitizeServiceData(data) {
 const EXPORT_MANIFEST_MARKDOWN_ATTACHMENT_FILENAME = "kai-export-manifest.md";
 const EXPORT_MANIFEST_MARKDOWN_CONTENT_TYPE = "text/markdown; charset=utf-8";
 const GRANT_RESPONSE_PACKET_MARKDOWN_ATTACHMENT_FILENAME = "kai-grant-response-packet.md";
+const GRANT_RESPONSE_PACKET_EXPORT_MANIFEST_MARKDOWN_ATTACHMENT_FILENAME =
+  "kai-grant-response-packet-export-manifest.md";
 const EXPORT_MANIFEST_CSV_ATTACHMENT_FILENAME = "kai-export-manifest-evidence-appendix.csv";
 const EXPORT_MANIFEST_CSV_CONTENT_TYPE = "text/csv; charset=utf-8";
 const EXPORT_MANIFEST_PDF_ATTACHMENT_FILENAME = "kai-export-manifest.pdf";
@@ -272,6 +275,20 @@ function sendGrantResponsePacketMarkdownAttachment(res, result) {
   res.status(200);
   res.setHeader("Content-Type", EXPORT_MANIFEST_MARKDOWN_CONTENT_TYPE);
   res.setHeader("Content-Disposition", `attachment; filename="${GRANT_RESPONSE_PACKET_MARKDOWN_ATTACHMENT_FILENAME}"`);
+  return res.send(markdown);
+}
+
+function sendGrantResponsePacketExportManifestMarkdownAttachment(res, result) {
+  if (!result?.ok) return sendServiceResult(res, result);
+  const markdown = typeof result.data?.markdown === "string" ? result.data.markdown : null;
+  if (markdown == null) return sendKaiError(res, "system_error");
+
+  res.status(200);
+  res.setHeader("Content-Type", EXPORT_MANIFEST_MARKDOWN_CONTENT_TYPE);
+  res.setHeader(
+    "Content-Disposition",
+    `attachment; filename="${GRANT_RESPONSE_PACKET_EXPORT_MANIFEST_MARKDOWN_ATTACHMENT_FILENAME}"`,
+  );
   return res.send(markdown);
 }
 
@@ -4128,6 +4145,72 @@ router.post(
   },
 );
 
+async function getGrantResponsePacketExportManifestMarkdownService() {
+  if (intakeServiceOverride?.serializeGrantResponsePacketExportManifestToMarkdown) return intakeServiceOverride;
+  grantResponsePacketExportManifestMarkdownServicePromise ||= import(
+    "../services/kaiGrantResponsePacketExportManifestMarkdownSerializer.js"
+  );
+  return grantResponsePacketExportManifestMarkdownServicePromise;
+}
+
+function grantResponsePacketExportManifestIdentifiers(req = {}) {
+  const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
+  const grantResponsePacketExportManifestId = typeof req.params?.grantResponsePacketExportManifestId === "string"
+    ? req.params.grantResponsePacketExportManifestId
+    : "";
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId) || organizationId !== organizationId.toLowerCase()) return null;
+  if (
+    !KAI_SPRINT2_P0_PATTERNS.uuid.test(grantResponsePacketExportManifestId)
+    || grantResponsePacketExportManifestId !== grantResponsePacketExportManifestId.toLowerCase()
+  ) return null;
+  return { organizationId, grantResponsePacketExportManifestId };
+}
+
+/**
+ * P14-08C: governed Grant Response Packet FINAL Markdown delivery, authorized
+ * solely by the route's own exact grantResponsePacketExportManifestId - never
+ * by organizationId+engagementId alone, a candidate id without its manifest,
+ * a member-level manifest/candidate id, or a latest/newest/preferred
+ * selection. Distinct from, and never a substitute for, the existing
+ * engagement-scoped PREVIEW_READ_ONLY
+ * /engagements/:engagementId/grant-response-packet/markdown route above.
+ * Contains no SQL and no direct database access - delegates once to
+ * kaiGrantResponsePacketExportManifestMarkdownSerializer.js, which itself
+ * delegates the manifest-bound render-model reconstruction (including the
+ * packet-native currentness/fingerprint proof) to the new P14-08C
+ * postgresGrantResponsePacketExportManifestRenderModelRepository.js. Creates
+ * no manifest, mutates no authority, and publishes nothing externally.
+ */
+router.get(
+  "/admin/organizations/:organizationId/grant-response-packet/export-manifests/:grantResponsePacketExportManifestId/markdown",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    const identifiers = grantResponsePacketExportManifestIdentifiers(req);
+    if (!identifiers) {
+      return sendKaiError(res, "validation_blocker", {
+        blockers: [routeValidationBlocker(
+          "invalid_uuid_field",
+          "organization_id_or_grant_response_packet_export_manifest_id",
+        )],
+      });
+    }
+    try {
+      const service = await getGrantResponsePacketExportManifestMarkdownService();
+      return sendGrantResponsePacketExportManifestMarkdownAttachment(
+        res,
+        await service.serializeGrantResponsePacketExportManifestToMarkdown({
+          organizationId: identifiers.organizationId,
+          grantResponsePacketExportManifestId: identifiers.grantResponsePacketExportManifestId,
+          actorContext: sprint2MappedActorContext(req),
+        }),
+      );
+    } catch (error) {
+      console.error("[kai-sprint2-intake] system_error", error);
+      return sendKaiError(res, "system_error");
+    }
+  },
+);
+
 export default router;
 
 export const __testables = {
@@ -4159,6 +4242,8 @@ export const __testables = {
   exportManifestIdentifiers,
   sendMarkdownAttachment,
   sendGrantResponsePacketMarkdownAttachment,
+  sendGrantResponsePacketExportManifestMarkdownAttachment,
+  grantResponsePacketExportManifestIdentifiers,
   grantResponsePacketIdentifier,
   validateCreateGrantResponsePacketExportCandidateRequestOrSend,
   grantResponsePacketExportCandidateReviewIdentifier,

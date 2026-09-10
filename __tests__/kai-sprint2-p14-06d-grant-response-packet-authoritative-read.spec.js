@@ -311,6 +311,30 @@ test("P14-06D packet GET exposes current candidate/review state to the export-re
       throw new Error("must not be called by this test's fake eligibility evaluator");
     },
   };
+  const MANIFEST = "14060000-0000-4000-8000-0000000000f9";
+  const MANIFEST_CREATED_AT = "2026-09-09T00:00:00.000Z";
+  let manifestStateCalls = 0;
+  const manifestRepository = {
+    async resolveExportManifestStateForCandidate(manifestStateInput) {
+      manifestStateCalls += 1;
+      assert.equal(manifestStateInput.grantResponsePacketExportCandidateId, CANDIDATE);
+      return {
+        ok: true,
+        data: {
+          manifests: [{
+            grantResponsePacketExportManifestId: MANIFEST,
+            grantResponsePacketExportCandidateId: CANDIDATE,
+            effectiveAuthorityDecisionId: "14060000-0000-4000-8000-0000000000fa",
+            effectiveAuthorityDecisionType: "export_authority_granted",
+            fingerprintContractVersion: "kai-sprint2-p14-08a-grant-response-packet-export-manifest-fingerprint-v1",
+            canonicalFingerprint: "fingerprint-sentinel",
+            createdAt: MANIFEST_CREATED_AT,
+          }],
+        },
+        error: null,
+      };
+    },
+  };
   let eligibilityCalls = 0;
   const result = await getGrantResponsePacket({
     organizationId: ORG,
@@ -321,6 +345,7 @@ test("P14-06D packet GET exposes current candidate/review state to the export-re
     generatedContentRepository,
     grantResponsePacketExportCandidateRepository: candidateRepository,
     grantResponsePacketHumanAuthorityDecisionRepository: {},
+    grantResponsePacketExportManifestRepository: manifestRepository,
     evaluateGrantResponsePacketFinalExportEligibility: async (evaluateInput) => {
       eligibilityCalls += 1;
       assert.equal(evaluateInput.grantResponsePacketExportCandidateId, CANDIDATE);
@@ -342,6 +367,7 @@ test("P14-06D packet GET exposes current candidate/review state to the export-re
   });
   assert.equal(result.ok, true);
   assert.equal(eligibilityCalls, 1);
+  assert.equal(manifestStateCalls, 1);
   assert.equal(result.data.exportReviewVisible, true);
   assert.equal(result.data.grantResponsePacketExportCandidateId, CANDIDATE);
   assert.equal(result.data.reviewQueueItemId, QUEUE);
@@ -352,6 +378,10 @@ test("P14-06D packet GET exposes current candidate/review state to the export-re
   assert.equal(result.data.finalReleaseAuthorityReason, "no_decision");
   assert.equal(result.data.finalExportEligible, false);
   assert.deepEqual(result.data.finalExportEligibilityBlockedReasons, ["generated_content_review_unresolved"]);
+  assert.deepEqual(result.data.finalDeliveryState, {
+    grantResponsePacketExportManifests: [{ grantResponsePacketExportManifestId: MANIFEST, createdAt: MANIFEST_CREATED_AT }],
+    finalMarkdownAvailable: true,
+  });
   for (const key of Object.keys(result.data)) {
     assert.doesNotMatch(key, /manifest|approval/i);
   }

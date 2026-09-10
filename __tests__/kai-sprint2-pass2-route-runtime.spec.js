@@ -251,6 +251,13 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // existing P3-01 governed generation vertical (additive; every prior
     // entry preserved verbatim).
     "/admin/organizations/:organizationId/generated-content-drafts/impact-narrative",
+    // P14-08C: governed Grant Response Packet FINAL Markdown delivery,
+    // authorized solely by the route's own exact
+    // grantResponsePacketExportManifestId - never organizationId+engagementId
+    // alone, a candidate id without its manifest, a member-level
+    // manifest/candidate id, or a latest/newest/preferred selection. Creates
+    // no manifest, mutates no authority, and publishes nothing externally.
+    "/admin/organizations/:organizationId/grant-response-packet/export-manifests/:grantResponsePacketExportManifestId/markdown",
     "/admin/organizations/:organizationId/requirements",
     "/admin/organizations/:organizationId/requirements/:requirementId/assessment",
     "/admin/organizations/:organizationId/review-queue",

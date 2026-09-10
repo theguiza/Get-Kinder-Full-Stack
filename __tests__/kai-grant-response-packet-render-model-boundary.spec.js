@@ -117,6 +117,7 @@ function packet(overrides = {}) {
     finalReleaseAuthorityReason: null,
     finalExportEligible: null,
     finalExportEligibilityBlockedReasons: null,
+    finalDeliveryState: null,
     drafts: [
       member(),
       member({

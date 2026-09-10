@@ -64,6 +64,16 @@ async function createDefaultGrantResponsePacketHumanAuthorityDecisionRepository(
   return createPostgresGrantResponsePacketHumanAuthorityDecisionRepository();
 }
 
+// P14-08C: read-only packet-manifest state lookup, reusing the exact,
+// already-proven P14-08A repository's resolveExportManifestStateForCandidate
+// - no new manifest read/selection logic is added here.
+async function createDefaultGrantResponsePacketExportManifestRepository() {
+  const { createPostgresGrantResponsePacketExportManifestRepository } = await import(
+    "../dictionary/postgresGrantResponsePacketExportManifestRepository.js"
+  );
+  return createPostgresGrantResponsePacketExportManifestRepository();
+}
+
 async function defaultEvaluateGrantResponsePacketFinalExportEligibility(input, dependencies) {
   const { evaluateGrantResponsePacketFinalExportEligibility } = await import(
     "./kaiGrantResponsePacketFinalExportEligibilityGateService.js"
@@ -117,11 +127,42 @@ function projectPacketDraft(packet, exportReviewVisible) {
   return { ...projected, exportManifestId, exportManifestHistory, exportReviewVisible };
 }
 
+// P14-08C: minimum safe packet-manifest read state for the exact current
+// candidate the packet DTO already resolved above - grantResponsePacketExportManifestId
+// + createdAt only (never raw authority rows, fingerprint, or effective-
+// authority-decision internals), and never a latest/newest/preferred
+// selection - the array is exactly the P14-08A repository's own
+// created_at-ASC presentation order over every manifest bound to this exact
+// candidate.
+function isFinalDeliveryStateDto(value) {
+  if (value === null) return true;
+  if (!(Boolean(value)
+    && typeof value === "object"
+    && !Array.isArray(value)
+    && Object.keys(value).length === 2
+    && Object.keys(value).every((key) => key === "grantResponsePacketExportManifests" || key === "finalMarkdownAvailable")
+    && Array.isArray(value.grantResponsePacketExportManifests)
+    && typeof value.finalMarkdownAvailable === "boolean")) {
+    return false;
+  }
+  if (value.finalMarkdownAvailable !== (value.grantResponsePacketExportManifests.length > 0)) return false;
+  return value.grantResponsePacketExportManifests.every((manifest) => (
+    Boolean(manifest)
+    && typeof manifest === "object"
+    && !Array.isArray(manifest)
+    && Object.keys(manifest).length === 2
+    && Object.keys(manifest).every((key) => key === "grantResponsePacketExportManifestId" || key === "createdAt")
+    && UUID_PATTERN.test(manifest.grantResponsePacketExportManifestId)
+    && typeof manifest.createdAt === "string"
+    && !Number.isNaN(Date.parse(manifest.createdAt))
+  ));
+}
+
 function isGrantResponsePacketDto(data) {
   if (!(Boolean(data)
     && typeof data === "object"
     && !Array.isArray(data)
-    && Object.keys(data).length === 14
+    && Object.keys(data).length === 15
     && Object.keys(data).every((key) => (
       key === "organizationId"
       || key === "engagementId"
@@ -137,7 +178,9 @@ function isGrantResponsePacketDto(data) {
       || key === "finalReleaseAuthorityReason"
       || key === "finalExportEligible"
       || key === "finalExportEligibilityBlockedReasons"
+      || key === "finalDeliveryState"
     ))
+    && isFinalDeliveryStateDto(data.finalDeliveryState)
     && UUID_PATTERN.test(data.organizationId)
     && UUID_PATTERN.test(data.engagementId)
     && data.packetAudience === "funder"
@@ -173,6 +216,7 @@ function isGrantResponsePacketDto(data) {
     if (data.queueStatus !== null) return false;
     if (data.reviewStatus !== null) return false;
     if (data.reviewUpdatedAt !== null) return false;
+    if (data.finalDeliveryState !== null) return false;
   }
   if (data.grantResponsePacketExportCandidateId === null) {
     if (data.reviewQueueItemId !== null) return false;
@@ -183,6 +227,7 @@ function isGrantResponsePacketDto(data) {
     if (data.finalReleaseAuthorityReason !== null) return false;
     if (data.finalExportEligible !== null) return false;
     if (data.finalExportEligibilityBlockedReasons !== null) return false;
+    if (data.finalDeliveryState !== null) return false;
   } else {
     if (typeof data.finalReleaseAuthorityEffective !== "boolean") return false;
     if (typeof data.finalExportEligible !== "boolean") return false;
@@ -284,6 +329,13 @@ export async function getGrantResponsePacket(input, dependencies = {}) {
   let finalReleaseAuthorityReason = null;
   let finalExportEligible = null;
   let finalExportEligibilityBlockedReasons = null;
+  // P14-08C: minimum safe packet-manifest read state for the exact current
+  // candidate above - null whenever no exportReviewVisible actor or no
+  // current candidate exists, mirroring the existing null-linkage exactly.
+  // Reuses the already-proven P14-08A
+  // resolveExportManifestStateForCandidate exact-candidate lookup verbatim -
+  // never a latest/newest/preferred manifest selection.
+  let finalDeliveryState = null;
   if (exportReviewVisible) {
     const currentRenderModel = await composeCurrentGrantResponsePacketRenderModel({
       organizationId: result.data.organizationId,
@@ -299,6 +351,7 @@ export async function getGrantResponsePacket(input, dependencies = {}) {
       finalReleaseAuthorityReason: null,
       finalExportEligible: null,
       finalExportEligibilityBlockedReasons: null,
+      finalDeliveryState: null,
       drafts,
     });
     if (!currentRenderModel) return buildKaiError("system_error", { data: null });
@@ -356,6 +409,27 @@ export async function getGrantResponsePacket(input, dependencies = {}) {
       finalExportEligibilityBlockedReasons = Array.isArray(eligibilityResult.data.validatorResult?.evidence?.failed_gates)
         ? eligibilityResult.data.validatorResult.evidence.failed_gates
         : [];
+
+      const manifestRepository = dependencies.grantResponsePacketExportManifestRepository
+        || (await createDefaultGrantResponsePacketExportManifestRepository());
+      const manifestStateResult = await manifestRepository.resolveExportManifestStateForCandidate({
+        organizationId: input.organizationId,
+        grantResponsePacketExportCandidateId: currentExportCandidateReviewState.grantResponsePacketExportCandidateId,
+      });
+      if (!manifestStateResult.ok) {
+        return buildKaiError(manifestStateResult.error.code, {
+          status: manifestStateResult.error.status,
+          data: null,
+        });
+      }
+      const grantResponsePacketExportManifests = manifestStateResult.data.manifests.map((manifest) => ({
+        grantResponsePacketExportManifestId: manifest.grantResponsePacketExportManifestId,
+        createdAt: manifest.createdAt,
+      }));
+      finalDeliveryState = {
+        grantResponsePacketExportManifests,
+        finalMarkdownAvailable: grantResponsePacketExportManifests.length > 0,
+      };
     }
   }
 
@@ -369,6 +443,7 @@ export async function getGrantResponsePacket(input, dependencies = {}) {
     finalReleaseAuthorityReason,
     finalExportEligible,
     finalExportEligibilityBlockedReasons,
+    finalDeliveryState,
     drafts,
   };
   if (!isGrantResponsePacketDto(data)) return buildKaiError("system_error", { data: null });

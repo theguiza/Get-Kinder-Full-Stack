@@ -60,16 +60,26 @@ function formatCitation(citation, citationIndex) {
   return `  - Citation ${citationIndex}: claim ${inlineCode(citation.claimId)}; evidence ${inlineCode(citation.evidenceItemId)}; source ${inlineCode(citation.sourceId)}; source version ${inlineCode(citation.sourceVersionId)}${citationIdentity}; support ${inlineCode(citation.supportStrength)}; claim review ${inlineCode(citation.claimReviewStatus)}; evidence review ${inlineCode(citation.evidenceReviewStatus)}; current eligible ${inlineCode(citation.currentEligible)}; blockers ${formatCodes(citation.blockerCodes)}; affected dimensions ${formatCodes(citation.affectedDimensionKeys)}; affected objects ${formatCodes(citation.affectedObjectIds)}.`;
 }
 
-export function serializeGrantResponsePacketRenderModelToMarkdown(renderModel) {
+export function serializeGrantResponsePacketRenderModelToMarkdown(renderModel, options = {}) {
   if (!validateRenderModel(renderModel)) {
     throw new TypeError("A valid Grant Response Packet render-model DTO is required.");
   }
 
+  // Additive, defaulting overrides only - existing callers that pass no
+  // options get byte-identical PREVIEW output. A distinct delivery pipeline
+  // (governed manifest-bound delivery) supplies its own distinct contract
+  // version/delivery-class label so its output never mislabels itself as
+  // this pipeline's delivery class.
+  const markdownContractVersion = typeof options.markdownContractVersion === "string"
+    ? options.markdownContractVersion
+    : GRANT_RESPONSE_PACKET_MARKDOWN_CONTRACT_VERSION;
+  const deliveryClass = typeof options.deliveryClass === "string" ? options.deliveryClass : DELIVERY_CLASS;
+
   const lines = [
     "# Grant Response Packet",
     "",
-    `Markdown contract: ${GRANT_RESPONSE_PACKET_MARKDOWN_CONTRACT_VERSION}`,
-    `Delivery class: ${inlineCode(DELIVERY_CLASS)}`,
+    `Markdown contract: ${markdownContractVersion}`,
+    `Delivery class: ${inlineCode(deliveryClass)}`,
     `Render model contract: ${inlineCode(renderModel.renderModelContractVersion)}`,
     `Organization: ${inlineCode(renderModel.organizationId)}`,
     `Engagement: ${inlineCode(renderModel.engagementId)}`,
@@ -130,12 +140,16 @@ export async function serializeGrantResponsePacketToMarkdown(input, dependencies
     dependencies.composeGrantResponsePacketRenderModel || composeGrantResponsePacketRenderModel;
   const result = await renderModelService(input, dependencies.renderModelDependencies || dependencies);
   if (!result.ok) return result;
+  const markdownContractVersion = typeof dependencies.markdownContractVersion === "string"
+    ? dependencies.markdownContractVersion
+    : GRANT_RESPONSE_PACKET_MARKDOWN_CONTRACT_VERSION;
+  const deliveryClass = typeof dependencies.deliveryClass === "string" ? dependencies.deliveryClass : DELIVERY_CLASS;
   return {
     ok: true,
     data: {
-      markdownContractVersion: GRANT_RESPONSE_PACKET_MARKDOWN_CONTRACT_VERSION,
-      deliveryClass: DELIVERY_CLASS,
-      markdown: serializeGrantResponsePacketRenderModelToMarkdown(result.data),
+      markdownContractVersion,
+      deliveryClass,
+      markdown: serializeGrantResponsePacketRenderModelToMarkdown(result.data, { markdownContractVersion, deliveryClass }),
     },
     error: null,
   };

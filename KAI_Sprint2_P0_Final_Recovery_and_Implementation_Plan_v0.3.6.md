@@ -26493,3 +26493,151 @@ shared-database file was touched.
 
 **Local commit:** one bounded commit created after all required checks
 passed.
+
+## Phase-14 (Grant Response Packet Track) - P14-08C: Exact Packet
+## Manifest-Bound FINAL Markdown Delivery + Authoritative Packet Manifest
+## Read State
+
+**Date:** 2026-09-10
+
+**Owner authorization (bounded, local-only):** implement final delivery
+authorized solely by an exact, existing `grantResponsePacketExportManifestId`,
+reusing the existing packet Markdown serializer, plus the minimum safe
+extension to the existing authoritative packet GET to expose packet-manifest
+read state for the exact current candidate. Starting HEAD:
+`0e20f96bb18ca09d48d1b8421606419cecc5fdab` (working tree clean). No schema
+change, no P14-08A/B redesign, no P14-07/P14-07B1 reopening, no new Markdown
+format, no PDF/DOCX/CSV, and no frontend.
+
+**Structural finding reused rather than reinvented:** a P14-03 packet
+candidate row never stores full block/citation content - only its own
+`canonical_fingerprint` and ordered member `generated_content_draft_id`s.
+Exactly like the already-accepted P14-06D/P14-07/P14-07B1 "packet-native
+currentness" pattern (recompose the packet's CURRENT render model, recompute
+its P14-03 fingerprint, and compare it to the exact candidate row's own
+stored fingerprint), this package proves a manifest-bound candidate is
+reconstructable from current state by that same equality check, never by a
+second content-snapshot storage scheme and never by treating "current" as a
+substitute for "exact" - an unequal fingerprint fails closed as
+`conflict_current_state_changed` rather than silently rendering different
+content under the same manifest identity.
+
+**Repository:** new
+`Backend/kai/dictionary/postgresGrantResponsePacketExportManifestRenderModelRepository.js`,
+the packet-level analogue of the existing P3-19
+`postgresExportManifestRenderModelRepository.js`. Exact-keys input
+`{organizationId, grantResponsePacketExportManifestId, actorContext}`. Loads
+the exact manifest row and its exact FK-bound P14-03 candidate row (tenant/
+identity-safe join) inside one read-only transaction, then recomposes the
+current packet render model via the existing, actor-gated
+`composeGrantResponsePacketRenderModel` and recomputes its P14-03 fingerprint
+via the existing `composeGrantResponsePacketExportCandidateFingerprint` -
+never a new fingerprint scheme. Fails closed as `not_found` for a
+nonexistent/cross-tenant manifest or an unresolvable candidate row, and as
+`conflict_current_state_changed` on any fingerprint mismatch. No SQL beyond
+two small tenant-scoped SELECTs; no manifest is ever created or reused here.
+
+**Service:** new
+`Backend/kai/services/kaiGrantResponsePacketExportManifestMarkdownSerializer.js`
+exporting `serializeGrantResponsePacketExportManifestToMarkdown`, mirroring
+the existing P3-19 `kaiExportManifestRenderModelService.js`'s convention of
+reusing its own manifest-track `CREATE_*_ALLOWED_ROLES`/`_OPERATION` gate for
+reads - here the exact P14-08B
+`CREATE_GRANT_RESPONSE_PACKET_EXPORT_MANIFEST_ALLOWED_ROLES`/`_OPERATION`
+(gk_admin-only), plus the same `validateTenantBoundaryConsistency` check.
+Exact-keys input `{organizationId, grantResponsePacketExportManifestId,
+actorContext}` - no engagementId, candidate id, fingerprint, member,
+eligibility, or authority field is ever accepted. Delegates the entire
+manifest-bound render-model reconstruction to the new repository above, then
+reuses the EXISTING
+`serializeGrantResponsePacketRenderModelToMarkdown` pure function unmodified -
+no new Markdown format. Returns an explicit five-field allowlist projection.
+
+**Markdown serializer (additive, non-breaking):**
+`Backend/kai/services/kaiGrantResponsePacketMarkdownSerializer.js`'s
+`serializeGrantResponsePacketRenderModelToMarkdown`/
+`serializeGrantResponsePacketToMarkdown` gained an additive
+`markdownContractVersion`/`deliveryClass` override (both default to the
+existing `PREVIEW_READ_ONLY` values when omitted, so the existing
+engagement-scoped preview route/tests are byte-identical). This closes the
+one genuine structural risk in reusing the serializer verbatim for FINAL
+delivery: its delivery-class header line was hardcoded to
+`PREVIEW_READ_ONLY`, which would have made a governed FINAL download
+falsely self-label as a preview. The new service above supplies its own
+distinct `FINAL_MANIFEST_BOUND` label and
+`kai-sprint2-grant-response-packet-markdown-final-v1` contract version - no
+new heading, block, citation, or field structure was added.
+
+**Route:** new `GET
+/admin/organizations/:organizationId/grant-response-packet/export-manifests/:grantResponsePacketExportManifestId/markdown`
+in `sprint2IntakeApi.js`, appended at the very end (after the P14-08B route,
+mirroring that package's own route-placement fix), following the exact P3-19
+governed-manifest-Markdown route convention: server-derived actorContext,
+structured KAI errors, one delegation into the service layer, no SQL/
+repository access in the route slice. The existing engagement-scoped
+`PREVIEW_READ_ONLY` `/engagements/:engagementId/grant-response-packet/markdown`
+route is untouched.
+
+**Authoritative packet GET extension:** `kaiGrantResponsePacketService.js`'s
+`getGrantResponsePacket` gained one new field, `finalDeliveryState` (null
+unless the actor is export-review-visible AND a current packet candidate
+exists), computed by calling the already-proven P14-08A
+`resolveExportManifestStateForCandidate` for the exact current candidate -
+never a latest/newest/preferred selection. Exposes only
+`grantResponsePacketExportManifestId` + `createdAt` per manifest plus a
+derived `finalMarkdownAvailable` boolean; no raw authority row, fingerprint,
+or effective-authority-decision internal is exposed. Field name deliberately
+avoids the literal substring "manifest"/"approval" to remain compatible with
+the existing P14-06D regression guard that asserts no such top-level key
+exists on this DTO - a naming accommodation, not a semantic weakening.
+
+**Verification:** added
+`__tests__/kai-sprint2-p14-08-c-grant-response-packet-export-manifest-final-markdown-boundary.spec.js`
+(19/19) proving: exact valid manifest composes the render model; nonexistent/
+cross-tenant manifest fails closed as `not_found`; a manifest bound to
+candidate A can never render candidate B's content; a superseded/changed
+candidate fails closed as `conflict_current_state_changed` instead of
+silently rendering different content; render-model composition failures
+propagate verbatim; the repository/service input contracts are exact-key
+only (engagementId, candidate id, fingerprint, member, eligibility, and
+authority fields are all refused); a member-level export manifest id cannot
+substitute the packet manifest identity; the existing packet Markdown
+serializer is reused verbatim and the FINAL output correctly self-labels as
+`FINAL_MANIFEST_BOUND` (never `PREVIEW_READ_ONLY`); the PREVIEW route's own
+default output is unchanged; no raw evidence/source body is exposed; the
+FINAL route is mounted exactly once, contains no SQL/repository access, and
+creates no manifest/mutates no authority; and the existing PREVIEW route
+remains present and unchanged.
+
+**Affected regressions passed:** P14-08A packet-manifest-foundation boundary
+suite, P14-08B service/route suite, P14-07 final-release-authority suite,
+P14-06A/P14-06B suites, P14-06D authoritative-read suite (extended with one
+new mocked manifest-repository dependency and a `finalDeliveryState`
+assertion), P14-03 candidate-foundation integration suite (1 skip, no
+runner-owned database), the packet render-model boundary suite (its `packet()`
+test fixture gained the additive `finalDeliveryState: null` field), the
+existing packet Markdown preview boundary suite (unchanged behavior proven),
+P3-19/P3-20 export-manifest boundary suites, the existing governed Markdown
+export-delivery route suite, and the Pass-2 route-runtime suite (route list
+extended with the one new route path in its exact alphabetical position).
+All green; `git diff --check` passed with no whitespace errors.
+
+**Frontend build:** not run - no frontend source or built bundle was
+changed.
+
+**Final diff review:** new files -
+`Backend/kai/dictionary/postgresGrantResponsePacketExportManifestRenderModelRepository.js`,
+`Backend/kai/services/kaiGrantResponsePacketExportManifestMarkdownSerializer.js`,
+and this package's own boundary test file; edited files -
+`Backend/kai/services/kaiGrantResponsePacketMarkdownSerializer.js` (additive
+override parameters only), `Backend/kai/services/kaiGrantResponsePacketService.js`
+(one new field + its null-linkage rules and computation),
+`Backend/kai/routes/sprint2IntakeApi.js` (one new route plus its helpers,
+appended at the very end), and three directly-coupled test files updated for
+the additive DTO field / new route path. No migration, no schema change, no
+P14-08A/B repository or contract logic change, no P14-07/P14-07B1 eligibility/
+authority logic change, no PDF/DOCX/CSV bytes, and no production/shared-
+database file was touched.
+
+**Local commit:** one bounded commit created after all required checks
+passed.
