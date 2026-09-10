@@ -2776,6 +2776,92 @@ router.post(
   },
 );
 
+/**
+ * P14-09: governed FUNDER evidence-summary generation for an explicit
+ * engagement. This is a distinct, additive route - the existing internal
+ * evidence-summary route above is completely unchanged and stays fixed to
+ * requestedAudience "internal". The accepted request body shape is
+ * identical to the internal route (claim_ids, idempotency_key,
+ * engagement_id only); requestedAudience is never read from the client and
+ * is instead set server-side to "funder" below. The same
+ * createEvidenceSummaryDraft service/repository/generator/validator/audit
+ * vertical is reused unmodified in its persistence, idempotency, and audit
+ * mechanics - only requestedAudience differs, and the repository's own
+ * freshly-evaluated funder-eligibility gate (pre- and post-generation)
+ * governs whether generation may proceed.
+ */
+function validateCreateFunderEvidenceSummaryRequestOrSend(req, res) {
+  if (!metadataContentTypeIsSupported(req)) {
+    sendKaiError(res, "unsupported_media_type");
+    return null;
+  }
+  const identifiers = eligibleClaimsForAudienceOrganizationIdentifier(req);
+  const payload = requestPayload(req);
+  const keys = Object.keys(payload);
+  if (
+    !identifiers
+    || keys.length !== 3
+    || !keys.every((key) => key === "claim_ids" || key === "idempotency_key" || key === "engagement_id")
+    || typeof payload.engagement_id !== "string"
+    || !KAI_SPRINT2_P0_PATTERNS.uuid.test(payload.engagement_id)
+    || payload.engagement_id !== payload.engagement_id.toLowerCase()
+    || !Array.isArray(payload.claim_ids)
+    || payload.claim_ids.length < 1
+    || payload.claim_ids.length > 20
+    || payload.claim_ids.some((claimId) => typeof claimId !== "string" || !KAI_SPRINT2_P0_PATTERNS.uuid.test(claimId) || claimId !== claimId.toLowerCase())
+    || payload.claim_ids.length !== new Set(payload.claim_ids).size
+    || typeof payload.idempotency_key !== "string"
+    || payload.idempotency_key !== payload.idempotency_key.trim()
+    || !/^[ -~]{8,128}$/.test(payload.idempotency_key)
+  ) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker(
+        "invalid_funder_evidence_summary_generation_request",
+        "organization_id_claim_ids_idempotency_key_or_engagement_id",
+      )],
+    });
+    return null;
+  }
+  return {
+    organizationId: identifiers.organizationId,
+    claimIds: [...payload.claim_ids].sort(),
+    idempotencyKey: payload.idempotency_key,
+    engagementId: payload.engagement_id,
+  };
+}
+
+router.post(
+  "/admin/organizations/:organizationId/generated-content-drafts/evidence-summary/funder",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    const parsed = validateCreateFunderEvidenceSummaryRequestOrSend(req, res);
+    if (!parsed) return;
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    return invokeService(res, async () => {
+      const service = await getGeneratedContentService();
+      const { createProductionEvidenceSummaryDraftGenerator } = await import("../services/kaiEvidenceSummaryDraftGenerator.js");
+      return service.createEvidenceSummaryDraft({
+        organizationId: parsed.organizationId,
+        engagementId: parsed.engagementId,
+        requestedAudience: "funder",
+        claimIds: parsed.claimIds,
+        idempotencyKey: parsed.idempotencyKey,
+        actorContext,
+        now,
+      }, {
+        draftGenerator: createProductionEvidenceSummaryDraftGenerator(),
+        metadataOnlyAudit: createProductionMetadataOnlyAuditForGeneratedContentDraft({
+          organizationId: parsed.organizationId,
+          actorContext,
+          now,
+          route: "p14_09_create_funder_evidence_summary_draft",
+        }),
+      });
+    }, 201);
+  },
+);
+
 function validateCreateImpactNarrativeRequestOrSend(req, res) {
   if (!metadataContentTypeIsSupported(req)) {
     sendKaiError(res, "unsupported_media_type");

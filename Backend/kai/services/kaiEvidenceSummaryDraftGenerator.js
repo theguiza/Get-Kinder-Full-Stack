@@ -2,6 +2,14 @@ import Anthropic from "@anthropic-ai/sdk";
 
 const CONTENT_TYPE = "evidence_summary";
 const REQUESTED_AUDIENCE = "internal";
+const FUNDER_REQUESTED_AUDIENCE = "funder";
+// P14-09: this adapter is shared by both the existing internal
+// evidence-summary route and the new governed funder evidence-summary
+// route. Internal behavior (including the exact system-prompt wording) is
+// preserved byte-for-byte; only a freshly authorized "funder" request gets
+// the funder-facing system-prompt wording below. No other audience is
+// accepted here - public generation is out of scope.
+const ALLOWED_REQUESTED_AUDIENCES = Object.freeze(new Set([REQUESTED_AUDIENCE, FUNDER_REQUESTED_AUDIENCE]));
 const MODEL = "claude-haiku-4-5-20251001";
 
 const anthropic = new Anthropic();
@@ -47,7 +55,7 @@ export function createProductionEvidenceSummaryDraftGenerator({
   return async function draftGenerator(generatorInput) {
     if (
       generatorInput?.contentType !== CONTENT_TYPE
-      || generatorInput?.requestedAudience !== REQUESTED_AUDIENCE
+      || !ALLOWED_REQUESTED_AUDIENCES.has(generatorInput?.requestedAudience)
       || !Array.isArray(generatorInput.claims)
     ) {
       return { blocks: [] };
@@ -57,7 +65,9 @@ export function createProductionEvidenceSummaryDraftGenerator({
       model: MODEL,
       max_tokens: 1200,
       system: [
-        "You generate internal evidence summaries for Get Kinder.",
+        generatorInput.requestedAudience === FUNDER_REQUESTED_AUDIENCE
+          ? "You generate funder-facing evidence summaries for Get Kinder."
+          : "You generate internal evidence summaries for Get Kinder.",
         "Use only the supplied governed claim projection.",
         "Return strict JSON only, with shape: {\"blocks\":[{\"text\":\"...\",\"citations\":[{\"claimId\":\"...\",\"evidenceItemId\":\"...\"}]}]}.",
         "Every block must cite at least one supplied claim/evidence pair.",
@@ -80,5 +90,7 @@ export function createProductionEvidenceSummaryDraftGenerator({
 export const __evidenceSummaryDraftGeneratorContract = Object.freeze({
   CONTENT_TYPE,
   REQUESTED_AUDIENCE,
+  FUNDER_REQUESTED_AUDIENCE,
+  ALLOWED_REQUESTED_AUDIENCES,
   MODEL,
 });

@@ -247,6 +247,13 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // verbatim).
     "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/review-packet",
     "/admin/organizations/:organizationId/generated-content-drafts/evidence-summary",
+    // P14-09 governed FUNDER evidence-summary generation for an explicit
+    // engagement, reusing the existing P3-01 governed generation vertical
+    // (additive; every prior entry preserved verbatim). requestedAudience
+    // is server-owned "funder" only - never client-supplied - and every
+    // requested claim must be freshly funder-eligible (pre- and
+    // post-generation) before generation may proceed.
+    "/admin/organizations/:organizationId/generated-content-drafts/evidence-summary/funder",
     // KAI P13-01 internal impact-narrative generation surface, reusing the
     // existing P3-01 governed generation vertical (additive; every prior
     // entry preserved verbatim).

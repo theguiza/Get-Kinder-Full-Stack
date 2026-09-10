@@ -28,6 +28,11 @@ const RESULT_STATUS = Object.freeze({
   duplicate_conflict: 409,
   not_found: 404,
   system_error: 500,
+  // P14-09: distinct, structured failure for governed funder generation
+  // only - a freshly evaluated claim that is not currently funder-eligible.
+  // Never used for internal generation (Package 14-05 preserves internal
+  // admission regardless of current audience/use eligibility).
+  funder_use_not_currently_eligible: 422,
 });
 
 const CONTENT_TYPE = "evidence_summary";
@@ -906,6 +911,20 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
         traceabilityResults.push(result.data);
       }
 
+      // P14-09: governed FUNDER draft generation additionally requires every
+      // requested claim's fresh P2-06 traceability evaluation (just above,
+      // for this exact transaction) to be currently funder-eligible. Unlike
+      // INTERNAL (Package 14-05, unchanged above), eligible=false must fail
+      // closed here - before the generator is ever invoked - using the
+      // authoritative evaluator result only (never libraryStatus, display
+      // state, or blocker counts).
+      if (
+        input.requestedAudience === "funder"
+        && !traceabilityResults.every((traceability) => traceability.eligible === true)
+      ) {
+        rollbackFailure("funder_use_not_currently_eligible");
+      }
+
       const projections = await loadGenerationProjection(tx, input);
       if (!projections) rollbackFailure("conflict_current_state_changed");
       const projectionByClaim = new Map(projections.map((claim) => [claim.claimId, claim]));
@@ -956,6 +975,14 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
           || result.data?.evidence?.evidence_item_id !== claim.evidenceItemId
         ) {
           rollbackFailure("conflict_current_state_changed");
+        }
+        // P14-09: for FUNDER only, this same post-generation revalidation
+        // pass must also fail closed (rolling back everything generated
+        // above, before any persistence) if current funder eligibility was
+        // lost between the pre-generation check and now. INTERNAL semantics
+        // above remain untouched - eligible is not read for internal.
+        if (input.requestedAudience === "funder" && result.data?.eligible !== true) {
+          rollbackFailure("funder_use_not_currently_eligible");
         }
       }
 
