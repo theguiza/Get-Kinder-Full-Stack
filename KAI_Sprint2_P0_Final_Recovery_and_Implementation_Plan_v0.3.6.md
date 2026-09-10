@@ -25816,3 +25816,155 @@ final eligibility, manifest, or production configuration changed.
 
 **Local commit:** one bounded commit created after all required checks
 passed.
+
+## Phase-14 (Grant Response Packet Track) - P14-07B1: Grant Response Packet
+## Human Final-Release Authority Persistence Foundation
+
+**Date:** 2026-09-09
+
+**Owner authorization (bounded, local-only):** add the smallest additive
+local schema/persistence foundation letting the existing "human final-release
+authority" decision concept (P3-17 `export_authority_granted` / grant /
+revoke / append-only supersession lineage) be represented for an exact,
+existing, immutable P14-03 Grant Response Packet export candidate. Starting
+HEAD: `d28b2f63ea7c0b6b25d665aaab3463a55c6d6b14` (working tree clean). No
+final-eligibility evaluation, no packet manifest, no final packet bytes, no
+frontend, and no production/shared-database work was performed.
+
+**Finding that authorized this package:** P14-07A (packet final-export
+eligibility) was attempted and found blocked: the existing, governing P3-18
+`evaluateFinalExportEligibility`/VAL-EXP-001 gate has a mandatory
+`affirmativeHumanExportAuthority` input that can only be non-`false` against
+a persisted `kai.human_authority_decisions` row, and that table's hard
+`FOREIGN KEY (export_candidate_id, organization_id) REFERENCES
+kai.export_candidates(...)` cannot represent a
+`kai.grant_response_packet_export_candidates` row (P14-03) - a structurally
+disjoint table. This package closes exactly that persistence gap; it does
+not implement P14-07A itself.
+
+**Schema:** new migration
+`migrations/kai_sprint2_p14_07_b1_grant_response_packet_human_authority_decision_ledger.sql`
+(+ `.rollback.sql`) adds exactly one new table,
+`kai.grant_response_packet_human_authority_decisions`, mirroring the existing
+P3-17 `kai.human_authority_decisions` shape and semantics exactly (append-only,
+backward-pointer `supersedes_decision_id` lineage scoped to
+(organization, candidate, decision_type), a partial unique index enforcing at
+most one lineage root and at most one direct successor per predecessor, and a
+`BEFORE UPDATE OR DELETE` trigger rejecting all mutation), narrowed to the
+single decision type this package is authorized to add -
+`export_authority_granted`, `decided_by_role` pinned to `gk_admin` - since a
+Grant Response Packet's audience is always exactly `funder`, so no
+`requested_audience` column or `client_reviewed`/`funder_ready`/`public_ready`
+equivalent exists here, and no `packet_approved`/`packet_funder_ready`/
+`packet_finalized` vocabulary was invented. The candidate FK is a tenant-safe
+composite `FOREIGN KEY (grant_response_packet_export_candidate_id,
+organization_id) REFERENCES kai.grant_response_packet_export_candidates(...)`.
+`kai.human_authority_decisions` and its existing FK into
+`kai.export_candidates` are completely untouched - no polymorphic/nullable
+widening of that constraint was made.
+
+**Repository:** new
+`Backend/kai/dictionary/postgresGrantResponsePacketHumanAuthorityDecisionRepository.js`
+exposing `recordDecision` and `evaluateEffectiveness`, mirroring the existing
+P3-17 repository's `recordDecision`/`evaluateEffectiveness` shape and
+semantics (exact-keys input, `deriveDecidedByRole` requiring an active
+`gk_admin` membership in the exact organization, replay-is-idempotent on a
+repeated same-action head, a genuinely new action superseding the current
+head, a root revoke rejected). The one necessary deviation from the P3-17
+pattern: because a packet's current semantic state can only be recomposed
+through the existing, actor-gated `composeGrantResponsePacketRenderModel` ->
+`getGrantResponsePacket` chain (the same chain P14-06D's
+`readCurrentGrantResponsePacketExportCandidateReviewState` already uses) -
+which opens its own connections and cannot run inside an open transaction -
+the current canonical fingerprint is always recomposed *before* any
+transaction (exactly as P14-06D already does), then compared, transaction-
+scoped, only against the exact loaded candidate row's own stored
+`canonical_fingerprint`; because
+`(organization_id, grant_response_packet_export_identity_id,
+canonical_fingerprint)` is a P14-03 unique convergence key, an equal
+recomputed fingerprint proves this exact candidate id is still the current
+one - never a latest/newest/superseded selection - and a changed fingerprint
+(any member revision or a superseded candidate) makes the same candidate id
+ineligible for a new decision without any row being rewritten. No fingerprint,
+member list, `requestedAudience`, or manifest identity is ever accepted from a
+caller.
+
+**Audit:** new
+`createProductionMetadataOnlyAuditForGrantResponsePacketHumanAuthorityDecision`
+in `kaiMetadataOnlyAuditComposition.js`, mirroring the existing P14-03/P14-05
+packet audit adapters' non-file-scoped discipline (`kai.audit_events` via
+`insertRequiredSuccessfulAuditEvent`, candidate-anchored `object_type`/
+`object_id`, never a new "human authority decision" object type). `Backend/kai/db/kaiAuditQueries.js`'s
+`SAFE_AUDIT_METADATA_KEYS` allowlist was additively widened by eight safe
+scalar fields this decision's audit row carries (`decision_id`,
+`decision_type`, `decision_action`, `decided_by_role`,
+`supersedes_decision_id`, `effective`, `effectiveness_reason`,
+`head_decision_id`); no existing key's handling changed except `effective`
+now normalizes to a strict boolean alongside the existing `blocked`/
+`metadata_only` fields.
+
+**Verification:** added
+`__tests__/kai-sprint2-p14-07-b1-grant-response-packet-human-authority-decision-ledger-boundary.spec.js`
+(15/15, pure-function/no-database) and
+`__tests__/kai-sprint2-p14-07-b1-grant-response-packet-human-authority-decision-ledger.integration.spec.js`
+(10/10 against a real runner-owned local PostgreSQL, skipped without it)
+proving: grant persisted and effective/discoverable; replay of the same
+action is idempotent (no new row, no new audit); revoke supersedes a grant
+and becomes the new ineffective head while the old grant row is never
+mutated; a root revoke is rejected; a stale/superseded candidate (recomposed
+fingerprint no longer matches) cannot be granted and candidate A's decision
+never authorizes candidate B; a nonexistent candidate id, a candidate from
+another organization, and a candidate whose packet identity belongs to a
+different engagement are each rejected as `not_found` with no latest/newest
+selection; client-supplied `canonicalFingerprint`/`effective`/
+`requestedAudience` fields are refused outright by the exact-keys input
+contract; and this package creates no final-eligibility state, no packet
+manifest table, and no packet bytes. The full migration/schema pack -
+`scripts/kai-sprint2-p14-07-b1-grant-response-packet-human-authority-decision-ledger-{verifier,smoke-seed,smoke-verifier,failure-checks,local-postgres}.{sql,js}`
+- proves (16/16 schema checks; a `unique_violation` is also accepted
+alongside `foreign_key_violation` for the cross-candidate-lineage failure
+check, since by that point in the runner's sequence the referenced
+predecessor already has a successor from an earlier proof, and either
+constraint firing equally proves the cross-candidate attempt is rejected):
+table/constraint/index/trigger presence; the candidate FK targets
+`kai.grant_response_packet_export_candidates` (never `kai.export_candidates`
+or a member-level id); malformed decision_type/decision_action rejected;
+non-`gk_admin` role rejected; self-superseding and cross-candidate lineage
+rejected; a member-level `kai.export_candidates` id cannot substitute a
+packet candidate id; non-`human` `created_by_type` rejected; append-only
+UPDATE/DELETE rejected; `kai.human_authority_decisions` is completely
+unaltered; and a standalone forward -> rollback -> reapply -> re-verify cycle
+against the same ephemeral instance succeeds.
+
+**Affected regressions passed:** P3-17 human-authority-decision-ledger
+boundary suite (49/49 combined with the packet-candidate/P14-06D boundary
+suites run together), P14-03 packet-candidate boundary suite, P14-06D
+authoritative-read boundary suite.
+
+**Full suite:** sandboxed `npm test` (escalated with the same non-listening
+loopback `DATABASE_URL` sentinel) returned 3792 passed, 7 failed, 64 skipped -
+the same pre-existing, unrelated batch/file-detail baseline failures
+documented in every prior Phase-14 entry (`the child-file read model...`,
+`...batch-files collection contract`, `...file-detail service returns exactly
+the 15-field allowlist`, `...file-detail contract`). No new full-suite
+failure was introduced.
+
+**Frontend build:** not run - no frontend source or built bundle was changed.
+
+**Final diff review:** new files -
+`migrations/kai_sprint2_p14_07_b1_grant_response_packet_human_authority_decision_ledger.sql`
+(+ `.rollback.sql`),
+`Backend/kai/dictionary/grantResponsePacketHumanAuthorityDecisionContract.js`,
+`Backend/kai/dictionary/postgresGrantResponsePacketHumanAuthorityDecisionRepository.js`,
+the boundary/integration test files, and the five
+`scripts/kai-sprint2-p14-07-b1-*` schema-pack files; edited files -
+`Backend/kai/db/kaiAuditQueries.js` (allowlist widening only),
+`Backend/kai/services/kaiMetadataOnlyAuditComposition.js` (one new adapter
+function plus its `__testables` export), `package.json` (two new scripts),
+and this ExecPlan entry. `git diff --check` passed with no whitespace errors.
+No `kai.human_authority_decisions`, `kai.export_candidates`,
+`kai.grant_response_packet_export_candidates`/`_members`, final-eligibility,
+manifest, frontend, or production/shared-database file was touched.
+
+**Local commit:** one bounded commit created after all required checks
+passed.

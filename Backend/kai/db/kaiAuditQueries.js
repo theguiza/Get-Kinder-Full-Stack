@@ -73,6 +73,14 @@ const SAFE_AUDIT_METADATA_KEYS = new Set([
   "resulting_queue_status",
   "previous_review_status",
   "resulting_review_status",
+  "decision_id",
+  "decision_type",
+  "decision_action",
+  "decided_by_role",
+  "supersedes_decision_id",
+  "effective",
+  "effectiveness_reason",
+  "head_decision_id",
 ]);
 
 const FORCED_FALSE_METADATA_FLAGS = [
@@ -144,7 +152,7 @@ function normalizeAuditMetadataValue(key, value) {
     const parsed = new Date(normalized);
     return Number.isNaN(parsed.getTime()) || parsed.toISOString() !== normalized ? null : normalized;
   }
-  if (key === "blocked" || key === "metadata_only") return value === true;
+  if (key === "blocked" || key === "metadata_only" || key === "effective") return value === true;
   if (key === "http_status") {
     const status = Number(value);
     return Number.isInteger(status) && status >= 100 && status <= 599 ? status : null;

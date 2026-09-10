@@ -81,6 +81,8 @@
     "verify:kai-sprint2-p14-02-grant-response-packet-export-identity-foundation": "node scripts/kai-sprint2-p14-02-grant-response-packet-export-identity-foundation-local-postgres.js",
     "verify:kai-sprint2-p14-03-grant-response-packet-export-candidate-foundation": "node scripts/kai-sprint2-p14-03-grant-response-packet-export-candidate-foundation-local-postgres.js",
     "verify:kai-sprint2-p14-05-grant-response-packet-export-review-binding": "node scripts/kai-sprint2-p14-05-grant-response-packet-export-review-binding-local-postgres.js",
+    "verify:kai-sprint2-p14-07-b1-grant-response-packet-human-authority-decision-ledger": "node scripts/kai-sprint2-p14-07-b1-grant-response-packet-human-authority-decision-ledger-local-postgres.js",
+    "test:kai-sprint2-p14-07-b1-grant-response-packet-human-authority-decision-ledger": "node --test __tests__/kai-sprint2-p14-07-b1-grant-response-packet-human-authority-decision-ledger-boundary.spec.js __tests__/kai-sprint2-p14-07-b1-grant-response-packet-human-authority-decision-ledger.integration.spec.js",
     "test:kai-sprint2-export-manifest-render-model-composition": "node --test __tests__/kai-sprint2-export-manifest-render-model-composition-boundary.spec.js",
     "test:kai-sprint2-export-manifest-markdown-representation": "node --test __tests__/kai-sprint2-export-manifest-markdown-representation-boundary.spec.js",
     "test:kai-sprint2-authorized-markdown-export-delivery": "node --test __tests__/kai-sprint2-authorized-markdown-export-delivery-route.spec.js",
