@@ -580,10 +580,19 @@ function validateExistingState(state, requestFingerprint, requestedAudience, con
   const citedBlockIds = new Set(state.citations.map((citation) => citation.generated_content_block_id));
   if (!state.blocks.every((block) => citedBlockIds.has(block.generated_content_block_id))) return false;
   const queue = state.queues[0];
+  // Exact replay of the immutable generation identity must not depend on
+  // downstream-mutable review progress: once review legitimately starts or
+  // resolves, this queue row moves through
+  // GENERATED_CONTENT_REVIEW_LIFECYCLE_PROFILES[1]/[2] and a replay of the
+  // same idempotency_key + request fingerprint must still recognize it as
+  // the same generation, not a conflict. Only a queue row outside the
+  // canonical lifecycle (wrong org/target/type, or a status pairing no
+  // profile admits) fails closed here.
   if (!isGeneratedContentReviewQueueRow(queue, {
     organizationId: state.run.organization_id,
     targetObjectId: draft.generated_content_draft_id,
     requireCreatedByType: true,
+    allowedLifecycleProfiles: GENERATED_CONTENT_REVIEW_LIFECYCLE_PROFILES,
   })) return false;
   return true;
 }
@@ -2950,6 +2959,7 @@ export const __generatedContentRepositoryTestables = Object.freeze({
   validateGeneratorInput,
   validateGeneratorResult,
   validateInput,
+  validateExistingState,
   validateReviewPacketInput,
   validateReviewPacketRows,
   validateExportReviewQueueRows,
