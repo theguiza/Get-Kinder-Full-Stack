@@ -117,7 +117,16 @@ function callbackSource(name) {
   throw new Error(`unknown callback ${name}`);
 }
 
-function buildRefetch({ getJsonImpl, stateLog, refs, generationRef = { current: 0 } }) {
+function buildRefetch({
+  getJsonImpl,
+  stateLog,
+  refs,
+  generationRef = { current: 0 },
+  // Real production value is 15000ms (GRANT_RESPONSE_PACKET_REFETCH_TIMEOUT_MS
+  // in ImpactEvidenceLibrary.jsx) - tests that need to observe the bounded
+  // timeout firing pass a short override so the test itself stays fast.
+  timeoutMs = 15000,
+}) {
   const factory = new Function(
     "grantPacketRequestGenerationRef",
     "setLoadingGrantResponsePacket",
@@ -134,6 +143,7 @@ function buildRefetch({ getJsonImpl, stateLog, refs, generationRef = { current: 
     "errorText",
     "projectGrantResponsePacket",
     "hydrateGrantResponsePacketExportReviewReadModel",
+    "GRANT_RESPONSE_PACKET_REFETCH_TIMEOUT_MS",
     `return (${extractRefetchSource()});`,
   );
   const getJson = async (path) => getJsonImpl(path);
@@ -153,6 +163,7 @@ function buildRefetch({ getJsonImpl, stateLog, refs, generationRef = { current: 
     (result) => result?.body?.error?.message || `Request failed (${result?.statusCode ?? "unknown"}).`,
     projectGrantResponsePacket,
     hydrateGrantResponsePacketExportReviewReadModel,
+    timeoutMs,
   );
 }
 
@@ -178,6 +189,7 @@ function buildAction({
     organizationIdRef: { current: organizationId },
     engagementIdRef: { current: engagementIdA },
   },
+  timeoutMs = 15000,
 } = {}) {
   const stateLog = [];
   const postCalls = [];
@@ -187,6 +199,7 @@ function buildAction({
   const refetch = buildRefetch({
     stateLog,
     refs,
+    timeoutMs,
     getJsonImpl: async (path) => {
       getCalls.push(path);
       return getJsonImpl(path);
@@ -497,6 +510,106 @@ test("P14-06E3 exact hydrated candidate, queue, and CAS values come from GET", a
   assert.equal(lastState(harness.stateLog, "candidateResult").grantResponsePacketExportCandidateId, candidateFromGetB);
   assert.equal(lastState(harness.stateLog, "reviewResult").reviewQueueItemId, queueFromGetB);
   assert.equal(lastState(harness.stateLog, "reviewResult").reviewUpdatedAt, nextReviewUpdatedAt);
+});
+
+test("P14-06E3 create-candidate: successful POST then rejected authoritative GET settles pending/loading, surfaces error, fabricates no candidate/review state", async () => {
+  const harness = buildAction({
+    action: "create",
+    postJsonImpl: async () => successfulPost(),
+    getJsonImpl: async () => {
+      throw new Error("Failed to fetch");
+    },
+  });
+
+  assert.deepEqual(
+    harness.stateLog.filter((entry) => entry[0] === "candidatePending"),
+    [],
+    "precondition: candidatePending has not yet been touched",
+  );
+
+  await harness.callback();
+
+  assert.equal(harness.postCalls.length, 1);
+  assert.deepEqual(harness.getCalls, [grantResponsePacketPath(organizationId, engagementIdA)]);
+
+  const pendingTransitions = harness.stateLog
+    .filter((entry) => entry[0] === "candidatePending")
+    .map((entry) => entry[1]);
+  assert.deepEqual(pendingTransitions, [true, false], "candidatePending must go true -> false, never stuck");
+
+  const loadingTransitions = harness.stateLog
+    .filter((entry) => entry[0] === "loading")
+    .map((entry) => entry[1]);
+  assert.deepEqual(loadingTransitions, [true, false], "loadingGrantResponsePacket must go true -> false, never stuck");
+
+  assert.equal(lastState(harness.stateLog, "requestState"), "error");
+  assert.equal(lastState(harness.stateLog, "packetError"), "Failed to fetch");
+
+  // No candidate/review state may be fabricated from a GET that never
+  // returned data - the rejected refetch must reset these to null rather
+  // than leaving stale/partial hydration in place.
+  assert.equal(lastState(harness.stateLog, "packet"), null);
+  assert.equal(lastState(harness.stateLog, "candidateResult"), null);
+  assert.equal(lastState(harness.stateLog, "reviewResult"), null);
+
+  // The Create control's own error slot is only ever cleared to "" at the
+  // start of this handler (the rejection itself is surfaced through the
+  // shared packet error state, not candidateError) - assert it was never
+  // set to a non-empty message, to avoid masking a regression that
+  // silently swallows the failure instead of surfacing it via packetError.
+  const candidateErrorValues = harness.stateLog
+    .filter((entry) => entry[0] === "candidateError")
+    .map((entry) => entry[1]);
+  assert.deepEqual(candidateErrorValues, [""]);
+});
+
+test("P14-06E3 create-candidate: non-settling authoritative GET after successful POST does not leave candidatePending/loading stuck true forever", async () => {
+  // Test-only bounded timeout override - the real
+  // GRANT_RESPONSE_PACKET_REFETCH_TIMEOUT_MS is 15000ms in production; this
+  // test uses a short one so it terminates quickly regardless of whether
+  // the code under test bounds the hang or not.
+  const testTimeoutMs = 50;
+  const harness = buildAction({
+    action: "create",
+    postJsonImpl: async () => successfulPost(),
+    timeoutMs: testTimeoutMs,
+    // A GET that never settles (e.g. a hung connection) must still be
+    // bounded by the refetch itself - this promise deliberately never
+    // resolves or rejects on its own.
+    getJsonImpl: () => new Promise(() => {}),
+  });
+
+  // Fire the callback but do NOT await it directly - it must not hang the
+  // test. Race a short, test-only bounded window (well beyond
+  // testTimeoutMs) to observe the state once the refetch's own timeout has
+  // had a chance to fire.
+  const callbackPromise = harness.callback();
+  const timedOut = Symbol("test-window-elapsed");
+  const raceResult = await Promise.race([
+    callbackPromise.then(() => "callback-settled"),
+    new Promise((resolve) => setTimeout(() => resolve(timedOut), testTimeoutMs + 500)),
+  ]);
+
+  assert.equal(raceResult, "callback-settled",
+    "createGrantResponsePacketExportCandidate must itself settle within a bounded window even when the authoritative GET never does");
+
+  const pendingTransitions = harness.stateLog
+    .filter((entry) => entry[0] === "candidatePending")
+    .map((entry) => entry[1]);
+  assert.deepEqual(pendingTransitions, [true, false],
+    "candidatePending must be settled back to false, never left stuck true forever");
+
+  const loadingTransitions = harness.stateLog
+    .filter((entry) => entry[0] === "loading")
+    .map((entry) => entry[1]);
+  assert.deepEqual(loadingTransitions, [true, false],
+    "loadingGrantResponsePacket must be settled back to false, never left stuck true forever");
+
+  assert.equal(lastState(harness.stateLog, "requestState"), "error");
+
+  // The POST must never be re-issued merely because the GET failed to
+  // settle - no silent auto-retry of the mutation.
+  assert.equal(harness.postCalls.length, 1);
 });
 
 test("P14-06E3 Request/Start/Complete UI state machine and no-finalization surfaces remain unchanged", () => {

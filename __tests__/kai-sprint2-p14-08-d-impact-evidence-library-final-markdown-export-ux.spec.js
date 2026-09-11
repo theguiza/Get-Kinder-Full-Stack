@@ -78,7 +78,17 @@ function extractPrepareSource() {
   );
 }
 
-function buildRefetch({ getJsonImpl, stateLog, refs, generationRef = { current: 0 } }) {
+function buildRefetch({
+  getJsonImpl,
+  stateLog,
+  refs,
+  generationRef = { current: 0 },
+  // Real production value is 15000ms (GRANT_RESPONSE_PACKET_REFETCH_TIMEOUT_MS
+  // in ImpactEvidenceLibrary.jsx) - comfortably larger than every mocked
+  // getJsonImpl in this file, so it never wins the race against a normal
+  // (fast) mocked response.
+  timeoutMs = 15000,
+}) {
   const factory = new Function(
     "grantPacketRequestGenerationRef",
     "setLoadingGrantResponsePacket",
@@ -95,6 +105,7 @@ function buildRefetch({ getJsonImpl, stateLog, refs, generationRef = { current: 
     "errorText",
     "projectGrantResponsePacket",
     "hydrateGrantResponsePacketExportReviewReadModel",
+    "GRANT_RESPONSE_PACKET_REFETCH_TIMEOUT_MS",
     `return (${extractRefetchSource()});`,
   );
   const getJson = async (path) => getJsonImpl(path);
@@ -114,6 +125,7 @@ function buildRefetch({ getJsonImpl, stateLog, refs, generationRef = { current: 
     (result) => result?.body?.error?.message || `Request failed (${result?.statusCode ?? "unknown"}).`,
     projectGrantResponsePacket,
     hydrateGrantResponsePacketExportReviewReadModel,
+    timeoutMs,
   );
 }
 

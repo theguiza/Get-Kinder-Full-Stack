@@ -140,6 +140,13 @@ function StatusBadge({ status }) {
   return <span className={`badge ${cls}`}>{label}</span>;
 }
 
+// Bounds the authoritative Grant Response Packet GET issued right after a
+// successful post-mutation (create/request/start/complete) so a hung
+// connection (a getJson call that never settles at all) cannot leave
+// loading/pending state stuck true forever, matching the existing rejected-
+// fetch handling for that same request.
+const GRANT_RESPONSE_PACKET_REFETCH_TIMEOUT_MS = 15000;
+
 const SENSITIVITY_FIELD_LABELS = Object.freeze({
   reviewed_personal_data_status: "Personal data",
   reviewed_minor_data_status: "Minor data",
@@ -919,9 +926,25 @@ export default function ImpactEvidenceLibrary() {
     // state stuck forever - it is applied exactly like a failed response so
     // every caller of this shared post-mutation refetch (create/request/
     // start/complete) always reaches its own pending-flag reset below.
+    //
+    // A getJson call that never settles at all (e.g. a hung connection,
+    // rather than a thrown rejection) is just as dangerous - nothing would
+    // ever resume this async function, so loading/pending flags would be
+    // stuck true forever with no error surfaced and no way to retry. This
+    // is bounded with the same timeout treated identically to a thrown
+    // rejection below: it never auto-retries the mutation, it only settles
+    // this refetch's own loading/error state.
     let result;
     try {
-      result = await getJson(grantResponsePacketPath(requestOrganizationId, requestEngagementId));
+      result = await Promise.race([
+        getJson(grantResponsePacketPath(requestOrganizationId, requestEngagementId)),
+        new Promise((_resolve, reject) => {
+          setTimeout(
+            () => reject(new Error("Request timed out.")),
+            GRANT_RESPONSE_PACKET_REFETCH_TIMEOUT_MS,
+          );
+        }),
+      ]);
     } catch (error) {
       if (!shouldApplyGrantResponsePacketResponse({
         requestGeneration,
