@@ -286,6 +286,34 @@ test("decision type passed to B1's evaluateEffectiveness matches export_authorit
   );
 });
 
+test("evaluateEffectiveness is called exactly once and receives the exact supplied composeRenderModel/renderModelDependencies - the default render-model fallback is never required", async () => {
+  let effectivenessCalls = 0;
+  let seenComposeRenderModel = null;
+  let seenRenderModelDependencies = null;
+  const renderModelDependencies = { candidateRepository: {} };
+  const composeRenderModel = async () => ({ ok: true, data: renderModel(), error: null });
+
+  const { deps } = dependencies({
+    evaluateEffectiveness: async (evalInput, evalDependencies = {}) => {
+      effectivenessCalls += 1;
+      seenComposeRenderModel = evalDependencies.composeRenderModel;
+      seenRenderModelDependencies = evalDependencies.renderModelDependencies;
+      return { ok: true, data: { effective: true, reason: null, headDecisionId: "d1" }, error: null };
+    },
+    extra: { composeRenderModel, renderModelDependencies },
+  });
+  deps.composeRenderModel = composeRenderModel;
+  deps.renderModelDependencies = renderModelDependencies;
+
+  const result = await evaluateGrantResponsePacketFinalExportEligibility(input(), deps);
+
+  assert.equal(effectivenessCalls, 1);
+  assert.equal(seenComposeRenderModel, composeRenderModel);
+  assert.equal(seenRenderModelDependencies, renderModelDependencies);
+  assert.equal(result.ok, true);
+  assert.equal(result.data.finalExportEligible, true);
+});
+
 test("shared VAL-EXP-001 validator is reused unmodified - the evaluator's own module imports it rather than reimplementing gate logic", () => {
   const source = readFileSync(
     new URL("../Backend/kai/services/kaiGrantResponsePacketFinalExportEligibilityGateService.js", import.meta.url),

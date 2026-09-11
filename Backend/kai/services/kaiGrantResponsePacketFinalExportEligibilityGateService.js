@@ -134,7 +134,7 @@ export async function evaluateGrantResponsePacketFinalExportEligibility(input, d
     grantResponsePacketExportCandidateId: input.grantResponsePacketExportCandidateId,
     decisionType: FINAL_RELEASE_AUTHORITY_DECISION_TYPE,
     actorContext: input.actorContext,
-  });
+  }, { composeRenderModel, renderModelDependencies: dependencies.renderModelDependencies || dependencies });
   if (!effectiveness.ok) return effectiveness;
   // "candidate_missing" covers: nonexistent candidate id, a candidate from
   // another organization, a candidate whose packet identity belongs to a
