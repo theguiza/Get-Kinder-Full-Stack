@@ -427,7 +427,13 @@
     const result = await repository.startGeneratedContentReview(input, {
       metadataOnlyAudit: dependencies.metadataOnlyAudit,
     });
-    if (!result.ok) return buildKaiError(result.error.code, { status: result.error.status, data: null });
+    if (!result.ok) {
+      return buildKaiError(result.error.code, {
+        status: result.error.status,
+        blockers: result.blockers,
+        data: null,
+      });
+    }
     return { ok: true, data: result.data, error: null };
   }
 

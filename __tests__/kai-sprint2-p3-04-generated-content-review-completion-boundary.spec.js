@@ -407,6 +407,43 @@ test("Stage-B generated-content review start rejects stale, cross-tenant, and wr
   }
 });
 
+test("Stage-B generated-content review start maps a database check-constraint rejection to a structured blocker instead of an empty one", async () => {
+  for (const pgErrorCode of ["23514", "22P02"]) {
+    const repository = createPostgresGeneratedContentRepository({
+      runInTransaction: async () => {
+        const error = new Error("simulated check-constraint rejection");
+        error.code = pgErrorCode;
+        throw error;
+      },
+      evaluator: fakeEvaluator(),
+    });
+    const result = await repository.startGeneratedContentReview(input(), { metadataOnlyAudit: auditRecorder() });
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "validation_blocker");
+    assert.ok(Array.isArray(result.blockers) && result.blockers.length >= 1);
+    assert.equal(result.blockers[0].validator_key, __generatedContentRepositoryContract.START_REVIEW_VALIDATOR_KEYS[0]);
+  }
+});
+
+test("Stage-B generated-content review start service forwards the repository's structured blocker instead of dropping it", async () => {
+  const repository = {
+    async startGeneratedContentReview() {
+      return {
+        ok: false,
+        data: null,
+        error: { code: "validation_blocker", status: 422 },
+        blockers: [{ validator_key: "VAL-REV-START-001", severity: "blocker", blocking_reason: "generated_content_review_start_currently_blocked" }],
+      };
+    },
+  };
+  const deps = { generatedContentRepository: repository, metadataOnlyAudit: auditRecorder(), env: enabledEnv };
+  const result = await startGeneratedContentReview(input(), deps);
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "validation_blocker");
+  assert.ok(Array.isArray(result.blockers) && result.blockers.length === 1);
+  assert.equal(result.blockers[0].validator_key, "VAL-REV-START-001");
+});
+
 test("Stage-B generated-content review start service gates match completion role and tenant authority", async () => {
   let repositoryCalls = 0;
   const repository = {
