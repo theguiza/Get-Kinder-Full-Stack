@@ -914,7 +914,31 @@ export default function ImpactEvidenceLibrary() {
     const requestGeneration = ++grantPacketRequestGenerationRef.current;
     setLoadingGrantResponsePacket(true);
     setGrantResponsePacketRequestState("loading");
-    const result = await getJson(grantResponsePacketPath(requestOrganizationId, requestEngagementId));
+    // A rejected getJson (a thrown network/fetch failure, as opposed to a
+    // settled non-2xx response) must never leave this request's loading
+    // state stuck forever - it is applied exactly like a failed response so
+    // every caller of this shared post-mutation refetch (create/request/
+    // start/complete) always reaches its own pending-flag reset below.
+    let result;
+    try {
+      result = await getJson(grantResponsePacketPath(requestOrganizationId, requestEngagementId));
+    } catch (error) {
+      if (!shouldApplyGrantResponsePacketResponse({
+        requestGeneration,
+        currentGeneration: grantPacketRequestGenerationRef.current,
+        requestOrganizationId,
+        currentOrganizationId: organizationIdRef.current,
+        requestEngagementId,
+        currentEngagementId: engagementIdRef.current,
+      })) return false;
+      setLoadingGrantResponsePacket(false);
+      setGrantResponsePacket(null);
+      setGrantResponsePacketExportCandidateResult(null);
+      setGrantResponsePacketExportReviewResult(null);
+      setGrantResponsePacketError(error?.message || "Request failed (network error).");
+      setGrantResponsePacketRequestState("error");
+      return true;
+    }
     if (!shouldApplyGrantResponsePacketResponse({
       requestGeneration,
       currentGeneration: grantPacketRequestGenerationRef.current,
@@ -1061,22 +1085,40 @@ export default function ImpactEvidenceLibrary() {
     setGrantResponsePacketExportReviewStartError("");
     setGrantResponsePacketExportReviewCompletePending(false);
     setGrantResponsePacketExportReviewCompleteError("");
-    const result = await postJson(
-      grantResponsePacketExportCandidatesPath(requestOrganizationId, requestEngagementId),
-      {},
-    );
-    const stillCurrent = requestOrganizationId === organizationIdRef.current
-      && requestEngagementId === engagementIdRef.current;
-    if (result.statusCode !== 200 && result.statusCode !== 201) {
-      if (stillCurrent) {
-        setGrantResponsePacketExportCandidateError(errorText(result));
+    // A thrown postJson/refetch (network failure, as opposed to a settled
+    // non-2xx response) must never leave grantResponsePacketExportCandidatePending
+    // stuck true forever - that would permanently disable the Create control
+    // with no way to retry. The pending flag is always cleared in finally,
+    // for exactly the same still-current engagement/organization the rest of
+    // this handler already checks.
+    try {
+      const result = await postJson(
+        grantResponsePacketExportCandidatesPath(requestOrganizationId, requestEngagementId),
+        {},
+      );
+      const stillCurrent = requestOrganizationId === organizationIdRef.current
+        && requestEngagementId === engagementIdRef.current;
+      if (result.statusCode !== 200 && result.statusCode !== 201) {
+        if (stillCurrent) {
+          setGrantResponsePacketExportCandidateError(errorText(result));
+        }
+        return;
+      }
+      await refetchGrantResponsePacketAfterMemberExportReviewRequest(requestOrganizationId, requestEngagementId);
+    } catch (error) {
+      if (
+        requestOrganizationId === organizationIdRef.current
+        && requestEngagementId === engagementIdRef.current
+      ) {
+        setGrantResponsePacketExportCandidateError(error?.message || "Request failed (network error).");
+      }
+    } finally {
+      if (
+        requestOrganizationId === organizationIdRef.current
+        && requestEngagementId === engagementIdRef.current
+      ) {
         setGrantResponsePacketExportCandidatePending(false);
       }
-      return;
-    }
-    await refetchGrantResponsePacketAfterMemberExportReviewRequest(requestOrganizationId, requestEngagementId);
-    if (stillCurrent) {
-      setGrantResponsePacketExportCandidatePending(false);
     }
   }, [
     organizationId,
