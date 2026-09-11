@@ -691,6 +691,52 @@ function validateReviewPacketRows(state, { organizationId, generatedContentDraft
   return graph;
 }
 
+const TRACEABILITY_GRAPH_RELATIONSHIP_KEYS = new Set([
+  "relationship_type",
+  "from_object_type",
+  "from_object_id",
+  "to_object_type",
+  "to_object_id",
+]);
+const TRACEABILITY_GRAPH_COMPLETENESS_KEYS = new Set([
+  "complete",
+  "missing_relationship_types",
+  "invalid_relationship_count",
+]);
+const TRACEABILITY_EVIDENCE_REVIEW_DECISION_KEYS = new Set(["decision_id", "decision_outcome"]);
+const TRACEABILITY_CLAIM_REVIEW_DECISION_KEYS = new Set(["decision_id", "decision_outcome", "approved_audiences"]);
+
+function isStringArrayValue(value) {
+  return Array.isArray(value) && value.every((entry) => typeof entry === "string");
+}
+
+function validateNullableReviewDecision(value, allowedKeys, { requireApprovedAudiences }) {
+  if (value === null) return true;
+  if (!hasOnlyAllowedKeys(value, allowedKeys)) return false;
+  if (!UUID_PATTERN.test(value.decision_id) || typeof value.decision_outcome !== "string") return false;
+  if (!requireApprovedAudiences) return true;
+  return value.approved_audiences === null || isStringArrayValue(value.approved_audiences);
+}
+
+function validateGraphRelationships(value) {
+  if (!Array.isArray(value) || value.length < 1) return false;
+  return value.every((relationship) => (
+    hasOnlyAllowedKeys(relationship, TRACEABILITY_GRAPH_RELATIONSHIP_KEYS)
+    && typeof relationship.relationship_type === "string"
+    && typeof relationship.from_object_type === "string"
+    && typeof relationship.to_object_type === "string"
+    && UUID_PATTERN.test(relationship.from_object_id)
+    && UUID_PATTERN.test(relationship.to_object_id)
+  ));
+}
+
+function validateGraphTraceCompletenessData(value) {
+  return hasOnlyAllowedKeys(value, TRACEABILITY_GRAPH_COMPLETENESS_KEYS)
+    && typeof value.complete === "boolean"
+    && isStringArrayValue(value.missing_relationship_types)
+    && typeof value.invalid_relationship_count === "number";
+}
+
 function validateTraceabilityData(data, { claimId, requestedAudience }) {
   const rootKeys = new Set([
     "claim",
@@ -699,12 +745,16 @@ function validateTraceabilityData(data, { claimId, requestedAudience }) {
     "source",
     "source_version",
     "claim_review",
+    "evidence_review_decision",
+    "claim_review_decision",
     "candidate",
     "promotion_decision",
     "dimensions",
     "gap_items",
     "client_followup_workflows",
     "potential_conflict_groups",
+    "graph_relationships",
+    "graph_trace_completeness",
     "requestedAudience",
     "eligible",
     "blockerCodes",
@@ -719,6 +769,10 @@ function validateTraceabilityData(data, { claimId, requestedAudience }) {
   if (!hasOnlyAllowedKeys(data.evidence, new Set(["evidence_item_id", "evidence_review_status", "support_strength", "review_queue_item_id", "review_queue_status", "review_status", "updated_at", "sensitivity_level"]))) return false;
   if (!hasOnlyAllowedKeys(data.source, new Set(["source_id", "source_code"]))) return false;
   if (!hasOnlyAllowedKeys(data.source_version, new Set(["source_version_id", "is_current"]))) return false;
+  if (!validateNullableReviewDecision(data.evidence_review_decision, TRACEABILITY_EVIDENCE_REVIEW_DECISION_KEYS, { requireApprovedAudiences: false })) return false;
+  if (!validateNullableReviewDecision(data.claim_review_decision, TRACEABILITY_CLAIM_REVIEW_DECISION_KEYS, { requireApprovedAudiences: true })) return false;
+  if (!validateGraphRelationships(data.graph_relationships)) return false;
+  if (!validateGraphTraceCompletenessData(data.graph_trace_completeness)) return false;
   return data.claim.claim_id === claimId
     && UUID_PATTERN.test(data.evidence.evidence_item_id)
     && UUID_PATTERN.test(data.source.source_id)
@@ -2905,6 +2959,7 @@ export const __generatedContentRepositoryTestables = Object.freeze({
   validateStartExportReviewInput,
   validateCompleteExportReviewInput,
   validateGrantResponsePacketMembershipInput,
+  validateTraceabilityData,
   loadGenerationProjection,
   TRACEABILITY_RESULT_CONTRACT_VALIDATOR_KEY,
   GENERATOR_RESULT_CONTRACT_VALIDATOR_KEY,
