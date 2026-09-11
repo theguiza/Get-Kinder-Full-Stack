@@ -385,8 +385,8 @@ function validateGeneratorResult(result) {
   return classifyGeneratorResult(result).ok;
 }
 
-function prepareRequiredAudit(metadataOnlyAudit, payload) {
-  const prepared = metadataOnlyAudit?.prepareMetadataOnlyAudit?.({ payload });
+function prepareRequiredAudit(metadataOnlyAudit, payload, db) {
+  const prepared = metadataOnlyAudit?.prepareMetadataOnlyAudit?.({ payload, db });
   const descriptor =
     prepared !== null && typeof prepared === "object" && !Array.isArray(prepared)
       ? Object.getOwnPropertyDescriptor(prepared, "ok")
@@ -1152,7 +1152,8 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
         object_type: "generated_content_draft",
         request_scope: "organization_generated_content_draft",
         contract: AUDIT_CONTRACT,
-      });
+        generated_content_draft_id: persisted.generatedContentDraftId,
+      }, tx);
       await insertAudit(tx, { input, persisted, projections });
       await preparedAudit.publish();
       return postWrite;
