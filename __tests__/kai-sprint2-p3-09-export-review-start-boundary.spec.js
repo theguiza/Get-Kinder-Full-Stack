@@ -337,6 +337,54 @@ test("P3-09 malformed audit metadata on an in_progress row conflicts without rep
   assert.equal(result.error.code, "conflict_current_state_changed");
 });
 
+test("P3-09 export-review start maps a database check-constraint rejection to a structured blocker instead of an empty one", async () => {
+  for (const pgErrorCode of ["23514", "22P02", "23503"]) {
+    const repository = createPostgresGeneratedContentRepository({
+      runInTransaction: async () => {
+        const error = new Error("simulated check-constraint rejection");
+        error.code = pgErrorCode;
+        throw error;
+      },
+    });
+    const result = await repository.startGeneratedDraftExportReview(input(), { metadataOnlyAudit: auditRecorder() });
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "validation_blocker");
+    assert.ok(Array.isArray(result.blockers) && result.blockers.length >= 1);
+    assert.equal(result.blockers[0].validator_key, __generatedContentRepositoryContract.EXPORT_REVIEW_START_VALIDATOR_KEYS[0]);
+  }
+});
+
+test("P3-09 export-review start service forwards the repository's structured blocker instead of dropping it", async () => {
+  const repository = {
+    async startGeneratedDraftExportReview() {
+      return {
+        ok: false,
+        data: null,
+        error: { code: "validation_blocker", status: 422 },
+        blockers: [{ validator_key: "VAL-EXP-002", severity: "blocker", blocking_reason: "export_review_start_currently_blocked" }],
+      };
+    },
+  };
+  const deps = { generatedContentRepository: repository, metadataOnlyAudit: auditRecorder(), env: enabledEnv };
+  const result = await startGeneratedDraftExportReview(input(), deps);
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "validation_blocker");
+  assert.ok(Array.isArray(result.blockers) && result.blockers.length === 1);
+  assert.equal(result.blockers[0].validator_key, "VAL-EXP-002");
+});
+
+test("P3-09 export-review start service returns a structured blocker (not an empty one) for malformed request-shape input", async () => {
+  let repositoryCalls = 0;
+  const repository = { async startGeneratedDraftExportReview() { repositoryCalls += 1; throw new Error("must not call"); } };
+  const deps = { generatedContentRepository: repository, metadataOnlyAudit: auditRecorder(), env: enabledEnv };
+  const result = await startGeneratedDraftExportReview({ ...input(), extra: true }, deps);
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "validation_blocker");
+  assert.ok(Array.isArray(result.blockers) && result.blockers.length === 1);
+  assert.equal(result.blockers[0].validator_key, "VAL-EXP-002");
+  assert.equal(repositoryCalls, 0);
+});
+
 test("P3-09 requires an injected metadataOnlyAudit dependency before attempting any transaction", async () => {
   const state = makeState();
   const repository = makeRepository(state);

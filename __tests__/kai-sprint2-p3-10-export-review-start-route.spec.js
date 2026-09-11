@@ -227,6 +227,22 @@ test("P3-10 export-review start route", async (t) => {
     assert.deepEqual(scenario.serviceCalls, []);
   });
 
+  await t.test("a structured validation_blocker from the service is preserved in the HTTP response, not collapsed to an empty array", async () => {
+    scenario = createScenario({
+      serviceResult: buildKaiError("validation_blocker", {
+        data: null,
+        blockers: [{ validator_key: "VAL-EXP-002", blocking_reason: "export_review_start_currently_blocked" }],
+      }),
+    });
+    const response = await requestJson(server, concretePath(), { body: { expected_updated_at: expectedUpdatedAt } });
+
+    assert.equal(response.statusCode, 422);
+    assert.equal(response.body.error.code, "validation_blocker");
+    assert.ok(Array.isArray(response.body.blockers) && response.body.blockers.length === 1);
+    assert.equal(response.body.blockers[0].validator_key, "VAL-EXP-002");
+    assert.equal(response.body.blockers[0].blocking_reason, "export_review_start_currently_blocked");
+  });
+
   await t.test("every listed service error maps through the existing safe envelope", async () => {
     for (const code of [
       "feature_disabled",

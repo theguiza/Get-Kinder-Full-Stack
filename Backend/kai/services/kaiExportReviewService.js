@@ -15,6 +15,10 @@ const COMPLETE_EXPORT_REVIEW_OPERATION = "complete_generated_draft_export_review
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const AUDIENCES = new Set(["internal", "funder", "public"]);
 
+function stageBlocker(validatorKey, blockingReason) {
+  return [{ validator_key: validatorKey, severity: "blocker", blocking_reason: blockingReason }];
+}
+
 function hasExactKeys(value, allowed) {
   return Boolean(value)
     && typeof value === "object"
@@ -382,7 +386,12 @@ export async function startGeneratedDraftExportReview(input, dependencies = {}) 
   if (!isKaiSprint2Enabled(env)) return buildKaiError("feature_disabled", { data: null });
   if (!isKaiGenerationEnabled(env)) return buildKaiError("feature_disabled", { data: null });
   if (!isKaiPublicExportEnabled(env)) return buildKaiError("feature_disabled", { data: null });
-  if (!isStartExportReviewInput(input)) return buildKaiError("validation_blocker", { data: null });
+  if (!isStartExportReviewInput(input)) {
+    return buildKaiError("validation_blocker", {
+      blockers: stageBlocker("VAL-EXP-002", "export_review_start_request_shape_invalid"),
+      data: null,
+    });
+  }
   if (!isMappedHumanActor(input.actorContext)) return buildKaiError("authorization_denied", { data: null });
 
   const auth = validateActorCanPerformOperation(
@@ -400,7 +409,13 @@ export async function startGeneratedDraftExportReview(input, dependencies = {}) 
   const result = await repository.startGeneratedDraftExportReview(input, {
     metadataOnlyAudit: dependencies.metadataOnlyAudit,
   });
-  if (!result.ok) return buildKaiError(result.error.code, { status: result.error.status, data: null });
+  if (!result.ok) {
+    return buildKaiError(result.error.code, {
+      status: result.error.status,
+      blockers: result.blockers,
+      data: null,
+    });
+  }
   if (!isStartExportReviewResultDto(result.data)) return buildKaiError("system_error", { data: null });
   return { ok: true, data: result.data, error: null };
 }
