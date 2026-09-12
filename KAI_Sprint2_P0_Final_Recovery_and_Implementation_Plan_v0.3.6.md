@@ -21971,6 +21971,164 @@ anywhere in this diff.
 **Local commit:** one bounded commit created after all required checks
 passed.
 
+## Board Reporting V1 - Read-Only Internal Packet / Render Model /
+## Canonical Fingerprint Foundation
+
+**Date:** 2026-09-12
+
+**Owner authorization (bounded, local-only):** start Board Reporting V1 as a
+new governed output profile over existing evidence, generated-content,
+review, currentness, authority, manifest, and delivery foundations; inspect
+the existing repository/schema/migration implementation; freeze the
+repository-supported membership/read/render contract; implement the
+read-only packet/DTO/read projection/render model/fingerprint/regressions
+when supported without new persistence; and derive the evidence-backed
+BR-02 persistence package required next. Starting HEAD:
+`68319e63e66b3931de2027ef43737358d2b75cbf` on `main` with a clean working
+tree. No database/cloud/credential/production infrastructure was inspected or
+mutated.
+
+**Preflight evidence inspected:** root `AGENTS.md`; branch/HEAD/status;
+`package.json` scripts/dependencies; generated-content service/repository/
+validators; Grant Response Packet service, render model, fingerprint,
+export-candidate, export-manifest and final-delivery services; generated-
+content, review queue, export review, export candidate/manifest, P14-01,
+P14-02, P14-03, P14-05, P14-07B1, and P14-08A migrations/runners; Grant
+Response Packet, generated-content review, export-review, manifest, and
+fingerprint boundary tests. The Grant packet/export-review PostgreSQL runner
+chains inspected install (after synthetic org/engagement/bootstrap support)
+`kai_sprint2_gate_a_p0_upload_lifecycle.sql`,
+`kai_sprint2_gate_a_p0_policy_decision_replay.sql`, P1 parser/data-
+dictionary/sensitivity/review/source migrations, P2 evidence/claim/
+followup/conflict migrations, `kai_sprint2_p3_01_generated_content_drafts.sql`,
+`kai_sprint2_p14_01_generation_run_engagement_binding.sql`,
+`kai_sprint2_p3_04_generated_content_review_completion.sql`,
+`kai_sprint2_p3_05_export_review_request.sql`,
+`kai_sprint2_p3_09_export_review_start.sql`,
+`kai_sprint2_p3_13_export_review_completion.sql`,
+`kai_sprint2_p3_16_export_candidate_foundation.sql`,
+`kai_sprint2_p3_17_human_authority_decision_ledger.sql`,
+`kai_sprint2_p3_19_export_manifest_foundation.sql`, then P14-02/P14-03 for
+packet identity/candidates, P14-05 for packet export-review binding, P14-07B1
+for packet human authority decisions, and P14-08A for packet export manifests.
+
+**Reuse-boundary classification (TOOL_VERIFIED at this HEAD):**
+- engagement-scoped generated-content discovery:
+  `REUSE_MECHANISM_WITH_BOARD_POLICY` - same server-side engagement join and
+  deterministic draft id ordering; Board policy pins `requested_audience =
+  internal`.
+- generated-content review reconstruction:
+  `REUSE_DIRECTLY` - existing batched read reconstructs the same per-draft
+  generated-content review packet state and resolved lifecycle.
+- traceability/current-use evaluation:
+  `REUSE_DIRECTLY` - existing claim/evidence/source current-use evaluator is
+  invoked inside the same read-only repeatable-read transaction and memoized
+  across members.
+- audience eligibility:
+  `REUSE_MECHANISM_WITH_BOARD_POLICY` - existing audience vocabulary is reused;
+  Board V1 is internal-only and no persisted `board` audience is added.
+- deterministic member ordering:
+  `REUSE_DIRECTLY` - SQL orders by `generated_content_draft_id ASC`; render/
+  fingerprint preserve that order and never re-sort.
+- packet/read-model helpers:
+  `REUSE_MECHANISM_WITH_BOARD_POLICY` - shared membership evaluator is
+  parameterized by packet audience; Board DTO is a smaller policy projection.
+- deterministic canonicalization/render helpers:
+  `REUSE_MECHANISM_WITH_BOARD_POLICY` - same deterministic member/block/
+  citation projection shape; Board render contract and labels are distinct.
+- fingerprint implementation:
+  `REUSE_MECHANISM_WITH_BOARD_POLICY` - same canonical JSON/hash mechanism;
+  Board representation is internal-only and distinct from Grant candidate
+  fingerprint.
+- candidate persistence:
+  `GRANT_SPECIFIC_DO_NOT_REUSE_AS_CONTRACT` in BR-01; becomes the analogue
+  required for BR-02, with Board-specific tables/identity.
+- immutable candidate-member snapshots:
+  `GRANT_SPECIFIC_DO_NOT_REUSE_AS_CONTRACT` in BR-01; required as a
+  Board-specific BR-02 persistence analogue.
+- review lifecycle infrastructure:
+  `REUSE_MECHANISM_WITH_BOARD_POLICY` - generated-content review is reused
+  directly; packet-level export/release review remains out of BR-01 and needs
+  Board-specific policy before persistence.
+- authority/release infrastructure:
+  `NOT_CONFIRMED` for Board as a contract; Grant final-release authority is
+  funder/export-specific and not reused in BR-01.
+- final-eligibility/currentness machinery:
+  `REUSE_MECHANISM_WITH_BOARD_POLICY` for generated draft currentness; Grant
+  final-export eligibility is `GRANT_SPECIFIC_DO_NOT_REUSE_AS_CONTRACT`.
+- export-manifest infrastructure:
+  `NOT_CONFIRMED` for Board persistence/delivery in BR-01; Grant packet
+  manifest foundation is the closest analogue for BR-02 design.
+- audit infrastructure:
+  `REUSE_MECHANISM_WITH_BOARD_POLICY` for future metadata-only audit pattern;
+  no audit writes in this read-only package.
+- delivery/output infrastructure:
+  `NOT_CONFIRMED` for Board delivery in BR-01; no route/serializer/download
+  surface added.
+
+**Implemented Board Reporting V1 contract:** new read-only Board Reporting
+service, render model, and fingerprint modules. Membership is derived
+server-side from persisted governed state:
+organization -> engagement -> engagement-bound generation runs/drafts ->
+resolved generated-content review -> fresh traceability/current-use
+evaluation -> Board policy. V1 admits only `requestedAudience: "internal"`
+and content types `evidence_summary`/`impact_narrative`, fails closed on
+unreviewed/stale/currently ineligible/cross-tenant/cross-audience drafts,
+returns deterministic member order, and carries no Grant Response Packet
+candidate/export-review/final-release/manifest/delivery fields. The
+repository change is intentionally tiny: the existing Grant membership
+evaluator now accepts an internal/funder audience policy parameter, defaults
+unchanged to funder for Grant, and exposes `getBoardReportingPacket` plus
+`evaluateBoardReportingPacketMembershipInTransaction` for the Board path.
+
+**Files added/changed:** added
+`Backend/kai/services/kaiBoardReportingPacketService.js`,
+`Backend/kai/services/kaiBoardReportingPacketRenderModelService.js`,
+`Backend/kai/services/kaiBoardReportingPacketFingerprintService.js`, and
+`__tests__/kai-board-reporting-packet-v1-boundary.spec.js`; edited
+`Backend/kai/dictionary/postgresGeneratedContentRepository.js` only to
+parameterize the proven membership evaluator by packet audience and add the
+Board read method. No migration, route, persistence, manifest, audit,
+frontend, bundle, production/shared-database, or cloud file was changed.
+
+**Verification:** with `DATABASE_URL` set to the required non-listening
+loopback sentinel for every Node command:
+`node --test __tests__/kai-board-reporting-packet-v1-boundary.spec.js` passed
+6/6, proving internal-only membership, evidence_summary + impact_narrative
+support, fail-closed exclusions, read-only DTO shape with no Grant export/
+candidate/finalization fields, deterministic render model, canonical
+fingerprint, and fingerprint rejection of non-internal/empty render models.
+Adjacent regression command
+`node --test __tests__/kai-grant-response-packet-boundary.spec.js
+__tests__/kai-grant-response-packet-render-model-boundary.spec.js
+__tests__/kai-grant-response-packet-export-candidate-boundary.spec.js`
+passed 48/48, proving existing Grant funder membership/render/fingerprint
+behavior remains unchanged by the shared evaluator parameterization.
+
+**BR-02 database/persistence package required next:** create a Board-specific
+durable identity/candidate/member-snapshot foundation analogous to P14-02/
+P14-03 but not reusing Grant table contracts: a board-reporting packet
+identity bound to `(organization_id, engagement_id, packet_audience =
+'internal')`; a board-reporting packet candidate table bound to the current
+Board render model/fingerprint contract; immutable ordered candidate-member
+snapshots referencing `kai.generated_content_drafts` by tenant-safe composite
+FK; CHECKs pinning audience to `internal`, supported content types to
+`evidence_summary`/`impact_narrative`, lowercase 64-char fingerprint, contract
+version, created_by_type, and append-only behavior; replay/convergence unique
+constraints over organization/engagement/audience/fingerprint/idempotency as
+appropriate; metadata-only audit operation(s) and verifier/smoke/failure
+checks; repository/service exact-key create/read-current candidate APIs that
+recompute the Board render model inside a repeatable-read transaction before
+persisting; tests proving no client-supplied members/fingerprint, stale
+fingerprint fails closed, ordered snapshots are immutable, cross-tenant
+reads fail closed, and no Grant/funder/export tables are mutated. BR-02
+should apply after the generated-content/review/currentness chain through
+P14-01 and may use the inspected P14-02/P14-03/P14-08A migration-runner
+patterns as implementation evidence, but with Board-specific table names,
+contracts, validators, and tests. Packet-level authority/release, export
+manifest, audit delivery, and output delivery remain separate follow-on
+packages unless explicitly authorized.
+
 
 ## Phase-14 (Grant Response Packet Track) - P14-06D Authoritative Grant
 ## Response Packet Export-Candidate / Export-Review State Read

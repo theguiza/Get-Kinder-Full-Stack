@@ -57,6 +57,7 @@ const AUDIENCES = new Set(["internal", "funder", "public"]);
 // vocabulary already governing generation/traceability; no second audience
 // concept.
 const GRANT_RESPONSE_PACKET_AUDIENCE = "funder";
+const BOARD_REPORTING_PACKET_AUDIENCE = "internal";
 const EVIDENCE_SENSITIVITY_LEVELS = new Set(["unknown"]);
 const SHA256_LOWER_PATTERN = /^[0-9a-f]{64}$/;
 
@@ -1278,7 +1279,7 @@ async function loadGrantResponsePacketEngagement(tx, { organizationId, engagemen
   return rows[0] || null;
 }
 
-async function loadGrantResponsePacketMemberDraftIds(tx, { organizationId, engagementId }) {
+async function loadGrantResponsePacketMemberDraftIds(tx, { organizationId, engagementId, packetAudience = GRANT_RESPONSE_PACKET_AUDIENCE }) {
   const { rows } = await tx.query(
     `SELECT d.generated_content_draft_id::text AS generated_content_draft_id
        FROM kai.generated_content_drafts d
@@ -1291,7 +1292,7 @@ async function loadGrantResponsePacketMemberDraftIds(tx, { organizationId, engag
         AND d.draft_status = $4
         AND d.requested_audience = $5
       ORDER BY d.generated_content_draft_id ASC`,
-    [organizationId, engagementId, [...ALLOWED_GENERATED_CONTENT_TYPES], DRAFT_STATUS, GRANT_RESPONSE_PACKET_AUDIENCE],
+    [organizationId, engagementId, [...ALLOWED_GENERATED_CONTENT_TYPES], DRAFT_STATUS, packetAudience],
   );
   return rows.map((row) => row.generated_content_draft_id);
 }
@@ -1522,14 +1523,18 @@ export async function evaluateGrantResponsePacketMembershipInTransaction(
   input,
   evaluator = evaluateClaimTraceabilityInTransaction,
   manifestReaders = DEFAULT_GRANT_RESPONSE_PACKET_MANIFEST_READERS,
+  { packetAudience = GRANT_RESPONSE_PACKET_AUDIENCE } = {},
 ) {
   if (!validateGrantResponsePacketMembershipInput(input)) return failure("validation_blocker");
+  if (![GRANT_RESPONSE_PACKET_AUDIENCE, BOARD_REPORTING_PACKET_AUDIENCE].includes(packetAudience)) {
+    return failure("validation_blocker");
+  }
   const { organizationId, engagementId } = input;
 
   const engagement = await loadGrantResponsePacketEngagement(tx, { organizationId, engagementId });
   if (!engagement) return failure("not_found");
 
-  const draftIds = await loadGrantResponsePacketMemberDraftIds(tx, { organizationId, engagementId });
+  const draftIds = await loadGrantResponsePacketMemberDraftIds(tx, { organizationId, engagementId, packetAudience });
   const statesByDraftId = await readReviewPacketStatesBatch(tx, { organizationId, generatedContentDraftIds: draftIds });
   const memoizedEvaluator = memoizeEvaluatorAcrossDrafts(evaluator);
 
@@ -1565,7 +1570,21 @@ export async function evaluateGrantResponsePacketMembershipInTransaction(
     drafts.push({ ...packet, ...manifestLinkage });
   }
 
-  return success({ organizationId, engagementId, packetAudience: GRANT_RESPONSE_PACKET_AUDIENCE, drafts });
+  return success({ organizationId, engagementId, packetAudience, drafts });
+}
+
+export async function evaluateBoardReportingPacketMembershipInTransaction(
+  tx,
+  input,
+  evaluator = evaluateClaimTraceabilityInTransaction,
+) {
+  return evaluateGrantResponsePacketMembershipInTransaction(
+    tx,
+    input,
+    evaluator,
+    DEFAULT_GRANT_RESPONSE_PACKET_MANIFEST_READERS,
+    { packetAudience: BOARD_REPORTING_PACKET_AUDIENCE },
+  );
 }
 
 async function lockImmutableDraftRoot(tx, { organizationId, generatedContentDraftId }) {
@@ -2304,6 +2323,20 @@ export function createPostgresGeneratedContentRepository({
         return await runInTransaction(async (tx) => {
           await tx.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY");
           return evaluateGrantResponsePacketMembershipInTransaction(tx, input, evaluator);
+        });
+      } catch (error) {
+        if (error instanceof RollbackResultError) return error.result;
+        if (error?.code === "22P02") return failure("validation_blocker");
+        if (error?.code === "25001") return failure("conflict_current_state_changed");
+        return failure("system_error");
+      }
+    },
+    async getBoardReportingPacket(input) {
+      if (!validateGrantResponsePacketMembershipInput(input)) return failure("validation_blocker");
+      try {
+        return await runInTransaction(async (tx) => {
+          await tx.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY");
+          return evaluateBoardReportingPacketMembershipInTransaction(tx, input, evaluator);
         });
       } catch (error) {
         if (error instanceof RollbackResultError) return error.result;
