@@ -31,6 +31,7 @@ import {
   validateIntakeBatchFilesQuery,
   validateFilePolicyBlockRequest,
   validateKaiSprint2MutationRequest,
+  validateRequestBoardReportingCandidateReviewRequest,
   validateRequestExportReviewRequest,
   validateRequestGrantResponsePacketExportReviewRequest,
   validateReviewQueueQuery,
@@ -54,6 +55,7 @@ import {
   createProductionMetadataOnlyAuditForGeneratedContentDraft,
   createProductionMetadataOnlyAuditForGeneratedContentReview,
   createProductionMetadataOnlyAuditForGeneratedDraftExportCandidate,
+  createProductionMetadataOnlyAuditForBoardReportingCandidate,
   createProductionMetadataOnlyAuditForGrantResponsePacketExportCandidate,
   createProductionMetadataOnlyAuditForGrantResponsePacketExportManifest,
   createProductionMetadataOnlyAuditForGrantResponsePacketExportReview,
@@ -84,6 +86,7 @@ let grantResponsePacketExportReviewServicePromise = null;
 let grantResponsePacketHumanFinalReleaseAuthorityServicePromise = null;
 let grantResponsePacketExportManifestServicePromise = null;
 let grantResponsePacketExportManifestMarkdownServicePromise = null;
+let boardReportingCandidateServicePromise = null;
 let evidenceLineageServicePromise = null;
 let evidenceCoverageAssessmentServicePromise = null;
 let claimProposalServicePromise = null;
@@ -3067,6 +3070,78 @@ router.get(
   },
 );
 
+async function getBoardReportingCandidateService() {
+  if (intakeServiceOverride?.requestBoardReportingCandidateReview) return intakeServiceOverride;
+  boardReportingCandidateServicePromise ||= import("../services/kaiBoardReportingCandidateService.js");
+  return boardReportingCandidateServicePromise;
+}
+
+function boardReportingCandidateReviewIdentifier(req = {}) {
+  const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
+  const engagementId = typeof req.params?.engagementId === "string" ? req.params.engagementId : "";
+  const boardReportingCandidateId = typeof req.params?.boardReportingCandidateId === "string"
+    ? req.params.boardReportingCandidateId
+    : "";
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId) || organizationId !== organizationId.toLowerCase()) return null;
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(engagementId) || engagementId !== engagementId.toLowerCase()) return null;
+  if (
+    !KAI_SPRINT2_P0_PATTERNS.uuid.test(boardReportingCandidateId)
+    || boardReportingCandidateId !== boardReportingCandidateId.toLowerCase()
+  ) return null;
+  return { organizationId, engagementId, boardReportingCandidateId };
+}
+
+function validateRequestBoardReportingCandidateReviewRequestOrSend(req, res) {
+  if (!metadataContentTypeIsSupported(req)) {
+    sendKaiError(res, "unsupported_media_type");
+    return null;
+  }
+  const identifiers = boardReportingCandidateReviewIdentifier(req);
+  if (!identifiers) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker(
+        "invalid_uuid_field",
+        "organization_id_engagement_id_or_board_reporting_candidate_id",
+      )],
+    });
+    return null;
+  }
+  const result = validateRequestBoardReportingCandidateReviewRequest(req.body);
+  if (!result.ok) {
+    sendKaiError(res, "validation_blocker", { blockers: result.blockers });
+    return null;
+  }
+  return identifiers;
+}
+
+router.post(
+  "/admin/organizations/:organizationId/engagements/:engagementId/board-reporting/candidates/:boardReportingCandidateId/review-request",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    const identifiers = validateRequestBoardReportingCandidateReviewRequestOrSend(req, res);
+    if (!identifiers) return;
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    return invokeService(res, async () => {
+      const service = await getBoardReportingCandidateService();
+      return service.requestBoardReportingCandidateReview({
+        organizationId: identifiers.organizationId,
+        engagementId: identifiers.engagementId,
+        boardReportingCandidateId: identifiers.boardReportingCandidateId,
+        actorContext,
+        now,
+      }, {
+        metadataOnlyAudit: createProductionMetadataOnlyAuditForBoardReportingCandidate({
+          organizationId: identifiers.organizationId,
+          engagementId: identifiers.engagementId,
+          actorContext,
+          now,
+        }),
+      });
+    }, 201);
+  },
+);
+
 /**
  * Grant Response Packet export-candidate workflow wiring (P14-04): creates
  * or reuses (on replay) the P14-03 packet-candidate + authoritative member
@@ -4322,6 +4397,8 @@ export const __testables = {
   sendGrantResponsePacketMarkdownAttachment,
   sendGrantResponsePacketExportManifestMarkdownAttachment,
   grantResponsePacketExportManifestIdentifiers,
+  boardReportingCandidateReviewIdentifier,
+  validateRequestBoardReportingCandidateReviewRequestOrSend,
   grantResponsePacketIdentifier,
   validateCreateGrantResponsePacketExportCandidateRequestOrSend,
   grantResponsePacketExportCandidateReviewIdentifier,

@@ -8,6 +8,8 @@ import {
   BOARD_REPORTING_CANDIDATE_FINGERPRINT_CONTRACT_VERSION,
   BOARD_REPORTING_CANDIDATE_CREATED_OPERATION,
   BOARD_REPORTING_CANDIDATE_AUDIT_CONTRACT,
+  BOARD_REPORTING_CANDIDATE_REVIEW_QUEUE_STATIC_CONTRACT,
+  BOARD_REPORTING_CANDIDATE_REVIEW_REQUESTED_OPERATION,
 } from "./boardReportingCandidateContract.js";
 
 const RESULT_STATUS = Object.freeze({
@@ -77,6 +79,21 @@ function isReadBoardReportingCandidateInput(input) {
     && UUID_PATTERN.test(input.organizationId)
     && UUID_PATTERN.test(input.engagementId)
     && UUID_PATTERN.test(input.boardReportingCandidateId);
+}
+
+function isRequestBoardReportingCandidateReviewInput(input) {
+  return hasExactKeys(input, new Set([
+    "organizationId",
+    "engagementId",
+    "boardReportingCandidateId",
+    "actorContext",
+    "now",
+  ]))
+    && UUID_PATTERN.test(input.organizationId)
+    && UUID_PATTERN.test(input.engagementId)
+    && UUID_PATTERN.test(input.boardReportingCandidateId)
+    && isMappedHumanActor(input.actorContext)
+    && isCanonicalUtcTimestamp(input.now);
 }
 
 async function defaultComposeRenderModel(input, dependencies) {
@@ -183,6 +200,115 @@ async function loadCandidateForRead(tx, { organizationId, engagementId, boardRep
     [organizationId, engagementId, boardReportingCandidateId],
   );
   return rows[0] || null;
+}
+
+async function loadBoardReportingCandidateForReview(tx, { organizationId, engagementId, boardReportingCandidateId }) {
+  const { rows } = await tx.query(
+    `SELECT board_reporting_candidate_id::text AS board_reporting_candidate_id,
+            organization_id::text AS organization_id,
+            engagement_id::text AS engagement_id,
+            canonical_fingerprint,
+            fingerprint_contract_version,
+            packet_audience,
+            candidate_status
+       FROM kai.board_reporting_candidates
+      WHERE organization_id = $1::uuid
+        AND engagement_id = $2::uuid
+        AND board_reporting_candidate_id = $3::uuid`,
+    [organizationId, engagementId, boardReportingCandidateId],
+  );
+  return rows[0] || null;
+}
+
+async function insertBoardReportingCandidateReviewQueueRow(tx, {
+  reviewQueueItemId,
+  organizationId,
+  engagementId,
+  boardReportingCandidateId,
+}) {
+  const contract = BOARD_REPORTING_CANDIDATE_REVIEW_QUEUE_STATIC_CONTRACT;
+  const { rows } = await tx.query(
+    `INSERT INTO kai.review_queue_items (
+       review_queue_item_id, organization_id, engagement_id, queue_type, target_object_type, target_object_id,
+       priority, queue_status, review_status, summary, required_action, queue_metadata, created_by, created_by_type
+     )
+     VALUES ($1::uuid,$2::uuid,$3::uuid,$4,$5,$6::uuid,$7,'open','needs_gk_review',$8,$9,'{}'::jsonb,NULL,$10)
+     ON CONFLICT (organization_id, queue_type, target_object_type, target_object_id)
+       WHERE queue_type = 'board_reporting_candidate_review'
+     DO NOTHING
+     RETURNING review_queue_item_id::text AS review_queue_item_id, queue_status, review_status, updated_at`,
+    [
+      reviewQueueItemId,
+      organizationId,
+      engagementId,
+      contract.queueType,
+      contract.targetObjectType,
+      boardReportingCandidateId,
+      contract.priority,
+      contract.summary,
+      contract.requiredAction,
+      contract.createdByType,
+    ],
+  );
+  return rows[0] || null;
+}
+
+async function loadBoardReportingCandidateReviewQueueRow(tx, { organizationId, boardReportingCandidateId }) {
+  const contract = BOARD_REPORTING_CANDIDATE_REVIEW_QUEUE_STATIC_CONTRACT;
+  const { rows } = await tx.query(
+    `SELECT review_queue_item_id::text AS review_queue_item_id,
+            organization_id::text AS organization_id,
+            engagement_id::text AS engagement_id,
+            queue_type,
+            target_object_type,
+            target_object_id::text AS target_object_id,
+            priority,
+            queue_status,
+            review_status,
+            summary,
+            required_action,
+            blocked_reason,
+            assigned_to::text AS assigned_to,
+            due_at,
+            queue_metadata,
+            created_by::text AS created_by,
+            created_by_type,
+            updated_at
+       FROM kai.review_queue_items
+      WHERE organization_id = $1::uuid
+        AND queue_type = $2
+        AND target_object_type = $3
+        AND target_object_id = $4::uuid`,
+    [organizationId, contract.queueType, contract.targetObjectType, boardReportingCandidateId],
+  );
+  return rows[0] || null;
+}
+
+function isValidBoardReportingCandidateReviewQueueRow(row, { organizationId, engagementId, boardReportingCandidateId }) {
+  const contract = BOARD_REPORTING_CANDIDATE_REVIEW_QUEUE_STATIC_CONTRACT;
+  if (!row) return false;
+  if (row.organization_id !== organizationId) return false;
+  if (row.engagement_id !== engagementId) return false;
+  if (row.target_object_id !== boardReportingCandidateId) return false;
+  if (row.queue_type !== contract.queueType) return false;
+  if (row.target_object_type !== contract.targetObjectType) return false;
+  if (row.priority !== contract.priority) return false;
+  if (row.queue_status !== "open") return false;
+  if (row.review_status !== "needs_gk_review") return false;
+  if (row.summary !== contract.summary) return false;
+  if (row.required_action !== contract.requiredAction) return false;
+  if (row.blocked_reason !== null) return false;
+  if (row.assigned_to !== null) return false;
+  if (row.due_at !== null) return false;
+  if (row.created_by !== null) return false;
+  if (row.created_by_type !== contract.createdByType) return false;
+  if (!row.queue_metadata || typeof row.queue_metadata !== "object" || Array.isArray(row.queue_metadata)) return false;
+  return Object.keys(row.queue_metadata).length === 0;
+}
+
+function asCanonicalUtcTimestamp(value) {
+  if (value === null || value === undefined) return null;
+  return value instanceof Date ? value.toISOString() : new Date(value).toISOString();
 }
 
 function fingerprintRenderModel(renderModel) {
@@ -345,11 +471,97 @@ export function createPostgresBoardReportingCandidateRepository({ runInTransacti
         return failure("system_error");
       }
     },
+
+    async requestBoardReportingCandidateReview(input, dependencies = {}) {
+      if (!isRequestBoardReportingCandidateReviewInput(input)) return failure("validation_blocker");
+      if (!dependencies.metadataOnlyAudit) return failure("validation_blocker");
+
+      try {
+        return await runInTransaction(async (tx) => {
+          const candidate = await loadBoardReportingCandidateForReview(tx, input);
+          if (!candidate) rollbackFailure("not_found");
+          if (
+            candidate.packet_audience !== BOARD_REPORTING_CANDIDATE_AUDIENCE
+            || candidate.fingerprint_contract_version !== BOARD_REPORTING_CANDIDATE_FINGERPRINT_CONTRACT_VERSION
+            || candidate.candidate_status !== "created"
+          ) {
+            rollbackFailure("conflict_current_state_changed");
+          }
+
+          const reviewQueueItemId = crypto.randomUUID();
+          const inserted = await insertBoardReportingCandidateReviewQueueRow(tx, {
+            reviewQueueItemId,
+            organizationId: input.organizationId,
+            engagementId: input.engagementId,
+            boardReportingCandidateId: input.boardReportingCandidateId,
+          });
+
+          let queueRow;
+          let replayed;
+          if (inserted) {
+            queueRow = inserted;
+            replayed = false;
+          } else {
+            const existing = await loadBoardReportingCandidateReviewQueueRow(tx, {
+              organizationId: input.organizationId,
+              boardReportingCandidateId: input.boardReportingCandidateId,
+            });
+            if (!isValidBoardReportingCandidateReviewQueueRow(existing, input)) {
+              rollbackFailure("conflict_current_state_changed");
+            }
+            queueRow = existing;
+            replayed = true;
+          }
+
+          if (!replayed) {
+            const preparedAudit = dependencies.metadataOnlyAudit.prepareMetadataOnlyAudit?.({
+              payload: {
+                attempted_operation: BOARD_REPORTING_CANDIDATE_REVIEW_REQUESTED_OPERATION,
+                actor_type: "human",
+                object_type: "board_reporting_candidate",
+                board_reporting_candidate_id: input.boardReportingCandidateId,
+                engagement_id: input.engagementId,
+                review_queue_item_id: queueRow.review_queue_item_id,
+                canonical_fingerprint: candidate.canonical_fingerprint,
+                previous_queue_status: null,
+                resulting_queue_status: "open",
+                previous_review_status: null,
+                resulting_review_status: "needs_gk_review",
+              },
+              db: tx,
+            });
+            if (!preparedAudit || preparedAudit.ok !== true || typeof preparedAudit.publish !== "function") {
+              rollbackFailure("system_error");
+            }
+            await preparedAudit.publish();
+          }
+
+          return success({
+            organizationId: input.organizationId,
+            engagementId: input.engagementId,
+            boardReportingCandidateId: input.boardReportingCandidateId,
+            canonicalFingerprint: candidate.canonical_fingerprint,
+            reviewQueueItemId: queueRow.review_queue_item_id,
+            queueStatus: queueRow.queue_status,
+            reviewStatus: queueRow.review_status,
+            reviewUpdatedAt: asCanonicalUtcTimestamp(queueRow.updated_at),
+            replayed,
+          });
+        });
+      } catch (error) {
+        if (error instanceof BoardReportingCandidateRollbackResultError) return error.result;
+        if (error?.code === "23503" || error?.code === "22P02" || error?.code === "23514") {
+          return failure("validation_blocker");
+        }
+        return failure("system_error");
+      }
+    },
   });
 }
 
 export const __boardReportingCandidateRepositoryTestables = Object.freeze({
   isCreateBoardReportingCandidateInput,
   isReadBoardReportingCandidateInput,
+  isRequestBoardReportingCandidateReviewInput,
   fingerprintRenderModel,
 });

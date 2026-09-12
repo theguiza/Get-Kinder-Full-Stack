@@ -66,6 +66,7 @@ const REQUEST_EXPORT_REVIEW_REQUEST_KEYS = new Set([
 ]);
 const CREATE_EXPORT_CANDIDATE_REQUEST_KEYS = new Set([]);
 const CREATE_GRANT_RESPONSE_PACKET_EXPORT_CANDIDATE_REQUEST_KEYS = new Set([]);
+const REQUEST_BOARD_REPORTING_CANDIDATE_REVIEW_REQUEST_KEYS = new Set([]);
 const REQUEST_GRANT_RESPONSE_PACKET_EXPORT_REVIEW_REQUEST_KEYS = new Set([]);
 const START_GRANT_RESPONSE_PACKET_EXPORT_REVIEW_REQUEST_KEYS = new Set([
   "expected_updated_at",
@@ -664,6 +665,17 @@ export function validateRequestGrantResponsePacketExportReviewRequest(payload) {
   }
   const keys = Object.keys(payload);
   if (keys.some((key) => !REQUEST_GRANT_RESPONSE_PACKET_EXPORT_REVIEW_REQUEST_KEYS.has(key))) {
+    return { ok: false, blockers: [requestBlocker("unknown_field", "body")] };
+  }
+  return { ok: true, blockers: [] };
+}
+
+export function validateRequestBoardReportingCandidateReviewRequest(payload) {
+  if (!isPlainObject(payload)) {
+    return { ok: false, blockers: [requestBlocker("request_body_must_be_object", "body")] };
+  }
+  const keys = Object.keys(payload);
+  if (keys.some((key) => !REQUEST_BOARD_REPORTING_CANDIDATE_REVIEW_REQUEST_KEYS.has(key))) {
     return { ok: false, blockers: [requestBlocker("unknown_field", "body")] };
   }
   return { ok: true, blockers: [] };

@@ -1739,6 +1739,12 @@ export function createProductionMetadataOnlyAuditForGrantResponsePacketExportCan
   }
 
   const SHA256_HEX_PATTERN = /^[0-9a-f]{64}$/;
+  const UUID_PATTERN_LOCAL = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+  const REVIEW_STATUS_PATTERN = /^[a-z_]{1,32}$/;
+
+  function safeReviewStatus(value) {
+    return typeof value === "string" && REVIEW_STATUS_PATTERN.test(value) ? value : null;
+  }
 
   return Object.freeze({
     prepareMetadataOnlyAudit({ payload, db } = {}) {
@@ -1753,6 +1759,10 @@ export function createProductionMetadataOnlyAuditForGrantResponsePacketExportCan
         : null;
       const memberCount = Number.isInteger(payload.member_count) && payload.member_count >= 0
         ? payload.member_count
+        : null;
+      const reviewQueueItemId = typeof payload.review_queue_item_id === "string"
+        && UUID_PATTERN_LOCAL.test(payload.review_queue_item_id)
+        ? payload.review_queue_item_id
         : null;
 
       const metadata = {
@@ -1814,6 +1824,12 @@ export function createProductionMetadataOnlyAuditForBoardReportingCandidate({
   }
 
   const SHA256_HEX_PATTERN = /^[0-9a-f]{64}$/;
+  const UUID_PATTERN_LOCAL = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+  const REVIEW_STATUS_PATTERN = /^[a-z_]{1,32}$/;
+
+  function safeReviewStatus(value) {
+    return typeof value === "string" && REVIEW_STATUS_PATTERN.test(value) ? value : null;
+  }
 
   return Object.freeze({
     prepareMetadataOnlyAudit({ payload, db } = {}) {
@@ -1829,6 +1845,10 @@ export function createProductionMetadataOnlyAuditForBoardReportingCandidate({
       const memberCount = Number.isInteger(payload.member_count) && payload.member_count >= 0
         ? payload.member_count
         : null;
+      const reviewQueueItemId = typeof payload.review_queue_item_id === "string"
+        && UUID_PATTERN_LOCAL.test(payload.review_queue_item_id)
+        ? payload.review_queue_item_id
+        : null;
 
       const metadata = {
         organization_id: organizationId,
@@ -1842,10 +1862,18 @@ export function createProductionMetadataOnlyAuditForBoardReportingCandidate({
         validator_key: typeof payload.validator_key === "string" ? payload.validator_key : null,
         canonical_fingerprint: canonicalFingerprint,
         member_count: memberCount,
+        review_queue_item_id: reviewQueueItemId,
+        previous_queue_status: safeReviewStatus(payload.previous_queue_status),
+        resulting_queue_status: safeReviewStatus(payload.resulting_queue_status),
+        previous_review_status: safeReviewStatus(payload.previous_review_status),
+        resulting_review_status: safeReviewStatus(payload.resulting_review_status),
         actor_type: actorContext?.actorType || "human",
         actor_user_id: actorContext?.actorUserId || null,
         request_id: actorContext?.requestId || null,
-        route: "br_02_board_reporting_candidate",
+        route: typeof payload.attempted_operation === "string"
+          && payload.attempted_operation === "board_reporting_candidate_review_requested"
+          ? "br_03a_board_reporting_candidate_review_request"
+          : "br_02_board_reporting_candidate",
         created_at: typeof now === "string" ? now : new Date().toISOString(),
         metadata_only: true,
         contains_raw_file_content: false,
