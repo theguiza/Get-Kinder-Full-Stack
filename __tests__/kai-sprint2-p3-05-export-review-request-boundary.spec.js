@@ -482,13 +482,46 @@ test("P3-05 duplicate matching audits fail closed", async () => {
   assert.equal(replay.error.code, "conflict_current_state_changed");
 });
 
-test("P3-05 requires an injected metadataOnlyAudit dependency before attempting any transaction", async () => {
+test("P3-05 treats a missing metadataOnlyAudit dependency as system_error before attempting any transaction", async () => {
   const state = makeFixtureState({ currentUseEligible: true });
   const repository = makeRepository(state);
   const result = await repository.requestGeneratedDraftExportReview(input(), {});
-  assert.equal(result.error.code, "validation_blocker");
+  assert.equal(result.error.code, "system_error");
   assert.equal(state.exportReviewQueues.length, 0);
   assert.equal(state.auditRows.length, 0);
+});
+
+test("P3-05 export-review request service composes its own production metadataOnlyAudit when the route injects none", async () => {
+  let receivedAudit = null;
+  const repository = {
+    async requestGeneratedDraftExportReview(_input, deps) {
+      receivedAudit = deps.metadataOnlyAudit;
+      return { ok: true, data: { generatedContentDraftId: DRAFT, requestedExportAudience: "internal", exportReviewRequestAccepted: false, replayed: false, reviewQueueItemId: null, queueStatus: null, reviewStatus: null, validatorResult: { validator_key: "VAL-EXP-001", severity: "blocker", object_type: "generated_content_draft", object_code: "export_manifest_eligibility", object_id: DRAFT, message: "x", blocking_reason: "export_manifest_not_eligible", required_fix: null, evidence: { failed_gates: [] } } }, error: null };
+    },
+  };
+  const deps = { generatedContentRepository: repository, env: enabledEnv };
+  const result = await requestGeneratedDraftExportReview(input(), deps);
+  assert.equal(result.ok, true);
+  assert.equal(typeof receivedAudit?.prepareMetadataOnlyAudit, "function");
+});
+
+test("P3-05 export-review request service forwards the repository's structured blocker instead of dropping it", async () => {
+  const repository = {
+    async requestGeneratedDraftExportReview() {
+      return {
+        ok: false,
+        data: null,
+        error: { code: "validation_blocker", status: 422 },
+        blockers: [{ validator_key: "VAL-EXP-001", severity: "blocker", blocking_reason: "export_manifest_not_eligible" }],
+      };
+    },
+  };
+  const deps = { generatedContentRepository: repository, metadataOnlyAudit: auditRecorder(), env: enabledEnv };
+  const result = await requestGeneratedDraftExportReview(input(), deps);
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "validation_blocker");
+  assert.ok(Array.isArray(result.blockers) && result.blockers.length === 1);
+  assert.equal(result.blockers[0].validator_key, "VAL-EXP-001");
 });
 
 test("P3-05 fails closed with system_error (not a thrown exception) when audit publication fails", async () => {

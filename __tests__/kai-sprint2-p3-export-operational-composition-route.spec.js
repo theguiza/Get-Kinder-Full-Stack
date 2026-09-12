@@ -221,7 +221,7 @@ test("export-review request route delegates to the existing requestGeneratedDraf
     assert.deepEqual(scenario.serviceCalls, []);
   });
 
-  await t.test("route forwards only path audience, middleware actorContext, server now, and audit dependency", async () => {
+  await t.test("route forwards only path audience, middleware actorContext, and server now; the service composes its own production audit dependency", async () => {
     scenario = createScenario({
       repositoryResult: { ok: true, data: injectedExportReviewRequestDto, error: null },
     });
@@ -241,7 +241,7 @@ test("export-review request route delegates to the existing requestGeneratedDraf
       actorContext,
       now: call.now,
     });
-    assert.equal(typeof scenario.dependencyCalls[0].metadataOnlyAudit?.prepareMetadataOnlyAudit, "function");
+    assert.equal(scenario.dependencyCalls[0], undefined);
     assert.deepEqual(response.body, { ok: true, data: injectedExportReviewRequestDto, warnings: [] });
 
     const nowMs = new Date(call.now).getTime();

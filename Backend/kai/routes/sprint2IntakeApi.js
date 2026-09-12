@@ -54,7 +54,6 @@ import {
   createProductionMetadataOnlyAuditForGeneratedContentDraft,
   createProductionMetadataOnlyAuditForGeneratedContentReview,
   createProductionMetadataOnlyAuditForGeneratedDraftExportCandidate,
-  createProductionMetadataOnlyAuditForGeneratedDraftExportReview,
   createProductionMetadataOnlyAuditForGrantResponsePacketExportCandidate,
   createProductionMetadataOnlyAuditForGrantResponsePacketExportManifest,
   createProductionMetadataOnlyAuditForGrantResponsePacketExportReview,
@@ -1263,13 +1262,6 @@ router.post(
         requestedExportAudience: payload.requested_export_audience,
         actorContext,
         now,
-      }, {
-        metadataOnlyAudit: createProductionMetadataOnlyAuditForGeneratedDraftExportReview({
-          organizationId: identifiers.organizationId,
-          generatedContentDraftId: identifiers.generatedContentDraftId,
-          actorContext,
-          now,
-        }),
       });
     }, 201);
   },

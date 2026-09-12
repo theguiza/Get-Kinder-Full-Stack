@@ -374,10 +374,27 @@ export async function requestGeneratedDraftExportReview(input, dependencies = {}
 
   const repository =
     dependencies.generatedContentRepository || (await createDefaultGeneratedContentRepository());
+
+  const metadataOnlyAudit =
+    dependencies.metadataOnlyAudit
+    || createProductionMetadataOnlyAuditForGeneratedDraftExportReview({
+      organizationId: input.organizationId,
+      generatedContentDraftId: input.generatedContentDraftId,
+      actorContext: input.actorContext,
+      now: input.now,
+      route: "/api/kai/sprint2/intake/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/export-review-request",
+    });
+
   const result = await repository.requestGeneratedDraftExportReview(input, {
-    metadataOnlyAudit: dependencies.metadataOnlyAudit,
+    metadataOnlyAudit,
   });
-  if (!result.ok) return buildKaiError(result.error.code, { status: result.error.status, data: null });
+  if (!result.ok) {
+    return buildKaiError(result.error.code, {
+      status: result.error.status,
+      blockers: result.blockers,
+      data: null,
+    });
+  }
   if (!isRequestExportReviewResultDto(result.data)) return buildKaiError("system_error", { data: null });
   return { ok: true, data: result.data, error: null };
 }
@@ -437,7 +454,12 @@ export async function completeGeneratedDraftExportReview(input, dependencies = {
   if (!isKaiSprint2Enabled(env)) return buildKaiError("feature_disabled", { data: null });
   if (!isKaiGenerationEnabled(env)) return buildKaiError("feature_disabled", { data: null });
   if (!isKaiPublicExportEnabled(env)) return buildKaiError("feature_disabled", { data: null });
-  if (!isCompleteExportReviewInput(input)) return buildKaiError("validation_blocker", { data: null });
+  if (!isCompleteExportReviewInput(input)) {
+    return buildKaiError("validation_blocker", {
+      blockers: stageBlocker("VAL-EXP-003", "export_review_complete_request_shape_invalid"),
+      data: null,
+    });
+  }
   if (!isMappedHumanActor(input.actorContext)) return buildKaiError("authorization_denied", { data: null });
 
   const auth = validateActorCanPerformOperation(
@@ -452,10 +474,27 @@ export async function completeGeneratedDraftExportReview(input, dependencies = {
 
   const repository =
     dependencies.generatedContentRepository || (await createDefaultGeneratedContentRepository());
+
+  const metadataOnlyAudit =
+    dependencies.metadataOnlyAudit
+    || createProductionMetadataOnlyAuditForGeneratedDraftExportReview({
+      organizationId: input.organizationId,
+      generatedContentDraftId: input.generatedContentDraftId,
+      actorContext: input.actorContext,
+      now: input.now,
+      route: "/api/kai/sprint2/intake/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/export-review-queue/:exportReviewQueueItemId/complete",
+    });
+
   const result = await repository.completeGeneratedDraftExportReview(input, {
-    metadataOnlyAudit: dependencies.metadataOnlyAudit,
+    metadataOnlyAudit,
   });
-  if (!result.ok) return buildKaiError(result.error.code, { status: result.error.status, data: null });
+  if (!result.ok) {
+    return buildKaiError(result.error.code, {
+      status: result.error.status,
+      blockers: result.blockers,
+      data: null,
+    });
+  }
   if (!isCompleteExportReviewResultDto(result.data)) return buildKaiError("system_error", { data: null });
   return { ok: true, data: result.data, error: null };
 }

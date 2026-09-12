@@ -336,13 +336,85 @@ test("P3-13 malformed audit metadata on a resolved row conflicts without repair"
   assert.equal(result.error.code, "conflict_current_state_changed");
 });
 
-test("P3-13 requires an injected metadataOnlyAudit dependency before attempting any transaction", async () => {
+test("P3-13 treats a missing metadataOnlyAudit dependency as system_error before attempting any transaction", async () => {
   const state = makeState();
   const repository = makeRepository(state);
   const result = await repository.completeGeneratedDraftExportReview(input(), {});
-  assert.equal(result.error.code, "validation_blocker");
+  assert.equal(result.error.code, "system_error");
   assert.equal(state.queueRow.queue_status, "in_progress");
   assert.equal(state.auditRows.length, 0);
+});
+
+test("P3-13 completion maps a database check-constraint rejection to a structured blocker instead of an empty one", async () => {
+  for (const pgErrorCode of ["23514", "22P02", "23503"]) {
+    const repository = createPostgresGeneratedContentRepository({
+      runInTransaction: async () => {
+        const error = new Error("simulated check-constraint rejection");
+        error.code = pgErrorCode;
+        throw error;
+      },
+    });
+    const result = await repository.completeGeneratedDraftExportReview(input(), { metadataOnlyAudit: auditRecorder() });
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "validation_blocker");
+    assert.ok(Array.isArray(result.blockers) && result.blockers.length >= 1);
+    assert.equal(result.blockers[0].validator_key, __generatedContentRepositoryContract.EXPORT_REVIEW_COMPLETE_VALIDATOR_KEYS[0]);
+  }
+});
+
+test("P3-13 completion returns a structured blocker (not an empty one) for malformed request-shape input", async () => {
+  const state = makeState();
+  const repository = makeRepository(state);
+  const result = await repository.completeGeneratedDraftExportReview({ ...input(), extra: true }, { metadataOnlyAudit: auditRecorder() });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "validation_blocker");
+  assert.ok(Array.isArray(result.blockers) && result.blockers.length === 1);
+  assert.equal(result.blockers[0].validator_key, "VAL-EXP-003");
+});
+
+test("P3-13 export-review complete service forwards the repository's structured blocker instead of dropping it", async () => {
+  const repository = {
+    async completeGeneratedDraftExportReview() {
+      return {
+        ok: false,
+        data: null,
+        error: { code: "validation_blocker", status: 422 },
+        blockers: [{ validator_key: "VAL-EXP-003", severity: "blocker", blocking_reason: "export_review_complete_currently_blocked" }],
+      };
+    },
+  };
+  const deps = { generatedContentRepository: repository, metadataOnlyAudit: auditRecorder(), env: enabledEnv };
+  const result = await completeGeneratedDraftExportReview(input(), deps);
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "validation_blocker");
+  assert.ok(Array.isArray(result.blockers) && result.blockers.length === 1);
+  assert.equal(result.blockers[0].validator_key, "VAL-EXP-003");
+});
+
+test("P3-13 export-review complete service returns a structured blocker (not an empty one) for malformed request-shape input", async () => {
+  let repositoryCalls = 0;
+  const repository = { async completeGeneratedDraftExportReview() { repositoryCalls += 1; throw new Error("must not call"); } };
+  const deps = { generatedContentRepository: repository, metadataOnlyAudit: auditRecorder(), env: enabledEnv };
+  const result = await completeGeneratedDraftExportReview({ ...input(), extra: true }, deps);
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "validation_blocker");
+  assert.ok(Array.isArray(result.blockers) && result.blockers.length === 1);
+  assert.equal(result.blockers[0].validator_key, "VAL-EXP-003");
+  assert.equal(repositoryCalls, 0);
+});
+
+test("P3-13 export-review complete service composes its own production metadataOnlyAudit when the route injects none", async () => {
+  let receivedAudit = null;
+  const repository = {
+    async completeGeneratedDraftExportReview(_input, deps) {
+      receivedAudit = deps.metadataOnlyAudit;
+      return { ok: true, data: { generatedContentDraftId: DRAFT, exportReviewQueueItemId: EXPORT_REVIEW_QUEUE, queueStatus: "resolved", reviewStatus: "resolved", replayed: false }, error: null };
+    },
+  };
+  const deps = { generatedContentRepository: repository, env: enabledEnv };
+  const result = await completeGeneratedDraftExportReview(input(), deps);
+  assert.equal(result.ok, true);
+  assert.equal(typeof receivedAudit?.prepareMetadataOnlyAudit, "function");
 });
 
 test("P3-13 fails closed with system_error (not a thrown exception) when audit publication fails", async () => {

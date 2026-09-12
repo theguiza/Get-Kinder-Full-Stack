@@ -2514,7 +2514,9 @@ export function createPostgresGeneratedContentRepository({
     },
     async requestGeneratedDraftExportReview(input, dependencies = {}) {
       if (!validateRequestExportReviewInput(input)) return failure("validation_blocker");
-      if (!dependencies.metadataOnlyAudit) return failure("validation_blocker");
+      if (typeof dependencies.metadataOnlyAudit?.prepareMetadataOnlyAudit !== "function") {
+        return failure("system_error");
+      }
 
       try {
         return await runInTransaction(async (tx) => {
@@ -2701,8 +2703,18 @@ export function createPostgresGeneratedContentRepository({
       }
     },
     async completeGeneratedDraftExportReview(input, dependencies = {}) {
-      if (!validateCompleteExportReviewInput(input)) return failure("validation_blocker");
-      if (!dependencies.metadataOnlyAudit) return failure("validation_blocker");
+      if (!validateCompleteExportReviewInput(input)) {
+        return failure(
+          "validation_blocker",
+          stageBlocker(
+            EXPORT_REVIEW_COMPLETE_VALIDATOR_KEYS[0],
+            "export_review_complete_request_shape_invalid",
+          ),
+        );
+      }
+      if (typeof dependencies.metadataOnlyAudit?.prepareMetadataOnlyAudit !== "function") {
+        return failure("system_error");
+      }
 
       try {
         return await runInTransaction(async (tx) => {
@@ -2785,7 +2797,12 @@ export function createPostgresGeneratedContentRepository({
       } catch (error) {
         if (error instanceof RollbackResultError) return error.result;
         if (error?.code === "23505") return failure("conflict_current_state_changed");
-        if (error?.code === "23503" || error?.code === "22P02" || error?.code === "23514") return failure("validation_blocker");
+        if (error?.code === "23503" || error?.code === "22P02" || error?.code === "23514") {
+          return failure(
+            "validation_blocker",
+            stageBlocker(EXPORT_REVIEW_COMPLETE_VALIDATOR_KEYS[0], "export_review_complete_currently_blocked"),
+          );
+        }
         if (error?.code === "25001") return failure("conflict_current_state_changed");
         return failure("system_error");
       }
