@@ -2598,8 +2598,18 @@ export function createPostgresGeneratedContentRepository({
       }
     },
     async startGeneratedDraftExportReview(input, dependencies = {}) {
-      if (!validateStartExportReviewInput(input)) return failure("validation_blocker");
-      if (!dependencies.metadataOnlyAudit) return failure("validation_blocker");
+      if (!validateStartExportReviewInput(input)) {
+        return failure(
+          "validation_blocker",
+          stageBlocker(
+            EXPORT_REVIEW_START_VALIDATOR_KEYS[0],
+            "export_review_start_request_shape_invalid",
+          ),
+        );
+      }
+      if (typeof dependencies.metadataOnlyAudit?.prepareMetadataOnlyAudit !== "function") {
+        return failure("system_error");
+      }
 
       try {
         return await runInTransaction(async (tx) => {

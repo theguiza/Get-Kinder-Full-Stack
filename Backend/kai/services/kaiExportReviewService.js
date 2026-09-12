@@ -6,6 +6,7 @@ import {
 import { buildKaiError } from "../errors/kaiErrors.js";
 import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationService.js";
 import { EXPORT_REVIEW_LIFECYCLE_PROFILES } from "../dictionary/exportReviewQueueContract.js";
+import { createProductionMetadataOnlyAuditForGeneratedDraftExportReview } from "./kaiMetadataOnlyAuditComposition.js";
 
 const EXPORT_REVIEW_ALLOWED_ROLES = new Set(["gk_admin"]);
 const REQUEST_EXPORT_REVIEW_OPERATION = "request_generated_draft_export_review";
@@ -406,8 +407,19 @@ export async function startGeneratedDraftExportReview(input, dependencies = {}) 
 
   const repository =
     dependencies.generatedContentRepository || (await createDefaultGeneratedContentRepository());
+
+  const metadataOnlyAudit =
+    dependencies.metadataOnlyAudit
+    || createProductionMetadataOnlyAuditForGeneratedDraftExportReview({
+      organizationId: input.organizationId,
+      generatedContentDraftId: input.generatedContentDraftId,
+      actorContext: input.actorContext,
+      now: input.now,
+      route: "/api/kai/sprint2/intake/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/export-review-queue/:exportReviewQueueItemId/start",
+    });
+
   const result = await repository.startGeneratedDraftExportReview(input, {
-    metadataOnlyAudit: dependencies.metadataOnlyAudit,
+    metadataOnlyAudit,
   });
   if (!result.ok) {
     return buildKaiError(result.error.code, {

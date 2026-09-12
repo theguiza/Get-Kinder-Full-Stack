@@ -385,11 +385,11 @@ test("P3-09 export-review start service returns a structured blocker (not an emp
   assert.equal(repositoryCalls, 0);
 });
 
-test("P3-09 requires an injected metadataOnlyAudit dependency before attempting any transaction", async () => {
+test("P3-09 treats a missing metadataOnlyAudit dependency as system_error before attempting any transaction", async () => {
   const state = makeState();
   const repository = makeRepository(state);
   const result = await repository.startGeneratedDraftExportReview(input(), {});
-  assert.equal(result.error.code, "validation_blocker");
+  assert.equal(result.error.code, "system_error");
   assert.equal(state.queueRow.queue_status, "open");
   assert.equal(state.auditRows.length, 0);
 });
