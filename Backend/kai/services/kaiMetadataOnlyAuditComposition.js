@@ -2318,6 +2318,95 @@ export function createProductionMetadataOnlyAuditForGrantResponsePacketExportMan
   });
 }
 
+/**
+ * Board Reporting production composition of the `metadataOnlyAudit` contract
+ * required by `postgresBoardReportingCandidateExportManifestRepository.js`.
+ * The Board-scoped analogue of `createProductionMetadataOnlyAuditForGrantResponsePacketExportManifest`
+ * - same non-file-scoped discipline (`kai.audit_events` via
+ * `insertRequiredSuccessfulAuditEvent`, never `kai.upload_lifecycle_audit`) -
+ * bound at construction only to `organizationId`/`engagementId`/
+ * `boardReportingCandidateId` (identity the caller already has before the
+ * manifest row exists; the manifest's own id is generated inside the
+ * repository's own transaction and is never taken as a constructor
+ * parameter). The audited object is the manifest itself
+ * (`object_type: "board_reporting_candidate_export_manifest"`), never the
+ * parent Board candidate; a payload whose `board_reporting_candidate_id`
+ * does not match this adapter's own bound candidate id, or that carries no
+ * valid `board_reporting_candidate_export_manifest_id`, is refused outright.
+ */
+export function createProductionMetadataOnlyAuditForBoardReportingCandidateExportManifest({
+  organizationId,
+  engagementId,
+  boardReportingCandidateId,
+  actorContext,
+  now,
+  insertAuditEvent = insertRequiredSuccessfulAuditEvent,
+} = {}) {
+  if (typeof organizationId !== "string" || organizationId.length === 0) {
+    throw new TypeError("createProductionMetadataOnlyAuditForBoardReportingCandidateExportManifest requires organizationId.");
+  }
+  if (typeof engagementId !== "string" || engagementId.length === 0) {
+    throw new TypeError("createProductionMetadataOnlyAuditForBoardReportingCandidateExportManifest requires engagementId.");
+  }
+  if (typeof boardReportingCandidateId !== "string" || !CLAIM_ID_PATTERN.test(boardReportingCandidateId)) {
+    throw new TypeError(
+      "createProductionMetadataOnlyAuditForBoardReportingCandidateExportManifest requires boardReportingCandidateId.",
+    );
+  }
+
+  function isPlainObject(value) {
+    return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  }
+
+  return Object.freeze({
+    prepareMetadataOnlyAudit({ payload, db } = {}) {
+      if (!isPlainObject(payload)) return { ok: false };
+      const payloadManifestId = payload.board_reporting_candidate_export_manifest_id;
+      if (typeof payloadManifestId !== "string" || !CLAIM_ID_PATTERN.test(payloadManifestId)) return { ok: false };
+      const payloadCandidateId = payload.board_reporting_candidate_id;
+      if (typeof payloadCandidateId !== "string" || payloadCandidateId !== boardReportingCandidateId) {
+        return { ok: false };
+      }
+
+      const metadata = {
+        organization_id: organizationId,
+        engagement_id: engagementId,
+        object_type: "board_reporting_candidate_export_manifest",
+        target_object_type: "board_reporting_candidate_export_manifest",
+        object_id: payloadManifestId,
+        board_reporting_candidate_export_manifest_id: payloadManifestId,
+        board_reporting_candidate_id: payloadCandidateId,
+        operation: typeof payload.attempted_operation === "string" ? payload.attempted_operation : "board_reporting_candidate_export_manifest_created",
+        operation_type: typeof payload.attempted_operation === "string" ? payload.attempted_operation : "board_reporting_candidate_export_manifest_created",
+        actor_type: actorContext?.actorType || "human",
+        actor_user_id: actorContext?.actorUserId || null,
+        request_id: actorContext?.requestId || null,
+        route: "board_reporting_candidate_export_manifest_foundation",
+        created_at: typeof now === "string" ? now : new Date().toISOString(),
+        metadata_only: true,
+        contains_raw_file_content: false,
+        contains_raw_parsed_rows: false,
+        contains_client_pii: false,
+        contains_prompt_text: false,
+        contains_unsafe_generated_text: false,
+        contains_signed_urls: false,
+        contains_storage_credentials: false,
+      };
+
+      return {
+        ok: true,
+        async publish() {
+          const result = await insertAuditEvent(metadata, db);
+          if (!result || result.ok !== true) {
+            throw new Error("board_reporting_candidate_export_manifest_metadata_only_audit_publish_failed");
+          }
+          return result;
+        },
+      };
+    },
+  });
+}
+
 export const __testables = Object.freeze({
   createProductionMetadataOnlyAudit,
   createProductionMetadataOnlyAuditForSensitivityAllowedUseDecision,
@@ -2347,4 +2436,5 @@ export const __testables = Object.freeze({
   createProductionMetadataOnlyAuditForGrantResponsePacketExportReview,
   createProductionMetadataOnlyAuditForGrantResponsePacketHumanAuthorityDecision,
   createProductionMetadataOnlyAuditForGrantResponsePacketExportManifest,
+  createProductionMetadataOnlyAuditForBoardReportingCandidateExportManifest,
 });

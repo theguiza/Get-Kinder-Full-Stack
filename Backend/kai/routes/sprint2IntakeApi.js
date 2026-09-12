@@ -18,6 +18,7 @@ import {
 } from "../middleware/kaiSprint2RequestSafety.js";
 import {
   validateBoardReportingCandidateHumanFinalReleaseAuthorityRequest,
+  validateCreateBoardReportingCandidateExportManifestRequest,
   validateCompleteBoardReportingCandidateReviewRequest,
   validateCompleteClaimReviewRequest,
   validateCompleteGrantResponsePacketExportReviewRequest,
@@ -59,6 +60,7 @@ import {
   createProductionMetadataOnlyAuditForGeneratedContentReview,
   createProductionMetadataOnlyAuditForGeneratedDraftExportCandidate,
   createProductionMetadataOnlyAuditForBoardReportingCandidate,
+  createProductionMetadataOnlyAuditForBoardReportingCandidateExportManifest,
   createProductionMetadataOnlyAuditForBoardReportingCandidateHumanFinalReleaseAuthority,
   createProductionMetadataOnlyAuditForGrantResponsePacketExportCandidate,
   createProductionMetadataOnlyAuditForGrantResponsePacketExportManifest,
@@ -92,6 +94,7 @@ let grantResponsePacketExportManifestServicePromise = null;
 let grantResponsePacketExportManifestMarkdownServicePromise = null;
 let boardReportingCandidateServicePromise = null;
 let boardReportingCandidateHumanFinalReleaseAuthorityServicePromise = null;
+let boardReportingCandidateExportManifestServicePromise = null;
 let evidenceLineageServicePromise = null;
 let evidenceCoverageAssessmentServicePromise = null;
 let claimProposalServicePromise = null;
@@ -3369,6 +3372,82 @@ router.post(
         }),
       });
     });
+  },
+);
+
+async function getBoardReportingCandidateExportManifestService() {
+  if (intakeServiceOverride?.createBoardReportingCandidateExportManifest) return intakeServiceOverride;
+  boardReportingCandidateExportManifestServicePromise ||= import(
+    "../services/kaiBoardReportingCandidateExportManifestService.js"
+  );
+  return boardReportingCandidateExportManifestServicePromise;
+}
+
+function validateCreateBoardReportingCandidateExportManifestRequestOrSend(req, res) {
+  if (!metadataContentTypeIsSupported(req)) {
+    sendKaiError(res, "unsupported_media_type");
+    return null;
+  }
+  const identifiers = boardReportingCandidateReviewIdentifier(req);
+  if (!identifiers) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker(
+        "invalid_uuid_field",
+        "organization_id_engagement_id_or_board_reporting_candidate_id",
+      )],
+    });
+    return null;
+  }
+  const result = validateCreateBoardReportingCandidateExportManifestRequest(req.body);
+  if (!result.ok) {
+    sendKaiError(res, "validation_blocker", { blockers: result.blockers });
+    return null;
+  }
+  return identifiers;
+}
+
+/**
+ * Board Reporting candidate export-manifest create/reuse - the Board-scoped
+ * analogue of the existing P14-08B grant-response-packet export-manifest
+ * route, for the EXACT existing, immutable BR-02 Board Reporting candidate
+ * identified by the route's own boardReportingCandidateId - never a
+ * client-selected latest/newest/preferred candidate. organizationId,
+ * engagementId, and the candidate id all come from the route path;
+ * actorContext/now are always server-derived. The request body is empty -
+ * no eligibility, authority, fingerprint, member, review-state, or manifest-
+ * identity field is ever accepted. Contains no SQL and no direct database
+ * access - delegates once to kaiBoardReportingCandidateExportManifestService,
+ * which itself delegates to postgresBoardReportingCandidateExportManifestRepository.js
+ * (real evaluateBoardReportingFinalEligibility + real BR-04 authority
+ * effectiveness, reimplemented nowhere). Produces no Board delivery artifact
+ * and publishes nothing externally.
+ */
+router.post(
+  "/admin/organizations/:organizationId/engagements/:engagementId/board-reporting/candidates/:boardReportingCandidateId/export-manifests",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    const identifiers = validateCreateBoardReportingCandidateExportManifestRequestOrSend(req, res);
+    if (!identifiers) return;
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    return invokeService(res, async () => {
+      const service = await getBoardReportingCandidateExportManifestService();
+      return service.createBoardReportingCandidateExportManifest({
+        organizationId: identifiers.organizationId,
+        engagementId: identifiers.engagementId,
+        boardReportingCandidateId: identifiers.boardReportingCandidateId,
+        actorContext,
+      }, {
+        now,
+        metadataOnlyAudit: createProductionMetadataOnlyAuditForBoardReportingCandidateExportManifest({
+          organizationId: identifiers.organizationId,
+          engagementId: identifiers.engagementId,
+          boardReportingCandidateId: identifiers.boardReportingCandidateId,
+          actorContext,
+          now,
+        }),
+      });
+    }, 201);
   },
 );
 

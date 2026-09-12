@@ -112,6 +112,7 @@ const BOARD_REPORTING_CANDIDATE_HUMAN_FINAL_RELEASE_AUTHORITY_REQUEST_KEYS = new
 // notes), so this route accepts an empty body only, exactly like
 // CREATE_GRANT_RESPONSE_PACKET_EXPORT_CANDIDATE_REQUEST_KEYS above.
 const CREATE_GRANT_RESPONSE_PACKET_EXPORT_MANIFEST_REQUEST_KEYS = new Set([]);
+const CREATE_BOARD_REPORTING_CANDIDATE_EXPORT_MANIFEST_REQUEST_KEYS = new Set([]);
 const CREATE_EXPORT_MANIFEST_REQUEST_KEYS = new Set([
   "export_review_queue_item_id",
 ]);
@@ -897,6 +898,24 @@ export function validateCreateGrantResponsePacketExportManifestRequest(payload) 
   }
   const keys = Object.keys(payload);
   if (keys.some((key) => !CREATE_GRANT_RESPONSE_PACKET_EXPORT_MANIFEST_REQUEST_KEYS.has(key))) {
+    return { ok: false, blockers: [requestBlocker("unknown_field", "body")] };
+  }
+  return { ok: true, blockers: [] };
+}
+
+// Board Reporting candidate export-manifest create: the Board-scoped
+// analogue of validateCreateGrantResponsePacketExportManifestRequest above.
+// Browser must send no manifest composition - organizationId, engagementId,
+// and the exact candidate id all come from the route path, and
+// actorContext/now are server-derived, so this route accepts an empty body
+// only. In particular this rejects any eligibility, authority, fingerprint,
+// member, review-state, or manifest-identity field.
+export function validateCreateBoardReportingCandidateExportManifestRequest(payload) {
+  if (!isPlainObject(payload)) {
+    return { ok: false, blockers: [requestBlocker("request_body_must_be_object", "body")] };
+  }
+  const keys = Object.keys(payload);
+  if (keys.some((key) => !CREATE_BOARD_REPORTING_CANDIDATE_EXPORT_MANIFEST_REQUEST_KEYS.has(key))) {
     return { ok: false, blockers: [requestBlocker("unknown_field", "body")] };
   }
   return { ok: true, blockers: [] };

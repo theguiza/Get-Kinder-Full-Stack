@@ -22368,6 +22368,184 @@ with `listen EPERM 127.0.0.1` before the runner could bind its loopback port
 sandbox and passed: `TOOL_VERIFIED Board final eligibility real-DB proof
 passed.` No full repository closure suite was run.
 
+## Board Reporting Candidate Export-Manifest Schema Foundation (Closure Entry)
+
+**Date:** 2026-09-12
+
+**Owner authorization (bounded, local-only):** repair a missing package-
+boundary bookkeeping item - this living ExecPlan had no entry recording the
+already-proven `kai.board_reporting_candidate_export_manifests` schema
+checkpoint landed at commit `54bcb33`. This entry records that checkpoint
+only; it performs no new schema/migration work.
+
+**Starting state (TOOL_VERIFIED):** commit `54bcb33` (`Add Board Reporting
+candidate export-manifest schema foundation`), branch `main`, clean tree.
+
+**Schema checkpoint (TOOL_VERIFIED):** `kai.board_reporting_candidate_export_manifests`
+table created (migration
+`kai_sprint2_board_reporting_candidate_export_manifest_foundation.sql` +
+`.rollback.sql`), the Board-scoped sibling of the existing P3-19
+`kai.export_manifests` and P14-08A `kai.grant_response_packet_export_manifests`
+foundations - a tenant-safe composite FK into BR-02
+`kai.board_reporting_candidates`, a tenant/decision-type-safe composite FK
+into BR-04 `kai.board_reporting_candidate_human_authority_decisions`, the
+`brcem_replay_convergence_unique UNIQUE(organization_id,
+board_reporting_candidate_id, canonical_fingerprint)` replay-convergence
+constraint, and an append-only `trg_brcem_append_only` trigger. No review-
+binding column and no eligibility-snapshot column were added (documented as
+intentionally deferred in the migration's own header). Verifier: 13/13 PASS.
+Smoke/failure/rollback: PASS. Affected regressions re-run at that checkpoint:
+BR-02/BR-04/P14-08A/P3-19/P3-20 all PASS.
+
+**Scope closed out at that checkpoint (TOOL_VERIFIED):** no manifest-create
+service, no repository, no route, and no runtime create/replay behavior
+existed yet - persistence identity only. No production/shared database
+access, push, or deployment was performed.
+
+**Status:** superseded by the runtime package entry immediately below, which
+implements the create/replay service this schema foundation was built for.
+
+## Board Reporting Candidate Export-Manifest Runtime Create/Replay Package
+
+**Date:** 2026-09-12
+
+**Owner authorization (bounded, local-only):** implement the runtime create/
+replay package over the existing, already-proven
+`kai.board_reporting_candidate_export_manifests` schema foundation (commit
+`54bcb33`) - a governed create-or-reuse manifest operation for the exact,
+existing, immutable BR-02 Board Reporting candidate identified by the
+caller, gated entirely by the real, unmodified Board final-eligibility gate
+and the real, unmodified BR-04 authority-effectiveness lineage. Starting
+state: branch `main`, HEAD `54bcb33f66685e46b2f9ad5f5eb344be2ebd1824`, clean
+working tree. No schema/migration change, no real PostgreSQL runtime
+lifecycle exercise, no Board delivery, and no production/push/deployment
+action was performed or authorized.
+
+**Precedent files inspected (TOOL_VERIFIED):** the P14-08A/P14-08B packet-
+level manifest track (`grantResponsePacketExportManifestContract.js`,
+`postgresGrantResponsePacketExportManifestRepository.js`,
+`kaiGrantResponsePacketExportManifestService.js`, the P14-08B route in
+`sprint2IntakeApi.js`, and
+`__tests__/kai-sprint2-p14-08-b-grant-response-packet-export-manifest-service-route.spec.js`);
+the P3-19/P3-20 member-level manifest track
+(`exportManifestContract.js`, `postgresExportManifestRepository.js`,
+`kaiExportManifestService.js`); the existing Board final-eligibility gate
+(`kaiBoardReportingFinalEligibilityGateService.js`); the existing BR-04
+authority ledger repository
+(`postgresBoardReportingCandidateHumanAuthorityDecisionRepository.js`,
+including its exported `loadBoardReportingCandidateForReview`/
+`evaluateEffectiveness`); the manifest foundation migration and its
+`.rollback.sql`; the `KAI_SPRINT2_ENABLED` route-gate pattern
+(`kaiSprint2Config.js` / `requireKaiSprint2Enabled`); and the existing
+`createProductionMetadataOnlyAuditForGrantResponsePacketExportManifest`/
+`createProductionMetadataOnlyAuditForBoardReportingCandidateHumanFinalReleaseAuthority`
+metadata-only audit factories in `kaiMetadataOnlyAuditComposition.js`.
+
+**Reuse classification (TOOL_VERIFIED):** BOARD_SPECIFIC_REPOSITORY_REQUIRED
+around fully-reused eligibility/authority logic - the manifest table, the
+final-eligibility gate, and the BR-04 authority ledger are each structurally
+disjoint from their P3-19/P14-08A member/packet-level counterparts (see the
+manifest foundation migration's own header), so a new Board-scoped
+repository/service/route was required, but it reimplements neither
+`evaluateBoardReportingFinalEligibility` nor BR-04's
+`evaluateEffectiveness`/lineage logic - both are called through, unmodified.
+
+**Implementation (TOOL_VERIFIED):** new files -
+`Backend/kai/dictionary/boardReportingCandidateExportManifestContract.js`
+(static contract constants: fingerprint contract version, created-operation,
+audit contract, `gk_admin`-only allowed roles, effective-authority-decision
+type); `Backend/kai/dictionary/postgresBoardReportingCandidateExportManifestRepository.js`
+(`createPostgresBoardReportingCandidateExportManifestRepository({runInTransaction})`
+exposing `createExportManifest`/`readExportManifestById`/
+`resolveExportManifestStateForCandidate`); `Backend/kai/services/kaiBoardReportingCandidateExportManifestService.js`
+(`createBoardReportingCandidateExportManifest(input, dependencies)`, exact-
+keys input contract `{organizationId, engagementId,
+boardReportingCandidateId, actorContext}` - no fingerprint, eligibility,
+review state, authority state, authority decision id, manifest id, or member
+list ever accepted); a new
+`createProductionMetadataOnlyAuditForBoardReportingCandidateExportManifest`
+factory added to `kaiMetadataOnlyAuditComposition.js`; a new
+`validateCreateBoardReportingCandidateExportManifestRequest` (empty-body-
+only) validator added to `kaiSprint2RequestSchemas.js`; and one new route
+mounted in `sprint2IntakeApi.js`.
+
+**Runtime contract / flow (TOOL_VERIFIED):** organization + engagement +
+boardReportingCandidateId + authorized (`gk_admin`) actor → service calls
+the existing, unmodified `evaluateBoardReportingFinalEligibility` → requires
+`finalEligibility === true` (any failed gate - no review, REQUEST-only
+review, START-only review, no authority, revoked authority, stale candidate,
+or wrong org/engagement/candidate - fails closed as `validation_blocker` or
+`not_found`, never bypassed) → repository re-derives the exact effective
+BR-04 decision id via the existing, unmodified
+`authorityRepository.evaluateEffectiveness` (never a second independent
+effectiveness determination) → builds the canonical representation
+`{organizationId, boardReportingCandidateId, effectiveAuthorityDecisionId}`
+→ computes the manifest fingerprint server-side (sha256 over canonical
+JSON; no client-supplied fingerprint accepted) → inside one transaction,
+re-loads the candidate via the existing, reused
+`loadBoardReportingCandidateForReview` (TOCTOU close), `INSERT ... ON
+CONFLICT (organization_id, board_reporting_candidate_id,
+canonical_fingerprint) DO NOTHING`, and on conflict re-selects the existing
+row (replay) → a metadata-only audit is published only when a new row was
+actually inserted (never on replay).
+
+**Replay behavior (TOOL_VERIFIED):** derived directly from the P3-19/P14-08A
+precedent and the existing `brcem_replay_convergence_unique` constraint -
+identical legitimate creation (same canonical manifest) resolves to the same
+manifest row, produces no duplicate row, and produces no duplicate creation
+audit. No new idempotency semantics were invented.
+
+**Route (TOOL_VERIFIED):** `POST /admin/organizations/:organizationId/engagements/:engagementId/board-reporting/candidates/:boardReportingCandidateId/export-manifests`
+mounted in `sprint2IntakeApi.js` (exposed through HTTP because the existing
+P14-08B/P3-19 manifest architecture exposes this same boundary through
+HTTP). Behind `requireKaiSprint2Enabled`/`KAI_SPRINT2_ENABLED`, contains no
+SQL and no direct `kai.*` access, delegates once to
+`kaiBoardReportingCandidateExportManifestService`, and accepts an empty
+request body only (any client-supplied field is refused as
+`validation_blocker`).
+
+**Verification (TOOL_VERIFIED):** new focused spec
+`__tests__/kai-sprint2-board-reporting-candidate-export-manifest-service-route.spec.js`
+(12/12 PASS) proves: eligible current candidate → manifest created; identical
+replay → same manifest, no duplicate audit; no review/REQUEST-only/START-
+only review, no authority, revoked authority, and stale candidate (via
+repository fail-closed results) → blocked with no manifest and no audit;
+wrong org/engagement/candidate → blocked (`not_found`/`authorization_denied`
+at the appropriate layer); unauthorized human (`gk_reviewer`), assistant/
+system actor, and cross-tenant actor fail closed before any repository call;
+the repository writes exactly one row (the manifest itself) - no candidate,
+member, review-queue, or authority-ledger mutation and no delivery side
+effect; the service/route are metadata-only (no delivery/artifact-bytes
+field); and the route is mounted exactly once with no raw SQL. No real
+PostgreSQL runtime lifecycle was exercised.
+
+**Affected regressions (TOOL_VERIFIED):** re-ran, all PASS (207/207 total
+across this combined run) -
+`kai-board-reporting-candidate-boundary.spec.js`,
+`kai-board-reporting-candidate-review-complete-boundary.spec.js`,
+`kai-board-reporting-candidate-review-request-boundary.spec.js`,
+`kai-board-reporting-candidate-review-start-boundary.spec.js`,
+`kai-board-reporting-final-eligibility-boundary.spec.js`,
+`kai-board-reporting-packet-v1-boundary.spec.js`,
+`kai-sprint2-br-04-board-reporting-candidate-human-authority-decision-ledger-boundary.spec.js`,
+`kai-sprint2-br-04-board-reporting-candidate-human-final-release-authority.spec.js`,
+`kai-sprint2-p14-08-a-grant-response-packet-export-manifest-foundation-boundary.spec.js`,
+`kai-sprint2-p14-08-b-grant-response-packet-export-manifest-service-route.spec.js`,
+`kai-sprint2-p14-08-c-grant-response-packet-export-manifest-final-markdown-boundary.spec.js`,
+`kai-sprint2-p3-19-export-manifest-foundation-boundary.spec.js`,
+`kai-sprint2-p3-20-export-manifest-review-binding-boundary.spec.js`, and
+`kai-sprint2-pass2-route-runtime.spec.js` (updated to include the one new
+mounted route path in its pinned route-list assertion - additive, every
+prior entry preserved verbatim). No real-DB integration spec was run.
+
+**Prohibited actions:** no schema/migration/table change, no review-binding
+or eligibility-snapshot column, no Board delivery/final Board Summary, no
+production/shared database access, no deployment, no push, and no cloud/
+config/feature-flag/credential mutation was performed.
+
+**Local commit:** one bounded commit created after all required checks
+passed, including the schema-closure entry above (no separate documentation
+commit).
 
 ## Phase-14 (Grant Response Packet Track) - P14-06D Authoritative Grant
 ## Response Packet Export-Candidate / Export-Review State Read

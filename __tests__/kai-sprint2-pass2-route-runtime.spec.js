@@ -149,6 +149,16 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // MVP UAT final completion: authoritative intake-context engagement read
     // (additive; every prior entry preserved verbatim).
     "/admin/organizations/:organizationId/engagements",
+    // Board Reporting candidate export-manifest create/reuse for the exact
+    // existing, immutable BR-02 Board Reporting candidate identified by the
+    // path's own boardReportingCandidateId, wrapped around the new
+    // postgresBoardReportingCandidateExportManifestRepository.js. Requires
+    // the real evaluateBoardReportingFinalEligibility gate (candidate
+    // contract + review-resolved + BR-04 authority-effectiveness + fresh
+    // currentness) to report finalEligibility === true before any manifest
+    // row is written. Creates no Board delivery artifact (additive; every
+    // prior entry preserved verbatim).
+    "/admin/organizations/:organizationId/engagements/:engagementId/board-reporting/candidates/:boardReportingCandidateId/export-manifests",
     // BR-04: governed human final-release authority grant/revoke for the
     // exact existing, immutable BR-02 Board Reporting candidate identified
     // by the path's own boardReportingCandidateId, wrapped around the new
