@@ -22129,6 +22129,93 @@ contracts, validators, and tests. Packet-level authority/release, export
 manifest, audit delivery, and output delivery remain separate follow-on
 packages unless explicitly authorized.
 
+## Board Reporting BR-02 - Immutable Candidate / Member Snapshot Foundation
+
+**Date:** 2026-09-12
+
+**Owner authorization (bounded, local-only):** implement BR-02 Board
+Reporting persistence from the accepted BR-01 current packet/render/
+fingerprint foundation through immutable Board candidate persistence,
+ordered candidate-member snapshot persistence, candidate read, idempotency/
+replay behavior, audit integration, migration package, and focused
+verification. No Board review/release authority/final eligibility/manifest/
+delivery or `board_update` generator was implemented.
+
+**Starting state (USER_CONFIRMED / TOOL_VERIFIED):** `main`,
+`9caf7f8a5fef772ee2339a51b6b37548f06e2c83`, clean working tree.
+
+**Migration dependency chain established (TOOL_VERIFIED):**
+`scripts/kai-sprint2-organization-enablement-bootstrap-synthetic-schema.sql`;
+synthetic `UNIQUE (engagement_id, organization_id)` on `kai.engagements`;
+`scripts/kai-sprint2-gate-a-bootstrap-synthetic-schema.sql`;
+`migrations/kai_sprint2_gate_a_p0_upload_lifecycle.sql`;
+`migrations/kai_sprint2_gate_a_p0_policy_decision_replay.sql`;
+`migrations/kai_sprint2_p1_parser_run_and_file_profile.sql`;
+`migrations/kai_sprint2_p1_04_data_dictionary_and_quality.sql`;
+`migrations/kai_sprint2_p1_05_intake_sensitivity_profile.sql`;
+`migrations/kai_sprint2_p1_06_review_queue.sql`;
+`migrations/kai_sprint2_p1_07_intake_source_candidate.sql`;
+`migrations/kai_sprint2_p1_08_source_promotion.sql`;
+`migrations/kai_sprint2_p2_01_evidence_lineage.sql`;
+`migrations/kai_sprint2_p2_03_claim_proposal.sql`;
+`migrations/kai_sprint2_p2_04_claim_gap_followup.sql`;
+`migrations/kai_sprint2_p2_05_conflict_review_candidate.sql`;
+`migrations/kai_sprint2_p3_01_generated_content_drafts.sql`;
+`migrations/kai_sprint2_p13_01_impact_narrative_content_type.sql`;
+`migrations/kai_sprint2_p14_01_generation_run_engagement_binding.sql`;
+`migrations/kai_sprint2_p3_04_generated_content_review_completion.sql`;
+`migrations/kai_sprint2_p3_05_export_review_request.sql`;
+`migrations/kai_sprint2_p3_09_export_review_start.sql`;
+`migrations/kai_sprint2_p3_13_export_review_completion.sql`;
+`migrations/kai_sprint2_p3_16_export_candidate_foundation.sql`;
+`migrations/kai_sprint2_p3_17_human_authority_decision_ledger.sql`;
+`migrations/kai_sprint2_p3_19_export_manifest_foundation.sql`;
+`migrations/kai_sprint2_br_02_board_reporting_candidate_foundation.sql`.
+
+**Implemented schema (TOOL_VERIFIED):** added
+`kai.board_reporting_candidates` and `kai.board_reporting_candidate_members`.
+No durable mutable Board packet row was introduced because no repository or
+schema constraint required one; Board current packet remains computed from
+authoritative governed state. Candidate rows are scoped to
+`organization_id` + `engagement_id`, pinned to `packet_audience = internal`,
+store `idempotency_key`, pinned fingerprint contract version, canonical
+fingerprint, `candidate_status = created`, creator metadata, and timestamp.
+Member rows store exact `generated_content_draft_id` and deterministic
+zero-based `ordinal`, with tenant-safe composite FKs to the candidate and
+generated-content draft, unique `(candidate, draft)` and `(candidate,
+ordinal)`, supporting indexes, and append-only UPDATE/DELETE rejection
+triggers on both tables.
+
+**Implementation files (TOOL_VERIFIED):** added Board candidate contract,
+Postgres repository, and service modules; added metadata-only audit adapter
+and safe audit metadata key; added complete migration package (forward,
+rollback draft, verifier, smoke seed, smoke verifier, failure checks, patch
+notes, runbook, local PostgreSQL runner); added focused boundary and
+runner-owned integration tests; added `package.json` verifier script.
+
+**Verification (TOOL_VERIFIED):** with `DATABASE_URL` set to
+`postgres://127.0.0.1:9/kai_sentinel` for every Node/npm command:
+`node --test __tests__/kai-board-reporting-candidate-boundary.spec.js
+__tests__/kai-board-reporting-packet-v1-boundary.spec.js
+__tests__/kai-sprint2-p14-04-grant-response-packet-export-candidate-service.spec.js
+__tests__/kai-sprint2-p14-04-grant-response-packet-export-candidate-audit.spec.js`
+passed 30/30. `npm run
+verify:kai-sprint2-br-02-board-reporting-candidate-foundation` passed the
+BR-02 verifier (15/15 PASS), smoke, failure checks, and focused runner-owned
+tests (13/13). Initial sandbox-only `initdb` failed on shared memory and the
+escalated rerun succeeded; an initial runner port collision was corrected by
+OS-selected free loopback port allocation. Existing Grant candidate/member
+regression `npm run
+verify:kai-sprint2-p14-03-grant-response-packet-export-candidate-foundation`
+passed verifier 16/16 and tests 36/36. Affected Board/Grant authoritative
+read/current-use/audit regressions passed: 17/17, 7/7 with one expected skip,
+and broader generated-content/Grant/Board packet current-use suite 51/51.
+
+**Prohibited actions:** no production/shared database migration, production
+mutation, deployment, push, cloud/config/feature-flag change, credential/
+secret access, real-client-data handling, destructive action, or
+`00_KAI_CURRENT_STATE.md` update was performed.
+
 
 ## Phase-14 (Grant Response Packet Track) - P14-06D Authoritative Grant
 ## Response Packet Export-Candidate / Export-Review State Read

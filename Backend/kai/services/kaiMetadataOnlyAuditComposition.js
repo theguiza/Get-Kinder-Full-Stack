@@ -1795,6 +1795,82 @@ export function createProductionMetadataOnlyAuditForGrantResponsePacketExportCan
   });
 }
 
+export function createProductionMetadataOnlyAuditForBoardReportingCandidate({
+  organizationId,
+  engagementId,
+  actorContext,
+  now,
+  insertAuditEvent = insertRequiredSuccessfulAuditEvent,
+} = {}) {
+  if (typeof organizationId !== "string" || organizationId.length === 0) {
+    throw new TypeError("createProductionMetadataOnlyAuditForBoardReportingCandidate requires organizationId.");
+  }
+  if (typeof engagementId !== "string" || engagementId.length === 0) {
+    throw new TypeError("createProductionMetadataOnlyAuditForBoardReportingCandidate requires engagementId.");
+  }
+
+  function isPlainObject(value) {
+    return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  }
+
+  const SHA256_HEX_PATTERN = /^[0-9a-f]{64}$/;
+
+  return Object.freeze({
+    prepareMetadataOnlyAudit({ payload, db } = {}) {
+      if (!isPlainObject(payload)) return { ok: false };
+      const payloadCandidateId = payload.board_reporting_candidate_id;
+      if (typeof payloadCandidateId !== "string" || payloadCandidateId.length === 0) return { ok: false };
+      if (payload.engagement_id !== undefined && payload.engagement_id !== engagementId) return { ok: false };
+
+      const canonicalFingerprint = typeof payload.canonical_fingerprint === "string"
+        && SHA256_HEX_PATTERN.test(payload.canonical_fingerprint)
+        ? payload.canonical_fingerprint
+        : null;
+      const memberCount = Number.isInteger(payload.member_count) && payload.member_count >= 0
+        ? payload.member_count
+        : null;
+
+      const metadata = {
+        organization_id: organizationId,
+        engagement_id: engagementId,
+        object_type: "board_reporting_candidate",
+        target_object_type: "board_reporting_candidate",
+        object_id: payloadCandidateId,
+        board_reporting_candidate_id: payloadCandidateId,
+        operation: typeof payload.attempted_operation === "string" ? payload.attempted_operation : "board_reporting_candidate_created",
+        operation_type: typeof payload.attempted_operation === "string" ? payload.attempted_operation : "board_reporting_candidate_created",
+        validator_key: typeof payload.validator_key === "string" ? payload.validator_key : null,
+        canonical_fingerprint: canonicalFingerprint,
+        member_count: memberCount,
+        actor_type: actorContext?.actorType || "human",
+        actor_user_id: actorContext?.actorUserId || null,
+        request_id: actorContext?.requestId || null,
+        route: "br_02_board_reporting_candidate",
+        created_at: typeof now === "string" ? now : new Date().toISOString(),
+        metadata_only: true,
+        contains_raw_file_content: false,
+        contains_raw_parsed_rows: false,
+        contains_client_pii: false,
+        contains_prompt_text: false,
+        contains_unsafe_generated_text: false,
+        contains_signed_urls: false,
+        contains_storage_credentials: false,
+      };
+
+      return {
+        ok: true,
+        async publish() {
+          const result = await insertAuditEvent(metadata, db);
+          if (!result || result.ok !== true) {
+            throw new Error("br_02_board_reporting_candidate_metadata_only_audit_publish_failed");
+          }
+          return result;
+        },
+      };
+    },
+  });
+}
+
 export function createProductionMetadataOnlyAuditForGrantResponsePacketExportReview({
   organizationId,
   engagementId,
@@ -2115,6 +2191,7 @@ export const __testables = Object.freeze({
   createProductionMetadataOnlyAuditForRequirementAssessment,
   createProductionMetadataOnlyAuditForEngagementRequirementAssessment,
   createProductionMetadataOnlyAuditForGrantResponsePacketExportCandidate,
+  createProductionMetadataOnlyAuditForBoardReportingCandidate,
   createProductionMetadataOnlyAuditForGrantResponsePacketExportReview,
   createProductionMetadataOnlyAuditForGrantResponsePacketHumanAuthorityDecision,
   createProductionMetadataOnlyAuditForGrantResponsePacketExportManifest,

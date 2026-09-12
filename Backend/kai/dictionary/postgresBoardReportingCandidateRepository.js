@@ -1,0 +1,355 @@
+import crypto from "node:crypto";
+
+import { withTransaction } from "../db/kaiDb.js";
+import { composeBoardReportingRenderModel } from "../services/kaiBoardReportingPacketRenderModelService.js";
+import { composeBoardReportingPacketFingerprint } from "../services/kaiBoardReportingPacketFingerprintService.js";
+import {
+  BOARD_REPORTING_CANDIDATE_AUDIENCE,
+  BOARD_REPORTING_CANDIDATE_FINGERPRINT_CONTRACT_VERSION,
+  BOARD_REPORTING_CANDIDATE_CREATED_OPERATION,
+  BOARD_REPORTING_CANDIDATE_AUDIT_CONTRACT,
+} from "./boardReportingCandidateContract.js";
+
+const RESULT_STATUS = Object.freeze({
+  validation_blocker: 422,
+  not_found: 404,
+  conflict_current_state_changed: 409,
+  system_error: 500,
+});
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
+
+function failure(code) {
+  return { ok: false, data: null, error: { code, status: RESULT_STATUS[code] || 500 } };
+}
+
+function success(data) {
+  return { ok: true, data, error: null };
+}
+
+export class BoardReportingCandidateRollbackResultError extends Error {
+  constructor(result) {
+    super("rollback board-reporting-candidate transaction");
+    this.name = "BoardReportingCandidateRollbackResultError";
+    this.result = result;
+  }
+}
+
+function rollbackFailure(code) {
+  throw new BoardReportingCandidateRollbackResultError(failure(code));
+}
+
+function hasExactKeys(value, allowed) {
+  return Boolean(value)
+    && typeof value === "object"
+    && !Array.isArray(value)
+    && Object.keys(value).length === allowed.size
+    && Object.keys(value).every((key) => allowed.has(key));
+}
+
+function isMappedHumanActor(actorContext) {
+  return actorContext?.actorType === "human"
+    && typeof actorContext?.actorUserId === "string"
+    && actorContext.actorUserId.length > 0;
+}
+
+function isCanonicalUtcTimestamp(value) {
+  if (typeof value !== "string") return false;
+  try {
+    return new Date(value).toISOString() === value;
+  } catch {
+    return false;
+  }
+}
+
+function isCreateBoardReportingCandidateInput(input) {
+  return hasExactKeys(input, new Set(["organizationId", "engagementId", "idempotencyKey", "actorContext", "now"]))
+    && UUID_PATTERN.test(input.organizationId)
+    && UUID_PATTERN.test(input.engagementId)
+    && IDEMPOTENCY_KEY_PATTERN.test(input.idempotencyKey)
+    && isMappedHumanActor(input.actorContext)
+    && isCanonicalUtcTimestamp(input.now);
+}
+
+function isReadBoardReportingCandidateInput(input) {
+  return hasExactKeys(input, new Set(["organizationId", "engagementId", "boardReportingCandidateId"]))
+    && UUID_PATTERN.test(input.organizationId)
+    && UUID_PATTERN.test(input.engagementId)
+    && UUID_PATTERN.test(input.boardReportingCandidateId);
+}
+
+async function defaultComposeRenderModel(input, dependencies) {
+  return composeBoardReportingRenderModel(
+    { organizationId: input.organizationId, engagementId: input.engagementId, actorContext: input.actorContext },
+    dependencies,
+  );
+}
+
+async function ensureEngagementBelongsToTenant(tx, { organizationId, engagementId }) {
+  const { rows } = await tx.query(
+    `SELECT 1
+       FROM kai.engagements
+      WHERE organization_id = $1::uuid AND engagement_id = $2::uuid`,
+    [organizationId, engagementId],
+  );
+  return Boolean(rows[0]);
+}
+
+async function insertCandidate(tx, { candidateId, organizationId, engagementId, idempotencyKey, fingerprint, actorContext, now }) {
+  const { rows } = await tx.query(
+    `INSERT INTO kai.board_reporting_candidates (
+       board_reporting_candidate_id, organization_id, engagement_id, packet_audience,
+       idempotency_key, fingerprint_contract_version, canonical_fingerprint,
+       candidate_status, created_by, created_by_type, created_at
+     )
+     VALUES ($1::uuid,$2::uuid,$3::uuid,$4,$5,$6,$7,'created',$8::uuid,'human',$9::timestamptz)
+     ON CONFLICT (organization_id, engagement_id, idempotency_key) DO NOTHING
+     RETURNING board_reporting_candidate_id::text AS board_reporting_candidate_id`,
+    [
+      candidateId,
+      organizationId,
+      engagementId,
+      BOARD_REPORTING_CANDIDATE_AUDIENCE,
+      idempotencyKey,
+      BOARD_REPORTING_CANDIDATE_FINGERPRINT_CONTRACT_VERSION,
+      fingerprint,
+      actorContext.actorUserId,
+      now,
+    ],
+  );
+  return rows[0] || null;
+}
+
+async function loadCandidateByIdempotencyKey(tx, { organizationId, engagementId, idempotencyKey }) {
+  const { rows } = await tx.query(
+    `SELECT board_reporting_candidate_id::text AS board_reporting_candidate_id,
+            canonical_fingerprint,
+            fingerprint_contract_version,
+            packet_audience,
+            candidate_status
+       FROM kai.board_reporting_candidates
+      WHERE organization_id = $1::uuid
+        AND engagement_id = $2::uuid
+        AND idempotency_key = $3`,
+    [organizationId, engagementId, idempotencyKey],
+  );
+  return rows[0] || null;
+}
+
+async function insertCandidateMembers(tx, { organizationId, candidateId, orderedGeneratedContentDraftIds, now }) {
+  for (let ordinal = 0; ordinal < orderedGeneratedContentDraftIds.length; ordinal += 1) {
+    await tx.query(
+      `INSERT INTO kai.board_reporting_candidate_members (
+         board_reporting_candidate_id, organization_id, generated_content_draft_id, ordinal, created_at
+       )
+       VALUES ($1::uuid,$2::uuid,$3::uuid,$4,$5::timestamptz)`,
+      [candidateId, organizationId, orderedGeneratedContentDraftIds[ordinal], ordinal, now],
+    );
+  }
+}
+
+async function loadCandidateMembers(tx, { organizationId, candidateId }) {
+  const { rows } = await tx.query(
+    `SELECT board_reporting_candidate_member_id::text AS board_reporting_candidate_member_id,
+            generated_content_draft_id::text AS generated_content_draft_id,
+            ordinal,
+            created_at
+       FROM kai.board_reporting_candidate_members
+      WHERE organization_id = $1::uuid AND board_reporting_candidate_id = $2::uuid
+      ORDER BY ordinal ASC`,
+    [organizationId, candidateId],
+  );
+  return rows;
+}
+
+async function loadCandidateForRead(tx, { organizationId, engagementId, boardReportingCandidateId }) {
+  const { rows } = await tx.query(
+    `SELECT board_reporting_candidate_id::text AS board_reporting_candidate_id,
+            organization_id::text AS organization_id,
+            engagement_id::text AS engagement_id,
+            packet_audience,
+            idempotency_key,
+            fingerprint_contract_version,
+            canonical_fingerprint,
+            candidate_status,
+            created_by::text AS created_by,
+            created_by_type,
+            created_at
+       FROM kai.board_reporting_candidates
+      WHERE organization_id = $1::uuid
+        AND engagement_id = $2::uuid
+        AND board_reporting_candidate_id = $3::uuid`,
+    [organizationId, engagementId, boardReportingCandidateId],
+  );
+  return rows[0] || null;
+}
+
+function fingerprintRenderModel(renderModel) {
+  const { fingerprint, orderedGeneratedContentDraftIds, error } =
+    composeBoardReportingPacketFingerprint(renderModel);
+  if (!fingerprint) {
+    const isExpectedBlocker = error === "not_internal_audience" || error === "no_eligible_members";
+    return { ok: false, code: isExpectedBlocker ? "validation_blocker" : "system_error" };
+  }
+  return { ok: true, fingerprint, orderedGeneratedContentDraftIds };
+}
+
+export function createPostgresBoardReportingCandidateRepository({ runInTransaction = withTransaction } = {}) {
+  return Object.freeze({
+    async createBoardReportingCandidate(input, dependencies = {}) {
+      if (!isCreateBoardReportingCandidateInput(input)) return failure("validation_blocker");
+      if (!dependencies.metadataOnlyAudit) return failure("validation_blocker");
+
+      const composeRenderModel = dependencies.composeRenderModel || defaultComposeRenderModel;
+      const preflightRenderModel = await composeRenderModel(input, dependencies.renderModelDependencies || dependencies);
+      if (!preflightRenderModel?.ok) {
+        return { ok: false, data: null, error: preflightRenderModel?.error || { code: "system_error", status: 500 } };
+      }
+      const preflightFingerprint = fingerprintRenderModel(preflightRenderModel.data);
+      if (!preflightFingerprint.ok) return failure(preflightFingerprint.code);
+
+      try {
+        return await runInTransaction(async (tx) => {
+          if (!(await ensureEngagementBelongsToTenant(tx, input))) rollbackFailure("not_found");
+
+          const currentRenderModel = await composeRenderModel(input, dependencies.renderModelDependencies || dependencies);
+          if (!currentRenderModel?.ok) rollbackFailure(currentRenderModel?.error?.code || "system_error");
+          const currentFingerprint = fingerprintRenderModel(currentRenderModel.data);
+          if (!currentFingerprint.ok) rollbackFailure(currentFingerprint.code);
+          if (currentFingerprint.fingerprint !== preflightFingerprint.fingerprint) {
+            rollbackFailure("conflict_current_state_changed");
+          }
+
+          const candidateId = crypto.randomUUID();
+          const inserted = await insertCandidate(tx, {
+            candidateId,
+            organizationId: input.organizationId,
+            engagementId: input.engagementId,
+            idempotencyKey: input.idempotencyKey,
+            fingerprint: currentFingerprint.fingerprint,
+            actorContext: input.actorContext,
+            now: input.now,
+          });
+
+          let boardReportingCandidateId;
+          let members;
+          let replayed;
+          if (inserted) {
+            boardReportingCandidateId = inserted.board_reporting_candidate_id;
+            await insertCandidateMembers(tx, {
+              organizationId: input.organizationId,
+              candidateId: boardReportingCandidateId,
+              orderedGeneratedContentDraftIds: currentFingerprint.orderedGeneratedContentDraftIds,
+              now: input.now,
+            });
+            members = currentFingerprint.orderedGeneratedContentDraftIds;
+            replayed = false;
+          } else {
+            const existing = await loadCandidateByIdempotencyKey(tx, input);
+            if (!existing) rollbackFailure("system_error");
+            if (
+              existing.canonical_fingerprint !== currentFingerprint.fingerprint
+              || existing.packet_audience !== BOARD_REPORTING_CANDIDATE_AUDIENCE
+              || existing.fingerprint_contract_version !== BOARD_REPORTING_CANDIDATE_FINGERPRINT_CONTRACT_VERSION
+              || existing.candidate_status !== "created"
+            ) {
+              rollbackFailure("conflict_current_state_changed");
+            }
+            boardReportingCandidateId = existing.board_reporting_candidate_id;
+            const existingMembers = await loadCandidateMembers(tx, {
+              organizationId: input.organizationId,
+              candidateId: boardReportingCandidateId,
+            });
+            members = existingMembers.map((row) => row.generated_content_draft_id);
+            if (members.length !== currentFingerprint.orderedGeneratedContentDraftIds.length
+              || members.some((member, index) => member !== currentFingerprint.orderedGeneratedContentDraftIds[index])) {
+              rollbackFailure("conflict_current_state_changed");
+            }
+            replayed = true;
+          }
+
+          if (!replayed) {
+            const preparedAudit = dependencies.metadataOnlyAudit.prepareMetadataOnlyAudit?.({
+              payload: {
+                attempted_operation: BOARD_REPORTING_CANDIDATE_CREATED_OPERATION,
+                actor_type: "human",
+                object_type: "board_reporting_candidate",
+                contract: BOARD_REPORTING_CANDIDATE_AUDIT_CONTRACT,
+                board_reporting_candidate_id: boardReportingCandidateId,
+                engagement_id: input.engagementId,
+                canonical_fingerprint: currentFingerprint.fingerprint,
+                member_count: members.length,
+              },
+              db: tx,
+            });
+            if (!preparedAudit || preparedAudit.ok !== true || typeof preparedAudit.publish !== "function") {
+              rollbackFailure("system_error");
+            }
+            await preparedAudit.publish();
+          }
+
+          return success({
+            boardReportingCandidateId,
+            organizationId: input.organizationId,
+            engagementId: input.engagementId,
+            packetAudience: BOARD_REPORTING_CANDIDATE_AUDIENCE,
+            fingerprintContractVersion: BOARD_REPORTING_CANDIDATE_FINGERPRINT_CONTRACT_VERSION,
+            canonicalFingerprint: currentFingerprint.fingerprint,
+            memberGeneratedContentDraftIds: members,
+            replayed,
+          });
+        });
+      } catch (error) {
+        if (error instanceof BoardReportingCandidateRollbackResultError) return error.result;
+        if (error?.code === "23505") return failure("conflict_current_state_changed");
+        if (error?.code === "23503" || error?.code === "22P02" || error?.code === "23514") return failure("validation_blocker");
+        return failure("system_error");
+      }
+    },
+
+    async readBoardReportingCandidate(input) {
+      if (!isReadBoardReportingCandidateInput(input)) return failure("validation_blocker");
+      try {
+        return await runInTransaction(async (tx) => {
+          await tx.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY");
+          const candidate = await loadCandidateForRead(tx, input);
+          if (!candidate) return failure("not_found");
+          const members = await loadCandidateMembers(tx, {
+            organizationId: input.organizationId,
+            candidateId: input.boardReportingCandidateId,
+          });
+          return success({
+            boardReportingCandidateId: candidate.board_reporting_candidate_id,
+            organizationId: candidate.organization_id,
+            engagementId: candidate.engagement_id,
+            packetAudience: candidate.packet_audience,
+            idempotencyKey: candidate.idempotency_key,
+            fingerprintContractVersion: candidate.fingerprint_contract_version,
+            canonicalFingerprint: candidate.canonical_fingerprint,
+            candidateStatus: candidate.candidate_status,
+            createdBy: candidate.created_by,
+            createdByType: candidate.created_by_type,
+            createdAt: candidate.created_at instanceof Date ? candidate.created_at.toISOString() : new Date(candidate.created_at).toISOString(),
+            members: members.map((member) => ({
+              boardReportingCandidateMemberId: member.board_reporting_candidate_member_id,
+              generatedContentDraftId: member.generated_content_draft_id,
+              ordinal: member.ordinal,
+              createdAt: member.created_at instanceof Date ? member.created_at.toISOString() : new Date(member.created_at).toISOString(),
+            })),
+          });
+        });
+      } catch (error) {
+        if (error instanceof BoardReportingCandidateRollbackResultError) return error.result;
+        if (error?.code === "22P02") return failure("validation_blocker");
+        return failure("system_error");
+      }
+    },
+  });
+}
+
+export const __boardReportingCandidateRepositoryTestables = Object.freeze({
+  isCreateBoardReportingCandidateInput,
+  isReadBoardReportingCandidateInput,
+  fingerprintRenderModel,
+});
