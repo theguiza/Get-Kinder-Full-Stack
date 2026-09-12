@@ -67,6 +67,9 @@ const REQUEST_EXPORT_REVIEW_REQUEST_KEYS = new Set([
 const CREATE_EXPORT_CANDIDATE_REQUEST_KEYS = new Set([]);
 const CREATE_GRANT_RESPONSE_PACKET_EXPORT_CANDIDATE_REQUEST_KEYS = new Set([]);
 const REQUEST_BOARD_REPORTING_CANDIDATE_REVIEW_REQUEST_KEYS = new Set([]);
+const START_BOARD_REPORTING_CANDIDATE_REVIEW_REQUEST_KEYS = new Set([
+  "expected_updated_at",
+]);
 const REQUEST_GRANT_RESPONSE_PACKET_EXPORT_REVIEW_REQUEST_KEYS = new Set([]);
 const START_GRANT_RESPONSE_PACKET_EXPORT_REVIEW_REQUEST_KEYS = new Set([
   "expected_updated_at",
@@ -678,6 +681,41 @@ export function validateRequestBoardReportingCandidateReviewRequest(payload) {
   if (keys.some((key) => !REQUEST_BOARD_REPORTING_CANDIDATE_REVIEW_REQUEST_KEYS.has(key))) {
     return { ok: false, blockers: [requestBlocker("unknown_field", "body")] };
   }
+  return { ok: true, blockers: [] };
+}
+
+// BR-03B: organizationId/engagementId/boardReportingCandidateId/
+// reviewQueueItemId all come from the route path; the browser sends back
+// only the exact expected_updated_at it last observed on the queue item -
+// the same optimistic CAS contract validateStartExportReviewRequest already
+// enforces for export_review. No membership, fingerprint, member snapshot,
+// release authority, eligibility, manifest, or delivery field is accepted.
+export function validateStartBoardReportingCandidateReviewRequest(payload) {
+  if (!isPlainObject(payload)) {
+    return { ok: false, blockers: [requestBlocker("request_body_must_be_object", "body")] };
+  }
+
+  const keys = Object.keys(payload);
+  for (const key of keys) {
+    if (!START_BOARD_REPORTING_CANDIDATE_REVIEW_REQUEST_KEYS.has(key)) {
+      return { ok: false, blockers: [requestBlocker("unknown_field", `body.${key}`)] };
+    }
+    const value = payload[key];
+    if (value === null) return { ok: false, blockers: [requestBlocker("null_field_not_allowed", `body.${key}`)] };
+    if (Array.isArray(value)) return { ok: false, blockers: [requestBlocker("array_field_not_allowlisted", `body.${key}`)] };
+    if (isPlainObject(value)) return { ok: false, blockers: [requestBlocker("nested_object_not_allowed", `body.${key}`)] };
+    if (typeof value !== "string") return { ok: false, blockers: [requestBlocker("invalid_string_field", `body.${key}`)] };
+    if (!canonicalIsoTimestamp(value)) {
+      return { ok: false, blockers: [requestBlocker("invalid_expected_updated_at", `body.${key}`)] };
+    }
+  }
+
+  for (const key of START_BOARD_REPORTING_CANDIDATE_REVIEW_REQUEST_KEYS) {
+    if (!Object.hasOwn(payload, key)) {
+      return { ok: false, blockers: [requestBlocker("required_field_missing", `body.${key}`)] };
+    }
+  }
+
   return { ok: true, blockers: [] };
 }
 

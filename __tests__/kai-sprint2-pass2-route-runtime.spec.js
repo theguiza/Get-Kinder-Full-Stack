@@ -149,6 +149,10 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // MVP UAT final completion: authoritative intake-context engagement read
     // (additive; every prior entry preserved verbatim).
     "/admin/organizations/:organizationId/engagements",
+    // BR-03B: Board review START surface - transitions an existing BR-03A
+    // REQUEST row to START only (additive; every prior entry preserved
+    // verbatim).
+    "/admin/organizations/:organizationId/engagements/:engagementId/board-reporting/candidates/:boardReportingCandidateId/review-queue/:reviewQueueItemId/start",
     // BR-03A: request-review-on-an-immutable-Board-candidate surface
     // (additive; every prior entry preserved verbatim).
     "/admin/organizations/:organizationId/engagements/:engagementId/board-reporting/candidates/:boardReportingCandidateId/review-request",

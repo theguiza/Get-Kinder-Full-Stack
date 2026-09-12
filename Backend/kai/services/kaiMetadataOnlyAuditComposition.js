@@ -1831,6 +1831,22 @@ export function createProductionMetadataOnlyAuditForBoardReportingCandidate({
     return typeof value === "string" && REVIEW_STATUS_PATTERN.test(value) ? value : null;
   }
 
+  // BR-03B: the START operation's optimistic-concurrency input
+  // (expected_updated_at) is carried into the audit metadata - never any
+  // other Board candidate/member/content field - solely so a later replay
+  // can be distinguished from a genuinely stale concurrency token (mirroring
+  // the same expected_updated_at replay-matching discipline P3-09 already
+  // established for export_review). It is a canonical UTC timestamp only;
+  // anything else is dropped rather than persisted.
+  function safeCanonicalUtcTimestamp(value) {
+    if (typeof value !== "string") return null;
+    try {
+      return new Date(value).toISOString() === value ? value : null;
+    } catch {
+      return null;
+    }
+  }
+
   return Object.freeze({
     prepareMetadataOnlyAudit({ payload, db } = {}) {
       if (!isPlainObject(payload)) return { ok: false };
@@ -1867,13 +1883,19 @@ export function createProductionMetadataOnlyAuditForBoardReportingCandidate({
         resulting_queue_status: safeReviewStatus(payload.resulting_queue_status),
         previous_review_status: safeReviewStatus(payload.previous_review_status),
         resulting_review_status: safeReviewStatus(payload.resulting_review_status),
+        expected_updated_at: safeCanonicalUtcTimestamp(payload.expected_updated_at),
         actor_type: actorContext?.actorType || "human",
         actor_user_id: actorContext?.actorUserId || null,
         request_id: actorContext?.requestId || null,
-        route: typeof payload.attempted_operation === "string"
-          && payload.attempted_operation === "board_reporting_candidate_review_requested"
-          ? "br_03a_board_reporting_candidate_review_request"
-          : "br_02_board_reporting_candidate",
+        route: (() => {
+          if (payload.attempted_operation === "board_reporting_candidate_review_requested") {
+            return "br_03a_board_reporting_candidate_review_request";
+          }
+          if (payload.attempted_operation === "board_reporting_candidate_review_started") {
+            return "br_03b_board_reporting_candidate_review_start";
+          }
+          return "br_02_board_reporting_candidate";
+        })(),
         created_at: typeof now === "string" ? now : new Date().toISOString(),
         metadata_only: true,
         contains_raw_file_content: false,

@@ -37,6 +37,7 @@ import {
   validateReviewQueueQuery,
   validateReviewQueueStatusRequest,
   validateSensitivityProfileDecisionRequest,
+  validateStartBoardReportingCandidateReviewRequest,
   validateStartExportReviewRequest,
   validateStartGrantResponsePacketExportReviewRequest,
 } from "../validators/kaiSprint2RequestSchemas.js";
@@ -3071,7 +3072,10 @@ router.get(
 );
 
 async function getBoardReportingCandidateService() {
-  if (intakeServiceOverride?.requestBoardReportingCandidateReview) return intakeServiceOverride;
+  if (
+    intakeServiceOverride?.requestBoardReportingCandidateReview
+    || intakeServiceOverride?.startBoardReportingCandidateReview
+  ) return intakeServiceOverride;
   boardReportingCandidateServicePromise ||= import("../services/kaiBoardReportingCandidateService.js");
   return boardReportingCandidateServicePromise;
 }
@@ -3139,6 +3143,78 @@ router.post(
         }),
       });
     }, 201);
+  },
+);
+
+function boardReportingCandidateReviewQueueIdentifier(req = {}) {
+  const root = boardReportingCandidateReviewIdentifier(req);
+  if (!root) return null;
+  const reviewQueueItemId = typeof req.params?.reviewQueueItemId === "string" ? req.params.reviewQueueItemId : "";
+  if (
+    !KAI_SPRINT2_P0_PATTERNS.uuid.test(reviewQueueItemId)
+    || reviewQueueItemId !== reviewQueueItemId.toLowerCase()
+  ) return null;
+  return { ...root, reviewQueueItemId };
+}
+
+function validateStartBoardReportingCandidateReviewRequestOrSend(req, res) {
+  if (!metadataContentTypeIsSupported(req)) {
+    sendKaiError(res, "unsupported_media_type");
+    return null;
+  }
+  const identifiers = boardReportingCandidateReviewQueueIdentifier(req);
+  if (!identifiers) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker(
+        "invalid_uuid_field",
+        "organization_id_engagement_id_board_reporting_candidate_id_or_review_queue_item_id",
+      )],
+    });
+    return null;
+  }
+  const result = validateStartBoardReportingCandidateReviewRequest(req.body);
+  if (!result.ok) {
+    sendKaiError(res, "validation_blocker", { blockers: result.blockers });
+    return null;
+  }
+  return identifiers;
+}
+
+// BR-03B: Board review START. Delegates the entire lifecycle transition to
+// kaiBoardReportingCandidateService/postgresBoardReportingCandidateRepository
+// - no SQL, no direct kai.* access, no raw KAI DB-helper access here. Mutates
+// only the existing review_queue_items row's queue_status/review_status; it
+// never touches the immutable board_reporting_candidates/
+// board_reporting_candidate_members rows, and creates no release authority,
+// final eligibility, manifest, or delivery state.
+router.post(
+  "/admin/organizations/:organizationId/engagements/:engagementId/board-reporting/candidates/:boardReportingCandidateId/review-queue/:reviewQueueItemId/start",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    const identifiers = validateStartBoardReportingCandidateReviewRequestOrSend(req, res);
+    if (!identifiers) return;
+    const payload = requestPayload(req);
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    return invokeService(res, async () => {
+      const service = await getBoardReportingCandidateService();
+      return service.startBoardReportingCandidateReview({
+        organizationId: identifiers.organizationId,
+        engagementId: identifiers.engagementId,
+        boardReportingCandidateId: identifiers.boardReportingCandidateId,
+        reviewQueueItemId: identifiers.reviewQueueItemId,
+        expectedUpdatedAt: payload.expected_updated_at,
+        actorContext,
+        now,
+      }, {
+        metadataOnlyAudit: createProductionMetadataOnlyAuditForBoardReportingCandidate({
+          organizationId: identifiers.organizationId,
+          engagementId: identifiers.engagementId,
+          actorContext,
+          now,
+        }),
+      });
+    });
   },
 );
 
@@ -4399,6 +4475,8 @@ export const __testables = {
   grantResponsePacketExportManifestIdentifiers,
   boardReportingCandidateReviewIdentifier,
   validateRequestBoardReportingCandidateReviewRequestOrSend,
+  boardReportingCandidateReviewQueueIdentifier,
+  validateStartBoardReportingCandidateReviewRequestOrSend,
   grantResponsePacketIdentifier,
   validateCreateGrantResponsePacketExportCandidateRequestOrSend,
   grantResponsePacketExportCandidateReviewIdentifier,
