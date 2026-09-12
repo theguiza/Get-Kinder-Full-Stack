@@ -88,6 +88,10 @@ function isReadBoardReportingCandidateInput(input) {
     && UUID_PATTERN.test(input.boardReportingCandidateId);
 }
 
+function isReadBoardReportingCandidateReviewStateByIdInput(input) {
+  return isReadBoardReportingCandidateInput(input);
+}
+
 function isRequestBoardReportingCandidateReviewInput(input) {
   return hasExactKeys(input, new Set([
     "organizationId",
@@ -631,6 +635,46 @@ export function createPostgresBoardReportingCandidateRepository({ runInTransacti
       }
     },
 
+    async readBoardReportingCandidateReviewStateById(input) {
+      if (!isReadBoardReportingCandidateReviewStateByIdInput(input)) return failure("validation_blocker");
+      try {
+        return await runInTransaction(async (tx) => {
+          await tx.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY");
+          const candidate = await loadBoardReportingCandidateForReview(tx, input);
+          if (!candidate) return failure("not_found");
+
+          const queueRow = await loadBoardReportingCandidateReviewQueueRow(tx, {
+            organizationId: input.organizationId,
+            boardReportingCandidateId: input.boardReportingCandidateId,
+          });
+          if (queueRow && !isValidBoardReportingCandidateReviewQueueRowForProfiles(queueRow, {
+            organizationId: input.organizationId,
+            engagementId: input.engagementId,
+            boardReportingCandidateId: input.boardReportingCandidateId,
+            allowedProfiles: BOARD_REPORTING_CANDIDATE_REVIEW_LIFECYCLE_PROFILES,
+          })) {
+            rollbackFailure("conflict_current_state_changed");
+          }
+
+          return success({
+            organizationId: input.organizationId,
+            engagementId: input.engagementId,
+            boardReportingCandidateId: input.boardReportingCandidateId,
+            reviewQueueItemId: queueRow?.review_queue_item_id ?? null,
+            queueStatus: queueRow?.queue_status ?? null,
+            reviewStatus: queueRow?.review_status ?? null,
+            reviewUpdatedAt: asCanonicalUtcTimestamp(queueRow?.updated_at),
+          });
+        });
+      } catch (error) {
+        if (error instanceof BoardReportingCandidateRollbackResultError) return error.result;
+        if (error?.code === "23503" || error?.code === "22P02" || error?.code === "23514") {
+          return failure("validation_blocker");
+        }
+        return failure("system_error");
+      }
+    },
+
     async requestBoardReportingCandidateReview(input, dependencies = {}) {
       if (!isRequestBoardReportingCandidateReviewInput(input)) return failure("validation_blocker");
       if (!dependencies.metadataOnlyAudit) return failure("validation_blocker");
@@ -989,6 +1033,7 @@ export function createPostgresBoardReportingCandidateRepository({ runInTransacti
 export const __boardReportingCandidateRepositoryTestables = Object.freeze({
   isCreateBoardReportingCandidateInput,
   isReadBoardReportingCandidateInput,
+  isReadBoardReportingCandidateReviewStateByIdInput,
   isRequestBoardReportingCandidateReviewInput,
   isStartBoardReportingCandidateReviewInput,
   isCompleteBoardReportingCandidateReviewInput,

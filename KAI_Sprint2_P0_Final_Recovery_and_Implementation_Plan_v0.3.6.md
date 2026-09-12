@@ -22216,6 +22216,111 @@ mutation, deployment, push, cloud/config/feature-flag change, credential/
 secret access, real-client-data handling, destructive action, or
 `00_KAI_CURRENT_STATE.md` update was performed.
 
+## Board Reporting Final Eligibility Current-State Gate
+
+**Date:** 2026-09-12
+
+**Owner authorization (bounded, local-only):** implement the next Board
+Reporting boundary as a read-only current-state gate over an exact immutable
+Board candidate, exact resolved Board review, effective human release
+authority, and freshly recomposed current Board packet state. No manifest,
+delivery record, final Board Summary, schema/migration, route, frontend,
+production/shared-database, cloud/config/feature-flag, credential, or
+real-client-data work was performed. The package is intentionally not named
+`BR-05`; no such package name was established by this ExecPlan.
+
+**Starting state (USER_CONFIRMED / TOOL_VERIFIED):** branch `main`, HEAD
+`09f89c2ad50e2e6e228c8d7ae29396bb6993a038`, clean working tree.
+
+**Precedent files inspected (TOOL_VERIFIED):** root `AGENTS.md`; this living
+ExecPlan; Board packet/read/render/fingerprint services
+(`kaiBoardReportingPacketService.js`,
+`kaiBoardReportingPacketRenderModelService.js`,
+`kaiBoardReportingPacketFingerprintService.js`); BR-02 candidate contract,
+service, Postgres repository, migration/verifier artifacts, and boundary
+tests; BR-03A/BR-03B review request/start/complete contract, repository
+helpers, route/service tests, migration/verifier artifacts, and focused
+tests; BR-04 Board human authority contract/repository/service/route tests
+and migration/verifier artifacts; P3-18 final eligibility service and
+tests; Grant Response Packet final eligibility service and tests.
+
+**Reuse classification (TOOL_VERIFIED):**
+`BOARD_SPECIFIC_COMPOSER_REQUIRED`. P3-18 and Grant Response Packet final
+eligibility patterns are useful precedents, but their candidate/authority
+bindings are hard-bound to `kai.export_candidates` and
+`kai.grant_response_packet_export_candidates` respectively. The Board gate
+must compose Board-specific candidate, review, authority, and fresh Board
+packet state. Generic structured result construction and existing Board
+fingerprint/render/current packet primitives were reused.
+
+**Implementation (TOOL_VERIFIED):** added
+`Backend/kai/services/kaiBoardReportingFinalEligibilityGateService.js`
+exporting `evaluateBoardReportingFinalEligibility`. Exact input contract:
+`{ organizationId, engagementId, boardReportingCandidateId, actorContext }`.
+The service accepts no members, member count, fingerprint, review state,
+authority state, eligibility state, manifest identity, delivery identity, or
+generated Board content from a caller.
+
+**Gate behavior (TOOL_VERIFIED):** the service reads the exact BR-02
+candidate by organization + engagement + candidate id; validates the
+candidate remains in the internal BR-02 immutable contract; reads the exact
+candidate's `board_reporting_candidate_review` state through the Board
+candidate repository; requires `resolved / resolved`; reads BR-04 current
+authority through
+`postgresBoardReportingCandidateHumanAuthorityDecisionRepository.evaluateEffectiveness`
+for `export_authority_granted`; recomposes the fresh current Board render
+model through the BR-01 `composeBoardReportingRenderModel` path; computes the
+fresh canonical fingerprint through the BR-01 Board fingerprint service; and
+compares that fresh fingerprint to the immutable candidate fingerprint.
+Absent authority and revoke-head authority both return not eligible. A fresh
+fingerprint mismatch returns stale/not eligible and does not mutate the
+candidate; changed current Board state requires a new candidate through the
+existing candidate path.
+
+**Result DTO (TOOL_VERIFIED):** safe scalar metadata only:
+`boardReportingCandidateId`, `organizationId`, `engagementId`,
+`candidateGate`, `reviewGate`, `authorityGate`, `currentnessGate`,
+`finalEligibility`, `failedGates`, `blockers`, `candidateFingerprint`,
+`freshFingerprint`, and `validatorResult`. No Board content, evidence
+payloads, candidate-member payloads, manifest, delivery, `approved`,
+`board_approved`, or `board_finalized` vocabulary is returned.
+
+**Repository helper (TOOL_VERIFIED):** added the read-only
+`readBoardReportingCandidateReviewStateById` helper to
+`Backend/kai/dictionary/postgresBoardReportingCandidateRepository.js`. It
+uses repeatable-read read-only transaction mode, selects the exact candidate,
+selects the exact candidate-bound review queue row if present, validates any
+row against the existing BR-03A/BR-03B lifecycle profiles, and returns only
+safe queue scalar state. It performs no INSERT/UPDATE/DELETE and creates no
+candidate, member, review, authority, manifest, or delivery state.
+
+**Verification (TOOL_VERIFIED):** with `DATABASE_URL` set to the required
+non-listening loopback sentinel for every Node command:
+`node --test __tests__/kai-board-reporting-final-eligibility-boundary.spec.js`
+passed 14/14, proving valid candidate + resolved review + grant + matching
+fresh fingerprint is eligible; no/open/in-progress review is not eligible;
+absent authority is not eligible; revoke head is not eligible; wrong org,
+wrong engagement, and review bound to another candidate fail closed; fresh
+fingerprint mismatch returns stale/not eligible; invalid candidate contract
+blocks; exact input rejects client-supplied state; and evaluation calls no
+write method.
+
+**Affected regressions (TOOL_VERIFIED):** the Board packet, candidate,
+review-request, review-start, review-complete, BR-04 authority, P3-18 final
+gate, P3-18 authority-state proof, and Grant Response Packet final
+eligibility boundary suites passed except one sandbox-only local-listener
+failure in the BR-04 route test (`listen EPERM 127.0.0.1`). The same BR-04
+route-containing suite was rerun outside the sandbox with the same sentinel
+and passed 21/21. No DB-backed final-eligibility proof or full repository
+suite was run.
+
+**Prohibited actions:** no schema/migration/table, approval row, eligibility
+row, new candidate, manifest, delivery record, final Board Summary,
+production/shared database access, deployment, push, cloud/config/
+feature-flag mutation, credential/secret access, real-client-data handling,
+destructive Git operation, or `00_KAI_CURRENT_STATE.md` update was
+performed.
+
 
 ## Phase-14 (Grant Response Packet Track) - P14-06D Authoritative Grant
 ## Response Packet Export-Candidate / Export-Review State Read
