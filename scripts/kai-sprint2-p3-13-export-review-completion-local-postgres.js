@@ -122,6 +122,21 @@ try {
   psqlFile("migrations/kai_sprint2_p3_05_export_review_request.sql");
   psqlFile("migrations/kai_sprint2_p3_09_export_review_start.sql");
   psqlFile("migrations/kai_sprint2_p3_13_export_review_completion.sql");
+  // getGeneratedDraftExportReviewPacket's durable read-recovery path (P3-20
+  // binding) reads kai.export_manifests via
+  // loadExportManifestIdentityForReviewQueueItemInTransaction on every call,
+  // even when no manifest row exists yet, so the table must exist - same
+  // P3-16/P3-17/P3-19 prerequisite chain the P3-19 runner itself applies, in
+  // the same order.
+  psqlFile("migrations/kai_sprint2_p3_16_export_candidate_foundation.sql");
+  psqlFile("migrations/kai_sprint2_p3_17_human_authority_decision_ledger.sql");
+  psqlFile("migrations/kai_sprint2_p3_17_authority_audit_gate_a_operation_repair.sql");
+  psqlFile("migrations/kai_sprint2_p3_19_export_manifest_foundation.sql");
+  // loadExportManifestIdentityForReviewQueueItemInTransaction queries
+  // kai.export_manifests by export_review_queue_item_id, a column the P3-19
+  // migration does not itself add - it is added by the P3-20 binding
+  // migration, so that must run too.
+  psqlFile("migrations/kai_sprint2_p3_20_export_manifest_review_binding.sql");
   psqlFile("scripts/kai-sprint2-p3-04-generated-content-review-completion-verifier.sql");
   // The P3-05 and P3-09 verifiers assert their own contract check by name;
   // P3-13 intentionally replaces the P3-09 constraint (see its verifier's

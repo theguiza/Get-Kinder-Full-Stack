@@ -155,12 +155,20 @@ async function runP305IntegrationSuite() {
         source: { source_id: "10000000-0000-4000-8000-000000000033", source_code: null },
         source_version: { source_version_id: "10000000-0000-4000-8000-000000000034", is_current: true },
         claim_review: { review_queue_item_id: "10000000-0000-4000-8000-000000000035", queue_status: "open", review_status: eligible ? "approved" : "needs_gk_review" },
+        evidence_review_decision: eligible ? { decision_id: "10000000-0000-4000-8000-000000000037", decision_outcome: "accepted" } : null,
+        claim_review_decision: eligible
+          ? { decision_id: "10000000-0000-4000-8000-000000000038", decision_outcome: "accepted", approved_audiences: ["internal", "funder"] }
+          : null,
         candidate: { intake_source_candidate_id: "90000000-0000-4000-8000-000000000003" },
         promotion_decision: { intake_promotion_decision_id: "10000000-0000-4000-8000-000000000036" },
         dimensions: {},
         gap_items: [],
         client_followup_workflows: [],
         potential_conflict_groups: [],
+        graph_relationships: [
+          { relationship_type: "claim_supported_by_evidence", from_object_type: "claim", from_object_id: evalInput.claimId, to_object_type: "evidence_item", to_object_id: evidenceItemId },
+        ],
+        graph_trace_completeness: { complete: true, missing_relationship_types: [], invalid_relationship_count: 0 },
         requestedAudience: evalInput.requestedAudience,
         eligible,
         blockerCodes: eligible ? [] : ["claim_review_unresolved"],

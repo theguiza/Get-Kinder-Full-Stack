@@ -127,6 +127,27 @@ try {
   // export_review_p3_05_single_state_contract_removed check), so it is not
   // re-run here once the P3-09 migration has been applied.
   psqlFile("scripts/kai-sprint2-p3-09-export-review-start-verifier.sql");
+  // getGeneratedDraftExportReviewPacket's durable read-recovery path (P3-20
+  // binding) reads kai.export_manifests via
+  // loadExportManifestIdentityForReviewQueueItemInTransaction on every call,
+  // even when no manifest row exists yet, so the table must exist. P3-16
+  // itself hard-requires the P3-13 review_queue_items export_review contract
+  // check to already be in place (it will not accept the P3-09 one alone),
+  // so P3-13's migration must run here too, after the P3-09 verifier has
+  // already asserted the P3-09 constraint by name (P3-13 replaces it) - the
+  // same P3-05/P3-09/P3-13/P3-16/P3-17/P3-19 order the P3-19 runner itself
+  // applies. This adds schema forward-compatibility only; it does not change
+  // any P3-09 lifecycle state, contract, or test in this file.
+  psqlFile("migrations/kai_sprint2_p3_13_export_review_completion.sql");
+  psqlFile("migrations/kai_sprint2_p3_16_export_candidate_foundation.sql");
+  psqlFile("migrations/kai_sprint2_p3_17_human_authority_decision_ledger.sql");
+  psqlFile("migrations/kai_sprint2_p3_17_authority_audit_gate_a_operation_repair.sql");
+  psqlFile("migrations/kai_sprint2_p3_19_export_manifest_foundation.sql");
+  // loadExportManifestIdentityForReviewQueueItemInTransaction queries
+  // kai.export_manifests by export_review_queue_item_id, a column the P3-19
+  // migration does not itself add - it is added by the P3-20 binding
+  // migration, so that must run too.
+  psqlFile("migrations/kai_sprint2_p3_20_export_manifest_review_binding.sql");
   psqlFile("scripts/kai-sprint2-gate-a-smoke-seed.sql");
   psqlFile("scripts/kai-sprint2-p1-04-data-dictionary-quality-smoke-seed.sql");
   psqlFile("scripts/kai-sprint2-p1-05-intake-sensitivity-profile-smoke-seed.sql");
