@@ -22321,6 +22321,53 @@ feature-flag mutation, credential/secret access, real-client-data handling,
 destructive Git operation, or `00_KAI_CURRENT_STATE.md` update was
 performed.
 
+## Board Reporting Final Eligibility Real-DB Stale/Negative Proof Extension
+
+**Date:** 2026-09-12
+
+**Owner authorization (bounded, local-only):** extend only the existing
+runner-owned real PostgreSQL Board final-eligibility proof to cover stale
+candidate currentness failure, required negative/fail-closed cases, and
+read-only immutability around those evaluations. No manifest, delivery,
+final Board Summary, schema/migration, route, production/shared database,
+cloud/config/feature-flag, credential, real-client-data, push, deployment, or
+repository closure-suite work was performed.
+
+**Starting state (USER_CONFIRMED / TOOL_VERIFIED):** branch `main`, HEAD
+`4b447bc8fd664d41006c3d767f85f96e69f76784`, clean working tree.
+
+**Implementation (TOOL_VERIFIED):** reused
+`scripts/kai-board-reporting-final-eligibility-real-db-local-postgres.js`
+and the existing integration spec. The runner and migration/bootstrap chain
+were unchanged. The spec now keeps the already-proven GRANT / REVOKE /
+re-GRANT lifecycle, then changes one upstream current Board packet
+composition input (`generated_content_drafts.content_type` and matching
+`generation_runs.content_type` for the first synthetic current member from
+`evidence_summary` to `impact_narrative`) while evaluating the original
+immutable candidate. The proof verifies the fresh fingerprint matched the
+candidate before mutation, differs after mutation, and that candidate,
+resolved review, and effective authority remain passing while currentness is
+stale and final eligibility is false.
+
+**Negative/read-only coverage (TOOL_VERIFIED):** the same real service path
+now proves missing candidate, wrong organization, wrong engagement, no Board
+review, REQUEST-only review, START/in-progress review, malformed review
+binding, no human authority decision, and revoke-head authority fail closed
+or return the existing non-eligible contract result. Cross-tenant actor
+authorization is recorded as `UPSTREAM_BOUNDARY` for this service boundary.
+Snapshots prove gate evaluation does not mutate the original candidate,
+candidate fingerprint, candidate members, member ordinals, resolved review,
+authority ledger, candidate count, Board review count, manifest count, or
+delivery tables. Repository fact recorded: no Board manifest persistence or
+delivery persistence table exists in this proof chain.
+
+**Verification (TOOL_VERIFIED):** with `DATABASE_URL` set to
+`postgres://127.0.0.1:9/kai_sentinel`, the first in-sandbox attempt failed
+with `listen EPERM 127.0.0.1` before the runner could bind its loopback port
+(environment-only). The same established runner was rerun outside the
+sandbox and passed: `TOOL_VERIFIED Board final eligibility real-DB proof
+passed.` No full repository closure suite was run.
+
 
 ## Phase-14 (Grant Response Packet Track) - P14-06D Authoritative Grant
 ## Response Packet Export-Candidate / Export-Review State Read
