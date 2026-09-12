@@ -115,6 +115,15 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // KAI Web Intake organization bootstrap: read-only, additive, and every
     // prior entry preserved verbatim.
     "/admin/organizations",
+    // Governed Board Summary FINAL Markdown delivery, authorized solely by
+    // the route's own exact boardReportingCandidateExportManifestId - never
+    // by organizationId+engagementId alone, a candidate id without its
+    // manifest, or a latest/newest/preferred selection. Mirrors the existing
+    // P14-08C grant-response-packet export-manifest markdown route. Creates
+    // no manifest, mutates no authority, changes no review state, reruns no
+    // final eligibility, creates no candidate (additive; every prior entry
+    // preserved verbatim).
+    "/admin/organizations/:organizationId/board-reporting/export-manifests/:boardReportingCandidateExportManifestId/markdown",
     // Impact Evidence Library claim-navigation index: read-only, additive, and
     // every prior entry preserved verbatim.
     "/admin/organizations/:organizationId/claim-library/candidates",

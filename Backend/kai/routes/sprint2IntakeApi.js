@@ -95,6 +95,7 @@ let grantResponsePacketExportManifestMarkdownServicePromise = null;
 let boardReportingCandidateServicePromise = null;
 let boardReportingCandidateHumanFinalReleaseAuthorityServicePromise = null;
 let boardReportingCandidateExportManifestServicePromise = null;
+let boardReportingCandidateExportManifestMarkdownServicePromise = null;
 let evidenceLineageServicePromise = null;
 let evidenceCoverageAssessmentServicePromise = null;
 let claimProposalServicePromise = null;
@@ -258,6 +259,8 @@ const EXPORT_MANIFEST_MARKDOWN_CONTENT_TYPE = "text/markdown; charset=utf-8";
 const GRANT_RESPONSE_PACKET_MARKDOWN_ATTACHMENT_FILENAME = "kai-grant-response-packet.md";
 const GRANT_RESPONSE_PACKET_EXPORT_MANIFEST_MARKDOWN_ATTACHMENT_FILENAME =
   "kai-grant-response-packet-export-manifest.md";
+const BOARD_REPORTING_CANDIDATE_EXPORT_MANIFEST_MARKDOWN_ATTACHMENT_FILENAME =
+  "kai-board-summary-export-manifest.md";
 const EXPORT_MANIFEST_CSV_ATTACHMENT_FILENAME = "kai-export-manifest-evidence-appendix.csv";
 const EXPORT_MANIFEST_CSV_CONTENT_TYPE = "text/csv; charset=utf-8";
 const EXPORT_MANIFEST_PDF_ATTACHMENT_FILENAME = "kai-export-manifest.pdf";
@@ -298,6 +301,20 @@ function sendGrantResponsePacketExportManifestMarkdownAttachment(res, result) {
   res.setHeader(
     "Content-Disposition",
     `attachment; filename="${GRANT_RESPONSE_PACKET_EXPORT_MANIFEST_MARKDOWN_ATTACHMENT_FILENAME}"`,
+  );
+  return res.send(markdown);
+}
+
+function sendBoardReportingCandidateExportManifestMarkdownAttachment(res, result) {
+  if (!result?.ok) return sendServiceResult(res, result);
+  const markdown = typeof result.data?.markdown === "string" ? result.data.markdown : null;
+  if (markdown == null) return sendKaiError(res, "system_error");
+
+  res.status(200);
+  res.setHeader("Content-Type", EXPORT_MANIFEST_MARKDOWN_CONTENT_TYPE);
+  res.setHeader(
+    "Content-Disposition",
+    `attachment; filename="${BOARD_REPORTING_CANDIDATE_EXPORT_MANIFEST_MARKDOWN_ATTACHMENT_FILENAME}"`,
   );
   return res.send(markdown);
 }
@@ -4673,6 +4690,72 @@ router.get(
   },
 );
 
+async function getBoardReportingCandidateExportManifestMarkdownService() {
+  if (intakeServiceOverride?.serializeBoardReportingCandidateExportManifestToMarkdown) return intakeServiceOverride;
+  boardReportingCandidateExportManifestMarkdownServicePromise ||= import(
+    "../services/kaiBoardReportingCandidateExportManifestMarkdownSerializer.js"
+  );
+  return boardReportingCandidateExportManifestMarkdownServicePromise;
+}
+
+function boardReportingCandidateExportManifestIdentifiers(req = {}) {
+  const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
+  const boardReportingCandidateExportManifestId = typeof req.params?.boardReportingCandidateExportManifestId === "string"
+    ? req.params.boardReportingCandidateExportManifestId
+    : "";
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId) || organizationId !== organizationId.toLowerCase()) return null;
+  if (
+    !KAI_SPRINT2_P0_PATTERNS.uuid.test(boardReportingCandidateExportManifestId)
+    || boardReportingCandidateExportManifestId !== boardReportingCandidateExportManifestId.toLowerCase()
+  ) return null;
+  return { organizationId, boardReportingCandidateExportManifestId };
+}
+
+/**
+ * Governed Board Summary FINAL Markdown delivery, authorized solely by the
+ * route's own exact boardReportingCandidateExportManifestId - never by
+ * organizationId+engagementId alone, a candidate id without its manifest, or
+ * a latest/newest/preferred selection. Mirrors the existing P14-08C
+ * /grant-response-packet/export-manifests/:id/markdown route above. Contains
+ * no SQL and no direct database access - delegates once to
+ * kaiBoardReportingCandidateExportManifestMarkdownSerializer.js, which
+ * itself delegates the manifest-bound render-model reconstruction
+ * (including the Board candidate/currentness fingerprint proof) to the new
+ * postgresBoardReportingCandidateExportManifestRenderModelRepository.js.
+ * Creates no manifest, mutates no authority, changes no review state,
+ * reruns no final eligibility, creates no candidate, and publishes nothing
+ * externally.
+ */
+router.get(
+  "/admin/organizations/:organizationId/board-reporting/export-manifests/:boardReportingCandidateExportManifestId/markdown",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    const identifiers = boardReportingCandidateExportManifestIdentifiers(req);
+    if (!identifiers) {
+      return sendKaiError(res, "validation_blocker", {
+        blockers: [routeValidationBlocker(
+          "invalid_uuid_field",
+          "organization_id_or_board_reporting_candidate_export_manifest_id",
+        )],
+      });
+    }
+    try {
+      const service = await getBoardReportingCandidateExportManifestMarkdownService();
+      return sendBoardReportingCandidateExportManifestMarkdownAttachment(
+        res,
+        await service.serializeBoardReportingCandidateExportManifestToMarkdown({
+          organizationId: identifiers.organizationId,
+          boardReportingCandidateExportManifestId: identifiers.boardReportingCandidateExportManifestId,
+          actorContext: sprint2MappedActorContext(req),
+        }),
+      );
+    } catch (error) {
+      console.error("[kai-sprint2-intake] system_error", error);
+      return sendKaiError(res, "system_error");
+    }
+  },
+);
+
 export default router;
 
 export const __testables = {
@@ -4706,6 +4789,8 @@ export const __testables = {
   sendGrantResponsePacketMarkdownAttachment,
   sendGrantResponsePacketExportManifestMarkdownAttachment,
   grantResponsePacketExportManifestIdentifiers,
+  sendBoardReportingCandidateExportManifestMarkdownAttachment,
+  boardReportingCandidateExportManifestIdentifiers,
   boardReportingCandidateReviewIdentifier,
   validateRequestBoardReportingCandidateReviewRequestOrSend,
   boardReportingCandidateReviewQueueIdentifier,

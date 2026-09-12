@@ -22683,6 +22683,171 @@ runner, the new
 `test:kai-sprint2-board-reporting-candidate-export-manifest-real-db`
 package.json script entry, and this ExecPlan entry.
 
+## Board Reporting - governed final Board Summary delivery bound to an exact
+## export-manifest (first delivery representation)
+
+**Date:** 2026-09-12
+
+**Owner authorization (bounded, local-only):** first governed final Board
+Summary delivery representation, bound to an exact existing
+`boardReportingCandidateExportManifestId`, layered on top of the already-
+closed manifest schema/runtime/real-DB proof (commits `54bcb33`, `a7b4715`,
+`80bd160`). No BR-02/BR-03/BR-04/final-eligibility/manifest-schema/manifest-
+runtime redesign; no frontend UX; one representation only (Markdown).
+
+**Precedent files inspected (TOOL_VERIFIED):** `AGENTS.md`;
+`kaiBoardReportingPacketService.js`,
+`kaiBoardReportingPacketRenderModelService.js`,
+`kaiBoardReportingPacketFingerprintService.js`,
+`postgresBoardReportingCandidateRepository.js`,
+`boardReportingCandidateContract.js`,
+`kaiBoardReportingFinalEligibilityGateService.js`,
+`boardReportingCandidateExportManifestContract.js`,
+`postgresBoardReportingCandidateExportManifestRepository.js`,
+`kaiBoardReportingCandidateExportManifestService.js` (existing Board
+services/repositories); P14-08C
+`postgresGrantResponsePacketExportManifestRenderModelRepository.js` and
+`kaiGrantResponsePacketExportManifestMarkdownSerializer.js` (the exact-
+manifest-bound FINAL Markdown delivery precedent this package mirrors);
+`kaiGrantResponsePacketMarkdownSerializer.js` (Markdown pure-text-generation
+shape); P3-19 `postgresExportManifestRenderModelRepository.js` (the earlier
+member-level manifest-bound-Markdown ancestor); `sprint2IntakeApi.js` route
+conventions (`sprint2ActorContextMiddleware`, `KAI_SPRINT2_P0_PATTERNS`,
+`sendKaiError`/`sendServiceResult`, lazy service import + memoized promise);
+`__tests__/kai-sprint2-pass2-route-runtime.spec.js` (pinned route list) and
+`__tests__/kai-sprint2-api-contract.spec.js` (route-registration regex
+inventory).
+
+**Reuse classification (TOOL_VERIFIED): exact.** No Board Markdown
+serializer existed before this package (confirmed by grep - the Board track
+had only structured render-model/fingerprint services, never a Markdown
+text-generation function), so the pure Markdown text function itself is new
+- but its structure, the manifest-bound render-model-reconstruction +
+currentness-fingerprint-proof repository, and the FINAL delivery service
+gate/allowlist pattern are all a direct, exact mirror of the existing P14-08C
+package, not an invented design. The Board currentness comparison itself
+(recompose the current render model, recompute
+`composeBoardReportingPacketFingerprint`, compare to the candidate's own
+`canonical_fingerprint`) reuses the identical technique already established
+by `kaiBoardReportingFinalEligibilityGateService.js` for the same purpose.
+
+**Implementation (TOOL_VERIFIED):**
+- New `Backend/kai/services/kaiBoardReportingMarkdownSerializer.js` - the
+  first Board Markdown pure text-generation function
+  (`serializeBoardReportingRenderModelToMarkdown`), structurally mirroring
+  `kaiGrantResponsePacketMarkdownSerializer.js` (inline-code scalar
+  formatting, additive `markdownContractVersion`/`deliveryClass` override
+  options, one heading per member/block), populated from the Board render
+  model's own fields. Default label is `PREVIEW_READ_ONLY` /
+  `kai-sprint2-board-reporting-markdown-preview-v1` when no override is
+  supplied - no existing caller exists yet to regress.
+- New
+  `Backend/kai/dictionary/postgresBoardReportingCandidateExportManifestRenderModelRepository.js`
+  - loads the exact `kai.board_reporting_candidate_export_manifests` row and
+  its exact bound `kai.board_reporting_candidates` row inside one read-only
+  transaction (`REPEATABLE READ READ ONLY`), then - outside the transaction
+  - recomposes the current render model via the existing
+  `composeBoardReportingRenderModel` and recomputes its fingerprint via the
+  existing `composeBoardReportingPacketFingerprint`, comparing it against
+  the candidate row's own stored `canonical_fingerprint`. Equal ->
+  `success`; not found (manifest or its bound candidate, including cross-
+  tenant or a manifest naming a different candidate) -> `not_found`;
+  unequal -> `conflict_current_state_changed`; any propagated render-model
+  failure (e.g. `feature_disabled`/`authorization_denied`) is returned
+  verbatim, never re-coded.
+- New
+  `Backend/kai/services/kaiBoardReportingCandidateExportManifestMarkdownSerializer.js`
+  - exact-keys input `{organizationId, boardReportingCandidateExportManifestId,
+  actorContext}` only; feature-flag gate (`isKaiSprint2Enabled`); mapped-
+  human-actor gate; reuses the existing
+  `CREATE_BOARD_REPORTING_CANDIDATE_EXPORT_MANIFEST_ALLOWED_ROLES`/`_OPERATION`
+  gk_admin-only gate already established for this manifest track (no new
+  gate); tenant-boundary check; delegates the render-model reconstruction to
+  the new repository; produces an explicit 5-field allowlist projection
+  (`boardReportingCandidateExportManifestId`, `boardReportingCandidateId`,
+  `markdownContractVersion`, `deliveryClass`, `markdown`) labeled
+  `kai-sprint2-board-reporting-markdown-final-v1` /
+  `FINAL_MANIFEST_BOUND` - never `board approved`, `externally approved`,
+  `published`, or `public ready`.
+
+**Runtime contract / flow (TOOL_VERIFIED):** exact
+`boardReportingCandidateExportManifestId` -> load exact manifest -> load its
+exact immutable BR-02 candidate -> recompose current Board render model
+(`composeBoardReportingRenderModel`) -> recompute the existing Board
+candidate/currentness fingerprint (`composeBoardReportingPacketFingerprint`)
+-> require exact match against the candidate's stored fingerprint -> reuse
+the existing Board Markdown serializer -> return `FINAL_MANIFEST_BOUND`.
+Never a latest/newest/preferred manifest, never a candidate resolved by
+organizationId+engagementId alone, never a caller-supplied candidate id/
+engagementId/fingerprint/authority/eligibility/content identity (all
+resolved server-side from the manifest's own lineage).
+
+**Route (TOOL_VERIFIED):** `GET
+/admin/organizations/:organizationId/board-reporting/export-manifests/:boardReportingCandidateExportManifestId/markdown`
+added to `sprint2IntakeApi.js`, mirroring the existing P14-08C GET route
+exactly - `sprint2ActorContextMiddleware`, inline pure-function identifier
+validation (`boardReportingCandidateExportManifestIdentifiers`), a lazy
+memoized service import
+(`getBoardReportingCandidateExportManifestMarkdownService`), and a dedicated
+attachment sender
+(`sendBoardReportingCandidateExportManifestMarkdownAttachment`, filename
+`kai-board-summary-export-manifest.md`, `Content-Type: text/markdown;
+charset=utf-8`). Contains no SQL and no direct database access; delegates
+once to `kaiBoardReportingCandidateExportManifestMarkdownSerializer.js`.
+KAI_SPRINT2_ENABLED-protected (mounted under the existing router), tenant-
+safe, authenticated-actor-context only.
+
+**Tests/regressions (TOOL_VERIFIED):** new
+`__tests__/kai-sprint2-board-reporting-candidate-export-manifest-final-markdown-boundary.spec.js`
+(18/18 PASS) proves: exact valid manifest -> FINAL Board Summary returned;
+nonexistent manifest -> `not_found`; cross-tenant manifest -> `not_found`;
+a manifest for candidate A can never render candidate B's content ->
+`not_found`; a superseded/changed Board candidate ->
+`conflict_current_state_changed` with no changed content returned;
+render-model-composition failures propagate verbatim; the repository/
+service exact-keys input contracts reject any caller-supplied
+engagementId/candidate id/fingerprint/member/eligibility/authority field;
+the existing Board Markdown serializer is reused unmodified and correctly
+self-labels `FINAL_MANIFEST_BOUND` (never `PREVIEW_READ_ONLY`); no raw
+evidence/source-body fields appear in the rendered output; the package
+sources and the route slice contain no SQL/manifest-creation/authority-
+mutation; the route is protected by feature flag and authentication, and
+malformed manifest identifiers never reach the service. `__tests__/kai-sprint2-pass2-route-runtime.spec.js`
+and `__tests__/kai-sprint2-api-contract.spec.js` were extended additively
+(pinned route list plus a registration-regex assertion) and both re-run
+clean (53/53 PASS together). Affected regressions re-run clean:
+`kai-board-reporting-packet-v1-boundary.spec.js`,
+`kai-board-reporting-candidate-boundary.spec.js`,
+`kai-board-reporting-final-eligibility-boundary.spec.js`,
+`kai-board-reporting-final-eligibility-real-db.integration.spec.js`,
+the BR-03A/BR-03B review boundary specs,
+`kai-sprint2-board-reporting-candidate-export-manifest-real-db.integration.spec.js`,
+`kai-sprint2-board-reporting-candidate-export-manifest-service-route.spec.js`,
+and the P14-08C precedent spec itself (89 PASS / 2 SKIP together, SKIPs are
+their own env-gated real-DB subtests, expected without a runner-owned DB
+var).
+
+**Full repository suite (TOOL_VERIFIED):** `DATABASE_URL='postgres://localhost:1/nonexistent_sentinel'
+npm test` -> 4224 tests, 4138 PASS / 7 FAIL / 79 SKIP. All 7 failures are the
+same pre-existing, known-unrelated baseline failures confined to
+`__tests__/kai-sprint2-batch-files-route.spec.js` and
+`__tests__/kai-sprint2-file-detail-route.spec.js` (batch-files/file-detail
+DTO/allowlist/keyset class of failure) already named in the accepted
+baseline. No failure is attributable to this Board delivery package.
+
+**Prohibited actions taken: NONE.** This package did not: change the
+manifest schema or fingerprint, change BR-04 authority semantics, change
+final-eligibility semantics, add another approval layer, add frontend
+controls, add PDF/DOCX/CSV representations, publish externally, deploy,
+push, touch production/shared databases, mutate feature flags/config/cloud/
+tenant state, access secrets, use real client data, or update
+`00_KAI_CURRENT_STATE.md`. Delivery creates no manifest, mutates no
+candidate, mutates no members, mutates no review state, and mutates no
+BR-04 authority.
+
+**Local commit:** pending (recorded once this ExecPlan entry and package are
+staged and committed as one coherent local commit; no push).
+
 ## Phase-14 (Grant Response Packet Track) - P14-06D Authoritative Grant
 ## Response Packet Export-Candidate / Export-Review State Read
 
