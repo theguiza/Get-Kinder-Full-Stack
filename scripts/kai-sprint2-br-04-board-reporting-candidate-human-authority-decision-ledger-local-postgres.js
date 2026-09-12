@@ -218,6 +218,38 @@ try {
     throw new Error("BR-04 rollback incorrectly succeeded while persisted decision rows exist");
   }
   console.log("BR-04 rollback correctly failed closed while persisted decision rows exist (append-only, cannot be emptied - terminal proof state).");
+
+  // Prove the actual runtime repository/service path end to end - create ->
+  // request -> START -> COMPLETE through the real
+  // postgresBoardReportingCandidateRepository.js, then GRANT -> read ->
+  // identical GRANT replay -> REVOKE -> read -> identical REVOKE replay
+  // through the real kaiBoardReportingCandidateHumanFinalReleaseAuthorityService.js
+  // + postgresBoardReportingCandidateHumanAuthorityDecisionRepository.js -
+  // not just direct SQL, as proven above.
+  const testResult = spawnSync("node", [
+    "--test",
+    "__tests__/kai-sprint2-br-04-board-reporting-candidate-human-final-release-authority.integration.spec.js",
+  ], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    stdio: "inherit",
+    env: {
+      ...process.env,
+      DATABASE_URL: sentinelUrl,
+      DATABASE_URL_LOCAL: "",
+      PGURL_LOCAL: "",
+      RENDER_DATABASE_URL: "",
+      PROD_DATABASE_URL: "",
+      DB_HOST: "127.0.0.1",
+      DB_PORT: port,
+      DB_NAME: dbName,
+      DB_USER: user,
+      DB_PASSWORD: "",
+      KAI_BR_04_BOARD_REPORTING_CANDIDATE_HUMAN_AUTHORITY_DECISION_LEDGER_DATABASE_URL: targetUrl,
+    },
+  });
+  if (testResult.status !== 0) throw new Error("BR-04 board-reporting-candidate-human-authority-decision-ledger real-DB integration test failed");
+  console.log("BR-04 board-reporting-candidate-human-authority-decision-ledger real-DB integration test passed.");
 } finally {
   if (started) spawnSync(pgCtl, ["-D", dataDir, "stop", "-m", "fast"], { encoding: "utf8", stdio: "ignore" });
   rmSync(workDir, { recursive: true, force: true });
