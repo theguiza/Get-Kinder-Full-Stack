@@ -229,6 +229,7 @@ try {
   const testResult = spawnSync("node", [
     "--test",
     "__tests__/kai-sprint2-br-04-board-reporting-candidate-human-final-release-authority.integration.spec.js",
+    "__tests__/kai-sprint2-br-04-board-reporting-candidate-human-final-release-authority-negative.integration.spec.js",
   ], {
     cwd: repoRoot,
     encoding: "utf8",
