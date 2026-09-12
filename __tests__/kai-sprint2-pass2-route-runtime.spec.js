@@ -149,6 +149,14 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // MVP UAT final completion: authoritative intake-context engagement read
     // (additive; every prior entry preserved verbatim).
     "/admin/organizations/:organizationId/engagements",
+    // BR-03B: Board review COMPLETE surface - transitions an existing
+    // BR-03B START row (in_progress/needs_gk_review) to resolved/resolved
+    // only. Completion means only that a gk_admin completed the governed
+    // human Board review of this exact immutable Board Reporting candidate
+    // - it grants no release authority, no final eligibility, no manifest,
+    // and no delivery state (additive; every prior entry preserved
+    // verbatim).
+    "/admin/organizations/:organizationId/engagements/:engagementId/board-reporting/candidates/:boardReportingCandidateId/review-queue/:reviewQueueItemId/complete",
     // BR-03B: Board review START surface - transitions an existing BR-03A
     // REQUEST row to START only (additive; every prior entry preserved
     // verbatim).

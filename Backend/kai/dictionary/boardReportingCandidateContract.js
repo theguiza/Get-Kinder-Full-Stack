@@ -46,3 +46,18 @@ export const BOARD_REPORTING_CANDIDATE_REVIEW_STARTED_OPERATION =
 
 export const BOARD_REPORTING_CANDIDATE_REVIEW_START_AUDIT_CONTRACT =
   "br_03b_board_reporting_candidate_review_start_v1";
+
+// BR-03B COMPLETE: transitions the SAME 'board_reporting_candidate_review'
+// queue row from in_progress/needs_gk_review to resolved/resolved only -
+// the exact predecessor/result pair the BR-03B migration's widened
+// review_queue_items_br_03b_board_reporting_candidate_review_contract_check
+// already admits (index 2 of BOARD_REPORTING_CANDIDATE_REVIEW_LIFECYCLE_PROFILES
+// above). Completion means only that a gk_admin completed the governed
+// human Board review of this exact immutable Board Reporting candidate - it
+// grants NO release authority, NO final eligibility, NO manifest, and NO
+// delivery/board_update state. No new queue_type, no new lifecycle.
+export const BOARD_REPORTING_CANDIDATE_REVIEW_COMPLETED_OPERATION =
+  "board_reporting_candidate_review_completed";
+
+export const BOARD_REPORTING_CANDIDATE_REVIEW_COMPLETE_AUDIT_CONTRACT =
+  "br_03b_board_reporting_candidate_review_complete_v1";

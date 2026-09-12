@@ -47,7 +47,7 @@ SELECT 'br_03b_smoke_row_complete_resolved_resolved',
             AND q.review_status = 'resolved'
             AND c.candidate_status = 'created'
        ) THEN 'PASS' ELSE 'FAIL' END,
-       'COMPLETE pair (resolved / resolved) is permitted (schema only - no completion code path exists yet)';
+       'COMPLETE pair (resolved / resolved) is permitted (schema-level proof; the repository/service/route completion code path is proven separately by the focused BR-03B COMPLETE tests)';
 
 DO $$
 BEGIN

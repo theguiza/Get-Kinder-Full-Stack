@@ -12,10 +12,12 @@ import {
   BOARD_REPORTING_CANDIDATE_REVIEW_REQUESTED_OPERATION,
   BOARD_REPORTING_CANDIDATE_REVIEW_LIFECYCLE_PROFILES,
   BOARD_REPORTING_CANDIDATE_REVIEW_STARTED_OPERATION,
+  BOARD_REPORTING_CANDIDATE_REVIEW_COMPLETED_OPERATION,
 } from "./boardReportingCandidateContract.js";
 
 const BOARD_REPORTING_CANDIDATE_REVIEW_REQUEST_PROFILE = BOARD_REPORTING_CANDIDATE_REVIEW_LIFECYCLE_PROFILES[0];
 const BOARD_REPORTING_CANDIDATE_REVIEW_START_PROFILE = BOARD_REPORTING_CANDIDATE_REVIEW_LIFECYCLE_PROFILES[1];
+const BOARD_REPORTING_CANDIDATE_REVIEW_COMPLETE_PROFILE = BOARD_REPORTING_CANDIDATE_REVIEW_LIFECYCLE_PROFILES[2];
 
 const RESULT_STATUS = Object.freeze({
   validation_blocker: 422,
@@ -102,6 +104,30 @@ function isRequestBoardReportingCandidateReviewInput(input) {
 }
 
 function isStartBoardReportingCandidateReviewInput(input) {
+  return hasExactKeys(input, new Set([
+    "organizationId",
+    "engagementId",
+    "boardReportingCandidateId",
+    "reviewQueueItemId",
+    "expectedUpdatedAt",
+    "actorContext",
+    "now",
+  ]))
+    && UUID_PATTERN.test(input.organizationId)
+    && UUID_PATTERN.test(input.engagementId)
+    && UUID_PATTERN.test(input.boardReportingCandidateId)
+    && UUID_PATTERN.test(input.reviewQueueItemId)
+    && isCanonicalUtcTimestamp(input.expectedUpdatedAt)
+    && isMappedHumanActor(input.actorContext)
+    && isCanonicalUtcTimestamp(input.now);
+}
+
+// COMPLETE input contract: identical shape to START (organizationId +
+// engagementId + boardReportingCandidateId + reviewQueueItemId +
+// expectedUpdatedAt + actorContext + now), and nothing else - no
+// membership, fingerprint, release authority, final eligibility, manifest,
+// or delivery field is ever accepted from a caller.
+function isCompleteBoardReportingCandidateReviewInput(input) {
   return hasExactKeys(input, new Set([
     "organizationId",
     "engagementId",
@@ -395,6 +421,33 @@ async function findMatchingBoardReportingCandidateReviewStartAudit(tx, {
       && metadata.resulting_queue_status === BOARD_REPORTING_CANDIDATE_REVIEW_START_PROFILE.queueStatus
       && metadata.previous_review_status === BOARD_REPORTING_CANDIDATE_REVIEW_REQUEST_PROFILE.reviewStatus
       && metadata.resulting_review_status === BOARD_REPORTING_CANDIDATE_REVIEW_START_PROFILE.reviewStatus
+      && metadata.expected_updated_at === expectedUpdatedAt;
+  });
+  return matches.length === 1;
+}
+
+async function findMatchingBoardReportingCandidateReviewCompleteAudit(tx, {
+  organizationId,
+  boardReportingCandidateId,
+  reviewQueueItemId,
+  expectedUpdatedAt,
+}) {
+  const { rows } = await tx.query(
+    `SELECT metadata
+       FROM kai.audit_events
+      WHERE organization_id = $1::uuid
+        AND action = $2
+        AND metadata->>'board_reporting_candidate_id' = $3
+        AND metadata->>'review_queue_item_id' = $4`,
+    [organizationId, BOARD_REPORTING_CANDIDATE_REVIEW_COMPLETED_OPERATION, boardReportingCandidateId, reviewQueueItemId],
+  );
+  const matches = rows.filter((row) => {
+    const metadata = row.metadata;
+    return metadata
+      && metadata.previous_queue_status === BOARD_REPORTING_CANDIDATE_REVIEW_START_PROFILE.queueStatus
+      && metadata.resulting_queue_status === BOARD_REPORTING_CANDIDATE_REVIEW_COMPLETE_PROFILE.queueStatus
+      && metadata.previous_review_status === BOARD_REPORTING_CANDIDATE_REVIEW_START_PROFILE.reviewStatus
+      && metadata.resulting_review_status === BOARD_REPORTING_CANDIDATE_REVIEW_COMPLETE_PROFILE.reviewStatus
       && metadata.expected_updated_at === expectedUpdatedAt;
   });
   return matches.length === 1;
@@ -783,6 +836,141 @@ export function createPostgresBoardReportingCandidateRepository({ runInTransacti
         return failure("system_error");
       }
     },
+
+    async completeBoardReportingCandidateReview(input, dependencies = {}) {
+      if (!isCompleteBoardReportingCandidateReviewInput(input)) return failure("validation_blocker");
+      if (!dependencies.metadataOnlyAudit) return failure("validation_blocker");
+
+      try {
+        return await runInTransaction(async (tx) => {
+          const candidate = await loadBoardReportingCandidateForReview(tx, input);
+          if (!candidate) rollbackFailure("not_found");
+          if (
+            candidate.packet_audience !== BOARD_REPORTING_CANDIDATE_AUDIENCE
+            || candidate.fingerprint_contract_version !== BOARD_REPORTING_CANDIDATE_FINGERPRINT_CONTRACT_VERSION
+            || candidate.candidate_status !== "created"
+          ) {
+            rollbackFailure("conflict_current_state_changed");
+          }
+
+          const queueRow = await loadBoardReportingCandidateReviewQueueRowById(tx, {
+            organizationId: input.organizationId,
+            reviewQueueItemId: input.reviewQueueItemId,
+          });
+          if (!queueRow) rollbackFailure("not_found");
+          if (
+            queueRow.engagement_id !== input.engagementId
+            || queueRow.target_object_type !== BOARD_REPORTING_CANDIDATE_REVIEW_QUEUE_STATIC_CONTRACT.targetObjectType
+            || queueRow.target_object_id !== input.boardReportingCandidateId
+            || queueRow.queue_type !== BOARD_REPORTING_CANDIDATE_REVIEW_QUEUE_STATIC_CONTRACT.queueType
+          ) {
+            rollbackFailure("conflict_current_state_changed");
+          }
+
+          const updateResult = await tx.query(
+            `UPDATE kai.review_queue_items
+                SET queue_status = $1,
+                    review_status = $2,
+                    updated_at = $3::timestamptz
+              WHERE organization_id = $4::uuid
+                AND review_queue_item_id = $5::uuid
+                AND engagement_id = $6::uuid
+                AND queue_type = $7
+                AND target_object_type = $8
+                AND target_object_id = $9::uuid
+                AND queue_status = $10
+                AND review_status = $11
+                AND date_trunc('milliseconds', updated_at) = date_trunc('milliseconds', $12::timestamptz)
+              RETURNING review_queue_item_id::text AS review_queue_item_id, queue_status, review_status, updated_at`,
+            [
+              BOARD_REPORTING_CANDIDATE_REVIEW_COMPLETE_PROFILE.queueStatus,
+              BOARD_REPORTING_CANDIDATE_REVIEW_COMPLETE_PROFILE.reviewStatus,
+              input.now,
+              input.organizationId,
+              input.reviewQueueItemId,
+              input.engagementId,
+              BOARD_REPORTING_CANDIDATE_REVIEW_QUEUE_STATIC_CONTRACT.queueType,
+              BOARD_REPORTING_CANDIDATE_REVIEW_QUEUE_STATIC_CONTRACT.targetObjectType,
+              input.boardReportingCandidateId,
+              BOARD_REPORTING_CANDIDATE_REVIEW_START_PROFILE.queueStatus,
+              BOARD_REPORTING_CANDIDATE_REVIEW_START_PROFILE.reviewStatus,
+              input.expectedUpdatedAt,
+            ],
+          );
+
+          let resultRow;
+          let replayed;
+          if (updateResult.rowCount === 1) {
+            resultRow = updateResult.rows[0];
+            replayed = false;
+          } else {
+            const postWriteRow = await loadBoardReportingCandidateReviewQueueRowById(tx, {
+              organizationId: input.organizationId,
+              reviewQueueItemId: input.reviewQueueItemId,
+            });
+            if (!isValidBoardReportingCandidateReviewQueueRowForProfiles(postWriteRow, {
+              organizationId: input.organizationId,
+              engagementId: input.engagementId,
+              boardReportingCandidateId: input.boardReportingCandidateId,
+              allowedProfiles: [BOARD_REPORTING_CANDIDATE_REVIEW_COMPLETE_PROFILE],
+            })) {
+              rollbackFailure("conflict_current_state_changed");
+            }
+            const hasMatchingAudit = await findMatchingBoardReportingCandidateReviewCompleteAudit(tx, {
+              organizationId: input.organizationId,
+              boardReportingCandidateId: input.boardReportingCandidateId,
+              reviewQueueItemId: input.reviewQueueItemId,
+              expectedUpdatedAt: input.expectedUpdatedAt,
+            });
+            if (!hasMatchingAudit) rollbackFailure("conflict_current_state_changed");
+            resultRow = postWriteRow;
+            replayed = true;
+          }
+
+          if (!replayed) {
+            const preparedAudit = dependencies.metadataOnlyAudit.prepareMetadataOnlyAudit?.({
+              payload: {
+                attempted_operation: BOARD_REPORTING_CANDIDATE_REVIEW_COMPLETED_OPERATION,
+                actor_type: "human",
+                object_type: "board_reporting_candidate",
+                board_reporting_candidate_id: input.boardReportingCandidateId,
+                engagement_id: input.engagementId,
+                review_queue_item_id: input.reviewQueueItemId,
+                canonical_fingerprint: candidate.canonical_fingerprint,
+                previous_queue_status: BOARD_REPORTING_CANDIDATE_REVIEW_START_PROFILE.queueStatus,
+                resulting_queue_status: BOARD_REPORTING_CANDIDATE_REVIEW_COMPLETE_PROFILE.queueStatus,
+                previous_review_status: BOARD_REPORTING_CANDIDATE_REVIEW_START_PROFILE.reviewStatus,
+                resulting_review_status: BOARD_REPORTING_CANDIDATE_REVIEW_COMPLETE_PROFILE.reviewStatus,
+                expected_updated_at: input.expectedUpdatedAt,
+              },
+              db: tx,
+            });
+            if (!preparedAudit || preparedAudit.ok !== true || typeof preparedAudit.publish !== "function") {
+              rollbackFailure("system_error");
+            }
+            await preparedAudit.publish();
+          }
+
+          return success({
+            organizationId: input.organizationId,
+            engagementId: input.engagementId,
+            boardReportingCandidateId: input.boardReportingCandidateId,
+            canonicalFingerprint: candidate.canonical_fingerprint,
+            reviewQueueItemId: input.reviewQueueItemId,
+            queueStatus: resultRow.queue_status,
+            reviewStatus: resultRow.review_status,
+            reviewUpdatedAt: asCanonicalUtcTimestamp(resultRow.updated_at),
+            replayed,
+          });
+        });
+      } catch (error) {
+        if (error instanceof BoardReportingCandidateRollbackResultError) return error.result;
+        if (error?.code === "23503" || error?.code === "22P02" || error?.code === "23514") {
+          return failure("validation_blocker");
+        }
+        return failure("system_error");
+      }
+    },
   });
 }
 
@@ -791,5 +979,6 @@ export const __boardReportingCandidateRepositoryTestables = Object.freeze({
   isReadBoardReportingCandidateInput,
   isRequestBoardReportingCandidateReviewInput,
   isStartBoardReportingCandidateReviewInput,
+  isCompleteBoardReportingCandidateReviewInput,
   fingerprintRenderModel,
 });

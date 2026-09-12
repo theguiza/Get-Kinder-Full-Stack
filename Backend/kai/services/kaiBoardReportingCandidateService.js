@@ -8,6 +8,7 @@ const CREATE_BOARD_REPORTING_CANDIDATE_OPERATION = "create_board_reporting_candi
 const READ_BOARD_REPORTING_CANDIDATE_OPERATION = "read_board_reporting_candidate";
 const REQUEST_BOARD_REPORTING_CANDIDATE_REVIEW_OPERATION = "request_board_reporting_candidate_review";
 const START_BOARD_REPORTING_CANDIDATE_REVIEW_OPERATION = "start_board_reporting_candidate_review";
+const COMPLETE_BOARD_REPORTING_CANDIDATE_REVIEW_OPERATION = "complete_board_reporting_candidate_review";
 const BOARD_REPORTING_CANDIDATE_ALLOWED_ROLES = new Set(EXPORT_CANDIDATE_ALLOWED_ROLES);
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
@@ -68,6 +69,33 @@ function isRequestBoardReportingCandidateReviewInput(input) {
 }
 
 function isStartBoardReportingCandidateReviewInput(input) {
+  return hasExactKeys(input, new Set([
+    "organizationId",
+    "engagementId",
+    "boardReportingCandidateId",
+    "reviewQueueItemId",
+    "expectedUpdatedAt",
+    "actorContext",
+    "now",
+  ]))
+    && UUID_PATTERN.test(input.organizationId)
+    && UUID_PATTERN.test(input.engagementId)
+    && UUID_PATTERN.test(input.boardReportingCandidateId)
+    && UUID_PATTERN.test(input.reviewQueueItemId)
+    && isCanonicalUtcTimestamp(input.expectedUpdatedAt)
+    && Boolean(input.actorContext)
+    && typeof input.actorContext === "object"
+    && !Array.isArray(input.actorContext)
+    && isCanonicalUtcTimestamp(input.now);
+}
+
+// Exact-keys input contract for the COMPLETE transition: identical shape to
+// the START transition (organizationId + engagementId +
+// boardReportingCandidateId + reviewQueueItemId + expectedUpdatedAt +
+// actorContext + now), and nothing else - no membership, fingerprint,
+// release authority, final eligibility, manifest, or delivery field is
+// ever accepted from a caller.
+function isCompleteBoardReportingCandidateReviewInput(input) {
   return hasExactKeys(input, new Set([
     "organizationId",
     "engagementId",
@@ -230,11 +258,43 @@ export async function startBoardReportingCandidateReview(input, dependencies = {
   };
 }
 
+export async function completeBoardReportingCandidateReview(input, dependencies = {}) {
+  const env = dependencies.env || process.env;
+  if (!isKaiSprint2Enabled(env)) return buildKaiError("feature_disabled", { data: null });
+  if (!isKaiGenerationEnabled(env)) return buildKaiError("feature_disabled", { data: null });
+  if (!isCompleteBoardReportingCandidateReviewInput(input)) return buildKaiError("validation_blocker", { data: null });
+  const authError = authorize(input, COMPLETE_BOARD_REPORTING_CANDIDATE_REVIEW_OPERATION);
+  if (authError) return authError;
+
+  const repository = dependencies.boardReportingCandidateRepository || (await createDefaultBoardReportingCandidateRepository());
+  const result = await repository.completeBoardReportingCandidateReview(input, {
+    metadataOnlyAudit: dependencies.metadataOnlyAudit,
+  });
+  if (!result.ok) return buildKaiError(result.error.code, { status: result.error.status, data: null });
+
+  return {
+    ok: true,
+    data: {
+      organizationId: result.data.organizationId,
+      engagementId: result.data.engagementId,
+      boardReportingCandidateId: result.data.boardReportingCandidateId,
+      canonicalFingerprint: result.data.canonicalFingerprint,
+      reviewQueueItemId: result.data.reviewQueueItemId,
+      queueStatus: result.data.queueStatus,
+      reviewStatus: result.data.reviewStatus,
+      reviewUpdatedAt: result.data.reviewUpdatedAt,
+      replayed: result.data.replayed,
+    },
+    error: null,
+  };
+}
+
 export const __boardReportingCandidateServiceContract = Object.freeze({
   CREATE_BOARD_REPORTING_CANDIDATE_OPERATION,
   READ_BOARD_REPORTING_CANDIDATE_OPERATION,
   REQUEST_BOARD_REPORTING_CANDIDATE_REVIEW_OPERATION,
   START_BOARD_REPORTING_CANDIDATE_REVIEW_OPERATION,
+  COMPLETE_BOARD_REPORTING_CANDIDATE_REVIEW_OPERATION,
   BOARD_REPORTING_CANDIDATE_ALLOWED_ROLES,
 });
 
@@ -243,5 +303,6 @@ export const __boardReportingCandidateServiceTestables = Object.freeze({
   isReadBoardReportingCandidateInput,
   isRequestBoardReportingCandidateReviewInput,
   isStartBoardReportingCandidateReviewInput,
+  isCompleteBoardReportingCandidateReviewInput,
   isMappedHumanActor,
 });

@@ -17,6 +17,7 @@ import {
   setKaiSprint2NoStore,
 } from "../middleware/kaiSprint2RequestSafety.js";
 import {
+  validateCompleteBoardReportingCandidateReviewRequest,
   validateCompleteClaimReviewRequest,
   validateCompleteGrantResponsePacketExportReviewRequest,
   validateCompleteClientFollowupRequest,
@@ -3075,6 +3076,7 @@ async function getBoardReportingCandidateService() {
   if (
     intakeServiceOverride?.requestBoardReportingCandidateReview
     || intakeServiceOverride?.startBoardReportingCandidateReview
+    || intakeServiceOverride?.completeBoardReportingCandidateReview
   ) return intakeServiceOverride;
   boardReportingCandidateServicePromise ||= import("../services/kaiBoardReportingCandidateService.js");
   return boardReportingCandidateServicePromise;
@@ -3199,6 +3201,72 @@ router.post(
     return invokeService(res, async () => {
       const service = await getBoardReportingCandidateService();
       return service.startBoardReportingCandidateReview({
+        organizationId: identifiers.organizationId,
+        engagementId: identifiers.engagementId,
+        boardReportingCandidateId: identifiers.boardReportingCandidateId,
+        reviewQueueItemId: identifiers.reviewQueueItemId,
+        expectedUpdatedAt: payload.expected_updated_at,
+        actorContext,
+        now,
+      }, {
+        metadataOnlyAudit: createProductionMetadataOnlyAuditForBoardReportingCandidate({
+          organizationId: identifiers.organizationId,
+          engagementId: identifiers.engagementId,
+          actorContext,
+          now,
+        }),
+      });
+    });
+  },
+);
+
+function validateCompleteBoardReportingCandidateReviewRequestOrSend(req, res) {
+  if (!metadataContentTypeIsSupported(req)) {
+    sendKaiError(res, "unsupported_media_type");
+    return null;
+  }
+  const identifiers = boardReportingCandidateReviewQueueIdentifier(req);
+  if (!identifiers) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker(
+        "invalid_uuid_field",
+        "organization_id_engagement_id_board_reporting_candidate_id_or_review_queue_item_id",
+      )],
+    });
+    return null;
+  }
+  const result = validateCompleteBoardReportingCandidateReviewRequest(req.body);
+  if (!result.ok) {
+    sendKaiError(res, "validation_blocker", { blockers: result.blockers });
+    return null;
+  }
+  return identifiers;
+}
+
+// BR-03B: Board review COMPLETE. Delegates the entire lifecycle transition
+// to kaiBoardReportingCandidateService/postgresBoardReportingCandidateRepository
+// - no SQL, no direct kai.* access, no raw KAI DB-helper access here.
+// Transitions the EXACT existing 'board_reporting_candidate_review' queue
+// row identified by the route's own reviewQueueItemId from
+// in_progress/needs_gk_review to resolved/resolved only, reusing the same
+// optimistic expected_updated_at CAS/replay contract the START route above
+// already uses. It never touches the immutable board_reporting_candidates/
+// board_reporting_candidate_members rows, and creates no release authority,
+// final eligibility, manifest, or delivery state - completion means only
+// that a gk_admin completed the governed human Board review of this exact
+// immutable Board Reporting candidate.
+router.post(
+  "/admin/organizations/:organizationId/engagements/:engagementId/board-reporting/candidates/:boardReportingCandidateId/review-queue/:reviewQueueItemId/complete",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    const identifiers = validateCompleteBoardReportingCandidateReviewRequestOrSend(req, res);
+    if (!identifiers) return;
+    const payload = requestPayload(req);
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    return invokeService(res, async () => {
+      const service = await getBoardReportingCandidateService();
+      return service.completeBoardReportingCandidateReview({
         organizationId: identifiers.organizationId,
         engagementId: identifiers.engagementId,
         boardReportingCandidateId: identifiers.boardReportingCandidateId,
@@ -4477,6 +4545,7 @@ export const __testables = {
   validateRequestBoardReportingCandidateReviewRequestOrSend,
   boardReportingCandidateReviewQueueIdentifier,
   validateStartBoardReportingCandidateReviewRequestOrSend,
+  validateCompleteBoardReportingCandidateReviewRequestOrSend,
   grantResponsePacketIdentifier,
   validateCreateGrantResponsePacketExportCandidateRequestOrSend,
   grantResponsePacketExportCandidateReviewIdentifier,

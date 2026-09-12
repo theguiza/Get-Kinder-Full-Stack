@@ -36,6 +36,7 @@ test("api contract exposes Sprint 2 status and admin metadata route shape", () =
   assert.match(routeSource, /router\.post\(\s*["']\/admin\/organizations\/:organizationId\/export-candidates\/:exportCandidateId\/final-release-authority["']/);
   assert.match(routeSource, /router\.post\(\s*["']\/admin\/organizations\/:organizationId\/engagements\/:engagementId\/board-reporting\/candidates\/:boardReportingCandidateId\/review-request["']/);
   assert.match(routeSource, /router\.post\(\s*["']\/admin\/organizations\/:organizationId\/engagements\/:engagementId\/board-reporting\/candidates\/:boardReportingCandidateId\/review-queue\/:reviewQueueItemId\/start["']/);
+  assert.match(routeSource, /router\.post\(\s*["']\/admin\/organizations\/:organizationId\/engagements\/:engagementId\/board-reporting\/candidates\/:boardReportingCandidateId\/review-queue\/:reviewQueueItemId\/complete["']/);
   assert.match(routeSource, /router\.get\(["']\/admin\/review-queue["']/);
   assert.match(routeSource, /router\.post\(["']\/admin\/review-queue\/:reviewQueueItemId\/status["']/);
   assert.match(routeSource, /router\.post\(["']\/admin\/batches\/:intakeBatchId\/file-reservations["']/);

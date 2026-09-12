@@ -198,6 +198,7 @@ try {
     "--test",
     "__tests__/kai-board-reporting-candidate-review-request-boundary.spec.js",
     "__tests__/kai-board-reporting-candidate-review-start-boundary.spec.js",
+    "__tests__/kai-board-reporting-candidate-review-complete-boundary.spec.js",
     "__tests__/kai-sprint2-br-03a-board-reporting-candidate-review-request.integration.spec.js",
     "__tests__/kai-sprint2-br-03b-board-reporting-candidate-review-lifecycle.integration.spec.js",
     "__tests__/kai-board-reporting-candidate-boundary.spec.js",
@@ -224,6 +225,32 @@ try {
   });
   if (testResult.status !== 0) throw new Error("BR-03B board-reporting-candidate-review-lifecycle tests failed");
   console.log("BR-03B board-reporting-candidate-review-lifecycle focused tests passed.");
+
+  // Re-verify rollback-fails-closed now that the focused suite above has
+  // driven a real REQUEST -> START -> COMPLETE transition (resolved/
+  // resolved) through the actual repository, not just direct SQL seeding.
+  const resolvedRowCount = parseInt(
+    run(psql, [
+      "-v", "ON_ERROR_STOP=1", "-t", "-A", "-d", dbName, "-c",
+      "SELECT count(*) FROM kai.review_queue_items WHERE queue_type = 'board_reporting_candidate_review' AND queue_status = 'resolved' AND review_status = 'resolved';",
+    ], { capture: true }).stdout.trim(),
+    10,
+  );
+  if (!(resolvedRowCount >= 1)) {
+    throw new Error("BR-03B expected at least one real resolved/resolved row from the repository-driven COMPLETE test before re-proving rollback");
+  }
+  const rollbackWithRealCompletedRow = spawnSync(psql, [
+    "-v", "ON_ERROR_STOP=1", "-d", dbName, "-f",
+    "migrations/kai_sprint2_br_03b_board_reporting_candidate_review_lifecycle.rollback.sql",
+  ], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    env: { ...process.env, DATABASE_URL: sentinelUrl, PGHOST: "127.0.0.1", PGPORT: port, PGDATABASE: dbName, PGUSER: user },
+  });
+  if (rollbackWithRealCompletedRow.status === 0) {
+    throw new Error("BR-03B rollback incorrectly succeeded while a real repository-driven COMPLETED row exists");
+  }
+  console.log("BR-03B rollback correctly failed closed while a real repository-driven COMPLETED row exists.");
 } finally {
   if (started) spawnSync(pgCtl, ["-D", dataDir, "stop", "-m", "fast"], { encoding: "utf8", stdio: "ignore" });
   rmSync(workDir, { recursive: true, force: true });
