@@ -1921,6 +1921,107 @@ export function createProductionMetadataOnlyAuditForBoardReportingCandidate({
   });
 }
 
+/**
+ * BR-04 production composition of the `metadataOnlyAudit` contract required
+ * by `postgresBoardReportingCandidateHumanAuthorityDecisionRepository.js`.
+ * The Board-level analogue of `createProductionMetadataOnlyAuditForHumanFinalReleaseAuthority`
+ * (P3-17) and `createProductionMetadataOnlyAuditForGrantResponsePacketHumanAuthorityDecision`
+ * (P14-07B1) - same non-file-scoped discipline (`kai.audit_events` via
+ * `insertRequiredSuccessfulAuditEvent`, never `kai.upload_lifecycle_audit`,
+ * mirroring how P14-07B1 audits its own packet-level ledger). The audited
+ * object is the Board Reporting candidate itself
+ * (`object_type: "board_reporting_candidate"`), never the bound review queue
+ * row or the decision row; a payload carrying no valid
+ * `board_reporting_candidate_id`, or whose `engagement_id` does not match
+ * this adapter's own bound engagementId, is refused outright.
+ */
+export function createProductionMetadataOnlyAuditForBoardReportingCandidateHumanFinalReleaseAuthority({
+  organizationId,
+  engagementId,
+  actorContext,
+  now,
+  insertAuditEvent = insertRequiredSuccessfulAuditEvent,
+} = {}) {
+  if (typeof organizationId !== "string" || organizationId.length === 0) {
+    throw new TypeError(
+      "createProductionMetadataOnlyAuditForBoardReportingCandidateHumanFinalReleaseAuthority requires organizationId.",
+    );
+  }
+  if (typeof engagementId !== "string" || engagementId.length === 0) {
+    throw new TypeError(
+      "createProductionMetadataOnlyAuditForBoardReportingCandidateHumanFinalReleaseAuthority requires engagementId.",
+    );
+  }
+
+  function isPlainObject(value) {
+    return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  }
+
+  const UUID_PATTERN_LOCAL = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+  const SAFE_ENUM_PATTERN = /^[a-z_]{1,64}$/;
+
+  function safeEnum(value) {
+    return typeof value === "string" && SAFE_ENUM_PATTERN.test(value) ? value : null;
+  }
+
+  function safeUuidOrNull(value) {
+    return typeof value === "string" && UUID_PATTERN_LOCAL.test(value) ? value : null;
+  }
+
+  return Object.freeze({
+    prepareMetadataOnlyAudit({ payload, db } = {}) {
+      if (!isPlainObject(payload)) return { ok: false };
+      const payloadCandidateId = payload.board_reporting_candidate_id;
+      if (typeof payloadCandidateId !== "string" || !UUID_PATTERN_LOCAL.test(payloadCandidateId)) return { ok: false };
+      if (payload.engagement_id !== undefined && payload.engagement_id !== engagementId) return { ok: false };
+
+      const metadata = {
+        organization_id: organizationId,
+        engagement_id: engagementId,
+        object_type: "board_reporting_candidate",
+        target_object_type: "board_reporting_candidate",
+        object_id: payloadCandidateId,
+        board_reporting_candidate_id: payloadCandidateId,
+        review_queue_item_id: safeUuidOrNull(payload.review_queue_item_id),
+        operation: typeof payload.attempted_operation === "string" ? payload.attempted_operation : "board_reporting_candidate_human_authority_decision_recorded",
+        operation_type: typeof payload.attempted_operation === "string" ? payload.attempted_operation : "board_reporting_candidate_human_authority_decision_recorded",
+        decision_id: safeUuidOrNull(payload.decision_id),
+        decision_type: safeEnum(payload.decision_type),
+        decision_action: safeEnum(payload.decision_action),
+        decided_by_role: safeEnum(payload.decided_by_role),
+        supersedes_decision_id: safeUuidOrNull(payload.supersedes_decision_id),
+        effective: payload.effective === true,
+        effectiveness_reason: safeEnum(payload.effectiveness_reason),
+        head_decision_id: safeUuidOrNull(payload.head_decision_id),
+        actor_type: actorContext?.actorType || "human",
+        actor_user_id: actorContext?.actorUserId || null,
+        request_id: actorContext?.requestId || null,
+        route: "br_04_board_reporting_candidate_human_final_release_authority",
+        created_at: typeof now === "string" ? now : new Date().toISOString(),
+        metadata_only: true,
+        contains_raw_file_content: false,
+        contains_raw_parsed_rows: false,
+        contains_client_pii: false,
+        contains_prompt_text: false,
+        contains_unsafe_generated_text: false,
+        contains_signed_urls: false,
+        contains_storage_credentials: false,
+      };
+
+      return {
+        ok: true,
+        async publish() {
+          const result = await insertAuditEvent(metadata, db);
+          if (!result || result.ok !== true) {
+            throw new Error("br_04_board_reporting_candidate_human_final_release_authority_metadata_only_audit_publish_failed");
+          }
+          return result;
+        },
+      };
+    },
+  });
+}
+
 export function createProductionMetadataOnlyAuditForGrantResponsePacketExportReview({
   organizationId,
   engagementId,
@@ -2242,6 +2343,7 @@ export const __testables = Object.freeze({
   createProductionMetadataOnlyAuditForEngagementRequirementAssessment,
   createProductionMetadataOnlyAuditForGrantResponsePacketExportCandidate,
   createProductionMetadataOnlyAuditForBoardReportingCandidate,
+  createProductionMetadataOnlyAuditForBoardReportingCandidateHumanFinalReleaseAuthority,
   createProductionMetadataOnlyAuditForGrantResponsePacketExportReview,
   createProductionMetadataOnlyAuditForGrantResponsePacketHumanAuthorityDecision,
   createProductionMetadataOnlyAuditForGrantResponsePacketExportManifest,

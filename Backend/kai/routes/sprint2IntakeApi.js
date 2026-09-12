@@ -17,6 +17,7 @@ import {
   setKaiSprint2NoStore,
 } from "../middleware/kaiSprint2RequestSafety.js";
 import {
+  validateBoardReportingCandidateHumanFinalReleaseAuthorityRequest,
   validateCompleteBoardReportingCandidateReviewRequest,
   validateCompleteClaimReviewRequest,
   validateCompleteGrantResponsePacketExportReviewRequest,
@@ -58,6 +59,7 @@ import {
   createProductionMetadataOnlyAuditForGeneratedContentReview,
   createProductionMetadataOnlyAuditForGeneratedDraftExportCandidate,
   createProductionMetadataOnlyAuditForBoardReportingCandidate,
+  createProductionMetadataOnlyAuditForBoardReportingCandidateHumanFinalReleaseAuthority,
   createProductionMetadataOnlyAuditForGrantResponsePacketExportCandidate,
   createProductionMetadataOnlyAuditForGrantResponsePacketExportManifest,
   createProductionMetadataOnlyAuditForGrantResponsePacketExportReview,
@@ -89,6 +91,7 @@ let grantResponsePacketHumanFinalReleaseAuthorityServicePromise = null;
 let grantResponsePacketExportManifestServicePromise = null;
 let grantResponsePacketExportManifestMarkdownServicePromise = null;
 let boardReportingCandidateServicePromise = null;
+let boardReportingCandidateHumanFinalReleaseAuthorityServicePromise = null;
 let evidenceLineageServicePromise = null;
 let evidenceCoverageAssessmentServicePromise = null;
 let claimProposalServicePromise = null;
@@ -3138,6 +3141,89 @@ router.post(
         now,
       }, {
         metadataOnlyAudit: createProductionMetadataOnlyAuditForBoardReportingCandidate({
+          organizationId: identifiers.organizationId,
+          engagementId: identifiers.engagementId,
+          actorContext,
+          now,
+        }),
+      });
+    }, 201);
+  },
+);
+
+async function getBoardReportingCandidateHumanFinalReleaseAuthorityService() {
+  if (intakeServiceOverride?.recordBoardReportingCandidateHumanFinalReleaseAuthorityDecision) return intakeServiceOverride;
+  boardReportingCandidateHumanFinalReleaseAuthorityServicePromise ||= import(
+    "../services/kaiBoardReportingCandidateHumanFinalReleaseAuthorityService.js"
+  );
+  return boardReportingCandidateHumanFinalReleaseAuthorityServicePromise;
+}
+
+function validateBoardReportingCandidateHumanFinalReleaseAuthorityRequestOrSend(req, res) {
+  if (!metadataContentTypeIsSupported(req)) {
+    sendKaiError(res, "unsupported_media_type");
+    return null;
+  }
+  const identifiers = boardReportingCandidateReviewIdentifier(req);
+  if (!identifiers) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker(
+        "invalid_uuid_field",
+        "organization_id_engagement_id_or_board_reporting_candidate_id",
+      )],
+    });
+    return null;
+  }
+  const result = validateBoardReportingCandidateHumanFinalReleaseAuthorityRequest(req.body);
+  if (!result.ok) {
+    sendKaiError(res, "validation_blocker", { blockers: result.blockers });
+    return null;
+  }
+  return identifiers;
+}
+
+/**
+ * BR-04: governed human final-release authority application for the EXACT
+ * existing, immutable BR-02 Board Reporting candidate identified by the
+ * route's own boardReportingCandidateId - never a client-selected
+ * latest/newest/preferred candidate. organizationId, engagementId, and the
+ * candidate id all come from the route path; actorContext/now are always
+ * server-derived. The request body carries only review_queue_item_id (the
+ * exact bound 'board_reporting_candidate_review' queue row the caller
+ * asserts is resolved) and decision_action (grant|revoke) - never
+ * requested_audience (a Board Reporting candidate's audience is always
+ * exactly "internal"), fingerprint, members, memberCount, review state,
+ * eligibility, authority state, or manifest identity. Contains no SQL and no
+ * direct database access - delegates once to
+ * kaiBoardReportingCandidateHumanFinalReleaseAuthorityService, which itself
+ * delegates once to the new BR-04
+ * postgresBoardReportingCandidateHumanAuthorityDecisionRepository.js.
+ * Recording a decision here grants only the same "human final-release
+ * authority" concept the existing single-draft P3-17 route and the
+ * Grant-Response-Packet P14-07 route already grant - no Board manifest and
+ * no Board file/artifact are ever produced by this route.
+ */
+router.post(
+  "/admin/organizations/:organizationId/engagements/:engagementId/board-reporting/candidates/:boardReportingCandidateId/final-release-authority",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    const identifiers = validateBoardReportingCandidateHumanFinalReleaseAuthorityRequestOrSend(req, res);
+    if (!identifiers) return;
+    const payload = requestPayload(req);
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    return invokeService(res, async () => {
+      const service = await getBoardReportingCandidateHumanFinalReleaseAuthorityService();
+      return service.recordBoardReportingCandidateHumanFinalReleaseAuthorityDecision({
+        organizationId: identifiers.organizationId,
+        engagementId: identifiers.engagementId,
+        boardReportingCandidateId: identifiers.boardReportingCandidateId,
+        reviewQueueItemId: payload.review_queue_item_id,
+        decisionAction: payload.decision_action,
+        actorContext,
+        now,
+      }, {
+        metadataOnlyAudit: createProductionMetadataOnlyAuditForBoardReportingCandidateHumanFinalReleaseAuthority({
           organizationId: identifiers.organizationId,
           engagementId: identifiers.engagementId,
           actorContext,

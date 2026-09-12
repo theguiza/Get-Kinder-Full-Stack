@@ -252,7 +252,11 @@ async function loadCandidateForRead(tx, { organizationId, engagementId, boardRep
   return rows[0] || null;
 }
 
-async function loadBoardReportingCandidateForReview(tx, { organizationId, engagementId, boardReportingCandidateId }) {
+// Exported for reuse by BR-04's postgresBoardReportingCandidateHumanAuthorityDecisionRepository.js
+// (and any other same-package caller) - the BR-04 human authority ledger
+// binds to this exact, existing, immutable BR-02 candidate row and must
+// never duplicate this SELECT.
+export async function loadBoardReportingCandidateForReview(tx, { organizationId, engagementId, boardReportingCandidateId }) {
   const { rows } = await tx.query(
     `SELECT board_reporting_candidate_id::text AS board_reporting_candidate_id,
             organization_id::text AS organization_id,
@@ -334,7 +338,11 @@ async function loadBoardReportingCandidateReviewQueueRow(tx, { organizationId, b
   return rows[0] || null;
 }
 
-function isValidBoardReportingCandidateReviewQueueRowForProfiles(row, {
+// Exported for reuse by BR-04's postgresBoardReportingCandidateHumanAuthorityDecisionRepository.js -
+// the same binding/profile check the BR-03B lifecycle transitions already
+// use, reused unchanged so BR-04 never re-implements its own notion of
+// which (queue_status, review_status) pairs are valid for this queue_type.
+export function isValidBoardReportingCandidateReviewQueueRowForProfiles(row, {
   organizationId,
   engagementId,
   boardReportingCandidateId,
@@ -371,7 +379,11 @@ function isValidBoardReportingCandidateReviewQueueRow(row, { organizationId, eng
   });
 }
 
-async function loadBoardReportingCandidateReviewQueueRowById(tx, { organizationId, reviewQueueItemId }) {
+// Exported for reuse by BR-04's postgresBoardReportingCandidateHumanAuthorityDecisionRepository.js -
+// loads the review_queue_items row by its own id (rather than by
+// target_object_id) so BR-04 can bind and verify the exact reviewQueueItemId
+// the caller supplied.
+export async function loadBoardReportingCandidateReviewQueueRowById(tx, { organizationId, reviewQueueItemId }) {
   const { rows } = await tx.query(
     `SELECT review_queue_item_id::text AS review_queue_item_id,
             organization_id::text AS organization_id,

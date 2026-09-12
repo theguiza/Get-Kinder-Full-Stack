@@ -149,6 +149,17 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // MVP UAT final completion: authoritative intake-context engagement read
     // (additive; every prior entry preserved verbatim).
     "/admin/organizations/:organizationId/engagements",
+    // BR-04: governed human final-release authority grant/revoke for the
+    // exact existing, immutable BR-02 Board Reporting candidate identified
+    // by the path's own boardReportingCandidateId, wrapped around the new
+    // postgresBoardReportingCandidateHumanAuthorityDecisionRepository.js.
+    // Requires the request body's own review_queue_item_id to bind to a
+    // resolved (BR-03B COMPLETE) 'board_reporting_candidate_review' queue
+    // row before any decision may be recorded. Grants only the same
+    // metadata-only "human final-release authority" concept the existing
+    // P3-17/P14-07 routes already grant - no Board manifest and no Board
+    // file/artifact.
+    "/admin/organizations/:organizationId/engagements/:engagementId/board-reporting/candidates/:boardReportingCandidateId/final-release-authority",
     // BR-03B: Board review COMPLETE surface - transitions an existing
     // BR-03B START row (in_progress/needs_gk_review) to resolved/resolved
     // only. Completion means only that a gk_admin completed the governed
