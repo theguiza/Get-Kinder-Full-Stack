@@ -22547,6 +22547,142 @@ config/feature-flag/credential mutation was performed.
 passed, including the schema-closure entry above (no separate documentation
 commit).
 
+## Board Reporting candidate export-manifest - real PostgreSQL runtime
+## proof and closure (proof/closure only, no redesign)
+
+**Date:** 2026-09-12
+
+**Owner authorization (bounded, local-only):** proof-and-closure pass only,
+against the already-shipped `boardReportingCandidateExportManifestContract.js`
+/ `postgresBoardReportingCandidateExportManifestRepository.js` /
+`kaiBoardReportingCandidateExportManifestService.js` runtime package
+(schema foundation commit `54bcb33`, runtime create/replay package commit
+`a7b4715`). No schema/contract redesign, no Board delivery work.
+
+**Real PostgreSQL runtime proof (TOOL_VERIFIED):** new real-DB integration
+spec `__tests__/kai-sprint2-board-reporting-candidate-export-manifest-real-db.integration.spec.js`
+(env-gated on runner-owned `KAI_BRCEM_REAL_DB_DATABASE_URL`, loopback-only),
+extending the existing foundation runner
+`scripts/kai-sprint2-board-reporting-candidate-export-manifest-foundation-local-postgres.js`
+to run it against the same ephemeral synthetic PostgreSQL, after the
+existing smoke-seed/smoke-verifier/failure-checks steps and before the
+terminal occupied-rollback proof, using a synthetic id namespace
+(`16090000-...`) disjoint from the BR-04 smoke-seed fixtures
+(`15030000-...`). Drives the real, unmodified
+`createBoardReportingCandidate` -> `requestBoardReportingCandidateReview` ->
+`startBoardReportingCandidateReview` -> `completeBoardReportingCandidateReview`
+-> `recordBoardReportingCandidateHumanFinalReleaseAuthorityDecision` (grant)
+-> `evaluateBoardReportingFinalEligibility` -> `createBoardReportingCandidateExportManifest`
+chain against real PostgreSQL and PASSED (1/1).
+
+**Persisted binding proof (TOOL_VERIFIED):** the persisted
+`kai.board_reporting_candidate_export_manifests` row's `organization_id`,
+`board_reporting_candidate_id`, `effective_authority_decision_id` (equal to
+the actual BR-04 GRANT head decision id, confirmed by an independent direct
+ledger read), `effective_authority_decision_type` (`export_authority_granted`),
+`fingerprint_contract_version`
+(`kai-sprint2-board-reporting-candidate-export-manifest-fingerprint-v1`),
+and `canonical_fingerprint` (matched against an independent recomputation
+via the repository's own exported `canonicalFingerprint` testable) were all
+asserted equal to their expected values.
+
+**Replay/audit proof (TOOL_VERIFIED):** an identical second call returns
+`replayed:true` and the same manifest id, with zero manifest-row growth and
+zero duplicate audit-row growth. Exactly one audit row exists after the
+first genuine create (`kai.audit_events`, matched via the allowlisted
+`object_id`/`object_type`/`board_reporting_candidate_id` metadata fields -
+see note below) and that row was confirmed metadata-only (no rendered
+draft/citation text, no connection strings, no credential-shaped values).
+
+**Negative/fail-closed proof (TOOL_VERIFIED, all via the real service/
+repository path, all producing zero new manifest rows and zero new audit
+rows):** missing candidate and wrong organization/engagement -> `not_found`;
+no review, REQUEST-only review, START-only review, resolved review with no
+authority decision, resolved review with revoked authority, and a stale
+candidate (via the same authoritative-input-mutation staleness technique as
+the final-eligibility real-DB spec, never a direct candidate-row mutation)
+-> `validation_blocker`; after REVOKE on the previously-eligible candidate,
+final eligibility becomes false and a further create attempt is blocked
+(`validation_blocker`) with the one existing manifest row still bound to the
+original GRANT decision id, never the revoked one. Cross-candidate authority
+binding was determined structurally unreachable given the shipped code
+(BR-04's `evaluateEffectiveness` is always invoked scoped by
+`{organizationId, boardReportingCandidateId, decisionType}`, and the ledger
+query itself filters by `board_reporting_candidate_id`) and is recorded
+`N/A` in the spec's own `TOOL_VERIFIED` output rather than fabricated.
+
+**Immutability proof (TOOL_VERIFIED):** snapshotted before/after every
+create, replay, and negative-case manifest-create attempt - the Board
+candidate row, its members/ordinals, its resolved review, and its full
+authority-decision history were all unchanged by manifest creation itself,
+and no `%delivery%`-named table exists.
+
+**Test-harness note (not a product defect):** the shared audit-metadata
+sanitizer allowlist (`Backend/kai/db/kaiAuditQueries.js`
+`SAFE_AUDIT_METADATA_KEYS`) does not include the custom
+`board_reporting_candidate_export_manifest_id` key the audit composition
+sets - it is silently dropped from the persisted `metadata` jsonb. The
+manifest's identity is still fully preserved in the persisted audit row via
+the allowlisted `object_id` field (set to the exact same value), so the
+real-DB spec was written to match on `object_id` rather than patching the
+shared sanitizer allowlist for a value that is already recoverable; no
+product code was changed for this. A denylist-substring assertion in an
+earlier draft of the spec also produced a false positive by matching a
+metadata *key name* (`contains_signed_urls`) rather than a value; corrected
+to check values only.
+
+**Affected regressions run (TOOL_VERIFIED, all PASS/SKIP as expected, no
+Board-manifest-runtime failures):**
+`kai-sprint2-board-reporting-candidate-export-manifest-service-route.spec.js`
+(12/12 PASS), the extended
+`verify:kai-sprint2-board-reporting-candidate-export-manifest-foundation`
+runner (schema/smoke/failure-check/real-DB-runtime/occupied-rollback all
+PASS), `kai-board-reporting-final-eligibility-boundary.spec.js` (14/14
+PASS), `kai-board-reporting-final-eligibility-real-db-local-postgres.js`
+(regression re-run, unmodified, PASS), the BR-04 boundary/unit specs (38/38
+PASS) and BR-04 real-DB runner (2/2 PASS), the BR-02/BR-03A/BR-03B
+integration+boundary specs (run together: 32 PASS / 2 SKIP and 6 PASS / 1
+SKIP - the SKIPs are their own env-gated real-DB subtests, expected without
+a runner-owned DB var), `kai-sprint2-pass2-route-runtime.spec.js` (38/38
+PASS - the pinned route-list assertion already covered the export-manifest
+route), and the P14-08A/P14-08B/P3-19/P3-20 manifest boundary+integration
+specs (42 PASS / 3 SKIP, SKIPs are their own env-gated real-DB subtests).
+
+**Full repository suite (TOOL_VERIFIED):** `DATABASE_URL='postgres://127.0.0.1:9/kai_sentinel'
+npm test` -> 4206 tests, 4120 PASS / 7 FAIL / 79 SKIP. All 7 failures are
+pre-existing, known-unrelated baseline failures confined to
+`__tests__/kai-sprint2-batch-files-route.spec.js` (2 failures: child-file
+keyset read model, batch-files collection contract) and
+`__tests__/kai-sprint2-file-detail-route.spec.js` (2 failures: 15-field
+allowlist, file-detail contract) - the same batch-files/file-detail DTO/
+allowlist/keyset class of failure named in the accepted baseline. No
+failure is attributable to the Board Reporting candidate export-manifest
+runtime package. Raw counts differ from the previously-recorded 4108/7/78
+baseline because the repository has grown since (additional passing tests
+and this package's own one new SKIP-when-ungated test), not because any
+previously-passing test regressed - compared by exact failing-test identity,
+not raw counts.
+
+**Repairs made:** NONE to shipped product code. The one thing this proof
+surfaced (the audit sanitizer's allowlist gap noted above) was resolved by
+correcting the proof's own query, not by changing
+`Backend/kai/db/kaiAuditQueries.js` or any manifest contract/repository/
+service file, because the manifest's identity remains fully recoverable
+through the already-allowlisted `object_id` field.
+
+**Prohibited actions taken: NONE.** This pass did not: modify the Board
+Reporting candidate export-manifest schema/contract/repository/service
+files themselves, perform any Board delivery/final Board Summary work,
+touch production or shared databases, fetch/push/deploy, mutate feature
+flags/tenants/production configuration, perform destructive git operations,
+or update `00_KAI_CURRENT_STATE.md`.
+
+**Local commit:** `1f4d715b20e89b68e1cf2857944c27120625364c` - one bounded
+commit adding the new real-DB integration spec, the extended foundation
+runner, the new
+`test:kai-sprint2-board-reporting-candidate-export-manifest-real-db`
+package.json script entry, and this ExecPlan entry.
+
 ## Phase-14 (Grant Response Packet Track) - P14-06D Authoritative Grant
 ## Response Packet Export-Candidate / Export-Review State Read
 

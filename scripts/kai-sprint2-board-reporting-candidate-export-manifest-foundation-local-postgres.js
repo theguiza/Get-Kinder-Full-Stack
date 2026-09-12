@@ -203,6 +203,38 @@ try {
   psqlFile("scripts/kai-sprint2-board-reporting-candidate-export-manifest-foundation-smoke-verifier.sql");
   psqlFile("scripts/kai-sprint2-board-reporting-candidate-export-manifest-foundation-failure-checks.sql");
 
+  // Real-DB runtime proof: drives the actual createBoardReportingCandidateExportManifest
+  // service/repository (create/replay/negative/audit/immutability) against
+  // this same runner-owned ephemeral database, using a synthetic id
+  // namespace (16090000-...) distinct from the smoke-seed fixtures above
+  // (15030000-...) so neither collides with the other.
+  const manifestRealDbTestResult = spawnSync("node", [
+    "--test",
+    "__tests__/kai-sprint2-board-reporting-candidate-export-manifest-real-db.integration.spec.js",
+  ], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    stdio: "inherit",
+    env: {
+      ...process.env,
+      DATABASE_URL: sentinelUrl,
+      DATABASE_URL_LOCAL: "",
+      PGURL_LOCAL: "",
+      RENDER_DATABASE_URL: "",
+      PROD_DATABASE_URL: "",
+      DB_HOST: "127.0.0.1",
+      DB_PORT: port,
+      DB_NAME: dbName,
+      DB_USER: user,
+      DB_PASSWORD: "",
+      KAI_BRCEM_REAL_DB_DATABASE_URL: targetUrl,
+    },
+  });
+  if (manifestRealDbTestResult.status !== 0) {
+    throw new Error("Board Reporting candidate export-manifest real-DB runtime proof failed");
+  }
+  console.log("TOOL_VERIFIED Board Reporting candidate export-manifest real-DB runtime proof passed.");
+
   const rollbackWhileManifestsExist = spawnSync(psql, [
     "-v", "ON_ERROR_STOP=1", "-d", dbName, "-f",
     "migrations/kai_sprint2_board_reporting_candidate_export_manifest_foundation.rollback.sql",
