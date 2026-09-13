@@ -258,6 +258,72 @@ test("bounded pagination completes all pages and fails closed when generated-con
   assert.equal(repositoryCalls, 0);
 });
 
+test("data gap memo idempotency lifecycle: new attempt key permits changed authoritative gaps while old key remains fail-closed", async () => {
+  const runs = new Map();
+  const repositoryCalls = [];
+  const generatedContentRepository = {
+    async createDataGapMemoDraft(repositoryInput) {
+      repositoryCalls.push(repositoryInput);
+      const requestFingerprint = fingerprintDataGapMemoRequest({
+        requestedAudience: repositoryInput.requestedAudience,
+        claimIds: repositoryInput.claimIds,
+        engagementId: repositoryInput.engagementId,
+      });
+      const existing = runs.get(repositoryInput.idempotencyKey);
+      if (existing) {
+        if (existing.requestFingerprint !== requestFingerprint) {
+          return { ok: false, data: null, error: { code: "duplicate_conflict", status: 409 } };
+        }
+        return { ok: true, data: { generatedContentDraftId: existing.generatedContentDraftId, replayed: true }, error: null };
+      }
+      const generatedContentDraftId = `00000000-0000-4000-8000-${String(900000000000 + runs.size).padStart(12, "0")}`;
+      runs.set(repositoryInput.idempotencyKey, { requestFingerprint, generatedContentDraftId });
+      return { ok: true, data: { generatedContentDraftId, replayed: false }, error: null };
+    },
+  };
+  let authoritativeGaps = { items: [gaps.items[0]] };
+  const deps = {
+    env: enabledEnv,
+    getEngagementForOrganization: stubGetEngagementForOrganization,
+    async listOrganizationEvidenceGapsForImpactLibrary() {
+      return {
+        ok: true,
+        data: {
+          items: authoritativeGaps.items,
+          limit: 25,
+          afterGapLogItemId: null,
+          truncated: false,
+          nextAfterGapLogItemId: null,
+        },
+        error: null,
+      };
+    },
+    generatedContentRepository,
+    draftGenerator: async () => ({ blocks: [] }),
+    metadataOnlyAudit: {},
+  };
+
+  const first = await createDataGapMemoDraft(input({ idempotencyKey: "data-gap-memo-k1" }), deps);
+  assert.equal(first.ok, true);
+  assert.deepEqual(repositoryCalls.at(-1).claimIds, [CLAIM]);
+
+  const unchangedNewAttempt = await createDataGapMemoDraft(input({ idempotencyKey: "data-gap-memo-k2" }), deps);
+  assert.equal(unchangedNewAttempt.ok, true);
+  assert.notEqual(unchangedNewAttempt.data.generatedContentDraftId, first.data.generatedContentDraftId);
+  assert.deepEqual(repositoryCalls.at(-1).claimIds, [CLAIM]);
+
+  authoritativeGaps = { items: [gaps.items[0], gaps.items[1]] };
+  const changedWithNewAttempt = await createDataGapMemoDraft(input({ idempotencyKey: "data-gap-memo-k3" }), deps);
+  assert.equal(changedWithNewAttempt.ok, true);
+  assert.deepEqual(repositoryCalls.at(-1).claimIds, [CLAIM, CLAIM_2]);
+
+  const changedWithOldAttempt = await createDataGapMemoDraft(input({ idempotencyKey: "data-gap-memo-k1" }), deps);
+  assert.equal(changedWithOldAttempt.ok, false);
+  assert.equal(changedWithOldAttempt.error.code, "duplicate_conflict");
+  assert.equal(changedWithOldAttempt.error.status, 409);
+  assert.deepEqual(repositoryCalls.at(-1).claimIds, [CLAIM, CLAIM_2]);
+});
+
 test("claim to citation path uses existing deterministic claim/evidence traceability semantics; evidence ids are not guessed", () => {
   const ok = validateGeneratedContentDraft({
     requestedAudience: "internal",

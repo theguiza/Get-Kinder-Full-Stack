@@ -1248,9 +1248,9 @@ test("Impact Evidence Library data-gap-memo generation has no browser-selected-c
   assert.deepEqual(Object.keys(noClaimsState.postJsonCalls[0].body).sort(), ["engagement_id", "idempotency_key"]);
   assert.equal("claim_ids" in noClaimsState.postJsonCalls[0].body, false);
 
-  // 5: changing selectedGenerationClaimIds alone must not change the Data Gap
-  // request identity (idempotency_key), across empty, one-claim, and a
-  // differently-sized claim selection.
+  // Changing selectedGenerationClaimIds cannot define Data Gap membership or
+  // request shape: a later explicit Data Gap action still sends no claim_ids.
+  // It does, however, get a fresh attempt-scoped idempotency key.
   const { generateDraft: generateWithOneClaim, state: oneClaimState } = buildGenerateDraft(handlerSource, {
     selectedGenerationClaimIds: [claimId],
   });
@@ -1266,8 +1266,52 @@ test("Impact Evidence Library data-gap-memo generation has no browser-selected-c
     oneClaimState.postJsonCalls[0].body.idempotency_key,
     otherClaimsState.postJsonCalls[0].body.idempotency_key,
   ];
-  assert.equal(keys[0], keys[1]);
-  assert.equal(keys[1], keys[2]);
+  assert.notEqual(keys[0], keys[1]);
+  assert.notEqual(keys[1], keys[2]);
+  assert.equal(keys.every((key) => /^data-gap-memo-[0-9a-f-]{36}$/.test(key)), true);
+  for (const call of [
+    noClaimsState.postJsonCalls[0],
+    oneClaimState.postJsonCalls[0],
+    otherClaimsState.postJsonCalls[0],
+  ]) {
+    assert.deepEqual(Object.keys(call.body).sort(), ["engagement_id", "idempotency_key"]);
+    assert.equal("claim_ids" in call.body, false);
+  }
+  assert.doesNotMatch(handlerSource, /data-gap-memo-\$\{requestOrganizationId\}-\$\{requestEngagementId\}/);
+});
+
+test("Impact Evidence Library data-gap-memo idempotency key is created once per explicit request attempt and renewed on a later Generate action", async () => {
+  const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+  const handlerSource = extractGenerateDraftHandlerSource(uiSource);
+  const dataGapBody = ({ idempotencyKey, engagementId: requestEngagementId }) => ({
+    idempotency_key: idempotencyKey,
+    engagement_id: requestEngagementId,
+  });
+
+  let postObservedWhileInFlight = null;
+  const { generateDraft, state } = buildGenerateDraft(handlerSource, {
+    selectedGenerationClaimIds: [],
+    postJson: async (path, body) => {
+      postObservedWhileInFlight = body.idempotency_key;
+      state.postJsonCalls.push({ path, body });
+      assert.equal(body.idempotency_key, postObservedWhileInFlight);
+      return {
+        statusCode: 201,
+        body: { ok: true, data: { generatedContentDraftId: "00000000-0000-4000-8000-000000000991" } },
+      };
+    },
+  });
+
+  await generateDraft(createDataGapMemoPath, "data-gap-memo", dataGapBody);
+  const firstKey = state.postJsonCalls[0].body.idempotency_key;
+  assert.equal(firstKey, postObservedWhileInFlight);
+  assert.equal(state.postJsonCalls.length, 1);
+
+  await generateDraft(createDataGapMemoPath, "data-gap-memo", dataGapBody);
+  const secondKey = state.postJsonCalls[1].body.idempotency_key;
+  assert.notEqual(secondKey, firstKey);
+  assert.equal(state.postJsonCalls.length, 2);
+  assert.deepEqual(Object.keys(state.postJsonCalls[1].body).sort(), ["engagement_id", "idempotency_key"]);
 });
 
 test("Impact Evidence Library readiness-assessment successful generation rehydrates authoritative Generated Drafts and selected packet state", async () => {

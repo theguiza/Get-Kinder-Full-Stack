@@ -1988,7 +1988,7 @@ export default function ImpactEvidenceLibrary() {
     setGeneratedDraftPacket(null);
     const idempotencyKey = isClaimDrivenGeneration
       ? `${idempotencyPrefix}-${selectedGenerationClaimIds.join("-")}`
-      : `${idempotencyPrefix}-${requestOrganizationId}-${requestEngagementId}`;
+      : `${idempotencyPrefix}-${globalThis.crypto.randomUUID()}`;
     const createResult = await postJson(
       pathBuilder(requestOrganizationId),
       requestBodyBuilder

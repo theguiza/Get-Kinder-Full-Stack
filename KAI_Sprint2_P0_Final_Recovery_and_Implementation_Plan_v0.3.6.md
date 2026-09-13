@@ -28435,3 +28435,97 @@ every Node/npm command):**
 claims no longer gate Data Gap Memo availability or influence its request
 identity. Backend/schema/database change required: NO. No push or deployment
 performed.
+
+**Final repair (same package, post-closure defect fix), continuing from
+`dcd47acd4f69dcbd050a00a98400cce4bf4a4ad5`:** the immediately prior repair
+correctly removed browser-selected-claim authority from Data Gap Memo, but it
+introduced a permanent frontend key:
+`data-gap-memo-${organizationId}-${engagementId}`. Because the established
+backend fingerprint for Data Gap Memo includes server-derived current gap
+`claimIds`, that permanent key caused the next legitimate Data Gap generation
+after authoritative gaps changed to reuse the old idempotency key and hit the
+backend's intended `duplicate_conflict` protection.
+
+**Final repair:** Data Gap Memo now uses one opaque request-attempt key per
+explicit Generate action: `data-gap-memo-${globalThis.crypto.randomUUID()}`.
+The key is created exactly once inside the existing `generateDraft` handler
+invocation before the POST, so the same logical request attempt uses the same
+key and a later explicit Generate action gets a different key. The key is not
+derived from selected claims, browser-derived gaps, claim IDs, evidence IDs,
+React render counts, array ordering, a page-session counter, or a browser-
+computed server fingerprint. The Data Gap request body remains exactly
+`engagement_id` and `idempotency_key`; the three claim-driven generators keep
+their existing claim-selection guard and key behavior unchanged.
+
+**Backend boundary preserved:** no backend source, fingerprinting, generated-
+content idempotency/replay semantics, authoritative gap collection,
+currentness, pagination, 20-claim bound, citation resolution, persistence,
+schema, or migration code changed. Focused backend proof now demonstrates:
+gaps X + K1 succeeds; unchanged gaps + K2 succeeds as a separate generation;
+changed gaps Y + K3 succeeds; deliberately reusing K1 against Y still returns
+`duplicate_conflict`.
+
+**Files changed:** `frontend/ImpactEvidenceLibrary.jsx`,
+`public/js/bundles/entry.js`,
+`__tests__/kai-sprint2-impact-evidence-library.spec.js`,
+`__tests__/kai-sprint2-data-gap-memo-draft-generation-boundary.spec.js`, and
+this ExecPlan.
+
+**Test evidence (`DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel` set for
+every Node/npm command; localhost listener suites rerun on the established
+permitted loopback surface after sandbox `listen EPERM`):**
+- Focused Data Gap frontend/product:
+  `node --test __tests__/kai-sprint2-impact-evidence-library.spec.js` ->
+  132/132 PASS.
+- Focused Data Gap backend:
+  `node --test __tests__/kai-sprint2-data-gap-memo-draft-generation-boundary.spec.js`
+  -> 10/10 PASS.
+- Direct generic idempotency/fingerprint regression:
+  `node --test __tests__/kai-sprint2-idempotency-contract.spec.js
+  __tests__/kai-sprint2-batch-idempotency-conflict.spec.js
+  __tests__/kai-sprint2-file-idempotency-conflict.spec.js` -> 32/32 PASS.
+- Gap/currentness/pagination proof:
+  `node --test __tests__/kai-package-4-organization-evidence-gaps-acceptance.spec.js
+  __tests__/kai-package-4-organization-evidence-gaps-semantic-parity.spec.js
+  __tests__/kai-package-4-organization-evidence-gaps-followup-column-projection-regression.spec.js
+  __tests__/kai-package-4-organization-evidence-gaps-repair.spec.js` -> 14/14 PASS.
+- Generated Drafts/generic generated-content regression:
+  `node --test __tests__/kai-sprint2-p3-01-generated-content-drafts-boundary.spec.js
+  __tests__/kai-sprint2-p3-02-generated-draft-review-packet-boundary.spec.js
+  __tests__/kai-sprint2-generated-drafts-library.spec.js
+  __tests__/kai-sprint2-generated-draft-export-review-read-recovery-boundary.spec.js`
+  -> 37/37 PASS.
+- Citation/review regression:
+  `node --test __tests__/kai-sprint2-p2-06-claim-traceability-boundary.spec.js
+  __tests__/kai-claim-traceability-validator-contract-repair.spec.js
+  __tests__/kai-sprint2-p2-06-claim-traceability-missing-log-regression.spec.js
+  __tests__/kai-sprint2-generated-content-review-start-audit-contract-boundary.spec.js
+  __tests__/kai-sprint2-p3-04-generated-content-review-completion-boundary.spec.js`
+  -> 42/42 PASS.
+- Readiness regression:
+  `node --test __tests__/kai-sprint2-readiness-assessment-draft-generation-boundary.spec.js
+  __tests__/kai-sprint2-requirements-readiness-rollup.spec.js
+  __tests__/kai-sprint2-requirements-readiness-rollup.integration.spec.js`
+  -> 14/14 PASS, 1 skipped by existing convention.
+- Impact Narrative regression:
+  `node --test __tests__/kai-sprint2-p13-01-impact-narrative-boundary.spec.js`
+  -> 6/6 PASS.
+- Grant/shared regression:
+  `node --test __tests__/kai-sprint2-impact-library-grant-response-packet.spec.js
+  __tests__/kai-sprint2-p14-06-grant-response-packet-export-review-lifecycle-frontend.spec.js
+  __tests__/kai-sprint2-p14-06e1-grant-response-packet-frontend-hydration.spec.js`
+  -> 78/78 PASS.
+- Board/shared regression:
+  `node --test __tests__/kai-sprint2-br-05-board-reporting-impact-evidence-library-frontend.spec.js
+  __tests__/kai-sprint2-br-board-reporting-browser-api-composition.spec.js`
+  -> 44/44 PASS.
+- API/routes:
+  `node --test __tests__/kai-sprint2-pass2-route-runtime.spec.js
+  __tests__/kai-sprint2-pass2-api-contract.spec.js
+  __tests__/kai-sprint2-api-contract.spec.js` -> 76/76 PASS.
+- Frontend production build: `npm run build` -> PASS.
+
+**Status:** DATA_GAP_MEMO_PACKAGE_CLOSED. Backend/schema/database change
+required: NO. No push, deployment, production mutation, feature-flag change,
+secret handling, real-client-data access, or `00_KAI_CURRENT_STATE.md` update
+performed.
