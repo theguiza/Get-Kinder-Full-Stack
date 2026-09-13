@@ -1229,6 +1229,47 @@ test("Impact Evidence Library data-gap-memo generation request uses the exact Da
   assert.doesNotMatch(logicSource, /engagementId.*gap|gap.*engagementId|filter\([^)]*gap/i);
 });
 
+test("Impact Evidence Library data-gap-memo generation has no browser-selected-claim prerequisite: fires with zero selected claims and request identity is unaffected by claim selection", async () => {
+  const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+  const handlerSource = extractGenerateDraftHandlerSource(uiSource);
+  const dataGapBody = ({ idempotencyKey, engagementId: requestEngagementId }) => ({
+    idempotency_key: idempotencyKey,
+    engagement_id: requestEngagementId,
+  });
+
+  // 1 & 2: zero selected claims must not block Data Gap Memo generation, and
+  // the click must still issue the exact Data Gap POST.
+  const { generateDraft: generateWithNoClaims, state: noClaimsState } = buildGenerateDraft(handlerSource, {
+    selectedGenerationClaimIds: [],
+  });
+  await generateWithNoClaims(createDataGapMemoPath, "data-gap-memo", dataGapBody);
+  assert.equal(noClaimsState.postJsonCalls.length, 1);
+  assert.equal(noClaimsState.postJsonCalls[0].path, createDataGapMemoPath(organizationId));
+  assert.deepEqual(Object.keys(noClaimsState.postJsonCalls[0].body).sort(), ["engagement_id", "idempotency_key"]);
+  assert.equal("claim_ids" in noClaimsState.postJsonCalls[0].body, false);
+
+  // 5: changing selectedGenerationClaimIds alone must not change the Data Gap
+  // request identity (idempotency_key), across empty, one-claim, and a
+  // differently-sized claim selection.
+  const { generateDraft: generateWithOneClaim, state: oneClaimState } = buildGenerateDraft(handlerSource, {
+    selectedGenerationClaimIds: [claimId],
+  });
+  await generateWithOneClaim(createDataGapMemoPath, "data-gap-memo", dataGapBody);
+
+  const { generateDraft: generateWithOtherClaims, state: otherClaimsState } = buildGenerateDraft(handlerSource, {
+    selectedGenerationClaimIds: [claimId, "00000000-0000-4000-8000-000000000777"],
+  });
+  await generateWithOtherClaims(createDataGapMemoPath, "data-gap-memo", dataGapBody);
+
+  const keys = [
+    noClaimsState.postJsonCalls[0].body.idempotency_key,
+    oneClaimState.postJsonCalls[0].body.idempotency_key,
+    otherClaimsState.postJsonCalls[0].body.idempotency_key,
+  ];
+  assert.equal(keys[0], keys[1]);
+  assert.equal(keys[1], keys[2]);
+});
+
 test("Impact Evidence Library readiness-assessment successful generation rehydrates authoritative Generated Drafts and selected packet state", async () => {
   const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
   const handlerSource = extractGenerateDraftHandlerSource(uiSource);
@@ -1510,8 +1551,18 @@ test("Impact Evidence Library generation handler: no request is issued (evidence
 
 test("Impact Evidence Library generation buttons: disabled whenever no explicit engagement is selected", () => {
   const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
-  const disabledMatches = uiSource.match(/disabled=\{generatingDraft \|\| selectedGenerationClaimIds\.length === 0 \|\| !engagementId\}/g) || [];
-  assert.equal(disabledMatches.length, 4);
+  // Evidence Summary, Impact Narrative, and Readiness Assessment are all
+  // claim-driven generators and keep the shared claim-selection prerequisite.
+  const claimDrivenDisabledMatches = uiSource.match(/disabled=\{generatingDraft \|\| selectedGenerationClaimIds\.length === 0 \|\| !engagementId\}/g) || [];
+  assert.equal(claimDrivenDisabledMatches.length, 3);
+  // Data Gap Memo has no real claim-selection prerequisite (its route
+  // deliberately accepts no claim_ids - membership is server-derived), so its
+  // button must not depend on selectedGenerationClaimIds.
+  const dataGapButtonStart = uiSource.indexOf("onClick={generateDataGapMemo}");
+  assert.notEqual(dataGapButtonStart, -1);
+  const dataGapButtonSlice = uiSource.slice(dataGapButtonStart, dataGapButtonStart + 200);
+  assert.match(dataGapButtonSlice, /disabled=\{generatingDraft \|\| !engagementId\}/);
+  assert.doesNotMatch(dataGapButtonSlice, /selectedGenerationClaimIds/);
 });
 
 test("Impact Evidence Library bootstraps its organization selection from the server, never from a typed or fabricated id", () => {

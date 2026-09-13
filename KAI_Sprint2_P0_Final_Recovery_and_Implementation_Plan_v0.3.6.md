@@ -28371,3 +28371,67 @@ required approved loopback escalation after sandbox `EPERM`):**
 
 **Status:** Data Gap Memo product implementation closed; schema/database change
 required: NO. No push or deployment performed.
+
+**Repair (same package, post-closure defect fix), continuing from
+`1390176139548e52f0ebf5dcc96acea09cb9227f`:** the closure above shipped one
+coupled defect: `generateDraft`'s shared availability guard
+(`selectedGenerationClaimIds.length === 0`) and its shared idempotency-key
+derivation (`${idempotencyPrefix}-${selectedGenerationClaimIds.join("-")}`)
+both applied unconditionally to Data Gap Memo even though its route
+deliberately accepts no `claim_ids` and authoritative gap membership is
+server-derived. This made the "Generate Data Gap Memo" button falsely require
+an unrelated claim selection, and made unrelated claim-checkbox changes alter
+Data Gap request identity, even though the request body sent to the server
+was already correctly limited to `engagement_id` + `idempotency_key`.
+
+**Repair:** `generateDraft` now derives `isClaimDrivenGeneration` from
+whether a `requestBodyBuilder` was supplied (true for Evidence Summary,
+Impact Narrative, and Readiness Assessment; false only for Data Gap Memo,
+the sole caller that passes one). The claim-selection prerequisite gate and
+the `selectedGenerationClaimIds`-based idempotency key now apply only when
+`isClaimDrivenGeneration` is true. Data Gap Memo's idempotency key is now
+`data-gap-memo-${organizationId}-${engagementId}` - deterministic, and
+invariant under unrelated claim-checkbox changes. No backend change was
+required: the generic idempotency/fingerprint contract
+(`fingerprintDataGapMemoRequest` over server-derived `claimIds` +
+`requestedAudience` + `engagementId`, unique on `(organization_id,
+idempotency_key)`) already applied correctly once the frontend stopped
+feeding it a claim-selection-derived key. The three claim-driven generators'
+guard and key derivation are unchanged.
+
+**Files changed:** `frontend/ImpactEvidenceLibrary.jsx`,
+`public/js/bundles/entry.js`, `__tests__/kai-sprint2-impact-evidence-library.spec.js`,
+and this ExecPlan.
+
+**Test evidence (`DATABASE_URL` set to a non-listening loopback sentinel for
+every Node/npm command):**
+- Focused Impact Evidence Library (frontend/product, includes new Data Gap
+  zero-claim-selection and request-identity-invariance proof):
+  `node --test __tests__/kai-sprint2-impact-evidence-library.spec.js` ->
+  131/131 PASS.
+- Data Gap backend boundary:
+  `node --test __tests__/kai-sprint2-data-gap-memo-draft-generation-boundary.spec.js`
+  -> 9/9 PASS.
+- Generic generated-content / readiness / impact-narrative / grant / board /
+  pass2-route-runtime regression:
+  `node --test __tests__/kai-sprint2-*generated-content* __tests__/kai-sprint2-*readiness*
+  __tests__/kai-sprint2-*impact-narrative* __tests__/*grant* __tests__/*board*
+  __tests__/kai-sprint2-pass2-route-runtime.spec.js` (non-integration files) ->
+  642/642 PASS.
+- Citation/review, Generated Drafts, and API/routes regression:
+  `node --test __tests__/kai-sprint2-p3-02-generated-draft-review-packet-boundary.spec.js
+  __tests__/kai-sprint2-generated-drafts-library.spec.js
+  __tests__/kai-sprint2-generated-draft-export-review-read-recovery-boundary.spec.js
+  __tests__/kai-sprint2-p2-06-claim-traceability-boundary.spec.js
+  __tests__/kai-claim-traceability-validator-contract-repair.spec.js
+  __tests__/kai-sprint2-p2-06-claim-traceability-missing-log-regression.spec.js
+  __tests__/kai-sprint2-generated-content-review-start-audit-contract-boundary.spec.js
+  __tests__/kai-sprint2-pass2-api-contract.spec.js __tests__/kai-sprint2-api-contract.spec.js`
+  -> 87/87 PASS.
+- Frontend production build: `npm run build` -> PASS.
+- `git diff --check` -> PASS.
+
+**Status:** Data Gap Memo package repaired and re-closed; browser-selected
+claims no longer gate Data Gap Memo availability or influence its request
+identity. Backend/schema/database change required: NO. No push or deployment
+performed.

@@ -1972,13 +1972,23 @@ export default function ImpactEvidenceLibrary() {
   }, [organizationId]);
 
   const generateDraft = useCallback(async (pathBuilder, idempotencyPrefix, requestBodyBuilder = null) => {
-    if (audience !== "internal" || selectedGenerationClaimIds.length === 0 || !engagementId) return;
+    // Data Gap Memo is the one generator here with a requestBodyBuilder: its
+    // route deliberately accepts no claim_ids (authoritative gap membership
+    // is server-derived - see createDataGapMemoDraft), so unlike the other
+    // three claim-driven generators it has no real claim-selection
+    // prerequisite and its idempotency_key must not vary with the browser's
+    // unrelated claim checkboxes.
+    const isClaimDrivenGeneration = !requestBodyBuilder;
+    if (audience !== "internal" || !engagementId) return;
+    if (isClaimDrivenGeneration && selectedGenerationClaimIds.length === 0) return;
     const requestOrganizationId = organizationId;
     const requestEngagementId = engagementId;
     setGeneratingDraft(true);
     setMessage("");
     setGeneratedDraftPacket(null);
-    const idempotencyKey = `${idempotencyPrefix}-${selectedGenerationClaimIds.join("-")}`;
+    const idempotencyKey = isClaimDrivenGeneration
+      ? `${idempotencyPrefix}-${selectedGenerationClaimIds.join("-")}`
+      : `${idempotencyPrefix}-${requestOrganizationId}-${requestEngagementId}`;
     const createResult = await postJson(
       pathBuilder(requestOrganizationId),
       requestBodyBuilder
@@ -2955,7 +2965,7 @@ export default function ImpactEvidenceLibrary() {
                 type="button"
                 className="btn btn-sm btn-outline-primary mt-2 w-100"
                 onClick={generateDataGapMemo}
-                disabled={generatingDraft || selectedGenerationClaimIds.length === 0 || !engagementId}
+                disabled={generatingDraft || !engagementId}
               >
                 {generatingDraft ? "Generating..." : "Generate Data Gap Memo"}
               </button>
