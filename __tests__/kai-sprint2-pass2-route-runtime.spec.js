@@ -212,6 +212,14 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // BR-03A: request-review-on-an-immutable-Board-candidate surface
     // (additive; every prior entry preserved verbatim).
     "/admin/organizations/:organizationId/engagements/:engagementId/board-reporting/candidates/:boardReportingCandidateId/review-request",
+    // Board Reporting candidate workflow-state read: the single
+    // browser-facing authoritative read composing current BR-03 review
+    // state, effective BR-04 final-release authority, current Board final
+    // eligibility (structured blockers/currentness), and this candidate's
+    // export-manifest history - over four EXISTING authoritative reads.
+    // Performs no mutation and reimplements no governance semantics
+    // (additive; every prior entry preserved verbatim).
+    "/admin/organizations/:organizationId/engagements/:engagementId/board-reporting/candidates/:boardReportingCandidateId/workflow-state",
     // KAI Package 4: read-only /impact-library Funder Requirements
     // composition (classifier + Package 3A/3B current engagement assessment
     // per applicable requirement), no applicability or assessment write.

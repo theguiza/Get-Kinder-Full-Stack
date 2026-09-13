@@ -100,6 +100,40 @@ function readResult(overrides = {}) {
   };
 }
 
+const workflowStateRoutePath = "/admin/organizations/:organizationId/engagements/:engagementId/board-reporting/candidates/:boardReportingCandidateId/workflow-state";
+
+function workflowStateResult(overrides = {}) {
+  return {
+    ok: true,
+    data: {
+      organizationId: ORG,
+      engagementId: ENGAGEMENT,
+      boardReportingCandidateId: CANDIDATE,
+      reviewState: {
+        reviewQueueItemId: "04000000-0000-4000-8000-000000000601",
+        queueStatus: "resolved",
+        reviewStatus: "resolved",
+        reviewUpdatedAt: "2026-09-12T11:00:00.000Z",
+      },
+      effectiveAuthority: {
+        decisionType: "export_authority_granted",
+        effective: true,
+        reason: null,
+        headDecisionId: "04000000-0000-4000-8000-000000000701",
+      },
+      finalEligibility: {
+        finalEligibility: true,
+        failedGates: [],
+        blockers: [],
+        currentnessGate: { current: true, stale: false },
+      },
+      exportManifests: [],
+      ...overrides,
+    },
+    error: null,
+  };
+}
+
 async function withRunningApp(t, { actorContext = gkAdminActorContext, authenticated = true } = {}) {
   const scenario = { authenticated, actorContext, serviceCalls: [], dependencyCalls: [] };
   const restoreFeatureFlag = (() => {
@@ -293,6 +327,65 @@ test("GET exact Board Reporting candidate delegates to readBoardReportingCandida
   assert.equal(badId.body.error.code, "validation_blocker");
 });
 
+test("GET Board Reporting candidate workflow-state delegates to readBoardReportingCandidateWorkflowState, authorized solely by the route's own boardReportingCandidateId, and performs no mutation", async (t) => {
+  const restoreService = intakeRouteTestables.setIntakeServiceForTest({
+    async readBoardReportingCandidateWorkflowState(input) {
+      scenario.serviceCalls.push(input);
+      return workflowStateResult();
+    },
+  });
+  t.after(restoreService);
+  const { scenario, requestJson } = await withRunningApp(t);
+  const path = `${basePath}/admin/organizations/${ORG}/engagements/${ENGAGEMENT}/board-reporting/candidates/${CANDIDATE}/workflow-state`;
+  const response = await requestJson(path);
+  assert.equal(response.statusCode, 200);
+  assert.equal(scenario.serviceCalls.length, 1);
+  assert.deepEqual(scenario.serviceCalls[0], {
+    organizationId: ORG,
+    engagementId: ENGAGEMENT,
+    boardReportingCandidateId: CANDIDATE,
+    actorContext: gkAdminActorContext,
+  });
+  assert.deepEqual(response.body.data, workflowStateResult().data);
+
+  // a second, identical GET yields byte-identical data - no mutation, no
+  // side effect visible across calls.
+  const again = await requestJson(path);
+  assert.deepEqual(again.body.data, response.body.data);
+
+  const withQuery = await requestJson(`${path}?foo=bar`);
+  assert.equal(withQuery.statusCode, 422);
+  assert.equal(withQuery.body.error.code, "validation_blocker");
+
+  const badId = await requestJson(
+    `${basePath}/admin/organizations/${ORG}/engagements/${ENGAGEMENT}/board-reporting/candidates/not-a-uuid/workflow-state`,
+  );
+  assert.equal(badId.statusCode, 422);
+  assert.equal(badId.body.error.code, "validation_blocker");
+
+  // unauthenticated caller fails closed before the service is reached
+  scenario.serviceCalls = [];
+  const unauthorizedScenario = await withRunningApp(t, { authenticated: false });
+  const unauthorized = await unauthorizedScenario.requestJson(path);
+  assert.equal(unauthorized.statusCode, 401);
+  assert.equal(scenario.serviceCalls.length, 0);
+});
+
+test("GET Board Reporting candidate workflow-state propagates a not_found (cross-org/cross-engagement/unknown candidate) result from the service verbatim", async (t) => {
+  const restoreService = intakeRouteTestables.setIntakeServiceForTest({
+    async readBoardReportingCandidateWorkflowState(input) {
+      scenario.serviceCalls.push(input);
+      return { ok: false, data: null, error: { code: "not_found", status: 404 } };
+    },
+  });
+  t.after(restoreService);
+  const { scenario, requestJson } = await withRunningApp(t);
+  const path = `${basePath}/admin/organizations/${ORG}/engagements/${ENGAGEMENT}/board-reporting/candidates/${CANDIDATE}/workflow-state`;
+  const response = await requestJson(path);
+  assert.equal(response.statusCode, 404);
+  assert.equal(response.body.error.code, "not_found");
+});
+
 test("all three routes fail closed with feature_disabled while KAI_SPRINT2_ENABLED is off", async (t) => {
   const original = process.env.KAI_SPRINT2_ENABLED;
   process.env.KAI_SPRINT2_ENABLED = "false";
@@ -328,6 +421,7 @@ test("all three routes fail closed with feature_disabled while KAI_SPRINT2_ENABL
   for (const path of [
     `${basePath}/admin/organizations/${ORG}/engagements/${ENGAGEMENT}/board-reporting`,
     `${basePath}/admin/organizations/${ORG}/engagements/${ENGAGEMENT}/board-reporting/candidates/${CANDIDATE}`,
+    `${basePath}/admin/organizations/${ORG}/engagements/${ENGAGEMENT}/board-reporting/candidates/${CANDIDATE}/workflow-state`,
   ]) {
     const response = await get(path);
     assert.equal(response.statusCode, 403);
@@ -341,6 +435,7 @@ test("Board Reporting browser API composition routes contain no raw SQL and no d
     [packetRoutePath, "get"],
     [createCandidateRoutePath, "post"],
     [readCandidateRoutePath, "get"],
+    [workflowStateRoutePath, "get"],
   ]) {
     const layer = sprint2IntakeApiRouter.stack.find(
       (candidate) => candidate.route?.path === path && candidate.route?.methods?.[method],

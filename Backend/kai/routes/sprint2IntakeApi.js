@@ -96,6 +96,7 @@ let boardReportingPacketServicePromise = null;
 let boardReportingCandidateServicePromise = null;
 let boardReportingCandidateHumanFinalReleaseAuthorityServicePromise = null;
 let boardReportingCandidateExportManifestServicePromise = null;
+let boardReportingCandidateWorkflowStateServicePromise = null;
 let boardReportingCandidateExportManifestMarkdownServicePromise = null;
 let evidenceLineageServicePromise = null;
 let evidenceCoverageAssessmentServicePromise = null;
@@ -3248,6 +3249,53 @@ router.get(
     return invokeService(res, async () => {
       const service = await getBoardReportingCandidateService();
       return service.readBoardReportingCandidate({
+        organizationId: identifiers.organizationId,
+        engagementId: identifiers.engagementId,
+        boardReportingCandidateId: identifiers.boardReportingCandidateId,
+        actorContext: sprint2MappedActorContext(req),
+      });
+    });
+  },
+);
+
+async function getBoardReportingCandidateWorkflowStateService() {
+  if (intakeServiceOverride?.readBoardReportingCandidateWorkflowState) return intakeServiceOverride;
+  boardReportingCandidateWorkflowStateServicePromise ||= import(
+    "../services/kaiBoardReportingCandidateWorkflowStateService.js"
+  );
+  return boardReportingCandidateWorkflowStateServicePromise;
+}
+
+/**
+ * Board Reporting candidate workflow-state read, browser-facing: authorized
+ * solely by the route's own exact boardReportingCandidateId - never
+ * organizationId+engagementId alone, and never a latest/newest/preferred
+ * selection. Read-only: no SQL, no direct database access, no mutation, and
+ * delegates exactly once to
+ * kaiBoardReportingCandidateWorkflowStateService.readBoardReportingCandidateWorkflowState,
+ * which itself composes four EXISTING authoritative reads (BR-03 review
+ * state, BR-04 effective final-release authority, the real Board final-
+ * eligibility gate, and this candidate's export-manifest history) and
+ * reimplements none of their governance semantics. actorContext is always
+ * server-derived from sprint2MappedActorContext(req), never accepted from
+ * the caller.
+ */
+router.get(
+  "/admin/organizations/:organizationId/engagements/:engagementId/board-reporting/candidates/:boardReportingCandidateId/workflow-state",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    const identifiers = boardReportingCandidateReviewIdentifier(req);
+    if (!identifiers || Object.keys(req.query || {}).length !== 0) {
+      return sendKaiError(res, "validation_blocker", {
+        blockers: [routeValidationBlocker(
+          "invalid_organization_id_engagement_id_or_board_reporting_candidate_id",
+          "organization_id_engagement_id_board_reporting_candidate_id",
+        )],
+      });
+    }
+    return invokeService(res, async () => {
+      const service = await getBoardReportingCandidateWorkflowStateService();
+      return service.readBoardReportingCandidateWorkflowState({
         organizationId: identifiers.organizationId,
         engagementId: identifiers.engagementId,
         boardReportingCandidateId: identifiers.boardReportingCandidateId,
