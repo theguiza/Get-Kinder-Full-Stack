@@ -158,6 +158,24 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // MVP UAT final completion: authoritative intake-context engagement read
     // (additive; every prior entry preserved verbatim).
     "/admin/organizations/:organizationId/engagements",
+    // Board Reporting browser-facing API composition: read-only current
+    // Board packet over the existing authoritative
+    // kaiBoardReportingPacketService.getBoardReportingPacket (additive;
+    // every prior entry preserved verbatim).
+    "/admin/organizations/:organizationId/engagements/:engagementId/board-reporting",
+    // Board Reporting browser-facing API composition: BR-02 candidate
+    // create/reuse over the existing authoritative
+    // kaiBoardReportingCandidateService.createBoardReportingCandidate - the
+    // browser sends only its own idempotency_key, never membership,
+    // fingerprint, review outcome, authority, eligibility, or manifest data
+    // (additive; every prior entry preserved verbatim).
+    "/admin/organizations/:organizationId/engagements/:engagementId/board-reporting/candidates",
+    // Board Reporting browser-facing API composition: exact BR-02 candidate
+    // read, authorized solely by the route's own exact
+    // boardReportingCandidateId, over the existing authoritative
+    // kaiBoardReportingCandidateService.readBoardReportingCandidate
+    // (additive; every prior entry preserved verbatim).
+    "/admin/organizations/:organizationId/engagements/:engagementId/board-reporting/candidates/:boardReportingCandidateId",
     // Board Reporting candidate export-manifest create/reuse for the exact
     // existing, immutable BR-02 Board Reporting candidate identified by the
     // path's own boardReportingCandidateId, wrapped around the new

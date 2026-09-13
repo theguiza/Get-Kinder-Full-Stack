@@ -92,6 +92,7 @@ let grantResponsePacketExportReviewServicePromise = null;
 let grantResponsePacketHumanFinalReleaseAuthorityServicePromise = null;
 let grantResponsePacketExportManifestServicePromise = null;
 let grantResponsePacketExportManifestMarkdownServicePromise = null;
+let boardReportingPacketServicePromise = null;
 let boardReportingCandidateServicePromise = null;
 let boardReportingCandidateHumanFinalReleaseAuthorityServicePromise = null;
 let boardReportingCandidateExportManifestServicePromise = null;
@@ -3095,15 +3096,166 @@ router.get(
   },
 );
 
+function boardReportingEngagementIdentifier(req = {}) {
+  const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
+  const engagementId = typeof req.params?.engagementId === "string" ? req.params.engagementId : "";
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId) || organizationId !== organizationId.toLowerCase()) return null;
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(engagementId) || engagementId !== engagementId.toLowerCase()) return null;
+  return { organizationId, engagementId };
+}
+
+async function getBoardReportingPacketService() {
+  if (intakeServiceOverride?.getBoardReportingPacket) return intakeServiceOverride;
+  boardReportingPacketServicePromise ||= import("../services/kaiBoardReportingPacketService.js");
+  return boardReportingPacketServicePromise;
+}
+
+/**
+ * Board Reporting packet: the browser-facing analogue of the existing
+ * Grant Response Packet read above, over the existing authoritative
+ * kaiBoardReportingPacketService.getBoardReportingPacket. Read-only: no SQL,
+ * no direct database access, delegates exactly once. Grants no review,
+ * authority, eligibility, or manifest state of its own - it is the same
+ * eligible-member packet BR-02 candidate creation already reads.
+ */
+router.get(
+  "/admin/organizations/:organizationId/engagements/:engagementId/board-reporting",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    const identifiers = boardReportingEngagementIdentifier(req);
+    if (!identifiers || Object.keys(req.query || {}).length !== 0) {
+      return sendKaiError(res, "validation_blocker", {
+        blockers: [routeValidationBlocker(
+          "invalid_organization_id_engagement_id_or_query",
+          "organization_id_engagement_id",
+        )],
+      });
+    }
+    return invokeService(res, async () => {
+      const service = await getBoardReportingPacketService();
+      return service.getBoardReportingPacket({
+        organizationId: identifiers.organizationId,
+        engagementId: identifiers.engagementId,
+        actorContext: sprint2MappedActorContext(req),
+      });
+    });
+  },
+);
+
 async function getBoardReportingCandidateService() {
   if (
-    intakeServiceOverride?.requestBoardReportingCandidateReview
+    intakeServiceOverride?.createBoardReportingCandidate
+    || intakeServiceOverride?.readBoardReportingCandidate
+    || intakeServiceOverride?.requestBoardReportingCandidateReview
     || intakeServiceOverride?.startBoardReportingCandidateReview
     || intakeServiceOverride?.completeBoardReportingCandidateReview
   ) return intakeServiceOverride;
   boardReportingCandidateServicePromise ||= import("../services/kaiBoardReportingCandidateService.js");
   return boardReportingCandidateServicePromise;
 }
+
+function validateCreateBoardReportingCandidateRequestOrSend(req, res) {
+  if (!metadataContentTypeIsSupported(req)) {
+    sendKaiError(res, "unsupported_media_type");
+    return null;
+  }
+  const identifiers = boardReportingEngagementIdentifier(req);
+  if (!identifiers) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id_or_engagement_id")],
+    });
+    return null;
+  }
+  const payload = requestPayload(req);
+  const keys = Object.keys(payload);
+  if (
+    keys.length !== 1
+    || keys[0] !== "idempotency_key"
+    || typeof payload.idempotency_key !== "string"
+    || payload.idempotency_key !== payload.idempotency_key.trim()
+    || !/^[A-Za-z0-9._:-]{8,128}$/.test(payload.idempotency_key)
+  ) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("invalid_create_board_reporting_candidate_request", "idempotency_key")],
+    });
+    return null;
+  }
+  return { organizationId: identifiers.organizationId, engagementId: identifiers.engagementId, idempotencyKey: payload.idempotency_key };
+}
+
+/**
+ * BR-02 candidate create/reuse, browser-facing: organizationId and
+ * engagementId come from the route path; the browser sends only its own
+ * idempotency_key. Membership, fingerprint, review outcome, authority,
+ * eligibility, and manifest data are never accepted from the client - the
+ * existing kaiBoardReportingCandidateService/postgresBoardReportingCandidateRepository
+ * vertical resolves the current eligible packet and derives candidate
+ * membership/fingerprint itself, and an identical idempotency_key replay
+ * against the same current state returns the same existing candidate
+ * (replayed: true) rather than creating a new one.
+ */
+router.post(
+  "/admin/organizations/:organizationId/engagements/:engagementId/board-reporting/candidates",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    const parsed = validateCreateBoardReportingCandidateRequestOrSend(req, res);
+    if (!parsed) return;
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    return invokeService(res, async () => {
+      const service = await getBoardReportingCandidateService();
+      return service.createBoardReportingCandidate({
+        organizationId: parsed.organizationId,
+        engagementId: parsed.engagementId,
+        idempotencyKey: parsed.idempotencyKey,
+        actorContext,
+        now,
+      }, {
+        metadataOnlyAudit: createProductionMetadataOnlyAuditForBoardReportingCandidate({
+          organizationId: parsed.organizationId,
+          engagementId: parsed.engagementId,
+          actorContext,
+          now,
+        }),
+      });
+    }, 201);
+  },
+);
+
+/**
+ * BR-02 exact candidate read, browser-facing: authorized solely by the
+ * route's own exact boardReportingCandidateId - never organizationId +
+ * engagementId alone, and never a latest/newest/preferred selection.
+ * Read-only: no SQL, no direct database access, delegates exactly once to
+ * the existing kaiBoardReportingCandidateService.readBoardReportingCandidate.
+ * Returns the immutable member snapshot captured at creation time, not the
+ * current packet (mirrors the BR-02 repository read/immutability
+ * guarantee already covered by BR-02 foundation tests).
+ */
+router.get(
+  "/admin/organizations/:organizationId/engagements/:engagementId/board-reporting/candidates/:boardReportingCandidateId",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    const identifiers = boardReportingCandidateReviewIdentifier(req);
+    if (!identifiers || Object.keys(req.query || {}).length !== 0) {
+      return sendKaiError(res, "validation_blocker", {
+        blockers: [routeValidationBlocker(
+          "invalid_organization_id_engagement_id_or_board_reporting_candidate_id",
+          "organization_id_engagement_id_board_reporting_candidate_id",
+        )],
+      });
+    }
+    return invokeService(res, async () => {
+      const service = await getBoardReportingCandidateService();
+      return service.readBoardReportingCandidate({
+        organizationId: identifiers.organizationId,
+        engagementId: identifiers.engagementId,
+        boardReportingCandidateId: identifiers.boardReportingCandidateId,
+        actorContext: sprint2MappedActorContext(req),
+      });
+    });
+  },
+);
 
 function boardReportingCandidateReviewIdentifier(req = {}) {
   const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
@@ -4791,6 +4943,8 @@ export const __testables = {
   grantResponsePacketExportManifestIdentifiers,
   sendBoardReportingCandidateExportManifestMarkdownAttachment,
   boardReportingCandidateExportManifestIdentifiers,
+  boardReportingEngagementIdentifier,
+  validateCreateBoardReportingCandidateRequestOrSend,
   boardReportingCandidateReviewIdentifier,
   validateRequestBoardReportingCandidateReviewRequestOrSend,
   boardReportingCandidateReviewQueueIdentifier,
