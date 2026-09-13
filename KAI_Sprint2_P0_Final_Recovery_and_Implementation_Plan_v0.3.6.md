@@ -22848,6 +22848,75 @@ BR-04 authority.
 **Local commit:** pending (recorded once this ExecPlan entry and package are
 staged and committed as one coherent local commit; no push).
 
+## Board Reporting - repository-package closure: standalone BR-02 runner
+## converged onto the shared engagement tenant-safe-identity prerequisite
+
+**Date:** 2026-09-13
+
+**Owner authorization (bounded, local-only, closure repair):** the standalone
+BR-02 local-Postgres proof runner
+(`scripts/kai-sprint2-br-02-board-reporting-candidate-foundation-local-postgres.js`)
+still manufactured the engagement tenant-safe-identity prerequisite itself
+via a runner-owned inline `ALTER TABLE kai.engagements ADD CONSTRAINT ...
+UNIQUE (engagement_id, organization_id)`, while the complete Board export-
+manifest chain runner
+(`scripts/kai-sprint2-board-reporting-candidate-export-manifest-foundation-local-postgres.js`)
+already consumed the shared, semantically-detecting
+`scripts/kai-sprint2-engagements-tenant-safe-identity-prerequisite-converge.sql`
+package. That left the two Board proof surfaces on two different prerequisite
+paths - the one remaining Board repository-package inconsistency identified
+at this package's closure. No BR-03/BR-04/final-eligibility/manifest/final-
+delivery/production-schema change; no new engagement migration; no BR-03
+forward repair.
+
+**Change (TOOL_VERIFIED):** in the BR-02 standalone runner, replaced the
+runner-owned inline `psqlExec("ALTER TABLE kai.engagements ADD CONSTRAINT
+kai_br_02_engagements_id_org_unique UNIQUE (engagement_id,
+organization_id);")` with
+`psqlFile("scripts/kai-sprint2-engagements-tenant-safe-identity-prerequisite-converge.sql")`,
+in the same bootstrap position (immediately after the organization-enablement
+synthetic bootstrap and before the remaining BR-02 prerequisite/dependency
+setup), matching the sequence already used by the export-manifest chain
+runner. The now-unused `psqlExec` helper was removed from the same file as
+part of this same edit. No other file was changed.
+
+**Proof (TOOL_VERIFIED), all against this repository's own local/ephemeral
+PostgreSQL proof surface:**
+- Engagement tenant-safe-identity prerequisite package runner: both
+  converge/no-op cases and rollback-ownership cases passed.
+- BR-02 board-reporting-candidate-foundation local-Postgres runner: verifier
+  15/15 PASS rows; focused integration/boundary tests 13/13 PASS.
+- BR-03A board-reporting-candidate-review-request local-Postgres runner:
+  35/35 PASS.
+- BR-03B board-reporting-candidate-review-lifecycle local-Postgres runner:
+  80 PASS / 0 FAIL / 1 SKIPPED (unchanged from the prior accepted baseline).
+- Complete Board export-manifest local-Postgres chain runner: forward /
+  rollback(empty) / forward proof, real-DB runtime create/replay/audit/
+  negatives/immutability proof, and terminal append-only rollback-refusal
+  proof all passed.
+- Focused P14-08C Grant Response Packet + Board FINAL_MANIFEST_BOUND
+  Markdown boundary regression
+  (`__tests__/kai-sprint2-p14-08-c-grant-response-packet-export-manifest-final-markdown-boundary.spec.js`,
+  `__tests__/kai-sprint2-board-reporting-candidate-export-manifest-final-markdown-boundary.spec.js`):
+  37/37 PASS.
+- `git diff --check`: PASS (no whitespace errors).
+
+**Result:** neither Board proof surface (the BR-02 standalone runner nor the
+Board export-manifest chain runner) creates an independent, runner-owned
+engagement composite-UNIQUE constraint any longer; both now converge onto the
+same shared prerequisite package. BR-02/BR-03A/BR-03B migrations, BR-03/BR-04
+semantics, Board final eligibility, Board manifest creation, Board final
+delivery, and production schema were not touched.
+
+**Prohibited actions taken: NONE.** No production/shared database access,
+no migrations, no push, no deploy, no Render/cloud/environment/feature-flag
+change, no secrets, no real client data, no destructive action, no Board
+redesign, no other-feature inspection, no repository-wide normalization of
+unrelated historical synthetic runners.
+
+**Local commit:** one bounded local commit created after all required
+package-focused proofs and `git diff --check` passed; no push.
+
 ## Phase-14 (Grant Response Packet Track) - P14-06D Authoritative Grant
 ## Response Packet Export-Candidate / Export-Review State Read
 

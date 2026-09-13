@@ -182,8 +182,13 @@ try {
 
   psqlExec("DELETE FROM kai.review_queue_items WHERE queue_type = 'board_reporting_candidate_review';");
   psqlFile("migrations/kai_sprint2_br_03b_board_reporting_candidate_review_lifecycle.rollback.sql");
-  const afterRollback = psqlExec("SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conrelid = 'kai.review_queue_items'::regclass AND conname = 'review_queue_items_br_03a_board_reporting_candidate_review_contract_check';");
-  if (!afterRollback.includes("board_reporting_candidate_review")) {
+  // Detected structurally (contype/content) rather than by the exact
+  // (possibly-truncated) catalog name, so this also positively proves the
+  // restored contract's actual shape - specifically, that it does NOT still
+  // admit the BR-03B-only 'in_progress' state - rather than merely finding
+  // an object that happens to hold the expected name.
+  const afterRollback = psqlExec("SELECT pg_get_constraintdef(oid) AS def FROM pg_constraint WHERE conrelid = 'kai.review_queue_items'::regclass AND contype = 'c' AND pg_get_constraintdef(oid) LIKE '%board_reporting_candidate_review%';");
+  if (!afterRollback.includes("board_reporting_candidate_review") || afterRollback.includes("in_progress")) {
     throw new Error("BR-03B rollback did not restore the BR-03A REQUEST-only contract check");
   }
   psqlFile("migrations/kai_sprint2_br_03b_board_reporting_candidate_review_lifecycle.sql");

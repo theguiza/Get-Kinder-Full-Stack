@@ -126,7 +126,7 @@ async function proveRunnerOwnedTarget() {
 
 function installRuntimeMigrationChain() {
   psqlFile("scripts/kai-sprint2-organization-enablement-bootstrap-synthetic-schema.sql");
-  psqlExec("ALTER TABLE kai.engagements ADD CONSTRAINT kai_brcem_engagements_id_org_unique UNIQUE (engagement_id, organization_id);");
+  psqlFile("scripts/kai-sprint2-engagements-tenant-safe-identity-prerequisite-converge.sql");
   psqlFile("scripts/kai-sprint2-gate-a-bootstrap-synthetic-schema.sql");
   psqlFile("migrations/kai_sprint2_gate_a_p0_upload_lifecycle.sql");
   psqlFile("migrations/kai_sprint2_gate_a_p0_policy_decision_replay.sql");

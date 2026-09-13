@@ -63,10 +63,6 @@ function psqlFile(path) {
   return run(psql, ["-v", "ON_ERROR_STOP=1", "-d", dbName, "-f", path], { capture: true }).stdout;
 }
 
-function psqlExec(sql) {
-  return run(psql, ["-v", "ON_ERROR_STOP=1", "-d", dbName, "-c", sql], { capture: true }).stdout;
-}
-
 const EXPECTED_CHECKS = [
   "board_reporting_candidates_table_present",
   "board_reporting_candidate_members_table_present",
@@ -140,7 +136,7 @@ try {
   await proveRunnerOwnedTarget();
 
   psqlFile("scripts/kai-sprint2-organization-enablement-bootstrap-synthetic-schema.sql");
-  psqlExec("ALTER TABLE kai.engagements ADD CONSTRAINT kai_br_02_engagements_id_org_unique UNIQUE (engagement_id, organization_id);");
+  psqlFile("scripts/kai-sprint2-engagements-tenant-safe-identity-prerequisite-converge.sql");
   psqlFile("scripts/kai-sprint2-gate-a-bootstrap-synthetic-schema.sql");
   psqlFile("migrations/kai_sprint2_gate_a_p0_upload_lifecycle.sql");
   psqlFile("migrations/kai_sprint2_gate_a_p0_policy_decision_replay.sql");
