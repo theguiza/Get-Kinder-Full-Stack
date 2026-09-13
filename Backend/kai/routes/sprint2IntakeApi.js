@@ -2642,6 +2642,7 @@ async function getGeneratedContentService() {
   if (
     intakeServiceOverride?.createEvidenceSummaryDraft
     || intakeServiceOverride?.createImpactNarrativeDraft
+    || intakeServiceOverride?.createReadinessAssessmentDraft
     || intakeServiceOverride?.getGeneratedDraftReviewPacket
     || intakeServiceOverride?.startGeneratedContentReview
     || intakeServiceOverride?.completeGeneratedContentReview
@@ -2950,6 +2951,78 @@ router.post(
           actorContext,
           now,
           route: "p13_01_create_impact_narrative_draft",
+        }),
+      });
+    }, 201);
+  },
+);
+
+function validateCreateReadinessAssessmentRequestOrSend(req, res) {
+  if (!metadataContentTypeIsSupported(req)) {
+    sendKaiError(res, "unsupported_media_type");
+    return null;
+  }
+  const identifiers = eligibleClaimsForAudienceOrganizationIdentifier(req);
+  const payload = requestPayload(req);
+  const keys = Object.keys(payload);
+  if (
+    !identifiers
+    || keys.length !== 3
+    || !keys.every((key) => key === "claim_ids" || key === "idempotency_key" || key === "engagement_id")
+    || typeof payload.engagement_id !== "string"
+    || !KAI_SPRINT2_P0_PATTERNS.uuid.test(payload.engagement_id)
+    || payload.engagement_id !== payload.engagement_id.toLowerCase()
+    || !Array.isArray(payload.claim_ids)
+    || payload.claim_ids.length < 1
+    || payload.claim_ids.length > 20
+    || payload.claim_ids.some((claimId) => typeof claimId !== "string" || !KAI_SPRINT2_P0_PATTERNS.uuid.test(claimId) || claimId !== claimId.toLowerCase())
+    || payload.claim_ids.length !== new Set(payload.claim_ids).size
+    || typeof payload.idempotency_key !== "string"
+    || payload.idempotency_key !== payload.idempotency_key.trim()
+    || !/^[ -~]{8,128}$/.test(payload.idempotency_key)
+  ) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker(
+        "invalid_internal_readiness_assessment_generation_request",
+        "organization_id_claim_ids_idempotency_key_or_engagement_id",
+      )],
+    });
+    return null;
+  }
+  return {
+    organizationId: identifiers.organizationId,
+    claimIds: [...payload.claim_ids].sort(),
+    idempotencyKey: payload.idempotency_key,
+    engagementId: payload.engagement_id,
+  };
+}
+
+router.post(
+  "/admin/organizations/:organizationId/generated-content-drafts/readiness-assessment",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    const parsed = validateCreateReadinessAssessmentRequestOrSend(req, res);
+    if (!parsed) return;
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    return invokeService(res, async () => {
+      const service = await getGeneratedContentService();
+      const { createProductionReadinessAssessmentDraftGenerator } = await import("../services/kaiReadinessAssessmentDraftGenerator.js");
+      return service.createReadinessAssessmentDraft({
+        organizationId: parsed.organizationId,
+        engagementId: parsed.engagementId,
+        requestedAudience: "internal",
+        claimIds: parsed.claimIds,
+        idempotencyKey: parsed.idempotencyKey,
+        actorContext,
+        now,
+      }, {
+        draftGenerator: createProductionReadinessAssessmentDraftGenerator(),
+        metadataOnlyAudit: createProductionMetadataOnlyAuditForGeneratedContentDraft({
+          organizationId: parsed.organizationId,
+          actorContext,
+          now,
+          route: "readiness_assessment_create_draft",
         }),
       });
     }, 201);

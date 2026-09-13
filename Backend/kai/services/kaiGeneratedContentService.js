@@ -9,6 +9,7 @@
   import { getEngagementForOrganization } from "../db/kaiQueries.js";
   import { EXPORT_REVIEW_LIFECYCLE_PROFILES } from "../dictionary/exportReviewQueueContract.js";
   import { __exportReviewServiceContract } from "./kaiExportReviewService.js";
+  import { listOrganizationRequirementsReadiness } from "./kaiRequirementAssessmentService.js";
 
   const { EXPORT_REVIEW_ALLOWED_ROLES } = __exportReviewServiceContract;
 
@@ -17,6 +18,7 @@
   const COMPLETE_GENERATED_CONTENT_REVIEW_ALLOWED_ROLES = new Set(["gk_reviewer", "gk_admin"]);
   const CREATE_EVIDENCE_SUMMARY_OPERATION = "create_evidence_summary_draft";
   const CREATE_IMPACT_NARRATIVE_OPERATION = "create_impact_narrative_draft";
+  const CREATE_READINESS_ASSESSMENT_OPERATION = "create_readiness_assessment_draft";
   const GET_GENERATED_DRAFT_REVIEW_PACKET_OPERATION = "get_generated_draft_review_packet";
   // Determines only whether the actor may see the export-review identity/
   // state this same read projects (below) - the identical role gate
@@ -30,7 +32,7 @@
   const COMPLETE_GENERATED_CONTENT_REVIEW_OPERATION = "complete_generated_content_review";
   const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
   const AUDIENCES = new Set(["internal", "funder", "public"]);
-  const ALLOWED_GENERATED_CONTENT_TYPES = new Set(["evidence_summary", "impact_narrative"]);
+  const ALLOWED_GENERATED_CONTENT_TYPES = new Set(["evidence_summary", "impact_narrative", "readiness_assessment"]);
 
   function hasExactKeys(value, allowed) {
     return Boolean(value)
@@ -69,6 +71,10 @@
   }
 
   function isCreateImpactNarrativeDraftInput(input) {
+    return isCreateEvidenceSummaryDraftInput(input) && input.requestedAudience === "internal";
+  }
+
+  function isCreateReadinessAssessmentDraftInput(input) {
     return isCreateEvidenceSummaryDraftInput(input) && input.requestedAudience === "internal";
   }
 
@@ -220,6 +226,75 @@
     const result = await repository.createImpactNarrativeDraft(input, {
       draftGenerator: dependencies.draftGenerator,
       metadataOnlyAudit: dependencies.metadataOnlyAudit,
+    });
+    if (!result.ok) {
+      return buildKaiError(result.error.code, {
+        status: result.error.status,
+        ...(result.blockers ? { blockers: result.blockers } : {}),
+      });
+    }
+    return { ok: true, data: result.data, error: null };
+  }
+
+  export async function createReadinessAssessmentDraft(input, dependencies = {}) {
+    const env = dependencies.env || process.env;
+    if (!isKaiSprint2Enabled(env)) return buildKaiError("feature_disabled");
+    if (!isKaiGenerationEnabled(env) || !areKaiSprint2GenerationFeaturesEnabled(env)) {
+      return buildKaiError("feature_disabled");
+    }
+    if (!isCreateReadinessAssessmentDraftInput(input)) {
+      return buildKaiError("validation_blocker");
+    }
+    if (!isMappedHumanActor(input.actorContext)) {
+      return buildKaiError("authorization_denied");
+    }
+
+    const auth = validateActorCanPerformOperation(
+      input.actorContext,
+      CREATE_READINESS_ASSESSMENT_OPERATION,
+      input.organizationId,
+      { allowedRoles: GENERATED_CONTENT_ALLOWED_ROLES },
+    );
+    if (!auth.ok) {
+      return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers });
+    }
+
+    const readEngagement = dependencies.getEngagementForOrganization || getEngagementForOrganization;
+    const engagementRecord = await readEngagement({
+      organizationId: input.organizationId,
+      engagementId: input.engagementId,
+    });
+
+    const tenant = validateTenantBoundaryConsistency({
+      expectedOrganizationId: input.organizationId,
+      payload: { organization_id: input.organizationId, engagement_id: input.engagementId },
+      engagementRecord,
+    });
+    if (tenant.severity === "blocker") {
+      return buildKaiError("tenant_boundary_violation", { blockers: [tenant] });
+    }
+
+    const readReadiness = dependencies.listOrganizationRequirementsReadiness || listOrganizationRequirementsReadiness;
+    const readinessResult = await readReadiness(
+      { organizationId: input.organizationId, actorContext: input.actorContext },
+      dependencies.requirementsReadinessDependencies ? {
+        ...dependencies.requirementsReadinessDependencies,
+        env,
+      } : { env },
+    );
+    if (!readinessResult.ok) {
+      return buildKaiError(readinessResult.error.code, {
+        status: readinessResult.error.status,
+        ...(readinessResult.blockers ? { blockers: readinessResult.blockers } : {}),
+      });
+    }
+
+    const repository =
+      dependencies.generatedContentRepository || (await createDefaultGeneratedContentRepository());
+    const result = await repository.createReadinessAssessmentDraft(input, {
+      draftGenerator: dependencies.draftGenerator,
+      metadataOnlyAudit: dependencies.metadataOnlyAudit,
+      authoritativeReadiness: readinessResult.data,
     });
     if (!result.ok) {
       return buildKaiError(result.error.code, {
@@ -477,6 +552,7 @@
     COMPLETE_GENERATED_CONTENT_REVIEW_ALLOWED_ROLES,
     CREATE_EVIDENCE_SUMMARY_OPERATION,
     CREATE_IMPACT_NARRATIVE_OPERATION,
+    CREATE_READINESS_ASSESSMENT_OPERATION,
     GET_GENERATED_DRAFT_REVIEW_PACKET_OPERATION,
     PROJECT_EXPORT_REVIEW_VISIBILITY_OPERATION,
     START_GENERATED_CONTENT_REVIEW_OPERATION,

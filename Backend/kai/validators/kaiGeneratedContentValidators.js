@@ -4,6 +4,7 @@ const VALIDATOR_KEYS = Object.freeze([
   "VAL-GEN-003",
   "VAL-GEN-004",
   "VAL-GEN-005",
+  "VAL-GEN-006",
 ]);
 
 const NUMERIC_LITERAL_PATTERN = /(?<![A-Za-z0-9_])[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:%|\b)/g;
@@ -50,6 +51,8 @@ export function validateGeneratedContentDraft({
   generationClaims,
   blocks,
   draftAudience = requestedAudience,
+  contentType = null,
+  authoritativeReadiness = null,
 } = {}) {
   const claimById = generationClaimsById(generationClaims || []);
   const citationSet = requestedCitationSet(generationClaims || []);
@@ -131,10 +134,43 @@ export function validateGeneratedContentDraft({
       : blocker("VAL-GEN-005", "draft_audience_exceeds_authority"),
   );
 
+  if (contentType === "readiness_assessment") {
+    const readinessBlocksPositive =
+      blocksContainPositiveReadinessAssertion(blocks)
+      && (
+        generationClaimsContainBlockers(generationClaims)
+        || readinessContainsGapOrUnsupportedRequirement(authoritativeReadiness)
+      );
+    results.push(
+      readinessBlocksPositive
+        ? blocker("VAL-GEN-006", "readiness_gap_or_blocker_stated_as_positive_assertion")
+        : pass("VAL-GEN-006"),
+    );
+  }
+
   return Object.freeze({
     ok: results.every((result) => result.severity === "pass"),
     results: Object.freeze(results),
     blockers: Object.freeze(results.filter((result) => result.severity === "blocker")),
+  });
+}
+
+function blocksContainPositiveReadinessAssertion(blocks = []) {
+  return (blocks || []).some((block) => (
+    /\b(all|every|fully|complete|ready|met|satisfied|supports?|sufficient)\b/i.test(block?.text || "")
+    && !/\b(gap|gaps|limitation|limitations|blocked|missing|not yet|unresolved|unsupported|requires|needs|cannot|does not)\b/i.test(block?.text || "")
+  ));
+}
+
+function generationClaimsContainBlockers(generationClaims = []) {
+  return (generationClaims || []).some((claim) => Array.isArray(claim.limitationCodes) && claim.limitationCodes.length > 0);
+}
+
+function readinessContainsGapOrUnsupportedRequirement(readiness) {
+  return (readiness?.requirements || []).some((requirement) => {
+    if (requirement?.assessed !== true || requirement?.assessment === null) return true;
+    const state = requirement.assessment?.assessment_state;
+    return state !== "satisfied";
   });
 }
 

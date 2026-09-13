@@ -28008,3 +28008,74 @@ idempotency), BR-03 review lifecycle, BR-04 final-release authority, final
 eligibility/currentness, export manifests, FINAL Markdown, the authoritative
 workflow-state read, the Impact Evidence Library Board UI, and unchanged-
 composition hard-reload recovery are all implemented, tested, and committed.
+
+## READINESS_ASSESSMENT_DRAFT_GENERATION - Backend Governed Draft Path
+
+**Scope:** backend only. No frontend UI, schema/migration, production/shared
+database, push, deploy, feature-flag, secret, or `00_KAI_CURRENT_STATE.md`
+change. Starting HEAD was `6a0c94b262d9340a636e152bfed8097d734d6510` on
+`main`; working tree was clean; HEAD contained the owner-confirmed Board
+Reporting closure commit.
+
+**Authoritative Readiness source:** reused
+`Backend/kai/services/kaiRequirementAssessmentService.js#listOrganizationRequirementsReadiness`
+and its repository/read-model DTO from
+`Backend/kai/dictionary/postgresRequirementAssessmentRepository.js`. The
+generator receives this authoritative DTO as input and may only summarize it;
+it does not determine or override applicability, requirement state, coverage,
+human acceptance, eligibility, review state, blockers, or gaps.
+
+**Generated-content path reused:** extended the existing generic
+`generation_runs` -> `generated_content_drafts` ->
+`generated_content_blocks` -> `generated_content_citations` ->
+`generated_content_review` queue path in
+`Backend/kai/dictionary/postgresGeneratedContentRepository.js` and
+`Backend/kai/services/kaiGeneratedContentService.js` with the content type
+`readiness_assessment`. Added
+`Backend/kai/services/kaiReadinessAssessmentDraftGenerator.js` as the
+production adapter. Added the internal-only route
+`POST /admin/organizations/:organizationId/generated-content-drafts/readiness-assessment`
+in `Backend/kai/routes/sprint2IntakeApi.js`; actor context, audience, and
+Readiness source are server-derived, with no route SQL/direct DB access.
+
+**Governance controls:** `readiness_assessment` is accepted by the shared
+generated-content contract and review-packet DTO, but excluded from the
+Grant/Board packet-member content-type set so Impact Narrative, Grant, and
+Board membership behavior remains unchanged. The generic validator now has a
+Readiness-only `VAL-GEN-006` blocker that rejects unconditional positive
+readiness assertions when the authoritative Readiness state has gaps or cited
+claims carry blockers/limitations. Existing citation, eligible-claim,
+audience-authority, unsupported numeric/causal language, draft-status, and
+human-review requirements remain in force.
+
+**Files changed:** `Backend/kai/dictionary/postgresGeneratedContentRepository.js`,
+`Backend/kai/routes/sprint2IntakeApi.js`,
+`Backend/kai/services/kaiGeneratedContentService.js`,
+`Backend/kai/services/kaiReadinessAssessmentDraftGenerator.js`,
+`Backend/kai/validators/kaiGeneratedContentValidators.js`,
+`__tests__/kai-sprint2-readiness-assessment-draft-generation-boundary.spec.js`,
+`__tests__/kai-sprint2-pass2-route-runtime.spec.js`, and this ExecPlan.
+
+**Test evidence (all Node commands used
+`DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel`):**
+- `node --test __tests__/kai-sprint2-readiness-assessment-draft-generation-boundary.spec.js`:
+  7/7 PASS.
+- `node --test __tests__/kai-sprint2-requirements-readiness-rollup.spec.js`:
+  first sandbox run hit local listener `EPERM`; approved loopback-listener
+  rerun passed 6/6.
+- `node --test __tests__/kai-sprint2-p3-01-generated-content-drafts-boundary.spec.js __tests__/kai-sprint2-p3-04-generated-content-review-completion-boundary.spec.js`:
+  30/30 PASS.
+- `node --test __tests__/kai-sprint2-p3-02-generated-draft-review-packet-boundary.spec.js __tests__/kai-sprint2-p3-06-export-review-packet-boundary.spec.js`:
+  26/26 PASS.
+- `node --test __tests__/kai-sprint2-p13-01-impact-narrative-boundary.spec.js`:
+  6/6 PASS.
+- `node --test __tests__/kai-sprint2-p14-04-grant-response-packet-export-candidate-service.spec.js __tests__/kai-grant-response-packet-boundary.spec.js`:
+  33/33 PASS.
+- `node --test __tests__/kai-sprint2-p14-06d-grant-response-packet-authoritative-read.spec.js __tests__/kai-sprint2-p14-09-generated-content-validation-blocker-diagnostic-propagation.spec.js`:
+  19/19 PASS.
+- `node --test __tests__/kai-sprint2-pass2-route-runtime.spec.js`: after
+  updating the affected route snapshot for the new backend route, approved
+  loopback-listener rerun passed 38/38.
+
+**Status:** backend governed Readiness Assessment draft generation closed;
+schema/database change required: NO.

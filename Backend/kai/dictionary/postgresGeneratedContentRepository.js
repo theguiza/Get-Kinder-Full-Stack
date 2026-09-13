@@ -40,7 +40,13 @@ const RESULT_STATUS = Object.freeze({
 
 const CONTENT_TYPE = "evidence_summary";
 const IMPACT_NARRATIVE_CONTENT_TYPE = "impact_narrative";
-const ALLOWED_GENERATED_CONTENT_TYPES = new Set([CONTENT_TYPE, IMPACT_NARRATIVE_CONTENT_TYPE]);
+const READINESS_ASSESSMENT_CONTENT_TYPE = "readiness_assessment";
+const PACKET_MEMBER_CONTENT_TYPES = new Set([CONTENT_TYPE, IMPACT_NARRATIVE_CONTENT_TYPE]);
+const ALLOWED_GENERATED_CONTENT_TYPES = new Set([
+  CONTENT_TYPE,
+  IMPACT_NARRATIVE_CONTENT_TYPE,
+  READINESS_ASSESSMENT_CONTENT_TYPE,
+]);
 const DRAFT_STATUS = "draft";
 const REVIEW_STATUS = GENERATED_CONTENT_REVIEW_QUEUE_CONTRACT.reviewStatus;
 const REVIEW_QUEUE_TYPE = GENERATED_CONTENT_REVIEW_QUEUE_CONTRACT.queueType;
@@ -209,6 +215,10 @@ export function fingerprintImpactNarrativeRequest({ requestedAudience, claimIds,
   return fingerprintGeneratedContentRequest(IMPACT_NARRATIVE_CONTENT_TYPE, { requestedAudience, claimIds, engagementId });
 }
 
+export function fingerprintReadinessAssessmentRequest({ requestedAudience, claimIds, engagementId }) {
+  return fingerprintGeneratedContentRequest(READINESS_ASSESSMENT_CONTENT_TYPE, { requestedAudience, claimIds, engagementId });
+}
+
 function hasExactKeys(value, allowed) {
   return Boolean(value)
     && typeof value === "object"
@@ -291,9 +301,13 @@ function validateCompleteReviewInput(input) {
 }
 
 function validateGeneratorInput(input) {
-  if (!hasExactKeys(input, new Set(["contentType", "requestedAudience", "claims"]))) return false;
+  const allowedInputKeys = input?.contentType === READINESS_ASSESSMENT_CONTENT_TYPE
+    ? new Set(["contentType", "requestedAudience", "claims", "readiness"])
+    : new Set(["contentType", "requestedAudience", "claims"]);
+  if (!hasExactKeys(input, allowedInputKeys)) return false;
   if (!ALLOWED_GENERATED_CONTENT_TYPES.has(input.contentType) || !AUDIENCES.has(input.requestedAudience)) return false;
   if (!Array.isArray(input.claims) || input.claims.length === 0) return false;
+  if (input.contentType === READINESS_ASSESSMENT_CONTENT_TYPE && !isAuthoritativeReadinessProjection(input.readiness)) return false;
   const allowedClaimKeys = new Set([
     "claimId",
     "claimStatement",
@@ -317,6 +331,31 @@ function validateGeneratorInput(input) {
     }
   }
   return true;
+}
+
+function isAuthoritativeReadinessProjection(value) {
+  return Boolean(value)
+    && typeof value === "object"
+    && !Array.isArray(value)
+    && Array.isArray(value.requirements)
+    && value.requirements.length >= 1
+    && value.requirements.every((requirement) => (
+      requirement
+      && typeof requirement === "object"
+      && !Array.isArray(requirement)
+      && typeof requirement.requirement_key === "string"
+      && typeof requirement.requirement_label === "string"
+      && typeof requirement.assessed === "boolean"
+      && (
+        requirement.assessment === null
+        || (
+          requirement.assessment
+          && typeof requirement.assessment === "object"
+          && !Array.isArray(requirement.assessment)
+          && typeof requirement.assessment.assessment_state === "string"
+        )
+      )
+    ));
 }
 
 // Pure classification: identical acceptance semantics to the original
@@ -924,7 +963,7 @@ async function loadGenerationProjection(tx, { organizationId, claimIds, requeste
   }));
 }
 
-function toGeneratorInput({ requestedAudience, projections, contentType }) {
+function toGeneratorInput({ requestedAudience, projections, contentType, authoritativeReadiness }) {
   const input = {
     contentType,
     requestedAudience,
@@ -938,6 +977,9 @@ function toGeneratorInput({ requestedAudience, projections, contentType }) {
       limitationCodes: claim.limitationCodes,
     })),
   };
+  if (contentType === READINESS_ASSESSMENT_CONTENT_TYPE) {
+    input.readiness = authoritativeReadiness;
+  }
   if (!validateGeneratorInput(input)) throw new Error("invalid_generator_input_contract");
   return input;
 }
@@ -1062,7 +1104,14 @@ function toResult(state, replayed = false) {
 
 async function createGeneratedContentDraft(contentType, fingerprintRequest, input, dependencies, { runInTransaction, evaluator, afterPersist }) {
   if (!validateInput(input)) return failure("validation_blocker");
-  if (contentType === IMPACT_NARRATIVE_CONTENT_TYPE && input.requestedAudience !== "internal") return failure("validation_blocker");
+  if (
+    [IMPACT_NARRATIVE_CONTENT_TYPE, READINESS_ASSESSMENT_CONTENT_TYPE].includes(contentType)
+    && input.requestedAudience !== "internal"
+  ) return failure("validation_blocker");
+  if (
+    contentType === READINESS_ASSESSMENT_CONTENT_TYPE
+    && !isAuthoritativeReadinessProjection(dependencies.authoritativeReadiness)
+  ) return failure("validation_blocker");
   if (typeof dependencies.draftGenerator !== "function") return failure("validation_blocker");
   if (!dependencies.metadataOnlyAudit) return failure("validation_blocker");
   const requestFingerprint = fingerprintRequest(input);
@@ -1148,7 +1197,12 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
         projection.limitationCodes = [...new Set(blockerCodes)].sort();
       }
 
-      const generatorInput = toGeneratorInput({ requestedAudience: input.requestedAudience, projections, contentType });
+      const generatorInput = toGeneratorInput({
+        requestedAudience: input.requestedAudience,
+        projections,
+        contentType,
+        authoritativeReadiness: dependencies.authoritativeReadiness,
+      });
       const generatorResult = await dependencies.draftGenerator(generatorInput);
       const generatorResultClassification = classifyGeneratorResult(generatorResult);
       if (!generatorResultClassification.ok) {
@@ -1167,6 +1221,8 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
         })),
         blocks: generatorResult.blocks,
         draftAudience: input.requestedAudience,
+        contentType,
+        authoritativeReadiness: dependencies.authoritativeReadiness,
       });
       if (!validation.ok) rollbackFailure("validation_blocker", validation.blockers);
 
@@ -1292,7 +1348,7 @@ async function loadGrantResponsePacketMemberDraftIds(tx, { organizationId, engag
         AND d.draft_status = $4
         AND d.requested_audience = $5
       ORDER BY d.generated_content_draft_id ASC`,
-    [organizationId, engagementId, [...ALLOWED_GENERATED_CONTENT_TYPES], DRAFT_STATUS, packetAudience],
+    [organizationId, engagementId, [...PACKET_MEMBER_CONTENT_TYPES], DRAFT_STATUS, packetAudience],
   );
   return rows.map((row) => row.generated_content_draft_id);
 }
@@ -2363,6 +2419,15 @@ export function createPostgresGeneratedContentRepository({
         { runInTransaction, evaluator, afterPersist },
       );
     },
+    async createReadinessAssessmentDraft(input, dependencies = {}) {
+      return createGeneratedContentDraft(
+        READINESS_ASSESSMENT_CONTENT_TYPE,
+        fingerprintReadinessAssessmentRequest,
+        input,
+        dependencies,
+        { runInTransaction, evaluator, afterPersist },
+      );
+    },
     async startGeneratedContentReview(input, dependencies = {}) {
       if (!validateCompleteReviewInput(input)) return failure("validation_blocker");
       if (!dependencies.metadataOnlyAudit) return failure("validation_blocker");
@@ -2980,6 +3045,8 @@ async function evaluateCompleteExportReviewReplayOrConflict(tx, input) {
 export const __generatedContentRepositoryContract = Object.freeze({
   CONTENT_TYPE,
   IMPACT_NARRATIVE_CONTENT_TYPE,
+  READINESS_ASSESSMENT_CONTENT_TYPE,
+  PACKET_MEMBER_CONTENT_TYPES,
   ALLOWED_GENERATED_CONTENT_TYPES,
   DRAFT_STATUS,
   REVIEW_STATUS,
@@ -3031,6 +3098,7 @@ export const __generatedContentRepositoryTestables = Object.freeze({
   validateCompleteReviewInput,
   fingerprintEvidenceSummaryRequest,
   fingerprintImpactNarrativeRequest,
+  fingerprintReadinessAssessmentRequest,
   prepareRequiredAudit,
   validateRequestExportReviewInput,
   validateExportReviewRequestStateInput,
