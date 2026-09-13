@@ -515,9 +515,17 @@ export function hydrateGrantResponsePacketExportReviewReadModel(projectedPacket)
 // already reads, nothing more. The exact candidate identity recovery
 // mechanism here is therefore NOT hydrated from the packet GET: it is
 // retained in React state (ImpactEvidenceLibrary.jsx) from the create/reuse
-// POST response only, keyed to organizationId + engagementId, and cleared
-// whenever the selected organization or engagement changes - never a
-// latest/newest/first/last/array-order guess.
+// POST response, keyed to organizationId + engagementId, and cleared whenever
+// the selected organization or engagement changes - never a latest/newest/
+// first/last/array-order guess. A true fresh mount (or hard reload) also
+// clears that React state, but ImpactEvidenceLibrary.jsx recovers the exact
+// same candidate id automatically once the packet reloads, by replaying the
+// same deterministic create/reuse idempotency key
+// (boardReportingCreateCandidateIdempotencyKey below is a pure function of
+// organizationId + engagementId only) - the backend's existing create/reuse
+// convergence (see postgresBoardReportingCandidateRepository.js) resolves
+// that replay back to the SAME existing candidate row (replayed: true), so
+// no second, browser-side persistence mechanism is ever introduced.
 // ---------------------------------------------------------------------------
 
 export function boardReportingPacketPath(organizationId, engagementId) {

@@ -384,7 +384,11 @@ export default function ImpactEvidenceLibrary() {
   // `boardReportingCandidateResult` below is the SOLE retained identity of
   // the exact candidate this browser has created/reused for the current
   // organization+engagement, set only from the create/reuse POST response
-  // and cleared whenever the selected organization or engagement changes.
+  // and cleared whenever the selected organization or engagement changes
+  // (including a true fresh mount/hard reload). The auto-recovery effect
+  // below createBoardReportingCandidate replays the existing, deterministic
+  // create/reuse idempotency key exactly once per organization+engagement
+  // selection to recover this exact identity after such a reset.
   const [boardReportingPacket, setBoardReportingPacket] = useState(null);
   const [loadingBoardReportingPacket, setLoadingBoardReportingPacket] = useState(false);
   const [boardReportingPacketError, setBoardReportingPacketError] = useState("");
@@ -436,6 +440,11 @@ export default function ImpactEvidenceLibrary() {
   const [boardReportingFinalSummaryError, setBoardReportingFinalSummaryError] = useState("");
   const boardReportingPacketRequestGenerationRef = useRef(0);
   const boardReportingWorkflowStateRequestGenerationRef = useRef(0);
+  // Guards the fresh-mount candidate auto-recovery effect below to exactly
+  // one attempt per organizationId+engagementId selection - reset alongside
+  // every other Board Reporting reset below, never re-armed by a pending/
+  // error state change alone (which would otherwise retry on every render).
+  const boardReportingCandidateAutoAttemptedRef = useRef(false);
 
   // Review Queue: organization-scope current-attention rollup. This is a
   // product PROJECTION of already-governed state (see
@@ -1012,6 +1021,7 @@ export default function ImpactEvidenceLibrary() {
   useEffect(() => {
     boardReportingPacketRequestGenerationRef.current += 1;
     boardReportingWorkflowStateRequestGenerationRef.current += 1;
+    boardReportingCandidateAutoAttemptedRef.current = false;
     setBoardReportingPacket(null);
     setBoardReportingPacketError("");
     setBoardReportingPacketRequestState("idle");
@@ -1213,6 +1223,36 @@ export default function ImpactEvidenceLibrary() {
     engagementId,
     boardReportingCandidatePending,
     refetchBoardReportingWorkflowState,
+  ]);
+
+  // Fresh-mount/reload exact candidate identity recovery: a true fresh mount
+  // (or a hard reload) always loses the React state that retains
+  // boardReportingCandidateResult (see the module-header comment above), but
+  // the BR-02 create/reuse route is keyed by a deterministic, purely
+  // client-derived idempotency key (organizationId + engagementId only - see
+  // boardReportingCreateCandidateIdempotencyKey). Replaying that exact same
+  // create/reuse call therefore always resolves back to the SAME existing
+  // candidate C (replayed: true) rather than creating a new one - so once the
+  // current engagement's packet has loaded, this effect replays it exactly
+  // once to recover the exact candidate id, then reads that exact candidate
+  // and its exact workflow-state, all through the existing
+  // createBoardReportingCandidate callback unchanged. Never a latest/newest/
+  // first/last/array-order guess, and never a second persistence mechanism.
+  useEffect(() => {
+    if (!organizationId || !engagementId) return;
+    if (boardReportingPacketRequestState !== "success") return;
+    if (boardReportingCandidateResult) return;
+    if (boardReportingCandidatePending) return;
+    if (boardReportingCandidateAutoAttemptedRef.current) return;
+    boardReportingCandidateAutoAttemptedRef.current = true;
+    createBoardReportingCandidate();
+  }, [
+    organizationId,
+    engagementId,
+    boardReportingPacketRequestState,
+    boardReportingCandidateResult,
+    boardReportingCandidatePending,
+    createBoardReportingCandidate,
   ]);
 
   // Requests governed review for the EXACT candidate id the server already

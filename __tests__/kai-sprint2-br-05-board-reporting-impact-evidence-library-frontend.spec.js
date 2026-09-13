@@ -767,6 +767,174 @@ test("Board Reporting packet DTO carries no prior candidate id field (confirming
 });
 
 // -----------------------------------------------------------------------
+// Fresh-mount / hard-reload exact candidate identity recovery.
+//
+// A true fresh mount discards every retained React state, including
+// boardReportingCandidateResult - this proves the recovery mechanism the
+// committed fix actually uses (replaying the existing, deterministic BR-02
+// create/reuse idempotency key through the unchanged createBoardReportingCandidate
+// callback) rather than any array-order/latest/newest guess, and rather than
+// a second, browser-persisted identity mechanism.
+// -----------------------------------------------------------------------
+function extractCreateCandidateSource() {
+  return extractUseCallbackSource(
+    "createBoardReportingCandidate",
+    "// Fresh-mount/reload exact candidate identity recovery:",
+  );
+}
+
+function buildCreateCandidateCallback({ postJsonImpl, getJsonImpl, stateLog, refs, refetch }) {
+  const factory = new Function(
+    "organizationId",
+    "engagementId",
+    "boardReportingCandidatePending",
+    "setBoardReportingCandidatePending",
+    "setBoardReportingCandidateError",
+    "postJson",
+    "boardReportingCandidatesPath",
+    "boardReportingCreateCandidateBody",
+    "boardReportingCreateCandidateIdempotencyKey",
+    "organizationIdRef",
+    "engagementIdRef",
+    "errorText",
+    "projectBoardReportingCandidateResult",
+    "setBoardReportingCandidateResult",
+    "getJson",
+    "boardReportingCandidatePath",
+    "setLoadingBoardReportingCandidateSnapshot",
+    "setBoardReportingCandidateSnapshotError",
+    "setBoardReportingCandidateSnapshot",
+    "projectBoardReportingCandidateSnapshot",
+    "refetchBoardReportingWorkflowState",
+    `return (${extractCreateCandidateSource()});`,
+  );
+  return factory(
+    organizationId,
+    engagementIdA,
+    false,
+    (v) => stateLog.push(["candidatePending", v]),
+    (v) => stateLog.push(["candidateError", v]),
+    postJsonImpl,
+    boardReportingCandidatesPath,
+    boardReportingCreateCandidateBody,
+    boardReportingCreateCandidateIdempotencyKey,
+    refs.organizationIdRef,
+    refs.engagementIdRef,
+    errorText,
+    projectBoardReportingCandidateResult,
+    (v) => stateLog.push(["candidateResult", v]),
+    getJsonImpl,
+    boardReportingCandidatePath,
+    (v) => stateLog.push(["loadingSnapshot", v]),
+    (v) => stateLog.push(["snapshotError", v]),
+    (v) => stateLog.push(["snapshot", v]),
+    projectBoardReportingCandidateSnapshot,
+    refetch,
+  );
+}
+
+test("a true fresh mount recovers the exact existing candidate C via the deterministic idempotency-key replay, and reads that exact candidate + its exact workflow-state", async () => {
+  // Candidate C already exists server-side for O + E; this call simulates
+  // the freshly-mounted component's React state (boardReportingCandidateResult
+  // === null, nothing retained) replaying the SAME deterministic idempotency
+  // key the original create used.
+  const getCalls = [];
+  const postCalls = [];
+  const stateLog = [];
+  const refs = { organizationIdRef: { current: organizationId }, engagementIdRef: { current: engagementIdA } };
+  const workflowStateGetCalls = [];
+  const refetch = buildRefetch({
+    stateLog,
+    refs,
+    getJsonImpl: async (path) => { workflowStateGetCalls.push(path); return { statusCode: 200, body: { ok: true, data: workflowStateDto({ boardReportingCandidateId: candidateIdA }) } }; },
+  });
+  const callback = buildCreateCandidateCallback({
+    stateLog,
+    refs,
+    refetch,
+    postJsonImpl: async (path, body) => {
+      postCalls.push({ path, body });
+      // Idempotent replay of an existing candidate: same candidate id C,
+      // replayed: true - never a newly minted id.
+      return {
+        statusCode: 200,
+        body: { ok: true, data: { organizationId, engagementId: engagementIdA, boardReportingCandidateId: candidateIdA, packetAudience: "internal", fingerprintContractVersion: 1, canonicalFingerprint: "abc", memberCount: 2, replayed: true } },
+      };
+    },
+    getJsonImpl: async (path) => { getCalls.push(path); return { statusCode: 200, body: { ok: true, data: { boardReportingCandidateId: candidateIdA, organizationId, engagementId: engagementIdA, packetAudience: "internal", fingerprintContractVersion: 1, canonicalFingerprint: "abc", candidateStatus: "active", createdAt: "2026-09-09T00:00:00.000Z", members: [] } } }; },
+  });
+
+  await callback();
+
+  // The create/reuse POST used the exact deterministic idempotency key for
+  // this organization+engagement (never a stored/cached candidate id).
+  assert.equal(postCalls.length, 1);
+  assert.equal(postCalls[0].path, boardReportingCandidatesPath(organizationId, engagementIdA));
+  assert.deepEqual(postCalls[0].body, { idempotency_key: boardReportingCreateCandidateIdempotencyKey(organizationId, engagementIdA) });
+
+  // The retained candidate result is exactly candidate C, marked replayed.
+  const candidateResult = lastState(stateLog, "candidateResult");
+  assert.equal(candidateResult.boardReportingCandidateId, candidateIdA);
+  assert.equal(candidateResult.replayed, true);
+
+  // The exact-candidate GET used exactly candidate C's id in the path.
+  assert.deepEqual(getCalls, [boardReportingCandidatePath(organizationId, engagementIdA, candidateIdA)]);
+
+  // The exact workflow-state GET used exactly candidate C's id in the path -
+  // never a latest/newest/first/last/array-order selection.
+  assert.deepEqual(workflowStateGetCalls, [boardReportingWorkflowStatePath(organizationId, engagementIdA, candidateIdA)]);
+});
+
+test("a rejected create/reuse replay (e.g. a stale fingerprint) clears/fails safely - no candidate is retained and no candidate/workflow-state GET is ever guessed", async () => {
+  const getCalls = [];
+  const postCalls = [];
+  const stateLog = [];
+  const refs = { organizationIdRef: { current: organizationId }, engagementIdRef: { current: engagementIdA } };
+  const refetch = buildRefetch({ stateLog, refs, getJsonImpl: async () => { throw new Error("must not refetch workflow-state without a candidate id"); } });
+  const callback = buildCreateCandidateCallback({
+    stateLog,
+    refs,
+    refetch,
+    postJsonImpl: async (path, body) => {
+      postCalls.push({ path, body });
+      return { statusCode: 409, body: { ok: false, error: { message: "candidate_state_conflict" } } };
+    },
+    getJsonImpl: async (path) => { getCalls.push(path); throw new Error("must not GET a candidate that was never established"); },
+  });
+
+  await callback();
+
+  assert.equal(postCalls.length, 1);
+  assert.equal(getCalls.length, 0);
+  assert.equal(lastState(stateLog, "candidateResult"), undefined);
+  assert.equal(lastState(stateLog, "candidateError"), "candidate_state_conflict");
+  assert.equal(lastState(stateLog, "candidatePending"), false);
+});
+
+test("the fresh-mount auto-recovery effect only replays create/reuse once packet load succeeds, only while no candidate is retained, and marks itself attempted so it never retries on every render", () => {
+  const start = uiSource.indexOf("// Fresh-mount/reload exact candidate identity recovery:");
+  assert.notEqual(start, -1);
+  const end = uiSource.indexOf("// Requests governed review for the EXACT candidate id", start);
+  assert.notEqual(end, -1);
+  const section = uiSource.slice(start, end);
+  assert.match(section, /if \(!organizationId \|\| !engagementId\) return;/);
+  assert.match(section, /if \(boardReportingPacketRequestState !== "success"\) return;/);
+  assert.match(section, /if \(boardReportingCandidateResult\) return;/);
+  assert.match(section, /if \(boardReportingCandidatePending\) return;/);
+  assert.match(section, /if \(boardReportingCandidateAutoAttemptedRef\.current\) return;/);
+  assert.match(section, /boardReportingCandidateAutoAttemptedRef\.current = true;/);
+  assert.match(section, /createBoardReportingCandidate\(\);/);
+});
+
+test("the auto-attempted guard ref is reset alongside every other Board Reporting reset on organization/engagement change", () => {
+  const start = uiSource.indexOf("boardReportingPacketRequestGenerationRef.current += 1;");
+  assert.notEqual(start, -1);
+  const sliceEnd = uiSource.indexOf("}, [organizationId, engagementId]);", start);
+  const section = uiSource.slice(start, sliceEnd);
+  assert.match(section, /boardReportingCandidateAutoAttemptedRef\.current = false;/);
+});
+
+// -----------------------------------------------------------------------
 // Property 20: FINAL section is visually/structurally distinct from the
 // live/preview workflow-state panel.
 // -----------------------------------------------------------------------
