@@ -3029,6 +3029,71 @@ router.post(
   },
 );
 
+function validateCreateDataGapMemoRequestOrSend(req, res) {
+  if (!metadataContentTypeIsSupported(req)) {
+    sendKaiError(res, "unsupported_media_type");
+    return null;
+  }
+  const identifiers = eligibleClaimsForAudienceOrganizationIdentifier(req);
+  const payload = requestPayload(req);
+  const keys = Object.keys(payload);
+  if (
+    !identifiers
+    || keys.length !== 2
+    || !keys.every((key) => key === "idempotency_key" || key === "engagement_id")
+    || typeof payload.engagement_id !== "string"
+    || !KAI_SPRINT2_P0_PATTERNS.uuid.test(payload.engagement_id)
+    || payload.engagement_id !== payload.engagement_id.toLowerCase()
+    || typeof payload.idempotency_key !== "string"
+    || payload.idempotency_key !== payload.idempotency_key.trim()
+    || !/^[ -~]{8,128}$/.test(payload.idempotency_key)
+  ) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker(
+        "invalid_internal_data_gap_memo_generation_request",
+        "organization_id_idempotency_key_or_engagement_id",
+      )],
+    });
+    return null;
+  }
+  return {
+    organizationId: identifiers.organizationId,
+    idempotencyKey: payload.idempotency_key,
+    engagementId: payload.engagement_id,
+  };
+}
+
+router.post(
+  "/admin/organizations/:organizationId/generated-content-drafts/data-gap-memo",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    const parsed = validateCreateDataGapMemoRequestOrSend(req, res);
+    if (!parsed) return;
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    return invokeService(res, async () => {
+      const service = await getGeneratedContentService();
+      const { createProductionDataGapMemoDraftGenerator } = await import("../services/kaiDataGapMemoDraftGenerator.js");
+      return service.createDataGapMemoDraft({
+        organizationId: parsed.organizationId,
+        engagementId: parsed.engagementId,
+        requestedAudience: "internal",
+        idempotencyKey: parsed.idempotencyKey,
+        actorContext,
+        now,
+      }, {
+        draftGenerator: createProductionDataGapMemoDraftGenerator(),
+        metadataOnlyAudit: createProductionMetadataOnlyAuditForGeneratedContentDraft({
+          organizationId: parsed.organizationId,
+          actorContext,
+          now,
+          route: "data_gap_memo_create_draft",
+        }),
+      });
+    }, 201);
+  },
+);
+
 router.get(
   "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/review-packet",
   sprint2ActorContextMiddleware,

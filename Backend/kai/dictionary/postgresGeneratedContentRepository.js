@@ -41,11 +41,13 @@ const RESULT_STATUS = Object.freeze({
 const CONTENT_TYPE = "evidence_summary";
 const IMPACT_NARRATIVE_CONTENT_TYPE = "impact_narrative";
 const READINESS_ASSESSMENT_CONTENT_TYPE = "readiness_assessment";
+const DATA_GAP_MEMO_CONTENT_TYPE = "data_gap_memo";
 const PACKET_MEMBER_CONTENT_TYPES = new Set([CONTENT_TYPE, IMPACT_NARRATIVE_CONTENT_TYPE]);
 const ALLOWED_GENERATED_CONTENT_TYPES = new Set([
   CONTENT_TYPE,
   IMPACT_NARRATIVE_CONTENT_TYPE,
   READINESS_ASSESSMENT_CONTENT_TYPE,
+  DATA_GAP_MEMO_CONTENT_TYPE,
 ]);
 const DRAFT_STATUS = "draft";
 const REVIEW_STATUS = GENERATED_CONTENT_REVIEW_QUEUE_CONTRACT.reviewStatus;
@@ -219,6 +221,10 @@ export function fingerprintReadinessAssessmentRequest({ requestedAudience, claim
   return fingerprintGeneratedContentRequest(READINESS_ASSESSMENT_CONTENT_TYPE, { requestedAudience, claimIds, engagementId });
 }
 
+export function fingerprintDataGapMemoRequest({ requestedAudience, claimIds, engagementId }) {
+  return fingerprintGeneratedContentRequest(DATA_GAP_MEMO_CONTENT_TYPE, { requestedAudience, claimIds, engagementId });
+}
+
 function hasExactKeys(value, allowed) {
   return Boolean(value)
     && typeof value === "object"
@@ -301,13 +307,17 @@ function validateCompleteReviewInput(input) {
 }
 
 function validateGeneratorInput(input) {
-  const allowedInputKeys = input?.contentType === READINESS_ASSESSMENT_CONTENT_TYPE
-    ? new Set(["contentType", "requestedAudience", "claims", "readiness"])
-    : new Set(["contentType", "requestedAudience", "claims"]);
+  let allowedInputKeys = new Set(["contentType", "requestedAudience", "claims"]);
+  if (input?.contentType === READINESS_ASSESSMENT_CONTENT_TYPE) {
+    allowedInputKeys = new Set(["contentType", "requestedAudience", "claims", "readiness"]);
+  } else if (input?.contentType === DATA_GAP_MEMO_CONTENT_TYPE) {
+    allowedInputKeys = new Set(["contentType", "requestedAudience", "claims", "gaps"]);
+  }
   if (!hasExactKeys(input, allowedInputKeys)) return false;
   if (!ALLOWED_GENERATED_CONTENT_TYPES.has(input.contentType) || !AUDIENCES.has(input.requestedAudience)) return false;
   if (!Array.isArray(input.claims) || input.claims.length === 0) return false;
   if (input.contentType === READINESS_ASSESSMENT_CONTENT_TYPE && !isAuthoritativeReadinessProjection(input.readiness)) return false;
+  if (input.contentType === DATA_GAP_MEMO_CONTENT_TYPE && !isAuthoritativeDataGapProjection(input.gaps)) return false;
   const allowedClaimKeys = new Set([
     "claimId",
     "claimStatement",
@@ -331,6 +341,28 @@ function validateGeneratorInput(input) {
     }
   }
   return true;
+}
+
+function isAuthoritativeDataGapProjection(value) {
+  return Boolean(value)
+    && typeof value === "object"
+    && !Array.isArray(value)
+    && Array.isArray(value.items)
+    && value.items.length >= 1
+    && value.items.every((item) => (
+      hasExactKeys(item, new Set([
+        "gap_log_item_id",
+        "claim_id",
+        "dimension_key",
+        "assessment_status",
+        "validator_key",
+      ]))
+      && UUID_PATTERN.test(item.gap_log_item_id)
+      && UUID_PATTERN.test(item.claim_id)
+      && typeof item.dimension_key === "string"
+      && typeof item.assessment_status === "string"
+      && typeof item.validator_key === "string"
+    ));
 }
 
 function isAuthoritativeReadinessProjection(value) {
@@ -980,6 +1012,9 @@ function toGeneratorInput({ requestedAudience, projections, contentType, authori
   if (contentType === READINESS_ASSESSMENT_CONTENT_TYPE) {
     input.readiness = authoritativeReadiness;
   }
+  if (contentType === DATA_GAP_MEMO_CONTENT_TYPE) {
+    input.gaps = authoritativeReadiness;
+  }
   if (!validateGeneratorInput(input)) throw new Error("invalid_generator_input_contract");
   return input;
 }
@@ -1105,12 +1140,16 @@ function toResult(state, replayed = false) {
 async function createGeneratedContentDraft(contentType, fingerprintRequest, input, dependencies, { runInTransaction, evaluator, afterPersist }) {
   if (!validateInput(input)) return failure("validation_blocker");
   if (
-    [IMPACT_NARRATIVE_CONTENT_TYPE, READINESS_ASSESSMENT_CONTENT_TYPE].includes(contentType)
+    [IMPACT_NARRATIVE_CONTENT_TYPE, READINESS_ASSESSMENT_CONTENT_TYPE, DATA_GAP_MEMO_CONTENT_TYPE].includes(contentType)
     && input.requestedAudience !== "internal"
   ) return failure("validation_blocker");
   if (
     contentType === READINESS_ASSESSMENT_CONTENT_TYPE
     && !isAuthoritativeReadinessProjection(dependencies.authoritativeReadiness)
+  ) return failure("validation_blocker");
+  if (
+    contentType === DATA_GAP_MEMO_CONTENT_TYPE
+    && !isAuthoritativeDataGapProjection(dependencies.authoritativeDataGaps)
   ) return failure("validation_blocker");
   if (typeof dependencies.draftGenerator !== "function") return failure("validation_blocker");
   if (!dependencies.metadataOnlyAudit) return failure("validation_blocker");
@@ -1201,7 +1240,9 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
         requestedAudience: input.requestedAudience,
         projections,
         contentType,
-        authoritativeReadiness: dependencies.authoritativeReadiness,
+        authoritativeReadiness: contentType === DATA_GAP_MEMO_CONTENT_TYPE
+          ? dependencies.authoritativeDataGaps
+          : dependencies.authoritativeReadiness,
       });
       const generatorResult = await dependencies.draftGenerator(generatorInput);
       const generatorResultClassification = classifyGeneratorResult(generatorResult);
@@ -1222,7 +1263,9 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
         blocks: generatorResult.blocks,
         draftAudience: input.requestedAudience,
         contentType,
-        authoritativeReadiness: dependencies.authoritativeReadiness,
+        authoritativeReadiness: contentType === DATA_GAP_MEMO_CONTENT_TYPE
+          ? dependencies.authoritativeDataGaps
+          : dependencies.authoritativeReadiness,
       });
       if (!validation.ok) rollbackFailure("validation_blocker", validation.blockers);
 
@@ -2428,6 +2471,15 @@ export function createPostgresGeneratedContentRepository({
         { runInTransaction, evaluator, afterPersist },
       );
     },
+    async createDataGapMemoDraft(input, dependencies = {}) {
+      return createGeneratedContentDraft(
+        DATA_GAP_MEMO_CONTENT_TYPE,
+        fingerprintDataGapMemoRequest,
+        input,
+        dependencies,
+        { runInTransaction, evaluator, afterPersist },
+      );
+    },
     async startGeneratedContentReview(input, dependencies = {}) {
       if (!validateCompleteReviewInput(input)) return failure("validation_blocker");
       if (!dependencies.metadataOnlyAudit) return failure("validation_blocker");
@@ -3046,6 +3098,7 @@ export const __generatedContentRepositoryContract = Object.freeze({
   CONTENT_TYPE,
   IMPACT_NARRATIVE_CONTENT_TYPE,
   READINESS_ASSESSMENT_CONTENT_TYPE,
+  DATA_GAP_MEMO_CONTENT_TYPE,
   PACKET_MEMBER_CONTENT_TYPES,
   ALLOWED_GENERATED_CONTENT_TYPES,
   DRAFT_STATUS,
@@ -3099,6 +3152,7 @@ export const __generatedContentRepositoryTestables = Object.freeze({
   fingerprintEvidenceSummaryRequest,
   fingerprintImpactNarrativeRequest,
   fingerprintReadinessAssessmentRequest,
+  fingerprintDataGapMemoRequest,
   prepareRequiredAudit,
   validateRequestExportReviewInput,
   validateExportReviewRequestStateInput,

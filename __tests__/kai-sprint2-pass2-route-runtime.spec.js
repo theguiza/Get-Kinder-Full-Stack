@@ -317,6 +317,11 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // review-packet read surface (additive; every prior entry preserved
     // verbatim).
     "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/review-packet",
+    // Data Gap Memo draft generation: internal-only generated-content draft
+    // creation using the authoritative organization evidence-gap read and
+    // server-resolved governed citations. It accepts no caller gap rows,
+    // evidence ids, currentness, or citation authority.
+    "/admin/organizations/:organizationId/generated-content-drafts/data-gap-memo",
     "/admin/organizations/:organizationId/generated-content-drafts/evidence-summary",
     // P14-09 governed FUNDER evidence-summary generation for an explicit
     // engagement, reusing the existing P3-01 governed generation vertical

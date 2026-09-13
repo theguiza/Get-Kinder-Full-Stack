@@ -5,6 +5,7 @@ const VALIDATOR_KEYS = Object.freeze([
   "VAL-GEN-004",
   "VAL-GEN-005",
   "VAL-GEN-006",
+  "VAL-GEN-007",
 ]);
 
 const NUMERIC_LITERAL_PATTERN = /(?<![A-Za-z0-9_])[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:%|\b)/g;
@@ -148,11 +149,35 @@ export function validateGeneratedContentDraft({
     );
   }
 
+  if (contentType === "data_gap_memo") {
+    const gapMemoPositiveSupport =
+      blocksContainPositiveGapInversion(blocks)
+      && authoritativeDataGapsContainReturnedGap(authoritativeReadiness);
+    results.push(
+      gapMemoPositiveSupport
+        ? blocker("VAL-GEN-007", "data_gap_or_missing_support_stated_as_positive_support")
+        : pass("VAL-GEN-007"),
+    );
+  }
+
   return Object.freeze({
     ok: results.every((result) => result.severity === "pass"),
     results: Object.freeze(results),
     blockers: Object.freeze(results.filter((result) => result.severity === "blocker")),
   });
+}
+
+function blocksContainPositiveGapInversion(blocks = []) {
+  return (blocks || []).some((block) => {
+    const text = block?.text || "";
+    if (/\b(no gaps?|no data gaps?|resolved clear|all clear)\b/i.test(text)) return true;
+    return /\b(sufficient support|fully supported|support is sufficient|complete support)\b/i.test(text)
+      && !/\b(limitation|limitations|missing|unresolved|risk|insufficient|not sufficient|needs|requires|cannot|does not)\b/i.test(text);
+  });
+}
+
+function authoritativeDataGapsContainReturnedGap(value) {
+  return Array.isArray(value?.items) && value.items.length > 0;
 }
 
 function blocksContainPositiveReadinessAssertion(blocks = []) {
