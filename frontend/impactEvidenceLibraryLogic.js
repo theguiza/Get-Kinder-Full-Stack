@@ -512,20 +512,28 @@ export function hydrateGrantResponsePacketExportReviewReadModel(projectedPacket)
 // Packet, the Board Reporting packet GET carries no prior candidate id of its
 // own (see kaiBoardReportingPacketService.js#getBoardReportingPacket) - it is
 // the same eligible-member packet the BR-02 candidate create/reuse route
-// already reads, nothing more. The exact candidate identity recovery
-// mechanism here is therefore NOT hydrated from the packet GET: it is
-// retained in React state (ImpactEvidenceLibrary.jsx) from the create/reuse
-// POST response, keyed to organizationId + engagementId, and cleared whenever
-// the selected organization or engagement changes - never a latest/newest/
-// first/last/array-order guess. A true fresh mount (or hard reload) also
-// clears that React state, but ImpactEvidenceLibrary.jsx recovers the exact
-// same candidate id automatically once the packet reloads, by replaying the
-// same deterministic create/reuse idempotency key
+// already reads, plus that packet's own current authoritative composition
+// identity (fingerprintContractVersion + canonicalFingerprint - the EXACT
+// same composeBoardReportingPacketFingerprint computation BR-02 candidate
+// create/reuse already relies on, never a new algorithm, never computed in
+// the browser). The exact candidate identity recovery mechanism here is
+// therefore NOT hydrated from the packet GET: it is retained in React state
+// (ImpactEvidenceLibrary.jsx) from the create/reuse POST response, keyed to
+// organizationId + engagementId + the packet's current canonicalFingerprint,
+// and cleared whenever the selected organization or engagement changes -
+// never a latest/newest/first/last/array-order guess. A true fresh mount (or
+// hard reload) also clears that React state, but ImpactEvidenceLibrary.jsx
+// recovers the exact same candidate id automatically once the packet
+// reloads, by replaying the same deterministic create/reuse idempotency key
 // (boardReportingCreateCandidateIdempotencyKey below is a pure function of
-// organizationId + engagementId only) - the backend's existing create/reuse
-// convergence (see postgresBoardReportingCandidateRepository.js) resolves
-// that replay back to the SAME existing candidate row (replayed: true), so
-// no second, browser-side persistence mechanism is ever introduced.
+// the packet's own current canonicalFingerprint only) - the backend's
+// existing create/reuse convergence (see
+// postgresBoardReportingCandidateRepository.js) resolves that replay back to
+// the SAME existing candidate row when the composition is unchanged
+// (replayed: true), and to a NEW candidate once the authoritative composition
+// - and therefore canonicalFingerprint - has changed, so no second,
+// browser-side persistence mechanism, and no stale candidate is ever silently
+// treated as current.
 // ---------------------------------------------------------------------------
 
 export function boardReportingPacketPath(organizationId, engagementId) {
@@ -545,13 +553,22 @@ export function boardReportingCandidatesPath(organizationId, engagementId) {
     + `/engagements/${encodeURIComponent(engagementId)}/board-reporting/candidates`;
 }
 
-// A deterministic, per-organization+engagement idempotency key so an
-// identical create/reuse replay against the same current state returns the
-// same existing candidate (replayed: true) rather than creating a new one on
-// every click - matches the BOARD_REPORTING candidate idempotency_key
-// contract (/^[A-Za-z0-9._:-]{8,128}$/) exactly.
-export function boardReportingCreateCandidateIdempotencyKey(organizationId, engagementId) {
-  return `board-reporting-${organizationId}-${engagementId}`;
+// A deterministic, composition-scoped idempotency key so an identical
+// create/reuse replay against the same current authoritative Board
+// composition returns the same existing candidate (replayed: true), while a
+// changed composition (a different canonicalFingerprint) always derives a
+// different key - matches the BOARD_REPORTING candidate idempotency_key
+// contract (/^[A-Za-z0-9._:-]{8,128}$/) exactly. `canonicalFingerprint` must
+// be the packet's own server-derived identity (projectBoardReportingPacket
+// above) - the browser never computes this fingerprint itself, only formats
+// it into a key. organizationId/engagementId are not repeated in the key text
+// itself: the backend's own idempotency_key uniqueness is already scoped by
+// organization_id + engagement_id, and canonicalFingerprint alone is already
+// specific to this exact organization/engagement/member composition (it is
+// computed over the members' own generatedContentDraftId values, which are
+// globally unique).
+export function boardReportingCreateCandidateIdempotencyKey(canonicalFingerprint) {
+  return `board-reporting-${canonicalFingerprint}`;
 }
 
 export function boardReportingCreateCandidateBody(idempotencyKey) {
@@ -682,6 +699,12 @@ export function projectBoardReportingPacket(dto) {
     engagementId: dto.engagementId,
     packetAudience: dto.packetAudience,
     supportedContentTypes: asArray(dto.supportedContentTypes).filter((entry) => typeof entry === "string"),
+    // The packet's own current authoritative Board composition identity -
+    // the EXACT same fingerprint BR-02 candidate create/reuse computes and
+    // validates replay against (see module header comment above). Both null
+    // together whenever there are currently no eligible members.
+    fingerprintContractVersion: typeof dto.fingerprintContractVersion === "string" ? dto.fingerprintContractVersion : null,
+    canonicalFingerprint: typeof dto.canonicalFingerprint === "string" ? dto.canonicalFingerprint : null,
     members: asArray(dto.members).map((member) => ({
       generationRunId: member?.generationRunId,
       generatedContentDraftId: member?.generatedContentDraftId,

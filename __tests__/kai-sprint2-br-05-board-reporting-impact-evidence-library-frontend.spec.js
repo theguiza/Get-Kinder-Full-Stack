@@ -126,31 +126,45 @@ test("boardReportingFinalReleaseAuthorityBody sends only review_queue_item_id an
 // -----------------------------------------------------------------------
 // Property 3: create/reuse sends only permitted input.
 // -----------------------------------------------------------------------
-test("boardReportingCreateCandidateBody sends only idempotency_key, matching the accepted contract pattern", () => {
-  const key = boardReportingCreateCandidateIdempotencyKey(organizationId, engagementIdA);
+const fingerprintA = "a".repeat(64);
+const fingerprintB = "b".repeat(64);
+
+test("boardReportingCreateCandidateIdempotencyKey is a pure, deterministic function of the packet's own canonicalFingerprint, matching the accepted contract pattern", () => {
+  const key = boardReportingCreateCandidateIdempotencyKey(fingerprintA);
   assert.match(key, /^[A-Za-z0-9._:-]{8,128}$/);
   assert.deepEqual(boardReportingCreateCandidateBody(key), { idempotency_key: key });
+
+  // Same composition (same fingerprint) -> same key. Different composition
+  // (different fingerprint) -> a different key.
+  assert.equal(boardReportingCreateCandidateIdempotencyKey(fingerprintA), key);
+  assert.notEqual(boardReportingCreateCandidateIdempotencyKey(fingerprintB), key);
 });
 
-test("create-candidate callback source in ImpactEvidenceLibrary.jsx never sends membership/fingerprint/review/authority/eligibility/manifest fields", () => {
+test("create-candidate callback source in ImpactEvidenceLibrary.jsx never sends membership/review/authority/eligibility/manifest fields, and derives its idempotency key only from the packet's own server-derived canonicalFingerprint", () => {
   const start = uiSource.indexOf("const createBoardReportingCandidate = useCallback(");
   assert.notEqual(start, -1);
   const end = uiSource.indexOf("const requestBoardReportingReview = useCallback(", start);
   assert.notEqual(end, -1);
   const source = uiSource.slice(start, end);
   assert.match(source, /boardReportingCreateCandidateBody\(/);
-  assert.doesNotMatch(source, /fingerprint|memberCount|members:|reviewStatus:|queueStatus:|effectiveAuthority|finalEligibility|manifestId/);
+  // The key is derived from the packet's own canonicalFingerprint - never
+  // computed by the browser, never organizationId/engagementId alone.
+  assert.match(source, /const canonicalFingerprint = boardReportingPacket\?\.canonicalFingerprint;/);
+  assert.match(source, /boardReportingCreateCandidateIdempotencyKey\(canonicalFingerprint\)/);
+  assert.doesNotMatch(source, /memberCount|members:|reviewStatus:|queueStatus:|effectiveAuthority|finalEligibility|manifestId/);
 });
 
 // -----------------------------------------------------------------------
 // Property 2/5/6: projectors are defensive allowlists of server fields only.
 // -----------------------------------------------------------------------
-test("projectBoardReportingPacket allowlists exactly the server DTO fields", () => {
+test("projectBoardReportingPacket allowlists exactly the server DTO fields, including the authoritative composition fingerprint identity", () => {
   const projected = projectBoardReportingPacket({
     organizationId,
     engagementId: engagementIdA,
     packetAudience: "internal",
     supportedContentTypes: ["evidence_summary", "impact_narrative"],
+    fingerprintContractVersion: "kai-sprint2-br-02-board-reporting-candidate-fingerprint-v1",
+    canonicalFingerprint: fingerprintA,
     members: [{
       generationRunId: "run-1",
       generatedContentDraftId: "draft-1",
@@ -166,8 +180,24 @@ test("projectBoardReportingPacket allowlists exactly the server DTO fields", () 
     }],
   });
   assert.equal(projected.organizationId, organizationId);
+  assert.equal(projected.fingerprintContractVersion, "kai-sprint2-br-02-board-reporting-candidate-fingerprint-v1");
+  assert.equal(projected.canonicalFingerprint, fingerprintA);
   assert.equal(projected.members.length, 1);
   assert.equal(projected.members[0].generatedContentDraftId, "draft-1");
+});
+
+test("projectBoardReportingPacket projects a null composition identity when the server packet has none (no eligible members)", () => {
+  const projected = projectBoardReportingPacket({
+    organizationId,
+    engagementId: engagementIdA,
+    packetAudience: "internal",
+    supportedContentTypes: ["evidence_summary", "impact_narrative"],
+    fingerprintContractVersion: null,
+    canonicalFingerprint: null,
+    members: [],
+  });
+  assert.equal(projected.fingerprintContractVersion, null);
+  assert.equal(projected.canonicalFingerprint, null);
 });
 
 test("projectBoardReportingCandidateResult and projectBoardReportingCandidateSnapshot are defensive allowlists", () => {
@@ -783,11 +813,19 @@ function extractCreateCandidateSource() {
   );
 }
 
-function buildCreateCandidateCallback({ postJsonImpl, getJsonImpl, stateLog, refs, refetch }) {
+function buildCreateCandidateCallback({
+  postJsonImpl,
+  getJsonImpl,
+  stateLog,
+  refs,
+  refetch,
+  boardReportingPacket = { canonicalFingerprint: fingerprintA },
+}) {
   const factory = new Function(
     "organizationId",
     "engagementId",
     "boardReportingCandidatePending",
+    "boardReportingPacket",
     "setBoardReportingCandidatePending",
     "setBoardReportingCandidateError",
     "postJson",
@@ -812,6 +850,7 @@ function buildCreateCandidateCallback({ postJsonImpl, getJsonImpl, stateLog, ref
     organizationId,
     engagementIdA,
     false,
+    boardReportingPacket,
     (v) => stateLog.push(["candidatePending", v]),
     (v) => stateLog.push(["candidateError", v]),
     postJsonImpl,
@@ -866,11 +905,12 @@ test("a true fresh mount recovers the exact existing candidate C via the determi
 
   await callback();
 
-  // The create/reuse POST used the exact deterministic idempotency key for
-  // this organization+engagement (never a stored/cached candidate id).
+  // The create/reuse POST used the exact deterministic idempotency key
+  // derived from the packet's own current canonicalFingerprint (never a
+  // stored/cached candidate id, never organizationId/engagementId alone).
   assert.equal(postCalls.length, 1);
   assert.equal(postCalls[0].path, boardReportingCandidatesPath(organizationId, engagementIdA));
-  assert.deepEqual(postCalls[0].body, { idempotency_key: boardReportingCreateCandidateIdempotencyKey(organizationId, engagementIdA) });
+  assert.deepEqual(postCalls[0].body, { idempotency_key: boardReportingCreateCandidateIdempotencyKey(fingerprintA) });
 
   // The retained candidate result is exactly candidate C, marked replayed.
   const candidateResult = lastState(stateLog, "candidateResult");
@@ -909,6 +949,120 @@ test("a rejected create/reuse replay (e.g. a stale fingerprint) clears/fails saf
   assert.equal(lastState(stateLog, "candidateResult"), undefined);
   assert.equal(lastState(stateLog, "candidateError"), "candidate_state_conflict");
   assert.equal(lastState(stateLog, "candidatePending"), false);
+});
+
+test("createBoardReportingCandidate never guesses a key: with no current packet composition identity it sets an error and never POSTs", async () => {
+  const getCalls = [];
+  const postCalls = [];
+  const stateLog = [];
+  const refs = { organizationIdRef: { current: organizationId }, engagementIdRef: { current: engagementIdA } };
+  const refetch = buildRefetch({ stateLog, refs, getJsonImpl: async () => { throw new Error("must not refetch workflow-state"); } });
+  const callback = buildCreateCandidateCallback({
+    stateLog,
+    refs,
+    refetch,
+    boardReportingPacket: null,
+    postJsonImpl: async (path, body) => { postCalls.push({ path, body }); throw new Error("must not POST without a current composition identity"); },
+    getJsonImpl: async (path) => { getCalls.push(path); throw new Error("must not GET"); },
+  });
+
+  await callback();
+
+  assert.equal(postCalls.length, 0);
+  assert.equal(getCalls.length, 0);
+  assert.equal(lastState(stateLog, "candidateError"), "Board Reporting composition identity is not yet available.");
+});
+
+// -----------------------------------------------------------------------
+// The core successor-candidate closure property: the SAME authoritative
+// Board composition (P1, fingerprint F1) always replays back to the SAME
+// candidate C1 via the SAME deterministic key K1, and a CHANGED authoritative
+// composition (P2, fingerprint F2 != F1) always derives a DIFFERENT key K2
+// and produces/reuses a DIFFERENT candidate C2 - never a latest/newest/
+// preferred guess, never a browser-computed fingerprint.
+// -----------------------------------------------------------------------
+test("createBoardReportingCandidate: unchanged composition replays the exact same candidate via the exact same key", async () => {
+  const postCalls = [];
+  const stateLog = [];
+  const refs = { organizationIdRef: { current: organizationId }, engagementIdRef: { current: engagementIdA } };
+  const refetch = buildRefetch({ stateLog, refs, getJsonImpl: async () => ({ statusCode: 200, body: { ok: true, data: workflowStateDto({ boardReportingCandidateId: candidateIdA }) } }) });
+
+  async function createOnce() {
+    return buildCreateCandidateCallback({
+      stateLog,
+      refs,
+      refetch,
+      boardReportingPacket: { canonicalFingerprint: fingerprintA },
+      postJsonImpl: async (path, body) => {
+        postCalls.push({ path, body });
+        return { statusCode: 200, body: { ok: true, data: { organizationId, engagementId: engagementIdA, boardReportingCandidateId: candidateIdA, packetAudience: "internal", fingerprintContractVersion: 1, canonicalFingerprint: fingerprintA, memberCount: 1, replayed: postCalls.length > 1 } } };
+      },
+      getJsonImpl: async () => ({ statusCode: 200, body: { ok: true, data: { boardReportingCandidateId: candidateIdA, organizationId, engagementId: engagementIdA, packetAudience: "internal", fingerprintContractVersion: 1, canonicalFingerprint: fingerprintA, candidateStatus: "active", createdAt: "2026-09-09T00:00:00.000Z", members: [] } } }),
+    })();
+  }
+
+  await createOnce();
+  await createOnce();
+
+  assert.equal(postCalls.length, 2);
+  assert.deepEqual(postCalls[0].body, postCalls[1].body, "same composition must derive the exact same idempotency key on replay");
+  const candidateResult = lastState(stateLog, "candidateResult");
+  assert.equal(candidateResult.boardReportingCandidateId, candidateIdA);
+  assert.equal(candidateResult.replayed, true);
+});
+
+test("createBoardReportingCandidate: a changed authoritative composition derives a different key and produces a different candidate, leaving the prior candidate's own snapshot untouched", async () => {
+  const stateLog = [];
+  const refs = { organizationIdRef: { current: organizationId }, engagementIdRef: { current: engagementIdA } };
+
+  // P1 -> F1 -> K1 -> C1.
+  const postCallsP1 = [];
+  const refetchP1 = buildRefetch({ stateLog, refs, getJsonImpl: async () => ({ statusCode: 200, body: { ok: true, data: workflowStateDto({ boardReportingCandidateId: candidateIdA }) } }) });
+  const createP1 = buildCreateCandidateCallback({
+    stateLog,
+    refs,
+    refetch: refetchP1,
+    boardReportingPacket: { canonicalFingerprint: fingerprintA },
+    postJsonImpl: async (path, body) => {
+      postCallsP1.push({ path, body });
+      return { statusCode: 201, body: { ok: true, data: { organizationId, engagementId: engagementIdA, boardReportingCandidateId: candidateIdA, packetAudience: "internal", fingerprintContractVersion: 1, canonicalFingerprint: fingerprintA, memberCount: 1, replayed: false } } };
+    },
+    getJsonImpl: async () => ({ statusCode: 200, body: { ok: true, data: { boardReportingCandidateId: candidateIdA, organizationId, engagementId: engagementIdA, packetAudience: "internal", fingerprintContractVersion: 1, canonicalFingerprint: fingerprintA, candidateStatus: "active", createdAt: "2026-09-09T00:00:00.000Z", members: [{ boardReportingCandidateMemberId: "m1", generatedContentDraftId: "d1", ordinal: 0, createdAt: "2026-09-09T00:00:00.000Z" }] } } }),
+  });
+  await createP1();
+  const c1Result = lastState(stateLog, "candidateResult");
+  const c1Snapshot = lastState(stateLog, "snapshot");
+  assert.equal(c1Result.boardReportingCandidateId, candidateIdA);
+  assert.equal(c1Result.canonicalFingerprint, fingerprintA);
+
+  // P2: the authoritative composition has changed (F2 != F1) -> K2 != K1 -> a
+  // NEW candidate C2 (never C1), and C1's own snapshot is never mutated or
+  // re-fetched as part of this.
+  const postCallsP2 = [];
+  const refetchP2 = buildRefetch({ stateLog, refs, getJsonImpl: async () => ({ statusCode: 200, body: { ok: true, data: workflowStateDto({ boardReportingCandidateId: candidateIdB }) } }) });
+  const createP2 = buildCreateCandidateCallback({
+    stateLog,
+    refs,
+    refetch: refetchP2,
+    boardReportingPacket: { canonicalFingerprint: fingerprintB },
+    postJsonImpl: async (path, body) => {
+      postCallsP2.push({ path, body });
+      return { statusCode: 201, body: { ok: true, data: { organizationId, engagementId: engagementIdA, boardReportingCandidateId: candidateIdB, packetAudience: "internal", fingerprintContractVersion: 1, canonicalFingerprint: fingerprintB, memberCount: 1, replayed: false } } };
+    },
+    getJsonImpl: async () => ({ statusCode: 200, body: { ok: true, data: { boardReportingCandidateId: candidateIdB, organizationId, engagementId: engagementIdA, packetAudience: "internal", fingerprintContractVersion: 1, canonicalFingerprint: fingerprintB, candidateStatus: "active", createdAt: "2026-09-09T01:00:00.000Z", members: [{ boardReportingCandidateMemberId: "m2", generatedContentDraftId: "d2", ordinal: 0, createdAt: "2026-09-09T01:00:00.000Z" }] } } }),
+  });
+  await createP2();
+  const c2Result = lastState(stateLog, "candidateResult");
+  const c2Snapshot = lastState(stateLog, "snapshot");
+
+  assert.notEqual(postCallsP1[0].body.idempotency_key, postCallsP2[0].body.idempotency_key, "K2 must differ from K1");
+  assert.notEqual(c2Result.boardReportingCandidateId, c1Result.boardReportingCandidateId, "C2 must differ from C1");
+  assert.equal(c2Result.canonicalFingerprint, fingerprintB);
+  // C1's own immutable snapshot (fingerprint/members captured at creation)
+  // is never overwritten by the C2 flow's own GET.
+  assert.equal(c1Snapshot.canonicalFingerprint, fingerprintA);
+  assert.equal(c2Snapshot.canonicalFingerprint, fingerprintB);
+  assert.notEqual(c2Snapshot.boardReportingCandidateId, c1Snapshot.boardReportingCandidateId);
 });
 
 test("the fresh-mount auto-recovery effect only replays create/reuse once packet load succeeds, only while no candidate is retained, and marks itself attempted so it never retries on every render", () => {

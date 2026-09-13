@@ -18,6 +18,7 @@ import {
   composeBoardReportingPacketFingerprint,
   BOARD_REPORTING_PACKET_FINGERPRINT_ERROR,
 } from "../Backend/kai/services/kaiBoardReportingPacketFingerprintService.js";
+import { BOARD_REPORTING_CANDIDATE_FINGERPRINT_CONTRACT_VERSION } from "../Backend/kai/dictionary/boardReportingCandidateContract.js";
 
 const ORG = "00000000-0000-4000-8000-000000000001";
 const OTHER_ORG = "00000000-0000-4000-8000-000000000002";
@@ -309,6 +310,103 @@ test("Board Reporting service exposes a read-only internal packet DTO with no Gr
   }
 });
 
+// Board successor-candidate closure: the packet DTO must project exactly the
+// SAME authoritative composition identity (fingerprint_contract_version +
+// canonical_fingerprint) that BR-02 candidate create/reuse computes and
+// stores against this exact organizationId + engagementId + members
+// composition (postgresBoardReportingCandidateRepository.js ->
+// composeBoardReportingPacketFingerprint) - never a new algorithm, never a
+// value computed by the browser.
+test("Board Reporting packet DTO projects the exact authoritative composition fingerprint, deterministic for the same composition and different when composition changes", async () => {
+  async function packetWith(memberOverrides = {}) {
+    return getBoardReportingPacket({
+      organizationId: ORG,
+      engagementId: ENGAGEMENT,
+      actorContext: reviewerActor,
+    }, {
+      env: enabledEnv,
+      generatedContentRepository: {
+        async getBoardReportingPacket() {
+          return {
+            ok: true,
+            data: {
+              organizationId: ORG,
+              engagementId: ENGAGEMENT,
+              packetAudience: "internal",
+              drafts: [membershipMember(memberOverrides)],
+            },
+            error: null,
+          };
+        },
+      },
+    });
+  }
+
+  const p1 = await packetWith();
+  assert.equal(p1.ok, true, JSON.stringify(p1));
+  assert.equal(p1.data.fingerprintContractVersion, BOARD_REPORTING_CANDIDATE_FINGERPRINT_CONTRACT_VERSION);
+  assert.match(p1.data.canonicalFingerprint, /^[a-f0-9]{64}$/);
+
+  // The exact same composition, read again, projects the exact same identity.
+  const p1Again = await packetWith();
+  assert.equal(p1Again.data.canonicalFingerprint, p1.data.canonicalFingerprint);
+
+  // This is the SAME algorithm the repository uses for BR-02 candidate
+  // create/reuse - recomputing it directly over the packet's own members
+  // must equal what the packet DTO already projected.
+  const directFingerprint = composeBoardReportingPacketFingerprint({
+    organizationId: p1.data.organizationId,
+    engagementId: p1.data.engagementId,
+    packetAudience: p1.data.packetAudience,
+    supportedContentTypes: p1.data.supportedContentTypes,
+    members: p1.data.members,
+  });
+  assert.equal(directFingerprint.fingerprint, p1.data.canonicalFingerprint);
+
+  // A changed authoritative composition (a different citation blockerCodes
+  // outcome on the same draft) must produce a different fingerprint.
+  const p2 = await packetWith({
+    blocks: [{
+      generatedContentBlockId: EVIDENCE_SUMMARY.blocks[0].generated_content_block_id,
+      ordinal: 1,
+      text: "Board Reporting packet member.",
+      citations: [citationFixture({ blockerCodes: ["manual_review_required"] })],
+    }],
+  });
+  assert.equal(p2.ok, true, JSON.stringify(p2));
+  assert.notEqual(p2.data.canonicalFingerprint, p1.data.canonicalFingerprint);
+});
+
+// No eligible members means no candidate can currently be created - both
+// identity fields must be null together, never a partial/fabricated identity.
+test("Board Reporting packet DTO projects a null composition identity when there are no eligible members", async () => {
+  const result = await getBoardReportingPacket({
+    organizationId: ORG,
+    engagementId: ENGAGEMENT,
+    actorContext: reviewerActor,
+  }, {
+    env: enabledEnv,
+    generatedContentRepository: {
+      async getBoardReportingPacket() {
+        return {
+          ok: true,
+          data: {
+            organizationId: ORG,
+            engagementId: ENGAGEMENT,
+            packetAudience: "internal",
+            drafts: [],
+          },
+          error: null,
+        };
+      },
+    },
+  });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.data.members.length, 0);
+  assert.equal(result.data.fingerprintContractVersion, null);
+  assert.equal(result.data.canonicalFingerprint, null);
+});
+
 test("Board Reporting render model and fingerprint are deterministic and internal-only", async () => {
   const input = { organizationId: ORG, engagementId: ENGAGEMENT, actorContext: reviewerActor };
   const readBoardReportingPacket = async () => ({
@@ -324,6 +422,8 @@ test("Board Reporting render model and fingerprint are deterministic and interna
         contentType: "impact_narrative",
         reviewUpdatedAt: "2026-09-01T00:00:00.000Z",
       })].map(toBoardMember),
+      fingerprintContractVersion: BOARD_REPORTING_CANDIDATE_FINGERPRINT_CONTRACT_VERSION,
+      canonicalFingerprint: "b".repeat(64),
     },
     error: null,
   });
@@ -432,6 +532,8 @@ function packetFixture(overrides = {}) {
     packetAudience: "internal",
     supportedContentTypes: ["evidence_summary", "impact_narrative"],
     members: [toBoardMember(membershipMember())],
+    fingerprintContractVersion: BOARD_REPORTING_CANDIDATE_FINGERPRINT_CONTRACT_VERSION,
+    canonicalFingerprint: "b".repeat(64),
     ...overrides,
   };
 }

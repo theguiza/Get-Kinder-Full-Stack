@@ -27839,3 +27839,172 @@ inside the existing `frontend/ImpactEvidenceLibrary.jsx` /
 
 **Local commit:** one bounded commit created after all required checks
 passed; no push.
+
+## Board Reporting Product Completion - Fresh-Mount Recovery and
+## Successor-Candidate Composition-Scoped Idempotency Closure
+
+**Date:** 2026-09-13
+
+**Owner authorization (bounded, local-only):** continuation and closure of
+the immediately preceding Board Reporting Product UI package
+(`daa0fda`), covering two commits already landed on `main` and the final
+successor-candidate defect closure completed in this same package.
+
+**Commit `04c9427` - unchanged-state hard-reload recovery (already landed,
+recorded here for completeness):** confirmed the fresh-mount/hard-reload
+exact candidate identity recovery mechanism described in the prior ExecPlan
+entry actually recovers the correct candidate after a real hard reload (all
+React state discarded): the auto-recovery effect in
+`ImpactEvidenceLibrary.jsx` replays `createBoardReportingCandidate` exactly
+once after the packet loads successfully and no candidate is currently
+retained, guarded by `boardReportingCandidateAutoAttemptedRef` (reset
+alongside every other Board Reporting reset on organization/engagement
+change) so it never retries on every render. Proved via
+`__tests__/kai-sprint2-br-05-board-reporting-impact-evidence-library-frontend.spec.js`
+(source-extraction harness against the exact committed callback/effect, no
+DOM) - PASS at the time of that commit.
+
+**Demonstrated remaining defect closed in this package:** the fresh-mount
+recovery mechanism above keyed BR-02 candidate create/reuse by a
+purely engagement-scoped idempotency key
+(`board-reporting-{organizationId}-{engagementId}`, in
+`frontend/impactEvidenceLibraryLogic.js#boardReportingCreateCandidateIdempotencyKey`),
+independent of the authoritative Board packet's own member composition. Once
+an immutable candidate `C1` existed for a given organization+engagement, the
+UI could never derive a distinct key for a later, changed authoritative
+composition `P2` - `createBoardReportingCandidate` would always replay the
+SAME idempotency key, and the backend's own fingerprint-mismatch check
+(`postgresBoardReportingCandidateRepository.js` -
+`currentFingerprint.fingerprint !== existing.canonical_fingerprint`) would
+fail the create/reuse call closed (`conflict_current_state_changed`) rather
+than ever producing a new successor candidate `C2`. There was no existing
+UI path from a changed authoritative Board composition to a new immutable
+candidate.
+
+**Authoritative Board composition identity used - no new algorithm:** the
+EXISTING `composeBoardReportingPacketFingerprint`
+(`Backend/kai/services/kaiBoardReportingPacketFingerprintService.js`), the
+SAME function `postgresBoardReportingCandidateRepository.js`'s
+`fingerprintRenderModel` already calls (via
+`composeBoardReportingRenderModel`/`composeBoardReportingRenderModelFromPacket`)
+to compute and validate-on-replay every BR-02 candidate's
+`fingerprint_contract_version` (`BOARD_REPORTING_CANDIDATE_FINGERPRINT_CONTRACT_VERSION`,
+`Backend/kai/dictionary/boardReportingCandidateContract.js`) +
+`canonical_fingerprint` pair.
+
+**Backend change - packet DTO extension (read-only, additive):**
+`kaiBoardReportingPacketService.js#getBoardReportingPacket` now also calls
+`composeBoardReportingPacketFingerprint` over its own already-computed
+`organizationId`/`engagementId`/`packetAudience`/`supportedContentTypes`/
+`members` (the identical shape BR-02 candidate creation feeds the same
+function), and projects the result as two new packet DTO fields -
+`fingerprintContractVersion` and `canonicalFingerprint` - both `null`
+together whenever the current packet has no eligible members. No SQL added
+to any route, no new database state, no new governance/state-machine
+semantics, no authorization widening, no raw source/evidence content. The
+packet DTO's exact-key contract (`isBoardReportingPacketDto`) was updated
+from 5 to 7 keys to require this pair to be present and internally
+consistent (`isBoardReportingPacketFingerprintIdentity`).
+
+**Frontend change - composition-scoped idempotency key:**
+`projectBoardReportingPacket` (`frontend/impactEvidenceLibraryLogic.js`) now
+allowlists the two new fields through to the packet's React projection.
+`boardReportingCreateCandidateIdempotencyKey` was changed from
+`(organizationId, engagementId) => board-reporting-{organizationId}-{engagementId}`
+to `(canonicalFingerprint) => board-reporting-{canonicalFingerprint}` - a
+pure function of the packet's own server-derived composition identity only,
+never computed by the browser. `organizationId`/`engagementId` are not
+repeated in the key text: the backend's own idempotency_key uniqueness is
+already scoped by `organization_id + engagement_id`, and
+`canonicalFingerprint` is already specific to this exact
+organization/engagement/member composition (it is computed over the
+members' own globally-unique `generatedContentDraftId` values). In
+`ImpactEvidenceLibrary.jsx`, `createBoardReportingCandidate` now reads
+`boardReportingPacket?.canonicalFingerprint` and derives the key from it -
+with no current composition identity (no eligible members yet), it sets a
+client-side error and never POSTs a guessed key. The fresh-mount recovery
+effect is unchanged (still the single, governed create/reuse path) and
+continues to replay the same callback; while the component stays mounted, a
+later composition change is picked up only via the existing manual
+"Create/reuse" action (`boardReportingCandidateResult` already holds a
+candidate, so the recovery effect does not re-fire on its own) - the
+previously-held candidate is left exactly as the authoritative
+eligibility/currentness read (workflow-state) already reports it, stale
+under the new composition, never silently treated as current, never
+mutated, and its own review/authority/manifest state is never transferred
+to the new candidate.
+
+**Proven lifecycle (backend service test +
+frontend logic/component tests, both listed below):** same composition ->
+same `canonicalFingerprint` -> same key -> same candidate replayed (including
+across a simulated fresh mount/hard reload); changed composition -> different
+`canonicalFingerprint` -> different key -> new candidate created/reused,
+distinct from the prior one, with the prior candidate's own immutable
+snapshot (fingerprint/members captured at creation) left untouched.
+
+**Test evidence (all commands run with
+`DATABASE_URL=postgres://localhost:1/nonexistent_sentinel` exported first):**
+- `node --test __tests__/kai-board-reporting-packet-v1-boundary.spec.js`:
+  8/8 PASS (2 new tests added: packet DTO projects the exact authoritative
+  fingerprint, deterministic for the same composition and different when
+  composition changes; packet DTO projects a null identity pair when there
+  are no eligible members).
+- `node --test __tests__/kai-sprint2-br-05-board-reporting-impact-evidence-library-frontend.spec.js`:
+  35/35 PASS (6 new/updated tests: the idempotency-key function is a pure,
+  deterministic function of `canonicalFingerprint`; the create-candidate
+  callback source derives its key only from `boardReportingPacket`'s own
+  `canonicalFingerprint`; `projectBoardReportingPacket` allowlists the
+  fingerprint identity pair, both the populated and null cases;
+  `createBoardReportingCandidate` never guesses a key and refuses to POST
+  without a current composition identity; unchanged composition replays the
+  exact same candidate via the exact same key; a changed composition derives
+  a different key and produces a different candidate while leaving the
+  prior candidate's own snapshot untouched).
+- Directly-coupled Board Reporting backend/API contract suites
+  (candidate create/read, review request/start/complete, workflow-state,
+  final eligibility, export-manifest, human-authority-decision-ledger,
+  browser-API-composition, and the Sprint 2 API contract/route-runtime
+  suites - 15 files): 243/243 PASS.
+- Directly-coupled Grant Response Packet + shared Impact Evidence Library
+  suites (27 files, excluding `*.integration.spec.js`, which require a live
+  database and are out of scope for this local-only closure): 494/494 PASS.
+- Full repository suite (`node --test __tests__/*.spec.js`): 4201/4209
+  non-skipped tests PASS; the same 8 pre-existing failures present on this
+  package's starting `HEAD` (`04c9427`, confirmed via `git stash` against
+  the identical suite before any change in this package) remain, all in
+  files unrelated to Board Reporting (`kai-child-file-read-model` /
+  `batch-files` collection / file-detail service / Generated Drafts library
+  source suites) - reproduced and attributed as a pre-existing baseline
+  condition, not caused by this package.
+- Frontend production build (`npm run build` / `vite build`): PASS (56
+  modules transformed).
+- `git diff --check`: PASS (no whitespace errors).
+- Full final `git diff` personally read across all five changed files
+  (`Backend/kai/services/kaiBoardReportingPacketService.js`,
+  `__tests__/kai-board-reporting-packet-v1-boundary.spec.js`,
+  `__tests__/kai-sprint2-br-05-board-reporting-impact-evidence-library-frontend.spec.js`,
+  `frontend/ImpactEvidenceLibrary.jsx`,
+  `frontend/impactEvidenceLibraryLogic.js`) plus the rebuilt
+  `public/js/bundles/entry.js`.
+
+**Prohibited actions taken: NONE.** BR-02's candidate/member model, BR-03
+review lifecycle, BR-04 final-release authority, Board final eligibility,
+export manifests, and the FINAL Markdown delivery path were not redesigned
+or weakened - the packet DTO extension is a read-only, additive projection of
+an identity the backend already computed and validated replay against. No
+migration, schema, production/shared database, push, deploy, Render/cloud/
+environment/feature-flag change, or secret was touched. No new Board
+candidate semantics, fingerprint algorithm, or persistence mechanism was
+introduced; no latest/newest/preferred/array-order candidate selection was
+introduced anywhere.
+
+**Local commit:** one bounded commit created after all required checks
+passed; no push.
+
+**Board Reporting product status: CLOSED.** This is the coherent end of the
+Board Reporting Product Completion package - packet architecture, BR-02
+candidate/member model (including composition-scoped successor-candidate
+idempotency), BR-03 review lifecycle, BR-04 final-release authority, final
+eligibility/currentness, export manifests, FINAL Markdown, the authoritative
+workflow-state read, the Impact Evidence Library Board UI, and unchanged-
+composition hard-reload recovery are all implemented, tested, and committed.

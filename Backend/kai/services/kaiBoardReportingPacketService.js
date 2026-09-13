@@ -3,6 +3,8 @@ import { buildKaiError } from "../errors/kaiErrors.js";
 import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationService.js";
 import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
 import { __generatedContentServiceContract, __generatedContentReviewPacketServiceTestables } from "./kaiGeneratedContentService.js";
+import { composeBoardReportingPacketFingerprint } from "./kaiBoardReportingPacketFingerprintService.js";
+import { BOARD_REPORTING_CANDIDATE_FINGERPRINT_CONTRACT_VERSION } from "../dictionary/boardReportingCandidateContract.js";
 
 const { GENERATED_CONTENT_REVIEW_ALLOWED_ROLES } = __generatedContentServiceContract;
 const { isGeneratedDraftReviewPacketDto } = __generatedContentReviewPacketServiceTestables;
@@ -94,17 +96,36 @@ function isBoardReportingMemberDto(member) {
     && member.currentUseEligible === true;
 }
 
+// P4 Board successor-candidate closure: the packet DTO also carries the
+// current authoritative Board composition identity - the SAME
+// fingerprint_contract_version + canonical_fingerprint pair BR-02 candidate
+// create/reuse already computes and stores (composeBoardReportingPacketFingerprint,
+// BOARD_REPORTING_CANDIDATE_FINGERPRINT_CONTRACT_VERSION), so a caller can
+// derive a composition-scoped idempotency key without the server ever
+// exposing raw source/evidence content or recomputing a new algorithm. Both
+// fields are null together whenever the current packet has no eligible
+// members (composeBoardReportingPacketFingerprint's NO_ELIGIBLE_MEMBERS case) -
+// never a partial pair.
+function isBoardReportingPacketFingerprintIdentity(data) {
+  if (data.canonicalFingerprint === null) return data.fingerprintContractVersion === null;
+  return data.fingerprintContractVersion === BOARD_REPORTING_CANDIDATE_FINGERPRINT_CONTRACT_VERSION
+    && typeof data.canonicalFingerprint === "string"
+    && /^[a-f0-9]{64}$/.test(data.canonicalFingerprint);
+}
+
 function isBoardReportingPacketDto(data) {
   return Boolean(data)
     && typeof data === "object"
     && !Array.isArray(data)
-    && Object.keys(data).length === 5
+    && Object.keys(data).length === 7
     && Object.keys(data).every((key) => (
       key === "organizationId"
       || key === "engagementId"
       || key === "packetAudience"
       || key === "supportedContentTypes"
       || key === "members"
+      || key === "fingerprintContractVersion"
+      || key === "canonicalFingerprint"
     ))
     && UUID_PATTERN.test(data.organizationId)
     && UUID_PATTERN.test(data.engagementId)
@@ -113,7 +134,8 @@ function isBoardReportingPacketDto(data) {
     && data.supportedContentTypes.length === BOARD_REPORTING_PACKET_CONTENT_TYPES.length
     && data.supportedContentTypes.every((type, index) => type === BOARD_REPORTING_PACKET_CONTENT_TYPES[index])
     && Array.isArray(data.members)
-    && data.members.every(isBoardReportingMemberDto);
+    && data.members.every(isBoardReportingMemberDto)
+    && isBoardReportingPacketFingerprintIdentity(data);
 }
 
 export async function getBoardReportingPacket(input, dependencies = {}) {
@@ -163,12 +185,29 @@ export async function getBoardReportingPacket(input, dependencies = {}) {
     members.push(projected);
   }
 
+  // Reuses the exact same fingerprint composition BR-02 candidate
+  // create/reuse relies on (postgresBoardReportingCandidateRepository.js ->
+  // composeBoardReportingPacketFingerprint) over this same organizationId +
+  // engagementId + packetAudience + supportedContentTypes + members shape -
+  // never a new algorithm, never computed in the browser. A NO_ELIGIBLE_MEMBERS
+  // result (empty members) is not an error here: it means no candidate can
+  // currently be created, and both identity fields are null.
+  const { fingerprint } = composeBoardReportingPacketFingerprint({
+    organizationId: result.data.organizationId,
+    engagementId: result.data.engagementId,
+    packetAudience: BOARD_REPORTING_PACKET_AUDIENCE,
+    supportedContentTypes: [...BOARD_REPORTING_PACKET_CONTENT_TYPES],
+    members,
+  });
+
   const data = {
     organizationId: result.data.organizationId,
     engagementId: result.data.engagementId,
     packetAudience: BOARD_REPORTING_PACKET_AUDIENCE,
     supportedContentTypes: [...BOARD_REPORTING_PACKET_CONTENT_TYPES],
     members,
+    fingerprintContractVersion: fingerprint ? BOARD_REPORTING_CANDIDATE_FINGERPRINT_CONTRACT_VERSION : null,
+    canonicalFingerprint: fingerprint || null,
   };
   if (!isBoardReportingPacketDto(data)) return buildKaiError("system_error", { data: null });
   return { ok: true, data, error: null };

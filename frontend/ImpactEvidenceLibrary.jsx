@@ -1162,6 +1162,16 @@ export default function ImpactEvidenceLibrary() {
   // that exact id.
   const createBoardReportingCandidate = useCallback(async () => {
     if (!organizationId || !engagementId || boardReportingCandidatePending) return;
+    // The idempotency key is derived from the packet's own current
+    // server-derived canonicalFingerprint (see module-header comment in
+    // impactEvidenceLibraryLogic.js) - never organizationId/engagementId
+    // alone. Without a current fingerprint (no eligible members yet) there is
+    // no authoritative composition to key a candidate against.
+    const canonicalFingerprint = boardReportingPacket?.canonicalFingerprint;
+    if (typeof canonicalFingerprint !== "string" || canonicalFingerprint.length === 0) {
+      setBoardReportingCandidateError("Board Reporting composition identity is not yet available.");
+      return;
+    }
     const requestOrganizationId = organizationId;
     const requestEngagementId = engagementId;
     setBoardReportingCandidatePending(true);
@@ -1170,7 +1180,7 @@ export default function ImpactEvidenceLibrary() {
       const result = await postJson(
         boardReportingCandidatesPath(requestOrganizationId, requestEngagementId),
         boardReportingCreateCandidateBody(
-          boardReportingCreateCandidateIdempotencyKey(requestOrganizationId, requestEngagementId),
+          boardReportingCreateCandidateIdempotencyKey(canonicalFingerprint),
         ),
       );
       const stillCurrent = requestOrganizationId === organizationIdRef.current
@@ -1222,22 +1232,32 @@ export default function ImpactEvidenceLibrary() {
     organizationId,
     engagementId,
     boardReportingCandidatePending,
+    boardReportingPacket,
     refetchBoardReportingWorkflowState,
   ]);
 
   // Fresh-mount/reload exact candidate identity recovery: a true fresh mount
   // (or a hard reload) always loses the React state that retains
   // boardReportingCandidateResult (see the module-header comment above), but
-  // the BR-02 create/reuse route is keyed by a deterministic, purely
-  // client-derived idempotency key (organizationId + engagementId only - see
-  // boardReportingCreateCandidateIdempotencyKey). Replaying that exact same
-  // create/reuse call therefore always resolves back to the SAME existing
-  // candidate C (replayed: true) rather than creating a new one - so once the
-  // current engagement's packet has loaded, this effect replays it exactly
-  // once to recover the exact candidate id, then reads that exact candidate
-  // and its exact workflow-state, all through the existing
+  // the BR-02 create/reuse route is keyed by a deterministic idempotency key
+  // derived from the packet's own current server-derived canonicalFingerprint
+  // (see boardReportingCreateCandidateIdempotencyKey). Replaying that exact
+  // same create/reuse call therefore always resolves back to the SAME
+  // existing candidate (replayed: true) whenever the authoritative
+  // composition is unchanged, and to a NEW candidate whenever it has changed
+  // since the prior mount - so once the current engagement's packet has
+  // loaded (carrying its current fingerprint), this effect replays it exactly
+  // once to recover the exact CURRENT candidate id, then reads that exact
+  // candidate and its exact workflow-state, all through the existing
   // createBoardReportingCandidate callback unchanged. Never a latest/newest/
   // first/last/array-order guess, and never a second persistence mechanism.
+  // While the component stays mounted, a later composition change is picked
+  // up only by the existing manual "Create/reuse" action (never
+  // automatically): boardReportingCandidateResult already holds a candidate,
+  // so this effect does not re-fire on its own, and the previously-held
+  // candidate is left exactly as the authoritative eligibility/currentness
+  // read (workflow-state) already reports it - stale under the new
+  // composition, never silently treated as current.
   useEffect(() => {
     if (!organizationId || !engagementId) return;
     if (boardReportingPacketRequestState !== "success") return;
