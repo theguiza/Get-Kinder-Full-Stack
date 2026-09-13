@@ -27718,3 +27718,124 @@ schema, or production/shared-database file was touched.
 
 **Local commit:** one bounded commit created after all required checks
 passed.
+
+
+## Board Reporting Product UI - Impact Evidence Library Frontend Wiring
+
+**Date:** 2026-09-13
+
+**Owner authorization (bounded, local-only):** the Board Reporting backend
+surface (BR-02 candidate create/reuse/read, BR-03A/B review request/start/
+complete, BR-04 human final-release authority, the real Board final-
+eligibility gate, the Board Reporting candidate export-manifest create/reuse
+route, and the governed FINAL Board Summary Markdown delivery route) was
+already complete and committed with no frontend consumer. This package adds
+the FRONTEND product UI for it on the EXISTING Impact Evidence Library page,
+reusing the accepted Grant Response Packet frontend patterns exactly - no new
+page/component, no backend/API change.
+
+**Exact candidate identity recovery mechanism:** unlike Grant Response
+Packet, `kaiBoardReportingPacketService.js#getBoardReportingPacket` returns no
+prior candidate id field of its own - it is the same eligible-member packet
+BR-02 candidate creation already reads, nothing more. The exact
+`boardReportingCandidateId` this UI acts on is therefore retained in React
+state (`ImpactEvidenceLibrary.jsx`), set only from the BR-02 create/reuse
+POST response, keyed to organizationId + engagementId, and cleared whenever
+the selected organization or engagement changes - never a latest/newest/
+first/last/array-order guess of any kind.
+
+**Frontend changes:** added to `frontend/impactEvidenceLibraryLogic.js` -
+path builders for the packet/candidate/workflow-state/review-request/review-
+start/review-complete/final-release-authority/export-manifests/export-
+manifest-markdown routes; `boardReportingCreateCandidateIdempotencyKey`/
+`boardReportingCreateCandidateBody`/`boardReportingFinalReleaseAuthorityBody`
+request-body builders; `shouldApplyBoardReportingResponse` (the stale org/
+engagement/generation guard, structurally identical to
+`shouldApplyGrantResponsePacketResponse`); defensive allowlist projectors
+`projectBoardReportingPacket`/`projectBoardReportingCandidateResult`/
+`projectBoardReportingCandidateSnapshot`/`projectBoardReportingWorkflowState`
+(the last never sorts/dedupes/picks a "latest" export manifest - it preserves
+the server's own `exportManifests` order verbatim);
+`boardReportingReviewLifecycleState`/`BOARD_REPORTING_REVIEW_LIFECYCLE_STATES`
+and `boardReportingFinalReleaseAuthorityControlState`/
+`BOARD_REPORTING_FINAL_RELEASE_AUTHORITY_CONTROL_STATES` (one-state-one-
+control state machines mirroring the Grant equivalents exactly); and
+`boardReportingFinalSummaryFetchable` (a UX-only gate requiring an explicit,
+existing manifest selection plus current eligibility/effective-authority -
+the server remains the sole enforcement authority regardless).
+
+Added to `frontend/ImpactEvidenceLibrary.jsx` - the full Board Reporting state
+set, the engagement/organization-switch reset effect (clearing the retained
+candidate identity and every dependent piece of state), the engagement-scoped
+packet fetch effect, the shared `refetchBoardReportingWorkflowState` post-
+mutation refetch (used after every review/authority/manifest mutation,
+stale-response-guarded and timeout-bounded exactly like
+`refetchGrantResponsePacketAfterMemberExportReviewRequest`),
+`createBoardReportingCandidate` (create/reuse + immutable snapshot read +
+workflow-state read), `requestBoardReportingReview`/
+`startBoardReportingReview`/`completeBoardReportingReview` (each gated on the
+one-state-one-control lifecycle and scoped to the exact candidate id +
+review-queue-item id + CAS token the workflow-state GET returned),
+`recordBoardReportingFinalReleaseAuthority` (grant/revoke, sending only
+`review_queue_item_id` + `decision_action`), `createBoardReportingExportManifest`,
+an explicit (never auto-selected) manifest radio-selection control, and
+`fetchBoardReportingFinalSummary` (fetches the FINAL_MANIFEST_BOUND Markdown
+attachment as text for exactly the explicitly-selected manifest id). The
+render block shows the packet, the create/reuse action and immutable
+candidate snapshot, workflow-state-driven review/authority/eligibility
+controls (eligibility's `failedGates`/`blockers`/`currentnessGate` as
+structured list items, never collapsed into one string), the export-manifest
+selection list, and a visually/structurally distinct "FINAL Board Summary"
+section gated on that explicit selection. No existing Grant Response Packet
+state, effect, callback, or render markup was modified - the diff to both
+files is purely additive (confirmed via `git diff`: zero removed lines in
+either file).
+
+**Test evidence (all commands run with
+`DATABASE_URL=postgres://localhost:1/nonexistent_sentinel_db` exported
+first):**
+- New focused suite
+  (`node --test __tests__/kai-sprint2-br-05-board-reporting-impact-evidence-library-frontend.spec.js`):
+  27/27 PASS.
+- Directly-coupled Grant Response Packet regression suites
+  (`node --test __tests__/kai-sprint2-p14-06e1-grant-response-packet-frontend-hydration.spec.js
+  __tests__/kai-sprint2-p14-06e2-grant-response-packet-initial-load-rehydration.spec.js
+  __tests__/kai-sprint2-p14-06e3-grant-response-packet-post-mutation-rehydration.spec.js
+  __tests__/kai-sprint2-p14-06-grant-response-packet-export-review-lifecycle-frontend.spec.js
+  __tests__/kai-sprint2-p14-08-d-impact-evidence-library-final-markdown-export-ux.spec.js
+  __tests__/kai-sprint2-impact-library-grant-response-packet.spec.js`):
+  120/120 PASS. The general Impact Library KAI surface suites
+  (`node --test __tests__/kai-sprint2-impact-library-kai-frontend.spec.js
+  __tests__/kai-sprint2-impact-library-kai-surface.spec.js`): 15/15 PASS.
+- Board Reporting backend/API contract suites, run to confirm the frontend's
+  route/DTO assumptions against the real contract (not modified)
+  (`node --test __tests__/kai-board-reporting-candidate-boundary.spec.js
+  __tests__/kai-board-reporting-candidate-workflow-state-boundary.spec.js
+  __tests__/kai-board-reporting-packet-v1-boundary.spec.js
+  __tests__/kai-board-reporting-final-eligibility-boundary.spec.js
+  __tests__/kai-board-reporting-candidate-review-request-boundary.spec.js
+  __tests__/kai-board-reporting-candidate-review-start-boundary.spec.js
+  __tests__/kai-board-reporting-candidate-review-complete-boundary.spec.js
+  __tests__/kai-sprint2-board-reporting-candidate-export-manifest-final-markdown-boundary.spec.js
+  __tests__/kai-sprint2-board-reporting-candidate-export-manifest-service-route.spec.js
+  __tests__/kai-sprint2-br-04-board-reporting-candidate-human-authority-decision-ledger-boundary.spec.js
+  __tests__/kai-sprint2-br-board-reporting-browser-api-composition.spec.js`):
+  132/132 PASS.
+- Frontend production build: `npm run build` (`vite build`) - PASS (56
+  modules transformed). The rebuilt `public/js/bundles/entry.js` was
+  discarded (not committed) per this package's explicit scope instruction to
+  stage only the two frontend source files, the new test file, and this
+  ExecPlan entry.
+- `git diff --check`: PASS (no whitespace errors).
+- Full final `git diff` personally read in both changed files: purely
+  additive in each (zero removed lines besides the diff file headers).
+
+**Prohibited actions taken: NONE.** No backend/API/route/service/repository
+file was touched. No migration, schema, production/shared database, push,
+deploy, Render/cloud/environment/feature-flag change, or secret was touched.
+No new frontend package/page/component was created - both edits landed
+inside the existing `frontend/ImpactEvidenceLibrary.jsx` /
+`frontend/impactEvidenceLibraryLogic.js` pair.
+
+**Local commit:** one bounded commit created after all required checks
+passed; no push.

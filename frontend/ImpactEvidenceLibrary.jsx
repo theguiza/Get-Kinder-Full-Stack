@@ -75,6 +75,29 @@ import {
   hydrateGrantResponsePacketExportReviewReadModel,
   projectGrantResponsePacket,
   shouldApplyGrantResponsePacketResponse,
+  boardReportingPacketPath,
+  boardReportingCandidatesPath,
+  boardReportingCreateCandidateIdempotencyKey,
+  boardReportingCreateCandidateBody,
+  boardReportingCandidatePath,
+  boardReportingWorkflowStatePath,
+  boardReportingReviewRequestPath,
+  boardReportingReviewStartPath,
+  boardReportingReviewCompletePath,
+  boardReportingFinalReleaseAuthorityPath,
+  boardReportingFinalReleaseAuthorityBody,
+  boardReportingExportManifestsPath,
+  boardReportingExportManifestMarkdownPath,
+  shouldApplyBoardReportingResponse,
+  projectBoardReportingPacket,
+  projectBoardReportingCandidateResult,
+  projectBoardReportingCandidateSnapshot,
+  projectBoardReportingWorkflowState,
+  boardReportingReviewLifecycleState,
+  BOARD_REPORTING_REVIEW_LIFECYCLE_STATES,
+  boardReportingFinalReleaseAuthorityControlState,
+  BOARD_REPORTING_FINAL_RELEASE_AUTHORITY_CONTROL_STATES,
+  boardReportingFinalSummaryFetchable,
   postJson,
   potentialConflictsPath,
   projectCandidateClaims,
@@ -351,6 +374,68 @@ export default function ImpactEvidenceLibrary() {
   const grantPacketRequestGenerationRef = useRef(0);
   const engagementIdRef = useRef(engagementId);
   engagementIdRef.current = engagementId;
+
+  // Board Reporting: engagement-scoped, read-only regrouping of already-
+  // governed internal-audience generated drafts (see
+  // Backend/kai/services/kaiBoardReportingPacketService.js). Keyed by
+  // organizationId + engagementId exactly like Grant Response Packet above.
+  // Unlike Grant Response Packet, the packet GET carries NO prior candidate
+  // id (see the module-header comment in impactEvidenceLibraryLogic.js) -
+  // `boardReportingCandidateResult` below is the SOLE retained identity of
+  // the exact candidate this browser has created/reused for the current
+  // organization+engagement, set only from the create/reuse POST response
+  // and cleared whenever the selected organization or engagement changes.
+  const [boardReportingPacket, setBoardReportingPacket] = useState(null);
+  const [loadingBoardReportingPacket, setLoadingBoardReportingPacket] = useState(false);
+  const [boardReportingPacketError, setBoardReportingPacketError] = useState("");
+  const [boardReportingPacketRequestState, setBoardReportingPacketRequestState] = useState("idle");
+  // BR-02 candidate create/reuse - the SOLE source of the exact
+  // boardReportingCandidateId every subsequent Board action below is scoped
+  // to. Never persisted server-side as UI truth beyond this create/reuse
+  // response; always reset whenever the selected engagement (or
+  // organization) changes.
+  const [boardReportingCandidatePending, setBoardReportingCandidatePending] = useState(false);
+  const [boardReportingCandidateResult, setBoardReportingCandidateResult] = useState(null);
+  const [boardReportingCandidateError, setBoardReportingCandidateError] = useState("");
+  // The immutable member snapshot for the exact candidate above (BR-02 exact
+  // candidate read) - read-only, never editable, never a recomputation of
+  // current packet membership.
+  const [boardReportingCandidateSnapshot, setBoardReportingCandidateSnapshot] = useState(null);
+  const [loadingBoardReportingCandidateSnapshot, setLoadingBoardReportingCandidateSnapshot] = useState(false);
+  const [boardReportingCandidateSnapshotError, setBoardReportingCandidateSnapshotError] = useState("");
+  // The single authoritative workflow-state read for the exact candidate
+  // above - review state, effective final-release authority, final
+  // eligibility (with structured failedGates/blockers/currentnessGate), and
+  // export-manifest history. Every review/authority/eligibility/manifest
+  // control below renders ONLY from this state, never from a mutation's own
+  // POST response body.
+  const [boardReportingWorkflowState, setBoardReportingWorkflowState] = useState(null);
+  const [loadingBoardReportingWorkflowState, setLoadingBoardReportingWorkflowState] = useState(false);
+  const [boardReportingWorkflowStateError, setBoardReportingWorkflowStateError] = useState("");
+  const [boardReportingWorkflowStateRequestState, setBoardReportingWorkflowStateRequestState] = useState("idle");
+  const [boardReportingReviewRequestPending, setBoardReportingReviewRequestPending] = useState(false);
+  const [boardReportingReviewRequestError, setBoardReportingReviewRequestError] = useState("");
+  const [boardReportingReviewStartPending, setBoardReportingReviewStartPending] = useState(false);
+  const [boardReportingReviewStartError, setBoardReportingReviewStartError] = useState("");
+  const [boardReportingReviewCompletePending, setBoardReportingReviewCompletePending] = useState(false);
+  const [boardReportingReviewCompleteError, setBoardReportingReviewCompleteError] = useState("");
+  const [boardReportingFinalReleaseAuthorityPending, setBoardReportingFinalReleaseAuthorityPending] = useState(false);
+  const [boardReportingFinalReleaseAuthorityError, setBoardReportingFinalReleaseAuthorityError] = useState("");
+  const [boardReportingExportManifestPending, setBoardReportingExportManifestPending] = useState(false);
+  const [boardReportingExportManifestError, setBoardReportingExportManifestError] = useState("");
+  // The user's explicit pick among the current workflow-state's own
+  // exportManifests list - never auto-selected first/last, always cleared on
+  // engagement/organization change and whenever a fresh workflow-state read
+  // no longer carries this exact manifest id.
+  const [selectedBoardReportingExportManifestId, setSelectedBoardReportingExportManifestId] = useState("");
+  // The FINAL Board Summary Markdown fetch/display state - visually and
+  // structurally distinct from the live/preview workflow-state panel above
+  // it. Fetched only once a manifest id has been explicitly selected.
+  const [boardReportingFinalSummaryLoading, setBoardReportingFinalSummaryLoading] = useState(false);
+  const [boardReportingFinalSummaryMarkdown, setBoardReportingFinalSummaryMarkdown] = useState(null);
+  const [boardReportingFinalSummaryError, setBoardReportingFinalSummaryError] = useState("");
+  const boardReportingPacketRequestGenerationRef = useRef(0);
+  const boardReportingWorkflowStateRequestGenerationRef = useRef(0);
 
   // Review Queue: organization-scope current-attention rollup. This is a
   // product PROJECTION of already-governed state (see
@@ -916,6 +1001,507 @@ export default function ImpactEvidenceLibrary() {
       cancelled = true;
     };
   }, [organizationId, engagementId]);
+
+  // Board Reporting: changing the selected engagement (or organization) must
+  // discard the previous engagement's visible Board state immediately -
+  // before the new request is even issued - including the retained exact
+  // candidate identity (see the module-header comment above), so a late
+  // response for a previously selected engagement can never overwrite the
+  // newly selected engagement's Board Reporting state (see
+  // shouldApplyBoardReportingResponse).
+  useEffect(() => {
+    boardReportingPacketRequestGenerationRef.current += 1;
+    boardReportingWorkflowStateRequestGenerationRef.current += 1;
+    setBoardReportingPacket(null);
+    setBoardReportingPacketError("");
+    setBoardReportingPacketRequestState("idle");
+    setLoadingBoardReportingPacket(false);
+    setBoardReportingCandidatePending(false);
+    setBoardReportingCandidateResult(null);
+    setBoardReportingCandidateError("");
+    setBoardReportingCandidateSnapshot(null);
+    setLoadingBoardReportingCandidateSnapshot(false);
+    setBoardReportingCandidateSnapshotError("");
+    setBoardReportingWorkflowState(null);
+    setLoadingBoardReportingWorkflowState(false);
+    setBoardReportingWorkflowStateError("");
+    setBoardReportingWorkflowStateRequestState("idle");
+    setBoardReportingReviewRequestPending(false);
+    setBoardReportingReviewRequestError("");
+    setBoardReportingReviewStartPending(false);
+    setBoardReportingReviewStartError("");
+    setBoardReportingReviewCompletePending(false);
+    setBoardReportingReviewCompleteError("");
+    setBoardReportingFinalReleaseAuthorityPending(false);
+    setBoardReportingFinalReleaseAuthorityError("");
+    setBoardReportingExportManifestPending(false);
+    setBoardReportingExportManifestError("");
+    setSelectedBoardReportingExportManifestId("");
+    setBoardReportingFinalSummaryLoading(false);
+    setBoardReportingFinalSummaryMarkdown(null);
+    setBoardReportingFinalSummaryError("");
+    if (!organizationId || !engagementId) return;
+    let cancelled = false;
+    (async () => {
+      const requestGeneration = ++boardReportingPacketRequestGenerationRef.current;
+      const requestOrganizationId = organizationId;
+      const requestEngagementId = engagementId;
+      setLoadingBoardReportingPacket(true);
+      setBoardReportingPacketRequestState("loading");
+      const result = await getJson(boardReportingPacketPath(organizationId, engagementId));
+      if (cancelled) return;
+      if (!shouldApplyBoardReportingResponse({
+        requestGeneration,
+        currentGeneration: boardReportingPacketRequestGenerationRef.current,
+        requestOrganizationId,
+        currentOrganizationId: organizationIdRef.current,
+        requestEngagementId,
+        currentEngagementId: engagementIdRef.current,
+      })) return;
+      setLoadingBoardReportingPacket(false);
+      if (result.statusCode !== 200 || !result.body?.ok) {
+        setBoardReportingPacket(null);
+        setBoardReportingPacketError(errorText(result));
+        setBoardReportingPacketRequestState("error");
+        return;
+      }
+      setBoardReportingPacket(projectBoardReportingPacket(result.body.data));
+      setBoardReportingPacketError("");
+      setBoardReportingPacketRequestState("success");
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [organizationId, engagementId]);
+
+  // Shared post-mutation refetch of the authoritative Board Reporting
+  // workflow-state for the EXACT candidate id passed in - used after every
+  // Board mutation (review request/start/complete, authority grant/revoke,
+  // manifest create/reuse), mirroring
+  // refetchGrantResponsePacketAfterMemberExportReviewRequest's stale-
+  // response/timeout discipline exactly.
+  const refetchBoardReportingWorkflowState = useCallback(async (requestOrganizationId, requestEngagementId, requestCandidateId) => {
+    const requestGeneration = ++boardReportingWorkflowStateRequestGenerationRef.current;
+    setLoadingBoardReportingWorkflowState(true);
+    setBoardReportingWorkflowStateRequestState("loading");
+    let result;
+    try {
+      result = await Promise.race([
+        getJson(boardReportingWorkflowStatePath(requestOrganizationId, requestEngagementId, requestCandidateId)),
+        new Promise((_resolve, reject) => {
+          setTimeout(
+            () => reject(new Error("Request timed out.")),
+            GRANT_RESPONSE_PACKET_REFETCH_TIMEOUT_MS,
+          );
+        }),
+      ]);
+    } catch (error) {
+      if (!shouldApplyBoardReportingResponse({
+        requestGeneration,
+        currentGeneration: boardReportingWorkflowStateRequestGenerationRef.current,
+        requestOrganizationId,
+        currentOrganizationId: organizationIdRef.current,
+        requestEngagementId,
+        currentEngagementId: engagementIdRef.current,
+      })) return false;
+      setLoadingBoardReportingWorkflowState(false);
+      setBoardReportingWorkflowState(null);
+      setBoardReportingWorkflowStateError(error?.message || "Request failed (network error).");
+      setBoardReportingWorkflowStateRequestState("error");
+      return true;
+    }
+    if (!shouldApplyBoardReportingResponse({
+      requestGeneration,
+      currentGeneration: boardReportingWorkflowStateRequestGenerationRef.current,
+      requestOrganizationId,
+      currentOrganizationId: organizationIdRef.current,
+      requestEngagementId,
+      currentEngagementId: engagementIdRef.current,
+    })) return false;
+    setLoadingBoardReportingWorkflowState(false);
+    if (result.statusCode !== 200 || !result.body?.ok) {
+      setBoardReportingWorkflowState(null);
+      setBoardReportingWorkflowStateError(errorText(result));
+      setBoardReportingWorkflowStateRequestState("error");
+      return true;
+    }
+    const projected = projectBoardReportingWorkflowState(result.body.data);
+    setBoardReportingWorkflowState(projected);
+    setBoardReportingWorkflowStateError("");
+    setBoardReportingWorkflowStateRequestState("success");
+    // A fresh workflow-state read that no longer carries the currently
+    // selected manifest id (e.g. a different candidate, or a manifest that
+    // never existed) must never leave a stale, now-unrecoverable selection
+    // in place - this only ever clears, it never auto-selects a replacement.
+    setSelectedBoardReportingExportManifestId((current) => (
+      current && projected?.exportManifests?.some((manifest) => manifest.boardReportingCandidateExportManifestId === current)
+        ? current
+        : ""
+    ));
+    setBoardReportingFinalSummaryMarkdown(null);
+    setBoardReportingFinalSummaryError("");
+    return true;
+  }, []);
+
+  // BR-02 candidate create/reuse for exactly the selected engagement. Sends
+  // only its own deterministic idempotency_key - every piece of candidate
+  // state (membership, ordering, fingerprint, candidate identity) is
+  // resolved server-side. On success this retains the EXACT candidate id the
+  // server returned (never a client-manufactured one) and reads both the
+  // immutable candidate snapshot and the authoritative workflow-state for
+  // that exact id.
+  const createBoardReportingCandidate = useCallback(async () => {
+    if (!organizationId || !engagementId || boardReportingCandidatePending) return;
+    const requestOrganizationId = organizationId;
+    const requestEngagementId = engagementId;
+    setBoardReportingCandidatePending(true);
+    setBoardReportingCandidateError("");
+    try {
+      const result = await postJson(
+        boardReportingCandidatesPath(requestOrganizationId, requestEngagementId),
+        boardReportingCreateCandidateBody(
+          boardReportingCreateCandidateIdempotencyKey(requestOrganizationId, requestEngagementId),
+        ),
+      );
+      const stillCurrent = requestOrganizationId === organizationIdRef.current
+        && requestEngagementId === engagementIdRef.current;
+      if (result.statusCode !== 200 && result.statusCode !== 201) {
+        if (stillCurrent) {
+          setBoardReportingCandidateError(errorText(result));
+        }
+        return;
+      }
+      const projected = projectBoardReportingCandidateResult(result.body?.data);
+      if (stillCurrent) {
+        setBoardReportingCandidateResult(projected);
+      }
+      const candidateId = projected?.boardReportingCandidateId;
+      if (!candidateId) return;
+      setLoadingBoardReportingCandidateSnapshot(true);
+      setBoardReportingCandidateSnapshotError("");
+      const snapshotResult = await getJson(
+        boardReportingCandidatePath(requestOrganizationId, requestEngagementId, candidateId),
+      );
+      if (requestOrganizationId === organizationIdRef.current && requestEngagementId === engagementIdRef.current) {
+        setLoadingBoardReportingCandidateSnapshot(false);
+        if (snapshotResult.statusCode === 200 && snapshotResult.body?.ok) {
+          setBoardReportingCandidateSnapshot(projectBoardReportingCandidateSnapshot(snapshotResult.body.data));
+          setBoardReportingCandidateSnapshotError("");
+        } else {
+          setBoardReportingCandidateSnapshot(null);
+          setBoardReportingCandidateSnapshotError(errorText(snapshotResult));
+        }
+      }
+      await refetchBoardReportingWorkflowState(requestOrganizationId, requestEngagementId, candidateId);
+    } catch (error) {
+      if (
+        requestOrganizationId === organizationIdRef.current
+        && requestEngagementId === engagementIdRef.current
+      ) {
+        setBoardReportingCandidateError(error?.message || "Request failed (network error).");
+      }
+    } finally {
+      if (
+        requestOrganizationId === organizationIdRef.current
+        && requestEngagementId === engagementIdRef.current
+      ) {
+        setBoardReportingCandidatePending(false);
+      }
+    }
+  }, [
+    organizationId,
+    engagementId,
+    boardReportingCandidatePending,
+    refetchBoardReportingWorkflowState,
+  ]);
+
+  // Requests governed review for the EXACT candidate id the server already
+  // returned above (boardReportingCandidateResult) - never a latest/newest/
+  // preferred guess. Sends an empty body; every piece of review-queue state
+  // is resolved server-side.
+  const requestBoardReportingReview = useCallback(async () => {
+    const candidateId = boardReportingCandidateResult?.boardReportingCandidateId;
+    if (!organizationId || !engagementId || !candidateId || boardReportingReviewRequestPending) return;
+    const requestOrganizationId = organizationId;
+    const requestEngagementId = engagementId;
+    setBoardReportingReviewRequestPending(true);
+    setBoardReportingReviewRequestError("");
+    const result = await postJson(
+      boardReportingReviewRequestPath(requestOrganizationId, requestEngagementId, candidateId),
+      {},
+    );
+    const stillCurrent = requestOrganizationId === organizationIdRef.current
+      && requestEngagementId === engagementIdRef.current;
+    if (result.statusCode !== 200 && result.statusCode !== 201) {
+      if (stillCurrent) {
+        setBoardReportingReviewRequestError(errorText(result));
+        setBoardReportingReviewRequestPending(false);
+      }
+      return;
+    }
+    await refetchBoardReportingWorkflowState(requestOrganizationId, requestEngagementId, candidateId);
+    if (stillCurrent) {
+      setBoardReportingReviewRequestPending(false);
+    }
+  }, [
+    organizationId,
+    engagementId,
+    boardReportingCandidateResult,
+    boardReportingReviewRequestPending,
+    refetchBoardReportingWorkflowState,
+  ]);
+
+  // Starts governed review for the EXACT candidate id + EXACT review-queue-
+  // item id + EXACT reviewUpdatedAt CAS token the workflow-state GET already
+  // returned above - never a latest/newest/preferred guess of any of the
+  // three.
+  const startBoardReportingReview = useCallback(async () => {
+    const candidateId = boardReportingCandidateResult?.boardReportingCandidateId;
+    const queueItemId = boardReportingWorkflowState?.reviewState?.reviewQueueItemId;
+    const expectedUpdatedAt = boardReportingWorkflowState?.reviewState?.reviewUpdatedAt;
+    if (
+      !organizationId || !engagementId || !candidateId || !queueItemId || !expectedUpdatedAt
+      || boardReportingReviewStartPending
+    ) return;
+    if (
+      boardReportingReviewLifecycleState(boardReportingWorkflowState?.reviewState)
+      !== BOARD_REPORTING_REVIEW_LIFECYCLE_STATES.startable
+    ) return;
+    const requestOrganizationId = organizationId;
+    const requestEngagementId = engagementId;
+    setBoardReportingReviewStartPending(true);
+    setBoardReportingReviewStartError("");
+    const result = await postJson(
+      boardReportingReviewStartPath(requestOrganizationId, requestEngagementId, candidateId, queueItemId),
+      reviewTransitionBody(expectedUpdatedAt),
+    );
+    const stillCurrent = requestOrganizationId === organizationIdRef.current
+      && requestEngagementId === engagementIdRef.current;
+    if (result.statusCode !== 200 && result.statusCode !== 201) {
+      if (stillCurrent) {
+        setBoardReportingReviewStartError(errorText(result));
+        setBoardReportingReviewStartPending(false);
+      }
+      return;
+    }
+    await refetchBoardReportingWorkflowState(requestOrganizationId, requestEngagementId, candidateId);
+    if (stillCurrent) {
+      setBoardReportingReviewStartPending(false);
+    }
+  }, [
+    organizationId,
+    engagementId,
+    boardReportingCandidateResult,
+    boardReportingWorkflowState,
+    boardReportingReviewStartPending,
+    refetchBoardReportingWorkflowState,
+  ]);
+
+  // Completes governed review for the EXACT candidate id + EXACT review-
+  // queue-item id + EXACT reviewUpdatedAt CAS token the workflow-state GET
+  // already returned above - never a latest/newest/preferred guess of any of
+  // the three.
+  const completeBoardReportingReview = useCallback(async () => {
+    const candidateId = boardReportingCandidateResult?.boardReportingCandidateId;
+    const queueItemId = boardReportingWorkflowState?.reviewState?.reviewQueueItemId;
+    const expectedUpdatedAt = boardReportingWorkflowState?.reviewState?.reviewUpdatedAt;
+    if (
+      !organizationId || !engagementId || !candidateId || !queueItemId || !expectedUpdatedAt
+      || boardReportingReviewCompletePending
+    ) return;
+    if (
+      boardReportingReviewLifecycleState(boardReportingWorkflowState?.reviewState)
+      !== BOARD_REPORTING_REVIEW_LIFECYCLE_STATES.completable
+    ) return;
+    const requestOrganizationId = organizationId;
+    const requestEngagementId = engagementId;
+    setBoardReportingReviewCompletePending(true);
+    setBoardReportingReviewCompleteError("");
+    const result = await postJson(
+      boardReportingReviewCompletePath(requestOrganizationId, requestEngagementId, candidateId, queueItemId),
+      reviewTransitionBody(expectedUpdatedAt),
+    );
+    const stillCurrent = requestOrganizationId === organizationIdRef.current
+      && requestEngagementId === engagementIdRef.current;
+    if (result.statusCode !== 200 && result.statusCode !== 201) {
+      if (stillCurrent) {
+        setBoardReportingReviewCompleteError(errorText(result));
+        setBoardReportingReviewCompletePending(false);
+      }
+      return;
+    }
+    await refetchBoardReportingWorkflowState(requestOrganizationId, requestEngagementId, candidateId);
+    if (stillCurrent) {
+      setBoardReportingReviewCompletePending(false);
+    }
+  }, [
+    organizationId,
+    engagementId,
+    boardReportingCandidateResult,
+    boardReportingWorkflowState,
+    boardReportingReviewCompletePending,
+    refetchBoardReportingWorkflowState,
+  ]);
+
+  // BR-04: governed human final-release authority grant/revoke for the EXACT
+  // current candidate id + EXACT current review_queue_item_id - never a
+  // latest/newest/preferred guess of either. Only reachable once review is
+  // resolved/resolved (see boardReportingFinalReleaseAuthorityControlState),
+  // mirroring the one-state-one-control discipline every other action on
+  // this card already follows. On success or failure alike, this never
+  // trusts its own POST response body as durable truth: it always refetches
+  // the authoritative workflow-state afterward.
+  const recordBoardReportingFinalReleaseAuthority = useCallback(async (decisionAction) => {
+    const candidateId = boardReportingCandidateResult?.boardReportingCandidateId;
+    const queueItemId = boardReportingWorkflowState?.reviewState?.reviewQueueItemId;
+    if (!organizationId || !engagementId || !candidateId || !queueItemId || boardReportingFinalReleaseAuthorityPending) return;
+    if (
+      boardReportingFinalReleaseAuthorityControlState(boardReportingWorkflowState)
+      === BOARD_REPORTING_FINAL_RELEASE_AUTHORITY_CONTROL_STATES.none
+    ) return;
+    const requestOrganizationId = organizationId;
+    const requestEngagementId = engagementId;
+    setBoardReportingFinalReleaseAuthorityPending(true);
+    setBoardReportingFinalReleaseAuthorityError("");
+    const result = await postJson(
+      boardReportingFinalReleaseAuthorityPath(requestOrganizationId, requestEngagementId, candidateId),
+      boardReportingFinalReleaseAuthorityBody(queueItemId, decisionAction),
+    );
+    const stillCurrent = requestOrganizationId === organizationIdRef.current
+      && requestEngagementId === engagementIdRef.current;
+    if (result.statusCode !== 200 && result.statusCode !== 201) {
+      if (stillCurrent) {
+        setBoardReportingFinalReleaseAuthorityError(errorText(result));
+        setBoardReportingFinalReleaseAuthorityPending(false);
+      }
+      return;
+    }
+    await refetchBoardReportingWorkflowState(requestOrganizationId, requestEngagementId, candidateId);
+    if (stillCurrent) {
+      setBoardReportingFinalReleaseAuthorityPending(false);
+    }
+  }, [
+    organizationId,
+    engagementId,
+    boardReportingCandidateResult,
+    boardReportingWorkflowState,
+    boardReportingFinalReleaseAuthorityPending,
+    refetchBoardReportingWorkflowState,
+  ]);
+
+  // Governed FINAL Board Summary export-manifest create/reuse for the EXACT
+  // current candidate id - never a latest/newest/preferred guess. Sends the
+  // existing required EMPTY body only ({}) - the backend's own create/reuse
+  // convergence decides whether a manifest needs creating, never this
+  // browser. On success or failure alike, this never trusts its own POST
+  // response body as durable truth: it always refetches the authoritative
+  // workflow-state afterward, and every rendered manifest comes only from
+  // that response's own exportManifests list.
+  const createBoardReportingExportManifest = useCallback(async () => {
+    const candidateId = boardReportingCandidateResult?.boardReportingCandidateId;
+    if (!organizationId || !engagementId || !candidateId || boardReportingExportManifestPending) return;
+    const requestOrganizationId = organizationId;
+    const requestEngagementId = engagementId;
+    setBoardReportingExportManifestPending(true);
+    setBoardReportingExportManifestError("");
+    const result = await postJson(
+      boardReportingExportManifestsPath(requestOrganizationId, requestEngagementId, candidateId),
+      {},
+    );
+    const stillCurrent = requestOrganizationId === organizationIdRef.current
+      && requestEngagementId === engagementIdRef.current;
+    if (result.statusCode !== 200 && result.statusCode !== 201) {
+      if (stillCurrent) {
+        setBoardReportingExportManifestError(errorText(result));
+        setBoardReportingExportManifestPending(false);
+      }
+      return;
+    }
+    await refetchBoardReportingWorkflowState(requestOrganizationId, requestEngagementId, candidateId);
+    if (stillCurrent) {
+      setBoardReportingExportManifestPending(false);
+    }
+  }, [
+    organizationId,
+    engagementId,
+    boardReportingCandidateResult,
+    boardReportingExportManifestPending,
+    refetchBoardReportingWorkflowState,
+  ]);
+
+  // Explicit user selection of exactly one existing manifest id from the
+  // current workflow-state's own exportManifests list - never inferred, and
+  // never auto-selected as a side effect of a fresh workflow-state read (see
+  // refetchBoardReportingWorkflowState above, which only ever clears a
+  // selection that no longer exists). Selecting a different manifest always
+  // clears any previously fetched FINAL Markdown - it is never shown against
+  // the wrong manifest id.
+  const selectBoardReportingExportManifestId = useCallback((manifestId) => {
+    setSelectedBoardReportingExportManifestId(manifestId);
+    setBoardReportingFinalSummaryMarkdown(null);
+    setBoardReportingFinalSummaryError("");
+  }, []);
+
+  // Fetches the governed FINAL Board Summary Markdown for exactly the
+  // explicitly-selected boardReportingCandidateExportManifestId - never an
+  // inferred/first/last manifest. boardReportingFinalSummaryFetchable is a UX
+  // nicety only; the server remains the sole enforcement authority
+  // regardless. The response is raw Markdown text (an attachment), not a
+  // {ok,data} JSON envelope, so this fetches and reads text directly rather
+  // than reusing getJson.
+  const fetchBoardReportingFinalSummary = useCallback(async () => {
+    if (
+      !organizationId
+      || !selectedBoardReportingExportManifestId
+      || boardReportingFinalSummaryLoading
+      || !boardReportingFinalSummaryFetchable(boardReportingWorkflowState, selectedBoardReportingExportManifestId)
+    ) return;
+    const requestOrganizationId = organizationId;
+    const requestManifestId = selectedBoardReportingExportManifestId;
+    setBoardReportingFinalSummaryLoading(true);
+    setBoardReportingFinalSummaryError("");
+    try {
+      const response = await fetch(
+        boardReportingExportManifestMarkdownPath(requestOrganizationId, requestManifestId),
+      );
+      if (
+        requestOrganizationId !== organizationIdRef.current
+        || requestManifestId !== selectedBoardReportingExportManifestId
+      ) return;
+      if (!response.ok) {
+        setBoardReportingFinalSummaryMarkdown(null);
+        setBoardReportingFinalSummaryError(`Request failed (${response.status}).`);
+        return;
+      }
+      const markdown = await response.text();
+      if (
+        requestOrganizationId !== organizationIdRef.current
+        || requestManifestId !== selectedBoardReportingExportManifestId
+      ) return;
+      setBoardReportingFinalSummaryMarkdown(markdown);
+      setBoardReportingFinalSummaryError("");
+    } catch (error) {
+      if (
+        requestOrganizationId === organizationIdRef.current
+        && requestManifestId === selectedBoardReportingExportManifestId
+      ) {
+        setBoardReportingFinalSummaryMarkdown(null);
+        setBoardReportingFinalSummaryError(error?.message || "Request failed (network error).");
+      }
+    } finally {
+      if (
+        requestOrganizationId === organizationIdRef.current
+        && requestManifestId === selectedBoardReportingExportManifestId
+      ) {
+        setBoardReportingFinalSummaryLoading(false);
+      }
+    }
+  }, [
+    organizationId,
+    selectedBoardReportingExportManifestId,
+    boardReportingFinalSummaryLoading,
+    boardReportingWorkflowState,
+  ]);
 
   const refetchGrantResponsePacketAfterMemberExportReviewRequest = useCallback(async (requestOrganizationId, requestEngagementId) => {
     const requestGeneration = ++grantPacketRequestGenerationRef.current;
@@ -2842,6 +3428,326 @@ export default function ImpactEvidenceLibrary() {
                       </div>
                     )}
                   </>
+                ) : null}
+              </>
+            )}
+          </div>
+
+          <div className="admin-card mt-3 board-reporting-card">
+            <div className="d-flex justify-content-between align-items-center mb-2">
+              <h5 className="mb-0">Board Reporting</h5>
+              <span className="badge text-bg-secondary">Audience: Internal</span>
+            </div>
+            <div className="text-muted small mb-2">
+              A read-only, engagement-scoped regrouping of already-governed, internal-audience
+              generated drafts for the selected engagement - membership, review state, and
+              eligibility are all resolved server-side; this section grants no approval or
+              export/finalization authority of its own.
+            </div>
+            {!organizationId || !engagementId ? (
+              <div className="text-muted small">Select an organization and engagement to see Board Reporting.</div>
+            ) : (
+              <>
+                {loadingBoardReportingPacket ? <div className="text-muted small">Loading Board Reporting packet...</div> : null}
+                {!loadingBoardReportingPacket && boardReportingPacketRequestState === "error" ? (
+                  <div className="alert alert-warning py-2 small">{boardReportingPacketError}</div>
+                ) : null}
+                {!loadingBoardReportingPacket && boardReportingPacketRequestState === "success" && boardReportingPacket ? (
+                  <>
+                    <ValueRow label="Eligible generated drafts" value={boardReportingPacket.members.length} />
+                    {boardReportingPacket.members.length === 0 ? (
+                      <div className="text-muted small">
+                        No reviewed internal-ready generated content is currently eligible for Board Reporting.
+                      </div>
+                    ) : (
+                      <div className="list-group mt-2">
+                        {boardReportingPacket.members.map((member) => (
+                          <div key={member.generatedContentDraftId} className="list-group-item">
+                            <div className="d-flex justify-content-between gap-2">
+                              <span className="small fw-semibold">{member.contentType}</span>
+                              <span className="badge text-bg-secondary">
+                                {generatedDraftReviewLabel(member.queueStatus, member.reviewStatus)}
+                              </span>
+                            </div>
+                            <ValueRow label="Draft id" value={member.generatedContentDraftId} />
+                            <ValueRow label="Requested audience" value={member.requestedAudience} />
+                            <ValueRow label="Draft status" value={member.draftStatus} />
+                            <ValueRow label="Current-use eligible" value={String(member.currentUseEligible)} />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </>
+                ) : null}
+
+                <div className="small mt-3">
+                  <button
+                    type="button"
+                    className="btn btn-sm btn-outline-secondary board-reporting-create-candidate-button"
+                    disabled={boardReportingCandidatePending}
+                    onClick={createBoardReportingCandidate}
+                  >
+                    {boardReportingCandidatePending ? "Creating Board Reporting candidate..." : "Create/reuse Board Reporting candidate"}
+                  </button>
+                  <div className="text-muted mt-1">
+                    Creates (or reuses, if nothing has changed) a Board Reporting candidate.
+                    Grants no approval, review, authority, eligibility, or manifest state of its
+                    own.
+                  </div>
+                  {boardReportingCandidateError ? (
+                    <div className="alert alert-warning py-2 small mt-1">{boardReportingCandidateError}</div>
+                  ) : null}
+                  {boardReportingCandidateResult ? (
+                    <div className="small mt-1">
+                      <ValueRow label="Board Reporting candidate id" value={boardReportingCandidateResult.boardReportingCandidateId} />
+                      <ValueRow label="Member count" value={boardReportingCandidateResult.memberCount} />
+                      <ValueRow label="Reused existing candidate" value={String(boardReportingCandidateResult.replayed)} />
+                    </div>
+                  ) : null}
+                </div>
+
+                {loadingBoardReportingCandidateSnapshot ? (
+                  <div className="text-muted small mt-2">Loading Board Reporting candidate snapshot...</div>
+                ) : null}
+                {boardReportingCandidateSnapshotError ? (
+                  <div className="alert alert-warning py-2 small mt-2">{boardReportingCandidateSnapshotError}</div>
+                ) : null}
+                {boardReportingCandidateSnapshot ? (
+                  <div className="mt-2 board-reporting-candidate-snapshot">
+                    <div className="fw-semibold small">Candidate snapshot (immutable)</div>
+                    <ValueRow label="Candidate status" value={boardReportingCandidateSnapshot.candidateStatus} />
+                    <ValueRow label="Created at" value={boardReportingCandidateSnapshot.createdAt} />
+                    <ValueRow label="Canonical fingerprint" value={boardReportingCandidateSnapshot.canonicalFingerprint} />
+                    <ValueRow label="Member count" value={boardReportingCandidateSnapshot.members.length} />
+                  </div>
+                ) : null}
+
+                {boardReportingCandidateResult ? (
+                  <div className="mt-3 board-reporting-workflow-state">
+                    <h6 className="mb-2">Workflow state</h6>
+                    {loadingBoardReportingWorkflowState ? (
+                      <div className="text-muted small">Loading Board Reporting workflow state...</div>
+                    ) : null}
+                    {!loadingBoardReportingWorkflowState && boardReportingWorkflowStateRequestState === "error" ? (
+                      <div className="alert alert-warning py-2 small">{boardReportingWorkflowStateError}</div>
+                    ) : null}
+                    {!loadingBoardReportingWorkflowState && boardReportingWorkflowState ? (
+                      <>
+                        <div className="small">
+                          <div className="fw-semibold">Review</div>
+                          <ValueRow label="Review queue item id" value={boardReportingWorkflowState.reviewState.reviewQueueItemId} />
+                          <ValueRow label="Queue status" value={boardReportingWorkflowState.reviewState.queueStatus} />
+                          <ValueRow label="Review status" value={boardReportingWorkflowState.reviewState.reviewStatus} />
+                        </div>
+
+                        {boardReportingReviewLifecycleState(boardReportingWorkflowState.reviewState)
+                          === BOARD_REPORTING_REVIEW_LIFECYCLE_STATES.requestable ? (
+                          <div className="mt-2">
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-outline-secondary board-reporting-review-request-button"
+                              disabled={boardReportingReviewRequestPending}
+                              onClick={requestBoardReportingReview}
+                            >
+                              {boardReportingReviewRequestPending ? "Requesting review..." : "Request review"}
+                            </button>
+                            {boardReportingReviewRequestError ? (
+                              <div className="alert alert-warning py-2 small mt-1">{boardReportingReviewRequestError}</div>
+                            ) : null}
+                          </div>
+                        ) : null}
+                        {boardReportingReviewLifecycleState(boardReportingWorkflowState.reviewState)
+                          === BOARD_REPORTING_REVIEW_LIFECYCLE_STATES.startable ? (
+                          <div className="mt-2">
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-outline-secondary board-reporting-review-start-button"
+                              disabled={boardReportingReviewStartPending}
+                              onClick={startBoardReportingReview}
+                            >
+                              {boardReportingReviewStartPending ? "Starting review..." : "Start review"}
+                            </button>
+                            {boardReportingReviewStartError ? (
+                              <div className="alert alert-warning py-2 small mt-1">{boardReportingReviewStartError}</div>
+                            ) : null}
+                          </div>
+                        ) : null}
+                        {boardReportingReviewLifecycleState(boardReportingWorkflowState.reviewState)
+                          === BOARD_REPORTING_REVIEW_LIFECYCLE_STATES.completable ? (
+                          <div className="mt-2">
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-outline-secondary board-reporting-review-complete-button"
+                              disabled={boardReportingReviewCompletePending}
+                              onClick={completeBoardReportingReview}
+                            >
+                              {boardReportingReviewCompletePending ? "Completing review..." : "Complete review"}
+                            </button>
+                            {boardReportingReviewCompleteError ? (
+                              <div className="alert alert-warning py-2 small mt-1">{boardReportingReviewCompleteError}</div>
+                            ) : null}
+                          </div>
+                        ) : null}
+                        {boardReportingReviewLifecycleState(boardReportingWorkflowState.reviewState)
+                          === BOARD_REPORTING_REVIEW_LIFECYCLE_STATES.resolved ? (
+                          <div className="mt-2">
+                            <span className="badge text-bg-success board-reporting-review-resolved-badge">
+                              Review complete
+                            </span>
+                          </div>
+                        ) : null}
+
+                        <div className="small mt-3">
+                          <div className="fw-semibold">Effective final-release authority</div>
+                          <ValueRow label="Decision type" value={boardReportingWorkflowState.effectiveAuthority.decisionType} />
+                          <ValueRow label="Effective" value={String(boardReportingWorkflowState.effectiveAuthority.effective)} />
+                          <ValueRow label="Reason" value={boardReportingWorkflowState.effectiveAuthority.reason} />
+                        </div>
+                        {boardReportingFinalReleaseAuthorityControlState(boardReportingWorkflowState)
+                          === BOARD_REPORTING_FINAL_RELEASE_AUTHORITY_CONTROL_STATES.grantable ? (
+                          <div className="mt-2">
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-outline-secondary board-reporting-final-release-authority-grant-button"
+                              disabled={boardReportingFinalReleaseAuthorityPending}
+                              onClick={() => recordBoardReportingFinalReleaseAuthority("grant")}
+                            >
+                              {boardReportingFinalReleaseAuthorityPending ? "Granting final release authority..." : "Grant final release authority"}
+                            </button>
+                          </div>
+                        ) : null}
+                        {boardReportingFinalReleaseAuthorityControlState(boardReportingWorkflowState)
+                          === BOARD_REPORTING_FINAL_RELEASE_AUTHORITY_CONTROL_STATES.revocable ? (
+                          <div className="mt-2">
+                            <span className="badge text-bg-success board-reporting-final-release-authority-granted-badge">
+                              Final release authority granted
+                            </span>
+                            <div className="mt-2">
+                              <button
+                                type="button"
+                                className="btn btn-sm btn-outline-secondary board-reporting-final-release-authority-revoke-button"
+                                disabled={boardReportingFinalReleaseAuthorityPending}
+                                onClick={() => recordBoardReportingFinalReleaseAuthority("revoke")}
+                              >
+                                {boardReportingFinalReleaseAuthorityPending ? "Revoking final release authority..." : "Revoke final release authority"}
+                              </button>
+                            </div>
+                          </div>
+                        ) : null}
+                        {boardReportingFinalReleaseAuthorityError ? (
+                          <div className="alert alert-warning py-2 small mt-1">{boardReportingFinalReleaseAuthorityError}</div>
+                        ) : null}
+
+                        <div className="small mt-3">
+                          <div className="fw-semibold">Final eligibility</div>
+                          <ValueRow label="Final eligibility" value={String(boardReportingWorkflowState.finalEligibility.finalEligibility)} />
+                          <ValueRow label="Currentness gate" value={String(boardReportingWorkflowState.finalEligibility.currentnessGate)} />
+                          {boardReportingWorkflowState.finalEligibility.failedGates.length ? (
+                            <div className="mt-1">
+                              <div className="text-muted">Failed gates</div>
+                              <ul className="mb-0 ps-3">
+                                {boardReportingWorkflowState.finalEligibility.failedGates.map((gate, index) => (
+                                  <li key={`failed-gate-${index}`}>{typeof gate === "string" ? gate : JSON.stringify(gate)}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          ) : null}
+                          {boardReportingWorkflowState.finalEligibility.blockers.length ? (
+                            <div className="mt-1">
+                              <div className="text-muted">Blockers</div>
+                              <ul className="mb-0 ps-3">
+                                {boardReportingWorkflowState.finalEligibility.blockers.map((blocker, index) => (
+                                  <li key={`blocker-${index}`}>{typeof blocker === "string" ? blocker : JSON.stringify(blocker)}</li>
+                                ))}
+                              </ul>
+                            </div>
+                          ) : null}
+                        </div>
+
+                        <div className="small mt-3">
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-outline-primary board-reporting-create-export-manifest-button"
+                            disabled={boardReportingExportManifestPending}
+                            onClick={createBoardReportingExportManifest}
+                          >
+                            {boardReportingExportManifestPending ? "Preparing export manifest..." : "Create/reuse export manifest"}
+                          </button>
+                          <div className="text-muted mt-1">
+                            Creates (or reuses, if nothing has changed) a governed export manifest
+                            for this exact candidate. This is not external publication and grants
+                            no external readiness or release status of its own.
+                          </div>
+                          {boardReportingExportManifestError ? (
+                            <div className="alert alert-warning py-2 small mt-1">{boardReportingExportManifestError}</div>
+                          ) : null}
+                        </div>
+
+                        {boardReportingWorkflowState.exportManifests.length ? (
+                          <div className="small mt-2 board-reporting-export-manifests">
+                            <div className="fw-semibold">Export manifests</div>
+                            <div className="text-muted mb-1">
+                              Select exactly one manifest before fetching the FINAL Board Summary
+                              below - none is ever auto-selected.
+                            </div>
+                            <ul className="list-unstyled mb-0">
+                              {boardReportingWorkflowState.exportManifests.map((manifest) => (
+                                <li key={manifest.boardReportingCandidateExportManifestId} className="mb-1">
+                                  <label className="d-flex align-items-center gap-2">
+                                    <input
+                                      type="radio"
+                                      name="board-reporting-export-manifest-selection"
+                                      className="board-reporting-export-manifest-radio"
+                                      checked={selectedBoardReportingExportManifestId === manifest.boardReportingCandidateExportManifestId}
+                                      onChange={() => selectBoardReportingExportManifestId(manifest.boardReportingCandidateExportManifestId)}
+                                    />
+                                    <span>
+                                      {manifest.boardReportingCandidateExportManifestId}
+                                      {" "}
+                                      <span className="text-muted">({manifest.createdAt})</span>
+                                    </span>
+                                  </label>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        ) : null}
+
+                        <div className="mt-3 p-2 border rounded board-reporting-final-summary-section">
+                          <h6 className="mb-1">FINAL Board Summary</h6>
+                          <div className="text-muted small mb-2">
+                            Distinct from the live workflow-state preview above - this is the
+                            governed FINAL_MANIFEST_BOUND Markdown for exactly the selected
+                            manifest id, never an inferred one.
+                          </div>
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-outline-primary board-reporting-fetch-final-summary-button"
+                            disabled={
+                              boardReportingFinalSummaryLoading
+                              || !boardReportingFinalSummaryFetchable(boardReportingWorkflowState, selectedBoardReportingExportManifestId)
+                            }
+                            onClick={fetchBoardReportingFinalSummary}
+                          >
+                            {boardReportingFinalSummaryLoading ? "Loading FINAL Board Summary..." : "Fetch FINAL Board Summary"}
+                          </button>
+                          {boardReportingFinalSummaryError ? (
+                            <div className="alert alert-warning py-2 small mt-2">{boardReportingFinalSummaryError}</div>
+                          ) : null}
+                          {!boardReportingFinalSummaryLoading && boardReportingFinalSummaryMarkdown != null ? (
+                            <pre className="small border rounded p-2 mt-2 board-reporting-final-summary-markdown">
+                              {boardReportingFinalSummaryMarkdown}
+                            </pre>
+                          ) : null}
+                          {!boardReportingFinalSummaryLoading && boardReportingFinalSummaryMarkdown == null && !boardReportingFinalSummaryError ? (
+                            <div className="text-muted small mt-2">
+                              Select a manifest and fetch to view the FINAL Board Summary.
+                            </div>
+                          ) : null}
+                        </div>
+                      </>
+                    ) : null}
+                  </div>
                 ) : null}
               </>
             )}

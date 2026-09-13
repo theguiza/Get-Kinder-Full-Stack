@@ -502,6 +502,356 @@ export function hydrateGrantResponsePacketExportReviewReadModel(projectedPacket)
   };
 }
 
+// ---------------------------------------------------------------------------
+// Board Reporting: the browser-facing analogue of Grant Response Packet above,
+// over Backend/kai/services/kaiBoardReportingPacketService.js,
+// kaiBoardReportingCandidateService.js,
+// kaiBoardReportingCandidateWorkflowStateService.js,
+// kaiBoardReportingCandidateHumanFinalReleaseAuthorityService.js, and
+// kaiBoardReportingCandidateExportManifestService.js. Unlike Grant Response
+// Packet, the Board Reporting packet GET carries no prior candidate id of its
+// own (see kaiBoardReportingPacketService.js#getBoardReportingPacket) - it is
+// the same eligible-member packet the BR-02 candidate create/reuse route
+// already reads, nothing more. The exact candidate identity recovery
+// mechanism here is therefore NOT hydrated from the packet GET: it is
+// retained in React state (ImpactEvidenceLibrary.jsx) from the create/reuse
+// POST response only, keyed to organizationId + engagementId, and cleared
+// whenever the selected organization or engagement changes - never a
+// latest/newest/first/last/array-order guess.
+// ---------------------------------------------------------------------------
+
+export function boardReportingPacketPath(organizationId, engagementId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}`
+    + `/engagements/${encodeURIComponent(engagementId)}/board-reporting`;
+}
+
+// BR-02 candidate create/reuse: keyed by exactly organizationId + engagementId
+// - the browser sends only its own idempotency_key (see
+// boardReportingCreateCandidateBody/boardReportingCreateCandidateIdempotencyKey
+// below). Membership, fingerprint, review outcome, authority, eligibility,
+// and manifest data are never accepted from the client - the backend resolves
+// the current eligible packet and derives candidate membership/fingerprint
+// itself.
+export function boardReportingCandidatesPath(organizationId, engagementId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}`
+    + `/engagements/${encodeURIComponent(engagementId)}/board-reporting/candidates`;
+}
+
+// A deterministic, per-organization+engagement idempotency key so an
+// identical create/reuse replay against the same current state returns the
+// same existing candidate (replayed: true) rather than creating a new one on
+// every click - matches the BOARD_REPORTING candidate idempotency_key
+// contract (/^[A-Za-z0-9._:-]{8,128}$/) exactly.
+export function boardReportingCreateCandidateIdempotencyKey(organizationId, engagementId) {
+  return `board-reporting-${organizationId}-${engagementId}`;
+}
+
+export function boardReportingCreateCandidateBody(idempotencyKey) {
+  return { idempotency_key: idempotencyKey };
+}
+
+// BR-02 exact candidate read: authorized solely by the EXACT existing
+// boardReportingCandidateId the create/reuse POST above already returned -
+// never organizationId+engagementId alone, and never a latest/newest/
+// preferred selection.
+export function boardReportingCandidatePath(organizationId, engagementId, boardReportingCandidateId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}`
+    + `/engagements/${encodeURIComponent(engagementId)}/board-reporting/candidates`
+    + `/${encodeURIComponent(boardReportingCandidateId)}`;
+}
+
+// The single browser-facing authoritative read surface for one exact Board
+// Reporting candidate's full governed lifecycle - current BR-03 review
+// state, effective BR-04 final-release authority, current Board final
+// eligibility (with structured failedGates/blockers/currentnessGate), and
+// this candidate's export-manifest history (see
+// kaiBoardReportingCandidateWorkflowStateService.js). Keyed by exactly the
+// same EXACT existing boardReportingCandidateId as boardReportingCandidatePath
+// above.
+export function boardReportingWorkflowStatePath(organizationId, engagementId, boardReportingCandidateId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}`
+    + `/engagements/${encodeURIComponent(engagementId)}/board-reporting/candidates`
+    + `/${encodeURIComponent(boardReportingCandidateId)}/workflow-state`;
+}
+
+export function boardReportingReviewRequestPath(organizationId, engagementId, boardReportingCandidateId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}`
+    + `/engagements/${encodeURIComponent(engagementId)}/board-reporting/candidates`
+    + `/${encodeURIComponent(boardReportingCandidateId)}/review-request`;
+}
+
+// BR-03B START: keyed by exactly the EXACT existing candidate id + the EXACT
+// existing review-queue item id the workflow-state GET already returned -
+// never a latest/newest/preferred guess of either. The request body is the
+// existing reviewTransitionBody({expected_updated_at}) helper unchanged - the
+// exact CAS token the workflow-state GET last observed on the queue item.
+export function boardReportingReviewStartPath(organizationId, engagementId, boardReportingCandidateId, reviewQueueItemId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}`
+    + `/engagements/${encodeURIComponent(engagementId)}/board-reporting/candidates`
+    + `/${encodeURIComponent(boardReportingCandidateId)}/review-queue`
+    + `/${encodeURIComponent(reviewQueueItemId)}/start`;
+}
+
+// BR-03B COMPLETE: same exact identity discipline as START above.
+export function boardReportingReviewCompletePath(organizationId, engagementId, boardReportingCandidateId, reviewQueueItemId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}`
+    + `/engagements/${encodeURIComponent(engagementId)}/board-reporting/candidates`
+    + `/${encodeURIComponent(boardReportingCandidateId)}/review-queue`
+    + `/${encodeURIComponent(reviewQueueItemId)}/complete`;
+}
+
+// BR-04: governed human final-release authority application for the EXACT
+// existing candidate id. Unlike Grant Response Packet's analogous route, the
+// Board route ALSO requires the EXACT existing review_queue_item_id (the
+// bound 'board_reporting_candidate_review' queue row the caller asserts is
+// resolved) in the body - never a requested_audience (a Board Reporting
+// candidate's audience is always exactly "internal"), fingerprint, members,
+// memberCount, review state, eligibility, authority state, or manifest
+// identity.
+export function boardReportingFinalReleaseAuthorityPath(organizationId, engagementId, boardReportingCandidateId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}`
+    + `/engagements/${encodeURIComponent(engagementId)}/board-reporting/candidates`
+    + `/${encodeURIComponent(boardReportingCandidateId)}/final-release-authority`;
+}
+
+export function boardReportingFinalReleaseAuthorityBody(reviewQueueItemId, decisionAction) {
+  return { review_queue_item_id: reviewQueueItemId, decision_action: decisionAction };
+}
+
+// Board Reporting candidate export-manifest create/reuse: keyed by exactly
+// the EXACT existing candidate id - the request body is the existing
+// required EMPTY body only ({}), no eligibility/authority/fingerprint/
+// member/review-state/manifest-identity field ever leaves this call. The
+// backend's own create/reuse convergence is authoritative: the browser never
+// decides whether a manifest needs creating.
+export function boardReportingExportManifestsPath(organizationId, engagementId, boardReportingCandidateId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}`
+    + `/engagements/${encodeURIComponent(engagementId)}/board-reporting/candidates`
+    + `/${encodeURIComponent(boardReportingCandidateId)}/export-manifests`;
+}
+
+// Governed FINAL Board Summary Markdown delivery - authorized solely by the
+// EXACT boardReportingCandidateExportManifestId the workflow-state GET's own
+// exportManifests list carries - never a candidate id without its manifest,
+// and never a latest/newest/preferred selection among multiple manifests.
+// Org-scoped only (not engagement-scoped), matching the analogous
+// grantResponsePacketExportManifestMarkdownPath above exactly.
+export function boardReportingExportManifestMarkdownPath(organizationId, boardReportingCandidateExportManifestId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}`
+    + `/board-reporting/export-manifests/${encodeURIComponent(boardReportingCandidateExportManifestId)}/markdown`;
+}
+
+// A Board Reporting response (packet or workflow-state) may be applied only
+// if it belongs to the organization AND engagement still current when it
+// resolves - same late-response-protection convention as
+// shouldApplyGrantResponsePacketResponse above, so a late response for a
+// previously selected engagement can never overwrite the newly selected
+// engagement's Board Reporting state.
+export function shouldApplyBoardReportingResponse({
+  requestGeneration,
+  currentGeneration,
+  requestOrganizationId,
+  currentOrganizationId,
+  requestEngagementId,
+  currentEngagementId,
+}) {
+  return (
+    requestGeneration === currentGeneration
+    && requestOrganizationId === currentOrganizationId
+    && requestEngagementId === currentEngagementId
+  );
+}
+
+// Explicit allowlist projection of the authoritative Board Reporting packet
+// DTO (kaiBoardReportingPacketService.js#getBoardReportingPacket): read-only,
+// engagement-scoped regrouping of already-governed, internal-audience
+// evidence_summary/impact_narrative drafts. No client-side eligibility
+// recomputation, no raw source/evidence content.
+export function projectBoardReportingPacket(dto) {
+  if (!dto || typeof dto !== "object") return null;
+  return {
+    organizationId: dto.organizationId,
+    engagementId: dto.engagementId,
+    packetAudience: dto.packetAudience,
+    supportedContentTypes: asArray(dto.supportedContentTypes).filter((entry) => typeof entry === "string"),
+    members: asArray(dto.members).map((member) => ({
+      generationRunId: member?.generationRunId,
+      generatedContentDraftId: member?.generatedContentDraftId,
+      contentType: member?.contentType,
+      draftStatus: member?.draftStatus,
+      requestedAudience: member?.requestedAudience,
+      reviewQueueItemId: member?.reviewQueueItemId,
+      queueStatus: member?.queueStatus,
+      reviewStatus: member?.reviewStatus,
+      reviewUpdatedAt: member?.reviewUpdatedAt,
+      currentUseEligible: member?.currentUseEligible === true,
+      blocks: asArray(member?.blocks),
+    })).filter((member) => typeof member.generatedContentDraftId === "string"),
+  };
+}
+
+// Explicit allowlist projection of the BR-02 create/reuse response
+// (kaiBoardReportingCandidateService.js#createBoardReportingCandidate) - safe
+// candidate metadata only, never a member list or ordering. This is the SOLE
+// source of the exact boardReportingCandidateId retained in React state (see
+// module header comment above) - never a latest/newest/preferred guess.
+export function projectBoardReportingCandidateResult(dto) {
+  if (!dto || typeof dto !== "object") return null;
+  return {
+    organizationId: dto.organizationId,
+    engagementId: dto.engagementId,
+    boardReportingCandidateId: dto.boardReportingCandidateId,
+    packetAudience: dto.packetAudience,
+    fingerprintContractVersion: dto.fingerprintContractVersion,
+    canonicalFingerprint: dto.canonicalFingerprint,
+    memberCount: typeof dto.memberCount === "number" ? dto.memberCount : null,
+    replayed: dto.replayed === true,
+  };
+}
+
+// Explicit allowlist projection of the BR-02 exact-candidate read response
+// (kaiBoardReportingCandidateService.js#readBoardReportingCandidate) - the
+// immutable member snapshot captured at creation time, not the current
+// packet.
+export function projectBoardReportingCandidateSnapshot(dto) {
+  if (!dto || typeof dto !== "object") return null;
+  return {
+    boardReportingCandidateId: dto.boardReportingCandidateId,
+    organizationId: dto.organizationId,
+    engagementId: dto.engagementId,
+    packetAudience: dto.packetAudience,
+    fingerprintContractVersion: dto.fingerprintContractVersion,
+    canonicalFingerprint: dto.canonicalFingerprint,
+    candidateStatus: dto.candidateStatus,
+    createdAt: typeof dto.createdAt === "string" ? dto.createdAt : null,
+    members: asArray(dto.members).map((member) => ({
+      boardReportingCandidateMemberId: member?.boardReportingCandidateMemberId,
+      generatedContentDraftId: member?.generatedContentDraftId,
+      ordinal: typeof member?.ordinal === "number" ? member.ordinal : null,
+      createdAt: typeof member?.createdAt === "string" ? member.createdAt : null,
+    })),
+  };
+}
+
+// Explicit allowlist projection of the authoritative workflow-state DTO
+// (kaiBoardReportingCandidateWorkflowStateService.js#readBoardReportingCandidateWorkflowState).
+// This defensive projector reads ONLY server-provided fields and never
+// fabricates, sorts, dedupes, or picks a "latest" export manifest -
+// exportManifests is returned in exactly the server's own order.
+export function projectBoardReportingWorkflowState(dto) {
+  if (!dto || typeof dto !== "object") return null;
+  const reviewState = dto.reviewState && typeof dto.reviewState === "object" ? dto.reviewState : {};
+  const effectiveAuthority = dto.effectiveAuthority && typeof dto.effectiveAuthority === "object" ? dto.effectiveAuthority : {};
+  const finalEligibility = dto.finalEligibility && typeof dto.finalEligibility === "object" ? dto.finalEligibility : {};
+  return {
+    organizationId: dto.organizationId,
+    engagementId: dto.engagementId,
+    boardReportingCandidateId: dto.boardReportingCandidateId,
+    reviewState: {
+      reviewQueueItemId: typeof reviewState.reviewQueueItemId === "string" ? reviewState.reviewQueueItemId : null,
+      queueStatus: typeof reviewState.queueStatus === "string" ? reviewState.queueStatus : null,
+      reviewStatus: typeof reviewState.reviewStatus === "string" ? reviewState.reviewStatus : null,
+      reviewUpdatedAt: typeof reviewState.reviewUpdatedAt === "string" ? reviewState.reviewUpdatedAt : null,
+    },
+    effectiveAuthority: {
+      decisionType: effectiveAuthority.decisionType ?? null,
+      effective: effectiveAuthority.effective === true,
+      reason: typeof effectiveAuthority.reason === "string" ? effectiveAuthority.reason : null,
+      headDecisionId: typeof effectiveAuthority.headDecisionId === "string" ? effectiveAuthority.headDecisionId : null,
+    },
+    finalEligibility: {
+      finalEligibility: finalEligibility.finalEligibility === true,
+      failedGates: asArray(finalEligibility.failedGates),
+      blockers: asArray(finalEligibility.blockers),
+      currentnessGate: finalEligibility.currentnessGate ?? null,
+    },
+    exportManifests: asArray(dto.exportManifests)
+      .map((manifest) => ({
+        boardReportingCandidateExportManifestId: manifest?.boardReportingCandidateExportManifestId,
+        boardReportingCandidateId: manifest?.boardReportingCandidateId,
+        effectiveAuthorityDecisionId: manifest?.effectiveAuthorityDecisionId ?? null,
+        effectiveAuthorityDecisionType: manifest?.effectiveAuthorityDecisionType ?? null,
+        fingerprintContractVersion: manifest?.fingerprintContractVersion ?? null,
+        canonicalFingerprint: manifest?.canonicalFingerprint ?? null,
+        createdAt: typeof manifest?.createdAt === "string" ? manifest.createdAt : null,
+      }))
+      .filter((manifest) => isRouteUuid(manifest.boardReportingCandidateExportManifestId)),
+  };
+}
+
+// The candidate review lifecycle UI state machine, driven entirely by the
+// exact server-returned queueStatus/reviewStatus pair on the current
+// workflow-state's reviewState (never client-derived, never a latest/newest/
+// preferred guess). Mirrors
+// grantResponsePacketExportReviewLifecycleState's one-state-one-control
+// discipline exactly: every combination shows at most one control.
+// "requestable" applies whenever a candidate exists but no review has yet
+// been requested for it (reviewQueueItemId null).
+export const BOARD_REPORTING_REVIEW_LIFECYCLE_STATES = Object.freeze({
+  requestable: "requestable",
+  startable: "startable",
+  completable: "completable",
+  resolved: "resolved",
+  unknown: "unknown",
+});
+
+export function boardReportingReviewLifecycleState(reviewState) {
+  if (!reviewState || typeof reviewState.reviewQueueItemId !== "string") {
+    return BOARD_REPORTING_REVIEW_LIFECYCLE_STATES.requestable;
+  }
+  if (reviewState.queueStatus === "open" && reviewState.reviewStatus === "needs_gk_review") {
+    return BOARD_REPORTING_REVIEW_LIFECYCLE_STATES.startable;
+  }
+  if (reviewState.queueStatus === "in_progress" && reviewState.reviewStatus === "needs_gk_review") {
+    return BOARD_REPORTING_REVIEW_LIFECYCLE_STATES.completable;
+  }
+  if (reviewState.queueStatus === "resolved" && reviewState.reviewStatus === "resolved") {
+    return BOARD_REPORTING_REVIEW_LIFECYCLE_STATES.resolved;
+  }
+  return BOARD_REPORTING_REVIEW_LIFECYCLE_STATES.unknown;
+}
+
+// The candidate final-release-authority control state, driven entirely by
+// the exact server-returned reviewState/effectiveAuthority fields on the
+// current workflow-state (never client-derived, never a latest/newest/
+// preferred guess). "none" whenever review is not yet resolved/resolved -
+// "grantable" once review is resolved and no effective grant exists -
+// "revocable" once an effective grant exists. Mirrors
+// grantResponsePacketFinalReleaseAuthorityControlState's one-state-one-
+// control discipline exactly.
+export const BOARD_REPORTING_FINAL_RELEASE_AUTHORITY_CONTROL_STATES = Object.freeze({
+  none: "none",
+  grantable: "grantable",
+  revocable: "revocable",
+});
+
+export function boardReportingFinalReleaseAuthorityControlState(workflowState) {
+  const reviewState = workflowState?.reviewState;
+  if (!reviewState || reviewState.queueStatus !== "resolved" || reviewState.reviewStatus !== "resolved") {
+    return BOARD_REPORTING_FINAL_RELEASE_AUTHORITY_CONTROL_STATES.none;
+  }
+  return workflowState?.effectiveAuthority?.effective === true
+    ? BOARD_REPORTING_FINAL_RELEASE_AUTHORITY_CONTROL_STATES.revocable
+    : BOARD_REPORTING_FINAL_RELEASE_AUTHORITY_CONTROL_STATES.grantable;
+}
+
+// Whether the governed FINAL Board Summary action may be attempted for an
+// explicitly-selected boardReportingCandidateExportManifestId. This is a UX
+// nicety only - the server (kaiBoardReportingCandidateExportManifestMarkdownSerializer.js)
+// remains the sole enforcement authority regardless of this function's
+// result. Requires: an explicit (non-empty) manifest id selection, that
+// exact manifest id present in the current workflow-state's own
+// exportManifests list (never inferred/first/last), final eligibility
+// currently true, and effective authority currently granted.
+export function boardReportingFinalSummaryFetchable(workflowState, selectedManifestId) {
+  if (!workflowState || typeof selectedManifestId !== "string" || selectedManifestId.length === 0) return false;
+  if (workflowState.finalEligibility?.finalEligibility !== true) return false;
+  if (workflowState.effectiveAuthority?.effective !== true) return false;
+  return asArray(workflowState.exportManifests).some(
+    (manifest) => manifest.boardReportingCandidateExportManifestId === selectedManifestId,
+  );
+}
+
 // Projects the Package 4 composition DTO into exactly what the Funder
 // Requirements card renders: the applicability state, the engagement's
 // current target (for display only - never editable here), and, only for
