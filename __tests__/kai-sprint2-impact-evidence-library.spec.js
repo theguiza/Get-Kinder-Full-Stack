@@ -40,6 +40,7 @@ import {
   createEvidenceSummaryPath,
   createFunderEvidenceSummaryPath,
   createImpactNarrativePath,
+  createReadinessAssessmentPath,
   decisionRequiresApprovedAudiences,
   decisionRequiresLimitationNotes,
   eligibleClaimsPath,
@@ -48,6 +49,8 @@ import {
   evidenceReviewDecisionValidationError,
   generatedContentReviewCompletePath,
   generatedContentReviewStartPath,
+  generatedDraftContentTypeLabel,
+  generatedDraftReviewLabel,
   generatedDraftReviewPacketPath,
   getJson,
   mergeClaims,
@@ -312,6 +315,85 @@ test("Impact Evidence Library impact-narrative create route is mounted with narr
     .filter((layer) => layer.route?.path === "/admin/organizations/:organizationId/generated-content-drafts/impact-narrative" && layer.route?.methods?.post);
   assert.equal(createMatches.length, 1);
   assert.deepEqual(Object.keys(createMatches[0].route.methods), ["post"]);
+});
+
+test("Impact Evidence Library readiness-assessment create route is mounted with narrow methods", () => {
+  const createMatches = sprint2IntakeApiRouter.stack
+    .filter((layer) => layer.route?.path === "/admin/organizations/:organizationId/generated-content-drafts/readiness-assessment" && layer.route?.methods?.post);
+  assert.equal(createMatches.length, 1);
+  assert.deepEqual(Object.keys(createMatches[0].route.methods), ["post"]);
+});
+
+test("Impact Evidence Library readiness-assessment create route pins readiness_assessment/internal and accepts no browser readiness authority", async (t) => {
+  let current = scenario({
+    result: {
+      ok: true,
+      data: {
+        generatedContentDraftId: "00000000-0000-4000-8000-000000000897",
+        requestedAudience: "internal",
+        draftStatus: "draft",
+        reviewQueueItemId: "00000000-0000-4000-8000-000000000898",
+        blocks: [{ ordinal: 1, text: "A readiness limitation remains.", citations: [{ claimId, evidenceItemId }] }],
+      },
+      error: null,
+    },
+  });
+  const originalFeatureFlag = process.env.KAI_SPRINT2_ENABLED;
+  process.env.KAI_SPRINT2_ENABLED = "true";
+  const restore = intakeRouteTestables.setIntakeServiceForTest({
+    async createReadinessAssessmentDraft(input, deps) {
+      current.calls.push({ input, deps });
+      return current.result;
+    },
+  });
+  const server = await listen(createApp(() => current));
+
+  t.after(async () => {
+    restore();
+    if (originalFeatureFlag === undefined) delete process.env.KAI_SPRINT2_ENABLED;
+    else process.env.KAI_SPRINT2_ENABLED = originalFeatureFlag;
+    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  });
+
+  const path = `${basePath}/admin/organizations/${organizationId}/generated-content-drafts/readiness-assessment`;
+
+  for (const rejectedBody of [
+    { claim_ids: [claimId], idempotency_key: "readiness-stage-a", engagement_id: engagementId, content_type: "readiness_assessment" },
+    { claim_ids: [claimId], idempotency_key: "readiness-stage-a", engagement_id: engagementId, requested_audience: "internal" },
+    { claim_ids: [claimId], idempotency_key: "readiness-stage-a", engagement_id: engagementId, readiness_status: "ready" },
+    { claim_ids: [claimId], idempotency_key: "readiness-stage-a", engagement_id: engagementId, requirement_applicability: "applicable" },
+    { claim_ids: [claimId], idempotency_key: "readiness-stage-a", engagement_id: engagementId, requirement_satisfaction: "satisfied" },
+    { claim_ids: [claimId], idempotency_key: "readiness-stage-a", engagement_id: engagementId, coverage_conclusions: [] },
+    { claim_ids: [claimId], idempotency_key: "readiness-stage-a", engagement_id: engagementId, blockers: [] },
+    { claim_ids: [claimId], idempotency_key: "readiness-stage-a", engagement_id: engagementId, citations: [{ claimId, evidenceItemId }] },
+    { claim_ids: [claimId], idempotency_key: "readiness-stage-a", engagement_id: engagementId, evidence_eligibility: "eligible" },
+    { claim_ids: [claimId], idempotency_key: "readiness-stage-a", engagement_id: engagementId, review_outcome: "resolved" },
+    { claim_ids: [claimId], idempotency_key: "readiness-stage-a" },
+  ]) {
+    const rejected = await postRequestJson(server, path, rejectedBody);
+    assert.equal(rejected.statusCode, 422);
+  }
+  assert.deepEqual(current.calls, []);
+
+  const allowed = await postRequestJson(server, path, {
+    claim_ids: [claimId],
+    idempotency_key: "readiness-stage-a",
+    engagement_id: engagementId,
+  });
+  assert.equal(allowed.statusCode, 201);
+  assert.equal(current.calls.length, 1);
+  assert.deepEqual(current.calls[0].input, {
+    organizationId,
+    engagementId,
+    requestedAudience: "internal",
+    claimIds: [claimId],
+    idempotencyKey: "readiness-stage-a",
+    actorContext,
+    now: current.calls[0].input.now,
+  });
+  assert.match(current.calls[0].input.now, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+  assert.equal(typeof current.calls[0].deps.draftGenerator, "function");
+  assert.equal(typeof current.calls[0].deps.metadataOnlyAudit?.prepareMetadataOnlyAudit, "function");
 });
 
 test("Impact Evidence Library impact-narrative create route pins impact_narrative/internal, owns audience server-side, and accepts no browser content_type, requested_audience, prompt, text, citations, evidence ids, or authority", async (t) => {
@@ -798,7 +880,7 @@ test("Impact Evidence Library frontend projections compose P2-08 and P2-06 witho
 
   const packet = projectGeneratedDraftPacket({
     generatedContentDraftId: "00000000-0000-4000-8000-000000000777",
-    contentType: "evidence_summary",
+    contentType: "readiness_assessment",
     draftStatus: "draft",
     requestedAudience: "internal",
     reviewQueueItemId,
@@ -816,14 +898,26 @@ test("Impact Evidence Library frontend projections compose P2-08 and P2-06 witho
         sourceId: "00000000-0000-4000-8000-000000000401",
         sourceVersionId: "00000000-0000-4000-8000-000000000501",
         supportStrength: "strong",
+        claimReviewStatus: "needs_gk_review",
+        evidenceReviewStatus: "resolved",
         currentEligible: true,
+        blockerCodes: ["coverage_dimension_unresolved"],
+        affectedDimensionKeys: ["definition_clarity"],
+        affectedObjectIds: ["00000000-0000-4000-8000-000000000601"],
         signed_url: "must not render",
       }],
     }],
   });
-  assert.equal(packet.contentType, "evidence_summary");
+  assert.equal(packet.contentType, "readiness_assessment");
+  assert.equal(generatedDraftContentTypeLabel(packet.contentType, packet.requestedAudience), "Readiness Assessment · Internal");
   assert.equal(packet.requestedAudience, "internal");
   assert.equal(packet.draftStatus, "draft");
+  assert.equal(packet.blocks[0].text, "Enrollment increased by 12% in 2025.");
+  assert.equal(packet.blocks[0].citations[0].claimId, claimId);
+  assert.equal(packet.blocks[0].citations[0].sourceId, "00000000-0000-4000-8000-000000000401");
+  assert.equal(packet.blocks[0].citations[0].claimReviewStatus, "needs_gk_review");
+  assert.deepEqual(packet.blocks[0].citations[0].blockerCodes, ["coverage_dimension_unresolved"]);
+  assert.deepEqual(packet.blocks[0].citations[0].affectedDimensionKeys, ["definition_clarity"]);
   assert.equal(canStartGeneratedContentReview(packet), true);
   assert.equal(canCompleteGeneratedContentReview(packet), false);
   assert.deepEqual(reviewTransitionBody(packet.reviewUpdatedAt), { expected_updated_at: "2026-08-15T10:00:00.000Z" });
@@ -988,7 +1082,7 @@ function buildGenerateDraft(handlerSource, overrides = {}) {
     "audience", "organizationId", "engagementId", "selectedGenerationClaimIds",
     "setGeneratingDraft", "setMessage", "setGeneratedDraftPacket",
     "postJson", "getJson", "errorText", "loadGeneratedDrafts", "setSelectedGeneratedDraftId",
-    "generatedDraftReviewPacketPath", "projectGeneratedDraftPacket",
+    "generatedDraftReviewPacketPath", "projectGeneratedDraftPacket", "organizationIdRef", "engagementIdRef",
     `return (${handlerSource});`,
   );
   const state = {
@@ -1004,6 +1098,8 @@ function buildGenerateDraft(handlerSource, overrides = {}) {
     audience: "internal",
     organizationId,
     engagementId,
+    organizationIdRef: { current: organizationId },
+    engagementIdRef: { current: engagementId },
     selectedGenerationClaimIds: [claimId],
     setGeneratingDraft: (value) => { state.generatingDraft = value; },
     setMessage: (value) => { state.message = value; },
@@ -1030,7 +1126,7 @@ function buildGenerateDraft(handlerSource, overrides = {}) {
     defaults.audience, defaults.organizationId, defaults.engagementId, defaults.selectedGenerationClaimIds,
     defaults.setGeneratingDraft, defaults.setMessage, defaults.setGeneratedDraftPacket,
     defaults.postJson, defaults.getJson, defaults.errorText, defaults.loadGeneratedDrafts, defaults.setSelectedGeneratedDraftId,
-    defaults.generatedDraftReviewPacketPath, defaults.projectGeneratedDraftPacket,
+    defaults.generatedDraftReviewPacketPath, defaults.projectGeneratedDraftPacket, defaults.organizationIdRef, defaults.engagementIdRef,
   );
   return { generateDraft, state };
 }
@@ -1042,7 +1138,7 @@ test("Impact Evidence Library 'generateDraft' handler: exact extracted source is
     "audience", "organizationId", "engagementId", "selectedGenerationClaimIds",
     "setGeneratingDraft", "setMessage", "setGeneratedDraftPacket",
     "postJson", "getJson", "errorText", "loadGeneratedDrafts", "setSelectedGeneratedDraftId",
-    "generatedDraftReviewPacketPath", "projectGeneratedDraftPacket",
+    "generatedDraftReviewPacketPath", "projectGeneratedDraftPacket", "organizationIdRef", "engagementIdRef",
     `return (${handlerSource});`,
   ));
 });
@@ -1075,6 +1171,103 @@ test("Impact Evidence Library internal impact-narrative generation request: real
   assert.doesNotMatch(JSON.stringify(state.postJsonCalls[0].body), /requested_audience|requestedAudience/);
 });
 
+test("Impact Evidence Library readiness-assessment generation request uses the readiness endpoint and sends only permitted client authority", async () => {
+  const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+  const logicSource = readFileSync("frontend/impactEvidenceLibraryLogic.js", "utf8");
+  const handlerSource = extractGenerateDraftHandlerSource(uiSource);
+  const { generateDraft, state } = buildGenerateDraft(handlerSource);
+  await generateDraft(createReadinessAssessmentPath, "readiness-assessment");
+  assert.match(uiSource, /Generate Readiness Assessment/);
+  assert.equal(state.postJsonCalls.length, 1);
+  assert.equal(state.postJsonCalls[0].path, createReadinessAssessmentPath(organizationId));
+  assert.deepEqual(Object.keys(state.postJsonCalls[0].body).sort(), ["claim_ids", "engagement_id", "idempotency_key"]);
+  assert.deepEqual(state.postJsonCalls[0].body.claim_ids, [claimId]);
+  assert.equal(state.postJsonCalls[0].body.engagement_id, engagementId);
+  assert.equal(typeof state.postJsonCalls[0].body.idempotency_key, "string");
+  assert.equal(state.postJsonCalls[0].body.idempotency_key.startsWith("readiness-assessment-"), true);
+  assert.deepEqual(Object.keys(state.postJsonCalls[0].body).sort(), ["claim_ids", "engagement_id", "idempotency_key"]);
+  assert.doesNotMatch(
+    uiSource + logicSource,
+    /set.*ReadinessStatus|compute.*Readiness|requirementApplicability|requirementSatisfaction|coverageConclusion/i,
+  );
+});
+
+test("Impact Evidence Library readiness-assessment successful generation rehydrates authoritative Generated Drafts and selected packet state", async () => {
+  const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+  const handlerSource = extractGenerateDraftHandlerSource(uiSource);
+  const draftId = "00000000-0000-4000-8000-000000000999";
+  const getJsonCalls = [];
+  const { generateDraft, state } = buildGenerateDraft(handlerSource, {
+    getJson: async (path) => {
+      getJsonCalls.push({ path });
+      return {
+        statusCode: 200,
+        body: {
+          ok: true,
+          data: {
+            generatedContentDraftId: draftId,
+            contentType: "readiness_assessment",
+            draftStatus: "draft",
+            requestedAudience: "internal",
+            reviewQueueItemId,
+            queueStatus: "open",
+            reviewStatus: "needs_gk_review",
+            currentUseEligible: false,
+            blocks: [{
+              ordinal: 1,
+              text: "A readiness limitation remains.",
+              citations: [{
+                claimId,
+                evidenceItemId,
+                sourceId: "00000000-0000-4000-8000-000000000401",
+                sourceVersionId: "00000000-0000-4000-8000-000000000501",
+                supportStrength: "limited",
+                claimReviewStatus: "needs_gk_review",
+                evidenceReviewStatus: "resolved",
+                currentEligible: false,
+                blockerCodes: ["claim_review_missing"],
+              }],
+            }],
+          },
+        },
+      };
+    },
+  });
+  await generateDraft(createReadinessAssessmentPath, "readiness-assessment");
+  state.getJsonCalls = getJsonCalls;
+  assert.equal(state.loadGeneratedDraftsCalls, 1);
+  assert.equal(state.selectedGeneratedDraftId, draftId);
+  assert.equal(state.getJsonCalls[0].path, generatedDraftReviewPacketPath(organizationId, draftId));
+  assert.equal(state.generatedDraftPacket.contentType, "readiness_assessment");
+  assert.equal(state.generatedDraftPacket.blocks[0].text, "A readiness limitation remains.");
+  assert.equal(state.generatedDraftPacket.blocks[0].citations[0].blockerCodes[0], "claim_review_missing");
+  assert.equal(generatedDraftReviewLabel(state.generatedDraftPacket.queueStatus, state.generatedDraftPacket.reviewStatus), "Needs review");
+});
+
+test("Impact Evidence Library generation handler rejects stale organization or engagement responses before hydration", async () => {
+  const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+  const handlerSource = extractGenerateDraftHandlerSource(uiSource);
+  const { generateDraft, state } = buildGenerateDraft(handlerSource, {
+    organizationIdRef: { current: otherOrganizationId },
+  });
+  await generateDraft(createReadinessAssessmentPath, "readiness-assessment");
+  assert.equal(state.postJsonCalls.length, 1);
+  assert.equal(state.loadGeneratedDraftsCalls, 0);
+  assert.deepEqual(state.getJsonCalls, []);
+  assert.equal(state.selectedGeneratedDraftId, null);
+  assert.equal(state.generatedDraftPacket, null);
+
+  const { generateDraft: staleEngagementGenerate, state: staleEngagementState } = buildGenerateDraft(handlerSource, {
+    engagementIdRef: { current: "00000000-0000-4000-8000-000000000402" },
+  });
+  await staleEngagementGenerate(createReadinessAssessmentPath, "readiness-assessment");
+  assert.equal(staleEngagementState.postJsonCalls.length, 1);
+  assert.equal(staleEngagementState.loadGeneratedDraftsCalls, 0);
+  assert.deepEqual(staleEngagementState.getJsonCalls, []);
+  assert.equal(staleEngagementState.selectedGeneratedDraftId, null);
+  assert.equal(staleEngagementState.generatedDraftPacket, null);
+});
+
 test("Impact Evidence Library generation handler: no request is issued (evidence-summary or impact-narrative) without an explicit selected engagement, and no latest/default/fallback engagement is inferred", async () => {
   const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
   const handlerSource = extractGenerateDraftHandlerSource(uiSource);
@@ -1091,6 +1284,12 @@ test("Impact Evidence Library generation handler: no request is issued (evidence
   assert.deepEqual(impactNarrativeState.getJsonCalls, []);
   assert.equal(impactNarrativeState.generatingDraft, null);
 
+  const { generateDraft: generateReadinessAssessmentNoEngagement, state: readinessState } = buildGenerateDraft(handlerSource, { engagementId: "" });
+  await generateReadinessAssessmentNoEngagement(createReadinessAssessmentPath, "readiness-assessment");
+  assert.deepEqual(readinessState.postJsonCalls, []);
+  assert.deepEqual(readinessState.getJsonCalls, []);
+  assert.equal(readinessState.generatingDraft, null);
+
   // Sanity: the same handler DOES issue a request once an explicit engagement
   // is selected, proving the prior assertions are a genuine guard and not an
   // artifact of some other missing precondition.
@@ -1102,7 +1301,7 @@ test("Impact Evidence Library generation handler: no request is issued (evidence
 test("Impact Evidence Library generation buttons: disabled whenever no explicit engagement is selected", () => {
   const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
   const disabledMatches = uiSource.match(/disabled=\{generatingDraft \|\| selectedGenerationClaimIds\.length === 0 \|\| !engagementId\}/g) || [];
-  assert.equal(disabledMatches.length, 2);
+  assert.equal(disabledMatches.length, 3);
 });
 
 test("Impact Evidence Library bootstraps its organization selection from the server, never from a typed or fabricated id", () => {

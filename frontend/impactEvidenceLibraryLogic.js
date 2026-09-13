@@ -39,6 +39,10 @@ export function createImpactNarrativePath(organizationId) {
   return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/generated-content-drafts/impact-narrative`;
 }
 
+export function createReadinessAssessmentPath(organizationId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/generated-content-drafts/readiness-assessment`;
+}
+
 export function generatedDraftLibraryIndexPath(organizationId) {
   return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/generated-content-drafts?limit=25`;
 }
@@ -2032,7 +2036,12 @@ export function projectGeneratedDraftPacket(dto) {
         sourceId: citation?.sourceId,
         sourceVersionId: citation?.sourceVersionId,
         supportStrength: citation?.supportStrength,
+        claimReviewStatus: citation?.claimReviewStatus,
+        evidenceReviewStatus: citation?.evidenceReviewStatus,
         currentEligible: citation?.currentEligible === true,
+        blockerCodes: asArray(citation?.blockerCodes),
+        affectedDimensionKeys: asArray(citation?.affectedDimensionKeys),
+        affectedObjectIds: asArray(citation?.affectedObjectIds),
       })),
     })),
   };
@@ -2066,6 +2075,14 @@ export function generatedDraftReviewLabel(queueStatus, reviewStatus) {
   if (key === "in_progress/needs_gk_review") return "In review";
   if (key === "resolved/resolved") return "Review completed";
   return "Unknown review state";
+}
+
+export function generatedDraftContentTypeLabel(contentType, requestedAudience) {
+  const audienceLabel = requestedAudience === "internal" ? "Internal" : requestedAudience || "Unknown audience";
+  if (contentType === "evidence_summary") return `Evidence Summary · ${audienceLabel}`;
+  if (contentType === "impact_narrative") return `Impact Narrative · ${audienceLabel}`;
+  if (contentType === "readiness_assessment") return `Readiness Assessment · ${audienceLabel}`;
+  return `${contentType || "Generated draft"} · ${audienceLabel}`;
 }
 
 export function canStartGeneratedContentReview(packet) {

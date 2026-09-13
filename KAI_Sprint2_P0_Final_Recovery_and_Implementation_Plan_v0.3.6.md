@@ -28079,3 +28079,91 @@ human-review requirements remain in force.
 
 **Status:** backend governed Readiness Assessment draft generation closed;
 schema/database change required: NO.
+
+## READINESS_ASSESSMENT_PRODUCT_SURFACE - Impact Evidence Library Generated Drafts
+
+**Scope:** product-surface continuation of the closed backend package only. No
+schema/migration, production/shared database, push, deploy, feature-flag,
+secret, export/final-release/candidate machinery, separate Readiness page,
+Readiness-specific draft store, or `00_KAI_CURRENT_STATE.md` change. Starting
+HEAD was `a2d7dc9ff8458d6fab1cff44679f90dbaf154e9a` on `main`; working tree
+was clean.
+
+**Product path closed:** the existing Impact Evidence Library internal
+generation controls now expose **Generate Readiness Assessment**, using
+`POST /api/kai/sprint2/intake/admin/organizations/:organizationId/generated-content-drafts/readiness-assessment`.
+The shared generation handler sends only `claim_ids`, `idempotency_key`, and
+`engagement_id`; the browser does not send or compute readiness status,
+requirement applicability/satisfaction, coverage conclusions, blockers,
+citations, evidence eligibility, or review outcome. On success, the existing
+Generated Drafts authoritative rehydration path reloads
+`GET .../generated-content-drafts?limit=25`, selects the returned draft id,
+and reads `GET .../generated-content-drafts/:generatedContentDraftId/review-packet`.
+The handler now rejects stale organization/engagement responses before they can
+hydrate the newly selected context.
+
+**Generated Drafts integration:** the generic Generated Drafts index read model
+now includes `readiness_assessment` alongside `evidence_summary` and
+`impact_narrative`, still scoped to organization, internal audience,
+`draft_status='draft'`, and the existing `generated_content_review` queue
+contract. The UI label mapping adds `Readiness Assessment` without changing
+Evidence Summary or Impact Narrative labels. The generic draft-packet
+projection now preserves the existing citation traceability fields already
+present in the read DTO (`sourceId`, `sourceVersionId`, `supportStrength`,
+`claimReviewStatus`, `evidenceReviewStatus`, `currentEligible`,
+`blockerCodes`, affected dimension/object ids), so blocks, limitations, and
+blockers remain visible through the normal Generated Drafts surface and are not
+converted into positive readiness language.
+
+**Citation path proved:** authoritative readiness support and governed claims
+enter `createReadinessAssessmentDraft`, flow through the shared generated
+content repository into `generated_content_citations`, are returned by the
+existing generated draft review-packet DTO, projected by
+`projectGeneratedDraftPacket`, and rendered under the existing Generated Drafts
+block/citation UI with review and blocker traceability.
+
+**Files changed:** `Backend/kai/db/kaiGeneratedDraftLibraryReadModels.js`,
+`frontend/impactEvidenceLibraryLogic.js`, `frontend/ImpactEvidenceLibrary.jsx`,
+`public/js/bundles/entry.js`,
+`__tests__/kai-sprint2-impact-evidence-library.spec.js`,
+`__tests__/kai-sprint2-generated-drafts-library.spec.js`, and this ExecPlan.
+
+**Test evidence (all Node/npm commands used
+`DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel`; localhost listener tests
+required approved loopback escalation after sandbox `EPERM`):**
+- Focused Readiness frontend/product and shared Impact Evidence Library:
+  `node --test __tests__/kai-sprint2-impact-evidence-library.spec.js` -> 126/126
+  PASS.
+- Generated Drafts library/read/render regression:
+  `node --test __tests__/kai-sprint2-generated-drafts-library.spec.js` -> 15/15
+  PASS.
+- Readiness backend regression:
+  `node --test __tests__/kai-sprint2-readiness-assessment-draft-generation-boundary.spec.js`
+  -> 7/7 PASS.
+- Impact Narrative regression:
+  `node --test __tests__/kai-sprint2-p13-01-impact-narrative-boundary.spec.js`
+  -> 6/6 PASS.
+- Generic generated-content, citation/read, and review regressions:
+  `node --test __tests__/kai-sprint2-p3-01-generated-content-drafts-boundary.spec.js`
+  -> 6/6 PASS; `node --test
+  __tests__/kai-sprint2-p3-02-generated-draft-review-packet-boundary.spec.js
+  __tests__/kai-sprint2-p3-06-export-review-packet-boundary.spec.js
+  __tests__/kai-sprint2-p3-04-generated-content-review-completion-boundary.spec.js`
+  -> 50/50 PASS.
+- Grant shared frontend regression:
+  `node --test __tests__/kai-sprint2-impact-library-grant-response-packet.spec.js
+  __tests__/kai-sprint2-p14-06e1-grant-response-packet-frontend-hydration.spec.js
+  __tests__/kai-sprint2-p14-06e2-grant-response-packet-initial-load-rehydration.spec.js
+  __tests__/kai-sprint2-p14-06e3-grant-response-packet-post-mutation-rehydration.spec.js`
+  -> 75/75 PASS.
+- Board shared frontend regression:
+  `node --test __tests__/kai-sprint2-br-05-board-reporting-impact-evidence-library-frontend.spec.js`
+  -> 35/35 PASS.
+- Affected API/route regression:
+  `node --test __tests__/kai-sprint2-pass2-route-runtime.spec.js` -> 38/38
+  PASS.
+- Frontend production build: `npm run build` -> PASS.
+- `git diff --check` -> PASS.
+
+**Status:** Readiness Assessment product surface closed; schema/database change
+required: NO. No push or deployment performed.

@@ -25,6 +25,7 @@ import {
 import { listGeneratedDraftLibraryIndex as readGeneratedDraftLibraryIndex } from "../Backend/kai/db/kaiGeneratedDraftLibraryReadModels.js";
 import {
   CLAIM_REVIEW_DECISIONS,
+  generatedDraftContentTypeLabel,
   generatedDraftLibraryIndexPath,
   generatedDraftReviewLabel,
   generatedDraftReviewPacketPath,
@@ -583,7 +584,7 @@ test("Generated Drafts read model is bounded, organization-scoped, deterministic
     },
   });
   assert.match(observed.sql, /WHERE d\.organization_id = \$1::uuid/);
-  assert.match(observed.sql, /AND d\.content_type IN \('evidence_summary', 'impact_narrative'\)/);
+  assert.match(observed.sql, /AND d\.content_type IN \('evidence_summary', 'impact_narrative', 'readiness_assessment'\)/);
   assert.match(observed.sql, /AND d\.requested_audience = 'internal'/);
   assert.match(observed.sql, /AND d\.draft_status = 'draft'/);
   assert.match(observed.sql, /AND q\.priority = 'medium'/);
@@ -656,6 +657,9 @@ test("Generated Drafts frontend projection strips unsafe fields and preserves sa
     generatedDraftLibraryIndexPath(organizationId),
     `${basePath}/admin/organizations/${organizationId}/generated-content-drafts?limit=25`,
   );
+  assert.equal(generatedDraftContentTypeLabel("evidence_summary", "internal"), "Evidence Summary · Internal");
+  assert.equal(generatedDraftContentTypeLabel("impact_narrative", "internal"), "Impact Narrative · Internal");
+  assert.equal(generatedDraftContentTypeLabel("readiness_assessment", "internal"), "Readiness Assessment · Internal");
   assert.notEqual(generatedDraftLibraryIndexPath(organizationId), generatedDraftReviewPacketPath(organizationId, draftId));
 });
 
@@ -690,7 +694,7 @@ test("Generated Drafts library source causes no model/provider call and no unsaf
   }
 
   const generatedDraftsUiSurface = [
-    sliceBetween(uiSource, "const loadGeneratedDrafts = useCallback", "const runExtractEvidence = useCallback"),
+    sliceBetween(uiSource, "const loadGeneratedDrafts = useCallback", "const loadRequirementsReadiness = useCallback"),
     sliceBetween(uiSource, '<h5 className="mb-0">Generated Drafts</h5>', '<div className="admin-card'),
     sliceBetween(uiSource, "{generatedDraftPacket ? (", null),
   ].join("\n");

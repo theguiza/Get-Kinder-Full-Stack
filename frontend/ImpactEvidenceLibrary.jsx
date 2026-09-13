@@ -24,6 +24,7 @@ import {
   createEvidenceSummaryPath,
   createFunderEvidenceSummaryPath,
   createImpactNarrativePath,
+  createReadinessAssessmentPath,
   decisionRequiresApprovedAudiences,
   decisionRequiresLimitationNotes,
   eligibleClaimsPath,
@@ -42,6 +43,7 @@ import {
   projectExportReviewRequestResult,
   generatedContentReviewCompletePath,
   generatedContentReviewStartPath,
+  generatedDraftContentTypeLabel,
   generatedDraftLibraryIndexPath,
   generatedDraftReviewLabel,
   generatedDraftReviewPacketPath,
@@ -872,8 +874,10 @@ export default function ImpactEvidenceLibrary() {
 
   const loadGeneratedDrafts = useCallback(async () => {
     if (!organizationId) return;
+    const requestOrganizationId = organizationId;
     setLoadingGeneratedDrafts(true);
-    const result = await getJson(generatedDraftLibraryIndexPath(organizationId));
+    const result = await getJson(generatedDraftLibraryIndexPath(requestOrganizationId));
+    if (requestOrganizationId !== organizationIdRef.current) return;
     setLoadingGeneratedDrafts(false);
     if (result.statusCode !== 200 || !result.body?.ok) {
       setGeneratedDrafts([]);
@@ -1968,28 +1972,43 @@ export default function ImpactEvidenceLibrary() {
 
   const generateDraft = useCallback(async (pathBuilder, idempotencyPrefix) => {
     if (audience !== "internal" || selectedGenerationClaimIds.length === 0 || !engagementId) return;
+    const requestOrganizationId = organizationId;
+    const requestEngagementId = engagementId;
     setGeneratingDraft(true);
     setMessage("");
     setGeneratedDraftPacket(null);
-    const createResult = await postJson(pathBuilder(organizationId), {
+    const createResult = await postJson(pathBuilder(requestOrganizationId), {
       claim_ids: selectedGenerationClaimIds,
       idempotency_key: `${idempotencyPrefix}-${selectedGenerationClaimIds.join("-")}`,
-      engagement_id: engagementId,
+      engagement_id: requestEngagementId,
     });
+    let stillCurrent = requestOrganizationId === organizationIdRef.current
+      && requestEngagementId === engagementIdRef.current;
     if (createResult.statusCode !== 201 && createResult.statusCode !== 200) {
-      setGeneratingDraft(false);
-      setMessage(errorText(createResult));
+      if (stillCurrent) {
+        setGeneratingDraft(false);
+        setMessage(errorText(createResult));
+      }
       return;
     }
     const draftId = createResult.body?.data?.generatedContentDraftId;
     if (!draftId) {
-      setGeneratingDraft(false);
-      setMessage("Generated draft response did not include a draft id.");
+      if (stillCurrent) {
+        setGeneratingDraft(false);
+        setMessage("Generated draft response did not include a draft id.");
+      }
       return;
     }
+    if (!stillCurrent) return;
     await loadGeneratedDrafts();
+    stillCurrent = requestOrganizationId === organizationIdRef.current
+      && requestEngagementId === engagementIdRef.current;
+    if (!stillCurrent) return;
     setSelectedGeneratedDraftId(draftId);
-    const packetResult = await getJson(generatedDraftReviewPacketPath(organizationId, draftId));
+    const packetResult = await getJson(generatedDraftReviewPacketPath(requestOrganizationId, draftId));
+    stillCurrent = requestOrganizationId === organizationIdRef.current
+      && requestEngagementId === engagementIdRef.current;
+    if (!stillCurrent) return;
     setGeneratingDraft(false);
     if (packetResult.statusCode !== 200 || !packetResult.body?.ok) {
       setMessage(errorText(packetResult));
@@ -2005,6 +2024,11 @@ export default function ImpactEvidenceLibrary() {
 
   const generateImpactNarrative = useCallback(
     () => generateDraft(createImpactNarrativePath, "impact-narrative"),
+    [generateDraft],
+  );
+
+  const generateReadinessAssessment = useCallback(
+    () => generateDraft(createReadinessAssessmentPath, "readiness-assessment"),
     [generateDraft],
   );
 
@@ -2895,6 +2919,16 @@ export default function ImpactEvidenceLibrary() {
                 disabled={generatingDraft || selectedGenerationClaimIds.length === 0 || !engagementId}
               >
                 {generatingDraft ? "Generating..." : "Generate Impact Narrative"}
+              </button>
+            ) : null}
+            {audience === "internal" ? (
+              <button
+                type="button"
+                className="btn btn-sm btn-outline-primary mt-2 w-100"
+                onClick={generateReadinessAssessment}
+                disabled={generatingDraft || selectedGenerationClaimIds.length === 0 || !engagementId}
+              >
+                {generatingDraft ? "Generating..." : "Generate Readiness Assessment"}
               </button>
             ) : null}
             {audience === "funder" ? (
@@ -3836,7 +3870,7 @@ export default function ImpactEvidenceLibrary() {
                       onClick={() => selectGeneratedDraft(draft.generatedContentDraftId)}
                     >
                       <div className="d-flex justify-content-between gap-2">
-                        <span>Evidence Summary · Internal</span>
+                        <span>{generatedDraftContentTypeLabel(draft.contentType, draft.requestedAudience)}</span>
                         <span className="badge text-bg-secondary">{generatedDraftReviewLabel(draft.queueStatus, draft.reviewStatus)}</span>
                       </div>
                       <div className="small mt-1">Created {draft.createdAt}</div>
@@ -4410,6 +4444,7 @@ export default function ImpactEvidenceLibrary() {
                 <StatusBadge status={generatedDraftPacket.queueStatus === "open" ? "needs_review" : "usable"} />
               </div>
               <ValueRow label="Content type" value={generatedDraftPacket.contentType} />
+              <ValueRow label="Draft type" value={generatedDraftContentTypeLabel(generatedDraftPacket.contentType, generatedDraftPacket.requestedAudience)} />
               <ValueRow label="Requested audience" value={generatedDraftPacket.requestedAudience} />
               <ValueRow label="Draft status" value={generatedDraftPacket.draftStatus} />
               <ValueRow label="Review state" value={`${generatedDraftPacket.queueStatus} / ${generatedDraftPacket.reviewStatus}`} />
@@ -4476,11 +4511,16 @@ export default function ImpactEvidenceLibrary() {
                   <div className="small fw-semibold">Block {block.ordinal}</div>
                   <p className="small mb-2">{block.text}</p>
                   {block.citations.map((citation, index) => (
-                    <ValueRow
-                      key={`${citation.claimId}-${citation.evidenceItemId}-${index}`}
-                      label="Citation"
-                      value={`${citation.claimId} / ${citation.evidenceItemId}`}
-                    />
+                    <div key={`${citation.claimId}-${citation.evidenceItemId}-${index}`} className="border-top pt-2 mt-2">
+                      <ValueRow label="Citation" value={`${citation.claimId} / ${citation.evidenceItemId}`} />
+                      <ValueRow label="Source" value={citation.sourceId} />
+                      <ValueRow label="Source version" value={citation.sourceVersionId} />
+                      <ValueRow label="Support strength" value={citation.supportStrength} />
+                      <ValueRow label="Claim review status" value={citation.claimReviewStatus} />
+                      <ValueRow label="Evidence review status" value={citation.evidenceReviewStatus} />
+                      <ValueRow label="Currently eligible" value={String(citation.currentEligible)} />
+                      <ValueRow label="Blocker codes" value={citation.blockerCodes.join(", ") || "none"} />
+                    </div>
                   ))}
                 </div>
               ))}
