@@ -43,6 +43,10 @@ export function createReadinessAssessmentPath(organizationId) {
   return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/generated-content-drafts/readiness-assessment`;
 }
 
+export function createDataGapMemoPath(organizationId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/generated-content-drafts/data-gap-memo`;
+}
+
 export function generatedDraftLibraryIndexPath(organizationId) {
   return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/generated-content-drafts?limit=25`;
 }
@@ -2082,6 +2086,7 @@ export function generatedDraftContentTypeLabel(contentType, requestedAudience) {
   if (contentType === "evidence_summary") return `Evidence Summary · ${audienceLabel}`;
   if (contentType === "impact_narrative") return `Impact Narrative · ${audienceLabel}`;
   if (contentType === "readiness_assessment") return `Readiness Assessment · ${audienceLabel}`;
+  if (contentType === "data_gap_memo") return `Data Gap Memo · ${audienceLabel}`;
   return `${contentType || "Generated draft"} · ${audienceLabel}`;
 }
 

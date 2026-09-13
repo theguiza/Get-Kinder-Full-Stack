@@ -22,6 +22,7 @@ import {
   coverageInternalAcceptancePath,
   coverageFunderAcceptancePath,
   createEvidenceSummaryPath,
+  createDataGapMemoPath,
   createFunderEvidenceSummaryPath,
   createImpactNarrativePath,
   createReadinessAssessmentPath,
@@ -1970,18 +1971,24 @@ export default function ImpactEvidenceLibrary() {
     setGeneratedDraftPacket(projectGeneratedDraftPacket(packetResult.body.data));
   }, [organizationId]);
 
-  const generateDraft = useCallback(async (pathBuilder, idempotencyPrefix) => {
+  const generateDraft = useCallback(async (pathBuilder, idempotencyPrefix, requestBodyBuilder = null) => {
     if (audience !== "internal" || selectedGenerationClaimIds.length === 0 || !engagementId) return;
     const requestOrganizationId = organizationId;
     const requestEngagementId = engagementId;
     setGeneratingDraft(true);
     setMessage("");
     setGeneratedDraftPacket(null);
-    const createResult = await postJson(pathBuilder(requestOrganizationId), {
-      claim_ids: selectedGenerationClaimIds,
-      idempotency_key: `${idempotencyPrefix}-${selectedGenerationClaimIds.join("-")}`,
-      engagement_id: requestEngagementId,
-    });
+    const idempotencyKey = `${idempotencyPrefix}-${selectedGenerationClaimIds.join("-")}`;
+    const createResult = await postJson(
+      pathBuilder(requestOrganizationId),
+      requestBodyBuilder
+        ? requestBodyBuilder({ idempotencyKey, engagementId: requestEngagementId })
+        : {
+            claim_ids: selectedGenerationClaimIds,
+            idempotency_key: idempotencyKey,
+            engagement_id: requestEngagementId,
+          },
+    );
     let stillCurrent = requestOrganizationId === organizationIdRef.current
       && requestEngagementId === engagementIdRef.current;
     if (createResult.statusCode !== 201 && createResult.statusCode !== 200) {
@@ -2029,6 +2036,18 @@ export default function ImpactEvidenceLibrary() {
 
   const generateReadinessAssessment = useCallback(
     () => generateDraft(createReadinessAssessmentPath, "readiness-assessment"),
+    [generateDraft],
+  );
+
+  const generateDataGapMemo = useCallback(
+    () => generateDraft(
+      createDataGapMemoPath,
+      "data-gap-memo",
+      ({ idempotencyKey, engagementId: requestEngagementId }) => ({
+        idempotency_key: idempotencyKey,
+        engagement_id: requestEngagementId,
+      }),
+    ),
     [generateDraft],
   );
 
@@ -2929,6 +2948,16 @@ export default function ImpactEvidenceLibrary() {
                 disabled={generatingDraft || selectedGenerationClaimIds.length === 0 || !engagementId}
               >
                 {generatingDraft ? "Generating..." : "Generate Readiness Assessment"}
+              </button>
+            ) : null}
+            {audience === "internal" ? (
+              <button
+                type="button"
+                className="btn btn-sm btn-outline-primary mt-2 w-100"
+                onClick={generateDataGapMemo}
+                disabled={generatingDraft || selectedGenerationClaimIds.length === 0 || !engagementId}
+              >
+                {generatingDraft ? "Generating..." : "Generate Data Gap Memo"}
               </button>
             ) : null}
             {audience === "funder" ? (

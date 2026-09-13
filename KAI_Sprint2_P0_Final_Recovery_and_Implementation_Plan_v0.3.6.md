@@ -28275,3 +28275,99 @@ required approved loopback escalation after sandbox `EPERM`):**
 
 **Status:** Data Gap Memo backend governed draft generation closed;
 schema/database change required: NO. No push or deployment performed.
+
+## DATA_GAP_MEMO_PRODUCT_SURFACE - Impact Evidence Library Generated Drafts
+
+**Scope:** product/UI surface only, continuing from backend closure
+`f8fa29a9ac0f1dbbf18b58a8bbad685ecf07592d`
+(`DATA_GAP_MEMO_BACKEND_CLOSED`). No package reselection, backend semantic
+redesign, schema/database, production/shared database, push, deploy,
+feature-flag, secret, real-client-data, or `00_KAI_CURRENT_STATE.md` change.
+Starting HEAD was `f8fa29a9ac0f1dbbf18b58a8bbad685ecf07592d` on `main`;
+working tree was clean.
+
+**Product integration:** the existing `/impact-library` Generated Drafts
+generation controls now expose **Generate Data Gap Memo** as a sibling of
+Generate Readiness Assessment. It uses the exact backend route
+`POST /api/kai/sprint2/intake/admin/organizations/:organizationId/generated-content-drafts/data-gap-memo`
+and sends only the route-supported browser request body keys
+`engagement_id` and `idempotency_key`. The browser does not send gaps, gap
+membership, currentness, assessment status, pagination/completeness, claim ids,
+evidence ids, source ids, citations, the 20-claim bound, or blocker authority.
+The selected `engagement_id` is preserved only as the existing generic
+generation lineage/context binding; the authoritative gap set remains
+organization-scoped and is not filtered or derived in React.
+
+**Generated Drafts integration:** the backend already admitted
+`data_gap_memo` in the generic Generated Drafts read/projection contract, so
+no backend projection change was needed. The frontend adds the exact route
+helper and shared content-type label `Data Gap Memo`; rendering remains the
+generic Generated Drafts list/packet path: `loadGeneratedDrafts`,
+`selectGeneratedDraft`, `projectGeneratedDraftLibraryItems`,
+`projectGeneratedDraftPacket`, `generatedDraftContentTypeLabel`,
+`generatedDraftReviewLabel`, `generatedDraftPacket.blocks.map`, and
+`block.citations.map`. No Data Gap-specific citation, limitation, blocker, or
+review UI was introduced.
+
+**Generation state and stale-context protection:** Data Gap generation reuses
+the existing `generateDraft` pending/duplicate-action state, structured
+`errorText` rendering, authoritative Generated Drafts refresh, exact draft id
+selection, and review-packet hydration sequence. The existing
+`organizationIdRef` + `engagementIdRef` stale-response guard prevents late
+success or blocker/error responses from hydrating, selecting, clearing, or
+overwriting a newer organization/engagement context. The backend overflow
+blocker `data_gap_memo_generation_claim_bound_exceeded` is rendered as a
+failed generation through the shared error mechanism; the UI does not select
+an older memo, show partial success, or hydrate a partial memo.
+
+**Files changed:** `Frontend/ImpactEvidenceLibrary.jsx`,
+`Frontend/impactEvidenceLibraryLogic.js`, `public/js/bundles/entry.js`,
+`__tests__/kai-sprint2-impact-evidence-library.spec.js`, and this ExecPlan.
+
+**Test evidence (all Node/npm commands used
+`DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel`; localhost listener tests
+required approved loopback escalation after sandbox `EPERM`):**
+- Focused Data Gap frontend/product and shared Impact Evidence Library:
+  `node --test __tests__/kai-sprint2-impact-evidence-library.spec.js` ->
+  130/130 PASS.
+- Data Gap backend focused regression and affected route runtime:
+  `node --test __tests__/kai-sprint2-data-gap-memo-draft-generation-boundary.spec.js
+  __tests__/kai-sprint2-pass2-route-runtime.spec.js` -> 47/47 PASS.
+- Generated Drafts regression:
+  `node --test __tests__/kai-sprint2-p3-01-generated-content-drafts-boundary.spec.js
+  __tests__/kai-sprint2-p3-02-generated-draft-review-packet-boundary.spec.js`
+  -> 15/15 PASS; `node --test
+  __tests__/kai-sprint2-generated-drafts-library.spec.js
+  __tests__/kai-sprint2-generated-draft-export-review-read-recovery-boundary.spec.js`
+  -> 22/22 PASS.
+- Citation/review regression:
+  `node --test __tests__/kai-sprint2-p2-06-claim-traceability-boundary.spec.js
+  __tests__/kai-claim-traceability-validator-contract-repair.spec.js
+  __tests__/kai-sprint2-p2-06-claim-traceability-missing-log-regression.spec.js
+  __tests__/kai-sprint2-generated-content-review-start-audit-contract-boundary.spec.js
+  __tests__/kai-sprint2-p3-04-generated-content-review-completion-boundary.spec.js`
+  -> 42/42 PASS.
+- Readiness regression:
+  `node --test __tests__/kai-sprint2-readiness-assessment-draft-generation-boundary.spec.js
+  __tests__/kai-sprint2-requirements-readiness-rollup.spec.js
+  __tests__/kai-sprint2-requirements-readiness-rollup.integration.spec.js`
+  -> 14/14 PASS, 1 skipped by existing convention.
+- Impact Narrative regression:
+  `node --test __tests__/kai-sprint2-p13-01-impact-narrative-boundary.spec.js`
+  -> 6/6 PASS.
+- Grant shared-page regression:
+  `node --test __tests__/kai-sprint2-impact-library-grant-response-packet.spec.js
+  __tests__/kai-sprint2-p14-06-grant-response-packet-export-review-lifecycle-frontend.spec.js
+  __tests__/kai-sprint2-p14-06e1-grant-response-packet-frontend-hydration.spec.js`
+  -> 78/78 PASS.
+- Board shared-page regression:
+  `node --test __tests__/kai-sprint2-br-05-board-reporting-impact-evidence-library-frontend.spec.js
+  __tests__/kai-sprint2-br-board-reporting-browser-api-composition.spec.js`
+  -> 44/44 PASS.
+- API/routes:
+  `node --test __tests__/kai-sprint2-pass2-api-contract.spec.js
+  __tests__/kai-sprint2-api-contract.spec.js` -> 38/38 PASS.
+- Frontend production build: `npm run build` -> PASS.
+
+**Status:** Data Gap Memo product implementation closed; schema/database change
+required: NO. No push or deployment performed.

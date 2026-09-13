@@ -37,6 +37,7 @@ import {
   cleanLimitationNotes,
   coverageFunderAcceptancePath,
   coverageInternalAcceptancePath,
+  createDataGapMemoPath,
   createEvidenceSummaryPath,
   createFunderEvidenceSummaryPath,
   createImpactNarrativePath,
@@ -1066,7 +1067,7 @@ test("Impact Evidence Library source has only the Stage-A internal generation ca
 // nothing beyond the declared list - no requestedAudience, no fabricated
 // engagement fallback, no other new browser-controlled field.
 function extractGenerateDraftHandlerSource(uiSource) {
-  const openMarker = "const generateDraft = useCallback(async (pathBuilder, idempotencyPrefix) => {";
+  const openMarker = "const generateDraft = useCallback(async (pathBuilder, idempotencyPrefix, requestBodyBuilder = null) => {";
   const openIdx = uiSource.indexOf(openMarker);
   assert.notEqual(openIdx, -1, "could not locate the generateDraft useCallback handler");
   const bodyStart = openIdx + "const generateDraft = useCallback(".length;
@@ -1192,12 +1193,55 @@ test("Impact Evidence Library readiness-assessment generation request uses the r
   );
 });
 
+test("Impact Evidence Library data-gap-memo generation request uses the exact Data Gap endpoint and sends only route-supported client inputs", async () => {
+  const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+  const logicSource = readFileSync("frontend/impactEvidenceLibraryLogic.js", "utf8");
+  const handlerSource = extractGenerateDraftHandlerSource(uiSource);
+  const { generateDraft, state } = buildGenerateDraft(handlerSource);
+  await generateDraft(
+    createDataGapMemoPath,
+    "data-gap-memo",
+    ({ idempotencyKey, engagementId: requestEngagementId }) => ({
+      idempotency_key: idempotencyKey,
+      engagement_id: requestEngagementId,
+    }),
+  );
+  assert.match(uiSource, /Generate Data Gap Memo/);
+  assert.equal(createDataGapMemoPath(organizationId), `${basePath}/admin/organizations/${organizationId}/generated-content-drafts/data-gap-memo`);
+  assert.equal(state.postJsonCalls.length, 1);
+  assert.equal(state.postJsonCalls[0].path, createDataGapMemoPath(organizationId));
+  assert.deepEqual(Object.keys(state.postJsonCalls[0].body).sort(), ["engagement_id", "idempotency_key"]);
+  assert.equal(state.postJsonCalls[0].body.engagement_id, engagementId);
+  assert.equal(typeof state.postJsonCalls[0].body.idempotency_key, "string");
+  assert.equal(state.postJsonCalls[0].body.idempotency_key.startsWith("data-gap-memo-"), true);
+  assert.equal("claim_ids" in state.postJsonCalls[0].body, false);
+  assert.equal("gaps" in state.postJsonCalls[0].body, false);
+  assert.equal("currentness" in state.postJsonCalls[0].body, false);
+  assert.equal("assessment_status" in state.postJsonCalls[0].body, false);
+  assert.equal("pagination" in state.postJsonCalls[0].body, false);
+  assert.equal("completeness" in state.postJsonCalls[0].body, false);
+  assert.equal("claim_id" in state.postJsonCalls[0].body, false);
+  assert.equal("evidence_id" in state.postJsonCalls[0].body, false);
+  assert.equal("source_id" in state.postJsonCalls[0].body, false);
+  assert.equal("citations" in state.postJsonCalls[0].body, false);
+  assert.equal("claim_bound" in state.postJsonCalls[0].body, false);
+  assert.equal("blockers" in state.postJsonCalls[0].body, false);
+  assert.doesNotMatch(logicSource, /engagementId.*gap|gap.*engagementId|filter\([^)]*gap/i);
+});
+
 test("Impact Evidence Library readiness-assessment successful generation rehydrates authoritative Generated Drafts and selected packet state", async () => {
   const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
   const handlerSource = extractGenerateDraftHandlerSource(uiSource);
   const draftId = "00000000-0000-4000-8000-000000000999";
   const getJsonCalls = [];
   const { generateDraft, state } = buildGenerateDraft(handlerSource, {
+    postJson: async (path, body) => {
+      state.postJsonCalls.push({ path, body });
+      return {
+        statusCode: 201,
+        body: { ok: true, data: { generatedContentDraftId: draftId } },
+      };
+    },
     getJson: async (path) => {
       getJsonCalls.push({ path });
       return {
@@ -1242,6 +1286,159 @@ test("Impact Evidence Library readiness-assessment successful generation rehydra
   assert.equal(state.generatedDraftPacket.blocks[0].text, "A readiness limitation remains.");
   assert.equal(state.generatedDraftPacket.blocks[0].citations[0].blockerCodes[0], "claim_review_missing");
   assert.equal(generatedDraftReviewLabel(state.generatedDraftPacket.queueStatus, state.generatedDraftPacket.reviewStatus), "Needs review");
+});
+
+test("Impact Evidence Library data-gap-memo successful generation rehydrates authoritative Generated Drafts and uses generic draft projection", async () => {
+  const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+  const handlerSource = extractGenerateDraftHandlerSource(uiSource);
+  const draftId = "00000000-0000-4000-8000-000000000998";
+  const getJsonCalls = [];
+  const { generateDraft, state } = buildGenerateDraft(handlerSource, {
+    postJson: async (path, body) => {
+      state.postJsonCalls.push({ path, body });
+      return {
+        statusCode: 201,
+        body: { ok: true, data: { generatedContentDraftId: draftId } },
+      };
+    },
+    getJson: async (path) => {
+      getJsonCalls.push({ path });
+      return {
+        statusCode: 200,
+        body: {
+          ok: true,
+          data: {
+            generatedContentDraftId: draftId,
+            contentType: "data_gap_memo",
+            draftStatus: "draft",
+            requestedAudience: "internal",
+            reviewQueueItemId,
+            queueStatus: "open",
+            reviewStatus: "needs_gk_review",
+            reviewUpdatedAt: "2026-09-13T00:00:00.000Z",
+            currentUseEligible: false,
+            blocks: [{
+              ordinal: 1,
+              text: "A known limitation remains visible.",
+              citations: [{
+                claimId,
+                evidenceItemId,
+                sourceId: "00000000-0000-4000-8000-000000000401",
+                sourceVersionId: "00000000-0000-4000-8000-000000000501",
+                supportStrength: "limited",
+                claimReviewStatus: "resolved",
+                evidenceReviewStatus: "resolved",
+                currentEligible: false,
+                blockerCodes: ["coverage_dimension_unresolved"],
+                affectedDimensionKeys: ["timeliness"],
+                affectedObjectIds: ["00000000-0000-4000-8000-000000000601"],
+              }],
+            }],
+          },
+        },
+      };
+    },
+  });
+  await generateDraft(
+    createDataGapMemoPath,
+    "data-gap-memo",
+    ({ idempotencyKey, engagementId: requestEngagementId }) => ({
+      idempotency_key: idempotencyKey,
+      engagement_id: requestEngagementId,
+    }),
+  );
+  state.getJsonCalls = getJsonCalls;
+  assert.equal(state.loadGeneratedDraftsCalls, 1);
+  assert.equal(state.selectedGeneratedDraftId, draftId);
+  assert.equal(state.getJsonCalls[0].path, generatedDraftReviewPacketPath(organizationId, draftId));
+  assert.equal(state.generatedDraftPacket.contentType, "data_gap_memo");
+  assert.equal(generatedDraftContentTypeLabel(state.generatedDraftPacket.contentType, state.generatedDraftPacket.requestedAudience), "Data Gap Memo · Internal");
+  assert.equal(state.generatedDraftPacket.blocks[0].text, "A known limitation remains visible.");
+  assert.deepEqual(state.generatedDraftPacket.blocks[0].citations[0].blockerCodes, ["coverage_dimension_unresolved"]);
+  assert.deepEqual(state.generatedDraftPacket.blocks[0].citations[0].affectedDimensionKeys, ["timeliness"]);
+  assert.equal(generatedDraftReviewLabel(state.generatedDraftPacket.queueStatus, state.generatedDraftPacket.reviewStatus), "Needs review");
+  assert.match(uiSource, /generatedDraftPacket\.blocks\.map/);
+  assert.match(uiSource, /block\.citations\.map/);
+  assert.match(uiSource, /generatedDraftReviewLabel\(draft\.queueStatus, draft\.reviewStatus\)/);
+});
+
+test("Impact Evidence Library data-gap-memo blocker failure does not select or hydrate a partial memo", async () => {
+  const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+  const handlerSource = extractGenerateDraftHandlerSource(uiSource);
+  const { generateDraft, state } = buildGenerateDraft(handlerSource, {
+    postJson: async (path, body) => {
+      state.postJsonCalls.push({ path, body });
+      return {
+        statusCode: 422,
+        body: {
+          ok: false,
+          error: {
+            code: "validation_blocker",
+            message: "data_gap_memo_generation_claim_bound_exceeded",
+            blockers: [{ blocking_reason: "data_gap_memo_generation_claim_bound_exceeded" }],
+          },
+        },
+      };
+    },
+  });
+  await generateDraft(
+    createDataGapMemoPath,
+    "data-gap-memo",
+    ({ idempotencyKey, engagementId: requestEngagementId }) => ({
+      idempotency_key: idempotencyKey,
+      engagement_id: requestEngagementId,
+    }),
+  );
+  assert.equal(state.postJsonCalls.length, 1);
+  assert.equal(state.message.includes("data_gap_memo_generation_claim_bound_exceeded"), true);
+  assert.equal(state.loadGeneratedDraftsCalls, 0);
+  assert.deepEqual(state.getJsonCalls, []);
+  assert.equal(state.selectedGeneratedDraftId, null);
+  assert.equal(state.generatedDraftPacket, null);
+  assert.equal(state.generatingDraft, false);
+});
+
+test("Impact Evidence Library data-gap-memo stale blocker or success response cannot cross-hydrate context", async () => {
+  const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+  const handlerSource = extractGenerateDraftHandlerSource(uiSource);
+  const dataGapBody = ({ idempotencyKey, engagementId: requestEngagementId }) => ({
+    idempotency_key: idempotencyKey,
+    engagement_id: requestEngagementId,
+  });
+
+  const { generateDraft: staleSuccessGenerate, state: staleSuccessState } = buildGenerateDraft(handlerSource, {
+    organizationIdRef: { current: otherOrganizationId },
+  });
+  await staleSuccessGenerate(createDataGapMemoPath, "data-gap-memo", dataGapBody);
+  assert.equal(staleSuccessState.postJsonCalls.length, 1);
+  assert.equal(staleSuccessState.loadGeneratedDraftsCalls, 0);
+  assert.deepEqual(staleSuccessState.getJsonCalls, []);
+  assert.equal(staleSuccessState.selectedGeneratedDraftId, null);
+  assert.equal(staleSuccessState.generatedDraftPacket, null);
+  assert.equal(staleSuccessState.message, "");
+
+  const { generateDraft: staleBlockerGenerate, state: staleBlockerState } = buildGenerateDraft(handlerSource, {
+    engagementIdRef: { current: "00000000-0000-4000-8000-000000000402" },
+    postJson: async (path, body) => {
+      staleBlockerState.postJsonCalls.push({ path, body });
+      return {
+        statusCode: 422,
+        body: {
+          ok: false,
+          error: {
+            code: "validation_blocker",
+            blockers: [{ blocking_reason: "data_gap_memo_generation_claim_bound_exceeded" }],
+          },
+        },
+      };
+    },
+  });
+  await staleBlockerGenerate(createDataGapMemoPath, "data-gap-memo", dataGapBody);
+  assert.equal(staleBlockerState.postJsonCalls.length, 1);
+  assert.equal(staleBlockerState.message, "");
+  assert.equal(staleBlockerState.generatingDraft, true);
+  assert.equal(staleBlockerState.selectedGeneratedDraftId, null);
+  assert.equal(staleBlockerState.generatedDraftPacket, null);
 });
 
 test("Impact Evidence Library generation handler rejects stale organization or engagement responses before hydration", async () => {
@@ -1290,6 +1487,19 @@ test("Impact Evidence Library generation handler: no request is issued (evidence
   assert.deepEqual(readinessState.getJsonCalls, []);
   assert.equal(readinessState.generatingDraft, null);
 
+  const { generateDraft: generateDataGapMemoNoEngagement, state: dataGapState } = buildGenerateDraft(handlerSource, { engagementId: "" });
+  await generateDataGapMemoNoEngagement(
+    createDataGapMemoPath,
+    "data-gap-memo",
+    ({ idempotencyKey, engagementId: requestEngagementId }) => ({
+      idempotency_key: idempotencyKey,
+      engagement_id: requestEngagementId,
+    }),
+  );
+  assert.deepEqual(dataGapState.postJsonCalls, []);
+  assert.deepEqual(dataGapState.getJsonCalls, []);
+  assert.equal(dataGapState.generatingDraft, null);
+
   // Sanity: the same handler DOES issue a request once an explicit engagement
   // is selected, proving the prior assertions are a genuine guard and not an
   // artifact of some other missing precondition.
@@ -1301,7 +1511,7 @@ test("Impact Evidence Library generation handler: no request is issued (evidence
 test("Impact Evidence Library generation buttons: disabled whenever no explicit engagement is selected", () => {
   const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
   const disabledMatches = uiSource.match(/disabled=\{generatingDraft \|\| selectedGenerationClaimIds\.length === 0 \|\| !engagementId\}/g) || [];
-  assert.equal(disabledMatches.length, 3);
+  assert.equal(disabledMatches.length, 4);
 });
 
 test("Impact Evidence Library bootstraps its organization selection from the server, never from a typed or fabricated id", () => {
