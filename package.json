@@ -68,6 +68,7 @@
     "test:kai-sprint2-package-2b-engagement-requirement-applicability": "node --test __tests__/kai-sprint2-package-2b-engagement-requirement-applicability.spec.js",
     "verify:kai-sprint2-p3-01-generated-content-drafts": "node scripts/kai-sprint2-p3-01-generated-content-drafts-local-postgres.js",
     "verify:kai-sprint2-p13-01-impact-narrative-content-type": "node scripts/kai-sprint2-p13-01-impact-narrative-content-type-local-postgres.js",
+    "verify:kai-sprint2-p14-14-generated-content-type-evolution": "node scripts/kai-sprint2-p14-14-generated-content-type-evolution-local-postgres.js",
     "verify:kai-sprint2-p3-02-generated-draft-review-packet": "node scripts/kai-sprint2-p3-02-generated-draft-review-packet-local-postgres.js",
     "verify:kai-sprint2-p3-03-export-manifest-eligibility": "node scripts/kai-sprint2-p3-03-export-manifest-eligibility-local-postgres.js",
     "verify:kai-sprint2-p3-04-generated-content-review-completion": "node scripts/kai-sprint2-p3-04-generated-content-review-completion-local-postgres.js",
