@@ -180,7 +180,9 @@ try {
   psqlFile("migrations/kai_sprint2_p2_03_claim_proposal.sql");
   psqlFile("migrations/kai_sprint2_p2_04_claim_gap_followup.sql");
   psqlFile("migrations/kai_sprint2_p2_05_conflict_review_candidate.sql");
+  psqlFile("migrations/kai_sprint2_p2_09_human_review_internal_approval.sql");
   psqlFile("migrations/kai_sprint2_p2_10_coverage_review_decision.sql");
+  psqlFile("migrations/kai_sprint2_p2_12_human_review_decision_ledger.sql");
   psqlFile("migrations/kai_sprint2_p3_01_generated_content_drafts.sql");
   psqlFile("migrations/kai_sprint2_p14_01_generation_run_engagement_binding.sql");
   psqlFile("migrations/kai_sprint2_p13_01_impact_narrative_content_type.sql");

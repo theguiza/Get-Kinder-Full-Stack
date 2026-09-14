@@ -28615,19 +28615,22 @@ PostgreSQL, `PG_BIN_DIR=/opt/homebrew/opt/libpq/bin`):**
 - `npm run verify:kai-sprint2-p14-10-review-queue-target-object-type-repair`
   -> PASS (3/3 node:test subtests, post-migration real funder Evidence
   Summary transaction commit proof).
-- `npm run verify:kai-sprint2-p13-01-impact-narrative-content-type` -> FAIL:
-  28/29 focused node:test subtests pass; one pre-existing, unrelated failure
-  (`relation "kai.evidence_review_decisions" does not exist`, SQLSTATE 42P01,
-  raised inside `evaluateClaimTraceabilityInTransaction` via
-  `findCurrentEvidenceReviewDecision`) reproduces identically on the
-  untouched, already-committed 909ff00 tree (confirmed via `git stash`
-  before/after) - the P13-01 runner's own migration chain does not apply
-  `kai_sprint2_p2_12_human_review_decision_ledger.sql`, which
-  `postgresClaimTraceabilityRepository.js` now calls into. This is a
-  pre-existing P13-01-runner/schema-chain gap, not caused by, or in scope for,
-  this P14-14 closure; it was not fixed here because that would go beyond the
-  P14-14 package boundary and touch shared claim-traceability/review-decision
-  wiring.
+- `npm run verify:kai-sprint2-p13-01-impact-narrative-content-type` -> PASS:
+  29/29 focused node:test subtests pass, 0 fail, 0 skip. The remaining
+  P13-01 local-Postgres regression was a runner-only migration-chain defect:
+  the real P13-01 integration path now evaluates claim traceability through
+  `postgresHumanReviewDecisionRepository.findCurrentEvidenceReviewDecision`,
+  but the P13-01 runner did not apply the human-review decision ledger schema
+  (`kai.evidence_review_decisions` / `kai.claim_review_decisions`) owned by
+  `migrations/kai_sprint2_p2_12_human_review_decision_ledger.sql`. P2-12's
+  direct prerequisite closure was established from the migration itself:
+  Gate A audit/function, P1-06 review queue, P2-01 evidence lineage, P2-03
+  claim proposal, and the P2-09 human-review internal-approval contract that
+  P2-12 explicitly repairs/supersedes. The P13-01 runner chain now adds only
+  the missing direct delta in canonical order, `P2-09 -> P2-12`, around the
+  already-present P2-10 runner dependency; no P2-11, A1/C2/C3 chain, app code,
+  validators, tests, shared migration, P14-14 runner, or P14-10 artifact was
+  changed for this repair.
 - Focused generated-content node:test suites (`kai-sprint2-p3-01-generated-content-drafts-boundary`,
   `kai-sprint2-p3-04-generated-content-review-completion-boundary`,
   `kai-sprint2-p3-04-generated-content-review-completion.integration`,
@@ -28645,10 +28648,11 @@ PostgreSQL, `PG_BIN_DIR=/opt/homebrew/opt/libpq/bin`):**
   runners above (those runners exercise a different, narrower real-service
   path). Evidence Summary, Impact Narrative, and generic generated-content
   persistence/idempotency real-DB coverage is provided by the P13-01 runner's
-  own integration suite (28/29 passing, one pre-existing unrelated failure as
-  above); Readiness Assessment and Data Gap Memo real-DB persistence coverage
-  is provided directly by the P14-14 runner's own new proof above.
+  own integration suite (29/29 passing after the runner-only P2-09/P2-12 chain
+  repair above); Readiness Assessment and Data Gap Memo real-DB persistence
+  coverage is provided directly by the P14-14 runner's own proof above.
 
-**Production migration/deployment has still not been performed.** No push,
-deploy, production database mutation, feature-flag change, or
-`00_KAI_CURRENT_STATE.md` update was made in this closure.
+**Generated-content content-type evolution repair closed locally.** No push,
+deployment, production database migration, production database mutation,
+feature-flag change, production configuration change, real-client-data access,
+or `00_KAI_CURRENT_STATE.md` update was made in this closure.
