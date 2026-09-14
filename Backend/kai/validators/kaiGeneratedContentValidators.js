@@ -109,10 +109,10 @@ export function validateGeneratedContentDraft({
     const citedText = citedStatements.join("\n");
     const allowedNumbers = new Set(unique(citedStatements.flatMap((statement) => literals(statement, NUMERIC_LITERAL_PATTERN))));
     for (const numericLiteral of unique(literals(block.text, NUMERIC_LITERAL_PATTERN))) {
-      if (!allowedNumbers.has(numericLiteral)) assertionViolations.push({ type: "numeric_literal", value: numericLiteral });
+      if (!allowedNumbers.has(numericLiteral)) assertionViolations.push({ type: "numeric_literal", block_ordinal: block.ordinal });
     }
     for (const causalLiteral of unique(literals(block.text, CAUSAL_PATTERN))) {
-      if (!citedText.includes(causalLiteral)) assertionViolations.push({ type: "causal_language", value: causalLiteral });
+      if (!citedText.includes(causalLiteral)) assertionViolations.push({ type: "causal_language", block_ordinal: block.ordinal });
     }
   }
   results.push(
@@ -120,6 +120,8 @@ export function validateGeneratedContentDraft({
       ? pass("VAL-GEN-004")
       : blocker("VAL-GEN-004", "unsupported_numeric_or_causal_assertion", {
           violation_count: assertionViolations.length,
+          assertion_classes: unique(assertionViolations.map((violation) => violation.type)).sort(),
+          block_ordinals: unique(assertionViolations.map((violation) => violation.block_ordinal).filter((ordinal) => Number.isInteger(ordinal))).sort((a, b) => a - b),
         }),
   );
 

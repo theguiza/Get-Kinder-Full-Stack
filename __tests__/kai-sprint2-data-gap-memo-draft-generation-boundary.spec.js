@@ -399,6 +399,169 @@ test("data gap semantic validator blocks gap-to-positive-support inversion witho
   assert.equal(impactNarrative.results.some((result) => result.validator_key === "VAL-GEN-007"), false);
 });
 
+test("data gap VAL-GEN-004 contract classifies unsupported numeric and causal text without exposing generated prose", () => {
+  const supportedNumeric = validateGeneratedContentDraft({
+    requestedAudience: "internal",
+    contentType: "data_gap_memo",
+    authoritativeReadiness: gaps,
+    generationClaims: [generationClaim({ claimStatement: "Coverage support was reviewed in 2025." })],
+    blocks: [{
+      ordinal: 1,
+      text: "Coverage support was reviewed in 2025.",
+      citations: [{ claimId: CLAIM, evidenceItemId: EVIDENCE }],
+    }],
+  });
+  assert.equal(supportedNumeric.ok, true);
+
+  const inventedNumeric = validateGeneratedContentDraft({
+    requestedAudience: "internal",
+    contentType: "data_gap_memo",
+    authoritativeReadiness: gaps,
+    generationClaims: [generationClaim({ claimStatement: "A governed claim has missing support." })],
+    blocks: [{
+      ordinal: 1,
+      text: "The memo identifies 2 unresolved gaps.",
+      citations: [{ claimId: CLAIM, evidenceItemId: EVIDENCE }],
+    }],
+  });
+  assert.equal(inventedNumeric.ok, false);
+  const numericBlocker = inventedNumeric.blockers.find((blocker) => blocker.validator_key === "VAL-GEN-004");
+  assert.equal(numericBlocker.blocking_reason, "unsupported_numeric_or_causal_assertion");
+  assert.deepEqual(numericBlocker.evidence, {
+    violation_count: 1,
+    assertion_classes: ["numeric_literal"],
+    block_ordinals: [1],
+  });
+  assert.equal(JSON.stringify(numericBlocker).includes("2 unresolved"), false);
+
+  const unsupportedCausal = validateGeneratedContentDraft({
+    requestedAudience: "internal",
+    contentType: "data_gap_memo",
+    authoritativeReadiness: gaps,
+    generationClaims: [generationClaim({ claimStatement: "A governed claim has missing support." })],
+    blocks: [{
+      ordinal: 1,
+      text: "The missing support caused a reporting limitation.",
+      citations: [{ claimId: CLAIM, evidenceItemId: EVIDENCE }],
+    }],
+  });
+  assert.equal(unsupportedCausal.ok, false);
+  const causalBlocker = unsupportedCausal.blockers.find((blocker) => blocker.validator_key === "VAL-GEN-004");
+  assert.equal(causalBlocker.blocking_reason, "unsupported_numeric_or_causal_assertion");
+  assert.deepEqual(causalBlocker.evidence.assertion_classes, ["causal_language"]);
+
+  const nonAttributionWithCausalTerm = validateGeneratedContentDraft({
+    requestedAudience: "internal",
+    contentType: "data_gap_memo",
+    authoritativeReadiness: gaps,
+    generationClaims: [generationClaim({ claimStatement: "A governed claim has missing support." })],
+    blocks: [{
+      ordinal: 1,
+      text: "The memo does not attribute outcomes because support is missing.",
+      citations: [{ claimId: CLAIM, evidenceItemId: EVIDENCE }],
+    }],
+  });
+  assert.equal(nonAttributionWithCausalTerm.ok, false);
+  assert.deepEqual(
+    nonAttributionWithCausalTerm.blockers.find((blocker) => blocker.validator_key === "VAL-GEN-004").evidence.assertion_classes,
+    ["causal_language"],
+  );
+
+  const numericLookingIdentifier = validateGeneratedContentDraft({
+    requestedAudience: "internal",
+    contentType: "data_gap_memo",
+    authoritativeReadiness: gaps,
+    generationClaims: [generationClaim({ claimStatement: "A governed claim has missing support." })],
+    blocks: [{
+      ordinal: 1,
+      text: "Gap item VAL-COV-001 remains unresolved.",
+      citations: [{ claimId: CLAIM, evidenceItemId: EVIDENCE }],
+    }],
+  });
+  assert.equal(numericLookingIdentifier.ok, false);
+  assert.deepEqual(
+    numericLookingIdentifier.blockers.find((blocker) => blocker.validator_key === "VAL-GEN-004").evidence.assertion_classes,
+    ["numeric_literal"],
+  );
+
+  const audienceGate = validateGeneratedContentDraft({
+    requestedAudience: "public",
+    contentType: "data_gap_memo",
+    authoritativeReadiness: gaps,
+    generationClaims: [generationClaim({
+      requestedAudience: "public",
+      audienceAuthority: { internal: true, funder: false, public: false },
+    })],
+    blocks: [{
+      ordinal: 1,
+      text: "A governed claim has missing support.",
+      citations: [{ claimId: CLAIM, evidenceItemId: EVIDENCE }],
+    }],
+    draftAudience: "public",
+  });
+  assert.equal(audienceGate.ok, false);
+  assert.equal(audienceGate.blockers.some((blocker) => blocker.validator_key === "VAL-GEN-005"), true);
+});
+
+test("data gap service path validates generator output before persistence/review boundary", async () => {
+  const calls = [];
+  const result = await createDataGapMemoDraft(input({ idempotencyKey: "data-gap-validator-path" }), {
+    env: enabledEnv,
+    getEngagementForOrganization: stubGetEngagementForOrganization,
+    async listOrganizationEvidenceGapsForImpactLibrary() {
+      return { ok: true, data: { items: [gaps.items[0]], limit: 25, afterGapLogItemId: null, truncated: false, nextAfterGapLogItemId: null }, error: null };
+    },
+    generatedContentRepository: {
+      async createDataGapMemoDraft(repositoryInput, dependencies) {
+        const generatorResult = await dependencies.draftGenerator({
+          contentType: "data_gap_memo",
+          requestedAudience: repositoryInput.requestedAudience,
+          gaps: dependencies.authoritativeDataGaps,
+          claims: [generatorClaim()],
+        });
+        calls.push({ stage: "generated", blockCount: generatorResult.blocks.length });
+        const validation = validateGeneratedContentDraft({
+          requestedAudience: repositoryInput.requestedAudience,
+          contentType: "data_gap_memo",
+          authoritativeReadiness: dependencies.authoritativeDataGaps,
+          generationClaims: [generationClaim()],
+          blocks: generatorResult.blocks,
+          draftAudience: repositoryInput.requestedAudience,
+        });
+        calls.push({ stage: "validated", ok: validation.ok });
+        if (!validation.ok) {
+          return { ok: false, data: null, error: { code: "validation_blocker", status: 422 }, blockers: validation.blockers };
+        }
+        return {
+          ok: true,
+          data: {
+            generatedContentDraftId: "00000000-0000-4000-8000-000000000703",
+            reviewQueueItemId: "00000000-0000-4000-8000-000000000704",
+            draftStatus: "draft",
+            reviewStatus: "needs_gk_review",
+          },
+          error: null,
+        };
+      },
+    },
+    draftGenerator: async () => ({
+      blocks: [{
+        ordinal: 1,
+        text: "A governed claim has missing support.",
+        citations: [{ claimId: CLAIM, evidenceItemId: EVIDENCE }],
+      }],
+    }),
+    metadataOnlyAudit: {},
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(calls, [
+    { stage: "generated", blockCount: 1 },
+    { stage: "validated", ok: true },
+  ]);
+  assert.equal(result.data.reviewQueueItemId, "00000000-0000-4000-8000-000000000704");
+});
+
 test("review packet DTO reuses generated_content_review and KAI cannot approve/finalize a data gap memo", () => {
   const { isGeneratedDraftReviewPacketDto } = __generatedContentReviewPacketServiceTestables;
   assert.equal(isGeneratedDraftReviewPacketDto({
@@ -474,6 +637,7 @@ test("production data gap memo generator sends only authoritative gaps and gover
   assert.equal(JSON.stringify(calls[0]).includes("resolved_risk_flagged"), true);
   assert.equal(JSON.stringify(calls[0]).includes("raw_content"), false);
   assert.equal(JSON.stringify(calls[0]).includes("signed_url"), false);
+  assert.match(calls[0].system, /Do not add numbers, dates, counts, ordinals, identifiers, validator keys/);
 
   assert.deepEqual(calls[0].output_config, {
     format: {

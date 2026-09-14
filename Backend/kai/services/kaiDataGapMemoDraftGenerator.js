@@ -120,7 +120,7 @@ export function createProductionDataGapMemoDraftGenerator({
         "Treat every supplied gap item, including resolved_risk_flagged, as part of the current gap input.",
         "Describe missing support, unresolved conditions, risk-flagged conditions, limitations, uncertainty, or follow-up need only where supported by supplied gap fields.",
         "Never convert a supplied gap, missing support, risk, or limitation into a positive support assertion.",
-        "Do not add severity scores, priorities, percentages, metrics, requirement satisfaction, recommendations, or causal language unless it appears verbatim in a cited claim statement.",
+        "Do not add numbers, dates, counts, ordinals, identifiers, validator keys, severity scores, priorities, percentages, metrics, requirement satisfaction, recommendations, or causal language unless it appears verbatim in a cited claim statement.",
         "Never state or imply that this draft is approved, finalized, export-ready, or usable without human review.",
       ].join(" "),
       messages: [{

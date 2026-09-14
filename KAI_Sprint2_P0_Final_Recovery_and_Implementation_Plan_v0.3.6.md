@@ -28757,3 +28757,51 @@ seam):
 database change required: NO. No push, deployment, production mutation,
 feature-flag change, secret handling, real-client-data access, or
 `00_KAI_CURRENT_STATE.md` update performed.
+
+## Data Gap Memo VAL-GEN-004 Production Blocker Repair (2026-09-14)
+
+**Live observation accepted as USER_CONFIRMED:** the current production Data
+Gap Memo request now reaches generated-content semantic validation and fails
+HTTP 422 with `validator_key: VAL-GEN-004` and
+`blocking_reason: unsupported_numeric_or_causal_assertion`, after commit
+`5765650` moved the same request beyond the prior
+`VAL-GEN-RESULT-P0-001 / generator_result_blocks_empty` boundary.
+
+**Inspection finding:** `VAL-GEN-004` is one combined blocker with two
+independent internal predicates over generated `blocks[].text` only:
+unsupported numeric literals and unsupported causal-language terms. Citations,
+UUID values, dates, identifiers, gap metadata, and other fields participate
+only if the generator copies them into block text. Numeric literals are allowed
+only when the exact literal appears in a cited claim statement. Causal terms
+are allowed only when the exact matched term appears in cited claim text.
+Negated/non-attribution causal wording is not distinguished by the validator.
+The public `blocking_reason` is used by existing repository/API/service tests
+and remains unchanged.
+
+**Root cause and repair:** the Data Gap Memo generator prompt prohibited
+severity scores, priorities, percentages, metrics, recommendations, and
+unsupported causal language, but it did not explicitly prohibit other
+numeric-looking output such as dates, counts, ordinals, identifiers, or
+validator keys from supplied gap metadata. That contract was narrower than
+the existing validator. The repair tightens only the Data Gap Memo generator
+instruction to avoid all numeric-looking text unless it appears verbatim in a
+cited claim statement, preserving `VAL-GEN-004` as a blocker. To make future
+combined-blocker diagnosis safe, `VAL-GEN-004` now includes only
+low-cardinality evidence (`assertion_classes`, `block_ordinals`, and
+`violation_count`) while preserving the existing public blocking reason and
+never exposing generated prose.
+
+**Test evidence** (`DATABASE_URL` set to a non-listening loopback sentinel;
+no PostgreSQL/cloud/production access):
+- `node --test __tests__/kai-sprint2-data-gap-memo-draft-generation-boundary.spec.js`
+  -> 21/21 PASS, 0 fail, 0 skipped.
+- `node --test __tests__/kai-sprint2-p3-01-generated-content-drafts-boundary.spec.js
+  __tests__/kai-sprint2-readiness-assessment-draft-generation-boundary.spec.js
+  __tests__/kai-sprint2-p14-09-generated-content-validation-blocker-diagnostic-propagation.spec.js`
+  -> 21/21 PASS, 0 fail, 0 skipped.
+- `git diff --check` -> PASS before this ExecPlan evidence update.
+
+**Status:** VAL_GEN_004_DATA_GAP_REPAIR_CLOSED locally. No push, deployment,
+production mutation, database mutation, migration, Board Reporting change,
+frontend idempotency change, feature-flag/configuration change,
+real-client-data access, or `00_KAI_CURRENT_STATE.md` update performed.
