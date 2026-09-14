@@ -28529,3 +28529,126 @@ permitted loopback surface after sandbox `listen EPERM`):**
 required: NO. No push, deployment, production mutation, feature-flag change,
 secret handling, real-client-data access, or `00_KAI_CURRENT_STATE.md` update
 performed.
+
+## P14-14 Generated-Content Type-Evolution: Migration Package Completion and Real-Transaction Persistence Proof (2026-09-13)
+
+**Confirmed root cause (accepted, not re-litigated):** on a real ephemeral
+PostgreSQL, before P14-14, inserting `content_type = 'data_gap_memo'` or
+`content_type = 'readiness_assessment'` into `kai.generation_runs` violates
+SQLSTATE 23514 on `generation_runs_p3_01_content_type_check`. The application
+repository (`Backend/kai/dictionary/postgresGeneratedContentRepository.js`,
+`ALLOWED_GENERATED_CONTENT_TYPES`) has supported all four generated-content
+types since the Readiness Assessment and Data Gap Memo product surfaces
+landed, but no migration after P13-01 had widened the database `content_type`
+CHECK constraints to match. Commit 909ff00 already contains the correct
+P14-14 schema repair (`migrations/kai_sprint2_p14_14_generated_content_type_evolution.sql`
+/ `.rollback.sql`), widening exactly `generation_runs_p3_01_content_type_check`
+and `generated_content_drafts_p3_01_content_type_check` to
+`evidence_summary, impact_narrative, readiness_assessment, data_gap_memo`,
+touching no other constraint, table, validator, citation, review, idempotency,
+or feature-flag behavior.
+
+**Migration package completed.** P14-14 previously had a forward migration,
+rollback, catalog verifier, package-owned local-Postgres runner, runbook, and
+patch notes, but was missing the three standalone artifacts the P13-01
+convention requires. Added, following the P13-01 naming/structure convention
+exactly:
+
+- `scripts/kai-sprint2-p14-14-generated-content-type-evolution-smoke-seed.sql`
+- `scripts/kai-sprint2-p14-14-generated-content-type-evolution-smoke-verifier.sql`
+- `scripts/kai-sprint2-p14-14-generated-content-type-evolution-failure-checks.sql`
+
+The package-owned runner
+(`scripts/kai-sprint2-p14-14-generated-content-type-evolution-local-postgres.js`,
+`npm run verify:kai-sprint2-p14-14-generated-content-type-evolution`) was
+wired to execute all P14-14 artifacts, including these three new ones, in the
+same run.
+
+**Real Data Gap Memo and Readiness Assessment persistence-transaction proof.**
+The same P14-14 package-owned ephemeral loopback PostgreSQL runner was
+extended (rather than building a separate harness) to, after applying
+migrations in order through P3-01 -> P14-01 -> P13-01 -> P14-14 (plus the
+additional A1.1-A1.4/B1.1/C2.1/P2-04/P2-05/P2-09/P2-10/P2-11/P2-12/C3-A3/C3-A4
+prerequisite chain the real, unstubbed Readiness/Data-Gap-Memo read services
+require):
+
+- build a real, synthetic-but-governed fixture through the real P2-01/P2-03/
+  P2-04 production services (a real current `source_version` -> a real
+  `evidence_item` -> a real `claim` -> a real current `gap_log_item`), and
+  seed one real B1.1 requirement row (`kai.requirement_sources` ->
+  `kai.requirement_framework_versions` -> `kai.requirement_sets` ->
+  `kai.requirements`) the same way the existing requirements-readiness-rollup
+  integration suite does;
+- call the actual production `createDataGapMemoDraft` and
+  `createReadinessAssessmentDraft` service functions
+  (`Backend/kai/services/kaiGeneratedContentService.js`) with the real,
+  unstubbed `listOrganizationEvidenceGapsForImpactLibrary` /
+  `listOrganizationRequirementsReadiness` read services and the real
+  `createPostgresGeneratedContentRepository` persistence path, stubbing only
+  the external generation-provider `draftGenerator` call (the repo's existing
+  test-stubbing convention for the LLM call, per
+  `__tests__/kai-sprint2-p3-01-generated-content-drafts.integration.spec.js`);
+- prove, via real queries against the same ephemeral PostgreSQL (never
+  handwritten INSERTs bypassing application code), that both content types
+  each durably produce exactly one `generation_runs` row, one
+  `generated_content_drafts` row, one `generated_content_blocks` row, one
+  `generated_content_citations` row, one open
+  `generated_content_review`-queue item, and one
+  `generated_content_draft_created` `kai.upload_lifecycle_audit` row, and that
+  a `getGeneratedDraftReviewPacket` reread of each draft succeeds and reports
+  the correct `contentType`.
+
+Both proofs passed (verified twice for stability). The rollback-fixture
+cleanup step was extended to delete the real service-generated child rows
+(blocks/citations/review-queue/audit) in FK-safe order before the
+narrowing-rollback proof, alongside the pre-existing manually-inserted
+post-migration proof rows.
+
+**Regression / real-DB proof results (run locally against real ephemeral
+PostgreSQL, `PG_BIN_DIR=/opt/homebrew/opt/libpq/bin`):**
+
+- `npm run verify:kai-sprint2-p14-14-generated-content-type-evolution` ->
+  PASS (constraint pre/post proof, smoke seed/verifier, failure checks, real
+  Data Gap Memo and Readiness Assessment persistence-transaction proof
+  including reread, incompatible-data rollback refusal, clean rollback
+  restore).
+- `npm run verify:kai-sprint2-p14-10-review-queue-target-object-type-repair`
+  -> PASS (3/3 node:test subtests, post-migration real funder Evidence
+  Summary transaction commit proof).
+- `npm run verify:kai-sprint2-p13-01-impact-narrative-content-type` -> FAIL:
+  28/29 focused node:test subtests pass; one pre-existing, unrelated failure
+  (`relation "kai.evidence_review_decisions" does not exist`, SQLSTATE 42P01,
+  raised inside `evaluateClaimTraceabilityInTransaction` via
+  `findCurrentEvidenceReviewDecision`) reproduces identically on the
+  untouched, already-committed 909ff00 tree (confirmed via `git stash`
+  before/after) - the P13-01 runner's own migration chain does not apply
+  `kai_sprint2_p2_12_human_review_decision_ledger.sql`, which
+  `postgresClaimTraceabilityRepository.js` now calls into. This is a
+  pre-existing P13-01-runner/schema-chain gap, not caused by, or in scope for,
+  this P14-14 closure; it was not fixed here because that would go beyond the
+  P14-14 package boundary and touch shared claim-traceability/review-decision
+  wiring.
+- Focused generated-content node:test suites (`kai-sprint2-p3-01-generated-content-drafts-boundary`,
+  `kai-sprint2-p3-04-generated-content-review-completion-boundary`,
+  `kai-sprint2-p3-04-generated-content-review-completion.integration`,
+  `kai-sprint2-generated-content-review-start-audit-contract.integration`,
+  `kai-sprint2-p14-09-generated-content-validation-blocker-diagnostic-propagation`,
+  `kai-sprint2-p14-11-generated-content-draft-audit-composition-repair.integration`,
+  `kai-sprint2-data-gap-memo-draft-generation-boundary`,
+  `kai-sprint2-readiness-assessment-draft-generation-boundary`) -> 61/61
+  applicable subtests PASS, 3 SKIPPED. The 3 skips are each gated on their own
+  package's dedicated `RUNNER_OWNED_DATABASE_URL` (the P3-04 review-completion,
+  generated-content-review-start-audit-contract, and P14-11 real-DB
+  integration suites), which were not set in this standalone invocation and
+  were not separately re-run via their own dedicated local-Postgres runners in
+  this closure - they are NOT claimed as covered by the P14-14/P13-01/P14-10
+  runners above (those runners exercise a different, narrower real-service
+  path). Evidence Summary, Impact Narrative, and generic generated-content
+  persistence/idempotency real-DB coverage is provided by the P13-01 runner's
+  own integration suite (28/29 passing, one pre-existing unrelated failure as
+  above); Readiness Assessment and Data Gap Memo real-DB persistence coverage
+  is provided directly by the P14-14 runner's own new proof above.
+
+**Production migration/deployment has still not been performed.** No push,
+deploy, production database mutation, feature-flag change, or
+`00_KAI_CURRENT_STATE.md` update was made in this closure.

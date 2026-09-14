@@ -1,0 +1,107 @@
+BEGIN;
+
+INSERT INTO kai.generation_runs (
+  generation_run_id,
+  organization_id,
+  idempotency_key,
+  request_fingerprint,
+  content_type,
+  requested_audience,
+  created_by_type
+)
+VALUES
+  (
+    '14140000-0000-4000-8000-000000000101',
+    '00000000-0000-4000-8000-000000000001',
+    'p14-14-smoke-evidence-summary',
+    repeat('5', 64),
+    'evidence_summary',
+    'internal',
+    'system'
+  ),
+  (
+    '14140000-0000-4000-8000-000000000102',
+    '00000000-0000-4000-8000-000000000001',
+    'p14-14-smoke-impact-narrative',
+    repeat('6', 64),
+    'impact_narrative',
+    'internal',
+    'system'
+  ),
+  (
+    '14140000-0000-4000-8000-000000000103',
+    '00000000-0000-4000-8000-000000000001',
+    'p14-14-smoke-readiness-assessment',
+    repeat('7', 64),
+    'readiness_assessment',
+    'internal',
+    'system'
+  ),
+  (
+    '14140000-0000-4000-8000-000000000104',
+    '00000000-0000-4000-8000-000000000001',
+    'p14-14-smoke-data-gap-memo',
+    repeat('8', 64),
+    'data_gap_memo',
+    'internal',
+    'system'
+  );
+
+INSERT INTO kai.generated_content_drafts (
+  generated_content_draft_id,
+  generation_run_id,
+  organization_id,
+  content_type,
+  requested_audience,
+  draft_status,
+  review_status,
+  validator_results,
+  created_by_type
+)
+VALUES
+  (
+    '14140000-0000-4000-8000-000000000201',
+    '14140000-0000-4000-8000-000000000101',
+    '00000000-0000-4000-8000-000000000001',
+    'evidence_summary',
+    'internal',
+    'draft',
+    'needs_gk_review',
+    '[]'::jsonb,
+    'system'
+  ),
+  (
+    '14140000-0000-4000-8000-000000000202',
+    '14140000-0000-4000-8000-000000000102',
+    '00000000-0000-4000-8000-000000000001',
+    'impact_narrative',
+    'internal',
+    'draft',
+    'needs_gk_review',
+    '[]'::jsonb,
+    'system'
+  ),
+  (
+    '14140000-0000-4000-8000-000000000203',
+    '14140000-0000-4000-8000-000000000103',
+    '00000000-0000-4000-8000-000000000001',
+    'readiness_assessment',
+    'internal',
+    'draft',
+    'needs_gk_review',
+    '[]'::jsonb,
+    'system'
+  ),
+  (
+    '14140000-0000-4000-8000-000000000204',
+    '14140000-0000-4000-8000-000000000104',
+    '00000000-0000-4000-8000-000000000001',
+    'data_gap_memo',
+    'internal',
+    'draft',
+    'needs_gk_review',
+    '[]'::jsonb,
+    'system'
+  );
+
+COMMIT;

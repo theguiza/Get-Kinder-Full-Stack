@@ -15,16 +15,34 @@
 - `scripts/kai-sprint2-p14-14-generated-content-type-evolution-verifier.sql`
   verifies the exact catalog delta, an unrelated-constraint negative check,
   and that unrelated P3-01/P13-01 contracts are unchanged.
+- `scripts/kai-sprint2-p14-14-generated-content-type-evolution-smoke-seed.sql`
+  seeds one synthetic `generation_runs`/`generated_content_drafts` pair for
+  each of the four current application content types (matching the P13-01
+  smoke-seed convention).
+- `scripts/kai-sprint2-p14-14-generated-content-type-evolution-smoke-verifier.sql`
+  proves each of the four seeded pairs is admitted and internally coherent.
+- `scripts/kai-sprint2-p14-14-generated-content-type-evolution-failure-checks.sql`
+  proves (read-only, transaction-scoped) that an unrelated content type, a
+  near-miss/unknown content-type token, and a non-system `created_by_type`
+  are all still rejected after the P14-14 widening.
 - `scripts/kai-sprint2-p14-14-generated-content-type-evolution-local-postgres.js`
   is the package-owned ephemeral loopback PostgreSQL runner for this migration
   package. It reproduces the pre-fix drift (SQLSTATE 23514 on
   `generation_runs_p3_01_content_type_check` for `data_gap_memo` and
-  `readiness_assessment`), applies the fix, proves all four content types are
-  now accepted at both tables, proves an unknown type is still rejected, and
-  exercises both the incompatible-data-refused and clean-restore rollback
-  paths.
+  `readiness_assessment`), applies the fix, runs the catalog verifier plus the
+  smoke seed/verifier and failure-checks above, proves all four content types
+  are now accepted at both tables, proves an unknown type is still rejected,
+  runs the actual Data Gap Memo and Readiness Assessment production
+  service/repository persistence transactions (real ephemeral PostgreSQL,
+  real governed evidence/claim/gap and requirements-catalogue fixtures, only
+  the external generation provider stubbed) and proves the complete durable
+  row set (generation_run, draft, blocks, citations, generated-content
+  review-queue item, `generated_content_draft_created` audit row, and a
+  repository reread) for both content types, and exercises both the
+  incompatible-data-refused and clean-restore rollback paths.
 - `scripts/kai-sprint2-p14-14-generated-content-type-evolution-runbook.md`
-  documents the synthetic verification and rollback characterization.
+  documents the synthetic verification, real-transaction persistence proof,
+  and rollback characterization.
 
 ## Problem Closed
 
