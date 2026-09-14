@@ -28656,3 +28656,104 @@ PostgreSQL, `PG_BIN_DIR=/opt/homebrew/opt/libpq/bin`):**
 deployment, production database migration, production database mutation,
 feature-flag change, production configuration change, real-client-data access,
 or `00_KAI_CURRENT_STATE.md` update was made in this closure.
+
+## Data Gap Memo Generator-Result Contract Repair: VAL-GEN-RESULT-P0-001 / generator_result_blocks_empty (2026-09-14)
+
+**Live observation (accepted, not re-litigated):** Data Gap Memo generation
+was failing `VAL-GEN-RESULT-P0-001` with blocking reason
+`generator_result_blocks_empty`. `postgresGeneratedContentRepository.js`'s
+`classifyGeneratorResult` rejects any generator result with
+`blocks.length < 1`, and, where the generator tagged a more specific
+`GENERATOR_RESULT_REASON`, surfaces that instead. Unlike
+`kaiEvidenceSummaryDraftGenerator.js` (P14-09-FUND-GEN-RESULT-001, already on
+the hardened Anthropic `output_config.format.type = "json_schema"` +
+result-reason pattern), `kaiDataGapMemoDraftGenerator.js` still used an
+unstructured provider call and a bare `parseJsonObject` helper, collapsing
+every provider/parse failure path (missing text, parse failure, invalid
+root, missing/invalid `blocks` field, a genuine empty result, and the
+generator's own input-contract rejection) into the same untagged
+`{ blocks: [] }` shape, so every one of those distinct causes surfaced
+identically as the generic `generator_result_blocks_empty`.
+
+**Repair: ported the established Evidence Summary structured-output
+contract onto the Data Gap Memo generator/provider boundary only.**
+`Backend/kai/services/kaiDataGapMemoDraftGenerator.js` now:
+- sends the same `output_config: { format: { type: "json_schema", schema } }`
+  mechanism, with a `DATA_GAP_MEMO_OUTPUT_SCHEMA` adapted only to the
+  existing Data Gap output shape (`blocks[].text`, `blocks[].citations[].
+  claimId/evidenceItemId`), root object, required `blocks`, no unsupported
+  additional properties - the same shape/strictness as
+  `EVIDENCE_SUMMARY_OUTPUT_SCHEMA`, transferring no claim/evidence/UUID/
+  citation/semantic authority into the provider schema;
+- uses the same `tagGeneratorResultReason` (`GENERATOR_RESULT_REASON`
+  non-enumerable symbol carrier) and `GENERATOR_RESULT_REASONS` vocabulary
+  already exported by `postgresGeneratedContentRepository.js`, preserving
+  `INPUT_CONTRACT_REJECTED`, `PROVIDER_TEXT_MISSING`, `JSON_PARSE_FAILED`,
+  `JSON_ROOT_INVALID`, and `BLOCKS_FIELD_INVALID` at the exact points those
+  conditions occur, before `normalizeGeneratorOutput` would otherwise
+  destroy them. No new reason strings were invented.
+
+**`DATA_GAP_SUCCESSFUL_PROVIDER_RESULT_CAN_BE_EMPTY: NO.` Reason:** the
+established Evidence Summary provider schema does not set a `blocks`
+`minItems` constraint (confirmed by direct inspection of
+`EVIDENCE_SUMMARY_OUTPUT_SCHEMA`), so that mechanism was not available to
+carry forward as a provider-schema constraint - inventing one for Data Gap
+Memo alone would not be porting the established pattern, it would be a new
+provider feature. `classifyGeneratorResult`'s existing
+`result.blocks.length < 1` predicate already fails closed on any empty
+result regardless of provider or content type, and the Data Gap service
+precondition (`createDataGapMemoDraft`) only invokes the generator with a
+non-empty, server-derived authoritative current-gap set. The repair
+therefore leaves the downstream empty-result blocker exactly as-is and adds
+one explicit generation instruction line: "If the supplied authoritative gap
+items are non-empty, you must return at least one block describing them;
+never return an empty blocks array when gap items were supplied." A
+genuinely empty, schema-conformant `{"blocks":[]}` response remains
+untagged and classifies as the generic `generator_result_blocks_empty`, per
+instruction 4 of the closure spec - no fallback content is fabricated and no
+block is synthesized outside the governed generator/validator path.
+
+**Data Gap Memo governance (contentType, requestedAudience, authoritative
+server-derived gap/claim membership, citation validation, gap semantic
+validation, the 20-claim bound, tenant/actor checks, idempotency,
+transaction/audit behavior, `generated_content_review` creation, and the
+human-review requirement) was not touched.**
+
+**Test evidence** (`DATABASE_URL` set to a non-listening loopback sentinel;
+no real provider request, using the existing `createMessage` injection
+seam):
+- `node --test __tests__/kai-sprint2-data-gap-memo-draft-generation-boundary.spec.js
+  __tests__/kai-sprint2-p14-09-evidence-summary-structured-output.spec.js
+  __tests__/kai-sprint2-p14-09-fund-gen-result-001-subreason-classification.spec.js`
+  -> 52/52 PASS, 0 fail, 0 skipped.
+- New/extended Data Gap Memo coverage in the boundary spec proves: the
+  provider request carries the exact bounded `output_config.format.schema`
+  (`DATA_GAP_MEMO_OUTPUT_SCHEMA`); a valid schema-conformant response
+  normalizes to the existing `{ blocks: [...] }` shape with an exact
+  governed citation and passes `classifyGeneratorResult`; direct invalid
+  generator input (missing `gaps.items`) is rejected as
+  `generator_result_input_contract_rejected` before any provider call;
+  missing/whitespace-only provider text tags
+  `generator_result_provider_text_missing`; unparseable text tags
+  `generator_result_json_parse_failed`; a JSON array root tags
+  `generator_result_json_root_invalid`; a missing/non-array `blocks` field
+  tags `generator_result_blocks_field_invalid`; a genuine, schema-conformant
+  empty `{"blocks":[]}` classifies as the untagged
+  `generator_result_blocks_empty`; and a valid generated draft still passes
+  `validateGeneratedContentDraft` and is excluded from the KAI-side
+  `data-gap-memo/final` (auto-finalize) route, preserving the human-review
+  boundary. The pre-existing citation fail-closed (guessed evidence id) and
+  gap-semantic fail-closed (gap-to-positive-support inversion blocked,
+  valid limitation language passed) tests in the same spec were re-run
+  unchanged and continue to pass, proving no validator was weakened.
+- `git diff --check` -> PASS (no whitespace errors). Complete diff
+  inspected: only `Backend/kai/services/kaiDataGapMemoDraftGenerator.js`
+  (generator/provider boundary) and
+  `__tests__/kai-sprint2-data-gap-memo-draft-generation-boundary.spec.js`
+  (test matrix) changed; no repository classifier, validator, migration,
+  frontend, Board Reporting, or Data Gap idempotency file was touched.
+
+**Status:** DATA_GAP_GENERATOR_RESULT_CONTRACT_REPAIR_CLOSED. Backend/schema/
+database change required: NO. No push, deployment, production mutation,
+feature-flag change, secret handling, real-client-data access, or
+`00_KAI_CURRENT_STATE.md` update performed.

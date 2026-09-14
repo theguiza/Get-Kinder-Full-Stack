@@ -19,6 +19,8 @@ import {
   createProductionDataGapMemoDraftGenerator,
 } from "../Backend/kai/services/kaiDataGapMemoDraftGenerator.js";
 
+const { classifyGeneratorResult, GENERATOR_RESULT_REASONS, validateGeneratorResult } = __generatedContentRepositoryTestables;
+
 const ORG = "00000000-0000-4000-8000-000000000001";
 const OTHER_ORG = "00000000-0000-4000-8000-000000000002";
 const ENGAGEMENT = "00000000-0000-4000-8000-000000000601";
@@ -472,6 +474,145 @@ test("production data gap memo generator sends only authoritative gaps and gover
   assert.equal(JSON.stringify(calls[0]).includes("resolved_risk_flagged"), true);
   assert.equal(JSON.stringify(calls[0]).includes("raw_content"), false);
   assert.equal(JSON.stringify(calls[0]).includes("signed_url"), false);
+
+  assert.deepEqual(calls[0].output_config, {
+    format: {
+      type: "json_schema",
+      schema: __dataGapMemoDraftGeneratorContract.DATA_GAP_MEMO_OUTPUT_SCHEMA,
+    },
+  });
+  const schema = calls[0].output_config.format.schema;
+  assert.equal(schema.type, "object");
+  assert.deepEqual(schema.required, ["blocks"]);
+  assert.equal(schema.additionalProperties, false);
+  const blockSchema = schema.properties.blocks.items;
+  assert.deepEqual(blockSchema.required, ["text", "citations"]);
+  assert.equal(blockSchema.additionalProperties, false);
+  const citationSchema = blockSchema.properties.citations.items;
+  assert.deepEqual(citationSchema.required, ["claimId", "evidenceItemId"]);
+  assert.equal(citationSchema.additionalProperties, false);
+
+  assert.equal(validateGeneratorResult(result), true);
+  assert.deepEqual(classifyGeneratorResult(result), { ok: true, reason: null });
+});
+
+test("data gap memo generator: direct invalid generator input is rejected before any provider call", async () => {
+  const calls = [];
+  const generator = createProductionDataGapMemoDraftGenerator({
+    async createMessage(payload) {
+      calls.push(payload);
+      return { content: [{ type: "text", text: JSON.stringify({ blocks: [] }) }] };
+    },
+  });
+
+  const result = await generator({
+    contentType: "data_gap_memo",
+    requestedAudience: "internal",
+    claims: [generatorClaim()],
+    // gaps omitted: fails the generatorInput.gaps?.items array check.
+  });
+
+  assert.equal(calls.length, 0);
+  assert.deepEqual(result, { blocks: [] });
+  assert.equal(classifyGeneratorResult(result).reason, GENERATOR_RESULT_REASONS.INPUT_CONTRACT_REJECTED);
+  assert.equal(validateGeneratorResult(result), false);
+});
+
+test("data gap memo generator: no extractable provider text fails closed as generator_result_provider_text_missing", async () => {
+  const generator = createProductionDataGapMemoDraftGenerator({
+    async createMessage() {
+      return { content: [] };
+    },
+  });
+  const result = await generator({ contentType: "data_gap_memo", requestedAudience: "internal", gaps, claims: [generatorClaim()] });
+  assert.deepEqual(result, { blocks: [] });
+  assert.equal(classifyGeneratorResult(result).reason, GENERATOR_RESULT_REASONS.PROVIDER_TEXT_MISSING);
+  assert.equal(validateGeneratorResult(result), false);
+});
+
+test("data gap memo generator: whitespace-only provider text fails closed as generator_result_provider_text_missing", async () => {
+  const generator = createProductionDataGapMemoDraftGenerator({
+    async createMessage() {
+      return { content: [{ type: "text", text: "   \n  " }] };
+    },
+  });
+  const result = await generator({ contentType: "data_gap_memo", requestedAudience: "internal", gaps, claims: [generatorClaim()] });
+  assert.deepEqual(result, { blocks: [] });
+  assert.equal(classifyGeneratorResult(result).reason, GENERATOR_RESULT_REASONS.PROVIDER_TEXT_MISSING);
+});
+
+test("data gap memo generator: unparseable provider text fails closed as generator_result_json_parse_failed", async () => {
+  const generator = createProductionDataGapMemoDraftGenerator({
+    async createMessage() {
+      return { content: [{ type: "text", text: "not-json" }] };
+    },
+  });
+  const result = await generator({ contentType: "data_gap_memo", requestedAudience: "internal", gaps, claims: [generatorClaim()] });
+  assert.deepEqual(result, { blocks: [] });
+  assert.equal(classifyGeneratorResult(result).reason, GENERATOR_RESULT_REASONS.JSON_PARSE_FAILED);
+});
+
+test("data gap memo generator: a non-object JSON root fails closed as generator_result_json_root_invalid", async () => {
+  const generator = createProductionDataGapMemoDraftGenerator({
+    async createMessage() {
+      return { content: [{ type: "text", text: JSON.stringify([1, 2, 3]) }] };
+    },
+  });
+  const result = await generator({ contentType: "data_gap_memo", requestedAudience: "internal", gaps, claims: [generatorClaim()] });
+  assert.deepEqual(result, { blocks: [] });
+  assert.equal(classifyGeneratorResult(result).reason, GENERATOR_RESULT_REASONS.JSON_ROOT_INVALID);
+});
+
+test("data gap memo generator: a missing blocks field fails closed as generator_result_blocks_field_invalid", async () => {
+  const generator = createProductionDataGapMemoDraftGenerator({
+    async createMessage() {
+      return { content: [{ type: "text", text: JSON.stringify({ notBlocks: [] }) }] };
+    },
+  });
+  const result = await generator({ contentType: "data_gap_memo", requestedAudience: "internal", gaps, claims: [generatorClaim()] });
+  assert.deepEqual(result, { blocks: [] });
+  assert.equal(classifyGeneratorResult(result).reason, GENERATOR_RESULT_REASONS.BLOCKS_FIELD_INVALID);
+});
+
+test("data gap memo generator: blocks not an array fails closed as generator_result_blocks_field_invalid", async () => {
+  const generator = createProductionDataGapMemoDraftGenerator({
+    async createMessage() {
+      return { content: [{ type: "text", text: JSON.stringify({ blocks: "not-an-array" }) }] };
+    },
+  });
+  const result = await generator({ contentType: "data_gap_memo", requestedAudience: "internal", gaps, claims: [generatorClaim()] });
+  assert.deepEqual(result, { blocks: [] });
+  assert.equal(classifyGeneratorResult(result).reason, GENERATOR_RESULT_REASONS.BLOCKS_FIELD_INVALID);
+});
+
+test("data gap memo generator: a genuinely empty blocks array from a schema-conformant response classifies as generator_result_blocks_empty", async () => {
+  const generator = createProductionDataGapMemoDraftGenerator({
+    async createMessage() {
+      return { content: [{ type: "text", text: JSON.stringify({ blocks: [] }) }] };
+    },
+  });
+  const result = await generator({ contentType: "data_gap_memo", requestedAudience: "internal", gaps, claims: [generatorClaim()] });
+  assert.deepEqual(result, { blocks: [] });
+  assert.equal(classifyGeneratorResult(result).reason, GENERATOR_RESULT_REASONS.BLOCKS_EMPTY);
+  assert.equal(validateGeneratorResult(result), false);
+});
+
+test("data gap memo generator: the resulting draft remains human-review gated after a valid generated result", () => {
+  const packet = __generatedContentReviewPacketServiceTestables.isGeneratedDraftReviewPacketDto;
+  assert.equal(typeof packet, "function");
+  const ok = validateGeneratedContentDraft({
+    requestedAudience: "internal",
+    contentType: "data_gap_memo",
+    authoritativeReadiness: gaps,
+    generationClaims: [generationClaim()],
+    blocks: [{
+      ordinal: 1,
+      text: "A current data gap remains for coverage support.",
+      citations: [{ claimId: CLAIM, evidenceItemId: EVIDENCE }],
+    }],
+  });
+  assert.equal(ok.ok, true);
+  assert.equal(sprint2IntakeApiRouter.stack.some((layer) => String(layer.route?.path || "").includes("data-gap-memo/final")), false);
 });
 
 test("data gap memo route is mounted and rejects browser-supplied gap/citation authority by schema", () => {
