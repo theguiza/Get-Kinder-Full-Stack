@@ -425,6 +425,30 @@ test("P3-06 authoritative evaluator accepts authentic P3-05 state and returns dr
   assert.deepEqual(state.writes, []);
 });
 
+test("P3-06 data_gap_memo export-review packet preserves citations and does not become system_error", async () => {
+  const state = makeState();
+  state.run.content_type = "data_gap_memo";
+  state.draft.content_type = "data_gap_memo";
+  state.siblingDrafts[0].content_type = "data_gap_memo";
+  const result = await getGeneratedDraftExportReviewPacket(input(), {
+    env: enabledEnv,
+    runInTransaction: async (callback) => callback(makeTx(state)),
+    evaluatePacket: evaluateGeneratedDraftExportReviewPacketInTransaction,
+    evaluator: evaluator(state),
+    loadManifestIdentity: async () => ({ exportManifestId: null }),
+    loadManifestHistory: async () => ({ exportManifestHistory: [] }),
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.contentType, "data_gap_memo");
+  assert.equal(result.data.exportEligible, false);
+  assert.equal(result.data.blocks[0].text, "Visible export-review packet text.");
+  assert.equal(result.data.blocks[0].citations[0].claimId, CLAIM);
+  assert.equal(result.data.blocks[0].citations[0].sourceId, SOURCE);
+  assert.equal(JSON.stringify(result.data).includes("raw"), false);
+  assert.deepEqual(state.writes, []);
+});
+
 test("P3-06 current eligibility deterioration remains visible but export-ineligible", async () => {
   const state = makeState({ currentUseEligible: false });
   const result = await evaluateGeneratedDraftExportReviewPacketInTransaction(makeTx(state), txInput(), evaluator(state));
@@ -449,6 +473,7 @@ test("P3-06 P3-05 evaluator requires complete queue-plus-audit authority and fai
     (state) => { state.exportReviewQueues = []; },
     (state) => { state.auditRows = []; },
     (state) => { state.auditRows.push({ ...state.auditRows[0], metadata: { ...state.auditRows[0].metadata } }); },
+    (state) => { state.exportReviewQueues[0].queue_type = "generated_content_review"; },
     (state) => { state.exportReviewQueues[0].target_object_id = "00000000-0000-4000-8000-000000000799"; },
     (state) => { state.auditRows[0].metadata.requested_export_audience = "public"; },
     (state) => { state.auditRows[0].metadata.failed_gates = [...state.auditRows[0].metadata.failed_gates].reverse(); },

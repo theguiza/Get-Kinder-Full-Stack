@@ -28805,3 +28805,71 @@ no PostgreSQL/cloud/production access):
 production mutation, database mutation, migration, Board Reporting change,
 frontend idempotency change, feature-flag/configuration change,
 real-client-data access, or `00_KAI_CURRENT_STATE.md` update performed.
+
+## Phase 14 Single-Draft Export-Review Packet Content-Type Repair (2026-09-14)
+
+**Live observation accepted as USER_CONFIRMED:** Data Gap Memo generation
+successfully progressed into the generated-draft export-review workflow, but
+`GET /api/kai/sprint2/intake/admin/organizations/:organizationId/generated-content-drafts/:draftId/export-review-queue/:queueItemId/packet`
+returned HTTP 500 with `error.code = system_error`, `blockers = []`, and
+`warnings = []`.
+
+**Inspection finding:** the existing route is the mounted P3-07 single-draft
+GK export-review packet GET. The route validates canonical UUID path
+identifiers, resolves the Sprint 2 actor context through the existing
+middleware, and delegates to `getGeneratedDraftExportReviewPacket`; it does
+not read SQL, mutate state, or decide export/release. The service enforces
+`KAI_SPRINT2_ENABLED`, `KAI_GENERATION_ENABLED`, and
+`KAI_PUBLIC_EXPORT_ENABLED`, mapped-human actor, active `gk_admin`
+authorization, then runs `evaluateGeneratedDraftExportReviewPacketInTransaction`
+plus exact export-manifest identity/history reads inside one repeatable-read
+read-only transaction. The repository evaluator loads the exact
+tenant-scoped generated draft, resolved `generated_content_review` packet,
+exact `export_review` queue row, matching export-review audit metadata, block
+citations/traceability, current-use eligibility, and the existing
+VAL-EXP-001 validator result. The service then applies its exact DTO
+allowlist before the route response mapper.
+
+**Root cause and repair:** the repository and generated-content service now
+admit `data_gap_memo` as a generated-content content type, and the Data Gap
+Memo flow can produce a legitimate generated draft with citations and an
+export-review queue. The export-review packet service DTO validator still
+hard-coded `contentType === "evidence_summary"`. That turned an otherwise
+valid `data_gap_memo` packet DTO into a service-level `system_error`, which
+the route correctly mapped to HTTP 500. The repair keeps the strict DTO
+allowlist but changes only that content-type predicate to the existing
+generated-content vocabulary:
+`evidence_summary`, `impact_narrative`, `readiness_assessment`, and
+`data_gap_memo`. No route SQL, queue binding, authorization, validator,
+manifest, migration, finalization, renderer, or frontend workflow was
+changed.
+
+**Test evidence** (`DATABASE_URL` set to the non-listening loopback sentinel
+for every Node command; no database/cloud/production access):
+- Focused repaired suite:
+  `node --test __tests__/kai-sprint2-p3-06-export-review-packet-boundary.spec.js`
+  -> 18/18 PASS. New coverage proves an authentic `data_gap_memo`
+  export-review packet returns successfully, remains export-ineligible under
+  the existing VAL-EXP-001 blockers, preserves block text and citation
+  metadata, contains no unrestricted raw data marker, and performs no writes.
+  The malformed queue-state matrix now also covers a wrong
+  `queue_type = generated_content_review` row failing closed.
+- Broader adjacent generated-content/export-review route run:
+  `node --test __tests__/kai-sprint2-data-gap-memo-draft-generation-boundary.spec.js __tests__/kai-sprint2-p3-01-generated-content-drafts-boundary.spec.js __tests__/kai-sprint2-p3-02-generated-draft-review-packet-boundary.spec.js __tests__/kai-sprint2-p3-04-generated-content-review-completion-boundary.spec.js __tests__/kai-sprint2-p3-05-export-review-request-boundary.spec.js __tests__/kai-sprint2-p3-07-export-review-packet-route.spec.js __tests__/kai-sprint2-generated-draft-export-review-read-recovery-boundary.spec.js`
+  -> 92/93 PASS, 1 FAIL from sandbox-only `listen EPERM` on the P3-07 local
+  HTTP listener. The failed subtest was rerun separately with approved
+  loopback-listener permissions:
+  `node --test __tests__/kai-sprint2-p3-07-export-review-packet-route.spec.js`
+  -> 8/8 PASS.
+- P3-06 integration wrapper:
+  `node --test __tests__/kai-sprint2-p3-06-export-review-packet.integration.spec.js`
+  -> 2/2 PASS, 1 SKIPPED DB-owned integration case under the sentinel.
+- Shared export-review lifecycle regression:
+  `node --test __tests__/kai-sprint2-p3-05-export-review-request-boundary.spec.js __tests__/kai-sprint2-p3-06-export-review-packet-boundary.spec.js __tests__/kai-sprint2-p3-09-export-review-start.integration.spec.js __tests__/kai-sprint2-p3-13-export-review-completion.integration.spec.js __tests__/kai-sprint2-p3-15-gk-export-review-complete-control.spec.js`
+  -> 62/62 PASS, 2 SKIPPED DB-owned integration cases under the sentinel.
+
+**Status:** PHASE14_SINGLE_DRAFT_EXPORT_REVIEW_PACKET_CONTENT_TYPE_REPAIR_CLOSED
+locally. No push, deployment, production mutation, database mutation,
+migration, schema change, feature-flag/configuration change, secret handling,
+real-client-data access, finalization/approval bypass, renderer release
+decision, or `00_KAI_CURRENT_STATE.md` update performed.

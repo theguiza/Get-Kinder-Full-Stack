@@ -15,6 +15,12 @@ const START_EXPORT_REVIEW_OPERATION = "start_generated_draft_export_review";
 const COMPLETE_EXPORT_REVIEW_OPERATION = "complete_generated_draft_export_review";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const AUDIENCES = new Set(["internal", "funder", "public"]);
+const ALLOWED_GENERATED_CONTENT_TYPES = new Set([
+  "evidence_summary",
+  "impact_narrative",
+  "readiness_assessment",
+  "data_gap_memo",
+]);
 
 function stageBlocker(validatorKey, blockingReason) {
   return [{ validator_key: validatorKey, severity: "blocker", blocking_reason: blockingReason }];
@@ -315,7 +321,7 @@ function isGeneratedDraftExportReviewPacketDto(data) {
   if (!hasExactKeys(data, EXPORT_REVIEW_PACKET_KEYS)) return false;
   if (!UUID_PATTERN.test(data.generationRunId)) return false;
   if (!UUID_PATTERN.test(data.generatedContentDraftId)) return false;
-  if (data.contentType !== "evidence_summary") return false;
+  if (!ALLOWED_GENERATED_CONTENT_TYPES.has(data.contentType)) return false;
   if (data.draftStatus !== "draft") return false;
   if (!AUDIENCES.has(data.requestedExportAudience)) return false;
   if (data.generatedContentReviewQueueStatus !== "resolved") return false;
