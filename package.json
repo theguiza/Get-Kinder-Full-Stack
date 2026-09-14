@@ -95,6 +95,7 @@
     "test:kai-sprint2-br-04-board-reporting-candidate-human-authority-decision-ledger": "node --test __tests__/kai-sprint2-br-04-board-reporting-candidate-human-authority-decision-ledger-boundary.spec.js __tests__/kai-sprint2-br-04-board-reporting-candidate-human-final-release-authority.spec.js",
     "verify:kai-sprint2-board-reporting-candidate-export-manifest-foundation": "node scripts/kai-sprint2-board-reporting-candidate-export-manifest-foundation-local-postgres.js",
     "test:kai-sprint2-board-reporting-candidate-export-manifest-real-db": "node --test __tests__/kai-sprint2-board-reporting-candidate-export-manifest-real-db.integration.spec.js",
+    "verify:kai-board-reporting-production-synthetic-canary": "node scripts/kai-board-reporting-production-synthetic-canary.js",
     "test:kai-sprint2-p14-08-a-grant-response-packet-export-manifest-foundation": "node --test __tests__/kai-sprint2-p14-08-a-grant-response-packet-export-manifest-foundation-boundary.spec.js __tests__/kai-sprint2-p14-08-a-grant-response-packet-export-manifest-foundation.integration.spec.js",
     "test:kai-sprint2-export-manifest-render-model-composition": "node --test __tests__/kai-sprint2-export-manifest-render-model-composition-boundary.spec.js",
     "test:kai-sprint2-export-manifest-markdown-representation": "node --test __tests__/kai-sprint2-export-manifest-markdown-representation-boundary.spec.js",
