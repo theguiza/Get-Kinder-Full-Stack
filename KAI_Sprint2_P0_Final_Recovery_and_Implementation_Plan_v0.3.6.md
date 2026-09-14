@@ -28873,3 +28873,58 @@ locally. No push, deployment, production mutation, database mutation,
 migration, schema change, feature-flag/configuration change, secret handling,
 real-client-data access, finalization/approval bypass, renderer release
 decision, or `00_KAI_CURRENT_STATE.md` update performed.
+
+## Board Reporting Vertical-Slice Packet Boundary Proof (2026-09-14)
+
+**Owner target:** prove the current Board Reporting path end to end using the
+accepted repository state, without reopening the closed Data Gap Memo packet
+defect or performing another broad Phase 14 audit.
+
+**Repository identifiers verified:** there is no canonical generated-content
+type named `board_update`, `board_report`, or `board_summary`. The current
+Board Reporting package is the `board-reporting` packet/candidate/final
+Markdown path. Its packet audience is `internal` and its supported member
+generated-content types are exactly `evidence_summary` and
+`impact_narrative` (`BOARD_REPORTING_PACKET_CONTENT_TYPES`). The central
+single-draft generated-content/export-review vocabulary remains
+`evidence_summary`, `impact_narrative`, `readiness_assessment`, and
+`data_gap_memo`.
+
+**Finding and smallest repair:** the board path itself was present through
+packet membership, immutable candidate creation, Board review lifecycle,
+BR-04 human final-release authority, Board-native final eligibility
+(`BR-FINAL-ELIGIBILITY-001`), export manifest, manifest-bound FINAL Markdown,
+citation appendix content in Markdown, and metadata-only audit points. The
+first real gap found was regression coverage, not production behavior: after
+the single-draft export-review packet allowlist repair, the suite proved
+`data_gap_memo` through the exact P3-06 DTO boundary but did not prove
+`impact_narrative`, the non-default Board Reporting member content type, over
+that same repaired boundary. Added one focused P3-06 regression using an
+authentic `impact_narrative` generated draft/export-review packet fixture.
+No service, route, repository, schema, renderer, authority, eligibility, or
+frontend implementation changed.
+
+**Test evidence** (`DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel` for
+all Node commands; no database/cloud/production access):
+- Focused repaired boundary suite:
+  `node --test __tests__/kai-sprint2-p3-06-export-review-packet-boundary.spec.js`
+  -> 19/19 PASS. New coverage proves `impact_narrative` traverses the same
+  repaired export-review packet service DTO boundary, preserves internal
+  audience, block text, citations/source version traceability, VAL-EXP-001
+  blocker state, manifest-history fields, and performs no writes.
+- Board Reporting boundary run:
+  `node --test __tests__/kai-sprint2-p3-06-export-review-packet-boundary.spec.js __tests__/kai-board-reporting-packet-v1-boundary.spec.js __tests__/kai-board-reporting-final-eligibility-boundary.spec.js __tests__/kai-board-reporting-candidate-boundary.spec.js __tests__/kai-board-reporting-candidate-workflow-state-boundary.spec.js __tests__/kai-board-reporting-candidate-review-request-boundary.spec.js __tests__/kai-board-reporting-candidate-review-start-boundary.spec.js __tests__/kai-board-reporting-candidate-review-complete-boundary.spec.js __tests__/kai-sprint2-br-04-board-reporting-candidate-human-authority-decision-ledger-boundary.spec.js __tests__/kai-sprint2-board-reporting-candidate-export-manifest-service-route.spec.js __tests__/kai-sprint2-board-reporting-candidate-export-manifest-final-markdown-boundary.spec.js __tests__/kai-sprint2-br-board-reporting-browser-api-composition.spec.js`
+  -> 142/153 PASS with 11 sandbox-only `listen EPERM` failures in route
+  listener subtests; all non-listener boundary tests, including the new P3-06
+  Board member content-type regression, passed.
+- Approved loopback-listener rerun for the route suites that hit sandbox
+  `EPERM`:
+  `node --test __tests__/kai-sprint2-board-reporting-candidate-export-manifest-service-route.spec.js __tests__/kai-sprint2-board-reporting-candidate-export-manifest-final-markdown-boundary.spec.js __tests__/kai-sprint2-br-board-reporting-browser-api-composition.spec.js`
+  -> 39/39 PASS.
+
+**Status:** BOARD_REPORTING_VERTICAL_SLICE_PACKET_BOUNDARY_PROOF_CLOSED
+locally after a test-only regression. No push, deployment, production
+mutation, database mutation, migration, schema change, feature-flag/
+configuration change, secret handling, real-client-data access,
+finalization/approval bypass, renderer architecture change, SQL-in-route
+change, or `00_KAI_CURRENT_STATE.md` update performed.

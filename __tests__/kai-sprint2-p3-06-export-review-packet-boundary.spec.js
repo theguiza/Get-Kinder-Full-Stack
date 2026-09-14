@@ -154,6 +154,12 @@ function makeState({ currentUseEligible = true } = {}) {
   };
 }
 
+function setStateContentType(state, contentType) {
+  state.run.content_type = contentType;
+  state.draft.content_type = contentType;
+  state.siblingDrafts[0].content_type = contentType;
+}
+
 function evaluator(state) {
   return async (tx, evalInput) => ({
     ok: true,
@@ -427,9 +433,7 @@ test("P3-06 authoritative evaluator accepts authentic P3-05 state and returns dr
 
 test("P3-06 data_gap_memo export-review packet preserves citations and does not become system_error", async () => {
   const state = makeState();
-  state.run.content_type = "data_gap_memo";
-  state.draft.content_type = "data_gap_memo";
-  state.siblingDrafts[0].content_type = "data_gap_memo";
+  setStateContentType(state, "data_gap_memo");
   const result = await getGeneratedDraftExportReviewPacket(input(), {
     env: enabledEnv,
     runInTransaction: async (callback) => callback(makeTx(state)),
@@ -446,6 +450,39 @@ test("P3-06 data_gap_memo export-review packet preserves citations and does not 
   assert.equal(result.data.blocks[0].citations[0].claimId, CLAIM);
   assert.equal(result.data.blocks[0].citations[0].sourceId, SOURCE);
   assert.equal(JSON.stringify(result.data).includes("raw"), false);
+  assert.deepEqual(state.writes, []);
+});
+
+test("P3-06 impact_narrative Board Reporting member type traverses the repaired export-review packet boundary", async () => {
+  const state = makeState();
+  setStateContentType(state, "impact_narrative");
+  const result = await getGeneratedDraftExportReviewPacket(input(), {
+    env: enabledEnv,
+    runInTransaction: async (callback) => callback(makeTx(state)),
+    evaluatePacket: evaluateGeneratedDraftExportReviewPacketInTransaction,
+    evaluator: evaluator(state),
+    loadManifestIdentity: async () => ({ exportManifestId: null }),
+    loadManifestHistory: async () => ({ exportManifestHistory: [] }),
+  });
+
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.data.contentType, "impact_narrative");
+  assert.equal(result.data.requestedExportAudience, "internal");
+  assert.equal(result.data.currentUseEligible, true);
+  assert.equal(result.data.exportEligible, false);
+  assert.equal(result.data.validatorResult.validator_key, "VAL-EXP-001");
+  assert.equal(result.data.validatorResult.severity, "blocker");
+  assert.deepEqual(result.data.validatorResult.evidence.failed_gates, [
+    "generated_content_still_draft",
+    "affirmative_human_export_authority_absent",
+    "final_export_gate_absent",
+  ]);
+  assert.equal(result.data.blocks[0].text, "Visible export-review packet text.");
+  assert.equal(result.data.blocks[0].citations[0].claimId, CLAIM);
+  assert.equal(result.data.blocks[0].citations[0].sourceId, SOURCE);
+  assert.equal(result.data.blocks[0].citations[0].sourceVersionId, SOURCE_VERSION);
+  assert.equal(result.data.exportManifestId, null);
+  assert.deepEqual(result.data.exportManifestHistory, []);
   assert.deepEqual(state.writes, []);
 });
 
