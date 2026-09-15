@@ -134,18 +134,26 @@ export async function createExportCandidateRequest(path) {
   return { statusCode: response.status, body: await readJson(response) };
 }
 
-// The authority-grant request body is fixed to exactly
-// { requested_audience, decision_action: "grant" } - this is the one place
-// this page ever asks a human to explicitly grant P3-17 final-release
-// authority; it is never inferred or granted automatically.
-export async function grantFinalReleaseAuthorityRequest(path, requestedAudience) {
+// The authority-decision request body is fixed to exactly
+// { requested_audience, decision_action } - this is the one place this page
+// ever asks a human to explicitly grant/revoke P3-17 final-release authority;
+// it is never inferred or changed automatically.
+async function recordFinalReleaseAuthorityRequest(path, requestedAudience, decisionAction) {
   const response = await fetch(path, {
     method: "POST",
     credentials: "same-origin",
     headers: { Accept: "application/json", "Content-Type": "application/json" },
-    body: JSON.stringify({ requested_audience: requestedAudience, decision_action: "grant" }),
+    body: JSON.stringify({ requested_audience: requestedAudience, decision_action: decisionAction }),
   });
   return { statusCode: response.status, body: await readJson(response) };
+}
+
+export async function grantFinalReleaseAuthorityRequest(path, requestedAudience) {
+  return recordFinalReleaseAuthorityRequest(path, requestedAudience, "grant");
+}
+
+export async function revokeFinalReleaseAuthorityRequest(path, requestedAudience) {
+  return recordFinalReleaseAuthorityRequest(path, requestedAudience, "revoke");
 }
 
 // The manifest-finalization request body is fixed to exactly
@@ -283,13 +291,17 @@ export function decideCompleteResult(result) {
   return { kind: "error", message: errorText(result) };
 }
 
-// Governed export finalization only ever becomes reachable once the
-// existing packet already reports exportEligible - this is a UI-only
-// display gate, never the P3-18/VAL-EXP-001 authority itself, which is
-// re-evaluated inside the P3-19 manifest-creation transaction regardless of
-// what this flag says.
+// Candidate preparation becomes reachable only after both review lanes are
+// resolved and the draft remains current-use eligible. It deliberately does
+// not require exportEligible: that final-export flag can remain false until
+// the explicit human authority step has occurred, and the P3-19 manifest
+// transaction re-evaluates VAL-EXP-001 regardless of this UI display gate.
 export function canPrepareExportCandidate(model) {
-  return !!model && model.exportEligible === true;
+  return !!model
+    && model.generatedContentReviewStatus === "resolved"
+    && model.exportReviewQueueStatus === "resolved"
+    && model.exportReviewStatus === "resolved"
+    && model.currentUseEligible === true;
 }
 
 // P3-16 candidate preparation: success returns the exact exportCandidateId

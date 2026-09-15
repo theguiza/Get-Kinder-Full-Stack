@@ -152,7 +152,7 @@ test("P3-12 other safe start failures render an error message without touching p
 test("P3-12 frontend source still contains no approve/reject/mark-ready controls after adding Start Review", () => {
   assert.doesNotMatch(jsxSource, /\b(approve|reject|mark-ready|markReady)\b/i);
   assert.doesNotMatch(logicSource, /\b(approve|reject|mark-ready|markReady)\b/i);
-  assert.equal((jsxSource.match(/<button/g) || []).length, 5, "Start Review, Complete Review, Prepare Export Candidate, Grant Final Release Authority, and Finalize Export are the only five button controls");
+  assert.equal((jsxSource.match(/<button/g) || []).length, 6, "Start Review, Complete Review, Prepare Export Candidate, Grant Final Release Authority, Revoke Final Release Authority, and Finalize Export are the only six button controls");
 });
 
 test("P3-12 P3-08 citation rendering ('Why can KAI say this?') is unchanged", () => {

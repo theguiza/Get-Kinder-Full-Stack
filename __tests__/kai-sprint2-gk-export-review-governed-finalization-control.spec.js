@@ -14,6 +14,7 @@ import {
   exportManifestsPath,
   finalReleaseAuthorityPath,
   grantFinalReleaseAuthorityRequest,
+  revokeFinalReleaseAuthorityRequest,
 } from "../frontend/gkExportReviewDetailLogic.js";
 
 const organizationId = "00000000-0000-4000-8000-000000000001";
@@ -84,6 +85,24 @@ test("grantFinalReleaseAuthorityRequest sends exactly { requested_audience, deci
   }
 });
 
+test("revokeFinalReleaseAuthorityRequest sends exactly { requested_audience, decision_action: \"revoke\" }", async () => {
+  const calls = [];
+  const originalFetch = global.fetch;
+  global.fetch = async (path, init) => {
+    calls.push({ path, init });
+    return { status: 201, json: async () => ({ ok: true, data: { effective: false }, warnings: [] }) };
+  };
+  try {
+    const path = finalReleaseAuthorityPath(organizationId, exportCandidateId);
+    await revokeFinalReleaseAuthorityRequest(path, "funder");
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].init.method, "POST");
+    assert.deepEqual(JSON.parse(calls[0].init.body), { requested_audience: "funder", decision_action: "revoke" });
+  } finally {
+    global.fetch = originalFetch;
+  }
+});
+
 test("createExportManifestRequest sends exactly { export_review_queue_item_id } and no finalGate/authority field", async () => {
   const calls = [];
   const originalFetch = global.fetch;
@@ -102,9 +121,28 @@ test("createExportManifestRequest sends exactly { export_review_queue_item_id } 
   }
 });
 
-test("canPrepareExportCandidate is gated on the existing exportEligible packet flag only", () => {
-  assert.equal(canPrepareExportCandidate({ exportEligible: true }), true);
-  assert.equal(canPrepareExportCandidate({ exportEligible: false }), false);
+test("canPrepareExportCandidate is gated on resolved/resolved current-use eligibility, not final export eligibility", () => {
+  assert.equal(canPrepareExportCandidate({
+    generatedContentReviewStatus: "resolved",
+    exportReviewQueueStatus: "resolved",
+    exportReviewStatus: "resolved",
+    currentUseEligible: true,
+    exportEligible: false,
+  }), true);
+  assert.equal(canPrepareExportCandidate({
+    generatedContentReviewStatus: "resolved",
+    exportReviewQueueStatus: "resolved",
+    exportReviewStatus: "resolved",
+    currentUseEligible: false,
+    exportEligible: true,
+  }), false);
+  assert.equal(canPrepareExportCandidate({
+    generatedContentReviewStatus: "resolved",
+    exportReviewQueueStatus: "in_progress",
+    exportReviewStatus: "needs_gk_review",
+    currentUseEligible: true,
+    exportEligible: true,
+  }), false);
   assert.equal(canPrepareExportCandidate(null), false);
   assert.equal(canPrepareExportCandidate(undefined), false);
 });
@@ -160,4 +198,11 @@ test("every exportManifestHistory entry renders its own exact Download Markdown 
 test("durable read recovery: Prepare/Grant controls do not reappear once an exact exportManifestId is already known (recovered or same-session)", () => {
   assert.match(jsxSource, /showPrepareCandidateControl\s*=\s*canPrepareExportCandidate\(model\)\s*&&\s*!exportCandidateId\s*&&\s*!exportManifestId/);
   assert.match(jsxSource, /showGrantAuthorityControl\s*=\s*!!exportCandidateId\s*&&\s*!authorityEffective\s*&&\s*!exportManifestId/);
+  assert.match(jsxSource, /showRevokeAuthorityControl\s*=\s*!!exportCandidateId\s*&&\s*authorityEffective\s*&&\s*!exportManifestId/);
+});
+
+test("effective human authority exposes an explicit Revoke Final Release Authority control before manifest creation", () => {
+  assert.match(jsxSource, /Revoke Final Release Authority/);
+  assert.match(jsxSource, /className="gk-export-review-revoke-authority-button"/);
+  assert.match(jsxSource, /onClick=\{handleRevokeFinalReleaseAuthority\}/);
 });

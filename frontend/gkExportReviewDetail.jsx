@@ -24,6 +24,7 @@ import {
   getJson,
   grantFinalReleaseAuthorityRequest,
   packetPath,
+  revokeFinalReleaseAuthorityRequest,
   startPath,
   startReviewRequest,
 } from "./gkExportReviewDetailLogic.js";
@@ -38,7 +39,7 @@ import {
  * against the accepted P3-14 route, each sent with exactly
  * { expected_updated_at } and no other client-supplied authority data, plus
  * the governed export-finalization chain: P3-16 candidate preparation, the
- * explicit human P3-17 final-release-authority grant, and the P3-19
+ * explicit human P3-17 final-release-authority grant/revoke controls, and the P3-19
  * manifest finalization, each its own existing, separately-authorized
  * backend operation invoked one at a time by explicit GK-admin action. It
  * holds no other queue-transition or final-gate control. gk_admin
@@ -306,6 +307,28 @@ export default function GkExportReviewDetail({
     }
   }, [authorityPending, exportCandidateId, outcome, organizationId]);
 
+  const handleRevokeFinalReleaseAuthority = useCallback(async () => {
+    if (authorityPending || !exportCandidateId || outcome?.kind !== "success" || !outcome.model) return;
+    setAuthorityPending(true);
+    setAuthorityErrorMessage(null);
+    try {
+      const result = await revokeFinalReleaseAuthorityRequest(
+        finalReleaseAuthorityPath(organizationId, exportCandidateId),
+        outcome.model.requestedExportAudience,
+      );
+      const decided = decideGrantFinalReleaseAuthorityResult(result);
+      if (decided.kind === "success") {
+        if (mountedRef.current) setAuthorityEffective(decided.effective);
+      } else {
+        setAuthorityErrorMessage(decided.message);
+      }
+    } catch {
+      if (mountedRef.current) setAuthorityErrorMessage("Request failed (network error).");
+    } finally {
+      if (mountedRef.current) setAuthorityPending(false);
+    }
+  }, [authorityPending, exportCandidateId, outcome, organizationId]);
+
   const handleFinalizeExport = useCallback(async () => {
     if (manifestPending || !exportCandidateId || !authorityEffective) return;
     setManifestPending(true);
@@ -338,6 +361,7 @@ export default function GkExportReviewDetail({
   const showCompleteControl = canCompleteReview(model);
   const showPrepareCandidateControl = canPrepareExportCandidate(model) && !exportCandidateId && !exportManifestId;
   const showGrantAuthorityControl = !!exportCandidateId && !authorityEffective && !exportManifestId;
+  const showRevokeAuthorityControl = !!exportCandidateId && authorityEffective && !exportManifestId;
   const showFinalizeExportControl = !!exportCandidateId && authorityEffective && !exportManifestId;
 
   return (
@@ -398,6 +422,17 @@ export default function GkExportReviewDetail({
               </button>
             ) : null}
             {authorityErrorMessage ? <p className="gk-export-review-note">{authorityErrorMessage}</p> : null}
+
+            {showRevokeAuthorityControl ? (
+              <button
+                type="button"
+                className="gk-export-review-revoke-authority-button"
+                onClick={handleRevokeFinalReleaseAuthority}
+                disabled={authorityPending}
+              >
+                Revoke Final Release Authority
+              </button>
+            ) : null}
 
             {showFinalizeExportControl ? (
               <button

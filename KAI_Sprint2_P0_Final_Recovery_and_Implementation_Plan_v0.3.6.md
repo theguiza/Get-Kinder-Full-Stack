@@ -28928,3 +28928,86 @@ mutation, database mutation, migration, schema change, feature-flag/
 configuration change, secret handling, real-client-data access,
 finalization/approval bypass, renderer architecture change, SQL-in-route
 change, or `00_KAI_CURRENT_STATE.md` update performed.
+
+## Phase-14 Generic Generated-Content Finalization UI Revoke Control Repair (2026-09-15)
+
+**Owner authorization (bounded, local-only):** continue the current Phase-14
+generic generated-content finalization UI package for the current synthetic
+Data Gap Memo (`generatedContentDraftId:
+1cd934dc-9731-4ce8-919b-2ccc58bf9bdd`,
+`generationRunId: 347f4c90-4d4f-42c1-ba7e-652aa99176f8`,
+`exportReviewQueueItemId: a59fdc69-f2b7-405d-b03d-ce721b53424d`), closing
+only whether an authenticated authorized human can continue from resolved
+export review through generic candidate/authority/manifest/output controls.
+The supplied backend finalization chain and current memo states remain
+USER_CONFIRMED starting context, not re-proved here.
+
+**Starting repository evidence:** branch `main`, HEAD
+`369a40d2903c46273d8041b338200fd4908f2cdb`, working tree clean. Root
+`AGENTS.md` was read. Relevant living ExecPlan generic single-draft
+finalization entries were read for the existing GK export-review detail page,
+candidate/final-release-authority/manifest controls, and Markdown/CSV/PDF/DOCX
+download links.
+
+**Inspection result (TOOL_VERIFIED):** the exact generic page is
+`/gk-admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/export-review-queue/:exportReviewQueueItemId`,
+rendered by `views/gk-export-review-detail.ejs` and
+`frontend/gkExportReviewDetail.jsx`, with paths and request helpers in
+`frontend/gkExportReviewDetailLogic.js`. The page already loaded the P3-07
+packet, displayed server-derived generated-content review/export-review/
+current-use/export eligibility and VAL-EXP-001 fields, exposed
+`Prepare Export Candidate`, exposed `Grant Final Release Authority`, exposed
+`Finalize Export`, and exposed exact manifest-bound `Download Markdown`,
+`Download CSV Evidence Appendix`, `Download PDF`, and `Download DOCX` links for
+same-session and historical manifests. The genuine UI gaps were that the
+generic single-draft page had no `Revoke Final Release Authority` control, even
+though the existing backend route and validator accept
+`decision_action = grant|revoke`, and that `Prepare Export Candidate` was gated
+on `exportEligible === true`, which hides the continuation for the current
+USER_CONFIRMED memo state (`currentUseEligible: true`, `exportEligible: false`)
+even though final export eligibility is only authoritative at manifest creation.
+
+**Smallest repair:** `frontend/gkExportReviewDetailLogic.js` now funnels the
+authority decision body through one private helper that sends exactly
+`{ requested_audience, decision_action }`, preserving the existing grant helper
+and adding `revokeFinalReleaseAuthorityRequest(...)` with fixed
+`decision_action: "revoke"`. `frontend/gkExportReviewDetail.jsx` now renders
+`Revoke Final Release Authority` only when an exact candidate id exists,
+server-returned `authorityEffective` is true, and no export manifest id is
+known yet. `Prepare Export Candidate` is now gated by server-projected
+resolved generated-content review, resolved export-review queue/status, and
+`currentUseEligible === true`, deliberately not by `exportEligible`. Revocation
+calls the same existing
+`POST /admin/organizations/:organizationId/export-candidates/:exportCandidateId/final-release-authority`
+route and updates local authority state only from the server-returned
+`effective` value. `Finalize Export` remains gated by the same server-derived
+effective-authority boolean. No frontend code supplies or calculates
+`finalGate`, affirmative human authority, authority effectiveness, export
+eligibility, candidate currentness, validator results, or manifest identity.
+
+**Files changed:** `frontend/gkExportReviewDetailLogic.js`,
+`frontend/gkExportReviewDetail.jsx`, `public/js/bundles/entry.js`,
+`__tests__/kai-sprint2-gk-export-review-governed-finalization-control.spec.js`,
+`__tests__/kai-sprint2-p3-12-gk-export-review-start-control.spec.js`,
+`__tests__/kai-sprint2-p3-15-gk-export-review-complete-control.spec.js`, and
+this ExecPlan entry.
+
+**Verification (TOOL_VERIFIED):** `DATABASE_URL` was set to the non-listening
+loopback sentinel for every Node/npm command; no database was queried. Focused
+generic frontend/read-path slice:
+`node --test __tests__/kai-sprint2-gk-export-review-governed-finalization-control.spec.js __tests__/kai-sprint2-p3-12-gk-export-review-start-control.spec.js __tests__/kai-sprint2-p3-15-gk-export-review-complete-control.spec.js __tests__/kai-sprint2-export-manifest-pdf-frontend-download-links.spec.js __tests__/kai-sprint2-export-manifest-docx-frontend-download-links.spec.js __tests__/kai-sprint2-p3-08-gk-export-review-detail.spec.js __tests__/kai-sprint2-p3-06-export-review-packet-boundary.spec.js`
+-> 95/95 PASS. Frontend build `npm run build` -> PASS (`vite build`, 56
+modules transformed). Broader generic route/finalization/output delivery slice
+first hit sandbox-only `listen EPERM 127.0.0.1` in listener subtests, then
+passed with approved loopback-listener execution:
+`node --test __tests__/kai-sprint2-governed-export-finalization-route.spec.js __tests__/kai-sprint2-authorized-markdown-export-delivery-route.spec.js __tests__/kai-sprint2-authorized-csv-export-delivery-route.spec.js __tests__/kai-sprint2-authorized-pdf-export-delivery-route.spec.js __tests__/kai-sprint2-authorized-docx-export-delivery-route.spec.js __tests__/kai-sprint2-p3-export-operational-composition-route.spec.js __tests__/kai-sprint2-api-contract.spec.js __tests__/kai-sprint2-pass2-route-runtime.spec.js`
+-> 104/104 PASS.
+
+**Final diff review:** confined to the generic GK export-review detail
+frontend, its rebuilt Vite bundle, directly coupled tests, and this ExecPlan.
+No backend service/route/model/validator, schema/migration, renderer,
+authority model, manifest model, citation model, VAL-GEN-005, VAL-EXP-001,
+Board Reporting, Grant Response Packet, feature flag, production config, or
+database/cloud path changed. Current production readiness of the supplied
+synthetic memo remains NOT_CONFIRMED until the owner performs the authenticated
+browser test against the target environment.

@@ -141,7 +141,7 @@ test("P3-15 frontend source still contains no approve/reject/publish or client-d
   const forbidden = /\b(approve|reject|mark-ready|markReady|affirmativeHumanExportAuthority|clientReviewed|client-reviewed|funder-ready|funderReady|public-ready|publicReady)\b/i;
   assert.doesNotMatch(jsxSource, forbidden);
   assert.doesNotMatch(logicSource, forbidden);
-  assert.equal((jsxSource.match(/<button/g) || []).length, 5);
+  assert.equal((jsxSource.match(/<button/g) || []).length, 6);
 });
 
 test("P3-15 P3-08 citation rendering ('Why can KAI say this?') is unchanged", () => {
