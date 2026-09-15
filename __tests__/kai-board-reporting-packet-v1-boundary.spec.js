@@ -482,6 +482,34 @@ test("Board Reporting render model fails closed for malformed packet state", () 
   );
 });
 
+test("Board Reporting service fails closed when a Board-typed repository packet is malformed", async () => {
+  const result = await getBoardReportingPacket({
+    organizationId: ORG,
+    engagementId: ENGAGEMENT,
+    actorContext: reviewerActor,
+  }, {
+    env: enabledEnv,
+    generatedContentRepository: {
+      async getBoardReportingPacket() {
+        return {
+          ok: true,
+          data: {
+            organizationId: ORG,
+            engagementId: ENGAGEMENT,
+            packetAudience: "internal",
+            drafts: [membershipMember({ contentType: "evidence_summary", blocks: [] })],
+          },
+          error: null,
+        };
+      },
+    },
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "system_error");
+  assert.equal(result.data, null);
+});
+
 function citationFixture(overrides = {}) {
   return {
     generatedContentCitationId: EVIDENCE_SUMMARY.citations[0].generated_content_citation_id,

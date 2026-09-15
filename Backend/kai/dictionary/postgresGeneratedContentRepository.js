@@ -43,6 +43,7 @@ const IMPACT_NARRATIVE_CONTENT_TYPE = "impact_narrative";
 const READINESS_ASSESSMENT_CONTENT_TYPE = "readiness_assessment";
 const DATA_GAP_MEMO_CONTENT_TYPE = "data_gap_memo";
 const PACKET_MEMBER_CONTENT_TYPES = new Set([CONTENT_TYPE, IMPACT_NARRATIVE_CONTENT_TYPE]);
+const BOARD_REPORTING_PACKET_MEMBER_CONTENT_TYPES = new Set([CONTENT_TYPE, IMPACT_NARRATIVE_CONTENT_TYPE]);
 const ALLOWED_GENERATED_CONTENT_TYPES = new Set([
   CONTENT_TYPE,
   IMPACT_NARRATIVE_CONTENT_TYPE,
@@ -1378,7 +1379,15 @@ async function loadGrantResponsePacketEngagement(tx, { organizationId, engagemen
   return rows[0] || null;
 }
 
-async function loadGrantResponsePacketMemberDraftIds(tx, { organizationId, engagementId, packetAudience = GRANT_RESPONSE_PACKET_AUDIENCE }) {
+async function loadGrantResponsePacketMemberDraftIds(
+  tx,
+  {
+    organizationId,
+    engagementId,
+    packetAudience = GRANT_RESPONSE_PACKET_AUDIENCE,
+    memberContentTypes = PACKET_MEMBER_CONTENT_TYPES,
+  },
+) {
   const { rows } = await tx.query(
     `SELECT d.generated_content_draft_id::text AS generated_content_draft_id
        FROM kai.generated_content_drafts d
@@ -1391,7 +1400,7 @@ async function loadGrantResponsePacketMemberDraftIds(tx, { organizationId, engag
         AND d.draft_status = $4
         AND d.requested_audience = $5
       ORDER BY d.generated_content_draft_id ASC`,
-    [organizationId, engagementId, [...PACKET_MEMBER_CONTENT_TYPES], DRAFT_STATUS, packetAudience],
+    [organizationId, engagementId, [...memberContentTypes], DRAFT_STATUS, packetAudience],
   );
   return rows.map((row) => row.generated_content_draft_id);
 }
@@ -1622,7 +1631,11 @@ export async function evaluateGrantResponsePacketMembershipInTransaction(
   input,
   evaluator = evaluateClaimTraceabilityInTransaction,
   manifestReaders = DEFAULT_GRANT_RESPONSE_PACKET_MANIFEST_READERS,
-  { packetAudience = GRANT_RESPONSE_PACKET_AUDIENCE } = {},
+  {
+    packetAudience = GRANT_RESPONSE_PACKET_AUDIENCE,
+    memberContentTypes = PACKET_MEMBER_CONTENT_TYPES,
+    includeExportManifestLinkage = true,
+  } = {},
 ) {
   if (!validateGrantResponsePacketMembershipInput(input)) return failure("validation_blocker");
   if (![GRANT_RESPONSE_PACKET_AUDIENCE, BOARD_REPORTING_PACKET_AUDIENCE].includes(packetAudience)) {
@@ -1633,7 +1646,12 @@ export async function evaluateGrantResponsePacketMembershipInTransaction(
   const engagement = await loadGrantResponsePacketEngagement(tx, { organizationId, engagementId });
   if (!engagement) return failure("not_found");
 
-  const draftIds = await loadGrantResponsePacketMemberDraftIds(tx, { organizationId, engagementId, packetAudience });
+  const draftIds = await loadGrantResponsePacketMemberDraftIds(tx, {
+    organizationId,
+    engagementId,
+    packetAudience,
+    memberContentTypes,
+  });
   const statesByDraftId = await readReviewPacketStatesBatch(tx, { organizationId, generatedContentDraftIds: draftIds });
   const memoizedEvaluator = memoizeEvaluatorAcrossDrafts(evaluator);
 
@@ -1661,12 +1679,16 @@ export async function evaluateGrantResponsePacketMembershipInTransaction(
     const resolvedProfile = GENERATED_CONTENT_REVIEW_LIFECYCLE_PROFILES[2];
     if (packet.queueStatus !== resolvedProfile.queueStatus || packet.reviewStatus !== resolvedProfile.reviewStatus) continue;
     if (packet.currentUseEligible !== true) continue;
-    const manifestLinkage = await loadPacketMemberExportManifestLinkage(
-      tx,
-      { organizationId, exportReviewQueueItemId: packet.exportReviewQueueItemId },
-      manifestReaders,
-    );
-    drafts.push({ ...packet, ...manifestLinkage });
+    if (includeExportManifestLinkage) {
+      const manifestLinkage = await loadPacketMemberExportManifestLinkage(
+        tx,
+        { organizationId, exportReviewQueueItemId: packet.exportReviewQueueItemId },
+        manifestReaders,
+      );
+      drafts.push({ ...packet, ...manifestLinkage });
+    } else {
+      drafts.push(packet);
+    }
   }
 
   return success({ organizationId, engagementId, packetAudience, drafts });
@@ -1682,7 +1704,11 @@ export async function evaluateBoardReportingPacketMembershipInTransaction(
     input,
     evaluator,
     DEFAULT_GRANT_RESPONSE_PACKET_MANIFEST_READERS,
-    { packetAudience: BOARD_REPORTING_PACKET_AUDIENCE },
+    {
+      packetAudience: BOARD_REPORTING_PACKET_AUDIENCE,
+      memberContentTypes: BOARD_REPORTING_PACKET_MEMBER_CONTENT_TYPES,
+      includeExportManifestLinkage: false,
+    },
   );
 }
 
