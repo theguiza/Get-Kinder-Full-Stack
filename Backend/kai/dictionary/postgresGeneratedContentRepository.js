@@ -2403,10 +2403,20 @@ export async function evaluateGeneratedDraftExportReviewPacketInTransaction(
     organizationId: input.organizationId,
     generatedContentDraftId: input.generatedContentDraftId,
   });
+  // candidateReadyToPrepare must reflect only genuine PRE-candidate state.
+  // validatorResult above is computed with finalGate/affirmativeHumanExportAuthority
+  // hardcoded false (neither can exist before a candidate does), so
+  // validatorResult.severity can never be "pass" here - VAL-EXP-001's
+  // finalGate/authority gates always fail unconditionally (see
+  // kaiExportManifestEligibilityValidators.js). Readiness is instead judged by
+  // requiring that no gate OTHER than those expected-absent-pre-candidate
+  // gates failed, mirroring evaluateExportReviewReadiness's same pattern.
+  const candidateBlockingFailedGates = (validatorResult.evidence?.failed_gates || [])
+    .filter((code) => !EXPORT_REVIEW_READINESS_FAILED_GATES.includes(code));
   const candidateReadyToPrepare = exportReviewResolved
     && limitationSnapshotConfirmed
     && ALLOWED_GENERATED_CONTENT_TYPES.has(packetResult.data.contentType)
-    && validatorResult.severity === "pass";
+    && candidateBlockingFailedGates.length === 0;
   return success({
     generationRunId: packetResult.data.generationRunId,
     generatedContentDraftId: packetResult.data.generatedContentDraftId,

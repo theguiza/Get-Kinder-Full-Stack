@@ -338,11 +338,15 @@ function isGeneratedDraftExportReviewPacketDto(data) {
   if (typeof data.candidateReadyToPrepare !== "boolean") return false;
   if (!isValidatorResultDto(data.validatorResult, data.generatedContentDraftId)) return false;
   if (data.exportEligible !== (data.validatorResult.severity === "pass")) return false;
-  // candidateReadyToPrepare is server-derived and strictly more conservative
-  // than exportEligible alone (also requires export-review resolution and
-  // a current limitation snapshot) - it can never be true when exportEligible
-  // is false.
-  if (data.candidateReadyToPrepare && !data.exportEligible) return false;
+  // exportEligible reflects the FULL VAL-EXP-001 gate set (including
+  // finalGate/affirmative human authority, which are always evaluated false
+  // pre-candidate) and is therefore always false on this packet - it is
+  // informational only here, not a precondition for candidateReadyToPrepare.
+  // candidateReadyToPrepare instead reflects genuine pre-candidate readiness:
+  // export-review resolution, a current limitation snapshot, an authorized
+  // content type, and no VAL-EXP-001 gate failing other than the ones that
+  // are expected-absent before a candidate/authority exist (see
+  // EXPORT_REVIEW_READINESS_FAILED_GATES in postgresGeneratedContentRepository.js).
   if (!Array.isArray(data.blocks) || data.blocks.length < 1 || data.blocks.length > 20) return false;
   for (const [index, block] of data.blocks.entries()) {
     const blockHasId = Object.prototype.hasOwnProperty.call(block, "generatedContentBlockId");

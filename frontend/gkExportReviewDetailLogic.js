@@ -313,11 +313,12 @@ export function decideCompleteResult(result) {
 
 // Phase-14: the packet now exposes the P3-16 limitation-snapshot currentness
 // prerequisite directly (candidateReadyToPrepare), computed server-side from
-// export-review resolution, current-snapshot existence, authorized content
-// type, and VAL-EXP-001 exportEligible - so this UI can gate Prepare Export
-// Candidate on the real, authoritative readiness state instead of the
-// conservative exportEligible-only approximation. No currentness, fingerprint,
-// or eligibility computation happens here.
+// export-review resolution, current-snapshot existence, and authorized
+// content type - the genuine PRE-candidate prerequisites (it does not, and
+// must not, require finalGate or human export authority, which cannot exist
+// before a candidate does) - so this UI can gate Prepare Export Candidate on
+// the real, authoritative readiness state. No currentness, fingerprint, or
+// eligibility computation happens here.
 export function canPrepareExportCandidate(model) {
   return !!model && model.candidateReadyToPrepare === true;
 }
