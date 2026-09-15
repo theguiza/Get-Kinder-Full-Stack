@@ -96,6 +96,7 @@ try {
   psqlFile("migrations/kai_sprint2_p2_11_client_followup_completion.sql");
   psqlFile("migrations/kai_sprint2_p2_12_human_review_decision_ledger.sql");
   psqlFile("migrations/kai_sprint2_p2_10_funder_coverage_authority.sql");
+  psqlFile("migrations/kai_sprint2_p2_10_public_coverage_authority.sql");
   psqlFile("scripts/kai-sprint2-p2-10-coverage-review-decision-verifier.sql");
   psqlFile("scripts/kai-sprint2-gate-a-smoke-seed.sql");
   psqlFile("scripts/kai-sprint2-p1-04-data-dictionary-quality-smoke-seed.sql");

@@ -32,6 +32,7 @@ import { validateConflictGroupCompleteness } from "../validators/kaiConflictGrou
 import {
   COVERAGE_REVIEW_DECISION_TYPE,
   COVERAGE_REVIEW_FUNDER_DECISION_TYPE,
+  COVERAGE_REVIEW_PUBLIC_DECISION_TYPE,
   computeCoverageReviewDecisionFingerprint,
 } from "../validators/kaiCoverageReviewDecisionValidators.js";
 import {
@@ -43,6 +44,7 @@ import {
   findCurrentClaimReviewDecision,
 } from "./postgresHumanReviewDecisionRepository.js";
 import { resolveEffectiveFunderAuthority } from "./postgresEffectiveFunderAuthorityResolver.js";
+import { resolveEffectivePublicAuthority } from "./postgresEffectivePublicAuthorityResolver.js";
 
 const CLAIM_TRACEABILITY_RESULT_STATUS = Object.freeze({
   validation_blocker: 422,
@@ -346,6 +348,7 @@ function safeDimensionStatuses(dimensions, limitationAcceptance) {
           validator_key: dimensions[dimensionKey].validator_key,
           internal_limitation_accepted: acceptance.internalAccepted,
           funder_limitation_accepted: acceptance.funderAccepted,
+          public_limitation_accepted: acceptance.publicAccepted,
           blocks_requested_audience: acceptance.blocksRequestedAudience,
         },
       ];
@@ -425,9 +428,14 @@ function audienceGateSummary(claimRow) {
  * consults the legacy claims.funder_use_allowed/evidence_items.funder_use_allowed
  * columns (schema-pinned false).
  *
- * For public, this preserves the exact unconditional fail-closed behavior
- * this stub always had: no funder/public/export authority is granted here
- * beyond what is described above.
+ * For requestedAudience = "public" (KAI B1B public-authority wiring repair):
+ * approved only when BOTH (a) the current claim-review-head decision is a
+ * terminal decision whose approved_audiences includes "public", AND (b) the
+ * shared Phase-5 effective-public-authority resolver
+ * (postgresEffectivePublicAuthorityResolver.js) reports permitted:true for
+ * this claim in this same tx/snapshot. Neither branch consults the legacy
+ * claims.public_use_allowed/evidence_items.public_use_allowed columns
+ * (schema-pinned false) as effective public authority.
  */
 async function approvalForAudience({ requestedAudience, organizationId, claimId, claimReviewHead, tx } = {}) {
   if (requestedAudience === "internal") {
@@ -445,6 +453,22 @@ async function approvalForAudience({ requestedAudience, organizationId, claimId,
     }
     const funderAuthority = await resolveEffectiveFunderAuthority(tx, { organizationId, claimId });
     if (!funderAuthority.permitted) {
+      return { approved: false, gateOpen: false, authorityPresent: false };
+    }
+    return { approved: true, gateOpen: true, authorityPresent: true };
+  }
+  if (requestedAudience === "public") {
+    const qualifyingReview = Boolean(
+      claimReviewHead
+      && claimReviewHead.decision_outcome !== "needs_more_information"
+      && Array.isArray(claimReviewHead.approved_audiences)
+      && claimReviewHead.approved_audiences.includes("public"),
+    );
+    if (!qualifyingReview) {
+      return { approved: false, gateOpen: false, authorityPresent: false };
+    }
+    const publicAuthority = await resolveEffectivePublicAuthority(tx, { organizationId, claimId });
+    if (!publicAuthority.permitted) {
       return { approved: false, gateOpen: false, authorityPresent: false };
     }
     return { approved: true, gateOpen: true, authorityPresent: true };
@@ -640,6 +664,7 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
       const gapItem = gapRows.find((row) => row.dimension_key === dimensionKey) || null;
       let internalAccepted = false;
       let funderAccepted = false;
+      let publicAccepted = false;
       if (gapItem) {
         const expectedFingerprint = computeCoverageReviewDecisionFingerprint({
           claimId,
@@ -665,14 +690,20 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
           && row.state_fingerprint === expectedFingerprint
           && row.decision === COVERAGE_REVIEW_FUNDER_DECISION_TYPE
         ));
+        publicAccepted = coverageReviewDecisionRows.some((row) => (
+          row.dimension_key === dimensionKey
+          && row.state_fingerprint === expectedFingerprint
+          && row.decision === COVERAGE_REVIEW_PUBLIC_DECISION_TYPE
+        ));
       }
       const currentAudienceAccepted =
         (requestedAudience === "internal" && internalAccepted)
-        || (requestedAudience === "funder" && funderAccepted);
+        || (requestedAudience === "funder" && funderAccepted)
+        || (requestedAudience === "public" && publicAccepted);
       const blocksRequestedAudience =
         dimension.evidence.assessment_status === "unresolved" &&
         !currentAudienceAccepted;
-      return [dimensionKey, { internalAccepted, funderAccepted, blocksRequestedAudience }];
+      return [dimensionKey, { internalAccepted, funderAccepted, publicAccepted, blocksRequestedAudience }];
     }),
   );
 

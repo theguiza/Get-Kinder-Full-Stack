@@ -207,6 +207,7 @@ const TRACEABILITY_DIMENSION_KEYS = new Set([
   "validator_key",
   "internal_limitation_accepted",
   "funder_limitation_accepted",
+  "public_limitation_accepted",
   "blocks_requested_audience",
 ]);
 const TRACEABILITY_CLAIM_KEYS = new Set([
@@ -362,6 +363,7 @@ function validateDimensions(dimensions) {
       typeof dimension.validator_key === "string" &&
       typeof dimension.internal_limitation_accepted === "boolean" &&
       typeof dimension.funder_limitation_accepted === "boolean" &&
+      typeof dimension.public_limitation_accepted === "boolean" &&
       typeof dimension.blocks_requested_audience === "boolean" &&
       validateMetadataSafeValue("assessment_status", dimension.assessment_status) &&
       validateMetadataSafeValue("validator_key", dimension.validator_key) &&
@@ -372,6 +374,10 @@ function validateDimensions(dimensions) {
       validateMetadataSafeValue(
         "funder_limitation_accepted",
         dimension.funder_limitation_accepted,
+      ) &&
+      validateMetadataSafeValue(
+        "public_limitation_accepted",
+        dimension.public_limitation_accepted,
       ) &&
       validateMetadataSafeValue(
         "blocks_requested_audience",

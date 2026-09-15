@@ -16,6 +16,7 @@ import {
   insertClaimReviewDecision,
 } from "./postgresHumanReviewDecisionRepository.js";
 import { resolveEffectiveFunderAuthority } from "./postgresEffectiveFunderAuthorityResolver.js";
+import { resolveEffectivePublicAuthority } from "./postgresEffectivePublicAuthorityResolver.js";
 import {
   isEvidenceReviewTerminalOutcome,
   isClaimReviewTerminalOutcome,
@@ -567,19 +568,15 @@ export function createPostgresHumanReviewRepository({ runInTransaction } = {}) {
             return failure("evidence_review_unresolved");
           }
 
-          // Governance ceiling (Problem B is NOT opened here): public remains
-          // exactly as it was - claim.public_use_allowed AND
-          // evidence.public_use_allowed, both still hard-pinned false
-          // everywhere in this schema, so 'public' can never legitimately
-          // pass here. Funder authority (KAI B1B) is now resolved through the
-          // shared Phase-5 effective-funder-authority resolver instead of the
-          // legacy funder_use_allowed booleans, which remain schema-pinned
-          // false and are never consulted. This runs before any write in this
+          // Governance ceiling: funder authority (KAI B1B) and public
+          // authority (KAI B1B public-authority wiring repair) are each
+          // resolved through their own shared Phase-5 effective-authority
+          // resolver instead of the legacy funder_use_allowed/
+          // public_use_allowed booleans, which remain schema-pinned false and
+          // are never consulted. This runs before any write in this
           // transaction, using this same tx/snapshot, so a rejection here
           // persists nothing.
           if (Array.isArray(approvedAudiences)) {
-            const evidenceItemRow = await getScopedEvidenceItemById({ organizationId, evidenceItemId }, tx);
-            if (!evidenceItemRow) return failure("not_found");
             for (const audience of approvedAudiences) {
               if (audience === "internal") continue;
               if (audience === "funder") {
@@ -588,7 +585,8 @@ export function createPostgresHumanReviewRepository({ runInTransaction } = {}) {
                 return failure("governance_ceiling_exceeded");
               }
               if (audience === "public") {
-                if (claimRow.public_use_allowed === true && evidenceItemRow.public_use_allowed === true) continue;
+                const publicAuthority = await resolveEffectivePublicAuthority(tx, { organizationId, claimId });
+                if (publicAuthority.permitted) continue;
                 return failure("governance_ceiling_exceeded");
               }
               return failure("validation_blocker");

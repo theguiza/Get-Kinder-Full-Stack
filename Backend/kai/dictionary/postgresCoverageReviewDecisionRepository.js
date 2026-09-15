@@ -3,11 +3,13 @@ import { evaluateClaimTraceabilityInTransaction } from "./postgresClaimTraceabil
 import {
   COVERAGE_REVIEW_DECISION_ROLE,
   COVERAGE_REVIEW_FUNDER_DECISION_TYPE,
+  COVERAGE_REVIEW_PUBLIC_DECISION_TYPE,
   COVERAGE_REVIEW_DECISION_TYPE,
   computeCoverageReviewDecisionFingerprint,
   isCoverageReviewDimensionKey,
 } from "../validators/kaiCoverageReviewDecisionValidators.js";
 import { resolveEffectiveFunderAuthority } from "./postgresEffectiveFunderAuthorityResolver.js";
+import { resolveEffectivePublicAuthority } from "./postgresEffectivePublicAuthorityResolver.js";
 
 /**
  * KAI P2-10 durable coverage authority: the owner-authorized
@@ -35,6 +37,7 @@ const COVERAGE_REVIEW_DECISION_RESULT_STATUS = Object.freeze({
 const COVERAGE_REVIEW_DECISION_AUDIT_CONTRACT = "p2_10_coverage_review_decision_v1";
 const COVERAGE_REVIEW_DECISION_AUDIT_OPERATION = "coverage_review_decision_accepted_internal_with_limitation";
 const COVERAGE_REVIEW_FUNDER_DECISION_AUDIT_OPERATION = "coverage_review_decision_accepted_funder_with_limitation";
+const COVERAGE_REVIEW_PUBLIC_DECISION_AUDIT_OPERATION = "coverage_review_decision_accepted_public_with_limitation";
 const COVERAGE_REVIEW_DECISION_VALIDATOR_KEY = "VAL-KAI-P2-10-001";
 
 function failure(code) {
@@ -191,26 +194,30 @@ function prepareRequiredAudit(metadataOnlyAudit, payload, tx) {
 }
 
 function operationForDecision(decision) {
-  return decision === COVERAGE_REVIEW_FUNDER_DECISION_TYPE
-    ? COVERAGE_REVIEW_FUNDER_DECISION_AUDIT_OPERATION
-    : COVERAGE_REVIEW_DECISION_AUDIT_OPERATION;
+  if (decision === COVERAGE_REVIEW_FUNDER_DECISION_TYPE) return COVERAGE_REVIEW_FUNDER_DECISION_AUDIT_OPERATION;
+  if (decision === COVERAGE_REVIEW_PUBLIC_DECISION_TYPE) return COVERAGE_REVIEW_PUBLIC_DECISION_AUDIT_OPERATION;
+  return COVERAGE_REVIEW_DECISION_AUDIT_OPERATION;
 }
 
 function requestedAudienceForDecision(decision) {
-  return decision === COVERAGE_REVIEW_FUNDER_DECISION_TYPE ? "funder" : "internal";
+  if (decision === COVERAGE_REVIEW_FUNDER_DECISION_TYPE) return "funder";
+  if (decision === COVERAGE_REVIEW_PUBLIC_DECISION_TYPE) return "public";
+  return "internal";
 }
 
 export function createPostgresCoverageReviewDecisionRepository({
   runInTransaction,
   evaluateClaimTraceability,
   resolveFunderAuthority,
+  resolvePublicAuthority,
 } = {}) {
   async function acceptCoverageLimitation(input, decision) {
     if (!isAcceptInternalCoverageLimitationInput(input)) return failure("validation_blocker");
     const { organizationId, claimId, dimensionKey, actorUserId, actorRole, now, metadataOnlyAudit } = input;
     const run = runInTransaction || (await resolveDefaultRunInTransaction());
     const evaluate = evaluateClaimTraceability || evaluateClaimTraceabilityInTransaction;
-    const resolveAuthority = resolveFunderAuthority || resolveEffectiveFunderAuthority;
+    const resolveFunder = resolveFunderAuthority || resolveEffectiveFunderAuthority;
+    const resolvePublic = resolvePublicAuthority || resolveEffectivePublicAuthority;
     const requestedAudience = requestedAudienceForDecision(decision);
     const auditOperation = operationForDecision(decision);
 
@@ -232,8 +239,13 @@ export function createPostgresCoverageReviewDecisionRepository({
         }
 
         if (decision === COVERAGE_REVIEW_FUNDER_DECISION_TYPE) {
-          const funderAuthority = await resolveAuthority(tx, { organizationId, claimId });
+          const funderAuthority = await resolveFunder(tx, { organizationId, claimId });
           if (!funderAuthority?.permitted) return failure("validation_blocker");
+        }
+
+        if (decision === COVERAGE_REVIEW_PUBLIC_DECISION_TYPE) {
+          const publicAuthority = await resolvePublic(tx, { organizationId, claimId });
+          if (!publicAuthority?.permitted) return failure("validation_blocker");
         }
 
         const dimension = data.dimensions[dimensionKey];
@@ -346,6 +358,9 @@ export function createPostgresCoverageReviewDecisionRepository({
     async acceptFunderCoverageLimitation(input) {
       return acceptCoverageLimitation(input, COVERAGE_REVIEW_FUNDER_DECISION_TYPE);
     },
+    async acceptPublicCoverageLimitation(input) {
+      return acceptCoverageLimitation(input, COVERAGE_REVIEW_PUBLIC_DECISION_TYPE);
+    },
   });
 }
 
@@ -353,6 +368,7 @@ export const __coverageReviewDecisionRepositoryContract = Object.freeze({
   COVERAGE_REVIEW_DECISION_AUDIT_CONTRACT,
   COVERAGE_REVIEW_DECISION_AUDIT_OPERATION,
   COVERAGE_REVIEW_FUNDER_DECISION_AUDIT_OPERATION,
+  COVERAGE_REVIEW_PUBLIC_DECISION_AUDIT_OPERATION,
   COVERAGE_REVIEW_DECISION_VALIDATOR_KEY,
 });
 

@@ -170,21 +170,23 @@ test("B1B: funder authority alone does not imply public/export/generation author
   assert.equal("generation" in result, false);
 });
 
-test("B1B wiring: claim-review governance ceiling resolves funder through the shared resolver, not legacy booleans, and public is unchanged", () => {
+test("B1B wiring: claim-review governance ceiling resolves funder and public through their shared resolvers, not legacy booleans", () => {
   const source = readFileSync(
     new URL("../Backend/kai/dictionary/postgresHumanReviewRepository.js", import.meta.url),
     "utf8",
   );
   assert.match(source, /resolveEffectiveFunderAuthority/);
+  assert.match(source, /resolveEffectivePublicAuthority/);
   assert.match(
     source,
     /if \(audience === "funder"\) \{\s*\n\s*const funderAuthority = await resolveEffectiveFunderAuthority\(tx, \{ organizationId, claimId \}\);\s*\n\s*if \(funderAuthority\.permitted\) continue;\s*\n\s*return failure\("governance_ceiling_exceeded"\);/,
   );
   assert.match(
     source,
-    /if \(audience === "public"\) \{\s*\n\s*if \(claimRow\.public_use_allowed === true && evidenceItemRow\.public_use_allowed === true\) continue;\s*\n\s*return failure\("governance_ceiling_exceeded"\);/,
+    /if \(audience === "public"\) \{\s*\n\s*const publicAuthority = await resolveEffectivePublicAuthority\(tx, \{ organizationId, claimId \}\);\s*\n\s*if \(publicAuthority\.permitted\) continue;\s*\n\s*return failure\("governance_ceiling_exceeded"\);/,
   );
   assert.doesNotMatch(source, /claimRow\.funder_use_allowed === true && evidenceItemRow\.funder_use_allowed === true/);
+  assert.doesNotMatch(source, /claimRow\.public_use_allowed === true && evidenceItemRow\.public_use_allowed === true/);
 });
 
 test("B1B wiring: recordClaimReviewDecision never auto-approves funder - the resolver only unblocks the ceiling, callers still choose approvedAudiences", () => {
@@ -331,16 +333,17 @@ test("B1B: P2-06 - public audience remains unconditionally fail-closed (unchange
   assert.deepEqual(approval, { approved: false, gateOpen: false, authorityPresent: false });
 });
 
-test("P2-10/B1B wiring: coverage carve-out is exact-audience only and public has no carve-out", () => {
+test("P2-10/B1B wiring: coverage carve-out is exact-audience only - internal/funder/public each require their own exact decision type, never each other's", () => {
   const source = readFileSync(
     new URL("../Backend/kai/dictionary/postgresClaimTraceabilityRepository.js", import.meta.url),
     "utf8",
   );
   assert.match(source, /row\.decision === COVERAGE_REVIEW_DECISION_TYPE/);
   assert.match(source, /row\.decision === COVERAGE_REVIEW_FUNDER_DECISION_TYPE/);
+  assert.match(source, /row\.decision === COVERAGE_REVIEW_PUBLIC_DECISION_TYPE/);
   assert.match(source, /requestedAudience === "internal" && internalAccepted/);
   assert.match(source, /requestedAudience === "funder" && funderAccepted/);
-  assert.doesNotMatch(source, /requestedAudience === "public" && .*Accepted/);
+  assert.match(source, /requestedAudience === "public" && publicAccepted/);
 });
 
 test("B1B: no migration file was added or edited for this package", () => {

@@ -19,6 +19,7 @@ import {
 const ACCEPT_INTERNAL_COVERAGE_LIMITATION_ALLOWED_ROLES = new Set([COVERAGE_REVIEW_DECISION_ROLE]);
 const ACCEPT_INTERNAL_COVERAGE_LIMITATION_OPERATION = "accept_internal_coverage_limitation";
 const ACCEPT_FUNDER_COVERAGE_LIMITATION_OPERATION = "accept_funder_coverage_limitation";
+const ACCEPT_PUBLIC_COVERAGE_LIMITATION_OPERATION = "accept_public_coverage_limitation";
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -62,6 +63,13 @@ export async function acceptFunderCoverageLimitation(input, dependencies = {}) {
   return acceptCoverageLimitation(input, dependencies, {
     operation: ACCEPT_FUNDER_COVERAGE_LIMITATION_OPERATION,
     repositoryMethod: "acceptFunderCoverageLimitation",
+  });
+}
+
+export async function acceptPublicCoverageLimitation(input, dependencies = {}) {
+  return acceptCoverageLimitation(input, dependencies, {
+    operation: ACCEPT_PUBLIC_COVERAGE_LIMITATION_OPERATION,
+    repositoryMethod: "acceptPublicCoverageLimitation",
   });
 }
 
@@ -117,6 +125,7 @@ export const __coverageReviewDecisionServiceContract = Object.freeze({
   ACCEPT_INTERNAL_COVERAGE_LIMITATION_ALLOWED_ROLES,
   ACCEPT_INTERNAL_COVERAGE_LIMITATION_OPERATION,
   ACCEPT_FUNDER_COVERAGE_LIMITATION_OPERATION,
+  ACCEPT_PUBLIC_COVERAGE_LIMITATION_OPERATION,
 });
 
 export const __coverageReviewDecisionServiceTestables = Object.freeze({

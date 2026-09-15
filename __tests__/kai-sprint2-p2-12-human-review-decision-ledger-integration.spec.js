@@ -448,4 +448,265 @@ async function runP212IntegrationSuite() {
       [ORG, alpha.evidenceItemId, evidenceQueueItem.review_queue_item_id, reviewerActor.actorUserId],
     ));
   });
+
+  // --- KAI B1B public-authority wiring repair: real-Postgres claim-review proof ---
+  //
+  // The Phase-5 sensitivity/allowed-use decision ledger is scoped to the one
+  // intake_sensitivity_profile shared by every evidence item/claim drawn from
+  // this org's single is_current source version (same sharing behavior the
+  // P14-09 funder-authority-repair suite already relies on), so each case
+  // below writes its own fresh profile-level decision head (superseding
+  // whatever head already exists) immediately before its
+  // recordClaimReviewDecision call, and builds its own independent,
+  // never-before-claimed evidence item/claim (via extra committed dictionary
+  // fields, mirroring the P14-09 fixture-budget pattern) so it never disturbs
+  // alpha/beta's state used by the sequenced tests above.
+  const PUBLIC_AUTHORITY_DICTIONARY_ID = "60000000-0000-4000-8000-000000000001";
+  const PUBLIC_AUTHORITY_FILE_PROFILE_ID = "50000000-0000-4000-8000-000000000001";
+  let publicAuthorityFieldsSeeded = false;
+  async function seedPublicAuthorityDictionaryFields() {
+    if (publicAuthorityFieldsSeeded) return;
+    for (const suffix of ["11", "12", "13"]) {
+      await pool.query(
+        `INSERT INTO kai.data_dictionary_fields (
+           data_dictionary_field_id, data_dictionary_id, organization_id, file_profile_id,
+           profile_field_key, field_label_safe, data_type, created_at
+         ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $5, 'number', now())
+         ON CONFLICT DO NOTHING`,
+        [`70000000-0000-4000-8000-0000000000${suffix}`, PUBLIC_AUTHORITY_DICTIONARY_ID, ORG, PUBLIC_AUTHORITY_FILE_PROFILE_ID, `field_${Number(suffix)}`],
+      );
+    }
+    publicAuthorityFieldsSeeded = true;
+  }
+
+  // Builds one fresh claim (through the real proposal/gap pipeline) with its
+  // evidence review already resolved/supported, so only the claim-review
+  // governance ceiling under test remains to be exercised.
+  async function buildPublicAuthorityCandidateClaim() {
+    await seedPublicAuthorityDictionaryFields();
+    const [sourceVersion] = await query(
+      `SELECT source_version_id FROM kai.source_versions WHERE organization_id = $1::uuid AND is_current = true ORDER BY source_version_id LIMIT 1`,
+      [ORG],
+    );
+    const evidenceResult = await extractEvidenceFromSourceVersion(
+      { organizationId: ORG, sourceVersionId: sourceVersion.source_version_id, actorContext: reviewerActor, now: NOW },
+      { env: { KAI_SPRINT2_ENABLED: "true" }, evidenceLineageRepository: evidenceRepo, metadataOnlyAudit: auditRecorder() },
+    );
+    assert.equal(evidenceResult.ok, true, JSON.stringify(evidenceResult));
+    const [evidenceRow] = await query(
+      `SELECT evidence_item_id, source_version_id FROM kai.evidence_items
+        WHERE organization_id = $1::uuid
+          AND NOT EXISTS (SELECT 1 FROM kai.claims c WHERE c.organization_id = kai.evidence_items.organization_id AND c.evidence_item_id = kai.evidence_items.evidence_item_id)
+        ORDER BY evidence_item_id ASC LIMIT 1`,
+      [ORG],
+    );
+    const claimResult = await proposeClaim(
+      { organizationId: ORG, evidenceItemId: evidenceRow.evidence_item_id, actorContext: reviewerActor, now: NOW },
+      { env: { KAI_SPRINT2_ENABLED: "true" }, claimProposalRepository: claimRepo, metadataOnlyAudit: auditRecorder() },
+    );
+    assert.equal(claimResult.ok, true, JSON.stringify(claimResult));
+    const claimId = claimResult.data.claim.claim_id;
+    const gapResult = await generateClaimGapFollowups(
+      { organizationId: ORG, claimId, actorContext: reviewerActor, now: NOW },
+      { env: { KAI_SPRINT2_ENABLED: "true" }, claimGapFollowupRepository: gapRepo, metadataOnlyAudit: auditRecorder() },
+    );
+    assert.equal(gapResult.ok, true, JSON.stringify(gapResult));
+
+    const evidenceQueue = await evidenceReviewQueueItem(evidenceRow.evidence_item_id);
+    const evidenceReviewResult = await recordEvidenceReviewDecision(
+      {
+        organizationId: ORG, evidenceItemId: evidenceRow.evidence_item_id, reviewQueueItemId: evidenceQueue.review_queue_item_id,
+        expectedUpdatedAt: new Date(evidenceQueue.updated_at).toISOString(), decision: "supported", actorContext: reviewerActor, now: NOW,
+      },
+      { env: { KAI_SPRINT2_ENABLED: "true" }, humanReviewRepository: humanReviewRepo, metadataOnlyAudit: auditRecorder() },
+    );
+    assert.equal(evidenceReviewResult.ok, true, JSON.stringify(evidenceReviewResult));
+
+    return { claimId, evidenceItemId: evidenceRow.evidence_item_id, sourceVersionId: evidenceRow.source_version_id };
+  }
+
+  // Supersedes the current Phase-5 decision head for the profile shared by
+  // this org's one source version, writing exactly the reviewed snapshot the
+  // case under test needs. Uses the same raw-INSERT approach the existing
+  // P14-09 funder-authority-repair suite already established for this
+  // purpose (there is no other test-owned helper for writing a Phase-5
+  // decision), so no consent/governance predicate is duplicated here - only
+  // field values are supplied, and the real DB-level
+  // intake_sensitivity_review_decisions_b1a_02_public_use_basis_check
+  // constraint is what actually enforces (or rejects) the basis.
+  async function supersedePhase5Decision(sourceVersionId, snapshot) {
+    const [lineage] = await query(
+      `SELECT intake_sensitivity_profile_id FROM kai.source_versions WHERE organization_id = $1::uuid AND source_version_id = $2::uuid`,
+      [ORG, sourceVersionId],
+    );
+    const intakeSensitivityProfileId = lineage.intake_sensitivity_profile_id;
+    let [sensitivityQueue] = await query(
+      `SELECT review_queue_item_id FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = 'sensitivity_review' AND target_object_type = 'intake_sensitivity_profile' AND target_object_id = $2::uuid`,
+      [ORG, intakeSensitivityProfileId],
+    );
+    if (!sensitivityQueue) {
+      [sensitivityQueue] = await query(
+        `INSERT INTO kai.review_queue_items (
+           organization_id, queue_type, target_object_type, target_object_id,
+           priority, queue_status, review_status, summary, required_action, queue_metadata, created_by_type
+         ) VALUES ($1::uuid, 'sensitivity_review', 'intake_sensitivity_profile', $2::uuid, 'medium', 'open', 'needs_gk_review',
+           'Review sensitivity and allowed-use metadata.', 'Review sensitivity and allowed-use metadata before governed use.', '{}'::jsonb, 'human')
+         RETURNING review_queue_item_id`,
+        [ORG, intakeSensitivityProfileId],
+      );
+    }
+    const [currentHead] = await query(
+      `SELECT d.decision_id
+         FROM kai.intake_sensitivity_review_decisions d
+        WHERE d.organization_id = $1::uuid
+          AND d.intake_sensitivity_profile_id = $2::uuid
+          AND NOT EXISTS (SELECT 1 FROM kai.intake_sensitivity_review_decisions s WHERE s.supersedes_decision_id = d.decision_id)`,
+      [ORG, intakeSensitivityProfileId],
+    );
+    await pool.query(
+      `INSERT INTO kai.intake_sensitivity_review_decisions (
+         organization_id, intake_sensitivity_profile_id, review_queue_item_id,
+         decision_outcome, reviewed_personal_data_status, reviewed_minor_data_status,
+         reviewed_health_housing_justice_immigration_status, reviewed_indigenous_governance_status,
+         reviewed_staff_notes_status, reviewed_story_testimonial_status, reviewed_small_cell_risk_status,
+         reviewed_financial_records_status, reviewed_consent_basis_status, reviewed_allowed_use_status,
+         reviewed_llm_processing_allowed, reviewed_product_learning_allowed, reviewed_public_use_allowed,
+         reviewed_funder_use_allowed, decided_by, decided_by_role, target_updated_at,
+         supersedes_decision_id, created_by_type, created_at
+       ) VALUES (
+         $1::uuid, $2::uuid, $3::uuid,
+         'reviewed', 'unknown', 'unknown',
+         'unknown', $4,
+         'unknown', 'unknown', 'unknown',
+         'unknown', $5, $6,
+         false, false, $7,
+         false, $8::uuid, 'gk_reviewer', $9::timestamptz,
+         $10, 'human', now()
+       )`,
+      [
+        ORG, intakeSensitivityProfileId, sensitivityQueue.review_queue_item_id,
+        snapshot.reviewed_indigenous_governance_status, snapshot.reviewed_consent_basis_status, snapshot.reviewed_allowed_use_status,
+        snapshot.reviewed_public_use_allowed, reviewerActor.actorUserId, NOW, currentHead?.decision_id ?? null,
+      ],
+    );
+    return { intakeSensitivityProfileId };
+  }
+
+  test("B1B public-authority DB proof (positive): a fully-established Phase-5 public basis lets recordClaimReviewDecision approve approvedAudiences=['public'], and the persisted current decision records it", async () => {
+    const { claimId, sourceVersionId } = await buildPublicAuthorityCandidateClaim();
+    await supersedePhase5Decision(sourceVersionId, {
+      reviewed_allowed_use_status: "allowed",
+      reviewed_consent_basis_status: "present",
+      reviewed_indigenous_governance_status: "absent",
+      reviewed_public_use_allowed: true,
+    });
+
+    const claimQueue = await claimReviewQueueItem(claimId);
+    const result = await recordClaimReviewDecision(
+      {
+        organizationId: ORG, claimId, reviewQueueItemId: claimQueue.review_queue_item_id,
+        expectedUpdatedAt: new Date(claimQueue.updated_at).toISOString(), decision: "approved",
+        approvedAudiences: ["public"], actorContext: reviewerActor, now: NOW,
+      },
+      { env: { KAI_SPRINT2_ENABLED: "true" }, humanReviewRepository: humanReviewRepo, metadataOnlyAudit: auditRecorder() },
+    );
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.deepEqual(result.data.approved_audiences, ["public"]);
+
+    const [currentHead] = await query(
+      `SELECT approved_audiences FROM kai.claim_review_decisions
+        WHERE organization_id = $1::uuid AND claim_id = $2::uuid
+          AND NOT EXISTS (SELECT 1 FROM kai.claim_review_decisions s WHERE s.supersedes_decision_id = kai.claim_review_decisions.decision_id)`,
+      [ORG, claimId],
+    );
+    assert.ok(currentHead.approved_audiences.includes("public"));
+  });
+
+  test("B1B public-authority DB proof (Case A): reviewed_public_use_allowed=false fails closed and persists no new claim-review decision", async () => {
+    const { claimId, sourceVersionId } = await buildPublicAuthorityCandidateClaim();
+    await supersedePhase5Decision(sourceVersionId, {
+      reviewed_allowed_use_status: "allowed",
+      reviewed_consent_basis_status: "present",
+      reviewed_indigenous_governance_status: "absent",
+      reviewed_public_use_allowed: false,
+    });
+
+    const beforeCount = await query(`SELECT count(*)::int AS count FROM kai.claim_review_decisions WHERE organization_id = $1::uuid AND claim_id = $2::uuid`, [ORG, claimId]);
+    const claimQueue = await claimReviewQueueItem(claimId);
+    const result = await recordClaimReviewDecision(
+      {
+        organizationId: ORG, claimId, reviewQueueItemId: claimQueue.review_queue_item_id,
+        expectedUpdatedAt: new Date(claimQueue.updated_at).toISOString(), decision: "approved",
+        approvedAudiences: ["public"], actorContext: reviewerActor, now: NOW,
+      },
+      { env: { KAI_SPRINT2_ENABLED: "true" }, humanReviewRepository: humanReviewRepo, metadataOnlyAudit: auditRecorder() },
+    );
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "validation_blocker");
+    assert.equal(result.error.status, 422);
+    const afterCount = await query(`SELECT count(*)::int AS count FROM kai.claim_review_decisions WHERE organization_id = $1::uuid AND claim_id = $2::uuid`, [ORG, claimId]);
+    assert.equal(afterCount[0].count, beforeCount[0].count);
+  });
+
+  test("B1B public-authority DB proof (Case B): a Phase-5 state that cannot legitimately establish the public basis (invalid consent) fails closed, persists no new claim-review decision, and the DB itself refuses to record public_use_allowed=true against that same invalid basis", async () => {
+    const { claimId, sourceVersionId } = await buildPublicAuthorityCandidateClaim();
+    const { intakeSensitivityProfileId } = await supersedePhase5Decision(sourceVersionId, {
+      reviewed_allowed_use_status: "allowed",
+      reviewed_consent_basis_status: "unknown",
+      reviewed_indigenous_governance_status: "absent",
+      reviewed_public_use_allowed: false,
+    });
+
+    // Independent DB-level proof: this exact invalid-basis snapshot can never
+    // legitimately carry reviewed_public_use_allowed = true - the schema's
+    // own intake_sensitivity_review_decisions_b1a_02_public_use_basis_check
+    // constraint rejects the attempt outright, before any application code
+    // runs.
+    const [rejectedHead] = await query(
+      `SELECT d.decision_id
+         FROM kai.intake_sensitivity_review_decisions d
+        WHERE d.organization_id = $1::uuid
+          AND d.intake_sensitivity_profile_id = $2::uuid
+          AND NOT EXISTS (SELECT 1 FROM kai.intake_sensitivity_review_decisions s WHERE s.supersedes_decision_id = d.decision_id)`,
+      [ORG, intakeSensitivityProfileId],
+    );
+    await assert.rejects(
+      query(
+        `INSERT INTO kai.intake_sensitivity_review_decisions (
+           organization_id, intake_sensitivity_profile_id, review_queue_item_id,
+           decision_outcome, reviewed_personal_data_status, reviewed_minor_data_status,
+           reviewed_health_housing_justice_immigration_status, reviewed_indigenous_governance_status,
+           reviewed_staff_notes_status, reviewed_story_testimonial_status, reviewed_small_cell_risk_status,
+           reviewed_financial_records_status, reviewed_consent_basis_status, reviewed_allowed_use_status,
+           reviewed_llm_processing_allowed, reviewed_product_learning_allowed, reviewed_public_use_allowed,
+           reviewed_funder_use_allowed, decided_by, decided_by_role, target_updated_at,
+           supersedes_decision_id, created_by_type, created_at
+         ) VALUES (
+           $1::uuid, $2::uuid,
+           (SELECT review_queue_item_id FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = 'sensitivity_review' AND target_object_type = 'intake_sensitivity_profile' AND target_object_id = $2::uuid),
+           'reviewed', 'unknown', 'unknown', 'unknown', 'absent', 'unknown', 'unknown', 'unknown', 'unknown',
+           'unknown', 'allowed', false, false, true, false,
+           $3::uuid, 'gk_reviewer', $4::timestamptz, $5, 'human', now()
+         )`,
+        [ORG, intakeSensitivityProfileId, reviewerActor.actorUserId, NOW, rejectedHead.decision_id],
+      ),
+      /public_use_basis_check|violates check constraint/,
+    );
+
+    const beforeCount = await query(`SELECT count(*)::int AS count FROM kai.claim_review_decisions WHERE organization_id = $1::uuid AND claim_id = $2::uuid`, [ORG, claimId]);
+    const claimQueue = await claimReviewQueueItem(claimId);
+    const result = await recordClaimReviewDecision(
+      {
+        organizationId: ORG, claimId, reviewQueueItemId: claimQueue.review_queue_item_id,
+        expectedUpdatedAt: new Date(claimQueue.updated_at).toISOString(), decision: "approved",
+        approvedAudiences: ["public"], actorContext: reviewerActor, now: NOW,
+      },
+      { env: { KAI_SPRINT2_ENABLED: "true" }, humanReviewRepository: humanReviewRepo, metadataOnlyAudit: auditRecorder() },
+    );
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "validation_blocker");
+    assert.equal(result.error.status, 422);
+    const afterCount = await query(`SELECT count(*)::int AS count FROM kai.claim_review_decisions WHERE organization_id = $1::uuid AND claim_id = $2::uuid`, [ORG, claimId]);
+    assert.equal(afterCount[0].count, beforeCount[0].count);
+  });
 }

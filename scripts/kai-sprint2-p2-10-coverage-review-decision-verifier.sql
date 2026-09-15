@@ -12,9 +12,10 @@ SELECT 'coverage_review_decisions_table_exists',
        'kai.coverage_review_decisions exists';
 
 -- decision_value_pinned proves the decision CHECK constraint's vocabulary is
--- the EXACT closed two-value set {accepted_internal_with_limitation,
--- accepted_funder_with_limitation} and no other value - not merely that
--- those two substrings appear somewhere in the constraint text (a LIKE-based
+-- the EXACT closed three-value set {accepted_internal_with_limitation,
+-- accepted_funder_with_limitation, accepted_public_with_limitation} and no
+-- other value - not merely that those three substrings appear somewhere in
+-- the constraint text (a LIKE-based
 -- substring check would silently keep passing even if a third value were
 -- ever added to the constraint). It parses the actual
 -- pg_get_constraintdef() `= ANY (ARRAY[...])` expression Postgres normalizes
@@ -47,10 +48,10 @@ INSERT INTO p2_10_results
 SELECT 'decision_value_pinned',
        CASE WHEN EXISTS (
               SELECT 1 FROM decision_values
-               WHERE vals = ARRAY['accepted_funder_with_limitation', 'accepted_internal_with_limitation']::text[]
+               WHERE vals = ARRAY['accepted_funder_with_limitation', 'accepted_internal_with_limitation', 'accepted_public_with_limitation']::text[]
             )
             THEN 'PASS' ELSE 'FAIL' END,
-       'decision column CHECK vocabulary is the exact closed two-value set {accepted_internal_with_limitation, accepted_funder_with_limitation} - no other value is permitted';
+       'decision column CHECK vocabulary is the exact closed three-value set {accepted_internal_with_limitation, accepted_funder_with_limitation, accepted_public_with_limitation} - no other value is permitted';
 
 INSERT INTO p2_10_results
 SELECT 'decided_by_role_pinned_to_gk_reviewer',
@@ -126,9 +127,10 @@ SELECT 'audit_operation_allowed',
                  AND c.conname = 'upload_lifecycle_audit_gate_a_operation_check'
                  AND pg_get_constraintdef(c.oid) LIKE '%coverage_review_decision_accepted_internal_with_limitation%'
                  AND pg_get_constraintdef(c.oid) LIKE '%coverage_review_decision_accepted_funder_with_limitation%'
+                 AND pg_get_constraintdef(c.oid) LIKE '%coverage_review_decision_accepted_public_with_limitation%'
             )
             THEN 'PASS' ELSE 'FAIL' END,
-       'upload_lifecycle_audit accepts both P2-10 internal and funder operations';
+       'upload_lifecycle_audit accepts the P2-10 internal, funder, and public operations';
 
 INSERT INTO p2_10_results
 SELECT 'audit_metadata_contract_present',

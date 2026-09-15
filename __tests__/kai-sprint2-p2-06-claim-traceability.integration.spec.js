@@ -37,11 +37,24 @@ async function runP206IntegrationSuite() {
   const { generateClaimGapFollowups } = await import("../Backend/kai/services/kaiClaimGapFollowupService.js");
   const { createConflictReviewCandidate } = await import("../Backend/kai/services/kaiConflictReviewCandidateService.js");
   const { getClaimTraceabilitySummary } = await import("../Backend/kai/services/kaiClaimTraceabilityService.js");
+  const { recordEvidenceReviewDecision, recordClaimReviewDecision } = await import("../Backend/kai/services/kaiHumanReviewService.js");
   const { createPostgresEvidenceLineageRepository } = await import("../Backend/kai/dictionary/postgresEvidenceLineageRepository.js");
   const { createPostgresClaimProposalRepository } = await import("../Backend/kai/dictionary/postgresClaimProposalRepository.js");
   const { createPostgresClaimGapFollowupRepository } = await import("../Backend/kai/dictionary/postgresClaimGapFollowupRepository.js");
   const { createPostgresConflictReviewCandidateRepository } = await import("../Backend/kai/dictionary/postgresConflictReviewCandidateRepository.js");
-  const { createPostgresClaimTraceabilityRepository } = await import("../Backend/kai/dictionary/postgresClaimTraceabilityRepository.js");
+  const { createPostgresHumanReviewRepository } = await import("../Backend/kai/dictionary/postgresHumanReviewRepository.js");
+  const {
+    createPostgresClaimTraceabilityRepository,
+    evaluateClaimTraceabilityInTransaction,
+  } = await import("../Backend/kai/dictionary/postgresClaimTraceabilityRepository.js");
+  const { createPostgresCoverageReviewDecisionRepository } = await import("../Backend/kai/dictionary/postgresCoverageReviewDecisionRepository.js");
+  const {
+    acceptInternalCoverageLimitation,
+    acceptFunderCoverageLimitation,
+    acceptPublicCoverageLimitation,
+  } = await import("../Backend/kai/services/kaiCoverageReviewDecisionService.js");
+  const { completeClientFollowup } = await import("../Backend/kai/services/kaiClientFollowupCompletionService.js");
+  const { createPostgresClientFollowupCompletionRepository } = await import("../Backend/kai/dictionary/postgresClientFollowupCompletionRepository.js");
 
   const ORG = "00000000-0000-4000-8000-000000000001";
   const NOW = "2026-08-06T10:00:00.000Z";
@@ -90,6 +103,9 @@ async function runP206IntegrationSuite() {
   const gapRepo = createPostgresClaimGapFollowupRepository({ runInTransaction: withRunnerOwnedTransaction });
   const conflictRepo = createPostgresConflictReviewCandidateRepository({ runInTransaction: withRunnerOwnedTransaction });
   const traceRepo = createPostgresClaimTraceabilityRepository({ runInTransaction: withRunnerOwnedTransaction });
+  const humanReviewRepo = createPostgresHumanReviewRepository({ runInTransaction: withRunnerOwnedTransaction });
+  const coverageRepo = createPostgresCoverageReviewDecisionRepository({ runInTransaction: withRunnerOwnedTransaction });
+  const clientFollowupRepo = createPostgresClientFollowupCompletionRepository({ runInTransaction: withRunnerOwnedTransaction });
 
   test.after(async () => {
     await pool.end();
@@ -105,6 +121,62 @@ async function runP206IntegrationSuite() {
       { organizationId: ORG, claimId, requestedAudience, actorContext },
       { env: { KAI_SPRINT2_ENABLED: "true" }, claimTraceabilityRepository: repository },
     );
+  }
+
+  function unresolvedDimensionKeys(traceData) {
+    return Object.entries(traceData.dimensions)
+      .filter(([, value]) => value.assessment_status === "unresolved")
+      .map(([dimensionKey]) => dimensionKey)
+      .sort();
+  }
+
+  async function acceptPublicForEveryUnresolvedDimension(claimId) {
+    const traced = await trace(claimId, "public");
+    assert.equal(traced.ok, true, JSON.stringify(traced));
+    const unresolved = unresolvedDimensionKeys(traced.data);
+    for (const dimensionKey of unresolved) {
+      const result = await acceptPublicCoverageLimitation(
+        { organizationId: ORG, claimId, dimensionKey, actorContext, now: NOW },
+        { env: { KAI_SPRINT2_ENABLED: "true" }, coverageReviewDecisionRepository: coverageRepo, metadataOnlyAudit: auditRecorder() },
+      );
+      assert.equal(result.ok, true, JSON.stringify(result));
+    }
+    return unresolved;
+  }
+
+  async function completeAllFollowups(claimId) {
+    const rows = await query(
+      `SELECT cfi.client_followup_item_id, rq.updated_at
+         FROM kai.client_followup_items cfi
+         JOIN kai.review_queue_items rq
+           ON rq.organization_id = cfi.organization_id
+          AND rq.queue_type = 'client_followup'
+          AND rq.target_object_type = 'client_followup_item'
+          AND rq.target_object_id = cfi.client_followup_item_id
+        WHERE cfi.organization_id = $1::uuid
+          AND cfi.claim_id = $2::uuid
+        ORDER BY cfi.dimension_key`,
+      [ORG, claimId],
+    );
+    const clientReviewerActor = {
+      actorType: "human",
+      actorUserId: "90000000-0000-4000-8000-000000000007",
+      organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_reviewer" }],
+    };
+    for (const row of rows) {
+      const result = await completeClientFollowup(
+        {
+          organizationId: ORG,
+          claimId,
+          clientFollowupItemId: row.client_followup_item_id,
+          expectedUpdatedAt: new Date(row.updated_at).toISOString(),
+          actorContext: clientReviewerActor,
+          now: NOW,
+        },
+        { env: { KAI_SPRINT2_ENABLED: "true" }, clientFollowupCompletionRepository: clientFollowupRepo, metadataOnlyAudit: auditRecorder() },
+      );
+      assert.equal(result.ok, true, JSON.stringify(result));
+    }
   }
 
   let prepared;
@@ -419,5 +491,444 @@ async function runP206IntegrationSuite() {
     assert.equal(result.data.potential_conflict_groups.length, 100);
     assert.equal(result.data.eligible, false);
     assert.ok(result.data.blockerCodes.includes("traceability_incomplete"));
+  });
+
+  // --- KAI B1B public-authority wiring repair: real-Postgres P2-06 proof ---
+  //
+  // Builds one fresh claim (its own never-before-claimed evidence item, via
+  // extra committed dictionary fields under the same shared dictionary/
+  // profile the P1-04 smoke seed already committed - the established
+  // fixture-budget pattern also used by the P14-09 funder-authority-repair
+  // and P2-12 public-authority suites) with its evidence review resolved, an
+  // (optional) Phase-5 public-authority decision, and an (optional) claim-
+  // review decision recording the given approvedAudiences.
+  const PUBLIC_P206_DICTIONARY_ID = "60000000-0000-4000-8000-000000000001";
+  const PUBLIC_P206_FILE_PROFILE_ID = "50000000-0000-4000-8000-000000000001";
+  let publicP206FieldsSeeded = false;
+  async function seedPublicP206DictionaryFields() {
+    if (publicP206FieldsSeeded) return;
+    // Budget: one never-before-claimed evidence item per buildPublicP206Claim()
+    // call across this whole suite (3 pre-existing B1B audience-authority
+    // tests + 6 public coverage-consumption tests added by the P2-06
+    // public-consumption proof) - generously overprovisioned so a future test
+    // addition does not silently exhaust it.
+    for (const suffix of ["31", "32", "33", "34", "35", "36", "37", "38", "39", "40", "41", "42"]) {
+      await pool.query(
+        `INSERT INTO kai.data_dictionary_fields (
+           data_dictionary_field_id, data_dictionary_id, organization_id, file_profile_id,
+           profile_field_key, field_label_safe, data_type, created_at
+         ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $5, 'number', now())
+         ON CONFLICT DO NOTHING`,
+        [`70000000-0000-4000-8000-0000000000${suffix}`, PUBLIC_P206_DICTIONARY_ID, ORG, PUBLIC_P206_FILE_PROFILE_ID, `field_${Number(suffix)}`],
+      );
+    }
+    publicP206FieldsSeeded = true;
+  }
+
+  async function supersedePhase5PublicDecision(sourceVersionId, { publicUseAllowed }) {
+    const [lineage] = await query(
+      `SELECT intake_sensitivity_profile_id FROM kai.source_versions WHERE organization_id = $1::uuid AND source_version_id = $2::uuid`,
+      [ORG, sourceVersionId],
+    );
+    const intakeSensitivityProfileId = lineage.intake_sensitivity_profile_id;
+    let [sensitivityQueue] = await query(
+      `SELECT review_queue_item_id FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = 'sensitivity_review' AND target_object_type = 'intake_sensitivity_profile' AND target_object_id = $2::uuid`,
+      [ORG, intakeSensitivityProfileId],
+    );
+    if (!sensitivityQueue) {
+      [sensitivityQueue] = await query(
+        `INSERT INTO kai.review_queue_items (
+           organization_id, queue_type, target_object_type, target_object_id,
+           priority, queue_status, review_status, summary, required_action, queue_metadata, created_by_type
+         ) VALUES ($1::uuid, 'sensitivity_review', 'intake_sensitivity_profile', $2::uuid, 'medium', 'open', 'needs_gk_review',
+           'Review sensitivity and allowed-use metadata.', 'Review sensitivity and allowed-use metadata before governed use.', '{}'::jsonb, 'human')
+         RETURNING review_queue_item_id`,
+        [ORG, intakeSensitivityProfileId],
+      );
+    }
+    const [currentHead] = await query(
+      `SELECT d.decision_id
+         FROM kai.intake_sensitivity_review_decisions d
+        WHERE d.organization_id = $1::uuid
+          AND d.intake_sensitivity_profile_id = $2::uuid
+          AND NOT EXISTS (SELECT 1 FROM kai.intake_sensitivity_review_decisions s WHERE s.supersedes_decision_id = d.decision_id)`,
+      [ORG, intakeSensitivityProfileId],
+    );
+    await pool.query(
+      `INSERT INTO kai.intake_sensitivity_review_decisions (
+         organization_id, intake_sensitivity_profile_id, review_queue_item_id,
+         decision_outcome, reviewed_personal_data_status, reviewed_minor_data_status,
+         reviewed_health_housing_justice_immigration_status, reviewed_indigenous_governance_status,
+         reviewed_staff_notes_status, reviewed_story_testimonial_status, reviewed_small_cell_risk_status,
+         reviewed_financial_records_status, reviewed_consent_basis_status, reviewed_allowed_use_status,
+         reviewed_llm_processing_allowed, reviewed_product_learning_allowed, reviewed_public_use_allowed,
+         reviewed_funder_use_allowed, decided_by, decided_by_role, target_updated_at,
+         supersedes_decision_id, created_by_type, created_at
+       ) VALUES (
+         $1::uuid, $2::uuid, $3::uuid,
+         'reviewed', 'unknown', 'unknown',
+         'unknown', 'absent',
+         'unknown', 'unknown', 'unknown',
+         'unknown', 'present', 'allowed',
+         false, false, $4,
+         false, $5::uuid, 'gk_reviewer', $6::timestamptz,
+         $7, 'human', now()
+       )`,
+      [ORG, intakeSensitivityProfileId, sensitivityQueue.review_queue_item_id, publicUseAllowed, actorContext.actorUserId, NOW, currentHead?.decision_id ?? null],
+    );
+  }
+
+  async function buildPublicP206Claim({
+    phase5PublicAllowed = true,
+    claimReviewApprovedAudiences = ["internal", "public"],
+    forceRawClaimReviewInsert = false,
+  } = {}) {
+    await seedPublicP206DictionaryFields();
+    const [sourceVersion] = await query(
+      `SELECT source_version_id FROM kai.source_versions WHERE organization_id = $1::uuid AND is_current = true ORDER BY source_version_id LIMIT 1`,
+      [ORG],
+    );
+    const evidenceResult = await extractEvidenceFromSourceVersion(
+      { organizationId: ORG, sourceVersionId: sourceVersion.source_version_id, actorContext, now: NOW },
+      { env: { KAI_SPRINT2_ENABLED: "true" }, evidenceLineageRepository: evidenceRepo, metadataOnlyAudit: auditRecorder() },
+    );
+    assert.equal(evidenceResult.ok, true, JSON.stringify(evidenceResult));
+    const [evidenceRow] = await query(
+      `SELECT evidence_item_id FROM kai.evidence_items
+        WHERE organization_id = $1::uuid
+          AND NOT EXISTS (SELECT 1 FROM kai.claims c WHERE c.organization_id = kai.evidence_items.organization_id AND c.evidence_item_id = kai.evidence_items.evidence_item_id)
+        ORDER BY evidence_item_id ASC LIMIT 1`,
+      [ORG],
+    );
+    const claimResult = await proposeClaim(
+      { organizationId: ORG, evidenceItemId: evidenceRow.evidence_item_id, actorContext, now: NOW },
+      { env: { KAI_SPRINT2_ENABLED: "true" }, claimProposalRepository: claimRepo, metadataOnlyAudit: auditRecorder() },
+    );
+    assert.equal(claimResult.ok, true, JSON.stringify(claimResult));
+    const claimId = claimResult.data.claim.claim_id;
+    const gapResult = await generateClaimGapFollowups(
+      { organizationId: ORG, claimId, actorContext, now: NOW },
+      { env: { KAI_SPRINT2_ENABLED: "true" }, claimGapFollowupRepository: gapRepo, metadataOnlyAudit: auditRecorder() },
+    );
+    assert.equal(gapResult.ok, true, JSON.stringify(gapResult));
+
+    const [evidenceQueue] = await query(
+      `SELECT review_queue_item_id, updated_at FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = 'evidence_review' AND target_object_type = 'evidence_item' AND target_object_id = $2::uuid`,
+      [ORG, evidenceRow.evidence_item_id],
+    );
+    const evidenceReviewResult = await recordEvidenceReviewDecision(
+      {
+        organizationId: ORG, evidenceItemId: evidenceRow.evidence_item_id, reviewQueueItemId: evidenceQueue.review_queue_item_id,
+        expectedUpdatedAt: new Date(evidenceQueue.updated_at).toISOString(), decision: "supported", actorContext, now: NOW,
+      },
+      { env: { KAI_SPRINT2_ENABLED: "true" }, humanReviewRepository: humanReviewRepo, metadataOnlyAudit: auditRecorder() },
+    );
+    assert.equal(evidenceReviewResult.ok, true, JSON.stringify(evidenceReviewResult));
+
+    await supersedePhase5PublicDecision(sourceVersion.source_version_id, { publicUseAllowed: phase5PublicAllowed });
+
+    if (claimReviewApprovedAudiences && forceRawClaimReviewInsert) {
+      // recordClaimReviewDecision itself enforces the Phase-5 governance
+      // ceiling for an approved_audiences write that includes "public" (it
+      // would reject the write outright when Phase-5 public authority is not
+      // currently established) - the exact same precedent the P14-09
+      // funder-authority-repair suite already established for this case. A
+      // negative case that needs an already-approved "public" claim-review
+      // decision sitting against a since-changed/invalid Phase-5 state is
+      // therefore testing P2-06 read-time behavior against that decision, not
+      // the write-time ceiling enforced elsewhere, so it must record the
+      // decision directly.
+      const [claimQueue] = await query(
+        `SELECT review_queue_item_id, updated_at FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = 'claim_review' AND target_object_type = 'claim' AND target_object_id = $2::uuid`,
+        [ORG, claimId],
+      );
+      await pool.query(
+        `INSERT INTO kai.claim_review_decisions (
+           organization_id, claim_id, review_queue_item_id, decision_outcome,
+           limitation_notes, approved_audiences, decided_by, decided_by_role,
+           target_updated_at, supersedes_decision_id, created_by_type, created_at
+         ) VALUES ($1::uuid, $2::uuid, $3::uuid, 'approved', NULL, $4, $5::uuid, 'gk_reviewer', $6::timestamptz, NULL, 'human', now())`,
+        [ORG, claimId, claimQueue.review_queue_item_id, claimReviewApprovedAudiences, actorContext.actorUserId, new Date(claimQueue.updated_at).toISOString()],
+      );
+    } else if (claimReviewApprovedAudiences) {
+      const [claimQueue] = await query(
+        `SELECT review_queue_item_id, updated_at FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = 'claim_review' AND target_object_type = 'claim' AND target_object_id = $2::uuid`,
+        [ORG, claimId],
+      );
+      const claimReviewResult = await recordClaimReviewDecision(
+        {
+          organizationId: ORG, claimId, reviewQueueItemId: claimQueue.review_queue_item_id,
+          expectedUpdatedAt: new Date(claimQueue.updated_at).toISOString(), decision: "approved",
+          approvedAudiences: claimReviewApprovedAudiences, actorContext, now: NOW,
+        },
+        { env: { KAI_SPRINT2_ENABLED: "true" }, humanReviewRepository: humanReviewRepo, metadataOnlyAudit: auditRecorder() },
+      );
+      assert.equal(claimReviewResult.ok, true, JSON.stringify(claimReviewResult));
+    }
+
+    return { claimId, evidenceItemId: evidenceRow.evidence_item_id };
+  }
+
+  async function supersedePhase5FunderAuthorityForClaim(claimId, { permitted }) {
+    const [lineage] = await query(
+      `SELECT sv.intake_sensitivity_profile_id
+         FROM kai.claims c
+         JOIN kai.evidence_items e
+           ON e.organization_id = c.organization_id
+          AND e.evidence_item_id = c.evidence_item_id
+         JOIN kai.source_versions sv
+           ON sv.organization_id = e.organization_id
+          AND sv.source_version_id = e.source_version_id
+        WHERE c.organization_id = $1::uuid
+          AND c.claim_id = $2::uuid`,
+      [ORG, claimId],
+    );
+    const intakeSensitivityProfileId = lineage.intake_sensitivity_profile_id;
+    const [sensitivityQueue] = await query(
+      `SELECT review_queue_item_id FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = 'sensitivity_review' AND target_object_type = 'intake_sensitivity_profile' AND target_object_id = $2::uuid`,
+      [ORG, intakeSensitivityProfileId],
+    );
+    const [currentHead] = await query(
+      `SELECT d.decision_id
+         FROM kai.intake_sensitivity_review_decisions d
+        WHERE d.organization_id = $1::uuid
+          AND d.intake_sensitivity_profile_id = $2::uuid
+          AND NOT EXISTS (SELECT 1 FROM kai.intake_sensitivity_review_decisions s WHERE s.supersedes_decision_id = d.decision_id)`,
+      [ORG, intakeSensitivityProfileId],
+    );
+    await pool.query(
+      `INSERT INTO kai.intake_sensitivity_review_decisions (
+         organization_id, intake_sensitivity_profile_id, review_queue_item_id,
+         decision_outcome, reviewed_personal_data_status, reviewed_minor_data_status,
+         reviewed_health_housing_justice_immigration_status, reviewed_indigenous_governance_status,
+         reviewed_staff_notes_status, reviewed_story_testimonial_status, reviewed_small_cell_risk_status,
+         reviewed_financial_records_status, reviewed_consent_basis_status, reviewed_allowed_use_status,
+         reviewed_llm_processing_allowed, reviewed_product_learning_allowed, reviewed_public_use_allowed,
+         reviewed_funder_use_allowed, decided_by, decided_by_role, target_updated_at,
+         supersedes_decision_id, created_by_type, created_at
+       ) VALUES (
+         $1::uuid, $2::uuid, $3::uuid,
+         'reviewed', 'unknown', 'unknown',
+         'unknown', 'absent',
+         'unknown', 'unknown', 'unknown',
+         'unknown', 'present', 'allowed',
+         false, false, true,
+         $4, $5::uuid, 'gk_reviewer', $6::timestamptz,
+         $7, 'human', now()
+       )`,
+      [ORG, intakeSensitivityProfileId, sensitivityQueue.review_queue_item_id, permitted, actorContext.actorUserId, NOW, currentHead?.decision_id ?? null],
+    );
+  }
+
+  test("P2-06 B1B public-authority proof: current public-approved claim review + valid Phase-5 public authority clears every audience-authority blocker for requestedAudience='public' (real evaluator, real resolveEffectivePublicAuthority, real Phase-5 head lookup)", async () => {
+    const { claimId } = await buildPublicP206Claim({ phase5PublicAllowed: true, claimReviewApprovedAudiences: ["internal", "public"] });
+    const result = await withRunnerOwnedTransaction(async (tx) => {
+      await tx.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY");
+      return evaluateClaimTraceabilityInTransaction(tx, { organizationId: ORG, claimId, requestedAudience: "public" });
+    });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.data.requestedAudience, "public");
+    // The audience-authority verdict itself (AUDIENCE_AUTHORITY_BLOCKER_CODES)
+    // must be fully cleared: approvalForAudience("public") really executed
+    // resolveEffectivePublicAuthority() against the real current Phase-5 head
+    // and found it permitted, and the real current claim-review head really
+    // carries "public" in approved_audiences.
+    assert.ok(!result.data.blockerCodes.includes("claim_not_approved_for_requested_audience"), JSON.stringify(result.data.blockerCodes));
+    assert.ok(!result.data.blockerCodes.includes("audience_gate_closed"), JSON.stringify(result.data.blockerCodes));
+    assert.ok(!result.data.blockerCodes.includes("requirement_authority_absent"), JSON.stringify(result.data.blockerCodes));
+    // With zero coverage acceptances recorded, coverage_dimension_unresolved
+    // remains among the blockers and eligible stays false - this proves the
+    // audience-authority verdict (the three blockers above) is fully and
+    // independently satisfied on its own, decoupled from coverage-dimension
+    // state. The full end-to-end positive proof (audience authority AND
+    // coverage acceptance both satisfied, eligible:true) is below.
+    assert.ok(result.data.blockerCodes.includes("coverage_dimension_unresolved"));
+    assert.equal(result.data.eligible, false);
+  });
+
+  test("P2-06 public coverage consumption: accepted_public_with_limitation for every otherwise-unresolved dimension, layered on a public-approved claim review + valid Phase-5 public authority, clears coverage_dimension_unresolved and yields eligible=true for requestedAudience='public' (real evaluator, real resolveEffectivePublicAuthority, real P2-10 repository, real Phase-5 head lookup)", async () => {
+    const { claimId } = await buildPublicP206Claim({ phase5PublicAllowed: true, claimReviewApprovedAudiences: ["internal", "public"] });
+
+    const unresolved = await acceptPublicForEveryUnresolvedDimension(claimId);
+    assert.ok(unresolved.length > 0, "fixture must have at least one unresolved dimension to prove the coverage-acceptance path");
+    // client_followup_unresolved (P2-04/P2-11) is an independent, untouched
+    // blocker never affected by a coverage decision - it must be separately
+    // resolved for eligible to reach true, exactly as the established P2-10
+    // suite's own full-acceptance proof already does for internal/funder.
+    await completeAllFollowups(claimId);
+
+    const result = await withRunnerOwnedTransaction((tx) =>
+      evaluateClaimTraceabilityInTransaction(tx, { organizationId: ORG, claimId, requestedAudience: "public" }));
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.data.requestedAudience, "public");
+    assert.ok(!result.data.blockerCodes.includes("claim_not_approved_for_requested_audience"), JSON.stringify(result.data.blockerCodes));
+    assert.ok(!result.data.blockerCodes.includes("audience_gate_closed"), JSON.stringify(result.data.blockerCodes));
+    assert.ok(!result.data.blockerCodes.includes("requirement_authority_absent"), JSON.stringify(result.data.blockerCodes));
+    assert.ok(!result.data.blockerCodes.includes("coverage_dimension_unresolved"), JSON.stringify(result.data.blockerCodes));
+    for (const dimensionKey of unresolved) {
+      assert.equal(result.data.dimensions[dimensionKey].public_limitation_accepted, true);
+      assert.equal(result.data.dimensions[dimensionKey].blocks_requested_audience, false);
+    }
+    assert.deepEqual(result.data.blockerCodes, [], JSON.stringify(result.data.blockerCodes));
+    assert.equal(result.data.eligible, true);
+  });
+
+  test("P2-06 public coverage consumption, Negative: one required public coverage acceptance missing - coverage_dimension_unresolved fires and eligible stays false", async () => {
+    const { claimId } = await buildPublicP206Claim({ phase5PublicAllowed: true, claimReviewApprovedAudiences: ["internal", "public"] });
+    const traced = await trace(claimId, "public");
+    const unresolved = unresolvedDimensionKeys(traced.data);
+    assert.ok(unresolved.length > 1, "fixture must have at least two unresolved dimensions to prove partial acceptance");
+
+    for (const dimensionKey of unresolved.slice(1)) {
+      const result = await acceptPublicCoverageLimitation(
+        { organizationId: ORG, claimId, dimensionKey, actorContext, now: NOW },
+        { env: { KAI_SPRINT2_ENABLED: "true" }, coverageReviewDecisionRepository: coverageRepo, metadataOnlyAudit: auditRecorder() },
+      );
+      assert.equal(result.ok, true, JSON.stringify(result));
+    }
+
+    const result = await withRunnerOwnedTransaction((tx) =>
+      evaluateClaimTraceabilityInTransaction(tx, { organizationId: ORG, claimId, requestedAudience: "public" }));
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.ok(result.data.blockerCodes.includes("coverage_dimension_unresolved"));
+    assert.equal(result.data.dimensions[unresolved[0]].public_limitation_accepted, false);
+    assert.equal(result.data.dimensions[unresolved[0]].blocks_requested_audience, true);
+    assert.equal(result.data.eligible, false);
+  });
+
+  test("P2-06 public coverage consumption, Negative: a stale state_fingerprint is ignored - coverage_dimension_unresolved fires and eligible stays false", async () => {
+    const { claimId, evidenceItemId } = await buildPublicP206Claim({ phase5PublicAllowed: true, claimReviewApprovedAudiences: ["internal", "public"] });
+    await acceptPublicForEveryUnresolvedDimension(claimId);
+    await completeAllFollowups(claimId);
+
+    const eligibleBefore = await withRunnerOwnedTransaction((tx) =>
+      evaluateClaimTraceabilityInTransaction(tx, { organizationId: ORG, claimId, requestedAudience: "public" }));
+    assert.equal(eligibleBefore.data.eligible, true, JSON.stringify(eligibleBefore.data.blockerCodes));
+
+    // Mutating a fact bound into the fingerprint (support_strength) makes the
+    // CURRENT recomputed fingerprint differ from the one every prior
+    // accepted_public_with_limitation row was written against - the stale
+    // rows are never mutated, revoked, or deleted, they simply stop matching.
+    await pool.query(
+      `UPDATE kai.evidence_items SET support_strength = 'unassessed' WHERE organization_id = $1::uuid AND evidence_item_id = $2::uuid`,
+      [ORG, evidenceItemId],
+    );
+
+    const result = await withRunnerOwnedTransaction((tx) =>
+      evaluateClaimTraceabilityInTransaction(tx, { organizationId: ORG, claimId, requestedAudience: "public" }));
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.ok(result.data.blockerCodes.includes("coverage_dimension_unresolved"));
+    assert.equal(result.data.eligible, false);
+    for (const dimensionKey of Object.keys(result.data.dimensions)) {
+      if (result.data.dimensions[dimensionKey].assessment_status === "unresolved") {
+        assert.equal(result.data.dimensions[dimensionKey].public_limitation_accepted, false, `${dimensionKey} must not read the now-stale acceptance as current`);
+      }
+    }
+
+    await pool.query(
+      `UPDATE kai.evidence_items SET support_strength = 'reviewed_supported' WHERE organization_id = $1::uuid AND evidence_item_id = $2::uuid`,
+      [ORG, evidenceItemId],
+    );
+  });
+
+  test("P2-06 public coverage consumption, Negative: only accepted_internal_with_limitation exists - does not satisfy public", async () => {
+    const { claimId } = await buildPublicP206Claim({ phase5PublicAllowed: true, claimReviewApprovedAudiences: ["internal", "public"] });
+    const traced = await trace(claimId, "public");
+    const unresolved = unresolvedDimensionKeys(traced.data);
+    assert.ok(unresolved.length > 0);
+
+    for (const dimensionKey of unresolved) {
+      const result = await acceptInternalCoverageLimitation(
+        { organizationId: ORG, claimId, dimensionKey, actorContext, now: NOW },
+        { env: { KAI_SPRINT2_ENABLED: "true" }, coverageReviewDecisionRepository: coverageRepo, metadataOnlyAudit: auditRecorder() },
+      );
+      assert.equal(result.ok, true, JSON.stringify(result));
+    }
+
+    const result = await withRunnerOwnedTransaction((tx) =>
+      evaluateClaimTraceabilityInTransaction(tx, { organizationId: ORG, claimId, requestedAudience: "public" }));
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.ok(result.data.blockerCodes.includes("coverage_dimension_unresolved"));
+    assert.equal(result.data.eligible, false);
+    for (const dimensionKey of unresolved) {
+      assert.equal(result.data.dimensions[dimensionKey].internal_limitation_accepted, true);
+      assert.equal(result.data.dimensions[dimensionKey].public_limitation_accepted, false);
+      assert.equal(result.data.dimensions[dimensionKey].blocks_requested_audience, true);
+    }
+  });
+
+  test("P2-06 public coverage consumption, Negative: only accepted_funder_with_limitation exists - does not satisfy public", async () => {
+    const { claimId } = await buildPublicP206Claim({ phase5PublicAllowed: true, claimReviewApprovedAudiences: ["internal", "public"] });
+    await supersedePhase5FunderAuthorityForClaim(claimId, { permitted: true });
+    const traced = await trace(claimId, "public");
+    const unresolved = unresolvedDimensionKeys(traced.data);
+    assert.ok(unresolved.length > 0);
+
+    for (const dimensionKey of unresolved) {
+      const result = await acceptFunderCoverageLimitation(
+        { organizationId: ORG, claimId, dimensionKey, actorContext, now: NOW },
+        { env: { KAI_SPRINT2_ENABLED: "true" }, coverageReviewDecisionRepository: coverageRepo, metadataOnlyAudit: auditRecorder() },
+      );
+      assert.equal(result.ok, true, JSON.stringify(result));
+    }
+
+    const result = await withRunnerOwnedTransaction((tx) =>
+      evaluateClaimTraceabilityInTransaction(tx, { organizationId: ORG, claimId, requestedAudience: "public" }));
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.ok(result.data.blockerCodes.includes("coverage_dimension_unresolved"));
+    assert.equal(result.data.eligible, false);
+    for (const dimensionKey of unresolved) {
+      assert.equal(result.data.dimensions[dimensionKey].funder_limitation_accepted, true);
+      assert.equal(result.data.dimensions[dimensionKey].public_limitation_accepted, false);
+      assert.equal(result.data.dimensions[dimensionKey].blocks_requested_audience, true);
+    }
+  });
+
+  test("P2-06 public coverage consumption, Negative: current accepted_public_with_limitation exists for every dimension but Phase-5 public authority is absent/invalid - public remains ineligible", async () => {
+    const { claimId } = await buildPublicP206Claim({ phase5PublicAllowed: true, claimReviewApprovedAudiences: ["internal", "public"] });
+    await acceptPublicForEveryUnresolvedDimension(claimId);
+    await completeAllFollowups(claimId);
+
+    const before = await withRunnerOwnedTransaction((tx) =>
+      evaluateClaimTraceabilityInTransaction(tx, { organizationId: ORG, claimId, requestedAudience: "public" }));
+    assert.equal(before.data.eligible, true, JSON.stringify(before.data.blockerCodes));
+
+    // Revoke Phase-5 public authority AFTER the coverage decisions already
+    // exist and are current: the coverage-dimension carve-out never grants
+    // audience authority by itself, so this must independently fail closed.
+    const [sourceVersion] = await query(
+      `SELECT source_version_id FROM kai.source_versions WHERE organization_id = $1::uuid AND is_current = true ORDER BY source_version_id LIMIT 1`,
+      [ORG],
+    );
+    await supersedePhase5PublicDecision(sourceVersion.source_version_id, { publicUseAllowed: false });
+
+    const result = await withRunnerOwnedTransaction((tx) =>
+      evaluateClaimTraceabilityInTransaction(tx, { organizationId: ORG, claimId, requestedAudience: "public" }));
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.ok(result.data.blockerCodes.includes("claim_not_approved_for_requested_audience"));
+    assert.ok(result.data.blockerCodes.includes("audience_gate_closed"));
+    assert.ok(result.data.blockerCodes.includes("requirement_authority_absent"));
+    assert.ok(!result.data.blockerCodes.includes("coverage_dimension_unresolved"), "the coverage-dimension carve-out remains satisfied - only the independent audience-authority verdict fails");
+    assert.equal(result.data.eligible, false);
+  });
+
+  test("P2-06 B1B public-authority proof, Negative A: Phase-5 public authority absent/false + claim review includes 'public' - eligible=false and every audience-authority blocker fires", async () => {
+    const { claimId } = await buildPublicP206Claim({ phase5PublicAllowed: false, claimReviewApprovedAudiences: ["internal", "public"], forceRawClaimReviewInsert: true });
+    const result = await withRunnerOwnedTransaction((tx) => evaluateClaimTraceabilityInTransaction(tx, { organizationId: ORG, claimId, requestedAudience: "public" }));
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.data.eligible, false);
+    assert.ok(result.data.blockerCodes.includes("claim_not_approved_for_requested_audience"));
+    assert.ok(result.data.blockerCodes.includes("audience_gate_closed"));
+    assert.ok(result.data.blockerCodes.includes("requirement_authority_absent"));
+  });
+
+  test("P2-06 B1B public-authority proof, Negative B: Phase-5 public authority valid but the current claim review does NOT include 'public' - eligible=false and every audience-authority blocker fires", async () => {
+    const { claimId } = await buildPublicP206Claim({ phase5PublicAllowed: true, claimReviewApprovedAudiences: ["internal"] });
+    const result = await withRunnerOwnedTransaction((tx) => evaluateClaimTraceabilityInTransaction(tx, { organizationId: ORG, claimId, requestedAudience: "public" }));
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.data.eligible, false);
+    assert.ok(result.data.blockerCodes.includes("claim_not_approved_for_requested_audience"));
+    assert.ok(result.data.blockerCodes.includes("audience_gate_closed"));
+    assert.ok(result.data.blockerCodes.includes("requirement_authority_absent"));
   });
 }
