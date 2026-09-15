@@ -25,6 +25,7 @@ import {
   validateCompleteClientFollowupRequest,
   validateCompleteEvidenceReviewRequest,
   validateCompleteExportReviewRequest,
+  validateConfirmLimitationSnapshotRequest,
   validateCreateExportCandidateRequest,
   validateCreateGrantResponsePacketExportCandidateRequest,
   validateCreateGrantResponsePacketExportManifestRequest,
@@ -59,6 +60,7 @@ import {
   createProductionMetadataOnlyAuditForGeneratedContentDraft,
   createProductionMetadataOnlyAuditForGeneratedContentReview,
   createProductionMetadataOnlyAuditForGeneratedDraftExportCandidate,
+  createProductionMetadataOnlyAuditForGeneratedDraftLimitationSnapshot,
   createProductionMetadataOnlyAuditForBoardReportingCandidate,
   createProductionMetadataOnlyAuditForBoardReportingCandidateExportManifest,
   createProductionMetadataOnlyAuditForBoardReportingCandidateHumanFinalReleaseAuthority,
@@ -1184,7 +1186,10 @@ async function getExportReviewService() {
 }
 
 async function getExportCandidateService() {
-  if (intakeServiceOverride?.createGeneratedDraftExportCandidate) return intakeServiceOverride;
+  if (
+    intakeServiceOverride?.createGeneratedDraftExportCandidate
+    || intakeServiceOverride?.confirmGeneratedDraftLimitationSnapshotFromCitedPairs
+  ) return intakeServiceOverride;
   exportCandidateServicePromise ||= import("../services/kaiExportCandidateService.js");
   return exportCandidateServicePromise;
 }
@@ -1255,6 +1260,26 @@ function validateCreateExportCandidateRequestOrSend(req, res) {
   return identifiers;
 }
 
+function validateConfirmLimitationSnapshotRequestOrSend(req, res) {
+  if (!metadataContentTypeIsSupported(req)) {
+    sendKaiError(res, "unsupported_media_type");
+    return null;
+  }
+  const identifiers = generatedContentDraftIdentifiers(req);
+  if (!identifiers) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id_or_generated_content_draft_id")],
+    });
+    return null;
+  }
+  const result = validateConfirmLimitationSnapshotRequest(req.body);
+  if (!result.ok) {
+    sendKaiError(res, "validation_blocker", { blockers: result.blockers });
+    return null;
+  }
+  return identifiers;
+}
+
 function validateHumanFinalReleaseAuthorityRequestOrSend(req, res) {
   if (!metadataContentTypeIsSupported(req)) {
     sendKaiError(res, "unsupported_media_type");
@@ -1292,6 +1317,33 @@ router.post(
         requestedExportAudience: payload.requested_export_audience,
         actorContext,
         now,
+      });
+    }, 201);
+  },
+);
+
+router.post(
+  "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/limitation-snapshot",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    const identifiers = validateConfirmLimitationSnapshotRequestOrSend(req, res);
+    if (!identifiers) return;
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    return invokeService(res, async () => {
+      const service = await getExportCandidateService();
+      return service.confirmGeneratedDraftLimitationSnapshotFromCitedPairs({
+        organizationId: identifiers.organizationId,
+        generatedContentDraftId: identifiers.generatedContentDraftId,
+        actorContext,
+        now,
+      }, {
+        metadataOnlyAudit: createProductionMetadataOnlyAuditForGeneratedDraftLimitationSnapshot({
+          organizationId: identifiers.organizationId,
+          generatedContentDraftId: identifiers.generatedContentDraftId,
+          actorContext,
+          now,
+        }),
       });
     }, 201);
   },

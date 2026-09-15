@@ -150,6 +150,7 @@ function makeState({ currentUseEligible = true } = {}) {
       },
     }],
     currentUseEligible,
+    limitationSnapshots: [],
     writes: [],
   };
 }
@@ -269,6 +270,13 @@ function makeTx(state) {
         const [organizationId, targetType, targetId, queueType] = params;
         return { rows: state.genContentReviewQueues.filter((q) => q.organization_id === organizationId && q.target_object_type === targetType && q.target_object_id === targetId && q.queue_type === queueType) };
       }
+      if (s.includes("FROM kai.limitation_snapshots")) {
+        const [organizationId, draftId] = params;
+        const current = state.limitationSnapshots.some((snap) => snap.organization_id === organizationId
+          && snap.generated_content_draft_id === draftId
+          && !state.limitationSnapshots.some((successor) => successor.supersedes_snapshot_id === snap.limitation_snapshot_id));
+        return { rows: current ? [{ "?column?": 1 }] : [] };
+      }
       if (s.includes("FROM kai.upload_lifecycle_audit")) {
         const [organizationId, operation, draftId, queueId] = params;
         return {
@@ -301,6 +309,8 @@ function packetDto(overrides = {}) {
     exportReviewStatus: "needs_gk_review",
     currentUseEligible: true,
     exportEligible: false,
+    limitationSnapshotConfirmed: false,
+    candidateReadyToPrepare: false,
     validatorResult: {
       validator_key: "VAL-EXP-001",
       severity: "blocker",
@@ -610,12 +620,13 @@ test("P3-11 packet exposes the authoritative exportReviewUpdatedAt for an in_pro
   assert.equal(result.data.exportReviewUpdatedAt, "2026-08-06T10:05:00.000Z");
 });
 
-test("P3-11 the P3-06 DTO allowlist contains exactly one new field beyond the accepted P3-06 shape", () => {
+test("P3-11 the P3-06 DTO allowlist contains exactly the accepted P3-06 shape plus exportReviewUpdatedAt and the Phase-14 candidate-readiness fields", () => {
   const state = makeState();
   return evaluateGeneratedDraftExportReviewPacketInTransaction(makeTx(state), txInput(), evaluator(state)).then((result) => {
     assert.equal(result.ok, true);
     assert.deepEqual([...Object.keys(result.data)].sort(), [
       "blocks",
+      "candidateReadyToPrepare",
       "contentType",
       "currentUseEligible",
       "draftStatus",
@@ -628,6 +639,7 @@ test("P3-11 the P3-06 DTO allowlist contains exactly one new field beyond the ac
       "generatedContentReviewQueueStatus",
       "generatedContentReviewStatus",
       "generationRunId",
+      "limitationSnapshotConfirmed",
       "requestedExportAudience",
       "validatorResult",
     ]);

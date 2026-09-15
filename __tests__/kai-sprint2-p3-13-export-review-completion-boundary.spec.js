@@ -142,6 +142,10 @@ function makeFakeTx(state) {
         };
       }
 
+      if (s.includes("FROM kai.limitation_snapshots")) {
+        return { rows: [] };
+      }
+
       throw new Error(`unhandled fake query: ${s}`);
     },
   };

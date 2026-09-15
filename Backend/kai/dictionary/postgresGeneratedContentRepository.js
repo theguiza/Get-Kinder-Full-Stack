@@ -2347,6 +2347,28 @@ export async function evaluateExportReviewRequestStateInTransaction(tx, input) {
   });
 }
 
+// Phase-14: read-only existence check for the current (non-superseded)
+// limitation snapshot on this draft, using the exact same append-only-chain
+// "no successor" definition of current as
+// postgresExportCandidateRepository.loadCurrentSnapshotForUpdate. This is an
+// existence check only - it does not recompute fingerprint/citation-coverage
+// currentness, which remains exclusively decided inside
+// createExportCandidate's own transaction at candidate creation/replay time.
+async function loadCurrentLimitationSnapshotExists(tx, { organizationId, generatedContentDraftId }) {
+  const { rows } = await tx.query(
+    `SELECT 1
+       FROM kai.limitation_snapshots ls
+      WHERE ls.organization_id = $1::uuid AND ls.generated_content_draft_id = $2::uuid
+        AND NOT EXISTS (
+              SELECT 1 FROM kai.limitation_snapshots successor
+               WHERE successor.supersedes_snapshot_id = ls.limitation_snapshot_id
+            )
+      LIMIT 1`,
+    [organizationId, generatedContentDraftId],
+  );
+  return rows.length > 0;
+}
+
 export async function evaluateGeneratedDraftExportReviewPacketInTransaction(
   tx,
   input,
@@ -2375,6 +2397,16 @@ export async function evaluateGeneratedDraftExportReviewPacketInTransaction(
     finalGate: false,
     affirmativeHumanExportAuthority: false,
   });
+  const exportReviewResolved = exportReviewResult.data.exportReviewQueueStatus === "resolved"
+    && exportReviewResult.data.exportReviewStatus === "resolved";
+  const limitationSnapshotConfirmed = await loadCurrentLimitationSnapshotExists(tx, {
+    organizationId: input.organizationId,
+    generatedContentDraftId: input.generatedContentDraftId,
+  });
+  const candidateReadyToPrepare = exportReviewResolved
+    && limitationSnapshotConfirmed
+    && ALLOWED_GENERATED_CONTENT_TYPES.has(packetResult.data.contentType)
+    && validatorResult.severity === "pass";
   return success({
     generationRunId: packetResult.data.generationRunId,
     generatedContentDraftId: packetResult.data.generatedContentDraftId,
@@ -2388,6 +2420,8 @@ export async function evaluateGeneratedDraftExportReviewPacketInTransaction(
     exportReviewStatus: exportReviewResult.data.exportReviewStatus,
     currentUseEligible: packetResult.data.currentUseEligible,
     exportEligible: validatorResult.severity === "pass",
+    limitationSnapshotConfirmed,
+    candidateReadyToPrepare,
     validatorResult,
     blocks: packetResult.data.blocks,
     exportReviewUpdatedAt: exportReviewResult.data.exportReviewUpdatedAt,

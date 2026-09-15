@@ -313,6 +313,11 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/export-review-request",
     "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/generated-content-review-queue/:reviewQueueItemId/complete",
     "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/generated-content-review-queue/:reviewQueueItemId/start",
+    // Phase-14: generic authenticated route wiring the existing
+    // confirmGeneratedDraftLimitationSnapshot capability, so the generic
+    // finalization path (already used by evidence_summary) also works for
+    // data_gap_memo and the other already-authorized generated-content types.
+    "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/limitation-snapshot",
     // KAI P3-01/P3-02 internal evidence-summary generation and generated-draft
     // review-packet read surface (additive; every prior entry preserved
     // verbatim).

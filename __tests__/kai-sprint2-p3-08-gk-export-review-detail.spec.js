@@ -28,6 +28,8 @@ const validDto = Object.freeze({
   exportReviewStatus: "needs_gk_review",
   currentUseEligible: true,
   exportEligible: false,
+  limitationSnapshotConfirmed: false,
+  candidateReadyToPrepare: false,
   validatorResult: {
     validator_key: "VAL-EXP-001",
     severity: "blocker",
@@ -103,6 +105,8 @@ test("P3-08 success renders only allowlisted P3-06 fields and drops everything e
     exportReviewStatus: "needs_gk_review",
     currentUseEligible: true,
     exportEligible: false,
+    limitationSnapshotConfirmed: false,
+    candidateReadyToPrepare: false,
     exportReviewQueueStatus: "open",
     exportReviewUpdatedAt: "2026-08-06T09:00:00.000Z",
     exportManifestId: null,

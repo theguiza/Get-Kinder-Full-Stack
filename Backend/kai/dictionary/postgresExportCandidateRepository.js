@@ -3,7 +3,7 @@ import crypto from "node:crypto";
 import { withTransaction } from "../db/kaiDb.js";
 import {
   LIMITATION_SNAPSHOT_ALLOWED_ROLES,
-  EXPORT_CANDIDATE_CONTENT_TYPE,
+  EXPORT_CANDIDATE_CONTENT_TYPES,
   EXPORT_CANDIDATE_AUDIENCES,
   EXPORT_CANDIDATE_FINGERPRINT_CONTRACT_VERSION,
   LIMITATION_SNAPSHOT_AUDIT_OPERATION,
@@ -619,6 +619,35 @@ export async function loadExportCandidateCanonicalRepresentationInTransaction(
 
 export function createPostgresExportCandidateRepository({ runInTransaction = withTransaction } = {}) {
   return Object.freeze({
+    // Phase-14: read-only lookup of the exact claim/evidence pairs a
+    // limitation snapshot for this draft must cover, per the same
+    // loadCitedPairs query confirmLimitationSnapshot itself uses. This lets a
+    // caller build a generic confirmation request (entries derived from the
+    // draft's own persisted citations, not client-supplied) without
+    // duplicating or relaxing the coverage check confirmLimitationSnapshot
+    // still re-runs, authoritatively, inside its own transaction.
+    async loadCitedPairsForDraft(input) {
+      if (!UUID_PATTERN.test(input?.organizationId) || !UUID_PATTERN.test(input?.generatedContentDraftId)) {
+        return failure("validation_blocker");
+      }
+      try {
+        return await runInTransaction(async (tx) => {
+          const draft = await loadDraftRow(tx, input);
+          if (!draft) return failure("not_found");
+          const citedPairs = await loadCitedPairs(tx, input);
+          return success({
+            citedPairs: citedPairs.map((pair) => ({
+              claimId: pair.claim_id,
+              evidenceItemId: pair.evidence_item_id,
+            })),
+          });
+        });
+      } catch (error) {
+        if (error?.code === "23503" || error?.code === "22P02" || error?.code === "23514") return failure("validation_blocker");
+        return failure("system_error");
+      }
+    },
+
     async confirmLimitationSnapshot(input, dependencies = {}) {
       if (!validateConfirmLimitationSnapshotInput(input)) return failure("validation_blocker");
       if (!dependencies.metadataOnlyAudit) return failure("validation_blocker");
@@ -738,7 +767,7 @@ export function createPostgresExportCandidateRepository({ runInTransaction = wit
         return await runInTransaction(async (tx) => {
           const draft = await loadDraftRow(tx, input);
           if (!draft) return failure("not_found");
-          if (draft.content_type !== EXPORT_CANDIDATE_CONTENT_TYPE) return failure("conflict_current_state_changed");
+          if (!EXPORT_CANDIDATE_CONTENT_TYPES.includes(draft.content_type)) return failure("conflict_current_state_changed");
           if (!EXPORT_CANDIDATE_AUDIENCES.includes(draft.requested_audience)) return failure("conflict_current_state_changed");
 
           const generatedContentResolved = await loadResolvedQueueRow(tx, {

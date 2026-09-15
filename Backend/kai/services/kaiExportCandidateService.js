@@ -113,6 +113,61 @@ export async function confirmGeneratedDraftLimitationSnapshot(input, dependencie
   return { ok: true, data: result.data, error: null };
 }
 
+// Phase-14: generic confirmation entry point for the existing
+// confirmGeneratedDraftLimitationSnapshot capability. The browser never
+// curates claim/evidence/limitation-code entries here - entries are derived
+// server-side, exclusively from the draft's own persisted citation pairs
+// (loadCitedPairsForDraft), each with an empty limitationCodes array. This
+// reuses the existing limitation-snapshot entry contract exactly (isLimitationCodeSet
+// accepts an empty array) and delegates to the unmodified
+// repository.confirmLimitationSnapshot for every currentness/fingerprint/
+// audit/authority check - this function adds no new semantics of its own.
+export async function confirmGeneratedDraftLimitationSnapshotFromCitedPairs(input, dependencies = {}) {
+  const env = dependencies.env || process.env;
+  if (!isKaiSprint2Enabled(env)) return buildKaiError("feature_disabled", { data: null });
+  if (!isKaiGenerationEnabled(env)) return buildKaiError("feature_disabled", { data: null });
+  if (!isKaiPublicExportEnabled(env)) return buildKaiError("feature_disabled", { data: null });
+  if (!isCreateExportCandidateInput(input)) return buildKaiError("validation_blocker", { data: null });
+  if (!isMappedHumanActor(input.actorContext)) return buildKaiError("authorization_denied", { data: null });
+
+  const auth = validateActorCanPerformOperation(
+    input.actorContext,
+    CONFIRM_LIMITATION_SNAPSHOT_OPERATION,
+    input.organizationId,
+    { allowedRoles: LIMITATION_SNAPSHOT_ROLES },
+  );
+  if (!auth.ok) {
+    return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers, data: null });
+  }
+
+  const repository =
+    dependencies.exportCandidateRepository || (await createDefaultExportCandidateRepository());
+
+  const citedPairsResult = await repository.loadCitedPairsForDraft(input);
+  if (!citedPairsResult.ok) {
+    return buildKaiError(citedPairsResult.error.code, { status: citedPairsResult.error.status, data: null });
+  }
+  if (citedPairsResult.data.citedPairs.length === 0) return buildKaiError("validation_blocker", { data: null });
+
+  const entries = citedPairsResult.data.citedPairs.map((pair) => ({
+    claimId: pair.claimId,
+    evidenceItemId: pair.evidenceItemId,
+    limitationCodes: [],
+  }));
+
+  const result = await repository.confirmLimitationSnapshot({
+    organizationId: input.organizationId,
+    generatedContentDraftId: input.generatedContentDraftId,
+    entries,
+    actorContext: input.actorContext,
+    now: input.now,
+  }, {
+    metadataOnlyAudit: dependencies.metadataOnlyAudit,
+  });
+  if (!result.ok) return buildKaiError(result.error.code, { status: result.error.status, data: null });
+  return { ok: true, data: result.data, error: null };
+}
+
 export async function createGeneratedDraftExportCandidate(input, dependencies = {}) {
   const env = dependencies.env || process.env;
   if (!isKaiSprint2Enabled(env)) return buildKaiError("feature_disabled", { data: null });

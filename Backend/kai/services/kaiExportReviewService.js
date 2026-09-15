@@ -224,6 +224,8 @@ const EXPORT_REVIEW_PACKET_KEYS = new Set([
   "exportReviewStatus",
   "currentUseEligible",
   "exportEligible",
+  "limitationSnapshotConfirmed",
+  "candidateReadyToPrepare",
   "validatorResult",
   "blocks",
   "exportReviewUpdatedAt",
@@ -332,8 +334,15 @@ function isGeneratedDraftExportReviewPacketDto(data) {
   )) return false;
   if (typeof data.currentUseEligible !== "boolean") return false;
   if (typeof data.exportEligible !== "boolean") return false;
+  if (typeof data.limitationSnapshotConfirmed !== "boolean") return false;
+  if (typeof data.candidateReadyToPrepare !== "boolean") return false;
   if (!isValidatorResultDto(data.validatorResult, data.generatedContentDraftId)) return false;
   if (data.exportEligible !== (data.validatorResult.severity === "pass")) return false;
+  // candidateReadyToPrepare is server-derived and strictly more conservative
+  // than exportEligible alone (also requires export-review resolution and
+  // a current limitation snapshot) - it can never be true when exportEligible
+  // is false.
+  if (data.candidateReadyToPrepare && !data.exportEligible) return false;
   if (!Array.isArray(data.blocks) || data.blocks.length < 1 || data.blocks.length > 20) return false;
   for (const [index, block] of data.blocks.entries()) {
     const blockHasId = Object.prototype.hasOwnProperty.call(block, "generatedContentBlockId");

@@ -65,6 +65,7 @@ const REQUEST_EXPORT_REVIEW_REQUEST_KEYS = new Set([
   "requested_export_audience",
 ]);
 const CREATE_EXPORT_CANDIDATE_REQUEST_KEYS = new Set([]);
+const CONFIRM_LIMITATION_SNAPSHOT_REQUEST_KEYS = new Set([]);
 const CREATE_GRANT_RESPONSE_PACKET_EXPORT_CANDIDATE_REQUEST_KEYS = new Set([]);
 const REQUEST_BOARD_REPORTING_CANDIDATE_REVIEW_REQUEST_KEYS = new Set([]);
 const START_BOARD_REPORTING_CANDIDATE_REVIEW_REQUEST_KEYS = new Set([
@@ -586,6 +587,21 @@ export function validateCreateExportCandidateRequest(payload) {
   }
   const keys = Object.keys(payload);
   if (keys.some((key) => !CREATE_EXPORT_CANDIDATE_REQUEST_KEYS.has(key))) {
+    return { ok: false, blockers: [requestBlocker("unknown_field", "body")] };
+  }
+  return { ok: true, blockers: [] };
+}
+
+// Browser must send no snapshot entries - claim/evidence pairs and their
+// (empty) limitation codes are derived server-side exclusively from the
+// draft's own persisted citations, so this route accepts an empty body only,
+// exactly like validateCreateExportCandidateRequest above.
+export function validateConfirmLimitationSnapshotRequest(payload) {
+  if (!isPlainObject(payload)) {
+    return { ok: false, blockers: [requestBlocker("request_body_must_be_object", "body")] };
+  }
+  const keys = Object.keys(payload);
+  if (keys.some((key) => !CONFIRM_LIMITATION_SNAPSHOT_REQUEST_KEYS.has(key))) {
     return { ok: false, blockers: [requestBlocker("unknown_field", "body")] };
   }
   return { ok: true, blockers: [] };

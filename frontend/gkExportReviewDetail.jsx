@@ -2,13 +2,16 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   canCompleteReview,
+  canConfirmLimitationSnapshot,
   canPrepareExportCandidate,
   canStartReview,
   completePath,
   completeReviewRequest,
+  confirmLimitationSnapshotRequest,
   createExportCandidateRequest,
   createExportManifestRequest,
   decideCompleteResult,
+  decideConfirmLimitationSnapshotResult,
   decideCreateExportCandidateResult,
   decideCreateExportManifestResult,
   decideGrantFinalReleaseAuthorityResult,
@@ -23,6 +26,7 @@ import {
   finalReleaseAuthorityPath,
   getJson,
   grantFinalReleaseAuthorityRequest,
+  limitationSnapshotPath,
   packetPath,
   revokeFinalReleaseAuthorityRequest,
   startPath,
@@ -154,6 +158,8 @@ function PacketDetail({ model }) {
       <FieldRow label="Export-review status" value={model.exportReviewStatus} />
       <FieldRow label="Current-use eligible" value={model.currentUseEligible} />
       <FieldRow label="Export eligible" value={model.exportEligible} />
+      <FieldRow label="Limitation snapshot confirmed" value={model.limitationSnapshotConfirmed} />
+      <FieldRow label="Candidate ready to prepare" value={model.candidateReadyToPrepare} />
 
       <h4>VAL-EXP-001</h4>
       <FieldRow label="Severity" value={model.validatorSeverity} />
@@ -178,6 +184,8 @@ export default function GkExportReviewDetail({
   const [startErrorMessage, setStartErrorMessage] = useState(null);
   const [completePending, setCompletePending] = useState(false);
   const [completeErrorMessage, setCompleteErrorMessage] = useState(null);
+  const [snapshotPending, setSnapshotPending] = useState(false);
+  const [snapshotErrorMessage, setSnapshotErrorMessage] = useState(null);
   const [exportCandidateId, setExportCandidateId] = useState(null);
   const [candidatePending, setCandidatePending] = useState(false);
   const [candidateErrorMessage, setCandidateErrorMessage] = useState(null);
@@ -263,6 +271,27 @@ export default function GkExportReviewDetail({
       if (mountedRef.current) setCompletePending(false);
     }
   }, [completePending, outcome, organizationId, generatedContentDraftId, exportReviewQueueItemId, loadPacket]);
+
+  const handleConfirmLimitationSnapshot = useCallback(async () => {
+    if (snapshotPending || outcome?.kind !== "success" || !outcome.model) return;
+    setSnapshotPending(true);
+    setSnapshotErrorMessage(null);
+    try {
+      const result = await confirmLimitationSnapshotRequest(
+        limitationSnapshotPath(organizationId, generatedContentDraftId),
+      );
+      const decided = decideConfirmLimitationSnapshotResult(result);
+      if (decided.kind === "success" || decided.kind === "conflict") {
+        await loadPacket();
+      } else {
+        setSnapshotErrorMessage(decided.message);
+      }
+    } catch {
+      if (mountedRef.current) setSnapshotErrorMessage("Request failed (network error).");
+    } finally {
+      if (mountedRef.current) setSnapshotPending(false);
+    }
+  }, [snapshotPending, outcome, organizationId, generatedContentDraftId, loadPacket]);
 
   const handlePrepareExportCandidate = useCallback(async () => {
     if (candidatePending || outcome?.kind !== "success" || !outcome.model) return;
@@ -359,6 +388,7 @@ export default function GkExportReviewDetail({
   const model = outcome?.kind === "success" ? outcome.model : null;
   const showStartControl = canStartReview(model);
   const showCompleteControl = canCompleteReview(model);
+  const showConfirmSnapshotControl = canConfirmLimitationSnapshot(model) && !exportCandidateId && !exportManifestId;
   const showPrepareCandidateControl = canPrepareExportCandidate(model) && !exportCandidateId && !exportManifestId;
   const showGrantAuthorityControl = !!exportCandidateId && !authorityEffective && !exportManifestId;
   const showRevokeAuthorityControl = !!exportCandidateId && authorityEffective && !exportManifestId;
@@ -399,6 +429,17 @@ export default function GkExportReviewDetail({
 
           <section className="gk-export-review-finalization">
             <h3>Governed export finalization</h3>
+            {showConfirmSnapshotControl ? (
+              <button
+                type="button"
+                className="gk-export-review-confirm-snapshot-button"
+                onClick={handleConfirmLimitationSnapshot}
+                disabled={snapshotPending}
+              >
+                Confirm Limitation Snapshot
+              </button>
+            ) : null}
+            {snapshotErrorMessage ? <p className="gk-export-review-note">{snapshotErrorMessage}</p> : null}
             {showPrepareCandidateControl ? (
               <button
                 type="button"

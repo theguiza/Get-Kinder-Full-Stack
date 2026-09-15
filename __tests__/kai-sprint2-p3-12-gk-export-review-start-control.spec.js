@@ -146,13 +146,16 @@ test("P3-12 other safe start failures render an error message without touching p
 // Superseded by the governed export finalization package: Prepare Export
 // Candidate, Grant Final Release Authority, Finalize Export, and Download
 // Markdown were added as their own explicit, separately-authorized controls.
-// What remains pinned is that no approve/reject/mark-ready wording exists and
-// that button count reflects exactly the accepted controls (Start Review,
-// Complete Review, plus the three governed-finalization action buttons).
+// Phase-14 adds one more: Confirm Limitation Snapshot, the generic UI
+// continuation for the existing confirmGeneratedDraftLimitationSnapshot
+// capability. What remains pinned is that no approve/reject/mark-ready
+// wording exists and that button count reflects exactly the accepted
+// controls (Start Review, Complete Review, plus the four
+// governed-finalization action buttons).
 test("P3-12 frontend source still contains no approve/reject/mark-ready controls after adding Start Review", () => {
   assert.doesNotMatch(jsxSource, /\b(approve|reject|mark-ready|markReady)\b/i);
   assert.doesNotMatch(logicSource, /\b(approve|reject|mark-ready|markReady)\b/i);
-  assert.equal((jsxSource.match(/<button/g) || []).length, 6, "Start Review, Complete Review, Prepare Export Candidate, Grant Final Release Authority, Revoke Final Release Authority, and Finalize Export are the only six button controls");
+  assert.equal((jsxSource.match(/<button/g) || []).length, 7, "Start Review, Complete Review, Confirm Limitation Snapshot, Prepare Export Candidate, Grant Final Release Authority, Revoke Final Release Authority, and Finalize Export are the only seven button controls");
 });
 
 test("P3-12 P3-08 citation rendering ('Why can KAI say this?') is unchanged", () => {

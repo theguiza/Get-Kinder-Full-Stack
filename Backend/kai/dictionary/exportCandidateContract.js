@@ -4,7 +4,19 @@ export const EXPORT_CANDIDATE_ALLOWED_ROLES = Object.freeze(["gk_admin"]);
 export const LIMITATION_CODE_PATTERN = /^[a-z][a-z0-9_.:-]{0,95}$/;
 export const LIMITATION_CODES_MAX_COUNT = 32;
 
-export const EXPORT_CANDIDATE_CONTENT_TYPE = "evidence_summary";
+// Phase-14: widened from the single hardcoded "evidence_summary" value to
+// the same generic generated-content type set already authorized across the
+// generation/generated-content-review/export-review path (see
+// ALLOWED_GENERATED_CONTENT_TYPES in kaiGeneratedContentService.js and
+// kaiExportReviewService.js). Board Reporting and Grant Response Packet are
+// separate content families with their own repositories and are not part of
+// this set.
+export const EXPORT_CANDIDATE_CONTENT_TYPES = Object.freeze([
+  "evidence_summary",
+  "impact_narrative",
+  "readiness_assessment",
+  "data_gap_memo",
+]);
 export const EXPORT_CANDIDATE_AUDIENCES = Object.freeze(["internal", "funder", "public"]);
 export const EXPORT_CANDIDATE_FINGERPRINT_CONTRACT_VERSION = "kai-sprint2-p3-16-export-candidate-fingerprint-v1";
 

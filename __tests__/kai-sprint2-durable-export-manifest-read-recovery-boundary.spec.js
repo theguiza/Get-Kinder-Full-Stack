@@ -78,6 +78,8 @@ function passingPacket() {
       exportReviewStatus: "resolved",
       currentUseEligible: true,
       exportEligible: true,
+      limitationSnapshotConfirmed: true,
+      candidateReadyToPrepare: true,
       validatorResult: {
         validator_key: "VAL-EXP-001",
         severity: "pass",
@@ -293,6 +295,7 @@ test("getGeneratedDraftExportReviewPacket's projected data carries exactly the a
     [...Object.keys(result.data)].sort(),
     [
       "blocks",
+      "candidateReadyToPrepare",
       "contentType",
       "currentUseEligible",
       "draftStatus",
@@ -307,6 +310,7 @@ test("getGeneratedDraftExportReviewPacket's projected data carries exactly the a
       "generatedContentReviewQueueStatus",
       "generatedContentReviewStatus",
       "generationRunId",
+      "limitationSnapshotConfirmed",
       "requestedExportAudience",
       "validatorResult",
     ].sort(),

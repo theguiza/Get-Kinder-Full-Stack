@@ -48,6 +48,11 @@ export function exportCandidatePath(organizationId, generatedContentDraftId) {
     + `/generated-content-drafts/${generatedContentDraftId}/export-candidates`;
 }
 
+export function limitationSnapshotPath(organizationId, generatedContentDraftId) {
+  return `${BASE_PATH}/admin/organizations/${organizationId}`
+    + `/generated-content-drafts/${generatedContentDraftId}/limitation-snapshot`;
+}
+
 export function finalReleaseAuthorityPath(organizationId, exportCandidateId) {
   return `${BASE_PATH}/admin/organizations/${organizationId}`
     + `/export-candidates/${exportCandidateId}/final-release-authority`;
@@ -117,6 +122,19 @@ export async function completeReviewRequest(path, expectedUpdatedAt) {
     credentials: "same-origin",
     headers: { Accept: "application/json", "Content-Type": "application/json" },
     body: JSON.stringify({ expected_updated_at: expectedUpdatedAt }),
+  });
+  return { statusCode: response.status, body: await readJson(response) };
+}
+
+// The confirmation request body is fixed to exactly {} - no client-curated
+// claim/evidence/limitation-code entries ever leave this call; entries are
+// derived server-side, exclusively from the draft's own persisted citations.
+export async function confirmLimitationSnapshotRequest(path) {
+  const response = await fetch(path, {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify({}),
   });
   return { statusCode: response.status, body: await readJson(response) };
 }
@@ -192,6 +210,8 @@ export function toRenderModel(data) {
     exportReviewStatus: data.exportReviewStatus,
     currentUseEligible: data.currentUseEligible,
     exportEligible: data.exportEligible,
+    limitationSnapshotConfirmed: data.limitationSnapshotConfirmed,
+    candidateReadyToPrepare: data.candidateReadyToPrepare,
     // P3-12: retained for Start Review control-state logic only. Neither
     // field is rendered by this page - see gkExportReviewDetail.jsx.
     exportReviewQueueStatus: data.exportReviewQueueStatus,
@@ -291,14 +311,39 @@ export function decideCompleteResult(result) {
   return { kind: "error", message: errorText(result) };
 }
 
-// Governed export finalization only ever becomes reachable once the
-// existing packet already reports exportEligible. The generic packet does
-// not currently expose the P3-16 limitation-snapshot currentness prerequisite
-// that createExportCandidate enforces, so this UI must stay on the
-// server-derived conservative gate instead of approximating candidate
-// readiness from review/current-use fields alone.
+// Phase-14: the packet now exposes the P3-16 limitation-snapshot currentness
+// prerequisite directly (candidateReadyToPrepare), computed server-side from
+// export-review resolution, current-snapshot existence, authorized content
+// type, and VAL-EXP-001 exportEligible - so this UI can gate Prepare Export
+// Candidate on the real, authoritative readiness state instead of the
+// conservative exportEligible-only approximation. No currentness, fingerprint,
+// or eligibility computation happens here.
 export function canPrepareExportCandidate(model) {
-  return !!model && model.exportEligible === true;
+  return !!model && model.candidateReadyToPrepare === true;
+}
+
+// Phase-14: shows the limitation-snapshot confirmation control whenever
+// export review is resolved (the same prerequisite createExportCandidate
+// itself requires before it ever reaches the snapshot check) but the
+// server-derived packet reports no current snapshot yet.
+export function canConfirmLimitationSnapshot(model) {
+  return !!model
+    && model.exportReviewQueueStatus === "resolved"
+    && model.exportReviewStatus === "resolved"
+    && model.limitationSnapshotConfirmed === false;
+}
+
+// P3-16 limitation-snapshot confirmation: success/conflict both resolve by
+// re-fetching the P3-07 packet once (never by trusting this response body),
+// exactly like decideStartResult/decideCompleteResult above.
+export function decideConfirmLimitationSnapshotResult(result) {
+  if (result?.statusCode === 201 && result?.body?.ok === true) {
+    return { kind: "success" };
+  }
+  if (result?.body?.error?.code === "conflict_current_state_changed") {
+    return { kind: "conflict" };
+  }
+  return { kind: "error", message: errorText(result) };
 }
 
 // P3-16 candidate preparation: success returns the exact exportCandidateId

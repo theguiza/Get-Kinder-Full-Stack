@@ -29077,3 +29077,31 @@ production mutation, real-client-data access, schema/migration change,
 feature-flag/configuration change, Board Reporting change, Grant Response
 Packet change, renderer change, finalization bypass, or
 `00_KAI_CURRENT_STATE.md` update performed.
+
+## Phase-14 Generic Data Gap Memo Finalization Path (2026-09-15)
+
+**Owner authorization (bounded, local-only):** the owner explicitly
+authorizes, as local repository work only:
+
+* `data_gap_memo` using the existing generic Phase-14 export-candidate /
+  finalization path (resolved generated-content review -> resolved export
+  review -> current limitation snapshot -> export candidate create/replay ->
+  human final-release authority -> export manifest -> persisted output),
+  alongside the existing `evidence_summary` workflow, without altering that
+  workflow's behavior;
+* exposing the existing `confirmGeneratedDraftLimitationSnapshot` service
+  through the smallest generic authenticated route and GK export-review UI
+  necessary to complete that path, reusing the existing limitation-snapshot
+  entry contract, citations, roles, validators, and currentness/fingerprint
+  semantics exactly (no new taxonomy);
+* the smallest server-derived candidate-readiness projection required to
+  replace `exportEligible === true` as the `Prepare Export Candidate` proxy,
+  with all currentness/fingerprint/finalGate/authority/eligibility
+  computation remaining server-side.
+
+This authorization does NOT cover, and none of the following may change:
+push, deployment, production mutation, database/schema/migration changes,
+feature-flag changes, VAL-GEN-005, VAL-EXP-001 internals, Board Reporting,
+Grant Response Packet, or real-client-data access. `gk_reviewer`/`gk_admin`
+human confirmation must remain required throughout. This entry is the record
+of that authorization; it is not itself a new planning checkpoint.
