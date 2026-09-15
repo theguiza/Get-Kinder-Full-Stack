@@ -29011,3 +29011,69 @@ Board Reporting, Grant Response Packet, feature flag, production config, or
 database/cloud path changed. Current production readiness of the supplied
 synthetic memo remains NOT_CONFIRMED until the owner performs the authenticated
 browser test against the target environment.
+
+## Phase-14 Generic Export-Candidate 409 Regression Repair (2026-09-15)
+
+**Owner authorization (bounded, local-only):** repair only the production
+regression introduced by `04dad192f28578f428b7493a883d1af59100893f` where the
+generic GK export-review UI exposed `Prepare Export Candidate` for a
+USER_CONFIRMED existing reviewed `evidence_summary` and the real production
+POST returned `409 conflict_current_state_changed`. No production access,
+deployment, database query/mutation, feature-flag/configuration work, Board
+Reporting work, Grant Response Packet work, renderer work, schema/migration
+work, or `00_KAI_CURRENT_STATE.md` update was performed.
+
+**Trace finding (TOOL_VERIFIED):** current HEAD initially was exactly
+`04dad192f28578f428b7493a883d1af59100893f` on `main`, working tree clean.
+The relevant 04dad19 diff changed `canPrepareExportCandidate` from the
+server-derived `exportEligible === true` display gate to a client predicate:
+resolved generated-content review, resolved export-review queue/status, and
+`currentUseEligible === true`. The authoritative
+`createGeneratedDraftExportCandidate` service gates feature flags, exact input,
+mapped human actor, and `gk_admin`, then delegates to
+`postgresExportCandidateRepository.createExportCandidate`. That repository
+requires: evidence-summary content type, allowed audience, resolved
+generated-content review queue, resolved export-review queue, a current
+limitation snapshot with entries, at least one canonical block, citation-pair
+coverage between the snapshot and live graph, canonical fingerprint
+construction, metadata-only audit, and insert/replay against
+`(organization_id, generated_content_draft_id, requested_audience,
+canonical_fingerprint)`. The exact branch producing the observed code is
+`const snapshot = await loadCurrentSnapshotWithEntries(tx, input); if
+(!snapshot) return failure("conflict_current_state_changed");`; additional
+candidate currentness/fingerprint branches can also return the same code, but
+the UI regression state specifically lacked any UI-exposed limitation snapshot
+currentness prerequisite.
+
+**Mismatch and repair (TOOL_VERIFIED):** the UI allowed resolved review lanes
+plus `currentUseEligible:true`. The backend actually also requires a current
+confirmed limitation snapshot and snapshot/graph fingerprint consistency, which
+the generic packet does not expose and the generic UI does not currently offer
+as a prerequisite action. The smallest repair restored
+`canPrepareExportCandidate(model)` to the conservative server-derived
+`model.exportEligible === true` gate and preserved the independent revoke
+control from 04dad19. No backend candidate/currentness/CAS semantics changed,
+and no 409 was suppressed or converted into success.
+
+**Files changed:** `frontend/gkExportReviewDetailLogic.js`,
+`__tests__/kai-sprint2-gk-export-review-governed-finalization-control.spec.js`,
+`public/js/bundles/entry.js`, and this ExecPlan entry.
+
+**Verification (TOOL_VERIFIED):** `DATABASE_URL` was set to
+`postgres://127.0.0.1:9/kai_sentinel` for every Node/npm command. Focused UI
+and directly coupled controls:
+`node --test __tests__/kai-sprint2-gk-export-review-governed-finalization-control.spec.js __tests__/kai-sprint2-p3-12-gk-export-review-start-control.spec.js __tests__/kai-sprint2-p3-15-gk-export-review-complete-control.spec.js`
+-> 49/49 PASS. Candidate/currentness/final gate slice:
+`node --test __tests__/kai-sprint2-p3-16-export-candidate-foundation-boundary.spec.js __tests__/kai-sprint2-p3-18-final-export-eligibility-gate-boundary.spec.js __tests__/kai-sprint2-p3-18-final-export-eligibility-gate-authority-state-proof.spec.js`
+-> 45/45 PASS. Broader generic read/UI/download slice first hit sandbox-only
+`listen EPERM 127.0.0.1` in the P3-07 route listener test; the non-listener
+subtests passed, and the exact route suite passed on approved loopback-listener
+rerun (`__tests__/kai-sprint2-p3-07-export-review-packet-route.spec.js` ->
+8/8 PASS). `npm run build` -> PASS (`vite build`, 56 modules transformed).
+
+**Status:** EXPORT_CANDIDATE_409_REGRESSION_REPAIRED locally. Production
+evidence remains USER_CONFIRMED, not TOOL_VERIFIED. No push, deployment,
+production mutation, real-client-data access, schema/migration change,
+feature-flag/configuration change, Board Reporting change, Grant Response
+Packet change, renderer change, finalization bypass, or
+`00_KAI_CURRENT_STATE.md` update performed.

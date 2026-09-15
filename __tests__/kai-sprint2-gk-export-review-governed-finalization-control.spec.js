@@ -121,13 +121,29 @@ test("createExportManifestRequest sends exactly { export_review_queue_item_id } 
   }
 });
 
-test("canPrepareExportCandidate is gated on resolved/resolved current-use eligibility, not final export eligibility", () => {
+test("canPrepareExportCandidate does not expose the 04dad19 invalid transition for resolved/current-use packets that are still export-ineligible", () => {
+  // This is the production-regression state: the packet's review lanes are
+  // resolved and current-use eligibility remains true, but the server-derived
+  // exportEligible gate is false. The P3-16 candidate service can still reject
+  // this state with conflict_current_state_changed when the current limitation
+  // snapshot prerequisite is absent/stale, so the generic UI must not offer the
+  // POST.
   assert.equal(canPrepareExportCandidate({
     generatedContentReviewStatus: "resolved",
     exportReviewQueueStatus: "resolved",
     exportReviewStatus: "resolved",
     currentUseEligible: true,
     exportEligible: false,
+  }), false);
+});
+
+test("canPrepareExportCandidate follows the server-derived exportEligible gate exactly", () => {
+  assert.equal(canPrepareExportCandidate({
+    generatedContentReviewStatus: "resolved",
+    exportReviewQueueStatus: "resolved",
+    exportReviewStatus: "resolved",
+    currentUseEligible: true,
+    exportEligible: true,
   }), true);
   assert.equal(canPrepareExportCandidate({
     generatedContentReviewStatus: "resolved",
@@ -135,14 +151,14 @@ test("canPrepareExportCandidate is gated on resolved/resolved current-use eligib
     exportReviewStatus: "resolved",
     currentUseEligible: false,
     exportEligible: true,
-  }), false);
+  }), true);
   assert.equal(canPrepareExportCandidate({
     generatedContentReviewStatus: "resolved",
     exportReviewQueueStatus: "in_progress",
     exportReviewStatus: "needs_gk_review",
     currentUseEligible: true,
     exportEligible: true,
-  }), false);
+  }), true);
   assert.equal(canPrepareExportCandidate(null), false);
   assert.equal(canPrepareExportCandidate(undefined), false);
 });

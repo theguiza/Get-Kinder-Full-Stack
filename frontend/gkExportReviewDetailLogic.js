@@ -291,17 +291,14 @@ export function decideCompleteResult(result) {
   return { kind: "error", message: errorText(result) };
 }
 
-// Candidate preparation becomes reachable only after both review lanes are
-// resolved and the draft remains current-use eligible. It deliberately does
-// not require exportEligible: that final-export flag can remain false until
-// the explicit human authority step has occurred, and the P3-19 manifest
-// transaction re-evaluates VAL-EXP-001 regardless of this UI display gate.
+// Governed export finalization only ever becomes reachable once the
+// existing packet already reports exportEligible. The generic packet does
+// not currently expose the P3-16 limitation-snapshot currentness prerequisite
+// that createExportCandidate enforces, so this UI must stay on the
+// server-derived conservative gate instead of approximating candidate
+// readiness from review/current-use fields alone.
 export function canPrepareExportCandidate(model) {
-  return !!model
-    && model.generatedContentReviewStatus === "resolved"
-    && model.exportReviewQueueStatus === "resolved"
-    && model.exportReviewStatus === "resolved"
-    && model.currentUseEligible === true;
+  return !!model && model.exportEligible === true;
 }
 
 // P3-16 candidate preparation: success returns the exact exportCandidateId
