@@ -34,8 +34,8 @@
 //        while exportEligible/full VAL-EXP-001 is still FALSE (no
 //        candidate, no authority, no manifest exist yet)
 //     -> real createGeneratedDraftExportCandidate (+ idempotent replay)
-//     -> real recordHumanFinalReleaseAuthorityDecision (P3-17 grant)
-//     -> real evaluateFinalExportEligibility (VAL-EXP-001 PASS)
+//     -> real P3-17 export-authority decision/effectiveness
+//     -> real P3-19 manifest write with authoritative P3-18/VAL-EXP-001 evaluation in-transaction
 //     -> real exportManifestRepository.createExportManifest (persisted
 //        manifest, FK'd to the effective grant)
 //     -> real composeExportManifestRenderModel (persisted-output retrieval,
@@ -105,10 +105,8 @@ async function runDataGapMemoFinalizationCompositionSuite() {
   const { createPostgresExportCandidateRepository } = await import("../Backend/kai/dictionary/postgresExportCandidateRepository.js");
   const { confirmGeneratedDraftLimitationSnapshot, createGeneratedDraftExportCandidate } = await import("../Backend/kai/services/kaiExportCandidateService.js");
   const { EXPORT_CANDIDATE_CONTENT_TYPES } = await import("../Backend/kai/dictionary/exportCandidateContract.js");
-  const { createPostgresHumanAuthorityDecisionRepository, loadExportCandidateForAuthority } =
+  const { createPostgresHumanAuthorityDecisionRepository } =
     await import("../Backend/kai/dictionary/postgresHumanAuthorityDecisionRepository.js");
-  const { recordHumanFinalReleaseAuthorityDecision } = await import("../Backend/kai/services/kaiHumanAuthorityDecisionService.js");
-  const { evaluateFinalExportEligibility } = await import("../Backend/kai/services/kaiFinalExportEligibilityGateService.js");
   const { createPostgresExportManifestRepository } = await import("../Backend/kai/dictionary/postgresExportManifestRepository.js");
   const { createProductionMetadataOnlyAuditForExportManifest } = await import("../Backend/kai/services/kaiMetadataOnlyAuditComposition.js");
   const { createPostgresExportManifestRenderModelRepository } = await import("../Backend/kai/dictionary/postgresExportManifestRenderModelRepository.js");
@@ -440,17 +438,6 @@ async function runDataGapMemoFinalizationCompositionSuite() {
       ));
   }
 
-  function finalGateDependencies(evidenceId) {
-    return {
-      env: enabledEnv,
-      runInTransaction: withRunnerOwnedTransaction,
-      evaluatePacket: evaluateGeneratedDraftExportReviewPacketInTransaction,
-      evaluator: currentUseEvaluator(evidenceId, { eligible: true }),
-      loadCandidate: loadExportCandidateForAuthority,
-      humanAuthorityDecisionRepository,
-    };
-  }
-
   test("P14 EXPORT_CANDIDATE_CONTENT_TYPES includes data_gap_memo (Phase-14 allowlist widening this suite proves end to end)", () => {
     assert.ok(EXPORT_CANDIDATE_CONTENT_TYPES.includes("data_gap_memo"));
     assert.ok(!EXPORT_CANDIDATE_CONTENT_TYPES.includes("board_reporting_candidate"));
@@ -543,70 +530,85 @@ async function runDataGapMemoFinalizationCompositionSuite() {
       assert.equal(authorityRows[0].count, 0);
     });
 
-    // ------------------------------------------------------------------
-    // DISCOVERED DEFECT (real DB, not fabricated, not fixed here): creating
-    // a REAL data_gap_memo export candidate against this repository's own
-    // real, frozen migration chain fails - not because of anything in the
-    // candidateReadyToPrepare repair (states 1-4 above are all genuinely
-    // real and pass), but because of a SEPARATE, pre-existing schema/
-    // application drift this composition proof newly surfaces:
-    // migrations/kai_sprint2_p3_16_export_candidate_foundation.sql declares
-    //   CONSTRAINT export_candidates_p3_16_content_type_check
-    //     CHECK (content_type = 'evidence_summary')
-    // - a CHECK constraint that was NEVER widened when
-    // Backend/kai/dictionary/exportCandidateContract.js's
-    // EXPORT_CANDIDATE_CONTENT_TYPES was widened (commit 4061e71, "Wire
-    // data_gap_memo through the generic Phase-14 export finalization path")
-    // to {evidence_summary, impact_narrative, readiness_assessment,
-    // data_gap_memo} - unlike the sibling generation_runs/
-    // generated_content_drafts.content_type constraints, which
-    // migrations/kai_sprint2_p14_14_generated_content_type_evolution.sql
-    // DID widen for exactly this same class of drift. The prior fake-tx
-    // proof (kai-sprint2-p14-export-candidate-data-gap-memo-content-type-gap.spec.js,
-    // commit 65806c3, "Prove ... (no code repair)") could never catch this,
-    // because its in-memory fake transaction has no real CHECK constraint to
-    // enforce - this is precisely the class of gap only a genuine
-    // ephemeral-Postgres proof (this file) can surface. Confirmed
-    // interactively while writing this file: the real INSERT fails with
-    // SQLSTATE 23514 on export_candidates_p3_16_content_type_check, which
-    // the repository's own catch block maps to validation_blocker (422) -
-    // this is the SAME repository code path used successfully for
-    // evidence_summary in every sibling P3-16/P3-18/P3-19/P3-20 suite.
-    //
-    // This defect sits entirely outside this task's permitted repair
-    // surface (an ADDITIVE schema migration widening one named CHECK
-    // constraint), and this task's own hard constraints explicitly forbid
-    // changing schema/migrations - so it is proven and disclosed here, not
-    // silently worked around and not fixed. See the final report for the
-    // exact smallest_remaining_action.
-    // ------------------------------------------------------------------
-    await t.test("STATE 5 (DISCOVERED DEFECT, NOT FIXED - out of this task's permitted schema-change scope): real export-candidate creation for data_gap_memo fails at the real database, because kai.export_candidates' own CHECK constraint was never widened past 'evidence_summary' even though EXPORT_CANDIDATE_CONTENT_TYPES was", async () => {
-      const attempt = await createGeneratedDraftExportCandidate(
+    let exportCandidateId = null;
+
+    await t.test("STATE 5: create export candidate via the real service/repository path -> exportCandidateId, data_gap_memo + limitationSnapshotId linkage, fingerprint present; identical replay converges", async () => {
+      const fresh = await createGeneratedDraftExportCandidate(
         { organizationId: ORG, generatedContentDraftId: pipeline.draftId, actorContext: gkAdmin, now: NOW },
         { env: enabledEnv, exportCandidateRepository: exportCandidateRepository(), metadataOnlyAudit: auditRecorder() },
       );
-      assert.equal(attempt.ok, false, "if this ever starts passing, the schema drift below has been closed and this whole disclosed-defect test (and its skip: true siblings) should be replaced with the full real STATE 5-9 proof");
-      assert.equal(attempt.error.code, "validation_blocker");
-      assert.equal(attempt.error.status, 422);
 
-      const candidateRows = await query(`SELECT count(*)::int AS count FROM kai.export_candidates WHERE generated_content_draft_id = $1::uuid`, [pipeline.draftId]);
-      assert.equal(candidateRows[0].count, 0, "the real database never persists a data_gap_memo export candidate at all under the current, unmodified migration chain");
-
-      const constraintRows = await query(
-        `SELECT pg_get_constraintdef(c.oid) AS definition
-           FROM pg_constraint c
-          WHERE c.conrelid = 'kai.export_candidates'::regclass
-            AND c.conname = 'export_candidates_p3_16_content_type_check'`,
+      assert.equal(fresh.ok, true, JSON.stringify(fresh));
+      assert.equal(fresh.data.replayed, false);
+      assert.match(
+        fresh.data.exportCandidateId,
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
       );
-      assert.equal(constraintRows.length, 1);
+      assert.match(fresh.data.canonicalFingerprint, /^[0-9a-f]{64}$/);
+
+      exportCandidateId = fresh.data.exportCandidateId;
+
+      const candidateRows = await query(
+        `SELECT
+           export_candidate_id::text AS export_candidate_id,
+           organization_id::text AS organization_id,
+           content_type,
+           generated_content_draft_id::text AS generated_content_draft_id,
+           limitation_snapshot_id::text AS limitation_snapshot_id,
+           requested_audience,
+           fingerprint_contract_version,
+           canonical_fingerprint
+         FROM kai.export_candidates
+         WHERE export_candidate_id = $1::uuid`,
+        [exportCandidateId],
+      );
+
+      assert.equal(candidateRows.length, 1);
+      assert.equal(candidateRows[0].export_candidate_id, exportCandidateId);
+      assert.equal(candidateRows[0].organization_id, ORG);
+      assert.equal(candidateRows[0].content_type, "data_gap_memo");
+      assert.equal(candidateRows[0].generated_content_draft_id, pipeline.draftId);
       assert.equal(
-        constraintRows[0].definition,
-        "CHECK ((content_type = 'evidence_summary'::text))",
-        "documents the exact, real, currently-deployed constraint definition this composition proof found - single-value, never widened for impact_narrative/readiness_assessment/data_gap_memo",
+        candidateRows[0].limitation_snapshot_id,
+        fresh.data.limitationSnapshotId,
+      );
+      assert.equal(
+        candidateRows[0].canonical_fingerprint,
+        fresh.data.canonicalFingerprint,
+      );
+
+      const replay = await createGeneratedDraftExportCandidate(
+        { organizationId: ORG, generatedContentDraftId: pipeline.draftId, actorContext: gkAdmin, now: NOW },
+        { env: enabledEnv, exportCandidateRepository: exportCandidateRepository(), metadataOnlyAudit: auditRecorder() },
+      );
+
+      assert.equal(replay.ok, true, JSON.stringify(replay));
+      assert.equal(replay.data.replayed, true);
+      assert.equal(replay.data.exportCandidateId, exportCandidateId);
+      assert.equal(
+        replay.data.limitationSnapshotId,
+        fresh.data.limitationSnapshotId,
+      );
+      assert.equal(
+        replay.data.canonicalFingerprint,
+        fresh.data.canonicalFingerprint,
+      );
+
+      const candidateCountRows = await query(
+        `SELECT count(*)::int AS count
+           FROM kai.export_candidates
+          WHERE generated_content_draft_id = $1::uuid`,
+        [pipeline.draftId],
+      );
+
+      assert.equal(
+        candidateCountRows[0].count,
+        1,
+        "identical replay must converge on the existing candidate rather than persist a duplicate",
       );
     });
 
-    await t.test("STATE 5b: gk_reviewer (not gk_admin) is refused candidate creation before any repository call is reached (proven independently of the STATE 5 schema defect - this is an authorization gate, not a database round-trip)", async () => {
+    await t.test("STATE 5b: gk_reviewer (not gk_admin) is refused candidate creation before any repository call is reached", async () => {
       const denied = await createGeneratedDraftExportCandidate(
         { organizationId: ORG, generatedContentDraftId: pipeline.draftId, actorContext: gkReviewer, now: NOW },
         { env: enabledEnv, exportCandidateRepository: exportCandidateRepository(), metadataOnlyAudit: auditRecorder() },
@@ -615,25 +617,506 @@ async function runDataGapMemoFinalizationCompositionSuite() {
       assert.equal(denied.error.code, "authorization_denied");
     });
 
-    await t.test("STATE 6-9 (BLOCKED, not executed): human authority grant, VAL-EXP-001 finalGate PASS, manifest persistence, persisted-output retrieval, and the remaining fail-closed regressions all require a real exportCandidateId, which STATE 5 proves the real database currently refuses to create for data_gap_memo", { skip: true }, () => {
-      // Intentionally not run: fabricating a stand-in exportCandidateId
-      // (e.g. bypassing the CHECK constraint with a raw, service-independent
-      // INSERT) would mean states 6-9 exercise a row the real, unmodified
-      // createGeneratedDraftExportCandidate path could never itself have
-      // produced - exactly the kind of core-business-function stubbing this
-      // task's instructions forbid. The SAME generic machinery (P3-17
-      // authority, VAL-EXP-001/kaiFinalExportEligibilityGateService,
-      // P3-19 manifest persistence, P3-20 durable read-recovery, and
-      // Markdown/CSV/PDF/DOCX render-model retrieval) is already proven end
-      // to end for evidence_summary by this repository's own
-      // kai-sprint2-p3-18-real-persisted-final-gate-proof.integration.spec.js,
-      // kai-sprint2-p3-19-export-manifest-foundation.integration.spec.js, and
-      // kai-sprint2-durable-export-manifest-read-recovery.integration.spec.js
-      // (all re-run alongside this file - see the runner's own test list) -
-      // none of that generic machinery is content-type-specific, and none of
-      // it is implicated in the STATE 5 defect. Only the data_gap_memo
-      // CONTENT-TYPE-SPECIFIC path is blocked, and only by the undisclosed
-      // schema gap documented above.
+    let authorityDecisionId = null;
+    let exportManifestId = null;
+
+    const manifestInput = (now, overrides = {}) => ({
+      organizationId: ORG,
+      exportCandidateId,
+      exportReviewQueueItemId: pipeline.exportReviewQueueItemId,
+      actorContext: gkAdmin,
+      now,
+      ...overrides,
+    });
+
+    const manifestDependencies = (now) => ({
+      metadataOnlyAudit: createProductionMetadataOnlyAuditForExportManifest({
+        organizationId: ORG,
+        exportCandidateId,
+        actorContext: gkAdmin,
+        now,
+      }),
+      evaluator: currentUseEvaluator(
+        pipeline.evidenceId,
+        { eligible: true },
+      ),
+    });
+
+    await t.test("STATE 6: absent authority blocks finalization; real P3-17 export authority grant is then bound to the exact data_gap_memo export candidate and becomes effective", async () => {
+      const beforeGrant =
+        await exportManifestRepository.createExportManifest(
+          manifestInput(GRANT_AT),
+          manifestDependencies(GRANT_AT),
+        );
+
+      assert.equal(beforeGrant.ok, false);
+      assert.equal(beforeGrant.error.code, "validation_blocker");
+
+      const beforeGrantRows = await query(
+        `SELECT count(*)::int AS count
+           FROM kai.export_manifests
+          WHERE export_candidate_id = $1::uuid`,
+        [exportCandidateId],
+      );
+
+      assert.equal(beforeGrantRows[0].count, 0);
+
+      const grant =
+        await humanAuthorityDecisionRepository.recordDecision(
+          {
+            organizationId: ORG,
+            exportCandidateId,
+            decisionType: "export_authority_granted",
+            decisionAction: "grant",
+            requestedAudience: "internal",
+            actorContext: gkAdmin,
+            now: GRANT_AT,
+          },
+          {
+            metadataOnlyAudit: auditRecorder(),
+          },
+        );
+
+      assert.equal(grant.ok, true, JSON.stringify(grant));
+      authorityDecisionId = grant.data.decisionId;
+
+      const effectiveness =
+        await humanAuthorityDecisionRepository.evaluateEffectiveness({
+          organizationId: ORG,
+          exportCandidateId,
+          decisionType: "export_authority_granted",
+        });
+
+      assert.equal(effectiveness.ok, true, JSON.stringify(effectiveness));
+      assert.equal(effectiveness.data.effective, true);
+      assert.equal(
+        effectiveness.data.headDecisionId,
+        authorityDecisionId,
+      );
+    });
+
+    await t.test("STATE 7: authoritative P3-18/VAL-EXP-001 manifest write succeeds, persists exact candidate/review/authority bindings, and identical replay converges", async () => {
+      const first =
+        await exportManifestRepository.createExportManifest(
+          manifestInput(GRANT_AT),
+          manifestDependencies(GRANT_AT),
+        );
+
+      assert.equal(first.ok, true, JSON.stringify(first));
+      assert.equal(first.data.replayed, false);
+      assert.equal(
+        first.data.effectiveAuthorityDecisionId,
+        authorityDecisionId,
+      );
+
+      exportManifestId = first.data.exportManifestId;
+
+      assert.match(
+        exportManifestId,
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+      );
+
+      const rows = await query(
+        `SELECT
+           export_manifest_id::text AS export_manifest_id,
+           export_candidate_id::text AS export_candidate_id,
+           export_review_queue_item_id::text AS export_review_queue_item_id,
+           effective_authority_decision_id::text AS effective_authority_decision_id,
+           effective_authority_decision_type,
+           canonical_fingerprint
+         FROM kai.export_manifests
+         WHERE export_manifest_id = $1::uuid`,
+        [exportManifestId],
+      );
+
+      assert.equal(rows.length, 1);
+      assert.equal(
+        rows[0].export_manifest_id,
+        exportManifestId,
+      );
+      assert.equal(
+        rows[0].export_candidate_id,
+        exportCandidateId,
+      );
+      assert.equal(
+        rows[0].export_review_queue_item_id,
+        pipeline.exportReviewQueueItemId,
+      );
+      assert.equal(
+        rows[0].effective_authority_decision_id,
+        authorityDecisionId,
+      );
+      assert.equal(
+        rows[0].effective_authority_decision_type,
+        "export_authority_granted",
+      );
+      assert.match(
+        rows[0].canonical_fingerprint,
+        /^[0-9a-f]{64}$/,
+      );
+
+      const replay =
+        await exportManifestRepository.createExportManifest(
+          manifestInput(GRANT_AT),
+          manifestDependencies(GRANT_AT),
+        );
+
+      assert.equal(replay.ok, true, JSON.stringify(replay));
+      assert.equal(replay.data.replayed, true);
+      assert.equal(
+        replay.data.exportManifestId,
+        exportManifestId,
+      );
+
+      const manifestCount = await query(
+        `SELECT count(*)::int AS count
+           FROM kai.export_manifests
+          WHERE export_candidate_id = $1::uuid`,
+        [exportCandidateId],
+      );
+
+      assert.equal(manifestCount[0].count, 1);
+
+      const auditCount = await query(
+        `SELECT count(*)::int AS count
+           FROM kai.audit_events
+          WHERE metadata->>'export_manifest_id' = $1`,
+        [exportManifestId],
+      );
+
+      assert.equal(
+        auditCount[0].count,
+        1,
+        "manifest replay must not publish a second audit event",
+      );
+
+      const draftRows = await query(
+        `SELECT draft_status
+           FROM kai.generated_content_drafts
+          WHERE generated_content_draft_id = $1::uuid`,
+        [pipeline.draftId],
+      );
+
+      assert.equal(
+        draftRows[0].draft_status,
+        "draft",
+        "manifest creation must not silently rewrite generated-content draft state",
+      );
+    });
+
+    await t.test("STATE 8: fresh governed reload recovers the persisted manifest identity; manifest-bound render reconstruction and Markdown/CSV/PDF/DOCX serialization preserve citation linkage without regeneration", async () => {
+      const recovered =
+        await getGeneratedDraftExportReviewPacket(
+          {
+            organizationId: ORG,
+            generatedContentDraftId: pipeline.draftId,
+            exportReviewQueueItemId:
+              pipeline.exportReviewQueueItemId,
+            actorContext: gkAdmin,
+          },
+          {
+            env: enabledEnv,
+            runInTransaction: withRunnerOwnedTransaction,
+            evaluator: currentUseEvaluator(
+              pipeline.evidenceId,
+              { eligible: true },
+            ),
+          },
+        );
+
+      assert.equal(
+        recovered.ok,
+        true,
+        JSON.stringify(recovered),
+      );
+      assert.equal(
+        recovered.data.exportManifestId,
+        exportManifestId,
+      );
+      assert.deepEqual(
+        recovered.data.exportManifestHistory.map(
+          (entry) => entry.exportManifestId,
+        ),
+        [exportManifestId],
+      );
+
+      const composed =
+        await exportManifestRenderModelRepository
+          .composeExportManifestRenderModel({
+            organizationId: ORG,
+            exportManifestId,
+          });
+
+      assert.equal(
+        composed.ok,
+        true,
+        JSON.stringify(composed),
+      );
+
+      const renderModel = composed.data;
+
+      assert.equal(
+        renderModel.manifest.exportManifestId,
+        exportManifestId,
+      );
+      assert.equal(
+        renderModel.exportCandidate.exportCandidateId,
+        exportCandidateId,
+      );
+      assert.equal(
+        renderModel.exportCandidate.contentType,
+        "data_gap_memo",
+      );
+      assert.equal(
+        renderModel.authority.effectiveAuthorityDecisionId,
+        authorityDecisionId,
+      );
+
+      const citation = renderModel.citations.find(
+        (entry) =>
+          entry.claimId === pipeline.claimId
+          && entry.evidenceItemId === pipeline.evidenceId,
+      );
+
+      assert.ok(
+        citation,
+        "persisted render model must retain the data_gap_memo claim/evidence citation pair",
+      );
+      assert.equal(typeof citation.citationRef, "string");
+      assert.ok(citation.citationRef.length > 0);
+
+      const citingBlock = renderModel.content.blocks.find(
+        (block) =>
+          Array.isArray(block.citationRefs)
+          && block.citationRefs.includes(citation.citationRef),
+      );
+
+      assert.ok(
+        citingBlock,
+        "persisted content must retain its citation reference",
+      );
+
+      const markdown =
+        serializeExportManifestRenderModelToMarkdown(renderModel);
+
+      const csv =
+        serializeExportManifestRenderModelToCsv(renderModel);
+
+      const pdf =
+        await serializeExportManifestRenderModelToPdf(renderModel);
+
+      const docx =
+        await serializeExportManifestRenderModelToDocx(renderModel);
+
+      assert.equal(typeof markdown, "string");
+      assert.ok(markdown.includes("## Citation Appendix"));
+      assert.ok(
+        markdown.includes(`[${citation.citationRef}]`),
+      );
+      assert.ok(markdown.includes(pipeline.claimId));
+      assert.ok(markdown.includes(pipeline.evidenceId));
+
+      assert.equal(typeof csv, "string");
+      assert.ok(csv.includes(citation.citationRef));
+      assert.ok(csv.includes(pipeline.claimId));
+      assert.ok(csv.includes(pipeline.evidenceId));
+
+      assert.ok(Buffer.isBuffer(pdf));
+      assert.equal(
+        pdf.slice(0, 5).toString("latin1"),
+        "%PDF-",
+      );
+
+      assert.ok(Buffer.isBuffer(docx));
+      assert.equal(
+        docx.slice(0, 2).toString("latin1"),
+        "PK",
+      );
+    });
+
+    await t.test("STATE 9: forged authoritative inputs, revoked authority, superseded candidate, and cross-tenant render lookup all fail closed", async () => {
+      const forgedManifestAttempt =
+        await exportManifestRepository.createExportManifest(
+          manifestInput(GRANT_AT, {
+            finalGate: true,
+            affirmativeHumanExportAuthority: true,
+            candidateCurrentness: true,
+            canonicalFingerprint: "f".repeat(64),
+          }),
+          manifestDependencies(GRANT_AT),
+        );
+
+      assert.equal(forgedManifestAttempt.ok, false);
+      assert.equal(
+        forgedManifestAttempt.error.code,
+        "validation_blocker",
+      );
+
+      const revoke =
+        await humanAuthorityDecisionRepository.recordDecision(
+          {
+            organizationId: ORG,
+            exportCandidateId,
+            decisionType: "export_authority_granted",
+            decisionAction: "revoke",
+            requestedAudience: "internal",
+            actorContext: gkAdmin,
+            now: REVOKE_AT,
+          },
+          {
+            metadataOnlyAudit: auditRecorder(),
+          },
+        );
+
+      assert.equal(revoke.ok, true, JSON.stringify(revoke));
+
+      const revoked =
+        await humanAuthorityDecisionRepository.evaluateEffectiveness({
+          organizationId: ORG,
+          exportCandidateId,
+          decisionType: "export_authority_granted",
+        });
+
+      assert.equal(revoked.ok, true);
+      assert.equal(revoked.data.effective, false);
+      assert.equal(
+        revoked.data.reason,
+        "head_is_revoke",
+      );
+
+      const revokedAttempt =
+        await exportManifestRepository.createExportManifest(
+          manifestInput(REVOKE_AT),
+          manifestDependencies(REVOKE_AT),
+        );
+
+      assert.equal(revokedAttempt.ok, false);
+      assert.equal(
+        revokedAttempt.error.code,
+        "validation_blocker",
+      );
+
+      const REGRANT_AT = "2026-09-15T10:22:00.000Z";
+
+      const regrant =
+        await humanAuthorityDecisionRepository.recordDecision(
+          {
+            organizationId: ORG,
+            exportCandidateId,
+            decisionType: "export_authority_granted",
+            decisionAction: "grant",
+            requestedAudience: "internal",
+            actorContext: gkAdmin,
+            now: REGRANT_AT,
+          },
+          {
+            metadataOnlyAudit: auditRecorder(),
+          },
+        );
+
+      assert.equal(regrant.ok, true, JSON.stringify(regrant));
+
+      const regranted =
+        await humanAuthorityDecisionRepository.evaluateEffectiveness({
+          organizationId: ORG,
+          exportCandidateId,
+          decisionType: "export_authority_granted",
+        });
+
+      assert.equal(regranted.ok, true);
+      assert.equal(regranted.data.effective, true);
+
+      const supersedingSnapshot =
+        await confirmGeneratedDraftLimitationSnapshot(
+          {
+            organizationId: ORG,
+            generatedContentDraftId: pipeline.draftId,
+            entries: [{
+              claimId: pipeline.claimId,
+              evidenceItemId: pipeline.evidenceId,
+              limitationCodes: ["small_sample_size"],
+            }],
+            actorContext: gkReviewer,
+            now: SUPERSEDE_AT,
+          },
+          {
+            env: enabledEnv,
+            exportCandidateRepository:
+              exportCandidateRepository(),
+            metadataOnlyAudit: auditRecorder(),
+          },
+        );
+
+      assert.equal(
+        supersedingSnapshot.ok,
+        true,
+        JSON.stringify(supersedingSnapshot),
+      );
+
+      const stale =
+        await humanAuthorityDecisionRepository.evaluateEffectiveness({
+          organizationId: ORG,
+          exportCandidateId,
+          decisionType: "export_authority_granted",
+        });
+
+      assert.equal(stale.ok, true);
+      assert.equal(stale.data.effective, false);
+      assert.equal(
+        stale.data.reason,
+        "limitation_snapshot_superseded",
+      );
+
+      const staleAttempt =
+        await exportManifestRepository.createExportManifest(
+          manifestInput(SUPERSEDE_AT),
+          manifestDependencies(SUPERSEDE_AT),
+        );
+
+      assert.equal(staleAttempt.ok, false);
+      assert.equal(
+        staleAttempt.error.code,
+        "validation_blocker",
+      );
+
+      const staleRender =
+        await exportManifestRenderModelRepository
+          .composeExportManifestRenderModel({
+            organizationId: ORG,
+            exportManifestId,
+          });
+
+      assert.equal(staleRender.ok, false);
+      assert.equal(
+        staleRender.error.code,
+        "conflict_current_state_changed",
+      );
+
+      const crossTenantRender =
+        await exportManifestRenderModelRepository
+          .composeExportManifestRenderModel({
+            organizationId: OTHER_ORG,
+            exportManifestId,
+          });
+
+      assert.equal(crossTenantRender.ok, false);
+      assert.equal(
+        crossTenantRender.error.code,
+        "not_found",
+      );
+
+      const manifestCount = await query(
+        `SELECT count(*)::int AS count
+           FROM kai.export_manifests
+          WHERE export_candidate_id = $1::uuid`,
+        [exportCandidateId],
+      );
+
+      assert.equal(
+        manifestCount[0].count,
+        1,
+        "forged/revoked/stale retries must not create another manifest",
+      );
     });
   });
 

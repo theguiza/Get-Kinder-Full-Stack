@@ -139,6 +139,8 @@ try {
   psqlFile("migrations/kai_sprint2_p3_09_export_review_start.sql");
   psqlFile("migrations/kai_sprint2_p3_13_export_review_completion.sql");
   psqlFile("migrations/kai_sprint2_p3_16_export_candidate_foundation.sql");
+  psqlFile("migrations/kai_sprint2_p14_15_export_candidate_content_type_evolution.sql");
+  psqlFile("scripts/kai-sprint2-p14-15-export-candidate-content-type-evolution-verifier.sql");
   psqlFile("migrations/kai_sprint2_p3_17_human_authority_decision_ledger.sql");
   psqlFile("migrations/kai_sprint2_p3_17_authority_audit_gate_a_operation_repair.sql");
   psqlFile("migrations/kai_sprint2_p3_19_export_manifest_foundation.sql");
@@ -212,6 +214,7 @@ try {
 
   const testResult = spawnSync("node", [
     "--test",
+      "--test-concurrency=1",
     "__tests__/kai-sprint2-p14-data-gap-memo-finalization-composition.integration.spec.js",
     "__tests__/kai-sprint2-p14-export-candidate-data-gap-memo-content-type-gap.spec.js",
     "__tests__/kai-sprint2-p3-16-export-candidate-foundation.integration.spec.js",
