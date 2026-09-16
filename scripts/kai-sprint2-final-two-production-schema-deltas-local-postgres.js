@@ -3,6 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { Client } from "pg";
+import {
+  PACKAGE_2A_ENGAGEMENT_REQUIREMENT_SET_CONSTRAINTS,
+  assertConstraintCatalogMatch,
+} from "./kai-sprint2-package-2a-constraint-verifier.js";
 
 const repoRoot = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
 const dbName = "kai_final_two_schema_deltas_synthetic";
@@ -206,42 +210,16 @@ async function verifyPackage2AStructure(client) {
   assert(columns.rowCount === expectedColumns.length, `Package 2A columns missing: ${expectedColumns.filter((c) => !columns.rows.some((r) => r.column_name === c)).join(", ")}`);
 
   const constraints = await client.query(`
-    SELECT conname, contype, pg_get_constraintdef(c.oid) AS definition
+    SELECT conname, contype, convalidated, pg_get_constraintdef(c.oid) AS definition
       FROM pg_constraint c
       JOIN pg_class r ON r.oid = c.conrelid
       JOIN pg_namespace n ON n.oid = r.relnamespace
      WHERE n.nspname = 'kai'
        AND r.relname = 'engagement_requirement_sets'
   `);
-  const hasConstraint = (predicate) => constraints.rows.some(predicate);
-  assert(
-    hasConstraint((row) => row.contype === "u" && row.conname.startsWith("engagement_requirement_sets_package_2a_id_org_engagement_set") && row.definition.includes("engagement_requirement_set_id, organization_id, engagement_id, requirement_set_id")),
-    "Package 2A unique identity constraint is missing",
-  );
-  assert(
-    hasConstraint((row) => row.conname === "engagement_requirement_sets_package_2a_supersedes_fk"),
-    "Package 2A supersedes FK is missing",
-  );
-  assert(
-    hasConstraint((row) => row.conname === "engagement_requirement_sets_package_2a_not_self_superseding"),
-    "Package 2A not-self-superseding check is missing",
-  );
-  assert(
-    hasConstraint((row) => row.conname === "engagement_requirement_sets_package_2a_reviewed_authority_check"),
-    "Package 2A reviewed authority check is missing",
-  );
-  assert(
-    hasConstraint((row) => row.conname === "engagement_requirement_sets_package_2a_effective_state_check"),
-    "Package 2A effective state check is missing",
-  );
-  assert(
-    hasConstraint((row) => row.conname.startsWith("engagement_requirement_sets_package_2a_reviewed_effective") && row.definition.includes("applicability_status = 'confirmed'::text")),
-    "Package 2A reviewed/effective consistency check is missing",
-  );
-  assert(
-    hasConstraint((row) => row.conname === "engagement_requirement_sets_package_2a_approved_target_check"),
-    "Package 2A approved target check is missing",
-  );
+  for (const spec of PACKAGE_2A_ENGAGEMENT_REQUIREMENT_SET_CONSTRAINTS) {
+    assertConstraintCatalogMatch(constraints.rows, spec);
+  }
 
   const indexes = await client.query(`
     SELECT indexname

@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import {
+  assertConstraintCatalogMatch,
+} from "../scripts/kai-sprint2-package-2a-constraint-verifier.js";
 
 const migrationSource = readFileSync("migrations/kai_sprint2_package_2a_engagement_requirement_sets_authority.sql", "utf8");
 const rollbackSource = readFileSync("migrations/kai_sprint2_package_2a_engagement_requirement_sets_authority.rollback.sql", "utf8");
@@ -90,4 +93,26 @@ test("Package 2A rollback removes only Package 2A additions and restores B1.1 id
   assert.match(rollbackSource, /DROP TRIGGER IF EXISTS trg_package_2a_engagement_requirement_sets_append_only/);
   assert.match(rollbackSource, /DROP FUNCTION IF EXISTS kai\.package_2a_reject_engagement_requirement_set_mutation/);
   assert.doesNotMatch(rollbackSource, /DROP TABLE/);
+});
+
+test("Package 2A final-two verifier rejects ambiguous or wrong truncated constraint catalog matches", () => {
+  const spec = {
+    label: "reviewed/effective consistency check",
+    identifierPrefix: "engagement_requirement_sets_package_2a_reviewed_effective_consi",
+    contype: "c",
+    definition:
+      "CHECK (((applicability_effective_state = 'pending_review'::text) OR ((applicability_status = 'confirmed'::text) AND (reviewed_by IS NOT NULL) AND (reviewed_by_role IS NOT NULL) AND (reviewed_at IS NOT NULL) AND (target_context_identity IS NOT NULL))))",
+  };
+  const validRow = {
+    conname: "engagement_requirement_sets_package_2a_reviewed_effective_consi",
+    contype: "c",
+    convalidated: true,
+    definition: spec.definition,
+  };
+
+  assert.doesNotThrow(() => assertConstraintCatalogMatch([validRow], spec));
+  assert.throws(() => assertConstraintCatalogMatch([], spec), /expected exactly one catalog match/);
+  assert.throws(() => assertConstraintCatalogMatch([validRow, { ...validRow }], spec), /expected exactly one catalog match/);
+  assert.throws(() => assertConstraintCatalogMatch([{ ...validRow, definition: "CHECK (false)" }], spec), /wrong definition/);
+  assert.throws(() => assertConstraintCatalogMatch([{ ...validRow, convalidated: false }], spec), /not validated/);
 });
