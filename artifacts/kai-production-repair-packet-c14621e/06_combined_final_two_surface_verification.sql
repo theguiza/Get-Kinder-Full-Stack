@@ -35,11 +35,34 @@ package_2a_long_constraints AS (
    WHERE n.nspname = 'kai'
      AND r.relname = 'engagement_requirement_sets'
 ),
-package_2a_named_objects AS (
-  SELECT to_regclass('kai.ux_engagement_requirement_sets_package_2a_current_identity') IS NOT NULL
-     AND to_regclass('kai.ux_engagement_requirement_sets_package_2a_single_successor') IS NOT NULL
-     AND to_regclass('kai.ix_engagement_requirement_sets_package_2a_current_lookup') IS NOT NULL
-     AND to_regprocedure('kai.package_2a_reject_engagement_requirement_set_mutation()') IS NOT NULL
+package_2a_index_specs AS (
+  SELECT *
+    FROM (VALUES
+      (
+        'ux_engagement_requirement_sets_package_2a_current_identity',
+        'CREATE UNIQUE INDEX ux_engagement_requirement_sets_package_2a_current_identity ON kai.engagement_requirement_sets USING btree (organization_id, engagement_id, requirement_set_id) WHERE (supersedes_engagement_requirement_set_id IS NULL)'
+      ),
+      (
+        'ux_engagement_requirement_sets_package_2a_single_successor',
+        'CREATE UNIQUE INDEX ux_engagement_requirement_sets_package_2a_single_successor ON kai.engagement_requirement_sets USING btree (supersedes_engagement_requirement_set_id) WHERE (supersedes_engagement_requirement_set_id IS NOT NULL)'
+      ),
+      (
+        'ix_engagement_requirement_sets_package_2a_current_lookup',
+        'CREATE INDEX ix_engagement_requirement_sets_package_2a_current_lookup ON kai.engagement_requirement_sets USING btree (organization_id, engagement_id, applicability_effective_state) WHERE (supersedes_engagement_requirement_set_id IS NULL)'
+      )
+    ) AS spec(index_name, indexdef)
+),
+package_2a_indexes AS (
+  SELECT count(actual.indexname) = 3
+         AND bool_and(COALESCE(actual.indexdef = spec.indexdef, false)) AS ok
+    FROM package_2a_index_specs spec
+    LEFT JOIN pg_indexes actual
+      ON actual.schemaname = 'kai'
+     AND actual.tablename = 'engagement_requirement_sets'
+     AND actual.indexname = spec.index_name
+),
+package_2a_append_only_objects AS (
+  SELECT to_regprocedure('kai.package_2a_reject_engagement_requirement_set_mutation()') IS NOT NULL
      AND EXISTS (
            SELECT 1
              FROM pg_trigger t
@@ -53,7 +76,7 @@ package_2a_named_objects AS (
 ),
 gate_a_index AS (
   SELECT (
-           SELECT array_agg(a.attname ORDER BY k.ord)
+           SELECT array_agg(a.attname::text ORDER BY k.ord)
              FROM pg_class i
              JOIN pg_namespace n ON n.oid = i.relnamespace
              JOIN pg_index ix ON ix.indexrelid = i.oid
@@ -80,10 +103,15 @@ checks AS (
          'Package 2A long constraint names match using proven PostgreSQL 63-byte-safe prefix handling'
     FROM package_2a_long_constraints
   UNION ALL
-  SELECT 'package_2a_named_objects',
+  SELECT 'package_2a_indexes',
          CASE WHEN ok THEN 'PASS' ELSE 'FAIL' END,
-         'Package 2A indexes, append-only function, and trigger exist'
-    FROM package_2a_named_objects
+         'Package 2A indexes match exact expected catalog definitions'
+    FROM package_2a_indexes
+  UNION ALL
+  SELECT 'package_2a_append_only_objects',
+         CASE WHEN ok THEN 'PASS' ELSE 'FAIL' END,
+         'Package 2A append-only function and trigger exist'
+    FROM package_2a_append_only_objects
   UNION ALL
   SELECT 'gate_a_object_facts_index',
          CASE WHEN ok THEN 'PASS' ELSE 'FAIL' END,
@@ -130,11 +158,25 @@ BEGIN
        WHERE n.nspname = 'kai'
          AND r.relname = 'engagement_requirement_sets'
     ),
-    package_2a_named_objects AS (
-      SELECT to_regclass('kai.ux_engagement_requirement_sets_package_2a_current_identity') IS NOT NULL
-         AND to_regclass('kai.ux_engagement_requirement_sets_package_2a_single_successor') IS NOT NULL
-         AND to_regclass('kai.ix_engagement_requirement_sets_package_2a_current_lookup') IS NOT NULL
-         AND to_regprocedure('kai.package_2a_reject_engagement_requirement_set_mutation()') IS NOT NULL
+    package_2a_index_specs AS (
+      SELECT *
+        FROM (VALUES
+          ('ux_engagement_requirement_sets_package_2a_current_identity', 'CREATE UNIQUE INDEX ux_engagement_requirement_sets_package_2a_current_identity ON kai.engagement_requirement_sets USING btree (organization_id, engagement_id, requirement_set_id) WHERE (supersedes_engagement_requirement_set_id IS NULL)'),
+          ('ux_engagement_requirement_sets_package_2a_single_successor', 'CREATE UNIQUE INDEX ux_engagement_requirement_sets_package_2a_single_successor ON kai.engagement_requirement_sets USING btree (supersedes_engagement_requirement_set_id) WHERE (supersedes_engagement_requirement_set_id IS NOT NULL)'),
+          ('ix_engagement_requirement_sets_package_2a_current_lookup', 'CREATE INDEX ix_engagement_requirement_sets_package_2a_current_lookup ON kai.engagement_requirement_sets USING btree (organization_id, engagement_id, applicability_effective_state) WHERE (supersedes_engagement_requirement_set_id IS NULL)')
+        ) AS spec(index_name, indexdef)
+    ),
+    package_2a_indexes AS (
+      SELECT count(actual.indexname) = 3
+             AND bool_and(COALESCE(actual.indexdef = spec.indexdef, false)) AS ok
+        FROM package_2a_index_specs spec
+        LEFT JOIN pg_indexes actual
+          ON actual.schemaname = 'kai'
+         AND actual.tablename = 'engagement_requirement_sets'
+         AND actual.indexname = spec.index_name
+    ),
+    package_2a_append_only_objects AS (
+      SELECT to_regprocedure('kai.package_2a_reject_engagement_requirement_set_mutation()') IS NOT NULL
          AND EXISTS (
                SELECT 1
                  FROM pg_trigger t
@@ -148,7 +190,7 @@ BEGIN
     ),
     gate_a_index AS (
       SELECT (
-               SELECT array_agg(a.attname ORDER BY k.ord)
+               SELECT array_agg(a.attname::text ORDER BY k.ord)
                  FROM pg_class i
                  JOIN pg_namespace n ON n.oid = i.relnamespace
                  JOIN pg_index ix ON ix.indexrelid = i.oid
@@ -167,7 +209,8 @@ BEGIN
     checks AS (
       SELECT ok FROM package_2a_columns
       UNION ALL SELECT ok FROM package_2a_long_constraints
-      UNION ALL SELECT ok FROM package_2a_named_objects
+      UNION ALL SELECT ok FROM package_2a_indexes
+      UNION ALL SELECT ok FROM package_2a_append_only_objects
       UNION ALL SELECT ok FROM gate_a_index
     )
     SELECT 1 FROM checks WHERE NOT ok

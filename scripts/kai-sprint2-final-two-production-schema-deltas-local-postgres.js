@@ -57,6 +57,22 @@ function psqlFile(path) {
   return run(psql, ["-v", "ON_ERROR_STOP=1", "-d", dbName, "-f", path], { capture: true }).stdout;
 }
 
+function psqlFileResult(path) {
+  return spawnSync(psql, ["-v", "ON_ERROR_STOP=1", "-d", dbName, "-f", path], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "pipe"],
+    env: {
+      ...process.env,
+      DATABASE_URL: sentinelUrl,
+      PGHOST: "127.0.0.1",
+      PGPORT: port,
+      PGDATABASE: dbName,
+      PGUSER: user,
+    },
+  });
+}
+
 async function withClient(callback) {
   const client = new Client({ connectionString: targetUrl, ssl: false });
   await client.connect();
@@ -385,12 +401,45 @@ async function proveGateARepair(client) {
 }
 
 async function proveCombinedVerifier(client) {
+  await establishFinalTwoOwningSchema(client);
+  assertCombinedVerifierPass("required indexes positive");
+  console.log("Combined verifier required indexes positive proof passed.");
+
+  await client.query(`
+    CREATE INDEX ix_engagement_requirement_sets_package_2a_unrelated_regression_probe
+      ON kai.engagement_requirement_sets (created_at)
+  `);
+  assertCombinedVerifierPass("unrelated Package 2A index regression");
+  console.log("Combined verifier unrelated Package 2A index regression proof passed.");
+
+  await establishFinalTwoOwningSchema(client);
+  await client.query("DROP INDEX kai.ix_engagement_requirement_sets_package_2a_current_lookup");
+  assertCombinedVerifierFail("missing required Package 2A index");
+  console.log("Combined verifier missing required Package 2A index negative proof passed.");
+
+  await establishFinalTwoOwningSchema(client);
+  await client.query("DROP INDEX kai.ux_engagement_requirement_sets_package_2a_current_identity");
+  await client.query(`
+    CREATE INDEX ux_engagement_requirement_sets_package_2a_current_identity
+      ON kai.engagement_requirement_sets (organization_id, engagement_id, requirement_set_id)
+      WHERE supersedes_engagement_requirement_set_id IS NULL
+  `);
+  assertCombinedVerifierFail("wrong Package 2A index uniqueness");
+  console.log("Combined verifier wrong Package 2A index uniqueness negative proof passed.");
+
+  console.log("Combined final-two repaired-surfaces verifier passed.");
+}
+
+async function establishFinalTwoOwningSchema(client) {
   await establishRequirementSetOwningSchema(client);
   await seedLegacyRequirementSet(client);
   psqlFile("migrations/kai_sprint2_package_2a_engagement_requirement_sets_authority.sql");
   await verifyPackage2AStructure(client);
 
-  await establishGateAOwningSchema(client);
+  psqlFile("scripts/kai-sprint2-gate-a-bootstrap-synthetic-schema.sql");
+  psqlFile("migrations/kai_sprint2_gate_a_p0_upload_lifecycle.sql");
+  psqlFile("migrations/kai_sprint2_gate_a_p0_upload_lifecycle_enforcement_forward_repair.sql");
+  psqlFile("migrations/kai_sprint2_gate_a_p0_policy_decision_replay.sql");
   await client.query("DROP INDEX IF EXISTS kai.ix_upload_policy_decision_replay_gate_a_object_facts");
   psqlFile("migrations/kai_sprint2_gate_a_p0_policy_decision_replay_object_facts_index_repair.sql");
   const expectedColumns = [
@@ -401,7 +450,21 @@ async function proveCombinedVerifier(client) {
     "verified_size_bytes",
   ];
   assert(JSON.stringify(await getReplayObjectFactsColumns(client)) === JSON.stringify(expectedColumns), "combined verifier did not find Gate-A object-facts index converged");
-  console.log("Combined final-two repaired-surfaces verifier passed.");
+}
+
+function assertCombinedVerifierPass(label) {
+  const result = psqlFileResult("artifacts/kai-production-repair-packet-c14621e/06_combined_final_two_surface_verification.sql");
+  const output = `${result.stdout}\n${result.stderr}`;
+  assert(result.status === 0, `${label}: combined verifier expected PASS\n${output}`);
+  assert(output.includes("FINAL_TWO_SURFACES_VERIFIED"), `${label}: combined verifier did not raise final success notice\n${output}`);
+  assert(!/\|\s*FAIL\s*\|/.test(output), `${label}: combined verifier emitted FAIL row\n${output}`);
+}
+
+function assertCombinedVerifierFail(label) {
+  const result = psqlFileResult("artifacts/kai-production-repair-packet-c14621e/06_combined_final_two_surface_verification.sql");
+  const output = `${result.stdout}\n${result.stderr}`;
+  assert(result.status !== 0, `${label}: combined verifier expected FAIL\n${output}`);
+  assert(output.includes("F_COMBINED_FINAL_TWO_SURFACE_VERIFICATION failed"), `${label}: combined verifier failed for unexpected reason\n${output}`);
 }
 
 let started = false;

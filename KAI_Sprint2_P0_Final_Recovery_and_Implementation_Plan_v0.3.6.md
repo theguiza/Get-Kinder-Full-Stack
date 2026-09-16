@@ -29150,3 +29150,58 @@ leaving the canonical Package 2A migration unchanged.
 
 **Status:** FINAL_TWO_SCHEMA_DELTAS_LOCALLY_PROVED. Production state and
 production application remain NOT_CONFIRMED. Stop before production.
+
+## Combined Final Two-Surface Verifier Index Join Repair (2026-09-16)
+
+**Owner authorization (bounded, local-only):** close only the remaining
+repository/tooling defect from the completed KAI production database
+reconciliation: the combined verifier false negative for Package 2A indexes.
+The owner supplied USER_CONFIRMED production/runtime closure evidence for the
+Package 2A production repair, Gate A production repair, local P2-06/P2-10
+integration results, and funder traceability. No production/database/runtime
+investigation was reopened.
+
+**Root cause (TOOL_VERIFIED in tracked packet source):** the current tracked
+combined verifier no longer contained the historical `LEFT JOIN ers er ON true`
+shape, but its Package 2A combined-surface check only verified index names via
+`to_regclass(...)`. That was insufficient for the required combined-verifier
+contract because a same-named index with the wrong uniqueness/property shape
+could still pass the combined summary.
+
+**Smallest repair:** in
+`artifacts/kai-production-repair-packet-c14621e/06_combined_final_two_surface_verification.sql`,
+replace the Package 2A name-only index check with exact expected-index rows
+matched by `schemaname`, `tablename`, and `indexname`, then compare each
+`pg_indexes.indexdef` to the established Package 2A verifier definitions.
+Append-only function/trigger verification remains separate, all Package 2A
+column/constraint checks are preserved, and the Gate A ordered-column check is
+preserved with an explicit `attname::text` cast required for the packet SQL to
+execute. The tracked packet SQL is the authoritative verifier copy; no packet
+manifest or generation script was found for this packet.
+
+**Regression proof (TOOL_VERIFIED):** the existing disposable PostgreSQL final
+two runner now executes the actual combined packet SQL and proves: required
+Package 2A indexes present with required properties -> PASS; an unrelated
+additional `kai.engagement_requirement_sets` index -> PASS; one required
+Package 2A index absent -> FAIL; one required Package 2A index recreated with
+wrong uniqueness -> FAIL. The same runner still proves Package 2A late apply,
+Package 2A rollback precheck, and Gate A index-only
+forward/rollback/reapply.
+
+**Verification (TOOL_VERIFIED):** `DATABASE_URL` was set to
+`postgres://127.0.0.1:9/kai_sentinel` for Node commands. The first sandboxed
+run failed before verifier execution because disposable PostgreSQL could not
+create a shared-memory segment under the sandbox; the approved local-only rerun
+passed after repair:
+`node scripts/kai-sprint2-final-two-production-schema-deltas-local-postgres.js`
+-> Package 2A late-apply PASS; Package 2A rollback-precheck PASS; Gate-A
+index-only forward/rollback/reapply PASS; required indexes positive PASS;
+unrelated Package 2A index regression PASS; missing required Package 2A index
+negative PASS; wrong Package 2A index uniqueness negative PASS; combined
+final-two repaired-surfaces verifier PASS. `git diff --check` -> PASS.
+
+**Status:** COMBINED_VERIFIER_JOIN_DEFECT_FIXED_LOCALLY. Production/runtime
+closure remains USER_CONFIRMED from owner-supplied evidence only. No
+production database access, production runtime call, migration execution,
+rollback, claim/coverage-state change, deployment, remote push, or
+`00_KAI_CURRENT_STATE.md` update was performed.
