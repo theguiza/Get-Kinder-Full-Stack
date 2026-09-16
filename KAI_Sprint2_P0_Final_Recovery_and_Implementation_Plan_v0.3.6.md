@@ -29331,3 +29331,108 @@ capacity, and may be revised only through a separately supported change.
 Production state and production application remain NOT_CONFIRMED. Stop before
 production. No production/database/cloud/feature-flag change, deployment, or
 remote push was performed.
+
+## Impact Narrative and Readiness Assessment Generator-Result Contract Repair: VAL-GEN-RESULT-P0-001 / generator_result_blocks_empty (2026-09-16)
+
+**Accepted starting context (USER_CONFIRMED, not re-litigated):** a prior
+repository reconciliation confirmed `kaiImpactNarrativeDraftGenerator.js`
+still used an unstructured provider call and a bare `parseJsonObject` helper
+- the same defect class already repaired in
+`kaiEvidenceSummaryDraftGenerator.js` (P14-09-FUND-GEN-RESULT-001) and
+`kaiDataGapMemoDraftGenerator.js` (see the Data Gap Memo entry above) - so
+every distinct provider/parse failure path (missing text, parse failure,
+invalid root, missing/invalid `blocks` field) and the generator's own
+input-contract rejection collapsed into the same untagged `{ blocks: [] }`
+shape, surfacing identically as the generic `generator_result_blocks_empty`.
+This confirms only a repository defect, not the exact causal event behind any
+previously observed live 422.
+
+**Readiness Assessment inspection (this closure):** direct inspection of
+`kaiReadinessAssessmentDraftGenerator.js` found the identical unstructured
+provider call and bare `parseJsonObject` helper, with no
+`output_config.format.type = "json_schema"` and no `GENERATOR_RESULT_REASON`
+tagging - the same defect class, not a superficially similar one. Readiness
+Assessment was therefore repaired in this same closure using the same
+established pattern.
+
+**Repair: ported the established Evidence Summary / Data Gap Memo
+structured-output contract onto both generator/provider boundaries only.**
+`Backend/kai/services/kaiImpactNarrativeDraftGenerator.js` and
+`Backend/kai/services/kaiReadinessAssessmentDraftGenerator.js` each now:
+- send the same `output_config: { format: { type: "json_schema", schema } }`
+  mechanism, with an `IMPACT_NARRATIVE_OUTPUT_SCHEMA` /
+  `READINESS_ASSESSMENT_OUTPUT_SCHEMA` adapted only to each generator's
+  existing output shape (`blocks[].text`, `blocks[].citations[].claimId/
+  evidenceItemId`), root object, required `blocks`, no unsupported additional
+  properties - the same shape/strictness as `EVIDENCE_SUMMARY_OUTPUT_SCHEMA`
+  and `DATA_GAP_MEMO_OUTPUT_SCHEMA`, transferring no claim/evidence/UUID/
+  citation/requirement/semantic authority into the provider schema;
+- use the same `tagGeneratorResultReason` (`GENERATOR_RESULT_REASON`
+  non-enumerable symbol carrier) and `GENERATOR_RESULT_REASONS` vocabulary
+  already exported by `postgresGeneratedContentRepository.js`, preserving
+  `INPUT_CONTRACT_REJECTED`, `PROVIDER_TEXT_MISSING`, `JSON_PARSE_FAILED`,
+  `JSON_ROOT_INVALID`, and `BLOCKS_FIELD_INVALID` at the exact points those
+  conditions occur, before `normalizeGeneratorOutput` would otherwise destroy
+  them. No new reason strings were invented, and a genuinely
+  schema-conformant empty `{"blocks":[]}` remains untagged and still
+  classifies as the generic `generator_result_blocks_empty` per
+  `classifyGeneratorResult`'s existing `blocks.length < 1` predicate -
+  unchanged, not weakened.
+
+Impact Narrative and Readiness Assessment governance (contentType,
+requestedAudience, claim/requirement eligibility, citation validation,
+tenant/actor checks, review lifecycle, and the human-review requirement) was
+not touched. `classifyGeneratorResult`'s acceptance predicates and
+`VAL-GEN-RESULT-P0-001` semantics were not touched.
+
+**Test evidence** (`DATABASE_URL` set to a non-listening loopback sentinel;
+no real provider request, using the existing `createMessage` injection seam):
+- `node --test __tests__/kai-sprint2-p13-01-impact-narrative-structured-output.spec.js
+  __tests__/kai-sprint2-readiness-assessment-structured-output.spec.js
+  __tests__/kai-sprint2-p13-01-impact-narrative-boundary.spec.js
+  __tests__/kai-sprint2-readiness-assessment-draft-generation-boundary.spec.js
+  __tests__/kai-sprint2-data-gap-memo-draft-generation-boundary.spec.js
+  __tests__/kai-sprint2-p14-09-funder-evidence-summary-boundary.spec.js
+  __tests__/kai-sprint2-p14-09-evidence-summary-structured-output.spec.js
+  __tests__/kai-sprint2-p14-09-fund-gen-result-001-subreason-classification.spec.js
+  __tests__/kai-sprint2-generated-drafts-library.spec.js
+  __tests__/kai-sprint2-p3-01-generated-content-drafts-boundary.spec.js
+  __tests__/kai-review-packet-traceability-contract-repair.integration.spec.js`
+  -> 124/125 applicable subtests PASS, 0 fail, 1 skipped (a pre-existing,
+  unrelated real-DB-gated skip in the traceability contract-repair
+  integration suite, not introduced by this change).
+- New structured-output coverage for both generators proves: the provider
+  request carries the exact bounded `output_config.format.schema`; a valid
+  schema-conformant response normalizes to the existing `{ blocks: [...] }`
+  shape with an exact governed citation and passes `classifyGeneratorResult`;
+  direct invalid generator input is rejected as
+  `generator_result_input_contract_rejected` before any provider call;
+  missing provider text tags `generator_result_provider_text_missing`;
+  unparseable text tags `generator_result_json_parse_failed`; a JSON array
+  root tags `generator_result_json_root_invalid`; a missing/non-array
+  `blocks` field tags `generator_result_blocks_field_invalid`; a genuine,
+  schema-conformant empty `{"blocks":[]}` classifies as the untagged
+  `generator_result_blocks_empty`; a malformed (non-UUID) citation still
+  fails closed as `generator_result_citation_id_invalid`; exactly one
+  provider call occurs per generation; and no raw provider text leaks into
+  the fail-closed result or its reason. The pre-existing Impact Narrative
+  boundary spec (P13-01) and Readiness Assessment boundary spec were re-run
+  unchanged and continue to pass, proving no validator, service gate, or
+  route was weakened.
+- `git diff --check` -> PASS (no whitespace errors). Complete diff inspected:
+  only `Backend/kai/services/kaiImpactNarrativeDraftGenerator.js`,
+  `Backend/kai/services/kaiReadinessAssessmentDraftGenerator.js` (generator/
+  provider boundaries), and two new focused test files
+  (`__tests__/kai-sprint2-p13-01-impact-narrative-structured-output.spec.js`,
+  `__tests__/kai-sprint2-readiness-assessment-structured-output.spec.js`)
+  changed; no repository classifier, validator, migration, frontend, Board
+  Reporting, Grant Response Packet, or funder_ready/public_ready file was
+  touched.
+
+**Status:** IMPACT_NARRATIVE_AND_READINESS_ASSESSMENT_GENERATOR_RESULT_CONTRACT_REPAIR_CLOSED.
+Backend/schema/database change required: NO. No push, deployment, production
+mutation, feature-flag change, secret handling, real-client-data access, or
+`00_KAI_CURRENT_STATE.md` update performed. The historical live 422's exact
+production root cause remains NOT_CONFIRMED from repository evidence alone.
+The `funder_ready`/`public_ready` semantics question identified separately
+remains out of scope and unchanged.
