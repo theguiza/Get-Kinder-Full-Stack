@@ -1,0 +1,302 @@
+expected_tables=74
+provenance_tables=74
+provenance_exactly_matches_expected=True
+active_migration_owned_tables=66
+bootstrap_base_with_migration_evolution=1
+bootstrap_only_foundation=7
+active_migrations=60
+repository_sql_files=130
+off_path_sql_files=70
+off_path_ddl_candidates=271
+off_path_dynamic_sql_candidates=16
+
+=== OFF-PATH DDL CANDIDATES ===
+migrations/kai_sprint2_a1_1_impact_outcome_context.rollback.sql:7 | DROP_TABLE | impact_outcome_contexts
+migrations/kai_sprint2_a1_2_impact_evaluation_framework_and_criteria.rollback.sql:4 | DROP_TABLE | impact_evaluation_criteria
+migrations/kai_sprint2_a1_2_impact_evaluation_framework_and_criteria.rollback.sql:7 | DROP_TABLE | impact_evaluation_framework_versions
+migrations/kai_sprint2_a1_3_impact_evaluations_and_results.rollback.sql:4 | DROP_TABLE | impact_evaluation_results
+migrations/kai_sprint2_a1_3_impact_evaluations_and_results.rollback.sql:7 | DROP_TABLE | impact_evaluations
+migrations/kai_sprint2_a1_3_impact_evaluations_and_results.rollback.sql:9 | ALTER_TABLE | impact_evaluation_criteria
+migrations/kai_sprint2_a1_4_impact_evaluation_result_provenance_links.rollback.sql:5 | DROP_TABLE | impact_evaluation_result_claim_links
+migrations/kai_sprint2_a1_4_impact_evaluation_result_provenance_links.rollback.sql:9 | DROP_TABLE | impact_evaluation_result_evidence_links
+migrations/kai_sprint2_a1_4_impact_evaluation_result_provenance_links.rollback.sql:11 | ALTER_TABLE | impact_evaluation_results
+migrations/kai_sprint2_b1_1_baseline_impact_requirements.rollback.sql:5 | DROP_TABLE | engagement_requirement_sets
+migrations/kai_sprint2_b1_1_baseline_impact_requirements.rollback.sql:8 | DROP_TABLE | requirements
+migrations/kai_sprint2_b1_1_baseline_impact_requirements.rollback.sql:11 | DROP_TABLE | requirement_sets
+migrations/kai_sprint2_b1_1_baseline_impact_requirements.rollback.sql:14 | DROP_TABLE | requirement_framework_versions
+migrations/kai_sprint2_b1_1_baseline_impact_requirements.rollback.sql:18 | DROP_TABLE | requirement_sources
+migrations/kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger.rollback.sql:3 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger.rollback.sql:29 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger.rollback.sql:38 | DROP_TABLE | intake_sensitivity_review_decisions
+migrations/kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger.rollback.sql:40 | ALTER_TABLE | intake_sensitivity_profiles
+migrations/kai_sprint2_board_reporting_candidate_export_manifest_foundation.rollback.sql:18 | DROP_TABLE | board_reporting_candidate_export_manifests
+migrations/kai_sprint2_br_02_board_reporting_candidate_foundation.rollback.sql:8 | DROP_TABLE | board_reporting_candidate_members
+migrations/kai_sprint2_br_02_board_reporting_candidate_foundation.rollback.sql:9 | DROP_TABLE | board_reporting_candidates
+migrations/kai_sprint2_br_03a_board_reporting_candidate_review_request.rollback.sql:18 | ALTER_TABLE | review_queue_items
+migrations/kai_sprint2_br_03b_board_reporting_candidate_review_lifecycle.rollback.sql:22 | ALTER_TABLE | review_queue_items
+migrations/kai_sprint2_br_04_board_reporting_candidate_human_authority_decision_ledger.rollback.sql:19 | DROP_TABLE | board_reporting_candidate_human_authority_decisions
+migrations/kai_sprint2_c2_1_requirement_assessment_persistence.rollback.sql:5 | DROP_TABLE | requirement_assessment_evaluation_result_links
+migrations/kai_sprint2_c2_1_requirement_assessment_persistence.rollback.sql:9 | DROP_TABLE | requirement_assessment_claim_links
+migrations/kai_sprint2_c2_1_requirement_assessment_persistence.rollback.sql:13 | DROP_TABLE | requirement_assessment_evidence_links
+migrations/kai_sprint2_c2_1_requirement_assessment_persistence.rollback.sql:21 | DROP_TABLE | requirement_assessments
+migrations/kai_sprint2_c3_a3_requirement_assessment_decision_gap_provenance.rollback.sql:11 | DROP_TABLE | ra_gap_links
+migrations/kai_sprint2_c3_a3_requirement_assessment_decision_gap_provenance.rollback.sql:15 | DROP_TABLE | ra_claim_review_decision_links
+migrations/kai_sprint2_c3_a3_requirement_assessment_decision_gap_provenance.rollback.sql:19 | DROP_TABLE | ra_evidence_review_decision_links
+migrations/kai_sprint2_c3_a4_requirement_assessment_provenance_extension.rollback.sql:8 | DROP_TABLE | ra_conflict_resolution_links
+migrations/kai_sprint2_c3_a4_requirement_assessment_provenance_extension.rollback.sql:18 | DROP_TABLE | ra_source_promotion_links
+migrations/kai_sprint2_c3_a4_requirement_assessment_provenance_extension.rollback.sql:28 | DROP_TABLE | ra_outcome_context_links
+migrations/kai_sprint2_gate_a_p0_policy_decision_replay.rollback.sql:6 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_gate_a_p0_policy_decision_replay.rollback.sql:11 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_gate_a_p0_policy_decision_replay.rollback.sql:17 | DROP_TABLE | upload_policy_decision_replay
+migrations/kai_sprint2_gate_a_p0_upload_lifecycle.rollback.sql:7 | DROP_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_generated_content_review_start_audit_contract.rollback.sql:6 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_generated_content_review_start_audit_contract.rollback.sql:57 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_generated_content_review_start_audit_contract.rollback.sql:60 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_generated_content_review_start_audit_contract.rollback.sql:62 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_generated_content_review_start_audit_contract.rollback.sql:64 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_gk_organization_tenant_binding.rollback.sql:5 | DROP_TABLE | gk_organization_bindings
+migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql:96 | ALTER_TABLE | intake_parser_runs
+migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql:99 | DROP_TABLE | evidence_items
+migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql:100 | DROP_TABLE | source_locators
+migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql:101 | DROP_TABLE | intake_promotion_decisions
+migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql:102 | DROP_TABLE | source_versions
+migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql:103 | DROP_TABLE | sources
+migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql:104 | DROP_TABLE | intake_source_candidates
+migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql:105 | DROP_TABLE | intake_sensitivity_profiles
+migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql:106 | DROP_TABLE | data_quality_findings
+migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql:107 | DROP_TABLE | data_dictionary_mappings
+migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql:108 | DROP_TABLE | data_dictionary_fields
+migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql:109 | DROP_TABLE | data_dictionaries
+migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql:110 | DROP_TABLE | intake_file_profiles
+migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql:111 | DROP_TABLE | intake_parser_runs
+migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql:117 | ALTER_TABLE | review_queue_items
+migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql:122 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_legacy_generation_cutover_20260817.sql:747 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_legacy_generation_cutover_20260817.sql:867 | ALTER_TABLE | review_queue_items
+migrations/kai_sprint2_legacy_generation_cutover_20260817.sql:882 | ALTER_TABLE | review_queue_items
+migrations/kai_sprint2_legacy_generation_cutover_20260817.sql:888 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_legacy_generation_cutover_20260817.sql:932 | CREATE_TABLE | intake_parser_runs
+migrations/kai_sprint2_legacy_generation_cutover_20260817.sql:985 | CREATE_INDEX_ON | intake_parser_runs
+migrations/kai_sprint2_legacy_generation_cutover_20260817.sql:988 | CREATE_TABLE | intake_file_profiles
+migrations/kai_sprint2_legacy_generation_cutover_20260817.sql:1025 | CREATE_INDEX_ON | intake_file_profiles
+migrations/kai_sprint2_legacy_generation_cutover_20260817.sql:1028 | CREATE_INDEX_ON | intake_file_profiles
+migrations/kai_sprint2_legacy_generation_cutover_20260817.sql:1038 | ALTER_TABLE | intake_parser_runs
+migrations/kai_sprint2_legacy_generation_cutover_20260817.sql:1083 | ALTER_TABLE | intake_file_profiles
+migrations/kai_sprint2_legacy_generation_cutover_20260817.sql:1089 | CREATE_TABLE | data_dictionaries
+migrations/kai_sprint2_legacy_generation_cutover_20260817.sql:1117 | CREATE_INDEX_ON | data_dictionaries
+migrations/kai_sprint2_legacy_generation_cutover_20260817.sql:1120 | CREATE_TABLE | data_dictionary_fields
+migrations/kai_sprint2_legacy_generation_cutover_20260817.sql:1211 | CREATE_INDEX_ON | data_dictionary_fields
+migrations/kai_sprint2_legacy_generation_cutover_20260817.sql:1214 | CREATE_TABLE | data_dictionary_mappings
+migrations/kai_sprint2_legacy_generation_cutover_20260817.sql:1232 | CREATE_INDEX_ON | data_dictionary_mappings
+migrations/kai_sprint2_legacy_generation_cutover_20260817.sql:1235 | CREATE_TABLE | data_quality_findings
+migrations/kai_sprint2_legacy_generation_cutover_20260817.sql:1271 | CREATE_INDEX_ON | data_quality_findings
+migrations/kai_sprint2_legacy_generation_cutover_20260817.sql:1336 | CREATE_TABLE | intake_sensitivity_profiles
+migrations/kai_sprint2_legacy_generation_cutover_20260817.sql:1432 | CREATE_INDEX_ON | intake_sensitivity_profiles
+migrations/kai_sprint2_legacy_generation_cutover_20260817.sql:1435 | CREATE_INDEX_ON | intake_sensitivity_profiles
+migrations/kai_sprint2_legacy_generation_cutover_20260817.sql:1481 | CREATE_TABLE | review_queue_items
+migrations/kai_sprint2_legacy_generation_cutover_20260817.sql:1565 | CREATE_INDEX_ON | review_queue_items
+migrations/kai_sprint2_legacy_generation_cutover_20260817.sql:1569 | CREATE_INDEX_ON | review_queue_items
+migrations/kai_sprint2_legacy_generation_cutover_20260817.sql:1587 | CREATE_TRIGGER_ON | review_queue_items
+migrations/kai_sprint2_legacy_generation_cutover_20260817.sql:1702 | ALTER_TABLE | intake_sensitivity_profiles
+migrations/kai_sprint2_legacy_generation_cutover_20260817.sql:1719 | CREATE_TABLE | intake_source_candidates
+migrations/kai_sprint2_legacy_generation_cutover_20260817.sql:1763 | CREATE_INDEX_ON | intake_source_candidates
+migrations/kai_sprint2_legacy_generation_cutover_20260817.sql:1766 | CREATE_INDEX_ON | intake_source_candidates
+migrations/kai_sprint2_legacy_generation_cutover_20260817.sql:1775 | CREATE_INDEX_ON | review_queue_items
+migrations/kai_sprint2_legacy_generation_cutover_20260817.sql:1842 | ALTER_TABLE | intake_source_candidates
+migrations/kai_sprint2_legacy_generation_cutover_20260817.sql:1862 | ALTER_TABLE | intake_source_candidates
+migrations/kai_sprint2_legacy_generation_cutover_20260817.sql:1875 | ALTER_TABLE | intake_source_candidates
+migrations/kai_sprint2_legacy_generation_cutover_20260817.sql:1893 | ALTER_TABLE | review_queue_items
+migrations/kai_sprint2_legacy_generation_cutover_20260817.sql:1916 | CREATE_TABLE | intake_promotion_decisions
+migrations/kai_sprint2_legacy_generation_cutover_20260817.sql:1965 | CREATE_INDEX_ON | intake_promotion_decisions
+migrations/kai_sprint2_legacy_generation_cutover_20260817.sql:1973 | CREATE_TABLE | sources
+migrations/kai_sprint2_legacy_generation_cutover_20260817.sql:2007 | CREATE_TABLE | source_versions
+migrations/kai_sprint2_legacy_generation_cutover_20260817.sql:2036 | CREATE_INDEX_ON | source_versions
+migrations/kai_sprint2_legacy_generation_cutover_20260817.sql:2047 | ALTER_TABLE | intake_promotion_decisions
+migrations/kai_sprint2_legacy_generation_cutover_20260817.sql:2062 | ALTER_TABLE | intake_promotion_decisions
+migrations/kai_sprint2_legacy_generation_cutover_20260817.sql:2097 | CREATE_TABLE | source_locators
+migrations/kai_sprint2_legacy_generation_cutover_20260817.sql:2131 | CREATE_INDEX_ON | source_locators
+migrations/kai_sprint2_legacy_generation_cutover_20260817.sql:2141 | ALTER_TABLE | source_versions
+migrations/kai_sprint2_legacy_generation_cutover_20260817.sql:2147 | CREATE_TABLE | evidence_items
+migrations/kai_sprint2_legacy_generation_cutover_20260817.sql:2214 | CREATE_INDEX_ON | evidence_items
+migrations/kai_sprint2_legacy_generation_cutover_20260817.sql:2217 | CREATE_INDEX_ON | review_queue_items
+migrations/kai_sprint2_p13_01_impact_narrative_content_type.rollback.sql:3 | ALTER_TABLE | generated_content_drafts
+migrations/kai_sprint2_p13_01_impact_narrative_content_type.rollback.sql:8 | ALTER_TABLE | generation_runs
+migrations/kai_sprint2_p14_01_generation_run_engagement_binding.rollback.sql:15 | ALTER_TABLE | generation_runs
+migrations/kai_sprint2_p14_01_generation_run_engagement_binding.rollback.sql:18 | ALTER_TABLE | generation_runs
+migrations/kai_sprint2_p14_02_grant_response_packet_export_identity_foundation.rollback.sql:5 | DROP_TABLE | grant_response_packet_export_identities
+migrations/kai_sprint2_p14_03_grant_response_packet_export_candidate_foundation.rollback.sql:5 | DROP_TABLE | grant_response_packet_export_candidate_members
+migrations/kai_sprint2_p14_03_grant_response_packet_export_candidate_foundation.rollback.sql:9 | DROP_TABLE | grant_response_packet_export_candidates
+migrations/kai_sprint2_p14_05_grant_response_packet_export_review_binding.rollback.sql:6 | ALTER_TABLE | review_queue_items
+migrations/kai_sprint2_p14_07_b1_grant_response_packet_human_authority_decision_ledger.rollback.sql:6 | DROP_TABLE | grant_response_packet_human_authority_decisions
+migrations/kai_sprint2_p14_08_a_grant_response_packet_export_manifest_foundation.rollback.sql:4 | DROP_TABLE | grant_response_packet_export_manifests
+migrations/kai_sprint2_p14_12_review_queue_type_check_legacy_repair.rollback.sql:28 | ALTER_TABLE | review_queue_items
+migrations/kai_sprint2_p14_12_review_queue_type_check_legacy_repair.sql:86 | ALTER_TABLE | review_queue_items
+migrations/kai_sprint2_p14_14_generated_content_type_evolution.rollback.sql:27 | ALTER_TABLE | generated_content_drafts
+migrations/kai_sprint2_p14_14_generated_content_type_evolution.rollback.sql:32 | ALTER_TABLE | generation_runs
+migrations/kai_sprint2_p14_15_export_candidate_content_type_evolution.rollback.sql:50 | ALTER_TABLE | export_candidates
+migrations/kai_sprint2_p1_04_data_dictionary_and_quality.rollback.sql:6 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p1_04_data_dictionary_and_quality.rollback.sql:22 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p1_04_data_dictionary_and_quality.rollback.sql:110 | DROP_TABLE | data_quality_findings
+migrations/kai_sprint2_p1_04_data_dictionary_and_quality.rollback.sql:113 | DROP_TABLE | data_dictionary_mappings
+migrations/kai_sprint2_p1_04_data_dictionary_and_quality.rollback.sql:118 | DROP_TABLE | data_dictionary_fields
+migrations/kai_sprint2_p1_04_data_dictionary_and_quality.rollback.sql:121 | DROP_TABLE | data_dictionaries
+migrations/kai_sprint2_p1_04_data_dictionary_and_quality.rollback.sql:123 | ALTER_TABLE | intake_file_profiles
+migrations/kai_sprint2_p1_05_intake_sensitivity_profile.rollback.sql:6 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p1_05_intake_sensitivity_profile.rollback.sql:23 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p1_05_intake_sensitivity_profile.rollback.sql:141 | DROP_TABLE | intake_sensitivity_profiles
+migrations/kai_sprint2_p1_06_review_queue.rollback.sql:6 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p1_06_review_queue.rollback.sql:24 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p1_06_review_queue.rollback.sql:166 | DROP_TABLE | review_queue_items
+migrations/kai_sprint2_p1_06_review_status_column_repair.rollback.sql:161 | ALTER_TABLE | review_queue_items
+migrations/kai_sprint2_p1_06_review_status_column_repair.rollback.sql:164 | ALTER_TABLE | review_queue_items
+migrations/kai_sprint2_p1_06_review_status_column_repair.rollback.sql:167 | ALTER_TABLE | review_queue_items
+migrations/kai_sprint2_p1_06_review_status_column_repair.rollback.sql:171 | ALTER_TABLE | review_queue_items
+migrations/kai_sprint2_p1_06_review_status_column_repair.sql:188 | ALTER_TABLE | review_queue_items
+migrations/kai_sprint2_p1_06_review_status_column_repair.sql:191 | ALTER_TABLE | review_queue_items
+migrations/kai_sprint2_p1_06_review_status_column_repair.sql:195 | ALTER_TABLE | review_queue_items
+migrations/kai_sprint2_p1_06_review_status_column_repair.sql:198 | ALTER_TABLE | review_queue_items
+migrations/kai_sprint2_p1_07_intake_source_candidate.rollback.sql:6 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p1_07_intake_source_candidate.rollback.sql:25 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p1_07_intake_source_candidate.rollback.sql:187 | DROP_TABLE | intake_source_candidates
+migrations/kai_sprint2_p1_07_intake_source_candidate.rollback.sql:189 | ALTER_TABLE | intake_sensitivity_profiles
+migrations/kai_sprint2_p1_08_source_promotion.rollback.sql:6 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p1_08_source_promotion.rollback.sql:26 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p1_08_source_promotion.rollback.sql:216 | ALTER_TABLE | intake_promotion_decisions
+migrations/kai_sprint2_p1_08_source_promotion.rollback.sql:221 | DROP_TABLE | source_versions
+migrations/kai_sprint2_p1_08_source_promotion.rollback.sql:222 | DROP_TABLE | sources
+migrations/kai_sprint2_p1_08_source_promotion.rollback.sql:224 | DROP_TABLE | intake_promotion_decisions
+migrations/kai_sprint2_p1_08_source_promotion.rollback.sql:226 | ALTER_TABLE | review_queue_items
+migrations/kai_sprint2_p1_08_source_promotion.rollback.sql:229 | ALTER_TABLE | intake_source_candidates
+migrations/kai_sprint2_p1_08_source_promotion.rollback.sql:232 | ALTER_TABLE | intake_source_candidates
+migrations/kai_sprint2_p1_08_source_promotion.rollback.sql:235 | ALTER_TABLE | intake_source_candidates
+migrations/kai_sprint2_p1_parser_run_and_file_profile.rollback.sql:6 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p1_parser_run_and_file_profile.rollback.sql:20 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p1_parser_run_and_file_profile.rollback.sql:58 | ALTER_TABLE | intake_parser_runs
+migrations/kai_sprint2_p1_parser_run_and_file_profile.rollback.sql:63 | DROP_TABLE | intake_file_profiles
+migrations/kai_sprint2_p1_parser_run_and_file_profile.rollback.sql:66 | DROP_TABLE | intake_parser_runs
+migrations/kai_sprint2_p2_01_evidence_lineage.rollback.sql:6 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p2_01_evidence_lineage.rollback.sql:27 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p2_01_evidence_lineage.rollback.sql:244 | ALTER_TABLE | review_queue_items
+migrations/kai_sprint2_p2_01_evidence_lineage.rollback.sql:249 | DROP_TABLE | evidence_items
+migrations/kai_sprint2_p2_01_evidence_lineage.rollback.sql:250 | DROP_TABLE | source_locators
+migrations/kai_sprint2_p2_01_evidence_lineage.rollback.sql:252 | ALTER_TABLE | source_versions
+migrations/kai_sprint2_p2_03_claim_proposal.rollback.sql:6 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p2_03_claim_proposal.rollback.sql:28 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p2_03_claim_proposal.rollback.sql:274 | ALTER_TABLE | review_queue_items
+migrations/kai_sprint2_p2_03_claim_proposal.rollback.sql:279 | DROP_TABLE | claim_evidence_links
+migrations/kai_sprint2_p2_03_claim_proposal.rollback.sql:280 | DROP_TABLE | claims
+migrations/kai_sprint2_p2_04_claim_gap_followup.rollback.sql:6 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p2_04_claim_gap_followup.rollback.sql:29 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p2_04_claim_gap_followup.rollback.sql:307 | ALTER_TABLE | review_queue_items
+migrations/kai_sprint2_p2_04_claim_gap_followup.rollback.sql:312 | DROP_TABLE | client_followup_items
+migrations/kai_sprint2_p2_04_claim_gap_followup.rollback.sql:313 | DROP_TABLE | gap_log_items
+migrations/kai_sprint2_p2_05_conflict_review_candidate.rollback.sql:6 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p2_05_conflict_review_candidate.rollback.sql:9 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p2_05_conflict_review_candidate.rollback.sql:35 | ALTER_TABLE | review_queue_items
+migrations/kai_sprint2_p2_05_conflict_review_candidate.rollback.sql:38 | DROP_TABLE | conflict_groups
+migrations/kai_sprint2_p2_09_human_review_internal_approval.rollback.sql:6 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p2_09_human_review_internal_approval.rollback.sql:9 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p2_09_human_review_internal_approval.rollback.sql:12 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p2_09_human_review_internal_approval.rollback.sql:37 | ALTER_TABLE | claims
+migrations/kai_sprint2_p2_09_human_review_internal_approval.rollback.sql:42 | ALTER_TABLE | evidence_items
+migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.rollback.sql:177 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.rollback.sql:180 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.rollback.sql:182 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.rollback.sql:184 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.rollback.sql:196 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.rollback.sql:278 | ALTER_TABLE | review_queue_items
+migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.rollback.sql:299 | ALTER_TABLE | review_queue_items
+migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.rollback.sql:302 | ALTER_TABLE | review_queue_items
+migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.rollback.sql:305 | ALTER_TABLE | review_queue_items
+migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.rollback.sql:358 | ALTER_TABLE | claims
+migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.rollback.sql:362 | ALTER_TABLE | claims
+migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.rollback.sql:365 | ALTER_TABLE | evidence_items
+migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.rollback.sql:369 | ALTER_TABLE | evidence_items
+migrations/kai_sprint2_p2_10_coverage_review_decision.rollback.sql:3 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p2_10_coverage_review_decision.rollback.sql:6 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p2_10_coverage_review_decision.rollback.sql:36 | DROP_TABLE | coverage_review_decisions
+migrations/kai_sprint2_p2_10_funder_coverage_authority.rollback.sql:3 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p2_10_funder_coverage_authority.rollback.sql:59 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p2_10_funder_coverage_authority.rollback.sql:64 | ALTER_TABLE | coverage_review_decisions
+migrations/kai_sprint2_p2_10_funder_coverage_authority.rollback.sql:69 | ALTER_TABLE | coverage_review_decisions
+migrations/kai_sprint2_p2_10_public_coverage_authority.rollback.sql:3 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p2_10_public_coverage_authority.rollback.sql:62 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p2_10_public_coverage_authority.rollback.sql:67 | ALTER_TABLE | coverage_review_decisions
+migrations/kai_sprint2_p2_11_client_followup_completion.rollback.sql:3 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p2_11_client_followup_completion.rollback.sql:6 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p2_11_client_followup_completion.rollback.sql:34 | ALTER_TABLE | review_queue_items
+migrations/kai_sprint2_p2_12_human_review_decision_ledger.rollback.sql:3 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p2_12_human_review_decision_ledger.rollback.sql:26 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p2_12_human_review_decision_ledger.rollback.sql:48 | ALTER_TABLE | claims
+migrations/kai_sprint2_p2_12_human_review_decision_ledger.rollback.sql:53 | ALTER_TABLE | evidence_items
+migrations/kai_sprint2_p2_12_human_review_decision_ledger.rollback.sql:58 | ALTER_TABLE | claims
+migrations/kai_sprint2_p2_12_human_review_decision_ledger.rollback.sql:63 | ALTER_TABLE | evidence_items
+migrations/kai_sprint2_p2_12_human_review_decision_ledger.rollback.sql:71 | DROP_TABLE | claim_review_decisions
+migrations/kai_sprint2_p2_12_human_review_decision_ledger.rollback.sql:76 | DROP_TABLE | evidence_review_decisions
+migrations/kai_sprint2_p3_01_generated_content_drafts.rollback.sql:9 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p3_01_generated_content_drafts.rollback.sql:12 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p3_01_generated_content_drafts.rollback.sql:39 | ALTER_TABLE | review_queue_items
+migrations/kai_sprint2_p3_01_generated_content_drafts.rollback.sql:42 | DROP_TABLE | generated_content_citations
+migrations/kai_sprint2_p3_01_generated_content_drafts.rollback.sql:43 | DROP_TABLE | generated_content_blocks
+migrations/kai_sprint2_p3_01_generated_content_drafts.rollback.sql:44 | DROP_TABLE | generated_content_drafts
+migrations/kai_sprint2_p3_01_generated_content_drafts.rollback.sql:45 | DROP_TABLE | generation_runs
+migrations/kai_sprint2_p3_04_generated_content_review_completion.rollback.sql:12 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p3_04_generated_content_review_completion.rollback.sql:15 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p3_04_generated_content_review_completion.rollback.sql:41 | ALTER_TABLE | review_queue_items
+migrations/kai_sprint2_p3_05_export_review_request.rollback.sql:9 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p3_05_export_review_request.rollback.sql:57 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p3_05_export_review_request.rollback.sql:60 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p3_05_export_review_request.rollback.sql:62 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p3_05_export_review_request.rollback.sql:64 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p3_05_export_review_request.rollback.sql:70 | ALTER_TABLE | review_queue_items
+migrations/kai_sprint2_p3_09_export_review_start.rollback.sql:11 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p3_09_export_review_start.rollback.sql:61 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p3_09_export_review_start.rollback.sql:64 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p3_09_export_review_start.rollback.sql:66 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p3_09_export_review_start.rollback.sql:68 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p3_09_export_review_start.rollback.sql:74 | ALTER_TABLE | review_queue_items
+migrations/kai_sprint2_p3_13_export_review_completion.rollback.sql:13 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p3_13_export_review_completion.rollback.sql:61 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p3_13_export_review_completion.rollback.sql:64 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p3_13_export_review_completion.rollback.sql:66 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p3_13_export_review_completion.rollback.sql:68 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p3_13_export_review_completion.rollback.sql:74 | ALTER_TABLE | review_queue_items
+migrations/kai_sprint2_p3_16_export_candidate_foundation.rollback.sql:3 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p3_16_export_candidate_foundation.rollback.sql:6 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p3_16_export_candidate_foundation.rollback.sql:60 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p3_16_export_candidate_foundation.rollback.sql:63 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p3_16_export_candidate_foundation.rollback.sql:65 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p3_16_export_candidate_foundation.rollback.sql:67 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p3_16_export_candidate_foundation.rollback.sql:73 | DROP_TABLE | export_candidates
+migrations/kai_sprint2_p3_16_export_candidate_foundation.rollback.sql:75 | DROP_TABLE | limitation_snapshot_entries
+migrations/kai_sprint2_p3_16_export_candidate_foundation.rollback.sql:79 | DROP_TABLE | limitation_snapshots
+migrations/kai_sprint2_p3_17_authority_audit_gate_a_operation_repair.rollback.sql:41 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p3_17_authority_audit_gate_a_operation_repair.rollback.sql:44 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p3_17_authority_audit_gate_a_operation_repair.rollback.sql:46 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p3_17_authority_audit_gate_a_operation_repair.rollback.sql:48 | ALTER_TABLE | upload_lifecycle_audit
+migrations/kai_sprint2_p3_17_human_authority_decision_ledger.rollback.sql:7 | DROP_TABLE | human_authority_decisions
+migrations/kai_sprint2_p3_19_export_manifest_foundation.rollback.sql:4 | DROP_TABLE | export_manifests
+migrations/kai_sprint2_p3_20_export_manifest_review_binding.rollback.sql:5 | ALTER_TABLE | export_manifests
+migrations/kai_sprint2_p3_20_export_manifest_review_binding.rollback.sql:8 | ALTER_TABLE | export_manifests
+migrations/kai_sprint2_p3_20_export_manifest_review_binding.rollback.sql:11 | ALTER_TABLE | review_queue_items
+migrations/kai_sprint2_package_2a_engagement_requirement_sets_authority.rollback.sql:10 | ALTER_TABLE | engagement_requirement_sets
+migrations/kai_sprint2_package_2a_engagement_requirement_sets_authority.rollback.sql:19 | ALTER_TABLE | engagement_requirement_sets
+migrations/kai_sprint2_package_2a_engagement_requirement_sets_authority.rollback.sql:23 | ALTER_TABLE | engagement_requirement_sets
+
+=== OFF-PATH DYNAMIC SQL CANDIDATES ===
+migrations/kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger.rollback.sql
+migrations/kai_sprint2_gate_a_p0_required_index_forward_repair.rollback.sql
+migrations/kai_sprint2_gate_a_p0_upload_lifecycle_enforcement_forward_repair.rollback.sql
+migrations/kai_sprint2_generated_content_review_start_audit_contract.rollback.sql
+migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql
+migrations/kai_sprint2_legacy_generation_cutover_20260817.sql
+migrations/kai_sprint2_p1_06_review_status_column_repair.rollback.sql
+migrations/kai_sprint2_p1_06_review_status_column_repair.sql
+migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.rollback.sql
+migrations/kai_sprint2_p2_10_funder_coverage_authority.rollback.sql
+migrations/kai_sprint2_p2_10_public_coverage_authority.rollback.sql
+migrations/kai_sprint2_p3_05_export_review_request.rollback.sql
+migrations/kai_sprint2_p3_09_export_review_start.rollback.sql
+migrations/kai_sprint2_p3_13_export_review_completion.rollback.sql
+migrations/kai_sprint2_p3_16_export_candidate_foundation.rollback.sql
+migrations/kai_sprint2_p3_17_authority_audit_gate_a_operation_repair.rollback.sql

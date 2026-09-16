@@ -1,0 +1,2416 @@
+
+
+============================================================
+scripts/kai-sprint2-gk-organization-tenant-binding-verifier.sql
+============================================================
+    1  DROP TABLE IF EXISTS gk_org_binding_results;
+    2  CREATE TEMP TABLE gk_org_binding_results (
+    3    check_name text PRIMARY KEY,
+    4    status text NOT NULL,
+    5    detail text NOT NULL
+    6  );
+    7  
+    8  INSERT INTO gk_org_binding_results
+    9  SELECT 'table_present',
+   10         CASE WHEN EXISTS (
+   11                SELECT 1 FROM information_schema.tables
+   12                 WHERE table_schema = 'kai' AND table_name = 'gk_organization_bindings'
+   13              )
+   14              THEN 'PASS' ELSE 'FAIL' END,
+   15         'kai.gk_organization_bindings exists';
+   16  
+   17  INSERT INTO gk_org_binding_results
+   18  SELECT 'gk_organization_id_column_present',
+   19         CASE WHEN EXISTS (
+   20                SELECT 1 FROM information_schema.columns
+   21                 WHERE table_schema = 'kai' AND table_name = 'gk_organization_bindings'
+   22                   AND column_name = 'gk_organization_id' AND data_type = 'integer' AND is_nullable = 'NO'
+   23              )
+   24              THEN 'PASS' ELSE 'FAIL' END,
+   25         'gk_organization_id is a required integer column';
+   26  
+   27  INSERT INTO gk_org_binding_results
+   28  SELECT 'kai_organization_id_column_present',
+   29         CASE WHEN EXISTS (
+   30                SELECT 1 FROM information_schema.columns
+   31                 WHERE table_schema = 'kai' AND table_name = 'gk_organization_bindings'
+   32                   AND column_name = 'kai_organization_id' AND data_type = 'uuid' AND is_nullable = 'NO'
+   33              )
+   34              THEN 'PASS' ELSE 'FAIL' END,
+   35         'kai_organization_id is a required uuid column';
+   36  
+   37  INSERT INTO gk_org_binding_results
+   38  SELECT 'gk_organization_id_fk_present',
+   39         CASE WHEN EXISTS (
+   40                SELECT 1
+   41                  FROM pg_constraint c
+   42                  JOIN pg_class rel ON rel.oid = c.conrelid
+   43                  JOIN pg_namespace nsp ON nsp.oid = rel.relnamespace
+   44                  JOIN pg_class frel ON frel.oid = c.confrelid
+   45                  JOIN pg_namespace fnsp ON fnsp.oid = frel.relnamespace
+   46                 WHERE c.contype = 'f'
+   47                   AND nsp.nspname = 'kai' AND rel.relname = 'gk_organization_bindings'
+   48                   AND fnsp.nspname = 'public' AND frel.relname = 'organizations'
+   49              )
+   50              THEN 'PASS' ELSE 'FAIL' END,
+   51         'gk_organization_id has a foreign key to public.organizations(id)';
+   52  
+   53  INSERT INTO gk_org_binding_results
+   54  SELECT 'status_check_present',
+   55         CASE WHEN EXISTS (
+   56                SELECT 1 FROM pg_constraint
+   57                 WHERE conname = 'gk_organization_bindings_status_check'
+   58                   AND pg_get_constraintdef(oid) LIKE '%''active''%''inactive''%'
+   59              )
+   60              THEN 'PASS' ELSE 'FAIL' END,
+   61         'status is constrained to active/inactive';
+   62  
+   63  INSERT INTO gk_org_binding_results
+   64  SELECT 'status_default_active',
+   65         CASE WHEN EXISTS (
+   66                SELECT 1 FROM information_schema.columns
+   67                 WHERE table_schema = 'kai' AND table_name = 'gk_organization_bindings'
+   68                   AND column_name = 'status' AND column_default LIKE '%active%'
+   69              )
+   70              THEN 'PASS' ELSE 'FAIL' END,
+   71         'status defaults to active';
+   72  
+   73  INSERT INTO gk_org_binding_results
+   74  SELECT 'unique_active_gk_org_index_present',
+   75         CASE WHEN EXISTS (
+   76                SELECT 1 FROM pg_indexes
+   77                 WHERE schemaname = 'kai' AND indexname = 'ux_gk_organization_bindings_active_gk_org'
+   78                   AND indexdef LIKE '%UNIQUE%' AND indexdef LIKE '%WHERE (status = ''active''%'
+   79              )
+   80              THEN 'PASS' ELSE 'FAIL' END,
+   81         'at most one active binding per Get Kinder organization is schema-enforced';
+   82  
+   83  INSERT INTO gk_org_binding_results
+   84  SELECT 'unique_active_kai_org_index_present',
+   85         CASE WHEN EXISTS (
+   86                SELECT 1 FROM pg_indexes
+   87                 WHERE schemaname = 'kai' AND indexname = 'ux_gk_organization_bindings_active_kai_org'
+   88                   AND indexdef LIKE '%UNIQUE%' AND indexdef LIKE '%WHERE (status = ''active''%'
+   89              )
+   90              THEN 'PASS' ELSE 'FAIL' END,
+   91         'at most one active binding per KAI tenant is schema-enforced';
+   92  
+   93  INSERT INTO gk_org_binding_results
+   94  SELECT 'updated_at_trigger_present',
+   95         CASE WHEN EXISTS (
+   96                SELECT 1 FROM pg_trigger
+   97                 WHERE tgname = 'trg_gk_organization_bindings_touch_updated_at'
+   98                   AND tgrelid = 'kai.gk_organization_bindings'::regclass
+   99                   AND NOT tgisinternal
+  100              )
+  101              THEN 'PASS' ELSE 'FAIL' END,
+  102         'updated_at is touched automatically on UPDATE';
+  103  
+  104  INSERT INTO gk_org_binding_results
+  105  SELECT 'no_other_kai_relation_introduced',
+  106         CASE WHEN (
+  107                SELECT count(*) FROM information_schema.tables WHERE table_schema = 'kai'
+  108              ) = 1
+  109              THEN 'PASS' ELSE 'FAIL' END,
+  110         'this migration introduces exactly one kai schema relation in an otherwise-empty kai schema';
+  111  
+  112  SELECT * FROM gk_org_binding_results ORDER BY check_name;
+  113  
+  114  DO $$
+  115  BEGIN
+  116    IF EXISTS (SELECT 1 FROM gk_org_binding_results WHERE status <> 'PASS') THEN
+  117      RAISE EXCEPTION 'gk_organization_tenant_binding verifier failed';
+  118    END IF;
+  119  END $$;
+  120  
+
+
+============================================================
+scripts/kai-sprint2-p1-07-source-candidate-verifier.sql
+============================================================
+    1  WITH checks AS (
+    2    SELECT 'TABLE_EXISTS' AS check_name,
+    3           'kai.intake_source_candidates' AS object_name,
+    4           CASE WHEN to_regclass('kai.intake_source_candidates') IS NOT NULL THEN 'PASS' ELSE 'FAIL' END AS status,
+    5           'P1-07 canonical source-candidate table' AS detail
+    6    UNION ALL
+    7    SELECT 'COLUMN_EXISTS', 'kai.intake_source_candidates.' || column_name_value,
+    8           CASE WHEN EXISTS (
+    9             SELECT 1 FROM information_schema.columns
+   10              WHERE table_schema = 'kai' AND table_name = 'intake_source_candidates' AND column_name = column_name_value
+   11           ) THEN 'PASS' ELSE 'FAIL' END,
+   12           'canonical column'
+   13      FROM unnest(ARRAY[
+   14        'intake_source_candidate_id',
+   15        'organization_id',
+   16        'intake_file_id',
+   17        'file_profile_id',
+   18        'data_dictionary_id',
+   19        'intake_sensitivity_profile_id',
+   20        'profile_canonical_sha256',
+   21        'proposed_source_type',
+   22        'candidate_status',
+   23        'created_by',
+   24        'created_by_type',
+   25        'created_at'
+   26      ]) AS column_name_value
+   27    UNION ALL
+   28    SELECT 'NO_RAW_CONTENT_COLUMN', 'kai.intake_source_candidates',
+   29           CASE WHEN NOT EXISTS (
+   30             SELECT 1 FROM information_schema.columns
+   31              WHERE table_schema = 'kai' AND table_name = 'intake_source_candidates'
+   32                AND column_name IN ('raw_content', 'sample_values', 'safe_description', 'permission_restrictions', 'filename', 'storage_location')
+   33           ) THEN 'PASS' ELSE 'FAIL' END,
+   34           'no raw-content, sample-value, or unrestricted free-text column exists'
+   35    UNION ALL
+   36    SELECT 'CHECK_EXISTS', check_name_value,
+   37           CASE WHEN EXISTS (
+   38             SELECT 1
+   39               FROM pg_constraint c
+   40               JOIN pg_class r ON r.oid = c.conrelid
+   41               JOIN pg_namespace n ON n.oid = r.relnamespace
+   42              WHERE n.nspname = 'kai'
+   43                AND r.relname = 'intake_source_candidates'
+   44                AND c.conname = check_name_value
+   45                AND c.contype = 'c'
+   46           ) THEN 'PASS' ELSE 'FAIL' END,
+   47           'required CHECK-enforced vocabulary or bound on kai.intake_source_candidates'
+   48      FROM unnest(ARRAY[
+   49        'intake_source_candidates_p1_07_canonical_sha_check',
+   50        'intake_source_candidates_p1_07_proposed_source_type_check',
+   51        'intake_source_candidates_p1_07_candidate_status_check',
+   52        'intake_source_candidates_p1_07_created_by_type_check'
+   53      ]) AS check_name_value
+   54    UNION ALL
+   55    SELECT 'PROPOSED_SOURCE_TYPE_PINNED_UNKNOWN', 'kai.intake_source_candidates.proposed_source_type',
+   56           CASE WHEN EXISTS (
+   57             SELECT 1
+   58               FROM pg_constraint c
+   59               JOIN pg_class r ON r.oid = c.conrelid
+   60               JOIN pg_namespace n ON n.oid = r.relnamespace
+   61              WHERE n.nspname = 'kai'
+   62                AND r.relname = 'intake_source_candidates'
+   63                AND c.conname = 'intake_source_candidates_p1_07_proposed_source_type_check'
+   64                AND pg_get_constraintdef(c.oid) LIKE '%''unknown''%'
+   65           ) THEN 'PASS' ELSE 'FAIL' END,
+   66           'no explicit source-classification producer contract exists yet, so proposed_source_type is pinned to unknown only'
+   67    UNION ALL
+   68    SELECT 'CANDIDATE_STATUS_PINNED_NEEDS_REVIEW', 'kai.intake_source_candidates.candidate_status',
+   69           CASE WHEN EXISTS (
+   70             SELECT 1
+   71               FROM pg_constraint c
+   72               JOIN pg_class r ON r.oid = c.conrelid
+   73               JOIN pg_namespace n ON n.oid = r.relnamespace
+   74              WHERE n.nspname = 'kai'
+   75                AND r.relname = 'intake_source_candidates'
+   76                AND c.conname = 'intake_source_candidates_p1_07_candidate_status_check'
+   77                AND pg_get_constraintdef(c.oid) LIKE '%''needs_gk_review''%'
+   78           ) THEN 'PASS' ELSE 'FAIL' END,
+   79           'no promoted, approved, finalized, or export-ready candidate_status value exists'
+   80    UNION ALL
+   81    SELECT 'IDENTITY_UNIQUE_CONSTRAINT_EXISTS', 'intake_source_candidates_p1_07_identity_unique',
+   82           CASE WHEN EXISTS (
+   83             SELECT 1
+   84               FROM pg_constraint c
+   85               JOIN pg_class r ON r.oid = c.conrelid
+   86               JOIN pg_namespace n ON n.oid = r.relnamespace
+   87              WHERE n.nspname = 'kai'
+   88                AND r.relname = 'intake_source_candidates'
+   89                AND c.conname = 'intake_source_candidates_p1_07_identity_unique'
+   90                AND c.contype = 'u'
+   91           ) THEN 'PASS' ELSE 'FAIL' END,
+   92           'one candidate per organization_id + intake_sensitivity_profile_id'
+   93    UNION ALL
+   94    SELECT 'LINEAGE_FK_EXISTS', fk_name_value,
+   95           CASE WHEN EXISTS (
+   96             SELECT 1
+   97               FROM pg_constraint c
+   98               JOIN pg_class r ON r.oid = c.conrelid
+   99               JOIN pg_namespace n ON n.oid = r.relnamespace
+  100              WHERE n.nspname = 'kai'
+  101                AND r.relname = 'intake_source_candidates'
+  102                AND c.conname = fk_name_value
+  103                AND c.contype = 'f'
+  104           ) THEN 'PASS' ELSE 'FAIL' END,
+  105           'tenant-safe composite lineage foreign key'
+  106      FROM unnest(ARRAY[
+  107        'intake_source_candidates_p1_07_file_fk',
+  108        'intake_source_candidates_p1_07_profile_lineage_fk',
+  109        'intake_source_candidates_p1_07_dictionary_lineage_fk',
+  110        'intake_source_candidates_p1_07_sensitivity_lineage_fk'
+  111      ]) AS fk_name_value
+  112    UNION ALL
+  113    SELECT 'SENSITIVITY_PROFILE_CANDIDATE_LINEAGE_UNIQUE_EXISTS', 'intake_sensitivity_profiles_p1_07_candidate_lineage_unique',
+  114           CASE WHEN EXISTS (
+  115             SELECT 1
+  116               FROM pg_constraint c
+  117               JOIN pg_class r ON r.oid = c.conrelid
+  118               JOIN pg_namespace n ON n.oid = r.relnamespace
+  119              WHERE n.nspname = 'kai'
+  120                AND r.relname = 'intake_sensitivity_profiles'
+  121                AND c.conname = 'intake_sensitivity_profiles_p1_07_candidate_lineage_unique'
+  122                AND c.contype = 'u'
+  123           ) THEN 'PASS' ELSE 'FAIL' END,
+  124           'P1-07-added unique constraint on kai.intake_sensitivity_profiles needed to express the composite sensitivity-lineage FK'
+  125    UNION ALL
+  126    SELECT 'UNIQUE_INDEX_EXISTS', 'ux_review_queue_items_p1_07_source_candidate_review_identity',
+  127           CASE WHEN EXISTS (
+  128             SELECT 1
+  129               FROM pg_class ic
+  130               JOIN pg_namespace n ON n.oid = ic.relnamespace
+  131              WHERE n.nspname = 'kai'
+  132                AND ic.relname = 'ux_review_queue_items_p1_07_source_candidate_review_identity'
+  133                AND ic.relkind = 'i'
+  134           ) THEN 'PASS' ELSE 'FAIL' END,
+  135           'partial unique index scopes the source_candidate_review idempotency identity, not a table-wide constraint'
+  136    UNION ALL
+  137    SELECT 'QUEUE_TYPE_VOCABULARY', 'source_candidate_review',
+  138           CASE WHEN EXISTS (
+  139             SELECT 1
+  140               FROM pg_constraint c
+  141               JOIN pg_class r ON r.oid = c.conrelid
+  142               JOIN pg_namespace n ON n.oid = r.relnamespace
+  143              WHERE n.nspname = 'kai'
+  144                AND r.relname = 'review_queue_items'
+  145                AND c.conname = 'review_queue_items_p1_06_queue_type_check'
+  146                AND pg_get_constraintdef(c.oid) LIKE '%source_candidate_review%'
+  147           ) THEN 'PASS' ELSE 'FAIL' END,
+  148           'queue_type vocabulary already accepts source_candidate_review (P1-06 reserved it); P1-07 does not edit the accepted P1-06 migration'
+  149    UNION ALL
+  150    SELECT 'AUDIT_OPERATION_VOCABULARY', 'intake_source_candidate_persisted',
+  151           CASE WHEN EXISTS (
+  152             SELECT 1
+  153               FROM pg_constraint c
+  154               JOIN pg_class r ON r.oid = c.conrelid
+  155               JOIN pg_namespace n ON n.oid = r.relnamespace
+  156              WHERE n.nspname = 'kai'
+  157                AND r.relname = 'upload_lifecycle_audit'
+  158                AND c.conname = 'upload_lifecycle_audit_gate_a_operation_check'
+  159                AND pg_get_constraintdef(c.oid) LIKE '%intake_source_candidate_persisted%'
+  160           ) THEN 'PASS' ELSE 'FAIL' END,
+  161           'existing audit table accepts the P1-07 intake-source-candidate-persisted operation'
+  162    UNION ALL
+  163    SELECT 'AUDIT_OPERATION_VOCABULARY', 'earlier_operations_preserved',
+  164           CASE WHEN EXISTS (
+  165             SELECT 1
+  166               FROM pg_constraint c
+  167               JOIN pg_class r ON r.oid = c.conrelid
+  168               JOIN pg_namespace n ON n.oid = r.relnamespace
+  169              WHERE n.nspname = 'kai'
+  170                AND r.relname = 'upload_lifecycle_audit'
+  171                AND c.conname = 'upload_lifecycle_audit_gate_a_operation_check'
+  172                AND pg_get_constraintdef(c.oid) LIKE '%parser_run_recorded%'
+  173                AND pg_get_constraintdef(c.oid) LIKE '%file_profile_persisted%'
+  174                AND pg_get_constraintdef(c.oid) LIKE '%data_dictionary_draft_persisted%'
+  175                AND pg_get_constraintdef(c.oid) LIKE '%intake_sensitivity_profile_persisted%'
+  176                AND pg_get_constraintdef(c.oid) LIKE '%sensitivity_review_queue_item_created%'
+  177                AND pg_get_constraintdef(c.oid) LIKE '%policy_decision_compare_and_set%'
+  178           ) THEN 'PASS' ELSE 'FAIL' END,
+  179           'Gate A/P1-02 through P1-06 audit operations remain accepted alongside the new P1-07 operation'
+  180    UNION ALL
+  181    SELECT 'AUDIT_METADATA_BRANCH', 'intake_source_candidate_persisted',
+  182           CASE WHEN EXISTS (
+  183             SELECT 1
+  184               FROM pg_constraint c
+  185               JOIN pg_class r ON r.oid = c.conrelid
+  186               JOIN pg_namespace n ON n.oid = r.relnamespace
+  187              WHERE n.nspname = 'kai'
+  188                AND r.relname = 'upload_lifecycle_audit'
+  189                AND c.conname = 'upload_lifecycle_audit_gate_a_metadata_object_check'
+  190                AND pg_get_constraintdef(c.oid) LIKE '%intake_source_candidate_persisted%'
+  191                AND pg_get_constraintdef(c.oid) LIKE '%metadata_only%'
+  192                AND pg_get_constraintdef(c.oid) LIKE '%intake_sensitivity_profile_id%'
+  193                AND pg_get_constraintdef(c.oid) LIKE '%validator_key%'
+  194           ) THEN 'PASS' ELSE 'FAIL' END,
+  195           'metadata object-check constraint enforces the P1-07 intake-source-candidate-persisted metadata branch'
+  196    UNION ALL
+  197    SELECT 'NO_TABLE_WIDE_FK_ON_SHARED_TARGET', 'kai.review_queue_items.target_object_id',
+  198           CASE WHEN NOT EXISTS (
+  199             SELECT 1
+  200               FROM pg_constraint c
+  201               JOIN pg_class r ON r.oid = c.conrelid
+  202               JOIN pg_namespace n ON n.oid = r.relnamespace
+  203              WHERE n.nspname = 'kai'
+  204                AND r.relname = 'review_queue_items'
+  205                AND c.contype = 'f'
+  206           ) THEN 'PASS' ELSE 'FAIL' END,
+  207           'P1-07 adds no table-wide foreign key on the shared, multi-target target_object_id column'
+  208    UNION ALL
+  209    SELECT 'NO_PROMOTION_OR_SOURCE_OBJECTS', object_name_value,
+  210           CASE WHEN to_regclass(object_name_value) IS NULL THEN 'PASS' ELSE 'FAIL' END,
+  211           'P1-07 does not create any source, source_version, or promotion-decision table'
+  212      FROM unnest(ARRAY[
+  213        'kai.sources',
+  214        'kai.source_versions',
+  215        'kai.intake_promotion_decisions'
+  216      ]) AS object_name_value
+  217  )
+  218  SELECT 'P1_07_CATALOG' AS result_type, check_name, object_name, status, detail
+  219  FROM checks
+  220  ORDER BY check_name, object_name;
+  221  
+
+
+============================================================
+scripts/kai-sprint2-p13-01-impact-narrative-content-type-verifier.sql
+============================================================
+    1  DROP TABLE IF EXISTS p13_01_results;
+    2  CREATE TEMP TABLE p13_01_results (
+    3    check_name text PRIMARY KEY,
+    4    status text NOT NULL,
+    5    detail text NOT NULL
+    6  );
+    7  
+    8  INSERT INTO p13_01_results
+    9  SELECT 'generation_runs_content_type_contract_allows_exact_p13_vocabulary',
+   10         CASE WHEN EXISTS (
+   11                SELECT 1
+   12                  FROM pg_constraint c
+   13                 WHERE c.conname = 'generation_runs_p3_01_content_type_check'
+   14                   AND c.conrelid = 'kai.generation_runs'::regclass
+   15                   AND replace(pg_get_constraintdef(c.oid), '::text', '') LIKE '%content_type = ANY (ARRAY[''evidence_summary'', ''impact_narrative'']%)'
+   16                   AND pg_get_constraintdef(c.oid) NOT LIKE '%grant_response%'
+   17                   AND pg_get_constraintdef(c.oid) NOT LIKE '%export%'
+   18              )
+   19              THEN 'PASS' ELSE 'FAIL' END,
+   20         'kai.generation_runs.content_type allows exactly evidence_summary and impact_narrative';
+   21  
+   22  INSERT INTO p13_01_results
+   23  SELECT 'generated_content_drafts_content_type_contract_allows_exact_p13_vocabulary',
+   24         CASE WHEN EXISTS (
+   25                SELECT 1
+   26                  FROM pg_constraint c
+   27                 WHERE c.conname = 'generated_content_drafts_p3_01_content_type_check'
+   28                   AND c.conrelid = 'kai.generated_content_drafts'::regclass
+   29                   AND replace(pg_get_constraintdef(c.oid), '::text', '') LIKE '%content_type = ANY (ARRAY[''evidence_summary'', ''impact_narrative'']%)'
+   30                   AND pg_get_constraintdef(c.oid) NOT LIKE '%grant_response%'
+   31                   AND pg_get_constraintdef(c.oid) NOT LIKE '%export%'
+   32              )
+   33              THEN 'PASS' ELSE 'FAIL' END,
+   34         'kai.generated_content_drafts.content_type allows exactly evidence_summary and impact_narrative';
+   35  
+   36  INSERT INTO p13_01_results
+   37  SELECT 'requested_audience_contract_unchanged',
+   38         CASE WHEN EXISTS (
+   39                SELECT 1 FROM pg_constraint
+   40                 WHERE conname = 'generation_runs_p3_01_requested_audience_check'
+   41                   AND conrelid = 'kai.generation_runs'::regclass
+   42                   AND pg_get_constraintdef(oid) LIKE '%internal%'
+   43                   AND pg_get_constraintdef(oid) LIKE '%funder%'
+   44                   AND pg_get_constraintdef(oid) LIKE '%public%'
+   45              )
+   46              AND EXISTS (
+   47                SELECT 1 FROM pg_constraint
+   48                 WHERE conname = 'generated_content_drafts_p3_01_requested_audience_check'
+   49                   AND conrelid = 'kai.generated_content_drafts'::regclass
+   50                   AND pg_get_constraintdef(oid) LIKE '%internal%'
+   51                   AND pg_get_constraintdef(oid) LIKE '%funder%'
+   52                   AND pg_get_constraintdef(oid) LIKE '%public%'
+   53              )
+   54              THEN 'PASS' ELSE 'FAIL' END,
+   55         'P13-01 does not alter the existing requested_audience contracts';
+   56  
+   57  INSERT INTO p13_01_results
+   58  SELECT 'draft_status_review_status_and_created_by_contracts_unchanged',
+   59         CASE WHEN EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'generated_content_drafts_p3_01_draft_status_check')
+   60                AND EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'generated_content_drafts_p3_01_review_status_check')
+   61                AND EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'generated_content_drafts_p3_01_created_by_type_check')
+   62                AND EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'generation_runs_p3_01_created_by_type_check')
+   63              THEN 'PASS' ELSE 'FAIL' END,
+   64         'P13-01 leaves draft-only, needs-review, and system-owned creation contracts in place';
+   65  
+   66  INSERT INTO p13_01_results
+   67  SELECT 'no_p13_queue_export_or_authority_schema',
+   68         CASE WHEN NOT EXISTS (
+   69                SELECT 1
+   70                  FROM information_schema.columns
+   71                 WHERE table_schema = 'kai'
+   72                   AND column_name IN (
+   73                     'impact_fact_id',
+   74                     'exported_at',
+   75                     'finalized_at',
+   76                     'public_ready',
+   77                     'funder_ready',
+   78                     'export_authority',
+   79                     'final_export_gate'
+   80                   )
+   81              )
+   82              THEN 'PASS' ELSE 'FAIL' END,
+   83         'P13-01 adds no impact facts, export/finalization, audience authority, or final-gate schema';
+   84  
+   85  SELECT * FROM p13_01_results ORDER BY check_name;
+   86  
+   87  DO $$
+   88  BEGIN
+   89    IF EXISTS (SELECT 1 FROM p13_01_results WHERE status <> 'PASS') THEN
+   90      RAISE EXCEPTION 'P13-01 impact-narrative content-type verifier failed';
+   91    END IF;
+   92  END $$;
+   93  
+
+
+============================================================
+scripts/kai-sprint2-p14-14-generated-content-type-evolution-verifier.sql
+============================================================
+    1  DROP TABLE IF EXISTS p14_14_results;
+    2  CREATE TEMP TABLE p14_14_results (
+    3    check_name text PRIMARY KEY,
+    4    status text NOT NULL,
+    5    detail text NOT NULL
+    6  );
+    7  
+    8  INSERT INTO p14_14_results
+    9  SELECT 'generation_runs_content_type_contract_allows_exact_p14_14_vocabulary',
+   10         CASE WHEN EXISTS (
+   11                SELECT 1
+   12                  FROM pg_constraint c
+   13                 WHERE c.conname = 'generation_runs_p3_01_content_type_check'
+   14                   AND c.conrelid = 'kai.generation_runs'::regclass
+   15                   AND replace(pg_get_constraintdef(c.oid), '::text', '') LIKE
+   16                       '%content_type = ANY (ARRAY[''evidence_summary'', ''impact_narrative'', ''readiness_assessment'', ''data_gap_memo'']%)'
+   17                   AND pg_get_constraintdef(c.oid) NOT LIKE '%grant_response%'
+   18                   AND pg_get_constraintdef(c.oid) NOT LIKE '%export%'
+   19              )
+   20              THEN 'PASS' ELSE 'FAIL' END,
+   21         'kai.generation_runs.content_type allows exactly evidence_summary, impact_narrative, readiness_assessment, data_gap_memo';
+   22  
+   23  INSERT INTO p14_14_results
+   24  SELECT 'generated_content_drafts_content_type_contract_allows_exact_p14_14_vocabulary',
+   25         CASE WHEN EXISTS (
+   26                SELECT 1
+   27                  FROM pg_constraint c
+   28                 WHERE c.conname = 'generated_content_drafts_p3_01_content_type_check'
+   29                   AND c.conrelid = 'kai.generated_content_drafts'::regclass
+   30                   AND replace(pg_get_constraintdef(c.oid), '::text', '') LIKE
+   31                       '%content_type = ANY (ARRAY[''evidence_summary'', ''impact_narrative'', ''readiness_assessment'', ''data_gap_memo'']%)'
+   32                   AND pg_get_constraintdef(c.oid) NOT LIKE '%grant_response%'
+   33                   AND pg_get_constraintdef(c.oid) NOT LIKE '%export%'
+   34              )
+   35              THEN 'PASS' ELSE 'FAIL' END,
+   36         'kai.generated_content_drafts.content_type allows exactly evidence_summary, impact_narrative, readiness_assessment, data_gap_memo';
+   37  
+   38  INSERT INTO p14_14_results
+   39  SELECT 'requested_audience_contract_unchanged',
+   40         CASE WHEN EXISTS (
+   41                SELECT 1 FROM pg_constraint
+   42                 WHERE conname = 'generation_runs_p3_01_requested_audience_check'
+   43                   AND conrelid = 'kai.generation_runs'::regclass
+   44                   AND pg_get_constraintdef(oid) LIKE '%internal%'
+   45                   AND pg_get_constraintdef(oid) LIKE '%funder%'
+   46                   AND pg_get_constraintdef(oid) LIKE '%public%'
+   47              )
+   48              AND EXISTS (
+   49                SELECT 1 FROM pg_constraint
+   50                 WHERE conname = 'generated_content_drafts_p3_01_requested_audience_check'
+   51                   AND conrelid = 'kai.generated_content_drafts'::regclass
+   52                   AND pg_get_constraintdef(oid) LIKE '%internal%'
+   53                   AND pg_get_constraintdef(oid) LIKE '%funder%'
+   54                   AND pg_get_constraintdef(oid) LIKE '%public%'
+   55              )
+   56              THEN 'PASS' ELSE 'FAIL' END,
+   57         'P14-14 does not alter the existing requested_audience contracts';
+   58  
+   59  INSERT INTO p14_14_results
+   60  SELECT 'fingerprint_draft_status_review_status_and_created_by_contracts_unchanged',
+   61         CASE WHEN EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'generation_runs_p3_01_fingerprint_check')
+   62                AND EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'generated_content_drafts_p3_01_draft_status_check')
+   63                AND EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'generated_content_drafts_p3_01_review_status_check')
+   64                AND EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'generated_content_drafts_p3_01_created_by_type_check')
+   65                AND EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'generation_runs_p3_01_created_by_type_check')
+   66              THEN 'PASS' ELSE 'FAIL' END,
+   67         'P14-14 leaves fingerprint, draft-only, needs-review, and system-owned creation contracts in place';
+   68  
+   69  INSERT INTO p14_14_results
+   70  SELECT 'identity_and_fk_contracts_unchanged',
+   71         CASE WHEN EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'generation_runs_p3_01_identity_unique')
+   72                AND EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'generation_runs_p3_01_id_org_unique')
+   73                AND EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'generated_content_drafts_p3_01_run_unique')
+   74                AND EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'generated_content_drafts_p3_01_id_org_unique')
+   75                AND EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'generated_content_drafts_p3_01_run_fk')
+   76              THEN 'PASS' ELSE 'FAIL' END,
+   77         'P14-14 leaves uniqueness and foreign-key identity contracts in place';
+   78  
+   79  INSERT INTO p14_14_results
+   80  SELECT 'review_queue_and_audit_contracts_unchanged',
+   81         CASE WHEN EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'review_queue_items_p3_01_generated_content_review_contract_check')
+   82                AND EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'upload_lifecycle_audit_p3_01_metadata_object_check')
+   83              THEN 'PASS' ELSE 'FAIL' END,
+   84         'P14-14 leaves the generated-content review-queue and audit contracts in place';
+   85  
+   86  INSERT INTO p14_14_results
+   87  SELECT 'unknown_content_type_rejected_by_generation_runs',
+   88         CASE WHEN NOT (
+   89                SELECT pg_get_constraintdef(c.oid) ~ 'not_a_real_type'
+   90                  FROM pg_constraint c
+   91                 WHERE c.conname = 'generation_runs_p3_01_content_type_check'
+   92                   AND c.conrelid = 'kai.generation_runs'::regclass
+   93              )
+   94              THEN 'PASS' ELSE 'FAIL' END,
+   95         'kai.generation_runs.content_type constraint text does not admit an arbitrary/unknown type token';
+   96  
+   97  INSERT INTO p14_14_results
+   98  SELECT 'content_type_still_explicit_enumeration',
+   99         CASE WHEN EXISTS (
+  100                SELECT 1 FROM pg_constraint c
+  101                 WHERE c.conname = 'generation_runs_p3_01_content_type_check'
+  102                   AND c.conrelid = 'kai.generation_runs'::regclass
+  103                   AND pg_get_constraintdef(c.oid) LIKE '%= ANY (ARRAY[%'
+  104              )
+  105              AND EXISTS (
+  106                SELECT 1 FROM pg_constraint c
+  107                 WHERE c.conname = 'generated_content_drafts_p3_01_content_type_check'
+  108                   AND c.conrelid = 'kai.generated_content_drafts'::regclass
+  109                   AND pg_get_constraintdef(c.oid) LIKE '%= ANY (ARRAY[%'
+  110              )
+  111              THEN 'PASS' ELSE 'FAIL' END,
+  112         'content_type remains an explicit IN(...)/ANY(ARRAY[...]) enumeration, not a weakened free-text check';
+  113  
+  114  SELECT * FROM p14_14_results ORDER BY check_name;
+  115  
+  116  DO $$
+  117  BEGIN
+  118    IF EXISTS (SELECT 1 FROM p14_14_results WHERE status <> 'PASS') THEN
+  119      RAISE EXCEPTION 'P14-14 generated-content type-evolution verifier failed';
+  120    END IF;
+  121  END $$;
+  122  
+
+
+============================================================
+scripts/kai-sprint2-p14-15-export-candidate-content-type-evolution-verifier.sql
+============================================================
+    1  DO $$
+    2  DECLARE
+    3    actual_def text;
+    4    actual_validated boolean;
+    5  
+    6    target_def CONSTANT text :=
+    7      'CHECK ((content_type = ANY (ARRAY[''evidence_summary''::text, ''impact_narrative''::text, ''readiness_assessment''::text, ''data_gap_memo''::text])))';
+    8  BEGIN
+    9    IF to_regclass('kai.export_candidates') IS NULL THEN
+   10      RAISE EXCEPTION
+   11        'P14-15 VERIFY FAIL: kai.export_candidates missing';
+   12    END IF;
+   13  
+   14    SELECT
+   15      pg_get_constraintdef(c.oid),
+   16      c.convalidated
+   17    INTO
+   18      actual_def,
+   19      actual_validated
+   20    FROM pg_constraint c
+   21    WHERE c.conrelid = 'kai.export_candidates'::regclass
+   22      AND c.conname = 'export_candidates_p3_16_content_type_check'
+   23      AND c.contype = 'c';
+   24  
+   25    IF actual_def IS NULL THEN
+   26      RAISE EXCEPTION
+   27        'P14-15 VERIFY FAIL: named constraint missing';
+   28    END IF;
+   29  
+   30    IF actual_def <> target_def THEN
+   31      RAISE EXCEPTION
+   32        'P14-15 VERIFY FAIL: unexpected definition (%)',
+   33        actual_def;
+   34    END IF;
+   35  
+   36    IF actual_validated IS DISTINCT FROM true THEN
+   37      RAISE EXCEPTION
+   38        'P14-15 VERIFY FAIL: constraint is not validated';
+   39    END IF;
+   40  END $$;
+   41  
+   42  SELECT
+   43    'P14_15_EXPORT_CANDIDATE_CONTENT_TYPE_EVOLUTION_VERIFIED' AS verification,
+   44    0 AS failures;
+   45  
+
+
+============================================================
+scripts/kai-sprint2-p2-09-human-review-verifier.sql
+============================================================
+    1  DROP TABLE IF EXISTS p2_09_results;
+    2  CREATE TEMP TABLE p2_09_results (
+    3    check_name text PRIMARY KEY,
+    4    status text NOT NULL,
+    5    detail text NOT NULL
+    6  );
+    7  
+    8  INSERT INTO p2_09_results
+    9  SELECT 'evidence_support_strength_widened',
+   10         CASE WHEN EXISTS (
+   11                SELECT 1
+   12                  FROM pg_constraint c
+   13                  JOIN pg_class r ON r.oid = c.conrelid
+   14                  JOIN pg_namespace n ON n.oid = r.relnamespace
+   15                 WHERE n.nspname = 'kai'
+   16                   AND r.relname = 'evidence_items'
+   17                   AND c.conname = 'evidence_items_p2_01_support_strength_check'
+   18                   AND pg_get_constraintdef(c.oid) LIKE '%reviewed_supported%'
+   19                   AND pg_get_constraintdef(c.oid) LIKE '%unassessed%'
+   20              )
+   21              THEN 'PASS' ELSE 'FAIL' END,
+   22         'evidence_items.support_strength admits unassessed and reviewed_supported only';
+   23  
+   24  INSERT INTO p2_09_results
+   25  SELECT 'claim_strength_widened',
+   26         CASE WHEN EXISTS (
+   27                SELECT 1
+   28                  FROM pg_constraint c
+   29                  JOIN pg_class r ON r.oid = c.conrelid
+   30                  JOIN pg_namespace n ON n.oid = r.relnamespace
+   31                 WHERE n.nspname = 'kai'
+   32                   AND r.relname = 'claims'
+   33                   AND c.conname = 'claims_p2_03_claim_strength_check'
+   34                   AND pg_get_constraintdef(c.oid) LIKE '%reviewed_supported%'
+   35                   AND pg_get_constraintdef(c.oid) LIKE '%unassessed%'
+   36              )
+   37              THEN 'PASS' ELSE 'FAIL' END,
+   38         'claims.claim_strength admits unassessed and reviewed_supported only';
+   39  
+   40  -- KAI P2-12 (Problem A1) superseded this assertion: evidence_review_status is
+   41  -- now widened to also admit 'reviewed' (see
+   42  -- kai_sprint2_p2_12_human_review_decision_ledger.sql), because "queue
+   43  -- resolved alone" is no longer sufficient proof of review - a decision-
+   44  -- ledger row is now also required. This script's own migration list includes
+   45  -- p2_12, so the constraint is asserted in its POST-p2_12 shape here.
+   46  INSERT INTO p2_09_results
+   47  SELECT 'evidence_review_status_widened_by_p2_12',
+   48         CASE WHEN EXISTS (
+   49                SELECT 1
+   50                  FROM pg_constraint c
+   51                  JOIN pg_class r ON r.oid = c.conrelid
+   52                  JOIN pg_namespace n ON n.oid = r.relnamespace
+   53                 WHERE n.nspname = 'kai'
+   54                   AND r.relname = 'evidence_items'
+   55                   AND c.conname = 'evidence_items_p2_01_review_status_check'
+   56                   AND pg_get_constraintdef(c.oid) LIKE '%needs_gk_review%'
+   57                   AND pg_get_constraintdef(c.oid) LIKE '%reviewed%'
+   58              )
+   59              THEN 'PASS' ELSE 'FAIL' END,
+   60         'evidence_items.evidence_review_status admits needs_gk_review and reviewed (widened by P2-12) - P2-06 additionally requires a decision-ledger head, not this column alone';
+   61  
+   62  -- KAI P2-12 superseded the claim_review_status half of this assertion (now
+   63  -- widened to admit 'reviewed'); claim_status stays deliberately pinned to
+   64  -- 'proposed' - P2-05 conflict-candidate detection still depends on it.
+   65  INSERT INTO p2_09_results
+   66  SELECT 'claim_status_unchanged_claim_review_status_widened_by_p2_12',
+   67         CASE WHEN EXISTS (
+   68                SELECT 1
+   69                  FROM pg_constraint c
+   70                  JOIN pg_class r ON r.oid = c.conrelid
+   71                  JOIN pg_namespace n ON n.oid = r.relnamespace
+   72                 WHERE n.nspname = 'kai'
+   73                   AND r.relname = 'claims'
+   74                   AND c.conname = 'claims_p2_03_claim_status_check'
+   75                   AND pg_get_constraintdef(c.oid) = 'CHECK ((claim_status = ''proposed''::text))'
+   76              )
+   77              AND EXISTS (
+   78                SELECT 1
+   79                  FROM pg_constraint c
+   80                  JOIN pg_class r ON r.oid = c.conrelid
+   81                  JOIN pg_namespace n ON n.oid = r.relnamespace
+   82                 WHERE n.nspname = 'kai'
+   83                   AND r.relname = 'claims'
+   84                   AND c.conname = 'claims_p2_03_claim_review_status_check'
+   85                   AND pg_get_constraintdef(c.oid) LIKE '%needs_gk_review%'
+   86                   AND pg_get_constraintdef(c.oid) LIKE '%reviewed%'
+   87              )
+   88              THEN 'PASS' ELSE 'FAIL' END,
+   89         'claims.claim_status is deliberately left pinned (P2-05 depends on it); claim_review_status is widened by P2-12';
+   90  
+   91  INSERT INTO p2_09_results
+   92  SELECT 'audit_operations_allowed',
+   93         CASE WHEN EXISTS (
+   94                SELECT 1
+   95                  FROM pg_constraint c
+   96                  JOIN pg_class r ON r.oid = c.conrelid
+   97                  JOIN pg_namespace n ON n.oid = r.relnamespace
+   98                 WHERE n.nspname = 'kai'
+   99                   AND r.relname = 'upload_lifecycle_audit'
+  100                   AND c.conname = 'upload_lifecycle_audit_gate_a_operation_check'
+  101                   AND pg_get_constraintdef(c.oid) LIKE '%evidence_review_completed%'
+  102                   AND pg_get_constraintdef(c.oid) LIKE '%claim_review_completed_internal_approval%'
+  103              )
+  104              THEN 'PASS' ELSE 'FAIL' END,
+  105         'upload_lifecycle_audit accepts both new P2-09 operations';
+  106  
+  107  INSERT INTO p2_09_results
+  108  SELECT 'evidence_review_metadata_contract_present',
+  109         CASE WHEN EXISTS (
+  110                SELECT 1
+  111                  FROM pg_constraint c
+  112                  JOIN pg_class r ON r.oid = c.conrelid
+  113                  JOIN pg_namespace n ON n.oid = r.relnamespace
+  114                 WHERE n.nspname = 'kai'
+  115                   AND r.relname = 'upload_lifecycle_audit'
+  116                   AND c.conname = 'upload_lifecycle_audit_p2_09_evidence_review_metadata_object_check'
+  117              )
+  118              THEN 'PASS' ELSE 'FAIL' END,
+  119         'evidence_review_completed audit rows are constrained to metadata-only keys';
+  120  
+  121  INSERT INTO p2_09_results
+  122  SELECT 'claim_review_metadata_contract_present',
+  123         CASE WHEN EXISTS (
+  124                SELECT 1
+  125                  FROM pg_constraint c
+  126                  JOIN pg_class r ON r.oid = c.conrelid
+  127                  JOIN pg_namespace n ON n.oid = r.relnamespace
+  128                 WHERE n.nspname = 'kai'
+  129                   AND r.relname = 'upload_lifecycle_audit'
+  130                   AND c.conname = 'upload_lifecycle_audit_p2_09_claim_review_metadata_object_check'
+  131              )
+  132              THEN 'PASS' ELSE 'FAIL' END,
+  133         'claim_review_completed_internal_approval audit rows are constrained to metadata-only keys';
+  134  
+  135  INSERT INTO p2_09_results
+  136  SELECT 'no_funder_public_export_state_introduced',
+  137         CASE WHEN NOT EXISTS (
+  138                SELECT 1
+  139                  FROM information_schema.columns
+  140                 WHERE table_schema = 'kai'
+  141                   AND column_name IN ('approved_funder', 'approved_public', 'export_ready_internal', 'export_authority', 'final_export_gate')
+  142              )
+  143              THEN 'PASS' ELSE 'FAIL' END,
+  144         'P2-09 introduces no funder/public/export-authority column anywhere in kai schema';
+  145  
+  146  -- KAI P2-12 superseded this assertion: it deliberately DOES add a decision
+  147  -- table (kai.evidence_review_decisions/kai.claim_review_decisions) - the
+  148  -- repaired contract this package originally warned was missing.
+  149  INSERT INTO p2_09_results
+  150  SELECT 'p2_12_decision_ledger_tables_present',
+  151         CASE WHEN to_regclass('kai.evidence_review_decisions') IS NOT NULL
+  152                  AND to_regclass('kai.claim_review_decisions') IS NOT NULL
+  153              THEN 'PASS' ELSE 'FAIL' END,
+  154         'P2-12 introduces kai.evidence_review_decisions/kai.claim_review_decisions - the append-only decision ledger';
+  155  
+  156  SELECT * FROM p2_09_results ORDER BY check_name;
+  157  
+  158  DO $$
+  159  BEGIN
+  160    IF EXISTS (SELECT 1 FROM p2_09_results WHERE status <> 'PASS') THEN
+  161      RAISE EXCEPTION 'P2-09 human-review verifier failed';
+  162    END IF;
+  163  END $$;
+  164  
+
+
+============================================================
+scripts/kai-sprint2-p2-10-coverage-review-decision-verifier.sql
+============================================================
+    1  DROP TABLE IF EXISTS p2_10_results;
+    2  CREATE TEMP TABLE p2_10_results (
+    3    check_name text PRIMARY KEY,
+    4    status text NOT NULL,
+    5    detail text NOT NULL
+    6  );
+    7  
+    8  INSERT INTO p2_10_results
+    9  SELECT 'coverage_review_decisions_table_exists',
+   10         CASE WHEN to_regclass('kai.coverage_review_decisions') IS NOT NULL
+   11              THEN 'PASS' ELSE 'FAIL' END,
+   12         'kai.coverage_review_decisions exists';
+   13  
+   14  -- decision_value_pinned proves the decision CHECK constraint's vocabulary is
+   15  -- the EXACT closed three-value set {accepted_internal_with_limitation,
+   16  -- accepted_funder_with_limitation, accepted_public_with_limitation} and no
+   17  -- other value - not merely that those three substrings appear somewhere in
+   18  -- the constraint text (a LIKE-based
+   19  -- substring check would silently keep passing even if a third value were
+   20  -- ever added to the constraint). It parses the actual
+   21  -- pg_get_constraintdef() `= ANY (ARRAY[...])` expression Postgres normalizes
+   22  -- an `IN (...)` CHECK into, extracts every literal in that array, and
+   23  -- compares the resulting set against the expected two-element set for exact
+   24  -- equality in both directions (every expected value present, no unexpected
+   25  -- value present).
+   26  WITH decision_constraint AS (
+   27    SELECT c.oid, pg_get_constraintdef(c.oid) AS def
+   28      FROM pg_constraint c
+   29      JOIN pg_class r ON r.oid = c.conrelid
+   30      JOIN pg_namespace n ON n.oid = r.relnamespace
+   31     WHERE n.nspname = 'kai'
+   32       AND r.relname = 'coverage_review_decisions'
+   33       AND c.conname = 'coverage_review_decisions_p2_10_decision_check'
+   34  ),
+   35  decision_array_body AS (
+   36    SELECT regexp_replace(def, '^.*=\s*ANY\s*\(ARRAY\[(.*)\]\)\).*$', '\1') AS array_body
+   37      FROM decision_constraint
+   38     WHERE def ~ '=\s*ANY\s*\(ARRAY\['
+   39  ),
+   40  decision_raw_values AS (
+   41    SELECT trim(both '''' from split_part(trim(elem), '::', 1)) AS val
+   42      FROM decision_array_body, unnest(string_to_array(array_body, ',')) AS elem
+   43  ),
+   44  decision_values AS (
+   45    SELECT array_agg(val ORDER BY val) AS vals FROM decision_raw_values
+   46  )
+   47  INSERT INTO p2_10_results
+   48  SELECT 'decision_value_pinned',
+   49         CASE WHEN EXISTS (
+   50                SELECT 1 FROM decision_values
+   51                 WHERE vals = ARRAY['accepted_funder_with_limitation', 'accepted_internal_with_limitation', 'accepted_public_with_limitation']::text[]
+   52              )
+   53              THEN 'PASS' ELSE 'FAIL' END,
+   54         'decision column CHECK vocabulary is the exact closed three-value set {accepted_internal_with_limitation, accepted_funder_with_limitation, accepted_public_with_limitation} - no other value is permitted';
+   55  
+   56  INSERT INTO p2_10_results
+   57  SELECT 'decided_by_role_pinned_to_gk_reviewer',
+   58         CASE WHEN EXISTS (
+   59                SELECT 1
+   60                  FROM pg_constraint c
+   61                  JOIN pg_class r ON r.oid = c.conrelid
+   62                  JOIN pg_namespace n ON n.oid = r.relnamespace
+   63                 WHERE n.nspname = 'kai'
+   64                   AND r.relname = 'coverage_review_decisions'
+   65                   AND c.conname = 'coverage_review_decisions_p2_10_decided_by_role_check'
+   66                   AND pg_get_constraintdef(c.oid) LIKE '%gk_reviewer%'
+   67                   AND pg_get_constraintdef(c.oid) NOT LIKE '%gk_admin%'
+   68                   AND pg_get_constraintdef(c.oid) NOT LIKE '%gk_operator%'
+   69              )
+   70              THEN 'PASS' ELSE 'FAIL' END,
+   71         'decided_by_role is pinned to gk_reviewer only - never gk_admin/gk_operator';
+   72  
+   73  INSERT INTO p2_10_results
+   74  SELECT 'identity_fingerprint_unique',
+   75         CASE WHEN EXISTS (
+   76                SELECT 1
+   77                  FROM pg_constraint c
+   78                  JOIN pg_class r ON r.oid = c.conrelid
+   79                  JOIN pg_namespace n ON n.oid = r.relnamespace
+   80                 WHERE n.nspname = 'kai'
+   81                   AND r.relname = 'coverage_review_decisions'
+   82                   AND c.conname = 'coverage_review_decisions_p2_10_identity_fingerprint_unique'
+   83                   AND c.contype = 'u'
+   84                   AND pg_get_constraintdef(c.oid) LIKE '%organization_id, claim_id, dimension_key, state_fingerprint, decision%'
+   85              )
+   86              THEN 'PASS' ELSE 'FAIL' END,
+   87         '(organization_id, claim_id, dimension_key, state_fingerprint, decision) is unique - exact replay is audience/authority-specific';
+   88  
+   89  INSERT INTO p2_10_results
+   90  SELECT 'gap_log_item_fk_present',
+   91         CASE WHEN EXISTS (
+   92                SELECT 1
+   93                  FROM pg_constraint c
+   94                  JOIN pg_class r ON r.oid = c.conrelid
+   95                  JOIN pg_namespace n ON n.oid = r.relnamespace
+   96                 WHERE n.nspname = 'kai'
+   97                   AND r.relname = 'coverage_review_decisions'
+   98                   AND c.conname = 'coverage_review_decisions_p2_10_gap_fk'
+   99                   AND c.contype = 'f'
+  100              )
+  101              THEN 'PASS' ELSE 'FAIL' END,
+  102         'a coverage decision can only ever bind to a claim/dimension that already has a current P2-04 gap row';
+  103  
+  104  INSERT INTO p2_10_results
+  105  SELECT 'append_only_trigger_present',
+  106         CASE WHEN EXISTS (
+  107                SELECT 1
+  108                  FROM pg_trigger t
+  109                  JOIN pg_class r ON r.oid = t.tgrelid
+  110                  JOIN pg_namespace n ON n.oid = r.relnamespace
+  111                 WHERE n.nspname = 'kai'
+  112                   AND r.relname = 'coverage_review_decisions'
+  113                   AND t.tgname = 'trg_p2_10_coverage_review_decisions_append_only'
+  114              )
+  115              THEN 'PASS' ELSE 'FAIL' END,
+  116         'kai.coverage_review_decisions rejects UPDATE/DELETE outright - append-only';
+  117  
+  118  INSERT INTO p2_10_results
+  119  SELECT 'audit_operation_allowed',
+  120         CASE WHEN EXISTS (
+  121                SELECT 1
+  122                  FROM pg_constraint c
+  123                  JOIN pg_class r ON r.oid = c.conrelid
+  124                  JOIN pg_namespace n ON n.oid = r.relnamespace
+  125                 WHERE n.nspname = 'kai'
+  126                   AND r.relname = 'upload_lifecycle_audit'
+  127                   AND c.conname = 'upload_lifecycle_audit_gate_a_operation_check'
+  128                   AND pg_get_constraintdef(c.oid) LIKE '%coverage_review_decision_accepted_internal_with_limitation%'
+  129                   AND pg_get_constraintdef(c.oid) LIKE '%coverage_review_decision_accepted_funder_with_limitation%'
+  130                   AND pg_get_constraintdef(c.oid) LIKE '%coverage_review_decision_accepted_public_with_limitation%'
+  131              )
+  132              THEN 'PASS' ELSE 'FAIL' END,
+  133         'upload_lifecycle_audit accepts the P2-10 internal, funder, and public operations';
+  134  
+  135  INSERT INTO p2_10_results
+  136  SELECT 'audit_metadata_contract_present',
+  137         CASE WHEN EXISTS (
+  138                SELECT 1
+  139                  FROM pg_constraint c
+  140                  JOIN pg_class r ON r.oid = c.conrelid
+  141                  JOIN pg_namespace n ON n.oid = r.relnamespace
+  142                 WHERE n.nspname = 'kai'
+  143                   AND r.relname = 'upload_lifecycle_audit'
+  144                   AND c.conname = 'upload_lifecycle_audit_p2_10_coverage_review_decision_metadata_object_check'
+  145              )
+  146              THEN 'PASS' ELSE 'FAIL' END,
+  147         'coverage_review_decision_accepted_internal_with_limitation audit rows are constrained to metadata-only keys';
+  148  
+  149  INSERT INTO p2_10_results
+  150  SELECT 'no_raw_content_columns',
+  151         CASE WHEN NOT EXISTS (
+  152                SELECT 1
+  153                  FROM information_schema.columns
+  154                 WHERE table_schema = 'kai'
+  155                   AND table_name = 'coverage_review_decisions'
+  156                   AND column_name IN ('rationale', 'question_text', 'safe_summary', 'raw_value', 'source_location')
+  157              )
+  158              THEN 'PASS' ELSE 'FAIL' END,
+  159         'kai.coverage_review_decisions persists no claim/evidence text, question text, raw values, or storage locations';
+  160  
+  161  INSERT INTO p2_10_results
+  162  SELECT 'no_authority_scope_double_encoding',
+  163         CASE WHEN NOT EXISTS (
+  164                SELECT 1
+  165                  FROM information_schema.columns
+  166                 WHERE table_schema = 'kai'
+  167                   AND table_name = 'coverage_review_decisions'
+  168                   AND column_name IN ('audience', 'requested_audience', 'authority_scope', 'approved_audience')
+  169              )
+  170              THEN 'PASS' ELSE 'FAIL' END,
+  171         'coverage authority scope is encoded only by decision value - no contradictory audience/scope column exists';
+  172  
+  173  INSERT INTO p2_10_results
+  174  SELECT 'no_funder_public_export_state_introduced',
+  175         CASE WHEN NOT EXISTS (
+  176                SELECT 1
+  177                  FROM information_schema.columns
+  178                 WHERE table_schema = 'kai'
+  179                   AND column_name IN ('approved_funder', 'approved_public', 'export_ready_internal', 'export_authority', 'final_export_gate')
+  180              )
+  181              THEN 'PASS' ELSE 'FAIL' END,
+  182         'P2-10 introduces no funder/public/export-authority column anywhere in kai schema';
+  183  
+  184  INSERT INTO p2_10_results
+  185  SELECT 'p2_02_p2_04_p2_05_untouched',
+  186         CASE WHEN NOT EXISTS (
+  187                SELECT 1
+  188                  FROM pg_constraint c
+  189                  JOIN pg_class r ON r.oid = c.conrelid
+  190                  JOIN pg_namespace n ON n.oid = r.relnamespace
+  191                 WHERE n.nspname = 'kai'
+  192                   AND r.relname = 'gap_log_items'
+  193                   AND c.conname = 'gap_log_items_p2_04_assessment_status_check'
+  194                   AND pg_get_constraintdef(c.oid) NOT LIKE '%resolved_risk_flagged%'
+  195              )
+  196              THEN 'PASS' ELSE 'FAIL' END,
+  197         'gap_log_items assessment_status vocabulary is unchanged (resolved_risk_flagged/unresolved only)';
+  198  
+  199  SELECT * FROM p2_10_results ORDER BY check_name;
+  200  
+  201  DO $$
+  202  BEGIN
+  203    IF EXISTS (SELECT 1 FROM p2_10_results WHERE status <> 'PASS') THEN
+  204      RAISE EXCEPTION 'P2-10 coverage-review-decision verifier failed';
+  205    END IF;
+  206  END $$;
+  207  
+
+
+============================================================
+scripts/kai-sprint2-p2-11-client-followup-completion-verifier.sql
+============================================================
+    1  DROP TABLE IF EXISTS p2_11_results;
+    2  CREATE TEMP TABLE p2_11_results (
+    3    check_name text PRIMARY KEY,
+    4    status text NOT NULL,
+    5    detail text NOT NULL
+    6  );
+    7  
+    8  INSERT INTO p2_11_results
+    9  SELECT 'client_followup_contract_admits_resolved_branch',
+   10         CASE WHEN EXISTS (
+   11                SELECT 1
+   12                  FROM pg_constraint c
+   13                  JOIN pg_class r ON r.oid = c.conrelid
+   14                  JOIN pg_namespace n ON n.oid = r.relnamespace
+   15                 WHERE n.nspname = 'kai'
+   16                   AND r.relname = 'review_queue_items'
+   17                   AND c.conname = 'review_queue_items_p2_04_client_followup_contract_check'
+   18                   AND pg_get_constraintdef(c.oid) LIKE '%waiting_on_client%'
+   19                   AND pg_get_constraintdef(c.oid) LIKE '%resolved%'
+   20              )
+   21              THEN 'PASS' ELSE 'FAIL' END,
+   22         'the client_followup contract CHECK admits both the fresh (waiting_on_client/proposed) and resolved (resolved/resolved) branches';
+   23  
+   24  INSERT INTO p2_11_results
+   25  SELECT 'audit_operation_allowed',
+   26         CASE WHEN EXISTS (
+   27                SELECT 1
+   28                  FROM pg_constraint c
+   29                  JOIN pg_class r ON r.oid = c.conrelid
+   30                  JOIN pg_namespace n ON n.oid = r.relnamespace
+   31                 WHERE n.nspname = 'kai'
+   32                   AND r.relname = 'upload_lifecycle_audit'
+   33                   AND c.conname = 'upload_lifecycle_audit_gate_a_operation_check'
+   34                   AND pg_get_constraintdef(c.oid) LIKE '%client_followup_completed%'
+   35              )
+   36              THEN 'PASS' ELSE 'FAIL' END,
+   37         'upload_lifecycle_audit accepts the new P2-11 client_followup_completed operation';
+   38  
+   39  INSERT INTO p2_11_results
+   40  SELECT 'audit_metadata_contract_present',
+   41         CASE WHEN EXISTS (
+   42                SELECT 1
+   43                  FROM pg_constraint c
+   44                  JOIN pg_class r ON r.oid = c.conrelid
+   45                  JOIN pg_namespace n ON n.oid = r.relnamespace
+   46                 WHERE n.nspname = 'kai'
+   47                   AND r.relname = 'upload_lifecycle_audit'
+   48                   AND c.conname = 'upload_lifecycle_audit_p2_11_client_followup_completion_metadata_object_check'
+   49              )
+   50              THEN 'PASS' ELSE 'FAIL' END,
+   51         'client_followup_completed audit rows are constrained to metadata-only keys with disposition pinned to no_additional_client_information';
+   52  
+   53  INSERT INTO p2_11_results
+   54  SELECT 'audit_metadata_forbids_answer_fields',
+   55         CASE WHEN EXISTS (
+   56                SELECT 1
+   57                  FROM pg_constraint c
+   58                  JOIN pg_class r ON r.oid = c.conrelid
+   59                  JOIN pg_namespace n ON n.oid = r.relnamespace
+   60                 WHERE n.nspname = 'kai'
+   61                   AND r.relname = 'upload_lifecycle_audit'
+   62                   AND c.conname = 'upload_lifecycle_audit_p2_11_client_followup_completion_metadata_object_check'
+   63                   AND pg_get_constraintdef(c.oid) LIKE '%answer%'
+   64                   AND pg_get_constraintdef(c.oid) LIKE '%question_text%'
+   65              )
+   66              THEN 'PASS' ELSE 'FAIL' END,
+   67         'the P2-11 audit metadata contract explicitly forbids answer/client_answer/question_text/safe_summary/raw_value keys';
+   68  
+   69  INSERT INTO p2_11_results
+   70  SELECT 'no_client_answer_columns_introduced',
+   71         CASE WHEN NOT EXISTS (
+   72                SELECT 1
+   73                  FROM information_schema.columns
+   74                 WHERE table_schema = 'kai'
+   75                   AND table_name IN ('client_followup_items', 'gap_log_items')
+   76                   AND column_name IN ('client_answer', 'answer', 'answer_text', 'raw_value', 'free_text')
+   77              )
+   78              THEN 'PASS' ELSE 'FAIL' END,
+   79         'P2-11 introduces no client-answer/free-text/raw-value column on kai.client_followup_items or kai.gap_log_items';
+   80  
+   81  INSERT INTO p2_11_results
+   82  SELECT 'p2_02_p2_04_dimension_vocabulary_untouched',
+   83         CASE WHEN EXISTS (
+   84                SELECT 1
+   85                  FROM pg_constraint c
+   86                  JOIN pg_class r ON r.oid = c.conrelid
+   87                  JOIN pg_namespace n ON n.oid = r.relnamespace
+   88                 WHERE n.nspname = 'kai'
+   89                   AND r.relname = 'gap_log_items'
+   90                   AND c.conname = 'gap_log_items_p2_04_assessment_status_check'
+   91                   AND pg_get_constraintdef(c.oid) LIKE '%resolved_risk_flagged%'
+   92                   AND pg_get_constraintdef(c.oid) LIKE '%unresolved%'
+   93              )
+   94              THEN 'PASS' ELSE 'FAIL' END,
+   95         'gap_log_items assessment_status vocabulary is unchanged (resolved_risk_flagged/unresolved only) - P2-11 never resolves a gap';
+   96  
+   97  INSERT INTO p2_11_results
+   98  SELECT 'no_funder_public_export_state_introduced',
+   99         CASE WHEN NOT EXISTS (
+  100                SELECT 1
+  101                  FROM information_schema.columns
+  102                 WHERE table_schema = 'kai'
+  103                   AND column_name IN ('approved_funder', 'approved_public', 'export_ready_internal', 'export_authority', 'final_export_gate')
+  104              )
+  105              THEN 'PASS' ELSE 'FAIL' END,
+  106         'P2-11 introduces no funder/public/export-authority column anywhere in kai schema';
+  107  
+  108  SELECT * FROM p2_11_results ORDER BY check_name;
+  109  
+  110  DO $$
+  111  BEGIN
+  112    IF EXISTS (SELECT 1 FROM p2_11_results WHERE status <> 'PASS') THEN
+  113      RAISE EXCEPTION 'P2-11 client-followup-completion verifier failed';
+  114    END IF;
+  115  END $$;
+  116  
+
+
+============================================================
+scripts/kai-sprint2-p2-12-human-review-decision-ledger-verifier.sql
+============================================================
+    1  DROP TABLE IF EXISTS p2_12_results;
+    2  CREATE TEMP TABLE p2_12_results (
+    3    check_name text PRIMARY KEY,
+    4    status text NOT NULL,
+    5    detail text NOT NULL
+    6  );
+    7  
+    8  INSERT INTO p2_12_results
+    9  SELECT 'evidence_review_decisions_table_exists',
+   10         CASE WHEN to_regclass('kai.evidence_review_decisions') IS NOT NULL THEN 'PASS' ELSE 'FAIL' END,
+   11         'kai.evidence_review_decisions exists';
+   12  
+   13  INSERT INTO p2_12_results
+   14  SELECT 'claim_review_decisions_table_exists',
+   15         CASE WHEN to_regclass('kai.claim_review_decisions') IS NOT NULL THEN 'PASS' ELSE 'FAIL' END,
+   16         'kai.claim_review_decisions exists';
+   17  
+   18  INSERT INTO p2_12_results
+   19  SELECT 'evidence_review_decisions_append_only_trigger',
+   20         CASE WHEN EXISTS (
+   21                SELECT 1 FROM pg_trigger t
+   22                  JOIN pg_class c ON c.oid = t.tgrelid
+   23                  JOIN pg_namespace n ON n.oid = c.relnamespace
+   24                 WHERE n.nspname = 'kai'
+   25                   AND c.relname = 'evidence_review_decisions'
+   26                   AND t.tgname = 'evidence_review_decisions_p2_12_append_only'
+   27              )
+   28              THEN 'PASS' ELSE 'FAIL' END,
+   29         'evidence_review_decisions has its append-only BEFORE UPDATE OR DELETE trigger';
+   30  
+   31  INSERT INTO p2_12_results
+   32  SELECT 'claim_review_decisions_append_only_trigger',
+   33         CASE WHEN EXISTS (
+   34                SELECT 1 FROM pg_trigger t
+   35                  JOIN pg_class c ON c.oid = t.tgrelid
+   36                  JOIN pg_namespace n ON n.oid = c.relnamespace
+   37                 WHERE n.nspname = 'kai'
+   38                   AND c.relname = 'claim_review_decisions'
+   39                   AND t.tgname = 'claim_review_decisions_p2_12_append_only'
+   40              )
+   41              THEN 'PASS' ELSE 'FAIL' END,
+   42         'claim_review_decisions has its append-only BEFORE UPDATE OR DELETE trigger';
+   43  
+   44  INSERT INTO p2_12_results
+   45  SELECT 'evidence_review_decisions_root_and_successor_indexes',
+   46         CASE WHEN EXISTS (
+   47                SELECT 1 FROM pg_indexes WHERE schemaname='kai' AND indexname='ux_evidence_review_decisions_p2_12_root_per_lineage'
+   48              ) AND EXISTS (
+   49                SELECT 1 FROM pg_indexes WHERE schemaname='kai' AND indexname='ux_evidence_review_decisions_p2_12_single_successor'
+   50              )
+   51              THEN 'PASS' ELSE 'FAIL' END,
+   52         'evidence_review_decisions has root-per-lineage and single-successor partial unique indexes';
+   53  
+   54  INSERT INTO p2_12_results
+   55  SELECT 'claim_review_decisions_root_and_successor_indexes',
+   56         CASE WHEN EXISTS (
+   57                SELECT 1 FROM pg_indexes WHERE schemaname='kai' AND indexname='ux_claim_review_decisions_p2_12_root_per_lineage'
+   58              ) AND EXISTS (
+   59                SELECT 1 FROM pg_indexes WHERE schemaname='kai' AND indexname='ux_claim_review_decisions_p2_12_single_successor'
+   60              )
+   61              THEN 'PASS' ELSE 'FAIL' END,
+   62         'claim_review_decisions has root-per-lineage and single-successor partial unique indexes';
+   63  
+   64  INSERT INTO p2_12_results
+   65  SELECT 'evidence_review_status_widened',
+   66         CASE WHEN EXISTS (
+   67                SELECT 1
+   68                  FROM pg_constraint c
+   69                  JOIN pg_class r ON r.oid = c.conrelid
+   70                  JOIN pg_namespace n ON n.oid = r.relnamespace
+   71                 WHERE n.nspname = 'kai'
+   72                   AND r.relname = 'evidence_items'
+   73                   AND c.conname = 'evidence_items_p2_01_review_status_check'
+   74                   AND pg_get_constraintdef(c.oid) LIKE '%reviewed%'
+   75                   AND pg_get_constraintdef(c.oid) LIKE '%needs_gk_review%'
+   76              )
+   77              THEN 'PASS' ELSE 'FAIL' END,
+   78         'evidence_items.evidence_review_status admits needs_gk_review and reviewed';
+   79  
+   80  INSERT INTO p2_12_results
+   81  SELECT 'claim_review_status_widened',
+   82         CASE WHEN EXISTS (
+   83                SELECT 1
+   84                  FROM pg_constraint c
+   85                  JOIN pg_class r ON r.oid = c.conrelid
+   86                  JOIN pg_namespace n ON n.oid = r.relnamespace
+   87                 WHERE n.nspname = 'kai'
+   88                   AND r.relname = 'claims'
+   89                   AND c.conname = 'claims_p2_03_claim_review_status_check'
+   90                   AND pg_get_constraintdef(c.oid) LIKE '%reviewed%'
+   91                   AND pg_get_constraintdef(c.oid) LIKE '%needs_gk_review%'
+   92              )
+   93              THEN 'PASS' ELSE 'FAIL' END,
+   94         'claims.claim_review_status admits needs_gk_review and reviewed';
+   95  
+   96  INSERT INTO p2_12_results
+   97  SELECT 'claim_status_unchanged',
+   98         CASE WHEN EXISTS (
+   99                SELECT 1
+  100                  FROM pg_constraint c
+  101                  JOIN pg_class r ON r.oid = c.conrelid
+  102                  JOIN pg_namespace n ON n.oid = r.relnamespace
+  103                 WHERE n.nspname = 'kai'
+  104                   AND r.relname = 'claims'
+  105                   AND c.conname = 'claims_p2_03_claim_status_check'
+  106                   AND pg_get_constraintdef(c.oid) = 'CHECK ((claim_status = ''proposed''::text))'
+  107              )
+  108              THEN 'PASS' ELSE 'FAIL' END,
+  109         'claims.claim_status is deliberately left pinned to proposed - P2-05 conflict-candidate detection depends on it';
+  110  
+  111  INSERT INTO p2_12_results
+  112  SELECT 'support_strength_widened_with_negative_terminal',
+  113         CASE WHEN EXISTS (
+  114                SELECT 1
+  115                  FROM pg_constraint c
+  116                  JOIN pg_class r ON r.oid = c.conrelid
+  117                  JOIN pg_namespace n ON n.oid = r.relnamespace
+  118                 WHERE n.nspname = 'kai'
+  119                   AND r.relname = 'evidence_items'
+  120                   AND c.conname = 'evidence_items_p2_01_support_strength_check'
+  121                   AND pg_get_constraintdef(c.oid) LIKE '%reviewed_not_supported%'
+  122              )
+  123              THEN 'PASS' ELSE 'FAIL' END,
+  124         'evidence_items.support_strength admits reviewed_not_supported';
+  125  
+  126  INSERT INTO p2_12_results
+  127  SELECT 'claim_strength_widened_with_negative_terminal',
+  128         CASE WHEN EXISTS (
+  129                SELECT 1
+  130                  FROM pg_constraint c
+  131                  JOIN pg_class r ON r.oid = c.conrelid
+  132                  JOIN pg_namespace n ON n.oid = r.relnamespace
+  133                 WHERE n.nspname = 'kai'
+  134                   AND r.relname = 'claims'
+  135                   AND c.conname = 'claims_p2_03_claim_strength_check'
+  136                   AND pg_get_constraintdef(c.oid) LIKE '%reviewed_not_supported%'
+  137              )
+  138              THEN 'PASS' ELSE 'FAIL' END,
+  139         'claims.claim_strength admits reviewed_not_supported';
+  140  
+  141  INSERT INTO p2_12_results
+  142  SELECT 'evidence_review_audit_metadata_widened',
+  143         CASE WHEN EXISTS (
+  144                SELECT 1
+  145                  FROM pg_constraint c
+  146                  JOIN pg_class r ON r.oid = c.conrelid
+  147                  JOIN pg_namespace n ON n.oid = r.relnamespace
+  148                 WHERE n.nspname = 'kai'
+  149                   AND r.relname = 'upload_lifecycle_audit'
+  150                   AND c.conname = 'upload_lifecycle_audit_p2_09_evidence_review_metadata_object_check'
+  151                   AND pg_get_constraintdef(c.oid) LIKE '%decision_id%'
+  152                   AND pg_get_constraintdef(c.oid) LIKE '%decision_outcome%'
+  153              )
+  154              THEN 'PASS' ELSE 'FAIL' END,
+  155         'evidence_review_completed audit rows are now required to carry decision_id/decision_outcome';
+  156  
+  157  INSERT INTO p2_12_results
+  158  SELECT 'claim_review_audit_metadata_widened',
+  159         CASE WHEN EXISTS (
+  160                SELECT 1
+  161                  FROM pg_constraint c
+  162                  JOIN pg_class r ON r.oid = c.conrelid
+  163                  JOIN pg_namespace n ON n.oid = r.relnamespace
+  164                 WHERE n.nspname = 'kai'
+  165                   AND r.relname = 'upload_lifecycle_audit'
+  166                   AND c.conname = 'upload_lifecycle_audit_p2_09_claim_review_metadata_object_check'
+  167                   AND pg_get_constraintdef(c.oid) LIKE '%decision_id%'
+  168                   AND pg_get_constraintdef(c.oid) LIKE '%approved_audiences%'
+  169              )
+  170              THEN 'PASS' ELSE 'FAIL' END,
+  171         'claim_review_completed_internal_approval audit rows are now required to carry decision_id/approved_audiences';
+  172  
+  173  INSERT INTO p2_12_results
+  174  SELECT 'no_new_audit_operation_strings_introduced',
+  175         CASE WHEN EXISTS (
+  176                SELECT 1
+  177                  FROM pg_constraint c
+  178                  JOIN pg_class r ON r.oid = c.conrelid
+  179                  JOIN pg_namespace n ON n.oid = r.relnamespace
+  180                 WHERE n.nspname = 'kai'
+  181                   AND r.relname = 'upload_lifecycle_audit'
+  182                   AND c.conname = 'upload_lifecycle_audit_gate_a_operation_check'
+  183                   AND pg_get_constraintdef(c.oid) LIKE '%evidence_review_completed%'
+  184                   AND pg_get_constraintdef(c.oid) LIKE '%claim_review_completed_internal_approval%'
+  185              )
+  186              THEN 'PASS' ELSE 'FAIL' END,
+  187         'P2-12 reuses the existing evidence_review_completed/claim_review_completed_internal_approval operation values - no new operation string';
+  188  
+  189  SELECT * FROM p2_12_results ORDER BY check_name;
+  190  
+  191  DO $$
+  192  BEGIN
+  193    IF EXISTS (SELECT 1 FROM p2_12_results WHERE status <> 'PASS') THEN
+  194      RAISE EXCEPTION 'P2-12 human-review-decision-ledger verifier failed';
+  195    END IF;
+  196  END $$;
+  197  
+
+
+============================================================
+scripts/kai-sprint2-p3-01-generated-content-drafts-verifier.sql
+============================================================
+    1  DROP TABLE IF EXISTS p3_01_results;
+    2  CREATE TEMP TABLE p3_01_results (
+    3    check_name text PRIMARY KEY,
+    4    status text NOT NULL,
+    5    detail text NOT NULL
+    6  );
+    7  
+    8  INSERT INTO p3_01_results
+    9  SELECT 'generation_runs_present',
+   10         CASE WHEN to_regclass('kai.generation_runs') IS NOT NULL THEN 'PASS' ELSE 'FAIL' END,
+   11         'generation run reservation table exists';
+   12  
+   13  INSERT INTO p3_01_results
+   14  SELECT 'draft_block_citation_tables_present',
+   15         CASE WHEN to_regclass('kai.generated_content_drafts') IS NOT NULL
+   16                AND to_regclass('kai.generated_content_blocks') IS NOT NULL
+   17                AND to_regclass('kai.generated_content_citations') IS NOT NULL
+   18              THEN 'PASS' ELSE 'FAIL' END,
+   19         'draft, block, and citation tables exist';
+   20  
+   21  INSERT INTO p3_01_results
+   22  SELECT 'idempotency_identity_unique',
+   23         CASE WHEN EXISTS (
+   24                SELECT 1
+   25                  FROM pg_constraint c
+   26                  JOIN pg_class r ON r.oid = c.conrelid
+   27                  JOIN pg_namespace n ON n.oid = r.relnamespace
+   28                 WHERE n.nspname = 'kai'
+   29                   AND r.relname = 'generation_runs'
+   30                   AND c.conname = 'generation_runs_p3_01_identity_unique'
+   31              )
+   32              THEN 'PASS' ELSE 'FAIL' END,
+   33         'organization_id + idempotency_key is the PostgreSQL arbiter';
+   34  
+   35  INSERT INTO p3_01_results
+   36  SELECT 'immutable_relationship_uniques',
+   37         CASE WHEN EXISTS (
+   38                SELECT 1 FROM pg_constraint WHERE conname = 'generated_content_drafts_p3_01_run_unique'
+   39              )
+   40              AND EXISTS (
+   41                SELECT 1 FROM pg_constraint WHERE conname = 'generated_content_blocks_p3_01_identity_unique'
+   42              )
+   43              AND EXISTS (
+   44                SELECT 1 FROM pg_constraint WHERE conname = 'generated_content_citations_p3_01_identity_unique'
+   45              )
+   46              THEN 'PASS' ELSE 'FAIL' END,
+   47         'one draft per run, blocks unique by ordinal, citations unique by block/claim/evidence';
+   48  
+   49  INSERT INTO p3_01_results
+   50  SELECT 'generated_content_review_queue_identity',
+   51         CASE WHEN EXISTS (
+   52                SELECT 1
+   53                  FROM pg_indexes
+   54                 WHERE schemaname = 'kai'
+   55                   AND indexname = 'ux_review_queue_items_p3_01_generated_content_review_identity'
+   56              )
+   57              AND EXISTS (
+   58                SELECT 1
+   59                  FROM pg_constraint
+   60                 WHERE conname = 'review_queue_items_p3_01_generated_content_review_contract_check'
+   61              )
+   62              THEN 'PASS' ELSE 'FAIL' END,
+   63         'exactly one generated_content_review item per draft identity';
+   64  
+   65  INSERT INTO p3_01_results
+   66  SELECT 'audit_operation_allowed',
+   67         CASE WHEN EXISTS (
+   68                SELECT 1
+   69                  FROM pg_constraint c
+   70                  JOIN pg_class r ON r.oid = c.conrelid
+   71                  JOIN pg_namespace n ON n.oid = r.relnamespace
+   72                 WHERE n.nspname = 'kai'
+   73                   AND r.relname = 'upload_lifecycle_audit'
+   74                   AND c.conname = 'upload_lifecycle_audit_gate_a_operation_check'
+   75                   AND pg_get_constraintdef(c.oid) LIKE '%generated_content_draft_created%'
+   76              )
+   77              THEN 'PASS' ELSE 'FAIL' END,
+   78         'metadata-only audit operation vocabulary includes P3-01 creation';
+   79  
+   80  INSERT INTO p3_01_results
+   81  SELECT 'audit_metadata_safe_contract',
+   82         CASE WHEN EXISTS (
+   83                SELECT 1
+   84                  FROM pg_constraint
+   85                 WHERE conname = 'upload_lifecycle_audit_p3_01_metadata_object_check'
+   86              )
+   87              THEN 'PASS' ELSE 'FAIL' END,
+   88         'P3-01 audit metadata is constrained to metadata-only identifiers and counts';
+   89  
+   90  INSERT INTO p3_01_results
+   91  SELECT 'draft_only_no_approval_or_export_columns',
+   92         CASE WHEN NOT EXISTS (
+   93                SELECT 1
+   94                  FROM information_schema.columns
+   95                 WHERE table_schema = 'kai'
+   96                   AND table_name IN ('generation_runs','generated_content_drafts','generated_content_blocks','generated_content_citations')
+   97                   AND column_name IN ('approved_at','finalized_at','exported_at','funder_ready','public_ready','source_of_truth')
+   98              )
+   99              THEN 'PASS' ELSE 'FAIL' END,
+  100         'generated content schema has no approval, finalize, export, funder/public-ready, or source-of-truth state';
+  101  
+  102  SELECT * FROM p3_01_results ORDER BY check_name;
+  103  
+  104  DO $$
+  105  BEGIN
+  106    IF EXISTS (SELECT 1 FROM p3_01_results WHERE status <> 'PASS') THEN
+  107      RAISE EXCEPTION 'P3-01 generated-content verifier failed';
+  108    END IF;
+  109  END $$;
+  110  
+
+
+============================================================
+scripts/kai-sprint2-p3-05-export-review-request-verifier.sql
+============================================================
+    1  DROP TABLE IF EXISTS p3_05_results;
+    2  DROP TABLE IF EXISTS p3_05_expected_checks;
+    3  
+    4  CREATE TEMP TABLE p3_05_expected_checks (
+    5    check_name text PRIMARY KEY
+    6  );
+    7  
+    8  INSERT INTO p3_05_expected_checks (check_name)
+    9  VALUES
+   10    ('export_review_contract_present'),
+   11    ('export_review_identity_unique_index_present'),
+   12    ('audit_operation_allowed'),
+   13    ('audit_metadata_safe_contract'),
+   14    ('no_export_authority_or_final_gate_state');
+   15  
+   16  CREATE TEMP TABLE p3_05_results (
+   17    check_name text PRIMARY KEY,
+   18    status text NOT NULL,
+   19    detail text NOT NULL
+   20  );
+   21  
+   22  INSERT INTO p3_05_results
+   23  SELECT 'export_review_contract_present',
+   24         CASE WHEN EXISTS (
+   25                SELECT 1
+   26                  FROM pg_constraint
+   27                 WHERE conname = 'review_queue_items_p3_05_export_review_contract_check'
+   28              )
+   29              THEN 'PASS' ELSE 'FAIL' END,
+   30         'queue contract pins export_review to the single open/needs_gk_review static profile';
+   31  
+   32  INSERT INTO p3_05_results
+   33  SELECT 'export_review_identity_unique_index_present',
+   34         CASE WHEN EXISTS (
+   35                SELECT 1
+   36                  FROM pg_indexes
+   37                 WHERE schemaname = 'kai'
+   38                   AND indexname = 'ux_review_queue_items_p3_05_export_review_identity'
+   39              )
+   40              THEN 'PASS' ELSE 'FAIL' END,
+   41         'partial unique index enforces at most one export_review row per organization/draft';
+   42  
+   43  INSERT INTO p3_05_results
+   44  SELECT 'audit_operation_allowed',
+   45         CASE WHEN EXISTS (
+   46                SELECT 1
+   47                  FROM pg_constraint c
+   48                  JOIN pg_class r ON r.oid = c.conrelid
+   49                  JOIN pg_namespace n ON n.oid = r.relnamespace
+   50                 WHERE n.nspname = 'kai'
+   51                   AND r.relname = 'upload_lifecycle_audit'
+   52                   AND c.conname = 'upload_lifecycle_audit_gate_a_operation_check'
+   53                   AND c.convalidated
+   54                   AND pg_get_constraintdef(c.oid) LIKE '%export_review_requested%'
+   55              )
+   56              THEN 'PASS' ELSE 'FAIL' END,
+   57         'metadata-only audit operation vocabulary includes P3-05 export_review_requested';
+   58  
+   59  INSERT INTO p3_05_results
+   60  SELECT 'audit_metadata_safe_contract',
+   61         CASE WHEN EXISTS (
+   62                SELECT 1
+   63                  FROM pg_constraint
+   64                 WHERE conname = 'upload_lifecycle_audit_p3_05_metadata_object_check'
+   65              )
+   66              THEN 'PASS' ELSE 'FAIL' END,
+   67         'P3-05 audit metadata is constrained to metadata-only identifiers, the validator key, and failed-gate codes';
+   68  
+   69  INSERT INTO p3_05_results
+   70  SELECT 'no_export_authority_or_final_gate_state',
+   71         CASE WHEN NOT EXISTS (
+   72                SELECT 1
+   73                  FROM information_schema.columns
+   74                 WHERE table_schema = 'kai'
+   75                   AND column_name IN ('export_authority', 'final_export_gate', 'approved_at', 'finalized_at', 'exported_at')
+   76              )
+   77              THEN 'PASS' ELSE 'FAIL' END,
+   78         'P3-05 introduces no export-authority, final-gate, or finalize/export state anywhere in kai schema';
+   79  
+   80  DO $$
+   81  DECLARE
+   82    expected_count integer := 5;
+   83  BEGIN
+   84    IF (SELECT COUNT(*) FROM p3_05_expected_checks) <> expected_count
+   85       OR (SELECT COUNT(*) FROM p3_05_results) <> expected_count
+   86       OR EXISTS (
+   87            SELECT 1
+   88              FROM p3_05_results r
+   89             GROUP BY r.check_name
+   90            HAVING COUNT(*) <> 1
+   91          )
+   92       OR EXISTS (
+   93            SELECT 1
+   94              FROM p3_05_expected_checks e
+   95              LEFT JOIN p3_05_results r ON r.check_name = e.check_name
+   96             WHERE r.check_name IS NULL
+   97          )
+   98       OR EXISTS (
+   99            SELECT 1
+  100              FROM p3_05_results r
+  101              LEFT JOIN p3_05_expected_checks e ON e.check_name = r.check_name
+  102             WHERE e.check_name IS NULL
+  103          ) THEN
+  104      RAISE EXCEPTION 'P3-05 export-review-request verifier result construction failed';
+  105    END IF;
+  106  END $$;
+  107  
+  108  DO $$
+  109  BEGIN
+  110    IF EXISTS (SELECT 1 FROM p3_05_results WHERE status <> 'PASS') THEN
+  111      RAISE EXCEPTION 'P3-05 export-review-request verifier failed';
+  112    END IF;
+  113  END $$;
+  114  
+  115  SELECT
+  116    check_name,
+  117    status,
+  118    detail
+  119  FROM p3_05_results
+  120  ORDER BY check_name;
+  121  
+
+
+============================================================
+scripts/kai-sprint2-p3-09-export-review-start-verifier.sql
+============================================================
+    1  DROP TABLE IF EXISTS p3_09_results;
+    2  DROP TABLE IF EXISTS p3_09_expected_checks;
+    3  
+    4  CREATE TEMP TABLE p3_09_expected_checks (
+    5    check_name text PRIMARY KEY
+    6  );
+    7  
+    8  INSERT INTO p3_09_expected_checks (check_name)
+    9  VALUES
+   10    ('export_review_contract_admits_start_lifecycle'),
+   11    ('export_review_p3_05_single_state_contract_removed'),
+   12    ('export_review_identity_unique_index_present'),
+   13    ('audit_operation_allowed'),
+   14    ('audit_metadata_safe_contract'),
+   15    ('no_export_authority_or_final_gate_state'),
+   16    ('no_resolved_export_review_state_admitted');
+   17  
+   18  CREATE TEMP TABLE p3_09_results (
+   19    check_name text PRIMARY KEY,
+   20    status text NOT NULL,
+   21    detail text NOT NULL
+   22  );
+   23  
+   24  INSERT INTO p3_09_results
+   25  SELECT 'export_review_contract_admits_start_lifecycle',
+   26         CASE WHEN EXISTS (
+   27                SELECT 1
+   28                  FROM pg_constraint
+   29                 WHERE conname = 'review_queue_items_p3_09_export_review_contract_check'
+   30              )
+   31              THEN 'PASS' ELSE 'FAIL' END,
+   32         'queue contract admits exactly open/needs_gk_review and in_progress/needs_gk_review for export_review';
+   33  
+   34  INSERT INTO p3_09_results
+   35  SELECT 'export_review_p3_05_single_state_contract_removed',
+   36         CASE WHEN NOT EXISTS (
+   37                SELECT 1
+   38                  FROM pg_constraint
+   39                 WHERE conname = 'review_queue_items_p3_05_export_review_contract_check'
+   40              )
+   41              THEN 'PASS' ELSE 'FAIL' END,
+   42         'the single-state P3-05 contract check is replaced (not duplicated) by the P3-09 two-state check';
+   43  
+   44  INSERT INTO p3_09_results
+   45  SELECT 'export_review_identity_unique_index_present',
+   46         CASE WHEN EXISTS (
+   47                SELECT 1
+   48                  FROM pg_indexes
+   49                 WHERE schemaname = 'kai'
+   50                   AND indexname = 'ux_review_queue_items_p3_05_export_review_identity'
+   51              )
+   52              THEN 'PASS' ELSE 'FAIL' END,
+   53         'the P3-05 partial unique index enforcing at most one export_review row per organization/draft is preserved';
+   54  
+   55  INSERT INTO p3_09_results
+   56  SELECT 'audit_operation_allowed',
+   57         CASE WHEN EXISTS (
+   58                SELECT 1
+   59                  FROM pg_constraint c
+   60                  JOIN pg_class r ON r.oid = c.conrelid
+   61                  JOIN pg_namespace n ON n.oid = r.relnamespace
+   62                 WHERE n.nspname = 'kai'
+   63                   AND r.relname = 'upload_lifecycle_audit'
+   64                   AND c.conname = 'upload_lifecycle_audit_gate_a_operation_check'
+   65                   AND c.convalidated
+   66                   AND pg_get_constraintdef(c.oid) LIKE '%export_review_started%'
+   67              )
+   68              THEN 'PASS' ELSE 'FAIL' END,
+   69         'metadata-only audit operation vocabulary includes P3-09 export_review_started';
+   70  
+   71  INSERT INTO p3_09_results
+   72  SELECT 'audit_metadata_safe_contract',
+   73         CASE WHEN EXISTS (
+   74                SELECT 1
+   75                  FROM pg_constraint
+   76                 WHERE conname = 'upload_lifecycle_audit_p3_09_metadata_object_check'
+   77              )
+   78              THEN 'PASS' ELSE 'FAIL' END,
+   79         'P3-09 audit metadata is constrained to metadata-only identifiers, actor/timestamps, status transitions, and validator keys';
+   80  
+   81  INSERT INTO p3_09_results
+   82  SELECT 'no_export_authority_or_final_gate_state',
+   83         CASE WHEN NOT EXISTS (
+   84                SELECT 1
+   85                  FROM information_schema.columns
+   86                 WHERE table_schema = 'kai'
+   87                   AND column_name IN ('export_authority', 'final_export_gate', 'approved_at', 'finalized_at', 'exported_at')
+   88              )
+   89              THEN 'PASS' ELSE 'FAIL' END,
+   90         'P3-09 introduces no export-authority, final-gate, or finalize/export state anywhere in kai schema';
+   91  
+   92  INSERT INTO p3_09_results
+   93  SELECT 'no_resolved_export_review_state_admitted',
+   94         CASE WHEN NOT EXISTS (
+   95                SELECT 1
+   96                  FROM pg_constraint c
+   97                 WHERE c.conname = 'review_queue_items_p3_09_export_review_contract_check'
+   98                   AND pg_get_constraintdef(c.oid) LIKE '%resolved%'
+   99              )
+  100              THEN 'PASS' ELSE 'FAIL' END,
+  101         'P3-09 does not admit a resolved/resolved (or any other) export_review lifecycle state';
+  102  
+  103  DO $$
+  104  DECLARE
+  105    expected_count integer := 7;
+  106  BEGIN
+  107    IF (SELECT COUNT(*) FROM p3_09_expected_checks) <> expected_count
+  108       OR (SELECT COUNT(*) FROM p3_09_results) <> expected_count
+  109       OR EXISTS (
+  110            SELECT 1
+  111              FROM p3_09_results r
+  112             GROUP BY r.check_name
+  113            HAVING COUNT(*) <> 1
+  114          )
+  115       OR EXISTS (
+  116            SELECT 1
+  117              FROM p3_09_expected_checks e
+  118              LEFT JOIN p3_09_results r ON r.check_name = e.check_name
+  119             WHERE r.check_name IS NULL
+  120          )
+  121       OR EXISTS (
+  122            SELECT 1
+  123              FROM p3_09_results r
+  124              LEFT JOIN p3_09_expected_checks e ON e.check_name = r.check_name
+  125             WHERE e.check_name IS NULL
+  126          ) THEN
+  127      RAISE EXCEPTION 'P3-09 export-review-start verifier result construction failed';
+  128    END IF;
+  129  END $$;
+  130  
+  131  DO $$
+  132  BEGIN
+  133    IF EXISTS (SELECT 1 FROM p3_09_results WHERE status <> 'PASS') THEN
+  134      RAISE EXCEPTION 'P3-09 export-review-start verifier failed';
+  135    END IF;
+  136  END $$;
+  137  
+  138  SELECT
+  139    check_name,
+  140    status,
+  141    detail
+  142  FROM p3_09_results
+  143  ORDER BY check_name;
+  144  
+
+
+============================================================
+scripts/kai-sprint2-p3-13-export-review-completion-verifier.sql
+============================================================
+    1  DROP TABLE IF EXISTS p3_13_results;
+    2  DROP TABLE IF EXISTS p3_13_expected_checks;
+    3  
+    4  CREATE TEMP TABLE p3_13_expected_checks (
+    5    check_name text PRIMARY KEY
+    6  );
+    7  
+    8  INSERT INTO p3_13_expected_checks (check_name)
+    9  VALUES
+   10    ('export_review_contract_admits_completion_lifecycle'),
+   11    ('export_review_p3_09_two_state_contract_removed'),
+   12    ('export_review_identity_unique_index_present'),
+   13    ('audit_operation_allowed'),
+   14    ('audit_metadata_safe_contract'),
+   15    ('no_export_authority_or_final_gate_state'),
+   16    ('audit_metadata_forbids_approval_and_authority_keys');
+   17  
+   18  CREATE TEMP TABLE p3_13_results (
+   19    check_name text PRIMARY KEY,
+   20    status text NOT NULL,
+   21    detail text NOT NULL
+   22  );
+   23  
+   24  INSERT INTO p3_13_results
+   25  SELECT 'export_review_contract_admits_completion_lifecycle',
+   26         CASE WHEN EXISTS (
+   27                SELECT 1
+   28                  FROM pg_constraint
+   29                 WHERE conname = 'review_queue_items_p3_13_export_review_contract_check'
+   30              )
+   31              THEN 'PASS' ELSE 'FAIL' END,
+   32         'queue contract admits exactly open/needs_gk_review, in_progress/needs_gk_review, and resolved/resolved for export_review';
+   33  
+   34  INSERT INTO p3_13_results
+   35  SELECT 'export_review_p3_09_two_state_contract_removed',
+   36         CASE WHEN NOT EXISTS (
+   37                SELECT 1
+   38                  FROM pg_constraint
+   39                 WHERE conname = 'review_queue_items_p3_09_export_review_contract_check'
+   40              )
+   41              THEN 'PASS' ELSE 'FAIL' END,
+   42         'the two-state P3-09 contract check is replaced (not duplicated) by the P3-13 three-state check';
+   43  
+   44  INSERT INTO p3_13_results
+   45  SELECT 'export_review_identity_unique_index_present',
+   46         CASE WHEN EXISTS (
+   47                SELECT 1
+   48                  FROM pg_indexes
+   49                 WHERE schemaname = 'kai'
+   50                   AND indexname = 'ux_review_queue_items_p3_05_export_review_identity'
+   51              )
+   52              THEN 'PASS' ELSE 'FAIL' END,
+   53         'the P3-05 partial unique index enforcing at most one export_review row per organization/draft is preserved';
+   54  
+   55  INSERT INTO p3_13_results
+   56  SELECT 'audit_operation_allowed',
+   57         CASE WHEN EXISTS (
+   58                SELECT 1
+   59                  FROM pg_constraint c
+   60                  JOIN pg_class r ON r.oid = c.conrelid
+   61                  JOIN pg_namespace n ON n.oid = r.relnamespace
+   62                 WHERE n.nspname = 'kai'
+   63                   AND r.relname = 'upload_lifecycle_audit'
+   64                   AND c.conname = 'upload_lifecycle_audit_gate_a_operation_check'
+   65                   AND pg_get_constraintdef(c.oid) LIKE '%export_review_completed%'
+   66              )
+   67              THEN 'PASS' ELSE 'FAIL' END,
+   68         'metadata-only audit operation vocabulary includes P3-13 export_review_completed';
+   69  
+   70  INSERT INTO p3_13_results
+   71  SELECT 'audit_metadata_safe_contract',
+   72         CASE WHEN EXISTS (
+   73                SELECT 1
+   74                  FROM pg_constraint
+   75                 WHERE conname = 'upload_lifecycle_audit_p3_13_metadata_object_check'
+   76              )
+   77              THEN 'PASS' ELSE 'FAIL' END,
+   78         'P3-13 audit metadata is constrained to metadata-only identifiers, actor/timestamps, status transitions, and validator keys';
+   79  
+   80  INSERT INTO p3_13_results
+   81  SELECT 'no_export_authority_or_final_gate_state',
+   82         CASE WHEN NOT EXISTS (
+   83                SELECT 1
+   84                  FROM information_schema.columns
+   85                 WHERE table_schema = 'kai'
+   86                   AND column_name IN ('export_authority', 'final_export_gate', 'approved_at', 'finalized_at', 'exported_at', 'export_eligible', 'affirmative_human_export_authority')
+   87              )
+   88              THEN 'PASS' ELSE 'FAIL' END,
+   89         'P3-13 introduces no export-authority, final-gate, or finalize/export state anywhere in kai schema';
+   90  
+   91  INSERT INTO p3_13_results
+   92  SELECT 'audit_metadata_forbids_approval_and_authority_keys',
+   93         CASE WHEN EXISTS (
+   94                SELECT 1
+   95                  FROM pg_constraint c
+   96                 WHERE c.conname = 'upload_lifecycle_audit_p3_13_metadata_object_check'
+   97                   AND pg_get_constraintdef(c.oid) LIKE '%approval%'
+   98                   AND pg_get_constraintdef(c.oid) LIKE '%export_authority%'
+   99                   AND pg_get_constraintdef(c.oid) LIKE '%final_export_gate%'
+  100              )
+  101              THEN 'PASS' ELSE 'FAIL' END,
+  102         'P3-13 completion audit metadata contract explicitly forbids approval/export-authority/final-gate keys';
+  103  
+  104  DO $$
+  105  DECLARE
+  106    expected_count integer := 7;
+  107  BEGIN
+  108    IF (SELECT COUNT(*) FROM p3_13_expected_checks) <> expected_count
+  109       OR (SELECT COUNT(*) FROM p3_13_results) <> expected_count
+  110       OR EXISTS (
+  111            SELECT 1
+  112              FROM p3_13_results r
+  113             GROUP BY r.check_name
+  114            HAVING COUNT(*) <> 1
+  115          )
+  116       OR EXISTS (
+  117            SELECT 1
+  118              FROM p3_13_expected_checks e
+  119              LEFT JOIN p3_13_results r ON r.check_name = e.check_name
+  120             WHERE r.check_name IS NULL
+  121          )
+  122       OR EXISTS (
+  123            SELECT 1
+  124              FROM p3_13_results r
+  125              LEFT JOIN p3_13_expected_checks e ON e.check_name = r.check_name
+  126             WHERE e.check_name IS NULL
+  127          ) THEN
+  128      RAISE EXCEPTION 'P3-13 export-review-completion verifier result construction failed';
+  129    END IF;
+  130  END $$;
+  131  
+  132  DO $$
+  133  BEGIN
+  134    IF EXISTS (SELECT 1 FROM p3_13_results WHERE status <> 'PASS') THEN
+  135      RAISE EXCEPTION 'P3-13 export-review-completion verifier failed';
+  136    END IF;
+  137  END $$;
+  138  
+  139  SELECT
+  140    check_name,
+  141    status,
+  142    detail
+  143  FROM p3_13_results
+  144  ORDER BY check_name;
+  145  
+
+
+============================================================
+scripts/kai-sprint2-p3-16-export-candidate-foundation-verifier.sql
+============================================================
+    1  DROP TABLE IF EXISTS p3_16_results;
+    2  DROP TABLE IF EXISTS p3_16_expected_checks;
+    3  
+    4  CREATE TEMP TABLE p3_16_expected_checks (
+    5    check_name text PRIMARY KEY
+    6  );
+    7  
+    8  INSERT INTO p3_16_expected_checks (check_name)
+    9  VALUES
+   10    ('limitation_snapshots_table_present'),
+   11    ('limitation_snapshot_entries_table_present'),
+   12    ('export_candidates_table_present'),
+   13    ('root_snapshot_per_draft_unique_index_present'),
+   14    ('single_successor_unique_index_present'),
+   15    ('no_forward_pointer_column_present'),
+   16    ('supersedes_snapshot_id_backward_pointer_present'),
+   17    ('predecessor_scoped_to_org_and_draft'),
+   18    ('limitation_snapshots_append_only_trigger_present'),
+   19    ('limitation_snapshot_entries_append_only_trigger_present'),
+   20    ('export_candidate_snapshot_binding_scoped_to_draft'),
+   21    ('limitation_snapshot_entries_identity_unique_present'),
+   22    ('limitation_snapshot_entries_codes_check_present'),
+   23    ('export_candidates_replay_convergence_unique_present'),
+   24    ('export_candidates_fingerprint_contract_pinned'),
+   25    ('export_candidates_does_not_reuse_generation_runs_fingerprint_column'),
+   26    ('audit_operations_present'),
+   27    ('limitation_snapshot_audit_metadata_safe_contract'),
+   28    ('export_candidate_audit_metadata_safe_contract'),
+   29    ('audit_metadata_forbids_content_and_authority_keys'),
+   30    ('no_export_authority_or_final_gate_state'),
+   31    ('draft_status_review_status_columns_unchanged'),
+   32    ('no_client_reviewed_or_finalize_export_tables');
+   33  
+   34  CREATE TEMP TABLE p3_16_results (
+   35    check_name text PRIMARY KEY,
+   36    status text NOT NULL,
+   37    detail text NOT NULL
+   38  );
+   39  
+   40  INSERT INTO p3_16_results
+   41  SELECT 'limitation_snapshots_table_present',
+   42         CASE WHEN to_regclass('kai.limitation_snapshots') IS NOT NULL THEN 'PASS' ELSE 'FAIL' END,
+   43         'kai.limitation_snapshots exists';
+   44  
+   45  INSERT INTO p3_16_results
+   46  SELECT 'limitation_snapshot_entries_table_present',
+   47         CASE WHEN to_regclass('kai.limitation_snapshot_entries') IS NOT NULL THEN 'PASS' ELSE 'FAIL' END,
+   48         'kai.limitation_snapshot_entries exists';
+   49  
+   50  INSERT INTO p3_16_results
+   51  SELECT 'export_candidates_table_present',
+   52         CASE WHEN to_regclass('kai.export_candidates') IS NOT NULL THEN 'PASS' ELSE 'FAIL' END,
+   53         'kai.export_candidates exists';
+   54  
+   55  INSERT INTO p3_16_results
+   56  SELECT 'root_snapshot_per_draft_unique_index_present',
+   57         CASE WHEN EXISTS (
+   58                SELECT 1 FROM pg_indexes
+   59                 WHERE schemaname = 'kai'
+   60                   AND indexname = 'ux_limitation_snapshots_p3_16_root_per_draft'
+   61              )
+   62              THEN 'PASS' ELSE 'FAIL' END,
+   63         'at most one root (first, no-predecessor) snapshot per (organization_id, generated_content_draft_id)';
+   64  
+   65  INSERT INTO p3_16_results
+   66  SELECT 'single_successor_unique_index_present',
+   67         CASE WHEN EXISTS (
+   68                SELECT 1 FROM pg_indexes
+   69                 WHERE schemaname = 'kai'
+   70                   AND indexname = 'ux_limitation_snapshots_p3_16_single_successor'
+   71              )
+   72              THEN 'PASS' ELSE 'FAIL' END,
+   73         'at most one direct successor may exist per predecessor snapshot (supersedes_snapshot_id)';
+   74  
+   75  INSERT INTO p3_16_results
+   76  SELECT 'no_forward_pointer_column_present',
+   77         CASE WHEN NOT EXISTS (
+   78                SELECT 1 FROM information_schema.columns
+   79                 WHERE table_schema = 'kai'
+   80                   AND table_name = 'limitation_snapshots'
+   81                   AND column_name = 'superseded_by_snapshot_id'
+   82              )
+   83              THEN 'PASS' ELSE 'FAIL' END,
+   84         'the defective forward-pointer superseded_by_snapshot_id column does not exist anywhere';
+   85  
+   86  INSERT INTO p3_16_results
+   87  SELECT 'supersedes_snapshot_id_backward_pointer_present',
+   88         CASE WHEN EXISTS (
+   89                SELECT 1 FROM information_schema.columns
+   90                 WHERE table_schema = 'kai'
+   91                   AND table_name = 'limitation_snapshots'
+   92                   AND column_name = 'supersedes_snapshot_id'
+   93              )
+   94              THEN 'PASS' ELSE 'FAIL' END,
+   95         'lineage is recorded as a backward pointer on the new row (supersedes_snapshot_id)';
+   96  
+   97  INSERT INTO p3_16_results
+   98  SELECT 'predecessor_scoped_to_org_and_draft',
+   99         CASE WHEN EXISTS (
+  100                SELECT 1 FROM pg_constraint
+  101                 WHERE conname = 'limitation_snapshots_p3_16_supersedes_fk'
+  102              )
+  103              THEN 'PASS' ELSE 'FAIL' END,
+  104         'a supersedes_snapshot_id reference is scoped to the same organization and generated-content draft as the new row';
+  105  
+  106  INSERT INTO p3_16_results
+  107  SELECT 'limitation_snapshots_append_only_trigger_present',
+  108         CASE WHEN EXISTS (
+  109                SELECT 1 FROM pg_trigger
+  110                 WHERE tgname = 'trg_p3_16_limitation_snapshots_append_only'
+  111                   AND tgrelid = 'kai.limitation_snapshots'::regclass
+  112                   AND NOT tgisinternal
+  113              )
+  114              THEN 'PASS' ELSE 'FAIL' END,
+  115         'ordinary UPDATE/DELETE of kai.limitation_snapshots is rejected at the database boundary';
+  116  
+  117  INSERT INTO p3_16_results
+  118  SELECT 'limitation_snapshot_entries_append_only_trigger_present',
+  119         CASE WHEN EXISTS (
+  120                SELECT 1 FROM pg_trigger
+  121                 WHERE tgname = 'trg_p3_16_limitation_snapshot_entries_append_only'
+  122                   AND tgrelid = 'kai.limitation_snapshot_entries'::regclass
+  123                   AND NOT tgisinternal
+  124              )
+  125              THEN 'PASS' ELSE 'FAIL' END,
+  126         'ordinary UPDATE/DELETE of kai.limitation_snapshot_entries is rejected at the database boundary';
+  127  
+  128  INSERT INTO p3_16_results
+  129  SELECT 'export_candidate_snapshot_binding_scoped_to_draft',
+  130         CASE WHEN EXISTS (
+  131                SELECT 1 FROM pg_constraint c
+  132                 WHERE c.conname = 'export_candidates_p3_16_snapshot_fk'
+  133                   AND pg_get_constraintdef(c.oid) LIKE '%generated_content_draft_id%'
+  134              )
+  135              THEN 'PASS' ELSE 'FAIL' END,
+  136         'an export candidate can only bind a limitation snapshot from its own organization and draft';
+  137  
+  138  INSERT INTO p3_16_results
+  139  SELECT 'limitation_snapshot_entries_identity_unique_present',
+  140         CASE WHEN EXISTS (
+  141                SELECT 1 FROM pg_constraint
+  142                 WHERE conname = 'limitation_snapshot_entries_p3_16_identity_unique'
+  143              )
+  144              THEN 'PASS' ELSE 'FAIL' END,
+  145         'exactly one entry per (limitation_snapshot_id, claim_id, evidence_item_id)';
+  146  
+  147  INSERT INTO p3_16_results
+  148  SELECT 'limitation_snapshot_entries_codes_check_present',
+  149         CASE WHEN EXISTS (
+  150                SELECT 1 FROM pg_constraint
+  151                 WHERE conname = 'limitation_snapshot_entries_p3_16_codes_check'
+  152              )
+  153              THEN 'PASS' ELSE 'FAIL' END,
+  154         'limitation_codes are constrained to the accepted syntax and deduplicated';
+  155  
+  156  INSERT INTO p3_16_results
+  157  SELECT 'export_candidates_replay_convergence_unique_present',
+  158         CASE WHEN EXISTS (
+  159                SELECT 1 FROM pg_constraint
+  160                 WHERE conname = 'export_candidates_p3_16_replay_convergence_unique'
+  161              )
+  162              THEN 'PASS' ELSE 'FAIL' END,
+  163         'identical (organization_id, generated_content_draft_id, requested_audience, canonical_fingerprint) converges to one row';
+  164  
+  165  INSERT INTO p3_16_results
+  166  SELECT 'export_candidates_fingerprint_contract_pinned',
+  167         CASE WHEN EXISTS (
+  168                SELECT 1 FROM pg_constraint c
+  169                 WHERE c.conname = 'export_candidates_p3_16_fingerprint_contract_version_check'
+  170                   AND pg_get_constraintdef(c.oid) LIKE '%kai-sprint2-p3-16-export-candidate-fingerprint-v1%'
+  171              )
+  172              THEN 'PASS' ELSE 'FAIL' END,
+  173         'export candidates are pinned to exactly one fingerprint contract version';
+  174  
+  175  INSERT INTO p3_16_results
+  176  SELECT 'export_candidates_does_not_reuse_generation_runs_fingerprint_column',
+  177         CASE WHEN NOT EXISTS (
+  178                SELECT 1 FROM information_schema.columns
+  179                 WHERE table_schema = 'kai'
+  180                   AND table_name = 'export_candidates'
+  181                   AND column_name = 'request_fingerprint'
+  182              )
+  183              THEN 'PASS' ELSE 'FAIL' END,
+  184         'export_candidates does not reuse generation_runs.request_fingerprint';
+  185  
+  186  INSERT INTO p3_16_results
+  187  SELECT 'audit_operations_present',
+  188         CASE WHEN EXISTS (
+  189                SELECT 1 FROM pg_constraint c
+  190                 WHERE c.conname = 'upload_lifecycle_audit_gate_a_operation_check'
+  191                   AND pg_get_constraintdef(c.oid) LIKE '%limitation_snapshot_confirmed%'
+  192                   AND pg_get_constraintdef(c.oid) LIKE '%export_candidate_created%'
+  193              )
+  194              THEN 'PASS' ELSE 'FAIL' END,
+  195         'metadata-only audit operation vocabulary includes both P3-16 operations';
+  196  
+  197  INSERT INTO p3_16_results
+  198  SELECT 'limitation_snapshot_audit_metadata_safe_contract',
+  199         CASE WHEN EXISTS (
+  200                SELECT 1 FROM pg_constraint
+  201                 WHERE conname = 'upload_lifecycle_audit_p3_16_limitation_snapshot_metadata_check'
+  202              )
+  203              THEN 'PASS' ELSE 'FAIL' END,
+  204         'limitation_snapshot_confirmed audit metadata is constrained to identifiers, actor/role, counts, and fingerprint';
+  205  
+  206  INSERT INTO p3_16_results
+  207  SELECT 'export_candidate_audit_metadata_safe_contract',
+  208         CASE WHEN EXISTS (
+  209                SELECT 1 FROM pg_constraint
+  210                 WHERE conname = 'upload_lifecycle_audit_p3_16_export_candidate_metadata_check'
+  211              )
+  212              THEN 'PASS' ELSE 'FAIL' END,
+  213         'export_candidate_created audit metadata is constrained to identifiers, actor, counts, and fingerprint';
+  214  
+  215  INSERT INTO p3_16_results
+  216  SELECT 'audit_metadata_forbids_content_and_authority_keys',
+  217         CASE WHEN EXISTS (
+  218                SELECT 1 FROM pg_constraint c
+  219                 WHERE c.conname = 'upload_lifecycle_audit_p3_16_export_candidate_metadata_check'
+  220                   AND pg_get_constraintdef(c.oid) LIKE '%draft_text%'
+  221                   AND pg_get_constraintdef(c.oid) LIKE '%approval%'
+  222                   AND pg_get_constraintdef(c.oid) LIKE '%export_authority%'
+  223                   AND pg_get_constraintdef(c.oid) LIKE '%final_export_gate%'
+  224                   AND pg_get_constraintdef(c.oid) LIKE '%limitation_codes%'
+  225              )
+  226              THEN 'PASS' ELSE 'FAIL' END,
+  227         'P3-16 audit metadata contracts explicitly forbid raw content, limitation codes, and export-authority/final-gate keys';
+  228  
+  229  INSERT INTO p3_16_results
+  230  SELECT 'no_export_authority_or_final_gate_state',
+  231         CASE WHEN NOT EXISTS (
+  232                SELECT 1 FROM information_schema.columns
+  233                 WHERE table_schema = 'kai'
+  234                   AND column_name IN ('export_authority', 'final_export_gate', 'approved_at', 'finalized_at', 'exported_at', 'export_eligible', 'affirmative_human_export_authority')
+  235              )
+  236              THEN 'PASS' ELSE 'FAIL' END,
+  237         'P3-16 introduces no export-authority, final-gate, or finalize/export state anywhere in kai schema';
+  238  
+  239  INSERT INTO p3_16_results
+  240  SELECT 'draft_status_review_status_columns_unchanged',
+  241         CASE WHEN EXISTS (
+  242                SELECT 1 FROM pg_constraint
+  243                 WHERE conname = 'generated_content_drafts_p3_01_draft_status_check'
+  244              )
+  245              THEN 'PASS' ELSE 'FAIL' END,
+  246         'generated_content_drafts.draft_status remains pinned to draft by its original P3-01 constraint';
+  247  
+  248  INSERT INTO p3_16_results
+  249  SELECT 'no_client_reviewed_or_finalize_export_tables',
+  250         CASE WHEN NOT EXISTS (
+  251                SELECT 1 FROM information_schema.tables
+  252                 WHERE table_schema = 'kai'
+  253                   AND table_name IN ('client_reviewed', 'funder_ready', 'public_ready', 'export_authority_grants', 'export_manifests', 'export_events')
+  254              )
+  255              THEN 'PASS' ELSE 'FAIL' END,
+  256         'P3-16 creates no client_reviewed/funder_ready/public_ready/export_authority_granted/manifest/final-export artifact or event tables';
+  257  
+  258  DO $$
+  259  DECLARE
+  260    expected_count integer := 23;
+  261  BEGIN
+  262    IF (SELECT COUNT(*) FROM p3_16_expected_checks) <> expected_count
+  263       OR (SELECT COUNT(*) FROM p3_16_results) <> expected_count
+  264       OR EXISTS (
+  265            SELECT 1
+  266              FROM p3_16_results r
+  267             GROUP BY r.check_name
+  268            HAVING COUNT(*) <> 1
+  269          )
+  270       OR EXISTS (
+  271            SELECT 1
+  272              FROM p3_16_expected_checks e
+  273              LEFT JOIN p3_16_results r ON r.check_name = e.check_name
+  274             WHERE r.check_name IS NULL
+  275          )
+  276       OR EXISTS (
+  277            SELECT 1
+  278              FROM p3_16_results r
+  279              LEFT JOIN p3_16_expected_checks e ON e.check_name = r.check_name
+  280             WHERE e.check_name IS NULL
+  281          ) THEN
+  282      RAISE EXCEPTION 'P3-16 export-candidate-foundation verifier result construction failed';
+  283    END IF;
+  284  END $$;
+  285  
+  286  DO $$
+  287  BEGIN
+  288    IF EXISTS (SELECT 1 FROM p3_16_results WHERE status <> 'PASS') THEN
+  289      RAISE EXCEPTION 'P3-16 export-candidate-foundation verifier failed';
+  290    END IF;
+  291  END $$;
+  292  
+  293  SELECT
+  294    check_name,
+  295    status,
+  296    detail
+  297  FROM p3_16_results
+  298  ORDER BY check_name;
+  299  
+
+
+============================================================
+scripts/kai-sprint2-p3-17-human-authority-decision-ledger-verifier.sql
+============================================================
+    1  DROP TABLE IF EXISTS p3_17_results;
+    2  DROP TABLE IF EXISTS p3_17_expected_checks;
+    3  
+    4  CREATE TEMP TABLE p3_17_expected_checks (
+    5    check_name text PRIMARY KEY
+    6  );
+    7  
+    8  INSERT INTO p3_17_expected_checks (check_name)
+    9  VALUES
+   10    ('human_authority_decisions_table_present'),
+   11    ('decision_type_check_present'),
+   12    ('decision_action_check_present'),
+   13    ('role_by_type_check_present'),
+   14    ('root_is_grant_check_present'),
+   15    ('candidate_binding_fk_present'),
+   16    ('audience_compatibility_trigger_present'),
+   17    ('no_forward_pointer_column_present'),
+   18    ('supersedes_decision_id_backward_pointer_present'),
+   19    ('predecessor_scoped_to_org_candidate_type'),
+   20    ('root_per_lineage_unique_index_present'),
+   21    ('single_successor_unique_index_present'),
+   22    ('append_only_trigger_present'),
+   23    ('no_export_authority_or_final_gate_state'),
+   24    ('no_export_manifest_or_event_tables'),
+   25    ('p3_16_candidate_and_snapshot_tables_unchanged');
+   26  
+   27  CREATE TEMP TABLE p3_17_results (
+   28    check_name text PRIMARY KEY,
+   29    status text NOT NULL,
+   30    detail text NOT NULL
+   31  );
+   32  
+   33  INSERT INTO p3_17_results
+   34  SELECT 'human_authority_decisions_table_present',
+   35         CASE WHEN to_regclass('kai.human_authority_decisions') IS NOT NULL THEN 'PASS' ELSE 'FAIL' END,
+   36         'kai.human_authority_decisions exists';
+   37  
+   38  INSERT INTO p3_17_results
+   39  SELECT 'decision_type_check_present',
+   40         CASE WHEN EXISTS (
+   41                SELECT 1 FROM pg_constraint c
+   42                 WHERE c.conname = 'human_authority_decisions_p3_17_decision_type_check'
+   43                   AND pg_get_constraintdef(c.oid) LIKE '%client_reviewed%'
+   44                   AND pg_get_constraintdef(c.oid) LIKE '%funder_ready%'
+   45                   AND pg_get_constraintdef(c.oid) LIKE '%public_ready%'
+   46                   AND pg_get_constraintdef(c.oid) LIKE '%export_authority_granted%'
+   47              )
+   48              THEN 'PASS' ELSE 'FAIL' END,
+   49         'decision_type is constrained to exactly client_reviewed/funder_ready/public_ready/export_authority_granted';
+   50  
+   51  INSERT INTO p3_17_results
+   52  SELECT 'decision_action_check_present',
+   53         CASE WHEN EXISTS (
+   54                SELECT 1 FROM pg_constraint c
+   55                 WHERE c.conname = 'human_authority_decisions_p3_17_decision_action_check'
+   56                   AND pg_get_constraintdef(c.oid) LIKE '%grant%'
+   57                   AND pg_get_constraintdef(c.oid) LIKE '%revoke%'
+   58              )
+   59              THEN 'PASS' ELSE 'FAIL' END,
+   60         'decision_action is constrained to exactly grant/revoke';
+   61  
+   62  INSERT INTO p3_17_results
+   63  SELECT 'role_by_type_check_present',
+   64         CASE WHEN EXISTS (
+   65                SELECT 1 FROM pg_constraint
+   66                 WHERE conname = 'human_authority_decisions_p3_17_role_by_type_check'
+   67              )
+   68              THEN 'PASS' ELSE 'FAIL' END,
+   69         'client_reviewed requires decided_by_role client_reviewer; every other decision type requires gk_admin';
+   70  
+   71  INSERT INTO p3_17_results
+   72  SELECT 'root_is_grant_check_present',
+   73         CASE WHEN EXISTS (
+   74                SELECT 1 FROM pg_constraint
+   75                 WHERE conname = 'human_authority_decisions_p3_17_root_is_grant_check'
+   76              )
+   77              THEN 'PASS' ELSE 'FAIL' END,
+   78         'the first (root, no-predecessor) event in a lineage must be a grant';
+   79  
+   80  INSERT INTO p3_17_results
+   81  SELECT 'candidate_binding_fk_present',
+   82         CASE WHEN EXISTS (
+   83                SELECT 1 FROM pg_constraint c
+   84                 WHERE c.conname = 'human_authority_decisions_p3_17_candidate_fk'
+   85                   AND pg_get_constraintdef(c.oid) LIKE '%export_candidates%'
+   86              )
+   87              THEN 'PASS' ELSE 'FAIL' END,
+   88         'every decision binds to exactly one existing (organization, export_candidate) row';
+   89  
+   90  INSERT INTO p3_17_results
+   91  SELECT 'audience_compatibility_trigger_present',
+   92         CASE WHEN EXISTS (
+   93                SELECT 1 FROM pg_trigger
+   94                 WHERE tgname = 'trg_p3_17_human_authority_decisions_audience_compatibility'
+   95                   AND tgrelid = 'kai.human_authority_decisions'::regclass
+   96                   AND NOT tgisinternal
+   97              )
+   98              THEN 'PASS' ELSE 'FAIL' END,
+   99         'funder_ready/public_ready audience compatibility is enforced at the database boundary';
+  100  
+  101  INSERT INTO p3_17_results
+  102  SELECT 'no_forward_pointer_column_present',
+  103         CASE WHEN NOT EXISTS (
+  104                SELECT 1 FROM information_schema.columns
+  105                 WHERE table_schema = 'kai'
+  106                   AND table_name = 'human_authority_decisions'
+  107                   AND column_name = 'superseded_by_decision_id'
+  108              )
+  109              THEN 'PASS' ELSE 'FAIL' END,
+  110         'no defective forward-pointer column exists';
+  111  
+  112  INSERT INTO p3_17_results
+  113  SELECT 'supersedes_decision_id_backward_pointer_present',
+  114         CASE WHEN EXISTS (
+  115                SELECT 1 FROM information_schema.columns
+  116                 WHERE table_schema = 'kai'
+  117                   AND table_name = 'human_authority_decisions'
+  118                   AND column_name = 'supersedes_decision_id'
+  119              )
+  120              THEN 'PASS' ELSE 'FAIL' END,
+  121         'lineage is recorded as a backward pointer on the new row (supersedes_decision_id)';
+  122  
+  123  INSERT INTO p3_17_results
+  124  SELECT 'predecessor_scoped_to_org_candidate_type',
+  125         CASE WHEN EXISTS (
+  126                SELECT 1 FROM pg_constraint c
+  127                 WHERE c.conname = 'human_authority_decisions_p3_17_supersedes_fk'
+  128                   AND pg_get_constraintdef(c.oid) LIKE '%export_candidate_id%'
+  129                   AND pg_get_constraintdef(c.oid) LIKE '%decision_type%'
+  130              )
+  131              THEN 'PASS' ELSE 'FAIL' END,
+  132         'predecessor lineage cannot cross organization, export candidate, or decision type';
+  133  
+  134  INSERT INTO p3_17_results
+  135  SELECT 'root_per_lineage_unique_index_present',
+  136         CASE WHEN EXISTS (
+  137                SELECT 1 FROM pg_indexes
+  138                 WHERE schemaname = 'kai'
+  139                   AND indexname = 'ux_human_authority_decisions_p3_17_root_per_lineage'
+  140              )
+  141              THEN 'PASS' ELSE 'FAIL' END,
+  142         'at most one root (first, no-predecessor) decision per (organization, export_candidate_id, decision_type)';
+  143  
+  144  INSERT INTO p3_17_results
+  145  SELECT 'single_successor_unique_index_present',
+  146         CASE WHEN EXISTS (
+  147                SELECT 1 FROM pg_indexes
+  148                 WHERE schemaname = 'kai'
+  149                   AND indexname = 'ux_human_authority_decisions_p3_17_single_successor'
+  150              )
+  151              THEN 'PASS' ELSE 'FAIL' END,
+  152         'at most one direct successor may exist per predecessor decision';
+  153  
+  154  INSERT INTO p3_17_results
+  155  SELECT 'append_only_trigger_present',
+  156         CASE WHEN EXISTS (
+  157                SELECT 1 FROM pg_trigger
+  158                 WHERE tgname = 'trg_p3_17_human_authority_decisions_append_only'
+  159                   AND tgrelid = 'kai.human_authority_decisions'::regclass
+  160                   AND NOT tgisinternal
+  161              )
+  162              THEN 'PASS' ELSE 'FAIL' END,
+  163         'ordinary UPDATE/DELETE of kai.human_authority_decisions is rejected at the database boundary';
+  164  
+  165  INSERT INTO p3_17_results
+  166  SELECT 'no_export_authority_or_final_gate_state',
+  167         CASE WHEN NOT EXISTS (
+  168                SELECT 1 FROM information_schema.columns
+  169                 WHERE table_schema = 'kai'
+  170                   AND column_name IN ('final_export_gate', 'final_gate', 'export_eligible', 'affirmative_human_export_authority', 'manifest', 'exported_at')
+  171              )
+  172              THEN 'PASS' ELSE 'FAIL' END,
+  173         'P3-17 introduces no finalGate, VAL-EXP-001 eligibility, or manifest/export-artifact state anywhere in kai schema';
+  174  
+  175  INSERT INTO p3_17_results
+  176  SELECT 'no_export_manifest_or_event_tables',
+  177         CASE WHEN NOT EXISTS (
+  178                SELECT 1 FROM information_schema.tables
+  179                 WHERE table_schema = 'kai'
+  180                   AND table_name IN ('export_manifests', 'export_events', 'export_artifacts')
+  181              )
+  182              THEN 'PASS' ELSE 'FAIL' END,
+  183         'P3-17 creates no manifest or final-export artifact/event tables';
+  184  
+  185  INSERT INTO p3_17_results
+  186  SELECT 'p3_16_candidate_and_snapshot_tables_unchanged',
+  187         CASE WHEN EXISTS (
+  188                SELECT 1 FROM pg_constraint WHERE conname = 'export_candidates_p3_16_snapshot_fk'
+  189              )
+  190              AND EXISTS (
+  191                SELECT 1 FROM pg_constraint WHERE conname = 'limitation_snapshots_p3_16_supersedes_fk'
+  192              )
+  193              THEN 'PASS' ELSE 'FAIL' END,
+  194         'P3-16 export-candidate and limitation-snapshot constraints remain exactly as accepted';
+  195  
+  196  DO $$
+  197  DECLARE
+  198    expected_count integer := 16;
+  199  BEGIN
+  200    IF (SELECT COUNT(*) FROM p3_17_expected_checks) <> expected_count
+  201       OR (SELECT COUNT(*) FROM p3_17_results) <> expected_count
+  202       OR EXISTS (
+  203            SELECT 1
+  204              FROM p3_17_results r
+  205             GROUP BY r.check_name
+  206            HAVING COUNT(*) <> 1
+  207          )
+  208       OR EXISTS (
+  209            SELECT 1
+  210              FROM p3_17_expected_checks e
+  211              LEFT JOIN p3_17_results r ON r.check_name = e.check_name
+  212             WHERE r.check_name IS NULL
+  213          )
+  214       OR EXISTS (
+  215            SELECT 1
+  216              FROM p3_17_results r
+  217              LEFT JOIN p3_17_expected_checks e ON e.check_name = r.check_name
+  218             WHERE e.check_name IS NULL
+  219          ) THEN
+  220      RAISE EXCEPTION 'P3-17 human-authority-decision-ledger verifier result construction failed';
+  221    END IF;
+  222  END $$;
+  223  
+  224  DO $$
+  225  BEGIN
+  226    IF EXISTS (SELECT 1 FROM p3_17_results WHERE status <> 'PASS') THEN
+  227      RAISE EXCEPTION 'P3-17 human-authority-decision-ledger verifier failed';
+  228    END IF;
+  229  END $$;
+  230  
+  231  SELECT
+  232    check_name,
+  233    status,
+  234    detail
+  235  FROM p3_17_results
+  236  ORDER BY check_name;
+  237  

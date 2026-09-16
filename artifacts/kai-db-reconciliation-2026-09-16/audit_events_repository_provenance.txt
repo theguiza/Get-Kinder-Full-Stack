@@ -1,0 +1,13 @@
+=== AUDIT_EVENTS REPOSITORY PROVENANCE ===
+scripts/kai-sprint2-organization-enablement-bootstrap-synthetic-schema.sql:50:  last_audit_event_id                 bigint
+scripts/kai-sprint2-organization-enablement-bootstrap-synthetic-schema.sql:78:CREATE TABLE kai.audit_events (
+scripts/kai-sprint2-p2-access-administration-bootstrap-synthetic-schema.sql:118:CREATE TABLE kai.audit_events (
+scripts/kai-sprint2-legacy-cutover-legacy-shape-seed.sql:140:CREATE TABLE kai.audit_events (
+scripts/kai-sprint2-legacy-cutover-legacy-shape-seed.sql:341:  last_audit_event_id uuid,
+scripts/kai-sprint2-legacy-cutover-legacy-shape-seed.sql:408:  last_audit_event_id uuid,
+scripts/kai-sprint2-legacy-cutover-legacy-shape-seed.sql:458:  last_audit_event_id uuid,
+scripts/kai-sprint2-legacy-cutover-legacy-shape-seed.sql:670:  last_audit_event_id uuid,
+scripts/kai-sprint2-legacy-cutover-legacy-shape-seed.sql:767:  last_audit_event_id uuid,
+scripts/kai-sprint2-legacy-cutover-legacy-shape-seed.sql:832:  last_audit_event_id uuid,
+scripts/kai-sprint2-p3-19-export-manifest-foundation-audit-events-bootstrap-synthetic-schema.sql:23:CREATE TABLE kai.audit_events (
+scripts/kai-sprint2-confirm-upload-metadata-boundary-schema-extension.sql:46:CREATE TABLE IF NOT EXISTS kai.audit_events (

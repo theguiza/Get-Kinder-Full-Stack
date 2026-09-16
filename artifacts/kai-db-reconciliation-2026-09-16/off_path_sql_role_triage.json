@@ -1,0 +1,1014 @@
+{
+  "dynamic_candidate_file_count": 16,
+  "input_candidate_file_count": 63,
+  "nonrollback_candidate_file_count": 3,
+  "nonrollback_dynamic_candidate_count": 2,
+  "off_path_nonrollback_candidates": [
+    {
+      "affected_tables": [
+        "data_dictionaries",
+        "data_dictionary_fields",
+        "data_dictionary_mappings",
+        "data_quality_findings",
+        "evidence_items",
+        "intake_file_profiles",
+        "intake_parser_runs",
+        "intake_promotion_decisions",
+        "intake_sensitivity_profiles",
+        "intake_source_candidates",
+        "review_queue_items",
+        "source_locators",
+        "source_versions",
+        "sources",
+        "upload_lifecycle_audit"
+      ],
+      "dynamic_sql_candidate": true,
+      "effect_count": 48,
+      "effects": [
+        {
+          "candidate_effect": "ALTER_TABLE",
+          "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+          "line": 747,
+          "table": "upload_lifecycle_audit"
+        },
+        {
+          "candidate_effect": "ALTER_TABLE",
+          "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+          "line": 867,
+          "table": "review_queue_items"
+        },
+        {
+          "candidate_effect": "ALTER_TABLE",
+          "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+          "line": 882,
+          "table": "review_queue_items"
+        },
+        {
+          "candidate_effect": "ALTER_TABLE",
+          "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+          "line": 888,
+          "table": "upload_lifecycle_audit"
+        },
+        {
+          "candidate_effect": "CREATE_TABLE",
+          "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+          "line": 932,
+          "table": "intake_parser_runs"
+        },
+        {
+          "candidate_effect": "CREATE_INDEX_ON",
+          "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+          "line": 985,
+          "table": "intake_parser_runs"
+        },
+        {
+          "candidate_effect": "CREATE_TABLE",
+          "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+          "line": 988,
+          "table": "intake_file_profiles"
+        },
+        {
+          "candidate_effect": "CREATE_INDEX_ON",
+          "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+          "line": 1025,
+          "table": "intake_file_profiles"
+        },
+        {
+          "candidate_effect": "CREATE_INDEX_ON",
+          "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+          "line": 1028,
+          "table": "intake_file_profiles"
+        },
+        {
+          "candidate_effect": "ALTER_TABLE",
+          "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+          "line": 1038,
+          "table": "intake_parser_runs"
+        },
+        {
+          "candidate_effect": "ALTER_TABLE",
+          "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+          "line": 1083,
+          "table": "intake_file_profiles"
+        },
+        {
+          "candidate_effect": "CREATE_TABLE",
+          "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+          "line": 1089,
+          "table": "data_dictionaries"
+        },
+        {
+          "candidate_effect": "CREATE_INDEX_ON",
+          "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+          "line": 1117,
+          "table": "data_dictionaries"
+        },
+        {
+          "candidate_effect": "CREATE_TABLE",
+          "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+          "line": 1120,
+          "table": "data_dictionary_fields"
+        },
+        {
+          "candidate_effect": "CREATE_INDEX_ON",
+          "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+          "line": 1211,
+          "table": "data_dictionary_fields"
+        },
+        {
+          "candidate_effect": "CREATE_TABLE",
+          "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+          "line": 1214,
+          "table": "data_dictionary_mappings"
+        },
+        {
+          "candidate_effect": "CREATE_INDEX_ON",
+          "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+          "line": 1232,
+          "table": "data_dictionary_mappings"
+        },
+        {
+          "candidate_effect": "CREATE_TABLE",
+          "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+          "line": 1235,
+          "table": "data_quality_findings"
+        },
+        {
+          "candidate_effect": "CREATE_INDEX_ON",
+          "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+          "line": 1271,
+          "table": "data_quality_findings"
+        },
+        {
+          "candidate_effect": "CREATE_TABLE",
+          "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+          "line": 1336,
+          "table": "intake_sensitivity_profiles"
+        },
+        {
+          "candidate_effect": "CREATE_INDEX_ON",
+          "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+          "line": 1432,
+          "table": "intake_sensitivity_profiles"
+        },
+        {
+          "candidate_effect": "CREATE_INDEX_ON",
+          "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+          "line": 1435,
+          "table": "intake_sensitivity_profiles"
+        },
+        {
+          "candidate_effect": "CREATE_TABLE",
+          "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+          "line": 1481,
+          "table": "review_queue_items"
+        },
+        {
+          "candidate_effect": "CREATE_INDEX_ON",
+          "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+          "line": 1565,
+          "table": "review_queue_items"
+        },
+        {
+          "candidate_effect": "CREATE_INDEX_ON",
+          "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+          "line": 1569,
+          "table": "review_queue_items"
+        },
+        {
+          "candidate_effect": "CREATE_TRIGGER_ON",
+          "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+          "line": 1587,
+          "table": "review_queue_items"
+        },
+        {
+          "candidate_effect": "ALTER_TABLE",
+          "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+          "line": 1702,
+          "table": "intake_sensitivity_profiles"
+        },
+        {
+          "candidate_effect": "CREATE_TABLE",
+          "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+          "line": 1719,
+          "table": "intake_source_candidates"
+        },
+        {
+          "candidate_effect": "CREATE_INDEX_ON",
+          "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+          "line": 1763,
+          "table": "intake_source_candidates"
+        },
+        {
+          "candidate_effect": "CREATE_INDEX_ON",
+          "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+          "line": 1766,
+          "table": "intake_source_candidates"
+        },
+        {
+          "candidate_effect": "CREATE_INDEX_ON",
+          "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+          "line": 1775,
+          "table": "review_queue_items"
+        },
+        {
+          "candidate_effect": "ALTER_TABLE",
+          "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+          "line": 1842,
+          "table": "intake_source_candidates"
+        },
+        {
+          "candidate_effect": "ALTER_TABLE",
+          "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+          "line": 1862,
+          "table": "intake_source_candidates"
+        },
+        {
+          "candidate_effect": "ALTER_TABLE",
+          "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+          "line": 1875,
+          "table": "intake_source_candidates"
+        },
+        {
+          "candidate_effect": "ALTER_TABLE",
+          "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+          "line": 1893,
+          "table": "review_queue_items"
+        },
+        {
+          "candidate_effect": "CREATE_TABLE",
+          "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+          "line": 1916,
+          "table": "intake_promotion_decisions"
+        },
+        {
+          "candidate_effect": "CREATE_INDEX_ON",
+          "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+          "line": 1965,
+          "table": "intake_promotion_decisions"
+        },
+        {
+          "candidate_effect": "CREATE_TABLE",
+          "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+          "line": 1973,
+          "table": "sources"
+        },
+        {
+          "candidate_effect": "CREATE_TABLE",
+          "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+          "line": 2007,
+          "table": "source_versions"
+        },
+        {
+          "candidate_effect": "CREATE_INDEX_ON",
+          "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+          "line": 2036,
+          "table": "source_versions"
+        },
+        {
+          "candidate_effect": "ALTER_TABLE",
+          "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+          "line": 2047,
+          "table": "intake_promotion_decisions"
+        },
+        {
+          "candidate_effect": "ALTER_TABLE",
+          "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+          "line": 2062,
+          "table": "intake_promotion_decisions"
+        },
+        {
+          "candidate_effect": "CREATE_TABLE",
+          "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+          "line": 2097,
+          "table": "source_locators"
+        },
+        {
+          "candidate_effect": "CREATE_INDEX_ON",
+          "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+          "line": 2131,
+          "table": "source_locators"
+        },
+        {
+          "candidate_effect": "ALTER_TABLE",
+          "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+          "line": 2141,
+          "table": "source_versions"
+        },
+        {
+          "candidate_effect": "CREATE_TABLE",
+          "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+          "line": 2147,
+          "table": "evidence_items"
+        },
+        {
+          "candidate_effect": "CREATE_INDEX_ON",
+          "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+          "line": 2214,
+          "table": "evidence_items"
+        },
+        {
+          "candidate_effect": "CREATE_INDEX_ON",
+          "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+          "line": 2217,
+          "table": "review_queue_items"
+        }
+      ],
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+      "last_git_commit": "21b731a726983fd331a872d80c1815014e65eb49\t2026-08-17T16:28:54-07:00\tKeep shared KAI contracts production-native during cutover",
+      "paired_rollback": "migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql",
+      "paired_rollback_exists": true,
+      "role": "OFF_PATH_NONROLLBACK_CANDIDATE",
+      "sha256": "733795b189f742895ee1ce67bf4fb0bf5779ef00e470969c1d1219c69e7312df",
+      "source_preview_first_100_lines": "-- ==========================================================================\n-- KAI legacy-generation cutover - CORRECTED forward-only bundle (2026-08-17)\n--\n-- ONE atomic, pgAdmin-Query-Tool-executable transaction. No psql meta-commands,\n-- no \\i, no DATABASE_URL, no external transaction wrapper, no nested\n-- historical-migration transaction boundaries. Any error before COMMIT rolls\n-- back the complete cutover; there is no reachable committed state in which\n-- legacy names have moved but the required canonical replacements are missing.\n--\n-- WHY THIS FILE WAS CORRECTED\n-- The first pass of this cutover assumed only seven tables were legacy-shaped\n-- and that kai.intake_parser_runs, kai.data_dictionary_fields,\n-- kai.data_dictionary_mappings, kai.data_quality_findings,\n-- kai.source_locators and kai.evidence_items were absent or already canonical.\n-- Run read-only against the real production catalog, that preflight returned\n-- four FAILs. Four further owner-supplied production captures then proved the\n-- assumption wrong: all thirteen objects below are the same older\n-- data-model generation, and the two tables the first pass believed had\n-- \"passed\" (data_dictionary_mappings, data_quality_findings) had only passed\n-- because the first pass classified shapes by a SINGLE marker column. Their\n-- production shapes carry that marker column while carrying none of the\n-- canonical P1-04 lineage columns. This file replaces single-column guessing\n-- with a multi-factor structural signature (columns + column type classes +\n-- primary key + named unique/check/foreign-key constraints + named indexes) and\n-- fails closed on any shape it does not recognise.\n--\n-- EVIDENCE (owner-supplied, read-only production captures, 2026-08-17)\n--   capture 1  full catalog: data_dictionaries, intake_file_profiles,\n--              intake_files, intake_promotion_decisions,\n--              intake_sensitivity_profiles, intake_source_candidates,\n--              review_queue_items, source_versions, sources\n--   capture 2  the production run of the first-pass preflight (29 checks, 4 FAIL)\n--   capture 3  full catalog: intake_parser_runs, data_dictionary_fields,\n--              source_locators, evidence_items, plus the incoming edges\n--              claim_evidence_links -> evidence_items,\n--              funder_requirements -> source_locators,\n--              funders -> source_locators\n--   capture 4  full catalog: data_dictionary_mappings, data_quality_findings\n--\n-- PER-OBJECT TREATMENT (classified from the captures plus current-HEAD code,\n-- never from the fact that an object appeared in a foreign-key edge)\n--\n--   RELOCATE_LEGACY (13) - proven legacy shape sitting on a name the current\n--   canonical P1 contract owns; moved intact into kai_legacy_20260817:\n--     kai.intake_parser_runs           kai.intake_file_profiles\n--     kai.data_dictionaries            kai.data_dictionary_fields\n--     kai.data_dictionary_mappings     kai.data_quality_findings\n--     kai.intake_sensitivity_profiles  kai.intake_source_candidates\n--     kai.intake_promotion_decisions   kai.sources\n--     kai.source_versions              kai.source_locators\n--     kai.evidence_items\n--\n--   KEEP_SHARED_IN_KAI (never relocated, never replaced, only additively\n--   extended by the narrowly-scoped changes in section 4):\n--     kai.intake_files  kai.review_queue_items  kai.upload_lifecycle_audit\n--     kai.organizations kai.engagements         kai.users\n--\n--   NOT_REQUIRED_FOR_CURRENT_CUTOVER (dependent tables whose foreign keys point\n--   at relocated objects; deliberately left in kai so their rows keep\n--   referencing the preserved legacy object, which is the truthful current\n--   meaning of those rows). ALTER TABLE ... SET SCHEMA moves a table without\n--   dropping or recreating any constraint, and a foreign key binds to the\n--   referenced table's OID, not to its schema-qualified name - so each of these\n--   keeps pointing at exactly the same rows after the move, now addressed as\n--   kai_legacy_20260817.*:\n--     kai.claim_evidence_links -> evidence_items\n--     kai.funder_requirements  -> source_locators\n--     kai.funders              -> source_locators\n--   No currently-mounted repository caller requires a canonical object at these\n--   three names right now. This is recorded, not silently ignored: the\n--   post-cutover verifier reports each of these edges, and the runbook records\n--   that a future P2-01/P2-03 package must handle kai.claim_evidence_links\n--   explicitly (its CREATE TABLE IF NOT EXISTS in\n--   migrations/kai_sprint2_p2_03_claim_proposal.sql would otherwise silently\n--   skip over the retained legacy table, reproducing this same class of\n--   incident).\n--\n--   P2-01 DECISION: P2_01_REQUIRED_FOR_REACHABLE_OPERATION.\n--   Repository proof at current HEAD: the Review Cockpit source-candidate detail\n--   itself still does not read source_locators or evidence_items, but the\n--   authenticated Sprint 2 intake router mounts the accepted P2-01\n--   evidence-extraction route and P2-02 evidence-coverage route behind only\n--   KAI_SPRINT2_ENABLED. The admin Impact Evidence Library UI also exposes those\n--   calls. Because KAI_SPRINT2_ENABLED is owner-confirmed enabled in production,\n--   leaving kai.source_locators/kai.evidence_items absent after this cutover\n--   would leave a currently mounted, human-authorized operation structurally\n--   broken. This bundle therefore preserves the legacy P2 graph intact under\n--   kai_legacy_20260817 and installs EMPTY canonical P2-01 source_locators and\n--   evidence_items tables. It still never translates, copies, relabels, or\n--   fabricates any legacy row into the canonical P2 generation.\n--\n-- WHAT THIS BUNDLE NEVER DOES\n--   * never translates a legacy row into a canonical row\n--   * never fabricates profile_canonical_sha256, file-profile / dictionary /\n--     sensitivity / candidate lineage, promotion decisions, source or\n--     source-version lineage, source locators, or evidence items\n--   * never fabricates a queue approval, rejection, resolution or cancellation\n--   * never relocates, replaces or narrows a shared object\n--   * never replays a historical migration file as a production step, and never\n--     edits one",
+      "tracked_references": [
+        "Backend/kai/db/kaiReviewCockpitReadModels.js:47: * (migrations/kai_sprint2_legacy_generation_cutover_20260817.sql, section 6). Rows",
+        "KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.6.md:18298:  - `migrations/kai_sprint2_legacy_generation_cutover_20260817.sql`: rebuilt as",
+        "KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.6.md:18472:  - `migrations/kai_sprint2_legacy_generation_cutover_20260817.sql` preserves",
+        "KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.6.md:19592:**Preflight:** read root `AGENTS.md` (package-boundary/testing/DATABASE_URL-sentinel conventions), confirmed branch `main` at a clean `f982017`, and inspected the closest prior conventions for this exact shape: `migrations/kai_sprint2_p2_04_claim_gap_followup.sql` (composite tenant-safe FK pattern, `_id_org_unique` shadow constraint, partial-unique idempotency index style) and `migrations/kai_sprint2_gk_organization_tenant_binding.sql` (minimal additive table + `updated_at` touch-trigger pattern). Confirmed via `migrations/kai_sprint2_legacy_generation_cutover_20260817.sql` that `kai.organizations` and `kai.engagements` are pre-existing, shared (`KEEP_SHARED_IN_KAI`) production objects never created or altered by any migration in this repository - consistent with the owner's instruction not to touch them. Confirmed the repository's schema-contract test convention is static regex assertion against migration SQL source text (no live database execution), matching `__tests__/kai-sprint2-p2-04-claim-gap-followup-schema-contract.spec.js` and `__tests__/kai-sprint2-gk-organization-binding-schema-contract.spec.js`. Proceeded directly; no blocker required a stop.",
+        "migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql:3:-- (migrations/kai_sprint2_legacy_generation_cutover_20260817.sql).",
+        "migrations/kai_sprint2_p14_12_review_queue_type_check_legacy_repair.sql:23:-- (migrations/kai_sprint2_legacy_generation_cutover_20260817.sql section 4",
+        "scripts/kai-sprint2-legacy-cutover-local-postgres.js:35:const CUTOVER_SQL = \"migrations/kai_sprint2_legacy_generation_cutover_20260817.sql\";",
+        "scripts/kai-sprint2-legacy-cutover-preflight.sql:3:-- (migrations/kai_sprint2_legacy_generation_cutover_20260817.sql).",
+        "scripts/kai-sprint2-legacy-cutover-runbook.md:104:   execution: `migrations/kai_sprint2_legacy_generation_cutover_20260817.sql`."
+      ]
+    },
+    {
+      "affected_tables": [
+        "review_queue_items"
+      ],
+      "dynamic_sql_candidate": false,
+      "effect_count": 1,
+      "effects": [
+        {
+          "candidate_effect": "ALTER_TABLE",
+          "file": "migrations/kai_sprint2_p14_12_review_queue_type_check_legacy_repair.sql",
+          "line": 86,
+          "table": "review_queue_items"
+        }
+      ],
+      "file": "migrations/kai_sprint2_p14_12_review_queue_type_check_legacy_repair.sql",
+      "last_git_commit": "c219fdbe0a2bf06eda7d9100c67213eb7b2d7c55\t2026-09-14T10:44:43-07:00\tFix legacy review queue type constraint drift",
+      "paired_rollback": "migrations/kai_sprint2_p14_12_review_queue_type_check_legacy_repair.rollback.sql",
+      "paired_rollback_exists": true,
+      "role": "OFF_PATH_NONROLLBACK_CANDIDATE",
+      "sha256": "09c38a18ef8699c2a6c4d6652bb5fc7579f3a15441c3b8d70b58c47e144937f6",
+      "source_preview_first_100_lines": "BEGIN;\n\nDO $$\nBEGIN\n  IF to_regclass('kai.review_queue_items') IS NULL THEN\n    RAISE EXCEPTION 'kai.review_queue_items is required before P14-12 review-queue queue_type legacy-constraint repair migration';\n  END IF;\nEND $$;\n\n-- P14-12 scope (bounded schema-drift repair only): a USER_CONFIRMED\n-- production snapshot showed kai.review_queue_items simultaneously carrying\n-- an obsolete, pre-P1-06 review_queue_items_queue_type_check fixed allowlist\n-- alongside the canonical, validated P1-06 review_queue_items_p1_06_queue_type_check\n-- contract (already widened by BR-03A to admit board_reporting_candidate_review)\n-- and the validated BR-03B Board review lifecycle contract. PostgreSQL CHECK\n-- constraints are cumulative (ANDed), so the obsolete allowlist - which does\n-- not include board_reporting_candidate_review - blocks every Board\n-- candidate review-queue insert even though the newer, named contracts\n-- already admit it. This is the same class of proven production drift P14-10\n-- repaired for review_queue_items_target_object_type_check: an unnamed-by-the-\n-- application, pre-P1-06 CHECK left in place when the canonical P1-06 table\n-- contract was introduced onto the pre-existing shared production table\n-- (migrations/kai_sprint2_legacy_generation_cutover_20260817.sql section 4\n-- only ever adds the canonical P1-06 constraints by name; it never asserts\n-- anything about, and never drops, this older constraint). No committed\n-- migration in this repository has ever dropped\n-- review_queue_items_queue_type_check.\n--\n-- This migration repairs that one proven, named drift only. It does not\n-- widen any vocabulary beyond what review_queue_items_p1_06_queue_type_check\n-- (as BR-03A last defined it) already authorizes, does not touch any other\n-- constraint, and does not modify data rows.\n\n-- Fail closed unless the canonical, validated P1-06 queue_type contract is\n-- present and already admits board_reporting_candidate_review - proving the\n-- Board-aware schema prerequisite by inspection of the live predicate, the\n-- same discipline BR-03B established for this same constraint.\nDO $$\nDECLARE\n  existing_predicate text;\nBEGIN\n  SELECT pg_get_expr(c.conbin, c.conrelid)\n    INTO existing_predicate\n    FROM pg_constraint c\n    JOIN pg_class r ON r.oid = c.conrelid\n    JOIN pg_namespace n ON n.oid = r.relnamespace\n   WHERE n.nspname = 'kai'\n     AND r.relname = 'review_queue_items'\n     AND c.conname = 'review_queue_items_p1_06_queue_type_check'\n     AND c.convalidated;\n\n  IF existing_predicate IS NULL THEN\n    RAISE EXCEPTION 'validated kai.review_queue_items_p1_06_queue_type_check is required before P14-12';\n  END IF;\n\n  IF position('''board_reporting_candidate_review''' IN existing_predicate) = 0 THEN\n    RAISE EXCEPTION 'kai.review_queue_items_p1_06_queue_type_check does not admit board_reporting_candidate_review; refusing P14-12';\n  END IF;\nEND $$;\n\n-- Fail closed unless the validated BR-03B Board review lifecycle contract is\n-- present, detected structurally (predicate shape), not by name, because the\n-- BR-03B verifier already established this constraint's catalog name may be\n-- truncated by PostgreSQL's 63-byte identifier limit.\nDO $$\nBEGIN\n  IF NOT EXISTS (\n    SELECT 1 FROM pg_constraint c\n     WHERE c.conrelid = 'kai.review_queue_items'::regclass\n       AND c.contype = 'c'\n       AND c.convalidated\n       AND pg_get_constraintdef(c.oid) LIKE '%board_reporting_candidate_review%'\n       AND pg_get_constraintdef(c.oid) LIKE '%target_object_type = ''board_reporting_candidate''%'\n       AND pg_get_constraintdef(c.oid) LIKE '%queue_status = ''open''%'\n       AND pg_get_constraintdef(c.oid) LIKE '%queue_status = ''in_progress''%'\n       AND pg_get_constraintdef(c.oid) LIKE '%queue_status = ''resolved''%'\n       AND pg_get_constraintdef(c.oid) LIKE '%review_status = ''resolved''%'\n  ) THEN\n    RAISE EXCEPTION 'the validated BR-03B Board review lifecycle contract check is required before P14-12';\n  END IF;\nEND $$;\n\n-- The repair itself: remove ONLY the obsolete legacy allowlist. Safe and a\n-- no-op if already absent (a database that never carried it, or a second run\n-- of this migration).\nALTER TABLE kai.review_queue_items\n  DROP CONSTRAINT IF EXISTS review_queue_items_queue_type_check;\n\nCOMMIT;",
+      "tracked_references": [
+        "scripts/kai-sprint2-p14-12-review-queue-type-check-legacy-repair-local-postgres.js:168:  psqlFile(\"migrations/kai_sprint2_p14_12_review_queue_type_check_legacy_repair.sql\");",
+        "scripts/kai-sprint2-p14-12-review-queue-type-check-legacy-repair-local-postgres.js:171:  psqlFile(\"migrations/kai_sprint2_p14_12_review_queue_type_check_legacy_repair.sql\");"
+      ]
+    },
+    {
+      "affected_tables": [
+        "review_queue_items"
+      ],
+      "dynamic_sql_candidate": true,
+      "effect_count": 4,
+      "effects": [
+        {
+          "candidate_effect": "ALTER_TABLE",
+          "file": "migrations/kai_sprint2_p1_06_review_status_column_repair.sql",
+          "line": 188,
+          "table": "review_queue_items"
+        },
+        {
+          "candidate_effect": "ALTER_TABLE",
+          "file": "migrations/kai_sprint2_p1_06_review_status_column_repair.sql",
+          "line": 191,
+          "table": "review_queue_items"
+        },
+        {
+          "candidate_effect": "ALTER_TABLE",
+          "file": "migrations/kai_sprint2_p1_06_review_status_column_repair.sql",
+          "line": 195,
+          "table": "review_queue_items"
+        },
+        {
+          "candidate_effect": "ALTER_TABLE",
+          "file": "migrations/kai_sprint2_p1_06_review_status_column_repair.sql",
+          "line": 198,
+          "table": "review_queue_items"
+        }
+      ],
+      "file": "migrations/kai_sprint2_p1_06_review_status_column_repair.sql",
+      "last_git_commit": "801675bbc24f5a94e198bf4173fae349b4fe2e3d\t2026-08-19T09:41:18-07:00\tKAI finalize source promotion review cockpit and schema repair",
+      "paired_rollback": "migrations/kai_sprint2_p1_06_review_status_column_repair.rollback.sql",
+      "paired_rollback_exists": true,
+      "role": "OFF_PATH_NONROLLBACK_CANDIDATE",
+      "sha256": "9b4cdb6674a5f9091695550c0223cea16705a1ae10f7bae0d43c4489b5ff8571",
+      "source_preview_first_100_lines": "BEGIN;\n\n-- P1-06 corrective repair: some already-existing kai.review_queue_items rows\n-- were created (outside this repository's own CREATE TABLE IF NOT EXISTS path)\n-- while review_status was still kai.review_status_enum-backed. The shared\n-- kai.review_status_enum never gained a 'resolved' label, so the P1-08\n-- resolved/resolved terminal write (postgresSourcePromotionRepository.js\n-- resolveReviewQueueItemIfCurrent) fails with 22P02 against that starting\n-- shape. This migration converts review_status to a column-local text type\n-- with its own CHECK vocabulary, exactly mirroring the already-reviewed\n-- column definition this repository's own P1-06 migration creates for a\n-- fresh table. It does not touch the shared kai.review_status_enum and does\n-- not alter any other column, table, or review-status semantics.\n--\n-- Fail-fast locking: refuse rather than wait indefinitely for the DDL lock\n-- if a concurrent session already holds one on this table.\nLOCK TABLE ONLY kai.review_queue_items\n  IN ACCESS EXCLUSIVE MODE NOWAIT;\n\n-- This migration recognizes exactly two starting states and fails closed on\n-- any other: (A) the diagnosed legacy enum-backed contract, which it repairs,\n-- and (B) the exact already-repaired text contract, which it leaves\n-- untouched and validates as a converged no-op. Because the mutation itself\n-- must be conditional on which state is found, it runs via EXECUTE inside\n-- this single guarded DO block rather than as bare top-level DDL.\nDO $review_status_repair$\nDECLARE\n  v_relkind \"char\";\n  v_ispartition boolean;\n  v_attnum smallint;\n  v_atttypid oid;\n  v_atttypname text;\n  v_atttypnamespace text;\n  v_atttyptype \"char\";\n  v_attnotnull boolean;\n  v_attidentity \"char\";\n  v_attgenerated \"char\";\n  v_defexpr text;\n  v_enum_type_oid oid;\n  v_has_resolved_label boolean;\n  v_non_vocab_count bigint;\n  v_conflicting_check_count integer;\n  v_name_collision_count integer;\n  v_invalid_index_count integer;\n  v_governing_check_count integer;\n  v_check_name text;\n  v_check_validated boolean;\n  v_vocab_ok boolean;\n  v_state text;\nBEGIN\n  -- Guard 1 (common to both recognized states): kai.review_queue_items\n  -- exists as an ordinary, non-partition table.\n  SELECT r.relkind, r.relispartition\n    INTO v_relkind, v_ispartition\n    FROM pg_class r\n    JOIN pg_namespace n ON n.oid = r.relnamespace\n   WHERE n.nspname = 'kai' AND r.relname = 'review_queue_items';\n\n  IF v_relkind IS NULL THEN\n    RAISE EXCEPTION 'kai.review_queue_items does not exist; refusing the P1-06 review_status repair';\n  END IF;\n  IF v_relkind <> 'r' OR v_ispartition THEN\n    RAISE EXCEPTION 'kai.review_queue_items is not an ordinary non-partition table (relkind=%, relispartition=%); refusing the P1-06 review_status repair', v_relkind, v_ispartition;\n  END IF;\n\n  SELECT a.attnum, a.atttypid, ty.typname, tn.nspname, ty.typtype,\n         a.attnotnull, a.attidentity, a.attgenerated,\n         pg_get_expr(d.adbin, d.adrelid)\n    INTO v_attnum, v_atttypid, v_atttypname, v_atttypnamespace, v_atttyptype,\n         v_attnotnull, v_attidentity, v_attgenerated, v_defexpr\n    FROM pg_attribute a\n    JOIN pg_class r ON r.oid = a.attrelid\n    JOIN pg_namespace n ON n.oid = r.relnamespace\n    JOIN pg_type ty ON ty.oid = a.atttypid\n    JOIN pg_namespace tn ON tn.oid = ty.typnamespace\n    LEFT JOIN pg_attrdef d ON d.adrelid = r.oid AND d.adnum = a.attnum\n   WHERE n.nspname = 'kai' AND r.relname = 'review_queue_items'\n     AND a.attname = 'review_status' AND NOT a.attisdropped;\n\n  IF v_attnum IS NULL THEN\n    RAISE EXCEPTION 'kai.review_queue_items.review_status does not exist; refusing the P1-06 review_status repair';\n  END IF;\n\n  -- Classify the starting state by the column's actual type. Anything that\n  -- is neither the diagnosed legacy enum contract nor the exact repaired\n  -- text contract fails closed rather than being treated as convergence.\n  IF v_atttypname = 'review_status_enum' AND v_atttypnamespace = 'kai' AND v_atttyptype = 'e' THEN\n    v_state := 'legacy';\n  ELSIF v_atttypname = 'text' AND v_atttypnamespace = 'pg_catalog' THEN\n    v_state := 'repaired';\n  ELSE\n    RAISE EXCEPTION 'kai.review_queue_items.review_status is neither the diagnosed legacy enum contract (kai.review_status_enum) nor the exact repaired text contract (found %.%, typtype=%); refusing the P1-06 review_status repair', v_atttypnamespace, v_atttypname, v_atttyptype;\n  END IF;\n\n  IF v_state = 'legacy' THEN\n    -- ================================================================\n    -- STATE A: LEGACY-COMPATIBLE. Apply the already-accepted\n    -- column-local forward repair.\n    -- ================================================================\n    IF NOT v_attnotnull THEN",
+      "tracked_references": [
+        "__tests__/kai-sprint2-p1-06-review-status-column-repair-schema-contract.spec.js:5:const migrationSource = readFileSync(\"migrations/kai_sprint2_p1_06_review_status_column_repair.sql\", \"utf8\");",
+        "scripts/kai-sprint2-p1-06-review-status-repair-local-postgres.js:24:const FORWARD_MIGRATION = \"migrations/kai_sprint2_p1_06_review_status_column_repair.sql\";"
+      ]
+    }
+  ],
+  "rollback_candidate_file_count": 60,
+  "rollback_files": [
+    {
+      "dynamic_sql_candidate": false,
+      "effect_count": 1,
+      "file": "migrations/kai_sprint2_a1_1_impact_outcome_context.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_a1_1_impact_outcome_context.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "64ade15629fd7f992fddd521de469e471abf27d64840571e10e2d05c099b05ec"
+    },
+    {
+      "dynamic_sql_candidate": false,
+      "effect_count": 2,
+      "file": "migrations/kai_sprint2_a1_2_impact_evaluation_framework_and_criteria.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_a1_2_impact_evaluation_framework_and_criteria.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "91e7a11c76cb3c526a212aeaf1088af92bcdf7396f56819352bda1b74ede32c3"
+    },
+    {
+      "dynamic_sql_candidate": false,
+      "effect_count": 3,
+      "file": "migrations/kai_sprint2_a1_3_impact_evaluations_and_results.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_a1_3_impact_evaluations_and_results.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "4ae7a55d52d0baf54d362a6c5a85aab1ab1c6e76ec32fde36e6d2a48ce5ed4fe"
+    },
+    {
+      "dynamic_sql_candidate": false,
+      "effect_count": 3,
+      "file": "migrations/kai_sprint2_a1_4_impact_evaluation_result_provenance_links.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_a1_4_impact_evaluation_result_provenance_links.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "9b435ec1a92b8ac29a81150eacf068dd053d13ca4e9d47c404364b50bf60f4f2"
+    },
+    {
+      "dynamic_sql_candidate": false,
+      "effect_count": 5,
+      "file": "migrations/kai_sprint2_b1_1_baseline_impact_requirements.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_b1_1_baseline_impact_requirements.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "7b2dc7328a1830357fbe01f5b1eb4311b0deba69b86508f5e0065aeb677c0779"
+    },
+    {
+      "dynamic_sql_candidate": true,
+      "effect_count": 4,
+      "file": "migrations/kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "8ac455bf7fa35d1212e7a087c9461199d816081258a451fa6479e5f9d3892cda"
+    },
+    {
+      "dynamic_sql_candidate": false,
+      "effect_count": 1,
+      "file": "migrations/kai_sprint2_board_reporting_candidate_export_manifest_foundation.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_board_reporting_candidate_export_manifest_foundation.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "a7c61ac960f204a5b6d94df4a14de405e28b95f9213adf305b01142589595ebf"
+    },
+    {
+      "dynamic_sql_candidate": false,
+      "effect_count": 2,
+      "file": "migrations/kai_sprint2_br_02_board_reporting_candidate_foundation.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_br_02_board_reporting_candidate_foundation.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "576c0dd64bf64bd3ddeb2449eafc662e58272acc76fae7a2ffd3b8206bbbcfac"
+    },
+    {
+      "dynamic_sql_candidate": false,
+      "effect_count": 1,
+      "file": "migrations/kai_sprint2_br_03a_board_reporting_candidate_review_request.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_br_03a_board_reporting_candidate_review_request.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "380f5bdd83d60e568406496370a6f31734136d6bdbb54cbe6d335911e0d76b1a"
+    },
+    {
+      "dynamic_sql_candidate": false,
+      "effect_count": 1,
+      "file": "migrations/kai_sprint2_br_03b_board_reporting_candidate_review_lifecycle.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_br_03b_board_reporting_candidate_review_lifecycle.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "32e4f3499aa44192ab15f321f242cd5a5f473aae0241b786f5b09329538e0a8e"
+    },
+    {
+      "dynamic_sql_candidate": false,
+      "effect_count": 1,
+      "file": "migrations/kai_sprint2_br_04_board_reporting_candidate_human_authority_decision_ledger.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_br_04_board_reporting_candidate_human_authority_decision_ledger.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "b13f16f815b893fbacc5cf4a8d06daf4ad0c1782fdd6ae9ca0750ffd07cfc5af"
+    },
+    {
+      "dynamic_sql_candidate": false,
+      "effect_count": 4,
+      "file": "migrations/kai_sprint2_c2_1_requirement_assessment_persistence.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_c2_1_requirement_assessment_persistence.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "651dad868a833754eeae67011c94cc2d5657a21563190862dc4974cf5b7eec53"
+    },
+    {
+      "dynamic_sql_candidate": false,
+      "effect_count": 3,
+      "file": "migrations/kai_sprint2_c3_a3_requirement_assessment_decision_gap_provenance.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_c3_a3_requirement_assessment_decision_gap_provenance.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "88e7301c9a9b883a604ee6cd35a09ad4fda428f46854417bd692580e1225ebd4"
+    },
+    {
+      "dynamic_sql_candidate": false,
+      "effect_count": 3,
+      "file": "migrations/kai_sprint2_c3_a4_requirement_assessment_provenance_extension.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_c3_a4_requirement_assessment_provenance_extension.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "01bbe8fde507e7e364e41cfcca31cd8c2295256004f985c7820f1079df4fd026"
+    },
+    {
+      "dynamic_sql_candidate": false,
+      "effect_count": 3,
+      "file": "migrations/kai_sprint2_gate_a_p0_policy_decision_replay.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_gate_a_p0_policy_decision_replay.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "397d68cc06a2c369dfc796c7e46ce7364d793a81d85772c72169fcb257e36c7d"
+    },
+    {
+      "dynamic_sql_candidate": true,
+      "effect_count": 0,
+      "file": "migrations/kai_sprint2_gate_a_p0_required_index_forward_repair.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_gate_a_p0_required_index_forward_repair.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "8825904c3b4bc2faba95be7413426852078a880b501c112a1fda9c8d40acaddd"
+    },
+    {
+      "dynamic_sql_candidate": false,
+      "effect_count": 1,
+      "file": "migrations/kai_sprint2_gate_a_p0_upload_lifecycle.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_gate_a_p0_upload_lifecycle.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "4ba8dfa423cb9120c9ed4e3b42471f0b58f93dcd070f0ca144701a58823ccb43"
+    },
+    {
+      "dynamic_sql_candidate": true,
+      "effect_count": 0,
+      "file": "migrations/kai_sprint2_gate_a_p0_upload_lifecycle_enforcement_forward_repair.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_gate_a_p0_upload_lifecycle_enforcement_forward_repair.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "98844247ddba9f50125303c6f6a5faf249c49a5cb88115b4903890dd444bba54"
+    },
+    {
+      "dynamic_sql_candidate": true,
+      "effect_count": 5,
+      "file": "migrations/kai_sprint2_generated_content_review_start_audit_contract.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_generated_content_review_start_audit_contract.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "98e44b63ada5979a6ff042c3fc435c152d6c73861753e24d05b4765c772e84eb"
+    },
+    {
+      "dynamic_sql_candidate": false,
+      "effect_count": 1,
+      "file": "migrations/kai_sprint2_gk_organization_tenant_binding.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_gk_organization_tenant_binding.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "d59ec9c3a127de2240bccde50d89009cfc9ae3371e5d8037c052fe0c0d1614ba"
+    },
+    {
+      "dynamic_sql_candidate": true,
+      "effect_count": 16,
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+      "paired_forward_active": false,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_OFF_PATH_SQL",
+      "sha256": "12a775ec2fbea3f5195bd1f537ca34ea72f2addd39192b9301d323984d8f7d0e"
+    },
+    {
+      "dynamic_sql_candidate": false,
+      "effect_count": 2,
+      "file": "migrations/kai_sprint2_p13_01_impact_narrative_content_type.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_p13_01_impact_narrative_content_type.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "d51841bcf5cf781c0a879e709bd33bd0359457108147d94faf1d49f738654861"
+    },
+    {
+      "dynamic_sql_candidate": false,
+      "effect_count": 2,
+      "file": "migrations/kai_sprint2_p14_01_generation_run_engagement_binding.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_p14_01_generation_run_engagement_binding.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "09c490ab8387b4a644eb72fd5bf4149217a0133f1ad474dbaa1f7d16c2edf68f"
+    },
+    {
+      "dynamic_sql_candidate": false,
+      "effect_count": 1,
+      "file": "migrations/kai_sprint2_p14_02_grant_response_packet_export_identity_foundation.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_p14_02_grant_response_packet_export_identity_foundation.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "7513c8199baf13fe97861c0ee8cf7c85958cad0a3500eb54cb57f0ebf8a3b168"
+    },
+    {
+      "dynamic_sql_candidate": false,
+      "effect_count": 2,
+      "file": "migrations/kai_sprint2_p14_03_grant_response_packet_export_candidate_foundation.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_p14_03_grant_response_packet_export_candidate_foundation.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "56ca9d1fabb1927d246db7b0e9a82ca81c02cb74552e77e346a9e9703c38be9a"
+    },
+    {
+      "dynamic_sql_candidate": false,
+      "effect_count": 1,
+      "file": "migrations/kai_sprint2_p14_05_grant_response_packet_export_review_binding.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_p14_05_grant_response_packet_export_review_binding.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "b1fe365316273e26689d56ae0ee3ea61652bed7b672e8ca16f0abf5da62ca12b"
+    },
+    {
+      "dynamic_sql_candidate": false,
+      "effect_count": 1,
+      "file": "migrations/kai_sprint2_p14_07_b1_grant_response_packet_human_authority_decision_ledger.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_p14_07_b1_grant_response_packet_human_authority_decision_ledger.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "d84291defb71a42737d401abee291626f60a01074e268caf7dad8a334b9a0a81"
+    },
+    {
+      "dynamic_sql_candidate": false,
+      "effect_count": 1,
+      "file": "migrations/kai_sprint2_p14_08_a_grant_response_packet_export_manifest_foundation.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_p14_08_a_grant_response_packet_export_manifest_foundation.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "7a8978124cae23b337e77ae0c01291a24f3b3fd2a05c3cdaad965837092057a0"
+    },
+    {
+      "dynamic_sql_candidate": false,
+      "effect_count": 1,
+      "file": "migrations/kai_sprint2_p14_12_review_queue_type_check_legacy_repair.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_p14_12_review_queue_type_check_legacy_repair.sql",
+      "paired_forward_active": false,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_OFF_PATH_SQL",
+      "sha256": "3a42cf08ab47a557e8cc1394c638f1b0ac9ee255039d8502986cf72eac6f840a"
+    },
+    {
+      "dynamic_sql_candidate": false,
+      "effect_count": 2,
+      "file": "migrations/kai_sprint2_p14_14_generated_content_type_evolution.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_p14_14_generated_content_type_evolution.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "5da4da7ba96ce2f0d7f32d4ae9506c42398e966b90782748ca8e648ca8d0c393"
+    },
+    {
+      "dynamic_sql_candidate": false,
+      "effect_count": 1,
+      "file": "migrations/kai_sprint2_p14_15_export_candidate_content_type_evolution.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_p14_15_export_candidate_content_type_evolution.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "f55206c885f7e434adfba5da294257ab75c496c2b94521bebbf499f9c10d69f6"
+    },
+    {
+      "dynamic_sql_candidate": false,
+      "effect_count": 7,
+      "file": "migrations/kai_sprint2_p1_04_data_dictionary_and_quality.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_p1_04_data_dictionary_and_quality.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "65d21ac5de9a8236c76ba2548c25be7ec5551316fb181a9aa62668e7c92224fb"
+    },
+    {
+      "dynamic_sql_candidate": false,
+      "effect_count": 3,
+      "file": "migrations/kai_sprint2_p1_05_intake_sensitivity_profile.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_p1_05_intake_sensitivity_profile.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "17bbbae002092554637acd228d82a1c7c772de3cba615edce1bf9e5e6a30c28c"
+    },
+    {
+      "dynamic_sql_candidate": false,
+      "effect_count": 3,
+      "file": "migrations/kai_sprint2_p1_06_review_queue.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_p1_06_review_queue.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "b2d8175e6da7f63b5cac8756f63d991469841d78f564bb540a3207587c1f5f7d"
+    },
+    {
+      "dynamic_sql_candidate": true,
+      "effect_count": 4,
+      "file": "migrations/kai_sprint2_p1_06_review_status_column_repair.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_p1_06_review_status_column_repair.sql",
+      "paired_forward_active": false,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_OFF_PATH_SQL",
+      "sha256": "ac95d41d338399aadaccd9c82e75562aaab7b6b66cbf8a3b8c24674f00034f70"
+    },
+    {
+      "dynamic_sql_candidate": false,
+      "effect_count": 4,
+      "file": "migrations/kai_sprint2_p1_07_intake_source_candidate.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_p1_07_intake_source_candidate.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "0c80b854b38c1a60b75d92ceb83a6825e4301f62b6b97e2bb212446d9c846a66"
+    },
+    {
+      "dynamic_sql_candidate": false,
+      "effect_count": 10,
+      "file": "migrations/kai_sprint2_p1_08_source_promotion.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_p1_08_source_promotion.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "c42186d54b0e6a690a252af41463f3546b470fce8f606ce3c586fd2e7fa8b1d4"
+    },
+    {
+      "dynamic_sql_candidate": false,
+      "effect_count": 5,
+      "file": "migrations/kai_sprint2_p1_parser_run_and_file_profile.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_p1_parser_run_and_file_profile.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "c0a99bdecba4aa8a123394562023cbff71e3efe38a6f6c5e0c5cb2cf5355141a"
+    },
+    {
+      "dynamic_sql_candidate": false,
+      "effect_count": 6,
+      "file": "migrations/kai_sprint2_p2_01_evidence_lineage.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_p2_01_evidence_lineage.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "d08a8e701c9ac3160701260cf0b7c93468729d9c80f64e901f865ec1797f32d7"
+    },
+    {
+      "dynamic_sql_candidate": false,
+      "effect_count": 5,
+      "file": "migrations/kai_sprint2_p2_03_claim_proposal.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_p2_03_claim_proposal.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "1e3e641d44811b22aec5b3ff14c1bc6d1ec2ff1d4429193b56ad445cdcb414e0"
+    },
+    {
+      "dynamic_sql_candidate": false,
+      "effect_count": 5,
+      "file": "migrations/kai_sprint2_p2_04_claim_gap_followup.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_p2_04_claim_gap_followup.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "ebc363b6c17e1f85aa3cb4e64524ce6bfe34e4b343c91de467355f659b4e141b"
+    },
+    {
+      "dynamic_sql_candidate": false,
+      "effect_count": 4,
+      "file": "migrations/kai_sprint2_p2_05_conflict_review_candidate.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_p2_05_conflict_review_candidate.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "bd8b504eb2c87b7d31a2b1489ece32baaea898100af810aba10bd3287889d393"
+    },
+    {
+      "dynamic_sql_candidate": false,
+      "effect_count": 5,
+      "file": "migrations/kai_sprint2_p2_09_human_review_internal_approval.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_p2_09_human_review_internal_approval.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "4a017b70728610afb6af7370c3fd1b379d1b7828562a6f5f0e71880be00d0710"
+    },
+    {
+      "dynamic_sql_candidate": true,
+      "effect_count": 13,
+      "file": "migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "fc0f313cf6707af967f0e1f9d1f968778113dfdf927ca4ab52649bac9c69521d"
+    },
+    {
+      "dynamic_sql_candidate": false,
+      "effect_count": 3,
+      "file": "migrations/kai_sprint2_p2_10_coverage_review_decision.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_p2_10_coverage_review_decision.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "adea81515419dbfe000191f82dd0a5f2052dd5305670cfcd7c7db4cd36ba001d"
+    },
+    {
+      "dynamic_sql_candidate": true,
+      "effect_count": 4,
+      "file": "migrations/kai_sprint2_p2_10_funder_coverage_authority.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_p2_10_funder_coverage_authority.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "fec75704fc28b4c78d7f08298d994ce0e7c7d6f266d89aa8c6c7f3a377918384"
+    },
+    {
+      "dynamic_sql_candidate": true,
+      "effect_count": 3,
+      "file": "migrations/kai_sprint2_p2_10_public_coverage_authority.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_p2_10_public_coverage_authority.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "d3c335047c60d2e02ad6894c46a3760ce5d365fac2b28d857e6326376058f150"
+    },
+    {
+      "dynamic_sql_candidate": false,
+      "effect_count": 3,
+      "file": "migrations/kai_sprint2_p2_11_client_followup_completion.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_p2_11_client_followup_completion.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "a25aa2be6894d95e5b5cb2b027e9cfe2c4bd4980aedd0c037313b1add74cd34b"
+    },
+    {
+      "dynamic_sql_candidate": false,
+      "effect_count": 8,
+      "file": "migrations/kai_sprint2_p2_12_human_review_decision_ledger.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_p2_12_human_review_decision_ledger.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "46e640776b1f54597d94dcbe7fb19f586272ed8683daab6ac46e59aee66f9b18"
+    },
+    {
+      "dynamic_sql_candidate": false,
+      "effect_count": 7,
+      "file": "migrations/kai_sprint2_p3_01_generated_content_drafts.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_p3_01_generated_content_drafts.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "a7b574fbbc5e5f6c06c0260f8673d05ef0fb8d7ac1f020188a6160b91d2cfe56"
+    },
+    {
+      "dynamic_sql_candidate": false,
+      "effect_count": 3,
+      "file": "migrations/kai_sprint2_p3_04_generated_content_review_completion.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_p3_04_generated_content_review_completion.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "c4ab77467ed7330b9f63402a0f2ac0f0bbaaf18657f9846490e68388712d0be0"
+    },
+    {
+      "dynamic_sql_candidate": true,
+      "effect_count": 6,
+      "file": "migrations/kai_sprint2_p3_05_export_review_request.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_p3_05_export_review_request.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "c767ba74d77f5bb09151e01f65d5f2656c2926414ac8be7cf498a4cf0d9909c0"
+    },
+    {
+      "dynamic_sql_candidate": true,
+      "effect_count": 6,
+      "file": "migrations/kai_sprint2_p3_09_export_review_start.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_p3_09_export_review_start.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "a4b80d44855848a49becf0efff90545b0fd09fb8e96993a86dbc52081e89d2d8"
+    },
+    {
+      "dynamic_sql_candidate": true,
+      "effect_count": 6,
+      "file": "migrations/kai_sprint2_p3_13_export_review_completion.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_p3_13_export_review_completion.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "850169b5a91a40b33a0172c6cac3ca88c92fc26ee2e2ae87e9c85caa963529c0"
+    },
+    {
+      "dynamic_sql_candidate": true,
+      "effect_count": 9,
+      "file": "migrations/kai_sprint2_p3_16_export_candidate_foundation.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_p3_16_export_candidate_foundation.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "7f466fc13610c1aea343c365b9a7f1d1cac358d68100e402b7df2bac197ec6ad"
+    },
+    {
+      "dynamic_sql_candidate": true,
+      "effect_count": 4,
+      "file": "migrations/kai_sprint2_p3_17_authority_audit_gate_a_operation_repair.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_p3_17_authority_audit_gate_a_operation_repair.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "971d806f2f9c2a74132aaa369c570837b1a51a3b8a842ae5dab89eb558bea4a4"
+    },
+    {
+      "dynamic_sql_candidate": false,
+      "effect_count": 1,
+      "file": "migrations/kai_sprint2_p3_17_human_authority_decision_ledger.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_p3_17_human_authority_decision_ledger.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "caceb74ff9766d09a3b9b18d77366ad2b82310ad64e0a053d5778d21e4eebf0d"
+    },
+    {
+      "dynamic_sql_candidate": false,
+      "effect_count": 1,
+      "file": "migrations/kai_sprint2_p3_19_export_manifest_foundation.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_p3_19_export_manifest_foundation.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "36c71268f2735633bd0d911b2929f388bf420e22edfdd2b0e47786af71fe6b22"
+    },
+    {
+      "dynamic_sql_candidate": false,
+      "effect_count": 3,
+      "file": "migrations/kai_sprint2_p3_20_export_manifest_review_binding.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_p3_20_export_manifest_review_binding.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "f971614a3acbb93c726826145a86cec416118de432084f03a7c46116a811d665"
+    },
+    {
+      "dynamic_sql_candidate": false,
+      "effect_count": 3,
+      "file": "migrations/kai_sprint2_package_2a_engagement_requirement_sets_authority.rollback.sql",
+      "paired_forward": "migrations/kai_sprint2_package_2a_engagement_requirement_sets_authority.sql",
+      "paired_forward_active": true,
+      "paired_forward_exists": true,
+      "role": "ROLLBACK_FOR_ACTIVE_MIGRATION",
+      "sha256": "2132eaaa9c9ee520bfd941372387ff598bc0003d62b557345c8750317dfc4143"
+    }
+  ],
+  "rollback_role_counts": {
+    "ROLLBACK_FOR_ACTIVE_MIGRATION": 57,
+    "ROLLBACK_FOR_OFF_PATH_SQL": 3
+  }
+}

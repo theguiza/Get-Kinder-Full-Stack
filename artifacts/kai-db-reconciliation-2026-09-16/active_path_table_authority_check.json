@@ -1,0 +1,1659 @@
+{
+  "active_migration_count": 60,
+  "active_migration_owned_tables": 66,
+  "bootstrap_base_with_migration_evolution": 1,
+  "bootstrap_only_foundation": 7,
+  "expected_table_count": 74,
+  "off_path_ddl_candidate_count": 271,
+  "off_path_ddl_candidates": [
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_a1_1_impact_outcome_context.rollback.sql",
+      "line": 7,
+      "table": "impact_outcome_contexts"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_a1_2_impact_evaluation_framework_and_criteria.rollback.sql",
+      "line": 4,
+      "table": "impact_evaluation_criteria"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_a1_2_impact_evaluation_framework_and_criteria.rollback.sql",
+      "line": 7,
+      "table": "impact_evaluation_framework_versions"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_a1_3_impact_evaluations_and_results.rollback.sql",
+      "line": 4,
+      "table": "impact_evaluation_results"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_a1_3_impact_evaluations_and_results.rollback.sql",
+      "line": 7,
+      "table": "impact_evaluations"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_a1_3_impact_evaluations_and_results.rollback.sql",
+      "line": 9,
+      "table": "impact_evaluation_criteria"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_a1_4_impact_evaluation_result_provenance_links.rollback.sql",
+      "line": 5,
+      "table": "impact_evaluation_result_claim_links"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_a1_4_impact_evaluation_result_provenance_links.rollback.sql",
+      "line": 9,
+      "table": "impact_evaluation_result_evidence_links"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_a1_4_impact_evaluation_result_provenance_links.rollback.sql",
+      "line": 11,
+      "table": "impact_evaluation_results"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_b1_1_baseline_impact_requirements.rollback.sql",
+      "line": 5,
+      "table": "engagement_requirement_sets"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_b1_1_baseline_impact_requirements.rollback.sql",
+      "line": 8,
+      "table": "requirements"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_b1_1_baseline_impact_requirements.rollback.sql",
+      "line": 11,
+      "table": "requirement_sets"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_b1_1_baseline_impact_requirements.rollback.sql",
+      "line": 14,
+      "table": "requirement_framework_versions"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_b1_1_baseline_impact_requirements.rollback.sql",
+      "line": 18,
+      "table": "requirement_sources"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger.rollback.sql",
+      "line": 3,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger.rollback.sql",
+      "line": 29,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger.rollback.sql",
+      "line": 38,
+      "table": "intake_sensitivity_review_decisions"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger.rollback.sql",
+      "line": 40,
+      "table": "intake_sensitivity_profiles"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_board_reporting_candidate_export_manifest_foundation.rollback.sql",
+      "line": 18,
+      "table": "board_reporting_candidate_export_manifests"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_br_02_board_reporting_candidate_foundation.rollback.sql",
+      "line": 8,
+      "table": "board_reporting_candidate_members"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_br_02_board_reporting_candidate_foundation.rollback.sql",
+      "line": 9,
+      "table": "board_reporting_candidates"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_br_03a_board_reporting_candidate_review_request.rollback.sql",
+      "line": 18,
+      "table": "review_queue_items"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_br_03b_board_reporting_candidate_review_lifecycle.rollback.sql",
+      "line": 22,
+      "table": "review_queue_items"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_br_04_board_reporting_candidate_human_authority_decision_ledger.rollback.sql",
+      "line": 19,
+      "table": "board_reporting_candidate_human_authority_decisions"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_c2_1_requirement_assessment_persistence.rollback.sql",
+      "line": 5,
+      "table": "requirement_assessment_evaluation_result_links"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_c2_1_requirement_assessment_persistence.rollback.sql",
+      "line": 9,
+      "table": "requirement_assessment_claim_links"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_c2_1_requirement_assessment_persistence.rollback.sql",
+      "line": 13,
+      "table": "requirement_assessment_evidence_links"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_c2_1_requirement_assessment_persistence.rollback.sql",
+      "line": 21,
+      "table": "requirement_assessments"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_c3_a3_requirement_assessment_decision_gap_provenance.rollback.sql",
+      "line": 11,
+      "table": "ra_gap_links"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_c3_a3_requirement_assessment_decision_gap_provenance.rollback.sql",
+      "line": 15,
+      "table": "ra_claim_review_decision_links"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_c3_a3_requirement_assessment_decision_gap_provenance.rollback.sql",
+      "line": 19,
+      "table": "ra_evidence_review_decision_links"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_c3_a4_requirement_assessment_provenance_extension.rollback.sql",
+      "line": 8,
+      "table": "ra_conflict_resolution_links"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_c3_a4_requirement_assessment_provenance_extension.rollback.sql",
+      "line": 18,
+      "table": "ra_source_promotion_links"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_c3_a4_requirement_assessment_provenance_extension.rollback.sql",
+      "line": 28,
+      "table": "ra_outcome_context_links"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_gate_a_p0_policy_decision_replay.rollback.sql",
+      "line": 6,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_gate_a_p0_policy_decision_replay.rollback.sql",
+      "line": 11,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_gate_a_p0_policy_decision_replay.rollback.sql",
+      "line": 17,
+      "table": "upload_policy_decision_replay"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_gate_a_p0_upload_lifecycle.rollback.sql",
+      "line": 7,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_generated_content_review_start_audit_contract.rollback.sql",
+      "line": 6,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_generated_content_review_start_audit_contract.rollback.sql",
+      "line": 57,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_generated_content_review_start_audit_contract.rollback.sql",
+      "line": 60,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_generated_content_review_start_audit_contract.rollback.sql",
+      "line": 62,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_generated_content_review_start_audit_contract.rollback.sql",
+      "line": 64,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_gk_organization_tenant_binding.rollback.sql",
+      "line": 5,
+      "table": "gk_organization_bindings"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql",
+      "line": 96,
+      "table": "intake_parser_runs"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql",
+      "line": 99,
+      "table": "evidence_items"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql",
+      "line": 100,
+      "table": "source_locators"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql",
+      "line": 101,
+      "table": "intake_promotion_decisions"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql",
+      "line": 102,
+      "table": "source_versions"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql",
+      "line": 103,
+      "table": "sources"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql",
+      "line": 104,
+      "table": "intake_source_candidates"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql",
+      "line": 105,
+      "table": "intake_sensitivity_profiles"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql",
+      "line": 106,
+      "table": "data_quality_findings"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql",
+      "line": 107,
+      "table": "data_dictionary_mappings"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql",
+      "line": 108,
+      "table": "data_dictionary_fields"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql",
+      "line": 109,
+      "table": "data_dictionaries"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql",
+      "line": 110,
+      "table": "intake_file_profiles"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql",
+      "line": 111,
+      "table": "intake_parser_runs"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql",
+      "line": 117,
+      "table": "review_queue_items"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql",
+      "line": 122,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+      "line": 747,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+      "line": 867,
+      "table": "review_queue_items"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+      "line": 882,
+      "table": "review_queue_items"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+      "line": 888,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "CREATE_TABLE",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+      "line": 932,
+      "table": "intake_parser_runs"
+    },
+    {
+      "candidate_effect": "CREATE_INDEX_ON",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+      "line": 985,
+      "table": "intake_parser_runs"
+    },
+    {
+      "candidate_effect": "CREATE_TABLE",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+      "line": 988,
+      "table": "intake_file_profiles"
+    },
+    {
+      "candidate_effect": "CREATE_INDEX_ON",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+      "line": 1025,
+      "table": "intake_file_profiles"
+    },
+    {
+      "candidate_effect": "CREATE_INDEX_ON",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+      "line": 1028,
+      "table": "intake_file_profiles"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+      "line": 1038,
+      "table": "intake_parser_runs"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+      "line": 1083,
+      "table": "intake_file_profiles"
+    },
+    {
+      "candidate_effect": "CREATE_TABLE",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+      "line": 1089,
+      "table": "data_dictionaries"
+    },
+    {
+      "candidate_effect": "CREATE_INDEX_ON",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+      "line": 1117,
+      "table": "data_dictionaries"
+    },
+    {
+      "candidate_effect": "CREATE_TABLE",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+      "line": 1120,
+      "table": "data_dictionary_fields"
+    },
+    {
+      "candidate_effect": "CREATE_INDEX_ON",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+      "line": 1211,
+      "table": "data_dictionary_fields"
+    },
+    {
+      "candidate_effect": "CREATE_TABLE",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+      "line": 1214,
+      "table": "data_dictionary_mappings"
+    },
+    {
+      "candidate_effect": "CREATE_INDEX_ON",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+      "line": 1232,
+      "table": "data_dictionary_mappings"
+    },
+    {
+      "candidate_effect": "CREATE_TABLE",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+      "line": 1235,
+      "table": "data_quality_findings"
+    },
+    {
+      "candidate_effect": "CREATE_INDEX_ON",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+      "line": 1271,
+      "table": "data_quality_findings"
+    },
+    {
+      "candidate_effect": "CREATE_TABLE",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+      "line": 1336,
+      "table": "intake_sensitivity_profiles"
+    },
+    {
+      "candidate_effect": "CREATE_INDEX_ON",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+      "line": 1432,
+      "table": "intake_sensitivity_profiles"
+    },
+    {
+      "candidate_effect": "CREATE_INDEX_ON",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+      "line": 1435,
+      "table": "intake_sensitivity_profiles"
+    },
+    {
+      "candidate_effect": "CREATE_TABLE",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+      "line": 1481,
+      "table": "review_queue_items"
+    },
+    {
+      "candidate_effect": "CREATE_INDEX_ON",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+      "line": 1565,
+      "table": "review_queue_items"
+    },
+    {
+      "candidate_effect": "CREATE_INDEX_ON",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+      "line": 1569,
+      "table": "review_queue_items"
+    },
+    {
+      "candidate_effect": "CREATE_TRIGGER_ON",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+      "line": 1587,
+      "table": "review_queue_items"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+      "line": 1702,
+      "table": "intake_sensitivity_profiles"
+    },
+    {
+      "candidate_effect": "CREATE_TABLE",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+      "line": 1719,
+      "table": "intake_source_candidates"
+    },
+    {
+      "candidate_effect": "CREATE_INDEX_ON",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+      "line": 1763,
+      "table": "intake_source_candidates"
+    },
+    {
+      "candidate_effect": "CREATE_INDEX_ON",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+      "line": 1766,
+      "table": "intake_source_candidates"
+    },
+    {
+      "candidate_effect": "CREATE_INDEX_ON",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+      "line": 1775,
+      "table": "review_queue_items"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+      "line": 1842,
+      "table": "intake_source_candidates"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+      "line": 1862,
+      "table": "intake_source_candidates"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+      "line": 1875,
+      "table": "intake_source_candidates"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+      "line": 1893,
+      "table": "review_queue_items"
+    },
+    {
+      "candidate_effect": "CREATE_TABLE",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+      "line": 1916,
+      "table": "intake_promotion_decisions"
+    },
+    {
+      "candidate_effect": "CREATE_INDEX_ON",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+      "line": 1965,
+      "table": "intake_promotion_decisions"
+    },
+    {
+      "candidate_effect": "CREATE_TABLE",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+      "line": 1973,
+      "table": "sources"
+    },
+    {
+      "candidate_effect": "CREATE_TABLE",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+      "line": 2007,
+      "table": "source_versions"
+    },
+    {
+      "candidate_effect": "CREATE_INDEX_ON",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+      "line": 2036,
+      "table": "source_versions"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+      "line": 2047,
+      "table": "intake_promotion_decisions"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+      "line": 2062,
+      "table": "intake_promotion_decisions"
+    },
+    {
+      "candidate_effect": "CREATE_TABLE",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+      "line": 2097,
+      "table": "source_locators"
+    },
+    {
+      "candidate_effect": "CREATE_INDEX_ON",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+      "line": 2131,
+      "table": "source_locators"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+      "line": 2141,
+      "table": "source_versions"
+    },
+    {
+      "candidate_effect": "CREATE_TABLE",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+      "line": 2147,
+      "table": "evidence_items"
+    },
+    {
+      "candidate_effect": "CREATE_INDEX_ON",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+      "line": 2214,
+      "table": "evidence_items"
+    },
+    {
+      "candidate_effect": "CREATE_INDEX_ON",
+      "file": "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+      "line": 2217,
+      "table": "review_queue_items"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p13_01_impact_narrative_content_type.rollback.sql",
+      "line": 3,
+      "table": "generated_content_drafts"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p13_01_impact_narrative_content_type.rollback.sql",
+      "line": 8,
+      "table": "generation_runs"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p14_01_generation_run_engagement_binding.rollback.sql",
+      "line": 15,
+      "table": "generation_runs"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p14_01_generation_run_engagement_binding.rollback.sql",
+      "line": 18,
+      "table": "generation_runs"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_p14_02_grant_response_packet_export_identity_foundation.rollback.sql",
+      "line": 5,
+      "table": "grant_response_packet_export_identities"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_p14_03_grant_response_packet_export_candidate_foundation.rollback.sql",
+      "line": 5,
+      "table": "grant_response_packet_export_candidate_members"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_p14_03_grant_response_packet_export_candidate_foundation.rollback.sql",
+      "line": 9,
+      "table": "grant_response_packet_export_candidates"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p14_05_grant_response_packet_export_review_binding.rollback.sql",
+      "line": 6,
+      "table": "review_queue_items"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_p14_07_b1_grant_response_packet_human_authority_decision_ledger.rollback.sql",
+      "line": 6,
+      "table": "grant_response_packet_human_authority_decisions"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_p14_08_a_grant_response_packet_export_manifest_foundation.rollback.sql",
+      "line": 4,
+      "table": "grant_response_packet_export_manifests"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p14_12_review_queue_type_check_legacy_repair.rollback.sql",
+      "line": 28,
+      "table": "review_queue_items"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p14_12_review_queue_type_check_legacy_repair.sql",
+      "line": 86,
+      "table": "review_queue_items"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p14_14_generated_content_type_evolution.rollback.sql",
+      "line": 27,
+      "table": "generated_content_drafts"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p14_14_generated_content_type_evolution.rollback.sql",
+      "line": 32,
+      "table": "generation_runs"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p14_15_export_candidate_content_type_evolution.rollback.sql",
+      "line": 50,
+      "table": "export_candidates"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p1_04_data_dictionary_and_quality.rollback.sql",
+      "line": 6,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p1_04_data_dictionary_and_quality.rollback.sql",
+      "line": 22,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_p1_04_data_dictionary_and_quality.rollback.sql",
+      "line": 110,
+      "table": "data_quality_findings"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_p1_04_data_dictionary_and_quality.rollback.sql",
+      "line": 113,
+      "table": "data_dictionary_mappings"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_p1_04_data_dictionary_and_quality.rollback.sql",
+      "line": 118,
+      "table": "data_dictionary_fields"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_p1_04_data_dictionary_and_quality.rollback.sql",
+      "line": 121,
+      "table": "data_dictionaries"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p1_04_data_dictionary_and_quality.rollback.sql",
+      "line": 123,
+      "table": "intake_file_profiles"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p1_05_intake_sensitivity_profile.rollback.sql",
+      "line": 6,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p1_05_intake_sensitivity_profile.rollback.sql",
+      "line": 23,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_p1_05_intake_sensitivity_profile.rollback.sql",
+      "line": 141,
+      "table": "intake_sensitivity_profiles"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p1_06_review_queue.rollback.sql",
+      "line": 6,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p1_06_review_queue.rollback.sql",
+      "line": 24,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_p1_06_review_queue.rollback.sql",
+      "line": 166,
+      "table": "review_queue_items"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p1_06_review_status_column_repair.rollback.sql",
+      "line": 161,
+      "table": "review_queue_items"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p1_06_review_status_column_repair.rollback.sql",
+      "line": 164,
+      "table": "review_queue_items"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p1_06_review_status_column_repair.rollback.sql",
+      "line": 167,
+      "table": "review_queue_items"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p1_06_review_status_column_repair.rollback.sql",
+      "line": 171,
+      "table": "review_queue_items"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p1_06_review_status_column_repair.sql",
+      "line": 188,
+      "table": "review_queue_items"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p1_06_review_status_column_repair.sql",
+      "line": 191,
+      "table": "review_queue_items"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p1_06_review_status_column_repair.sql",
+      "line": 195,
+      "table": "review_queue_items"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p1_06_review_status_column_repair.sql",
+      "line": 198,
+      "table": "review_queue_items"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p1_07_intake_source_candidate.rollback.sql",
+      "line": 6,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p1_07_intake_source_candidate.rollback.sql",
+      "line": 25,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_p1_07_intake_source_candidate.rollback.sql",
+      "line": 187,
+      "table": "intake_source_candidates"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p1_07_intake_source_candidate.rollback.sql",
+      "line": 189,
+      "table": "intake_sensitivity_profiles"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p1_08_source_promotion.rollback.sql",
+      "line": 6,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p1_08_source_promotion.rollback.sql",
+      "line": 26,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p1_08_source_promotion.rollback.sql",
+      "line": 216,
+      "table": "intake_promotion_decisions"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_p1_08_source_promotion.rollback.sql",
+      "line": 221,
+      "table": "source_versions"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_p1_08_source_promotion.rollback.sql",
+      "line": 222,
+      "table": "sources"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_p1_08_source_promotion.rollback.sql",
+      "line": 224,
+      "table": "intake_promotion_decisions"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p1_08_source_promotion.rollback.sql",
+      "line": 226,
+      "table": "review_queue_items"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p1_08_source_promotion.rollback.sql",
+      "line": 229,
+      "table": "intake_source_candidates"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p1_08_source_promotion.rollback.sql",
+      "line": 232,
+      "table": "intake_source_candidates"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p1_08_source_promotion.rollback.sql",
+      "line": 235,
+      "table": "intake_source_candidates"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p1_parser_run_and_file_profile.rollback.sql",
+      "line": 6,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p1_parser_run_and_file_profile.rollback.sql",
+      "line": 20,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p1_parser_run_and_file_profile.rollback.sql",
+      "line": 58,
+      "table": "intake_parser_runs"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_p1_parser_run_and_file_profile.rollback.sql",
+      "line": 63,
+      "table": "intake_file_profiles"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_p1_parser_run_and_file_profile.rollback.sql",
+      "line": 66,
+      "table": "intake_parser_runs"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p2_01_evidence_lineage.rollback.sql",
+      "line": 6,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p2_01_evidence_lineage.rollback.sql",
+      "line": 27,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p2_01_evidence_lineage.rollback.sql",
+      "line": 244,
+      "table": "review_queue_items"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_p2_01_evidence_lineage.rollback.sql",
+      "line": 249,
+      "table": "evidence_items"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_p2_01_evidence_lineage.rollback.sql",
+      "line": 250,
+      "table": "source_locators"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p2_01_evidence_lineage.rollback.sql",
+      "line": 252,
+      "table": "source_versions"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p2_03_claim_proposal.rollback.sql",
+      "line": 6,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p2_03_claim_proposal.rollback.sql",
+      "line": 28,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p2_03_claim_proposal.rollback.sql",
+      "line": 274,
+      "table": "review_queue_items"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_p2_03_claim_proposal.rollback.sql",
+      "line": 279,
+      "table": "claim_evidence_links"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_p2_03_claim_proposal.rollback.sql",
+      "line": 280,
+      "table": "claims"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p2_04_claim_gap_followup.rollback.sql",
+      "line": 6,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p2_04_claim_gap_followup.rollback.sql",
+      "line": 29,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p2_04_claim_gap_followup.rollback.sql",
+      "line": 307,
+      "table": "review_queue_items"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_p2_04_claim_gap_followup.rollback.sql",
+      "line": 312,
+      "table": "client_followup_items"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_p2_04_claim_gap_followup.rollback.sql",
+      "line": 313,
+      "table": "gap_log_items"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p2_05_conflict_review_candidate.rollback.sql",
+      "line": 6,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p2_05_conflict_review_candidate.rollback.sql",
+      "line": 9,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p2_05_conflict_review_candidate.rollback.sql",
+      "line": 35,
+      "table": "review_queue_items"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_p2_05_conflict_review_candidate.rollback.sql",
+      "line": 38,
+      "table": "conflict_groups"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p2_09_human_review_internal_approval.rollback.sql",
+      "line": 6,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p2_09_human_review_internal_approval.rollback.sql",
+      "line": 9,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p2_09_human_review_internal_approval.rollback.sql",
+      "line": 12,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p2_09_human_review_internal_approval.rollback.sql",
+      "line": 37,
+      "table": "claims"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p2_09_human_review_internal_approval.rollback.sql",
+      "line": 42,
+      "table": "evidence_items"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.rollback.sql",
+      "line": 177,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.rollback.sql",
+      "line": 180,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.rollback.sql",
+      "line": 182,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.rollback.sql",
+      "line": 184,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.rollback.sql",
+      "line": 196,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.rollback.sql",
+      "line": 278,
+      "table": "review_queue_items"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.rollback.sql",
+      "line": 299,
+      "table": "review_queue_items"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.rollback.sql",
+      "line": 302,
+      "table": "review_queue_items"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.rollback.sql",
+      "line": 305,
+      "table": "review_queue_items"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.rollback.sql",
+      "line": 358,
+      "table": "claims"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.rollback.sql",
+      "line": 362,
+      "table": "claims"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.rollback.sql",
+      "line": 365,
+      "table": "evidence_items"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.rollback.sql",
+      "line": 369,
+      "table": "evidence_items"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p2_10_coverage_review_decision.rollback.sql",
+      "line": 3,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p2_10_coverage_review_decision.rollback.sql",
+      "line": 6,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_p2_10_coverage_review_decision.rollback.sql",
+      "line": 36,
+      "table": "coverage_review_decisions"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p2_10_funder_coverage_authority.rollback.sql",
+      "line": 3,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p2_10_funder_coverage_authority.rollback.sql",
+      "line": 59,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p2_10_funder_coverage_authority.rollback.sql",
+      "line": 64,
+      "table": "coverage_review_decisions"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p2_10_funder_coverage_authority.rollback.sql",
+      "line": 69,
+      "table": "coverage_review_decisions"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p2_10_public_coverage_authority.rollback.sql",
+      "line": 3,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p2_10_public_coverage_authority.rollback.sql",
+      "line": 62,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p2_10_public_coverage_authority.rollback.sql",
+      "line": 67,
+      "table": "coverage_review_decisions"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p2_11_client_followup_completion.rollback.sql",
+      "line": 3,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p2_11_client_followup_completion.rollback.sql",
+      "line": 6,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p2_11_client_followup_completion.rollback.sql",
+      "line": 34,
+      "table": "review_queue_items"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p2_12_human_review_decision_ledger.rollback.sql",
+      "line": 3,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p2_12_human_review_decision_ledger.rollback.sql",
+      "line": 26,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p2_12_human_review_decision_ledger.rollback.sql",
+      "line": 48,
+      "table": "claims"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p2_12_human_review_decision_ledger.rollback.sql",
+      "line": 53,
+      "table": "evidence_items"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p2_12_human_review_decision_ledger.rollback.sql",
+      "line": 58,
+      "table": "claims"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p2_12_human_review_decision_ledger.rollback.sql",
+      "line": 63,
+      "table": "evidence_items"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_p2_12_human_review_decision_ledger.rollback.sql",
+      "line": 71,
+      "table": "claim_review_decisions"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_p2_12_human_review_decision_ledger.rollback.sql",
+      "line": 76,
+      "table": "evidence_review_decisions"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p3_01_generated_content_drafts.rollback.sql",
+      "line": 9,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p3_01_generated_content_drafts.rollback.sql",
+      "line": 12,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p3_01_generated_content_drafts.rollback.sql",
+      "line": 39,
+      "table": "review_queue_items"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_p3_01_generated_content_drafts.rollback.sql",
+      "line": 42,
+      "table": "generated_content_citations"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_p3_01_generated_content_drafts.rollback.sql",
+      "line": 43,
+      "table": "generated_content_blocks"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_p3_01_generated_content_drafts.rollback.sql",
+      "line": 44,
+      "table": "generated_content_drafts"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_p3_01_generated_content_drafts.rollback.sql",
+      "line": 45,
+      "table": "generation_runs"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p3_04_generated_content_review_completion.rollback.sql",
+      "line": 12,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p3_04_generated_content_review_completion.rollback.sql",
+      "line": 15,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p3_04_generated_content_review_completion.rollback.sql",
+      "line": 41,
+      "table": "review_queue_items"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p3_05_export_review_request.rollback.sql",
+      "line": 9,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p3_05_export_review_request.rollback.sql",
+      "line": 57,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p3_05_export_review_request.rollback.sql",
+      "line": 60,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p3_05_export_review_request.rollback.sql",
+      "line": 62,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p3_05_export_review_request.rollback.sql",
+      "line": 64,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p3_05_export_review_request.rollback.sql",
+      "line": 70,
+      "table": "review_queue_items"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p3_09_export_review_start.rollback.sql",
+      "line": 11,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p3_09_export_review_start.rollback.sql",
+      "line": 61,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p3_09_export_review_start.rollback.sql",
+      "line": 64,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p3_09_export_review_start.rollback.sql",
+      "line": 66,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p3_09_export_review_start.rollback.sql",
+      "line": 68,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p3_09_export_review_start.rollback.sql",
+      "line": 74,
+      "table": "review_queue_items"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p3_13_export_review_completion.rollback.sql",
+      "line": 13,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p3_13_export_review_completion.rollback.sql",
+      "line": 61,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p3_13_export_review_completion.rollback.sql",
+      "line": 64,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p3_13_export_review_completion.rollback.sql",
+      "line": 66,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p3_13_export_review_completion.rollback.sql",
+      "line": 68,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p3_13_export_review_completion.rollback.sql",
+      "line": 74,
+      "table": "review_queue_items"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p3_16_export_candidate_foundation.rollback.sql",
+      "line": 3,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p3_16_export_candidate_foundation.rollback.sql",
+      "line": 6,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p3_16_export_candidate_foundation.rollback.sql",
+      "line": 60,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p3_16_export_candidate_foundation.rollback.sql",
+      "line": 63,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p3_16_export_candidate_foundation.rollback.sql",
+      "line": 65,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p3_16_export_candidate_foundation.rollback.sql",
+      "line": 67,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_p3_16_export_candidate_foundation.rollback.sql",
+      "line": 73,
+      "table": "export_candidates"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_p3_16_export_candidate_foundation.rollback.sql",
+      "line": 75,
+      "table": "limitation_snapshot_entries"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_p3_16_export_candidate_foundation.rollback.sql",
+      "line": 79,
+      "table": "limitation_snapshots"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p3_17_authority_audit_gate_a_operation_repair.rollback.sql",
+      "line": 41,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p3_17_authority_audit_gate_a_operation_repair.rollback.sql",
+      "line": 44,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p3_17_authority_audit_gate_a_operation_repair.rollback.sql",
+      "line": 46,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p3_17_authority_audit_gate_a_operation_repair.rollback.sql",
+      "line": 48,
+      "table": "upload_lifecycle_audit"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_p3_17_human_authority_decision_ledger.rollback.sql",
+      "line": 7,
+      "table": "human_authority_decisions"
+    },
+    {
+      "candidate_effect": "DROP_TABLE",
+      "file": "migrations/kai_sprint2_p3_19_export_manifest_foundation.rollback.sql",
+      "line": 4,
+      "table": "export_manifests"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p3_20_export_manifest_review_binding.rollback.sql",
+      "line": 5,
+      "table": "export_manifests"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p3_20_export_manifest_review_binding.rollback.sql",
+      "line": 8,
+      "table": "export_manifests"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_p3_20_export_manifest_review_binding.rollback.sql",
+      "line": 11,
+      "table": "review_queue_items"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_package_2a_engagement_requirement_sets_authority.rollback.sql",
+      "line": 10,
+      "table": "engagement_requirement_sets"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_package_2a_engagement_requirement_sets_authority.rollback.sql",
+      "line": 19,
+      "table": "engagement_requirement_sets"
+    },
+    {
+      "candidate_effect": "ALTER_TABLE",
+      "file": "migrations/kai_sprint2_package_2a_engagement_requirement_sets_authority.rollback.sql",
+      "line": 23,
+      "table": "engagement_requirement_sets"
+    }
+  ],
+  "off_path_dynamic_sql_candidate_count": 16,
+  "off_path_dynamic_sql_candidates": [
+    "migrations/kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger.rollback.sql",
+    "migrations/kai_sprint2_gate_a_p0_required_index_forward_repair.rollback.sql",
+    "migrations/kai_sprint2_gate_a_p0_upload_lifecycle_enforcement_forward_repair.rollback.sql",
+    "migrations/kai_sprint2_generated_content_review_start_audit_contract.rollback.sql",
+    "migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql",
+    "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+    "migrations/kai_sprint2_p1_06_review_status_column_repair.rollback.sql",
+    "migrations/kai_sprint2_p1_06_review_status_column_repair.sql",
+    "migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.rollback.sql",
+    "migrations/kai_sprint2_p2_10_funder_coverage_authority.rollback.sql",
+    "migrations/kai_sprint2_p2_10_public_coverage_authority.rollback.sql",
+    "migrations/kai_sprint2_p3_05_export_review_request.rollback.sql",
+    "migrations/kai_sprint2_p3_09_export_review_start.rollback.sql",
+    "migrations/kai_sprint2_p3_13_export_review_completion.rollback.sql",
+    "migrations/kai_sprint2_p3_16_export_candidate_foundation.rollback.sql",
+    "migrations/kai_sprint2_p3_17_authority_audit_gate_a_operation_repair.rollback.sql"
+  ],
+  "off_path_sql_file_count": 70,
+  "provenance_exactly_matches_expected": true,
+  "provenance_table_count": 74,
+  "repository_sql_file_count": 130
+}

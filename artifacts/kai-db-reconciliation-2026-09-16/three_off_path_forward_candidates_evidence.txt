@@ -1,0 +1,1629 @@
+# KAI off-path non-rollback authority evidence
+
+
+==============================================================================
+FILE: migrations/kai_sprint2_legacy_generation_cutover_20260817.sql
+==============================================================================
+dynamic_sql_candidate: True
+paired_rollback_exists: True
+effect_count: 48
+affected_tables: data_dictionaries, data_dictionary_fields, data_dictionary_mappings, data_quality_findings, evidence_items, intake_file_profiles, intake_parser_runs, intake_promotion_decisions, intake_sensitivity_profiles, intake_source_candidates, review_queue_items, source_locators, source_versions, sources, upload_lifecycle_audit
+
+=== ACTIVE-PATH OWNERSHIP OF AFFECTED TABLES ===
+
+[data_dictionaries]
+classification=ACTIVE_MIGRATION_OWNED
+active_migration_creators=["migrations/kai_sprint2_p1_04_data_dictionary_and_quality.sql"]
+active_migration_alterers=[]
+all_repository_migration_creators=["migrations/kai_sprint2_legacy_generation_cutover_20260817.sql", "migrations/kai_sprint2_p1_04_data_dictionary_and_quality.sql"]
+all_repository_migration_alterers=[]
+
+[data_dictionary_fields]
+classification=ACTIVE_MIGRATION_OWNED
+active_migration_creators=["migrations/kai_sprint2_p1_04_data_dictionary_and_quality.sql"]
+active_migration_alterers=[]
+all_repository_migration_creators=["migrations/kai_sprint2_legacy_generation_cutover_20260817.sql", "migrations/kai_sprint2_p1_04_data_dictionary_and_quality.sql"]
+all_repository_migration_alterers=[]
+
+[data_dictionary_mappings]
+classification=ACTIVE_MIGRATION_OWNED
+active_migration_creators=["migrations/kai_sprint2_p1_04_data_dictionary_and_quality.sql"]
+active_migration_alterers=[]
+all_repository_migration_creators=["migrations/kai_sprint2_legacy_generation_cutover_20260817.sql", "migrations/kai_sprint2_p1_04_data_dictionary_and_quality.sql"]
+all_repository_migration_alterers=[]
+
+[data_quality_findings]
+classification=ACTIVE_MIGRATION_OWNED
+active_migration_creators=["migrations/kai_sprint2_p1_04_data_dictionary_and_quality.sql"]
+active_migration_alterers=[]
+all_repository_migration_creators=["migrations/kai_sprint2_legacy_generation_cutover_20260817.sql", "migrations/kai_sprint2_p1_04_data_dictionary_and_quality.sql"]
+all_repository_migration_alterers=[]
+
+[evidence_items]
+classification=ACTIVE_MIGRATION_OWNED
+active_migration_creators=["migrations/kai_sprint2_p2_01_evidence_lineage.sql"]
+active_migration_alterers=["migrations/kai_sprint2_p2_09_human_review_internal_approval.sql", "migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.sql", "migrations/kai_sprint2_p2_12_human_review_decision_ledger.sql"]
+all_repository_migration_creators=["migrations/kai_sprint2_legacy_generation_cutover_20260817.sql", "migrations/kai_sprint2_p2_01_evidence_lineage.sql"]
+all_repository_migration_alterers=["migrations/kai_sprint2_p2_09_human_review_internal_approval.rollback.sql", "migrations/kai_sprint2_p2_09_human_review_internal_approval.sql", "migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.rollback.sql", "migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.sql", "migrations/kai_sprint2_p2_12_human_review_decision_ledger.rollback.sql", "migrations/kai_sprint2_p2_12_human_review_decision_ledger.sql"]
+
+[intake_file_profiles]
+classification=ACTIVE_MIGRATION_OWNED
+active_migration_creators=["migrations/kai_sprint2_p1_parser_run_and_file_profile.sql"]
+active_migration_alterers=["migrations/kai_sprint2_p1_04_data_dictionary_and_quality.sql"]
+all_repository_migration_creators=["migrations/kai_sprint2_legacy_generation_cutover_20260817.sql", "migrations/kai_sprint2_p1_parser_run_and_file_profile.sql"]
+all_repository_migration_alterers=["migrations/kai_sprint2_legacy_generation_cutover_20260817.sql", "migrations/kai_sprint2_p1_04_data_dictionary_and_quality.rollback.sql", "migrations/kai_sprint2_p1_04_data_dictionary_and_quality.sql"]
+
+[intake_parser_runs]
+classification=ACTIVE_MIGRATION_OWNED
+active_migration_creators=["migrations/kai_sprint2_p1_parser_run_and_file_profile.sql"]
+active_migration_alterers=["migrations/kai_sprint2_p1_parser_run_and_file_profile.sql"]
+all_repository_migration_creators=["migrations/kai_sprint2_legacy_generation_cutover_20260817.sql", "migrations/kai_sprint2_p1_parser_run_and_file_profile.sql"]
+all_repository_migration_alterers=["migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql", "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql", "migrations/kai_sprint2_p1_parser_run_and_file_profile.rollback.sql", "migrations/kai_sprint2_p1_parser_run_and_file_profile.sql"]
+
+[intake_promotion_decisions]
+classification=ACTIVE_MIGRATION_OWNED
+active_migration_creators=["migrations/kai_sprint2_p1_08_source_promotion.sql"]
+active_migration_alterers=["migrations/kai_sprint2_p1_08_source_promotion.sql"]
+all_repository_migration_creators=["migrations/kai_sprint2_legacy_generation_cutover_20260817.sql", "migrations/kai_sprint2_p1_08_source_promotion.sql"]
+all_repository_migration_alterers=["migrations/kai_sprint2_legacy_generation_cutover_20260817.sql", "migrations/kai_sprint2_p1_08_source_promotion.rollback.sql", "migrations/kai_sprint2_p1_08_source_promotion.sql"]
+
+[intake_sensitivity_profiles]
+classification=ACTIVE_MIGRATION_OWNED
+active_migration_creators=["migrations/kai_sprint2_p1_05_intake_sensitivity_profile.sql"]
+active_migration_alterers=["migrations/kai_sprint2_p1_07_intake_source_candidate.sql", "migrations/kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger.sql"]
+all_repository_migration_creators=["migrations/kai_sprint2_legacy_generation_cutover_20260817.sql", "migrations/kai_sprint2_p1_05_intake_sensitivity_profile.sql"]
+all_repository_migration_alterers=["migrations/kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger.rollback.sql", "migrations/kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger.sql", "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql", "migrations/kai_sprint2_p1_07_intake_source_candidate.rollback.sql", "migrations/kai_sprint2_p1_07_intake_source_candidate.sql"]
+
+[intake_source_candidates]
+classification=ACTIVE_MIGRATION_OWNED
+active_migration_creators=["migrations/kai_sprint2_p1_07_intake_source_candidate.sql"]
+active_migration_alterers=["migrations/kai_sprint2_p1_08_source_promotion.sql"]
+all_repository_migration_creators=["migrations/kai_sprint2_legacy_generation_cutover_20260817.sql", "migrations/kai_sprint2_p1_07_intake_source_candidate.sql"]
+all_repository_migration_alterers=["migrations/kai_sprint2_legacy_generation_cutover_20260817.sql", "migrations/kai_sprint2_p1_08_source_promotion.rollback.sql", "migrations/kai_sprint2_p1_08_source_promotion.sql"]
+
+[review_queue_items]
+classification=ACTIVE_MIGRATION_OWNED
+active_migration_creators=["migrations/kai_sprint2_p1_06_review_queue.sql"]
+active_migration_alterers=["migrations/kai_sprint2_p1_08_source_promotion.sql", "migrations/kai_sprint2_p2_01_evidence_lineage.sql", "migrations/kai_sprint2_p2_03_claim_proposal.sql", "migrations/kai_sprint2_p2_04_claim_gap_followup.sql", "migrations/kai_sprint2_p2_05_conflict_review_candidate.sql", "migrations/kai_sprint2_p2_11_client_followup_completion.sql", "migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.sql", "migrations/kai_sprint2_p3_01_generated_content_drafts.sql", "migrations/kai_sprint2_p3_04_generated_content_review_completion.sql", "migrations/kai_sprint2_p3_05_export_review_request.sql", "migrations/kai_sprint2_p3_09_export_review_start.sql", "migrations/kai_sprint2_p3_13_export_review_completion.sql", "migrations/kai_sprint2_p14_10_review_queue_target_object_type_repair.sql", "migrations/kai_sprint2_p3_20_export_manifest_review_binding.sql", "migrations/kai_sprint2_p14_05_grant_response_packet_export_review_binding.sql", "migrations/kai_sprint2_br_03a_board_reporting_candidate_review_request.sql", "migrations/kai_sprint2_br_03b_board_reporting_candidate_review_lifecycle.sql"]
+all_repository_migration_creators=["migrations/kai_sprint2_legacy_generation_cutover_20260817.sql", "migrations/kai_sprint2_p1_06_review_queue.sql"]
+all_repository_migration_alterers=["migrations/kai_sprint2_br_03a_board_reporting_candidate_review_request.rollback.sql", "migrations/kai_sprint2_br_03a_board_reporting_candidate_review_request.sql", "migrations/kai_sprint2_br_03b_board_reporting_candidate_review_lifecycle.rollback.sql", "migrations/kai_sprint2_br_03b_board_reporting_candidate_review_lifecycle.sql", "migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql", "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql", "migrations/kai_sprint2_p14_05_grant_response_packet_export_review_binding.rollback.sql", "migrations/kai_sprint2_p14_05_grant_response_packet_export_review_binding.sql", "migrations/kai_sprint2_p14_10_review_queue_target_object_type_repair.sql", "migrations/kai_sprint2_p14_12_review_queue_type_check_legacy_repair.rollback.sql", "migrations/kai_sprint2_p14_12_review_queue_type_check_legacy_repair.sql", "migrations/kai_sprint2_p1_06_review_status_column_repair.rollback.sql", "migrations/kai_sprint2_p1_06_review_status_column_repair.sql", "migrations/kai_sprint2_p1_08_source_promotion.rollback.sql", "migrations/kai_sprint2_p1_08_source_promotion.sql", "migrations/kai_sprint2_p2_01_evidence_lineage.rollback.sql", "migrations/kai_sprint2_p2_01_evidence_lineage.sql", "migrations/kai_sprint2_p2_03_claim_proposal.rollback.sql", "migrations/kai_sprint2_p2_03_claim_proposal.sql", "migrations/kai_sprint2_p2_04_claim_gap_followup.rollback.sql", "migrations/kai_sprint2_p2_04_claim_gap_followup.sql", "migrations/kai_sprint2_p2_05_conflict_review_candidate.rollback.sql", "migrations/kai_sprint2_p2_05_conflict_review_candidate.sql", "migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.rollback.sql", "migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.sql", "migrations/kai_sprint2_p2_11_client_followup_completion.rollback.sql", "migrations/kai_sprint2_p2_11_client_followup_completion.sql", "migrations/kai_sprint2_p3_01_generated_content_drafts.rollback.sql", "migrations/kai_sprint2_p3_01_generated_content_drafts.sql", "migrations/kai_sprint2_p3_04_generated_content_review_completion.rollback.sql", "migrations/kai_sprint2_p3_04_generated_content_review_completion.sql", "migrations/kai_sprint2_p3_05_export_review_request.rollback.sql", "migrations/kai_sprint2_p3_05_export_review_request.sql", "migrations/kai_sprint2_p3_09_export_review_start.rollback.sql", "migrations/kai_sprint2_p3_09_export_review_start.sql", "migrations/kai_sprint2_p3_13_export_review_completion.rollback.sql", "migrations/kai_sprint2_p3_13_export_review_completion.sql", "migrations/kai_sprint2_p3_20_export_manifest_review_binding.rollback.sql", "migrations/kai_sprint2_p3_20_export_manifest_review_binding.sql"]
+
+[source_locators]
+classification=ACTIVE_MIGRATION_OWNED
+active_migration_creators=["migrations/kai_sprint2_p2_01_evidence_lineage.sql"]
+active_migration_alterers=[]
+all_repository_migration_creators=["migrations/kai_sprint2_legacy_generation_cutover_20260817.sql", "migrations/kai_sprint2_p2_01_evidence_lineage.sql"]
+all_repository_migration_alterers=[]
+
+[source_versions]
+classification=ACTIVE_MIGRATION_OWNED
+active_migration_creators=["migrations/kai_sprint2_p1_08_source_promotion.sql"]
+active_migration_alterers=["migrations/kai_sprint2_p2_01_evidence_lineage.sql"]
+all_repository_migration_creators=["migrations/kai_sprint2_legacy_generation_cutover_20260817.sql", "migrations/kai_sprint2_p1_08_source_promotion.sql"]
+all_repository_migration_alterers=["migrations/kai_sprint2_legacy_generation_cutover_20260817.sql", "migrations/kai_sprint2_p2_01_evidence_lineage.rollback.sql", "migrations/kai_sprint2_p2_01_evidence_lineage.sql"]
+
+[sources]
+classification=ACTIVE_MIGRATION_OWNED
+active_migration_creators=["migrations/kai_sprint2_p1_08_source_promotion.sql"]
+active_migration_alterers=[]
+all_repository_migration_creators=["migrations/kai_sprint2_legacy_generation_cutover_20260817.sql", "migrations/kai_sprint2_p1_08_source_promotion.sql"]
+all_repository_migration_alterers=[]
+
+[upload_lifecycle_audit]
+classification=ACTIVE_MIGRATION_OWNED
+active_migration_creators=["migrations/kai_sprint2_gate_a_p0_upload_lifecycle.sql"]
+active_migration_alterers=["migrations/kai_sprint2_gate_a_p0_policy_decision_replay.sql", "migrations/kai_sprint2_p1_parser_run_and_file_profile.sql", "migrations/kai_sprint2_p1_04_data_dictionary_and_quality.sql", "migrations/kai_sprint2_p1_05_intake_sensitivity_profile.sql", "migrations/kai_sprint2_p1_06_review_queue.sql", "migrations/kai_sprint2_p1_07_intake_source_candidate.sql", "migrations/kai_sprint2_p1_08_source_promotion.sql", "migrations/kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger.sql", "migrations/kai_sprint2_p2_01_evidence_lineage.sql", "migrations/kai_sprint2_p2_03_claim_proposal.sql", "migrations/kai_sprint2_p2_04_claim_gap_followup.sql", "migrations/kai_sprint2_p2_05_conflict_review_candidate.sql", "migrations/kai_sprint2_p2_09_human_review_internal_approval.sql", "migrations/kai_sprint2_p2_10_coverage_review_decision.sql", "migrations/kai_sprint2_p2_11_client_followup_completion.sql", "migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.sql", "migrations/kai_sprint2_p2_12_human_review_decision_ledger.sql", "migrations/kai_sprint2_p2_10_funder_coverage_authority.sql", "migrations/kai_sprint2_p2_10_public_coverage_authority.sql", "migrations/kai_sprint2_p3_01_generated_content_drafts.sql", "migrations/kai_sprint2_p3_04_generated_content_review_completion.sql", "migrations/kai_sprint2_generated_content_review_start_audit_contract.sql", "migrations/kai_sprint2_p3_05_export_review_request.sql", "migrations/kai_sprint2_p3_09_export_review_start.sql", "migrations/kai_sprint2_p3_13_export_review_completion.sql", "migrations/kai_sprint2_p3_16_export_candidate_foundation.sql", "migrations/kai_sprint2_p3_17_authority_audit_gate_a_operation_repair.sql"]
+all_repository_migration_creators=["migrations/kai_sprint2_gate_a_p0_upload_lifecycle.sql"]
+all_repository_migration_alterers=["migrations/kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger.rollback.sql", "migrations/kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger.sql", "migrations/kai_sprint2_gate_a_p0_policy_decision_replay.rollback.sql", "migrations/kai_sprint2_gate_a_p0_policy_decision_replay.sql", "migrations/kai_sprint2_generated_content_review_start_audit_contract.rollback.sql", "migrations/kai_sprint2_generated_content_review_start_audit_contract.sql", "migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql", "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql", "migrations/kai_sprint2_p1_04_data_dictionary_and_quality.rollback.sql", "migrations/kai_sprint2_p1_04_data_dictionary_and_quality.sql", "migrations/kai_sprint2_p1_05_intake_sensitivity_profile.rollback.sql", "migrations/kai_sprint2_p1_05_intake_sensitivity_profile.sql", "migrations/kai_sprint2_p1_06_review_queue.rollback.sql", "migrations/kai_sprint2_p1_06_review_queue.sql", "migrations/kai_sprint2_p1_07_intake_source_candidate.rollback.sql", "migrations/kai_sprint2_p1_07_intake_source_candidate.sql", "migrations/kai_sprint2_p1_08_source_promotion.rollback.sql", "migrations/kai_sprint2_p1_08_source_promotion.sql", "migrations/kai_sprint2_p1_parser_run_and_file_profile.rollback.sql", "migrations/kai_sprint2_p1_parser_run_and_file_profile.sql", "migrations/kai_sprint2_p2_01_evidence_lineage.rollback.sql", "migrations/kai_sprint2_p2_01_evidence_lineage.sql", "migrations/kai_sprint2_p2_03_claim_proposal.rollback.sql", "migrations/kai_sprint2_p2_03_claim_proposal.sql", "migrations/kai_sprint2_p2_04_claim_gap_followup.rollback.sql", "migrations/kai_sprint2_p2_04_claim_gap_followup.sql", "migrations/kai_sprint2_p2_05_conflict_review_candidate.rollback.sql", "migrations/kai_sprint2_p2_05_conflict_review_candidate.sql", "migrations/kai_sprint2_p2_09_human_review_internal_approval.rollback.sql", "migrations/kai_sprint2_p2_09_human_review_internal_approval.sql", "migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.rollback.sql", "migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.sql", "migrations/kai_sprint2_p2_10_coverage_review_decision.rollback.sql", "migrations/kai_sprint2_p2_10_coverage_review_decision.sql", "migrations/kai_sprint2_p2_10_funder_coverage_authority.rollback.sql", "migrations/kai_sprint2_p2_10_funder_coverage_authority.sql", "migrations/kai_sprint2_p2_10_public_coverage_authority.rollback.sql", "migrations/kai_sprint2_p2_10_public_coverage_authority.sql", "migrations/kai_sprint2_p2_11_client_followup_completion.rollback.sql", "migrations/kai_sprint2_p2_11_client_followup_completion.sql", "migrations/kai_sprint2_p2_12_human_review_decision_ledger.rollback.sql", "migrations/kai_sprint2_p2_12_human_review_decision_ledger.sql", "migrations/kai_sprint2_p3_01_generated_content_drafts.rollback.sql", "migrations/kai_sprint2_p3_01_generated_content_drafts.sql", "migrations/kai_sprint2_p3_04_generated_content_review_completion.rollback.sql", "migrations/kai_sprint2_p3_04_generated_content_review_completion.sql", "migrations/kai_sprint2_p3_05_export_review_request.rollback.sql", "migrations/kai_sprint2_p3_05_export_review_request.sql", "migrations/kai_sprint2_p3_09_export_review_start.rollback.sql", "migrations/kai_sprint2_p3_09_export_review_start.sql", "migrations/kai_sprint2_p3_13_export_review_completion.rollback.sql", "migrations/kai_sprint2_p3_13_export_review_completion.sql", "migrations/kai_sprint2_p3_16_export_candidate_foundation.rollback.sql", "migrations/kai_sprint2_p3_16_export_candidate_foundation.sql", "migrations/kai_sprint2_p3_17_authority_audit_gate_a_operation_repair.rollback.sql", "migrations/kai_sprint2_p3_17_authority_audit_gate_a_operation_repair.sql"]
+
+=== REPOSITORY REFERENCES TO THIS FILE ===
+Backend/kai/db/kaiReviewCockpitReadModels.js:47: * (migrations/kai_sprint2_legacy_generation_cutover_20260817.sql, section 6). Rows
+KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.6.md:18298:  - `migrations/kai_sprint2_legacy_generation_cutover_20260817.sql`: rebuilt as
+KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.6.md:18472:  - `migrations/kai_sprint2_legacy_generation_cutover_20260817.sql` preserves
+KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.6.md:19592:**Preflight:** read root `AGENTS.md` (package-boundary/testing/DATABASE_URL-sentinel conventions), confirmed branch `main` at a clean `f982017`, and inspected the closest prior conventions for this exact shape: `migrations/kai_sprint2_p2_04_claim_gap_followup.sql` (composite tenant-safe FK pattern, `_id_org_unique` shadow constraint, partial-unique idempotency index style) and `migrations/kai_sprint2_gk_organization_tenant_binding.sql` (minimal additive table + `updated_at` touch-trigger pattern). Confirmed via `migrations/kai_sprint2_legacy_generation_cutover_20260817.sql` that `kai.organizations` and `kai.engagements` are pre-existing, shared (`KEEP_SHARED_IN_KAI`) production objects never created or altered by any migration in this repository - consistent with the owner's instruction not to touch them. Confirmed the repository's schema-contract test convention is static regex assertion against migration SQL source text (no live database execution), matching `__tests__/kai-sprint2-p2-04-claim-gap-followup-schema-contract.spec.js` and `__tests__/kai-sprint2-gk-organization-binding-schema-contract.spec.js`. Proceeded directly; no blocker required a stop.
+migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql:3:-- (migrations/kai_sprint2_legacy_generation_cutover_20260817.sql).
+migrations/kai_sprint2_p14_12_review_queue_type_check_legacy_repair.sql:23:-- (migrations/kai_sprint2_legacy_generation_cutover_20260817.sql section 4
+scripts/kai-sprint2-legacy-cutover-local-postgres.js:35:const CUTOVER_SQL = "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql";
+scripts/kai-sprint2-legacy-cutover-preflight.sql:3:-- (migrations/kai_sprint2_legacy_generation_cutover_20260817.sql).
+scripts/kai-sprint2-legacy-cutover-runbook.md:104:   execution: `migrations/kai_sprint2_legacy_generation_cutover_20260817.sql`.
+
+=== FILE CREATION HISTORY ===
+08e3d1e37d6a9c1a5b3cdcde7cac00c6d5324c02	2026-08-17T13:21:23-07:00	Fix legacy Sprint 2 source-candidate schema upgrade
+
+=== RECENT FILE HISTORY ===
+21b731a726983fd331a872d80c1815014e65eb49	2026-08-17T16:28:54-07:00	Keep shared KAI contracts production-native during cutover
+151b892405f4527ce41210a345ee4d4bd898e4de	2026-08-17T15:55:05-07:00	Fix cutover shared-contract compatibility with production
+6447884b393584110fc6171855b86f107ebcce15	2026-08-17T15:15:54-07:00	Correct legacy cutover P2-01 reachable schema
+6947b96484e08d7b7d60483025572a97a57a9f7c	2026-08-17T14:53:52-07:00	Verify legacy KAI cutover shared-object producer compatibility from code
+06464a1cc5d1ec7ea24dbe4cbc976e5a2fefdf8f	2026-08-17T14:38:10-07:00	Correct legacy KAI cutover against production dependency graph
+08e3d1e37d6a9c1a5b3cdcde7cac00c6d5324c02	2026-08-17T13:21:23-07:00	Fix legacy Sprint 2 source-candidate schema upgrade
+
+=== FIRST 160 SOURCE LINES ===
+    1: -- ==========================================================================
+    2: -- KAI legacy-generation cutover - CORRECTED forward-only bundle (2026-08-17)
+    3: --
+    4: -- ONE atomic, pgAdmin-Query-Tool-executable transaction. No psql meta-commands,
+    5: -- no \i, no DATABASE_URL, no external transaction wrapper, no nested
+    6: -- historical-migration transaction boundaries. Any error before COMMIT rolls
+    7: -- back the complete cutover; there is no reachable committed state in which
+    8: -- legacy names have moved but the required canonical replacements are missing.
+    9: --
+   10: -- WHY THIS FILE WAS CORRECTED
+   11: -- The first pass of this cutover assumed only seven tables were legacy-shaped
+   12: -- and that kai.intake_parser_runs, kai.data_dictionary_fields,
+   13: -- kai.data_dictionary_mappings, kai.data_quality_findings,
+   14: -- kai.source_locators and kai.evidence_items were absent or already canonical.
+   15: -- Run read-only against the real production catalog, that preflight returned
+   16: -- four FAILs. Four further owner-supplied production captures then proved the
+   17: -- assumption wrong: all thirteen objects below are the same older
+   18: -- data-model generation, and the two tables the first pass believed had
+   19: -- "passed" (data_dictionary_mappings, data_quality_findings) had only passed
+   20: -- because the first pass classified shapes by a SINGLE marker column. Their
+   21: -- production shapes carry that marker column while carrying none of the
+   22: -- canonical P1-04 lineage columns. This file replaces single-column guessing
+   23: -- with a multi-factor structural signature (columns + column type classes +
+   24: -- primary key + named unique/check/foreign-key constraints + named indexes) and
+   25: -- fails closed on any shape it does not recognise.
+   26: --
+   27: -- EVIDENCE (owner-supplied, read-only production captures, 2026-08-17)
+   28: --   capture 1  full catalog: data_dictionaries, intake_file_profiles,
+   29: --              intake_files, intake_promotion_decisions,
+   30: --              intake_sensitivity_profiles, intake_source_candidates,
+   31: --              review_queue_items, source_versions, sources
+   32: --   capture 2  the production run of the first-pass preflight (29 checks, 4 FAIL)
+   33: --   capture 3  full catalog: intake_parser_runs, data_dictionary_fields,
+   34: --              source_locators, evidence_items, plus the incoming edges
+   35: --              claim_evidence_links -> evidence_items,
+   36: --              funder_requirements -> source_locators,
+   37: --              funders -> source_locators
+   38: --   capture 4  full catalog: data_dictionary_mappings, data_quality_findings
+   39: --
+   40: -- PER-OBJECT TREATMENT (classified from the captures plus current-HEAD code,
+   41: -- never from the fact that an object appeared in a foreign-key edge)
+   42: --
+   43: --   RELOCATE_LEGACY (13) - proven legacy shape sitting on a name the current
+   44: --   canonical P1 contract owns; moved intact into kai_legacy_20260817:
+   45: --     kai.intake_parser_runs           kai.intake_file_profiles
+   46: --     kai.data_dictionaries            kai.data_dictionary_fields
+   47: --     kai.data_dictionary_mappings     kai.data_quality_findings
+   48: --     kai.intake_sensitivity_profiles  kai.intake_source_candidates
+   49: --     kai.intake_promotion_decisions   kai.sources
+   50: --     kai.source_versions              kai.source_locators
+   51: --     kai.evidence_items
+   52: --
+   53: --   KEEP_SHARED_IN_KAI (never relocated, never replaced, only additively
+   54: --   extended by the narrowly-scoped changes in section 4):
+   55: --     kai.intake_files  kai.review_queue_items  kai.upload_lifecycle_audit
+   56: --     kai.organizations kai.engagements         kai.users
+   57: --
+   58: --   NOT_REQUIRED_FOR_CURRENT_CUTOVER (dependent tables whose foreign keys point
+   59: --   at relocated objects; deliberately left in kai so their rows keep
+   60: --   referencing the preserved legacy object, which is the truthful current
+   61: --   meaning of those rows). ALTER TABLE ... SET SCHEMA moves a table without
+   62: --   dropping or recreating any constraint, and a foreign key binds to the
+   63: --   referenced table's OID, not to its schema-qualified name - so each of these
+   64: --   keeps pointing at exactly the same rows after the move, now addressed as
+   65: --   kai_legacy_20260817.*:
+   66: --     kai.claim_evidence_links -> evidence_items
+   67: --     kai.funder_requirements  -> source_locators
+   68: --     kai.funders              -> source_locators
+   69: --   No currently-mounted repository caller requires a canonical object at these
+   70: --   three names right now. This is recorded, not silently ignored: the
+   71: --   post-cutover verifier reports each of these edges, and the runbook records
+   72: --   that a future P2-01/P2-03 package must handle kai.claim_evidence_links
+   73: --   explicitly (its CREATE TABLE IF NOT EXISTS in
+   74: --   migrations/kai_sprint2_p2_03_claim_proposal.sql would otherwise silently
+   75: --   skip over the retained legacy table, reproducing this same class of
+   76: --   incident).
+   77: --
+   78: --   P2-01 DECISION: P2_01_REQUIRED_FOR_REACHABLE_OPERATION.
+   79: --   Repository proof at current HEAD: the Review Cockpit source-candidate detail
+   80: --   itself still does not read source_locators or evidence_items, but the
+   81: --   authenticated Sprint 2 intake router mounts the accepted P2-01
+   82: --   evidence-extraction route and P2-02 evidence-coverage route behind only
+   83: --   KAI_SPRINT2_ENABLED. The admin Impact Evidence Library UI also exposes those
+   84: --   calls. Because KAI_SPRINT2_ENABLED is owner-confirmed enabled in production,
+   85: --   leaving kai.source_locators/kai.evidence_items absent after this cutover
+   86: --   would leave a currently mounted, human-authorized operation structurally
+   87: --   broken. This bundle therefore preserves the legacy P2 graph intact under
+   88: --   kai_legacy_20260817 and installs EMPTY canonical P2-01 source_locators and
+   89: --   evidence_items tables. It still never translates, copies, relabels, or
+   90: --   fabricates any legacy row into the canonical P2 generation.
+   91: --
+   92: -- WHAT THIS BUNDLE NEVER DOES
+   93: --   * never translates a legacy row into a canonical row
+   94: --   * never fabricates profile_canonical_sha256, file-profile / dictionary /
+   95: --     sensitivity / candidate lineage, promotion decisions, source or
+   96: --     source-version lineage, source locators, or evidence items
+   97: --   * never fabricates a queue approval, rejection, resolution or cancellation
+   98: --   * never relocates, replaces or narrows a shared object
+   99: --   * never replays a historical migration file as a production step, and never
+  100: --     edits one
+  101: --   * never narrows kai.upload_lifecycle_audit's operation vocabulary or
+  102: --     kai.review_queue_items' queue_type/queue_status vocabulary. The P1-02/04/
+  103: --     05/06/07/08 migration files each DROP and re-ADD
+  104: --     upload_lifecycle_audit_gate_a_operation_check and
+  105: --     upload_lifecycle_audit_gate_a_metadata_object_check with their own
+  106: --     generation's list. Replaying any of them against a production database
+  107: --     that has since been widened by a later package would silently SHRINK a
+  108: --     live vocabulary, so every one of those twelve statements is excluded from
+  109: --     the canonical DDL below and replaced by the fail-closed assertion in
+  110: --     section 4: the two operations the canonical P1 producers actually write
+  111: --     must ALREADY be permitted, or this bundle refuses to proceed.
+  112: --
+  113: -- OPERATIONAL TIMEOUTS: this repository defines no lock_timeout /
+  114: -- statement_timeout convention anywhere in migrations/ or scripts/, so none is
+  115: -- invented here. That decision is reported as NOT_CONFIRMED and belongs to the
+  116: -- operator running this bundle; see
+  117: -- scripts/kai-sprint2-legacy-cutover-runbook.md.
+  118: -- ==========================================================================
+  119: 
+  120: BEGIN;
+  121: 
+  122: -- --------------------------------------------------------------------------
+  123: -- 1. Expected starting-state signatures, revalidated INSIDE this transaction.
+  124: --
+  125: --    A temporary, ON COMMIT DROP table, so nothing here survives the
+  126: --    transaction and nothing is left behind on rollback. Each row is the
+  127: --    multi-factor structural signature of one material object, transcribed
+  128: --    from the four production captures (legacy side) and from this
+  129: --    repository's own current canonical migrations (canonical side).
+  130: --
+  131: --    legacy_columns / canonical_columns entries are 'column_name:data_type',
+  132: --    where data_type is information_schema.columns.data_type - the exact
+  133: --    vocabulary the captures use ('uuid', 'text', 'jsonb', 'boolean',
+  134: --    'smallint', 'integer', 'bigint', 'date', 'timestamp with time zone',
+  135: --    'ARRAY', 'USER-DEFINED').
+  136: -- --------------------------------------------------------------------------
+  137: CREATE TEMPORARY TABLE kai_cutover_signature (
+  138:   table_name              text PRIMARY KEY,
+  139:   legacy_columns          text[] NOT NULL,
+  140:   legacy_pk_columns       text[] NOT NULL,
+  141:   legacy_constraints      text[] NOT NULL,
+  142:   legacy_indexes          text[] NOT NULL,
+  143:   legacy_fk_edges         text[] NOT NULL,
+  144:   canonical_columns       text[] NOT NULL,
+  145:   canonical_constraints   text[] NOT NULL
+  146: ) ON COMMIT DROP;
+  147: 
+  148: INSERT INTO kai_cutover_signature VALUES
+  149: ('intake_parser_runs',
+  150:  ARRAY['intake_parser_run_id:uuid','job_id:uuid','job_status:USER-DEFINED','parse_status:USER-DEFINED',
+  151:        'max_retries:integer','requires_manual_review:boolean','locked_by:text','output_profile_id:uuid',
+  152:        'parser_input_metadata:jsonb','parser_output_metadata:jsonb'],
+  153:  ARRAY['intake_parser_run_id'],
+  154:  ARRAY['intake_parser_runs_pkey','intake_parser_runs_max_retries_check',
+  155:        'fk_intake_parser_runs_output_profile','fk_intake_parser_runs_file_org'],
+  156:  ARRAY['idx_intake_parser_runs_file','idx_intake_parser_runs_org','idx_intake_parser_runs_status'],
+  157:  ARRAY['fk_intake_parser_runs_output_profile->kai.intake_file_profiles',
+  158:        'intake_parser_runs_intake_file_id_fkey->kai.intake_files'],
+  159:  ARRAY['parser_run_id:uuid','checksum:text','parser_status:text'],
+  160:  ARRAY['intake_parser_runs_p1_identity_unique','intake_parser_runs_p1_parser_status_check',
+
+=== ROLE-SIGNAL LINES ===
+----- lines 1-34 -----
+    1: -- ==========================================================================
+    2: -- KAI legacy-generation cutover - CORRECTED forward-only bundle (2026-08-17)
+    3: --
+    4: -- ONE atomic, pgAdmin-Query-Tool-executable transaction. No psql meta-commands,
+    5: -- no \i, no DATABASE_URL, no external transaction wrapper, no nested
+    6: -- historical-migration transaction boundaries. Any error before COMMIT rolls
+    7: -- back the complete cutover; there is no reachable committed state in which
+    8: -- legacy names have moved but the required canonical replacements are missing.
+    9: --
+   10: -- WHY THIS FILE WAS CORRECTED
+   11: -- The first pass of this cutover assumed only seven tables were legacy-shaped
+   12: -- and that kai.intake_parser_runs, kai.data_dictionary_fields,
+   13: -- kai.data_dictionary_mappings, kai.data_quality_findings,
+   14: -- kai.source_locators and kai.evidence_items were absent or already canonical.
+   15: -- Run read-only against the real production catalog, that preflight returned
+   16: -- four FAILs. Four further owner-supplied production captures then proved the
+   17: -- assumption wrong: all thirteen objects below are the same older
+   18: -- data-model generation, and the two tables the first pass believed had
+   19: -- "passed" (data_dictionary_mappings, data_quality_findings) had only passed
+   20: -- because the first pass classified shapes by a SINGLE marker column. Their
+   21: -- production shapes carry that marker column while carrying none of the
+   22: -- canonical P1-04 lineage columns. This file replaces single-column guessing
+   23: -- with a multi-factor structural signature (columns + column type classes +
+   24: -- primary key + named unique/check/foreign-key constraints + named indexes) and
+   25: -- fails closed on any shape it does not recognise.
+   26: --
+   27: -- EVIDENCE (owner-supplied, read-only production captures, 2026-08-17)
+   28: --   capture 1  full catalog: data_dictionaries, intake_file_profiles,
+   29: --              intake_files, intake_promotion_decisions,
+   30: --              intake_sensitivity_profiles, intake_source_candidates,
+   31: --              review_queue_items, source_versions, sources
+   32: --   capture 2  the production run of the first-pass preflight (29 checks, 4 FAIL)
+   33: --   capture 3  full catalog: intake_parser_runs, data_dictionary_fields,
+   34: --              source_locators, evidence_items, plus the incoming edges
+----- lines 41-46 -----
+   41: -- never from the fact that an object appeared in a foreign-key edge)
+   42: --
+   43: --   RELOCATE_LEGACY (13) - proven legacy shape sitting on a name the current
+   44: --   canonical P1 contract owns; moved intact into kai_legacy_20260817:
+   45: --     kai.intake_parser_runs           kai.intake_file_profiles
+   46: --     kai.data_dictionaries            kai.data_dictionary_fields
+----- lines 58-62 -----
+   58: --   NOT_REQUIRED_FOR_CURRENT_CUTOVER (dependent tables whose foreign keys point
+   59: --   at relocated objects; deliberately left in kai so their rows keep
+   60: --   referencing the preserved legacy object, which is the truthful current
+   61: --   meaning of those rows). ALTER TABLE ... SET SCHEMA moves a table without
+   62: --   dropping or recreating any constraint, and a foreign key binds to the
+----- lines 67-77 -----
+   67: --     kai.funder_requirements  -> source_locators
+   68: --     kai.funders              -> source_locators
+   69: --   No currently-mounted repository caller requires a canonical object at these
+   70: --   three names right now. This is recorded, not silently ignored: the
+   71: --   post-cutover verifier reports each of these edges, and the runbook records
+   72: --   that a future P2-01/P2-03 package must handle kai.claim_evidence_links
+   73: --   explicitly (its CREATE TABLE IF NOT EXISTS in
+   74: --   migrations/kai_sprint2_p2_03_claim_proposal.sql would otherwise silently
+   75: --   skip over the retained legacy table, reproducing this same class of
+   76: --   incident).
+   77: --
+----- lines 82-95 -----
+   82: --   evidence-extraction route and P2-02 evidence-coverage route behind only
+   83: --   KAI_SPRINT2_ENABLED. The admin Impact Evidence Library UI also exposes those
+   84: --   calls. Because KAI_SPRINT2_ENABLED is owner-confirmed enabled in production,
+   85: --   leaving kai.source_locators/kai.evidence_items absent after this cutover
+   86: --   would leave a currently mounted, human-authorized operation structurally
+   87: --   broken. This bundle therefore preserves the legacy P2 graph intact under
+   88: --   kai_legacy_20260817 and installs EMPTY canonical P2-01 source_locators and
+   89: --   evidence_items tables. It still never translates, copies, relabels, or
+   90: --   fabricates any legacy row into the canonical P2 generation.
+   91: --
+   92: -- WHAT THIS BUNDLE NEVER DOES
+   93: --   * never translates a legacy row into a canonical row
+   94: --   * never fabricates profile_canonical_sha256, file-profile / dictionary /
+   95: --     sensitivity / candidate lineage, promotion decisions, source or
+----- lines 97-113 -----
+   97: --   * never fabricates a queue approval, rejection, resolution or cancellation
+   98: --   * never relocates, replaces or narrows a shared object
+   99: --   * never replays a historical migration file as a production step, and never
+  100: --     edits one
+  101: --   * never narrows kai.upload_lifecycle_audit's operation vocabulary or
+  102: --     kai.review_queue_items' queue_type/queue_status vocabulary. The P1-02/04/
+  103: --     05/06/07/08 migration files each DROP and re-ADD
+  104: --     upload_lifecycle_audit_gate_a_operation_check and
+  105: --     upload_lifecycle_audit_gate_a_metadata_object_check with their own
+  106: --     generation's list. Replaying any of them against a production database
+  107: --     that has since been widened by a later package would silently SHRINK a
+  108: --     live vocabulary, so every one of those twelve statements is excluded from
+  109: --     the canonical DDL below and replaced by the fail-closed assertion in
+  110: --     section 4: the two operations the canonical P1 producers actually write
+  111: --     must ALREADY be permitted, or this bundle refuses to proceed.
+  112: --
+  113: -- OPERATIONAL TIMEOUTS: this repository defines no lock_timeout /
+----- lines 115-119 -----
+  115: -- invented here. That decision is reported as NOT_CONFIRMED and belongs to the
+  116: -- operator running this bundle; see
+  117: -- scripts/kai-sprint2-legacy-cutover-runbook.md.
+  118: -- ==========================================================================
+  119: 
+----- lines 124-131 -----
+  124: --
+  125: --    A temporary, ON COMMIT DROP table, so nothing here survives the
+  126: --    transaction and nothing is left behind on rollback. Each row is the
+  127: --    multi-factor structural signature of one material object, transcribed
+  128: --    from the four production captures (legacy side) and from this
+  129: --    repository's own current canonical migrations (canonical side).
+  130: --
+  131: --    legacy_columns / canonical_columns entries are 'column_name:data_type',
+----- lines 370-375 -----
+  370: --
+  371: --    Every material object is classified as exactly one of
+  372: --      LEGACY_EXPECTED    - matches the captured production legacy signature
+  373: --      CANONICAL_EXPECTED - matches this repository's canonical signature
+  374: --      ABSENT             - not present
+  375: --      UNRECOGNIZED       - anything else; always fails closed
+----- lines 379-388 -----
+  379: --      FULL_LEGACY - every one of the thirteen is LEGACY_EXPECTED and the
+  380: --                    destination schema does not exist yet (the real
+  381: --                    pre-cutover production state)
+  382: --      CONVERGED   - every one is CANONICAL_EXPECTED or ABSENT and the
+  383: --                    destination schema already holds this cutover's own
+  384: --                    relocated tables (a safe no-op rerun of a completed
+  385: --                    cutover)
+  386: --    Any mixture, any UNRECOGNIZED object, or an unexpected pre-existing
+  387: --    destination schema aborts the whole transaction without mutating anything.
+  388: -- --------------------------------------------------------------------------
+----- lines 407-411 -----
+  407: 
+  408:     ELSIF NOT EXISTS (
+  409:             -- any required legacy column missing, or present with a different
+  410:             -- data-type class than the capture recorded
+  411:             SELECT 1 FROM unnest(sig.legacy_columns) AS spec
+----- lines 418-422 -----
+  418:           )
+  419:           AND NOT EXISTS (
+  420:             -- any canonical-only column present at all disqualifies the legacy
+  421:             -- classification: the two generations are mutually exclusive
+  422:             SELECT 1 FROM unnest(sig.canonical_columns) AS spec
+----- lines 501-510 -----
+  501:             AND c.data_type = split_part(spec, ':', 2)
+  502:        );
+  503:       RAISE EXCEPTION
+  504:         'kai.% is UNRECOGNIZED: it matches neither the captured production legacy signature nor this repository''s canonical signature. Legacy signature elements not satisfied: %. Refusing to guess.',
+  505:         sig.table_name, coalesce(missing_detail, '(constraint/index/primary-key/foreign-key element)');
+  506:     END IF;
+  507: 
+  508:     RAISE NOTICE 'kai legacy-generation cutover: kai.% classified %', sig.table_name, classification;
+  509:   END LOOP;
+  510: 
+----- lines 516-531 -----
+  516:     destination_state := 'CONVERGED';
+  517:   ELSE
+  518:     RAISE EXCEPTION
+  519:       'schema % already exists but does not hold this cutover''s complete relocated set; refusing to guess whether it is a partial prior run or an unrelated schema',
+  520:       legacy_schema_name;
+  521:   END IF;
+  522: 
+  523:   IF legacy_count = total_count AND destination_state = 'ABSENT' THEN
+  524:     RAISE NOTICE 'kai legacy-generation cutover: starting state FULL_LEGACY; proceeding.';
+  525:   ELSIF canonical_count + absent_count = total_count AND destination_state = 'CONVERGED' THEN
+  526:     RAISE NOTICE 'kai legacy-generation cutover: starting state CONVERGED; every statement below is a no-op.';
+  527:   ELSE
+  528:     RAISE EXCEPTION
+  529:       'unsupported starting state: % legacy / % canonical / % absent of % material objects, destination schema %. This bundle only accepts a fully-legacy pre-cutover state or its own fully-converged post-cutover state.',
+  530:       legacy_count, canonical_count, absent_count, total_count, destination_state;
+  531:   END IF;
+----- lines 533-537 -----
+  533:   -- Shared prerequisites this bundle relies on and never installs itself.
+  534:   IF to_regclass('kai.intake_files') IS NULL THEN
+  535:     RAISE EXCEPTION 'kai.intake_files is required before the legacy-generation cutover';
+  536:   END IF;
+  537:   IF NOT EXISTS (
+----- lines 541-548 -----
+  541:        AND c.conname = 'intake_files_gate_a_upload_state_check'
+  542:   ) THEN
+  543:     RAISE EXCEPTION 'kai.intake_files does not carry the expected Gate A canonical contract (intake_files_gate_a_upload_state_check); refusing to guess its compatibility';
+  544:   END IF;
+  545:   IF to_regclass('kai.upload_lifecycle_audit') IS NULL THEN
+  546:     RAISE EXCEPTION 'kai.upload_lifecycle_audit is required before the legacy-generation cutover';
+  547:   END IF;
+  548:   IF NOT EXISTS (
+----- lines 550-557 -----
+  550:      WHERE n.nspname = 'kai' AND p.proname = 'gate_a_p0_jsonb_metadata_only'
+  551:   ) THEN
+  552:     RAISE EXCEPTION 'kai.gate_a_p0_jsonb_metadata_only is required before the legacy-generation cutover';
+  553:   END IF;
+  554:   IF to_regclass('kai.review_queue_items') IS NULL THEN
+  555:     RAISE EXCEPTION 'kai.review_queue_items is required before the legacy-generation cutover';
+  556:   END IF;
+  557: 
+----- lines 577-581 -----
+  577:        AND v.oid <> t.oid
+  578:   ) THEN
+  579:     RAISE EXCEPTION 'a view or materialized view depends on a relocation candidate; this bundle does not understand that dependency and refuses to relocate';
+  580:   END IF;
+  581:   IF EXISTS (
+----- lines 597-601 -----
+  597:        )
+  598:   ) THEN
+  599:     RAISE EXCEPTION 'an unexpected user trigger exists on a relocation candidate; only the exact production-supported BEFORE UPDATE kai.set_updated_at() trigger set is allowed';
+  600:   END IF;
+  601:   IF EXISTS (
+----- lines 616-620 -----
+  616:      )
+  617:   ) THEN
+  618:     RAISE EXCEPTION 'the expected production-supported updated_at trigger set is incomplete or has a non-matching signature';
+  619:   END IF;
+  620:   UPDATE kai_cutover_allowed_updated_at_trigger allow
+----- lines 629-633 -----
+  629:      WHERE n.nspname = 'kai'
+  630:   ) THEN
+  631:     RAISE EXCEPTION 'a kai schema function body references a relocation candidate by schema-qualified name; relocation would silently change what it resolves to, so this bundle refuses to relocate';
+  632:   END IF;
+  633: 
+----- lines 649-653 -----
+  649:      ORDER BY 1, 2
+  650:   LOOP
+  651:     RAISE NOTICE 'kai legacy-generation cutover: retained dependent % keeps foreign key % into relocated %',
+  652:       sig.dependent, sig.conname, sig.referenced;
+  653:   END LOOP;
+----- lines 655-659 -----
+  655: 
+  656: -- --------------------------------------------------------------------------
+  657: -- 3. Preserve the proven-legacy objects.
+  658: --
+  659: --    Mechanism: ALTER TABLE ... SET SCHEMA, re-selected against the now-complete
+----- lines 666-672 -----
+  666: --      * constraints and indexes - not dropped, not recreated, not revalidated;
+  667: --                      they move with the table
+  668: --      * legacy-to-legacy foreign keys - both endpoints move, and the keys bind
+  669: --                      by OID, so every one keeps working across the move
+  670: --      * intended legacy-to-shared foreign keys - the captured edges into
+  671: --                      kai.intake_files, kai.organizations, kai.engagements and
+  672: --                      kai.users keep referencing those shared tables, which
+----- lines 676-685 -----
+  676: --                      exactly the same rows, now addressed under the preserved
+  677: --                      schema
+  678: --      * trigger and function behaviour - section 2 has already proven there are
+  679: --                      no user triggers on these tables and no kai function body
+  680: --                      that resolves any of these names, so nothing can change
+  681: --                      meaning under the move
+  682: --    The mechanism cannot make an old record appear canonical: the relocated
+  683: --    tables keep their legacy names inside the preserved schema and no canonical
+  684: --    reader ever addresses that schema.
+  685: --
+----- lines 690-694 -----
+  690: 
+  691: COMMENT ON SCHEMA kai_legacy_20260817 IS
+  692:   'Preserved pre-Sprint2 KAI data generation, relocated intact (rows, identifiers, constraints, indexes and foreign keys unmodified) by the 2026-08-17 legacy-generation cutover so the canonical P1 contract could take the kai.* names. Never read by canonical application code. Never translated into canonical rows.';
+  693: 
+  694: DO $cutover_relocate$
+----- lines 708-712 -----
+  708:        AND to_regclass('kai_legacy_20260817.' || target) IS NULL THEN
+  709:       EXECUTE format('ALTER TABLE kai.%I SET SCHEMA kai_legacy_20260817', target);
+  710:       RAISE NOTICE 'kai legacy-generation cutover: preserved kai.% as kai_legacy_20260817.%', target, target;
+  711:     END IF;
+  712:   END LOOP;
+----- lines 734-766 -----
+  734:        )
+  735:   ) THEN
+  736:     RAISE EXCEPTION 'allowed updated_at trigger did not remain attached to its preserved legacy relation after relocation';
+  737:   END IF;
+  738: END $cutover_trigger_relocation_assert$;
+  739: 
+  740: -- --------------------------------------------------------------------------
+  741: -- 5. Install the required canonical objects at the freed kai.* names.
+  742: --
+  743: --    The DDL below is extracted from this repository's own current canonical
+  744: --    migration files, which are NOT edited and NOT executed as production steps
+  745: --    by this cutover. Each extract is verbatim except that the source file's own
+  746: --    BEGIN;/COMMIT; are removed (this bundle is one transaction) and its
+  747: --    ALTER TABLE kai.upload_lifecycle_audit constraint REPLACEMENTS are removed
+  748: --    (section 4 explains why, and asserts the requirement additively instead).
+  749: --    The eight ALTER TABLE ... ADD CONSTRAINT statements that the source files
+  750: --    write without a DROP CONSTRAINT IF EXISTS have been made idempotent so a
+  751: --    converged rerun is a genuine no-op; no constraint definition is otherwise
+  752: --    altered.
+  753: --
+  754: --    Empty canonical P2-01 source_locators/evidence_items objects are installed
+  755: --    after relocation because those names are used by accepted mounted P2
+  756: --    operations. No legacy P2 row is translated into them.
+  757: -- --------------------------------------------------------------------------
+  758: 
+  759: -- --------------------------------------------------------------------------
+  760: -- 4. Shared objects: proven-safe additive changes only. These come BEFORE the
+  761: --    canonical DDL below, because the canonical P1-07 and P1-08 definitions
+  762: --    guard by name on review_queue_items_p1_06_queue_type_check and
+  763: --    review_queue_items_p1_06_queue_status_check existing first - and the shared
+  764: --    production review_queue_items table, which is never replaced, does not
+  765: --    carry them.
+  766: --
+
+=== DETECTED DDL EFFECT CONTEXT ===
+----- lines 743-751 -----
+  743: --    The DDL below is extracted from this repository's own current canonical
+  744: --    migration files, which are NOT edited and NOT executed as production steps
+  745: --    by this cutover. Each extract is verbatim except that the source file's own
+  746: --    BEGIN;/COMMIT; are removed (this bundle is one transaction) and its
+  747: --    ALTER TABLE kai.upload_lifecycle_audit constraint REPLACEMENTS are removed
+  748: --    (section 4 explains why, and asserts the requirement additively instead).
+  749: --    The eight ALTER TABLE ... ADD CONSTRAINT statements that the source files
+  750: --    write without a DROP CONSTRAINT IF EXISTS have been made idempotent so a
+  751: --    converged rerun is a genuine no-op; no constraint definition is otherwise
+----- lines 863-871 -----
+  863:       JOIN pg_namespace n ON n.oid = r.relnamespace
+  864:      WHERE n.nspname = 'kai' AND r.relname = 'review_queue_items'
+  865:        AND c.conname = 'review_queue_items_p1_06_queue_type_check'
+  866:   ) THEN
+  867:     ALTER TABLE kai.review_queue_items
+  868:       ADD CONSTRAINT review_queue_items_p1_06_queue_type_check
+  869:       CHECK (queue_type IN (
+  870:         'intake_file_review', 'source_candidate_review', 'sensitivity_review',
+  871:         'data_dictionary_review', 'evidence_review', 'claim_review', 'client_followup',
+----- lines 878-892 -----
+  878:       JOIN pg_namespace n ON n.oid = r.relnamespace
+  879:      WHERE n.nspname = 'kai' AND r.relname = 'review_queue_items'
+  880:        AND c.conname = 'review_queue_items_p1_06_queue_status_check'
+  881:   ) THEN
+  882:     ALTER TABLE kai.review_queue_items
+  883:       ADD CONSTRAINT review_queue_items_p1_06_queue_status_check
+  884:       CHECK (queue_status IN ('open', 'in_progress', 'blocked', 'waiting_on_client', 'waiting_on_gk', 'resolved', 'cancelled'));
+  885:   END IF;
+  886: END $cutover_shared$;
+  887: 
+  888: ALTER TABLE kai.upload_lifecycle_audit
+  889:   DROP CONSTRAINT IF EXISTS upload_lifecycle_audit_gate_a_operation_check,
+  890:   ADD CONSTRAINT upload_lifecycle_audit_gate_a_operation_check
+  891:     CHECK (operation IN (
+  892:       'reserve_upload',
+----- lines 928-936 -----
+  928:     RAISE EXCEPTION 'kai.gate_a_p0_jsonb_metadata_only is required before P1-02 parser-run/file-profile migration';
+  929:   END IF;
+  930: END $$;
+  931: 
+  932: CREATE TABLE IF NOT EXISTS kai.intake_parser_runs (
+  933:   parser_run_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  934:   organization_id uuid NOT NULL,
+  935:   intake_file_id uuid NOT NULL,
+  936:   parser_name text NOT NULL,
+----- lines 981-992 -----
+  981:       OR (parser_status = 'cancelled' AND completed_at IS NOT NULL AND output_profile_id IS NULL)
+  982:     )
+  983: );
+  984: 
+  985: CREATE INDEX IF NOT EXISTS ix_intake_parser_runs_p1_tenant_file
+  986:   ON kai.intake_parser_runs (organization_id, intake_file_id);
+  987: 
+  988: CREATE TABLE IF NOT EXISTS kai.intake_file_profiles (
+  989:   file_profile_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  990:   organization_id uuid NOT NULL,
+  991:   intake_file_id uuid NOT NULL,
+  992:   parser_run_id uuid NOT NULL,
+----- lines 1021-1032 -----
+ 1021:   CONSTRAINT intake_file_profiles_p1_canonical_sha_check
+ 1022:     CHECK (profile_canonical_sha256 ~ '^[a-f0-9]{64}$')
+ 1023: );
+ 1024: 
+ 1025: CREATE INDEX IF NOT EXISTS ix_intake_file_profiles_p1_tenant_file
+ 1026:   ON kai.intake_file_profiles (organization_id, intake_file_id);
+ 1027: 
+ 1028: CREATE INDEX IF NOT EXISTS ix_intake_file_profiles_p1_parser_run
+ 1029:   ON kai.intake_file_profiles (parser_run_id);
+ 1030: 
+ 1031: DO $idem$
+ 1032: BEGIN
+----- lines 1034-1042 -----
+ 1034:     SELECT 1 FROM pg_constraint pc JOIN pg_class r ON r.oid = pc.conrelid
+ 1035:       JOIN pg_namespace nn ON nn.oid = r.relnamespace
+ 1036:      WHERE nn.nspname = 'kai' AND r.relname = 'intake_parser_runs' AND pc.conname = 'intake_parser_runs_p1_output_profile_fk'
+ 1037:   ) THEN
+ 1038:     ALTER TABLE kai.intake_parser_runs
+ 1039:     ADD CONSTRAINT intake_parser_runs_p1_output_profile_fk
+ 1040:     FOREIGN KEY (output_profile_id, organization_id, intake_file_id, parser_name, parser_version, checksum)
+ 1041:     REFERENCES kai.intake_file_profiles (file_profile_id, organization_id, intake_file_id, parser_name, parser_version, checksum)
+ 1042:     ON DELETE RESTRICT;
+----- lines 1079-1093 -----
+ 1079:     SELECT 1 FROM pg_constraint pc JOIN pg_class r ON r.oid = pc.conrelid
+ 1080:       JOIN pg_namespace nn ON nn.oid = r.relnamespace
+ 1081:      WHERE nn.nspname = 'kai' AND r.relname = 'intake_file_profiles' AND pc.conname = 'intake_file_profiles_p1_04_lineage_unique'
+ 1082:   ) THEN
+ 1083:     ALTER TABLE kai.intake_file_profiles
+ 1084:     ADD CONSTRAINT intake_file_profiles_p1_04_lineage_unique
+ 1085:     UNIQUE (file_profile_id, organization_id, intake_file_id, profile_canonical_sha256);
+ 1086:   END IF;
+ 1087: END $idem$;
+ 1088: 
+ 1089: CREATE TABLE IF NOT EXISTS kai.data_dictionaries (
+ 1090:   data_dictionary_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+ 1091:   organization_id uuid NOT NULL,
+ 1092:   intake_file_id uuid NOT NULL,
+ 1093:   file_profile_id uuid NOT NULL,
+----- lines 1113-1124 -----
+ 1113:   CONSTRAINT data_dictionaries_p1_04_canonical_sha_check
+ 1114:     CHECK (profile_canonical_sha256 ~ '^[a-f0-9]{64}$')
+ 1115: );
+ 1116: 
+ 1117: CREATE INDEX IF NOT EXISTS ix_data_dictionaries_p1_04_tenant_file
+ 1118:   ON kai.data_dictionaries (organization_id, intake_file_id);
+ 1119: 
+ 1120: CREATE TABLE IF NOT EXISTS kai.data_dictionary_fields (
+ 1121:   data_dictionary_field_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+ 1122:   data_dictionary_id uuid NOT NULL,
+ 1123:   organization_id uuid NOT NULL,
+ 1124:   file_profile_id uuid NOT NULL,
+----- lines 1207-1218 -----
+ 1207:   CONSTRAINT data_dictionary_fields_p1_04_human_review_check
+ 1208:     CHECK (human_review_required = true)
+ 1209: );
+ 1210: 
+ 1211: CREATE INDEX IF NOT EXISTS ix_data_dictionary_fields_p1_04_dictionary
+ 1212:   ON kai.data_dictionary_fields (data_dictionary_id);
+ 1213: 
+ 1214: CREATE TABLE IF NOT EXISTS kai.data_dictionary_mappings (
+ 1215:   data_dictionary_mapping_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+ 1216:   data_dictionary_field_id uuid NOT NULL,
+ 1217:   data_dictionary_id uuid NOT NULL,
+ 1218:   organization_id uuid NOT NULL,
+----- lines 1228-1239 -----
+ 1228:     REFERENCES kai.data_dictionary_fields (data_dictionary_field_id, data_dictionary_id, organization_id, file_profile_id, profile_field_key)
+ 1229:     ON DELETE RESTRICT
+ 1230: );
+ 1231: 
+ 1232: CREATE INDEX IF NOT EXISTS ix_data_dictionary_mappings_p1_04_dictionary
+ 1233:   ON kai.data_dictionary_mappings (data_dictionary_id);
+ 1234: 
+ 1235: CREATE TABLE IF NOT EXISTS kai.data_quality_findings (
+ 1236:   data_quality_finding_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+ 1237:   data_dictionary_id uuid NOT NULL,
+ 1238:   organization_id uuid NOT NULL,
+ 1239:   file_profile_id uuid NOT NULL,
+----- lines 1267-1275 -----
+ 1267:       AND finding_detail_safe !~* '(https?://|/Users/|/private/|/var/|/etc/|password|secret|api[_-]?key|token|credential|Bearer\s|stack ?trace|traceback|\s{2}at [A-Za-z])'
+ 1268:     )
+ 1269: );
+ 1270: 
+ 1271: CREATE INDEX IF NOT EXISTS ix_data_quality_findings_p1_04_dictionary
+ 1272:   ON kai.data_quality_findings (data_dictionary_id);
+ 1273: 
+ 1274: -- =====================================================================
+ 1275: -- Canonical DDL extracted from migrations/kai_sprint2_p1_05_intake_sensitivity_profile.sql
+----- lines 1332-1340 -----
+ 1332: -- raw content, filenames, field names, or absence. No column here executes retention,
+ 1333: -- deletes data, changes storage lifecycle, activates a job, or grants any approval or
+ 1334: -- external-release authority. review_status/review_requirements are not persisted:
+ 1335: -- the only committed fact about review is the fail-closed human_review_required flag.
+ 1336: CREATE TABLE IF NOT EXISTS kai.intake_sensitivity_profiles (
+ 1337:   intake_sensitivity_profile_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+ 1338:   organization_id uuid NOT NULL,
+ 1339:   intake_file_id uuid NOT NULL,
+ 1340:   file_profile_id uuid NOT NULL,
+----- lines 1428-1439 -----
+ 1428:   CONSTRAINT intake_sensitivity_profiles_p1_05_retention_posture_check
+ 1429:     CHECK (retention_posture = 'restricted_pending_review')
+ 1430: );
+ 1431: 
+ 1432: CREATE INDEX IF NOT EXISTS ix_intake_sensitivity_profiles_p1_05_tenant_file
+ 1433:   ON kai.intake_sensitivity_profiles (organization_id, intake_file_id);
+ 1434: 
+ 1435: CREATE INDEX IF NOT EXISTS ix_intake_sensitivity_profiles_p1_05_dictionary
+ 1436:   ON kai.intake_sensitivity_profiles (data_dictionary_id);
+ 1437: 
+ 1438: -- =====================================================================
+ 1439: -- Canonical DDL extracted from migrations/kai_sprint2_p1_06_review_queue.sql
+----- lines 1477-1485 -----
+ 1477: -- full canonical table - not a P1-06-only narrow subset - so every existing and future
+ 1478: -- queue_type keeps working unmodified. P1-06 itself only ever writes queue_type =
+ 1479: -- 'sensitivity_review', queue_status = 'open', priority = 'medium' rows: the wider
+ 1480: -- vocabulary below exists because the table is shared, not because P1-06 uses it.
+ 1481: CREATE TABLE IF NOT EXISTS kai.review_queue_items (
+ 1482:   review_queue_item_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+ 1483:   organization_id uuid NOT NULL,
+ 1484:   engagement_id uuid,
+ 1485:   queue_type text NOT NULL,
+----- lines 1561-1573 -----
+ 1561: -- unique index, not a table-wide constraint, so other queue_types already assumed by
+ 1562: -- kaiIntakeQueries.js/kaiReviewQueueService.js (for example a re-opened
+ 1563: -- 'intake_file_review' item for the same intake_file after an earlier one resolved)
+ 1564: -- keep their own legitimate multi-row-per-target behavior unmodified.
+ 1565: CREATE UNIQUE INDEX IF NOT EXISTS ux_review_queue_items_p1_06_sensitivity_review_identity
+ 1566:   ON kai.review_queue_items (organization_id, queue_type, target_object_type, target_object_id)
+ 1567:   WHERE queue_type = 'sensitivity_review';
+ 1568: 
+ 1569: CREATE INDEX IF NOT EXISTS ix_review_queue_items_p1_06_tenant_queue
+ 1570:   ON kai.review_queue_items (organization_id, queue_type, queue_status);
+ 1571: 
+ 1572: -- Row-level `updated_at` maintenance: the existing production
+ 1573: -- updateReviewQueueItemStatusIfCurrent query (Backend/kai/db/kaiIntakeQueries.js) never
+----- lines 1583-1591 -----
+ 1583: END;
+ 1584: $$;
+ 1585: 
+ 1586: DROP TRIGGER IF EXISTS trg_review_queue_items_p1_06_touch_updated_at ON kai.review_queue_items;
+ 1587: CREATE TRIGGER trg_review_queue_items_p1_06_touch_updated_at
+ 1588:   BEFORE UPDATE ON kai.review_queue_items
+ 1589:   FOR EACH ROW
+ 1590:   EXECUTE FUNCTION kai.review_queue_items_p1_06_touch_updated_at();
+ 1591: 
+----- lines 1698-1706 -----
+ 1698:     SELECT 1 FROM pg_constraint pc JOIN pg_class r ON r.oid = pc.conrelid
+ 1699:       JOIN pg_namespace nn ON nn.oid = r.relnamespace
+ 1700:      WHERE nn.nspname = 'kai' AND r.relname = 'intake_sensitivity_profiles' AND pc.conname = 'intake_sensitivity_profiles_p1_07_candidate_lineage_unique'
+ 1701:   ) THEN
+ 1702:     ALTER TABLE kai.intake_sensitivity_profiles
+ 1703:     ADD CONSTRAINT intake_sensitivity_profiles_p1_07_candidate_lineage_unique
+ 1704:     UNIQUE (intake_sensitivity_profile_id, organization_id, file_profile_id, data_dictionary_id);
+ 1705:   END IF;
+ 1706: END $idem$;
+----- lines 1715-1723 -----
+ 1715: -- proposed_source_type is pinned to the existing repository-authorized 'unknown'
+ 1716: -- representation rather than fabricated to satisfy a non-null column; a later,
+ 1717: -- separately authorized package may loosen this pin once a real producer contract
+ 1718: -- exists.
+ 1719: CREATE TABLE IF NOT EXISTS kai.intake_source_candidates (
+ 1720:   intake_source_candidate_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+ 1721:   organization_id uuid NOT NULL,
+ 1722:   intake_file_id uuid NOT NULL,
+ 1723:   file_profile_id uuid NOT NULL,
+----- lines 1759-1779 -----
+ 1759:   CONSTRAINT intake_source_candidates_p1_07_created_by_type_check
+ 1760:     CHECK (created_by_type IN ('human', 'system'))
+ 1761: );
+ 1762: 
+ 1763: CREATE INDEX IF NOT EXISTS ix_intake_source_candidates_p1_07_tenant_file
+ 1764:   ON kai.intake_source_candidates (organization_id, intake_file_id);
+ 1765: 
+ 1766: CREATE INDEX IF NOT EXISTS ix_intake_source_candidates_p1_07_sensitivity_profile
+ 1767:   ON kai.intake_source_candidates (intake_sensitivity_profile_id);
+ 1768: 
+ 1769: -- P1-07 idempotency identity for the 'source_candidate_review' queue_type only: a
+ 1770: -- partial unique index, not a table-wide constraint, so every other queue_type
+ 1771: -- already sharing kai.review_queue_items keeps its own legitimate cardinality
+ 1772: -- unmodified. This mirrors the P1-06 precedent exactly
+ 1773: -- (ux_review_queue_items_p1_06_sensitivity_review_identity) and is added through
+ 1774: -- this forward migration only; the accepted P1-06 migration is not edited.
+ 1775: CREATE UNIQUE INDEX IF NOT EXISTS ux_review_queue_items_p1_07_source_candidate_review_identity
+ 1776:   ON kai.review_queue_items (organization_id, queue_type, target_object_type, target_object_id)
+ 1777:   WHERE queue_type = 'source_candidate_review';
+ 1778: 
+ 1779: -- =====================================================================
+----- lines 1838-1846 -----
+ 1838: -- migration created the table with the full canonical, already-shared
+ 1839: -- queue_status list), and review_queue_items.required_action already exists as a
+ 1840: -- nullable P1-06 column, so this package widens no review_queue_items CHECK
+ 1841: -- constraint and adds no review_queue_items column.
+ 1842: ALTER TABLE kai.intake_source_candidates
+ 1843:   DROP CONSTRAINT IF EXISTS intake_source_candidates_p1_07_candidate_status_check,
+ 1844:   ADD CONSTRAINT intake_source_candidates_p1_07_candidate_status_check
+ 1845:     CHECK (candidate_status IN ('needs_gk_review', 'promoted', 'rejected'));
+ 1846: 
+----- lines 1858-1866 -----
+ 1858:     SELECT 1 FROM pg_constraint pc JOIN pg_class r ON r.oid = pc.conrelid
+ 1859:       JOIN pg_namespace nn ON nn.oid = r.relnamespace
+ 1860:      WHERE nn.nspname = 'kai' AND r.relname = 'intake_source_candidates' AND pc.conname = 'intake_source_candidates_p1_08_identity_unique'
+ 1861:   ) THEN
+ 1862:     ALTER TABLE kai.intake_source_candidates
+ 1863:     ADD CONSTRAINT intake_source_candidates_p1_08_identity_unique
+ 1864:       UNIQUE (intake_source_candidate_id, organization_id);
+ 1865:   END IF;
+ 1866: END $idem$;
+----- lines 1871-1879 -----
+ 1871:     SELECT 1 FROM pg_constraint pc JOIN pg_class r ON r.oid = pc.conrelid
+ 1872:       JOIN pg_namespace nn ON nn.oid = r.relnamespace
+ 1873:      WHERE nn.nspname = 'kai' AND r.relname = 'intake_source_candidates' AND pc.conname = 'intake_source_candidates_p1_08_promotion_lineage_unique'
+ 1874:   ) THEN
+ 1875:     ALTER TABLE kai.intake_source_candidates
+ 1876:     ADD CONSTRAINT intake_source_candidates_p1_08_promotion_lineage_unique
+ 1877:       UNIQUE (intake_source_candidate_id, organization_id, intake_sensitivity_profile_id, profile_canonical_sha256);
+ 1878:   END IF;
+ 1879: END $idem$;
+----- lines 1889-1897 -----
+ 1889:     SELECT 1 FROM pg_constraint pc JOIN pg_class r ON r.oid = pc.conrelid
+ 1890:       JOIN pg_namespace nn ON nn.oid = r.relnamespace
+ 1891:      WHERE nn.nspname = 'kai' AND r.relname = 'review_queue_items' AND pc.conname = 'review_queue_items_p1_08_identity_unique'
+ 1892:   ) THEN
+ 1893:     ALTER TABLE kai.review_queue_items
+ 1894:     ADD CONSTRAINT review_queue_items_p1_08_identity_unique
+ 1895:       UNIQUE (review_queue_item_id, organization_id);
+ 1896:   END IF;
+ 1897: END $idem$;
+----- lines 1912-1920 -----
+ 1912: -- is recorded directly at whichever of the three outcomes was requested.
+ 1913: -- reviewed_source_type/source_id/source_version_id/promoted_at are therefore
+ 1914: -- nullable, and bound (all four non-null) only when decision_status = 'promoted';
+ 1915: -- they stay null for 'needs_more_information' and 'rejected'.
+ 1916: CREATE TABLE IF NOT EXISTS kai.intake_promotion_decisions (
+ 1917:   intake_promotion_decision_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+ 1918:   organization_id uuid NOT NULL,
+ 1919:   intake_source_candidate_id uuid NOT NULL,
+ 1920:   review_queue_item_id uuid NOT NULL,
+----- lines 1961-1977 -----
+ 1961:   CONSTRAINT intake_promotion_decisions_p1_08_created_by_type_check
+ 1962:     CHECK (created_by_type IN ('human', 'system'))
+ 1963: );
+ 1964: 
+ 1965: CREATE INDEX IF NOT EXISTS ix_intake_promotion_decisions_p1_08_tenant_candidate
+ 1966:   ON kai.intake_promotion_decisions (organization_id, intake_source_candidate_id);
+ 1967: 
+ 1968: -- P1-08 foundation table: one deterministic source identity per organization,
+ 1969: -- keyed by source_code - a sha256 hex digest computed only from immutable,
+ 1970: -- already-committed lineage facts (organization_id, intake_sensitivity_profile_id,
+ 1971: -- profile_canonical_sha256, reviewed_source_type). Never derived from a filename,
+ 1972: -- MIME type, sample value, AI output, or external lookup.
+ 1973: CREATE TABLE IF NOT EXISTS kai.sources (
+ 1974:   source_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+ 1975:   organization_id uuid NOT NULL,
+ 1976:   source_code text NOT NULL,
+ 1977:   reviewed_source_type text NOT NULL,
+----- lines 2003-2011 -----
+ 2003: -- committed candidate row it was promoted from, and at most one current version
+ 2004: -- per source (partial unique index below). This package promotes exactly one
+ 2005: -- candidate into exactly one source_version; it does not implement merging
+ 2006: -- multiple candidates into one source's version history.
+ 2007: CREATE TABLE IF NOT EXISTS kai.source_versions (
+ 2008:   source_version_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+ 2009:   organization_id uuid NOT NULL,
+ 2010:   source_id uuid NOT NULL,
+ 2011:   intake_source_candidate_id uuid NOT NULL,
+----- lines 2032-2040 -----
+ 2032:   CONSTRAINT source_versions_p1_08_canonical_sha_check
+ 2033:     CHECK (profile_canonical_sha256 ~ '^[a-f0-9]{64}$')
+ 2034: );
+ 2035: 
+ 2036: CREATE UNIQUE INDEX IF NOT EXISTS ux_source_versions_p1_08_current_per_source
+ 2037:   ON kai.source_versions (source_id)
+ 2038:   WHERE is_current = true;
+ 2039: 
+ 2040: DO $idem$
+----- lines 2043-2051 -----
+ 2043:     SELECT 1 FROM pg_constraint pc JOIN pg_class r ON r.oid = pc.conrelid
+ 2044:       JOIN pg_namespace nn ON nn.oid = r.relnamespace
+ 2045:      WHERE nn.nspname = 'kai' AND r.relname = 'intake_promotion_decisions' AND pc.conname = 'intake_promotion_decisions_p1_08_source_fk'
+ 2046:   ) THEN
+ 2047:     ALTER TABLE kai.intake_promotion_decisions
+ 2048:     ADD CONSTRAINT intake_promotion_decisions_p1_08_source_fk
+ 2049:       FOREIGN KEY (source_id, organization_id)
+ 2050:       REFERENCES kai.sources (source_id, organization_id)
+ 2051:       ON DELETE RESTRICT;
+----- lines 2058-2066 -----
+ 2058:     SELECT 1 FROM pg_constraint pc JOIN pg_class r ON r.oid = pc.conrelid
+ 2059:       JOIN pg_namespace nn ON nn.oid = r.relnamespace
+ 2060:      WHERE nn.nspname = 'kai' AND r.relname = 'intake_promotion_decisions' AND pc.conname = 'intake_promotion_decisions_p1_08_source_version_fk'
+ 2061:   ) THEN
+ 2062:     ALTER TABLE kai.intake_promotion_decisions
+ 2063:     ADD CONSTRAINT intake_promotion_decisions_p1_08_source_version_fk
+ 2064:       FOREIGN KEY (source_version_id, organization_id)
+ 2065:       REFERENCES kai.source_versions (source_version_id, organization_id)
+ 2066:       ON DELETE RESTRICT;
+----- lines 2093-2101 -----
+ 2093:     RAISE EXCEPTION 'kai.source_versions_p1_08_id_org_unique is required before P2-01 evidence-lineage migration';
+ 2094:   END IF;
+ 2095: END $$;
+ 2096: 
+ 2097: CREATE TABLE IF NOT EXISTS kai.source_locators (
+ 2098:   source_locator_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+ 2099:   organization_id uuid NOT NULL,
+ 2100:   source_version_id uuid NOT NULL,
+ 2101:   locator_type text NOT NULL,
+----- lines 2127-2135 -----
+ 2127:   CONSTRAINT source_locators_p2_01_created_by_type_check
+ 2128:     CHECK (created_by_type IN ('human', 'system'))
+ 2129: );
+ 2130: 
+ 2131: CREATE INDEX IF NOT EXISTS ix_source_locators_p2_01_tenant_version
+ 2132:   ON kai.source_locators (organization_id, source_version_id);
+ 2133: 
+ 2134: DO $idem$
+ 2135: BEGIN
+----- lines 2137-2151 -----
+ 2137:     SELECT 1 FROM pg_constraint pc JOIN pg_class r ON r.oid = pc.conrelid
+ 2138:       JOIN pg_namespace nn ON nn.oid = r.relnamespace
+ 2139:      WHERE nn.nspname = 'kai' AND r.relname = 'source_versions' AND pc.conname = 'source_versions_p2_01_id_source_org_unique'
+ 2140:   ) THEN
+ 2141:     ALTER TABLE kai.source_versions
+ 2142:       ADD CONSTRAINT source_versions_p2_01_id_source_org_unique
+ 2143:       UNIQUE (source_version_id, source_id, organization_id);
+ 2144:   END IF;
+ 2145: END $idem$;
+ 2146: 
+ 2147: CREATE TABLE IF NOT EXISTS kai.evidence_items (
+ 2148:   evidence_item_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+ 2149:   organization_id uuid NOT NULL,
+ 2150:   source_id uuid NOT NULL,
+ 2151:   source_version_id uuid NOT NULL,
+----- lines 2210-2221 -----
+ 2210:   CONSTRAINT evidence_items_p2_01_created_by_type_check
+ 2211:     CHECK (created_by_type IN ('human', 'system'))
+ 2212: );
+ 2213: 
+ 2214: CREATE INDEX IF NOT EXISTS ix_evidence_items_p2_01_tenant_version
+ 2215:   ON kai.evidence_items (organization_id, source_version_id);
+ 2216: 
+ 2217: CREATE UNIQUE INDEX IF NOT EXISTS ux_review_queue_items_p2_01_evidence_review_identity
+ 2218:   ON kai.review_queue_items (organization_id, queue_type, target_object_type, target_object_id)
+ 2219:   WHERE queue_type = 'evidence_review';
+ 2220: 
+ 2221: -- --------------------------------------------------------------------------
+
+==============================================================================
+FILE: migrations/kai_sprint2_p14_12_review_queue_type_check_legacy_repair.sql
+==============================================================================
+dynamic_sql_candidate: False
+paired_rollback_exists: True
+effect_count: 1
+affected_tables: review_queue_items
+
+=== ACTIVE-PATH OWNERSHIP OF AFFECTED TABLES ===
+
+[review_queue_items]
+classification=ACTIVE_MIGRATION_OWNED
+active_migration_creators=["migrations/kai_sprint2_p1_06_review_queue.sql"]
+active_migration_alterers=["migrations/kai_sprint2_p1_08_source_promotion.sql", "migrations/kai_sprint2_p2_01_evidence_lineage.sql", "migrations/kai_sprint2_p2_03_claim_proposal.sql", "migrations/kai_sprint2_p2_04_claim_gap_followup.sql", "migrations/kai_sprint2_p2_05_conflict_review_candidate.sql", "migrations/kai_sprint2_p2_11_client_followup_completion.sql", "migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.sql", "migrations/kai_sprint2_p3_01_generated_content_drafts.sql", "migrations/kai_sprint2_p3_04_generated_content_review_completion.sql", "migrations/kai_sprint2_p3_05_export_review_request.sql", "migrations/kai_sprint2_p3_09_export_review_start.sql", "migrations/kai_sprint2_p3_13_export_review_completion.sql", "migrations/kai_sprint2_p14_10_review_queue_target_object_type_repair.sql", "migrations/kai_sprint2_p3_20_export_manifest_review_binding.sql", "migrations/kai_sprint2_p14_05_grant_response_packet_export_review_binding.sql", "migrations/kai_sprint2_br_03a_board_reporting_candidate_review_request.sql", "migrations/kai_sprint2_br_03b_board_reporting_candidate_review_lifecycle.sql"]
+all_repository_migration_creators=["migrations/kai_sprint2_legacy_generation_cutover_20260817.sql", "migrations/kai_sprint2_p1_06_review_queue.sql"]
+all_repository_migration_alterers=["migrations/kai_sprint2_br_03a_board_reporting_candidate_review_request.rollback.sql", "migrations/kai_sprint2_br_03a_board_reporting_candidate_review_request.sql", "migrations/kai_sprint2_br_03b_board_reporting_candidate_review_lifecycle.rollback.sql", "migrations/kai_sprint2_br_03b_board_reporting_candidate_review_lifecycle.sql", "migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql", "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql", "migrations/kai_sprint2_p14_05_grant_response_packet_export_review_binding.rollback.sql", "migrations/kai_sprint2_p14_05_grant_response_packet_export_review_binding.sql", "migrations/kai_sprint2_p14_10_review_queue_target_object_type_repair.sql", "migrations/kai_sprint2_p14_12_review_queue_type_check_legacy_repair.rollback.sql", "migrations/kai_sprint2_p14_12_review_queue_type_check_legacy_repair.sql", "migrations/kai_sprint2_p1_06_review_status_column_repair.rollback.sql", "migrations/kai_sprint2_p1_06_review_status_column_repair.sql", "migrations/kai_sprint2_p1_08_source_promotion.rollback.sql", "migrations/kai_sprint2_p1_08_source_promotion.sql", "migrations/kai_sprint2_p2_01_evidence_lineage.rollback.sql", "migrations/kai_sprint2_p2_01_evidence_lineage.sql", "migrations/kai_sprint2_p2_03_claim_proposal.rollback.sql", "migrations/kai_sprint2_p2_03_claim_proposal.sql", "migrations/kai_sprint2_p2_04_claim_gap_followup.rollback.sql", "migrations/kai_sprint2_p2_04_claim_gap_followup.sql", "migrations/kai_sprint2_p2_05_conflict_review_candidate.rollback.sql", "migrations/kai_sprint2_p2_05_conflict_review_candidate.sql", "migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.rollback.sql", "migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.sql", "migrations/kai_sprint2_p2_11_client_followup_completion.rollback.sql", "migrations/kai_sprint2_p2_11_client_followup_completion.sql", "migrations/kai_sprint2_p3_01_generated_content_drafts.rollback.sql", "migrations/kai_sprint2_p3_01_generated_content_drafts.sql", "migrations/kai_sprint2_p3_04_generated_content_review_completion.rollback.sql", "migrations/kai_sprint2_p3_04_generated_content_review_completion.sql", "migrations/kai_sprint2_p3_05_export_review_request.rollback.sql", "migrations/kai_sprint2_p3_05_export_review_request.sql", "migrations/kai_sprint2_p3_09_export_review_start.rollback.sql", "migrations/kai_sprint2_p3_09_export_review_start.sql", "migrations/kai_sprint2_p3_13_export_review_completion.rollback.sql", "migrations/kai_sprint2_p3_13_export_review_completion.sql", "migrations/kai_sprint2_p3_20_export_manifest_review_binding.rollback.sql", "migrations/kai_sprint2_p3_20_export_manifest_review_binding.sql"]
+
+=== REPOSITORY REFERENCES TO THIS FILE ===
+scripts/kai-sprint2-p14-12-review-queue-type-check-legacy-repair-local-postgres.js:168:  psqlFile("migrations/kai_sprint2_p14_12_review_queue_type_check_legacy_repair.sql");
+scripts/kai-sprint2-p14-12-review-queue-type-check-legacy-repair-local-postgres.js:171:  psqlFile("migrations/kai_sprint2_p14_12_review_queue_type_check_legacy_repair.sql");
+
+=== FILE CREATION HISTORY ===
+c219fdbe0a2bf06eda7d9100c67213eb7b2d7c55	2026-09-14T10:44:43-07:00	Fix legacy review queue type constraint drift
+
+=== RECENT FILE HISTORY ===
+c219fdbe0a2bf06eda7d9100c67213eb7b2d7c55	2026-09-14T10:44:43-07:00	Fix legacy review queue type constraint drift
+
+=== FIRST 160 SOURCE LINES ===
+    1: BEGIN;
+    2: 
+    3: DO $$
+    4: BEGIN
+    5:   IF to_regclass('kai.review_queue_items') IS NULL THEN
+    6:     RAISE EXCEPTION 'kai.review_queue_items is required before P14-12 review-queue queue_type legacy-constraint repair migration';
+    7:   END IF;
+    8: END $$;
+    9: 
+   10: -- P14-12 scope (bounded schema-drift repair only): a USER_CONFIRMED
+   11: -- production snapshot showed kai.review_queue_items simultaneously carrying
+   12: -- an obsolete, pre-P1-06 review_queue_items_queue_type_check fixed allowlist
+   13: -- alongside the canonical, validated P1-06 review_queue_items_p1_06_queue_type_check
+   14: -- contract (already widened by BR-03A to admit board_reporting_candidate_review)
+   15: -- and the validated BR-03B Board review lifecycle contract. PostgreSQL CHECK
+   16: -- constraints are cumulative (ANDed), so the obsolete allowlist - which does
+   17: -- not include board_reporting_candidate_review - blocks every Board
+   18: -- candidate review-queue insert even though the newer, named contracts
+   19: -- already admit it. This is the same class of proven production drift P14-10
+   20: -- repaired for review_queue_items_target_object_type_check: an unnamed-by-the-
+   21: -- application, pre-P1-06 CHECK left in place when the canonical P1-06 table
+   22: -- contract was introduced onto the pre-existing shared production table
+   23: -- (migrations/kai_sprint2_legacy_generation_cutover_20260817.sql section 4
+   24: -- only ever adds the canonical P1-06 constraints by name; it never asserts
+   25: -- anything about, and never drops, this older constraint). No committed
+   26: -- migration in this repository has ever dropped
+   27: -- review_queue_items_queue_type_check.
+   28: --
+   29: -- This migration repairs that one proven, named drift only. It does not
+   30: -- widen any vocabulary beyond what review_queue_items_p1_06_queue_type_check
+   31: -- (as BR-03A last defined it) already authorizes, does not touch any other
+   32: -- constraint, and does not modify data rows.
+   33: 
+   34: -- Fail closed unless the canonical, validated P1-06 queue_type contract is
+   35: -- present and already admits board_reporting_candidate_review - proving the
+   36: -- Board-aware schema prerequisite by inspection of the live predicate, the
+   37: -- same discipline BR-03B established for this same constraint.
+   38: DO $$
+   39: DECLARE
+   40:   existing_predicate text;
+   41: BEGIN
+   42:   SELECT pg_get_expr(c.conbin, c.conrelid)
+   43:     INTO existing_predicate
+   44:     FROM pg_constraint c
+   45:     JOIN pg_class r ON r.oid = c.conrelid
+   46:     JOIN pg_namespace n ON n.oid = r.relnamespace
+   47:    WHERE n.nspname = 'kai'
+   48:      AND r.relname = 'review_queue_items'
+   49:      AND c.conname = 'review_queue_items_p1_06_queue_type_check'
+   50:      AND c.convalidated;
+   51: 
+   52:   IF existing_predicate IS NULL THEN
+   53:     RAISE EXCEPTION 'validated kai.review_queue_items_p1_06_queue_type_check is required before P14-12';
+   54:   END IF;
+   55: 
+   56:   IF position('''board_reporting_candidate_review''' IN existing_predicate) = 0 THEN
+   57:     RAISE EXCEPTION 'kai.review_queue_items_p1_06_queue_type_check does not admit board_reporting_candidate_review; refusing P14-12';
+   58:   END IF;
+   59: END $$;
+   60: 
+   61: -- Fail closed unless the validated BR-03B Board review lifecycle contract is
+   62: -- present, detected structurally (predicate shape), not by name, because the
+   63: -- BR-03B verifier already established this constraint's catalog name may be
+   64: -- truncated by PostgreSQL's 63-byte identifier limit.
+   65: DO $$
+   66: BEGIN
+   67:   IF NOT EXISTS (
+   68:     SELECT 1 FROM pg_constraint c
+   69:      WHERE c.conrelid = 'kai.review_queue_items'::regclass
+   70:        AND c.contype = 'c'
+   71:        AND c.convalidated
+   72:        AND pg_get_constraintdef(c.oid) LIKE '%board_reporting_candidate_review%'
+   73:        AND pg_get_constraintdef(c.oid) LIKE '%target_object_type = ''board_reporting_candidate''%'
+   74:        AND pg_get_constraintdef(c.oid) LIKE '%queue_status = ''open''%'
+   75:        AND pg_get_constraintdef(c.oid) LIKE '%queue_status = ''in_progress''%'
+   76:        AND pg_get_constraintdef(c.oid) LIKE '%queue_status = ''resolved''%'
+   77:        AND pg_get_constraintdef(c.oid) LIKE '%review_status = ''resolved''%'
+   78:   ) THEN
+   79:     RAISE EXCEPTION 'the validated BR-03B Board review lifecycle contract check is required before P14-12';
+   80:   END IF;
+   81: END $$;
+   82: 
+   83: -- The repair itself: remove ONLY the obsolete legacy allowlist. Safe and a
+   84: -- no-op if already absent (a database that never carried it, or a second run
+   85: -- of this migration).
+   86: ALTER TABLE kai.review_queue_items
+   87:   DROP CONSTRAINT IF EXISTS review_queue_items_queue_type_check;
+   88: 
+   89: COMMIT;
+
+=== ROLE-SIGNAL LINES ===
+----- lines 4-38 -----
+    4: BEGIN
+    5:   IF to_regclass('kai.review_queue_items') IS NULL THEN
+    6:     RAISE EXCEPTION 'kai.review_queue_items is required before P14-12 review-queue queue_type legacy-constraint repair migration';
+    7:   END IF;
+    8: END $$;
+    9: 
+   10: -- P14-12 scope (bounded schema-drift repair only): a USER_CONFIRMED
+   11: -- production snapshot showed kai.review_queue_items simultaneously carrying
+   12: -- an obsolete, pre-P1-06 review_queue_items_queue_type_check fixed allowlist
+   13: -- alongside the canonical, validated P1-06 review_queue_items_p1_06_queue_type_check
+   14: -- contract (already widened by BR-03A to admit board_reporting_candidate_review)
+   15: -- and the validated BR-03B Board review lifecycle contract. PostgreSQL CHECK
+   16: -- constraints are cumulative (ANDed), so the obsolete allowlist - which does
+   17: -- not include board_reporting_candidate_review - blocks every Board
+   18: -- candidate review-queue insert even though the newer, named contracts
+   19: -- already admit it. This is the same class of proven production drift P14-10
+   20: -- repaired for review_queue_items_target_object_type_check: an unnamed-by-the-
+   21: -- application, pre-P1-06 CHECK left in place when the canonical P1-06 table
+   22: -- contract was introduced onto the pre-existing shared production table
+   23: -- (migrations/kai_sprint2_legacy_generation_cutover_20260817.sql section 4
+   24: -- only ever adds the canonical P1-06 constraints by name; it never asserts
+   25: -- anything about, and never drops, this older constraint). No committed
+   26: -- migration in this repository has ever dropped
+   27: -- review_queue_items_queue_type_check.
+   28: --
+   29: -- This migration repairs that one proven, named drift only. It does not
+   30: -- widen any vocabulary beyond what review_queue_items_p1_06_queue_type_check
+   31: -- (as BR-03A last defined it) already authorizes, does not touch any other
+   32: -- constraint, and does not modify data rows.
+   33: 
+   34: -- Fail closed unless the canonical, validated P1-06 queue_type contract is
+   35: -- present and already admits board_reporting_candidate_review - proving the
+   36: -- Board-aware schema prerequisite by inspection of the live predicate, the
+   37: -- same discipline BR-03B established for this same constraint.
+   38: DO $$
+----- lines 51-59 -----
+   51: 
+   52:   IF existing_predicate IS NULL THEN
+   53:     RAISE EXCEPTION 'validated kai.review_queue_items_p1_06_queue_type_check is required before P14-12';
+   54:   END IF;
+   55: 
+   56:   IF position('''board_reporting_candidate_review''' IN existing_predicate) = 0 THEN
+   57:     RAISE EXCEPTION 'kai.review_queue_items_p1_06_queue_type_check does not admit board_reporting_candidate_review; refusing P14-12';
+   58:   END IF;
+   59: END $$;
+----- lines 61-65 -----
+   61: -- Fail closed unless the validated BR-03B Board review lifecycle contract is
+   62: -- present, detected structurally (predicate shape), not by name, because the
+   63: -- BR-03B verifier already established this constraint's catalog name may be
+   64: -- truncated by PostgreSQL's 63-byte identifier limit.
+   65: DO $$
+----- lines 77-87 -----
+   77:        AND pg_get_constraintdef(c.oid) LIKE '%review_status = ''resolved''%'
+   78:   ) THEN
+   79:     RAISE EXCEPTION 'the validated BR-03B Board review lifecycle contract check is required before P14-12';
+   80:   END IF;
+   81: END $$;
+   82: 
+   83: -- The repair itself: remove ONLY the obsolete legacy allowlist. Safe and a
+   84: -- no-op if already absent (a database that never carried it, or a second run
+   85: -- of this migration).
+   86: ALTER TABLE kai.review_queue_items
+   87:   DROP CONSTRAINT IF EXISTS review_queue_items_queue_type_check;
+
+=== DETECTED DDL EFFECT CONTEXT ===
+----- lines 82-89 -----
+   82: 
+   83: -- The repair itself: remove ONLY the obsolete legacy allowlist. Safe and a
+   84: -- no-op if already absent (a database that never carried it, or a second run
+   85: -- of this migration).
+   86: ALTER TABLE kai.review_queue_items
+   87:   DROP CONSTRAINT IF EXISTS review_queue_items_queue_type_check;
+   88: 
+   89: COMMIT;
+
+==============================================================================
+FILE: migrations/kai_sprint2_p1_06_review_status_column_repair.sql
+==============================================================================
+dynamic_sql_candidate: True
+paired_rollback_exists: True
+effect_count: 4
+affected_tables: review_queue_items
+
+=== ACTIVE-PATH OWNERSHIP OF AFFECTED TABLES ===
+
+[review_queue_items]
+classification=ACTIVE_MIGRATION_OWNED
+active_migration_creators=["migrations/kai_sprint2_p1_06_review_queue.sql"]
+active_migration_alterers=["migrations/kai_sprint2_p1_08_source_promotion.sql", "migrations/kai_sprint2_p2_01_evidence_lineage.sql", "migrations/kai_sprint2_p2_03_claim_proposal.sql", "migrations/kai_sprint2_p2_04_claim_gap_followup.sql", "migrations/kai_sprint2_p2_05_conflict_review_candidate.sql", "migrations/kai_sprint2_p2_11_client_followup_completion.sql", "migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.sql", "migrations/kai_sprint2_p3_01_generated_content_drafts.sql", "migrations/kai_sprint2_p3_04_generated_content_review_completion.sql", "migrations/kai_sprint2_p3_05_export_review_request.sql", "migrations/kai_sprint2_p3_09_export_review_start.sql", "migrations/kai_sprint2_p3_13_export_review_completion.sql", "migrations/kai_sprint2_p14_10_review_queue_target_object_type_repair.sql", "migrations/kai_sprint2_p3_20_export_manifest_review_binding.sql", "migrations/kai_sprint2_p14_05_grant_response_packet_export_review_binding.sql", "migrations/kai_sprint2_br_03a_board_reporting_candidate_review_request.sql", "migrations/kai_sprint2_br_03b_board_reporting_candidate_review_lifecycle.sql"]
+all_repository_migration_creators=["migrations/kai_sprint2_legacy_generation_cutover_20260817.sql", "migrations/kai_sprint2_p1_06_review_queue.sql"]
+all_repository_migration_alterers=["migrations/kai_sprint2_br_03a_board_reporting_candidate_review_request.rollback.sql", "migrations/kai_sprint2_br_03a_board_reporting_candidate_review_request.sql", "migrations/kai_sprint2_br_03b_board_reporting_candidate_review_lifecycle.rollback.sql", "migrations/kai_sprint2_br_03b_board_reporting_candidate_review_lifecycle.sql", "migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql", "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql", "migrations/kai_sprint2_p14_05_grant_response_packet_export_review_binding.rollback.sql", "migrations/kai_sprint2_p14_05_grant_response_packet_export_review_binding.sql", "migrations/kai_sprint2_p14_10_review_queue_target_object_type_repair.sql", "migrations/kai_sprint2_p14_12_review_queue_type_check_legacy_repair.rollback.sql", "migrations/kai_sprint2_p14_12_review_queue_type_check_legacy_repair.sql", "migrations/kai_sprint2_p1_06_review_status_column_repair.rollback.sql", "migrations/kai_sprint2_p1_06_review_status_column_repair.sql", "migrations/kai_sprint2_p1_08_source_promotion.rollback.sql", "migrations/kai_sprint2_p1_08_source_promotion.sql", "migrations/kai_sprint2_p2_01_evidence_lineage.rollback.sql", "migrations/kai_sprint2_p2_01_evidence_lineage.sql", "migrations/kai_sprint2_p2_03_claim_proposal.rollback.sql", "migrations/kai_sprint2_p2_03_claim_proposal.sql", "migrations/kai_sprint2_p2_04_claim_gap_followup.rollback.sql", "migrations/kai_sprint2_p2_04_claim_gap_followup.sql", "migrations/kai_sprint2_p2_05_conflict_review_candidate.rollback.sql", "migrations/kai_sprint2_p2_05_conflict_review_candidate.sql", "migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.rollback.sql", "migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.sql", "migrations/kai_sprint2_p2_11_client_followup_completion.rollback.sql", "migrations/kai_sprint2_p2_11_client_followup_completion.sql", "migrations/kai_sprint2_p3_01_generated_content_drafts.rollback.sql", "migrations/kai_sprint2_p3_01_generated_content_drafts.sql", "migrations/kai_sprint2_p3_04_generated_content_review_completion.rollback.sql", "migrations/kai_sprint2_p3_04_generated_content_review_completion.sql", "migrations/kai_sprint2_p3_05_export_review_request.rollback.sql", "migrations/kai_sprint2_p3_05_export_review_request.sql", "migrations/kai_sprint2_p3_09_export_review_start.rollback.sql", "migrations/kai_sprint2_p3_09_export_review_start.sql", "migrations/kai_sprint2_p3_13_export_review_completion.rollback.sql", "migrations/kai_sprint2_p3_13_export_review_completion.sql", "migrations/kai_sprint2_p3_20_export_manifest_review_binding.rollback.sql", "migrations/kai_sprint2_p3_20_export_manifest_review_binding.sql"]
+
+=== REPOSITORY REFERENCES TO THIS FILE ===
+__tests__/kai-sprint2-p1-06-review-status-column-repair-schema-contract.spec.js:5:const migrationSource = readFileSync("migrations/kai_sprint2_p1_06_review_status_column_repair.sql", "utf8");
+scripts/kai-sprint2-p1-06-review-status-repair-local-postgres.js:24:const FORWARD_MIGRATION = "migrations/kai_sprint2_p1_06_review_status_column_repair.sql";
+
+=== FILE CREATION HISTORY ===
+801675bbc24f5a94e198bf4173fae349b4fe2e3d	2026-08-19T09:41:18-07:00	KAI finalize source promotion review cockpit and schema repair
+
+=== RECENT FILE HISTORY ===
+801675bbc24f5a94e198bf4173fae349b4fe2e3d	2026-08-19T09:41:18-07:00	KAI finalize source promotion review cockpit and schema repair
+
+=== FIRST 160 SOURCE LINES ===
+    1: BEGIN;
+    2: 
+    3: -- P1-06 corrective repair: some already-existing kai.review_queue_items rows
+    4: -- were created (outside this repository's own CREATE TABLE IF NOT EXISTS path)
+    5: -- while review_status was still kai.review_status_enum-backed. The shared
+    6: -- kai.review_status_enum never gained a 'resolved' label, so the P1-08
+    7: -- resolved/resolved terminal write (postgresSourcePromotionRepository.js
+    8: -- resolveReviewQueueItemIfCurrent) fails with 22P02 against that starting
+    9: -- shape. This migration converts review_status to a column-local text type
+   10: -- with its own CHECK vocabulary, exactly mirroring the already-reviewed
+   11: -- column definition this repository's own P1-06 migration creates for a
+   12: -- fresh table. It does not touch the shared kai.review_status_enum and does
+   13: -- not alter any other column, table, or review-status semantics.
+   14: --
+   15: -- Fail-fast locking: refuse rather than wait indefinitely for the DDL lock
+   16: -- if a concurrent session already holds one on this table.
+   17: LOCK TABLE ONLY kai.review_queue_items
+   18:   IN ACCESS EXCLUSIVE MODE NOWAIT;
+   19: 
+   20: -- This migration recognizes exactly two starting states and fails closed on
+   21: -- any other: (A) the diagnosed legacy enum-backed contract, which it repairs,
+   22: -- and (B) the exact already-repaired text contract, which it leaves
+   23: -- untouched and validates as a converged no-op. Because the mutation itself
+   24: -- must be conditional on which state is found, it runs via EXECUTE inside
+   25: -- this single guarded DO block rather than as bare top-level DDL.
+   26: DO $review_status_repair$
+   27: DECLARE
+   28:   v_relkind "char";
+   29:   v_ispartition boolean;
+   30:   v_attnum smallint;
+   31:   v_atttypid oid;
+   32:   v_atttypname text;
+   33:   v_atttypnamespace text;
+   34:   v_atttyptype "char";
+   35:   v_attnotnull boolean;
+   36:   v_attidentity "char";
+   37:   v_attgenerated "char";
+   38:   v_defexpr text;
+   39:   v_enum_type_oid oid;
+   40:   v_has_resolved_label boolean;
+   41:   v_non_vocab_count bigint;
+   42:   v_conflicting_check_count integer;
+   43:   v_name_collision_count integer;
+   44:   v_invalid_index_count integer;
+   45:   v_governing_check_count integer;
+   46:   v_check_name text;
+   47:   v_check_validated boolean;
+   48:   v_vocab_ok boolean;
+   49:   v_state text;
+   50: BEGIN
+   51:   -- Guard 1 (common to both recognized states): kai.review_queue_items
+   52:   -- exists as an ordinary, non-partition table.
+   53:   SELECT r.relkind, r.relispartition
+   54:     INTO v_relkind, v_ispartition
+   55:     FROM pg_class r
+   56:     JOIN pg_namespace n ON n.oid = r.relnamespace
+   57:    WHERE n.nspname = 'kai' AND r.relname = 'review_queue_items';
+   58: 
+   59:   IF v_relkind IS NULL THEN
+   60:     RAISE EXCEPTION 'kai.review_queue_items does not exist; refusing the P1-06 review_status repair';
+   61:   END IF;
+   62:   IF v_relkind <> 'r' OR v_ispartition THEN
+   63:     RAISE EXCEPTION 'kai.review_queue_items is not an ordinary non-partition table (relkind=%, relispartition=%); refusing the P1-06 review_status repair', v_relkind, v_ispartition;
+   64:   END IF;
+   65: 
+   66:   SELECT a.attnum, a.atttypid, ty.typname, tn.nspname, ty.typtype,
+   67:          a.attnotnull, a.attidentity, a.attgenerated,
+   68:          pg_get_expr(d.adbin, d.adrelid)
+   69:     INTO v_attnum, v_atttypid, v_atttypname, v_atttypnamespace, v_atttyptype,
+   70:          v_attnotnull, v_attidentity, v_attgenerated, v_defexpr
+   71:     FROM pg_attribute a
+   72:     JOIN pg_class r ON r.oid = a.attrelid
+   73:     JOIN pg_namespace n ON n.oid = r.relnamespace
+   74:     JOIN pg_type ty ON ty.oid = a.atttypid
+   75:     JOIN pg_namespace tn ON tn.oid = ty.typnamespace
+   76:     LEFT JOIN pg_attrdef d ON d.adrelid = r.oid AND d.adnum = a.attnum
+   77:    WHERE n.nspname = 'kai' AND r.relname = 'review_queue_items'
+   78:      AND a.attname = 'review_status' AND NOT a.attisdropped;
+   79: 
+   80:   IF v_attnum IS NULL THEN
+   81:     RAISE EXCEPTION 'kai.review_queue_items.review_status does not exist; refusing the P1-06 review_status repair';
+   82:   END IF;
+   83: 
+   84:   -- Classify the starting state by the column's actual type. Anything that
+   85:   -- is neither the diagnosed legacy enum contract nor the exact repaired
+   86:   -- text contract fails closed rather than being treated as convergence.
+   87:   IF v_atttypname = 'review_status_enum' AND v_atttypnamespace = 'kai' AND v_atttyptype = 'e' THEN
+   88:     v_state := 'legacy';
+   89:   ELSIF v_atttypname = 'text' AND v_atttypnamespace = 'pg_catalog' THEN
+   90:     v_state := 'repaired';
+   91:   ELSE
+   92:     RAISE EXCEPTION 'kai.review_queue_items.review_status is neither the diagnosed legacy enum contract (kai.review_status_enum) nor the exact repaired text contract (found %.%, typtype=%); refusing the P1-06 review_status repair', v_atttypnamespace, v_atttypname, v_atttyptype;
+   93:   END IF;
+   94: 
+   95:   IF v_state = 'legacy' THEN
+   96:     -- ================================================================
+   97:     -- STATE A: LEGACY-COMPATIBLE. Apply the already-accepted
+   98:     -- column-local forward repair.
+   99:     -- ================================================================
+  100:     IF NOT v_attnotnull THEN
+  101:       RAISE EXCEPTION 'kai.review_queue_items.review_status is not NOT NULL; refusing the P1-06 review_status repair';
+  102:     END IF;
+  103:     IF v_defexpr IS DISTINCT FROM '''needs_gk_review''::kai.review_status_enum' THEN
+  104:       RAISE EXCEPTION 'kai.review_queue_items.review_status default is not exactly ''needs_gk_review''::kai.review_status_enum (found %); refusing the P1-06 review_status repair', v_defexpr;
+  105:     END IF;
+  106:     IF v_attidentity <> '' OR v_attgenerated <> '' THEN
+  107:       RAISE EXCEPTION 'kai.review_queue_items.review_status is identity/generated (attidentity=%, attgenerated=%); refusing the P1-06 review_status repair', v_attidentity, v_attgenerated;
+  108:     END IF;
+  109: 
+  110:     -- Guard 4: the shared kai.review_status_enum exists and does NOT
+  111:     -- contain 'resolved'.
+  112:     SELECT ty.oid INTO v_enum_type_oid
+  113:       FROM pg_type ty
+  114:       JOIN pg_namespace n ON n.oid = ty.typnamespace
+  115:      WHERE n.nspname = 'kai' AND ty.typname = 'review_status_enum' AND ty.typtype = 'e';
+  116: 
+  117:     IF v_enum_type_oid IS NULL THEN
+  118:       RAISE EXCEPTION 'kai.review_status_enum does not exist as an enum; refusing the P1-06 review_status repair';
+  119:     END IF;
+  120: 
+  121:     SELECT EXISTS (
+  122:       SELECT 1 FROM pg_enum e WHERE e.enumtypid = v_enum_type_oid AND e.enumlabel = 'resolved'
+  123:     ) INTO v_has_resolved_label;
+  124: 
+  125:     IF v_has_resolved_label THEN
+  126:       RAISE EXCEPTION 'kai.review_status_enum already contains ''resolved''; the shared enum has drifted from the diagnosed starting contract, refusing the P1-06 review_status repair';
+  127:     END IF;
+  128: 
+  129:     -- Guard 5: every existing review_status value is representable in the
+  130:     -- intended P1-06 text vocabulary.
+  131:     EXECUTE format(
+  132:       'SELECT count(*) FROM kai.review_queue_items WHERE review_status::text NOT IN (%L, %L, %L)',
+  133:       'proposed', 'needs_gk_review', 'resolved'
+  134:     ) INTO v_non_vocab_count;
+  135: 
+  136:     IF v_non_vocab_count > 0 THEN
+  137:       RAISE EXCEPTION 'kai.review_queue_items has % row(s) whose review_status is outside {proposed, needs_gk_review, resolved}; refusing the P1-06 review_status repair', v_non_vocab_count;
+  138:     END IF;
+  139: 
+  140:     -- Guard 6: no unexpected existing CHECK constraint structurally
+  141:     -- references the review_status column (detected via conkey, not
+  142:     -- rendered-SQL matching).
+  143:     SELECT count(*) INTO v_conflicting_check_count
+  144:       FROM pg_constraint c
+  145:       JOIN pg_class r ON r.oid = c.conrelid
+  146:       JOIN pg_namespace n ON n.oid = r.relnamespace
+  147:      WHERE n.nspname = 'kai' AND r.relname = 'review_queue_items'
+  148:        AND c.contype = 'c'
+  149:        AND v_attnum = ANY (c.conkey);
+  150: 
+  151:     IF v_conflicting_check_count > 0 THEN
+  152:       RAISE EXCEPTION 'kai.review_queue_items already has % CHECK constraint(s) structurally referencing review_status; refusing to guess a compatible shape', v_conflicting_check_count;
+  153:     END IF;
+  154: 
+  155:     -- Guard 7: the intended constraint name is not already occupied
+  156:     -- unexpectedly.
+  157:     SELECT count(*) INTO v_name_collision_count
+  158:       FROM pg_constraint c
+  159:       JOIN pg_class r ON r.oid = c.conrelid
+  160:       JOIN pg_namespace n ON n.oid = r.relnamespace
+
+=== ROLE-SIGNAL LINES ===
+----- lines 1-5 -----
+    1: BEGIN;
+    2: 
+    3: -- P1-06 corrective repair: some already-existing kai.review_queue_items rows
+    4: -- were created (outside this repository's own CREATE TABLE IF NOT EXISTS path)
+    5: -- while review_status was still kai.review_status_enum-backed. The shared
+----- lines 7-24 -----
+    7: -- resolved/resolved terminal write (postgresSourcePromotionRepository.js
+    8: -- resolveReviewQueueItemIfCurrent) fails with 22P02 against that starting
+    9: -- shape. This migration converts review_status to a column-local text type
+   10: -- with its own CHECK vocabulary, exactly mirroring the already-reviewed
+   11: -- column definition this repository's own P1-06 migration creates for a
+   12: -- fresh table. It does not touch the shared kai.review_status_enum and does
+   13: -- not alter any other column, table, or review-status semantics.
+   14: --
+   15: -- Fail-fast locking: refuse rather than wait indefinitely for the DDL lock
+   16: -- if a concurrent session already holds one on this table.
+   17: LOCK TABLE ONLY kai.review_queue_items
+   18:   IN ACCESS EXCLUSIVE MODE NOWAIT;
+   19: 
+   20: -- This migration recognizes exactly two starting states and fails closed on
+   21: -- any other: (A) the diagnosed legacy enum-backed contract, which it repairs,
+   22: -- and (B) the exact already-repaired text contract, which it leaves
+   23: -- untouched and validates as a converged no-op. Because the mutation itself
+   24: -- must be conditional on which state is found, it runs via EXECUTE inside
+----- lines 58-65 -----
+   58: 
+   59:   IF v_relkind IS NULL THEN
+   60:     RAISE EXCEPTION 'kai.review_queue_items does not exist; refusing the P1-06 review_status repair';
+   61:   END IF;
+   62:   IF v_relkind <> 'r' OR v_ispartition THEN
+   63:     RAISE EXCEPTION 'kai.review_queue_items is not an ordinary non-partition table (relkind=%, relispartition=%); refusing the P1-06 review_status repair', v_relkind, v_ispartition;
+   64:   END IF;
+   65: 
+----- lines 79-109 -----
+   79: 
+   80:   IF v_attnum IS NULL THEN
+   81:     RAISE EXCEPTION 'kai.review_queue_items.review_status does not exist; refusing the P1-06 review_status repair';
+   82:   END IF;
+   83: 
+   84:   -- Classify the starting state by the column's actual type. Anything that
+   85:   -- is neither the diagnosed legacy enum contract nor the exact repaired
+   86:   -- text contract fails closed rather than being treated as convergence.
+   87:   IF v_atttypname = 'review_status_enum' AND v_atttypnamespace = 'kai' AND v_atttyptype = 'e' THEN
+   88:     v_state := 'legacy';
+   89:   ELSIF v_atttypname = 'text' AND v_atttypnamespace = 'pg_catalog' THEN
+   90:     v_state := 'repaired';
+   91:   ELSE
+   92:     RAISE EXCEPTION 'kai.review_queue_items.review_status is neither the diagnosed legacy enum contract (kai.review_status_enum) nor the exact repaired text contract (found %.%, typtype=%); refusing the P1-06 review_status repair', v_atttypnamespace, v_atttypname, v_atttyptype;
+   93:   END IF;
+   94: 
+   95:   IF v_state = 'legacy' THEN
+   96:     -- ================================================================
+   97:     -- STATE A: LEGACY-COMPATIBLE. Apply the already-accepted
+   98:     -- column-local forward repair.
+   99:     -- ================================================================
+  100:     IF NOT v_attnotnull THEN
+  101:       RAISE EXCEPTION 'kai.review_queue_items.review_status is not NOT NULL; refusing the P1-06 review_status repair';
+  102:     END IF;
+  103:     IF v_defexpr IS DISTINCT FROM '''needs_gk_review''::kai.review_status_enum' THEN
+  104:       RAISE EXCEPTION 'kai.review_queue_items.review_status default is not exactly ''needs_gk_review''::kai.review_status_enum (found %); refusing the P1-06 review_status repair', v_defexpr;
+  105:     END IF;
+  106:     IF v_attidentity <> '' OR v_attgenerated <> '' THEN
+  107:       RAISE EXCEPTION 'kai.review_queue_items.review_status is identity/generated (attidentity=%, attgenerated=%); refusing the P1-06 review_status repair', v_attidentity, v_attgenerated;
+  108:     END IF;
+  109: 
+----- lines 116-120 -----
+  116: 
+  117:     IF v_enum_type_oid IS NULL THEN
+  118:       RAISE EXCEPTION 'kai.review_status_enum does not exist as an enum; refusing the P1-06 review_status repair';
+  119:     END IF;
+  120: 
+----- lines 124-131 -----
+  124: 
+  125:     IF v_has_resolved_label THEN
+  126:       RAISE EXCEPTION 'kai.review_status_enum already contains ''resolved''; the shared enum has drifted from the diagnosed starting contract, refusing the P1-06 review_status repair';
+  127:     END IF;
+  128: 
+  129:     -- Guard 5: every existing review_status value is representable in the
+  130:     -- intended P1-06 text vocabulary.
+  131:     EXECUTE format(
+----- lines 135-142 -----
+  135: 
+  136:     IF v_non_vocab_count > 0 THEN
+  137:       RAISE EXCEPTION 'kai.review_queue_items has % row(s) whose review_status is outside {proposed, needs_gk_review, resolved}; refusing the P1-06 review_status repair', v_non_vocab_count;
+  138:     END IF;
+  139: 
+  140:     -- Guard 6: no unexpected existing CHECK constraint structurally
+  141:     -- references the review_status column (detected via conkey, not
+  142:     -- rendered-SQL matching).
+----- lines 150-157 -----
+  150: 
+  151:     IF v_conflicting_check_count > 0 THEN
+  152:       RAISE EXCEPTION 'kai.review_queue_items already has % CHECK constraint(s) structurally referencing review_status; refusing to guess a compatible shape', v_conflicting_check_count;
+  153:     END IF;
+  154: 
+  155:     -- Guard 7: the intended constraint name is not already occupied
+  156:     -- unexpectedly.
+  157:     SELECT count(*) INTO v_name_collision_count
+----- lines 163-167 -----
+  163: 
+  164:     IF v_name_collision_count > 0 THEN
+  165:       RAISE EXCEPTION 'kai.review_queue_items_p1_06_review_status_check already exists unexpectedly; refusing the P1-06 review_status repair';
+  166:     END IF;
+  167: 
+----- lines 176-180 -----
+  176: 
+  177:     IF v_invalid_index_count > 0 THEN
+  178:       RAISE EXCEPTION 'kai.review_queue_items has % index(es) involving review_status that are not valid/ready; refusing the P1-06 review_status repair', v_invalid_index_count;
+  179:     END IF;
+  180: 
+----- lines 207-211 -----
+  207:      WHERE n.nspname = 'kai' AND r.relname = 'review_queue_items';
+  208:     IF v_relkind <> 'r' OR v_ispartition THEN
+  209:       RAISE EXCEPTION 'postcondition failed: kai.review_queue_items is no longer an ordinary non-partition table';
+  210:     END IF;
+  211: 
+----- lines 222-232 -----
+  222: 
+  223:     IF v_atttypname <> 'text' OR v_atttypnamespace <> 'pg_catalog' THEN
+  224:       RAISE EXCEPTION 'postcondition failed: review_status is not pg_catalog.text (found %.%)', v_atttypnamespace, v_atttypname;
+  225:     END IF;
+  226:     IF NOT v_attnotnull THEN
+  227:       RAISE EXCEPTION 'postcondition failed: review_status is no longer NOT NULL';
+  228:     END IF;
+  229:     IF v_defexpr IS DISTINCT FROM '''needs_gk_review''::text' THEN
+  230:       RAISE EXCEPTION 'postcondition failed: review_status default is not exactly ''needs_gk_review''::text (found %)', v_defexpr;
+  231:     END IF;
+  232: 
+----- lines 239-243 -----
+  239:        AND v_attnum = ANY (c.conkey);
+  240:     IF v_governing_check_count <> 1 THEN
+  241:       RAISE EXCEPTION 'postcondition failed: expected exactly 1 CHECK constraint governing review_status, found %', v_governing_check_count;
+  242:     END IF;
+  243: 
+----- lines 250-257 -----
+  250:        AND v_attnum = ANY (c.conkey);
+  251:     IF v_check_name <> 'review_queue_items_p1_06_review_status_check' THEN
+  252:       RAISE EXCEPTION 'postcondition failed: governing CHECK is not review_queue_items_p1_06_review_status_check (found %)', v_check_name;
+  253:     END IF;
+  254:     IF NOT v_check_validated THEN
+  255:       RAISE EXCEPTION 'postcondition failed: review_queue_items_p1_06_review_status_check is not validated';
+  256:     END IF;
+  257: 
+----- lines 261-265 -----
+  261:     ) INTO v_non_vocab_count;
+  262:     IF v_non_vocab_count > 0 THEN
+  263:       RAISE EXCEPTION 'postcondition failed: % row(s) outside the three-value vocabulary', v_non_vocab_count;
+  264:     END IF;
+  265: 
+----- lines 271-275 -----
+  271:     ) INTO v_has_resolved_label;
+  272:     IF v_has_resolved_label THEN
+  273:       RAISE EXCEPTION 'postcondition failed: kai.review_status_enum unexpectedly gained ''resolved''';
+  274:     END IF;
+  275: 
+----- lines 282-289 -----
+  282:        AND NOT (i.indisvalid AND i.indisready);
+  283:     IF v_invalid_index_count > 0 THEN
+  284:       RAISE EXCEPTION 'postcondition failed: % index(es) involving review_status are not valid/ready', v_invalid_index_count;
+  285:     END IF;
+  286: 
+  287:     RAISE NOTICE 'P1-06 review_status column repair applied: legacy enum contract converted to the repaired text contract.';
+  288:   ELSE
+  289:     -- ================================================================
+----- lines 295-305 -----
+  295:     -- ================================================================
+  296:     IF NOT v_attnotnull THEN
+  297:       RAISE EXCEPTION 'converged-state check failed: kai.review_queue_items.review_status is not NOT NULL; refusing the P1-06 review_status repair no-op';
+  298:     END IF;
+  299:     IF v_defexpr IS DISTINCT FROM '''needs_gk_review''::text' THEN
+  300:       RAISE EXCEPTION 'converged-state check failed: review_status default is not exactly ''needs_gk_review''::text (found %); refusing the P1-06 review_status repair no-op', v_defexpr;
+  301:     END IF;
+  302:     IF v_attidentity <> '' OR v_attgenerated <> '' THEN
+  303:       RAISE EXCEPTION 'converged-state check failed: review_status is identity/generated (attidentity=%, attgenerated=%); refusing the P1-06 review_status repair no-op', v_attidentity, v_attgenerated;
+  304:     END IF;
+  305: 
+----- lines 312-316 -----
+  312:        AND v_attnum = ANY (c.conkey);
+  313:     IF v_governing_check_count <> 1 THEN
+  314:       RAISE EXCEPTION 'converged-state check failed: expected exactly 1 CHECK constraint governing review_status, found %; refusing the P1-06 review_status repair no-op', v_governing_check_count;
+  315:     END IF;
+  316: 
+----- lines 323-327 -----
+  323:        AND v_attnum = ANY (c.conkey);
+  324:     IF v_check_name <> 'review_queue_items_p1_06_review_status_check' OR NOT v_check_validated THEN
+  325:       RAISE EXCEPTION 'converged-state check failed: governing CHECK is not the validated review_queue_items_p1_06_review_status_check (name=%, validated=%); refusing the P1-06 review_status repair no-op', v_check_name, v_check_validated;
+  326:     END IF;
+  327: 
+----- lines 343-347 -----
+  343:       ) literals;
+  344:     IF v_vocab_ok IS NOT TRUE THEN
+  345:       RAISE EXCEPTION 'converged-state check failed: review_queue_items_p1_06_review_status_check does not admit exactly {proposed, needs_gk_review, resolved}; refusing the P1-06 review_status repair no-op';
+  346:     END IF;
+  347: 
+----- lines 351-355 -----
+  351:     ) INTO v_non_vocab_count;
+  352:     IF v_non_vocab_count > 0 THEN
+  353:       RAISE EXCEPTION 'converged-state check failed: % row(s) outside the three-value vocabulary; refusing the P1-06 review_status repair no-op', v_non_vocab_count;
+  354:     END IF;
+  355: 
+----- lines 359-363 -----
+  359:      WHERE n.nspname = 'kai' AND ty.typname = 'review_status_enum' AND ty.typtype = 'e';
+  360:     IF v_enum_type_oid IS NULL THEN
+  361:       RAISE EXCEPTION 'converged-state check failed: kai.review_status_enum does not exist as an enum; refusing the P1-06 review_status repair no-op';
+  362:     END IF;
+  363: 
+----- lines 366-370 -----
+  366:     ) INTO v_has_resolved_label;
+  367:     IF v_has_resolved_label THEN
+  368:       RAISE EXCEPTION 'converged-state check failed: kai.review_status_enum already contains ''resolved''; refusing the P1-06 review_status repair no-op';
+  369:     END IF;
+  370: 
+----- lines 377-384 -----
+  377:        AND NOT (i.indisvalid AND i.indisready);
+  378:     IF v_invalid_index_count > 0 THEN
+  379:       RAISE EXCEPTION 'converged-state check failed: % index(es) involving review_status are not valid/ready; refusing the P1-06 review_status repair no-op', v_invalid_index_count;
+  380:     END IF;
+  381: 
+  382:     RAISE NOTICE 'P1-06 review_status column repair: already in the exact repaired contract, converged no-op.';
+  383:   END IF;
+  384: END $review_status_repair$;
+
+=== DETECTED DDL EFFECT CONTEXT ===
+----- lines 184-202 -----
+  184:     -- against an unexpected inheriting child picking up this change
+  185:     -- implicitly. Dollar-quoted EXECUTE keeps the literal DDL text
+  186:     -- identical to a bare statement (no escaped-quote doubling), since the
+  187:     -- mutation is conditional on the branch selected above.
+  188:     EXECUTE $exec$ALTER TABLE ONLY kai.review_queue_items
+  189:       ALTER COLUMN review_status DROP DEFAULT$exec$;
+  190: 
+  191:     EXECUTE $exec$ALTER TABLE ONLY kai.review_queue_items
+  192:       ALTER COLUMN review_status TYPE text
+  193:       USING review_status::text$exec$;
+  194: 
+  195:     EXECUTE $exec$ALTER TABLE ONLY kai.review_queue_items
+  196:       ALTER COLUMN review_status SET DEFAULT 'needs_gk_review'::text$exec$;
+  197: 
+  198:     EXECUTE $exec$ALTER TABLE ONLY kai.review_queue_items
+  199:       ADD CONSTRAINT review_queue_items_p1_06_review_status_check
+  200:       CHECK (review_status IN ('proposed', 'needs_gk_review', 'resolved'))$exec$;
+  201: 
+  202:     -- Postconditions, verified structurally in the same transaction before

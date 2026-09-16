@@ -1,0 +1,122 @@
+[
+  {
+    "path": "scripts/kai-sprint2-p1-07-source-candidate-verifier.sql",
+    "accepted": false,
+    "process_status": 0,
+    "row_count": 35,
+    "stdout_tail": " CHECK-enforced vocabulary or bound on kai.intake_source_candidates\nP1_07_CATALOG,CHECK_EXISTS,intake_source_candidates_p1_07_created_by_type_check,PASS,required CHECK-enforced vocabulary or bound on kai.intake_source_candidates\nP1_07_CATALOG,CHECK_EXISTS,intake_source_candidates_p1_07_proposed_source_type_check,PASS,required CHECK-enforced vocabulary or bound on kai.intake_source_candidates\nP1_07_CATALOG,COLUMN_EXISTS,kai.intake_source_candidates.candidate_status,PASS,canonical column\nP1_07_CATALOG,COLUMN_EXISTS,kai.intake_source_candidates.created_at,PASS,canonical column\nP1_07_CATALOG,COLUMN_EXISTS,kai.intake_source_candidates.created_by,PASS,canonical column\nP1_07_CATALOG,COLUMN_EXISTS,kai.intake_source_candidates.created_by_type,PASS,canonical column\nP1_07_CATALOG,COLUMN_EXISTS,kai.intake_source_candidates.data_dictionary_id,PASS,canonical column\nP1_07_CATALOG,COLUMN_EXISTS,kai.intake_source_candidates.file_profile_id,PASS,canonical column\nP1_07_CATALOG,COLUMN_EXISTS,kai.intake_source_candidates.intake_file_id,PASS,canonical column\nP1_07_CATALOG,COLUMN_EXISTS,kai.intake_source_candidates.intake_sensitivity_profile_id,PASS,canonical column\nP1_07_CATALOG,COLUMN_EXISTS,kai.intake_source_candidates.intake_source_candidate_id,PASS,canonical column\nP1_07_CATALOG,COLUMN_EXISTS,kai.intake_source_candidates.organization_id,PASS,canonical column\nP1_07_CATALOG,COLUMN_EXISTS,kai.intake_source_candidates.profile_canonical_sha256,PASS,canonical column\nP1_07_CATALOG,COLUMN_EXISTS,kai.intake_source_candidates.proposed_source_type,PASS,canonical column\nP1_07_CATALOG,IDENTITY_UNIQUE_CONSTRAINT_EXISTS,intake_source_candidates_p1_07_identity_unique,PASS,one candidate per organization_id + intake_sensitivity_profile_id\nP1_07_CATALOG,LINEAGE_FK_EXISTS,intake_source_candidates_p1_07_dictionary_lineage_fk,PASS,tenant-safe composite lineage foreign key\nP1_07_CATALOG,LINEAGE_FK_EXISTS,intake_source_candidates_p1_07_file_fk,PASS,tenant-safe composite lineage foreign key\nP1_07_CATALOG,LINEAGE_FK_EXISTS,intake_source_candidates_p1_07_profile_lineage_fk,PASS,tenant-safe composite lineage foreign key\nP1_07_CATALOG,LINEAGE_FK_EXISTS,intake_source_candidates_p1_07_sensitivity_lineage_fk,PASS,tenant-safe composite lineage foreign key\nP1_07_CATALOG,NO_PROMOTION_OR_SOURCE_OBJECTS,kai.intake_promotion_decisions,FAIL,\"P1-07 does not create any source, source_version, or promotion-decision table\"\nP1_07_CATALOG,NO_PROMOTION_OR_SOURCE_OBJECTS,kai.source_versions,FAIL,\"P1-07 does not create any source, source_version, or promotion-decision table\"\nP1_07_CATALOG,NO_PROMOTION_OR_SOURCE_OBJECTS,kai.sources,FAIL,\"P1-07 does not create any source, source_version, or promotion-decision table\"\nP1_07_CATALOG,NO_RAW_CONTENT_COLUMN,kai.intake_source_candidates,PASS,\"no raw-content, sample-value, or unrestricted free-text column exists\"\nP1_07_CATALOG,NO_TABLE_WIDE_FK_ON_SHARED_TARGET,kai.review_queue_items.target_object_id,PASS,\"P1-07 adds no table-wide foreign key on the shared, multi-target target_object_id column\"\nP1_07_CATALOG,PROPOSED_SOURCE_TYPE_PINNED_UNKNOWN,kai.intake_source_candidates.proposed_source_type,PASS,\"no explicit source-classification producer contract exists yet, so proposed_source_type is pinned to unknown only\"\nP1_07_CATALOG,QUEUE_TYPE_VOCABULARY,source_candidate_review,PASS,queue_type vocabulary already accepts source_candidate_review (P1-06 reserved it); P1-07 does not edit the accepted P1-06 migration\nP1_07_CATALOG,SENSITIVITY_PROFILE_CANDIDATE_LINEAGE_UNIQUE_EXISTS,intake_sensitivity_profiles_p1_07_candidate_lineage_unique,PASS,P1-07-added unique constraint on kai.intake_sensitivity_profiles needed to express the composite sensitivity-lineage FK\nP1_07_CATALOG,TABLE_EXISTS,kai.intake_source_candidates,PASS,P1-07 canonical source-candidate table\nP1_07_CATALOG,UNIQUE_INDEX_EXISTS,ux_review_queue_items_p1_07_source_candidate_review_identity,PASS,\"partial unique index scopes the source_candidate_review idempotency identity, not a table-wide constraint\"\n",
+    "stderr_tail": ""
+  },
+  {
+    "path": "scripts/kai-sprint2-p2-09-human-review-verifier.sql",
+    "accepted": false,
+    "process_status": 3,
+    "row_count": 9,
+    "stdout_tail": "check_name,status,detail\naudit_operations_allowed,FAIL,upload_lifecycle_audit accepts both new P2-09 operations\nclaim_review_metadata_contract_present,PASS,claim_review_completed_internal_approval audit rows are constrained to metadata-only keys\nclaim_status_unchanged_claim_review_status_widened_by_p2_12,PASS,claims.claim_status is deliberately left pinned (P2-05 depends on it); claim_review_status is widened by P2-12\nclaim_strength_widened,PASS,claims.claim_strength admits unassessed and reviewed_supported only\nevidence_review_metadata_contract_present,PASS,evidence_review_completed audit rows are constrained to metadata-only keys\nevidence_review_status_widened_by_p2_12,PASS,\"evidence_items.evidence_review_status admits needs_gk_review and reviewed (widened by P2-12) - P2-06 additionally requires a decision-ledger head, not this column alone\"\nevidence_support_strength_widened,PASS,evidence_items.support_strength admits unassessed and reviewed_supported only\nno_funder_public_export_state_introduced,PASS,P2-09 introduces no funder/public/export-authority column anywhere in kai schema\np2_12_decision_ledger_tables_present,PASS,P2-12 introduces kai.evidence_review_decisions/kai.claim_review_decisions - the append-only decision ledger\n",
+    "stderr_tail": "psql:scripts/kai-sprint2-p2-09-human-review-verifier.sql:1: NOTICE:  table \"p2_09_results\" does not exist, skipping\npsql:scripts/kai-sprint2-p2-09-human-review-verifier.sql:163: ERROR:  P2-09 human-review verifier failed\nCONTEXT:  PL/pgSQL function inline_code_block line 4 at RAISE\n"
+  },
+  {
+    "path": "scripts/kai-sprint2-p2-10-coverage-review-decision-verifier.sql",
+    "accepted": false,
+    "process_status": 3,
+    "row_count": 12,
+    "stdout_tail": "check_name,status,detail\nappend_only_trigger_present,PASS,kai.coverage_review_decisions rejects UPDATE/DELETE outright - append-only\naudit_metadata_contract_present,PASS,coverage_review_decision_accepted_internal_with_limitation audit rows are constrained to metadata-only keys\naudit_operation_allowed,FAIL,\"upload_lifecycle_audit accepts the P2-10 internal, funder, and public operations\"\ncoverage_review_decisions_table_exists,PASS,kai.coverage_review_decisions exists\ndecided_by_role_pinned_to_gk_reviewer,PASS,decided_by_role is pinned to gk_reviewer only - never gk_admin/gk_operator\ndecision_value_pinned,PASS,\"decision column CHECK vocabulary is the exact closed three-value set {accepted_internal_with_limitation, accepted_funder_with_limitation, accepted_public_with_limitation} - no other value is permitted\"\ngap_log_item_fk_present,PASS,a coverage decision can only ever bind to a claim/dimension that already has a current P2-04 gap row\nidentity_fingerprint_unique,PASS,\"(organization_id, claim_id, dimension_key, state_fingerprint, decision) is unique - exact replay is audience/authority-specific\"\nno_authority_scope_double_encoding,PASS,coverage authority scope is encoded only by decision value - no contradictory audience/scope column exists\nno_funder_public_export_state_introduced,PASS,P2-10 introduces no funder/public/export-authority column anywhere in kai schema\nno_raw_content_columns,PASS,\"kai.coverage_review_decisions persists no claim/evidence text, question text, raw values, or storage locations\"\np2_02_p2_04_p2_05_untouched,PASS,gap_log_items assessment_status vocabulary is unchanged (resolved_risk_flagged/unresolved only)\n",
+    "stderr_tail": "psql:scripts/kai-sprint2-p2-10-coverage-review-decision-verifier.sql:1: NOTICE:  table \"p2_10_results\" does not exist, skipping\npsql:scripts/kai-sprint2-p2-10-coverage-review-decision-verifier.sql:206: ERROR:  P2-10 coverage-review-decision verifier failed\nCONTEXT:  PL/pgSQL function inline_code_block line 4 at RAISE\n"
+  },
+  {
+    "path": "scripts/kai-sprint2-p2-11-client-followup-completion-verifier.sql",
+    "accepted": false,
+    "process_status": 3,
+    "row_count": 7,
+    "stdout_tail": "check_name,status,detail\naudit_metadata_contract_present,PASS,client_followup_completed audit rows are constrained to metadata-only keys with disposition pinned to no_additional_client_information\naudit_metadata_forbids_answer_fields,PASS,the P2-11 audit metadata contract explicitly forbids answer/client_answer/question_text/safe_summary/raw_value keys\naudit_operation_allowed,FAIL,upload_lifecycle_audit accepts the new P2-11 client_followup_completed operation\nclient_followup_contract_admits_resolved_branch,PASS,the client_followup contract CHECK admits both the fresh (waiting_on_client/proposed) and resolved (resolved/resolved) branches\nno_client_answer_columns_introduced,PASS,P2-11 introduces no client-answer/free-text/raw-value column on kai.client_followup_items or kai.gap_log_items\nno_funder_public_export_state_introduced,PASS,P2-11 introduces no funder/public/export-authority column anywhere in kai schema\np2_02_p2_04_dimension_vocabulary_untouched,PASS,gap_log_items assessment_status vocabulary is unchanged (resolved_risk_flagged/unresolved only) - P2-11 never resolves a gap\n",
+    "stderr_tail": "psql:scripts/kai-sprint2-p2-11-client-followup-completion-verifier.sql:1: NOTICE:  table \"p2_11_results\" does not exist, skipping\npsql:scripts/kai-sprint2-p2-11-client-followup-completion-verifier.sql:115: ERROR:  P2-11 client-followup-completion verifier failed\nCONTEXT:  PL/pgSQL function inline_code_block line 4 at RAISE\n"
+  },
+  {
+    "path": "scripts/kai-sprint2-p2-12-human-review-decision-ledger-verifier.sql",
+    "accepted": false,
+    "process_status": 3,
+    "row_count": 14,
+    "stdout_tail": "check_name,status,detail\nclaim_review_audit_metadata_widened,PASS,claim_review_completed_internal_approval audit rows are now required to carry decision_id/approved_audiences\nclaim_review_decisions_append_only_trigger,PASS,claim_review_decisions has its append-only BEFORE UPDATE OR DELETE trigger\nclaim_review_decisions_root_and_successor_indexes,PASS,claim_review_decisions has root-per-lineage and single-successor partial unique indexes\nclaim_review_decisions_table_exists,PASS,kai.claim_review_decisions exists\nclaim_review_status_widened,PASS,claims.claim_review_status admits needs_gk_review and reviewed\nclaim_status_unchanged,PASS,claims.claim_status is deliberately left pinned to proposed - P2-05 conflict-candidate detection depends on it\nclaim_strength_widened_with_negative_terminal,PASS,claims.claim_strength admits reviewed_not_supported\nevidence_review_audit_metadata_widened,PASS,evidence_review_completed audit rows are now required to carry decision_id/decision_outcome\nevidence_review_decisions_append_only_trigger,PASS,evidence_review_decisions has its append-only BEFORE UPDATE OR DELETE trigger\nevidence_review_decisions_root_and_successor_indexes,PASS,evidence_review_decisions has root-per-lineage and single-successor partial unique indexes\nevidence_review_decisions_table_exists,PASS,kai.evidence_review_decisions exists\nevidence_review_status_widened,PASS,evidence_items.evidence_review_status admits needs_gk_review and reviewed\nno_new_audit_operation_strings_introduced,FAIL,P2-12 reuses the existing evidence_review_completed/claim_review_completed_internal_approval operation values - no new operation string\nsupport_strength_widened_with_negative_terminal,PASS,evidence_items.support_strength admits reviewed_not_supported\n",
+    "stderr_tail": "psql:scripts/kai-sprint2-p2-12-human-review-decision-ledger-verifier.sql:1: NOTICE:  table \"p2_12_results\" does not exist, skipping\npsql:scripts/kai-sprint2-p2-12-human-review-decision-ledger-verifier.sql:196: ERROR:  P2-12 human-review-decision-ledger verifier failed\nCONTEXT:  PL/pgSQL function inline_code_block line 4 at RAISE\n"
+  },
+  {
+    "path": "scripts/kai-sprint2-p3-01-generated-content-drafts-verifier.sql",
+    "accepted": false,
+    "process_status": 3,
+    "row_count": 8,
+    "stdout_tail": "check_name,status,detail\naudit_metadata_safe_contract,PASS,P3-01 audit metadata is constrained to metadata-only identifiers and counts\naudit_operation_allowed,PASS,metadata-only audit operation vocabulary includes P3-01 creation\ndraft_block_citation_tables_present,PASS,\"draft, block, and citation tables exist\"\ndraft_only_no_approval_or_export_columns,PASS,\"generated content schema has no approval, finalize, export, funder/public-ready, or source-of-truth state\"\ngenerated_content_review_queue_identity,FAIL,exactly one generated_content_review item per draft identity\ngeneration_runs_present,PASS,generation run reservation table exists\nidempotency_identity_unique,PASS,organization_id + idempotency_key is the PostgreSQL arbiter\nimmutable_relationship_uniques,PASS,\"one draft per run, blocks unique by ordinal, citations unique by block/claim/evidence\"\n",
+    "stderr_tail": "psql:scripts/kai-sprint2-p3-01-generated-content-drafts-verifier.sql:1: NOTICE:  table \"p3_01_results\" does not exist, skipping\npsql:scripts/kai-sprint2-p3-01-generated-content-drafts-verifier.sql:109: ERROR:  P3-01 generated-content verifier failed\nCONTEXT:  PL/pgSQL function inline_code_block line 4 at RAISE\n"
+  },
+  {
+    "path": "scripts/kai-sprint2-p13-01-impact-narrative-content-type-verifier.sql",
+    "accepted": false,
+    "process_status": 3,
+    "row_count": 5,
+    "stdout_tail": "check_name,status,detail\ndraft_status_review_status_and_created_by_contracts_unchanged,PASS,\"P13-01 leaves draft-only, needs-review, and system-owned creation contracts in place\"\ngenerated_content_drafts_content_type_contract_allows_exact_p13_vocabulary,FAIL,kai.generated_content_drafts.content_type allows exactly evidence_summary and impact_narrative\ngeneration_runs_content_type_contract_allows_exact_p13_vocabulary,FAIL,kai.generation_runs.content_type allows exactly evidence_summary and impact_narrative\nno_p13_queue_export_or_authority_schema,PASS,\"P13-01 adds no impact facts, export/finalization, audience authority, or final-gate schema\"\nrequested_audience_contract_unchanged,PASS,P13-01 does not alter the existing requested_audience contracts\n",
+    "stderr_tail": "psql:scripts/kai-sprint2-p13-01-impact-narrative-content-type-verifier.sql:1: NOTICE:  table \"p13_01_results\" does not exist, skipping\npsql:scripts/kai-sprint2-p13-01-impact-narrative-content-type-verifier.sql:92: ERROR:  P13-01 impact-narrative content-type verifier failed\nCONTEXT:  PL/pgSQL function inline_code_block line 4 at RAISE\n"
+  },
+  {
+    "path": "scripts/kai-sprint2-p14-14-generated-content-type-evolution-verifier.sql",
+    "accepted": false,
+    "process_status": 3,
+    "row_count": 8,
+    "stdout_tail": "check_name,status,detail\ncontent_type_still_explicit_enumeration,PASS,\"content_type remains an explicit IN(...)/ANY(ARRAY[...]) enumeration, not a weakened free-text check\"\nfingerprint_draft_status_review_status_and_created_by_contracts_unchanged,PASS,\"P14-14 leaves fingerprint, draft-only, needs-review, and system-owned creation contracts in place\"\ngenerated_content_drafts_content_type_contract_allows_exact_p14_14_vocabulary,PASS,\"kai.generated_content_drafts.content_type allows exactly evidence_summary, impact_narrative, readiness_assessment, data_gap_memo\"\ngeneration_runs_content_type_contract_allows_exact_p14_14_vocabulary,PASS,\"kai.generation_runs.content_type allows exactly evidence_summary, impact_narrative, readiness_assessment, data_gap_memo\"\nidentity_and_fk_contracts_unchanged,PASS,P14-14 leaves uniqueness and foreign-key identity contracts in place\nrequested_audience_contract_unchanged,PASS,P14-14 does not alter the existing requested_audience contracts\nreview_queue_and_audit_contracts_unchanged,FAIL,P14-14 leaves the generated-content review-queue and audit contracts in place\nunknown_content_type_rejected_by_generation_runs,PASS,kai.generation_runs.content_type constraint text does not admit an arbitrary/unknown type token\n",
+    "stderr_tail": "psql:scripts/kai-sprint2-p14-14-generated-content-type-evolution-verifier.sql:1: NOTICE:  table \"p14_14_results\" does not exist, skipping\npsql:scripts/kai-sprint2-p14-14-generated-content-type-evolution-verifier.sql:121: ERROR:  P14-14 generated-content type-evolution verifier failed\nCONTEXT:  PL/pgSQL function inline_code_block line 4 at RAISE\n"
+  },
+  {
+    "path": "scripts/kai-sprint2-p3-05-export-review-request-verifier.sql",
+    "accepted": false,
+    "process_status": 3,
+    "row_count": 0,
+    "stdout_tail": "",
+    "stderr_tail": "psql:scripts/kai-sprint2-p3-05-export-review-request-verifier.sql:1: NOTICE:  table \"p3_05_results\" does not exist, skipping\npsql:scripts/kai-sprint2-p3-05-export-review-request-verifier.sql:2: NOTICE:  table \"p3_05_expected_checks\" does not exist, skipping\npsql:scripts/kai-sprint2-p3-05-export-review-request-verifier.sql:113: ERROR:  P3-05 export-review-request verifier failed\nCONTEXT:  PL/pgSQL function inline_code_block line 4 at RAISE\n"
+  },
+  {
+    "path": "scripts/kai-sprint2-p3-09-export-review-start-verifier.sql",
+    "accepted": false,
+    "process_status": 3,
+    "row_count": 0,
+    "stdout_tail": "",
+    "stderr_tail": "psql:scripts/kai-sprint2-p3-09-export-review-start-verifier.sql:1: NOTICE:  table \"p3_09_results\" does not exist, skipping\npsql:scripts/kai-sprint2-p3-09-export-review-start-verifier.sql:2: NOTICE:  table \"p3_09_expected_checks\" does not exist, skipping\npsql:scripts/kai-sprint2-p3-09-export-review-start-verifier.sql:136: ERROR:  P3-09 export-review-start verifier failed\nCONTEXT:  PL/pgSQL function inline_code_block line 4 at RAISE\n"
+  },
+  {
+    "path": "scripts/kai-sprint2-p3-13-export-review-completion-verifier.sql",
+    "accepted": false,
+    "process_status": 3,
+    "row_count": 0,
+    "stdout_tail": "",
+    "stderr_tail": "psql:scripts/kai-sprint2-p3-13-export-review-completion-verifier.sql:1: NOTICE:  table \"p3_13_results\" does not exist, skipping\npsql:scripts/kai-sprint2-p3-13-export-review-completion-verifier.sql:2: NOTICE:  table \"p3_13_expected_checks\" does not exist, skipping\npsql:scripts/kai-sprint2-p3-13-export-review-completion-verifier.sql:137: ERROR:  P3-13 export-review-completion verifier failed\nCONTEXT:  PL/pgSQL function inline_code_block line 4 at RAISE\n"
+  },
+  {
+    "path": "scripts/kai-sprint2-p3-16-export-candidate-foundation-verifier.sql",
+    "accepted": false,
+    "process_status": 3,
+    "row_count": 0,
+    "stdout_tail": "",
+    "stderr_tail": "psql:scripts/kai-sprint2-p3-16-export-candidate-foundation-verifier.sql:1: NOTICE:  table \"p3_16_results\" does not exist, skipping\npsql:scripts/kai-sprint2-p3-16-export-candidate-foundation-verifier.sql:2: NOTICE:  table \"p3_16_expected_checks\" does not exist, skipping\npsql:scripts/kai-sprint2-p3-16-export-candidate-foundation-verifier.sql:291: ERROR:  P3-16 export-candidate-foundation verifier failed\nCONTEXT:  PL/pgSQL function inline_code_block line 4 at RAISE\n"
+  },
+  {
+    "path": "scripts/kai-sprint2-p14-15-export-candidate-content-type-evolution-verifier.sql",
+    "accepted": false,
+    "process_status": 0,
+    "row_count": 1,
+    "stdout_tail": "verification,failures\nP14_15_EXPORT_CANDIDATE_CONTENT_TYPE_EVOLUTION_VERIFIED,0\n",
+    "stderr_tail": ""
+  },
+  {
+    "path": "scripts/kai-sprint2-p3-17-human-authority-decision-ledger-verifier.sql",
+    "accepted": false,
+    "process_status": 3,
+    "row_count": 0,
+    "stdout_tail": "",
+    "stderr_tail": "psql:scripts/kai-sprint2-p3-17-human-authority-decision-ledger-verifier.sql:1: NOTICE:  table \"p3_17_results\" does not exist, skipping\npsql:scripts/kai-sprint2-p3-17-human-authority-decision-ledger-verifier.sql:2: NOTICE:  table \"p3_17_expected_checks\" does not exist, skipping\npsql:scripts/kai-sprint2-p3-17-human-authority-decision-ledger-verifier.sql:229: ERROR:  P3-17 human-authority-decision-ledger verifier failed\nCONTEXT:  PL/pgSQL function inline_code_block line 4 at RAISE\n"
+  },
+  {
+    "path": "scripts/kai-sprint2-gk-organization-tenant-binding-verifier.sql",
+    "accepted": false,
+    "process_status": 3,
+    "row_count": 10,
+    "stdout_tail": "check_name,status,detail\ngk_organization_id_column_present,PASS,gk_organization_id is a required integer column\ngk_organization_id_fk_present,PASS,gk_organization_id has a foreign key to public.organizations(id)\nkai_organization_id_column_present,PASS,kai_organization_id is a required uuid column\nno_other_kai_relation_introduced,FAIL,this migration introduces exactly one kai schema relation in an otherwise-empty kai schema\nstatus_check_present,PASS,status is constrained to active/inactive\nstatus_default_active,PASS,status defaults to active\ntable_present,PASS,kai.gk_organization_bindings exists\nunique_active_gk_org_index_present,PASS,at most one active binding per Get Kinder organization is schema-enforced\nunique_active_kai_org_index_present,PASS,at most one active binding per KAI tenant is schema-enforced\nupdated_at_trigger_present,PASS,updated_at is touched automatically on UPDATE\n",
+    "stderr_tail": "psql:scripts/kai-sprint2-gk-organization-tenant-binding-verifier.sql:1: NOTICE:  table \"gk_org_binding_results\" does not exist, skipping\npsql:scripts/kai-sprint2-gk-organization-tenant-binding-verifier.sql:119: ERROR:  gk_organization_tenant_binding verifier failed\nCONTEXT:  PL/pgSQL function inline_code_block line 4 at RAISE\n"
+  }
+]

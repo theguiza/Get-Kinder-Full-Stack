@@ -1,0 +1,36 @@
+full_authority_tables=64
+full_authority_equal=62
+full_authority_different=2
+full_authority_missing_from_production=0
+production_only_tables=15
+
+=== FULL-AUTHORITY DIFFERENCES ===
+engagement_requirement_sets
+upload_policy_decision_replay
+
+=== FULL-AUTHORITY MISSING ===
+NONE
+
+=== REVIEW_QUEUE_ITEMS POSTCONDITIONS ===
+review_status_matches_fresh_contract=True
+obsolete_queue_type_check_present=False
+canonical_queue_type_check_present=True
+canonical_queue_type_check_validated=True
+board_lifecycle_constraint_matches=1
+
+=== PRODUCTION-ONLY TABLES ===
+export_items
+exports
+funder_requirements
+funders
+graph_relationships
+intake_batches
+model_outputs
+prompt_runs
+prompt_templates
+report_sections
+reports
+retention_jobs
+retention_rules
+review_decisions
+rubrics

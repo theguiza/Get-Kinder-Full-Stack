@@ -1,0 +1,3700 @@
+{
+  "authority": {
+    "bootstrap_only_tables": [
+      "audit_events",
+      "engagements",
+      "organization_memberships",
+      "organizations",
+      "roles",
+      "user_roles",
+      "users"
+    ],
+    "full_authority_table_count": 64,
+    "mixed_base_tables": [
+      "intake_files"
+    ],
+    "shared_preexisting_tables": [
+      "review_queue_items",
+      "upload_lifecycle_audit"
+    ]
+  },
+  "expected_only_tables": [],
+  "foundation_presence": {
+    "audit_events": {
+      "fresh_present": true,
+      "production_present": true
+    },
+    "engagements": {
+      "fresh_present": true,
+      "production_present": true
+    },
+    "organization_memberships": {
+      "fresh_present": true,
+      "production_present": true
+    },
+    "organizations": {
+      "fresh_present": true,
+      "production_present": true
+    },
+    "roles": {
+      "fresh_present": true,
+      "production_present": true
+    },
+    "user_roles": {
+      "fresh_present": true,
+      "production_present": true
+    },
+    "users": {
+      "fresh_present": true,
+      "production_present": true
+    }
+  },
+  "full_authority_different_tables": [
+    "engagement_requirement_sets",
+    "upload_policy_decision_replay"
+  ],
+  "full_authority_equal_tables": [
+    "board_reporting_candidate_export_manifests",
+    "board_reporting_candidate_human_authority_decisions",
+    "board_reporting_candidate_members",
+    "board_reporting_candidates",
+    "claim_evidence_links",
+    "claim_review_decisions",
+    "claims",
+    "client_followup_items",
+    "conflict_groups",
+    "coverage_review_decisions",
+    "data_dictionaries",
+    "data_dictionary_fields",
+    "data_dictionary_mappings",
+    "data_quality_findings",
+    "evidence_items",
+    "evidence_review_decisions",
+    "export_candidates",
+    "export_manifests",
+    "gap_log_items",
+    "generated_content_blocks",
+    "generated_content_citations",
+    "generated_content_drafts",
+    "generation_runs",
+    "gk_organization_bindings",
+    "grant_response_packet_export_candidate_members",
+    "grant_response_packet_export_candidates",
+    "grant_response_packet_export_identities",
+    "grant_response_packet_export_manifests",
+    "grant_response_packet_human_authority_decisions",
+    "human_authority_decisions",
+    "impact_evaluation_criteria",
+    "impact_evaluation_framework_versions",
+    "impact_evaluation_result_claim_links",
+    "impact_evaluation_result_evidence_links",
+    "impact_evaluation_results",
+    "impact_evaluations",
+    "impact_outcome_contexts",
+    "intake_file_profiles",
+    "intake_parser_runs",
+    "intake_promotion_decisions",
+    "intake_sensitivity_profiles",
+    "intake_sensitivity_review_decisions",
+    "intake_source_candidates",
+    "limitation_snapshot_entries",
+    "limitation_snapshots",
+    "ra_claim_review_decision_links",
+    "ra_conflict_resolution_links",
+    "ra_evidence_review_decision_links",
+    "ra_gap_links",
+    "ra_outcome_context_links",
+    "ra_source_promotion_links",
+    "requirement_assessment_claim_links",
+    "requirement_assessment_evaluation_result_links",
+    "requirement_assessment_evidence_links",
+    "requirement_assessments",
+    "requirement_framework_versions",
+    "requirement_sets",
+    "requirement_sources",
+    "requirements",
+    "source_locators",
+    "source_versions",
+    "sources"
+  ],
+  "full_authority_missing_tables": [],
+  "full_authority_results": [
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "board_reporting_candidate_export_manifests"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "board_reporting_candidate_human_authority_decisions"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "board_reporting_candidate_members"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "board_reporting_candidates"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "claim_evidence_links"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "claim_review_decisions"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "claims"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "client_followup_items"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "conflict_groups"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "coverage_review_decisions"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "data_dictionaries"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "data_dictionary_fields"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "data_dictionary_mappings"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "data_quality_findings"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [
+            {
+              "attnum": 12,
+              "column_name": "applicability_effective_state",
+              "default": "'pending_review'::text",
+              "generated_kind": "",
+              "identity_kind": "",
+              "not_null": true,
+              "table_name": "engagement_requirement_sets",
+              "type": "text"
+            },
+            {
+              "attnum": 11,
+              "column_name": "reviewed_at",
+              "default": null,
+              "generated_kind": "",
+              "identity_kind": "",
+              "not_null": false,
+              "table_name": "engagement_requirement_sets",
+              "type": "timestamp with time zone"
+            },
+            {
+              "attnum": 9,
+              "column_name": "reviewed_by",
+              "default": null,
+              "generated_kind": "",
+              "identity_kind": "",
+              "not_null": false,
+              "table_name": "engagement_requirement_sets",
+              "type": "uuid"
+            },
+            {
+              "attnum": 10,
+              "column_name": "reviewed_by_role",
+              "default": null,
+              "generated_kind": "",
+              "identity_kind": "",
+              "not_null": false,
+              "table_name": "engagement_requirement_sets",
+              "type": "text"
+            },
+            {
+              "attnum": 13,
+              "column_name": "supersedes_engagement_requirement_set_id",
+              "default": null,
+              "generated_kind": "",
+              "identity_kind": "",
+              "not_null": false,
+              "table_name": "engagement_requirement_sets",
+              "type": "uuid"
+            },
+            {
+              "attnum": 14,
+              "column_name": "target_context_identity",
+              "default": null,
+              "generated_kind": "",
+              "identity_kind": "",
+              "not_null": false,
+              "table_name": "engagement_requirement_sets",
+              "type": "jsonb"
+            }
+          ],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [
+            {
+              "definition": "CHECK (target_context_identity IS NULL OR jsonb_typeof(target_context_identity) = 'object'::text AND target_context_identity ? 'target_funder_id'::text AND target_context_identity ? 'target_framework'::text)",
+              "name": "engagement_requirement_sets_package_2a_approved_target_check",
+              "table_name": "engagement_requirement_sets",
+              "type": "c",
+              "validated": true
+            },
+            {
+              "definition": "CHECK (applicability_effective_state = ANY (ARRAY['pending_review'::text, 'applicable'::text, 'not_applicable'::text, 'retired'::text]))",
+              "name": "engagement_requirement_sets_package_2a_effective_state_check",
+              "table_name": "engagement_requirement_sets",
+              "type": "c",
+              "validated": true
+            },
+            {
+              "definition": "UNIQUE (engagement_requirement_set_id, organization_id, engagement_id, requirement_set_id)",
+              "name": "engagement_requirement_sets_package_2a_id_org_engagement_set_un",
+              "table_name": "engagement_requirement_sets",
+              "type": "u",
+              "validated": true
+            },
+            {
+              "definition": "CHECK (supersedes_engagement_requirement_set_id IS DISTINCT FROM engagement_requirement_set_id)",
+              "name": "engagement_requirement_sets_package_2a_not_self_superseding",
+              "table_name": "engagement_requirement_sets",
+              "type": "c",
+              "validated": true
+            },
+            {
+              "definition": "CHECK (reviewed_by IS NULL AND reviewed_by_role IS NULL AND reviewed_at IS NULL OR reviewed_by IS NOT NULL AND (reviewed_by_role = ANY (ARRAY['gk_admin'::text, 'gk_operator'::text, 'gk_reviewer'::text, 'client_admin'::text])) AND reviewed_at IS NOT NULL)",
+              "name": "engagement_requirement_sets_package_2a_reviewed_authority_check",
+              "table_name": "engagement_requirement_sets",
+              "type": "c",
+              "validated": true
+            },
+            {
+              "definition": "CHECK (applicability_effective_state = 'pending_review'::text OR applicability_status = 'confirmed'::text AND reviewed_by IS NOT NULL AND reviewed_by_role IS NOT NULL AND reviewed_at IS NOT NULL AND target_context_identity IS NOT NULL)",
+              "name": "engagement_requirement_sets_package_2a_reviewed_effective_consi",
+              "table_name": "engagement_requirement_sets",
+              "type": "c",
+              "validated": true
+            },
+            {
+              "definition": "FOREIGN KEY (supersedes_engagement_requirement_set_id, organization_id, engagement_id, requirement_set_id) REFERENCES kai.engagement_requirement_sets(engagement_requirement_set_id, organization_id, engagement_id, requirement_set_id) ON DELETE RESTRICT",
+              "name": "engagement_requirement_sets_package_2a_supersedes_fk",
+              "table_name": "engagement_requirement_sets",
+              "type": "f",
+              "validated": true
+            }
+          ],
+          "production_only": [
+            {
+              "definition": "UNIQUE (organization_id, engagement_id, requirement_set_id)",
+              "name": "engagement_requirement_sets_b1_1_identity_unique",
+              "table_name": "engagement_requirement_sets",
+              "type": "u",
+              "validated": true
+            }
+          ]
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [
+            {
+              "definition": "CREATE UNIQUE INDEX engagement_requirement_sets_package_2a_id_org_engagement_set_un ON kai.engagement_requirement_sets USING btree (engagement_requirement_set_id, organization_id, engagement_id, requirement_set_id)",
+              "name": "engagement_requirement_sets_package_2a_id_org_engagement_set_un",
+              "table_name": "engagement_requirement_sets"
+            },
+            {
+              "definition": "CREATE INDEX ix_engagement_requirement_sets_package_2a_current_lookup ON kai.engagement_requirement_sets USING btree (organization_id, engagement_id, applicability_effective_state) WHERE (supersedes_engagement_requirement_set_id IS NULL)",
+              "name": "ix_engagement_requirement_sets_package_2a_current_lookup",
+              "table_name": "engagement_requirement_sets"
+            },
+            {
+              "definition": "CREATE UNIQUE INDEX ux_engagement_requirement_sets_package_2a_current_identity ON kai.engagement_requirement_sets USING btree (organization_id, engagement_id, requirement_set_id) WHERE (supersedes_engagement_requirement_set_id IS NULL)",
+              "name": "ux_engagement_requirement_sets_package_2a_current_identity",
+              "table_name": "engagement_requirement_sets"
+            },
+            {
+              "definition": "CREATE UNIQUE INDEX ux_engagement_requirement_sets_package_2a_single_successor ON kai.engagement_requirement_sets USING btree (supersedes_engagement_requirement_set_id) WHERE (supersedes_engagement_requirement_set_id IS NOT NULL)",
+              "name": "ux_engagement_requirement_sets_package_2a_single_successor",
+              "table_name": "engagement_requirement_sets"
+            }
+          ],
+          "production_only": [
+            {
+              "definition": "CREATE UNIQUE INDEX engagement_requirement_sets_b1_1_identity_unique ON kai.engagement_requirement_sets USING btree (organization_id, engagement_id, requirement_set_id)",
+              "name": "engagement_requirement_sets_b1_1_identity_unique",
+              "table_name": "engagement_requirement_sets"
+            }
+          ]
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [
+            {
+              "definition": "CREATE TRIGGER trg_package_2a_engagement_requirement_sets_append_only BEFORE DELETE OR UPDATE ON kai.engagement_requirement_sets FOR EACH ROW EXECUTE FUNCTION kai.package_2a_reject_engagement_requirement_set_mutation()",
+              "enabled": "O",
+              "name": "trg_package_2a_engagement_requirement_sets_append_only",
+              "table_name": "engagement_requirement_sets"
+            }
+          ],
+          "production_only": []
+        }
+      },
+      "is_equal": false,
+      "present_expected": true,
+      "present_production": true,
+      "table": "engagement_requirement_sets"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "evidence_items"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "evidence_review_decisions"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "export_candidates"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "export_manifests"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "gap_log_items"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "generated_content_blocks"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "generated_content_citations"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "generated_content_drafts"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "generation_runs"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "gk_organization_bindings"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "grant_response_packet_export_candidate_members"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "grant_response_packet_export_candidates"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "grant_response_packet_export_identities"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "grant_response_packet_export_manifests"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "grant_response_packet_human_authority_decisions"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "human_authority_decisions"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "impact_evaluation_criteria"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "impact_evaluation_framework_versions"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "impact_evaluation_result_claim_links"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "impact_evaluation_result_evidence_links"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "impact_evaluation_results"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "impact_evaluations"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "impact_outcome_contexts"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "intake_file_profiles"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "intake_parser_runs"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "intake_promotion_decisions"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "intake_sensitivity_profiles"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "intake_sensitivity_review_decisions"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "intake_source_candidates"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "limitation_snapshot_entries"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "limitation_snapshots"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "ra_claim_review_decision_links"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "ra_conflict_resolution_links"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "ra_evidence_review_decision_links"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "ra_gap_links"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "ra_outcome_context_links"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "ra_source_promotion_links"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "requirement_assessment_claim_links"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "requirement_assessment_evaluation_result_links"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "requirement_assessment_evidence_links"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "requirement_assessments"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "requirement_framework_versions"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "requirement_sets"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "requirement_sources"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "requirements"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "source_locators"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "source_versions"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": true,
+      "present_expected": true,
+      "present_production": true,
+      "table": "sources"
+    },
+    {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [
+            {
+              "definition": "CREATE INDEX ix_upload_policy_decision_replay_gate_a_object_facts ON kai.upload_policy_decision_replay USING btree (organization_id, intake_file_id, object_version_id, verified_checksum, verified_size_bytes)",
+              "name": "ix_upload_policy_decision_replay_gate_a_object_facts",
+              "table_name": "upload_policy_decision_replay"
+            }
+          ],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": false,
+      "present_expected": true,
+      "present_production": true,
+      "table": "upload_policy_decision_replay"
+    }
+  ],
+  "full_authority_summary": {
+    "different": 2,
+    "equal": 62,
+    "missing_from_production": 0
+  },
+  "production_only_tables": [
+    "export_items",
+    "exports",
+    "funder_requirements",
+    "funders",
+    "graph_relationships",
+    "intake_batches",
+    "model_outputs",
+    "prompt_runs",
+    "prompt_templates",
+    "report_sections",
+    "reports",
+    "retention_jobs",
+    "retention_rules",
+    "review_decisions",
+    "rubrics"
+  ],
+  "review_queue_postconditions": {
+    "board_lifecycle_constraint_matches": [
+      {
+        "definition": "CHECK (queue_type <> 'board_reporting_candidate_review'::text OR target_object_type = 'board_reporting_candidate'::text AND (queue_status = 'open'::text AND review_status = 'needs_gk_review'::text OR queue_status = 'in_progress'::text AND review_status = 'needs_gk_review'::text OR queue_status = 'resolved'::text AND review_status = 'resolved'::text) AND priority = 'medium'::kai.priority_enum AND summary = 'Board Reporting candidate requires review.'::text AND required_action = 'Review internal Board packet membership and current-use support before release work.'::text AND blocked_reason IS NULL AND assigned_to IS NULL AND due_at IS NULL AND queue_metadata = '{}'::jsonb AND created_by IS NULL AND created_by_type = 'system'::kai.created_by_type_enum)",
+        "name": "rqi_br03b_board_review_contract_check",
+        "table_name": "review_queue_items",
+        "type": "c",
+        "validated": true
+      }
+    ],
+    "canonical_queue_type_check_present": true,
+    "canonical_queue_type_check_validated": true,
+    "expected_review_status_column": {
+      "attnum": 9,
+      "column_name": "review_status",
+      "default": "'needs_gk_review'::text",
+      "generated_kind": "",
+      "identity_kind": "",
+      "not_null": true,
+      "table_name": "review_queue_items",
+      "type": "text"
+    },
+    "obsolete_queue_type_check_present": false,
+    "production_review_status_column": {
+      "attnum": 9,
+      "column_name": "review_status",
+      "default": "'needs_gk_review'::text",
+      "generated_kind": "",
+      "identity_kind": "",
+      "not_null": true,
+      "table_name": "review_queue_items",
+      "type": "text"
+    },
+    "review_status_matches_fresh_contract": true
+  },
+  "shared_or_mixed_table_results": {
+    "intake_files": {
+      "collections": {
+        "columns": {
+          "changed": [
+            {
+              "expected": {
+                "attnum": 6,
+                "column_name": "checksum",
+                "default": null,
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": true,
+                "table_name": "intake_files",
+                "type": "text"
+              },
+              "key": [
+                "intake_files",
+                "checksum"
+              ],
+              "production": {
+                "attnum": 15,
+                "column_name": "checksum",
+                "default": null,
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": true,
+                "table_name": "intake_files",
+                "type": "text"
+              }
+            },
+            {
+              "expected": {
+                "attnum": 12,
+                "column_name": "created_at",
+                "default": "now()",
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": true,
+                "table_name": "intake_files",
+                "type": "timestamp with time zone"
+              },
+              "key": [
+                "intake_files",
+                "created_at"
+              ],
+              "production": {
+                "attnum": 28,
+                "column_name": "created_at",
+                "default": "now()",
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": true,
+                "table_name": "intake_files",
+                "type": "timestamp with time zone"
+              }
+            },
+            {
+              "expected": {
+                "attnum": 11,
+                "column_name": "file_policy_status",
+                "default": "'pending'::text",
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": true,
+                "table_name": "intake_files",
+                "type": "text"
+              },
+              "key": [
+                "intake_files",
+                "file_policy_status"
+              ],
+              "production": {
+                "attnum": 22,
+                "column_name": "file_policy_status",
+                "default": "'pending'::text",
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": true,
+                "table_name": "intake_files",
+                "type": "text"
+              }
+            },
+            {
+              "expected": {
+                "attnum": 8,
+                "column_name": "force_new_version",
+                "default": "false",
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": true,
+                "table_name": "intake_files",
+                "type": "boolean"
+              },
+              "key": [
+                "intake_files",
+                "force_new_version"
+              ],
+              "production": {
+                "attnum": 24,
+                "column_name": "force_new_version",
+                "default": "false",
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": true,
+                "table_name": "intake_files",
+                "type": "boolean"
+              }
+            },
+            {
+              "expected": {
+                "attnum": 20,
+                "column_name": "gcs_generation",
+                "default": null,
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": false,
+                "table_name": "intake_files",
+                "type": "numeric(20,0)"
+              },
+              "key": [
+                "intake_files",
+                "gcs_generation"
+              ],
+              "production": {
+                "attnum": 41,
+                "column_name": "gcs_generation",
+                "default": null,
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": false,
+                "table_name": "intake_files",
+                "type": "numeric(20,0)"
+              }
+            },
+            {
+              "expected": {
+                "attnum": 7,
+                "column_name": "hash_algorithm",
+                "default": "'sha256'::text",
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": true,
+                "table_name": "intake_files",
+                "type": "text"
+              },
+              "key": [
+                "intake_files",
+                "hash_algorithm"
+              ],
+              "production": {
+                "attnum": 16,
+                "column_name": "hash_algorithm",
+                "default": "'sha256'::text",
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": true,
+                "table_name": "intake_files",
+                "type": "text"
+              }
+            },
+            {
+              "expected": {
+                "attnum": 1,
+                "column_name": "intake_file_id",
+                "default": null,
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": true,
+                "table_name": "intake_files",
+                "type": "uuid"
+              },
+              "key": [
+                "intake_files",
+                "intake_file_id"
+              ],
+              "production": {
+                "attnum": 1,
+                "column_name": "intake_file_id",
+                "default": "gen_random_uuid()",
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": true,
+                "table_name": "intake_files",
+                "type": "uuid"
+              }
+            },
+            {
+              "expected": {
+                "attnum": 16,
+                "column_name": "object_version_id",
+                "default": null,
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": false,
+                "table_name": "intake_files",
+                "type": "text"
+              },
+              "key": [
+                "intake_files",
+                "object_version_id"
+              ],
+              "production": {
+                "attnum": 37,
+                "column_name": "object_version_id",
+                "default": null,
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": false,
+                "table_name": "intake_files",
+                "type": "text"
+              }
+            },
+            {
+              "expected": {
+                "attnum": 4,
+                "column_name": "original_filename",
+                "default": null,
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": true,
+                "table_name": "intake_files",
+                "type": "text"
+              },
+              "key": [
+                "intake_files",
+                "original_filename"
+              ],
+              "production": {
+                "attnum": 5,
+                "column_name": "original_filename",
+                "default": null,
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": true,
+                "table_name": "intake_files",
+                "type": "text"
+              }
+            },
+            {
+              "expected": {
+                "attnum": 10,
+                "column_name": "parse_status",
+                "default": "'quarantined'::text",
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": true,
+                "table_name": "intake_files",
+                "type": "text"
+              },
+              "key": [
+                "intake_files",
+                "parse_status"
+              ],
+              "production": {
+                "attnum": 20,
+                "column_name": "parse_status",
+                "default": "'quarantined'::kai.parse_status_enum",
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": true,
+                "table_name": "intake_files",
+                "type": "kai.parse_status_enum"
+              }
+            },
+            {
+              "expected": {
+                "attnum": 9,
+                "column_name": "processing_status",
+                "default": "'quarantined'::text",
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": true,
+                "table_name": "intake_files",
+                "type": "text"
+              },
+              "key": [
+                "intake_files",
+                "processing_status"
+              ],
+              "production": {
+                "attnum": 19,
+                "column_name": "processing_status",
+                "default": "'quarantined'::kai.processing_status_enum",
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": true,
+                "table_name": "intake_files",
+                "type": "kai.processing_status_enum"
+              }
+            },
+            {
+              "expected": {
+                "attnum": 5,
+                "column_name": "safe_filename",
+                "default": null,
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": true,
+                "table_name": "intake_files",
+                "type": "text"
+              },
+              "key": [
+                "intake_files",
+                "safe_filename"
+              ],
+              "production": {
+                "attnum": 6,
+                "column_name": "safe_filename",
+                "default": null,
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": true,
+                "table_name": "intake_files",
+                "type": "text"
+              }
+            },
+            {
+              "expected": {
+                "attnum": 15,
+                "column_name": "upload_expires_at",
+                "default": "(now() + '24:00:00'::interval)",
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": true,
+                "table_name": "intake_files",
+                "type": "timestamp with time zone"
+              },
+              "key": [
+                "intake_files",
+                "upload_expires_at"
+              ],
+              "production": {
+                "attnum": 36,
+                "column_name": "upload_expires_at",
+                "default": "(now() + '24:00:00'::interval)",
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": true,
+                "table_name": "intake_files",
+                "type": "timestamp with time zone"
+              }
+            },
+            {
+              "expected": {
+                "attnum": 13,
+                "column_name": "upload_state",
+                "default": "'reserved'::text",
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": true,
+                "table_name": "intake_files",
+                "type": "text"
+              },
+              "key": [
+                "intake_files",
+                "upload_state"
+              ],
+              "production": {
+                "attnum": 34,
+                "column_name": "upload_state",
+                "default": "'reserved'::text",
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": true,
+                "table_name": "intake_files",
+                "type": "text"
+              }
+            },
+            {
+              "expected": {
+                "attnum": 14,
+                "column_name": "upload_state_changed_at",
+                "default": "now()",
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": true,
+                "table_name": "intake_files",
+                "type": "timestamp with time zone"
+              },
+              "key": [
+                "intake_files",
+                "upload_state_changed_at"
+              ],
+              "production": {
+                "attnum": 35,
+                "column_name": "upload_state_changed_at",
+                "default": "now()",
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": true,
+                "table_name": "intake_files",
+                "type": "timestamp with time zone"
+              }
+            },
+            {
+              "expected": {
+                "attnum": 19,
+                "column_name": "verified_at",
+                "default": null,
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": false,
+                "table_name": "intake_files",
+                "type": "timestamp with time zone"
+              },
+              "key": [
+                "intake_files",
+                "verified_at"
+              ],
+              "production": {
+                "attnum": 40,
+                "column_name": "verified_at",
+                "default": null,
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": false,
+                "table_name": "intake_files",
+                "type": "timestamp with time zone"
+              }
+            },
+            {
+              "expected": {
+                "attnum": 17,
+                "column_name": "verified_checksum",
+                "default": null,
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": false,
+                "table_name": "intake_files",
+                "type": "text"
+              },
+              "key": [
+                "intake_files",
+                "verified_checksum"
+              ],
+              "production": {
+                "attnum": 38,
+                "column_name": "verified_checksum",
+                "default": null,
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": false,
+                "table_name": "intake_files",
+                "type": "text"
+              }
+            },
+            {
+              "expected": {
+                "attnum": 18,
+                "column_name": "verified_size_bytes",
+                "default": null,
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": false,
+                "table_name": "intake_files",
+                "type": "bigint"
+              },
+              "key": [
+                "intake_files",
+                "verified_size_bytes"
+              ],
+              "production": {
+                "attnum": 39,
+                "column_name": "verified_size_bytes",
+                "default": null,
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": false,
+                "table_name": "intake_files",
+                "type": "bigint"
+              }
+            }
+          ],
+          "missing_from_production": [],
+          "production_only": [
+            {
+              "attnum": 29,
+              "column_name": "created_by",
+              "default": null,
+              "generated_kind": "",
+              "identity_kind": "",
+              "not_null": true,
+              "table_name": "intake_files",
+              "type": "uuid"
+            },
+            {
+              "attnum": 30,
+              "column_name": "created_by_type",
+              "default": "'human'::kai.created_by_type_enum",
+              "generated_kind": "",
+              "identity_kind": "",
+              "not_null": true,
+              "table_name": "intake_files",
+              "type": "kai.created_by_type_enum"
+            },
+            {
+              "attnum": 4,
+              "column_name": "engagement_id",
+              "default": null,
+              "generated_kind": "",
+              "identity_kind": "",
+              "not_null": false,
+              "table_name": "intake_files",
+              "type": "uuid"
+            },
+            {
+              "attnum": 13,
+              "column_name": "file_extension",
+              "default": null,
+              "generated_kind": "",
+              "identity_kind": "",
+              "not_null": false,
+              "table_name": "intake_files",
+              "type": "text"
+            },
+            {
+              "attnum": 27,
+              "column_name": "file_metadata",
+              "default": "'{}'::jsonb",
+              "generated_kind": "",
+              "identity_kind": "",
+              "not_null": true,
+              "table_name": "intake_files",
+              "type": "jsonb"
+            },
+            {
+              "attnum": 14,
+              "column_name": "file_size_bytes",
+              "default": null,
+              "generated_kind": "",
+              "identity_kind": "",
+              "not_null": false,
+              "table_name": "intake_files",
+              "type": "bigint"
+            },
+            {
+              "attnum": 33,
+              "column_name": "last_audit_event_id",
+              "default": null,
+              "generated_kind": "",
+              "identity_kind": "",
+              "not_null": false,
+              "table_name": "intake_files",
+              "type": "uuid"
+            },
+            {
+              "attnum": 18,
+              "column_name": "legal_hold_status",
+              "default": "'none'::kai.legal_hold_status_enum",
+              "generated_kind": "",
+              "identity_kind": "",
+              "not_null": true,
+              "table_name": "intake_files",
+              "type": "kai.legal_hold_status_enum"
+            },
+            {
+              "attnum": 23,
+              "column_name": "malware_scan_status",
+              "default": "'not_configured'::text",
+              "generated_kind": "",
+              "identity_kind": "",
+              "not_null": true,
+              "table_name": "intake_files",
+              "type": "text"
+            },
+            {
+              "attnum": 12,
+              "column_name": "mime_type",
+              "default": null,
+              "generated_kind": "",
+              "identity_kind": "",
+              "not_null": false,
+              "table_name": "intake_files",
+              "type": "text"
+            },
+            {
+              "attnum": 25,
+              "column_name": "original_intake_file_id",
+              "default": null,
+              "generated_kind": "",
+              "identity_kind": "",
+              "not_null": false,
+              "table_name": "intake_files",
+              "type": "uuid"
+            },
+            {
+              "attnum": 17,
+              "column_name": "raw_file_retained",
+              "default": "true",
+              "generated_kind": "",
+              "identity_kind": "",
+              "not_null": true,
+              "table_name": "intake_files",
+              "type": "boolean"
+            },
+            {
+              "attnum": 21,
+              "column_name": "review_status",
+              "default": "'proposed'::kai.review_status_enum",
+              "generated_kind": "",
+              "identity_kind": "",
+              "not_null": true,
+              "table_name": "intake_files",
+              "type": "kai.review_status_enum"
+            },
+            {
+              "attnum": 10,
+              "column_name": "storage_bucket",
+              "default": null,
+              "generated_kind": "",
+              "identity_kind": "",
+              "not_null": false,
+              "table_name": "intake_files",
+              "type": "text"
+            },
+            {
+              "attnum": 11,
+              "column_name": "storage_object_key",
+              "default": null,
+              "generated_kind": "",
+              "identity_kind": "",
+              "not_null": false,
+              "table_name": "intake_files",
+              "type": "text"
+            },
+            {
+              "attnum": 8,
+              "column_name": "storage_provider",
+              "default": "'s3_compatible'::text",
+              "generated_kind": "",
+              "identity_kind": "",
+              "not_null": true,
+              "table_name": "intake_files",
+              "type": "text"
+            },
+            {
+              "attnum": 9,
+              "column_name": "storage_region",
+              "default": null,
+              "generated_kind": "",
+              "identity_kind": "",
+              "not_null": false,
+              "table_name": "intake_files",
+              "type": "text"
+            },
+            {
+              "attnum": 7,
+              "column_name": "storage_uri",
+              "default": null,
+              "generated_kind": "",
+              "identity_kind": "",
+              "not_null": true,
+              "table_name": "intake_files",
+              "type": "text"
+            },
+            {
+              "attnum": 26,
+              "column_name": "supersedes_intake_file_id",
+              "default": null,
+              "generated_kind": "",
+              "identity_kind": "",
+              "not_null": false,
+              "table_name": "intake_files",
+              "type": "uuid"
+            },
+            {
+              "attnum": 31,
+              "column_name": "updated_at",
+              "default": "now()",
+              "generated_kind": "",
+              "identity_kind": "",
+              "not_null": true,
+              "table_name": "intake_files",
+              "type": "timestamp with time zone"
+            },
+            {
+              "attnum": 32,
+              "column_name": "updated_by",
+              "default": null,
+              "generated_kind": "",
+              "identity_kind": "",
+              "not_null": false,
+              "table_name": "intake_files",
+              "type": "uuid"
+            }
+          ]
+        },
+        "constraints": {
+          "changed": [],
+          "missing_from_production": [
+            {
+              "definition": "CHECK (checksum ~ '^[a-f0-9]{64}$'::text)",
+              "name": "intake_files_gate_a_declared_checksum_check",
+              "table_name": "intake_files",
+              "type": "c",
+              "validated": true
+            },
+            {
+              "definition": "CHECK (hash_algorithm = 'sha256'::text)",
+              "name": "intake_files_gate_a_hash_algorithm_check",
+              "table_name": "intake_files",
+              "type": "c",
+              "validated": true
+            }
+          ],
+          "production_only": [
+            {
+              "definition": "FOREIGN KEY (intake_batch_id, organization_id) REFERENCES kai.intake_batches(intake_batch_id, organization_id)",
+              "name": "fk_intake_files_batch_org",
+              "table_name": "intake_files",
+              "type": "f",
+              "validated": true
+            },
+            {
+              "definition": "FOREIGN KEY (engagement_id, organization_id) REFERENCES kai.engagements(engagement_id, organization_id)",
+              "name": "fk_intake_files_engagement_org",
+              "table_name": "intake_files",
+              "type": "f",
+              "validated": true
+            },
+            {
+              "definition": "CHECK (checksum <> ''::text)",
+              "name": "intake_files_checksum_check",
+              "table_name": "intake_files",
+              "type": "c",
+              "validated": true
+            },
+            {
+              "definition": "FOREIGN KEY (created_by) REFERENCES kai.users(user_id) ON DELETE RESTRICT",
+              "name": "intake_files_created_by_fkey",
+              "table_name": "intake_files",
+              "type": "f",
+              "validated": true
+            },
+            {
+              "definition": "FOREIGN KEY (engagement_id) REFERENCES kai.engagements(engagement_id) ON DELETE SET NULL",
+              "name": "intake_files_engagement_id_fkey",
+              "table_name": "intake_files",
+              "type": "f",
+              "validated": true
+            },
+            {
+              "definition": "CHECK (file_policy_status = ANY (ARRAY['pending'::text, 'passed'::text, 'blocked'::text, 'failed'::text, 'skipped'::text]))",
+              "name": "intake_files_file_policy_status_check",
+              "table_name": "intake_files",
+              "type": "c",
+              "validated": true
+            },
+            {
+              "definition": "CHECK (file_size_bytes IS NULL OR file_size_bytes >= 0)",
+              "name": "intake_files_file_size_bytes_check",
+              "table_name": "intake_files",
+              "type": "c",
+              "validated": true
+            },
+            {
+              "definition": "CHECK (hash_algorithm <> ''::text)",
+              "name": "intake_files_hash_algorithm_check",
+              "table_name": "intake_files",
+              "type": "c",
+              "validated": true
+            },
+            {
+              "definition": "FOREIGN KEY (intake_batch_id) REFERENCES kai.intake_batches(intake_batch_id) ON DELETE CASCADE",
+              "name": "intake_files_intake_batch_id_fkey",
+              "table_name": "intake_files",
+              "type": "f",
+              "validated": true
+            },
+            {
+              "definition": "FOREIGN KEY (last_audit_event_id) REFERENCES kai.audit_events(audit_event_id) ON DELETE SET NULL",
+              "name": "intake_files_last_audit_event_id_fkey",
+              "table_name": "intake_files",
+              "type": "f",
+              "validated": true
+            },
+            {
+              "definition": "CHECK (malware_scan_status = ANY (ARRAY['not_configured'::text, 'queued'::text, 'running'::text, 'passed'::text, 'failed'::text, 'skipped'::text]))",
+              "name": "intake_files_malware_scan_status_check",
+              "table_name": "intake_files",
+              "type": "c",
+              "validated": true
+            },
+            {
+              "definition": "CHECK (organization_id IS NOT NULL)",
+              "name": "intake_files_organization_id_check",
+              "table_name": "intake_files",
+              "type": "c",
+              "validated": true
+            },
+            {
+              "definition": "FOREIGN KEY (organization_id) REFERENCES kai.organizations(organization_id) ON DELETE RESTRICT",
+              "name": "intake_files_organization_id_fkey",
+              "table_name": "intake_files",
+              "type": "f",
+              "validated": true
+            },
+            {
+              "definition": "CHECK (original_filename <> ''::text)",
+              "name": "intake_files_original_filename_check",
+              "table_name": "intake_files",
+              "type": "c",
+              "validated": true
+            },
+            {
+              "definition": "FOREIGN KEY (original_intake_file_id) REFERENCES kai.intake_files(intake_file_id) ON DELETE SET NULL",
+              "name": "intake_files_original_intake_file_id_fkey",
+              "table_name": "intake_files",
+              "type": "f",
+              "validated": true
+            },
+            {
+              "definition": "CHECK (safe_filename <> ''::text)",
+              "name": "intake_files_safe_filename_check",
+              "table_name": "intake_files",
+              "type": "c",
+              "validated": true
+            },
+            {
+              "definition": "CHECK (storage_provider = ANY (ARRAY['s3_compatible'::text, 'cloudflare_r2'::text, 'gcs'::text, 'supabase_storage'::text, 'local_dev'::text, 'other'::text]))",
+              "name": "intake_files_storage_provider_check",
+              "table_name": "intake_files",
+              "type": "c",
+              "validated": true
+            },
+            {
+              "definition": "CHECK (storage_uri <> ''::text)",
+              "name": "intake_files_storage_uri_check",
+              "table_name": "intake_files",
+              "type": "c",
+              "validated": true
+            },
+            {
+              "definition": "FOREIGN KEY (supersedes_intake_file_id) REFERENCES kai.intake_files(intake_file_id) ON DELETE SET NULL",
+              "name": "intake_files_supersedes_intake_file_id_fkey",
+              "table_name": "intake_files",
+              "type": "f",
+              "validated": true
+            },
+            {
+              "definition": "FOREIGN KEY (updated_by) REFERENCES kai.users(user_id) ON DELETE SET NULL",
+              "name": "intake_files_updated_by_fkey",
+              "table_name": "intake_files",
+              "type": "f",
+              "validated": true
+            }
+          ]
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": [
+            {
+              "definition": "CREATE INDEX idx_intake_files_batch ON kai.intake_files USING btree (intake_batch_id)",
+              "name": "idx_intake_files_batch",
+              "table_name": "intake_files"
+            },
+            {
+              "definition": "CREATE INDEX idx_intake_files_org_status ON kai.intake_files USING btree (organization_id, processing_status, parse_status, review_status)",
+              "name": "idx_intake_files_org_status",
+              "table_name": "intake_files"
+            },
+            {
+              "definition": "CREATE INDEX idx_intake_files_storage_object_key ON kai.intake_files USING btree (storage_object_key)",
+              "name": "idx_intake_files_storage_object_key",
+              "table_name": "intake_files"
+            },
+            {
+              "definition": "CREATE UNIQUE INDEX ux_intake_files_file_org ON kai.intake_files USING btree (intake_file_id, organization_id)",
+              "name": "ux_intake_files_file_org",
+              "table_name": "intake_files"
+            },
+            {
+              "definition": "CREATE UNIQUE INDEX ux_intake_files_org_checksum_default ON kai.intake_files USING btree (organization_id, checksum) WHERE (force_new_version = false)",
+              "name": "ux_intake_files_org_checksum_default",
+              "table_name": "intake_files"
+            }
+          ]
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": [
+            {
+              "definition": "CREATE TRIGGER trg_intake_files_updated_at BEFORE UPDATE ON kai.intake_files FOR EACH ROW EXECUTE FUNCTION kai.set_updated_at()",
+              "enabled": "O",
+              "name": "trg_intake_files_updated_at",
+              "table_name": "intake_files"
+            }
+          ]
+        }
+      },
+      "is_equal": false,
+      "present_expected": true,
+      "present_production": true,
+      "table": "intake_files"
+    },
+    "review_queue_items": {
+      "collections": {
+        "columns": {
+          "changed": [
+            {
+              "expected": {
+                "attnum": 11,
+                "column_name": "assigned_to",
+                "default": null,
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": false,
+                "table_name": "review_queue_items",
+                "type": "uuid"
+              },
+              "key": [
+                "review_queue_items",
+                "assigned_to"
+              ],
+              "production": {
+                "attnum": 10,
+                "column_name": "assigned_to",
+                "default": null,
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": false,
+                "table_name": "review_queue_items",
+                "type": "uuid"
+              }
+            },
+            {
+              "expected": {
+                "attnum": 10,
+                "column_name": "blocked_reason",
+                "default": null,
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": false,
+                "table_name": "review_queue_items",
+                "type": "text"
+              },
+              "key": [
+                "review_queue_items",
+                "blocked_reason"
+              ],
+              "production": {
+                "attnum": 13,
+                "column_name": "blocked_reason",
+                "default": null,
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": false,
+                "table_name": "review_queue_items",
+                "type": "text"
+              }
+            },
+            {
+              "expected": {
+                "attnum": 18,
+                "column_name": "created_at",
+                "default": "now()",
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": true,
+                "table_name": "review_queue_items",
+                "type": "timestamp with time zone"
+              },
+              "key": [
+                "review_queue_items",
+                "created_at"
+              ],
+              "production": {
+                "attnum": 17,
+                "column_name": "created_at",
+                "default": "now()",
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": true,
+                "table_name": "review_queue_items",
+                "type": "timestamp with time zone"
+              }
+            },
+            {
+              "expected": {
+                "attnum": 16,
+                "column_name": "created_by",
+                "default": null,
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": false,
+                "table_name": "review_queue_items",
+                "type": "uuid"
+              },
+              "key": [
+                "review_queue_items",
+                "created_by"
+              ],
+              "production": {
+                "attnum": 18,
+                "column_name": "created_by",
+                "default": null,
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": false,
+                "table_name": "review_queue_items",
+                "type": "uuid"
+              }
+            },
+            {
+              "expected": {
+                "attnum": 17,
+                "column_name": "created_by_type",
+                "default": "'system'::text",
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": true,
+                "table_name": "review_queue_items",
+                "type": "text"
+              },
+              "key": [
+                "review_queue_items",
+                "created_by_type"
+              ],
+              "production": {
+                "attnum": 19,
+                "column_name": "created_by_type",
+                "default": "'system'::kai.created_by_type_enum",
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": true,
+                "table_name": "review_queue_items",
+                "type": "kai.created_by_type_enum"
+              }
+            },
+            {
+              "expected": {
+                "attnum": 12,
+                "column_name": "due_at",
+                "default": null,
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": false,
+                "table_name": "review_queue_items",
+                "type": "timestamp with time zone"
+              },
+              "key": [
+                "review_queue_items",
+                "due_at"
+              ],
+              "production": {
+                "attnum": 11,
+                "column_name": "due_at",
+                "default": null,
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": false,
+                "table_name": "review_queue_items",
+                "type": "timestamp with time zone"
+              }
+            },
+            {
+              "expected": {
+                "attnum": 7,
+                "column_name": "priority",
+                "default": "'medium'::text",
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": true,
+                "table_name": "review_queue_items",
+                "type": "text"
+              },
+              "key": [
+                "review_queue_items",
+                "priority"
+              ],
+              "production": {
+                "attnum": 7,
+                "column_name": "priority",
+                "default": "'medium'::kai.priority_enum",
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": true,
+                "table_name": "review_queue_items",
+                "type": "kai.priority_enum"
+              }
+            },
+            {
+              "expected": {
+                "attnum": 15,
+                "column_name": "queue_metadata",
+                "default": "'{}'::jsonb",
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": true,
+                "table_name": "review_queue_items",
+                "type": "jsonb"
+              },
+              "key": [
+                "review_queue_items",
+                "queue_metadata"
+              ],
+              "production": {
+                "attnum": 16,
+                "column_name": "queue_metadata",
+                "default": "'{}'::jsonb",
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": true,
+                "table_name": "review_queue_items",
+                "type": "jsonb"
+              }
+            },
+            {
+              "expected": {
+                "attnum": 14,
+                "column_name": "required_action",
+                "default": null,
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": false,
+                "table_name": "review_queue_items",
+                "type": "text"
+              },
+              "key": [
+                "review_queue_items",
+                "required_action"
+              ],
+              "production": {
+                "attnum": 15,
+                "column_name": "required_action",
+                "default": null,
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": false,
+                "table_name": "review_queue_items",
+                "type": "text"
+              }
+            },
+            {
+              "expected": {
+                "attnum": 13,
+                "column_name": "summary",
+                "default": null,
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": true,
+                "table_name": "review_queue_items",
+                "type": "text"
+              },
+              "key": [
+                "review_queue_items",
+                "summary"
+              ],
+              "production": {
+                "attnum": 14,
+                "column_name": "summary",
+                "default": null,
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": true,
+                "table_name": "review_queue_items",
+                "type": "text"
+              }
+            },
+            {
+              "expected": {
+                "attnum": 19,
+                "column_name": "updated_at",
+                "default": "now()",
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": true,
+                "table_name": "review_queue_items",
+                "type": "timestamp with time zone"
+              },
+              "key": [
+                "review_queue_items",
+                "updated_at"
+              ],
+              "production": {
+                "attnum": 20,
+                "column_name": "updated_at",
+                "default": "now()",
+                "generated_kind": "",
+                "identity_kind": "",
+                "not_null": true,
+                "table_name": "review_queue_items",
+                "type": "timestamp with time zone"
+              }
+            }
+          ],
+          "missing_from_production": [],
+          "production_only": [
+            {
+              "attnum": 12,
+              "column_name": "last_action_at",
+              "default": null,
+              "generated_kind": "",
+              "identity_kind": "",
+              "not_null": false,
+              "table_name": "review_queue_items",
+              "type": "timestamp with time zone"
+            },
+            {
+              "attnum": 21,
+              "column_name": "updated_by",
+              "default": null,
+              "generated_kind": "",
+              "identity_kind": "",
+              "not_null": false,
+              "table_name": "review_queue_items",
+              "type": "uuid"
+            }
+          ]
+        },
+        "constraints": {
+          "changed": [
+            {
+              "expected": {
+                "definition": "CHECK (queue_type <> 'export_review'::text OR target_object_type = 'generated_content_draft'::text AND (queue_status = 'open'::text AND review_status = 'needs_gk_review'::text OR queue_status = 'in_progress'::text AND review_status = 'needs_gk_review'::text OR queue_status = 'resolved'::text AND review_status = 'resolved'::text) AND priority = 'medium'::text AND summary = 'Generated draft requires export review.'::text AND required_action = 'Review audience authority, current eligibility, citations, and the final export gate before any export.'::text AND blocked_reason IS NULL AND assigned_to IS NULL AND due_at IS NULL AND queue_metadata = '{}'::jsonb AND created_by IS NULL AND created_by_type = 'system'::text OR target_object_type = 'grant_response_packet_export_candidate'::text AND (queue_status = 'open'::text AND review_status = 'needs_gk_review'::text OR queue_status = 'in_progress'::text AND review_status = 'needs_gk_review'::text OR queue_status = 'resolved'::text AND review_status = 'resolved'::text) AND priority = 'medium'::text AND summary = 'Grant Response Packet export candidate requires export review.'::text AND required_action = 'Review packet membership, funder audience, and export authority before any export.'::text AND blocked_reason IS NULL AND assigned_to IS NULL AND due_at IS NULL AND queue_metadata = '{}'::jsonb AND created_by IS NULL AND created_by_type = 'system'::text)",
+                "name": "review_queue_items_p14_05_export_review_contract_check",
+                "table_name": "review_queue_items",
+                "type": "c",
+                "validated": true
+              },
+              "key": [
+                "review_queue_items",
+                "review_queue_items_p14_05_export_review_contract_check"
+              ],
+              "production": {
+                "definition": "CHECK (queue_type <> 'export_review'::text OR target_object_type = 'generated_content_draft'::text AND (queue_status = 'open'::text AND review_status = 'needs_gk_review'::text OR queue_status = 'in_progress'::text AND review_status = 'needs_gk_review'::text OR queue_status = 'resolved'::text AND review_status = 'resolved'::text) AND priority = 'medium'::kai.priority_enum AND summary = 'Generated draft requires export review.'::text AND required_action = 'Review audience authority, current eligibility, citations, and the final export gate before any export.'::text AND blocked_reason IS NULL AND assigned_to IS NULL AND due_at IS NULL AND queue_metadata = '{}'::jsonb AND created_by IS NULL AND created_by_type = 'system'::kai.created_by_type_enum OR target_object_type = 'grant_response_packet_export_candidate'::text AND (queue_status = 'open'::text AND review_status = 'needs_gk_review'::text OR queue_status = 'in_progress'::text AND review_status = 'needs_gk_review'::text OR queue_status = 'resolved'::text AND review_status = 'resolved'::text) AND priority = 'medium'::kai.priority_enum AND summary = 'Grant Response Packet export candidate requires export review.'::text AND required_action = 'Review packet membership, funder audience, and export authority before any export.'::text AND blocked_reason IS NULL AND assigned_to IS NULL AND due_at IS NULL AND queue_metadata = '{}'::jsonb AND created_by IS NULL AND created_by_type = 'system'::kai.created_by_type_enum)",
+                "name": "review_queue_items_p14_05_export_review_contract_check",
+                "table_name": "review_queue_items",
+                "type": "c",
+                "validated": true
+              }
+            },
+            {
+              "expected": {
+                "definition": "CHECK (queue_type <> 'client_followup'::text OR target_object_type = 'client_followup_item'::text AND priority = 'medium'::text AND summary = 'Client clarification is required for an unresolved claim gap.'::text AND assigned_to IS NULL AND due_at IS NULL AND (required_action = ANY (ARRAY['Confirm the business meaning of the unresolved field or measure.'::text, 'Confirm the denominator and how it is calculated.'::text, 'Confirm the reporting period represented by this source.'::text, 'Confirm the entity level represented by the unresolved field or measure.'::text])) AND (queue_status = 'waiting_on_client'::text AND review_status = 'proposed'::text OR queue_status = 'resolved'::text AND review_status = 'resolved'::text))",
+                "name": "review_queue_items_p2_04_client_followup_contract_check",
+                "table_name": "review_queue_items",
+                "type": "c",
+                "validated": true
+              },
+              "key": [
+                "review_queue_items",
+                "review_queue_items_p2_04_client_followup_contract_check"
+              ],
+              "production": {
+                "definition": "CHECK (queue_type <> 'client_followup'::text OR target_object_type = 'client_followup_item'::text AND priority = 'medium'::kai.priority_enum AND summary = 'Client clarification is required for an unresolved claim gap.'::text AND assigned_to IS NULL AND due_at IS NULL AND (required_action = ANY (ARRAY['Confirm the business meaning of the unresolved field or measure.'::text, 'Confirm the denominator and how it is calculated.'::text, 'Confirm the reporting period represented by this source.'::text, 'Confirm the entity level represented by the unresolved field or measure.'::text])) AND (queue_status = 'waiting_on_client'::text AND review_status = 'proposed'::text OR queue_status = 'resolved'::text AND review_status = 'resolved'::text))",
+                "name": "review_queue_items_p2_04_client_followup_contract_check",
+                "table_name": "review_queue_items",
+                "type": "c",
+                "validated": true
+              }
+            },
+            {
+              "expected": {
+                "definition": "CHECK (queue_type <> 'conflict_resolution'::text OR target_object_type = 'conflict_group'::text AND queue_status = 'open'::text AND review_status = 'needs_gk_review'::text AND priority = 'medium'::text AND summary = 'Potential claim conflict requires GK review.'::text AND required_action = 'Compare both claims, their evidence lineage, definitions, reporting periods, entity levels, denominators, and support limitations. Record whether a conflict exists. Do not approve or promote either claim.'::text AND assigned_to IS NULL AND due_at IS NULL)",
+                "name": "review_queue_items_p2_05_conflict_resolution_contract_check",
+                "table_name": "review_queue_items",
+                "type": "c",
+                "validated": true
+              },
+              "key": [
+                "review_queue_items",
+                "review_queue_items_p2_05_conflict_resolution_contract_check"
+              ],
+              "production": {
+                "definition": "CHECK (queue_type <> 'conflict_resolution'::text OR target_object_type = 'conflict_group'::text AND queue_status = 'open'::text AND review_status = 'needs_gk_review'::text AND priority = 'medium'::kai.priority_enum AND summary = 'Potential claim conflict requires GK review.'::text AND required_action = 'Compare both claims, their evidence lineage, definitions, reporting periods, entity levels, denominators, and support limitations. Record whether a conflict exists. Do not approve or promote either claim.'::text AND assigned_to IS NULL AND due_at IS NULL)",
+                "name": "review_queue_items_p2_05_conflict_resolution_contract_check",
+                "table_name": "review_queue_items",
+                "type": "c",
+                "validated": true
+              }
+            },
+            {
+              "expected": {
+                "definition": "CHECK (queue_type <> 'generated_content_review'::text OR target_object_type = 'generated_content_draft'::text AND (queue_status = 'open'::text AND review_status = 'needs_gk_review'::text OR queue_status = 'in_progress'::text AND review_status = 'needs_gk_review'::text OR queue_status = 'resolved'::text AND review_status = 'resolved'::text) AND priority = 'medium'::text AND summary = 'Generated draft requires human review.'::text AND required_action = 'Review citations, audience eligibility, limitations, unsupported claims, and numeric or causal assertions before any use.'::text AND assigned_to IS NULL AND due_at IS NULL AND created_by_type = 'system'::text)",
+                "name": "review_queue_items_p3_04_generated_content_review_contract_chec",
+                "table_name": "review_queue_items",
+                "type": "c",
+                "validated": true
+              },
+              "key": [
+                "review_queue_items",
+                "review_queue_items_p3_04_generated_content_review_contract_chec"
+              ],
+              "production": {
+                "definition": "CHECK (queue_type <> 'generated_content_review'::text OR target_object_type = 'generated_content_draft'::text AND (queue_status = 'open'::text AND review_status = 'needs_gk_review'::text OR queue_status = 'in_progress'::text AND review_status = 'needs_gk_review'::text OR queue_status = 'resolved'::text AND review_status = 'resolved'::text) AND priority = 'medium'::kai.priority_enum AND summary = 'Generated draft requires human review.'::text AND required_action = 'Review citations, audience eligibility, limitations, unsupported claims, and numeric or causal assertions before any use.'::text AND assigned_to IS NULL AND due_at IS NULL AND created_by_type = 'system'::kai.created_by_type_enum)",
+                "name": "review_queue_items_p3_04_generated_content_review_contract_chec",
+                "table_name": "review_queue_items",
+                "type": "c",
+                "validated": true
+              }
+            }
+          ],
+          "missing_from_production": [
+            {
+              "definition": "CHECK (queue_type <> 'board_reporting_candidate_review'::text OR target_object_type = 'board_reporting_candidate'::text AND (queue_status = 'open'::text AND review_status = 'needs_gk_review'::text OR queue_status = 'in_progress'::text AND review_status = 'needs_gk_review'::text OR queue_status = 'resolved'::text AND review_status = 'resolved'::text) AND priority = 'medium'::text AND summary = 'Board Reporting candidate requires review.'::text AND required_action = 'Review internal Board packet membership and current-use support before release work.'::text AND blocked_reason IS NULL AND assigned_to IS NULL AND due_at IS NULL AND queue_metadata = '{}'::jsonb AND created_by IS NULL AND created_by_type = 'system'::text)",
+              "name": "review_queue_items_br_03b_board_reporting_candidate_review_cont",
+              "table_name": "review_queue_items",
+              "type": "c",
+              "validated": true
+            },
+            {
+              "definition": "CHECK (blocked_reason IS NULL OR length(blocked_reason) >= 1 AND length(blocked_reason) <= 2000)",
+              "name": "review_queue_items_p1_06_blocked_reason_check",
+              "table_name": "review_queue_items",
+              "type": "c",
+              "validated": true
+            },
+            {
+              "definition": "CHECK (created_by_type = ANY (ARRAY['human'::text, 'system'::text]))",
+              "name": "review_queue_items_p1_06_created_by_type_check",
+              "table_name": "review_queue_items",
+              "type": "c",
+              "validated": true
+            },
+            {
+              "definition": "CHECK (priority = ANY (ARRAY['mandatory'::text, 'immediate_fix'::text, 'high'::text, 'medium'::text, 'low'::text, 'backlog'::text, 'not_applicable'::text, 'unknown'::text]))",
+              "name": "review_queue_items_p1_06_priority_check",
+              "table_name": "review_queue_items",
+              "type": "c",
+              "validated": true
+            },
+            {
+              "definition": "CHECK (jsonb_typeof(queue_metadata) = 'object'::text)",
+              "name": "review_queue_items_p1_06_queue_metadata_object_check",
+              "table_name": "review_queue_items",
+              "type": "c",
+              "validated": true
+            },
+            {
+              "definition": "CHECK (required_action IS NULL OR length(required_action) >= 1 AND length(required_action) <= 2000)",
+              "name": "review_queue_items_p1_06_required_action_check",
+              "table_name": "review_queue_items",
+              "type": "c",
+              "validated": true
+            },
+            {
+              "definition": "CHECK (queue_type <> 'sensitivity_review'::text OR required_action IS NOT NULL AND length(btrim(required_action)) >= 1 AND length(btrim(required_action)) <= 2000)",
+              "name": "review_queue_items_p1_06_sensrev_required_action_check",
+              "table_name": "review_queue_items",
+              "type": "c",
+              "validated": true
+            },
+            {
+              "definition": "CHECK (length(summary) >= 1 AND length(summary) <= 2000)",
+              "name": "review_queue_items_p1_06_summary_check",
+              "table_name": "review_queue_items",
+              "type": "c",
+              "validated": true
+            },
+            {
+              "definition": "CHECK (queue_type <> 'evidence_review'::text OR required_action IS NOT NULL AND length(btrim(required_action)) >= 1 AND length(btrim(required_action)) <= 2000)",
+              "name": "review_queue_items_p2_01_evidence_review_required_action_check",
+              "table_name": "review_queue_items",
+              "type": "c",
+              "validated": true
+            }
+          ],
+          "production_only": [
+            {
+              "definition": "FOREIGN KEY (engagement_id, organization_id) REFERENCES kai.engagements(engagement_id, organization_id)",
+              "name": "fk_review_queue_items_engagement_org",
+              "table_name": "review_queue_items",
+              "type": "f",
+              "validated": true
+            },
+            {
+              "definition": "FOREIGN KEY (assigned_to) REFERENCES kai.users(user_id) ON DELETE SET NULL",
+              "name": "review_queue_items_assigned_to_fkey",
+              "table_name": "review_queue_items",
+              "type": "f",
+              "validated": true
+            },
+            {
+              "definition": "FOREIGN KEY (created_by) REFERENCES kai.users(user_id) ON DELETE SET NULL",
+              "name": "review_queue_items_created_by_fkey",
+              "table_name": "review_queue_items",
+              "type": "f",
+              "validated": true
+            },
+            {
+              "definition": "FOREIGN KEY (engagement_id) REFERENCES kai.engagements(engagement_id) ON DELETE SET NULL",
+              "name": "review_queue_items_engagement_id_fkey",
+              "table_name": "review_queue_items",
+              "type": "f",
+              "validated": true
+            },
+            {
+              "definition": "FOREIGN KEY (organization_id) REFERENCES kai.organizations(organization_id) ON DELETE RESTRICT",
+              "name": "review_queue_items_organization_id_fkey",
+              "table_name": "review_queue_items",
+              "type": "f",
+              "validated": true
+            },
+            {
+              "definition": "CHECK (queue_status = ANY (ARRAY['open'::text, 'in_progress'::text, 'blocked'::text, 'waiting_on_client'::text, 'waiting_on_gk'::text, 'resolved'::text, 'cancelled'::text]))",
+              "name": "review_queue_items_queue_status_check",
+              "table_name": "review_queue_items",
+              "type": "c",
+              "validated": true
+            },
+            {
+              "definition": "CHECK (summary <> ''::text)",
+              "name": "review_queue_items_summary_check",
+              "table_name": "review_queue_items",
+              "type": "c",
+              "validated": true
+            },
+            {
+              "definition": "CHECK (length(summary) <= 4000)",
+              "name": "review_queue_items_summary_check1",
+              "table_name": "review_queue_items",
+              "type": "c",
+              "validated": true
+            },
+            {
+              "definition": "FOREIGN KEY (updated_by) REFERENCES kai.users(user_id) ON DELETE SET NULL",
+              "name": "review_queue_items_updated_by_fkey",
+              "table_name": "review_queue_items",
+              "type": "f",
+              "validated": true
+            },
+            {
+              "definition": "CHECK (queue_type <> 'board_reporting_candidate_review'::text OR target_object_type = 'board_reporting_candidate'::text AND (queue_status = 'open'::text AND review_status = 'needs_gk_review'::text OR queue_status = 'in_progress'::text AND review_status = 'needs_gk_review'::text OR queue_status = 'resolved'::text AND review_status = 'resolved'::text) AND priority = 'medium'::kai.priority_enum AND summary = 'Board Reporting candidate requires review.'::text AND required_action = 'Review internal Board packet membership and current-use support before release work.'::text AND blocked_reason IS NULL AND assigned_to IS NULL AND due_at IS NULL AND queue_metadata = '{}'::jsonb AND created_by IS NULL AND created_by_type = 'system'::kai.created_by_type_enum)",
+              "name": "rqi_br03b_board_review_contract_check",
+              "table_name": "review_queue_items",
+              "type": "c",
+              "validated": true
+            }
+          ]
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": [
+            {
+              "definition": "CREATE INDEX idx_review_queue_items_assigned ON kai.review_queue_items USING btree (assigned_to, queue_status)",
+              "name": "idx_review_queue_items_assigned",
+              "table_name": "review_queue_items"
+            },
+            {
+              "definition": "CREATE INDEX idx_review_queue_items_org_status ON kai.review_queue_items USING btree (organization_id, queue_status, priority, review_status)",
+              "name": "idx_review_queue_items_org_status",
+              "table_name": "review_queue_items"
+            },
+            {
+              "definition": "CREATE INDEX idx_review_queue_items_target ON kai.review_queue_items USING btree (target_object_type, target_object_id)",
+              "name": "idx_review_queue_items_target",
+              "table_name": "review_queue_items"
+            }
+          ]
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": [
+            {
+              "definition": "CREATE TRIGGER trg_review_queue_items_updated_at BEFORE UPDATE ON kai.review_queue_items FOR EACH ROW EXECUTE FUNCTION kai.set_updated_at()",
+              "enabled": "O",
+              "name": "trg_review_queue_items_updated_at",
+              "table_name": "review_queue_items"
+            }
+          ]
+        }
+      },
+      "is_equal": false,
+      "present_expected": true,
+      "present_production": true,
+      "table": "review_queue_items"
+    },
+    "upload_lifecycle_audit": {
+      "collections": {
+        "columns": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "constraints": {
+          "changed": [
+            {
+              "expected": {
+                "definition": "CHECK ((operation = ANY (ARRAY['reserve_upload'::text, 'start_upload'::text, 'complete_object_version'::text, 'confirm_upload'::text, 'block_upload'::text, 'abandon_upload'::text, 'expire_upload'::text, 'policy_decision_compare_and_set'::text, 'parser_run_recorded'::text, 'file_profile_persisted'::text, 'data_dictionary_draft_persisted'::text, 'intake_sensitivity_profile_persisted'::text, 'sensitivity_review_queue_item_created'::text, 'intake_source_candidate_persisted'::text, 'source_promotion_decision_persisted'::text, 'evidence_lineage_extracted'::text, 'claim_proposed'::text, 'claim_gap_and_followup_generated'::text, 'conflict_review_candidate_created'::text, 'generated_content_draft_created'::text])) OR operation = 'generated_content_review_completed'::text OR operation = 'generated_content_review_started'::text OR operation = 'export_review_requested'::text OR operation = 'export_review_started'::text OR operation = 'export_review_completed'::text OR (operation = ANY (ARRAY['limitation_snapshot_confirmed'::text, 'export_candidate_created'::text])) OR operation = 'human_authority_decision_recorded'::text)",
+                "name": "upload_lifecycle_audit_gate_a_operation_check",
+                "table_name": "upload_lifecycle_audit",
+                "type": "c",
+                "validated": true
+              },
+              "key": [
+                "upload_lifecycle_audit",
+                "upload_lifecycle_audit_gate_a_operation_check"
+              ],
+              "production": {
+                "definition": "CHECK ((operation = ANY (ARRAY['reserve_upload'::text, 'start_upload'::text, 'complete_object_version'::text, 'confirm_upload'::text, 'block_upload'::text, 'abandon_upload'::text, 'expire_upload'::text, 'policy_decision_compare_and_set'::text, 'parser_run_recorded'::text, 'file_profile_persisted'::text, 'data_dictionary_draft_persisted'::text, 'intake_sensitivity_profile_persisted'::text, 'sensitivity_review_queue_item_created'::text, 'sensitivity_review_decision_recorded'::text, 'intake_source_candidate_persisted'::text, 'source_promotion_decision_persisted'::text, 'evidence_lineage_extracted'::text, 'claim_proposed'::text, 'claim_gap_and_followup_generated'::text, 'conflict_review_candidate_created'::text, 'evidence_review_completed'::text, 'claim_review_completed_internal_approval'::text, 'coverage_review_decision_accepted_internal_with_limitation'::text])) OR (operation = ANY ('{client_followup_completed,generated_content_draft_created}'::text[])) OR operation = 'coverage_review_decision_accepted_funder_with_limitation'::text OR operation = 'generated_content_review_completed'::text OR operation = 'export_review_requested'::text OR operation = 'export_review_started'::text OR operation = 'export_review_completed'::text OR (operation = ANY (ARRAY['limitation_snapshot_confirmed'::text, 'export_candidate_created'::text])) OR operation = 'human_authority_decision_recorded'::text OR operation = 'generated_content_review_started'::text OR operation = 'coverage_review_decision_accepted_public_with_limitation'::text)",
+                "name": "upload_lifecycle_audit_gate_a_operation_check",
+                "table_name": "upload_lifecycle_audit",
+                "type": "c",
+                "validated": true
+              }
+            },
+            {
+              "expected": {
+                "definition": "CHECK (operation <> 'claim_review_completed_internal_approval'::text OR jsonb_typeof(metadata) = 'object'::text AND kai.gate_a_p0_jsonb_metadata_only(metadata) AND metadata ? 'metadata_only'::text AND metadata ? 'contract'::text AND metadata ? 'claim_id'::text AND metadata ? 'evidence_item_id'::text AND metadata ? 'review_queue_item_id'::text AND metadata ? 'previous_queue_status'::text AND metadata ? 'resulting_queue_status'::text AND metadata ? 'previous_review_status'::text AND metadata ? 'resulting_review_status'::text AND metadata ? 'previous_claim_strength'::text AND metadata ? 'resulting_claim_strength'::text AND metadata ? 'validator_key'::text AND metadata ? 'decision_id'::text AND metadata ? 'decision_outcome'::text AND metadata ? 'approved_audiences'::text AND metadata ? 'previous_claim_review_status'::text AND metadata ? 'resulting_claim_review_status'::text)",
+                "name": "upload_lifecycle_audit_p2_09_claim_review_metadata_object_check",
+                "table_name": "upload_lifecycle_audit",
+                "type": "c",
+                "validated": true
+              },
+              "key": [
+                "upload_lifecycle_audit",
+                "upload_lifecycle_audit_p2_09_claim_review_metadata_object_check"
+              ],
+              "production": {
+                "definition": "CHECK (operation <> 'claim_review_completed_internal_approval'::text OR jsonb_typeof(metadata) = 'object'::text AND kai.gate_a_p0_jsonb_metadata_only(metadata) AND metadata ? 'metadata_only'::text AND metadata ? 'contract'::text AND metadata ? 'claim_id'::text AND metadata ? 'evidence_item_id'::text AND metadata ? 'review_queue_item_id'::text AND metadata ? 'previous_queue_status'::text AND metadata ? 'resulting_queue_status'::text AND metadata ? 'previous_review_status'::text AND metadata ? 'resulting_review_status'::text AND metadata ? 'previous_claim_strength'::text AND metadata ? 'resulting_claim_strength'::text AND metadata ? 'validator_key'::text AND metadata ? 'decision_id'::text AND metadata ? 'decision_outcome'::text AND metadata ? 'approved_audiences'::text AND metadata ? 'previous_claim_review_status'::text AND metadata ? 'resulting_claim_review_status'::text) NOT VALID",
+                "name": "upload_lifecycle_audit_p2_09_claim_review_metadata_object_check",
+                "table_name": "upload_lifecycle_audit",
+                "type": "c",
+                "validated": false
+              }
+            },
+            {
+              "expected": {
+                "definition": "CHECK (operation <> 'evidence_review_completed'::text OR jsonb_typeof(metadata) = 'object'::text AND kai.gate_a_p0_jsonb_metadata_only(metadata) AND metadata ? 'metadata_only'::text AND metadata ? 'contract'::text AND metadata ? 'evidence_item_id'::text AND metadata ? 'review_queue_item_id'::text AND metadata ? 'previous_queue_status'::text AND metadata ? 'resulting_queue_status'::text AND metadata ? 'previous_review_status'::text AND metadata ? 'resulting_review_status'::text AND metadata ? 'previous_support_strength'::text AND metadata ? 'resulting_support_strength'::text AND metadata ? 'validator_key'::text AND metadata ? 'decision_id'::text AND metadata ? 'decision_outcome'::text AND metadata ? 'previous_evidence_review_status'::text AND metadata ? 'resulting_evidence_review_status'::text)",
+                "name": "upload_lifecycle_audit_p2_09_evidence_review_metadata_object_ch",
+                "table_name": "upload_lifecycle_audit",
+                "type": "c",
+                "validated": true
+              },
+              "key": [
+                "upload_lifecycle_audit",
+                "upload_lifecycle_audit_p2_09_evidence_review_metadata_object_ch"
+              ],
+              "production": {
+                "definition": "CHECK (operation <> 'evidence_review_completed'::text OR jsonb_typeof(metadata) = 'object'::text AND kai.gate_a_p0_jsonb_metadata_only(metadata) AND metadata ? 'metadata_only'::text AND metadata ? 'contract'::text AND metadata ? 'evidence_item_id'::text AND metadata ? 'review_queue_item_id'::text AND metadata ? 'previous_queue_status'::text AND metadata ? 'resulting_queue_status'::text AND metadata ? 'previous_review_status'::text AND metadata ? 'resulting_review_status'::text AND metadata ? 'previous_support_strength'::text AND metadata ? 'resulting_support_strength'::text AND metadata ? 'validator_key'::text AND metadata ? 'decision_id'::text AND metadata ? 'decision_outcome'::text AND metadata ? 'previous_evidence_review_status'::text AND metadata ? 'resulting_evidence_review_status'::text) NOT VALID",
+                "name": "upload_lifecycle_audit_p2_09_evidence_review_metadata_object_ch",
+                "table_name": "upload_lifecycle_audit",
+                "type": "c",
+                "validated": false
+              }
+            }
+          ],
+          "missing_from_production": [],
+          "production_only": []
+        },
+        "indexes": {
+          "changed": [],
+          "missing_from_production": [
+            {
+              "definition": "CREATE INDEX ix_upload_lifecycle_audit_gate_a_tenant_file ON kai.upload_lifecycle_audit USING btree (organization_id, intake_file_id, created_at)",
+              "name": "ix_upload_lifecycle_audit_gate_a_tenant_file",
+              "table_name": "upload_lifecycle_audit"
+            }
+          ],
+          "production_only": []
+        },
+        "triggers": {
+          "changed": [],
+          "missing_from_production": [],
+          "production_only": []
+        }
+      },
+      "is_equal": false,
+      "present_expected": true,
+      "present_production": true,
+      "table": "upload_lifecycle_audit"
+    }
+  }
+}

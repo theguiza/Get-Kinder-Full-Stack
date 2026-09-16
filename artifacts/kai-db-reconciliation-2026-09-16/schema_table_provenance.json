@@ -1,0 +1,1970 @@
+{
+  "construction_step_count": 64,
+  "construction_steps": [
+    {
+      "ordinal": 1,
+      "kind": "bootstrap",
+      "path": "scripts/kai-sprint2-organization-enablement-bootstrap-synthetic-schema.sql",
+      "exists": true,
+      "creates": [
+        "audit_events",
+        "engagements",
+        "organizations"
+      ],
+      "alters": []
+    },
+    {
+      "ordinal": 2,
+      "kind": "bootstrap",
+      "path": "scripts/kai-sprint2-engagements-tenant-safe-identity-prerequisite-converge.sql",
+      "exists": true,
+      "creates": [],
+      "alters": [
+        "engagements"
+      ]
+    },
+    {
+      "ordinal": 3,
+      "kind": "bootstrap",
+      "path": "scripts/kai-sprint2-package-4-impact-library-engagement-funder-requirements-auth-bootstrap-synthetic-schema.sql",
+      "exists": true,
+      "creates": [
+        "organization_memberships",
+        "roles",
+        "user_roles",
+        "users"
+      ],
+      "alters": []
+    },
+    {
+      "ordinal": 4,
+      "kind": "bootstrap",
+      "path": "scripts/kai-sprint2-gate-a-bootstrap-synthetic-schema.sql",
+      "exists": true,
+      "creates": [
+        "intake_files"
+      ],
+      "alters": []
+    },
+    {
+      "ordinal": 5,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_gate_a_p0_upload_lifecycle.sql",
+      "exists": true,
+      "creates": [
+        "upload_lifecycle_audit"
+      ],
+      "alters": [
+        "intake_files"
+      ]
+    },
+    {
+      "ordinal": 6,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_gate_a_p0_upload_lifecycle_enforcement_forward_repair.sql",
+      "exists": true,
+      "creates": [],
+      "alters": []
+    },
+    {
+      "ordinal": 7,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_gate_a_p0_required_index_forward_repair.sql",
+      "exists": true,
+      "creates": [],
+      "alters": []
+    },
+    {
+      "ordinal": 8,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_gate_a_p0_policy_decision_replay.sql",
+      "exists": true,
+      "creates": [
+        "upload_policy_decision_replay"
+      ],
+      "alters": [
+        "upload_lifecycle_audit"
+      ]
+    },
+    {
+      "ordinal": 9,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_p1_parser_run_and_file_profile.sql",
+      "exists": true,
+      "creates": [
+        "intake_file_profiles",
+        "intake_parser_runs"
+      ],
+      "alters": [
+        "intake_parser_runs",
+        "upload_lifecycle_audit"
+      ]
+    },
+    {
+      "ordinal": 10,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_p1_04_data_dictionary_and_quality.sql",
+      "exists": true,
+      "creates": [
+        "data_dictionaries",
+        "data_dictionary_fields",
+        "data_dictionary_mappings",
+        "data_quality_findings"
+      ],
+      "alters": [
+        "intake_file_profiles",
+        "upload_lifecycle_audit"
+      ]
+    },
+    {
+      "ordinal": 11,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_p1_05_intake_sensitivity_profile.sql",
+      "exists": true,
+      "creates": [
+        "intake_sensitivity_profiles"
+      ],
+      "alters": [
+        "upload_lifecycle_audit"
+      ]
+    },
+    {
+      "ordinal": 12,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_p1_06_review_queue.sql",
+      "exists": true,
+      "creates": [
+        "review_queue_items"
+      ],
+      "alters": [
+        "upload_lifecycle_audit"
+      ]
+    },
+    {
+      "ordinal": 13,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_p1_07_intake_source_candidate.sql",
+      "exists": true,
+      "creates": [
+        "intake_source_candidates"
+      ],
+      "alters": [
+        "intake_sensitivity_profiles",
+        "upload_lifecycle_audit"
+      ]
+    },
+    {
+      "ordinal": 14,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_p1_08_source_promotion.sql",
+      "exists": true,
+      "creates": [
+        "intake_promotion_decisions",
+        "source_versions",
+        "sources"
+      ],
+      "alters": [
+        "intake_promotion_decisions",
+        "intake_source_candidates",
+        "review_queue_items",
+        "upload_lifecycle_audit"
+      ]
+    },
+    {
+      "ordinal": 15,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger.sql",
+      "exists": true,
+      "creates": [
+        "intake_sensitivity_review_decisions"
+      ],
+      "alters": [
+        "intake_sensitivity_profiles",
+        "upload_lifecycle_audit"
+      ]
+    },
+    {
+      "ordinal": 16,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_p2_01_evidence_lineage.sql",
+      "exists": true,
+      "creates": [
+        "evidence_items",
+        "source_locators"
+      ],
+      "alters": [
+        "review_queue_items",
+        "source_versions",
+        "upload_lifecycle_audit"
+      ]
+    },
+    {
+      "ordinal": 17,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_p2_03_claim_proposal.sql",
+      "exists": true,
+      "creates": [
+        "claim_evidence_links",
+        "claims"
+      ],
+      "alters": [
+        "review_queue_items",
+        "upload_lifecycle_audit"
+      ]
+    },
+    {
+      "ordinal": 18,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_p2_04_claim_gap_followup.sql",
+      "exists": true,
+      "creates": [
+        "client_followup_items",
+        "gap_log_items"
+      ],
+      "alters": [
+        "review_queue_items",
+        "upload_lifecycle_audit"
+      ]
+    },
+    {
+      "ordinal": 19,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_p2_05_conflict_review_candidate.sql",
+      "exists": true,
+      "creates": [
+        "conflict_groups"
+      ],
+      "alters": [
+        "review_queue_items",
+        "upload_lifecycle_audit"
+      ]
+    },
+    {
+      "ordinal": 20,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_p2_09_human_review_internal_approval.sql",
+      "exists": true,
+      "creates": [],
+      "alters": [
+        "claims",
+        "evidence_items",
+        "upload_lifecycle_audit"
+      ]
+    },
+    {
+      "ordinal": 21,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_p2_10_coverage_review_decision.sql",
+      "exists": true,
+      "creates": [
+        "coverage_review_decisions"
+      ],
+      "alters": [
+        "upload_lifecycle_audit"
+      ]
+    },
+    {
+      "ordinal": 22,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_p2_11_client_followup_completion.sql",
+      "exists": true,
+      "creates": [],
+      "alters": [
+        "review_queue_items",
+        "upload_lifecycle_audit"
+      ]
+    },
+    {
+      "ordinal": 23,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.sql",
+      "exists": true,
+      "creates": [],
+      "alters": [
+        "claims",
+        "evidence_items",
+        "review_queue_items",
+        "upload_lifecycle_audit"
+      ]
+    },
+    {
+      "ordinal": 24,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_p2_12_human_review_decision_ledger.sql",
+      "exists": true,
+      "creates": [
+        "claim_review_decisions",
+        "evidence_review_decisions"
+      ],
+      "alters": [
+        "claims",
+        "evidence_items",
+        "upload_lifecycle_audit"
+      ]
+    },
+    {
+      "ordinal": 25,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_p2_10_funder_coverage_authority.sql",
+      "exists": true,
+      "creates": [],
+      "alters": [
+        "coverage_review_decisions",
+        "upload_lifecycle_audit"
+      ]
+    },
+    {
+      "ordinal": 26,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_p2_10_public_coverage_authority.sql",
+      "exists": true,
+      "creates": [],
+      "alters": [
+        "coverage_review_decisions",
+        "upload_lifecycle_audit"
+      ]
+    },
+    {
+      "ordinal": 27,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_a1_1_impact_outcome_context.sql",
+      "exists": true,
+      "creates": [
+        "impact_outcome_contexts"
+      ],
+      "alters": []
+    },
+    {
+      "ordinal": 28,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_a1_2_impact_evaluation_framework_and_criteria.sql",
+      "exists": true,
+      "creates": [
+        "impact_evaluation_criteria",
+        "impact_evaluation_framework_versions"
+      ],
+      "alters": []
+    },
+    {
+      "ordinal": 29,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_a1_3_impact_evaluations_and_results.sql",
+      "exists": true,
+      "creates": [
+        "impact_evaluation_results",
+        "impact_evaluations"
+      ],
+      "alters": [
+        "impact_evaluation_criteria"
+      ]
+    },
+    {
+      "ordinal": 30,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_a1_4_impact_evaluation_result_provenance_links.sql",
+      "exists": true,
+      "creates": [
+        "impact_evaluation_result_claim_links",
+        "impact_evaluation_result_evidence_links"
+      ],
+      "alters": [
+        "impact_evaluation_results"
+      ]
+    },
+    {
+      "ordinal": 31,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_b1_1_baseline_impact_requirements.sql",
+      "exists": true,
+      "creates": [
+        "engagement_requirement_sets",
+        "requirement_framework_versions",
+        "requirement_sets",
+        "requirement_sources",
+        "requirements"
+      ],
+      "alters": []
+    },
+    {
+      "ordinal": 32,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_b1_3_accepted_catalogue_persistence.sql",
+      "exists": true,
+      "creates": [],
+      "alters": []
+    },
+    {
+      "ordinal": 33,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_package_2a_engagement_requirement_sets_authority.sql",
+      "exists": true,
+      "creates": [],
+      "alters": [
+        "engagement_requirement_sets"
+      ]
+    },
+    {
+      "ordinal": 34,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_c2_1_requirement_assessment_persistence.sql",
+      "exists": true,
+      "creates": [
+        "requirement_assessment_claim_links",
+        "requirement_assessment_evaluation_result_links",
+        "requirement_assessment_evidence_links",
+        "requirement_assessments"
+      ],
+      "alters": []
+    },
+    {
+      "ordinal": 35,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_c3_a3_requirement_assessment_decision_gap_provenance.sql",
+      "exists": true,
+      "creates": [
+        "ra_claim_review_decision_links",
+        "ra_evidence_review_decision_links",
+        "ra_gap_links"
+      ],
+      "alters": []
+    },
+    {
+      "ordinal": 36,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_c3_a4_requirement_assessment_provenance_extension.sql",
+      "exists": true,
+      "creates": [
+        "ra_conflict_resolution_links",
+        "ra_outcome_context_links",
+        "ra_source_promotion_links"
+      ],
+      "alters": []
+    },
+    {
+      "ordinal": 37,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_p3_01_generated_content_drafts.sql",
+      "exists": true,
+      "creates": [
+        "generated_content_blocks",
+        "generated_content_citations",
+        "generated_content_drafts",
+        "generation_runs"
+      ],
+      "alters": [
+        "review_queue_items",
+        "upload_lifecycle_audit"
+      ]
+    },
+    {
+      "ordinal": 38,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_p13_01_impact_narrative_content_type.sql",
+      "exists": true,
+      "creates": [],
+      "alters": [
+        "generated_content_drafts",
+        "generation_runs"
+      ]
+    },
+    {
+      "ordinal": 39,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_p14_01_generation_run_engagement_binding.sql",
+      "exists": true,
+      "creates": [],
+      "alters": [
+        "generation_runs"
+      ]
+    },
+    {
+      "ordinal": 40,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_p14_14_generated_content_type_evolution.sql",
+      "exists": true,
+      "creates": [],
+      "alters": [
+        "generated_content_drafts",
+        "generation_runs"
+      ]
+    },
+    {
+      "ordinal": 41,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_p3_04_generated_content_review_completion.sql",
+      "exists": true,
+      "creates": [],
+      "alters": [
+        "review_queue_items",
+        "upload_lifecycle_audit"
+      ]
+    },
+    {
+      "ordinal": 42,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_generated_content_review_start_audit_contract.sql",
+      "exists": true,
+      "creates": [],
+      "alters": [
+        "upload_lifecycle_audit"
+      ]
+    },
+    {
+      "ordinal": 43,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_p3_05_export_review_request.sql",
+      "exists": true,
+      "creates": [],
+      "alters": [
+        "review_queue_items",
+        "upload_lifecycle_audit"
+      ]
+    },
+    {
+      "ordinal": 44,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_p3_09_export_review_start.sql",
+      "exists": true,
+      "creates": [],
+      "alters": [
+        "review_queue_items",
+        "upload_lifecycle_audit"
+      ]
+    },
+    {
+      "ordinal": 45,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_p3_13_export_review_completion.sql",
+      "exists": true,
+      "creates": [],
+      "alters": [
+        "review_queue_items",
+        "upload_lifecycle_audit"
+      ]
+    },
+    {
+      "ordinal": 46,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_p14_10_review_queue_target_object_type_repair.sql",
+      "exists": true,
+      "creates": [],
+      "alters": [
+        "review_queue_items"
+      ]
+    },
+    {
+      "ordinal": 47,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_p3_16_export_candidate_foundation.sql",
+      "exists": true,
+      "creates": [
+        "export_candidates",
+        "limitation_snapshot_entries",
+        "limitation_snapshots"
+      ],
+      "alters": [
+        "upload_lifecycle_audit"
+      ]
+    },
+    {
+      "ordinal": 48,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_p14_15_export_candidate_content_type_evolution.sql",
+      "exists": true,
+      "creates": [],
+      "alters": [
+        "export_candidates"
+      ]
+    },
+    {
+      "ordinal": 49,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_p3_17_human_authority_decision_ledger.sql",
+      "exists": true,
+      "creates": [
+        "human_authority_decisions"
+      ],
+      "alters": []
+    },
+    {
+      "ordinal": 50,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_p3_17_authority_audit_gate_a_operation_repair.sql",
+      "exists": true,
+      "creates": [],
+      "alters": [
+        "upload_lifecycle_audit"
+      ]
+    },
+    {
+      "ordinal": 51,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_p3_19_export_manifest_foundation.sql",
+      "exists": true,
+      "creates": [
+        "export_manifests"
+      ],
+      "alters": []
+    },
+    {
+      "ordinal": 52,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_p3_20_export_manifest_review_binding.sql",
+      "exists": true,
+      "creates": [],
+      "alters": [
+        "export_manifests",
+        "review_queue_items"
+      ]
+    },
+    {
+      "ordinal": 53,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_p14_02_grant_response_packet_export_identity_foundation.sql",
+      "exists": true,
+      "creates": [
+        "grant_response_packet_export_identities"
+      ],
+      "alters": []
+    },
+    {
+      "ordinal": 54,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_p14_03_grant_response_packet_export_candidate_foundation.sql",
+      "exists": true,
+      "creates": [
+        "grant_response_packet_export_candidate_members",
+        "grant_response_packet_export_candidates"
+      ],
+      "alters": []
+    },
+    {
+      "ordinal": 55,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_p14_05_grant_response_packet_export_review_binding.sql",
+      "exists": true,
+      "creates": [],
+      "alters": [
+        "review_queue_items"
+      ]
+    },
+    {
+      "ordinal": 56,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_p14_07_b1_grant_response_packet_human_authority_decision_ledger.sql",
+      "exists": true,
+      "creates": [
+        "grant_response_packet_human_authority_decisions"
+      ],
+      "alters": []
+    },
+    {
+      "ordinal": 57,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_p14_08_a_grant_response_packet_export_manifest_foundation.sql",
+      "exists": true,
+      "creates": [
+        "grant_response_packet_export_manifests"
+      ],
+      "alters": []
+    },
+    {
+      "ordinal": 58,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_br_02_board_reporting_candidate_foundation.sql",
+      "exists": true,
+      "creates": [
+        "board_reporting_candidate_members",
+        "board_reporting_candidates"
+      ],
+      "alters": []
+    },
+    {
+      "ordinal": 59,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_br_03a_board_reporting_candidate_review_request.sql",
+      "exists": true,
+      "creates": [],
+      "alters": [
+        "review_queue_items"
+      ]
+    },
+    {
+      "ordinal": 60,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_br_03b_board_reporting_candidate_review_lifecycle.sql",
+      "exists": true,
+      "creates": [],
+      "alters": [
+        "review_queue_items"
+      ]
+    },
+    {
+      "ordinal": 61,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_br_04_board_reporting_candidate_human_authority_decision_ledger.sql",
+      "exists": true,
+      "creates": [
+        "board_reporting_candidate_human_authority_decisions"
+      ],
+      "alters": []
+    },
+    {
+      "ordinal": 62,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_board_reporting_candidate_export_manifest_foundation.sql",
+      "exists": true,
+      "creates": [
+        "board_reporting_candidate_export_manifests"
+      ],
+      "alters": []
+    },
+    {
+      "ordinal": 63,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_gate_c1_gcs_generation_binding.sql",
+      "exists": true,
+      "creates": [],
+      "alters": [
+        "intake_files"
+      ]
+    },
+    {
+      "ordinal": 64,
+      "kind": "migration",
+      "path": "migrations/kai_sprint2_gk_organization_tenant_binding.sql",
+      "exists": true,
+      "creates": [
+        "gk_organization_bindings"
+      ],
+      "alters": []
+    }
+  ],
+  "tables": [
+    {
+      "table": "audit_events",
+      "classification": "BOOTSTRAP_ONLY_FOUNDATION",
+      "active_bootstrap_creators": [
+        "scripts/kai-sprint2-organization-enablement-bootstrap-synthetic-schema.sql"
+      ],
+      "active_migration_creators": [],
+      "all_repository_migration_creators": [],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "board_reporting_candidate_export_manifests",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_board_reporting_candidate_export_manifest_foundation.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_board_reporting_candidate_export_manifest_foundation.sql"
+      ],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "board_reporting_candidate_human_authority_decisions",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_br_04_board_reporting_candidate_human_authority_decision_ledger.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_br_04_board_reporting_candidate_human_authority_decision_ledger.sql"
+      ],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "board_reporting_candidate_members",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_br_02_board_reporting_candidate_foundation.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_br_02_board_reporting_candidate_foundation.sql"
+      ],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "board_reporting_candidates",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_br_02_board_reporting_candidate_foundation.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_br_02_board_reporting_candidate_foundation.sql"
+      ],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "claim_evidence_links",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_p2_03_claim_proposal.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_p2_03_claim_proposal.sql"
+      ],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "claim_review_decisions",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_p2_12_human_review_decision_ledger.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_p2_12_human_review_decision_ledger.sql"
+      ],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "claims",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_p2_03_claim_proposal.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_p2_03_claim_proposal.sql"
+      ],
+      "active_migration_alterers": [
+        "migrations/kai_sprint2_p2_09_human_review_internal_approval.sql",
+        "migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.sql",
+        "migrations/kai_sprint2_p2_12_human_review_decision_ledger.sql"
+      ],
+      "all_repository_migration_alterers": [
+        "migrations/kai_sprint2_p2_09_human_review_internal_approval.rollback.sql",
+        "migrations/kai_sprint2_p2_09_human_review_internal_approval.sql",
+        "migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.rollback.sql",
+        "migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.sql",
+        "migrations/kai_sprint2_p2_12_human_review_decision_ledger.rollback.sql",
+        "migrations/kai_sprint2_p2_12_human_review_decision_ledger.sql"
+      ]
+    },
+    {
+      "table": "client_followup_items",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_p2_04_claim_gap_followup.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_p2_04_claim_gap_followup.sql"
+      ],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "conflict_groups",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_p2_05_conflict_review_candidate.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_p2_05_conflict_review_candidate.sql"
+      ],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "coverage_review_decisions",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_p2_10_coverage_review_decision.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_p2_10_coverage_review_decision.sql"
+      ],
+      "active_migration_alterers": [
+        "migrations/kai_sprint2_p2_10_funder_coverage_authority.sql",
+        "migrations/kai_sprint2_p2_10_public_coverage_authority.sql"
+      ],
+      "all_repository_migration_alterers": [
+        "migrations/kai_sprint2_p2_10_funder_coverage_authority.rollback.sql",
+        "migrations/kai_sprint2_p2_10_funder_coverage_authority.sql",
+        "migrations/kai_sprint2_p2_10_public_coverage_authority.rollback.sql",
+        "migrations/kai_sprint2_p2_10_public_coverage_authority.sql"
+      ]
+    },
+    {
+      "table": "data_dictionaries",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_p1_04_data_dictionary_and_quality.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+        "migrations/kai_sprint2_p1_04_data_dictionary_and_quality.sql"
+      ],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "data_dictionary_fields",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_p1_04_data_dictionary_and_quality.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+        "migrations/kai_sprint2_p1_04_data_dictionary_and_quality.sql"
+      ],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "data_dictionary_mappings",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_p1_04_data_dictionary_and_quality.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+        "migrations/kai_sprint2_p1_04_data_dictionary_and_quality.sql"
+      ],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "data_quality_findings",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_p1_04_data_dictionary_and_quality.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+        "migrations/kai_sprint2_p1_04_data_dictionary_and_quality.sql"
+      ],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "engagement_requirement_sets",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_b1_1_baseline_impact_requirements.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_b1_1_baseline_impact_requirements.sql"
+      ],
+      "active_migration_alterers": [
+        "migrations/kai_sprint2_package_2a_engagement_requirement_sets_authority.sql"
+      ],
+      "all_repository_migration_alterers": [
+        "migrations/kai_sprint2_package_2a_engagement_requirement_sets_authority.rollback.sql",
+        "migrations/kai_sprint2_package_2a_engagement_requirement_sets_authority.sql"
+      ]
+    },
+    {
+      "table": "engagements",
+      "classification": "BOOTSTRAP_ONLY_FOUNDATION",
+      "active_bootstrap_creators": [
+        "scripts/kai-sprint2-organization-enablement-bootstrap-synthetic-schema.sql"
+      ],
+      "active_migration_creators": [],
+      "all_repository_migration_creators": [],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "evidence_items",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_p2_01_evidence_lineage.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+        "migrations/kai_sprint2_p2_01_evidence_lineage.sql"
+      ],
+      "active_migration_alterers": [
+        "migrations/kai_sprint2_p2_09_human_review_internal_approval.sql",
+        "migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.sql",
+        "migrations/kai_sprint2_p2_12_human_review_decision_ledger.sql"
+      ],
+      "all_repository_migration_alterers": [
+        "migrations/kai_sprint2_p2_09_human_review_internal_approval.rollback.sql",
+        "migrations/kai_sprint2_p2_09_human_review_internal_approval.sql",
+        "migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.rollback.sql",
+        "migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.sql",
+        "migrations/kai_sprint2_p2_12_human_review_decision_ledger.rollback.sql",
+        "migrations/kai_sprint2_p2_12_human_review_decision_ledger.sql"
+      ]
+    },
+    {
+      "table": "evidence_review_decisions",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_p2_12_human_review_decision_ledger.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_p2_12_human_review_decision_ledger.sql"
+      ],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "export_candidates",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_p3_16_export_candidate_foundation.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_p3_16_export_candidate_foundation.sql"
+      ],
+      "active_migration_alterers": [
+        "migrations/kai_sprint2_p14_15_export_candidate_content_type_evolution.sql"
+      ],
+      "all_repository_migration_alterers": [
+        "migrations/kai_sprint2_p14_15_export_candidate_content_type_evolution.rollback.sql",
+        "migrations/kai_sprint2_p14_15_export_candidate_content_type_evolution.sql"
+      ]
+    },
+    {
+      "table": "export_manifests",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_p3_19_export_manifest_foundation.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_p3_19_export_manifest_foundation.sql"
+      ],
+      "active_migration_alterers": [
+        "migrations/kai_sprint2_p3_20_export_manifest_review_binding.sql"
+      ],
+      "all_repository_migration_alterers": [
+        "migrations/kai_sprint2_p3_20_export_manifest_review_binding.rollback.sql",
+        "migrations/kai_sprint2_p3_20_export_manifest_review_binding.sql"
+      ]
+    },
+    {
+      "table": "gap_log_items",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_p2_04_claim_gap_followup.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_p2_04_claim_gap_followup.sql"
+      ],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "generated_content_blocks",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_p3_01_generated_content_drafts.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_p3_01_generated_content_drafts.sql"
+      ],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "generated_content_citations",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_p3_01_generated_content_drafts.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_p3_01_generated_content_drafts.sql"
+      ],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "generated_content_drafts",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_p3_01_generated_content_drafts.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_p3_01_generated_content_drafts.sql"
+      ],
+      "active_migration_alterers": [
+        "migrations/kai_sprint2_p13_01_impact_narrative_content_type.sql",
+        "migrations/kai_sprint2_p14_14_generated_content_type_evolution.sql"
+      ],
+      "all_repository_migration_alterers": [
+        "migrations/kai_sprint2_p13_01_impact_narrative_content_type.rollback.sql",
+        "migrations/kai_sprint2_p13_01_impact_narrative_content_type.sql",
+        "migrations/kai_sprint2_p14_14_generated_content_type_evolution.rollback.sql",
+        "migrations/kai_sprint2_p14_14_generated_content_type_evolution.sql"
+      ]
+    },
+    {
+      "table": "generation_runs",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_p3_01_generated_content_drafts.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_p3_01_generated_content_drafts.sql"
+      ],
+      "active_migration_alterers": [
+        "migrations/kai_sprint2_p13_01_impact_narrative_content_type.sql",
+        "migrations/kai_sprint2_p14_01_generation_run_engagement_binding.sql",
+        "migrations/kai_sprint2_p14_14_generated_content_type_evolution.sql"
+      ],
+      "all_repository_migration_alterers": [
+        "migrations/kai_sprint2_p13_01_impact_narrative_content_type.rollback.sql",
+        "migrations/kai_sprint2_p13_01_impact_narrative_content_type.sql",
+        "migrations/kai_sprint2_p14_01_generation_run_engagement_binding.rollback.sql",
+        "migrations/kai_sprint2_p14_01_generation_run_engagement_binding.sql",
+        "migrations/kai_sprint2_p14_14_generated_content_type_evolution.rollback.sql",
+        "migrations/kai_sprint2_p14_14_generated_content_type_evolution.sql"
+      ]
+    },
+    {
+      "table": "gk_organization_bindings",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_gk_organization_tenant_binding.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_gk_organization_tenant_binding.sql"
+      ],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "grant_response_packet_export_candidate_members",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_p14_03_grant_response_packet_export_candidate_foundation.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_p14_03_grant_response_packet_export_candidate_foundation.sql"
+      ],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "grant_response_packet_export_candidates",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_p14_03_grant_response_packet_export_candidate_foundation.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_p14_03_grant_response_packet_export_candidate_foundation.sql"
+      ],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "grant_response_packet_export_identities",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_p14_02_grant_response_packet_export_identity_foundation.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_p14_02_grant_response_packet_export_identity_foundation.sql"
+      ],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "grant_response_packet_export_manifests",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_p14_08_a_grant_response_packet_export_manifest_foundation.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_p14_08_a_grant_response_packet_export_manifest_foundation.sql"
+      ],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "grant_response_packet_human_authority_decisions",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_p14_07_b1_grant_response_packet_human_authority_decision_ledger.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_p14_07_b1_grant_response_packet_human_authority_decision_ledger.sql"
+      ],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "human_authority_decisions",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_p3_17_human_authority_decision_ledger.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_p3_17_human_authority_decision_ledger.sql"
+      ],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "impact_evaluation_criteria",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_a1_2_impact_evaluation_framework_and_criteria.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_a1_2_impact_evaluation_framework_and_criteria.sql"
+      ],
+      "active_migration_alterers": [
+        "migrations/kai_sprint2_a1_3_impact_evaluations_and_results.sql"
+      ],
+      "all_repository_migration_alterers": [
+        "migrations/kai_sprint2_a1_3_impact_evaluations_and_results.rollback.sql",
+        "migrations/kai_sprint2_a1_3_impact_evaluations_and_results.sql"
+      ]
+    },
+    {
+      "table": "impact_evaluation_framework_versions",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_a1_2_impact_evaluation_framework_and_criteria.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_a1_2_impact_evaluation_framework_and_criteria.sql"
+      ],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "impact_evaluation_result_claim_links",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_a1_4_impact_evaluation_result_provenance_links.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_a1_4_impact_evaluation_result_provenance_links.sql"
+      ],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "impact_evaluation_result_evidence_links",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_a1_4_impact_evaluation_result_provenance_links.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_a1_4_impact_evaluation_result_provenance_links.sql"
+      ],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "impact_evaluation_results",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_a1_3_impact_evaluations_and_results.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_a1_3_impact_evaluations_and_results.sql"
+      ],
+      "active_migration_alterers": [
+        "migrations/kai_sprint2_a1_4_impact_evaluation_result_provenance_links.sql"
+      ],
+      "all_repository_migration_alterers": [
+        "migrations/kai_sprint2_a1_4_impact_evaluation_result_provenance_links.rollback.sql",
+        "migrations/kai_sprint2_a1_4_impact_evaluation_result_provenance_links.sql"
+      ]
+    },
+    {
+      "table": "impact_evaluations",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_a1_3_impact_evaluations_and_results.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_a1_3_impact_evaluations_and_results.sql"
+      ],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "impact_outcome_contexts",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_a1_1_impact_outcome_context.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_a1_1_impact_outcome_context.sql"
+      ],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "intake_file_profiles",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_p1_parser_run_and_file_profile.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+        "migrations/kai_sprint2_p1_parser_run_and_file_profile.sql"
+      ],
+      "active_migration_alterers": [
+        "migrations/kai_sprint2_p1_04_data_dictionary_and_quality.sql"
+      ],
+      "all_repository_migration_alterers": [
+        "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+        "migrations/kai_sprint2_p1_04_data_dictionary_and_quality.rollback.sql",
+        "migrations/kai_sprint2_p1_04_data_dictionary_and_quality.sql"
+      ]
+    },
+    {
+      "table": "intake_files",
+      "classification": "BOOTSTRAP_BASE_WITH_MIGRATION_EVOLUTION",
+      "active_bootstrap_creators": [
+        "scripts/kai-sprint2-gate-a-bootstrap-synthetic-schema.sql"
+      ],
+      "active_migration_creators": [],
+      "all_repository_migration_creators": [],
+      "active_migration_alterers": [
+        "migrations/kai_sprint2_gate_a_p0_upload_lifecycle.sql",
+        "migrations/kai_sprint2_gate_c1_gcs_generation_binding.sql"
+      ],
+      "all_repository_migration_alterers": [
+        "migrations/kai_sprint2_gate_a_p0_upload_lifecycle.rollback.sql",
+        "migrations/kai_sprint2_gate_a_p0_upload_lifecycle.sql",
+        "migrations/kai_sprint2_gate_c1_gcs_generation_binding.rollback.sql",
+        "migrations/kai_sprint2_gate_c1_gcs_generation_binding.sql"
+      ]
+    },
+    {
+      "table": "intake_parser_runs",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_p1_parser_run_and_file_profile.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+        "migrations/kai_sprint2_p1_parser_run_and_file_profile.sql"
+      ],
+      "active_migration_alterers": [
+        "migrations/kai_sprint2_p1_parser_run_and_file_profile.sql"
+      ],
+      "all_repository_migration_alterers": [
+        "migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql",
+        "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+        "migrations/kai_sprint2_p1_parser_run_and_file_profile.rollback.sql",
+        "migrations/kai_sprint2_p1_parser_run_and_file_profile.sql"
+      ]
+    },
+    {
+      "table": "intake_promotion_decisions",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_p1_08_source_promotion.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+        "migrations/kai_sprint2_p1_08_source_promotion.sql"
+      ],
+      "active_migration_alterers": [
+        "migrations/kai_sprint2_p1_08_source_promotion.sql"
+      ],
+      "all_repository_migration_alterers": [
+        "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+        "migrations/kai_sprint2_p1_08_source_promotion.rollback.sql",
+        "migrations/kai_sprint2_p1_08_source_promotion.sql"
+      ]
+    },
+    {
+      "table": "intake_sensitivity_profiles",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_p1_05_intake_sensitivity_profile.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+        "migrations/kai_sprint2_p1_05_intake_sensitivity_profile.sql"
+      ],
+      "active_migration_alterers": [
+        "migrations/kai_sprint2_p1_07_intake_source_candidate.sql",
+        "migrations/kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger.sql"
+      ],
+      "all_repository_migration_alterers": [
+        "migrations/kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger.rollback.sql",
+        "migrations/kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger.sql",
+        "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+        "migrations/kai_sprint2_p1_07_intake_source_candidate.rollback.sql",
+        "migrations/kai_sprint2_p1_07_intake_source_candidate.sql"
+      ]
+    },
+    {
+      "table": "intake_sensitivity_review_decisions",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger.sql"
+      ],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "intake_source_candidates",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_p1_07_intake_source_candidate.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+        "migrations/kai_sprint2_p1_07_intake_source_candidate.sql"
+      ],
+      "active_migration_alterers": [
+        "migrations/kai_sprint2_p1_08_source_promotion.sql"
+      ],
+      "all_repository_migration_alterers": [
+        "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+        "migrations/kai_sprint2_p1_08_source_promotion.rollback.sql",
+        "migrations/kai_sprint2_p1_08_source_promotion.sql"
+      ]
+    },
+    {
+      "table": "limitation_snapshot_entries",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_p3_16_export_candidate_foundation.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_p3_16_export_candidate_foundation.sql"
+      ],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "limitation_snapshots",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_p3_16_export_candidate_foundation.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_p3_16_export_candidate_foundation.sql"
+      ],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "organization_memberships",
+      "classification": "BOOTSTRAP_ONLY_FOUNDATION",
+      "active_bootstrap_creators": [
+        "scripts/kai-sprint2-package-4-impact-library-engagement-funder-requirements-auth-bootstrap-synthetic-schema.sql"
+      ],
+      "active_migration_creators": [],
+      "all_repository_migration_creators": [],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "organizations",
+      "classification": "BOOTSTRAP_ONLY_FOUNDATION",
+      "active_bootstrap_creators": [
+        "scripts/kai-sprint2-organization-enablement-bootstrap-synthetic-schema.sql"
+      ],
+      "active_migration_creators": [],
+      "all_repository_migration_creators": [],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "ra_claim_review_decision_links",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_c3_a3_requirement_assessment_decision_gap_provenance.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_c3_a3_requirement_assessment_decision_gap_provenance.sql"
+      ],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "ra_conflict_resolution_links",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_c3_a4_requirement_assessment_provenance_extension.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_c3_a4_requirement_assessment_provenance_extension.sql"
+      ],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "ra_evidence_review_decision_links",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_c3_a3_requirement_assessment_decision_gap_provenance.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_c3_a3_requirement_assessment_decision_gap_provenance.sql"
+      ],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "ra_gap_links",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_c3_a3_requirement_assessment_decision_gap_provenance.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_c3_a3_requirement_assessment_decision_gap_provenance.sql"
+      ],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "ra_outcome_context_links",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_c3_a4_requirement_assessment_provenance_extension.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_c3_a4_requirement_assessment_provenance_extension.sql"
+      ],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "ra_source_promotion_links",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_c3_a4_requirement_assessment_provenance_extension.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_c3_a4_requirement_assessment_provenance_extension.sql"
+      ],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "requirement_assessment_claim_links",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_c2_1_requirement_assessment_persistence.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_c2_1_requirement_assessment_persistence.sql"
+      ],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "requirement_assessment_evaluation_result_links",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_c2_1_requirement_assessment_persistence.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_c2_1_requirement_assessment_persistence.sql"
+      ],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "requirement_assessment_evidence_links",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_c2_1_requirement_assessment_persistence.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_c2_1_requirement_assessment_persistence.sql"
+      ],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "requirement_assessments",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_c2_1_requirement_assessment_persistence.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_c2_1_requirement_assessment_persistence.sql"
+      ],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "requirement_framework_versions",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_b1_1_baseline_impact_requirements.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_b1_1_baseline_impact_requirements.sql"
+      ],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "requirement_sets",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_b1_1_baseline_impact_requirements.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_b1_1_baseline_impact_requirements.sql"
+      ],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "requirement_sources",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_b1_1_baseline_impact_requirements.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_b1_1_baseline_impact_requirements.sql"
+      ],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "requirements",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_b1_1_baseline_impact_requirements.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_b1_1_baseline_impact_requirements.sql"
+      ],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "review_queue_items",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_p1_06_review_queue.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+        "migrations/kai_sprint2_p1_06_review_queue.sql"
+      ],
+      "active_migration_alterers": [
+        "migrations/kai_sprint2_p1_08_source_promotion.sql",
+        "migrations/kai_sprint2_p2_01_evidence_lineage.sql",
+        "migrations/kai_sprint2_p2_03_claim_proposal.sql",
+        "migrations/kai_sprint2_p2_04_claim_gap_followup.sql",
+        "migrations/kai_sprint2_p2_05_conflict_review_candidate.sql",
+        "migrations/kai_sprint2_p2_11_client_followup_completion.sql",
+        "migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.sql",
+        "migrations/kai_sprint2_p3_01_generated_content_drafts.sql",
+        "migrations/kai_sprint2_p3_04_generated_content_review_completion.sql",
+        "migrations/kai_sprint2_p3_05_export_review_request.sql",
+        "migrations/kai_sprint2_p3_09_export_review_start.sql",
+        "migrations/kai_sprint2_p3_13_export_review_completion.sql",
+        "migrations/kai_sprint2_p14_10_review_queue_target_object_type_repair.sql",
+        "migrations/kai_sprint2_p3_20_export_manifest_review_binding.sql",
+        "migrations/kai_sprint2_p14_05_grant_response_packet_export_review_binding.sql",
+        "migrations/kai_sprint2_br_03a_board_reporting_candidate_review_request.sql",
+        "migrations/kai_sprint2_br_03b_board_reporting_candidate_review_lifecycle.sql"
+      ],
+      "all_repository_migration_alterers": [
+        "migrations/kai_sprint2_br_03a_board_reporting_candidate_review_request.rollback.sql",
+        "migrations/kai_sprint2_br_03a_board_reporting_candidate_review_request.sql",
+        "migrations/kai_sprint2_br_03b_board_reporting_candidate_review_lifecycle.rollback.sql",
+        "migrations/kai_sprint2_br_03b_board_reporting_candidate_review_lifecycle.sql",
+        "migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql",
+        "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+        "migrations/kai_sprint2_p14_05_grant_response_packet_export_review_binding.rollback.sql",
+        "migrations/kai_sprint2_p14_05_grant_response_packet_export_review_binding.sql",
+        "migrations/kai_sprint2_p14_10_review_queue_target_object_type_repair.sql",
+        "migrations/kai_sprint2_p14_12_review_queue_type_check_legacy_repair.rollback.sql",
+        "migrations/kai_sprint2_p14_12_review_queue_type_check_legacy_repair.sql",
+        "migrations/kai_sprint2_p1_06_review_status_column_repair.rollback.sql",
+        "migrations/kai_sprint2_p1_06_review_status_column_repair.sql",
+        "migrations/kai_sprint2_p1_08_source_promotion.rollback.sql",
+        "migrations/kai_sprint2_p1_08_source_promotion.sql",
+        "migrations/kai_sprint2_p2_01_evidence_lineage.rollback.sql",
+        "migrations/kai_sprint2_p2_01_evidence_lineage.sql",
+        "migrations/kai_sprint2_p2_03_claim_proposal.rollback.sql",
+        "migrations/kai_sprint2_p2_03_claim_proposal.sql",
+        "migrations/kai_sprint2_p2_04_claim_gap_followup.rollback.sql",
+        "migrations/kai_sprint2_p2_04_claim_gap_followup.sql",
+        "migrations/kai_sprint2_p2_05_conflict_review_candidate.rollback.sql",
+        "migrations/kai_sprint2_p2_05_conflict_review_candidate.sql",
+        "migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.rollback.sql",
+        "migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.sql",
+        "migrations/kai_sprint2_p2_11_client_followup_completion.rollback.sql",
+        "migrations/kai_sprint2_p2_11_client_followup_completion.sql",
+        "migrations/kai_sprint2_p3_01_generated_content_drafts.rollback.sql",
+        "migrations/kai_sprint2_p3_01_generated_content_drafts.sql",
+        "migrations/kai_sprint2_p3_04_generated_content_review_completion.rollback.sql",
+        "migrations/kai_sprint2_p3_04_generated_content_review_completion.sql",
+        "migrations/kai_sprint2_p3_05_export_review_request.rollback.sql",
+        "migrations/kai_sprint2_p3_05_export_review_request.sql",
+        "migrations/kai_sprint2_p3_09_export_review_start.rollback.sql",
+        "migrations/kai_sprint2_p3_09_export_review_start.sql",
+        "migrations/kai_sprint2_p3_13_export_review_completion.rollback.sql",
+        "migrations/kai_sprint2_p3_13_export_review_completion.sql",
+        "migrations/kai_sprint2_p3_20_export_manifest_review_binding.rollback.sql",
+        "migrations/kai_sprint2_p3_20_export_manifest_review_binding.sql"
+      ]
+    },
+    {
+      "table": "roles",
+      "classification": "BOOTSTRAP_ONLY_FOUNDATION",
+      "active_bootstrap_creators": [
+        "scripts/kai-sprint2-package-4-impact-library-engagement-funder-requirements-auth-bootstrap-synthetic-schema.sql"
+      ],
+      "active_migration_creators": [],
+      "all_repository_migration_creators": [],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "source_locators",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_p2_01_evidence_lineage.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+        "migrations/kai_sprint2_p2_01_evidence_lineage.sql"
+      ],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "source_versions",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_p1_08_source_promotion.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+        "migrations/kai_sprint2_p1_08_source_promotion.sql"
+      ],
+      "active_migration_alterers": [
+        "migrations/kai_sprint2_p2_01_evidence_lineage.sql"
+      ],
+      "all_repository_migration_alterers": [
+        "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+        "migrations/kai_sprint2_p2_01_evidence_lineage.rollback.sql",
+        "migrations/kai_sprint2_p2_01_evidence_lineage.sql"
+      ]
+    },
+    {
+      "table": "sources",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_p1_08_source_promotion.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+        "migrations/kai_sprint2_p1_08_source_promotion.sql"
+      ],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "upload_lifecycle_audit",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_gate_a_p0_upload_lifecycle.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_gate_a_p0_upload_lifecycle.sql"
+      ],
+      "active_migration_alterers": [
+        "migrations/kai_sprint2_gate_a_p0_policy_decision_replay.sql",
+        "migrations/kai_sprint2_p1_parser_run_and_file_profile.sql",
+        "migrations/kai_sprint2_p1_04_data_dictionary_and_quality.sql",
+        "migrations/kai_sprint2_p1_05_intake_sensitivity_profile.sql",
+        "migrations/kai_sprint2_p1_06_review_queue.sql",
+        "migrations/kai_sprint2_p1_07_intake_source_candidate.sql",
+        "migrations/kai_sprint2_p1_08_source_promotion.sql",
+        "migrations/kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger.sql",
+        "migrations/kai_sprint2_p2_01_evidence_lineage.sql",
+        "migrations/kai_sprint2_p2_03_claim_proposal.sql",
+        "migrations/kai_sprint2_p2_04_claim_gap_followup.sql",
+        "migrations/kai_sprint2_p2_05_conflict_review_candidate.sql",
+        "migrations/kai_sprint2_p2_09_human_review_internal_approval.sql",
+        "migrations/kai_sprint2_p2_10_coverage_review_decision.sql",
+        "migrations/kai_sprint2_p2_11_client_followup_completion.sql",
+        "migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.sql",
+        "migrations/kai_sprint2_p2_12_human_review_decision_ledger.sql",
+        "migrations/kai_sprint2_p2_10_funder_coverage_authority.sql",
+        "migrations/kai_sprint2_p2_10_public_coverage_authority.sql",
+        "migrations/kai_sprint2_p3_01_generated_content_drafts.sql",
+        "migrations/kai_sprint2_p3_04_generated_content_review_completion.sql",
+        "migrations/kai_sprint2_generated_content_review_start_audit_contract.sql",
+        "migrations/kai_sprint2_p3_05_export_review_request.sql",
+        "migrations/kai_sprint2_p3_09_export_review_start.sql",
+        "migrations/kai_sprint2_p3_13_export_review_completion.sql",
+        "migrations/kai_sprint2_p3_16_export_candidate_foundation.sql",
+        "migrations/kai_sprint2_p3_17_authority_audit_gate_a_operation_repair.sql"
+      ],
+      "all_repository_migration_alterers": [
+        "migrations/kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger.rollback.sql",
+        "migrations/kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger.sql",
+        "migrations/kai_sprint2_gate_a_p0_policy_decision_replay.rollback.sql",
+        "migrations/kai_sprint2_gate_a_p0_policy_decision_replay.sql",
+        "migrations/kai_sprint2_generated_content_review_start_audit_contract.rollback.sql",
+        "migrations/kai_sprint2_generated_content_review_start_audit_contract.sql",
+        "migrations/kai_sprint2_legacy_generation_cutover_20260817.rollback.sql",
+        "migrations/kai_sprint2_legacy_generation_cutover_20260817.sql",
+        "migrations/kai_sprint2_p1_04_data_dictionary_and_quality.rollback.sql",
+        "migrations/kai_sprint2_p1_04_data_dictionary_and_quality.sql",
+        "migrations/kai_sprint2_p1_05_intake_sensitivity_profile.rollback.sql",
+        "migrations/kai_sprint2_p1_05_intake_sensitivity_profile.sql",
+        "migrations/kai_sprint2_p1_06_review_queue.rollback.sql",
+        "migrations/kai_sprint2_p1_06_review_queue.sql",
+        "migrations/kai_sprint2_p1_07_intake_source_candidate.rollback.sql",
+        "migrations/kai_sprint2_p1_07_intake_source_candidate.sql",
+        "migrations/kai_sprint2_p1_08_source_promotion.rollback.sql",
+        "migrations/kai_sprint2_p1_08_source_promotion.sql",
+        "migrations/kai_sprint2_p1_parser_run_and_file_profile.rollback.sql",
+        "migrations/kai_sprint2_p1_parser_run_and_file_profile.sql",
+        "migrations/kai_sprint2_p2_01_evidence_lineage.rollback.sql",
+        "migrations/kai_sprint2_p2_01_evidence_lineage.sql",
+        "migrations/kai_sprint2_p2_03_claim_proposal.rollback.sql",
+        "migrations/kai_sprint2_p2_03_claim_proposal.sql",
+        "migrations/kai_sprint2_p2_04_claim_gap_followup.rollback.sql",
+        "migrations/kai_sprint2_p2_04_claim_gap_followup.sql",
+        "migrations/kai_sprint2_p2_05_conflict_review_candidate.rollback.sql",
+        "migrations/kai_sprint2_p2_05_conflict_review_candidate.sql",
+        "migrations/kai_sprint2_p2_09_human_review_internal_approval.rollback.sql",
+        "migrations/kai_sprint2_p2_09_human_review_internal_approval.sql",
+        "migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.rollback.sql",
+        "migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.sql",
+        "migrations/kai_sprint2_p2_10_coverage_review_decision.rollback.sql",
+        "migrations/kai_sprint2_p2_10_coverage_review_decision.sql",
+        "migrations/kai_sprint2_p2_10_funder_coverage_authority.rollback.sql",
+        "migrations/kai_sprint2_p2_10_funder_coverage_authority.sql",
+        "migrations/kai_sprint2_p2_10_public_coverage_authority.rollback.sql",
+        "migrations/kai_sprint2_p2_10_public_coverage_authority.sql",
+        "migrations/kai_sprint2_p2_11_client_followup_completion.rollback.sql",
+        "migrations/kai_sprint2_p2_11_client_followup_completion.sql",
+        "migrations/kai_sprint2_p2_12_human_review_decision_ledger.rollback.sql",
+        "migrations/kai_sprint2_p2_12_human_review_decision_ledger.sql",
+        "migrations/kai_sprint2_p3_01_generated_content_drafts.rollback.sql",
+        "migrations/kai_sprint2_p3_01_generated_content_drafts.sql",
+        "migrations/kai_sprint2_p3_04_generated_content_review_completion.rollback.sql",
+        "migrations/kai_sprint2_p3_04_generated_content_review_completion.sql",
+        "migrations/kai_sprint2_p3_05_export_review_request.rollback.sql",
+        "migrations/kai_sprint2_p3_05_export_review_request.sql",
+        "migrations/kai_sprint2_p3_09_export_review_start.rollback.sql",
+        "migrations/kai_sprint2_p3_09_export_review_start.sql",
+        "migrations/kai_sprint2_p3_13_export_review_completion.rollback.sql",
+        "migrations/kai_sprint2_p3_13_export_review_completion.sql",
+        "migrations/kai_sprint2_p3_16_export_candidate_foundation.rollback.sql",
+        "migrations/kai_sprint2_p3_16_export_candidate_foundation.sql",
+        "migrations/kai_sprint2_p3_17_authority_audit_gate_a_operation_repair.rollback.sql",
+        "migrations/kai_sprint2_p3_17_authority_audit_gate_a_operation_repair.sql"
+      ]
+    },
+    {
+      "table": "upload_policy_decision_replay",
+      "classification": "ACTIVE_MIGRATION_OWNED",
+      "active_bootstrap_creators": [],
+      "active_migration_creators": [
+        "migrations/kai_sprint2_gate_a_p0_policy_decision_replay.sql"
+      ],
+      "all_repository_migration_creators": [
+        "migrations/kai_sprint2_gate_a_p0_policy_decision_replay.sql"
+      ],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "user_roles",
+      "classification": "BOOTSTRAP_ONLY_FOUNDATION",
+      "active_bootstrap_creators": [
+        "scripts/kai-sprint2-package-4-impact-library-engagement-funder-requirements-auth-bootstrap-synthetic-schema.sql"
+      ],
+      "active_migration_creators": [],
+      "all_repository_migration_creators": [],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    },
+    {
+      "table": "users",
+      "classification": "BOOTSTRAP_ONLY_FOUNDATION",
+      "active_bootstrap_creators": [
+        "scripts/kai-sprint2-package-4-impact-library-engagement-funder-requirements-auth-bootstrap-synthetic-schema.sql"
+      ],
+      "active_migration_creators": [],
+      "all_repository_migration_creators": [],
+      "active_migration_alterers": [],
+      "all_repository_migration_alterers": []
+    }
+  ]
+}

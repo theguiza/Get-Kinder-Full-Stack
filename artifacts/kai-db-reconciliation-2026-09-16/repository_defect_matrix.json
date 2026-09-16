@@ -1,0 +1,443 @@
+[
+  {
+    "object_package": "scripts/kai-sprint2-p1-07-source-candidate-verifier.sql",
+    "evidence": "emitted FAIL row(s) against current full schema",
+    "classification": "VERIFIER_DEFECT",
+    "consequence": "repository verification surface cannot be accepted as all PASS on the current full executable schema",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "scripts/kai-sprint2-p2-09-human-review-verifier.sql",
+    "evidence": "exited nonzero and/or emitted no accepted PASS result set",
+    "classification": "VERIFIER_DEFECT",
+    "consequence": "repository verification surface cannot be accepted as all PASS on the current full executable schema",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "scripts/kai-sprint2-p2-10-coverage-review-decision-verifier.sql",
+    "evidence": "exited nonzero and/or emitted no accepted PASS result set",
+    "classification": "VERIFIER_DEFECT",
+    "consequence": "repository verification surface cannot be accepted as all PASS on the current full executable schema",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "scripts/kai-sprint2-p2-11-client-followup-completion-verifier.sql",
+    "evidence": "exited nonzero and/or emitted no accepted PASS result set",
+    "classification": "VERIFIER_DEFECT",
+    "consequence": "repository verification surface cannot be accepted as all PASS on the current full executable schema",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "scripts/kai-sprint2-p2-12-human-review-decision-ledger-verifier.sql",
+    "evidence": "exited nonzero and/or emitted no accepted PASS result set",
+    "classification": "VERIFIER_DEFECT",
+    "consequence": "repository verification surface cannot be accepted as all PASS on the current full executable schema",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "scripts/kai-sprint2-p3-01-generated-content-drafts-verifier.sql",
+    "evidence": "exited nonzero and/or emitted no accepted PASS result set",
+    "classification": "VERIFIER_DEFECT",
+    "consequence": "repository verification surface cannot be accepted as all PASS on the current full executable schema",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "scripts/kai-sprint2-p13-01-impact-narrative-content-type-verifier.sql",
+    "evidence": "exited nonzero and/or emitted no accepted PASS result set",
+    "classification": "VERIFIER_DEFECT",
+    "consequence": "repository verification surface cannot be accepted as all PASS on the current full executable schema",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "scripts/kai-sprint2-p14-14-generated-content-type-evolution-verifier.sql",
+    "evidence": "exited nonzero and/or emitted no accepted PASS result set",
+    "classification": "VERIFIER_DEFECT",
+    "consequence": "repository verification surface cannot be accepted as all PASS on the current full executable schema",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "scripts/kai-sprint2-p3-05-export-review-request-verifier.sql",
+    "evidence": "exited nonzero and/or emitted no accepted PASS result set",
+    "classification": "VERIFIER_DEFECT",
+    "consequence": "repository verification surface cannot be accepted as all PASS on the current full executable schema",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "scripts/kai-sprint2-p3-09-export-review-start-verifier.sql",
+    "evidence": "exited nonzero and/or emitted no accepted PASS result set",
+    "classification": "VERIFIER_DEFECT",
+    "consequence": "repository verification surface cannot be accepted as all PASS on the current full executable schema",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "scripts/kai-sprint2-p3-13-export-review-completion-verifier.sql",
+    "evidence": "exited nonzero and/or emitted no accepted PASS result set",
+    "classification": "VERIFIER_DEFECT",
+    "consequence": "repository verification surface cannot be accepted as all PASS on the current full executable schema",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "scripts/kai-sprint2-p3-16-export-candidate-foundation-verifier.sql",
+    "evidence": "exited nonzero and/or emitted no accepted PASS result set",
+    "classification": "VERIFIER_DEFECT",
+    "consequence": "repository verification surface cannot be accepted as all PASS on the current full executable schema",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "scripts/kai-sprint2-p14-15-export-candidate-content-type-evolution-verifier.sql",
+    "evidence": "emitted FAIL row(s) against current full schema",
+    "classification": "VERIFIER_DEFECT",
+    "consequence": "repository verification surface cannot be accepted as all PASS on the current full executable schema",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "scripts/kai-sprint2-p3-17-human-authority-decision-ledger-verifier.sql",
+    "evidence": "exited nonzero and/or emitted no accepted PASS result set",
+    "classification": "VERIFIER_DEFECT",
+    "consequence": "repository verification surface cannot be accepted as all PASS on the current full executable schema",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "scripts/kai-sprint2-gk-organization-tenant-binding-verifier.sql",
+    "evidence": "exited nonzero and/or emitted no accepted PASS result set",
+    "classification": "VERIFIER_DEFECT",
+    "consequence": "repository verification surface cannot be accepted as all PASS on the current full executable schema",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "migrations/kai_sprint2_p1_06_review_status_column_repair.sql",
+    "evidence": "fails after fresh P1-06 because fresh P1-06 creates review_status text and no kai.review_status_enum; file header identifies legacy enum-backed repair path",
+    "classification": "INTENTIONAL_LEGACY",
+    "consequence": "must not be combined into active fresh construction path",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "Backend/kai/db/kaiIntakeQueries.js -> kai.intake_batches",
+    "evidence": "static reference not present as table in EXPECTED_EXECUTABLE_SCHEMA; may be non-table dynamic reference",
+    "classification": "NOT_CONFIRMED",
+    "consequence": "not confirmed as table dependency; may be column alias/non-table identifier",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "Backend/kai/db/kaiOrganizationEnablementQueries.js -> kai.engagement_status_enum",
+    "evidence": "static reference not present as table in EXPECTED_EXECUTABLE_SCHEMA; may be non-table dynamic reference",
+    "classification": "NOT_CONFIRMED",
+    "consequence": "not confirmed as table dependency; may be column alias/non-table identifier",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "Backend/kai/db/kaiQueries.js -> kai.intake_batches",
+    "evidence": "static reference not present as table in EXPECTED_EXECUTABLE_SCHEMA; may be non-table dynamic reference",
+    "classification": "NOT_CONFIRMED",
+    "consequence": "not confirmed as table dependency; may be column alias/non-table identifier",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "Backend/kai/db/kaiReadModels.js -> kai.intake_batches",
+    "evidence": "static reference not present as table in EXPECTED_EXECUTABLE_SCHEMA; may be non-table dynamic reference",
+    "classification": "NOT_CONFIRMED",
+    "consequence": "not confirmed as table dependency; may be column alias/non-table identifier",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "Backend/kai/dictionary/postgresGeneratedContentRepository.js -> kai.generatorResultReason",
+    "evidence": "static reference not present as table in EXPECTED_EXECUTABLE_SCHEMA; may be non-table dynamic reference",
+    "classification": "NOT_CONFIRMED",
+    "consequence": "not confirmed as table dependency; may be column alias/non-table identifier",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "Backend/kai/security/syntheticSecurityAssessmentEnqueue.js -> kai.syntheticSecurityAssessmentEnqueue",
+    "evidence": "static reference not present as table in EXPECTED_EXECUTABLE_SCHEMA; may be non-table dynamic reference",
+    "classification": "NOT_CONFIRMED",
+    "consequence": "not confirmed as table dependency; may be column alias/non-table identifier",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "Backend/kai/services/kaiIntakeService.js -> kai.file_policy",
+    "evidence": "static reference not present as table in EXPECTED_EXECUTABLE_SCHEMA; may be non-table dynamic reference",
+    "classification": "NOT_CONFIRMED",
+    "consequence": "not confirmed as table dependency; may be column alias/non-table identifier",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "Backend/kai/services/kaiMetadataOnlyAuditComposition.js -> kai.object_type_enum",
+    "evidence": "static reference not present as table in EXPECTED_EXECUTABLE_SCHEMA; may be non-table dynamic reference",
+    "classification": "NOT_CONFIRMED",
+    "consequence": "not confirmed as table dependency; may be column alias/non-table identifier",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "Backend/kai/services/kaiReviewQueueService.js -> kai.review_queue",
+    "evidence": "static reference not present as table in EXPECTED_EXECUTABLE_SCHEMA; may be non-table dynamic reference",
+    "classification": "NOT_CONFIRMED",
+    "consequence": "not confirmed as table dependency; may be column alias/non-table identifier",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "Backend/kai/upload/inMemoryUploadLifecycleRepository.js -> kai.inMemoryUploadLifecycleRepository",
+    "evidence": "static reference not present as table in EXPECTED_EXECUTABLE_SCHEMA; may be non-table dynamic reference",
+    "classification": "NOT_CONFIRMED",
+    "consequence": "not confirmed as table dependency; may be column alias/non-table identifier",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "__tests__/kai-guest-search.spec.js -> kai.js",
+    "evidence": "static reference not present as table in EXPECTED_EXECUTABLE_SCHEMA; may be non-table dynamic reference",
+    "classification": "NOT_CONFIRMED",
+    "consequence": "not confirmed as table dependency; may be column alias/non-table identifier",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "__tests__/kai-history-budget.spec.js -> kai.js",
+    "evidence": "static reference not present as table in EXPECTED_EXECUTABLE_SCHEMA; may be non-table dynamic reference",
+    "classification": "NOT_CONFIRMED",
+    "consequence": "not confirmed as table dependency; may be column alias/non-table identifier",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "__tests__/kai-package-3-repair-acceptance.spec.js -> kai.js",
+    "evidence": "static reference not present as table in EXPECTED_EXECUTABLE_SCHEMA; may be non-table dynamic reference",
+    "classification": "NOT_CONFIRMED",
+    "consequence": "not confirmed as table dependency; may be column alias/non-table identifier",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "__tests__/kai-package-4-organization-evidence-gaps-acceptance.spec.js -> kai.js",
+    "evidence": "static reference not present as table in EXPECTED_EXECUTABLE_SCHEMA; may be non-table dynamic reference",
+    "classification": "NOT_CONFIRMED",
+    "consequence": "not confirmed as table dependency; may be column alias/non-table identifier",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "__tests__/kai-personalization-routing.spec.js -> kai.js",
+    "evidence": "static reference not present as table in EXPECTED_EXECUTABLE_SCHEMA; may be non-table dynamic reference",
+    "classification": "NOT_CONFIRMED",
+    "consequence": "not confirmed as table dependency; may be column alias/non-table identifier",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "__tests__/kai-runtime-context-bootstrap.spec.js -> kai.js",
+    "evidence": "static reference not present as table in EXPECTED_EXECUTABLE_SCHEMA; may be non-table dynamic reference",
+    "classification": "NOT_CONFIRMED",
+    "consequence": "not confirmed as table dependency; may be column alias/non-table identifier",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "__tests__/kai-sprint2-impact-library-kai-surface.spec.js -> kai.js",
+    "evidence": "static reference not present as table in EXPECTED_EXECUTABLE_SCHEMA; may be non-table dynamic reference",
+    "classification": "NOT_CONFIRMED",
+    "consequence": "not confirmed as table dependency; may be column alias/non-table identifier",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "__tests__/kai-sprint2-mutation-orchestration.spec.js -> kai.mutation",
+    "evidence": "static reference not present as table in EXPECTED_EXECUTABLE_SCHEMA; may be non-table dynamic reference",
+    "classification": "NOT_CONFIRMED",
+    "consequence": "not confirmed as table dependency; may be column alias/non-table identifier",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "__tests__/kai-sprint2-p1-03-parser-profile-worker-boundary.spec.js -> kai.evidence",
+    "evidence": "static reference not present as table in EXPECTED_EXECUTABLE_SCHEMA; may be non-table dynamic reference",
+    "classification": "NOT_CONFIRMED",
+    "consequence": "not confirmed as table dependency; may be column alias/non-table identifier",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "__tests__/kai-sprint2-p1-03-parser-profile-worker-boundary.spec.js -> kai.intake_data_dictionar",
+    "evidence": "static reference not present as table in EXPECTED_EXECUTABLE_SCHEMA; may be non-table dynamic reference",
+    "classification": "NOT_CONFIRMED",
+    "consequence": "not confirmed as table dependency; may be column alias/non-table identifier",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "__tests__/kai-sprint2-p1-03-parser-profile-worker-boundary.spec.js -> kai.intake_sensitivity",
+    "evidence": "static reference not present as table in EXPECTED_EXECUTABLE_SCHEMA; may be non-table dynamic reference",
+    "classification": "NOT_CONFIRMED",
+    "consequence": "not confirmed as table dependency; may be column alias/non-table identifier",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "__tests__/kai-sprint2-p1-03-parser-profile-worker-boundary.spec.js -> kai.review_queue",
+    "evidence": "static reference not present as table in EXPECTED_EXECUTABLE_SCHEMA; may be non-table dynamic reference",
+    "classification": "NOT_CONFIRMED",
+    "consequence": "not confirmed as table dependency; may be column alias/non-table identifier",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "__tests__/kai-sprint2-p1-03-parser-profile-worker-boundary.spec.js -> kai.source",
+    "evidence": "static reference not present as table in EXPECTED_EXECUTABLE_SCHEMA; may be non-table dynamic reference",
+    "classification": "NOT_CONFIRMED",
+    "consequence": "not confirmed as table dependency; may be column alias/non-table identifier",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "__tests__/kai-sprint2-p1-06-review-status-column-repair-schema-contract.spec.js -> kai.review_status_enum",
+    "evidence": "static reference not present as table in EXPECTED_EXECUTABLE_SCHEMA; may be non-table dynamic reference",
+    "classification": "NOT_CONFIRMED",
+    "consequence": "not confirmed as table dependency; may be column alias/non-table identifier",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "__tests__/kai-sprint2-p14-07-b1-grant-response-packet-human-authority-decision-ledger.integration.spec.js -> kai.grant_response_packet_final_eligibility",
+    "evidence": "static reference not present as table in EXPECTED_EXECUTABLE_SCHEMA; may be non-table dynamic reference",
+    "classification": "NOT_CONFIRMED",
+    "consequence": "not confirmed as table dependency; may be column alias/non-table identifier",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "__tests__/kai-sprint2-review-queue-status-route.spec.js -> kai.review_queue",
+    "evidence": "static reference not present as table in EXPECTED_EXECUTABLE_SCHEMA; may be non-table dynamic reference",
+    "classification": "NOT_CONFIRMED",
+    "consequence": "not confirmed as table dependency; may be column alias/non-table identifier",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "scripts/kai-sprint2-gate-a-required-index-local-postgres.js -> kai.ix_intake_files_gate_a_object_version",
+    "evidence": "static reference not present as table in EXPECTED_EXECUTABLE_SCHEMA; may be non-table dynamic reference",
+    "classification": "NOT_CONFIRMED",
+    "consequence": "not confirmed as table dependency; may be column alias/non-table identifier",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "scripts/kai-sprint2-gate-a-required-index-local-postgres.js -> kai.ix_intake_files_gate_a_tenant_upload_state",
+    "evidence": "static reference not present as table in EXPECTED_EXECUTABLE_SCHEMA; may be non-table dynamic reference",
+    "classification": "NOT_CONFIRMED",
+    "consequence": "not confirmed as table dependency; may be column alias/non-table identifier",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "scripts/kai-sprint2-gate-a-required-index-local-postgres.js -> kai.ux_intake_files_gate_a_org_declared_checksum",
+    "evidence": "static reference not present as table in EXPECTED_EXECUTABLE_SCHEMA; may be non-table dynamic reference",
+    "classification": "NOT_CONFIRMED",
+    "consequence": "not confirmed as table dependency; may be column alias/non-table identifier",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "scripts/kai-sprint2-legacy-cutover-local-postgres.js -> kai.funder_requirements",
+    "evidence": "static reference not present as table in EXPECTED_EXECUTABLE_SCHEMA; may be non-table dynamic reference",
+    "classification": "NOT_CONFIRMED",
+    "consequence": "not confirmed as table dependency; may be column alias/non-table identifier",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "scripts/kai-sprint2-legacy-cutover-local-postgres.js -> kai.funders",
+    "evidence": "static reference not present as table in EXPECTED_EXECUTABLE_SCHEMA; may be non-table dynamic reference",
+    "classification": "NOT_CONFIRMED",
+    "consequence": "not confirmed as table dependency; may be column alias/non-table identifier",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "scripts/kai-sprint2-legacy-cutover-local-postgres.js -> kai.priority_enum",
+    "evidence": "static reference not present as table in EXPECTED_EXECUTABLE_SCHEMA; may be non-table dynamic reference",
+    "classification": "NOT_CONFIRMED",
+    "consequence": "not confirmed as table dependency; may be column alias/non-table identifier",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "scripts/kai-sprint2-legacy-cutover-local-postgres.js -> kai.priority_enum_probe",
+    "evidence": "static reference not present as table in EXPECTED_EXECUTABLE_SCHEMA; may be non-table dynamic reference",
+    "classification": "NOT_CONFIRMED",
+    "consequence": "not confirmed as table dependency; may be column alias/non-table identifier",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "scripts/kai-sprint2-legacy-cutover-local-postgres.js -> kai.set_updated_at",
+    "evidence": "static reference not present as table in EXPECTED_EXECUTABLE_SCHEMA; may be non-table dynamic reference",
+    "classification": "NOT_CONFIRMED",
+    "consequence": "not confirmed as table dependency; may be column alias/non-table identifier",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "scripts/kai-sprint2-legacy-cutover-local-postgres.js -> kai.set_updated_at_probe",
+    "evidence": "static reference not present as table in EXPECTED_EXECUTABLE_SCHEMA; may be non-table dynamic reference",
+    "classification": "NOT_CONFIRMED",
+    "consequence": "not confirmed as table dependency; may be column alias/non-table identifier",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "scripts/kai-sprint2-legacy-cutover-local-postgres.js -> kai.table",
+    "evidence": "static reference not present as table in EXPECTED_EXECUTABLE_SCHEMA; may be non-table dynamic reference",
+    "classification": "NOT_CONFIRMED",
+    "consequence": "not confirmed as table dependency; may be column alias/non-table identifier",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "scripts/kai-sprint2-p1-06-review-status-repair-local-postgres.js -> kai.review_status_enum",
+    "evidence": "static reference not present as table in EXPECTED_EXECUTABLE_SCHEMA; may be non-table dynamic reference",
+    "classification": "NOT_CONFIRMED",
+    "consequence": "not confirmed as table dependency; may be column alias/non-table identifier",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "scripts/kai-sprint2-p1-06-review-status-repair-local-postgres.js -> kai.unrelated_review_status_enum_consumer",
+    "evidence": "static reference not present as table in EXPECTED_EXECUTABLE_SCHEMA; may be non-table dynamic reference",
+    "classification": "NOT_CONFIRMED",
+    "consequence": "not confirmed as table dependency; may be column alias/non-table identifier",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "scripts/kai-sprint2-p14-02-grant-response-packet-export-identity-foundation-local-postgres.js -> kai.engagement_status_enum",
+    "evidence": "static reference not present as table in EXPECTED_EXECUTABLE_SCHEMA; may be non-table dynamic reference",
+    "classification": "NOT_CONFIRMED",
+    "consequence": "not confirmed as table dependency; may be column alias/non-table identifier",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "scripts/kai-sprint2-p14-07-b1-grant-response-packet-human-authority-decision-ledger-local-postgres.js -> kai.human_authority_",
+    "evidence": "static reference not present as table in EXPECTED_EXECUTABLE_SCHEMA; may be non-table dynamic reference",
+    "classification": "NOT_CONFIRMED",
+    "consequence": "not confirmed as table dependency; may be column alias/non-table identifier",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "scripts/kai-sprint2-p2-09-p2-10-p2-11-forward-reconciliation-local-postgres.js -> kai.gate_a_p0_jsonb_metadata_only",
+    "evidence": "static reference not present as table in EXPECTED_EXECUTABLE_SCHEMA; may be non-table dynamic reference",
+    "classification": "NOT_CONFIRMED",
+    "consequence": "not confirmed as table dependency; may be column alias/non-table identifier",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "scripts/kai-sprint2-p2-09-p2-10-p2-11-forward-reconciliation-local-postgres.js -> kai.priority_enum",
+    "evidence": "static reference not present as table in EXPECTED_EXECUTABLE_SCHEMA; may be non-table dynamic reference",
+    "classification": "NOT_CONFIRMED",
+    "consequence": "not confirmed as table dependency; may be column alias/non-table identifier",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "scripts/kai-sprint2-p3-05-export-review-request-predecessor-proof.js -> kai.ux_review_queue_items_p3_05_export_review_identity",
+    "evidence": "static reference not present as table in EXPECTED_EXECUTABLE_SCHEMA; may be non-table dynamic reference",
+    "classification": "NOT_CONFIRMED",
+    "consequence": "not confirmed as table dependency; may be column alias/non-table identifier",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "scripts/kai-sprint2-p3-09-audit-operation-preservation-regression.js -> kai.export_review_start",
+    "evidence": "static reference not present as table in EXPECTED_EXECUTABLE_SCHEMA; may be non-table dynamic reference",
+    "classification": "NOT_CONFIRMED",
+    "consequence": "not confirmed as table dependency; may be column alias/non-table identifier",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "scripts/kai-sprint2-p3-09-audit-operation-preservation-regression.js -> kai.upload_lifecycle_audit_gate_a_operation_check",
+    "evidence": "static reference not present as table in EXPECTED_EXECUTABLE_SCHEMA; may be non-table dynamic reference",
+    "classification": "NOT_CONFIRMED",
+    "consequence": "not confirmed as table dependency; may be column alias/non-table identifier",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "scripts/kai-sprint2-p3-19-export-manifest-foundation-local-postgres.js -> kai.engagement_status_enum",
+    "evidence": "static reference not present as table in EXPECTED_EXECUTABLE_SCHEMA; may be non-table dynamic reference",
+    "classification": "NOT_CONFIRMED",
+    "consequence": "not confirmed as table dependency; may be column alias/non-table identifier",
+    "repair_needed": "NOT_CONFIRMED"
+  },
+  {
+    "object_package": "scripts/kai-sprint2-p3-19-export-manifest-foundation-local-postgres.js -> kai.object_type_enum",
+    "evidence": "static reference not present as table in EXPECTED_EXECUTABLE_SCHEMA; may be non-table dynamic reference",
+    "classification": "NOT_CONFIRMED",
+    "consequence": "not confirmed as table dependency; may be column alias/non-table identifier",
+    "repair_needed": "NOT_CONFIRMED"
+  }
+]

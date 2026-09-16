@@ -1,0 +1,908 @@
+[
+  {
+    "path": "$.constructionPath",
+    "value": [
+      {
+        "kind": "bootstrap",
+        "path": "scripts/kai-sprint2-organization-enablement-bootstrap-synthetic-schema.sql"
+      },
+      {
+        "kind": "bootstrap",
+        "path": "scripts/kai-sprint2-engagements-tenant-safe-identity-prerequisite-converge.sql"
+      },
+      {
+        "kind": "bootstrap",
+        "path": "scripts/kai-sprint2-package-4-impact-library-engagement-funder-requirements-auth-bootstrap-synthetic-schema.sql"
+      },
+      {
+        "kind": "bootstrap",
+        "path": "scripts/kai-sprint2-gate-a-bootstrap-synthetic-schema.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_gate_a_p0_upload_lifecycle.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_gate_a_p0_upload_lifecycle_enforcement_forward_repair.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_gate_a_p0_required_index_forward_repair.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_gate_a_p0_policy_decision_replay.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p1_parser_run_and_file_profile.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p1_04_data_dictionary_and_quality.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p1_05_intake_sensitivity_profile.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p1_06_review_queue.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p1_07_intake_source_candidate.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p1_08_source_promotion.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p2_01_evidence_lineage.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p2_03_claim_proposal.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p2_04_claim_gap_followup.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p2_05_conflict_review_candidate.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p2_09_human_review_internal_approval.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p2_10_coverage_review_decision.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p2_11_client_followup_completion.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p2_12_human_review_decision_ledger.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p2_10_funder_coverage_authority.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p2_10_public_coverage_authority.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_a1_1_impact_outcome_context.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_a1_2_impact_evaluation_framework_and_criteria.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_a1_3_impact_evaluations_and_results.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_a1_4_impact_evaluation_result_provenance_links.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_b1_1_baseline_impact_requirements.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_b1_3_accepted_catalogue_persistence.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_package_2a_engagement_requirement_sets_authority.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_c2_1_requirement_assessment_persistence.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_c3_a3_requirement_assessment_decision_gap_provenance.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_c3_a4_requirement_assessment_provenance_extension.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p3_01_generated_content_drafts.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p13_01_impact_narrative_content_type.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p14_01_generation_run_engagement_binding.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p14_14_generated_content_type_evolution.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p3_04_generated_content_review_completion.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_generated_content_review_start_audit_contract.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p3_05_export_review_request.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p3_09_export_review_start.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p3_13_export_review_completion.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p14_10_review_queue_target_object_type_repair.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p3_16_export_candidate_foundation.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p14_15_export_candidate_content_type_evolution.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p3_17_human_authority_decision_ledger.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p3_17_authority_audit_gate_a_operation_repair.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p3_19_export_manifest_foundation.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p3_20_export_manifest_review_binding.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p14_02_grant_response_packet_export_identity_foundation.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p14_03_grant_response_packet_export_candidate_foundation.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p14_05_grant_response_packet_export_review_binding.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p14_07_b1_grant_response_packet_human_authority_decision_ledger.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p14_08_a_grant_response_packet_export_manifest_foundation.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_br_02_board_reporting_candidate_foundation.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_br_03a_board_reporting_candidate_review_request.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_br_03b_board_reporting_candidate_review_lifecycle.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_br_04_board_reporting_candidate_human_authority_decision_ledger.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_board_reporting_candidate_export_manifest_foundation.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_gate_c1_gcs_generation_binding.sql"
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_gk_organization_tenant_binding.sql"
+      }
+    ]
+  },
+  {
+    "path": "$.applied",
+    "value": [
+      {
+        "kind": "bootstrap",
+        "path": "scripts/kai-sprint2-organization-enablement-bootstrap-synthetic-schema.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nCREATE TABLE\nCREATE SCHEMA\nCREATE TYPE\nCREATE TABLE\nCREATE INDEX\nCREATE TABLE\nCREATE TYPE\nCREATE TABLE\nCOMMIT\n",
+          "stderr_tail": ""
+        }
+      },
+      {
+        "kind": "bootstrap",
+        "path": "scripts/kai-sprint2-engagements-tenant-safe-identity-prerequisite-converge.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nDO\nCOMMIT\n",
+          "stderr_tail": ""
+        }
+      },
+      {
+        "kind": "bootstrap",
+        "path": "scripts/kai-sprint2-package-4-impact-library-engagement-funder-requirements-auth-bootstrap-synthetic-schema.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nCREATE TABLE\nCREATE TABLE\nCREATE FUNCTION\nCREATE TABLE\nCREATE TABLE\nINSERT 0 6\nCREATE TABLE\nCREATE TRIGGER\nCREATE TABLE\nCOMMIT\n",
+          "stderr_tail": ""
+        }
+      },
+      {
+        "kind": "bootstrap",
+        "path": "scripts/kai-sprint2-gate-a-bootstrap-synthetic-schema.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nCREATE EXTENSION\nCREATE SCHEMA\nCREATE TABLE\nCOMMIT\n",
+          "stderr_tail": "psql:scripts/kai-sprint2-gate-a-bootstrap-synthetic-schema.sql:4: NOTICE:  schema \"kai\" already exists, skipping\n"
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_gate_a_p0_upload_lifecycle.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nCREATE SCHEMA\nDO\nALTER TABLE\nUPDATE 0\nALTER TABLE\nALTER TABLE\nCREATE INDEX\nCREATE INDEX\nCREATE INDEX\nCREATE INDEX\nCREATE TABLE\nCREATE INDEX\nCREATE FUNCTION\nDROP TRIGGER\nCREATE TRIGGER\nCOMMIT\n",
+          "stderr_tail": "psql:migrations/kai_sprint2_gate_a_p0_upload_lifecycle.sql:3: NOTICE:  schema \"kai\" already exists, skipping\npsql:migrations/kai_sprint2_gate_a_p0_upload_lifecycle.sql:89: NOTICE:  constraint \"intake_files_gate_a_upload_state_check\" of relation \"intake_files\" does not exist, skipping\npsql:migrations/kai_sprint2_gate_a_p0_upload_lifecycle.sql:89: NOTICE:  constraint \"intake_files_gate_a_declared_checksum_check\" of relation \"intake_files\" does not exist, skipping\npsql:migrations/kai_sprint2_gate_a_p0_upload_lifecycle.sql:89: NOTICE:  constraint \"intake_files_gate_a_hash_algorithm_check\" of relation \"intake_files\" does not exist, skipping\npsql:migrations/kai_sprint2_gate_a_p0_upload_lifecycle.sql:89: NOTICE:  constraint \"intake_files_gate_a_object_version_check\" of relation \"intake_files\" does not exist, skipping\npsql:migrations/kai_sprint2_gate_a_p0_upload_lifecycle.sql:89: NOTICE:  constraint \"intake_files_gate_a_verified_checksum_check\" of relation \"intake_files\" does not exist, skipping\npsql:migrations/kai_sprint2_gate_a_p0_upload_lifecycle.sql:89: NOTICE:  constraint \"intake_files_gate_a_verified_size_check\" of relation \"intake_files\" does not exist, skipping\npsql:migrations/kai_sprint2_gate_a_p0_upload_lifecycle.sql:89: NOTICE:  constraint \"intake_files_gate_a_state_fact_consistency_check\" of relation \"intake_files\" does not exist, skipping\npsql:migrations/kai_sprint2_gate_a_p0_upload_lifecycle.sql:218: NOTICE:  trigger \"trg_gate_a_p0_upload_lifecycle\" for relation \"kai.intake_files\" does not exist, skipping\n"
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_gate_a_p0_upload_lifecycle_enforcement_forward_repair.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nCREATE FUNCTION\nDROP TRIGGER\nCREATE TRIGGER\nCOMMIT\n",
+          "stderr_tail": ""
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_gate_a_p0_required_index_forward_repair.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nCREATE INDEX\nCREATE INDEX\nCREATE INDEX\nCOMMIT\n",
+          "stderr_tail": "psql:migrations/kai_sprint2_gate_a_p0_required_index_forward_repair.sql:42: NOTICE:  relation \"ux_intake_files_gate_a_org_declared_checksum\" already exists, skipping\npsql:migrations/kai_sprint2_gate_a_p0_required_index_forward_repair.sql:45: NOTICE:  relation \"ix_intake_files_gate_a_tenant_upload_state\" already exists, skipping\npsql:migrations/kai_sprint2_gate_a_p0_required_index_forward_repair.sql:49: NOTICE:  relation \"ix_intake_files_gate_a_object_version\" already exists, skipping\n"
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_gate_a_p0_policy_decision_replay.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nCREATE FUNCTION\nCREATE TABLE\nCREATE INDEX\nALTER TABLE\nALTER TABLE\nCOMMIT\n",
+          "stderr_tail": "psql:migrations/kai_sprint2_gate_a_p0_policy_decision_replay.sql:49: NOTICE:  identifier \"upload_policy_decision_replay_gate_a_sanitized_result_object_check\" will be truncated to \"upload_policy_decision_replay_gate_a_sanitized_result_object_ch\"\npsql:migrations/kai_sprint2_gate_a_p0_policy_decision_replay.sql:49: NOTICE:  identifier \"upload_policy_decision_replay_gate_a_sanitized_result_metadata_only_check\" will be truncated to \"upload_policy_decision_replay_gate_a_sanitized_result_metadata_\"\n"
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p1_parser_run_and_file_profile.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nCREATE TABLE\nCREATE INDEX\nCREATE TABLE\nCREATE INDEX\nCREATE INDEX\nALTER TABLE\nALTER TABLE\nALTER TABLE\nCOMMIT\n",
+          "stderr_tail": ""
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p1_04_data_dictionary_and_quality.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nALTER TABLE\nCREATE TABLE\nCREATE INDEX\nCREATE TABLE\nCREATE INDEX\nCREATE TABLE\nCREATE INDEX\nCREATE TABLE\nCREATE INDEX\nALTER TABLE\nALTER TABLE\nCOMMIT\n",
+          "stderr_tail": ""
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p1_05_intake_sensitivity_profile.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nCREATE TABLE\nCREATE INDEX\nCREATE INDEX\nALTER TABLE\nALTER TABLE\nCOMMIT\n",
+          "stderr_tail": ""
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p1_06_review_queue.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nCREATE TABLE\nCREATE INDEX\nCREATE INDEX\nCREATE FUNCTION\nDROP TRIGGER\nCREATE TRIGGER\nALTER TABLE\nALTER TABLE\nCOMMIT\n",
+          "stderr_tail": "psql:migrations/kai_sprint2_p1_06_review_queue.sql:147: NOTICE:  trigger \"trg_review_queue_items_p1_06_touch_updated_at\" for relation \"kai.review_queue_items\" does not exist, skipping\n"
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p1_07_intake_source_candidate.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nALTER TABLE\nCREATE TABLE\nCREATE INDEX\nCREATE INDEX\nCREATE INDEX\nALTER TABLE\nALTER TABLE\nCOMMIT\n",
+          "stderr_tail": ""
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p1_08_source_promotion.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nALTER TABLE\nALTER TABLE\nALTER TABLE\nALTER TABLE\nCREATE TABLE\nCREATE INDEX\nCREATE TABLE\nCREATE TABLE\nCREATE INDEX\nALTER TABLE\nALTER TABLE\nALTER TABLE\nALTER TABLE\nCOMMIT\n",
+          "stderr_tail": ""
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nDO\nCREATE TABLE\nCREATE INDEX\nCREATE INDEX\nCREATE INDEX\nCREATE FUNCTION\nCREATE TRIGGER\nDO\nALTER TABLE\nCOMMIT\n",
+          "stderr_tail": "psql:migrations/kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger.sql:275: NOTICE:  identifier \"intake_sensitivity_review_decisions_b1a_02_id_org_profile_unique\" will be truncated to \"intake_sensitivity_review_decisions_b1a_02_id_org_profile_uniqu\"\npsql:migrations/kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger.sql:275: NOTICE:  identifier \"intake_sensitivity_review_decisions_b1a_02_snapshot_completeness_check\" will be truncated to \"intake_sensitivity_review_decisions_b1a_02_snapshot_completenes\"\npsql:migrations/kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger.sql:275: NOTICE:  identifier \"intake_sensitivity_review_decisions_b1a_02_story_testimonial_check\" will be truncated to \"intake_sensitivity_review_decisions_b1a_02_story_testimonial_ch\"\npsql:migrations/kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger.sql:275: NOTICE:  identifier \"intake_sensitivity_review_decisions_b1a_02_small_cell_risk_check\" will be truncated to \"intake_sensitivity_review_decisions_b1a_02_small_cell_risk_chec\"\npsql:migrations/kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger.sql:275: NOTICE:  identifier \"intake_sensitivity_review_decisions_b1a_02_product_learning_basis_check\" will be truncated to \"intake_sensitivity_review_decisions_b1a_02_product_learning_bas\"\npsql:migrations/kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger.sql:275: NOTICE:  identifier \"intake_sensitivity_review_decisions_b1a_02_funder_use_basis_check\" will be truncated to \"intake_sensitivity_review_decisions_b1a_02_funder_use_basis_che\"\npsql:migrations/kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger.sql:275: NOTICE:  identifier \"intake_sensitivity_review_decisions_b1a_02_public_use_basis_check\" will be truncated to \"intake_sensitivity_review_decisions_b1a_02_public_use_basis_che\"\npsql:migrations/kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger.sql:275: NOTICE:  identifier \"intake_sensitivity_review_decisions_b1a_02_created_by_type_check\" will be truncated to \"intake_sensitivity_review_decisions_b1a_02_created_by_type_chec\"\npsql:migrations/kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger.sql:386: NOTICE:  identifier \"upload_lifecycle_audit_b1a_02_sensitivity_decision_metadata_check\" will be truncated to \"upload_lifecycle_audit_b1a_02_sensitivity_decision_metadata_che\"\npsql:migrations/kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger.sql:386: NOTICE:  identifier \"upload_lifecycle_audit_b1a_02_sensitivity_decision_metadata_check\" will be truncated to \"upload_lifecycle_audit_b1a_02_sensitivity_decision_metadata_che\"\npsql:migrations/kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger.sql:386: NOTICE:  constraint \"upload_lifecycle_audit_b1a_02_sensitivity_decision_metadata_che\" of relation \"upload_lifecycle_audit\" does not exist, skipping\n"
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p2_01_evidence_lineage.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nCREATE TABLE\nCREATE INDEX\nALTER TABLE\nCREATE TABLE\nCREATE INDEX\nCREATE INDEX\nALTER TABLE\nALTER TABLE\nALTER TABLE\nCOMMIT\n",
+          "stderr_tail": "psql:migrations/kai_sprint2_p2_01_evidence_lineage.sql:119: NOTICE:  constraint \"source_versions_p2_01_id_source_org_unique\" of relation \"source_versions\" does not exist, skipping\npsql:migrations/kai_sprint2_p2_01_evidence_lineage.sql:230: NOTICE:  constraint \"review_queue_items_p2_01_evidence_review_required_action_check\" of relation \"review_queue_items\" does not exist, skipping\n"
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p2_03_claim_proposal.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nCREATE TABLE\nCREATE INDEX\nCREATE TABLE\nCREATE INDEX\nCREATE INDEX\nALTER TABLE\nALTER TABLE\nALTER TABLE\nCOMMIT\n",
+          "stderr_tail": "psql:migrations/kai_sprint2_p2_03_claim_proposal.sql:183: NOTICE:  constraint \"review_queue_items_p2_03_claim_review_required_action_check\" of relation \"review_queue_items\" does not exist, skipping\n"
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p2_04_claim_gap_followup.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nCREATE TABLE\nCREATE INDEX\nCREATE TABLE\nCREATE INDEX\nCREATE INDEX\nALTER TABLE\nALTER TABLE\nALTER TABLE\nCOMMIT\n",
+          "stderr_tail": "psql:migrations/kai_sprint2_p2_04_claim_gap_followup.sql:249: NOTICE:  constraint \"review_queue_items_p2_04_client_followup_contract_check\" of relation \"review_queue_items\" does not exist, skipping\n"
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p2_05_conflict_review_candidate.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nCREATE TABLE\nCREATE INDEX\nCREATE INDEX\nALTER TABLE\nALTER TABLE\nALTER TABLE\nCOMMIT\n",
+          "stderr_tail": "psql:migrations/kai_sprint2_p2_05_conflict_review_candidate.sql:92: NOTICE:  constraint \"review_queue_items_p2_05_conflict_resolution_contract_check\" of relation \"review_queue_items\" does not exist, skipping\npsql:migrations/kai_sprint2_p2_05_conflict_review_candidate.sql:180: NOTICE:  constraint \"upload_lifecycle_audit_p2_05_metadata_object_check\" of relation \"upload_lifecycle_audit\" does not exist, skipping\n"
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p2_09_human_review_internal_approval.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nALTER TABLE\nALTER TABLE\nALTER TABLE\nALTER TABLE\nALTER TABLE\nCOMMIT\n",
+          "stderr_tail": "psql:migrations/kai_sprint2_p2_09_human_review_internal_approval.sql:111: NOTICE:  identifier \"upload_lifecycle_audit_p2_09_evidence_review_metadata_object_check\" will be truncated to \"upload_lifecycle_audit_p2_09_evidence_review_metadata_object_ch\"\npsql:migrations/kai_sprint2_p2_09_human_review_internal_approval.sql:111: NOTICE:  identifier \"upload_lifecycle_audit_p2_09_evidence_review_metadata_object_check\" will be truncated to \"upload_lifecycle_audit_p2_09_evidence_review_metadata_object_ch\"\npsql:migrations/kai_sprint2_p2_09_human_review_internal_approval.sql:111: NOTICE:  constraint \"upload_lifecycle_audit_p2_09_evidence_review_metadata_object_ch\" of relation \"upload_lifecycle_audit\" does not exist, skipping\npsql:migrations/kai_sprint2_p2_09_human_review_internal_approval.sql:134: NOTICE:  constraint \"upload_lifecycle_audit_p2_09_claim_review_metadata_object_check\" of relation \"upload_lifecycle_audit\" does not exist, skipping\n"
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p2_10_coverage_review_decision.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nCREATE TABLE\nCREATE INDEX\nCREATE FUNCTION\nCREATE TRIGGER\nALTER TABLE\nALTER TABLE\nCOMMIT\n",
+          "stderr_tail": "psql:migrations/kai_sprint2_p2_10_coverage_review_decision.sql:188: NOTICE:  identifier \"upload_lifecycle_audit_p2_10_coverage_review_decision_metadata_object_check\" will be truncated to \"upload_lifecycle_audit_p2_10_coverage_review_decision_metadata_\"\npsql:migrations/kai_sprint2_p2_10_coverage_review_decision.sql:188: NOTICE:  identifier \"upload_lifecycle_audit_p2_10_coverage_review_decision_metadata_object_check\" will be truncated to \"upload_lifecycle_audit_p2_10_coverage_review_decision_metadata_\"\npsql:migrations/kai_sprint2_p2_10_coverage_review_decision.sql:188: NOTICE:  constraint \"upload_lifecycle_audit_p2_10_coverage_review_decision_metadata_\" of relation \"upload_lifecycle_audit\" does not exist, skipping\n"
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p2_11_client_followup_completion.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nALTER TABLE\nALTER TABLE\nALTER TABLE\nCOMMIT\n",
+          "stderr_tail": "psql:migrations/kai_sprint2_p2_11_client_followup_completion.sql:138: NOTICE:  identifier \"upload_lifecycle_audit_p2_11_client_followup_completion_metadata_object_check\" will be truncated to \"upload_lifecycle_audit_p2_11_client_followup_completion_metadat\"\npsql:migrations/kai_sprint2_p2_11_client_followup_completion.sql:138: NOTICE:  identifier \"upload_lifecycle_audit_p2_11_client_followup_completion_metadata_object_check\" will be truncated to \"upload_lifecycle_audit_p2_11_client_followup_completion_metadat\"\npsql:migrations/kai_sprint2_p2_11_client_followup_completion.sql:138: NOTICE:  constraint \"upload_lifecycle_audit_p2_11_client_followup_completion_metadat\" of relation \"upload_lifecycle_audit\" does not exist, skipping\n"
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nCREATE FUNCTION\nCREATE FUNCTION\nCREATE FUNCTION\nCREATE FUNCTION\nCREATE FUNCTION\nCREATE FUNCTION\nDO\nDO\nDO\nDO\nDO\nDO\nDO\nDO\nDO\nCOMMIT\n",
+          "stderr_tail": "psql:migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.sql:293: NOTICE:  table \"kai_recon_check_probe\" does not exist, skipping\npsql:migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.sql:327: NOTICE:  table \"kai_recon_check_probe\" does not exist, skipping\npsql:migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.sql:327: NOTICE:  table \"kai_recon_check_probe\" does not exist, skipping\npsql:migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.sql:361: NOTICE:  table \"kai_recon_check_probe\" does not exist, skipping\npsql:migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.sql:361: NOTICE:  table \"kai_recon_check_probe\" does not exist, skipping\npsql:migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.sql:422: NOTICE:  identifier \"upload_lifecycle_audit_p2_09_evidence_review_metadata_object_check\" will be truncated to \"upload_lifecycle_audit_p2_09_evidence_review_metadata_object_ch\"\npsql:migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.sql:422: NOTICE:  identifier \"upload_lifecycle_audit_p2_09_evidence_review_metadata_object_check\" will be truncated to \"upload_lifecycle_audit_p2_09_evidence_review_metadata_object_ch\"\nLINE 33:     ALTER TABLE kai.upload_lifecycle_audit\n             ^\npsql:migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.sql:422: NOTICE:  identifier \"upload_lifecycle_audit_p2_09_evidence_review_metadata_object_check\" will be truncated to \"upload_lifecycle_audit_p2_09_evidence_review_metadata_object_ch\"\npsql:migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.sql:422: NOTICE:  identifier \"upload_lifecycle_audit_p2_09_evidence_review_metadata_object_check\" will be truncated to \"upload_lifecycle_audit_p2_09_evidence_review_metadata_object_ch\"\nLINE 53:     ALTER TABLE kai.upload_lifecycle_audit\n             ^\npsql:migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.sql:422: NOTICE:  table \"kai_recon_check_probe\" does not exist, skipping\npsql:migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.sql:485: NOTICE:  table \"kai_recon_check_probe\" does not exist, skipping\npsql:migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.sql:632: NOTICE:  table \"kai_recon_check_probe\" does not exist, skipping\npsql:migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.sql:632: NOTICE:  table \"kai_recon_check_probe\" does not exist, skipping\npsql:migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.sql:713: NOTICE:  identifier \"upload_lifecycle_audit_p2_11_client_followup_completion_metadata_object_check\" will be truncated to \"upload_lifecycle_audit_p2_11_client_followup_completion_metadat\"\npsql:migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.sql:713: NOTICE:  identifier \"upload_lifecycle_audit_p2_11_client_followup_completion_metadata_object_check\" will be truncated to \"upload_lifecycle_audit_p2_11_client_followup_completion_metadat\"\nLINE 43:     ALTER TABLE kai.upload_lifecycle_audit\n             ^\npsql:migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.sql:713: NOTICE:  identifier \"upload_lifecycle_audit_p2_11_client_followup_completion_metadata_object_check\" will be truncated to \"upload_lifecycle_audit_p2_11_client_followup_completion_metadat\"\npsql:migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.sql:713: NOTICE:  identifier \"upload_lifecycle_audit_p2_11_client_followup_completion_metadata_object_check\" will be truncated to \"upload_lifecycle_audit_p2_11_client_followup_completion_metadat\"\nLINE 73:     ALTER TABLE kai.upload_lifecycle_audit\n             ^\npsql:migrations/kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation.sql:713: NOTICE:  table \"kai_recon_check_probe\" does not exist, skipping\n"
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p2_12_human_review_decision_ledger.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nCREATE FUNCTION\nCREATE TABLE\nCREATE INDEX\nCREATE INDEX\nCREATE INDEX\nCREATE FUNCTION\nCREATE TRIGGER\nCREATE TABLE\nCREATE INDEX\nCREATE INDEX\nCREATE INDEX\nCREATE FUNCTION\nCREATE TRIGGER\nALTER TABLE\nALTER TABLE\nALTER TABLE\nALTER TABLE\nALTER TABLE\nALTER TABLE\nCOMMIT\n",
+          "stderr_tail": "psql:migrations/kai_sprint2_p2_12_human_review_decision_ledger.sql:316: NOTICE:  identifier \"upload_lifecycle_audit_p2_09_evidence_review_metadata_object_check\" will be truncated to \"upload_lifecycle_audit_p2_09_evidence_review_metadata_object_ch\"\npsql:migrations/kai_sprint2_p2_12_human_review_decision_ledger.sql:316: NOTICE:  identifier \"upload_lifecycle_audit_p2_09_evidence_review_metadata_object_check\" will be truncated to \"upload_lifecycle_audit_p2_09_evidence_review_metadata_object_ch\"\n"
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p2_10_funder_coverage_authority.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nALTER TABLE\nALTER TABLE\nDO\nALTER TABLE\nCOMMIT\n",
+          "stderr_tail": "psql:migrations/kai_sprint2_p2_10_funder_coverage_authority.sql:81: NOTICE:  identifier \"upload_lifecycle_audit_p2_10_coverage_review_decision_metadata_object_check\" will be truncated to \"upload_lifecycle_audit_p2_10_coverage_review_decision_metadata_\"\npsql:migrations/kai_sprint2_p2_10_funder_coverage_authority.sql:81: NOTICE:  identifier \"upload_lifecycle_audit_p2_10_coverage_review_decision_metadata_object_check\" will be truncated to \"upload_lifecycle_audit_p2_10_coverage_review_decision_metadata_\"\n"
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p2_10_public_coverage_authority.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nALTER TABLE\nDO\nALTER TABLE\nCOMMIT\n",
+          "stderr_tail": "psql:migrations/kai_sprint2_p2_10_public_coverage_authority.sql:94: NOTICE:  identifier \"upload_lifecycle_audit_p2_10_coverage_review_decision_metadata_object_check\" will be truncated to \"upload_lifecycle_audit_p2_10_coverage_review_decision_metadata_\"\npsql:migrations/kai_sprint2_p2_10_public_coverage_authority.sql:94: NOTICE:  identifier \"upload_lifecycle_audit_p2_10_coverage_review_decision_metadata_object_check\" will be truncated to \"upload_lifecycle_audit_p2_10_coverage_review_decision_metadata_\"\n"
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_a1_1_impact_outcome_context.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nCREATE TABLE\nCREATE INDEX\nCREATE INDEX\nCREATE FUNCTION\nDROP TRIGGER\nCREATE TRIGGER\nCOMMIT\n",
+          "stderr_tail": "psql:migrations/kai_sprint2_a1_1_impact_outcome_context.sql:96: NOTICE:  trigger \"trg_impact_outcome_contexts_touch_updated_at\" for relation \"kai.impact_outcome_contexts\" does not exist, skipping\n"
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_a1_2_impact_evaluation_framework_and_criteria.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nCREATE TABLE\nCREATE INDEX\nCREATE TABLE\nCREATE INDEX\nCOMMIT\n",
+          "stderr_tail": "psql:migrations/kai_sprint2_a1_2_impact_evaluation_framework_and_criteria.sql:57: NOTICE:  identifier \"impact_evaluation_framework_versions_a1_2_framework_status_check\" will be truncated to \"impact_evaluation_framework_versions_a1_2_framework_status_chec\"\n"
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_a1_3_impact_evaluations_and_results.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nALTER TABLE\nCREATE TABLE\nCREATE INDEX\nCREATE TABLE\nCREATE INDEX\nCOMMIT\n",
+          "stderr_tail": ""
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_a1_4_impact_evaluation_result_provenance_links.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nALTER TABLE\nCREATE TABLE\nCREATE INDEX\nCREATE INDEX\nCREATE TABLE\nCREATE INDEX\nCREATE INDEX\nCOMMIT\n",
+          "stderr_tail": ""
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_b1_1_baseline_impact_requirements.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nCREATE TABLE\nCREATE INDEX\nCREATE INDEX\nCREATE TABLE\nCREATE INDEX\nCREATE TABLE\nCREATE INDEX\nCREATE TABLE\nCREATE INDEX\nCREATE TABLE\nCREATE INDEX\nCREATE INDEX\nCOMMIT\n",
+          "stderr_tail": ""
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_b1_3_accepted_catalogue_persistence.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nDO\nCOMMIT\n",
+          "stderr_tail": ""
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_package_2a_engagement_requirement_sets_authority.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nALTER TABLE\nALTER TABLE\nCREATE INDEX\nCREATE INDEX\nCREATE INDEX\nCREATE FUNCTION\nDROP TRIGGER\nCREATE TRIGGER\nCOMMIT\n",
+          "stderr_tail": "psql:migrations/kai_sprint2_package_2a_engagement_requirement_sets_authority.sql:81: NOTICE:  identifier \"engagement_requirement_sets_package_2a_id_org_engagement_set_unique\" will be truncated to \"engagement_requirement_sets_package_2a_id_org_engagement_set_un\"\npsql:migrations/kai_sprint2_package_2a_engagement_requirement_sets_authority.sql:81: NOTICE:  identifier \"engagement_requirement_sets_package_2a_id_org_engagement_set_unique\" will be truncated to \"engagement_requirement_sets_package_2a_id_org_engagement_set_un\"\npsql:migrations/kai_sprint2_package_2a_engagement_requirement_sets_authority.sql:81: NOTICE:  identifier \"engagement_requirement_sets_package_2a_reviewed_effective_consistency_check\" will be truncated to \"engagement_requirement_sets_package_2a_reviewed_effective_consi\"\npsql:migrations/kai_sprint2_package_2a_engagement_requirement_sets_authority.sql:81: NOTICE:  identifier \"engagement_requirement_sets_package_2a_reviewed_effective_consistency_check\" will be truncated to \"engagement_requirement_sets_package_2a_reviewed_effective_consi\"\npsql:migrations/kai_sprint2_package_2a_engagement_requirement_sets_authority.sql:81: NOTICE:  constraint \"engagement_requirement_sets_package_2a_id_org_engagement_set_un\" of relation \"engagement_requirement_sets\" does not exist, skipping\npsql:migrations/kai_sprint2_package_2a_engagement_requirement_sets_authority.sql:81: NOTICE:  constraint \"engagement_requirement_sets_package_2a_supersedes_fk\" of relation \"engagement_requirement_sets\" does not exist, skipping\npsql:migrations/kai_sprint2_package_2a_engagement_requirement_sets_authority.sql:81: NOTICE:  constraint \"engagement_requirement_sets_package_2a_not_self_superseding\" of relation \"engagement_requirement_sets\" does not exist, skipping\npsql:migrations/kai_sprint2_package_2a_engagement_requirement_sets_authority.sql:81: NOTICE:  constraint \"engagement_requirement_sets_package_2a_reviewed_authority_check\" of relation \"engagement_requirement_sets\" does not exist, skipping\npsql:migrations/kai_sprint2_package_2a_engagement_requirement_sets_authority.sql:81: NOTICE:  constraint \"engagement_requirement_sets_package_2a_effective_state_check\" of relation \"engagement_requirement_sets\" does not exist, skipping\npsql:migrations/kai_sprint2_package_2a_engagement_requirement_sets_authority.sql:81: NOTICE:  constraint \"engagement_requirement_sets_package_2a_reviewed_effective_consi\" of relation \"engagement_requirement_sets\" does not exist, skipping\npsql:migrations/kai_sprint2_package_2a_engagement_requirement_sets_authority.sql:81: NOTICE:  constraint \"engagement_requirement_sets_package_2a_approved_target_check\" of relation \"engagement_requirement_sets\" does not exist, skipping\npsql:migrations/kai_sprint2_package_2a_engagement_requirement_sets_authority.sql:105: NOTICE:  trigger \"trg_package_2a_engagement_requirement_sets_append_only\" for relation \"kai.engagement_requirement_sets\" does not exist, skipping\n"
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_c2_1_requirement_assessment_persistence.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nCREATE TABLE\nCREATE INDEX\nCREATE INDEX\nCREATE INDEX\nCREATE FUNCTION\nCREATE TRIGGER\nCREATE TABLE\nCREATE INDEX\nCREATE INDEX\nCREATE TABLE\nCREATE INDEX\nCREATE INDEX\nCREATE TABLE\nCREATE INDEX\nCREATE INDEX\nCOMMIT\n",
+          "stderr_tail": "psql:migrations/kai_sprint2_c2_1_requirement_assessment_persistence.sql:280: NOTICE:  identifier \"requirement_assessment_evaluation_result_links_c2_1_identity_unique\" will be truncated to \"requirement_assessment_evaluation_result_links_c2_1_identity_un\"\npsql:migrations/kai_sprint2_c2_1_requirement_assessment_persistence.sql:280: NOTICE:  identifier \"requirement_assessment_evaluation_result_links_c2_1_assessment_fk\" will be truncated to \"requirement_assessment_evaluation_result_links_c2_1_assessment_\"\npsql:migrations/kai_sprint2_c2_1_requirement_assessment_persistence.sql:283: NOTICE:  identifier \"ix_requirement_assessment_evaluation_result_links_c2_1_assessment\" will be truncated to \"ix_requirement_assessment_evaluation_result_links_c2_1_assessme\"\n"
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_c3_a3_requirement_assessment_decision_gap_provenance.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nCREATE TABLE\nCREATE INDEX\nCREATE INDEX\nCREATE TABLE\nCREATE INDEX\nCREATE INDEX\nCREATE TABLE\nCREATE INDEX\nCREATE INDEX\nCREATE FUNCTION\nCREATE TRIGGER\nCREATE FUNCTION\nCREATE TRIGGER\nCOMMIT\n",
+          "stderr_tail": ""
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_c3_a4_requirement_assessment_provenance_extension.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nCREATE TABLE\nCREATE INDEX\nCREATE INDEX\nCREATE FUNCTION\nCREATE TRIGGER\nCREATE FUNCTION\nCREATE TRIGGER\nCREATE TABLE\nCREATE INDEX\nCREATE INDEX\nCREATE FUNCTION\nCREATE TRIGGER\nCREATE FUNCTION\nCREATE TRIGGER\nCREATE TABLE\nCREATE INDEX\nCREATE INDEX\nCREATE FUNCTION\nCREATE TRIGGER\nCOMMIT\n",
+          "stderr_tail": ""
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p3_01_generated_content_drafts.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nCREATE TABLE\nCREATE TABLE\nCREATE TABLE\nCREATE TABLE\nCREATE INDEX\nALTER TABLE\nALTER TABLE\nALTER TABLE\nCOMMIT\n",
+          "stderr_tail": "psql:migrations/kai_sprint2_p3_01_generated_content_drafts.sql:143: NOTICE:  identifier \"review_queue_items_p3_01_generated_content_review_contract_check\" will be truncated to \"review_queue_items_p3_01_generated_content_review_contract_chec\"\npsql:migrations/kai_sprint2_p3_01_generated_content_drafts.sql:143: NOTICE:  identifier \"review_queue_items_p3_01_generated_content_review_contract_check\" will be truncated to \"review_queue_items_p3_01_generated_content_review_contract_chec\"\npsql:migrations/kai_sprint2_p3_01_generated_content_drafts.sql:143: NOTICE:  constraint \"review_queue_items_p3_01_generated_content_review_contract_chec\" of relation \"review_queue_items\" does not exist, skipping\npsql:migrations/kai_sprint2_p3_01_generated_content_drafts.sql:212: NOTICE:  constraint \"upload_lifecycle_audit_p3_01_metadata_object_check\" of relation \"upload_lifecycle_audit\" does not exist, skipping\n"
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p13_01_impact_narrative_content_type.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nALTER TABLE\nALTER TABLE\nCOMMIT\n",
+          "stderr_tail": ""
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p14_01_generation_run_engagement_binding.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nALTER TABLE\nALTER TABLE\nCOMMIT\n",
+          "stderr_tail": "psql:migrations/kai_sprint2_p14_01_generation_run_engagement_binding.sql:44: NOTICE:  constraint \"generation_runs_p14_01_engagement_fk\" of relation \"generation_runs\" does not exist, skipping\n"
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p14_14_generated_content_type_evolution.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nDO\nALTER TABLE\nALTER TABLE\nCOMMIT\n",
+          "stderr_tail": ""
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p3_04_generated_content_review_completion.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nALTER TABLE\nDO\nALTER TABLE\nCOMMIT\n",
+          "stderr_tail": "psql:migrations/kai_sprint2_p3_04_generated_content_review_completion.sql:48: NOTICE:  identifier \"review_queue_items_p3_01_generated_content_review_contract_check\" will be truncated to \"review_queue_items_p3_01_generated_content_review_contract_chec\"\npsql:migrations/kai_sprint2_p3_04_generated_content_review_completion.sql:48: NOTICE:  identifier \"review_queue_items_p3_04_generated_content_review_contract_check\" will be truncated to \"review_queue_items_p3_04_generated_content_review_contract_chec\"\npsql:migrations/kai_sprint2_p3_04_generated_content_review_completion.sql:48: NOTICE:  identifier \"review_queue_items_p3_04_generated_content_review_contract_check\" will be truncated to \"review_queue_items_p3_04_generated_content_review_contract_chec\"\npsql:migrations/kai_sprint2_p3_04_generated_content_review_completion.sql:48: NOTICE:  constraint \"review_queue_items_p3_04_generated_content_review_contract_chec\" of relation \"review_queue_items\" does not exist, skipping\npsql:migrations/kai_sprint2_p3_04_generated_content_review_completion.sql:139: NOTICE:  constraint \"upload_lifecycle_audit_p3_04_metadata_object_check\" of relation \"upload_lifecycle_audit\" does not exist, skipping\n"
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_generated_content_review_start_audit_contract.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nDO\nALTER TABLE\nCOMMIT\n",
+          "stderr_tail": "psql:migrations/kai_sprint2_generated_content_review_start_audit_contract.sql:143: NOTICE:  constraint \"upload_lifecycle_audit_gcrs_metadata_object_check\" of relation \"upload_lifecycle_audit\" does not exist, skipping\n"
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p3_05_export_review_request.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nDO\nCREATE INDEX\nALTER TABLE\nDO\nALTER TABLE\nCOMMIT\n",
+          "stderr_tail": "psql:migrations/kai_sprint2_p3_05_export_review_request.sql:79: NOTICE:  constraint \"review_queue_items_p3_05_export_review_contract_check\" of relation \"review_queue_items\" does not exist, skipping\npsql:migrations/kai_sprint2_p3_05_export_review_request.sql:164: NOTICE:  constraint \"upload_lifecycle_audit_p3_05_metadata_object_check\" of relation \"upload_lifecycle_audit\" does not exist, skipping\n"
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p3_09_export_review_start.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nALTER TABLE\nDO\nALTER TABLE\nCOMMIT\n",
+          "stderr_tail": "psql:migrations/kai_sprint2_p3_09_export_review_start.sql:55: NOTICE:  constraint \"review_queue_items_p3_09_export_review_contract_check\" of relation \"review_queue_items\" does not exist, skipping\npsql:migrations/kai_sprint2_p3_09_export_review_start.sql:150: NOTICE:  constraint \"upload_lifecycle_audit_p3_09_metadata_object_check\" of relation \"upload_lifecycle_audit\" does not exist, skipping\n"
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p3_13_export_review_completion.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nALTER TABLE\nDO\nALTER TABLE\nCOMMIT\n",
+          "stderr_tail": "psql:migrations/kai_sprint2_p3_13_export_review_completion.sql:59: NOTICE:  constraint \"review_queue_items_p3_13_export_review_contract_check\" of relation \"review_queue_items\" does not exist, skipping\npsql:migrations/kai_sprint2_p3_13_export_review_completion.sql:159: NOTICE:  constraint \"upload_lifecycle_audit_p3_13_metadata_object_check\" of relation \"upload_lifecycle_audit\" does not exist, skipping\n"
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p14_10_review_queue_target_object_type_repair.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nALTER TABLE\nDO\nCOMMIT\n",
+          "stderr_tail": "psql:migrations/kai_sprint2_p14_10_review_queue_target_object_type_repair.sql:29: NOTICE:  constraint \"review_queue_items_target_object_type_check\" of relation \"review_queue_items\" does not exist, skipping\n"
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p3_16_export_candidate_foundation.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nCREATE FUNCTION\nCREATE TABLE\nCREATE INDEX\nCREATE INDEX\nCREATE FUNCTION\nCREATE TRIGGER\nCREATE TABLE\nCREATE TRIGGER\nCREATE TABLE\nDO\nALTER TABLE\nALTER TABLE\nCOMMIT\n",
+          "stderr_tail": "psql:migrations/kai_sprint2_p3_16_export_candidate_foundation.sql:301: NOTICE:  constraint \"upload_lifecycle_audit_p3_16_limitation_snapshot_metadata_check\" of relation \"upload_lifecycle_audit\" does not exist, skipping\npsql:migrations/kai_sprint2_p3_16_export_candidate_foundation.sql:355: NOTICE:  constraint \"upload_lifecycle_audit_p3_16_export_candidate_metadata_check\" of relation \"upload_lifecycle_audit\" does not exist, skipping\n"
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p14_15_export_candidate_content_type_evolution.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nALTER TABLE\nCOMMIT\n",
+          "stderr_tail": ""
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p3_17_human_authority_decision_ledger.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nCREATE TABLE\nCREATE INDEX\nCREATE INDEX\nCREATE FUNCTION\nCREATE TRIGGER\nCREATE FUNCTION\nCREATE TRIGGER\nCOMMIT\n",
+          "stderr_tail": ""
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p3_17_authority_audit_gate_a_operation_repair.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nDO\nCOMMIT\n",
+          "stderr_tail": ""
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p3_19_export_manifest_foundation.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nCREATE TABLE\nCREATE FUNCTION\nCREATE TRIGGER\nCOMMIT\n",
+          "stderr_tail": ""
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p3_20_export_manifest_review_binding.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nALTER TABLE\nALTER TABLE\nCREATE TABLE\nDO\nALTER TABLE\nUPDATE 0\nALTER TABLE\nALTER TABLE\nALTER TABLE\nCREATE INDEX\nCOMMIT\n",
+          "stderr_tail": ""
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p14_02_grant_response_packet_export_identity_foundation.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nCREATE TABLE\nCREATE FUNCTION\nCREATE TRIGGER\nCOMMIT\n",
+          "stderr_tail": ""
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p14_03_grant_response_packet_export_candidate_foundation.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nCREATE TABLE\nCREATE FUNCTION\nCREATE TRIGGER\nCREATE TABLE\nCREATE TRIGGER\nCOMMIT\n",
+          "stderr_tail": ""
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p14_05_grant_response_packet_export_review_binding.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nALTER TABLE\nCOMMIT\n",
+          "stderr_tail": "psql:migrations/kai_sprint2_p14_05_grant_response_packet_export_review_binding.sql:93: NOTICE:  constraint \"review_queue_items_p14_05_export_review_contract_check\" of relation \"review_queue_items\" does not exist, skipping\n"
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p14_07_b1_grant_response_packet_human_authority_decision_ledger.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nCREATE TABLE\nCREATE INDEX\nCREATE INDEX\nCREATE FUNCTION\nCREATE TRIGGER\nCOMMIT\n",
+          "stderr_tail": ""
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_p14_08_a_grant_response_packet_export_manifest_foundation.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nCREATE TABLE\nCREATE FUNCTION\nCREATE TRIGGER\nCOMMIT\n",
+          "stderr_tail": ""
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_br_02_board_reporting_candidate_foundation.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nCREATE TABLE\nCREATE INDEX\nCREATE INDEX\nCREATE FUNCTION\nCREATE TRIGGER\nCREATE TABLE\nCREATE INDEX\nCREATE INDEX\nCREATE TRIGGER\nCOMMIT\n",
+          "stderr_tail": ""
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_br_03a_board_reporting_candidate_review_request.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nALTER TABLE\nCREATE INDEX\nALTER TABLE\nCOMMIT\n",
+          "stderr_tail": "psql:migrations/kai_sprint2_br_03a_board_reporting_candidate_review_request.sql:39: NOTICE:  identifier \"ux_review_queue_items_br_03a_board_reporting_candidate_review_identity\" will be truncated to \"ux_review_queue_items_br_03a_board_reporting_candidate_review_i\"\npsql:migrations/kai_sprint2_br_03a_board_reporting_candidate_review_request.sql:60: NOTICE:  identifier \"review_queue_items_br_03a_board_reporting_candidate_review_contract_check\" will be truncated to \"review_queue_items_br_03a_board_reporting_candidate_review_cont\"\npsql:migrations/kai_sprint2_br_03a_board_reporting_candidate_review_request.sql:60: NOTICE:  identifier \"review_queue_items_br_03a_board_reporting_candidate_review_contract_check\" will be truncated to \"review_queue_items_br_03a_board_reporting_candidate_review_cont\"\npsql:migrations/kai_sprint2_br_03a_board_reporting_candidate_review_request.sql:60: NOTICE:  constraint \"review_queue_items_br_03a_board_reporting_candidate_review_cont\" of relation \"review_queue_items\" does not exist, skipping\n"
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_br_03b_board_reporting_candidate_review_lifecycle.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nDO\nDO\nALTER TABLE\nCOMMIT\n",
+          "stderr_tail": "psql:migrations/kai_sprint2_br_03b_board_reporting_candidate_review_lifecycle.sql:120: NOTICE:  identifier \"review_queue_items_br_03a_board_reporting_candidate_review_contract_check\" will be truncated to \"review_queue_items_br_03a_board_reporting_candidate_review_cont\"\npsql:migrations/kai_sprint2_br_03b_board_reporting_candidate_review_lifecycle.sql:120: NOTICE:  identifier \"review_queue_items_br_03b_board_reporting_candidate_review_contract_check\" will be truncated to \"review_queue_items_br_03b_board_reporting_candidate_review_cont\"\npsql:migrations/kai_sprint2_br_03b_board_reporting_candidate_review_lifecycle.sql:120: NOTICE:  identifier \"review_queue_items_br_03b_board_reporting_candidate_review_contract_check\" will be truncated to \"review_queue_items_br_03b_board_reporting_candidate_review_cont\"\npsql:migrations/kai_sprint2_br_03b_board_reporting_candidate_review_lifecycle.sql:120: NOTICE:  constraint \"review_queue_items_br_03b_board_reporting_candidate_review_cont\" of relation \"review_queue_items\" does not exist, skipping\n"
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_br_04_board_reporting_candidate_human_authority_decision_ledger.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nCREATE TABLE\nCREATE INDEX\nCREATE INDEX\nCREATE FUNCTION\nCREATE TRIGGER\nCOMMIT\n",
+          "stderr_tail": ""
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_board_reporting_candidate_export_manifest_foundation.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nCREATE TABLE\nCREATE FUNCTION\nCREATE TRIGGER\nCOMMIT\n",
+          "stderr_tail": ""
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_gate_c1_gcs_generation_binding.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nDO\nALTER TABLE\nALTER TABLE\nCREATE FUNCTION\nDROP TRIGGER\nCREATE TRIGGER\nCOMMIT\n",
+          "stderr_tail": "psql:migrations/kai_sprint2_gate_c1_gcs_generation_binding.sql:40: NOTICE:  constraint \"intake_files_gate_c1_gcs_generation_positive_check\" of relation \"intake_files\" does not exist, skipping\npsql:migrations/kai_sprint2_gate_c1_gcs_generation_binding.sql:40: NOTICE:  constraint \"intake_files_gate_c1_generation_requires_object_version_check\" of relation \"intake_files\" does not exist, skipping\npsql:migrations/kai_sprint2_gate_c1_gcs_generation_binding.sql:58: NOTICE:  trigger \"trg_gate_c1_gcs_generation_binding\" for relation \"kai.intake_files\" does not exist, skipping\n"
+        }
+      },
+      {
+        "kind": "migration",
+        "path": "migrations/kai_sprint2_gk_organization_tenant_binding.sql",
+        "result": {
+          "status": 0,
+          "signal": null,
+          "stdout_tail": "BEGIN\nCREATE SCHEMA\nDO\nCREATE TABLE\nCREATE INDEX\nCREATE INDEX\nCREATE INDEX\nCREATE INDEX\nCREATE FUNCTION\nDROP TRIGGER\nCREATE TRIGGER\nCOMMIT\n",
+          "stderr_tail": "psql:migrations/kai_sprint2_gk_organization_tenant_binding.sql:3: NOTICE:  schema \"kai\" already exists, skipping\npsql:migrations/kai_sprint2_gk_organization_tenant_binding.sql:65: NOTICE:  trigger \"trg_gk_organization_bindings_touch_updated_at\" for relation \"kai.gk_organization_bindings\" does not exist, skipping\n"
+        }
+      }
+    ]
+  }
+]
