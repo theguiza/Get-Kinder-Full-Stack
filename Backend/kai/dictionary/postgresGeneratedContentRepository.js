@@ -67,6 +67,18 @@ const AUDIENCES = new Set(["internal", "funder", "public"]);
 // concept.
 const GRANT_RESPONSE_PACKET_AUDIENCE = "funder";
 const BOARD_REPORTING_PACKET_AUDIENCE = "internal";
+// P14-C2: owner-directed INITIAL execution-safety bounds for the Grant
+// Response Packet membership scan only - never applied to Board Reporting
+// (evaluateBoardReportingPacketMembershipInTransaction below never supplies
+// maxCandidateDrafts/maxDistinctClaims, so it keeps its exact prior
+// behavior). These are execution bounds evaluated against CANDIDATE state
+// before final member eligibility is known, not an assertion of maximum
+// system capacity, and not a pagination/truncation scheme: exceeding
+// either fails the whole read closed, before the claim-traceability
+// evaluator is ever invoked, with no partial packet ever returned.
+export const GRANT_RESPONSE_PACKET_MAX_CANDIDATE_DRAFTS = 50;
+export const GRANT_RESPONSE_PACKET_MAX_DISTINCT_CLAIMS = 100;
+const EXECUTION_BOUND_VALIDATOR_KEY = "VAL-PKT-BOUND-001";
 const EVIDENCE_SENSITIVITY_LEVELS = new Set(["unknown"]);
 const SHA256_LOWER_PATTERN = /^[0-9a-f]{64}$/;
 
@@ -178,6 +190,34 @@ function failure(code, blockers) {
 
 function success(data) {
   return { ok: true, data, error: null };
+}
+
+// Safe blocker evidence for a Grant Response Packet execution-bound
+// overflow: only the bound dimension, the configured limit, and a
+// numeric observed count/lower-bound - never a member id, claim id,
+// evidence/source body, or raw row. The message/required_fix fields carry
+// the same bounded numbers so an operator can diagnose the overflow even
+// where a downstream boundary strips structured `evidence` (see
+// sprint2IntakeApi.js sanitizeServiceBlockers).
+function executionBoundExceededBlocker(boundDimension, configuredLimit, observed) {
+  const observedNumber = observed.count !== undefined ? observed.count : observed.atLeast;
+  const observedText = observed.count !== undefined ? `${observedNumber}` : `at least ${observedNumber}`;
+  return [{
+    validator_key: EXECUTION_BOUND_VALIDATOR_KEY,
+    severity: "blocker",
+    object_type: "grant_response_packet",
+    object_code: "grant_response_packet_execution_bound",
+    blocking_reason: `${boundDimension}_execution_bound_exceeded`,
+    message:
+      `Grant Response Packet ${boundDimension.replace(/_/g, " ")} execution bound exceeded `
+      + `(limit ${configuredLimit}, observed ${observedText}). No partial packet was produced.`,
+    required_fix: "Reduce packet scope, or have an owner raise the execution-safety bound.",
+    evidence: {
+      bound_dimension: boundDimension,
+      configured_limit: configuredLimit,
+      ...(observed.count !== undefined ? { observed_count: observed.count } : { observed_at_least: observed.atLeast }),
+    },
+  }];
 }
 
 export class RollbackResultError extends Error {
@@ -1386,10 +1426,17 @@ async function loadGrantResponsePacketMemberDraftIds(
     engagementId,
     packetAudience = GRANT_RESPONSE_PACKET_AUDIENCE,
     memberContentTypes = PACKET_MEMBER_CONTENT_TYPES,
+    // P14-C2: an overflow PROBE, not pagination - null (the default, and
+    // the only value Board Reporting ever supplies) issues the exact prior
+    // unbounded query. A caller enforcing a candidate-draft execution bound
+    // passes limit + 1 so a >limit candidate set is provably detected
+    // without reading every row of an unbounded overflow, while a <=limit
+    // candidate set still returns its full, exact membership untouched.
+    limit = null,
   },
 ) {
-  const { rows } = await tx.query(
-    `SELECT d.generated_content_draft_id::text AS generated_content_draft_id
+  const params = [organizationId, engagementId, [...memberContentTypes], DRAFT_STATUS, packetAudience];
+  let sql = `SELECT d.generated_content_draft_id::text AS generated_content_draft_id
        FROM kai.generated_content_drafts d
        JOIN kai.generation_runs r
          ON r.generation_run_id = d.generation_run_id
@@ -1399,9 +1446,12 @@ async function loadGrantResponsePacketMemberDraftIds(
         AND d.content_type = ANY($3::text[])
         AND d.draft_status = $4
         AND d.requested_audience = $5
-      ORDER BY d.generated_content_draft_id ASC`,
-    [organizationId, engagementId, [...memberContentTypes], DRAFT_STATUS, packetAudience],
-  );
+      ORDER BY d.generated_content_draft_id ASC`;
+  if (limit !== null) {
+    params.push(limit);
+    sql += ` LIMIT $6`;
+  }
+  const { rows } = await tx.query(sql, params);
   return rows.map((row) => row.generated_content_draft_id);
 }
 
@@ -1635,6 +1685,15 @@ export async function evaluateGrantResponsePacketMembershipInTransaction(
     packetAudience = GRANT_RESPONSE_PACKET_AUDIENCE,
     memberContentTypes = PACKET_MEMBER_CONTENT_TYPES,
     includeExportManifestLinkage = true,
+    // P14-C2: execution bounds over CANDIDATE packet state, evaluated
+    // before final member eligibility is known - null (the default) is the
+    // exact prior unbounded behavior. Board Reporting
+    // (evaluateBoardReportingPacketMembershipInTransaction below) never
+    // supplies either option, so its behavior is provably unchanged; only
+    // getGrantResponsePacket's Grant Response Packet call site supplies
+    // them.
+    maxCandidateDrafts = null,
+    maxDistinctClaims = null,
   } = {},
 ) {
   if (!validateGrantResponsePacketMembershipInput(input)) return failure("validation_blocker");
@@ -1651,8 +1710,40 @@ export async function evaluateGrantResponsePacketMembershipInTransaction(
     engagementId,
     packetAudience,
     memberContentTypes,
+    limit: maxCandidateDrafts === null ? null : maxCandidateDrafts + 1,
   });
+  // Candidate-draft execution bound: checked from the overflow-probe
+  // result alone, before any batched structural read and before the
+  // claim-traceability evaluator is ever reached. Fail closed - no
+  // partial packet, no export-candidate reuse, no manifest/Markdown.
+  if (maxCandidateDrafts !== null && draftIds.length > maxCandidateDrafts) {
+    return failure(
+      "validation_blocker",
+      executionBoundExceededBlocker("candidate_drafts", maxCandidateDrafts, { atLeast: draftIds.length }),
+    );
+  }
+
   const statesByDraftId = await readReviewPacketStatesBatch(tx, { organizationId, generatedContentDraftIds: draftIds });
+
+  // Distinct-claim execution bound: derived from the already-batched
+  // citation state readReviewPacketStatesBatch just loaded (no new query),
+  // counting each cited claim id once across every candidate draft/block/
+  // citation - before the memoized evaluator wrapper below is even
+  // created, so evaluateClaimTraceabilityInTransaction is never invoked
+  // when this bound is exceeded.
+  if (maxDistinctClaims !== null) {
+    const distinctClaimIds = new Set();
+    for (const state of statesByDraftId.values()) {
+      for (const citation of state.citations) distinctClaimIds.add(citation.claim_id);
+    }
+    if (distinctClaimIds.size > maxDistinctClaims) {
+      return failure(
+        "validation_blocker",
+        executionBoundExceededBlocker("distinct_claims", maxDistinctClaims, { count: distinctClaimIds.size }),
+      );
+    }
+  }
+
   const memoizedEvaluator = memoizeEvaluatorAcrossDrafts(evaluator);
 
   const drafts = [];
@@ -2491,7 +2582,10 @@ export function createPostgresGeneratedContentRepository({
       try {
         return await runInTransaction(async (tx) => {
           await tx.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY");
-          return evaluateGrantResponsePacketMembershipInTransaction(tx, input, evaluator);
+          return evaluateGrantResponsePacketMembershipInTransaction(tx, input, evaluator, undefined, {
+            maxCandidateDrafts: GRANT_RESPONSE_PACKET_MAX_CANDIDATE_DRAFTS,
+            maxDistinctClaims: GRANT_RESPONSE_PACKET_MAX_DISTINCT_CLAIMS,
+          });
         });
       } catch (error) {
         if (error instanceof RollbackResultError) return error.result;

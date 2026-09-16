@@ -29227,3 +29227,107 @@ closure remains USER_CONFIRMED from owner-supplied evidence only. No
 production database access, production runtime call, migration execution,
 rollback, claim/coverage-state change, deployment, remote push, or
 `00_KAI_CURRENT_STATE.md` update was performed.
+
+## Phase-14 (Grant Response Packet Track) - P14-C2 Grant Response Packet Bounded Execution (2026-09-16)
+
+**Owner authorization (bounded, local-only):** adopt owner-directed INITIAL
+execution-safety bounds for the Grant Response Packet membership scan -
+`GRANT_RESPONSE_PACKET_MAX_CANDIDATE_DRAFTS=50`,
+`GRANT_RESPONSE_PACKET_MAX_DISTINCT_CLAIMS=100`,
+`GRANT_RESPONSE_PACKET_BOUND_EXCEEDED_POLICY=FAIL_CLOSED_NO_PARTIAL_PACKET` -
+and make the existing execution path explicitly bounded and fail-closed. These
+values are deliberate initial execution-safety guardrails selected from the
+completed P14-C1 synthetic capacity characterization; they are not an
+assertion of maximum system capacity and may be changed later only through a
+separately supported change. No redesign, pagination, truncated success
+response, migration-chain repair, or change to fingerprint, export-review,
+final-release authority, export-manifest identity, FINAL Markdown, or Board
+Reporting semantics was authorized or performed.
+
+**Smallest repair:** in
+`Backend/kai/dictionary/postgresGeneratedContentRepository.js`,
+`loadGrantResponsePacketMemberDraftIds` gained an opt-in `limit` parameter
+(default `null`, the exact prior unbounded query) used only as a bounded
+overflow PROBE (`LIMIT maxCandidateDrafts + 1`) - never pagination.
+`evaluateGrantResponsePacketMembershipInTransaction` gained opt-in
+`maxCandidateDrafts`/`maxDistinctClaims` options (both default `null`): the
+candidate-draft bound is checked from the probe result before any batched
+structural read; the distinct-claim bound is derived from the citation state
+`readReviewPacketStatesBatch` already batches (no new query) and checked
+before the claim-traceability evaluator is ever invoked. Either bound
+exceeded fails the whole read closed via the existing
+`failure("validation_blocker", blockers)` convention with a new
+`VAL-PKT-BOUND-001` blocker (`blocking_reason` distinguishes
+`candidate_drafts_execution_bound_exceeded` from
+`distinct_claims_execution_bound_exceeded`; `evidence` carries only
+`bound_dimension`/`configured_limit`/`observed_count`|`observed_at_least` -
+never a member id, claim id, or evidence/source body). Only
+`getGrantResponsePacket` supplies the two bound options (as the exported
+`GRANT_RESPONSE_PACKET_MAX_CANDIDATE_DRAFTS`/`_MAX_DISTINCT_CLAIMS`
+constants); `getBoardReportingPacket`/
+`evaluateBoardReportingPacketMembershipInTransaction` supply neither, so
+Board Reporting keeps its exact prior unbounded behavior. In
+`Backend/kai/services/kaiGrantResponsePacketService.js`, the
+`getGrantResponsePacket` failure branch now forwards `result.blockers` and
+the blocker's bounded diagnostic `message` through `buildKaiError` (previously
+dropped for every repository failure code, not just this one) so the existing
+Impact Evidence Library packet-error alert - which only ever renders
+`result.body.error.message` - now shows the real bounded-overflow reason with
+no frontend code change required.
+
+**Regression proof (TOOL_VERIFIED):** new focused suite
+`__tests__/kai-sprint2-p14-c2-grant-response-packet-execution-bounds.spec.js`
+(7/7 PASS) proves: 50 candidate drafts admitted; 51 fail closed before the
+claim evaluator runs (evaluator invocation count 0, no partial packet); 100
+distinct claims admitted; 101 distinct claims fail closed before
+`evaluateClaimTraceabilityInTransaction` (evaluator invocation count 0, no
+partial packet); a claim cited by many candidate drafts counts once toward the
+distinct-claim bound; and Board Reporting membership is unaffected by either
+bound. All four directly-named existing suites remain unmodified and pass:
+`__tests__/kai-grant-response-packet-boundary.spec.js`,
+`__tests__/kai-grant-response-packet-render-model-boundary.spec.js`,
+`__tests__/kai-grant-response-packet-export-candidate-boundary.spec.js`,
+`__tests__/kai-sprint2-p14-09-assembled-funder-packet-membership-proof.spec.js`
+(66/66 PASS combined with the new suite). A broader regression sweep across
+every non-integration Board Reporting/Grant-Response-Packet/export-manifest/
+P14/P3 packet suite passed 937/937.
+
+**Real local PostgreSQL boundary proof (TOOL_VERIFIED):** a new disposable,
+loopback-only (127.0.0.1) ephemeral PostgreSQL runner,
+`scripts/kai-sprint2-p14-c2-grant-response-packet-execution-bounds-local-postgres.js`,
+exercises the real, unmocked `evaluateClaimTraceabilityInTransaction` and the
+real repository's `getGrantResponsePacket` (via
+`createPostgresGeneratedContentRepository`, evaluator wrapped only by a
+pass-through call counter) against a real synthetic database, proving: CASE 1
+(50 candidate drafts, 1 distinct fully-governed funder-eligible claim) ->
+PASS, all 50 members returned, evaluator invoked once (memoized); CASE 2 (51
+candidate drafts) -> BLOCK, `validation_blocker` /
+`candidate_drafts_execution_bound_exceeded`, evaluator invoked 0 times, no
+partial packet (`data: null`); CASE 3 (50 candidate drafts, 100 distinct
+claims) -> PASS, evaluator invoked 100 times, bound not tripped; CASE 4 (101
+distinct claims) -> BLOCK, `validation_blocker` /
+`distinct_claims_execution_bound_exceeded`, evaluator invoked 0 times, no
+partial packet. `node scripts/kai-sprint2-p14-c2-grant-response-packet-execution-bounds-local-postgres.js`
+exited 0, run twice on independent fresh ephemeral instances. No migration
+file was modified; the runner needed the same `kai.engagements` composite-
+unique-constraint runner-local accommodation already used by the P3-02/P14-09
+runners, plus its own migration-chain ordering (isolated to this new script
+only) to exercise the generated-content-review start/complete lifecycle no
+prior runner needed against this exact base - this is not the P14-C1
+migration-chain issue referenced in prior lore, since no such artifact exists
+in this repository yet. `DATABASE_URL` was set to the non-listening loopback
+sentinel for all non-database-owning Node/npm commands throughout.
+`git diff --check` -> PASS.
+
+**Files changed:** `Backend/kai/dictionary/postgresGeneratedContentRepository.js`,
+`Backend/kai/services/kaiGrantResponsePacketService.js`,
+`__tests__/kai-sprint2-p14-c2-grant-response-packet-execution-bounds.spec.js`,
+`scripts/kai-sprint2-p14-c2-grant-response-packet-execution-bounds-local-postgres.js`,
+and this ExecPlan entry.
+
+**Status:** GRANT_RESPONSE_PACKET_EXECUTION_BOUNDS_ADOPTED_LOCALLY. These are
+owner-directed INITIAL execution-safety bounds, not a measured maximum
+capacity, and may be revised only through a separately supported change.
+Production state and production application remain NOT_CONFIRMED. Stop before
+production. No production/database/cloud/feature-flag change, deployment, or
+remote push was performed.

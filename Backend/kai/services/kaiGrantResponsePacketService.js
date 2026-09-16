@@ -301,7 +301,14 @@ export async function getGrantResponsePacket(input, dependencies = {}) {
     organizationId: input.organizationId,
     engagementId: input.engagementId,
   });
-  if (!result.ok) return buildKaiError(result.error.code, { status: result.error.status, data: null });
+  if (!result.ok) {
+    return buildKaiError(result.error.code, {
+      status: result.error.status,
+      blockers: result.blockers,
+      message: result.blockers?.[0]?.message,
+      data: null,
+    });
+  }
 
   const drafts = [];
   for (const packet of result.data.drafts) {
