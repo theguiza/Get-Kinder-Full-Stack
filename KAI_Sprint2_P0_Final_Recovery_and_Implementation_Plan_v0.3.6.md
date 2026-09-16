@@ -29105,3 +29105,48 @@ feature-flag changes, VAL-GEN-005, VAL-EXP-001 internals, Board Reporting,
 Grant Response Packet, or real-client-data access. `gk_reviewer`/`gk_admin`
 human confirmation must remain required throughout. This entry is the record
 of that authorization; it is not itself a new planning checkpoint.
+
+## Final Two Production-Schema Delta Local Proof (2026-09-16)
+
+**Owner authorization (bounded, local-only):** execute the final repository
+and disposable-PostgreSQL proof for the two USER_CONFIRMED remaining KAI
+production-schema deltas only: late Package 2A convergence for
+`kai.engagement_requirement_sets`, and the missing
+`ix_upload_policy_decision_replay_gate_a_object_facts` index on
+`kai.upload_policy_decision_replay`. No production connection, production
+mutation, pgAdmin use, deployment, push, credential access, cloud access, or
+real-client-data access was authorized or performed.
+
+**Smallest repair:** added an index-only Gate-A corrective migration pair for
+`ix_upload_policy_decision_replay_gate_a_object_facts`, with rollback dropping
+only that index. Added a bounded local PostgreSQL proof runner that constructs
+fresh synthetic owning schemas, reproduces the accepted pre-states, applies the
+canonical Package 2A migration unchanged, proves valid legacy row survival,
+verifies Package 2A columns/constraints/indexes/function/append-only trigger,
+proves the rollback precheck returns `SAFE_TO_ROLL_BACK` only when no Package
+2A-only authority/history state or restored-unique conflict exists, proves the
+Gate-A index-only forward/rollback/reapply path, and runs a combined verifier
+for both final repaired surfaces.
+
+**Files changed:** `migrations/kai_sprint2_gate_a_p0_policy_decision_replay_object_facts_index_repair.sql`,
+`migrations/kai_sprint2_gate_a_p0_policy_decision_replay_object_facts_index_repair.rollback.sql`,
+`scripts/kai-sprint2-final-two-production-schema-deltas-local-postgres.js`,
+`__tests__/kai-sprint2-gate-a-policy-decision-replay-schema-contract.spec.js`,
+and this ExecPlan entry.
+
+**Verification (TOOL_VERIFIED):** `DATABASE_URL` was set to the non-listening
+loopback sentinel for Node commands. The existing unchanged Package 2A
+disposable PostgreSQL proof passed forward and structural rollback. The new
+final-two disposable PostgreSQL proof passed Package 2A late apply, Package 2A
+rollback precheck, Gate-A index-only forward/rollback/reapply, and combined
+final-surface verification. Focused schema-contract tests passed:
+`node --test __tests__/kai-sprint2-package-2a-engagement-requirement-sets-authority-schema-contract.spec.js __tests__/kai-sprint2-gate-a-policy-decision-replay-schema-contract.spec.js`
+-> 9/9 PASS. `git diff --check` -> PASS.
+
+**TOOL_VERIFIED finding:** PostgreSQL stores two Package 2A constraint
+identifiers truncated to its 63-byte identifier limit; the proof verifies those
+constraints by unambiguous name prefix and `pg_get_constraintdef(...)` while
+leaving the canonical Package 2A migration unchanged.
+
+**Status:** FINAL_TWO_SCHEMA_DELTAS_LOCALLY_PROVED. Production state and
+production application remain NOT_CONFIRMED. Stop before production.

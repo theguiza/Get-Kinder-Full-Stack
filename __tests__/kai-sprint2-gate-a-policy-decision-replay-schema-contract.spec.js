@@ -5,6 +5,14 @@ import test from "node:test";
 const inMemoryRepositorySource = readFileSync("Backend/kai/upload/inMemoryUploadLifecycleRepository.js", "utf8");
 const followUpMigrationSource = readFileSync("migrations/kai_sprint2_gate_a_p0_policy_decision_replay.sql", "utf8");
 const followUpRollbackSource = readFileSync("migrations/kai_sprint2_gate_a_p0_policy_decision_replay.rollback.sql", "utf8");
+const objectFactsIndexRepairSource = readFileSync(
+  "migrations/kai_sprint2_gate_a_p0_policy_decision_replay_object_facts_index_repair.sql",
+  "utf8",
+);
+const objectFactsIndexRepairRollbackSource = readFileSync(
+  "migrations/kai_sprint2_gate_a_p0_policy_decision_replay_object_facts_index_repair.rollback.sql",
+  "utf8",
+);
 
 test("Gate A durable policy replay schema maps to accepted synthetic compareAndSetPolicyDecision facts", () => {
   assert.match(inMemoryRepositorySource, /compareAndSetPolicyDecision\(input\)/);
@@ -55,4 +63,24 @@ test("Gate A policy replay rollback draft targets only the follow-up amendment",
   assert.doesNotMatch(followUpRollbackSource, /DROP COLUMN IF EXISTS upload_state/);
   assert.doesNotMatch(followUpRollbackSource, /DROP TABLE IF EXISTS kai\.upload_lifecycle_audit/);
   assert.doesNotMatch(followUpRollbackSource, /DROP TRIGGER IF EXISTS trg_gate_a_p0_upload_lifecycle/);
+});
+
+test("Gate A policy replay object-facts repair is index-only forward and rollback", () => {
+  assert.match(objectFactsIndexRepairSource, /^BEGIN;/);
+  assert.match(objectFactsIndexRepairSource, /COMMIT;\s*$/);
+  assert.match(
+    objectFactsIndexRepairSource,
+    /CREATE INDEX IF NOT EXISTS ix_upload_policy_decision_replay_gate_a_object_facts\s+ON kai\.upload_policy_decision_replay \(\s+organization_id,\s+intake_file_id,\s+object_version_id,\s+verified_checksum,\s+verified_size_bytes\s+\);/,
+  );
+  assert.doesNotMatch(objectFactsIndexRepairSource, /\b(?:CREATE|ALTER|DROP)\s+(?:TABLE|FUNCTION|TRIGGER)\b/);
+  assert.doesNotMatch(objectFactsIndexRepairSource, /\b(?:INSERT|UPDATE|DELETE|TRUNCATE)\b/);
+
+  assert.match(objectFactsIndexRepairRollbackSource, /^BEGIN;/);
+  assert.match(objectFactsIndexRepairRollbackSource, /COMMIT;\s*$/);
+  assert.match(
+    objectFactsIndexRepairRollbackSource,
+    /DROP INDEX IF EXISTS kai\.ix_upload_policy_decision_replay_gate_a_object_facts;/,
+  );
+  assert.doesNotMatch(objectFactsIndexRepairRollbackSource, /\b(?:CREATE|ALTER|DROP)\s+(?:TABLE|FUNCTION|TRIGGER)\b/);
+  assert.doesNotMatch(objectFactsIndexRepairRollbackSource, /\b(?:INSERT|UPDATE|DELETE|TRUNCATE)\b/);
 });
