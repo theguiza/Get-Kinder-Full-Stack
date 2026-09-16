@@ -24488,6 +24488,28 @@ already-scoped-out issue - not P14-01 engagement work.
 **Local commit:** one bounded commit created after all required checks
 passed.
 
+**P3-18 assembled runner closure note (2026-09-16):** the P3-18 item in the
+historical export-manifest runner debt above is now closed for the Phase 13/14
+assembled acceptance runner only. Root cause was a runner-local schema fixture
+gap: `kai-sprint2-p3-18-real-persisted-final-gate-proof-local-postgres.js`
+exercised the cross-run P3-13 integration packet read after P3-20 made
+`getGeneratedDraftExportReviewPacket` always use the durable
+`kai.export_manifests` read-recovery path, but the runner had not applied the
+P3-19/P3-20 manifest prerequisites. The P3-13 fresh completion and serial
+audit-backed replay had already persisted correctly; the failing line 365 was
+`packet.ok`, actual `false`, expected `true`, with service result
+`system_error` because `kai.export_manifests` was absent. Repair was confined to
+adding the P3-19/P3-20 migrations after the P3-16/P3-17 verifier/failure-check
+block and before tests in the P3-18 local runner, preserving the pre-manifest
+verifier boundaries. Verification: focused P3-13 local PostgreSQL runner passed
+172/0/1 (173 tests, one intentional skip); P3-13 boundary suite passed 31/31;
+exact assembled command
+`DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel npm run verify:kai-sprint2-p3-18-real-persisted-final-gate-proof`
+passed 301/301, 0 fail, 0 skip; `git diff --check` passed. No production,
+production database, migration against a shared database, deployment, remote
+push, feature-flag, Current State, or production configuration action was
+performed.
+
 ## Grant Response Packet: Engagement-Scoped Deterministic Generated-Draft
 ## Membership + Composition (repository/service foundation)
 

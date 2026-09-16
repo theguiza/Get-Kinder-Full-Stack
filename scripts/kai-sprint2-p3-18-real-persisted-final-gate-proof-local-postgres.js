@@ -147,6 +147,14 @@ try {
   psqlFile("scripts/kai-sprint2-p3-17-human-authority-decision-ledger-smoke-seed.sql");
   psqlFile("scripts/kai-sprint2-p3-17-human-authority-decision-ledger-smoke-verifier.sql");
   psqlFile("scripts/kai-sprint2-p3-17-human-authority-decision-ledger-failure-checks.sql");
+  // getGeneratedDraftExportReviewPacket's durable read-recovery path (P3-20
+  // binding) reads kai.export_manifests via
+  // loadExportManifestIdentityForReviewQueueItemInTransaction on every call,
+  // even when no manifest row exists yet. Apply those later prerequisites only
+  // after the P3-16/P3-17 verifiers that intentionally assert their own
+  // pre-manifest package boundaries.
+  psqlFile("migrations/kai_sprint2_p3_19_export_manifest_foundation.sql");
+  psqlFile("migrations/kai_sprint2_p3_20_export_manifest_review_binding.sql");
 
   // Real kai.organizations/kai.engagements rows the P3-18 (and cross-run
   // P3-13) integration suites' createEvidenceSummaryDraft/
