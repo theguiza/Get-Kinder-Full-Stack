@@ -50,6 +50,14 @@ const CONTENT_TYPE = "evidence_summary";
 const IMPACT_NARRATIVE_CONTENT_TYPE = "impact_narrative";
 const READINESS_ASSESSMENT_CONTENT_TYPE = "readiness_assessment";
 const DATA_GAP_MEMO_CONTENT_TYPE = "data_gap_memo";
+// P13-EXT-1: standalone evidence-backed "Case for Support" narrative. Joins
+// the generic generated-content admission/review lifecycle exactly like the
+// other four content types, but is deliberately NEVER added to
+// PACKET_MEMBER_CONTENT_TYPES or BOARD_REPORTING_PACKET_MEMBER_CONTENT_TYPES
+// below - Grant Response Packet and Board Reporting membership are scoped
+// exactly as before, and this content type is not part of either composite
+// export.
+const CASE_FOR_SUPPORT_CONTENT_TYPE = "case_for_support";
 const PACKET_MEMBER_CONTENT_TYPES = new Set([CONTENT_TYPE, IMPACT_NARRATIVE_CONTENT_TYPE]);
 const BOARD_REPORTING_PACKET_MEMBER_CONTENT_TYPES = new Set([CONTENT_TYPE, IMPACT_NARRATIVE_CONTENT_TYPE]);
 const ALLOWED_GENERATED_CONTENT_TYPES = new Set([
@@ -57,6 +65,7 @@ const ALLOWED_GENERATED_CONTENT_TYPES = new Set([
   IMPACT_NARRATIVE_CONTENT_TYPE,
   READINESS_ASSESSMENT_CONTENT_TYPE,
   DATA_GAP_MEMO_CONTENT_TYPE,
+  CASE_FOR_SUPPORT_CONTENT_TYPE,
 ]);
 const DRAFT_STATUS = "draft";
 const REVIEW_STATUS = GENERATED_CONTENT_REVIEW_QUEUE_CONTRACT.reviewStatus;
@@ -284,6 +293,10 @@ export function fingerprintReadinessAssessmentRequest({ requestedAudience, claim
 
 export function fingerprintDataGapMemoRequest({ requestedAudience, claimIds, engagementId }) {
   return fingerprintGeneratedContentRequest(DATA_GAP_MEMO_CONTENT_TYPE, { requestedAudience, claimIds, engagementId });
+}
+
+export function fingerprintCaseForSupportRequest({ requestedAudience, claimIds, engagementId }) {
+  return fingerprintGeneratedContentRequest(CASE_FOR_SUPPORT_CONTENT_TYPE, { requestedAudience, claimIds, engagementId });
 }
 
 function hasExactKeys(value, allowed) {
@@ -2689,6 +2702,15 @@ export function createPostgresGeneratedContentRepository({
         { runInTransaction, evaluator, afterPersist },
       );
     },
+    async createCaseForSupportDraft(input, dependencies = {}) {
+      return createGeneratedContentDraft(
+        CASE_FOR_SUPPORT_CONTENT_TYPE,
+        fingerprintCaseForSupportRequest,
+        input,
+        dependencies,
+        { runInTransaction, evaluator, afterPersist },
+      );
+    },
     async startGeneratedContentReview(input, dependencies = {}) {
       if (!validateCompleteReviewInput(input)) return failure("validation_blocker");
       if (!dependencies.metadataOnlyAudit) return failure("validation_blocker");
@@ -3308,6 +3330,7 @@ export const __generatedContentRepositoryContract = Object.freeze({
   IMPACT_NARRATIVE_CONTENT_TYPE,
   READINESS_ASSESSMENT_CONTENT_TYPE,
   DATA_GAP_MEMO_CONTENT_TYPE,
+  CASE_FOR_SUPPORT_CONTENT_TYPE,
   PACKET_MEMBER_CONTENT_TYPES,
   ALLOWED_GENERATED_CONTENT_TYPES,
   DRAFT_STATUS,
@@ -3362,6 +3385,7 @@ export const __generatedContentRepositoryTestables = Object.freeze({
   fingerprintImpactNarrativeRequest,
   fingerprintReadinessAssessmentRequest,
   fingerprintDataGapMemoRequest,
+  fingerprintCaseForSupportRequest,
   prepareRequiredAudit,
   validateRequestExportReviewInput,
   validateExportReviewRequestStateInput,

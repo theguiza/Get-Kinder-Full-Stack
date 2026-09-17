@@ -107,6 +107,9 @@ import { validateExportManifestEligibility } from "../Backend/kai/validators/kai
 import {
   createPostgresGeneratedContentRepository,
 } from "../Backend/kai/dictionary/postgresGeneratedContentRepository.js";
+import { createCaseForSupportDraft } from "../Backend/kai/services/kaiGeneratedContentService.js";
+
+const enabledEnv = Object.freeze({ KAI_SPRINT2_ENABLED: "true", KAI_GENERATION_ENABLED: "true" });
 
 const CLAIM = "00000000-0000-4000-8000-000000000101";
 const EVIDENCE = "00000000-0000-4000-8000-000000000201";
@@ -128,6 +131,7 @@ const CONTENT_TYPES = Object.freeze([
   "impact_narrative",
   "readiness_assessment",
   "data_gap_memo",
+  "case_for_support",
 ]);
 
 const READINESS = Object.freeze({
@@ -326,6 +330,77 @@ test("[evidence_summary] predicate 7b - VAL-GEN-005 rejects a funder-requested d
   assert.equal(result.ok, false);
   assert.deepEqual(blockerKeys(result), ["VAL-GEN-005"]);
 });
+
+// ---------------------------------------------------------------------
+// Predicate 7d (case_for_support-specific, P13-EXT-1): case_for_support is
+// generation-time restricted to internal + funder only - unlike the three
+// internal-only types above, it is NOT rejected at the repository layer for
+// a funder request (see createGeneratedContentDraft's internal-only-types
+// array in postgresGeneratedContentRepository.js, which deliberately does
+// NOT include case_for_support). Instead, "public" is rejected at the
+// SERVICE-level input validator (isCreateCaseForSupportDraftInput,
+// kaiGeneratedContentService.js), before the repository is ever reached,
+// while "internal" and "funder" are both accepted at that same input-shape
+// layer.
+// ---------------------------------------------------------------------
+
+test('[case_for_support] predicate 7d - the service-level input validator rejects requestedAudience "public" before any repository call', async () => {
+  const repository = {
+    createCaseForSupportDraft: async () => { throw new Error("createCaseForSupportDraft must not be reached: public must fail closed at the service-level input validator"); },
+  };
+  const result = await createCaseForSupportDraft({
+    organizationId: ORG,
+    engagementId: ENGAGEMENT,
+    requestedAudience: "public",
+    claimIds: [CLAIM],
+    idempotencyKey: "phase13-governance-case-for-support-audience-gate-public",
+    actorContext: { actorType: "human", actorUserId: "90000000-0000-4000-8000-000000000001", source: "public.userdata", organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "gk_admin" }] },
+    now: "2026-09-01T00:00:00.000Z",
+  }, { env: enabledEnv, generatedContentRepository: repository, metadataOnlyAudit: auditRecorder() });
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "validation_blocker");
+});
+
+for (const requestedAudience of ["internal", "funder"]) {
+  test(`[case_for_support] predicate 7d - the service-level input validator accepts requestedAudience "${requestedAudience}" (repository is invoked)`, async () => {
+    let repositoryCalls = 0;
+    const repository = {
+      createCaseForSupportDraft: async (repoInput) => {
+        repositoryCalls += 1;
+        return {
+          ok: true,
+          data: {
+            generationRunId: "00000000-0000-4000-8000-000000000801",
+            generatedContentDraftId: "00000000-0000-4000-8000-000000000802",
+            requestedAudience: repoInput.requestedAudience,
+            draftStatus: "draft",
+            reviewStatus: "needs_gk_review",
+            reviewQueueItemId: "00000000-0000-4000-8000-000000000803",
+            blocks: [{ ordinal: 1, text: SAFE_STATEMENT, citations: [{ claimId: CLAIM, evidenceItemId: EVIDENCE }] }],
+            replayed: false,
+          },
+          error: null,
+        };
+      },
+    };
+    const result = await createCaseForSupportDraft({
+      organizationId: ORG,
+      engagementId: ENGAGEMENT,
+      requestedAudience,
+      claimIds: [CLAIM],
+      idempotencyKey: `phase13-governance-case-for-support-audience-gate-${requestedAudience}`,
+      actorContext: { actorType: "human", actorUserId: "90000000-0000-4000-8000-000000000001", source: "public.userdata", organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "gk_admin" }] },
+      now: "2026-09-01T00:00:00.000Z",
+    }, {
+      env: enabledEnv,
+      generatedContentRepository: repository,
+      metadataOnlyAudit: auditRecorder(),
+      getEngagementForOrganization: async () => ({ engagement_id: ENGAGEMENT, organization_id: ORG }),
+    });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(repositoryCalls, 1);
+  });
+}
 
 for (const contentType of ["impact_narrative", "readiness_assessment", "data_gap_memo"]) {
   test(`[${contentType}] predicate 7c - the real creation service fails closed (validation_blocker) before generation if a non-"internal" audience is requested at all`, async () => {
@@ -594,7 +669,7 @@ test("[readiness_assessment] predicate 4 - claim.limitationCodes feeds VAL-GEN-0
 // produces the exact same validateGeneratedContentDraft outcome as the same
 // claim with limitationCodes: [] for these three content types, proving
 // limitationCodes is not itself a distinct governance signal for them.
-for (const contentType of ["evidence_summary", "impact_narrative", "data_gap_memo"]) {
+for (const contentType of ["evidence_summary", "impact_narrative", "data_gap_memo", "case_for_support"]) {
   test(`[${contentType}] predicate 4 - documented variance: no VAL-GEN branch reads claim.limitationCodes for this type (outcome is identical with and without it)`, () => {
     const withLimitation = validateGeneratedContentDraft(validArgs(contentType, {
       generationClaims: [governedClaim({ limitationCodes: ["evidence_gap_unresolved"] })],
@@ -865,6 +940,7 @@ const REPOSITORY_METHOD_BY_CONTENT_TYPE = Object.freeze({
   impact_narrative: "createImpactNarrativeDraft",
   readiness_assessment: "createReadinessAssessmentDraft",
   data_gap_memo: "createDataGapMemoDraft",
+  case_for_support: "createCaseForSupportDraft",
 });
 
 for (const contentType of CONTENT_TYPES) {
@@ -932,6 +1008,6 @@ for (const contentType of CONTENT_TYPES) {
   });
 }
 
-test("horizontal Phase-13 governance conformance: all four content types were exercised", () => {
-  assert.deepEqual(CONTENT_TYPES, ["evidence_summary", "impact_narrative", "readiness_assessment", "data_gap_memo"]);
+test("horizontal Phase-13 governance conformance: all five content types were exercised", () => {
+  assert.deepEqual(CONTENT_TYPES, ["evidence_summary", "impact_narrative", "readiness_assessment", "data_gap_memo", "case_for_support"]);
 });

@@ -437,7 +437,7 @@ test("Generated Drafts read model index includes data_gap_memo in the generic co
       return { rows: [] };
     },
   });
-  assert.match(observed.sql, /AND d\.content_type IN \('evidence_summary', 'impact_narrative', 'readiness_assessment', 'data_gap_memo'\)/);
+  assert.match(observed.sql, /AND d\.content_type IN \('evidence_summary', 'impact_narrative', 'readiness_assessment', 'data_gap_memo', 'case_for_support'\)/);
 });
 
 test("Generated Drafts library index reuses e890a8c's export-review role boundary: gk_reviewer never receives identity/state even when a row exists", async () => {
@@ -628,7 +628,7 @@ test("Generated Drafts read model is bounded, organization-scoped, deterministic
     },
   });
   assert.match(observed.sql, /WHERE d\.organization_id = \$1::uuid/);
-  assert.match(observed.sql, /AND d\.content_type IN \('evidence_summary', 'impact_narrative', 'readiness_assessment', 'data_gap_memo'\)/);
+  assert.match(observed.sql, /AND d\.content_type IN \('evidence_summary', 'impact_narrative', 'readiness_assessment', 'data_gap_memo', 'case_for_support'\)/);
   assert.match(observed.sql, /AND d\.requested_audience = 'internal'/);
   assert.match(observed.sql, /AND d\.draft_status = 'draft'/);
   assert.match(observed.sql, /AND q\.priority = 'medium'/);
@@ -705,6 +705,8 @@ test("Generated Drafts frontend projection strips unsafe fields and preserves sa
   assert.equal(generatedDraftContentTypeLabel("impact_narrative", "internal"), "Impact Narrative · Internal");
   assert.equal(generatedDraftContentTypeLabel("readiness_assessment", "internal"), "Readiness Assessment · Internal");
   assert.equal(generatedDraftContentTypeLabel("data_gap_memo", "internal"), "Data Gap Memo · Internal");
+  assert.equal(generatedDraftContentTypeLabel("case_for_support", "internal"), "Case for Support · Internal");
+  assert.equal(generatedDraftContentTypeLabel("case_for_support", "funder"), "Case for Support · funder");
   assert.notEqual(generatedDraftLibraryIndexPath(organizationId), generatedDraftReviewPacketPath(organizationId, draftId));
 });
 

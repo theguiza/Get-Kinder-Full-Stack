@@ -20,6 +20,7 @@
   const CREATE_IMPACT_NARRATIVE_OPERATION = "create_impact_narrative_draft";
   const CREATE_READINESS_ASSESSMENT_OPERATION = "create_readiness_assessment_draft";
   const CREATE_DATA_GAP_MEMO_OPERATION = "create_data_gap_memo_draft";
+  const CREATE_CASE_FOR_SUPPORT_OPERATION = "create_case_for_support_draft";
   const GET_GENERATED_DRAFT_REVIEW_PACKET_OPERATION = "get_generated_draft_review_packet";
   // Determines only whether the actor may see the export-review identity/
   // state this same read projects (below) - the identical role gate
@@ -33,7 +34,18 @@
   const COMPLETE_GENERATED_CONTENT_REVIEW_OPERATION = "complete_generated_content_review";
   const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
   const AUDIENCES = new Set(["internal", "funder", "public"]);
-  const ALLOWED_GENERATED_CONTENT_TYPES = new Set(["evidence_summary", "impact_narrative", "readiness_assessment", "data_gap_memo"]);
+  const ALLOWED_GENERATED_CONTENT_TYPES = new Set(["evidence_summary", "impact_narrative", "readiness_assessment", "data_gap_memo", "case_for_support"]);
+  // P13-EXT-1: case_for_support is generation-time restricted to internal +
+  // funder only - public is never an allowed requestedAudience for this
+  // content type, rejected here at the service-level input validator (the
+  // same fail-closed layer isCreateImpactNarrativeDraftInput/
+  // isCreateReadinessAssessmentDraftInput/isCreateDataGapMemoDraftInput
+  // already use to narrow evidence_summary's broader {internal, funder,
+  // public} shape). All audiences remain subject to the existing claim-level
+  // audience-authority gates (approvalForAudience / VAL-GEN-005) - this is
+  // purely an input-shape restriction, not a new audience-authority
+  // mechanism.
+  const CASE_FOR_SUPPORT_AUDIENCES = new Set(["internal", "funder"]);
   const DATA_GAP_MEMO_GENERATION_CLAIM_LIMIT = 20;
 
   function hasExactKeys(value, allowed) {
@@ -86,6 +98,10 @@
     }
     return isCreateEvidenceSummaryDraftInput({ ...input, claimIds: ["00000000-0000-4000-8000-000000000001"] })
       && input.requestedAudience === "internal";
+  }
+
+  function isCreateCaseForSupportDraftInput(input) {
+    return isCreateEvidenceSummaryDraftInput(input) && CASE_FOR_SUPPORT_AUDIENCES.has(input.requestedAudience);
   }
 
   function isMappedHumanActor(actorContext) {
@@ -305,6 +321,59 @@
       draftGenerator: dependencies.draftGenerator,
       metadataOnlyAudit: dependencies.metadataOnlyAudit,
       authoritativeReadiness: readinessResult.data,
+    });
+    if (!result.ok) {
+      return buildKaiError(result.error.code, {
+        status: result.error.status,
+        ...(result.blockers ? { blockers: result.blockers } : {}),
+      });
+    }
+    return { ok: true, data: result.data, error: null };
+  }
+
+  export async function createCaseForSupportDraft(input, dependencies = {}) {
+    const env = dependencies.env || process.env;
+    if (!isKaiSprint2Enabled(env)) return buildKaiError("feature_disabled");
+    if (!isKaiGenerationEnabled(env) || !areKaiSprint2GenerationFeaturesEnabled(env)) {
+      return buildKaiError("feature_disabled");
+    }
+    if (!isCreateCaseForSupportDraftInput(input)) {
+      return buildKaiError("validation_blocker");
+    }
+    if (!isMappedHumanActor(input.actorContext)) {
+      return buildKaiError("authorization_denied");
+    }
+
+    const auth = validateActorCanPerformOperation(
+      input.actorContext,
+      CREATE_CASE_FOR_SUPPORT_OPERATION,
+      input.organizationId,
+      { allowedRoles: GENERATED_CONTENT_ALLOWED_ROLES },
+    );
+    if (!auth.ok) {
+      return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers });
+    }
+
+    const readEngagement = dependencies.getEngagementForOrganization || getEngagementForOrganization;
+    const engagementRecord = await readEngagement({
+      organizationId: input.organizationId,
+      engagementId: input.engagementId,
+    });
+
+    const tenant = validateTenantBoundaryConsistency({
+      expectedOrganizationId: input.organizationId,
+      payload: { organization_id: input.organizationId, engagement_id: input.engagementId },
+      engagementRecord,
+    });
+    if (tenant.severity === "blocker") {
+      return buildKaiError("tenant_boundary_violation", { blockers: [tenant] });
+    }
+
+    const repository =
+      dependencies.generatedContentRepository || (await createDefaultGeneratedContentRepository());
+    const result = await repository.createCaseForSupportDraft(input, {
+      draftGenerator: dependencies.draftGenerator,
+      metadataOnlyAudit: dependencies.metadataOnlyAudit,
     });
     if (!result.ok) {
       return buildKaiError(result.error.code, {
@@ -695,6 +764,7 @@
     CREATE_IMPACT_NARRATIVE_OPERATION,
     CREATE_READINESS_ASSESSMENT_OPERATION,
     CREATE_DATA_GAP_MEMO_OPERATION,
+    CREATE_CASE_FOR_SUPPORT_OPERATION,
     GET_GENERATED_DRAFT_REVIEW_PACKET_OPERATION,
     PROJECT_EXPORT_REVIEW_VISIBILITY_OPERATION,
     START_GENERATED_CONTENT_REVIEW_OPERATION,

@@ -1,6 +1,6 @@
 // Horizontal generated-content REVIEW LIFECYCLE conformance suite for the
-// four current generated-draft content types (evidence_summary,
-// impact_narrative, readiness_assessment, data_gap_memo).
+// five current generated-draft content types (evidence_summary,
+// impact_narrative, readiness_assessment, data_gap_memo, case_for_support).
 //
 // This suite is deliberately scoped to the review lifecycle - creation's
 // coupling to a fresh generated_content_review row, starting and completing
@@ -104,6 +104,7 @@ const CONTENT_TYPES = Object.freeze([
   "impact_narrative",
   "readiness_assessment",
   "data_gap_memo",
+  "case_for_support",
 ]);
 
 const ORG = "00000000-0000-4000-8000-000000000001";
@@ -170,6 +171,7 @@ const REPOSITORY_METHOD_BY_CONTENT_TYPE = Object.freeze({
   impact_narrative: "createImpactNarrativeDraft",
   readiness_assessment: "createReadinessAssessmentDraft",
   data_gap_memo: "createDataGapMemoDraft",
+  case_for_support: "createCaseForSupportDraft",
 });
 
 function creationDependenciesFor(contentType) {
@@ -1017,7 +1019,7 @@ test("section 6 - a synthetic effective P3-17 human export-authority decision is
 // Section 7 - ALLOWLISTS.
 // =======================================================================
 
-test("section 7 - the six lifecycle-facing allowlists all include exactly the same four current content types", () => {
+test("section 7 - the six lifecycle-facing allowlists all include exactly the same five current content types", () => {
   const expected = new Set(CONTENT_TYPES);
 
   assert.deepEqual(new Set(__generatedContentServiceContract.ALLOWED_GENERATED_CONTENT_TYPES), expected);
@@ -1032,13 +1034,13 @@ test("section 7 - the six lifecycle-facing allowlists all include exactly the sa
   // "service lazy-loads the database-capable repository only after all
   // gates, per its own source" tests).
   const exportReviewServiceSource = readFileSync(new URL("../Backend/kai/services/kaiExportReviewService.js", import.meta.url), "utf8");
-  assert.match(exportReviewServiceSource, /const ALLOWED_GENERATED_CONTENT_TYPES = new Set\(\[\s*"evidence_summary",\s*"impact_narrative",\s*"readiness_assessment",\s*"data_gap_memo",?\s*\]\)/);
+  assert.match(exportReviewServiceSource, /const ALLOWED_GENERATED_CONTENT_TYPES = new Set\(\[\s*"evidence_summary",\s*"impact_narrative",\s*"readiness_assessment",\s*"data_gap_memo",\s*"case_for_support",?\s*\]\)/);
 
   const libraryServiceSource = readFileSync(new URL("../Backend/kai/services/kaiGeneratedDraftLibraryService.js", import.meta.url), "utf8");
-  assert.match(libraryServiceSource, /const LIBRARY_CONTENT_TYPES = new Set\(\[\s*"evidence_summary",\s*"impact_narrative",\s*"readiness_assessment",\s*"data_gap_memo",?\s*\]\)/);
+  assert.match(libraryServiceSource, /const LIBRARY_CONTENT_TYPES = new Set\(\[\s*"evidence_summary",\s*"impact_narrative",\s*"readiness_assessment",\s*"data_gap_memo",\s*"case_for_support",?\s*\]\)/);
 
   const readModelSource = readFileSync(new URL("../Backend/kai/db/kaiGeneratedDraftLibraryReadModels.js", import.meta.url), "utf8");
-  assert.match(readModelSource, /d\.content_type IN \('evidence_summary', 'impact_narrative', 'readiness_assessment', 'data_gap_memo'\)/);
+  assert.match(readModelSource, /d\.content_type IN \('evidence_summary', 'impact_narrative', 'readiness_assessment', 'data_gap_memo', 'case_for_support'\)/);
 });
 
 test("section 7 - the intentionally-narrower funder/board-packet allowlists remain exactly as narrow as designed (not a lifecycle allowlist, not drift)", () => {
@@ -1124,6 +1126,6 @@ test("section 8 - a gk_reviewer actor may start/complete generated_content_revie
   assert.equal(completeExport.error.code, "authorization_denied");
 });
 
-test("horizontal review-lifecycle conformance: all four content types were exercised", () => {
-  assert.deepEqual(CONTENT_TYPES, ["evidence_summary", "impact_narrative", "readiness_assessment", "data_gap_memo"]);
+test("horizontal review-lifecycle conformance: all five content types were exercised", () => {
+  assert.deepEqual(CONTENT_TYPES, ["evidence_summary", "impact_narrative", "readiness_assessment", "data_gap_memo", "case_for_support"]);
 });

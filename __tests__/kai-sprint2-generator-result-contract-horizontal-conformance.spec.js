@@ -52,6 +52,10 @@ import {
   __dataGapMemoDraftGeneratorContract,
 } from "../Backend/kai/services/kaiDataGapMemoDraftGenerator.js";
 import {
+  createProductionCaseForSupportDraftGenerator,
+  __caseForSupportDraftGeneratorContract,
+} from "../Backend/kai/services/kaiCaseForSupportDraftGenerator.js";
+import {
   __generatedContentRepositoryTestables,
 } from "../Backend/kai/dictionary/postgresGeneratedContentRepository.js";
 
@@ -175,6 +179,19 @@ const GENERATORS = [
     // absent here.
     invalidInput: () => ({ contentType: "data_gap_memo", requestedAudience: "internal", claims: [GOOD_CLAIM] }),
   },
+  {
+    name: "case_for_support",
+    factory: createProductionCaseForSupportDraftGenerator,
+    contract: __caseForSupportDraftGeneratorContract,
+    schemaKey: "CASE_FOR_SUPPORT_OUTPUT_SCHEMA",
+    validInput: () => ({ contentType: "case_for_support", requestedAudience: "internal", claims: [GOOD_CLAIM] }),
+    // Content-specific: like evidence_summary, case_for_support's own
+    // ALLOWED_REQUESTED_AUDIENCES set accepts only "internal"/"funder" -
+    // "public" is deliberately out of scope for this generator (see
+    // kaiCaseForSupportDraftGenerator.js and the P13-EXT-1 decision to
+    // reject public at the service-level input validator).
+    invalidInput: () => ({ contentType: "case_for_support", requestedAudience: "public", claims: [GOOD_CLAIM] }),
+  },
 ];
 
 for (const gen of GENERATORS) {
@@ -277,9 +294,9 @@ for (const gen of GENERATORS) {
   });
 }
 
-test("horizontal conformance: all four production generator factories were exercised", () => {
+test("horizontal conformance: all five production generator factories were exercised", () => {
   assert.deepEqual(
     GENERATORS.map((gen) => gen.name),
-    ["evidence_summary", "impact_narrative", "readiness_assessment", "data_gap_memo"],
+    ["evidence_summary", "impact_narrative", "readiness_assessment", "data_gap_memo", "case_for_support"],
   );
 });

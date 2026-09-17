@@ -20,6 +20,7 @@ const ALLOWED_GENERATED_CONTENT_TYPES = new Set([
   "impact_narrative",
   "readiness_assessment",
   "data_gap_memo",
+  "case_for_support",
 ]);
 
 function stageBlocker(validatorKey, blockingReason) {

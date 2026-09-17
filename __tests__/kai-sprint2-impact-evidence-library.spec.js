@@ -1438,6 +1438,8 @@ test("Impact Evidence Library data-gap-memo successful generation rehydrates aut
   assert.equal(state.getJsonCalls[0].path, generatedDraftReviewPacketPath(organizationId, draftId));
   assert.equal(state.generatedDraftPacket.contentType, "data_gap_memo");
   assert.equal(generatedDraftContentTypeLabel(state.generatedDraftPacket.contentType, state.generatedDraftPacket.requestedAudience), "Data Gap Memo · Internal");
+  assert.equal(generatedDraftContentTypeLabel("case_for_support", "internal"), "Case for Support · Internal");
+  assert.equal(generatedDraftContentTypeLabel("case_for_support", "funder"), "Case for Support · funder");
   assert.equal(state.generatedDraftPacket.blocks[0].text, "A known limitation remains visible.");
   assert.deepEqual(state.generatedDraftPacket.blocks[0].citations[0].blockerCodes, ["coverage_dimension_unresolved"]);
   assert.deepEqual(state.generatedDraftPacket.blocks[0].citations[0].affectedDimensionKeys, ["timeliness"]);

@@ -2092,6 +2092,7 @@ export function generatedDraftContentTypeLabel(contentType, requestedAudience) {
   if (contentType === "impact_narrative") return `Impact Narrative · ${audienceLabel}`;
   if (contentType === "readiness_assessment") return `Readiness Assessment · ${audienceLabel}`;
   if (contentType === "data_gap_memo") return `Data Gap Memo · ${audienceLabel}`;
+  if (contentType === "case_for_support") return `Case for Support · ${audienceLabel}`;
   return `${contentType || "Generated draft"} · ${audienceLabel}`;
 }
 
