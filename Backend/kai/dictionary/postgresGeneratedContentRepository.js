@@ -36,6 +36,14 @@ const RESULT_STATUS = Object.freeze({
   // Never used for internal generation (Package 14-05 preserves internal
   // admission regardless of current audience/use eligibility).
   funder_use_not_currently_eligible: 422,
+  // Phase-13 governance repair: distinct, structured failure for ANY
+  // requested audience/content type - a freshly evaluated claim whose
+  // authoritative claim_strength is the terminal "reviewed_not_supported"
+  // outcome (claimStrengthForOutcome, humanReviewDecisionContract.js). Unlike
+  // funder_use_not_currently_eligible above, this fires for INTERNAL
+  // generation too: a terminal rejection is never merely a downstream
+  // eligibility fact the way an unresolved/unassessed claim is.
+  claim_reviewed_not_supported: 422,
 });
 
 const CONTENT_TYPE = "evidence_summary";
@@ -93,6 +101,18 @@ const SHA256_LOWER_PATTERN = /^[0-9a-f]{64}$/;
 const TRACEABILITY_RESULT_CONTRACT_VALIDATOR_KEY = "VAL-GEN-TRACE-P0-001";
 const GENERATOR_RESULT_CONTRACT_VALIDATOR_KEY = "VAL-GEN-RESULT-P0-001";
 const PERSISTENCE_VALIDATION_VALIDATOR_KEY = "VAL-GEN-PERSIST-P0-001";
+// Phase-13 governance repair: the earliest shared generated-content
+// admission boundary at which every current content type's claims are
+// already freshly traceability-revalidated (see traceabilityResults in
+// createGeneratedContentDraft below). claim.claim_strength is already
+// present on that result with no projection change needed - it is the one
+// authoritative field that distinguishes an unresolved/unassessed claim
+// from a terminally rejected ("reviewed_not_supported") one; blockerCodes/
+// eligible collapse both into the same signal
+// (postgresClaimTraceabilityRepository.js line 770) and must not be used to
+// detect this instead.
+const CLAIM_STRENGTH_VALIDATOR_KEY = "VAL-GEN-CLAIM-STRENGTH-P0-001";
+const TERMINAL_REJECTED_CLAIM_STRENGTH = "reviewed_not_supported";
 
 // P14-09-FUND-GEN-RESULT-001: closed, metadata-only subreason vocabulary for
 // the single VAL-GEN-RESULT-P0-001 / generator_result_contract_invalid
@@ -1227,6 +1247,22 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
           );
         }
         traceabilityResults.push(result.data);
+      }
+
+      // Phase-13 governance repair: a terminal "reviewed_not_supported"
+      // claim_strength must fail BEFORE the generator is ever invoked, for
+      // every requested audience and content type - preventing a terminally
+      // rejected claim from reaching the generator, rather than generating
+      // text and rejecting it only afterward. This is strictly narrower than
+      // (and must not be conflated with) the merely unresolved/unassessed
+      // `eligible=false` case Package 14-05 still admits for INTERNAL above.
+      for (const traceability of traceabilityResults) {
+        if (traceability.claim?.claim_strength === TERMINAL_REJECTED_CLAIM_STRENGTH) {
+          rollbackFailure(
+            "claim_reviewed_not_supported",
+            stageBlocker(CLAIM_STRENGTH_VALIDATOR_KEY, "claim_terminally_not_supported"),
+          );
+        }
       }
 
       // Authority-source repair: derive generation-time funder audience
@@ -3329,6 +3365,8 @@ export const __generatedContentRepositoryTestables = Object.freeze({
   TRACEABILITY_RESULT_CONTRACT_VALIDATOR_KEY,
   GENERATOR_RESULT_CONTRACT_VALIDATOR_KEY,
   PERSISTENCE_VALIDATION_VALIDATOR_KEY,
+  CLAIM_STRENGTH_VALIDATOR_KEY,
+  TERMINAL_REJECTED_CLAIM_STRENGTH,
   classifyGeneratorResult,
   GENERATOR_RESULT_REASONS,
   GENERATOR_RESULT_REASON,

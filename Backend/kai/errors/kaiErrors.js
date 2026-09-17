@@ -31,6 +31,7 @@ export const KAI_ERROR_STATUS = Object.freeze({
   membership_state_conflict: 409,
   engagement_requirement_applicability_not_confirmed: 422,
   funder_use_not_currently_eligible: 422,
+  claim_reviewed_not_supported: 422,
 });
 
 export const KAI_ERROR_MESSAGES = Object.freeze({
@@ -66,6 +67,7 @@ export const KAI_ERROR_MESSAGES = Object.freeze({
   membership_state_conflict: "More than one stored client-role row exists for this user in this organization; resolve the conflict before mutating.",
   engagement_requirement_applicability_not_confirmed: "This requirement's requirement set does not have current, reviewed, effective-applicable Package 2B applicability for this engagement against its current approved target.",
   funder_use_not_currently_eligible: "One or more requested claims is not currently funder-eligible.",
+  claim_reviewed_not_supported: "One or more requested claims has a terminal reviewed_not_supported claim strength and cannot be used for generation.",
 });
 
 export function buildKaiError(code, overrides = {}) {

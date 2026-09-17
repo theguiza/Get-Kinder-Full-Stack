@@ -37,15 +37,30 @@
 //   1. eligible/current governed input succeeds
 //        -> VAL-GEN-001..007 all "pass" (validateGeneratedContentDraft)
 //   2. ineligible/blocked claim cannot become an accepted assertion
-//        -> evidence_summary (funder only): repository pre-generation gate,
-//           error code "funder_use_not_currently_eligible"
-//           (postgresGeneratedContentRepository.js ~L1256-1261)
+//        -> ALL FOUR TYPES, any requested audience: a claim whose
+//           authoritative claim_strength is the TERMINAL
+//           "reviewed_not_supported" outcome is rejected before the
+//           generator is ever invoked - repository pre-generation gate,
+//           error code "claim_reviewed_not_supported"
+//           (postgresGeneratedContentRepository.js, immediately after the
+//           traceabilityResults loop in createGeneratedContentDraft; Phase-13
+//           repair). This is distinct from, and narrower than, the merely
+//           UNRESOLVED/UNASSESSED `eligible=false` case below, which INTERNAL
+//           generation still admits unchanged.
+//        -> evidence_summary (funder only): additionally, repository
+//           pre-generation gate, error code
+//           "funder_use_not_currently_eligible"
+//           (postgresGeneratedContentRepository.js ~L1256-1261) - a broader,
+//           audience-scoped current-use-eligibility gate that subsumes the
+//           terminal case above for funder requests specifically
 //        -> readiness_assessment: VAL-GEN-006,
 //           "readiness_gap_or_blocker_stated_as_positive_assertion"
 //        -> data_gap_memo: VAL-GEN-007,
 //           "data_gap_or_missing_support_stated_as_positive_support"
-//        -> impact_narrative: NO distinct validator exists (documented
-//           type-specific variance below, not a divergence)
+//        -> impact_narrative: no VAL-GEN-006/007-equivalent PURE VALIDATOR
+//           exists (documented type-specific variance below, not a
+//           divergence) - but the repository-layer terminal gate above
+//           still applies to it, like every other type
 //   3. citations resolve only to governed claim/evidence identities
 //        -> VAL-GEN-002 "missing_or_unresolved_exact_citation" and
 //           VAL-GEN-003 "unauthorized_claim_reference" (all 4 types,
@@ -372,17 +387,30 @@ test("[data_gap_memo] predicate 2 - the authoritative current gap set cannot be 
 // that must NOT by itself block INTERNAL generation. This is NOT a
 // governance divergence: it is the documented, load-bearing design that lets
 // an internal, human-review-gated draft legitimately surface a currently
-// ineligible/limited claim (predicate 9's human-review gate is the intended
-// backstop for these two types, not a VAL-GEN blocker).
+// unresolved/unassessed claim (predicate 9's human-review gate is the
+// intended backstop for these two types, not a VAL-GEN blocker).
 //
-// Disambiguation (Phase-13 reconciliation): `currentEligible: false` /
-// `limitationCodes` is the downstream current-use/traceability state
-// (unresolved claim or evidence review, an unassessed OR formally
-// not-supported claim/evidence strength, an unresolved coverage dimension,
-// or an unresolved client follow-up - postgresClaimTraceabilityRepository.js
-// lines 749-793 collapse all of these, including a terminal
-// "reviewed_not_supported" strength decision, into the same
-// eligible:false/blockerCodes signal). This is a DIFFERENT concept from
+// Disambiguation (Phase-13 reconciliation): `validateGeneratedContentDraft`
+// itself has NO visibility into WHY `currentEligible` is false - it only
+// ever sees the opaque boolean plus a `limitationCodes` string array, so at
+// this pure-validator layer an unresolved/unassessed claim and a terminally
+// "reviewed_not_supported" claim are indistinguishable (both collapse into
+// the same `support_strength_unassessed` blocker code -
+// postgresClaimTraceabilityRepository.js line 770). The test below proves
+// that indistinguishability holds exactly as before at THIS layer.
+//
+// This is no longer the whole governance story, though: the REPOSITORY layer
+// (postgresGeneratedContentRepository.js's createGeneratedContentDraft, the
+// shared admission boundary all four content types pass through before the
+// pure validator ever runs) now reads the one field that DOES distinguish
+// the two cases - the fresh traceability result's authoritative
+// `claim.claim_strength` - and rejects a terminal "reviewed_not_supported"
+// claim (error code "claim_reviewed_not_supported") before generation even
+// starts, for every content type and requested audience. See the repository-
+// level Case A / Case B tests below for that enforcement; this test proves
+// only the pure validator's (unchanged, still-opaque) behavior in isolation.
+//
+// This `currentEligible`/`limitationCodes` concept is also DIFFERENT from
 // both of the following, which remain fully enforced for impact_narrative
 // and are proven elsewhere in this file:
 //   - a genuinely BLOCKED claim reference, i.e. one outside the governed
@@ -397,26 +425,15 @@ test("[data_gap_memo] predicate 2 - the authoritative current gap set cannot be 
 //     predicate 7 below).
 // A claim already excluded by either of those two controls never reaches
 // this test's fixture at all - it never becomes part of `generationClaims`.
-// The `currentEligible: false` fixture below therefore does not represent
-// an authoritative "blocked" or "audience-unauthorized" claim; it represents
-// an authorized, audience-eligible, governed claim whose separate
-// current-use/traceability state (however it arose, including a formally
-// rejected support assessment) is preserved and surfaced to the reviewer
-// via `limitationCodes`/`currentEligible` on the persisted citation, with
-// human review as the required gate before any export/final use.
-test("[impact_narrative] predicate 2 - documented variance: an authorized, audience-eligible governed claim whose current-use/traceability state is ineligible (including a formally not-supported assessment) does NOT by itself block INTERNAL generation (no VAL-GEN-006/007-equivalent exists for this type; human review is the backstop, not a substitute generation-time gate)", () => {
+test("[impact_narrative] predicate 2 - documented variance: the PURE VALIDATOR (validateGeneratedContentDraft) has no visibility into an opaque currentEligible:false/limitationCodes signal and does not, by itself, block INTERNAL generation on it (no VAL-GEN-006/007-equivalent exists for this type at this layer; the repository-layer terminal-claim-strength gate proven below is the real enforcement point for a formally rejected claim)", () => {
   const result = validateGeneratedContentDraft(validArgs("impact_narrative", {
     generationClaims: [governedClaim({ limitationCodes: ["evidence_gap_unresolved"], currentEligible: false })],
   }));
   assert.equal(result.ok, true, JSON.stringify(result.blockers));
 
-  // The same governance holds regardless of WHY current-use eligibility is
-  // false: the validator has no visibility into cause (it only ever sees
-  // the boolean + an opaque limitationCodes string array), so a formally
-  // rejected ("reviewed_not_supported") claim's traceability collapses into
-  // the identical signal (postgresClaimTraceabilityRepository.js line 770's
-  // "support_strength_unassessed" blocker fires for both an unassessed AND
-  // a terminal not-supported strength) and is governed identically.
+  // Even a `limitationCodes` string that names the terminal blocker code
+  // does not, by itself, change this pure-validator outcome: it only ever
+  // sees an opaque string array, never claim_strength itself.
   const rejectedResult = validateGeneratedContentDraft(validArgs("impact_narrative", {
     generationClaims: [governedClaim({ limitationCodes: ["support_strength_unassessed"], currentEligible: false })],
   }));
@@ -444,6 +461,91 @@ test("[evidence_summary] predicate 2 - a currently-ineligible governed claim req
   assert.equal(state.generationRuns.length, 0);
   assert.equal(state.generatedContentDrafts.length, 0);
 });
+
+// ---------------------------------------------------------------------
+// Predicate 2 (Phase-13 repair): the repository-layer terminal-claim-
+// strength gate, driven through the real createGeneratedContentDraft
+// admission boundary shared by all four content types.
+//
+// CASE A - unresolved/unassessed INTERNAL claim: existing accepted INTERNAL
+// drafting behavior is unchanged for a claim that is governed,
+// audience-authorized, and merely unresolved/unassessed (claim_strength
+// "unassessed", eligible:false). This must NOT become a blanket
+// currentEligible===false rejection.
+// ---------------------------------------------------------------------
+
+for (const contentType of CONTENT_TYPES) {
+  test(`[${contentType}] predicate 2 Case A - an unresolved/unassessed governed claim (claim_strength "unassessed", eligible:false) still succeeds for INTERNAL generation (accepted behavior preserved)`, async () => {
+    const state = makeState();
+    const evaluator = makeEvaluator({ eligibleForClaim: () => false, claimStrengthForClaim: () => "unassessed" });
+    const repository = makeRepository(state, evaluator);
+    const methodName = REPOSITORY_METHOD_BY_CONTENT_TYPE[contentType];
+
+    const result = await repository[methodName]({
+      organizationId: ORG,
+      engagementId: ENGAGEMENT,
+      requestedAudience: "internal",
+      claimIds: [CLAIM],
+      idempotencyKey: `phase13-governance-case-a-unresolved-${contentType}`,
+      actorContext: { actorType: "human", actorUserId: "90000000-0000-4000-8000-000000000001" },
+      now: "2026-09-01T00:00:00.000Z",
+    }, {
+      draftGenerator: goodGenerator(),
+      metadataOnlyAudit: auditRecorder(),
+      ...creationDependenciesFor(contentType),
+    });
+
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.data.draftStatus, "draft");
+  });
+}
+
+// ---------------------------------------------------------------------
+// Predicate 2 (Phase-13 repair), CASE B - terminally rejected claim: for
+// every current content type, a claim whose fresh, authoritative
+// claim_strength is the TERMINAL "reviewed_not_supported" outcome
+// (claimStrengthForOutcome, humanReviewDecisionContract.js) cannot become an
+// accepted generated assertion. The repository rejects it (error code
+// "claim_reviewed_not_supported", carrying a
+// VAL-GEN-CLAIM-STRENGTH-P0-001/"claim_terminally_not_supported" structured
+// blocker) BEFORE the generator is ever invoked, and before any durable
+// state is written - for every content type identically, unlike predicate 2
+// (readiness_assessment/data_gap_memo)'s content-type-specific VAL-GEN-006/
+// 007 heuristics.
+// ---------------------------------------------------------------------
+
+for (const contentType of CONTENT_TYPES) {
+  test(`[${contentType}] predicate 2 Case B - a claim with terminal claim_strength "reviewed_not_supported" cannot become an accepted generated assertion (repository pre-generation gate, claim_reviewed_not_supported)`, async () => {
+    const state = makeState();
+    const evaluator = makeEvaluator({ claimStrengthForClaim: () => "reviewed_not_supported" });
+    const repository = makeRepository(state, evaluator);
+    const methodName = REPOSITORY_METHOD_BY_CONTENT_TYPE[contentType];
+
+    const result = await repository[methodName]({
+      organizationId: ORG,
+      engagementId: ENGAGEMENT,
+      requestedAudience: "internal",
+      claimIds: [CLAIM],
+      idempotencyKey: `phase13-governance-case-b-terminal-rejected-${contentType}`,
+      actorContext: { actorType: "human", actorUserId: "90000000-0000-4000-8000-000000000001" },
+      now: "2026-09-01T00:00:00.000Z",
+    }, {
+      draftGenerator: async () => { throw new Error("draftGenerator must not be reached: a terminally rejected claim must never reach the generator"); },
+      metadataOnlyAudit: auditRecorder(),
+      ...creationDependenciesFor(contentType),
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "claim_reviewed_not_supported");
+    assert.ok(
+      result.blockers.some((b) => b.blocking_reason === "claim_terminally_not_supported" && b.validator_key === "VAL-GEN-CLAIM-STRENGTH-P0-001"),
+      JSON.stringify(result.blockers),
+    );
+    // Fail-closed before any durable state is written.
+    assert.equal(state.generationRuns.length, 0);
+    assert.equal(state.generatedContentDrafts.length, 0);
+  });
+}
 
 // ---------------------------------------------------------------------
 // Predicate 4 (type-specific): required limitation handling remains
@@ -715,11 +817,11 @@ function withFakeTransaction(state) {
   };
 }
 
-function makeEvaluator({ eligibleForClaim = () => true } = {}) {
+function makeEvaluator({ eligibleForClaim = () => true, claimStrengthForClaim = () => "reviewed_supported" } = {}) {
   return async (tx, { claimId, requestedAudience }) => ({
     ok: true,
     data: {
-      claim: { claim_id: claimId },
+      claim: { claim_id: claimId, claim_strength: claimStrengthForClaim(claimId) },
       evidence: { evidence_item_id: EVIDENCE },
       requestedAudience,
       eligible: eligibleForClaim(claimId),

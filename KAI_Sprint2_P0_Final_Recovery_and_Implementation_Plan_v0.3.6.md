@@ -29774,3 +29774,98 @@ every Node command; no external provider call, database, or cloud access):**
 production code changed. No push, deployment, production mutation,
 feature-flag change, secret handling, real-client-data access, or
 `00_KAI_CURRENT_STATE.md` update performed.
+
+## Phase-13 governance repair: terminal `reviewed_not_supported` claim_strength gate at generated-content admission (2026-09-17)
+
+**Goal:** repair the one bounded gap the prior reconciliation package above
+correctly identified but, per its own explicit scope, did not close: a
+governed claim whose CURRENT authoritative `claim_strength` is the TERMINAL
+`reviewed_not_supported` outcome (`claimStrengthForOutcome`,
+`humanReviewDecisionContract.js`) could still reach INTERNAL generation for
+`evidence_summary` and `impact_narrative` (no VAL-GEN-006/007-equivalent
+exists for either type), because `eligible=false`/`blockerCodes` collapse a
+terminal rejection and a merely unresolved/unassessed claim into the same
+signal (`postgresClaimTraceabilityRepository.js` line 770's
+`support_strength_unassessed` blocker). The owner's controlling requirement
+for this package: a terminal `reviewed_not_supported` claim must never
+become an accepted generated assertion, for any content type or requested
+audience, while an unresolved/unassessed claim's existing accepted INTERNAL
+admission must remain unchanged.
+
+**Authoritative distinguishing field:** `claim.claim_strength` itself
+(`unassessed` vs. `reviewed_not_supported`, both terminal-decision
+projections written by `claimStrengthForOutcome`,
+`Backend/kai/dictionary/humanReviewDecisionContract.js`) - not
+`eligible`/`blockerCodes`, which are the same for both. This field is
+already returned, with no projection/schema change, on every fresh
+traceability result (`traceability.claim.claim_strength`,
+`Backend/kai/dictionary/postgresClaimTraceabilityRepository.js` line 803)
+computed by the `traceabilityResults` loop inside
+`createGeneratedContentDraft` - the one shared generated-content admission
+boundary already used by all four current content types
+(`evidence_summary`, `impact_narrative`, `readiness_assessment`,
+`data_gap_memo`), before `loadGenerationProjection` or the generator is ever
+invoked.
+
+**Repair (`Backend/kai/dictionary/postgresGeneratedContentRepository.js`):**
+immediately after that `traceabilityResults` loop, a new check rejects the
+whole generation request (`rollbackFailure`, so nothing is persisted and the
+generator is never called) if any traceability result's
+`claim.claim_strength === "reviewed_not_supported"`, for every requested
+audience and content type. New top-level result/error code
+`claim_reviewed_not_supported` (added to `RESULT_STATUS` in the same file
+and to `KAI_ERROR_STATUS`/`KAI_ERROR_MESSAGES` in
+`Backend/kai/errors/kaiErrors.js`, mirroring the existing
+`funder_use_not_currently_eligible` pattern), carrying a structured
+`stageBlocker` diagnostic under a new validator key
+`VAL-GEN-CLAIM-STRENGTH-P0-001` / reason `claim_terminally_not_supported`
+(no existing reason code captured this terminal-specific distinction; the
+closest existing one, `support_strength_unassessed`, is exactly the
+overloaded signal this repair must NOT reuse). The merely
+unresolved/unassessed `eligible=false` INTERNAL admission path (Package
+14-05) is untouched: the new check reads only `claim_strength`, never
+`eligible`.
+
+**Test evidence (`DATABASE_URL=postgres://localhost:1/nonexistent_sentinel_db`
+set for every Node command; no external provider call, database, or cloud
+access):**
+- `node --test __tests__/kai-sprint2-phase13-governance-horizontal-conformance.spec.js`
+  -> 46/46 PASS. Adds, per content type: Case A (claim_strength
+  `unassessed`, `eligible:false` still succeeds for INTERNAL - accepted
+  behavior preserved) and Case B (claim_strength `reviewed_not_supported`
+  fails closed with `claim_reviewed_not_supported`, generator never
+  invoked, no durable state written). Also corrects the prior package's
+  impact_narrative "documented variance" test/comment to state precisely
+  what remains true (the PURE VALIDATOR `validateGeneratedContentDraft`
+  still has no visibility into `currentEligible`'s cause) versus what this
+  repair changes (the REPOSITORY layer now enforces the terminal case
+  separately, before the validator ever runs).
+- `node --test __tests__/kai-sprint2-generator-result-contract-horizontal-conformance.spec.js
+  __tests__/kai-sprint2-p2-12-human-review-decision-ledger-boundary.spec.js
+  __tests__/kai-sprint2-p2-06-claim-traceability-boundary.spec.js
+  __tests__/kai-claim-traceability-validator-contract-repair.spec.js
+  __tests__/kai-sprint2-p13-01-impact-narrative-boundary.spec.js
+  __tests__/kai-sprint2-p14-09-generated-content-validation-blocker-diagnostic-propagation.spec.js
+  __tests__/kai-sprint2-p3-01-generated-content-drafts-boundary.spec.js
+  __tests__/kai-sprint2-p14-09-funder-evidence-summary-boundary.spec.js
+  __tests__/kai-sprint2-p14-09-assembled-funder-packet-membership-proof.spec.js`
+  -> 102/102 PASS (unaffected).
+- `node --test __tests__/kai-sprint2-p3-04-generated-content-review-completion-boundary.spec.js
+  __tests__/kai-sprint2-p14-09-fund-gen-result-001-subreason-classification.spec.js
+  __tests__/kai-sprint2-p14-09-evidence-summary-structured-output.spec.js
+  __tests__/kai-sprint2-p13-01-impact-narrative-structured-output.spec.js`
+  -> 68/68 PASS (unaffected).
+- Broader regression sweep: every non-integration spec importing
+  `postgresGeneratedContentRepository.js` or `kaiErrors.js` (49 files) ->
+  743/750 PASS; the 7 failures (`kai-sprint2-batch-files-route.spec.js`,
+  `kai-sprint2-file-detail-route.spec.js`) are confirmed pre-existing on the
+  unmodified `60499d8` base commit (reproduced via `git stash`) and are
+  unrelated to this repair.
+- `git diff --check` -> PASS (no whitespace errors). Complete diff
+  inspected: `Backend/kai/dictionary/postgresGeneratedContentRepository.js`,
+  `Backend/kai/errors/kaiErrors.js`, and the one governance test file
+  changed. No schema, migration, or unrelated content-type file touched.
+
+**Status:** TERMINAL_REJECTED_CLAIM_GENERATION_BLOCK_REPAIRED. No push,
+deployment, production mutation, feature-flag change, secret handling,
+real-client-data access, or `00_KAI_CURRENT_STATE.md` update performed.
