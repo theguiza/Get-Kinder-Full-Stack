@@ -327,6 +327,7 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // creation using the authoritative organization evidence-gap read and
     // server-resolved governed citations. It accepts no caller gap rows,
     // evidence ids, currentness, or citation authority.
+    "/admin/organizations/:organizationId/generated-content-drafts/board-update",
     "/admin/organizations/:organizationId/generated-content-drafts/case-for-support",
     "/admin/organizations/:organizationId/generated-content-drafts/data-gap-memo",
     "/admin/organizations/:organizationId/generated-content-drafts/evidence-summary",
@@ -433,7 +434,11 @@ test("admin batch list route delegates sanitized query scope with no direct data
     const routeSource = readFileSync("Backend/kai/routes/sprint2IntakeApi.js", "utf8");
     assert.doesNotMatch(routeSource, /from ["']\.\.\/db\//);
     assert.doesNotMatch(routeSource, /\b(?:pool|db)\.query\s*\(/);
-    assert.doesNotMatch(routeSource, /\b(?:SELECT|INSERT|UPDATE|DELETE)\b/i);
+    // Negative lookbehind for a preceding hyphen so this still catches a
+    // real inline SQL statement while not false-positiving on the
+    // P13-EXT-2 board-update route path's own kebab-case name (the word
+    // "update" in "generated-content-drafts/board-update" is not SQL).
+    assert.doesNotMatch(routeSource, /(?<!-)\b(?:SELECT|INSERT|UPDATE|DELETE)\b/i);
   } finally {
     restore();
   }

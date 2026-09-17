@@ -58,6 +58,18 @@ const DATA_GAP_MEMO_CONTENT_TYPE = "data_gap_memo";
 // exactly as before, and this content type is not part of either composite
 // export.
 const CASE_FOR_SUPPORT_CONTENT_TYPE = "case_for_support";
+// P13-EXT-2: standalone evidence-backed internal board/reporting draft.
+// Joins the generic generated-content admission/review lifecycle exactly
+// like the other content types, and (like impact_narrative,
+// readiness_assessment, and data_gap_memo) is generation-time restricted to
+// "internal" only at createGeneratedContentDraft's internal-only-types
+// array below. It is deliberately NEVER added to PACKET_MEMBER_CONTENT_TYPES
+// or BOARD_REPORTING_PACKET_MEMBER_CONTENT_TYPES below - Grant Response
+// Packet and Board Reporting (the packet/composition capability) membership
+// are scoped exactly as before, and this content type is not part of either
+// composite export. It is a distinct, standalone draft type from Board
+// Reporting.
+const BOARD_UPDATE_CONTENT_TYPE = "board_update";
 const PACKET_MEMBER_CONTENT_TYPES = new Set([CONTENT_TYPE, IMPACT_NARRATIVE_CONTENT_TYPE]);
 const BOARD_REPORTING_PACKET_MEMBER_CONTENT_TYPES = new Set([CONTENT_TYPE, IMPACT_NARRATIVE_CONTENT_TYPE]);
 const ALLOWED_GENERATED_CONTENT_TYPES = new Set([
@@ -66,6 +78,7 @@ const ALLOWED_GENERATED_CONTENT_TYPES = new Set([
   READINESS_ASSESSMENT_CONTENT_TYPE,
   DATA_GAP_MEMO_CONTENT_TYPE,
   CASE_FOR_SUPPORT_CONTENT_TYPE,
+  BOARD_UPDATE_CONTENT_TYPE,
 ]);
 const DRAFT_STATUS = "draft";
 const REVIEW_STATUS = GENERATED_CONTENT_REVIEW_QUEUE_CONTRACT.reviewStatus;
@@ -297,6 +310,10 @@ export function fingerprintDataGapMemoRequest({ requestedAudience, claimIds, eng
 
 export function fingerprintCaseForSupportRequest({ requestedAudience, claimIds, engagementId }) {
   return fingerprintGeneratedContentRequest(CASE_FOR_SUPPORT_CONTENT_TYPE, { requestedAudience, claimIds, engagementId });
+}
+
+export function fingerprintBoardUpdateRequest({ requestedAudience, claimIds, engagementId }) {
+  return fingerprintGeneratedContentRequest(BOARD_UPDATE_CONTENT_TYPE, { requestedAudience, claimIds, engagementId });
 }
 
 function hasExactKeys(value, allowed) {
@@ -1223,7 +1240,7 @@ function toResult(state, replayed = false) {
 async function createGeneratedContentDraft(contentType, fingerprintRequest, input, dependencies, { runInTransaction, evaluator, afterPersist }) {
   if (!validateInput(input)) return failure("validation_blocker");
   if (
-    [IMPACT_NARRATIVE_CONTENT_TYPE, READINESS_ASSESSMENT_CONTENT_TYPE, DATA_GAP_MEMO_CONTENT_TYPE].includes(contentType)
+    [IMPACT_NARRATIVE_CONTENT_TYPE, READINESS_ASSESSMENT_CONTENT_TYPE, DATA_GAP_MEMO_CONTENT_TYPE, BOARD_UPDATE_CONTENT_TYPE].includes(contentType)
     && input.requestedAudience !== "internal"
   ) return failure("validation_blocker");
   if (
@@ -2711,6 +2728,15 @@ export function createPostgresGeneratedContentRepository({
         { runInTransaction, evaluator, afterPersist },
       );
     },
+    async createBoardUpdateDraft(input, dependencies = {}) {
+      return createGeneratedContentDraft(
+        BOARD_UPDATE_CONTENT_TYPE,
+        fingerprintBoardUpdateRequest,
+        input,
+        dependencies,
+        { runInTransaction, evaluator, afterPersist },
+      );
+    },
     async startGeneratedContentReview(input, dependencies = {}) {
       if (!validateCompleteReviewInput(input)) return failure("validation_blocker");
       if (!dependencies.metadataOnlyAudit) return failure("validation_blocker");
@@ -3331,6 +3357,7 @@ export const __generatedContentRepositoryContract = Object.freeze({
   READINESS_ASSESSMENT_CONTENT_TYPE,
   DATA_GAP_MEMO_CONTENT_TYPE,
   CASE_FOR_SUPPORT_CONTENT_TYPE,
+  BOARD_UPDATE_CONTENT_TYPE,
   PACKET_MEMBER_CONTENT_TYPES,
   ALLOWED_GENERATED_CONTENT_TYPES,
   DRAFT_STATUS,
@@ -3386,6 +3413,7 @@ export const __generatedContentRepositoryTestables = Object.freeze({
   fingerprintReadinessAssessmentRequest,
   fingerprintDataGapMemoRequest,
   fingerprintCaseForSupportRequest,
+  fingerprintBoardUpdateRequest,
   prepareRequiredAudit,
   validateRequestExportReviewInput,
   validateExportReviewRequestStateInput,

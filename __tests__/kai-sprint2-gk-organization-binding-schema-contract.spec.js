@@ -60,9 +60,13 @@ test("no KAI Sprint 2 route file contains direct SQL for the organization bindin
   assert.ok(routeFiles.length > 0);
   for (const fileName of routeFiles) {
     const source = readFileSync(`Backend/kai/routes/${fileName}`, "utf8");
+    // Negative lookbehind for a preceding hyphen so this still catches a
+    // real inline SQL statement while not false-positiving on the
+    // P13-EXT-2 board-update route path's own kebab-case name (the word
+    // "update" in "generated-content-drafts/board-update" is not SQL).
     assert.doesNotMatch(
       source,
-      /\b(?:SELECT|INSERT INTO|UPDATE|DELETE FROM)\b/i,
+      /(?<!-)\b(?:SELECT|INSERT INTO|UPDATE|DELETE FROM)\b/i,
       `${fileName} must not contain direct SQL`,
     );
     assert.doesNotMatch(source, /gk_organization_bindings/, `${fileName} must not reference the binding table directly`);

@@ -56,6 +56,10 @@ import {
   __caseForSupportDraftGeneratorContract,
 } from "../Backend/kai/services/kaiCaseForSupportDraftGenerator.js";
 import {
+  createProductionBoardUpdateDraftGenerator,
+  __boardUpdateDraftGeneratorContract,
+} from "../Backend/kai/services/kaiBoardUpdateDraftGenerator.js";
+import {
   __generatedContentRepositoryTestables,
 } from "../Backend/kai/dictionary/postgresGeneratedContentRepository.js";
 
@@ -192,6 +196,20 @@ const GENERATORS = [
     // reject public at the service-level input validator).
     invalidInput: () => ({ contentType: "case_for_support", requestedAudience: "public", claims: [GOOD_CLAIM] }),
   },
+  {
+    name: "board_update",
+    factory: createProductionBoardUpdateDraftGenerator,
+    contract: __boardUpdateDraftGeneratorContract,
+    schemaKey: "BOARD_UPDATE_OUTPUT_SCHEMA",
+    validInput: () => ({ contentType: "board_update", requestedAudience: "internal", claims: [GOOD_CLAIM] }),
+    // Content-specific: like impact_narrative/readiness_assessment/
+    // data_gap_memo, board_update's own ALLOWED_REQUESTED_AUDIENCES set
+    // accepts only "internal" - "funder" is deliberately out of scope for
+    // this generator (see kaiBoardUpdateDraftGenerator.js and the P13-EXT-2
+    // decision to reject funder/public at the service-level input
+    // validator).
+    invalidInput: () => ({ contentType: "board_update", requestedAudience: "funder", claims: [GOOD_CLAIM] }),
+  },
 ];
 
 for (const gen of GENERATORS) {
@@ -294,9 +312,9 @@ for (const gen of GENERATORS) {
   });
 }
 
-test("horizontal conformance: all five production generator factories were exercised", () => {
+test("horizontal conformance: all six production generator factories were exercised", () => {
   assert.deepEqual(
     GENERATORS.map((gen) => gen.name),
-    ["evidence_summary", "impact_narrative", "readiness_assessment", "data_gap_memo", "case_for_support"],
+    ["evidence_summary", "impact_narrative", "readiness_assessment", "data_gap_memo", "case_for_support", "board_update"],
   );
 });

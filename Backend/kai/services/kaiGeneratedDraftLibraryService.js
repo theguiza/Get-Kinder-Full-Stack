@@ -23,7 +23,7 @@ const GENERATED_DRAFT_LIBRARY_MAX_LIMIT = 25;
 const UUID_RE = KAI_SPRINT2_P0_PATTERNS.uuid;
 const REVIEW_QUEUE_STATUSES = new Set(["open", "in_progress", "resolved", "blocked"]);
 const REVIEW_STATUSES = new Set(["needs_gk_review", "resolved"]);
-const LIBRARY_CONTENT_TYPES = new Set(["evidence_summary", "impact_narrative", "readiness_assessment", "data_gap_memo", "case_for_support"]);
+const LIBRARY_CONTENT_TYPES = new Set(["evidence_summary", "impact_narrative", "readiness_assessment", "data_gap_memo", "case_for_support", "board_update"]);
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);

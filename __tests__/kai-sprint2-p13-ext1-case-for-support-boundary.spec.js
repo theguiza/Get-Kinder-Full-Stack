@@ -224,7 +224,11 @@ test("P13-EXT-1 HTTP route source delegates only and contains no direct persiste
   const routeSource = readFileSync("Backend/kai/routes/sprint2IntakeApi.js", "utf8");
   const start = routeSource.indexOf('router.post(\n  "/admin/organizations/:organizationId/generated-content-drafts/case-for-support"');
   assert.ok(start >= 0);
-  const end = routeSource.indexOf('router.get(\n  "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/review-packet"', start);
+  // P13-EXT-2's board-update route was inserted directly after this one
+  // (before the review-packet route), so bound this section at the
+  // board-update route's own start rather than review-packet's - keeping
+  // this test scoped to case-for-support's own route only.
+  const end = routeSource.indexOf('router.post(\n  "/admin/organizations/:organizationId/generated-content-drafts/board-update"', start);
   assert.ok(end > start);
   const section = routeSource.slice(start, end);
   assert.match(section, /createCaseForSupportDraft/);

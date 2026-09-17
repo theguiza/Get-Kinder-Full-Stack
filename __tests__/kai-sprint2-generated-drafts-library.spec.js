@@ -414,11 +414,15 @@ test("Generated Drafts library index admits all four canonical generated-content
   }
 
   // An unsupported content type still fails closed as system_error rather
-  // than being silently admitted alongside the four canonical types.
+  // than being silently admitted alongside the canonical types. Uses
+  // grant_response_paragraph (a real but distinct Grant Response Packet
+  // content type, never a member of LIBRARY_CONTENT_TYPES) rather than
+  // board_update, which P13-EXT-2 made a genuine Generated Drafts content
+  // type.
   const deps = {
     env: enabledEnv,
     async listGeneratedDraftLibraryIndex() {
-      return [draftRow({ content_type: "board_update" })];
+      return [draftRow({ content_type: "grant_response_paragraph" })];
     },
   };
   const result = await listGeneratedDraftLibraryIndex(
@@ -437,7 +441,7 @@ test("Generated Drafts read model index includes data_gap_memo in the generic co
       return { rows: [] };
     },
   });
-  assert.match(observed.sql, /AND d\.content_type IN \('evidence_summary', 'impact_narrative', 'readiness_assessment', 'data_gap_memo', 'case_for_support'\)/);
+  assert.match(observed.sql, /AND d\.content_type IN \('evidence_summary', 'impact_narrative', 'readiness_assessment', 'data_gap_memo', 'case_for_support', 'board_update'\)/);
 });
 
 test("Generated Drafts library index reuses e890a8c's export-review role boundary: gk_reviewer never receives identity/state even when a row exists", async () => {
@@ -628,7 +632,7 @@ test("Generated Drafts read model is bounded, organization-scoped, deterministic
     },
   });
   assert.match(observed.sql, /WHERE d\.organization_id = \$1::uuid/);
-  assert.match(observed.sql, /AND d\.content_type IN \('evidence_summary', 'impact_narrative', 'readiness_assessment', 'data_gap_memo', 'case_for_support'\)/);
+  assert.match(observed.sql, /AND d\.content_type IN \('evidence_summary', 'impact_narrative', 'readiness_assessment', 'data_gap_memo', 'case_for_support', 'board_update'\)/);
   assert.match(observed.sql, /AND d\.requested_audience = 'internal'/);
   assert.match(observed.sql, /AND d\.draft_status = 'draft'/);
   assert.match(observed.sql, /AND q\.priority = 'medium'/);
@@ -707,6 +711,7 @@ test("Generated Drafts frontend projection strips unsafe fields and preserves sa
   assert.equal(generatedDraftContentTypeLabel("data_gap_memo", "internal"), "Data Gap Memo · Internal");
   assert.equal(generatedDraftContentTypeLabel("case_for_support", "internal"), "Case for Support · Internal");
   assert.equal(generatedDraftContentTypeLabel("case_for_support", "funder"), "Case for Support · funder");
+  assert.equal(generatedDraftContentTypeLabel("board_update", "internal"), "Board Update · Internal");
   assert.notEqual(generatedDraftLibraryIndexPath(organizationId), generatedDraftReviewPacketPath(organizationId, draftId));
 });
 

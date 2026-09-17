@@ -107,7 +107,7 @@ import { validateExportManifestEligibility } from "../Backend/kai/validators/kai
 import {
   createPostgresGeneratedContentRepository,
 } from "../Backend/kai/dictionary/postgresGeneratedContentRepository.js";
-import { createCaseForSupportDraft } from "../Backend/kai/services/kaiGeneratedContentService.js";
+import { createCaseForSupportDraft, createBoardUpdateDraft } from "../Backend/kai/services/kaiGeneratedContentService.js";
 
 const enabledEnv = Object.freeze({ KAI_SPRINT2_ENABLED: "true", KAI_GENERATION_ENABLED: "true" });
 
@@ -132,6 +132,7 @@ const CONTENT_TYPES = Object.freeze([
   "readiness_assessment",
   "data_gap_memo",
   "case_for_support",
+  "board_update",
 ]);
 
 const READINESS = Object.freeze({
@@ -402,7 +403,7 @@ for (const requestedAudience of ["internal", "funder"]) {
   });
 }
 
-for (const contentType of ["impact_narrative", "readiness_assessment", "data_gap_memo"]) {
+for (const contentType of ["impact_narrative", "readiness_assessment", "data_gap_memo", "board_update"]) {
   test(`[${contentType}] predicate 7c - the real creation service fails closed (validation_blocker) before generation if a non-"internal" audience is requested at all`, async () => {
     const repository = createPostgresGeneratedContentRepository({
       runInTransaction: async () => { throw new Error("runInTransaction must not be reached: this content type must fail closed on requestedAudience before any transaction opens"); },
@@ -412,6 +413,7 @@ for (const contentType of ["impact_narrative", "readiness_assessment", "data_gap
       impact_narrative: "createImpactNarrativeDraft",
       readiness_assessment: "createReadinessAssessmentDraft",
       data_gap_memo: "createDataGapMemoDraft",
+      board_update: "createBoardUpdateDraft",
     }[contentType];
     const result = await repository[methodName]({
       organizationId: ORG,
@@ -426,6 +428,76 @@ for (const contentType of ["impact_narrative", "readiness_assessment", "data_gap
     assert.equal(result.error.code, "validation_blocker");
   });
 }
+
+// ---------------------------------------------------------------------
+// Predicate 7e (board_update-specific, P13-EXT-2): board_update is
+// generation-time restricted to internal only - like impact_narrative/
+// readiness_assessment/data_gap_memo (not case_for_support's broader
+// internal+funder shape), it IS included in createGeneratedContentDraft's
+// internal-only-types array in postgresGeneratedContentRepository.js (see
+// predicate 7c above, which now includes board_update), and it is
+// additionally rejected at the SERVICE-level input validator
+// (isCreateBoardUpdateDraftInput, kaiGeneratedContentService.js) before the
+// repository is ever reached, for both "funder" and "public".
+// ---------------------------------------------------------------------
+
+for (const requestedAudience of ["funder", "public"]) {
+  test(`[board_update] predicate 7e - the service-level input validator rejects requestedAudience "${requestedAudience}" before any repository call`, async () => {
+    const repository = {
+      createBoardUpdateDraft: async () => { throw new Error("createBoardUpdateDraft must not be reached: funder/public must fail closed at the service-level input validator"); },
+    };
+    const result = await createBoardUpdateDraft({
+      organizationId: ORG,
+      engagementId: ENGAGEMENT,
+      requestedAudience,
+      claimIds: [CLAIM],
+      idempotencyKey: `phase13-governance-board-update-audience-gate-${requestedAudience}`,
+      actorContext: { actorType: "human", actorUserId: "90000000-0000-4000-8000-000000000001", source: "public.userdata", organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "gk_admin" }] },
+      now: "2026-09-01T00:00:00.000Z",
+    }, { env: enabledEnv, generatedContentRepository: repository, metadataOnlyAudit: auditRecorder() });
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "validation_blocker");
+  });
+}
+
+test('[board_update] predicate 7e - the service-level input validator accepts requestedAudience "internal" (repository is invoked)', async () => {
+  let repositoryCalls = 0;
+  const repository = {
+    createBoardUpdateDraft: async (repoInput) => {
+      repositoryCalls += 1;
+      return {
+        ok: true,
+        data: {
+          generationRunId: "00000000-0000-4000-8000-000000000801",
+          generatedContentDraftId: "00000000-0000-4000-8000-000000000802",
+          requestedAudience: repoInput.requestedAudience,
+          draftStatus: "draft",
+          reviewStatus: "needs_gk_review",
+          reviewQueueItemId: "00000000-0000-4000-8000-000000000803",
+          blocks: [{ ordinal: 1, text: SAFE_STATEMENT, citations: [{ claimId: CLAIM, evidenceItemId: EVIDENCE }] }],
+          replayed: false,
+        },
+        error: null,
+      };
+    },
+  };
+  const result = await createBoardUpdateDraft({
+    organizationId: ORG,
+    engagementId: ENGAGEMENT,
+    requestedAudience: "internal",
+    claimIds: [CLAIM],
+    idempotencyKey: "phase13-governance-board-update-audience-gate-internal",
+    actorContext: { actorType: "human", actorUserId: "90000000-0000-4000-8000-000000000001", source: "public.userdata", organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "gk_admin" }] },
+    now: "2026-09-01T00:00:00.000Z",
+  }, {
+    env: enabledEnv,
+    generatedContentRepository: repository,
+    metadataOnlyAudit: auditRecorder(),
+    getEngagementForOrganization: async () => ({ engagement_id: ENGAGEMENT, organization_id: ORG }),
+  });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(repositoryCalls, 1);
+});
 
 // ---------------------------------------------------------------------
 // Predicate 2 (type-specific): ineligible or blocked claim input cannot
@@ -669,7 +741,7 @@ test("[readiness_assessment] predicate 4 - claim.limitationCodes feeds VAL-GEN-0
 // produces the exact same validateGeneratedContentDraft outcome as the same
 // claim with limitationCodes: [] for these three content types, proving
 // limitationCodes is not itself a distinct governance signal for them.
-for (const contentType of ["evidence_summary", "impact_narrative", "data_gap_memo", "case_for_support"]) {
+for (const contentType of ["evidence_summary", "impact_narrative", "data_gap_memo", "case_for_support", "board_update"]) {
   test(`[${contentType}] predicate 4 - documented variance: no VAL-GEN branch reads claim.limitationCodes for this type (outcome is identical with and without it)`, () => {
     const withLimitation = validateGeneratedContentDraft(validArgs(contentType, {
       generationClaims: [governedClaim({ limitationCodes: ["evidence_gap_unresolved"] })],
@@ -941,6 +1013,7 @@ const REPOSITORY_METHOD_BY_CONTENT_TYPE = Object.freeze({
   readiness_assessment: "createReadinessAssessmentDraft",
   data_gap_memo: "createDataGapMemoDraft",
   case_for_support: "createCaseForSupportDraft",
+  board_update: "createBoardUpdateDraft",
 });
 
 for (const contentType of CONTENT_TYPES) {
@@ -1008,6 +1081,6 @@ for (const contentType of CONTENT_TYPES) {
   });
 }
 
-test("horizontal Phase-13 governance conformance: all five content types were exercised", () => {
-  assert.deepEqual(CONTENT_TYPES, ["evidence_summary", "impact_narrative", "readiness_assessment", "data_gap_memo", "case_for_support"]);
+test("horizontal Phase-13 governance conformance: all six content types were exercised", () => {
+  assert.deepEqual(CONTENT_TYPES, ["evidence_summary", "impact_narrative", "readiness_assessment", "data_gap_memo", "case_for_support", "board_update"]);
 });
