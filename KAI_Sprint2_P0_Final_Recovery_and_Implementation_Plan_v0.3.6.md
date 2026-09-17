@@ -29517,3 +29517,115 @@ every Node command; no database/cloud/production access):**
 schema/database change required: NO. No push, deployment, production
 mutation, feature-flag change, secret handling, real-client-data access, or
 `00_KAI_CURRENT_STATE.md` update performed.
+
+## Four-Generator Horizontal Generator-Result Contract Conformance Proof (2026-09-17)
+
+**Scope:** test-only. No production generator, classifier, schema, or runtime
+helper was changed or extracted. Starting HEAD was
+`282f1165ea0d31280f4eeac0735e60d641529a45` on `main`; working tree was clean.
+
+**Purpose:** each of the four current generated-draft production generators
+(`kaiEvidenceSummaryDraftGenerator.js`, `kaiImpactNarrativeDraftGenerator.js`,
+`kaiReadinessAssessmentDraftGenerator.js`, `kaiDataGapMemoDraftGenerator.js`)
+already had its own focused structured-output/boundary spec proving the
+provider-call -> structured-output request -> text extraction -> JSON parse
+-> JSON-root validation -> blocks-field validation -> failure-reason
+preservation -> block/citation normalization -> `classifyGeneratorResult`
+contract in isolation. Following the same-class allowlist drift the
+immediately preceding entry found and repaired independently across two
+sibling files, this package adds one horizontal, parameterized conformance
+suite so a future silent drift in any one generator is caught by a single
+shared table instead of depending on whichever per-generator spec happens to
+already cover it.
+
+**New suite:**
+`__tests__/kai-sprint2-generator-result-contract-horizontal-conformance.spec.js`.
+One generator table (name, production factory, exported schema contract, a
+`validInput()` builder using the smallest valid internal input for that
+generator, and one content-appropriate `invalidInput()` builder) is declared
+once and parameterized across 8 shared cases per generator (33 tests total,
+including one closing assertion that all four factories were exercised):
+(1) a valid structured provider response normalizes to the common
+`{ blocks: [{ ordinal, text, citations: [{ claimId, evidenceItemId }] }] }`
+envelope and is accepted by `classifyGeneratorResult`; (2) a content-specific
+invalid input (evidence_summary: unsupported `"public"` audience;
+impact_narrative: unsupported `"funder"` audience; readiness_assessment:
+missing `readiness.requirements`; data_gap_memo: missing `gaps.items`) is
+rejected as `INPUT_CONTRACT_REJECTED` before any provider call; (3) no
+extractable provider text classifies as `PROVIDER_TEXT_MISSING`; (4)
+unparseable provider text classifies as `JSON_PARSE_FAILED`; (5) a
+non-object JSON root classifies as `JSON_ROOT_INVALID`; (6) a missing/
+non-array `blocks` field classifies as `BLOCKS_FIELD_INVALID`; (7) a
+genuinely schema-conformant `{"blocks":[]}` does not fabricate any of the
+four early-loss reasons above and still classifies as the existing
+`BLOCKS_EMPTY` reason; (8) a schema-conformant but non-UUID citation id is
+still rejected downstream as the existing `CITATION_ID_INVALID` reason. Every
+case exercises the real production factory (with only `createMessage`
+injected - no external provider call) and the real
+`__generatedContentRepositoryTestables.classifyGeneratorResult` seam; no
+extract/parse/normalize/classify logic is mocked or reimplemented in the new
+suite. Content-specific behavior is preserved and not flattened: each
+generator's own prompt, `max_tokens`, and required input shape (Evidence
+Summary's funder audience, Readiness Assessment's `readiness.requirements`,
+Data Gap Memo's `gaps.items`) are exercised as-is via each table entry's own
+`validInput`/`invalidInput`, never replaced with one generic shape.
+
+**Result: all four generators satisfy the contract identically.** No
+divergence was found.
+
+**Inspection finding (evidence only, no extraction performed in this
+package):** `extractText`, `normalizeGeneratorOutput`, `tagGeneratorResultReason`,
+and the five-branch failure/reason control flow (provider-text-missing ->
+JSON-parse -> JSON-root -> blocks-field -> normalize) are byte-for-byte
+duplicated across all four production generator files, and each generator's
+output schema (`blocks` array of `{ text, citations: [{ claimId,
+evidenceItemId }] }`, `additionalProperties: false` throughout) is
+byte-identical except for its const name - `kaiImpactNarrativeDraftGenerator.js`,
+`kaiReadinessAssessmentDraftGenerator.js`, and
+`kaiDataGapMemoDraftGenerator.js`'s own comments already document that they
+were each ported verbatim from
+`kaiEvidenceSummaryDraftGenerator.js`. Meaningful content-specific
+differences that must remain generator-owned: `CONTENT_TYPE`; the requested-
+audience contract (evidence_summary alone accepts a `funder` audience via its
+own `ALLOWED_REQUESTED_AUDIENCES` set; the other three accept only
+`"internal"`); each generator's own system-prompt wording; `max_tokens`
+(1200 / 1600 / 1800 / 1800); and each generator's own additional required
+input field beyond `claims` (`readiness.requirements` for
+readiness_assessment, `gaps.items` for data_gap_memo). This is evidence for a
+possible later runtime-helper extraction; no such extraction was performed
+here, and none of production code, prompts, `max_tokens`, output schemas,
+supported audiences, or generated-content registration was touched.
+
+**Files changed:**
+`__tests__/kai-sprint2-generator-result-contract-horizontal-conformance.spec.js`
+(new) and this ExecPlan. No production file was changed.
+
+**Test evidence (`DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel` set for
+every Node command; no external provider call, database, or cloud access):**
+- New horizontal conformance suite:
+  `node --test __tests__/kai-sprint2-generator-result-contract-horizontal-conformance.spec.js`
+  -> 33/33 PASS.
+- Existing focused per-generator structured-output/boundary suites for all
+  four generators, run alongside the new suite:
+  `node --test __tests__/kai-sprint2-generator-result-contract-horizontal-conformance.spec.js
+  __tests__/kai-sprint2-p14-09-evidence-summary-structured-output.spec.js
+  __tests__/kai-sprint2-p14-09-funder-evidence-summary-boundary.spec.js
+  __tests__/kai-sprint2-p13-01-impact-narrative-structured-output.spec.js
+  __tests__/kai-sprint2-p13-01-impact-narrative-boundary.spec.js
+  __tests__/kai-sprint2-readiness-assessment-structured-output.spec.js
+  __tests__/kai-sprint2-readiness-assessment-draft-generation-boundary.spec.js
+  __tests__/kai-sprint2-data-gap-memo-draft-generation-boundary.spec.js`
+  -> 111/111 PASS.
+- Existing generator-result classifier/subreason regression directly
+  exercising the same `classifyGeneratorResult` seam the new suite uses:
+  `node --test __tests__/kai-sprint2-p14-09-fund-gen-result-001-subreason-classification.spec.js`
+  -> 23/23 PASS.
+- `git diff --check` -> PASS (no whitespace errors). Complete diff inspected:
+  only the one new test file and this ExecPlan changed; no production
+  generator, classifier, schema, migration, or Generated Drafts
+  library/index file was touched.
+
+**Status:** FOUR_GENERATOR_HORIZONTAL_CONFORMANCE_PROVED. Test-only package;
+no production code changed, no runtime helper extracted. No push,
+deployment, production mutation, feature-flag change, secret handling,
+real-client-data access, or `00_KAI_CURRENT_STATE.md` update performed.
