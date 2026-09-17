@@ -30075,3 +30075,60 @@ every Node command; no database/cloud/production access):**
 NO_OWNER_DECISION_REQUIRED. No push, deployment, production mutation,
 feature-flag change, secret handling, real-client-data access, or
 `00_KAI_CURRENT_STATE.md` update performed.
+
+## Phase-13 P13-EXT-2 board_update generated-content package closure (2026-09-17)
+
+**Owner authorization and scope:** owner authorized the bounded
+`board_update` package as P13-EXT-2, separate from existing Board Reporting.
+This package adds the canonical generated-content type `board_update`; it does
+not reopen Board Reporting, does not widen Board Reporting or Grant Response
+Packet membership, and does not begin another Phase-13 package.
+
+**Implementation commit:** `b6ecb1a7e3cd8cc72c329a182bf92f0712eaaf70`
+(`Add Phase 13 board-update generated content`). Local package status:
+implementation committed on `main`; this entry records repository-governance
+bookkeeping only.
+
+**Package-end evidence recorded from accepted starting evidence:**
+- Canonical generated-content type implemented: `board_update`.
+- Exact four-field HTTP request contract restored.
+- Internal-only generation boundary enforced through route, service,
+  repository, and generator.
+- Shared provider/result contract integrated horizontally, including the
+  board-update generator.
+- Common Phase-13 governance integrated.
+- Generated-content review lifecycle integrated.
+- Generated Drafts and frontend source/tracked bundle synchronized.
+- Generic export-review integration present without Board Reporting or Grant
+  Response Packet membership widening.
+
+**Migration source files present, not executed:**
+- `migrations/kai_sprint2_p13_ext2_board_update_content_type_evolution.sql`
+- `migrations/kai_sprint2_p13_ext2_board_update_content_type_evolution.rollback.sql`
+- `migrations/kai_sprint2_p13_ext2_board_update_export_candidate_content_type_evolution.sql`
+- `migrations/kai_sprint2_p13_ext2_board_update_export_candidate_content_type_evolution.rollback.sql`
+
+**Verification-pack files present:**
+- `scripts/kai-sprint2-p13-ext2-board-update-content-type-evolution-verifier.sql`
+- `scripts/kai-sprint2-p13-ext2-board-update-content-type-evolution-failure-checks.sql`
+- `scripts/kai-sprint2-p13-ext2-board-update-content-type-evolution-smoke-seed.sql`
+- `scripts/kai-sprint2-p13-ext2-board-update-content-type-evolution-smoke-verifier.sql`
+- `scripts/kai-sprint2-p13-ext2-board-update-content-type-evolution-patch-notes.md`
+- `scripts/kai-sprint2-p13-ext2-board-update-content-type-evolution-runbook.md`
+
+**Verification posture:** the verification pack was repaired to strict
+read-only source form for the verifier, failure-check, and smoke-verifier SQL.
+The smoke seed is synthetic and was not executed. No database connection was
+made, no migration was executed, and no live database migration verification is
+claimed. Focused, horizontal, and regression proofs passed before the final
+SQL/doc-only repair. Final `git diff --check` passed before the implementation
+commit.
+
+**Full-suite residual classification:** seven full-suite failures remain
+classified as `NOT_ATTRIBUTABLE_BY_CURRENT_DIFF`. This closure does not
+describe them as historically pre-existing.
+
+**Status:** P13_EXT_2_BOARD_UPDATE_PACKAGE_CLOSED_LOCALLY. No production or
+runtime closure claimed. No push, deployment, production mutation, database
+mutation, migration execution, feature-flag/configuration change,
+real-client-data access, or `00_KAI_CURRENT_STATE.md` update performed.
