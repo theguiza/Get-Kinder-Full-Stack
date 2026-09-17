@@ -2038,6 +2038,7 @@ export function projectGeneratedDraftPacket(dto) {
         claimId: citation?.claimId,
         evidenceItemId: citation?.evidenceItemId,
         sourceId: citation?.sourceId,
+        sourceCode: typeof citation?.sourceCode === "string" ? citation.sourceCode : null,
         sourceVersionId: citation?.sourceVersionId,
         supportStrength: citation?.supportStrength,
         claimReviewStatus: citation?.claimReviewStatus,
@@ -2046,6 +2047,10 @@ export function projectGeneratedDraftPacket(dto) {
         blockerCodes: asArray(citation?.blockerCodes),
         affectedDimensionKeys: asArray(citation?.affectedDimensionKeys),
         affectedObjectIds: asArray(citation?.affectedObjectIds),
+        // ALLOWED_AUDIENCE: the claim's current authoritative audience
+        // approval - null (no decision/no approved_audiences yet) is a
+        // distinct, preserved state, never coerced to an empty array.
+        approvedAudiences: Array.isArray(citation?.approvedAudiences) ? asArray(citation.approvedAudiences) : null,
       })),
     })),
   };

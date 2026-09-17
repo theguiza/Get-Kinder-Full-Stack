@@ -236,6 +236,7 @@ const CITATION_KEYS = new Set([
   "claimId",
   "evidenceItemId",
   "sourceId",
+  "sourceCode",
   "sourceVersionId",
   "supportStrength",
   "claimReviewStatus",
@@ -244,6 +245,7 @@ const CITATION_KEYS = new Set([
   "blockerCodes",
   "affectedDimensionKeys",
   "affectedObjectIds",
+  "approvedAudiences",
 ]);
 const CITATION_KEYS_WITH_ID = new Set(["generatedContentCitationId", ...CITATION_KEYS]);
 const VALIDATOR_RESULT_KEYS = new Set([
@@ -361,12 +363,17 @@ function isGeneratedDraftExportReviewPacketDto(data) {
       if (citationHasId && !UUID_PATTERN.test(citation.generatedContentCitationId)) return false;
       if (!UUID_PATTERN.test(citation.claimId) || !UUID_PATTERN.test(citation.evidenceItemId)) return false;
       if (!UUID_PATTERN.test(citation.sourceId) || !UUID_PATTERN.test(citation.sourceVersionId)) return false;
+      if (citation.sourceCode !== null && typeof citation.sourceCode !== "string") return false;
       if (typeof citation.supportStrength !== "string") return false;
       if (typeof citation.claimReviewStatus !== "string" || typeof citation.evidenceReviewStatus !== "string") return false;
       if (typeof citation.currentEligible !== "boolean") return false;
       if (!isStringArray(citation.blockerCodes)) return false;
       if (!isStringArray(citation.affectedDimensionKeys)) return false;
       if (!isStringArray(citation.affectedObjectIds)) return false;
+      if (citation.approvedAudiences !== null) {
+        if (!isStringArray(citation.approvedAudiences)) return false;
+        if (!citation.approvedAudiences.every((value) => AUDIENCES.has(value))) return false;
+      }
     }
   }
   if (!isCanonicalUtcTimestamp(data.exportReviewUpdatedAt)) return false;

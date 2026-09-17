@@ -234,6 +234,7 @@ test("readiness review-packet DTO uses existing generated-content citation/revie
         claimId: CLAIM,
         evidenceItemId: EVIDENCE,
         sourceId: SOURCE,
+        sourceCode: null,
         sourceVersionId: SOURCE_VERSION,
         supportStrength: "unassessed",
         claimReviewStatus: "needs_gk_review",
@@ -242,6 +243,7 @@ test("readiness review-packet DTO uses existing generated-content citation/revie
         blockerCodes: ["claim_review_missing"],
         affectedDimensionKeys: [],
         affectedObjectIds: [],
+        approvedAudiences: null,
       }],
     }],
   }), true);

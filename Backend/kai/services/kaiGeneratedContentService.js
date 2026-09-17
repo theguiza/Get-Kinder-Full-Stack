@@ -457,6 +457,7 @@
     "claimId",
     "evidenceItemId",
     "sourceId",
+    "sourceCode",
     "sourceVersionId",
     "supportStrength",
     "claimReviewStatus",
@@ -465,6 +466,7 @@
     "blockerCodes",
     "affectedDimensionKeys",
     "affectedObjectIds",
+    "approvedAudiences",
   ]);
   const CITATION_KEYS_WITH_ID = new Set(["generatedContentCitationId", ...CITATION_KEYS]);
 
@@ -509,12 +511,21 @@
         if (citationHasId && !UUID_PATTERN.test(citation.generatedContentCitationId)) return false;
         if (!UUID_PATTERN.test(citation.claimId) || !UUID_PATTERN.test(citation.evidenceItemId)) return false;
         if (!UUID_PATTERN.test(citation.sourceId) || !UUID_PATTERN.test(citation.sourceVersionId)) return false;
+        if (citation.sourceCode !== null && typeof citation.sourceCode !== "string") return false;
         if (typeof citation.supportStrength !== "string") return false;
         if (typeof citation.claimReviewStatus !== "string" || typeof citation.evidenceReviewStatus !== "string") return false;
         if (typeof citation.currentEligible !== "boolean") return false;
         if (!isStringArray(citation.blockerCodes)) return false;
         if (!isStringArray(citation.affectedDimensionKeys)) return false;
         if (!isStringArray(citation.affectedObjectIds)) return false;
+        // ALLOWED_AUDIENCE: the claim's current authoritative audience
+        // approval, null when no decision (or no approved_audiences on the
+        // decision) exists yet; otherwise a subset of the three known
+        // audiences, never a client-supplied or generation-time value.
+        if (citation.approvedAudiences !== null) {
+          if (!isStringArray(citation.approvedAudiences)) return false;
+          if (!citation.approvedAudiences.every((value) => AUDIENCES.has(value))) return false;
+        }
       }
     }
     return true;

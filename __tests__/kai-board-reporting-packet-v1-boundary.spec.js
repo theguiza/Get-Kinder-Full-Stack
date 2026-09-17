@@ -516,6 +516,7 @@ function citationFixture(overrides = {}) {
     claimId: EVIDENCE_SUMMARY.claimId,
     evidenceItemId: EVIDENCE_SUMMARY.evidenceId,
     sourceId: EVIDENCE_SUMMARY.sourceId,
+    sourceCode: null,
     sourceVersionId: EVIDENCE_SUMMARY.sourceVersionId,
     supportStrength: "strong",
     claimReviewStatus: "approved",
@@ -524,6 +525,7 @@ function citationFixture(overrides = {}) {
     blockerCodes: [],
     affectedDimensionKeys: [],
     affectedObjectIds: [],
+    approvedAudiences: ["internal", "funder"],
     ...overrides,
   };
 }

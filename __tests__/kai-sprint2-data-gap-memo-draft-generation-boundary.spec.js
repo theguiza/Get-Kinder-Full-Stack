@@ -586,6 +586,7 @@ test("review packet DTO reuses generated_content_review and KAI cannot approve/f
         claimId: CLAIM,
         evidenceItemId: EVIDENCE,
         sourceId: SOURCE,
+        sourceCode: null,
         sourceVersionId: SOURCE_VERSION,
         supportStrength: "unassessed",
         claimReviewStatus: "needs_gk_review",
@@ -594,6 +595,7 @@ test("review packet DTO reuses generated_content_review and KAI cannot approve/f
         blockerCodes: ["coverage_dimension_unresolved"],
         affectedDimensionKeys: ["coverage_gaps"],
         affectedObjectIds: [],
+        approvedAudiences: null,
       }],
     }],
   }), true);

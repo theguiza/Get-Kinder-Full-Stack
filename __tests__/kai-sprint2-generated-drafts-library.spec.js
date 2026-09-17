@@ -22,6 +22,7 @@ import {
   __generatedDraftLibraryServiceContract,
   __testables as generatedDraftLibraryServiceTestables,
 } from "../Backend/kai/services/kaiGeneratedDraftLibraryService.js";
+import { __generatedContentReviewPacketServiceTestables } from "../Backend/kai/services/kaiGeneratedContentService.js";
 import { listGeneratedDraftLibraryIndex as readGeneratedDraftLibraryIndex } from "../Backend/kai/db/kaiGeneratedDraftLibraryReadModels.js";
 import {
   CLAIM_REVIEW_DECISIONS,
@@ -830,4 +831,186 @@ test("A1C-2 regression: a claim review decision of 'approved' is real wire vocab
   assert.equal(result.data.items[0].draftStatus, "draft");
   assert.equal(result.data.items[0].requestedAudience, "internal");
   assert.doesNotMatch(JSON.stringify(result), /\bfinal\b|export-ready|\breleased?\b|\bapproved\b/i);
+});
+
+// CONFLICTS_GAPS traceability-repair proof: the review packet's own
+// per-citation `affectedDimensionKeys`/`affectedObjectIds` (the specific
+// coverage-dimension/conflict-or-gap object ids a citation's blockerCodes
+// refer to - postgresClaimTraceabilityRepository.js's `affectedDimensionKeys`/
+// `affectedObjectIds` sets, carried verbatim through
+// postgresGeneratedContentRepository.js's `toReviewPacket` citation shape and
+// the service DTO's CITATION_KEYS) already reached
+// `projectGeneratedDraftPacket`'s per-citation projection (asserted below,
+// unchanged), but the one generic selected-draft review-packet render
+// location (`{generatedDraftPacket ? (` in ImpactEvidenceLibrary.jsx) never
+// rendered either field to the reviewer - only the opaque `blockerCodes`
+// array, with no specific affected dimension/object identifying which
+// coverage gap or conflict a code refers to. This is a render-only repair:
+// no DTO, service, repository, schema, or projection-function change. Proved
+// horizontally for all four current content types, since this render
+// location and the citation shape are exactly the same code for all four
+// (content_type is only ever displayed as a label here, never branched on).
+test("Generated Drafts selected-draft review surface now renders affectedDimensionKeys/affectedObjectIds for every citation, for all four content types (CONFLICTS_GAPS repair)", () => {
+  const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+
+  function sliceBetween(source, startMarker, endMarker) {
+    const start = source.indexOf(startMarker);
+    assert.ok(start !== -1, `test-boundary marker not found: ${startMarker}`);
+    if (endMarker === null) return source.slice(start);
+    const end = source.indexOf(endMarker, start + startMarker.length);
+    assert.ok(end !== -1, `test-boundary marker not found: ${endMarker}`);
+    return source.slice(start, end);
+  }
+
+  // RENDER_LOCATION: the generic selected-draft review packet block, the
+  // same one the existing A1C-2 test above slices with the identical marker.
+  const selectedDraftReviewSurface = sliceBetween(uiSource, "{generatedDraftPacket ? (", null);
+  assert.match(selectedDraftReviewSurface, /citation\.affectedDimensionKeys\.join\(", "\)/);
+  assert.match(selectedDraftReviewSurface, /citation\.affectedObjectIds\.join\(", "\)/);
+  // Still renders the pre-existing WHY_CAN_KAI_SAY_THIS/SOURCE/
+  // EVIDENCE_STRENGTH/REVIEWER_STATUS fields this repair must not regress.
+  assert.match(selectedDraftReviewSurface, /citation\.claimId/);
+  assert.match(selectedDraftReviewSurface, /citation\.sourceId/);
+  assert.match(selectedDraftReviewSurface, /citation\.supportStrength/);
+  assert.match(selectedDraftReviewSurface, /generatedDraftPacket\.queueStatus.*generatedDraftPacket\.reviewStatus/);
+
+  // FRONTEND_FIELD: projectGeneratedDraftPacket already carries both fields
+  // through untouched, for all four content types (this function does not
+  // branch on contentType at all - proved directly here rather than assumed).
+  for (const contentType of ["evidence_summary", "impact_narrative", "readiness_assessment", "data_gap_memo"]) {
+    const packet = projectGeneratedDraftPacket({
+      generatedContentDraftId: draftId,
+      contentType,
+      draftStatus: "draft",
+      requestedAudience: "internal",
+      reviewQueueItemId,
+      queueStatus: "resolved",
+      reviewStatus: "resolved",
+      currentUseEligible: true,
+      blocks: [{
+        ordinal: 1,
+        text: "Enrollment increased.",
+        citations: [{
+          claimId: "00000000-0000-4000-8000-000000000901",
+          evidenceItemId: "00000000-0000-4000-8000-000000000902",
+          sourceId: "00000000-0000-4000-8000-000000000903",
+          sourceVersionId: "00000000-0000-4000-8000-000000000904",
+          supportStrength: "reviewed_supported",
+          claimReviewStatus: "reviewed",
+          evidenceReviewStatus: "reviewed",
+          currentEligible: false,
+          blockerCodes: ["coverage_dimension_unresolved", "potential_conflict_review_unresolved"],
+          affectedDimensionKeys: ["financial_health"],
+          affectedObjectIds: ["00000000-0000-4000-8000-000000000905"],
+        }],
+      }],
+    });
+    const citation = packet.blocks[0].citations[0];
+    assert.deepEqual(citation.affectedDimensionKeys, ["financial_health"]);
+    assert.deepEqual(citation.affectedObjectIds, ["00000000-0000-4000-8000-000000000905"]);
+  }
+});
+
+// SOURCE + ALLOWED_AUDIENCE traceability-repair proof: `sourceCode` (the
+// governed human-readable source identity, `evaluated.source.source_code`
+// - already computed by the same evaluator `toReviewPacket` calls, and
+// already rendered elsewhere in this same file for the separate Data
+// Sources browser, `source.sourceCode` ~L4364) and `approvedAudiences` (the
+// claim's own current authoritative audience approval,
+// `evaluated.claim_review_decision.approved_audiences` - distinct from the
+// draft-level `requestedAudience`, which is only what generation was
+// originally requested for) were both computed by the traceability
+// evaluator but dropped inside `toReviewPacket`'s citation builder
+// (postgresGeneratedContentRepository.js) before ever reaching the service
+// DTO. This proof, plus the widened `CITATION_KEYS` in
+// kaiGeneratedContentService.js/kaiExportReviewService.js and the widened
+// `projectGeneratedDraftPacket` projection, closes both gaps end to end: no
+// new schema, no new migration, no new product-semantic decision - both
+// values already existed in the same evaluator output `toReviewPacket`
+// already reads.
+test("Generated Drafts selected-draft review surface now renders sourceCode and approvedAudiences for every citation, for all four content types (SOURCE + ALLOWED_AUDIENCE repair)", () => {
+  const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+
+  function sliceBetween(source, startMarker, endMarker) {
+    const start = source.indexOf(startMarker);
+    assert.ok(start !== -1, `test-boundary marker not found: ${startMarker}`);
+    if (endMarker === null) return source.slice(start);
+    const end = source.indexOf(endMarker, start + startMarker.length);
+    assert.ok(end !== -1, `test-boundary marker not found: ${endMarker}`);
+    return source.slice(start, end);
+  }
+
+  // RENDER_LOCATION: the same generic selected-draft review packet block.
+  const selectedDraftReviewSurface = sliceBetween(uiSource, "{generatedDraftPacket ? (", null);
+  assert.match(selectedDraftReviewSurface, /citation\.sourceCode/);
+  assert.match(selectedDraftReviewSurface, /citation\.approvedAudiences/);
+  // The raw sourceId/sourceVersionId identity is preserved alongside the new
+  // human-readable sourceCode - never replaced.
+  assert.match(selectedDraftReviewSurface, /citation\.sourceId/);
+  assert.match(selectedDraftReviewSurface, /citation\.sourceVersionId/);
+
+  // SERVICE/API_DTO: the widened citation contract accepts a real citation
+  // carrying both fields, for both a recorded and an absent audience
+  // decision, and rejects a citation missing either field outright (proving
+  // this is now a required, not merely tolerated, part of the contract).
+  const validCitation = {
+    claimId: "00000000-0000-4000-8000-000000000901",
+    evidenceItemId: "00000000-0000-4000-8000-000000000902",
+    sourceId: "00000000-0000-4000-8000-000000000903",
+    sourceCode: "annual-report-2026",
+    sourceVersionId: "00000000-0000-4000-8000-000000000904",
+    supportStrength: "reviewed_supported",
+    claimReviewStatus: "reviewed",
+    evidenceReviewStatus: "reviewed",
+    currentEligible: true,
+    blockerCodes: [],
+    affectedDimensionKeys: [],
+    affectedObjectIds: [],
+    approvedAudiences: ["internal", "funder"],
+  };
+  function packetWithCitation(citation) {
+    return {
+      generationRunId: "00000000-0000-4000-8000-000000000700",
+      generatedContentDraftId: draftId,
+      contentType: "evidence_summary",
+      draftStatus: "draft",
+      requestedAudience: "internal",
+      reviewQueueItemId,
+      queueStatus: "resolved",
+      reviewStatus: "resolved",
+      reviewUpdatedAt: "2026-09-17T09:00:00.000Z",
+      currentUseEligible: true,
+      exportReviewQueueItemId: null,
+      exportReviewQueueStatus: null,
+      exportReviewStatus: null,
+      blocks: [{ ordinal: 1, text: "Enrollment increased.", citations: [citation] }],
+    };
+  }
+  const { isGeneratedDraftReviewPacketDto } = __generatedContentReviewPacketServiceTestables;
+  assert.equal(isGeneratedDraftReviewPacketDto(packetWithCitation(validCitation)), true);
+  assert.equal(isGeneratedDraftReviewPacketDto(packetWithCitation({ ...validCitation, approvedAudiences: null })), true);
+  const { sourceCode, ...missingSourceCode } = validCitation;
+  assert.equal(isGeneratedDraftReviewPacketDto(packetWithCitation(missingSourceCode)), false);
+  const { approvedAudiences, ...missingApprovedAudiences } = validCitation;
+  assert.equal(isGeneratedDraftReviewPacketDto(packetWithCitation(missingApprovedAudiences)), false);
+
+  // FRONTEND_FIELD: projectGeneratedDraftPacket carries both fields through,
+  // for all four content types, including the null/no-decision-yet case.
+  for (const contentType of ["evidence_summary", "impact_narrative", "readiness_assessment", "data_gap_memo"]) {
+    const packet = projectGeneratedDraftPacket({
+      ...packetWithCitation(validCitation),
+      contentType,
+    });
+    const citation = packet.blocks[0].citations[0];
+    assert.equal(citation.sourceCode, "annual-report-2026");
+    assert.deepEqual(citation.approvedAudiences, ["internal", "funder"]);
+
+    const noDecisionPacket = projectGeneratedDraftPacket({
+      ...packetWithCitation({ ...validCitation, sourceCode: null, approvedAudiences: null }),
+      contentType,
+    });
+    const noDecisionCitation = noDecisionPacket.blocks[0].citations[0];
+    assert.equal(noDecisionCitation.sourceCode, null);
+    assert.equal(noDecisionCitation.approvedAudiences, null);
+  }
 });

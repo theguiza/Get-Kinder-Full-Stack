@@ -954,6 +954,7 @@ async function toReviewPacket(tx, state, input, validation, evaluator) {
         claimId: citation.claim_id,
         evidenceItemId: citation.evidence_item_id,
         sourceId: evaluated.source.source_id,
+        sourceCode: evaluated.source.source_code ?? null,
         sourceVersionId: evaluated.source_version.source_version_id,
         supportStrength: evaluated.evidence.support_strength,
         claimReviewStatus: evaluated.claim.claim_review_status,
@@ -962,6 +963,14 @@ async function toReviewPacket(tx, state, input, validation, evaluator) {
         blockerCodes: [...new Set(evaluated.blockerCodes)],
         affectedDimensionKeys: evaluated.affectedDimensionKeys,
         affectedObjectIds: evaluated.affectedObjectIds,
+        // ALLOWED_AUDIENCE: the claim's own current authoritative audience
+        // approval decision (distinct from the draft-level requestedAudience,
+        // which is only what generation was originally requested for). Same
+        // evaluator output validateTraceabilityData already requires
+        // (claim_review_decision.approved_audiences); null when no decision
+        // has ever been recorded or the recorded decision carries no
+        // approved_audiences, never a client/generation-time re-derivation.
+        approvedAudiences: evaluated.claim_review_decision?.approved_audiences ?? null,
       };
     });
     return {

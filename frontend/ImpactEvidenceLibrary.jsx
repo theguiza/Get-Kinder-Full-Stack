@@ -4553,12 +4553,25 @@ export default function ImpactEvidenceLibrary() {
                     <div key={`${citation.claimId}-${citation.evidenceItemId}-${index}`} className="border-top pt-2 mt-2">
                       <ValueRow label="Citation" value={`${citation.claimId} / ${citation.evidenceItemId}`} />
                       <ValueRow label="Source" value={citation.sourceId} />
+                      <ValueRow label="Source code" value={citation.sourceCode || "unknown"} />
                       <ValueRow label="Source version" value={citation.sourceVersionId} />
                       <ValueRow label="Support strength" value={citation.supportStrength} />
                       <ValueRow label="Claim review status" value={citation.claimReviewStatus} />
                       <ValueRow label="Evidence review status" value={citation.evidenceReviewStatus} />
                       <ValueRow label="Currently eligible" value={String(citation.currentEligible)} />
                       <ValueRow label="Blocker codes" value={citation.blockerCodes.join(", ") || "none"} />
+                      <ValueRow
+                        label="Affected coverage dimensions"
+                        value={citation.affectedDimensionKeys.join(", ") || "none"}
+                      />
+                      <ValueRow
+                        label="Affected conflict/gap object ids"
+                        value={citation.affectedObjectIds.join(", ") || "none"}
+                      />
+                      <ValueRow
+                        label="Current audience authority"
+                        value={citation.approvedAudiences ? (citation.approvedAudiences.join(", ") || "none") : "no decision recorded"}
+                      />
                     </div>
                   ))}
                 </div>

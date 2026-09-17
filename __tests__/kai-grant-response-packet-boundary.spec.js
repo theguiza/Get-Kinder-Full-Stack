@@ -901,6 +901,7 @@ test("Grant Response Packet service projects export-review fields only for an ac
         claimId: DRAFT_A.claimId,
         evidenceItemId: DRAFT_A.evidenceId,
         sourceId: DRAFT_A.sourceId,
+        sourceCode: null,
         sourceVersionId: DRAFT_A.sourceVersionId,
         supportStrength: "strong",
         claimReviewStatus: "approved",
@@ -909,6 +910,7 @@ test("Grant Response Packet service projects export-review fields only for an ac
         blockerCodes: [],
         affectedDimensionKeys: [],
         affectedObjectIds: [],
+        approvedAudiences: ["internal", "funder"],
       }],
     }],
   };

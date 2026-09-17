@@ -228,6 +228,7 @@ test("P13-01 review-packet DTO contract accepts impact_narrative alongside evide
         claimId: CLAIM,
         evidenceItemId: EVIDENCE,
         sourceId: "00000000-0000-4000-8000-000000000301",
+        sourceCode: null,
         sourceVersionId: "00000000-0000-4000-8000-000000000401",
         supportStrength: "unassessed",
         claimReviewStatus: "needs_gk_review",
@@ -236,6 +237,7 @@ test("P13-01 review-packet DTO contract accepts impact_narrative alongside evide
         blockerCodes: [],
         affectedDimensionKeys: [],
         affectedObjectIds: [],
+        approvedAudiences: null,
       }],
     }],
   };

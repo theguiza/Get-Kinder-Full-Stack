@@ -44,6 +44,7 @@ function citation(overrides = {}) {
     claimId: CLAIM_A,
     evidenceItemId: EVIDENCE_A,
     sourceId: SOURCE_A,
+    sourceCode: null,
     sourceVersionId: SOURCE_VERSION_A,
     supportStrength: "strong",
     claimReviewStatus: "approved",
@@ -52,6 +53,7 @@ function citation(overrides = {}) {
     blockerCodes: ["source_version_superseded"],
     affectedDimensionKeys: ["currency"],
     affectedObjectIds: ["source-version:1"],
+    approvedAudiences: ["internal", "funder"],
     ...overrides,
   };
 }

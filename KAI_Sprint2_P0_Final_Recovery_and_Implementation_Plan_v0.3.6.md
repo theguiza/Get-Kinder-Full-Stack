@@ -29869,3 +29869,209 @@ access):**
 **Status:** TERMINAL_REJECTED_CLAIM_GENERATION_BLOCK_REPAIRED. No push,
 deployment, production mutation, feature-flag change, secret handling,
 real-client-data access, or `00_KAI_CURRENT_STATE.md` update performed.
+
+## Generated Drafts seven-concept TRACEABILITY proof-and-repair (2026-09-17)
+
+**Scope:** trace WHY_CAN_KAI_SAY_THIS / SOURCE / EVIDENCE_STRENGTH /
+ALLOWED_AUDIENCE / LIMITATIONS / CONFLICTS_GAPS / REVIEWER_STATUS from
+authoritative source through the real Generated Drafts selected-draft review
+surface, for all four current content types, and repair every gap that does
+not require new schema or a new product-semantic decision. Starting HEAD
+`5be15ca` on `main`; working tree clean.
+
+**Path traced** (persistence -> read model -> service DTO -> route ->
+frontend API helper -> frontend projection -> render), confirmed identical
+for all four content types (`evidence_summary`, `impact_narrative`,
+`readiness_assessment`, `data_gap_memo` - none branches this path):
+- Persistence/evaluator: `Backend/kai/dictionary/postgresClaimTraceabilityRepository.js`
+  (claim/evidence/source/source_version/decision rows; `blockerCodes`/
+  `affectedDimensionKeys`/`affectedObjectIds` computed ~L719-793; returns
+  `source.source_code` and `claim_review_decision.approved_audiences`
+  ~L793-830).
+- Read/build: `Backend/kai/dictionary/postgresGeneratedContentRepository.js`
+  `toReviewPacket` (~L930-994) - builds the packet's `blocks[].citations[]`
+  shape from the evaluator's per-claim result; now also carries
+  `sourceCode`/`approvedAudiences` through from that same evaluator output.
+- Service DTO: `Backend/kai/services/kaiGeneratedContentService.js`
+  `getGeneratedDraftReviewPacket` (~L547-603), `CITATION_KEYS` (~L456-471,
+  widened), `isGeneratedDraftReviewPacketDto` (~L477-533, widened). The
+  parallel export-review packet DTO validator,
+  `Backend/kai/services/kaiExportReviewService.js`'s own duplicated
+  `CITATION_KEYS`/`isGeneratedDraftExportReviewPacketDto` (~L235-370), is
+  widened identically - it independently re-validates the same
+  `toReviewPacket`-built citation shape for the export-review packet surface
+  and would otherwise silently reject the wider shape.
+- Route: `Backend/kai/routes/sprint2IntakeApi.js` `GET
+  /admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/review-packet`
+  (~L3149-3171) - generic, does not delegate to Board Reporting/Grant
+  Response Packet/Impact Evaluation.
+- Frontend API helper: `frontend/impactEvidenceLibraryLogic.js`
+  `generatedDraftReviewPacketPath` (~L55-57).
+- Frontend projection: `frontend/impactEvidenceLibraryLogic.js`
+  `projectGeneratedDraftPacket` (~L2012-2056, widened to carry
+  `sourceCode`/`approvedAudiences` through, `null`-preserving).
+- Render: `frontend/ImpactEvidenceLibrary.jsx`, the `{generatedDraftPacket ?
+  (` block (~L4479-4577) - confirmed this is the generic single-draft
+  surface, distinct from the separate, out-of-scope Grant Response Packet
+  member-drafts render (`grantResponsePacket.drafts.map`, ~L3444-3560) which
+  duplicates similar citation fields for its own packet-scoped page and was
+  not touched.
+
+**TRACEABILITY_MATRIX (final state, after repair):**
+- WHY_CAN_KAI_SAY_THIS: citation `claimId`/`evidenceItemId` link, rendered.
+  PRESENT_END_TO_END, all four types.
+- SOURCE: `sourceId`/`sourceVersionId` (raw UUIDs) plus the new, governed,
+  human-readable `sourceCode` (`evaluated.source.source_code`, the same
+  convention already used for the separate Data Sources browser in the same
+  file) all reach and render together - the raw identity is preserved, not
+  replaced. PRESENT_END_TO_END, all four types.
+- EVIDENCE_STRENGTH: `supportStrength` (governed `evidence.support_strength`),
+  rendered. PRESENT_END_TO_END, all four types.
+- ALLOWED_AUDIENCE: the new `approvedAudiences`
+  (`evaluated.claim_review_decision.approved_audiences` - the claim's own
+  current authoritative audience approval, distinct from the draft-level
+  `requestedAudience`, which is only what generation was originally requested
+  for) now reaches the citation DTO and renders (`null` when no decision has
+  ever been recorded, a distinct and preserved state, never coerced to an
+  empty array). PRESENT_END_TO_END, all four types.
+- LIMITATIONS: citation `blockerCodes` (governed, e.g.
+  `support_strength_unassessed`, `coverage_dimension_unresolved`),
+  end-to-end through render, via `blockerDisplayText`, which returns the real
+  governed code or a specific governed prose mapping - never generic error
+  text. PRESENT_END_TO_END, all four types.
+- CONFLICTS_GAPS: `blockerCodes` plus the specific
+  `affectedDimensionKeys`/`affectedObjectIds` (which dimension, or which
+  conflict/gap/review-queue-item id, a code refers to) now all render.
+  PRESENT_END_TO_END, all four types.
+- REVIEWER_STATUS: live `queueStatus`/`reviewStatus` from
+  `state.queues[0]` (the current `review_queue_items` row joined fresh on
+  every read - never an immutable draft-table field; `generated_content_drafts`
+  has no `review_status` column at all), rendered. PRESENT_END_TO_END, all
+  four types.
+
+**All seven concepts are now PRESENT_END_TO_END for all four content types.
+No OWNER_DECISION_REQUIRED items remain.**
+
+**Repairs made (two packages, one coherent commit):**
+1. CONFLICTS_GAPS (render-only, no DTO/service/repository change):
+   `frontend/ImpactEvidenceLibrary.jsx`'s generic selected-draft citation
+   block renders `citation.affectedDimensionKeys` and
+   `citation.affectedObjectIds` (joined, `"none"` when empty), immediately
+   after the existing `Blocker codes` row.
+2. SOURCE + ALLOWED_AUDIENCE (citation DTO widening - both values already
+   computed by the same evaluator `toReviewPacket` already calls; no schema,
+   migration, or new product-semantic decision required):
+   - `Backend/kai/dictionary/postgresGeneratedContentRepository.js`
+     `toReviewPacket`'s citation builder now also sets
+     `sourceCode: evaluated.source.source_code ?? null` and
+     `approvedAudiences: evaluated.claim_review_decision?.approved_audiences ?? null`.
+   - `Backend/kai/services/kaiGeneratedContentService.js`'s `CITATION_KEYS`
+     and `isGeneratedDraftReviewPacketDto` widened to require and validate
+     both fields (`sourceCode`: string or null; `approvedAudiences`: null or
+     a subset of the three known audiences).
+   - `Backend/kai/services/kaiExportReviewService.js`'s own parallel,
+     independently-duplicated `CITATION_KEYS`/
+     `isGeneratedDraftExportReviewPacketDto` widened identically (discovered
+     only by running the full regression sweep - this second, separate
+     export-review-packet DTO validator re-checks the same citation shape
+     and would otherwise reject it).
+   - `frontend/impactEvidenceLibraryLogic.js`'s `projectGeneratedDraftPacket`
+     widened to carry both fields through unchanged (`null`-preserving, not
+     coerced to `""`/`[]`).
+   - `frontend/ImpactEvidenceLibrary.jsx` renders `citation.sourceCode`
+     (alongside, not replacing, the existing raw `sourceId`/
+     `sourceVersionId`) and a "Current audience authority" row for
+     `citation.approvedAudiences` (worded to avoid the literal word
+     "approved" - already-established, deliberately narrow vocabulary ban
+     that keeps the Generated-Drafts-only render surface from ever implying
+     final/export/release authority; the underlying field name
+     `approvedAudiences`/wire vocabulary `approved_audiences` is untouched
+     and remains legitimate elsewhere, per the existing A1C-2 precedent).
+
+Preserved throughout: tenant/audience/authorization/review boundaries (no
+authorization, role, or lifecycle-gate logic touched); no schema or
+migration; no generator/provider/validator/claim-admission logic touched; no
+Board Reporting, Grant Response Packet, or Impact Evaluation module logic
+changed (their citation shape widened only because they structurally reuse
+the same shared `toReviewPacket`/`isGeneratedDraftReviewPacketDto`
+functions, proven by the regression sweep below, not because those modules
+were edited).
+
+**Regression coverage added (`__tests__/kai-sprint2-generated-drafts-library.spec.js`):**
+- "Generated Drafts selected-draft review surface now renders
+  affectedDimensionKeys/affectedObjectIds for every citation, for all four
+  content types (CONFLICTS_GAPS repair)" - slices the real
+  `ImpactEvidenceLibrary.jsx` source at the same `{generatedDraftPacket ? (`
+  marker the existing A1C-2 test uses, asserts the new render lines are
+  present (and the pre-existing WHY_CAN_KAI_SAY_THIS/SOURCE/
+  EVIDENCE_STRENGTH/REVIEWER_STATUS lines are not regressed), and drives the
+  real `projectGeneratedDraftPacket` function once per content type with a
+  citation carrying non-empty `affectedDimensionKeys`/`affectedObjectIds`,
+  asserting both pass through unchanged for all four types.
+- "Generated Drafts selected-draft review surface now renders sourceCode and
+  approvedAudiences for every citation, for all four content types (SOURCE +
+  ALLOWED_AUDIENCE repair)" - asserts the same render surface now references
+  `citation.sourceCode`/`citation.approvedAudiences` alongside the preserved
+  `citation.sourceId`/`citation.sourceVersionId`; drives the real
+  `isGeneratedDraftReviewPacketDto` to prove both fields are now required
+  (a citation missing either is rejected, not merely tolerated) and that a
+  recorded vs. absent (`null`) audience decision are both valid; and drives
+  the real `projectGeneratedDraftPacket` once per content type for both the
+  populated and the `null`-decision case.
+- Existing exact-shape citation fixtures across the repository that
+  construct a literal review-packet/export-review-packet citation object
+  were updated to include `sourceCode`/`approvedAudiences` (never loosening
+  the `hasExactKeys` contract itself): `__tests__/kai-sprint2-generated-draft-export-review-read-recovery-boundary.spec.js`,
+  `__tests__/kai-sprint2-p3-02-generated-draft-review-packet-boundary.spec.js`,
+  `__tests__/kai-sprint2-p3-06-export-review-packet-boundary.spec.js`,
+  `__tests__/kai-sprint2-durable-export-manifest-read-recovery-boundary.spec.js`,
+  `__tests__/kai-sprint2-data-gap-memo-draft-generation-boundary.spec.js`,
+  `__tests__/kai-sprint2-p13-01-impact-narrative-boundary.spec.js`,
+  `__tests__/kai-sprint2-readiness-assessment-draft-generation-boundary.spec.js`,
+  `__tests__/kai-board-reporting-packet-v1-boundary.spec.js`,
+  `__tests__/kai-grant-response-packet-boundary.spec.js`,
+  `__tests__/kai-grant-response-packet-render-model-boundary.spec.js`. Each
+  was found empirically (full non-integration suite run before and after),
+  not guessed at.
+
+**HORIZONTAL_CONTENT_TYPE_RESULT:** all four content types share the exact
+same generic path end to end (no branch on `content_type` anywhere in
+`toReviewPacket`, either service DTO validator, the route, the frontend
+projection, or the render block); confirmed directly by both new tests
+driving `projectGeneratedDraftPacket` once per type.
+
+**Test evidence (`DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel` set for
+every Node command; no database/cloud/production access):**
+- `node --test __tests__/kai-sprint2-generated-drafts-library.spec.js` ->
+  19/19 PASS (17 pre-existing + 2 new).
+- Full non-integration repository sweep, before this package's fixture
+  repairs: `node --test $(ls __tests__/*.spec.js | grep -v integration)` ->
+  4341 tests, 22 failures. 5 confirmed pre-existing and unrelated
+  (`kai-sprint2-batch-files-route.spec.js`,
+  `kai-sprint2-file-detail-route.spec.js`,
+  `kai-sprint2-pass2-route-runtime.spec.js` - reproduced identically via
+  `git stash` against this package's own unmodified starting point); the
+  remaining 17 were this package's own citation-DTO-widening ripple, each
+  fixed as listed above.
+- Same full non-integration sweep, after all fixture repairs -> 4332 tests,
+  8 failures, all 8 the same pre-existing, unrelated, already-confirmed
+  failures in the 3 files above (nested subtests included in the count).
+- Full originally-specified targeted sweep (22 files: the generic Generated
+  Drafts/library/review-packet/export-review-packet suites, the review-
+  lifecycle and Phase-13 governance horizontal conformance suites, the
+  four-generator horizontal contract suite, and every Board Reporting/Grant
+  Response Packet suite whose fixtures needed repair) -> 489/489 PASS.
+- `git diff --check` -> PASS (no whitespace errors). Complete diff inspected:
+  3 production files (`Backend/kai/dictionary/postgresGeneratedContentRepository.js`,
+  `Backend/kai/services/kaiGeneratedContentService.js`,
+  `Backend/kai/services/kaiExportReviewService.js`), 2 frontend files
+  (`frontend/ImpactEvidenceLibrary.jsx`, `frontend/impactEvidenceLibraryLogic.js`),
+  and 12 test files (the 10 fixture repairs above plus
+  `__tests__/kai-sprint2-generated-drafts-library.spec.js`'s two new tests)
+  changed. No schema, migration, generator, validator, authorization, or
+  review-lifecycle-semantics file touched.
+
+**Status:** ALL_SEVEN_CONCEPTS_PRESENT_END_TO_END_ALL_FOUR_TYPES;
+NO_OWNER_DECISION_REQUIRED. No push, deployment, production mutation,
+feature-flag change, secret handling, real-client-data access, or
+`00_KAI_CURRENT_STATE.md` update performed.
