@@ -29629,3 +29629,148 @@ every Node command; no external provider call, database, or cloud access):**
 no production code changed, no runtime helper extracted. No push,
 deployment, production mutation, feature-flag change, secret handling,
 real-client-data access, or `00_KAI_CURRENT_STATE.md` update performed.
+
+## Phase-13 governance-semantic reconciliation (impact_narrative "currently-ineligible" fixture) - completed 2026-09-17
+
+**Goal:** reconcile the current-behavior facts established by
+`__tests__/kai-sprint2-phase13-governance-horizontal-conformance.spec.js`
+against the controlling Phase-13 Product Architecture / Roadmap validator
+contract (VAL-GEN-001..007) / Threat Model requirements named in this
+package's owner prompt, with special attention to whether a claim that is
+actually BLOCKED or actually INELIGIBLE FOR INTERNAL AUDIENCE under the
+authoritative governed claim/review model could reach impact_narrative
+generation.
+
+**Note on source authority:** the three named controlling documents
+(`KAI_MVP_Sprint2_Product_Workflow_and_Ingestion_Architecture_v0.1.md`,
+`KAI_MVP_Sprint2_Intake_Evidence_Foundation_Roadmap_Extract.md`,
+`KAI_MVP_Sprint2_Intake_AI_Threat_Model_v0.1.md`) do not exist anywhere in
+this repository (confirmed by exhaustive filename/keyword search across the
+full tree). The architecture bullets, VAL-GEN-001..005 roadmap names, and
+Threat Model control list given directly in the owner prompt were therefore
+treated as the authoritative text of those documents for this
+reconciliation, together with this living ExecPlan's own accepted decisions
+(principally Package 14-05, "Internal generation availability /
+audience-eligibility decoupling", ~line 19276).
+
+**Eligibility state model traced to source** (production code, not variable
+names):
+- `claim_review_status` (`migrations/kai_sprint2_p2_12_human_review_decision_ledger.sql`)
+  has exactly two values, `needs_gk_review` | `reviewed`; there is no
+  `'blocked'` value anywhere in the schema.
+- A claim/evidence's support assessment (`claim_strength` /
+  `support_strength`) has three values: `unassessed`, `reviewed_supported`,
+  `reviewed_not_supported`. `postgresClaimTraceabilityRepository.js` lines
+  749-793 build `blockerCodes`/`eligible` for a claim: an unresolved
+  claim/evidence review, an unassessed OR `reviewed_not_supported` (formally
+  rejected) strength, an unresolved coverage dimension, or an unresolved
+  client follow-up ALL collapse into the same `eligible:false` +
+  `blockerCodes` signal (line 770's comment states this collapsing of
+  "unassessed" and the terminal "reviewed_not_supported" decision is
+  deliberate). This traceability-level `eligible`/`blockerCodes` fact is
+  distinct from, and is not consulted by, VAL-GEN-001/003/005.
+- `audienceAuthority.{internal,funder,public}` (claim's audience
+  authorization) is a separate fact, derived in
+  `postgresGeneratedContentRepository.js` `loadGenerationProjection`/
+  `createGeneratedContentDraft`, and is the only fact VAL-GEN-005 reads
+  (`kaiGeneratedContentValidators.js` `audienceAllowed`, lines 204-209).
+- VAL-GEN-001 (`kaiGeneratedContentValidators.js` lines 62-74) reads only
+  `claim.revalidatedForGeneration` and `claim.requestedAudience`, per the
+  Package 14-05 semantic correction already recorded in this ExecPlan; it
+  does not read current-use eligibility.
+- VAL-GEN-003 (lines 90-102) reads only whether a cited `{claimId,
+  evidenceItemId}` pair is a member of the `generationClaims` actually
+  supplied for the request (`unauthorized_claim_reference`) - this, not any
+  claim-review/strength state, is the repository's actual "blocked claim"
+  exclusion, and it is enforced identically for all four content types
+  (proven per-type by this suite's existing predicate-3 test).
+
+**Findings:**
+- A claim outside the supplied/authorized `generationClaims` set (the
+  actual "blocked claim" control) cannot reach an accepted assertion in
+  impact_narrative: excluded by VAL-GEN-003, already horizontally proven for
+  this type.
+- A claim without `audienceAuthority` for the requested audience cannot
+  reach an accepted assertion in impact_narrative: excluded by VAL-GEN-005,
+  already horizontally proven for this type.
+- A claim whose separate current-use/traceability state is ineligible
+  (`currentEligible: false`, any `blockerCodes`/`limitationCodes` cause,
+  including a formally `reviewed_not_supported` claim) CAN reach accepted
+  INTERNAL impact_narrative generation. This is the documented, tested,
+  owner-accepted Package 14-05 design (`createGeneratedContentDraft` lines
+  1204-1210: "`eligible=false` alone must never reject INTERNAL draft
+  creation"), not an unreconciled gap: the fact is preserved (never
+  fabricated) and surfaced to the reviewer via `limitationCodes`/
+  `currentEligible` on the persisted citation (P3-02 review packet), and the
+  architecture's own "require review before export/final use" requirement
+  is the intended, separately-authoritative backstop for this decoupled
+  state - not a substitute for the two generation-time controls that DO
+  apply (VAL-GEN-003, VAL-GEN-005).
+- The existing suite's "currently-ineligible/limited" impact_narrative
+  fixture already represented exactly this current-use/traceability state,
+  not an authoritative blocked or audience-unauthorized claim; its wording
+  and single fixture case were imprecise/incomplete rather than wrong.
+
+**Correction (test-only, per CASE 1 of the owner prompt's action rules):**
+`__tests__/kai-sprint2-phase13-governance-horizontal-conformance.spec.js` -
+expanded the comment above, and the title of, the existing impact_narrative
+"documented variance" test to explicitly disambiguate current-use/
+traceability ineligibility from both VAL-GEN-003 blocked-claim exclusion and
+VAL-GEN-005 audience-ineligibility (both already enforced and already
+horizontally proven for impact_narrative elsewhere in the same file), and
+added a second assertion in that same test proving the identical governance
+outcome when the claim's ineligibility cause is a formally
+`reviewed_not_supported` assessment (`limitationCodes: ["support_strength_unassessed"]`)
+rather than an unresolved/pending one (`limitationCodes: ["evidence_gap_unresolved"]`) -
+proving the validator's treatment is uniform because it has no visibility
+into cause, only the boolean + an opaque code array. No production file was
+changed.
+
+**VAL-GEN reconciliation (STATUS values: CONFORMS /
+SEMANTICALLY_EQUIVALENT_DIFFERENT_IMPLEMENTATION / IMPLEMENTATION_DIVERGENCE
+/ NOT_CONFIRMED):**
+- VAL-GEN-001 ("uses eligible claims"): roadmap-named eligibility was
+  redefined by the already-accepted Package 14-05 decision to mean
+  "revalidated for this generation + requested-audience match", decoupled
+  from current-use eligibility by deliberate, tested, owner-accepted design.
+  STATUS: SEMANTICALLY_EQUIVALENT_DIFFERENT_IMPLEMENTATION. Applies to all
+  four content types.
+- VAL-GEN-002 ("traceable citations"): unchanged, content-type-agnostic.
+  STATUS: CONFORMS. All four types.
+- VAL-GEN-003 ("no blocked claims"): implements blocked-claim exclusion as
+  citation-set membership against the supplied/authorized `generationClaims`
+  - the only concept of "blocked" that actually exists as a distinct,
+  content-type-agnostic generation-time control. STATUS: CONFORMS. All four
+  types.
+- VAL-GEN-004 ("no unsupported causal language" / numeric invention):
+  unchanged, content-type-agnostic. STATUS: CONFORMS. All four types.
+- VAL-GEN-005 (audience gate): unchanged, content-type-agnostic, reads only
+  `audienceAuthority`. STATUS: CONFORMS. All four types.
+- VAL-GEN-006 (readiness-specific limitation/blocker-vs-positive-assertion
+  gate): content-type-scoped by explicit, documented design; not required
+  by the architecture to generalize to the other three types, which
+  preserve the same underlying `limitationCodes` fact as reviewer-visible
+  generator input/citation metadata rather than a generation-time blocker.
+  STATUS: CONFORMS (readiness_assessment only, by design).
+- VAL-GEN-007 (data-gap-specific gap-inversion gate): same reasoning as
+  VAL-GEN-006, scoped to data_gap_memo by design. STATUS: CONFORMS
+  (data_gap_memo only, by design).
+
+**Test evidence (`DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel` set for
+every Node command; no external provider call, database, or cloud access):**
+- `node --test __tests__/kai-sprint2-phase13-governance-horizontal-conformance.spec.js`
+  -> 38/38 PASS (35 pre-existing behavior-equivalent + 3 net-new assertions
+  inside the strengthened impact_narrative test; test count includes the
+  suite's own closing coverage-summary test).
+- `node --test __tests__/kai-sprint2-generator-result-contract-horizontal-conformance.spec.js`
+  -> 33/33 PASS (unaffected; re-run per this package's verification
+  requirement since both suites share the same production seam).
+- `git diff --check` -> PASS (no whitespace errors). Complete diff
+  inspected: only this ExecPlan and the one governance test file changed;
+  no production validator, repository, service, route, schema, or migration
+  file was touched.
+
+**Status:** PHASE13_GOVERNANCE_SEMANTICS_CONFIRMED. Test-only package; no
+production code changed. No push, deployment, production mutation,
+feature-flag change, secret handling, real-client-data access, or
+`00_KAI_CURRENT_STATE.md` update performed.

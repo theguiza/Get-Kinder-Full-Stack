@@ -374,11 +374,53 @@ test("[data_gap_memo] predicate 2 - the authoritative current gap set cannot be 
 // an internal, human-review-gated draft legitimately surface a currently
 // ineligible/limited claim (predicate 9's human-review gate is the intended
 // backstop for these two types, not a VAL-GEN blocker).
-test("[impact_narrative] predicate 2 - documented variance: a currently-ineligible/limited claim does NOT by itself block INTERNAL generation (no VAL-GEN-006/007-equivalent exists for this type; human review is the backstop)", () => {
+//
+// Disambiguation (Phase-13 reconciliation): `currentEligible: false` /
+// `limitationCodes` is the downstream current-use/traceability state
+// (unresolved claim or evidence review, an unassessed OR formally
+// not-supported claim/evidence strength, an unresolved coverage dimension,
+// or an unresolved client follow-up - postgresClaimTraceabilityRepository.js
+// lines 749-793 collapse all of these, including a terminal
+// "reviewed_not_supported" strength decision, into the same
+// eligible:false/blockerCodes signal). This is a DIFFERENT concept from
+// both of the following, which remain fully enforced for impact_narrative
+// and are proven elsewhere in this file:
+//   - a genuinely BLOCKED claim reference, i.e. one outside the governed
+//     claim/evidence identities actually supplied for this generation
+//     request: excluded by VAL-GEN-003 "unauthorized_claim_reference" for
+//     all four content types, including impact_narrative (see predicate 3
+//     above, "a citation pointing at an evidence item outside the governed
+//     claim projection is rejected by VAL-GEN-002 and VAL-GEN-003").
+//   - a claim genuinely INELIGIBLE FOR THE REQUESTED AUDIENCE, i.e. one
+//     whose `claim.audienceAuthority` does not authorize the requested
+//     audience: excluded by VAL-GEN-005 for all four content types (see
+//     predicate 7 below).
+// A claim already excluded by either of those two controls never reaches
+// this test's fixture at all - it never becomes part of `generationClaims`.
+// The `currentEligible: false` fixture below therefore does not represent
+// an authoritative "blocked" or "audience-unauthorized" claim; it represents
+// an authorized, audience-eligible, governed claim whose separate
+// current-use/traceability state (however it arose, including a formally
+// rejected support assessment) is preserved and surfaced to the reviewer
+// via `limitationCodes`/`currentEligible` on the persisted citation, with
+// human review as the required gate before any export/final use.
+test("[impact_narrative] predicate 2 - documented variance: an authorized, audience-eligible governed claim whose current-use/traceability state is ineligible (including a formally not-supported assessment) does NOT by itself block INTERNAL generation (no VAL-GEN-006/007-equivalent exists for this type; human review is the backstop, not a substitute generation-time gate)", () => {
   const result = validateGeneratedContentDraft(validArgs("impact_narrative", {
     generationClaims: [governedClaim({ limitationCodes: ["evidence_gap_unresolved"], currentEligible: false })],
   }));
   assert.equal(result.ok, true, JSON.stringify(result.blockers));
+
+  // The same governance holds regardless of WHY current-use eligibility is
+  // false: the validator has no visibility into cause (it only ever sees
+  // the boolean + an opaque limitationCodes string array), so a formally
+  // rejected ("reviewed_not_supported") claim's traceability collapses into
+  // the identical signal (postgresClaimTraceabilityRepository.js line 770's
+  // "support_strength_unassessed" blocker fires for both an unassessed AND
+  // a terminal not-supported strength) and is governed identically.
+  const rejectedResult = validateGeneratedContentDraft(validArgs("impact_narrative", {
+    generationClaims: [governedClaim({ limitationCodes: ["support_strength_unassessed"], currentEligible: false })],
+  }));
+  assert.equal(rejectedResult.ok, true, JSON.stringify(rejectedResult.blockers));
 });
 
 test("[evidence_summary] predicate 2 - a currently-ineligible governed claim requested for FUNDER use cannot become an accepted generated assertion (repository pre-generation gate, funder_use_not_currently_eligible)", async () => {
