@@ -396,6 +396,49 @@ test("Generated Drafts library service authorizes like the existing generated-dr
   assert.equal(calls, 0);
 });
 
+test("Generated Drafts library index admits all four canonical generated-content types, including data_gap_memo, and excludes unsupported types", async () => {
+  for (const contentType of ["evidence_summary", "impact_narrative", "readiness_assessment", "data_gap_memo"]) {
+    const deps = {
+      env: enabledEnv,
+      async listGeneratedDraftLibraryIndex() {
+        return [draftRow({ content_type: contentType })];
+      },
+    };
+    const result = await listGeneratedDraftLibraryIndex(
+      { organizationId, limit: 25, afterGeneratedContentDraftId: null, actorContext },
+      deps,
+    );
+    assert.equal(result.ok, true, `${contentType}: expected ok=true, got ${JSON.stringify(result.error)}`);
+    assert.equal(result.data.items[0].contentType, contentType);
+  }
+
+  // An unsupported content type still fails closed as system_error rather
+  // than being silently admitted alongside the four canonical types.
+  const deps = {
+    env: enabledEnv,
+    async listGeneratedDraftLibraryIndex() {
+      return [draftRow({ content_type: "board_update" })];
+    },
+  };
+  const result = await listGeneratedDraftLibraryIndex(
+    { organizationId, limit: 25, afterGeneratedContentDraftId: null, actorContext },
+    deps,
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "system_error");
+});
+
+test("Generated Drafts read model index includes data_gap_memo in the generic content_type allowlist alongside the other three canonical types", async () => {
+  let observed = null;
+  await readGeneratedDraftLibraryIndex(organizationId, { limit: 25, afterGeneratedContentDraftId: null }, {
+    async query(sql, params) {
+      observed = { sql, params };
+      return { rows: [] };
+    },
+  });
+  assert.match(observed.sql, /AND d\.content_type IN \('evidence_summary', 'impact_narrative', 'readiness_assessment', 'data_gap_memo'\)/);
+});
+
 test("Generated Drafts library index reuses e890a8c's export-review role boundary: gk_reviewer never receives identity/state even when a row exists", async () => {
   const deps = {
     env: enabledEnv,
@@ -584,7 +627,7 @@ test("Generated Drafts read model is bounded, organization-scoped, deterministic
     },
   });
   assert.match(observed.sql, /WHERE d\.organization_id = \$1::uuid/);
-  assert.match(observed.sql, /AND d\.content_type IN \('evidence_summary', 'impact_narrative', 'readiness_assessment'\)/);
+  assert.match(observed.sql, /AND d\.content_type IN \('evidence_summary', 'impact_narrative', 'readiness_assessment', 'data_gap_memo'\)/);
   assert.match(observed.sql, /AND d\.requested_audience = 'internal'/);
   assert.match(observed.sql, /AND d\.draft_status = 'draft'/);
   assert.match(observed.sql, /AND q\.priority = 'medium'/);
@@ -660,6 +703,7 @@ test("Generated Drafts frontend projection strips unsafe fields and preserves sa
   assert.equal(generatedDraftContentTypeLabel("evidence_summary", "internal"), "Evidence Summary · Internal");
   assert.equal(generatedDraftContentTypeLabel("impact_narrative", "internal"), "Impact Narrative · Internal");
   assert.equal(generatedDraftContentTypeLabel("readiness_assessment", "internal"), "Readiness Assessment · Internal");
+  assert.equal(generatedDraftContentTypeLabel("data_gap_memo", "internal"), "Data Gap Memo · Internal");
   assert.notEqual(generatedDraftLibraryIndexPath(organizationId), generatedDraftReviewPacketPath(organizationId, draftId));
 });
 

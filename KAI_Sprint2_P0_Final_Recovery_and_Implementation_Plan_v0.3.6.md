@@ -29436,3 +29436,84 @@ mutation, feature-flag change, secret handling, real-client-data access, or
 production root cause remains NOT_CONFIRMED from repository evidence alone.
 The `funder_ready`/`public_ready` semantics question identified separately
 remains out of scope and unchanged.
+
+## Generated Drafts Generic Index: data_gap_memo Regression Repair (2026-09-17)
+
+**Confirmed regression:** the `DATA_GAP_MEMO_PRODUCT_SURFACE` entry above
+states the backend already admitted `data_gap_memo` in the generic Generated
+Drafts read/projection contract. Current repository evidence at this HEAD
+contradicted that: `Backend/kai/db/kaiGeneratedDraftLibraryReadModels.js`
+filtered the generic Generated Drafts index `content_type` allowlist to only
+`evidence_summary`, `impact_narrative`, `readiness_assessment`, excluding
+`data_gap_memo`.
+
+**Directly coupled second defect found during inspection:** the paired
+service file, `Backend/kai/services/kaiGeneratedDraftLibraryService.js`, has
+its own `LIBRARY_CONTENT_TYPES` allowlist that independently gates the same
+generic index response. That set had only ever contained `evidence_summary`
+and `impact_narrative` (since the index's introduction), so it already
+excluded both `readiness_assessment` and `data_gap_memo` before this repair -
+confirmed empirically: a `readiness_assessment` row reaching this service
+today returns `system_error`, not the row. Restoring only the DB-layer
+allowlist without this one would have made the regression worse (a
+`data_gap_memo` row would pass the DB filter and then hit the same
+`system_error` at the service layer). Both allowlists are repaired together
+as the smallest coherent fix to the one bounded "generic Generated Drafts
+index" surface; no other file, generator, classifier, schema, migration,
+feature flag, or export/finalization authority was touched.
+
+**Repair:** widened both allowlists to the same four canonical
+generated-content types already established elsewhere in the repository
+(`Backend/kai/services/kaiGeneratedContentService.js`'s
+`ALLOWED_GENERATED_CONTENT_TYPES`): `evidence_summary`, `impact_narrative`,
+`readiness_assessment`, `data_gap_memo`. Organization scoping, requested-
+audience filtering, draft-status filtering, the `generated_content_review`
+join/state requirements, the export-review left join and its static-contract
+validation, ordering, cursor pagination, authorization, feature gates, the
+service DTO shape, the existing P3-02 single-draft review-packet selection
+path, and the Start/Complete Review lifecycle are all unchanged. No Data Gap
+Memo-specific list/read/review path was created; `data_gap_memo` drafts
+continue through the exact same generic `listGeneratedDraftLibraryIndex`
+read model, service, and frontend projection/label functions
+(`projectGeneratedDraftLibraryItems`, `generatedDraftContentTypeLabel`) as
+the other three content types.
+
+**Files changed:** `Backend/kai/db/kaiGeneratedDraftLibraryReadModels.js`,
+`Backend/kai/services/kaiGeneratedDraftLibraryService.js`,
+`__tests__/kai-sprint2-generated-drafts-library.spec.js`, and this ExecPlan.
+
+**Test evidence (`DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel` set for
+every Node command; no database/cloud/production access):**
+- Focused Generated Drafts library/index suite (includes the repaired SQL
+  allowlist assertion, two new tests proving all four canonical types are
+  admitted and an unsupported type still fails closed, and a new
+  `data_gap_memo` content-type-label assertion):
+  `node --test __tests__/kai-sprint2-generated-drafts-library.spec.js` ->
+  17/17 PASS.
+- Directly coupled regression (Data Gap product surface, P3-01/P3-02/P3-06
+  generated-draft and export-review-packet paths, export-review read
+  recovery, Data Gap backend boundary, pass2 route runtime, Readiness
+  Assessment boundary, Impact Narrative boundary):
+  `node --test __tests__/kai-sprint2-impact-evidence-library.spec.js
+  __tests__/kai-sprint2-p3-01-generated-content-drafts-boundary.spec.js
+  __tests__/kai-sprint2-p3-02-generated-draft-review-packet-boundary.spec.js
+  __tests__/kai-sprint2-p3-06-export-review-packet-boundary.spec.js
+  __tests__/kai-sprint2-generated-draft-export-review-read-recovery-boundary.spec.js
+  __tests__/kai-sprint2-data-gap-memo-draft-generation-boundary.spec.js
+  __tests__/kai-sprint2-pass2-route-runtime.spec.js
+  __tests__/kai-sprint2-readiness-assessment-draft-generation-boundary.spec.js
+  __tests__/kai-sprint2-p13-01-impact-narrative-boundary.spec.js` ->
+  244/245 PASS, 1 pre-existing unrelated failure (`kai-sprint2-pass2-route-
+  runtime.spec.js`'s route-path-list assertion is missing an unrelated
+  `.../coverage-dimensions/:dimensionKey/public-acceptance` route entry;
+  confirmed present and failing identically on this package's starting HEAD
+  before any change in this entry, so it is not a regression introduced
+  here and is left untouched as out of scope).
+- `git diff --check` -> PASS (no whitespace errors). Complete diff inspected:
+  only the two allowlist edits above and their directly coupled test file
+  changed.
+
+**Status:** DATA_GAP_MEMO_GENERATED_DRAFTS_REGRESSION_REPAIRED. Backend/
+schema/database change required: NO. No push, deployment, production
+mutation, feature-flag change, secret handling, real-client-data access, or
+`00_KAI_CURRENT_STATE.md` update performed.
