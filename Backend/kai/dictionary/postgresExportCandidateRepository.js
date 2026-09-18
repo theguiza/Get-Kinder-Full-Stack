@@ -28,8 +28,8 @@ const SHA256_LOWER_PATTERN = /^[0-9a-f]{64}$/;
 const GENERATED_CONTENT_REVIEW_RESOLVED_PROFILE = GENERATED_CONTENT_REVIEW_LIFECYCLE_PROFILES[2];
 const EXPORT_REVIEW_RESOLVED_PROFILE = EXPORT_REVIEW_LIFECYCLE_PROFILES[2];
 
-function failure(code) {
-  return { ok: false, data: null, error: { code, status: RESULT_STATUS[code] || 500 } };
+function failure(code, reason) {
+  return { ok: false, data: null, error: { code, status: RESULT_STATUS[code] || 500, reason: reason || null } };
 }
 
 function success(data) {
@@ -649,10 +649,10 @@ export function createPostgresExportCandidateRepository({ runInTransaction = wit
     },
 
     async confirmLimitationSnapshot(input, dependencies = {}) {
-      if (!validateConfirmLimitationSnapshotInput(input)) return failure("validation_blocker");
-      if (!dependencies.metadataOnlyAudit) return failure("validation_blocker");
+      if (!validateConfirmLimitationSnapshotInput(input)) return failure("validation_blocker", "invalid_confirm_input_shape");
+      if (!dependencies.metadataOnlyAudit) return failure("validation_blocker", "missing_metadata_only_audit_dependency");
       const confirmedByRole = deriveConfirmedByRole(input.actorContext, input.organizationId);
-      if (!confirmedByRole) return failure("validation_blocker");
+      if (!confirmedByRole) return failure("validation_blocker", "confirmed_by_role_not_derivable");
 
       try {
         return await runInTransaction(async (tx) => {
@@ -660,8 +660,8 @@ export function createPostgresExportCandidateRepository({ runInTransaction = wit
           if (!draft) return failure("not_found");
 
           const citedPairs = await loadCitedPairs(tx, input);
-          if (citedPairs.length === 0) return failure("validation_blocker");
-          if (!validateEntriesCoverExactCitedPairs(input.entries, citedPairs)) return failure("validation_blocker");
+          if (citedPairs.length === 0) return failure("validation_blocker", "no_cited_pairs");
+          if (!validateEntriesCoverExactCitedPairs(input.entries, citedPairs)) return failure("validation_blocker", "entries_do_not_match_cited_pairs");
 
           const entriesFingerprint = canonicalEntriesFingerprint(input.entries);
           const existing = await loadCurrentSnapshotForUpdate(tx, input);

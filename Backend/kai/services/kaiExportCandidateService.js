@@ -17,6 +17,56 @@ const CONFIRM_LIMITATION_SNAPSHOT_OPERATION = "confirm_generated_draft_limitatio
 const CREATE_EXPORT_CANDIDATE_OPERATION = "create_generated_draft_export_candidate";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
+// repository.confirmLimitationSnapshot fails closed with a bare
+// { code: "validation_blocker", reason } for several distinct internal
+// checks (input shape, missing audit dependency, an actor whose
+// organization role can't be resolved into a confirmed_by_role, a cited-pair
+// set that changed between the read and the write, or entries that don't
+// exactly cover the persisted cited pairs). Every one of those is a genuine
+// validation failure the caller needs to be able to act on, so each reason
+// maps to a populated structured blocker here rather than surfacing as an
+// empty blockers array.
+const CONFIRM_LIMITATION_SNAPSHOT_BLOCKER_DETAIL = Object.freeze({
+  invalid_confirm_input_shape: {
+    message: "The limitation snapshot confirmation request was malformed.",
+    required_fix: "Resend the request with organizationId, generatedContentDraftId, actorContext, and now populated as expected.",
+  },
+  missing_metadata_only_audit_dependency: {
+    message: "The limitation snapshot confirmation could not be recorded because its audit dependency is unavailable.",
+    required_fix: "Retry the request; if this persists, the service is missing its metadataOnlyAudit wiring.",
+  },
+  confirmed_by_role_not_derivable: {
+    message: "The confirming actor does not hold an active organization role permitted to confirm a limitation snapshot.",
+    required_fix: "Grant the confirming actor an active gk_reviewer or gk_admin membership in this organization.",
+  },
+  no_cited_pairs: {
+    message: "This generated content draft has no cited claim/evidence pairs to snapshot.",
+    required_fix: "Add at least one claim/evidence citation to the draft before confirming a limitation snapshot.",
+  },
+  entries_do_not_match_cited_pairs: {
+    message: "The limitation snapshot entries do not exactly match the draft's currently persisted cited claim/evidence pairs.",
+    required_fix: "Re-read the draft's current cited pairs and resubmit entries that cover them exactly, with no additions or omissions.",
+  },
+});
+
+function buildConfirmLimitationSnapshotValidationBlocker(reason, input) {
+  const detail = CONFIRM_LIMITATION_SNAPSHOT_BLOCKER_DETAIL[reason] || {
+    message: "The limitation snapshot confirmation failed validation.",
+    required_fix: "Review the request and retry.",
+  };
+  return {
+    validator_key: "VAL-EXP-CAND-002",
+    severity: "blocker",
+    object_type: "generated_content_draft",
+    object_code: input.generatedContentDraftId,
+    object_id: input.generatedContentDraftId,
+    message: detail.message,
+    blocking_reason: reason || "validation_failed",
+    required_fix: detail.required_fix,
+    evidence: {},
+  };
+}
+
 function hasExactKeys(value, allowed) {
   return Boolean(value)
     && typeof value === "object"
@@ -181,7 +231,16 @@ export async function confirmGeneratedDraftLimitationSnapshotFromCitedPairs(inpu
   }, {
     metadataOnlyAudit: dependencies.metadataOnlyAudit,
   });
-  if (!result.ok) return buildKaiError(result.error.code, { status: result.error.status, data: null });
+  if (!result.ok) {
+    if (result.error.code === "validation_blocker") {
+      return buildKaiError("validation_blocker", {
+        status: result.error.status,
+        data: null,
+        blockers: [buildConfirmLimitationSnapshotValidationBlocker(result.error.reason, input)],
+      });
+    }
+    return buildKaiError(result.error.code, { status: result.error.status, data: null });
+  }
   return { ok: true, data: result.data, error: null };
 }
 

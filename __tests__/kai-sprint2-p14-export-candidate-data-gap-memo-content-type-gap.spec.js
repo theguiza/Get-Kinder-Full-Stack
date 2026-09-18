@@ -290,6 +290,40 @@ test("P14 confirming the limitation snapshot via the generic route service on a 
   assert.equal(state.snapshots.length, 0, "no snapshot was written for the rejected request");
 });
 
+test("P14 confirming the limitation snapshot via the generic route service for a platform-superuser actor with no matching org membership role fails closed with a populated structured blocker (not an empty blockers array), even though the draft has a cited pair and authorization succeeds", async () => {
+  const state = makeState({ contentType: "data_gap_memo", reviewResolved: true });
+  const exportCandidateRepository = repositoryFor(state);
+
+  // This actor is authorized by validateActorCanPerformOperation's
+  // platform-superuser bypass (kaiAuthorizationService.js), which does not
+  // require any kai.organization_memberships row at all. But
+  // deriveConfirmedByRole in the repository has no such bypass - it strictly
+  // requires an active membership with role gk_reviewer/gk_admin for this
+  // organization to attribute the confirmation. The cited pair exists and
+  // the actor is authorized, yet confirmation must still fail closed - the
+  // regression this guards is that failure surfacing with an EMPTY blockers
+  // array instead of a populated one.
+  const platformSuperuserActorContext = Object.freeze({
+    actorType: "human",
+    actorUserId: "90000000-0000-4000-8000-000000000099",
+    platformSuperuser: true,
+    organizationMemberships: [],
+  });
+
+  const confirmResult = await confirmGeneratedDraftLimitationSnapshotFromCitedPairs(
+    { organizationId: ORG, generatedContentDraftId: DRAFT, actorContext: platformSuperuserActorContext, now: NOW },
+    { exportCandidateRepository, metadataOnlyAudit: auditRecorder(), env: enabledEnv },
+  );
+
+  assert.equal(confirmResult.ok, false);
+  assert.equal(confirmResult.error.code, "validation_blocker");
+  assert.equal(confirmResult.error.status, 422);
+  assert.ok(Array.isArray(confirmResult.blockers) && confirmResult.blockers.length > 0, JSON.stringify(confirmResult));
+  assert.equal(confirmResult.blockers[0].blocking_reason, "confirmed_by_role_not_derivable");
+  assert.equal(confirmResult.blockers[0].object_code, DRAFT);
+  assert.equal(state.snapshots.length, 0, "no snapshot was written for the rejected request");
+});
+
 test("P14 a superseded limitation snapshot fails closed: the bound candidate's currentness evaluates to superseded, not current", async () => {
   const state = makeState({ contentType: "data_gap_memo", reviewResolved: true });
   const exportCandidateRepository = repositoryFor(state);
