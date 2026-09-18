@@ -147,7 +147,24 @@ export async function confirmGeneratedDraftLimitationSnapshotFromCitedPairs(inpu
   if (!citedPairsResult.ok) {
     return buildKaiError(citedPairsResult.error.code, { status: citedPairsResult.error.status, data: null });
   }
-  if (citedPairsResult.data.citedPairs.length === 0) return buildKaiError("validation_blocker", { data: null });
+  if (citedPairsResult.data.citedPairs.length === 0) {
+    return buildKaiError("validation_blocker", {
+      data: null,
+      blockers: [
+        {
+          validator_key: "VAL-EXP-CAND-001",
+          severity: "blocker",
+          object_type: "generated_content_draft",
+          object_code: input.generatedContentDraftId,
+          object_id: input.generatedContentDraftId,
+          message: "This generated content draft has no cited claim/evidence pairs to snapshot.",
+          blocking_reason: "no_cited_pairs",
+          required_fix: "Add at least one claim/evidence citation to the draft before confirming a limitation snapshot.",
+          evidence: {},
+        },
+      ],
+    });
+  }
 
   const entries = citedPairsResult.data.citedPairs.map((pair) => ({
     claimId: pair.claimId,

@@ -58,7 +58,7 @@ function auditRecorder() {
 // object. Mutations are appended to the matching in-memory table; every
 // currentness/fingerprint/coverage decision is still made by the real,
 // unmodified repository code running against this fake data.
-function makeState({ contentType = "data_gap_memo", reviewResolved = true } = {}) {
+function makeState({ contentType = "data_gap_memo", reviewResolved = true, citations = null } = {}) {
   return {
     draft: {
       generated_content_draft_id: DRAFT,
@@ -74,7 +74,7 @@ function makeState({ contentType = "data_gap_memo", reviewResolved = true } = {}
       ? { queue_status: "resolved", review_status: "resolved" }
       : { queue_status: "in_progress", review_status: "needs_gk_review" },
     blocks: [{ generated_content_block_id: BLOCK, ordinal: 1, text: "KAI's data gap memo finding." }],
-    citations: [{ generated_content_block_id: BLOCK, claim_id: CLAIM, evidence_item_id: EVIDENCE, source_id: SOURCE, source_version_id: SOURCE_VERSION }],
+    citations: citations ?? [{ generated_content_block_id: BLOCK, claim_id: CLAIM, evidence_item_id: EVIDENCE, source_id: SOURCE, source_version_id: SOURCE_VERSION }],
     snapshots: [],
     snapshotEntries: [],
     candidates: [],
@@ -270,6 +270,24 @@ test("P14 confirming the limitation snapshot via the generic route service deriv
   assert.equal(replayResult.data.replayed, true);
   assert.equal(replayResult.data.exportCandidateId, exportCandidateId);
   assert.equal(state.candidates.length, 1, "no duplicate export_candidates row was inserted on replay");
+});
+
+test("P14 confirming the limitation snapshot via the generic route service on a draft with no cited pairs fails closed with a populated structured blocker (not an empty blockers array)", async () => {
+  const state = makeState({ contentType: "data_gap_memo", reviewResolved: true, citations: [] });
+  const exportCandidateRepository = repositoryFor(state);
+
+  const confirmResult = await confirmGeneratedDraftLimitationSnapshotFromCitedPairs(
+    { organizationId: ORG, generatedContentDraftId: DRAFT, actorContext: gkAdminActorContext, now: NOW },
+    { exportCandidateRepository, metadataOnlyAudit: auditRecorder(), env: enabledEnv },
+  );
+
+  assert.equal(confirmResult.ok, false);
+  assert.equal(confirmResult.error.code, "validation_blocker");
+  assert.equal(confirmResult.error.status, 422);
+  assert.ok(Array.isArray(confirmResult.blockers) && confirmResult.blockers.length > 0, JSON.stringify(confirmResult));
+  assert.equal(confirmResult.blockers[0].blocking_reason, "no_cited_pairs");
+  assert.equal(confirmResult.blockers[0].object_code, DRAFT);
+  assert.equal(state.snapshots.length, 0, "no snapshot was written for the rejected request");
 });
 
 test("P14 a superseded limitation snapshot fails closed: the bound candidate's currentness evaluates to superseded, not current", async () => {
