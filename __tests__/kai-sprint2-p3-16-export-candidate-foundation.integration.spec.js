@@ -170,7 +170,7 @@ async function runP316IntegrationSuite() {
     return { draftId, claimA, evidenceA, claimB, evidenceB, genQueueItemId: genQueueRows[0].review_queue_item_id };
   }
 
-  function confirmInput({ draftId, claimA, evidenceA, claimB, evidenceB, codesA = [], codesB = [], actor = gkReviewer, now = NOW }) {
+  function confirmInput({ draftId, claimA, evidenceA, claimB, evidenceB, codesA = [], codesB = [], actor = gkReviewer, confirmedByRole = "gk_reviewer", now = NOW }) {
     return {
       organizationId: ORG,
       generatedContentDraftId: draftId,
@@ -179,6 +179,7 @@ async function runP316IntegrationSuite() {
         { claimId: claimB, evidenceItemId: evidenceB, limitationCodes: codesB },
       ],
       actorContext: actor,
+      confirmedByRole,
       now,
     };
   }
@@ -192,7 +193,7 @@ async function runP316IntegrationSuite() {
     const repo = repository();
 
     const missing = await repo.confirmLimitationSnapshot(
-      { organizationId: ORG, generatedContentDraftId: draftId, entries: [{ claimId: claimA, evidenceItemId: evidenceA, limitationCodes: [] }], actorContext: gkReviewer, now: NOW },
+      { organizationId: ORG, generatedContentDraftId: draftId, entries: [{ claimId: claimA, evidenceItemId: evidenceA, limitationCodes: [] }], actorContext: gkReviewer, confirmedByRole: "gk_reviewer", now: NOW },
       { metadataOnlyAudit: auditRecorder() },
     );
     assert.equal(missing.error.code, "validation_blocker");
@@ -207,6 +208,7 @@ async function runP316IntegrationSuite() {
           { claimId: claimA, evidenceItemId: "10000000-0000-4000-8000-000000009999", limitationCodes: [] },
         ],
         actorContext: gkReviewer,
+        confirmedByRole: "gk_reviewer",
         now: NOW,
       },
       { metadataOnlyAudit: auditRecorder() },
@@ -391,15 +393,25 @@ async function runP316IntegrationSuite() {
     assert.equal(auditRows[0].count, 2); // one for the first confirmation, one for the single winning supersession
   });
 
-  test("P3-16 limitation snapshot confirmation: gk_reviewer role and gk_admin role are both authoritative, and cross-tenant/uncited claim ids are rejected", async () => {
+  test("P3-16 limitation snapshot confirmation: gk_reviewer role and gk_admin role are both authoritative, and an actor with no confirmedByRole the repository recognizes as canonical is rejected", async () => {
     const seed = await seedDraftReadyForCandidate();
     const repo = repository();
-    const asAdmin = await repo.confirmLimitationSnapshot(confirmInput({ ...seed, actor: gkAdmin }), { metadataOnlyAudit: auditRecorder() });
+    const asAdmin = await repo.confirmLimitationSnapshot(confirmInput({ ...seed, actor: gkAdmin, confirmedByRole: "gk_admin" }), { metadataOnlyAudit: auditRecorder() });
     assert.equal(asAdmin.ok, true);
     assert.equal(asAdmin.data.confirmedByRole, "gk_admin");
 
+    // The repository no longer derives confirmedByRole from
+    // actorContext.organizationMemberships - it only validates that the
+    // caller-supplied confirmedByRole is canonical (gk_reviewer/gk_admin).
+    // This reproduces the case a caller that skipped resolution (or resolved
+    // to a non-canonical value) would hit.
     const noRole = await repo.confirmLimitationSnapshot(
-      confirmInput({ ...seed, actor: { actorType: "human", actorUserId: "x", organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_admin" }] }, now: LATER }),
+      confirmInput({
+        ...seed,
+        actor: { actorType: "human", actorUserId: "x", organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_admin" }] },
+        confirmedByRole: "client_admin",
+        now: LATER,
+      }),
       { metadataOnlyAudit: auditRecorder() },
     );
     assert.equal(noRole.error.code, "validation_blocker");

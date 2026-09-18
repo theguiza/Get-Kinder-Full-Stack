@@ -157,7 +157,7 @@ async function runP317IntegrationSuite() {
     );
 
     const snapshot = await exportCandidateRepository.confirmLimitationSnapshot(
-      { organizationId: ORG, generatedContentDraftId: draftId, entries: [{ claimId: claimA, evidenceItemId: evidenceA, limitationCodes: [] }], actorContext: gkReviewer, now: NOW },
+      { organizationId: ORG, generatedContentDraftId: draftId, entries: [{ claimId: claimA, evidenceItemId: evidenceA, limitationCodes: [] }], actorContext: gkReviewer, confirmedByRole: "gk_reviewer", now: NOW },
       { metadataOnlyAudit: auditRecorder() },
     );
     assert.equal(snapshot.ok, true);
@@ -332,7 +332,7 @@ async function runP317IntegrationSuite() {
 
     // Supersede the bound limitation snapshot without touching the ledger at all.
     await exportCandidateRepository.confirmLimitationSnapshot(
-      { organizationId: ORG, generatedContentDraftId: seed.draftId, entries: [{ claimId: seed.claimA, evidenceItemId: seed.evidenceA, limitationCodes: ["small_sample_size"] }], actorContext: gkReviewer, now: LATER },
+      { organizationId: ORG, generatedContentDraftId: seed.draftId, entries: [{ claimId: seed.claimA, evidenceItemId: seed.evidenceA, limitationCodes: ["small_sample_size"] }], actorContext: gkReviewer, confirmedByRole: "gk_reviewer", now: LATER },
       { metadataOnlyAudit: auditRecorder() },
     );
 

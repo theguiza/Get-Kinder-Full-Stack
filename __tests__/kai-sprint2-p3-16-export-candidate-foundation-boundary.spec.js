@@ -4,11 +4,13 @@ import { readFileSync } from "node:fs";
 
 import {
   confirmGeneratedDraftLimitationSnapshot,
+  confirmGeneratedDraftLimitationSnapshotFromCitedPairs,
   createGeneratedDraftExportCandidate,
   __exportCandidateServiceContract,
   __exportCandidateServiceTestables,
 } from "../Backend/kai/services/kaiExportCandidateService.js";
 import {
+  createPostgresExportCandidateRepository,
   __exportCandidateRepositoryTestables,
 } from "../Backend/kai/dictionary/postgresExportCandidateRepository.js";
 import {
@@ -47,6 +49,16 @@ const gkReviewerActorContext = Object.freeze({
     { organization_id: ORG, membership_status: "active", role_name: "gk_reviewer" },
   ],
 });
+// The existing Get Kinder site-admin authority: no kai.organization_memberships
+// row at all, authorized solely through central authorization's recognized
+// get_kinder_site_admin platform-superuser bypass.
+const platformSuperuserActorContext = Object.freeze({
+  actorType: "human",
+  actorUserId: "90000000-0000-4000-8000-000000000006",
+  organizationMemberships: [],
+  platformSuperuser: true,
+  platformSuperuserAuthority: "get_kinder_site_admin",
+});
 
 function auditRecorder() {
   return { prepareMetadataOnlyAudit() { return { ok: true, async publish() {} }; } };
@@ -58,6 +70,18 @@ function confirmInput(overrides = {}) {
     generatedContentDraftId: DRAFT,
     entries: [{ claimId: CLAIM_A, evidenceItemId: EVIDENCE_A, limitationCodes: ["small_sample_size"] }],
     actorContext: gkReviewerActorContext,
+    now: NOW,
+    ...overrides,
+  };
+}
+
+function repositoryConfirmInput(overrides = {}) {
+  return {
+    organizationId: ORG,
+    generatedContentDraftId: DRAFT,
+    entries: [{ claimId: CLAIM_A, evidenceItemId: EVIDENCE_A, limitationCodes: ["small_sample_size"] }],
+    actorContext: gkReviewerActorContext,
+    confirmedByRole: "gk_reviewer",
     now: NOW,
     ...overrides,
   };
@@ -91,22 +115,25 @@ test("P3-16 limitation snapshot confirmation is restricted to gk_reviewer/gk_adm
 
 // --- repository pure-function testables ---
 
-test("P3-16 confirm-limitation-snapshot input validator rejects unknown keys, malformed ids, malformed codes, and duplicate cited pairs", () => {
+test("P3-16 confirm-limitation-snapshot input validator rejects unknown keys, malformed ids, malformed codes, duplicate cited pairs, and a missing/blank confirmedByRole", () => {
   const { validateConfirmLimitationSnapshotInput } = __exportCandidateRepositoryTestables;
-  assert.equal(validateConfirmLimitationSnapshotInput(confirmInput()), true);
-  assert.equal(validateConfirmLimitationSnapshotInput({ ...confirmInput(), extra: true }), false);
-  assert.equal(validateConfirmLimitationSnapshotInput(confirmInput({ organizationId: "not-a-uuid" })), false);
-  assert.equal(validateConfirmLimitationSnapshotInput(confirmInput({ entries: [] })), false);
-  assert.equal(validateConfirmLimitationSnapshotInput(confirmInput({
+  assert.equal(validateConfirmLimitationSnapshotInput(repositoryConfirmInput()), true);
+  assert.equal(validateConfirmLimitationSnapshotInput({ ...repositoryConfirmInput(), extra: true }), false);
+  assert.equal(validateConfirmLimitationSnapshotInput(confirmInput()), false, "the service-shaped input (no confirmedByRole) is not a valid repository input");
+  assert.equal(validateConfirmLimitationSnapshotInput(repositoryConfirmInput({ organizationId: "not-a-uuid" })), false);
+  assert.equal(validateConfirmLimitationSnapshotInput(repositoryConfirmInput({ entries: [] })), false);
+  assert.equal(validateConfirmLimitationSnapshotInput(repositoryConfirmInput({
     entries: [{ claimId: CLAIM_A, evidenceItemId: EVIDENCE_A, limitationCodes: ["BAD CODE"] }],
   })), false);
-  assert.equal(validateConfirmLimitationSnapshotInput(confirmInput({
+  assert.equal(validateConfirmLimitationSnapshotInput(repositoryConfirmInput({
     entries: [
       { claimId: CLAIM_A, evidenceItemId: EVIDENCE_A, limitationCodes: [] },
       { claimId: CLAIM_A, evidenceItemId: EVIDENCE_A, limitationCodes: ["x"] },
     ],
   })), false);
-  assert.equal(validateConfirmLimitationSnapshotInput(confirmInput({ now: "2026-08-07 10:00:00" })), false);
+  assert.equal(validateConfirmLimitationSnapshotInput(repositoryConfirmInput({ now: "2026-08-07 10:00:00" })), false);
+  assert.equal(validateConfirmLimitationSnapshotInput(repositoryConfirmInput({ confirmedByRole: "" })), false);
+  assert.equal(validateConfirmLimitationSnapshotInput(repositoryConfirmInput({ confirmedByRole: null })), false);
 });
 
 test("P3-16 exact cited-pair coverage rejects missing pairs, extra/uncited pairs, and accepts an exact match", () => {
@@ -142,21 +169,24 @@ test("P3-16 canonicalEntriesFingerprint is order-independent, code-set-order-ind
   assert.notEqual(canonicalEntriesFingerprint(a), canonicalEntriesFingerprint(changed));
 });
 
-test("P3-16 deriveConfirmedByRole requires an active, org-scoped gk_reviewer/gk_admin membership", () => {
-  const { deriveConfirmedByRole } = __exportCandidateRepositoryTestables;
-  assert.equal(deriveConfirmedByRole(gkReviewerActorContext, ORG), "gk_reviewer");
-  assert.equal(deriveConfirmedByRole(gkAdminActorContext, ORG), "gk_admin");
-  assert.equal(deriveConfirmedByRole(gkReviewerActorContext, OTHER_ORG), null);
-  assert.equal(deriveConfirmedByRole({
-    actorType: "human",
-    actorUserId: "x",
-    organizationMemberships: [{ organization_id: ORG, membership_status: "inactive", role_name: "gk_admin" }],
-  }, ORG), null);
-  assert.equal(deriveConfirmedByRole({
-    actorType: "human",
-    actorUserId: "x",
-    organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_admin" }],
-  }, ORG), null);
+test("P3-16 repository no longer derives confirmedByRole from actorContext.organizationMemberships: an actor with no active org membership at all (the platform-superuser shape) is accepted once the service supplies a canonical confirmedByRole", async () => {
+  const repository = createPostgresExportCandidateRepository({ runInTransaction: async () => { throw new Error("should not reach a transaction: shape/role validation must fail first"); } });
+  const platformSuperuserActor = { actorType: "human", actorUserId: "x", organizationMemberships: [] };
+
+  const missingRole = await repository.confirmLimitationSnapshot(
+    { organizationId: ORG, generatedContentDraftId: DRAFT, entries: [{ claimId: CLAIM_A, evidenceItemId: EVIDENCE_A, limitationCodes: [] }], actorContext: platformSuperuserActor, confirmedByRole: null, now: NOW },
+    { metadataOnlyAudit: auditRecorder() },
+  );
+  assert.equal(missingRole.ok, false);
+  assert.equal(missingRole.error.code, "validation_blocker");
+
+  const nonCanonicalRole = await repository.confirmLimitationSnapshot(
+    { organizationId: ORG, generatedContentDraftId: DRAFT, entries: [{ claimId: CLAIM_A, evidenceItemId: EVIDENCE_A, limitationCodes: [] }], actorContext: platformSuperuserActor, confirmedByRole: "client_admin", now: NOW },
+    { metadataOnlyAudit: auditRecorder() },
+  );
+  assert.equal(nonCanonicalRole.ok, false);
+  assert.equal(nonCanonicalRole.error.code, "validation_blocker");
+  assert.equal(nonCanonicalRole.error.reason, "confirmed_by_role_not_derivable");
 });
 
 test("P3-16 create-export-candidate input validator rejects unknown keys, malformed ids, and non-canonical timestamps", () => {
@@ -274,6 +304,106 @@ test("P3-16 confirmGeneratedDraftLimitationSnapshot requires feature flags, exac
   const asAdmin = await confirmGeneratedDraftLimitationSnapshot(confirmInput({ actorContext: gkAdminActorContext }), { ...deps, env: enabledEnv });
   assert.equal(asAdmin.ok, true);
   assert.equal(repositoryCalls, 2);
+});
+
+function capturingRepository() {
+  const calls = [];
+  return {
+    calls,
+    async confirmLimitationSnapshot(input) {
+      calls.push(input);
+      return { ok: true, data: { confirmedByRole: input.confirmedByRole }, error: null };
+    },
+  };
+}
+
+test("P3-16 confirmGeneratedDraftLimitationSnapshot: recognized site-admin platform-superuser authorization (no org membership) attributes gk_admin and passes it to the repository [SERVICE_REPOSITORY_ARGUMENT]", async () => {
+  const repository = capturingRepository();
+  const deps = { exportCandidateRepository: repository, metadataOnlyAudit: auditRecorder(), env: enabledEnv };
+
+  const result = await confirmGeneratedDraftLimitationSnapshot(confirmInput({ actorContext: platformSuperuserActorContext }), deps);
+  assert.equal(result.ok, true);
+  assert.equal(repository.calls.length, 1);
+  assert.equal(repository.calls[0].confirmedByRole, "gk_admin");
+  assert.equal(Object.hasOwn(repository.calls[0].actorContext, "organizationMemberships"), true);
+  assert.deepEqual(repository.calls[0].actorContext.organizationMemberships, [], "no synthetic membership is fabricated");
+});
+
+test("P3-16 confirmGeneratedDraftLimitationSnapshot: an ordinary unauthorized actor is blocked before the repository is ever called [SERVICE_REPOSITORY_ARGUMENT]", async () => {
+  const repository = capturingRepository();
+  const deps = { exportCandidateRepository: repository, metadataOnlyAudit: auditRecorder(), env: enabledEnv };
+
+  const result = await confirmGeneratedDraftLimitationSnapshot(
+    confirmInput({ actorContext: { actorType: "human", actorUserId: "x", organizationMemberships: [] } }),
+    deps,
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "authorization_denied");
+  assert.equal(repository.calls.length, 0);
+});
+
+test("P3-16 confirmGeneratedDraftLimitationSnapshot: gk_reviewer and gk_admin memberships attribute their own role to the repository [SERVICE_REPOSITORY_ARGUMENT]", async () => {
+  const repository = capturingRepository();
+  const deps = { exportCandidateRepository: repository, metadataOnlyAudit: auditRecorder(), env: enabledEnv };
+
+  const asReviewer = await confirmGeneratedDraftLimitationSnapshot(confirmInput({ actorContext: gkReviewerActorContext }), deps);
+  assert.equal(asReviewer.ok, true);
+  assert.equal(repository.calls[0].confirmedByRole, "gk_reviewer");
+
+  const asAdmin = await confirmGeneratedDraftLimitationSnapshot(confirmInput({ actorContext: gkAdminActorContext }), deps);
+  assert.equal(asAdmin.ok, true);
+  assert.equal(repository.calls[1].confirmedByRole, "gk_admin");
+});
+
+test("P3-16 confirmGeneratedDraftLimitationSnapshot: successful authorization with unresolvable attribution fails closed with confirmed_by_role_not_derivable and never reaches the repository", async () => {
+  const repository = capturingRepository();
+  const deps = { exportCandidateRepository: repository, metadataOnlyAudit: auditRecorder(), env: enabledEnv };
+
+  // Central authorization's platform-superuser bypass succeeds regardless of
+  // the operation's allowedRoles (see kai-sprint2-authorization.spec.js), but
+  // this actor's platformSuperuserAuthority is not the recognized
+  // get_kinder_site_admin source, so the shared resolver in
+  // Backend/kai/auth/kaiAuthorizedRoleAttribution.js must not attribute
+  // gk_admin (see kai-sprint2-authorized-role-attribution.spec.js for the
+  // resolver-level proof of this same rule).
+  const result = await confirmGeneratedDraftLimitationSnapshot(
+    confirmInput({
+      actorContext: {
+        actorType: "human",
+        actorUserId: "x",
+        organizationMemberships: [],
+        platformSuperuser: true,
+        platformSuperuserAuthority: "not_get_kinder_site_admin",
+      },
+    }),
+    deps,
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "validation_blocker");
+  assert.equal(result.blockers[0].blocking_reason, "confirmed_by_role_not_derivable");
+  assert.equal(repository.calls.length, 0);
+});
+
+test("P3-16 confirmGeneratedDraftLimitationSnapshotFromCitedPairs follows the same attribution flow as confirmGeneratedDraftLimitationSnapshot [SERVICE_REPOSITORY_ARGUMENT]", async () => {
+  const calls = [];
+  const repository = {
+    async loadCitedPairsForDraft() {
+      return { ok: true, data: { citedPairs: [{ claimId: CLAIM_A, evidenceItemId: EVIDENCE_A }] } };
+    },
+    async confirmLimitationSnapshot(input) {
+      calls.push(input);
+      return { ok: true, data: { confirmedByRole: input.confirmedByRole }, error: null };
+    },
+  };
+  const deps = { exportCandidateRepository: repository, metadataOnlyAudit: auditRecorder(), env: enabledEnv };
+
+  const asSiteAdmin = await confirmGeneratedDraftLimitationSnapshotFromCitedPairs(
+    candidateInput({ actorContext: platformSuperuserActorContext }),
+    deps,
+  );
+  assert.equal(asSiteAdmin.ok, true);
+  assert.equal(calls[0].confirmedByRole, "gk_admin");
+  assert.deepEqual(calls[0].actorContext.organizationMemberships, []);
 });
 
 test("P3-16 confirmGeneratedDraftLimitationSnapshot lazy-loads the database-capable repository only after all gates, per its own source", () => {

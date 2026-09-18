@@ -114,12 +114,21 @@ function canonicalEntriesFingerprint(entries) {
 // Limitation snapshot confirmation (OWNER_DECISION.P3_EXPORT_LIMITATION_SNAPSHOT_V1)
 // ---------------------------------------------------------------------------
 
+// confirmedByRole is resolved by the service layer (from the actor's own
+// successful authorization result, via the shared resolveAuthorizedHumanRole
+// attribution helper) and supplied here as plain data - this repository no
+// longer derives it from actorContext.organizationMemberships. Its shape is
+// checked here; its canonical/DDL validity is checked separately in
+// confirmLimitationSnapshot, where a missing/non-canonical value still fails
+// closed with the same "confirmed_by_role_not_derivable" reason a caller
+// that skipped resolution would previously have hit.
 function validateConfirmLimitationSnapshotInput(input) {
   if (!hasExactKeys(input, new Set([
     "organizationId",
     "generatedContentDraftId",
     "entries",
     "actorContext",
+    "confirmedByRole",
     "now",
   ]))) return false;
   if (!UUID_PATTERN.test(input.organizationId)) return false;
@@ -136,16 +145,8 @@ function validateConfirmLimitationSnapshotInput(input) {
     seen.add(key);
   }
   if (!Boolean(input.actorContext) || typeof input.actorContext !== "object" || Array.isArray(input.actorContext)) return false;
+  if (typeof input.confirmedByRole !== "string" || input.confirmedByRole.length === 0) return false;
   return isCanonicalUtcTimestamp(input.now);
-}
-
-function deriveConfirmedByRole(actorContext, organizationId) {
-  const memberships = (actorContext?.organizationMemberships || []).filter(
-    (membership) => String(membership.organization_id) === String(organizationId)
-      && membership.membership_status === "active"
-      && LIMITATION_SNAPSHOT_ALLOWED_ROLES.includes(membership.role_name),
-  );
-  return memberships[0]?.role_name || null;
 }
 
 async function loadCitedPairs(tx, { organizationId, generatedContentDraftId }) {
@@ -651,8 +652,10 @@ export function createPostgresExportCandidateRepository({ runInTransaction = wit
     async confirmLimitationSnapshot(input, dependencies = {}) {
       if (!validateConfirmLimitationSnapshotInput(input)) return failure("validation_blocker", "invalid_confirm_input_shape");
       if (!dependencies.metadataOnlyAudit) return failure("validation_blocker", "missing_metadata_only_audit_dependency");
-      const confirmedByRole = deriveConfirmedByRole(input.actorContext, input.organizationId);
-      if (!confirmedByRole) return failure("validation_blocker", "confirmed_by_role_not_derivable");
+      const { confirmedByRole } = input;
+      if (!LIMITATION_SNAPSHOT_ALLOWED_ROLES.includes(confirmedByRole)) {
+        return failure("validation_blocker", "confirmed_by_role_not_derivable");
+      }
 
       try {
         return await runInTransaction(async (tx) => {
@@ -887,7 +890,6 @@ export const __exportCandidateRepositoryTestables = Object.freeze({
   validateCreateExportCandidateInput,
   buildCanonicalRepresentation,
   canonicalFingerprint,
-  deriveConfirmedByRole,
   evaluateExportCandidateCurrentnessInTransaction,
   loadExportCandidateCanonicalRepresentationInTransaction,
 });

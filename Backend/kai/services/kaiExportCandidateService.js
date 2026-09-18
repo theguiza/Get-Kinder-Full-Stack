@@ -5,6 +5,7 @@ import {
 } from "../config/kaiSprint2Config.js";
 import { buildKaiError } from "../errors/kaiErrors.js";
 import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationService.js";
+import { resolveAuthorizedHumanRole } from "../auth/kaiAuthorizedRoleAttribution.js";
 import {
   LIMITATION_SNAPSHOT_ALLOWED_ROLES,
   EXPORT_CANDIDATE_ALLOWED_ROLES,
@@ -154,9 +155,21 @@ export async function confirmGeneratedDraftLimitationSnapshot(input, dependencie
     return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers, data: null });
   }
 
+  const confirmedByRole = resolveAuthorizedHumanRole({
+    actorContext: input.actorContext,
+    auth,
+    allowedRoles: LIMITATION_SNAPSHOT_ROLES,
+  });
+  if (!confirmedByRole) {
+    return buildKaiError("validation_blocker", {
+      data: null,
+      blockers: [buildConfirmLimitationSnapshotValidationBlocker("confirmed_by_role_not_derivable", input)],
+    });
+  }
+
   const repository =
     dependencies.exportCandidateRepository || (await createDefaultExportCandidateRepository());
-  const result = await repository.confirmLimitationSnapshot(input, {
+  const result = await repository.confirmLimitationSnapshot({ ...input, confirmedByRole }, {
     metadataOnlyAudit: dependencies.metadataOnlyAudit,
   });
   if (!result.ok) return buildKaiError(result.error.code, { status: result.error.status, data: null });
@@ -188,6 +201,18 @@ export async function confirmGeneratedDraftLimitationSnapshotFromCitedPairs(inpu
   );
   if (!auth.ok) {
     return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers, data: null });
+  }
+
+  const confirmedByRole = resolveAuthorizedHumanRole({
+    actorContext: input.actorContext,
+    auth,
+    allowedRoles: LIMITATION_SNAPSHOT_ROLES,
+  });
+  if (!confirmedByRole) {
+    return buildKaiError("validation_blocker", {
+      data: null,
+      blockers: [buildConfirmLimitationSnapshotValidationBlocker("confirmed_by_role_not_derivable", input)],
+    });
   }
 
   const repository =
@@ -227,6 +252,7 @@ export async function confirmGeneratedDraftLimitationSnapshotFromCitedPairs(inpu
     generatedContentDraftId: input.generatedContentDraftId,
     entries,
     actorContext: input.actorContext,
+    confirmedByRole,
     now: input.now,
   }, {
     metadataOnlyAudit: dependencies.metadataOnlyAudit,

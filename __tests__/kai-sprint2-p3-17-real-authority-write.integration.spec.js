@@ -146,7 +146,7 @@ async function runRealAuthorityWriteSuite() {
     );
 
     const snapshot = await exportCandidateRepository.confirmLimitationSnapshot(
-      { organizationId: ORG, generatedContentDraftId: draftId, entries: [{ claimId: claimA, evidenceItemId: evidenceA, limitationCodes: [] }], actorContext: gkReviewer, now: NOW },
+      { organizationId: ORG, generatedContentDraftId: draftId, entries: [{ claimId: claimA, evidenceItemId: evidenceA, limitationCodes: [] }], actorContext: gkReviewer, confirmedByRole: "gk_reviewer", now: NOW },
       { metadataOnlyAudit: auditRecorder() },
     );
     assert.equal(snapshot.ok, true);

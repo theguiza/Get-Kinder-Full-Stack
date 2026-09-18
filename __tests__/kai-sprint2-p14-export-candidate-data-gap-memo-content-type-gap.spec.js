@@ -290,19 +290,23 @@ test("P14 confirming the limitation snapshot via the generic route service on a 
   assert.equal(state.snapshots.length, 0, "no snapshot was written for the rejected request");
 });
 
-test("P14 confirming the limitation snapshot via the generic route service for a platform-superuser actor with no matching org membership role fails closed with a populated structured blocker (not an empty blockers array), even though the draft has a cited pair and authorization succeeds", async () => {
+test("P14 [KAI Package 2B] confirming the limitation snapshot via the generic route service for a recognized site-admin platform-superuser actor with no org membership succeeds and attributes gk_admin (not confirmed_by_role_not_derivable) [SQL_BIND]", async () => {
   const state = makeState({ contentType: "data_gap_memo", reviewResolved: true });
   const exportCandidateRepository = repositoryFor(state);
 
   // This actor is authorized by validateActorCanPerformOperation's
   // platform-superuser bypass (kaiAuthorizationService.js), which does not
-  // require any kai.organization_memberships row at all. But
-  // deriveConfirmedByRole in the repository has no such bypass - it strictly
-  // requires an active membership with role gk_reviewer/gk_admin for this
-  // organization to attribute the confirmation. The cited pair exists and
-  // the actor is authorized, yet confirmation must still fail closed - the
-  // regression this guards is that failure surfacing with an EMPTY blockers
-  // array instead of a populated one.
+  // require any kai.organization_memberships row at all -
+  // platformSuperuserAuthority defaults to the recognized
+  // "get_kinder_site_admin" source when the actor doesn't set it explicitly.
+  // Before the KAI Package 2B repair, the repository's own deriveConfirmedByRole
+  // had no such bypass - it strictly required an active gk_reviewer/gk_admin
+  // membership for this organization, so this exact actor/operation
+  // combination spuriously failed with confirmed_by_role_not_derivable even
+  // though authorization had already succeeded. Post-repair, attribution is
+  // resolved from the same successful authorization result
+  // (resolveAuthorizedHumanRole, Backend/kai/auth/kaiAuthorizedRoleAttribution.js)
+  // and correctly attributes gk_admin with no synthetic membership.
   const platformSuperuserActorContext = Object.freeze({
     actorType: "human",
     actorUserId: "90000000-0000-4000-8000-000000000099",
@@ -312,6 +316,34 @@ test("P14 confirming the limitation snapshot via the generic route service for a
 
   const confirmResult = await confirmGeneratedDraftLimitationSnapshotFromCitedPairs(
     { organizationId: ORG, generatedContentDraftId: DRAFT, actorContext: platformSuperuserActorContext, now: NOW },
+    { exportCandidateRepository, metadataOnlyAudit: auditRecorder(), env: enabledEnv },
+  );
+
+  assert.equal(confirmResult.ok, true, JSON.stringify(confirmResult));
+  assert.equal(confirmResult.data.confirmedByRole, "gk_admin");
+  assert.equal(state.snapshots.length, 1, "the snapshot was persisted for the accepted request");
+  assert.equal(state.snapshots[0].confirmed_by_role, "gk_admin", "the bound INSERT ... kai.limitation_snapshots parameter carries gk_admin");
+  assert.equal(state.snapshots[0].confirmed_by, "90000000-0000-4000-8000-000000000099");
+});
+
+test("P14 [KAI Package 2B] the same recognized site-admin platform-superuser actor is blocked with confirmed_by_role_not_derivable (not authorization_denied) when gk_admin is not itself an allowed role for the operation", async () => {
+  const state = makeState({ contentType: "data_gap_memo", reviewResolved: true });
+  const exportCandidateRepository = repositoryFor(state);
+
+  // confirmGeneratedDraftLimitationSnapshotFromCitedPairs always authorizes
+  // against LIMITATION_SNAPSHOT_ROLES (gk_reviewer, gk_admin), which already
+  // includes gk_admin, so this exercises the resolver directly instead: an
+  // authority string other than the one recognized source still fails closed.
+  const wrongAuthoritySource = Object.freeze({
+    actorType: "human",
+    actorUserId: "90000000-0000-4000-8000-000000000098",
+    platformSuperuser: true,
+    platformSuperuserAuthority: "not_get_kinder_site_admin",
+    organizationMemberships: [],
+  });
+
+  const confirmResult = await confirmGeneratedDraftLimitationSnapshotFromCitedPairs(
+    { organizationId: ORG, generatedContentDraftId: DRAFT, actorContext: wrongAuthoritySource, now: NOW },
     { exportCandidateRepository, metadataOnlyAudit: auditRecorder(), env: enabledEnv },
   );
 
