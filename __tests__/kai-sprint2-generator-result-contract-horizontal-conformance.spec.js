@@ -64,6 +64,10 @@ import {
   __annualReportSectionDraftGeneratorContract,
 } from "../Backend/kai/services/kaiAnnualReportSectionDraftGenerator.js";
 import {
+  createProductionFunderOutcomeTableDraftGenerator,
+  __funderOutcomeTableDraftGeneratorContract,
+} from "../Backend/kai/services/kaiFunderOutcomeTableDraftGenerator.js";
+import {
   __generatedContentRepositoryTestables,
 } from "../Backend/kai/dictionary/postgresGeneratedContentRepository.js";
 
@@ -228,6 +232,20 @@ const GENERATORS = [
     validInput: () => ({ contentType: "annual_report_section", requestedAudience: "public", claims: [GOOD_CLAIM] }),
     invalidInput: () => ({ contentType: "annual_report_section", requestedAudience: "unknown", claims: [GOOD_CLAIM] }),
   },
+  {
+    name: "funder_outcome_table",
+    factory: createProductionFunderOutcomeTableDraftGenerator,
+    contract: __funderOutcomeTableDraftGeneratorContract,
+    schemaKey: "FUNDER_OUTCOME_TABLE_OUTPUT_SCHEMA",
+    validInput: () => ({ contentType: "funder_outcome_table", requestedAudience: "funder", claims: [GOOD_CLAIM] }),
+    // Content-specific: like board_update, funder_outcome_table's own
+    // ALLOWED_REQUESTED_AUDIENCES set accepts only a single value - here
+    // "funder" instead of "internal" - so "internal" is deliberately out of
+    // scope for this generator (see kaiFunderOutcomeTableDraftGenerator.js
+    // and the P13-EXT-4 decision to reject internal/public at the
+    // service-level input validator).
+    invalidInput: () => ({ contentType: "funder_outcome_table", requestedAudience: "internal", claims: [GOOD_CLAIM] }),
+  },
 ];
 
 for (const gen of GENERATORS) {
@@ -351,6 +369,6 @@ for (const gen of GENERATORS) {
 test("horizontal conformance: all current production generator factories were exercised", () => {
   assert.deepEqual(
     GENERATORS.map((gen) => gen.name),
-    ["evidence_summary", "impact_narrative", "readiness_assessment", "data_gap_memo", "case_for_support", "board_update", "annual_report_section"],
+    ["evidence_summary", "impact_narrative", "readiness_assessment", "data_gap_memo", "case_for_support", "board_update", "annual_report_section", "funder_outcome_table"],
   );
 });

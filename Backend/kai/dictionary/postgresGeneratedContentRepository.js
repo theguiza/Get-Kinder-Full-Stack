@@ -75,6 +75,19 @@ const BOARD_UPDATE_CONTENT_TYPE = "board_update";
 // standalone draft types, but is deliberately not added to packet/composite
 // membership sets below.
 const ANNUAL_REPORT_SECTION_CONTENT_TYPE = "annual_report_section";
+// P13-EXT-4: standalone evidence-backed funder-only outcome table draft. It
+// joins the generic generated-content admission/review lifecycle exactly
+// like the other standalone draft types, and (like board_update) is
+// generation-time restricted to a single requestedAudience value - here
+// "funder" instead of "internal" - at the SERVICE-level input validator
+// (isCreateFunderOutcomeTableDraftInput, kaiGeneratedContentService.js), not
+// at createGeneratedContentDraft's internal-only-types array below (that
+// array only ever narrows to "internal"). It is deliberately not added to
+// PACKET_MEMBER_CONTENT_TYPES or BOARD_REPORTING_PACKET_MEMBER_CONTENT_TYPES
+// below - Grant Response Packet and Board Reporting membership are scoped
+// exactly as before, and this content type is not part of either composite
+// export.
+const FUNDER_OUTCOME_TABLE_CONTENT_TYPE = "funder_outcome_table";
 const PACKET_MEMBER_CONTENT_TYPES = new Set([CONTENT_TYPE, IMPACT_NARRATIVE_CONTENT_TYPE]);
 const BOARD_REPORTING_PACKET_MEMBER_CONTENT_TYPES = new Set([CONTENT_TYPE, IMPACT_NARRATIVE_CONTENT_TYPE]);
 const ALLOWED_GENERATED_CONTENT_TYPES = new Set([
@@ -85,6 +98,7 @@ const ALLOWED_GENERATED_CONTENT_TYPES = new Set([
   CASE_FOR_SUPPORT_CONTENT_TYPE,
   BOARD_UPDATE_CONTENT_TYPE,
   ANNUAL_REPORT_SECTION_CONTENT_TYPE,
+  FUNDER_OUTCOME_TABLE_CONTENT_TYPE,
 ]);
 const DRAFT_STATUS = "draft";
 const REVIEW_STATUS = GENERATED_CONTENT_REVIEW_QUEUE_CONTRACT.reviewStatus;
@@ -324,6 +338,10 @@ export function fingerprintBoardUpdateRequest({ requestedAudience, claimIds, eng
 
 export function fingerprintAnnualReportSectionRequest({ requestedAudience, claimIds, engagementId }) {
   return fingerprintGeneratedContentRequest(ANNUAL_REPORT_SECTION_CONTENT_TYPE, { requestedAudience, claimIds, engagementId });
+}
+
+export function fingerprintFunderOutcomeTableRequest({ requestedAudience, claimIds, engagementId }) {
+  return fingerprintGeneratedContentRequest(FUNDER_OUTCOME_TABLE_CONTENT_TYPE, { requestedAudience, claimIds, engagementId });
 }
 
 function hasExactKeys(value, allowed) {
@@ -2756,6 +2774,15 @@ export function createPostgresGeneratedContentRepository({
         { runInTransaction, evaluator, afterPersist },
       );
     },
+    async createFunderOutcomeTableDraft(input, dependencies = {}) {
+      return createGeneratedContentDraft(
+        FUNDER_OUTCOME_TABLE_CONTENT_TYPE,
+        fingerprintFunderOutcomeTableRequest,
+        input,
+        dependencies,
+        { runInTransaction, evaluator, afterPersist },
+      );
+    },
     async startGeneratedContentReview(input, dependencies = {}) {
       if (!validateCompleteReviewInput(input)) return failure("validation_blocker");
       if (!dependencies.metadataOnlyAudit) return failure("validation_blocker");
@@ -3378,6 +3405,7 @@ export const __generatedContentRepositoryContract = Object.freeze({
   CASE_FOR_SUPPORT_CONTENT_TYPE,
   BOARD_UPDATE_CONTENT_TYPE,
   ANNUAL_REPORT_SECTION_CONTENT_TYPE,
+  FUNDER_OUTCOME_TABLE_CONTENT_TYPE,
   PACKET_MEMBER_CONTENT_TYPES,
   ALLOWED_GENERATED_CONTENT_TYPES,
   DRAFT_STATUS,
@@ -3435,6 +3463,7 @@ export const __generatedContentRepositoryTestables = Object.freeze({
   fingerprintCaseForSupportRequest,
   fingerprintBoardUpdateRequest,
   fingerprintAnnualReportSectionRequest,
+  fingerprintFunderOutcomeTableRequest,
   prepareRequiredAudit,
   validateRequestExportReviewInput,
   validateExportReviewRequestStateInput,

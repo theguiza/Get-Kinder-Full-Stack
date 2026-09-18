@@ -545,9 +545,16 @@ test("P13-EXT-3 boundary proof: packet/composite memberships and unrelated exten
   assert.match(repositorySource, /const PACKET_MEMBER_CONTENT_TYPES = new Set\(\[CONTENT_TYPE, IMPACT_NARRATIVE_CONTENT_TYPE\]\)/);
   assert.match(repositorySource, /const BOARD_REPORTING_PACKET_MEMBER_CONTENT_TYPES = new Set\(\[CONTENT_TYPE, IMPACT_NARRATIVE_CONTENT_TYPE\]\)/);
   assert.equal(repositorySource.includes('const GRANT_RESPONSE_PARAGRAPH_CONTENT_TYPE = "grant_response_paragraph"'), false);
-  assert.equal(repositorySource.includes('const FUNDER_OUTCOME_TABLE_CONTENT_TYPE = "funder_outcome_table"'), false);
+  // funder_outcome_table was a documented Phase-13 gap AT THE TIME this
+  // P13-EXT-3 package closed (see the "Phase-13 gaps remaining" note in the
+  // living ExecPlan's P13-EXT-3 closure entry). It was subsequently
+  // implemented by the P13-EXT-4 package
+  // (kai-sprint2-p13-ext4-funder-outcome-table-boundary.spec.js), so the two
+  // assertions that used to prove its absence here are deliberately removed
+  // rather than left to bit-rot into a false negative; grant_response_paragraph
+  // remains a genuine, still-unimplemented off-limits type and is still
+  // proven absent above and below.
   assert.equal(__generatedContentRepositoryContract.PACKET_MEMBER_CONTENT_TYPES.has("annual_report_section"), false);
   assert.equal(__generatedContentRepositoryContract.PACKET_MEMBER_CONTENT_TYPES.has("grant_response_paragraph"), false);
   assert.equal(__generatedContentRepositoryContract.ALLOWED_GENERATED_CONTENT_TYPES.has("grant_response_paragraph"), false);
-  assert.equal(__generatedContentRepositoryContract.ALLOWED_GENERATED_CONTENT_TYPES.has("funder_outcome_table"), false);
 });

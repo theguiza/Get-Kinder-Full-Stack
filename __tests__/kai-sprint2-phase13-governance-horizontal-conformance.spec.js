@@ -107,7 +107,7 @@ import { validateExportManifestEligibility } from "../Backend/kai/validators/kai
 import {
   createPostgresGeneratedContentRepository,
 } from "../Backend/kai/dictionary/postgresGeneratedContentRepository.js";
-import { createCaseForSupportDraft, createBoardUpdateDraft } from "../Backend/kai/services/kaiGeneratedContentService.js";
+import { createCaseForSupportDraft, createBoardUpdateDraft, createFunderOutcomeTableDraft } from "../Backend/kai/services/kaiGeneratedContentService.js";
 
 const enabledEnv = Object.freeze({ KAI_SPRINT2_ENABLED: "true", KAI_GENERATION_ENABLED: "true" });
 
@@ -134,6 +134,7 @@ const CONTENT_TYPES = Object.freeze([
   "case_for_support",
   "board_update",
   "annual_report_section",
+  "funder_outcome_table",
 ]);
 
 const READINESS = Object.freeze({
@@ -501,6 +502,76 @@ test('[board_update] predicate 7e - the service-level input validator accepts re
 });
 
 // ---------------------------------------------------------------------
+// Predicate 7f (funder_outcome_table-specific, P13-EXT-4):
+// funder_outcome_table is generation-time restricted to "funder" only -
+// unlike board_update's internal-only restriction above, it is NOT added to
+// createGeneratedContentDraft's internal-only-types array in
+// postgresGeneratedContentRepository.js (that array only ever narrows to
+// "internal"). Instead, "internal" and "public" are both rejected at the
+// SERVICE-level input validator (isCreateFunderOutcomeTableDraftInput,
+// kaiGeneratedContentService.js) before the repository is ever reached,
+// while "funder" alone is accepted at that same input-shape layer.
+// ---------------------------------------------------------------------
+
+for (const requestedAudience of ["internal", "public"]) {
+  test(`[funder_outcome_table] predicate 7f - the service-level input validator rejects requestedAudience "${requestedAudience}" before any repository call`, async () => {
+    const repository = {
+      createFunderOutcomeTableDraft: async () => { throw new Error("createFunderOutcomeTableDraft must not be reached: internal/public must fail closed at the service-level input validator"); },
+    };
+    const result = await createFunderOutcomeTableDraft({
+      organizationId: ORG,
+      engagementId: ENGAGEMENT,
+      requestedAudience,
+      claimIds: [CLAIM],
+      idempotencyKey: `phase13-governance-funder-outcome-table-audience-gate-${requestedAudience}`,
+      actorContext: { actorType: "human", actorUserId: "90000000-0000-4000-8000-000000000001", source: "public.userdata", organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "gk_admin" }] },
+      now: "2026-09-01T00:00:00.000Z",
+    }, { env: enabledEnv, generatedContentRepository: repository, metadataOnlyAudit: auditRecorder() });
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "validation_blocker");
+  });
+}
+
+test('[funder_outcome_table] predicate 7f - the service-level input validator accepts requestedAudience "funder" (repository is invoked)', async () => {
+  let repositoryCalls = 0;
+  const repository = {
+    createFunderOutcomeTableDraft: async (repoInput) => {
+      repositoryCalls += 1;
+      return {
+        ok: true,
+        data: {
+          generationRunId: "00000000-0000-4000-8000-000000000801",
+          generatedContentDraftId: "00000000-0000-4000-8000-000000000802",
+          requestedAudience: repoInput.requestedAudience,
+          draftStatus: "draft",
+          reviewStatus: "needs_gk_review",
+          reviewQueueItemId: "00000000-0000-4000-8000-000000000803",
+          blocks: [{ ordinal: 1, text: SAFE_STATEMENT, citations: [{ claimId: CLAIM, evidenceItemId: EVIDENCE }] }],
+          replayed: false,
+        },
+        error: null,
+      };
+    },
+  };
+  const result = await createFunderOutcomeTableDraft({
+    organizationId: ORG,
+    engagementId: ENGAGEMENT,
+    requestedAudience: "funder",
+    claimIds: [CLAIM],
+    idempotencyKey: "phase13-governance-funder-outcome-table-audience-gate-funder",
+    actorContext: { actorType: "human", actorUserId: "90000000-0000-4000-8000-000000000001", source: "public.userdata", organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "gk_admin" }] },
+    now: "2026-09-01T00:00:00.000Z",
+  }, {
+    env: enabledEnv,
+    generatedContentRepository: repository,
+    metadataOnlyAudit: auditRecorder(),
+    getEngagementForOrganization: async () => ({ engagement_id: ENGAGEMENT, organization_id: ORG }),
+  });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(repositoryCalls, 1);
+});
+
+// ---------------------------------------------------------------------
 // Predicate 2 (type-specific): ineligible or blocked claim input cannot
 // become an accepted generated assertion.
 // ---------------------------------------------------------------------
@@ -610,6 +681,44 @@ test("[evidence_summary] predicate 2 - a currently-ineligible governed claim req
   assert.equal(state.generatedContentDrafts.length, 0);
 });
 
+// P13-EXT-4: funder_outcome_table is funder-audience-only in production, so
+// it inherits this exact shared repository gate (createGeneratedContentDraft
+// does not branch on contentType for the funder-eligibility check at
+// postgresGeneratedContentRepository.js ~L1359-1364/~L1439-1441 - it is
+// driven purely by `input.requestedAudience === "funder"` against the same
+// fresh per-claim P2-06 evaluator result every content type receives).
+// Proved directly through repository.createFunderOutcomeTableDraft, not just
+// the service-level input validator, using the identical fixture pattern
+// already established above for evidence_summary.
+test("[funder_outcome_table] predicate 2 - a currently-ineligible governed claim requested for FUNDER use cannot become an accepted generated assertion (repository pre-generation gate, funder_use_not_currently_eligible)", async () => {
+  const state = makeState();
+  const evaluator = makeEvaluator({ eligibleForClaim: () => false });
+  const repository = makeRepository(state, evaluator);
+  let generatorCalls = 0;
+  const countingGenerator = async (generatorInput) => {
+    generatorCalls += 1;
+    return goodGenerator()(generatorInput);
+  };
+
+  const result = await repository.createFunderOutcomeTableDraft({
+    organizationId: ORG,
+    engagementId: ENGAGEMENT,
+    requestedAudience: "funder",
+    claimIds: [CLAIM],
+    idempotencyKey: "phase13-governance-funder-outcome-table-funder-ineligible",
+    actorContext: { actorType: "human", actorUserId: "90000000-0000-4000-8000-000000000001" },
+    now: "2026-09-01T00:00:00.000Z",
+  }, { draftGenerator: countingGenerator, metadataOnlyAudit: auditRecorder() });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "funder_use_not_currently_eligible");
+  // The production generator is never invoked, and no draft/run is
+  // persisted, for an ineligible claim - fail-closed before generation.
+  assert.equal(generatorCalls, 0);
+  assert.equal(state.generationRuns.length, 0);
+  assert.equal(state.generatedContentDrafts.length, 0);
+});
+
 // ---------------------------------------------------------------------
 // Predicate 2 (Phase-13 repair): the repository-layer terminal-claim-
 // strength gate, driven through the real createGeneratedContentDraft
@@ -622,7 +731,14 @@ test("[evidence_summary] predicate 2 - a currently-ineligible governed claim req
 // currentEligible===false rejection.
 // ---------------------------------------------------------------------
 
-for (const contentType of CONTENT_TYPES) {
+// funder_outcome_table is excluded from this loop: it is funder-audience-only
+// in production (P13-EXT-4), so there is no "still succeeds for INTERNAL
+// generation" case for it to preserve, and unlike the other content types its
+// one real requested audience ("funder") requires eligible:true at this same
+// repository gate (see the funder_use_not_currently_eligible test above) -
+// making an eligible:false success case impossible to construct honestly for
+// this type, rather than merely untested.
+for (const contentType of CONTENT_TYPES.filter((type) => type !== "funder_outcome_table")) {
   test(`[${contentType}] predicate 2 Case A - an unresolved/unassessed governed claim (claim_strength "unassessed", eligible:false) still succeeds for INTERNAL generation (accepted behavior preserved)`, async () => {
     const state = makeState();
     const evaluator = makeEvaluator({ eligibleForClaim: () => false, claimStrengthForClaim: () => "unassessed" });
@@ -742,7 +858,7 @@ test("[readiness_assessment] predicate 4 - claim.limitationCodes feeds VAL-GEN-0
 // produces the exact same validateGeneratedContentDraft outcome as the same
 // claim with limitationCodes: [] for these three content types, proving
 // limitationCodes is not itself a distinct governance signal for them.
-for (const contentType of ["evidence_summary", "impact_narrative", "data_gap_memo", "case_for_support", "board_update", "annual_report_section"]) {
+for (const contentType of ["evidence_summary", "impact_narrative", "data_gap_memo", "case_for_support", "board_update", "annual_report_section", "funder_outcome_table"]) {
   test(`[${contentType}] predicate 4 - documented variance: no VAL-GEN branch reads claim.limitationCodes for this type (outcome is identical with and without it)`, () => {
     const withLimitation = validateGeneratedContentDraft(validArgs(contentType, {
       generationClaims: [governedClaim({ limitationCodes: ["evidence_gap_unresolved"] })],
@@ -1016,7 +1132,17 @@ const REPOSITORY_METHOD_BY_CONTENT_TYPE = Object.freeze({
   case_for_support: "createCaseForSupportDraft",
   board_update: "createBoardUpdateDraft",
   annual_report_section: "createAnnualReportSectionDraft",
+  funder_outcome_table: "createFunderOutcomeTableDraft",
 });
+
+// Every predecessor content type's real production audience is "internal"
+// for this generic successful-persistence proof; funder_outcome_table is the
+// sole exception (P13-EXT-4: funder-audience-only), so a genuinely successful
+// funder_outcome_table generation fixture must request "funder", never
+// "internal" (predecessor semantics are otherwise unchanged).
+function successfulGenerationAudienceFor(contentType) {
+  return contentType === "funder_outcome_table" ? "funder" : "internal";
+}
 
 for (const contentType of CONTENT_TYPES) {
   test(`[${contentType}] predicates 8/9/10 - a successful generation is persisted as a human-review-gated draft with no final/export/approval authority`, async () => {
@@ -1028,7 +1154,7 @@ for (const contentType of CONTENT_TYPES) {
     const result = await repository[methodName]({
       organizationId: ORG,
       engagementId: ENGAGEMENT,
-      requestedAudience: "internal",
+      requestedAudience: successfulGenerationAudienceFor(contentType),
       claimIds: [CLAIM],
       idempotencyKey: `phase13-governance-persist-${contentType}`,
       actorContext: { actorType: "human", actorUserId: "90000000-0000-4000-8000-000000000001" },
@@ -1084,5 +1210,5 @@ for (const contentType of CONTENT_TYPES) {
 }
 
 test("horizontal Phase-13 governance conformance: all current content types were exercised", () => {
-  assert.deepEqual(CONTENT_TYPES, ["evidence_summary", "impact_narrative", "readiness_assessment", "data_gap_memo", "case_for_support", "board_update", "annual_report_section"]);
+  assert.deepEqual(CONTENT_TYPES, ["evidence_summary", "impact_narrative", "readiness_assessment", "data_gap_memo", "case_for_support", "board_update", "annual_report_section", "funder_outcome_table"]);
 });

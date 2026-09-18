@@ -23,6 +23,7 @@ const ALLOWED_GENERATED_CONTENT_TYPES = new Set([
   "case_for_support",
   "board_update",
   "annual_report_section",
+  "funder_outcome_table",
 ]);
 
 function stageBlocker(validatorKey, blockingReason) {

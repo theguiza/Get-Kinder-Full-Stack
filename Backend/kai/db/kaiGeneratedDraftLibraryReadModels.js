@@ -4,10 +4,9 @@ import pool from "./kaiDb.js";
  * Read-only Impact Evidence Library generated-drafts index.
  *
  * This deliberately small read model only enumerates organization-scoped
- * `internal`-audience generated-content-draft identities already persisted
- * through the accepted P3-01/P13-01/Readiness paths (content types:
- * `evidence_summary`, `impact_narrative`, `readiness_assessment`,
- * `data_gap_memo`), joined to
+ * generated-content-draft identities already persisted through the accepted
+ * P3-01/P13-01/Readiness paths (content types: `evidence_summary`,
+ * `impact_narrative`, `readiness_assessment`, `data_gap_memo`), joined to
  * their existing `generated_content_review` queue row. It carries no generated
  * block text, citation detail,
  * evidence/source content, or storage identifiers; P3-02 remains
@@ -78,8 +77,11 @@ export async function listGeneratedDraftLibraryIndex(
         AND eq.target_object_type = 'generated_content_draft'
         AND eq.target_object_id = d.generated_content_draft_id
       WHERE d.organization_id = $1::uuid
-        AND d.content_type IN ('evidence_summary', 'impact_narrative', 'readiness_assessment', 'data_gap_memo', 'case_for_support', 'board_update', 'annual_report_section')
-        AND d.requested_audience = 'internal'
+        AND d.content_type IN ('evidence_summary', 'impact_narrative', 'readiness_assessment', 'data_gap_memo', 'case_for_support', 'board_update', 'annual_report_section', 'funder_outcome_table')
+        AND (
+          (d.content_type = 'funder_outcome_table' AND d.requested_audience = 'funder')
+          OR (d.content_type <> 'funder_outcome_table' AND d.requested_audience = 'internal')
+        )
         AND d.draft_status = 'draft'
         AND q.priority = 'medium'
         AND q.summary = 'Generated draft requires human review.'

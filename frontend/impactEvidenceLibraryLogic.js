@@ -2095,6 +2095,7 @@ export function generatedDraftContentTypeLabel(contentType, requestedAudience) {
   if (contentType === "case_for_support") return `Case for Support · ${audienceLabel}`;
   if (contentType === "board_update") return `Board Update · ${audienceLabel}`;
   if (contentType === "annual_report_section") return `Annual Report Section · ${audienceLabel}`;
+  if (contentType === "funder_outcome_table") return `Funder Outcome Table · ${audienceLabel}`;
   return `${contentType || "Generated draft"} · ${audienceLabel}`;
 }
 

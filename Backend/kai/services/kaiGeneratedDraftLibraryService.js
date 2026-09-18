@@ -23,7 +23,7 @@ const GENERATED_DRAFT_LIBRARY_MAX_LIMIT = 25;
 const UUID_RE = KAI_SPRINT2_P0_PATTERNS.uuid;
 const REVIEW_QUEUE_STATUSES = new Set(["open", "in_progress", "resolved", "blocked"]);
 const REVIEW_STATUSES = new Set(["needs_gk_review", "resolved"]);
-const LIBRARY_CONTENT_TYPES = new Set(["evidence_summary", "impact_narrative", "readiness_assessment", "data_gap_memo", "case_for_support", "board_update", "annual_report_section"]);
+const LIBRARY_CONTENT_TYPES = new Set(["evidence_summary", "impact_narrative", "readiness_assessment", "data_gap_memo", "case_for_support", "board_update", "annual_report_section", "funder_outcome_table"]);
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -31,6 +31,15 @@ function isPlainObject(value) {
 
 function canonicalUuid(value) {
   return typeof value === "string" && value === value.toLowerCase() && UUID_RE.test(value);
+}
+
+// Explicit content-type/audience compatibility rule: every existing content
+// type stays internal-only, and funder_outcome_table is funder-audience-only
+// (never internal, never public). Mirrors the read model's WHERE predicate so
+// a row that should never have been selected still fails closed here too.
+function isAudienceCompatible(contentType, requestedAudience) {
+  if (contentType === "funder_outcome_table") return requestedAudience === "funder";
+  return requestedAudience === "internal";
 }
 
 function isMappedHumanActor(actorContext) {
@@ -112,7 +121,7 @@ function responseDraftSummary(row, organizationId, exportReviewVisible) {
     || !canonicalUuid(row.organization_id)
     || row.organization_id !== organizationId
     || !LIBRARY_CONTENT_TYPES.has(row.content_type)
-    || row.requested_audience !== "internal"
+    || !isAudienceCompatible(row.content_type, row.requested_audience)
     || row.draft_status !== "draft"
     || !canonicalUuid(row.review_queue_item_id)
     || !REVIEW_QUEUE_STATUSES.has(row.queue_status)

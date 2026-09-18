@@ -30273,3 +30273,160 @@ production or runtime closure claimed. No push, deployment, production
 mutation, database mutation, migration execution, feature-flag/configuration
 change, real-client-data access, or `00_KAI_CURRENT_STATE.md` update
 performed.
+
+## Phase-13 P13-EXT-4 funder_outcome_table generated-content package closure (2026-09-18)
+
+**Owner authorization and scope:** owner selected `funder_outcome_table` as
+the bounded P13-EXT-4 package, restricted to `requested_audience=funder`
+only (never `internal`, never `public`). Starting `HEAD` for this closure
+pass: `4eb1648f82656f6ed07d6ede634070bc1cee1547`. This package adds one
+eighth canonical generated-content type; it does not implement
+`grant_response_paragraph` (which remains the sole remaining Phase-13 gap),
+does not reopen Board Reporting or Grant Response Packet membership, and
+does not redesign or execute any migration.
+
+**Runtime implementation surfaces:**
+- `Backend/kai/services/kaiFunderOutcomeTableDraftGenerator.js` (new
+  production generator factory,
+  `createProductionFunderOutcomeTableDraftGenerator`,
+  `FUNDER_OUTCOME_TABLE_OUTPUT_SCHEMA`; tabular content is rendered inside
+  the shared `blocks[].text` field - no separate structured-table field
+  exists anywhere in the shared generated-content output contract).
+- `Backend/kai/services/kaiGeneratedContentService.js`
+  (`createFunderOutcomeTableDraft`,
+  `isCreateFunderOutcomeTableDraftInput` - narrows the shared
+  `{internal,funder,public}` shape to `funder` only).
+- `Backend/kai/routes/sprint2IntakeApi.js`
+  (`POST /admin/organizations/:organizationId/generated-content-drafts/funder-outcome-table`).
+- `Backend/kai/dictionary/postgresGeneratedContentRepository.js`,
+  `Backend/kai/dictionary/exportCandidateContract.js`,
+  `Backend/kai/services/kaiExportReviewService.js`,
+  `Backend/kai/services/kaiGeneratedDraftLibraryService.js`,
+  `Backend/kai/db/kaiGeneratedDraftLibraryReadModels.js`,
+  `frontend/impactEvidenceLibraryLogic.js` all admit
+  `funder_outcome_table` alongside the seven predecessor types.
+
+**Funder-only audience proof:** unlike the seven predecessor types (all
+`internal`-only or, for `case_for_support`/`board_update`,
+`internal`/`funder`-restricted per their own prior packages),
+`funder_outcome_table` is generation-time restricted to `requested_audience
+= funder` exclusively, enforced at the service-level input validator
+(`isCreateFunderOutcomeTableDraftInput`) and mirrored by the HTTP route
+validator (`payload.requested_audience !== "funder"` rejected with `422`),
+the Generated Drafts read-model `WHERE` predicate
+(`kaiGeneratedDraftLibraryReadModels.js`), and the Generated Drafts service
+`isAudienceCompatible` gate (`kaiGeneratedDraftLibraryService.js`), all
+four of which were exercised directly (not source-inspected) by the
+focused P13-EXT-4 boundary suite.
+
+**Generated Drafts repair:** `kaiGeneratedDraftLibraryReadModels.js`'s
+`listGeneratedDraftLibraryIndex` query and `kaiGeneratedDraftLibraryService.js`'s
+`responseDraftSummary` previously hard-coded `requested_audience =
+'internal'` as the only admitted audience for every library content type.
+Both were repaired to an explicit content-type/audience compatibility rule
+(`isAudienceCompatible`): every predecessor type stays `internal`-only,
+and `funder_outcome_table` is `funder`-only. This is a narrow, explicit
+widening - no other content type's audience behavior changed.
+
+**Exact four-field HTTP request contract:** `engagement_id`, `claim_ids`,
+`idempotency_key`, `requested_audience` (accepted value: `funder` only);
+`internal`, `public`, unknown audience values, and any additional body
+field are rejected with `422`.
+
+**Shared provider/result contract and final conformance cases:** the
+shared parameterized suite
+(`__tests__/kai-sprint2-generator-result-contract-horizontal-conformance.spec.js`)
+result: 81/81 PASS, including all eight current generators
+(`evidence_summary`, `impact_narrative`, `readiness_assessment`,
+`data_gap_memo`, `case_for_support`, `board_update`,
+`annual_report_section`, `funder_outcome_table`); no other generator's
+evidence regressed.
+
+**Governance/review/Generated Drafts integration:** Phase-13 governance
+horizontal conformance -> 92/92 PASS
+(`__tests__/kai-sprint2-phase13-governance-horizontal-conformance.spec.js`,
+including `funder_outcome_table` predicates 1-10); Generated Drafts
+library -> 20/20 PASS
+(`__tests__/kai-sprint2-generated-drafts-library.spec.js`); focused
+P13-EXT-4 funder-outcome-table boundary -> 16/16 PASS
+(`__tests__/kai-sprint2-p13-ext4-funder-outcome-table-boundary.spec.js`).
+
+**Generic export-review proof:** review-lifecycle horizontal conformance
+suite (`__tests__/kai-sprint2-review-lifecycle-horizontal-conformance.spec.js`)
+re-run confirmed 79/79 PASS with `funder_outcome_table` included, directly
+exercising `Backend/kai/services/kaiExportReviewService.js`'s
+`requestGeneratedDraftExportReview`, `startGeneratedDraftExportReview`, and
+`completeGeneratedDraftExportReview`. Result:
+`generic_export_review=PROVED_BY_EXISTING_HORIZONTAL_LIFECYCLE_SUITE`.
+
+**Seven-type predecessor / eight-type target:** predecessors
+(`evidence_summary`, `impact_narrative`, `readiness_assessment`,
+`data_gap_memo`, `case_for_support`, `board_update`,
+`annual_report_section`) preserved verbatim; `funder_outcome_table` is the
+only new canonical generated-content type added by this package.
+`grant_response_paragraph` remains absent from every vocabulary set,
+migration, and script (confirmed by the P13-EXT-4 boundary suite's
+dedicated grant_response_paragraph-absence assertions).
+
+**P13-EXT-3 predecessor spec repair:** the P13-EXT-3 boundary spec
+(`__tests__/kai-sprint2-p13-ext3-annual-report-section-boundary.spec.js`)
+previously asserted `funder_outcome_table`'s absence as a documented gap at
+that package's closure time. Those two now-stale negative assertions were
+removed (not left to bit-rot into a false negative); the
+`grant_response_paragraph`-absence assertions in that same spec are
+untouched and still pass (15/15 PASS re-run).
+
+**Frontend bundle parity:** `frontend/impactEvidenceLibraryLogic.js`'s new
+`funder_outcome_table` label branch is present verbatim (minified) in the
+tracked `public/js/bundles/entry.js`.
+
+**Migration/rollback files present, not executed:**
+- `migrations/kai_sprint2_p13_ext4_funder_outcome_table_content_type_evolution.sql`
+- `migrations/kai_sprint2_p13_ext4_funder_outcome_table_content_type_evolution.rollback.sql`
+- `migrations/kai_sprint2_p13_ext4_funder_outcome_table_export_candidate_content_type_evolution.sql`
+- `migrations/kai_sprint2_p13_ext4_funder_outcome_table_export_candidate_content_type_evolution.rollback.sql`
+
+**Verification-pack files present:**
+- `scripts/kai-sprint2-p13-ext4-funder-outcome-table-content-type-evolution-verifier.sql`
+- `scripts/kai-sprint2-p13-ext4-funder-outcome-table-content-type-evolution-failure-checks.sql`
+- `scripts/kai-sprint2-p13-ext4-funder-outcome-table-content-type-evolution-smoke-seed.sql`
+- `scripts/kai-sprint2-p13-ext4-funder-outcome-table-content-type-evolution-smoke-verifier.sql`
+- `scripts/kai-sprint2-p13-ext4-funder-outcome-table-content-type-evolution-patch-notes.md`
+- `scripts/kai-sprint2-p13-ext4-funder-outcome-table-content-type-evolution-runbook.md`
+
+**Strict read-only verification result:** the verifier, failure-checks, and
+smoke-verifier SQL contain no `INSERT`/`UPDATE`/`DELETE`/`DROP`/`ALTER`/
+`TRUNCATE` statements (only `CHECK` constraint-definition string literals
+and read-only `SELECT`/`DO`-block queries) -> PASS. The smoke seed is
+explicit, synthetic, and marked not-yet-run; it was not executed. Rollback
+migrations retain their existing-row guards (refusing to narrow the
+constraint while any `funder_outcome_table` row exists).
+
+**Actual final test results
+(`DATABASE_URL=postgres://sentinel:sentinel@127.0.0.1:1/sentinel_kai_no_listener`
+set for every Node command; no database/cloud/production access):**
+- Focused P13-EXT-4 funder-outcome-table boundary -> 16/16 PASS.
+- Generated Drafts library -> 20/20 PASS.
+- Shared generator-result horizontal conformance -> 81/81 PASS.
+- Phase-13 governance horizontal conformance -> 92/92 PASS.
+- Review-lifecycle horizontal conformance -> 79/79 PASS.
+- P13-EXT-3 annual-report/schema boundary (repaired spec) -> 15/15 PASS.
+- `git diff --check` -> PASS.
+
+**Live PostgreSQL/schema behavior:** remains `NOT_CONFIRMED`. Migrations
+were NOT executed. Database connection: NO. Push: NO. Deployment: NO.
+
+**Grant Response Packet, Board Reporting, and Impact Evaluation
+boundaries:** unchanged by this package.
+`PACKET_MEMBER_CONTENT_TYPES`/`BOARD_REPORTING_PACKET_MEMBER_CONTENT_TYPES`
+remain `{evidence_summary, impact_narrative}` exactly as before;
+`funder_outcome_table` is not a member of either composite export.
+
+**Phase-13 gaps remaining:** `grant_response_paragraph` is not implemented
+by this or any prior package and remains the sole remaining Phase-13 gap.
+
+**Status:** P13_EXT_4_FUNDER_OUTCOME_TABLE_PACKAGE_CLOSED_LOCALLY. No
+production or runtime closure claimed. No push, deployment, production
+mutation, database mutation, migration execution, feature-flag/configuration
+change, real-client-data access, or `00_KAI_CURRENT_STATE.md` update
+performed.

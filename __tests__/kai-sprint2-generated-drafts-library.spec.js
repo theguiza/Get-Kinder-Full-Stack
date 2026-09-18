@@ -398,11 +398,12 @@ test("Generated Drafts library service authorizes like the existing generated-dr
 });
 
 test("Generated Drafts library index admits all canonical generated-content types, including annual_report_section, and excludes unsupported types", async () => {
-  for (const contentType of ["evidence_summary", "impact_narrative", "readiness_assessment", "data_gap_memo", "case_for_support", "board_update", "annual_report_section"]) {
+  for (const contentType of ["evidence_summary", "impact_narrative", "readiness_assessment", "data_gap_memo", "case_for_support", "board_update", "annual_report_section", "funder_outcome_table"]) {
+    const requestedAudience = contentType === "funder_outcome_table" ? "funder" : "internal";
     const deps = {
       env: enabledEnv,
       async listGeneratedDraftLibraryIndex() {
-        return [draftRow({ content_type: contentType })];
+        return [draftRow({ content_type: contentType, requested_audience: requestedAudience })];
       },
     };
     const result = await listGeneratedDraftLibraryIndex(
@@ -411,6 +412,7 @@ test("Generated Drafts library index admits all canonical generated-content type
     );
     assert.equal(result.ok, true, `${contentType}: expected ok=true, got ${JSON.stringify(result.error)}`);
     assert.equal(result.data.items[0].contentType, contentType);
+    assert.equal(result.data.items[0].requestedAudience, requestedAudience);
   }
 
   // An unsupported content type still fails closed as system_error rather
@@ -433,6 +435,81 @@ test("Generated Drafts library index admits all canonical generated-content type
   assert.equal(result.error.code, "system_error");
 });
 
+test("Generated Drafts library index admits an actual funder_outcome_table/funder row and preserves existing internal predecessor rows, while rejecting funder_outcome_table/internal, funder_outcome_table/public, and unrelated non-internal predecessor rows", async () => {
+  const funderRow = draftRow({
+    generated_content_draft_id: "00000000-0000-4000-8000-000000000601",
+    content_type: "funder_outcome_table",
+    requested_audience: "funder",
+  });
+  const internalPredecessorRow = draftRow({
+    generated_content_draft_id: "00000000-0000-4000-8000-000000000602",
+    content_type: "evidence_summary",
+    requested_audience: "internal",
+  });
+
+  const admitted = await listGeneratedDraftLibraryIndex(
+    { organizationId, limit: 25, afterGeneratedContentDraftId: null, actorContext },
+    { env: enabledEnv, async listGeneratedDraftLibraryIndex() { return [funderRow, internalPredecessorRow]; } },
+  );
+  assert.equal(admitted.ok, true);
+  const byId = Object.fromEntries(admitted.data.items.map((item) => [item.generatedContentDraftId, item]));
+  assert.equal(byId[funderRow.generated_content_draft_id].contentType, "funder_outcome_table");
+  assert.equal(byId[funderRow.generated_content_draft_id].requestedAudience, "funder");
+  assert.equal(byId[internalPredecessorRow.generated_content_draft_id].contentType, "evidence_summary");
+  assert.equal(byId[internalPredecessorRow.generated_content_draft_id].requestedAudience, "internal");
+
+  const fotInternalRejected = await listGeneratedDraftLibraryIndex(
+    { organizationId, limit: 25, afterGeneratedContentDraftId: null, actorContext },
+    {
+      env: enabledEnv,
+      async listGeneratedDraftLibraryIndex() {
+        return [draftRow({ content_type: "funder_outcome_table", requested_audience: "internal" })];
+      },
+    },
+  );
+  assert.equal(fotInternalRejected.ok, false);
+  assert.equal(fotInternalRejected.error.code, "system_error");
+
+  const fotPublicRejected = await listGeneratedDraftLibraryIndex(
+    { organizationId, limit: 25, afterGeneratedContentDraftId: null, actorContext },
+    {
+      env: enabledEnv,
+      async listGeneratedDraftLibraryIndex() {
+        return [draftRow({ content_type: "funder_outcome_table", requested_audience: "public" })];
+      },
+    },
+  );
+  assert.equal(fotPublicRejected.ok, false);
+  assert.equal(fotPublicRejected.error.code, "system_error");
+
+  // Unrelated predecessor content type at a non-internal audience must remain
+  // rejected: the compatibility rule admits funder_outcome_table+funder only,
+  // never a broad funder/public carve-out for every existing content type.
+  const predecessorFunderRejected = await listGeneratedDraftLibraryIndex(
+    { organizationId, limit: 25, afterGeneratedContentDraftId: null, actorContext },
+    {
+      env: enabledEnv,
+      async listGeneratedDraftLibraryIndex() {
+        return [draftRow({ content_type: "evidence_summary", requested_audience: "funder" })];
+      },
+    },
+  );
+  assert.equal(predecessorFunderRejected.ok, false);
+  assert.equal(predecessorFunderRejected.error.code, "system_error");
+
+  const predecessorPublicRejected = await listGeneratedDraftLibraryIndex(
+    { organizationId, limit: 25, afterGeneratedContentDraftId: null, actorContext },
+    {
+      env: enabledEnv,
+      async listGeneratedDraftLibraryIndex() {
+        return [draftRow({ content_type: "annual_report_section", requested_audience: "public" })];
+      },
+    },
+  );
+  assert.equal(predecessorPublicRejected.ok, false);
+  assert.equal(predecessorPublicRejected.error.code, "system_error");
+});
+
 test("Generated Drafts read model index includes annual_report_section in the generic content_type allowlist alongside the other canonical types", async () => {
   let observed = null;
   await readGeneratedDraftLibraryIndex(organizationId, { limit: 25, afterGeneratedContentDraftId: null }, {
@@ -441,7 +518,7 @@ test("Generated Drafts read model index includes annual_report_section in the ge
       return { rows: [] };
     },
   });
-  assert.match(observed.sql, /AND d\.content_type IN \('evidence_summary', 'impact_narrative', 'readiness_assessment', 'data_gap_memo', 'case_for_support', 'board_update', 'annual_report_section'\)/);
+  assert.match(observed.sql, /AND d\.content_type IN \('evidence_summary', 'impact_narrative', 'readiness_assessment', 'data_gap_memo', 'case_for_support', 'board_update', 'annual_report_section', 'funder_outcome_table'\)/);
 });
 
 test("Generated Drafts library index reuses e890a8c's export-review role boundary: gk_reviewer never receives identity/state even when a row exists", async () => {
@@ -632,8 +709,9 @@ test("Generated Drafts read model is bounded, organization-scoped, deterministic
     },
   });
   assert.match(observed.sql, /WHERE d\.organization_id = \$1::uuid/);
-  assert.match(observed.sql, /AND d\.content_type IN \('evidence_summary', 'impact_narrative', 'readiness_assessment', 'data_gap_memo', 'case_for_support', 'board_update', 'annual_report_section'\)/);
-  assert.match(observed.sql, /AND d\.requested_audience = 'internal'/);
+  assert.match(observed.sql, /AND d\.content_type IN \('evidence_summary', 'impact_narrative', 'readiness_assessment', 'data_gap_memo', 'case_for_support', 'board_update', 'annual_report_section', 'funder_outcome_table'\)/);
+  assert.match(observed.sql, /d\.requested_audience = 'internal'/);
+  assert.match(observed.sql, /d\.content_type = 'funder_outcome_table' AND d\.requested_audience = 'funder'/);
   assert.match(observed.sql, /AND d\.draft_status = 'draft'/);
   assert.match(observed.sql, /AND q\.priority = 'medium'/);
   assert.match(observed.sql, /AND q\.assigned_to IS NULL/);
@@ -713,6 +791,7 @@ test("Generated Drafts frontend projection strips unsafe fields and preserves sa
   assert.equal(generatedDraftContentTypeLabel("case_for_support", "funder"), "Case for Support · funder");
   assert.equal(generatedDraftContentTypeLabel("board_update", "internal"), "Board Update · Internal");
   assert.equal(generatedDraftContentTypeLabel("annual_report_section", "public"), "Annual Report Section · public");
+  assert.equal(generatedDraftContentTypeLabel("funder_outcome_table", "funder"), "Funder Outcome Table · funder");
   assert.notEqual(generatedDraftLibraryIndexPath(organizationId), generatedDraftReviewPacketPath(organizationId, draftId));
 });
 
