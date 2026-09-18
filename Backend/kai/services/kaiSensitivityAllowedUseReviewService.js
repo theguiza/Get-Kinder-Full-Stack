@@ -1,6 +1,7 @@
 import { isKaiSprint2Enabled } from "../config/kaiSprint2Config.js";
 import { buildKaiError } from "../errors/kaiErrors.js";
 import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationService.js";
+import { resolveAuthorizedHumanRole } from "../auth/kaiAuthorizedRoleAttribution.js";
 import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
 import { createPostgresSensitivityAllowedUseReviewRepository } from "../dictionary/postgresSensitivityAllowedUseReviewRepository.js";
 import {
@@ -51,24 +52,6 @@ function isNormalizedNow(value) {
 
 function isMappedHumanActor(actorContext) {
   return actorContext?.actorType === "human" && isNonEmptyString(actorContext?.actorUserId);
-}
-
-/**
- * Derive the decided_by_role recorded on the ledger row: the actor's actual
- * org-scoped membership role if it is one of the allowed roles, else a matching
- * global KAI capability role, else gk_admin as the platform-superuser-bypass
- * fallback. Mirrors kaiHumanReviewService.js's resolveDecidedByRole exactly -
- * validateActorCanPerformOperation itself does not report which specific role
- * matched, so this is resolved independently, after authorization has passed.
- */
-function resolveDecidedByRole(actorContext, auth) {
-  const membershipMatch = (auth?.memberships || [])
-    .find((membership) => RECORD_SENSITIVITY_DECISION_ALLOWED_ROLES.has(membership.role_name));
-  if (membershipMatch) return membershipMatch.role_name;
-  const globalMatch = (actorContext?.kaiRoles || [])
-    .find((role) => RECORD_SENSITIVITY_DECISION_ALLOWED_ROLES.has(role));
-  if (globalMatch) return globalMatch;
-  return "gk_admin";
 }
 
 const RECORD_SENSITIVITY_DECISION_INPUT_KEYS = new Set([
@@ -156,7 +139,14 @@ export async function recordSensitivityAllowedUseDecision(input, dependencies = 
     return buildKaiError("tenant_boundary_violation", { blockers: [tenant] });
   }
 
-  const decidedByRole = resolveDecidedByRole(actorContext, auth);
+  const decidedByRole = resolveAuthorizedHumanRole({
+    actorContext,
+    auth,
+    allowedRoles: RECORD_SENSITIVITY_DECISION_ALLOWED_ROLES,
+  });
+  if (!decidedByRole) {
+    return buildKaiError("authorization_denied");
+  }
 
   const repository =
     dependencies.sensitivityAllowedUseReviewRepository || createPostgresSensitivityAllowedUseReviewRepository();
@@ -187,5 +177,4 @@ export const __sensitivityAllowedUseReviewServiceContract = Object.freeze({
 export const __sensitivityAllowedUseReviewServiceTestables = Object.freeze({
   isRecordSensitivityAllowedUseDecisionInput,
   isMappedHumanActor,
-  resolveDecidedByRole,
 });

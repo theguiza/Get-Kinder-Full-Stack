@@ -1,6 +1,7 @@
 import { isKaiSprint2Enabled } from "../config/kaiSprint2Config.js";
 import { buildKaiError } from "../errors/kaiErrors.js";
 import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationService.js";
+import { resolveAuthorizedHumanRole } from "../auth/kaiAuthorizedRoleAttribution.js";
 import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
 import { createPostgresHumanReviewRepository } from "../dictionary/postgresHumanReviewRepository.js";
 import {
@@ -50,22 +51,6 @@ function isNonEmptyTrimmedStringArray(value) {
 
 function isMappedHumanActor(actorContext) {
   return actorContext?.actorType === "human" && isNonEmptyString(actorContext?.actorUserId);
-}
-
-/**
- * Derive the decided_by_role recorded on the ledger row: the actor's actual
- * org-scoped membership role if it is one of the allowed roles, else a
- * matching global KAI capability role, else gk_admin as the platform-
- * superuser-bypass fallback. validateActorCanPerformOperation itself does
- * not return which specific role matched (only ok/memberships), so this is
- * resolved independently, after authorization has already passed.
- */
-function resolveDecidedByRole(actorContext, auth, allowedRoles) {
-  const membershipMatch = (auth?.memberships || []).find((membership) => allowedRoles.has(membership.role_name));
-  if (membershipMatch) return membershipMatch.role_name;
-  const globalMatch = (actorContext?.kaiRoles || []).find((role) => allowedRoles.has(role));
-  if (globalMatch) return globalMatch;
-  return "gk_admin";
 }
 
 function isRecordEvidenceReviewDecisionInput(value) {
@@ -175,7 +160,14 @@ export async function recordEvidenceReviewDecision(input, dependencies = {}) {
     return buildKaiError("tenant_boundary_violation", { blockers: [tenant] });
   }
 
-  const decidedByRole = resolveDecidedByRole(actorContext, auth, RECORD_EVIDENCE_REVIEW_DECISION_ALLOWED_ROLES);
+  const decidedByRole = resolveAuthorizedHumanRole({
+    actorContext,
+    auth,
+    allowedRoles: RECORD_EVIDENCE_REVIEW_DECISION_ALLOWED_ROLES,
+  });
+  if (!decidedByRole) {
+    return buildKaiError("authorization_denied");
+  }
 
   const repository = dependencies.humanReviewRepository || createPostgresHumanReviewRepository();
   const result = await repository.recordEvidenceReviewDecision({
@@ -246,7 +238,14 @@ export async function recordClaimReviewDecision(input, dependencies = {}) {
     return buildKaiError("tenant_boundary_violation", { blockers: [tenant] });
   }
 
-  const decidedByRole = resolveDecidedByRole(actorContext, auth, RECORD_CLAIM_REVIEW_DECISION_ALLOWED_ROLES);
+  const decidedByRole = resolveAuthorizedHumanRole({
+    actorContext,
+    auth,
+    allowedRoles: RECORD_CLAIM_REVIEW_DECISION_ALLOWED_ROLES,
+  });
+  if (!decidedByRole) {
+    return buildKaiError("authorization_denied");
+  }
 
   const repository = dependencies.humanReviewRepository || createPostgresHumanReviewRepository();
   const result = await repository.recordClaimReviewDecision({
