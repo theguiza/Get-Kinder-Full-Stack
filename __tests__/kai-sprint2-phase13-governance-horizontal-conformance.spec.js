@@ -133,6 +133,7 @@ const CONTENT_TYPES = Object.freeze([
   "data_gap_memo",
   "case_for_support",
   "board_update",
+  "annual_report_section",
 ]);
 
 const READINESS = Object.freeze({
@@ -741,7 +742,7 @@ test("[readiness_assessment] predicate 4 - claim.limitationCodes feeds VAL-GEN-0
 // produces the exact same validateGeneratedContentDraft outcome as the same
 // claim with limitationCodes: [] for these three content types, proving
 // limitationCodes is not itself a distinct governance signal for them.
-for (const contentType of ["evidence_summary", "impact_narrative", "data_gap_memo", "case_for_support", "board_update"]) {
+for (const contentType of ["evidence_summary", "impact_narrative", "data_gap_memo", "case_for_support", "board_update", "annual_report_section"]) {
   test(`[${contentType}] predicate 4 - documented variance: no VAL-GEN branch reads claim.limitationCodes for this type (outcome is identical with and without it)`, () => {
     const withLimitation = validateGeneratedContentDraft(validArgs(contentType, {
       generationClaims: [governedClaim({ limitationCodes: ["evidence_gap_unresolved"] })],
@@ -1014,6 +1015,7 @@ const REPOSITORY_METHOD_BY_CONTENT_TYPE = Object.freeze({
   data_gap_memo: "createDataGapMemoDraft",
   case_for_support: "createCaseForSupportDraft",
   board_update: "createBoardUpdateDraft",
+  annual_report_section: "createAnnualReportSectionDraft",
 });
 
 for (const contentType of CONTENT_TYPES) {
@@ -1081,6 +1083,6 @@ for (const contentType of CONTENT_TYPES) {
   });
 }
 
-test("horizontal Phase-13 governance conformance: all six content types were exercised", () => {
-  assert.deepEqual(CONTENT_TYPES, ["evidence_summary", "impact_narrative", "readiness_assessment", "data_gap_memo", "case_for_support", "board_update"]);
+test("horizontal Phase-13 governance conformance: all current content types were exercised", () => {
+  assert.deepEqual(CONTENT_TYPES, ["evidence_summary", "impact_narrative", "readiness_assessment", "data_gap_memo", "case_for_support", "board_update", "annual_report_section"]);
 });

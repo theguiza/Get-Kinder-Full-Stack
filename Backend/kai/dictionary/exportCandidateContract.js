@@ -18,6 +18,7 @@ export const EXPORT_CANDIDATE_CONTENT_TYPES = Object.freeze([
   "data_gap_memo",
   "case_for_support",
   "board_update",
+  "annual_report_section",
 ]);
 export const EXPORT_CANDIDATE_AUDIENCES = Object.freeze(["internal", "funder", "public"]);
 export const EXPORT_CANDIDATE_FINGERPRINT_CONTRACT_VERSION = "kai-sprint2-p3-16-export-candidate-fingerprint-v1";

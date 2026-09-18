@@ -70,6 +70,11 @@ const CASE_FOR_SUPPORT_CONTENT_TYPE = "case_for_support";
 // composite export. It is a distinct, standalone draft type from Board
 // Reporting.
 const BOARD_UPDATE_CONTENT_TYPE = "board_update";
+// P13-EXT-3: standalone traceable annual-report draft section. It joins the
+// generic generated-content admission/review lifecycle exactly like other
+// standalone draft types, but is deliberately not added to packet/composite
+// membership sets below.
+const ANNUAL_REPORT_SECTION_CONTENT_TYPE = "annual_report_section";
 const PACKET_MEMBER_CONTENT_TYPES = new Set([CONTENT_TYPE, IMPACT_NARRATIVE_CONTENT_TYPE]);
 const BOARD_REPORTING_PACKET_MEMBER_CONTENT_TYPES = new Set([CONTENT_TYPE, IMPACT_NARRATIVE_CONTENT_TYPE]);
 const ALLOWED_GENERATED_CONTENT_TYPES = new Set([
@@ -79,6 +84,7 @@ const ALLOWED_GENERATED_CONTENT_TYPES = new Set([
   DATA_GAP_MEMO_CONTENT_TYPE,
   CASE_FOR_SUPPORT_CONTENT_TYPE,
   BOARD_UPDATE_CONTENT_TYPE,
+  ANNUAL_REPORT_SECTION_CONTENT_TYPE,
 ]);
 const DRAFT_STATUS = "draft";
 const REVIEW_STATUS = GENERATED_CONTENT_REVIEW_QUEUE_CONTRACT.reviewStatus;
@@ -314,6 +320,10 @@ export function fingerprintCaseForSupportRequest({ requestedAudience, claimIds, 
 
 export function fingerprintBoardUpdateRequest({ requestedAudience, claimIds, engagementId }) {
   return fingerprintGeneratedContentRequest(BOARD_UPDATE_CONTENT_TYPE, { requestedAudience, claimIds, engagementId });
+}
+
+export function fingerprintAnnualReportSectionRequest({ requestedAudience, claimIds, engagementId }) {
+  return fingerprintGeneratedContentRequest(ANNUAL_REPORT_SECTION_CONTENT_TYPE, { requestedAudience, claimIds, engagementId });
 }
 
 function hasExactKeys(value, allowed) {
@@ -2737,6 +2747,15 @@ export function createPostgresGeneratedContentRepository({
         { runInTransaction, evaluator, afterPersist },
       );
     },
+    async createAnnualReportSectionDraft(input, dependencies = {}) {
+      return createGeneratedContentDraft(
+        ANNUAL_REPORT_SECTION_CONTENT_TYPE,
+        fingerprintAnnualReportSectionRequest,
+        input,
+        dependencies,
+        { runInTransaction, evaluator, afterPersist },
+      );
+    },
     async startGeneratedContentReview(input, dependencies = {}) {
       if (!validateCompleteReviewInput(input)) return failure("validation_blocker");
       if (!dependencies.metadataOnlyAudit) return failure("validation_blocker");
@@ -3358,6 +3377,7 @@ export const __generatedContentRepositoryContract = Object.freeze({
   DATA_GAP_MEMO_CONTENT_TYPE,
   CASE_FOR_SUPPORT_CONTENT_TYPE,
   BOARD_UPDATE_CONTENT_TYPE,
+  ANNUAL_REPORT_SECTION_CONTENT_TYPE,
   PACKET_MEMBER_CONTENT_TYPES,
   ALLOWED_GENERATED_CONTENT_TYPES,
   DRAFT_STATUS,
@@ -3414,6 +3434,7 @@ export const __generatedContentRepositoryTestables = Object.freeze({
   fingerprintDataGapMemoRequest,
   fingerprintCaseForSupportRequest,
   fingerprintBoardUpdateRequest,
+  fingerprintAnnualReportSectionRequest,
   prepareRequiredAudit,
   validateRequestExportReviewInput,
   validateExportReviewRequestStateInput,

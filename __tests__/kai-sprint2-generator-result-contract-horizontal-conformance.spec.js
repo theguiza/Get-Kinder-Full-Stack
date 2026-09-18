@@ -60,6 +60,10 @@ import {
   __boardUpdateDraftGeneratorContract,
 } from "../Backend/kai/services/kaiBoardUpdateDraftGenerator.js";
 import {
+  createProductionAnnualReportSectionDraftGenerator,
+  __annualReportSectionDraftGeneratorContract,
+} from "../Backend/kai/services/kaiAnnualReportSectionDraftGenerator.js";
+import {
   __generatedContentRepositoryTestables,
 } from "../Backend/kai/dictionary/postgresGeneratedContentRepository.js";
 
@@ -121,6 +125,12 @@ const MALFORMED_JSON_RESPONSE = { content: [{ type: "text", text: "not-json" }] 
 const NON_OBJECT_ROOT_RESPONSE = { content: [{ type: "text", text: JSON.stringify([1, 2, 3]) }] };
 const BLOCKS_FIELD_INVALID_RESPONSE = { content: [{ type: "text", text: JSON.stringify({ notBlocks: [] }) }] };
 const GENUINE_EMPTY_BLOCKS_RESPONSE = { content: [{ type: "text", text: JSON.stringify({ blocks: [] }) }] };
+const MALFORMED_BLOCK_RESPONSE = {
+  content: [{ type: "text", text: JSON.stringify({ blocks: [{ text: 12345, citations: [{ claimId: CLAIM, evidenceItemId: EVIDENCE }] }] }) }],
+};
+const MISSING_CITATIONS_RESPONSE = {
+  content: [{ type: "text", text: JSON.stringify({ blocks: [{ text: "A generated block.", citations: [] }] }) }],
+};
 const MALFORMED_CITATION_RESPONSE = {
   content: [{ type: "text", text: JSON.stringify({ blocks: [{ text: "A generated block.", citations: [{ claimId: "not-a-uuid", evidenceItemId: EVIDENCE }] }] }) }],
 };
@@ -209,6 +219,14 @@ const GENERATORS = [
     // decision to reject funder/public at the service-level input
     // validator).
     invalidInput: () => ({ contentType: "board_update", requestedAudience: "funder", claims: [GOOD_CLAIM] }),
+  },
+  {
+    name: "annual_report_section",
+    factory: createProductionAnnualReportSectionDraftGenerator,
+    contract: __annualReportSectionDraftGeneratorContract,
+    schemaKey: "ANNUAL_REPORT_SECTION_OUTPUT_SCHEMA",
+    validInput: () => ({ contentType: "annual_report_section", requestedAudience: "public", claims: [GOOD_CLAIM] }),
+    invalidInput: () => ({ contentType: "annual_report_section", requestedAudience: "unknown", claims: [GOOD_CLAIM] }),
   },
 ];
 
@@ -303,6 +321,24 @@ for (const gen of GENERATORS) {
     assert.equal(validateGeneratorResult(result), false);
   });
 
+  test(`[${gen.name}] Case 7b - malformed block (non-string text normalized to empty): classified as BLOCK_TEXT_INVALID`, async () => {
+    const { generator } = makeGenerator(gen.factory, { response: MALFORMED_BLOCK_RESPONSE });
+    const result = await generator(gen.validInput());
+
+    assert.equal(result.blocks[0].text, "");
+    assert.equal(classifyGeneratorResult(result).reason, GENERATOR_RESULT_REASONS.BLOCK_TEXT_INVALID);
+    assert.equal(validateGeneratorResult(result), false);
+  });
+
+  test(`[${gen.name}] Case 7c - missing citations (genuinely empty citations array): classified as CITATIONS_MISSING`, async () => {
+    const { generator } = makeGenerator(gen.factory, { response: MISSING_CITATIONS_RESPONSE });
+    const result = await generator(gen.validInput());
+
+    assert.deepEqual(result.blocks[0].citations, []);
+    assert.equal(classifyGeneratorResult(result).reason, GENERATOR_RESULT_REASONS.CITATIONS_MISSING);
+    assert.equal(validateGeneratorResult(result), false);
+  });
+
   test(`[${gen.name}] Case 8 - malformed citation (non-UUID id): rejected downstream by the existing classifier as CITATION_ID_INVALID`, async () => {
     const { generator } = makeGenerator(gen.factory, { response: MALFORMED_CITATION_RESPONSE });
     const result = await generator(gen.validInput());
@@ -312,9 +348,9 @@ for (const gen of GENERATORS) {
   });
 }
 
-test("horizontal conformance: all six production generator factories were exercised", () => {
+test("horizontal conformance: all current production generator factories were exercised", () => {
   assert.deepEqual(
     GENERATORS.map((gen) => gen.name),
-    ["evidence_summary", "impact_narrative", "readiness_assessment", "data_gap_memo", "case_for_support", "board_update"],
+    ["evidence_summary", "impact_narrative", "readiness_assessment", "data_gap_memo", "case_for_support", "board_update", "annual_report_section"],
   );
 });

@@ -30132,3 +30132,144 @@ describe them as historically pre-existing.
 runtime closure claimed. No push, deployment, production mutation, database
 mutation, migration execution, feature-flag/configuration change,
 real-client-data access, or `00_KAI_CURRENT_STATE.md` update performed.
+
+## Phase-13 P13-EXT-3 annual_report_section generated-content package closure (2026-09-18)
+
+**Owner authorization and scope:** owner selected `annual_report_section` as
+the bounded P13-EXT-3 package, targeting audiences `internal,funder,public`.
+Starting `HEAD` for this closure pass: `e6f27e904465d51e21b22a38bcab0775a7e4c51a`.
+This package adds one seventh canonical generated-content type; it does not
+implement `grant_response_paragraph` or `funder_outcome_table` (both remain
+Phase-13 gaps), does not reopen Board Reporting or Grant Response Packet
+membership, and does not redesign or execute any migration.
+
+**Runtime implementation surfaces:**
+- `Backend/kai/services/kaiAnnualReportSectionDraftGenerator.js` (new
+  production generator factory, `ANNUAL_REPORT_SECTION_OUTPUT_SCHEMA`).
+- `Backend/kai/services/kaiGeneratedContentService.js`
+  (`createAnnualReportSectionDraft`).
+- `Backend/kai/routes/sprint2IntakeApi.js`
+  (`POST /admin/organizations/:organizationId/generated-content-drafts/annual-report-section`).
+- `Backend/kai/dictionary/postgresGeneratedContentRepository.js`,
+  `Backend/kai/dictionary/exportCandidateContract.js`,
+  `Backend/kai/services/kaiExportReviewService.js`,
+  `Backend/kai/services/kaiGeneratedDraftLibraryService.js`,
+  `Backend/kai/db/kaiGeneratedDraftLibraryReadModels.js`,
+  `frontend/impactEvidenceLibraryLogic.js` all admit `annual_report_section`
+  generically alongside the six predecessor types.
+
+**Exact four-field HTTP request contract:** `engagement_id`, `claim_ids`,
+`idempotency_key`, `requested_audience` (one of `internal`, `funder`,
+`public`); unknown audience values and any additional body field are
+rejected with `422`.
+
+**Shared provider/result contract and final conformance cases:** the shared
+parameterized suite
+(`__tests__/kai-sprint2-generator-result-contract-horizontal-conformance.spec.js`)
+was inspected against the accepted contract's full case list. Two cases were
+confirmed genuinely absent as distinct cases (not inferable from
+`BLOCKS_FIELD_INVALID` or `CITATION_ID_INVALID`): a malformed-block case
+(non-string block text, classified `BLOCK_TEXT_INVALID`) and a
+missing-citations case (block with a genuinely empty `citations` array,
+classified `CITATIONS_MISSING`). Both were added as new parameterized cases
+(`Case 7b`, `Case 7c`) across all seven generator table entries, not as an
+annual-report-only parser suite. Full shared suite result: 71/71 PASS,
+including all seven current generators (`evidence_summary`,
+`impact_narrative`, `readiness_assessment`, `data_gap_memo`,
+`case_for_support`, `board_update`, `annual_report_section`); no other
+generator's evidence regressed.
+
+**Governance/review/Generated Drafts integration:** Phase-13 governance
+horizontal conformance ->  99/99 PASS
+(`__tests__/kai-sprint2-phase13-governance-horizontal-conformance.spec.js`,
+including `annual_report_section` predicates 1-10); Generated Drafts library
+-> 19/19 PASS (`__tests__/kai-sprint2-generated-drafts-library.spec.js`);
+focused P13-EXT-3 annual-report/schema boundary -> 15/15 PASS
+(`__tests__/kai-sprint2-p13-ext3-annual-report-section-boundary.spec.js`).
+
+**Generic export-review proof:** inspected
+`__tests__/kai-sprint2-review-lifecycle-horizontal-conformance.spec.js` and
+confirmed it directly imports and exercises
+`Backend/kai/services/kaiExportReviewService.js`'s own
+`requestGeneratedDraftExportReview`, `startGeneratedDraftExportReview`, and
+`completeGeneratedDraftExportReview` (not source inspection). Result:
+`generic_export_review=PROVED_BY_EXISTING_HORIZONTAL_LIFECYCLE_SUITE`; suite
+re-run confirmed 70/70 PASS with `annual_report_section` included. No
+additional export-review test family run.
+
+**Mounted route-runtime proof:** the existing focused P13-EXT-3 boundary test
+"P13-EXT-3 route is mounted as an authenticated annual_report_section
+draft-generation POST" and its companion four-field-contract test retrieve
+the route layer from the real, imported `sprint2IntakeApiRouter.stack` and
+invoke the layer's full middleware chain in order (feature gate,
+authentication/actor-context, request validation, service delegation), not a
+mock router and not the handler called directly. This is genuine mounted
+runtime proof; the separate
+`__tests__/kai-sprint2-pass2-route-runtime.spec.js` file does not cover the
+`annual-report-section` route and was not additionally run for this
+endpoint. Result: PASS.
+
+**Impact Evaluation isolation/regression proof:** confirmed current
+existence of `Backend/kai/services/kaiImpactEvaluationGenerator.js`,
+`Backend/kai/services/kaiImpactEvaluationService.js`, and
+`Backend/kai/dictionary/postgresImpactEvaluationRepository.js`; inspected
+their import graphs (`kaiSprint2Config.js`, `kaiErrors.js`,
+`kaiAuthorizationService.js`, `tenantValidators.js`,
+`kaiImpactEvaluationInterpretation.js`,
+`postgresClaimTraceabilityRepository.js`,
+`kaiImpactEvaluationValidators.js`) against the complete P13-EXT-3
+changed-file set and found no changed file in the Impact Evaluation runtime
+dependency path. Result:
+`impact_evaluation_unchanged=TOOL_VERIFIED_BY_DIFF_AND_DEPENDENCY_INSPECTION`;
+no Impact Evaluation test was required or run.
+
+**Frontend bundle parity:** `frontend/impactEvidenceLibraryLogic.js`'s new
+`annual_report_section` label branch is present verbatim (minified) in the
+tracked `public/js/bundles/entry.js`.
+
+**Six-type predecessor / seven-type target:** predecessors
+(`evidence_summary`, `impact_narrative`, `readiness_assessment`,
+`data_gap_memo`, `case_for_support`, `board_update`) preserved verbatim;
+`annual_report_section` is the only new canonical generated-content type
+added by this package.
+
+**Migration/rollback files present, not executed:**
+- `migrations/kai_sprint2_p13_ext3_annual_report_section_content_type_evolution.sql`
+- `migrations/kai_sprint2_p13_ext3_annual_report_section_content_type_evolution.rollback.sql`
+- `migrations/kai_sprint2_p13_ext3_annual_report_section_export_candidate_content_type_evolution.sql`
+- `migrations/kai_sprint2_p13_ext3_annual_report_section_export_candidate_content_type_evolution.rollback.sql`
+
+**Verification-pack files present:**
+- `scripts/kai-sprint2-p13-ext3-annual-report-section-content-type-evolution-verifier.sql`
+- `scripts/kai-sprint2-p13-ext3-annual-report-section-content-type-evolution-failure-checks.sql`
+- `scripts/kai-sprint2-p13-ext3-annual-report-section-content-type-evolution-smoke-seed.sql`
+- `scripts/kai-sprint2-p13-ext3-annual-report-section-content-type-evolution-smoke-verifier.sql`
+- `scripts/kai-sprint2-p13-ext3-annual-report-section-content-type-evolution-patch-notes.md`
+- `scripts/kai-sprint2-p13-ext3-annual-report-section-content-type-evolution-runbook.md`
+
+**Strict read-only verification result:** the verifier, failure-checks, and
+smoke-verifier SQL contain no `INSERT`/`UPDATE`/`DELETE`/`DROP`/`ALTER`/
+`TRUNCATE` statements (only `CHECK` constraint-definition string literals
+and read-only `SELECT`-based queries) -> PASS. The smoke seed is explicit,
+synthetic, and marked not-yet-run; it was not executed.
+
+**Actual final test results (`DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel`
+set for every Node command; no database/cloud/production access):**
+- Shared generator-result horizontal conformance -> 71/71 PASS.
+- Phase-13 governance horizontal conformance -> 99/99 PASS.
+- Review-lifecycle horizontal conformance -> 70/70 PASS.
+- Generated Drafts library -> 19/19 PASS.
+- Focused P13-EXT-3 annual-report/schema boundary -> 15/15 PASS.
+- `git diff --check` -> PASS.
+
+**Live PostgreSQL/schema behavior:** remains `NOT_CONFIRMED`. Migrations
+were NOT executed. Database connection: NO. Push: NO. Deployment: NO.
+
+**Phase-13 gaps remaining:** `grant_response_paragraph` and
+`funder_outcome_table` are not implemented by this or any prior package.
+
+**Status:** P13_EXT_3_ANNUAL_REPORT_SECTION_PACKAGE_CLOSED_LOCALLY. No
+production or runtime closure claimed. No push, deployment, production
+mutation, database mutation, migration execution, feature-flag/configuration
+change, real-client-data access, or `00_KAI_CURRENT_STATE.md` update
+performed.
