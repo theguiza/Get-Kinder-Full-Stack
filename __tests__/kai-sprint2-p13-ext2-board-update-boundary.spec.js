@@ -472,7 +472,11 @@ test("P13-EXT-2 repository generator-input contract allows board_update (standar
     limitationCodes: [],
   };
   assert.equal(validateGeneratorInput({ contentType: "board_update", requestedAudience: "internal", claims: [baseClaim] }), true);
-  assert.equal(validateGeneratorInput({ contentType: "grant_response_paragraph", requestedAudience: "internal", claims: [baseClaim] }), false);
+  // grant_response_paragraph was implemented by P13-EXT-5 (see
+  // kai-sprint2-p13-ext5-grant-response-paragraph-boundary.spec.js);
+  // grant_response_packet (a distinct, never-a-contentType object_type)
+  // replaces it here as the still-unrecognized negative proof.
+  assert.equal(validateGeneratorInput({ contentType: "grant_response_packet", requestedAudience: "internal", claims: [baseClaim] }), false);
 });
 
 test("P13-EXT-2 review-packet DTO contract accepts board_update alongside the other content types", () => {
@@ -512,7 +516,11 @@ test("P13-EXT-2 review-packet DTO contract accepts board_update alongside the ot
     }],
   };
   assert.equal(isGeneratedDraftReviewPacketDto(basePacket), true);
-  assert.equal(isGeneratedDraftReviewPacketDto({ ...basePacket, contentType: "grant_response_paragraph" }), false);
+  // grant_response_paragraph was implemented by P13-EXT-5 (see
+  // kai-sprint2-p13-ext5-grant-response-paragraph-boundary.spec.js);
+  // grant_response_packet (a distinct, never-a-contentType object_type)
+  // replaces it here as the still-unrecognized negative proof.
+  assert.equal(isGeneratedDraftReviewPacketDto({ ...basePacket, contentType: "grant_response_packet" }), false);
 });
 
 test("P13-EXT-2 production board-update draft-generator adapter sends only the governed projection, normalizes provider JSON, and accepts only the internal audience", async () => {

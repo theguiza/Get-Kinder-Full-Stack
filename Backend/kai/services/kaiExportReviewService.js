@@ -24,6 +24,7 @@ const ALLOWED_GENERATED_CONTENT_TYPES = new Set([
   "board_update",
   "annual_report_section",
   "funder_outcome_table",
+  "grant_response_paragraph",
 ]);
 
 function stageBlocker(validatorKey, blockingReason) {

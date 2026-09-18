@@ -398,7 +398,7 @@ test("Generated Drafts library service authorizes like the existing generated-dr
 });
 
 test("Generated Drafts library index admits all canonical generated-content types, including annual_report_section, and excludes unsupported types", async () => {
-  for (const contentType of ["evidence_summary", "impact_narrative", "readiness_assessment", "data_gap_memo", "case_for_support", "board_update", "annual_report_section", "funder_outcome_table"]) {
+  for (const contentType of ["evidence_summary", "impact_narrative", "readiness_assessment", "data_gap_memo", "case_for_support", "board_update", "annual_report_section", "funder_outcome_table", "grant_response_paragraph"]) {
     const requestedAudience = contentType === "funder_outcome_table" ? "funder" : "internal";
     const deps = {
       env: enabledEnv,
@@ -417,14 +417,18 @@ test("Generated Drafts library index admits all canonical generated-content type
 
   // An unsupported content type still fails closed as system_error rather
   // than being silently admitted alongside the canonical types. Uses
-  // grant_response_paragraph (a real but distinct Grant Response Packet
-  // content type, never a member of LIBRARY_CONTENT_TYPES) rather than
-  // board_update, which P13-EXT-2 made a genuine Generated Drafts content
-  // type.
+  // grant_response_packet (a real, distinct object_type belonging to the
+  // separate Grant Response Packet composite-export domain -
+  // postgresGeneratedContentRepository.js's evaluateGrantResponsePacket
+  // uses this exact literal as `object_type`, never as a generated-content
+  // `content_type`) rather than grant_response_paragraph, which P13-EXT-5
+  // made a genuine Generated Drafts content type (previously this test used
+  // grant_response_paragraph for this same purpose, before P13-EXT-2 had
+  // similarly retired board_update from it).
   const deps = {
     env: enabledEnv,
     async listGeneratedDraftLibraryIndex() {
-      return [draftRow({ content_type: "grant_response_paragraph" })];
+      return [draftRow({ content_type: "grant_response_packet" })];
     },
   };
   const result = await listGeneratedDraftLibraryIndex(
@@ -518,7 +522,7 @@ test("Generated Drafts read model index includes annual_report_section in the ge
       return { rows: [] };
     },
   });
-  assert.match(observed.sql, /AND d\.content_type IN \('evidence_summary', 'impact_narrative', 'readiness_assessment', 'data_gap_memo', 'case_for_support', 'board_update', 'annual_report_section', 'funder_outcome_table'\)/);
+  assert.match(observed.sql, /AND d\.content_type IN \('evidence_summary', 'impact_narrative', 'readiness_assessment', 'data_gap_memo', 'case_for_support', 'board_update', 'annual_report_section', 'funder_outcome_table', 'grant_response_paragraph'\)/);
 });
 
 test("Generated Drafts library index reuses e890a8c's export-review role boundary: gk_reviewer never receives identity/state even when a row exists", async () => {
@@ -709,7 +713,7 @@ test("Generated Drafts read model is bounded, organization-scoped, deterministic
     },
   });
   assert.match(observed.sql, /WHERE d\.organization_id = \$1::uuid/);
-  assert.match(observed.sql, /AND d\.content_type IN \('evidence_summary', 'impact_narrative', 'readiness_assessment', 'data_gap_memo', 'case_for_support', 'board_update', 'annual_report_section', 'funder_outcome_table'\)/);
+  assert.match(observed.sql, /AND d\.content_type IN \('evidence_summary', 'impact_narrative', 'readiness_assessment', 'data_gap_memo', 'case_for_support', 'board_update', 'annual_report_section', 'funder_outcome_table', 'grant_response_paragraph'\)/);
   assert.match(observed.sql, /d\.requested_audience = 'internal'/);
   assert.match(observed.sql, /d\.content_type = 'funder_outcome_table' AND d\.requested_audience = 'funder'/);
   assert.match(observed.sql, /AND d\.draft_status = 'draft'/);
@@ -792,6 +796,7 @@ test("Generated Drafts frontend projection strips unsafe fields and preserves sa
   assert.equal(generatedDraftContentTypeLabel("board_update", "internal"), "Board Update · Internal");
   assert.equal(generatedDraftContentTypeLabel("annual_report_section", "public"), "Annual Report Section · public");
   assert.equal(generatedDraftContentTypeLabel("funder_outcome_table", "funder"), "Funder Outcome Table · funder");
+  assert.equal(generatedDraftContentTypeLabel("grant_response_paragraph", "internal"), "Grant Response Paragraph · Internal");
   assert.notEqual(generatedDraftLibraryIndexPath(organizationId), generatedDraftReviewPacketPath(organizationId, draftId));
 });
 

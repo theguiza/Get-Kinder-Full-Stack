@@ -1,0 +1,143 @@
+-- KAI P13-EXT-5 grant_response_paragraph content-type evolution failure checks.
+--
+-- Read-only. Proves from catalog definitions that unrelated content types,
+-- a near-miss grant_response_paragraph-like token, and non-system
+-- generation-run creators remain outside the accepted contracts after the
+-- widening. In particular, grant_response_packet - the distinct object_type
+-- used by the separate grant_response_packet composite-export domain
+-- (postgresGeneratedContentRepository.js's evaluateGrantResponsePacket) -
+-- is proven to remain outside every content_type contract this package
+-- touches, despite its name resembling grant_response_paragraph. This
+-- script performs no schema or data writes, and does not rely on
+-- transaction rollback for read-only compliance.
+
+WITH constraints AS (
+  SELECT
+    c.conname,
+    pg_get_constraintdef(c.oid) AS constraint_def
+  FROM pg_constraint c
+  WHERE (c.conname = 'generation_runs_p3_01_content_type_check'
+         AND c.conrelid = 'kai.generation_runs'::regclass)
+     OR (c.conname = 'generation_runs_p3_01_created_by_type_check'
+         AND c.conrelid = 'kai.generation_runs'::regclass)
+     OR (c.conname = 'export_candidates_p3_16_content_type_check'
+         AND c.conrelid = 'kai.export_candidates'::regclass)
+),
+expected AS (
+  SELECT
+    'generation_runs_p3_01_content_type_check' AS conname,
+    'CHECK ((content_type = ANY (ARRAY[''evidence_summary''::text, ''impact_narrative''::text, ''readiness_assessment''::text, ''data_gap_memo''::text, ''case_for_support''::text, ''board_update''::text, ''annual_report_section''::text, ''funder_outcome_table''::text, ''grant_response_paragraph''::text])))' AS expected_def
+  UNION ALL
+  SELECT
+    'generation_runs_p3_01_created_by_type_check',
+    'CHECK ((created_by_type = ''system''::text))'
+  UNION ALL
+  SELECT
+    'export_candidates_p3_16_content_type_check',
+    'CHECK ((content_type = ANY (ARRAY[''evidence_summary''::text, ''impact_narrative''::text, ''readiness_assessment''::text, ''data_gap_memo''::text, ''case_for_support''::text, ''board_update''::text, ''annual_report_section''::text, ''funder_outcome_table''::text, ''grant_response_paragraph''::text])))'
+),
+results AS (
+  SELECT
+    'generation_runs_rejects_unrelated_content_type' AS check_name,
+    CASE
+      WHEN c.constraint_def = e.expected_def
+       AND c.constraint_def NOT LIKE '%''grant_response_packet''::text%'
+      THEN 'PASS' ELSE 'FAIL'
+    END AS status,
+    'generation_runs.content_type admits only the nine current application content types' AS detail
+  FROM expected e
+  LEFT JOIN constraints c ON c.conname = e.conname
+  WHERE e.conname = 'generation_runs_p3_01_content_type_check'
+
+  UNION ALL
+
+  SELECT
+    'generation_runs_rejects_near_miss_grant_response_paragraph_token',
+    CASE
+      WHEN c.constraint_def = e.expected_def
+       AND c.constraint_def LIKE '%''grant_response_paragraph''::text%'
+       AND c.constraint_def NOT LIKE '%''grant_response_packet''::text%'
+      THEN 'PASS' ELSE 'FAIL'
+    END,
+    'generation_runs.content_type remains an exact enumeration for grant_response_paragraph, distinct from grant_response_packet'
+  FROM expected e
+  LEFT JOIN constraints c ON c.conname = e.conname
+  WHERE e.conname = 'generation_runs_p3_01_content_type_check'
+
+  UNION ALL
+
+  SELECT
+    'generation_runs_created_by_type_still_system_only',
+    CASE
+      WHEN c.constraint_def = 'CHECK ((created_by_type = ''system''::text))'
+       AND c.constraint_def NOT LIKE '%''human''::text%'
+      THEN 'PASS' ELSE 'FAIL'
+    END,
+    'P13-EXT-5 does not widen system-owned generation_run creation, even for grant_response_paragraph'
+  FROM expected e
+  LEFT JOIN constraints c ON c.conname = e.conname
+  WHERE e.conname = 'generation_runs_p3_01_created_by_type_check'
+
+  UNION ALL
+
+  SELECT
+    'export_candidates_rejects_unrelated_content_type',
+    CASE
+      WHEN c.constraint_def = e.expected_def
+       AND c.constraint_def NOT LIKE '%''grant_response_packet''::text%'
+      THEN 'PASS' ELSE 'FAIL'
+    END,
+    'export_candidates.content_type admits only the nine current application content types'
+  FROM expected e
+  LEFT JOIN constraints c ON c.conname = e.conname
+  WHERE e.conname = 'export_candidates_p3_16_content_type_check'
+)
+SELECT * FROM results ORDER BY check_name;
+
+DO $$
+BEGIN
+  IF EXISTS (
+    WITH constraints AS (
+      SELECT
+        c.conname,
+        pg_get_constraintdef(c.oid) AS constraint_def
+      FROM pg_constraint c
+      WHERE (c.conname = 'generation_runs_p3_01_content_type_check'
+             AND c.conrelid = 'kai.generation_runs'::regclass)
+         OR (c.conname = 'generation_runs_p3_01_created_by_type_check'
+             AND c.conrelid = 'kai.generation_runs'::regclass)
+         OR (c.conname = 'export_candidates_p3_16_content_type_check'
+             AND c.conrelid = 'kai.export_candidates'::regclass)
+    ),
+    failures AS (
+      SELECT 1
+      FROM constraints
+      WHERE conname = 'generation_runs_p3_01_content_type_check'
+        AND constraint_def <> 'CHECK ((content_type = ANY (ARRAY[''evidence_summary''::text, ''impact_narrative''::text, ''readiness_assessment''::text, ''data_gap_memo''::text, ''case_for_support''::text, ''board_update''::text, ''annual_report_section''::text, ''funder_outcome_table''::text, ''grant_response_paragraph''::text])))'
+      UNION ALL
+      SELECT 1
+      FROM constraints
+      WHERE conname = 'generation_runs_p3_01_created_by_type_check'
+        AND constraint_def <> 'CHECK ((created_by_type = ''system''::text))'
+      UNION ALL
+      SELECT 1
+      FROM constraints
+      WHERE conname = 'export_candidates_p3_16_content_type_check'
+        AND constraint_def <> 'CHECK ((content_type = ANY (ARRAY[''evidence_summary''::text, ''impact_narrative''::text, ''readiness_assessment''::text, ''data_gap_memo''::text, ''case_for_support''::text, ''board_update''::text, ''annual_report_section''::text, ''funder_outcome_table''::text, ''grant_response_paragraph''::text])))'
+      UNION ALL
+      SELECT 1
+      WHERE NOT EXISTS (
+        SELECT 1 FROM constraints WHERE conname = 'generation_runs_p3_01_content_type_check'
+      )
+         OR NOT EXISTS (
+        SELECT 1 FROM constraints WHERE conname = 'generation_runs_p3_01_created_by_type_check'
+      )
+         OR NOT EXISTS (
+        SELECT 1 FROM constraints WHERE conname = 'export_candidates_p3_16_content_type_check'
+      )
+    )
+    SELECT 1 FROM failures
+  ) THEN
+    RAISE EXCEPTION 'P13-EXT-5 grant_response_paragraph content-type evolution failure-checks verifier failed';
+  END IF;
+END $$;

@@ -202,7 +202,15 @@ test("P13-01 repository generator-input contract allows exactly evidence_summary
   };
   assert.equal(validateGeneratorInput({ contentType: "impact_narrative", requestedAudience: "internal", claims: [baseClaim] }), true);
   assert.equal(validateGeneratorInput({ contentType: "evidence_summary", requestedAudience: "internal", claims: [baseClaim] }), true);
-  assert.equal(validateGeneratorInput({ contentType: "grant_response_paragraph", requestedAudience: "internal", claims: [baseClaim] }), false);
+  // grant_response_paragraph was implemented by P13-EXT-5 (see
+  // kai-sprint2-p13-ext5-grant-response-paragraph-boundary.spec.js), so it
+  // is no longer usable here as an unrecognized-contentType negative proof.
+  // grant_response_packet (the distinct Grant Response Packet
+  // composite-export object_type - postgresGeneratedContentRepository.js's
+  // evaluateGrantResponsePacket uses this exact literal as `object_type`,
+  // never as a generated-content `contentType`) replaces it as a genuinely
+  // still-unrecognized value.
+  assert.equal(validateGeneratorInput({ contentType: "grant_response_packet", requestedAudience: "internal", claims: [baseClaim] }), false);
 });
 
 test("P13-01 review-packet DTO contract accepts impact_narrative alongside evidence_summary", () => {
@@ -243,7 +251,11 @@ test("P13-01 review-packet DTO contract accepts impact_narrative alongside evide
   };
   assert.equal(isGeneratedDraftReviewPacketDto(basePacket), true);
   assert.equal(isGeneratedDraftReviewPacketDto({ ...basePacket, contentType: "evidence_summary" }), true);
-  assert.equal(isGeneratedDraftReviewPacketDto({ ...basePacket, contentType: "grant_response_paragraph" }), false);
+  // grant_response_paragraph was implemented by P13-EXT-5 (see
+  // kai-sprint2-p13-ext5-grant-response-paragraph-boundary.spec.js);
+  // grant_response_packet (a distinct, never-a-contentType object_type)
+  // replaces it here as the still-unrecognized negative proof.
+  assert.equal(isGeneratedDraftReviewPacketDto({ ...basePacket, contentType: "grant_response_packet" }), false);
 });
 
 test("P13-01 production impact-narrative draft-generator adapter sends only the governed projection and normalizes provider JSON into the draftGenerator contract", async () => {

@@ -409,7 +409,11 @@ test("P13-EXT-1 repository generator-input contract allows case_for_support (sta
   assert.equal(validateGeneratorInput({ contentType: "case_for_support", requestedAudience: "internal", claims: [baseClaim] }), true);
   assert.equal(validateGeneratorInput({ contentType: "case_for_support", requestedAudience: "funder", claims: [baseClaim] }), true);
   assert.equal(validateGeneratorInput({ contentType: "case_for_support", requestedAudience: "public", claims: [baseClaim] }), true);
-  assert.equal(validateGeneratorInput({ contentType: "grant_response_paragraph", requestedAudience: "internal", claims: [baseClaim] }), false);
+  // grant_response_paragraph was implemented by P13-EXT-5 (see
+  // kai-sprint2-p13-ext5-grant-response-paragraph-boundary.spec.js);
+  // grant_response_packet (a distinct, never-a-contentType object_type)
+  // replaces it here as the still-unrecognized negative proof.
+  assert.equal(validateGeneratorInput({ contentType: "grant_response_packet", requestedAudience: "internal", claims: [baseClaim] }), false);
 });
 
 test("P13-EXT-1 review-packet DTO contract accepts case_for_support alongside the other content types", () => {
@@ -450,7 +454,11 @@ test("P13-EXT-1 review-packet DTO contract accepts case_for_support alongside th
   };
   assert.equal(isGeneratedDraftReviewPacketDto(basePacket), true);
   assert.equal(isGeneratedDraftReviewPacketDto({ ...basePacket, requestedAudience: "funder" }), true);
-  assert.equal(isGeneratedDraftReviewPacketDto({ ...basePacket, contentType: "grant_response_paragraph" }), false);
+  // grant_response_paragraph was implemented by P13-EXT-5 (see
+  // kai-sprint2-p13-ext5-grant-response-paragraph-boundary.spec.js);
+  // grant_response_packet (a distinct, never-a-contentType object_type)
+  // replaces it here as the still-unrecognized negative proof.
+  assert.equal(isGeneratedDraftReviewPacketDto({ ...basePacket, contentType: "grant_response_packet" }), false);
 });
 
 test("P13-EXT-1 production case-for-support draft-generator adapter sends only the governed projection, normalizes provider JSON, and accepts both internal and funder audiences", async () => {

@@ -109,6 +109,7 @@ const CONTENT_TYPES = Object.freeze([
   "board_update",
   "annual_report_section",
   "funder_outcome_table",
+  "grant_response_paragraph",
 ]);
 
 const ORG = "00000000-0000-4000-8000-000000000001";
@@ -179,6 +180,7 @@ const REPOSITORY_METHOD_BY_CONTENT_TYPE = Object.freeze({
   board_update: "createBoardUpdateDraft",
   annual_report_section: "createAnnualReportSectionDraft",
   funder_outcome_table: "createFunderOutcomeTableDraft",
+  grant_response_paragraph: "createGrantResponseParagraphDraft",
 });
 
 function creationDependenciesFor(contentType) {
@@ -1041,13 +1043,13 @@ test("section 7 - the lifecycle-facing allowlists all include exactly the same c
   // "service lazy-loads the database-capable repository only after all
   // gates, per its own source" tests).
   const exportReviewServiceSource = readFileSync(new URL("../Backend/kai/services/kaiExportReviewService.js", import.meta.url), "utf8");
-  assert.match(exportReviewServiceSource, /const ALLOWED_GENERATED_CONTENT_TYPES = new Set\(\[\s*"evidence_summary",\s*"impact_narrative",\s*"readiness_assessment",\s*"data_gap_memo",\s*"case_for_support",\s*"board_update",\s*"annual_report_section",\s*"funder_outcome_table",?\s*\]\)/);
+  assert.match(exportReviewServiceSource, /const ALLOWED_GENERATED_CONTENT_TYPES = new Set\(\[\s*"evidence_summary",\s*"impact_narrative",\s*"readiness_assessment",\s*"data_gap_memo",\s*"case_for_support",\s*"board_update",\s*"annual_report_section",\s*"funder_outcome_table",\s*"grant_response_paragraph",?\s*\]\)/);
 
   const libraryServiceSource = readFileSync(new URL("../Backend/kai/services/kaiGeneratedDraftLibraryService.js", import.meta.url), "utf8");
-  assert.match(libraryServiceSource, /const LIBRARY_CONTENT_TYPES = new Set\(\[\s*"evidence_summary",\s*"impact_narrative",\s*"readiness_assessment",\s*"data_gap_memo",\s*"case_for_support",\s*"board_update",\s*"annual_report_section",\s*"funder_outcome_table",?\s*\]\)/);
+  assert.match(libraryServiceSource, /const LIBRARY_CONTENT_TYPES = new Set\(\[\s*"evidence_summary",\s*"impact_narrative",\s*"readiness_assessment",\s*"data_gap_memo",\s*"case_for_support",\s*"board_update",\s*"annual_report_section",\s*"funder_outcome_table",\s*"grant_response_paragraph",?\s*\]\)/);
 
   const readModelSource = readFileSync(new URL("../Backend/kai/db/kaiGeneratedDraftLibraryReadModels.js", import.meta.url), "utf8");
-  assert.match(readModelSource, /d\.content_type IN \('evidence_summary', 'impact_narrative', 'readiness_assessment', 'data_gap_memo', 'case_for_support', 'board_update', 'annual_report_section', 'funder_outcome_table'\)/);
+  assert.match(readModelSource, /d\.content_type IN \('evidence_summary', 'impact_narrative', 'readiness_assessment', 'data_gap_memo', 'case_for_support', 'board_update', 'annual_report_section', 'funder_outcome_table', 'grant_response_paragraph'\)/);
 });
 
 test("section 7 - the intentionally-narrower funder/board-packet allowlists remain exactly as narrow as designed (not a lifecycle allowlist, not drift)", () => {
@@ -1134,5 +1136,5 @@ test("section 8 - a gk_reviewer actor may start/complete generated_content_revie
 });
 
 test("horizontal review-lifecycle conformance: all current content types were exercised", () => {
-  assert.deepEqual(CONTENT_TYPES, ["evidence_summary", "impact_narrative", "readiness_assessment", "data_gap_memo", "case_for_support", "board_update", "annual_report_section", "funder_outcome_table"]);
+  assert.deepEqual(CONTENT_TYPES, ["evidence_summary", "impact_narrative", "readiness_assessment", "data_gap_memo", "case_for_support", "board_update", "annual_report_section", "funder_outcome_table", "grant_response_paragraph"]);
 });

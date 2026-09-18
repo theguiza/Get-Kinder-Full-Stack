@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 
 import sprint2IntakeApiRouter, { __testables as intakeRouteTestables } from "../Backend/kai/routes/sprint2IntakeApi.js";
 import {
-  createFunderOutcomeTableDraft,
+  createGrantResponseParagraphDraft,
   __generatedContentReviewPacketServiceTestables,
   __generatedContentServiceContract,
 } from "../Backend/kai/services/kaiGeneratedContentService.js";
@@ -13,14 +13,14 @@ import { EXPORT_CANDIDATE_CONTENT_TYPES } from "../Backend/kai/dictionary/export
 import {
   __generatedContentRepositoryContract,
   __generatedContentRepositoryTestables,
-  fingerprintFunderOutcomeTableRequest,
+  fingerprintGrantResponseParagraphRequest,
   fingerprintEvidenceSummaryRequest,
 } from "../Backend/kai/dictionary/postgresGeneratedContentRepository.js";
 import { generatedDraftContentTypeLabel } from "../frontend/impactEvidenceLibraryLogic.js";
 import {
-  __funderOutcomeTableDraftGeneratorContract,
-  createProductionFunderOutcomeTableDraftGenerator,
-} from "../Backend/kai/services/kaiFunderOutcomeTableDraftGenerator.js";
+  __grantResponseParagraphDraftGeneratorContract,
+  createProductionGrantResponseParagraphDraftGenerator,
+} from "../Backend/kai/services/kaiGrantResponseParagraphDraftGenerator.js";
 import { createAttachKaiSprint2ActorContext } from "../Backend/kai/middleware/kaiSprint2Authentication.js";
 
 const ORG = "00000000-0000-4000-8000-000000000001";
@@ -33,7 +33,7 @@ const SOURCE = "00000000-0000-4000-8000-000000000301";
 const SOURCE_VERSION = "00000000-0000-4000-8000-000000000401";
 const NOW = "2026-09-18T10:00:00.000Z";
 const enabledEnv = Object.freeze({ KAI_SPRINT2_ENABLED: "true", KAI_GENERATION_ENABLED: "true" });
-const routePath = "/admin/organizations/:organizationId/generated-content-drafts/funder-outcome-table";
+const routePath = "/admin/organizations/:organizationId/generated-content-drafts/grant-response-paragraph";
 
 const adminActorContext = Object.freeze({
   actorType: "human",
@@ -57,9 +57,9 @@ function input(overrides = {}) {
   return {
     organizationId: ORG,
     engagementId: ENGAGEMENT,
-    requestedAudience: "funder",
+    requestedAudience: "internal",
     claimIds: [CLAIM],
-    idempotencyKey: "p13-ext4-funder-outcome-table-key",
+    idempotencyKey: "p13-ext5-grant-response-paragraph-key",
     actorContext: adminActorContext,
     now: NOW,
     ...overrides,
@@ -70,8 +70,8 @@ function requestBody(overrides = {}) {
   return {
     engagement_id: ENGAGEMENT,
     claim_ids: [CLAIM],
-    idempotency_key: "p13-ext4-funder-outcome-table-route-key",
-    requested_audience: "funder",
+    idempotency_key: "p13-ext5-grant-response-paragraph-route-key",
+    requested_audience: "internal",
     ...overrides,
   };
 }
@@ -103,7 +103,7 @@ function createResponse() {
   };
 }
 
-async function invokeFunderOutcomeTableRoute(body, { actorContext = adminActorContext } = {}) {
+async function invokeGrantResponseParagraphRoute(body, { actorContext = adminActorContext } = {}) {
   const routeLayer = sprint2IntakeApiRouter.stack
     .find((layer) => layer.route?.path === routePath && layer.route?.methods?.post);
   assert.ok(routeLayer);
@@ -134,24 +134,24 @@ async function invokeFunderOutcomeTableRoute(body, { actorContext = adminActorCo
   }
 }
 
-test("P13-EXT-4 canonical funder_outcome_table registration is generic only", () => {
-  assert.equal(__generatedContentServiceContract.ALLOWED_GENERATED_CONTENT_TYPES.has("funder_outcome_table"), true);
-  assert.equal(__generatedContentRepositoryContract.ALLOWED_GENERATED_CONTENT_TYPES.has("funder_outcome_table"), true);
-  assert.equal(EXPORT_CANDIDATE_CONTENT_TYPES.includes("funder_outcome_table"), true);
-  assert.equal(__generatedContentRepositoryContract.PACKET_MEMBER_CONTENT_TYPES.has("funder_outcome_table"), false);
+test("P13-EXT-5 canonical grant_response_paragraph registration is generic only", () => {
+  assert.equal(__generatedContentServiceContract.ALLOWED_GENERATED_CONTENT_TYPES.has("grant_response_paragraph"), true);
+  assert.equal(__generatedContentRepositoryContract.ALLOWED_GENERATED_CONTENT_TYPES.has("grant_response_paragraph"), true);
+  assert.equal(EXPORT_CANDIDATE_CONTENT_TYPES.includes("grant_response_paragraph"), true);
+  assert.equal(__generatedContentRepositoryContract.PACKET_MEMBER_CONTENT_TYPES.has("grant_response_paragraph"), false);
 });
 
-test("P13-EXT-4 route is mounted as an authenticated funder_outcome_table draft-generation POST", () => {
+test("P13-EXT-5 route is mounted as an authenticated grant_response_paragraph draft-generation POST", () => {
   const matches = sprint2IntakeApiRouter.stack
     .filter((layer) => layer.route?.path === routePath && layer.route?.methods?.post);
   assert.equal(matches.length, 1);
   assert.deepEqual(Object.keys(matches[0].route.methods), ["post"]);
 });
 
-test("P13-EXT-4 HTTP route accepts exactly four body fields, admits only funder, rejects internal/public/unknown audience and extra fields, and passes audience through", async (t) => {
+test("P13-EXT-5 HTTP route accepts exactly four body fields, admits internal/funder/public, rejects unknown audience and extra fields, and passes audience through", async (t) => {
   const calls = [];
   const restoreService = intakeRouteTestables.setIntakeServiceForTest({
-    async createFunderOutcomeTableDraft(routeInput, dependencies) {
+    async createGrantResponseParagraphDraft(routeInput, dependencies) {
       calls.push({ input: routeInput, dependencies });
       return {
         ok: true,
@@ -162,7 +162,7 @@ test("P13-EXT-4 HTTP route accepts exactly four body fields, admits only funder,
           draftStatus: "draft",
           reviewStatus: "needs_gk_review",
           reviewQueueItemId: "00000000-0000-4000-8000-000000000803",
-          blocks: [{ ordinal: 1, text: "| Outcome | Status |\n| --- | --- |\n| A claim-backed outcome. | Reported |", citations: [{ claimId: CLAIM, evidenceItemId: EVIDENCE }] }],
+          blocks: [{ ordinal: 1, text: "A claim-backed grant response paragraph.", citations: [{ claimId: CLAIM, evidenceItemId: EVIDENCE }] }],
           replayed: false,
         },
         error: null,
@@ -181,41 +181,41 @@ test("P13-EXT-4 HTTP route accepts exactly four body fields, admits only funder,
   process.env.KAI_SPRINT2_ENABLED = "true";
   process.env.KAI_GENERATION_ENABLED = "true";
 
-  const result = await invokeFunderOutcomeTableRoute(requestBody({ requested_audience: "funder" }));
-  assert.equal(result.statusCode, 201);
-  assert.equal(result.body.data.requestedAudience, "funder");
-
-  for (const audience of ["internal", "public", "unknown"]) {
-    assert.equal((await invokeFunderOutcomeTableRoute(requestBody({ requested_audience: audience }))).statusCode, 422);
+  for (const audience of ["internal", "funder", "public"]) {
+    const result = await invokeGrantResponseParagraphRoute(requestBody({ requested_audience: audience }));
+    assert.equal(result.statusCode, 201);
+    assert.equal(result.body.data.requestedAudience, audience);
   }
+
+  assert.equal((await invokeGrantResponseParagraphRoute(requestBody({ requested_audience: "unknown" }))).statusCode, 422);
   const missingAudience = requestBody();
   delete missingAudience.requested_audience;
-  assert.equal((await invokeFunderOutcomeTableRoute(missingAudience)).statusCode, 422);
-  assert.equal((await invokeFunderOutcomeTableRoute(requestBody({ funder_name: "Example Foundation" }))).statusCode, 422);
-  assert.deepEqual(calls.map((call) => call.input.requestedAudience), ["funder"]);
+  assert.equal((await invokeGrantResponseParagraphRoute(missingAudience)).statusCode, 422);
+  assert.equal((await invokeGrantResponseParagraphRoute(requestBody({ funder_name: "Example Foundation" }))).statusCode, 422);
+  assert.deepEqual(calls.map((call) => call.input.requestedAudience), ["internal", "funder", "public"]);
   assert.equal(calls[0].input.engagementId, ENGAGEMENT);
   assert.deepEqual(calls[0].input.claimIds, [CLAIM]);
   assert.equal(typeof calls[0].dependencies.draftGenerator, "function");
   assert.equal(typeof calls[0].dependencies.metadataOnlyAudit?.prepareMetadataOnlyAudit, "function");
 });
 
-test("P13-EXT-4 route source delegates only and contains no direct persistence behavior", () => {
+test("P13-EXT-5 route source delegates only and contains no direct persistence behavior", () => {
   const routeSource = readFileSync("Backend/kai/routes/sprint2IntakeApi.js", "utf8");
-  const start = routeSource.indexOf('router.post(\n  "/admin/organizations/:organizationId/generated-content-drafts/funder-outcome-table"');
+  const start = routeSource.indexOf('router.post(\n  "/admin/organizations/:organizationId/generated-content-drafts/grant-response-paragraph"');
   assert.ok(start >= 0);
   const end = routeSource.indexOf('router.get(\n  "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/review-packet"', start);
   assert.ok(end > start);
   const section = routeSource.slice(start, end);
-  assert.match(section, /createFunderOutcomeTableDraft/);
+  assert.match(section, /createGrantResponseParagraphDraft/);
   assert.doesNotMatch(section, /\bkai\./);
   assert.doesNotMatch(section, /\b(?:pool|db)\.query\s*\(/);
   assert.doesNotMatch(section.replace(/"[^"]*"/g, '""'), /\b(?:SELECT|INSERT|UPDATE|DELETE)\b/i);
 });
 
-test("P13-EXT-4 service gates malformed/RBAC/tenant/audience failures and delegates only requestedAudience \"funder\" to repository.createFunderOutcomeTableDraft", async () => {
+test("P13-EXT-5 service gates malformed/RBAC/tenant/audience failures and delegates every requestedAudience value to repository.createGrantResponseParagraphDraft", async () => {
   let repositoryCalls = 0;
   const repository = {
-    async createFunderOutcomeTableDraft(repoInput) {
+    async createGrantResponseParagraphDraft(repoInput) {
       repositoryCalls += 1;
       return {
         ok: true,
@@ -226,7 +226,7 @@ test("P13-EXT-4 service gates malformed/RBAC/tenant/audience failures and delega
           draftStatus: "draft",
           reviewStatus: "needs_gk_review",
           reviewQueueItemId: "00000000-0000-4000-8000-000000000803",
-          blocks: [{ ordinal: 1, text: "A claim-backed table row.", citations: [{ claimId: CLAIM, evidenceItemId: EVIDENCE }] }],
+          blocks: [{ ordinal: 1, text: "A claim-backed paragraph.", citations: [{ claimId: CLAIM, evidenceItemId: EVIDENCE }] }],
           replayed: false,
         },
         error: null,
@@ -240,21 +240,21 @@ test("P13-EXT-4 service gates malformed/RBAC/tenant/audience failures and delega
     metadataOnlyAudit: {},
   };
 
-  assert.equal((await createFunderOutcomeTableDraft({ ...input(), extra: true }, deps)).error.code, "validation_blocker");
-  assert.equal((await createFunderOutcomeTableDraft(input({ requestedAudience: "unknown" }), deps)).error.code, "validation_blocker");
-  assert.equal((await createFunderOutcomeTableDraft(input({ requestedAudience: "internal" }), deps)).error.code, "validation_blocker");
-  assert.equal((await createFunderOutcomeTableDraft(input({ requestedAudience: "public" }), deps)).error.code, "validation_blocker");
-  assert.equal((await createFunderOutcomeTableDraft(input({ actorContext: clientActorContext }), deps)).error.code, "authorization_denied");
-  assert.equal((await createFunderOutcomeTableDraft(input({ organizationId: OTHER_ORG }), deps)).error.code, "authorization_denied");
-  assert.equal((await createFunderOutcomeTableDraft(input({ engagementId: OTHER_ENGAGEMENT }), deps)).error.code, "tenant_boundary_violation");
+  assert.equal((await createGrantResponseParagraphDraft({ ...input(), extra: true }, deps)).error.code, "validation_blocker");
+  assert.equal((await createGrantResponseParagraphDraft(input({ requestedAudience: "unknown" }), deps)).error.code, "validation_blocker");
+  assert.equal((await createGrantResponseParagraphDraft(input({ actorContext: clientActorContext }), deps)).error.code, "authorization_denied");
+  assert.equal((await createGrantResponseParagraphDraft(input({ organizationId: OTHER_ORG }), deps)).error.code, "authorization_denied");
+  assert.equal((await createGrantResponseParagraphDraft(input({ engagementId: OTHER_ENGAGEMENT }), deps)).error.code, "tenant_boundary_violation");
 
-  const result = await createFunderOutcomeTableDraft(input({ requestedAudience: "funder" }), deps);
-  assert.equal(result.ok, true, JSON.stringify(result));
-  assert.equal(result.data.requestedAudience, "funder");
-  assert.equal(repositoryCalls, 1);
+  for (const requestedAudience of ["internal", "funder", "public"]) {
+    const result = await createGrantResponseParagraphDraft(input({ requestedAudience }), deps);
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.data.requestedAudience, requestedAudience);
+  }
+  assert.equal(repositoryCalls, 3);
 });
 
-test("P13-EXT-4 repository generator-input contract and fingerprint include content type, audience, engagement, and claims", () => {
+test("P13-EXT-5 repository generator-input contract and fingerprint include content type, audience, engagement, and claims", () => {
   const baseClaim = {
     claimId: CLAIM,
     claimStatement: "A claim.",
@@ -265,49 +265,47 @@ test("P13-EXT-4 repository generator-input contract and fingerprint include cont
     limitationCodes: [],
   };
   assert.equal(__generatedContentRepositoryTestables.validateGeneratorInput({
-    contentType: "funder_outcome_table",
-    requestedAudience: "funder",
+    contentType: "grant_response_paragraph",
+    requestedAudience: "internal",
     claims: [baseClaim],
   }), true);
-  // grant_response_paragraph was implemented by P13-EXT-5 (see
-  // kai-sprint2-p13-ext5-grant-response-paragraph-boundary.spec.js), so it
-  // is no longer usable here as an unrecognized-contentType negative proof.
-  // grant_response_packet (the distinct Grant Response Packet composite-
-  // export object_type - postgresGeneratedContentRepository.js's
-  // evaluateGrantResponsePacket uses this exact literal as `object_type`,
-  // never as a generated-content `contentType`) replaces it as a genuinely
-  // still-unrecognized value.
+  // grant_response_packet is a real, distinct object_type belonging to the
+  // separate Grant Response Packet composite-export domain (see
+  // postgresGeneratedContentRepository.js's evaluateGrantResponsePacket,
+  // which uses this exact literal as `object_type`, never as a generated-
+  // content `contentType`) - it remains a genuinely unrecognized
+  // contentType here despite the name resembling grant_response_paragraph.
   assert.equal(__generatedContentRepositoryTestables.validateGeneratorInput({
     contentType: "grant_response_packet",
-    requestedAudience: "funder",
+    requestedAudience: "internal",
     claims: [baseClaim],
   }), false);
 
-  const fingerprint = fingerprintFunderOutcomeTableRequest({
-    requestedAudience: "funder",
+  const fingerprint = fingerprintGrantResponseParagraphRequest({
+    requestedAudience: "internal",
     engagementId: ENGAGEMENT,
     claimIds: [CLAIM],
   });
   assert.notEqual(fingerprint, fingerprintEvidenceSummaryRequest({
-    requestedAudience: "funder",
+    requestedAudience: "internal",
     engagementId: ENGAGEMENT,
     claimIds: [CLAIM],
   }));
-  assert.notEqual(fingerprint, fingerprintFunderOutcomeTableRequest({
-    requestedAudience: "funder",
+  assert.notEqual(fingerprint, fingerprintGrantResponseParagraphRequest({
+    requestedAudience: "internal",
     engagementId: OTHER_ENGAGEMENT,
     claimIds: [CLAIM],
   }));
-  assert.equal(fingerprint, fingerprintFunderOutcomeTableRequest({
-    requestedAudience: "funder",
+  assert.equal(fingerprint, fingerprintGrantResponseParagraphRequest({
+    requestedAudience: "internal",
     engagementId: ENGAGEMENT,
     claimIds: [CLAIM],
   }));
 });
 
-test("P13-EXT-4 production generator uses the shared block/citation result contract, is funder-only, and renders tabular content inside block text", async () => {
+test("P13-EXT-5 production generator uses the shared block/citation result contract and supports internal/funder/public", async () => {
   const calls = [];
-  const generator = createProductionFunderOutcomeTableDraftGenerator({
+  const generator = createProductionGrantResponseParagraphDraftGenerator({
     async createMessage(payload) {
       calls.push(payload);
       return {
@@ -315,7 +313,7 @@ test("P13-EXT-4 production generator uses the shared block/citation result contr
           type: "text",
           text: JSON.stringify({
             blocks: [{
-              text: "| Metric | Value |\n| --- | --- | \n| The funder outcome table is supported by governed evidence. | reported |",
+              text: "The grant response paragraph is supported by governed evidence.",
               citations: [{ claimId: CLAIM, evidenceItemId: EVIDENCE, ignored: "drop" }],
               ignored: "drop",
             }],
@@ -326,11 +324,11 @@ test("P13-EXT-4 production generator uses the shared block/citation result contr
   });
 
   const result = await generator({
-    contentType: "funder_outcome_table",
-    requestedAudience: "funder",
+    contentType: "grant_response_paragraph",
+    requestedAudience: "internal",
     claims: [{
       claimId: CLAIM,
-      claimStatement: "The funder outcome table is supported by governed evidence.",
+      claimStatement: "The grant response paragraph is supported by governed evidence.",
       claimType: "finding",
       evidenceItemId: EVIDENCE,
       sourceId: SOURCE,
@@ -342,35 +340,34 @@ test("P13-EXT-4 production generator uses the shared block/citation result contr
   assert.deepEqual(result, {
     blocks: [{
       ordinal: 1,
-      text: "| Metric | Value |\n| --- | --- | \n| The funder outcome table is supported by governed evidence. | reported |",
+      text: "The grant response paragraph is supported by governed evidence.",
       citations: [{ claimId: CLAIM, evidenceItemId: EVIDENCE }],
     }],
   });
   assert.equal(__generatedContentRepositoryTestables.validateGeneratorResult(result), true);
   assert.equal(calls.length, 1);
-  assert.equal(calls[0].model, __funderOutcomeTableDraftGeneratorContract.MODEL);
-  // No separate structured-table output field exists anywhere in this
-  // schema - the shared blocks[].text + citations[] contract is reused
-  // unchanged, and tabular presentation lives inside block text only.
-  assert.deepEqual(Object.keys(__funderOutcomeTableDraftGeneratorContract.FUNDER_OUTCOME_TABLE_OUTPUT_SCHEMA.properties), ["blocks"]);
-  assert.equal(JSON.stringify(calls[0]).includes("funder_name"), false);
-  assert.equal(JSON.stringify(calls[0]).includes("reporting_period"), false);
+  assert.equal(calls[0].model, __grantResponseParagraphDraftGeneratorContract.MODEL);
+  assert.deepEqual(Object.keys(__grantResponseParagraphDraftGeneratorContract.GRANT_RESPONSE_PARAGRAPH_OUTPUT_SCHEMA.properties), ["blocks"]);
 
-  // Funder-only: internal/public are rejected before any provider call.
-  for (const requestedAudience of ["internal", "public"]) {
-    const rejectedCalls = [];
-    const rejectingGenerator = createProductionFunderOutcomeTableDraftGenerator({
+  // Unlike funder_outcome_table (P13-EXT-4, funder-only), grant_response_paragraph
+  // reuses the full unrestricted shared {internal, funder, public} shape -
+  // all three audiences reach the provider call.
+  for (const requestedAudience of ["internal", "funder", "public"]) {
+    const audienceCalls = [];
+    const audienceGenerator = createProductionGrantResponseParagraphDraftGenerator({
       async createMessage(payload) {
-        rejectedCalls.push(payload);
-        throw new Error("must not be called");
+        audienceCalls.push(payload);
+        return {
+          content: [{ type: "text", text: JSON.stringify({ blocks: [{ text: "A paragraph.", citations: [{ claimId: CLAIM, evidenceItemId: EVIDENCE }] }] }) }],
+        };
       },
     });
-    const rejected = await rejectingGenerator({
-      contentType: "funder_outcome_table",
+    const audienceResult = await audienceGenerator({
+      contentType: "grant_response_paragraph",
       requestedAudience,
       claims: [{
         claimId: CLAIM,
-        claimStatement: "Unused.",
+        claimStatement: "A claim.",
         claimType: "finding",
         evidenceItemId: EVIDENCE,
         sourceId: SOURCE,
@@ -378,19 +375,43 @@ test("P13-EXT-4 production generator uses the shared block/citation result contr
         limitationCodes: [],
       }],
     });
-    assert.deepEqual(rejected, { blocks: [] });
-    assert.equal(rejectedCalls.length, 0);
-    assert.equal(__generatedContentRepositoryTestables.validateGeneratorResult(rejected), false);
+    assert.equal(audienceCalls.length, 1);
+    assert.equal(__generatedContentRepositoryTestables.validateGeneratorResult(audienceResult), true);
   }
+
+  // "unknown" is rejected before any provider call.
+  const rejectedCalls = [];
+  const rejectingGenerator = createProductionGrantResponseParagraphDraftGenerator({
+    async createMessage(payload) {
+      rejectedCalls.push(payload);
+      throw new Error("must not be called");
+    },
+  });
+  const rejected = await rejectingGenerator({
+    contentType: "grant_response_paragraph",
+    requestedAudience: "unknown",
+    claims: [{
+      claimId: CLAIM,
+      claimStatement: "Unused.",
+      claimType: "finding",
+      evidenceItemId: EVIDENCE,
+      sourceId: SOURCE,
+      sourceVersionId: SOURCE_VERSION,
+      limitationCodes: [],
+    }],
+  });
+  assert.deepEqual(rejected, { blocks: [] });
+  assert.equal(rejectedCalls.length, 0);
+  assert.equal(__generatedContentRepositoryTestables.validateGeneratorResult(rejected), false);
 });
 
-test("P13-EXT-4 Generated Drafts, review lifecycle, generic export-review, and frontend label admit funder_outcome_table", () => {
+test("P13-EXT-5 Generated Drafts, review lifecycle, generic export-review, and frontend label admit grant_response_paragraph", () => {
   const packet = {
     generationRunId: "00000000-0000-4000-8000-000000000501",
     generatedContentDraftId: "00000000-0000-4000-8000-000000000502",
-    contentType: "funder_outcome_table",
+    contentType: "grant_response_paragraph",
     draftStatus: "draft",
-    requestedAudience: "funder",
+    requestedAudience: "internal",
     reviewQueueItemId: "00000000-0000-4000-8000-000000000503",
     queueStatus: "open",
     reviewStatus: "needs_gk_review",
@@ -401,7 +422,7 @@ test("P13-EXT-4 Generated Drafts, review lifecycle, generic export-review, and f
     exportReviewStatus: null,
     blocks: [{
       ordinal: 1,
-      text: "| Outcome | Status |\n| --- | --- |\n| Narrative table row. | reported |",
+      text: "A claim-backed grant response paragraph.",
       citations: [{
         claimId: CLAIM,
         evidenceItemId: EVIDENCE,
@@ -415,24 +436,51 @@ test("P13-EXT-4 Generated Drafts, review lifecycle, generic export-review, and f
         blockerCodes: [],
         affectedDimensionKeys: [],
         affectedObjectIds: [],
-        approvedAudiences: ["funder"],
+        approvedAudiences: ["internal"],
       }],
     }],
   };
   assert.equal(__generatedContentReviewPacketServiceTestables.isGeneratedDraftReviewPacketDto(packet), true);
-  // P13-EXT-4 (Generated Drafts repair): the library read model/service index
-  // now applies an explicit content-type/audience compatibility rule
-  // (kaiGeneratedDraftLibraryReadModels.js's WHERE predicate and
-  // responseDraftSummary's isAudienceCompatible()) rather than a single
-  // internal-only check - every predecessor content type is still
-  // internal-only, but funder_outcome_table is admitted only at its real
-  // production audience, "funder" (never "internal", never "public"). This
-  // proves generic content-type admission at that layer using the one
-  // audience this content type is actually compatible with.
+  // grant_response_paragraph reuses the same internal-only Generated Drafts
+  // library visibility rule every predecessor type except funder_outcome_table
+  // already has (kaiGeneratedDraftLibraryReadModels.js's WHERE predicate and
+  // responseDraftSummary's isAudienceCompatible() both default to
+  // requestedAudience === "internal" for every content_type other than
+  // "funder_outcome_table" - no new branch was added for this type).
   assert.equal(generatedDraftLibraryTestables.responseDraftSummary({
     generated_content_draft_id: "00000000-0000-4000-8000-000000000502",
     organization_id: ORG,
-    content_type: "funder_outcome_table",
+    content_type: "grant_response_paragraph",
+    requested_audience: "internal",
+    draft_status: "draft",
+    review_queue_item_id: "00000000-0000-4000-8000-000000000503",
+    queue_status: "open",
+    review_status: "needs_gk_review",
+    created_at: NOW,
+    export_review_queue_item_id: null,
+    export_review_organization_id: null,
+    export_review_queue_type: null,
+    export_review_target_object_type: null,
+    export_review_target_object_id: null,
+    export_review_priority: null,
+    export_review_queue_status: null,
+    export_review_status: null,
+    export_review_blocked_reason: null,
+    export_review_assigned_to: null,
+    export_review_due_at: null,
+    export_review_summary: null,
+    export_review_required_action: null,
+    export_review_queue_metadata: null,
+    export_review_created_by: null,
+    export_review_created_by_type: null,
+  }, ORG, true)?.contentType, "grant_response_paragraph");
+  // A funder-audience grant_response_paragraph row is correctly rejected by
+  // the same rule (it is not funder_outcome_table, so only "internal" is
+  // library-compatible for it).
+  assert.equal(generatedDraftLibraryTestables.responseDraftSummary({
+    generated_content_draft_id: "00000000-0000-4000-8000-000000000502",
+    organization_id: ORG,
+    content_type: "grant_response_paragraph",
     requested_audience: "funder",
     draft_status: "draft",
     review_queue_item_id: "00000000-0000-4000-8000-000000000503",
@@ -455,38 +503,28 @@ test("P13-EXT-4 Generated Drafts, review lifecycle, generic export-review, and f
     export_review_queue_metadata: null,
     export_review_created_by: null,
     export_review_created_by_type: null,
-  }, ORG, true)?.contentType, "funder_outcome_table");
-  assert.equal(EXPORT_CANDIDATE_CONTENT_TYPES.includes("funder_outcome_table"), true);
-  assert.equal(generatedDraftContentTypeLabel("funder_outcome_table", "funder"), "Funder Outcome Table · funder");
+  }, ORG, true), null);
+  assert.equal(EXPORT_CANDIDATE_CONTENT_TYPES.includes("grant_response_paragraph"), true);
+  assert.equal(generatedDraftContentTypeLabel("grant_response_paragraph", "internal"), "Grant Response Paragraph · Internal");
 });
 
-test("P13-EXT-4 boundary proof: packet/composite memberships and off-limits content types stay unchanged", () => {
+test("P13-EXT-5 boundary proof: packet/composite memberships and off-limits content types stay unchanged", () => {
   const repositorySource = readFileSync("Backend/kai/dictionary/postgresGeneratedContentRepository.js", "utf8");
   assert.match(repositorySource, /const PACKET_MEMBER_CONTENT_TYPES = new Set\(\[CONTENT_TYPE, IMPACT_NARRATIVE_CONTENT_TYPE\]\)/);
   assert.match(repositorySource, /const BOARD_REPORTING_PACKET_MEMBER_CONTENT_TYPES = new Set\(\[CONTENT_TYPE, IMPACT_NARRATIVE_CONTENT_TYPE\]\)/);
-  // grant_response_paragraph was a documented Phase-13 gap AT THE TIME this
-  // P13-EXT-4 package closed (see the "Phase-13 gaps remaining" note in the
-  // living ExecPlan's P13-EXT-4 closure entry). It was subsequently
-  // implemented by the P13-EXT-5 package
-  // (kai-sprint2-p13-ext5-grant-response-paragraph-boundary.spec.js), so the
-  // two assertions that used to prove its absence here (the
-  // GRANT_RESPONSE_PARAGRAPH_CONTENT_TYPE const-declaration check and the
-  // ALLOWED_GENERATED_CONTENT_TYPES.has("grant_response_paragraph") check)
-  // are deliberately removed rather than left to bit-rot into a false
-  // negative.
-  assert.equal(__generatedContentRepositoryContract.PACKET_MEMBER_CONTENT_TYPES.has("funder_outcome_table"), false);
+  assert.equal(__generatedContentRepositoryContract.PACKET_MEMBER_CONTENT_TYPES.has("grant_response_paragraph"), false);
 
-  // funder_outcome_table is NOT added to createGeneratedContentDraft's
-  // internal-only-types array (that array only ever narrows to "internal";
-  // funder_outcome_table's own funder-only restriction is enforced at the
-  // SERVICE-level input validator instead - proven above).
+  // Despite the name resembling "Grant Response Packet", grant_response_paragraph
+  // is NOT added to createGeneratedContentDraft's internal-only-types array
+  // either (that array only ever narrows to "internal" - grant_response_paragraph
+  // is not narrowed at all, exactly like annual_report_section).
   const internalOnlyArrayMatch = repositorySource.match(/\[IMPACT_NARRATIVE_CONTENT_TYPE, READINESS_ASSESSMENT_CONTENT_TYPE, DATA_GAP_MEMO_CONTENT_TYPE, BOARD_UPDATE_CONTENT_TYPE\]\.includes\(contentType\)/);
   assert.ok(internalOnlyArrayMatch, "internal-only-types array must remain exactly the four pre-existing internal-only types");
 });
 
-test("P13-EXT-4 no migration/database surfaces were added by this application-only package", () => {
+test("P13-EXT-5 no migration/database surfaces were added by this application-only package", () => {
   const repositorySource = readFileSync("Backend/kai/dictionary/postgresGeneratedContentRepository.js", "utf8");
-  assert.doesNotMatch(repositorySource, /migrations\/.*funder_outcome_table/);
+  assert.doesNotMatch(repositorySource, /migrations\/.*grant_response_paragraph/);
 });
 
 function stripSqlStringLiterals(sql) {
@@ -502,34 +540,35 @@ function assertSqlHasNoMutation(sql, label) {
 const PREDECESSOR_CONTENT_TYPES = [
   "evidence_summary", "impact_narrative", "readiness_assessment",
   "data_gap_memo", "case_for_support", "board_update", "annual_report_section",
+  "funder_outcome_table",
 ];
-const TARGET_CONTENT_TYPES = [...PREDECESSOR_CONTENT_TYPES, "funder_outcome_table"];
+const TARGET_CONTENT_TYPES = [...PREDECESSOR_CONTENT_TYPES, "grant_response_paragraph"];
 const PREDECESSOR_DEF = `CHECK ((content_type = ANY (ARRAY[${PREDECESSOR_CONTENT_TYPES.map((t) => `''${t}''::text`).join(", ")}])))`;
 const TARGET_DEF = `CHECK ((content_type = ANY (ARRAY[${TARGET_CONTENT_TYPES.map((t) => `''${t}''::text`).join(", ")}])))`;
 
-const FORWARD_MIGRATION_PATH = "migrations/kai_sprint2_p13_ext4_funder_outcome_table_content_type_evolution.sql";
-const ROLLBACK_MIGRATION_PATH = "migrations/kai_sprint2_p13_ext4_funder_outcome_table_content_type_evolution.rollback.sql";
-const EXPORT_FORWARD_MIGRATION_PATH = "migrations/kai_sprint2_p13_ext4_funder_outcome_table_export_candidate_content_type_evolution.sql";
-const EXPORT_ROLLBACK_MIGRATION_PATH = "migrations/kai_sprint2_p13_ext4_funder_outcome_table_export_candidate_content_type_evolution.rollback.sql";
-const VERIFIER_PATH = "scripts/kai-sprint2-p13-ext4-funder-outcome-table-content-type-evolution-verifier.sql";
-const FAILURE_CHECKS_PATH = "scripts/kai-sprint2-p13-ext4-funder-outcome-table-content-type-evolution-failure-checks.sql";
-const SMOKE_SEED_PATH = "scripts/kai-sprint2-p13-ext4-funder-outcome-table-content-type-evolution-smoke-seed.sql";
-const SMOKE_VERIFIER_PATH = "scripts/kai-sprint2-p13-ext4-funder-outcome-table-content-type-evolution-smoke-verifier.sql";
-const RUNBOOK_PATH = "scripts/kai-sprint2-p13-ext4-funder-outcome-table-content-type-evolution-runbook.md";
-const PATCH_NOTES_PATH = "scripts/kai-sprint2-p13-ext4-funder-outcome-table-content-type-evolution-patch-notes.md";
+const FORWARD_MIGRATION_PATH = "migrations/kai_sprint2_p13_ext5_grant_response_paragraph_content_type_evolution.sql";
+const ROLLBACK_MIGRATION_PATH = "migrations/kai_sprint2_p13_ext5_grant_response_paragraph_content_type_evolution.rollback.sql";
+const EXPORT_FORWARD_MIGRATION_PATH = "migrations/kai_sprint2_p13_ext5_grant_response_paragraph_export_candidate_content_type_evolution.sql";
+const EXPORT_ROLLBACK_MIGRATION_PATH = "migrations/kai_sprint2_p13_ext5_grant_response_paragraph_export_candidate_content_type_evolution.rollback.sql";
+const VERIFIER_PATH = "scripts/kai-sprint2-p13-ext5-grant-response-paragraph-content-type-evolution-verifier.sql";
+const FAILURE_CHECKS_PATH = "scripts/kai-sprint2-p13-ext5-grant-response-paragraph-content-type-evolution-failure-checks.sql";
+const SMOKE_SEED_PATH = "scripts/kai-sprint2-p13-ext5-grant-response-paragraph-content-type-evolution-smoke-seed.sql";
+const SMOKE_VERIFIER_PATH = "scripts/kai-sprint2-p13-ext5-grant-response-paragraph-content-type-evolution-smoke-verifier.sql";
+const RUNBOOK_PATH = "scripts/kai-sprint2-p13-ext5-grant-response-paragraph-content-type-evolution-runbook.md";
+const PATCH_NOTES_PATH = "scripts/kai-sprint2-p13-ext5-grant-response-paragraph-content-type-evolution-patch-notes.md";
 
-test("P13-EXT-4 migration package: predecessor and target content-type vocabularies are exact", () => {
+test("P13-EXT-5 migration package: predecessor and target content-type vocabularies are exact", () => {
   const forward = readFileSync(FORWARD_MIGRATION_PATH, "utf8");
   const exportForward = readFileSync(EXPORT_FORWARD_MIGRATION_PATH, "utf8");
-  assert.equal(PREDECESSOR_CONTENT_TYPES.length, 7);
-  assert.equal(TARGET_CONTENT_TYPES.length, 8);
-  assert.ok(forward.includes(PREDECESSOR_DEF), "forward migration must reference the exact seven-type predecessor definition");
-  assert.ok(forward.includes(TARGET_DEF), "forward migration must reference the exact eight-type target definition");
-  assert.ok(exportForward.includes(PREDECESSOR_DEF), "export-candidate forward migration must reference the exact seven-type predecessor definition");
-  assert.ok(exportForward.includes(TARGET_DEF), "export-candidate forward migration must reference the exact eight-type target definition");
+  assert.equal(PREDECESSOR_CONTENT_TYPES.length, 8);
+  assert.equal(TARGET_CONTENT_TYPES.length, 9);
+  assert.ok(forward.includes(PREDECESSOR_DEF), "forward migration must reference the exact eight-type predecessor definition");
+  assert.ok(forward.includes(TARGET_DEF), "forward migration must reference the exact nine-type target definition");
+  assert.ok(exportForward.includes(PREDECESSOR_DEF), "export-candidate forward migration must reference the exact eight-type predecessor definition");
+  assert.ok(exportForward.includes(TARGET_DEF), "export-candidate forward migration must reference the exact nine-type target definition");
 });
 
-test("P13-EXT-4 migration package: forward migrations recognize predecessor/target and fail closed on an unrecognized definition", () => {
+test("P13-EXT-5 migration package: forward migrations recognize predecessor/target and fail closed on an unrecognized definition", () => {
   const forward = readFileSync(FORWARD_MIGRATION_PATH, "utf8");
   const exportForward = readFileSync(EXPORT_FORWARD_MIGRATION_PATH, "utf8");
   assert.match(forward, /runs_def <> predecessor_def AND runs_def <> target_def/);
@@ -539,33 +578,34 @@ test("P13-EXT-4 migration package: forward migrations recognize predecessor/targ
   assert.match(exportForward, /RAISE EXCEPTION\s*\n\s*'export_candidates_p3_16_content_type_check has an unexpected definition/);
 });
 
-test("P13-EXT-4 migration package: rollback migrations recognize only predecessor/target and refuse narrowing when funder_outcome_table rows exist", () => {
+test("P13-EXT-5 migration package: rollback migrations recognize only predecessor/target and refuse narrowing when grant_response_paragraph rows exist", () => {
   const rollback = readFileSync(ROLLBACK_MIGRATION_PATH, "utf8");
   const exportRollback = readFileSync(EXPORT_ROLLBACK_MIGRATION_PATH, "utf8");
 
-  assert.match(rollback, /WHERE content_type = 'funder_outcome_table'/);
-  assert.match(rollback, /RAISE EXCEPTION 'P13-EXT-4 rollback refused: kai\.generation_runs holds funder_outcome_table rows/);
-  assert.match(rollback, /RAISE EXCEPTION 'P13-EXT-4 rollback refused: kai\.generated_content_drafts holds funder_outcome_table rows/);
+  assert.match(rollback, /WHERE content_type = 'grant_response_paragraph'/);
+  assert.match(rollback, /RAISE EXCEPTION 'P13-EXT-5 rollback refused: kai\.generation_runs holds grant_response_paragraph rows/);
+  assert.match(rollback, /RAISE EXCEPTION 'P13-EXT-5 rollback refused: kai\.generated_content_drafts holds grant_response_paragraph rows/);
   assert.match(rollback, new RegExp(PREDECESSOR_CONTENT_TYPES.map((t) => `'${t}'`).join(", ").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
 
   assert.match(exportRollback, /IF actual_def = predecessor_def THEN\s*\n\s*RETURN;/);
   assert.match(exportRollback, /IF actual_def <> target_def THEN/);
-  assert.match(exportRollback, /WHERE content_type = 'funder_outcome_table'/);
-  assert.match(exportRollback, /RAISE EXCEPTION\s*\n\s*'P13-EXT-4 rollback refused: funder_outcome_table export candidates exist'/);
+  assert.match(exportRollback, /WHERE content_type = 'grant_response_paragraph'/);
+  assert.match(exportRollback, /RAISE EXCEPTION\s*\n\s*'P13-EXT-5 rollback refused: grant_response_paragraph export candidates exist'/);
 });
 
-test("P13-EXT-4 migration package: grant_response_paragraph is never admitted, and no other unrecognized type appears", () => {
+test("P13-EXT-5 migration package: no unrecognized content-type token appears outside the failure-checks negative proof", () => {
   const files = [FORWARD_MIGRATION_PATH, ROLLBACK_MIGRATION_PATH, EXPORT_FORWARD_MIGRATION_PATH, EXPORT_ROLLBACK_MIGRATION_PATH, VERIFIER_PATH, FAILURE_CHECKS_PATH, SMOKE_VERIFIER_PATH];
   for (const path of files) {
     const source = readFileSync(path, "utf8");
-    assert.equal(source.includes("grant_response_paragraph"), path === FAILURE_CHECKS_PATH, `${path} must not admit grant_response_paragraph (only the failure-checks negative-proof file may mention it)`);
+    assert.equal(source.includes("grant_response_packet"), path === FAILURE_CHECKS_PATH, `${path} must not admit grant_response_packet (only the failure-checks negative-proof file may mention it)`);
 
     // content_type literals in these files are always cast with ::text
-    // (e.g. ''funder_outcome_table''::text or 'funder_outcome_table'::text),
-    // which distinguishes them from unrelated quoted strings like check-name
-    // labels ('predecessor_types_still_admitted_alongside_funder_outcome_table').
+    // (e.g. ''grant_response_paragraph''::text or
+    // 'grant_response_paragraph'::text), which distinguishes them from
+    // unrelated quoted strings like check-name labels
+    // ('predecessor_types_still_admitted_alongside_grant_response_paragraph').
     const castContentTypeTokens = [...source.matchAll(/'([a-z_]+)'::text/g)].map((m) => m[1]);
-    const knownNegativeProofTokens = new Set(["grant_response_paragraph"]);
+    const knownNegativeProofTokens = new Set(["grant_response_packet"]);
     for (const token of castContentTypeTokens) {
       if (knownNegativeProofTokens.has(token)) continue;
       assert.ok(
@@ -576,20 +616,18 @@ test("P13-EXT-4 migration package: grant_response_paragraph is never admitted, a
   }
 });
 
-test("P13-EXT-4 migration package: verifier, failure-checks, and smoke-verifier SQL are strictly read-only", () => {
+test("P13-EXT-5 migration package: verifier, failure-checks, and smoke-verifier SQL are strictly read-only", () => {
   assertSqlHasNoMutation(readFileSync(VERIFIER_PATH, "utf8"), VERIFIER_PATH);
   assertSqlHasNoMutation(readFileSync(FAILURE_CHECKS_PATH, "utf8"), FAILURE_CHECKS_PATH);
   assertSqlHasNoMutation(readFileSync(SMOKE_VERIFIER_PATH, "utf8"), SMOKE_VERIFIER_PATH);
 });
 
-test("P13-EXT-4 migration package: smoke seed is explicitly synthetic and source-only, uses requested_audience funder, and required artifacts all exist", () => {
+test("P13-EXT-5 migration package: smoke seed is explicitly synthetic and source-only, and required artifacts all exist", () => {
   const seed = readFileSync(SMOKE_SEED_PATH, "utf8");
   assert.match(seed, /NOT YET RUN/);
   assert.match(seed, /[Ss]ynthetic data only/);
   assert.match(seed, /never be run against a real client database|never against a real client database/);
-  assert.match(seed, /requested_audience 'funder'/);
-  assert.match(seed, /\n\s*'funder',\n/);
-  assert.doesNotMatch(seed, /grant_response_paragraph/);
+  assert.doesNotMatch(seed, /grant_response_packet/);
 
   const runbook = readFileSync(RUNBOOK_PATH, "utf8");
   assert.match(runbook, /None of these steps were executed\s+against a live database/);

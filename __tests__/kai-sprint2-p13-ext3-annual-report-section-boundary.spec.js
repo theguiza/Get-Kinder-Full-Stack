@@ -271,8 +271,14 @@ test("P13-EXT-3 repository generator-input contract and fingerprint include cont
       claims: [baseClaim],
     }), true);
   }
+  // grant_response_paragraph was implemented by P13-EXT-5 (see
+  // kai-sprint2-p13-ext5-grant-response-paragraph-boundary.spec.js), so it
+  // is no longer usable here as an unrecognized-contentType negative proof.
+  // grant_response_packet (the distinct Grant Response Packet
+  // composite-export object_type, never a generated-content contentType)
+  // replaces it as a genuinely still-unrecognized value.
   assert.equal(__generatedContentRepositoryTestables.validateGeneratorInput({
-    contentType: "grant_response_paragraph",
+    contentType: "grant_response_packet",
     requestedAudience: "internal",
     claims: [baseClaim],
   }), false);
@@ -544,7 +550,18 @@ test("P13-EXT-3 boundary proof: packet/composite memberships and unrelated exten
   const repositorySource = readFileSync("Backend/kai/dictionary/postgresGeneratedContentRepository.js", "utf8");
   assert.match(repositorySource, /const PACKET_MEMBER_CONTENT_TYPES = new Set\(\[CONTENT_TYPE, IMPACT_NARRATIVE_CONTENT_TYPE\]\)/);
   assert.match(repositorySource, /const BOARD_REPORTING_PACKET_MEMBER_CONTENT_TYPES = new Set\(\[CONTENT_TYPE, IMPACT_NARRATIVE_CONTENT_TYPE\]\)/);
-  assert.equal(repositorySource.includes('const GRANT_RESPONSE_PARAGRAPH_CONTENT_TYPE = "grant_response_paragraph"'), false);
+  // grant_response_paragraph was a documented Phase-13 gap AT THE TIME this
+  // P13-EXT-3 package closed (see the "Phase-13 gaps remaining" note in the
+  // living ExecPlan's P13-EXT-3 closure entry). It was subsequently
+  // implemented by the P13-EXT-5 package
+  // (kai-sprint2-p13-ext5-grant-response-paragraph-boundary.spec.js), so the
+  // two assertions that used to prove its absence here (the
+  // GRANT_RESPONSE_PARAGRAPH_CONTENT_TYPE const-declaration check and the
+  // ALLOWED_GENERATED_CONTENT_TYPES.has("grant_response_paragraph") check
+  // below) are deliberately removed rather than left to bit-rot into a
+  // false negative - mirroring exactly how this same test previously
+  // removed its own stale funder_outcome_table assertions when P13-EXT-4
+  // landed (see immediately below).
   // funder_outcome_table was a documented Phase-13 gap AT THE TIME this
   // P13-EXT-3 package closed (see the "Phase-13 gaps remaining" note in the
   // living ExecPlan's P13-EXT-3 closure entry). It was subsequently
@@ -556,5 +573,4 @@ test("P13-EXT-3 boundary proof: packet/composite memberships and unrelated exten
   // proven absent above and below.
   assert.equal(__generatedContentRepositoryContract.PACKET_MEMBER_CONTENT_TYPES.has("annual_report_section"), false);
   assert.equal(__generatedContentRepositoryContract.PACKET_MEMBER_CONTENT_TYPES.has("grant_response_paragraph"), false);
-  assert.equal(__generatedContentRepositoryContract.ALLOWED_GENERATED_CONTENT_TYPES.has("grant_response_paragraph"), false);
 });

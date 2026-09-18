@@ -68,6 +68,10 @@ import {
   __funderOutcomeTableDraftGeneratorContract,
 } from "../Backend/kai/services/kaiFunderOutcomeTableDraftGenerator.js";
 import {
+  createProductionGrantResponseParagraphDraftGenerator,
+  __grantResponseParagraphDraftGeneratorContract,
+} from "../Backend/kai/services/kaiGrantResponseParagraphDraftGenerator.js";
+import {
   __generatedContentRepositoryTestables,
 } from "../Backend/kai/dictionary/postgresGeneratedContentRepository.js";
 
@@ -246,6 +250,14 @@ const GENERATORS = [
     // service-level input validator).
     invalidInput: () => ({ contentType: "funder_outcome_table", requestedAudience: "internal", claims: [GOOD_CLAIM] }),
   },
+  {
+    name: "grant_response_paragraph",
+    factory: createProductionGrantResponseParagraphDraftGenerator,
+    contract: __grantResponseParagraphDraftGeneratorContract,
+    schemaKey: "GRANT_RESPONSE_PARAGRAPH_OUTPUT_SCHEMA",
+    validInput: () => ({ contentType: "grant_response_paragraph", requestedAudience: "public", claims: [GOOD_CLAIM] }),
+    invalidInput: () => ({ contentType: "grant_response_paragraph", requestedAudience: "unknown", claims: [GOOD_CLAIM] }),
+  },
 ];
 
 for (const gen of GENERATORS) {
@@ -369,6 +381,6 @@ for (const gen of GENERATORS) {
 test("horizontal conformance: all current production generator factories were exercised", () => {
   assert.deepEqual(
     GENERATORS.map((gen) => gen.name),
-    ["evidence_summary", "impact_narrative", "readiness_assessment", "data_gap_memo", "case_for_support", "board_update", "annual_report_section", "funder_outcome_table"],
+    ["evidence_summary", "impact_narrative", "readiness_assessment", "data_gap_memo", "case_for_support", "board_update", "annual_report_section", "funder_outcome_table", "grant_response_paragraph"],
   );
 });

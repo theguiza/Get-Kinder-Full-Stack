@@ -135,6 +135,7 @@ const CONTENT_TYPES = Object.freeze([
   "board_update",
   "annual_report_section",
   "funder_outcome_table",
+  "grant_response_paragraph",
 ]);
 
 const READINESS = Object.freeze({
@@ -858,7 +859,7 @@ test("[readiness_assessment] predicate 4 - claim.limitationCodes feeds VAL-GEN-0
 // produces the exact same validateGeneratedContentDraft outcome as the same
 // claim with limitationCodes: [] for these three content types, proving
 // limitationCodes is not itself a distinct governance signal for them.
-for (const contentType of ["evidence_summary", "impact_narrative", "data_gap_memo", "case_for_support", "board_update", "annual_report_section", "funder_outcome_table"]) {
+for (const contentType of ["evidence_summary", "impact_narrative", "data_gap_memo", "case_for_support", "board_update", "annual_report_section", "funder_outcome_table", "grant_response_paragraph"]) {
   test(`[${contentType}] predicate 4 - documented variance: no VAL-GEN branch reads claim.limitationCodes for this type (outcome is identical with and without it)`, () => {
     const withLimitation = validateGeneratedContentDraft(validArgs(contentType, {
       generationClaims: [governedClaim({ limitationCodes: ["evidence_gap_unresolved"] })],
@@ -1133,6 +1134,7 @@ const REPOSITORY_METHOD_BY_CONTENT_TYPE = Object.freeze({
   board_update: "createBoardUpdateDraft",
   annual_report_section: "createAnnualReportSectionDraft",
   funder_outcome_table: "createFunderOutcomeTableDraft",
+  grant_response_paragraph: "createGrantResponseParagraphDraft",
 });
 
 // Every predecessor content type's real production audience is "internal"
@@ -1210,5 +1212,5 @@ for (const contentType of CONTENT_TYPES) {
 }
 
 test("horizontal Phase-13 governance conformance: all current content types were exercised", () => {
-  assert.deepEqual(CONTENT_TYPES, ["evidence_summary", "impact_narrative", "readiness_assessment", "data_gap_memo", "case_for_support", "board_update", "annual_report_section", "funder_outcome_table"]);
+  assert.deepEqual(CONTENT_TYPES, ["evidence_summary", "impact_narrative", "readiness_assessment", "data_gap_memo", "case_for_support", "board_update", "annual_report_section", "funder_outcome_table", "grant_response_paragraph"]);
 });

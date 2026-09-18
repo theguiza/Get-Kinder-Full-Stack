@@ -30430,3 +30430,168 @@ production or runtime closure claimed. No push, deployment, production
 mutation, database mutation, migration execution, feature-flag/configuration
 change, real-client-data access, or `00_KAI_CURRENT_STATE.md` update
 performed.
+
+## Phase-13 P13-EXT-5 grant_response_paragraph generated-content package closure (2026-09-18)
+
+**Owner authorization and scope:** owner selected `grant_response_paragraph`
+- the sole remaining Phase-13 gap named by the P13-EXT-4 closure entry above
+- as the bounded P13-EXT-5 package. Starting `HEAD` for this closure pass:
+`f25d5773ceda35bb6b2aed07fc82d6a5a50ba67e`. This package adds one ninth
+canonical generated-content type; it does not reopen Board Reporting or
+Grant Response Packet membership, and does not execute any migration.
+
+**Requested-audience contract (found, reused unmodified, no owner gate
+invented):** the shared `{internal, funder, public}` `AUDIENCES` set
+(`Backend/kai/services/kaiGeneratedContentService.js`,
+`Backend/kai/dictionary/postgresGeneratedContentRepository.js`,
+`Backend/kai/services/kaiExportReviewService.js`) is the sole audience
+vocabulary. Per-type restriction is an explicit per-package owner decision
+recorded at each prior closure (`case_for_support` ->
+`{internal,funder}`; `board_update` -> `{internal}`;
+`annual_report_section` -> unrestricted; `funder_outcome_table` ->
+`{funder}` only). No P13-EXT-5-specific owner authorization narrowing this
+shape was found anywhere in this living ExecPlan - every prior mention of
+`grant_response_paragraph` only names it as the remaining gap, with no
+audience directive - and no contradictory evidence was found in the code
+either. `grant_response_paragraph` therefore reuses the unrestricted shape
+verbatim (`isCreateGrantResponseParagraphDraftInput` ==
+`isCreateEvidenceSummaryDraftInput`, the same rule already governing
+`annual_report_section`): no new audience value and no new owner gate were
+introduced merely because this type is new.
+
+**Runtime implementation surfaces:**
+- `Backend/kai/services/kaiGrantResponseParagraphDraftGenerator.js` (new
+  production generator factory,
+  `createProductionGrantResponseParagraphDraftGenerator`,
+  `GRANT_RESPONSE_PARAGRAPH_OUTPUT_SCHEMA`; modeled on
+  `kaiAnnualReportSectionDraftGenerator.js` - shared `blocks[].text` +
+  `citations[]` output shape, all three audiences allowed).
+- `Backend/kai/services/kaiGeneratedContentService.js`
+  (`createGrantResponseParagraphDraft`,
+  `isCreateGrantResponseParagraphDraftInput`, unrestricted).
+- `Backend/kai/routes/sprint2IntakeApi.js`
+  (`POST /admin/organizations/:organizationId/generated-content-drafts/grant-response-paragraph`).
+- `Backend/kai/dictionary/postgresGeneratedContentRepository.js`
+  (`GRANT_RESPONSE_PARAGRAPH_CONTENT_TYPE`,
+  `fingerprintGrantResponseParagraphRequest`,
+  `createGrantResponseParagraphDraft` repository method),
+  `Backend/kai/dictionary/exportCandidateContract.js`,
+  `Backend/kai/services/kaiExportReviewService.js`,
+  `Backend/kai/services/kaiGeneratedDraftLibraryService.js`,
+  `Backend/kai/db/kaiGeneratedDraftLibraryReadModels.js`,
+  `frontend/impactEvidenceLibraryLogic.js` all admit
+  `grant_response_paragraph` alongside the eight predecessor types.
+
+**Exact four-field HTTP request contract:** `engagement_id`, `claim_ids`,
+`idempotency_key`, `requested_audience` (accepted values: `internal`,
+`funder`, `public`); unknown audience values and any additional body field
+are rejected with `422`. This is the shared four-field contract reused
+verbatim, not a new contract.
+
+**Shared provider/result contract and final conformance cases:** the
+shared parameterized suite
+(`__tests__/kai-sprint2-generator-result-contract-horizontal-conformance.spec.js`)
+was re-run with `grant_response_paragraph` included alongside all eight
+predecessor generators; no other generator's evidence regressed.
+
+**Governance/review/Generated Drafts integration:** Phase-13 governance
+horizontal conformance, Generated Drafts library, and the new focused
+P13-EXT-5 grant-response-paragraph boundary suite
+(`__tests__/kai-sprint2-p13-ext5-grant-response-paragraph-boundary.spec.js`,
+16/16 PASS) were all re-run and pass with `grant_response_paragraph`
+included.
+
+**Generic export-review proof:** review-lifecycle horizontal conformance
+suite (`__tests__/kai-sprint2-review-lifecycle-horizontal-conformance.spec.js`)
+re-run confirmed PASS with `grant_response_paragraph` included, directly
+exercising `Backend/kai/services/kaiExportReviewService.js`'s
+`requestGeneratedDraftExportReview`, `startGeneratedDraftExportReview`, and
+`completeGeneratedDraftExportReview`. Result:
+`generic_export_review=PROVED_BY_EXISTING_HORIZONTAL_LIFECYCLE_SUITE`.
+
+**Eight-type predecessor / nine-type target:** predecessors
+(`evidence_summary`, `impact_narrative`, `readiness_assessment`,
+`data_gap_memo`, `case_for_support`, `board_update`,
+`annual_report_section`, `funder_outcome_table`) preserved verbatim;
+`grant_response_paragraph` is the only new canonical generated-content type
+added by this package.
+
+**Predecessor spec repair:** the P13-EXT-1 through P13-EXT-4 and P13-01
+boundary specs previously asserted `grant_response_paragraph`'s absence as
+the documented remaining gap. Those now-stale negative assertions were
+either removed (packet/registry absence assertions, following the same
+convention the P13-EXT-4 closure used to retire P13-EXT-3's
+`funder_outcome_table`-absence assertions) or, where the assertion's
+purpose was to prove an "unrecognized content type" is rejected by a
+generator/DTO boundary, repointed to the still-genuinely-unrecognized
+`grant_response_packet` literal (a real, pre-existing, distinct
+`object_type` token used by `evaluateGrantResponsePacket` in
+`postgresGeneratedContentRepository.js`, unrelated to the new
+`grant_response_paragraph` content type despite the similar name).
+
+**Frontend bundle parity:** `frontend/impactEvidenceLibraryLogic.js`'s new
+`grant_response_paragraph` label branch is present verbatim (minified) in
+the tracked `public/js/bundles/entry.js`.
+
+**Migration/rollback files present, not executed:**
+- `migrations/kai_sprint2_p13_ext5_grant_response_paragraph_content_type_evolution.sql`
+- `migrations/kai_sprint2_p13_ext5_grant_response_paragraph_content_type_evolution.rollback.sql`
+- `migrations/kai_sprint2_p13_ext5_grant_response_paragraph_export_candidate_content_type_evolution.sql`
+- `migrations/kai_sprint2_p13_ext5_grant_response_paragraph_export_candidate_content_type_evolution.rollback.sql`
+
+**Verification-pack files present:**
+- `scripts/kai-sprint2-p13-ext5-grant-response-paragraph-content-type-evolution-verifier.sql`
+- `scripts/kai-sprint2-p13-ext5-grant-response-paragraph-content-type-evolution-failure-checks.sql`
+- `scripts/kai-sprint2-p13-ext5-grant-response-paragraph-content-type-evolution-smoke-seed.sql`
+- `scripts/kai-sprint2-p13-ext5-grant-response-paragraph-content-type-evolution-smoke-verifier.sql`
+- `scripts/kai-sprint2-p13-ext5-grant-response-paragraph-content-type-evolution-patch-notes.md`
+- `scripts/kai-sprint2-p13-ext5-grant-response-paragraph-content-type-evolution-runbook.md`
+
+**Strict read-only verification result:** the verifier, failure-checks, and
+smoke-verifier SQL contain no `INSERT`/`UPDATE`/`DELETE`/`DROP`/`ALTER`/
+`TRUNCATE` statements (only `CHECK` constraint-definition string literals
+and read-only `SELECT`/`DO`-block queries) -> PASS. The smoke seed is
+explicit, synthetic, and marked not-yet-run; it was not executed. Rollback
+migrations retain the existing-row guard pattern (refusing to narrow the
+constraint while any `grant_response_paragraph` row exists).
+
+**Actual final test results
+(`DATABASE_URL=postgres://sentinel:sentinel@127.0.0.1:1/sentinel_kai_no_listener`
+set for every Node command; no database/cloud/production access):**
+- Focused P13-EXT-5 grant-response-paragraph boundary -> 16/16 PASS.
+- Combined re-run of the ext5 + ext4 + ext3 + ext2 + ext1 + impact-narrative
+  boundary specs, Generated Drafts library, and all three horizontal
+  conformance suites -> 380/380 PASS.
+- Full `__tests__/*.spec.js` suite -> 4669 pass / 8 fail / 82 skipped
+  (4759 total). The 8 failing subtests (5 distinct top-level tests: child-
+  file read model, batch-files collection contract, file-detail
+  service/contract x2, Pass 2 router upload-confirmation surface) were
+  confirmed pre-existing and unrelated to this package by re-running the
+  identical full suite on the clean pre-package tree (`git stash`), which
+  reproduces the same 8 failures in files this package's diff never
+  touches.
+- `git diff --check` -> PASS.
+
+**Live PostgreSQL/schema behavior:** remains `NOT_CONFIRMED`. Migrations
+were NOT executed. Database connection: NO. Push: NO. Deployment: NO.
+
+**Grant Response Packet, Board Reporting, and Impact Evaluation
+boundaries:** unchanged by this package.
+`PACKET_MEMBER_CONTENT_TYPES`/`BOARD_REPORTING_PACKET_MEMBER_CONTENT_TYPES`
+remain `{evidence_summary, impact_narrative}` exactly as before;
+`grant_response_paragraph` is not a member of either composite export - no
+authoritative repository/product evidence was found requiring otherwise,
+despite the name resembling "Grant Response Packet".
+
+**Phase-13 gaps remaining:** none. All nine canonical generated-content
+types identified across this living ExecPlan
+(`evidence_summary`, `impact_narrative`, `readiness_assessment`,
+`data_gap_memo`, `case_for_support`, `board_update`,
+`annual_report_section`, `funder_outcome_table`, `grant_response_paragraph`)
+are now implemented.
+
+**Status:** P13_EXT_5_GRANT_RESPONSE_PARAGRAPH_PACKAGE_CLOSED_LOCALLY. No
+production or runtime closure claimed. No push, deployment, production
+mutation, database mutation, migration execution, feature-flag/configuration
+change, real-client-data access, or `00_KAI_CURRENT_STATE.md` update
+performed.

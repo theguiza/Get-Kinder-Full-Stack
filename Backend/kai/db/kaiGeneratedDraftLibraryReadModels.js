@@ -77,7 +77,7 @@ export async function listGeneratedDraftLibraryIndex(
         AND eq.target_object_type = 'generated_content_draft'
         AND eq.target_object_id = d.generated_content_draft_id
       WHERE d.organization_id = $1::uuid
-        AND d.content_type IN ('evidence_summary', 'impact_narrative', 'readiness_assessment', 'data_gap_memo', 'case_for_support', 'board_update', 'annual_report_section', 'funder_outcome_table')
+        AND d.content_type IN ('evidence_summary', 'impact_narrative', 'readiness_assessment', 'data_gap_memo', 'case_for_support', 'board_update', 'annual_report_section', 'funder_outcome_table', 'grant_response_paragraph')
         AND (
           (d.content_type = 'funder_outcome_table' AND d.requested_audience = 'funder')
           OR (d.content_type <> 'funder_outcome_table' AND d.requested_audience = 'internal')

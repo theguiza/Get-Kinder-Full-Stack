@@ -88,6 +88,22 @@ const ANNUAL_REPORT_SECTION_CONTENT_TYPE = "annual_report_section";
 // exactly as before, and this content type is not part of either composite
 // export.
 const FUNDER_OUTCOME_TABLE_CONTENT_TYPE = "funder_outcome_table";
+// P13-EXT-5: standalone evidence-backed grant-response-paragraph draft. It
+// joins the generic generated-content admission/review lifecycle exactly
+// like annual_report_section - no generation-time audience restriction is
+// applied at createGeneratedContentDraft's internal-only-types array below,
+// and no new single-audience restriction is applied at the SERVICE-level
+// input validator either (isCreateGrantResponseParagraphDraftInput,
+// kaiGeneratedContentService.js, reuses the shared {internal, funder,
+// public} shape unchanged - the same shape annual_report_section already
+// reuses unrestricted). Despite the name resembling "Grant Response
+// Packet", this type is deliberately NOT added to
+// PACKET_MEMBER_CONTENT_TYPES or BOARD_REPORTING_PACKET_MEMBER_CONTENT_TYPES
+// below - Grant Response Packet and Board Reporting membership are scoped
+// exactly as before, and this content type is not part of either composite
+// export; no authoritative repository/product evidence was found requiring
+// otherwise.
+const GRANT_RESPONSE_PARAGRAPH_CONTENT_TYPE = "grant_response_paragraph";
 const PACKET_MEMBER_CONTENT_TYPES = new Set([CONTENT_TYPE, IMPACT_NARRATIVE_CONTENT_TYPE]);
 const BOARD_REPORTING_PACKET_MEMBER_CONTENT_TYPES = new Set([CONTENT_TYPE, IMPACT_NARRATIVE_CONTENT_TYPE]);
 const ALLOWED_GENERATED_CONTENT_TYPES = new Set([
@@ -99,6 +115,7 @@ const ALLOWED_GENERATED_CONTENT_TYPES = new Set([
   BOARD_UPDATE_CONTENT_TYPE,
   ANNUAL_REPORT_SECTION_CONTENT_TYPE,
   FUNDER_OUTCOME_TABLE_CONTENT_TYPE,
+  GRANT_RESPONSE_PARAGRAPH_CONTENT_TYPE,
 ]);
 const DRAFT_STATUS = "draft";
 const REVIEW_STATUS = GENERATED_CONTENT_REVIEW_QUEUE_CONTRACT.reviewStatus;
@@ -342,6 +359,10 @@ export function fingerprintAnnualReportSectionRequest({ requestedAudience, claim
 
 export function fingerprintFunderOutcomeTableRequest({ requestedAudience, claimIds, engagementId }) {
   return fingerprintGeneratedContentRequest(FUNDER_OUTCOME_TABLE_CONTENT_TYPE, { requestedAudience, claimIds, engagementId });
+}
+
+export function fingerprintGrantResponseParagraphRequest({ requestedAudience, claimIds, engagementId }) {
+  return fingerprintGeneratedContentRequest(GRANT_RESPONSE_PARAGRAPH_CONTENT_TYPE, { requestedAudience, claimIds, engagementId });
 }
 
 function hasExactKeys(value, allowed) {
@@ -2783,6 +2804,15 @@ export function createPostgresGeneratedContentRepository({
         { runInTransaction, evaluator, afterPersist },
       );
     },
+    async createGrantResponseParagraphDraft(input, dependencies = {}) {
+      return createGeneratedContentDraft(
+        GRANT_RESPONSE_PARAGRAPH_CONTENT_TYPE,
+        fingerprintGrantResponseParagraphRequest,
+        input,
+        dependencies,
+        { runInTransaction, evaluator, afterPersist },
+      );
+    },
     async startGeneratedContentReview(input, dependencies = {}) {
       if (!validateCompleteReviewInput(input)) return failure("validation_blocker");
       if (!dependencies.metadataOnlyAudit) return failure("validation_blocker");
@@ -3406,6 +3436,7 @@ export const __generatedContentRepositoryContract = Object.freeze({
   BOARD_UPDATE_CONTENT_TYPE,
   ANNUAL_REPORT_SECTION_CONTENT_TYPE,
   FUNDER_OUTCOME_TABLE_CONTENT_TYPE,
+  GRANT_RESPONSE_PARAGRAPH_CONTENT_TYPE,
   PACKET_MEMBER_CONTENT_TYPES,
   ALLOWED_GENERATED_CONTENT_TYPES,
   DRAFT_STATUS,
@@ -3464,6 +3495,7 @@ export const __generatedContentRepositoryTestables = Object.freeze({
   fingerprintBoardUpdateRequest,
   fingerprintAnnualReportSectionRequest,
   fingerprintFunderOutcomeTableRequest,
+  fingerprintGrantResponseParagraphRequest,
   prepareRequiredAudit,
   validateRequestExportReviewInput,
   validateExportReviewRequestStateInput,

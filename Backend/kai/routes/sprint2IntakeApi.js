@@ -2699,6 +2699,7 @@ async function getGeneratedContentService() {
     || intakeServiceOverride?.createBoardUpdateDraft
     || intakeServiceOverride?.createAnnualReportSectionDraft
     || intakeServiceOverride?.createFunderOutcomeTableDraft
+    || intakeServiceOverride?.createGrantResponseParagraphDraft
     || intakeServiceOverride?.getGeneratedDraftReviewPacket
     || intakeServiceOverride?.startGeneratedContentReview
     || intakeServiceOverride?.completeGeneratedContentReview
@@ -3440,6 +3441,80 @@ router.post(
           actorContext,
           now,
           route: "funder_outcome_table_create_draft",
+        }),
+      });
+    }, 201);
+  },
+);
+
+function validateCreateGrantResponseParagraphRequestOrSend(req, res) {
+  if (!metadataContentTypeIsSupported(req)) {
+    sendKaiError(res, "unsupported_media_type");
+    return null;
+  }
+  const identifiers = eligibleClaimsForAudienceOrganizationIdentifier(req);
+  const payload = requestPayload(req);
+  const keys = Object.keys(payload);
+  if (
+    !identifiers
+    || keys.length !== 4
+    || !keys.every((key) => key === "claim_ids" || key === "idempotency_key" || key === "engagement_id" || key === "requested_audience")
+    || typeof payload.engagement_id !== "string"
+    || !KAI_SPRINT2_P0_PATTERNS.uuid.test(payload.engagement_id)
+    || payload.engagement_id !== payload.engagement_id.toLowerCase()
+    || !Array.isArray(payload.claim_ids)
+    || payload.claim_ids.length < 1
+    || payload.claim_ids.length > 20
+    || payload.claim_ids.some((claimId) => typeof claimId !== "string" || !KAI_SPRINT2_P0_PATTERNS.uuid.test(claimId) || claimId !== claimId.toLowerCase())
+    || payload.claim_ids.length !== new Set(payload.claim_ids).size
+    || typeof payload.idempotency_key !== "string"
+    || payload.idempotency_key !== payload.idempotency_key.trim()
+    || !/^[ -~]{8,128}$/.test(payload.idempotency_key)
+    || !["internal", "funder", "public"].includes(payload.requested_audience)
+  ) {
+    sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker(
+        "invalid_grant_response_paragraph_generation_request",
+        "organization_id_claim_ids_idempotency_key_engagement_id_or_requested_audience",
+      )],
+    });
+    return null;
+  }
+  return {
+    organizationId: identifiers.organizationId,
+    claimIds: [...payload.claim_ids].sort(),
+    idempotencyKey: payload.idempotency_key,
+    engagementId: payload.engagement_id,
+    requestedAudience: payload.requested_audience,
+  };
+}
+
+router.post(
+  "/admin/organizations/:organizationId/generated-content-drafts/grant-response-paragraph",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    const parsed = validateCreateGrantResponseParagraphRequestOrSend(req, res);
+    if (!parsed) return;
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    return invokeService(res, async () => {
+      const service = await getGeneratedContentService();
+      const { createProductionGrantResponseParagraphDraftGenerator } = await import("../services/kaiGrantResponseParagraphDraftGenerator.js");
+      return service.createGrantResponseParagraphDraft({
+        organizationId: parsed.organizationId,
+        engagementId: parsed.engagementId,
+        requestedAudience: parsed.requestedAudience,
+        claimIds: parsed.claimIds,
+        idempotencyKey: parsed.idempotencyKey,
+        actorContext,
+        now,
+      }, {
+        draftGenerator: createProductionGrantResponseParagraphDraftGenerator(),
+        metadataOnlyAudit: createProductionMetadataOnlyAuditForGeneratedContentDraft({
+          organizationId: parsed.organizationId,
+          actorContext,
+          now,
+          route: "grant_response_paragraph_create_draft",
         }),
       });
     }, 201);
