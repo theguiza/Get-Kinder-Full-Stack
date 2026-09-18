@@ -441,12 +441,14 @@ test("P13-EXT-5 Generated Drafts, review lifecycle, generic export-review, and f
     }],
   };
   assert.equal(__generatedContentReviewPacketServiceTestables.isGeneratedDraftReviewPacketDto(packet), true);
-  // grant_response_paragraph reuses the same internal-only Generated Drafts
-  // library visibility rule every predecessor type except funder_outcome_table
-  // already has (kaiGeneratedDraftLibraryReadModels.js's WHERE predicate and
-  // responseDraftSummary's isAudienceCompatible() both default to
-  // requestedAudience === "internal" for every content_type other than
-  // "funder_outcome_table" - no new branch was added for this type).
+  // grant_response_paragraph's own generation-time contract is unrestricted
+  // (internal/funder/public, exactly like evidence_summary and
+  // annual_report_section), and the Generated Drafts library visibility rule
+  // (kaiGeneratedDraftLibraryReadModels.js's WHERE predicate and
+  // responseDraftSummary's isAudienceCompatible()) was repaired to match
+  // each content type's own real contract instead of defaulting every type
+  // but funder_outcome_table to "internal" - so both "internal" and "funder"
+  // grant_response_paragraph rows are library-visible.
   assert.equal(generatedDraftLibraryTestables.responseDraftSummary({
     generated_content_draft_id: "00000000-0000-4000-8000-000000000502",
     organization_id: ORG,
@@ -474,9 +476,9 @@ test("P13-EXT-5 Generated Drafts, review lifecycle, generic export-review, and f
     export_review_created_by: null,
     export_review_created_by_type: null,
   }, ORG, true)?.contentType, "grant_response_paragraph");
-  // A funder-audience grant_response_paragraph row is correctly rejected by
-  // the same rule (it is not funder_outcome_table, so only "internal" is
-  // library-compatible for it).
+  // A funder-audience grant_response_paragraph row is correctly admitted:
+  // grant_response_paragraph's real contract allows funder (and public), so
+  // this must not be forced to the old "internal-only default" rejection.
   assert.equal(generatedDraftLibraryTestables.responseDraftSummary({
     generated_content_draft_id: "00000000-0000-4000-8000-000000000502",
     organization_id: ORG,
@@ -503,7 +505,7 @@ test("P13-EXT-5 Generated Drafts, review lifecycle, generic export-review, and f
     export_review_queue_metadata: null,
     export_review_created_by: null,
     export_review_created_by_type: null,
-  }, ORG, true), null);
+  }, ORG, true)?.contentType, "grant_response_paragraph");
   assert.equal(EXPORT_CANDIDATE_CONTENT_TYPES.includes("grant_response_paragraph"), true);
   assert.equal(generatedDraftContentTypeLabel("grant_response_paragraph", "internal"), "Grant Response Paragraph · Internal");
 });

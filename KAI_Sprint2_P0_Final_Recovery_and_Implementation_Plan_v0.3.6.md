@@ -30595,3 +30595,78 @@ production or runtime closure claimed. No push, deployment, production
 mutation, database mutation, migration execution, feature-flag/configuration
 change, real-client-data access, or `00_KAI_CURRENT_STATE.md` update
 performed.
+
+## Phase-13/14 architecture-closure matrix (2026-09-18)
+
+A three-pass horizontal audit (Phase-13 nine-type conformance, Phase-13
+carry-forward repair, Phase-14 gate/export/authority matrix) closed the
+remaining open items:
+
+- **Generated Drafts audience-visibility repair:** `isAudienceCompatible`
+  (`Backend/kai/services/kaiGeneratedDraftLibraryService.js`) and the
+  matching read-model `WHERE` predicate
+  (`Backend/kai/db/kaiGeneratedDraftLibraryReadModels.js`) previously
+  defaulted every content type to internal-only visibility except
+  `funder_outcome_table` (funder-only) - an unrevisited default from when
+  the read model covered fewer content types, not an authoritative rule.
+  This excluded funder/public-audience `case_for_support`,
+  `annual_report_section`, and `grant_response_paragraph` drafts from the
+  Generated Drafts list even though they were valid, successfully generated
+  drafts with no other discoverable review path. Repaired to a per-content-
+  type allowed-audience map that mirrors each type's real generation-time
+  contract in `kaiGeneratedContentService.js` exactly (verified 9/9), and
+  still fails closed for any unmapped content type/audience combination.
+- **Composite export-format parity (Grant Response Packet, Board
+  Summary):** confirmed IMPLEMENTED_CONFORMANT. Each composite is its own
+  single Markdown-only export-type slot by explicit prior package scoping
+  (Grant Response Packet's own authorization note excludes PDF/DOCX/Board
+  Summary work); no authoritative source requires PDF/DOCX/CSV parity for
+  either composite, so none was added.
+- **Citation appendix mapping:** the CSV evidence appendix
+  (`kaiExportManifestCsvSerializer.js`) is the citation appendix - it
+  carries the full `citation_ref`/`claim_id`/`evidence_item_id`/
+  `source_id`/`source_version_id`/`limitation_codes` trace and is
+  documented in this plan as the same citation/limitation relationship the
+  Markdown Citation Appendix exposes, tabular. No separate artifact exists
+  or is required.
+- **Public-export semantics:** `KAI_PUBLIC_EXPORT_ENABLED` fails closed
+  (absent/false both yield `feature_disabled` via the same normalization
+  path), and `export_authority_granted` is checked unconditionally
+  regardless of `requested_audience`, so public-audience generation alone
+  never grants final export authority. Production value of the flag
+  remains `NOT_CONFIRMED` (runtime configuration, out of scope here).
+- **Audit-trace metadata-only proof:** added a horizontal regression test
+  (`__tests__/kai-sprint2-metadata-only-audit-export-path-allowlist.spec.js`)
+  proving, for all three export-manifest audit-composition paths (ordinary
+  final export, Grant Response Packet, Board Reporting candidate), that
+  metadata persisted via `insertAuditEvent` never contains generated block
+  text, raw evidence/claim text, prompts, raw client data, PII,
+  credentials, signed URLs, or raw storage locations - only actor/action/
+  object-id/reason-code-shaped fields - even when the caller-shaped payload
+  attempts to smuggle such fields in.
+
+**Actual test results this pass**
+(`DATABASE_URL=postgres://sentinel:sentinel@127.0.0.1:1/sentinel_kai_no_listener`
+set for every Node command; no database/cloud/production access):
+- `kai-sprint2-generated-drafts-library.spec.js` -> 20/20 PASS.
+- `kai-sprint2-p13-ext5-grant-response-paragraph-boundary.spec.js` ->
+  16/16 PASS.
+- `kai-sprint2-metadata-only-audit-export-path-allowlist.spec.js` (new) ->
+  4/4 PASS.
+- `kai-sprint2-p3-18-final-export-eligibility-gate-boundary.spec.js` +
+  `kai-sprint2-p3-18-final-export-eligibility-gate-authority-state-proof.spec.js`
+  -> 69/69 PASS.
+- `git diff --check` -> PASS.
+- The Phase-13 405-assertion horizontal suites and full capacity/boundary
+  suites were not rerun this pass - no shared lifecycle/dependency surface
+  they cover was touched.
+
+**Composite membership unchanged:** `PACKET_MEMBER_CONTENT_TYPES`/
+`BOARD_REPORTING_PACKET_MEMBER_CONTENT_TYPES` remain exactly
+`{evidence_summary, impact_narrative}`. No type was added to either
+composite from naming intuition.
+
+**Status:** PHASE13_14_ARCHITECTURE_MATRIX_CLOSED_LOCALLY. No production or
+runtime closure claimed. No push, deployment, production mutation,
+database mutation, migration execution, feature-flag/configuration change,
+real-client-data access, or `00_KAI_CURRENT_STATE.md` update performed.

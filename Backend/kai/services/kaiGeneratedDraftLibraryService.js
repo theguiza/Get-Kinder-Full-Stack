@@ -33,13 +33,43 @@ function canonicalUuid(value) {
   return typeof value === "string" && value === value.toLowerCase() && UUID_RE.test(value);
 }
 
-// Explicit content-type/audience compatibility rule: every existing content
-// type stays internal-only, and funder_outcome_table is funder-audience-only
-// (never internal, never public). Mirrors the read model's WHERE predicate so
-// a row that should never have been selected still fails closed here too.
+// Content-type/audience compatibility rule: mirrors each content type's own
+// actual generation-time allowed-audience contract in
+// kaiGeneratedContentService.js's per-type input validators (not a blanket
+// "internal always, funder only for funder_outcome_table" default).
+// Contracts as of this repair:
+//   - evidence_summary, annual_report_section, grant_response_paragraph:
+//     unrestricted - internal, funder, public (evidence_summary's own input
+//     validator's AUDIENCES shape, reused verbatim by the annual-report and
+//     grant-response-paragraph validators).
+//   - case_for_support: internal, funder only (CASE_FOR_SUPPORT_AUDIENCES).
+//   - funder_outcome_table: funder only (its own input validator).
+//   - impact_narrative, readiness_assessment, data_gap_memo, board_update:
+//     internal only (each of those input validators pins requestedAudience
+//     to "internal").
+// This repairs a prior gap where a funder/public-audience case_for_support,
+// annual_report_section, or grant_response_paragraph draft was successfully
+// generated and persisted but never appeared in the Generated Drafts list
+// (no authoritative ExecPlan/code rule was found requiring that exclusion -
+// it was an unrevisited default from when this read model only covered a
+// smaller, internal-only set of content types).
+// Mirrors the read model's WHERE predicate so a row that should never have
+// been selected still fails closed here too.
+const CONTENT_TYPE_ALLOWED_AUDIENCES = new Map([
+  ["evidence_summary", new Set(["internal", "funder", "public"])],
+  ["impact_narrative", new Set(["internal"])],
+  ["readiness_assessment", new Set(["internal"])],
+  ["data_gap_memo", new Set(["internal"])],
+  ["case_for_support", new Set(["internal", "funder"])],
+  ["board_update", new Set(["internal"])],
+  ["annual_report_section", new Set(["internal", "funder", "public"])],
+  ["funder_outcome_table", new Set(["funder"])],
+  ["grant_response_paragraph", new Set(["internal", "funder", "public"])],
+]);
+
 function isAudienceCompatible(contentType, requestedAudience) {
-  if (contentType === "funder_outcome_table") return requestedAudience === "funder";
-  return requestedAudience === "internal";
+  const allowed = CONTENT_TYPE_ALLOWED_AUDIENCES.get(contentType);
+  return Boolean(allowed) && allowed.has(requestedAudience);
 }
 
 function isMappedHumanActor(actorContext) {

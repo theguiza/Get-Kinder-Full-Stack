@@ -486,10 +486,12 @@ test("Generated Drafts library index admits an actual funder_outcome_table/funde
   assert.equal(fotPublicRejected.ok, false);
   assert.equal(fotPublicRejected.error.code, "system_error");
 
-  // Unrelated predecessor content type at a non-internal audience must remain
-  // rejected: the compatibility rule admits funder_outcome_table+funder only,
-  // never a broad funder/public carve-out for every existing content type.
-  const predecessorFunderRejected = await listGeneratedDraftLibraryIndex(
+  // Content types whose real generation-time contract (kaiGeneratedContentService.js's
+  // isCreate*DraftInput validators) is unrestricted (evidence_summary,
+  // annual_report_section, grant_response_paragraph) or internal+funder
+  // (case_for_support) must be admitted at every audience their own contract
+  // allows, not forced to "internal always" the way a blanket default would.
+  const evidenceSummaryFunderAdmitted = await listGeneratedDraftLibraryIndex(
     { organizationId, limit: 25, afterGeneratedContentDraftId: null, actorContext },
     {
       env: enabledEnv,
@@ -498,10 +500,22 @@ test("Generated Drafts library index admits an actual funder_outcome_table/funde
       },
     },
   );
-  assert.equal(predecessorFunderRejected.ok, false);
-  assert.equal(predecessorFunderRejected.error.code, "system_error");
+  assert.equal(evidenceSummaryFunderAdmitted.ok, true);
+  assert.equal(evidenceSummaryFunderAdmitted.data.items[0].requestedAudience, "funder");
 
-  const predecessorPublicRejected = await listGeneratedDraftLibraryIndex(
+  const evidenceSummaryPublicAdmitted = await listGeneratedDraftLibraryIndex(
+    { organizationId, limit: 25, afterGeneratedContentDraftId: null, actorContext },
+    {
+      env: enabledEnv,
+      async listGeneratedDraftLibraryIndex() {
+        return [draftRow({ content_type: "evidence_summary", requested_audience: "public" })];
+      },
+    },
+  );
+  assert.equal(evidenceSummaryPublicAdmitted.ok, true);
+  assert.equal(evidenceSummaryPublicAdmitted.data.items[0].requestedAudience, "public");
+
+  const annualReportSectionPublicAdmitted = await listGeneratedDraftLibraryIndex(
     { organizationId, limit: 25, afterGeneratedContentDraftId: null, actorContext },
     {
       env: enabledEnv,
@@ -510,8 +524,96 @@ test("Generated Drafts library index admits an actual funder_outcome_table/funde
       },
     },
   );
-  assert.equal(predecessorPublicRejected.ok, false);
-  assert.equal(predecessorPublicRejected.error.code, "system_error");
+  assert.equal(annualReportSectionPublicAdmitted.ok, true);
+  assert.equal(annualReportSectionPublicAdmitted.data.items[0].requestedAudience, "public");
+
+  const annualReportSectionFunderAdmitted = await listGeneratedDraftLibraryIndex(
+    { organizationId, limit: 25, afterGeneratedContentDraftId: null, actorContext },
+    {
+      env: enabledEnv,
+      async listGeneratedDraftLibraryIndex() {
+        return [draftRow({ content_type: "annual_report_section", requested_audience: "funder" })];
+      },
+    },
+  );
+  assert.equal(annualReportSectionFunderAdmitted.ok, true);
+  assert.equal(annualReportSectionFunderAdmitted.data.items[0].requestedAudience, "funder");
+
+  const grantResponseParagraphFunderAdmitted = await listGeneratedDraftLibraryIndex(
+    { organizationId, limit: 25, afterGeneratedContentDraftId: null, actorContext },
+    {
+      env: enabledEnv,
+      async listGeneratedDraftLibraryIndex() {
+        return [draftRow({ content_type: "grant_response_paragraph", requested_audience: "funder" })];
+      },
+    },
+  );
+  assert.equal(grantResponseParagraphFunderAdmitted.ok, true);
+  assert.equal(grantResponseParagraphFunderAdmitted.data.items[0].requestedAudience, "funder");
+
+  const grantResponseParagraphPublicAdmitted = await listGeneratedDraftLibraryIndex(
+    { organizationId, limit: 25, afterGeneratedContentDraftId: null, actorContext },
+    {
+      env: enabledEnv,
+      async listGeneratedDraftLibraryIndex() {
+        return [draftRow({ content_type: "grant_response_paragraph", requested_audience: "public" })];
+      },
+    },
+  );
+  assert.equal(grantResponseParagraphPublicAdmitted.ok, true);
+  assert.equal(grantResponseParagraphPublicAdmitted.data.items[0].requestedAudience, "public");
+
+  const caseForSupportFunderAdmitted = await listGeneratedDraftLibraryIndex(
+    { organizationId, limit: 25, afterGeneratedContentDraftId: null, actorContext },
+    {
+      env: enabledEnv,
+      async listGeneratedDraftLibraryIndex() {
+        return [draftRow({ content_type: "case_for_support", requested_audience: "funder" })];
+      },
+    },
+  );
+  assert.equal(caseForSupportFunderAdmitted.ok, true);
+  assert.equal(caseForSupportFunderAdmitted.data.items[0].requestedAudience, "funder");
+
+  // But content types whose own contract truly is internal-only
+  // (impact_narrative, readiness_assessment, data_gap_memo, board_update)
+  // must still be rejected at a non-internal audience, and case_for_support
+  // (internal+funder only, never public) must still reject public.
+  const impactNarrativeFunderRejected = await listGeneratedDraftLibraryIndex(
+    { organizationId, limit: 25, afterGeneratedContentDraftId: null, actorContext },
+    {
+      env: enabledEnv,
+      async listGeneratedDraftLibraryIndex() {
+        return [draftRow({ content_type: "impact_narrative", requested_audience: "funder" })];
+      },
+    },
+  );
+  assert.equal(impactNarrativeFunderRejected.ok, false);
+  assert.equal(impactNarrativeFunderRejected.error.code, "system_error");
+
+  const boardUpdatePublicRejected = await listGeneratedDraftLibraryIndex(
+    { organizationId, limit: 25, afterGeneratedContentDraftId: null, actorContext },
+    {
+      env: enabledEnv,
+      async listGeneratedDraftLibraryIndex() {
+        return [draftRow({ content_type: "board_update", requested_audience: "public" })];
+      },
+    },
+  );
+  assert.equal(boardUpdatePublicRejected.ok, false);
+  assert.equal(boardUpdatePublicRejected.error.code, "system_error");
+
+  const caseForSupportPublicRejected = await listGeneratedDraftLibraryIndex(
+    { organizationId, limit: 25, afterGeneratedContentDraftId: null, actorContext },
+    {
+      env: enabledEnv,
+      async listGeneratedDraftLibraryIndex() {
+        return [draftRow({ content_type: "case_for_support", requested_audience: "public" })];
+      },
+    },
+  );
+  assert.equal(caseForSupportPublicRejected.ok, false);
+  assert.equal(caseForSupportPublicRejected.error.code, "system_error");
 });
 
 test("Generated Drafts read model index includes annual_report_section in the generic content_type allowlist alongside the other canonical types", async () => {
