@@ -30670,3 +30670,105 @@ composite from naming intuition.
 runtime closure claimed. No push, deployment, production mutation,
 database mutation, migration execution, feature-flag/configuration change,
 real-client-data access, or `00_KAI_CURRENT_STATE.md` update performed.
+
+## Phase 13/14 release-candidate acceptance (2026-09-18)
+
+Following the architecture-closure matrix above, one assembled repository
+acceptance was run to prove the complete Phase-13->14 chain end to end and,
+because it passed with no implementation defect found, this package closes
+with a release-candidate commit.
+
+**Assembled generic chain proof (new):**
+`__tests__/kai-sprint2-p14-11-assembled-generic-release-candidate-acceptance.spec.js`
+(22/22 PASS). Extends the existing
+`kai-sprint2-p3-18-assembled-pre-artifact-release-proof.spec.js` chain
+(which deliberately stops at final-gate composition/VAL-EXP-001 - see its
+own "artifact boundary" tests) forward through the remaining Phase-14
+stages, threading ONE consistent generated-draft/export-candidate identity
+through the real, unmodified production services with only
+repository-object-level fakes at the seam each service already exposes
+(the same seam `kai-sprint2-p3-18-...` and
+`kai-sprint2-p3-19-export-manifest-foundation-boundary.spec.js` use):
+generated draft (`createEvidenceSummaryDraft`) -> generated-content review
+completion -> export-review request/start/complete -> export candidate ->
+BEFORE-authority final-gate BLOCKED -> real `recordHumanFinalReleaseAuthorityDecision`
+grant -> AFTER-grant final-gate PASS (VAL-EXP-001) -> real
+`createExportManifest` -> real `composeExportManifestRenderModel` fed the
+REAL canonical representation this same chain built (via the exported,
+unmodified `composeRenderModel` pure function) -> real
+`serializeExportManifestRenderModelToMarkdown` (authorized output, Citation
+Appendix) -> real `serializeExportManifestRenderModelToCsv` (the CSV
+evidence appendix/citation trace, confirmed to be the citation appendix per
+the architecture matrix above - same claim/evidence/source/source-version
+identities resolve end to end, no separate artifact). No external AI/
+network call and no PostgreSQL connection were made; synthetic data only.
+
+**Public-audience human-authority proof (residual Prompt-3 evidence
+seam):** in the same file, for a `requestedAudience="public"` candidate:
+(1) `KAI_PUBLIC_EXPORT_ENABLED` absent/unset -> `feature_disabled` at
+`evaluateFinalExportEligibility`, `recordHumanFinalReleaseAuthorityDecision`,
+and `createExportManifest` alike; (2) the flag enabled alone, with no
+effective decision, still leaves `finalExportEligible:false`
+(`effectivenessReason:"no_decision"`); (3) an effective, authorized human
+`export_authority_granted` grant is required and sufficient, exactly as for
+`internal`/`funder` - no public-specific bypass or extra requirement
+exists. Public-export semantics were not changed to make this pass; the
+proof matches the "fails closed unconditionally regardless of
+requested_audience" finding already recorded in the architecture-closure
+matrix above.
+
+**Negative cases:** missing `export_authority_granted` blocks final export
+(no-decision case, both generic and public-audience); cross-tenant
+identity/reference fails closed (`authorization_denied`, before any
+repository/transaction call) for both `createExportManifest` and
+`evaluateFinalExportEligibility`; an assistant/system actor cannot grant
+final authority (`recordHumanFinalReleaseAuthorityDecision`), cannot create
+an export manifest, and cannot evaluate/finalize export eligibility either
+(`authorization_denied` in all three, before any repository call). Blocked-
+claim / audience-ineligible-evidence / missing-or-invalid-citation negative
+cases are proven by the real VAL-GEN validators and the real
+`createPostgresGeneratedContentRepository` admission boundary in
+`kai-sprint2-phase13-governance-horizontal-conformance.spec.js` (already
+passing, rerun as regression below) through the SAME production admission
+boundary this file's own draft-creation step drives - not duplicated.
+
+**Composite normal-path proof (existing, reused, not rewritten):** the
+Grant Response Packet chain (candidate -> review/final authority ->
+manifest -> authorized Markdown -> citations/audit) and the Board
+Reporting/Board Summary chain (same shape) were run via their existing
+normal synthetic E2E suites - 553/553 PASS across 37 files, listed below.
+`PACKET_MEMBER_CONTENT_TYPES`/`BOARD_REPORTING_PACKET_MEMBER_CONTENT_TYPES`
+remain exactly `{evidence_summary, impact_narrative}` - unchanged. The
+"50/51/100/101" capacity/boundary-count proofs
+(`kai-sprint2-p14-c2-grant-response-packet-execution-bounds.spec.js`,
+`kai-board-reporting-candidate-boundary.spec.js`) were identified and
+deliberately NOT rerun or rewritten, per package scope.
+
+**Repair:** NONE. The assembled proof exposed no implementation defect;
+every real service, validator, and serializer it exercised behaved exactly
+as the architecture-closure matrix above already found. No source file
+under `Backend/kai/` was changed this pass.
+
+**Actual test results this pass**
+(`DATABASE_URL=postgres://sentinel:sentinel@127.0.0.1:1/sentinel_kai_no_listener`
+set for every Node command; no database/cloud/production access):
+- `kai-sprint2-p14-11-assembled-generic-release-candidate-acceptance.spec.js`
+  (new) -> 22/22 PASS.
+- `kai-sprint2-p3-18-assembled-pre-artifact-release-proof.spec.js` ->
+  9/9 PASS.
+- `kai-sprint2-b1b-effective-public-authority.spec.js` -> 20/20 PASS.
+- `kai-sprint2-generator-result-contract-horizontal-conformance.spec.js`,
+  `kai-sprint2-phase13-governance-horizontal-conformance.spec.js`,
+  `kai-sprint2-review-lifecycle-horizontal-conformance.spec.js`,
+  `kai-sprint2-metadata-only-audit-export-path-allowlist.spec.js`,
+  combined with the two proofs above -> 342/342 PASS (single combined run).
+- Grant Response Packet + Board Reporting normal E2E (37 files, excluding
+  the two capacity suites named above and excluding `*.integration.spec.js`/
+  `*real-db*` files, which require a live database and were not run) ->
+  553/553 PASS.
+- `git diff --check` -> PASS (no whitespace errors).
+
+**Status:** PHASE13_14_RELEASE_CANDIDATE_COMMITTED_LOCALLY. No production
+or runtime closure claimed. No push, deployment, production mutation,
+database mutation, migration execution, feature-flag/configuration change,
+real-client-data access, or `00_KAI_CURRENT_STATE.md` update performed.
