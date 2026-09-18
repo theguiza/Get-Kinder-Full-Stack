@@ -96,8 +96,8 @@ test("P3-17 final-release authority service pins existing export_authority_grant
   assert.deepEqual([...__humanAuthorityDecisionServiceContract.FINAL_RELEASE_AUTHORITY_ROLES], ["gk_admin"]);
 });
 
-test("P3-17 final-release authority repository validator and role derivation enforce exact human contract", () => {
-  const { isRecordDecisionInput, deriveDecidedByRole } = __humanAuthorityDecisionRepositoryTestables;
+test("P3-17 final-release authority repository validator and role canonicality enforce exact human contract", () => {
+  const { isRecordDecisionInput, isCanonicalDecidedByRole } = __humanAuthorityDecisionRepositoryTestables;
   const input = {
     organizationId: ORG,
     exportCandidateId: CANDIDATE,
@@ -105,6 +105,7 @@ test("P3-17 final-release authority repository validator and role derivation enf
     decisionAction: "grant",
     requestedAudience: "internal",
     actorContext: gkAdminActorContext,
+    decidedByRole: "gk_admin",
     now: NOW,
   };
 
@@ -113,9 +114,16 @@ test("P3-17 final-release authority repository validator and role derivation enf
   assert.equal(isRecordDecisionInput({ ...input, decisionType: "final_gate" }), false);
   assert.equal(isRecordDecisionInput({ ...input, decisionAction: "approve" }), false);
   assert.equal(isRecordDecisionInput({ ...input, actorContext: { actorType: "system", actorUserId: ACTOR } }), false);
-  assert.equal(deriveDecidedByRole(gkAdminActorContext, ORG, "export_authority_granted"), "gk_admin");
-  assert.equal(deriveDecidedByRole(gkAdminActorContext, OTHER_ORG, "export_authority_granted"), null);
-  assert.equal(deriveDecidedByRole(gkReviewerActorContext, ORG, "export_authority_granted"), null);
+  assert.equal(isRecordDecisionInput({ ...input, decidedByRole: "" }), false);
+  // decidedByRole is resolved by the service layer (via the shared
+  // resolveAuthorizedHumanRole helper against the actual successful
+  // authorization result), not derived here from
+  // actorContext.organizationMemberships - this repository only ever
+  // validates that the role it was handed is the exact canonical role
+  // required for the decisionType.
+  assert.equal(isCanonicalDecidedByRole("gk_admin", "export_authority_granted"), true);
+  assert.equal(isCanonicalDecidedByRole("gk_reviewer", "export_authority_granted"), false);
+  assert.equal(isCanonicalDecidedByRole("gk_admin", "final_gate"), false);
 });
 
 test("P3-17 authorized affirmative final-release authority write succeeds and existing evaluator recognizes it", async () => {
@@ -140,6 +148,7 @@ test("P3-17 authorized affirmative final-release authority write succeeds and ex
     decisionAction: "grant",
     requestedAudience: "internal",
     actorContext: gkAdminActorContext,
+    decidedByRole: "gk_admin",
     now: NOW,
   }, { metadataOnlyAudit: auditRecorder() });
 
@@ -171,6 +180,7 @@ test("P3-17 wrong audience fails before authority insert", async () => {
     decisionAction: "grant",
     requestedAudience: "internal",
     actorContext: gkAdminActorContext,
+    decidedByRole: "gk_admin",
     now: NOW,
   }, { metadataOnlyAudit: auditRecorder() });
 
@@ -195,6 +205,7 @@ test("P3-17 stale export candidate fails before authority insert; existing evalu
     decisionAction: "grant",
     requestedAudience: "internal",
     actorContext: gkAdminActorContext,
+    decidedByRole: "gk_admin",
     now: NOW,
   }, { metadataOnlyAudit: auditRecorder() });
   assert.equal(result.error.code, "conflict_current_state_changed");
@@ -235,6 +246,7 @@ test("P3-17 revocation/supersession makes earlier final-release authority ineffe
     decisionAction: "revoke",
     requestedAudience: "internal",
     actorContext: gkAdminActorContext,
+    decidedByRole: "gk_admin",
     now: NOW,
   }, { metadataOnlyAudit: auditRecorder() });
 
@@ -264,6 +276,7 @@ test("P3-17 duplicate same-action authority decision follows existing no-op repl
     decisionAction: "grant",
     requestedAudience: "internal",
     actorContext: gkAdminActorContext,
+    decidedByRole: "gk_admin",
     now: NOW,
   }, { metadataOnlyAudit: auditRecorder() });
 

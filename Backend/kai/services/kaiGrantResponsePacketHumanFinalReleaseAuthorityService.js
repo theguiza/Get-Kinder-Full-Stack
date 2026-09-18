@@ -1,6 +1,7 @@
 import { isKaiSprint2Enabled, isKaiGenerationEnabled } from "../config/kaiSprint2Config.js";
 import { buildKaiError } from "../errors/kaiErrors.js";
 import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationService.js";
+import { resolveAuthorizedHumanRole } from "../auth/kaiAuthorizedRoleAttribution.js";
 import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
 import {
   GRANT_RESPONSE_PACKET_HUMAN_AUTHORITY_DECISION_TYPES,
@@ -115,6 +116,15 @@ export async function recordGrantResponsePacketHumanFinalReleaseAuthorityDecisio
     return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers, data: null });
   }
 
+  const decidedByRole = resolveAuthorizedHumanRole({
+    actorContext: input.actorContext,
+    auth,
+    allowedRoles: RECORD_GRANT_RESPONSE_PACKET_HUMAN_FINAL_RELEASE_AUTHORITY_ROLES,
+  });
+  if (!decidedByRole) {
+    return buildKaiError("validation_blocker", { data: null });
+  }
+
   const tenant = validateTenantBoundaryConsistency({
     expectedOrganizationId: input.organizationId,
     payload: { organization_id: input.organizationId },
@@ -133,6 +143,7 @@ export async function recordGrantResponsePacketHumanFinalReleaseAuthorityDecisio
     decisionType: FINAL_RELEASE_AUTHORITY_DECISION_TYPE,
     decisionAction: input.decisionAction,
     actorContext: input.actorContext,
+    decidedByRole,
     now: input.now,
   }, {
     metadataOnlyAudit: dependencies.metadataOnlyAudit,

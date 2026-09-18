@@ -113,6 +113,7 @@ function isRecordBoardReportingCandidateHumanAuthorityDecisionInput(input) {
     "decisionType",
     "decisionAction",
     "actorContext",
+    "decidedByRole",
     "now",
   ]))
     && UUID_PATTERN.test(input.organizationId)
@@ -122,6 +123,7 @@ function isRecordBoardReportingCandidateHumanAuthorityDecisionInput(input) {
     && BOARD_REPORTING_CANDIDATE_HUMAN_AUTHORITY_DECISION_TYPES.includes(input.decisionType)
     && ["grant", "revoke"].includes(input.decisionAction)
     && isMappedHumanActor(input.actorContext)
+    && typeof input.decidedByRole === "string" && input.decidedByRole.length > 0
     && isCanonicalUtcTimestamp(input.now);
 }
 
@@ -132,17 +134,15 @@ function isEvaluateEffectivenessInput(input) {
     && BOARD_REPORTING_CANDIDATE_HUMAN_AUTHORITY_DECISION_TYPES.includes(input.decisionType);
 }
 
-// Only a mapped human actor with an active gk_admin membership in this exact
-// organization may decide export_authority_granted - mirrors the existing
-// P3-17/P14-07B1 deriveDecidedByRole exactly.
-function deriveDecidedByRole(actorContext, organizationId, decisionType) {
+// decidedByRole is resolved by the service layer (from the actor's own
+// successful validateActorCanPerformOperation result, via the shared
+// resolveAuthorizedHumanRole helper), not derived here from
+// actorContext.organizationMemberships. This repository still validates the
+// supplied role is the exact canonical role required for the decisionType
+// before writing it, independent of how it was resolved.
+function isCanonicalDecidedByRole(decidedByRole, decisionType) {
   const requiredRole = roleRequiredForBoardReportingCandidateHumanAuthorityDecisionType(decisionType);
-  if (!requiredRole) return null;
-  const membership = (actorContext?.organizationMemberships || []).find((entry) =>
-    String(entry.organization_id) === String(organizationId)
-    && entry.membership_status === "active"
-    && entry.role_name === requiredRole);
-  return membership ? requiredRole : null;
+  return Boolean(requiredRole) && decidedByRole === requiredRole;
 }
 
 async function loadCurrentDecisionHead(tx, { organizationId, boardReportingCandidateId, decisionType, forUpdate }) {
@@ -224,8 +224,8 @@ export function createPostgresBoardReportingCandidateHumanAuthorityDecisionRepos
     async recordDecision(input, dependencies = {}) {
       if (!isRecordBoardReportingCandidateHumanAuthorityDecisionInput(input)) return failure("validation_blocker");
       if (!dependencies.metadataOnlyAudit) return failure("validation_blocker");
-      const decidedByRole = deriveDecidedByRole(input.actorContext, input.organizationId, input.decisionType);
-      if (!decidedByRole) return failure("validation_blocker");
+      if (!isCanonicalDecidedByRole(input.decidedByRole, input.decisionType)) return failure("validation_blocker");
+      const { decidedByRole } = input;
 
       try {
         return await runInTransaction(async (tx) => {
@@ -370,7 +370,7 @@ export function createPostgresBoardReportingCandidateHumanAuthorityDecisionRepos
 export const __boardReportingCandidateHumanAuthorityDecisionRepositoryTestables = Object.freeze({
   isRecordBoardReportingCandidateHumanAuthorityDecisionInput,
   isEvaluateEffectivenessInput,
-  deriveDecidedByRole,
+  isCanonicalDecidedByRole,
   evaluateBoardReportingCandidateHumanAuthorityEffectivenessInTransaction,
 });
 

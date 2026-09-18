@@ -17,7 +17,6 @@ import {
 import { BOARD_REPORTING_CANDIDATE_REVIEW_QUEUE_STATIC_CONTRACT } from "../Backend/kai/dictionary/boardReportingCandidateContract.js";
 
 const ORG = "00000000-0000-4000-8000-000000000001";
-const OTHER_ORG = "00000000-0000-4000-8000-000000000002";
 const ENGAGEMENT = "04000000-0000-4000-8000-000000000001";
 const CANDIDATE = "04000000-0000-4000-8000-000000000501";
 const REVIEW_QUEUE_ITEM = "04000000-0000-4000-8000-000000000601";
@@ -32,6 +31,7 @@ function recordInput(overrides = {}) {
     decisionType: "export_authority_granted",
     decisionAction: "grant",
     actorContext: ACTOR,
+    decidedByRole: "gk_admin",
     now: "2026-09-12T00:00:00.000Z",
     ...overrides,
   };
@@ -93,6 +93,7 @@ test("BR-04 record-decision input validator rejects unknown keys, malformed ids,
   assert.equal(isRecordBoardReportingCandidateHumanAuthorityDecisionInput(recordInput({ decisionType: "board_approved" })), false);
   assert.equal(isRecordBoardReportingCandidateHumanAuthorityDecisionInput(recordInput({ decisionAction: "approve" })), false);
   assert.equal(isRecordBoardReportingCandidateHumanAuthorityDecisionInput(recordInput({ actorContext: { actorType: "system" } })), false);
+  assert.equal(isRecordBoardReportingCandidateHumanAuthorityDecisionInput(recordInput({ decidedByRole: "" })), false);
   assert.equal(isRecordBoardReportingCandidateHumanAuthorityDecisionInput(recordInput({ now: "not-a-timestamp" })), false);
   // No fingerprint, member list, or requestedAudience is ever accepted -
   // a Board Reporting candidate's audience is always exactly "internal".
@@ -107,35 +108,21 @@ test("BR-04 evaluate-effectiveness input validator rejects unknown keys and unkn
   assert.equal(isEvaluateEffectivenessInput(effectivenessInput({ decisionType: "board_approved" })), false);
 });
 
-// --- decided-by-role derivation ---
-
-test("BR-04 deriveDecidedByRole requires an active gk_admin membership in the exact organization", () => {
-  const { deriveDecidedByRole } = __boardReportingCandidateHumanAuthorityDecisionRepositoryTestables;
-  const gkAdminActor = {
-    ...ACTOR,
-    organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "gk_admin" }],
-  };
-  assert.equal(deriveDecidedByRole(gkAdminActor, ORG, "export_authority_granted"), "gk_admin");
-
-  const wrongOrgActor = {
-    ...ACTOR,
-    organizationMemberships: [{ organization_id: OTHER_ORG, membership_status: "active", role_name: "gk_admin" }],
-  };
-  assert.equal(deriveDecidedByRole(wrongOrgActor, ORG, "export_authority_granted"), null);
-
-  const inactiveActor = {
-    ...ACTOR,
-    organizationMemberships: [{ organization_id: ORG, membership_status: "revoked", role_name: "gk_admin" }],
-  };
-  assert.equal(deriveDecidedByRole(inactiveActor, ORG, "export_authority_granted"), null);
-
-  const wrongRoleActor = {
-    ...ACTOR,
-    organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_reviewer" }],
-  };
-  assert.equal(deriveDecidedByRole(wrongRoleActor, ORG, "export_authority_granted"), null);
-
-  assert.equal(deriveDecidedByRole(gkAdminActor, ORG, "board_approved"), null);
+// --- decided-by-role canonicality ---
+//
+// decidedByRole is no longer derived here from actorContext.organizationMemberships
+// (that re-derivation, independent of how validateActorCanPerformOperation actually
+// authorized the actor, is exactly the defect this repair closes - see
+// resolveAuthorizedHumanRole in kaiAuthorizedRoleAttribution.js, which the
+// service layer now uses before ever calling this repository). This repository
+// only ever validates that the role it was handed is the exact canonical role
+// required for the decisionType.
+test("BR-04 isCanonicalDecidedByRole only accepts the exact canonical role required for the decisionType", () => {
+  const { isCanonicalDecidedByRole } = __boardReportingCandidateHumanAuthorityDecisionRepositoryTestables;
+  assert.equal(isCanonicalDecidedByRole("gk_admin", "export_authority_granted"), true);
+  assert.equal(isCanonicalDecidedByRole("client_reviewer", "export_authority_granted"), false);
+  assert.equal(isCanonicalDecidedByRole("gk_reviewer", "export_authority_granted"), false);
+  assert.equal(isCanonicalDecidedByRole("gk_admin", "board_approved"), false);
 });
 
 // --- pure transaction-scoped effectiveness evaluator ---
@@ -204,7 +191,7 @@ test("BR-04 recordDecision rejects when no metadataOnlyAudit dependency is suppl
   assert.equal(result.error.code, "validation_blocker");
 });
 
-test("BR-04 recordDecision rejects an actor without an active gk_admin membership before ever opening the transaction", async () => {
+test("BR-04 recordDecision rejects a decidedByRole that is not the exact canonical role for the decisionType before ever opening the transaction", async () => {
   let transactionOpened = false;
   const repo = createPostgresBoardReportingCandidateHumanAuthorityDecisionRepository({
     runInTransaction: async (fn) => {
@@ -213,7 +200,7 @@ test("BR-04 recordDecision rejects an actor without an active gk_admin membershi
     },
   });
   const result = await repo.recordDecision(
-    recordInput({ actorContext: { ...ACTOR, organizationMemberships: [] } }),
+    recordInput({ decidedByRole: "client_reviewer" }),
     { metadataOnlyAudit: { prepareMetadataOnlyAudit: () => ({ ok: true, publish: async () => {} }) } },
   );
   assert.equal(result.ok, false);

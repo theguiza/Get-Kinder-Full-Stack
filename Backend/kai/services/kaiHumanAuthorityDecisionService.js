@@ -4,6 +4,7 @@ import {
   isKaiSprint2Enabled,
 } from "../config/kaiSprint2Config.js";
 import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationService.js";
+import { resolveAuthorizedHumanRole } from "../auth/kaiAuthorizedRoleAttribution.js";
 import { roleRequiredForDecisionType } from "../dictionary/humanAuthorityDecisionContract.js";
 import { buildKaiError } from "../errors/kaiErrors.js";
 
@@ -84,6 +85,15 @@ export async function recordHumanFinalReleaseAuthorityDecision(input, dependenci
     return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers, data: null });
   }
 
+  const decidedByRole = resolveAuthorizedHumanRole({
+    actorContext: input.actorContext,
+    auth,
+    allowedRoles: FINAL_RELEASE_AUTHORITY_ROLES,
+  });
+  if (!decidedByRole) {
+    return buildKaiError("validation_blocker", { data: null });
+  }
+
   const repository =
     dependencies.humanAuthorityDecisionRepository || (await createDefaultHumanAuthorityDecisionRepository());
   const result = await repository.recordDecision({
@@ -93,6 +103,7 @@ export async function recordHumanFinalReleaseAuthorityDecision(input, dependenci
     decisionAction: input.decisionAction,
     requestedAudience: input.requestedAudience,
     actorContext: input.actorContext,
+    decidedByRole,
     now: input.now,
   }, {
     metadataOnlyAudit: dependencies.metadataOnlyAudit,

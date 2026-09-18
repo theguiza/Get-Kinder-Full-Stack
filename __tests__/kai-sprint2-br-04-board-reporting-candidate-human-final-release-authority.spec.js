@@ -169,6 +169,7 @@ function repositoryInput(overrides = {}) {
     decisionType: "export_authority_granted",
     decisionAction: "grant",
     actorContext: gkAdminActorContext,
+    decidedByRole: "gk_admin",
     now: NOW,
     ...overrides,
   };
