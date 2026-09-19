@@ -3,7 +3,11 @@ import {
   isKaiGenerationEnabled,
   isKaiPublicExportEnabled,
 } from "../config/kaiSprint2Config.js";
-import { buildKaiError } from "../errors/kaiErrors.js";
+import {
+  buildKaiError,
+  isUnstructuredValidationBlockerFailure,
+  unstructuredExportEligibilityDiagnosticBlocker,
+} from "../errors/kaiErrors.js";
 import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationService.js";
 import { validateExportManifestEligibility } from "../validators/kaiExportManifestEligibilityValidators.js";
 
@@ -117,7 +121,28 @@ export async function evaluateFinalExportEligibilityInTransaction(tx, input, dep
     evaluateCandidateCurrentness,
   );
   if (!effectiveness.ok) {
-    return buildKaiError(effectiveness.error.code, { status: effectiveness.error.status, data: null });
+    // P3-17's own effectiveness evaluator (e.g. evaluateHumanAuthorityEffectivenessInTransaction)
+    // can itself fail closed with an unstructured { ok:false, error.code:"validation_blocker" }
+    // and no blockers - a real validator/eligibility outcome is never
+    // computed here, so distinct from VAL-EXP-001's own denial below. Rule A:
+    // a real blocker the dependency already attached is preserved unchanged.
+    if (isUnstructuredValidationBlockerFailure(effectiveness)) {
+      return buildKaiError("validation_blocker", {
+        status: effectiveness.error.status,
+        data: null,
+        blockers: unstructuredExportEligibilityDiagnosticBlocker({
+          failureStage: "authority_effectiveness_evaluation",
+          upstreamErrorCode: "validation_blocker",
+        }),
+      });
+    }
+    return buildKaiError(effectiveness.error.code, {
+      status: effectiveness.error.status,
+      data: null,
+      ...(Array.isArray(effectiveness.blockers) && effectiveness.blockers.length > 0
+        ? { blockers: effectiveness.blockers }
+        : {}),
+    });
   }
 
   const validatorResult = validateExportManifestEligibility({

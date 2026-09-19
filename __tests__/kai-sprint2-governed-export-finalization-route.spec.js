@@ -381,6 +381,96 @@ test("Test 6 (success path): a passing manifest create response is unaffected by
   assert.equal(Object.hasOwn(response.body, "blockers"), false);
 });
 
+test("Test 8 (HTTP): the unstructured export-eligibility diagnostic blocker reaches the HTTP response", async (t) => {
+  const scenario = {
+    authenticated: true,
+    actorContext: gkAdminActorContext,
+    serviceCalls: [],
+    dependencyCalls: [],
+    result: {
+      ok: false,
+      error: { code: "validation_blocker" },
+      data: null,
+      blockers: [{
+        validator_key: "VAL-SYS-P0-001",
+        severity: "blocker",
+        object_type: "export_candidate",
+        message: "Export eligibility evaluation was blocked before a structured validator result was produced.",
+        blocking_reason: "unstructured_export_eligibility_blocker",
+        required_fix: "Use the diagnostic evidence to identify the failing export-eligibility stage.",
+        evidence: {
+          failure_stage: "authority_effectiveness_evaluation",
+          upstream_error_code: "validation_blocker",
+        },
+      }],
+    },
+  };
+  const { server, close } = await startServer(scenario);
+  t.after(close);
+  const path = `${basePath}/admin/organizations/${ORG}/export-candidates/${CANDIDATE}/export-manifests`;
+
+  const response = await requestJson(server, path, { export_review_queue_item_id: QUEUE_ITEM });
+
+  assert.equal(response.statusCode, 422);
+  assert.equal(response.body.error.code, "validation_blocker");
+  assert.equal(response.body.blockers.length, 1);
+  assert.equal(response.body.blockers[0].validator_key, "VAL-SYS-P0-001");
+  assert.equal(response.body.blockers[0].blocking_reason, "unstructured_export_eligibility_blocker");
+  assert.equal(response.body.blockers[0].evidence.failure_stage, "authority_effectiveness_evaluation");
+  assert.equal(response.body.blockers[0].evidence.upstream_error_code, "validation_blocker");
+  // The previously-observed production shape (blockers:[]) must not recur.
+  assert.notDeepEqual(response.body.blockers, []);
+});
+
+test("Test 9 (sanitizer boundary): unsafe failure_stage/upstream_error_code/upstream_reason values are stripped before HTTP", () => {
+  const { sanitizeServiceBlockers } = intakeRouteTestables;
+  const unsafeValues = [
+    "Authority Effectiveness Evaluation",
+    "authority_effectiveness_evaluation; DROP TABLE kai.export_manifests;",
+    "authority/effectiveness",
+    "authority\neffectiveness",
+    "a".repeat(65),
+    "",
+    null,
+    42,
+    { injected: true },
+  ];
+  for (const unsafeValue of unsafeValues) {
+    const sanitized = sanitizeServiceBlockers([{
+      validator_key: "VAL-SYS-P0-001",
+      severity: "blocker",
+      blocking_reason: "unstructured_export_eligibility_blocker",
+      evidence: {
+        failure_stage: unsafeValue,
+        upstream_error_code: unsafeValue,
+        upstream_reason: unsafeValue,
+      },
+    }]);
+    assert.equal(Object.hasOwn(sanitized[0].evidence, "failure_stage"), false, JSON.stringify(unsafeValue));
+    assert.equal(Object.hasOwn(sanitized[0].evidence, "upstream_error_code"), false, JSON.stringify(unsafeValue));
+    assert.equal(Object.hasOwn(sanitized[0].evidence, "upstream_reason"), false, JSON.stringify(unsafeValue));
+  }
+});
+
+test("Test 9b (sanitizer boundary): safe failure_stage/upstream_error_code/upstream_reason values survive alongside failed_gates", () => {
+  const { sanitizeServiceBlockers } = intakeRouteTestables;
+  const sanitized = sanitizeServiceBlockers([{
+    validator_key: "VAL-SYS-P0-001",
+    severity: "blocker",
+    blocking_reason: "unstructured_export_eligibility_blocker",
+    evidence: {
+      failure_stage: "authority_effectiveness_evaluation",
+      upstream_error_code: "validation_blocker",
+      upstream_reason: "no_decision",
+      failed_gates: ["affirmative_human_export_authority_absent"],
+    },
+  }]);
+  assert.equal(sanitized[0].evidence.failure_stage, "authority_effectiveness_evaluation");
+  assert.equal(sanitized[0].evidence.upstream_error_code, "validation_blocker");
+  assert.equal(sanitized[0].evidence.upstream_reason, "no_decision");
+  assert.deepEqual(sanitized[0].evidence.failed_gates, ["affirmative_human_export_authority_absent"]);
+});
+
 test("governed export finalization route requires authentication", async (t) => {
   const scenario = { authenticated: false, actorContext: gkAdminActorContext, serviceCalls: [], dependencyCalls: [], result: { ok: true, data: {}, error: null } };
   const { server, close } = await startServer(scenario);

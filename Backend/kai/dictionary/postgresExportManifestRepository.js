@@ -3,6 +3,10 @@ import crypto from "node:crypto";
 import { withTransaction } from "../db/kaiDb.js";
 import { evaluateFinalExportEligibilityInTransaction } from "../services/kaiFinalExportEligibilityGateService.js";
 import {
+  isUnstructuredValidationBlockerFailure,
+  unstructuredExportEligibilityDiagnosticBlocker,
+} from "../errors/kaiErrors.js";
+import {
   EXPORT_MANIFEST_FINGERPRINT_CONTRACT_VERSION,
   EXPORT_MANIFEST_CREATED_OPERATION,
   EXPORT_MANIFEST_AUDIT_CONTRACT,
@@ -28,6 +32,27 @@ function failure(code, blockers, data = null) {
 
 function success(data) {
   return { ok: true, data, error: null };
+}
+
+// Defense-in-depth only: evaluateFinalExportEligibilityInTransaction already
+// normalizes every real unstructured validation_blocker it can produce (see
+// kaiFinalExportEligibilityGateService.js) before returning here, so this
+// should never actually trigger. It exists so that this boundary can never
+// regress to the ordinary export-manifest route observing { blockers: [] }
+// for a validation_blocker, even if a future eligibility dependency is added
+// without the same normalization. Rule A: a real blocker eligibility already
+// attached is preserved unchanged.
+function applyEligibilityFailureFallback(eligibility) {
+  if (isUnstructuredValidationBlockerFailure(eligibility)) {
+    return failure(
+      "validation_blocker",
+      unstructuredExportEligibilityDiagnosticBlocker({
+        failureStage: "final_export_eligibility_evaluation",
+        upstreamErrorCode: "validation_blocker",
+      }),
+    );
+  }
+  return eligibility;
 }
 
 const AUTHORITY_ABSENT_FAILED_GATE = "affirmative_human_export_authority_absent";
@@ -292,7 +317,7 @@ export function createPostgresExportManifestRepository({ runInTransaction = with
             },
             eligibilityDependencies,
           );
-          if (!eligibility.ok) return eligibility;
+          if (!eligibility.ok) return applyEligibilityFailureFallback(eligibility);
           if (eligibility.data.finalExportEligible !== true) {
             // Preserve the authoritative VAL-EXP-001 validatorResult (including
             // evidence.failed_gates) that evaluateFinalExportEligibilityInTransaction
@@ -390,4 +415,5 @@ export const __exportManifestRepositoryTestables = Object.freeze({
   canonicalFingerprint,
   isLoadExportManifestIdentityInput,
   isLoadExportManifestHistoryInput,
+  applyEligibilityFailureFallback,
 });

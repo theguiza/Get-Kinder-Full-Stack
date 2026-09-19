@@ -173,12 +173,35 @@ function sanitizeAuthorityEffectivenessReason(evidence, failedGates) {
   return reason;
 }
 
+// Bounded machine-code diagnostic fields for the export-eligibility
+// unstructured-validation_blocker repair (see kaiErrors.js
+// unstructuredExportEligibilityDiagnosticBlocker). Same shape/safety rules as
+// sanitizeFailedGates/sanitizeAuthorityEffectivenessReason: a short
+// snake_case code only, never an id, claim, evidence body, or raw upstream
+// detail.
+function sanitizeExportEligibilityDiagnosticField(value) {
+  if (typeof value !== "string" || value.length === 0 || value.length > 64) return null;
+  return SAFE_FAILED_GATE_PATTERN.test(value) ? value : null;
+}
+
+function sanitizeExportEligibilityDiagnosticEvidence(evidence) {
+  const failureStage = sanitizeExportEligibilityDiagnosticField(evidence?.failure_stage);
+  const upstreamErrorCode = sanitizeExportEligibilityDiagnosticField(evidence?.upstream_error_code);
+  const upstreamReason = sanitizeExportEligibilityDiagnosticField(evidence?.upstream_reason);
+  return {
+    ...(failureStage ? { failure_stage: failureStage } : {}),
+    ...(upstreamErrorCode ? { upstream_error_code: upstreamErrorCode } : {}),
+    ...(upstreamReason ? { upstream_reason: upstreamReason } : {}),
+  };
+}
+
 function sanitizeServiceBlockers(blockers) {
   if (!Array.isArray(blockers)) return [];
   return blockers.flatMap((blocker) => {
     if (!blocker || typeof blocker !== "object" || Array.isArray(blocker)) return [];
     const failedGates = sanitizeFailedGates(blocker.evidence?.failed_gates);
     const authorityEffectivenessReason = sanitizeAuthorityEffectivenessReason(blocker.evidence, failedGates);
+    const exportEligibilityDiagnostic = sanitizeExportEligibilityDiagnosticEvidence(blocker.evidence);
     return [{
       validator_key: String(blocker.validator_key || "VAL-SYS-P0-001").slice(0, 64),
       severity: "blocker",
@@ -191,6 +214,7 @@ function sanitizeServiceBlockers(blockers) {
       evidence: {
         ...(failedGates.length > 0 ? { failed_gates: failedGates } : {}),
         ...(authorityEffectivenessReason ? { authority_effectiveness_reason: authorityEffectivenessReason } : {}),
+        ...exportEligibilityDiagnostic,
       },
     }];
   });

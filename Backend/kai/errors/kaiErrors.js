@@ -153,3 +153,56 @@ export function auditPayloadRejected(blockers = [], overrides = {}) {
     blockers,
   });
 }
+
+const DIAGNOSTIC_MACHINE_CODE_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
+
+// Shared fail-closed diagnostic for the export-eligibility call chain
+// (evaluateFinalExportEligibilityInTransaction and its direct dependencies,
+// plus the P3-19 repository's own final boundary): every one of those points
+// can currently return an unstructured { ok:false, error.code:"validation_blocker" }
+// with no blockers, which reaches the ordinary export-manifest HTTP response
+// as an unexplained { blockers: [] }. This never changes any eligibility
+// decision - it only attaches a bounded, machine-code-only stage
+// discriminator (never a business reason, an id, or raw upstream detail) at
+// whichever exact call site first observes the unstructured failure, so the
+// response stays self-diagnosing without guessing why eligibility failed.
+export function unstructuredExportEligibilityDiagnosticBlocker({
+  failureStage,
+  upstreamErrorCode,
+  upstreamReason,
+} = {}) {
+  const safeStage = typeof failureStage === "string" && DIAGNOSTIC_MACHINE_CODE_PATTERN.test(failureStage)
+    ? failureStage
+    : "final_export_eligibility_evaluation";
+  const safeUpstreamErrorCode =
+    typeof upstreamErrorCode === "string" && DIAGNOSTIC_MACHINE_CODE_PATTERN.test(upstreamErrorCode)
+      ? upstreamErrorCode
+      : "validation_blocker";
+  const safeUpstreamReason =
+    typeof upstreamReason === "string" && DIAGNOSTIC_MACHINE_CODE_PATTERN.test(upstreamReason)
+      ? upstreamReason
+      : null;
+  return [{
+    validator_key: "VAL-SYS-P0-001",
+    severity: "blocker",
+    object_type: "export_candidate",
+    message: "Export eligibility evaluation was blocked before a structured validator result was produced.",
+    blocking_reason: "unstructured_export_eligibility_blocker",
+    required_fix: "Use the diagnostic evidence to identify the failing export-eligibility stage.",
+    evidence: {
+      failure_stage: safeStage,
+      upstream_error_code: safeUpstreamErrorCode,
+      ...(safeUpstreamReason ? { upstream_reason: safeUpstreamReason } : {}),
+    },
+  }];
+}
+
+// True exactly when `result` is the unstructured-blocker shape this repair
+// targets: ok:false, error.code validation_blocker, and no real blocker
+// already attached (Rule A elsewhere always preserves a real blocker as-is).
+export function isUnstructuredValidationBlockerFailure(result) {
+  return Boolean(result)
+    && result.ok === false
+    && result.error?.code === "validation_blocker"
+    && !(Array.isArray(result.blockers) && result.blockers.length > 0);
+}

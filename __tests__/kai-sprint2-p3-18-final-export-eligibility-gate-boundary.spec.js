@@ -217,6 +217,59 @@ test("wrong-tenant actor is denied", async () => {
   assert.equal(result.error.code, "authorization_denied");
 });
 
+// --- Observability repair: the P3-17 effectiveness evaluator itself can
+// fail closed with an unstructured { ok:false, error.code:"validation_blocker" }
+// and no blockers (e.g. evaluateHumanAuthorityEffectivenessInTransaction's
+// own input-contract guard). That must never surface as a bare
+// { blockers: [] } - it becomes one safe, bounded diagnostic blocker
+// identifying the exact stage, distinct from VAL-EXP-001's own denial. -----
+
+test("an unstructured validation_blocker from the P3-17 effectiveness evaluator becomes a self-diagnosing blocker", async () => {
+  const { deps } = dependencies({
+    humanAuthorityDecisionRepository: {
+      evaluateEffectiveness: async () => ({ ok: false, data: null, error: { code: "validation_blocker", status: 422 } }),
+    },
+  });
+  const result = await evaluateFinalExportEligibility(input(), deps);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "validation_blocker");
+  assert.equal(result.error.status, 422);
+  assert.equal(Array.isArray(result.blockers), true);
+  assert.equal(result.blockers.length, 1);
+  assert.equal(result.blockers[0].validator_key, "VAL-SYS-P0-001");
+  assert.equal(result.blockers[0].blocking_reason, "unstructured_export_eligibility_blocker");
+  assert.equal(result.blockers[0].evidence.failure_stage, "authority_effectiveness_evaluation");
+  assert.equal(result.blockers[0].evidence.upstream_error_code, "validation_blocker");
+  assert.equal(Object.hasOwn(result.blockers[0].evidence, "upstream_reason"), false);
+});
+
+test("a real blocker already attached to an effectiveness-evaluator failure is preserved unchanged (Rule A)", async () => {
+  const realBlocker = [{ validator_key: "VAL-CUSTOM-001", severity: "blocker", blocking_reason: "some_real_reason" }];
+  const { deps } = dependencies({
+    humanAuthorityDecisionRepository: {
+      evaluateEffectiveness: async () => ({ ok: false, data: null, error: { code: "validation_blocker", status: 422 }, blockers: realBlocker }),
+    },
+  });
+  const result = await evaluateFinalExportEligibility(input(), deps);
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.blockers, realBlocker);
+});
+
+test("an effectiveness-evaluator failure with a different error code is passed through unchanged (not this repair's scope)", async () => {
+  const { deps } = dependencies({
+    humanAuthorityDecisionRepository: {
+      evaluateEffectiveness: async () => ({ ok: false, data: null, error: { code: "system_error", status: 500 } }),
+    },
+  });
+  const result = await evaluateFinalExportEligibility(input(), deps);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "system_error");
+  assert.equal(Object.hasOwn(result, "blockers"), false);
+});
+
 test("decision type passed to effectiveness evaluator matches P3-17's export_authority_granted contract", () => {
   assert.equal(
     __finalExportEligibilityGateServiceContract.FINAL_RELEASE_AUTHORITY_DECISION_TYPE,

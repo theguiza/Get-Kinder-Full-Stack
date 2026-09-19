@@ -411,6 +411,60 @@ test("Test 5: an eligible candidate still creates/replays the manifest exactly a
   assert.equal(Object.hasOwn(result, "blockers"), false);
 });
 
+// --- Observability repair: an eligibility-chain dependency (here, the
+// tx-scoped P3-17 authority-effectiveness evaluator) can itself fail closed
+// with an unstructured { ok:false, error.code:"validation_blocker" } and no
+// blockers. This must never reach the ordinary export-manifest response as a
+// bare { blockers: [] } - evaluateFinalExportEligibilityInTransaction
+// normalizes it into one bounded diagnostic blocker before the repository
+// ever sees it. This is distinct from Test 1/2 above (a real VAL-EXP-001
+// denial) - no eligibility decision is made here at all. --------------------
+
+test("Test 6: an unstructured validation_blocker from evaluateAuthorityEffectiveness is normalized into a self-diagnosing blocker before reaching the repository boundary", async () => {
+  const repository = manifestRepository();
+  const deps = eligibilityDeps({
+    evaluateAuthorityEffectiveness: async () => ({ ok: false, data: null, error: { code: "validation_blocker", status: 422 } }),
+  });
+  const result = await repository.createExportManifest(baseInput(), { ...deps, metadataOnlyAudit: manifestMetadataOnlyAudit });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "validation_blocker");
+  assert.equal(result.blockers.length, 1);
+  assert.equal(result.blockers[0].validator_key, "VAL-SYS-P0-001");
+  assert.equal(result.blockers[0].blocking_reason, "unstructured_export_eligibility_blocker");
+  assert.equal(result.blockers[0].evidence.failure_stage, "authority_effectiveness_evaluation");
+  assert.equal(result.blockers[0].evidence.upstream_error_code, "validation_blocker");
+});
+
+// --- Test 7: the repository's own final boundary fallback (defense-in-depth
+// only - Test 6 above proves the upstream gate-service normalization already
+// prevents this in practice). Exercised directly against the exported pure
+// function, since evaluateFinalExportEligibilityInTransaction is not
+// injectable from this repository and already normalizes every real
+// unstructured case before returning. -----------------------------------
+
+test("Test 7: the repository's final fallback converts a hypothetical still-unstructured eligibility failure into failure_stage=final_export_eligibility_evaluation", () => {
+  const { applyEligibilityFailureFallback } = __exportManifestRepositoryTestables;
+  const result = applyEligibilityFailureFallback({ ok: false, data: null, error: { code: "validation_blocker", status: 422 } });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "validation_blocker");
+  assert.equal(result.blockers.length, 1);
+  assert.equal(result.blockers[0].evidence.failure_stage, "final_export_eligibility_evaluation");
+  assert.equal(result.blockers[0].evidence.upstream_error_code, "validation_blocker");
+});
+
+test("Test 7b: the repository's final fallback preserves a real blocker unchanged (Rule A) and leaves non-validation_blocker failures untouched", () => {
+  const { applyEligibilityFailureFallback } = __exportManifestRepositoryTestables;
+
+  const realBlocker = [{ validator_key: "VAL-EXP-001", severity: "blocker", blocking_reason: "export_manifest_not_eligible" }];
+  const withRealBlocker = { ok: false, data: null, error: { code: "validation_blocker", status: 422 }, blockers: realBlocker };
+  assert.deepEqual(applyEligibilityFailureFallback(withRealBlocker), withRealBlocker);
+
+  const notFound = { ok: false, data: null, error: { code: "not_found", status: 404 } };
+  assert.deepEqual(applyEligibilityFailureFallback(notFound), notFound);
+});
+
 test("Test 5b: an eligible candidate's failure result never leaks into a passing createExportManifest service call", async () => {
   const repository = manifestRepository();
   const failingDeps = eligibilityDeps({
