@@ -102,7 +102,14 @@ export async function createExportManifest(input, dependencies = {}) {
   };
 
   const result = await repository.createExportManifest(repositoryInput, { metadataOnlyAudit });
-  if (!result.ok) return { ok: false, error: result.error, data: null };
+  if (!result.ok) {
+    return {
+      ok: false,
+      error: result.error,
+      data: result.data ?? null,
+      ...(result.blockers ? { blockers: result.blockers } : {}),
+    };
+  }
   return { ok: true, data: result.data, error: null };
 }
 

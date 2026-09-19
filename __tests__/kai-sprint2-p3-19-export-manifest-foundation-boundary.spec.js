@@ -6,6 +6,7 @@ import {
 } from "../Backend/kai/services/kaiFinalExportEligibilityGateService.js";
 import {
   __exportManifestRepositoryTestables,
+  createPostgresExportManifestRepository,
 } from "../Backend/kai/dictionary/postgresExportManifestRepository.js";
 import {
   createExportManifest,
@@ -240,4 +241,193 @@ test("service input contract accepts no now/finalGate/eligibility field from the
     }),
     false,
   );
+});
+
+// --- Phase-14 self-diagnosing ordinary manifest failure: the repository must
+// preserve the VAL-EXP-001 validatorResult it already computes through
+// evaluateFinalExportEligibilityInTransaction, instead of collapsing an
+// ineligible outcome to a bare "validation_blocker" with no blockers. -------
+
+function eligibilityPacket(overrides = {}) {
+  return {
+    ok: true,
+    data: {
+      generatedContentDraftId: DRAFT,
+      requestedExportAudience: "internal",
+      draftStatus: "final",
+      generatedContentReviewQueueStatus: "resolved",
+      generatedContentReviewStatus: "resolved",
+      exportReviewQueueStatus: "resolved",
+      exportReviewStatus: "resolved",
+      currentUseEligible: true,
+      ...overrides,
+    },
+    error: null,
+  };
+}
+
+function eligibilityDeps(overrides = {}) {
+  return {
+    loadCandidate: async () => ({
+      export_candidate_id: CANDIDATE,
+      organization_id: ORG,
+      generated_content_draft_id: DRAFT,
+      requested_audience: "internal",
+    }),
+    evaluatePacket: async () => eligibilityPacket(),
+    evaluator: async () => ({ ok: true, data: {}, error: null }),
+    evaluateAuthorityEffectiveness: async () => ({
+      ok: true,
+      data: { effective: true, reason: null, headDecisionId: DECISION },
+      error: null,
+    }),
+    evaluateCandidateCurrentness: async () => ({ ok: true, data: {}, error: null }),
+    ...overrides,
+  };
+}
+
+function manifestRepository() {
+  return createPostgresExportManifestRepository({
+    runInTransaction: async (callback) => callback({ async query() { return { rows: [] }; } }),
+  });
+}
+
+const manifestMetadataOnlyAudit = { prepareMetadataOnlyAudit() { return { ok: true, async publish() {} }; } };
+
+test("Test 1: an unresolved-review ordinary blocker survives repository as a VAL-EXP-001 blocker", async () => {
+  const repository = manifestRepository();
+  const deps = eligibilityDeps({
+    evaluatePacket: async () => eligibilityPacket({ generatedContentReviewStatus: "pending" }),
+  });
+  const result = await repository.createExportManifest(baseInput(), { ...deps, metadataOnlyAudit: manifestMetadataOnlyAudit });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "validation_blocker");
+  assert.equal(Array.isArray(result.blockers), true);
+  assert.equal(result.blockers.length, 1);
+  assert.equal(result.blockers[0].validator_key, "VAL-EXP-001");
+  assert.equal(result.blockers[0].severity, "blocker");
+  assert.deepEqual(result.blockers[0].evidence.failed_gates, ["generated_content_review_unresolved"]);
+});
+
+test("Test 2: missing-authority blocker survives with VAL-EXP-001, failed_gates, and the effectivenessReason preserved internally", async () => {
+  const repository = manifestRepository();
+  const deps = eligibilityDeps({
+    evaluateAuthorityEffectiveness: async () => ({
+      ok: true,
+      data: { effective: false, reason: "no_decision", headDecisionId: null },
+      error: null,
+    }),
+  });
+  const result = await repository.createExportManifest(baseInput(), { ...deps, metadataOnlyAudit: manifestMetadataOnlyAudit });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "validation_blocker");
+  assert.equal(result.blockers[0].validator_key, "VAL-EXP-001");
+  assert.deepEqual(result.blockers[0].evidence.failed_gates, ["affirmative_human_export_authority_absent"]);
+  // effectivenessReason is preserved internally on the repository's own
+  // failure result (no existing public HTTP `data` contract for it), AND -
+  // because the authority gate is the one that failed here - copied into the
+  // blocker's own evidence so the HTTP response is self-diagnosing too.
+  assert.equal(result.data.effectivenessReason, "no_decision");
+  assert.equal(result.blockers[0].evidence.authority_effectiveness_reason, "no_decision");
+});
+
+test("Test 3: a stale candidate (fingerprint_mismatch) still surfaces affirmative_human_export_authority_absent, with the currentness reason preserved internally and in the blocker's evidence", async () => {
+  const repository = manifestRepository();
+  const deps = eligibilityDeps({
+    evaluateAuthorityEffectiveness: async () => ({
+      ok: true,
+      data: { effective: false, reason: "fingerprint_mismatch", headDecisionId: null },
+      error: null,
+    }),
+  });
+  const result = await repository.createExportManifest(baseInput(), { ...deps, metadataOnlyAudit: manifestMetadataOnlyAudit });
+
+  assert.equal(result.ok, false);
+  assert.ok(result.blockers[0].evidence.failed_gates.includes("affirmative_human_export_authority_absent"));
+  assert.equal(result.data.effectivenessReason, "fingerprint_mismatch");
+  assert.equal(result.blockers[0].evidence.authority_effectiveness_reason, "fingerprint_mismatch");
+});
+
+test("Test 3b: a non-authority blocker does not gain an authority_effectiveness_reason, even when effectivenessReason is set", async () => {
+  const repository = manifestRepository();
+  const deps = eligibilityDeps({
+    evaluatePacket: async () => eligibilityPacket({ generatedContentReviewStatus: "pending" }),
+    // effective:true means the authority gate did not fail, but the
+    // evaluator can still carry a non-null reason - that must never leak
+    // into a blocker whose failed_gates does not include the authority gate.
+    evaluateAuthorityEffectiveness: async () => ({
+      ok: true,
+      data: { effective: true, reason: "lineage_ambiguous", headDecisionId: DECISION },
+      error: null,
+    }),
+  });
+  const result = await repository.createExportManifest(baseInput(), { ...deps, metadataOnlyAudit: manifestMetadataOnlyAudit });
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.blockers[0].evidence.failed_gates, ["generated_content_review_unresolved"]);
+  assert.equal(Object.hasOwn(result.blockers[0].evidence, "authority_effectiveness_reason"), false);
+});
+
+test("Test 4: multiple failed gates all survive, unchanged and in the validator's existing order", async () => {
+  const repository = manifestRepository();
+  const deps = eligibilityDeps({
+    evaluatePacket: async () => eligibilityPacket({ generatedContentReviewStatus: "pending", currentUseEligible: false }),
+    evaluateAuthorityEffectiveness: async () => ({
+      ok: true,
+      data: { effective: false, reason: "no_decision", headDecisionId: null },
+      error: null,
+    }),
+  });
+  const result = await repository.createExportManifest(baseInput(), { ...deps, metadataOnlyAudit: manifestMetadataOnlyAudit });
+
+  assert.equal(result.ok, false);
+  assert.deepEqual(result.blockers[0].evidence.failed_gates, [
+    "generated_content_review_unresolved",
+    "current_use_ineligible",
+    "affirmative_human_export_authority_absent",
+  ]);
+  assert.equal(result.blockers[0].evidence.authority_effectiveness_reason, "no_decision");
+  assert.equal(Object.keys(result.blockers[0].evidence).length, 2, "authority_effectiveness_reason must appear exactly once, alongside failed_gates only");
+});
+
+test("Test 5: an eligible candidate still creates/replays the manifest exactly as before", async () => {
+  const insertedRows = [{ export_manifest_id: "00000000-0000-4000-8000-000000000999" }];
+  const repository = createPostgresExportManifestRepository({
+    runInTransaction: async (callback) => callback({
+      async query(sql) {
+        if (/INSERT INTO kai\.export_manifests/.test(sql)) return { rows: insertedRows };
+        return { rows: [] };
+      },
+    }),
+  });
+  const deps = eligibilityDeps();
+  const result = await repository.createExportManifest(baseInput(), { ...deps, metadataOnlyAudit: manifestMetadataOnlyAudit });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.exportManifestId, "00000000-0000-4000-8000-000000000999");
+  assert.equal(result.data.replayed, false);
+  assert.equal(Object.hasOwn(result, "blockers"), false);
+});
+
+test("Test 5b: an eligible candidate's failure result never leaks into a passing createExportManifest service call", async () => {
+  const repository = manifestRepository();
+  const failingDeps = eligibilityDeps({
+    evaluatePacket: async () => eligibilityPacket({ generatedContentReviewStatus: "pending" }),
+  });
+  const failingResult = await repository.createExportManifest(baseInput(), { ...failingDeps, metadataOnlyAudit: manifestMetadataOnlyAudit });
+
+  const serviceDepsForFailure = {
+    env: enabledEnv,
+    now: "2026-09-06T10:00:00.000Z",
+    repository: { async createExportManifest() { return failingResult; } },
+    metadataOnlyAudit: manifestMetadataOnlyAudit,
+  };
+  const serviceResult = await createExportManifest(serviceInput(), serviceDepsForFailure);
+
+  assert.equal(serviceResult.ok, false);
+  assert.equal(serviceResult.error.code, "validation_blocker");
+  assert.equal(serviceResult.blockers[0].validator_key, "VAL-EXP-001");
+  assert.deepEqual(serviceResult.blockers[0].evidence.failed_gates, ["generated_content_review_unresolved"]);
 });

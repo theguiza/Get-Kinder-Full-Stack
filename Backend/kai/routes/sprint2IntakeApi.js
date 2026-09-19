@@ -147,10 +147,38 @@ function sanitizeServiceWarnings(warnings) {
   });
 }
 
+const SAFE_FAILED_GATE_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
+
+// failed_gates is a fixed, machine-readable diagnostic vocabulary shared by
+// several KAI eligibility validators (e.g. VAL-EXP-001) - short snake_case
+// codes, never an id, claim, or evidence body - so it is safe to pass
+// through here, unlike the rest of a validator's `evidence`.
+function sanitizeFailedGates(failedGates) {
+  if (!Array.isArray(failedGates)) return [];
+  return failedGates
+    .filter((gate) => typeof gate === "string" && SAFE_FAILED_GATE_PATTERN.test(gate))
+    .slice(0, 20);
+}
+
+const AUTHORITY_ABSENT_FAILED_GATE = "affirmative_human_export_authority_absent";
+
+// Same bounded-machine-code approach as sanitizeFailedGates: a short
+// snake_case diagnostic code only, never an id, claim, or evidence body -
+// and only ever attached when the authority gate is the one that failed.
+function sanitizeAuthorityEffectivenessReason(evidence, failedGates) {
+  if (!failedGates.includes(AUTHORITY_ABSENT_FAILED_GATE)) return null;
+  const reason = evidence?.authority_effectiveness_reason;
+  if (typeof reason !== "string" || reason.length === 0 || reason.length > 64) return null;
+  if (!SAFE_FAILED_GATE_PATTERN.test(reason)) return null;
+  return reason;
+}
+
 function sanitizeServiceBlockers(blockers) {
   if (!Array.isArray(blockers)) return [];
   return blockers.flatMap((blocker) => {
     if (!blocker || typeof blocker !== "object" || Array.isArray(blocker)) return [];
+    const failedGates = sanitizeFailedGates(blocker.evidence?.failed_gates);
+    const authorityEffectivenessReason = sanitizeAuthorityEffectivenessReason(blocker.evidence, failedGates);
     return [{
       validator_key: String(blocker.validator_key || "VAL-SYS-P0-001").slice(0, 64),
       severity: "blocker",
@@ -160,7 +188,10 @@ function sanitizeServiceBlockers(blockers) {
       message: String(blocker.message || "Request failed KAI validation.").slice(0, 200),
       blocking_reason: String(blocker.blocking_reason || "validation_blocker").slice(0, 64),
       required_fix: String(blocker.required_fix || "Correct the request and retry.").slice(0, 1000),
-      evidence: {},
+      evidence: {
+        ...(failedGates.length > 0 ? { failed_gates: failedGates } : {}),
+        ...(authorityEffectivenessReason ? { authority_effectiveness_reason: authorityEffectivenessReason } : {}),
+      },
     }];
   });
 }

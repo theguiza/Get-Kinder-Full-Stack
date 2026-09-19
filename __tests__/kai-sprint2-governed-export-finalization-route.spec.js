@@ -182,6 +182,205 @@ test("governed export finalization route propagates a P3-19 structured blocker w
   assert.equal(response.body.ok, false);
 });
 
+test("Test 6: governed export finalization route propagates the VAL-EXP-001 structured blocker, including evidence.failed_gates, over HTTP", async (t) => {
+  const scenario = {
+    authenticated: true,
+    actorContext: gkAdminActorContext,
+    serviceCalls: [],
+    dependencyCalls: [],
+    result: {
+      ok: false,
+      error: { code: "validation_blocker" },
+      data: null,
+      blockers: [{
+        validator_key: "VAL-EXP-001",
+        severity: "blocker",
+        object_type: "generated_content_draft",
+        object_code: "export_manifest_eligibility",
+        object_id: "00000000-0000-4000-8000-000000000301",
+        message: "Export manifest eligibility gates failed.",
+        blocking_reason: "export_manifest_not_eligible",
+        required_fix: null,
+        evidence: { failed_gates: ["affirmative_human_export_authority_absent"] },
+      }],
+    },
+  };
+  const { server, close } = await startServer(scenario);
+  t.after(close);
+  const path = `${basePath}/admin/organizations/${ORG}/export-candidates/${CANDIDATE}/export-manifests`;
+
+  const response = await requestJson(server, path, { export_review_queue_item_id: QUEUE_ITEM });
+
+  assert.equal(response.statusCode, 422);
+  assert.equal(response.body.error.code, "validation_blocker");
+  assert.equal(Array.isArray(response.body.blockers), true);
+  assert.equal(response.body.blockers.length, 1);
+  assert.equal(response.body.blockers[0].validator_key, "VAL-EXP-001");
+  assert.deepEqual(response.body.blockers[0].evidence.failed_gates, ["affirmative_human_export_authority_absent"]);
+});
+
+function authorityBlockerScenario({ failedGates, authorityEffectivenessReason }) {
+  return {
+    authenticated: true,
+    actorContext: gkAdminActorContext,
+    serviceCalls: [],
+    dependencyCalls: [],
+    result: {
+      ok: false,
+      error: { code: "validation_blocker" },
+      data: null,
+      blockers: [{
+        validator_key: "VAL-EXP-001",
+        severity: "blocker",
+        object_type: "generated_content_draft",
+        object_code: "export_manifest_eligibility",
+        object_id: "00000000-0000-4000-8000-000000000301",
+        message: "Export manifest eligibility gates failed.",
+        blocking_reason: "export_manifest_not_eligible",
+        required_fix: null,
+        evidence: {
+          failed_gates: failedGates,
+          ...(authorityEffectivenessReason !== undefined ? { authority_effectiveness_reason: authorityEffectivenessReason } : {}),
+        },
+      }],
+    },
+  };
+}
+
+test("Test 1 (HTTP): a stale-candidate authority diagnostic (fingerprint_mismatch) reaches the HTTP blocker", async (t) => {
+  const scenario = authorityBlockerScenario({
+    failedGates: ["affirmative_human_export_authority_absent"],
+    authorityEffectivenessReason: "fingerprint_mismatch",
+  });
+  const { server, close } = await startServer(scenario);
+  t.after(close);
+  const path = `${basePath}/admin/organizations/${ORG}/export-candidates/${CANDIDATE}/export-manifests`;
+
+  const response = await requestJson(server, path, { export_review_queue_item_id: QUEUE_ITEM });
+
+  assert.equal(response.statusCode, 422);
+  assert.equal(response.body.error.code, "validation_blocker");
+  assert.equal(response.body.blockers[0].validator_key, "VAL-EXP-001");
+  assert.deepEqual(response.body.blockers[0].evidence.failed_gates, ["affirmative_human_export_authority_absent"]);
+  assert.equal(response.body.blockers[0].evidence.authority_effectiveness_reason, "fingerprint_mismatch");
+});
+
+test("Test 2 (HTTP): a missing-authority diagnostic (no_decision) reaches the HTTP blocker", async (t) => {
+  const scenario = authorityBlockerScenario({
+    failedGates: ["affirmative_human_export_authority_absent"],
+    authorityEffectivenessReason: "no_decision",
+  });
+  const { server, close } = await startServer(scenario);
+  t.after(close);
+  const path = `${basePath}/admin/organizations/${ORG}/export-candidates/${CANDIDATE}/export-manifests`;
+
+  const response = await requestJson(server, path, { export_review_queue_item_id: QUEUE_ITEM });
+
+  assert.equal(response.body.blockers[0].evidence.authority_effectiveness_reason, "no_decision");
+});
+
+test("Test 4 (HTTP): multiple failed gates survive unchanged and the authority reason appears exactly once", async (t) => {
+  const scenario = authorityBlockerScenario({
+    failedGates: [
+      "generated_content_review_unresolved",
+      "current_use_ineligible",
+      "affirmative_human_export_authority_absent",
+    ],
+    authorityEffectivenessReason: "no_decision",
+  });
+  const { server, close } = await startServer(scenario);
+  t.after(close);
+  const path = `${basePath}/admin/organizations/${ORG}/export-candidates/${CANDIDATE}/export-manifests`;
+
+  const response = await requestJson(server, path, { export_review_queue_item_id: QUEUE_ITEM });
+
+  assert.deepEqual(response.body.blockers[0].evidence.failed_gates, [
+    "generated_content_review_unresolved",
+    "current_use_ineligible",
+    "affirmative_human_export_authority_absent",
+  ]);
+  assert.equal(response.body.blockers[0].evidence.authority_effectiveness_reason, "no_decision");
+  assert.equal(Object.keys(response.body.blockers[0].evidence).length, 2);
+});
+
+test("Test 5 (sanitizer boundary): an unsafe/malformed authority_effectiveness_reason is stripped before HTTP, without weakening failed_gates", () => {
+  const { sanitizeServiceBlockers } = intakeRouteTestables;
+  const unsafeReasons = [
+    "Fingerprint Mismatch",
+    "fingerprint_mismatch; DROP TABLE kai.export_manifests;",
+    "a".repeat(65),
+    "",
+    null,
+    42,
+    { injected: true },
+  ];
+  for (const unsafeReason of unsafeReasons) {
+    const sanitized = sanitizeServiceBlockers([{
+      validator_key: "VAL-EXP-001",
+      severity: "blocker",
+      object_type: "generated_content_draft",
+      object_code: "export_manifest_eligibility",
+      message: "Export manifest eligibility gates failed.",
+      blocking_reason: "export_manifest_not_eligible",
+      evidence: {
+        failed_gates: ["affirmative_human_export_authority_absent"],
+        authority_effectiveness_reason: unsafeReason,
+      },
+    }]);
+    assert.deepEqual(sanitized[0].evidence.failed_gates, ["affirmative_human_export_authority_absent"], JSON.stringify(unsafeReason));
+    assert.equal(Object.hasOwn(sanitized[0].evidence, "authority_effectiveness_reason"), false, JSON.stringify(unsafeReason));
+  }
+});
+
+test("Test 5b (sanitizer boundary): a safe authority_effectiveness_reason is dropped when the authority gate did not fail", () => {
+  const { sanitizeServiceBlockers } = intakeRouteTestables;
+  const sanitized = sanitizeServiceBlockers([{
+    validator_key: "VAL-EXP-001",
+    severity: "blocker",
+    object_type: "generated_content_draft",
+    object_code: "export_manifest_eligibility",
+    message: "Export manifest eligibility gates failed.",
+    blocking_reason: "export_manifest_not_eligible",
+    evidence: {
+      failed_gates: ["generated_content_review_unresolved"],
+      authority_effectiveness_reason: "no_decision",
+    },
+  }]);
+  assert.deepEqual(sanitized[0].evidence.failed_gates, ["generated_content_review_unresolved"]);
+  assert.equal(Object.hasOwn(sanitized[0].evidence, "authority_effectiveness_reason"), false);
+});
+
+test("Test 6 (success path): a passing manifest create response is unaffected by the authority-reason sanitization", async (t) => {
+  const scenario = {
+    authenticated: true,
+    actorContext: gkAdminActorContext,
+    serviceCalls: [],
+    dependencyCalls: [],
+    result: {
+      ok: true,
+      data: {
+        exportManifestId: MANIFEST,
+        exportCandidateId: CANDIDATE,
+        effectiveAuthorityDecisionId: "00000000-0000-4000-8000-000000000902",
+        fingerprintContractVersion: 1,
+        canonicalFingerprint: "deadbeef",
+        replayed: false,
+      },
+      error: null,
+    },
+  };
+  const { server, close } = await startServer(scenario);
+  t.after(close);
+  const path = `${basePath}/admin/organizations/${ORG}/export-candidates/${CANDIDATE}/export-manifests`;
+
+  const response = await requestJson(server, path, { export_review_queue_item_id: QUEUE_ITEM });
+
+  assert.equal(response.statusCode, 201);
+  assert.equal(response.body.ok, true);
+  assert.equal(response.body.data.exportManifestId, MANIFEST);
+  assert.equal(Object.hasOwn(response.body, "blockers"), false);
+});
+
 test("governed export finalization route requires authentication", async (t) => {
   const scenario = { authenticated: false, actorContext: gkAdminActorContext, serviceCalls: [], dependencyCalls: [], result: { ok: true, data: {}, error: null } };
   const { server, close } = await startServer(scenario);

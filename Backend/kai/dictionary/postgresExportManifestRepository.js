@@ -17,12 +17,42 @@ const RESULT_STATUS = Object.freeze({
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
-function failure(code) {
-  return { ok: false, data: null, error: { code, status: RESULT_STATUS[code] || 500 } };
+function failure(code, blockers, data = null) {
+  return {
+    ok: false,
+    data,
+    error: { code, status: RESULT_STATUS[code] || 500 },
+    ...(blockers ? { blockers } : {}),
+  };
 }
 
 function success(data) {
   return { ok: true, data, error: null };
+}
+
+const AUTHORITY_ABSENT_FAILED_GATE = "affirmative_human_export_authority_absent";
+const MACHINE_CODE_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
+
+// Extends the authoritative VAL-EXP-001 validatorResult with the
+// already-computed P3-17 effectiveness reason - but only when the authority
+// gate is the one that actually failed, and only with a bounded,
+// machine-code-shaped value. Never mutates validatorResult itself, never
+// touches failed_gates, and never attaches a reason for an unrelated gate.
+function withAuthorityEffectivenessReasonEvidence(validatorResult, effectivenessReason) {
+  const failedGates = validatorResult?.evidence?.failed_gates;
+  if (!Array.isArray(failedGates) || !failedGates.includes(AUTHORITY_ABSENT_FAILED_GATE)) {
+    return validatorResult;
+  }
+  if (typeof effectivenessReason !== "string" || !MACHINE_CODE_PATTERN.test(effectivenessReason)) {
+    return validatorResult;
+  }
+  return {
+    ...validatorResult,
+    evidence: {
+      ...validatorResult.evidence,
+      authority_effectiveness_reason: effectivenessReason,
+    },
+  };
 }
 
 export class ExportManifestRollbackResultError extends Error {
@@ -263,7 +293,22 @@ export function createPostgresExportManifestRepository({ runInTransaction = with
             eligibilityDependencies,
           );
           if (!eligibility.ok) return eligibility;
-          if (eligibility.data.finalExportEligible !== true) return failure("validation_blocker");
+          if (eligibility.data.finalExportEligible !== true) {
+            // Preserve the authoritative VAL-EXP-001 validatorResult (including
+            // evidence.failed_gates) that evaluateFinalExportEligibilityInTransaction
+            // already computed, rather than collapsing it to a bare code - this is
+            // what makes the ordinary manifest failure self-diagnosing.
+            // effectivenessReason is also carried in `data` for internal-only
+            // observability (the route's sanitizeServiceData allowlist does not
+            // surface it publicly), and - when it explains the authority gate
+            // specifically - copied into the blocker's own evidence so the HTTP
+            // response is self-diagnosing for that case too.
+            return failure(
+              "validation_blocker",
+              [withAuthorityEffectivenessReasonEvidence(eligibility.data.validatorResult, eligibility.data.effectivenessReason)],
+              { effectivenessReason: eligibility.data.effectivenessReason },
+            );
+          }
 
           const effectiveAuthorityDecisionId = eligibility.data.effectiveAuthorityDecisionId;
           if (!effectiveAuthorityDecisionId) rollbackFailure("system_error");
