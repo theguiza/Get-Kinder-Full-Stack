@@ -16,6 +16,7 @@ import {
   unstructuredExportManifestDiagnosticBlocker,
   exportManifestConstraintDiagnosticBlocker,
 } from "../Backend/kai/errors/kaiErrors.js";
+import { createProductionMetadataOnlyAuditForExportManifest } from "../Backend/kai/services/kaiMetadataOnlyAuditComposition.js";
 
 const ORG = "00000000-0000-4000-8000-000000000001";
 const OTHER_ORG = "00000000-0000-4000-8000-000000000002";
@@ -754,4 +755,130 @@ test("Test 5b: an eligible candidate's failure result never leaks into a passing
   assert.equal(serviceResult.error.code, "validation_blocker");
   assert.equal(serviceResult.blockers[0].validator_key, "VAL-EXP-001");
   assert.deepEqual(serviceResult.blockers[0].evidence.failed_gates, ["generated_content_review_unresolved"]);
+});
+
+// --- Route -> service composition boundary: the route
+// (Backend/kai/routes/sprint2IntakeApi.js) composes the service call
+// itself, so a mocked-service route test alone can't catch a route/service
+// contract drift (it only records whatever shape the route happens to send).
+// These tests reproduce the route's exact composition - a four-key public
+// service input, plus `now` and `metadataOnlyAudit` passed through the
+// dependencies object, exactly as sprint2IntakeApi.js's export-manifest
+// route builds them - and drive it into the real, un-mocked
+// createExportManifest service function, so this exact contract mismatch
+// (previously: the route folding `now` into the public service input) is
+// exercised across the real route/service boundary.
+
+function routeComposedServiceCall({ now, capturedRepositoryInputs }) {
+  const identifiers = { organizationId: ORG, exportCandidateId: CANDIDATE };
+  const actorContext = gkAdmin;
+  const metadataOnlyAudit = createProductionMetadataOnlyAuditForExportManifest({
+    organizationId: identifiers.organizationId,
+    exportCandidateId: identifiers.exportCandidateId,
+    actorContext,
+    now,
+    insertAuditEvent: async () => ({ ok: true }),
+  });
+  const repository = {
+    async createExportManifest(repositoryInput) {
+      capturedRepositoryInputs.push(repositoryInput);
+      const prepared = metadataOnlyAudit.prepareMetadataOnlyAudit({
+        payload: {
+          export_manifest_id: "00000000-0000-4000-8000-000000000999",
+          export_candidate_id: repositoryInput.exportCandidateId,
+        },
+      });
+      assert.equal(prepared.ok, true);
+      await prepared.publish();
+      return { ok: true, data: { exportManifestId: "00000000-0000-4000-8000-000000000999", replayed: false }, error: null };
+    },
+  };
+  const input = {
+    // Exactly sprint2IntakeApi.js's route-composed public service input - no
+    // `now` key.
+    organizationId: identifiers.organizationId,
+    exportCandidateId: identifiers.exportCandidateId,
+    exportReviewQueueItemId: QUEUE,
+    actorContext,
+  };
+  const dependencies = {
+    env: enabledEnv,
+    // Exactly sprint2IntakeApi.js's route-composed dependencies object -
+    // `now` travels here, alongside metadataOnlyAudit.
+    now,
+    metadataOnlyAudit,
+    repository,
+  };
+  return createExportManifest(input, dependencies);
+}
+
+test("Route/service boundary: the route's exact four-key input plus dependencies.now composition reaches the repository, and never trips failure_stage=service_input_contract", async () => {
+  const capturedRepositoryInputs = [];
+  const now = "2026-09-06T10:00:00.000Z";
+
+  const result = await routeComposedServiceCall({ now, capturedRepositoryInputs });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.exportManifestId, "00000000-0000-4000-8000-000000000999");
+  assert.notEqual(result.error?.code, "validation_blocker");
+  if (result.blockers) {
+    assert.equal(
+      result.blockers.some((blocker) => blocker.evidence?.failure_stage === "service_input_contract"),
+      false,
+    );
+  }
+
+  // The valid four-key service input plus dependencies.now reaches the
+  // repository, and the repository's own input receives that exact now.
+  assert.equal(capturedRepositoryInputs.length, 1);
+  assert.deepEqual(capturedRepositoryInputs[0], {
+    organizationId: ORG,
+    exportCandidateId: CANDIDATE,
+    exportReviewQueueItemId: QUEUE,
+    actorContext: gkAdmin,
+    now,
+  });
+});
+
+test("Route/service boundary: metadataOnlyAudit built from the route's own now publishes the exact same now the repository received", async () => {
+  const now = "2026-09-06T11:30:00.000Z";
+  const publishedEvents = [];
+  const metadataOnlyAudit = createProductionMetadataOnlyAuditForExportManifest({
+    organizationId: ORG,
+    exportCandidateId: CANDIDATE,
+    actorContext: gkAdmin,
+    now,
+    insertAuditEvent: async (metadata) => {
+      publishedEvents.push(metadata);
+      return { ok: true };
+    },
+  });
+  const capturedRepositoryInputs = [];
+  const repository = {
+    async createExportManifest(repositoryInput) {
+      capturedRepositoryInputs.push(repositoryInput);
+      const prepared = metadataOnlyAudit.prepareMetadataOnlyAudit({
+        payload: {
+          export_manifest_id: "00000000-0000-4000-8000-000000000999",
+          export_candidate_id: repositoryInput.exportCandidateId,
+        },
+      });
+      assert.equal(prepared.ok, true);
+      await prepared.publish();
+      return { ok: true, data: { exportManifestId: "00000000-0000-4000-8000-000000000999", replayed: false }, error: null };
+    },
+  };
+
+  const result = await createExportManifest(serviceInput(), {
+    env: enabledEnv,
+    now,
+    metadataOnlyAudit,
+    repository,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(capturedRepositoryInputs.length, 1);
+  assert.equal(capturedRepositoryInputs[0].now, now);
+  assert.equal(publishedEvents.length, 1);
+  assert.equal(publishedEvents[0].created_at, now);
 });

@@ -1537,8 +1537,8 @@ router.post(
         exportCandidateId: identifiers.exportCandidateId,
         exportReviewQueueItemId: payload.export_review_queue_item_id,
         actorContext,
-        now,
       }, {
+        now,
         metadataOnlyAudit: createProductionMetadataOnlyAuditForExportManifest({
           organizationId: identifiers.organizationId,
           exportCandidateId: identifiers.exportCandidateId,

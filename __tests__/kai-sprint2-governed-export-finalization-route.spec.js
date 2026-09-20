@@ -134,17 +134,21 @@ test("governed export finalization route delegates to createExportManifest and r
 
   assert.equal(response.statusCode, 201);
   assert.equal(scenario.serviceCalls.length, 1);
+  // The route-composed service input is exactly the service's four-key
+  // public contract - `now` is an execution dependency, never part of the
+  // public service input (see kaiExportManifestService.js
+  // isCreateExportManifestInput), so it must never appear here.
   assert.deepEqual(scenario.serviceCalls[0], {
     organizationId: ORG,
     exportCandidateId: CANDIDATE,
     exportReviewQueueItemId: QUEUE_ITEM,
     actorContext: gkAdminActorContext,
-    now: scenario.serviceCalls[0].now,
   });
   assert.equal(typeof scenario.dependencyCalls[0].metadataOnlyAudit?.prepareMetadataOnlyAudit, "function");
   assert.equal(response.body.data.exportManifestId, MANIFEST);
   assert.equal(response.body.data.exportCandidateId, CANDIDATE);
-  const nowMs = new Date(scenario.serviceCalls[0].now).getTime();
+  // `now` is instead passed through the service's dependency object.
+  const nowMs = new Date(scenario.dependencyCalls[0].now).getTime();
   assert.ok(nowMs >= before && nowMs <= after);
 });
 
