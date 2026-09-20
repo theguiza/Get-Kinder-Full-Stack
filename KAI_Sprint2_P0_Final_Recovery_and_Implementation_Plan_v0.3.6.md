@@ -30772,3 +30772,123 @@ set for every Node command; no database/cloud/production access):
 or runtime closure claimed. No push, deployment, production mutation,
 database mutation, migration execution, feature-flag/configuration change,
 real-client-data access, or `00_KAI_CURRENT_STATE.md` update performed.
+
+## Phase 14 Semantic Authority + Dormant Authority Contract Closure (2026-09-20)
+
+**Owner-accepted semantics (recorded here, not inferred from code):**
+- `client_reviewed`: conditional, not universal. Client knowledge/
+  confirmation is required only when the governed workflow actually requires
+  it. The dormant P3-17 `client_reviewed` decision type is NOT a universal
+  final-export prerequisite, and this vocabulary is not turned into a
+  universal `client_reviewed` gate merely because it exists in the P3-17
+  contract's decision-type array.
+- `funder_ready`: a readiness concept, not a second mandatory human
+  final-release approval. A funder-audience final export does not require
+  both `funder_ready` and `export_authority_granted` as stacked human
+  approvals. Applicable review, evidence/claim eligibility, audience
+  eligibility, currentness, limitations, and validator controls establish
+  readiness; `export_authority_granted` remains the operative human
+  final-release authority.
+- `public_ready`: same readiness-concept status as `funder_ready`, not a
+  second mandatory approval. Where public export is supported, readiness is
+  established through the applicable public-audience, review, governance,
+  currentness, validator, and feature controls (`KAI_PUBLIC_EXPORT_ENABLED`
+  fails closed). `export_authority_granted` remains the human final-release
+  authority. The living ExecPlan does not defer public export from current
+  accepted Phase 14 scope, so no explicit deferral is preserved or invented
+  here; the architecture-closure matrix and release-candidate acceptance
+  entries above already document public-audience behavior as implemented
+  and proven, not deferred.
+- `export_authority_granted`: the operative human final-release authority.
+  It does not replace review, audience eligibility, currentness, validator
+  gates, limitation/governance controls, or feature gates - it is the final
+  human release decision after those controls pass.
+
+**Fresh inspection this package (starting HEAD `6ccecee`, clean):** direct
+read of `Backend/kai/dictionary/humanAuthorityDecisionContract.js`,
+`postgresHumanAuthorityDecisionRepository.js`,
+`kaiHumanAuthorityDecisionService.js`,
+`kaiFinalExportEligibilityGateService.js`,
+`kaiGrantResponsePacketFinalExportEligibilityGateService.js`,
+`kaiBoardReportingFinalEligibilityGateService.js`, the ordinary/GRP/Board
+final-release-authority routes in `sprint2IntakeApi.js`, `VAL-EXP-001`
+(`kaiExportManifestEligibilityValidators.js`), and the directly coupled
+authority/final-eligibility test suites found: runtime already matches the
+accepted semantics exactly.
+- `kaiHumanAuthorityDecisionService.js#recordHumanFinalReleaseAuthorityDecision`
+  hardcodes `FINAL_RELEASE_AUTHORITY_DECISION_TYPE = "export_authority_granted"`
+  and its exact-keys request contract has no `decisionType` field, so no
+  caller (route or otherwise) can record a `client_reviewed`/`funder_ready`/
+  `public_ready` decision through this path.
+- `kaiFinalExportEligibilityGateService.js#evaluateFinalExportEligibility`
+  consults P3-17 effectiveness for `export_authority_granted` only, checked
+  unconditionally regardless of `requested_audience` (internal/funder/public
+  alike) - confirmed already documented in the "Phase-13/14
+  architecture-closure matrix" and "Phase 13/14 release-candidate acceptance"
+  entries above.
+- The GRP (`kaiGrantResponsePacketFinalExportEligibilityGateService.js`/
+  `grantResponsePacketHumanAuthorityDecisionContract.js`, P14-07B1) and Board
+  Reporting (`kaiBoardReportingFinalEligibilityGateService.js`/
+  `boardReportingCandidateHumanAuthorityDecisionContract.js`) analogues each
+  declare only a single `export_authority_granted`-equivalent decision type
+  in their own narrowed contracts - no `client_reviewed`/`funder_ready`/
+  `public_ready` equivalent exists in either, by explicit prior package
+  scoping (P14-07B1).
+- `client_reviewed`/`funder_ready`/`public_ready` appear only in
+  `humanAuthorityDecisionContract.js`'s vocabulary/role/audience maps and in
+  the generic `postgresHumanAuthorityDecisionRepository.js#recordDecision`/
+  `evaluateEffectiveness` functions those maps feed (which validate any of
+  the four types generically) - never referenced by any route, service, or
+  `VAL-EXP-001` gate logic. They are real, persistable, dormant vocabulary,
+  not wired as an additional mandatory gate.
+
+**Runtime code change:** NONE required - the runtime composition already
+matches the accepted shape (`applicable readiness/review/governance gates +
+effective export_authority_granted -> final eligibility`, never a stack of
+`funder_ready + public_ready + client_reviewed + export_authority_granted`).
+Per package instructions, working production logic was not rewritten.
+Smallest useful contract/comment changes were made instead so a future
+engineer cannot reasonably read the dormant P3-17 decision types as
+additional mandatory final-release gates: a clarifying header comment on
+`HUMAN_AUTHORITY_DECISION_TYPES` in `humanAuthorityDecisionContract.js`, and
+a clarifying comment on `FINAL_RELEASE_AUTHORITY_DECISION_TYPE` in
+`kaiFinalExportEligibilityGateService.js`. No route, schema/migration,
+validator, or existing test assertion was changed.
+
+**New focused test:**
+`__tests__/kai-sprint2-p14-14-semantic-authority-contract-clarification.spec.js`
+proving, against the real `kaiFinalExportEligibilityGateService.js` and the
+real `humanAuthorityDecisionContract.js` vocabulary: absence of
+`client_reviewed` does not by itself block an ordinary internal-audience
+final export; absence of `funder_ready` does not by itself block a
+funder-audience final export; absence of `public_ready` does not by itself
+create an additional public-audience final-release authority requirement
+(all three proven by driving the real gate with `effective:true` for
+`export_authority_granted` alone, across `internal`/`funder`/`public`
+candidates, and asserting PASS with no second decision type ever queried);
+an effective `export_authority_granted` remains required (revoked/absent
+authority still blocks, for all three audiences); other governed gates
+(review unresolved, current-use ineligible) remain fail-closed even with
+effective authority; a non-`gk_admin` actor cannot grant/revoke authority;
+and an assistant/system actor cannot grant final-release authority
+(`actorType !== "human"` rejected before any repository call). Also asserts
+the dormant vocabulary/role/audience maps in `humanAuthorityDecisionContract.js`
+are unchanged in shape (still exactly the four documented types) and that
+none of `client_reviewed`/`funder_ready`/`public_ready` is referenced by
+`kaiFinalExportEligibilityGateService.js`'s own contract export.
+
+**Test evidence** (`DATABASE_URL=postgres://sentinel:sentinel@127.0.0.1:1/sentinel_kai_no_listener`
+set for every Node command; no database/cloud/production access):
+- `node --test __tests__/kai-sprint2-p14-14-semantic-authority-contract-clarification.spec.js` -> see FOCUSED_TESTS in this package's return.
+- Directly coupled regression: `kai-sprint2-p3-18-final-export-eligibility-gate-boundary.spec.js`,
+  `kai-sprint2-p3-18-final-export-eligibility-gate-authority-state-proof.spec.js`,
+  `kai-sprint2-p3-17-human-authority-decision-ledger-boundary.spec.js`,
+  `kai-sprint2-p3-17-human-final-release-authority-write.spec.js` -> see
+  COUPLED_TESTS in this package's return.
+- `git diff --check` -> see GIT_DIFF_CHECK in this package's return.
+
+**Status:** PHASE14_SEMANTIC_AUTHORITY_AND_DORMANT_AUTHORITY_CONTRACT_CLOSURE_LOCAL.
+No production or runtime closure claimed. No push, deployment, production
+mutation, database mutation, migration execution, feature-flag/configuration
+change, real-client-data access, or `00_KAI_CURRENT_STATE.md` update
+performed.

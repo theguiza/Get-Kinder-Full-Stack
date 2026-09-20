@@ -1,3 +1,15 @@
+// Phase 14 owner-accepted semantics (2026-09-20): this vocabulary is an
+// append-only ledger of decision TYPES the repository can persist, not a
+// stack of mandatory final-release approvals. `export_authority_granted` is
+// the sole operative human final-release authority consulted by
+// kaiHumanAuthorityDecisionService.js / kaiFinalExportEligibilityGateService.js
+// and their GRP/Board Reporting analogues - those callers hardcode this one
+// decision type and never accept a client-supplied decisionType.
+// `client_reviewed`/`funder_ready`/`public_ready` are dormant readiness/
+// review vocabulary: real, persistable via this repository's generic
+// recordDecision/evaluateEffectiveness, but not wired as an additional
+// mandatory gate anywhere. Do not read their presence in this array as a
+// requirement that a caller must record them before final export.
 export const HUMAN_AUTHORITY_DECISION_TYPES = Object.freeze([
   "client_reviewed",
   "funder_ready",

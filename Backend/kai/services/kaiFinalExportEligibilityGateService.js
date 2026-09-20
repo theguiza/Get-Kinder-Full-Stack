@@ -13,6 +13,14 @@ import { validateExportManifestEligibility } from "../validators/kaiExportManife
 
 const FINAL_EXPORT_ELIGIBILITY_ALLOWED_ROLES = new Set(["gk_admin"]);
 const EVALUATE_FINAL_EXPORT_ELIGIBILITY_OPERATION = "evaluate_final_export_eligibility";
+// Phase 14 owner-accepted semantics (2026-09-20): `export_authority_granted`
+// is the ONLY human-authority decision type this gate ever consults, for
+// every requested audience (internal/funder/public alike - see
+// kaiPublicExportSemantics discussion in the living ExecPlan). The dormant
+// `client_reviewed`/`funder_ready`/`public_ready` decision types declared in
+// humanAuthorityDecisionContract.js are readiness/review vocabulary, not
+// additional mandatory final-release approvals, and must never be added
+// here as a second required effectiveness check.
 const FINAL_RELEASE_AUTHORITY_DECISION_TYPE = "export_authority_granted";
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
