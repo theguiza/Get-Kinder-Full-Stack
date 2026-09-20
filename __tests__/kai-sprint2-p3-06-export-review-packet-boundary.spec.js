@@ -402,9 +402,139 @@ test("P3-06 service runs both shared evaluators, and the P3-20 durable-recovery 
       assert.deepEqual(seenInput, { organizationId: ORG, exportReviewQueueItemId: EXPORT_REVIEW_QUEUE });
       return { exportManifestHistory: [] };
     },
+    resolveCurrentCandidate: async (seenTx, seenInput) => {
+      calls.push("resolveCurrentCandidate");
+      assert.equal(seenTx, tx);
+      assert.deepEqual(seenInput, {
+        organizationId: ORG,
+        generatedContentDraftId: DRAFT,
+        requestedAudience: "internal",
+      });
+      return { ok: true, data: { exportCandidateId: null, reason: "no_current_candidate" } };
+    },
+    evaluateFinalEligibility: async () => { throw new Error("must not call when no current candidate exists"); },
   });
   assert.equal(result.ok, true);
-  assert.deepEqual(calls, ["SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY", "evaluatePacket", "loadManifestIdentity", "loadManifestHistory"]);
+  assert.deepEqual(calls, [
+    "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY",
+    "evaluatePacket",
+    "resolveCurrentCandidate",
+    "loadManifestIdentity",
+    "loadManifestHistory",
+  ]);
+  assert.equal(result.data.exportCandidateId, null);
+});
+
+const CANDIDATE_ID = "00000000-0000-4000-8000-000000000801";
+
+function passingValidatorResult() {
+  return {
+    validator_key: "VAL-EXP-001",
+    severity: "pass",
+    object_type: "generated_content_draft",
+    object_code: "export_manifest_eligibility",
+    object_id: DRAFT,
+    message: "Export manifest eligibility gates passed.",
+    blocking_reason: null,
+    required_fix: null,
+    evidence: {},
+  };
+}
+
+function authorityBlockedValidatorResult() {
+  return {
+    validator_key: "VAL-EXP-001",
+    severity: "blocker",
+    object_type: "generated_content_draft",
+    object_code: "export_manifest_eligibility",
+    object_id: DRAFT,
+    message: "Export manifest eligibility gates failed.",
+    blocking_reason: "affirmative_human_export_authority_absent",
+    required_fix: null,
+    evidence: { failed_gates: ["affirmative_human_export_authority_absent"] },
+  };
+}
+
+test("P3-06 service overwrites exportEligible/validatorResult with the authoritative eligibility result once a current export candidate is resolved (State B, effective authority)", async () => {
+  const tx = { async query() { return { rows: [] }; } };
+  let eligibilityCalled = false;
+  const result = await getGeneratedDraftExportReviewPacket(input(), {
+    env: enabledEnv,
+    runInTransaction: async (callback) => callback(tx),
+    evaluatePacket: async () => ({ ok: true, data: packetDto(), error: null }),
+    evaluator,
+    loadManifestIdentity: async () => ({ exportManifestId: null }),
+    loadManifestHistory: async () => ({ exportManifestHistory: [] }),
+    resolveCurrentCandidate: async (seenTx, seenInput) => {
+      assert.equal(seenTx, tx);
+      assert.deepEqual(seenInput, { organizationId: ORG, generatedContentDraftId: DRAFT, requestedAudience: "internal" });
+      return { ok: true, data: { exportCandidateId: CANDIDATE_ID, reason: null } };
+    },
+    evaluateFinalEligibility: async (seenTx, seenInput, seenDependencies) => {
+      eligibilityCalled = true;
+      assert.equal(seenTx, tx);
+      assert.deepEqual(seenInput, {
+        organizationId: ORG,
+        exportCandidateId: CANDIDATE_ID,
+        exportReviewQueueItemId: EXPORT_REVIEW_QUEUE,
+      });
+      assert.equal(typeof seenDependencies.evaluatePacket, "function");
+      assert.equal(typeof seenDependencies.evaluator, "function");
+      assert.equal(typeof seenDependencies.loadCandidate, "function");
+      assert.equal(typeof seenDependencies.evaluateAuthorityEffectiveness, "function");
+      return {
+        ok: true,
+        data: {
+          generatedContentDraftId: DRAFT,
+          exportCandidateId: CANDIDATE_ID,
+          requestedExportAudience: "internal",
+          finalExportEligible: true,
+          validatorResult: passingValidatorResult(),
+          effectiveHumanExportAuthority: true,
+          effectivenessReason: null,
+        },
+        error: null,
+      };
+    },
+    loadCandidateForAuthority: async () => { throw new Error("must not call directly - only via evaluateFinalEligibility's own dependency"); },
+    humanAuthorityDecisionRepository: { evaluateEffectiveness: async () => { throw new Error("must not call directly"); } },
+  });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(eligibilityCalled, true);
+  assert.equal(result.data.exportCandidateId, CANDIDATE_ID);
+  assert.equal(result.data.exportEligible, true);
+  assert.equal(result.data.validatorResult.severity, "pass");
+});
+
+test("P3-06 service preserves the authoritative blocker when a current export candidate exists but human export authority is not effective (State B, ineffective authority)", async () => {
+  const tx = { async query() { return { rows: [] }; } };
+  const result = await getGeneratedDraftExportReviewPacket(input(), {
+    env: enabledEnv,
+    runInTransaction: async (callback) => callback(tx),
+    evaluatePacket: async () => ({ ok: true, data: packetDto(), error: null }),
+    evaluator,
+    loadManifestIdentity: async () => ({ exportManifestId: null }),
+    loadManifestHistory: async () => ({ exportManifestHistory: [] }),
+    resolveCurrentCandidate: async () => ({ ok: true, data: { exportCandidateId: CANDIDATE_ID, reason: null } }),
+    evaluateFinalEligibility: async () => ({
+      ok: true,
+      data: {
+        generatedContentDraftId: DRAFT,
+        exportCandidateId: CANDIDATE_ID,
+        requestedExportAudience: "internal",
+        finalExportEligible: false,
+        validatorResult: authorityBlockedValidatorResult(),
+        effectiveHumanExportAuthority: false,
+        effectivenessReason: "no_decision",
+      },
+      error: null,
+    }),
+  });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.data.exportCandidateId, CANDIDATE_ID);
+  assert.equal(result.data.exportEligible, false);
+  assert.equal(result.data.validatorResult.severity, "blocker");
+  assert.equal(result.data.validatorResult.blocking_reason, "affirmative_human_export_authority_absent");
 });
 
 test("P3-06 service never runs the P3-20 manifest-identity or manifest-history lookups when the packet composition itself fails - no separate best-effort follow-up", async () => {

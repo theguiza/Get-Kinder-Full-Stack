@@ -282,6 +282,14 @@ function serviceDeps(overrides = {}) {
       evaluator: async () => ({ ok: true, data: {}, error: null }),
       loadManifestIdentity: async () => { calls.loadManifestIdentity += 1; return { exportManifestId: MANIFEST_A }; },
       loadManifestHistory: async () => { calls.loadManifestHistory += 1; return { exportManifestHistory: [HISTORY_ENTRY_A] }; },
+      // This suite is scoped to the P3-20 manifest-identity/history read
+      // model, not current-candidate recovery (covered by its own suite) -
+      // no current candidate exists here, so the authoritative eligibility
+      // evaluator must never run.
+      resolveCurrentCandidate: async () => ({ ok: true, data: { exportCandidateId: null, reason: "no_current_candidate" } }),
+      evaluateFinalEligibility: async () => { throw new Error("must not call when no current candidate exists"); },
+      loadCandidateForAuthority: async () => { throw new Error("must not call when no current candidate exists"); },
+      humanAuthorityDecisionRepository: { evaluateEffectiveness: async () => { throw new Error("must not call when no current candidate exists"); } },
       ...overrides,
     },
   };
@@ -301,6 +309,7 @@ test("getGeneratedDraftExportReviewPacket's projected data carries exactly the a
       "contentType",
       "currentUseEligible",
       "draftStatus",
+      "exportCandidateId",
       "exportEligible",
       "exportManifestId",
       "exportManifestHistory",
@@ -387,7 +396,7 @@ test("the manifest-history lookup is scoped to the exact caller-supplied organiz
 test("no latest/current/timestamp-shaped field exists on the projected packet DTO validator's own key set", () => {
   const { isGeneratedDraftExportReviewPacketWithManifestDto } = __exportReviewServiceTestables;
   const forbiddenNamePattern = /latest|current(?!UseEligible)|active|mostrecent|timestamp/i;
-  const projected = { ...passingPacket().data, exportManifestId: MANIFEST_A, exportManifestHistory: [HISTORY_ENTRY_A] };
+  const projected = { ...passingPacket().data, exportManifestId: MANIFEST_A, exportManifestHistory: [HISTORY_ENTRY_A], exportCandidateId: null };
   for (const key of Object.keys(projected)) {
     assert.doesNotMatch(key, forbiddenNamePattern, `unexpected latest/current-shaped field: ${key}`);
   }

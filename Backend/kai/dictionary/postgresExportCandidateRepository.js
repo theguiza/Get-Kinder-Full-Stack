@@ -618,6 +618,77 @@ export async function loadExportCandidateCanonicalRepresentationInTransaction(
   });
 }
 
+// ---------------------------------------------------------------------------
+// Read-only current-candidate resolver (export-review packet current-state
+// recovery). Resolves the EXACT kai.export_candidates row, if any, whose
+// canonical fingerprint matches the draft's CURRENT governed state for the
+// exact (organizationId, generatedContentDraftId, requestedAudience)
+// replay-convergence identity - the same identity/uniqueness constraint
+// createExportCandidate itself converges on. It is deliberately built from
+// the SAME helpers createExportCandidate and
+// evaluateExportCandidateCurrentnessInTransaction already use
+// (loadDraftRow, loadCurrentSnapshotWithEntries, loadCanonicalGraph,
+// buildCanonicalRepresentation, canonicalFingerprint,
+// loadExistingExportCandidate) - no canonicalization, fingerprint, or
+// citation-pair logic is duplicated here. requestedAudience is accepted as
+// an input, not re-derived: the caller (kaiExportReviewService.js) already
+// holds the one authoritative requested-audience source the export-review
+// packet composition itself uses (the export-review queue item's own bound
+// audience), so this resolver never invents a second audience-selection
+// rule.
+//
+// The query against kai.export_candidates is the exact tenant-scoped
+// (organization_id, generated_content_draft_id, requested_audience,
+// canonical_fingerprint) lookup - never ORDER BY created_at, never LIMIT 1
+// over candidate history, never MAX(created_at), and never any other
+// latest/newest heuristic. A stale historical candidate (one whose
+// fingerprint no longer matches current governed state) can never resolve
+// here, by construction: only the fingerprint recomputed from current state
+// is ever looked up. Absence of a current candidate is a normal read
+// result (exportCandidateId: null), never an error.
+// ---------------------------------------------------------------------------
+export async function readCurrentExportCandidateForDraftInTransaction(
+  tx,
+  { organizationId, generatedContentDraftId, requestedAudience },
+) {
+  if (!UUID_PATTERN.test(organizationId) || !UUID_PATTERN.test(generatedContentDraftId)) {
+    return failure("validation_blocker");
+  }
+  if (!EXPORT_CANDIDATE_AUDIENCES.includes(requestedAudience)) {
+    return failure("validation_blocker");
+  }
+
+  const draft = await loadDraftRow(tx, { organizationId, generatedContentDraftId });
+  if (!draft) return success({ exportCandidateId: null, reason: "draft_missing" });
+
+  const snapshot = await loadCurrentSnapshotWithEntries(tx, { organizationId, generatedContentDraftId });
+  if (!snapshot) return success({ exportCandidateId: null, reason: "limitation_snapshot_missing" });
+
+  const blocks = await loadCanonicalGraph(tx, { organizationId, generatedContentDraftId });
+  if (blocks.length === 0) return success({ exportCandidateId: null, reason: "no_blocks" });
+
+  const representation = buildCanonicalRepresentation({
+    organizationId,
+    generatedContentDraftId,
+    contentType: draft.content_type,
+    requestedAudience,
+    blocks,
+    snapshotEntries: snapshot.entries,
+  });
+  if (!representation) return success({ exportCandidateId: null, reason: "cited_pair_mismatch" });
+
+  const fingerprint = canonicalFingerprint(representation);
+  const existing = await loadExistingExportCandidate(tx, {
+    organizationId,
+    generatedContentDraftId,
+    requestedAudience,
+    fingerprint,
+  });
+  if (!existing) return success({ exportCandidateId: null, reason: "no_current_candidate" });
+
+  return success({ exportCandidateId: existing.export_candidate_id, reason: null });
+}
+
 export function createPostgresExportCandidateRepository({ runInTransaction = withTransaction } = {}) {
   return Object.freeze({
     // Phase-14: read-only lookup of the exact claim/evidence pairs a
@@ -892,6 +963,7 @@ export const __exportCandidateRepositoryTestables = Object.freeze({
   canonicalFingerprint,
   evaluateExportCandidateCurrentnessInTransaction,
   loadExportCandidateCanonicalRepresentationInTransaction,
+  readCurrentExportCandidateForDraftInTransaction,
 });
 
 export const __exportCandidateRepositoryContract = Object.freeze({

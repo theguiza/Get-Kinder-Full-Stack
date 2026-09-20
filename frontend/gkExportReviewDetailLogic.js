@@ -216,6 +216,14 @@ export function toRenderModel(data) {
     // field is rendered by this page - see gkExportReviewDetail.jsx.
     exportReviewQueueStatus: data.exportReviewQueueStatus,
     exportReviewUpdatedAt: data.exportReviewUpdatedAt,
+    // Server-authoritative current-candidate recovery: the EXACT
+    // export_candidates id the backend resolved, this same read, from
+    // current governed state (organizationId + generatedContentDraftId +
+    // requestedExportAudience + the canonical fingerprint recomputed from
+    // current state) - null whenever no exact current-state candidate
+    // exists. Never a browser-remembered id carried over from an earlier
+    // POST response.
+    exportCandidateId: data.exportCandidateId ?? null,
     // Compatibility-only: the singular backend field collapses to null
     // whenever more than one manifest exists for this review item. This
     // page no longer uses this field to restore active workflow state - see

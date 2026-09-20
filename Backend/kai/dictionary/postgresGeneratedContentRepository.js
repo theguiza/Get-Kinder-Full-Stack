@@ -2652,6 +2652,13 @@ export async function evaluateGeneratedDraftExportReviewPacketInTransaction(
   // kaiExportManifestEligibilityValidators.js). Readiness is instead judged by
   // requiring that no gate OTHER than those expected-absent-pre-candidate
   // gates failed, mirroring evaluateExportReviewReadiness's same pattern.
+  // Note: the caller (kaiExportReviewService.js getGeneratedDraftExportReviewPacket)
+  // may, once it resolves an exact current-state export candidate for this
+  // draft, overwrite exportEligible/validatorResult on the object returned
+  // below with the real outcome of the existing authoritative eligibility
+  // evaluator for that exact candidate. This function's own computation here
+  // stays the pre-candidate baseline; it never fabricates a post-candidate
+  // outcome itself.
   const candidateBlockingFailedGates = (validatorResult.evidence?.failed_gates || [])
     .filter((code) => !EXPORT_REVIEW_READINESS_FAILED_GATES.includes(code));
   const candidateReadyToPrepare = exportReviewResolved

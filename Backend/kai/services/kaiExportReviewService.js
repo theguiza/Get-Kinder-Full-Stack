@@ -145,12 +145,34 @@ async function createDefaultExportReviewPacketDependencies() {
     loadExportManifestIdentityForReviewQueueItemInTransaction,
     loadExportManifestHistoryForReviewQueueItemInTransaction,
   } = await import("../dictionary/postgresExportManifestRepository.js");
+  const {
+    readCurrentExportCandidateForDraftInTransaction,
+  } = await import("../dictionary/postgresExportCandidateRepository.js");
+  const {
+    loadExportCandidateForAuthority,
+    createPostgresHumanAuthorityDecisionRepository,
+  } = await import("../dictionary/postgresHumanAuthorityDecisionRepository.js");
+  const {
+    evaluateFinalExportEligibilityInTransaction,
+  } = await import("./kaiFinalExportEligibilityGateService.js");
   return {
     runInTransaction: withTransaction,
     evaluatePacket: evaluateGeneratedDraftExportReviewPacketInTransaction,
     evaluator: evaluateClaimTraceabilityInTransaction,
     loadManifestIdentity: loadExportManifestIdentityForReviewQueueItemInTransaction,
     loadManifestHistory: loadExportManifestHistoryForReviewQueueItemInTransaction,
+    // Current-candidate recovery (accepted resolution contract): resolves
+    // the EXACT export_candidates row, if any, matching the draft's CURRENT
+    // canonical fingerprint - see postgresExportCandidateRepository.js. Never
+    // a latest/newest/created_at-ordered historical candidate.
+    resolveCurrentCandidate: readCurrentExportCandidateForDraftInTransaction,
+    // Existing authoritative eligibility composition (evaluates real
+    // human-authority effectiveness plus the real VAL-EXP-001 outcome for an
+    // exact candidate id) - reused unmodified, never duplicated, for the
+    // one exact candidate resolveCurrentCandidate above may recover.
+    evaluateFinalEligibility: evaluateFinalExportEligibilityInTransaction,
+    loadCandidateForAuthority: loadExportCandidateForAuthority,
+    humanAuthorityDecisionRepository: createPostgresHumanAuthorityDecisionRepository(),
   };
 }
 
@@ -316,13 +338,19 @@ const EXPORT_REVIEW_PACKET_WITH_MANIFEST_KEYS = new Set([
   ...EXPORT_REVIEW_PACKET_KEYS,
   "exportManifestId",
   "exportManifestHistory",
+  // Current-candidate recovery (accepted resolution contract): the EXACT
+  // export_candidates id resolved server-side, this same read, from current
+  // governed state - null whenever no exact current-state candidate exists.
+  // Never a browser-remembered id from an earlier POST response.
+  "exportCandidateId",
 ]);
 
 function isGeneratedDraftExportReviewPacketWithManifestDto(data) {
   if (!hasExactKeys(data, EXPORT_REVIEW_PACKET_WITH_MANIFEST_KEYS)) return false;
   if (!(data.exportManifestId === null || UUID_PATTERN.test(data.exportManifestId))) return false;
+  if (!(data.exportCandidateId === null || UUID_PATTERN.test(data.exportCandidateId))) return false;
   if (!isExportManifestHistoryDto(data.exportManifestHistory)) return false;
-  const { exportManifestId, exportManifestHistory, ...innerPacket } = data;
+  const { exportManifestId, exportManifestHistory, exportCandidateId, ...innerPacket } = data;
   return isGeneratedDraftExportReviewPacketDto(innerPacket);
 }
 
@@ -345,14 +373,21 @@ function isGeneratedDraftExportReviewPacketDto(data) {
   if (typeof data.candidateReadyToPrepare !== "boolean") return false;
   if (!isValidatorResultDto(data.validatorResult, data.generatedContentDraftId)) return false;
   if (data.exportEligible !== (data.validatorResult.severity === "pass")) return false;
-  // exportEligible reflects the FULL VAL-EXP-001 gate set (including
-  // finalGate/affirmative human authority, which are always evaluated false
-  // pre-candidate) and is therefore always false on this packet - it is
-  // informational only here, not a precondition for candidateReadyToPrepare.
-  // candidateReadyToPrepare instead reflects genuine pre-candidate readiness:
-  // export-review resolution, a current limitation snapshot, an authorized
-  // content type, and no VAL-EXP-001 gate failing other than the ones that
-  // are expected-absent before a candidate/authority exist (see
+  // exportEligible/validatorResult reflect the FULL VAL-EXP-001 gate set.
+  // Before an exact current-state export candidate exists, finalGate and
+  // affirmative human export authority cannot yet exist, so this packet's
+  // baseline computation (evaluateGeneratedDraftExportReviewPacketInTransaction)
+  // evaluates both hardcoded false and exportEligible is always false there -
+  // informational only, never a precondition for candidateReadyToPrepare.
+  // Once getGeneratedDraftExportReviewPacket below resolves an exact current
+  // candidate for this draft, it overwrites exportEligible/validatorResult,
+  // inside the same read-only transaction, with the real outcome from the
+  // existing authoritative eligibility evaluator for that exact candidate -
+  // never a second, independently-derived currentness or human-authority
+  // check. candidateReadyToPrepare instead reflects genuine pre-candidate
+  // readiness: export-review resolution, a current limitation snapshot, an
+  // authorized content type, and no VAL-EXP-001 gate failing other than the
+  // ones that are expected-absent before a candidate/authority exist (see
   // EXPORT_REVIEW_READINESS_FAILED_GATES in postgresGeneratedContentRepository.js).
   if (!Array.isArray(data.blocks) || data.blocks.length < 1 || data.blocks.length > 20) return false;
   for (const [index, block] of data.blocks.entries()) {
@@ -552,17 +587,27 @@ export async function getGeneratedDraftExportReviewPacket(input, dependencies = 
     || !dependencies.evaluatePacket
     || !dependencies.evaluator
     || !dependencies.loadManifestIdentity
-    || !dependencies.loadManifestHistory;
+    || !dependencies.loadManifestHistory
+    || !dependencies.resolveCurrentCandidate
+    || !dependencies.evaluateFinalEligibility
+    || !dependencies.loadCandidateForAuthority
+    || !dependencies.humanAuthorityDecisionRepository;
   const defaults = needsDefaults ? await createDefaultExportReviewPacketDependencies() : null;
   const runInTransaction = dependencies.runInTransaction || defaults.runInTransaction;
   const evaluatePacket = dependencies.evaluatePacket || defaults.evaluatePacket;
   const evaluator = dependencies.evaluator || defaults.evaluator;
   const loadManifestIdentity = dependencies.loadManifestIdentity || defaults.loadManifestIdentity;
   const loadManifestHistory = dependencies.loadManifestHistory || defaults.loadManifestHistory;
+  const resolveCurrentCandidate = dependencies.resolveCurrentCandidate || defaults.resolveCurrentCandidate;
+  const evaluateFinalEligibility = dependencies.evaluateFinalEligibility || defaults.evaluateFinalEligibility;
+  const loadCandidateForAuthority = dependencies.loadCandidateForAuthority || defaults.loadCandidateForAuthority;
+  const humanAuthorityDecisionRepository =
+    dependencies.humanAuthorityDecisionRepository || defaults.humanAuthorityDecisionRepository;
 
   let packetResult;
   let manifestIdentity;
   let manifestHistory;
+  let currentExportCandidateId = null;
   try {
     packetResult = await runInTransaction(async (tx) => {
       await tx.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY");
@@ -572,6 +617,50 @@ export async function getGeneratedDraftExportReviewPacket(input, dependencies = 
         exportReviewQueueItemId: input.exportReviewQueueItemId,
       }, evaluator);
       if (!inner?.ok) return inner;
+
+      // Current-candidate recovery (accepted resolution contract): the EXACT
+      // export_candidates row, if any, whose canonical fingerprint matches
+      // this draft's CURRENT governed state for this exact (organizationId,
+      // generatedContentDraftId, requestedAudience) identity - reusing the
+      // packet's own already-authoritative requestedExportAudience, never a
+      // second audience-selection rule. Never a latest/newest/created_at
+      // heuristic over candidate history; absence is a normal read result.
+      const candidateResult = await resolveCurrentCandidate(tx, {
+        organizationId: input.organizationId,
+        generatedContentDraftId: input.generatedContentDraftId,
+        requestedAudience: inner.data.requestedExportAudience,
+      });
+      if (!candidateResult?.ok) return candidateResult;
+      currentExportCandidateId = candidateResult.data.exportCandidateId;
+
+      if (currentExportCandidateId) {
+        // An exact current-state candidate exists: overwrite the packet's
+        // exportEligible/validatorResult, in this same read-only
+        // transaction, with the real outcome of the existing authoritative
+        // eligibility evaluator for that exact candidate - real finalGate,
+        // real human export authority effectiveness, real currentness. This
+        // never duplicates VAL-EXP-001, human-authority derivation, or
+        // candidate-currentness logic.
+        const evaluateAuthorityEffectiveness = (_authorityTx, effectivenessInput) =>
+          humanAuthorityDecisionRepository.evaluateEffectiveness(effectivenessInput);
+        const eligibilityResult = await evaluateFinalEligibility(tx, {
+          organizationId: input.organizationId,
+          exportCandidateId: currentExportCandidateId,
+          exportReviewQueueItemId: input.exportReviewQueueItemId,
+        }, {
+          evaluatePacket,
+          evaluator,
+          loadCandidate: loadCandidateForAuthority,
+          evaluateAuthorityEffectiveness,
+        });
+        if (!eligibilityResult?.ok) return eligibilityResult;
+        inner.data = {
+          ...inner.data,
+          exportEligible: eligibilityResult.data.finalExportEligible,
+          validatorResult: eligibilityResult.data.validatorResult,
+        };
+      }
+
       // Durable read recovery (P3-20 binding), same read-only transaction as
       // the unchanged packet composition above - never a separate best-
       // effort follow-up, and only reached once that composition itself
@@ -604,6 +693,7 @@ export async function getGeneratedDraftExportReviewPacket(input, dependencies = 
     ...packetResult.data,
     exportManifestId: manifestIdentity?.exportManifestId ?? null,
     exportManifestHistory: manifestHistory?.exportManifestHistory ?? [],
+    exportCandidateId: currentExportCandidateId ?? null,
   };
   if (!isGeneratedDraftExportReviewPacketWithManifestDto(projected)) {
     return buildKaiError("system_error", { data: null });
