@@ -27,6 +27,7 @@ import {
   getJson,
   grantFinalReleaseAuthorityRequest,
   limitationSnapshotPath,
+  nextExportCandidateIdForPacketOutcome,
   packetPath,
   revokeFinalReleaseAuthorityRequest,
   startPath,
@@ -210,8 +211,10 @@ export default function GkExportReviewDetail({
     try {
       const result = await getJson(packetPath(organizationId, generatedContentDraftId, exportReviewQueueItemId));
       if (!mountedRef.current) return;
+      const decided = decideOutcome(result);
       setLoading(false);
-      setOutcome(decideOutcome(result));
+      setOutcome(decided);
+      setExportCandidateId((previous) => nextExportCandidateIdForPacketOutcome(decided, previous));
     } catch {
       if (!mountedRef.current) return;
       setLoading(false);

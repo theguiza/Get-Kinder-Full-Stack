@@ -7,6 +7,7 @@ import {
   errorText,
   toRenderModel,
   decideOutcome,
+  nextExportCandidateIdForPacketOutcome,
   SAFE_ERROR_CODES,
   getJson,
 } from "../frontend/gkExportReviewDetailLogic.js";
@@ -314,6 +315,77 @@ test("P3-08 route is registered with existing site authentication and no other a
   // route (the internal review cockpit host page) after this P3-08 route was
   // accepted; this assertion is updated additively to reflect that.
   assert.equal(matches.length, 2);
+});
+
+test("candidate reload recovery: a packet load carrying candidate A hydrates the component's active candidate to A", () => {
+  const outcome = decideOutcome({
+    statusCode: 200,
+    body: { ok: true, data: { ...validDto, exportCandidateId: "00000000-0000-4000-8000-000000000801" } },
+  });
+  assert.equal(
+    nextExportCandidateIdForPacketOutcome(outcome, null),
+    "00000000-0000-4000-8000-000000000801",
+  );
+});
+
+test("candidate reload recovery: a packet load carrying no current candidate clears any stale local candidate id, never fabricating or preserving it", () => {
+  const outcome = decideOutcome({ statusCode: 200, body: { ok: true, data: validDto } });
+  assert.equal(outcome.model.exportCandidateId, null);
+  assert.equal(
+    nextExportCandidateIdForPacketOutcome(outcome, "00000000-0000-4000-8000-000000000801"),
+    null,
+  );
+});
+
+test("candidate reload recovery: a replacement packet candidate B supersedes a previously held candidate A", () => {
+  const outcome = decideOutcome({
+    statusCode: 200,
+    body: { ok: true, data: { ...validDto, exportCandidateId: "00000000-0000-4000-8000-000000000802" } },
+  });
+  assert.equal(
+    nextExportCandidateIdForPacketOutcome(outcome, "00000000-0000-4000-8000-000000000801"),
+    "00000000-0000-4000-8000-000000000802",
+  );
+});
+
+test("candidate reload recovery: a failed packet reload leaves the existing in-session candidate id untouched", () => {
+  const outcome = decideOutcome({ statusCode: 500, body: null });
+  assert.equal(outcome.kind, "error");
+  assert.equal(
+    nextExportCandidateIdForPacketOutcome(outcome, "00000000-0000-4000-8000-000000000801"),
+    "00000000-0000-4000-8000-000000000801",
+  );
+});
+
+test("candidate reload recovery: never derived from exportManifestHistory - a history entry's exportCandidateId is ignored when the packet's own current candidate is null", () => {
+  const outcome = decideOutcome({
+    statusCode: 200,
+    body: {
+      ok: true,
+      data: {
+        ...validDto,
+        exportCandidateId: null,
+        exportManifestHistory: [{
+          exportManifestId: "00000000-0000-4000-8000-000000000901",
+          exportCandidateId: "00000000-0000-4000-8000-000000000803",
+          createdAt: "2026-09-08T10:00:00.000Z",
+        }],
+      },
+    },
+  });
+  assert.equal(
+    nextExportCandidateIdForPacketOutcome(outcome, "00000000-0000-4000-8000-000000000803"),
+    null,
+  );
+});
+
+test("candidate reload recovery: the component wires the packet load to the reload-recovery reducer, never to a raw outcome.model assignment", () => {
+  const source = readFileSync("frontend/gkExportReviewDetail.jsx", "utf8");
+  assert.match(
+    source,
+    /setExportCandidateId\(\s*\(previous\)\s*=>\s*nextExportCandidateIdForPacketOutcome\(decided,\s*previous\)\s*\)/,
+  );
+  assert.doesNotMatch(source, /setExportCandidateId\(\s*(decided\.model|outcome\.model)\.exportCandidateId\s*\)/);
 });
 
 test("P3-08 entry.jsx mounts exactly one new render function and leaves existing render functions intact", () => {

@@ -273,6 +273,19 @@ export function decideOutcome(result) {
   return { kind: "error", message: errorText(result) };
 }
 
+// Server-authoritative candidate reload recovery: a successful packet read
+// always replaces the local candidate id with the exact backend-resolved
+// current candidate for that read (or null, clearing a stale one) - never
+// derived from exportManifestHistory, and never a browser-remembered id
+// carried over from an earlier POST response or an earlier packet read. A
+// non-success outcome (network/server error) leaves the existing in-session
+// candidate id untouched, since a failed reload must not destroy state the
+// user already established this session.
+export function nextExportCandidateIdForPacketOutcome(outcome, previousExportCandidateId) {
+  if (outcome?.kind !== "success") return previousExportCandidateId ?? null;
+  return outcome.model?.exportCandidateId ?? null;
+}
+
 // P3-12: the Start Review control shows only for the one queue/review state
 // pair this ticket authorizes. Every other combination (including
 // in_progress) shows none.

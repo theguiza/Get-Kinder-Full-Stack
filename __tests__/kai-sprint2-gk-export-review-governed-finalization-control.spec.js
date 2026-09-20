@@ -229,3 +229,31 @@ test("effective human authority exposes an explicit Revoke Final Release Authori
   assert.match(jsxSource, /className="gk-export-review-revoke-authority-button"/);
   assert.match(jsxSource, /onClick=\{handleRevokeFinalReleaseAuthority\}/);
 });
+
+test("candidate-preparation POST response still sets the active candidate directly from decideCreateExportCandidateResult, unchanged by reload recovery", () => {
+  assert.match(
+    jsxSource,
+    /if \(decided\.kind === "success"\) \{\s*\n\s*if \(mountedRef\.current\) setExportCandidateId\(decided\.exportCandidateId\);/,
+  );
+});
+
+test("control visibility (Confirm Limitation Snapshot, Prepare/Grant/Revoke/Finalize) is derived from the single exportCandidateId state, which packet reload now hydrates - no separate reload-only candidate variable exists", () => {
+  assert.match(jsxSource, /showConfirmSnapshotControl\s*=\s*canConfirmLimitationSnapshot\(model\)\s*&&\s*!exportCandidateId\s*&&\s*!exportManifestId/);
+  assert.match(jsxSource, /showPrepareCandidateControl\s*=\s*canPrepareExportCandidate\(model\)\s*&&\s*!exportCandidateId\s*&&\s*!exportManifestId/);
+  assert.match(jsxSource, /showGrantAuthorityControl\s*=\s*!!exportCandidateId\s*&&\s*!authorityEffective\s*&&\s*!exportManifestId/);
+  assert.match(jsxSource, /showRevokeAuthorityControl\s*=\s*!!exportCandidateId\s*&&\s*authorityEffective\s*&&\s*!exportManifestId/);
+  assert.match(jsxSource, /showFinalizeExportControl\s*=\s*!!exportCandidateId\s*&&\s*authorityEffective\s*&&\s*!exportManifestId/);
+  assert.doesNotMatch(jsxSource, /recoveredExportCandidateId|reloadedExportCandidateId|hydratedExportCandidateId/);
+});
+
+// No existing packet field represents final-release-authority effectiveness
+// (only the grant/revoke POST response transiently returns `effective` -
+// never persisted onto or re-exposed by the GET packet). Reload recovery is
+// therefore limited to exportCandidateId; authorityEffective is deliberately
+// NOT hydrated from exportEligible/validatorSeverity or any other packet
+// field, since no existing contract defines that projection and inventing
+// one is out of scope for this repair.
+test("authorityEffective is never derived from exportEligible/validatorSeverity or any other packet field - no invented authority-hydration contract", () => {
+  assert.doesNotMatch(jsxSource, /setAuthorityEffective\(\s*model\??\.(exportEligible|validatorSeverity)/);
+  assert.doesNotMatch(jsxSource, /setAuthorityEffective\(\s*(decided|outcome)\.model/);
+});
