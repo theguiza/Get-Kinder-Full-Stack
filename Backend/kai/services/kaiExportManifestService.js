@@ -3,7 +3,7 @@ import {
   isKaiGenerationEnabled,
   isKaiPublicExportEnabled,
 } from "../config/kaiSprint2Config.js";
-import { buildKaiError } from "../errors/kaiErrors.js";
+import { buildKaiError, unstructuredExportManifestDiagnosticBlocker } from "../errors/kaiErrors.js";
 import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationService.js";
 import {
   CREATE_EXPORT_MANIFEST_ALLOWED_ROLES,
@@ -72,7 +72,14 @@ export async function createExportManifest(input, dependencies = {}) {
   if (!isKaiSprint2Enabled(env)) return buildKaiError("feature_disabled", { data: null });
   if (!isKaiGenerationEnabled(env)) return buildKaiError("feature_disabled", { data: null });
   if (!isKaiPublicExportEnabled(env)) return buildKaiError("feature_disabled", { data: null });
-  if (!isCreateExportManifestInput(input)) return buildKaiError("validation_blocker", { data: null });
+  if (!isCreateExportManifestInput(input)) {
+    return buildKaiError("validation_blocker", {
+      data: null,
+      blockers: unstructuredExportManifestDiagnosticBlocker({
+        failureStage: "service_input_contract",
+      }),
+    });
+  }
   if (!isMappedHumanActor(input.actorContext)) return buildKaiError("authorization_denied", { data: null });
 
   const auth = validateActorCanPerformOperation(

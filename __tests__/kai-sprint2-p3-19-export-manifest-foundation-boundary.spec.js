@@ -12,6 +12,10 @@ import {
   createExportManifest,
   __exportManifestServiceTestables,
 } from "../Backend/kai/services/kaiExportManifestService.js";
+import {
+  unstructuredExportManifestDiagnosticBlocker,
+  exportManifestConstraintDiagnosticBlocker,
+} from "../Backend/kai/errors/kaiErrors.js";
 
 const ORG = "00000000-0000-4000-8000-000000000001";
 const OTHER_ORG = "00000000-0000-4000-8000-000000000002";
@@ -463,6 +467,272 @@ test("Test 7b: the repository's final fallback preserves a real blocker unchange
 
   const notFound = { ok: false, data: null, error: { code: "not_found", status: 404 } };
   assert.deepEqual(applyEligibilityFailureFallback(notFound), notFound);
+});
+
+// --- Ordinary export-manifest bare-422 diagnostic: the three remaining bare
+// validation_blocker branches in createExportManifest itself (not the
+// eligibility chain above) must also self-diagnose instead of returning
+// { blockers: [] }. -------------------------------------------------------
+
+test("invalid repository input produces a single VAL-SYS-P0-001 blocker with failure_stage=repository_input_contract", async () => {
+  const repository = manifestRepository();
+  const result = await repository.createExportManifest(
+    { organizationId: ORG },
+    { ...eligibilityDeps(), metadataOnlyAudit: manifestMetadataOnlyAudit },
+  );
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "validation_blocker");
+  assert.equal(result.blockers.length, 1);
+  assert.equal(result.blockers[0].validator_key, "VAL-SYS-P0-001");
+  assert.equal(result.blockers[0].blocking_reason, "unstructured_export_manifest_failure");
+  assert.equal(result.blockers[0].evidence.failure_stage, "repository_input_contract");
+});
+
+test("missing metadataOnlyAudit dependency produces a single VAL-SYS-P0-001 blocker with failure_stage=metadata_only_audit_dependency", async () => {
+  const repository = manifestRepository();
+  const result = await repository.createExportManifest(baseInput(), { ...eligibilityDeps() });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "validation_blocker");
+  assert.equal(result.blockers.length, 1);
+  assert.equal(result.blockers[0].validator_key, "VAL-SYS-P0-001");
+  assert.equal(result.blockers[0].blocking_reason, "unstructured_export_manifest_failure");
+  assert.equal(result.blockers[0].evidence.failure_stage, "metadata_only_audit_dependency");
+});
+
+test("a 23503/22P02/23514 export-manifest insert failure produces a single VAL-SYS-P0-001 blocker carrying the exact upstream Postgres code", async () => {
+  for (const pgCode of ["23503", "22P02", "23514"]) {
+    const repository = createPostgresExportManifestRepository({
+      runInTransaction: async (callback) => callback({
+        async query(sql) {
+          if (/INSERT INTO kai\.export_manifests/.test(sql)) {
+            const error = new Error("constraint violated");
+            error.code = pgCode;
+            throw error;
+          }
+          return { rows: [] };
+        },
+      }),
+    });
+    const result = await repository.createExportManifest(baseInput(), {
+      ...eligibilityDeps(),
+      metadataOnlyAudit: manifestMetadataOnlyAudit,
+    });
+
+    assert.equal(result.ok, false, pgCode);
+    assert.equal(result.error.code, "validation_blocker", pgCode);
+    assert.equal(result.blockers.length, 1, pgCode);
+    assert.equal(result.blockers[0].validator_key, "VAL-SYS-P0-001", pgCode);
+    assert.equal(result.blockers[0].blocking_reason, "unstructured_export_manifest_failure", pgCode);
+    assert.equal(result.blockers[0].evidence.failure_stage, "export_manifest_insert", pgCode);
+    assert.equal(result.blockers[0].evidence.upstream_error_code, pgCode, pgCode);
+  }
+});
+
+function repositoryWithInsertError(pgCode, constraintName) {
+  return createPostgresExportManifestRepository({
+    runInTransaction: async (callback) => callback({
+      async query(sql) {
+        if (/INSERT INTO kai\.export_manifests/.test(sql)) {
+          const error = new Error("constraint violated");
+          error.code = pgCode;
+          error.constraint = constraintName;
+          // Adversarial: raw postgres detail/message text must never leak
+          // into the resulting blocker even though it is present on the
+          // thrown driver error, exactly as node-postgres would populate it.
+          error.detail =
+            `Key (export_candidate_id)=(${CANDIDATE}) is not present in table "export_candidates".`;
+          throw error;
+        }
+        return { rows: [] };
+      },
+    }),
+  });
+}
+
+const KNOWN_CONSTRAINT_CASES = [
+  {
+    constraintName: "export_manifests_p3_19_authority_decision_fk",
+    pgCode: "23503",
+    objectCode: "export_manifest_authority_reference",
+    blockingReason: "export_authority_reference_invalid",
+    constraintKey: "authority_decision_fk",
+  },
+  {
+    constraintName: "export_manifests_p3_19_candidate_fk",
+    pgCode: "23503",
+    objectCode: "export_manifest_candidate_reference",
+    blockingReason: "export_candidate_reference_invalid",
+    constraintKey: "candidate_fk",
+  },
+  {
+    constraintName: "export_manifests_p3_20_review_queue_item_fk",
+    pgCode: "23503",
+    objectCode: "export_manifest_review_reference",
+    blockingReason: "export_review_reference_invalid",
+    constraintKey: "review_queue_item_fk",
+  },
+  {
+    constraintName: "export_manifests_p3_19_canonical_fingerprint_check",
+    pgCode: "23514",
+    objectCode: "export_manifest_canonical_fingerprint",
+    blockingReason: "canonical_fingerprint_invalid",
+    constraintKey: "canonical_fingerprint_check",
+  },
+];
+
+for (const testCase of KNOWN_CONSTRAINT_CASES) {
+  test(`a ${testCase.pgCode} insert failure on the known constraint ${testCase.constraintName} produces an actionable ${testCase.blockingReason} blocker`, async () => {
+    const repository = repositoryWithInsertError(testCase.pgCode, testCase.constraintName);
+    const result = await repository.createExportManifest(baseInput(), {
+      ...eligibilityDeps(),
+      metadataOnlyAudit: manifestMetadataOnlyAudit,
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "validation_blocker");
+    assert.equal(result.blockers.length, 1);
+    const [blocker] = result.blockers;
+    assert.equal(blocker.validator_key, "VAL-SYS-P0-001");
+    assert.equal(blocker.object_type, "export_manifest");
+    assert.equal(blocker.object_code, testCase.objectCode);
+    assert.equal(blocker.blocking_reason, testCase.blockingReason);
+    assert.equal(blocker.evidence.failure_stage, "export_manifest_insert");
+    assert.equal(blocker.evidence.upstream_error_code, testCase.pgCode);
+    assert.equal(blocker.evidence.constraint_key, testCase.constraintKey);
+
+    // Raw database internals must never reach the blocker.
+    assert.doesNotMatch(JSON.stringify(blocker), /export_candidates|is not present in table|constraint violated/i);
+    assert.doesNotMatch(JSON.stringify(blocker), new RegExp(testCase.constraintName));
+  });
+}
+
+test("a 23503 insert failure on an unknown constraint falls back to the existing generic export_manifest_insert diagnostic", async () => {
+  const repository = repositoryWithInsertError("23503", "some_future_unmapped_fk");
+  const result = await repository.createExportManifest(baseInput(), {
+    ...eligibilityDeps(),
+    metadataOnlyAudit: manifestMetadataOnlyAudit,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "validation_blocker");
+  assert.equal(result.blockers.length, 1);
+  assert.equal(result.blockers[0].blocking_reason, "unstructured_export_manifest_failure");
+  assert.equal(result.blockers[0].evidence.failure_stage, "export_manifest_insert");
+  assert.equal(result.blockers[0].evidence.upstream_error_code, "23503");
+  assert.equal(Object.hasOwn(result.blockers[0].evidence, "constraint_key"), false);
+});
+
+test("a 23514 insert failure on an unknown constraint falls back to the existing generic export_manifest_insert diagnostic", async () => {
+  const repository = repositoryWithInsertError("23514", "some_future_unmapped_check");
+  const result = await repository.createExportManifest(baseInput(), {
+    ...eligibilityDeps(),
+    metadataOnlyAudit: manifestMetadataOnlyAudit,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "validation_blocker");
+  assert.equal(result.blockers.length, 1);
+  assert.equal(result.blockers[0].blocking_reason, "unstructured_export_manifest_failure");
+  assert.equal(result.blockers[0].evidence.failure_stage, "export_manifest_insert");
+  assert.equal(result.blockers[0].evidence.upstream_error_code, "23514");
+  assert.equal(Object.hasOwn(result.blockers[0].evidence, "constraint_key"), false);
+});
+
+test("a 22P02 insert failure never attempts constraint mapping, even when a known constraint name is present on the error", async () => {
+  const repository = repositoryWithInsertError("22P02", "export_manifests_p3_19_authority_decision_fk");
+  const result = await repository.createExportManifest(baseInput(), {
+    ...eligibilityDeps(),
+    metadataOnlyAudit: manifestMetadataOnlyAudit,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "validation_blocker");
+  assert.equal(result.blockers.length, 1);
+  assert.equal(result.blockers[0].blocking_reason, "unstructured_export_manifest_failure");
+  assert.equal(result.blockers[0].evidence.failure_stage, "export_manifest_insert");
+  assert.equal(result.blockers[0].evidence.upstream_error_code, "22P02");
+  assert.equal(Object.hasOwn(result.blockers[0].evidence, "constraint_key"), false);
+});
+
+test("an unexpected database error (not 23503/22P02/23514/23505/25001) remains a system_error with no blockers", async () => {
+  const repository = createPostgresExportManifestRepository({
+    runInTransaction: async (callback) => callback({
+      async query(sql) {
+        if (/INSERT INTO kai\.export_manifests/.test(sql)) {
+          const error = new Error("connection terminated unexpectedly");
+          error.code = "57P01";
+          throw error;
+        }
+        return { rows: [] };
+      },
+    }),
+  });
+  const result = await repository.createExportManifest(baseInput(), {
+    ...eligibilityDeps(),
+    metadataOnlyAudit: manifestMetadataOnlyAudit,
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "system_error");
+  assert.equal(Object.hasOwn(result, "blockers"), false);
+});
+
+test("exportManifestConstraintDiagnosticBlocker returns null for an unknown constraint name and for a non-string constraint name", () => {
+  assert.equal(exportManifestConstraintDiagnosticBlocker({ upstreamErrorCode: "23503", constraintName: "not_a_real_constraint" }), null);
+  assert.equal(exportManifestConstraintDiagnosticBlocker({ upstreamErrorCode: "23503", constraintName: undefined }), null);
+  assert.equal(exportManifestConstraintDiagnosticBlocker({ upstreamErrorCode: "23503", constraintName: null }), null);
+});
+
+test("exportManifestConstraintDiagnosticBlocker never exposes the raw constraint name, only the mapped constraint_key", () => {
+  const [blocker] = exportManifestConstraintDiagnosticBlocker({
+    upstreamErrorCode: "23503",
+    constraintName: "export_manifests_p3_19_authority_decision_fk",
+  });
+  assert.equal(blocker.evidence.constraint_key, "authority_decision_fk");
+  assert.doesNotMatch(JSON.stringify(blocker), /export_manifests_p3_19_authority_decision_fk/);
+});
+
+test("the export-manifest diagnostic blocker never carries a raw error message, SQL, stack, or the raw error object", () => {
+  const [blocker] = unstructuredExportManifestDiagnosticBlocker({
+    failureStage: "export_manifest_insert",
+    upstreamErrorCode: "23503",
+  });
+
+  assert.deepEqual(Object.keys(blocker).sort(), [
+    "blocking_reason",
+    "evidence",
+    "message",
+    "object_type",
+    "required_fix",
+    "severity",
+    "validator_key",
+  ]);
+  assert.deepEqual(Object.keys(blocker.evidence).sort(), ["failure_stage", "upstream_error_code"]);
+  assert.equal(typeof blocker.message, "string");
+  assert.doesNotMatch(blocker.message, /INSERT|SELECT|constraint|duplicate key/i);
+
+  const withUnsafeUpstream = unstructuredExportManifestDiagnosticBlocker({
+    failureStage: "export_manifest_insert",
+    upstreamErrorCode: 'duplicate key value violates unique constraint "export_manifests_pkey"',
+  });
+  assert.equal(Object.hasOwn(withUnsafeUpstream[0].evidence, "upstream_error_code"), false);
+});
+
+test("an input that fails the service isCreateExportManifestInput contract produces a single VAL-SYS-P0-001 blocker with failure_stage=service_input_contract, before the repository is ever called", async () => {
+  const { deps, calls } = serviceDeps();
+  const result = await createExportManifest({ organizationId: ORG }, deps);
+
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "validation_blocker");
+  assert.equal(result.data, null);
+  assert.equal(Array.isArray(result.blockers), true);
+  assert.equal(result.blockers.length, 1);
+  assert.equal(result.blockers[0].validator_key, "VAL-SYS-P0-001");
+  assert.equal(result.blockers[0].blocking_reason, "unstructured_export_manifest_failure");
+  assert.equal(result.blockers[0].evidence.failure_stage, "service_input_contract");
+  assert.equal(calls.createExportManifest, 0);
 });
 
 test("Test 5b: an eligible candidate's failure result never leaks into a passing createExportManifest service call", async () => {

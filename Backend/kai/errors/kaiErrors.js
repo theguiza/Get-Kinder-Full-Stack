@@ -197,6 +197,142 @@ export function unstructuredExportEligibilityDiagnosticBlocker({
   }];
 }
 
+const EXPORT_MANIFEST_DIAGNOSTIC_FAILURE_STAGES = new Set([
+  "service_input_contract",
+  "repository_input_contract",
+  "metadata_only_audit_dependency",
+  "export_manifest_insert",
+]);
+
+// Postgres SQLSTATE codes (23503, 22P02, 23514, ...) are five characters of
+// digits/uppercase letters - never matched by DIAGNOSTIC_MACHINE_CODE_PATTERN
+// (which requires a leading lowercase letter), so they need their own check.
+const POSTGRES_SQLSTATE_PATTERN = /^[0-9A-Z]{5}$/;
+
+// Shared fail-closed diagnostic for the three remaining bare
+// { error.code: "validation_blocker", blockers: undefined } branches in
+// postgresExportManifestRepository's createExportManifest: an invalid
+// repository input, a missing metadataOnlyAudit dependency, or a
+// constrained-integrity insert failure (23503/22P02/23514). Same bounded,
+// machine-code-only shape as unstructuredExportEligibilityDiagnosticBlocker
+// above - never a business reason, an id, SQL, or raw upstream detail.
+export function unstructuredExportManifestDiagnosticBlocker({
+  failureStage,
+  upstreamErrorCode,
+} = {}) {
+  const safeStage = typeof failureStage === "string" && EXPORT_MANIFEST_DIAGNOSTIC_FAILURE_STAGES.has(failureStage)
+    ? failureStage
+    : "export_manifest_insert";
+  const safeUpstreamErrorCode =
+    typeof upstreamErrorCode === "string"
+    && (DIAGNOSTIC_MACHINE_CODE_PATTERN.test(upstreamErrorCode) || POSTGRES_SQLSTATE_PATTERN.test(upstreamErrorCode))
+      ? upstreamErrorCode
+      : null;
+  return [{
+    validator_key: "VAL-SYS-P0-001",
+    severity: "blocker",
+    object_type: "export_manifest",
+    message: "Export manifest creation was blocked before a structured validator result was produced.",
+    blocking_reason: "unstructured_export_manifest_failure",
+    required_fix: "Use the diagnostic evidence to identify the failing export-manifest stage.",
+    evidence: {
+      failure_stage: safeStage,
+      ...(safeUpstreamErrorCode ? { upstream_error_code: safeUpstreamErrorCode } : {}),
+    },
+  }];
+}
+
+// USER_CONFIRMED production kai.export_manifests constraint names (from an
+// owner-supplied pgAdmin catalog result), used only as an internal
+// exact-match allowlist - the raw constraint name is never serialized to the
+// API client. Each entry maps to the safe, machine-readable classification
+// the client is allowed to see.
+const EXPORT_MANIFEST_CONSTRAINT_DIAGNOSTICS = new Map([
+  ["export_manifests_p3_19_authority_decision_fk", {
+    objectCode: "export_manifest_authority_reference",
+    message: "The selected export authority decision is not valid for this export candidate.",
+    blockingReason: "export_authority_reference_invalid",
+    requiredFix:
+      "Re-evaluate the current export authority decision for this organization and export candidate, then retry export finalization.",
+    constraintKey: "authority_decision_fk",
+  }],
+  ["export_manifests_p3_19_candidate_fk", {
+    objectCode: "export_manifest_candidate_reference",
+    message: "The export candidate referenced by this export manifest is not valid.",
+    blockingReason: "export_candidate_reference_invalid",
+    requiredFix: "Re-evaluate the export candidate for this organization, then retry export finalization.",
+    constraintKey: "candidate_fk",
+  }],
+  ["export_manifests_p3_20_review_queue_item_fk", {
+    objectCode: "export_manifest_review_reference",
+    message: "The export review queue item referenced by this export manifest is not valid.",
+    blockingReason: "export_review_reference_invalid",
+    requiredFix:
+      "Re-evaluate the export review queue item for this organization and export candidate, then retry export finalization.",
+    constraintKey: "review_queue_item_fk",
+  }],
+  ["export_manifests_p3_19_canonical_fingerprint_check", {
+    objectCode: "export_manifest_canonical_fingerprint",
+    message: "The computed export manifest fingerprint is not valid.",
+    blockingReason: "canonical_fingerprint_invalid",
+    requiredFix: "Retry export finalization; if this recurs, escalate it as a system defect.",
+    constraintKey: "canonical_fingerprint_check",
+  }],
+  ["export_manifests_p3_19_created_by_type_check", {
+    objectCode: "export_manifest_actor_type",
+    message: "The export manifest actor type is not valid.",
+    blockingReason: "export_manifest_actor_type_invalid",
+    requiredFix: "Retry export finalization as a mapped human actor.",
+    constraintKey: "created_by_type_check",
+  }],
+  ["export_manifests_p3_19_decision_type_check", {
+    objectCode: "export_manifest_authority_decision_type",
+    message: "The effective export authority decision type is not valid.",
+    blockingReason: "export_authority_decision_type_invalid",
+    requiredFix:
+      "Re-evaluate the current export authority decision for this organization and export candidate, then retry export finalization.",
+    constraintKey: "decision_type_check",
+  }],
+  ["export_manifests_p3_19_fingerprint_contract_version_check", {
+    objectCode: "export_manifest_fingerprint_contract_version",
+    message: "The export manifest fingerprint contract version is not valid.",
+    blockingReason: "fingerprint_contract_version_invalid",
+    requiredFix: "Retry export finalization; if this recurs, escalate it as a system defect.",
+    constraintKey: "fingerprint_contract_version_check",
+  }],
+]);
+
+// Actionable export-manifest insert diagnostic for a known constraint. Returns
+// null (never a blocker) when `constraintName` is not an exact match in the
+// USER_CONFIRMED allowlist above, so callers fall back to the existing
+// generic unstructuredExportManifestDiagnosticBlocker for every unknown or
+// missing constraint identifier. The raw constraint name is only ever used
+// as a lookup key here; only the mapped constraintKey (a short, bounded,
+// pre-declared machine code) is ever attached to the returned evidence.
+export function exportManifestConstraintDiagnosticBlocker({ upstreamErrorCode, constraintName } = {}) {
+  if (typeof constraintName !== "string") return null;
+  const mapping = EXPORT_MANIFEST_CONSTRAINT_DIAGNOSTICS.get(constraintName);
+  if (!mapping) return null;
+  const safeUpstreamErrorCode =
+    typeof upstreamErrorCode === "string" && POSTGRES_SQLSTATE_PATTERN.test(upstreamErrorCode)
+      ? upstreamErrorCode
+      : null;
+  return [{
+    validator_key: "VAL-SYS-P0-001",
+    severity: "blocker",
+    object_type: "export_manifest",
+    object_code: mapping.objectCode,
+    message: mapping.message,
+    blocking_reason: mapping.blockingReason,
+    required_fix: mapping.requiredFix,
+    evidence: {
+      failure_stage: "export_manifest_insert",
+      ...(safeUpstreamErrorCode ? { upstream_error_code: safeUpstreamErrorCode } : {}),
+      constraint_key: mapping.constraintKey,
+    },
+  }];
+}
+
 // True exactly when `result` is the unstructured-blocker shape this repair
 // targets: ok:false, error.code validation_blocker, and no real blocker
 // already attached (Rule A elsewhere always preserves a real blocker as-is).

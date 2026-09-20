@@ -422,6 +422,191 @@ test("Test 8 (HTTP): the unstructured export-eligibility diagnostic blocker reac
   assert.notDeepEqual(response.body.blockers, []);
 });
 
+test("Test 9 (HTTP): the ordinary export-manifest bare-422 diagnostic (repository-side, not eligibility) reaches the HTTP response", async (t) => {
+  const scenario = {
+    authenticated: true,
+    actorContext: gkAdminActorContext,
+    serviceCalls: [],
+    dependencyCalls: [],
+    result: {
+      ok: false,
+      error: { code: "validation_blocker" },
+      data: null,
+      blockers: [{
+        validator_key: "VAL-SYS-P0-001",
+        severity: "blocker",
+        object_type: "export_manifest",
+        message: "Export manifest creation was blocked before a structured validator result was produced.",
+        blocking_reason: "unstructured_export_manifest_failure",
+        required_fix: "Use the diagnostic evidence to identify the failing export-manifest stage.",
+        evidence: {
+          failure_stage: "export_manifest_insert",
+          upstream_error_code: "23503",
+        },
+      }],
+    },
+  };
+  const { server, close } = await startServer(scenario);
+  t.after(close);
+  const path = `${basePath}/admin/organizations/${ORG}/export-candidates/${CANDIDATE}/export-manifests`;
+
+  const response = await requestJson(server, path, { export_review_queue_item_id: QUEUE_ITEM });
+
+  assert.equal(response.statusCode, 422);
+  assert.equal(response.body.error.code, "validation_blocker");
+  assert.equal(response.body.blockers.length, 1);
+  assert.equal(response.body.blockers[0].validator_key, "VAL-SYS-P0-001");
+  assert.equal(response.body.blockers[0].blocking_reason, "unstructured_export_manifest_failure");
+  assert.equal(response.body.blockers[0].evidence.failure_stage, "export_manifest_insert");
+  assert.equal(response.body.blockers[0].evidence.upstream_error_code, "23503");
+});
+
+test("Test 9c (HTTP): the ordinary export-manifest bare-422 diagnostic (service-side input contract) reaches the HTTP response", async (t) => {
+  const scenario = {
+    authenticated: true,
+    actorContext: gkAdminActorContext,
+    serviceCalls: [],
+    dependencyCalls: [],
+    result: {
+      ok: false,
+      error: { code: "validation_blocker" },
+      data: null,
+      blockers: [{
+        validator_key: "VAL-SYS-P0-001",
+        severity: "blocker",
+        object_type: "export_manifest",
+        message: "Export manifest creation was blocked before a structured validator result was produced.",
+        blocking_reason: "unstructured_export_manifest_failure",
+        required_fix: "Use the diagnostic evidence to identify the failing export-manifest stage.",
+        evidence: {
+          failure_stage: "service_input_contract",
+        },
+      }],
+    },
+  };
+  const { server, close } = await startServer(scenario);
+  t.after(close);
+  const path = `${basePath}/admin/organizations/${ORG}/export-candidates/${CANDIDATE}/export-manifests`;
+
+  const response = await requestJson(server, path, { export_review_queue_item_id: QUEUE_ITEM });
+
+  assert.equal(response.statusCode, 422);
+  assert.equal(response.body.error.code, "validation_blocker");
+  assert.equal(response.body.blockers.length, 1);
+  assert.equal(response.body.blockers[0].validator_key, "VAL-SYS-P0-001");
+  assert.equal(response.body.blockers[0].blocking_reason, "unstructured_export_manifest_failure");
+  assert.equal(response.body.blockers[0].evidence.failure_stage, "service_input_contract");
+});
+
+test("service error.message survives for an expected service error (validation_blocker)", async (t) => {
+  const scenario = {
+    authenticated: true,
+    actorContext: gkAdminActorContext,
+    serviceCalls: [],
+    dependencyCalls: [],
+    result: {
+      ok: false,
+      error: { code: "validation_blocker", status: 422, message: "SPECIFIC_SAFE_TEST_MESSAGE" },
+      data: null,
+      blockers: [],
+    },
+  };
+  const { server, close } = await startServer(scenario);
+  t.after(close);
+  const path = `${basePath}/admin/organizations/${ORG}/export-candidates/${CANDIDATE}/export-manifests`;
+
+  const response = await requestJson(server, path, { export_review_queue_item_id: QUEUE_ITEM });
+
+  assert.equal(response.statusCode, 422);
+  assert.equal(response.body.error.code, "validation_blocker");
+  assert.equal(response.body.error.message, "SPECIFIC_SAFE_TEST_MESSAGE");
+});
+
+test("missing service error.message retains the existing KAI fallback message", async (t) => {
+  const scenario = {
+    authenticated: true,
+    actorContext: gkAdminActorContext,
+    serviceCalls: [],
+    dependencyCalls: [],
+    result: {
+      ok: false,
+      error: { code: "validation_blocker", status: 422 },
+      data: null,
+      blockers: [],
+    },
+  };
+  const { server, close } = await startServer(scenario);
+  t.after(close);
+  const path = `${basePath}/admin/organizations/${ORG}/export-candidates/${CANDIDATE}/export-manifests`;
+
+  const response = await requestJson(server, path, { export_review_queue_item_id: QUEUE_ITEM });
+
+  assert.equal(response.statusCode, 422);
+  assert.equal(response.body.error.message, "Request failed KAI validation.");
+});
+
+test("a system_error service message is never exposed over HTTP", async (t) => {
+  const scenario = {
+    authenticated: true,
+    actorContext: gkAdminActorContext,
+    serviceCalls: [],
+    dependencyCalls: [],
+    result: {
+      ok: false,
+      error: { code: "system_error", status: 500, message: "DO_NOT_EXPOSE_THIS" },
+      data: null,
+    },
+  };
+  const { server, close } = await startServer(scenario);
+  t.after(close);
+  const path = `${basePath}/admin/organizations/${ORG}/export-candidates/${CANDIDATE}/export-manifests`;
+
+  const response = await requestJson(server, path, { export_review_queue_item_id: QUEUE_ITEM });
+
+  assert.equal(response.statusCode, 500);
+  assert.equal(response.body.error.message, "KAI Sprint 2 server error.");
+  assert.doesNotMatch(JSON.stringify(response.body), /DO_NOT_EXPOSE_THIS/);
+});
+
+test("a structured blocker is returned unchanged alongside a surviving service error message", async (t) => {
+  const scenario = {
+    authenticated: true,
+    actorContext: gkAdminActorContext,
+    serviceCalls: [],
+    dependencyCalls: [],
+    result: {
+      ok: false,
+      error: { code: "validation_blocker", status: 422, message: "SPECIFIC_SAFE_TEST_MESSAGE" },
+      data: null,
+      blockers: [{
+        validator_key: "VAL-EXP-001",
+        severity: "blocker",
+        object_type: "generated_content_draft",
+        object_code: "export_manifest_eligibility",
+        object_id: "00000000-0000-4000-8000-000000000301",
+        message: "Export manifest eligibility gates failed.",
+        blocking_reason: "export_manifest_not_eligible",
+        required_fix: "Resolve the failing export-eligibility gate and retry.",
+        evidence: { failed_gates: ["affirmative_human_export_authority_absent"] },
+      }],
+    },
+  };
+  const { server, close } = await startServer(scenario);
+  t.after(close);
+  const path = `${basePath}/admin/organizations/${ORG}/export-candidates/${CANDIDATE}/export-manifests`;
+
+  const response = await requestJson(server, path, { export_review_queue_item_id: QUEUE_ITEM });
+
+  assert.equal(response.statusCode, 422);
+  assert.equal(response.body.error.message, "SPECIFIC_SAFE_TEST_MESSAGE");
+  assert.equal(response.body.blockers.length, 1);
+  assert.equal(response.body.blockers[0].validator_key, "VAL-EXP-001");
+  assert.equal(response.body.blockers[0].blocking_reason, "export_manifest_not_eligible");
+  assert.equal(response.body.blockers[0].required_fix, "Resolve the failing export-eligibility gate and retry.");
+  assert.equal(response.body.blockers[0].message, "Export manifest eligibility gates failed.");
+  assert.deepEqual(response.body.blockers[0].evidence.failed_gates, ["affirmative_human_export_authority_absent"]);
+});
+
 test("Test 9 (sanitizer boundary): unsafe failure_stage/upstream_error_code/upstream_reason values are stripped before HTTP", () => {
   const { sanitizeServiceBlockers } = intakeRouteTestables;
   const unsafeValues = [
@@ -449,6 +634,102 @@ test("Test 9 (sanitizer boundary): unsafe failure_stage/upstream_error_code/upst
     assert.equal(Object.hasOwn(sanitized[0].evidence, "failure_stage"), false, JSON.stringify(unsafeValue));
     assert.equal(Object.hasOwn(sanitized[0].evidence, "upstream_error_code"), false, JSON.stringify(unsafeValue));
     assert.equal(Object.hasOwn(sanitized[0].evidence, "upstream_reason"), false, JSON.stringify(unsafeValue));
+  }
+});
+
+test("Test 9d (HTTP): a known-constraint export-manifest insert failure reaches the HTTP response as an actionable blocker with constraint_key", async (t) => {
+  const scenario = {
+    authenticated: true,
+    actorContext: gkAdminActorContext,
+    serviceCalls: [],
+    dependencyCalls: [],
+    result: {
+      ok: false,
+      error: { code: "validation_blocker" },
+      data: null,
+      blockers: [{
+        validator_key: "VAL-SYS-P0-001",
+        severity: "blocker",
+        object_type: "export_manifest",
+        object_code: "export_manifest_authority_reference",
+        message: "The selected export authority decision is not valid for this export candidate.",
+        blocking_reason: "export_authority_reference_invalid",
+        required_fix:
+          "Re-evaluate the current export authority decision for this organization and export candidate, then retry export finalization.",
+        evidence: {
+          failure_stage: "export_manifest_insert",
+          upstream_error_code: "23503",
+          constraint_key: "authority_decision_fk",
+        },
+      }],
+    },
+  };
+  const { server, close } = await startServer(scenario);
+  t.after(close);
+  const path = `${basePath}/admin/organizations/${ORG}/export-candidates/${CANDIDATE}/export-manifests`;
+
+  const response = await requestJson(server, path, { export_review_queue_item_id: QUEUE_ITEM });
+
+  assert.equal(response.statusCode, 422);
+  assert.equal(response.body.error.code, "validation_blocker");
+  assert.equal(response.body.blockers.length, 1);
+  const [blocker] = response.body.blockers;
+  assert.equal(blocker.blocking_reason, "export_authority_reference_invalid");
+  assert.equal(blocker.evidence.failure_stage, "export_manifest_insert");
+  assert.equal(blocker.evidence.upstream_error_code, "23503");
+  assert.equal(blocker.evidence.constraint_key, "authority_decision_fk");
+});
+
+test("Test 9e (sanitizer boundary): an unsafe/unknown constraint_key is stripped before HTTP", () => {
+  const { sanitizeServiceBlockers } = intakeRouteTestables;
+  const unsafeValues = [
+    "export_manifests_p3_19_authority_decision_fk",
+    "some_future_unmapped_fk",
+    "authority_decision_fk; DROP TABLE kai.export_manifests;",
+    "AUTHORITY_DECISION_FK",
+    "",
+    null,
+    42,
+    { injected: true },
+  ];
+  for (const unsafeValue of unsafeValues) {
+    const sanitized = sanitizeServiceBlockers([{
+      validator_key: "VAL-SYS-P0-001",
+      severity: "blocker",
+      blocking_reason: "export_authority_reference_invalid",
+      evidence: {
+        failure_stage: "export_manifest_insert",
+        upstream_error_code: "23503",
+        constraint_key: unsafeValue,
+      },
+    }]);
+    assert.equal(Object.hasOwn(sanitized[0].evidence, "constraint_key"), false, JSON.stringify(unsafeValue));
+  }
+});
+
+test("Test 9f (sanitizer boundary): each known constraint_key survives HTTP sanitization", () => {
+  const { sanitizeServiceBlockers } = intakeRouteTestables;
+  const knownConstraintKeys = [
+    "authority_decision_fk",
+    "candidate_fk",
+    "review_queue_item_fk",
+    "canonical_fingerprint_check",
+    "created_by_type_check",
+    "decision_type_check",
+    "fingerprint_contract_version_check",
+  ];
+  for (const constraintKey of knownConstraintKeys) {
+    const sanitized = sanitizeServiceBlockers([{
+      validator_key: "VAL-SYS-P0-001",
+      severity: "blocker",
+      blocking_reason: "export_authority_reference_invalid",
+      evidence: {
+        failure_stage: "export_manifest_insert",
+        upstream_error_code: "23503",
+        constraint_key: constraintKey,
+      },
+    }]);
+    assert.equal(sanitized[0].evidence.constraint_key, constraintKey);
   }
 });
 

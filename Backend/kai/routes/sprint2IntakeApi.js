@@ -123,7 +123,14 @@ export function sendServiceResult(res, result, successStatus = 200) {
     ? requestedCode
     : "system_error";
   const includeExpectedDetails = code !== "system_error";
+  const serviceErrorMessage =
+    includeExpectedDetails
+    && typeof result?.error?.message === "string"
+    && result.error.message.trim().length > 0
+      ? result.error.message.trim()
+      : null;
   return sendKaiError(res, code, {
+    ...(serviceErrorMessage ? { message: serviceErrorMessage } : {}),
     data: sanitizeServiceData(result?.data),
     blockers: includeExpectedDetails ? sanitizeServiceBlockers(result?.blockers) : [],
     warnings: includeExpectedDetails ? sanitizeServiceWarnings(result?.warnings) : [],
@@ -184,14 +191,41 @@ function sanitizeExportEligibilityDiagnosticField(value) {
   return SAFE_FAILED_GATE_PATTERN.test(value) ? value : null;
 }
 
+// Postgres SQLSTATE codes (23503, 22P02, 23514, ...) - five characters of
+// digits/uppercase letters - never match SAFE_FAILED_GATE_PATTERN (leading
+// lowercase letter only), so evidence.upstream_error_code needs its own
+// allowance for them alongside the existing lowercase machine codes.
+const POSTGRES_SQLSTATE_PATTERN = /^[0-9A-Z]{5}$/;
+
+function sanitizeDiagnosticUpstreamErrorCode(value) {
+  if (typeof value !== "string" || value.length === 0 || value.length > 64) return null;
+  if (SAFE_FAILED_GATE_PATTERN.test(value)) return value;
+  return POSTGRES_SQLSTATE_PATTERN.test(value) ? value : null;
+}
+
+// Same bounded machine-code shape as the other export-eligibility diagnostic
+// fields above - a short snake_case code identifying which known
+// kai.export_manifests constraint an insert violated, never the raw database
+// constraint name (see kaiErrors.js exportManifestConstraintDiagnosticBlocker,
+// whose Map values are the only source of this field).
+const EXPORT_MANIFEST_CONSTRAINT_KEY_PATTERN =
+  /^(authority_decision_fk|candidate_fk|review_queue_item_fk|canonical_fingerprint_check|created_by_type_check|decision_type_check|fingerprint_contract_version_check)$/;
+
+function sanitizeExportManifestConstraintKey(value) {
+  if (typeof value !== "string" || value.length === 0 || value.length > 64) return null;
+  return EXPORT_MANIFEST_CONSTRAINT_KEY_PATTERN.test(value) ? value : null;
+}
+
 function sanitizeExportEligibilityDiagnosticEvidence(evidence) {
   const failureStage = sanitizeExportEligibilityDiagnosticField(evidence?.failure_stage);
-  const upstreamErrorCode = sanitizeExportEligibilityDiagnosticField(evidence?.upstream_error_code);
+  const upstreamErrorCode = sanitizeDiagnosticUpstreamErrorCode(evidence?.upstream_error_code);
   const upstreamReason = sanitizeExportEligibilityDiagnosticField(evidence?.upstream_reason);
+  const constraintKey = sanitizeExportManifestConstraintKey(evidence?.constraint_key);
   return {
     ...(failureStage ? { failure_stage: failureStage } : {}),
     ...(upstreamErrorCode ? { upstream_error_code: upstreamErrorCode } : {}),
     ...(upstreamReason ? { upstream_reason: upstreamReason } : {}),
+    ...(constraintKey ? { constraint_key: constraintKey } : {}),
   };
 }
 

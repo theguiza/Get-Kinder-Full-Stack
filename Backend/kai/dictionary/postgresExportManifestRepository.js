@@ -5,6 +5,8 @@ import { evaluateFinalExportEligibilityInTransaction } from "../services/kaiFina
 import {
   isUnstructuredValidationBlockerFailure,
   unstructuredExportEligibilityDiagnosticBlocker,
+  unstructuredExportManifestDiagnosticBlocker,
+  exportManifestConstraintDiagnosticBlocker,
 } from "../errors/kaiErrors.js";
 import {
   EXPORT_MANIFEST_FINGERPRINT_CONTRACT_VERSION,
@@ -283,8 +285,18 @@ export async function loadExportManifestHistoryForReviewQueueItemInTransaction(t
 export function createPostgresExportManifestRepository({ runInTransaction = withTransaction } = {}) {
   return Object.freeze({
     async createExportManifest(input, dependencies = {}) {
-      if (!isCreateExportManifestInput(input)) return failure("validation_blocker");
-      if (!dependencies.metadataOnlyAudit) return failure("validation_blocker");
+      if (!isCreateExportManifestInput(input)) {
+        return failure(
+          "validation_blocker",
+          unstructuredExportManifestDiagnosticBlocker({ failureStage: "repository_input_contract" }),
+        );
+      }
+      if (!dependencies.metadataOnlyAudit) {
+        return failure(
+          "validation_blocker",
+          unstructuredExportManifestDiagnosticBlocker({ failureStage: "metadata_only_audit_dependency" }),
+        );
+      }
 
       const needsDefaults = !dependencies.evaluatePacket
         || !dependencies.evaluator
@@ -402,7 +414,26 @@ export function createPostgresExportManifestRepository({ runInTransaction = with
         if (error instanceof ExportManifestRollbackResultError) return error.result;
         if (error?.code === "23505" || error?.code === "25001") return failure("conflict_current_state_changed");
         if (error?.code === "23503" || error?.code === "22P02" || error?.code === "23514") {
-          return failure("validation_blocker");
+          // node-postgres (pg) exposes the violated constraint's name as
+          // error.constraint on a DatabaseError - never parsed out of
+          // error.message/detail/where or any SQL/stack text. Only an exact
+          // match against the USER_CONFIRMED allowlist in kaiErrors.js
+          // produces an actionable blocker; every other constraint (known or
+          // not) falls through to the existing generic diagnostic.
+          const constraintBlocker =
+            (error.code === "23503" || error.code === "23514")
+              ? exportManifestConstraintDiagnosticBlocker({
+                upstreamErrorCode: error.code,
+                constraintName: error.constraint,
+              })
+              : null;
+          return failure(
+            "validation_blocker",
+            constraintBlocker || unstructuredExportManifestDiagnosticBlocker({
+              failureStage: "export_manifest_insert",
+              upstreamErrorCode: error.code,
+            }),
+          );
         }
         return failure("system_error");
       }
