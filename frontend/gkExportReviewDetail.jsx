@@ -27,6 +27,7 @@ import {
   getJson,
   grantFinalReleaseAuthorityRequest,
   limitationSnapshotPath,
+  nextAuthorityEffectiveForPacketOutcome,
   nextExportCandidateIdForPacketOutcome,
   packetPath,
   revokeFinalReleaseAuthorityRequest,
@@ -215,6 +216,7 @@ export default function GkExportReviewDetail({
       setLoading(false);
       setOutcome(decided);
       setExportCandidateId((previous) => nextExportCandidateIdForPacketOutcome(decided, previous));
+      setAuthorityEffective((previous) => nextAuthorityEffectiveForPacketOutcome(decided, previous));
     } catch {
       if (!mountedRef.current) return;
       setLoading(false);

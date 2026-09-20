@@ -246,14 +246,18 @@ test("control visibility (Confirm Limitation Snapshot, Prepare/Grant/Revoke/Fina
   assert.doesNotMatch(jsxSource, /recoveredExportCandidateId|reloadedExportCandidateId|hydratedExportCandidateId/);
 });
 
-// No existing packet field represents final-release-authority effectiveness
-// (only the grant/revoke POST response transiently returns `effective` -
-// never persisted onto or re-exposed by the GET packet). Reload recovery is
-// therefore limited to exportCandidateId; authorityEffective is deliberately
-// NOT hydrated from exportEligible/validatorSeverity or any other packet
-// field, since no existing contract defines that projection and inventing
-// one is out of scope for this repair.
-test("authorityEffective is never derived from exportEligible/validatorSeverity or any other packet field - no invented authority-hydration contract", () => {
+// The packet now exposes its own explicit finalReleaseAuthorityEffective
+// read field (sourced from the existing authoritative human-authority
+// evaluator, never a second algorithm - see gkExportReviewDetailLogic.js).
+// Reload recovery hydrates authorityEffective from exactly that field, via
+// the same reducer pattern as exportCandidateId's
+// nextExportCandidateIdForPacketOutcome; it is still never derived directly
+// from exportEligible/validatorSeverity or any other packet field.
+test("authorityEffective is hydrated only from the packet's own finalReleaseAuthorityEffective field, never from exportEligible/validatorSeverity or any other field", () => {
   assert.doesNotMatch(jsxSource, /setAuthorityEffective\(\s*model\??\.(exportEligible|validatorSeverity)/);
-  assert.doesNotMatch(jsxSource, /setAuthorityEffective\(\s*(decided|outcome)\.model/);
+  assert.doesNotMatch(jsxSource, /setAuthorityEffective\(\s*(decided|outcome)\.model\.(exportEligible|validatorSeverity)/);
+  assert.match(
+    jsxSource,
+    /setAuthorityEffective\(\s*\(previous\)\s*=>\s*nextAuthorityEffectiveForPacketOutcome\(decided,\s*previous\)\s*\)/,
+  );
 });

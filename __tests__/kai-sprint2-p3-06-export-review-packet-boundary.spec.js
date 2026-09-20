@@ -504,6 +504,7 @@ test("P3-06 service overwrites exportEligible/validatorResult with the authorita
   assert.equal(result.data.exportCandidateId, CANDIDATE_ID);
   assert.equal(result.data.exportEligible, true);
   assert.equal(result.data.validatorResult.severity, "pass");
+  assert.equal(result.data.finalReleaseAuthorityEffective, true);
 });
 
 test("P3-06 service preserves the authoritative blocker when a current export candidate exists but human export authority is not effective (State B, ineffective authority)", async () => {
@@ -535,6 +536,54 @@ test("P3-06 service preserves the authoritative blocker when a current export ca
   assert.equal(result.data.exportEligible, false);
   assert.equal(result.data.validatorResult.severity, "blocker");
   assert.equal(result.data.validatorResult.blocking_reason, "affirmative_human_export_authority_absent");
+  assert.equal(result.data.finalReleaseAuthorityEffective, false);
+});
+
+test("P3-06 service exposes finalReleaseAuthorityEffective: null when no exact current export candidate exists to evaluate", async () => {
+  const tx = { async query() { return { rows: [] }; } };
+  const result = await getGeneratedDraftExportReviewPacket(input(), {
+    env: enabledEnv,
+    runInTransaction: async (callback) => callback(tx),
+    evaluatePacket: async () => ({ ok: true, data: packetDto(), error: null }),
+    evaluator,
+    loadManifestIdentity: async () => ({ exportManifestId: null }),
+    loadManifestHistory: async () => ({ exportManifestHistory: [] }),
+    resolveCurrentCandidate: async () => ({ ok: true, data: { exportCandidateId: null, reason: "no_current_candidate" } }),
+    evaluateFinalEligibility: async () => { throw new Error("must not call when no current candidate exists"); },
+  });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.data.exportCandidateId, null);
+  assert.equal(result.data.finalReleaseAuthorityEffective, null);
+});
+
+test("P3-06 service derives finalReleaseAuthorityEffective from the same authoritative eligibility result used for exportEligible - never a second authority algorithm", async () => {
+  const tx = { async query() { return { rows: [] }; } };
+  const result = await getGeneratedDraftExportReviewPacket(input(), {
+    env: enabledEnv,
+    runInTransaction: async (callback) => callback(tx),
+    evaluatePacket: async () => ({ ok: true, data: packetDto(), error: null }),
+    evaluator,
+    loadManifestIdentity: async () => ({ exportManifestId: null }),
+    loadManifestHistory: async () => ({ exportManifestHistory: [] }),
+    resolveCurrentCandidate: async () => ({ ok: true, data: { exportCandidateId: CANDIDATE_ID, reason: null } }),
+    evaluateFinalEligibility: async () => ({
+      ok: true,
+      data: {
+        generatedContentDraftId: DRAFT,
+        exportCandidateId: CANDIDATE_ID,
+        requestedExportAudience: "internal",
+        finalExportEligible: false,
+        validatorResult: authorityBlockedValidatorResult(),
+        effectiveHumanExportAuthority: false,
+        effectivenessReason: "head_is_revoke",
+      },
+      error: null,
+    }),
+    loadCandidateForAuthority: async () => { throw new Error("must not call directly - only via evaluateFinalEligibility's own dependency"); },
+    humanAuthorityDecisionRepository: { evaluateEffectiveness: async () => { throw new Error("must not call directly"); } },
+  });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.data.finalReleaseAuthorityEffective, false);
 });
 
 test("P3-06 service never runs the P3-20 manifest-identity or manifest-history lookups when the packet composition itself fails - no separate best-effort follow-up", async () => {

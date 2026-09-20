@@ -224,6 +224,13 @@ export function toRenderModel(data) {
     // exists. Never a browser-remembered id carried over from an earlier
     // POST response.
     exportCandidateId: data.exportCandidateId ?? null,
+    // Authority-effectiveness read hydration: the exact current candidate's
+    // server-authoritative final-release-authority effectiveness - null when
+    // no exact current candidate exists to evaluate, true/false otherwise.
+    // Never inferred from exportEligible/validatorSeverity here or by the
+    // component; the component hydrates its local authority state directly
+    // from this field on every successful packet load.
+    finalReleaseAuthorityEffective: data.finalReleaseAuthorityEffective ?? null,
     // Compatibility-only: the singular backend field collapses to null
     // whenever more than one manifest exists for this review item. This
     // page no longer uses this field to restore active workflow state - see
@@ -284,6 +291,19 @@ export function decideOutcome(result) {
 export function nextExportCandidateIdForPacketOutcome(outcome, previousExportCandidateId) {
   if (outcome?.kind !== "success") return previousExportCandidateId ?? null;
   return outcome.model?.exportCandidateId ?? null;
+}
+
+// Server-authoritative authority-effectiveness reload recovery: a successful
+// packet read always replaces the local authorityEffective flag with the
+// exact backend-resolved finalReleaseAuthorityEffective for that read
+// (null/false both collapse to false - no exact current candidate, or a
+// candidate with ineffective/absent/revoked/stale authority, must never
+// leave a stale prior true reflected in the UI). A non-success outcome
+// (network/server error) leaves the existing in-session flag untouched, for
+// the same reason a failed reload must not destroy exportCandidateId above.
+export function nextAuthorityEffectiveForPacketOutcome(outcome, previousAuthorityEffective) {
+  if (outcome?.kind !== "success") return previousAuthorityEffective ?? false;
+  return outcome.model?.finalReleaseAuthorityEffective === true;
 }
 
 // P3-12: the Start Review control shows only for the one queue/review state

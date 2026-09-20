@@ -343,14 +343,24 @@ const EXPORT_REVIEW_PACKET_WITH_MANIFEST_KEYS = new Set([
   // governed state - null whenever no exact current-state candidate exists.
   // Never a browser-remembered id from an earlier POST response.
   "exportCandidateId",
+  // Authority-effectiveness read exposure: the exact current candidate's
+  // human final-release-authority effectiveness, sourced unmodified from the
+  // same existing authoritative eligibility evaluator already run above for
+  // exportEligible/validatorResult - never a second authority algorithm, and
+  // never inferred from exportEligible/validatorResult/manifest history. null
+  // whenever no exact current-state candidate exists to evaluate.
+  "finalReleaseAuthorityEffective",
 ]);
 
 function isGeneratedDraftExportReviewPacketWithManifestDto(data) {
   if (!hasExactKeys(data, EXPORT_REVIEW_PACKET_WITH_MANIFEST_KEYS)) return false;
   if (!(data.exportManifestId === null || UUID_PATTERN.test(data.exportManifestId))) return false;
   if (!(data.exportCandidateId === null || UUID_PATTERN.test(data.exportCandidateId))) return false;
+  if (!(data.finalReleaseAuthorityEffective === null || typeof data.finalReleaseAuthorityEffective === "boolean")) return false;
   if (!isExportManifestHistoryDto(data.exportManifestHistory)) return false;
-  const { exportManifestId, exportManifestHistory, exportCandidateId, ...innerPacket } = data;
+  const {
+    exportManifestId, exportManifestHistory, exportCandidateId, finalReleaseAuthorityEffective, ...innerPacket
+  } = data;
   return isGeneratedDraftExportReviewPacketDto(innerPacket);
 }
 
@@ -608,6 +618,7 @@ export async function getGeneratedDraftExportReviewPacket(input, dependencies = 
   let manifestIdentity;
   let manifestHistory;
   let currentExportCandidateId = null;
+  let finalReleaseAuthorityEffective = null;
   try {
     packetResult = await runInTransaction(async (tx) => {
       await tx.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY");
@@ -659,6 +670,13 @@ export async function getGeneratedDraftExportReviewPacket(input, dependencies = 
           exportEligible: eligibilityResult.data.finalExportEligible,
           validatorResult: eligibilityResult.data.validatorResult,
         };
+        // Read-model exposure only: the same eligibilityResult already
+        // computed above via the existing authoritative human-authority
+        // evaluator (evaluateHumanAuthorityEffectivenessInTransaction, via
+        // evaluateFinalEligibility's own evaluateAuthorityEffectiveness
+        // dependency) - never a second, independently-derived authority
+        // check, and never inferred from exportEligible/validatorResult.
+        finalReleaseAuthorityEffective = eligibilityResult.data.effectiveHumanExportAuthority === true;
       }
 
       // Durable read recovery (P3-20 binding), same read-only transaction as
@@ -694,6 +712,7 @@ export async function getGeneratedDraftExportReviewPacket(input, dependencies = 
     exportManifestId: manifestIdentity?.exportManifestId ?? null,
     exportManifestHistory: manifestHistory?.exportManifestHistory ?? [],
     exportCandidateId: currentExportCandidateId ?? null,
+    finalReleaseAuthorityEffective,
   };
   if (!isGeneratedDraftExportReviewPacketWithManifestDto(projected)) {
     return buildKaiError("system_error", { data: null });

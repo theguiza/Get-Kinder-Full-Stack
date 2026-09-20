@@ -7,6 +7,7 @@ import {
   errorText,
   toRenderModel,
   decideOutcome,
+  nextAuthorityEffectiveForPacketOutcome,
   nextExportCandidateIdForPacketOutcome,
   SAFE_ERROR_CODES,
   getJson,
@@ -111,6 +112,7 @@ test("P3-08 success renders only allowlisted P3-06 fields and drops everything e
     exportReviewQueueStatus: "open",
     exportReviewUpdatedAt: "2026-08-06T09:00:00.000Z",
     exportCandidateId: null,
+    finalReleaseAuthorityEffective: null,
     exportManifestId: null,
     exportManifestHistory: [],
     validatorSeverity: "blocker",
@@ -386,6 +388,59 @@ test("candidate reload recovery: the component wires the packet load to the relo
     /setExportCandidateId\(\s*\(previous\)\s*=>\s*nextExportCandidateIdForPacketOutcome\(decided,\s*previous\)\s*\)/,
   );
   assert.doesNotMatch(source, /setExportCandidateId\(\s*(decided\.model|outcome\.model)\.exportCandidateId\s*\)/);
+});
+
+test("authority reload hydration: toRenderModel projects the exact server-authoritative finalReleaseAuthorityEffective field", () => {
+  assert.equal(toRenderModel({ ...validDto, finalReleaseAuthorityEffective: true }).finalReleaseAuthorityEffective, true);
+  assert.equal(toRenderModel({ ...validDto, finalReleaseAuthorityEffective: false }).finalReleaseAuthorityEffective, false);
+  assert.equal(toRenderModel({ ...validDto, finalReleaseAuthorityEffective: null }).finalReleaseAuthorityEffective, null);
+  assert.equal(toRenderModel(validDto).finalReleaseAuthorityEffective, null);
+});
+
+test("authority reload hydration: a packet load carrying an effective current candidate hydrates the local authority flag to true", () => {
+  const outcome = decideOutcome({
+    statusCode: 200,
+    body: { ok: true, data: { ...validDto, exportCandidateId: "00000000-0000-4000-8000-000000000801", finalReleaseAuthorityEffective: true } },
+  });
+  assert.equal(nextAuthorityEffectiveForPacketOutcome(outcome, false), true);
+});
+
+test("authority reload hydration: a packet load carrying a current candidate with ineffective/absent authority hydrates the local flag to false", () => {
+  const outcome = decideOutcome({
+    statusCode: 200,
+    body: { ok: true, data: { ...validDto, exportCandidateId: "00000000-0000-4000-8000-000000000801", finalReleaseAuthorityEffective: false } },
+  });
+  assert.equal(nextAuthorityEffectiveForPacketOutcome(outcome, true), false);
+});
+
+test("authority reload hydration: a packet load carrying no current candidate (finalReleaseAuthorityEffective: null) clears a stale prior true flag", () => {
+  const outcome = decideOutcome({
+    statusCode: 200,
+    body: { ok: true, data: { ...validDto, exportCandidateId: null, finalReleaseAuthorityEffective: null } },
+  });
+  assert.equal(nextAuthorityEffectiveForPacketOutcome(outcome, true), false);
+});
+
+test("authority reload hydration: authority previously revoked (server now reports false) never renders as effective again after reload", () => {
+  const outcome = decideOutcome({
+    statusCode: 200,
+    body: { ok: true, data: { ...validDto, exportCandidateId: "00000000-0000-4000-8000-000000000801", finalReleaseAuthorityEffective: false } },
+  });
+  assert.equal(nextAuthorityEffectiveForPacketOutcome(outcome, true), false);
+});
+
+test("authority reload hydration: a failed packet reload leaves the existing in-session authority flag untouched", () => {
+  const outcome = decideOutcome({ statusCode: 500, body: null });
+  assert.equal(outcome.kind, "error");
+  assert.equal(nextAuthorityEffectiveForPacketOutcome(outcome, true), true);
+});
+
+test("authority reload hydration: the component wires the packet load to the authority reload-recovery reducer, never to a raw outcome.model assignment", () => {
+  const source = readFileSync("frontend/gkExportReviewDetail.jsx", "utf8");
+  assert.match(
+    source,
+    /setAuthorityEffective\(\s*\(previous\)\s*=>\s*nextAuthorityEffectiveForPacketOutcome\(decided,\s*previous\)\s*\)/,
+  );
 });
 
 test("P3-08 entry.jsx mounts exactly one new render function and leaves existing render functions intact", () => {

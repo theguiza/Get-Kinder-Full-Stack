@@ -317,6 +317,7 @@ test("getGeneratedDraftExportReviewPacket's projected data carries exactly the a
       "exportReviewQueueStatus",
       "exportReviewStatus",
       "exportReviewUpdatedAt",
+      "finalReleaseAuthorityEffective",
       "generatedContentDraftId",
       "generatedContentReviewQueueStatus",
       "generatedContentReviewStatus",
@@ -326,6 +327,7 @@ test("getGeneratedDraftExportReviewPacket's projected data carries exactly the a
       "validatorResult",
     ].sort(),
   );
+  assert.equal(result.data.finalReleaseAuthorityEffective, null);
 });
 
 test("getGeneratedDraftExportReviewPacket reports exportManifestId: null and exportManifestHistory: [] (never fabricated) when nothing is recoverable", async () => {
@@ -396,7 +398,13 @@ test("the manifest-history lookup is scoped to the exact caller-supplied organiz
 test("no latest/current/timestamp-shaped field exists on the projected packet DTO validator's own key set", () => {
   const { isGeneratedDraftExportReviewPacketWithManifestDto } = __exportReviewServiceTestables;
   const forbiddenNamePattern = /latest|current(?!UseEligible)|active|mostrecent|timestamp/i;
-  const projected = { ...passingPacket().data, exportManifestId: MANIFEST_A, exportManifestHistory: [HISTORY_ENTRY_A], exportCandidateId: null };
+  const projected = {
+    ...passingPacket().data,
+    exportManifestId: MANIFEST_A,
+    exportManifestHistory: [HISTORY_ENTRY_A],
+    exportCandidateId: null,
+    finalReleaseAuthorityEffective: null,
+  };
   for (const key of Object.keys(projected)) {
     assert.doesNotMatch(key, forbiddenNamePattern, `unexpected latest/current-shaped field: ${key}`);
   }
