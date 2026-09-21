@@ -110,6 +110,7 @@ function passingPacket() {
               affectedDimensionKeys: [],
               affectedObjectIds: [],
               approvedAudiences: null,
+              limitationCodes: [],
             },
           ],
         },
