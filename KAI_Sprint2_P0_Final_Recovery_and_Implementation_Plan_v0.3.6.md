@@ -30892,3 +30892,116 @@ No production or runtime closure claimed. No push, deployment, production
 mutation, database mutation, migration execution, feature-flag/configuration
 change, real-client-data access, or `00_KAI_CURRENT_STATE.md` update
 performed.
+
+## Phase 14 Conditional Client-Review Conformance (2026-09-20)
+
+**Purpose:** prove whether the REAL review/governance workflow correctly
+implements conditional client involvement - distinct from, and not to be
+confused with, the dormant P3-17 `client_reviewed` human-authority decision
+type already resolved in the immediately preceding semantic-authority
+package. That package is not reopened here.
+
+**Fresh inspection this package (starting HEAD `c5924b9`, clean):** the
+authoritative "client knowledge/confirmation is required" mechanism already
+exists, is real, and is already correctly wired:
+
+- **State:** a `kai.client_followup_items`/`kai.review_queue_items`
+  (`queue_type='client_followup'`) row, created only from a real, persisted
+  P2-04 coverage gap (`Backend/kai/services/kaiClaimGapFollowupService.js#generateClaimGapFollowups`,
+  routed at `POST .../claims/:claimId/claim-gap-followups`) - never a
+  universal, request-time-derived trigger such as audience or content type.
+  A claim with no persisted client_followup row is never blocked by this
+  mechanism (`for (const row of followupQueueRows)` in
+  `evaluateClaimTraceabilityInTransaction` simply does not iterate) -
+  confirming client review is conditional, not universal.
+- **Blocking path:** a fresh row (`queue_status='waiting_on_client'`) makes
+  `client_followup_unresolved` fire in
+  `Backend/kai/dictionary/postgresClaimTraceabilityRepository.js`
+  (`evaluateClaimTraceabilityInTransaction`), which makes that claim's
+  `eligible=false`, which the generated-content repository aggregates into
+  the packet's `currentUseEligible` (`Backend/kai/dictionary/postgresGeneratedContentRepository.js`
+  - `[...evaluatedByClaim.values()].every((e) => e.eligible === true)`),
+  which `VAL-EXP-001` (`kaiExportManifestEligibilityValidators.js`) fails
+  closed on as `current_use_ineligible` - an existing governed gate, not a
+  new predicate invented for this package.
+- **Resolution actor:** exactly `client_reviewer` (org-scoped, external to
+  GK), via `kaiClientFollowupCompletionService.js#completeClientFollowup` ->
+  `postgresClientFollowupCompletionRepository.js` (P2-11). `gk_admin`,
+  `gk_operator`, `gk_reviewer`, `client_admin`, `client_contributor`,
+  `system`, and `assistant` are all denied by construction
+  (`COMPLETE_CLIENT_FOLLOWUP_ALLOWED_ROLES = new Set(["client_reviewer"])`).
+  The transition writes exactly one fixed disposition
+  (`no_additional_client_information`) to the linked review-queue row and
+  accepts no answer/free-text/raw-value field from the caller.
+- **GK cannot bypass it:** `Backend/kai/dictionary/postgresHumanReviewRepository.js`
+  (the GK-only P2-09 `completeEvidenceReview`/
+  `completeClaimReviewInternalApproval` transitions) hardcodes its
+  compare-and-set queries' `queue_type` to `EVIDENCE_REVIEW_QUEUE_TYPE`
+  (`"evidence_review"`) / `CLAIM_REVIEW_QUEUE_TYPE` (`"claim_review"`) only -
+  it never references `client_followup` and has no code path that can
+  target a `client_followup` queue row, by construction rather than by a
+  runtime check that could be bypassed.
+- **Final-authority separation preserved:** `completeClientFollowup`/its
+  repository reference neither `kai.human_authority_decisions` nor
+  `export_authority_granted` anywhere in source - resolving a client-required
+  workflow cannot grant final-release authority. Conversely, an unresolved
+  client-required blocker (`currentUseEligible=false`) fails
+  `evaluateFinalExportEligibility` closed via `current_use_ineligible`
+  even when `export_authority_granted` is effective, and once resolved
+  (`currentUseEligible=true`) final export is not additionally held back by
+  the dormant `client_reviewed` decision type (never checked anywhere, per
+  the preceding semantic-authority package) - proving both REQUIREMENT D (no
+  false negative) and that this package did not reopen that decision.
+
+**Decision:** OUTCOME 1 - the existing review/follow-up/governance
+architecture already represents conditional client input correctly. No
+runtime behavior was changed. Only the smallest focused tests needed to make
+this contract explicit were added, using the existing seams
+(`evaluateFinalExportEligibility`'s injectable `evaluatePacket`/
+`evaluateEffectiveness`, source-shape assertions on the two repositories'
+hardcoded queue-type constants, and the existing
+`completeClientFollowup`/`kaiClientFollowupCompletionService.js` boundary).
+No new state, route, or parallel client-review workflow was manufactured.
+
+**New focused test:**
+`__tests__/kai-sprint2-p14-15-conditional-client-review-conformance.spec.js`
+(7/7 PASS) proves: the real `client_followup_unresolved` blocker condition
+in `postgresClaimTraceabilityRepository.js` is gated only on a persisted
+unresolved/`waiting_on_client` followup queue row (source-shape assertion);
+GK review's compare-and-set queries can never target a `client_followup`
+queue row (source-shape assertion on `postgresHumanReviewRepository.js`);
+an unresolved client-required blocker (`currentUseEligible=false`) fails
+`evaluateFinalExportEligibility` closed as `current_use_ineligible` even
+with effective `export_authority_granted`; once resolved
+(`currentUseEligible=true`) final export is not additionally blocked by the
+dormant `client_reviewed` decision type; resolving client-required work
+alone (without effective `export_authority_granted`) still leaves final
+export BLOCKED on `affirmative_human_export_authority_absent`; the
+client-followup-completion service/repository never reference
+`kai.human_authority_decisions`/`export_authority_granted`; and only
+`client_reviewer` (never `gk_admin`) can complete a client-followup
+workflow, which writes only a fixed disposition and accepts no free-text
+answer field.
+
+**Test evidence** (`DATABASE_URL=postgres://sentinel:sentinel@127.0.0.1:1/sentinel_kai_no_listener`
+set for every Node command; no database/cloud/production access):
+- `node --test __tests__/kai-sprint2-p14-15-conditional-client-review-conformance.spec.js`
+  -> 7/7 PASS.
+- Directly coupled regression: `kai-sprint2-p14-14-semantic-authority-contract-clarification.spec.js`,
+  `kai-sprint2-p2-09-human-review-boundary.spec.js`,
+  `kai-sprint2-p2-11-client-followup-completion-boundary.spec.js`,
+  `kai-sprint2-p2-06-claim-traceability-boundary.spec.js`,
+  `kai-sprint2-p2-04-claim-gap-followup-boundary.spec.js`,
+  `kai-sprint2-p2-04-claim-gap-followup-route.spec.js`,
+  `kai-sprint2-p3-02-generated-draft-review-packet-boundary.spec.js`,
+  `kai-sprint2-p3-06-export-review-packet-boundary.spec.js`,
+  `kai-sprint2-p3-18-final-export-eligibility-gate-boundary.spec.js`,
+  `kai-sprint2-p3-18-final-export-eligibility-gate-authority-state-proof.spec.js`
+  (run together) -> 188/188 PASS, 0 fail.
+- `git diff --check` -> PASS.
+
+**Status:** PHASE14_CONDITIONAL_CLIENT_REVIEW_CONFORMANCE_CLOSED_LOCALLY. No
+production or runtime closure claimed. No push, deployment, production
+mutation, database mutation, migration execution, feature-flag/configuration
+change, real-client-data access, or `00_KAI_CURRENT_STATE.md` update
+performed.
