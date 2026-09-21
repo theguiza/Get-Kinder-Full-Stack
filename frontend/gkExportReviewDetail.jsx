@@ -80,6 +80,7 @@ function CitationDetail({ citation }) {
       <FieldRow label="Claim" value={citation.claimId} />
       <FieldRow label="Evidence item" value={citation.evidenceItemId} />
       <FieldRow label="Source" value={citation.sourceId} />
+      <FieldRow label="Source code" value={citation.sourceCode ?? "none"} />
       <FieldRow label="Source version" value={citation.sourceVersionId} />
       <FieldRow label="Support strength" value={citation.supportStrength} />
       <FieldRow label="Claim review status" value={citation.claimReviewStatus} />
@@ -88,6 +89,11 @@ function CitationDetail({ citation }) {
       <FieldRow label="Blocker codes" value={citation.blockerCodes.join(", ") || "none"} />
       <FieldRow label="Affected dimensions" value={citation.affectedDimensionKeys.join(", ") || "none"} />
       <FieldRow label="Affected object ids" value={citation.affectedObjectIds.join(", ") || "none"} />
+      <FieldRow
+        label="Allowed audiences"
+        value={citation.approvedAudiences ? citation.approvedAudiences.join(", ") || "none" : "no decision recorded"}
+      />
+      <FieldRow label="Limitation codes" value={citation.limitationCodes.join(", ") || "none"} />
     </li>
   );
 }

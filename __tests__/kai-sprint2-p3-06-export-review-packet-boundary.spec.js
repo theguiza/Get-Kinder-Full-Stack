@@ -339,6 +339,7 @@ function packetDto(overrides = {}) {
         affectedDimensionKeys: [],
         affectedObjectIds: [],
         approvedAudiences: null,
+        limitationCodes: [],
       }],
     }],
     exportReviewUpdatedAt: "2026-08-06T09:00:00.000Z",

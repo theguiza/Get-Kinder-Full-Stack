@@ -31005,3 +31005,101 @@ production or runtime closure claimed. No push, deployment, production
 mutation, database mutation, migration execution, feature-flag/configuration
 change, real-client-data access, or `00_KAI_CURRENT_STATE.md` update
 performed.
+
+## Phase 14 Export-Review UI Traceability Closure (2026-09-20)
+
+**Purpose:** prove whether the seven required governed traceability concepts
+(why can KAI say this, source, evidence strength, allowed audience,
+limitations, conflicts/gaps, reviewer status) already flow end to end from
+persisted state through the GK export-review page
+(`frontend/gkExportReviewDetail.jsx`/`gkExportReviewDetailLogic.js`), and
+make only the smallest coherent repair where governed data was dropped
+before the UI.
+
+**Traceability matrix (fresh inspection, starting HEAD `f7012a9`, clean):**
+
+| Concept | Status found | Fix |
+|---|---|---|
+| Why can KAI say this? | ALREADY_CONFORMANT - block/citation/claim/evidence linkage reaches the DTO and renders under an explicit "Why can KAI say this?" heading. | none |
+| Source | `sourceId`/`sourceVersionId` already conformant. `sourceCode` (safe, already backend-allowlisted, never raw content/paths/URLs) reached the service DTO but was dropped in `toRenderModel`/never rendered. | frontend projection fix |
+| Evidence strength | ALREADY_CONFORMANT - `supportStrength` is the authoritative field end to end; nothing invented. | none |
+| Allowed audience | The authoritative field is `approvedAudiences` (the claim-review governance decision), already sourced correctly in `postgresGeneratedContentRepository.js` and already in the service DTO allowlist - but dropped in `toRenderModel`, and the page instead only rendered `requestedExportAudience` (what export was requested for, not what's approved) - the exact wrong-field risk this package was told to guard against. | frontend projection fix |
+| Limitations | Only `limitationSnapshotConfirmed` (a boolean) reached the export-review packet. Real per-(claim,evidence) `limitationCodes` already exist in `kai.limitation_snapshot_entries` (written by the existing P3-16 `confirmLimitationSnapshot`, already exposed downstream by the export-manifest render model) but no export-review read path projected them. | backend + frontend projection fix (new read, no new persistence) |
+| Conflicts/gaps | ALREADY_CONFORMANT - `blockerCodes`/`affectedDimensionKeys`/`affectedObjectIds` (including the Phase-14-closed `client_followup_unresolved`) reach the DTO and render. | none |
+| Reviewer status | ALREADY_CONFORMANT - `claimReviewStatus`/`evidenceReviewStatus`/`generatedContentReviewStatus`/`exportReviewStatus` all reach the DTO and render. | none |
+
+**Repair (Outcome B, smallest coherent projection fix, no new persistence):**
+- `Backend/kai/dictionary/postgresGeneratedContentRepository.js`: new
+  `loadCurrentLimitationSnapshotEntries` (mirrors
+  `loadCurrentLimitationSnapshotExists`'s existing "no successor" currentness
+  definition, reading the same `kai.limitation_snapshots`/
+  `kai.limitation_snapshot_entries` tables the existing P3-16
+  `confirmLimitationSnapshot` already writes). `evaluateGeneratedDraftExportReviewPacketInTransaction`
+  now maps each citation's `limitationCodes` from this read by
+  `(claimId, evidenceItemId)` - `[]` whenever no current snapshot exists yet
+  (never invented). `limitationSnapshotConfirmed`'s own existing boolean
+  computation is unchanged.
+- `Backend/kai/services/kaiExportReviewService.js`: `CITATION_KEYS` gains
+  `limitationCodes`; `isGeneratedDraftExportReviewPacketDto` validates it
+  with the existing `isLimitationCodeSet` (`exportCandidateContract.js`) -
+  the same governed-code-shape check `confirmLimitationSnapshot` itself
+  enforces, not a new vocabulary.
+- `frontend/gkExportReviewDetailLogic.js` (`toRenderModel`): citation
+  projection gains `sourceCode`, `approvedAudiences` (preserving `null`
+  distinctly from an empty array), and `limitationCodes` - all three already
+  present on the backend DTO, previously silently dropped by this explicit
+  allowlist.
+- `frontend/gkExportReviewDetail.jsx` (`CitationDetail`): renders three new
+  `FieldRow`s - "Source code", "Allowed audiences", "Limitation codes" -
+  alongside the existing citation fields. No existing label was renamed;
+  "Requested export audience" at the packet level is left exactly as-is
+  (it correctly answers a different question than allowed audience).
+- `public/js/bundles/entry.js` rebuilt (`npm run build`, vite) to match the
+  frontend source change.
+
+**No new persistence, no schema/migration, no new vocabulary, no route
+change, no SQL/DB access added to any route.** The frontend never
+recomputes eligibility/approval itself - it only renders the exact governed
+values the backend already resolved.
+
+**Test evidence** (`DATABASE_URL=postgres://sentinel:sentinel@127.0.0.1:1/sentinel_kai_no_listener`
+set for every Node command; no database/cloud/production access):
+- New: `node --test __tests__/kai-sprint2-p14-16-export-review-ui-traceability.spec.js`
+  -> 9/9 PASS - proves `loadCurrentLimitationSnapshotEntries`'s currentness/
+  no-invented-data behavior directly (fake tx), the service DTO now requires
+  and validates `sourceCode`/`approvedAudiences`/`limitationCodes` (malformed
+  `limitationCodes` fails closed), `toRenderModel` carries all three fields
+  through (including preserving `approvedAudiences: null` distinctly from
+  `requestedExportAudience`), the render model never carries raw
+  URLs/storage-path/credential/actor-context markers, every rendered
+  `limitationCode` matches the governed code pattern, and the frontend
+  source now renders the three new field rows.
+- Coupled regression (existing suites, two updated for the new required DTO
+  field - `packetDto()`'s citation fixture in
+  `kai-sprint2-p3-06-export-review-packet-boundary.spec.js` and `validDto`/
+  the expected render model in `kai-sprint2-p3-08-gk-export-review-detail.spec.js`,
+  both additive, no assertion weakened): `kai-sprint2-p3-06-export-review-packet-boundary.spec.js`,
+  `kai-sprint2-p3-08-gk-export-review-detail.spec.js` (includes candidate
+  reload recovery and authority reload hydration - both still PASS),
+  `kai-sprint2-p3-09-export-review-start-boundary.spec.js`,
+  `kai-sprint2-p3-13-export-review-completion-boundary.spec.js`,
+  `kai-sprint2-p14-11-assembled-generic-release-candidate-acceptance.spec.js`,
+  `kai-sprint2-p3-18-assembled-pre-artifact-release-proof.spec.js`,
+  `kai-sprint2-review-lifecycle-horizontal-conformance.spec.js`,
+  `kai-sprint2-generated-drafts-library.spec.js`,
+  `kai-sprint2-gk-export-review-governed-finalization-control.spec.js`,
+  `kai-sprint2-p14-14-semantic-authority-contract-clarification.spec.js`,
+  `kai-sprint2-p14-15-conditional-client-review-conformance.spec.js` (run
+  together) -> 307/307 PASS, 0 fail.
+- Frontend build: `npm run build` (vite) -> succeeded, no errors.
+- `git diff --check` -> PASS.
+
+**Remaining item:** none required by this package's scope; final export
+finalization controls, VAL-EXP-001, and P3-17 authority semantics were not
+touched.
+
+**Status:** PHASE14_EXPORT_REVIEW_UI_TRACEABILITY_CLOSED_LOCALLY. No
+production or runtime closure claimed. No push, deployment, production
+mutation, database mutation, migration execution, feature-flag/configuration
+change, real-client-data access, or `00_KAI_CURRENT_STATE.md` update
+performed.

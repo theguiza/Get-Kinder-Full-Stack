@@ -2610,6 +2610,38 @@ async function loadCurrentLimitationSnapshotExists(tx, { organizationId, generat
   return rows.length > 0;
 }
 
+// Phase-14 UI traceability: read-only per-(claim,evidence) limitation codes
+// for the SAME current (non-superseded) limitation snapshot
+// loadCurrentLimitationSnapshotExists already checks existence of - same
+// "no successor" currentness definition, same kai.limitation_snapshots/
+// kai.limitation_snapshot_entries tables the existing P3-16
+// confirmLimitationSnapshot (postgresExportCandidateRepository.js) writes and
+// the existing export-manifest render model
+// (postgresExportManifestRenderModelRepository.js) already exposes
+// downstream. Returns [] whenever no current snapshot exists yet (before
+// confirmation) - never invented codes, never a recomputation of currentness.
+async function loadCurrentLimitationSnapshotEntries(tx, { organizationId, generatedContentDraftId }) {
+  const { rows: snapshotRows } = await tx.query(
+    `SELECT ls.limitation_snapshot_id::text AS limitation_snapshot_id
+       FROM kai.limitation_snapshots ls
+      WHERE ls.organization_id = $1::uuid AND ls.generated_content_draft_id = $2::uuid
+        AND NOT EXISTS (
+              SELECT 1 FROM kai.limitation_snapshots successor
+               WHERE successor.supersedes_snapshot_id = ls.limitation_snapshot_id
+            )`,
+    [organizationId, generatedContentDraftId],
+  );
+  const snapshot = snapshotRows[0];
+  if (!snapshot) return [];
+  const { rows: entryRows } = await tx.query(
+    `SELECT claim_id::text AS claim_id, evidence_item_id::text AS evidence_item_id, limitation_codes
+       FROM kai.limitation_snapshot_entries
+      WHERE limitation_snapshot_id = $1::uuid`,
+    [snapshot.limitation_snapshot_id],
+  );
+  return entryRows;
+}
+
 export async function evaluateGeneratedDraftExportReviewPacketInTransaction(
   tx,
   input,
@@ -2644,6 +2676,26 @@ export async function evaluateGeneratedDraftExportReviewPacketInTransaction(
     organizationId: input.organizationId,
     generatedContentDraftId: input.generatedContentDraftId,
   });
+  // Phase-14 UI traceability: project the exact existing governed
+  // limitation-code entries (see loadCurrentLimitationSnapshotEntries above)
+  // onto each citation by (claimId, evidenceItemId) - the same pairing key
+  // confirmLimitationSnapshot itself requires exact cited-pair coverage for.
+  // [] whenever no entry exists yet for that pair (snapshot not yet
+  // confirmed) - never a fabricated code.
+  const limitationEntries = await loadCurrentLimitationSnapshotEntries(tx, {
+    organizationId: input.organizationId,
+    generatedContentDraftId: input.generatedContentDraftId,
+  });
+  const limitationCodesByPair = new Map(
+    limitationEntries.map((entry) => [`${entry.claim_id}:${entry.evidence_item_id}`, [...new Set(entry.limitation_codes)].sort()]),
+  );
+  const blocksWithLimitationCodes = packetResult.data.blocks.map((block) => ({
+    ...block,
+    citations: block.citations.map((citation) => ({
+      ...citation,
+      limitationCodes: limitationCodesByPair.get(`${citation.claimId}:${citation.evidenceItemId}`) || [],
+    })),
+  }));
   // candidateReadyToPrepare must reflect only genuine PRE-candidate state.
   // validatorResult above is computed with finalGate/affirmativeHumanExportAuthority
   // hardcoded false (neither can exist before a candidate does), so
@@ -2681,7 +2733,7 @@ export async function evaluateGeneratedDraftExportReviewPacketInTransaction(
     limitationSnapshotConfirmed,
     candidateReadyToPrepare,
     validatorResult,
-    blocks: packetResult.data.blocks,
+    blocks: blocksWithLimitationCodes,
     exportReviewUpdatedAt: exportReviewResult.data.exportReviewUpdatedAt,
   });
 }
@@ -3486,6 +3538,7 @@ export const __generatedContentRepositoryContract = Object.freeze({
 });
 
 export const __generatedContentRepositoryTestables = Object.freeze({
+  loadCurrentLimitationSnapshotEntries,
   validateGeneratorInput,
   validateGeneratorResult,
   validateInput,

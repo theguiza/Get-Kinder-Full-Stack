@@ -6,6 +6,7 @@ import {
 import { buildKaiError } from "../errors/kaiErrors.js";
 import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationService.js";
 import { EXPORT_REVIEW_LIFECYCLE_PROFILES } from "../dictionary/exportReviewQueueContract.js";
+import { isLimitationCodeSet } from "../dictionary/exportCandidateContract.js";
 import { createProductionMetadataOnlyAuditForGeneratedDraftExportReview } from "./kaiMetadataOnlyAuditComposition.js";
 
 const EXPORT_REVIEW_ALLOWED_ROLES = new Set(["gk_admin"]);
@@ -273,6 +274,7 @@ const CITATION_KEYS = new Set([
   "affectedDimensionKeys",
   "affectedObjectIds",
   "approvedAudiences",
+  "limitationCodes",
 ]);
 const CITATION_KEYS_WITH_ID = new Set(["generatedContentCitationId", ...CITATION_KEYS]);
 const VALIDATOR_RESULT_KEYS = new Set([
@@ -424,6 +426,7 @@ function isGeneratedDraftExportReviewPacketDto(data) {
         if (!isStringArray(citation.approvedAudiences)) return false;
         if (!citation.approvedAudiences.every((value) => AUDIENCES.has(value))) return false;
       }
+      if (!isLimitationCodeSet(citation.limitationCodes)) return false;
     }
   }
   if (!isCanonicalUtcTimestamp(data.exportReviewUpdatedAt)) return false;

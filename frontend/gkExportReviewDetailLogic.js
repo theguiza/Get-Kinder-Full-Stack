@@ -256,6 +256,7 @@ export function toRenderModel(data) {
         claimId: citation?.claimId,
         evidenceItemId: citation?.evidenceItemId,
         sourceId: citation?.sourceId,
+        sourceCode: citation?.sourceCode ?? null,
         sourceVersionId: citation?.sourceVersionId,
         supportStrength: citation?.supportStrength,
         claimReviewStatus: citation?.claimReviewStatus,
@@ -264,6 +265,13 @@ export function toRenderModel(data) {
         blockerCodes: Array.isArray(citation?.blockerCodes) ? citation.blockerCodes : [],
         affectedDimensionKeys: Array.isArray(citation?.affectedDimensionKeys) ? citation.affectedDimensionKeys : [],
         affectedObjectIds: Array.isArray(citation?.affectedObjectIds) ? citation.affectedObjectIds : [],
+        // The authoritative claim-review governance decision's approved
+        // audiences - distinct from the packet-level requestedExportAudience
+        // (what export was requested for). null when no claim-review
+        // decision has ever been recorded; never derived from
+        // currentEligible/exportEligible/requestedExportAudience here.
+        approvedAudiences: Array.isArray(citation?.approvedAudiences) ? citation.approvedAudiences : null,
+        limitationCodes: Array.isArray(citation?.limitationCodes) ? citation.limitationCodes : [],
       })) : [],
     })),
   };
