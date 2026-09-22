@@ -55,6 +55,31 @@ function responseQueueItem(row) {
   };
 }
 
+function isOptionalMachineToken(value) {
+  return value === null || (typeof value === "string" && MACHINE_TOKEN_RE.test(value));
+}
+
+function isOptionalUuid(value) {
+  return value === null || canonicalUuid(value);
+}
+
+function isOptionalBoolean(value) {
+  return value === null || typeof value === "boolean";
+}
+
+// KAI Impact Library redesign, D-Correction 1: the smallest additive
+// read-model projection needed to present real, governed Evidence (not
+// Claims relabeled) in the Knowledge Studio Evidence tab and, later,
+// Impact Fact Detail's Sources tab. No new persistence, no schema change -
+// these columns already existed on kai.evidence_items (see
+// migrations/kai_sprint2_p2_01_evidence_lineage.sql); this only joins and
+// serializes them. Statement text is passed through verbatim (never
+// truncated/rewritten here); every other new field is validated the same
+// fail-closed way as the pre-existing claim fields above.
+function isOptionalStatement(value) {
+  return value === null || (typeof value === "string" && value.length > 0 && value.length <= 4000);
+}
+
 function responseClaimCandidate(row, organizationId) {
   if (
     !isPlainObject(row)
@@ -71,6 +96,14 @@ function responseClaimCandidate(row, organizationId) {
     || typeof row.claim_strength !== "string"
     || !MACHINE_TOKEN_RE.test(row.claim_strength)
     || !Array.isArray(row.review_queue_items)
+    || !isOptionalStatement(row.evidence_statement ?? null)
+    || !isOptionalMachineToken(row.evidence_support_strength ?? null)
+    || !isOptionalMachineToken(row.evidence_review_status ?? null)
+    || !isOptionalUuid(row.evidence_source_id ?? null)
+    || !isOptionalUuid(row.evidence_source_version_id ?? null)
+    || !isOptionalBoolean(row.evidence_internal_only ?? null)
+    || !isOptionalBoolean(row.evidence_public_use_allowed ?? null)
+    || !isOptionalBoolean(row.evidence_funder_use_allowed ?? null)
   ) {
     return null;
   }
@@ -84,6 +117,14 @@ function responseClaimCandidate(row, organizationId) {
     claimReviewStatus: row.claim_review_status,
     claimStrength: row.claim_strength,
     reviewQueueItems,
+    evidenceStatement: row.evidence_statement ?? null,
+    evidenceSupportStrength: row.evidence_support_strength ?? null,
+    evidenceReviewStatus: row.evidence_review_status ?? null,
+    evidenceSourceId: row.evidence_source_id ?? null,
+    evidenceSourceVersionId: row.evidence_source_version_id ?? null,
+    evidenceInternalOnly: row.evidence_internal_only ?? null,
+    evidencePublicUseAllowed: row.evidence_public_use_allowed ?? null,
+    evidenceFunderUseAllowed: row.evidence_funder_use_allowed ?? null,
   };
 }
 

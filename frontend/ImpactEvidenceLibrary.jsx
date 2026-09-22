@@ -3000,6 +3000,57 @@ export default function ImpactEvidenceLibrary({
           {knowledgeStudioTab === "evidence" ? (
           <div className="admin-card">
             <div className="d-flex justify-content-between align-items-center mb-2">
+              <h5 className="mb-0">Evidence</h5>
+              <span className="text-muted small">{claims.length} shown</span>
+            </div>
+            <div className="small text-muted mb-2">
+              What KAI has extracted from your organization's information, with its source and current review
+              posture - not an interpreted statement. Each item traces to exactly one governed evidence record.
+            </div>
+            {candidateClaimsError ? (
+              <div className="alert alert-warning py-2 small">Evidence: {candidateClaimsError}</div>
+            ) : null}
+            {claims.length === 0 && !loadingCandidateClaims ? (
+              <div className="text-muted small">No evidence extracted yet for this organization.</div>
+            ) : null}
+            <ul className="list-group">
+              {claims.map((claim) => (
+                <li key={claim.claimId} className="list-group-item">
+                  <div className="fw-semibold small">
+                    {claim.evidenceStatement || "Evidence statement not yet available"}
+                  </div>
+                  <div className="d-flex flex-wrap gap-2 mt-1">
+                    {claim.evidenceSupportStrength ? (
+                      <span className="badge text-bg-secondary">{claim.evidenceSupportStrength}</span>
+                    ) : null}
+                    {claim.evidenceReviewStatus ? (
+                      <span className="badge text-bg-light border">{claim.evidenceReviewStatus}</span>
+                    ) : null}
+                    {claim.evidenceInternalOnly === false ? (
+                      <span className="badge text-bg-light border">Not internal-only</span>
+                    ) : null}
+                  </div>
+                  <div className="mt-1">
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-outline-primary"
+                      onClick={() => {
+                        setSelectedClaimId(claim.claimId);
+                        traceabilityPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                        traceabilityPanelRef.current?.focus();
+                      }}
+                    >
+                      View source &amp; traceability
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </div>
+          ) : null}
+
+          <div className="admin-card">
+            <div className="d-flex justify-content-between align-items-center mb-2">
               <h5 className="mb-0">Claims</h5>
               <span className="text-muted small">{claims.length} shown</span>
             </div>
@@ -3123,7 +3174,6 @@ export default function ImpactEvidenceLibrary({
               </button>
             ) : null}
           </div>
-          ) : null}
 
           <div className="admin-card mt-3">
             <div className="d-flex justify-content-between align-items-center mb-2">
@@ -4263,6 +4313,17 @@ export default function ImpactEvidenceLibrary({
               </>
             ) : null}
           </div>
+
+          {knowledgeStudioTab === "processing" ? (
+            <div className="small text-muted mb-2">
+              Processing currently covers sensitivity &amp; allowed-use classification - the stage where KAI
+              determines what an uploaded file is allowed to be used for. Other processing stages (intake,
+              profiling, data-dictionary mapping, source promotion) are not yet exposed here.
+            </div>
+          ) : null}
+          {knowledgeStudioTab === "processing" && sensitivityCapability !== true ? (
+            <div className="text-muted small">Sensitivity &amp; allowed-use classification is not currently available for this organization.</div>
+          ) : null}
 
           {knowledgeStudioTab === "processing" && sensitivityCapability === true ? (
             <div className="admin-card mt-3">

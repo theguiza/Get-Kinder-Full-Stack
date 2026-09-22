@@ -35,8 +35,27 @@ test("3: Processing gates the existing real sensitivity/allowed-use review state
   assert.match(libSource, /\{knowledgeStudioTab === "processing" && intakeSensitivityProfileId && sensitivityCapability === true \? \(/);
 });
 
-test("4: Evidence gates the existing governed Claim Library section, preserving its real lineage/source data", () => {
-  assert.match(libSource, /\{knowledgeStudioTab === "evidence" \? \(\s*<div className="admin-card">\s*<div className="d-flex justify-content-between align-items-center mb-2">\s*<h5 className="mb-0">Claims<\/h5>/);
+test("4 (D-Correction 1): Evidence shows real evidence (statement/strength/review status/source), not the Claim Library relabeled - Claims moved to an always-visible, non-tab-gated section pending Package E", () => {
+  assert.match(libSource, /\{knowledgeStudioTab === "evidence" \? \(\s*<div className="admin-card">\s*<div className="d-flex justify-content-between align-items-center mb-2">\s*<h5 className="mb-0">Evidence<\/h5>/);
+  assert.match(libSource, /claim\.evidenceStatement \|\| "Evidence statement not yet available"/);
+  assert.match(libSource, /claim\.evidenceSupportStrength/);
+  assert.match(libSource, /claim\.evidenceReviewStatus/);
+  // Claims is no longer gated to the Evidence tab - it remains reachable,
+  // unconditionally, alongside the other preserved non-tab capabilities.
+  const claimsHeadingIndex = libSource.indexOf('<h5 className="mb-0">Claims</h5>');
+  assert.ok(claimsHeadingIndex > -1, "Claims section must still exist");
+  const precedingSlice = libSource.slice(Math.max(0, claimsHeadingIndex - 200), claimsHeadingIndex);
+  assert.doesNotMatch(precedingSlice, /knowledgeStudioTab ===/, "Claims must no longer be tab-gated to Evidence");
+});
+
+test("evidence read-model addition: the claim-library query joins kai.evidence_items read-only (no new persistence, no schema change) and the service/frontend project the real evidence fields", () => {
+  const readModelSource = readFileSync("Backend/kai/db/kaiClaimLibraryReadModels.js", "utf8");
+  const serviceSource = readFileSync("Backend/kai/services/kaiClaimLibraryService.js", "utf8");
+  const logicSource = readFileSync("frontend/impactEvidenceLibraryLogic.js", "utf8");
+  assert.match(readModelSource, /LEFT JOIN kai\.evidence_items e/);
+  assert.doesNotMatch(readModelSource, /\bINSERT\b|\bUPDATE\b|\bDELETE\b|\bTRUNCATE\b|FOR UPDATE|CREATE TABLE|ALTER TABLE/i);
+  assert.match(serviceSource, /evidenceStatement: row\.evidence_statement \?\? null,/);
+  assert.match(logicSource, /evidenceStatement: claim\.evidenceStatement \?\? null,/);
 });
 
 test("5: Gaps gates the existing organization-level Gaps and Risks section (same review-queue-derived data, no new fetch)", () => {
@@ -94,4 +113,22 @@ test("12: existing non-tab capabilities (Funder Requirements, Grant Response Pac
   assert.ok(workflowHeadingIndex > -1);
   const workflowPreceding = libSource.slice(Math.max(0, workflowHeadingIndex - 200), workflowHeadingIndex);
   assert.doesNotMatch(workflowPreceding, /knowledgeStudioTab ===/, "Claim & evidence workflow must remain unconditionally reachable");
+});
+
+test("D-Correction 3: Gap Detail no longer shows a raw claim UUID or a validator key as normal user-facing content", () => {
+  assert.doesNotMatch(gapDetailSource, /Claim \{typeof gap\.claimId/, "no truncated claim UUID display");
+  assert.doesNotMatch(gapDetailSource, /gap\.validatorKey/, "no validator key display");
+  assert.doesNotMatch(gapDetailSource, />\s*Governed by\s*</, "no 'Governed by' validator-key section");
+});
+
+test("D-Correction 3: known status enums are translated to human-readable text rather than shown as raw backend vocabulary", () => {
+  assert.match(gapDetailSource, /const STATUS_LABELS = Object\.freeze\(\{/);
+  assert.match(gapDetailSource, /unresolved: "Not yet resolved",/);
+  assert.match(gapDetailSource, /function humanizeStatus\(status\)/);
+});
+
+test("D-Correction 2: Processing states its real, honest scope and never fabricates progress for unimplemented stages", () => {
+  assert.match(libSource, /Processing currently covers sensitivity &amp; allowed-use classification/);
+  assert.match(libSource, /Other processing stages \(intake,\s*\n\s*profiling, data-dictionary mapping, source promotion\) are not yet exposed here\./);
+  assert.doesNotMatch(libSource, /progress\s*:\s*\d|percentComplete|progressPercent/i, "no fabricated progress metric anywhere in this file");
 });

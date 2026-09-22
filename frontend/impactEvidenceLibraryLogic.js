@@ -1807,6 +1807,17 @@ export function projectCandidateClaims(dto) {
       reviewStatus: item.review_status,
     })),
     libraryStatus: "needs_review",
+    // KAI Impact Library redesign, D-Correction 1 / Package E: the real,
+    // governed evidence item behind this claim (statement/strength/review
+    // status/source lineage/use-authority) - never a claim field relabeled.
+    evidenceStatement: claim.evidenceStatement ?? null,
+    evidenceSupportStrength: claim.evidenceSupportStrength ?? null,
+    evidenceReviewStatus: claim.evidenceReviewStatus ?? null,
+    evidenceSourceId: claim.evidenceSourceId ?? null,
+    evidenceSourceVersionId: claim.evidenceSourceVersionId ?? null,
+    evidenceInternalOnly: claim.evidenceInternalOnly ?? null,
+    evidencePublicUseAllowed: claim.evidencePublicUseAllowed ?? null,
+    evidenceFunderUseAllowed: claim.evidenceFunderUseAllowed ?? null,
   })).filter((claim) => isRouteUuid(claim.claimId) && isRouteUuid(claim.evidenceItemId));
 }
 

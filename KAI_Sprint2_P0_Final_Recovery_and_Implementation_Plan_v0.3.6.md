@@ -31593,3 +31593,81 @@ redesign) remains open; and the eventual destination of the non-tab
 capabilities (Funder Requirements, Grant Response Packet, Board Reporting,
 Generated Drafts) within the approved IA is not yet decided by any accepted
 package.
+
+### Package D-Correction — Evidence/Processing/Gap Detail semantic fixes (CLOSED LOCALLY)
+
+Bounded correction over Package D per owner review, applied without reopening D's tab IA or the file's overall structure.
+
+**D-Correction 1 (Evidence is not Claims):** inspected the repository for an
+existing organization-scoped evidence read path distinct from the Claim
+Library. None existed as a browsable list (evidence is otherwise only
+reachable one-claim-at-a-time via Traceability, or per-source-version via
+extraction actions) - but `kai.evidence_items` (created by
+`migrations/kai_sprint2_p2_01_evidence_lineage.sql`) already has real,
+governed columns (`statement`, `support_strength`, `evidence_review_status`,
+`source_id`, `source_version_id`, `internal_only`, `public_use_allowed`,
+`funder_use_allowed`) that the existing Claim Library query never selected.
+Implemented the smallest additive read-model projection: `Backend/kai/db/
+kaiClaimLibraryReadModels.js`'s existing query gained one additional
+read-only `LEFT JOIN kai.evidence_items e ON e.evidence_item_id =
+c.evidence_item_id AND e.organization_id = c.organization_id` (no new
+persistence, no schema change, no new endpoint); `kaiClaimLibraryService.js`
+allowlists and serializes the new fields (fail-closed, same validation
+convention as the pre-existing claim fields); `impactEvidenceLibraryLogic.js`'s
+`projectCandidateClaims` carries them through. The Evidence tab now renders
+real evidence (statement, support strength, review status) instead of the
+Claim Library relabeled. The pre-existing Claims section itself was **not
+deleted** - it moved to always-visible (no longer tab-gated), matching the
+other preserved non-tab capabilities, until Package E gives it its real
+"Impact Library" destination.
+
+**D-Correction 2 (Processing is not just sensitivity):** inspected
+`kaiIntakeService.js`, `kaiDataDictionaryService.js`,
+`kaiIntakeSensitivityProfileService.js` for other real, currently-reachable
+processing stages. Found `listDataDictionaryEntries` exists server-side but
+requires a specific `dataDictionaryId` with no existing organization-wide
+enumeration or frontend wiring anywhere in the repository - using it would
+require additional plumbing beyond a "smallest projection" and was not
+built here. Sensitivity/allowed-use classification remains the only
+processing stage with a genuinely wired, organization-scoped,
+already-fetched read today. Rather than fabricate additional stages, the
+Processing tab now states its real, honest scope explicitly and shows an
+honest empty state when sensitivity capability is unavailable - no new
+backend capability was added, no progress percentage or async state was
+invented anywhere.
+
+**D-Correction 3 (humanize Gap Detail):** removed the truncated claim UUID
+and the raw `validatorKey` from `KnowledgeStudioGapDetail.jsx`'s normal
+user-facing content. Added a small, honest `STATUS_LABELS` translation map
+for the known real status enum values already used elsewhere in this
+codebase (`unresolved`, `resolved`, `needs_gk_review`, `waiting_on_client`,
+etc.) - an unrecognized status is shown as-is rather than a fabricated
+label. Detail now reads: title (humanized dimension/basis key), what's
+missing, why it matters, current status (humanized), and the existing
+"View evidence & source context" action into Traceability. Still does not
+wire "Add to Plan" (Package G/G2).
+
+**No schema/migration change beyond a read-only JOIN. No new fabricated
+data. No production/database mutation, deployment, feature-flag change, or
+cloud/infrastructure change.**
+
+**Test evidence** (`DATABASE_URL=postgres://localhost:1/nonexistent_sentinel_db`
+set for every Node command; no database/cloud/production access):
+- `__tests__/kai-impact-library-knowledge-studio-tabs.spec.js` expanded to
+  14 cases: updated test 4 for the real Evidence content and Claims'
+  always-visible relocation; new tests for the evidence read-model addition,
+  D-Correction 2's honest Processing scope statement, and D-Correction 3's
+  removal of UUID/validator-key display plus status humanization. 14/14
+  PASS.
+- `kai-sprint2-impact-evidence-library.spec.js` (132 cases, including the
+  read model's existing organization-scoping/read-only/LEFT-JOIN-shape
+  assertions): all still PASS after the new JOIN and DTO fields.
+- Full non-integration suite (`__tests__/*.spec.js`, 4953 cases): 12
+  failures, byte-identical to the established baseline - 0 regressions.
+- Frontend build: `npm run build` (vite) -> succeeded at every step.
+- `git diff --check` -> PASS.
+
+**Status:** PACKAGE_D_CORRECTION_CLOSED_LOCALLY. No production or runtime
+closure claimed. No push, deployment, production mutation, database
+mutation, migration execution, feature-flag/configuration change,
+real-client-data access, or `00_KAI_CURRENT_STATE.md` update performed.
