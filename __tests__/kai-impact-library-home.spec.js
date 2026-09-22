@@ -60,7 +60,7 @@ test("ImpactLibraryApp wires Home to the real ImpactHomeView, not a placeholder,
     appSource,
     /activeSection === "home"\) \{\s*sectionContent = \(\s*<ImpactHomeView/,
   );
-  assert.match(appSource, /const SECTION_SHOWS_PROJECT_CONTEXT_BAR = Object\.freeze\(\{\s*knowledgeStudio: true,\s*\}\);/);
+  assert.match(appSource, /const SECTION_SHOWS_PROJECT_CONTEXT_BAR = Object\.freeze\(\{\s*knowledgeStudio: true,\s*improvementPlan: true,\s*\}\);/);
 });
 
 test("Home is the default landing section for /impact-library, matching the approved design's IA", () => {

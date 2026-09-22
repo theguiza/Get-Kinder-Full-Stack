@@ -21,6 +21,17 @@ import React from "react";
  * only server-authoritative fields. `onGoToTraceability` re-selects the
  * associated claim and scrolls to the existing Traceability panel, reusing
  * that real evidence/source/review-state view rather than duplicating it.
+ *
+ * Package G2 correction: "Add to Plan" is now wired, but ONLY for the "gap"
+ * category, since only that category carries a real gap_log_item_id -
+ * Improvement Practice's one supported origin FK. The other three
+ * categories (coverage finding / conflict / client follow-up) have no
+ * gap_log_item_id at all, so no button is shown for them - never a
+ * simulated success or a fabricated association. `onAddToPlan(gapLogItemId)`
+ * is expected to create a real persisted practice through the same
+ * authorized service path Improvement Plan itself uses (Package G/G2); a
+ * rejected/unauthorized attempt surfaces `addToPlanError` as-is, never a
+ * fabricated success.
  */
 
 const STATUS_LABELS = Object.freeze({
@@ -43,11 +54,20 @@ function humanizeStatus(status) {
   return STATUS_LABELS[status] || status;
 }
 
-export default function KnowledgeStudioGapDetail({ gap, onBack, onGoToTraceability }) {
+export default function KnowledgeStudioGapDetail({
+  gap,
+  onBack,
+  onGoToTraceability,
+  onAddToPlan,
+  addingToPlan,
+  addToPlanError,
+  addedToPlan,
+}) {
   if (!gap) return null;
 
   const category = gap.category;
   const title = humanizeDimensionKey(gap.dimensionKey) || humanizeDimensionKey(gap.basisCode) || "Evidence gap";
+  const canAddToPlan = category === "gap" && Boolean(gap.gapLogItemId) && typeof onAddToPlan === "function";
 
   const whatIsMissing = {
     gap: "This dimension does not yet have an accepted assessment.",
@@ -89,9 +109,21 @@ export default function KnowledgeStudioGapDetail({ gap, onBack, onGoToTraceabili
         </div>
       ) : null}
 
-      <button type="button" className="btn btn-sm btn-outline-primary" onClick={onGoToTraceability}>
+      <button type="button" className="btn btn-sm btn-outline-primary me-2" onClick={onGoToTraceability}>
         View evidence &amp; source context
       </button>
+
+      {canAddToPlan ? (
+        <button
+          type="button"
+          className="btn btn-sm btn-outline-secondary"
+          disabled={addingToPlan || addedToPlan}
+          onClick={() => onAddToPlan(gap.gapLogItemId)}
+        >
+          {addedToPlan ? "Added to Plan" : addingToPlan ? "Adding…" : "Add to Plan"}
+        </button>
+      ) : null}
+      {addToPlanError ? <div className="small text-danger mt-2">{addToPlanError}</div> : null}
     </div>
   );
 }

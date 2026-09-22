@@ -201,6 +201,12 @@ export default function ImpactEvidenceLibrary({
   onOrganizationIdChange,
   engagementId: parentEngagementId,
   onEngagementIdChange,
+  // Package G2: when supplied, wires Gap Detail's "Add to Plan" action to
+  // the real, authorized Improvement Practice create path Improvement Plan
+  // itself uses (frontend/ImpactLibraryApp.jsx). A caller that does not
+  // pass it simply never shows that button (KnowledgeStudioGapDetail's own
+  // fallback), never a simulated success.
+  onAddImprovementPractice,
 } = {}) {
   const [organizations, setOrganizations] = useState([]);
   const [localOrganizationId, setLocalOrganizationId] = useState("");
@@ -247,6 +253,37 @@ export default function ImpactEvidenceLibrary({
   // followup object from organizationGapsAndRisks, or null) currently
   // showing its Gap Detail view instead of the Gaps grid.
   const [selectedGap, setSelectedGap] = useState(null);
+  // Package G2: per-gap "Add to Plan" transient state, reset whenever a
+  // different gap is selected so a prior gap's success/error never leaks
+  // onto the next one.
+  const [addingImprovementPracticeGapId, setAddingImprovementPracticeGapId] = useState(null);
+  const [addImprovementPracticeError, setAddImprovementPracticeError] = useState("");
+  const [addedImprovementPracticeGapId, setAddedImprovementPracticeGapId] = useState(null);
+  const handleAddToPlan = useCallback(async (gapLogItemId) => {
+    if (typeof onAddImprovementPractice !== "function") return;
+    setAddingImprovementPracticeGapId(gapLogItemId);
+    setAddImprovementPracticeError("");
+    const dimensionLabel = typeof selectedGap?.dimensionKey === "string" && selectedGap.dimensionKey
+      ? selectedGap.dimensionKey.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase())
+      : null;
+    const result = await onAddImprovementPractice({
+      title: dimensionLabel ? `Resolve evidence gap: ${dimensionLabel}` : "Resolve evidence gap",
+      rationale: "Added from Knowledge Studio's Gaps tab to track resolving this evidence gap.",
+      cadence: "one_time",
+      engagementId: engagementId || undefined,
+      gapLogItemId,
+    });
+    setAddingImprovementPracticeGapId(null);
+    if (result?.ok) {
+      setAddedImprovementPracticeGapId(gapLogItemId);
+    } else {
+      setAddImprovementPracticeError(result?.error || "Could not add this gap to the Improvement Plan.");
+    }
+  }, [onAddImprovementPractice, selectedGap, engagementId]);
+  useEffect(() => {
+    setAddImprovementPracticeError("");
+    setAddedImprovementPracticeGapId(null);
+  }, [selectedGap]);
   useEffect(() => {
     if (knowledgeStudioTab !== "gaps") setSelectedGap(null);
   }, [knowledgeStudioTab]);
@@ -2751,6 +2788,10 @@ export default function ImpactEvidenceLibrary({
               traceabilityPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
               traceabilityPanelRef.current?.focus();
             }}
+            onAddToPlan={typeof onAddImprovementPractice === "function" ? handleAddToPlan : undefined}
+            addingToPlan={addingImprovementPracticeGapId === selectedGap.gapLogItemId}
+            addedToPlan={addedImprovementPracticeGapId === selectedGap.gapLogItemId}
+            addToPlanError={addImprovementPracticeError}
           />
         ) : (
         <>

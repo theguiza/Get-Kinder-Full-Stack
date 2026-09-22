@@ -1,32 +1,24 @@
 import React, { useCallback, useEffect, useState } from "react";
 
 import ImpactLibraryShell, { ProjectContextBar } from "./impactLibraryShell.jsx";
-import { organizationsPath, organizationProfilePath, engagementsPath, createEngagementPath, postJson } from "./kaiWebIntakeLogic.js";
+import {
+  organizationsPath,
+  organizationProfilePath,
+  engagementsPath,
+  createEngagementPath,
+  improvementPracticesPath,
+  improvementPracticeStatusPath,
+  postJson,
+} from "./kaiWebIntakeLogic.js";
 import { getJson } from "./impactEvidenceLibraryLogic.js";
 import ImpactEvidenceLibrary from "./ImpactEvidenceLibrary.jsx";
 import ImpactHomeView from "./ImpactHomeView.jsx";
 import ImpactLibraryListView from "./impactLibrary/ImpactLibraryListView.jsx";
 import ImpactFactDetailView from "./impactLibrary/ImpactFactDetailView.jsx";
 import ProjectsView from "./projects/ProjectsView.jsx";
+import ImprovementPlanView from "./improvementPlan/ImprovementPlanView.jsx";
 import NeedsAttentionView from "./needsAttention/NeedsAttentionView.jsx";
 import { useNeedsAttention } from "./needsAttention/useNeedsAttention.js";
-
-/**
- * A single, honestly-labeled placeholder for approved-design sections that
- * are not yet built by this rollout. Never fabricates data or a working
- * interaction for the missing view - it only names the section and states
- * plainly that it is coming in a later update.
- */
-function ComingSoonPanel({ title }) {
-  return (
-    <div>
-      <h1 style={{ fontSize: 26, fontWeight: 700, color: "#2C2E3A", margin: "0 0 8px" }}>{title}</h1>
-      <p style={{ fontSize: 14.5, color: "#5B6478", maxWidth: 560, lineHeight: 1.5 }}>
-        This part of the redesigned Impact Library is being rolled out and isn&rsquo;t available yet.
-      </p>
-    </div>
-  );
-}
 
 /**
  * Per-view classification of whether "All organizational knowledge" (no
@@ -39,22 +31,29 @@ function ComingSoonPanel({ title }) {
  * Impact Library and Impact Fact Detail (Package E) are also
  * ORGANIZATION_WIDE: claimLibraryCandidatesPath and claimTraceabilityPath
  * take only organizationId (+ claimId/audience), never an engagementId.
- * Improvement Plan/Projects are not yet built (Packages G/F), so they are
- * not yet classified - this map is extended as each one lands, never
- * assumed.
+ * Improvement Plan (Package G2) is also ORGANIZATION_WIDE:
+ * GET .../improvement-practices supports both an organization-only list and
+ * an engagement-scoped list (?engagement_id=...), so "All organizational
+ * knowledge" is honest there too. Projects is not yet classified here - it
+ * shows the shared list/selector itself rather than a filtered read.
  */
 const SECTION_ALLOWS_ORGANIZATION_WIDE = Object.freeze({
   knowledgeStudio: true,
   impactLibrary: true,
+  improvementPlan: true,
 });
 
 // Sections whose content actually consumes the shared Project/Engagement
 // context today. Home's and Impact Library's real reads are all
 // organization-wide and do not yet take an engagement filter, so the
 // selector is not shown there - showing it would imply a filtering
-// behavior that does not exist.
+// behavior that does not exist. Improvement Plan can show both
+// organization-level and Project-scoped practices at once, so the bar (with
+// its "All organizational knowledge" option) drives the same
+// selectedEngagementId used to filter the list.
 const SECTION_SHOWS_PROJECT_CONTEXT_BAR = Object.freeze({
   knowledgeStudio: true,
+  improvementPlan: true,
 });
 
 /**
@@ -205,6 +204,88 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
     return { ok: true };
   }, [selectedOrganizationId, refetchEngagements]);
 
+  // Package G2: Improvement Plan over the new kai.improvement_practices
+  // persistence. Re-fetched whenever the active organization OR the shared
+  // Project/Engagement selection changes, since the list is organization-
+  // wide when no Project is selected and Project-scoped otherwise (unlike
+  // engagements/Projects themselves, which are always organization-wide).
+  const [improvementPractices, setImprovementPractices] = useState([]);
+  const [improvementPracticesLoaded, setImprovementPracticesLoaded] = useState(false);
+  const [creatingImprovementPractice, setCreatingImprovementPractice] = useState(false);
+  const [createImprovementPracticeError, setCreateImprovementPracticeError] = useState("");
+  const [changingImprovementPracticeStatusId, setChangingImprovementPracticeStatusId] = useState(null);
+  const [improvementPracticeStatusError, setImprovementPracticeStatusError] = useState("");
+
+  const refetchImprovementPractices = useCallback(async (organizationId, engagementId) => {
+    if (!organizationId) {
+      setImprovementPractices([]);
+      setImprovementPracticesLoaded(false);
+      return;
+    }
+    const result = await getJson(improvementPracticesPath(organizationId, engagementId));
+    setImprovementPracticesLoaded(true);
+    if (result.statusCode !== 200 || !result.body?.ok) {
+      setImprovementPractices([]);
+      return;
+    }
+    setImprovementPractices(result.body.data || []);
+  }, []);
+
+  useEffect(() => {
+    setImprovementPractices([]);
+    setImprovementPracticesLoaded(false);
+    if (!selectedOrganizationId) return undefined;
+    let cancelled = false;
+    (async () => {
+      if (cancelled) return;
+      await refetchImprovementPractices(selectedOrganizationId, selectedEngagementId);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedOrganizationId, selectedEngagementId, refetchImprovementPractices]);
+
+  const createImprovementPractice = useCallback(async (fields) => {
+    if (!selectedOrganizationId) return { ok: false, error: "Select an organization first." };
+    setCreatingImprovementPractice(true);
+    setCreateImprovementPracticeError("");
+    const body = {
+      title: fields.title,
+      rationale: fields.rationale,
+      cadence: fields.cadence,
+    };
+    if (fields.engagementId) body.engagement_id = fields.engagementId;
+    if (fields.nextDueDate) body.next_due_date = fields.nextDueDate;
+    if (fields.gapLogItemId) body.gap_log_item_id = fields.gapLogItemId;
+    const result = await postJson(improvementPracticesPath(selectedOrganizationId), body);
+    setCreatingImprovementPractice(false);
+    if (result.statusCode !== 201 || !result.body?.ok) {
+      const message = result.body?.error?.message || "Could not create the practice.";
+      setCreateImprovementPracticeError(message);
+      return { ok: false, error: message };
+    }
+    await refetchImprovementPractices(selectedOrganizationId, selectedEngagementId);
+    return { ok: true };
+  }, [selectedOrganizationId, selectedEngagementId, refetchImprovementPractices]);
+
+  const changeImprovementPracticeStatus = useCallback(async (practice, status) => {
+    if (!selectedOrganizationId) return { ok: false, error: "Select an organization first." };
+    setChangingImprovementPracticeStatusId(practice.improvement_practice_id);
+    setImprovementPracticeStatusError("");
+    const result = await postJson(
+      improvementPracticeStatusPath(selectedOrganizationId, practice.improvement_practice_id),
+      { expected_updated_at: practice.updated_at, status },
+    );
+    setChangingImprovementPracticeStatusId(null);
+    if (result.statusCode !== 200 || !result.body?.ok) {
+      const message = result.body?.error?.message || "Could not update the practice status.";
+      setImprovementPracticeStatusError(message);
+      return { ok: false, error: message };
+    }
+    await refetchImprovementPractices(selectedOrganizationId, selectedEngagementId);
+    return { ok: true };
+  }, [selectedOrganizationId, selectedEngagementId, refetchImprovementPractices]);
+
   // Package H: the one shared Needs Attention state, feeding both the
   // header bell's real hasAttention signal and the full Needs Attention
   // view - never a fabricated dot, never a second review truth from
@@ -229,6 +310,7 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
         onOrganizationIdChange={setSelectedOrganizationId}
         engagementId={selectedEngagementId}
         onEngagementIdChange={setSelectedEngagementId}
+        onAddImprovementPractice={createImprovementPractice}
       />
     );
   } else if (activeSection === "home") {
@@ -252,7 +334,20 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
       />
     );
   } else if (activeSection === "improvementPlan") {
-    sectionContent = <ComingSoonPanel title="Improvement Plan" />;
+    sectionContent = (
+      <ImprovementPlanView
+        practices={improvementPractices}
+        practicesLoaded={improvementPracticesLoaded}
+        engagements={engagements}
+        selectedEngagementId={selectedEngagementId}
+        onCreatePractice={createImprovementPractice}
+        creating={creatingImprovementPractice}
+        createError={createImprovementPracticeError}
+        onChangeStatus={changeImprovementPracticeStatus}
+        changingStatusId={changingImprovementPracticeStatusId}
+        statusError={improvementPracticeStatusError}
+      />
+    );
   } else if (activeSection === "projects") {
     sectionContent = (
       <ProjectsView

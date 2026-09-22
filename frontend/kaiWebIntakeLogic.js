@@ -18,6 +18,22 @@ export function organizationProfilePath(organizationId) {
   return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/profile`;
 }
 
+// KAI Impact Library redesign, Package G/G2: Improvement Plan over the new
+// kai.improvement_practices table. engagementId is optional - omitted means
+// the organization-wide list (no engagement_id query param sent).
+export function improvementPracticesPath(organizationId, engagementId) {
+  const base = `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/improvement-practices`;
+  return engagementId ? `${base}?engagement_id=${encodeURIComponent(engagementId)}` : base;
+}
+
+export function improvementPracticePath(organizationId, improvementPracticeId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/improvement-practices/${encodeURIComponent(improvementPracticeId)}`;
+}
+
+export function improvementPracticeStatusPath(organizationId, improvementPracticeId) {
+  return `${improvementPracticePath(organizationId, improvementPracticeId)}/status`;
+}
+
 export function batchesPath(organizationId) {
   return `${BASE_PATH}/admin/batches?organization_id=${encodeURIComponent(organizationId)}`;
 }

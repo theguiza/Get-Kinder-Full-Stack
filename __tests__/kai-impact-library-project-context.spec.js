@@ -16,7 +16,7 @@ const webIntakeSource = readFileSync("frontend/KaiWebIntake.jsx", "utf8");
 const libSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
 
 test("1: the Project list is fetched from the existing engagementsPath()/listAuthorizedEngagements read path, scoped to the active organization", () => {
-  assert.match(appSource, /import \{ organizationsPath, organizationProfilePath, engagementsPath, createEngagementPath, postJson \} from "\.\/kaiWebIntakeLogic\.js";/);
+  assert.match(appSource, /organizationsPath,\s*organizationProfilePath,\s*engagementsPath,\s*createEngagementPath,/);
   assert.match(appSource, /getJson\(engagementsPath\(organizationId\)\)/);
 });
 
@@ -75,7 +75,7 @@ test("9: the Project selector prefers the human-readable engagement_code and onl
 });
 
 test("10: \"All organizational knowledge\" is only offered when the active section is explicitly classified as organization-wide", () => {
-  assert.match(appSource, /const SECTION_ALLOWS_ORGANIZATION_WIDE = Object\.freeze\(\{\s*knowledgeStudio: true,\s*impactLibrary: true,\s*\}\);/);
+  assert.match(appSource, /const SECTION_ALLOWS_ORGANIZATION_WIDE = Object\.freeze\(\{\s*knowledgeStudio: true,\s*impactLibrary: true,\s*improvementPlan: true,\s*\}\);/);
   assert.match(appSource, /const allowOrganizationWide = SECTION_ALLOWS_ORGANIZATION_WIDE\[activeSection\] === true;/);
   assert.match(shellSource, /\{allowOrganizationWide \? <option value="">All organizational knowledge<\/option> : null\}/);
 });
