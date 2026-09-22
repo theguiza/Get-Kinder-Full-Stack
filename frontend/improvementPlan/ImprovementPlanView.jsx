@@ -124,12 +124,14 @@ export default function ImprovementPlanView({
             value={title}
             onChange={(event) => setTitle(event.target.value)}
             placeholder="Practice title"
+            aria-label="Practice title"
             style={{ fontSize: 14, padding: "9px 12px", borderRadius: 8, border: "1px solid rgba(69,90,124,0.22)" }}
           />
           <textarea
             value={rationale}
             onChange={(event) => setRationale(event.target.value)}
             placeholder="Why this matters"
+            aria-label="Why this matters"
             rows={2}
             style={{ fontSize: 14, padding: "9px 12px", borderRadius: 8, border: "1px solid rgba(69,90,124,0.22)", fontFamily: "inherit", resize: "vertical" }}
           />
@@ -219,7 +221,14 @@ export default function ImprovementPlanView({
                   value={practice.status}
                   disabled={changingStatusId === practice.improvement_practice_id}
                   onChange={(event) => onChangeStatus(practice, event.target.value)}
-                  style={{ fontSize: 12.5, padding: "4px 6px", borderRadius: 6, border: "1px solid rgba(69,90,124,0.22)" }}
+                  aria-label="Practice status"
+                  style={{
+                    fontSize: 13,
+                    padding: "10px 10px",
+                    minHeight: 44,
+                    borderRadius: 6,
+                    border: "1px solid rgba(69,90,124,0.22)",
+                  }}
                 >
                   <option value="recommended">{humanizeImprovementPracticeStatus("recommended")}</option>
                   <option value="active">{humanizeImprovementPracticeStatus("active")}</option>
