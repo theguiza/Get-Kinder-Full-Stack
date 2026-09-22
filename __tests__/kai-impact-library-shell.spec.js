@@ -56,9 +56,11 @@ test("frontend/ImpactLibraryApp.jsx composes the existing ImpactEvidenceLibrary 
   assert.equal(otherRenders.length, 1, "ImpactEvidenceLibrary must be composed in exactly one place");
 });
 
-test("frontend/ImpactLibraryApp.jsx never sets hasAttention true without a real Needs Attention data source (no fabricated alert)", () => {
+test("frontend/ImpactLibraryApp.jsx sources hasAttention from the real Package H Needs Attention hook, never a hardcoded/fabricated value", () => {
   const source = readFileSync("frontend/ImpactLibraryApp.jsx", "utf8");
-  assert.match(source, /hasAttention=\{false\}/);
+  assert.match(source, /import \{ useNeedsAttention \} from "\.\/needsAttention\/useNeedsAttention\.js";/);
+  assert.match(source, /const needsAttention = useNeedsAttention\(selectedOrganizationId\);/);
+  assert.match(source, /hasAttention=\{needsAttention\.hasAttention\}/);
 });
 
 test("frontend/kaiWebIntakeLogic.js exposes organizationProfilePath alongside the existing organizations/engagements path builders", () => {

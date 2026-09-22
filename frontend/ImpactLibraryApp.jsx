@@ -8,6 +8,8 @@ import ImpactHomeView from "./ImpactHomeView.jsx";
 import ImpactLibraryListView from "./impactLibrary/ImpactLibraryListView.jsx";
 import ImpactFactDetailView from "./impactLibrary/ImpactFactDetailView.jsx";
 import ProjectsView from "./projects/ProjectsView.jsx";
+import NeedsAttentionView from "./needsAttention/NeedsAttentionView.jsx";
+import { useNeedsAttention } from "./needsAttention/useNeedsAttention.js";
 
 /**
  * A single, honestly-labeled placeholder for approved-design sections that
@@ -201,6 +203,12 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
     return { ok: true };
   }, [selectedOrganizationId, refetchEngagements]);
 
+  // Package H: the one shared Needs Attention state, feeding both the
+  // header bell's real hasAttention signal and the full Needs Attention
+  // view - never a fabricated dot, never a second review truth from
+  // Knowledge Studio's own Reviews tab.
+  const needsAttention = useNeedsAttention(selectedOrganizationId);
+
   const activeProfile = organizationProfiles[selectedOrganizationId] || null;
   const organizationName = activeProfile?.name || "";
   const organizationLogoUrl = activeProfile?.logoUrl || "";
@@ -256,7 +264,18 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
       />
     );
   } else if (activeSection === "needsAttention") {
-    sectionContent = <ComingSoonPanel title="Needs Attention" />;
+    sectionContent = (
+      <NeedsAttentionView
+        organizationId={selectedOrganizationId}
+        resolved={needsAttention.resolved}
+        conclusivelyEmpty={needsAttention.conclusivelyEmpty}
+        claimReviewItems={needsAttention.claimReviewItems}
+        evidenceReviewItems={needsAttention.evidenceReviewItems}
+        followupItems={needsAttention.followupItems}
+        sensitivityItems={needsAttention.sensitivityItems}
+        sensitivityStatus={needsAttention.sensitivityStatus}
+      />
+    );
   }
 
   return (
@@ -268,7 +287,7 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
       organizations={organizationsForSwitcher}
       selectedOrganizationId={selectedOrganizationId}
       onSelectOrganization={setSelectedOrganizationId}
-      hasAttention={false}
+      hasAttention={needsAttention.hasAttention}
       onOpenNeedsAttention={() => setActiveSection("needsAttention")}
     >
       {SECTION_SHOWS_PROJECT_CONTEXT_BAR[activeSection] === true ? (

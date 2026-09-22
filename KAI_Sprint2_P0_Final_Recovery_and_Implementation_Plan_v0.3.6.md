@@ -32004,3 +32004,90 @@ condition for Package G - continuing into unrelated authorized packages
 explicit, separate schema/database change authorization before any further
 G work (migration authoring, table creation, or a G-backed UI) may
 proceed.
+
+### Package H/H2 — Needs Attention (CLOSED LOCALLY)
+
+**Authorization inspected first, per instruction:** all four owner-approved
+MVP domains (claim/Impact Fact review, evidence review, source sensitivity/
+allowed-use review, client questions/follow-ups) are already produced by
+existing, already-governed reads: the organization-scope Review Queue
+rollup (`organizationReviewQueuePath`/`listOrganizationReviewQueue`,
+already used by Knowledge Studio's Reviews tab and by Impact Home) and the
+existing Phase-5 sensitivity rollup
+(`sensitivityCapabilitiesPath`/`sensitivityReviewQueuePath`, already used
+by Knowledge Studio's Processing tab). **No new backend capability was
+required for these four domains** - this package is entirely a new,
+shared presentation of already-authoritative state.
+
+**Domain 5 (intake/file problems requiring action) is intentionally
+omitted, not fabricated:** searched for an existing organization-wide read
+of "files/batches needing action" and found none - only per-file status
+columns and per-batch/per-file reads scoped one at a time. Recorded as a
+smallest-missing-capability follow-up rather than built without a real
+read path.
+
+**What changed:**
+- `frontend/needsAttention/useNeedsAttention.js` (new): fetches the same
+  two existing rollups (Review Queue + sensitivity) independently of
+  Knowledge Studio's own fetch of the same data - both are read-only,
+  idempotent GETs, so duplication carries no correctness risk (unlike
+  organization/engagement *selection*, which Package C0 correctly made a
+  single shared source of truth). Splits `reviewQueueItems`' existing
+  blocker codes into claim-review / evidence-review / client-followup
+  buckets using the already-existing `reviewQueueBlockerActionability`/
+  `blockerDisplayText` functions - no new classification logic invented.
+  `hasAttention` (for the header bell) is `true` only once every
+  underlying rollup has conclusively resolved (never a fabricated
+  positive *or* negative signal) - the same "never guess while unknown"
+  discipline this codebase already applies to
+  `reviewQueueIsConclusivelyEmpty` elsewhere.
+- `frontend/needsAttention/NeedsAttentionView.jsx` (new): the full inbox
+  view, reached only via the header bell (not a left-nav item, unchanged
+  from Package B). Labels items by claim id and the real, existing
+  `blockerDisplayText` - no fabricated claim statement or marketing copy.
+- `frontend/ImpactLibraryApp.jsx`: wires `useNeedsAttention` once,
+  supplying both the shell's bell (`hasAttention`, previously hardcoded
+  `false`) and the full `NeedsAttentionView` - one shared state, not two.
+  Classified organization-wide (same as Reviews); does not show the shared
+  Project context bar.
+
+**Knowledge Studio Reviews / Needs Attention relationship preserved:**
+both now demonstrably read the same authoritative Review Queue/sensitivity
+rollups - no second review truth was created. Knowledge Studio Reviews
+remains the contextual view; Needs Attention is the cross-product view of
+the identical underlying state.
+
+**No schema/migration change. No new backend read added (domains 1-4 reuse
+existing endpoints entirely; domain 5 was not built). No production/
+database mutation, deployment, feature-flag change, or cloud/
+infrastructure change.**
+
+**Test evidence** (`DATABASE_URL=postgres://localhost:1/nonexistent_sentinel_db`
+set for every Node command; no database/cloud/production access):
+- New: `__tests__/kai-impact-library-needs-attention.spec.js` (7 cases) -
+  proves the same existing read paths are reused (no second review truth,
+  no new endpoint); the four MVP domains are derived from the shared
+  rollup and domain 5 is intentionally, honestly omitted; the bell's
+  `hasAttention` is never fabricated in either direction; the app wires one
+  shared hook to both the bell and the full view; Needs Attention remains
+  bell-only, never a nav item; no fabricated claim statement/copy; the
+  Project context bar is correctly not shown. 7/7 PASS.
+- One existing Package B test updated for the real (no longer hardcoded)
+  `hasAttention` wiring (`kai-impact-library-shell.spec.js`) - still PASS,
+  same underlying "never fabricated" guarantee, now proven against the
+  real hook instead of a literal `false`.
+- Full non-integration suite (`__tests__/*.spec.js`, 4996 cases): 12
+  failures, byte-identical to the established baseline - 0 regressions.
+- Frontend build: `npm run build` (vite) -> succeeded.
+- `git diff --check` -> PASS.
+
+**Status:** PACKAGE_H_H2_NEEDS_ATTENTION_CLOSED_LOCALLY. No production or
+runtime closure claimed. No push, deployment, production mutation,
+database mutation, migration execution, feature-flag/configuration
+change, real-client-data access, or `00_KAI_CURRENT_STATE.md` update
+performed.
+
+**Recorded follow-up (NOT_CONFIRMED, not blocking):** domain 5
+(intake/file problems requiring action) has no existing organization-wide
+read path and was not built; a future package would need to identify or
+add the smallest such read model before including it here.
