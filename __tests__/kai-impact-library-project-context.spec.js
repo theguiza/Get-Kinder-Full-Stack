@@ -74,7 +74,7 @@ test("9: the Project selector prefers the human-readable engagement_code and onl
 });
 
 test("10: \"All organizational knowledge\" is only offered when the active section is explicitly classified as organization-wide", () => {
-  assert.match(appSource, /const SECTION_ALLOWS_ORGANIZATION_WIDE = Object\.freeze\(\{\s*knowledgeStudio: true,\s*\}\);/);
+  assert.match(appSource, /const SECTION_ALLOWS_ORGANIZATION_WIDE = Object\.freeze\(\{\s*knowledgeStudio: true,\s*impactLibrary: true,\s*\}\);/);
   assert.match(appSource, /const allowOrganizationWide = SECTION_ALLOWS_ORGANIZATION_WIDE\[activeSection\] === true;/);
   assert.match(shellSource, /\{allowOrganizationWide \? <option value="">All organizational knowledge<\/option> : null\}/);
 });

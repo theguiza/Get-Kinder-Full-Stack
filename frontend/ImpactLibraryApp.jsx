@@ -5,6 +5,8 @@ import { organizationsPath, organizationProfilePath, engagementsPath } from "./k
 import { getJson } from "./impactEvidenceLibraryLogic.js";
 import ImpactEvidenceLibrary from "./ImpactEvidenceLibrary.jsx";
 import ImpactHomeView from "./ImpactHomeView.jsx";
+import ImpactLibraryListView from "./impactLibrary/ImpactLibraryListView.jsx";
+import ImpactFactDetailView from "./impactLibrary/ImpactFactDetailView.jsx";
 
 /**
  * A single, honestly-labeled placeholder for approved-design sections that
@@ -31,19 +33,23 @@ function ComingSoonPanel({ title }) {
  * Funder Requirements / Grant Response Packet / Board Reporting sub-features
  * are ENGAGEMENT_SCOPED_ONLY, and those already render their own existing
  * "select an organization/engagement" gate when no engagement is active.
- * Home/Impact Library/Improvement Plan/Projects are not yet built (Packages
- * C/E/F/G), so they are not yet classified - this map is extended as each
- * one lands, never assumed.
+ * Impact Library and Impact Fact Detail (Package E) are also
+ * ORGANIZATION_WIDE: claimLibraryCandidatesPath and claimTraceabilityPath
+ * take only organizationId (+ claimId/audience), never an engagementId.
+ * Improvement Plan/Projects are not yet built (Packages G/F), so they are
+ * not yet classified - this map is extended as each one lands, never
+ * assumed.
  */
 const SECTION_ALLOWS_ORGANIZATION_WIDE = Object.freeze({
   knowledgeStudio: true,
+  impactLibrary: true,
 });
 
 // Sections whose content actually consumes the shared Project/Engagement
-// context today. Home's real metrics (Impact Facts, Recommendations, Needs
-// your attention) are all organization-wide reads that do not yet take an
-// engagement filter, so the selector is not shown there - showing it would
-// imply a filtering behavior that does not exist.
+// context today. Home's and Impact Library's real reads are all
+// organization-wide and do not yet take an engagement filter, so the
+// selector is not shown there - showing it would imply a filtering
+// behavior that does not exist.
 const SECTION_SHOWS_PROJECT_CONTEXT_BAR = Object.freeze({
   knowledgeStudio: true,
 });
@@ -69,6 +75,14 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
   const [engagements, setEngagements] = useState([]);
   const [engagementsLoaded, setEngagementsLoaded] = useState(false);
   const [selectedEngagementId, setSelectedEngagementId] = useState("");
+
+  // Package E: which Impact Fact (claimId), if any, Impact Library is
+  // currently drilled into. Reset whenever the section or organization
+  // changes so a stale selection from a prior organization can never leak.
+  const [selectedImpactFactClaimId, setSelectedImpactFactClaimId] = useState(null);
+  useEffect(() => {
+    setSelectedImpactFactClaimId(null);
+  }, [activeSection, selectedOrganizationId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -176,7 +190,18 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
       />
     );
   } else if (activeSection === "impactLibrary") {
-    sectionContent = <ComingSoonPanel title="Impact Library" />;
+    sectionContent = selectedImpactFactClaimId ? (
+      <ImpactFactDetailView
+        organizationId={selectedOrganizationId}
+        claimId={selectedImpactFactClaimId}
+        onBack={() => setSelectedImpactFactClaimId(null)}
+      />
+    ) : (
+      <ImpactLibraryListView
+        organizationId={selectedOrganizationId}
+        onViewFact={setSelectedImpactFactClaimId}
+      />
+    );
   } else if (activeSection === "improvementPlan") {
     sectionContent = <ComingSoonPanel title="Improvement Plan" />;
   } else if (activeSection === "projects") {

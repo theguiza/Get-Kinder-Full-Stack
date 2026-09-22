@@ -31671,3 +31671,93 @@ set for every Node command; no database/cloud/production access):
 closure claimed. No push, deployment, production mutation, database
 mutation, migration execution, feature-flag/configuration change,
 real-client-data access, or `00_KAI_CURRENT_STATE.md` update performed.
+
+### Package E — Impact Library + Impact Fact Detail (CLOSED LOCALLY)
+
+**Impact Fact remains a UI projection, not persistence:** built entirely
+over the existing governed Claim Library
+(`claimLibraryCandidatesPath`/`listClaimLibraryCandidates`, already used
+by Home and Knowledge Studio's Evidence tab) and the existing per-claim
+Traceability read (`claimTraceabilityPath`/`projectTraceability`, the same
+data Knowledge Studio's Traceability panel already fetches). No
+`kai.impact_facts` table, service, or endpoint was created.
+
+**What changed:**
+- `frontend/impactLibrary/ImpactLibraryListView.jsx` (new): organization-
+  wide list of Impact Facts (claims), each card showing the real evidence
+  statement (from D-Correction 1's read-model addition), a review-status
+  badge (Reviewed/Needs review, from the real `claim_review_status`
+  values), claim type, and claim/evidence strength. No "Program," "Period,"
+  or tags shown - none of that data exists in KAI today, so none was
+  fabricated to match the mockup's example cards.
+- `frontend/impactLibrary/ImpactFactDetailView.jsx` (new): the approved
+  five tabs, all mapped onto the existing Traceability projection's
+  already-present fields - no new fetch beyond re-requesting per selected
+  audience:
+  - **Overview**: evidence strength, review status, requested-audience
+    eligibility, and the real statement text.
+  - **Sources**: real source/source-version/locator lineage
+    (`traceability.source`/`.sourceVersion`/`.locator`) - "why can KAI say
+    this," not raw ids.
+  - **Limitations**: real dimension "known limitation"/"unresolved" states,
+    open gap items, and unreviewed potential conflicts - nothing invented.
+  - **Allowed use**: real per-audience use-authority flags
+    (`internal_only`/`funder_use_allowed`/`public_use_allowed`, from
+    D-Correction 1) plus real audience eligibility/blocker text: eligibility
+    is explicitly not presented as approval (a fixed disclaimer line, matching
+    the same governance-truth rule this codebase already applies
+    elsewhere).
+  - **History**: no human-readable, timestamped history read path exists
+    for a claim anywhere in the repository - only its current review
+    decision outcome. Shown honestly as "Current state," with an explicit
+    "not yet available" message rather than a fabricated timeline.
+- **"Use this"**: inspected existing generation/reuse actions (Evidence
+  Summary, Grant Response Packet, Board Reporting) - all are
+  engagement-scoped and specific to their own destinations, not a generic
+  "reuse this claim" action. No such general action exists, so none was
+  fabricated; recorded NOT_CONFIRMED. Those existing generation
+  capabilities remain exactly where Package D left them (always-visible,
+  non-tab-gated) - untouched by this package.
+- `frontend/ImpactLibraryApp.jsx`: wires `impactLibrary` to the real list/
+  detail views with claimId-based drill-in state, reset on organization or
+  section change. Classified `impactLibrary: true` in
+  `SECTION_ALLOWS_ORGANIZATION_WIDE` (`claimLibraryCandidatesPath`/
+  `claimTraceabilityPath` take no `engagementId`) and deliberately **not**
+  added to `SECTION_SHOWS_PROJECT_CONTEXT_BAR` - showing the shared
+  Project selector on an organization-wide view would imply filtering that
+  doesn't happen.
+
+**Traceability preserved:** the existing Knowledge Studio Traceability
+panel was not touched, deleted, or retired - Impact Fact Detail is a new,
+separate presentation of the same underlying read, proven independently
+via its own tests. Retiring the old panel's user-facing duplication is
+left for a later package once Impact Fact Detail's coverage is confirmed
+sufficient in practice.
+
+**No schema/migration change. No new persistence. No production/database
+mutation, deployment, feature-flag change, or cloud/infrastructure
+change.**
+
+**Test evidence** (`DATABASE_URL=postgres://localhost:1/nonexistent_sentinel_db`
+set for every Node command; no database/cloud/production access):
+- New: `__tests__/kai-impact-library-fact-detail.spec.js` (11 cases) -
+  proves the list/detail views reuse only existing read paths; no
+  fabricated Program/Period/tags fields; all five tabs present with
+  Overview default; Sources/Limitations/Allowed-use/History are each
+  derived only from real traceability fields; "Use this" is intentionally
+  absent and recorded as such; both views are correctly classified
+  organization-wide and don't show the Project context bar; the app wires
+  real views with proper selection-reset behavior. 11/11 PASS.
+- One existing C0 test fixture updated for the new classification-map
+  entry (`kai-impact-library-project-context.spec.js`) - still PASS, same
+  underlying guarantee.
+- Full non-integration suite (`__tests__/*.spec.js`, 4964 cases): 12
+  failures, byte-identical to the established baseline - 0 regressions.
+- Frontend build: `npm run build` (vite) -> succeeded.
+- `git diff --check` -> PASS.
+
+**Status:** PACKAGE_E_IMPACT_LIBRARY_AND_FACT_DETAIL_CLOSED_LOCALLY. No
+production or runtime closure claimed. No push, deployment, production
+mutation, database mutation, migration execution, feature-flag/configuration
+change, real-client-data access, or `00_KAI_CURRENT_STATE.md` update
+performed.
