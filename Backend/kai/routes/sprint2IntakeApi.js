@@ -1883,6 +1883,32 @@ router.get("/admin/organizations/:organizationId/engagements", async (req, res) 
 });
 
 /**
+ * "+ New Project" (Package F). Project remains a UI label over
+ * kai.engagements - this creates one additional, user-named engagement
+ * for an organization the actor is already authorized to write to. No new
+ * Project persistence model; authorization, tenant scoping, and the
+ * required audit insert are all enforced inside the service, not here.
+ */
+router.post("/admin/organizations/:organizationId/engagements", async (req, res) => {
+  const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId) || organizationId !== organizationId.toLowerCase()) {
+    return sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id")],
+    });
+  }
+  if (!validateMutationRequestOrSend(req, res, "create_engagement")) return;
+  const payload = requestPayload(req);
+  return invokeService(res, async () => {
+    const service = await getEngagementContextService();
+    return service.createEngagement({
+      organizationId,
+      engagementCode: payload.engagement_code,
+      req: { user: safeAuthenticatedUser(req) },
+    });
+  }, 201);
+});
+
+/**
  * KAI organization display-profile read: the name and (when set) logo_url
  * for one organization the actor is already authorized for, used only by
  * the /impact-library product shell header. Read-only; never accepts or

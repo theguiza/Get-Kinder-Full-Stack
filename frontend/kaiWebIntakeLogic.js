@@ -8,6 +8,12 @@ export function engagementsPath(organizationId) {
   return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/engagements`;
 }
 
+// KAI Impact Library redesign, Package F: "+ New Project" over
+// kai.engagements - same path shape as engagementsPath, POST creates.
+export function createEngagementPath(organizationId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/engagements`;
+}
+
 export function organizationProfilePath(organizationId) {
   return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/profile`;
 }

@@ -31870,3 +31870,105 @@ No production or runtime closure claimed. No push, deployment, production
 mutation, database mutation, migration execution, feature-flag/configuration
 change, real-client-data access, or `00_KAI_CURRENT_STATE.md` update
 performed.
+
+### Package F — Projects (over kai.engagements) (CLOSED LOCALLY)
+
+**Create-engagement determination (bounded inspection, not a broad
+rediscovery):** searched specifically for an existing create-engagement
+service/API path. Found `insertInitialEngagement`
+(`Backend/kai/db/kaiOrganizationEnablementQueries.js`) - a general-purpose
+INSERT already accepting an arbitrary `engagementCode` parameter (default
+only when omitted) with graceful unique-constraint conflict handling
+(`conflicting_engagement`). It was, however, only ever called from
+organization-enablement bootstrap (`kaiOrganizationEnablementService.js`)
+with a fixed default code, inside a bootstrap-specific transaction/lock/
+audit flow - there was no authorized, general-purpose service or route a
+user could invoke to create an *additional*, user-named Project.
+**Classification: partially implemented.** Implemented the smallest
+missing capability: an authorized service wrapper and route reusing the
+same DB write, not a new one.
+
+**What changed:**
+- `Backend/kai/services/kaiEngagementContextService.js`: added
+  `createEngagement`, the first write this file exposes. Reuses
+  `insertInitialEngagement` unchanged (same DB function, arbitrary code).
+  Mirrors this same file's existing `updateEngagementRequirementTarget`
+  transaction + required-audit pattern exactly: `withTransaction`, tenant-
+  boundary check, the insert, then `insertRequiredSuccessfulAuditEvent`
+  inside the same transaction - if the audit insert is rejected, the whole
+  operation fails (`audit_payload_rejected`), matching the established
+  "required," not best-effort, audit convention for this table/operation.
+  Authorized for the same role set as every other engagement operation in
+  this file (`gk_admin`/`gk_operator`/`client_admin`) - a client_admin can
+  create a Project for its own bound organization, same as it can list or
+  update one.
+- `Backend/kai/validators/kaiSprint2RequestSchemas.js`: new
+  `create_engagement` mutation schema entry (`organization_id`,
+  `engagement_code`, using the existing `displayLabelMaxLength` bound - no
+  new limit invented).
+- `Backend/kai/routes/sprint2IntakeApi.js`: new
+  `POST .../admin/organizations/:organizationId/engagements`, validated via
+  the existing shared mutation-request validator, delegating entirely to
+  the service (no SQL/DB access in the route).
+- `frontend/kaiWebIntakeLogic.js`: `createEngagementPath`.
+- `frontend/ImpactLibraryApp.jsx`: the engagements-fetch effect was
+  refactored into a reusable `refetchEngagements` callback (same shared
+  Project/Engagement list Package C0 already owns - no second list). A new
+  `createEngagement` handler POSTs, then re-fetches that one shared list
+  (preserving the current selection) and selects the newly created
+  Project - "+ New Project" always resolves through the real, shared
+  state, never a second one.
+- `frontend/projects/ProjectsView.jsx` (new): lists the shared engagements
+  as Projects (`engagement_code` as name, `engagement_type`,
+  `engagement_status` - no fabricated "reporting period," since
+  `kai.engagements` has no such column). Selecting a row updates the same
+  shared `selectedEngagementId` Knowledge Studio consumes. "+ New Project"
+  opens a real inline form wired to the new create-engagement action - not
+  a dead button. Intake Batch is not mentioned or elevated anywhere in this
+  view.
+
+**Project/Knowledge preservation:** no file/source-reuse-across-Projects
+relationship model exists today (organization-scoped sources remain
+associated with the organization, not duplicated per Project) - this
+package did not touch that model at all, consistent with "do not silently
+redesign the persisted file/source relationships in Package F." Left
+NOT_CONFIRMED, as instructed, without blocking Project listing/selection/
+creation.
+
+**No schema/migration change (the underlying `kai.engagements` table and
+its `engagement_code` column already existed and already accepted
+arbitrary values). No production/database mutation, deployment,
+feature-flag change, or cloud/infrastructure change.**
+
+**Test evidence** (`DATABASE_URL=postgres://localhost:1/nonexistent_sentinel_db`
+set for every Node command; no database/cloud/production access):
+- New: `__tests__/kai-impact-library-create-engagement.spec.js` (10 cases)
+  - proves the determination itself (the DB write already accepted an
+  arbitrary code); `KAI_SPRINT2_ENABLED` gating; validation/authorization/
+  tenant checks all fail closed before any repository call; successful
+  creation runs inside one transaction with the required audit recorded;
+  a conflicting code maps to an honest conflict error with no audit
+  recorded for a write that didn't happen; a rejected audit fails the
+  whole operation; the authorized role set matches every other engagement
+  operation; the route validates and delegates with no SQL/DB access.
+  10/10 PASS.
+- New: `__tests__/kai-impact-library-projects.spec.js` (7 cases) - proves
+  Projects consumes the one shared engagements list/selection (no second
+  fetch/selector); selecting a Project updates the shared context; only
+  real fields are shown, never a fabricated reporting period; "+ New
+  Project" is wired to the real action; a successful create re-fetches the
+  shared list and selects the new Project; Batch is never mentioned in the
+  Projects view; the shared Project context bar is correctly not shown on
+  Projects (it is the picker itself). 7/7 PASS.
+- One existing C0 test file updated for the `refetchEngagements` refactor
+  (`kai-impact-library-project-context.spec.js`) - still PASS, same
+  underlying guarantees (organization-keyed re-fetch, single shared list).
+- Full non-integration suite (`__tests__/*.spec.js`, 4989 cases): 12
+  failures, byte-identical to the established baseline - 0 regressions.
+- Frontend build: `npm run build` (vite) -> succeeded at every step.
+- `git diff --check` -> PASS.
+
+**Status:** PACKAGE_F_PROJECTS_CLOSED_LOCALLY. No production or runtime
+closure claimed. No push, deployment, production mutation, database
+mutation, migration execution, feature-flag/configuration change,
+real-client-data access, or `00_KAI_CURRENT_STATE.md` update performed.

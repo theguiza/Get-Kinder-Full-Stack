@@ -160,6 +160,14 @@ export const KAI_SPRINT2_ROUTE_SCHEMAS = Object.freeze({
     notes: { type: "string", maxLength: KAI_SPRINT2_P0_STRING_LIMITS.operatorTextMaxLength },
     batch_metadata: { type: "object", schema: metadataMarkerSchema },
   }),
+  // KAI Impact Library redesign, Package F: "+ New Project" over
+  // kai.engagements. engagement_code carries the user-supplied Project
+  // name; no format constraint exists at the schema level (kai.engagements
+  // has none either) beyond the existing displayLabelMaxLength bound.
+  create_engagement: Object.freeze({
+    organization_id: { type: "uuid" },
+    engagement_code: { type: "string", maxLength: KAI_SPRINT2_P0_STRING_LIMITS.displayLabelMaxLength },
+  }),
   reserve_intake_file_metadata: Object.freeze({
     organization_id: { type: "uuid" },
     engagement_id: { type: "uuid" },

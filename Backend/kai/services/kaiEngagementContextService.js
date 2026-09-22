@@ -9,6 +9,7 @@ import {
   listEngagementsForOrganization,
   updateEngagementProjectMetadata,
 } from "../db/kaiQueries.js";
+import { insertInitialEngagement } from "../db/kaiOrganizationEnablementQueries.js";
 import { withTransaction } from "../db/kaiDb.js";
 import { insertRequiredSuccessfulAuditEvent } from "../db/kaiAuditQueries.js";
 import { resolveKaiActorContext } from "../auth/kaiActorContext.js";
@@ -32,6 +33,13 @@ const UPDATE_ENGAGEMENT_TARGET_ALLOWED_ROLES = new Set(["gk_admin", "gk_operator
 const UPDATE_ENGAGEMENT_TARGET_OPERATION = "update_engagement_requirement_target";
 const CLASSIFY_FUNDER_REQUIREMENTS_ALLOWED_ROLES = new Set(["gk_admin", "gk_operator", "client_admin"]);
 const CLASSIFY_FUNDER_REQUIREMENTS_OPERATION = "classify_engagement_funder_requirements_state";
+// KAI Impact Library redesign, Package F: "+ New Project" over kai.engagements.
+// Same allowed-role set as every other engagement-scoped operation in this
+// file - a client_admin actor may create a Project/Engagement for its own
+// bound organization, the same as it may list or update one.
+const CREATE_ENGAGEMENT_ALLOWED_ROLES = new Set(["gk_admin", "gk_operator", "client_admin"]);
+const CREATE_ENGAGEMENT_OPERATION = "create_engagement";
+const ENGAGEMENT_CODE_MAX_LENGTH = 200;
 const ENGAGEMENT_REQUIREMENT_TARGET_METADATA_KEY = "engagement_requirement_target";
 const SAFE_TARGET_IDENTIFIER_PATTERN = /^[a-z][a-z0-9_]{0,95}$/;
 const SAFE_TARGET_LABEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9 ._:/#()-]{0,199}$/;
@@ -526,6 +534,130 @@ export async function updateEngagementRequirementTarget(input, dependencies = {}
   };
 }
 
+function isCreateEngagementInput(value) {
+  const allowedKeys = new Set(["organizationId", "engagementCode", "actorContext", "req"]);
+  if (!isPlainObject(value) || !Object.keys(value).every((key) => allowedKeys.has(key))) return false;
+  if (!isNonEmptyString(value.organizationId)) return false;
+  if (
+    !isNonEmptyString(value.engagementCode)
+    || value.engagementCode.length > ENGAGEMENT_CODE_MAX_LENGTH
+    || value.engagementCode.trim() !== value.engagementCode
+  ) {
+    return false;
+  }
+  return isPlainObject(value.actorContext) || isPlainObject(value.req);
+}
+
+/**
+ * "+ New Project" (Package F). Project remains a UI label over
+ * kai.engagements - no second Project model, no new table. Reuses the
+ * existing, already-idempotent-on-conflict insertInitialEngagement DB
+ * write (previously only ever called by organization-enablement bootstrap
+ * with a fixed default code); this is the first authorized path that lets
+ * an ordinary actor create an ADDITIONAL, user-named engagement for an
+ * organization that already has one. Mirrors
+ * updateEngagementRequirementTarget's transaction + required-audit
+ * pattern above exactly - the same file, the same write conventions.
+ */
+export async function createEngagement(input = {}, dependencies = {}) {
+  if (!isKaiSprint2Enabled(dependencies.env || process.env)) {
+    return buildKaiError("feature_disabled");
+  }
+  if (!isCreateEngagementInput(input)) {
+    return buildKaiError("validation_blocker");
+  }
+
+  const actorResult = input.actorContext
+    ? { ok: true, actorContext: input.actorContext }
+    : await resolveKaiActorContext(input.req, dependencies);
+  if (!actorResult.ok) return actorError(actorResult);
+
+  const { actorContext } = actorResult;
+  if (!isMappedHumanActor(actorContext)) {
+    return buildKaiError("authorization_denied");
+  }
+
+  const auth = validateActorCanPerformOperation(
+    actorContext,
+    CREATE_ENGAGEMENT_OPERATION,
+    input.organizationId,
+    { allowedRoles: CREATE_ENGAGEMENT_ALLOWED_ROLES },
+  );
+  if (!auth.ok) {
+    return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers });
+  }
+
+  const tenant = validateTenantBoundaryConsistency({
+    expectedOrganizationId: input.organizationId,
+    payload: { organization_id: input.organizationId },
+  });
+  if (tenant.severity === "blocker") {
+    return buildKaiError("tenant_boundary_violation", { blockers: [tenant] });
+  }
+
+  const runInTransaction = dependencies.runInTransaction || withTransaction;
+  const insertEngagement = dependencies.insertInitialEngagement || insertInitialEngagement;
+  const insertAudit = dependencies.insertRequiredSuccessfulAuditEvent || insertRequiredSuccessfulAuditEvent;
+
+  let engagement = null;
+  try {
+    engagement = await runInTransaction(async (tx) => {
+      const insertResult = await insertEngagement(
+        {
+          organizationId: input.organizationId,
+          engagementCode: input.engagementCode,
+          createdByUserId: actorContext.actorUserId,
+        },
+        tx,
+      );
+      if (!insertResult.ok) {
+        const error = new Error(insertResult.error_code || "system_error");
+        error.kaiErrorCode = insertResult.error_code === "conflicting_engagement"
+          ? "engagement_code_conflict"
+          : "system_error";
+        throw error;
+      }
+
+      const auditResult = await insertAudit({
+        operation: CREATE_ENGAGEMENT_OPERATION,
+        operation_type: CREATE_ENGAGEMENT_OPERATION,
+        reason_code: "engagement_created",
+        object_type: "other",
+        target_object_type: "engagement",
+        object_id: insertResult.engagement.engagement_id,
+        organization_id: input.organizationId,
+        engagement_id: insertResult.engagement.engagement_id,
+        actor_type: actorContext.actorType,
+        actor_user_id: actorContext.actorUserId,
+        created_by_service: "kaiEngagementContextService",
+        metadata_only: true,
+      }, tx);
+      if (!auditResult?.ok) {
+        const error = new Error("required audit rejected");
+        error.kaiErrorCode = "audit_payload_rejected";
+        throw error;
+      }
+
+      return insertResult.engagement;
+    });
+  } catch (error) {
+    if (error?.kaiErrorCode) {
+      return buildKaiError(error.kaiErrorCode);
+    }
+    throw error;
+  }
+
+  return {
+    ok: true,
+    data: {
+      engagement_id: engagement.engagement_id,
+      organization_id: engagement.organization_id,
+      engagement_code: engagement.engagement_code,
+    },
+    error: null,
+  };
+}
+
 export async function classifyEngagementFunderRequirementsState(input, dependencies = {}) {
   if (!isKaiSprint2Enabled(dependencies.env || process.env)) {
     return buildKaiError("feature_disabled");
@@ -694,6 +826,8 @@ export const __engagementContextServiceContract = Object.freeze({
   UPDATE_ENGAGEMENT_TARGET_OPERATION,
   CLASSIFY_FUNDER_REQUIREMENTS_ALLOWED_ROLES,
   CLASSIFY_FUNDER_REQUIREMENTS_OPERATION,
+  CREATE_ENGAGEMENT_ALLOWED_ROLES,
+  CREATE_ENGAGEMENT_OPERATION,
   ENGAGEMENT_REQUIREMENT_TARGET_METADATA_KEY,
   TARGET_FIELD_DEFINITIONS,
   CLASSIFIER_STATES,
@@ -705,6 +839,7 @@ export const __engagementContextServiceTestables = Object.freeze({
   isListEngagementsInput,
   isUpdateEngagementTargetInput,
   isClassifyEngagementFunderRequirementsInput,
+  isCreateEngagementInput,
   isMappedHumanActor,
   normalizeEngagementRequirementTarget,
   serializeEngagementTarget,

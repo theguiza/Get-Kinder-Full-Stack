@@ -1,12 +1,13 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 
 import ImpactLibraryShell, { ProjectContextBar } from "./impactLibraryShell.jsx";
-import { organizationsPath, organizationProfilePath, engagementsPath } from "./kaiWebIntakeLogic.js";
+import { organizationsPath, organizationProfilePath, engagementsPath, createEngagementPath, postJson } from "./kaiWebIntakeLogic.js";
 import { getJson } from "./impactEvidenceLibraryLogic.js";
 import ImpactEvidenceLibrary from "./ImpactEvidenceLibrary.jsx";
 import ImpactHomeView from "./ImpactHomeView.jsx";
 import ImpactLibraryListView from "./impactLibrary/ImpactLibraryListView.jsx";
 import ImpactFactDetailView from "./impactLibrary/ImpactFactDetailView.jsx";
+import ProjectsView from "./projects/ProjectsView.jsx";
 
 /**
  * A single, honestly-labeled placeholder for approved-design sections that
@@ -130,10 +131,40 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
     };
   }, [organizations]);
 
-  // Package C0: the one authoritative Project/Engagement list and
-  // selection for the active organization. Re-fetched, and the previous
-  // organization's selection discarded, every time the active organization
-  // changes - an Engagement/Project must never carry across organizations.
+  const [creatingEngagement, setCreatingEngagement] = useState(false);
+  const [createEngagementError, setCreateEngagementError] = useState("");
+
+  // Package C0: the one authoritative Project/Engagement list fetch for
+  // the active organization, reused both by the organization-change effect
+  // below and by Package F's "+ New Project" (so a newly created Project
+  // appears through the exact same shared list, never a second one).
+  const refetchEngagements = useCallback(async (organizationId, { preserveSelection = false } = {}) => {
+    if (!organizationId) {
+      setEngagements([]);
+      setEngagementsLoaded(false);
+      setSelectedEngagementId("");
+      return;
+    }
+    const result = await getJson(engagementsPath(organizationId));
+    setEngagementsLoaded(true);
+    if (result.statusCode !== 200 || !result.body?.ok) {
+      setEngagements([]);
+      return;
+    }
+    const items = result.body.data?.items || [];
+    setEngagements(items);
+    if (preserveSelection) return;
+    // Smallest honest auto-selection rule: exactly one authorized Project
+    // selects itself; with more than one, the user chooses (or the view
+    // stays at "All organizational knowledge" where that is honest).
+    if (items.length === 1) {
+      setSelectedEngagementId(items[0].engagement_id);
+    }
+  }, []);
+
+  // Package C0: re-fetched, and the previous organization's selection
+  // discarded, every time the active organization changes - an
+  // Engagement/Project must never carry across organizations.
   useEffect(() => {
     setEngagements([]);
     setEngagementsLoaded(false);
@@ -141,26 +172,34 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
     if (!selectedOrganizationId) return undefined;
     let cancelled = false;
     (async () => {
-      const result = await getJson(engagementsPath(selectedOrganizationId));
       if (cancelled) return;
-      setEngagementsLoaded(true);
-      if (result.statusCode !== 200 || !result.body?.ok) {
-        setEngagements([]);
-        return;
-      }
-      const items = result.body.data?.items || [];
-      setEngagements(items);
-      // Smallest honest auto-selection rule: exactly one authorized Project
-      // selects itself; with more than one, the user chooses (or the view
-      // stays at "All organizational knowledge" where that is honest).
-      if (items.length === 1) {
-        setSelectedEngagementId(items[0].engagement_id);
-      }
+      await refetchEngagements(selectedOrganizationId);
     })();
     return () => {
       cancelled = true;
     };
-  }, [selectedOrganizationId]);
+  }, [selectedOrganizationId, refetchEngagements]);
+
+  // Package F: "+ New Project". Reuses the existing authorized
+  // create-engagement path; on success, re-fetches the one shared
+  // Project/Engagement list (preserving whatever is currently selected)
+  // and selects the newly created Project.
+  const createEngagement = useCallback(async (engagementCode) => {
+    if (!selectedOrganizationId) return { ok: false, error: "Select an organization first." };
+    setCreatingEngagement(true);
+    setCreateEngagementError("");
+    const result = await postJson(createEngagementPath(selectedOrganizationId), { engagement_code: engagementCode });
+    setCreatingEngagement(false);
+    if (result.statusCode !== 201 || !result.body?.ok) {
+      const message = result.body?.error?.message || "Could not create the Project.";
+      setCreateEngagementError(message);
+      return { ok: false, error: message };
+    }
+    await refetchEngagements(selectedOrganizationId, { preserveSelection: true });
+    const createdEngagementId = result.body.data?.engagement_id;
+    if (createdEngagementId) setSelectedEngagementId(createdEngagementId);
+    return { ok: true };
+  }, [selectedOrganizationId, refetchEngagements]);
 
   const activeProfile = organizationProfiles[selectedOrganizationId] || null;
   const organizationName = activeProfile?.name || "";
@@ -205,7 +244,17 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
   } else if (activeSection === "improvementPlan") {
     sectionContent = <ComingSoonPanel title="Improvement Plan" />;
   } else if (activeSection === "projects") {
-    sectionContent = <ComingSoonPanel title="Projects" />;
+    sectionContent = (
+      <ProjectsView
+        engagements={engagements}
+        engagementsLoaded={engagementsLoaded}
+        selectedEngagementId={selectedEngagementId}
+        onSelectEngagement={setSelectedEngagementId}
+        onCreateEngagement={createEngagement}
+        creating={creatingEngagement}
+        createError={createEngagementError}
+      />
+    );
   } else if (activeSection === "needsAttention") {
     sectionContent = <ComingSoonPanel title="Needs Attention" />;
   }

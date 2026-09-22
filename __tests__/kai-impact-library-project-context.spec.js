@@ -16,16 +16,17 @@ const webIntakeSource = readFileSync("frontend/KaiWebIntake.jsx", "utf8");
 const libSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
 
 test("1: the Project list is fetched from the existing engagementsPath()/listAuthorizedEngagements read path, scoped to the active organization", () => {
-  assert.match(appSource, /import \{ organizationsPath, organizationProfilePath, engagementsPath \} from "\.\/kaiWebIntakeLogic\.js";/);
-  assert.match(appSource, /getJson\(engagementsPath\(selectedOrganizationId\)\)/);
+  assert.match(appSource, /import \{ organizationsPath, organizationProfilePath, engagementsPath, createEngagementPath, postJson \} from "\.\/kaiWebIntakeLogic\.js";/);
+  assert.match(appSource, /getJson\(engagementsPath\(organizationId\)\)/);
 });
 
-test("2: engagements are re-fetched (not just re-filtered) whenever the active organization changes, so a stale cross-organization list can never be shown", () => {
-  const effectIndex = appSource.indexOf("setEngagements([]);\n    setEngagementsLoaded(false);\n    setSelectedEngagementId(\"\");");
+test("2: engagements are re-fetched (not just re-filtered) whenever the active organization changes, so a stale cross-organization list can never be shown - via the same shared refetchEngagements used by Package F's create action", () => {
+  assert.match(appSource, /const refetchEngagements = useCallback\(async \(organizationId, \{ preserveSelection = false \} = \{\}\) => \{/);
+  const effectIndex = appSource.indexOf("useEffect(() => {\n    setEngagements([]);");
   assert.ok(effectIndex > -1, "organization-keyed engagement reset/fetch effect not found");
-  const effectSlice = appSource.slice(effectIndex, appSource.indexOf("[selectedOrganizationId]);", effectIndex) + 30);
-  assert.match(effectSlice, /getJson\(engagementsPath\(selectedOrganizationId\)\)/);
-  assert.match(appSource, /\}, \[selectedOrganizationId\]\);/, "the engagement fetch effect must be keyed on the active organization");
+  const effectSlice = appSource.slice(effectIndex, appSource.indexOf("[selectedOrganizationId, refetchEngagements]);", effectIndex) + 40);
+  assert.match(effectSlice, /await refetchEngagements\(selectedOrganizationId\);/);
+  assert.match(appSource, /\}, \[selectedOrganizationId, refetchEngagements\]\);/, "the engagement fetch effect must be keyed on the active organization");
 });
 
 test("3: exactly one authorized Project auto-selects itself", () => {
