@@ -44,6 +44,45 @@ async function selectGkOrganizationBindingByGkOrganizationId(db, gkOrganizationI
 }
 
 /**
+ * Read-only reverse lookup (KAI tenant -> Get Kinder organization) used by
+ * the KAI organization display-profile read path: the active binding row,
+ * if any, for a given kai_organization_id. Only status = 'active' rows are
+ * returned, matching listActiveGkOrganizationBindingsForGkOrganizationIds -
+ * a deactivated binding must never resolve display metadata.
+ */
+export async function getActiveGkOrganizationBindingForKaiOrganizationId(kaiOrganizationId, db = pool) {
+  if (typeof kaiOrganizationId !== "string" || !UUID_RE.test(kaiOrganizationId)) return null;
+  const { rows } = await db.query(
+    `SELECT ${BINDING_SELECT_COLUMNS}
+       FROM kai.gk_organization_bindings
+      WHERE kai_organization_id = $1
+        AND status = 'active'
+      LIMIT 1`,
+    [kaiOrganizationId.toLowerCase()],
+  );
+  return rows[0] || null;
+}
+
+/**
+ * Read-only lookup of the existing Get Kinder public.organizations display
+ * fields (name, logo_url only - never description/status/rep_user_id or any
+ * other column) for a bound gk_organization_id. Used exclusively by the KAI
+ * organization display-profile read path.
+ */
+export async function getPublicOrganizationDisplayFields(gkOrganizationId, db = pool) {
+  const normalized = normalizeGkOrganizationId(gkOrganizationId);
+  if (!normalized) return null;
+  const { rows } = await db.query(
+    `SELECT name, logo_url
+       FROM public.organizations
+      WHERE id = $1
+      LIMIT 1`,
+    [normalized],
+  );
+  return rows[0] || null;
+}
+
+/**
  * Explicit, idempotent, uniqueness-safe binding-creation capability. This is
  * the ONLY controlled path that may create or change a
  * kai.gk_organization_bindings row - nothing infers or auto-creates a

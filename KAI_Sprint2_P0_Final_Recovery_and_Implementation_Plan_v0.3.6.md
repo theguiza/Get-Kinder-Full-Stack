@@ -31103,3 +31103,99 @@ production or runtime closure claimed. No push, deployment, production
 mutation, database mutation, migration execution, feature-flag/configuration
 change, real-client-data access, or `00_KAI_CURRENT_STATE.md` update
 performed.
+
+---
+
+## Impact Library Product Redesign (`/impact-library` shell + views)
+
+**Scope authorization:** Owner-authorized workstream (2026-09-22) implementing
+the approved Claude Design handoff (`design_handoff_impact_library/`) as a
+redesign of the existing authenticated `/impact-library` surface. Not a new
+application; no parallel route tree. Package order accepted by owner:
+B (shared shell, sub-packages B0/B1/B2) -> C (Impact Home) -> D (Knowledge
+Studio) -> E (Impact Library + Impact Fact Detail) -> F (Projects, over
+`kai.engagements`) -> G/G2 (Improvement Plan, backend then UI) -> H/H2 (Needs
+Attention, backend extension then UI) -> I (responsive/accessibility QA
+pass).
+
+**Impact Fact scope decision (recorded per owner instruction):** the
+redesign's user-facing "Impact Fact" is a UI-only projection of the existing
+governed claim/evidence/traceability model (`kaiClaimLibraryService.js`,
+`kaiClaimTraceabilityService.js`, `kaiEligibleClaimsForAudienceService.js`,
+evidence services). It is **not** an implementation of the deferred
+`KAI_PACKAGE_3A_IMPACT_FACT_CONTRACT_v1.md` / `KAI_PACKAGE_3B_ARCHITECTURE_DECISION_v1.md`
+/ `KAI_PACKAGE_3D_IMPACT_FACT_PERSISTENCE_DECISION_v1.md` persisted-object
+track (which remains deferred, `PRODUCT_NECESSITY: NOT_CONFIRMED`, per 3D). No
+new Impact Fact persistence is authorized or created by this workstream. If a
+future package ever implements persisted Impact Facts per the 3A contract,
+this UI will need to be re-pointed at that new object; it is not assumed to
+already satisfy 3A's structural/governance requirements.
+
+**Projects scope decision:** user-facing "Project" = backend `kai.engagements`
+(no new Project persistence/table/service). Relationship preserved:
+Organization -> Project/Engagement -> Intake -> Intake Batch -> Files. Intake
+Batch remains backend/intake plumbing, not a normal user-facing nav concept.
+
+### Package B0 — Organization display-profile read path (CLOSED LOCALLY)
+
+**Why:** the approved shell header requires an organization name and
+(optional) logo. The KAI intake API's existing `listAuthorizedOrganizations`
+(`GET /api/kai/sprint2/intake/admin/organizations`) returns only
+`organization_id` (a UUID) - no display metadata exists in the KAI tenant
+model. Display metadata (`name`, `logo_url`) exists only in the separate,
+legacy `public.organizations` table, reachable from a KAI `organization_id`
+only via the existing `kai.gk_organization_bindings` table (added by
+`migrations/kai_sprint2_gk_organization_tenant_binding.sql`, previously used
+only for role derivation, never for display). This package adds exactly one
+small, read-only capability to bridge that existing relationship - no schema
+change, no new persistence, no new organization-identity model.
+
+**What changed:**
+- `Backend/kai/db/kaiOrganizationBindingQueries.js`: added
+  `getActiveGkOrganizationBindingForKaiOrganizationId(kaiOrganizationId)`
+  (reverse lookup of the existing active-binding uniqueness the migration
+  already enforces) and `getPublicOrganizationDisplayFields(gkOrganizationId)`
+  (reads only `name`, `logo_url` from `public.organizations` - no other
+  column).
+- `Backend/kai/services/kaiOrganizationContextService.js`: added
+  `getOrganizationDisplayProfile({ organizationId, req|actorContext },
+  dependencies)`. Reuses the exact same actor-resolution and
+  `organizationMemberships`-based authorization already used by
+  `listAuthorizedOrganizations`, scoped to the one requested
+  `organizationId` - an actor not actively, role-authorized for that
+  organization is denied (`authorization_denied`) before any binding/display
+  lookup is attempted (fails closed; never leaks another organization's
+  metadata). Returns `{ organization_id, name, logo_url, resolved }`;
+  `resolved: false` (name/logo_url both `null`) when no active binding exists
+  or the bound row has no display fields, rather than fabricating a name.
+- `Backend/kai/routes/sprint2IntakeApi.js`: added
+  `GET /api/kai/sprint2/intake/admin/organizations/:organizationId/profile`,
+  matching the existing sibling `/admin/organizations/:organizationId/engagements`
+  route's shape exactly (UUID validation, `invokeService`, no SQL/DB access
+  in the route itself). No competing organization-context API created.
+
+**No schema/migration change. No new organization-identity model. No
+production/database mutation, deployment, feature-flag change, or
+cloud/infrastructure change.**
+
+**Test evidence** (`DATABASE_URL=postgres://localhost:1/nonexistent_sentinel_db`
+set for every Node command; no database/cloud/production access):
+- New tests appended to `__tests__/kai-sprint2-organization-context-service.spec.js`
+  (8 new cases): authorized member resolves name+logo; cross-organization
+  request is denied *before* any binding/display lookup runs (proven via a
+  spy that asserts the binding lookup was never called); missing `logo_url`
+  is returned as `null` without fabrication; no active binding yields an
+  unresolved (`resolved:false`) result without ever calling the display-field
+  lookup; a bound organization with no display row yields the same
+  unresolved result; `feature_disabled` and `validation_blocker` paths
+  covered.
+- `node --test __tests__/kai-sprint2-organization-context-service.spec.js`
+  -> 16/16 PASS, 0 fail (8 pre-existing + 8 new).
+- `Backend/kai/routes/sprint2IntakeApi.js` re-imported successfully after
+  the route addition (module load smoke check).
+
+**Status:** PACKAGE_B0_ORGANIZATION_DISPLAY_PROFILE_READ_PATH_CLOSED_LOCALLY.
+No production or runtime closure claimed. No push, deployment, production
+mutation, database mutation, migration execution, feature-flag/configuration
+change, real-client-data access, or `00_KAI_CURRENT_STATE.md` update
+performed.

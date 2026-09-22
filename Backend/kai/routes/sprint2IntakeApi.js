@@ -1883,6 +1883,31 @@ router.get("/admin/organizations/:organizationId/engagements", async (req, res) 
 });
 
 /**
+ * KAI organization display-profile read: the name and (when set) logo_url
+ * for one organization the actor is already authorized for, used only by
+ * the /impact-library product shell header. Read-only; never accepts or
+ * returns any public.organizations column beyond name/logo_url, and never
+ * resolves a different organization's binding than the one requested -
+ * authorization for the requested organization_id is enforced inside the
+ * service the same way as the organizations/engagements reads above.
+ */
+router.get("/admin/organizations/:organizationId/profile", async (req, res) => {
+  const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId) || organizationId !== organizationId.toLowerCase()) {
+    return sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id")],
+    });
+  }
+  return invokeService(res, async () => {
+    const service = await getOrganizationContextService();
+    return service.getOrganizationDisplayProfile({
+      organizationId,
+      req: { user: safeAuthenticatedUser(req) },
+    });
+  });
+});
+
+/**
  * Structured external requirement-set registration: creates/replays only the
  * existing catalogue objects (`requirement_sources` -> framework version ->
  * requirement set -> requirements). It does not create
