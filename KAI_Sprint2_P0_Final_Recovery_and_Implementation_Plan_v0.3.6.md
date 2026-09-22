@@ -31408,3 +31408,76 @@ production or runtime closure claimed. No push, deployment, production
 mutation, database mutation, migration execution, feature-flag/configuration
 change, real-client-data access, or `00_KAI_CURRENT_STATE.md` update
 performed.
+
+### Package C — Impact Home (CLOSED LOCALLY)
+
+**Home decisions (recorded, per owner authorization):** no Programs KPI (no
+"program" domain object exists anywhere in KAI); no "KAI recommends"
+hero-card copy (no recommendation-generation service exists); no Recent
+Activity list (no human-readable, org-scoped activity feed exists - only
+write-only "record blocked attempt" audit services). Home shows real
+evidence-system metrics only, sourced from the same already-governed read
+paths `ImpactEvidenceLibrary.jsx` already uses, reusing their exported pure
+projection functions (`impactEvidenceLibraryLogic.js`) rather than a second,
+independent data model.
+
+**What changed:**
+- `frontend/ImpactHomeView.jsx` (new): fetches the governed Claim Library
+  (`claimLibraryCandidatesPath`) and the Review Queue rollup
+  (`organizationReviewQueuePath`) for the active organization - both
+  organization-wide reads, no engagement filter needed. Derives:
+  - **Impact Facts (reviewed)** - count of candidate claims with
+    `claimReviewStatus === "reviewed"` (the real, migration-verified value:
+    `CHECK (claim_review_status IN ('needs_gk_review', 'reviewed'))`,
+    `migrations/kai_sprint2_p2_12_human_review_decision_ledger.sql`).
+  - **Recommendations** - count of real governed gap items plus coverage
+    findings (`projectOrganizationGapsAndRisks`, the same function
+    `ImpactEvidenceLibrary.jsx`'s existing Gaps and Risks section already
+    uses - no new fetch, no new backend read).
+  - **Needs your attention** - the Review Queue item count, shown as a
+    number only when the rollup that produced it (`reviewQueueIsComplete`)
+    actually completed; otherwise an honest loading/error state, never a
+    guessed number.
+  - **Next Action** - the first Review Queue item whose blocker is real
+    `ACTION_REQUIRED` (via the existing, already-governed
+    `reviewQueueBlockerActionability`), labeled only with fields the DTO
+    actually provides (a truncated claim id, and `blockerDisplayText`'s
+    existing humanized blocker text) - not polished marketing copy, since
+    no claim-statement/plain-language field is available in any DTO this
+    frontend receives today (a Package E dependency, not invented here).
+  - **First-time vs populated** - derived from real signals (no claims at
+    all AND a conclusively empty Review Queue), never a manual toggle.
+- `frontend/ImpactLibraryApp.jsx`: wires the `home` section to
+  `ImpactHomeView` (replacing its `ComingSoonPanel`); `home` is now the
+  default landing section, matching the approved IA. The shared
+  `ProjectContextBar` (Package C0) is intentionally not shown on Home,
+  since Home's reads don't yet consume the Project/Engagement context -
+  showing it would imply a filtering behavior that doesn't exist
+  (`SECTION_SHOWS_PROJECT_CONTEXT_BAR`).
+
+**No schema/migration change. No fabricated data, no fabricated
+interaction. No production/database mutation, deployment, feature-flag
+change, or cloud/infrastructure change.**
+
+**Test evidence** (`DATABASE_URL=postgres://localhost:1/nonexistent_sentinel_db`
+set for every Node command; no database/cloud/production access):
+- New: `__tests__/kai-impact-library-home.spec.js` (9 cases) - proves every
+  stat/list is sourced from an existing governed read path; the reviewed
+  filter uses the real, migration-verified status value; Recommendations is
+  a real gap+coverage-finding count; Needs-your-attention is never shown as
+  a number unless the rollup completed; Next Action requires a real
+  ACTION_REQUIRED blocker and contains no hardcoded recommendation copy;
+  labels never fabricate a claim statement; first-time state is derived
+  from real signals; Home is wired to the real component (not a
+  placeholder) and correctly omits the Project context bar; Home is the
+  default landing section. 9/9 PASS.
+- Full non-integration suite (`__tests__/*.spec.js`, 4939 cases): 12
+  failures, the same pre-existing, unrelated `kai-sprint2-*` baseline
+  identified in Packages B/C0 (same exact test names) - 0 regressions.
+- Frontend build: `npm run build` (vite) -> succeeded, no errors.
+- `git diff --check` -> PASS.
+
+**Status:** PACKAGE_C_IMPACT_HOME_CLOSED_LOCALLY. No production or runtime
+closure claimed. No push, deployment, production mutation, database
+mutation, migration execution, feature-flag/configuration change,
+real-client-data access, or `00_KAI_CURRENT_STATE.md` update performed.

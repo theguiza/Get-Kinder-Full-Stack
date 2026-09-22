@@ -4,6 +4,7 @@ import ImpactLibraryShell, { ProjectContextBar } from "./impactLibraryShell.jsx"
 import { organizationsPath, organizationProfilePath, engagementsPath } from "./kaiWebIntakeLogic.js";
 import { getJson } from "./impactEvidenceLibraryLogic.js";
 import ImpactEvidenceLibrary from "./ImpactEvidenceLibrary.jsx";
+import ImpactHomeView from "./ImpactHomeView.jsx";
 
 /**
  * A single, honestly-labeled placeholder for approved-design sections that
@@ -38,6 +39,15 @@ const SECTION_ALLOWS_ORGANIZATION_WIDE = Object.freeze({
   knowledgeStudio: true,
 });
 
+// Sections whose content actually consumes the shared Project/Engagement
+// context today. Home's real metrics (Impact Facts, Recommendations, Needs
+// your attention) are all organization-wide reads that do not yet take an
+// engagement filter, so the selector is not shown there - showing it would
+// imply a filtering behavior that does not exist.
+const SECTION_SHOWS_PROJECT_CONTEXT_BAR = Object.freeze({
+  knowledgeStudio: true,
+});
+
 /**
  * Top-level container for the approved /impact-library redesign (Packages
  * B1/B2 shell + C0 shared Project/Engagement context). Owns the one
@@ -47,7 +57,7 @@ const SECTION_ALLOWS_ORGANIZATION_WIDE = Object.freeze({
  * the engagement through to KaiWebIntake) - no view gets its own
  * independent, potentially-disagreeing selection.
  */
-export default function ImpactLibraryApp({ initialSection = "knowledgeStudio" } = {}) {
+export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
   const [activeSection, setActiveSection] = useState(initialSection);
   const [organizations, setOrganizations] = useState([]);
   const [selectedOrganizationId, setSelectedOrganizationId] = useState("");
@@ -159,7 +169,12 @@ export default function ImpactLibraryApp({ initialSection = "knowledgeStudio" } 
       />
     );
   } else if (activeSection === "home") {
-    sectionContent = <ComingSoonPanel title="Home" />;
+    sectionContent = (
+      <ImpactHomeView
+        organizationId={selectedOrganizationId}
+        onGoToKnowledgeStudio={() => setActiveSection("knowledgeStudio")}
+      />
+    );
   } else if (activeSection === "impactLibrary") {
     sectionContent = <ComingSoonPanel title="Impact Library" />;
   } else if (activeSection === "improvementPlan") {
@@ -182,13 +197,15 @@ export default function ImpactLibraryApp({ initialSection = "knowledgeStudio" } 
       hasAttention={false}
       onOpenNeedsAttention={() => setActiveSection("needsAttention")}
     >
-      <ProjectContextBar
-        engagements={engagements}
-        engagementsLoaded={engagementsLoaded}
-        selectedEngagementId={selectedEngagementId}
-        onSelectEngagement={setSelectedEngagementId}
-        allowOrganizationWide={allowOrganizationWide}
-      />
+      {SECTION_SHOWS_PROJECT_CONTEXT_BAR[activeSection] === true ? (
+        <ProjectContextBar
+          engagements={engagements}
+          engagementsLoaded={engagementsLoaded}
+          selectedEngagementId={selectedEngagementId}
+          onSelectEngagement={setSelectedEngagementId}
+          allowOrganizationWide={allowOrganizationWide}
+        />
+      ) : null}
       {sectionContent}
     </ImpactLibraryShell>
   );
