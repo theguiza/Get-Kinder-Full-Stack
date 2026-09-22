@@ -2998,7 +2998,7 @@ test("Impact Evidence Library mounts KAI Web Intake under its authorized organiz
 
   assert.match(
     uiSource,
-    /\{organizationId \? \([\s\S]*?<KaiWebIntake[\s\S]*?organizationId=\{organizationId\}[\s\S]*?embedded[\s\S]*?\/>[\s\S]*?\) : null\}/,
+    /\{knowledgeStudioTab === "files" && organizationId \? \([\s\S]*?<KaiWebIntake[\s\S]*?organizationId=\{organizationId\}[\s\S]*?embedded[\s\S]*?\/>[\s\S]*?\) : null\}/,
   );
 });
 

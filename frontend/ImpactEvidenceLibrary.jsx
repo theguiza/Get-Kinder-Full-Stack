@@ -149,6 +149,7 @@ import {
 import { organizationsPath } from "./kaiWebIntakeLogic.js";
 import { engagementsPath } from "./kaiWebIntakeLogic.js";
 import KaiWebIntake from "./KaiWebIntake.jsx";
+import KnowledgeStudioGapDetail from "./knowledgeStudio/KnowledgeStudioGapDetail.jsx";
 import ImpactLibraryKai from "./ImpactLibraryKai.jsx";
 
 function ValueRow({ label, value }) {
@@ -229,6 +230,24 @@ export default function ImpactEvidenceLibrary({
   const [loadingEngagements, setLoadingEngagements] = useState(false);
   const [engagementsLoaded, setEngagementsLoaded] = useState(false);
   const [audience, setAudience] = useState("internal");
+  // KAI Impact Library redesign, Package D: the approved Knowledge Studio
+  // tab set (Files/Processing/Evidence/Gaps/Reviews). Purely a rendering
+  // toggle over sections that already exist below, computed from state
+  // that already exists above - no new fetch, no new state model, no
+  // section's own logic touched. Sections outside the five approved tabs
+  // (Funder Requirements, Grant Response Packet, Board Reporting,
+  // Generated Drafts, Traceability, Claim & evidence workflow) remain
+  // always visible below the tab content: their eventual destination is
+  // not yet decided by any accepted package, so they stay reachable rather
+  // than being hidden or removed.
+  const [knowledgeStudioTab, setKnowledgeStudioTab] = useState("files");
+  // Package D: the one Gaps-tab item (a real gap/coverage-finding/conflict/
+  // followup object from organizationGapsAndRisks, or null) currently
+  // showing its Gap Detail view instead of the Gaps grid.
+  const [selectedGap, setSelectedGap] = useState(null);
+  useEffect(() => {
+    if (knowledgeStudioTab !== "gaps") setSelectedGap(null);
+  }, [knowledgeStudioTab]);
   // The all-state governed Claim Library and the audience-scoped eligible-claims
   // result are independent requests with independent loading/data/error state:
   // a failure or empty result on one must never clear or gate the other.
@@ -2577,6 +2596,26 @@ export default function ImpactEvidenceLibrary({
   return (
     <section>
       <h1 className="admin-title mb-3">Impact Evidence Library</h1>
+
+      <ul className="nav nav-tabs mb-3">
+        {[
+          ["files", "Files"],
+          ["processing", "Processing"],
+          ["evidence", "Evidence"],
+          ["gaps", "Gaps"],
+          ["reviews", "Reviews"],
+        ].map(([key, label]) => (
+          <li className="nav-item" key={key}>
+            <button
+              type="button"
+              className={`nav-link${knowledgeStudioTab === key ? " active" : ""}`}
+              onClick={() => setKnowledgeStudioTab(key)}
+            >
+              {label}
+            </button>
+          </li>
+        ))}
+      </ul>
       <div className="admin-card mb-3">
         <div className="row g-3 align-items-end">
           <div className="col-12 col-lg-5">
@@ -2642,7 +2681,7 @@ export default function ImpactEvidenceLibrary({
 
       <ImpactLibraryKai organizationId={organizationId} engagementId={engagementId} />
 
-      {organizationId ? (
+      {knowledgeStudioTab === "files" && organizationId ? (
         <KaiWebIntake
           organizationId={organizationId}
           engagementId={engagementId}
@@ -2654,6 +2693,7 @@ export default function ImpactEvidenceLibrary({
 
       {message ? <div className="alert alert-warning py-2">{message}</div> : null}
 
+      {knowledgeStudioTab === "gaps" ? (
       <div className="admin-card mb-3">
         <div className="d-flex justify-content-between align-items-center mb-2">
           <h5 className="mb-0">Gaps and Risks</h5>
@@ -2671,6 +2711,19 @@ export default function ImpactEvidenceLibrary({
           claim-traceability state as the Review Queue below; this page never decides for itself whether a gap,
           conflict, or follow-up is current.
         </div>
+        {selectedGap ? (
+          <KnowledgeStudioGapDetail
+            gap={selectedGap}
+            onBack={() => setSelectedGap(null)}
+            onGoToTraceability={() => {
+              if (selectedGap.claimId) setSelectedClaimId(selectedGap.claimId);
+              setSelectedGap(null);
+              traceabilityPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+              traceabilityPanelRef.current?.focus();
+            }}
+          />
+        ) : (
+        <>
         {reviewQueueError ? <div className="alert alert-warning py-2 small">{reviewQueueError}</div> : null}
         {loadingReviewQueue ? <div className="text-muted small">Loading organization evidence health...</div> : null}
         {!loadingReviewQueue && !reviewQueueError && !reviewQueueIsComplete(reviewQueueCompleteness) ? (
@@ -2698,17 +2751,26 @@ export default function ImpactEvidenceLibrary({
                   {organizationGapsAndRisks.gapItems.map((gap) => (
                     <li key={gap.gapLogItemId} className="small d-flex justify-content-between align-items-center gap-2 mt-1">
                       <span className="text-break">{gap.dimensionKey}</span>
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-outline-primary flex-shrink-0"
-                        onClick={() => {
-                          setSelectedClaimId(gap.claimId);
-                          traceabilityPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-                          traceabilityPanelRef.current?.focus();
-                        }}
-                      >
-                        Review claim
-                      </button>
+                      <div className="d-flex gap-1 flex-shrink-0">
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline-secondary"
+                          onClick={() => setSelectedGap({ ...gap, category: "gap" })}
+                        >
+                          View
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline-primary"
+                          onClick={() => {
+                            setSelectedClaimId(gap.claimId);
+                            traceabilityPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                            traceabilityPanelRef.current?.focus();
+                          }}
+                        >
+                          Review claim
+                        </button>
+                      </div>
                     </li>
                   ))}
                 </ul>
@@ -2724,17 +2786,26 @@ export default function ImpactEvidenceLibrary({
                   {organizationGapsAndRisks.coverageFindings.map((finding) => (
                     <li key={`${finding.claimId}-${finding.dimensionKey}`} className="small d-flex justify-content-between align-items-center gap-2 mt-1">
                       <span className="text-break">{finding.dimensionKey}</span>
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-outline-primary flex-shrink-0"
-                        onClick={() => {
-                          setSelectedClaimId(finding.claimId);
-                          traceabilityPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-                          traceabilityPanelRef.current?.focus();
-                        }}
-                      >
-                        Review claim
-                      </button>
+                      <div className="d-flex gap-1 flex-shrink-0">
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline-secondary"
+                          onClick={() => setSelectedGap({ ...finding, category: "coverageFinding" })}
+                        >
+                          View
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline-primary"
+                          onClick={() => {
+                            setSelectedClaimId(finding.claimId);
+                            traceabilityPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                            traceabilityPanelRef.current?.focus();
+                          }}
+                        >
+                          Review claim
+                        </button>
+                      </div>
                     </li>
                   ))}
                 </ul>
@@ -2750,17 +2821,26 @@ export default function ImpactEvidenceLibrary({
                   {organizationGapsAndRisks.conflicts.map((conflict) => (
                     <li key={conflict.conflictGroupId} className="small d-flex justify-content-between align-items-center gap-2 mt-1">
                       <span className="text-break">{conflict.basisCode}</span>
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-outline-primary flex-shrink-0"
-                        onClick={() => {
-                          setSelectedClaimId(conflict.claimId);
-                          traceabilityPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-                          traceabilityPanelRef.current?.focus();
-                        }}
-                      >
-                        Review claim
-                      </button>
+                      <div className="d-flex gap-1 flex-shrink-0">
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline-secondary"
+                          onClick={() => setSelectedGap({ ...conflict, category: "conflict" })}
+                        >
+                          View
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline-primary"
+                          onClick={() => {
+                            setSelectedClaimId(conflict.claimId);
+                            traceabilityPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                            traceabilityPanelRef.current?.focus();
+                          }}
+                        >
+                          Review claim
+                        </button>
+                      </div>
                     </li>
                   ))}
                 </ul>
@@ -2776,17 +2856,26 @@ export default function ImpactEvidenceLibrary({
                   {organizationGapsAndRisks.followups.map((followup) => (
                     <li key={followup.clientFollowupItemId} className="small d-flex justify-content-between align-items-center gap-2 mt-1">
                       <span className="text-break">{followup.dimensionKey}</span>
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-outline-primary flex-shrink-0"
-                        onClick={() => {
-                          setSelectedClaimId(followup.claimId);
-                          traceabilityPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-                          traceabilityPanelRef.current?.focus();
-                        }}
-                      >
-                        Review claim
-                      </button>
+                      <div className="d-flex gap-1 flex-shrink-0">
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline-secondary"
+                          onClick={() => setSelectedGap({ ...followup, category: "followup" })}
+                        >
+                          View
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline-primary"
+                          onClick={() => {
+                            setSelectedClaimId(followup.claimId);
+                            traceabilityPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                            traceabilityPanelRef.current?.focus();
+                          }}
+                        >
+                          Review claim
+                        </button>
+                      </div>
                     </li>
                   ))}
                 </ul>
@@ -2794,8 +2883,12 @@ export default function ImpactEvidenceLibrary({
             </div>
           </div>
         ) : null}
+        </>
+        )}
       </div>
+      ) : null}
 
+      {knowledgeStudioTab === "reviews" ? (
       <div className="admin-card mb-3">
         <div className="d-flex justify-content-between align-items-center mb-2">
           <h5 className="mb-0">Review Queue</h5>
@@ -2900,9 +2993,11 @@ export default function ImpactEvidenceLibrary({
           ))}
         </ul>
       </div>
+      ) : null}
 
       <div className="row g-3">
         <div className="col-12 col-xl-5">
+          {knowledgeStudioTab === "evidence" ? (
           <div className="admin-card">
             <div className="d-flex justify-content-between align-items-center mb-2">
               <h5 className="mb-0">Claims</h5>
@@ -3028,6 +3123,7 @@ export default function ImpactEvidenceLibrary({
               </button>
             ) : null}
           </div>
+          ) : null}
 
           <div className="admin-card mt-3">
             <div className="d-flex justify-content-between align-items-center mb-2">
@@ -4168,7 +4264,7 @@ export default function ImpactEvidenceLibrary({
             ) : null}
           </div>
 
-          {sensitivityCapability === true ? (
+          {knowledgeStudioTab === "processing" && sensitivityCapability === true ? (
             <div className="admin-card mt-3">
               <div className="d-flex justify-content-between align-items-center mb-2">
                 <h5 className="mb-0">Sources needing sensitivity &amp; allowed-use review</h5>
@@ -4205,7 +4301,7 @@ export default function ImpactEvidenceLibrary({
             </div>
           ) : null}
 
-          {intakeSensitivityProfileId && sensitivityCapability === true ? (
+          {knowledgeStudioTab === "processing" && intakeSensitivityProfileId && sensitivityCapability === true ? (
             <div className="admin-card mt-3">
               <div className="d-flex justify-content-between align-items-center mb-2">
                 <h5 className="mb-0">Sensitivity &amp; allowed-use review</h5>
@@ -4382,6 +4478,7 @@ export default function ImpactEvidenceLibrary({
             </div>
           ) : null}
 
+          {knowledgeStudioTab === "files" ? (
           <div className="admin-card mt-3">
             <h5 className="mb-2">Data Sources</h5>
             <div className="small text-muted mb-2">
@@ -4437,6 +4534,7 @@ export default function ImpactEvidenceLibrary({
               </div>
             ) : null}
           </div>
+          ) : null}
 
           <div className="admin-card mt-3">
             <h5 className="mb-2">Claim &amp; evidence workflow</h5>

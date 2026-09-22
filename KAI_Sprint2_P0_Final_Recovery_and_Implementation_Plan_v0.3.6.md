@@ -31481,3 +31481,115 @@ set for every Node command; no database/cloud/production access):
 closure claimed. No push, deployment, production mutation, database
 mutation, migration execution, feature-flag/configuration change,
 real-client-data access, or `00_KAI_CURRENT_STATE.md` update performed.
+
+### Package D — Knowledge Studio (Files/Processing/Evidence/Gaps/Reviews + Gap Detail) (CLOSED LOCALLY)
+
+**Bounded verification performed first (per owner instruction):** confirmed
+Package C's `ImpactHomeView.jsx` reads only `organizationId` (never
+`engagementId`) and its two read paths
+(`claimLibraryCandidatesPath`/`organizationReviewQueuePath`) are the same
+organization-wide reads C0 already classified `ORGANIZATION_WIDE` for
+Knowledge Studio's core content. No scope mixing, no defect found - no
+repair needed.
+
+**Decomposition method chosen (recorded explicitly, not hidden):** given
+`ImpactEvidenceLibrary.jsx` is 4,600+ lines and 12 existing test files
+anchor to its exact source text at specific sections (`readFileSync`
+source-contract tests, this repo's established pattern for untestable-via-
+jsdom React components), this package performs an **incremental,
+conditional-rendering decomposition in place** rather than a physical
+multi-file split: each of the five approved tabs gates an existing,
+already-implemented, already-tested render section behind
+`knowledgeStudioTab` - no section's own state, effects, fetch logic, or API
+contract was touched, only its visibility. This is the safest form of
+"incremental extraction over existing working behavior" available without
+rewriting all 12 anchored test files' assertions in the same pass. It
+genuinely reduces what's *reachable at once* (a real, navigable IA matching
+the approved design) but does **not** yet reduce the file's total line
+count - physical extraction into separate component files is recorded here
+as a deliberate, reasoned deferral (NOT_CONFIRMED as complete), a
+reasonable follow-up once the tab boundaries proven in this package are
+stable.
+
+**Tab -> existing section mapping (all pre-existing, unmodified capability):**
+- **Files**: the existing embedded `<KaiWebIntake>` mount (previously
+  unconditional across all tabs, now correctly Files-only) and the existing
+  "Data Sources" section (governed sources/source-versions read).
+- **Processing**: the existing sensitivity/allowed-use review sections
+  (`sensitivityCapability`-gated, unchanged logic).
+- **Evidence**: the existing governed Claim Library ("Claims") section.
+- **Gaps**: the existing organization-level "Gaps and Risks" section
+  (`projectOrganizationGapsAndRisks`, no new fetch).
+- **Reviews**: the existing "Review Queue" section - status/badges only
+  (`reviewQueueBlockerActionability`); no decision-making action button
+  lives inside this tab's own gated block, so no new unauthorized action
+  was introduced. Decision controls remain exactly where they already were,
+  in the existing, already-role-gated Traceability panel
+  (`canCompleteEvidenceReview`/`canCompleteClaimReview`, untouched).
+
+**Non-tab capabilities preserved (owner-required inventory - none deleted,
+orphaned, or made unreachable; final destination genuinely unresolved for
+all of these, recorded NOT_CONFIRMED rather than silently decided):** KAI
+Baseline Readiness, Funder Requirements, Grant Response Packet, Board
+Reporting, Generated Drafts, the Traceability panel itself, and the "Claim
+& evidence workflow" action panel - all remain unconditionally rendered
+below the tab content, exactly as before.
+
+**Gap Detail (new):** `frontend/knowledgeStudio/KnowledgeStudioGapDetail.jsx`
+- a genuinely new, separate file (no existing test anchors to relocate,
+unlike the tab sections). Takes one already-computed gap/coverage-finding/
+conflict/follow-up object (from the Gaps tab's existing
+`organizationGapsAndRisks` - no second fetch) and a "View evidence & source
+context" action that re-selects the claim and scrolls to the existing
+Traceability panel, reusing it rather than duplicating evidence/source
+rendering. **Per owner instruction, does not wire or simulate "Add to
+Plan"** - that action is Package G/G2's responsibility once Improvement
+Plan persistence exists; omitting it here is intentional.
+
+**Project context (C0) preserved:** Knowledge Studio still consumes the one
+shared organization/engagement selection (unchanged from C0); no new,
+independent selector was introduced anywhere in this package.
+
+**No schema/migration change. No new fabricated data or interaction. No
+production/database mutation, deployment, feature-flag change, or
+cloud/infrastructure change.**
+
+**Test evidence** (`DATABASE_URL=postgres://localhost:1/nonexistent_sentinel_db`
+set for every Node command; no database/cloud/production access):
+- New: `__tests__/kai-impact-library-knowledge-studio-tabs.spec.js` (10
+  cases, covering all 14 requested proof points across the 10 assertions)
+  - proves: the five tabs are real single-select state; Files gates the
+  existing Web Intake/Data Sources without a duplicate selector; Processing
+  gates the existing real sensitivity states; Evidence gates the existing
+  Claims section; Gaps gates the existing Gaps and Risks section; Gap
+  Detail resolves the exact selected item and never renders an Add-to-Plan
+  action; Reviews gates the existing status-only Review Queue with no
+  decision-making action inside it; the shared C0 Project context is
+  unchanged; Web Intake/Traceability are untouched beyond visibility; all
+  non-tab capabilities remain unconditionally reachable. 10/10 PASS.
+- One existing locked test updated for the intentional, accepted contract
+  change (Web Intake is now Files-tab-scoped, not unconditional) -
+  `kai-sprint2-impact-evidence-library.spec.js` - still PASS, same
+  underlying guarantee (mounted under authorized organization context)
+  preserved.
+- Full regression: Home (9), C0 project-context (10), shell (18) - all
+  still PASS, confirming Package C and C0 remain correct.
+- Full non-integration suite (`__tests__/*.spec.js`, 4949 cases): 12
+  failures, byte-identical to the Package B/C0/C baseline (same exact test
+  names) - 0 regressions.
+- Frontend build: `npm run build` (vite) -> succeeded at every step, no
+  errors.
+- `git diff --check` -> PASS.
+
+**Status:** PACKAGE_D_KNOWLEDGE_STUDIO_CLOSED_LOCALLY. No production or
+runtime closure claimed. No push, deployment, production mutation, database
+mutation, migration execution, feature-flag/configuration change,
+real-client-data access, or `00_KAI_CURRENT_STATE.md` update performed.
+
+**Recorded follow-up (NOT_CONFIRMED, not blocking):** physical extraction
+of the five tab sections into separate component files (further reducing
+`ImpactEvidenceLibrary.jsx`'s line count, per the general direction of this
+redesign) remains open; and the eventual destination of the non-tab
+capabilities (Funder Requirements, Grant Response Packet, Board Reporting,
+Generated Drafts) within the approved IA is not yet decided by any accepted
+package.
