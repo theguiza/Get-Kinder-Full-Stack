@@ -124,17 +124,40 @@ test("createEngagement creates the engagement inside one transaction and records
     engagement_id: "10000000-0000-4000-8000-000000000001",
     organization_id: ORG_A,
     engagement_code: "2026 Annual Report",
+    engagement_type: null,
   });
   assert.equal(harness.calls.transactions, 1);
   assert.equal(harness.calls.insert.length, 1);
   assert.equal(harness.calls.insert[0].input.organizationId, ORG_A);
   assert.equal(harness.calls.insert[0].input.engagementCode, "2026 Annual Report");
   assert.equal(harness.calls.insert[0].input.createdByUserId, clientAdminActor.actorUserId);
+  assert.equal(harness.calls.insert[0].input.engagementType, null);
   assert.equal(harness.calls.audit.length, 1);
   assert.equal(harness.calls.audit[0].metadata.operation, "create_engagement");
   assert.equal(harness.calls.audit[0].metadata.organization_id, ORG_A);
   assert.equal(harness.calls.audit[0].metadata.object_id, "10000000-0000-4000-8000-000000000001");
   assert.equal(harness.calls.audit[0].metadata.target_object_type, "engagement");
+});
+
+test("createEngagement passes an explicit engagementType through to the DB write and returns it in the response, reusing the existing engagement_type column instead of silently taking its DB default", async () => {
+  const harness = createHarness({
+    insertResult: {
+      ok: true,
+      engagement: {
+        engagement_id: "10000000-0000-4000-8000-000000000001",
+        organization_id: ORG_A,
+        engagement_code: "2026 Annual Report",
+        engagement_type: "impact_report",
+      },
+    },
+  });
+  const result = await createEngagement(
+    { organizationId: ORG_A, engagementCode: "2026 Annual Report", engagementType: "impact_report", actorContext: clientAdminActor },
+    harness.dependencies,
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.data.engagement_type, "impact_report");
+  assert.equal(harness.calls.insert[0].input.engagementType, "impact_report");
 });
 
 test("createEngagement maps a conflicting engagement_code to an honest conflict error, never silently overwriting or renaming", async () => {

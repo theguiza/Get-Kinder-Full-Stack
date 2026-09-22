@@ -1903,6 +1903,7 @@ router.post("/admin/organizations/:organizationId/engagements", async (req, res)
     return service.createEngagement({
       organizationId,
       engagementCode: payload.engagement_code,
+      engagementType: payload.engagement_type,
       req: { user: safeAuthenticatedUser(req) },
     });
   }, 201);

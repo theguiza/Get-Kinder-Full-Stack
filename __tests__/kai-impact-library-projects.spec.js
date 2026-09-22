@@ -34,9 +34,14 @@ test("Projects shows only real engagement fields - name/code, type, status - and
 
 test("+ New Project is wired to the real, newly-authorized create-engagement action - not a dead button", () => {
   assert.match(projectsViewSource, /onClick=\{\(\) => setShowCreateForm/);
-  assert.match(projectsViewSource, /await onCreateEngagement\(name\)/);
-  assert.match(appSource, /const createEngagement = useCallback\(async \(engagementCode\) => \{/);
-  assert.match(appSource, /postJson\(createEngagementPath\(selectedOrganizationId\), \{ engagement_code: engagementCode \}\)/);
+  assert.match(projectsViewSource, /await onCreateEngagement\(name, newProjectType\.trim\(\) \|\| undefined\)/);
+  assert.match(appSource, /const createEngagement = useCallback\(async \(engagementCode, engagementType\) => \{/);
+  assert.match(appSource, /postJson\(createEngagementPath\(selectedOrganizationId\), body\)/);
+});
+
+test("+ New Project accepts an optional Project type, reusing the existing engagement_type column instead of a fabricated one", () => {
+  assert.match(projectsViewSource, /placeholder="Type \(optional\)"/);
+  assert.match(appSource, /if \(engagementType\) body\.engagement_type = engagementType;/);
 });
 
 test("a successful Project creation re-fetches the one shared list (preserving the current selection) and selects the new Project - never a second list", () => {

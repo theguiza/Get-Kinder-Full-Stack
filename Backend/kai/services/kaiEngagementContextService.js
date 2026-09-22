@@ -535,13 +535,20 @@ export async function updateEngagementRequirementTarget(input, dependencies = {}
 }
 
 function isCreateEngagementInput(value) {
-  const allowedKeys = new Set(["organizationId", "engagementCode", "actorContext", "req"]);
+  const allowedKeys = new Set(["organizationId", "engagementCode", "engagementType", "actorContext", "req"]);
   if (!isPlainObject(value) || !Object.keys(value).every((key) => allowedKeys.has(key))) return false;
   if (!isNonEmptyString(value.organizationId)) return false;
   if (
     !isNonEmptyString(value.engagementCode)
     || value.engagementCode.length > ENGAGEMENT_CODE_MAX_LENGTH
     || value.engagementCode.trim() !== value.engagementCode
+  ) {
+    return false;
+  }
+  if (
+    value.engagementType !== undefined
+    && value.engagementType !== null
+    && (!isNonEmptyString(value.engagementType) || value.engagementType.length > ENGAGEMENT_CODE_MAX_LENGTH)
   ) {
     return false;
   }
@@ -607,6 +614,7 @@ export async function createEngagement(input = {}, dependencies = {}) {
           organizationId: input.organizationId,
           engagementCode: input.engagementCode,
           createdByUserId: actorContext.actorUserId,
+          engagementType: isNonEmptyString(input.engagementType) ? input.engagementType : null,
         },
         tx,
       );
@@ -653,6 +661,7 @@ export async function createEngagement(input = {}, dependencies = {}) {
       engagement_id: engagement.engagement_id,
       organization_id: engagement.organization_id,
       engagement_code: engagement.engagement_code,
+      engagement_type: engagement.engagement_type || null,
     },
     error: null,
   };

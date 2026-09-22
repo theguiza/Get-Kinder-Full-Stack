@@ -182,7 +182,7 @@ export async function selectInitialEngagementForOrganization(
  * mechanism (the advisory lock in the orchestration layer is).
  */
 export async function insertInitialEngagement(
-  { organizationId, engagementCode = DEFAULT_INITIAL_ENGAGEMENT_CODE, createdByUserId = null } = {},
+  { organizationId, engagementCode = DEFAULT_INITIAL_ENGAGEMENT_CODE, createdByUserId = null, engagementType = null } = {},
   db = pool,
 ) {
   if (typeof organizationId !== "string" || !UUID_RE.test(organizationId)) {
@@ -190,12 +190,19 @@ export async function insertInitialEngagement(
   }
   const normalizedEngagementCode =
     typeof engagementCode === "string" && engagementCode.length > 0 ? engagementCode : DEFAULT_INITIAL_ENGAGEMENT_CODE;
+  const columns = ["organization_id", "engagement_code", "created_by"];
+  const values = [organizationId, normalizedEngagementCode, createdByUserId];
+  if (typeof engagementType === "string" && engagementType.length > 0) {
+    columns.push("engagement_type");
+    values.push(engagementType);
+  }
+  const placeholders = values.map((_, index) => `$${index + 1}`).join(", ");
   try {
     const { rows } = await db.query(
-      `INSERT INTO kai.engagements (organization_id, engagement_code, created_by)
-       VALUES ($1, $2, $3)
-       RETURNING engagement_id, organization_id, engagement_code`,
-      [organizationId, normalizedEngagementCode, createdByUserId],
+      `INSERT INTO kai.engagements (${columns.join(", ")})
+       VALUES (${placeholders})
+       RETURNING engagement_id, organization_id, engagement_code, engagement_type`,
+      values,
     );
     return { ok: true, engagement: rows[0] };
   } catch (error) {

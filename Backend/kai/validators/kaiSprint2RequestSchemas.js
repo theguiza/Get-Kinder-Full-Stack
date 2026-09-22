@@ -167,6 +167,16 @@ export const KAI_SPRINT2_ROUTE_SCHEMAS = Object.freeze({
   create_engagement: Object.freeze({
     organization_id: { type: "uuid" },
     engagement_code: { type: "string", maxLength: KAI_SPRINT2_P0_STRING_LIMITS.displayLabelMaxLength },
+    // Package F bounded repair: engagement_type already exists as a real
+    // kai.engagements column (exposed by the read DTO and shown in
+    // ProjectsView) but was never settable at creation - it silently took
+    // the DB default. Not required in the payload (this schema engine only
+    // validates fields that are present), same string bound as
+    // engagement_code, no new limit invented.
+    engagement_type: {
+      type: "string",
+      maxLength: KAI_SPRINT2_P0_STRING_LIMITS.displayLabelMaxLength,
+    },
   }),
   reserve_intake_file_metadata: Object.freeze({
     organization_id: { type: "uuid" },

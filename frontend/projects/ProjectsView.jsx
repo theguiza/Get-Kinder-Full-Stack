@@ -35,14 +35,16 @@ export default function ProjectsView({
 }) {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
+  const [newProjectType, setNewProjectType] = useState("");
 
   const handleCreate = async (event) => {
     event.preventDefault();
     const name = newProjectName.trim();
     if (!name) return;
-    const result = await onCreateEngagement(name);
+    const result = await onCreateEngagement(name, newProjectType.trim() || undefined);
     if (result?.ok) {
       setNewProjectName("");
+      setNewProjectType("");
       setShowCreateForm(false);
     }
   };
@@ -96,6 +98,12 @@ export default function ProjectsView({
             onChange={(event) => setNewProjectName(event.target.value)}
             placeholder="Project name"
             style={{ flex: 1, minWidth: 220, fontSize: 14, padding: "9px 12px", borderRadius: 8, border: "1px solid rgba(69,90,124,0.22)" }}
+          />
+          <input
+            value={newProjectType}
+            onChange={(event) => setNewProjectType(event.target.value)}
+            placeholder="Type (optional)"
+            style={{ flex: 1, minWidth: 160, fontSize: 14, padding: "9px 12px", borderRadius: 8, border: "1px solid rgba(69,90,124,0.22)" }}
           />
           <button
             type="submit"
