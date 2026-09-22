@@ -31972,3 +31972,35 @@ set for every Node command; no database/cloud/production access):
 closure claimed. No push, deployment, production mutation, database
 mutation, migration execution, feature-flag/configuration change,
 real-client-data access, or `00_KAI_CURRENT_STATE.md` update performed.
+
+### Package G — Improvement Plan (STOPPED at schema/database authorization boundary)
+
+**Inspection performed:** searched the full repository (`migrations/*.sql`,
+`Backend/kai/`) for any existing persistence or service matching
+"improvement practice," "recurring practice," or an "Impact Operating
+System" concept. **None exists.** This confirms the finding already
+recorded in Package C's inspection (no Programs/Recommendations-adjacent
+practice model exists in KAI today) - Improvement Plan genuinely requires
+new persistence, exactly as anticipated when this package order was
+accepted.
+
+**Behavioral/data-model requirements are owner-approved** (recorded here
+for when schema authorization is separately granted): one row per
+organization, optionally associated with one Project/Engagement, carrying
+title, why-it-matters/rationale, status
+(`recommended`/`active`/`paused`/`completed`), cadence
+(`one-time`/`every_session`/`weekly`/`monthly`/`quarterly`/`annually`/`ongoing`),
+an optional next-due date, an optional responsible actor, and an optional
+relationship to the evidence gap/recommendation that caused it.
+
+**Stopping here per explicit instruction:** this package's UI and backend
+both require a new table (no existing table can honestly represent this),
+which is a schema/database change. No migration file was created, no
+schema was touched, no persistence was added. This is the accepted stop
+condition for Package G - continuing into unrelated authorized packages
+(H/H2) rather than attempting any part of the schema change.
+
+**Status:** PACKAGE_G_STOPPED_AT_SCHEMA_AUTHORIZATION_BOUNDARY. Awaiting
+explicit, separate schema/database change authorization before any further
+G work (migration authoring, table creation, or a G-backed UI) may
+proceed.
