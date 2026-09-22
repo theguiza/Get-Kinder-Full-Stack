@@ -1799,6 +1799,21 @@ async function getEngagementContextService() {
   return engagementContextServicePromise;
 }
 
+let improvementPracticeServicePromise = null;
+async function getImprovementPracticeService() {
+  if (
+    intakeServiceOverride?.createImprovementPractice
+    || intakeServiceOverride?.listImprovementPracticesForOrganizationOperation
+    || intakeServiceOverride?.getImprovementPracticeOperation
+    || intakeServiceOverride?.updateImprovementPracticeFieldsOperation
+    || intakeServiceOverride?.updateImprovementPracticeStatusOperation
+  ) {
+    return intakeServiceOverride;
+  }
+  improvementPracticeServicePromise ||= import("../services/kaiImprovementPracticeService.js");
+  return improvementPracticeServicePromise;
+}
+
 let engagementRequirementApplicabilityServicePromise = null;
 async function getEngagementRequirementApplicabilityService() {
   if (
@@ -1907,6 +1922,137 @@ router.post("/admin/organizations/:organizationId/engagements", async (req, res)
       req: { user: safeAuthenticatedUser(req) },
     });
   }, 201);
+});
+
+function improvementPracticeIdentifiers(req) {
+  const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
+  const improvementPracticeId = typeof req.params?.improvementPracticeId === "string" ? req.params.improvementPracticeId : "";
+  if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId) || organizationId !== organizationId.toLowerCase()) {
+    return null;
+  }
+  if (req.params?.improvementPracticeId !== undefined) {
+    if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(improvementPracticeId) || improvementPracticeId !== improvementPracticeId.toLowerCase()) {
+      return null;
+    }
+  }
+  return { organizationId, improvementPracticeId };
+}
+
+/**
+ * Package G (Improvement Plan / Improvement Practices). "Project"-scoped
+ * (engagement_id optional) and organization-scoped practices over the new
+ * kai.improvement_practices table - authorization, tenant scoping, and the
+ * required audit insert are all enforced inside the service, not here.
+ */
+router.post("/admin/organizations/:organizationId/improvement-practices", async (req, res) => {
+  const identifiers = improvementPracticeIdentifiers(req);
+  if (!identifiers) {
+    return sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id")],
+    });
+  }
+  if (!validateMutationRequestOrSend(req, res, "create_improvement_practice")) return;
+  const payload = requestPayload(req);
+  return invokeService(res, async () => {
+    const service = await getImprovementPracticeService();
+    return service.createImprovementPractice({
+      organizationId: identifiers.organizationId,
+      engagementId: payload.engagement_id,
+      gapLogItemId: payload.gap_log_item_id,
+      title: payload.title,
+      rationale: payload.rationale,
+      cadence: payload.cadence,
+      nextDueDate: payload.next_due_date,
+      responsibleActorUserId: payload.responsible_actor_user_id,
+      req: { user: safeAuthenticatedUser(req) },
+    });
+  }, 201);
+});
+
+router.get("/admin/organizations/:organizationId/improvement-practices", async (req, res) => {
+  const identifiers = improvementPracticeIdentifiers(req);
+  if (!identifiers) {
+    return sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id")],
+    });
+  }
+  const engagementId = typeof req.query?.engagement_id === "string" ? req.query.engagement_id : null;
+  if (engagementId && (!KAI_SPRINT2_P0_PATTERNS.uuid.test(engagementId) || engagementId !== engagementId.toLowerCase())) {
+    return sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("invalid_uuid_field", "engagement_id")],
+    });
+  }
+  return invokeService(res, async () => {
+    const service = await getImprovementPracticeService();
+    return service.listImprovementPracticesForOrganizationOperation({
+      organizationId: identifiers.organizationId,
+      engagementId,
+      req: { user: safeAuthenticatedUser(req) },
+    });
+  });
+});
+
+router.get("/admin/organizations/:organizationId/improvement-practices/:improvementPracticeId", async (req, res) => {
+  const identifiers = improvementPracticeIdentifiers(req);
+  if (!identifiers) {
+    return sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("invalid_uuid_field", "improvement_practice_id")],
+    });
+  }
+  return invokeService(res, async () => {
+    const service = await getImprovementPracticeService();
+    return service.getImprovementPracticeOperation({
+      organizationId: identifiers.organizationId,
+      improvementPracticeId: identifiers.improvementPracticeId,
+      req: { user: safeAuthenticatedUser(req) },
+    });
+  });
+});
+
+router.patch("/admin/organizations/:organizationId/improvement-practices/:improvementPracticeId", async (req, res) => {
+  const identifiers = improvementPracticeIdentifiers(req);
+  if (!identifiers) {
+    return sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("invalid_uuid_field", "improvement_practice_id")],
+    });
+  }
+  if (!validateMutationRequestOrSend(req, res, "update_improvement_practice")) return;
+  const payload = requestPayload(req);
+  return invokeService(res, async () => {
+    const service = await getImprovementPracticeService();
+    return service.updateImprovementPracticeFieldsOperation({
+      organizationId: identifiers.organizationId,
+      improvementPracticeId: identifiers.improvementPracticeId,
+      expectedUpdatedAt: payload.expected_updated_at,
+      title: payload.title,
+      rationale: payload.rationale,
+      cadence: payload.cadence,
+      nextDueDate: payload.next_due_date,
+      responsibleActorUserId: payload.responsible_actor_user_id,
+      req: { user: safeAuthenticatedUser(req) },
+    });
+  });
+});
+
+router.post("/admin/organizations/:organizationId/improvement-practices/:improvementPracticeId/status", async (req, res) => {
+  const identifiers = improvementPracticeIdentifiers(req);
+  if (!identifiers) {
+    return sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("invalid_uuid_field", "improvement_practice_id")],
+    });
+  }
+  if (!validateMutationRequestOrSend(req, res, "change_improvement_practice_status")) return;
+  const payload = requestPayload(req);
+  return invokeService(res, async () => {
+    const service = await getImprovementPracticeService();
+    return service.updateImprovementPracticeStatusOperation({
+      organizationId: identifiers.organizationId,
+      improvementPracticeId: identifiers.improvementPracticeId,
+      expectedUpdatedAt: payload.expected_updated_at,
+      status: payload.status,
+      req: { user: safeAuthenticatedUser(req) },
+    });
+  });
 });
 
 /**

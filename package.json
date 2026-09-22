@@ -90,6 +90,7 @@
     "test:kai-sprint2-p14-07-b1-grant-response-packet-human-authority-decision-ledger": "node --test __tests__/kai-sprint2-p14-07-b1-grant-response-packet-human-authority-decision-ledger-boundary.spec.js __tests__/kai-sprint2-p14-07-b1-grant-response-packet-human-authority-decision-ledger.integration.spec.js",
     "verify:kai-sprint2-p14-08-a-grant-response-packet-export-manifest-foundation": "node scripts/kai-sprint2-p14-08-a-grant-response-packet-export-manifest-foundation-local-postgres.js",
     "verify:kai-sprint2-br-02-board-reporting-candidate-foundation": "node scripts/kai-sprint2-br-02-board-reporting-candidate-foundation-local-postgres.js",
+    "verify:kai-sprint2-package-g-improvement-practices-foundation": "node scripts/kai-sprint2-package-g-improvement-practices-foundation-local-postgres.js",
     "verify:kai-sprint2-br-03a-board-reporting-candidate-review-request": "node scripts/kai-sprint2-br-03a-board-reporting-candidate-review-request-local-postgres.js",
     "verify:kai-sprint2-br-04-board-reporting-candidate-human-authority-decision-ledger": "node scripts/kai-sprint2-br-04-board-reporting-candidate-human-authority-decision-ledger-local-postgres.js",
     "test:kai-sprint2-br-04-board-reporting-candidate-human-authority-decision-ledger": "node --test __tests__/kai-sprint2-br-04-board-reporting-candidate-human-authority-decision-ledger-boundary.spec.js __tests__/kai-sprint2-br-04-board-reporting-candidate-human-final-release-authority.spec.js",

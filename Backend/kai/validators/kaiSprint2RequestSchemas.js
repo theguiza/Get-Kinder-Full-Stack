@@ -178,6 +178,36 @@ export const KAI_SPRINT2_ROUTE_SCHEMAS = Object.freeze({
       maxLength: KAI_SPRINT2_P0_STRING_LIMITS.displayLabelMaxLength,
     },
   }),
+  // Package G (Improvement Plan / Improvement Practices): status/cadence
+  // are validated against their approved fixed vocabularies inside the
+  // service layer (this generic schema engine has no enum descriptor - see
+  // the FILE_POLICY_BLOCKING_REASON_CODE_SET precedent below for the same
+  // convention). title reuses displayLabelMaxLength; rationale reuses
+  // operatorTextMaxLength - no new limit invented.
+  create_improvement_practice: Object.freeze({
+    organization_id: { type: "uuid" },
+    engagement_id: { type: "uuid" },
+    gap_log_item_id: { type: "uuid" },
+    title: { type: "string", maxLength: KAI_SPRINT2_P0_STRING_LIMITS.displayLabelMaxLength },
+    rationale: { type: "string", maxLength: KAI_SPRINT2_P0_STRING_LIMITS.operatorTextMaxLength },
+    cadence: { type: "string", maxLength: KAI_SPRINT2_P0_STRING_LIMITS.machineCodeMaxLength },
+    next_due_date: { type: "string", maxLength: 10 },
+    responsible_actor_user_id: { type: "uuid" },
+  }),
+  update_improvement_practice: Object.freeze({
+    organization_id: { type: "uuid" },
+    expected_updated_at: { type: "string", maxLength: KAI_SPRINT2_P0_STRING_LIMITS.displayLabelMaxLength },
+    title: { type: "string", maxLength: KAI_SPRINT2_P0_STRING_LIMITS.displayLabelMaxLength },
+    rationale: { type: "string", maxLength: KAI_SPRINT2_P0_STRING_LIMITS.operatorTextMaxLength },
+    cadence: { type: "string", maxLength: KAI_SPRINT2_P0_STRING_LIMITS.machineCodeMaxLength },
+    next_due_date: { type: "string", maxLength: 10 },
+    responsible_actor_user_id: { type: "uuid" },
+  }),
+  change_improvement_practice_status: Object.freeze({
+    organization_id: { type: "uuid" },
+    expected_updated_at: { type: "string", maxLength: KAI_SPRINT2_P0_STRING_LIMITS.displayLabelMaxLength },
+    status: { type: "string", maxLength: KAI_SPRINT2_P0_STRING_LIMITS.machineCodeMaxLength },
+  }),
   reserve_intake_file_metadata: Object.freeze({
     organization_id: { type: "uuid" },
     engagement_id: { type: "uuid" },
