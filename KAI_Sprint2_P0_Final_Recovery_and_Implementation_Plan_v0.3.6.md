@@ -32091,3 +32091,118 @@ performed.
 (intake/file problems requiring action) has no existing organization-wide
 read path and was not built; a future package would need to identify or
 add the smallest such read model before including it here.
+
+### Package F completeness repair — settable engagement_type (CLOSED LOCALLY)
+
+Continuation session start verified: HEAD `accc877` and the full local
+commit sequence (`6385596`..`accc877`) matched the reported handoff exactly;
+working tree clean.
+
+**Bounded verification performed** against the controlling Engagement-as-
+Project contract's seven Project/use-case metadata concepts
+(`engagement_type`, `use_case_type`, `reporting_period_start`,
+`reporting_period_end`, `target_funder_id`, `target_framework`,
+`project_status`): `engagement_type` is the only one with a real
+`kai.engagements` column, and it was not settable through `createEngagement`
+- new Projects silently took the column's DB default.
+`reporting_period_start`/`reporting_period_end`/`target_funder_id`/
+`target_framework` already exist as validated `project_metadata` jsonb sub-
+keys, populated by the separate, already-authorized
+`updateEngagementRequirementTarget` path, and are already exposed by the
+read DTO under `requirement_target` - not missing, just not duplicated into
+Projects. `use_case_type` and `project_status` are genuinely absent
+anywhere in the repository, under any name.
+
+**Smallest coherent repair:** `insertInitialEngagement`,
+`createEngagement`, the `create_engagement` validator, and the create-
+engagement route now accept an optional `engagement_type`, reusing the
+existing column - no schema change. `ProjectsView`'s "+ New Project" form
+gained an optional "Type" field. `use_case_type`/`project_status` are left
+NOT_CONFIRMED/deferred rather than fabricated as new jsonb keys with no
+approved semantics.
+
+**Test evidence** (`DATABASE_URL=postgres://localhost:1/nonexistent_sentinel_db`
+set for every Node command): `kai-impact-library-create-engagement.spec.js`
+and `kai-impact-library-projects.spec.js` updated and PASS. Full suite
+(4998 cases): 12 failures, byte-identical to the established baseline - 0
+regressions. `npm run build` PASS. `git diff --check` PASS.
+
+**Status:** PACKAGE_F_COMPLETENESS_REPAIR_CLOSED_LOCALLY.
+
+### Package G — Improvement Practice backend (CLOSED LOCALLY)
+
+Owner separately authorized the repository-only schema/migration work this
+package had previously stopped at (`PACKAGE_G_STOPPED_AT_SCHEMA_
+AUTHORIZATION_BOUNDARY`). Repository inspection re-confirmed no
+"improvement practice" persistence exists anywhere in this schema before
+this package.
+
+**Schema (`migrations/kai_sprint2_package_g_improvement_practices_foundation.sql`
+/`.rollback.sql`):** one new, additive, **mutable** relation,
+`kai.improvement_practices` - unlike this schema's append-only decision/
+snapshot ledgers, status/cadence/next_due_date/responsible actor are
+ordinary in-place UPDATE targets on the same row, mirroring
+`kai.impact_outcome_contexts`. `organization_id` is required;
+`engagement_id` and `gap_log_item_id` are optional, each bound through a
+tenant-safe composite FK (`(id, organization_id) -> <target> (id,
+organization_id)`). `kai.client_followup_items` and
+`kai.coverage_review_decisions` are distinct, incompatible gap-like shapes
+from `kai.gap_log_items` - a polymorphic origin FK across all three is
+explicitly deferred, not built unsafely. `status` is pinned to
+`recommended`/`active`/`paused`/`completed`; `cadence` to `one_time`/
+`every_session`/`weekly`/`monthly`/`quarterly`/`annually`/`ongoing`.
+
+**Migration verification package authored:** verifier, smoke-seed, smoke-
+verifier, failure-checks (negative-path FK/CHECK proofs), patch notes,
+runbook, and a local-postgres runner
+(`scripts/kai-sprint2-package-g-improvement-practices-foundation-local-
+postgres.js`, `npm run verify:kai-sprint2-package-g-improvement-practices-
+foundation`) that stands up a disposable, loopback-only, ephemeral
+PostgreSQL instance (no shared/production database, no credential
+discovery) and proves the full migration dependency chain, the verifier
+(12/12 PASS), smoke seed/verifier, failure checks, and the focused Node
+tests, all against a real (throwaway) Postgres. Separately, manually
+proved in the same disposable manner: the rollback removes exactly what
+the forward migration created, and the migration re-applies cleanly and
+passes the same verifier afterward. **No migration was executed against
+production or any shared database.**
+
+**Backend:** `kaiImprovementPracticeQueries.js` (insert/get/list/update-
+fields/update-status; the latter two use the Board Reporting candidate
+review's `date_trunc('milliseconds', updated_at)` optimistic-concurrency
+compare-and-swap convention). `kaiImprovementPracticeService.js`:
+`KAI_SPRINT2_ENABLED` gate, mapped-human-actor requirement, role/tenant
+authorization via `validateActorCanPerformOperation` (same allowed-role set
+as every other engagement-scoped operation: `gk_admin`/`gk_operator`/
+`client_admin`), `withTransaction` + a required
+`insertRequiredSuccessfulAuditEvent` audit write for every mutation, using
+`object_type: "other"` / `target_object_type: "improvement_practice"` - the
+same safe pattern Package F's `createEngagement` already established, since
+`kai.object_type_enum`'s real production label set is NOT_CONFIRMED and
+this package does not touch it. New `create_improvement_practice`/
+`update_improvement_practice`/`change_improvement_practice_status`
+validator schemas (title/rationale reuse `displayLabelMaxLength`/
+`operatorTextMaxLength` - no new limit invented; status/cadence enums
+validated in the service, matching this codebase's existing convention for
+enum-like fields, since the shared schema-validation engine has no enum
+descriptor). New `POST`/`GET`/`PATCH .../admin/organizations/
+:organizationId/improvement-practices` (+`/:id`, +`/:id/status`) routes -
+no SQL/DB access in the routes.
+
+**Not built (deferred, not fabricated):** polymorphic origin FK to
+`client_followup_items`/`coverage_review_decisions`; Gap Detail "Add to
+Plan" wiring; Improvement Plan UI; Home integration (all Package G2+).
+
+**Test evidence:** `kai-sprint2-package-g-improvement-practices-foundation-
+schema-contract.spec.js`, `kai-package-g-improvement-practice-service.
+spec.js`, `kai-package-g-improvement-practice-routes.spec.js` all PASS,
+plus the real ephemeral-PostgreSQL migration/verifier/smoke/failure-check
+run above. Full suite (5024 cases): 12 failures, byte-identical to the
+established baseline - 0 regressions. `npm run build` PASS. `git diff
+--check` PASS.
+
+**Status:** PACKAGE_G_IMPROVEMENT_PRACTICE_BACKEND_CLOSED_LOCALLY. No
+production or runtime closure claimed. No push, deployment, production
+mutation, database mutation, migration execution against production/shared
+databases, feature-flag/configuration change, real-client-data access, or
+`00_KAI_CURRENT_STATE.md` update performed.
