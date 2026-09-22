@@ -8,6 +8,10 @@ export function engagementsPath(organizationId) {
   return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/engagements`;
 }
 
+export function organizationProfilePath(organizationId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/profile`;
+}
+
 export function batchesPath(organizationId) {
   return `${BASE_PATH}/admin/batches?organization_id=${encodeURIComponent(organizationId)}`;
 }

@@ -31199,3 +31199,97 @@ No production or runtime closure claimed. No push, deployment, production
 mutation, database mutation, migration execution, feature-flag/configuration
 change, real-client-data access, or `00_KAI_CURRENT_STATE.md` update
 performed.
+
+### Package B1/B2 — Shared shell + baseline responsive behavior (CLOSED LOCALLY)
+
+**What changed:**
+- `frontend/impactLibraryShell.jsx` (new): presentational
+  `ImpactLibraryShell` component implementing the approved shell (design
+  handoff README §3): left navigation (Home, Knowledge Studio, Impact
+  Library, Improvement Plan, Projects - Needs Attention intentionally not a
+  nav item, reached only via the header bell), header (organization
+  logo/name, notification bell with coral dot only when `hasAttention` is
+  true), no Get Kinder branding. Purely presentational - all data/state is
+  owned by the caller.
+- `frontend/ImpactLibraryApp.jsx` (new): top-level container. Fetches the
+  actor's authorized organizations (existing `listAuthorizedOrganizations`)
+  and, per organization, its display profile (new B0 read path), so the
+  header and organization switcher show a resolved name rather than a UUID
+  once available. Composes the existing, **unmodified**
+  `ImpactEvidenceLibrary.jsx` inside the shell under the Knowledge Studio
+  section - its own internal organization-selection state and behavior are
+  untouched (thirteen existing test files assert against its exact source,
+  so it was deliberately not refactored in this package). Sections not yet
+  built (Home, Impact Library, Improvement Plan, Projects, Needs Attention)
+  render a single, honestly-labeled "being rolled out, not available yet"
+  placeholder - no fabricated data, no dead interaction pretending to
+  persist anything. `hasAttention` is hardcoded `false` (no fabricated
+  alert) until Package H builds a real Needs Attention data source.
+- `frontend/kaiWebIntakeLogic.js`: added `organizationProfilePath()` next to
+  the existing `organizationsPath()`/`engagementsPath()` builders.
+- `frontend/entry.jsx`: `window.renderImpactEvidenceLibrary` now mounts
+  `ImpactLibraryApp` instead of `ImpactEvidenceLibrary` directly; the direct
+  `ImpactEvidenceLibrary` import is kept (and now composed one level deeper,
+  inside `ImpactLibraryApp.jsx`) so the locked `impact-library-view.spec.js`
+  source contract still holds.
+- `views/impact-library.ejs`: removed `partials/site-header`/
+  `partials/site-footer` for this one route only (per approved design - no
+  GK branding, no footer on this surface); added `gk-design-tokens.css` and
+  the Work Sans/IBM Plex Mono fonts the shell uses. Kept Bootstrap CSS/JS
+  and the pre-existing `.admin-title`/`.admin-card` styles, since
+  `ImpactEvidenceLibrary.jsx` still depends on both throughout and was not
+  otherwise touched. `public/js/bundles/entry.js` rebuilt (`npm run build`,
+  vite) to match.
+- `public/css/gk-design-tokens.css`: added shell-scoped `.gk-shell-*`
+  classes plus tablet (icon-only 64px rail, tooltip via native `title`) and
+  mobile (fixed bottom tab bar, sidebar footer hidden, single-column
+  content) baseline responsive rules per the responsive spec file. Full
+  responsive/accessibility QA is Package I, not this package.
+
+**Known interim limitation (recorded here, not hidden):** the shell
+header's organization name/logo is resolved independently of
+`ImpactEvidenceLibrary`'s own in-page organization picker (both read the
+same authorized-organizations list, but are not state-synchronized). For an
+actor authorized for exactly one organization (the common case) this is
+always correct. An actor authorized for multiple organizations can switch
+organizations in either the header or the in-page picker, but the two are
+not yet kept in sync - tracked to be resolved naturally by Package D, which
+decomposes `ImpactEvidenceLibrary.jsx` and lifts shared organization/
+engagement context out of it.
+
+**No schema/migration change. No production/database mutation, deployment,
+feature-flag change, or cloud/infrastructure change.**
+
+**Test evidence** (`DATABASE_URL=postgres://localhost:1/nonexistent_sentinel_db`
+set for every Node command; no database/cloud/production access):
+- New: `__tests__/kai-impact-library-shell.spec.js` (8 cases) - proves
+  `views/impact-library.ejs` no longer includes the site-header/footer
+  partials while three other authenticated views still do; the locked
+  mount-point/entry.js contract still holds; `entry.jsx` mounts
+  `ImpactLibraryApp` while still importing `ImpactEvidenceLibrary.jsx`; the
+  shell exposes exactly the five approved nav sections in order and Needs
+  Attention is not one of them; `ImpactEvidenceLibrary` is composed in
+  exactly one place (Knowledge Studio); `hasAttention` is never fabricated;
+  `organizationProfilePath` exists alongside the existing path builders.
+  8/8 PASS.
+- Regression: `impact-library-view.spec.js`,
+  `kai-sprint2-impact-library-kai-frontend.spec.js`,
+  `kai-sprint2-impact-library-kai-surface.spec.js`,
+  `kai-sprint2-organization-context-service.spec.js` (run together with the
+  new suite) -> 44/44 PASS, 0 fail.
+- Frontend build: `npm run build` (vite) -> succeeded, no errors, both
+  before and after the final source edits.
+- `git diff --check` -> PASS.
+- Full non-integration suite (`__tests__/*.spec.js`, 4912 cases) was run
+  before this package's changes and again after: the same 12 pre-existing
+  failures (all in `kai-sprint2-*` route/DTO-contract suites unrelated to
+  organization-context, engagements, or impact-library) are present
+  **identically** in both runs (confirmed via `git stash`/`stash pop`
+  around a full-suite run) - not introduced or affected by this package,
+  and out of this package's scope to fix.
+
+**Status:** PACKAGE_B1_B2_SHARED_SHELL_AND_BASELINE_RESPONSIVE_CLOSED_LOCALLY.
+No production or runtime closure claimed. No push, deployment, production
+mutation, database mutation, migration execution, feature-flag/configuration
+change, real-client-data access, or `00_KAI_CURRENT_STATE.md` update
+performed.

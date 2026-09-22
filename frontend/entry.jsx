@@ -19,7 +19,11 @@ import KaiClientFollowupReview from "./KaiClientFollowupReview.jsx";
 import GkExportReviewDetail from "./gkExportReviewDetail.jsx";
 import { renderOrgPortal, renderKpiStrip } from "./orgPortal.jsx";
 import { renderOrgWorkspace } from "./orgWorkspace.jsx";
+// Kept as a direct import (rather than only inside ImpactLibraryApp.jsx) so
+// this file continues to name the governed component it mounts, matching
+// impact-library-view.spec.js's source contract.
 import ImpactEvidenceLibrary from "./ImpactEvidenceLibrary.jsx";
+import ImpactLibraryApp from "./ImpactLibraryApp.jsx";
 
 const ROOTS = new WeakMap();
 
@@ -171,7 +175,7 @@ window.renderImpactEvidenceLibrary = (selector = "#impact-evidence-library-root"
   const root = getOrCreateRoot(el);
   root.render(
     <React.StrictMode>
-      <ImpactEvidenceLibrary {...props} />
+      <ImpactLibraryApp {...props} />
     </React.StrictMode>
   );
 };

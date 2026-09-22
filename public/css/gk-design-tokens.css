@@ -735,3 +735,144 @@
   font-size: 0.88rem;
   text-align: right;
 }
+
+/* ── Impact Library product shell (design_handoff_impact_library) ── */
+.gk-shell-root {
+  display: flex;
+  height: 100vh;
+  width: 100%;
+  background: #F7F3ED;
+  font-family: "Work Sans", sans-serif;
+  color: #2C2E3A;
+  overflow: hidden;
+}
+.gk-shell-sidebar {
+  width: 224px;
+  flex-shrink: 0;
+  background: #455A7C;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 20px 12px;
+}
+.gk-shell-nav-group { display: flex; flex-direction: column; gap: 2px; }
+.gk-shell-nav-footer {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-top: 1px solid rgba(255,255,255,0.14);
+  padding-top: 12px;
+}
+.gk-shell-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  cursor: pointer;
+  text-decoration: none;
+  color: rgba(255,255,255,0.82);
+  font-weight: 500;
+  font-size: 14px;
+}
+.gk-shell-nav-item:hover { background: rgba(255,255,255,0.08); color: rgba(255,255,255,0.92); text-decoration: none; }
+.gk-shell-nav-item-active { background: #FF5656; color: #FFFFFF; font-weight: 600; }
+.gk-shell-nav-item-active:hover { background: #FF5656; color: #FFFFFF; }
+.gk-shell-nav-footer-item { font-size: 13.5px; color: rgba(255,255,255,0.72); }
+.gk-shell-nav-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+.gk-shell-main { flex: 1; min-width: 0; display: flex; flex-direction: column; height: 100%; }
+.gk-shell-header {
+  height: 68px;
+  flex-shrink: 0;
+  background: #FFFFFF;
+  border-bottom: 1px solid rgba(69,90,124,0.12);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 32px;
+}
+.gk-shell-header-org { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.gk-shell-org-logo {
+  width: 32px; height: 32px; flex-shrink: 0;
+  border-radius: 8px; object-fit: cover;
+}
+.gk-shell-org-logo-fallback {
+  background: #F7F3ED; color: #455A7C; font-weight: 700;
+  display: flex; align-items: center; justify-content: center;
+}
+.gk-shell-header-org-name {
+  font-weight: 600; font-size: 15px; color: #2C2E3A;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 320px;
+}
+.gk-shell-org-switcher-wrap { position: relative; min-width: 0; }
+.gk-shell-org-switcher-btn {
+  display: flex; align-items: center; gap: 6px;
+  background: none; border: none; padding: 4px; cursor: pointer; min-width: 0;
+}
+.gk-shell-org-switcher-menu {
+  position: absolute; left: 0; top: calc(100% + 4px); z-index: 20;
+  min-width: 220px; max-height: 260px; overflow-y: auto;
+  border: 1px solid rgba(69,90,124,0.16); border-radius: 10px;
+  background: #fff; padding: 6px;
+  box-shadow: 0 4px 14px rgba(26,39,68,0.12);
+}
+.gk-shell-org-switcher-option {
+  display: block; width: 100%; text-align: left; border: 0; border-radius: 8px;
+  background: transparent; color: #2C2E3A; font-size: 13.5px; padding: 8px 10px; cursor: pointer;
+}
+.gk-shell-org-switcher-option:hover { background: #F7F3ED; }
+.gk-shell-org-switcher-option[aria-selected="true"] { font-weight: 700; color: #455A7C; }
+
+.gk-shell-bell-btn {
+  position: relative; width: 38px; height: 38px; border-radius: 10px;
+  border: none; background: transparent; display: flex; align-items: center; justify-content: center; cursor: pointer;
+}
+.gk-shell-bell-btn:hover { background: #F7F3ED; }
+.gk-shell-bell-dot {
+  position: absolute; top: 6px; right: 7px; width: 8px; height: 8px;
+  border-radius: 50%; background: #FF5656; border: 1.5px solid #FFFFFF;
+}
+
+.gk-shell-content { flex: 1; overflow-y: auto; padding: 40px 48px 64px; }
+
+/* Focus visibility, every breakpoint (design_handoff §7) */
+.gk-shell-nav-item:focus-visible,
+.gk-shell-org-switcher-btn:focus-visible,
+.gk-shell-bell-btn:focus-visible,
+.gk-shell-org-switcher-option:focus-visible {
+  outline: 2px solid #FF5656;
+  outline-offset: 2px;
+}
+
+/* ── Tablet: 64px icon-only rail (design_handoff responsive spec) ── */
+@media (max-width: 1199.98px) {
+  .gk-shell-sidebar { width: 64px; align-items: center; padding: 16px 8px; }
+  .gk-shell-nav-item { padding: 10px; justify-content: center; }
+  .gk-shell-nav-label { display: none; }
+  .gk-shell-header { padding: 0 20px; }
+  .gk-shell-content { padding: 24px 24px 48px; }
+}
+
+/* ── Mobile: fixed bottom tab bar, single-column content ── */
+@media (max-width: 767.98px) {
+  .gk-shell-root { flex-direction: column; height: 100vh; }
+  .gk-shell-sidebar {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
+    width: 100%; height: 64px; flex-direction: row;
+    align-items: center; justify-content: space-around;
+    padding: 0 6px;
+  }
+  .gk-shell-nav-group { flex-direction: row; justify-content: space-around; width: 100%; gap: 0; }
+  .gk-shell-nav-footer { display: none; }
+  .gk-shell-nav-item {
+    flex-direction: column; gap: 3px; padding: 6px 4px; min-width: 44px; min-height: 44px;
+    justify-content: center;
+  }
+  .gk-shell-nav-label { display: block; font-size: 9.5px; text-align: center; white-space: normal; }
+  .gk-shell-main { padding-bottom: 64px; }
+  .gk-shell-header { height: 52px; padding: 0 16px; }
+  .gk-shell-header-org-name { max-width: 46vw; }
+  .gk-shell-content { padding: 16px 16px 32px; }
+}
