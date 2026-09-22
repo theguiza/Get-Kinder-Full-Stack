@@ -195,7 +195,7 @@ test("KAI Web Intake bootstraps its organization/engagement selection from the s
 
   // Selecting an organization automatically chains into the existing engagements read.
   assert.match(intakeUiSource, /loadEngagements\(organizationId\)/);
-  assert.match(intakeUiSource, /setEngagementId\(items\.length === 1 \? items\[0\]\.engagement_id : ""\)/);
+  assert.match(intakeUiSource, /setLocalEngagementId\(items\.length === 1 \? items\[0\]\.engagement_id : ""\)/);
 
   // Explicit empty states are rendered rather than fabricating an id.
   assert.match(intakeUiSource, /No KAI organization is available for this account\./);
@@ -443,7 +443,7 @@ test("KAI Web Intake preserves standalone heading behavior and supports embedded
 
   assert.match(
     uiSource,
-    /organizationId: parentOrganizationId = "",\s*embedded = false,/,
+    /organizationId: parentOrganizationId = "",[\s\S]*?engagementId: parentEngagementId = "",[\s\S]*?embedded = false,/,
   );
 
   assert.match(

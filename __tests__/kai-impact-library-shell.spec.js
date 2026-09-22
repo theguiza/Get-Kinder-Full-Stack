@@ -50,9 +50,9 @@ test("frontend/impactLibraryShell.jsx exposes exactly the five approved left-nav
 test("frontend/ImpactLibraryApp.jsx composes the existing ImpactEvidenceLibrary component under the Knowledge Studio section only", () => {
   const source = readFileSync("frontend/ImpactLibraryApp.jsx", "utf8");
   assert.match(source, /import ImpactEvidenceLibrary from "\.\/ImpactEvidenceLibrary\.jsx";/);
-  const knowledgeStudioBranch = source.match(/activeSection === "knowledgeStudio"\) \{\s*sectionContent = <ImpactEvidenceLibrary \/>;/);
+  const knowledgeStudioBranch = source.match(/activeSection === "knowledgeStudio"\) \{\s*sectionContent = \(\s*<ImpactEvidenceLibrary/);
   assert.ok(knowledgeStudioBranch, "ImpactEvidenceLibrary must be rendered when activeSection is knowledgeStudio");
-  const otherRenders = [...source.matchAll(/<ImpactEvidenceLibrary\s*\/>/g)];
+  const otherRenders = [...source.matchAll(/<ImpactEvidenceLibrary\b/g)];
   assert.equal(otherRenders.length, 1, "ImpactEvidenceLibrary must be composed in exactly one place");
 });
 

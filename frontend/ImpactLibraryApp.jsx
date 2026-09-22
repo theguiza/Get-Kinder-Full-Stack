@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 
-import ImpactLibraryShell from "./impactLibraryShell.jsx";
-import { organizationsPath, organizationProfilePath } from "./kaiWebIntakeLogic.js";
+import ImpactLibraryShell, { ProjectContextBar } from "./impactLibraryShell.jsx";
+import { organizationsPath, organizationProfilePath, engagementsPath } from "./kaiWebIntakeLogic.js";
 import { getJson } from "./impactEvidenceLibraryLogic.js";
 import ImpactEvidenceLibrary from "./ImpactEvidenceLibrary.jsx";
 
@@ -23,24 +23,29 @@ function ComingSoonPanel({ title }) {
 }
 
 /**
- * Top-level container for the approved /impact-library redesign (Package
- * B1/B2). Owns the shared shell's organization display state and Needs
- * Attention affordance; the existing, unmodified ImpactEvidenceLibrary
- * component (governed evidence/claim/traceability tool) is composed inside
- * the shell under the Knowledge Studio section, preserving its own internal
- * organization-selection behavior exactly as before.
- *
- * Known interim limitation (tracked for Package D, which decomposes
- * ImpactEvidenceLibrary.jsx): the shell header's organization name/logo is
- * resolved independently of ImpactEvidenceLibrary's own in-page organization
- * picker, since that component's organization state is internal and used by
- * thirteen existing locked source-contract tests. For the common case (a
- * user authorized for exactly one organization) this is always correct. A
- * user authorized for multiple organizations can still switch organizations
- * both in the header (which will fetch a fresh display profile) and inside
- * Knowledge Studio's own picker; the two are not yet synchronized, and the
- * header does not automatically reflect a change made in the in-page
- * picker.
+ * Per-view classification of whether "All organizational knowledge" (no
+ * Project/Engagement filter) is honest for that view's read paths (Package
+ * C0). Knowledge Studio's primary content (claims, evidence, gaps/risks,
+ * review queue, organization sources) is ORGANIZATION_WIDE - only its
+ * Funder Requirements / Grant Response Packet / Board Reporting sub-features
+ * are ENGAGEMENT_SCOPED_ONLY, and those already render their own existing
+ * "select an organization/engagement" gate when no engagement is active.
+ * Home/Impact Library/Improvement Plan/Projects are not yet built (Packages
+ * C/E/F/G), so they are not yet classified - this map is extended as each
+ * one lands, never assumed.
+ */
+const SECTION_ALLOWS_ORGANIZATION_WIDE = Object.freeze({
+  knowledgeStudio: true,
+});
+
+/**
+ * Top-level container for the approved /impact-library redesign (Packages
+ * B1/B2 shell + C0 shared Project/Engagement context). Owns the one
+ * authoritative organization and Project/Engagement selection for the whole
+ * application and passes both down as controlled props to the existing,
+ * otherwise-unmodified ImpactEvidenceLibrary component (which in turn passes
+ * the engagement through to KaiWebIntake) - no view gets its own
+ * independent, potentially-disagreeing selection.
  */
 export default function ImpactLibraryApp({ initialSection = "knowledgeStudio" } = {}) {
   const [activeSection, setActiveSection] = useState(initialSection);
@@ -50,6 +55,10 @@ export default function ImpactLibraryApp({ initialSection = "knowledgeStudio" } 
   // showing a raw UUID for any organization whose display profile has
   // already resolved - not only the currently active one.
   const [organizationProfiles, setOrganizationProfiles] = useState({});
+
+  const [engagements, setEngagements] = useState([]);
+  const [engagementsLoaded, setEngagementsLoaded] = useState(false);
+  const [selectedEngagementId, setSelectedEngagementId] = useState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -97,6 +106,38 @@ export default function ImpactLibraryApp({ initialSection = "knowledgeStudio" } 
     };
   }, [organizations]);
 
+  // Package C0: the one authoritative Project/Engagement list and
+  // selection for the active organization. Re-fetched, and the previous
+  // organization's selection discarded, every time the active organization
+  // changes - an Engagement/Project must never carry across organizations.
+  useEffect(() => {
+    setEngagements([]);
+    setEngagementsLoaded(false);
+    setSelectedEngagementId("");
+    if (!selectedOrganizationId) return undefined;
+    let cancelled = false;
+    (async () => {
+      const result = await getJson(engagementsPath(selectedOrganizationId));
+      if (cancelled) return;
+      setEngagementsLoaded(true);
+      if (result.statusCode !== 200 || !result.body?.ok) {
+        setEngagements([]);
+        return;
+      }
+      const items = result.body.data?.items || [];
+      setEngagements(items);
+      // Smallest honest auto-selection rule: exactly one authorized Project
+      // selects itself; with more than one, the user chooses (or the view
+      // stays at "All organizational knowledge" where that is honest).
+      if (items.length === 1) {
+        setSelectedEngagementId(items[0].engagement_id);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedOrganizationId]);
+
   const activeProfile = organizationProfiles[selectedOrganizationId] || null;
   const organizationName = activeProfile?.name || "";
   const organizationLogoUrl = activeProfile?.logoUrl || "";
@@ -105,9 +146,18 @@ export default function ImpactLibraryApp({ initialSection = "knowledgeStudio" } 
     name: organizationProfiles[org.organization_id]?.name || "",
   }));
 
+  const allowOrganizationWide = SECTION_ALLOWS_ORGANIZATION_WIDE[activeSection] === true;
+
   let sectionContent;
   if (activeSection === "knowledgeStudio") {
-    sectionContent = <ImpactEvidenceLibrary />;
+    sectionContent = (
+      <ImpactEvidenceLibrary
+        organizationId={selectedOrganizationId}
+        onOrganizationIdChange={setSelectedOrganizationId}
+        engagementId={selectedEngagementId}
+        onEngagementIdChange={setSelectedEngagementId}
+      />
+    );
   } else if (activeSection === "home") {
     sectionContent = <ComingSoonPanel title="Home" />;
   } else if (activeSection === "impactLibrary") {
@@ -132,6 +182,13 @@ export default function ImpactLibraryApp({ initialSection = "knowledgeStudio" } 
       hasAttention={false}
       onOpenNeedsAttention={() => setActiveSection("needsAttention")}
     >
+      <ProjectContextBar
+        engagements={engagements}
+        engagementsLoaded={engagementsLoaded}
+        selectedEngagementId={selectedEngagementId}
+        onSelectEngagement={setSelectedEngagementId}
+        allowOrganizationWide={allowOrganizationWide}
+      />
       {sectionContent}
     </ImpactLibraryShell>
   );

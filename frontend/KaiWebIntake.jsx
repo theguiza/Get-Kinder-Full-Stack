@@ -30,6 +30,16 @@ function ValueRow({ label, value }) {
 
 export default function KaiWebIntake({
   organizationId: parentOrganizationId = "",
+  // KAI Impact Library redesign, Package C0 (shared Project/Engagement
+  // context): when a parent supplies this, it is the one authoritative
+  // active Project/Engagement for the whole /impact-library application -
+  // this component's own engagement picker is hidden and its own
+  // engagements list is never fetched, exactly mirroring how
+  // parentOrganizationId already suppresses this component's organization
+  // picker/fetch. A caller that does not pass it (e.g. the standalone
+  // adminDashboard KAI Web Intake panel) is completely unaffected.
+  engagementId: parentEngagementId = "",
+  onEngagementIdChange,
   embedded = false,
   // KAI B1A-3B-R2: explicit opt-in seam only. When a parent passes this
   // callback, KaiWebIntake reports the ONE server-grounded fact a Phase-5
@@ -53,7 +63,18 @@ export default function KaiWebIntake({
   const [loadingOrganizations, setLoadingOrganizations] = useState(true);
   const [organizationsLoaded, setOrganizationsLoaded] = useState(false);
   const [engagements, setEngagements] = useState([]);
-  const [engagementId, setEngagementId] = useState("");
+  const [localEngagementId, setLocalEngagementId] = useState("");
+  const engagementId = parentEngagementId || localEngagementId;
+  // Routes a user-driven engagement change to the shared Project context
+  // when a parent owns it, otherwise to this component's own local state -
+  // never both, so there is exactly one authoritative value.
+  const updateEngagementId = useCallback((value) => {
+    if (parentEngagementId) {
+      if (typeof onEngagementIdChange === "function") onEngagementIdChange(value);
+      return;
+    }
+    setLocalEngagementId(value);
+  }, [parentEngagementId, onEngagementIdChange]);
   const [loadingEngagements, setLoadingEngagements] = useState(false);
   const [engagementsLoaded, setEngagementsLoaded] = useState(false);
   const [batchCode, setBatchCode] = useState("");
@@ -105,7 +126,7 @@ export default function KaiWebIntake({
 
   useEffect(() => {
     setEngagements([]);
-    setEngagementId("");
+    setLocalEngagementId("");
     setEngagementsLoaded(false);
     setBatchCode("");
     setBatches([]);
@@ -127,9 +148,18 @@ export default function KaiWebIntake({
   }, [organizationId]);
 
   const loadEngagements = useCallback(async (orgId) => {
+    // A parent-supplied engagementId means the shared Project/Engagement
+    // context (Package C0) already owns engagement selection for this
+    // organization - this component must not run a second, independent
+    // engagement fetch/selection that could disagree with it.
+    if (parentEngagementId) {
+      setEngagements([]);
+      setEngagementsLoaded(true);
+      return;
+    }
     if (!orgId) {
       setEngagements([]);
-      setEngagementId("");
+      setLocalEngagementId("");
       setEngagementsLoaded(false);
       return;
     }
@@ -139,18 +169,19 @@ export default function KaiWebIntake({
     setEngagementsLoaded(true);
     if (result.statusCode !== 200 || !result.body?.ok) {
       setEngagements([]);
-      setEngagementId("");
+      setLocalEngagementId("");
       setMessage(errorText(result));
       return;
     }
     const items = result.body.data?.items || [];
     setEngagements(items);
-    setEngagementId(items.length === 1 ? items[0].engagement_id : "");
-  }, []);
+    setLocalEngagementId(items.length === 1 ? items[0].engagement_id : "");
+  }, [parentEngagementId]);
 
   // Once an organization is selected (auto- or user-picked), the engagement
   // list for that organization is fetched automatically - the user never
-  // types or fabricates an engagement id either.
+  // types or fabricates an engagement id either. Skipped entirely when a
+  // parent already supplies the active engagement (see loadEngagements).
   useEffect(() => {
     loadEngagements(organizationId);
   }, [organizationId, loadEngagements]);
@@ -337,6 +368,7 @@ export default function KaiWebIntake({
             )}
           </div>
           )}
+          {parentEngagementId ? null : (
           <div className="col-12 col-lg-5">
             <label className="form-label small fw-semibold">Engagement</label>
             {loadingEngagements ? (
@@ -349,7 +381,7 @@ export default function KaiWebIntake({
               <select
                 className="form-select form-select-sm"
                 value={engagementId}
-                onChange={(event) => setEngagementId(event.target.value)}
+                onChange={(event) => updateEngagementId(event.target.value)}
                 disabled={engagements.length <= 1}
               >
                 {engagements.map((item) => (
@@ -359,6 +391,7 @@ export default function KaiWebIntake({
             )}
             <div className="form-text">Only existing, tenant-authoritative organizations and engagements are selectable.</div>
           </div>
+          )}
           <div className="col-12 col-lg-3">
             <label className="form-label small fw-semibold">Batch code</label>
             <input className="form-control form-control-sm" value={batchCode} onChange={(event) => setBatchCode(event.target.value.trim())} />
@@ -387,7 +420,7 @@ export default function KaiWebIntake({
                   type="button"
                   className="btn btn-sm btn-outline-primary"
                   onClick={() => {
-                    setEngagementId(item.engagement_id || "");
+                    updateEngagementId(item.engagement_id || "");
                     setIntakeBatchId(item.intake_batch_id);
                     setBatchFiles([]);
                     setIntakeFileId("");

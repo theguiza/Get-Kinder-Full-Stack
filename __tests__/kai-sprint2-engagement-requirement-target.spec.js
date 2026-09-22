@@ -255,6 +255,7 @@ test("engagement target read returns the governed target when present without le
   assert.deepEqual(result.data.items, [{
     engagement_id: ENGAGEMENT_A,
     organization_id: ORG_A,
+    engagement_code: null,
     engagement_type: "pilot_assessment",
     engagement_status: "draft",
     requirement_target: validTarget,
@@ -353,6 +354,7 @@ test("existing engagement list behavior remains valid for rows without target me
   assert.deepEqual(result.data.items, [{
     engagement_id: ENGAGEMENT_A,
     organization_id: ORG_A,
+    engagement_code: null,
     engagement_type: null,
     engagement_status: null,
     requirement_target: {},

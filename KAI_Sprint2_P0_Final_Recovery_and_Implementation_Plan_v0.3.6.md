@@ -31293,3 +31293,118 @@ No production or runtime closure claimed. No push, deployment, production
 mutation, database mutation, migration execution, feature-flag/configuration
 change, real-client-data access, or `00_KAI_CURRENT_STATE.md` update
 performed.
+
+### Package C0 — Shared Project/Engagement context (CLOSED LOCALLY)
+
+**Scope decision recorded:** user-facing "Project" = backend `kai.engagements`
+(`listAuthorizedEngagements`, unchanged). No new Project persistence/table/
+service. Project context is cross-cutting: one authoritative selection for
+the whole `/impact-library` application, not per-view state.
+
+**What changed:**
+- `Backend/kai/services/kaiEngagementContextService.js`: added
+  `engagement_code` to `serializeEngagementTarget()`'s output - the
+  smallest authorized read-model addition for a human-readable Project
+  label. `engagement_code` already exists on every `kai.engagements` row
+  (`NOT NULL`) and was simply not previously serialized; nothing was
+  fabricated. Two existing locked "must not leak arbitrary project_metadata"
+  tests updated to include the new allowlisted field (fixtures only - their
+  leak-prevention assertions are unchanged).
+- `frontend/impactLibraryShell.jsx`: added `ProjectContextBar`, the one
+  reusable "Project [ current project ▼ ]" control, rendered once above
+  whichever section is active. Prefers `engagement_code`; falls back to
+  the raw id only if no code exists (never fabricates a name). Offers
+  "All organizational knowledge" only when the caller marks the active
+  section as organization-wide-capable.
+- `frontend/ImpactLibraryApp.jsx`: now owns the one authoritative
+  organization AND engagement/Project selection (previously only
+  organization - see Package B1's recorded interim limitation, now
+  resolved as a natural consequence of doing this correctly). Fetches
+  engagements via the existing `engagementsPath()`/`listAuthorizedEngagements`
+  for the active organization; auto-selects a single result; clears the
+  selection whenever the organization changes (before the new list
+  resolves), so an engagement can never carry across organizations.
+  Classifies which sections may honestly show "All organizational
+  knowledge" via `SECTION_ALLOWS_ORGANIZATION_WIDE` (currently:
+  `knowledgeStudio: true` - Home/Impact Library/Improvement Plan/Projects
+  aren't built yet, so intentionally unclassified rather than assumed).
+- `frontend/ImpactEvidenceLibrary.jsx`: organization AND engagement
+  selection converted to the controlled-with-fallback pattern (mirrors
+  this same file's own pre-existing `organizationId`/`parentOrganizationId`-
+  style convention already used elsewhere in this codebase, e.g.
+  `frontend/KaiWebIntake.jsx`). When a parent supplies both, this
+  component's own organization/engagement bootstrap fetches are skipped
+  entirely and it reads/writes the shared values instead - never a second,
+  independently-disagreeing selection. A caller that supplies neither is
+  completely unaffected. The component's own organization/engagement
+  `<select>` UI was deliberately left in place (not hidden) rather than
+  restructured, since it now reads/writes the same shared state as the new
+  shell-level `ProjectContextBar` and cannot disagree with it - visually
+  redundant when embedded via `ImpactLibraryApp`, but zero risk to this
+  4,585-line file's existing structure/tests. Hiding it is left to Package
+  D's planned decomposition. The selected engagement now also flows one
+  level further, into `<KaiWebIntake>` (previously only `organizationId`
+  was passed).
+- `frontend/KaiWebIntake.jsx`: engagement selection also converted to the
+  controlled-with-fallback pattern (new `engagementId`/`onEngagementIdChange`
+  props, mirroring its own existing `organizationId`/`parentOrganizationId`
+  convention exactly). When a parent supplies an engagement, this
+  component's own engagement list fetch and picker `<select>` are both
+  skipped - "do not ask the user to select the same Engagement again" - and
+  its one remaining user-driven engagement change (resuming a previously
+  created batch from a different engagement) is routed to the parent via
+  `onEngagementIdChange` instead of a second local state. Intake batches
+  remain backend/intake plumbing, not exposed as "Project."
+- Classification performed (owner-required, "ALL ORGANIZATIONAL KNOWLEDGE"):
+  Knowledge Studio's primary content (claims, evidence, gaps/risks, review
+  queue, organization sources) is **ORGANIZATION_WIDE** - none of those
+  reads gate on `engagementId`. Only Funder Requirements, Grant Response
+  Packet, and Board Reporting are **ENGAGEMENT_SCOPED_ONLY** (each already
+  has its own existing "select an organization/engagement first" empty
+  state, unchanged). Home/Impact Library/Improvement Plan/Projects are not
+  yet built and are therefore not yet classified.
+
+**No schema/migration change. No new Project persistence. No production/
+database mutation, deployment, feature-flag change, or cloud/infrastructure
+change.**
+
+**Test evidence** (`DATABASE_URL=postgres://localhost:1/nonexistent_sentinel_db`
+set for every Node command; no database/cloud/production access):
+- New: `__tests__/kai-impact-library-project-context.spec.js` (10 cases,
+  matching the ten items requested) - proves the Project list is fetched
+  scoped to the active organization; engagements are re-fetched (not
+  filtered) on organization change; single-Project auto-selection; Project
+  selection clears before a new organization's list resolves; the
+  selection propagates as controlled props through
+  `ImpactLibraryApp` -> `ImpactEvidenceLibrary` -> `KaiWebIntake` with no
+  second independent selector remaining at any layer; a cross-organization
+  Project is not representable in the UI (the selector only ever lists the
+  currently-fetched, organization-scoped set); `engagement_code` is
+  preferred over the raw id; "All organizational knowledge" is gated by
+  the explicit per-section classification map. 10/10 PASS.
+- Updated backend fixtures (2 files, 4 test cases) for the new
+  `engagement_code` field - `kai-sprint2-engagement-requirement-target.spec.js`,
+  `kai-sprint2-uat-final-completion-boundary.spec.js` - all still PASS,
+  leak-prevention assertions unchanged.
+- Updated frontend source-contract fixtures (4 files) for the
+  controlled-with-fallback state-declaration shape -
+  `kai-sprint2-impact-evidence-library.spec.js`,
+  `kai-sprint2-impact-library-kai-frontend.spec.js`,
+  `kai-sprint2-uat-enablement-frontend.spec.js`,
+  `kai-impact-library-shell.spec.js` - all still PASS, and still prove the
+  same underlying guarantees (no typed/fabricated id, empty states
+  rendered, engagement flows to `ImpactLibraryKai`, embedded/standalone
+  heading behavior).
+- Full non-integration suite (`__tests__/*.spec.js`, 4930 cases) after all
+  C0 changes: 12 failures, byte-for-byte the same 12 pre-existing,
+  unrelated `kai-sprint2-*` route/DTO-contract failures identified in
+  Package B (confirmed by comparing the exact failing-test-name list
+  before and after) - 0 regressions.
+- Frontend build: `npm run build` (vite) -> succeeded, no errors.
+- `git diff --check` -> PASS.
+
+**Status:** PACKAGE_C0_SHARED_PROJECT_ENGAGEMENT_CONTEXT_CLOSED_LOCALLY. No
+production or runtime closure claimed. No push, deployment, production
+mutation, database mutation, migration execution, feature-flag/configuration
+change, real-client-data access, or `00_KAI_CURRENT_STATE.md` update
+performed.

@@ -12,7 +12,8 @@ import { readFileSync } from "node:fs";
 test("ImpactEvidenceLibrary.jsx lifts engagement selection to page state and passes it to ImpactLibraryKai", () => {
   const source = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
   assert.match(source, /import ImpactLibraryKai from "\.\/ImpactLibraryKai\.jsx";/);
-  assert.match(source, /const \[engagementId, setEngagementId\] = useState\(""\);/);
+  assert.match(source, /const \[localEngagementId, setLocalEngagementId\] = useState\(""\);/);
+  assert.match(source, /const engagementId = parentEngagementId !== undefined \? parentEngagementId : localEngagementId;/);
   assert.match(source, /<ImpactLibraryKai organizationId={organizationId} engagementId={engagementId} \/>/);
 });
 

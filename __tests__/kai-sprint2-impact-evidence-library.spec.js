@@ -1624,7 +1624,7 @@ test("Impact Evidence Library bootstraps its organization selection from the ser
   // matching the established KAI Web Intake / Review Cockpit pattern.
   assert.match(uiSource, /import \{ organizationsPath \} from "\.\/kaiWebIntakeLogic\.js";/);
   assert.match(uiSource, /useEffect\(\(\) => \{[\s\S]*?getJson\(organizationsPath\(\)\)/);
-  assert.match(uiSource, /items\.length === 1[\s\S]{0,80}setOrganizationId\(items\[0\]\.organization_id\)/);
+  assert.match(uiSource, /items\.length === 1[\s\S]{0,80}setLocalOrganizationId\(items\[0\]\.organization_id\)/);
 
   // Explicit empty/loading states are rendered rather than fabricating an id.
   assert.match(uiSource, /Loading your organizations\.\.\./);

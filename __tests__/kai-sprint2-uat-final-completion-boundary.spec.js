@@ -134,6 +134,7 @@ test("engagement-context read returns only engagement_id/organization_id for an 
   assert.deepEqual(result.data.items, [{
     engagement_id: "e1",
     organization_id: ORG,
+    engagement_code: null,
     engagement_type: null,
     engagement_status: null,
     requirement_target: {},
@@ -149,6 +150,7 @@ test("engagement-context read allows a bound client_admin to read its own organi
   assert.deepEqual(result.data.items, [{
     engagement_id: "e1",
     organization_id: ORG,
+    engagement_code: null,
     engagement_type: null,
     engagement_status: null,
     requirement_target: {},

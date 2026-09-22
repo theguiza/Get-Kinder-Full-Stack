@@ -169,6 +169,12 @@ function serializeEngagementTarget(row = {}) {
   return {
     engagement_id: row.engagement_id,
     organization_id: row.organization_id,
+    // KAI Impact Library redesign, Package C0: the smallest authorized
+    // read-model addition needed for a human-readable Project/Engagement
+    // label - engagement_code already exists on every kai.engagements row
+    // (NOT NULL) and was simply not previously serialized. Never
+    // fabricated: null only if a caller-supplied test fixture omits it.
+    engagement_code: row.engagement_code || null,
     engagement_type: row.engagement_type || null,
     engagement_status: row.engagement_status || null,
     requirement_target: target.ok ? target.target : {},

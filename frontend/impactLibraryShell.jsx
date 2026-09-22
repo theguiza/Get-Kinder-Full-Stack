@@ -61,6 +61,44 @@ function NavIcon({ path, active }) {
   );
 }
 
+/**
+ * KAI Impact Library redesign, Package C0: the one shared Project/Engagement
+ * context control, rendered once above whichever section is active so every
+ * view (Home, Knowledge Studio, Impact Library, Improvement Plan) reads the
+ * same selection - never a per-view picker that could disagree with it.
+ * Purely presentational; `engagements` must already carry a human-readable
+ * label (engagement_code) wherever available - this component never falls
+ * back to showing a raw UUID unless no label exists at all.
+ */
+export function ProjectContextBar({
+  engagements = [],
+  engagementsLoaded = false,
+  selectedEngagementId = "",
+  onSelectEngagement,
+  allowOrganizationWide = false,
+}) {
+  if (!engagementsLoaded) return null;
+  if (engagements.length === 0) return null;
+  return (
+    <div className="gk-shell-project-bar">
+      <label className="gk-shell-project-bar-label" htmlFor="gk-shell-project-select">Project</label>
+      <select
+        id="gk-shell-project-select"
+        className="gk-shell-project-bar-select"
+        value={selectedEngagementId}
+        onChange={(event) => onSelectEngagement?.(event.target.value)}
+      >
+        {allowOrganizationWide ? <option value="">All organizational knowledge</option> : null}
+        {engagements.map((eng) => (
+          <option key={eng.engagement_id} value={eng.engagement_id}>
+            {eng.engagement_code || eng.engagement_id}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
 function OrgLogo({ logoUrl, name }) {
   if (logoUrl) {
     return <img src={logoUrl} alt="" className="gk-shell-org-logo" />;

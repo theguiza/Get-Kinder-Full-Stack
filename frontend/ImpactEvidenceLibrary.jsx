@@ -185,9 +185,30 @@ const SENSITIVITY_FIELD_LABELS = Object.freeze({
   reviewed_consent_basis_status: "Consent basis",
 });
 
-export default function ImpactEvidenceLibrary() {
+export default function ImpactEvidenceLibrary({
+  // KAI Impact Library redesign, Package C0 (shared Project/Engagement
+  // context): when a parent (frontend/ImpactLibraryApp.jsx) supplies these,
+  // they are the one authoritative organization/engagement for the whole
+  // /impact-library application - this component's own organization and
+  // engagement fetch/selection become read-through onto that shared state
+  // instead of a second, independently-disagreeing selection. A caller that
+  // does not pass them is completely unaffected (falls back to this
+  // component's own long-standing bootstrap behavior).
+  organizationId: parentOrganizationId,
+  onOrganizationIdChange,
+  engagementId: parentEngagementId,
+  onEngagementIdChange,
+} = {}) {
   const [organizations, setOrganizations] = useState([]);
-  const [organizationId, setOrganizationId] = useState("");
+  const [localOrganizationId, setLocalOrganizationId] = useState("");
+  const organizationId = parentOrganizationId !== undefined ? parentOrganizationId : localOrganizationId;
+  const updateOrganizationId = useCallback((value) => {
+    if (parentOrganizationId !== undefined) {
+      if (typeof onOrganizationIdChange === "function") onOrganizationIdChange(value);
+      return;
+    }
+    setLocalOrganizationId(value);
+  }, [parentOrganizationId, onOrganizationIdChange]);
   const [loadingOrganizations, setLoadingOrganizations] = useState(true);
   const [organizationsLoaded, setOrganizationsLoaded] = useState(false);
   // Engagement selection for the governed Impact Library KAI surface: KAI
@@ -196,7 +217,15 @@ export default function ImpactEvidenceLibrary() {
   // engagement selection embedded inside KaiWebIntake below) and passed to
   // ImpactLibraryKai as requested context re-authorized server-side.
   const [engagements, setEngagements] = useState([]);
-  const [engagementId, setEngagementId] = useState("");
+  const [localEngagementId, setLocalEngagementId] = useState("");
+  const engagementId = parentEngagementId !== undefined ? parentEngagementId : localEngagementId;
+  const updateEngagementId = useCallback((value) => {
+    if (parentEngagementId !== undefined) {
+      if (typeof onEngagementIdChange === "function") onEngagementIdChange(value);
+      return;
+    }
+    setLocalEngagementId(value);
+  }, [parentEngagementId, onEngagementIdChange]);
   const [loadingEngagements, setLoadingEngagements] = useState(false);
   const [engagementsLoaded, setEngagementsLoaded] = useState(false);
   const [audience, setAudience] = useState("internal");
@@ -555,8 +584,16 @@ export default function ImpactEvidenceLibrary() {
 
   // The browser never types or fabricates an organization id: it always
   // bootstraps from the same server-authoritative organizations list already
-  // used by the KAI Web Intake and Review Cockpit panels.
+  // used by the KAI Web Intake and Review Cockpit panels. Skipped entirely
+  // when a parent already supplies the active organization (Package C0's
+  // shared context owns that fetch instead).
   useEffect(() => {
+    if (parentOrganizationId !== undefined) {
+      setOrganizations([]);
+      setLoadingOrganizations(false);
+      setOrganizationsLoaded(true);
+      return undefined;
+    }
     let cancelled = false;
     (async () => {
       setLoadingOrganizations(true);
@@ -572,13 +609,13 @@ export default function ImpactEvidenceLibrary() {
       const items = result.body.data?.items || [];
       setOrganizations(items);
       if (items.length === 1) {
-        setOrganizationId(items[0].organization_id);
+        setLocalOrganizationId(items[0].organization_id);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [parentOrganizationId]);
 
   // Changing organization must discard the previous organization's governed
   // Claim Library / eligibility state immediately, and must invalidate any
@@ -696,12 +733,20 @@ export default function ImpactEvidenceLibrary() {
 
   // Engagement selection is scoped to the selected organization: changing
   // organization must discard the previous organization's engagement
-  // selection before a new engagement list is requested.
+  // selection before a new engagement list is requested. Skipped entirely
+  // when a parent already supplies the active engagement (Package C0's
+  // shared context owns that fetch, and already resets it on organization
+  // change).
   useEffect(() => {
+    if (parentEngagementId !== undefined) {
+      setEngagements([]);
+      setEngagementsLoaded(true);
+      return undefined;
+    }
     setEngagements([]);
-    setEngagementId("");
+    setLocalEngagementId("");
     setEngagementsLoaded(false);
-    if (!organizationId) return;
+    if (!organizationId) return undefined;
     let cancelled = false;
     (async () => {
       setLoadingEngagements(true);
@@ -717,13 +762,13 @@ export default function ImpactEvidenceLibrary() {
       const items = result.body.data?.items || [];
       setEngagements(items);
       if (items.length === 1) {
-        setEngagementId(items[0].engagement_id);
+        setLocalEngagementId(items[0].engagement_id);
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [organizationId]);
+  }, [organizationId, parentEngagementId]);
 
   // Audience change invalidates the eligibility dimension only: the governed
   // Claim Library (candidateClaims) is left untouched so the old audience's
@@ -2544,7 +2589,7 @@ export default function ImpactEvidenceLibrary() {
               <select
                 className="form-select form-select-sm"
                 value={organizationId}
-                onChange={(event) => setOrganizationId(event.target.value)}
+                onChange={(event) => updateOrganizationId(event.target.value)}
                 disabled={organizations.length <= 1}
               >
                 {organizations.length > 1 ? <option value="">Select an organization</option> : null}
@@ -2566,7 +2611,7 @@ export default function ImpactEvidenceLibrary() {
               <select
                 className="form-select form-select-sm"
                 value={engagementId}
-                onChange={(event) => setEngagementId(event.target.value)}
+                onChange={(event) => updateEngagementId(event.target.value)}
                 disabled={engagements.length <= 1}
               >
                 {engagements.length > 1 ? <option value="">Select an engagement</option> : null}
@@ -2600,6 +2645,8 @@ export default function ImpactEvidenceLibrary() {
       {organizationId ? (
         <KaiWebIntake
           organizationId={organizationId}
+          engagementId={engagementId}
+          onEngagementIdChange={updateEngagementId}
           embedded
           onSensitivityProfileDiscovered={handleSensitivityProfileDiscoveredFromIntake}
         />
