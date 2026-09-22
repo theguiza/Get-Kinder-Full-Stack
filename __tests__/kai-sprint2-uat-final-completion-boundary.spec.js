@@ -137,6 +137,8 @@ test("engagement-context read returns only engagement_id/organization_id for an 
     engagement_code: null,
     engagement_type: null,
     engagement_status: null,
+    project_status: null,
+    use_case_type: null,
     requirement_target: {},
   }]);
 });
@@ -153,6 +155,8 @@ test("engagement-context read allows a bound client_admin to read its own organi
     engagement_code: null,
     engagement_type: null,
     engagement_status: null,
+    project_status: null,
+    use_case_type: null,
     requirement_target: {},
   }]);
 });

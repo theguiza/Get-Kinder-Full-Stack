@@ -185,12 +185,13 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
   // create-engagement path; on success, re-fetches the one shared
   // Project/Engagement list (preserving whatever is currently selected)
   // and selects the newly created Project.
-  const createEngagement = useCallback(async (engagementCode, engagementType) => {
+  const createEngagement = useCallback(async (engagementCode, engagementType, useCaseType) => {
     if (!selectedOrganizationId) return { ok: false, error: "Select an organization first." };
     setCreatingEngagement(true);
     setCreateEngagementError("");
     const body = { engagement_code: engagementCode };
     if (engagementType) body.engagement_type = engagementType;
+    if (useCaseType) body.use_case_type = useCaseType;
     const result = await postJson(createEngagementPath(selectedOrganizationId), body);
     setCreatingEngagement(false);
     if (result.statusCode !== 201 || !result.body?.ok) {

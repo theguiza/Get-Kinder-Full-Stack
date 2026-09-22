@@ -177,6 +177,38 @@ export const KAI_SPRINT2_ROUTE_SCHEMAS = Object.freeze({
       type: "string",
       maxLength: KAI_SPRINT2_P0_STRING_LIMITS.displayLabelMaxLength,
     },
+    // Package F completeness repair: use_case_type/project_status. Neither
+    // has an accepted large vocabulary (project_status reuses the real
+    // engagement_status DB enum, which backstops it directly; use_case_type
+    // is validated against the existing project_metadata "identifier"
+    // pattern inside the service). machineCodeMaxLength matches this
+    // codebase's existing convention for other machine-code-like fields
+    // whose enum is validated in the service layer (see cadence/status
+    // above) - no new limit invented.
+    use_case_type: {
+      type: "string",
+      maxLength: KAI_SPRINT2_P0_STRING_LIMITS.machineCodeMaxLength,
+    },
+    project_status: {
+      type: "string",
+      maxLength: KAI_SPRINT2_P0_STRING_LIMITS.machineCodeMaxLength,
+    },
+  }),
+  // Package F completeness repair: the update counterpart to
+  // create_engagement's use_case_type/project_status above - lets an
+  // already-created Project's use_case_type and/or project_status be
+  // changed later. Neither is required (the service requires at least one
+  // to be present).
+  update_engagement_project_details: Object.freeze({
+    organization_id: { type: "uuid" },
+    use_case_type: {
+      type: "string",
+      maxLength: KAI_SPRINT2_P0_STRING_LIMITS.machineCodeMaxLength,
+    },
+    project_status: {
+      type: "string",
+      maxLength: KAI_SPRINT2_P0_STRING_LIMITS.machineCodeMaxLength,
+    },
   }),
   // Package G (Improvement Plan / Improvement Practices): status/cadence
   // are validated against their approved fixed vocabularies inside the

@@ -34,14 +34,26 @@ test("Projects shows only real engagement fields - name/code, type, status - and
 
 test("+ New Project is wired to the real, newly-authorized create-engagement action - not a dead button", () => {
   assert.match(projectsViewSource, /onClick=\{\(\) => setShowCreateForm/);
-  assert.match(projectsViewSource, /await onCreateEngagement\(name, newProjectType\.trim\(\) \|\| undefined\)/);
-  assert.match(appSource, /const createEngagement = useCallback\(async \(engagementCode, engagementType\) => \{/);
+  assert.match(
+    projectsViewSource,
+    /await onCreateEngagement\(name, newProjectType\.trim\(\) \|\| undefined, newProjectUseCase\.trim\(\) \|\| undefined\)/,
+  );
+  assert.match(appSource, /const createEngagement = useCallback\(async \(engagementCode, engagementType, useCaseType\) => \{/);
   assert.match(appSource, /postJson\(createEngagementPath\(selectedOrganizationId\), body\)/);
 });
 
 test("+ New Project accepts an optional Project type, reusing the existing engagement_type column instead of a fabricated one", () => {
   assert.match(projectsViewSource, /placeholder="Type \(optional\)"/);
   assert.match(appSource, /if \(engagementType\) body\.engagement_type = engagementType;/);
+});
+
+test("+ New Project accepts an optional use case, stored through the existing project_metadata jsonb mechanism (no schema change)", () => {
+  assert.match(projectsViewSource, /placeholder="Use case \(optional\)"/);
+  assert.match(appSource, /if \(useCaseType\) body\.use_case_type = useCaseType;/);
+});
+
+test("Projects displays use_case_type when present - human-readable, never a raw metadata key", () => {
+  assert.match(projectsViewSource, /engagement\.use_case_type/);
 });
 
 test("a successful Project creation re-fetches the one shared list (preserving the current selection) and selects the new Project - never a second list", () => {

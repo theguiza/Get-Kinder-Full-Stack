@@ -1919,9 +1919,57 @@ router.post("/admin/organizations/:organizationId/engagements", async (req, res)
       organizationId,
       engagementCode: payload.engagement_code,
       engagementType: payload.engagement_type,
+      useCaseType: payload.use_case_type,
+      engagementStatus: payload.project_status,
       req: { user: safeAuthenticatedUser(req) },
     });
   }, 201);
+});
+
+/**
+ * Package F completeness repair (project_status/use_case_type). Updates an
+ * already-created Project's use_case_type and/or project_status
+ * (engagement_status) - authorization, tenant scoping, and the required
+ * audit insert are all enforced inside the service, not here. At least one
+ * of the two fields must be present (enforced by the service); this route
+ * only rejects an unknown field, matching the requirement-target route's
+ * body-shape convention below.
+ */
+router.patch("/admin/organizations/:organizationId/engagements/:engagementId/project-details", async (req, res) => {
+  const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
+  const engagementId = typeof req.params?.engagementId === "string" ? req.params.engagementId : "";
+  if (
+    !KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId) ||
+    organizationId !== organizationId.toLowerCase() ||
+    !KAI_SPRINT2_P0_PATTERNS.uuid.test(engagementId) ||
+    engagementId !== engagementId.toLowerCase()
+  ) {
+    return sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id_or_engagement_id")],
+    });
+  }
+
+  const payload = requestPayload(req);
+  const payloadKeys = Object.keys(payload);
+  const allowedPayloadKeys = new Set(["use_case_type", "project_status"]);
+  if (payloadKeys.length === 0 || !payloadKeys.every((key) => allowedPayloadKeys.has(key))) {
+    return sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("unknown_field", "body")],
+    });
+  }
+  if (!validateMutationRequestOrSend(req, res, "update_engagement_project_details")) return;
+
+  return invokeService(res, async () => {
+    const service = await getEngagementContextService();
+    const input = {
+      organizationId,
+      engagementId,
+      req: { user: safeAuthenticatedUser(req) },
+    };
+    if (Object.hasOwn(payload, "use_case_type")) input.useCaseType = payload.use_case_type;
+    if (Object.hasOwn(payload, "project_status")) input.projectStatus = payload.project_status;
+    return service.updateEngagementProjectDetails(input);
+  });
 });
 
 function improvementPracticeIdentifiers(req) {

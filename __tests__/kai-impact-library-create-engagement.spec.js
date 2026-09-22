@@ -22,7 +22,16 @@ const ORG_B = "00000000-0000-4000-8000-00000000000b";
 const enabledEnv = Object.freeze({ KAI_SPRINT2_ENABLED: "true" });
 
 function createHarness({
-  insertResult = { ok: true, engagement: { engagement_id: "10000000-0000-4000-8000-000000000001", organization_id: ORG_A, engagement_code: "2026 Annual Report" } },
+  insertResult = {
+    ok: true,
+    engagement: {
+      engagement_id: "10000000-0000-4000-8000-000000000001",
+      organization_id: ORG_A,
+      engagement_code: "2026 Annual Report",
+      engagement_status: null,
+      project_metadata: {},
+    },
+  },
   auditResult = { ok: true },
 } = {}) {
   const calls = { transactions: 0, insert: [], audit: [] };
@@ -125,6 +134,9 @@ test("createEngagement creates the engagement inside one transaction and records
     organization_id: ORG_A,
     engagement_code: "2026 Annual Report",
     engagement_type: null,
+    engagement_status: null,
+    project_status: null,
+    use_case_type: null,
   });
   assert.equal(harness.calls.transactions, 1);
   assert.equal(harness.calls.insert.length, 1);
@@ -132,6 +144,8 @@ test("createEngagement creates the engagement inside one transaction and records
   assert.equal(harness.calls.insert[0].input.engagementCode, "2026 Annual Report");
   assert.equal(harness.calls.insert[0].input.createdByUserId, clientAdminActor.actorUserId);
   assert.equal(harness.calls.insert[0].input.engagementType, null);
+  assert.equal(harness.calls.insert[0].input.engagementStatus, null);
+  assert.equal(harness.calls.insert[0].input.projectMetadata, null);
   assert.equal(harness.calls.audit.length, 1);
   assert.equal(harness.calls.audit[0].metadata.operation, "create_engagement");
   assert.equal(harness.calls.audit[0].metadata.organization_id, ORG_A);
@@ -158,6 +172,72 @@ test("createEngagement passes an explicit engagementType through to the DB write
   assert.equal(result.ok, true);
   assert.equal(result.data.engagement_type, "impact_report");
   assert.equal(harness.calls.insert[0].input.engagementType, "impact_report");
+});
+
+test("createEngagement passes an explicit engagementStatus through to the DB write and returns it as both engagement_status and project_status - project_status is the controlling contract's name for the same already-existing column, not a second concept", async () => {
+  const harness = createHarness({
+    insertResult: {
+      ok: true,
+      engagement: {
+        engagement_id: "10000000-0000-4000-8000-000000000001",
+        organization_id: ORG_A,
+        engagement_code: "2026 Annual Report",
+        engagement_status: "active",
+        project_metadata: {},
+      },
+    },
+  });
+  const result = await createEngagement(
+    { organizationId: ORG_A, engagementCode: "2026 Annual Report", engagementStatus: "active", actorContext: clientAdminActor },
+    harness.dependencies,
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.data.engagement_status, "active");
+  assert.equal(result.data.project_status, "active");
+  assert.equal(harness.calls.insert[0].input.engagementStatus, "active");
+});
+
+test("createEngagement passes an explicit useCaseType through project_metadata (no schema change - the same jsonb bucket engagement_requirement_target already uses) and returns it", async () => {
+  const harness = createHarness({
+    insertResult: {
+      ok: true,
+      engagement: {
+        engagement_id: "10000000-0000-4000-8000-000000000001",
+        organization_id: ORG_A,
+        engagement_code: "2026 Annual Report",
+        engagement_status: null,
+        project_metadata: { use_case_type: "readiness_self_check" },
+      },
+    },
+  });
+  const result = await createEngagement(
+    {
+      organizationId: ORG_A,
+      engagementCode: "2026 Annual Report",
+      useCaseType: "readiness_self_check",
+      actorContext: clientAdminActor,
+    },
+    harness.dependencies,
+  );
+  assert.equal(result.ok, true);
+  assert.equal(result.data.use_case_type, "readiness_self_check");
+  assert.deepEqual(harness.calls.insert[0].input.projectMetadata, { use_case_type: "readiness_self_check" });
+});
+
+test("createEngagement rejects a useCaseType that does not match the existing project_metadata identifier pattern, before any repository call", async () => {
+  const harness = createHarness();
+  const result = await createEngagement(
+    {
+      organizationId: ORG_A,
+      engagementCode: "2026 Annual Report",
+      useCaseType: "Not A Valid Identifier!",
+      actorContext: clientAdminActor,
+    },
+    harness.dependencies,
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "validation_blocker");
+  assert.equal(harness.calls.transactions, 0);
 });
 
 test("createEngagement maps a conflicting engagement_code to an honest conflict error, never silently overwriting or renaming", async () => {
@@ -192,6 +272,21 @@ test("the create-engagement route validates organization_id and delegates to the
   const routeSource = readFileSync("Backend/kai/routes/sprint2IntakeApi.js", "utf8");
   assert.match(routeSource, /router\.post\("\/admin\/organizations\/:organizationId\/engagements", async \(req, res\) => \{/);
   assert.match(routeSource, /service\.createEngagement\(\{/);
+  assert.match(routeSource, /useCaseType: payload\.use_case_type/);
+  assert.match(routeSource, /engagementStatus: payload\.project_status/);
   const schemaSource = readFileSync("Backend/kai/validators/kaiSprint2RequestSchemas.js", "utf8");
   assert.match(schemaSource, /create_engagement: Object\.freeze\(\{/);
+  assert.match(schemaSource, /use_case_type: \{/);
+  assert.match(schemaSource, /project_status: \{/);
+});
+
+test("the update-engagement-project-details route is PATCH-only, validates organization_id/engagement_id, requires at least one known field, and delegates to the service", () => {
+  const routeSource = readFileSync("Backend/kai/routes/sprint2IntakeApi.js", "utf8");
+  assert.match(
+    routeSource,
+    /router\.patch\("\/admin\/organizations\/:organizationId\/engagements\/:engagementId\/project-details", async \(req, res\) => \{/,
+  );
+  assert.match(routeSource, /service\.updateEngagementProjectDetails\(input\)/);
+  const schemaSource = readFileSync("Backend/kai/validators/kaiSprint2RequestSchemas.js", "utf8");
+  assert.match(schemaSource, /update_engagement_project_details: Object\.freeze\(\{/);
 });

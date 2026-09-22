@@ -258,6 +258,8 @@ test("engagement target read returns the governed target when present without le
     engagement_code: null,
     engagement_type: "pilot_assessment",
     engagement_status: "draft",
+    project_status: "draft",
+    use_case_type: null,
     requirement_target: validTarget,
   }]);
 });
@@ -357,6 +359,8 @@ test("existing engagement list behavior remains valid for rows without target me
     engagement_code: null,
     engagement_type: null,
     engagement_status: null,
+    project_status: null,
+    use_case_type: null,
     requirement_target: {},
   }]);
 });

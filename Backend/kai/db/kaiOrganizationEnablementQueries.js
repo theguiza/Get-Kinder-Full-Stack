@@ -180,9 +180,23 @@ export async function selectInitialEngagementForOrganization(
  * (organization_id, engagement_code) pair inside the same transaction; the
  * 23505 handling here is defense-in-depth, not the primary idempotency
  * mechanism (the advisory lock in the orchestration layer is).
+ *
+ * KAI Impact Library redesign, Package F completeness repair (project_status/
+ * use_case_type): `engagementStatus` reuses the same already-existing
+ * `engagement_status` column (its real DB enum backstops validity, exactly
+ * like `engagementType` above - no app-level enum list invented) and
+ * `projectMetadata` lets a caller seed `project_metadata` (e.g. the
+ * `use_case_type` jsonb key) at creation instead of a separate write.
  */
 export async function insertInitialEngagement(
-  { organizationId, engagementCode = DEFAULT_INITIAL_ENGAGEMENT_CODE, createdByUserId = null, engagementType = null } = {},
+  {
+    organizationId,
+    engagementCode = DEFAULT_INITIAL_ENGAGEMENT_CODE,
+    createdByUserId = null,
+    engagementType = null,
+    engagementStatus = null,
+    projectMetadata = null,
+  } = {},
   db = pool,
 ) {
   if (typeof organizationId !== "string" || !UUID_RE.test(organizationId)) {
@@ -196,12 +210,20 @@ export async function insertInitialEngagement(
     columns.push("engagement_type");
     values.push(engagementType);
   }
+  if (typeof engagementStatus === "string" && engagementStatus.length > 0) {
+    columns.push("engagement_status");
+    values.push(engagementStatus);
+  }
+  if (projectMetadata && typeof projectMetadata === "object") {
+    columns.push("project_metadata");
+    values.push(JSON.stringify(projectMetadata));
+  }
   const placeholders = values.map((_, index) => `$${index + 1}`).join(", ");
   try {
     const { rows } = await db.query(
       `INSERT INTO kai.engagements (${columns.join(", ")})
        VALUES (${placeholders})
-       RETURNING engagement_id, organization_id, engagement_code, engagement_type`,
+       RETURNING engagement_id, organization_id, engagement_code, engagement_type, engagement_status, project_metadata`,
       values,
     );
     return { ok: true, engagement: rows[0] };

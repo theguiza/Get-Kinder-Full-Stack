@@ -17,9 +17,9 @@ const COLORS = Object.freeze({
  * a second independent selector.
  *
  * Only real engagement fields are shown (engagement_code as the Project
- * name, engagement_type as its use-case/type, engagement_status). No
- * "reporting period" is shown - kai.engagements has no such column today;
- * inventing one was avoided rather than fabricated.
+ * name, engagement_type as its type, use_case_type, engagement_status/
+ * project_status). No "reporting period" is shown - kai.engagements has no
+ * such column today; inventing one was avoided rather than fabricated.
  *
  * "+ New Project" is wired to the real, newly-authorized create-engagement
  * capability (Package F) - never a dead button.
@@ -36,15 +36,17 @@ export default function ProjectsView({
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [newProjectName, setNewProjectName] = useState("");
   const [newProjectType, setNewProjectType] = useState("");
+  const [newProjectUseCase, setNewProjectUseCase] = useState("");
 
   const handleCreate = async (event) => {
     event.preventDefault();
     const name = newProjectName.trim();
     if (!name) return;
-    const result = await onCreateEngagement(name, newProjectType.trim() || undefined);
+    const result = await onCreateEngagement(name, newProjectType.trim() || undefined, newProjectUseCase.trim() || undefined);
     if (result?.ok) {
       setNewProjectName("");
       setNewProjectType("");
+      setNewProjectUseCase("");
       setShowCreateForm(false);
     }
   };
@@ -105,6 +107,12 @@ export default function ProjectsView({
             placeholder="Type (optional)"
             style={{ flex: 1, minWidth: 160, fontSize: 14, padding: "9px 12px", borderRadius: 8, border: "1px solid rgba(69,90,124,0.22)" }}
           />
+          <input
+            value={newProjectUseCase}
+            onChange={(event) => setNewProjectUseCase(event.target.value)}
+            placeholder="Use case (optional)"
+            style={{ flex: 1, minWidth: 160, fontSize: 14, padding: "9px 12px", borderRadius: 8, border: "1px solid rgba(69,90,124,0.22)" }}
+          />
           <button
             type="submit"
             disabled={creating || !newProjectName.trim()}
@@ -159,6 +167,7 @@ export default function ProjectsView({
                 </div>
                 <div style={{ fontSize: 12.5, color: COLORS.textMuted, marginTop: 2 }}>
                   {engagement.engagement_type || "Type not set"}
+                  {engagement.use_case_type ? ` • ${engagement.use_case_type}` : ""}
                   {engagement.engagement_status ? ` • ${engagement.engagement_status}` : ""}
                 </div>
               </div>

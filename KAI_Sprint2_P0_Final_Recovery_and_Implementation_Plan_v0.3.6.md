@@ -32325,3 +32325,132 @@ RECORDED_SCOPE_BOUNDARY. No production or runtime closure claimed. No
 push, deployment, production mutation, database mutation, migration
 execution, feature-flag/configuration change, real-client-data access, or
 `00_KAI_CURRENT_STATE.md` update performed.
+
+### Package F completeness repair, final pass - use_case_type/project_status (CLOSED LOCALLY)
+
+Continuation session start verified: HEAD `b61ab65` and the full local
+commit sequence matched the reported handoff exactly; working tree clean.
+
+**Bounded re-verification performed** against only the two remaining
+controlling-contract concepts: `use_case_type` and `project_status`.
+Determination first inspected whether the existing controlled metadata
+mechanism (the already-authorized `project_metadata` jsonb bucket, plus the
+already-existing `engagement_status` column) could safely represent both
+without a schema change - it can (Case A):
+
+- **`project_status`** is not a missing concept at all - it is the
+  controlling contract's user-facing name for the already-existing,
+  already-tracked `engagement_status` column (Project is the user-facing
+  name for kai.engagements throughout this codebase; same convention). It
+  was already read/exposed, but never settable at creation and had no
+  update path. Repaired by extending `insertInitialEngagement` to accept an
+  optional `engagementStatus` (same "pass raw string, let the real DB enum
+  backstop validity" convention already established for `engagement_type` -
+  no app-level enum list invented) and adding a new
+  `updateEngagementProjectDetails` service operation + `updateEngagementProjectFields`
+  DB query for changing it after creation.
+- **`use_case_type`** is genuinely new. Bounded inspection of the committed
+  production schema capture
+  (`artifacts/kai-db-reconciliation-2026-09-16/PRODUCTION_KAI_SCHEMA.json`,
+  `schema_table_provenance.json`) found real production-only
+  `use_case_type`/`reporting_period_start`/`reporting_period_end`/
+  `target_funder_id`/`target_framework` columns on `kai.engagements` -
+  but that table is classified `BOOTSTRAP_ONLY_FOUNDATION` (pre-existing,
+  not constructed/evolved by this repository's own migrations), and those
+  extra columns are absent from the tracked/reproducible
+  `EXPECTED_EXECUTABLE_SCHEMA.json` this repository's local ephemeral-
+  Postgres tests build against. Writing to a production-only column this
+  repository cannot honestly reproduce or test was avoided; `use_case_type`
+  is instead stored as a new top-level `project_metadata` jsonb key
+  (sibling to the already-existing `engagement_requirement_target` key),
+  reusing that bucket's existing "identifier" validation pattern
+  (`SAFE_TARGET_IDENTIFIER_PATTERN`) rather than inventing a new taxonomy -
+  no accepted large vocabulary exists for it, so none was fabricated.
+
+**What changed:**
+- `Backend/kai/db/kaiOrganizationEnablementQueries.js`: `insertInitialEngagement`
+  accepts optional `engagementStatus`/`projectMetadata`, both defaulting to
+  the prior DB-default behavior when omitted; `RETURNING` now also carries
+  `engagement_status`/`project_metadata`.
+- `Backend/kai/db/kaiQueries.js`: new `updateEngagementProjectFields` -
+  updates `project_metadata` and, only when supplied, `engagement_status`.
+- `Backend/kai/services/kaiEngagementContextService.js`: `createEngagement`
+  accepts `useCaseType`/`engagementStatus`; the read DTO
+  (`serializeEngagementTarget`) now also exposes `project_status` (mirrors
+  `engagement_status`) and `use_case_type` (read back from
+  `project_metadata`, validated, never a raw/corrupt value). New
+  `updateEngagementProjectDetails` operation mirrors
+  `updateEngagementRequirementTarget`'s transaction + required-audit
+  pattern exactly; requires at least one of the two fields; `useCaseType`
+  may be explicitly `null` to clear it.
+- `Backend/kai/validators/kaiSprint2RequestSchemas.js`: `create_engagement`
+  gained `use_case_type`/`project_status` (bounded by the existing
+  `machineCodeMaxLength`, matching the established convention for other
+  machine-code-like fields whose enum is validated in the service layer);
+  new `update_engagement_project_details` schema.
+- `Backend/kai/routes/sprint2IntakeApi.js`: the create-engagement route
+  passes both new fields through; new
+  `PATCH .../admin/organizations/:organizationId/engagements/:engagementId/project-details`
+  route, validated and delegated entirely to the service (no SQL/DB access
+  in the route). The generic route-schema engine rejects an explicit
+  `null`, so clearing `use_case_type` is reachable through the service/
+  tests but not yet through this HTTP route - recorded, not silently
+  fabricated as supported.
+- `frontend/ImpactLibraryApp.jsx` / `frontend/projects/ProjectsView.jsx`:
+  "+ New Project" gained an optional "Use case" field (submits
+  `use_case_type`); the Project list line now also shows `use_case_type`
+  when present. `project_status` is not separately displayed - it is the
+  same value already shown as `engagement_status`, not a second concept, so
+  showing it twice would not be human-readable/useful.
+
+**Not built (deferred, not fabricated):** no ProjectsView UI to change
+`project_status`/`use_case_type` after creation - the backend update path
+exists (same precedent as `updateEngagementRequirementTarget`'s PUT route,
+which also has no UI consumer yet, and Package G's PATCH update-fields
+route before G2 added status-change UI only).
+
+**Test evidence** (`DATABASE_URL=postgres://localhost:1/nonexistent_sentinel_db`
+set for every Node command; no database/cloud/production access):
+- New: `__tests__/kai-package-f-project-metadata-completeness.spec.js`
+  (13 cases) - proves the create/update paths, validation, authorization,
+  tenant boundary, required-audit, the DTO's `project_status`/`use_case_type`
+  exposure (including rejecting a corrupt/invalid stored value rather than
+  leaking it), and the schema-provenance determination above (asserted
+  directly against the committed schema-capture artifacts). 13/13 PASS.
+- Updated: `kai-impact-library-create-engagement.spec.js` (new
+  `engagementStatus`/`useCaseType` passthrough + rejection cases, updated
+  route/schema assertions), `kai-impact-library-projects.spec.js` (new
+  create-form/list-display assertions), `kai-sprint2-engagement-requirement-target.spec.js`
+  and `kai-sprint2-uat-final-completion-boundary.spec.js` (existing exact-
+  shape DTO assertions extended for the two new fields) - all PASS.
+- Full non-integration suite (`__tests__/*.spec.js`, 5077 cases): 12
+  failures, byte-identical to the established baseline (confirmed by
+  diffing failing-test names against a stashed pre-change run) - 0
+  regressions. `npm run build` (vite) -> succeeded. `git diff --check` ->
+  PASS.
+
+**Final redesign repository acceptance pass:** the five owner-approved
+primary product surfaces (Home, Knowledge Studio incl. Files/Processing/
+Evidence/Gaps/Reviews/Gap Detail, Impact Library, Impact Fact Detail,
+Improvement Plan, Projects, Needs Attention via bell) are unchanged by this
+package and remain covered by their existing passing regression suites.
+Architecture distinctions (Organization vs Project=kai.engagements vs
+Intake Batch; Evidence vs Claims/Impact Facts; governed claim-assertion
+headline; real persisted Improvement Practices; Gap -> Add to Plan; Needs
+Attention's authoritative workflow state; no fabricated dashboard data; no
+dead primary nav destination) are all unaffected - re-verified by the full
+suite passing at baseline. Preserved capabilities (KAI Baseline Readiness,
+Funder Requirements, Grant Response Packet, Board Reporting, Generated
+Drafts, governed traceability/review) remain exactly where recorded:
+below Knowledge Studio's tab content in `frontend/ImpactEvidenceLibrary.jsx`
+- inspected, not modified; their long-term IA placement remains a separate,
+unresolved decision, not a blocker to this closure. Live desktop/tablet/
+mobile browser-rendered QA remains NOT_CONFIRMED (no browser/rendering
+surface was available or used in this session) - a release/UAT item, not a
+redesign-package blocker.
+
+**Status:** PACKAGE_F_COMPLETENESS_REPAIR_FINAL_PASS_CLOSED_LOCALLY. KAI
+Impact Library redesign repository work is COMPLETE_LOCAL. No production
+or runtime closure claimed. No push, deployment, production mutation,
+database mutation, migration execution, feature-flag/configuration change,
+real-client-data access, or `00_KAI_CURRENT_STATE.md` update performed.

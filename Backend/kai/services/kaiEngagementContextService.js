@@ -8,6 +8,7 @@ import {
   listExternalRequirementSetsForTarget,
   listEngagementsForOrganization,
   updateEngagementProjectMetadata,
+  updateEngagementProjectFields,
 } from "../db/kaiQueries.js";
 import { insertInitialEngagement } from "../db/kaiOrganizationEnablementQueries.js";
 import { withTransaction } from "../db/kaiDb.js";
@@ -39,8 +40,24 @@ const CLASSIFY_FUNDER_REQUIREMENTS_OPERATION = "classify_engagement_funder_requi
 // bound organization, the same as it may list or update one.
 const CREATE_ENGAGEMENT_ALLOWED_ROLES = new Set(["gk_admin", "gk_operator", "client_admin"]);
 const CREATE_ENGAGEMENT_OPERATION = "create_engagement";
+// KAI Impact Library redesign, Package F completeness repair (project_status/
+// use_case_type): "project_status" is the controlling contract's user-facing
+// name for the already-existing, already-settable-on-create `engagement_status`
+// column (Project is the user-facing name for kai.engagements throughout this
+// codebase - same convention). Updating it after creation is the smallest
+// missing piece, alongside the genuinely-new `use_case_type` project_metadata
+// key - both share this one update operation/role set.
+const UPDATE_ENGAGEMENT_PROJECT_DETAILS_ALLOWED_ROLES = new Set(["gk_admin", "gk_operator", "client_admin"]);
+const UPDATE_ENGAGEMENT_PROJECT_DETAILS_OPERATION = "update_engagement_project_details";
 const ENGAGEMENT_CODE_MAX_LENGTH = 200;
 const ENGAGEMENT_REQUIREMENT_TARGET_METADATA_KEY = "engagement_requirement_target";
+// `use_case_type` has no accepted repository vocabulary (unlike
+// engagement_status, which is a real DB enum column) - it is stored in the
+// same project_metadata jsonb bucket as engagement_requirement_target and
+// reuses that bucket's existing "identifier" validation convention
+// (SAFE_TARGET_IDENTIFIER_PATTERN, defined below) rather than inventing a new
+// taxonomy.
+const PROJECT_USE_CASE_TYPE_METADATA_KEY = "use_case_type";
 const SAFE_TARGET_IDENTIFIER_PATTERN = /^[a-z][a-z0-9_]{0,95}$/;
 const SAFE_TARGET_LABEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9 ._:/#()-]{0,199}$/;
 const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -171,6 +188,15 @@ function readProjectMetadata(row = {}) {
   return isPlainObject(row.project_metadata) ? row.project_metadata : {};
 }
 
+function isValidUseCaseType(value) {
+  return isNonEmptyString(value) && SAFE_TARGET_IDENTIFIER_PATTERN.test(value);
+}
+
+function readProjectUseCaseType(row = {}) {
+  const raw = readProjectMetadata(row)[PROJECT_USE_CASE_TYPE_METADATA_KEY];
+  return isValidUseCaseType(raw) ? raw : null;
+}
+
 function serializeEngagementTarget(row = {}) {
   const metadata = readProjectMetadata(row);
   const target = normalizeEngagementRequirementTarget(metadata[ENGAGEMENT_REQUIREMENT_TARGET_METADATA_KEY] || {});
@@ -185,6 +211,11 @@ function serializeEngagementTarget(row = {}) {
     engagement_code: row.engagement_code || null,
     engagement_type: row.engagement_type || null,
     engagement_status: row.engagement_status || null,
+    // Package F completeness repair: "project_status" is the controlling
+    // contract's name for this same already-existing engagement_status
+    // column value - not a second status concept.
+    project_status: row.engagement_status || null,
+    use_case_type: readProjectUseCaseType(row),
     requirement_target: target.ok ? target.target : {},
   };
 }
@@ -535,7 +566,15 @@ export async function updateEngagementRequirementTarget(input, dependencies = {}
 }
 
 function isCreateEngagementInput(value) {
-  const allowedKeys = new Set(["organizationId", "engagementCode", "engagementType", "actorContext", "req"]);
+  const allowedKeys = new Set([
+    "organizationId",
+    "engagementCode",
+    "engagementType",
+    "useCaseType",
+    "engagementStatus",
+    "actorContext",
+    "req",
+  ]);
   if (!isPlainObject(value) || !Object.keys(value).every((key) => allowedKeys.has(key))) return false;
   if (!isNonEmptyString(value.organizationId)) return false;
   if (
@@ -549,6 +588,40 @@ function isCreateEngagementInput(value) {
     value.engagementType !== undefined
     && value.engagementType !== null
     && (!isNonEmptyString(value.engagementType) || value.engagementType.length > ENGAGEMENT_CODE_MAX_LENGTH)
+  ) {
+    return false;
+  }
+  if (value.useCaseType !== undefined && value.useCaseType !== null && !isValidUseCaseType(value.useCaseType)) {
+    return false;
+  }
+  if (
+    value.engagementStatus !== undefined
+    && value.engagementStatus !== null
+    && (!isNonEmptyString(value.engagementStatus) || value.engagementStatus.length > ENGAGEMENT_CODE_MAX_LENGTH)
+  ) {
+    return false;
+  }
+  return isPlainObject(value.actorContext) || isPlainObject(value.req);
+}
+
+/**
+ * Package F completeness repair (project_status/use_case_type): at least one
+ * of useCaseType/projectStatus must be present - an empty update is a
+ * validation blocker, not a silent no-op write. useCaseType may be explicitly
+ * null (clears the project_metadata key); projectStatus may not, since
+ * engagement_status is NOT NULL at the database level.
+ */
+function isUpdateEngagementProjectDetailsInput(value) {
+  const allowedKeys = new Set(["organizationId", "engagementId", "useCaseType", "projectStatus", "actorContext", "req"]);
+  if (!isPlainObject(value) || !Object.keys(value).every((key) => allowedKeys.has(key))) return false;
+  if (!isNonEmptyString(value.organizationId) || !isNonEmptyString(value.engagementId)) return false;
+  const hasUseCaseType = Object.hasOwn(value, "useCaseType");
+  const hasProjectStatus = Object.hasOwn(value, "projectStatus");
+  if (!hasUseCaseType && !hasProjectStatus) return false;
+  if (hasUseCaseType && value.useCaseType !== null && !isValidUseCaseType(value.useCaseType)) return false;
+  if (
+    hasProjectStatus
+    && (!isNonEmptyString(value.projectStatus) || value.projectStatus.length > ENGAGEMENT_CODE_MAX_LENGTH)
   ) {
     return false;
   }
@@ -615,6 +688,10 @@ export async function createEngagement(input = {}, dependencies = {}) {
           engagementCode: input.engagementCode,
           createdByUserId: actorContext.actorUserId,
           engagementType: isNonEmptyString(input.engagementType) ? input.engagementType : null,
+          engagementStatus: isNonEmptyString(input.engagementStatus) ? input.engagementStatus : null,
+          projectMetadata: isValidUseCaseType(input.useCaseType)
+            ? { [PROJECT_USE_CASE_TYPE_METADATA_KEY]: input.useCaseType }
+            : null,
         },
         tx,
       );
@@ -662,7 +739,130 @@ export async function createEngagement(input = {}, dependencies = {}) {
       organization_id: engagement.organization_id,
       engagement_code: engagement.engagement_code,
       engagement_type: engagement.engagement_type || null,
+      engagement_status: engagement.engagement_status || null,
+      project_status: engagement.engagement_status || null,
+      use_case_type: readProjectUseCaseType(engagement),
     },
+    error: null,
+  };
+}
+
+/**
+ * Package F completeness repair (project_status/use_case_type): the update
+ * counterpart to createEngagement's create-time settability above - lets an
+ * already-created Project's use_case_type and/or project_status
+ * (engagement_status) be changed later. Mirrors
+ * updateEngagementRequirementTarget's transaction + required-audit pattern
+ * exactly.
+ */
+export async function updateEngagementProjectDetails(input, dependencies = {}) {
+  if (!isKaiSprint2Enabled(dependencies.env || process.env)) {
+    return buildKaiError("feature_disabled");
+  }
+  if (!isUpdateEngagementProjectDetailsInput(input)) {
+    return buildKaiError("validation_blocker");
+  }
+
+  const actorResult = input.actorContext
+    ? { ok: true, actorContext: input.actorContext }
+    : await resolveKaiActorContext(input.req, dependencies);
+  if (!actorResult.ok) return actorError(actorResult);
+
+  const { actorContext } = actorResult;
+  if (!isMappedHumanActor(actorContext)) {
+    return buildKaiError("authorization_denied");
+  }
+
+  const auth = validateActorCanPerformOperation(
+    actorContext,
+    UPDATE_ENGAGEMENT_PROJECT_DETAILS_OPERATION,
+    input.organizationId,
+    { allowedRoles: UPDATE_ENGAGEMENT_PROJECT_DETAILS_ALLOWED_ROLES },
+  );
+  if (!auth.ok) {
+    return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers });
+  }
+
+  const runInTransaction = dependencies.runInTransaction || withTransaction;
+  const readEngagement = dependencies.getEngagementForOrganization || getEngagementForOrganization;
+  const updateProjectFields = dependencies.updateEngagementProjectFields || updateEngagementProjectFields;
+  const insertAudit = dependencies.insertRequiredSuccessfulAuditEvent || insertRequiredSuccessfulAuditEvent;
+
+  let row = null;
+  try {
+    row = await runInTransaction(async (tx) => {
+      const engagement = await readEngagement(
+        { organizationId: input.organizationId, engagementId: input.engagementId, lockForUpdate: true },
+        tx,
+      );
+      if (!engagement) return null;
+
+      const tenant = validateTenantBoundaryConsistency({
+        expectedOrganizationId: input.organizationId,
+        payload: { organization_id: input.organizationId, engagement_id: input.engagementId },
+        engagementRecord: engagement,
+      });
+      if (tenant.severity === "blocker") {
+        const error = new Error("tenant_boundary_violation");
+        error.kaiErrorCode = "tenant_boundary_violation";
+        error.blockers = [tenant];
+        throw error;
+      }
+
+      const projectMetadata = { ...readProjectMetadata(engagement) };
+      if (Object.hasOwn(input, "useCaseType")) {
+        if (input.useCaseType === null) {
+          delete projectMetadata[PROJECT_USE_CASE_TYPE_METADATA_KEY];
+        } else {
+          projectMetadata[PROJECT_USE_CASE_TYPE_METADATA_KEY] = input.useCaseType;
+        }
+      }
+
+      const updated = await updateProjectFields(
+        {
+          organizationId: input.organizationId,
+          engagementId: input.engagementId,
+          projectMetadata,
+          engagementStatus: Object.hasOwn(input, "projectStatus") ? input.projectStatus : null,
+        },
+        tx,
+      );
+      if (!updated) return null;
+
+      const auditResult = await insertAudit({
+        operation: UPDATE_ENGAGEMENT_PROJECT_DETAILS_OPERATION,
+        operation_type: UPDATE_ENGAGEMENT_PROJECT_DETAILS_OPERATION,
+        reason_code: "engagement_project_details_updated",
+        object_type: "other",
+        target_object_type: "engagement",
+        object_id: input.engagementId,
+        organization_id: input.organizationId,
+        engagement_id: input.engagementId,
+        actor_type: actorContext.actorType,
+        actor_user_id: actorContext.actorUserId,
+        created_by_service: "kaiEngagementContextService",
+        metadata_only: true,
+      }, tx);
+      if (!auditResult?.ok) {
+        const error = new Error("required audit rejected");
+        error.kaiErrorCode = "audit_payload_rejected";
+        throw error;
+      }
+
+      return updated;
+    });
+  } catch (error) {
+    if (error?.kaiErrorCode) {
+      return buildKaiError(error.kaiErrorCode, { blockers: error.blockers || [] });
+    }
+    throw error;
+  }
+
+  if (!row) return buildKaiError("not_found");
+
+  return {
+    ok: true,
+    data: serializeEngagementTarget(row),
     error: null,
   };
 }
@@ -837,7 +1037,10 @@ export const __engagementContextServiceContract = Object.freeze({
   CLASSIFY_FUNDER_REQUIREMENTS_OPERATION,
   CREATE_ENGAGEMENT_ALLOWED_ROLES,
   CREATE_ENGAGEMENT_OPERATION,
+  UPDATE_ENGAGEMENT_PROJECT_DETAILS_ALLOWED_ROLES,
+  UPDATE_ENGAGEMENT_PROJECT_DETAILS_OPERATION,
   ENGAGEMENT_REQUIREMENT_TARGET_METADATA_KEY,
+  PROJECT_USE_CASE_TYPE_METADATA_KEY,
   TARGET_FIELD_DEFINITIONS,
   CLASSIFIER_STATES,
   APPLICABILITY_NOT_CONFIRMED_REASON,
@@ -849,6 +1052,8 @@ export const __engagementContextServiceTestables = Object.freeze({
   isUpdateEngagementTargetInput,
   isClassifyEngagementFunderRequirementsInput,
   isCreateEngagementInput,
+  isUpdateEngagementProjectDetailsInput,
+  isValidUseCaseType,
   isMappedHumanActor,
   normalizeEngagementRequirementTarget,
   serializeEngagementTarget,

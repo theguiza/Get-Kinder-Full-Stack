@@ -210,6 +210,37 @@ export async function updateEngagementProjectMetadata(
   return rows[0] || null;
 }
 
+/**
+ * KAI Impact Library redesign, Package F completeness repair
+ * (project_status/use_case_type): updates project_metadata (the jsonb home
+ * for `use_case_type`, alongside the already-existing
+ * `engagement_requirement_target` key) and, only when supplied, the
+ * already-existing `engagement_status` column (the real DB enum backstops
+ * validity - no app-level enum list invented, same convention as
+ * `engagement_type`). engagement_status is NOT NULL, so it is only ever set,
+ * never cleared, by this query.
+ */
+export async function updateEngagementProjectFields(
+  { organizationId, engagementId, projectMetadata, engagementStatus },
+  db = pool,
+) {
+  const setClauses = ["project_metadata = $3::jsonb"];
+  const values = [organizationId, engagementId, JSON.stringify(projectMetadata || {})];
+  if (typeof engagementStatus === "string" && engagementStatus.length > 0) {
+    values.push(engagementStatus);
+    setClauses.push(`engagement_status = $${values.length}`);
+  }
+  const { rows } = await db.query(
+    `UPDATE kai.engagements
+        SET ${setClauses.join(", ")}
+      WHERE organization_id = $1
+        AND engagement_id = $2
+      RETURNING engagement_id, organization_id, engagement_type, engagement_status, project_metadata`,
+    values,
+  );
+  return rows[0] || null;
+}
+
 export async function listExternalRequirementSetsForTarget(
   { sourceCode, frameworkCode },
   db = pool,
