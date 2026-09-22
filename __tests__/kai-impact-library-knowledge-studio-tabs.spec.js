@@ -35,11 +35,13 @@ test("3: Processing gates the existing real sensitivity/allowed-use review state
   assert.match(libSource, /\{knowledgeStudioTab === "processing" && intakeSensitivityProfileId && sensitivityCapability === true \? \(/);
 });
 
-test("4 (D-Correction 1): Evidence shows real evidence (statement/strength/review status/source), not the Claim Library relabeled - Claims moved to an always-visible, non-tab-gated section pending Package E", () => {
+test("4 (E1 correction): Evidence is enumerated from the evidence-native read model (not the Claim Library) so unclaimed evidence is included - Claims remains an always-visible, non-tab-gated section pending Package E", () => {
   assert.match(libSource, /\{knowledgeStudioTab === "evidence" \? \(\s*<div className="admin-card">\s*<div className="d-flex justify-content-between align-items-center mb-2">\s*<h5 className="mb-0">Evidence<\/h5>/);
-  assert.match(libSource, /claim\.evidenceStatement \|\| "Evidence statement not yet available"/);
-  assert.match(libSource, /claim\.evidenceSupportStrength/);
-  assert.match(libSource, /claim\.evidenceReviewStatus/);
+  assert.match(libSource, /evidenceLibraryCandidatesPath,\s*\n\s*projectEvidenceLibraryItems,/);
+  assert.match(libSource, /item\.statement \|\| "Evidence statement not yet available"/);
+  assert.match(libSource, /item\.supportStrength/);
+  assert.match(libSource, /item\.evidenceReviewStatus/);
+  assert.match(libSource, /No claim proposed yet/);
   // Claims is no longer gated to the Evidence tab - it remains reachable,
   // unconditionally, alongside the other preserved non-tab capabilities.
   const claimsHeadingIndex = libSource.indexOf('<h5 className="mb-0">Claims</h5>');

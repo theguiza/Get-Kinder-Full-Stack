@@ -96,6 +96,7 @@ function responseClaimCandidate(row, organizationId) {
     || typeof row.claim_strength !== "string"
     || !MACHINE_TOKEN_RE.test(row.claim_strength)
     || !Array.isArray(row.review_queue_items)
+    || !isOptionalStatement(row.claim_statement ?? null)
     || !isOptionalStatement(row.evidence_statement ?? null)
     || !isOptionalMachineToken(row.evidence_support_strength ?? null)
     || !isOptionalMachineToken(row.evidence_review_status ?? null)
@@ -117,6 +118,10 @@ function responseClaimCandidate(row, organizationId) {
     claimReviewStatus: row.claim_review_status,
     claimStrength: row.claim_strength,
     reviewQueueItems,
+    // KAI Impact Library redesign, E1: the claim's own governed assertion -
+    // distinct from evidenceStatement below, which is supporting provenance
+    // text, never the Impact Fact headline itself.
+    claimStatement: row.claim_statement ?? null,
     evidenceStatement: row.evidence_statement ?? null,
     evidenceSupportStrength: row.evidence_support_strength ?? null,
     evidenceReviewStatus: row.evidence_review_status ?? null,

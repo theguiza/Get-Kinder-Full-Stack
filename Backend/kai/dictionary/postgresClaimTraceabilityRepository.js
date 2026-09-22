@@ -801,6 +801,14 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
       claim_status: claimRow.claim_status,
       claim_review_status: claimRow.claim_review_status,
       claim_strength: claimRow.claim_strength,
+      // KAI Impact Library redesign, E1: the claim's own governed
+      // assertion text - distinct from the evidence item's statement below
+      // (see migrations/kai_sprint2_p2_03_claim_proposal.sql: claims.statement
+      // is deterministically derived from the evidence item's locator
+      // coordinates, "never from the evidence item's own statement text").
+      // Already fetched by getScopedClaimById; simply not previously
+      // included in this DTO.
+      statement: claimRow.statement,
       audience_gates: audienceGateSummary(claimRow),
     },
     evidence: {
@@ -812,6 +820,10 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
       review_status: evidenceReviewQueueItemRow.review_status,
       updated_at: rowIso(evidenceReviewQueueItemRow.updated_at),
       sensitivity_level: evidenceItemRow.sensitivity_level,
+      // Already fetched by getScopedEvidenceItemById; exposed for the same
+      // reason as claim.statement above - supporting provenance text, never
+      // presented as the claim itself.
+      statement: evidenceItemRow.statement,
     },
     locator: { source_locator_id: locatorRow.source_locator_id },
     source: { source_id: sourceRow.source_id, source_code: sourceRow.source_code ?? null },

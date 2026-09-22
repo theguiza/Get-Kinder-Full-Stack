@@ -2804,6 +2804,69 @@ router.get(
   },
 );
 
+let evidenceLibraryServicePromise = null;
+async function getEvidenceLibraryService() {
+  if (intakeServiceOverride?.listOrganizationEvidenceLibrary) return intakeServiceOverride;
+  evidenceLibraryServicePromise ||= import("../services/kaiEvidenceLibraryService.js");
+  return evidenceLibraryServicePromise;
+}
+
+function evidenceLibraryIndexQuery(req = {}) {
+  const allowedKeys = new Set(["limit", "after_evidence_item_id"]);
+  const keys = Object.keys(req.query || {});
+  if (!keys.every((key) => allowedKeys.has(key))) return null;
+
+  let limit = 25;
+  if (req.query.limit !== undefined) {
+    if (typeof req.query.limit !== "string" || !/^\d+$/.test(req.query.limit)) return null;
+    limit = Number(req.query.limit);
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 25) return null;
+  }
+
+  let afterEvidenceItemId = null;
+  if (req.query.after_evidence_item_id !== undefined) {
+    const candidate = normalizedUuid(req.query.after_evidence_item_id);
+    if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(candidate)) return null;
+    afterEvidenceItemId = candidate;
+  }
+
+  return { limit, afterEvidenceItemId };
+}
+
+/**
+ * KAI Impact Library redesign, E1 correction: organization-scoped Evidence
+ * Library read, enumerated directly off the governed evidence_items table
+ * rather than through the claims table - an evidence item can exist before
+ * any claim is proposed for it (source promotion -> evidence extraction ->
+ * coverage/quality assessment -> claim proposal), so a claims-anchored join
+ * would silently exclude it. Read-only; no SQL/DB access in this route.
+ */
+router.get(
+  "/admin/organizations/:organizationId/evidence-library/candidates",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    const identifiers = eligibleClaimsForAudienceOrganizationIdentifier(req);
+    const query = evidenceLibraryIndexQuery(req);
+    if (!identifiers || !query) {
+      return sendKaiError(res, "validation_blocker", {
+        blockers: [routeValidationBlocker(
+          "invalid_organization_id_or_query",
+          "organization_id_limit_or_after_evidence_item_id",
+        )],
+      });
+    }
+    return invokeService(res, async () => {
+      const service = await getEvidenceLibraryService();
+      return service.listOrganizationEvidenceLibrary({
+        organizationId: identifiers.organizationId,
+        limit: query.limit,
+        afterEvidenceItemId: query.afterEvidenceItemId,
+        actorContext: sprint2MappedActorContext(req),
+      });
+    });
+  },
+);
+
 async function getGeneratedContentService() {
   if (
     intakeServiceOverride?.createEvidenceSummaryDraft

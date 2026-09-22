@@ -31761,3 +31761,112 @@ production or runtime closure claimed. No push, deployment, production
 mutation, database mutation, migration execution, feature-flag/configuration
 change, real-client-data access, or `00_KAI_CURRENT_STATE.md` update
 performed.
+
+### Package E1 — Evidence enumeration semantics + Impact Fact headline correction (CLOSED LOCALLY)
+
+**E1 question 1 answered - CASE A (evidence can exist without a claim), proven from schema, not inferred:**
+`kai.evidence_items` (`migrations/kai_sprint2_p2_01_evidence_lineage.sql`)
+has no `claim_id` column and no foreign key referencing `kai.claims` -
+its only foreign keys are to `kai.source_versions` and
+`kai.source_locators`. The dependency runs the other way:
+`kai.claims.evidence_item_id` is `NOT NULL` with
+`CONSTRAINT claims_p2_03_evidence_item_fk FOREIGN KEY (evidence_item_id,
+organization_id) REFERENCES kai.evidence_items (...) ON DELETE RESTRICT`
+(`migrations/kai_sprint2_p2_03_claim_proposal.sql`). The uniqueness
+constraint `UNIQUE (organization_id, evidence_item_id, claim_type)` with
+`claim_type` pinned to a single value (`CHECK (claim_type = 'finding')`)
+bounds claims per evidence item at **one**, not at **least one** - nothing
+requires every evidence item to have a claim. This matches the documented
+pipeline (source promotion -> evidence extraction -> coverage/quality
+assessment -> claim proposal): an evidence item legitimately exists at any
+stage before the last one.
+
+**Correction applied (Case A path):** the previous Evidence tab (added in
+Package D, using the Claim Library's `LEFT JOIN` to `evidence_items`) would
+silently exclude any evidence item with no claim proposed yet. Added the
+smallest new, organization-scoped, read-only capability:
+- `Backend/kai/db/kaiEvidenceLibraryReadModels.js` (new):
+  `listOrganizationEvidenceItems`, enumerating `kai.evidence_items`
+  directly - no join through claims.
+- `Backend/kai/services/kaiEvidenceLibraryService.js` (new):
+  `listOrganizationEvidenceLibrary`, mirroring
+  `kaiClaimLibraryService.js`'s exact conventions (same role set
+  `gk_admin`/`gk_operator`/`gk_reviewer`, `read_intake` operation,
+  `KAI_SPRINT2_ENABLED` gate, tenant-boundary check, cursor pagination,
+  fail-closed DTO allowlisting - no raw storage path/participant content
+  field exists in the allowlist).
+- `Backend/kai/routes/sprint2IntakeApi.js`: new
+  `GET .../evidence-library/candidates` route, mirroring the claim-library
+  candidates route's shape exactly. No SQL/DB access in the route.
+- `frontend/impactEvidenceLibraryLogic.js`: `evidenceLibraryCandidatesPath`/
+  `projectEvidenceLibraryItems`.
+- `frontend/ImpactEvidenceLibrary.jsx`: Evidence tab now fetches and
+  renders from this new, independent read - not `candidateClaims`. Each
+  item still offers "View source & traceability" only when a governed
+  claim actually references it (cross-referenced against the
+  already-fetched Claims data, no new lookup); otherwise shows an honest
+  "No claim proposed yet" badge rather than a broken/fabricated action.
+  Claims/Impact Facts remain a fully separate conceptual layer - the two
+  services do not import or call each other.
+
+**E1 question 2 answered - a real, distinct governed claim assertion field
+exists:** `kai.claims.statement` (`migrations/kai_sprint2_p2_03_claim_proposal.sql`)
+is deterministically derived from the evidence item's own locator
+coordinates and is explicitly documented as "never from the evidence
+item's own `statement` text (which could smuggle a different
+evidence_type's semantics into the claim)" - a genuinely separate field
+from `evidence_items.statement`. It was already being read by
+`getScopedClaimById` (`Backend/kai/db/kaiIntakeQueries.js`) but was not
+included in either the Claim Library list DTO or the per-claim
+Traceability DTO.
+
+**Correction applied:** exposed the already-fetched, previously-unserialized
+field in both places (smallest possible fix, no new query):
+- `kaiClaimLibraryReadModels.js`: added `c.statement AS claim_statement`
+  to the existing query (additive `SELECT`/`GROUP BY` only).
+- `kaiClaimLibraryService.js`: added `claimStatement` to the DTO
+  (fail-closed validated, same convention as the other fields).
+- `Backend/kai/dictionary/postgresClaimTraceabilityRepository.js`
+  (`evaluateClaimTraceabilityInTransaction`): added `statement:
+  claimRow.statement` to the `claim` object and `statement:
+  evidenceItemRow.statement` to the `evidence` object in the traceability
+  DTO - both already fetched, neither previously serialized.
+- `frontend/impactLibrary/ImpactLibraryListView.jsx` and
+  `ImpactFactDetailView.jsx`: Impact Fact headline now shows
+  `claim.claimStatement` / `traceability.claim?.statement` (the real claim
+  assertion), never the linked evidence statement. The evidence statement
+  remains visible in Fact Detail's Overview tab, explicitly relabeled
+  "Supporting evidence" rather than presented as the fact itself.
+
+**No schema/migration change. No new persistence - every new/exposed field
+was already stored; this only adds read/serialization paths. No
+production/database mutation, deployment, feature-flag change, or
+cloud/infrastructure change.**
+
+**Test evidence** (`DATABASE_URL=postgres://localhost:1/nonexistent_sentinel_db`
+set for every Node command; no database/cloud/production access):
+- New: `__tests__/kai-impact-library-e1-correction.spec.js` (8 cases) -
+  proves the schema/constraint facts directly from the migration files
+  (not inferred from fixtures or observed data); Evidence is wired to the
+  new independent read path; the new service is organization-scoped,
+  tenant-safe, `KAI_SPRINT2_ENABLED`-gated, and authorization-denies a
+  cross-organization actor before any repository call; evidence items
+  carry real source/locator lineage with no raw storage/participant-content
+  field in the allowlist; the Claim Library and Evidence Library services
+  do not import each other; the Impact Fact headline uses the claim's own
+  statement in both the list and detail views, with the evidence statement
+  relabeled as supporting evidence. 8/8 PASS.
+- One existing Package D/D-Correction test updated for the new Evidence
+  tab source (`kai-impact-library-knowledge-studio-tabs.spec.js`, test 4) -
+  still PASS, same underlying guarantee (real, non-Claim-Library-derived
+  Evidence).
+- Full non-integration suite (`__tests__/*.spec.js`, 4972 cases): 12
+  failures, byte-identical to the established baseline - 0 regressions.
+- Frontend build: `npm run build` (vite) -> succeeded at every step.
+- `git diff --check` -> PASS.
+
+**Status:** PACKAGE_E1_EVIDENCE_AND_IMPACT_FACT_HEADLINE_CORRECTION_CLOSED_LOCALLY.
+No production or runtime closure claimed. No push, deployment, production
+mutation, database mutation, migration execution, feature-flag/configuration
+change, real-client-data access, or `00_KAI_CURRENT_STATE.md` update
+performed.

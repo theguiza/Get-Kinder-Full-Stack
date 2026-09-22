@@ -113,7 +113,7 @@ export default function ImpactFactDetailView({ organizationId, claimId, onBack }
         <div>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, marginBottom: 22, flexWrap: "wrap" }}>
             <h1 style={{ fontSize: 24, fontWeight: 700, color: COLORS.ink, margin: 0 }}>
-              {traceability.evidence?.statement || "Impact Fact"}
+              {traceability.claim?.statement || "Impact Fact"}
             </h1>
             <select
               value={audience}
@@ -161,7 +161,7 @@ export default function ImpactFactDetailView({ organizationId, claimId, onBack }
                 ))}
               </div>
               <div style={{ background: "#FFFFFF", border: "1px solid rgba(69,90,124,0.10)", borderRadius: 10, padding: 22 }}>
-                <SectionLabel>Statement</SectionLabel>
+                <SectionLabel>Supporting evidence</SectionLabel>
                 <p style={{ fontSize: 14, color: COLORS.ink, lineHeight: 1.6, margin: 0 }}>
                   {traceability.evidence?.statement || "This evidence statement is not yet available."}
                 </p>

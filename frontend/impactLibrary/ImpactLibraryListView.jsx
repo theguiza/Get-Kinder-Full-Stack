@@ -113,7 +113,7 @@ export default function ImpactLibraryListView({ organizationId, onViewFact }) {
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6, flexWrap: "wrap" }}>
                 <span style={{ fontSize: 15.5, fontWeight: 600, color: COLORS.ink }}>
-                  {claim.evidenceStatement || "Statement not yet available"}
+                  {claim.claimStatement || "Statement not yet available"}
                 </span>
                 <StatusBadge status={claim.claimReviewStatus} />
               </div>

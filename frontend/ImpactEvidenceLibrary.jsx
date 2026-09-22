@@ -14,6 +14,8 @@ import {
   canStartGeneratedContentReview,
   claimGapFollowupsPath,
   claimLibraryCandidatesPath,
+  evidenceLibraryCandidatesPath,
+  projectEvidenceLibraryItems,
   claimProposalPath,
   claimReviewCompletePath,
   claimReviewDecisionBody,
@@ -258,6 +260,14 @@ export default function ImpactEvidenceLibrary({
   const [candidateClaimsError, setCandidateClaimsError] = useState("");
   const [eligibleClaimsError, setEligibleClaimsError] = useState("");
   const [eligibleRequestState, setEligibleRequestState] = useState("idle");
+  // KAI Impact Library redesign, E1 correction: real, organization-scoped
+  // evidence, enumerated directly from kai.evidence_items - independent of
+  // candidateClaims above, since an evidence item can exist before any
+  // claim is proposed for it (a claims-anchored join would silently
+  // exclude it).
+  const [evidenceItems, setEvidenceItems] = useState([]);
+  const [loadingEvidenceItems, setLoadingEvidenceItems] = useState(false);
+  const [evidenceItemsError, setEvidenceItemsError] = useState("");
   // Candidate (governed Claim Library) and eligibility (audience-scoped)
   // requests are invalidated independently: organization change invalidates
   // both, audience change invalidates eligibility only. See
@@ -850,6 +860,26 @@ export default function ImpactEvidenceLibrary({
     setEligibleRequestState("success");
     setEligibleClaims(projectEligibleClaims(result.body.data));
   }, [audience, organizationId]);
+
+  const loadEvidenceItems = useCallback(async () => {
+    if (!organizationId) return;
+    setLoadingEvidenceItems(true);
+    setEvidenceItemsError("");
+    const result = await getJson(evidenceLibraryCandidatesPath(organizationId));
+    setLoadingEvidenceItems(false);
+    if (result.statusCode !== 200 || !result.body?.ok) {
+      setEvidenceItems([]);
+      setEvidenceItemsError(errorText(result));
+      return;
+    }
+    setEvidenceItems(projectEvidenceLibraryItems(result.body.data));
+  }, [organizationId]);
+
+  useEffect(() => {
+    setEvidenceItems([]);
+    setEvidenceItemsError("");
+    if (organizationId) loadEvidenceItems();
+  }, [organizationId, loadEvidenceItems]);
 
   const loadClaims = useCallback(() => {
     if (!organizationId) {
@@ -3001,50 +3031,64 @@ export default function ImpactEvidenceLibrary({
           <div className="admin-card">
             <div className="d-flex justify-content-between align-items-center mb-2">
               <h5 className="mb-0">Evidence</h5>
-              <span className="text-muted small">{claims.length} shown</span>
+              <span className="text-muted small">{evidenceItems.length} shown</span>
             </div>
             <div className="small text-muted mb-2">
               What KAI has extracted from your organization's information, with its source and current review
-              posture - not an interpreted statement. Each item traces to exactly one governed evidence record.
+              posture - not an interpreted statement, and not filtered to only evidence that already has a
+              claim proposed for it.
             </div>
-            {candidateClaimsError ? (
-              <div className="alert alert-warning py-2 small">Evidence: {candidateClaimsError}</div>
+            {evidenceItemsError ? (
+              <div className="alert alert-warning py-2 small">Evidence: {evidenceItemsError}</div>
             ) : null}
-            {claims.length === 0 && !loadingCandidateClaims ? (
+            {loadingEvidenceItems ? <div className="text-muted small">Loading evidence...</div> : null}
+            {evidenceItems.length === 0 && !loadingEvidenceItems ? (
               <div className="text-muted small">No evidence extracted yet for this organization.</div>
             ) : null}
             <ul className="list-group">
-              {claims.map((claim) => (
-                <li key={claim.claimId} className="list-group-item">
-                  <div className="fw-semibold small">
-                    {claim.evidenceStatement || "Evidence statement not yet available"}
-                  </div>
-                  <div className="d-flex flex-wrap gap-2 mt-1">
-                    {claim.evidenceSupportStrength ? (
-                      <span className="badge text-bg-secondary">{claim.evidenceSupportStrength}</span>
+              {evidenceItems.map((item) => {
+                // Evidence can exist without a claim yet - only offer the
+                // jump into Traceability when a governed claim actually
+                // references this evidence item (existing Claims data,
+                // already fetched below - no new lookup).
+                const linkedClaim = claims.find((claim) => claim.evidenceItemId === item.evidenceItemId);
+                return (
+                  <li key={item.evidenceItemId} className="list-group-item">
+                    <div className="fw-semibold small">
+                      {item.statement || "Evidence statement not yet available"}
+                    </div>
+                    <div className="d-flex flex-wrap gap-2 mt-1">
+                      {item.supportStrength ? (
+                        <span className="badge text-bg-secondary">{item.supportStrength}</span>
+                      ) : null}
+                      {item.evidenceReviewStatus ? (
+                        <span className="badge text-bg-light border">{item.evidenceReviewStatus}</span>
+                      ) : null}
+                      {item.internalOnly === false ? (
+                        <span className="badge text-bg-light border">Not internal-only</span>
+                      ) : null}
+                      {!linkedClaim ? (
+                        <span className="badge text-bg-light border">No claim proposed yet</span>
+                      ) : null}
+                    </div>
+                    {linkedClaim ? (
+                      <div className="mt-1">
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline-primary"
+                          onClick={() => {
+                            setSelectedClaimId(linkedClaim.claimId);
+                            traceabilityPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                            traceabilityPanelRef.current?.focus();
+                          }}
+                        >
+                          View source &amp; traceability
+                        </button>
+                      </div>
                     ) : null}
-                    {claim.evidenceReviewStatus ? (
-                      <span className="badge text-bg-light border">{claim.evidenceReviewStatus}</span>
-                    ) : null}
-                    {claim.evidenceInternalOnly === false ? (
-                      <span className="badge text-bg-light border">Not internal-only</span>
-                    ) : null}
-                  </div>
-                  <div className="mt-1">
-                    <button
-                      type="button"
-                      className="btn btn-sm btn-outline-primary"
-                      onClick={() => {
-                        setSelectedClaimId(claim.claimId);
-                        traceabilityPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-                        traceabilityPanelRef.current?.focus();
-                      }}
-                    >
-                      View source &amp; traceability
-                    </button>
-                  </div>
-                </li>
-              ))}
+                  </li>
+                );
+              })}
             </ul>
           </div>
           ) : null}

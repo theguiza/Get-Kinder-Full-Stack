@@ -15,6 +15,29 @@ export function claimLibraryCandidatesPath(organizationId) {
   return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/claim-library/candidates?limit=25`;
 }
 
+// KAI Impact Library redesign, E1 correction: evidence is enumerated
+// directly from kai.evidence_items, never through kai.claims - an evidence
+// item can exist before any claim is proposed for it.
+export function evidenceLibraryCandidatesPath(organizationId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/evidence-library/candidates?limit=25`;
+}
+
+export function projectEvidenceLibraryItems(dto) {
+  return asArray(dto?.items).map((item) => ({
+    evidenceItemId: item.evidenceItemId,
+    sourceId: item.sourceId,
+    sourceVersionId: item.sourceVersionId,
+    evidenceType: item.evidenceType,
+    dataClass: item.dataClass,
+    supportStrength: item.supportStrength,
+    statement: item.statement,
+    evidenceReviewStatus: item.evidenceReviewStatus,
+    internalOnly: item.internalOnly,
+    publicUseAllowed: item.publicUseAllowed,
+    funderUseAllowed: item.funderUseAllowed,
+  })).filter((item) => isRouteUuid(item.evidenceItemId));
+}
+
 export function claimTraceabilityPath(organizationId, claimId, audience) {
   const params = new URLSearchParams({ requested_audience: audience });
   return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}`
@@ -1807,6 +1830,10 @@ export function projectCandidateClaims(dto) {
       reviewStatus: item.review_status,
     })),
     libraryStatus: "needs_review",
+    // KAI Impact Library redesign, E1: the claim's own governed assertion -
+    // the real Impact Fact headline. Distinct from evidenceStatement below,
+    // which is supporting provenance, never the headline itself.
+    claimStatement: claim.claimStatement ?? null,
     // KAI Impact Library redesign, D-Correction 1 / Package E: the real,
     // governed evidence item behind this claim (statement/strength/review
     // status/source lineage/use-authority) - never a claim field relabeled.

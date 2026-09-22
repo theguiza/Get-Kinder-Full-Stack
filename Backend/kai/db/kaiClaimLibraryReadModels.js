@@ -25,6 +25,7 @@ export async function listClaimLibraryReviewCandidates(
             c.evidence_item_id::text AS evidence_item_id,
             c.claim_type, c.claim_status,
             c.claim_review_status, c.claim_strength,
+            c.statement AS claim_statement,
             e.statement AS evidence_statement,
             e.support_strength AS evidence_support_strength,
             e.evidence_review_status AS evidence_review_status,
@@ -60,7 +61,7 @@ export async function listClaimLibraryReviewCandidates(
       WHERE c.organization_id = $1::uuid
         ${cursorClause}
       GROUP BY c.claim_id, c.organization_id, c.evidence_item_id, c.claim_type,
-               c.claim_status, c.claim_review_status, c.claim_strength,
+               c.claim_status, c.claim_review_status, c.claim_strength, c.statement,
                e.statement, e.support_strength, e.evidence_review_status,
                e.source_id, e.source_version_id, e.internal_only,
                e.public_use_allowed, e.funder_use_allowed
