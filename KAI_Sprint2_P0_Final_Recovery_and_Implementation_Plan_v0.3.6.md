@@ -32206,3 +32206,122 @@ production or runtime closure claimed. No push, deployment, production
 mutation, database mutation, migration execution against production/shared
 databases, feature-flag/configuration change, real-client-data access, or
 `00_KAI_CURRENT_STATE.md` update performed.
+
+### Package G2 — Improvement Plan UI + Gap Detail Add to Plan (CLOSED LOCALLY)
+
+Replaced the `ComingSoonPanel` placeholder with `frontend/improvementPlan/
+ImprovementPlanView.jsx` (modeled on Package F's `ProjectsView.jsx`): lists
+real, persisted practices only (title, rationale, humanized status/cadence,
+next-due date, Project label or "Organization-wide", an honest "Originated
+from a data gap" tag) - never a raw `responsible_actor_user_id`/
+`gap_log_item_id`/`improvement_practice_id`, never a fabricated sample
+practice. "+ New Practice" and the per-row status control both call the
+real, authorized Package G service endpoints. `improvementPlan` was added
+to both `SECTION_ALLOWS_ORGANIZATION_WIDE` (the backend supports both an
+org-wide and an engagement-scoped list) and `SECTION_SHOWS_PROJECT_CONTEXT_BAR`
+in `ImpactLibraryApp.jsx`; `ComingSoonPanel` was deleted (no remaining
+caller).
+
+**Gap Detail "Add to Plan"** (deferred by Package D-Correction) is now
+wired in `KnowledgeStudioGapDetail.jsx`, but only for the `"gap"` category
+- the only one carrying a real `gap_log_item_id`, Improvement Practice's
+one supported origin FK; the other three categories (coverage finding,
+conflict, client follow-up) show no button. `ImpactEvidenceLibrary.jsx`
+wires it to the real `createImprovementPractice` path via a new optional
+`onAddImprovementPractice` prop - no simulated success.
+
+**Correction found and fixed during this package:** a first full-suite run
+surfaced 4 regressions - three stale exact-match source assertions in
+existing Package C0/Home tests (updated to match the new map/import
+shapes, same underlying guarantees) and one genuine locked-contract
+violation: adding a `patchJson` helper to `kaiWebIntakeLogic.js` put the
+string `PATCH` into a file this codebase already tests as GET/POST(/PUT for
+the Gate C-2A signed upload)-only. Resolved by removing the unused
+`patchJson` helper (Package G's PATCH update-fields route exists on the
+backend but has no UI consumer yet - create + status-change cover this
+package's UI scope) rather than weakening the existing contract test.
+
+**Test evidence:** `kai-package-g2-improvement-plan-view.spec.js` (new)
+PASS; `kai-impact-library-home.spec.js`/`kai-impact-library-project-context.spec.js`
+updated and PASS. Full suite (5035 cases): 12 failures, byte-identical to
+baseline - 0 regressions (confirmed after the fix above). `npm run build`
+PASS. `git diff --check` PASS.
+
+**Status:** PACKAGE_G2_IMPROVEMENT_PLAN_UI_CLOSED_LOCALLY.
+
+### Home Improvement Plan integration (CLOSED LOCALLY)
+
+`ImpactHomeView.jsx` fetches the organization-wide improvement-practices
+list alongside its existing claims/review-queue reads and adds an "Active
+Improvement Practices" stat tile (gated on `improvementPracticesLoaded`,
+never a fabricated number before the read resolves) plus an "Improvement
+Plan" preview card (up to three active/recommended practices, a real "View
+Improvement Plan" navigation action, and an honest "No active or
+recommended Improvement Practices yet." empty state - never a sample
+card). `ImpactLibraryApp.jsx` wires a real `onGoToImprovementPlan`
+callback.
+
+**Test evidence:** `kai-package-g2-home-improvement-plan-integration.spec.js`
+(new) PASS; existing Home test unmodified, still PASS. Full suite (5040
+cases): 12 failures, byte-identical to baseline - 0 regressions. `npm run
+build` PASS. `git diff --check` PASS.
+
+**Status:** PACKAGE_G2_HOME_INTEGRATION_CLOSED_LOCALLY.
+
+### Package I — Responsive/Accessibility/Interaction QA (CLOSED LOCALLY, with recorded scope boundary)
+
+Inspected first (per instruction, before writing any check): this repo has
+**no** jsdom/Playwright/Cypress/Storybook tooling anywhere for this
+product - every existing frontend check (including Package B1/B2's own
+"shell" spec) is `readFileSync` + regex under `node:test`. This QA pass
+follows that same established convention rather than introducing a new
+framework, per instruction.
+
+**Repairs applied** to the two genuinely new Package G2 surfaces (the only
+UI this continuation authored):
+- `ImprovementPlanView.jsx`: create-form title/rationale inputs gained
+  `aria-label` (placeholder text alone is not a reliable accessible name);
+  the per-row status `<select>` gained `aria-label="Practice status"` and
+  was resized to meet the approved 44px touch-target floor.
+- Gap Detail's "Add to Plan" button: confirmed already a real, keyboard-
+  operable native `<button>` with a real handler - no change needed.
+
+**New test** `kai-package-i-responsive-accessibility-qa.spec.js` closes a
+real, previously-**untested** gap - the shared shell's responsive
+breakpoint/touch-target/focus-visibility CSS had zero prior test coverage
+- and verifies: the desktop(implicit >=1200px)/tablet(<=1199.98px)/
+mobile(<=767.98px) three-breakpoint system exists as designed; the
+Needs Attention bell is reachable at every breakpoint (it lives in the
+always-visible header, not the mobile-hidden nav footer); Improvement
+Plan's status is never color-only; no raw UUID is rendered as a primary
+label; Gap Detail's Add to Plan is real and keyboard-operable; and the
+five approved primary destinations are unchanged.
+
+**Preserved capabilities** (KAI Baseline Readiness, Funder Requirements,
+Grant Response Packet, Board Reporting, Generated Drafts, governed
+traceability) were inspected, not modified - all remain reachable exactly
+where prior packages left them: below Knowledge Studio's tab content
+(the existing "not yet decided by any accepted package" convention,
+unchanged by this continuation).
+
+**Recorded scope boundary (NOT_CONFIRMED, not silently skipped):** no live
+browser-rendered verification at representative desktop/tablet/mobile
+viewport widths was performed - no jsdom/Playwright/Cypress tooling exists
+for this product and no authorized live application/database instance was
+available to render against in this session. A full pixel-rendered audit,
+and a full touch-target/accessible-name sweep of the pre-existing (pre-
+redesign) Bootstrap-based views (Funder Requirements, Grant Response
+Packet, Board Reporting, Generated Drafts), remain outside this pass's
+verified scope - a future package would need to either add a real
+browser-rendering test harness (a decision outside this package's
+authorization) or perform a manual audit against a real running instance.
+
+**Test evidence:** `kai-package-i-responsive-accessibility-qa.spec.js`
+(new, 11/11 PASS). Full suite (5051 cases): 12 failures, byte-identical to
+baseline - 0 regressions. `npm run build` PASS. `git diff --check` PASS.
+
+**Status:** PACKAGE_I_RESPONSIVE_ACCESSIBILITY_QA_CLOSED_LOCALLY_WITH_
+RECORDED_SCOPE_BOUNDARY. No production or runtime closure claimed. No
+push, deployment, production mutation, database mutation, migration
+execution, feature-flag/configuration change, real-client-data access, or
+`00_KAI_CURRENT_STATE.md` update performed.
