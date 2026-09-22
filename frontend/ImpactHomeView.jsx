@@ -12,6 +12,8 @@ import {
   blockerDisplayText,
   projectOrganizationGapsAndRisks,
 } from "./impactEvidenceLibraryLogic.js";
+import { improvementPracticesPath } from "./kaiWebIntakeLogic.js";
+import { humanizeImprovementPracticeStatus } from "./improvementPlan/improvementPlanLogic.js";
 
 const COLORS = Object.freeze({
   coral: "#FF5656",
@@ -63,7 +65,7 @@ function reviewQueueItemLabel(item) {
  * fabricated Recent Activity, per owner decision. Home is organization-wide:
  * none of its reads are gated on an engagement/Project.
  */
-export default function ImpactHomeView({ organizationId, onGoToKnowledgeStudio }) {
+export default function ImpactHomeView({ organizationId, onGoToKnowledgeStudio, onGoToImprovementPlan }) {
   const [candidateClaims, setCandidateClaims] = useState([]);
   const [claimsLoaded, setClaimsLoaded] = useState(false);
 
@@ -71,12 +73,22 @@ export default function ImpactHomeView({ organizationId, onGoToKnowledgeStudio }
   const [reviewQueueCompleteness, setReviewQueueCompleteness] = useState({ truncated: false, evaluationErrorCount: 0 });
   const [reviewQueueRequestState, setReviewQueueRequestState] = useState("idle");
 
+  // Package G2 Home integration: the real, organization-wide (no Project
+  // filter) Improvement Practice list - never a fabricated recommendation
+  // or sample practice. improvementPracticesLoaded gates the summary the
+  // same "never guess while unknown" way claimsLoaded/reviewQueueComplete
+  // already do above.
+  const [improvementPractices, setImprovementPractices] = useState([]);
+  const [improvementPracticesLoaded, setImprovementPracticesLoaded] = useState(false);
+
   useEffect(() => {
     setCandidateClaims([]);
     setClaimsLoaded(false);
     setReviewQueueItems([]);
     setReviewQueueCompleteness({ truncated: false, evaluationErrorCount: 0 });
     setReviewQueueRequestState("idle");
+    setImprovementPractices([]);
+    setImprovementPracticesLoaded(false);
     if (!organizationId) return undefined;
 
     let cancelled = false;
@@ -102,6 +114,17 @@ export default function ImpactHomeView({ organizationId, onGoToKnowledgeStudio }
       setReviewQueueItems(projectReviewQueue(result.body.data));
       setReviewQueueCompleteness(projectReviewQueueCompleteness(result.body.data));
       setReviewQueueRequestState("success");
+    })();
+
+    (async () => {
+      const result = await getJson(improvementPracticesPath(organizationId));
+      if (cancelled) return;
+      setImprovementPracticesLoaded(true);
+      if (result.statusCode !== 200 || !result.body?.ok) {
+        setImprovementPractices([]);
+        return;
+      }
+      setImprovementPractices(result.body.data || []);
     })();
 
     return () => {
@@ -130,6 +153,18 @@ export default function ImpactHomeView({ organizationId, onGoToKnowledgeStudio }
   );
 
   const nextAction = attentionPreview.find((item) => item.actionability === "ACTION_REQUIRED") || attentionPreview[0] || null;
+
+  const activeImprovementPracticesCount = useMemo(
+    () => improvementPractices.filter((practice) => practice.status === "active").length,
+    [improvementPractices],
+  );
+  const improvementPracticesPreview = useMemo(
+    () =>
+      improvementPractices
+        .filter((practice) => practice.status === "active" || practice.status === "recommended")
+        .slice(0, 3),
+    [improvementPractices],
+  );
 
   const isFirstTime = claimsLoaded && candidateClaims.length === 0 && reviewQueueComplete && reviewQueueItems.length === 0;
 
@@ -179,6 +214,7 @@ export default function ImpactHomeView({ organizationId, onGoToKnowledgeStudio }
         <StatTile n={claimsLoaded ? reviewedClaimsCount : "…"} label="Impact Facts (reviewed)" />
         <StatTile n={reviewQueueComplete ? recommendationsCount : "…"} label="Recommendations" />
         <StatTile n={attentionCount === null ? "…" : attentionCount} label="Needs your attention" alert={Boolean(attentionCount)} />
+        <StatTile n={improvementPracticesLoaded ? activeImprovementPracticesCount : "…"} label="Active Improvement Practices" />
       </div>
 
       {nextAction ? (
@@ -234,6 +270,51 @@ export default function ImpactHomeView({ organizationId, onGoToKnowledgeStudio }
                 <div>
                   <div style={{ fontSize: 13.5, color: COLORS.ink, fontWeight: 500, lineHeight: 1.4 }}>{item.claimLabel}</div>
                   <div style={{ fontSize: 12.5, color: COLORS.textMuted, marginTop: 2 }}>{item.blockerText}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div style={{ background: "#FFFFFF", border: "1px solid rgba(69,90,124,0.10)", borderRadius: 10, padding: 22, marginTop: 20 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14, gap: 12, flexWrap: "wrap" }}>
+          <div style={{ fontWeight: 600, fontSize: 15, color: COLORS.ink }}>Improvement Plan</div>
+          {typeof onGoToImprovementPlan === "function" ? (
+            <button
+              type="button"
+              onClick={onGoToImprovementPlan}
+              style={{
+                fontFamily: "'Work Sans', sans-serif",
+                fontWeight: 600,
+                fontSize: 12.5,
+                padding: "6px 12px",
+                borderRadius: 8,
+                cursor: "pointer",
+                background: "transparent",
+                color: COLORS.slate,
+                border: "1px solid rgba(69,90,124,0.22)",
+              }}
+            >
+              View Improvement Plan
+            </button>
+          ) : null}
+        </div>
+        {!improvementPracticesLoaded ? (
+          <div style={{ fontSize: 13, color: COLORS.textMuted }}>Loading&hellip;</div>
+        ) : improvementPracticesPreview.length === 0 ? (
+          <div style={{ fontSize: 13, color: COLORS.textMuted }}>No active or recommended Improvement Practices yet.</div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 13 }}>
+            {improvementPracticesPreview.map((practice) => (
+              <div key={practice.improvement_practice_id} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                <span style={{ width: 6, height: 6, borderRadius: "50%", background: COLORS.slate, marginTop: 7, flexShrink: 0 }} />
+                <div>
+                  <div style={{ fontSize: 13.5, color: COLORS.ink, fontWeight: 500, lineHeight: 1.4 }}>{practice.title}</div>
+                  <div style={{ fontSize: 12.5, color: COLORS.textMuted, marginTop: 2 }}>
+                    {humanizeImprovementPracticeStatus(practice.status)}
+                    {practice.next_due_date ? ` • Next due ${practice.next_due_date}` : ""}
+                  </div>
                 </div>
               </div>
             ))}

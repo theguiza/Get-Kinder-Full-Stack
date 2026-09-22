@@ -318,6 +318,7 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
       <ImpactHomeView
         organizationId={selectedOrganizationId}
         onGoToKnowledgeStudio={() => setActiveSection("knowledgeStudio")}
+        onGoToImprovementPlan={() => setActiveSection("improvementPlan")}
       />
     );
   } else if (activeSection === "impactLibrary") {
