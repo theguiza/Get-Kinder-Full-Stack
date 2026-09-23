@@ -219,6 +219,37 @@ function stageBlocker(validatorKey, blockingReason) {
   return [{ validator_key: validatorKey, severity: "blocker", blocking_reason: blockingReason }];
 }
 
+// Board Reporting current-state diagnostic discrimination only: five
+// already-fail-closed conflict_current_state_changed predicates on the
+// getBoardReportingPacket read path collapse into the same public 409/code
+// today. This bounded, metadata-safe discriminator identifies WHICH
+// predicate fired - never a claim/evidence/draft/org id, generated text,
+// SQL, or raw Postgres error - and never changes whether a branch blocks,
+// the HTTP status, or the public error code. Threaded only through the
+// Board Reporting call path (evaluateBoardReportingPacketMembershipInTransaction
+// -> evaluateGrantResponsePacketMembershipInTransaction -> toReviewPacket);
+// Grant Response Packet and the single-draft review-packet read never
+// request it, so their existing conflict_current_state_changed responses
+// are unchanged.
+const BOARD_REPORTING_CURRENT_STATE_VALIDATOR_KEYS = Object.freeze({
+  REVIEW_GRAPH_INVALID: "VAL-BOARD-CURRENT-001",
+  TRACEABILITY_READ_FAILED: "VAL-BOARD-CURRENT-002",
+  TRACEABILITY_CONTRACT_INVALID: "VAL-BOARD-CURRENT-003",
+  CITATION_EVIDENCE_MISMATCH: "VAL-BOARD-CURRENT-004",
+  PG_TRANSACTION_STATE_ERROR: "VAL-BOARD-CURRENT-005",
+});
+const BOARD_REPORTING_CURRENT_STATE_REASONS = Object.freeze({
+  REVIEW_GRAPH_INVALID: "board_reporting_review_graph_invalid",
+  TRACEABILITY_READ_FAILED: "board_reporting_traceability_read_failed",
+  TRACEABILITY_CONTRACT_INVALID: "board_reporting_traceability_contract_invalid",
+  CITATION_EVIDENCE_MISMATCH: "board_reporting_citation_evidence_mismatch",
+  PG_TRANSACTION_STATE_ERROR: "board_reporting_pg_transaction_state_error",
+});
+
+function boardReportingCurrentStateBlocker(key) {
+  return stageBlocker(BOARD_REPORTING_CURRENT_STATE_VALIDATOR_KEYS[key], BOARD_REPORTING_CURRENT_STATE_REASONS[key]);
+}
+
 const COMPLETE_REVIEW_FRESH_PROFILE = GENERATED_CONTENT_REVIEW_LIFECYCLE_PROFILES[1];
 const COMPLETE_REVIEW_RESOLVED_PROFILE = GENERATED_CONTENT_REVIEW_LIFECYCLE_PROFILES[2];
 const START_REVIEW_FRESH_PROFILE = GENERATED_CONTENT_REVIEW_LIFECYCLE_PROFILES[0];
@@ -1006,7 +1037,7 @@ function validateTraceabilityData(data, { claimId, requestedAudience }) {
     && typeof data.evidence.evidence_review_status === "string";
 }
 
-async function toReviewPacket(tx, state, input, validation, evaluator) {
+async function toReviewPacket(tx, state, input, validation, evaluator, { boardReportingDiagnostics = false } = {}) {
   const evaluatedByClaim = new Map();
   const uniqueClaimIds = [...new Set(state.citations.map((citation) => citation.claim_id))].sort();
   for (const claimId of uniqueClaimIds) {
@@ -1015,9 +1046,17 @@ async function toReviewPacket(tx, state, input, validation, evaluator) {
       claimId,
       requestedAudience: state.draft.requested_audience,
     });
-    if (!result.ok) return failure("conflict_current_state_changed");
+    if (!result.ok) {
+      return failure(
+        "conflict_current_state_changed",
+        boardReportingDiagnostics ? boardReportingCurrentStateBlocker("TRACEABILITY_READ_FAILED") : undefined,
+      );
+    }
     if (!validateTraceabilityData(result.data, { claimId, requestedAudience: state.draft.requested_audience })) {
-      return failure("conflict_current_state_changed");
+      return failure(
+        "conflict_current_state_changed",
+        boardReportingDiagnostics ? boardReportingCurrentStateBlocker("TRACEABILITY_CONTRACT_INVALID") : undefined,
+      );
     }
     evaluatedByClaim.set(claimId, result.data);
   }
@@ -1026,7 +1065,10 @@ async function toReviewPacket(tx, state, input, validation, evaluator) {
     const citations = validation.citationsByBlock.get(block.generated_content_block_id).map((citation) => {
       const evaluated = evaluatedByClaim.get(citation.claim_id);
       if (citation.evidence_item_id !== evaluated.evidence.evidence_item_id) {
-        throw new RollbackResultError(failure("conflict_current_state_changed"));
+        throw new RollbackResultError(failure(
+          "conflict_current_state_changed",
+          boardReportingDiagnostics ? boardReportingCurrentStateBlocker("CITATION_EVIDENCE_MISMATCH") : undefined,
+        ));
       }
       return {
         generatedContentCitationId: citation.generated_content_citation_id,
@@ -1818,6 +1860,12 @@ export async function evaluateGrantResponsePacketMembershipInTransaction(
     // them.
     maxCandidateDrafts = null,
     maxDistinctClaims = null,
+    // Board Reporting current-state diagnostic discrimination only (see
+    // boardReportingCurrentStateBlocker above) - default false is the exact
+    // prior behavior; only evaluateBoardReportingPacketMembershipInTransaction
+    // below ever supplies true, so Grant Response Packet's own
+    // conflict_current_state_changed responses are provably unchanged.
+    boardReportingDiagnostics = false,
   } = {},
 ) {
   if (!validateGrantResponsePacketMembershipInput(input)) return failure("validation_blocker");
@@ -1886,9 +1934,21 @@ export async function evaluateGrantResponsePacketMembershipInTransaction(
     // membership evaluation, never a silent per-draft skip - only a
     // genuinely absent draft (handled by the `!state` check above) is
     // skipped.
-    if (validation === false) return failure("conflict_current_state_changed");
+    if (validation === false) {
+      return failure(
+        "conflict_current_state_changed",
+        boardReportingDiagnostics ? boardReportingCurrentStateBlocker("REVIEW_GRAPH_INVALID") : undefined,
+      );
+    }
 
-    const packetResult = await toReviewPacket(tx, state, { organizationId, generatedContentDraftId }, validation, memoizedEvaluator);
+    const packetResult = await toReviewPacket(
+      tx,
+      state,
+      { organizationId, generatedContentDraftId },
+      validation,
+      memoizedEvaluator,
+      { boardReportingDiagnostics },
+    );
     if (!packetResult.ok) return packetResult;
     const packet = packetResult.data;
     const resolvedProfile = GENERATED_CONTENT_REVIEW_LIFECYCLE_PROFILES[2];
@@ -1923,6 +1983,7 @@ export async function evaluateBoardReportingPacketMembershipInTransaction(
       packetAudience: BOARD_REPORTING_PACKET_AUDIENCE,
       memberContentTypes: BOARD_REPORTING_PACKET_MEMBER_CONTENT_TYPES,
       includeExportManifestLinkage: false,
+      boardReportingDiagnostics: true,
     },
   );
 }
@@ -2787,7 +2848,12 @@ export function createPostgresGeneratedContentRepository({
       } catch (error) {
         if (error instanceof RollbackResultError) return error.result;
         if (error?.code === "22P02") return failure("validation_blocker");
-        if (error?.code === "25001") return failure("conflict_current_state_changed");
+        if (error?.code === "25001") {
+          return failure(
+            "conflict_current_state_changed",
+            boardReportingCurrentStateBlocker("PG_TRANSACTION_STATE_ERROR"),
+          );
+        }
         return failure("system_error");
       }
     },
