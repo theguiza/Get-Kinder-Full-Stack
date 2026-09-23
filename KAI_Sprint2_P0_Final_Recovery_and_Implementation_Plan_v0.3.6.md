@@ -32523,3 +32523,40 @@ No production or runtime closure claimed. No push, deployment, production
 mutation, database mutation, migration execution, feature-flag/
 configuration change, real-client-data access, or
 `00_KAI_CURRENT_STATE.md` update performed.
+
+### Board Reporting current packet traceability DTO contract repair (CLOSED LOCALLY)
+
+**Date:** 2026-09-23
+
+**Trigger:** `/impact-library` Board Reporting packet read
+`GET /api/kai/sprint2/intake/admin/organizations/:organizationId/engagements/:engagementId/board-reporting`
+was returning `409 conflict_current_state_changed` with
+`VAL-BOARD-CURRENT-003` /
+`board_reporting_traceability_contract_invalid`. Repository-only diagnosis
+showed the Board Reporting path was not rejecting stale Board composition
+state; it was rejecting a successful P2-06 claim-traceability DTO because
+`validateTraceabilityData` had not been updated for the current authoritative
+DTO's governed `claim.statement` and `evidence.statement` child fields.
+
+**Repair:** Updated
+`Backend/kai/dictionary/postgresGeneratedContentRepository.js#validateTraceabilityData`
+to allow `statement` on the nested `claim` and `evidence` objects and to
+validate those fields as bounded non-empty strings when present. No Board
+Reporting DTO surface was widened: `toReviewPacket` still projects only the
+existing citation fields used by generated-content packets. No route,
+frontend, schema, migration, production database, feature flag, or runtime
+configuration was changed.
+
+**Tests:** With `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel` set for
+every Node command:
+- `node --test __tests__/kai-claim-traceability-validator-contract-repair.spec.js __tests__/kai-board-reporting-current-state-diagnostics.spec.js __tests__/kai-board-reporting-packet-v1-boundary.spec.js`
+  -> 26/26 PASS.
+- `node --test __tests__/kai-grant-response-packet-boundary.spec.js __tests__/kai-sprint2-p3-02-generated-draft-review-packet-boundary.spec.js __tests__/kai-sprint2-p3-04-generated-content-review-completion-boundary.spec.js __tests__/kai-sprint2-p3-05-export-review-request-boundary.spec.js __tests__/kai-sprint2-p3-06-export-review-packet-boundary.spec.js __tests__/kai-sprint2-p3-13-export-review-completion-boundary.spec.js`
+  -> 129/129 PASS.
+- `git diff --check` -> PASS. Full diff inspected.
+
+**Status:** BOARD_REPORTING_TRACEABILITY_DTO_CONTRACT_REPAIR_CLOSED_LOCALLY.
+No production or runtime closure claimed. No push, deployment, production
+mutation, database mutation, migration execution, feature-flag/configuration
+change, real-client-data access, or `00_KAI_CURRENT_STATE.md` update
+performed.

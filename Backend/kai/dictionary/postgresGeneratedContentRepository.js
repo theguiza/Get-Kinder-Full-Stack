@@ -1017,8 +1017,8 @@ function validateTraceabilityData(data, { claimId, requestedAudience }) {
   if (!hasExactKeys(data, rootKeys)) return false;
   if (data.requestedAudience !== requestedAudience || typeof data.eligible !== "boolean") return false;
   if (!Array.isArray(data.blockerCodes) || !Array.isArray(data.affectedDimensionKeys) || !Array.isArray(data.affectedObjectIds)) return false;
-  if (!hasOnlyAllowedKeys(data.claim, new Set(["claim_id", "claim_type", "claim_status", "claim_review_status", "claim_strength", "audience_gates"]))) return false;
-  if (!hasOnlyAllowedKeys(data.evidence, new Set(["evidence_item_id", "evidence_review_status", "support_strength", "review_queue_item_id", "review_queue_status", "review_status", "updated_at", "sensitivity_level"]))) return false;
+  if (!hasOnlyAllowedKeys(data.claim, new Set(["claim_id", "claim_type", "claim_status", "claim_review_status", "claim_strength", "statement", "audience_gates"]))) return false;
+  if (!hasOnlyAllowedKeys(data.evidence, new Set(["evidence_item_id", "evidence_review_status", "support_strength", "review_queue_item_id", "review_queue_status", "review_status", "updated_at", "sensitivity_level", "statement"]))) return false;
   if (!hasOnlyAllowedKeys(data.source, new Set(["source_id", "source_code"]))) return false;
   if (!hasOnlyAllowedKeys(data.source_version, new Set(["source_version_id", "is_current"]))) return false;
   if (!validateNullableReviewDecision(data.evidence_review_decision, TRACEABILITY_EVIDENCE_REVIEW_DECISION_KEYS, { requireApprovedAudiences: false })) return false;
@@ -1030,6 +1030,14 @@ function validateTraceabilityData(data, { claimId, requestedAudience }) {
     && UUID_PATTERN.test(data.source.source_id)
     && UUID_PATTERN.test(data.source_version.source_version_id)
     && data.source_version.is_current === true
+    && (!Object.prototype.hasOwnProperty.call(data.claim, "statement")
+      || (typeof data.claim.statement === "string"
+        && data.claim.statement.length >= 1
+        && data.claim.statement.length <= 500))
+    && (!Object.prototype.hasOwnProperty.call(data.evidence, "statement")
+      || (typeof data.evidence.statement === "string"
+        && data.evidence.statement.length >= 1
+        && data.evidence.statement.length <= 500))
     && typeof data.evidence.support_strength === "string"
     && isCanonicalUtcTimestamp(data.evidence.updated_at)
     && EVIDENCE_SENSITIVITY_LEVELS.has(data.evidence.sensitivity_level)

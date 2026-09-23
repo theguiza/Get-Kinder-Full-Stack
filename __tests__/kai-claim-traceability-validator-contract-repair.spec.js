@@ -40,6 +40,7 @@ function validTraceabilityDto(overrides = {}) {
       claim_status: "active",
       claim_review_status: "resolved",
       claim_strength: "reviewed_supported",
+      statement: "Claim statement accepted by the traceability contract.",
       audience_gates: {
         internal_only: false,
         public_use_allowed: false,
@@ -56,6 +57,7 @@ function validTraceabilityDto(overrides = {}) {
       review_status: "resolved",
       updated_at: "2026-08-06T09:00:00.000Z",
       sensitivity_level: "unknown",
+      statement: "Evidence statement accepted by the traceability contract.",
     },
     locator: { source_locator_id: LOCATOR },
     source: { source_id: SOURCE, source_code: "SRC-1" },
@@ -103,6 +105,32 @@ function validTraceabilityDto(overrides = {}) {
 test("validateTraceabilityData accepts the current authoritative evaluator DTO shape", () => {
   const dto = validTraceabilityDto();
   assert.equal(validateTraceabilityData(dto, { claimId: CLAIM, requestedAudience: "funder" }), true);
+});
+
+test("validateTraceabilityData accepts governed claim/evidence statement fields from the current evaluator", () => {
+  const dto = validTraceabilityDto({
+    claim: {
+      ...validTraceabilityDto().claim,
+      statement: "Board reporting should not reject this claim text.",
+    },
+    evidence: {
+      ...validTraceabilityDto().evidence,
+      statement: "Board reporting should not reject this evidence text.",
+    },
+  });
+  assert.equal(validateTraceabilityData(dto, { claimId: CLAIM, requestedAudience: "funder" }), true);
+});
+
+test("validateTraceabilityData rejects malformed governed statement fields when present", () => {
+  const malformedClaimStatement = validTraceabilityDto({
+    claim: { ...validTraceabilityDto().claim, statement: "" },
+  });
+  assert.equal(validateTraceabilityData(malformedClaimStatement, { claimId: CLAIM, requestedAudience: "funder" }), false);
+
+  const malformedEvidenceStatement = validTraceabilityDto({
+    evidence: { ...validTraceabilityDto().evidence, statement: "x".repeat(501) },
+  });
+  assert.equal(validateTraceabilityData(malformedEvidenceStatement, { claimId: CLAIM, requestedAudience: "funder" }), false);
 });
 
 test("validateTraceabilityData accepts null decision fields and an incomplete graph_trace_completeness", () => {

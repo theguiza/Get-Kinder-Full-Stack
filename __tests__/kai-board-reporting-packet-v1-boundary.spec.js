@@ -197,8 +197,8 @@ const sharedEvaluator = async (tx, args) => {
   return {
     ok: true,
     data: {
-      claim: { claim_id: args.claimId, claim_type: "finding", claim_status: "proposed", claim_review_status: "approved", claim_strength: "strong", audience_gates: {} },
-      evidence: { evidence_item_id: fixture.evidenceId, evidence_review_status: "approved", support_strength: "strong", review_queue_item_id: "00000000-0000-4000-8000-000000000601", review_queue_status: "closed", review_status: "approved", updated_at: "2026-08-06T09:00:00.000Z", sensitivity_level: "unknown" },
+      claim: { claim_id: args.claimId, claim_type: "finding", claim_status: "proposed", claim_review_status: "approved", claim_strength: "strong", statement: "Board packet claim statement.", audience_gates: {} },
+      evidence: { evidence_item_id: fixture.evidenceId, evidence_review_status: "approved", support_strength: "strong", review_queue_item_id: "00000000-0000-4000-8000-000000000601", review_queue_status: "closed", review_status: "approved", updated_at: "2026-08-06T09:00:00.000Z", sensitivity_level: "unknown", statement: "Board packet evidence statement." },
       locator: { source_locator_id: "00000000-0000-4000-8000-000000000602" },
       source: { source_id: fixture.sourceId, source_code: null },
       source_version: { source_version_id: fixture.sourceVersionId, is_current: true },
