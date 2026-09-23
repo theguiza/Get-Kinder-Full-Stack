@@ -4,17 +4,22 @@ import { readFileSync } from "node:fs";
 
 /**
  * Impact Library redesign, Package B1/B2: the approved product shell
- * (design_handoff_impact_library/README.md §1/§3) replaces this one route's
- * chrome only - no Get Kinder branding/site-wide header/footer on
- * /impact-library, every other authenticated view unaffected, and the
- * governed ImpactEvidenceLibrary component keeps rendering (composed inside
- * the new shell) rather than being replaced.
+ * (design_handoff_impact_library/README.md §1/§3) renders inside the
+ * standard site-header/site-footer partials, like every other authenticated
+ * view, and the governed ImpactEvidenceLibrary component keeps rendering
+ * (composed inside the new shell) rather than being replaced.
  */
 
-test("views/impact-library.ejs no longer includes the global site-header/site-footer partials", () => {
+test("views/impact-library.ejs includes the shared site-header/site-footer partials around the mount point", () => {
   const view = readFileSync("views/impact-library.ejs", "utf8");
-  assert.doesNotMatch(view, /include\("partials\/site-header"/);
-  assert.doesNotMatch(view, /include\("partials\/site-footer"\)/);
+  const headerIndex = view.indexOf('include("partials/site-header", { currentPage: "impact-library" })');
+  const rootIndex = view.indexOf('id="impact-evidence-library-root"');
+  const footerIndex = view.indexOf('include("partials/site-footer")');
+  assert.ok(headerIndex > -1, "site header partial must be included");
+  assert.ok(footerIndex > -1, "site footer partial must be included");
+  assert.ok(headerIndex < rootIndex && rootIndex < footerIndex, "header, then app root, then footer");
+  assert.equal(view.match(/include\("partials\/site-header"/g).length, 1);
+  assert.equal(view.match(/include\("partials\/site-footer"/g).length, 1);
 });
 
 test("views/impact-library.ejs still contains the required mount point and loads entry.js (locked contract)", () => {

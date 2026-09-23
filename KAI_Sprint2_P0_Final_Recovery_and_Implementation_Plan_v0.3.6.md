@@ -32560,3 +32560,49 @@ No production or runtime closure claimed. No push, deployment, production
 mutation, database mutation, migration execution, feature-flag/configuration
 change, real-client-data access, or `00_KAI_CURRENT_STATE.md` update
 performed.
+
+### Impact Library standard site header/footer restoration (CLOSED LOCALLY)
+
+**Date:** 2026-09-23
+
+**Trigger:** Owner instruction: `/impact-library` rendered without the
+standard site header and footer. Repository inspection showed this was
+deliberate in Impact Library redesign Package B1/B2 (`ce0309a`), which
+removed `partials/site-header` / `partials/site-footer` from
+`views/impact-library.ejs` and locked their absence in
+`__tests__/kai-impact-library-shell.spec.js`. The owner instruction
+supersedes that B1/B2 "no site-wide header/footer" shell decision for this
+route only.
+
+**Repair:** `views/impact-library.ejs` again includes the existing shared
+`partials/site-header` (`currentPage: "impact-library"`) and
+`partials/site-footer` around the unchanged `#impact-evidence-library-root`
+mount point, following the include order and fixed-top
+`padding-top: clamp(88px, 14vw, 112px)` body offset used by
+`views/kai-review-cockpit.ejs`. Integration-only layout fixes in the view:
+`.gk-shell-root` height fitted below the fixed site header instead of
+`100vh`, and mobile body bottom padding so the shell's fixed bottom tab bar
+does not cover the site footer. The shell test's first assertion now
+requires exactly one header include, then the root, then exactly one footer
+include. No partial, frontend component, route, API, backend service,
+schema, migration, feature flag, or configuration was changed.
+
+**Tests:** With a loopback `DATABASE_URL` sentinel set for every Node/npm
+command:
+- `node --test __tests__/kai-impact-library-shell.spec.js __tests__/impact-library-view.spec.js __tests__/kai-impact-library-home.spec.js`
+  -> 22/22 PASS.
+- EJS render of `views/impact-library.ejs` with stub locals -> header, app
+  root, footer, then scripts in order; one header, one footer, one
+  `entry.js`, one Bootstrap bundle.
+- `npm run build` -> PASS; tracked `public/js/bundles/entry.js` unchanged.
+- `npm test` -> 4995 pass / 12 fail / 82 skipped; the identical 12 failures
+  (backend route/SQL-boundary tests) reproduce at clean `040963f`, so none
+  come from this change.
+- `git diff --check` -> PASS. Full diff inspected.
+
+**Status:** IMPACT_LIBRARY_SITE_SHELL_RESTORATION_CLOSED_LOCALLY. No visual
+browser verification (no existing repository browser tooling; running the
+app requires unauthorized database/session access). No production or
+runtime closure claimed. No push, deployment, production mutation, database
+mutation, migration execution, feature-flag/configuration change,
+real-client-data access, or `00_KAI_CURRENT_STATE.md` update performed.

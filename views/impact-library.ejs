@@ -13,15 +13,20 @@
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-SgOJa3DmI69IUzQ2PVdRZhwQ+dy64/BUtbMJw1MZ8t5HZApcHrRKUc4W0kG879m7" crossorigin="anonymous"/>
   <style>
     /*
-      Approved design (design_handoff_impact_library/README.md §3): the
-      /impact-library product shell is self-contained - no Get Kinder
-      branding, no site-wide header/footer. This page intentionally does
-      not include partials/site-header or partials/site-footer, unlike
-      every other authenticated view. Bootstrap is kept only because the
-      existing ImpactEvidenceLibrary component (composed inside the new
-      shell's Knowledge Studio section) still relies on it throughout.
+      /impact-library renders inside the standard site shell
+      (partials/site-header + partials/site-footer), following the same
+      include order and fixed-top body offset as kai-review-cockpit.ejs.
+      Bootstrap is kept because the site header and the existing
+      ImpactEvidenceLibrary component both rely on it.
+
+      The product shell (.gk-shell-root, gk-design-tokens.css) was sized for
+      a full-viewport page; fit it below the fixed site header instead, and
+      on mobile keep its fixed bottom tab bar from covering the site footer.
     */
-    html, body { height: 100%; margin: 0; }
+    .gk-shell-root { height: calc(100vh - clamp(88px, 14vw, 112px)); }
+    @media (max-width: 767.98px) {
+      body { padding-bottom: 64px; }
+    }
     /* Preserved from this view's previous markup: ImpactEvidenceLibrary.jsx
        still uses these classNames throughout. */
     .admin-title {
@@ -38,8 +43,12 @@
     }
   </style>
 </head>
-<body>
+<body style="padding-top: clamp(88px, 14vw, 112px);">
+  <%- include("partials/site-header", { currentPage: "impact-library" }) %>
+
   <div id="impact-evidence-library-root"></div>
+
+  <%- include("partials/site-footer") %>
 
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.5/dist/js/bootstrap.bundle.min.js" integrity="sha384-k6d4wzSIapyDyv1kpU366/PK5hCdSbCRGRCMv+eplOQJWyd1fbcAu9OCUj5zNLiq" crossorigin="anonymous"></script>
   <script src="/js/bundles/entry.js?<%= assetTag %>"></script>
