@@ -126,6 +126,18 @@ test("updateEngagementProjectDetails rejects a useCaseType that does not match t
   assert.equal(harness.calls.transactions, 0);
 });
 
+test("updateEngagementProjectDetails rejects a projectStatus value outside kai.engagement_status_enum's real production vocabulary with a structured validation_blocker, before any repository call", async () => {
+  const harness = createHarness();
+  const result = await updateEngagementProjectDetails(
+    { organizationId: ORG_A, engagementId: ENGAGEMENT_A, projectStatus: "not_a_real_status", actorContext: clientAdminActor },
+    harness.dependencies,
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "validation_blocker");
+  assert.equal(result.error.status, 422);
+  assert.equal(harness.calls.transactions, 0);
+});
+
 test("updateEngagementProjectDetails denies an actor authorized only for a different organization, before any repository call", async () => {
   const harness = createHarness();
   const result = await updateEngagementProjectDetails(

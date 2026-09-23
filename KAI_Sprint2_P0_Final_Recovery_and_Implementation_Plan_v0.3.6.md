@@ -32454,3 +32454,72 @@ Impact Library redesign repository work is COMPLETE_LOCAL. No production
 or runtime closure claimed. No push, deployment, production mutation,
 database mutation, migration execution, feature-flag/configuration change,
 real-client-data access, or `00_KAI_CURRENT_STATE.md` update performed.
+
+### Release preflight bounded safety repair - project_status fail-closed validation (CLOSED LOCALLY)
+
+Read-only preflight session start verified: HEAD `bd35b8a`, branch `main`,
+working tree clean, local branch 19 commits ahead of `origin/main` (no push
+performed). Repository re-inspection re-confirmed no reopening of closed
+redesign packages was required or attempted.
+
+**Bounded safety check performed** (per release-preflight instruction, not
+a new package): traced what happens when an invalid `project_status`
+reaches `createEngagement` and `updateEngagementProjectDetails`
+(`Backend/kai/services/kaiEngagementContextService.js`). Prior to this
+repair, neither the route schema
+(`Backend/kai/validators/kaiSprint2RequestSchemas.js`) nor the service
+input guards (`isCreateEngagementInput`/`isUpdateEngagementProjectDetailsInput`)
+constrained `engagementStatus`/`projectStatus` to any allow-list - the
+documented design ("the real DB enum backstops validity - no app-level
+enum list invented") relied entirely on Postgres rejecting an invalid
+`kai.engagement_status_enum` value at write time. Both write paths
+(`kaiOrganizationEnablementQueries.js#insertInitialEngagement`,
+`kaiQueries.js#updateEngagementProjectFields`) only special-case Postgres
+error `23505` (unique violation); any other Postgres error - including the
+enum's own `22P02` rejection - was rethrown unmodified, reached the route's
+generic `invokeService` handler, and surfaced as an unstructured
+`system_error` (HTTP 500), not a structured `validation_blocker`.
+Transaction/audit/tenant-boundary behavior was already correct on this
+path (single-statement writes inside `withTransaction`, which rolls back
+before the audit insert can run on any thrown error; tenant checks run
+before the write in both paths) - **verdict: FAIL only on error
+classification, no partial-write or tenant-bypass risk**.
+
+**Smallest repair applied:** added `ENGAGEMENT_STATUS_ALLOWED_VALUES`
+(`draft`, `active`, `paused`, `completed`, `archived`, `deleted` - the
+exact, evidence-based vocabulary of the real production
+`kai.engagement_status_enum`, confirmed directly against
+`artifacts/kai-db-reconciliation-2026-09-16/PRODUCTION_KAI_SCHEMA.json`'s
+`types` capture, `enum_sort_order` 1-6; no vocabulary invented) to
+`kaiEngagementContextService.js`, and checked both
+`isCreateEngagementInput`'s `engagementStatus` guard and
+`isUpdateEngagementProjectDetailsInput`'s `projectStatus` guard against it.
+An invalid value now fails the existing `isCreateEngagementInput`/
+`isUpdateEngagementProjectDetailsInput` guard and returns the existing
+`validation_blocker` (422) structured error before the transaction/DB write
+is ever attempted - same mechanism already used for every other invalid
+field on these two operations (`useCaseType`, `engagementType`,
+`engagementCode`). Updated the two now-stale "no app-level enum list
+invented" doc comments in `kaiOrganizationEnablementQueries.js` and
+`kaiQueries.js` to reflect the new upstream guard. Did not touch
+`use_case_type`, `engagement_type`, routing, UI, or any other Package F
+surface.
+
+**Test evidence** (`DATABASE_URL` set to a non-listening loopback sentinel
+for every Node/npm command; no database/cloud/production access):
+- New: one rejection case added to each of
+  `__tests__/kai-impact-library-create-engagement.spec.js` and
+  `__tests__/kai-package-f-project-metadata-completeness.spec.js`, proving
+  an out-of-vocabulary status returns `validation_blocker`/422 with zero
+  transactions/DB calls attempted. Both focused files: 29/29 PASS (up from
+  27/27).
+- Full suite (`npm test`, 5071 cases): 12 failures, confirmed
+  byte-identical (by name, via a stashed pre-change baseline run at the
+  same HEAD) to the pre-existing baseline - 0 regressions. `npm run build`
+  (vite) -> succeeded. `git diff --check` -> PASS. Full diff inspected.
+
+**Status:** RELEASE_PREFLIGHT_PROJECT_STATUS_SAFETY_REPAIR_CLOSED_LOCALLY.
+No production or runtime closure claimed. No push, deployment, production
+mutation, database mutation, migration execution, feature-flag/
+configuration change, real-client-data access, or
+`00_KAI_CURRENT_STATE.md` update performed.

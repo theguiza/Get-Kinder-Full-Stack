@@ -215,10 +215,11 @@ export async function updateEngagementProjectMetadata(
  * (project_status/use_case_type): updates project_metadata (the jsonb home
  * for `use_case_type`, alongside the already-existing
  * `engagement_requirement_target` key) and, only when supplied, the
- * already-existing `engagement_status` column (the real DB enum backstops
- * validity - no app-level enum list invented, same convention as
- * `engagement_type`). engagement_status is NOT NULL, so it is only ever set,
- * never cleared, by this query.
+ * already-existing `engagement_status` column. The caller
+ * (kaiEngagementContextService's isUpdateEngagementProjectDetailsInput)
+ * validates `projectStatus` against the real kai.engagement_status_enum's
+ * production vocabulary before this function is ever called. engagement_status
+ * is NOT NULL, so it is only ever set, never cleared, by this query.
  */
 export async function updateEngagementProjectFields(
   { organizationId, engagementId, projectMetadata, engagementStatus },

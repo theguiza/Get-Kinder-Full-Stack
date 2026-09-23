@@ -58,6 +58,22 @@ const ENGAGEMENT_REQUIREMENT_TARGET_METADATA_KEY = "engagement_requirement_targe
 // (SAFE_TARGET_IDENTIFIER_PATTERN, defined below) rather than inventing a new
 // taxonomy.
 const PROJECT_USE_CASE_TYPE_METADATA_KEY = "use_case_type";
+// project_status/engagementStatus writes straight to the real
+// kai.engagement_status_enum-typed engagement_status column (see
+// serializeEngagementTarget above). Validating against this enum's actual
+// production vocabulary (artifacts/kai-db-reconciliation-2026-09-16/
+// PRODUCTION_KAI_SCHEMA.json, type kai.engagement_status_enum,
+// enum_sort_order 1-6) before the DB write turns an invalid value into a
+// structured validation_blocker instead of letting Postgres's own enum
+// rejection surface as an unstructured system_error.
+const ENGAGEMENT_STATUS_ALLOWED_VALUES = new Set([
+  "draft",
+  "active",
+  "paused",
+  "completed",
+  "archived",
+  "deleted",
+]);
 const SAFE_TARGET_IDENTIFIER_PATTERN = /^[a-z][a-z0-9_]{0,95}$/;
 const SAFE_TARGET_LABEL_PATTERN = /^[A-Za-z0-9][A-Za-z0-9 ._:/#()-]{0,199}$/;
 const ISO_DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
@@ -597,7 +613,11 @@ function isCreateEngagementInput(value) {
   if (
     value.engagementStatus !== undefined
     && value.engagementStatus !== null
-    && (!isNonEmptyString(value.engagementStatus) || value.engagementStatus.length > ENGAGEMENT_CODE_MAX_LENGTH)
+    && (
+      !isNonEmptyString(value.engagementStatus)
+      || value.engagementStatus.length > ENGAGEMENT_CODE_MAX_LENGTH
+      || !ENGAGEMENT_STATUS_ALLOWED_VALUES.has(value.engagementStatus)
+    )
   ) {
     return false;
   }
@@ -621,7 +641,11 @@ function isUpdateEngagementProjectDetailsInput(value) {
   if (hasUseCaseType && value.useCaseType !== null && !isValidUseCaseType(value.useCaseType)) return false;
   if (
     hasProjectStatus
-    && (!isNonEmptyString(value.projectStatus) || value.projectStatus.length > ENGAGEMENT_CODE_MAX_LENGTH)
+    && (
+      !isNonEmptyString(value.projectStatus)
+      || value.projectStatus.length > ENGAGEMENT_CODE_MAX_LENGTH
+      || !ENGAGEMENT_STATUS_ALLOWED_VALUES.has(value.projectStatus)
+    )
   ) {
     return false;
   }

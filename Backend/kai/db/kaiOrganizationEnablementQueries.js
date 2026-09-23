@@ -183,10 +183,13 @@ export async function selectInitialEngagementForOrganization(
  *
  * KAI Impact Library redesign, Package F completeness repair (project_status/
  * use_case_type): `engagementStatus` reuses the same already-existing
- * `engagement_status` column (its real DB enum backstops validity, exactly
- * like `engagementType` above - no app-level enum list invented) and
- * `projectMetadata` lets a caller seed `project_metadata` (e.g. the
- * `use_case_type` jsonb key) at creation instead of a separate write.
+ * `engagement_status` column, exactly like `engagementType` above. The
+ * caller (kaiEngagementContextService's isCreateEngagementInput) validates
+ * `engagementStatus` against the real kai.engagement_status_enum's
+ * production vocabulary before this function is ever called, so this write
+ * should never itself trigger the DB enum's own rejection. `projectMetadata`
+ * lets a caller seed `project_metadata` (e.g. the `use_case_type` jsonb key)
+ * at creation instead of a separate write.
  */
 export async function insertInitialEngagement(
   {

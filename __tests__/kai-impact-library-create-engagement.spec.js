@@ -197,6 +197,25 @@ test("createEngagement passes an explicit engagementStatus through to the DB wri
   assert.equal(harness.calls.insert[0].input.engagementStatus, "active");
 });
 
+test("createEngagement rejects an engagementStatus value outside kai.engagement_status_enum's real production vocabulary with a structured validation_blocker, before any DB write", async () => {
+  const harness = createHarness();
+  const result = await createEngagement(
+    {
+      organizationId: ORG_A,
+      engagementCode: "2026 Annual Report",
+      engagementStatus: "not_a_real_status",
+      actorContext: clientAdminActor,
+    },
+    harness.dependencies,
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "validation_blocker");
+  assert.equal(result.error.status, 422);
+  assert.equal(harness.calls.transactions, 0);
+  assert.equal(harness.calls.insert.length, 0);
+  assert.equal(harness.calls.audit.length, 0);
+});
+
 test("createEngagement passes an explicit useCaseType through project_metadata (no schema change - the same jsonb bucket engagement_requirement_target already uses) and returns it", async () => {
   const harness = createHarness({
     insertResult: {
