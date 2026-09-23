@@ -172,7 +172,13 @@ export async function getBoardReportingPacket(input, dependencies = {}) {
     organizationId: input.organizationId,
     engagementId: input.engagementId,
   });
-  if (!result.ok) return buildKaiError(result.error.code, { status: result.error.status, data: null });
+  if (!result.ok) {
+    return buildKaiError(result.error.code, {
+      status: result.error.status,
+      blockers: result.blockers,
+      data: null,
+    });
+  }
 
   if (result.data.packetAudience !== BOARD_REPORTING_PACKET_AUDIENCE) {
     return buildKaiError("system_error", { data: null });

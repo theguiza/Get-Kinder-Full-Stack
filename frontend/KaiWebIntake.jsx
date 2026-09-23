@@ -420,7 +420,17 @@ export default function KaiWebIntake({
                   type="button"
                   className="btn btn-sm btn-outline-primary"
                   onClick={() => {
-                    updateEngagementId(item.engagement_id || "");
+                    // Package C0 repair: resuming an existing batch is an
+                    // internal intake action, never an explicit Project
+                    // selection - when a parent owns the shared Project/
+                    // Engagement context, that context stays authoritative
+                    // even if this org-wide batch list happens to include a
+                    // batch from a different engagement. Only in standalone
+                    // (no parent) mode does this remain how the component's
+                    // own local engagement id gets set, exactly as before.
+                    if (!parentEngagementId) {
+                      updateEngagementId(item.engagement_id || "");
+                    }
                     setIntakeBatchId(item.intake_batch_id);
                     setBatchFiles([]);
                     setIntakeFileId("");
