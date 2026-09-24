@@ -33698,3 +33698,155 @@ intake write authority is unchanged.
 **Status:** CLIENT_AUTHORIZATION_PACKAGE_1_COMMON_SHELL_RECONCILED_LOCALLY.
 No push, deployment, production or database access, schema, flag, binding,
 or membership change, and no `00_KAI_CURRENT_STATE.md` update.
+
+### Horizontal client authorization closure - Package 2: client-safe Funder Requirements (applicability / readiness) (2026-09-24)
+
+**Starting state (TOOL_VERIFIED):** `main`, HEAD `c9a7fbc`, clean. Package 1
+results are USER_CONFIRMED and were not reopened.
+
+**Current pipeline (TOOL_VERIFIED from code):**
+1. Engagement: `kai.engagements.project_metadata.engagement_requirement_target`
+   (`serializeEngagementTarget`). The target is client-visible since
+   Package 1. The PUT is {gk_admin, gk_operator, client_admin}; no
+   frontend offers it.
+2. Authoritative sets: `listExternalRequirementSetsForTarget` (external,
+   active, non-`kai_standard`, exact source/framework match).
+3. Applicability: `kai.engagement_requirement_sets` rows classified by
+   `isCurrentReviewedApplicability`. CURRENT requires `confirmed`,
+   reviewer and timestamp, an applicable/not_applicable effective state, no
+   successor, and a matching target snapshot. Everything else (proposed,
+   superseded, retargeted) is NOT_CONFIRMED.
+4. Classifier (`classifyEngagementFunderRequirementsState`, {gk_admin,
+   gk_operator, client_admin}) states: `no_target_selected`,
+   `target_selected_no_authoritative_requirement_set`,
+   `authoritative_requirement_set_not_applicable` (covers both current
+   not-applicable and not-confirmed), and
+   `applicable_requirement_set_assessment_not_available`. The DTO carries
+   `applicability_rows` with `reviewed_by`, `reviewed_by_role`,
+   `reviewed_at`, supersession ids, `created_by`, and target snapshots.
+5. Assessment (`getEngagementRequirementAssessment`, GK read roles only):
+   the live Package 2B gate, then repository recompute-and-compare. A
+   persisted row counts only if its fingerprint equals live governed state,
+   so a stale row reads `not_found`. States (every rule):
+   satisfied / partially_satisfied / not_satisfied / needs_review. The DTO
+   carries assessment ids, GK explanation text (governed-item counts and
+   review-decision semantics), fingerprint, and evidence/claim/decision/gap/
+   context provenance ids.
+6. Composition (`getEngagementFunderRequirementsForImpactLibrary`):
+   classifier plus a per-requirement assessment. Its absent codes
+   {`not_found`, `engagement_requirement_applicability_not_confirmed`} become
+   `current_assessment: null`; everything else fails closed. For
+   client_admin it failed at the GK-only assessment read once a set was
+   applicable; R/C failed at the classifier.
+7. Follow-ups: no persisted link exists between requirement assessments and
+   P2-11 client follow-ups.
+8. Frontend: only the GK cockpit card renders it.
+
+**Client contract (TOOL_VERIFIED):** GET
+`/api/kai/sprint2/intake/admin/organizations/:organizationId/engagements/:engagementId/client-funder-requirements`,
+served by `kaiClientFunderRequirementsService.js#getClientFunderRequirements`.
+- Admission: mapped human, the read_intake set with an active same-org
+  membership (A/R/C and GK), tenant validation, then the engagement tenant
+  check against its record. Cross-org is `VAL-AUT-003` before any read; a
+  foreign engagement is `not_found`.
+- DTO `{engagementId, status, target, requirementSets}`:
+  - `status`: `no_target` | `no_requirement_set` | `not_applicable` (only
+    when every authoritative set has a CURRENT reviewed not-applicable
+    decision) | `applicability_pending` (proposed, superseded, retargeted,
+    or no decision) | `applicable`.
+  - `target`: `{funderId, framework, grantProgram, report,
+    reportingTemplate, reportingPeriodStart, reportingPeriodEnd}`.
+  - `requirementSets` (only when `applicable`, only CURRENT_APPLICABLE
+    sets): `{requirementSetId, name, funderName, frameworkName,
+    versionLabel, requirements: [{requirementId, label, description,
+    readiness}]}`.
+  - `readiness`: met / partially_met / not_met / in_review, one-to-one with
+    the four assessment states, plus `not_yet_assessed` for the
+    composition's absent codes. An unknown state or any other failure fails
+    closed.
+- Source of truth: the same classifier core and the same live-gate
+  assessment core, extracted without behavior change as
+  `readEngagementFunderRequirementsStateForAuthorizedCaller` and
+  `readCurrentEngagementRequirementAssessmentForAuthorizedCaller` (the GK
+  wrappers call them after their own unchanged gates), plus a new
+  catalogue-only `listRequirementCatalogueLabels` (no tenant columns).
+- Explicitly excluded: applicability rows, reviewer identity, role and
+  timestamps, supersession and target-snapshot fields, `created_by*`,
+  assessment ids, explanation text, fingerprints, `created_at`, all
+  provenance ids, requirement keys, `missing_persistence`, and
+  `not_confirmed_*`.
+
+**Follow-ups:** no requirement-to-follow-up link exists, so no per-requirement
+follow-up flag was invented. The tab shows the existing follow-up link only
+with `clientFollowupReview`. Completion authority is unchanged (P2-11,
+client_reviewer).
+
+**Frontend:** a new Knowledge Studio tab, "Funder Requirements"
+(`ClientFunderRequirements.jsx`). It uses the selected project, makes
+exactly one request (the client read), and is honest about no-project,
+no-target, pending, and not-yet-assessed states. It has no assessment or
+target controls and no GK route. `projectClientFunderRequirements`
+rejects unknown statuses and readiness values. No access-capability was
+added; the read is available to every client role. No new top-level page
+was added.
+
+**Tests (TOOL_VERIFIED):**
+- `__tests__/kai-client-funder-requirements.spec.js` 15/15. It runs the
+  real service, real classifier core, real live gate, and real projection,
+  injecting only low-level reads. It covers:
+  - the contract;
+  - applicable with exact keys;
+  - one-to-one mapping and fail-closed behavior;
+  - no-target, no-set, not-applicable, pending, and retargeted states;
+  - superseded and stale handling;
+  - GK-only artifacts leaving the payload unchanged;
+  - role parity: binding-derived A, R, C, and GK;
+  - no assess/read/classifier/composition escalation;
+  - cross-org with zero reads, and a foreign engagement;
+  - validation;
+  - GK DTOs unchanged;
+  - the mounted route;
+  - frontend contracts.
+- Package 4 PostgreSQL runner
+  (`scripts/kai-sprint2-package-4-impact-library-engagement-funder-requirements-local-postgres.js`):
+  21/21. The original 9 cases are unchanged. The seed pool now ends after
+  both proofs (a root `after()` ended it early). The new proof uses the
+  real route, middleware, `resolveKaiActorContext`, classifier, Package 2B
+  applicability, Package 3B gate, recompute-and-compare, and catalogue
+  labels, with client_admin, client_reviewer, and client_contributor
+  members. It proves:
+  - both requirements start not_yet_assessed;
+  - `ir_pur_001` and `ir_contrib_002` read not_satisfied → not_met;
+  - adding an outcome context makes the persisted `ir_pur_001` row stale →
+    not_yet_assessed, while the row persists;
+  - reassessing gives satisfied → met while the real gap stays not_met;
+  - each step equals the GK composition mapped one-to-one;
+  - not_applicable, applicability_pending (proposed only), and no_target;
+  - reads leave the assessment, applicability, audit, user, and context
+    row counts unchanged;
+  - an org-B client_admin gets 403 `VAL-AUT-003`, an org-B engagement is
+    `not_found` for org A, and org B never sees org A's assessments;
+  - client members still cannot read the GK composition;
+  - a superseding not-applicable review hides the persisted met assessment;
+  - no reviewer, assessment, or provenance token appears in any response.
+- Package 2B runner: 8/8.
+- `npm test`: 5181 pass, 12 fail, 87 skipped. `c9a7fbc` was 5166/12/87.
+  The failing names are identical, and the route-inventory missing-entry
+  detail is identical (the new route is registered in the inventory).
+- `npm run build` PASS. `git diff --check` PASS.
+
+**Open (NOT_CONFIRMED / carried):**
+- Not verified in a browser or in production.
+- A requirement key with no assessment rule makes the repository return
+  `unsupported_requirement`, which fails the client read closed, exactly
+  as it fails the GK composition.
+- The organization-scope KAI baseline readiness rollup stays GK-only and is
+  not part of Funder Requirements.
+- No per-requirement client follow-up link exists in the model.
+- No funder-audience readiness is computed per requirement, so none is
+  shown.
+
+**Status:** CLIENT_SAFE_FUNDER_REQUIREMENTS_IMPLEMENTED_LOCALLY. No push,
+deployment, production or shared database access, schema, flag, binding,
+or membership change, and no `00_KAI_CURRENT_STATE.md` update. The only
+database used was the runner-owned ephemeral loopback cluster.

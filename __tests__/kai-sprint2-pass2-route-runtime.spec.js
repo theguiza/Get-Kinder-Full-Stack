@@ -224,6 +224,10 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // Performs no mutation and reimplements no governance semantics
     // (additive; every prior entry preserved verbatim).
     "/admin/organizations/:organizationId/engagements/:engagementId/board-reporting/candidates/:boardReportingCandidateId/workflow-state",
+    // Client-safe Funder Requirements: governed applicability status and
+    // current-assessment readiness projected to client-safe fields
+    // (additive; every prior entry preserved verbatim).
+    "/admin/organizations/:organizationId/engagements/:engagementId/client-funder-requirements",
     // KAI Package 4: read-only /impact-library Funder Requirements
     // composition (classifier + Package 3A/3B current engagement assessment
     // per applicable requirement), no applicability or assessment write.

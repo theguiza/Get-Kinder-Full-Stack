@@ -917,6 +917,21 @@ export async function classifyEngagementFunderRequirementsState(input, dependenc
   );
   if (!actor.ok) return actor;
 
+  return readEngagementFunderRequirementsStateForAuthorizedCaller(
+    { organizationId: input.organizationId, engagementId: input.engagementId },
+    dependencies,
+  );
+}
+
+/**
+ * The governed funder-requirements classification for one engagement, with
+ * no actor authorization of its own: the caller must already have
+ * authorized the actor for this organization. classifyEngagementFunderRequirementsState
+ * (above) calls it after its own gate; the client-safe Funder Requirements
+ * read calls it after its own gate and projects the result. Same reads, same
+ * tenant check against the engagement record, same predicates, same states.
+ */
+export async function readEngagementFunderRequirementsStateForAuthorizedCaller(input, dependencies = {}) {
   const readEngagement = dependencies.getEngagementForOrganization || getEngagementForOrganization;
   const listAuthority = dependencies.listExternalRequirementSetsForTarget || listExternalRequirementSetsForTarget;
   const listApplicability = dependencies.listEngagementRequirementSetsForOrganization || listEngagementRequirementSetsForOrganization;

@@ -2,12 +2,14 @@ import React, { useState } from "react";
 
 import KaiWebIntake from "../KaiWebIntake.jsx";
 import ImpactLibraryKai from "../ImpactLibraryKai.jsx";
+import ClientFunderRequirements from "./ClientFunderRequirements.jsx";
 import { CLIENT_FOLLOWUP_REVIEW_HREF } from "../impactEvidenceLibraryLogic.js";
 
 const CLIENT_KNOWLEDGE_STUDIO_TABS = Object.freeze([
   ["files", "Files"],
   ["evidence", "Evidence"],
   ["gaps", "Gaps"],
+  ["funderRequirements", "Funder Requirements"],
   ["reviews", "Reviews"],
 ]);
 
@@ -28,6 +30,8 @@ function dimensionLabel(dimensionKey) {
  *   role) and, only when intakeContribution is true, its batch/upload
  *   writes;
  * - ImpactLibraryKai's message POST (engagement context policy);
+ * - ClientFunderRequirements' client-safe funder-requirements read for the
+ *   selected project (Funder Requirements tab only);
  * - nothing else: reviewed Impact Facts arrive as the `facts` prop, fetched
  *   once per organization by ImpactLibraryApp from the client-safe
  *   impact-facts read.
@@ -132,6 +136,14 @@ export default function ClientKnowledgeStudio({
             </a>
           ) : null}
         </div>
+      ) : null}
+
+      {tab === "funderRequirements" ? (
+        <ClientFunderRequirements
+          organizationId={organizationId}
+          engagementId={engagementId}
+          canReviewFollowups={canReviewFollowups}
+        />
       ) : null}
 
       {tab === "reviews" ? (

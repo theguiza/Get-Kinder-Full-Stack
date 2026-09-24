@@ -385,6 +385,41 @@ export async function getRequirementSetIdForRequirement({ requirementId }, db = 
 }
 
 /**
+ * Client-safe Funder Requirements display read: the shared catalogue labels
+ * (requirement label/description/order plus its set, framework, and source
+ * names) for requirement ids the caller has already resolved as currently
+ * applicable. kai.requirements and its parents are shared catalogue data
+ * with no organization or engagement columns, so this read carries no tenant
+ * data and decides no applicability.
+ */
+export async function listRequirementCatalogueLabels({ requirementIds }, db = pool) {
+  if (!Array.isArray(requirementIds) || requirementIds.length === 0) return [];
+  const { rows } = await db.query(
+    `SELECT r.requirement_id::text AS requirement_id,
+            r.requirement_label,
+            r.requirement_description,
+            r.display_order,
+            rs.requirement_set_id::text AS requirement_set_id,
+            rs.set_name,
+            rfv.framework_name,
+            rfv.version_label,
+            src.source_name
+       FROM kai.requirements r
+       JOIN kai.requirement_sets rs
+         ON rs.requirement_set_id = r.requirement_set_id
+       JOIN kai.requirement_framework_versions rfv
+         ON rfv.requirement_framework_version_id = rs.requirement_framework_version_id
+       JOIN kai.requirement_sources src
+         ON src.requirement_source_id = rfv.requirement_source_id
+      WHERE r.requirement_id = ANY($1::uuid[])
+      ORDER BY r.display_order ASC, r.requirement_key ASC
+      LIMIT 500`,
+    [requirementIds],
+  );
+  return rows;
+}
+
+/**
  * Package 2B-A governed-authority read: the exact source/framework/status
  * identity of one requirement set, keyed by requirement_set_id. Used only to
  * validate a proposed or reviewed engagement_requirement_sets row against its

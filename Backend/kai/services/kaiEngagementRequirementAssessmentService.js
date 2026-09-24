@@ -346,6 +346,22 @@ export async function getEngagementRequirementAssessment(input, dependencies = {
     return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers });
   }
 
+  return readCurrentEngagementRequirementAssessmentForAuthorizedCaller(
+    { organizationId: input.organizationId, engagementId: input.engagementId, requirementId: input.requirementId },
+    dependencies,
+  );
+}
+
+/**
+ * The CURRENT engagement-scope assessment for one requirement, with no actor
+ * authorization of its own: the caller must already have authorized the
+ * actor for this organization. getEngagementRequirementAssessment (above)
+ * calls it after its own gate; the client-safe Funder Requirements read calls
+ * it after its own gate and projects only the assessment state. Same
+ * engagement/tenant check, same live Package 2B gate, same
+ * recompute-and-compare repository read, same failure codes.
+ */
+export async function readCurrentEngagementRequirementAssessmentForAuthorizedCaller(input, dependencies = {}) {
   const getEngagement = dependencies.getEngagementForOrganization || getEngagementForOrganization;
   const engagement = await getEngagement({ organizationId: input.organizationId, engagementId: input.engagementId });
   if (!engagement) return buildKaiError("not_found");

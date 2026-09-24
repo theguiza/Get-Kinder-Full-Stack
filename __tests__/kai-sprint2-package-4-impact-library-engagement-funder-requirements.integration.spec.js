@@ -1,4 +1,4 @@
-import test, { after } from "node:test";
+import test from "node:test";
 import assert from "node:assert/strict";
 
 const RUNNER_OWNED_DATABASE_URL = process.env.KAI_PACKAGE_4_FUNDER_REQUIREMENTS_DATABASE_URL;
@@ -47,10 +47,17 @@ if (!RUNNER_OWNED_DATABASE_URL) {
 async function runAssembledProof() {
   const { Pool } = await import("pg");
   const seedPool = new Pool({ connectionString: RUNNER_OWNED_DATABASE_URL, ssl: false });
-  after(async () => {
+  try {
+    await runProofCases(seedPool);
+  } finally {
     await seedPool.end();
-  });
+  }
+}
 
+// Both top-level proofs run inside runAssembledProof's try, so the seed pool
+// is ended only after the last one (a root after() hook would end it as soon
+// as the first proof finished).
+async function runProofCases(seedPool) {
   const router = (await import("../Backend/kai/routes/sprint2IntakeApi.js")).default;
   const { findOrCreateKaiUserByLegacyPublicUserdataId } = await import("../Backend/kai/db/kaiQueries.js");
   const {
@@ -437,6 +444,288 @@ async function runAssembledProof() {
       assert.equal(res.body.ok, false);
       assert.ok(["not_found", "tenant_boundary_violation"].includes(res.body.error.code), `unexpected error code: ${res.body.error.code}`);
       assert.equal(res.body.data, null, "no requirement/assessment data may leak on a cross-tenant failure");
+    });
+  });
+
+  // ===================================================================
+  // Client-safe Funder Requirements over the same real state. Real route
+  // (actor middleware + handler), real resolveKaiActorContext, real
+  // classifier core, real Package 2B rows, real Package 3B live gate and
+  // recompute-and-compare assessment read, real catalogue labels - with
+  // client_admin / client_reviewer / client_contributor members.
+  // ===================================================================
+  const CLIENT_ROUTE = "/admin/organizations/:organizationId/engagements/:engagementId/client-funder-requirements";
+  const clientRouteLayer = router.stack.find(
+    (candidate) => candidate.route?.path === CLIENT_ROUTE && candidate.route?.methods?.get,
+  );
+  assert.ok(clientRouteLayer, "GET client-funder-requirements exists on the real production router");
+
+  async function callClientRoute(organizationId, engagementId, legacyUserId) {
+    const res = createResponse();
+    const req = { params: { organizationId, engagementId }, query: {}, user: { id: legacyUserId } };
+    for (const layer of clientRouteLayer.route.stack) {
+      let advanced = false;
+      await layer.handle(req, res, (error) => {
+        if (error) throw error;
+        advanced = true;
+      });
+      if (!advanced) break;
+    }
+    return res;
+  }
+
+  async function seedTwoRequirementCatalogue() {
+    const source = (
+      await seedPool.query(
+        "INSERT INTO kai.requirement_sources (source_type, source_code, source_name) VALUES ('funder', 'city_impact_fund', 'City Impact Fund') RETURNING requirement_source_id",
+      )
+    ).rows[0].requirement_source_id;
+    const version = (
+      await seedPool.query(
+        `INSERT INTO kai.requirement_framework_versions
+           (requirement_source_id, framework_code, framework_name, version_label, framework_status)
+         VALUES ($1, 'annual_outcomes_v1', 'Annual Outcomes', 'v1', 'active')
+         RETURNING requirement_framework_version_id`,
+        [source],
+      )
+    ).rows[0].requirement_framework_version_id;
+    const requirementSetId = (
+      await seedPool.query(
+        `INSERT INTO kai.requirement_sets (requirement_framework_version_id, set_key, set_name)
+         VALUES ($1, 'annual_outcomes', 'Annual Outcomes') RETURNING requirement_set_id`,
+        [version],
+      )
+    ).rows[0].requirement_set_id;
+    // Two real rule keys: ir_pur_001 is satisfied by a recorded outcome
+    // context; ir_contrib_002 is not_satisfied with no governed evidence.
+    const outcomeRequirementId = (
+      await seedPool.query(
+        `INSERT INTO kai.requirements (requirement_set_id, requirement_key, requirement_label, requirement_description, display_order)
+         VALUES ($1, 'ir_pur_001', 'Intended outcomes are defined', 'Each program states the change it intends.', 0)
+         RETURNING requirement_id`,
+        [requirementSetId],
+      )
+    ).rows[0].requirement_id;
+    const limitationRequirementId = (
+      await seedPool.query(
+        `INSERT INTO kai.requirements (requirement_set_id, requirement_key, requirement_label, display_order)
+         VALUES ($1, 'ir_contrib_002', 'Known limitations affecting confidence in a reported result are documented', 1)
+         RETURNING requirement_id`,
+        [requirementSetId],
+      )
+    ).rows[0].requirement_id;
+    return { requirementSetId, outcomeRequirementId, limitationRequirementId };
+  }
+
+  async function writeCounts() {
+    const { rows } = await seedPool.query(`
+      SELECT (SELECT count(*) FROM kai.requirement_assessments)::int AS assessments,
+             (SELECT count(*) FROM kai.engagement_requirement_sets)::int AS applicability,
+             (SELECT count(*) FROM kai.audit_events)::int AS audit,
+             (SELECT count(*) FROM kai.users)::int AS users,
+             (SELECT count(*) FROM kai.impact_outcome_contexts)::int AS outcome_contexts`);
+    return rows[0];
+  }
+
+  const CLIENT_READINESS = Object.freeze({ satisfied: "met", partially_satisfied: "partially_met", not_satisfied: "not_met", needs_review: "in_review" });
+
+  await test("Client-safe Funder Requirements (real PostgreSQL): current effective state, stale/superseded never current, no leakage, cross-org denied, read-only", async (t) => {
+    await resetAllTables();
+    const orgA = await seedOrganization("KAI Client FR Org A");
+    const orgB = await seedOrganization("KAI Client FR Org B");
+    const { requirementSetId, outcomeRequirementId, limitationRequirementId } = await seedTwoRequirementCatalogue();
+
+    await seedRequesterActor(601, orgA, "client_admin");
+    await seedRequesterActor(602, orgA, "client_reviewer");
+    await seedRequesterActor(603, orgA, "client_contributor");
+    await seedRequesterActor(604, orgB, "client_admin");
+    await seedRequesterActor(605, orgA, "gk_operator");
+    const CLIENTS = [601, 602, 603];
+
+    const engApplicable = await seedEngagement(orgA, "client-applicable", TARGET);
+    const engNotApplicable = await seedEngagement(orgA, "client-not-applicable", TARGET);
+    const engPending = await seedEngagement(orgA, "client-pending", TARGET);
+    const engNoTarget = await seedEngagement(orgA, "client-no-target", null);
+    const engOrgB = await seedEngagement(orgB, "client-org-b", TARGET);
+
+    await proposeAndReview(orgA, engApplicable, requirementSetId, "applicable");
+    await proposeAndReview(orgA, engNotApplicable, requirementSetId, "not_applicable");
+    const proposal = await proposeEngagementRequirementSetApplicability({
+      organizationId: orgA,
+      engagementId: engPending,
+      requirementSetId,
+      actorContext: seededActorContext(PROPOSER_ID, orgA, "gk_operator"),
+    });
+    assert.equal(proposal.ok, true, JSON.stringify(proposal.error));
+    await proposeAndReview(orgB, engOrgB, requirementSetId, "applicable");
+
+    const hidden = [
+      PROPOSER_ID,
+      REVIEWER_ID,
+      ASSESSOR_ID,
+      orgB,
+      "reviewed_by",
+      "reviewed_at",
+      "applicability_rows",
+      "target_context_identity",
+      "requirement_assessment_id",
+      "assessment_explanation",
+      "state_fingerprint",
+      "governed evidence/claim items",
+      "organization-level impact outcome context",
+      "ir_pur_001",
+      "ir_contrib_002",
+      "evidence_item_ids",
+      "current_gap_log_item_ids",
+    ];
+    const assertNoLeak = (body, label) => {
+      const serialized = JSON.stringify(body);
+      for (const secret of hidden) assert.ok(!serialized.includes(secret), `${label} leaked ${secret}`);
+    };
+
+    async function readAllClients(engagementId) {
+      const responses = [];
+      for (const legacyUserId of CLIENTS) {
+        const res = await callClientRoute(orgA, engagementId, legacyUserId);
+        assert.equal(res.statusCode, 200, `user ${legacyUserId}: ${JSON.stringify(res.body)}`);
+        assertNoLeak(res.body, `user ${legacyUserId}`);
+        responses.push(res.body.data);
+      }
+      assert.deepEqual(responses[1], responses[0], "client_reviewer sees exactly what client_admin sees");
+      assert.deepEqual(responses[2], responses[0], "client_contributor sees exactly what client_admin sees");
+      return responses[0];
+    }
+
+    function readinessById(data) {
+      return Object.fromEntries(data.requirementSets.flatMap((set) => set.requirements).map((r) => [r.requirementId, r.readiness]));
+    }
+
+    async function gkReadinessById(engagementId) {
+      const res = await callFunderRequirementsRoute(orgA, engagementId, 605);
+      assert.equal(res.statusCode, 200, JSON.stringify(res.body));
+      return Object.fromEntries(
+        res.body.data.applicable_requirement_sets.flatMap((set) => set.requirements).map((r) => [
+          r.requirement_id,
+          r.current_assessment ? CLIENT_READINESS[r.current_assessment.assessment.assessment_state] : "not_yet_assessed",
+        ]),
+      );
+    }
+
+    const assess = (requirementId) => assessEngagementRequirement({
+      organizationId: orgA,
+      engagementId: engApplicable,
+      requirementId,
+      actorContext: seededActorContext(ASSESSOR_ID, orgA, "gk_reviewer"),
+      now: new Date().toISOString(),
+    });
+
+    await t.test("current applicable, unassessed: labelled requirements, both not_yet_assessed, target shown, exact keys", async () => {
+      const data = await readAllClients(engApplicable);
+      assert.deepEqual(Object.keys(data).sort(), ["engagementId", "requirementSets", "status", "target"]);
+      assert.equal(data.status, "applicable");
+      assert.equal(data.engagementId, engApplicable);
+      assert.equal(data.target.funderId, "city_impact_fund");
+      assert.equal(data.target.framework, "annual_outcomes_v1");
+      assert.equal(data.requirementSets.length, 1);
+      const [set] = data.requirementSets;
+      assert.deepEqual(Object.keys(set).sort(), ["frameworkName", "funderName", "name", "requirementSetId", "requirements", "versionLabel"]);
+      assert.equal(set.funderName, "City Impact Fund");
+      assert.deepEqual(set.requirements.map((r) => r.label), ["Intended outcomes are defined", "Known limitations affecting confidence in a reported result are documented"]);
+      assert.deepEqual(Object.keys(set.requirements[0]).sort(), ["description", "label", "readiness", "requirementId"]);
+      assert.deepEqual(readinessById(data), { [outcomeRequirementId]: "not_yet_assessed", [limitationRequirementId]: "not_yet_assessed" });
+      assert.deepEqual(readinessById(data), await gkReadinessById(engApplicable));
+    });
+
+    await t.test("governed gaps: both requirements assessed not_satisfied -> not_met, matching the GK composition", async () => {
+      assert.equal((await assess(outcomeRequirementId)).data.assessment_state, "not_satisfied");
+      assert.equal((await assess(limitationRequirementId)).data.assessment_state, "not_satisfied");
+      const data = await readAllClients(engApplicable);
+      assert.deepEqual(readinessById(data), { [outcomeRequirementId]: "not_met", [limitationRequirementId]: "not_met" });
+      assert.deepEqual(readinessById(data), await gkReadinessById(engApplicable));
+    });
+
+    await t.test("stale assessment: governed inputs change, the persisted not_satisfied row stays but is never shown as current", async () => {
+      await seedPool.query(
+        `INSERT INTO kai.impact_outcome_contexts
+           (organization_id, engagement_id, outcome_key, outcome_statement, stakeholder_key, stakeholder_label, created_by_type)
+         VALUES ($1, NULL, 'youth_employment', 'Participants gain stable employment.', 'participants', 'Program participants', 'human')`,
+        [orgA],
+      );
+      const { rows } = await seedPool.query(
+        "SELECT assessment_state FROM kai.requirement_assessments WHERE organization_id = $1 AND engagement_id = $2 AND requirement_id = $3",
+        [orgA, engApplicable, outcomeRequirementId],
+      );
+      assert.deepEqual(rows.map((row) => row.assessment_state), ["not_satisfied"], "the stale row remains persisted");
+      const data = await readAllClients(engApplicable);
+      assert.deepEqual(readinessById(data), { [outcomeRequirementId]: "not_yet_assessed", [limitationRequirementId]: "not_met" });
+      assert.deepEqual(readinessById(data), await gkReadinessById(engApplicable));
+    });
+
+    await t.test("sufficient governed state: reassessment is satisfied -> met, while the real gap stays not_met", async () => {
+      assert.equal((await assess(outcomeRequirementId)).data.assessment_state, "satisfied");
+      const data = await readAllClients(engApplicable);
+      assert.deepEqual(readinessById(data), { [outcomeRequirementId]: "met", [limitationRequirementId]: "not_met" });
+      assert.deepEqual(readinessById(data), await gkReadinessById(engApplicable));
+    });
+
+    await t.test("not applicable / not yet confirmed / no target never list requirements", async () => {
+      const notApplicable = await readAllClients(engNotApplicable);
+      assert.equal(notApplicable.status, "not_applicable");
+      assert.deepEqual(notApplicable.requirementSets, []);
+      const pending = await readAllClients(engPending);
+      assert.equal(pending.status, "applicability_pending");
+      assert.deepEqual(pending.requirementSets, []);
+      const noTarget = await readAllClients(engNoTarget);
+      assert.equal(noTarget.status, "no_target");
+      assert.deepEqual(noTarget.requirementSets, []);
+    });
+
+    await t.test("the client reads are read-only: no assessment, applicability, audit, user, or context row is written", async () => {
+      const before = await writeCounts();
+      for (const engagementId of [engApplicable, engNotApplicable, engPending, engNoTarget]) await readAllClients(engagementId);
+      assert.deepEqual(await writeCounts(), before);
+    });
+
+    await t.test("cross-org: a client_admin of org B is denied on org A before any data, and org A cannot read org B's engagement", async () => {
+      const denied = await callClientRoute(orgA, engApplicable, 604);
+      assert.equal(denied.statusCode, 403);
+      assert.equal(denied.body.ok, false);
+      assert.equal(denied.body.blockers[0].validator_key, "VAL-AUT-003");
+      assert.equal(denied.body.data ?? null, null);
+      const foreign = await callClientRoute(orgA, engOrgB, 601);
+      assert.equal(foreign.body.ok, false);
+      assert.equal(foreign.body.error.code, "not_found");
+      assert.ok(!JSON.stringify(foreign.body).includes("requirementSets"));
+      const ownOrgB = await callClientRoute(orgB, engOrgB, 604);
+      assert.equal(ownOrgB.statusCode, 200);
+      assert.deepEqual(readinessById(ownOrgB.body.data), { [outcomeRequirementId]: "not_yet_assessed", [limitationRequirementId]: "not_yet_assessed" }, "org A's assessments never appear for org B");
+    });
+
+    await t.test("GK authority unchanged: client members still cannot read the GK composition", async () => {
+      for (const legacyUserId of CLIENTS) {
+        const res = await callFunderRequirementsRoute(orgA, engApplicable, legacyUserId);
+        assert.equal(res.body.ok, false, `user ${legacyUserId}`);
+        assert.equal(res.body.error.code, "authorization_denied");
+      }
+    });
+
+    await t.test("superseded applicability: after a replacement not_applicable review the persisted met assessment is never shown", async () => {
+      const replacement = await approveEngagementRequirementSetApplicability({
+        organizationId: orgA,
+        engagementId: engApplicable,
+        requirementSetId,
+        decision: "not_applicable",
+        actorContext: seededActorContext(REVIEWER_ID, orgA, "gk_reviewer"),
+      });
+      assert.equal(replacement.ok, true, JSON.stringify(replacement.error));
+      const { rows } = await seedPool.query(
+        "SELECT count(*)::int AS n FROM kai.requirement_assessments WHERE organization_id = $1 AND engagement_id = $2",
+        [orgA, engApplicable],
+      );
+      assert.equal(rows[0].n, 3, "historical assessments remain persisted");
+      const data = await readAllClients(engApplicable);
+      assert.equal(data.status, "not_applicable");
+      assert.deepEqual(data.requirementSets, []);
     });
   });
 }

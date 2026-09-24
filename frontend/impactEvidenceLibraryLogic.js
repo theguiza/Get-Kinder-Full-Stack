@@ -70,6 +70,80 @@ export function projectOrganizationAccessCapabilities(dto) {
   };
 }
 
+// Client-safe Funder Requirements for one engagement/project: governed
+// applicability status, the project's own target, and per currently
+// applicable requirement its catalogue label and readiness. Never the GK
+// funder-requirements composition (review rows, assessment ids/text).
+export function clientFunderRequirementsPath(organizationId, engagementId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}`
+    + `/engagements/${encodeURIComponent(engagementId)}/client-funder-requirements`;
+}
+
+export const CLIENT_FUNDER_REQUIREMENTS_STATUSES = Object.freeze([
+  "no_target",
+  "no_requirement_set",
+  "not_applicable",
+  "applicability_pending",
+  "applicable",
+]);
+
+export const CLIENT_REQUIREMENT_READINESS = Object.freeze([
+  "met",
+  "partially_met",
+  "not_met",
+  "in_review",
+  "not_yet_assessed",
+]);
+
+function nullableString(value) {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+
+// Returns null (unknown) for a missing/malformed DTO or any unknown status
+// or readiness value, so the view never presents a guessed state.
+export function projectClientFunderRequirements(dto) {
+  if (!dto || typeof dto !== "object" || Array.isArray(dto)) return null;
+  if (!CLIENT_FUNDER_REQUIREMENTS_STATUSES.includes(dto.status)) return null;
+  if (!Array.isArray(dto.requirementSets)) return null;
+  const target = dto.target && typeof dto.target === "object" && !Array.isArray(dto.target) ? dto.target : {};
+  const requirementSets = [];
+  for (const set of dto.requirementSets) {
+    if (!set || typeof set !== "object" || typeof set.requirementSetId !== "string" || !Array.isArray(set.requirements)) return null;
+    const requirements = [];
+    for (const requirement of set.requirements) {
+      if (!requirement || typeof requirement.requirementId !== "string") return null;
+      if (!CLIENT_REQUIREMENT_READINESS.includes(requirement.readiness)) return null;
+      requirements.push({
+        requirementId: requirement.requirementId,
+        label: nullableString(requirement.label),
+        description: nullableString(requirement.description),
+        readiness: requirement.readiness,
+      });
+    }
+    requirementSets.push({
+      requirementSetId: set.requirementSetId,
+      name: nullableString(set.name),
+      funderName: nullableString(set.funderName),
+      frameworkName: nullableString(set.frameworkName),
+      versionLabel: nullableString(set.versionLabel),
+      requirements,
+    });
+  }
+  return {
+    status: dto.status,
+    target: {
+      funderId: nullableString(target.funderId),
+      framework: nullableString(target.framework),
+      grantProgram: nullableString(target.grantProgram),
+      report: nullableString(target.report),
+      reportingTemplate: nullableString(target.reportingTemplate),
+      reportingPeriodStart: nullableString(target.reportingPeriodStart),
+      reportingPeriodEnd: nullableString(target.reportingPeriodEnd),
+    },
+    requirementSets: dto.status === "applicable" ? requirementSets : [],
+  };
+}
+
 // Client-safe reviewed Impact Facts: claims the governed evaluator marks
 // eligible for the internal audience, as claim id, statement, type, and
 // accepted limitation dimensions only.

@@ -3208,6 +3208,48 @@ router.get(
   },
 );
 
+let clientFunderRequirementsServicePromise = null;
+async function getClientFunderRequirementsService() {
+  if (intakeServiceOverride?.getClientFunderRequirements) return intakeServiceOverride;
+  clientFunderRequirementsServicePromise ||= import("../services/kaiClientFunderRequirementsService.js");
+  return clientFunderRequirementsServicePromise;
+}
+
+/**
+ * Client-safe Funder Requirements for one engagement/project: the governed
+ * applicability status and, for currently applicable requirements, catalogue
+ * labels and a readiness value from the current engagement assessment. None
+ * of the GK composition's review rows, assessment ids, explanations, or
+ * provenance. The GK funder-requirements route above is unchanged. No SQL
+ * here; the browser supplies only the two path ids.
+ */
+router.get(
+  "/admin/organizations/:organizationId/engagements/:engagementId/client-funder-requirements",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
+    const engagementId = typeof req.params?.engagementId === "string" ? req.params.engagementId : "";
+    if (
+      !KAI_SPRINT2_P0_PATTERNS.uuid.test(organizationId) ||
+      organizationId !== organizationId.toLowerCase() ||
+      !KAI_SPRINT2_P0_PATTERNS.uuid.test(engagementId) ||
+      engagementId !== engagementId.toLowerCase()
+    ) {
+      return sendKaiError(res, "validation_blocker", {
+        blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id_or_engagement_id")],
+      });
+    }
+    return invokeService(res, async () => {
+      const service = await getClientFunderRequirementsService();
+      return service.getClientFunderRequirements({
+        organizationId,
+        engagementId,
+        actorContext: sprint2MappedActorContext(req),
+      });
+    });
+  },
+);
+
 let evidenceLibraryServicePromise = null;
 async function getEvidenceLibraryService() {
   if (intakeServiceOverride?.listOrganizationEvidenceLibrary) return intakeServiceOverride;
