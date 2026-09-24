@@ -268,4 +268,5 @@ export const __generatedDraftLibraryServiceContract = Object.freeze({
 
 export const __testables = Object.freeze({
   responseDraftSummary,
+  isAudienceCompatible,
 });

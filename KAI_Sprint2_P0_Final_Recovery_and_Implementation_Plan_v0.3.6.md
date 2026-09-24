@@ -33850,3 +33850,188 @@ was added.
 deployment, production or shared database access, schema, flag, binding,
 or membership change, and no `00_KAI_CURRENT_STATE.md` update. The only
 database used was the runner-owned ephemeral loopback cluster.
+
+### Horizontal client authorization closure - Package 3: client-safe Generated Drafts, conditional client review, GRP / Board previews (2026-09-24)
+
+**Starting state (TOOL_VERIFIED):** `main`, HEAD `d11945b`, clean. Packages 1
+and 2 are USER_CONFIRMED and were not reopened.
+
+**Generated-content ledger (TOOL_VERIFIED from source).** Before this package
+the client UI issued none of these requests: the GK cockpit is mounted only
+with `internalKnowledgeWorkspace`.
+- GET `generated-content-drafts` (index), GET `.../:id/review-packet`,
+  GET `engagements/:id/grant-response-packet`,
+  GET `engagements/:id/board-reporting`: {gk_admin, gk_reviewer} with
+  `combineGlobalRoles`. A/R/C would be denied. GK_INTERNAL: the DTOs carry
+  review-queue and generation-run ids, per-citation evidence/source/version
+  ids, GK review vocabulary, blocker codes, and export-review / candidate /
+  final / manifest state.
+- POST `generated-content-drafts/{evidence-summary,.../funder,impact-narrative,readiness-assessment,data-gap-memo,case-for-support,board-update,annual-report-section,funder-outcome-table,grant-response-paragraph}`:
+  {gk_admin, gk_operator, gk_reviewer}. A/R/C denied. GENERATION_MUTATION.
+- POST `.../generated-content-review-queue/:id/{start,complete}`:
+  {gk_reviewer, gk_admin}. A/R/C denied. GK_INTERNAL (GK review).
+- Draft export-review request/start/complete/packet, limitation snapshot,
+  export candidates/manifests and their markdown/csv/pdf/docx; GRP export
+  candidates, export review, final-release authority, manifests, and final
+  Markdown; Board candidates, workflow state, review request/start/complete,
+  final-release authority, manifests, and Markdown: GK only (export review
+  and eligibility are `gk_admin`). A/R/C denied. HIGH_RISK_FINAL.
+- Unchanged by this package.
+
+**Content types (TOOL_VERIFIED):** all nine architecture types are
+implemented as repository content types, each with its own generation POST,
+the shared index and review-packet read, and the shared GK review queue:
+`grant_response_paragraph`, `funder_outcome_table`,
+`annual_report_section`, `board_update`, `case_for_support`,
+`impact_narrative`, `readiness_assessment`, `evidence_summary`, and
+`data_gap_memo`. Allowed audiences per type are
+`CONTENT_TYPE_ALLOWED_AUDIENCES`:
+- `evidence_summary`, `annual_report_section`, `grant_response_paragraph`:
+  internal, funder, or public.
+- `case_for_support`: internal or funder.
+- `funder_outcome_table`: funder only.
+- The rest: internal only.
+
+GRP members are funder-audience `evidence_summary` / `impact_narrative`;
+Board members are internal-audience `evidence_summary` / `impact_narrative`.
+
+**Client visibility rule (TOOL_VERIFIED; one rule, reused rather than
+invented):** the repository's own packet-membership rule
+(`evaluateGrantResponsePacketMembershipInTransaction`). A draft is shown to a
+client only when:
+- its GK `generated_content_review` is `resolved/resolved`;
+- `currentUseEligible === true` (every cited claim is currently eligible
+  for the draft's requested audience through the P2-06 evaluator);
+- its audience fits its content type.
+
+Otherwise it is invisible, and `not_found` by id. `requested_audience` is the
+draft's target audience (internal = the organization's own use, the same
+audience as client impact-facts), not a GK-internal marker.
+
+**Contract (TOOL_VERIFIED):** `kaiClientGeneratedContentService.js`. All four
+reads require a mapped human, the read_intake set with an active same-org
+membership, tenant validation before any read, and both generation flags.
+They are read-only.
+- GET `.../organizations/:organizationId/client-generated-drafts` →
+  `{items: [{generatedContentDraftId, contentType, audience,
+  reviewState: "reviewed", createdAt, blockCount}], awaitingClientInputCount,
+  truncated}`. Index rows are validated by the GK index's own
+  `responseDraftSummary`, with export-review state withheld. The scan is
+  bounded to 50 drafts with no cursor. A per-draft current-state conflict
+  hides that draft; any other failure fails the read.
+- GET `.../client-generated-drafts/:generatedContentDraftId` →
+  `{generatedContentDraftId, contentType, audience, reviewState,
+  blocks: [{ordinal, text, supportingClaimIds}]}`.
+- GET `.../engagements/:engagementId/client-grant-response-packet` and
+  `.../client-board-reporting` → `{engagementId, audience,
+  status: available | no_reviewed_drafts, drafts}`. These use the
+  repository's own membership and ordering. A member violating the rule is a
+  contract failure. Repository blockers (execution bounds, Board
+  diagnostics) never cross; only the code does.
+- Source of truth: the real repository `getGeneratedDraftReviewPacket`,
+  `getGrantResponsePacket`, and `getBoardReportingPacket` (READ ONLY
+  repeatable-read), validated by the single-draft
+  `isGeneratedDraftReviewPacketDto`.
+- Excluded: generation-run, review-queue, block, citation, evidence, source,
+  and version ids; source codes; support strength; claim/evidence review
+  statuses; blocker codes; affected objects/dimensions; approved audiences;
+  review timestamps; `currentUseEligible`; all export-review, candidate,
+  final-release, eligibility, and manifest state; export-manifest linkage.
+  The repository carries no raw prompts or provider/model payloads.
+
+**Traceability (TOOL_VERIFIED):** each block lists its cited claim ids. For
+a visible draft every cited claim is currently eligible for the draft's
+audience. The UI resolves them against the client-safe impact-facts the
+page already loads (statement plus accepted limitations). A claim outside
+that set (e.g. a funder-only approval) shows "A reviewed Impact Fact approved
+for this audience". No evidence, source, or citation DTO is exposed, and no
+second evaluator is used.
+
+**Conditional client review (TOOL_VERIFIED; no OWNER_DECISION):**
+- `generated_content_review` has only `open` / `in_progress` /
+  `needs_gk_review` → `resolved` states, for {gk_reviewer, gk_admin}. It is
+  GK review and stays GK-only.
+- The repository's established client-review mechanism (Phase 14
+  Conditional Client-Review Conformance, 2026-09-20) is the P2-11 claim
+  follow-up. Its roles are client_reviewer only; client_admin,
+  client_contributor, and GK roles are denied. It writes a fixed disposition,
+  creates no human-authority / export / final state, and while unresolved
+  blocks the claim, and therefore the draft's current use.
+- The list's `awaitingClientInputCount` counts GK-reviewed drafts held only
+  by `client_followup_unresolved` (a count, never content). The UI shows the
+  existing follow-up link only with the existing `clientFollowupReview`
+  capability and a non-zero count.
+- No capability was added, and no second review lifecycle was created.
+
+**Frontend:** a new Knowledge Studio tab, "Generated Drafts"
+(`ClientGeneratedDrafts.jsx`), with:
+- reviewed drafts, including audience and date;
+- draft detail with "What supports this";
+- GRP and Board Reporting previews for the selected project, labelled
+  preview-only and still needing GK final review;
+- honest empty and not-ready states.
+
+It has only client-safe reads; no generation, review, export, or release
+control; and no GK cockpit or GK route. The projections fail closed on
+unknown types, audiences, review states, and packet shapes.
+
+**Tests (TOOL_VERIFIED):**
+- `__tests__/kai-client-generated-content.spec.js` 16/16:
+  - GK role sets unchanged;
+  - the list shows only visible drafts, with awaiting-client counted but not
+    shown, and a draft in GK review is never evaluated;
+  - exact detail keys, with de-duplicated claim ids;
+  - in-review, ineligible, awaiting, and unknown ids are `not_found`;
+  - cross-org actors and foreign-org ids get `VAL-AUT-003` with zero reads;
+  - unknown type, audience mismatch, and malformed packets fail closed;
+  - per-draft conflict versus failure handling;
+  - the 50-draft bound with no cursor;
+  - GK-only metadata changes leave the payload identical, while text
+    changes alter it;
+  - GRP and Board previews, empty, bounded-error, bad-member, and foreign
+    engagement cases;
+  - role parity (binding-derived A, R, C, GK);
+  - no generation, GK review, GK draft/packet reads, export, or final
+    authority for any client role;
+  - P2-11 completion allowed for client_reviewer only, and the capability;
+  - mounted routes;
+  - frontend contracts.
+- Board mixed-content PostgreSQL runner
+  (`scripts/kai-board-reporting-mixed-content-local-postgres.js`): 7/7. The
+  original 2 cases are unchanged. The 5 new cases use real seeded drafts,
+  blocks, citations, review queues, and engagement-bound runs; the real
+  index SQL; the real repository; and the real client service, with the
+  suite's synthetic claim evaluator. They prove:
+  - only GK-reviewed, eligible drafts show, identical for A/R/C, including
+    a funder draft;
+  - in-review, ineligible, awaiting-client, and unknown ids are `not_found`;
+  - GRP and Board previews contain exactly their governed members;
+  - a foreign engagement is `not_found`;
+  - answering the client follow-up (evaluator unblocked) makes the held
+    draft visible and creates no review, export, or final row;
+  - all reads leave queue, draft, block, run, and audit counts and queue
+    state unchanged;
+  - cross-org is denied, and a foreign-org actor cannot fetch this org's
+    draft ids;
+  - GK still reads an in-review draft and the GRP;
+  - client roles still cannot read the GK packet.
+- P2-11 runner: 28/28 (the real client-review transition, unchanged).
+- `npm test`: 5197 pass, 12 fail, 87 skipped. `d11945b` was 5181/12/87. The
+  failing names are identical, and the route-inventory missing-entry detail
+  is identical (the 4 new routes are registered).
+- `npm run build` PASS. `git diff --check` PASS.
+
+**Limitations / open (NOT_CONFIRMED):**
+- In the new PostgreSQL cases, claim eligibility comes from the Board
+  suite's synthetic evaluator. The real P2-06 evaluator's eligibility is
+  proven by the P2-06/P2-08 runners, and its drafts use the same repository
+  path.
+- Not verified in a browser or in production.
+- The Generated Drafts list is organization-wide, as the GK index is; only
+  the GRP and Board previews are engagement-scoped.
+- Only the first 50 drafts are scanned.
+
+**Status:** CLIENT_SAFE_GENERATED_CONTENT_IMPLEMENTED_LOCALLY. No push,
+deployment, production or shared database access, schema, flag, binding, or
+membership change, and no `00_KAI_CURRENT_STATE.md` update. The only
+databases used were runner-owned ephemeral loopback clusters.

@@ -153,6 +153,11 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // MVP UAT final completion: P2-11 client-reviewer-facing read (additive;
     // every prior entry preserved verbatim).
     "/admin/organizations/:organizationId/client-followups",
+    // Client-safe Generated Drafts: only GK-reviewed, currently eligible
+    // drafts, projected to client-safe fields (additive; every prior entry
+    // preserved verbatim).
+    "/admin/organizations/:organizationId/client-generated-drafts",
+    "/admin/organizations/:organizationId/client-generated-drafts/:generatedContentDraftId",
     // KAI data-dictionary entries: read-only safe DTO surface over governed
     // dictionary fields, additive, and every prior entry preserved verbatim.
     "/admin/organizations/:organizationId/data-dictionaries/:dataDictionaryId/entries",
@@ -224,10 +229,17 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // Performs no mutation and reimplements no governance semantics
     // (additive; every prior entry preserved verbatim).
     "/admin/organizations/:organizationId/engagements/:engagementId/board-reporting/candidates/:boardReportingCandidateId/workflow-state",
+    // Client-safe Board Reporting preview over the governed Board packet
+    // membership (additive; every prior entry preserved verbatim).
+    "/admin/organizations/:organizationId/engagements/:engagementId/client-board-reporting",
     // Client-safe Funder Requirements: governed applicability status and
     // current-assessment readiness projected to client-safe fields
     // (additive; every prior entry preserved verbatim).
     "/admin/organizations/:organizationId/engagements/:engagementId/client-funder-requirements",
+    // Client-safe Grant Response Packet preview over the governed packet
+    // membership; no export/final state (additive; every prior entry
+    // preserved verbatim).
+    "/admin/organizations/:organizationId/engagements/:engagementId/client-grant-response-packet",
     // KAI Package 4: read-only /impact-library Funder Requirements
     // composition (classifier + Package 3A/3B current engagement assessment
     // per applicable requirement), no applicability or assessment write.

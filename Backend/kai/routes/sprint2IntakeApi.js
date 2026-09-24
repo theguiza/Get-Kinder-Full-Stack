@@ -3250,6 +3250,64 @@ router.get(
   },
 );
 
+let clientGeneratedContentServicePromise = null;
+async function getClientGeneratedContentService() {
+  if (intakeServiceOverride?.listClientGeneratedDrafts) return intakeServiceOverride;
+  clientGeneratedContentServicePromise ||= import("../services/kaiClientGeneratedContentService.js");
+  return clientGeneratedContentServicePromise;
+}
+
+function clientContentPathIds(req, keys) {
+  const ids = {};
+  for (const key of keys) {
+    const value = typeof req.params?.[key] === "string" ? req.params[key] : "";
+    if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(value) || value !== value.toLowerCase()) return null;
+    ids[key] = value;
+  }
+  return ids;
+}
+
+/**
+ * Client-safe Generated Drafts and packet previews
+ * (kaiClientGeneratedContentService.js): only GK-reviewed, currently
+ * eligible drafts, projected to content type, audience, block text, and the
+ * cited claim ids. The GK generated-drafts index, review packet, Grant
+ * Response Packet, Board Reporting, generation, review, export, and
+ * final-release routes are unchanged. No SQL here; the browser supplies only
+ * path ids.
+ */
+for (const [path, keys, method] of [
+  ["/admin/organizations/:organizationId/client-generated-drafts", ["organizationId"], "listClientGeneratedDrafts"],
+  [
+    "/admin/organizations/:organizationId/client-generated-drafts/:generatedContentDraftId",
+    ["organizationId", "generatedContentDraftId"],
+    "getClientGeneratedDraft",
+  ],
+  [
+    "/admin/organizations/:organizationId/engagements/:engagementId/client-grant-response-packet",
+    ["organizationId", "engagementId"],
+    "getClientGrantResponsePacketPreview",
+  ],
+  [
+    "/admin/organizations/:organizationId/engagements/:engagementId/client-board-reporting",
+    ["organizationId", "engagementId"],
+    "getClientBoardReportingPreview",
+  ],
+]) {
+  router.get(path, sprint2ActorContextMiddleware, async (req, res) => {
+    const ids = clientContentPathIds(req, keys);
+    if (!ids) {
+      return sendKaiError(res, "validation_blocker", {
+        blockers: [routeValidationBlocker("invalid_uuid_field", keys.join("_or_"))],
+      });
+    }
+    return invokeService(res, async () => {
+      const service = await getClientGeneratedContentService();
+      return service[method]({ ...ids, actorContext: sprint2MappedActorContext(req) });
+    });
+  });
+}
+
 let evidenceLibraryServicePromise = null;
 async function getEvidenceLibraryService() {
   if (intakeServiceOverride?.listOrganizationEvidenceLibrary) return intakeServiceOverride;

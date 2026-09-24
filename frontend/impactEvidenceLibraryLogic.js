@@ -144,6 +144,103 @@ export function projectClientFunderRequirements(dto) {
   };
 }
 
+// Client-safe Generated Drafts and packet previews: only GK-reviewed,
+// currently eligible drafts, as content type, audience, block text, and the
+// cited claim ids (which match client impact-facts claim ids). Never the GK
+// generated-drafts index, review packet, Grant Response Packet, or Board
+// Reporting reads.
+export function clientGeneratedDraftsPath(organizationId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/client-generated-drafts`;
+}
+
+export function clientGeneratedDraftPath(organizationId, generatedContentDraftId) {
+  return `${clientGeneratedDraftsPath(organizationId)}/${encodeURIComponent(generatedContentDraftId)}`;
+}
+
+export function clientGrantResponsePacketPath(organizationId, engagementId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}`
+    + `/engagements/${encodeURIComponent(engagementId)}/client-grant-response-packet`;
+}
+
+export function clientBoardReportingPreviewPath(organizationId, engagementId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}`
+    + `/engagements/${encodeURIComponent(engagementId)}/client-board-reporting`;
+}
+
+export const CLIENT_GENERATED_CONTENT_TYPES = Object.freeze([
+  "evidence_summary",
+  "impact_narrative",
+  "readiness_assessment",
+  "data_gap_memo",
+  "case_for_support",
+  "board_update",
+  "annual_report_section",
+  "funder_outcome_table",
+  "grant_response_paragraph",
+]);
+const CLIENT_GENERATED_AUDIENCES = Object.freeze(["internal", "funder", "public"]);
+
+function isPlainClientObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function isClientDraftHeader(item) {
+  return isPlainClientObject(item)
+    && typeof item.generatedContentDraftId === "string"
+    && CLIENT_GENERATED_CONTENT_TYPES.includes(item.contentType)
+    && CLIENT_GENERATED_AUDIENCES.includes(item.audience)
+    && item.reviewState === "reviewed";
+}
+
+// Returns null (unknown) for any malformed DTO or unknown content type,
+// audience, or review state.
+export function projectClientGeneratedDraftList(dto) {
+  if (!isPlainClientObject(dto) || !Array.isArray(dto.items) || !Number.isInteger(dto.awaitingClientInputCount)) return null;
+  const items = [];
+  for (const item of dto.items) {
+    if (!isClientDraftHeader(item) || !Number.isInteger(item.blockCount)) return null;
+    items.push({
+      generatedContentDraftId: item.generatedContentDraftId,
+      contentType: item.contentType,
+      audience: item.audience,
+      reviewState: item.reviewState,
+      createdAt: typeof item.createdAt === "string" ? item.createdAt : null,
+      blockCount: item.blockCount,
+    });
+  }
+  return { items, awaitingClientInputCount: dto.awaitingClientInputCount, truncated: dto.truncated === true };
+}
+
+export function projectClientGeneratedDraft(dto) {
+  if (!isClientDraftHeader(dto) || !Array.isArray(dto.blocks) || dto.blocks.length === 0) return null;
+  const blocks = [];
+  for (const block of dto.blocks) {
+    if (!isPlainClientObject(block) || !Number.isInteger(block.ordinal) || typeof block.text !== "string") return null;
+    if (!Array.isArray(block.supportingClaimIds) || !block.supportingClaimIds.every((id) => typeof id === "string")) return null;
+    blocks.push({ ordinal: block.ordinal, text: block.text, supportingClaimIds: [...block.supportingClaimIds] });
+  }
+  return {
+    generatedContentDraftId: dto.generatedContentDraftId,
+    contentType: dto.contentType,
+    audience: dto.audience,
+    reviewState: dto.reviewState,
+    blocks,
+  };
+}
+
+export function projectClientPacketPreview(dto, audience) {
+  if (!isPlainClientObject(dto) || dto.audience !== audience || !Array.isArray(dto.drafts)) return null;
+  if (!["available", "no_reviewed_drafts"].includes(dto.status)) return null;
+  const drafts = [];
+  for (const draft of dto.drafts) {
+    const projected = projectClientGeneratedDraft(draft);
+    if (!projected || projected.audience !== audience) return null;
+    drafts.push(projected);
+  }
+  if ((dto.status === "available") !== (drafts.length > 0)) return null;
+  return { status: dto.status, audience, drafts };
+}
+
 // Client-safe reviewed Impact Facts: claims the governed evaluator marks
 // eligible for the internal audience, as claim id, statement, type, and
 // accepted limitation dimensions only.

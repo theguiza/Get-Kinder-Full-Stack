@@ -3,6 +3,7 @@ import React, { useState } from "react";
 import KaiWebIntake from "../KaiWebIntake.jsx";
 import ImpactLibraryKai from "../ImpactLibraryKai.jsx";
 import ClientFunderRequirements from "./ClientFunderRequirements.jsx";
+import ClientGeneratedDrafts from "./ClientGeneratedDrafts.jsx";
 import { CLIENT_FOLLOWUP_REVIEW_HREF } from "../impactEvidenceLibraryLogic.js";
 
 const CLIENT_KNOWLEDGE_STUDIO_TABS = Object.freeze([
@@ -10,6 +11,7 @@ const CLIENT_KNOWLEDGE_STUDIO_TABS = Object.freeze([
   ["evidence", "Evidence"],
   ["gaps", "Gaps"],
   ["funderRequirements", "Funder Requirements"],
+  ["generatedDrafts", "Generated Drafts"],
   ["reviews", "Reviews"],
 ]);
 
@@ -32,6 +34,9 @@ function dimensionLabel(dimensionKey) {
  * - ImpactLibraryKai's message POST (engagement context policy);
  * - ClientFunderRequirements' client-safe funder-requirements read for the
  *   selected project (Funder Requirements tab only);
+ * - ClientGeneratedDrafts' client-safe generated-draft, draft-detail, and
+ *   Grant Response Packet / Board Reporting preview reads (Generated Drafts
+ *   tab only);
  * - nothing else: reviewed Impact Facts arrive as the `facts` prop, fetched
  *   once per organization by ImpactLibraryApp from the client-safe
  *   impact-facts read.
@@ -142,6 +147,15 @@ export default function ClientKnowledgeStudio({
         <ClientFunderRequirements
           organizationId={organizationId}
           engagementId={engagementId}
+          canReviewFollowups={canReviewFollowups}
+        />
+      ) : null}
+
+      {tab === "generatedDrafts" ? (
+        <ClientGeneratedDrafts
+          organizationId={organizationId}
+          engagementId={engagementId}
+          facts={facts}
           canReviewFollowups={canReviewFollowups}
         />
       ) : null}
