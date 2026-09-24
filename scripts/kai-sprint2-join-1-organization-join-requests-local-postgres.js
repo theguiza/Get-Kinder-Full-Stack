@@ -5,7 +5,7 @@ import { spawnSync } from "node:child_process";
 import { createServer } from "node:net";
 import { Client } from "pg";
 
-// JOIN-1/JOIN-2/JOIN-3 ephemeral real-PostgreSQL proof: initdb a throwaway
+// JOIN-1..JOIN-5 ephemeral real-PostgreSQL proof: initdb a throwaway
 // loopback-only cluster, apply the synthetic prerequisites + the JOIN-1
 // migration, prove rollback and idempotent re-apply, then run the JOIN-1
 // through JOIN-3 specs against it. Synthetic data only; the cluster and its
@@ -155,6 +155,9 @@ try {
     "__tests__/kai-sprint2-join-3-organization-join-request-review-service.spec.js",
     "__tests__/kai-sprint2-join-3-organization-join-request-review-routes.spec.js",
     "__tests__/kai-sprint2-join-3-organization-join-request-review.integration.spec.js",
+    "__tests__/kai-sprint2-join-4-organization-join-ui.spec.js",
+    "__tests__/kai-sprint2-join-5-client-admin-review-ui.spec.js",
+    "__tests__/kai-sprint2-join-5-assembled-flow.integration.spec.js",
   ], {
     cwd: repoRoot,
     encoding: "utf8",
@@ -169,14 +172,14 @@ try {
       KAI_JOIN_1_ORGANIZATION_JOIN_REQUESTS_DATABASE_URL: targetUrl,
     },
   });
-  if (testResult.status !== 0) throw new Error("JOIN-1/JOIN-2/JOIN-3 organization join requests tests failed");
+  if (testResult.status !== 0) throw new Error("JOIN-1..JOIN-5 organization join requests tests failed");
   if (
     psqlScalar("SELECT count(*) FROM kai.organization_join_requests") !== "0"
     || psqlScalar("SELECT count(*) FROM kai.organization_memberships") !== "0"
   ) {
-    throw new Error("JOIN-1/JOIN-2/JOIN-3 integration tests left synthetic rows behind");
+    throw new Error("JOIN-1..JOIN-5 integration tests left synthetic rows behind");
   }
-  console.log("JOIN-1/JOIN-2/JOIN-3 organization join requests focused tests passed.");
+  console.log("JOIN-1..JOIN-5 organization join requests focused tests passed.");
 } finally {
   if (started) spawnSync(pgCtl, ["-D", dataDir, "stop", "-m", "fast"], { encoding: "utf8", stdio: "ignore" });
   rmSync(workDir, { recursive: true, force: true });

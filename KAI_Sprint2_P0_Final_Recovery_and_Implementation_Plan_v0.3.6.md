@@ -33078,3 +33078,83 @@ before the sentinel was exported (none touch a database).
 deployment, production/shared database access or mutation, migration,
 feature-flag/configuration change, real-client-data access, or
 `00_KAI_CURRENT_STATE.md` update performed. JOIN-5 not started.
+
+### Join Existing Organization - JOIN-5 final closure (CLOSED LOCALLY)
+
+**Date:** 2026-09-24
+
+**Scope (owner-authorized, JOIN-5 closure only):** give the normal
+reviewer (effective organization client_admin) a usable review UI, check
+the JOIN-4 `/home` redirect for workflow regressions, and prove the
+assembled flow. No new product scope; JOIN-1..3 backend unchanged.
+
+**Starting state:** branch `main`; starting HEAD
+`cd5ba3cffc17a9330d8821432b9ceeabdd2f3b5e`; working tree clean. Root
+`AGENTS.md` read and followed.
+
+**Client_admin review UI:** Impact Library (`ImpactLibraryApp.jsx`) probes
+the existing JOIN-3 `GET /api/kai/sprint2/access-administration/organizations/:id/join-requests`
+for the selected organization; only a 200 makes review available (no
+frontend authority computation). Home then shows the new
+`frontend/impactLibrary/OrganizationJoinRequestsReviewPanel.jsx` (requester
+email, submitted time, "Approve as contributor" / "Decline", no role
+selector) whenever requests are pending, and the header "+ Add or join
+organization" menu gains "Review join requests". Decisions POST the JOIN-3
+endpoints with `{}`, refresh the queue, and refresh on 409/404. A 403
+(ordinary contributor/reviewer, other-org admin, global role alone) shows
+nothing. The /admin KAI Access fallback is unchanged.
+
+**/home redirect side effects:** `GET /org-portal` is retired - the
+`app.use("/org-portal")` GET redirect is registered before the page route,
+so the page that renders the logo/description forms is unreachable and
+their `buildOrgPortal*RedirectPath` -> `/home` returns are retired paths;
+`/dashboard` is a retired pivot route. Both are normal-landing (A); no
+contextual workflow (B) found, so no repair. The JOIN-4 seam is preserved.
+
+**Verification** (loopback `DATABASE_URL` sentinel exported for every
+Node/npm command in this package):
+- `node --test __tests__/kai-sprint2-join-5-client-admin-review-ui.spec.js`
+  -> 7/7 (real access-admin router + real JOIN-3 service + real
+  authorization over HTTP: stored/derived client_admin and site admin 200;
+  contributor, client_reviewer, other-org admin, global gk_admin alone 403
+  for queue, approve, and decline; source contracts; /home classification).
+- `__tests__/kai-sprint2-join-5-assembled-flow.integration.spec.js` (in the
+  JOIN ephemeral runner): real `resolveKaiActorContext` + real
+  `listAuthorizedOrganizations` + real JOIN-2/JOIN-3 services on real
+  PostgreSQL: zero org -> bounded search -> pending (replay) -> client_admin
+  queue + approve -> active client_contributor -> reload lists the org ->
+  existing user joins a second org -> site admin declines -> no membership,
+  retry allowed -> requester only ever holds client_contributor.
+- `npm run verify:kai-sprint2-join-1-organization-join-requests` -> 128/128
+  PASS (JOIN-1..5; migration apply/idempotent/rollback/re-apply unchanged).
+- JOIN-1..5 specs -> 100 pass, 0 fail, 4 skipped (runner-only).
+- Impact Library / shell / responsive / onboarding / access-admin /
+  actor-context / organization-context / tenant / GK binding specs -> 375
+  pass, 0 fail, 3 skipped.
+- `npm test` -> 5120 pass, 12 fail, 86 skipped; failure set identical to
+  the JOIN-4 baseline.
+- Visual (bounded, no new dependency): local headless Chrome driven over
+  the DevTools protocol with Node 22's built-in WebSocket, against a
+  scratchpad-only static harness loading the built `entry.js` + CSS with a
+  synthetic `fetch` mock (no server/database/real data). At 1440x900 and
+  390x844: zero-org setup actions, Join panel (1-char term sends no
+  search, backend display_name, POST body `organization_id` only, pending
+  message, "Request pending"), member menu (Request/create + Join, no
+  Review item on 403, Tab-reachable with coral focus-visible outline, Enter
+  opens, Tab into menu item, Escape closes), client_admin review panel
+  (Approve POST body `{}`, queue refresh, menu reopen) - 70 of 72 checks
+  pass; no horizontal overflow at either width. The 2 failures are Escape
+  after a programmatic `element.click()` (focus not inside the menu); the
+  keyboard path works.
+- `npm run build` -> PASS. `git diff --check` -> PASS. Full diff inspected.
+
+**Limitations:** the visual harness omits the site header/footer and the
+real server; the Escape key closes the Add-or-join menu only while focus is
+inside it (no document-level listener). The Impact Library does not poll.
+Synthetic mirrors only for externally owned tables; the JOIN-1 migration is
+still unapplied to any shared or production database.
+
+**Status:** JOIN_EXISTING_ORGANIZATION_PACKAGE_CLOSED_LOCALLY (JOIN-1..5).
+No push, deployment, production/shared database access or mutation,
+migration application, feature-flag/configuration change, real-client-data
+access, or `00_KAI_CURRENT_STATE.md` update performed.

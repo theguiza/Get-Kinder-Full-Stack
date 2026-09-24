@@ -182,3 +182,33 @@ export function describeJoinReviewError({ status, code, blockingReason: reason }
 export function shouldRefreshJoinQueueAfterError(status) {
   return status === 404 || status === 409;
 }
+
+/**
+ * JOIN-5: Impact Library client_admin review. The pending queue is shown
+ * only after the JOIN-3 GET itself succeeds (200); any other response
+ * (e.g. 403 for an ordinary contributor/reviewer) means no review UI. Only
+ * the safe fields JOIN-3 returns for display are kept.
+ */
+export function isJoinReviewAvailable(result) {
+  return result?.statusCode === 200 && result?.body?.ok === true;
+}
+
+export function toJoinReviewQueueItems(items) {
+  return (Array.isArray(items) ? items : [])
+    .filter((item) => typeof item?.organization_join_request_id === "string" && item?.status === "pending")
+    .map((item) => ({
+      organization_join_request_id: item.organization_join_request_id,
+      requester_email: typeof item.requester_email === "string" ? item.requester_email : "",
+      submitted_at: item.submitted_at || null,
+    }));
+}
+
+/** { statusCode, body } -> the shape describeJoinReviewError expects. */
+export function joinReviewErrorFromResult(result) {
+  const body = result?.body;
+  return {
+    status: result?.statusCode,
+    code: body?.error && typeof body.error === "object" ? body.error.code || null : null,
+    blockingReason: blockingReason(body) || null,
+  };
+}

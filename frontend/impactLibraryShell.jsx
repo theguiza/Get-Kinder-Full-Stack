@@ -130,6 +130,7 @@ export default function ImpactLibraryShell({
   organizationActionHref = "/org-apply?source=impact-library",
   organizationActionLabel = "Request organization",
   onJoinOrganization,
+  onReviewJoinRequests,
   hasAttention = false,
   onOpenNeedsAttention,
   children,
@@ -257,6 +258,19 @@ export default function ImpactLibraryShell({
                     >
                       Join existing organization
                     </button>
+                    {typeof onReviewJoinRequests === "function" ? (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className="gk-shell-org-switcher-option"
+                        onClick={() => {
+                          setAddOrgMenuOpen(false);
+                          onReviewJoinRequests();
+                        }}
+                      >
+                        Review join requests
+                      </button>
+                    ) : null}
                   </div>
                 ) : null}
               </div>

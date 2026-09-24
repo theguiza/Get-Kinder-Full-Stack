@@ -1097,3 +1097,8 @@ a.gk-shell-org-switcher-option:hover { color: #2C2E3A; text-decoration: none; }
   .gk-shell-add-org-menu { left: auto; right: 0; min-width: 200px; max-width: calc(100vw - 32px); }
   .gk-organization-join { padding: 16px; }
 }
+
+/* JOIN-5: Impact Library client_admin Join requests review panel. */
+.gk-organization-join-result-meta { display: block; color: #8890A0; font-size: 12px; font-weight: 400; margin-top: 2px; }
+.gk-organization-join-review-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.gk-organization-join-review-actions .gk-organization-join-close { min-height: 36px; }

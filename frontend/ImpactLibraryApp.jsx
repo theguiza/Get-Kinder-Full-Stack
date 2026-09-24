@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import ImpactLibraryShell, { ProjectContextBar } from "./impactLibraryShell.jsx";
 import {
@@ -22,9 +22,17 @@ import ImprovementPlanView from "./improvementPlan/ImprovementPlanView.jsx";
 import NeedsAttentionView from "./needsAttention/NeedsAttentionView.jsx";
 import { useNeedsAttention } from "./needsAttention/useNeedsAttention.js";
 import OrganizationJoinPanel from "./impactLibrary/OrganizationJoinPanel.jsx";
+import OrganizationJoinRequestsReviewPanel from "./impactLibrary/OrganizationJoinRequestsReviewPanel.jsx";
 import {
   declinedJoinRequestMessage,
   deriveJoinRequestView,
+  describeJoinReviewError,
+  isJoinReviewAvailable,
+  joinReviewErrorFromResult,
+  kaiOrganizationJoinRequestDecisionPath,
+  kaiOrganizationJoinRequestsReviewPath,
+  shouldRefreshJoinQueueAfterError,
+  toJoinReviewQueueItems,
   myOrganizationJoinRequestsPath,
   pendingJoinRequestMessage,
   stalePendingJoinRequestMessage,
@@ -310,6 +318,69 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
   const openJoinOrganization = useCallback(() => {
     setActiveSection("home");
     setJoinPanelOpen(true);
+  }, []);
+
+  // JOIN-5: organization client_admin review of the selected organization's
+  // pending join requests, over the JOIN-3 access-administration endpoints.
+  // The review surface exists only after the JOIN-3 GET itself returns 200
+  // for this organization; a 403 (ordinary contributor/reviewer) leaves it
+  // unavailable. No authority is computed here.
+  const [joinReview, setJoinReview] = useState({
+    organizationId: "",
+    available: false,
+    items: [],
+    loading: false,
+    error: "",
+    actionId: "",
+  });
+  const [joinReviewOpen, setJoinReviewOpen] = useState(false);
+  const joinReviewRequestRef = useRef(0);
+
+  const refetchJoinReview = useCallback(async (organizationId) => {
+    const token = ++joinReviewRequestRef.current;
+    if (!organizationId) {
+      setJoinReview({ organizationId: "", available: false, items: [], loading: false, error: "", actionId: "" });
+      return;
+    }
+    setJoinReview((curr) => ({ ...curr, organizationId, loading: curr.organizationId === organizationId && curr.available }));
+    const result = await getJson(kaiOrganizationJoinRequestsReviewPath(organizationId));
+    if (joinReviewRequestRef.current !== token) return;
+    setJoinReview((curr) => ({
+      ...curr,
+      organizationId,
+      available: isJoinReviewAvailable(result),
+      items: isJoinReviewAvailable(result) ? toJoinReviewQueueItems(result.body.data?.items) : [],
+      loading: false,
+    }));
+  }, []);
+
+  useEffect(() => {
+    setJoinReviewOpen(false);
+    setJoinReview({ organizationId: selectedOrganizationId, available: false, items: [], loading: false, error: "", actionId: "" });
+    refetchJoinReview(selectedOrganizationId);
+  }, [selectedOrganizationId, refetchJoinReview]);
+
+  const decideJoinRequest = useCallback(async (item, decision) => {
+    const organizationId = joinReview.organizationId;
+    if (!organizationId || joinReview.actionId) return;
+    setJoinReview((curr) => ({ ...curr, actionId: item.organization_join_request_id, error: "" }));
+    const result = await postJson(
+      kaiOrganizationJoinRequestDecisionPath(organizationId, item.organization_join_request_id, decision),
+      {},
+    );
+    if (result.statusCode === 200 && result.body?.ok) {
+      setJoinReview((curr) => ({ ...curr, actionId: "" }));
+      await refetchJoinReview(organizationId);
+      return;
+    }
+    const failure = joinReviewErrorFromResult(result);
+    setJoinReview((curr) => ({ ...curr, actionId: "", error: describeJoinReviewError(failure) }));
+    if (shouldRefreshJoinQueueAfterError(failure.status)) await refetchJoinReview(organizationId);
+  }, [joinReview.organizationId, joinReview.actionId, refetchJoinReview]);
+
+  const openJoinReview = useCallback(() => {
+    setActiveSection("home");
+    setJoinReviewOpen(true);
   }, []);
 
   const completeKaiSetup = useCallback(async () => {
@@ -650,6 +721,7 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
       }
       organizationActionLabel={hasAuthorizedOrganizations ? "Request another organization" : "Request organization"}
       onJoinOrganization={openJoinOrganization}
+      onReviewJoinRequests={hasAuthorizedOrganizations && joinReview.available ? openJoinReview : undefined}
       hasAttention={needsAttention.hasAttention}
       onOpenNeedsAttention={() => setActiveSection("needsAttention")}
     >
@@ -666,6 +738,16 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
         <div className="gk-organization-join-area gk-organization-join-area--compact">
           <JoinRequestNotices view={joinRequestView} />
           {joinPanelOpen ? joinPanel : null}
+          {joinReview.available && joinReview.organizationId === selectedOrganizationId && (joinReviewOpen || joinReview.items.length > 0) ? (
+            <OrganizationJoinRequestsReviewPanel
+              items={joinReview.items}
+              loading={joinReview.loading}
+              error={joinReview.error}
+              actionId={joinReview.actionId}
+              onDecide={decideJoinRequest}
+              onClose={joinReviewOpen ? () => setJoinReviewOpen(false) : undefined}
+            />
+          ) : null}
         </div>
       ) : null}
       {showRequestNoticeForExistingUser ? (
