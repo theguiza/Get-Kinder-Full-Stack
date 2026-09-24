@@ -180,10 +180,10 @@ test("KAI enabled and bound: existing derived authority makes the organization v
   assert.deepEqual(result.data.items, [{ organization_id: KAI_ORG }]);
 });
 
-test("Impact Library organization onboarding UI exposes request/create states, not a fabricated Join workflow", () => {
+test("Impact Library organization onboarding UI exposes request/create states alongside the JOIN-4 Join action, with no invite/domain workflow", () => {
   const appSource = readFileSync("frontend/ImpactLibraryApp.jsx", "utf8");
   assert.match(appSource, /You do not yet have an organization available in KAI\./);
-  assert.match(appSource, /Set up an organization to start building your Impact Evidence Library\./);
+  assert.match(appSource, /title: "Set up your organization"/);
   assert.match(appSource, /Request \/ create organization/);
   assert.match(appSource, /Your organization request has been submitted\./);
   assert.match(appSource, /Your organization request was not approved\./);
@@ -191,7 +191,10 @@ test("Impact Library organization onboarding UI exposes request/create states, n
   assert.match(appSource, /Complete KAI setup/);
   assert.match(appSource, /organizationOnboardingStatusPath/);
   assert.match(appSource, /kaiEnablementPath/);
-  assert.doesNotMatch(appSource, /Join existing organization|Join organization|invite code|domain matching/i);
+  // JOIN-4 supersedes the earlier "no Join workflow" pin: Join existing
+  // organization now exists (JOIN-2/3 backend); invite/domain flows still do not.
+  assert.match(appSource, /Join existing organization/);
+  assert.doesNotMatch(appSource, /invite code|domain matching/i);
 });
 
 test("Impact Library organization selection behavior is preserved while request/create another organization is reachable", () => {

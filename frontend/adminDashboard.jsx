@@ -11,6 +11,12 @@ import {
   kaiOrganizationAccessPath,
   kaiOrganizationMembershipPath,
 } from "./kaiOrganizationAccessLogic.js";
+import {
+  describeJoinReviewError,
+  kaiOrganizationJoinRequestDecisionPath,
+  kaiOrganizationJoinRequestsReviewPath,
+  shouldRefreshJoinQueueAfterError,
+} from "./kaiOrganizationJoinLogic.js";
 
 const NAV_ITEMS = [
   { key: "overview", label: "Overview", icon: "fa-gauge-high" },
@@ -68,6 +74,10 @@ const INITIAL_KAI_ACCESS_MODAL = Object.freeze({
   formError: "",
   rowDrafts: {},
   rowSavingKey: null,
+  joinRequests: [],
+  joinRequestsLoading: false,
+  joinRequestsError: "",
+  joinRequestActionId: null,
 });
 const OVERRIDE_BOOLEAN_OPTIONS = [
   { value: "", label: "Inherit" },
@@ -779,6 +789,7 @@ export default function AdminDashboard() {
 
   const [kaiAccessModal, setKaiAccessModal] = useState(() => INITIAL_KAI_ACCESS_MODAL);
   const kaiAccessRequestRef = useRef(0);
+  const kaiJoinRequestsRequestRef = useRef(0);
 
   const [eventEdit, setEventEdit] = useState(null);
   const [volunteerEdit, setVolunteerEdit] = useState(null);
@@ -856,7 +867,13 @@ export default function AdminDashboard() {
         (typeof payload?.error === "string" ? payload.error : null) ||
         payload?.message ||
         `Request failed (${response.status})`;
-      throw new Error(errorMessage);
+      // Additive: callers that need the KAI error shape (JOIN-4 join-request
+      // review 409/404 handling) read these; existing callers only use message.
+      const error = new Error(errorMessage);
+      error.status = response.status;
+      error.kaiCode = payload?.error && typeof payload.error === "object" ? payload.error.code || null : null;
+      error.kaiBlockingReason = Array.isArray(payload?.blockers) ? payload.blockers[0]?.blocking_reason || null : null;
+      throw error;
     }
     return payload;
   }, []);
@@ -1538,6 +1555,48 @@ export default function AdminDashboard() {
     [requestJson]
   );
 
+  // JOIN-4: the organization's pending join requests (JOIN-3 GET
+  // .../join-requests). Same stale-response protection as loadKaiAccess: a
+  // separate monotonically increasing token plus the open-organization gate.
+  // Authorization is the backend's decision; a 403 is shown, not predicted.
+  const loadKaiJoinRequests = useCallback(
+    async (organizationId, kaiOrganizationId) => {
+      const requestToken = ++kaiJoinRequestsRequestRef.current;
+      if (!kaiOrganizationId) {
+        setKaiAccessModal((curr) =>
+          curr.organizationId === organizationId ? { ...curr, joinRequestsLoading: false, joinRequests: [] } : curr
+        );
+        return;
+      }
+      setKaiAccessModal((curr) =>
+        curr.organizationId === organizationId ? { ...curr, joinRequestsLoading: true } : curr
+      );
+      try {
+        const payload = await kaiRequestJson(kaiOrganizationJoinRequestsReviewPath(kaiOrganizationId));
+        if (kaiJoinRequestsRequestRef.current !== requestToken) return;
+        const items = Array.isArray(payload?.data?.items) ? payload.data.items : [];
+        setKaiAccessModal((curr) =>
+          curr.organizationId === organizationId
+            ? { ...curr, joinRequestsLoading: false, joinRequests: items }
+            : curr
+        );
+      } catch (err) {
+        if (kaiJoinRequestsRequestRef.current !== requestToken) return;
+        setKaiAccessModal((curr) =>
+          curr.organizationId === organizationId
+            ? {
+                ...curr,
+                joinRequestsLoading: false,
+                joinRequests: [],
+                joinRequestsError: describeJoinReviewError({ status: err?.status, code: err?.kaiCode }),
+              }
+            : curr
+        );
+      }
+    },
+    [kaiRequestJson]
+  );
+
   const openKaiAccessModal = useCallback(
     (org) => {
       const kaiOrganizationId = org?.kai_organization_id || null;
@@ -1553,12 +1612,14 @@ export default function AdminDashboard() {
           : "This organization has no active KAI organization binding yet, so KAI access cannot be viewed or changed here.",
       });
       loadKaiAccess(org.id, kaiOrganizationId);
+      loadKaiJoinRequests(org.id, kaiOrganizationId);
     },
-    [loadKaiAccess]
+    [loadKaiAccess, loadKaiJoinRequests]
   );
 
   const closeKaiAccessModal = useCallback(() => {
     kaiAccessRequestRef.current += 1;
+    kaiJoinRequestsRequestRef.current += 1;
     setKaiAccessModal(INITIAL_KAI_ACCESS_MODAL);
   }, []);
 
@@ -1598,6 +1659,45 @@ export default function AdminDashboard() {
       setKaiAccessModal((curr) => ({ ...curr, submitting: false, formError: message }));
     }
   }, [kaiAccessModal, requestJson, kaiMutateJson, pushToast, loadKaiAccess]);
+
+  // JOIN-4: approve (server-fixed active client_contributor) or decline one
+  // pending join request. The request carries no body fields - the backend
+  // resolves reviewer, requester, role, and status. Both outcomes refresh
+  // the queue from the server; approval also refreshes the roster so the
+  // new contributor appears. A 409/404 race refreshes the queue too.
+  const submitKaiJoinRequestDecision = useCallback(
+    async (joinRequest, decision) => {
+      const { organizationId, kaiOrganizationId, joinRequestActionId } = kaiAccessModal;
+      const joinRequestId = joinRequest?.organization_join_request_id;
+      if (!kaiOrganizationId || !joinRequestId || joinRequestActionId) return;
+
+      setKaiAccessModal((curr) => ({ ...curr, joinRequestActionId: joinRequestId, joinRequestsError: "" }));
+      try {
+        await kaiMutateJson(kaiOrganizationJoinRequestDecisionPath(kaiOrganizationId, joinRequestId, decision), "POST", {});
+        const who = joinRequest.requester_email || "the requester";
+        pushToast(decision === "approve" ? `Approved ${who} as a contributor.` : `Declined the join request from ${who}.`, "success");
+        setKaiAccessModal((curr) => ({ ...curr, joinRequestActionId: null }));
+        loadKaiJoinRequests(organizationId, kaiOrganizationId);
+        if (decision === "approve") loadKaiAccess(organizationId, kaiOrganizationId);
+      } catch (err) {
+        setKaiAccessModal((curr) =>
+          curr.organizationId === organizationId
+            ? {
+                ...curr,
+                joinRequestActionId: null,
+                joinRequestsError: describeJoinReviewError({
+                  status: err?.status,
+                  code: err?.kaiCode,
+                  blockingReason: err?.kaiBlockingReason,
+                }),
+              }
+            : { ...curr, joinRequestActionId: null }
+        );
+        if (shouldRefreshJoinQueueAfterError(err?.status)) loadKaiJoinRequests(organizationId, kaiOrganizationId);
+      }
+    },
+    [kaiAccessModal, kaiMutateJson, pushToast, loadKaiJoinRequests, loadKaiAccess]
+  );
 
   const submitKaiAccessRoleChange = useCallback(
     async (row, newRole) => {
@@ -4148,6 +4248,74 @@ export default function AdminDashboard() {
                 </tbody>
               </table>
             </div>
+
+            {kaiAccessModal.kaiOrganizationId ? (
+              <section className="border-top pt-3 mb-3" aria-labelledby="kai-join-requests-heading">
+                <h6 id="kai-join-requests-heading" className="mb-1">Join requests</h6>
+                <div className="small text-muted mb-2">
+                  Approving adds the person as a contributor. Roles can be changed afterwards in the access list above.
+                </div>
+                {kaiAccessModal.joinRequestsError ? (
+                  <div className="alert alert-warning py-2 small mb-2" role="alert">{kaiAccessModal.joinRequestsError}</div>
+                ) : null}
+                <div className="table-responsive" style={{ maxHeight: 220, overflowY: "auto" }}>
+                  <table className="table table-sm mb-0">
+                    <thead>
+                      <tr>
+                        <th scope="col">Requester</th>
+                        <th scope="col">Submitted</th>
+                        <th scope="col">Decision</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {kaiAccessModal.joinRequestsLoading ? (
+                        <tr>
+                          <td colSpan={3} className="text-muted small">Loading…</td>
+                        </tr>
+                      ) : kaiAccessModal.joinRequests.length === 0 ? (
+                        <tr>
+                          <td colSpan={3} className="text-muted small">No pending join requests.</td>
+                        </tr>
+                      ) : (
+                        kaiAccessModal.joinRequests.map((joinRequest) => {
+                          const busy = kaiAccessModal.joinRequestActionId === joinRequest.organization_join_request_id;
+                          const requester = joinRequest.requester_email || "Unknown requester";
+                          const submitted = joinRequest.submitted_at ? new Date(joinRequest.submitted_at).toLocaleString() : "—";
+                          return (
+                            <tr key={joinRequest.organization_join_request_id}>
+                              <td>{requester}</td>
+                              <td>{submitted}</td>
+                              <td>
+                                <div className="d-flex flex-wrap gap-1">
+                                  <button
+                                    type="button"
+                                    className="btn btn-primary btn-sm"
+                                    disabled={Boolean(kaiAccessModal.joinRequestActionId)}
+                                    aria-label={`Approve ${requester} as contributor`}
+                                    onClick={() => submitKaiJoinRequestDecision(joinRequest, "approve")}
+                                  >
+                                    {busy ? "Saving…" : "Approve as contributor"}
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className="btn btn-outline-secondary btn-sm"
+                                    disabled={Boolean(kaiAccessModal.joinRequestActionId)}
+                                    aria-label={`Decline join request from ${requester}`}
+                                    onClick={() => submitKaiJoinRequestDecision(joinRequest, "decline")}
+                                  >
+                                    Decline
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </section>
+            ) : null}
 
             <div className="border-top pt-3">
               <div className="row g-2 align-items-end">

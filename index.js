@@ -80,6 +80,7 @@ import {
 } from "./Backend/legacyOpenAiQuarantine.js";
 import { verifyToken, ensureAuthenticatedApi } from "./middleware/auth.js";
 import { ensureOrgRepPage } from "./middleware/ensureOrgRep.js";
+import { redirectAuthenticatedHomeToSignedInLanding } from "./middleware/signedInLanding.js";
 import { ensureAdmin, ensureAdminApi, isAdminRequest } from "./Backend/middleware/ensureAdmin.js";
 import {
   resolveOrgScope,
@@ -3480,7 +3481,9 @@ app.get("/", async (req, res, next) => {
   return renderIndexPage(req, res, next);
 });
 
-app.get("/home", renderIndexPage);
+// JOIN-4: authenticated /home (where every login success path lands) goes to
+// the normal KAI landing; unauthenticated /home stays the public page.
+app.get("/home", redirectAuthenticatedHomeToSignedInLanding, renderIndexPage);
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 16) OAuth Callback Routes

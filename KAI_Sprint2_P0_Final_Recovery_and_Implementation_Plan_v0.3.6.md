@@ -32987,3 +32987,94 @@ migration still unapplied to any shared or production database.
 production/shared database access or mutation, feature-flag/configuration
 change, real-client-data access, or `00_KAI_CURRENT_STATE.md` update
 performed. JOIN-4 not started.
+
+### Join Existing Organization - JOIN-4 Impact Library Join UI, admin review UI, signed-in landing (CLOSED LOCALLY)
+
+**Date:** 2026-09-24
+
+**Scope (owner-authorized Join Existing Organization package, JOIN-4
+only):** presentation over the closed JOIN-1..3 backend, plus the
+owner-confirmed signed-in landing. No schema/migration, no JOIN-1..3
+backend behavior change, no push, deploy, or database access.
+
+**Starting state:** branch `main`; starting HEAD
+`276d738f3caf827d75f71e753d44b9ce44cedb18`; working tree clean. Root
+`AGENTS.md` read and followed.
+
+**Implementation:**
+- Signed-in landing: every login success path (local `POST /login`,
+  Google/Facebook OAuth callbacks; signup returns through `/login`) already
+  redirects to `/home`, and none carries a return/deep-link parameter. One
+  central seam - `middleware/signedInLanding.js`
+  `redirectAuthenticatedHomeToSignedInLanding` on `app.get("/home", ...)` -
+  sends an authenticated `GET /home` to `/impact-library`; unauthenticated
+  `/home`, `/`, the `/home/<section>` marketing deep links, logout, OAuth
+  session handling, and `/admin` are unchanged.
+- `frontend/kaiOrganizationJoinLogic.js` (pure): JOIN-2/JOIN-3 paths, the
+  backend minimum term (2, asserted equal to the service contract), the
+  `organization_id`-only request body, backend `display_name`-only results,
+  `deriveJoinRequestView` (latest request per organization; approved never
+  a parallel state; pending for an already-authorized organization is a
+  "stale" cleanup notice only), and concise error copy for search, submit,
+  and admin review (409/404 refresh rule).
+- `frontend/impactLibrary/OrganizationJoinPanel.jsx`: the one shared
+  search/request component (debounced 300 ms, min-length gated, labelled
+  input, polite live region, "Request pending" instead of a duplicate
+  button, refreshes own requests after submit). No role, invite, domain, or
+  create-organization fields.
+- `frontend/ImpactLibraryApp.jsx`: fetches own join requests; zero-org Home
+  shows "Set up your organization" with "Request / create organization"
+  (existing `/org-apply?source=impact-library`) and "Join existing
+  organization" inline (no popup) plus pending/declined notices; existing
+  users keep one-org auto-select and the multi-org switcher, with compact
+  join notices and the same panel on Home. The authorized organization list
+  remains the only source of usable access.
+- `frontend/impactLibraryShell.jsx`: header "+ Add or join organization"
+  menu (Request / create new organization, Join existing organization);
+  keyboard/Escape/aria-expanded; original link kept as fallback.
+- `frontend/adminDashboard.jsx` (existing /admin -> Organizations -> KAI
+  Access modal): "Join requests" section listing requester email and
+  submitted time with "Approve as contributor" / "Decline" (POST, empty
+  body, no role selector); refreshes the queue after each decision and the
+  roster after approval; 409/404 refreshes the queue; `kaiRequestJson`
+  errors now additively carry HTTP status, KAI code, and blocking reason.
+- CSS: new join/menu styles with focus-visible outlines; a JOIN-4 mobile
+  block after the shell's own mobile block keeps the header control and
+  menu inside the viewport.
+- `kai-impact-library-organization-onboarding.spec.js`: the earlier pin that
+  no Join workflow exists is superseded (Join now exists; invite/domain
+  still absent), and the NO_REQUEST title assertion follows the new copy.
+
+**Tests / verification** (loopback `DATABASE_URL` sentinel exported for the
+package's test/build runs; see limitation below):
+- `node --test __tests__/kai-sprint2-join-4-organization-join-ui.spec.js`
+  -> 21/21 PASS (real Express landing proof, logic units, source contracts
+  for zero-org, existing-user, approved/stale-pending, admin, security,
+  accessibility/responsive).
+- JOIN-1..4 specs -> 93 pass, 0 fail, 3 skipped; JOIN ephemeral PostgreSQL
+  runner -> 99/99 PASS (regression).
+- Impact Library (all `kai-impact-library-*`, `impact-library-view`),
+  shell/responsive (`kai-package-i-responsive-accessibility-qa`),
+  access-admin UI/route, actor-context, organization-context, GK binding,
+  onboarding, tenant-authorization specs -> 375 pass, 0 fail, 3 skipped.
+- API contract specs -> same 4 pre-existing failures.
+- `npm test` -> 5113 pass, 12 fail, 85 skipped; failure set identical to
+  the JOIN-3 baseline.
+- `npm run build` -> PASS. `git diff --check` -> PASS. Full diff inspected.
+
+**Limitations:** no browser/visual walkthrough was performed (the repo has
+no DOM test harness; verification is logic + source contracts), so rendered
+layout at each breakpoint is NOT_CONFIRMED visually. The admin review UI is
+the existing /admin KAI Access modal, reachable only by Get Kinder site
+admins; a stored/derived client_admin has no UI for JOIN-3 review yet
+(backend supports it). The Impact Library does not poll: an approval shows
+up on the next load/refetch of the authorized organization list. An
+authenticated `/home` now always redirects, including for site admins and
+for internal redirects that target `/home` (e.g. org-portal saves,
+`/dashboard`). One `vite build` and two `node -e` checks in this session ran
+before the sentinel was exported (none touch a database).
+
+**Status:** JOIN_4_UI_AND_SIGNED_IN_LANDING_CLOSED_LOCALLY. No push,
+deployment, production/shared database access or mutation, migration,
+feature-flag/configuration change, real-client-data access, or
+`00_KAI_CURRENT_STATE.md` update performed. JOIN-5 not started.

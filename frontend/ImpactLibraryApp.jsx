@@ -21,6 +21,14 @@ import ProjectsView from "./projects/ProjectsView.jsx";
 import ImprovementPlanView from "./improvementPlan/ImprovementPlanView.jsx";
 import NeedsAttentionView from "./needsAttention/NeedsAttentionView.jsx";
 import { useNeedsAttention } from "./needsAttention/useNeedsAttention.js";
+import OrganizationJoinPanel from "./impactLibrary/OrganizationJoinPanel.jsx";
+import {
+  declinedJoinRequestMessage,
+  deriveJoinRequestView,
+  myOrganizationJoinRequestsPath,
+  pendingJoinRequestMessage,
+  stalePendingJoinRequestMessage,
+} from "./kaiOrganizationJoinLogic.js";
 
 /**
  * Per-view classification of whether "All organizational knowledge" (no
@@ -69,8 +77,8 @@ const REQUEST_STATES_SHOWN_WITH_AUTHORIZED_ORGANIZATIONS = Object.freeze(
 
 const ONBOARDING_COPY = Object.freeze({
   NO_REQUEST: {
-    title: "You do not yet have an organization available in KAI.",
-    body: "Set up an organization to start building your Impact Evidence Library.",
+    title: "Set up your organization",
+    body: "You do not yet have an organization available in KAI. Request a new organization, or join one that already uses KAI.",
     action: "Request / create organization",
   },
   PENDING: {
@@ -95,6 +103,7 @@ function OrganizationOnboardingPanel({
   enablementInFlight = false,
   enablementError = "",
   onEnableKai,
+  onJoinOrganization,
   compact = false,
 }) {
   const safeStatus = ONBOARDING_COPY[status] ? status : "NO_REQUEST";
@@ -121,6 +130,11 @@ function OrganizationOnboardingPanel({
               {copy.action}
             </a>
           ) : null}
+          {!compact && typeof onJoinOrganization === "function" ? (
+            <button type="button" className="gk-organization-onboarding-secondary" onClick={onJoinOrganization}>
+              Join existing organization
+            </button>
+          ) : null}
           {safeStatus === "APPROVED_NOT_KAI_ENABLED" && canEnableKai ? (
             <button
               type="button"
@@ -141,6 +155,27 @@ function OrganizationOnboardingPanel({
           <p className="gk-organization-onboarding-error">{enablementError}</p>
         ) : null}
       </div>
+    </section>
+  );
+}
+
+/**
+ * JOIN-4: compact join-request state notices. Rendered from the user's own
+ * join requests as derived by deriveJoinRequestView - never a membership
+ * state of their own, and never in place of usable organization access.
+ */
+function JoinRequestNotices({ view }) {
+  const lines = [
+    ...view.pending.map((entry) => ({ key: `p:${entry.organization_join_request_id}`, text: pendingJoinRequestMessage(entry.organization_display_name) })),
+    ...view.declined.map((entry) => ({ key: `d:${entry.organization_join_request_id}`, text: declinedJoinRequestMessage(entry.organization_display_name) })),
+    ...view.stalePending.map((entry) => ({ key: `s:${entry.organization_join_request_id}`, text: stalePendingJoinRequestMessage(entry.organization_display_name) })),
+  ];
+  if (lines.length === 0) return null;
+  return (
+    <section className="gk-organization-join-notices" aria-label="Organization join requests" aria-live="polite">
+      {lines.map((line) => (
+        <p key={line.key} className="gk-organization-join-notice">{line.text}</p>
+      ))}
     </section>
   );
 }
@@ -247,6 +282,34 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  // JOIN-4: the user's own join requests (JOIN-2 GET .../requests/mine).
+  // Display-only state; usable access always comes from organizationsPath().
+  const [myJoinRequests, setMyJoinRequests] = useState([]);
+  const [joinPanelOpen, setJoinPanelOpen] = useState(false);
+
+  const refetchMyJoinRequests = useCallback(async () => {
+    const result = await getJson(myOrganizationJoinRequestsPath());
+    if (result.statusCode !== 200 || !result.body?.ok) return;
+    setMyJoinRequests(Array.isArray(result.body.data?.items) ? result.body.data.items : []);
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const result = await getJson(myOrganizationJoinRequestsPath());
+      if (cancelled || result.statusCode !== 200 || !result.body?.ok) return;
+      setMyJoinRequests(Array.isArray(result.body.data?.items) ? result.body.data.items : []);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const openJoinOrganization = useCallback(() => {
+    setActiveSection("home");
+    setJoinPanelOpen(true);
   }, []);
 
   const completeKaiSetup = useCallback(async () => {
@@ -459,6 +522,17 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
     name: organizationProfiles[org.organization_id]?.name || "",
   }));
   const hasAuthorizedOrganizations = organizations.length > 0;
+  const joinRequestView = deriveJoinRequestView({
+    requests: myJoinRequests,
+    authorizedOrganizationIds: organizations.map((org) => org.organization_id),
+  });
+  const joinPanel = (
+    <OrganizationJoinPanel
+      pendingOrganizationIds={joinRequestView.pendingOrganizationIds}
+      onRequestSubmitted={refetchMyJoinRequests}
+      onClose={hasAuthorizedOrganizations ? () => setJoinPanelOpen(false) : undefined}
+    />
+  );
 
   const allowOrganizationWide = SECTION_ALLOWS_ORGANIZATION_WIDE[activeSection] === true;
   const showRequestNoticeForExistingUser =
@@ -469,14 +543,21 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
   let sectionContent;
   if (!hasAuthorizedOrganizations && onboardingLoaded) {
     sectionContent = (
-      <OrganizationOnboardingPanel
-        status={onboardingStatus?.status || "NO_REQUEST"}
-        application={onboardingStatus?.application || null}
-        canEnableKai={onboardingStatus?.can_enable_kai === true && Boolean(onboardingStatus?.gk_organization_id)}
-        enablementInFlight={enablementInFlight}
-        enablementError={enablementError}
-        onEnableKai={completeKaiSetup}
-      />
+      <div className="gk-organization-setup">
+        <OrganizationOnboardingPanel
+          status={onboardingStatus?.status || "NO_REQUEST"}
+          application={onboardingStatus?.application || null}
+          canEnableKai={onboardingStatus?.can_enable_kai === true && Boolean(onboardingStatus?.gk_organization_id)}
+          enablementInFlight={enablementInFlight}
+          enablementError={enablementError}
+          onEnableKai={completeKaiSetup}
+          onJoinOrganization={() => setJoinPanelOpen(true)}
+        />
+        <div className="gk-organization-join-area">
+          <JoinRequestNotices view={joinRequestView} />
+          {joinPanelOpen ? joinPanel : null}
+        </div>
+      </div>
     );
   } else if (!hasAuthorizedOrganizations) {
     sectionContent = <div style={{ color: "#8890A0", fontSize: 14 }}>Loading organization setup...</div>;
@@ -568,6 +649,7 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
           : ORGANIZATION_REQUEST_HREF
       }
       organizationActionLabel={hasAuthorizedOrganizations ? "Request another organization" : "Request organization"}
+      onJoinOrganization={openJoinOrganization}
       hasAttention={needsAttention.hasAttention}
       onOpenNeedsAttention={() => setActiveSection("needsAttention")}
     >
@@ -579,6 +661,12 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
           onSelectEngagement={setSelectedEngagementId}
           allowOrganizationWide={allowOrganizationWide}
         />
+      ) : null}
+      {hasAuthorizedOrganizations && activeSection === "home" ? (
+        <div className="gk-organization-join-area gk-organization-join-area--compact">
+          <JoinRequestNotices view={joinRequestView} />
+          {joinPanelOpen ? joinPanel : null}
+        </div>
       ) : null}
       {showRequestNoticeForExistingUser ? (
         <OrganizationOnboardingPanel

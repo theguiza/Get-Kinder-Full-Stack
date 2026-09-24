@@ -958,6 +958,81 @@
   margin-top: 12px;
 }
 
+/* ── JOIN-4: Join Existing Organization + Add or join organization ── */
+button.gk-shell-org-action { cursor: pointer; font-family: inherit; }
+.gk-shell-add-org-wrap { position: relative; min-width: 0; }
+.gk-shell-add-org-menu { min-width: 240px; }
+a.gk-shell-org-switcher-option { text-decoration: none; }
+a.gk-shell-org-switcher-option:hover { color: #2C2E3A; text-decoration: none; }
+.gk-organization-onboarding-secondary {
+  align-items: center;
+  background: #FFFFFF;
+  border: 1px solid rgba(69,90,124,0.32);
+  border-radius: 8px;
+  color: #455A7C;
+  cursor: pointer;
+  display: inline-flex;
+  font-family: "Work Sans", sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  min-height: 40px;
+  padding: 10px 16px;
+}
+.gk-organization-onboarding-secondary:hover { background: #F7F3ED; }
+.gk-organization-setup {
+  display: flex; flex-direction: column; align-items: center; gap: 16px;
+  min-height: 100%; justify-content: center; padding: 24px 0;
+}
+.gk-organization-setup .gk-organization-onboarding { min-height: 0; padding: 0; width: 100%; }
+.gk-organization-join-area { width: min(100%, 640px); display: flex; flex-direction: column; gap: 12px; }
+.gk-organization-join-area:empty { display: none; }
+.gk-organization-join-area--compact { width: 100%; margin-bottom: 20px; }
+.gk-organization-join-notices {
+  background: #FFFFFF; border: 1px solid rgba(69,90,124,0.12); border-radius: 10px;
+  padding: 12px 16px; display: flex; flex-direction: column; gap: 6px;
+}
+.gk-organization-join-notice { color: #455A7C; font-size: 13.5px; line-height: 1.45; margin: 0; overflow-wrap: anywhere; }
+.gk-organization-join {
+  background: #FFFFFF; border: 1px solid rgba(69,90,124,0.12); border-radius: 10px;
+  box-shadow: 0 1px 3px rgba(30,41,59,0.05); padding: 20px 22px; min-width: 0;
+}
+.gk-organization-join-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.gk-organization-join-title { color: #2C2E3A; font-size: 17px; font-weight: 700; margin: 0; }
+.gk-organization-join-close {
+  background: none; border: 1px solid rgba(69,90,124,0.24); border-radius: 8px;
+  color: #455A7C; cursor: pointer; font-size: 12.5px; font-weight: 700; padding: 5px 10px;
+}
+.gk-organization-join-label { display: block; color: #455A7C; font-size: 12.5px; font-weight: 700; margin-bottom: 6px; }
+.gk-organization-join-input {
+  width: 100%; max-width: 100%; box-sizing: border-box;
+  border: 1px solid rgba(69,90,124,0.28); border-radius: 8px; padding: 9px 12px;
+  font-family: "Work Sans", sans-serif; font-size: 14px; color: #2C2E3A; background: #FFFFFF;
+}
+.gk-organization-join-hint { color: #8890A0; font-size: 12.5px; margin: 6px 0 0; }
+.gk-organization-join-status { min-height: 20px; margin-top: 8px; color: #5B6478; font-size: 13px; }
+.gk-organization-join-error { color: #D63B3B; }
+.gk-organization-join-success { color: #2E7D5B; }
+.gk-organization-join-results { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.gk-organization-join-result {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px;
+  border: 1px solid rgba(69,90,124,0.12); border-radius: 8px; padding: 10px 12px;
+}
+.gk-organization-join-result-name { color: #2C2E3A; font-weight: 600; font-size: 14px; min-width: 0; overflow-wrap: anywhere; }
+.gk-organization-join-result-state { color: #8890A0; font-size: 12.5px; font-weight: 700; }
+.gk-organization-join-request-btn {
+  background: #FF5656; border: 1px solid #FF5656; border-radius: 8px; color: #FFFFFF; cursor: pointer;
+  font-family: "Work Sans", sans-serif; font-size: 13px; font-weight: 700; min-height: 36px; padding: 7px 14px;
+}
+.gk-organization-join-request-btn:hover { background: #E84545; border-color: #E84545; }
+.gk-organization-join-request-btn:disabled { cursor: default; opacity: 0.7; }
+.gk-organization-onboarding-primary:focus-visible,
+.gk-organization-onboarding-secondary:focus-visible,
+.gk-organization-join-input:focus-visible,
+.gk-organization-join-close:focus-visible,
+.gk-organization-join-request-btn:focus-visible {
+  outline: 2px solid #FF5656;
+  outline-offset: 2px;
+}
 /* ── Shared Project/Engagement context control (Package C0) ── */
 .gk-shell-project-bar {
   display: flex; align-items: center; gap: 10px;
@@ -1012,4 +1087,13 @@
   .gk-shell-header { height: 52px; padding: 0 16px; }
   .gk-shell-header-org-name { max-width: 46vw; }
   .gk-shell-content { padding: 16px 16px 32px; }
+}
+
+/* JOIN-4 mobile: keep the Add or join organization control and its menu
+   inside the viewport (no horizontal overflow). */
+@media (max-width: 767.98px) {
+  .gk-shell-header-org-name { max-width: 34vw; }
+  .gk-shell-org-action { white-space: normal; max-width: 34vw; font-size: 11.5px; padding: 5px 8px; line-height: 1.25; }
+  .gk-shell-add-org-menu { left: auto; right: 0; min-width: 200px; max-width: calc(100vw - 32px); }
+  .gk-organization-join { padding: 16px; }
 }

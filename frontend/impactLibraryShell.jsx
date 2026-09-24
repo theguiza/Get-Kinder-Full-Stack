@@ -129,11 +129,13 @@ export default function ImpactLibraryShell({
   onSelectOrganization,
   organizationActionHref = "/org-apply?source=impact-library",
   organizationActionLabel = "Request organization",
+  onJoinOrganization,
   hasAttention = false,
   onOpenNeedsAttention,
   children,
 }) {
   const [orgMenuOpen, setOrgMenuOpen] = useState(false);
+  const [addOrgMenuOpen, setAddOrgMenuOpen] = useState(false);
   const showOrgSwitcher = Array.isArray(organizations) && organizations.length > 1 && typeof onSelectOrganization === "function";
   const displayName = typeof organizationName === "string" && organizationName.trim() ? organizationName.trim() : "Your organization";
 
@@ -220,7 +222,45 @@ export default function ImpactLibraryShell({
             ) : (
               <span className="gk-shell-header-org-name">{displayName}</span>
             )}
-            {organizationActionHref ? (
+            {typeof onJoinOrganization === "function" ? (
+              <div
+                className="gk-shell-add-org-wrap"
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") setAddOrgMenuOpen(false);
+                }}
+              >
+                <button
+                  type="button"
+                  className="gk-shell-org-action"
+                  onClick={() => setAddOrgMenuOpen((open) => !open)}
+                  aria-expanded={addOrgMenuOpen}
+                  aria-haspopup="menu"
+                  aria-controls="gk-shell-add-org-menu"
+                >
+                  + Add or join organization
+                </button>
+                {addOrgMenuOpen ? (
+                  <div id="gk-shell-add-org-menu" className="gk-shell-org-switcher-menu gk-shell-add-org-menu" role="menu">
+                    {organizationActionHref ? (
+                      <a role="menuitem" className="gk-shell-org-switcher-option" href={organizationActionHref}>
+                        Request / create new organization
+                      </a>
+                    ) : null}
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="gk-shell-org-switcher-option"
+                      onClick={() => {
+                        setAddOrgMenuOpen(false);
+                        onJoinOrganization();
+                      }}
+                    >
+                      Join existing organization
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            ) : organizationActionHref ? (
               <a className="gk-shell-org-action" href={organizationActionHref}>
                 {organizationActionLabel}
               </a>
