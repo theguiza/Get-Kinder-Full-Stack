@@ -22,13 +22,16 @@ const COLORS = Object.freeze({
  * such column today; inventing one was avoided rather than fabricated.
  *
  * "+ New Project" is wired to the real, newly-authorized create-engagement
- * capability (Package F) - never a dead button.
+ * capability (Package F) - never a dead button - and is offered only when
+ * canCreate (the server's projectManagement capability) is true. Every
+ * member can view and select Projects.
  */
 export default function ProjectsView({
   engagements,
   engagementsLoaded,
   selectedEngagementId,
   onSelectEngagement,
+  canCreate = false,
   onCreateEngagement,
   creating,
   createError,
@@ -60,27 +63,29 @@ export default function ProjectsView({
             Use projects to focus on specific reporting needs or initiatives.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => setShowCreateForm((open) => !open)}
-          style={{
-            fontFamily: "'Work Sans', sans-serif",
-            fontWeight: 600,
-            fontSize: 14,
-            padding: "10px 18px",
-            borderRadius: 8,
-            cursor: "pointer",
-            background: COLORS.coral,
-            color: "#FFFFFF",
-            border: `1px solid ${COLORS.coral}`,
-            flexShrink: 0,
-          }}
-        >
-          + New Project
-        </button>
+        {canCreate ? (
+          <button
+            type="button"
+            onClick={() => setShowCreateForm((open) => !open)}
+            style={{
+              fontFamily: "'Work Sans', sans-serif",
+              fontWeight: 600,
+              fontSize: 14,
+              padding: "10px 18px",
+              borderRadius: 8,
+              cursor: "pointer",
+              background: COLORS.coral,
+              color: "#FFFFFF",
+              border: `1px solid ${COLORS.coral}`,
+              flexShrink: 0,
+            }}
+          >
+            + New Project
+          </button>
+        ) : null}
       </div>
 
-      {showCreateForm ? (
+      {canCreate && showCreateForm ? (
         <form
           onSubmit={handleCreate}
           style={{

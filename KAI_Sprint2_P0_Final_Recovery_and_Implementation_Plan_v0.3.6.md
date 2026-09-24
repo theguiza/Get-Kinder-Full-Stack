@@ -33561,3 +33561,140 @@ The existing P2-08 runner still passes 19/19.
 
 **Status:** IMPACT_FACTS_POSTGRES_PROOF_PASSED_LOCALLY. No push, deployment,
 production database access, or product-code change.
+
+### Horizontal client authorization closure - Package 1: common client role / capability / shell reconciliation (2026-09-24)
+
+**Program (USER_CONFIRMED):** four packages close client authorization
+horizontally: (1) common role/capability/shell, (2) Funder Requirements +
+Requirements/Readiness client-safe completion, (3) Generated Drafts +
+generated-content/client-review completion, (4) assembled acceptance. This
+is Package 1. Starting state TOOL_VERIFIED: `main`, HEAD `3994ef0`, clean.
+
+**Client network ledger (TOOL_VERIFIED from source; the scope for Packages
+1-3).** `P` = `/api/kai/sprint2/intake/admin`. A/R/C = client_admin /
+client_reviewer / client_contributor. "Before" is HEAD `3994ef0`.
+
+| Surface | Request | Caller | Service policy | Before A/R/C | After A/R/C | Class |
+|---|---|---|---|---|---|---|
+| Shell | GET `P/organizations` | ImpactLibraryApp | read_intake | 200/200/200 | same | CLIENT_SAFE_READ |
+| Shell | GET `P/organizations/:id/profile` | ImpactLibraryApp | read_intake | 200/200/200 | same | CLIENT_SAFE_READ |
+| Shell | GET `P/organization-onboarding/status` | ImpactLibraryApp | authenticated self | 200 | same | CLIENT_SAFE_READ |
+| Shell | POST enablement | ImpactLibraryApp, only when `can_enable_kai` | enablement policy | n/a in member path | same | CLIENT_ADMIN_ACTION |
+| Shell | GET `P/access-capabilities` | ImpactLibraryApp | read_intake | 200/200/200 | same, 3 new flags | CLIENT_SAFE_READ |
+| Join | GET `P/organization-join/requests/mine`, `.../organizations?q`; POST `.../requests` | ImpactLibraryApp, OrganizationJoinPanel | JOIN-2 self-service | 200 | same | CLIENT_SAFE_READ (the POST is self-service by any authenticated user) |
+| Join admin | GET `.../access-administration/organizations/:id/join-requests` | ImpactLibraryApp, every organization change | JOIN-3 `view_kai_access`, {client_admin} | 200/**403**/**403** | 200/not issued/not issued | CLIENT_ADMIN_ACTION (was MISWIRED_CLIENT_CALL for R/C) |
+| Join admin | POST `.../join-requests/:id/approve\|decline` | review panel | JOIN-3, {client_admin} | A only | same | CLIENT_ADMIN_ACTION |
+| Project | GET `P/organizations/:id/engagements` | ImpactLibraryApp, KaiWebIntake | `list_engagement_contexts` | 200/**403**/**403** | 200/200/200 | CLIENT_SAFE_READ |
+| Project | POST `P/organizations/:id/engagements` | ProjectsView | `create_engagement`, {gk_admin, gk_operator, client_admin} | A; control shown to R/C | A; control hidden for R/C | CLIENT_ADMIN_ACTION |
+| Home / Needs Attention | GET `P/organizations/:id/impact-home/summary` | ImpactHomeView, useNeedsAttention | read_intake | 200/200/200 | same | CLIENT_SAFE_READ |
+| Home / Needs Attention | GET organization review queue | only when `internalReviewAvailable` | GK review | not issued | same | GK_INTERNAL |
+| Needs Attention | GET `P/review-cockpit/capabilities` | useNeedsAttention | reports only | 200 false | same | CLIENT_SAFE_READ |
+| Needs Attention | GET `P/review-cockpit/queue` (sensitivity) | only when capability true | GK | not issued | same | GK_INTERNAL |
+| Home / Improvement Plan | GET `P/organizations/:id/improvement-practices[?engagement_id]` | ImpactHomeView, ImpactLibraryApp | `list_improvement_practices` | 200/**403**/**403** | 200/200/200 | CLIENT_SAFE_READ |
+| Improvement Plan | POST `.../improvement-practices`, POST `.../:id/status` | ImprovementPlanView | {gk_admin, gk_operator, client_admin} | A; controls shown to R/C | A; controls hidden for R/C | CLIENT_ADMIN_ACTION |
+| Files / Data Sources | GET `P/batches`, `P/batches/:id/files`, `P/files/:id` | KaiWebIntake | read_intake | 200/200/200 | same | CLIENT_SAFE_READ |
+| Intake / upload | POST `P/batches`, `.../file-reservations`, `.../files/upload-url`, `P/files/:id/confirm-upload` | KaiWebIntake, only with `intakeContribution` | P0 write: gk_admin/gk_operator or client_admin | A only; hidden for R/C | same | CLIENT_CONTRIBUTOR_ACTION (contributor: OWNER_DECISION_REQUIRED) |
+| Evidence / Impact Library / Impact Fact detail | GET `P/organizations/:id/impact-facts` | ImpactLibraryApp (shared) | read_intake | 200/200/200 | same | CLIENT_SAFE_READ |
+| Gaps / Reviews tabs | none | ClientKnowledgeStudio | n/a | n/a | same | n/a (follow-up link only with `clientFollowupReview`) |
+| Client follow-ups | GET `P/organizations/:id/client-followups`; POST `.../complete` | `/kai/client-followups`, linked only for `clientFollowupReview` | P2-11, {client_reviewer} | R only | same | CLIENT_REVIEWER_ACTION |
+| KAI chat | POST `/api/kai/impact-library/message` | ImpactLibraryKai | request context = organizations + engagements; tools = each tool's own policy | 200/**403**/**403** (engagement policy); all five GK tools offered to A | 200/200/200 base chat; zero tools offered to A/R/C | CLIENT_SAFE_READ (base); tools GK_INTERNAL |
+| GK cockpit: evidence library, claim library, eligible claims, traceability, sources, review queue | several | ImpactEvidenceLibrary, ImpactLibraryListView, ImpactFactDetailView | GK read sets | not issued (mounted only with `internalKnowledgeWorkspace`) | same | GK_INTERNAL |
+| Funder Requirements | GET engagement funder requirements | GK cockpit only | assessment stage GK-only | not issued | same | GK_INTERNAL (Package 2) |
+| Requirements / Readiness | GET requirements readiness / assessments | GK cockpit only | GK | not issued | same | GK_INTERNAL (Package 2) |
+| Generated Drafts, grant response packet, board reporting (candidate/export/review/final release/manifest) | several | GK cockpit only | GK / final authority | not issued | same | GK_INTERNAL / HIGH_RISK_FINAL (Package 3) |
+
+**Changes (TOOL_VERIFIED):**
+- `kaiEngagementContextService.js`: `LIST_ENGAGEMENTS_ALLOWED_ROLES`
+  (the read only) now also admits same-org client_reviewer and
+  client_contributor. The whole DTO is the organization's own project
+  configuration (id, organization, code, type, status, use case,
+  requirement target). create, project-details update, requirement-target
+  update, and funder classification keep {gk_admin, gk_operator,
+  client_admin}. gk_reviewer is unchanged.
+- `kaiImprovementPracticeService.js`: new `IMPROVEMENT_PRACTICE_READ_ROLES`
+  for list/get only (adds client_reviewer and client_contributor); create,
+  field update, and status change keep `IMPROVEMENT_PRACTICE_ALLOWED_ROLES`.
+- `kaiOrganizationAccessCapabilitiesService.js`: three flags, each the
+  owning service's own `validateActorCanPerformOperation` call:
+  `projectManagement` (`create_engagement`), `improvementPlanManagement`
+  (practice create and status), `organizationJoinReview` (JOIN-3
+  `view_kai_access`). The join review service exports its list operation.
+- KAI chat: `kaiAssistantClaimTraceabilityTool.js#listAuthorizedAssistantToolNames`
+  reports the tools whose own policy (same operation, same role set) admits
+  the actor in the server-composed organization. `handleKaiMessage` offers
+  only those on the Impact Evidence Library surface. The executor still
+  authorizes every call in full. With none authorized, the prompt is a
+  client variant that claims no data tools and states it cannot approve,
+  finalize, release, or override. GK actors get the unchanged five tools
+  and the unchanged prompt.
+- Frontend: `ImpactLibraryApp.jsx` issues the JOIN-3 review GET only when
+  `organizationJoinReview`, and passes `canManage` / `canCreate` from the
+  capabilities to `ImprovementPlanView` / `ProjectsView`. Those views hide
+  "+ New Practice", the status control, and "+ New Project" otherwise;
+  controls stay hidden while capabilities are unresolved or failed. No role
+  array in the frontend.
+- No change to `kaiAuthorizationService.js`, actor/binding derivation,
+  P0 write roles, GK read sets, routes, schema, flags, bindings, or
+  memberships.
+
+**Owner decision (NOT_CONFIRMED as resolved):** the recorded owner-authorized
+decision sets `P0_CLIENT_WRITE_ROLES = {client_admin}`, and its test
+explicitly keeps client_contributor blocked. The 2026-09-24 contract
+("client_admin = ... client_contributor contribution") describes
+client_admin; it does not authorize contributor writes. No newer explicit
+decision was found. **CLIENT_CONTRIBUTOR_UPLOAD = OWNER_DECISION_REQUIRED**;
+intake write authority is unchanged.
+
+**Tests (TOOL_VERIFIED):**
+- `__tests__/kai-client-authorization-reconciliation.spec.js` 29/29 (10 new
+  cases):
+  - read-only widening contract, with every mutation, join-review,
+    chat-tool, and P0 write set unchanged;
+  - the capability matrix with the new flags;
+  - client_reviewer and client_contributor journeys: organizations,
+    capabilities, engagements (exact DTO keys), practices list/get, Home
+    summary, sensitivity 200 false, intake batches, facts, and the KAI chat
+    request context all succeed with no hidden content;
+  - for the same roles, project create, practice create/status, join review,
+    intake writes, chat tools, GK evidence/claim library, review queue,
+    generated drafts, and review decisions are all denied;
+  - client_admin keeps join review, project, and plan administration and
+    gets no chat tools; GK roles keep all five tools; gk_reviewer's
+    engagement read is unchanged;
+  - cross-org A/R/C denied `VAL-AUT-003` on every widened read and denied
+    chat context;
+  - `handleKaiMessage`: A/R/C get no tools and the client prompt, and
+    gk_operator gets the five tools and the GK prompt;
+  - frontend source contracts for join-review gating and mutation gating.
+- Deliberate contract updates: `kai-sprint2-uat-final-completion-boundary`
+  (engagement read set, client_reviewer admitted, gk_reviewer still
+  denied, mutation sets pinned), `kai-sprint2-join-5-client-admin-review-ui`
+  (capability-gated effect), `kai-sprint2-impact-library-kai-surface`
+  (prompt call signature).
+- `npm test` (sentinel `DATABASE_URL`): 5166 pass, 12 fail, 87 skipped.
+  HEAD baseline, from a clean detached worktree of `3994ef0` with only a
+  dummy `OPENAI_API_KEY` placeholder and no `.env`: 5156 pass, 12 fail, 87
+  skipped. The failing test names are identical.
+- `npm run build` PASS (bundle rebuilt). `git diff --check` PASS.
+
+**Limitations (NOT_CONFIRMED):**
+- Not verified in a browser or in production.
+- The real-PostgreSQL runners were not rerun; no repository or evaluator
+  code changed.
+- The ImpactLibraryKai placeholder copy still mentions claims and
+  traceability for client members; the server prompt is correct.
+
+**Open items for Packages 2 and 3:**
+- Funder Requirements and Requirements/Readiness have no client-safe
+  projection; the assessment stage is GK-only (owner decision on releasing
+  GK assessments to clients).
+- Generated Drafts, generated-content client review, grant response packet,
+  and board reporting are GK-only; the client product issues none of them.
+- `data_dictionary_review` client actions are not surfaced.
+- gk_reviewer is still denied the engagement read, and therefore the KAI
+  chat context (pre-existing GK behavior, left unchanged).
+- CLIENT_CONTRIBUTOR_UPLOAD = OWNER_DECISION_REQUIRED.
+
+**Status:** CLIENT_AUTHORIZATION_PACKAGE_1_COMMON_SHELL_RECONCILED_LOCALLY.
+No push, deployment, production or database access, schema, flag, binding,
+or membership change, and no `00_KAI_CURRENT_STATE.md` update.

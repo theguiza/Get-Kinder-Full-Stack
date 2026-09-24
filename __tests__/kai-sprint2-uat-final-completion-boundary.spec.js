@@ -118,11 +118,15 @@ test("P2-11 read is disabled when KAI_SPRINT2_ENABLED is not true", async () => 
 
 // --- intake-context engagement read ---
 
-test("engagement-context read allowed roles are exactly gk_admin/gk_operator/client_admin", () => {
+test("engagement-context read allowed roles are exactly gk_admin/gk_operator and the three same-org client roles", () => {
   assert.deepEqual(
     [...__engagementContextServiceContract.LIST_ENGAGEMENTS_ALLOWED_ROLES].sort(),
-    ["client_admin", "gk_admin", "gk_operator"],
+    ["client_admin", "client_contributor", "client_reviewer", "gk_admin", "gk_operator"],
   );
+  // Reading project context never widens creating or updating it.
+  for (const key of ["CREATE_ENGAGEMENT_ALLOWED_ROLES", "UPDATE_ENGAGEMENT_PROJECT_DETAILS_ALLOWED_ROLES", "UPDATE_ENGAGEMENT_TARGET_ALLOWED_ROLES", "CLASSIFY_FUNDER_REQUIREMENTS_ALLOWED_ROLES"]) {
+    assert.deepEqual([...__engagementContextServiceContract[key]].sort(), ["client_admin", "gk_admin", "gk_operator"], key);
+  }
 });
 
 test("engagement-context read returns only engagement_id/organization_id for an authorized actor", async () => {
@@ -161,13 +165,20 @@ test("engagement-context read allows a bound client_admin to read its own organi
   }]);
 });
 
-test("engagement-context read rejects client_reviewer before any repository call - only GK actors select engagement context here", async () => {
-  const result = await listAuthorizedEngagements(
+test("engagement-context read admits a same-org client_reviewer with the same project DTO, and still rejects gk_reviewer before any repository call", async () => {
+  const allowed = await listAuthorizedEngagements(
     { organizationId: ORG, actorContext: clientReviewerActor },
+    { env: enabledEnv, listEngagementsForOrganization: async () => [{ engagement_id: "e1", organization_id: ORG, extra: "must not leak" }] },
+  );
+  assert.equal(allowed.ok, true);
+  assert.equal(allowed.data.items.length, 1);
+  assert.doesNotMatch(JSON.stringify(allowed), /must not leak/);
+  const denied = await listAuthorizedEngagements(
+    { organizationId: ORG, actorContext: gkReviewerActor },
     { env: enabledEnv, listEngagementsForOrganization: async () => { throw new Error("must not be called"); } },
   );
-  assert.equal(result.ok, false);
-  assert.equal(result.error.code, "authorization_denied");
+  assert.equal(denied.ok, false);
+  assert.equal(denied.error.code, "authorization_denied");
 });
 
 test("engagement-context read fails closed for cross-tenant membership", async () => {

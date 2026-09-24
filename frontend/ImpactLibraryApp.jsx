@@ -336,9 +336,10 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
 
   // JOIN-5: organization client_admin review of the selected organization's
   // pending join requests, over the JOIN-3 access-administration endpoints.
-  // The review surface exists only after the JOIN-3 GET itself returns 200
-  // for this organization; a 403 (ordinary contributor/reviewer) leaves it
-  // unavailable. No authority is computed here.
+  // The JOIN-3 GET is issued only when the server's access-capabilities read
+  // reports organizationJoinReview (the JOIN-3 review policy itself), so an
+  // ordinary contributor/reviewer never probes it; the review surface still
+  // exists only after that GET returns 200. No authority is computed here.
   const [joinReview, setJoinReview] = useState({
     organizationId: "",
     available: false,
@@ -367,12 +368,6 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
       loading: false,
     }));
   }, []);
-
-  useEffect(() => {
-    setJoinReviewOpen(false);
-    setJoinReview({ organizationId: selectedOrganizationId, available: false, items: [], loading: false, error: "", actionId: "" });
-    refetchJoinReview(selectedOrganizationId);
-  }, [selectedOrganizationId, refetchJoinReview]);
 
   const decideJoinRequest = useCallback(async (item, decision) => {
     const organizationId = joinReview.organizationId;
@@ -618,6 +613,23 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
   const capabilitiesResolved =
     accessCapabilities.organizationId === selectedOrganizationId && accessCapabilities.status !== "loading" && accessCapabilities.status !== "idle";
   const internalKnowledgeWorkspace = capabilitiesResolved && accessCapabilities.data?.internalKnowledgeWorkspace === true;
+  // Mutation controls are offered only on a resolved server answer; while
+  // unknown or after a failed read they stay hidden (fail closed). Reading
+  // Projects and the Improvement Plan needs no capability.
+  const canManageProjects = capabilitiesResolved && accessCapabilities.data?.projectManagement === true;
+  const canManageImprovementPlan = capabilitiesResolved && accessCapabilities.data?.improvementPlanManagement === true;
+  const canReviewJoinRequests = capabilitiesResolved && accessCapabilities.data?.organizationJoinReview === true;
+
+  useEffect(() => {
+    setJoinReviewOpen(false);
+    setJoinReview({ organizationId: selectedOrganizationId, available: false, items: [], loading: false, error: "", actionId: "" });
+    if (!canReviewJoinRequests) {
+      // Invalidates any in-flight review read for a previous organization.
+      joinReviewRequestRef.current += 1;
+      return;
+    }
+    refetchJoinReview(selectedOrganizationId);
+  }, [selectedOrganizationId, canReviewJoinRequests, refetchJoinReview]);
 
   // Client-safe reviewed Impact Facts, fetched once per organization and
   // shared by the client Impact Library and client Knowledge Studio (so
@@ -770,6 +782,7 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
         onChangeStatus={changeImprovementPracticeStatus}
         changingStatusId={changingImprovementPracticeStatusId}
         statusError={improvementPracticeStatusError}
+        canManage={canManageImprovementPlan}
       />
     );
   } else if (activeSection === "projects") {
@@ -782,6 +795,7 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
         onCreateEngagement={createEngagement}
         creating={creatingEngagement}
         createError={createEngagementError}
+        canCreate={canManageProjects}
       />
     );
   } else if (activeSection === "needsAttention") {

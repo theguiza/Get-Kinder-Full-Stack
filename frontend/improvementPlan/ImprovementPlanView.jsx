@@ -33,12 +33,17 @@ const CADENCE_OPTIONS = Object.keys(IMPROVEMENT_PRACTICE_CADENCE_LABELS);
  * responsible_actor_user_id and gap_log_item_id are never rendered as raw
  * identifiers - only a "Originated from a data gap" tag and (for Projects)
  * the real engagement_code label are shown.
+ *
+ * canManage is the server's improvementPlanManagement capability (the
+ * create/status policies). Without it the plan is read-only: no
+ * "+ New Practice" and the status is shown as text, not a control.
  */
 export default function ImprovementPlanView({
   practices,
   practicesLoaded,
   engagements,
   selectedEngagementId,
+  canManage = false,
   onCreatePractice,
   creating,
   createError,
@@ -86,27 +91,29 @@ export default function ImprovementPlanView({
             Recurring practices that turn a data or evidence gap into stronger impact evidence over time.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => setShowCreateForm((open) => !open)}
-          style={{
-            fontFamily: "'Work Sans', sans-serif",
-            fontWeight: 600,
-            fontSize: 14,
-            padding: "10px 18px",
-            borderRadius: 8,
-            cursor: "pointer",
-            background: COLORS.coral,
-            color: "#FFFFFF",
-            border: `1px solid ${COLORS.coral}`,
-            flexShrink: 0,
-          }}
-        >
-          + New Practice
-        </button>
+        {canManage ? (
+          <button
+            type="button"
+            onClick={() => setShowCreateForm((open) => !open)}
+            style={{
+              fontFamily: "'Work Sans', sans-serif",
+              fontWeight: 600,
+              fontSize: 14,
+              padding: "10px 18px",
+              borderRadius: 8,
+              cursor: "pointer",
+              background: COLORS.coral,
+              color: "#FFFFFF",
+              border: `1px solid ${COLORS.coral}`,
+              flexShrink: 0,
+            }}
+          >
+            + New Practice
+          </button>
+        ) : null}
       </div>
 
-      {showCreateForm ? (
+      {canManage && showCreateForm ? (
         <form
           onSubmit={handleCreate}
           style={{
@@ -217,24 +224,28 @@ export default function ImprovementPlanView({
                     background: STATUS_DOT_COLORS[practice.status] || COLORS.textMuted,
                   }}
                 />
-                <select
-                  value={practice.status}
-                  disabled={changingStatusId === practice.improvement_practice_id}
-                  onChange={(event) => onChangeStatus(practice, event.target.value)}
-                  aria-label="Practice status"
-                  style={{
-                    fontSize: 13,
-                    padding: "10px 10px",
-                    minHeight: 44,
-                    borderRadius: 6,
-                    border: "1px solid rgba(69,90,124,0.22)",
-                  }}
-                >
-                  <option value="recommended">{humanizeImprovementPracticeStatus("recommended")}</option>
-                  <option value="active">{humanizeImprovementPracticeStatus("active")}</option>
-                  <option value="paused">{humanizeImprovementPracticeStatus("paused")}</option>
-                  <option value="completed">{humanizeImprovementPracticeStatus("completed")}</option>
-                </select>
+                {canManage ? (
+                  <select
+                    value={practice.status}
+                    disabled={changingStatusId === practice.improvement_practice_id}
+                    onChange={(event) => onChangeStatus(practice, event.target.value)}
+                    aria-label="Practice status"
+                    style={{
+                      fontSize: 13,
+                      padding: "10px 10px",
+                      minHeight: 44,
+                      borderRadius: 6,
+                      border: "1px solid rgba(69,90,124,0.22)",
+                    }}
+                  >
+                    <option value="recommended">{humanizeImprovementPracticeStatus("recommended")}</option>
+                    <option value="active">{humanizeImprovementPracticeStatus("active")}</option>
+                    <option value="paused">{humanizeImprovementPracticeStatus("paused")}</option>
+                    <option value="completed">{humanizeImprovementPracticeStatus("completed")}</option>
+                  </select>
+                ) : (
+                  <span style={{ color: COLORS.textSecondary }}>{humanizeImprovementPracticeStatus(practice.status)}</span>
+                )}
               </label>
             </div>
             <div style={{ fontSize: 13, color: COLORS.textSecondary }}>{practice.rationale}</div>

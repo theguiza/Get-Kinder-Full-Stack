@@ -22,6 +22,17 @@ import { resolveKaiActorContext } from "../auth/kaiActorContext.js";
  * list a Project.
  */
 const IMPROVEMENT_PRACTICE_ALLOWED_ROLES = new Set(["gk_admin", "gk_operator", "client_admin"]);
+// Reading the plan (list/get) is ordinary client visibility: the practice
+// DTO (serializePractice) is the organization's own plan - title, rationale,
+// cadence, status, dates, and bare ids - with no gap, evidence, claim, or
+// review content. Same-org client_reviewer and client_contributor members
+// may read it; create, field edits, and status changes keep
+// IMPROVEMENT_PRACTICE_ALLOWED_ROLES.
+const IMPROVEMENT_PRACTICE_READ_ROLES = new Set([
+  ...IMPROVEMENT_PRACTICE_ALLOWED_ROLES,
+  "client_reviewer",
+  "client_contributor",
+]);
 const CREATE_IMPROVEMENT_PRACTICE_OPERATION = "create_improvement_practice";
 const LIST_IMPROVEMENT_PRACTICES_OPERATION = "list_improvement_practices";
 const GET_IMPROVEMENT_PRACTICE_OPERATION = "get_improvement_practice";
@@ -123,7 +134,7 @@ function serializePractice(row = {}) {
   };
 }
 
-async function resolveAuthorizedActor(input, dependencies, operation) {
+async function resolveAuthorizedActor(input, dependencies, operation, allowedRoles = IMPROVEMENT_PRACTICE_ALLOWED_ROLES) {
   if (!isKaiSprint2Enabled(dependencies.env || process.env)) {
     return { ok: false, error: buildKaiError("feature_disabled") };
   }
@@ -141,7 +152,7 @@ async function resolveAuthorizedActor(input, dependencies, operation) {
   }
 
   const auth = validateActorCanPerformOperation(actorContext, operation, input.organizationId, {
-    allowedRoles: IMPROVEMENT_PRACTICE_ALLOWED_ROLES,
+    allowedRoles,
   });
   if (!auth.ok) {
     return { ok: false, error: buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers }) };
@@ -262,7 +273,7 @@ export async function listImprovementPracticesForOrganizationOperation(input = {
     return buildKaiError("validation_blocker");
   }
 
-  const authResult = await resolveAuthorizedActor(input, dependencies, LIST_IMPROVEMENT_PRACTICES_OPERATION);
+  const authResult = await resolveAuthorizedActor(input, dependencies, LIST_IMPROVEMENT_PRACTICES_OPERATION, IMPROVEMENT_PRACTICE_READ_ROLES);
   if (!authResult.ok) return authResult.error;
 
   const listPractices = dependencies.listImprovementPracticesForOrganization || listImprovementPracticesForOrganization;
@@ -286,7 +297,7 @@ export async function getImprovementPracticeOperation(input = {}, dependencies =
     return buildKaiError("validation_blocker");
   }
 
-  const authResult = await resolveAuthorizedActor(input, dependencies, GET_IMPROVEMENT_PRACTICE_OPERATION);
+  const authResult = await resolveAuthorizedActor(input, dependencies, GET_IMPROVEMENT_PRACTICE_OPERATION, IMPROVEMENT_PRACTICE_READ_ROLES);
   if (!authResult.ok) return authResult.error;
 
   const getPractice = dependencies.getImprovementPracticeForOrganization || getImprovementPracticeForOrganization;
@@ -476,4 +487,7 @@ export async function updateImprovementPracticeStatusOperation(input = {}, depen
 
 export const __improvementPracticeServiceContract = {
   IMPROVEMENT_PRACTICE_ALLOWED_ROLES,
+  IMPROVEMENT_PRACTICE_READ_ROLES,
+  CREATE_IMPROVEMENT_PRACTICE_OPERATION,
+  UPDATE_IMPROVEMENT_PRACTICE_STATUS_OPERATION,
 };

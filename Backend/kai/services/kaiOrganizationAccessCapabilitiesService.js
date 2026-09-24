@@ -5,6 +5,9 @@ import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationServic
 import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
 import { __claimLibraryServiceContract } from "./kaiClaimLibraryService.js";
 import { __clientFollowupReadServiceContract } from "./kaiClientFollowupReadService.js";
+import { __engagementContextServiceContract } from "./kaiEngagementContextService.js";
+import { __improvementPracticeServiceContract } from "./kaiImprovementPracticeService.js";
+import { __organizationJoinRequestReviewServiceContract } from "./kaiOrganizationJoinRequestReviewService.js";
 
 /**
  * Organization access capabilities for the Impact Library client. The
@@ -27,6 +30,14 @@ import { __clientFollowupReadServiceContract } from "./kaiClientFollowupReadServ
  *   policies (upload/intake contribution).
  * - clientFollowupReview: the P2-11 client follow-up review policy
  *   (client_reviewer).
+ * - projectManagement: the create_engagement policy ("+ New Project").
+ *   Reading Projects is ordinary client context and needs no flag.
+ * - improvementPlanManagement: the create_improvement_practice and
+ *   update_improvement_practice_status policies ("+ New Practice" and the
+ *   status control). Reading the plan needs no flag.
+ * - organizationJoinReview: the JOIN-3 join-request review list policy
+ *   (organization client_admin). The shell requests the review queue only
+ *   when this is true.
  *
  * Admission reuses the existing read_intake role set for an active same-org
  * member, then tenant validation. Cross-org actors are denied (VAL-AUT-003).
@@ -38,6 +49,14 @@ const UUID_RE = KAI_SPRINT2_P0_PATTERNS.uuid;
 const { CLAIM_LIBRARY_READ_OPERATION, CLAIM_LIBRARY_READ_ROLES } = __claimLibraryServiceContract;
 const { LIST_CLIENT_FOLLOWUP_WORKFLOWS_ALLOWED_ROLES, LIST_CLIENT_FOLLOWUP_WORKFLOWS_OPERATION } =
   __clientFollowupReadServiceContract;
+const { CREATE_ENGAGEMENT_ALLOWED_ROLES, CREATE_ENGAGEMENT_OPERATION } = __engagementContextServiceContract;
+const {
+  IMPROVEMENT_PRACTICE_ALLOWED_ROLES,
+  CREATE_IMPROVEMENT_PRACTICE_OPERATION,
+  UPDATE_IMPROVEMENT_PRACTICE_STATUS_OPERATION,
+} = __improvementPracticeServiceContract;
+const { REVIEWER_ALLOWED_ROLES: JOIN_REVIEW_ALLOWED_ROLES, LIST_OPERATION: JOIN_REVIEW_LIST_OPERATION } =
+  __organizationJoinRequestReviewServiceContract;
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -108,6 +127,11 @@ export async function getOrganizationAccessCapabilities(input, dependencies = {}
         organizationId,
         LIST_CLIENT_FOLLOWUP_WORKFLOWS_ALLOWED_ROLES,
       ),
+      projectManagement: passes(actorContext, CREATE_ENGAGEMENT_OPERATION, organizationId, CREATE_ENGAGEMENT_ALLOWED_ROLES),
+      improvementPlanManagement:
+        passes(actorContext, CREATE_IMPROVEMENT_PRACTICE_OPERATION, organizationId, IMPROVEMENT_PRACTICE_ALLOWED_ROLES)
+        && passes(actorContext, UPDATE_IMPROVEMENT_PRACTICE_STATUS_OPERATION, organizationId, IMPROVEMENT_PRACTICE_ALLOWED_ROLES),
+      organizationJoinReview: passes(actorContext, JOIN_REVIEW_LIST_OPERATION, organizationId, JOIN_REVIEW_ALLOWED_ROLES),
     },
     error: null,
   };

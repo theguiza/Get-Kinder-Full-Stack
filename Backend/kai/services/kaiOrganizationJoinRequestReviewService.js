@@ -372,6 +372,7 @@ export async function declineOrganizationJoinRequest(
 
 export const __organizationJoinRequestReviewServiceContract = Object.freeze({
   REVIEWER_ALLOWED_ROLES,
+  LIST_OPERATION: VIEW_KAI_ACCESS,
   APPROVED_MEMBERSHIP_ROLE_NAME,
   APPROVED_MEMBERSHIP_STATUS,
   APPROVE_OPERATION,

@@ -629,6 +629,30 @@ async function importDefaultOrganizationEvidenceGapReadService() {
   return import("./kaiOrganizationEvidenceGapReadService.js");
 }
 
+function allowedRolesForTool(toolName) {
+  if (toolName === CLIENT_FOLLOWUP_TOOL_NAME) return CLIENT_FOLLOWUP_ALLOWED_ROLES;
+  if (toolName === ORGANIZATION_EVIDENCE_GAPS_TOOL_NAME) return ORGANIZATION_EVIDENCE_GAPS_ALLOWED_ROLES;
+  return ALLOWED_ROLES;
+}
+
+/**
+ * The governed tools this actor may use in the server-composed organization:
+ * each name is kept only when the same validateActorCanPerformOperation call
+ * getClaimTraceabilitySummaryTool makes for that tool (same operation, same
+ * role set) admits the actor. The KAI runtime offers the model only these
+ * tools, so an ordinary client member can hold the base conversation without
+ * being offered GK-only tools. It only reports: every tool call is still
+ * authorized in full by getClaimTraceabilitySummaryTool. A missing actor or
+ * organization yields no tools.
+ */
+export function listAuthorizedAssistantToolNames({ actorContext, organizationId } = {}) {
+  if (!isPlainObject(actorContext) || actorContext.actorType !== "human" || !isNonEmptyString(organizationId)) return [];
+  return [...TOOL_NAMES].filter(
+    (toolName) =>
+      validateActorCanPerformOperation(actorContext, toolName, organizationId, { allowedRoles: allowedRolesForTool(toolName) }).ok === true,
+  );
+}
+
 export async function getClaimTraceabilitySummaryTool(input, dependencies = {}) {
   const env = dependencies.env || process.env;
   if (!isKaiSprint2Enabled(env)) return buildKaiError("feature_disabled");
@@ -656,17 +680,11 @@ export async function getClaimTraceabilitySummaryTool(input, dependencies = {}) 
   const { actorContext } = input;
   if (!isMappedHumanActor(actorContext)) return buildKaiError("authorization_denied");
 
-  const allowedRolesForOperation =
-    input.toolName === CLIENT_FOLLOWUP_TOOL_NAME
-      ? CLIENT_FOLLOWUP_ALLOWED_ROLES
-      : input.toolName === ORGANIZATION_EVIDENCE_GAPS_TOOL_NAME
-        ? ORGANIZATION_EVIDENCE_GAPS_ALLOWED_ROLES
-        : ALLOWED_ROLES;
   const auth = validateActorCanPerformOperation(
     actorContext,
     input.toolName,
     input.arguments.organizationId,
-    { allowedRoles: allowedRolesForOperation },
+    { allowedRoles: allowedRolesForTool(input.toolName) },
   );
   if (!auth.ok) {
     if (auth.blockers?.some((blocker) => blocker.blocking_reason === "missing_active_organization_membership")) {

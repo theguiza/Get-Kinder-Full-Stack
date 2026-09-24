@@ -142,7 +142,8 @@ test("ordinary contributor/reviewer, another org's admin, and a global gk_admin 
 test("Impact Library renders the review surface only after the JOIN-3 GET succeeded for the selected organization", () => {
   assert.match(appSource, /const result = await getJson\(kaiOrganizationJoinRequestsReviewPath\(organizationId\)\);/);
   assert.match(appSource, /available: isJoinReviewAvailable\(result\),/);
-  assert.match(appSource, /refetchJoinReview\(selectedOrganizationId\);\s*\}, \[selectedOrganizationId, refetchJoinReview\]\);/);
+  // The JOIN-3 GET is issued only when the server reports organizationJoinReview.
+  assert.match(appSource, /if \(!canReviewJoinRequests\) \{[\s\S]*?\}\s*refetchJoinReview\(selectedOrganizationId\);\s*\}, \[selectedOrganizationId, canReviewJoinRequests, refetchJoinReview\]\);/);
   assert.match(appSource, /joinReview\.available && joinReview\.organizationId === selectedOrganizationId && \(joinReviewOpen \|\| joinReview\.items\.length > 0\)/);
   assert.match(appSource, /onReviewJoinRequests=\{hasAuthorizedOrganizations && joinReview\.available \? openJoinReview : undefined\}/);
   assert.match(shellSource, /typeof onReviewJoinRequests === "function" \? \([\s\S]*?Review join requests/);

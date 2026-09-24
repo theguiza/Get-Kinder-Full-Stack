@@ -16,19 +16,29 @@ import { insertRequiredSuccessfulAuditEvent } from "../db/kaiAuditQueries.js";
 import { resolveKaiActorContext } from "../auth/kaiActorContext.js";
 
 /**
- * KAI intake-context read: lets the Web Intake UI select an EXISTING
+ * KAI Project/Engagement context read: lets the Impact Library shell, Web
+ * Intake, and the KAI assistant request context select an EXISTING
  * tenant-authoritative organization/engagement pair instead of the caller
- * fabricating one. Gated by exactly the roles that can create a batch with
- * the resulting engagement id: the global gk_admin/gk_operator write roles
- * (Backend/kai/config/kaiSprint2P0Contract.js#create_intake_batch) plus the
- * org-scoped client_admin write exception derived only from an active
- * kai.gk_organization_bindings row (kaiAuthorizationService.js's
- * P0_CLIENT_WRITE_ROLES) - a client_admin actor bootstrapping ordinary intake
- * for its own bound organization must be able to read that organization's
- * engagements the same as it can create a batch in it. Read-only: never
- * creates an engagement row.
+ * fabricating one. Originally gated by exactly the roles that can create a
+ * batch (gk_admin/gk_operator plus the binding-derived client_admin). The
+ * engagement/project is the MVP use-case container every client role works
+ * in, and this DTO (serializeEngagementTarget: id, organization, code, type,
+ * status, use case, requirement target) is the organization's own project
+ * configuration - no evidence, claim, review, or GK assessment content - so
+ * the read is also admitted for same-org client_reviewer and
+ * client_contributor members. Reading context grants nothing else:
+ * create/update/classify below keep their own gk_admin/gk_operator/
+ * client_admin sets, and batch creation keeps the P0 write policy.
+ * gk_reviewer is intentionally unchanged. Read-only: never creates an
+ * engagement row.
  */
-const LIST_ENGAGEMENTS_ALLOWED_ROLES = new Set(["gk_admin", "gk_operator", "client_admin"]);
+const LIST_ENGAGEMENTS_ALLOWED_ROLES = new Set([
+  "gk_admin",
+  "gk_operator",
+  "client_admin",
+  "client_reviewer",
+  "client_contributor",
+]);
 const LIST_ENGAGEMENTS_OPERATION = "list_engagement_contexts";
 const UPDATE_ENGAGEMENT_TARGET_ALLOWED_ROLES = new Set(["gk_admin", "gk_operator", "client_admin"]);
 const UPDATE_ENGAGEMENT_TARGET_OPERATION = "update_engagement_requirement_target";

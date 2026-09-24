@@ -134,7 +134,7 @@ test("source contract: handleKaiMessage's legacy org prompt path cannot be reach
   const promptSelectionIndex = source.indexOf("let systemPrompt = isImpactEvidenceLibrarySurface");
   assert.ok(promptSelectionIndex > -1);
   const branchSlice = source.slice(promptSelectionIndex, promptSelectionIndex + 400);
-  assert.match(branchSlice, /getImpactEvidenceLibrarySystemPrompt\(user, kaiContext\)/);
+  assert.match(branchSlice, /getImpactEvidenceLibrarySystemPrompt\(user, kaiContext, \{ governedToolNames: \[\.\.\.authorizedGovernedToolNames\] \}\)/);
 });
 
 test("ephemeral (persistConversation: false) requests never resolve/create a conversationId, load history, or persist messages", async () => {

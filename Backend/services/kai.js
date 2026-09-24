@@ -11,6 +11,7 @@ import { getToolDefinitionsForKaiContext, IMPACT_EVIDENCE_LIBRARY_SURFACE } from
 import { executeToolCall } from "./kai-tool-executor.js";
 import { determineKaiTier, getModelForTier } from "../middleware/kai-tier.js";
 import { resolveKaiRequestContext } from "../kai/services/kaiContextService.js";
+import { listAuthorizedAssistantToolNames } from "../kai/services/kaiAssistantClaimTraceabilityTool.js";
 
 const anthropic = new Anthropic();
 const GUEST_TOOL_ALLOWLIST = new Set([
@@ -656,8 +657,20 @@ export async function handleKaiMessage({
     const isReportingReadinessSurface = surface === "reporting_readiness";
     const isImpactEvidenceLibrarySurface = surface === IMPACT_EVIDENCE_LIBRARY_SURFACE;
     const isOrgRep = user?.org_rep === true;
+    // Impact Evidence Library: the base conversation is available to any
+    // actor the governed request context admits; the governed tools offered
+    // are only those whose own server policy admits this actor in the
+    // server-composed organization (each call is still re-authorized).
+    const authorizedGovernedToolNames = isImpactEvidenceLibrarySurface
+      ? new Set(
+          listAuthorizedAssistantToolNames({
+            actorContext: kaiContext?.actorContext,
+            organizationId: kaiContext?.organizationContext?.organizationId,
+          }),
+        )
+      : null;
     let systemPrompt = isImpactEvidenceLibrarySurface
-      ? getImpactEvidenceLibrarySystemPrompt(user, kaiContext)
+      ? getImpactEvidenceLibrarySystemPrompt(user, kaiContext, { governedToolNames: [...authorizedGovernedToolNames] })
       : isReportingReadinessSurface
       ? getReportingReadinessSystemPrompt(user)
       : isGuest
@@ -674,7 +687,9 @@ export async function handleKaiMessage({
     }
 
     const toolDefinitions = getToolDefinitionsForKaiContext(resolvedTier, { surface }).filter(
-      (tool) => resolvedTier !== "guest" || GUEST_TOOL_ALLOWLIST.has(tool?.name)
+      (tool) =>
+        (resolvedTier !== "guest" || GUEST_TOOL_ALLOWLIST.has(tool?.name)) &&
+        (!authorizedGovernedToolNames || authorizedGovernedToolNames.has(tool?.name))
     );
     const model = getModelForTier(resolvedTier);
 

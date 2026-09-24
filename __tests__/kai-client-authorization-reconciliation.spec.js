@@ -17,8 +17,30 @@ import {
 import { getImpactHomeSummary } from "../Backend/kai/services/kaiImpactHomeSummaryService.js";
 import { createPostgresEligibleClaimsForAudienceRepository } from "../Backend/kai/dictionary/postgresEligibleClaimsForAudienceRepository.js";
 import { listAuthorizedOrganizations } from "../Backend/kai/services/kaiOrganizationContextService.js";
-import { listAuthorizedEngagements } from "../Backend/kai/services/kaiEngagementContextService.js";
-import { listImprovementPracticesForOrganizationOperation } from "../Backend/kai/services/kaiImprovementPracticeService.js";
+import {
+  createEngagement,
+  listAuthorizedEngagements,
+  __engagementContextServiceContract,
+} from "../Backend/kai/services/kaiEngagementContextService.js";
+import {
+  createImprovementPractice,
+  getImprovementPracticeOperation,
+  listImprovementPracticesForOrganizationOperation,
+  updateImprovementPracticeStatusOperation,
+  __improvementPracticeServiceContract,
+} from "../Backend/kai/services/kaiImprovementPracticeService.js";
+import {
+  listPendingOrganizationJoinRequestsForReviewer,
+  __organizationJoinRequestReviewServiceContract,
+} from "../Backend/kai/services/kaiOrganizationJoinRequestReviewService.js";
+import { resolveKaiRequestContext } from "../Backend/kai/services/kaiContextService.js";
+import {
+  listAuthorizedAssistantToolNames,
+  __assistantClaimTraceabilityToolContract,
+} from "../Backend/kai/services/kaiAssistantClaimTraceabilityTool.js";
+import pool from "../Backend/db/pg.js";
+import { handleKaiMessage, __testables as kaiServiceTestables } from "../Backend/services/kai.js";
+import { IMPACT_EVIDENCE_LIBRARY_SURFACE } from "../Backend/services/kai-tool-definitions.js";
 import { listIntakeBatchesForOrganization } from "../Backend/kai/services/kaiIntakeService.js";
 import { getReviewCockpitCapabilities } from "../Backend/kai/services/kaiReviewCockpitService.js";
 import { listClaimLibraryCandidates, __claimLibraryServiceContract } from "../Backend/kai/services/kaiClaimLibraryService.js";
@@ -333,12 +355,15 @@ test("P2-08 repository default projection is unchanged when no projection is sup
 // ---------------------------------------------------------------------------
 
 test("access capabilities follow each existing policy: client_admin contributes but is neither GK nor client reviewer", async () => {
+  const flags = (internalKnowledgeWorkspace, intakeContribution, clientFollowupReview, projectManagement, improvementPlanManagement, organizationJoinReview) => ({
+    internalKnowledgeWorkspace, intakeContribution, clientFollowupReview, projectManagement, improvementPlanManagement, organizationJoinReview,
+  });
   const expectations = [
-    [await clientAdminActor(), { internalKnowledgeWorkspace: false, intakeContribution: true, clientFollowupReview: false }],
-    [memberActor("client_reviewer"), { internalKnowledgeWorkspace: false, intakeContribution: false, clientFollowupReview: true }],
-    [memberActor("client_contributor"), { internalKnowledgeWorkspace: false, intakeContribution: false, clientFollowupReview: false }],
-    [memberActor("gk_reviewer"), { internalKnowledgeWorkspace: true, intakeContribution: false, clientFollowupReview: false }],
-    [memberActor("gk_operator", { kaiRoles: ["gk_operator"] }), { internalKnowledgeWorkspace: true, intakeContribution: true, clientFollowupReview: false }],
+    [await clientAdminActor(), flags(false, true, false, true, true, true)],
+    [memberActor("client_reviewer"), flags(false, false, true, false, false, false)],
+    [memberActor("client_contributor"), flags(false, false, false, false, false, false)],
+    [memberActor("gk_reviewer"), flags(true, false, false, false, false, false)],
+    [memberActor("gk_operator", { kaiRoles: ["gk_operator"] }), flags(true, true, false, true, true, false)],
   ];
   for (const [actorContext, expected] of expectations) {
     const result = await getOrganizationAccessCapabilities({ organizationId: ORG, actorContext }, { env: ENV });
@@ -580,6 +605,283 @@ test("assembled journey, client_reviewer / client_contributor / GK reviewer / cr
 });
 
 // ---------------------------------------------------------------------------
+// Package 1 (horizontal closure): common client shell for every client role.
+// ---------------------------------------------------------------------------
+
+const PRACTICE_ID = "d0000000-0000-4000-8000-000000000001";
+const PRACTICE_ROW = Object.freeze({
+  improvement_practice_id: PRACTICE_ID,
+  organization_id: ORG,
+  engagement_id: ENGAGEMENT,
+  gap_log_item_id: null,
+  title: "Monthly attendance check",
+  rationale: "Keeps attendance evidence current",
+  status: "active",
+  cadence: "monthly",
+  next_due_date: null,
+  responsible_actor_user_id: null,
+  created_at: "2026-09-01T00:00:00.000Z",
+  updated_at: "2026-09-01T00:00:00.000Z",
+});
+const ENGAGEMENT_ROW = Object.freeze({
+  engagement_id: ENGAGEMENT,
+  organization_id: ORG,
+  engagement_code: "Annual report",
+  engagement_type: "reporting",
+  engagement_status: "active",
+  project_metadata: {},
+});
+
+test("contract: read context is widened only for reads; every mutation, join-review, and chat-tool role set is unchanged", () => {
+  const clientRead = ["client_admin", "client_contributor", "client_reviewer", "gk_admin", "gk_operator"];
+  const adminManaged = ["client_admin", "gk_admin", "gk_operator"];
+  assert.deepEqual([...__engagementContextServiceContract.LIST_ENGAGEMENTS_ALLOWED_ROLES].sort(), clientRead);
+  assert.deepEqual([...__improvementPracticeServiceContract.IMPROVEMENT_PRACTICE_READ_ROLES].sort(), clientRead);
+  assert.deepEqual([...__improvementPracticeServiceContract.IMPROVEMENT_PRACTICE_ALLOWED_ROLES].sort(), adminManaged);
+  assert.deepEqual([...__engagementContextServiceContract.CREATE_ENGAGEMENT_ALLOWED_ROLES].sort(), adminManaged);
+  assert.deepEqual([...__engagementContextServiceContract.UPDATE_ENGAGEMENT_PROJECT_DETAILS_ALLOWED_ROLES].sort(), adminManaged);
+  assert.deepEqual([...__organizationJoinRequestReviewServiceContract.REVIEWER_ALLOWED_ROLES], ["client_admin"]);
+  assert.deepEqual([...__assistantClaimTraceabilityToolContract.ALLOWED_ROLES].sort(), ["gk_admin", "gk_operator", "gk_reviewer"]);
+  assert.deepEqual([...KAI_SPRINT2_P0_OPERATION_ROLES.create_intake_batch].sort(), ["gk_admin", "gk_operator"]);
+});
+
+for (const role of ["client_reviewer", "client_contributor"]) {
+  test(`assembled journey, ${role}: every common client-shell read is admitted with client-safe content`, async () => {
+    const actorContext = memberActor(role);
+
+    const organizations = await listAuthorizedOrganizations({ actorContext }, { env: ENV });
+    assert.deepEqual(organizations.data.items.map((item) => item.organization_id), [ORG]);
+    const capabilities = await getOrganizationAccessCapabilities({ organizationId: ORG, actorContext }, { env: ENV });
+    assert.equal(capabilities.ok, true, JSON.stringify(capabilities));
+    assert.equal(capabilities.data.internalKnowledgeWorkspace, false);
+
+    const engagements = await listAuthorizedEngagements(
+      { organizationId: ORG, actorContext },
+      { env: ENV, listEngagementsForOrganization: async ({ organizationId }) => (organizationId === ORG ? [ENGAGEMENT_ROW] : []) },
+    );
+    assert.equal(engagements.ok, true, JSON.stringify(engagements));
+    assert.deepEqual(Object.keys(engagements.data.items[0]).sort(), [
+      "engagement_code", "engagement_id", "engagement_status", "engagement_type", "organization_id", "project_status", "requirement_target", "use_case_type",
+    ]);
+
+    const practices = await listImprovementPracticesForOrganizationOperation(
+      { organizationId: ORG, actorContext },
+      { env: ENV, listImprovementPracticesForOrganization: async () => [PRACTICE_ROW] },
+    );
+    assert.equal(practices.ok, true, JSON.stringify(practices));
+    assert.equal(practices.data[0].title, "Monthly attendance check");
+    const practice = await getImprovementPracticeOperation(
+      { organizationId: ORG, improvementPracticeId: PRACTICE_ID, actorContext },
+      { env: ENV, getImprovementPracticeForOrganization: async () => PRACTICE_ROW },
+    );
+    assert.equal(practice.ok, true, JSON.stringify(practice));
+
+    const summary = await getImpactHomeSummary(
+      { organizationId: ORG, actorContext },
+      {
+        env: ENV,
+        eligibleClaimsForAudienceRepository: createPostgresEligibleClaimsForAudienceRepository({
+          runInTransaction: async (callback) => callback(claimsTransaction(Object.keys(EVALUATIONS))),
+          evaluator: async (_tx, input) => ({ ok: true, data: { ...EVALUATIONS[input.claimId], requestedAudience: input.requestedAudience } }),
+        }),
+        listClientFollowupWorkflowsForOrganization: async () => [],
+      },
+    );
+    assert.equal(summary.ok, true, JSON.stringify(summary));
+    assert.equal(summary.data.internalReviewAvailable, false);
+    const sensitivity = await getReviewCockpitCapabilities({ organizationId: ORG, actorContext }, { env: ENV });
+    assert.deepEqual(sensitivity, { ok: true, data: { can_manage_sensitivity_review: false } });
+    const batches = await listIntakeBatchesForOrganization(
+      { organizationId: ORG, actorContext },
+      { env: ENV, listIntakeBatchesForOrganization: async () => [] },
+    );
+    assert.equal(batches.ok, true, JSON.stringify(batches));
+    const facts = await listClientImpactFacts({ organizationId: ORG, actorContext }, factsDependencies());
+    assert.equal(facts.ok, true);
+
+    // KAI chat base: the governed request context resolves the same way the
+    // chat route does, through the same organization/engagement reads.
+    const chatContext = await resolveKaiRequestContext(
+      { actorContext, requestedOrganizationId: ORG, requestedEngagementId: ENGAGEMENT },
+      { env: ENV, listEngagementsForOrganization: async () => [ENGAGEMENT_ROW] },
+    );
+    assert.equal(chatContext.ok, true, JSON.stringify(chatContext));
+    assert.deepEqual(chatContext.data.engagementContext, { engagementId: ENGAGEMENT, organizationId: ORG });
+
+    for (const value of [organizations, capabilities, engagements, practices, practice, summary, sensitivity, batches, facts]) {
+      assertNoHidden(value, `${role} journey`);
+    }
+  });
+
+  test(`assembled journey, ${role}: no project, plan, join-review, intake-write, chat-tool, or GK escalation`, async () => {
+    const actorContext = memberActor(role);
+    const now = "2026-09-24T12:00:00.000Z";
+    const createdProject = await createEngagement(
+      { organizationId: ORG, engagementCode: "New project", actorContext },
+      { env: ENV, runInTransaction: throwingRead("engagement create transaction") },
+    );
+    assertRoleDenied(createdProject, `${role} create project`);
+    const createdPractice = await createImprovementPractice(
+      { organizationId: ORG, title: "T", rationale: "R", cadence: "monthly", actorContext },
+      { env: ENV, runInTransaction: throwingRead("practice create transaction") },
+    );
+    assertRoleDenied(createdPractice, `${role} create practice`);
+    const changedStatus = await updateImprovementPracticeStatusOperation(
+      { organizationId: ORG, improvementPracticeId: PRACTICE_ID, expectedUpdatedAt: now, status: "paused", actorContext },
+      { env: ENV, runInTransaction: throwingRead("practice status transaction") },
+    );
+    assertRoleDenied(changedStatus, `${role} change practice status`);
+    const joinQueue = await listPendingOrganizationJoinRequestsForReviewer(
+      { organizationId: ORG, actorContext },
+      { env: ENV, listPendingOrganizationJoinRequestsForReview: throwingRead("join requests") },
+    );
+    assert.equal(joinQueue.ok, false);
+    assert.equal(joinQueue.error.code, "authorization_denied");
+    assert.equal(joinQueue.blockers[0].blocking_reason, "role_not_allowed");
+    // Intake writes are unchanged (CLIENT_CONTRIBUTOR_UPLOAD = OWNER_DECISION_REQUIRED).
+    assert.equal(validateActorCanPerformOperation(actorContext, "create_intake_batch", ORG).ok, false);
+    assert.equal(validateActorCanPerformOperation(actorContext, "create_intake_file", ORG).ok, false);
+    assert.deepEqual(listAuthorizedAssistantToolNames({ actorContext, organizationId: ORG }), [], "base chat only, no governed tool");
+    for (const [label, result] of Object.entries({
+      "evidence library": await listOrganizationEvidenceLibrary(
+        { organizationId: ORG, limit: 25, afterEvidenceItemId: null, actorContext },
+        { env: ENV, listOrganizationEvidenceItems: throwingRead("evidence items") },
+      ),
+      "claim library": await listClaimLibraryCandidates(
+        { organizationId: ORG, actorContext, limit: 25 },
+        { env: ENV, listClaimLibraryReviewCandidates: throwingRead("claim library") },
+      ),
+      "review queue": await listOrganizationReviewQueue(
+        { organizationId: ORG, actorContext },
+        { env: ENV, claimTraceabilityRepository: { listOrganizationReviewQueue: throwingRead("review queue") } },
+      ),
+      "generated drafts": await listGeneratedDraftLibraryIndex({ organizationId: ORG, limit: 25, actorContext }, { env: ENV }),
+    })) {
+      assertRoleDenied(result, `${role} ${label}`);
+    }
+    assert.equal(
+      validateActorCanPerformOperation(actorContext, "record_claim_review_decision", ORG, { allowedRoles: new Set(DECISION_ALLOWED_ROLES) }).ok,
+      false,
+    );
+  });
+}
+
+test("client_admin keeps its implemented project, plan, and join-review administration; GK internal authority is unchanged", async () => {
+  const actorContext = await clientAdminActor();
+  const joinQueue = await listPendingOrganizationJoinRequestsForReviewer(
+    { organizationId: ORG, actorContext },
+    { env: ENV, listPendingOrganizationJoinRequestsForReview: async () => [] },
+  );
+  assert.equal(joinQueue.ok, true, JSON.stringify(joinQueue));
+  for (const [operation, allowedRoles] of [
+    ["create_engagement", __engagementContextServiceContract.CREATE_ENGAGEMENT_ALLOWED_ROLES],
+    ["create_improvement_practice", __improvementPracticeServiceContract.IMPROVEMENT_PRACTICE_ALLOWED_ROLES],
+    ["update_improvement_practice_status", __improvementPracticeServiceContract.IMPROVEMENT_PRACTICE_ALLOWED_ROLES],
+  ]) {
+    assert.equal(validateActorCanPerformOperation(actorContext, operation, ORG, { allowedRoles }).ok, true, operation);
+  }
+  assert.deepEqual(listAuthorizedAssistantToolNames({ actorContext, organizationId: ORG }), [], "client_admin: base chat only");
+
+  const allTools = [...__assistantClaimTraceabilityToolContract.TOOL_NAMES].sort();
+  for (const gk of [memberActor("gk_reviewer"), memberActor("gk_operator", { kaiRoles: ["gk_operator"] }), memberActor("gk_admin")]) {
+    assert.deepEqual(listAuthorizedAssistantToolNames({ actorContext: gk, organizationId: ORG }).sort(), allTools);
+  }
+  assert.deepEqual(listAuthorizedAssistantToolNames({ actorContext: memberActor("gk_operator"), organizationId: OTHER_ORG }), []);
+  assert.deepEqual(listAuthorizedAssistantToolNames({ actorContext: memberActor("gk_operator") }), []);
+  assert.deepEqual(listAuthorizedAssistantToolNames({ actorContext: { actorType: "service" }, organizationId: ORG }), []);
+  const gkReviewerEngagements = await listAuthorizedEngagements(
+    { organizationId: ORG, actorContext: memberActor("gk_reviewer") },
+    { env: ENV, listEngagementsForOrganization: throwingRead("engagements") },
+  );
+  assertRoleDenied(gkReviewerEngagements, "gk_reviewer engagement read (unchanged)");
+});
+
+test("cross-org client_reviewer / client_contributor are denied (VAL-AUT-003) on every widened read and on chat context", async () => {
+  for (const role of ["client_reviewer", "client_contributor", "client_admin"]) {
+    const actorContext = memberActor(role, { organizationId: OTHER_ORG });
+    for (const result of [
+      await listAuthorizedEngagements({ organizationId: ORG, actorContext }, { env: ENV, listEngagementsForOrganization: throwingRead("engagements") }),
+      await listImprovementPracticesForOrganizationOperation(
+        { organizationId: ORG, actorContext },
+        { env: ENV, listImprovementPracticesForOrganization: throwingRead("practices") },
+      ),
+      await getImprovementPracticeOperation(
+        { organizationId: ORG, improvementPracticeId: PRACTICE_ID, actorContext },
+        { env: ENV, getImprovementPracticeForOrganization: throwingRead("practice") },
+      ),
+      await getOrganizationAccessCapabilities({ organizationId: ORG, actorContext }, { env: ENV }),
+    ]) {
+      assert.equal(result.ok, false, role);
+      assert.equal(result.blockers[0].validator_key, "VAL-AUT-003", role);
+    }
+    const chatContext = await resolveKaiRequestContext(
+      { actorContext, requestedOrganizationId: ORG, requestedEngagementId: ENGAGEMENT },
+      { env: ENV, listEngagementsForOrganization: throwingRead("engagements") },
+    );
+    assert.equal(chatContext.ok, false);
+    assert.equal(chatContext.error.code, "authorization_denied");
+    assert.deepEqual(listAuthorizedAssistantToolNames({ actorContext, organizationId: ORG }), []);
+  }
+});
+
+async function runImpactLibraryChat(actorContext) {
+  const originalQuery = pool.query;
+  pool.query = async (rawSql, params = []) => {
+    const sql = (typeof rawSql === "string" ? rawSql : rawSql?.text ?? "").trim();
+    if (sql === "SELECT * FROM userdata WHERE id = $1 LIMIT 1") return { rows: [{ id: params[0], role: "volunteer" }], rowCount: 1 };
+    throw new Error(`Unexpected query in chat test: ${sql}`);
+  };
+  const payloads = [];
+  kaiServiceTestables.setResolveKaiRequestContextForTests(async () => ({
+    ok: true,
+    data: {
+      actorContext,
+      organizationContext: { organizationId: ORG },
+      engagementContext: { engagementId: ENGAGEMENT, organizationId: ORG },
+    },
+    error: null,
+  }));
+  kaiServiceTestables.setAnthropicCreateForTests(async (payload) => {
+    payloads.push(payload);
+    return { content: [{ type: "text", text: "Here is how reviews work." }], stop_reason: "end_turn", usage: { input_tokens: 1, output_tokens: 1 } };
+  });
+  try {
+    const result = await handleKaiMessage({
+      userId: 424242,
+      userMessage: "How do reviews work?",
+      conversationId: null,
+      tier: "pro",
+      surface: IMPACT_EVIDENCE_LIBRARY_SURFACE,
+      requestedOrganizationId: ORG,
+      requestedEngagementId: ENGAGEMENT,
+      persistConversation: false,
+    });
+    return { result, payloads };
+  } finally {
+    pool.query = originalQuery;
+    kaiServiceTestables.resetAnthropicCreateForTests();
+    kaiServiceTestables.resetResolveKaiRequestContextForTests();
+  }
+}
+
+test("KAI chat: client members get the base conversation with no governed tool and a no-data prompt; GK tool exposure is unchanged", async () => {
+  for (const actorContext of [await clientAdminActor(), memberActor("client_reviewer"), memberActor("client_contributor")]) {
+    const { result, payloads } = await runImpactLibraryChat(actorContext);
+    assert.equal(result.error, undefined, JSON.stringify(result));
+    assert.equal(result.message, "Here is how reviews work.");
+    assert.equal(payloads.length, 1);
+    assert.equal(payloads[0].tools, undefined, "no tool is offered to a client member");
+    assert.match(payloads[0].system, /You have no governed data tools for this user on this page/);
+    assert.match(payloads[0].system, /You cannot approve, finalize, release, or change any claim/);
+    assert.doesNotMatch(payloads[0].system, /help Get Kinder staff/);
+    assert.match(payloads[0].system, new RegExp(`Organization ID: ${ORG}`));
+  }
+  const { payloads } = await runImpactLibraryChat(memberActor("gk_operator", { kaiRoles: ["gk_operator"] }));
+  assert.deepEqual(payloads[0].tools.map((tool) => tool.name).sort(), [...__assistantClaimTraceabilityToolContract.TOOL_NAMES].sort());
+  assert.match(payloads[0].system, /help Get Kinder staff work inside the governed Impact Evidence Library/);
+});
+
+// ---------------------------------------------------------------------------
 // Frontend: the client product never calls a known GK-only endpoint.
 // ---------------------------------------------------------------------------
 
@@ -645,4 +947,31 @@ test("frontend: KaiWebIntake offers batch/upload writes only with contribution c
   assert.match(intakeSource, /\{canContribute \? \(\s*<button type="button" className="btn btn-sm btn-primary" onClick=\{createBatch\}/);
   assert.match(intakeSource, /\{canContribute \? \(\s*<div className="admin-card mb-3">\s*<h5 className="mb-2">2\. Upload file<\/h5>/);
   assert.match(readFileSync("frontend/adminDashboard.jsx", "utf8"), /<KaiWebIntake \/>/);
+});
+
+const improvementPlanSource = readFileSync("frontend/improvementPlan/ImprovementPlanView.jsx", "utf8");
+const projectsSource = readFileSync("frontend/projects/ProjectsView.jsx", "utf8");
+
+test("frontend: the join-review queue is requested only when the server reports organizationJoinReview", () => {
+  assert.match(appSource, /const canReviewJoinRequests = capabilitiesResolved && accessCapabilities\.data\?\.organizationJoinReview === true;/);
+  const effect = appSource.slice(appSource.indexOf("const canReviewJoinRequests"), appSource.indexOf("}, [selectedOrganizationId, canReviewJoinRequests, refetchJoinReview]);"));
+  assert.match(effect, /if \(!canReviewJoinRequests\) \{[\s\S]*?return;\s*\}\s*refetchJoinReview\(selectedOrganizationId\);/);
+  // The only other review-queue reads follow a decision, which needs the review panel (available only after a 200).
+  assert.equal((appSource.match(/refetchJoinReview\(/g) || []).length, 3);
+  assert.equal((appSource.match(/getJson\(kaiOrganizationJoinRequestsReviewPath\(/g) || []).length, 1);
+});
+
+test("frontend: Project and Improvement Plan mutations are offered only with the server capability; reads need none", () => {
+  assert.match(appSource, /const canManageProjects = capabilitiesResolved && accessCapabilities\.data\?\.projectManagement === true;/);
+  assert.match(appSource, /const canManageImprovementPlan = capabilitiesResolved && accessCapabilities\.data\?\.improvementPlanManagement === true;/);
+  assert.match(appSource, /<ImprovementPlanView[\s\S]*?canManage=\{canManageImprovementPlan\}/);
+  assert.match(appSource, /<ProjectsView[\s\S]*?canCreate=\{canManageProjects\}/);
+  assert.match(improvementPlanSource, /canManage = false,/);
+  assert.match(improvementPlanSource, /\{canManage \? \(\s*<button[\s\S]*?\+ New Practice/);
+  assert.match(improvementPlanSource, /\{canManage && showCreateForm \? \(/);
+  assert.match(improvementPlanSource, /\{canManage \? \(\s*<select\s+value=\{practice\.status\}/);
+  assert.match(projectsSource, /canCreate = false,/);
+  assert.match(projectsSource, /\{canCreate \? \(\s*<button[\s\S]*?\+ New Project/);
+  assert.match(projectsSource, /\{canCreate && showCreateForm \? \(/);
+  for (const source of [improvementPlanSource, projectsSource]) assert.doesNotMatch(source, /getJson\(|postJson\(|fetch\(/);
 });

@@ -64,6 +64,9 @@ export function projectOrganizationAccessCapabilities(dto) {
     internalKnowledgeWorkspace: dto.internalKnowledgeWorkspace === true,
     intakeContribution: dto.intakeContribution === true,
     clientFollowupReview: dto.clientFollowupReview === true,
+    projectManagement: dto.projectManagement === true,
+    improvementPlanManagement: dto.improvementPlanManagement === true,
+    organizationJoinReview: dto.organizationJoinReview === true,
   };
 }
 
