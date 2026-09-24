@@ -32649,3 +32649,66 @@ No production or runtime closure claimed. No push, deployment, production
 mutation, database mutation, migration execution, feature-flag/configuration
 change, real-client-data access, or `00_KAI_CURRENT_STATE.md` update
 performed.
+
+### Impact Library organization onboarding (request/create organization) (CLOSED LOCALLY)
+
+**Date:** 2026-09-24
+
+**Scope:** User-scoped organization-onboarding read and Impact Library states
+for users with zero, one, or many KAI organizations, including existing users
+requesting another organization. Reuses existing authority only:
+`listAuthorizedOrganizations` (what the user can use now), the existing
+`public.org_applications` request/approval lifecycle (`routes/orgApplyApi.js`),
+`resolveOrgScopeForUserId` (own GK memberships), and
+`getKaiEnablementStatusForOrganization` / existing enablement POST (KAI setup).
+No schema change, migration, KAI-table authority change, or Join Existing
+Organization workflow.
+
+**Implementation:**
+- `GET /kai/sprint2/admin/organization-onboarding/status`
+  (`Backend/kai/routes/sprint2IntakeApi.js`): no SQL; identity only from
+  `safeAuthenticatedUser(req)`; no browser-supplied user/org id.
+- `Backend/kai/services/kaiOrganizationOnboardingService.js`: orchestration
+  only (no pool/SQL). `status` is always the latest own request's state
+  (`NO_REQUEST | PENDING | DECLINED | APPROVED_NOT_KAI_ENABLED |
+  KAI_AVAILABLE`); organization availability is reported separately as
+  `has_authorized_organizations`, so an unrelated authorized organization
+  never masks another request. `KAI_AVAILABLE` requires the enablement read's
+  `kai_organization_id` for the requested organization to be in the caller's
+  authorized organization list.
+- `Backend/kai/db/gkOrganizationApplicationQueries.js#selectLatestOwnOrganizationApplication`
+  (same convention as `gkUserDirectoryQueries.js`): latest by
+  `submitted_at DESC NULLS LAST, id DESC`; no status priority; safe fields
+  only.
+- Approved application -> GK organization correlation: `org_applications`
+  stores no organization id, so the service mirrors the approval route's rule
+  (normalized name, lowest id) over the caller's own active admin memberships
+  only. Recorded limitation (NOT_CONFIRMED beyond that rule).
+- UI (`frontend/ImpactLibraryApp.jsx`, `impactLibraryShell.jsx`, CSS):
+  zero-org full onboarding panel; one-org auto-selection and multi-org
+  switcher unchanged; header "Request organization" / "Request another
+  organization" -> `/org-apply?source=impact-library`; existing users see a
+  compact Home notice for PENDING / DECLINED / APPROVED_NOT_KAI_ENABLED
+  (with "Complete KAI setup" only when the enablement authority permits).
+  `/org-apply` accepts `source=impact-library` for existing org reps and
+  returns to the Impact Library after submission.
+
+**Tests:** With a loopback `DATABASE_URL` sentinel for every Node/npm
+command:
+- `node --test __tests__/kai-impact-library-organization-onboarding.spec.js`
+  -> 25/25 PASS.
+- Related Impact Library shell/Home/context/projects, organization-context,
+  enablement, GK binding, access-administration and web-intake specs
+  (37 files) -> 400 pass, 0 fail, 6 skipped (DB-integration specs that
+  require the runner-owned database).
+- `npm test` -> 5020 pass, 12 fail, 82 skipped. The 12 failures
+  (`kai-sprint2-api-contract`, `batch-files-route`, `file-detail-route`,
+  `p1-09-review-cockpit-boundary`, `pass2-route-runtime`) fail identically on
+  a clean `e5ca77b` worktree; pre-existing and outside this package.
+- `npm run build` -> PASS. `git diff --check` -> PASS. Full diff inspected.
+
+**Status:** IMPACT_LIBRARY_ORGANIZATION_ONBOARDING_CLOSED_LOCALLY.
+USER_DRIVEN_JOIN_EXISTING_ORGANIZATION remains unimplemented. No production
+or runtime closure claimed. No push, deployment, production mutation,
+database access/mutation, migration, feature-flag/configuration change,
+real-client-data access, or `00_KAI_CURRENT_STATE.md` update performed.

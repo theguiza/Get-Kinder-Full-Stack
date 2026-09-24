@@ -824,6 +824,22 @@
 }
 .gk-shell-org-switcher-option:hover { background: #F7F3ED; }
 .gk-shell-org-switcher-option[aria-selected="true"] { font-weight: 700; color: #455A7C; }
+.gk-shell-org-action {
+  color: #455A7C;
+  border: 1px solid rgba(69,90,124,0.24);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12.5px;
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+  background: rgba(255,255,255,0.42);
+}
+.gk-shell-org-action:hover {
+  color: #2C2E3A;
+  background: #F7F3ED;
+  text-decoration: none;
+}
 
 .gk-shell-bell-btn {
   position: relative; width: 38px; height: 38px; border-radius: 10px;
@@ -836,6 +852,111 @@
 }
 
 .gk-shell-content { flex: 1; overflow-y: auto; padding: 40px 48px 64px; }
+
+.gk-organization-onboarding {
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 0;
+}
+.gk-organization-onboarding-card {
+  width: min(100%, 640px);
+  background: #FFFFFF;
+  border: 1px solid rgba(69,90,124,0.12);
+  border-radius: 10px;
+  box-shadow: 0 1px 3px rgba(30,41,59,0.05), 0 8px 20px rgba(30,41,59,0.04);
+  padding: 32px;
+}
+.gk-organization-onboarding-kicker {
+  color: #FF5656;
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+}
+.gk-organization-onboarding h1 {
+  color: #2C2E3A;
+  font-size: 26px;
+  font-weight: 700;
+  line-height: 1.2;
+  margin: 0 0 10px;
+}
+.gk-organization-onboarding p {
+  color: #5B6478;
+  font-size: 14.5px;
+  line-height: 1.5;
+  margin: 0;
+}
+.gk-organization-onboarding-org {
+  color: #455A7C;
+  background: #F7F3ED;
+  border-radius: 8px;
+  display: inline-flex;
+  font-size: 13px;
+  font-weight: 700;
+  margin-top: 18px;
+  padding: 7px 10px;
+}
+.gk-organization-onboarding-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 22px;
+}
+.gk-organization-onboarding-primary {
+  align-items: center;
+  background: #FF5656;
+  border: 1px solid #FF5656;
+  border-radius: 8px;
+  color: #FFFFFF;
+  cursor: pointer;
+  display: inline-flex;
+  font-family: "Work Sans", sans-serif;
+  font-size: 14px;
+  font-weight: 700;
+  min-height: 40px;
+  padding: 10px 16px;
+  text-decoration: none;
+}
+.gk-organization-onboarding-primary:hover {
+  background: #E84545;
+  border-color: #E84545;
+  color: #FFFFFF;
+  text-decoration: none;
+}
+.gk-organization-onboarding-primary:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+.gk-organization-onboarding-note,
+.gk-organization-onboarding-error {
+  font-size: 13px;
+  margin-top: 14px;
+}
+.gk-organization-onboarding-error {
+  color: #FF5656;
+}
+.gk-organization-onboarding--compact {
+  min-height: 0;
+  display: block;
+  padding: 0 0 20px;
+}
+.gk-organization-onboarding--compact .gk-organization-onboarding-card {
+  width: 100%;
+  padding: 18px 20px;
+}
+.gk-organization-onboarding--compact h2 {
+  color: #2C2E3A;
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.3;
+  margin: 0 0 6px;
+}
+.gk-organization-onboarding--compact .gk-organization-onboarding-org,
+.gk-organization-onboarding--compact .gk-organization-onboarding-actions {
+  margin-top: 12px;
+}
 
 /* ── Shared Project/Engagement context control (Package C0) ── */
 .gk-shell-project-bar {
@@ -853,6 +974,7 @@
 }
 
 /* Focus visibility, every breakpoint (design_handoff §7) */
+.gk-shell-org-action:focus-visible,
 .gk-shell-nav-item:focus-visible,
 .gk-shell-org-switcher-btn:focus-visible,
 .gk-shell-bell-btn:focus-visible,

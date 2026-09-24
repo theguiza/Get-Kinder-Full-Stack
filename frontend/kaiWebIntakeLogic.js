@@ -4,6 +4,10 @@ export function organizationsPath() {
   return `${BASE_PATH}/admin/organizations`;
 }
 
+export function organizationOnboardingStatusPath() {
+  return `${BASE_PATH}/admin/organization-onboarding/status`;
+}
+
 export function engagementsPath(organizationId) {
   return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/engagements`;
 }

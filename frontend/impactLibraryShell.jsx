@@ -127,6 +127,8 @@ export default function ImpactLibraryShell({
   organizations = [],
   selectedOrganizationId = "",
   onSelectOrganization,
+  organizationActionHref = "/org-apply?source=impact-library",
+  organizationActionLabel = "Request organization",
   hasAttention = false,
   onOpenNeedsAttention,
   children,
@@ -218,6 +220,11 @@ export default function ImpactLibraryShell({
             ) : (
               <span className="gk-shell-header-org-name">{displayName}</span>
             )}
+            {organizationActionHref ? (
+              <a className="gk-shell-org-action" href={organizationActionHref}>
+                {organizationActionLabel}
+              </a>
+            ) : null}
           </div>
           <button
             type="button"

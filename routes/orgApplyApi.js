@@ -48,16 +48,17 @@ function normalizeOrganizationName(value) {
 
 orgApplyRouter.get("/org-apply", ensureAuthenticated, async (req, res) => {
   try {
+    const fromImpactLibrary = req.query.source === "impact-library";
     const scope = await resolveOrgScope(req, {
       allowAdminPreview: false,
       includeOrgMembersForOrgRep: false,
     }).catch(() => null);
-    if (scope?.hasOrgRepAccess && scope?.orgId) return res.redirect("/home");
+    if (!fromImpactLibrary && scope?.hasOrgRepAccess && scope?.orgId) return res.redirect("/home");
     const assetTag = Date.now();
     const submitted = req.query.submitted === "true";
     const error = req.query.error === "true";
     const csrfToken = typeof req.csrfToken === "function" ? req.csrfToken() : "";
-    return res.render("org-apply", { user: req.user, assetTag, submitted, error, csrfToken });
+    return res.render("org-apply", { user: req.user, assetTag, submitted, error, csrfToken, fromImpactLibrary });
   } catch (err) {
     console.error("GET /org-apply error:", err);
     return res.redirect("/org-apply?error=true");
@@ -111,7 +112,8 @@ orgApplyRouter.post("/org-apply", ensureAuthenticated, async (req, res) => {
       )
     );
 
-    return res.redirect("/org-apply?submitted=true");
+    const source = req.body?.source === "impact-library" ? "&source=impact-library" : "";
+    return res.redirect(`/org-apply?submitted=true${source}`);
   } catch (err) {
     console.error("POST /org-apply error:", err);
     return res.redirect("/org-apply?error=true");

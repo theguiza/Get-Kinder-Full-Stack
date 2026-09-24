@@ -55,6 +55,7 @@
   <%
     const isSubmitted = submitted === true || submitted === "true";
     const hasError = error === true || error === "true";
+    const cameFromImpactLibrary = fromImpactLibrary === true || fromImpactLibrary === "true";
   %>
 
   <main class="container pb-4">
@@ -78,7 +79,9 @@
             <p class="text-muted mb-4">
               We'll review your application and get back to you within 2 business days. Keep an eye on your inbox.
             </p>
-            <a class="btn btn-outline-secondary" href="/home">Back Home</a>
+            <a class="btn btn-outline-secondary" href="<%= cameFromImpactLibrary ? '/impact-library' : '/home' %>">
+              <%= cameFromImpactLibrary ? 'Back to Impact Library' : 'Back Home' %>
+            </a>
           </div>
         <% } else { %>
           <% if (hasError) { %>
@@ -91,6 +94,9 @@
             <div class="card-body p-4 p-md-5">
               <form action="/org-apply" method="post">
                 <input type="hidden" name="_csrf" value="<%= typeof csrfToken !== 'undefined' ? csrfToken : '' %>">
+                <% if (cameFromImpactLibrary) { %>
+                  <input type="hidden" name="source" value="impact-library">
+                <% } %>
 
                 <div class="mb-3">
                   <label for="orgName" class="form-label">Organization Name *</label>

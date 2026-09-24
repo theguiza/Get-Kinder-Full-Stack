@@ -8,8 +8,10 @@ import {
   createEngagementPath,
   improvementPracticesPath,
   improvementPracticeStatusPath,
+  organizationOnboardingStatusPath,
   postJson,
 } from "./kaiWebIntakeLogic.js";
+import { kaiEnablementPath } from "./kaiOrgEnablementLogic.js";
 import { getJson } from "./impactEvidenceLibraryLogic.js";
 import ImpactEvidenceLibrary from "./ImpactEvidenceLibrary.jsx";
 import ImpactHomeView from "./ImpactHomeView.jsx";
@@ -56,6 +58,93 @@ const SECTION_SHOWS_PROJECT_CONTEXT_BAR = Object.freeze({
   improvementPlan: true,
 });
 
+const ORGANIZATION_REQUEST_HREF = "/org-apply?source=impact-library";
+
+// Request states that stay visible (compactly, on Home) to a user who
+// already has another organization available in KAI; the organization
+// selector remains the authority for what the user can currently use.
+const REQUEST_STATES_SHOWN_WITH_AUTHORIZED_ORGANIZATIONS = Object.freeze(
+  new Set(["PENDING", "DECLINED", "APPROVED_NOT_KAI_ENABLED"]),
+);
+
+const ONBOARDING_COPY = Object.freeze({
+  NO_REQUEST: {
+    title: "You do not yet have an organization available in KAI.",
+    body: "Set up an organization to start building your Impact Evidence Library.",
+    action: "Request / create organization",
+  },
+  PENDING: {
+    title: "Your organization request has been submitted.",
+    body: "It is waiting for review. We will make it available in KAI after approval and setup.",
+  },
+  DECLINED: {
+    title: "Your organization request was not approved.",
+    body: "You can submit a new request with updated organization details.",
+    action: "Submit a new request",
+  },
+  APPROVED_NOT_KAI_ENABLED: {
+    title: "Your organization has been approved.",
+    body: "KAI setup still needs to be completed before it appears in your Impact Library.",
+  },
+});
+
+function OrganizationOnboardingPanel({
+  status,
+  application,
+  canEnableKai = false,
+  enablementInFlight = false,
+  enablementError = "",
+  onEnableKai,
+  compact = false,
+}) {
+  const safeStatus = ONBOARDING_COPY[status] ? status : "NO_REQUEST";
+  const copy = ONBOARDING_COPY[safeStatus];
+  const orgName = typeof application?.org_name === "string" && application.org_name.trim()
+    ? application.org_name.trim()
+    : "";
+
+  const Heading = compact ? "h2" : "h1";
+
+  return (
+    <section
+      className={compact ? "gk-organization-onboarding gk-organization-onboarding--compact" : "gk-organization-onboarding"}
+      aria-live="polite"
+    >
+      <div className="gk-organization-onboarding-card">
+        <div className="gk-organization-onboarding-kicker">{compact ? "Organization request" : "Organization setup"}</div>
+        <Heading>{copy.title}</Heading>
+        <p>{copy.body}</p>
+        {orgName ? <div className="gk-organization-onboarding-org">{orgName}</div> : null}
+        <div className="gk-organization-onboarding-actions">
+          {copy.action ? (
+            <a className="gk-organization-onboarding-primary" href={ORGANIZATION_REQUEST_HREF}>
+              {copy.action}
+            </a>
+          ) : null}
+          {safeStatus === "APPROVED_NOT_KAI_ENABLED" && canEnableKai ? (
+            <button
+              type="button"
+              className="gk-organization-onboarding-primary"
+              onClick={onEnableKai}
+              disabled={enablementInFlight}
+            >
+              {enablementInFlight ? "Completing setup..." : "Complete KAI setup"}
+            </button>
+          ) : null}
+        </div>
+        {safeStatus === "APPROVED_NOT_KAI_ENABLED" && !canEnableKai ? (
+          <p className="gk-organization-onboarding-note">
+            Setup is not available from this account yet.
+          </p>
+        ) : null}
+        {enablementError ? (
+          <p className="gk-organization-onboarding-error">{enablementError}</p>
+        ) : null}
+      </div>
+    </section>
+  );
+}
+
 /**
  * Top-level container for the approved /impact-library redesign (Packages
  * B1/B2 shell + C0 shared Project/Engagement context). Owns the one
@@ -86,6 +175,25 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
     setSelectedImpactFactClaimId(null);
   }, [activeSection, selectedOrganizationId]);
 
+  const refetchOrganizations = useCallback(async ({ preserveSelection = false } = {}) => {
+    const result = await getJson(organizationsPath());
+    if (result.statusCode !== 200 || !result.body?.ok) {
+      setOrganizations([]);
+      setSelectedOrganizationId("");
+      return;
+    }
+    const items = result.body.data?.items || [];
+    setOrganizations(items);
+    if (items.length > 0) {
+      setSelectedOrganizationId((current) => {
+        if (preserveSelection && items.some((item) => item.organization_id === current)) return current;
+        return items[0].organization_id;
+      });
+    } else {
+      setSelectedOrganizationId("");
+    }
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -93,18 +201,68 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
       if (cancelled) return;
       if (result.statusCode !== 200 || !result.body?.ok) {
         setOrganizations([]);
+        setSelectedOrganizationId("");
         return;
       }
       const items = result.body.data?.items || [];
       setOrganizations(items);
       if (items.length > 0) {
         setSelectedOrganizationId(items[0].organization_id);
+      } else {
+        setSelectedOrganizationId("");
       }
     })();
     return () => {
       cancelled = true;
     };
   }, []);
+
+  const [onboardingStatus, setOnboardingStatus] = useState(null);
+  const [onboardingLoaded, setOnboardingLoaded] = useState(false);
+  const [enablementInFlight, setEnablementInFlight] = useState(false);
+  const [enablementError, setEnablementError] = useState("");
+
+  const refetchOnboardingStatus = useCallback(async () => {
+    const result = await getJson(organizationOnboardingStatusPath());
+    setOnboardingLoaded(true);
+    if (result.statusCode !== 200 || !result.body?.ok) {
+      setOnboardingStatus({ status: "NO_REQUEST", application: null, can_enable_kai: false, gk_organization_id: null });
+      return;
+    }
+    setOnboardingStatus(result.body.data || { status: "NO_REQUEST" });
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const result = await getJson(organizationOnboardingStatusPath());
+      if (cancelled) return;
+      setOnboardingLoaded(true);
+      if (result.statusCode !== 200 || !result.body?.ok) {
+        setOnboardingStatus({ status: "NO_REQUEST", application: null, can_enable_kai: false, gk_organization_id: null });
+        return;
+      }
+      setOnboardingStatus(result.body.data || { status: "NO_REQUEST" });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const completeKaiSetup = useCallback(async () => {
+    const gkOrganizationId = onboardingStatus?.gk_organization_id;
+    if (!gkOrganizationId) return;
+    setEnablementInFlight(true);
+    setEnablementError("");
+    const result = await postJson(kaiEnablementPath(gkOrganizationId), {});
+    setEnablementInFlight(false);
+    if (result.statusCode !== 201 || !result.body?.ok) {
+      setEnablementError("KAI setup could not be completed from this account.");
+      return;
+    }
+    await refetchOrganizations({ preserveSelection: true });
+    await refetchOnboardingStatus();
+  }, [onboardingStatus, refetchOrganizations, refetchOnboardingStatus]);
 
   useEffect(() => {
     if (organizations.length === 0) return;
@@ -300,11 +458,29 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
     organization_id: org.organization_id,
     name: organizationProfiles[org.organization_id]?.name || "",
   }));
+  const hasAuthorizedOrganizations = organizations.length > 0;
 
   const allowOrganizationWide = SECTION_ALLOWS_ORGANIZATION_WIDE[activeSection] === true;
+  const showRequestNoticeForExistingUser =
+    hasAuthorizedOrganizations &&
+    activeSection === "home" &&
+    REQUEST_STATES_SHOWN_WITH_AUTHORIZED_ORGANIZATIONS.has(onboardingStatus?.status);
 
   let sectionContent;
-  if (activeSection === "knowledgeStudio") {
+  if (!hasAuthorizedOrganizations && onboardingLoaded) {
+    sectionContent = (
+      <OrganizationOnboardingPanel
+        status={onboardingStatus?.status || "NO_REQUEST"}
+        application={onboardingStatus?.application || null}
+        canEnableKai={onboardingStatus?.can_enable_kai === true && Boolean(onboardingStatus?.gk_organization_id)}
+        enablementInFlight={enablementInFlight}
+        enablementError={enablementError}
+        onEnableKai={completeKaiSetup}
+      />
+    );
+  } else if (!hasAuthorizedOrganizations) {
+    sectionContent = <div style={{ color: "#8890A0", fontSize: 14 }}>Loading organization setup...</div>;
+  } else if (activeSection === "knowledgeStudio") {
     sectionContent = (
       <ImpactEvidenceLibrary
         organizationId={selectedOrganizationId}
@@ -381,21 +557,38 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
     <ImpactLibraryShell
       activeSection={activeSection}
       onNavigate={setActiveSection}
-      organizationName={organizationName}
+      organizationName={hasAuthorizedOrganizations ? organizationName : "KAI setup"}
       organizationLogoUrl={organizationLogoUrl}
       organizations={organizationsForSwitcher}
       selectedOrganizationId={selectedOrganizationId}
       onSelectOrganization={setSelectedOrganizationId}
+      organizationActionHref={
+        !hasAuthorizedOrganizations && onboardingStatus?.status === "PENDING"
+          ? null
+          : ORGANIZATION_REQUEST_HREF
+      }
+      organizationActionLabel={hasAuthorizedOrganizations ? "Request another organization" : "Request organization"}
       hasAttention={needsAttention.hasAttention}
       onOpenNeedsAttention={() => setActiveSection("needsAttention")}
     >
-      {SECTION_SHOWS_PROJECT_CONTEXT_BAR[activeSection] === true ? (
+      {hasAuthorizedOrganizations && SECTION_SHOWS_PROJECT_CONTEXT_BAR[activeSection] === true ? (
         <ProjectContextBar
           engagements={engagements}
           engagementsLoaded={engagementsLoaded}
           selectedEngagementId={selectedEngagementId}
           onSelectEngagement={setSelectedEngagementId}
           allowOrganizationWide={allowOrganizationWide}
+        />
+      ) : null}
+      {showRequestNoticeForExistingUser ? (
+        <OrganizationOnboardingPanel
+          compact
+          status={onboardingStatus.status}
+          application={onboardingStatus.application || null}
+          canEnableKai={onboardingStatus.can_enable_kai === true && Boolean(onboardingStatus.gk_organization_id)}
+          enablementInFlight={enablementInFlight}
+          enablementError={enablementError}
+          onEnableKai={completeKaiSetup}
         />
       ) : null}
       {sectionContent}

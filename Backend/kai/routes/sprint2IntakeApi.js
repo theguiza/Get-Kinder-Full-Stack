@@ -1859,6 +1859,13 @@ async function getOrganizationEnablementService() {
   return organizationEnablementServicePromise;
 }
 
+let organizationOnboardingServicePromise = null;
+async function getOrganizationOnboardingService() {
+  if (intakeServiceOverride?.getMyOrganizationOnboardingStatus) return intakeServiceOverride;
+  organizationOnboardingServicePromise ||= import("../services/kaiOrganizationOnboardingService.js");
+  return organizationOnboardingServicePromise;
+}
+
 const GK_ORGANIZATION_ID_PATTERN = /^[1-9][0-9]{0,9}$/;
 
 /**
@@ -1872,6 +1879,20 @@ router.get("/admin/organizations", async (req, res) => {
   return invokeService(res, async () => {
     const service = await getOrganizationContextService();
     return service.listAuthorizedOrganizations({ req: { user: safeAuthenticatedUser(req) } });
+  });
+});
+
+/**
+ * Impact Library organization-onboarding read: user-scoped status for the
+ * existing organization application lifecycle. The route contains no SQL and
+ * never accepts a user id or organization id from the browser; the service
+ * derives identity from the authenticated request and delegates KAI setup
+ * checks to the existing enablement authority.
+ */
+router.get("/admin/organization-onboarding/status", async (req, res) => {
+  return invokeService(res, async () => {
+    const service = await getOrganizationOnboardingService();
+    return service.getMyOrganizationOnboardingStatus({ req: { user: safeAuthenticatedUser(req) } });
   });
 });
 
