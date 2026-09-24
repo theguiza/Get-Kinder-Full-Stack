@@ -3141,6 +3141,73 @@ router.get(
   },
 );
 
+let organizationAccessCapabilitiesServicePromise = null;
+async function getOrganizationAccessCapabilitiesService() {
+  if (intakeServiceOverride?.getOrganizationAccessCapabilities) return intakeServiceOverride;
+  organizationAccessCapabilitiesServicePromise ||= import("../services/kaiOrganizationAccessCapabilitiesService.js");
+  return organizationAccessCapabilitiesServicePromise;
+}
+
+/**
+ * Organization access capabilities: which existing service policies admit
+ * the actor for this organization (GK internal knowledge workspace, intake
+ * contribution, client follow-up review), so the Impact Library client never
+ * calls a GK-only read to discover it. Booleans only; no SQL here.
+ */
+router.get(
+  "/admin/organizations/:organizationId/access-capabilities",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    const identifiers = eligibleClaimsForAudienceOrganizationIdentifier(req);
+    if (!identifiers) {
+      return sendKaiError(res, "validation_blocker", {
+        blockers: [routeValidationBlocker("invalid_organization_id", "organization_id")],
+      });
+    }
+    return invokeService(res, async () => {
+      const service = await getOrganizationAccessCapabilitiesService();
+      return service.getOrganizationAccessCapabilities({
+        organizationId: identifiers.organizationId,
+        actorContext: sprint2MappedActorContext(req),
+      });
+    });
+  },
+);
+
+let clientImpactFactsServicePromise = null;
+async function getClientImpactFactsService() {
+  if (intakeServiceOverride?.listClientImpactFacts) return intakeServiceOverride;
+  clientImpactFactsServicePromise ||= import("../services/kaiClientImpactFactsService.js");
+  return clientImpactFactsServicePromise;
+}
+
+/**
+ * Client-safe reviewed Impact Facts: only claims the governed P2-08
+ * evaluator marks eligible for the internal audience, projected to claim id,
+ * statement, type, and accepted limitation dimensions. Replaces the client
+ * Impact Library / Knowledge Studio use of the GK-internal claim-library and
+ * evidence-library indexes. No SQL here.
+ */
+router.get(
+  "/admin/organizations/:organizationId/impact-facts",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    const identifiers = eligibleClaimsForAudienceOrganizationIdentifier(req);
+    if (!identifiers) {
+      return sendKaiError(res, "validation_blocker", {
+        blockers: [routeValidationBlocker("invalid_organization_id", "organization_id")],
+      });
+    }
+    return invokeService(res, async () => {
+      const service = await getClientImpactFactsService();
+      return service.listClientImpactFacts({
+        organizationId: identifiers.organizationId,
+        actorContext: sprint2MappedActorContext(req),
+      });
+    });
+  },
+);
+
 let evidenceLibraryServicePromise = null;
 async function getEvidenceLibraryService() {
   if (intakeServiceOverride?.listOrganizationEvidenceLibrary) return intakeServiceOverride;

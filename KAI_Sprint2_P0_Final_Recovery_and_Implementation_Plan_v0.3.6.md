@@ -33365,3 +33365,137 @@ Recommendations tile. A client reviewer's next action links to the existing
 **Status:** CLIENT_SAFE_IMPACT_HOME_SUMMARY_IMPLEMENTED_LOCALLY. No push,
 deployment, production/shared database access, membership creation,
 authorization-list change, or `00_KAI_CURRENT_STATE.md` update performed.
+
+### Client authorization contract reconciliation across the reachable Impact Library client (2026-09-24)
+
+**USER_CONFIRMED:** 3193c97 is deployed. A binding-derived same-org
+client_admin loads Impact Home. Knowledge Studio then got 403
+`role_not_allowed` (`VAL-AUT-004`, `object_code = read_intake`) from
+`GET .../evidence-library/candidates?limit=25`, seen seven times in one load.
+Owner contract for this package: client_admin = ordinary client-safe reads +
+client_contributor contribution + implemented org-administration;
+client_admin != client_reviewer; client_admin != any GK role.
+
+**Root cause (TOOL_VERIFIED):** the `/impact-library` shell mounted the GK
+cockpit (`ImpactEvidenceLibrary`) as Knowledge Studio and the GK claim-library
+/ traceability views as the Impact Library for every actor. Every
+`role_not_allowed` comes from one function
+(`kaiAuthorizationService.js#validateActorCanPerformOperation`), but ~50
+services pass their own `allowedRoles` sets. The cockpit's reads are all
+GK-only: evidence library, claim library, eligible claims, traceability,
+review queue, sources, requirements readiness, funder-requirements
+assessments, generated drafts, grant response packet, and board reporting,
+plus an automatic board-reporting candidate POST. The evidence-library DTO
+carries verbatim (including unreviewed) evidence statements and GK review
+status, so it is GK_INTERNAL. Its authority is unchanged, and it is removed
+from the client request path.
+
+**Seven requests (TOOL_VERIFIED / NOT_CONFIRMED):** `evidenceLibraryCandidatesPath`
+has one static caller (`ImpactEvidenceLibrary.jsx` `loadEvidenceItems`). That
+caller is a `useCallback` keyed on `[organizationId]`, run by one effect keyed
+on `[organizationId, loadEvidenceItems]`. There is no retry, fetch wrapper,
+service worker, or dev-mode StrictMode double effect (the bundle is production
+React). The component is remounted each time Knowledge Studio is entered.
+Code therefore issues one read per mount per organization. Seven identical
+reads within a single mount cannot be produced by this code; which remounts
+or organization changes produced seven is NOT_CONFIRMED. After this package a
+client actor issues zero such reads, and a GK actor still issues one per mount.
+
+**Changes (TOOL_VERIFIED):**
+- `GET /admin/organizations/:organizationId/access-capabilities`, in
+  `kaiOrganizationAccessCapabilitiesService.js`. Admission: the read_intake
+  set, an active same-org membership, and tenant validation. It returns
+  `{internalKnowledgeWorkspace, intakeContribution, clientFollowupReview}`.
+  Each flag is the existing policy's own
+  `validateActorCanPerformOperation` call: the claim-library read, P0
+  `create_intake_batch` and `create_intake_file`, and the P2-11
+  `list_client_followup_workflows`. No role list is defined in this service.
+- `GET /admin/organizations/:organizationId/impact-facts`, in
+  `kaiClientImpactFactsService.js`. Admission is the same as above. It uses
+  the P2-08 repository (new optional `projectEligibleClaim`; the default DTO
+  is unchanged) with audience `internal`, so only `eligible === true` claims
+  are projected. Each item is `{claimId, statement, claimType,
+  limitationDimensionKeys}`, the last being the dimensions that are unresolved
+  but accepted for internal use. The response carries no evidence text,
+  source, locator, or version ids, review-queue state, decisions, or validator
+  keys. Paging is internal (100 items, 10 pages); the response has only
+  `truncated` and no cursor, because the P2-08 cursor can name an ineligible
+  claim.
+- `ImpactLibraryApp.jsx` reads the capabilities once per organization. It
+  mounts the GK `ImpactEvidenceLibrary`, `ImpactLibraryListView`, and
+  `ImpactFactDetailView` only when `internalKnowledgeWorkspace` is true. While
+  unresolved it shows Loading, and on failure it falls back to the client
+  views. Client facts are fetched once per organization and shared.
+- New `ClientKnowledgeStudio.jsx` tabs:
+  - Files: KaiWebIntake with `canContribute`.
+  - Evidence: reviewed facts only.
+  - Gaps: an explanation, with a follow-up link for `clientFollowupReview`.
+  - Reviews: an explanation.
+  - ImpactLibraryKai is kept.
+- New `ClientImpactLibraryView.jsx`: list plus detail from the loaded facts,
+  with no traceability read.
+- `KaiWebIntake.jsx`: new optional `canContribute` (default true) hides the
+  batch-create and upload controls.
+- No service role set changed. No migration, flag, binding, or membership
+  change.
+
+**Tests (TOOL_VERIFIED):**
+- New `__tests__/kai-client-authorization-reconciliation.spec.js`, 19/19. It
+  uses the real `resolveKaiActorContext` plus binding derivation for
+  client_admin and the real P2-08 repository with an injected
+  transaction/evaluator. It covers:
+  - exact fact keys and accepted-limitation semantics;
+  - hidden/unreviewed/sensitive claims never changing the payload or counts;
+  - the 100 bound with no cursor;
+  - fail-closed on evaluator errors;
+  - the default P2-08 DTO being unchanged;
+  - the capability matrix for client_admin/reviewer/contributor/gk_reviewer/gk_operator;
+  - cross-org `VAL-AUT-003`;
+  - mounted routes forwarding only org id + actor;
+  - the assembled client_admin journey, where organizations, capabilities,
+    engagements, improvement practices, Home summary, review-cockpit
+    capabilities (200 false), intake batches, and facts all succeed with no
+    hidden content;
+  - intake write policy passing while GK governance, review decisions, and
+    cross-org are denied;
+  - 13 GK-internal / client-reviewer / high-risk services returning
+    `role_not_allowed` before any read;
+  - client_reviewer follow-ups retained, contributor denied follow-up
+    review, and GK reviewer evidence library and review queue unchanged;
+  - frontend source contracts: no GK-only path builder or request in the
+    client views, gated mounting, a single evidence-library caller, and
+    KaiWebIntake gating.
+- Focused set (authorization, actor context, binding, tenant, JIT, P2-06,
+  P2-08, P2-11, Impact Library/Home/Needs Attention, evidence library,
+  generated drafts, JOIN, Package G/4, route runtime, review cockpit, board
+  reporting UI): 900 pass, 3 fail. The 3 are the HEAD baseline.
+- `npm run build` PASS.
+- `npm test`: 5156 pass, 12 fail, 87 skipped. HEAD with this change stashed:
+  5137 pass, 12 fail, 87 skipped. The failing test names are identical, and
+  the route-inventory missing-entry set is identical.
+- `git diff --check` PASS.
+
+**Deliberate denials (unchanged policy, not offered in the client UI):**
+- GK evidence/claim library, eligible claims, traceability, review queue,
+  sources, requirements readiness, and requirement assessments.
+- Engagement Funder Requirements: its assessment stage is GK-only, so the
+  composition 403s for client_admin once applicable.
+- Generated drafts, grant response packet, board reporting (including
+  candidate/export/final authority), and sensitivity review.
+- client follow-up review and completion (client_reviewer only).
+
+**Limitations (NOT_CONFIRMED):**
+- The new projection was not run against the real P2-06 evaluator on
+  PostgreSQL; the runner-owned P2-08 database was not authorized here.
+- Not verified in a browser.
+- Pre-existing and not client_admin: client_reviewer/client_contributor
+  still get 403 from `engagements`, `improvement-practices`, the JOIN review
+  probe, and the KAI chat message (engagement policy). client_contributor
+  still cannot upload (`P0_CLIENT_WRITE_ROLES = {client_admin}`, an earlier
+  owner-authorized decision). KAI chat tools remain GK-only.
+- A client-safe Funder Requirements projection needs an owner decision on
+  releasing GK requirement assessments to clients.
+
+**Status:** CLIENT_AUTHORIZATION_CONTRACT_RECONCILED_LOCALLY. No push,
+deployment, database access, schema, flag, binding, or membership change,
+and no `00_KAI_CURRENT_STATE.md` update.

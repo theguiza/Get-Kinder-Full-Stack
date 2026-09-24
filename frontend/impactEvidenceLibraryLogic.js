@@ -48,6 +48,49 @@ export function projectImpactHomeSummary(dto) {
 // organization workspace) is where a client reviewer completes these.
 export const CLIENT_FOLLOWUP_REVIEW_HREF = "/kai/client-followups";
 
+// Server-derived organization access capabilities. Each flag is the answer
+// of an existing service policy for this actor and organization; the
+// Impact Library client uses them instead of guessing roles or calling a
+// GK-internal read and treating 403 as "not available".
+export function organizationAccessCapabilitiesPath(organizationId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/access-capabilities`;
+}
+
+// Returns null (unknown) for a missing/malformed DTO. Callers treat unknown
+// as "not available", so a failed read never mounts a GK-internal view.
+export function projectOrganizationAccessCapabilities(dto) {
+  if (!dto || typeof dto !== "object" || Array.isArray(dto)) return null;
+  return {
+    internalKnowledgeWorkspace: dto.internalKnowledgeWorkspace === true,
+    intakeContribution: dto.intakeContribution === true,
+    clientFollowupReview: dto.clientFollowupReview === true,
+  };
+}
+
+// Client-safe reviewed Impact Facts: claims the governed evaluator marks
+// eligible for the internal audience, as claim id, statement, type, and
+// accepted limitation dimensions only.
+export function clientImpactFactsPath(organizationId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/impact-facts`;
+}
+
+export function projectClientImpactFacts(dto) {
+  if (!dto || typeof dto !== "object" || !Array.isArray(dto.items)) return null;
+  return {
+    items: dto.items
+      .filter((item) => isRouteUuid(item?.claimId))
+      .map((item) => ({
+        claimId: item.claimId,
+        statement: typeof item.statement === "string" ? item.statement : "",
+        claimType: typeof item.claimType === "string" ? item.claimType : "",
+        limitationDimensionKeys: Array.isArray(item.limitationDimensionKeys)
+          ? item.limitationDimensionKeys.filter((key) => typeof key === "string")
+          : [],
+      })),
+    truncated: dto.truncated === true,
+  };
+}
+
 // KAI Impact Library redesign, E1 correction: evidence is enumerated
 // directly from kai.evidence_items, never through kai.claims - an evidence
 // item can exist before any claim is proposed for it.

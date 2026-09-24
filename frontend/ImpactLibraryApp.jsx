@@ -12,8 +12,16 @@ import {
   postJson,
 } from "./kaiWebIntakeLogic.js";
 import { kaiEnablementPath } from "./kaiOrgEnablementLogic.js";
-import { getJson } from "./impactEvidenceLibraryLogic.js";
+import {
+  clientImpactFactsPath,
+  getJson,
+  organizationAccessCapabilitiesPath,
+  projectClientImpactFacts,
+  projectOrganizationAccessCapabilities,
+} from "./impactEvidenceLibraryLogic.js";
 import ImpactEvidenceLibrary from "./ImpactEvidenceLibrary.jsx";
+import ClientKnowledgeStudio from "./knowledgeStudio/ClientKnowledgeStudio.jsx";
+import ClientImpactLibraryView from "./impactLibrary/ClientImpactLibraryView.jsx";
 import ImpactHomeView from "./ImpactHomeView.jsx";
 import ImpactLibraryListView from "./impactLibrary/ImpactLibraryListView.jsx";
 import ImpactFactDetailView from "./impactLibrary/ImpactFactDetailView.jsx";
@@ -196,6 +204,12 @@ function JoinRequestNotices({ view }) {
  * otherwise-unmodified ImpactEvidenceLibrary component (which in turn passes
  * the engagement through to KaiWebIntake) - no view gets its own
  * independent, potentially-disagreeing selection.
+ *
+ * ImpactEvidenceLibrary and the GK Impact Library list/detail views read
+ * only GK-internal surfaces, so they are mounted only for an actor the
+ * server's access-capabilities read reports as internalKnowledgeWorkspace;
+ * every other actor gets ClientKnowledgeStudio / ClientImpactLibraryView,
+ * which use client-safe reads only.
  */
 export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
   const [activeSection, setActiveSection] = useState(initialSection);
@@ -579,6 +593,64 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
     return { ok: true };
   }, [selectedOrganizationId, selectedEngagementId, refetchImprovementPractices]);
 
+  // Server-derived access capabilities for the selected organization. Every
+  // flag is an existing service policy's answer for this actor. The GK
+  // Knowledge Studio (ImpactEvidenceLibrary) and GK Impact Library views make
+  // only GK-internal reads, so they are mounted only when
+  // internalKnowledgeWorkspace is true; until the answer is known nothing is
+  // mounted for those sections, and an unknown/failed answer falls back to
+  // the client-safe views (which make client-safe reads only).
+  const [accessCapabilities, setAccessCapabilities] = useState({ organizationId: "", status: "idle", data: null });
+  useEffect(() => {
+    setAccessCapabilities({ organizationId: selectedOrganizationId, status: selectedOrganizationId ? "loading" : "idle", data: null });
+    if (!selectedOrganizationId) return undefined;
+    let cancelled = false;
+    (async () => {
+      const result = await getJson(organizationAccessCapabilitiesPath(selectedOrganizationId));
+      if (cancelled) return;
+      const data = result.statusCode === 200 && result.body?.ok ? projectOrganizationAccessCapabilities(result.body.data) : null;
+      setAccessCapabilities({ organizationId: selectedOrganizationId, status: data ? "success" : "error", data });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedOrganizationId]);
+  const capabilitiesResolved =
+    accessCapabilities.organizationId === selectedOrganizationId && accessCapabilities.status !== "loading" && accessCapabilities.status !== "idle";
+  const internalKnowledgeWorkspace = capabilitiesResolved && accessCapabilities.data?.internalKnowledgeWorkspace === true;
+
+  // Client-safe reviewed Impact Facts, fetched once per organization and
+  // shared by the client Impact Library and client Knowledge Studio (so
+  // switching between them never re-reads). Requested only for an actor
+  // without the internal workspace, and only once a section that shows them
+  // is opened.
+  const [clientImpactFacts, setClientImpactFacts] = useState({ organizationId: "", status: "idle", items: [], truncated: false });
+  const clientFactsRequestedForRef = useRef("");
+  const clientFactsNeeded =
+    capabilitiesResolved && !internalKnowledgeWorkspace && (activeSection === "impactLibrary" || activeSection === "knowledgeStudio");
+  useEffect(() => {
+    if (!clientFactsNeeded || !selectedOrganizationId) return;
+    if (clientFactsRequestedForRef.current === selectedOrganizationId) return;
+    clientFactsRequestedForRef.current = selectedOrganizationId;
+    const requestOrganizationId = selectedOrganizationId;
+    setClientImpactFacts({ organizationId: requestOrganizationId, status: "loading", items: [], truncated: false });
+    (async () => {
+      const result = await getJson(clientImpactFactsPath(requestOrganizationId));
+      const projected = result.statusCode === 200 && result.body?.ok ? projectClientImpactFacts(result.body.data) : null;
+      // A late response for a previously selected organization never
+      // replaces the current organization's facts.
+      setClientImpactFacts((current) => (
+        current.organizationId !== requestOrganizationId
+          ? current
+          : projected
+            ? { organizationId: requestOrganizationId, status: "success", items: projected.items, truncated: projected.truncated }
+            : { organizationId: requestOrganizationId, status: "error", items: [], truncated: false }
+      ));
+    })();
+  }, [clientFactsNeeded, selectedOrganizationId]);
+  const clientFactsForOrganization =
+    clientImpactFacts.organizationId === selectedOrganizationId ? clientImpactFacts : { status: "loading", items: [], truncated: false };
+
   // Package H: the one shared Needs Attention state, feeding both the
   // header bell's real hasAttention signal and the full Needs Attention
   // view - never a fabricated dot, never a second review truth from
@@ -632,6 +704,28 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
     );
   } else if (!hasAuthorizedOrganizations) {
     sectionContent = <div style={{ color: "#8890A0", fontSize: 14 }}>Loading organization setup...</div>;
+  } else if ((activeSection === "knowledgeStudio" || activeSection === "impactLibrary") && !capabilitiesResolved) {
+    sectionContent = <div style={{ color: "#8890A0", fontSize: 14 }}>Loading...</div>;
+  } else if (activeSection === "knowledgeStudio" && !internalKnowledgeWorkspace) {
+    sectionContent = (
+      <ClientKnowledgeStudio
+        organizationId={selectedOrganizationId}
+        engagementId={selectedEngagementId}
+        onEngagementIdChange={setSelectedEngagementId}
+        capabilities={accessCapabilities.data}
+        facts={clientFactsForOrganization}
+        onViewImpactLibrary={() => setActiveSection("impactLibrary")}
+      />
+    );
+  } else if (activeSection === "impactLibrary" && !internalKnowledgeWorkspace) {
+    sectionContent = (
+      <ClientImpactLibraryView
+        facts={clientFactsForOrganization}
+        selectedClaimId={selectedImpactFactClaimId}
+        onViewFact={setSelectedImpactFactClaimId}
+        onBack={() => setSelectedImpactFactClaimId(null)}
+      />
+    );
   } else if (activeSection === "knowledgeStudio") {
     sectionContent = (
       <ImpactEvidenceLibrary

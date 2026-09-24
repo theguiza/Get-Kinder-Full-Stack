@@ -115,6 +115,9 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // KAI Web Intake organization bootstrap: read-only, additive, and every
     // prior entry preserved verbatim.
     "/admin/organizations",
+    // Organization access capabilities: booleans from existing service
+    // policies only (additive; every prior entry preserved verbatim).
+    "/admin/organizations/:organizationId/access-capabilities",
     // Governed Board Summary FINAL Markdown delivery, authorized solely by
     // the route's own exact boardReportingCandidateExportManifestId - never
     // by organizationId+engagementId alone, a candidate id without its
@@ -353,6 +356,9 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // manifest/candidate id, or a latest/newest/preferred selection. Creates
     // no manifest, mutates no authority, and publishes nothing externally.
     "/admin/organizations/:organizationId/grant-response-packet/export-manifests/:grantResponsePacketExportManifestId/markdown",
+    // Client-safe reviewed Impact Facts: governed eligible claims projected
+    // to client-safe fields (additive; every prior entry preserved verbatim).
+    "/admin/organizations/:organizationId/impact-facts",
     // Client-safe Impact Home summary: organization-scoped aggregates only
     // (additive; every prior entry preserved verbatim).
     "/admin/organizations/:organizationId/impact-home/summary",

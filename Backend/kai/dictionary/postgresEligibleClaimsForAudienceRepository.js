@@ -99,7 +99,14 @@ function shapeError(error) {
   return failure("system_error");
 }
 
-export function createPostgresEligibleClaimsForAudienceRepository({ runInTransaction, evaluator } = {}) {
+// `projectEligibleClaim` lets a caller shape each eligible evaluation into a
+// narrower DTO (it must keep `claimId`). Eligibility itself never changes:
+// only claims the evaluator marks `eligible === true` are ever projected.
+export function createPostgresEligibleClaimsForAudienceRepository({
+  runInTransaction,
+  evaluator,
+  projectEligibleClaim = toEligibleClaim,
+} = {}) {
   return Object.freeze({
     async listEligibleClaimsForAudience(input) {
       if (!validateInput(input)) return failure("validation_blocker");
@@ -141,7 +148,7 @@ export function createPostgresEligibleClaimsForAudienceRepository({ runInTransac
               });
               if (isUnusableCandidateResult(result)) continue;
               if (!result.ok) return failure("conflict_current_state_changed");
-              if (result.data.eligible === true) eligibleClaims.push(toEligibleClaim(result.data));
+              if (result.data.eligible === true) eligibleClaims.push(projectEligibleClaim(result.data));
               if (eligibleClaims.length >= limit + 1 || inspected >= MAX_CANDIDATES) break;
             }
 

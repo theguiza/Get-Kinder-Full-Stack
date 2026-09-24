@@ -41,6 +41,13 @@ export default function KaiWebIntake({
   engagementId: parentEngagementId = "",
   onEngagementIdChange,
   embedded = false,
+  // Server-derived intake contribution capability (the P0
+  // create_intake_batch/create_intake_file policies, reported by the
+  // organization access-capabilities read). When false, the batch-create and
+  // upload controls are not offered, so an actor those policies deny is never
+  // shown a write that can only fail; the read-only batch/file views remain.
+  // Defaults to true, so every mount that does not pass it is unaffected.
+  canContribute = true,
   // KAI B1A-3B-R2: explicit opt-in seam only. When a parent passes this
   // callback, KaiWebIntake reports the ONE server-grounded fact a Phase-5
   // caller needs - the current selected file's P1-05
@@ -392,15 +399,19 @@ export default function KaiWebIntake({
             <div className="form-text">Only existing, tenant-authoritative organizations and engagements are selectable.</div>
           </div>
           )}
+          {canContribute ? (
           <div className="col-12 col-lg-3">
             <label className="form-label small fw-semibold">Batch code</label>
             <input className="form-control form-control-sm" value={batchCode} onChange={(event) => setBatchCode(event.target.value.trim())} />
           </div>
+          ) : null}
         </div>
         <div className="d-flex gap-2">
+          {canContribute ? (
           <button type="button" className="btn btn-sm btn-primary" onClick={createBatch} disabled={busy || !organizationId || !engagementId}>
             Create batch
           </button>
+          ) : null}
           <button type="button" className="btn btn-sm btn-outline-primary" onClick={loadBatches} disabled={busy || !organizationId}>
             Load existing batches
           </button>
@@ -448,6 +459,7 @@ export default function KaiWebIntake({
         ) : null}
       </div>
 
+      {canContribute ? (
       <div className="admin-card mb-3">
         <h5 className="mb-2">2. Upload file</h5>
         <input
@@ -460,6 +472,11 @@ export default function KaiWebIntake({
         </button>
         {intakeFileId ? <div className="small mt-2">Intake file id: {intakeFileId}</div> : null}
       </div>
+      ) : (
+      <div className="admin-card mb-3 small text-muted">
+        Uploading files is not available for your role in this organization. You can still view existing batches and files.
+      </div>
+      )}
 
       <div className="row g-3">
         <div className="col-12 col-lg-6">
