@@ -181,3 +181,82 @@ export async function recordOrganizationJoinRequestDecision(
     throw error;
   }
 }
+
+/**
+ * JOIN-2 pre-membership discovery reads over kai.organizations. "Joinable"
+ * is the existing lifecycle label status = 'active'; only the organization
+ * id and its KAI name (as display_name) are ever selected - never code,
+ * contract/DPA refs, legacy public-organization linkage, or audit columns.
+ * Only KAI organizations are read: a legacy-only public.organizations row is
+ * never offered, and nothing here enables KAI for one.
+ */
+const JOINABLE_ORGANIZATION_SEARCH_MAX_LIMIT = 10;
+
+function escapeLikePattern(value) {
+  return value.replace(/[\\%_]/g, (character) => `\\${character}`);
+}
+
+export async function searchJoinableKaiOrganizations(
+  { searchTerm, excludeOrganizationIds = [], limit = JOINABLE_ORGANIZATION_SEARCH_MAX_LIMIT },
+  db = pool,
+) {
+  if (typeof searchTerm !== "string" || searchTerm.trim().length === 0) return [];
+  const boundedLimit = Math.min(
+    Math.max(Number.isInteger(limit) ? limit : JOINABLE_ORGANIZATION_SEARCH_MAX_LIMIT, 1),
+    JOINABLE_ORGANIZATION_SEARCH_MAX_LIMIT,
+  );
+  const excluded = (Array.isArray(excludeOrganizationIds) ? excludeOrganizationIds : []).filter(
+    (organizationId) => typeof organizationId === "string" && organizationId.length > 0,
+  );
+  const { rows } = await db.query(
+    `SELECT organization_id, name AS display_name
+       FROM kai.organizations
+      WHERE status = 'active'
+        AND name ILIKE $1 ESCAPE '\\'
+        AND NOT (organization_id = ANY($2::uuid[]))
+      ORDER BY lower(name) ASC, organization_id ASC
+      LIMIT $3`,
+    [`%${escapeLikePattern(searchTerm.trim())}%`, excluded, boundedLimit],
+  );
+  return rows;
+}
+
+export async function getJoinableKaiOrganization({ organizationId }, db = pool) {
+  if (!organizationId) return null;
+  const { rows } = await db.query(
+    `SELECT organization_id, name AS display_name
+       FROM kai.organizations
+      WHERE organization_id = $1
+        AND status = 'active'
+      LIMIT 1`,
+    [organizationId],
+  );
+  return rows[0] || null;
+}
+
+/**
+ * The requester's own requests with each organization's KAI name, newest
+ * first. Deliberately omits reviewed_by_user_id and updated_at: the
+ * requester-facing projection never exposes reviewer identity.
+ */
+export async function listOwnOrganizationJoinRequestsWithOrganization(
+  { requesterUserId, limit = ORGANIZATION_JOIN_REQUEST_LIST_DEFAULT_LIMIT },
+  db = pool,
+) {
+  if (!requesterUserId) return [];
+  const { rows } = await db.query(
+    `SELECT r.organization_join_request_id,
+            r.organization_id,
+            o.name AS organization_display_name,
+            r.status,
+            r.created_at,
+            r.reviewed_at
+       FROM kai.organization_join_requests r
+       JOIN kai.organizations o ON o.organization_id = r.organization_id
+      WHERE r.requester_user_id = $1
+      ORDER BY r.created_at DESC, r.organization_join_request_id ASC
+      LIMIT $2`,
+    [requesterUserId, boundedListLimit(limit)],
+  );
+  return rows;
+}

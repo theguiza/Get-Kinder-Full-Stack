@@ -210,6 +210,12 @@ export const KAI_SPRINT2_ROUTE_SCHEMAS = Object.freeze({
       maxLength: KAI_SPRINT2_P0_STRING_LIMITS.machineCodeMaxLength,
     },
   }),
+  // JOIN-2 (Join Existing Organization): the browser supplies only the
+  // target KAI organization id chosen from discovery. Requester identity
+  // comes from the authenticated actor; no role field exists.
+  submit_organization_join_request: Object.freeze({
+    organization_id: { type: "uuid" },
+  }),
   // Package G (Improvement Plan / Improvement Practices): status/cadence
   // are validated against their approved fixed vocabularies inside the
   // service layer (this generic schema engine has no enum descriptor - see

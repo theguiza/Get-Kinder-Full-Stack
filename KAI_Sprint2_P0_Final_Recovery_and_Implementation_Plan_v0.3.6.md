@@ -32778,3 +32778,102 @@ been applied to any shared or production database.
 deployment, production/shared database access or mutation,
 feature-flag/configuration change, real-client-data access, or
 `00_KAI_CURRENT_STATE.md` update performed.
+
+### Join Existing Organization - JOIN-2 discovery, submission, own status (CLOSED LOCALLY)
+
+**Date:** 2026-09-24
+
+**Scope (owner-authorized Join Existing Organization package, JOIN-2 only):**
+user self-service organization discovery, join-request submission, and
+own-request status over the JOIN-1 persistence. No JOIN-1 schema change,
+admin review/approval, membership creation, UI, push, deploy, or
+production/shared database access.
+
+**Starting state:** branch `main`; starting HEAD
+`b8144b4c3c3d1bd8b3d7426ff727dc76535e2c04`; working tree clean. Root
+`AGENTS.md` read and followed.
+
+**Implementation:**
+- Routes (`Backend/kai/routes/sprint2IntakeApi.js`, mounted under
+  `/api/kai/sprint2/intake`, beside the onboarding status route; ordinary
+  authenticated self-service, no admin role gate, no SQL, identity only via
+  `safeAuthenticatedUser(req)`):
+  `GET /admin/organization-join/organizations?q=`,
+  `POST /admin/organization-join/requests` (body schema
+  `submit_organization_join_request` = `organization_id` only; any other
+  field, including requester/role fields, is rejected 400 before the
+  service), `GET /admin/organization-join/requests/mine`.
+- `Backend/kai/services/kaiOrganizationJoinRequestService.js` (no SQL/pool):
+  - Discovery: mapped human actor; term trimmed/whitespace-collapsed,
+    2..200 chars required (no browse-all); at most 10 results; only active
+    (`status = 'active'`) KAI organizations; only `organization_id` +
+    `display_name` (`kai.organizations.name`); organizations with effective
+    access excluded. LIKE wildcards escaped. Never reads
+    `public.organizations`, never enables KAI.
+  - Effective access = existing `listAuthorizedOrganizations` authority
+    (internal memberships merged with derived GK-binding `client_admin`)
+    plus any other active membership on the actor context.
+  - Submission: organization id must be a canonical UUID; requester is
+    `actorContext.actorUserId` only. Effective access -> 409
+    `membership_state_conflict` / `join_request_already_authorized`, before
+    any transaction. In one transaction: joinable-organization read
+    (unknown/non-active -> 404 `join_request_organization_not_joinable`);
+    stored `kai.organization_memberships` rows for requester+organization
+    (`getActorOrganizationAccess`): active (any role) -> already authorized;
+    any other status -> 409 `join_request_administrator_action_required`,
+    membership never created/reactivated/overwritten; existing pending ->
+    replayed (`outcome: existing_pending`), no insert, no audit; otherwise
+    JOIN-1 `insertPendingOrganizationJoinRequest` + metadata-only
+    `insertRequiredSuccessfulAuditEvent` (`submit_organization_join_request`,
+    target `organization_join_request`) -> commit (`outcome: created`).
+    Audit rejection/throw rolls back the insert. A lost unique-index race
+    rolls back and replays the winner's pending row without a second audit.
+  - Own status: actor's own requests only (`requester_user_id` from actor);
+    DTO `organization_join_request_id`, `organization_id`,
+    `organization_display_name`, `status`, `submitted_at`, `reviewed_at`;
+    no reviewer identity.
+- `Backend/kai/db/kaiOrganizationJoinRequestQueries.js` (read helpers added;
+  JOIN-1 schema unchanged): `searchJoinableKaiOrganizations`,
+  `getJoinableKaiOrganization`,
+  `listOwnOrganizationJoinRequestsWithOrganization`.
+- JOIN-1 ephemeral runner extended with a synthetic
+  `kai.organization_memberships` mirror and the JOIN-2 specs.
+
+**Tests / verification** (loopback `DATABASE_URL` sentinel for every
+Node/npm command):
+- `node --test __tests__/kai-sprint2-join-*.spec.js` -> 45 pass, 0 fail,
+  2 skipped (integration specs without runner-owned DB).
+- `npm run verify:kai-sprint2-join-1-organization-join-requests`
+  (ephemeral loopback cluster, synthetic data only): JOIN-1 migration
+  apply/idempotent re-apply/rollback/re-apply unchanged; JOIN-1 + JOIN-2
+  specs 60/60 PASS, including real-PostgreSQL discovery exclusion,
+  created+single audit, sequential and concurrent duplicate replay (one row,
+  one audit), a 4-way first-submission race (one created, one audit),
+  stored and derived authority blocks, revoked membership untouched,
+  draft/unknown organization, audit-failure rollback with no orphan row,
+  and own-status isolation; no rows left behind.
+- Actor-context / organization-context / GK binding / enablement /
+  access-administration / onboarding specs (14 files) -> 168 pass, 0 fail,
+  3 skipped.
+- API contract specs (`verify:kai-sprint2-api-contract` files) -> identical
+  4 failures with and without this change; the failing `kai.*` regex
+  matches pre-existing route text (none in added lines).
+- `npm test` -> 5065 pass, 12 fail, 84 skipped; failure set identical to
+  the JOIN-1 baseline.
+- `git diff --check` -> PASS. Full diff inspected.
+
+**Limitations:** `display_name` is `kai.organizations.name` (not the GK
+`public.organizations` display name) - NOT_CONFIRMED as the preferred
+user-facing label. "Joinable" is `status = 'active'` under the existing
+enum; NOT_CONFIRMED against the full deployed label set. Discovery can
+reveal the existence and name of active KAI organizations matching a 2+
+character term (bounded to 10). A Get Kinder site admin with no membership
+is not treated as already authorized. `kai.organization_memberships` /
+`kai.organizations` / `kai.users` / `kai.audit_events` are proven only
+against synthetic mirrors. JOIN-1 migration still unapplied to any shared
+or production database.
+
+**Status:** JOIN_2_DISCOVERY_SUBMISSION_OWN_STATUS_CLOSED_LOCALLY. No push,
+deployment, production/shared database access or mutation,
+feature-flag/configuration change, real-client-data access, or
+`00_KAI_CURRENT_STATE.md` update performed. JOIN-3 not started.

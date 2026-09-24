@@ -1866,6 +1866,13 @@ async function getOrganizationOnboardingService() {
   return organizationOnboardingServicePromise;
 }
 
+let organizationJoinRequestServicePromise = null;
+async function getOrganizationJoinRequestService() {
+  if (intakeServiceOverride?.submitOrganizationJoinRequest) return intakeServiceOverride;
+  organizationJoinRequestServicePromise ||= import("../services/kaiOrganizationJoinRequestService.js");
+  return organizationJoinRequestServicePromise;
+}
+
 const GK_ORGANIZATION_ID_PATTERN = /^[1-9][0-9]{0,9}$/;
 
 /**
@@ -1893,6 +1900,37 @@ router.get("/admin/organization-onboarding/status", async (req, res) => {
   return invokeService(res, async () => {
     const service = await getOrganizationOnboardingService();
     return service.getMyOrganizationOnboardingStatus({ req: { user: safeAuthenticatedUser(req) } });
+  });
+});
+
+/**
+ * JOIN-2 Join Existing Organization self-service routes. Ordinary
+ * authenticated user operations (no admin role gate): requester identity is
+ * resolved by the service from the authenticated request only. The browser
+ * may send only a search term (`q`) or the target organization_id; no user
+ * id or role is ever read from the request. No SQL here.
+ */
+router.get("/admin/organization-join/organizations", async (req, res) => {
+  const searchTerm = typeof req.query?.q === "string" ? req.query.q : "";
+  return invokeService(res, async () => {
+    const service = await getOrganizationJoinRequestService();
+    return service.searchJoinableOrganizations({ searchTerm, req: { user: safeAuthenticatedUser(req) } });
+  });
+});
+
+router.post("/admin/organization-join/requests", async (req, res) => {
+  if (!validateMutationRequestOrSend(req, res, "submit_organization_join_request")) return;
+  const organizationId = requestPayload(req).organization_id;
+  return invokeService(res, async () => {
+    const service = await getOrganizationJoinRequestService();
+    return service.submitOrganizationJoinRequest({ organizationId, req: { user: safeAuthenticatedUser(req) } });
+  });
+});
+
+router.get("/admin/organization-join/requests/mine", async (req, res) => {
+  return invokeService(res, async () => {
+    const service = await getOrganizationJoinRequestService();
+    return service.listMyOrganizationJoinRequests({ req: { user: safeAuthenticatedUser(req) } });
   });
 });
 
