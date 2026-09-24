@@ -33230,3 +33230,62 @@ package to reconcile the insert contract. No manual row insert and no binding.
 **Status:** KAI_USERS_JIT_HANDOFF_ERROR_MAPPING_REPAIRED_LOCALLY. No push,
 deployment, production/shared database access or mutation, binding creation,
 configuration change, or `00_KAI_CURRENT_STATE.md` update performed.
+
+### Organization-onboarding status — authenticated email reaches kai.users JIT provisioning (2026-09-24)
+
+**USER_CONFIRMED root cause** (supersedes the NOT_CONFIRMED insert-rejection
+reason in the previous entry): production `kai.users.email` is a
+USER-DEFINED email type, NOT NULL, no default. The onboarding route
+projected the authenticated user through `safeAuthenticatedUser` ->
+`{ id }`, so `resolveKaiActorContext` provisioned with `email = NULL` and
+production rejected the JIT insert. The shared synthetic mirror declared
+`email text` nullable, which is why local integration missed it.
+
+**Fix (TOOL_VERIFIED):** `Backend/kai/routes/sprint2IntakeApi.js` adds the
+route-local `safeAuthenticatedIdentityForKaiUserProvisioning(req)` ->
+exactly `{ id, email }` from the deserialized `req.user` (a blank or
+non-string email becomes null). Only `GET /admin/organization-onboarding/status`
+uses it. The shared `safeAuthenticatedUser` is deliberately unchanged:
+`isAdminRequest` grants platform-superuser authority from `ADMIN_EMAILS`
+by email, and forwarding email through the shared helper would silently
+change that authority on 22 other service-level routes. The onboarding
+path never reads `platformSuperuser`. JIT query and identity model are
+unchanged.
+
+**Mirror:** the onboarding bootstrap now sets `kai.users.email NOT NULL`
+(no default). The user-defined type's definition is not mirrored
+(NOT_CONFIRMED).
+
+**6c51e55 reassessed:** kept. It turns the no-usable-email case into 403
+`mapped_kai_user_required` instead of 500. STATE C asserts that a
+valid-email request never reaches that path, so it cannot hide a
+valid-email provisioning defect.
+
+**Evidence (TOOL_VERIFIED):**
+- Real-route PostgreSQL proof. Before the route fix, against the corrected
+  mirror: STATE C failed (JIT `23502` on `email`), reproducing the
+  production defect. After the fix, 6/6: STATE C unmapped approved GK admin
+  with an email -> exactly one active `public.userdata` row with the
+  authenticated email, 200 APPROVED_NOT_KAI_ENABLED, no provisioning-failure
+  log, zero `kai.organization_memberships`, no binding; STATE D email
+  undefined/null/""/"   " -> 403 `mapped_kai_user_required`, no row, no
+  binding; STATE E mapped + binding -> KAI_AVAILABLE.
+- Onboarding spec +1 projection test (password/is_admin/org_id/session/
+  body/query never forwarded) -> 26/26; route-source assertion updated.
+- Focused actor-context / JIT / onboarding / client-org / enablement / GK
+  binding / organization-context / JOIN-2 route specs pass; runners: GK
+  binding 6/6, enablement 9/9, JOIN-1..5 128/128, P2 access admin 18/18.
+- `npm test` -> 5124 pass, 12 fail, 87 skipped; failure detail identical
+  to HEAD (baseline). The new route text adds no `kai.<table>` or SQL-keyword
+  matches for those route-contract scanners.
+
+**Remaining (NOT_CONFIRMED, out of scope):** the other service-level
+routes still forward `{ id }` only. A user whose first KAI request is
+one of them (for example `/admin/organizations` or the JOIN routes) still
+gets 403 `mapped_kai_user_required` until an onboarding-status request has
+provisioned the mapping. Extending email to those routes needs a separate
+decision about `ADMIN_EMAILS` platform-superuser authority.
+
+**Status:** KAI_USERS_JIT_EMAIL_HANDOFF_REPAIRED_LOCALLY. No push,
+deployment, production/shared database access or mutation, schema change,
+manual row, binding creation, or `00_KAI_CURRENT_STATE.md` update performed.

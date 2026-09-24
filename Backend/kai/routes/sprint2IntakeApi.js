@@ -453,6 +453,26 @@ function safeAuthenticatedUser(req = {}) {
   };
 }
 
+/**
+ * Identity projection for a service-level route whose actor resolver may JIT
+ * provision the KAI user mapping: the deployed KAI users email column is
+ * NOT NULL with no default, so the authenticated Get Kinder email must reach
+ * provisioning. Only the server-side deserialized id and email are forwarded -
+ * never session data, password, is_admin, organization ids, or anything from
+ * the request body/query. A missing or blank email is forwarded as null, so no
+ * invalid mapping can be provisioned and the resolver returns
+ * mapped_kai_user_required.
+ */
+function safeAuthenticatedIdentityForKaiUserProvisioning(req = {}) {
+  const user = safeAuthenticatedUser(req);
+  if (!user) return null;
+  const email = req["user"].email;
+  return {
+    id: user.id,
+    email: typeof email === "string" && email.trim().length > 0 ? email : null,
+  };
+}
+
 function requestPayload(req = {}) {
   return req.body && typeof req.body === "object" && !Array.isArray(req.body) ? req.body : {};
 }
@@ -1899,7 +1919,9 @@ router.get("/admin/organizations", async (req, res) => {
 router.get("/admin/organization-onboarding/status", async (req, res) => {
   return invokeService(res, async () => {
     const service = await getOrganizationOnboardingService();
-    return service.getMyOrganizationOnboardingStatus({ req: { user: safeAuthenticatedUser(req) } });
+    return service.getMyOrganizationOnboardingStatus({
+      req: { user: safeAuthenticatedIdentityForKaiUserProvisioning(req) },
+    });
   });
 });
 
@@ -6013,6 +6035,7 @@ export const __testables = {
   requestContext,
   requestPayload,
   safeAuthenticatedUser,
+  safeAuthenticatedIdentityForKaiUserProvisioning,
   batchDetailIdentifiers,
   fileDetailIdentifiers,
   uploadIdentifiers,

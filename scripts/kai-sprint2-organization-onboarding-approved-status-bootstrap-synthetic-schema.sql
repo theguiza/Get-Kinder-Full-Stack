@@ -18,6 +18,14 @@ ALTER TABLE public.organizations
   ADD COLUMN approved_at timestamptz,
   ADD COLUMN approved_by text;
 
+-- USER_CONFIRMED production kai.users.email contract: a USER-DEFINED email
+-- type, NOT NULL, no default. The shared P2 mirror declares it as nullable
+-- text, which let a NULL-email JIT insert pass locally while production
+-- rejected it. The user-defined type's own definition is not mirrored (it is
+-- not confirmed); NOT NULL with no default is the part the JIT insert must satisfy.
+ALTER TABLE kai.users
+  ALTER COLUMN email SET NOT NULL;
+
 -- The approval route's ON CONFLICT (user_id, org_id) upsert requires this.
 ALTER TABLE public.user_org_memberships
   ADD COLUMN added_by_user_id integer,

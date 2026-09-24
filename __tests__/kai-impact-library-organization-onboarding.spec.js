@@ -415,8 +415,25 @@ test("security: the onboarding route never forwards browser-supplied user or org
   const routeSource = readFileSync("Backend/kai/routes/sprint2IntakeApi.js", "utf8");
   const routeStart = routeSource.indexOf('router.get("/admin/organization-onboarding/status"');
   const routeSlice = routeSource.slice(routeStart, routeSource.indexOf("});\n", routeStart));
-  assert.match(routeSlice, /req: \{ user: safeAuthenticatedUser\(req\) \}/);
+  assert.match(routeSlice, /req: \{ user: safeAuthenticatedIdentityForKaiUserProvisioning\(req\) \}/);
   assert.doesNotMatch(routeSlice, /req\.(query|body|params)/);
+});
+
+test("security: the onboarding identity projection forwards exactly the authenticated id and email", async () => {
+  const { __testables } = await import("../Backend/kai/routes/sprint2IntakeApi.js");
+  const project = __testables.safeAuthenticatedIdentityForKaiUserProvisioning;
+  const req = {
+    user: { id: 501, email: "applicant@example.test", password: "hash", is_admin: true, org_id: 7, roles: ["x"] },
+    session: { adminPreviewUserId: 999 },
+    body: { user_id: 999, email: "forged@example.test" },
+    query: { email: "forged@example.test" },
+  };
+  assert.deepEqual(project(req), { id: 501, email: "applicant@example.test" });
+  for (const email of [undefined, null, "", "   ", 42]) {
+    assert.deepEqual(project({ user: { id: 501, email } }), { id: 501, email: null });
+  }
+  assert.equal(project({}), null);
+  assert.equal(project({ user: [] }), null);
 });
 
 test("architecture: onboarding service has no raw pool/SQL; the DB helper owns the application read", () => {

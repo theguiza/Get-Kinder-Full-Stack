@@ -9,10 +9,11 @@ const RUNNER_OWNED_DATABASE_URL = process.env.KAI_ORGANIZATION_ONBOARDING_APPROV
  * organization application is approved (USER_CONFIRMED condition: pending
  * works; approved + public organization + active GK org-admin membership +
  * no GK->KAI binding returns 500). STATE C/D cover the USER_CONFIRMED
- * production divergence - the same approved GK admin with NO kai.users
- * mapping - both when the JIT insert succeeds and when the deployed kai.users
- * table rejects it (which must be 403 mapped_kai_user_required, never 500).
- * STATE E covers mapped + active binding -> KAI_AVAILABLE.
+ * production defect - the same approved GK admin with NO kai.users mapping,
+ * against the USER_CONFIRMED NOT NULL kai.users.email contract: the
+ * authenticated email must reach the JIT insert (STATE C), and a user
+ * without a usable email must get 403 mapped_kai_user_required with no row,
+ * never 500 (STATE D). STATE E covers mapped + active binding -> KAI_AVAILABLE.
  *
  * Runs only inside scripts/kai-sprint2-organization-onboarding-approved-status-local-postgres.js,
  * which points the application's real ambient pool (Backend/db/pg.js via
@@ -51,8 +52,8 @@ if (!RUNNER_OWNED_DATABASE_URL) {
   // application, active GK org-admin membership, NO kai.users row, NO binding.
   const UNMAPPED_JIT_USER_ID = 97002;
   const UNMAPPED_JIT_ORG_NAME = "Onboarding Synthetic Unmapped Society";
-  // Same condition, but the kai.users table rejects the JIT insert (synthetic
-  // stand-in for a deployed kai.users constraint this mirror does not carry).
+  // Same condition, but the authenticated identity carries no usable email,
+  // so the JIT insert cannot satisfy kai.users.email NOT NULL.
   const UNMAPPED_REJECTED_USER_ID = 97003;
   const UNMAPPED_REJECTED_ORG_NAME = "Onboarding Synthetic Rejected Society";
 
@@ -87,7 +88,7 @@ if (!RUNNER_OWNED_DATABASE_URL) {
 
   async function kaiUsersFor(legacyUserId) {
     const { rows } = await pool.query(
-      `SELECT user_id, status FROM kai.users WHERE legacy_public_userdata_id = $1`,
+      `SELECT user_id, status, legacy_identity_source, email FROM kai.users WHERE legacy_public_userdata_id = $1`,
       [legacyUserId],
     );
     return rows;
@@ -102,11 +103,18 @@ if (!RUNNER_OWNED_DATABASE_URL) {
   }
   const BASE = "/api/kai/sprint2/intake";
 
-  async function callStatus(legacyUserId = LEGACY_USER_ID) {
+  const authenticatedEmailFor = (legacyUserId) => `onboarding.${legacyUserId}@synthetic.test`;
+
+  // The authenticated user mirrors a deserialized public.userdata row
+  // (index.js passport.deserializeUser selects *), including fields the
+  // onboarding route must never forward.
+  async function callStatus(legacyUserId = LEGACY_USER_ID, options = {}) {
+    // An explicit `email: undefined` must stay undefined (no default).
+    const email = Object.hasOwn(options, "email") ? options.email : authenticatedEmailFor(legacyUserId);
     const app = express();
     app.use(BASE, (req, res, next) => {
       req.isAuthenticated = () => true;
-      req.user = { id: legacyUserId, email: `onboarding.${legacyUserId}@synthetic.test` };
+      req.user = { id: legacyUserId, email, password: "synthetic-hash", is_admin: false, org_id: 424242 };
       next();
     });
     app.use(BASE, requireKaiSprint2Enabled, sprint2IntakeApiRouter);
@@ -136,8 +144,8 @@ if (!RUNNER_OWNED_DATABASE_URL) {
     await pool.query(`INSERT INTO public.userdata (id, org_id, org_rep) VALUES ($1, NULL, false)`, [LEGACY_USER_ID]);
     await pool.query(
       `INSERT INTO kai.users (legacy_identity_source, legacy_public_userdata_id, status, email)
-       VALUES ('public.userdata', $1, 'active', 'onboarding.synthetic@synthetic.test')`,
-      [LEGACY_USER_ID],
+       VALUES ('public.userdata', $1, 'active', $2)`,
+      [LEGACY_USER_ID, authenticatedEmailFor(LEGACY_USER_ID)],
     );
     const { rows } = await pool.query(
       `INSERT INTO public.org_applications (user_id, org_name, org_description, org_website, rep_role, status)
@@ -214,6 +222,12 @@ if (!RUNNER_OWNED_DATABASE_URL) {
     const mapped = await kaiUsersFor(UNMAPPED_JIT_USER_ID);
     assert.equal(mapped.length, 1, "exactly one JIT-provisioned kai.users row");
     assert.equal(mapped[0].status, "active");
+    assert.equal(mapped[0].legacy_identity_source, "public.userdata");
+    assert.equal(mapped[0].email, authenticatedEmailFor(UNMAPPED_JIT_USER_ID), "JIT row carries the authenticated email");
+    assert.ok(
+      !result.errors.some((line) => line.includes("kai.users JIT provisioning failed")),
+      "a valid-email JIT insert must succeed, not fall through to the controlled 403",
+    );
     const { rows: memberships } = await pool.query(
       `SELECT 1 FROM kai.organization_memberships WHERE user_id = $1`,
       [mapped[0].user_id],
@@ -222,30 +236,15 @@ if (!RUNNER_OWNED_DATABASE_URL) {
     assert.equal(await bindingCountFor(orgId), 0, "status read never creates a GK->KAI binding");
   });
 
-  test("STATE D - production condition where the JIT kai.users insert is rejected -> controlled 403 mapped_kai_user_required, never 500", async () => {
+  test("STATE D - production condition with no usable authenticated email -> no kai.users row, controlled 403 mapped_kai_user_required, never 500", async () => {
     const orgId = await seedApprovedApplicant(UNMAPPED_REJECTED_USER_ID, UNMAPPED_REJECTED_ORG_NAME);
-    await pool.query(`
-      CREATE FUNCTION kai.synthetic_reject_jit_user() RETURNS trigger LANGUAGE plpgsql AS $fn$
-      BEGIN
-        IF NEW.legacy_public_userdata_id = ${UNMAPPED_REJECTED_USER_ID} THEN
-          RAISE EXCEPTION 'synthetic deployed kai.users constraint rejected JIT insert' USING ERRCODE = 'not_null_violation';
-        END IF;
-        RETURN NEW;
-      END;
-      $fn$`);
-    await pool.query(`
-      CREATE TRIGGER synthetic_reject_jit_user BEFORE INSERT ON kai.users
-      FOR EACH ROW EXECUTE FUNCTION kai.synthetic_reject_jit_user()`);
-    try {
-      const result = await callStatus(UNMAPPED_REJECTED_USER_ID);
+    for (const email of [undefined, null, "", "   "]) {
+      const result = await callStatus(UNMAPPED_REJECTED_USER_ID, { email });
       assert.notEqual(result.status, 500, `REPRODUCED 500: ${JSON.stringify(result.body)}\n${result.errors.join("\n---\n")}`);
       assert.equal(result.status, 403, JSON.stringify(result));
       assert.equal(result.body.error.code, "mapped_kai_user_required");
-      assert.deepEqual(await kaiUsersFor(UNMAPPED_REJECTED_USER_ID), [], "no partial kai.users row");
+      assert.deepEqual(await kaiUsersFor(UNMAPPED_REJECTED_USER_ID), [], "no invalid kai.users row");
       assert.equal(await bindingCountFor(orgId), 0, "no GK->KAI binding created");
-    } finally {
-      await pool.query(`DROP TRIGGER synthetic_reject_jit_user ON kai.users`);
-      await pool.query(`DROP FUNCTION kai.synthetic_reject_jit_user()`);
     }
   });
 
