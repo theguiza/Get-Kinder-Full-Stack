@@ -10,6 +10,12 @@ import {
   manageOrganizationMembership,
   manageGlobalKaiRole,
 } from "../services/kaiAccessAdministrationService.js";
+import {
+  listPendingOrganizationJoinRequestsForReviewer,
+  approveOrganizationJoinRequest,
+  declineOrganizationJoinRequest,
+} from "../services/kaiOrganizationJoinRequestReviewService.js";
+import { KAI_SPRINT2_P0_PATTERNS } from "../config/kaiSprint2P0Contract.js";
 
 /**
  * Package 2 governed role/organization-access administration routes. Every
@@ -40,6 +46,9 @@ function getAccessAdministrationService() {
       viewEffectiveKaiAccess,
       manageOrganizationMembership,
       manageGlobalKaiRole,
+      listPendingOrganizationJoinRequestsForReviewer,
+      approveOrganizationJoinRequest,
+      declineOrganizationJoinRequest,
     }
   );
 }
@@ -125,6 +134,65 @@ router.put("/global-roles/:legacyPublicUserdataId", async (req, res, next) => {
     return next(error);
   }
 });
+
+/**
+ * JOIN-3 join-request review routes. Reviewer authority (platform superuser,
+ * or effective client_admin of this exact organization) is enforced in
+ * kaiOrganizationJoinRequestReviewService.js. Identifiers must be canonical
+ * lowercase UUIDs; the decision routes accept no body fields at all - the
+ * requester, reviewer, role, and membership status are never
+ * browser-supplied. The service fails closed when the request does not
+ * belong to the route's organization.
+ */
+function canonicalUuidParam(raw) {
+  return typeof raw === "string" && KAI_SPRINT2_P0_PATTERNS.uuid.test(raw) && raw === raw.toLowerCase() ? raw : null;
+}
+
+function hasNoBodyFields(req) {
+  const body = req.body;
+  if (body === undefined || body === null) return true;
+  return typeof body === "object" && !Array.isArray(body) && Object.keys(body).length === 0;
+}
+
+router.get("/organizations/:organizationId/join-requests", async (req, res, next) => {
+  try {
+    const organizationId = canonicalUuidParam(req.params.organizationId);
+    if (!organizationId) return sendKaiError(res, "validation_blocker");
+
+    const result = await getAccessAdministrationService().listPendingOrganizationJoinRequestsForReviewer({
+      actorContext: req.kaiSprint2ActorContext,
+      organizationId,
+    });
+    return sendServiceResult(res, result, 200);
+  } catch (error) {
+    return next(error);
+  }
+});
+
+for (const [decisionPath, serviceMethod] of [
+  ["approve", "approveOrganizationJoinRequest"],
+  ["decline", "declineOrganizationJoinRequest"],
+]) {
+  router.post(`/organizations/:organizationId/join-requests/:organizationJoinRequestId/${decisionPath}`, async (req, res, next) => {
+    try {
+      const organizationId = canonicalUuidParam(req.params.organizationId);
+      const organizationJoinRequestId = canonicalUuidParam(req.params.organizationJoinRequestId);
+      if (!organizationId || !organizationJoinRequestId || !hasNoBodyFields(req)) {
+        return sendKaiError(res, "validation_blocker");
+      }
+
+      const result = await getAccessAdministrationService()[serviceMethod]({
+        actorContext: req.kaiSprint2ActorContext,
+        organizationId,
+        organizationJoinRequestId,
+        now: new Date().toISOString(),
+      });
+      return sendServiceResult(res, result, 200);
+    } catch (error) {
+      return next(error);
+    }
+  });
+}
 
 export default router;
 

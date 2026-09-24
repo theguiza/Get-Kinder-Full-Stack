@@ -94,6 +94,7 @@
     "verify:kai-sprint2-join-1-organization-join-requests": "node scripts/kai-sprint2-join-1-organization-join-requests-local-postgres.js",
     "test:kai-sprint2-join-1-organization-join-requests": "node --test __tests__/kai-sprint2-join-1-organization-join-requests-schema-contract.spec.js __tests__/kai-sprint2-join-1-organization-join-request-queries.spec.js",
     "test:kai-sprint2-join-2-organization-join-requests": "node --test __tests__/kai-sprint2-join-2-organization-join-request-service.spec.js __tests__/kai-sprint2-join-2-organization-join-request-routes.spec.js",
+    "test:kai-sprint2-join-3-organization-join-request-review": "node --test __tests__/kai-sprint2-join-3-organization-join-request-review-service.spec.js __tests__/kai-sprint2-join-3-organization-join-request-review-routes.spec.js",
     "verify:kai-sprint2-br-03a-board-reporting-candidate-review-request": "node scripts/kai-sprint2-br-03a-board-reporting-candidate-review-request-local-postgres.js",
     "verify:kai-sprint2-br-04-board-reporting-candidate-human-authority-decision-ledger": "node scripts/kai-sprint2-br-04-board-reporting-candidate-human-authority-decision-ledger-local-postgres.js",
     "test:kai-sprint2-br-04-board-reporting-candidate-human-authority-decision-ledger": "node --test __tests__/kai-sprint2-br-04-board-reporting-candidate-human-authority-decision-ledger-boundary.spec.js __tests__/kai-sprint2-br-04-board-reporting-candidate-human-final-release-authority.spec.js",

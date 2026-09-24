@@ -32877,3 +32877,113 @@ or production database.
 deployment, production/shared database access or mutation,
 feature-flag/configuration change, real-client-data access, or
 `00_KAI_CURRENT_STATE.md` update performed. JOIN-3 not started.
+
+### Join Existing Organization - JOIN-3 admin review, approve/decline, controlled membership (CLOSED LOCALLY)
+
+**Date:** 2026-09-24
+
+**Scope (owner-authorized Join Existing Organization package, JOIN-3 only;
+owner-confirmed policy):** reviewer = effective client_admin of the target
+organization, or `actorContext.platformSuperuser` (existing Get Kinder
+site-admin authority); approved membership = server-fixed active
+`client_contributor`; no client_admin/client_reviewer through this
+workflow; requester never reviews own request. No JOIN-1 schema change, no
+JOIN-2 user-flow change, no UI, push, deploy, or production/shared database
+access.
+
+**Starting state:** branch `main`; starting HEAD
+`4896982f9f3e4d52ea751f532c75c850ff471d32`; working tree clean. Root
+`AGENTS.md` read and followed.
+
+**Preflight findings:** `manageOrganizationMembership` authorized through
+`validateActorCanPerformOperation(..., MANAGE_ORGANIZATION_MEMBERSHIP, org,
+{ allowedRoles: client_admin })` (platform-superuser shortcut; stored and
+derived GK-binding client_admin both on `actorContext.organizationMemberships`;
+global `kai.user_roles` alone not counted), then ran its org advisory lock,
+multiple-row fail-closed, last-admin protection, replacement-semantics
+upsert, and required metadata-only membership audit inside its own
+`withTransaction` - not composable into a caller-owned transaction. The
+reviewer FK (`reviewed_by_user_id -> kai.users`) is satisfiable: every
+authorized reviewer, including platform superuser, is a mapped kai.users
+actor.
+
+**Implementation:**
+- `Backend/kai/services/kaiAccessAdministrationService.js`: smallest
+  internal refactor - the transaction body is now exported as
+  `applyOrganizationMembershipChangeInTransaction(tx, ...)`, called unchanged
+  by `manageOrganizationMembership` (same authorization, lock, policy,
+  audit, and results), plus an opt-in `onlyCreate` guard that refuses when
+  any stored row exists. Existing routes/tests unchanged and passing.
+- `Backend/kai/services/kaiOrganizationJoinRequestReviewService.js` (no SQL):
+  `listPendingOrganizationJoinRequestsForReviewer` (VIEW_KAI_ACCESS),
+  `approveOrganizationJoinRequest` / `declineOrganizationJoinRequest`
+  (MANAGE_ORGANIZATION_MEMBERSHIP), all with `allowedRoles: client_admin`
+  and authorization before any read. Decision flow inside one transaction:
+  request row `FOR UPDATE` -> not found / route-organization mismatch ->
+  404; requester == actor -> 403 `join_request_self_review_denied`;
+  non-pending -> 409 `join_request_not_pending`. Approval then rechecks the
+  requester: non-active kai.users or any non-active stored membership ->
+  409 `join_request_administrator_action_required`; active stored
+  membership or derived GK->KAI admin (binding + GK org-admin roster) ->
+  409 `join_request_requester_already_authorized`; >1 stored rows -> 409
+  `join_request_membership_state_conflict`; all leave the request pending
+  and memberships untouched. Otherwise the access-admin core
+  (`onlyCreate: true`, re-listed under the org lock) creates active
+  `client_contributor` + its `organization_membership_assigned` audit ->
+  JOIN-1 pending-only CAS to approved with `reviewed_by_user_id` = actor ->
+  metadata-only `approve_organization_join_request` audit (ids, from/to
+  state, resulting role/status; no names/emails) -> COMMIT. Any failure
+  after a write throws and rolls back everything. Decline: CAS to declined
+  + `decline_organization_join_request` audit; no membership read/mutation.
+- `Backend/kai/db/kaiOrganizationJoinRequestQueries.js`:
+  `listPendingOrganizationJoinRequestsForReview` (pending only, requester
+  id + email per existing access-admin roster convention),
+  `getOrganizationJoinRequestForDecisionForUpdate` (`FOR UPDATE OF r`).
+- `Backend/kai/routes/kaiAccessAdministrationApi.js` (existing
+  `/api/kai/sprint2/access-administration` surface, no SQL):
+  `GET /organizations/:organizationId/join-requests`,
+  `POST /organizations/:organizationId/join-requests/:organizationJoinRequestId/approve|decline`;
+  canonical lowercase UUIDs only; decision routes reject any body field.
+- JOIN ephemeral runner extended with the real
+  `kai_sprint2_gk_organization_tenant_binding.sql` migration, a synthetic
+  `public.userdata` mirror, and the JOIN-3 specs; it now also asserts no
+  membership rows are left behind.
+
+**Tests / verification** (loopback `DATABASE_URL` sentinel for every
+Node/npm command):
+- `node --test __tests__/kai-sprint2-join-*.spec.js` -> 72 pass, 0 fail,
+  3 skipped (integration specs without runner-owned DB); JOIN-3 service +
+  route specs 27/27.
+- `npm run verify:kai-sprint2-join-1-organization-join-requests`
+  (ephemeral loopback cluster, synthetic data): JOIN-1 migration checks
+  unchanged; JOIN-1..3 specs 99/99 PASS, including real stored/derived/
+  superuser approval, tenant denial and org mismatch, self-review (service
+  and DB CHECK), derived/stored/revoked/invited/multiple recheck with no
+  mutation, rollback on decision-audit/decision/membership failure (no
+  membership, membership audit, or decision), decline, terminal replay, a
+  3-way concurrent approve (one decision, one membership, two audits), and
+  approve-vs-decline race (one coherent terminal state).
+- `npm run verify:kai-sprint2-p2-access-administration` (refactor on real
+  PostgreSQL) -> 18/18 PASS.
+- Actor-context / organization-context / GK binding / enablement /
+  access-administration / onboarding / tenant-authorization / audit specs
+  -> 217 pass, 0 fail, 5 skipped.
+- API contract specs -> same 4 pre-existing failures; the access-admin
+  route file independently passes both no-`kai.*`/no-SQL regexes.
+- `npm test` -> 5092 pass, 12 fail, 85 skipped; failure set identical to the
+  JOIN-2 baseline.
+- `git diff --check` -> PASS. Full diff inspected.
+
+**Limitations:** derived-authority recheck was proven on real PostgreSQL
+only through the `public.userdata.org_rep` fallback (the ambient-pool
+`hasUserOrgMembershipTable` probe returns false under the sentinel); the
+`public.user_org_memberships` path is covered by existing access-admin
+specs only. A requester who became effectively authorized is left pending
+(no auto-close). Queue exposes requester email per existing access-admin
+convention. Synthetic mirrors only for externally owned tables; JOIN-1
+migration still unapplied to any shared or production database.
+
+**Status:** JOIN_3_ADMIN_REVIEW_CLOSED_LOCALLY. No push, deployment,
+production/shared database access or mutation, feature-flag/configuration
+change, real-client-data access, or `00_KAI_CURRENT_STATE.md` update
+performed. JOIN-4 not started.

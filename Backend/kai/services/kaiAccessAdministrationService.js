@@ -226,6 +226,56 @@ export async function manageOrganizationMembership(
   if (!targetKaiUser?.user_id) return failure("validation_blocker");
 
   const runInTransaction = dependencies.runInTransaction || withTransaction;
+
+  try {
+    return await runInTransaction(async (tx) => {
+      const result = await applyOrganizationMembershipChangeInTransaction(
+        tx,
+        {
+          actorContext,
+          organizationId,
+          targetUserId: targetKaiUser.user_id,
+          roleName,
+          membershipStatus,
+          now,
+          platformSuperuserAuthorized,
+        },
+        dependencies,
+      );
+      if (!result.ok) return result;
+      return success({
+        organization_id: organizationId,
+        user_id: targetKaiUser.user_id,
+        legacy_public_userdata_id: targetLegacyPublicUserdataId,
+        role_name: roleName,
+        membership_status: membershipStatus,
+        replayed: !result.data.mutated,
+      });
+    });
+  } catch (error) {
+    return shapeThrownError(error);
+  }
+}
+
+/**
+ * The transaction-capable core of manageOrganizationMembership, exposed so
+ * another governed workflow (JOIN-3 join-request approval) can compose the
+ * exact same membership policy - organization advisory lock, multiple-row
+ * fail-closed, last-admin protection, replacement-semantics upsert, and the
+ * required metadata-only membership audit - inside its own caller-owned
+ * transaction. The caller MUST already have authorized the actor for
+ * MANAGE_ORGANIZATION_MEMBERSHIP on organizationId and validated
+ * roleName/membershipStatus; this function performs no authorization and
+ * never opens or commits a transaction. `onlyCreate: true` additionally
+ * refuses (membership_state_conflict) when any stored row already exists,
+ * so a caller that must never replace or reactivate a membership cannot.
+ * A thrown audit failure propagates so the caller's transaction rolls back.
+ */
+export async function applyOrganizationMembershipChangeInTransaction(
+  tx,
+  { actorContext, organizationId, targetUserId, roleName, membershipStatus, now, platformSuperuserAuthorized, onlyCreate = false },
+  dependencies = {},
+) {
   const listExistingRows = dependencies.listOrganizationMembershipRowsForUserInOrganization || listOrganizationMembershipRowsForUserInOrganization;
   const countActiveAdmins = dependencies.countActiveStoredClientAdminMemberships || countActiveStoredClientAdminMemberships;
   const hasDerivedAdmin = dependencies.hasActiveDerivedClientAdminForOrganization || hasActiveDerivedClientAdminForOrganization;
@@ -234,80 +284,74 @@ export async function manageOrganizationMembership(
     dependencies.createProductionMetadataOnlyAuditForAccessAdministration ||
     createProductionMetadataOnlyAuditForAccessAdministration;
 
-  try {
-    return await runInTransaction(async (tx) => {
-      await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
-        `kai_org_admin_lock:${organizationId}`,
-      ]);
+  await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
+    `kai_org_admin_lock:${organizationId}`,
+  ]);
 
-      // The deployed uniqueness is UNIQUE (organization_id, user_id, role_name),
-      // not (organization_id, user_id): PostgreSQL itself permits more than one
-      // stored role row for the same user+organization. This package's own
-      // writes never create that state (see upsertOrganizationMembershipRoleStatus's
-      // replacement semantics), but pre-existing data might - fail closed rather
-      // than silently pick one to treat as authoritative.
-      const existingRows = await listExistingRows(organizationId, targetKaiUser.user_id, tx);
-      if (existingRows.length > 1) {
-        return failure("membership_state_conflict");
-      }
-      const previousRow = existingRows[0] || null;
-      const isCurrentlyActiveAdmin = previousRow?.role_name === "client_admin" && previousRow?.membership_status === "active";
-      const wouldStillBeActiveAdmin = roleName === "client_admin" && membershipStatus === KAI_ACTIVE_ORGANIZATION_MEMBERSHIP_STATUS;
-
-      if (isCurrentlyActiveAdmin && !wouldStillBeActiveAdmin && !platformSuperuserAuthorized) {
-        const orgHasDerivedAdmin = await hasDerivedAdmin(organizationId, tx);
-        if (!orgHasDerivedAdmin) {
-          const remainingStoredAdmins = await countActiveAdmins(organizationId, tx, {
-            excludingUserId: targetKaiUser.user_id,
-          });
-          if (remainingStoredAdmins === 0) {
-            return failure("last_admin_protection");
-          }
-        }
-      }
-
-      const upsertResult = await upsertMembership(
-        { organizationId, userId: targetKaiUser.user_id, roleName, membershipStatus },
-        tx,
-      );
-
-      if (upsertResult.conflict) {
-        return failure("membership_state_conflict");
-      }
-
-      if (upsertResult.mutated) {
-        const factory = auditFactory({
-          organizationId,
-          targetUserId: targetKaiUser.user_id,
-          objectType: "organization_membership",
-          actorContext,
-          now,
-        });
-        await publishRequiredAudit(factory, {
-          target_user_id: targetKaiUser.user_id,
-          attempted_operation: previousRow ? "organization_membership_role_status_changed" : "organization_membership_assigned",
-          role_name: roleName,
-          previous_role_name: previousRow?.role_name ?? null,
-          resulting_role_name: roleName,
-          previous_membership_status: previousRow?.membership_status ?? null,
-          resulting_membership_status: membershipStatus,
-          authority_source: "stored",
-          validator_key: "VAL-KAI-P2-ACC-001",
-        }, tx);
-      }
-
-      return success({
-        organization_id: organizationId,
-        user_id: targetKaiUser.user_id,
-        legacy_public_userdata_id: targetLegacyPublicUserdataId,
-        role_name: roleName,
-        membership_status: membershipStatus,
-        replayed: !upsertResult.mutated,
-      });
-    });
-  } catch (error) {
-    return shapeThrownError(error);
+  // The deployed uniqueness is UNIQUE (organization_id, user_id, role_name),
+  // not (organization_id, user_id): PostgreSQL itself permits more than one
+  // stored role row for the same user+organization. This package's own
+  // writes never create that state (see upsertOrganizationMembershipRoleStatus's
+  // replacement semantics), but pre-existing data might - fail closed rather
+  // than silently pick one to treat as authoritative.
+  const existingRows = await listExistingRows(organizationId, targetUserId, tx);
+  if (existingRows.length > 1) {
+    return failure("membership_state_conflict");
   }
+  if (onlyCreate && existingRows.length > 0) {
+    return failure("membership_state_conflict");
+  }
+  const previousRow = existingRows[0] || null;
+  const isCurrentlyActiveAdmin = previousRow?.role_name === "client_admin" && previousRow?.membership_status === "active";
+  const wouldStillBeActiveAdmin = roleName === "client_admin" && membershipStatus === KAI_ACTIVE_ORGANIZATION_MEMBERSHIP_STATUS;
+
+  if (isCurrentlyActiveAdmin && !wouldStillBeActiveAdmin && !platformSuperuserAuthorized) {
+    const orgHasDerivedAdmin = await hasDerivedAdmin(organizationId, tx);
+    if (!orgHasDerivedAdmin) {
+      const remainingStoredAdmins = await countActiveAdmins(organizationId, tx, {
+        excludingUserId: targetUserId,
+      });
+      if (remainingStoredAdmins === 0) {
+        return failure("last_admin_protection");
+      }
+    }
+  }
+
+  const upsertResult = await upsertMembership(
+    { organizationId, userId: targetUserId, roleName, membershipStatus },
+    tx,
+  );
+
+  if (upsertResult.conflict) {
+    return failure("membership_state_conflict");
+  }
+
+  if (upsertResult.mutated) {
+    const factory = auditFactory({
+      organizationId,
+      targetUserId,
+      objectType: "organization_membership",
+      actorContext,
+      now,
+    });
+    await publishRequiredAudit(factory, {
+      target_user_id: targetUserId,
+      attempted_operation: previousRow ? "organization_membership_role_status_changed" : "organization_membership_assigned",
+      role_name: roleName,
+      previous_role_name: previousRow?.role_name ?? null,
+      resulting_role_name: roleName,
+      previous_membership_status: previousRow?.membership_status ?? null,
+      resulting_membership_status: membershipStatus,
+      authority_source: "stored",
+      validator_key: "VAL-KAI-P2-ACC-001",
+    }, tx);
+  }
+
+  return success({
+    previous_row: previousRow,
+    resulting_row: upsertResult.newRow || null,
+    mutated: Boolean(upsertResult.mutated),
+  });
 }
 
 /**

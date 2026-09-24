@@ -5,10 +5,10 @@ import { spawnSync } from "node:child_process";
 import { createServer } from "node:net";
 import { Client } from "pg";
 
-// JOIN-1/JOIN-2 ephemeral real-PostgreSQL proof: initdb a throwaway
+// JOIN-1/JOIN-2/JOIN-3 ephemeral real-PostgreSQL proof: initdb a throwaway
 // loopback-only cluster, apply the synthetic prerequisites + the JOIN-1
 // migration, prove rollback and idempotent re-apply, then run the JOIN-1
-// and JOIN-2 specs against it. Synthetic data only; the cluster and its
+// through JOIN-3 specs against it. Synthetic data only; the cluster and its
 // workdir are always removed.
 const repoRoot = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
 const dbName = "kai_join_1_organization_join_requests_synthetic";
@@ -115,6 +115,8 @@ try {
   psqlFile("scripts/kai-sprint2-organization-enablement-bootstrap-synthetic-schema.sql");
   psqlFile("scripts/kai-sprint2-join-1-organization-join-requests-bootstrap-synthetic-schema.sql");
   psqlFile("scripts/kai-sprint2-join-2-organization-join-requests-bootstrap-synthetic-schema.sql");
+  psqlFile("migrations/kai_sprint2_gk_organization_tenant_binding.sql");
+  psqlFile("scripts/kai-sprint2-join-3-organization-join-requests-bootstrap-synthetic-schema.sql");
 
   psqlFile(MIGRATION);
   if (psqlScalar(TABLE_PRESENT_SQL) !== "t") throw new Error("JOIN-1 migration did not create kai.organization_join_requests");
@@ -150,6 +152,9 @@ try {
     "__tests__/kai-sprint2-join-2-organization-join-request-service.spec.js",
     "__tests__/kai-sprint2-join-2-organization-join-request-routes.spec.js",
     "__tests__/kai-sprint2-join-2-organization-join-requests.integration.spec.js",
+    "__tests__/kai-sprint2-join-3-organization-join-request-review-service.spec.js",
+    "__tests__/kai-sprint2-join-3-organization-join-request-review-routes.spec.js",
+    "__tests__/kai-sprint2-join-3-organization-join-request-review.integration.spec.js",
   ], {
     cwd: repoRoot,
     encoding: "utf8",
@@ -164,11 +169,14 @@ try {
       KAI_JOIN_1_ORGANIZATION_JOIN_REQUESTS_DATABASE_URL: targetUrl,
     },
   });
-  if (testResult.status !== 0) throw new Error("JOIN-1/JOIN-2 organization join requests tests failed");
-  if (psqlScalar("SELECT count(*) FROM kai.organization_join_requests") !== "0") {
-    throw new Error("JOIN-1/JOIN-2 integration tests left synthetic rows behind");
+  if (testResult.status !== 0) throw new Error("JOIN-1/JOIN-2/JOIN-3 organization join requests tests failed");
+  if (
+    psqlScalar("SELECT count(*) FROM kai.organization_join_requests") !== "0"
+    || psqlScalar("SELECT count(*) FROM kai.organization_memberships") !== "0"
+  ) {
+    throw new Error("JOIN-1/JOIN-2/JOIN-3 integration tests left synthetic rows behind");
   }
-  console.log("JOIN-1/JOIN-2 organization join requests focused tests passed.");
+  console.log("JOIN-1/JOIN-2/JOIN-3 organization join requests focused tests passed.");
 } finally {
   if (started) spawnSync(pgCtl, ["-D", dataDir, "stop", "-m", "fast"], { encoding: "utf8", stdio: "ignore" });
   rmSync(workDir, { recursive: true, force: true });

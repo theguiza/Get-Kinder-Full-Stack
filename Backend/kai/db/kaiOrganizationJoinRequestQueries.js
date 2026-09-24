@@ -260,3 +260,64 @@ export async function listOwnOrganizationJoinRequestsWithOrganization(
   );
   return rows;
 }
+
+/**
+ * JOIN-3 reviewer queue: one organization's pending requests with the
+ * requester's KAI user id and email - the same identifying field the
+ * existing access-administration roster already shows an authorized
+ * administrator (kaiAccessAdministrationQueries.js
+ * #listOrganizationMembershipRowsForOrganization). Nothing else from
+ * kai.users is selected. Authorization is the caller's responsibility.
+ */
+export async function listPendingOrganizationJoinRequestsForReview(
+  { organizationId, limit = ORGANIZATION_JOIN_REQUEST_LIST_DEFAULT_LIMIT },
+  db = pool,
+) {
+  if (!organizationId) return [];
+  const { rows } = await db.query(
+    `SELECT r.organization_join_request_id,
+            r.organization_id,
+            r.requester_user_id,
+            u.email AS requester_email,
+            r.status,
+            r.created_at
+       FROM kai.organization_join_requests r
+       JOIN kai.users u ON u.user_id = r.requester_user_id
+      WHERE r.organization_id = $1
+        AND r.status = 'pending'
+      ORDER BY r.created_at ASC, r.organization_join_request_id ASC
+      LIMIT $2`,
+    [organizationId, boundedListLimit(limit)],
+  );
+  return rows;
+}
+
+/**
+ * JOIN-3 decision read: the request row (locked FOR UPDATE, so concurrent
+ * decisions on the same request serialize) plus the requester's
+ * kai.users status and legacy public.userdata id, which the approval
+ * recheck needs to detect derived GK->KAI authority. Looked up by request
+ * id only, so the caller can compare the row's organization_id with the
+ * route's organization and fail closed on a mismatch.
+ */
+export async function getOrganizationJoinRequestForDecisionForUpdate({ organizationJoinRequestId }, db = pool) {
+  if (!organizationJoinRequestId) return null;
+  const { rows } = await db.query(
+    `SELECT r.organization_join_request_id,
+            r.organization_id,
+            r.requester_user_id,
+            r.status,
+            r.created_at,
+            r.reviewed_at,
+            r.reviewed_by_user_id,
+            u.status AS requester_kai_user_status,
+            u.legacy_public_userdata_id AS requester_legacy_public_userdata_id
+       FROM kai.organization_join_requests r
+       JOIN kai.users u ON u.user_id = r.requester_user_id
+      WHERE r.organization_join_request_id = $1
+      LIMIT 1
+      FOR UPDATE OF r`,
+    [organizationJoinRequestId],
+  );
+  return rows[0] || null;
+}
