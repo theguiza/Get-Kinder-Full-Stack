@@ -32712,3 +32712,69 @@ USER_DRIVEN_JOIN_EXISTING_ORGANIZATION remains unimplemented. No production
 or runtime closure claimed. No push, deployment, production mutation,
 database access/mutation, migration, feature-flag/configuration change,
 real-client-data access, or `00_KAI_CURRENT_STATE.md` update performed.
+
+### Join Existing Organization - JOIN-1 persistence foundation (CLOSED LOCALLY)
+
+**Date:** 2026-09-24
+
+**Scope (owner-authorized Join Existing Organization package, JOIN-1 only):**
+durable join-request persistence plus repository query primitives. No
+routes, services, UI, membership creation, audit writes, production/shared
+database access, push, or deploy.
+
+**Starting state:** branch `main`; starting HEAD
+`3ff4b8ce9bc20165d10b38cd5b9e0dc470fd017e`; working tree clean. Root
+`AGENTS.md` read and followed. Completed organization-onboarding work
+(`public.org_applications` request/create path) untouched.
+
+**Implementation:**
+- `migrations/kai_sprint2_join_1_organization_join_requests.sql` (+
+  `.rollback.sql`): one additive table `kai.organization_join_requests`
+  (`organization_join_request_id`, `organization_id`, `requester_user_id`,
+  `status`, `created_at`, `reviewed_at`, `reviewed_by_user_id`,
+  `updated_at`). FKs: `organization_id` -> `kai.organizations`,
+  `requester_user_id` and `reviewed_by_user_id` -> `kai.users` (all
+  `ON DELETE RESTRICT`). CHECKs: status in `pending/approved/declined`;
+  review fields NULL iff pending; `reviewed_at >= created_at`; reviewer <>
+  requester. Partial unique index `(organization_id, requester_user_id)
+  WHERE status = 'pending'` (one pending per requester+org; a declined
+  request may be followed by a new row). Reviewer-queue and requester-history
+  indexes. BEFORE UPDATE trigger: identity columns immutable, approved/
+  declined terminal, pending may only move to approved/declined, maintains
+  `updated_at`. No requested-role column and no client_admin/client_reviewer
+  value; the organization is identified by id only, never name.
+- `Backend/kai/db/kaiOrganizationJoinRequestQueries.js`:
+  `insertPendingOrganizationJoinRequest`,
+  `getOrganizationJoinRequestForOrganization`,
+  `getPendingOrganizationJoinRequestForRequester`,
+  `listOrganizationJoinRequestsForRequester`,
+  `listPendingOrganizationJoinRequestsForOrganization`,
+  `recordOrganizationJoinRequestDecision` (pending-only compare-and-swap).
+  Stable error codes: `pending_request_exists`, `invalid_reference`,
+  `invalid_join_request_fields`, `invalid_join_request_decision`,
+  `join_request_not_pending`, `self_review_not_permitted`. Reviewer
+  authorization and membership creation are left to later packages.
+
+**Tests / verification** (loopback `DATABASE_URL` sentinel for every
+Node/npm command):
+- `node --test __tests__/kai-sprint2-join-1-*.spec.js` -> 19 pass, 0 fail,
+  1 skipped (integration spec without runner-owned DB).
+- `npm run verify:kai-sprint2-join-1-organization-join-requests`
+  (ephemeral initdb loopback cluster, synthetic data only): migration
+  applied (index:constraint:trigger = 5:9:1), idempotent re-apply, rollback
+  removes only JOIN-1 objects, re-apply after rollback; schema-contract +
+  query + real-PostgreSQL integration specs 25/25 PASS; no rows left behind;
+  workdir removed.
+- `npm test` -> 5039 pass, 12 fail, 83 skipped. Every failure also fails on
+  a clean `3ff4b8c` worktree (pre-existing, outside this package).
+- `git diff --check` -> PASS. Full diff inspected.
+
+**Limitations:** `kai.users`/`kai.organizations` are externally owned; the
+synthetic mirrors prove the migration only against their USER_CONFIRMED
+shapes (NOT_CONFIRMED against the deployed database). The migration has not
+been applied to any shared or production database.
+
+**Status:** JOIN_1_PERSISTENCE_FOUNDATION_CLOSED_LOCALLY. No push,
+deployment, production/shared database access or mutation,
+feature-flag/configuration change, real-client-data access, or
+`00_KAI_CURRENT_STATE.md` update performed.
