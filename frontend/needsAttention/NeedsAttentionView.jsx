@@ -108,7 +108,7 @@ export default function NeedsAttentionView({
           {followupItems.map((entry, index) => (
             <Row
               key={`followup-${index}`}
-              title={`Claim ${entry.item.claim?.claim_id ? entry.item.claim.claim_id.slice(0, 8) : "follow-up"}`}
+              title={entry.title || `Claim ${entry.item.claim?.claim_id ? entry.item.claim.claim_id.slice(0, 8) : "follow-up"}`}
               subtitle={entry.text}
               badge="Follow-up"
             />

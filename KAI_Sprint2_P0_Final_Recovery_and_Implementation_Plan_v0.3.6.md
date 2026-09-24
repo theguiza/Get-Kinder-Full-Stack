@@ -33289,3 +33289,79 @@ decision about `ADMIN_EMAILS` platform-superuser authority.
 **Status:** KAI_USERS_JIT_EMAIL_HANDOFF_REPAIRED_LOCALLY. No push,
 deployment, production/shared database access or mutation, schema change,
 manual row, binding creation, or `00_KAI_CURRENT_STATE.md` update performed.
+
+### Client-safe Impact Home summary replaces GK-internal Home reads (2026-09-24)
+
+**USER_CONFIRMED:** production client_admin (binding-derived) Home got 403
+`role_not_allowed` from `claim-library/candidates` (`read_intake`) and the
+organization Review Queue (`list_organization_review_queue`). Both are
+GK-review-internal. `client_admin` is not `client_reviewer`. Impact Facts
+count only same-org claims eligible for the internal audience. First-time
+state uses client-visible state only. Neither service's role list changes.
+
+**Contract (TOOL_VERIFIED):** `GET /admin/organizations/:organizationId/impact-home/summary`
+-> `Backend/kai/services/kaiImpactHomeSummaryService.js#getImpactHomeSummary`.
+The DTO is exactly `{ reviewedImpactFactCount, reviewedImpactFactCountIsLowerBound,
+clientActionCount, clientActions: [{ clientFollowupItemId, questionText }],
+internalReviewAvailable, isFirstTime }`.
+- Admission: mapped human, active same-org membership, roles = the
+  `read_intake` set, then tenant validation. Cross-org is `VAL-AUT-003`.
+- Count: the existing P2-08 repository (`listEligibleClaimsForAudience`,
+  audience `internal`, `eligible === true` from the P2-06 evaluator), up to
+  10 pages of 100. Only the integer leaves the service; past that bound the
+  count is flagged as a lower bound.
+- Client actions: only for actors passing the existing P2-11
+  `list_client_followup_workflows` policy (`client_reviewer`), through the
+  real `listClientFollowupWorkflows`, filtered to
+  `waiting_on_client`/`proposed` (`kaiClaimGapFollowupValidators.js`
+  constants). client_admin and client_contributor get none.
+- `internalReviewAvailable`: whether the actor passes the unchanged Review
+  Queue policy.
+- `isFirstTime`: `count === 0 && clientActions.length === 0`.
+
+**Frontend:** `ImpactHomeView.jsx` and `useNeedsAttention.js` read the
+summary. They call the organization Review Queue only when
+`internalReviewAvailable`, and Home no longer calls
+`claim-library/candidates`. Client Home hides the GK-derived
+Recommendations tile. A client reviewer's next action links to the existing
+`/kai/client-followups` page. `CLAIM_LIBRARY_READ_ROLES` and
+`REVIEW_QUEUE_ALLOWED_ROLES` are unchanged.
+
+**Evidence (TOOL_VERIFIED):**
+- `__tests__/kai-impact-home-summary.spec.js` 11/11. It uses the real
+  `resolveKaiActorContext` + binding derivation for client_admin and the
+  real P2-08 repository with an injected evaluator. It covers the exact DTO
+  keys and no leakage of claim/evidence/source/queue content; client_reviewer
+  follow-ups only; contributor aggregate only; cross-org denied; GK reviewer
+  `internalReviewAvailable`; client-visible first-time; fail-closed evaluator
+  errors; the mounted route forwarding only org id + actor; and the
+  unchanged claim-library/Review Queue denying client_admin while still
+  serving gk_reviewer.
+- The P2-08 real-PostgreSQL runner adds 3 cases on the proposed,
+  internal-only, review-gated claim with generated GK review work and client
+  follow-ups: client_admin gets `{0, first-time}` with nothing leaked and no
+  writes; client_reviewer gets exactly the real completable follow-ups
+  (non-empty); the gk_reviewer count equals the P2-08 eligible set. 19/19.
+- Home / Needs Attention source specs updated -> 18/18. Focused set
+  (client-org authorization, JIT/actor-context, GK binding, organization
+  context, P2-06/P2-08/P2-11, claim library, impact evidence library) ->
+  351 pass, 0 fail, 4 skipped (runner-only).
+- Runners: P2-06 26/26, P2-11 28/28, GK tenant binding 6/6.
+- `npm run build` PASS (bundle rebuilt).
+- `npm test` -> 5137 pass, 12 fail, 87 skipped. The 12 are the baseline;
+  route-contract failure detail is identical to HEAD.
+- `git diff --check` PASS.
+
+**Limitations (NOT_CONFIRMED):**
+- The Knowledge Studio and Library list views still call
+  `claim-library/candidates` and will 403 for client roles.
+- The Needs Attention sensitivity rollup is unchanged, and whether it
+  403s for client roles was not inspected. For actors without sensitivity
+  capability, the bell never reports "conclusively empty" (pre-existing).
+- `data_dictionary_review` client actions are not included (no existing
+  client-safe read).
+- Not verified in a browser.
+
+**Status:** CLIENT_SAFE_IMPACT_HOME_SUMMARY_IMPLEMENTED_LOCALLY. No push,
+deployment, production/shared database access, membership creation,
+authorization-list change, or `00_KAI_CURRENT_STATE.md` update performed.

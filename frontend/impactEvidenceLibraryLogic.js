@@ -15,6 +15,39 @@ export function claimLibraryCandidatesPath(organizationId) {
   return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/claim-library/candidates?limit=25`;
 }
 
+// Client-safe Impact Home summary (aggregates only). Home and the Needs
+// Attention bell use this instead of the GK-internal claim-library index and
+// organization Review Queue; they call the Review Queue only when the server
+// reports internalReviewAvailable for this actor.
+export function impactHomeSummaryPath(organizationId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/impact-home/summary`;
+}
+
+// Projects exactly the summary fields Home and the bell render. Returns null
+// (unknown - never a guessed zero) when the DTO is missing or malformed.
+export function projectImpactHomeSummary(dto) {
+  if (!dto || typeof dto !== "object" || Array.isArray(dto)) return null;
+  const isCount = (value) => Number.isInteger(value) && value >= 0;
+  if (!isCount(dto.reviewedImpactFactCount) || !isCount(dto.clientActionCount) || !Array.isArray(dto.clientActions)) {
+    return null;
+  }
+  const clientActions = dto.clientActions
+    .filter((action) => typeof action?.clientFollowupItemId === "string" && typeof action?.questionText === "string")
+    .map((action) => ({ clientFollowupItemId: action.clientFollowupItemId, questionText: action.questionText }));
+  return {
+    reviewedImpactFactCount: dto.reviewedImpactFactCount,
+    reviewedImpactFactCountIsLowerBound: dto.reviewedImpactFactCountIsLowerBound === true,
+    clientActionCount: clientActions.length,
+    clientActions,
+    internalReviewAvailable: dto.internalReviewAvailable === true,
+    isFirstTime: dto.isFirstTime === true,
+  };
+}
+
+// The existing client follow-up review page (also linked from the
+// organization workspace) is where a client reviewer completes these.
+export const CLIENT_FOLLOWUP_REVIEW_HREF = "/kai/client-followups";
+
 // KAI Impact Library redesign, E1 correction: evidence is enumerated
 // directly from kai.evidence_items, never through kai.claims - an evidence
 // item can exist before any claim is proposed for it.

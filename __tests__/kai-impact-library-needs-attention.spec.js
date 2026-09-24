@@ -21,6 +21,12 @@ test("Needs Attention reuses the exact same existing read paths as Knowledge Stu
   assert.match(hookSource, /reviewQueueBlockerActionability,\s*\n\s*blockerDisplayText,/);
 });
 
+test("the bell requests the internal Review Queue only when the client-safe summary reports internalReviewAvailable; client follow-ups come only from summary clientActions", () => {
+  assert.match(hookSource, /impactHomeSummaryPath,\s*\n\s*projectImpactHomeSummary,/);
+  assert.match(hookSource, /if \(!projectedSummary\.internalReviewAvailable\) \{\s*\/\/[^\n]*\n\s*setReviewQueueRequestState\("success"\);\s*return;\s*\}\s*const result = await getJson\(organizationReviewQueuePath\(organizationId\)\);/);
+  assert.match(hookSource, /const clientActions = summary && !summary\.internalReviewAvailable \? summary\.clientActions : \[\];/);
+});
+
 test("the approved MVP domains (claim review, evidence review, sensitivity/allowed-use, client follow-ups) are all derived from the shared rollup - domain 5 (intake/file problems) is intentionally omitted, not fabricated", () => {
   assert.match(hookSource, /claim_review_unresolved/);
   assert.match(hookSource, /evidence_review_unresolved/);

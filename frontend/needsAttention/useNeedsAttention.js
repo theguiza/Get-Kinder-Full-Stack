@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 
 import {
   getJson,
+  impactHomeSummaryPath,
+  projectImpactHomeSummary,
   organizationReviewQueuePath,
   projectReviewQueue,
   projectReviewQueueCompleteness,
@@ -33,6 +35,12 @@ import {
  * action" was found in this repository. Rather than fabricate one, it is
  * omitted here and recorded as a smallest-missing-capability follow-up.
  *
+ * Client organization members: the Review Queue rollup is GK-internal, so it
+ * is requested only when the client-safe Impact Home summary reports
+ * internalReviewAvailable for this actor. Otherwise domains 1-2 are not
+ * applicable and domain 4 comes only from the summary's clientActions
+ * (completable client follow-ups, present only for a client_reviewer).
+ *
  * Excluded per owner instruction: ordinary successful processing status,
  * background system activity, GK-admin-only export/release review, and any
  * generic notification unrelated to a required human action.
@@ -41,6 +49,7 @@ export function useNeedsAttention(organizationId) {
   const [reviewQueueItems, setReviewQueueItems] = useState([]);
   const [reviewQueueCompleteness, setReviewQueueCompleteness] = useState({ truncated: false, evaluationErrorCount: 0 });
   const [reviewQueueRequestState, setReviewQueueRequestState] = useState("idle");
+  const [summary, setSummary] = useState(null);
 
   const [sensitivityCapability, setSensitivityCapability] = useState(null);
   const [sensitivityCapabilityRequestState, setSensitivityCapabilityRequestState] = useState("idle");
@@ -52,6 +61,7 @@ export function useNeedsAttention(organizationId) {
     setReviewQueueItems([]);
     setReviewQueueCompleteness({ truncated: false, evaluationErrorCount: 0 });
     setReviewQueueRequestState("idle");
+    setSummary(null);
     setSensitivityCapability(null);
     setSensitivityCapabilityRequestState("idle");
     setSensitivityReviewQueueItems([]);
@@ -62,6 +72,20 @@ export function useNeedsAttention(organizationId) {
 
     (async () => {
       setReviewQueueRequestState("loading");
+      const summaryResult = await getJson(impactHomeSummaryPath(organizationId));
+      if (cancelled) return;
+      const projectedSummary =
+        summaryResult.statusCode === 200 && summaryResult.body?.ok ? projectImpactHomeSummary(summaryResult.body.data) : null;
+      if (!projectedSummary) {
+        setReviewQueueRequestState("error");
+        return;
+      }
+      setSummary(projectedSummary);
+      if (!projectedSummary.internalReviewAvailable) {
+        // Client-safe path: the summary is complete; no Review Queue call.
+        setReviewQueueRequestState("success");
+        return;
+      }
       const result = await getJson(organizationReviewQueuePath(organizationId));
       if (cancelled) return;
       if (result.statusCode !== 200 || !result.body?.ok) {
@@ -116,10 +140,12 @@ export function useNeedsAttention(organizationId) {
 
   const reviewQueueComplete = reviewQueueRequestState === "success" && reviewQueueIsComplete(reviewQueueCompleteness);
 
+  const clientActions = summary && !summary.internalReviewAvailable ? summary.clientActions : [];
+
   const conclusivelyEmpty = reviewQueueIsConclusivelyEmpty({
     reviewQueueRequestState,
     reviewQueueCompleteness,
-    reviewQueueItemsLength: reviewQueueItems.length,
+    reviewQueueItemsLength: reviewQueueItems.length + clientActions.length,
     sensitivityCapabilityRequestState,
     sensitivityCapability,
     sensitivityAttentionStatus: sensitivityAttention.status,
@@ -140,13 +166,22 @@ export function useNeedsAttention(organizationId) {
       else if (blockerCode === "client_followup_unresolved") followupItems.push(entry);
     }
   }
+  for (const action of clientActions) {
+    followupItems.push({
+      item: {},
+      blockerCode: "client_followup_unresolved",
+      actionability: "ACTION_REQUIRED",
+      title: "Client follow-up",
+      text: action.questionText,
+    });
+  }
 
   // Resolved only once every rollup this hook depends on has conclusively
   // succeeded - never a positive or fabricated signal from partial/unknown
   // state (matches this codebase's existing "never show 0 while unknown"
   // convention, applied here to the bell's dot in both directions).
   const resolved = reviewQueueComplete && sensitivityAttention.status !== "loading" && sensitivityAttention.status !== "error";
-  const totalCount = reviewQueueItems.length + sensitivityAttention.items.length;
+  const totalCount = reviewQueueItems.length + clientActions.length + sensitivityAttention.items.length;
   const hasAttention = resolved && totalCount > 0;
 
   return {

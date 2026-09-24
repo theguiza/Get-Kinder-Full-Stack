@@ -353,6 +353,9 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // manifest/candidate id, or a latest/newest/preferred selection. Creates
     // no manifest, mutates no authority, and publishes nothing externally.
     "/admin/organizations/:organizationId/grant-response-packet/export-manifests/:grantResponsePacketExportManifestId/markdown",
+    // Client-safe Impact Home summary: organization-scoped aggregates only
+    // (additive; every prior entry preserved verbatim).
+    "/admin/organizations/:organizationId/impact-home/summary",
     "/admin/organizations/:organizationId/requirements",
     "/admin/organizations/:organizationId/requirements/:requirementId/assessment",
     "/admin/organizations/:organizationId/review-queue",

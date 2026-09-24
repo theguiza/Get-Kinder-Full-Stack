@@ -3106,6 +3106,41 @@ router.get(
   },
 );
 
+let impactHomeSummaryServicePromise = null;
+async function getImpactHomeSummaryService() {
+  if (intakeServiceOverride?.getImpactHomeSummary) return intakeServiceOverride;
+  impactHomeSummaryServicePromise ||= import("../services/kaiImpactHomeSummaryService.js");
+  return impactHomeSummaryServicePromise;
+}
+
+/**
+ * Client-safe Impact Home summary: organization-scoped aggregates only
+ * (governed Impact Fact count, client-actionable follow-ups for client
+ * reviewers, and whether the actor may use the internal Review Queue). It
+ * replaces Home's use of the GK-internal claim-library index and Review
+ * Queue. No SQL here; the browser supplies only the organization id path
+ * parameter.
+ */
+router.get(
+  "/admin/organizations/:organizationId/impact-home/summary",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    const identifiers = eligibleClaimsForAudienceOrganizationIdentifier(req);
+    if (!identifiers) {
+      return sendKaiError(res, "validation_blocker", {
+        blockers: [routeValidationBlocker("invalid_organization_id", "organization_id")],
+      });
+    }
+    return invokeService(res, async () => {
+      const service = await getImpactHomeSummaryService();
+      return service.getImpactHomeSummary({
+        organizationId: identifiers.organizationId,
+        actorContext: sprint2MappedActorContext(req),
+      });
+    });
+  },
+);
+
 let evidenceLibraryServicePromise = null;
 async function getEvidenceLibraryService() {
   if (intakeServiceOverride?.listOrganizationEvidenceLibrary) return intakeServiceOverride;

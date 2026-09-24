@@ -15,7 +15,7 @@ const homeSource = readFileSync("frontend/ImpactHomeView.jsx", "utf8");
 const appSource = readFileSync("frontend/ImpactLibraryApp.jsx", "utf8");
 
 test("Home's stats and Needs-Attention data come only from existing governed read paths - no Programs, no Recent Activity, no recommendation-engine call", () => {
-  assert.match(homeSource, /claimLibraryCandidatesPath/);
+  assert.match(homeSource, /impactHomeSummaryPath/);
   assert.match(homeSource, /organizationReviewQueuePath/);
   assert.match(homeSource, /projectOrganizationGapsAndRisks/);
   // No fabricated stat tile or rendered section for concepts with no real backing.
@@ -23,16 +23,24 @@ test("Home's stats and Needs-Attention data come only from existing governed rea
   assert.doesNotMatch(homeSource, />Recent [Aa]ctivity</);
 });
 
-test("the Impact Facts stat counts only claims with the real, migration-verified 'reviewed' claim_review_status value", () => {
-  assert.match(homeSource, /claim\.claimReviewStatus === "reviewed"/);
+test("Home never reads the GK-internal claim-library index; the Impact Facts stat is the server's governed aggregate count only", () => {
+  assert.doesNotMatch(homeSource, /claimLibraryCandidatesPath|projectCandidateClaims|claimReviewStatus/);
+  assert.match(homeSource, /summary\.reviewedImpactFactCount/);
+});
+
+test("Home requests the internal Review Queue only when the client-safe summary reports internalReviewAvailable", () => {
+  assert.match(homeSource, /if \(!projected\?\.internalReviewAvailable\) return;\s*setReviewQueueRequestState\("loading"\);\s*const queueResult = await getJson\(organizationReviewQueuePath\(organizationId\)\);/);
+  assert.match(homeSource, /\{internalReviewAvailable \? \(\s*<StatTile n=\{reviewQueueComplete \? recommendationsCount : "…"\} label="Recommendations" \/>/);
 });
 
 test("the Recommendations stat is a real count of governed gap items plus coverage findings, not an invented number", () => {
   assert.match(homeSource, /const recommendationsCount = gapsAndRisks\.gapItems\.length \+ gapsAndRisks\.coverageFindings\.length;/);
 });
 
-test("Needs your attention is never shown as a conclusive number unless the review queue rollup actually completed", () => {
-  assert.match(homeSource, /const attentionCount = reviewQueueComplete \? reviewQueueItems\.length : null;/);
+test("Needs your attention is never shown as a conclusive number unless its source (internal Review Queue or client-safe summary) actually resolved", () => {
+  assert.match(homeSource, /const attentionResolved = internalReviewAvailable \? reviewQueueComplete : Boolean\(summary\);/);
+  assert.match(homeSource, /const attentionCount = !attentionResolved\s*\? null/);
+  assert.match(homeSource, /: summary\.clientActionCount;/);
   assert.match(homeSource, /reviewQueueIsComplete\(reviewQueueCompleteness\)/);
 });
 
@@ -47,10 +55,10 @@ test("Home never fabricates a claim statement/title that the DTO does not provid
   assert.match(homeSource, /blockerDisplayText\(blockerCode, item\.requestedAudience\)/);
 });
 
-test("first-time state is derived from real signals (no claims and a conclusively empty review queue), not a manual toggle", () => {
+test("first-time state is derived only from client-visible summary state (plus a conclusively empty internal queue for internal reviewers), not a manual toggle", () => {
   assert.match(
     homeSource,
-    /const isFirstTime = claimsLoaded && candidateClaims\.length === 0 && reviewQueueComplete && reviewQueueItems\.length === 0;/,
+    /const isFirstTime =\s*summary\?\.isFirstTime === true && \(!internalReviewAvailable \|\| \(reviewQueueComplete && reviewQueueItems\.length === 0\)\);/,
   );
 });
 

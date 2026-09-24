@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useState } from "react";
 
 import {
-  claimLibraryCandidatesPath,
+  impactHomeSummaryPath,
+  projectImpactHomeSummary,
+  CLIENT_FOLLOWUP_REVIEW_HREF,
   organizationReviewQueuePath,
   getJson,
-  projectCandidateClaims,
   projectReviewQueue,
   projectReviewQueueCompleteness,
   reviewQueueIsComplete,
@@ -60,14 +61,18 @@ function reviewQueueItemLabel(item) {
 /**
  * Impact Home (Package C, KAI Impact Library redesign). Every number and
  * list item here is a direct projection of an existing, already-governed
- * read path (governed Claim Library, Review Queue, Gaps and Risks) - no
+ * read path (client-safe Impact Home summary; for actors the server reports
+ * internalReviewAvailable, the internal Review Queue and Gaps and Risks) - no
  * fabricated "Programs" count, no invented "KAI recommends" copy, no
  * fabricated Recent Activity, per owner decision. Home is organization-wide:
  * none of its reads are gated on an engagement/Project.
  */
 export default function ImpactHomeView({ organizationId, onGoToKnowledgeStudio, onGoToImprovementPlan }) {
-  const [candidateClaims, setCandidateClaims] = useState([]);
-  const [claimsLoaded, setClaimsLoaded] = useState(false);
+  // Client-safe summary: the governed Impact Fact count, client-actionable
+  // follow-ups, and whether this actor may use the internal Review Queue.
+  // Home never reads the GK-internal claim-library index.
+  const [summary, setSummary] = useState(null);
+  const [summaryLoaded, setSummaryLoaded] = useState(false);
 
   const [reviewQueueItems, setReviewQueueItems] = useState([]);
   const [reviewQueueCompleteness, setReviewQueueCompleteness] = useState({ truncated: false, evaluationErrorCount: 0 });
@@ -76,14 +81,14 @@ export default function ImpactHomeView({ organizationId, onGoToKnowledgeStudio, 
   // Package G2 Home integration: the real, organization-wide (no Project
   // filter) Improvement Practice list - never a fabricated recommendation
   // or sample practice. improvementPracticesLoaded gates the summary the
-  // same "never guess while unknown" way claimsLoaded/reviewQueueComplete
+  // same "never guess while unknown" way summaryLoaded/reviewQueueComplete
   // already do above.
   const [improvementPractices, setImprovementPractices] = useState([]);
   const [improvementPracticesLoaded, setImprovementPracticesLoaded] = useState(false);
 
   useEffect(() => {
-    setCandidateClaims([]);
-    setClaimsLoaded(false);
+    setSummary(null);
+    setSummaryLoaded(false);
     setReviewQueueItems([]);
     setReviewQueueCompleteness({ truncated: false, evaluationErrorCount: 0 });
     setReviewQueueRequestState("idle");
@@ -93,26 +98,23 @@ export default function ImpactHomeView({ organizationId, onGoToKnowledgeStudio, 
 
     let cancelled = false;
     (async () => {
-      const result = await getJson(claimLibraryCandidatesPath(organizationId));
+      const result = await getJson(impactHomeSummaryPath(organizationId));
       if (cancelled) return;
-      setClaimsLoaded(true);
-      if (result.statusCode !== 200 || !result.body?.ok) {
-        setCandidateClaims([]);
-        return;
-      }
-      setCandidateClaims(projectCandidateClaims(result.body.data));
-    })();
-
-    (async () => {
+      const projected = result.statusCode === 200 && result.body?.ok ? projectImpactHomeSummary(result.body.data) : null;
+      setSummary(projected);
+      setSummaryLoaded(true);
+      // The internal Review Queue is read only for actors the server already
+      // authorizes for it; a client organization member never requests it.
+      if (!projected?.internalReviewAvailable) return;
       setReviewQueueRequestState("loading");
-      const result = await getJson(organizationReviewQueuePath(organizationId));
+      const queueResult = await getJson(organizationReviewQueuePath(organizationId));
       if (cancelled) return;
-      if (result.statusCode !== 200 || !result.body?.ok) {
+      if (queueResult.statusCode !== 200 || !queueResult.body?.ok) {
         setReviewQueueRequestState("error");
         return;
       }
-      setReviewQueueItems(projectReviewQueue(result.body.data));
-      setReviewQueueCompleteness(projectReviewQueueCompleteness(result.body.data));
+      setReviewQueueItems(projectReviewQueue(queueResult.body.data));
+      setReviewQueueCompleteness(projectReviewQueueCompleteness(queueResult.body.data));
       setReviewQueueRequestState("success");
     })();
 
@@ -132,24 +134,40 @@ export default function ImpactHomeView({ organizationId, onGoToKnowledgeStudio, 
     };
   }, [organizationId]);
 
-  const reviewedClaimsCount = useMemo(
-    () => candidateClaims.filter((claim) => claim.claimReviewStatus === "reviewed").length,
-    [candidateClaims],
-  );
+  const internalReviewAvailable = summary?.internalReviewAvailable === true;
+  const impactFactTile = summary
+    ? `${summary.reviewedImpactFactCount}${summary.reviewedImpactFactCountIsLowerBound ? "+" : ""}`
+    : summaryLoaded
+      ? "—"
+      : "…";
 
   const gapsAndRisks = useMemo(() => projectOrganizationGapsAndRisks(reviewQueueItems), [reviewQueueItems]);
   const recommendationsCount = gapsAndRisks.gapItems.length + gapsAndRisks.coverageFindings.length;
 
   const reviewQueueComplete = reviewQueueRequestState === "success" && reviewQueueIsComplete(reviewQueueCompleteness);
-  const attentionCount = reviewQueueComplete ? reviewQueueItems.length : null;
+  // Attention is resolved from the internal Review Queue for actors
+  // authorized for it, otherwise only from the client-safe summary.
+  const attentionResolved = internalReviewAvailable ? reviewQueueComplete : Boolean(summary);
+  const attentionCount = !attentionResolved
+    ? null
+    : internalReviewAvailable
+      ? reviewQueueItems.length
+      : summary.clientActionCount;
 
   const attentionPreview = useMemo(
     () =>
-      reviewQueueItems.slice(0, 3).map((item) => ({
-        ...reviewQueueItemLabel(item),
-        actionability: item.blockerCodes?.[0] ? reviewQueueBlockerActionability(item.blockerCodes[0], item) : null,
-      })),
-    [reviewQueueItems],
+      internalReviewAvailable
+        ? reviewQueueItems.slice(0, 3).map((item) => ({
+            ...reviewQueueItemLabel(item),
+            actionability: item.blockerCodes?.[0] ? reviewQueueBlockerActionability(item.blockerCodes[0], item) : null,
+          }))
+        : (summary?.clientActions || []).slice(0, 3).map((action) => ({
+            claimLabel: "Client follow-up",
+            blockerText: action.questionText,
+            actionability: "ACTION_REQUIRED",
+            actionHref: CLIENT_FOLLOWUP_REVIEW_HREF,
+          })),
+    [internalReviewAvailable, reviewQueueItems, summary],
   );
 
   const nextAction = attentionPreview.find((item) => item.actionability === "ACTION_REQUIRED") || attentionPreview[0] || null;
@@ -166,7 +184,12 @@ export default function ImpactHomeView({ organizationId, onGoToKnowledgeStudio, 
     [improvementPractices],
   );
 
-  const isFirstTime = claimsLoaded && candidateClaims.length === 0 && reviewQueueComplete && reviewQueueItems.length === 0;
+  // First-time is derived from client-visible state only (summary.isFirstTime:
+  // no eligible Impact Facts and no client actions). For actors authorized
+  // for the internal Review Queue it additionally requires that queue to be
+  // conclusively empty.
+  const isFirstTime =
+    summary?.isFirstTime === true && (!internalReviewAvailable || (reviewQueueComplete && reviewQueueItems.length === 0));
 
   if (!organizationId) {
     return <div style={{ color: COLORS.textMuted, fontSize: 14 }}>Select an organization to see its Impact Home.</div>;
@@ -211,8 +234,10 @@ export default function ImpactHomeView({ organizationId, onGoToKnowledgeStudio, 
       </p>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 16, marginBottom: 28 }}>
-        <StatTile n={claimsLoaded ? reviewedClaimsCount : "…"} label="Impact Facts (reviewed)" />
-        <StatTile n={reviewQueueComplete ? recommendationsCount : "…"} label="Recommendations" />
+        <StatTile n={impactFactTile} label="Impact Facts (reviewed)" />
+        {internalReviewAvailable ? (
+          <StatTile n={reviewQueueComplete ? recommendationsCount : "…"} label="Recommendations" />
+        ) : null}
         <StatTile n={attentionCount === null ? "…" : attentionCount} label="Needs your attention" alert={Boolean(attentionCount)} />
         <StatTile n={improvementPracticesLoaded ? activeImprovementPracticesCount : "…"} label="Active Improvement Practices" />
       </div>
@@ -234,31 +259,53 @@ export default function ImpactHomeView({ organizationId, onGoToKnowledgeStudio, 
           <div style={{ fontSize: 13.5, color: COLORS.textSecondary, maxWidth: 480, lineHeight: 1.5, marginBottom: 16 }}>
             {nextAction.blockerText}
           </div>
-          <button
-            type="button"
-            onClick={onGoToKnowledgeStudio}
-            style={{
-              fontFamily: "'Work Sans', sans-serif",
-              fontWeight: 600,
-              fontSize: 14,
-              padding: "10px 18px",
-              borderRadius: 8,
-              cursor: "pointer",
-              background: COLORS.coral,
-              color: "#FFFFFF",
-              border: `1px solid ${COLORS.coral}`,
-            }}
-          >
-            Review in Knowledge Studio
-          </button>
+          {nextAction.actionHref ? (
+            <a
+              href={nextAction.actionHref}
+              style={{
+                display: "inline-block",
+                fontFamily: "'Work Sans', sans-serif",
+                fontWeight: 600,
+                fontSize: 14,
+                padding: "10px 18px",
+                borderRadius: 8,
+                background: COLORS.coral,
+                color: "#FFFFFF",
+                border: `1px solid ${COLORS.coral}`,
+                textDecoration: "none",
+              }}
+            >
+              Open client follow-ups
+            </a>
+          ) : (
+            <button
+              type="button"
+              onClick={onGoToKnowledgeStudio}
+              style={{
+                fontFamily: "'Work Sans', sans-serif",
+                fontWeight: 600,
+                fontSize: 14,
+                padding: "10px 18px",
+                borderRadius: 8,
+                cursor: "pointer",
+                background: COLORS.coral,
+                color: "#FFFFFF",
+                border: `1px solid ${COLORS.coral}`,
+              }}
+            >
+              Review in Knowledge Studio
+            </button>
+          )}
         </div>
       ) : null}
 
       <div style={{ background: "#FFFFFF", border: "1px solid rgba(69,90,124,0.10)", borderRadius: 10, padding: 22 }}>
         <div style={{ fontWeight: 600, fontSize: 15, color: COLORS.ink, marginBottom: 14 }}>Needs your attention</div>
-        {!reviewQueueComplete ? (
+        {!attentionResolved ? (
           <div style={{ fontSize: 13, color: COLORS.textMuted }}>
-            {reviewQueueRequestState === "error" ? "Could not load current attention items." : "Loading…"}
+            {reviewQueueRequestState === "error" || (summaryLoaded && !summary)
+              ? "Could not load current attention items."
+              : "Loading…"}
           </div>
         ) : attentionPreview.length === 0 ? (
           <div style={{ fontSize: 13, color: COLORS.textMuted }}>Nothing currently needs attention for this organization.</div>
