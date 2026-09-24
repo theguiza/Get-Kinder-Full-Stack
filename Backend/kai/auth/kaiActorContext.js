@@ -21,7 +21,8 @@ export function pickSafeLegacyUser(user = {}) {
  * missing kai.users mapping is provisioned automatically (JIT) rather than
  * requiring manual mapping. An existing but explicitly non-active kai.users
  * row (e.g. deprovisioned) is never resurrected here and still fails closed
- * with mapped_kai_user_required. Organization/role authorization is decided
+ * with mapped_kai_user_required, as does a missing mapping whose JIT insert
+ * the deployed kai.users table rejects. Organization/role authorization is decided
  * afterward by validateActorCanPerformOperation and is unaffected by identity
  * provisioning: a freshly provisioned user has no kai.user_roles/
  * kai.organization_memberships rows and so is authorized for nothing until an
@@ -50,7 +51,24 @@ export async function resolveKaiActorContext(reqOrUser, dependencies = {}) {
     dependencies.resolveEffectiveClientOrganizationMembershipsForLegacyUser ||
     resolveEffectiveClientOrganizationMembershipsForLegacyUser;
 
-  const kaiUser = await findOrCreateUser({ legacyPublicUserdataId: user.id, email: user.email || null });
+  let kaiUser;
+  try {
+    kaiUser = await findOrCreateUser({ legacyPublicUserdataId: user.id, email: user.email || null });
+  } catch (error) {
+    if (!error?.kaiUserProvisioningFailed) throw error;
+    // No mapping exists and the JIT insert was rejected: the caller still has
+    // no usable kai.users mapping, which is the controlled
+    // mapped_kai_user_required outcome, not a server error. Only the
+    // PostgreSQL diagnostic identifiers are logged: the message is omitted
+    // because some PostgreSQL messages echo the rejected value (e.g. email).
+    console.error("[kai-actor-context] kai.users JIT provisioning failed", {
+      code: error.cause?.code || null,
+      constraint: error.cause?.constraint || null,
+      column: error.cause?.column || null,
+      table: error.cause?.table || null,
+    });
+    kaiUser = null;
+  }
   const hasActivePublicUserdataMapping =
     kaiUser?.user_id &&
     kaiUser.legacy_identity_source === "public.userdata" &&

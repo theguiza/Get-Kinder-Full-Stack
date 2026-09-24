@@ -17,6 +17,30 @@ async function selectKaiUserByLegacyPublicUserdataId(db, legacyPublicUserdataId)
 }
 
 /**
+ * The JIT INSERT is the one write whose success depends on the externally
+ * managed deployed kai.users contract. Its failure is tagged
+ * kaiUserProvisioningFailed so the actor resolver can report the known
+ * "no usable mapping" condition (mapped_kai_user_required) instead of a
+ * generic system_error; the original error is kept as cause. Any other
+ * failure (connect, lock, lookup, commit) is left untagged.
+ */
+async function insertKaiUserForLegacyPublicUserdataId(db, legacyPublicUserdataId, email) {
+  try {
+    const { rows } = await db.query(
+      `INSERT INTO kai.users (legacy_identity_source, legacy_public_userdata_id, email, status)
+       VALUES ('public.userdata', $1, $2, 'active')
+       RETURNING ${KAI_USER_SELECT_COLUMNS}`,
+      [legacyPublicUserdataId, email],
+    );
+    return rows[0] || null;
+  } catch (error) {
+    const provisioningError = new Error("kai.users JIT provisioning insert failed", { cause: error });
+    provisioningError.kaiUserProvisioningFailed = true;
+    throw provisioningError;
+  }
+}
+
+/**
  * Resolve the internal kai.users principal for an authenticated public.userdata
  * identity, provisioning it on first use. Existing rows (any status) are
  * returned as-is so an explicitly deactivated mapping still fails closed in
@@ -40,13 +64,7 @@ export async function findOrCreateKaiUserByLegacyPublicUserdataId(
   if (typeof db.connect !== "function") {
     const existing = await selectKaiUserByLegacyPublicUserdataId(db, legacyPublicUserdataId);
     if (existing) return existing;
-    const { rows } = await db.query(
-      `INSERT INTO kai.users (legacy_identity_source, legacy_public_userdata_id, email, status)
-       VALUES ('public.userdata', $1, $2, 'active')
-       RETURNING ${KAI_USER_SELECT_COLUMNS}`,
-      [legacyPublicUserdataId, email],
-    );
-    return rows[0] || null;
+    return insertKaiUserForLegacyPublicUserdataId(db, legacyPublicUserdataId, email);
   }
 
   const client = await db.connect();
@@ -63,14 +81,9 @@ export async function findOrCreateKaiUserByLegacyPublicUserdataId(
       return existing;
     }
 
-    const { rows } = await client.query(
-      `INSERT INTO kai.users (legacy_identity_source, legacy_public_userdata_id, email, status)
-       VALUES ('public.userdata', $1, $2, 'active')
-       RETURNING ${KAI_USER_SELECT_COLUMNS}`,
-      [legacyPublicUserdataId, email],
-    );
+    const provisioned = await insertKaiUserForLegacyPublicUserdataId(client, legacyPublicUserdataId, email);
     await client.query("COMMIT");
-    return rows[0] || null;
+    return provisioned;
   } catch (error) {
     await client.query("ROLLBACK").catch(() => {});
     throw error;

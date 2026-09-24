@@ -422,3 +422,89 @@ test("an authenticated actor mapped to one organization cannot access a differen
   assert.equal(otherOrg.ok, false);
   assert.equal(otherOrg.error_code, "authorization_denied");
 });
+
+// A pool whose kai.users lookup finds nothing and whose failing statement is
+// chosen by the test, standing in for a deployed kai.users contract that
+// rejects the JIT insert (or a non-provisioning database failure).
+function createFailingKaiUsersPool({ failOn }) {
+  const statements = [];
+  return {
+    statements,
+    async connect() {
+      return {
+        async query(sql) {
+          statements.push(sql.split(/\s+/).slice(0, 3).join(" "));
+          if (failOn(sql)) {
+            const error = new Error('null value in column "display_name" of relation "users" violates not-null constraint');
+            error.code = "23502";
+            error.column = "display_name";
+            error.table = "users";
+            throw error;
+          }
+          return { rows: [] };
+        },
+        release() {},
+      };
+    },
+  };
+}
+
+function withCapturedConsoleError(fn) {
+  const original = console.error;
+  const captured = [];
+  console.error = (...args) => captured.push(args);
+  return Promise.resolve()
+    .then(fn)
+    .then((value) => ({ value, captured }))
+    .finally(() => {
+      console.error = original;
+    });
+}
+
+test("findOrCreateKaiUserByLegacyPublicUserdataId tags a rejected JIT insert and rolls back", async () => {
+  const pool = createFailingKaiUsersPool({ failOn: (sql) => sql.startsWith("INSERT INTO kai.users") });
+  await assert.rejects(
+    findOrCreateKaiUserByLegacyPublicUserdataId({ legacyPublicUserdataId: 4242 }, pool),
+    (error) => error.kaiUserProvisioningFailed === true && error.cause?.code === "23502",
+  );
+  assert.equal(pool.statements.at(-1), "ROLLBACK");
+  assert.ok(!pool.statements.includes("COMMIT"));
+});
+
+test("resolveKaiActorContext returns controlled mapped_kai_user_required when the JIT kai.users insert is rejected", async () => {
+  const pool = createFailingKaiUsersPool({ failOn: (sql) => sql.startsWith("INSERT INTO kai.users") });
+  const { value: result, captured } = await withCapturedConsoleError(() =>
+    resolveKaiActorContext(
+      { user: { id: 4242, email: "unmapped@example.test" } },
+      {
+        findOrCreateKaiUserByLegacyPublicUserdataId: (input) => findOrCreateKaiUserByLegacyPublicUserdataId(input, pool),
+        listKaiRolesForUser: async () => {
+          throw new Error("roles must not be read without a mapping");
+        },
+        listOrganizationMembershipsForUser: async () => {
+          throw new Error("memberships must not be read without a mapping");
+        },
+        resolveEffectiveClientOrganizationMembershipsForLegacyUser: async () => {
+          throw new Error("GK-derived memberships must not be read without a mapping");
+        },
+      },
+    ),
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.error_code, "mapped_kai_user_required");
+  assert.equal(result.actorContext, undefined, "no actor, role, or tenant membership without a mapping");
+  assert.equal(captured.length, 1);
+  assert.equal(captured[0][1].code, "23502");
+  assert.ok(!JSON.stringify(captured).includes("unmapped@example.test"), "log carries no user values");
+});
+
+test("resolveKaiActorContext still surfaces non-provisioning database failures as errors (never as a mapping result)", async () => {
+  const pool = createFailingKaiUsersPool({ failOn: (sql) => sql.startsWith("SELECT pg_advisory_xact_lock") });
+  await assert.rejects(
+    resolveKaiActorContext(
+      { user: { id: 4242 } },
+      { findOrCreateKaiUserByLegacyPublicUserdataId: (input) => findOrCreateKaiUserByLegacyPublicUserdataId(input, pool) },
+    ),
+    (error) => !error.kaiUserProvisioningFailed && error.code === "23502",
+  );
+});

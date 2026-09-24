@@ -33158,3 +33158,75 @@ still unapplied to any shared or production database.
 No push, deployment, production/shared database access or mutation,
 migration application, feature-flag/configuration change, real-client-data
 access, or `00_KAI_CURRENT_STATE.md` update performed.
+
+### Organization-onboarding status 500 for an unmapped approved GK admin — kai.users JIT handoff repair (2026-09-24)
+
+**USER_CONFIRMED production facts (approved Harbourline Society
+application):** application approved; userdata org/org_rep set; active GK
+organization-admin membership; NO active `kai.users` mapping; NO GK->KAI
+binding; `GET /admin/organization-onboarding/status` returns 500. Owner
+direction: no further production investigation, no binding creation, no
+manual `kai.users` insert.
+
+**Identity model (TOOL_VERIFIED, not changed):** JIT. `resolveKaiActorContext`
+calls `findOrCreateKaiUserByLegacyPublicUserdataId`, which provisions an
+absent `public.userdata` mapping (owner decision recorded in the 2026-08-11
+JIT package); an existing non-active row still fails closed with
+`mapped_kai_user_required`.
+
+**Causes (TOOL_VERIFIED from code + local reproduction):**
+- Identity handoff: with no row present, the only way the route can end with
+  no row is that the JIT `INSERT INTO kai.users` inside
+  `findOrCreateKaiUserByLegacyPublicUserdataId` threw and rolled back (success
+  leaves an active row; an existing non-active row yields 403). The exact
+  deployed-schema reason for the rejection remains NOT_CONFIRMED (the
+  deployed `kai.users` insert contract has been an open item since the JIT
+  package); against the mirrored schema the JIT insert succeeds.
+- Error mapping: the insert exception propagated unhandled through
+  `resolveKaiActorContext` and `getMyOrganizationOnboardingStatus` into the
+  route's `invokeService` catch, which always answers `system_error` 500.
+
+**Repair:** `Backend/kai/db/kaiQueries.js` tags only a failed JIT INSERT
+(`kaiUserProvisioningFailed`, original error as `cause`); connect / lock /
+lookup / commit failures stay untagged. `Backend/kai/auth/kaiActorContext.js`
+maps the tagged failure to the existing `mapped_kai_user_required` (403) and
+logs only SQLSTATE/constraint/column/table (no message, since some
+PostgreSQL messages echo values). No role, membership, binding, or tenant
+access is read or granted without a mapping. Every consumer of the resolver
+(middleware-attached and service-level routes) inherits the controlled 403.
+
+**Evidence:**
+- Real-route local PostgreSQL proof
+  (`scripts/kai-sprint2-organization-onboarding-approved-status-local-postgres.js`,
+  spec `__tests__/kai-organization-onboarding-approved-status.integration.spec.js`,
+  bootstrap adds synthetic `kai.organizations`/`kai.engagements` keys):
+  STATE C unmapped approved GK admin, no binding -> JIT row, 200
+  APPROVED_NOT_KAI_ENABLED, zero `kai.organization_memberships`, no binding;
+  STATE D same with the JIT insert rejected by a synthetic trigger -> before
+  repair 500 `system_error` (reproduced), after repair 403
+  `mapped_kai_user_required`, no row, no binding; STATE E mapped + active
+  binding + initial engagement -> KAI_AVAILABLE, while the STATE C user stays
+  APPROVED_NOT_KAI_ENABLED. 6/6 PASS.
+- `__tests__/kai-sprint2-jit-actor-provisioning.spec.js` +3 tests (tag and
+  rollback; controlled mapping result with no role/membership reads and no
+  user values logged; non-provisioning failure still throws) -> 17/17.
+- Actor-context / middleware / onboarding / client-org authorization /
+  enablement / GK binding / organization-context specs -> 131 pass, 0 fail,
+  1 skipped (runner-only).
+- Runners: GK tenant binding 6/6, organization enablement 9/9, P2 access
+  administration 18/18, JOIN-1..5 128/128, Package 4 11/11.
+- `npm test` -> 5123 pass, 12 fail, 87 skipped; the 12 failures are identical
+  at HEAD without this change (JOIN baseline).
+- `git diff --check` -> PASS. Full diff inspected.
+
+**Production remediation after deploy (not performed):** after deployment
+the unmapped user receives 403 `mapped_kai_user_required` instead of 500.
+Obtaining the mapping still requires the deployed `kai.users` table to accept
+the JIT insert: read the new `[kai-actor-context] kai.users JIT provisioning
+failed` log line (SQLSTATE/constraint/column) for this user's next request,
+then run the existing read-only `kai.users` catalog query recorded in the JIT
+package to reconcile the insert contract. No manual row insert and no binding.
+
+**Status:** KAI_USERS_JIT_HANDOFF_ERROR_MAPPING_REPAIRED_LOCALLY. No push,
+deployment, production/shared database access or mutation, binding creation,
+configuration change, or `00_KAI_CURRENT_STATE.md` update performed.
