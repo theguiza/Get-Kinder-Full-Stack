@@ -786,7 +786,7 @@
 .gk-shell-header {
   height: 68px;
   flex-shrink: 0;
-  background: #FFFFFF;
+  background: #c2cddf;
   border-bottom: 1px solid rgba(69,90,124,0.12);
   display: flex;
   align-items: center;

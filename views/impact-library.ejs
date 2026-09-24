@@ -14,16 +14,23 @@
   <style>
     /*
       /impact-library renders inside the standard site shell
-      (partials/site-header + partials/site-footer), following the same
-      include order and fixed-top body offset as kai-review-cockpit.ejs.
-      Bootstrap is kept because the site header and the existing
-      ImpactEvidenceLibrary component both rely on it.
+      (partials/site-header + partials/site-footer), in the same include
+      order as kai-review-cockpit.ejs. Bootstrap is kept because the site
+      header and the existing ImpactEvidenceLibrary component both rely on it.
 
-      The product shell (.gk-shell-root, gk-design-tokens.css) was sized for
-      a full-viewport page; fit it below the fixed site header instead, and
-      on mobile keep its fixed bottom tab bar from covering the site footer.
+      Unlike document-style pages, the product shell (.gk-shell-root,
+      gk-design-tokens.css) is a full-bleed app, so it starts directly below
+      the fixed site header: the body offset equals that header's natural
+      height (80px logo + Bootstrap navbar and brand vertical padding =
+      106px), the shared "body > header + *" breathing-room margin in
+      style.css is cancelled for the mount point only, and the shell fills
+      the rest of the viewport. On mobile, body bottom padding keeps the
+      shell's fixed bottom tab bar from covering the site footer.
     */
-    .gk-shell-root { height: calc(100vh - clamp(88px, 14vw, 112px)); }
+    :root { --gk-site-header-height: 106px; }
+    body { padding-top: var(--gk-site-header-height); }
+    #impact-evidence-library-root { margin-top: 0; }
+    .gk-shell-root { height: calc(100vh - var(--gk-site-header-height)); }
     @media (max-width: 767.98px) {
       body { padding-bottom: 64px; }
     }
@@ -43,7 +50,7 @@
     }
   </style>
 </head>
-<body style="padding-top: clamp(88px, 14vw, 112px);">
+<body>
   <%- include("partials/site-header", { currentPage: "impact-library" }) %>
 
   <div id="impact-evidence-library-root"></div>

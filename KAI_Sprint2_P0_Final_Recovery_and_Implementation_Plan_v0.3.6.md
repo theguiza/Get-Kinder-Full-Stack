@@ -32606,3 +32606,46 @@ app requires unauthorized database/session access). No production or
 runtime closure claimed. No push, deployment, production mutation, database
 mutation, migration execution, feature-flag/configuration change,
 real-client-data access, or `00_KAI_CURRENT_STATE.md` update performed.
+
+### Impact Library site-header spacing and internal product header colour (CLOSED LOCALLY)
+
+**Date:** 2026-09-23
+
+**Trigger:** Owner visual inspection after `ec6432b`: excess blank space
+below the restored shared site header on `/impact-library`, and the internal
+Impact Library product header (`.gk-shell-header`) should be `#c2cddf`.
+
+**Cause (measured in local headless Chrome against locally rendered views
+with stub locals):** the shared navbar's natural height is 106px (also 106px
+on the home page reference header). `/impact-library` reserved
+`padding-top: clamp(88px, 14vw, 112px)` (112px on desktop) and the shared
+style.css rule `body > header + * { margin-top: clamp(20px, 3vw, 36px) }`
+added 36px above the React mount, so the product shell started at 148px:
+a 42px white gap directly above the then-white 68px internal shell header.
+On mobile the 88px offset was 18px short of the header. The shell height
+calc also ignored the margin.
+
+**Repair:** `views/impact-library.ejs` now sets
+`--gk-site-header-height: 106px`, uses it for body `padding-top` and for
+`.gk-shell-root` height, and sets `#impact-evidence-library-root
+{ margin-top: 0 }` (this page only). `public/css/gk-design-tokens.css`
+`.gk-shell-header` background `#FFFFFF` -> `#c2cddf` (selector used only by
+`frontend/impactLibraryShell.jsx`). Shared partials, `style.css`, and other
+views unchanged.
+
+**Tests:** With a loopback `DATABASE_URL` sentinel for every Node/npm
+command:
+- `node --test __tests__/kai-impact-library-shell.spec.js __tests__/impact-library-view.spec.js __tests__/kai-impact-library-home.spec.js __tests__/kai-package-i-responsive-accessibility-qa.spec.js`
+  -> 33/33 PASS.
+- Local headless Chrome (1440px and 500px): navbar 106px white, one
+  header/footer, shell top 106px (gap 0), internal header
+  `rgb(194, 205, 223)`, sidebar in place, `.gk-shell-content` overflow-y
+  auto, footer below the shell, no horizontal overflow on `/impact-library`;
+  `kai-review-cockpit` measurements identical before and after.
+- `npm run build` -> PASS. `git diff --check` -> PASS. Full diff inspected.
+
+**Status:** IMPACT_LIBRARY_HEADER_SPACING_AND_SHELL_HEADER_COLOUR_CLOSED_LOCALLY.
+No production or runtime closure claimed. No push, deployment, production
+mutation, database mutation, migration execution, feature-flag/configuration
+change, real-client-data access, or `00_KAI_CURRENT_STATE.md` update
+performed.
