@@ -510,9 +510,10 @@ async function runP206IntegrationSuite() {
     // Budget: one never-before-claimed evidence item per buildPublicP206Claim()
     // call across this whole suite (3 pre-existing B1B audience-authority
     // tests + 6 public coverage-consumption tests added by the P2-06
-    // public-consumption proof) - generously overprovisioned so a future test
+    // public-consumption proof + 4 client-safe impact-facts fixture claims) -
+    // generously overprovisioned so a future test
     // addition does not silently exhaust it.
-    for (const suffix of ["31", "32", "33", "34", "35", "36", "37", "38", "39", "40", "41", "42"]) {
+    for (const suffix of ["31", "32", "33", "34", "35", "36", "37", "38", "39", "40", "41", "42", "43", "44", "45", "46"]) {
       await pool.query(
         `INSERT INTO kai.data_dictionary_fields (
            data_dictionary_field_id, data_dictionary_id, organization_id, file_profile_id,
@@ -930,5 +931,250 @@ async function runP206IntegrationSuite() {
     assert.ok(result.data.blockerCodes.includes("claim_not_approved_for_requested_audience"));
     assert.ok(result.data.blockerCodes.includes("audience_gate_closed"));
     assert.ok(result.data.blockerCodes.includes("requirement_authority_absent"));
+  });
+
+  // Client-safe impact-facts over real governed state: real binding-derived
+  // client_admin -> listClientImpactFacts -> real P2-08 repository (runner-
+  // owned transaction only) -> real P2-06 evaluator -> client projection.
+  const { listClientImpactFacts } = await import("../Backend/kai/services/kaiClientImpactFactsService.js");
+  const { createPostgresEligibleClaimsForAudienceRepository } = await import("../Backend/kai/dictionary/postgresEligibleClaimsForAudienceRepository.js");
+  const { resolveKaiActorContext } = await import("../Backend/kai/auth/kaiActorContext.js");
+  const OTHER_ORG = "00000000-0000-4000-8000-000000000002";
+  const GK_ORG = 77;
+
+  async function bindingDerivedClientAdmin(boundKaiOrganizationId) {
+    const result = await resolveKaiActorContext(
+      { user: { id: 501, email: "admin@harbourline.test" } },
+      {
+        findOrCreateKaiUserByLegacyPublicUserdataId: async ({ legacyPublicUserdataId, email }) => ({
+          user_id: "90000000-0000-4000-8000-000000000021",
+          legacy_identity_source: "public.userdata",
+          legacy_public_userdata_id: legacyPublicUserdataId,
+          status: "active",
+          email,
+        }),
+        listKaiRolesForUser: async () => [],
+        listOrganizationMembershipsForUser: async () => [],
+        resolveOrgScopeForUserId: async () => ({ memberships: [{ orgId: GK_ORG, role: "admin", is_active: true }] }),
+        listActiveGkOrganizationBindingsForGkOrganizationIds: async (ids) =>
+          ids.includes(GK_ORG) ? [{ gk_organization_id: GK_ORG, kai_organization_id: boundKaiOrganizationId, status: "active" }] : [],
+      },
+    );
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.deepEqual(
+      result.actorContext.organizationMemberships.map(({ organization_id, role_name, source }) => ({ organization_id, role_name, source })),
+      [{ organization_id: boundKaiOrganizationId, role_name: "client_admin", source: "gk_organization_binding" }],
+    );
+    return result.actorContext;
+  }
+
+  const factsDependencies = { env: { KAI_SPRINT2_ENABLED: "true" }, runInTransaction: withRunnerOwnedTransaction };
+
+  // Ground truth from the real evaluator. Claims the P2-08 repository treats
+  // as unusable (not_found / conflict_current_state_changed - e.g. the
+  // deliberately inconsistent claim seeded by the "absent P2-04 rows" test
+  // above) are never eligible; `requireUsable` is set for fixture claims.
+  async function internalEvaluation(claimId, { requireUsable = true } = {}) {
+    const result = await withRunnerOwnedTransaction(async (tx) => {
+      await tx.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY");
+      return evaluateClaimTraceabilityInTransaction(tx, { organizationId: ORG, claimId, requestedAudience: "internal" });
+    });
+    if (!requireUsable && !result.ok && ["not_found", "conflict_current_state_changed"].includes(result.error?.code)) {
+      return { eligible: false, unusable: true, reason: result.error.reason || result.error.code };
+    }
+    assert.equal(result.ok, true, JSON.stringify(result));
+    return result.data;
+  }
+
+  let impactFactsFixture;
+  async function prepareImpactFactsFixture() {
+    if (impactFactsFixture) return impactFactsFixture;
+    // B: a fresh proposed claim whose claim review is still open (its GK
+    // claim-review queue item remains open - D). The shared prepareTwoClaims
+    // claims are not used: an earlier test deliberately corrupts their P2-04
+    // state, which the repository then skips as unusable.
+    const unreviewed = await buildPublicP206Claim({ phase5PublicAllowed: false, claimReviewApprovedAudiences: null });
+    const unreviewedClaimIds = [unreviewed.claimId];
+    const [openClaimQueue] = await query(
+      `SELECT queue_status FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = 'claim_review' AND target_object_id = $2::uuid`,
+      [ORG, unreviewed.claimId],
+    );
+    assert.notEqual(openClaimQueue?.queue_status, "resolved", "B keeps open GK claim-review work");
+    // A: governed internal-eligible claim - evidence review supported, claim
+    // review approved for internal, every unresolved dimension accepted as an
+    // internal limitation, every client follow-up completed.
+    const eligible = await buildPublicP206Claim({ phase5PublicAllowed: false, claimReviewApprovedAudiences: ["internal"] });
+    const unresolvedForEligible = unresolvedDimensionKeys((await trace(eligible.claimId, "internal")).data);
+    for (const dimensionKey of unresolvedForEligible) {
+      const accepted = await acceptInternalCoverageLimitation(
+        { organizationId: ORG, claimId: eligible.claimId, dimensionKey, actorContext, now: NOW },
+        { env: { KAI_SPRINT2_ENABLED: "true" }, coverageReviewDecisionRepository: coverageRepo, metadataOnlyAudit: auditRecorder() },
+      );
+      assert.equal(accepted.ok, true, JSON.stringify(accepted));
+    }
+    await completeAllFollowups(eligible.claimId);
+    // C: reviewed and approved for internal with follow-ups completed, but its
+    // unresolved coverage dimensions were never accepted for internal use, so
+    // the real evaluator rejects it (coverage_dimension_unresolved).
+    const rejected = await buildPublicP206Claim({ phase5PublicAllowed: false, claimReviewApprovedAudiences: ["internal"] });
+    await completeAllFollowups(rejected.claimId);
+    impactFactsFixture = {
+      eligibleClaimId: eligible.claimId,
+      eligibleUnresolved: unresolvedForEligible,
+      unreviewedClaimIds,
+      rejectedClaimId: rejected.claimId,
+    };
+    return impactFactsFixture;
+  }
+
+  test("impact-facts (real PostgreSQL, real P2-06 evaluator): binding-derived client_admin sees exactly the governed internal-eligible facts, nothing hidden leaks, read-only", async () => {
+    const fixture = await prepareImpactFactsFixture();
+
+    // Ground truth straight from the real evaluator for every claim in ORG.
+    const allClaims = await query(`SELECT claim_id::text AS claim_id FROM kai.claims WHERE organization_id = $1::uuid ORDER BY claim_id`, [ORG]);
+    const evaluations = new Map();
+    for (const row of allClaims) evaluations.set(row.claim_id, await internalEvaluation(row.claim_id, { requireUsable: false }));
+    const eligibleIds = [...evaluations].filter(([, data]) => data.eligible === true).map(([id]) => id).sort();
+
+    for (const claimId of [fixture.eligibleClaimId, fixture.rejectedClaimId, ...fixture.unreviewedClaimIds]) {
+      assert.notEqual(evaluations.get(claimId).unusable, true, `fixture claim ${claimId} must be evaluable`);
+    }
+    const eligibleEvaluation = evaluations.get(fixture.eligibleClaimId);
+    assert.equal(eligibleEvaluation.eligible, true, JSON.stringify(eligibleEvaluation.blockerCodes));
+    for (const claimId of fixture.unreviewedClaimIds) {
+      assert.equal(evaluations.get(claimId).eligible, false);
+      assert.ok(evaluations.get(claimId).blockerCodes.includes("claim_review_unresolved"));
+    }
+    const rejectedEvaluation = evaluations.get(fixture.rejectedClaimId);
+    assert.equal(rejectedEvaluation.eligible, false);
+    assert.ok(rejectedEvaluation.blockerCodes.includes("coverage_dimension_unresolved"), JSON.stringify(rejectedEvaluation.blockerCodes));
+    assert.ok(allClaims.length > eligibleIds.length, "fixture contains hidden (ineligible) claims");
+
+    const hidden = await query(
+      `SELECT c.claim_id::text AS claim_id, c.statement AS claim_statement, e.evidence_item_id::text AS evidence_item_id,
+              e.statement AS evidence_statement, e.source_id::text AS source_id, e.source_version_id::text AS source_version_id,
+              e.source_locator_id::text AS source_locator_id
+         FROM kai.claims c
+         JOIN kai.evidence_items e ON e.organization_id = c.organization_id AND e.evidence_item_id = c.evidence_item_id
+        WHERE c.organization_id = $1::uuid`,
+      [ORG],
+    );
+    const queueRows = await query(
+      `SELECT review_queue_item_id::text AS id, summary, required_action FROM kai.review_queue_items WHERE organization_id = $1::uuid`,
+      [ORG],
+    );
+    assert.ok(queueRows.length > 0, "fixture has GK review-queue material");
+
+    const actorContextForClient = await bindingDerivedClientAdmin(ORG);
+    const beforeAudit = await query(`SELECT count(*)::int AS count FROM kai.upload_lifecycle_audit`);
+    const beforeCounts = await query(
+      `SELECT (SELECT count(*) FROM kai.claims)::int AS claims, (SELECT count(*) FROM kai.review_queue_items)::int AS queue,
+              (SELECT count(*) FROM kai.coverage_review_decisions)::int AS coverage`,
+    );
+    transactionLog.length = 0;
+
+    const result = await listClientImpactFacts({ organizationId: ORG, actorContext: actorContextForClient }, factsDependencies);
+    assert.equal(result.ok, true, JSON.stringify(result));
+
+    // Exact DTO shape and exact governed set.
+    assert.deepEqual(Object.keys(result.data).sort(), ["items", "truncated"]);
+    assert.equal(result.data.truncated, false);
+    assert.deepEqual(result.data.items.map((item) => item.claimId).sort(), eligibleIds);
+    assert.ok(eligibleIds.includes(fixture.eligibleClaimId));
+    for (const item of result.data.items) {
+      assert.deepEqual(Object.keys(item).sort(), ["claimId", "claimType", "limitationDimensionKeys", "statement"]);
+      const evaluation = evaluations.get(item.claimId);
+      assert.equal(item.statement, evaluation.claim.statement);
+      assert.equal(item.claimType, evaluation.claim.claim_type);
+      const expectedLimitations = Object.entries(evaluation.dimensions)
+        .filter(([, value]) => value.assessment_status === "unresolved" && value.internal_limitation_accepted === true)
+        .map(([key]) => key)
+        .sort();
+      assert.deepEqual(item.limitationDimensionKeys, expectedLimitations);
+    }
+    const factA = result.data.items.find((item) => item.claimId === fixture.eligibleClaimId);
+    assert.deepEqual(factA.limitationDimensionKeys, [...fixture.eligibleUnresolved].sort());
+
+    // Leak check against every real hidden value.
+    const serialized = JSON.stringify(result.data);
+    const eligibleSet = new Set(eligibleIds);
+    for (const row of hidden) {
+      if (!eligibleSet.has(row.claim_id)) {
+        assert.ok(!serialized.includes(row.claim_id), `leaked hidden claim id ${row.claim_id}`);
+        if (row.claim_statement) {
+          const statementOwnedByVisibleFact = result.data.items.some((item) => item.statement === row.claim_statement);
+          if (!statementOwnedByVisibleFact) assert.ok(!serialized.includes(row.claim_statement), "leaked hidden claim statement");
+        }
+      }
+      for (const value of [row.evidence_item_id, row.evidence_statement, row.source_id, row.source_version_id, row.source_locator_id]) {
+        if (typeof value === "string" && value.length > 0) assert.ok(!serialized.includes(value), `leaked ${value}`);
+      }
+    }
+    for (const row of queueRows) {
+      for (const value of [row.id, row.summary, row.required_action]) {
+        if (typeof value === "string" && value.length > 0) assert.ok(!serialized.includes(value), `leaked queue material ${value}`);
+      }
+    }
+    for (const token of ["review_queue_item_id", "queue_status", "review_status", "needs_gk_review", "decision_outcome", "validator_key", "approved_audiences", "sensitivity_level", "evidence_item_id", "source_locator_id", "source_version_id", "blockerCodes"]) {
+      assert.ok(!serialized.includes(token), `leaked GK field token ${token}`);
+    }
+
+    // Read-only: no write SQL, no audit, no row-count change.
+    assert.ok(transactionLog.some((sql) => /REPEATABLE READ READ ONLY/.test(sql)));
+    assert.equal(transactionLog.some((sql) => /\bINSERT\b|\bUPDATE\b|\bDELETE\b/i.test(sql)), false);
+    assert.deepEqual(await query(`SELECT count(*)::int AS count FROM kai.upload_lifecycle_audit`), beforeAudit);
+    assert.deepEqual(
+      await query(
+        `SELECT (SELECT count(*) FROM kai.claims)::int AS claims, (SELECT count(*) FROM kai.review_queue_items)::int AS queue,
+                (SELECT count(*) FROM kai.coverage_review_decisions)::int AS coverage`,
+      ),
+      beforeCounts,
+    );
+  });
+
+  test("impact-facts (real PostgreSQL): hidden/ineligible claims change neither the returned count nor the pagination metadata", async () => {
+    const fixture = await prepareImpactFactsFixture();
+    const clientAdmin = await bindingDerivedClientAdmin(ORG);
+    const before = await listClientImpactFacts({ organizationId: ORG, actorContext: clientAdmin }, factsDependencies);
+    // Add one more real ineligible claim (proposed, unreviewed) to ORG.
+    const extra = await buildPublicP206Claim({ phase5PublicAllowed: false, claimReviewApprovedAudiences: null });
+    assert.equal((await internalEvaluation(extra.claimId)).eligible, false);
+    const after = await listClientImpactFacts({ organizationId: ORG, actorContext: clientAdmin }, factsDependencies);
+    assert.equal(before.ok && after.ok, true);
+    assert.deepEqual(after.data, before.data);
+    assert.ok(!JSON.stringify(after.data).includes(extra.claimId));
+    assert.ok(after.data.items.some((item) => item.claimId === fixture.eligibleClaimId));
+  });
+
+  test("impact-facts (real PostgreSQL): client_admin bound to another organization is denied before any claim is scanned", async () => {
+    await prepareImpactFactsFixture();
+    const crossOrgAdmin = await bindingDerivedClientAdmin(OTHER_ORG);
+    transactionLog.length = 0;
+    const result = await listClientImpactFacts({ organizationId: ORG, actorContext: crossOrgAdmin }, factsDependencies);
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "authorization_denied");
+    assert.equal(result.blockers[0].validator_key, "VAL-AUT-003");
+    assert.equal(result.data ?? null, null);
+    assert.equal(transactionLog.length, 0, "no transaction opened, no claim scanned");
+  });
+
+  test("impact-facts (real PostgreSQL): the default P2-08 DTO is unchanged when no projection is requested", async () => {
+    await prepareImpactFactsFixture();
+    const defaultRepository = createPostgresEligibleClaimsForAudienceRepository({ runInTransaction: withRunnerOwnedTransaction });
+    const listed = await defaultRepository.listEligibleClaimsForAudience({ organizationId: ORG, requestedAudience: "internal", limit: 100, afterClaimId: null });
+    assert.equal(listed.ok, true, JSON.stringify(listed));
+    assert.deepEqual(Object.keys(listed.data).sort(), ["afterClaimId", "eligibleClaims", "limit", "nextAfterClaimId", "requestedAudience", "truncated"]);
+    assert.ok(listed.data.eligibleClaims.length > 0);
+    for (const claim of listed.data.eligibleClaims) {
+      assert.deepEqual(Object.keys(claim).sort(), [
+        "claimId", "claimReviewStatus", "claimStatus", "claimType", "evidenceItemId", "requestedAudience", "sourceId", "sourceVersionId", "supportStrength",
+      ]);
+    }
+    const facts = await listClientImpactFacts({ organizationId: ORG, actorContext: await bindingDerivedClientAdmin(ORG) }, factsDependencies);
+    assert.deepEqual(
+      facts.data.items.map((item) => item.claimId).sort(),
+      listed.data.eligibleClaims.map((claim) => claim.claimId).sort(),
+      "the client projection selects exactly the default P2-08 eligible set",
+    );
   });
 }

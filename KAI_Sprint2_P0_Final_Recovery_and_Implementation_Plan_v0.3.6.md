@@ -33499,3 +33499,65 @@ client actor issues zero such reads, and a GK actor still issues one per mount.
 **Status:** CLIENT_AUTHORIZATION_CONTRACT_RECONCILED_LOCALLY. No push,
 deployment, database access, schema, flag, binding, or membership change,
 and no `00_KAI_CURRENT_STATE.md` update.
+
+### impact-facts real-PostgreSQL acceptance proof (2026-09-24)
+
+**Scope:** closes the one limitation recorded for 25159f0, that the
+client-safe `impact-facts` projection had not been exercised through the
+real P2-08 repository and the real P2-06 evaluator. The change is test-only.
+
+**Proof (TOOL_VERIFIED):** runner
+`scripts/kai-sprint2-p2-06-claim-traceability-local-postgres.js`: an
+ephemeral initdb cluster on loopback, synthetic seed, removed afterwards.
+30/30 pass. Four cases were added at the end of
+`__tests__/kai-sprint2-p2-06-claim-traceability.integration.spec.js`.
+
+The chain under test:
+- a binding-derived client_admin, from the real `resolveKaiActorContext` and
+  real derivation with injected GK membership and binding sources;
+- `listClientImpactFacts`;
+- the real P2-08 repository, with only the runner-owned transaction injected;
+- the real `evaluateClaimTraceabilityInTransaction`.
+
+Fixture:
+- A: a claim with evidence review supported, claim review approved for
+  internal, every unresolved dimension accepted for internal, and follow-ups
+  completed. The evaluator returns eligible.
+- B: a proposed claim whose claim review is still open. Blocker:
+  `claim_review_unresolved`; its GK claim-review queue item stays open.
+- C: a claim approved for internal with follow-ups completed but coverage not
+  accepted. Blocker: `coverage_dimension_unresolved`.
+- The suite's other ineligible and unusable claims.
+- The second seeded organization, `00000000-0000-4000-8000-000000000002`.
+
+Assertions:
+- The returned items equal exactly the evaluator's internal-eligible set,
+  which includes A and excludes B and C.
+- Each item's keys are exactly `claimId`, `statement`, `claimType`,
+  `limitationDimensionKeys`. `statement` and `claimType` equal the
+  evaluator's values.
+- Limitations equal the dimensions that are unresolved and accepted for
+  internal use. For A, that is its accepted dimensions.
+- No hidden claim id or statement appears. No evidence item id, evidence
+  statement, source, version or locator id appears. No review-queue id,
+  summary or required action appears, and no GK field token.
+- The call was a read-only repeatable-read transaction: no write SQL, and
+  audit and row counts unchanged.
+- Adding another ineligible claim leaves the response byte-identical: same
+  count, `truncated` false, no cursor.
+- A client_admin bound to the other organization gets `VAL-AUT-003`, and no
+  transaction is opened.
+- The default P2-08 DTO keys are unchanged, and it selects the same eligible
+  set as the client projection.
+
+The existing P2-08 runner still passes 19/19.
+
+**Limitations (NOT_CONFIRMED):**
+- The HTTP route was not run against PostgreSQL. It is covered by the
+  mounted-route test.
+- The GK membership and binding lookups are injected, not read from
+  PostgreSQL.
+- Production is not confirmed.
+
+**Status:** IMPACT_FACTS_POSTGRES_PROOF_PASSED_LOCALLY. No push, deployment,
+production database access, or product-code change.
