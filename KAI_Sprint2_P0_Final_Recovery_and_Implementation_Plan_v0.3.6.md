@@ -34035,3 +34035,152 @@ unknown types, audiences, review states, and packet shapes.
 deployment, production or shared database access, schema, flag, binding, or
 membership change, and no `00_KAI_CURRENT_STATE.md` update. The only
 databases used were runner-owned ephemeral loopback clusters.
+
+### Horizontal client authorization closure - Package 4: project-context reconciliation, real P2-06 assembled proof, local browser acceptance (2026-09-24)
+
+**Starting state (TOOL_VERIFIED):** `main`, HEAD
+`09246d11d8b5a8aa44059737df7da7c94c483492`, clean. Packages 1-3 are
+USER_CONFIRMED and were not reopened, except the one directly attributable
+defect below.
+
+**Project context (TOOL_VERIFIED):**
+- No repository or ExecPlan rule requires the client Generated Drafts list to
+  be organization-wide.
+- The Package 3 client list/detail routes had no caller outside Package 3
+  and were never deployed. They were replaced by
+  `GET .../organizations/:organizationId/engagements/:engagementId/client-generated-drafts[?cursor=]`
+  and `.../client-generated-drafts/:generatedContentDraftId`.
+- The service verifies the engagement against its own record in the
+  organization (`not_found` otherwise).
+- The list uses the GK index read model with a new optional `engagementId`,
+  which joins `kai.generation_runs.engagement_id` (P14-01). Without it, the
+  GK index adds no join or predicate.
+- Detail requires `readGeneratedDraftEngagementId` to equal the selected
+  engagement, so another project's draft is `not_found`.
+- The Package 3 visibility rule is unchanged.
+
+**Pagination (TOOL_VERIFIED):**
+- Each request scans at most 50 index rows. `nextCursor` is an opaque
+  `c1.` token for the keyset position after the last scanned row, including
+  invisible rows, so pages never skip or repeat a draft.
+- The DTO replaces `truncated` with `nextCursor`. A malformed cursor is
+  `validation_blocker`.
+- The frontend shows a "Load more" control with honest copy ("More drafts
+  for this project have not been checked yet."), appends pages without
+  duplicates, and resets on project change. Late responses are dropped by
+  key.
+
+**Directly attributable defect repaired:** `listEngagementsForOrganization`
+never selected `engagement_code`, which the engagement DTO serializes
+(Package C0), so the project selector showed raw ids. It now selects it. The
+column exists in the production-mirrored schema.
+
+**Real P2-06 assembled proof (TOOL_VERIFIED):** P2-06 runner, 33/33 (the 30
+existing cases unchanged plus 3 new). The runner adds the generated-content
+migrations and a synthetic `kai.engagements` mirror. Because P3-01 re-states
+the shared `upload_lifecycle_audit` operation CHECK with an older list, the
+runner keeps the union of the CHECK before and after P3-01. The new cases use
+real claims built through the real services, real draft/citation/review
+rows, the real generated-content repository with its default
+`evaluateClaimTraceabilityInTransaction`, the real project-scoped index SQL,
+and the real client service.
+- A: a reviewed draft citing an eligible claim is visible, and detail works.
+- B: the same claim with GK review open is hidden.
+- C: a claim held only by real `client_followup_unresolved` makes its draft
+  hidden and counted.
+- E: a funder-audience draft citing an internal-only approval
+  (`claim_not_approved_for_requested_audience`) is hidden.
+- A/R/C results are identical, and reads write nothing.
+- D: `completeClientFollowup` is denied for client_admin and
+  client_contributor; client_reviewer completes it; the real evaluator
+  clears the claim; the held draft becomes visible; no generated-content
+  review, export review, draft, or run is created.
+- F: Project A/B scoping holds; A's detail path cannot fetch B's draft.
+- G: cross-org is `VAL-AUT-003` with zero transactions; this org's
+  project/draft ids give nothing to another org.
+
+**Browser acceptance (TOOL_VERIFIED, local only):**
+`scripts/kai-client-knowledge-studio-browser-acceptance-local-postgres.js`
+with `__tests__/kai-client-knowledge-studio-browser-acceptance.integration.spec.js`,
+6/6.
+- The runner builds a loopback ephemeral cluster with the union schema in
+  the P14-09 canonical order (including the P2-09/P2-10/P2-11 forward
+  reconciliation), the requirement, content-type, Improvement Plan, JOIN,
+  and binding migrations, and the synthetic smoke seeds.
+- Governed state is seeded through the real services (the P14-09 recipe):
+  - one claim eligible for internal and funder (real P2-06), and one held
+    only by real client follow-ups;
+  - Alpha Funder Requirements: applicable; one requirement assessed
+    `satisfied`, one not yet assessed;
+  - Beta: reviewed not applicable; Gamma: no target;
+  - 56 Alpha drafts (4 cases plus 52 reviewed), one Beta draft.
+- A loopback Express app mounts the real KAI routers and serves the built
+  bundle. Headless Chrome is driven over the DevTools protocol using Node's
+  built-in WebSocket; no dependency was added. Only the Get Kinder session
+  login is simulated (harness cookie → `req.user`, as route tests do).
+- client_admin and client_contributor:
+  - the project selector lists Projects Alpha, Beta, and Gamma;
+  - no-project messages;
+  - Alpha Funder Requirements: target, set, and Supported / Not yet
+    assessed;
+  - Alpha Generated Drafts: first bounded page, then Load more (cursor
+    request) to all 54 visible drafts, with no duplicates;
+  - in-review, held, and Beta texts are absent;
+  - detail shows "Reviewed by Get Kinder", the supporting Impact Fact
+    statement, and "not a final document";
+  - the GRP preview holds the Alpha funder draft and Board holds the Alpha
+    internal draft;
+  - switching to Beta: every request carries Beta's id with no cursor, Alpha
+    content is gone, Beta's Board member shows, the GRP is empty, and
+    requirements read not applicable;
+  - Gamma shows honest empty states; returning to Alpha restores it;
+  - no forbidden controls, no follow-up prompt;
+  - the join-review read appears for client_admin only;
+  - no page exceptions, and no rows written.
+- client_reviewer:
+  - the same reads, plus "1 reviewed draft(s) are waiting on answers" and
+    the follow-up link;
+  - the real `/kai/client-followups` page: Load follow-ups, then every
+    "Mark reviewed" → POST `.../complete` 200;
+  - the real evaluator then clears the claim, and the formerly held Impact
+    narrative is listed;
+  - no generated-content review, export review, draft, assessment, or
+    applicability row is created.
+- Foreign client_admin: direct fetches to Alpha's draft, funder-requirement,
+  and packet routes return 403 `VAL-AUT-003` with no content.
+- Network boundary: every UI request (a cumulative log per page) matches the
+  client-safe route allowlist, none is a GK-internal route, and every status
+  is below 400.
+
+**Tests (TOOL_VERIFIED):**
+- `__tests__/kai-client-generated-content.spec.js` 17/17, now including:
+  - pagination: 130 drafts with every third ineligible come back in 3
+    bounded requests, each visible draft exactly once, the cursor opaque;
+    exactly 50 rows give no cursor; bad cursors are rejected;
+  - project scoping, including a foreign engagement.
+- Board mixed-content runner 7/7 (real SQL scoping; another project's
+  reviewed drafts excluded and `not_found`).
+- Package 4 Funder Requirements runner 21/21. Package 2B 8/8. P2-08 19/19.
+  P2-11 28/28. P2-06 33/33. Browser 6/6.
+- `npm test`: 5199 pass, 12 fail, 88 skipped. `09246d1` was 5197/12/87; the
+  +1 skip is the runner-only browser spec. The failing names are identical,
+  and the route-inventory missing-entry detail is identical.
+- `npm run build` PASS. `git diff --check` PASS.
+
+**Not changed:** no GK role set, generation, generated-content review,
+export, or final authority; no P2-06 logic; no schema, flag, binding, or
+membership outside disposable fixtures; no production code auth bypass (the
+harness cookie exists only in the runner-owned test app).
+
+**Limitations (NOT_CONFIRMED):**
+- The real Get Kinder session/passport login and the production site shell
+  were not exercised.
+- Production behavior.
+- Draft review states in the browser fixture are set directly, as every
+  generated-content runner does. The browser Funder Requirements
+  applicability and assessment go through the real services.
+
+**Status:** CLIENT_KNOWLEDGE_STUDIO_LOCAL_ACCEPTANCE_PASSED. No push,
+deployment, production or shared database access, or
+`00_KAI_CURRENT_STATE.md` update. The only databases used were runner-owned
+ephemeral loopback clusters.

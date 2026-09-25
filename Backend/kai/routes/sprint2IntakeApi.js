@@ -3268,19 +3268,24 @@ function clientContentPathIds(req, keys) {
 }
 
 /**
- * Client-safe Generated Drafts and packet previews
- * (kaiClientGeneratedContentService.js): only GK-reviewed, currently
- * eligible drafts, projected to content type, audience, block text, and the
- * cited claim ids. The GK generated-drafts index, review packet, Grant
+ * Client-safe Generated Drafts and packet previews for one selected
+ * engagement/project (kaiClientGeneratedContentService.js): only GK-reviewed,
+ * currently eligible drafts whose generation run is bound to that
+ * engagement, projected to content type, audience, block text, and the cited
+ * claim ids. The GK generated-drafts index, review packet, Grant
  * Response Packet, Board Reporting, generation, review, export, and
  * final-release routes are unchanged. No SQL here; the browser supplies only
  * path ids.
  */
 for (const [path, keys, method] of [
-  ["/admin/organizations/:organizationId/client-generated-drafts", ["organizationId"], "listClientGeneratedDrafts"],
   [
-    "/admin/organizations/:organizationId/client-generated-drafts/:generatedContentDraftId",
-    ["organizationId", "generatedContentDraftId"],
+    "/admin/organizations/:organizationId/engagements/:engagementId/client-generated-drafts",
+    ["organizationId", "engagementId"],
+    "listClientGeneratedDrafts",
+  ],
+  [
+    "/admin/organizations/:organizationId/engagements/:engagementId/client-generated-drafts/:generatedContentDraftId",
+    ["organizationId", "engagementId", "generatedContentDraftId"],
     "getClientGeneratedDraft",
   ],
   [
@@ -3301,9 +3306,12 @@ for (const [path, keys, method] of [
         blockers: [routeValidationBlocker("invalid_uuid_field", keys.join("_or_"))],
       });
     }
+    // Only the draft list takes a query value: its opaque continuation
+    // cursor, validated by the service.
+    const cursor = method === "listClientGeneratedDrafts" && typeof req.query?.cursor === "string" ? { cursor: req.query.cursor } : {};
     return invokeService(res, async () => {
       const service = await getClientGeneratedContentService();
-      return service[method]({ ...ids, actorContext: sprint2MappedActorContext(req) });
+      return service[method]({ ...ids, ...cursor, actorContext: sprint2MappedActorContext(req) });
     });
   });
 }

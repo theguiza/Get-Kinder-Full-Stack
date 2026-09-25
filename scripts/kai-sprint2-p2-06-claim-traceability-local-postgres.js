@@ -46,6 +46,30 @@ function psqlFile(path) {
   return run(psql, ["-v", "ON_ERROR_STOP=1", "-d", dbName, "-f", path], { capture: true }).stdout;
 }
 
+function psqlExec(sql) {
+  return run(psql, ["-v", "ON_ERROR_STOP=1", "-d", dbName, "-c", sql], { capture: true }).stdout;
+}
+
+async function constraintCheckExpression(tableName, constraintName) {
+  const client = new Client({ connectionString: targetUrl, ssl: false });
+  await client.connect();
+  try {
+    const { rows } = await client.query(
+      `SELECT pg_get_constraintdef(c.oid) AS definition
+         FROM pg_constraint c
+         JOIN pg_class t ON t.oid = c.conrelid
+         JOIN pg_namespace n ON n.oid = t.relnamespace
+        WHERE n.nspname = 'kai' AND t.relname = $1 AND c.conname = $2`,
+      [tableName, constraintName],
+    );
+    const definition = rows[0]?.definition;
+    if (!definition || !definition.startsWith("CHECK ")) throw new Error(`missing CHECK ${constraintName}`);
+    return definition.slice("CHECK ".length);
+  } finally {
+    await client.end();
+  }
+}
+
 async function proveRunnerOwnedTarget() {
   const client = new Client({ connectionString: targetUrl, ssl: false });
   await client.connect();
@@ -97,6 +121,39 @@ try {
   psqlFile("migrations/kai_sprint2_p2_12_human_review_decision_ledger.sql");
   psqlFile("migrations/kai_sprint2_p2_10_funder_coverage_authority.sql");
   psqlFile("migrations/kai_sprint2_p2_10_public_coverage_authority.sql");
+  // Client Generated Drafts assembled proof (real P2-06 evaluator): the
+  // generated-content schema plus the engagement binding it needs. No
+  // repository migration creates kai.engagements, so this is a synthetic
+  // mirror of the column list getEngagementForOrganization reads (the
+  // organization-enablement bootstrap's full table depends on
+  // kai.organizations, which this runner's schema does not load), created
+  // after every P2-06 migration so their schema is unchanged.
+  psqlExec(`CREATE TABLE kai.engagements (
+    engagement_id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+    organization_id uuid NOT NULL,
+    engagement_code text NOT NULL,
+    engagement_type text NOT NULL DEFAULT 'pilot_assessment',
+    engagement_status text NOT NULL DEFAULT 'draft',
+    project_metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+    UNIQUE (organization_id, engagement_code),
+    UNIQUE (engagement_id, organization_id)
+  );`);
+  // P3-01 redefines the shared upload_lifecycle_audit operation CHECK with
+  // its own (older) operation list, which would drop the operations the
+  // P2-09..P2-12/B1A migrations applied above added. Those migrations do not
+  // record their order relative to P3-01, so the runner keeps the union: the
+  // CHECK as it stood before P3-01 OR the one P3-01 installs (P3-04 then
+  // extends it additively, as it does everywhere).
+  const operationCheckBeforeP301 = await constraintCheckExpression("upload_lifecycle_audit", "upload_lifecycle_audit_gate_a_operation_check");
+  psqlFile("migrations/kai_sprint2_p3_01_generated_content_drafts.sql");
+  const operationCheckFromP301 = await constraintCheckExpression("upload_lifecycle_audit", "upload_lifecycle_audit_gate_a_operation_check");
+  psqlExec(`ALTER TABLE kai.upload_lifecycle_audit
+    DROP CONSTRAINT upload_lifecycle_audit_gate_a_operation_check,
+    ADD CONSTRAINT upload_lifecycle_audit_gate_a_operation_check CHECK ((${operationCheckBeforeP301}) OR (${operationCheckFromP301}));`);
+  psqlFile("migrations/kai_sprint2_p14_01_generation_run_engagement_binding.sql");
+  psqlFile("migrations/kai_sprint2_p13_01_impact_narrative_content_type.sql");
+  psqlFile("migrations/kai_sprint2_p14_14_generated_content_type_evolution.sql");
+  psqlFile("migrations/kai_sprint2_p3_04_generated_content_review_completion.sql");
   psqlFile("scripts/kai-sprint2-gate-a-smoke-seed.sql");
   psqlFile("scripts/kai-sprint2-p1-04-data-dictionary-quality-smoke-seed.sql");
   psqlFile("scripts/kai-sprint2-p1-05-intake-sensitivity-profile-smoke-seed.sql");

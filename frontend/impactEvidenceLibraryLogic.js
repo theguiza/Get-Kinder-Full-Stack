@@ -144,17 +144,23 @@ export function projectClientFunderRequirements(dto) {
   };
 }
 
-// Client-safe Generated Drafts and packet previews: only GK-reviewed,
-// currently eligible drafts, as content type, audience, block text, and the
-// cited claim ids (which match client impact-facts claim ids). Never the GK
-// generated-drafts index, review packet, Grant Response Packet, or Board
-// Reporting reads.
-export function clientGeneratedDraftsPath(organizationId) {
-  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/client-generated-drafts`;
+// Client-safe Generated Drafts and packet previews for the selected
+// engagement/project: only GK-reviewed, currently eligible drafts bound to
+// it, as content type, audience, block text, and the cited claim ids (which
+// match client impact-facts claim ids). Never the GK generated-drafts index,
+// review packet, Grant Response Packet, or Board Reporting reads. The list is
+// bounded per request; `cursor` is the server's opaque continuation token.
+function clientEngagementBasePath(organizationId, engagementId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/engagements/${encodeURIComponent(engagementId)}`;
 }
 
-export function clientGeneratedDraftPath(organizationId, generatedContentDraftId) {
-  return `${clientGeneratedDraftsPath(organizationId)}/${encodeURIComponent(generatedContentDraftId)}`;
+export function clientGeneratedDraftsPath(organizationId, engagementId, cursor = null) {
+  const base = `${clientEngagementBasePath(organizationId, engagementId)}/client-generated-drafts`;
+  return cursor ? `${base}?cursor=${encodeURIComponent(cursor)}` : base;
+}
+
+export function clientGeneratedDraftPath(organizationId, engagementId, generatedContentDraftId) {
+  return `${clientEngagementBasePath(organizationId, engagementId)}/client-generated-drafts/${encodeURIComponent(generatedContentDraftId)}`;
 }
 
 export function clientGrantResponsePacketPath(organizationId, engagementId) {
@@ -208,7 +214,8 @@ export function projectClientGeneratedDraftList(dto) {
       blockCount: item.blockCount,
     });
   }
-  return { items, awaitingClientInputCount: dto.awaitingClientInputCount, truncated: dto.truncated === true };
+  if (!(dto.nextCursor === null || (typeof dto.nextCursor === "string" && dto.nextCursor.length > 0))) return null;
+  return { items, awaitingClientInputCount: dto.awaitingClientInputCount, nextCursor: dto.nextCursor };
 }
 
 export function projectClientGeneratedDraft(dto) {

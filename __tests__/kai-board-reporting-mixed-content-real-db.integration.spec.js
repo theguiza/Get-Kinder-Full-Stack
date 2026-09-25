@@ -368,7 +368,11 @@ async function runSuite() {
   // derivation, GRP/Board membership), and the real client service, with
   // this suite's established synthetic claim evaluator.
   // ===================================================================
-  const { listGeneratedDraftLibraryIndex: readDraftIndexSql } = await import("../Backend/kai/db/kaiGeneratedDraftLibraryReadModels.js");
+  const {
+    listGeneratedDraftLibraryIndex: readDraftIndexSql,
+    readGeneratedDraftEngagementId: readDraftEngagementSql,
+  } = await import("../Backend/kai/db/kaiGeneratedDraftLibraryReadModels.js");
+  const { getEngagementForOrganization: readEngagementSql } = await import("../Backend/kai/db/kaiQueries.js");
   const {
     listClientGeneratedDrafts,
     getClientGeneratedDraft,
@@ -501,9 +505,7 @@ async function runSuite() {
     draftFixture("26010006", 6, "data_gap_memo"),
     draftFixture("26010007", 7, "readiness_assessment"),
   ];
-  const expectedVisibleDraftIds = [
-    visibleInternal, funderDraft, earlierDrafts[0], earlierDrafts[1], earlierDrafts[2], earlierDrafts[5], earlierDrafts[6],
-  ].map((draft) => draft.draftId).sort();
+  const expectedVisibleDraftIds = [visibleInternal, funderDraft].map((draft) => draft.draftId).sort();
 
   const claimStates = new Map([
     [hiddenIneligible.claimId, "audience_gate_closed"],
@@ -518,6 +520,8 @@ async function runSuite() {
     env: enabledEnv,
     generatedContentRepository: clientRepository,
     listGeneratedDraftLibraryIndex: (organizationId, options) => readDraftIndexSql(organizationId, options, pool),
+    readGeneratedDraftEngagementId: (organizationId, draftId) => readDraftEngagementSql(organizationId, draftId, pool),
+    getEngagementForOrganization: (input) => readEngagementSql(input, pool),
   });
   const secrets = [
     "RAW EVIDENCE STATEMENT", inGkReview.draftId, hiddenIneligible.draftId, awaitingClient.draftId, funderInReview.draftId,
@@ -546,7 +550,7 @@ async function runSuite() {
     const before = await mutationCounts();
     const results = [];
     for (const role of CLIENT_ROLES) {
-      const result = await listClientGeneratedDrafts({ organizationId: CLIENT_ORG, actorContext: clientActor(role) }, clientDeps);
+      const result = await listClientGeneratedDrafts({ organizationId: CLIENT_ORG, engagementId: clientEngagement, actorContext: clientActor(role) }, clientDeps);
       assert.equal(result.ok, true, `${role}: ${JSON.stringify(result)}`);
       assertClientSafe(result, `${role} list`);
       results.push(result.data);
@@ -555,7 +559,22 @@ async function runSuite() {
     assert.deepEqual(results[2], results[0]);
     assert.deepEqual(results[0].items.map((item) => item.generatedContentDraftId).sort(), expectedVisibleDraftIds);
     assert.equal(results[0].items.find((item) => item.generatedContentDraftId === funderDraft.draftId).audience, "funder");
-    assert.equal(results[0].truncated, false);
+    assert.equal(results[0].nextCursor, null);
+    // The earlier proofs' reviewed, eligible drafts belong to other
+    // engagements of the same organization and never appear in this project.
+    for (const draft of [earlierDrafts[0], earlierDrafts[1], earlierDrafts[2], earlierDrafts[5], earlierDrafts[6]]) {
+      assert.ok(!results[0].items.some((item) => item.generatedContentDraftId === draft.draftId), draft.draftId);
+    }
+    const otherProject = await listClientGeneratedDrafts(
+      { organizationId: CLIENT_ORG, engagementId: "26010000-0000-4000-8000-000000000101", actorContext: clientActor("client_admin") },
+      clientDeps,
+    );
+    assert.deepEqual(otherProject.data.items.map((item) => item.generatedContentDraftId).sort(), [earlierDrafts[0], earlierDrafts[1], earlierDrafts[2]].map((d) => d.draftId).sort());
+    const crossProjectDetail = await getClientGeneratedDraft(
+      { organizationId: CLIENT_ORG, engagementId: clientEngagement, generatedContentDraftId: earlierDrafts[0].draftId, actorContext: clientActor("client_admin") },
+      clientDeps,
+    );
+    assert.equal(crossProjectDetail.error.code, "not_found", "another project's reviewed draft is not_found through this project's path");
     assert.equal(results[0].awaitingClientInputCount, 1, "the draft held only by an unresolved client follow-up is counted, not shown");
     assert.deepEqual(await mutationCounts(), before, "the list performs no write");
   });
@@ -563,7 +582,7 @@ async function runSuite() {
   await test("client draft detail (real PostgreSQL): text and cited claim ids only; hidden, in-review, awaiting, and foreign drafts are not_found", async () => {
     const before = await mutationCounts();
     const detail = await getClientGeneratedDraft(
-      { organizationId: CLIENT_ORG, generatedContentDraftId: visibleInternal.draftId, actorContext: clientActor("client_contributor") },
+      { organizationId: CLIENT_ORG, engagementId: clientEngagement, generatedContentDraftId: visibleInternal.draftId, actorContext: clientActor("client_contributor") },
       clientDeps,
     );
     assert.equal(detail.ok, true, JSON.stringify(detail));
@@ -576,7 +595,7 @@ async function runSuite() {
     });
     assertClientSafe(detail, "detail");
     for (const draftId of [inGkReview.draftId, hiddenIneligible.draftId, awaitingClient.draftId, funderInReview.draftId, earlierDrafts[4].draftId, "26020000-0000-4000-8000-000000000999"]) {
-      const denied = await getClientGeneratedDraft({ organizationId: CLIENT_ORG, generatedContentDraftId: draftId, actorContext: clientActor("client_reviewer") }, clientDeps);
+      const denied = await getClientGeneratedDraft({ organizationId: CLIENT_ORG, engagementId: clientEngagement, generatedContentDraftId: draftId, actorContext: clientActor("client_reviewer") }, clientDeps);
       assert.equal(denied.ok, false, draftId);
       assert.equal(denied.error.code, "not_found", draftId);
       assertClientSafe(denied, `denied ${draftId}`);
@@ -613,11 +632,11 @@ async function runSuite() {
   await test("answering the client follow-up (evaluator no longer blocked) makes the held draft visible without creating any review, export, or final row", async () => {
     const before = await mutationCounts();
     claimStates.delete(awaitingClient.claimId);
-    const list = await listClientGeneratedDrafts({ organizationId: CLIENT_ORG, actorContext: clientActor("client_reviewer") }, clientDeps);
+    const list = await listClientGeneratedDrafts({ organizationId: CLIENT_ORG, engagementId: clientEngagement, actorContext: clientActor("client_reviewer") }, clientDeps);
     assert.equal(list.data.awaitingClientInputCount, 0);
     assert.ok(list.data.items.some((item) => item.generatedContentDraftId === awaitingClient.draftId));
     const detail = await getClientGeneratedDraft(
-      { organizationId: CLIENT_ORG, generatedContentDraftId: awaitingClient.draftId, actorContext: clientActor("client_admin") },
+      { organizationId: CLIENT_ORG, engagementId: clientEngagement, generatedContentDraftId: awaitingClient.draftId, actorContext: clientActor("client_admin") },
       clientDeps,
     );
     assert.equal(detail.data.reviewState, "reviewed");
@@ -627,8 +646,8 @@ async function runSuite() {
 
   await test("cross-org clients are denied before any draft or packet row is read; GK reads of the same rows are unchanged", async () => {
     for (const result of [
-      await listClientGeneratedDrafts({ organizationId: CLIENT_ORG, actorContext: clientActor("client_admin", FOREIGN_ORG) }, clientDeps),
-      await getClientGeneratedDraft({ organizationId: CLIENT_ORG, generatedContentDraftId: visibleInternal.draftId, actorContext: clientActor("client_reviewer", FOREIGN_ORG) }, clientDeps),
+      await listClientGeneratedDrafts({ organizationId: CLIENT_ORG, engagementId: clientEngagement, actorContext: clientActor("client_admin", FOREIGN_ORG) }, clientDeps),
+      await getClientGeneratedDraft({ organizationId: CLIENT_ORG, engagementId: clientEngagement, generatedContentDraftId: visibleInternal.draftId, actorContext: clientActor("client_reviewer", FOREIGN_ORG) }, clientDeps),
       await getClientGrantResponsePacketPreview({ organizationId: CLIENT_ORG, engagementId: clientEngagement, actorContext: clientActor("client_contributor", FOREIGN_ORG) }, clientDeps),
     ]) {
       assert.equal(result.ok, false);
@@ -636,10 +655,11 @@ async function runSuite() {
     }
     // A foreign-org member asking its own organization for this org's draft
     // ids gets nothing: every read is scoped to the requested organization.
-    const ownForeign = await listClientGeneratedDrafts({ organizationId: FOREIGN_ORG, actorContext: clientActor("client_admin", FOREIGN_ORG) }, clientDeps);
-    assert.deepEqual(ownForeign.data.items, []);
+    const ownForeign = await listClientGeneratedDrafts({ organizationId: FOREIGN_ORG, engagementId: clientEngagement, actorContext: clientActor("client_admin", FOREIGN_ORG) }, clientDeps);
+    assert.equal(ownForeign.ok, false);
+    assert.equal(ownForeign.error.code, "not_found", "this org's project is not a project of the foreign org");
     const foreignLookup = await getClientGeneratedDraft(
-      { organizationId: FOREIGN_ORG, generatedContentDraftId: visibleInternal.draftId, actorContext: clientActor("client_admin", FOREIGN_ORG) },
+      { organizationId: FOREIGN_ORG, engagementId: clientEngagement, generatedContentDraftId: visibleInternal.draftId, actorContext: clientActor("client_admin", FOREIGN_ORG) },
       clientDeps,
     );
     assert.equal(foreignLookup.ok, false);
@@ -661,7 +681,7 @@ async function runSuite() {
     assert.deepEqual(gkGrp.data.drafts.map((draft) => draft.generatedContentDraftId), [funderDraft.draftId]);
     for (const role of CLIENT_ROLES) {
       const denied = await getGeneratedDraftReviewPacket(
-        { organizationId: CLIENT_ORG, generatedContentDraftId: visibleInternal.draftId, actorContext: clientActor(role) },
+        { organizationId: CLIENT_ORG, engagementId: clientEngagement, generatedContentDraftId: visibleInternal.draftId, actorContext: clientActor(role) },
         { env: enabledEnv, generatedContentRepository: clientRepository },
       );
       assert.equal(denied.ok, false, `${role} still cannot read the GK review packet`);

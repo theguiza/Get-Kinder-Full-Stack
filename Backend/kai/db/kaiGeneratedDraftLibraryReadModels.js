@@ -32,12 +32,27 @@ import pool from "./kaiDb.js";
  */
 export async function listGeneratedDraftLibraryIndex(
   organizationId,
-  { limit, afterGeneratedContentDraftId = null },
+  { limit, afterGeneratedContentDraftId = null, engagementId = null },
   db = pool,
 ) {
   const params = [organizationId, limit + 1];
-  const cursorClause = afterGeneratedContentDraftId === null ? "" : "AND d.generated_content_draft_id > $3::uuid";
-  if (afterGeneratedContentDraftId !== null) params.push(afterGeneratedContentDraftId);
+  let cursorClause = "";
+  if (afterGeneratedContentDraftId !== null) {
+    params.push(afterGeneratedContentDraftId);
+    cursorClause = `AND d.generated_content_draft_id > $${params.length}::uuid`;
+  }
+  // Optional project scope (the client selected-project read): only drafts
+  // whose generation run is bound to this engagement in this organization
+  // (kai.generation_runs.engagement_id, P14-01). Omitted (the GK index), no
+  // join or predicate is added.
+  let engagementJoin = "";
+  if (engagementId !== null) {
+    params.push(engagementId);
+    engagementJoin = `JOIN kai.generation_runs r
+         ON r.generation_run_id = d.generation_run_id
+        AND r.organization_id = d.organization_id
+        AND r.engagement_id = $${params.length}::uuid`;
+  }
 
   const { rows } = await db.query(
     `SELECT d.generated_content_draft_id::text AS generated_content_draft_id,
@@ -66,6 +81,7 @@ export async function listGeneratedDraftLibraryIndex(
             eq.created_by::text AS export_review_created_by,
             eq.created_by_type AS export_review_created_by_type
        FROM kai.generated_content_drafts d
+       ${engagementJoin}
        JOIN kai.review_queue_items q
          ON q.organization_id = d.organization_id
         AND q.queue_type = 'generated_content_review'
@@ -104,4 +120,25 @@ export async function listGeneratedDraftLibraryIndex(
     params,
   );
   return rows;
+}
+
+/**
+ * The engagement a generated draft's generation run is bound to
+ * (kai.generation_runs.engagement_id), for the organization-scoped draft.
+ * null when the draft does not exist in this organization or its run has no
+ * engagement binding. Read-only.
+ */
+export async function readGeneratedDraftEngagementId(organizationId, generatedContentDraftId, db = pool) {
+  const { rows } = await db.query(
+    `SELECT r.engagement_id::text AS engagement_id
+       FROM kai.generated_content_drafts d
+       JOIN kai.generation_runs r
+         ON r.generation_run_id = d.generation_run_id
+        AND r.organization_id = d.organization_id
+      WHERE d.organization_id = $1::uuid
+        AND d.generated_content_draft_id = $2::uuid
+      LIMIT 1`,
+    [organizationId, generatedContentDraftId],
+  );
+  return rows[0]?.engagement_id ?? null;
 }

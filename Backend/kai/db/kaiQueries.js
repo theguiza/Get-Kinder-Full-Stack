@@ -197,8 +197,11 @@ export async function getIntakeBatchTenantState(intakeBatchId, organizationId, d
  */
 export async function listEngagementsForOrganization({ organizationId }, db = pool) {
   if (!organizationId) return [];
+  // engagement_code is the Project label serializeEngagementTarget returns
+  // (Package C0); it was never selected here, so the project selector fell
+  // back to raw engagement ids.
   const { rows } = await db.query(
-    `SELECT engagement_id, organization_id, engagement_type, engagement_status, project_metadata
+    `SELECT engagement_id, organization_id, engagement_code, engagement_type, engagement_status, project_metadata
        FROM kai.engagements
       WHERE organization_id = $1
       ORDER BY engagement_id ASC

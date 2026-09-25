@@ -1177,4 +1177,256 @@ async function runP206IntegrationSuite() {
       "the client projection selects exactly the default P2-08 eligible set",
     );
   });
+
+  // ===================================================================
+  // Client Generated Drafts over the REAL P2-06 evaluator: real governed
+  // claims (built and reviewed through the real services above), real
+  // persisted draft/block/citation/review rows, the real generated-content
+  // repository with its default evaluateClaimTraceabilityInTransaction, the
+  // real project-scoped index SQL, and the real client service.
+  // ===================================================================
+  const {
+    listClientGeneratedDrafts,
+    getClientGeneratedDraft,
+  } = await import("../Backend/kai/services/kaiClientGeneratedContentService.js");
+  const { createPostgresGeneratedContentRepository } = await import("../Backend/kai/dictionary/postgresGeneratedContentRepository.js");
+  const {
+    listGeneratedDraftLibraryIndex: readDraftIndexSql,
+    readGeneratedDraftEngagementId: readDraftEngagementSql,
+  } = await import("../Backend/kai/db/kaiGeneratedDraftLibraryReadModels.js");
+  const { getEngagementForOrganization: readEngagementSql } = await import("../Backend/kai/db/kaiQueries.js");
+
+  const PROJECT_A = "5a000000-0000-4000-8000-00000000a001";
+  const PROJECT_B = "5a000000-0000-4000-8000-00000000b001";
+  const clientContentDeps = Object.freeze({
+    env: { KAI_SPRINT2_ENABLED: "true", KAI_GENERATION_ENABLED: "true" },
+    generatedContentRepository: createPostgresGeneratedContentRepository({ runInTransaction: withRunnerOwnedTransaction }),
+    listGeneratedDraftLibraryIndex: (organizationId, options) => readDraftIndexSql(organizationId, options, pool),
+    readGeneratedDraftEngagementId: (organizationId, draftId) => readDraftEngagementSql(organizationId, draftId, pool),
+    getEngagementForOrganization: (input) => readEngagementSql(input, pool),
+  });
+  const clientMember = (role, organizationId = ORG) => ({
+    actorType: "human",
+    actorUserId: `90000000-0000-4000-8000-0000000000${role === "client_admin" ? "31" : role === "client_reviewer" ? "32" : "33"}`,
+    kaiRoles: [],
+    organizationMemberships: [{ organization_id: organizationId, membership_status: "active", role_name: role }],
+  });
+
+  async function seedClientDraft(n, { engagementId, claimId, evidenceItemId, audience = "internal", contentType = "evidence_summary", review = "resolved" }) {
+    const hex = String(n).padStart(2, "0");
+    const draft = {
+      runId: `5b0000${hex}-0000-4000-8000-000000000001`,
+      draftId: `5c0000${hex}-0000-4000-8000-000000000001`,
+      blockId: `5d0000${hex}-0000-4000-8000-000000000001`,
+      citationId: `5e0000${hex}-0000-4000-8000-000000000001`,
+      queueId: `5f0000${hex}-0000-4000-8000-000000000001`,
+    };
+    const [queueStatus, reviewStatus] = review === "resolved" ? ["resolved", "resolved"] : ["open", "needs_gk_review"];
+    await pool.query(
+      `INSERT INTO kai.generation_runs (generation_run_id, organization_id, engagement_id, idempotency_key, request_fingerprint,
+         content_type, requested_audience, created_by_type)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, 'system')`,
+      [draft.runId, ORG, engagementId, `client-p206-${hex}`, `${hex}`.repeat(32), contentType, audience],
+    );
+    await pool.query(
+      `INSERT INTO kai.generated_content_drafts (generated_content_draft_id, generation_run_id, organization_id, content_type,
+         requested_audience, draft_status, review_status, validator_results, created_by_type)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, 'draft', 'needs_gk_review', '[]'::jsonb, 'system')`,
+      [draft.draftId, draft.runId, ORG, contentType, audience],
+    );
+    await pool.query(
+      `INSERT INTO kai.generated_content_blocks (generated_content_block_id, generated_content_draft_id, organization_id, ordinal, text)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, 1, $4)`,
+      [draft.blockId, draft.draftId, ORG, `Client draft ${hex} text.`],
+    );
+    await pool.query(
+      `INSERT INTO kai.generated_content_citations (generated_content_citation_id, generated_content_block_id, organization_id, claim_id, evidence_item_id)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid)`,
+      [draft.citationId, draft.blockId, ORG, claimId, evidenceItemId],
+    );
+    await pool.query(
+      `INSERT INTO kai.review_queue_items (review_queue_item_id, organization_id, queue_type, target_object_type, target_object_id,
+         priority, queue_status, review_status, assigned_to, due_at, summary, required_action, queue_metadata, created_by_type)
+       VALUES ($1::uuid, $2::uuid, 'generated_content_review', 'generated_content_draft', $3::uuid, 'medium', $4, $5, NULL, NULL,
+               'Generated draft requires human review.',
+               'Review citations, audience eligibility, limitations, unsupported claims, and numeric or causal assertions before any use.',
+               '{}'::jsonb, 'system')`,
+      [draft.queueId, ORG, draft.draftId, queueStatus, reviewStatus],
+    );
+    return draft;
+  }
+
+  async function governedInternalClaim({ completeFollowups }) {
+    const built = await buildPublicP206Claim({ phase5PublicAllowed: false, claimReviewApprovedAudiences: ["internal"] });
+    for (const dimensionKey of unresolvedDimensionKeys((await trace(built.claimId, "internal")).data)) {
+      const accepted = await acceptInternalCoverageLimitation(
+        { organizationId: ORG, claimId: built.claimId, dimensionKey, actorContext, now: NOW },
+        { env: { KAI_SPRINT2_ENABLED: "true" }, coverageReviewDecisionRepository: coverageRepo, metadataOnlyAudit: auditRecorder() },
+      );
+      assert.equal(accepted.ok, true, JSON.stringify(accepted));
+    }
+    if (completeFollowups) await completeAllFollowups(built.claimId);
+    return built;
+  }
+
+  let clientDraftFixture;
+  async function prepareClientDraftFixture() {
+    if (clientDraftFixture) return clientDraftFixture;
+    for (const [engagementId, code] of [[PROJECT_A, "client-project-alpha"], [PROJECT_B, "client-project-beta"]]) {
+      await pool.query("INSERT INTO kai.engagements (engagement_id, organization_id, engagement_code) VALUES ($1::uuid, $2::uuid, $3)", [engagementId, ORG, code]);
+    }
+    const eligible = await governedInternalClaim({ completeFollowups: true });
+    const held = await governedInternalClaim({ completeFollowups: false });
+    const openFollowups = await query(
+      "SELECT count(*)::int AS n FROM kai.client_followup_items WHERE organization_id = $1::uuid AND claim_id = $2::uuid",
+      [ORG, held.claimId],
+    );
+    assert.ok(openFollowups[0].n > 0, "the held claim has real P2-04/P2-11 client follow-ups");
+    clientDraftFixture = {
+      eligible,
+      held,
+      caseA: await seedClientDraft(1, { engagementId: PROJECT_A, claimId: eligible.claimId, evidenceItemId: eligible.evidenceItemId }),
+      caseB: await seedClientDraft(2, { engagementId: PROJECT_A, claimId: eligible.claimId, evidenceItemId: eligible.evidenceItemId, contentType: "impact_narrative", review: "open" }),
+      caseC: await seedClientDraft(3, { engagementId: PROJECT_A, claimId: held.claimId, evidenceItemId: held.evidenceItemId, contentType: "impact_narrative" }),
+      caseE: await seedClientDraft(4, { engagementId: PROJECT_A, claimId: eligible.claimId, evidenceItemId: eligible.evidenceItemId, audience: "funder" }),
+      caseF: await seedClientDraft(5, { engagementId: PROJECT_B, claimId: eligible.claimId, evidenceItemId: eligible.evidenceItemId }),
+    };
+    return clientDraftFixture;
+  }
+
+  async function realEvaluation(claimId, requestedAudience) {
+    const result = await withRunnerOwnedTransaction(async (tx) => {
+      await tx.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY");
+      return evaluateClaimTraceabilityInTransaction(tx, { organizationId: ORG, claimId, requestedAudience });
+    });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    return result.data;
+  }
+
+  async function listFor(role, engagementId) {
+    const result = await listClientGeneratedDrafts({ organizationId: ORG, engagementId, actorContext: clientMember(role) }, clientContentDeps);
+    assert.equal(result.ok, true, `${role}: ${JSON.stringify(result)}`);
+    return result.data;
+  }
+
+  const CLIENT_ROLES = ["client_admin", "client_reviewer", "client_contributor"];
+
+  async function authorityCounts() {
+    const [row] = await query(`
+      SELECT (SELECT count(*) FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = 'generated_content_review')::int AS gc_review,
+             (SELECT string_agg(queue_status || review_status || updated_at::text, ',' ORDER BY review_queue_item_id)
+                FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = 'generated_content_review') AS gc_review_state,
+             (SELECT count(*) FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = 'export_review')::int AS export_review,
+             (SELECT count(*) FROM kai.generated_content_drafts WHERE organization_id = $1::uuid)::int AS drafts,
+             (SELECT count(*) FROM kai.generation_runs WHERE organization_id = $1::uuid)::int AS runs`, [ORG]);
+    return row;
+  }
+
+  test("client Generated Drafts (real P2-06): A visible, B in GK review hidden, C held by a real client follow-up counted, E audience-ineligible hidden; identical for A/R/C; read-only", async () => {
+    const fixture = await prepareClientDraftFixture();
+    const eligibleInternal = await realEvaluation(fixture.eligible.claimId, "internal");
+    assert.equal(eligibleInternal.eligible, true, JSON.stringify(eligibleInternal.blockerCodes));
+    const heldInternal = await realEvaluation(fixture.held.claimId, "internal");
+    assert.equal(heldInternal.eligible, false);
+    assert.deepEqual([...new Set(heldInternal.blockerCodes)], ["client_followup_unresolved"], "held only by the real client follow-up");
+    const eligibleFunder = await realEvaluation(fixture.eligible.claimId, "funder");
+    assert.equal(eligibleFunder.eligible, false, "the claim is approved for internal only");
+    assert.ok(eligibleFunder.blockerCodes.includes("claim_not_approved_for_requested_audience"), JSON.stringify(eligibleFunder.blockerCodes));
+
+    const before = await authorityCounts();
+    const views = [];
+    for (const role of CLIENT_ROLES) views.push(await listFor(role, PROJECT_A));
+    assert.deepEqual(views[1], views[0]);
+    assert.deepEqual(views[2], views[0]);
+    assert.deepEqual(views[0].items.map((item) => item.generatedContentDraftId), [fixture.caseA.draftId]);
+    assert.equal(views[0].awaitingClientInputCount, 1);
+    assert.equal(views[0].nextCursor, null);
+    const serialized = JSON.stringify(views);
+    for (const hidden of [fixture.caseB.draftId, fixture.caseC.draftId, fixture.caseE.draftId, fixture.caseF.draftId, fixture.eligible.evidenceItemId,
+      fixture.caseA.queueId, fixture.caseA.runId, fixture.caseA.citationId, "client_followup_unresolved", "needs_gk_review"]) {
+      assert.ok(!serialized.includes(hidden), `leaked ${hidden}`);
+    }
+    const detail = await getClientGeneratedDraft(
+      { organizationId: ORG, engagementId: PROJECT_A, generatedContentDraftId: fixture.caseA.draftId, actorContext: clientMember("client_contributor") },
+      clientContentDeps,
+    );
+    assert.equal(detail.ok, true, JSON.stringify(detail));
+    assert.deepEqual(detail.data.blocks, [{ ordinal: 1, text: "Client draft 01 text.", supportingClaimIds: [fixture.eligible.claimId] }]);
+    for (const draft of [fixture.caseB, fixture.caseC, fixture.caseE]) {
+      const denied = await getClientGeneratedDraft(
+        { organizationId: ORG, engagementId: PROJECT_A, generatedContentDraftId: draft.draftId, actorContext: clientMember("client_reviewer") },
+        clientContentDeps,
+      );
+      assert.equal(denied.error.code, "not_found", draft.draftId);
+    }
+    assert.deepEqual(await authorityCounts(), before, "client reads write nothing");
+  });
+
+  test("client Generated Drafts (real P2-06): the real client_reviewer P2-11 completion makes the held draft visible and creates no generated-content review, export, or final state; A and C cannot complete", async () => {
+    const fixture = await prepareClientDraftFixture();
+    const [row] = await query(
+      `SELECT cfi.client_followup_item_id, rq.updated_at FROM kai.client_followup_items cfi
+         JOIN kai.review_queue_items rq ON rq.organization_id = cfi.organization_id AND rq.queue_type = 'client_followup'
+          AND rq.target_object_type = 'client_followup_item' AND rq.target_object_id = cfi.client_followup_item_id
+        WHERE cfi.organization_id = $1::uuid AND cfi.claim_id = $2::uuid ORDER BY cfi.dimension_key LIMIT 1`,
+      [ORG, fixture.held.claimId],
+    );
+    for (const role of ["client_admin", "client_contributor"]) {
+      const denied = await completeClientFollowup(
+        { organizationId: ORG, claimId: fixture.held.claimId, clientFollowupItemId: row.client_followup_item_id,
+          expectedUpdatedAt: new Date(row.updated_at).toISOString(), actorContext: clientMember(role), now: NOW },
+        { env: { KAI_SPRINT2_ENABLED: "true" }, clientFollowupCompletionRepository: clientFollowupRepo, metadataOnlyAudit: auditRecorder() },
+      );
+      assert.equal(denied.ok, false, role);
+      assert.equal(denied.blockers[0].blocking_reason, "role_not_allowed", role);
+    }
+    const before = await authorityCounts();
+    await completeAllFollowups(fixture.held.claimId);
+    assert.equal((await realEvaluation(fixture.held.claimId, "internal")).eligible, true, "the real evaluator now clears the claim");
+    assert.deepEqual(await authorityCounts(), before, "completion created no generated-content review, export review, draft, or run");
+    for (const role of CLIENT_ROLES) {
+      const view = await listFor(role, PROJECT_A);
+      assert.deepEqual(view.items.map((item) => item.generatedContentDraftId).sort(), [fixture.caseA.draftId, fixture.caseC.draftId].sort(), role);
+      assert.equal(view.awaitingClientInputCount, 0);
+    }
+    const detail = await getClientGeneratedDraft(
+      { organizationId: ORG, engagementId: PROJECT_A, generatedContentDraftId: fixture.caseC.draftId, actorContext: clientMember("client_admin") },
+      clientContentDeps,
+    );
+    assert.equal(detail.data.reviewState, "reviewed");
+  });
+
+  test("client Generated Drafts (real P2-06): project scoping - Project B lists only its draft, Project A cannot fetch B's draft; cross-org is denied before any read", async () => {
+    const fixture = await prepareClientDraftFixture();
+    const viewB = await listFor("client_reviewer", PROJECT_B);
+    assert.deepEqual(viewB.items.map((item) => item.generatedContentDraftId), [fixture.caseF.draftId]);
+    const viewA = await listFor("client_reviewer", PROJECT_A);
+    assert.ok(!viewA.items.some((item) => item.generatedContentDraftId === fixture.caseF.draftId));
+    const crossProject = await getClientGeneratedDraft(
+      { organizationId: ORG, engagementId: PROJECT_A, generatedContentDraftId: fixture.caseF.draftId, actorContext: clientMember("client_admin") },
+      clientContentDeps,
+    );
+    assert.equal(crossProject.error.code, "not_found");
+    const ownProject = await getClientGeneratedDraft(
+      { organizationId: ORG, engagementId: PROJECT_B, generatedContentDraftId: fixture.caseF.draftId, actorContext: clientMember("client_admin") },
+      clientContentDeps,
+    );
+    assert.equal(ownProject.ok, true);
+
+    transactionLog.length = 0;
+    for (const result of [
+      await listClientGeneratedDrafts({ organizationId: ORG, engagementId: PROJECT_A, actorContext: clientMember("client_admin", OTHER_ORG) }, clientContentDeps),
+      await getClientGeneratedDraft({ organizationId: ORG, engagementId: PROJECT_A, generatedContentDraftId: fixture.caseA.draftId, actorContext: clientMember("client_reviewer", OTHER_ORG) }, clientContentDeps),
+    ]) {
+      assert.equal(result.ok, false);
+      assert.equal(result.blockers[0].validator_key, "VAL-AUT-003");
+    }
+    assert.equal(transactionLog.length, 0, "no transaction opened for a cross-org client");
+    const foreign = await getClientGeneratedDraft(
+      { organizationId: OTHER_ORG, engagementId: PROJECT_A, generatedContentDraftId: fixture.caseA.draftId, actorContext: clientMember("client_admin", OTHER_ORG) },
+      clientContentDeps,
+    );
+    assert.equal(foreign.error.code, "not_found", "this organization's project and draft ids expose nothing to another organization");
+    assert.ok(!JSON.stringify(foreign).includes("Client draft"));
+  });
 }

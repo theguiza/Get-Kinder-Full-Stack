@@ -153,11 +153,6 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // MVP UAT final completion: P2-11 client-reviewer-facing read (additive;
     // every prior entry preserved verbatim).
     "/admin/organizations/:organizationId/client-followups",
-    // Client-safe Generated Drafts: only GK-reviewed, currently eligible
-    // drafts, projected to client-safe fields (additive; every prior entry
-    // preserved verbatim).
-    "/admin/organizations/:organizationId/client-generated-drafts",
-    "/admin/organizations/:organizationId/client-generated-drafts/:generatedContentDraftId",
     // KAI data-dictionary entries: read-only safe DTO surface over governed
     // dictionary fields, additive, and every prior entry preserved verbatim.
     "/admin/organizations/:organizationId/data-dictionaries/:dataDictionaryId/entries",
@@ -236,6 +231,11 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // current-assessment readiness projected to client-safe fields
     // (additive; every prior entry preserved verbatim).
     "/admin/organizations/:organizationId/engagements/:engagementId/client-funder-requirements",
+    // Client-safe Generated Drafts for the selected engagement/project: only
+    // GK-reviewed, currently eligible drafts bound to it, projected to
+    // client-safe fields (additive; every prior entry preserved verbatim).
+    "/admin/organizations/:organizationId/engagements/:engagementId/client-generated-drafts",
+    "/admin/organizations/:organizationId/engagements/:engagementId/client-generated-drafts/:generatedContentDraftId",
     // Client-safe Grant Response Packet preview over the governed packet
     // membership; no export/final state (additive; every prior entry
     // preserved verbatim).
