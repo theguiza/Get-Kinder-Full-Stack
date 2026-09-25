@@ -34184,3 +34184,89 @@ harness cookie exists only in the runner-owned test app).
 deployment, production or shared database access, or
 `00_KAI_CURRENT_STATE.md` update. The only databases used were runner-owned
 ephemeral loopback clusters.
+
+### P1-07 source-candidate handoff after a human 'reviewed' sensitivity decision (2026-09-25)
+
+**Owner authorization:** repair Issue A only (live synthetic acceptance,
+organization `ed32e526-...`, batch `harbourline-core-2025-26`, D01
+`cbdb3887-...`: P1-05 profile persisted, zero review items, zero source
+candidates). Issue B (`security_assessment_timeout`) is explicitly out of
+scope and untouched.
+
+**Root cause (TOOL_VERIFIED at `3e6d9bd`):** the P1 worker deliberately stops
+at P1-05 (enforced by `kai-sprint2-p1-worker-runtime-composition.spec.js`).
+P1-06 is reachable only through the human GK review-work route. P1-07
+`createSourceCandidateStub` had no production caller, so no normal flow could
+ever create a source candidate for P1-08.
+
+**Repair:**
+- `Backend/kai/services/kaiReviewCockpitService.js`:
+  `submitSensitivityProfileDecision` (the production human decision route)
+  now invokes the unmodified P1-07 `createSourceCandidateStub` once, only
+  when the committed current decision is the terminal `reviewed` outcome
+  (fresh or replayed), as the same authenticated human actor. The decision
+  is already committed and is never undone by the handoff. The response gains
+  `source_candidate_handoff`
+  (`created | replayed | not_applicable | not_created`, candidate/queue ids,
+  sanitized `error_code`).
+- `Backend/kai/services/kaiMetadataOnlyAuditComposition.js`: new
+  `createProductionMetadataOnlyAuditForSourceCandidate`, mirroring the P1-06
+  adapter. P1-07 previously had no production audit provider and fails
+  closed without one.
+- `Backend/kai/services/kaiSourceCandidateService.js`: docstring only.
+- No change to any repository, SQL, predicate, route, migration, worker, UI,
+  or flag. The P1 worker, P1-06, P1-07, and P1-08 code are unchanged.
+
+**Authority:** the worker still imports no P1-06/P1-07 seam. The cockpit
+rejects non-human actors before the decision. P1-07 re-applies
+KAI_SPRINT2_ENABLED, AUTH-KAI-003, the active-membership role check, tenant
+consistency, VAL-KAI-P1-07-001, idempotency, and required audit itself.
+Candidates are created `needs_gk_review`; P1-08 promotion remains the
+separate explicit human decision route.
+
+**Tests (TOOL_VERIFIED):**
+- New `__tests__/kai-sprint2-p1-07-source-candidate-handoff-boundary.spec.js`
+  11/11 (single invocation with the same human actor; replay; no call on
+  `needs_more_information` or failed decision; non-human actors refused;
+  P1-07 refusals reported `not_created`; malformed/cross-tenant results not
+  echoed; no P1-08 call; worker still stops at P1-05; audit adapter shape).
+- New real-PostgreSQL runner `verify:kai-sprint2-p1-07-source-candidate-handoff`
+  5/5: exactly one candidate plus one `source_candidate_review` item, created
+  by the human reviewer, with one lifecycle audit and one `kai.audit_events`
+  row; only the decision, candidate, queue, and audit tables change; zero
+  promotion decisions, sources, and source_versions; P1-08 candidate detail
+  readable; identical replay writes nothing; system/AI actors write nothing;
+  `needs_more_information` writes no candidate; a predicate-failing profile
+  (CHECK lifted only in the throwaway DB) leaves the decision committed and
+  writes no candidate, queue item, or audit.
+- `__tests__/kai-sprint2-b1a-2r-review-work-integration.spec.js`: its side-
+  effect test previously passed only because the handoff could not reach the
+  sentinel default pool. It now wires the real P1-07 repository to the
+  runner DB and expects the candidate write, still forbidding promotion,
+  source, and source_version writes. B1A-2R runner 6/6.
+- Runners: B1A-02 34/34, P1-06 15/15, P1-07 11/11, B1A-3B-R2 4/4, legacy
+  cutover 2/2, P1-08 17/19 (the same 2 failures at `3e6d9bd`).
+- `npm test`: 5210 pass, 12 fail, 89 skipped. At `3e6d9bd`: 5199/12/88. The
+  12 failing test names are identical; +11 pass and +1 skip are the new specs.
+- `git diff --check` PASS. Full diff inspected.
+
+**Limitations (NOT_CONFIRMED):**
+- Profiles that already had a `reviewed` decision before deployment get a
+  candidate only when a reviewer resubmits that decision (a replay), or
+  through a later explicit action. No backfill is performed.
+- P1-07 authorization does not use `combineGlobalRoles`, unlike the Phase-5
+  decision. A reviewer who is authorized only through global roles may record
+  the decision but receive `not_created`/`tenant_boundary_violation`. That
+  P1-07 contract is preserved, not widened.
+- As with P1-06, P1-07's repository does not pass its transaction to
+  `prepareMetadataOnlyAudit`, so the `kai.audit_events` publish uses the
+  default pool (a failure still rolls back the candidate).
+- The Impact Library UI still shows "Review recorded." and does not surface
+  `source_candidate_handoff`. The admin Review Cockpit already lists
+  `source_candidate_review` items and links to the P1-08 decision.
+- Production behavior, and the deployed schema's acceptance of these writes.
+
+**Status:** P1_07_SOURCE_CANDIDATE_HANDOFF_REPAIRED_LOCALLY. No push,
+deployment, production or shared database access, feature-flag, tenant,
+credential, or `00_KAI_CURRENT_STATE.md` change. The only databases used
+were runner-owned ephemeral loopback clusters.

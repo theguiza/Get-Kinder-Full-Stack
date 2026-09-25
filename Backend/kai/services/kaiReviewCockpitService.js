@@ -23,7 +23,10 @@ import { validateSensitivityProfileDecisionRequest } from "../validators/kaiSpri
 import { createSourcePromotionDecision } from "./kaiSourcePromotionService.js";
 import { __sourcePromotionRepositoryContract } from "../dictionary/postgresSourcePromotionRepository.js";
 import { recordSensitivityAllowedUseDecision } from "./kaiSensitivityAllowedUseReviewService.js";
+import { createSourceCandidateStub } from "./kaiSourceCandidateService.js";
+import { __sourceCandidateRepositoryContract } from "../dictionary/postgresSourceCandidateRepository.js";
 import {
+  isSensitivityAllowedUseTerminalOutcome,
   SENSITIVITY_ALLOWED_USE_DECISION_OUTCOMES,
   SENSITIVITY_PRESENCE_DECISION_FIELDS,
   SENSITIVITY_PERMISSION_DECISION_FIELDS,
@@ -32,6 +35,7 @@ import {
 } from "../dictionary/sensitivityAllowedUseDecisionContract.js";
 import {
   createProductionMetadataOnlyAuditForSensitivityAllowedUseDecision,
+  createProductionMetadataOnlyAuditForSourceCandidate,
   createProductionMetadataOnlyAuditForSourcePromotion,
 } from "./kaiMetadataOnlyAuditComposition.js";
 
@@ -43,9 +47,11 @@ import {
  * createSourcePromotionDecision. This module:
  *
  * - contains no SQL and imports no database pool: every read is delegated to the
- *   P1-09 read models, and the one write path is delegated wholly to P1-08's
- *   accepted service (no decision, transition, replay, or idempotency logic is
- *   reimplemented, retried, or coerced here);
+ *   P1-09 read models, and every write path is delegated wholly to an accepted
+ *   service - P1-08's promotion decision, B1A-2's sensitivity decision, and the
+ *   P1-07 source-candidate handoff that follows a committed 'reviewed' decision (no
+ *   decision, transition, replay, or idempotency logic is reimplemented, retried,
+ *   or coerced here);
  * - implements no file-profile mutation of any kind - file-profile review is
  *   strictly read-only in this package, and no approval/rejection/resolution/
  *   eligibility state is invented for it anywhere;
@@ -860,11 +866,17 @@ export async function getReviewCockpitSensitivityProfileDetail(input = {}, depen
  * idempotency logic of its own - exactly like submitSourceCandidateDecision below.
  * A conflict_current_state_changed result is returned to the caller as produced:
  * never retried, never re-requested with a different outcome, and never coerced
- * into any other result. It writes nothing itself, creates no queue item, and
- * touches no P1-05 column and no downstream approval, generation, or
- * external-release authority of any kind (see
- * Backend/kai/dictionary/postgresSensitivityAllowedUseReviewRepository.js for the
- * exhaustive list of what the write path is forbidden from touching).
+ * into any other result. It writes nothing itself and touches no P1-05 column and
+ * no downstream approval, generation, or external-release authority of any kind
+ * (see Backend/kai/dictionary/postgresSensitivityAllowedUseReviewRepository.js for
+ * the exhaustive list of what the write path is forbidden from touching).
+ *
+ * P1-07 handoff: once the committed current decision is the terminal 'reviewed'
+ * outcome (fresh or replayed), this seam invokes the existing, unmodified P1-07
+ * `createSourceCandidateStub` once, as the same authenticated human actor - see
+ * ensureSourceCandidateAfterReviewedDecision below. The Phase-5 decision is
+ * already committed in its own transaction before that call and is never undone,
+ * retried, or re-reported by the handoff's outcome.
  */
 export async function submitSensitivityProfileDecision(input = {}, dependencies = {}) {
   const deps = resolvedDependencies(dependencies);
@@ -944,15 +956,123 @@ export async function submitSensitivityProfileDecision(input = {}, dependencies 
     return buildKaiError("system_error");
   }
 
+  const sourceCandidateHandoff = isSensitivityAllowedUseTerminalOutcome(currentDecision.decision_outcome)
+    ? await ensureSourceCandidateAfterReviewedDecision(
+      { organizationId, intakeSensitivityProfileId, actorContext, now },
+      deps,
+      env,
+    )
+    : sourceCandidateHandoffResult("not_applicable");
+
   return {
     ok: true,
     data: {
       current_decision: currentDecision,
       sensitivity_review_queue_item: reviewQueueItem,
       replayed: data.replayed,
+      source_candidate_handoff: sourceCandidateHandoff,
     },
     warnings: [],
   };
+}
+
+const {
+  SOURCE_CANDIDATE_REVIEW_QUEUE_TYPE,
+  SOURCE_CANDIDATE_REVIEW_TARGET_OBJECT_TYPE,
+} = __sourceCandidateRepositoryContract;
+
+function sourceCandidateHandoffResult(status, { sourceCandidate = null, reviewQueueItem = null, errorCode = null } = {}) {
+  return {
+    status,
+    intake_source_candidate_id: sourceCandidate?.intake_source_candidate_id ?? null,
+    candidate_status: sourceCandidate?.candidate_status ?? null,
+    review_queue_item_id: reviewQueueItem?.review_queue_item_id ?? null,
+    queue_status: reviewQueueItem?.queue_status ?? null,
+    error_code: errorCode,
+  };
+}
+
+/**
+ * The P1-07 handoff after a committed, terminal 'reviewed' Phase-5 decision.
+ *
+ * Invokes the existing P1-07 `createSourceCandidateStub` service exactly once with
+ * the same authenticated human actor that just recorded the decision. Every P1-07
+ * guarantee stays inside that service and its repository, and none is reimplemented
+ * here: KAI_SPRINT2_ENABLED, AUTH-KAI-003 (mapped human only), the
+ * gk_admin/gk_operator/gk_reviewer active-membership check, tenant consistency, the
+ * VAL-KAI-P1-07-001 creation-trigger predicate, create/replay idempotency, and the
+ * required metadata-only audit (whose failure rolls the candidate back). It creates
+ * only the review-only `needs_gk_review` candidate stub and its
+ * 'source_candidate_review' queue item -
+ * never a promotion decision, source, or source_version, nor anything further
+ * downstream; P1-08 promotion remains the separate explicit human decision in
+ * submitSourceCandidateDecision below.
+ *
+ * Never throws and never retries. The decision is already committed, so any P1-07
+ * refusal or failure is reported as `not_created` with its error code (the file's
+ * candidate simply does not exist yet); resubmitting the same decision replays it
+ * and re-attempts this idempotent handoff.
+ */
+async function ensureSourceCandidateAfterReviewedDecision(
+  { organizationId, intakeSensitivityProfileId, actorContext, now },
+  deps,
+  env,
+) {
+  let result;
+  try {
+    const metadataOnlyAudit = deps.sourceCandidateMetadataOnlyAudit
+      || createProductionMetadataOnlyAuditForSourceCandidate({
+        organizationId,
+        intakeSensitivityProfileId,
+        actorContext,
+        now,
+      });
+    const ensureCandidate = deps.createSourceCandidateStub || createSourceCandidateStub;
+    result = await ensureCandidate(
+      { organizationId, intakeSensitivityProfileId, actorContext, now },
+      {
+        env,
+        ...(deps.sourceCandidateRepository ? { sourceCandidateRepository: deps.sourceCandidateRepository } : {}),
+        metadataOnlyAudit,
+      },
+    );
+  } catch {
+    return sourceCandidateHandoffResult("not_created", { errorCode: "system_error" });
+  }
+
+  if (!result?.ok) {
+    const code = result?.error?.code;
+    return sourceCandidateHandoffResult("not_created", {
+      errorCode: typeof code === "string" && MACHINE_TOKEN_RE.test(code) ? code : "system_error",
+    });
+  }
+
+  const sourceCandidate = result.data?.sourceCandidate;
+  const reviewQueueItem = result.data?.reviewQueueItem;
+  if (
+    !isPlainObject(sourceCandidate)
+    || !isPlainObject(reviewQueueItem)
+    || typeof result.data.replayed !== "boolean"
+    || !canonicalUuid(sourceCandidate.intake_source_candidate_id)
+    || sourceCandidate.organization_id !== organizationId
+    || sourceCandidate.intake_sensitivity_profile_id !== intakeSensitivityProfileId
+    || typeof sourceCandidate.candidate_status !== "string"
+    || !MACHINE_TOKEN_RE.test(sourceCandidate.candidate_status)
+    || !canonicalUuid(reviewQueueItem.review_queue_item_id)
+    || reviewQueueItem.organization_id !== organizationId
+    || reviewQueueItem.queue_type !== SOURCE_CANDIDATE_REVIEW_QUEUE_TYPE
+    || reviewQueueItem.target_object_type !== SOURCE_CANDIDATE_REVIEW_TARGET_OBJECT_TYPE
+    || reviewQueueItem.target_object_id !== sourceCandidate.intake_source_candidate_id
+    || typeof reviewQueueItem.queue_status !== "string"
+    || !MACHINE_TOKEN_RE.test(reviewQueueItem.queue_status)
+  ) {
+    return sourceCandidateHandoffResult("not_created", { errorCode: "system_error" });
+  }
+
+  return sourceCandidateHandoffResult(result.data.replayed ? "replayed" : "created", {
+    sourceCandidate,
+    reviewQueueItem,
+  });
 }
 
 function composeReviewCockpitFileProfileDetail(record, organizationId) {

@@ -21,6 +21,7 @@
     "verify:kai-sprint2-p1-05-intake-sensitivity-profile": "node scripts/kai-sprint2-p1-05-intake-sensitivity-profile-local-postgres.js",
     "verify:kai-sprint2-p1-06-review-queue": "node scripts/kai-sprint2-p1-06-review-queue-local-postgres.js",
     "verify:kai-sprint2-p1-07-source-candidate": "node scripts/kai-sprint2-p1-07-source-candidate-local-postgres.js",
+    "verify:kai-sprint2-p1-07-source-candidate-handoff": "node scripts/kai-sprint2-p1-07-source-candidate-handoff-local-postgres.js",
     "verify:kai-sprint2-p1-08-source-promotion": "node scripts/kai-sprint2-p1-08-source-promotion-local-postgres.js",
     "verify:kai-sprint2-p2-01-evidence-lineage": "node scripts/kai-sprint2-p2-01-evidence-lineage-local-postgres.js",
     "verify:kai-sprint2-p2-02-evidence-coverage-assessment": "node scripts/kai-sprint2-p2-02-evidence-coverage-assessment-local-postgres.js",

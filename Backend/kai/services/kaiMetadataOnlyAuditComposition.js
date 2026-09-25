@@ -1517,6 +1517,82 @@ export function createProductionMetadataOnlyAuditForSensitivityReviewQueueItem({
   });
 }
 
+/**
+ * Production composition of the `metadataOnlyAudit` contract required by P1-07's
+ * `createSourceCandidateStub` seam
+ * (Backend/kai/dictionary/postgresSourceCandidateRepository.js), used by the
+ * P1-07 handoff inside the Review Cockpit's human sensitivity-decision seam
+ * (kaiReviewCockpitService.js#submitSensitivityProfileDecision) to actually reach
+ * it. Mirrors the P1-06 adapter directly above: bound at construction to the
+ * organizationId/intakeSensitivityProfileId identity that is known before the
+ * write, because the repository's own `buildSourceCandidateAuditPayload` places no
+ * id on the payload it hands to `prepareMetadataOnlyAudit` - only fixed
+ * operation/contract/status metadata - so this adapter validates that fixed shape
+ * and stamps the bound identity onto the published audit row.
+ */
+export function createProductionMetadataOnlyAuditForSourceCandidate({
+  organizationId,
+  intakeSensitivityProfileId,
+  actorContext,
+  now,
+  insertAuditEvent = insertRequiredSuccessfulAuditEvent,
+} = {}) {
+  if (typeof organizationId !== "string" || organizationId.length === 0) {
+    throw new TypeError("createProductionMetadataOnlyAuditForSourceCandidate requires organizationId.");
+  }
+  if (typeof intakeSensitivityProfileId !== "string" || intakeSensitivityProfileId.length === 0) {
+    throw new TypeError("createProductionMetadataOnlyAuditForSourceCandidate requires intakeSensitivityProfileId.");
+  }
+
+  function isPlainObject(value) {
+    return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  }
+
+  return Object.freeze({
+    prepareMetadataOnlyAudit({ payload, db } = {}) {
+      if (!isPlainObject(payload)) return { ok: false };
+      if (payload.object_type !== "intake_source_candidate") return { ok: false };
+      if (payload.attempted_operation !== "intake_source_candidate_persisted") return { ok: false };
+      if (typeof payload.candidate_status !== "string" || payload.candidate_status.length === 0) return { ok: false };
+      if (typeof payload.queue_status !== "string" || payload.queue_status.length === 0) return { ok: false };
+
+      const metadata = {
+        organization_id: organizationId,
+        object_type: "intake_sensitivity_profile",
+        target_object_type: "intake_sensitivity_profile",
+        object_id: intakeSensitivityProfileId,
+        operation: "intake_source_candidate_persisted",
+        operation_type: "intake_source_candidate_persisted",
+        validator_key: typeof payload.validator_key === "string" ? payload.validator_key : null,
+        actor_type: actorContext?.actorType || "human",
+        actor_user_id: actorContext?.actorUserId || null,
+        request_id: actorContext?.requestId || null,
+        route: "p1_07_source_candidate_handoff",
+        created_at: typeof now === "string" ? now : new Date().toISOString(),
+        metadata_only: true,
+        contains_raw_file_content: false,
+        contains_raw_parsed_rows: false,
+        contains_client_pii: false,
+        contains_prompt_text: false,
+        contains_unsafe_generated_text: false,
+        contains_signed_urls: false,
+        contains_storage_credentials: false,
+      };
+
+      return {
+        ok: true,
+        async publish() {
+          const result = await insertAuditEvent(metadata, db);
+          if (!result || result.ok !== true) {
+            throw new Error("p1_07_source_candidate_metadata_only_audit_publish_failed");
+          }
+          return result;
+        },
+      };
+    },
+  });
+}
+
 const IMPACT_EVALUATION_ID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /**

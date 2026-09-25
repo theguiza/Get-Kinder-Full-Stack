@@ -40,7 +40,10 @@ async function runB1A2RIntegrationSuite() {
     submitSensitivityProfileDecision,
   } = await import("../Backend/kai/services/kaiReviewCockpitService.js");
   const { getReviewCockpitSensitivityProfileRecord } = await import("../Backend/kai/db/kaiReviewCockpitReadModels.js");
-  const { __sourceCandidateRepositoryTestables } = await import("../Backend/kai/dictionary/postgresSourceCandidateRepository.js");
+  const {
+    __sourceCandidateRepositoryTestables,
+    createPostgresSourceCandidateRepository,
+  } = await import("../Backend/kai/dictionary/postgresSourceCandidateRepository.js");
   const { __sourcePromotionRepositoryTestables } = await import("../Backend/kai/dictionary/postgresSourcePromotionRepository.js");
 
   const ORG = "00000000-0000-4000-8000-000000000001";
@@ -55,6 +58,9 @@ async function runB1A2RIntegrationSuite() {
     runInTransaction: (callback) => withTransaction(callback, pool),
   });
   const decisionRepository = createPostgresSensitivityAllowedUseReviewRepository({
+    runInTransaction: (callback) => withTransaction(callback, pool),
+  });
+  const sourceCandidateRepository = createPostgresSourceCandidateRepository({
     runInTransaction: (callback) => withTransaction(callback, pool),
   });
 
@@ -358,21 +364,33 @@ async function runB1A2RIntegrationSuite() {
           reviewed_snapshot: internalOnlySnapshot(),
         },
       },
-      { env: ENV, sensitivityAllowedUseReviewRepository: decisionRepository, metadataOnlyAudit: auditRecorder() },
+      {
+        env: ENV,
+        sensitivityAllowedUseReviewRepository: decisionRepository,
+        metadataOnlyAudit: auditRecorder(),
+        // The P1-07 handoff that follows a committed 'reviewed' decision, wired to
+        // this runner-owned database so its writes are observed here rather than
+        // silently failing against the process-default pool.
+        sourceCandidateRepository,
+        sourceCandidateMetadataOnlyAudit: auditRecorder(),
+      },
     );
 
     const after = await schemaRowCounts();
     const changed = Object.keys(after).filter((table) => after[table] !== before[table]).sort();
     // The P1-05 profile (and its file/dictionary foundation) was already seeded
     // before this snapshot, so only the bound queue row, the new decision-ledger
-    // row, and their audit rows change from here.
+    // row, the P1-07 review-only source-candidate stub (plus its
+    // 'source_candidate_review' queue row) created by the 'reviewed' handoff, and
+    // their audit rows change from here.
     assert.deepEqual(changed, [
       "intake_sensitivity_review_decisions",
+      "intake_source_candidates",
       "review_queue_items",
       "upload_lifecycle_audit",
     ]);
+    assert.equal(after.intake_source_candidates - before.intake_source_candidates, 1);
     for (const forbidden of [
-      "intake_source_candidates",
       "intake_promotion_decisions",
       "sources",
       "source_versions",

@@ -56,8 +56,13 @@ function isMappedHumanActor(actorContext) {
  * product-learning use all still denied, retention still restricted pending
  * review). This never creates a source, source_version, evidence, claim, or any
  * promotion/approval record, and it never transitions candidate_status beyond
- * null -> 'needs_gk_review'. It is not composed into any route, listener,
- * scheduler, or production path.
+ * null -> 'needs_gk_review'. Its one production caller is the Review Cockpit's
+ * human sensitivity-decision seam
+ * (kaiReviewCockpitService.js#submitSensitivityProfileDecision), which invokes it
+ * only after a committed terminal 'reviewed' Phase-5 decision, as the same
+ * authenticated human actor. It is not composed into any worker, listener, or
+ * scheduler: the P1 worker's system actor can never reach it, and AUTH-KAI-003
+ * below would reject it if it did.
  *
  * Contains no SQL and imports no database pool: persistence is delegated entirely
  * to the injected P1-07 source-candidate repository. Authorization and
