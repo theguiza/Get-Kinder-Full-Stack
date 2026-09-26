@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 
 import KaiWebIntake from "../KaiWebIntake.jsx";
 import ImpactLibraryKai from "../ImpactLibraryKai.jsx";
@@ -54,6 +54,14 @@ export default function ClientKnowledgeStudio({
   onViewImpactLibrary,
 }) {
   const [tab, setTab] = useState("files");
+  // Files persistence/rehydration: the Files tab's selected intake batch is
+  // retained outside the tab-gated KaiWebIntake mount (re-validated by
+  // KaiWebIntake against a fresh server read) and cleared whenever the
+  // organization or Project changes.
+  const [filesIntakeBatchId, setFilesIntakeBatchId] = useState("");
+  useEffect(() => {
+    setFilesIntakeBatchId("");
+  }, [organizationId, engagementId]);
   const canContribute = capabilities?.intakeContribution === true;
   const canReviewFollowups = capabilities?.clientFollowupReview === true;
   const factsStatus = facts?.status || "loading";
@@ -84,6 +92,8 @@ export default function ClientKnowledgeStudio({
           organizationId={organizationId}
           engagementId={engagementId}
           onEngagementIdChange={onEngagementIdChange}
+          intakeBatchId={filesIntakeBatchId}
+          onIntakeBatchIdChange={setFilesIntakeBatchId}
           embedded
           canContribute={canContribute}
         />

@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
-  batchFilesPath,
   batchesPath,
   confirmUploadPath,
   createBatchPath,
@@ -11,9 +10,12 @@ import {
   fileReservationsPath,
   generateIdempotencyKey,
   getJson,
+  INTAKE_READ_STATUS,
   organizationsPath,
   postJson,
   putToSignedUrl,
+  readEngagementIntakeBatches,
+  readIntakeBatchFiles,
   requestUploadUrlPath,
   resolveFileReservationIdempotencyKey,
   sha256HexOfFile,
@@ -48,6 +50,18 @@ export default function KaiWebIntake({
   // shown a write that can only fail; the read-only batch/file views remain.
   // Defaults to true, so every mount that does not pass it is unaffected.
   canContribute = true,
+  // Files persistence/rehydration: when a parent supplies the active
+  // engagement, this component reconstructs its batch/file state from the
+  // server on every mount - it reads the organization's batches, keeps only
+  // those whose persisted engagement_id is the active engagement, and loads
+  // the selected batch's files. A parent may also retain the selected batch
+  // across this component's unmount (e.g. leaving the Files tab): it passes
+  // the retained id here and receives every validated selection through
+  // onIntakeBatchIdChange. The retained id is only a hint - it is used only
+  // after the fresh server read confirms it belongs to this organization and
+  // engagement, and is replaced otherwise. Standalone callers pass neither.
+  intakeBatchId: retainedIntakeBatchId = "",
+  onIntakeBatchIdChange,
   // KAI B1A-3B-R2: explicit opt-in seam only. When a parent passes this
   // callback, KaiWebIntake reports the ONE server-grounded fact a Phase-5
   // caller needs - the current selected file's P1-05
@@ -96,6 +110,27 @@ export default function KaiWebIntake({
   const createBatchIdempotencyKeyRef = useRef(null);
   const fileReservationIdempotencyKeyRef = useRef(null);
   const fileReservationIdentityRef = useRef(null);
+  // Server-backed batch/file reconstruction runs only when a parent owns the
+  // active engagement; standalone mounts keep their manual-load contract.
+  const engagementScoped = Boolean(parentEngagementId);
+  const [batchesRequest, setBatchesRequest] = useState({ status: INTAKE_READ_STATUS.NOT_STARTED, error: "" });
+  const [batchFilesRequest, setBatchFilesRequest] = useState({ status: INTAKE_READ_STATUS.NOT_STARTED, error: "" });
+  // Read through refs so a parent re-render (a new retained id or callback
+  // identity) never re-triggers the bootstrap read.
+  const retainedIntakeBatchIdRef = useRef(retainedIntakeBatchId);
+  retainedIntakeBatchIdRef.current = retainedIntakeBatchId;
+  const onIntakeBatchIdChangeRef = useRef(onIntakeBatchIdChange);
+  onIntakeBatchIdChangeRef.current = onIntakeBatchIdChange;
+  const intakeBatchIdRef = useRef(intakeBatchId);
+  intakeBatchIdRef.current = intakeBatchId;
+  // Incremented on every bootstrap start, context change, and unmount, so a
+  // late batch-list response for a prior context is discarded instead of
+  // selecting (or reporting to the parent) a batch from that context.
+  const batchBootstrapTokenRef = useRef(0);
+  const reportIntakeBatchSelection = useCallback((value) => {
+    if (!engagementScoped) return;
+    if (typeof onIntakeBatchIdChangeRef.current === "function") onIntakeBatchIdChangeRef.current(value || "");
+  }, [engagementScoped]);
 
   // The browser never types or fabricates an organization id: it always
   // bootstraps from the server-authoritative list of organizations the
@@ -142,6 +177,8 @@ export default function KaiWebIntake({
     setIntakeFileId("");
     setFileStatus(null);
     setBatchFiles([]);
+    setBatchesRequest({ status: INTAKE_READ_STATUS.NOT_STARTED, error: "" });
+    setBatchFilesRequest({ status: INTAKE_READ_STATUS.NOT_STARTED, error: "" });
     setBusy(false);
     setMessage("");
 
@@ -193,6 +230,88 @@ export default function KaiWebIntake({
     loadEngagements(organizationId);
   }, [organizationId, loadEngagements]);
 
+  // A parent-owned engagement change invalidates every batch/file fact that
+  // belonged to the previous Project before the new Project is bootstrapped
+  // (declared ahead of the bootstrap effect so it always runs first).
+  // Standalone mounts never change parentEngagementId, so they are unaffected.
+  useEffect(() => {
+    batchBootstrapTokenRef.current += 1;
+    setBatches([]);
+    setIntakeBatchId("");
+    setBatchFiles([]);
+    setIntakeFileId("");
+    setFileStatus(null);
+    setBatchesRequest({ status: INTAKE_READ_STATUS.NOT_STARTED, error: "" });
+    setBatchFilesRequest({ status: INTAKE_READ_STATUS.NOT_STARTED, error: "" });
+    setMessage("");
+    createBatchIdempotencyKeyRef.current = null;
+    fileReservationIdempotencyKeyRef.current = null;
+    fileReservationIdentityRef.current = null;
+    reportSensitivityProfileDiscovered(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [parentEngagementId]);
+
+  // Reads the persisted batches for the active organization + engagement and
+  // establishes the selection from that read alone (see
+  // readEngagementIntakeBatches): a retained id only if it is in the scoped
+  // list, else the sole scoped batch, else no selection and the chooser.
+  const bootstrapEngagementBatches = useCallback(async (preferredIntakeBatchId) => {
+    if (!organizationId || !parentEngagementId) return;
+    batchBootstrapTokenRef.current += 1;
+    const token = batchBootstrapTokenRef.current;
+    setBatchesRequest({ status: INTAKE_READ_STATUS.LOADING, error: "" });
+    const outcome = await readEngagementIntakeBatches({
+      organizationId,
+      engagementId: parentEngagementId,
+      retainedIntakeBatchId: preferredIntakeBatchId || "",
+    });
+    if (token !== batchBootstrapTokenRef.current) return;
+    setBatches(outcome.batches);
+    setBatchesRequest({ status: outcome.status, error: outcome.error });
+    if (outcome.status === INTAKE_READ_STATUS.ERROR) {
+      // Nothing is validated, so nothing is selected: a batch already
+      // validated by an earlier read in this mount stays; otherwise the file
+      // route is never called for an unvalidated id.
+      return;
+    }
+    if (outcome.intakeBatchId !== intakeBatchIdRef.current) {
+      setIntakeBatchId(outcome.intakeBatchId);
+      setBatchFiles([]);
+      setBatchFilesRequest({ status: INTAKE_READ_STATUS.NOT_STARTED, error: "" });
+      setIntakeFileId("");
+      setFileStatus(null);
+      reportSensitivityProfileDiscovered(null);
+    }
+    reportIntakeBatchSelection(outcome.intakeBatchId);
+  }, [organizationId, parentEngagementId, reportIntakeBatchSelection, reportSensitivityProfileDiscovered]);
+
+  // Files entry/remount: reconstruct from the server, never from the
+  // "Load existing batches" button or any browser-only cache.
+  useEffect(() => {
+    if (!engagementScoped || !organizationId) return undefined;
+    bootstrapEngagementBatches(retainedIntakeBatchIdRef.current);
+    return () => {
+      batchBootstrapTokenRef.current += 1;
+    };
+  }, [engagementScoped, organizationId, bootstrapEngagementBatches]);
+
+  // Once a validated batch is selected, its persisted files are read
+  // automatically - no second manual "Load".
+  useEffect(() => {
+    if (!engagementScoped || !organizationId || !intakeBatchId) return undefined;
+    let cancelled = false;
+    setBatchFilesRequest({ status: INTAKE_READ_STATUS.LOADING, error: "" });
+    (async () => {
+      const outcome = await readIntakeBatchFiles({ organizationId, intakeBatchId });
+      if (cancelled) return;
+      setBatchFiles(outcome.items);
+      setBatchFilesRequest({ status: outcome.status, error: outcome.error });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [engagementScoped, organizationId, intakeBatchId]);
+
   const loadBatches = useCallback(async () => {
     if (!organizationId) return;
 
@@ -234,7 +353,11 @@ export default function KaiWebIntake({
     createBatchIdempotencyKeyRef.current = null;
     setIntakeBatchId(result.body?.data?.intake_batch_id || "");
     setMessage(`Batch created: ${result.body?.data?.intake_batch_id}`);
-  }, [organizationId, engagementId, batchCode]);
+    // Engagement-scoped: re-read the batch list so the new batch is selected
+    // (and retained by the parent) only once the server lists it for this
+    // engagement.
+    if (engagementScoped) bootstrapEngagementBatches(result.body?.data?.intake_batch_id || "");
+  }, [organizationId, engagementId, batchCode, engagementScoped, bootstrapEngagementBatches]);
 
   const reserveAndUpload = useCallback(async () => {
     if (!organizationId || !engagementId || !intakeBatchId || !file) {
@@ -332,14 +455,12 @@ export default function KaiWebIntake({
   const loadBatchFiles = useCallback(async () => {
     if (!organizationId || !intakeBatchId) return;
     setBusy(true);
-    const result = await getJson(batchFilesPath(organizationId, intakeBatchId));
+    setBatchFilesRequest({ status: INTAKE_READ_STATUS.LOADING, error: "" });
+    const outcome = await readIntakeBatchFiles({ organizationId, intakeBatchId });
     setBusy(false);
-    if (result.statusCode !== 200 || !result.body?.ok) {
-      setBatchFiles([]);
-      setMessage(errorText(result));
-      return;
-    }
-    setBatchFiles(result.body.data?.items || []);
+    setBatchFiles(outcome.items);
+    setBatchFilesRequest({ status: outcome.status, error: outcome.error });
+    if (outcome.status === INTAKE_READ_STATUS.ERROR) setMessage(outcome.error);
   }, [organizationId, intakeBatchId]);
 
   return (
@@ -412,11 +533,30 @@ export default function KaiWebIntake({
             Create batch
           </button>
           ) : null}
-          <button type="button" className="btn btn-sm btn-outline-primary" onClick={loadBatches} disabled={busy || !organizationId}>
+          <button
+            type="button"
+            className="btn btn-sm btn-outline-primary"
+            onClick={engagementScoped ? () => bootstrapEngagementBatches(intakeBatchId) : loadBatches}
+            disabled={busy || !organizationId || batchesRequest.status === INTAKE_READ_STATUS.LOADING}
+          >
             Load existing batches
           </button>
         </div>
         {intakeBatchId ? <div className="small mt-2">Batch id: {intakeBatchId}</div> : null}
+        {engagementScoped && batchesRequest.status === INTAKE_READ_STATUS.LOADING ? (
+          <div className="small text-muted mt-2">Loading this project&rsquo;s batches...</div>
+        ) : null}
+        {engagementScoped && batchesRequest.status === INTAKE_READ_STATUS.ERROR ? (
+          <div className="alert alert-danger py-2 small mt-2 mb-0">
+            This project&rsquo;s batches could not be loaded: {batchesRequest.error}
+          </div>
+        ) : null}
+        {engagementScoped && batchesRequest.status === INTAKE_READ_STATUS.SUCCESS_EMPTY ? (
+          <div className="small text-muted mt-2">No intake batches exist for this project yet.</div>
+        ) : null}
+        {engagementScoped && batchesRequest.status === INTAKE_READ_STATUS.SUCCESS_WITH_DATA && !intakeBatchId ? (
+          <div className="small text-muted mt-2">This project has more than one batch. Select a batch to view its files.</div>
+        ) : null}
         {batches.length > 0 ? (
           <ul className="small mt-3 mb-0">
             {batches.map((item) => (
@@ -443,7 +583,9 @@ export default function KaiWebIntake({
                       updateEngagementId(item.engagement_id || "");
                     }
                     setIntakeBatchId(item.intake_batch_id);
+                    reportIntakeBatchSelection(item.intake_batch_id);
                     setBatchFiles([]);
+                    setBatchFilesRequest({ status: INTAKE_READ_STATUS.NOT_STARTED, error: "" });
                     setIntakeFileId("");
                     setFileStatus(null);
                     setMessage("");
@@ -521,7 +663,13 @@ export default function KaiWebIntake({
               <h5 className="mb-0">Batch files</h5>
               <button type="button" className="btn btn-sm btn-outline-primary" onClick={loadBatchFiles} disabled={busy || !intakeBatchId}>Load</button>
             </div>
-            {batchFiles.length === 0 ? <div className="text-muted small">No files listed yet.</div> : (
+            {batchFilesRequest.status === INTAKE_READ_STATUS.LOADING ? (
+              <div className="text-muted small">Loading this batch&rsquo;s files...</div>
+            ) : batchFilesRequest.status === INTAKE_READ_STATUS.ERROR ? (
+              <div className="alert alert-danger py-2 small mb-0">This batch&rsquo;s files could not be loaded: {batchFilesRequest.error}</div>
+            ) : batchFilesRequest.status === INTAKE_READ_STATUS.SUCCESS_EMPTY ? (
+              <div className="text-muted small">This batch has no files yet.</div>
+            ) : batchFiles.length === 0 ? <div className="text-muted small">No files listed yet.</div> : (
               <ul className="small mb-0">
                 {batchFiles.map((item) => (
                   <li

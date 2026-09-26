@@ -145,3 +145,90 @@ export function fileExtensionOf(filename) {
 export function errorText(result) {
   return result?.body?.error?.message || `Request failed (${result?.statusCode ?? "unknown"}).`;
 }
+
+// Files persistence/rehydration: request-state vocabulary for the batch and
+// batch-file reads, so an initial empty array is never presented as proof
+// that no persisted data exists, and a failed read never renders as zero-data.
+export const INTAKE_READ_STATUS = Object.freeze({
+  NOT_STARTED: "not_started",
+  LOADING: "loading",
+  SUCCESS_EMPTY: "success_empty",
+  SUCCESS_WITH_DATA: "success_with_data",
+  ERROR: "error",
+});
+
+function sameId(left, right) {
+  return Boolean(left) && Boolean(right) && String(left).toLowerCase() === String(right).toLowerCase();
+}
+
+// The organization-scoped batch list is narrowed to the active Project using
+// only each batch's persisted organization_id + engagement_id - never its
+// code, name, timestamps, or position.
+export function engagementScopedBatches(batches, organizationId, engagementId) {
+  if (!Array.isArray(batches) || !organizationId || !engagementId) return [];
+  return batches.filter(
+    (batch) =>
+      batch &&
+      batch.intake_batch_id &&
+      sameId(batch.organization_id, organizationId) &&
+      sameId(batch.engagement_id, engagementId),
+  );
+}
+
+// Resolves which batch (if any) is active after a fresh authoritative read:
+// a retained selection is reused only when it is in the scoped list; a single
+// scoped batch is selected; several require an explicit user choice.
+export function resolveIntakeBatchSelection(scopedBatches, retainedIntakeBatchId = "") {
+  const items = Array.isArray(scopedBatches) ? scopedBatches : [];
+  const retained = items.find((batch) => sameId(batch.intake_batch_id, retainedIntakeBatchId));
+  if (retained) {
+    return { intakeBatchId: retained.intake_batch_id, retainedStale: false, requiresChoice: false };
+  }
+  const retainedStale = Boolean(retainedIntakeBatchId);
+  if (items.length === 1) {
+    return { intakeBatchId: items[0].intake_batch_id, retainedStale, requiresChoice: false };
+  }
+  return { intakeBatchId: "", retainedStale, requiresChoice: items.length > 1 };
+}
+
+// One authoritative read of the organization's batches, narrowed to the
+// active engagement and resolved to a selection. A failed read selects
+// nothing, so an unvalidated retained id can never reach the file route.
+export async function readEngagementIntakeBatches(
+  { organizationId, engagementId, retainedIntakeBatchId = "" },
+  getJsonFn = getJson,
+) {
+  const result = await getJsonFn(batchesPath(organizationId));
+  if (result?.statusCode !== 200 || !result?.body?.ok) {
+    return {
+      status: INTAKE_READ_STATUS.ERROR,
+      error: errorText(result),
+      batches: [],
+      intakeBatchId: "",
+      retainedStale: false,
+      requiresChoice: false,
+    };
+  }
+  const batches = engagementScopedBatches(result.body.data?.batches, organizationId, engagementId);
+  return {
+    status: batches.length > 0 ? INTAKE_READ_STATUS.SUCCESS_WITH_DATA : INTAKE_READ_STATUS.SUCCESS_EMPTY,
+    error: "",
+    batches,
+    ...resolveIntakeBatchSelection(batches, retainedIntakeBatchId),
+  };
+}
+
+// One authoritative read of a validated batch's persisted files through the
+// existing organization + intakeBatchId -> listIntakeFilesForBatch route.
+export async function readIntakeBatchFiles({ organizationId, intakeBatchId }, getJsonFn = getJson) {
+  const result = await getJsonFn(batchFilesPath(organizationId, intakeBatchId));
+  if (result?.statusCode !== 200 || !result?.body?.ok) {
+    return { status: INTAKE_READ_STATUS.ERROR, error: errorText(result), items: [] };
+  }
+  const items = Array.isArray(result.body.data?.items) ? result.body.data.items : [];
+  return {
+    status: items.length > 0 ? INTAKE_READ_STATUS.SUCCESS_WITH_DATA : INTAKE_READ_STATUS.SUCCESS_EMPTY,
+    error: "",
+    items,
+  };
+}

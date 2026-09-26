@@ -237,6 +237,15 @@ export default function ImpactEvidenceLibrary({
   }, [parentEngagementId, onEngagementIdChange]);
   const [loadingEngagements, setLoadingEngagements] = useState(false);
   const [engagementsLoaded, setEngagementsLoaded] = useState(false);
+  // Files persistence/rehydration: the Files tab's selected intake batch is
+  // retained here, outside the tab-gated KaiWebIntake mount, so leaving and
+  // re-entering Files restores it. KaiWebIntake re-validates it against a
+  // fresh server read before use; it is cleared whenever the organization or
+  // Project changes so it can never carry into another context.
+  const [filesIntakeBatchId, setFilesIntakeBatchId] = useState("");
+  useEffect(() => {
+    setFilesIntakeBatchId("");
+  }, [organizationId, engagementId]);
   const [audience, setAudience] = useState("internal");
   // KAI Impact Library redesign, Package D: the approved Knowledge Studio
   // tab set (Files/Processing/Evidence/Gaps/Reviews). Purely a rendering
@@ -2753,6 +2762,8 @@ export default function ImpactEvidenceLibrary({
           organizationId={organizationId}
           engagementId={engagementId}
           onEngagementIdChange={updateEngagementId}
+          intakeBatchId={filesIntakeBatchId}
+          onIntakeBatchIdChange={setFilesIntakeBatchId}
           embedded
           onSensitivityProfileDiscovered={handleSensitivityProfileDiscoveredFromIntake}
         />
