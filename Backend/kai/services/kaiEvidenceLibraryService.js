@@ -4,6 +4,7 @@ import { buildKaiError } from "../errors/kaiErrors.js";
 import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationService.js";
 import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
 import { listOrganizationEvidenceItems as readOrganizationEvidenceItems } from "../db/kaiEvidenceLibraryReadModels.js";
+import { canRecordEvidenceReviewDecision } from "./kaiHumanReviewService.js";
 
 /**
  * KAI Impact Library redesign, E1 correction: Knowledge Studio's Evidence
@@ -54,7 +55,53 @@ function isOptionalBoolean(value) {
   return value === null || typeof value === "boolean";
 }
 
-function responseEvidenceItem(row, organizationId) {
+function canonicalTimestamp(value) {
+  if (value instanceof Date) return Number.isNaN(value.getTime()) ? null : value.toISOString();
+  if (typeof value !== "string") return null;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null;
+}
+
+/**
+ * The evidence item's own P2-01 `evidence_review` queue item. Every reader
+ * gets the review posture: the queue status pair and the current
+ * decision-lineage head's outcome. Only an actor who can record a P2-12
+ * evidence-review decision (canRecordEvidenceReviewDecision) also gets the
+ * write coordinates that request needs: the queue item id and the
+ * optimistic-concurrency token (`expectedUpdatedAt`, the queue row's
+ * updated_at). Returns null when the item has no evidence_review queue item,
+ * and undefined - the caller fails the whole read closed - for a malformed row
+ * or for more than one current decision head (ambiguous lineage, which the
+ * P2-12 write repository also refuses rather than choosing one).
+ */
+function responseEvidenceReview(row, { includeWriteCoordinates }) {
+  const headCount = row.evidence_review_decision_head_count ?? 0;
+  if (!Number.isInteger(headCount) || headCount < 0 || headCount > 1) return undefined;
+  const reviewQueueItemId = row.review_queue_item_id ?? null;
+  const decisionOutcome = row.evidence_review_decision_outcome ?? null;
+  if ((headCount === 1) !== (decisionOutcome !== null)) return undefined;
+  if (reviewQueueItemId === null) {
+    return decisionOutcome === null ? null : undefined;
+  }
+  const expectedUpdatedAt = canonicalTimestamp(row.review_queue_updated_at);
+  if (
+    !canonicalUuid(reviewQueueItemId)
+    || !isOptionalMachineToken(row.review_queue_status ?? null)
+    || !isOptionalMachineToken(row.review_queue_review_status ?? null)
+    || !expectedUpdatedAt
+    || !isOptionalMachineToken(decisionOutcome)
+  ) {
+    return undefined;
+  }
+  const posture = {
+    queueStatus: row.review_queue_status ?? null,
+    reviewStatus: row.review_queue_review_status ?? null,
+    currentDecisionOutcome: decisionOutcome,
+  };
+  return includeWriteCoordinates ? { reviewQueueItemId, expectedUpdatedAt, ...posture } : posture;
+}
+
+function responseEvidenceItem(row, organizationId, { includeWriteCoordinates = false } = {}) {
   if (
     !isPlainObject(row)
     || !canonicalUuid(row.evidence_item_id)
@@ -64,6 +111,7 @@ function responseEvidenceItem(row, organizationId) {
     || !isOptionalUuid(row.source_version_id ?? null)
     || !isOptionalMachineToken(row.evidence_type ?? null)
     || !isOptionalMachineToken(row.data_class ?? null)
+    || !isOptionalMachineToken(row.sensitivity_level ?? null)
     || !isOptionalMachineToken(row.support_strength ?? null)
     || !isOptionalStatement(row.statement ?? null)
     || !isOptionalMachineToken(row.evidence_review_status ?? null)
@@ -73,6 +121,8 @@ function responseEvidenceItem(row, organizationId) {
   ) {
     return null;
   }
+  const evidenceReview = responseEvidenceReview(row, { includeWriteCoordinates });
+  if (evidenceReview === undefined) return null;
   return {
     evidenceItemId: row.evidence_item_id,
     sourceId: row.source_id ?? null,
@@ -85,6 +135,8 @@ function responseEvidenceItem(row, organizationId) {
     internalOnly: row.internal_only ?? null,
     publicUseAllowed: row.public_use_allowed ?? null,
     funderUseAllowed: row.funder_use_allowed ?? null,
+    sensitivityLevel: row.sensitivity_level ?? null,
+    evidenceReview,
   };
 }
 
@@ -127,9 +179,13 @@ export async function listOrganizationEvidenceLibrary(input = {}, dependencies =
   const rows = await readItems(organizationId, { limit, afterEvidenceItemId });
   if (!Array.isArray(rows) || rows.length > limit + 1) return buildKaiError("system_error");
 
+  // Server-derived P2-12 authority for this actor and organization: whether
+  // the Evidence tab may offer the decision action, and whether each item
+  // carries the write coordinates. The P2-12 service still re-checks it.
+  const canRecordEvidenceReview = canRecordEvidenceReviewDecision({ actorContext: input.actorContext, organizationId });
   const candidates = [];
   for (const row of rows) {
-    const candidate = responseEvidenceItem(row, organizationId);
+    const candidate = responseEvidenceItem(row, organizationId, { includeWriteCoordinates: canRecordEvidenceReview });
     if (!candidate) return buildKaiError("system_error");
     candidates.push(candidate);
   }
@@ -144,6 +200,7 @@ export async function listOrganizationEvidenceLibrary(input = {}, dependencies =
       afterEvidenceItemId,
       truncated: hasNext,
       nextAfterEvidenceItemId: hasNext ? items.at(-1).evidenceItemId : null,
+      capabilities: { canRecordEvidenceReviewDecision: canRecordEvidenceReview },
     },
     warnings: [],
   };
@@ -158,4 +215,5 @@ export const __evidenceLibraryServiceContract = Object.freeze({
 
 export const __testables = Object.freeze({
   responseEvidenceItem,
+  responseEvidenceReview,
 });

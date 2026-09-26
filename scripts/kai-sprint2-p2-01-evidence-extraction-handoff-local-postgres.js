@@ -21,6 +21,14 @@ import { Client } from "pg";
  */
 
 const repoRoot = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
+// The same runner-owned lineage schema also serves the P2-12 no-claim evidence
+// review proof, which starts from this handoff's output. Only these specs run.
+const RUNNER_SPECS = Object.freeze([
+  "__tests__/kai-sprint2-p2-01-evidence-extraction-handoff.integration.spec.js",
+  "__tests__/kai-sprint2-p2-12-no-claim-evidence-review.integration.spec.js",
+]);
+const handoffSpec = process.argv[2] || RUNNER_SPECS[0];
+if (!RUNNER_SPECS.includes(handoffSpec)) throw new Error(`P2-01 handoff runner refused an unlisted spec: ${handoffSpec}`);
 const dbName = "kai_p2_01_evidence_extraction_handoff_synthetic";
 const defaultServerBin = "/opt/homebrew/opt/postgresql@16/bin";
 const fallbackBin = "/opt/homebrew/opt/libpq/bin";
@@ -37,7 +45,6 @@ const port = String(63000 + Math.floor(Math.random() * 1000));
 const user = process.env.USER || "postgres";
 const targetUrl = `postgresql://${user}@127.0.0.1:${port}/${dbName}`;
 const sentinelUrl = "postgres://127.0.0.1:9/kai_sentinel";
-const handoffSpec = "__tests__/kai-sprint2-p2-01-evidence-extraction-handoff.integration.spec.js";
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -201,8 +208,8 @@ try {
       KAI_P2_01_EVIDENCE_EXTRACTION_HANDOFF_DATABASE_URL: targetUrl,
     },
   });
-  if (testResult.status !== 0) throw new Error("P2-01 evidence-extraction handoff integration tests failed");
-  console.log("P2-01 evidence-extraction handoff integration tests passed.");
+  if (testResult.status !== 0) throw new Error(`${handoffSpec} integration tests failed`);
+  console.log(`${handoffSpec} integration tests passed.`);
 } finally {
   if (started) spawnSync(pgCtl, ["-D", dataDir, "stop", "-m", "fast"], { encoding: "utf8", stdio: "ignore" });
   rmSync(workDir, { recursive: true, force: true });

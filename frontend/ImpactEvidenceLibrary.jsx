@@ -10,6 +10,9 @@ import {
   canSelectClaimForFunderGeneration,
   canCompleteClaimReview,
   canCompleteEvidenceReview,
+  canCompleteEvidenceLibraryReview,
+  evidenceLibraryReviewRequest,
+  projectEvidenceLibraryCapabilities,
   canCompleteGeneratedContentReview,
   canStartGeneratedContentReview,
   claimGapFollowupsPath,
@@ -322,6 +325,7 @@ export default function ImpactEvidenceLibrary({
   const eligibleRequestGenerationRef = useRef(0);
   const traceabilityPanelRef = useRef(null);
   const claimAudienceSeedIdentityRef = useRef("");
+  const evidenceRequestGenerationRef = useRef(0);
   const organizationIdRef = useRef(organizationId);
   const audienceRef = useRef(audience);
   organizationIdRef.current = organizationId;
@@ -365,6 +369,16 @@ export default function ImpactEvidenceLibrary({
   const [claimDecision, setClaimDecision] = useState("");
   const [claimLimitationNotesText, setClaimLimitationNotesText] = useState("");
   const [claimApprovedAudiences, setClaimApprovedAudiences] = useState([]);
+  // Knowledge Studio Evidence tab: direct P2-12 evidence review of one
+  // evidence item, with or without a claim. Independent of the
+  // claim-traceability decision form above.
+  const [evidenceReviewTargetId, setEvidenceReviewTargetId] = useState("");
+  // Server-derived with the Evidence Library read; defaults to no capability.
+  const [evidenceLibraryCapabilities, setEvidenceLibraryCapabilities] = useState(() => projectEvidenceLibraryCapabilities(null));
+  const [evidenceTabDecision, setEvidenceTabDecision] = useState("");
+  const [evidenceTabLimitationNotesText, setEvidenceTabLimitationNotesText] = useState("");
+  const [evidenceTabReviewPending, setEvidenceTabReviewPending] = useState(false);
+  const [evidenceTabReviewResult, setEvidenceTabReviewResult] = useState("");
 
   // KAI B1A-3B: Phase-5 sensitivity/consent/allowed-use review state,
   // independent of every other loading/error dimension on this page.
@@ -925,21 +939,39 @@ export default function ImpactEvidenceLibrary({
 
   const loadEvidenceItems = useCallback(async () => {
     if (!organizationId) return;
+    const requestGeneration = ++evidenceRequestGenerationRef.current;
+    const requestOrganizationId = organizationId;
     setLoadingEvidenceItems(true);
     setEvidenceItemsError("");
     const result = await getJson(evidenceLibraryCandidatesPath(organizationId));
+    // A late response for a previous organization (or superseded by a newer
+    // read) never repopulates the current view.
+    if (!shouldApplyCandidateResponse({
+      requestGeneration,
+      currentGeneration: evidenceRequestGenerationRef.current,
+      requestOrganizationId,
+      currentOrganizationId: organizationIdRef.current,
+    })) return;
     setLoadingEvidenceItems(false);
     if (result.statusCode !== 200 || !result.body?.ok) {
       setEvidenceItems([]);
+      setEvidenceLibraryCapabilities(projectEvidenceLibraryCapabilities(null));
       setEvidenceItemsError(errorText(result));
       return;
     }
     setEvidenceItems(projectEvidenceLibraryItems(result.body.data));
+    setEvidenceLibraryCapabilities(projectEvidenceLibraryCapabilities(result.body.data));
   }, [organizationId]);
 
   useEffect(() => {
+    evidenceRequestGenerationRef.current += 1;
+    setLoadingEvidenceItems(false);
     setEvidenceItems([]);
+    setEvidenceLibraryCapabilities(projectEvidenceLibraryCapabilities(null));
     setEvidenceItemsError("");
+    setEvidenceReviewTargetId("");
+    setEvidenceTabReviewResult("");
+    setEvidenceTabReviewPending(false);
     if (organizationId) loadEvidenceItems();
   }, [organizationId, loadEvidenceItems]);
 
@@ -2517,6 +2549,58 @@ export default function ImpactEvidenceLibrary({
     [claimDecision, claimLimitationNotesText, claimApprovedAudiences],
   );
 
+  // Choosing another evidence item never carries over an in-progress decision.
+  useEffect(() => {
+    setEvidenceTabDecision("");
+    setEvidenceTabLimitationNotesText("");
+  }, [evidenceReviewTargetId]);
+
+  const evidenceReviewTarget = useMemo(
+    () => evidenceItems.find((item) => item.evidenceItemId === evidenceReviewTargetId) || null,
+    [evidenceItems, evidenceReviewTargetId],
+  );
+
+  const evidenceTabDecisionValidationError = useMemo(
+    () => evidenceReviewDecisionValidationError({ decision: evidenceTabDecision, limitationNotes: evidenceTabLimitationNotesText }),
+    [evidenceTabDecision, evidenceTabLimitationNotesText],
+  );
+
+  // Records one decision through the existing P2-12 evidence-review route,
+  // then re-reads the Evidence Library so the item shows persisted state (and
+  // a fresh concurrency token after a conflict).
+  const runEvidenceLibraryReview = useCallback(async () => {
+    const item = evidenceReviewTarget;
+    if (!organizationId || !item || evidenceTabReviewPending) return;
+    if (!canCompleteEvidenceLibraryReview(item, evidenceLibraryCapabilities) || evidenceTabDecisionValidationError) return;
+    const requestOrganizationId = organizationId;
+    const request = evidenceLibraryReviewRequest(organizationId, item, {
+      decision: evidenceTabDecision,
+      limitationNotes: evidenceTabLimitationNotesText,
+    });
+    setEvidenceTabReviewPending(true);
+    setEvidenceTabReviewResult("");
+    const result = await postJson(request.path, request.body);
+    if (organizationIdRef.current !== requestOrganizationId) return;
+    setEvidenceTabReviewPending(false);
+    setEvidenceTabReviewResult(result.statusCode === 200
+      ? `Evidence review decision recorded: ${evidenceTabDecision}.`
+      : errorText(result));
+    if (result.statusCode === 200) {
+      setEvidenceTabDecision("");
+      setEvidenceTabLimitationNotesText("");
+    }
+    await loadEvidenceItems();
+  }, [
+    organizationId,
+    evidenceReviewTarget,
+    evidenceTabReviewPending,
+    evidenceTabDecision,
+    evidenceTabLimitationNotesText,
+    evidenceTabDecisionValidationError,
+    evidenceLibraryCapabilities,
+    loadEvidenceItems,
+  ]);
+
   const runCompleteEvidenceReview = useCallback(async () => {
     if (!organizationId || !traceability?.evidence || workflowPending) return;
     if (!canCompleteEvidenceReview(traceability.evidence, traceability.evidenceReviewDecision)) return;
@@ -3152,6 +3236,102 @@ export default function ImpactEvidenceLibrary({
                         >
                           View source &amp; traceability
                         </button>
+                      </div>
+                    ) : null}
+                    {canCompleteEvidenceLibraryReview(item, evidenceLibraryCapabilities) && evidenceReviewTargetId !== item.evidenceItemId ? (
+                      <div className="mt-1">
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline-primary"
+                          onClick={() => {
+                            setEvidenceReviewTargetId(item.evidenceItemId);
+                            setEvidenceTabReviewResult("");
+                          }}
+                        >
+                          Review evidence
+                        </button>
+                      </div>
+                    ) : null}
+                    {evidenceReviewTargetId === item.evidenceItemId && evidenceLibraryCapabilities.canRecordEvidenceReviewDecision ? (
+                      <div className="border rounded p-2 mt-2" aria-label="Evidence review">
+                        <div className="small fw-semibold mb-1">Evidence review</div>
+                        <ValueRow label="Evidence type" value={item.evidenceType} />
+                        <ValueRow label="Data class" value={item.dataClass} />
+                        <ValueRow label="Sensitivity" value={item.sensitivityLevel} />
+                        <ValueRow label="Support strength" value={item.supportStrength} />
+                        <ValueRow label="Evidence review status" value={item.evidenceReviewStatus} />
+                        <ValueRow
+                          label="Review queue"
+                          value={`${item.evidenceReview?.queueStatus || "none"} / ${item.evidenceReview?.reviewStatus || "none"}`}
+                        />
+                        <ValueRow label="Current decision" value={item.evidenceReview?.currentDecisionOutcome} />
+                        <ValueRow label="Source version" value={item.sourceVersionId} />
+                        <ValueRow
+                          label="Audience"
+                          value={item.internalOnly === true ? "Internal only" : item.internalOnly === false ? "Not internal-only" : undefined}
+                        />
+                        <div className="small text-muted my-2">
+                          Recording an evidence review decision does not propose or approve a claim and does not
+                          make this evidence available to funders or the public.
+                        </div>
+                        {canCompleteEvidenceLibraryReview(item, evidenceLibraryCapabilities) ? (
+                          <>
+                            <div className="d-flex flex-wrap gap-3 mb-2">
+                              {EVIDENCE_REVIEW_DECISIONS.map((value) => (
+                                <div className="form-check" key={value}>
+                                  <input
+                                    className="form-check-input"
+                                    type="radio"
+                                    name="evidence-library-review-decision"
+                                    id={`evidence-library-review-decision-${value}`}
+                                    value={value}
+                                    checked={evidenceTabDecision === value}
+                                    onChange={() => setEvidenceTabDecision(value)}
+                                  />
+                                  <label className="form-check-label small" htmlFor={`evidence-library-review-decision-${value}`}>
+                                    {value}
+                                  </label>
+                                </div>
+                              ))}
+                            </div>
+                            {decisionRequiresLimitationNotes(evidenceTabDecision) ? (
+                              <div className="mb-2">
+                                <label className="form-label small fw-semibold" htmlFor="evidence-library-review-limitation-notes">
+                                  Limitation notes (one per line)
+                                </label>
+                                <textarea
+                                  id="evidence-library-review-limitation-notes"
+                                  className="form-control form-control-sm"
+                                  rows={3}
+                                  value={evidenceTabLimitationNotesText}
+                                  onChange={(event) => setEvidenceTabLimitationNotesText(event.target.value)}
+                                />
+                              </div>
+                            ) : null}
+                          </>
+                        ) : null}
+                        {evidenceTabReviewResult ? (
+                          <div className="small mb-2" role="status">{evidenceTabReviewResult}</div>
+                        ) : null}
+                        <div className="d-flex flex-wrap gap-2">
+                          {canCompleteEvidenceLibraryReview(item, evidenceLibraryCapabilities) ? (
+                            <button
+                              type="button"
+                              className="btn btn-sm btn-primary"
+                              onClick={runEvidenceLibraryReview}
+                              disabled={evidenceTabReviewPending || Boolean(evidenceTabDecisionValidationError)}
+                            >
+                              Record Evidence Review Decision
+                            </button>
+                          ) : null}
+                          <button
+                            type="button"
+                            className="btn btn-sm btn-outline-secondary"
+                            onClick={() => setEvidenceReviewTargetId("")}
+                          >
+                            Close
+                          </button>
+                        </div>
                       </div>
                     ) : null}
                   </li>

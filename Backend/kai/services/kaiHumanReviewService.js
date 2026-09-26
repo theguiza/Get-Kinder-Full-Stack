@@ -190,6 +190,37 @@ export async function recordEvidenceReviewDecision(input, dependencies = {}) {
 }
 
 /**
+ * Read-only projection of whether this actor would pass every authorization
+ * step recordEvidenceReviewDecision applies before its repository call, for
+ * this organization: a mapped human, the same operation, allowed roles, and
+ * combineGlobalRoles option (so active same-organization membership), the
+ * same tenant check, and an attributable decided_by role. It grants nothing:
+ * recordEvidenceReviewDecision re-checks every request. Used to decide
+ * whether a read surface may offer the decision action and its write
+ * coordinates.
+ */
+export function canRecordEvidenceReviewDecision({ actorContext, organizationId } = {}) {
+  if (!isNonEmptyString(organizationId) || !isMappedHumanActor(actorContext)) return false;
+  const auth = validateActorCanPerformOperation(
+    actorContext,
+    RECORD_EVIDENCE_REVIEW_DECISION_OPERATION,
+    organizationId,
+    { allowedRoles: RECORD_EVIDENCE_REVIEW_DECISION_ALLOWED_ROLES, combineGlobalRoles: true },
+  );
+  if (!auth.ok) return false;
+  const tenant = validateTenantBoundaryConsistency({
+    expectedOrganizationId: organizationId,
+    payload: { organization_id: organizationId },
+  });
+  if (tenant.severity === "blocker") return false;
+  return resolveAuthorizedHumanRole({
+    actorContext,
+    auth,
+    allowedRoles: RECORD_EVIDENCE_REVIEW_DECISION_ALLOWED_ROLES,
+  }) !== null;
+}
+
+/**
  * KAI P2-12 human claim-review decision recording. Requires the linked
  * evidence item's own decision-lineage head to already be a terminal
  * outcome - see the repository module for the exact precondition and write

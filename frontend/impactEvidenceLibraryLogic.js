@@ -292,7 +292,62 @@ export function projectEvidenceLibraryItems(dto) {
     internalOnly: item.internalOnly,
     publicUseAllowed: item.publicUseAllowed,
     funderUseAllowed: item.funderUseAllowed,
+    sensitivityLevel: item.sensitivityLevel ?? null,
+    evidenceReview: projectEvidenceLibraryReview(item.evidenceReview),
   })).filter((item) => isRouteUuid(item.evidenceItemId));
+}
+
+// The evidence item's own P2-01 evidence_review queue item, as the Evidence
+// Library read returns it: the review posture for every reader, plus the P2-12
+// write coordinates (queue id + concurrency token) only when the server
+// returned both in a route-safe form - which it does only for an actor with
+// P2-12 evidence-review authority.
+function projectEvidenceLibraryReview(review) {
+  if (!review || typeof review !== "object") return null;
+  const hasWriteCoordinates = isRouteUuid(review.reviewQueueItemId) && typeof review.expectedUpdatedAt === "string";
+  return {
+    reviewQueueItemId: hasWriteCoordinates ? review.reviewQueueItemId : null,
+    expectedUpdatedAt: hasWriteCoordinates ? review.expectedUpdatedAt : null,
+    queueStatus: review.queueStatus ?? null,
+    reviewStatus: review.reviewStatus ?? null,
+    currentDecisionOutcome: review.currentDecisionOutcome ?? null,
+  };
+}
+
+// The server-derived capability returned with the Evidence Library read
+// (Backend/kai/services/kaiHumanReviewService.js canRecordEvidenceReviewDecision:
+// the same checks the P2-12 decision service applies). Anything but an explicit
+// true is no capability.
+export function projectEvidenceLibraryCapabilities(dto) {
+  return { canRecordEvidenceReviewDecision: dto?.capabilities?.canRecordEvidenceReviewDecision === true };
+}
+
+// Whether the Evidence tab may offer the P2-12 decision for this item: the
+// server capability, the write coordinates, and the exact (evidence, decision)
+// rule canCompleteEvidenceReview already applies on the claim-traceability
+// path. This is display gating only: the P2-12 service stays authoritative.
+export function canCompleteEvidenceLibraryReview(item, capabilities) {
+  if (capabilities?.canRecordEvidenceReviewDecision !== true) return false;
+  const review = item?.evidenceReview;
+  if (!review || !review.reviewQueueItemId || !review.expectedUpdatedAt) return false;
+  return canCompleteEvidenceReview(
+    { review_queue_status: review.queueStatus, review_status: review.reviewStatus },
+    review.currentDecisionOutcome ? { decisionOutcome: review.currentDecisionOutcome } : null,
+  );
+}
+
+// The existing P2-12 evidence-review decision route and body for one Evidence
+// Library item. The concurrency token is the queue row's updated_at, exactly
+// as the claim-traceability path sends it.
+export function evidenceLibraryReviewRequest(organizationId, item, { decision, limitationNotes }) {
+  return {
+    path: evidenceReviewCompletePath(organizationId, item.evidenceItemId, item.evidenceReview.reviewQueueItemId),
+    body: evidenceReviewDecisionBody({
+      expectedUpdatedAt: item.evidenceReview.expectedUpdatedAt,
+      decision,
+      limitationNotes,
+    }),
+  };
 }
 
 export function claimTraceabilityPath(organizationId, claimId, audience) {
