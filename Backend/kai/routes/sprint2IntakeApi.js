@@ -5416,8 +5416,8 @@ router.post(
 
 let evidenceReviewServicePromise = null;
 async function getHumanReviewServiceForEvidenceReview() {
-  if (intakeServiceOverride?.recordEvidenceReviewDecision) return intakeServiceOverride;
-  evidenceReviewServicePromise ||= import("../services/kaiHumanReviewService.js");
+  if (intakeServiceOverride?.recordEvidenceReviewDecisionWithClaimProposalHandoff) return intakeServiceOverride;
+  evidenceReviewServicePromise ||= import("../services/kaiEvidenceReviewClaimProposalHandoffService.js");
   return evidenceReviewServicePromise;
 }
 
@@ -5471,8 +5471,12 @@ function validateEvidenceReviewCompletionRequestOrSend(req, res) {
  * authorized service, which alone owns writing the new append-only decision-
  * ledger row, the compare-and-set queue/domain-column write, post-write
  * validation, and required same-transaction audit. Never completes,
- * resolves, or references the linked claim's own claim_review queue item -
- * completing an evidence review can never approve a claim.
+ * resolves, or references any claim's claim_review queue item - completing
+ * an evidence review can never approve a claim. After a committed positive
+ * decision the composing service runs the existing P2-02 assessment and the
+ * existing P2-03 proposal (a review-gated, internal-only claim with its own
+ * open claim_review item) and reports it as `claim_proposal_handoff`; see
+ * Backend/kai/services/kaiEvidenceReviewClaimProposalHandoffService.js.
  */
 router.post(
   "/admin/organizations/:organizationId/evidence-items/:evidenceItemId/evidence-review/:reviewQueueItemId/complete",
@@ -5485,7 +5489,7 @@ router.post(
     const now = new Date().toISOString();
     return invokeService(res, async () => {
       const service = await getHumanReviewServiceForEvidenceReview();
-      return service.recordEvidenceReviewDecision({
+      return service.recordEvidenceReviewDecisionWithClaimProposalHandoff({
         organizationId: identifiers.organizationId,
         evidenceItemId: identifiers.evidenceItemId,
         reviewQueueItemId: identifiers.reviewQueueItemId,

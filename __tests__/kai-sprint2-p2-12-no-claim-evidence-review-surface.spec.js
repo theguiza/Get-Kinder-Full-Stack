@@ -227,12 +227,14 @@ test("UI: the Evidence tab submits only through evidenceLibraryReviewRequest (th
   assert.match(handler, /if \(organizationIdRef\.current !== requestOrganizationId\) return;/);
   assert.match(handler, /await loadEvidenceItems\(\);/);
   assert.equal((handler.match(/postJson\(/g) || []).length, 1);
-  assert.doesNotMatch(handler, /claimProposal|claim-proposal|claimReviewComplete|evidence-extraction|approved_audiences/);
+  // The claim proposal after a positive decision runs on the server; the
+  // browser never calls the P2-03 route or the P2-02 assessment itself.
+  assert.doesNotMatch(handler, /claimProposalPath|claim-proposal|evidenceCoverageAssessmentPath|claimReviewComplete|evidence-extraction|approved_audiences/);
   assert.match(librarySource, /\{canCompleteEvidenceLibraryReview\(item, evidenceLibraryCapabilities\) && evidenceReviewTargetId !== item\.evidenceItemId \? \(/);
   assert.match(librarySource, /\{evidenceReviewTargetId === item\.evidenceItemId && evidenceLibraryCapabilities\.canRecordEvidenceReviewDecision \? \(/);
   assert.equal((librarySource.match(/canCompleteEvidenceLibraryReview\(item\)/g) || []).length, 0, "every gate passes the server capability");
   assert.match(librarySource, /setEvidenceLibraryCapabilities\(projectEvidenceLibraryCapabilities\(result\.body\.data\)\);/);
-  assert.match(librarySource, /does not propose or approve a claim and does not\s*\n\s*make this evidence available to funders or the public/);
+  assert.match(librarySource, /never approves a claim and does not\s*\n\s*make this evidence available to funders or the public/);
 });
 
 test("UI: a late Evidence Library response for a previous organization cannot repopulate the current one", () => {

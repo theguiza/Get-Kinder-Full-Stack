@@ -26,6 +26,7 @@
     "verify:kai-sprint2-p2-01-evidence-lineage": "node scripts/kai-sprint2-p2-01-evidence-lineage-local-postgres.js",
     "verify:kai-sprint2-p2-01-evidence-extraction-handoff": "node scripts/kai-sprint2-p2-01-evidence-extraction-handoff-local-postgres.js",
     "verify:kai-sprint2-p2-12-no-claim-evidence-review": "node scripts/kai-sprint2-p2-01-evidence-extraction-handoff-local-postgres.js __tests__/kai-sprint2-p2-12-no-claim-evidence-review.integration.spec.js",
+    "verify:kai-sprint2-p2-03-reviewed-evidence-claim-proposal": "node scripts/kai-sprint2-p2-01-evidence-extraction-handoff-local-postgres.js __tests__/kai-sprint2-p2-03-reviewed-evidence-claim-proposal.integration.spec.js",
     "verify:kai-sprint2-p2-02-evidence-coverage-assessment": "node scripts/kai-sprint2-p2-02-evidence-coverage-assessment-local-postgres.js",
     "verify:kai-sprint2-p2-03-claim-proposal": "node scripts/kai-sprint2-p2-03-claim-proposal-local-postgres.js",
     "verify:kai-sprint2-p2-04-claim-gap-followup": "node scripts/kai-sprint2-p2-04-claim-gap-followup-local-postgres.js",

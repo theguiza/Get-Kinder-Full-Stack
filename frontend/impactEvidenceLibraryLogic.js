@@ -350,6 +350,32 @@ export function evidenceLibraryReviewRequest(organizationId, item, { decision, l
   };
 }
 
+// The server's claim-proposal handoff after an Evidence tab review decision
+// (Backend/kai/services/kaiEvidenceReviewClaimProposalHandoffService.js): a
+// positive decision runs the P2-02 assessment and the P2-03 proposal on the
+// server. The browser never calls either route for this. Returns the sentence
+// to show after the decision, and whether Claims should be re-read.
+export function claimProposalHandoffOutcome(handoff) {
+  const status = handoff?.status;
+  if (status === "created" || status === "replayed") {
+    return {
+      message: "KAI proposed an internal-only claim from this evidence. It still needs Get Kinder claim review before any use.",
+      reloadClaims: true,
+    };
+  }
+  if (status === "not_applicable") {
+    return { message: "No claim was proposed: only evidence reviewed as supported can be proposed as a claim.", reloadClaims: false };
+  }
+  if (status === "not_created") {
+    const code = typeof handoff.error_code === "string" ? handoff.error_code : "unknown";
+    return {
+      message: `KAI did not propose a claim from this evidence (${code}). The evidence review decision is recorded.`,
+      reloadClaims: false,
+    };
+  }
+  return { message: "", reloadClaims: false };
+}
+
 export function claimTraceabilityPath(organizationId, claimId, audience) {
   const params = new URLSearchParams({ requested_audience: audience });
   return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}`

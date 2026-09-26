@@ -34915,3 +34915,141 @@ only UI path to the P2-12 decision went through a claim's traceability.
 deployment, production or shared database, GCS, schema/migration,
 feature-flag, tenant, credential, `.env`, or `00_KAI_CURRENT_STATE.md` change.
 The only databases used were runner-owned ephemeral loopback clusters.
+
+### P2-02/P2-03 reviewed-evidence -> proposed-claim continuity (2026-09-26)
+
+**Owner authorization:** let a fresh, positively reviewed evidence item reach
+an ordinary review-gated proposed claim through the normal product, after the
+required P2-02 assessment, reusing P2-02/P2-03 unchanged. No claim review,
+approval, P2-04/P2-05 work, schema change, or audience change. Starting HEAD
+`26013bfdef1797274a0432d7fad4f4a73e66f8e6`, branch `main`, working tree clean.
+
+**Contracts (TOOL_VERIFIED at `26013bf`):**
+- P2-02 `assessEvidenceCoverageForSourceVersion({ organizationId,
+  sourceVersionId, actorContext })`; route
+  `GET .../source-versions/:sourceVersionId/evidence-coverage-assessment`.
+  Mapped human `gk_admin`/`gk_operator`/`gk_reviewer` with active membership.
+  Read-only, deterministic, persistence- and audit-free, per source_version.
+  Fails closed (`validateEvidenceCoverageAssessmentIsPermitted`: P2-01
+  lineage/promotion/current-version/checksum/permission gate plus
+  `allowed_use_status = 'not_allowed'`). Its ten dimensions are
+  informational (`pass`/`warning` only, never a blocker). It does not require
+  reviewed evidence. P2-03 does not consume it; P2-06 recomputes the same
+  dimensions and blocks unresolved ones until P2-10 acceptance, and requires
+  P2-04 gap state before it evaluates a claim at all.
+- P2-03 `proposeClaim({ organizationId, evidenceItemId, actorContext, now })`;
+  route `POST .../evidence-items/:evidenceItemId/claim-proposal` (empty body).
+  Same roles, mapped human only (system/ai/assistant refused). Claim text is
+  deterministic from the locator (no caller text). Requires complete current
+  P2-01 lineage and the evidence_review pair; unresolved review or
+  `unassessed` strength only warns (accepted 2026-08-06 design). Writes one
+  `finding` claim (`proposed`/`needs_gk_review`/`unassessed`, internal-only,
+  every audience flag and `export_ready` false), one `claim_evidence_links`
+  row, one open `claim_review` queue item, and a `claim_proposed` audit, in
+  one transaction; identical replay writes nothing; non-current version is
+  `conflict_current_state_changed`.
+- P2-12 claim review requires a terminal evidence-review head; P2-06 requires
+  both strengths `reviewed_supported`.
+
+**Reconciliation:** the ordinary path previously had no P2-02/P2-03 step
+after evidence review (the only UI control, "Propose claim", keys on an
+already-selected claim), so reviewed evidence stopped at zero claims. The
+explicit GK P2-03 route still accepts lineage-complete unreviewed (and
+`not_supported`) evidence and does not run P2-02's `allowed_use` gate; that is
+the accepted P2-03 contract (~25 downstream integration fixtures propose
+before review) and was NOT changed. Its claims stay internal-only,
+`unassessed`, refused by claim review until evidence review is terminal, and
+never eligible. Owner decision required to close it: whether P2-03 itself
+must require a positive terminal evidence review and P2-02 permission.
+
+**Repair (server-side continuation):**
+- New `Backend/kai/services/kaiEvidenceReviewClaimProposalHandoffService.js`:
+  `recordEvidenceReviewDecisionWithClaimProposalHandoff` calls the unmodified
+  P2-12 `recordEvidenceReviewDecision`; only on success does
+  `proposeClaimAfterEvidenceReviewDecision` run. It requires a committed
+  `supported`/`supported_with_limitation` decision (`reviewed_supported`,
+  queue resolved), re-reads the evidence item (same organization, still
+  `reviewed_supported`), runs P2-02 for its source_version, and only if P2-02
+  passes calls P2-03 once with the same human actor, `now`, and the production
+  claim-proposal audit adapter. The result must be exactly the review-gated
+  proposal. Reports `claim_proposal_handoff`
+  (`created|replayed|not_applicable|not_created`, dimension counts, claim and
+  claim_review ids, sanitized `error_code`; never statement text). Never
+  throws; no SQL; no claim-review, approval, audience, or export path.
+- `Backend/kai/routes/sprint2IntakeApi.js`: the P2-12 evidence-review route
+  delegates once to the composing service. P2-02/P2-03 routes unchanged.
+- `frontend/impactEvidenceLibraryLogic.js`, `frontend/ImpactEvidenceLibrary.jsx`:
+  the Evidence tab reports the handoff after the single P2-12 POST and
+  re-reads the Claim Library; panel wording updated; the existing Claims card
+  shows the claim text and "Get Kinder claim review required". Bundle rebuilt.
+- Runners allowlist the new specs; `verify:kai-sprint2-p2-03-reviewed-evidence-claim-proposal`.
+- Coupled updates: the P2-12 surface spec (wording and browser-never-proposes
+  guard) and the P2-12 browser spec (case 3/6 now expect one proposed claim
+  plus its claim_review item and zero claim decisions).
+
+**Tests (TOOL_VERIFIED; `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel`):**
+- Baseline before editing: P2-02/P2-03/P2-12/P2-01-handoff unit specs 165/165;
+  P2-02 runner 7/7; P2-03 runner 15/15; P2-12 browser 11/11.
+- New boundary spec 16/16 (positive-only gate, P2-02-before-P2-03 order and
+  arguments, production audit adapter, P2-02/P2-03 refusal/throw/malformed and
+  unsafe results, replay, real-service role parity, no SQL, route, UI).
+- New real-PostgreSQL proof 17/17: Evidence A `supported` -> deltas exactly
+  claims +1, claim_evidence_links +1, review_queue_items +1 (claim_review,
+  open/needs_gk_review), evidence_review_decisions +1, audit_events +2,
+  upload_lifecycle_audit +2; claim `proposed`/`needs_gk_review`/`unassessed`,
+  all flags false, `created_by` = reviewer, claim_review_decisions 0. P2-02
+  (read-only, zero writes) reported 7 unresolved, 2 risk-flagged,
+  coverage_gaps clear. P2-06 then fails closed for internal/funder/public
+  (`gap_dimension_requires_missing_p204_state`); eligible-claims excludes it;
+  the review-queue rollup stays ok (evaluationErrorCount 1). Evidence B
+  `not_supported` and `needs_more_information` -> `not_applicable`, only the
+  decision rows. `supported_with_limitation` proposes and keeps the note in the
+  ledger. Replay: zero writes. Stale token: conflict, zero writes.
+  Non-current source_version: P2-12, P2-02, and P2-03 each refuse
+  (`conflict_current_state_changed`), zero writes. `allowed_use` `not_allowed`:
+  reviewed, P2-02 `validation_blocker`, no claim. Operator/client/system/AI and
+  cross-organization attempts, a forged positive decision for Org 2 evidence,
+  and file/parser/profile/dictionary/candidate/source_version ids as the
+  evidence id all wrote nothing. Client pipeline:
+  `impact_fact_review`/`waiting_for_get_kinder`/`impact_fact_review_pending`,
+  no ids or claim text. Project B and Org 2 unchanged.
+- New browser acceptance 10/10 (existing runner, headless Chrome): cockpit
+  promotion -> automatic P2-01 (no extraction request); Evidence A
+  `supported` sends only the P2-12 POST (200), no `/claim-proposal` or
+  `/evidence-coverage-assessment` request, then Claim Library re-read; Claims
+  card shows the text, `finding · needs_gk_review`, "Get Kinder claim review
+  required", `claim_review/open`; Evidence B `not_supported` proposes
+  nothing and stays "No claim proposed yet"; client shows Evidence review
+  Complete / Impact Fact review Waiting for Get Kinder with no ids or
+  controls; reload writes nothing; Project B and Organization B show nothing
+  of Project A; operator sees no review control; client direct P2-03 and
+  P2-12 POSTs 403 with zero writes; final DB: one proposed claim, one open
+  claim_review item, zero claim decisions, no audience/export authority.
+- Existing: browser client Knowledge Studio 6/6, Files 3/3, evidence pipeline
+  7/7, P2-01 handoff 5/5, P2-12 11/11; runners P2-02 7/7, P2-03 15/15, P2-01
+  handoff 7/7, P2-12 no-claim 11/11, P2-12 ledger 24/24, P2-06 33/33.
+- `npm test` on `.env`-free copies with a synthetic placeholder OpenAI key:
+  baseline `26013bf` 5271 pass / 12 fail / 95 skipped of 5378; package 5290 /
+  12 / 97 of 5399. Failure names identical.
+- `npm run build` succeeded. `git diff --check` PASS. Full diff inspected.
+
+**Limitations (NOT_CONFIRMED / remaining):**
+- The proposed claim's single-claim traceability read returns 409
+  (`gap_dimension_requires_missing_p204_state`) until P2-04 gap/follow-up
+  state exists, so the GK page shows its error banner when the claim is
+  selected, the Reviews rollup omits it, and claim review is not reachable
+  from traceability. P2-04 continuity is the next gap and is not implemented.
+- The Claims card labels any Claim Library claim "internally available
+  (governed)" and selectable for internal evidence-summary generation
+  (accepted P14-05 rule); unchanged here.
+- The explicit P2-03 route contract above is unchanged (owner decision).
+- A handoff `not_created` has no dedicated retry control; recovery is an
+  identical P2-12 resubmission (replay) or the explicit P2-03 route.
+- If a claim review later changes the claim, an identical evidence-review
+  replay reports the P2-03 replay as `not_created` (`system_error`).
+- Production and deployed schema not verified.
+
+**Status:** REVIEWED_EVIDENCE_TO_PROPOSED_CLAIM_CONTINUITY_REPAIRED_LOCALLY. No
+push, deployment, production or shared database, GCS, schema/migration,
+feature-flag, tenant, credential, `.env`, or `00_KAI_CURRENT_STATE.md` change.
+The only databases used were runner-owned ephemeral loopback clusters.

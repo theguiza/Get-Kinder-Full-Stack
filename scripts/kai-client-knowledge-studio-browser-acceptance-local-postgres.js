@@ -18,6 +18,9 @@ import { Client } from "pg";
  * runs the GK source promotion -> server-side evidence extraction acceptance, and
  * __tests__/kai-p2-12-no-claim-evidence-review-browser-acceptance.integration.spec.js
  * runs the GK Evidence tab P2-12 review of evidence that has no claim.
+ * __tests__/kai-reviewed-evidence-claim-proposal-browser-acceptance.integration.spec.js
+ * runs reviewed evidence -> server-side P2-02/P2-03 -> the proposed claim on
+ * the GK Claims card.
  *
  * - An ephemeral, loopback-only PostgreSQL cluster owned by this runner,
  *   with the union of the schemas the client product reads, applied in the
@@ -62,6 +65,7 @@ const ACCEPTANCE_SPECS = Object.freeze([
   "__tests__/kai-client-evidence-pipeline-browser-acceptance.integration.spec.js",
   "__tests__/kai-p2-01-evidence-extraction-handoff-browser-acceptance.integration.spec.js",
   "__tests__/kai-p2-12-no-claim-evidence-review-browser-acceptance.integration.spec.js",
+  "__tests__/kai-reviewed-evidence-claim-proposal-browser-acceptance.integration.spec.js",
 ]);
 const acceptanceSpec = process.argv[2] || ACCEPTANCE_SPECS[0];
 if (!ACCEPTANCE_SPECS.includes(acceptanceSpec)) {

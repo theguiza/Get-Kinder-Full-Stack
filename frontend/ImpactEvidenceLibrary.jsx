@@ -19,6 +19,7 @@ import {
   claimLibraryCandidatesPath,
   evidenceLibraryCandidatesPath,
   projectEvidenceLibraryItems,
+  claimProposalHandoffOutcome,
   claimProposalPath,
   claimReviewCompletePath,
   claimReviewDecisionBody,
@@ -2582,14 +2583,20 @@ export default function ImpactEvidenceLibrary({
     const result = await postJson(request.path, request.body);
     if (organizationIdRef.current !== requestOrganizationId) return;
     setEvidenceTabReviewPending(false);
+    const handoff = result.statusCode === 200
+      ? claimProposalHandoffOutcome(result.body?.data?.claim_proposal_handoff)
+      : { message: "", reloadClaims: false };
     setEvidenceTabReviewResult(result.statusCode === 200
-      ? `Evidence review decision recorded: ${evidenceTabDecision}.`
+      ? `Evidence review decision recorded: ${evidenceTabDecision}. ${handoff.message}`.trim()
       : errorText(result));
     if (result.statusCode === 200) {
       setEvidenceTabDecision("");
       setEvidenceTabLimitationNotesText("");
     }
     await loadEvidenceItems();
+    // Re-read the persisted Claim Library so the proposed claim (and the
+    // Evidence item's claim badge) come from the server, not this response.
+    if (handoff.reloadClaims && organizationIdRef.current === requestOrganizationId) await loadCandidateClaims();
   }, [
     organizationId,
     evidenceReviewTarget,
@@ -2599,6 +2606,7 @@ export default function ImpactEvidenceLibrary({
     evidenceTabDecisionValidationError,
     evidenceLibraryCapabilities,
     loadEvidenceItems,
+    loadCandidateClaims,
   ]);
 
   const runCompleteEvidenceReview = useCallback(async () => {
@@ -3271,7 +3279,8 @@ export default function ImpactEvidenceLibrary({
                           value={item.internalOnly === true ? "Internal only" : item.internalOnly === false ? "Not internal-only" : undefined}
                         />
                         <div className="small text-muted my-2">
-                          Recording an evidence review decision does not propose or approve a claim and does not
+                          A supported decision lets KAI propose an internal-only claim that still needs Get Kinder
+                          claim review. Recording an evidence review decision never approves a claim and does not
                           make this evidence available to funders or the public.
                         </div>
                         {canCompleteEvidenceLibraryReview(item, evidenceLibraryCapabilities) ? (
@@ -3393,9 +3402,13 @@ export default function ImpactEvidenceLibrary({
                       <span className="form-check-label">Include in funder evidence summary</span>
                     </div>
                   ) : null}
+                  {claim.claimStatement ? <div className="small mt-1 text-break">{claim.claimStatement}</div> : null}
                   <div className="small mt-1">
                     {claim.claimType || "claim"} · {claim.claimReviewStatus || claim.claimStatus || "status unknown"}
                   </div>
+                  {claim.claimReviewStatus === "needs_gk_review" ? (
+                    <div className="small mt-1">Get Kinder claim review required</div>
+                  ) : null}
                   <div className="small mt-1">
                     Governed internal availability: {claim.governedAvailable ? "internally available (governed)" : "not in current governed result"}
                   </div>
