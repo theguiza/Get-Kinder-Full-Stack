@@ -55,10 +55,12 @@ function isMappedHumanActor(actorContext) {
  * repository read, lock, validator side effect, or audit activity - if it is
  * disabled, this returns the canonical `feature_disabled` result with zero
  * repository calls. P2-01C correction: this package's own
- * `KAI_EVIDENCE_LINEAGE_ENABLED` flag has been removed; P2-01 has no route,
- * worker, listener, or production composition and so remains dormant under
- * `KAI_SPRINT2_ENABLED` alone, exactly like every other still-unwired P2 package.
- * It is not composed into any route, listener, scheduler, or production path.
+ * `KAI_EVIDENCE_LINEAGE_ENABLED` flag has been removed; P2-01 is gated by
+ * `KAI_SPRINT2_ENABLED` alone. It has exactly two callers, both human-initiated:
+ * the internal evidence-extraction route, and the Review Cockpit's handoff after
+ * a committed human 'promoted' P1-08 decision
+ * (kaiReviewCockpitService.submitSourceCandidateDecision). No worker, listener,
+ * or scheduler invokes it.
  *
  * Contains no SQL and imports no database pool: persistence, lineage re-reads, and
  * every fail-closed validator are delegated entirely to the injected P2-01

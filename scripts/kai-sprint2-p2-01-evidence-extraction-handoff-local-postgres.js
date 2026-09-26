@@ -5,36 +5,23 @@ import { spawnSync } from "node:child_process";
 import { Client } from "pg";
 
 /**
- * Local browser acceptance for the client Knowledge Studio (Funder
- * Requirements, Generated Drafts, Grant Response Packet / Board Reporting
- * previews, client follow-up completion) for client_admin, client_reviewer,
- * and client_contributor. Passing
- * __tests__/kai-web-intake-files-rehydration-browser-acceptance.integration.spec.js
- * as the first argument runs the Knowledge Studio Files persistence/
- * rehydration acceptance against the same fixture instead;
- * __tests__/kai-client-evidence-pipeline-browser-acceptance.integration.spec.js
- * runs the client intake -> review -> evidence continuity acceptance, and
- * __tests__/kai-p2-01-evidence-extraction-handoff-browser-acceptance.integration.spec.js
- * runs the GK source promotion -> server-side evidence extraction acceptance.
+ * Real-PostgreSQL assembled proof of the P1-08 source promotion -> P2-01
+ * evidence extraction handoff:
+ *   __tests__/kai-sprint2-p2-01-evidence-extraction-handoff.integration.spec.js
  *
- * - An ephemeral, loopback-only PostgreSQL cluster owned by this runner,
- *   with the union of the schemas the client product reads, applied in the
- *   canonical order the P14-09 funder-authority runner established, and the
- *   repository's synthetic smoke seeds. Removed afterwards.
- * - A child Node process (the acceptance spec) whose ambient pool
- *   (Backend/db/pg.js) points only at that cluster: every URL-style database
- *   variable is cleared, so .env can never redirect it.
- * - The spec seeds governed state through the real services, serves the real
- *   KAI routers and the real built bundle from a loopback Express app, and
- *   drives a real headless Chrome over the DevTools protocol.
- *
- * The only simulated layer is the Get Kinder session login: the harness app
- * sets req.user from a harness cookie, as the route tests set req.user. Every
- * KAI actor, membership, and authorization decision is the real one.
+ * - An ephemeral, loopback-only PostgreSQL cluster owned by this runner, with
+ *   the same schema chain and synthetic smoke seeds as the client Knowledge
+ *   Studio browser acceptance runner (so kai.claims and
+ *   kai.evidence_review_decisions exist and the client pipeline read model can
+ *   run). Removed afterwards.
+ * - A child Node process (the spec) whose ambient pool (Backend/db/pg.js)
+ *   points only at that cluster: every URL-style database variable is
+ *   cleared, so .env can never redirect it. The spec therefore exercises the
+ *   default production repositories and audit composition of every service.
  */
 
 const repoRoot = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
-const dbName = "kai_client_browser_acceptance_synthetic";
+const dbName = "kai_p2_01_evidence_extraction_handoff_synthetic";
 const defaultServerBin = "/opt/homebrew/opt/postgresql@16/bin";
 const fallbackBin = "/opt/homebrew/opt/libpq/bin";
 const binDir = process.env.PG_BIN_DIR || (existsSync(join(defaultServerBin, "postgres")) ? defaultServerBin : fallbackBin);
@@ -42,28 +29,15 @@ const initdb = join(binDir, "initdb");
 const pgCtl = join(binDir, "pg_ctl");
 const psql = join(binDir, "psql");
 const createdb = join(binDir, "createdb");
-const workDir = mkdtempSync(join(tmpdir(), "kai-client-browser-pg-"));
+const workDir = mkdtempSync(join(tmpdir(), "kai-p2-01-handoff-pg-"));
 const dataDir = join(workDir, "data");
 const socketDir = join(workDir, "socket");
 const logFile = join(workDir, "postgres.log");
-const port = String(59800 + Math.floor(Math.random() * 100));
+const port = String(63000 + Math.floor(Math.random() * 1000));
 const user = process.env.USER || "postgres";
 const targetUrl = `postgresql://${user}@127.0.0.1:${port}/${dbName}`;
 const sentinelUrl = "postgres://127.0.0.1:9/kai_sentinel";
-const chromePath = process.env.KAI_BROWSER_ACCEPTANCE_CHROME
-  || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-// The acceptance spec to run against this fixture (default: the client
-// Knowledge Studio acceptance). Only the listed runner-owned specs may run.
-const ACCEPTANCE_SPECS = Object.freeze([
-  "__tests__/kai-client-knowledge-studio-browser-acceptance.integration.spec.js",
-  "__tests__/kai-web-intake-files-rehydration-browser-acceptance.integration.spec.js",
-  "__tests__/kai-client-evidence-pipeline-browser-acceptance.integration.spec.js",
-  "__tests__/kai-p2-01-evidence-extraction-handoff-browser-acceptance.integration.spec.js",
-]);
-const acceptanceSpec = process.argv[2] || ACCEPTANCE_SPECS[0];
-if (!ACCEPTANCE_SPECS.includes(acceptanceSpec)) {
-  throw new Error(`browser acceptance runner refused an unlisted spec: ${acceptanceSpec}`);
-}
+const handoffSpec = "__tests__/kai-sprint2-p2-01-evidence-extraction-handoff.integration.spec.js";
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -95,19 +69,15 @@ async function proveRunnerOwnedTarget() {
       SELECT current_database() AS database_name, inet_server_addr()::text AS server_addr,
              inet_server_port()::text AS server_port, current_setting('listen_addresses') AS listen_addresses`);
     const row = rows[0];
-    if (row.database_name !== dbName) throw new Error("browser acceptance runner refused non-synthetic database name");
+    if (row.database_name !== dbName) throw new Error("P2-01 handoff runner refused non-synthetic database name");
     if (!["127.0.0.1", "127.0.0.1/32", "::1", "::ffff:127.0.0.1"].includes(row.server_addr)) {
-      throw new Error(`browser acceptance runner refused non-loopback server address: ${row.server_addr}`);
+      throw new Error(`P2-01 handoff runner refused non-loopback server address: ${row.server_addr}`);
     }
-    if (row.server_port !== port) throw new Error("browser acceptance runner refused unexpected PostgreSQL port");
-    if (row.listen_addresses !== "127.0.0.1") throw new Error("browser acceptance runner refused non-loopback listen_addresses");
+    if (row.server_port !== port) throw new Error("P2-01 handoff runner refused unexpected PostgreSQL port");
+    if (row.listen_addresses !== "127.0.0.1") throw new Error("P2-01 handoff runner refused non-loopback listen_addresses");
   } finally {
     await client.end();
   }
-}
-
-if (!existsSync(chromePath)) {
-  throw new Error(`browser acceptance requires a local Chrome binary (set KAI_BROWSER_ACCEPTANCE_CHROME); not found: ${chromePath}`);
 }
 
 let started = false;
@@ -122,7 +92,7 @@ try {
   // Organizations/engagements/audit and the auth mirror the real
   // resolveKaiActorContext reads (Package 4 runner).
   psqlFile("scripts/kai-sprint2-organization-enablement-bootstrap-synthetic-schema.sql");
-  psqlExec("ALTER TABLE kai.engagements ADD CONSTRAINT kai_client_browser_engagements_id_org_unique UNIQUE (engagement_id, organization_id);");
+  psqlExec("ALTER TABLE kai.engagements ADD CONSTRAINT kai_p2_01_handoff_engagements_id_org_unique UNIQUE (engagement_id, organization_id);");
   psqlFile("scripts/kai-sprint2-package-4-impact-library-engagement-funder-requirements-auth-bootstrap-synthetic-schema.sql");
   // The Package 4 auth mirror lists the GK and reviewer roles only; the
   // client roles this acceptance signs in as are added as synthetic rows.
@@ -208,7 +178,7 @@ try {
     psqlFile(`scripts/${seed}.sql`);
   }
 
-  const testResult = spawnSync("node", ["--test", acceptanceSpec], {
+  const testResult = spawnSync("node", ["--test", handoffSpec], {
     cwd: repoRoot,
     encoding: "utf8",
     stdio: "inherit",
@@ -228,16 +198,13 @@ try {
       DB_USER: user,
       DB_PASSWORD: "",
       KAI_SPRINT2_ENABLED: "true",
-      KAI_GENERATION_ENABLED: "true",
-      KAI_CLIENT_BROWSER_ACCEPTANCE_DATABASE_URL: targetUrl,
-      KAI_CLIENT_BROWSER_ACCEPTANCE_CHROME: chromePath,
-      KAI_CLIENT_BROWSER_ACCEPTANCE_WORKDIR: workDir,
+      KAI_P2_01_EVIDENCE_EXTRACTION_HANDOFF_DATABASE_URL: targetUrl,
     },
   });
-  if (testResult.status !== 0) throw new Error(`browser acceptance failed: ${acceptanceSpec}`);
-  console.log(`Browser acceptance passed: ${acceptanceSpec}`);
+  if (testResult.status !== 0) throw new Error("P2-01 evidence-extraction handoff integration tests failed");
+  console.log("P2-01 evidence-extraction handoff integration tests passed.");
 } finally {
   if (started) spawnSync(pgCtl, ["-D", dataDir, "stop", "-m", "fast"], { encoding: "utf8", stdio: "ignore" });
   rmSync(workDir, { recursive: true, force: true });
-  console.log(`Client Knowledge Studio browser acceptance ephemeral workdir removed: ${workDir}`);
+  console.log(`P2-01 evidence-extraction handoff ephemeral PostgreSQL workdir removed: ${workDir}`);
 }

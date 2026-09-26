@@ -180,6 +180,23 @@ function FileProfileDetail({ detail }) {
   );
 }
 
+/**
+ * The server-side P2-01 handoff that follows a committed 'promoted' decision.
+ * Only the handoff's status, counts, and sanitized error code are shown.
+ */
+function evidenceHandoffText(handoff) {
+  if (!handoff || handoff.status === "not_applicable") return "";
+  const count = Number.isInteger(handoff.evidence_item_count) ? handoff.evidence_item_count : 0;
+  if (handoff.status === "created") {
+    return ` Evidence extraction: ${count} evidence item(s) created, awaiting GK evidence review.`;
+  }
+  if (handoff.status === "replayed") {
+    return ` Evidence extraction: ${count} evidence item(s) already present (no new write).`;
+  }
+  return ` The source is promoted, but evidence extraction did not complete (${handoff.error_code || "system_error"}).`
+    + " The promotion is saved; retry evidence extraction below.";
+}
+
 function decisionSubmitLabel(outcome) {
   if (outcome === "promoted") return "Promote";
   if (outcome === "rejected") return "Reject";
@@ -238,7 +255,7 @@ function SourceDecisionControls({ detail, onSubmit, busy }) {
   );
 }
 
-function SourceCandidateDetail({ detail, onSubmitDecision, busy, decisionResult }) {
+function SourceCandidateDetail({ detail, onSubmitDecision, busy, decisionResult, retryPayload }) {
   if (!detail) return null;
   const candidate = detail.source_candidate;
   const decision = detail.promotion_decision;
@@ -295,6 +312,13 @@ function SourceCandidateDetail({ detail, onSubmitDecision, busy, decisionResult 
       <h4>Source decision</h4>
       <SourceDecisionControls detail={detail} onSubmit={onSubmitDecision} busy={busy} />
       {decisionResult ? <p className="kai-cockpit-note">{decisionResult}</p> : null}
+      {retryPayload ? (
+        // Recovery only: re-sends the identical promotion, which P1-08 replays
+        // with no new write before the server re-attempts evidence extraction.
+        <button type="button" onClick={() => onSubmitDecision(retryPayload)} disabled={busy}>
+          Retry evidence extraction
+        </button>
+      ) : null}
     </section>
   );
 }
@@ -318,6 +342,7 @@ export default function KaiReviewCockpit(props = {}) {
   const [selectedItemId, setSelectedItemId] = useState(null);
   const [message, setMessage] = useState("");
   const [decisionResult, setDecisionResult] = useState("");
+  const [retryPayload, setRetryPayload] = useState(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
@@ -340,6 +365,7 @@ export default function KaiReviewCockpit(props = {}) {
     setDetailKind(null);
     setSelectedItemId(null);
     setDecisionResult("");
+    setRetryPayload(null);
     setBusy(false);
     setMessage("");
   }, [organization]);
@@ -350,6 +376,7 @@ export default function KaiReviewCockpit(props = {}) {
     setDetailKind(null);
     setSelectedItemId(null);
     setDecisionResult("");
+    setRetryPayload(null);
   }
 
   useEffect(() => {
@@ -423,6 +450,7 @@ export default function KaiReviewCockpit(props = {}) {
   const openDetail = useCallback(async (item) => {
     if (!organization) return;
     setDecisionResult("");
+    setRetryPayload(null);
     setSelectedItemId(item.review_queue_item_id);
     const route = detailRouteForQueueItem(item);
     if (!route) {
@@ -456,16 +484,20 @@ export default function KaiReviewCockpit(props = {}) {
     );
     if (activeOrganizationRef.current !== organization) return;
     setBusy(false);
+    setRetryPayload(null);
     if (result.statusCode !== 200 || !result.body?.ok) {
       // A stale/terminal conflict is displayed as its own typed result and is never
       // retried or re-sent with a different outcome from this component.
       setDecisionResult(errorText(result));
       return;
     }
+    const handoff = result.body.data.evidence_extraction_handoff;
     setDecisionResult(
       `Recorded ${result.body.data.promotion_decision.decision_status}` +
-      `${result.body.data.replayed ? " (replayed, no new write)" : ""}.`,
+      `${result.body.data.replayed ? " (replayed, no new write)" : ""}.` +
+      evidenceHandoffText(handoff),
     );
+    if (handoff?.status === "not_created" && payload.outcome === "promoted") setRetryPayload(payload);
     const refreshed = await getJson(
       `${COCKPIT_PATH}/source-candidates/${candidateId}?organization_id=${encodeURIComponent(organization)}`,
     );
@@ -582,6 +614,7 @@ export default function KaiReviewCockpit(props = {}) {
           onSubmitDecision={submitDecision}
           busy={busy}
           decisionResult={decisionResult}
+          retryPayload={retryPayload}
         />
       ) : null}
     </div>

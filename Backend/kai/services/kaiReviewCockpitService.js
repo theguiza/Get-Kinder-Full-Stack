@@ -25,6 +25,8 @@ import { __sourcePromotionRepositoryContract } from "../dictionary/postgresSourc
 import { recordSensitivityAllowedUseDecision } from "./kaiSensitivityAllowedUseReviewService.js";
 import { createSourceCandidateStub } from "./kaiSourceCandidateService.js";
 import { __sourceCandidateRepositoryContract } from "../dictionary/postgresSourceCandidateRepository.js";
+import { extractEvidenceFromSourceVersion } from "./kaiEvidenceLineageService.js";
+import { __evidenceLineageRepositoryContract } from "../dictionary/postgresEvidenceLineageRepository.js";
 import {
   isSensitivityAllowedUseTerminalOutcome,
   SENSITIVITY_ALLOWED_USE_DECISION_OUTCOMES,
@@ -37,6 +39,7 @@ import {
   createProductionMetadataOnlyAuditForSensitivityAllowedUseDecision,
   createProductionMetadataOnlyAuditForSourceCandidate,
   createProductionMetadataOnlyAuditForSourcePromotion,
+  createProductionMetadataOnlyAuditForSourceVersion,
 } from "./kaiMetadataOnlyAuditComposition.js";
 
 /**
@@ -48,10 +51,11 @@ import {
  *
  * - contains no SQL and imports no database pool: every read is delegated to the
  *   P1-09 read models, and every write path is delegated wholly to an accepted
- *   service - P1-08's promotion decision, B1A-2's sensitivity decision, and the
- *   P1-07 source-candidate handoff that follows a committed 'reviewed' decision (no
- *   decision, transition, replay, or idempotency logic is reimplemented, retried,
- *   or coerced here);
+ *   service - P1-08's promotion decision, B1A-2's sensitivity decision, the
+ *   P1-07 source-candidate handoff that follows a committed 'reviewed' decision,
+ *   and the P2-01 extraction handoff that follows a committed 'promoted' decision
+ *   (no decision, transition, replay, or idempotency logic is reimplemented,
+ *   retried, or coerced here);
  * - implements no file-profile mutation of any kind - file-profile review is
  *   strictly read-only in this package, and no approval/rejection/resolution/
  *   eligibility state is invented for it anywhere;
@@ -1187,6 +1191,14 @@ export async function getReviewCockpitSourceCandidateDetail(input = {}, dependen
  * never re-requested with a different outcome, and never coerced into any other
  * result - so a stale or terminal-state conflict can never trigger a second
  * mutation attempt from this layer.
+ *
+ * P2-01 handoff: once the committed decision is 'promoted' (fresh or replayed),
+ * this seam invokes the existing, unmodified P2-01
+ * `extractEvidenceFromSourceVersion` once, for the exact source_version the
+ * decision is bound to, as the same authenticated human actor - see
+ * ensureEvidenceAfterPromotedDecision below. The P1-08 decision, source, and
+ * source_version are already committed in their own transaction before that
+ * call and are never undone, retried, or re-reported by the handoff's outcome.
  */
 export async function submitSourceCandidateDecision(input = {}, dependencies = {}) {
   const deps = resolvedDependencies(dependencies);
@@ -1262,6 +1274,14 @@ export async function submitSourceCandidateDecision(input = {}, dependencies = {
     return buildKaiError("system_error");
   }
 
+  const evidenceExtractionHandoff = promotionDecision.decision_status === DECISION_STATUS_PROMOTED
+    ? await ensureEvidenceAfterPromotedDecision(
+      { organizationId, intakeSourceCandidateId, promotionDecision, sourceVersion, actorContext, now },
+      deps,
+      env,
+    )
+    : evidenceExtractionHandoffResult("not_applicable");
+
   return {
     ok: true,
     data: {
@@ -1271,9 +1291,157 @@ export async function submitSourceCandidateDecision(input = {}, dependencies = {
       source,
       source_version: sourceVersion,
       replayed: data.replayed,
+      evidence_extraction_handoff: evidenceExtractionHandoff,
     },
     warnings: [],
   };
+}
+
+const { DECISION_STATUS_PROMOTED } = __sourcePromotionRepositoryContract;
+const {
+  REVIEW_QUEUE_TYPE: EVIDENCE_REVIEW_QUEUE_TYPE,
+  REVIEW_TARGET_OBJECT_TYPE: EVIDENCE_REVIEW_TARGET_OBJECT_TYPE,
+} = __evidenceLineageRepositoryContract;
+
+function evidenceExtractionHandoffResult(
+  status,
+  { sourceVersionId = null, evidenceItemCount = null, reviewQueueItemCount = null, errorCode = null } = {},
+) {
+  return {
+    status,
+    source_version_id: sourceVersionId,
+    evidence_item_count: evidenceItemCount,
+    review_queue_item_count: reviewQueueItemCount,
+    error_code: errorCode,
+  };
+}
+
+/**
+ * The P2-01 handoff after a committed 'promoted' P1-08 decision.
+ *
+ * The source_version is the one the committed decision row itself is bound to
+ * (`promotion_decision.source_version_id`, returned by P1-08 in the same
+ * transaction that created or replayed it) - never a newest/first/browser-supplied
+ * guess - and it must be the current version of this exact candidate's lineage
+ * before P2-01 is called at all. P2-01 then independently re-reads and enforces
+ * the same organization, current source_version, and fully promoted lineage.
+ *
+ * Invokes the existing P2-01 `extractEvidenceFromSourceVersion` service exactly
+ * once with the same authenticated human actor that just recorded the decision and
+ * the production source-version audit adapter the P2-01 route composes. Every
+ * P2-01 guarantee stays inside that service and its repository, and none is
+ * reimplemented here: KAI_SPRINT2_ENABLED, AUTH-KAI-003 (mapped human only), the
+ * gk_admin/gk_operator/gk_reviewer active-membership check, tenant consistency,
+ * VAL-KAI-P2-01-001, create/replay idempotency, and the required metadata-only
+ * audit. It creates only unreviewed `needs_gk_review` evidence items, their
+ * source coordinates, and their open 'evidence_review' queue items - never an
+ * evidence-review decision or anything further downstream; evidence review remains
+ * the separate explicit human P2-12 decision.
+ *
+ * Never throws and never retries. The promotion is already committed, so any P2-01
+ * refusal or failure is reported as `not_created` with a sanitized error code (the
+ * source's evidence simply does not exist yet); resubmitting the same promotion
+ * replays it and re-attempts this idempotent handoff. The response carries ids and
+ * counts only - never an evidence statement.
+ */
+async function ensureEvidenceAfterPromotedDecision(
+  { organizationId, intakeSourceCandidateId, promotionDecision, sourceVersion, actorContext, now },
+  deps,
+  env,
+) {
+  const sourceVersionId = promotionDecision.source_version_id;
+  if (
+    !canonicalUuid(sourceVersionId)
+    || !isPlainObject(sourceVersion)
+    || sourceVersion.source_version_id !== sourceVersionId
+    || sourceVersion.source_id !== promotionDecision.source_id
+    || sourceVersion.organization_id !== organizationId
+    || sourceVersion.intake_source_candidate_id !== intakeSourceCandidateId
+    || promotionDecision.intake_source_candidate_id !== intakeSourceCandidateId
+  ) {
+    return evidenceExtractionHandoffResult("not_created", { errorCode: "system_error" });
+  }
+  if (sourceVersion.is_current !== true) {
+    return evidenceExtractionHandoffResult("not_created", {
+      sourceVersionId,
+      errorCode: "conflict_current_state_changed",
+    });
+  }
+
+  let result;
+  try {
+    const metadataOnlyAudit = deps.evidenceExtractionMetadataOnlyAudit
+      || createProductionMetadataOnlyAuditForSourceVersion({
+        organizationId,
+        sourceVersionId,
+        actorContext,
+        now,
+      });
+    const extract = deps.extractEvidenceFromSourceVersion || extractEvidenceFromSourceVersion;
+    result = await extract(
+      { organizationId, sourceVersionId, actorContext, now },
+      {
+        env,
+        ...(deps.evidenceLineageRepository ? { evidenceLineageRepository: deps.evidenceLineageRepository } : {}),
+        metadataOnlyAudit,
+      },
+    );
+  } catch {
+    return evidenceExtractionHandoffResult("not_created", { sourceVersionId, errorCode: "system_error" });
+  }
+
+  if (!result?.ok) {
+    const code = result?.error?.code;
+    return evidenceExtractionHandoffResult("not_created", {
+      sourceVersionId,
+      errorCode: typeof code === "string" && MACHINE_TOKEN_RE.test(code) ? code : "system_error",
+    });
+  }
+
+  const extracted = isPlainObject(result.data) ? result.data : null;
+  const evidenceItems = Array.isArray(extracted?.evidenceItems) ? extracted.evidenceItems : null;
+  const reviewQueueItems = Array.isArray(extracted?.reviewQueueItems) ? extracted.reviewQueueItems : null;
+  const evidenceItemIds = new Set();
+  const lineageValid = Boolean(
+    extracted
+    && evidenceItems
+    && reviewQueueItems
+    && typeof extracted.replayed === "boolean"
+    && isPlainObject(extracted.sourceVersion)
+    && extracted.sourceVersion.source_version_id === sourceVersionId
+    && extracted.sourceVersion.organization_id === organizationId
+    && evidenceItems.length === reviewQueueItems.length
+    && evidenceItems.every((item) => {
+      if (
+        !isPlainObject(item)
+        || !canonicalUuid(item.evidence_item_id)
+        || item.organization_id !== organizationId
+        || item.source_version_id !== sourceVersionId
+        || evidenceItemIds.has(item.evidence_item_id)
+      ) {
+        return false;
+      }
+      evidenceItemIds.add(item.evidence_item_id);
+      return true;
+    })
+    && reviewQueueItems.every((item) => (
+      isPlainObject(item)
+      && canonicalUuid(item.review_queue_item_id)
+      && item.organization_id === organizationId
+      && item.queue_type === EVIDENCE_REVIEW_QUEUE_TYPE
+      && item.target_object_type === EVIDENCE_REVIEW_TARGET_OBJECT_TYPE
+      && evidenceItemIds.has(item.target_object_id)
+    )),
+  );
+  if (!lineageValid) {
+    return evidenceExtractionHandoffResult("not_created", { sourceVersionId, errorCode: "system_error" });
+  }
+
+  return evidenceExtractionHandoffResult(extracted.replayed ? "replayed" : "created", {
+    sourceVersionId,
+    evidenceItemCount: evidenceItems.length,
+    reviewQueueItemCount: reviewQueueItems.length,
+  });
 }
 
 export const __reviewCockpitServiceContract = Object.freeze({

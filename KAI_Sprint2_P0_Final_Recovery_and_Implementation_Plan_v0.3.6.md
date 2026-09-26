@@ -34609,3 +34609,141 @@ for every Node/npm command):**
 deployment, production or shared database, GCS, schema/migration,
 feature-flag, tenant, credential, or `00_KAI_CURRENT_STATE.md` change. The
 only databases used were runner-owned ephemeral loopback clusters.
+
+### P1-08 source promotion -> P2-01 evidence extraction handoff (2026-09-26)
+
+**Owner authorization:** close the continuity gap between a committed human
+P1-08 source promotion and P2-01 evidence creation, so ordinary promotion no
+longer needs a separate hidden GK extraction action. Starting HEAD
+`109672a4f18199f7af66b1e05a639bb10cd32772`, branch `main`, working tree
+clean. `kai-intake-persistence-diag.txt` was not read or modified.
+
+**Contracts (TOOL_VERIFIED at `109672a`):**
+- P1-08 outcomes are `needs_more_information`, `rejected`, `promoted`
+  (legal follow-up: `needs_more_information` -> `rejected`/`promoted`).
+  Only `promoted` creates or replays `kai.sources` and one
+  `kai.source_versions` row (`is_current = true`, unique per organization +
+  candidate), in the same transaction as the decision, candidate, queue, and
+  audit writes. The result carries `promotionDecision.source_version_id`,
+  `source`, and `sourceVersion`; an identical replay is a zero-write read
+  back with `replayed: true`.
+- P2-01 `extractEvidenceFromSourceVersion` re-reads and requires the current
+  source_version, the candidate and decision at `promoted` and bound to that
+  exact source/version, one organization, matching lineage checksums, and the
+  permission predicate. It writes one `column` locator, one
+  `dictionary_field_presence_fact` (`organization_committed_metadata`,
+  sensitivity copied from the field, `unassessed`, `needs_gk_review`,
+  internal-only, public/funder/LLM use false), and one open `evidence_review`
+  queue item per committed dictionary field, idempotently (zero writes and no
+  audit on replay).
+- No extraction decision ledger, approval state, blocking review queue, or
+  manual-only policy exists. The 2026-08-15 P2-01 route entry records only
+  that that package added no promotion hook.
+- P1-08 and P2-01 both require a mapped human and call
+  `validateActorCanPerformOperation` with the same
+  `gk_admin`/`gk_operator`/`gk_reviewer` set and active same-organization
+  membership (neither operation is in `P0_MUTATING_OPERATIONS`, neither uses
+  `globalRolesOnly`). No reconciliation was needed.
+
+**Root cause:** `extractEvidenceFromSourceVersion` had exactly one caller,
+the GK extraction route. Nothing called it after a committed promotion.
+
+**Repair:**
+- `Backend/kai/services/kaiReviewCockpitService.js`:
+  `submitSourceCandidateDecision` calls the unmodified P2-01 service once when
+  the committed decision is `promoted` (fresh or replayed). It passes the
+  source_version the decision row is bound to, after checking that it belongs to
+  this candidate and organization and is current, along with the same human
+  actor, the same `now`, and the production
+  `createProductionMetadataOnlyAuditForSourceVersion` adapter the route uses.
+  The response gains `evidence_extraction_handoff`
+  (`created | replayed | not_applicable | not_created`, `source_version_id`,
+  evidence/queue counts, sanitized `error_code`). It never contains
+  statements. P2-01 refusals, throws, and malformed results produce
+  `not_created`. The promotion stays committed, and an identical resubmission
+  replays it and retries the handoff.
+- `frontend/kaiReviewCockpit.jsx`: the decision result names the handoff
+  outcome. On `not_created`, a GK-only "Retry evidence extraction" button
+  re-sends the identical promotion (a P1-08 replay). The existing Knowledge
+  Studio "Extract evidence" control is unchanged. The browser never calls the
+  extraction route. `public/js/bundles/entry.js` regenerated.
+- `Backend/kai/services/kaiEvidenceLineageService.js`: docstring only.
+- No change to any repository, SQL, validator, route, migration, worker,
+  flag, client DTO, or authorization rule.
+
+**Tests (TOOL_VERIFIED; `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel`):**
+- New `kai-sprint2-p2-01-evidence-extraction-handoff-boundary.spec.js` 10/10.
+  It covers: a single call with the exact version, actor, and `now`; the
+  production audit adapter; no call for `needs_more_information` or
+  `rejected`; no call after cockpit, authorization, validator, conflict,
+  write, or malformed P1-08 results; no call for a missing, mismatched,
+  other-candidate, or non-current version; sanitized `not_created` for every
+  P2-01 failure; replay and recovery; real P1-08/P2-01 role parity (client,
+  system, AI, assistant, cross-organization, and inactive actors are refused
+  before any repository call); no review, claim, or HTTP seam; and the UI
+  contract.
+- New real-PostgreSQL runner `verify:kai-sprint2-p2-01-evidence-extraction-handoff`
+  7/7. It uses the browser runner's schema chain, the default production
+  repositories, and the audit composition. The spec never names P2-01. On a
+  fresh lineage (fixture P1-03..P1-05, then real P1-06, cockpit sensitivity
+  decision, and P1-07 handoff), one promotion produced exactly
+  decision +1, source +1, source_version +1, locators +2, evidence +2,
+  evidence_review items +2, audit_events +2, and upload_lifecycle_audit +2,
+  with claims, evidence-review decisions, and claim-review decisions at +0.
+  The evidence has the exact P2-01 state and the promoting reviewer as
+  `created_by`. The source_version is current and bound to the candidate and
+  decision. The identical replay changed no table. The client pipeline reads
+  `evidence_review` / `waiting_for_get_kinder` / `evidence_awaiting_review`
+  with no Impact Fact and no hidden ids. Other cases: `needs_more_information`
+  then `rejected` created nothing downstream; with evidence inserts failing
+  (a throwaway trigger), only the promotion rows were committed, the handoff
+  returned `validation_blocker` without the raw message, and the replay then
+  created the evidence; a non-current version gave
+  `conflict_current_state_changed` with zero writes; cross-organization,
+  client, system, and AI requests wrote nothing.
+- New browser acceptance
+  `kai-p2-01-evidence-extraction-handoff-browser-acceptance.integration.spec.js`
+  (allowlisted in the existing runner) 5/5. The GK reviewer promotes a fresh
+  candidate in the cockpit. The only POST is the decision (200), no
+  extraction request is sent, and the cockpit shows
+  "Evidence extraction: 2 evidence item(s) created, awaiting GK evidence
+  review." Database counts match. The GK Knowledge Studio Evidence tab lists
+  both items as `needs_gk_review` / "No claim proposed yet". The client
+  Project shows Evidence creation Complete, Evidence review Waiting for Get
+  Kinder, and "Evidence has been created from 1 file and is waiting for Get
+  Kinder evidence review.", with no Impact Fact, statement, GK request, or
+  GK control. With the failure trigger, the cockpit shows the not-completed
+  message and the retry control, and the promotion rows stay committed with
+  no evidence. Retry sends only the decision POST, creates the evidence, and
+  removes the control.
+- Existing: P1-09 scan test narrowed to allow evidence only through the
+  P2-01 handoff. Runners P1-07 handoff 5/5, P1-07 11/11, P1-06 15/15, P2-01
+  17/17, B1A-2R 6/6, B1A-02 34/34, B1A-3B-R2 4/4, P2-12 24/24, review queue
+  3/3, legacy cutover 2/2, and P1-08 17/19 (same 2 failures run at
+  `109672a`). Browser acceptances: client Knowledge Studio 6/6, Files 3/3,
+  evidence pipeline 7/7.
+- `npm test`: 5252 pass, 12 fail, 93 skipped of 5357 (at `109672a`:
+  5239/12/91 of 5342). The 12 failing names are identical.
+- `npm run build` succeeded. `git diff --check` PASS. Full diff inspected.
+
+**Limitations (NOT_CONFIRMED):**
+- A promotion committed before this change gets evidence only when a GK
+  replays it or uses "Extract evidence". There is no backfill.
+- If a dictionary has zero fields, P2-01 reports its zero-write result as
+  `replayed` with count 0, and the handoff reports that as-is.
+- If extraction fails and the page is reloaded, the retry button is gone.
+  Recovery is then a manual identical re-promotion or "Extract evidence".
+- The cockpit queue still excludes `evidence_review`. GK sees new evidence in
+  the Knowledge Studio Evidence list, and P2-12 review is reached through a
+  claim's traceability.
+- Out of scope and unchanged: client/GK data-dictionary confirmation and a
+  `data_dictionary_review` producer; parser failed-run retry/recovery; files
+  without `engagement_id` outside Project status; capped client Impact
+  Facts; downstream evidence review, claim proposal, claim review, and
+  coverage/conflict/follow-up/eligibility gates. Production behavior is not
+  verified. This package does not close the intake -> Impact Fact lifecycle.
+
+**Status:** P1_08_TO_P2_01_EVIDENCE_HANDOFF_REPAIRED_LOCALLY. No push,
+deployment, production or shared database, GCS, schema/migration,
+feature-flag, tenant, credential, or `00_KAI_CURRENT_STATE.md` change. The
+only databases used were runner-owned ephemeral loopback clusters.

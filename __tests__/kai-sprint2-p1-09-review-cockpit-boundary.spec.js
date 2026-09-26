@@ -1090,10 +1090,26 @@ test("P1-09 pagination determinism: a full page emits a next_cursor bound to the
   assert.equal(lastPage.data.pagination.next_cursor, null);
 });
 
-test("P1-09 introduces no evidence, locator, claim, graph, assistant-tool, generation, export, or client-facing surface", () => {
+test("P1-09 introduces no locator, claim, graph, assistant-tool, generation, export, or client-facing surface; evidence only through the P2-01 post-promotion handoff", () => {
   for (const source of [serviceSource, readModelSource, uiSource]) {
-    assert.doesNotMatch(source, /\b(?:evidence|locator|claim|graph_relationship|assistant_tool|generateContent|funder_export|public_export)\b/i);
+    assert.doesNotMatch(source, /\b(?:locator|claim|graph_relationship|assistant_tool|generateContent|funder_export|public_export)\b/i);
   }
+  // The read models stay evidence-free. The service reaches evidence only through
+  // the existing P2-01 service, resolved and invoked once, inside the promoted-
+  // decision handoff; the UI only renders that handoff's result.
+  assert.doesNotMatch(readModelSource, /\bevidence\b/i);
+  const serviceImports = serviceSource.match(/^import[\s\S]*?;$/gm) || [];
+  const evidenceImports = serviceImports.filter((statement) => /evidence/i.test(statement));
+  assert.deepEqual(evidenceImports, [
+    'import { extractEvidenceFromSourceVersion } from "./kaiEvidenceLineageService.js";',
+    'import { __evidenceLineageRepositoryContract } from "../dictionary/postgresEvidenceLineageRepository.js";',
+  ]);
+  assert.equal((serviceSource.match(/deps\.extractEvidenceFromSourceVersion \|\| extractEvidenceFromSourceVersion/g) || []).length, 1);
+  assert.equal((serviceSource.match(/await extract\(/g) || []).length, 1);
+  const handoffBody = serviceSource.match(/async function ensureEvidenceAfterPromotedDecision\([\s\S]*?\n}\n/)?.[0];
+  assert.ok(handoffBody);
+  assert.match(handoffBody, /const extract = deps\.extractEvidenceFromSourceVersion \|\| extractEvidenceFromSourceVersion;/);
+  assert.doesNotMatch(uiSource, /evidence-extraction|evidence-review|evidence-library/);
   assert.doesNotMatch(uiSource, /client[_-]review|clientPortal/i);
 });
 
