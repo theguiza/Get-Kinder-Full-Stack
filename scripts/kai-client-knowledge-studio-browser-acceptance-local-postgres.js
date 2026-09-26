@@ -8,7 +8,10 @@ import { Client } from "pg";
  * Local browser acceptance for the client Knowledge Studio (Funder
  * Requirements, Generated Drafts, Grant Response Packet / Board Reporting
  * previews, client follow-up completion) for client_admin, client_reviewer,
- * and client_contributor.
+ * and client_contributor. Passing
+ * __tests__/kai-web-intake-files-rehydration-browser-acceptance.integration.spec.js
+ * as the first argument runs the Knowledge Studio Files persistence/
+ * rehydration acceptance against the same fixture instead.
  *
  * - An ephemeral, loopback-only PostgreSQL cluster owned by this runner,
  *   with the union of the schemas the client product reads, applied in the
@@ -45,6 +48,16 @@ const targetUrl = `postgresql://${user}@127.0.0.1:${port}/${dbName}`;
 const sentinelUrl = "postgres://127.0.0.1:9/kai_sentinel";
 const chromePath = process.env.KAI_BROWSER_ACCEPTANCE_CHROME
   || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+// The acceptance spec to run against this fixture (default: the client
+// Knowledge Studio acceptance). Only the listed runner-owned specs may run.
+const ACCEPTANCE_SPECS = Object.freeze([
+  "__tests__/kai-client-knowledge-studio-browser-acceptance.integration.spec.js",
+  "__tests__/kai-web-intake-files-rehydration-browser-acceptance.integration.spec.js",
+]);
+const acceptanceSpec = process.argv[2] || ACCEPTANCE_SPECS[0];
+if (!ACCEPTANCE_SPECS.includes(acceptanceSpec)) {
+  throw new Error(`browser acceptance runner refused an unlisted spec: ${acceptanceSpec}`);
+}
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -164,6 +177,19 @@ try {
   ]) {
     psqlFile(`migrations/${migration}.sql`);
   }
+  // No repository migration creates kai.intake_batches (a pre-migration base
+  // table, like kai.audit_events), and the synthetic kai.intake_files above
+  // lacks some columns the file read models select. Knowledge Studio's Files
+  // tab reads both on entry, so both get synthetic mirrors of exactly the
+  // columns the batch/file read models select.
+  psqlExec(`CREATE TABLE kai.intake_batches (
+    intake_batch_id uuid PRIMARY KEY, organization_id uuid NOT NULL, engagement_id uuid, batch_code text,
+    processing_status text, review_status text, idempotency_key text, source_system_name text, source_system_ref text,
+    created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now());`);
+  psqlExec(`ALTER TABLE kai.intake_files
+    ADD COLUMN IF NOT EXISTS engagement_id uuid, ADD COLUMN IF NOT EXISTS mime_type text, ADD COLUMN IF NOT EXISTS file_size_bytes bigint,
+    ADD COLUMN IF NOT EXISTS malware_scan_status text, ADD COLUMN IF NOT EXISTS review_status text,
+    ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();`);
   for (const seed of [
     "kai-sprint2-gate-a-smoke-seed",
     "kai-sprint2-p1-04-data-dictionary-quality-smoke-seed",
@@ -176,7 +202,7 @@ try {
     psqlFile(`scripts/${seed}.sql`);
   }
 
-  const testResult = spawnSync("node", ["--test", "__tests__/kai-client-knowledge-studio-browser-acceptance.integration.spec.js"], {
+  const testResult = spawnSync("node", ["--test", acceptanceSpec], {
     cwd: repoRoot,
     encoding: "utf8",
     stdio: "inherit",
@@ -202,8 +228,8 @@ try {
       KAI_CLIENT_BROWSER_ACCEPTANCE_WORKDIR: workDir,
     },
   });
-  if (testResult.status !== 0) throw new Error("client Knowledge Studio browser acceptance failed");
-  console.log("Client Knowledge Studio browser acceptance passed.");
+  if (testResult.status !== 0) throw new Error(`browser acceptance failed: ${acceptanceSpec}`);
+  console.log(`Browser acceptance passed: ${acceptanceSpec}`);
 } finally {
   if (started) spawnSync(pgCtl, ["-D", dataDir, "stop", "-m", "fast"], { encoding: "utf8", stdio: "ignore" });
   rmSync(workDir, { recursive: true, force: true });

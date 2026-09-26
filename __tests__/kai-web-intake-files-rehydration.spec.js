@@ -336,3 +336,61 @@ test("Case 9: standalone KaiWebIntake keeps its existing manual contract", () =>
   // The manual file Load control remains available as an explicit refresh.
   assert.match(webIntakeSource, /onClick=\{loadBatchFiles\} disabled=\{busy \|\| !intakeBatchId\}>Load<\/button>/);
 });
+
+test("Project switch A: an authoritative engagementId change clears a profile discovered from the previous Project's file, and its dependent detail state resets", () => {
+  const start = libSource.indexOf("const intakeDerivedSensitivityProfileIdRef = useRef(\"\");");
+  assert.ok(start > -1, "intake-derived profile ref not found");
+  const end = libSource.indexOf("}, [engagementId]);", start);
+  assert.ok(end > start && end - start < 600, "Project-change reset effect must be keyed on engagementId");
+  const reset = libSource.slice(start, end);
+  // Only the still-selected file-derived id is cleared; the ref is consumed
+  // so the reset applies to the Project it was discovered in.
+  assert.match(reset, /intakeDerivedSensitivityProfileIdRef\.current = "";/);
+  assert.match(
+    reset,
+    /setSelectedSensitivityProfileId\(\(current\) => \(current === intakeDerivedProfileId \? "" : current\)\);/,
+  );
+  // Organization-wide review data is not touched by a Project change.
+  assert.doesNotMatch(reset, /setSensitivityReviewQueueItems|setSensitivityCapability|setReviewQueueItems/);
+
+  // The intake handler records which id it set.
+  const handlerStart = libSource.indexOf("const handleSensitivityProfileDiscoveredFromIntake");
+  const handler = libSource.slice(handlerStart, handlerStart + 400);
+  assert.match(
+    handler,
+    /intakeDerivedSensitivityProfileIdRef\.current = intakeSensitivityProfileId;\s*\n\s*setSelectedSensitivityProfileId\(intakeSensitivityProfileId\);/,
+  );
+
+  // Clearing the id drives the existing selected-profile-dependent resets:
+  // detail/error/action result on id change, and the seeded form on null detail.
+  assert.match(
+    libSource,
+    /useEffect\(\(\) => \{\s*\n\s*setSensitivityDetail\(null\);\s*\n\s*setSensitivityError\(""\);\s*\n\s*setSensitivityActionResult\(""\);\s*\n\s*if \(sensitivityCapability === true && intakeSensitivityProfileId\) \{\s*\n\s*loadSensitivityDetail\(\);\s*\n\s*\}\s*\n\s*\}, \[sensitivityCapability, intakeSensitivityProfileId, loadSensitivityDetail\]\);/,
+  );
+  assert.match(
+    libSource,
+    /const current = sensitivityDetail\?\.currentDecision;\s*\n\s*if \(!current\) \{\s*\n\s*setSensitivityFormState\(defaultSensitivityReviewFormState\(\)\);/,
+  );
+  // With no selected id the review card is not rendered, so no prior
+  // Project's profile detail can be shown.
+  assert.match(libSource, /\{knowledgeStudioTab === "processing" && intakeSensitivityProfileId && sensitivityCapability === true \? \(/);
+
+  // Behavior of the reset's update rule: a file-derived id from Project A is
+  // cleared; a different (queue/traceability) selection is kept.
+  const PROFILE_A = "00000000-0000-4000-8000-0000000000c1";
+  const QUEUE_PROFILE = "00000000-0000-4000-8000-0000000000c2";
+  const update = (intakeDerivedProfileId) => (current) => (current === intakeDerivedProfileId ? "" : current);
+  assert.equal(update(PROFILE_A)(PROFILE_A), "");
+  assert.equal(update(PROFILE_A)(QUEUE_PROFILE), QUEUE_PROFILE);
+});
+
+test("Project switch B: a same-Project null report from KaiWebIntake still never clears the selected profile", () => {
+  const handlerStart = libSource.indexOf("const handleSensitivityProfileDiscoveredFromIntake");
+  const handler = libSource.slice(handlerStart, libSource.indexOf("}, []);", handlerStart));
+  assert.match(handler, /if \(isRouteUuid\(intakeSensitivityProfileId\)\) \{/);
+  assert.doesNotMatch(handler, /setSelectedSensitivityProfileId\(""\)/);
+  assert.doesNotMatch(handler, /else/);
+  // KaiWebIntake's same-Project file interactions still report null through
+  // the seam (e.g. selecting another file), which the handler ignores.
+  assert.match(webIntakeSource, /setIntakeFileId\(item\.intake_file_id\);\s*\n\s*setFileStatus\(null\);\s*\n\s*setMessage\(""\);\s*\n\s*reportSensitivityProfileDiscovered\(null\);/);
+});

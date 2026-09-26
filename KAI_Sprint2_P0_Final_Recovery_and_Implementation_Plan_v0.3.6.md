@@ -34365,3 +34365,93 @@ for every Node/npm command):**
 **Status:** IMPACT_LIBRARY_FILES_REHYDRATION_REPAIRED_LOCALLY. No push,
 deployment, database/GCS access, schema/migration, feature-flag, tenant,
 credential, or `00_KAI_CURRENT_STATE.md` change.
+
+#### Amendment: Project-change sensitivity-profile reset and local browser acceptance (2026-09-26)
+
+**Owner authorization:** close one missed acceptance condition of the Files
+repair above (`3c4d3d0`), then run real local browser acceptance of the
+repair. The root cause was not reopened.
+
+**Missed condition (TOOL_VERIFIED at `3c4d3d0`):** on a Project change,
+`KaiWebIntake` reports `null` through `onSensitivityProfileDiscovered`, but
+`ImpactEvidenceLibrary.handleSensitivityProfileDiscoveredFromIntake`
+deliberately ignores `null`. That protects an in-progress same-Project review
+and is covered by an existing test. `selectedSensitivityProfileId` was
+otherwise reset only on organization change, so a profile discovered from a
+Project A file survived into Project B.
+
+**Fix (`frontend/ImpactEvidenceLibrary.jsx`):** the intake handler records the
+id it set in `intakeDerivedSensitivityProfileIdRef`. A new effect keyed on
+`engagementId`, placed next to the organization-change reset, consumes that
+ref and clears `selectedSensitivityProfileId` only while it still equals the
+file-derived id. Queue- or traceability-picked selections, the review queue
+list, and the capability are organization-wide and are kept. Clearing the id
+drives the existing `[sensitivityCapability, intakeSensitivityProfileId]`
+effect, which resets `sensitivityDetail`, `sensitivityError`, and
+`sensitivityActionResult`; the form then re-seeds to its default. With no id,
+the review card does not render. The null-ignoring handler is unchanged.
+
+**Browser acceptance (TOOL_VERIFIED, local only):** new
+`__tests__/kai-web-intake-files-rehydration-browser-acceptance.integration.spec.js`,
+run by the existing
+`scripts/kai-client-knowledge-studio-browser-acceptance-local-postgres.js`,
+which now takes an allowlisted spec argument. It uses the same ephemeral
+loopback cluster, real KAI routers and built bundle, and headless Chrome over
+DevTools; no dependency was added. The runner also adds synthetic mirrors of
+`kai.intake_batches` (no repository migration creates it) and of the
+`kai.intake_files` columns the file read models select. The fixture has three
+synthetic Projects: Alpha has one batch with smoke-seed file 1 (walked through
+the real Gate A lifecycle edges to `confirmed`, so its seeded P1-05 profile
+`80000000-…0001` resolves) plus one more file; Beta has one batch with one
+file; Gamma has none. Results were 3/3 for `gk_operator` (internal Knowledge
+Studio) and `client_admin` (client Knowledge Studio):
+- case 1: on Files entry, `GET …/batches?organization_id=` returned 200 and
+  `GET …/batches/<Alpha>/files` returned 200 with no button click; both files
+  rendered; the sole batch was selected.
+- case 2: Files → Evidence → Files repeated both reads (200) and re-rendered
+  the files.
+- case 3: after a full reload and re-selecting Alpha (the Project is not
+  persisted across page instances), the batch list and files were read
+  again.
+- case 4: after Alpha → Beta, the Beta list and Beta files reads returned
+  200; no Alpha batch-files request was made; no Alpha batch, file, or id was
+  shown. For `gk_operator`, the Alpha file-derived profile (file detail 200,
+  profile detail read, review card shown) no longer showed its review card
+  under Beta.
+- Beta → Gamma: the batch list returned 200 and "No intake batches exist for
+  this project yet." rendered, with no batch-files request.
+- No page exceptions occurred, and browsing wrote no batch, file, or
+  sensitivity decision.
+- Negative control: with the `ImpactEvidenceLibrary` change reverted and the
+  bundle rebuilt, the `gk_operator` run failed with "Alpha's file-derived
+  sensitivity profile survived into Beta".
+- Case 5 (multiple batches) was NOT_RUN. The fixture has no Project with
+  several batches, and the owner directed that none be manufactured.
+
+**Existing client browser acceptance regression (repaired):** the existing
+client Knowledge Studio acceptance failed 5/6, in `client_reviewer`: `GET
+/admin/batches -> 500`. That test selects a Project while on the default
+Files tab. After `3c4d3d0`, the Files tab reads batches on entry, as
+required, but the fixture had no `kai.intake_batches`. The runner-level
+synthetic mirror above resolved it: 6/6.
+
+**Verification:** `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel` was set
+for every Node/npm command.
+- `kai-web-intake-files-rehydration.spec.js` 13/13, including new Project
+  switch A and B cases. The existing R2 null-preservation test was unchanged
+  and passes.
+- Coupled Impact Library, KaiWebIntake, and Knowledge Studio specs plus both
+  browser specs, run outside their runner: 259 pass, 0 fail, 2 skipped (the
+  runner-only browser specs).
+- Browser runners: Files 3/3, client 6/6. `npm run build` succeeded.
+  `git diff --check` PASS. Full diff inspected.
+
+**Limitations (NOT_CONFIRMED):** the multiple-batch chooser in a real
+browser; production behavior. `loadSensitivityDetail` has no stale-response
+guard (pre-existing). A late response could repopulate `sensitivityDetail`,
+but the card does not render without a selected id.
+
+**Status:** IMPACT_LIBRARY_FILES_REHYDRATION_ACCEPTED_LOCALLY. No push,
+deployment, shared or production database, GCS, schema/migration,
+feature-flag, tenant, credential, or `00_KAI_CURRENT_STATE.md` change. The
+only databases used were runner-owned ephemeral loopback clusters.

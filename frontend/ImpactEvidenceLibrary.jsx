@@ -732,6 +732,21 @@ export default function ImpactEvidenceLibrary({
     setReviewQueueRequestState("idle");
   }, [organizationId]);
 
+  // Files persistence/rehydration: the intake handler below ignores a null
+  // report, so KaiWebIntake's own Project-change reset cannot clear a profile
+  // it discovered from the previous Project's file. An authoritative Project
+  // change therefore clears the selection here - only when it is still that
+  // file-derived id (a queue or traceability selection is organization-wide
+  // and is kept). Clearing it lets the existing detail effect reset the
+  // profile's detail, error, action result, and seeded form.
+  const intakeDerivedSensitivityProfileIdRef = useRef("");
+  useEffect(() => {
+    const intakeDerivedProfileId = intakeDerivedSensitivityProfileIdRef.current;
+    intakeDerivedSensitivityProfileIdRef.current = "";
+    if (!intakeDerivedProfileId) return;
+    setSelectedSensitivityProfileId((current) => (current === intakeDerivedProfileId ? "" : current));
+  }, [engagementId]);
+
   // KAI B1A-3B authorization gate: fetch the server-grounded capability once
   // per organization selection, before anything else Phase-5-related can
   // happen. This is bootstrapped alongside organizations/engagements, not
@@ -802,6 +817,7 @@ export default function ImpactEvidenceLibrary({
   // path into this same piece of state.
   const handleSensitivityProfileDiscoveredFromIntake = useCallback((intakeSensitivityProfileId) => {
     if (isRouteUuid(intakeSensitivityProfileId)) {
+      intakeDerivedSensitivityProfileIdRef.current = intakeSensitivityProfileId;
       setSelectedSensitivityProfileId(intakeSensitivityProfileId);
     }
   }, []);
