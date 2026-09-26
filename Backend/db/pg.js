@@ -2,13 +2,6 @@
 import { Pool } from "pg";
 import "dotenv/config";
 
-const mask = (value = "", { keepStart = 4, keepEnd = 2 } = {}) => {
-  if (!value) return "";
-  const str = String(value);
-  if (str.length <= keepStart + keepEnd) return "*".repeat(Math.max(3, str.length));
-  return `${str.slice(0, keepStart)}…${str.slice(-keepEnd)}`;
-};
-
 const isProduction = process.env.NODE_ENV === "production";
 
 const isLikelyInternalHost = (hostname = "") => {
@@ -68,9 +61,9 @@ if (connectionString) {
       );
     }
   } catch (err) {
+    // The raw connection string can embed credentials, so only its source is logged.
     console.log("[pg] Using remote connection string", {
       source: connectionSource,
-      connection: mask(connectionString),
     });
   }
 } else {
@@ -82,9 +75,12 @@ if (connectionString) {
     port: process.env.DB_PORT ? parseInt(process.env.DB_PORT, 10) : 5432,
   };
   pool = new Pool(localConfig);
+  // Credential material is never logged, not even masked.
   console.log("[pg] Using local connection", {
-    ...localConfig,
-    password: localConfig.password ? mask(localConfig.password) : null,
+    user: localConfig.user,
+    host: localConfig.host,
+    database: localConfig.database,
+    port: localConfig.port,
   });
 }
 
