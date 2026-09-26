@@ -34455,3 +34455,157 @@ but the card does not render without a selected id.
 deployment, shared or production database, GCS, schema/migration,
 feature-flag, tenant, credential, or `00_KAI_CURRENT_STATE.md` change. The
 only databases used were runner-owned ephemeral loopback clusters.
+
+### Client Knowledge Studio intake -> review -> evidence continuity (2026-09-26)
+
+**Owner authorization:** repair the client Knowledge Studio dead end between
+persisted Files and reviewed Evidence ("0 shown / No reviewed evidence yet"
+with no visible workflow), without widening client authority, exposing GK
+review data, auto-approving any review, or reopening the Files repair.
+Starting HEAD `371c176f1b6120af16344a56438901aa48734f46`, branch `main`,
+working tree clean. The owner diagnostic `kai-intake-persistence-diag.txt`
+(committed at `371c176`) was not read or modified. The four named
+architecture documents (Product Workflow and Ingestion Architecture,
+Roadmap Extract, Backend Storage and Validator Contract, Intake AI Threat
+Model) are not present in this repository; the owner-supplied flow,
+invariants, and review ownership were applied as stated.
+
+**Pipeline map (TOOL_VERIFIED at `371c176`, one confirmed file):**
+- A intake file: `kai.intake_files`, written by reserve/upload/confirm
+  routes; read by the batch-files and file-detail routes (`read_intake`,
+  every client role); Files tab. EXISTS.
+- B parser run / C file profile / D data dictionary / E sensitivity
+  profile: written only by the P1 worker (cron, `KAI_WORKER_ENABLED`), which
+  stops at P1-05 by contract. Progress/failure is persisted only on
+  `intake_parser_runs` (`parser_status`, `error_code`); the other objects'
+  existence is the progress signal. The client saw only the per-file
+  `p1_lifecycle` booleans. EXISTS. No client data-dictionary confirmation
+  route or UI exists, and nothing creates `data_dictionary_review` items
+  (dictionary status is CHECK-pinned to `draft`).
+- F review queue: `sensitivity_review` items are created only by the GK
+  review-work route; `source_candidate_review`, `evidence_review`,
+  `claim_review`, `client_followup` by their producing services. No
+  production creator for `intake_file_review` or `data_dictionary_review`.
+  GK-only reads. EXISTS.
+- E decision -> G source candidate: GK human sensitivity decision; a
+  `reviewed` decision creates the P1-07 candidate (2026-09-25 handoff).
+- H promotion -> I source / J source_version: GK human P1-08 decision.
+- K evidence items: GK-invoked extraction route only (no automatic
+  caller). L evidence review: GK human P2-12 decision.
+- M client Impact Fact: `impact-facts` = governed P2-08 internal-audience
+  eligible claims, organization-wide, never engagement-scoped.
+- Engagement scope: only `intake_files`/`intake_batches` carry
+  `engagement_id`; every downstream object is reachable only through the
+  file's lineage.
+
+**First hidden transition:** P1-05 sensitivity profile persisted -> GK
+sensitivity review (human gate). No automatic transition before any human
+gate is broken. The client product had no read of any lineage state after
+the `p1_lifecycle` booleans, and the Evidence tab showed organization-wide
+reviewed facts with an unconditional zero message. The defect was
+visibility, not a broken automatic transition, so no pipeline transition
+was changed and no human gate is crossed.
+
+**Repair:**
+- `Backend/kai/db/kaiClientEvidencePipelineReadModel.js` (new): engagement
+  check, and one organization + engagement scoped lineage read per file
+  (current-checksum parser run, profile, dictionary, sensitivity profile,
+  current non-superseded sensitivity decision, candidate counts by status,
+  current source versions, evidence counts by review status, claims, open
+  client follow-ups). Statuses, booleans, counts, the parser error code, and
+  claim ids only.
+- `Backend/kai/services/kaiClientEvidencePipelineService.js` (new): feature
+  flag, strict input, mapped human, `read_intake` role set (unchanged),
+  tenant check, engagement-in-organization check (`not_found`), then a pure
+  stage derivation (upload, security check, processing, data dictionary,
+  sensitivity classification, sensitivity review, source review, evidence
+  creation, evidence review, Impact Fact review) with status, responsible
+  party (`kai`/`client`/`get_kinder`/`none`), next action code, a fixed safe
+  failure category, and a per-Project reason summary. Reviewed Impact Facts
+  come only from `listClientImpactFacts` intersected with the Project's
+  lineage claims; that read runs only when a claim exists and its failure
+  fails the read closed. No decision outcome, sensitivity value, statement
+  of a non-eligible claim, reviewer, queue, source/version/evidence id, or
+  parser message is returned.
+- `Backend/kai/routes/sprint2IntakeApi.js`: `GET
+  /admin/organizations/:organizationId/engagements/:engagementId/client-evidence-pipeline`
+  (path ids only, no SQL).
+- Frontend: `frontend/knowledgeStudio/clientEvidencePipelineLogic.js`
+  (path, strict DTO projection, explicit request states, Evidence/Reviews
+  view derivation, copy), `useClientEvidencePipeline.js` (org + Project
+  keyed request, sequence guard against late responses, refresh on
+  Files/Evidence/Reviews entry), `ClientEvidencePipelineStatus.jsx`
+  ("Processing & evidence status" on Files), and `ClientKnowledgeStudio.jsx`
+  (Files status card; Evidence uses the Project pipeline and explains each
+  upstream reason, keeps the organization-wide facts view only when no
+  Project is selected; Reviews shows client follow-up work for
+  `clientFollowupReview` actors and "No action is currently required from
+  you." plus the Get Kinder wait list for everyone else). Navigation is
+  unchanged. `public/js/bundles/entry.js` regenerated.
+
+**Tests (TOOL_VERIFIED; `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel`
+for every Node/npm command):**
+- New `__tests__/kai-client-evidence-pipeline.spec.js` 14/14: role set
+  equals `read_intake`; client roles admitted, foreign-org/unknown/system/AI
+  refused before any read; foreign or mismatched engagement is `not_found`
+  with no file read; 22 lineage fixtures map to exact stage, status,
+  responsible party, next action, and reason; only lineage-and-eligible
+  facts returned; facts read skipped without claims and failing closed;
+  exact client key set with hidden-value scan; empty and truncated; mounted
+  route; frontend request states (HTTP/malformed/other-Project/network are
+  errors), Evidence and Reviews views, next-action copy per capability;
+  source contracts (no request in the studio/status component, keyed hook,
+  late-response guard, no GK path builder).
+- New browser acceptance
+  `__tests__/kai-client-evidence-pipeline-browser-acceptance.integration.spec.js`
+  via the existing runner (allowlisted), 7/7: case 1 + case 4 (Alpha file
+  stage list, "Waiting for Get Kinder sensitivity review", Reviews "No action
+  is currently required from you."); case 2 (Evidence explains, no "0 shown",
+  no organization zero message; Gamma "Upload data in Files"); case 7 (a real
+  parser-repository failure renders "Processing failed: KAI could not read
+  this file's contents." without the stored message, and a failed pipeline
+  read renders as an error, not zero); case 6 (Alpha -> Beta clears status,
+  files, and evidence; a held Alpha response released after the switch
+  never repopulates Beta); governed progression (real sensitivity review
+  item + decision, then real extraction, each move the client stage); case 5
+  + case 3 (real claim/evidence/claim review, coverage acceptance, P2-11
+  completion: the eligible fact renders under Alpha Evidence and not under
+  Beta; client_reviewer sees "Your action is needed" and the existing
+  follow-up link; client_admin sees no follow-up action; no GK request or
+  control). Each actor runs in its own browser context, and the server
+  capabilities are asserted per actor.
+- Existing client browser acceptance 6/6 after allowlisting the new
+  client-safe route; Files browser acceptance 3/3.
+- Directly coupled specs (client authorization reconciliation, funder
+  requirements, generated content, Files rehydration, Knowledge Studio tabs,
+  project context, pass2 route runtime): 134/136; the 2 pass2 failures are
+  identical at `371c176`.
+- `npm test`: 5239 pass, 12 fail, 91 skipped of 5342 (at `371c176`:
+  5224/12/90 of 5326). The 12 failing names are identical.
+- `npm run build` succeeded (bundle byte-identical on rebuild).
+  `git diff --check` PASS. Full diff inspected.
+
+**Limitations (NOT_CONFIRMED):**
+- No client data-dictionary confirmation exists, so the dictionary stage
+  reports drafted/complete and never asks the client to confirm.
+- Evidence extraction after promotion has no automatic caller; the client
+  sees "Get Kinder has not yet created evidence". Wiring an automatic
+  extraction handoff was not in scope.
+- Files whose `engagement_id` is null never appear in any Project pipeline;
+  their facts remain visible only in the organization-wide view.
+- The governed facts read is capped at 100 organization-wide; beyond that,
+  a Project's fact count can be understated (`reviewedImpactFactsTruncated`).
+  The pipeline lists the 100 most recent files per Project.
+- A candidate rejected in favor of a later one, or a `needs_more_information`
+  promotion, is reported as waiting for Get Kinder source review; the
+  `not_currently_eligible` state does not name the evaluator blocker
+  (GK-internal by design).
+- The smoke seed leaves file 1 at `file_policy_status='pending'` although
+  its parser lineage exists; the browser fixture sets `passed`. File 1's
+  P1-08 promotion is the smoke seed's, not a real P1-08 call.
+- Production behavior and the deployed schema's acceptance of the reads.
+
+**Status:** CLIENT_EVIDENCE_PIPELINE_CONTINUITY_REPAIRED_LOCALLY. No push,
+deployment, production or shared database, GCS, schema/migration,
+feature-flag, tenant, credential, or `00_KAI_CURRENT_STATE.md` change. The
+only databases used were runner-owned ephemeral loopback clusters.

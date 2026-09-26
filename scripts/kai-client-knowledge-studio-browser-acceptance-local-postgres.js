@@ -11,7 +11,9 @@ import { Client } from "pg";
  * and client_contributor. Passing
  * __tests__/kai-web-intake-files-rehydration-browser-acceptance.integration.spec.js
  * as the first argument runs the Knowledge Studio Files persistence/
- * rehydration acceptance against the same fixture instead.
+ * rehydration acceptance against the same fixture instead;
+ * __tests__/kai-client-evidence-pipeline-browser-acceptance.integration.spec.js
+ * runs the client intake -> review -> evidence continuity acceptance.
  *
  * - An ephemeral, loopback-only PostgreSQL cluster owned by this runner,
  *   with the union of the schemas the client product reads, applied in the
@@ -53,6 +55,7 @@ const chromePath = process.env.KAI_BROWSER_ACCEPTANCE_CHROME
 const ACCEPTANCE_SPECS = Object.freeze([
   "__tests__/kai-client-knowledge-studio-browser-acceptance.integration.spec.js",
   "__tests__/kai-web-intake-files-rehydration-browser-acceptance.integration.spec.js",
+  "__tests__/kai-client-evidence-pipeline-browser-acceptance.integration.spec.js",
 ]);
 const acceptanceSpec = process.argv[2] || ACCEPTANCE_SPECS[0];
 if (!ACCEPTANCE_SPECS.includes(acceptanceSpec)) {

@@ -514,7 +514,8 @@ async function runBrowserAcceptance() {
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
   const browser = await launchChrome();
 
-  // Client-safe routes the client UI may call (Packages 1-4), by path shape.
+  // Client-safe routes the client UI may call (Packages 1-4 and the client
+  // evidence pipeline), by path shape.
   const orgPath = `/api/kai/sprint2/intake/admin/organizations/${ORG}`;
   const ALLOWED_CLIENT_ROUTES = [
     /^\/api\/kai\/sprint2\/intake\/admin\/organizations$/,
@@ -523,7 +524,7 @@ async function runBrowserAcceptance() {
     new RegExp(`^${orgPath}/(profile|engagements|access-capabilities|impact-home/summary|impact-facts|improvement-practices|client-followups)$`),
     /^\/api\/kai\/sprint2\/intake\/admin\/review-cockpit\/capabilities$/,
     /^\/api\/kai\/sprint2\/intake\/admin\/batches$/,
-    new RegExp(`^${orgPath}/engagements/[0-9a-f-]{36}/(client-funder-requirements|client-generated-drafts|client-generated-drafts/[0-9a-f-]{36}|client-grant-response-packet|client-board-reporting)$`),
+    new RegExp(`^${orgPath}/engagements/[0-9a-f-]{36}/(client-funder-requirements|client-evidence-pipeline|client-generated-drafts|client-generated-drafts/[0-9a-f-]{36}|client-grant-response-packet|client-board-reporting)$`),
     new RegExp(`^${orgPath}/claims/[0-9a-f-]{36}/client-followups/[0-9a-f-]{36}/complete$`),
     new RegExp(`^/api/kai/sprint2/access-administration/organizations/${ORG}/join-requests$`),
   ];

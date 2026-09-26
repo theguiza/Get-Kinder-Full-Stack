@@ -3250,6 +3250,39 @@ router.get(
   },
 );
 
+let clientEvidencePipelineServicePromise = null;
+async function getClientEvidencePipelineService() {
+  if (intakeServiceOverride?.getClientEvidencePipeline) return intakeServiceOverride;
+  clientEvidencePipelineServicePromise ||= import("../services/kaiClientEvidencePipelineService.js");
+  return clientEvidencePipelineServicePromise;
+}
+
+/**
+ * Client-safe evidence pipeline for one engagement/project
+ * (kaiClientEvidencePipelineService.js): per uploaded file, the governed
+ * workflow stage it has reached, who it is waiting on, and the next
+ * permitted action, plus the governed-eligible reviewed Impact Facts that
+ * descend from the Project's files. None of the GK review-cockpit, queue,
+ * source, or evidence-library payloads. No SQL here; the browser supplies
+ * only the two path ids.
+ */
+router.get(
+  "/admin/organizations/:organizationId/engagements/:engagementId/client-evidence-pipeline",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    const ids = clientContentPathIds(req, ["organizationId", "engagementId"]);
+    if (!ids) {
+      return sendKaiError(res, "validation_blocker", {
+        blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id_or_engagement_id")],
+      });
+    }
+    return invokeService(res, async () => {
+      const service = await getClientEvidencePipelineService();
+      return service.getClientEvidencePipeline({ ...ids, actorContext: sprint2MappedActorContext(req) });
+    });
+  },
+);
+
 let clientGeneratedContentServicePromise = null;
 async function getClientGeneratedContentService() {
   if (intakeServiceOverride?.listClientGeneratedDrafts) return intakeServiceOverride;
