@@ -215,7 +215,9 @@ export function nextActionText(file, { canReviewFollowups = false, canContribute
     case "upload_new_file":
       return canContribute ? "Upload a corrected file." : "A client admin in your organization can upload a corrected file.";
     case "contact_get_kinder":
-      return "Contact Get Kinder. Processing cannot be retried from here.";
+      return file.currentStage === "security_check"
+        ? "Contact Get Kinder for help with this file's security check."
+        : "Contact Get Kinder. Processing cannot be retried from here.";
     default:
       return file.currentStatus === "complete" ? "No action required. Reviewed evidence from this file is available." : "No action required from you.";
   }

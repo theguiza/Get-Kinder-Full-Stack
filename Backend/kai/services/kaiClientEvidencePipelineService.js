@@ -162,10 +162,12 @@ function deriveFileStages(row, reviewedImpactFactCount) {
 
   const policy = row.file_policy_status;
   if (policy === "passed") stages.push(stage("security_check", STAGE_STATUS.complete, RESPONSIBLE.none));
-  else if (policy === "blocked" || policy === "failed") {
-    stages.push(stage("security_check", STAGE_STATUS.failed, RESPONSIBLE.client, {
-      failureCategory: policy === "blocked" ? "file_blocked_by_policy" : "security_check_failed",
-    }));
+  else if (policy === "blocked") {
+    stages.push(stage("security_check", STAGE_STATUS.failed, RESPONSIBLE.client, { failureCategory: "file_blocked_by_policy" }));
+  } else if (policy === "failed") {
+    // The assessment itself did not complete; replacing the file is not a
+    // remedy the client can be told to apply.
+    stages.push(stage("security_check", STAGE_STATUS.failed, RESPONSIBLE.getKinder, { failureCategory: "security_check_failed" }));
   } else if (policy === null || policy === undefined || policy === "pending") {
     stages.push(stage("security_check", STAGE_STATUS.inProgress, RESPONSIBLE.kai));
   } else {
@@ -273,7 +275,7 @@ function nextActionFor(current) {
     case STAGE_STATUS.waitingForClient:
       return NEXT_ACTION.answerClientFollowups;
     case STAGE_STATUS.failed:
-      return current.key === "processing" ? NEXT_ACTION.contactGetKinder : NEXT_ACTION.uploadNewFile;
+      return current.responsible === RESPONSIBLE.getKinder ? NEXT_ACTION.contactGetKinder : NEXT_ACTION.uploadNewFile;
     case STAGE_STATUS.inProgress:
     case STAGE_STATUS.notStarted:
       return current.responsible === RESPONSIBLE.kai ? NEXT_ACTION.waitForProcessing : NEXT_ACTION.none;

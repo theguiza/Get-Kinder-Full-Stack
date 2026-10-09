@@ -254,6 +254,33 @@ test("stages: automatic processing, failures, and every human gate map to the re
   assert.equal(result.data.summary.reasons.find((r) => r.reason === "failed").fileCount, 4);
 });
 
+const FAILURE_ROWS = Object.freeze([
+  row(1, { upload_state: "expired" }),
+  row(2, { upload_state: "policy_blocked" }),
+  row(3, { file_policy_status: "blocked" }),
+  row(4, { file_policy_status: "failed" }),
+  row(5, { parser_status: "failed", parser_error_code: "something_internal", file_profile_complete: false }),
+]);
+
+test("stages: a security-assessment execution failure is Get Kinder's to resolve; a policy block stays the client's", async () => {
+  const { result } = await read([...FAILURE_ROWS]);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  const expected = {
+    1: ["upload", "failed", "client", "upload_new_file", "failed", "upload_not_completed"],
+    2: ["upload", "failed", "client", "upload_new_file", "failed", "file_blocked_by_policy"],
+    3: ["security_check", "failed", "client", "upload_new_file", "failed", "file_blocked_by_policy"],
+    4: ["security_check", "failed", "get_kinder", "contact_get_kinder", "failed", "security_check_failed"],
+    5: ["processing", "failed", "get_kinder", "contact_get_kinder", "failed", "processing_failed"],
+  };
+  for (const [n, values] of Object.entries(expected)) {
+    const current = currentOf(result, Number(n));
+    assert.deepEqual([...Object.values(current).slice(0, 5), current.file.failureCategory], values, `file ${n}`);
+  }
+  const securityStage = currentOf(result, 4).file.stages.find((s) => s.key === "security_check");
+  assert.deepEqual(securityStage, { key: "security_check", status: "failed", responsible: "get_kinder", failureCategory: "security_check_failed" });
+  assert.deepEqual(currentOf(result, 4).file.stages.slice(2).map((s) => s.status), Array(8).fill("not_started"), "nothing downstream of a failed check is shown as reached");
+});
+
 // ---------------------------------------------------------------------------
 // Reviewed Impact Facts: governed read only, Project lineage only, fail closed
 // ---------------------------------------------------------------------------
@@ -444,6 +471,27 @@ test("frontend Reviews tab and next actions: client work only for client reviewe
   assert.equal(nextActionText(failed), "Contact Get Kinder. Processing cannot be retried from here.");
   assert.equal(stageStatusLabel(gk.stages[5]), "Waiting for Get Kinder");
   assert.equal(stageStatusLabel(gk.stages[6]), "Not available yet");
+});
+
+test("frontend next actions: a failed security check says to contact Get Kinder, never to upload a corrected file", async () => {
+  const data = projectClientEvidencePipeline(await serviceDto([...FAILURE_ROWS]), ENGAGEMENT);
+  const [uploadExpired, uploadBlocked, policyBlocked, securityFailed, processingFailed] = data.files;
+  for (const canContribute of [true, false]) {
+    const text = nextActionText(securityFailed, { canContribute });
+    assert.equal(text, "Contact Get Kinder for help with this file's security check.");
+    assert.doesNotMatch(text, /upload|corrected|retry|replace/i);
+  }
+  assert.equal(nextActionText(policyBlocked, { canContribute: true }), "Upload a corrected file.");
+  assert.equal(nextActionText(policyBlocked), "A client admin in your organization can upload a corrected file.");
+  assert.equal(nextActionText(uploadBlocked, { canContribute: true }), "Upload a corrected file.");
+  assert.equal(nextActionText(uploadExpired, { canContribute: true }), "Upload a corrected file.");
+  assert.equal(nextActionText(processingFailed), "Contact Get Kinder. Processing cannot be retried from here.");
+  // The failure stays visible: the check is reported as failed, never as passed.
+  assert.equal(securityFailed.currentStatus, "failed");
+  assert.equal(securityFailed.failureCategory, "security_check_failed");
+  const securityStage = securityFailed.stages.find((s) => s.key === "security_check");
+  assert.equal(stageStatusLabel(securityStage), "Failed");
+  assert.equal(securityFailed.stages.some((s) => s.status === "complete" && s.key !== "upload"), false);
 });
 
 // ---------------------------------------------------------------------------
