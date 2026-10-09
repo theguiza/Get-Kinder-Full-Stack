@@ -1353,6 +1353,21 @@ test("P0-07 corrected synthetic assessment binding and malware projection", asyn
   });
 });
 
+test("P0-07 relative and package-absolute worksheet relationships both pass the composed bounded assessment", async () => {
+  for (const target of ["worksheets/sheet1.xml", "/xl/worksheets/sheet1.xml"]) {
+    const bytes = createXlsxFixture({ target });
+    const input = { extension: ".xlsx", declaredMime: XLSX_MIME, bytes, sha256: sha256(bytes) };
+    const malwareScanAdapter = createKaiSyntheticFixtureMalwareAdapter({ cleanSha256: sha256(bytes) });
+
+    assert.deepEqual(await assessBoundedFileSecurity(input, { malwareScanAdapter }), { policy: "pass" }, target);
+
+    const executor = createInternalSecurityAssessmentExecutor({
+      assessor: (assessorInput) => assessBoundedFileSecurity(assessorInput, { malwareScanAdapter }),
+    });
+    assert.deepEqual(await executor.execute(input), { policy: "pass" }, target);
+  }
+});
+
 test("P0-07 format-security HTTP acceptance cases use bounded local assessment composition", async (t) => {
   const xlsxMacro = createXlsxFixture({
     extraEntries: [{ name: "xl/vbaProject.bin", content: new Uint8Array([0x00, 0x01]) }],

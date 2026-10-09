@@ -301,7 +301,38 @@ test("P0-05 XLSX dimensions, string text, comments, and orphan worksheets do not
   assert.equal(await detect(bytes), undefined);
 });
 
-test("P0-05 XLSX missing, duplicate, external, absolute, and traversal relationship mappings fail safely", async () => {
+test("P0-05 XLSX relative and package-absolute worksheet targets resolve to the same worksheet part", async () => {
+  const relativeTarget = "worksheets/sheet1.xml";
+  const packageAbsoluteTarget = "/xl/worksheets/sheet1.xml";
+
+  assert.equal(__testables.resolveWorkbookRelationshipTarget(relativeTarget), "xl/worksheets/sheet1.xml");
+  assert.equal(__testables.resolveWorkbookRelationshipTarget(packageAbsoluteTarget), "xl/worksheets/sheet1.xml");
+
+  const relative = createWorkbook({ sheetCount: 1, worksheetCellCounts: [1], rels: relsXml(1, () => relativeTarget) });
+  const packageAbsolute = createWorkbook({ sheetCount: 1, worksheetCellCounts: [1], rels: relsXml(1, () => packageAbsoluteTarget) });
+  assert.equal(await detect(relative), undefined);
+  assert.equal(await detect(packageAbsolute), undefined);
+
+  // Counting the referenced part's cells proves both forms reach xl/worksheets/sheet1.xml.
+  for (const target of [relativeTarget, packageAbsoluteTarget]) {
+    assertExactTwoKeyResult(await detect(createWorkbook({
+      sheetCount: 1,
+      worksheetCellCounts: [KAI_SPRINT2_P0_XLSX_LIMITS.maxCells + 1],
+      worksheetOptions: { blank: true },
+      rels: relsXml(1, () => target),
+    })), CELL_LIMIT_RESULT);
+  }
+
+  const deflatedPackageAbsolute = createWorkbook({
+    sheetCount: 2,
+    worksheetCellCounts: [1, 1],
+    rels: relsXml(2, (index) => (index === 1 ? relativeTarget : `/xl/worksheets/sheet${index}.xml`)),
+    deflateEntries: true,
+  });
+  assert.equal(await detect(deflatedPackageAbsolute), undefined);
+});
+
+test("P0-05 XLSX missing, duplicate, external, unsafe absolute, and traversal relationship mappings fail safely", async () => {
   await assertSanitizedFailure(createWorkbook({
     sheetCount: 1,
     worksheetCellCounts: [0],
@@ -323,7 +354,7 @@ test("P0-05 XLSX missing, duplicate, external, absolute, and traversal relations
   await assertSanitizedFailure(createWorkbook({
     sheetCount: 1,
     worksheetCellCounts: [0],
-    rels: `<?xml version="1.0"?><Relationships><Relationship Id="rId1" Type="${WORKSHEET_REL_TYPE}" Target="/xl/worksheets/sheet1.xml"/></Relationships>`,
+    rels: `<?xml version="1.0"?><Relationships><Relationship Id="rId1" Type="${WORKSHEET_REL_TYPE}" TargetMode="External" Target="/xl/worksheets/sheet1.xml"/></Relationships>`,
   }));
 
   await assertSanitizedFailure(createWorkbook({
@@ -331,6 +362,33 @@ test("P0-05 XLSX missing, duplicate, external, absolute, and traversal relations
     worksheetCellCounts: [0],
     rels: `<?xml version="1.0"?><Relationships><Relationship Id="rId1" Type="${WORKSHEET_REL_TYPE}" Target="../worksheets/sheet1.xml"/></Relationships>`,
   }));
+
+  for (const unsafeTarget of [
+    "//xl/worksheets/sheet1.xml",
+    "///xl/worksheets/sheet1.xml",
+    "/../xl/worksheets/sheet1.xml",
+    "/xl/../xl/worksheets/sheet1.xml",
+    "/xl\\worksheets\\sheet1.xml",
+    "\\xl\\worksheets\\sheet1.xml",
+    "\\\\server\\share\\sheet1.xml",
+    "C:/xl/worksheets/sheet1.xml",
+    "/C:/xl/worksheets/sheet1.xml",
+    "file:///xl/worksheets/sheet1.xml",
+    "/xl/worksheets/sheet1.xml#fragment",
+    "/xl/worksheets/sheet1.xml?query",
+    "/",
+    "/xl",
+    "/worksheets/sheet1.xml",
+    "/docProps/app.xml",
+    "/xl/worksheets/missing.xml",
+  ]) {
+    await assertSanitizedFailure(createWorkbook({
+      sheetCount: 1,
+      worksheetCellCounts: [0],
+      rels: relsXml(1, () => unsafeTarget),
+      extraEntries: [{ name: "docProps/app.xml", content: "<?xml version=\"1.0\"?><Properties/>" }],
+    }));
+  }
 });
 
 test("P0-05 XLSX DTD/entity input, malformed XML, malformed ZIP, unsupported compression, and decompression failures fail safely", async () => {

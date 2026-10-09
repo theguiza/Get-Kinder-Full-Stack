@@ -35053,3 +35053,80 @@ must require a positive terminal evidence review and P2-02 permission.
 push, deployment, production or shared database, GCS, schema/migration,
 feature-flag, tenant, credential, `.env`, or `00_KAI_CURRENT_STATE.md` change.
 The only databases used were runner-owned ephemeral loopback clusters.
+
+### P0-05 XLSX package-absolute worksheet relationship clarification and repair (2026-10-09)
+
+**Owner direction (USER_CONFIRMED):** an internal OOXML worksheet relationship
+`Target` beginning with a single `/` is a package-root-relative part name, not a
+filesystem path. It is accepted when it resolves safely to an existing worksheet
+part inside the package. `Target="worksheets/sheet1.xml"` and
+`Target="/xl/worksheets/sheet1.xml"` both resolve to `xl/worksheets/sheet1.xml`.
+
+**Superseding clarification (narrow):** in `## P0-05 XLSX sheet and cell limit
+detection`, the `sanitized_failure_behavior` field lists "absolute" relationship
+mappings among sanitized failures. That word conflicted with
+`internal_target_behavior` in `## P0-05 OOXML path-traversal detection` ("package-absolute
+leading slash resolves from package root and is allowed when inside package").
+For the sheet/cell detector, "absolute" now means filesystem, UNC, network-path,
+drive-letter, or scheme forms only. Safe package-absolute internal targets
+are permitted. The historical field text is left unchanged as the record of
+what was committed. Every other prohibition still applies: external
+`TargetMode`, `..` segments, backslash, `//` UNC or network-path forms,
+drive-letter and scheme forms (including `file:`), `#` and `?`, targets that
+resolve outside `xl/`, missing worksheet parts, and malformed, macro, archive-limit,
+and malware failures.
+`Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md` (sheet/cell
+relationship boundary vs. internal target rules) carries the same wording pair;
+it is not modified in this package and is read with this clarification.
+
+**Defect (TOOL_VERIFIED, synthetic only):** `isUnsafeRelationshipTarget` in
+`Backend/kai/validators/xlsxSheetCellLimitDetector.js` rejected any leading `/`.
+A valid package-absolute worksheet relationship therefore raised the sanitized
+sheet/cell failure. The failure propagated through the traversal, macro/external,
+and archive detector chain to `{ status: "failed", category:
+"security_assessment_timeout" }`. The traversal detector already accepted the
+form.
+
+**Correction:** `isUnsafeRelationshipTarget` now rejects `//` (UNC or
+network-path) and any backslash instead of every leading `/`.
+`resolveWorkbookRelationshipTarget` resolves a leading-`/` target from the
+package root and other targets from `xl/` as before. Unchanged: rejection of any
+`..` segment, the `xl/` containment check, and the existing-entry check.
+`security_assessment_timeout` handling is unchanged. The resolver is exported
+on `__testables` for the A/B assertion.
+
+**Tests (TOOL_VERIFIED; `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel`):**
+- Regression first: the sheet/cell spec's old package-absolute rejection
+  became an A/B same-worksheet test (resolver equality, both pass, both block at
+  1,000,001 cells, deflated mixed-form workbook). Negative unsafe-absolute cases
+  were added (`//`, `///`, `/../`, `/xl/../`, backslash, UNC, drive, `/C:`,
+  `file:`, `#`, `?`, `/`, `/xl`, outside `xl/`, missing part,
+  External-mode package-absolute). A composed P0-07 acceptance test runs
+  `assessBoundedFileSecurity` and the internal executor with real detectors and
+  the synthetic clean-malware fixture adapter. Before the repair: sheet/cell
+  10/11 (new A/B test failed with the sanitized failure). Composed: relative passed;
+  `/xl/worksheets/sheet1.xml` returned `{ status: "failed", category:
+  "security_assessment_timeout" }`.
+- After the repair: both forms return `{ policy: "pass" }` through the composed
+  assessor and executor. The focused XLSX/OOXML/macro/archive/formula,
+  bounded-assessor, executor, ClamAV-adapter, repository-contract,
+  type-agreement, and client-evidence-pipeline specs pass 133/133. The P0
+  acceptance spec passes 63/63 (including existing macro, external-link,
+  traversal, entry-bomb, ratio-bomb, encrypted, and formula cases).
+- `.env`-free copies with a synthetic placeholder OpenAI key:
+  `npm run test:kai-sprint2` 4614 pass / 12 fail / 87 skipped of 4713.
+  `npm test`: baseline `704c9c7` 5292 / 12 / 97 of 5401; package 5294 / 12 / 97
+  of 5403. Failure names are identical (pre-existing route/read-model specs;
+  none XLSX/security).
+- `git diff --check` PASS. Full diff inspected.
+
+**Limitations (NOT_CONFIRMED):** this proves only the local synthetic defect and
+repair. It does not prove that this defect caused the historical production
+XLSX `security_assessment_timeout` failures. No production file, record, or log
+was inspected, and existing failed files are not re-assessed or recovered.
+
+**Status:** P0_05_XLSX_PACKAGE_ABSOLUTE_WORKSHEET_TARGET_REPAIRED_LOCALLY. No push,
+deployment, production or shared database, cloud, feature-flag, tenant,
+credential, `.env`, repository-contract, Implementation Baseline, or
+`00_KAI_CURRENT_STATE.md` change. The `704c9c7` client-remediation
+correction is preserved unchanged.

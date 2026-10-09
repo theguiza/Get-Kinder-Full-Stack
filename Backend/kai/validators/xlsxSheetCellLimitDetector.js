@@ -477,7 +477,8 @@ async function parseWorkbookSheets({ bytes, entries }) {
 function isUnsafeRelationshipTarget(target, targetMode) {
   if (typeof targetMode === "string" && targetMode.toLowerCase() === "external") return true;
   if (typeof target !== "string" || target.length === 0) return true;
-  if (target.startsWith("/") || target.startsWith("\\") || target.includes("\\")) return true;
+  // A single leading "/" is a package-absolute part name; "//" is a UNC or network-path form.
+  if (target.startsWith("//") || target.includes("\\")) return true;
   if (/^[A-Za-z][A-Za-z0-9+.-]*:/.test(target)) return true;
   if (target.includes("#") || target.includes("?")) return true;
   return false;
@@ -486,7 +487,9 @@ function isUnsafeRelationshipTarget(target, targetMode) {
 function resolveWorkbookRelationshipTarget(target) {
   if (isUnsafeRelationshipTarget(target, undefined)) failXlsxInspection();
 
-  const segments = `${WORKBOOK_BASE_DIRECTORY}/${target}`.split("/");
+  const segments = target.startsWith("/")
+    ? target.slice(1).split("/")
+    : `${WORKBOOK_BASE_DIRECTORY}/${target}`.split("/");
   const resolved = [];
   for (const segment of segments) {
     if (!segment || segment === ".") continue;
@@ -613,5 +616,6 @@ export async function detectXlsxSheetCellLimitPolicy({ extension, declaredMime, 
 export const __testables = Object.freeze({
   XmlElementScanner,
   parseZipCentralDirectory,
+  resolveWorkbookRelationshipTarget,
   sanitizedXlsxFailure,
 });
