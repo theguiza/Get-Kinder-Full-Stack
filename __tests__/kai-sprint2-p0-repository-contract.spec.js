@@ -306,7 +306,12 @@ test("repository contract records XLSX sheet and cell limit detector authority a
   assert.match(contract, /count actual worksheet `<c>` XML elements by namespace\/local name/);
   assert.match(contract, /Do not use regex, byte searching, worksheet dimensions, row numbers, ranges, shared strings, comments, formulas/);
   assert.match(contract, /Do not count orphan worksheet files/);
-  assert.match(contract, /missing, duplicate, unresolved, malformed, absolute, external, or traversal relationship mappings use the existing sanitized failure path/);
+  assert.match(contract, /missing, duplicate, unresolved, malformed, filesystem-absolute, external, or traversal relationship mappings use the existing sanitized failure path/);
+  assert.match(contract, /`worksheets\/sheet1\.xml` and `\/xl\/worksheets\/sheet1\.xml` both resolve to `xl\/worksheets\/sheet1\.xml`/);
+  assert.match(contract, /A single leading `\/` is a package-absolute part name and does not by itself make an internal target unsafe/);
+  assert.match(contract, /Filesystem-absolute means UNC or network-path \(`\/\/`\), backslash, drive-letter, or scheme \(including `file:`\) forms/);
+  assert.match(contract, /`TargetMode="External"`, any `\.\.` segment, `#` or `\?`, targets that resolve outside `xl\/` or above the package root, and missing worksheet parts also use the sanitized failure path/);
+  assert.doesNotMatch(contract, /malformed, absolute, external, or traversal relationship mappings/);
   assert.match(contract, /DTD\/entity declarations, unsupported XML, malformed ZIP\/XML, unsupported compression, decompression failure, or unexpected parser output use sanitized failure/);
   assert.match(contract, /Formula and instruction-like contents remain inert/);
   assert.match(contract, /Do not execute, evaluate, rewrite, return, retain, persist, expose, or log workbook content, formulas, filenames, relationship targets, XML, paths, stacks, parser internals, rows, cells, values, or counts/);

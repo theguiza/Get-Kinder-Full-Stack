@@ -35130,3 +35130,88 @@ deployment, production or shared database, cloud, feature-flag, tenant,
 credential, `.env`, repository-contract, Implementation Baseline, or
 `00_KAI_CURRENT_STATE.md` change. The `704c9c7` client-remediation
 correction is preserved unchanged.
+
+### P0-05 XLSX repository-contract reconciliation and release-readiness classification (2026-10-09)
+
+**Owner direction (USER_CONFIRMED):** finish reconciling the repository contract
+with the package-absolute worksheet relationship repair (`12563d1`). Then classify
+the 12 existing full-suite failures for release safety. No push or deployment.
+
+**Contract correction (TOOL_VERIFIED):** in
+`Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md`, the
+`OWNER_DECISION.P0_05_XLSX_SHEET_CELL_LIMIT_DETECTOR_V1` relationship
+boundary now says "filesystem-absolute" instead of "absolute". It also
+states the resolution rule: `worksheets/sheet1.xml` and
+`/xl/worksheets/sheet1.xml` both resolve to `xl/worksheets/sheet1.xml`, and a
+single leading `/` alone does not make an internal target unsafe. It defines
+filesystem-absolute as `//`, backslash, drive-letter, or scheme (including
+`file:`) forms. It keeps external `TargetMode`, any `..`, `#`/`?`, out-of-`xl/` or
+above-root targets, and missing parts as sanitized failures. The wording matches
+`isUnsafeRelationshipTarget`/`resolveWorkbookRelationshipTarget` as repaired.
+The OOXML path-traversal provision already agreed and is unchanged. The
+historical ExecPlan `sanitized_failure_behavior` field and the preceding
+clarification entry are left unchanged as the decision record.
+`__tests__/kai-sprint2-p0-repository-contract.spec.js` asserts the new
+wording and the absence of the obsolete phrase. No implementation change.
+
+**Tests (TOOL_VERIFIED; `.env`-free tracked-file copy,
+`DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel`, placeholder OpenAI key):**
+repository contract 21/21; focused XLSX/OOXML/macro/archive/formula,
+bounded-assessor, executor, ClamAV-adapter, repository-contract,
+type-agreement, and client-evidence-pipeline 133/133; XLSX ZIP fixture
+corpus 9/9; P0 acceptance 63/63. `npm run test:kai-sprint2` 4614 pass / 12 fail /
+87 skipped of 4713. `npm test` 5294 / 12 / 97 of 5403. Counts and failure
+names are identical to the `12563d1` baseline. No new failures.
+
+**Existing 12 failures, classified (TOOL_VERIFIED from assertion output and
+source):**
+- Lexical comment matches, no code violation (4): `sprint2IntakeApi
+  delegates admin metadata operations ...`, `route files contain no direct
+  SQL against kai schema`, `P1-09 routes call authorized services only ...`,
+  `admin batch list route delegates sanitized query scope ...`. Every match in
+  `Backend/kai/routes/sprint2IntakeApi.js` is in a comment (lines 208, 1983,
+  1986, 2014, 2073, 2074: `kai.export_manifests`, `kai.engagements`,
+  `kai.improvement_practices`, "audit insert"). The SQL-verb-near-`kai.`, pool
+  import, `../db/` import, `pool/db.query`, and KAI DB helper import assertions
+  all pass. The behavioral sanitized-service-input assertions pass.
+- Route-inventory drift (1): `Pass 2 router exposes metadata intake plus
+  real P0 upload confirmation surface`. Additions only, none removed. This test
+  does not assess authorization on the added routes.
+- Restricted DTO shape violated (4 tests / 7 counted failures):
+  `the direct file-detail service returns exactly the 15-field allowlist`,
+  `assembled production middleware and router enforce the file-detail
+  contract`, `assembled production middleware and router enforce the
+  batch-files collection contract`, `the child-file read model is
+  tenant-scoped, bounded, ordered, and uses the exclusive keyset predicate`.
+  The file-detail and batch-files DTOs return an extra `p1_lifecycle` object
+  (`parser_status`, three completeness booleans, `automatic_stage`,
+  `intake_sensitivity_profile_id`) beyond the exact allowlist. The child-file
+  production SELECT is widened past the allowlist, and `checksum` appears
+  there only as a lateral-join predicate (`pr.checksum = verified_checksum`),
+  not as a projected or returned field. This contradicts this plan's
+  `dto_boundary` ("exact field-by-field ... allowlist; production SELECT is
+  restricted to the same fields") and `success_response_boundary`. No owner
+  decision authorizing `p1_lifecycle` was found. Mitigating facts: every
+  added read is organization-scoped (`organization_id = $1` and
+  org-correlated joins), the values are bounded enums, booleans, or a
+  UUID-validated same-tenant id, and no listed excluded category (storage,
+  checksum, raw content, credentials, PII) is returned. The change entered at
+  `cf74fac`/`643e995` and is already in the local `origin/main` tracking ref.
+  It is not part of the outgoing commits.
+
+**Release path:** outgoing commits relative to the local `origin/main` tracking
+ref `b1eae7d` (not fetched; remote state NOT_CONFIRMED): `704c9c7`,
+`12563d1`, and this package's commit. The repository contains no `render.yaml`,
+CI workflow, or recorded auto-deploy behavior. Whether a push to
+`origin/main` deploys automatically is NOT_CONFIRMED.
+
+**Release readiness:** NO-GO. The restricted file-detail/batch-files DTO
+contract is demonstrably exceeded without recorded owner authority, and
+auto-deploy behavior is NOT_CONFIRMED. Resolution is an owner decision:
+either authorize `p1_lifecycle` (and the widened SELECT) as a contract
+amendment and update the four tests, or remove it. Neither was performed here.
+
+**Status:** P0_05_XLSX_CONTRACT_RECONCILED_LOCALLY; RELEASE_READINESS_NO_GO.
+No push, deployment, production or shared database, cloud, feature-flag,
+tenant, credential, `.env`, Implementation Baseline, or
+`00_KAI_CURRENT_STATE.md` change.
