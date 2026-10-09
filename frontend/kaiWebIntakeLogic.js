@@ -171,6 +171,15 @@ export function declaredMimeTypeForFile(file) {
   return MIME_TYPE_BY_SUPPORTED_EXTENSION[fileExtensionOf(file?.name)] || "application/octet-stream";
 }
 
+// The server signs an upload only for a record still in "reserved". A 409
+// conflict_current_state_changed means its bytes were already transferred
+// (a retried or continued intent whose earlier attempt got further than the
+// browser saw), so the remaining step is confirmation - which re-verifies the
+// stored bytes server-side and replays safely - not a stale-state dead end.
+export function uploadUrlResultRequiresConfirmOnly(result) {
+  return result?.statusCode === 409 && result?.body?.error?.code === "conflict_current_state_changed";
+}
+
 export const DUPLICATE_RESOLUTION_ACTION = Object.freeze({
   USE_EXISTING_FILE: "use_existing_file",
   CONTINUE_UPLOAD: "continue_upload",

@@ -24,6 +24,7 @@ import {
   requestUploadUrlPath,
   resolveFileReservationIdempotencyKey,
   sha256HexOfFile,
+  uploadUrlResultRequiresConfirmOnly,
 } from "./kaiWebIntakeLogic.js";
 import { pipelineFileStatusText } from "./knowledgeStudio/clientEvidencePipelineLogic.js";
 import useClientEvidencePipeline from "./knowledgeStudio/useClientEvidencePipeline.js";
@@ -407,8 +408,11 @@ export default function KaiWebIntake({
   // confirmUpload. The signed URL/headers live only in this local scope for
   // the duration of the PUT; they are never stored in component state,
   // rendered, or logged. A reservation already past "reserved" has its bytes
-  // in storage, so only confirmation remains. Confirmation always re-verifies
-  // the stored bytes against the reservation's declared checksum and size.
+  // in storage, so only confirmation remains - including when the server
+  // refuses to sign because the record moved on since this browser last saw
+  // it (a replayed reservation whose earlier confirmation response was lost).
+  // Confirmation always re-verifies the stored bytes against the
+  // reservation's declared checksum and size.
   const transferAndConfirm = useCallback(async ({ reservedFileId, selectedFile, uploadState }) => {
     if (uploadState === "reserved") {
       const uploadUrlResult = await postJson(requestUploadUrlPath(intakeBatchId), {
@@ -416,14 +420,16 @@ export default function KaiWebIntake({
         engagement_id: engagementId,
         intake_file_id: reservedFileId,
       });
-      if (uploadUrlResult.statusCode !== 200 || !uploadUrlResult.body?.ok) {
-        return { ok: false, message: errorText(uploadUrlResult) };
-      }
-      const { upload_url: uploadUrl, upload_method: uploadMethod, upload_headers: uploadHeaders } = uploadUrlResult.body.data;
+      if (!uploadUrlResultRequiresConfirmOnly(uploadUrlResult)) {
+        if (uploadUrlResult.statusCode !== 200 || !uploadUrlResult.body?.ok) {
+          return { ok: false, message: errorText(uploadUrlResult) };
+        }
+        const { upload_url: uploadUrl, upload_method: uploadMethod, upload_headers: uploadHeaders } = uploadUrlResult.body.data;
 
-      const putResult = await putToSignedUrl(uploadUrl, uploadMethod, uploadHeaders, selectedFile);
-      if (!putResult.ok) {
-        return { ok: false, message: `Upload failed (${putResult.statusCode}).` };
+        const putResult = await putToSignedUrl(uploadUrl, uploadMethod, uploadHeaders, selectedFile);
+        if (!putResult.ok) {
+          return { ok: false, message: `Upload failed (${putResult.statusCode}).` };
+        }
       }
     }
 

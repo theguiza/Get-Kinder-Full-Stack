@@ -26,6 +26,7 @@ import {
   declaredMimeTypeForFile,
   duplicateResolutionFromResult,
   duplicateResolutionView,
+  uploadUrlResultRequiresConfirmOnly,
 } from "../frontend/kaiWebIntakeLogic.js";
 
 // Synthetic identifiers and bytes only: no client data, database, or storage.
@@ -1192,4 +1193,34 @@ test("the browser declares a server-allowed MIME for every supported type when t
   assert.equal(declaredMimeTypeForFile({ name: "a.md", type: "text/plain" }), "text/plain");
   assert.equal(duplicateResolutionFromResult({ statusCode: 500, body: { data: { duplicate_resolution: {} } } }), null);
   assert.equal(duplicateResolutionFromResult({ statusCode: 422, body: { data: null } }), null);
+});
+
+test("a retried or continued upload whose record already left \"reserved\" is confirmed, never stopped at the signing 409", () => {
+  // Only the server's own stale-state refusal to sign means "bytes already
+  // transferred"; every other signing failure is still reported as an error.
+  assert.equal(uploadUrlResultRequiresConfirmOnly({
+    statusCode: 409,
+    body: { ok: false, error: { code: "conflict_current_state_changed" } },
+  }), true);
+  for (const result of [
+    { statusCode: 200, body: { ok: true, data: {} } },
+    { statusCode: 409, body: { ok: false, error: { code: "duplicate_conflict" } } },
+    { statusCode: 404, body: { ok: false, error: { code: "conflict_current_state_changed" } } },
+    { statusCode: 503, body: { ok: false, error: { code: "storage_provider_not_configured" } } },
+    { statusCode: 409, body: null },
+    null,
+  ]) {
+    assert.equal(uploadUrlResultRequiresConfirmOnly(result), false);
+  }
+
+  const uiSource = readFileSync("frontend/KaiWebIntake.jsx", "utf8");
+  const transferBody = uiSource.slice(
+    uiSource.indexOf("const transferAndConfirm = useCallback"),
+    uiSource.indexOf("const reserveAndUpload = useCallback"),
+  );
+  const fallbackIndex = transferBody.indexOf("if (!uploadUrlResultRequiresConfirmOnly(uploadUrlResult)) {");
+  assert.ok(fallbackIndex > transferBody.indexOf("requestUploadUrlPath(intakeBatchId)"));
+  assert.ok(fallbackIndex < transferBody.indexOf("if (uploadUrlResult.statusCode !== 200 || !uploadUrlResult.body?.ok) {"));
+  assert.ok(transferBody.indexOf("putToSignedUrl") > fallbackIndex);
+  assert.ok(transferBody.indexOf("const confirmResult") > transferBody.indexOf("putToSignedUrl"));
 });

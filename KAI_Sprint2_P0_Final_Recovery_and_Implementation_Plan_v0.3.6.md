@@ -35556,3 +35556,145 @@ nonexistent file; synthetic OpenAI placeholder):**
 deployment, production or shared database, cloud, feature-flag, tenant,
 credential, `.env`, schema/migration, Implementation Baseline, or
 `00_KAI_CURRENT_STATE.md` change.
+
+### Duplicate upload resolution: real-PostgreSQL and browser proof, lost-confirmation retry repair (2026-10-09)
+
+**Owner direction (USER_CONFIRMED):** complete the duplicate-upload repair from
+`2a7094e` end to end. Trace checksum detection -> 422 -> route sanitization ->
+browser parsing -> dialog -> chosen action -> reservation/upload service,
+reproduce the earliest broken boundary, repair only verified defects, and prove
+the path on real PostgreSQL through a synthetic local harness. No push,
+deployment, production write, migration, index change, or Current State update.
+
+**Starting state (TOOL_VERIFIED):** `main` at `2a7094e`, clean.
+
+**Trace (TOOL_VERIFIED, by reading and by test):**
+- The production route calls `kaiIntakeRuntimeService.reserveIntakeFileMetadata`,
+  which is the service function with no injected dependencies: the ambient
+  pool, `withTransaction`, and the default SQL helpers. The earlier spec used a
+  route service override and an in-memory store, so none of that had run.
+- Request safety is a plain strict JSON parser with no key allowlist. The route
+  schema accepts `force_new_version` (boolean) and `duplicate_of_intake_file_id`
+  (UUID). `sendServiceResult` keeps `data.duplicate_resolution` on 422 and 409
+  through the exact-shape sanitizer. The mutation limits (120 per actor and 600
+  per organization in 15 minutes) do not constrain the flow.
+- `npm run build` reproduced the committed `public/js/bundles/entry.js` byte for
+  byte at `2a7094e`.
+
+**Real-PostgreSQL proof (TOOL_VERIFIED):** new runner
+`scripts/kai-sprint2-intake-duplicate-resolution-local-postgres.js`
+(`npm run verify:kai-sprint2-intake-duplicate-resolution-real-db`).
+- An ephemeral PostgreSQL 16 initdb cluster, loopback only. Its identity
+  (database, address, port, `listen_addresses`, version) is proven before use,
+  and it is removed afterwards.
+- Schema: the organization-enablement and Package 4 auth bootstraps, the
+  tenant-binding migration, and the new
+  `scripts/kai-sprint2-intake-duplicate-resolution-production-shape-synthetic-schema.sql`.
+  That file is a production-shaped `kai.intake_batches` and `kai.intake_files`
+  mirror of the 2026-09-16 capture: enums, CHECKs, composite and lineage
+  self-FKs, the three versioning columns, and
+  `ux_intake_files_org_checksum_default`. The Gate A lifecycle (trigger plus
+  `ux_intake_files_gate_a_org_declared_checksum`), policy-decision replay, and
+  Gate C-1 migrations are applied on top.
+- The child's ambient pool is pinned to the cluster, with every URL-style
+  variable cleared, and the spec asserts the ambient pool's target.
+
+Spec `__tests__/kai-sprint2-intake-duplicate-resolution.integration.spec.js`,
+11/11 pass. It is skipped in the ordinary suites.
+- Real: the mounted router over HTTP; `resolveKaiActorContext` with real
+  memberships and roles; the service and all of its SQL; the Postgres upload
+  lifecycle repository; confirm-time byte verification; the bounded per-type
+  detectors and policy CAS; and the frontend's own paths, MIME fallback,
+  parser, and view.
+- Synthetic: object storage (a signed-PUT and exact-generation stand-in), the
+  malware verdict, and the session login.
+
+Per format (CSV, XLSX, MD, TXT, machine-readable PDF), each file is uploaded,
+verified and assessed as `passed`, then:
+- exact replay;
+- the actual 422 `VAL-IDEMP-006` / `duplicate_checksum` with a resolution, plus
+  its blocked-attempt audit, with no checksum or locator in either;
+- use existing file;
+- a new intake version with `original` / `supersedes`, the required audit, and
+  a full re-upload and re-assessment;
+- replay of the new version, and a conflicting key (409 `duplicate_conflict`);
+- a stale 409 with a fresh resolution;
+- other batch (linked, `supersedes` null) and other project;
+- cross-tenant: no match, no disclosure, and a foreign id refused;
+- a denied `client_viewer`;
+- modified bytes.
+
+Also:
+- unfinished uploads, where Continue completes the record and a new version is
+  refused;
+- lapsed uploads, where the new version supersedes the lapsed record;
+- `blocked` and `failed` content from real assessment outcomes: cancel only in
+  every batch, and an override is refused;
+- six racing reservations: one 201, the rest 422 with a resolution through the
+  real partial unique index;
+- six racing new versions: one 201, the rest 409 under the original-row lock;
+- a trigger-forced audit failure: 500, and the row is rolled back.
+
+The dialog test runs the real `KaiWebIntake`, compiled from source by the
+repository's esbuild, in headless Chrome over CDP. It covers:
+- server-listed buttons only;
+- Cancel, which sends no request;
+- Use existing file;
+- a new version;
+- a stale 409 that redraws the dialog to Continue upload, which completes with
+  the bytes still selected;
+- Continue upload of an unfinished `.md` reservation;
+- a malware-blocked PDF that offers Cancel only;
+- no page exceptions.
+
+**Reproduced defect (TOOL_VERIFIED):** retrying the same file selection after
+the server had finished the upload but the browser never saw the confirmation
+(gateway timeout on confirm). The same intent correctly replays its reservation
+(201), but `reserveAndUpload` always treated it as `reserved`. The upload-URL
+request then got 409 `conflict_current_state_changed`, and the user saw
+"Current resource state changed." with no way forward, although the record was
+confirmed and `passed`. The browser test failed at `2a7094e` with exactly that
+page.
+
+**Repair (TOOL_VERIFIED):**
+- `frontend/kaiWebIntakeLogic.js` adds `uploadUrlResultRequiresConfirmOnly`
+  (only a 409 `conflict_current_state_changed`).
+- `KaiWebIntake.transferAndConfirm` then skips signing and the PUT and goes
+  straight to confirmation. Confirmation re-verifies the stored bytes
+  server-side and replays safely. Every other signing failure is still
+  reported.
+- The same change covers Continue upload when the record moved on after the
+  dialog was shown.
+- No backend, schema, SQL, or authorization change.
+- Unit and source-contract test added to
+  `kai-sprint2-intake-duplicate-resolution.spec.js`.
+
+**Results (TOOL_VERIFIED; loopback `DATABASE_URL` sentinel):**
+
+| Command | Pass | Fail | Skipped | Total |
+| --- | --- | --- | --- | --- |
+| Real-DB runner | 11 | 0 | 0 | 11 |
+| `npm run test:kai-sprint2` | 4668 | 0 | 88 | 4756 |
+| `npm test` | 5348 | 0 | 98 | 5446 |
+| `npm run verify:kai-sprint2-api-contract` | 71 | 0 | 0 | 71 |
+| `npm run verify:kai-sprint2-schema-contract` | 21 | 0 | 0 | 21 |
+
+`npm run build` succeeded; the bundle diff is this change plus minifier
+renames. `git diff --check` is clean.
+
+**Limitations (NOT_CONFIRMED):**
+- Production is not confirmed fixed. The local fix is not deployed, and the
+  deployed revision is not known here.
+- The live rows behind the owner's report were not inspected. Whether that
+  record is policy-blocked or security-failed (cancel only by design) is
+  unknown.
+- Object storage, the malware scanner, and the session login are synthetic. The
+  Impact Library shell was not loaded, only `KaiWebIntake` itself.
+- Owner decisions from `2a7094e` remain open: `VAL-OPS-002`, `client_admin`
+  versioning authority, and org-wide unavailability of security-failed content.
+- One `node -e` read of the local schema-capture JSON ran before the sentinel
+  was set. It loaded no database module and made no connection.
+
+**Status:** DUPLICATE_UPLOAD_RESOLUTION_REAL_POSTGRES_PROVEN_AND_RETRY_REPAIRED_LOCALLY.
+No push, deployment, production or shared database, cloud, feature-flag, tenant,
+credential, `.env`, schema/migration, index, or `00_KAI_CURRENT_STATE.md` change.
