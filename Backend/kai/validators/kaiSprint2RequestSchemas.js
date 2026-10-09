@@ -257,6 +257,8 @@ export const KAI_SPRINT2_ROUTE_SCHEMAS = Object.freeze({
     checksum: { type: "string", maxLength: KAI_SPRINT2_P0_STRING_LIMITS.checksumSha256HexLength },
     hash_algorithm: { type: "string", maxLength: KAI_SPRINT2_P0_STRING_LIMITS.machineCodeMaxLength },
     reservation_metadata: { type: "object", schema: metadataMarkerSchema },
+    force_new_version: { type: "boolean" },
+    duplicate_of_intake_file_id: { type: "uuid" },
   }),
 });
 

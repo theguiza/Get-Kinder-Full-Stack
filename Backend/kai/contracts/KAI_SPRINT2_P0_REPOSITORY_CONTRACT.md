@@ -1542,6 +1542,19 @@ The internal repository interface defines one exact-identity, repository-neutral
 
 Declared-checksum duplicate detection is preliminary and organization-scoped. It never represents independent object verification. `force_new_version` may permit an explicitly authorized new version, but the new record must link to its predecessor, receive a new immutable object-version identity, and retain its own checksum and audit history. Final uniqueness and concurrency behavior require Gate A verification.
 
+Every declared-checksum match still returns the `VAL-IDEMP-006` blocker (422). The response `data.duplicate_resolution` (`kai_intake_duplicate_resolution_v1`) adds the restricted same-organization facts of the matched record and the actions the backend can execute, from one classifier for every file type (`Backend/kai/services/kaiIntakeDuplicateResolution.js`):
+
+```text
+same batch, confirmed (policy pending/passed):  use_existing_file, upload_new_intake_version
+same batch, upload unfinished and unexpired:    continue_upload (new version denied)
+same batch, upload abandoned/expired/lapsed:    upload_new_intake_version
+other batch or engagement in the organization:  upload_new_intake_version (linked duplicate candidate)
+any record policy-blocked or security-failed:   no action (cancel only)
+declared size differs from the matched record:  no action (cancel only)
+```
+
+`upload_new_intake_version` is a reservation with `force_new_version=true` and `duplicate_of_intake_file_id` naming the presented record. One transaction locks the organization's unforced original row for the checksum, re-checks replay, re-classifies, requires the presented record and permitted action to still hold (otherwise 409 `conflict_current_state_changed` with a fresh resolution, or the 422 blocker), inserts a `force_new_version=true` row with `original_intake_file_id` (the original) and, for the same batch only, `supersedes_intake_file_id` (the presented record), and writes a required metadata-only `reserve_intake_file_new_version` audit. The new row starts reserved/pending/quarantined, so upload, byte verification, security assessment, and parsing run again. It never creates a source, source version, evidence item, or claim. The reservation fingerprint field list is unchanged; the new-version intent is compared separately on replay.
+
 ## Authorization and operation matrix
 
 Every human operation requires a mapped actor and active membership in the target organization. P0 mutation additionally requires the named global role, except for the two owner-authorized client-write operations noted below:

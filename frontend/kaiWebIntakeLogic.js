@@ -131,19 +131,128 @@ export function generateIdempotencyKey() {
   return [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
-// Resolves the idempotency key for one logical file-reservation operation.
-// The server blocks duplicate declared checksums, so browser retries must key
-// the reservation by the same batch + checksum identity that the server uses.
-export function resolveFileReservationIdempotencyKey(previousIdentity, intakeBatchId, checksum) {
-  const key = `file-${intakeBatchId}-${checksum}`;
+// Resolves the idempotency key for one logical file-reservation intent: one
+// file selection, in one batch, with the checksum of exactly the bytes
+// selected, optionally as an explicit new version of one existing file.
+// A retry of that intent replays the same key; choosing a file again, a
+// different file, another batch, or a new-version decision is a new intent
+// and mints a new key. Repeated uploads of content already held are resolved
+// by the server's duplicate-resolution response, not by key reuse.
+export function resolveFileReservationIdempotencyKey(
+  previousIdentity,
+  { selectionId, intakeBatchId, checksum, duplicateOfIntakeFileId = null },
+  mintKey = generateIdempotencyKey,
+) {
   if (
     previousIdentity &&
+    previousIdentity.selectionId === selectionId &&
     previousIdentity.intakeBatchId === intakeBatchId &&
-    previousIdentity.checksum === checksum
+    previousIdentity.checksum === checksum &&
+    previousIdentity.duplicateOfIntakeFileId === duplicateOfIntakeFileId
   ) {
     return previousIdentity;
   }
-  return { intakeBatchId, checksum, key };
+  return { selectionId, intakeBatchId, checksum, duplicateOfIntakeFileId, key: `file-${mintKey()}` };
+}
+
+// Server-allowed MIME for each supported extension, used only when the
+// browser reports no type for the selected file (common for .md and .txt).
+// A browser-reported type is always sent as reported.
+const MIME_TYPE_BY_SUPPORTED_EXTENSION = Object.freeze({
+  ".csv": "text/csv",
+  ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ".md": "text/markdown",
+  ".txt": "text/plain",
+  ".pdf": "application/pdf",
+});
+
+export function declaredMimeTypeForFile(file) {
+  if (typeof file?.type === "string" && file.type.length > 0) return file.type;
+  return MIME_TYPE_BY_SUPPORTED_EXTENSION[fileExtensionOf(file?.name)] || "application/octet-stream";
+}
+
+export const DUPLICATE_RESOLUTION_ACTION = Object.freeze({
+  USE_EXISTING_FILE: "use_existing_file",
+  CONTINUE_UPLOAD: "continue_upload",
+  UPLOAD_NEW_INTAKE_VERSION: "upload_new_intake_version",
+  CANCEL: "cancel",
+});
+
+const KNOWN_DUPLICATE_ACTIONS = new Set(Object.values(DUPLICATE_RESOLUTION_ACTION));
+
+// The server's duplicate-resolution payload (422 VAL-IDEMP-006, or 409 when
+// the presented file changed), or null for any other response.
+export function duplicateResolutionFromResult(result) {
+  if (result?.statusCode !== 422 && result?.statusCode !== 409) return null;
+  const resolution = result?.body?.data?.duplicate_resolution;
+  if (
+    !resolution
+    || resolution.contract !== "kai_intake_duplicate_resolution_v1"
+    || typeof resolution.existing_file?.intake_file_id !== "string"
+    || typeof resolution.existing_file?.intake_batch_id !== "string"
+    || !Array.isArray(resolution.available_actions)
+  ) {
+    return null;
+  }
+  return {
+    ...resolution,
+    available_actions: resolution.available_actions.filter((action) => KNOWN_DUPLICATE_ACTIONS.has(action)),
+  };
+}
+
+const DUPLICATE_LOCATION_TEXT = Object.freeze({
+  duplicate_in_batch: "In this batch",
+  duplicate_in_other_batch: "In another batch in this project",
+  duplicate_in_other_engagement: "In another project in this organization",
+});
+
+const EXISTING_STATE_TEXT = Object.freeze({
+  confirmed: "Uploaded",
+  upload_in_progress: "Upload not finished",
+  upload_not_completed: "Upload did not complete",
+  blocked_by_policy: "Blocked by a file security policy",
+  security_check_failed: "Security check could not run",
+  unknown: "Status unavailable",
+});
+
+const DUPLICATE_RESTRICTION_TEXT = Object.freeze({
+  blocked_by_policy:
+    "An identical file was blocked by a file security policy, so this copy can't be added. Correct the file and upload the corrected version, or contact Get Kinder.",
+  security_check_failed:
+    "The security check for the identical file could not run. Uploading the same file again won't resolve this. Contact Get Kinder.",
+  upload_in_progress:
+    "An upload of this file in this batch hasn't finished. Continue that upload instead of starting another.",
+  declared_size_mismatch:
+    "The selected file's size doesn't match the earlier file. Choose the file again and retry.",
+  state_unknown: "The earlier file's status can't be confirmed, so no action is available. Contact Get Kinder.",
+});
+
+function duplicateActionLabel(action, duplicateStatus) {
+  if (action === DUPLICATE_RESOLUTION_ACTION.USE_EXISTING_FILE) return "Use existing file";
+  if (action === DUPLICATE_RESOLUTION_ACTION.CONTINUE_UPLOAD) return "Continue upload";
+  if (action === DUPLICATE_RESOLUTION_ACTION.UPLOAD_NEW_INTAKE_VERSION) {
+    return duplicateStatus === "duplicate_in_batch"
+      ? "Upload again as a new intake version"
+      : "Upload to this batch as a linked copy";
+  }
+  return "Cancel";
+}
+
+// Display model for the resolution card: only the actions the server listed.
+export function duplicateResolutionView(resolution) {
+  const existing = resolution.existing_file;
+  return {
+    heading: "This file has already been added.",
+    existingFilename: existing.safe_filename,
+    location: DUPLICATE_LOCATION_TEXT[resolution.duplicate_status] || "In this organization",
+    status: EXISTING_STATE_TEXT[existing.existing_state] || EXISTING_STATE_TEXT.unknown,
+    processingStatus: existing.processing_status,
+    restriction: resolution.restriction_code ? DUPLICATE_RESTRICTION_TEXT[resolution.restriction_code] || null : null,
+    actions: resolution.available_actions.map((action) => ({
+      action,
+      label: duplicateActionLabel(action, resolution.duplicate_status),
+    })),
+  };
 }
 
 export function fileExtensionOf(filename) {

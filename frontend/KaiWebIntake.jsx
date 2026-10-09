@@ -3,6 +3,10 @@ import {
   batchesPath,
   confirmUploadPath,
   createBatchPath,
+  declaredMimeTypeForFile,
+  DUPLICATE_RESOLUTION_ACTION,
+  duplicateResolutionFromResult,
+  duplicateResolutionView,
   engagementsPath,
   errorText,
   fileDetailPath,
@@ -120,6 +124,13 @@ export default function KaiWebIntake({
   const createBatchIdempotencyKeyRef = useRef(null);
   const fileReservationIdempotencyKeyRef = useRef(null);
   const fileReservationIdentityRef = useRef(null);
+  // Each file-input change is a new selection, so a reservation intent (and
+  // its idempotency key, checksum, and any duplicate resolution) never
+  // carries over to a different choice of file.
+  const [fileSelectionId, setFileSelectionId] = useState(0);
+  // { resolution, selectedFile, selectionId, intakeBatchId } from the
+  // server's duplicate-resolution response for the current selection.
+  const [duplicateResolution, setDuplicateResolution] = useState(null);
   // Server-backed batch/file reconstruction runs only when a parent owns the
   // active engagement; standalone mounts keep their manual-load contract.
   const engagementScoped = Boolean(parentEngagementId);
@@ -216,6 +227,7 @@ export default function KaiWebIntake({
     createBatchIdempotencyKeyRef.current = null;
     fileReservationIdempotencyKeyRef.current = null;
     fileReservationIdentityRef.current = null;
+    setDuplicateResolution(null);
     // Organization change invalidates any previously reported profile
     // identity: it belonged to the prior organization's file selection.
     reportSensitivityProfileDiscovered(null);
@@ -278,6 +290,7 @@ export default function KaiWebIntake({
     createBatchIdempotencyKeyRef.current = null;
     fileReservationIdempotencyKeyRef.current = null;
     fileReservationIdentityRef.current = null;
+    setDuplicateResolution(null);
     reportSensitivityProfileDiscovered(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [parentEngagementId]);
@@ -390,85 +403,104 @@ export default function KaiWebIntake({
     if (engagementScoped) bootstrapEngagementBatches(result.body?.data?.intake_batch_id || "");
   }, [organizationId, engagementId, batchCode, engagementScoped, bootstrapEngagementBatches]);
 
-  const reserveAndUpload = useCallback(async () => {
+  // Gate C-2A: reserve -> requestUploadUrl -> signed browser PUT to GCS ->
+  // confirmUpload. The signed URL/headers live only in this local scope for
+  // the duration of the PUT; they are never stored in component state,
+  // rendered, or logged. A reservation already past "reserved" has its bytes
+  // in storage, so only confirmation remains. Confirmation always re-verifies
+  // the stored bytes against the reservation's declared checksum and size.
+  const transferAndConfirm = useCallback(async ({ reservedFileId, selectedFile, uploadState }) => {
+    if (uploadState === "reserved") {
+      const uploadUrlResult = await postJson(requestUploadUrlPath(intakeBatchId), {
+        organization_id: organizationId,
+        engagement_id: engagementId,
+        intake_file_id: reservedFileId,
+      });
+      if (uploadUrlResult.statusCode !== 200 || !uploadUrlResult.body?.ok) {
+        return { ok: false, message: errorText(uploadUrlResult) };
+      }
+      const { upload_url: uploadUrl, upload_method: uploadMethod, upload_headers: uploadHeaders } = uploadUrlResult.body.data;
+
+      const putResult = await putToSignedUrl(uploadUrl, uploadMethod, uploadHeaders, selectedFile);
+      if (!putResult.ok) {
+        return { ok: false, message: `Upload failed (${putResult.statusCode}).` };
+      }
+    }
+
+    const confirmResult = await postJson(confirmUploadPath(organizationId, reservedFileId), {
+      organization_id: organizationId,
+    });
+    if (confirmResult.statusCode !== 200) {
+      return { ok: false, message: errorText(confirmResult) };
+    }
+    return { ok: true };
+  }, [organizationId, engagementId, intakeBatchId]);
+
+  const reserveAndUpload = useCallback(async ({ duplicateOfIntakeFileId = null } = {}) => {
     if (!organizationId || !engagementId || !intakeBatchId || !file) {
       setMessage("A batch and a chosen file are required.");
       return;
     }
     setBusy(true);
     setMessage("");
+    setDuplicateResolution(null);
 
-    const checksum = await sha256HexOfFile(file);
+    const selectedFile = file;
+    const selectionId = fileSelectionId;
+    // Always the checksum of exactly the bytes selected now - never a value
+    // carried over from an earlier selection.
+    const checksum = await sha256HexOfFile(selectedFile);
 
-    // The server's preliminary duplicate protection is checksum-based, so
-    // retrying the same file content in the same batch must replay the same
-    // reservation key instead of minting a fresh key that trips VAL-IDEMP-006.
     fileReservationIdentityRef.current = resolveFileReservationIdempotencyKey(
       fileReservationIdentityRef.current,
-      intakeBatchId,
-      checksum,
+      { selectionId, intakeBatchId, checksum, duplicateOfIntakeFileId },
     );
     fileReservationIdempotencyKeyRef.current = fileReservationIdentityRef.current.key;
 
     const reserveResult = await postJson(fileReservationsPath(intakeBatchId), {
       organization_id: organizationId,
       engagement_id: engagementId,
-      original_filename: file.name,
-      file_extension: fileExtensionOf(file.name),
-      mime_type: file.type || "text/csv",
-      file_size_bytes: file.size,
+      original_filename: selectedFile.name,
+      file_extension: fileExtensionOf(selectedFile.name),
+      mime_type: declaredMimeTypeForFile(selectedFile),
+      file_size_bytes: selectedFile.size,
       checksum,
       hash_algorithm: "sha256",
       idempotency_key: fileReservationIdempotencyKeyRef.current,
+      ...(duplicateOfIntakeFileId
+        ? { force_new_version: true, duplicate_of_intake_file_id: duplicateOfIntakeFileId }
+        : {}),
     });
     if (reserveResult.statusCode !== 201 && reserveResult.statusCode !== 200) {
       setBusy(false);
+      const resolution = duplicateResolutionFromResult(reserveResult);
+      if (resolution) {
+        setDuplicateResolution({ resolution, selectedFile, selectionId, intakeBatchId });
+        return;
+      }
       setMessage(errorText(reserveResult));
       return;
     }
     const reservedFileId = reserveResult.body?.data?.intake_file_id;
     setIntakeFileId(reservedFileId || "");
 
-    // Gate C-2A: reserve -> requestUploadUrl -> signed browser PUT to GCS ->
-    // confirmUpload. The signed URL/headers live only in this local scope for
-    // the duration of the PUT; they are never stored in component state,
-    // rendered, or logged.
-    const uploadUrlResult = await postJson(requestUploadUrlPath(intakeBatchId), {
-      organization_id: organizationId,
-      engagement_id: engagementId,
-      intake_file_id: reservedFileId,
-    });
-    if (uploadUrlResult.statusCode !== 200 || !uploadUrlResult.body?.ok) {
-      setBusy(false);
-      setMessage(errorText(uploadUrlResult));
-      return;
-    }
-    const { upload_url: uploadUrl, upload_method: uploadMethod, upload_headers: uploadHeaders } = uploadUrlResult.body.data;
-
-    const putResult = await putToSignedUrl(uploadUrl, uploadMethod, uploadHeaders, file);
-    if (!putResult.ok) {
-      setBusy(false);
-      setMessage(`Upload failed (${putResult.statusCode}).`);
-      return;
-    }
-
-    const confirmResult = await postJson(confirmUploadPath(organizationId, reservedFileId), {
-      organization_id: organizationId,
-    });
+    const transfer = await transferAndConfirm({ reservedFileId, selectedFile, uploadState: "reserved" });
     setBusy(false);
-    if (confirmResult.statusCode !== 200) {
-      setMessage(errorText(confirmResult));
+    if (!transfer.ok) {
+      setMessage(transfer.message);
       return;
     }
     fileReservationIdentityRef.current = null;
     fileReservationIdempotencyKeyRef.current = null;
-    setMessage("File reserved, uploaded, and confirmed.");
-  }, [organizationId, engagementId, intakeBatchId, file]);
+    setMessage(duplicateOfIntakeFileId
+      ? "New intake version reserved, uploaded, and confirmed."
+      : "File reserved, uploaded, and confirmed.");
+  }, [organizationId, engagementId, intakeBatchId, file, fileSelectionId, transferAndConfirm]);
 
-  const refreshFileStatus = useCallback(async () => {
-    if (!organizationId || !intakeFileId) return;
+  const loadFileStatus = useCallback(async (targetIntakeFileId) => {
+    if (!organizationId || !targetIntakeFileId) return;
     setBusy(true);
-    const result = await getJson(fileDetailPath(organizationId, intakeFileId));
+    const result = await getJson(fileDetailPath(organizationId, targetIntakeFileId));
     setBusy(false);
     if (result.statusCode !== 200 || !result.body?.ok) {
       setFileStatus(null);
@@ -483,16 +515,84 @@ export default function KaiWebIntake({
     if (typeof onSensitivityProfileDiscovered !== "function") return;
     sensitivityLookupSeqRef.current += 1;
     const lookupSeq = sensitivityLookupSeqRef.current;
-    const intakeSensitivityProfileId = await readIntakeFileSensitivityProfileId({ organizationId, intakeFileId });
+    const intakeSensitivityProfileId = await readIntakeFileSensitivityProfileId({
+      organizationId,
+      intakeFileId: targetIntakeFileId,
+    });
     if (
       lookupSeq !== sensitivityLookupSeqRef.current
-      || intakeFileIdRef.current !== intakeFileId
+      || intakeFileIdRef.current !== targetIntakeFileId
       || organizationIdRef.current !== organizationId
     ) {
       return;
     }
     reportSensitivityProfileDiscovered(intakeSensitivityProfileId);
-  }, [organizationId, intakeFileId, onSensitivityProfileDiscovered, refreshPipeline, reportSensitivityProfileDiscovered]);
+  }, [organizationId, onSensitivityProfileDiscovered, refreshPipeline, reportSensitivityProfileDiscovered]);
+
+  const refreshFileStatus = useCallback(() => loadFileStatus(intakeFileId), [loadFileStatus, intakeFileId]);
+
+  // Executes only an action the server listed for this selection's duplicate
+  // resolution. Use existing file reads that file's detail; Continue upload
+  // finishes the existing reservation with the selected bytes; a new intake
+  // version is an explicit, server-validated reservation of the selected
+  // bytes that names the existing file it resolves.
+  const resolveDuplicate = useCallback(async (action) => {
+    const pending = duplicateResolution;
+    if (!pending) return;
+    if (pending.selectionId !== fileSelectionId || pending.intakeBatchId !== intakeBatchId) {
+      setDuplicateResolution(null);
+      setMessage("The selected file or batch changed. Upload the file again.");
+      return;
+    }
+    if (!pending.resolution.available_actions.includes(action)) return;
+    const existing = pending.resolution.existing_file;
+    setDuplicateResolution(null);
+
+    if (action === DUPLICATE_RESOLUTION_ACTION.CANCEL) {
+      setMessage("");
+      return;
+    }
+    if (action === DUPLICATE_RESOLUTION_ACTION.USE_EXISTING_FILE) {
+      setIntakeFileId(existing.intake_file_id);
+      intakeFileIdRef.current = existing.intake_file_id;
+      setFileStatus(null);
+      setMessage(`Using the existing file ${existing.safe_filename}.`);
+      reportSensitivityProfileDiscovered(null);
+      await loadFileStatus(existing.intake_file_id);
+      return;
+    }
+    if (action === DUPLICATE_RESOLUTION_ACTION.CONTINUE_UPLOAD) {
+      setBusy(true);
+      setMessage("");
+      setIntakeFileId(existing.intake_file_id);
+      const transfer = await transferAndConfirm({
+        reservedFileId: existing.intake_file_id,
+        selectedFile: pending.selectedFile,
+        uploadState: existing.upload_state,
+      });
+      setBusy(false);
+      setMessage(transfer.ok ? "Upload continued and confirmed." : transfer.message);
+      return;
+    }
+    if (action === DUPLICATE_RESOLUTION_ACTION.UPLOAD_NEW_INTAKE_VERSION) {
+      await reserveAndUpload({ duplicateOfIntakeFileId: existing.intake_file_id });
+    }
+  }, [
+    duplicateResolution,
+    fileSelectionId,
+    intakeBatchId,
+    loadFileStatus,
+    reportSensitivityProfileDiscovered,
+    reserveAndUpload,
+    transferAndConfirm,
+  ]);
+
+  const visibleDuplicateResolution =
+    duplicateResolution
+    && duplicateResolution.selectionId === fileSelectionId
+    && duplicateResolution.intakeBatchId === intakeBatchId
+      ? duplicateResolutionView(duplicateResolution.resolution)
+      : null;
 
   const loadBatchFiles = useCallback(async () => {
     if (!organizationId || !intakeBatchId) return;
@@ -649,11 +749,41 @@ export default function KaiWebIntake({
         <input
           type="file"
           className="form-control form-control-sm mb-2"
-          onChange={(event) => setFile(event.target.files?.[0] || null)}
+          onChange={(event) => {
+            setFile(event.target.files?.[0] || null);
+            setFileSelectionId((value) => value + 1);
+            setDuplicateResolution(null);
+          }}
+          disabled={busy}
         />
-        <button type="button" className="btn btn-sm btn-primary" onClick={reserveAndUpload} disabled={busy || !intakeBatchId || !file}>
+        <button type="button" className="btn btn-sm btn-primary" onClick={() => reserveAndUpload()} disabled={busy || !intakeBatchId || !file}>
           Upload the selected file
         </button>
+        {visibleDuplicateResolution ? (
+          <div className="alert alert-info py-2 small mt-2 mb-0" role="status">
+            <div className="fw-semibold mb-1">{visibleDuplicateResolution.heading}</div>
+            <div>Existing file: {visibleDuplicateResolution.existingFilename}</div>
+            <div>Location: {visibleDuplicateResolution.location}</div>
+            <div>Status: {visibleDuplicateResolution.status}</div>
+            <div>Processing: {visibleDuplicateResolution.processingStatus}</div>
+            {visibleDuplicateResolution.restriction ? (
+              <div className="mt-1">{visibleDuplicateResolution.restriction}</div>
+            ) : null}
+            <div className="d-flex flex-wrap gap-2 mt-2">
+              {visibleDuplicateResolution.actions.map(({ action, label }) => (
+                <button
+                  key={action}
+                  type="button"
+                  className={action === DUPLICATE_RESOLUTION_ACTION.CANCEL ? "btn btn-sm btn-outline-secondary" : "btn btn-sm btn-primary"}
+                  onClick={() => resolveDuplicate(action)}
+                  disabled={busy}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
         {intakeFileId ? <div className="small mt-2">Intake file id: {intakeFileId}</div> : null}
       </div>
       ) : (

@@ -1125,6 +1125,22 @@ test("file reservation blocks preliminary duplicate declared checksums without v
         duplicateLookupInput = input;
         return { checksum: declaredChecksum };
       },
+      async listIntakeFileChecksumMatches() {
+        return [{
+          intake_file_id: "1fe568b1-5c05-4c42-bb1f-6e20de216c7b",
+          intake_batch_id: intakeBatchId,
+          organization_id: organizationId,
+          engagement_id: engagementId,
+          safe_filename: "safe.csv",
+          file_extension: ".csv",
+          file_size_bytes: 0,
+          upload_state: "confirmed",
+          upload_expires_at: "2026-07-13T10:00:00.000Z",
+          file_policy_status: "passed",
+          processing_status: "quarantined",
+          created_at: "2026-07-12T10:00:00.000Z",
+        }];
+      },
       async insertIntakeFileMetadata() {
         inserted = true;
       },
@@ -1140,6 +1156,12 @@ test("file reservation blocks preliminary duplicate declared checksums without v
   assert.equal(result.blockers[0].blocking_reason, "duplicate_checksum");
   assert.equal(result.blockers[0].evidence.duplicate_evaluation, "preliminary_declared_checksum_match");
   assert.equal(result.blockers[0].evidence.storage_checksum_verified, false);
+  assert.equal(result.data.duplicate_resolution.duplicate_status, "duplicate_in_batch");
+  assert.deepEqual(result.data.duplicate_resolution.available_actions, [
+    "use_existing_file",
+    "upload_new_intake_version",
+    "cancel",
+  ]);
   assert.equal(inserted, false);
 });
 

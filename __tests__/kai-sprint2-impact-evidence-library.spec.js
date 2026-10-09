@@ -3457,8 +3457,8 @@ test("KAI B1A-3B-R2: KaiWebIntake exposes an explicit opt-in onSensitivityProfil
   );
   // The GK lookup is issued only for an opted-in mount.
   const refreshRegion = intakeSource.slice(
+    intakeSource.indexOf("const loadFileStatus"),
     intakeSource.indexOf("const refreshFileStatus"),
-    intakeSource.indexOf("const loadBatchFiles"),
   );
   const optInGuard = refreshRegion.indexOf('if (typeof onSensitivityProfileDiscovered !== "function") return;');
   const lookupCall = refreshRegion.indexOf("readIntakeFileSensitivityProfileId(");
@@ -3537,11 +3537,11 @@ test("KAI B1A-3B-R2: resolved profiles remain discoverable through the same GK f
   // resolved/superseded decision is reported exactly the same way as a
   // brand-new one.
   const refreshRegion = intakeSource.slice(
+    intakeSource.indexOf("const loadFileStatus"),
     intakeSource.indexOf("const refreshFileStatus"),
-    intakeSource.indexOf("const loadBatchFiles"),
   );
   assert.doesNotMatch(refreshRegion, /review_status|queue_status|current_decision/);
-  assert.match(refreshRegion, /readIntakeFileSensitivityProfileId\(\{ organizationId, intakeFileId \}\)/);
+  assert.match(refreshRegion, /readIntakeFileSensitivityProfileId\(\{\s*organizationId,\s*intakeFileId: targetIntakeFileId,\s*\}\)/);
 
   const readModelSource = readFileSync("Backend/kai/db/kaiReviewCockpitReadModels.js", "utf8");
   const lookupRegion = readModelSource.slice(

@@ -20,6 +20,9 @@ import {
   getScopedIntakeFileSecurityAssessmentFacts,
   insertIntakeBatchMetadata,
   insertIntakeFileMetadata,
+  insertIntakeFileNewVersionMetadata,
+  listIntakeFileChecksumMatches,
+  lockIntakeFileChecksumOriginal,
 } from "../db/kaiIntakeQueries.js";
 import { withTransaction } from "../db/kaiDb.js";
 import { insertRequiredSuccessfulAuditEvent } from "../db/kaiAuditQueries.js";
@@ -62,6 +65,13 @@ import {
 } from "../validators/idempotencyValidators.js";
 import { runValidators } from "../validators/runValidators.js";
 import { recordBlockedAttempt } from "./kaiAuditService.js";
+import {
+  DUPLICATE_RESOLUTION_ACTIONS,
+  classifyIntakeFileDuplicate,
+  duplicateResolutionResponse,
+  newIntakeVersionLineage,
+  newIntakeVersionWarning,
+} from "./kaiIntakeDuplicateResolution.js";
 
 const PASS2_MARKER = "pass2_admin_metadata_intake_verification";
 const PASS2_GATE_PLAN = "KAI_MVP_Sprint2_P0_Pass2_Production_Synthetic_Metadata_Write_Gate_Plan_v0.1.1";
@@ -612,10 +622,17 @@ function explicitSafeFilenameInput(input = {}, payload = {}) {
   return undefined;
 }
 
-function normalizeReservationMetadata({ payload, idempotencyKey, reservationPayloadHash }) {
-  return {
+function normalizeReservationMetadata({ payload, idempotencyKey, reservationPayloadHash, duplicateResolution = null }) {
+  const metadata = {
     ...(payload.reservation_metadata && typeof payload.reservation_metadata === "object" ? payload.reservation_metadata : {}),
     ...(payload.file_metadata && typeof payload.file_metadata === "object" ? payload.file_metadata : {}),
+  };
+  // Only the service records a duplicate-resolution intent; a caller-supplied
+  // value is never persisted.
+  delete metadata.duplicate_resolution;
+  return {
+    ...metadata,
+    ...(duplicateResolution ? { duplicate_resolution: duplicateResolution } : {}),
     p0_pass: PASS2_MARKER,
     gate_plan: PASS2_GATE_PLAN,
     synthetic_only: true,
@@ -2191,14 +2208,29 @@ async function authorizeUploadReservedIntakeFile(input = {}, dependencies = {}) 
   };
 }
 
-function fileReservationReplayResult(row, expectedFingerprint, actorContext) {
+function storedDuplicateResolution(row) {
+  const stored = row?.file_metadata?.duplicate_resolution;
+  return stored && typeof stored === "object" && !Array.isArray(stored) ? stored : null;
+}
+
+function fileReservationReplayResult(row, expectedFingerprint, actorContext, duplicateIntent = { forced: false }) {
   if (hasConflictingFingerprint(row, expectedFingerprint, "file_metadata", "reservation_payload_hash")) {
+    return buildKaiError("duplicate_conflict");
+  }
+  // The reservation fingerprint field list is contract-fixed, so the
+  // new-version intent is compared separately: one idempotency identity can
+  // never mean both an ordinary reservation and a new intake version, or two
+  // different new versions.
+  const stored = storedDuplicateResolution(row);
+  const storedDuplicateOf = stored?.force_new_version === true ? stored.duplicate_of_intake_file_id : null;
+  const requestedDuplicateOf = duplicateIntent.forced ? duplicateIntent.duplicateOfIntakeFileId : null;
+  if ((storedDuplicateOf || null) !== (requestedDuplicateOf || null)) {
     return buildKaiError("duplicate_conflict");
   }
   return {
     ok: true,
     data: responseFile(row),
-    warnings: [],
+    warnings: storedDuplicateOf ? [newIntakeVersionWarning(stored.duplicate_status)] : [],
     audit_context: {
       actor_user_id: actorContext.actorUserId,
       actor_type: actorContext.actorType,
@@ -2373,6 +2405,86 @@ export async function createIntakeBatch(input = {}, dependencies = {}) {
   };
 }
 
+const DECLARED_CHECKSUM_UNIQUE_CONSTRAINTS = new Set([
+  "ux_intake_files_gate_a_org_declared_checksum",
+  "ux_intake_files_org_checksum_default",
+]);
+
+function isDeclaredChecksumUniqueViolation(error) {
+  return error?.code === "23505" && DECLARED_CHECKSUM_UNIQUE_CONSTRAINTS.has(error?.constraint);
+}
+
+/**
+ * force_new_version is honored only together with the exact existing intake
+ * file the actor was shown and chose to resolve against, so a new intake
+ * record is never created blind or against a different record than the one
+ * presented.
+ */
+function reservationDuplicateIntent(input = {}, payload = {}) {
+  const force = Object.hasOwn(input, "forceNewVersion") ? input.forceNewVersion : payload.force_new_version;
+  const duplicateOf = Object.hasOwn(input, "duplicateOfIntakeFileId")
+    ? input.duplicateOfIntakeFileId
+    : payload.duplicate_of_intake_file_id;
+  if (force === true) {
+    if (typeof duplicateOf !== "string" || !UUID_RE.test(duplicateOf) || duplicateOf !== duplicateOf.toLowerCase()) {
+      return { ok: false, message: "force_new_version requires duplicate_of_intake_file_id." };
+    }
+    return { ok: true, forced: true, duplicateOfIntakeFileId: duplicateOf };
+  }
+  if (force !== undefined && force !== null && force !== false) {
+    return { ok: false, message: "force_new_version must be a boolean." };
+  }
+  if (duplicateOf !== undefined && duplicateOf !== null) {
+    return { ok: false, message: "duplicate_of_intake_file_id requires force_new_version=true." };
+  }
+  return { ok: true, forced: false };
+}
+
+async function classifyReservationDuplicate(lookup, dependencies, db) {
+  const listMatches = dependencies.listIntakeFileChecksumMatches || listIntakeFileChecksumMatches;
+  const matches = await listMatches({
+    organizationId: lookup.organizationId,
+    checksum: lookup.checksum,
+    intakeBatchId: lookup.intakeBatchId,
+    engagementId: lookup.engagementId,
+  }, db);
+  return classifyIntakeFileDuplicate({
+    matches,
+    organizationId: lookup.organizationId,
+    intakeBatchId: lookup.intakeBatchId,
+    engagementId: lookup.engagementId,
+    safeFilename: lookup.safeFilename,
+    fileExtension: lookup.fileExtension,
+    declaredSizeBytes: lookup.fileSizeBytes,
+    now: lookup.now,
+  });
+}
+
+/**
+ * VAL-IDEMP-006 stays the blocker for every declared-checksum match; the
+ * response additionally carries the restricted resolution the backend can
+ * execute for this match.
+ */
+async function duplicateChecksumBlockedResponse({ checksum, classification, actorContext, auditMetadata, dependencies }) {
+  const duplicateValidation = await runValidators(
+    PRELIMINARY_DUPLICATE_VALIDATORS,
+    { checksum, duplicateChecksums: [checksum] },
+    { group_key: "reserve_intake_file_metadata_preliminary_duplicate" },
+  );
+  const response = await toBlockerResponse(duplicateValidation.blockers, actorContext, "reserve_intake_file_metadata", {
+    ...auditMetadata,
+    duplicate_evaluation: "preliminary_declared_checksum_match",
+    storage_checksum_verified: false,
+  }, dependencies);
+  return classification
+    ? { ...response, data: { duplicate_resolution: duplicateResolutionResponse(classification) } }
+    : response;
+}
+
+function reservationNow(dependencies = {}) {
+  return typeof dependencies.now === "function" ? new Date(dependencies.now()) : new Date();
+}
+
 export async function reserveIntakeFileMetadata(input = {}, dependencies = {}) {
   if (!isKaiSprint2Enabled(dependencies.env || process.env)) {
     return buildKaiError("feature_disabled");
@@ -2392,6 +2504,9 @@ export async function reserveIntakeFileMetadata(input = {}, dependencies = {}) {
 
   const auth = validateActorCanPerformOperation(actorContext, "create_intake_file", organizationId);
   if (!auth.ok) return buildKaiError(auth.error_code, { blockers: auth.blockers });
+
+  const duplicateIntent = reservationDuplicateIntent(input, payload);
+  if (!duplicateIntent.ok) return buildKaiError("invalid_request", { message: duplicateIntent.message });
 
   const batchRecord = dependencies.getIntakeBatchTenantState
     ? await dependencies.getIntakeBatchTenantState(intakeBatchId, organizationId)
@@ -2546,76 +2661,259 @@ export async function reserveIntakeFileMetadata(input = {}, dependencies = {}) {
   });
   const existing = await findExisting(idempotencyLookup);
   if (existing) {
-    return fileReservationReplayResult(existing, reservationPayloadHash, actorContext);
+    return fileReservationReplayResult(existing, reservationPayloadHash, actorContext, duplicateIntent);
   }
 
+  const fileExtension = input.fileExtension || payload.file_extension || null;
+  const fileSizeBytes = input.fileSizeBytes ?? payload.file_size_bytes ?? 0;
+  const duplicateLookup = Object.freeze({
+    organizationId,
+    checksum,
+    intakeBatchId,
+    engagementId,
+    safeFilename: filenameResult.safeFilename,
+    fileExtension,
+    fileSizeBytes,
+    now: reservationNow(dependencies),
+  });
+  const duplicateAuditMetadata = Object.freeze({
+    organization_id: organizationId,
+    engagement_id: engagementId,
+    intake_batch_id: intakeBatchId,
+    route: routeName(input.route, "/api/kai/sprint2/intake/admin/batches/:intakeBatchId/file-reservations"),
+    request_id: input.requestId || null,
+  });
+
+  // VAL-IDEMP-006 trigger: unchanged organization-scoped declared-checksum
+  // predicate (the same rows the declared-checksum unique index covers).
   const findDuplicate = dependencies.findIntakeFileReservationByChecksum || findIntakeFileReservationByChecksum;
   const duplicate = await findDuplicate({ organizationId, checksum });
-  if (duplicate) {
-    const duplicateValidation = await runValidators(
-      PRELIMINARY_DUPLICATE_VALIDATORS,
-      { checksum, duplicateChecksums: [duplicate.checksum || checksum] },
-      { group_key: "reserve_intake_file_metadata_preliminary_duplicate" },
-    );
-    if (!duplicateValidation.ok) {
-      return await toBlockerResponse(duplicateValidation.blockers, actorContext, "reserve_intake_file_metadata", {
-        organization_id: organizationId,
-        engagement_id: engagementId,
-        intake_batch_id: intakeBatchId,
-        route: routeName(input.route, "/api/kai/sprint2/intake/admin/batches/:intakeBatchId/file-reservations"),
-        request_id: input.requestId || null,
-        duplicate_evaluation: "preliminary_declared_checksum_match",
-        storage_checksum_verified: false,
-      }, dependencies);
-    }
+  if (duplicate && !duplicateIntent.forced) {
+    return await duplicateChecksumBlockedResponse({
+      checksum,
+      classification: await classifyReservationDuplicate(duplicateLookup, dependencies),
+      actorContext,
+      auditMetadata: duplicateAuditMetadata,
+      dependencies,
+    });
+  }
+  if (!duplicate && duplicateIntent.forced) {
+    return buildKaiError("conflict_current_state_changed", {
+      message: "No existing file with this checksum remains to version. Upload the file normally.",
+    });
   }
 
-  const fileMetadata = normalizeReservationMetadata({ payload, idempotencyKey, reservationPayloadHash });
-  const fileSizeBytes = input.fileSizeBytes ?? payload.file_size_bytes ?? 0;
   if (Number.isSafeInteger(fileSizeBytes) && fileSizeBytes > KAI_SPRINT2_MAX_FILE_SIZE_BYTES) {
     return fileTooLargeUploadFailure();
   }
   const storageBucket = dependencies.storageBucket || null;
   const storageUri =
     `reservation://kai/${storageProvider}/org/${organizationId}/intake/${intakeBatchId}/${intakeFileId}/${filenameResult.safeFilename}`;
+  const fileFields = {
+    intakeFileId,
+    intakeBatchId,
+    organizationId,
+    engagementId,
+    originalFilename: input.originalFilename || payload.original_filename || filenameResult.safeFilename,
+    safeFilename: filenameResult.safeFilename,
+    storageUri,
+    storageProvider,
+    storageBucket,
+    storageObjectKey: objectKeyResult.objectKey,
+    mimeType,
+    fileExtension,
+    fileSizeBytes,
+    checksum,
+    hashAlgorithm,
+    rawFileRetained: false,
+    filePolicyStatus: "pending",
+    malwareScanStatus: "not_configured",
+    createdBy: actorContext.actorUserId,
+    createdByType: actorContext.actorType,
+  };
 
+  if (duplicateIntent.forced) {
+    return await reserveNewIntakeVersion({
+      fileFields,
+      payload,
+      idempotencyKey,
+      reservationPayloadHash,
+      idempotencyLookup,
+      duplicateIntent,
+      duplicateLookup,
+      duplicateAuditMetadata,
+      actorContext,
+      dependencies,
+    });
+  }
+
+  const fileMetadata = normalizeReservationMetadata({ payload, idempotencyKey, reservationPayloadHash });
   const insertFile = dependencies.insertIntakeFileMetadata || insertIntakeFileMetadata;
   let row;
   try {
-    row = await insertFile({
-      intakeFileId,
-      intakeBatchId,
-      organizationId,
-      engagementId,
-      originalFilename: input.originalFilename || payload.original_filename || filenameResult.safeFilename,
-      safeFilename: filenameResult.safeFilename,
-      storageUri,
-      storageProvider,
-      storageBucket,
-      storageObjectKey: objectKeyResult.objectKey,
-      mimeType,
-      fileExtension: input.fileExtension || payload.file_extension || null,
-      fileSizeBytes,
-      checksum,
-      hashAlgorithm,
-      rawFileRetained: false,
-      filePolicyStatus: "pending",
-      malwareScanStatus: "not_configured",
-      fileMetadata,
-      createdBy: actorContext.actorUserId,
-      createdByType: actorContext.actorType,
-    });
+    row = await insertFile({ ...fileFields, fileMetadata });
   } catch (error) {
+    if (isDeclaredChecksumUniqueViolation(error)) {
+      // A concurrent reservation of the same content won the
+      // declared-checksum unique index: answer exactly as the preliminary
+      // check would have.
+      return await duplicateChecksumBlockedResponse({
+        checksum,
+        classification: await classifyReservationDuplicate(duplicateLookup, dependencies),
+        actorContext,
+        auditMetadata: duplicateAuditMetadata,
+        dependencies,
+      });
+    }
     if (error !== kaiIdempotentWriteConflict) throw error;
     const conflictedExisting = await findExisting(idempotencyLookup);
     if (!conflictedExisting) return buildKaiError("duplicate_conflict");
-    return fileReservationReplayResult(conflictedExisting, reservationPayloadHash, actorContext);
+    return fileReservationReplayResult(conflictedExisting, reservationPayloadHash, actorContext, duplicateIntent);
   }
 
   return {
     ok: true,
     data: responseFile(row),
     warnings: [],
+    audit_context: {
+      actor_user_id: actorContext.actorUserId,
+      actor_type: actorContext.actorType,
+      operation: "reserve_intake_file_metadata",
+    },
+  };
+}
+
+class NewIntakeVersionAuditRequiredError extends Error {
+  constructor() {
+    super("new_intake_version_audit_required");
+    this.name = "NewIntakeVersionAuditRequiredError";
+  }
+}
+
+/**
+ * Explicit new intake record for content this organization already holds.
+ * One transaction: lock the organization's original record for this
+ * checksum (serializing every concurrent new-version request for the same
+ * content), re-check idempotent replay, re-classify from current rows,
+ * require the actor's chosen record to still be the one presented and the
+ * action to still be permitted, then insert the lineage-carrying row and its
+ * required metadata-only audit. The new row starts at reserved/pending like
+ * any reservation, so upload, byte verification, the security assessment and
+ * parsing all run again for it. Nothing here creates a source, source
+ * version, evidence item, or claim.
+ */
+async function reserveNewIntakeVersion({
+  fileFields,
+  payload,
+  idempotencyKey,
+  reservationPayloadHash,
+  idempotencyLookup,
+  duplicateIntent,
+  duplicateLookup,
+  duplicateAuditMetadata,
+  actorContext,
+  dependencies,
+}) {
+  const runInTransaction = dependencies.runInTransaction || withTransaction;
+  const lockOriginal = dependencies.lockIntakeFileChecksumOriginal || lockIntakeFileChecksumOriginal;
+  const findExisting = dependencies.findIntakeFileReservationByIdempotencyKey || findIntakeFileReservationByIdempotencyKey;
+  const insertNewVersion = dependencies.insertIntakeFileNewVersionMetadata || insertIntakeFileNewVersionMetadata;
+  const insertAudit = dependencies.insertRequiredSuccessfulAuditEvent || insertRequiredSuccessfulAuditEvent;
+
+  let outcome;
+  try {
+    outcome = await runInTransaction(async (tx) => {
+      const original = await lockOriginal({ organizationId: fileFields.organizationId, checksum: fileFields.checksum }, tx);
+      if (!original) return { kind: "premise_changed" };
+
+      const replay = await findExisting(idempotencyLookup, tx);
+      if (replay) return { kind: "replay", row: replay };
+
+      const classification = await classifyReservationDuplicate(duplicateLookup, dependencies, tx);
+      if (!classification) return { kind: "premise_changed" };
+      if (classification.subject.intake_file_id !== duplicateIntent.duplicateOfIntakeFileId) {
+        return { kind: "stale", classification };
+      }
+      if (!classification.availableActions.includes(DUPLICATE_RESOLUTION_ACTIONS.uploadNewIntakeVersion)) {
+        return { kind: "denied", classification };
+      }
+
+      const lineage = newIntakeVersionLineage(classification, original.intake_file_id);
+      const fileMetadata = normalizeReservationMetadata({
+        payload,
+        idempotencyKey,
+        reservationPayloadHash,
+        duplicateResolution: {
+          force_new_version: true,
+          duplicate_of_intake_file_id: duplicateIntent.duplicateOfIntakeFileId,
+          duplicate_status: classification.duplicateStatus,
+        },
+      });
+      const row = await insertNewVersion({
+        ...fileFields,
+        fileMetadata,
+        originalIntakeFileId: lineage.originalIntakeFileId,
+        supersedesIntakeFileId: lineage.supersedesIntakeFileId,
+      }, tx);
+
+      const audit = await insertAudit({
+        operation: "reserve_intake_file_new_version",
+        operation_type: "reserve_intake_file_new_version",
+        actor_user_id: actorContext.actorUserId,
+        actor_type: actorContext.actorType,
+        organization_id: fileFields.organizationId,
+        engagement_id: fileFields.engagementId,
+        intake_batch_id: fileFields.intakeBatchId,
+        intake_file_id: fileFields.intakeFileId,
+        object_type: "intake_file",
+        target_object_type: "intake_file",
+        object_id: fileFields.intakeFileId,
+        reason_code: classification.duplicateStatus,
+        validator_key: "VAL-IDEMP-006",
+        duplicate_of_intake_file_id: duplicateIntent.duplicateOfIntakeFileId,
+        original_intake_file_id: lineage.originalIntakeFileId,
+        supersedes_intake_file_id: lineage.supersedesIntakeFileId,
+        to_state: "reserved",
+        route: duplicateAuditMetadata.route,
+        request_id: duplicateAuditMetadata.request_id,
+      }, tx);
+      if (audit?.ok !== true) throw new NewIntakeVersionAuditRequiredError();
+
+      return { kind: "created", row, classification };
+    });
+  } catch (error) {
+    if (error instanceof NewIntakeVersionAuditRequiredError) return buildKaiError("system_error");
+    throw error;
+  }
+
+  if (outcome.kind === "replay") {
+    return fileReservationReplayResult(outcome.row, reservationPayloadHash, actorContext, duplicateIntent);
+  }
+  if (outcome.kind === "premise_changed") {
+    return buildKaiError("conflict_current_state_changed", {
+      message: "No existing file with this checksum remains to version. Upload the file normally.",
+    });
+  }
+  if (outcome.kind === "stale") {
+    return buildKaiError("conflict_current_state_changed", {
+      message: "The existing file changed since it was shown. Review the current file and choose again.",
+      data: { duplicate_resolution: duplicateResolutionResponse(outcome.classification) },
+    });
+  }
+  if (outcome.kind === "denied") {
+    return await duplicateChecksumBlockedResponse({
+      checksum: fileFields.checksum,
+      classification: outcome.classification,
+      actorContext,
+      auditMetadata: duplicateAuditMetadata,
+      dependencies,
+    });
+  }
+
+  return {
+    ok: true,
+    data: responseFile(outcome.row),
+    warnings: [newIntakeVersionWarning(outcome.classification.duplicateStatus)],
     audit_context: {
       actor_user_id: actorContext.actorUserId,
       actor_type: actorContext.actorType,

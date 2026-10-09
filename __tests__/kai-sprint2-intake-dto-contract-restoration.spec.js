@@ -544,8 +544,9 @@ test("Files keeps Processing & evidence status, KaiWebIntake reads no p1_lifecyc
   assert.match(librarySource, /sensitivityCapability === true \? handleSensitivityProfileDiscoveredFromIntake : undefined/);
 
   // A delayed lookup cannot report for a superseded file, organization, or lookup.
-  const refreshRegion = intakeSource.slice(intakeSource.indexOf("const refreshFileStatus"), intakeSource.indexOf("const loadBatchFiles"));
-  assert.match(refreshRegion, /lookupSeq !== sensitivityLookupSeqRef\.current\s+\|\| intakeFileIdRef\.current !== intakeFileId\s+\|\| organizationIdRef\.current !== organizationId/);
+  const refreshRegion = intakeSource.slice(intakeSource.indexOf("const loadFileStatus"), intakeSource.indexOf("const refreshFileStatus"));
+  assert.match(refreshRegion, /lookupSeq !== sensitivityLookupSeqRef\.current\s+\|\| intakeFileIdRef\.current !== targetIntakeFileId\s+\|\| organizationIdRef\.current !== organizationId/);
+  assert.match(intakeSource, /const refreshFileStatus = useCallback\(\(\) => loadFileStatus\(intakeFileId\), \[loadFileStatus, intakeFileId\]\);/);
   assert.match(intakeSource, /intakeFileIdRef\.current = intakeFileId;/);
   assert.match(intakeSource, /organizationIdRef\.current = organizationId;/);
 });

@@ -143,6 +143,8 @@ const EXACT_VERIFICATION_PHASE_PATTERN =
 const SAFE_SERVICE_WARNING_MESSAGES = Object.freeze({
   blocked_attempt_audit_not_written: "Blocked-attempt audit was not written.",
   blocked_attempt_audit_failed: "Blocked-attempt audit failed without changing the validator response.",
+  duplicate_in_batch: "A new intake version of a file already in this batch was created.",
+  duplicate_candidate_recorded: "A new intake record linked to an existing identical file was created.",
 });
 
 function sanitizeServiceWarnings(warnings) {
@@ -344,7 +346,88 @@ function sanitizeServiceData(data) {
   ]) {
     if (typeof data[key] === "boolean") sanitized[key] = data[key];
   }
+  const duplicateResolution = sanitizeDuplicateResolution(data.duplicate_resolution);
+  if (duplicateResolution) sanitized.duplicate_resolution = duplicateResolution;
   return Object.keys(sanitized).length > 0 ? sanitized : null;
+}
+
+const DUPLICATE_RESOLUTION_STATUS_PATTERN = /^(duplicate_in_batch|duplicate_in_other_batch|duplicate_in_other_engagement)$/;
+const DUPLICATE_RESOLUTION_ACTION_PATTERN = /^(use_existing_file|continue_upload|upload_new_intake_version|cancel)$/;
+const DUPLICATE_RESOLUTION_RESTRICTION_PATTERN =
+  /^(blocked_by_policy|security_check_failed|upload_in_progress|declared_size_mismatch|state_unknown)$/;
+const DUPLICATE_EXISTING_STATE_PATTERN =
+  /^(confirmed|upload_in_progress|upload_not_completed|blocked_by_policy|security_check_failed|unknown)$/;
+const DUPLICATE_UPLOAD_STATE_PATTERN =
+  /^(reserved|upload_started|uploaded_unconfirmed|confirmed|policy_blocked|abandoned|expired)$/;
+const DUPLICATE_FILE_POLICY_STATUS_PATTERN = /^(pending|passed|blocked|failed|skipped)$/;
+const SAFE_MACHINE_STATUS_PATTERN = /^[a-z][a-z0-9_]{0,63}$/;
+const SAFE_FILE_EXTENSION_PATTERN = /^\.[a-z0-9]{1,16}$/;
+// Stored safe filenames already passed reservation filename validation; this
+// is a second, response-side guard against control or path characters.
+const SAFE_RESPONSE_FILENAME_PATTERN = /^[^\u0000-\u001F\u007F-\u009F/\\]{1,255}$/u;
+
+function sanitizedUuidOrNull(value) {
+  return typeof value === "string" && KAI_SPRINT2_P0_PATTERNS.uuid.test(value) ? value.toLowerCase() : null;
+}
+
+// Exact-shape pass-through for the reservation duplicate-resolution payload
+// (kaiIntakeDuplicateResolution.js duplicateResolutionResponse): every field
+// is a known vocabulary value, an identifier, or the stored safe filename -
+// never a checksum, object locator, URI, or upload link. Anything malformed drops
+// the whole object.
+function sanitizeDuplicateResolution(resolution) {
+  if (!resolution || typeof resolution !== "object" || Array.isArray(resolution)) return null;
+  const existing = resolution.existing_file;
+  if (
+    resolution.contract !== "kai_intake_duplicate_resolution_v1"
+    || !DUPLICATE_RESOLUTION_STATUS_PATTERN.test(resolution.duplicate_status || "")
+    || !existing
+    || typeof existing !== "object"
+  ) {
+    return null;
+  }
+  const intakeFileId = sanitizedUuidOrNull(existing.intake_file_id);
+  const intakeBatchId = sanitizedUuidOrNull(existing.intake_batch_id);
+  const safeFilename = typeof existing.safe_filename === "string" ? existing.safe_filename : "";
+  if (
+    !intakeFileId
+    || !intakeBatchId
+    || !SAFE_RESPONSE_FILENAME_PATTERN.test(safeFilename)
+    || !DUPLICATE_UPLOAD_STATE_PATTERN.test(existing.upload_state || "")
+    || !DUPLICATE_FILE_POLICY_STATUS_PATTERN.test(existing.file_policy_status || "")
+    || !SAFE_MACHINE_STATUS_PATTERN.test(existing.processing_status || "")
+    || !DUPLICATE_EXISTING_STATE_PATTERN.test(existing.existing_state || "")
+  ) {
+    return null;
+  }
+  const actions = Array.isArray(resolution.available_actions)
+    ? resolution.available_actions.filter((action) => typeof action === "string" && DUPLICATE_RESOLUTION_ACTION_PATTERN.test(action))
+    : [];
+  const restrictionCode = typeof resolution.restriction_code === "string"
+    && DUPLICATE_RESOLUTION_RESTRICTION_PATTERN.test(resolution.restriction_code)
+    ? resolution.restriction_code
+    : null;
+  return {
+    contract: resolution.contract,
+    duplicate_status: resolution.duplicate_status,
+    existing_file: {
+      intake_file_id: intakeFileId,
+      intake_batch_id: intakeBatchId,
+      engagement_id: sanitizedUuidOrNull(existing.engagement_id),
+      safe_filename: safeFilename,
+      file_extension: typeof existing.file_extension === "string" && SAFE_FILE_EXTENSION_PATTERN.test(existing.file_extension)
+        ? existing.file_extension
+        : null,
+      upload_state: existing.upload_state,
+      file_policy_status: existing.file_policy_status,
+      processing_status: existing.processing_status,
+      existing_state: existing.existing_state,
+    },
+    same_filename: resolution.same_filename === true,
+    same_file_extension: resolution.same_file_extension === true,
+    available_actions: [...new Set(actions)],
+    restriction_code: restrictionCode,
+  };
 }
 
 const EXPORT_MANIFEST_MARKDOWN_ATTACHMENT_FILENAME = "kai-export-manifest.md";
@@ -2560,6 +2643,8 @@ router.post("/admin/batches/:intakeBatchId/file-reservations", async (req, res) 
       fileSizeBytes: payload.file_size_bytes,
       checksum: payload.checksum,
       hashAlgorithm: payload.hash_algorithm,
+      forceNewVersion: payload.force_new_version,
+      duplicateOfIntakeFileId: payload.duplicate_of_intake_file_id,
     });
   }, 201);
 });

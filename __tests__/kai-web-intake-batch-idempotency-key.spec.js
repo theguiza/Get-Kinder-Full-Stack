@@ -152,87 +152,112 @@ test("KAI Web Intake file-reservation request includes idempotency_key alongside
 // Exercises the actual production identity/key resolver KaiWebIntake.jsx calls
 // before every reservation POST (frontend/kaiWebIntakeLogic.js ->
 // resolveFileReservationIdempotencyKey). No algorithm is reimplemented here.
-test("resolveFileReservationIdempotencyKey reuses the key for the same batch + checksum and rotates it for a different checksum or batch", () => {
+test("resolveFileReservationIdempotencyKey reuses the key only for a retry of the same selection, batch, checksum, and new-version intent", () => {
   const checksumA = "a".repeat(64);
   const checksumB = "b".repeat(64);
+  const batchA = "00000000-0000-4000-8000-000000000003";
+  const batchB = "00000000-0000-4000-8000-000000000004";
+  const existingFileId = "00000000-0000-4000-8000-000000000009";
 
-  const first = resolveFileReservationIdempotencyKey(null, "00000000-0000-4000-8000-000000000003", checksumA);
+  const first = resolveFileReservationIdempotencyKey(null, { selectionId: 1, intakeBatchId: batchA, checksum: checksumA });
   assert.equal(KAI_SPRINT2_P0_PATTERNS.idempotencyKey.test(first.key), true);
+  assert.equal(first.key.includes(checksumA), false, "the key is not derived from the checksum");
 
-  // Retry of the SAME logical reservation (same batch, same checksum) reuses the key.
-  const retry = resolveFileReservationIdempotencyKey(first, "00000000-0000-4000-8000-000000000003", checksumA);
-  assert.equal(retry.key, first.key, "retry of the same logical batch + checksum must reuse the key");
+  // Retry of the SAME logical reservation reuses the identity unchanged.
+  const retry = resolveFileReservationIdempotencyKey(first, { selectionId: 1, intakeBatchId: batchA, checksum: checksumA });
   assert.equal(retry, first, "an unchanged identity must be returned as-is, not rebuilt");
 
-  // A different checksum in the same batch is a different logical reservation.
-  const differentChecksum = resolveFileReservationIdempotencyKey(first, "00000000-0000-4000-8000-000000000003", checksumB);
-  assert.notEqual(
-    differentChecksum.key,
-    first.key,
-    "a different checksum must use a different key",
+  // Each of these is a new intent and must mint a new key.
+  const intents = [
+    resolveFileReservationIdempotencyKey(first, { selectionId: 1, intakeBatchId: batchA, checksum: checksumB }),
+    resolveFileReservationIdempotencyKey(first, { selectionId: 1, intakeBatchId: batchB, checksum: checksumA }),
+    // Choosing the same bytes again is a new selection, not a replay.
+    resolveFileReservationIdempotencyKey(first, { selectionId: 2, intakeBatchId: batchA, checksum: checksumA }),
+    resolveFileReservationIdempotencyKey(first, {
+      selectionId: 1,
+      intakeBatchId: batchA,
+      checksum: checksumA,
+      duplicateOfIntakeFileId: existingFileId,
+    }),
+  ];
+  const keys = new Set([first.key, ...intents.map((identity) => identity.key)]);
+  assert.equal(keys.size, 5, "every new intent must use a distinct key");
+
+  // A retry of the new-version intent reuses that intent's key.
+  const newVersion = intents[3];
+  assert.equal(
+    resolveFileReservationIdempotencyKey(newVersion, {
+      selectionId: 1,
+      intakeBatchId: batchA,
+      checksum: checksumA,
+      duplicateOfIntakeFileId: existingFileId,
+    }),
+    newVersion,
   );
 
-  // The same checksum in a different target batch must not inherit the prior key.
-  const differentBatch = resolveFileReservationIdempotencyKey(differentChecksum, "00000000-0000-4000-8000-000000000004", checksumB);
-  assert.notEqual(
-    differentBatch.key,
-    differentChecksum.key,
-    "the same checksum in a different target batch must use a different key",
+  // The minted key is injected, so it is deterministic under test.
+  const deterministic = resolveFileReservationIdempotencyKey(
+    null,
+    { selectionId: 7, intakeBatchId: batchA, checksum: checksumA },
+    () => "0123456789abcdef0123456789abcdef",
   );
-
-  // Returning to the original batch + checksum reconstructs the same stable
-  // key, avoiding a duplicate-checksum blocker after a reselect or reload.
-  const backToOriginal = resolveFileReservationIdempotencyKey(differentBatch, "00000000-0000-4000-8000-000000000003", checksumA);
-  assert.equal(backToOriginal.key, first.key, "batch + checksum determines the reservation key");
+  assert.equal(deterministic.key, "file-0123456789abcdef0123456789abcdef");
 });
 
-test("KaiWebIntake holds one idempotency key per logical file-reservation in a ref distinct from batch-create, sends it in the reservation POST body, keys it by batch + checksum, and clears it only after the confirmed end-to-end success", () => {
+test("KaiWebIntake holds one idempotency key per file-reservation intent in a ref distinct from batch-create, hashes the current selection, sends the key, and clears it only after the confirmed end-to-end success", () => {
   const uiSource = readFileSync("frontend/KaiWebIntake.jsx", "utf8");
 
   assert.match(uiSource, /const fileReservationIdempotencyKeyRef = useRef\(null\);/);
   assert.match(uiSource, /const fileReservationIdentityRef = useRef\(null\);/);
+  // Every file-input change starts a new selection and drops any resolution.
+  assert.match(
+    uiSource,
+    /setFile\(event\.target\.files\?\.\[0\] \|\| null\);\s*setFileSelectionId\(\(value\) => value \+ 1\);\s*setDuplicateResolution\(null\);/,
+  );
 
   const reserveAndUploadBody = uiSource.slice(
     uiSource.indexOf("const reserveAndUpload = useCallback"),
-    uiSource.indexOf("[organizationId, engagementId, intakeBatchId, file]"),
+    uiSource.indexOf("[organizationId, engagementId, intakeBatchId, file, fileSelectionId, transferAndConfirm]"),
+  );
+  const transferBody = uiSource.slice(
+    uiSource.indexOf("const transferAndConfirm = useCallback"),
+    uiSource.indexOf("const reserveAndUpload = useCallback"),
   );
 
-  // The logical identity is resolved by the shared, independently-tested
-  // resolveFileReservationIdempotencyKey helper (identified by the target
-  // batch and checksum), after checksum calculation and before the
-  // reservation POST.
   assert.match(uiSource, /import \{[\s\S]*?resolveFileReservationIdempotencyKey[\s\S]*?\} from "\.\/kaiWebIntakeLogic\.js";/);
-
   assert.match(
     reserveAndUploadBody,
-    /fileReservationIdentityRef\.current = resolveFileReservationIdempotencyKey\(\s*fileReservationIdentityRef\.current,\s*intakeBatchId,\s*checksum,\s*\);/,
+    /fileReservationIdentityRef\.current = resolveFileReservationIdempotencyKey\(\s*fileReservationIdentityRef\.current,\s*\{ selectionId, intakeBatchId, checksum, duplicateOfIntakeFileId \},\s*\);/,
   );
   assert.match(reserveAndUploadBody, /fileReservationIdempotencyKeyRef\.current = fileReservationIdentityRef\.current\.key;/);
 
-  const checksumIndex = reserveAndUploadBody.indexOf("const checksum = await sha256HexOfFile(file)");
+  const selectionIndex = reserveAndUploadBody.indexOf("const selectedFile = file;");
+  const checksumIndex = reserveAndUploadBody.indexOf("const checksum = await sha256HexOfFile(selectedFile)");
   const resolveIndex = reserveAndUploadBody.indexOf("resolveFileReservationIdempotencyKey(");
   const postIndex = reserveAndUploadBody.indexOf("postJson(fileReservationsPath(intakeBatchId)");
   assert.ok(
-    checksumIndex > -1 && resolveIndex > checksumIndex && postIndex > resolveIndex,
-    "the checksum must be calculated, then the key resolved, before the reservation POST",
+    selectionIndex > -1 && checksumIndex > selectionIndex && resolveIndex > checksumIndex && postIndex > resolveIndex,
+    "the current selection is hashed, then the key resolved, before the reservation POST",
   );
 
-  // The key is included in the reservation JSON body as idempotency_key.
   assert.match(reserveAndUploadBody, /idempotency_key: fileReservationIdempotencyKeyRef\.current,/);
-
-  // Every existing reservation request field remains unchanged.
   assert.match(reserveAndUploadBody, /organization_id: organizationId,/);
   assert.match(reserveAndUploadBody, /engagement_id: engagementId,/);
-  assert.match(reserveAndUploadBody, /original_filename: file\.name,/);
-  assert.match(reserveAndUploadBody, /file_extension: fileExtensionOf\(file\.name\),/);
-  assert.match(reserveAndUploadBody, /mime_type: file\.type \|\| "text\/csv",/);
-  assert.match(reserveAndUploadBody, /file_size_bytes: file\.size,/);
+  assert.match(reserveAndUploadBody, /original_filename: selectedFile\.name,/);
+  assert.match(reserveAndUploadBody, /file_extension: fileExtensionOf\(selectedFile\.name\),/);
+  assert.match(reserveAndUploadBody, /mime_type: declaredMimeTypeForFile\(selectedFile\),/);
+  assert.match(reserveAndUploadBody, /file_size_bytes: selectedFile\.size,/);
   assert.match(reserveAndUploadBody, /checksum,/);
   assert.match(reserveAndUploadBody, /hash_algorithm: "sha256",/);
+  // force_new_version is sent only with the existing file the actor chose.
+  assert.match(
+    reserveAndUploadBody,
+    /duplicateOfIntakeFileId\s*\?\s*\{ force_new_version: true, duplicate_of_intake_file_id: duplicateOfIntakeFileId \}\s*:\s*\{\}/,
+  );
 
   // A reservation-POST failure must NOT clear the key: it can be replayed.
   const reservationFailureGateIndex = reserveAndUploadBody.indexOf(
-    'if (reserveResult.statusCode !== 201 && reserveResult.statusCode !== 200) {',
+    "if (reserveResult.statusCode !== 201 && reserveResult.statusCode !== 200) {",
   );
   const reservationFailureBlock = reserveAndUploadBody.slice(
     reservationFailureGateIndex,
@@ -240,36 +265,27 @@ test("KaiWebIntake holds one idempotency key per logical file-reservation in a r
   );
   assert.ok(!reservationFailureBlock.includes("fileReservationIdempotencyKeyRef.current = null"), "the reservation key must survive a reservation failure");
 
-  // A downstream failure (upload-url request, signed PUT, or confirm) after a
-  // successful reservation must also NOT clear the key: the whole logical
-  // operation, including the reservation POST, can be replayed on retry.
-  const uploadUrlFailureIndex = reserveAndUploadBody.indexOf(
-    'if (uploadUrlResult.statusCode !== 200 || !uploadUrlResult.body?.ok) {',
-  );
-  const putFailureIndex = reserveAndUploadBody.indexOf("if (!putResult.ok) {");
-  const confirmFailureIndex = reserveAndUploadBody.indexOf('if (confirmResult.statusCode !== 200) {');
-  const successMessageIndex = reserveAndUploadBody.indexOf('"File reserved, uploaded, and confirmed."');
+  // Upload-url, PUT, and confirm stages report failure without clearing the key.
+  for (const gate of [
+    "if (uploadUrlResult.statusCode !== 200 || !uploadUrlResult.body?.ok) {",
+    "if (!putResult.ok) {",
+    "if (confirmResult.statusCode !== 200) {",
+  ]) {
+    assert.ok(transferBody.includes(gate), `expected transfer stage gate: ${gate}`);
+  }
+  assert.ok(!transferBody.includes("fileReservationIdempotencyKeyRef.current = null"));
+
+  const transferFailureIndex = reserveAndUploadBody.indexOf("if (!transfer.ok) {");
   const clearIdentityIndex = reserveAndUploadBody.indexOf("fileReservationIdentityRef.current = null;");
   const clearKeyIndex = reserveAndUploadBody.indexOf("fileReservationIdempotencyKeyRef.current = null;");
+  const successMessageIndex = reserveAndUploadBody.indexOf('"File reserved, uploaded, and confirmed."');
   assert.ok(
-    uploadUrlFailureIndex > -1 && putFailureIndex > -1 && confirmFailureIndex > -1 && successMessageIndex > -1,
-    "expected the reservation, upload-url, PUT, and confirm stages to all be present",
-  );
-  // Everything strictly before the clear statements must contain no clearing of the key.
-  const downstreamFailurePaths = reserveAndUploadBody.slice(uploadUrlFailureIndex, clearIdentityIndex);
-  assert.ok(
-    !downstreamFailurePaths.includes("fileReservationIdempotencyKeyRef.current = null"),
-    "no downstream failure branch before the confirmed success may clear the reservation key",
+    transferFailureIndex > postIndex
+      && clearIdentityIndex > transferFailureIndex
+      && clearKeyIndex > transferFailureIndex
+      && clearKeyIndex < successMessageIndex,
+    "the reservation identity and key must be cleared only after the confirmed transfer, right before the success message",
   );
 
-  // The key (and its identity) are cleared only once the entire logical
-  // operation is definitively complete, immediately before the success message.
-  assert.ok(
-    clearIdentityIndex > confirmFailureIndex && clearKeyIndex > confirmFailureIndex && clearKeyIndex < successMessageIndex,
-    "the reservation identity and key must be cleared only after the confirm-upload success gate, right before the success message",
-  );
-
-  // Batch-create and file-reservation idempotency state are held in distinct refs.
-  assert.notEqual("createBatchIdempotencyKeyRef", "fileReservationIdempotencyKeyRef");
   assert.ok(!reserveAndUploadBody.includes("createBatchIdempotencyKeyRef"), "reservation must not reuse the batch-create idempotency key");
 });

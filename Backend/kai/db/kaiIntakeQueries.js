@@ -122,32 +122,141 @@ export async function insertIntakeFileMetadata(file, db = pool) {
      RETURNING intake_file_id, intake_batch_id, organization_id, engagement_id, safe_filename,
        storage_provider, storage_bucket, storage_object_key, file_policy_status, malware_scan_status,
        processing_status, parse_status, review_status`,
+    intakeFileInsertValues(file),
+  );
+  return rows[0] || null;
+}
+
+function intakeFileInsertValues(file) {
+  return [
+    file.intakeFileId,
+    file.intakeBatchId,
+    file.organizationId,
+    file.engagementId || null,
+    file.originalFilename,
+    file.safeFilename,
+    file.storageUri,
+    file.storageProvider,
+    file.storageRegion || null,
+    file.storageBucket || null,
+    file.storageObjectKey || null,
+    file.mimeType || null,
+    file.fileExtension || null,
+    file.fileSizeBytes ?? null,
+    file.checksum,
+    file.hashAlgorithm || "sha256",
+    file.rawFileRetained ?? false,
+    "quarantined",
+    "quarantined",
+    "proposed",
+    file.filePolicyStatus || "pending",
+    file.malwareScanStatus || "not_configured",
+    JSON.stringify(file.fileMetadata || {}),
+    file.createdBy,
+    file.createdByType || "human",
+  ];
+}
+
+const INTAKE_FILE_CHECKSUM_MATCH_LIMIT = 50;
+
+/**
+ * Declared-checksum duplicate resolution: this organization's intake-file
+ * rows carrying the same declared checksum, forced versions included, with
+ * the lifecycle facts the shared classifier needs. Organization-scoped like
+ * findIntakeFileReservationByChecksum. Policy-blocked and security-failed
+ * rows sort first, then rows in the requesting batch, then the requesting
+ * engagement, so the bounded window always holds every row that decides the
+ * classification.
+ */
+export async function listIntakeFileChecksumMatches(
+  { organizationId, checksum, intakeBatchId, engagementId },
+  db = pool,
+) {
+  if (!organizationId || !checksum) return [];
+  const { rows } = await db.query(
+    `SELECT intake_file_id, intake_batch_id, organization_id, engagement_id, safe_filename,
+            file_extension, file_size_bytes, upload_state, upload_expires_at, file_policy_status,
+            processing_status, force_new_version, original_intake_file_id, supersedes_intake_file_id,
+            created_at
+       FROM kai.intake_files
+      WHERE organization_id = $1
+        AND checksum = $2
+      ORDER BY (upload_state = 'policy_blocked' OR file_policy_status = 'blocked') DESC NULLS LAST,
+               (file_policy_status = 'failed') DESC NULLS LAST,
+               (intake_batch_id = $3::uuid) DESC NULLS LAST,
+               (engagement_id IS NOT DISTINCT FROM $4::uuid) DESC,
+               created_at DESC,
+               intake_file_id DESC
+      LIMIT ${INTAKE_FILE_CHECKSUM_MATCH_LIMIT}`,
+    [organizationId, checksum, intakeBatchId || null, engagementId || null],
+  );
+  return rows;
+}
+
+/**
+ * Serializes explicit new-intake-version creation for one organization's
+ * content: every forced row for a checksum links to the one unforced
+ * original, so locking that original row orders concurrent requests.
+ */
+export async function lockIntakeFileChecksumOriginal({ organizationId, checksum }, db = pool) {
+  if (!organizationId || !checksum) return null;
+  const { rows } = await db.query(
+    `SELECT intake_file_id
+       FROM kai.intake_files
+      WHERE organization_id = $1
+        AND checksum = $2
+        AND force_new_version = false
+      LIMIT 1
+      FOR UPDATE`,
+    [organizationId, checksum],
+  );
+  return rows[0] || null;
+}
+
+/**
+ * Explicit new intake version: the same reservation insert, plus
+ * force_new_version = true and the canonical-DDL lineage columns
+ * original_intake_file_id / supersedes_intake_file_id.
+ */
+export async function insertIntakeFileNewVersionMetadata(file, db = pool) {
+  const { rows } = await db.query(
+    `INSERT INTO kai.intake_files (
+       intake_file_id,
+       intake_batch_id,
+       organization_id,
+       engagement_id,
+       original_filename,
+       safe_filename,
+       storage_uri,
+       storage_provider,
+       storage_region,
+       storage_bucket,
+       storage_object_key,
+       mime_type,
+       file_extension,
+       file_size_bytes,
+       checksum,
+       hash_algorithm,
+       raw_file_retained,
+       processing_status,
+       parse_status,
+       review_status,
+       file_policy_status,
+       malware_scan_status,
+       file_metadata,
+       created_by,
+       created_by_type,
+       force_new_version,
+       original_intake_file_id,
+       supersedes_intake_file_id
+     ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23::jsonb,$24,$25,true,$26,$27)
+     RETURNING intake_file_id, intake_batch_id, organization_id, engagement_id, safe_filename,
+       storage_provider, storage_bucket, storage_object_key, file_policy_status, malware_scan_status,
+       processing_status, parse_status, review_status`,
     [
-      file.intakeFileId,
-      file.intakeBatchId,
-      file.organizationId,
-      file.engagementId || null,
-      file.originalFilename,
-      file.safeFilename,
-      file.storageUri,
-      file.storageProvider,
-      file.storageRegion || null,
-      file.storageBucket || null,
-      file.storageObjectKey || null,
-      file.mimeType || null,
-      file.fileExtension || null,
-      file.fileSizeBytes ?? null,
-      file.checksum,
-      file.hashAlgorithm || "sha256",
-      file.rawFileRetained ?? false,
-      "quarantined",
-      "quarantined",
-      "proposed",
-      file.filePolicyStatus || "pending",
-      file.malwareScanStatus || "not_configured",
-      JSON.stringify(file.fileMetadata || {}),
-      file.createdBy,
-      file.createdByType || "human",
+      ...intakeFileInsertValues(file),
+      file.originalIntakeFileId,
+      file.supersedesIntakeFileId || null,
     ],
   );
   return rows[0] || null;

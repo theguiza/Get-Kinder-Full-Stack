@@ -35378,3 +35378,181 @@ internal security executor, and client evidence pipeline: 113/113.
 deployment, production or shared database, cloud, feature-flag, tenant,
 credential, `.env`, schema, Implementation Baseline, or
 `00_KAI_CURRENT_STATE.md` change.
+
+### Universal duplicate upload and reservation resolution (2026-10-09)
+
+**Owner direction (USER_CONFIRMED):** repair the owner-reported
+`POST /admin/batches/:batchId/file-reservations` 422 `VAL-IDEMP-006` /
+`duplicate_checksum` dead end with one duplicate-resolution workflow shared by
+CSV, XLSX, MD, TXT and machine-readable PDF. Keep `VAL-IDEMP-006`, checksum
+integrity, file security, lineage and tenant isolation. No push or deployment.
+
+**Starting state (TOOL_VERIFIED):** `main` at `83d33cf`, clean.
+`npm run test:kai-sprint2` 4645 pass / 0 fail / 87 skipped of 4732.
+
+**Governing sources (TOOL_VERIFIED, read from the local Sprint 2 archive
+outside the repository):** Backend/Storage/Validator Implementation Contract
+Section 20 ("Intake file checksum duplicate": same batch ->
+`duplicate_in_batch` blocker/warning by `force_new_version`; same
+organization/engagement, other batch -> duplicate-candidate relationship
+metadata only; `force_new_version=true` -> new row with
+`original_intake_file_id`/`supersedes_intake_file_id` if policy allows), Threat
+Model T9, and the Product Workflow quarantine/promotion phases. The lineage
+columns are in the canonical intake DDL extract and the 2026-09-16 production
+schema capture. They are not in the repository's synthetic bootstrap DDL, which
+the live reservation insert already exceeds.
+
+**Pre-repair behavior (TOOL_VERIFIED, `HEAD` run in a temporary scratch
+worktree, synthetic dependencies, loopback sentinel):**
+- `findIntakeFileReservationByChecksum` matched any unforced row with the same
+  organization and declared checksum. That is the
+  `ux_intake_files_gate_a_org_declared_checksum` scope, ignoring batch,
+  engagement, size and filename.
+- Any match returned 422 `VAL-IDEMP-006` with no resolution data.
+- The browser keyed reservations `file-{batch}-{checksum}`, so the same bytes
+  in another batch, or after a non-replayable earlier key, always failed.
+- The service never set `force_new_version`, and the route rejected it as
+  `unknown_field`.
+- Confirm-time byte verification was already independent of the declared
+  checksum.
+
+**Repair (TOOL_VERIFIED):**
+- `Backend/kai/services/kaiIntakeDuplicateResolution.js` is one
+  format-independent classifier. It maps existing rows to actual lifecycle
+  semantics: `confirmed` (policy pending/passed), `upload_in_progress`
+  (reserved/upload_started/uploaded_unconfirmed before `upload_expires_at`),
+  `upload_not_completed` (abandoned/expired/lapsed), `blocked_by_policy`,
+  `security_check_failed`, and `unknown`. Actions:
+  - same batch, confirmed: use existing file, or upload a new intake version;
+  - same batch, upload in progress: continue upload only;
+  - same batch, upload not completed: new intake version;
+  - other batch or engagement in the organization: new linked intake record
+    only;
+  - any record policy-blocked or security-failed anywhere in the
+    organization, a declared size that differs from the matched record, or an
+    unknown state: cancel only.
+- `reserveIntakeFileMetadata` keeps the unchanged predicate as the
+  `VAL-IDEMP-006` trigger and adds `data.duplicate_resolution`
+  (`kai_intake_duplicate_resolution_v1`, restricted same-organization fields,
+  no checksum, storage locator or URI).
+- An explicit request needs `force_new_version=true` plus
+  `duplicate_of_intake_file_id`. It runs in one transaction:
+  1. `FOR UPDATE` lock on the organization's unforced original row for the
+     checksum;
+  2. in-transaction replay check;
+  3. re-classification;
+  4. presented-record and permitted-action check (409
+     `conflict_current_state_changed` with a fresh resolution, or the 422
+     blocker);
+  5. insert with `force_new_version=true`, `original_intake_file_id`, and
+     `supersedes_intake_file_id` (same batch only);
+  6. required metadata-only `reserve_intake_file_new_version` audit (failure
+     rolls back).
+- A unique-index race (23505 on the declared-checksum index) now returns the
+  same 422 resolution instead of a 500.
+- The reservation fingerprint field list is unchanged. The new-version intent
+  is compared separately on replay (409 `duplicate_conflict` on mismatch).
+  Caller-supplied `duplicate_resolution` metadata is discarded.
+- Route: schema accepts boolean `force_new_version` and UUID
+  `duplicate_of_intake_file_id`, an exact-shape sanitizer passes the
+  resolution, and two success warnings are added. The route still has no SQL.
+- Audit allowlist: three lineage id keys.
+- Repository contract: the duplicate section is documented.
+- Frontend (`KaiWebIntake`, every mount):
+  - the idempotency identity is scoped to one file selection, batch, current
+    checksum and new-version intent (random key, replayed only on retry);
+  - every file-input change starts a new selection;
+  - an empty browser MIME falls back to the server-allowed MIME for the
+    extension;
+  - "This file has already been added." shows the existing file, location,
+    status, restriction text, and only the server-listed actions. Use existing
+    file reads file detail. Continue upload signs, uploads and confirms a
+    `reserved` record, or confirms only. New version re-hashes the selection
+    and sends the explicit request. Cancel makes no request.
+
+**Tests (TOOL_VERIFIED; loopback `DATABASE_URL` sentinel; dotenv pointed at a
+nonexistent file; synthetic OpenAI placeholder):**
+- New `kai-sprint2-intake-duplicate-resolution.spec.js` (21) runs the real
+  service, route and frontend logic over an in-memory store that enforces the
+  unique index, serialized transactions with rollback, and audits. It covers,
+  per format (CSV, XLSX, MD, TXT, PDF):
+  - first upload;
+  - exact and conflicting replay;
+  - same-batch duplicate (in-progress, then confirmed);
+  - other-batch candidate with lineage;
+  - modified bytes with the same filename;
+  - denied actor;
+  - stale target;
+  - same-batch new version with `supersedes` and audit;
+  - reserved/pending/quarantined re-entry;
+  - reservation MIME check before any lock;
+  - post-confirm security assessment invoked for the new row;
+  - streamed-byte verification match and mismatch;
+  - routed 422 sanitization and frontend action parity.
+- Shared tests cover:
+  - the reported failure from the unchanged predicate, then its permitted
+    resolution;
+  - the lifecycle state matrix;
+  - failed transfer and lapsed reservation;
+  - incomplete reservation;
+  - policy-blocked and security-failed content across batches and
+    engagements;
+  - `force_new_version` contract and intent replay;
+  - route schema;
+  - audit-failure rollback;
+  - tenant isolation and non-disclosure;
+  - cross-engagement;
+  - three concurrency races;
+  - renamed and `.md` versus `.txt` duplicates with intake-file-specific
+    parser identity;
+  - stale declared checksum;
+  - unsupported, mismatched, unsafe and oversized files with and without
+    override;
+  - no source, evidence, claim or approval dependency, with new SQL touching
+    only `kai.intake_files`;
+  - MIME fallback.
+- The concurrency test exposed a real defect: a serialized second new version
+  preferred the confirmed original over the first request's just-reserved
+  version. Same-batch subject precedence now puts an in-progress upload first.
+- Mutation control: letting blocked content offer a new version failed the
+  blocked-content test. The file was restored byte-identical.
+- Updated tests, causally required:
+  - the old duplicate service test now injects the match listing;
+  - the frontend reservation-key tests now pin per-selection identity;
+  - three B1A-3B-R2/DTO source contracts are retargeted from
+    `refreshFileStatus` to `loadFileStatus(targetIntakeFileId)`, with the same
+    guards.
+- A route comment was reworded to stay clear of the export-route
+  storage-phrase scans.
+- Results: `npm run test:kai-sprint2` 4666 pass / 0 fail / 87 skipped of
+  4753. `npm test` 5346 / 0 / 97 of 5443. `npm run build` succeeded. The
+  bundle diff reflects only this frontend change.
+
+**Limitations (NOT_CONFIRMED):**
+- No real PostgreSQL run. The `FOR UPDATE` serialization, 23505 constraint
+  name, lineage FK inserts, and `information_schema` audit introspection are
+  proven only against synthetic doubles. Deployed-schema compatibility of the
+  lineage columns rests on the 2026-09-16 capture.
+- Per-type detectors (CSV formula/row limits, XLSX workbook limits,
+  image-only/encrypted PDF) are not re-run by the new spec. It proves the new
+  row reaches the same pending assessment, and the unchanged per-type suites
+  pass in the full run.
+- No DOM render harness or browser walkthrough.
+- One early module import in this session ran without the sentinel prefix.
+  It issued no query or connection, because the pool connects lazily.
+
+**Owner decisions surfaced:**
+- `VAL-OPS-002` "no duplicate current source version" (T9, Product Workflow
+  promotion gate) is not implemented. Promotion uniqueness is per intake
+  source candidate, so two human-reviewed intake records of identical bytes
+  could each be promoted. The new lineage columns can support that gate.
+- `force_new_version` uses the existing `create_intake_file` authority,
+  including org-scoped `client_admin`. Restricting it to GK roles would be a
+  policy change.
+- Identical bytes whose security check failed to run stay unavailable
+  organization-wide until Get Kinder resolves the original record.
+
+**Status:** UNIVERSAL_DUPLICATE_UPLOAD_RESOLUTION_REPAIRED_LOCALLY. No push,
+deployment, production or shared database, cloud, feature-flag, tenant,
+credential, `.env`, schema/migration, Implementation Baseline, or
+`00_KAI_CURRENT_STATE.md` change.
