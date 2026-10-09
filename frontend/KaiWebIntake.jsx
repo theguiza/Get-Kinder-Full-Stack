@@ -16,10 +16,13 @@ import {
   putToSignedUrl,
   readEngagementIntakeBatches,
   readIntakeBatchFiles,
+  readIntakeFileSensitivityProfileId,
   requestUploadUrlPath,
   resolveFileReservationIdempotencyKey,
   sha256HexOfFile,
 } from "./kaiWebIntakeLogic.js";
+import { pipelineFileStatusText } from "./knowledgeStudio/clientEvidencePipelineLogic.js";
+import useClientEvidencePipeline from "./knowledgeStudio/useClientEvidencePipeline.js";
 
 function ValueRow({ label, value }) {
   return (
@@ -66,11 +69,18 @@ export default function KaiWebIntake({
   // callback, KaiWebIntake reports the ONE server-grounded fact a Phase-5
   // caller needs - the current selected file's P1-05
   // intake_sensitivity_profile_id (or null once no authoritative profile is
-  // selected/known) - straight from the existing file-detail GET response,
-  // never derived or fabricated client-side. Every existing mount that does
-  // not pass this prop (e.g. the standalone adminDashboard KAI Web Intake
-  // panel) is completely unaffected: the callback is simply never invoked.
+  // selected/known) - from the GK-only review-cockpit file lookup, never
+  // from the restricted file-detail DTO and never derived or fabricated
+  // client-side. Only an opted-in mount ever issues that lookup; every mount
+  // that does not pass this prop (e.g. the standalone adminDashboard KAI Web
+  // Intake panel) is completely unaffected.
   onSensitivityProfileDiscovered,
+  // Per-file processing status comes from the Project's client evidence
+  // pipeline (useClientEvidencePipeline), never from the restricted intake
+  // DTOs. A parent that already reads it passes its request (and refresh)
+  // here; otherwise this component reads it for its own active Project.
+  processingStatus,
+  onProcessingStatusRefresh,
 }) {
   const reportSensitivityProfileDiscovered = useCallback((intakeSensitivityProfileId) => {
     if (typeof onSensitivityProfileDiscovered === "function") {
@@ -123,6 +133,27 @@ export default function KaiWebIntake({
   onIntakeBatchIdChangeRef.current = onIntakeBatchIdChange;
   const intakeBatchIdRef = useRef(intakeBatchId);
   intakeBatchIdRef.current = intakeBatchId;
+  // The sensitivity-profile lookup reports only for the file and
+  // organization it was issued for, and only if no later lookup started.
+  const intakeFileIdRef = useRef(intakeFileId);
+  intakeFileIdRef.current = intakeFileId;
+  const organizationIdRef = useRef(organizationId);
+  organizationIdRef.current = organizationId;
+  const sensitivityLookupSeqRef = useRef(0);
+  const [ownPipelineRefresh, setOwnPipelineRefresh] = useState(0);
+  const ownPipeline = useClientEvidencePipeline(
+    organizationId,
+    processingStatus ? "" : engagementId,
+    ownPipelineRefresh,
+  );
+  const pipeline = processingStatus || ownPipeline;
+  const refreshPipeline = useCallback(() => {
+    if (processingStatus) {
+      if (typeof onProcessingStatusRefresh === "function") onProcessingStatusRefresh();
+      return;
+    }
+    setOwnPipelineRefresh((value) => value + 1);
+  }, [processingStatus, onProcessingStatusRefresh]);
   // Incremented on every bootstrap start, context change, and unmount, so a
   // late batch-list response for a prior context is discarded instead of
   // selecting (or reporting to the parent) a batch from that context.
@@ -446,11 +477,22 @@ export default function KaiWebIntake({
       return;
     }
     setFileStatus(result.body.data);
-    // KAI B1A-3B-R2: report the server-grounded P1-05 profile id from this
-    // same authoritative file-detail response - the ONLY thing forwarded
-    // through the opt-in seam, never the raw fileStatus payload.
-    reportSensitivityProfileDiscovered(result.body.data?.p1_lifecycle?.intake_sensitivity_profile_id || null);
-  }, [organizationId, intakeFileId, reportSensitivityProfileDiscovered]);
+    refreshPipeline();
+    // KAI B1A-3B-R2: only an opted-in parent triggers the GK-only lookup, and
+    // only its server-grounded profile id is forwarded through the seam.
+    if (typeof onSensitivityProfileDiscovered !== "function") return;
+    sensitivityLookupSeqRef.current += 1;
+    const lookupSeq = sensitivityLookupSeqRef.current;
+    const intakeSensitivityProfileId = await readIntakeFileSensitivityProfileId({ organizationId, intakeFileId });
+    if (
+      lookupSeq !== sensitivityLookupSeqRef.current
+      || intakeFileIdRef.current !== intakeFileId
+      || organizationIdRef.current !== organizationId
+    ) {
+      return;
+    }
+    reportSensitivityProfileDiscovered(intakeSensitivityProfileId);
+  }, [organizationId, intakeFileId, onSensitivityProfileDiscovered, refreshPipeline, reportSensitivityProfileDiscovered]);
 
   const loadBatchFiles = useCallback(async () => {
     if (!organizationId || !intakeBatchId) return;
@@ -629,28 +671,15 @@ export default function KaiWebIntake({
             </div>
             {!fileStatus ? <div className="text-muted small">No file status loaded yet.</div> : (
               <>
-                <ValueRow
-                  label="P1 processing"
-                  value={fileStatus.p1_lifecycle?.automatic_stage ?? "not started"}
-                />
+                <ValueRow label="Current stage" value={pipelineFileStatusText(pipeline, fileStatus.intake_file_id)} />
                 <ValueRow label="Malware scan" value={fileStatus.malware_scan_status} />
                 <ValueRow label="File policy" value={fileStatus.file_policy_status} />
                 <ValueRow label="Security assessment" value={fileStatus.security_assessment?.category ?? fileStatus.security_assessment?.policy_outcome} />
+                <ValueRow label="Processing" value={pipelineFileStatusText(pipeline, fileStatus.intake_file_id, "processing")} />
+                <ValueRow label="Data dictionary" value={pipelineFileStatusText(pipeline, fileStatus.intake_file_id, "data_dictionary")} />
                 <ValueRow
-                  label="Parser/profile"
-                  value={
-                    fileStatus.p1_lifecycle?.file_profile_complete
-                      ? "complete"
-                      : (fileStatus.p1_lifecycle?.parser_status ?? "not started")
-                  }
-                />
-                <ValueRow
-                  label="Data dictionary"
-                  value={fileStatus.p1_lifecycle?.data_dictionary_complete ? "complete" : "not complete"}
-                />
-                <ValueRow
-                  label="Sensitivity profile"
-                  value={fileStatus.p1_lifecycle?.sensitivity_profile_complete ? "complete" : "not complete"}
+                  label="Sensitivity classification"
+                  value={pipelineFileStatusText(pipeline, fileStatus.intake_file_id, "sensitivity_classification")}
                 />
                 <ValueRow label="Review status" value={fileStatus.review_status} />
               </>
@@ -677,7 +706,7 @@ export default function KaiWebIntake({
                     className="d-flex justify-content-between align-items-center gap-2"
                   >
                     <span>
-                      {item.safe_filename} &mdash; P1: {item.p1_lifecycle?.automatic_stage ?? "not started"}
+                      {item.safe_filename} &mdash; {pipelineFileStatusText(pipeline, item.intake_file_id)}
                     </span>
                     <button
                       type="button"

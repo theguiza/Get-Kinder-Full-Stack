@@ -22,8 +22,8 @@ if (!RUNNER_OWNED_DATABASE_URL) {
  * KAI B1A-3B-R2: proves, against real PostgreSQL, that the true first-review
  * bootstrap - a P1-05 intake_sensitivity_profile with NO sensitivity_review
  * queue item, NO promoted source, NO evidence item, and NO claim - is
- * discoverable and reachable through the existing file-detail/P1 lifecycle
- * read and the existing B1A-2R review-work operation, with zero pre-existing
+ * discoverable and reachable through the GK-only review-cockpit file ->
+ * sensitivity-profile lookup and the existing B1A-2R review-work operation, with zero pre-existing
  * review queue row required. This is the R1 gap: sensitivityReviewQueuePath
  * only ever reads EXISTING review_queue_items rows, so it cannot discover a
  * profile that has none.
@@ -33,12 +33,17 @@ async function runB1A3BR2IntegrationSuite() {
   const { withTransaction } = await import("../Backend/kai/db/kaiDb.js");
   const { createPostgresReviewQueueRepository } = await import("../Backend/kai/dictionary/postgresReviewQueueRepository.js");
   const { ensureSensitivityReviewQueueItem } = await import("../Backend/kai/services/kaiReviewQueueService.js");
-  const { getReviewCockpitSensitivityProfileDetail } = await import("../Backend/kai/services/kaiReviewCockpitService.js");
-  const { getReviewCockpitSensitivityProfileRecord } = await import("../Backend/kai/db/kaiReviewCockpitReadModels.js");
+  const {
+    getReviewCockpitIntakeFileSensitivityProfile,
+    getReviewCockpitSensitivityProfileDetail,
+  } = await import("../Backend/kai/services/kaiReviewCockpitService.js");
+  const {
+    getReviewCockpitIntakeFileSensitivityProfileRecord,
+    getReviewCockpitSensitivityProfileRecord,
+  } = await import("../Backend/kai/db/kaiReviewCockpitReadModels.js");
   const { getIntakeFileDetail } = await import("../Backend/kai/services/kaiIntakeService.js");
   const {
     getIntakeFileMetadata,
-    getScopedIntakeFileP1Lifecycle,
     getScopedLatestSecurityAssessmentAuditProjection,
   } = await import("../Backend/kai/db/kaiReadModels.js");
 
@@ -153,9 +158,19 @@ async function runB1A3BR2IntegrationSuite() {
       {
         env: ENV,
         getIntakeFileMetadata: (organizationId, id) => getIntakeFileMetadata(organizationId, id, pool),
-        getScopedIntakeFileP1Lifecycle: (organizationId, id) => getScopedIntakeFileP1Lifecycle(organizationId, id, pool),
         getScopedLatestSecurityAssessmentAuditProjection: (organizationId, id) =>
           getScopedLatestSecurityAssessmentAuditProjection(organizationId, id, pool),
+      },
+    );
+  }
+
+  async function fileSensitivityProfile(intakeFileId) {
+    return getReviewCockpitIntakeFileSensitivityProfile(
+      { organizationId: ORG, intakeFileId, actorContext: reviewerActor },
+      {
+        env: ENV,
+        getReviewCockpitIntakeFileSensitivityProfileRecord: (organizationId, id) =>
+          getReviewCockpitIntakeFileSensitivityProfileRecord(organizationId, id, pool),
       },
     );
   }
@@ -208,18 +223,22 @@ async function runB1A3BR2IntegrationSuite() {
     }
   });
 
-  test("B1A-3B-R2 (A,B,C): file-detail/P1 lifecycle returns the exact server-grounded intake_sensitivity_profile_id, with no claim traceability call and no pre-existing review-queue row required", async () => {
+  test("B1A-3B-R2 (A,B,C): the GK file lookup returns the exact server-grounded intake_sensitivity_profile_id, with no claim traceability call and no pre-existing review-queue row required", async () => {
     const { intakeFileId, intakeSensitivityProfileId } = await seedZeroQueueSensitivityProfile(2);
 
+    // The restricted file-detail DTO carries no lifecycle or profile identity.
     const detail = await fileDetail(intakeFileId);
     assert.equal(detail.ok, true, JSON.stringify(detail));
-    assert.equal(detail.data.p1_lifecycle.sensitivity_profile_complete, true);
+    assert.equal(Object.hasOwn(detail.data, "p1_lifecycle"), false);
+
     // (A) the exact server-grounded id, straight from the deterministic P1-05
     // read model - never fabricated, never a different/newest-row guess.
-    assert.equal(detail.data.p1_lifecycle.intake_sensitivity_profile_id, intakeSensitivityProfileId);
+    const lookup = await fileSensitivityProfile(intakeFileId);
+    assert.equal(lookup.ok, true, JSON.stringify(lookup));
+    assert.deepEqual(lookup.data, { intake_file_id: intakeFileId, intake_sensitivity_profile_id: intakeSensitivityProfileId });
 
     // (C) confirm, directly against the schema, that no review_queue_items row
-    // exists for this profile - the file-detail read above never created one
+    // exists for this profile - the lookup above never created one
     // and required none to succeed.
     const queueRows = await withClient((client) => client.query(
       `SELECT count(*)::int AS count FROM kai.review_queue_items
@@ -234,9 +253,9 @@ async function runB1A3BR2IntegrationSuite() {
   test("B1A-3B-R2 (D,E,F,G,H): GET returns queue item = null -> review-work POST {} succeeds -> exactly one queue identity exists -> authoritative GET returns it -> current_decision is still null", async () => {
     const { intakeFileId, intakeSensitivityProfileId } = await seedZeroQueueSensitivityProfile(3);
 
-    const detail = await fileDetail(intakeFileId);
-    assert.equal(detail.ok, true);
-    assert.equal(detail.data.p1_lifecycle.intake_sensitivity_profile_id, intakeSensitivityProfileId);
+    const lookup = await fileSensitivityProfile(intakeFileId);
+    assert.equal(lookup.ok, true);
+    assert.equal(lookup.data.intake_sensitivity_profile_id, intakeSensitivityProfileId);
 
     // (D)
     const firstProfileDetail = await sensitivityDetail(intakeSensitivityProfileId);
@@ -278,7 +297,7 @@ async function runB1A3BR2IntegrationSuite() {
 
   test("B1A-3B-R2 (I,J): review-work creation grants zero permissive Phase-5 authority and creates no evidence, claim, generated-output, export, or release authority row", async () => {
     const { intakeFileId, intakeSensitivityProfileId } = await seedZeroQueueSensitivityProfile(4);
-    await fileDetail(intakeFileId);
+    await fileSensitivityProfile(intakeFileId);
 
     const beforeProfile = await withClient((client) => client.query(
       `SELECT human_review_required, public_use_allowed, funder_use_allowed, llm_processing_allowed,

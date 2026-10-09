@@ -317,3 +317,63 @@ export async function getReviewCockpitSensitivityDecisionRecord(
     lineageAmbiguous,
   };
 }
+
+/**
+ * KAI B1A-3B-R2 zero-queue discovery: the P1-05 sensitivity profile identity of
+ * one intake file, for the GK review cockpit only. Organization-and-file scoped;
+ * returns no row when the file does not exist in the organization.
+ *
+ * The lineage is bound to the file's CURRENT verified checksum (latest parser run
+ * for that checksum -> its output file profile -> that profile's data dictionary ->
+ * that profile's sensitivity profile), so a run for an older object version can
+ * never surface a profile. kai.data_dictionaries is UNIQUE (organization_id,
+ * file_profile_id) and kai.intake_sensitivity_profiles is UNIQUE (organization_id,
+ * file_profile_id, data_dictionary_id), so at most one profile matches: a
+ * deterministic lookup, never a newest-row guess. intake_sensitivity_profile_id is
+ * null until the parser run is completed and the profile, dictionary, and
+ * sensitivity profile all exist. Only identifiers are selected.
+ */
+export async function getReviewCockpitIntakeFileSensitivityProfileRecord(
+  organizationId,
+  intakeFileId,
+  db = pool,
+) {
+  const { rows } = await db.query(
+    `SELECT f.organization_id, f.intake_file_id,
+            CASE
+              WHEN r.parser_status = 'completed'
+               AND p.file_profile_id IS NOT NULL
+               AND EXISTS (
+                     SELECT 1
+                       FROM kai.data_dictionaries d
+                      WHERE d.organization_id = f.organization_id
+                        AND d.intake_file_id = f.intake_file_id
+                        AND d.file_profile_id = p.file_profile_id
+                   )
+              THEN s.intake_sensitivity_profile_id
+            END AS intake_sensitivity_profile_id
+       FROM kai.intake_files f
+       LEFT JOIN LATERAL (
+         SELECT pr.parser_status, pr.output_profile_id
+           FROM kai.intake_parser_runs pr
+          WHERE pr.organization_id = f.organization_id
+            AND pr.intake_file_id = f.intake_file_id
+            AND pr.checksum = f.verified_checksum
+          ORDER BY pr.created_at DESC, pr.parser_run_id DESC
+          LIMIT 1
+       ) r ON true
+       LEFT JOIN kai.intake_file_profiles p
+         ON p.organization_id = f.organization_id
+        AND p.intake_file_id = f.intake_file_id
+        AND p.file_profile_id = r.output_profile_id
+       LEFT JOIN kai.intake_sensitivity_profiles s
+         ON s.organization_id = f.organization_id
+        AND s.intake_file_id = f.intake_file_id
+        AND s.file_profile_id = p.file_profile_id
+      WHERE f.organization_id = $1
+        AND f.intake_file_id = $2
+      LIMIT 1`,
+    [organizationId, intakeFileId],
+  );
+  return rows[0] || null;
+}

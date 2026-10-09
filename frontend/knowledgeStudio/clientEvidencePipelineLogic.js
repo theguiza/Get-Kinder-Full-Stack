@@ -195,6 +195,30 @@ export function stageStatusLabel(stage) {
   }
 }
 
+/**
+ * One file's processing status, as text, from a project pipeline request
+ * (Files: KaiWebIntake's file status and batch list). With no `stageKey`, the
+ * file's current stage; otherwise that stage's status. A file the pipeline
+ * does not list (no project selected, another project, or past the read's
+ * bound) is "not available", never inferred.
+ */
+export function pipelineFileStatusText(request, intakeFileId, stageKey = null) {
+  const status = request?.status || PIPELINE_REQUEST_STATUS.NOT_STARTED;
+  if (status === PIPELINE_REQUEST_STATUS.LOADING) return "loading";
+  if (status === PIPELINE_REQUEST_STATUS.ERROR) return "unavailable";
+  const file = isPipelineSuccess(status) && Array.isArray(request.data?.files)
+    ? request.data.files.find((entry) => entry.intakeFileId === intakeFileId)
+    : null;
+  if (!file) return "not available";
+  if (stageKey) {
+    const stage = file.stages.find((entry) => entry.key === stageKey);
+    return stage ? stageStatusLabel(stage) : "not available";
+  }
+  if (!file.currentStage) return "Complete";
+  const current = file.stages.find((entry) => entry.key === file.currentStage);
+  return `${PIPELINE_STAGE_LABELS[file.currentStage]}: ${current ? stageStatusLabel(current) : "Unknown"}`;
+}
+
 function pluralFiles(count) {
   return count === 1 ? "1 file" : `${count} files`;
 }

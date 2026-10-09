@@ -1174,6 +1174,25 @@ router.get("/admin/review-cockpit/sensitivity-profiles/:intakeSensitivityProfile
 });
 
 /**
+ * KAI B1A-3B-R2 zero-queue discovery: a GK-only, read-only lookup of one intake
+ * file's P1-05 sensitivity profile id, so the existing sensitivity-review card can
+ * be opened before any queue item exists. Validates identifiers and delegates once
+ * to the review-cockpit service, which owns authorization and the scoped read.
+ */
+router.get("/admin/review-cockpit/intake-files/:intakeFileId/sensitivity-profile", async (req, res) => {
+  const identifiers = reviewCockpitIdentifiers(req, "intakeFileId");
+  if (!identifiers) return sendKaiError(res, "invalid_request");
+  return invokeService(res, async () => {
+    const service = await getReviewCockpitService();
+    return service.getReviewCockpitIntakeFileSensitivityProfile({
+      ...requestContext(req, "/api/kai/sprint2/intake/admin/review-cockpit/intake-files/:intakeFileId/sensitivity-profile"),
+      organizationId: identifiers.organizationId,
+      intakeFileId: identifiers.objectId,
+    });
+  });
+});
+
+/**
  * KAI B1A-2 Phase-5 sensitivity/allowed-use decision route. Structurally identical
  * to the source-candidate decision route below (validator -> service ->
  * repository): it contains no SQL, imports no database pool, and calls exactly one

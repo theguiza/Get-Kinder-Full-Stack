@@ -1,3 +1,5 @@
+import { isRouteUuid } from "./impactEvidenceLibraryLogic.js";
+
 export const BASE_PATH = "/api/kai/sprint2/intake";
 
 export function organizationsPath() {
@@ -48,6 +50,13 @@ export function batchFilesPath(organizationId, intakeBatchId) {
 
 export function fileDetailPath(organizationId, intakeFileId) {
   return `${BASE_PATH}/admin/files/${encodeURIComponent(intakeFileId)}?organization_id=${encodeURIComponent(organizationId)}`;
+}
+
+// GK-only review-cockpit lookup of one intake file's P1-05 sensitivity profile
+// id. Never part of the restricted file-detail DTO.
+export function intakeFileSensitivityProfilePath(organizationId, intakeFileId) {
+  return `${BASE_PATH}/admin/review-cockpit/intake-files/${encodeURIComponent(intakeFileId)}/sensitivity-profile`
+    + `?organization_id=${encodeURIComponent(organizationId)}`;
 }
 
 export function createBatchPath() {
@@ -231,4 +240,18 @@ export async function readIntakeBatchFiles({ organizationId, intakeBatchId }, ge
     error: "",
     items,
   };
+}
+
+// One read of the GK-only file -> sensitivity profile lookup. Resolves to the
+// server-grounded profile id, or null for a failed read, a response for a
+// different file, or a file without a complete profile - never a guess.
+export async function readIntakeFileSensitivityProfileId({ organizationId, intakeFileId }, getJsonFn = getJson) {
+  try {
+    const result = await getJsonFn(intakeFileSensitivityProfilePath(organizationId, intakeFileId));
+    const data = result?.statusCode === 200 && result?.body?.ok ? result.body.data : null;
+    if (!data || data.intake_file_id !== intakeFileId) return null;
+    return isRouteUuid(data.intake_sensitivity_profile_id) ? data.intake_sensitivity_profile_id : null;
+  } catch {
+    return null;
+  }
 }

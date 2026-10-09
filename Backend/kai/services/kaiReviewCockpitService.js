@@ -8,6 +8,7 @@ import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationServic
 import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
 import {
   getReviewCockpitFileProfileRecord as readFileProfileRecord,
+  getReviewCockpitIntakeFileSensitivityProfileRecord as readIntakeFileSensitivityProfileRecord,
   getReviewCockpitSensitivityProfileRecord as readSensitivityProfileRecord,
   getReviewCockpitSourceCandidateRecord as readSourceCandidateRecord,
   listReviewCockpitQueueItems as readReviewCockpitQueueItems,
@@ -799,6 +800,48 @@ export async function getReviewCockpitFileProfileDetail(input = {}, dependencies
   if (!detail.ok) return detail;
   if (detail.data.file_profile.file_profile_id !== fileProfileId) return buildKaiError("system_error");
   return detail;
+}
+
+/**
+ * KAI B1A-3B-R2 zero-queue discovery: resolves one intake file to its P1-05
+ * intake_sensitivity_profile_id so a GK reviewer can open the existing
+ * sensitivity-review card before any sensitivity_review queue item exists.
+ * Same P1-09 authorization as every cockpit read; read-only; one
+ * organization-and-file-scoped read. A missing file and a row for another
+ * organization or file are the same not_found. The response carries only the
+ * requested file id and the profile id, which is null while the file has no
+ * complete current-checksum profile - it is never inferred.
+ */
+export async function getReviewCockpitIntakeFileSensitivityProfile(input = {}, dependencies = {}) {
+  const deps = resolvedDependencies(dependencies);
+  const authorization = await authorizeReviewCockpitRequest(input, deps);
+  if (!authorization.ok) return authorization.error;
+  const { organizationId } = authorization;
+
+  const intakeFileId = typeof input.intakeFileId === "string" ? input.intakeFileId : "";
+  if (!canonicalUuid(intakeFileId)) return buildKaiError("invalid_request");
+
+  const readRecord = deps.getReviewCockpitIntakeFileSensitivityProfileRecord
+    || readIntakeFileSensitivityProfileRecord;
+  const record = await readRecord(organizationId, intakeFileId);
+  if (!record) return buildKaiError("not_found");
+  if (!isPlainObject(record)) return buildKaiError("system_error");
+  if (record.organization_id !== organizationId || record.intake_file_id !== intakeFileId) {
+    return buildKaiError("not_found");
+  }
+
+  const intakeSensitivityProfileId = record.intake_sensitivity_profile_id ?? null;
+  if (intakeSensitivityProfileId !== null && !canonicalUuid(intakeSensitivityProfileId)) {
+    return buildKaiError("system_error");
+  }
+
+  return {
+    ok: true,
+    data: {
+      intake_file_id: intakeFileId,
+      intake_sensitivity_profile_id: intakeSensitivityProfileId,
+    },
+  };
 }
 
 export async function getReviewCockpitSensitivityProfileDetail(input = {}, dependencies = {}) {

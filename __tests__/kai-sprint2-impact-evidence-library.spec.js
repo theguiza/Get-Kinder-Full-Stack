@@ -3408,47 +3408,63 @@ test("KAI B1A-3B-R2: R1_REQUIRES_EXISTING_QUEUE - sensitivityReviewQueuePath que
   // discovered through it.
 });
 
-test("KAI B1A-3B-R2: the file-detail P1 lifecycle read model additively projects intake_sensitivity_profile_id, deterministically and tenant-scoped, with no unordered/newest-row guess", () => {
-  const readModelSource = readFileSync("Backend/kai/db/kaiReadModels.js", "utf8");
-  const start = readModelSource.indexOf("export async function getScopedIntakeFileP1Lifecycle");
-  const end = readModelSource.indexOf("export async function getDataDictionaryDraftSummary", start);
-  const region = readModelSource.slice(start, end);
+test("KAI B1A-3B-R2: the GK file lookup read model resolves intake_sensitivity_profile_id deterministically and tenant-scoped, with no unordered/newest-row guess", () => {
+  const readModelSource = readFileSync("Backend/kai/db/kaiReviewCockpitReadModels.js", "utf8");
+  const start = readModelSource.indexOf("export async function getReviewCockpitIntakeFileSensitivityProfileRecord");
+  assert.ok(start >= 0);
+  const region = readModelSource.slice(start);
 
-  assert.match(region, /s\.intake_sensitivity_profile_id AS intake_sensitivity_profile_id/);
+  assert.match(region, /THEN s\.intake_sensitivity_profile_id\s+END AS intake_sensitivity_profile_id/);
   assert.match(region, /LEFT JOIN kai\.intake_sensitivity_profiles s/);
   assert.match(region, /s\.organization_id = f\.organization_id/);
   assert.match(region, /s\.intake_file_id = f\.intake_file_id/);
   assert.match(region, /s\.file_profile_id = p\.file_profile_id/);
+  assert.match(region, /pr\.checksum = f\.verified_checksum/);
+  assert.match(region, /WHERE f\.organization_id = \$1\s+AND f\.intake_file_id = \$2/);
   // The sensitivity-profile join itself carries no ORDER BY/LIMIT of its
   // own - it is a plain equi-join on the unique (organization_id,
   // file_profile_id) lineage, not a "most recent row" pick.
   const sensitivityJoinStart = region.indexOf("LEFT JOIN kai.intake_sensitivity_profiles s");
   const sensitivityJoinClause = region.slice(sensitivityJoinStart, region.indexOf("WHERE f.organization_id", sensitivityJoinStart));
   assert.doesNotMatch(sensitivityJoinClause, /ORDER BY|LIMIT/i);
+
+  // The restricted intake read models no longer carry this lineage.
+  const intakeReadModels = readFileSync("Backend/kai/db/kaiReadModels.js", "utf8");
+  assert.doesNotMatch(intakeReadModels, /getScopedIntakeFileP1Lifecycle|intake_sensitivity_profiles|intake_parser_runs/);
 });
 
-test("KAI B1A-3B-R2: the file-detail service exposes intake_sensitivity_profile_id only once the completeness chain has actually reached sensitivity, and only as a valid route uuid", () => {
-  const serviceSource = readFileSync("Backend/kai/services/kaiIntakeService.js", "utf8");
-  const start = serviceSource.indexOf("function p1LifecycleProjection");
-  const end = serviceSource.indexOf("function responseFileDetail", start);
+test("KAI B1A-3B-R2: the GK file lookup service reuses the P1-09 cockpit authorization and returns only a canonical id or null", () => {
+  const serviceSource = readFileSync("Backend/kai/services/kaiReviewCockpitService.js", "utf8");
+  const start = serviceSource.indexOf("export async function getReviewCockpitIntakeFileSensitivityProfile");
+  const end = serviceSource.indexOf("export async function getReviewCockpitSensitivityProfileDetail", start);
   const region = serviceSource.slice(start, end);
 
-  assert.match(region, /sensitivityProfileComplete\s*\n?\s*&&\s*UUID_RE\.test/);
+  assert.match(region, /await authorizeReviewCockpitRequest\(input, deps\)/);
+  assert.match(region, /intakeSensitivityProfileId !== null && !canonicalUuid\(intakeSensitivityProfileId\)/);
   assert.match(region, /intake_sensitivity_profile_id: intakeSensitivityProfileId/);
+
+  const intakeServiceSource = readFileSync("Backend/kai/services/kaiIntakeService.js", "utf8");
+  assert.doesNotMatch(intakeServiceSource, /p1_lifecycle|p1LifecycleProjection|intake_sensitivity_profile_id/);
 });
 
 test("KAI B1A-3B-R2: KaiWebIntake exposes an explicit opt-in onSensitivityProfileDiscovered seam, never an unconditional Phase-5 UI element in the shared component", () => {
   const intakeSource = readFileSync("frontend/KaiWebIntake.jsx", "utf8");
 
-  assert.match(intakeSource, /onSensitivityProfileDiscovered,?\s*\n\}\)/);
+  assert.match(intakeSource, /onSensitivityProfileDiscovered,\s*\n(?:\s*\/\/.*\n)*\s*processingStatus,/);
   assert.match(
     intakeSource,
     /if \(typeof onSensitivityProfileDiscovered === "function"\)/,
   );
-  assert.match(
-    intakeSource,
-    /reportSensitivityProfileDiscovered\(result\.body\.data\?\.p1_lifecycle\?\.intake_sensitivity_profile_id \|\| null\)/,
+  // The GK lookup is issued only for an opted-in mount.
+  const refreshRegion = intakeSource.slice(
+    intakeSource.indexOf("const refreshFileStatus"),
+    intakeSource.indexOf("const loadBatchFiles"),
   );
+  const optInGuard = refreshRegion.indexOf('if (typeof onSensitivityProfileDiscovered !== "function") return;');
+  const lookupCall = refreshRegion.indexOf("readIntakeFileSensitivityProfileId(");
+  assert.ok(optInGuard >= 0 && lookupCall > optInGuard);
+  assert.match(refreshRegion, /reportSensitivityProfileDiscovered\(intakeSensitivityProfileId\)/);
+  assert.doesNotMatch(intakeSource, /p1_lifecycle/);
 
   // No hardcoded Phase-5 review card/form was added to the shared component
   // itself - ImpactEvidenceLibrary alone owns the one Phase-5 review card.
@@ -3462,10 +3478,13 @@ test("KAI B1A-3B-R2: adminDashboard's standalone KAI Web Intake mount does not o
   assert.doesNotMatch(dashboardSource, /onSensitivityProfileDiscovered/);
 });
 
-test("KAI B1A-3B-R2 UI: ImpactEvidenceLibrary opts in to the KaiWebIntake seam and feeds the discovered id into the SAME canonical selectedSensitivityProfileId, guarded by isRouteUuid, never fabricated", () => {
+test("KAI B1A-3B-R2 UI: ImpactEvidenceLibrary opts in to the KaiWebIntake seam only with the server-grounded capability and feeds the discovered id into the SAME canonical selectedSensitivityProfileId, guarded by isRouteUuid, never fabricated", () => {
   const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
 
-  assert.match(uiSource, /onSensitivityProfileDiscovered=\{handleSensitivityProfileDiscoveredFromIntake\}/);
+  assert.match(
+    uiSource,
+    /onSensitivityProfileDiscovered=\{\s*sensitivityCapability === true \? handleSensitivityProfileDiscoveredFromIntake : undefined\s*\}/,
+  );
 
   const handlerStart = uiSource.indexOf("const handleSensitivityProfileDiscoveredFromIntake");
   const handlerRegion = uiSource.slice(handlerStart, handlerStart + 400);
@@ -3511,16 +3530,22 @@ test("KAI B1A-3B-R2: organization change still clears selectedSensitivityProfile
   assert.match(orgChangeEffect, /setSelectedSensitivityProfileId\(""\);/);
 });
 
-test("KAI B1A-3B-R2: resolved profiles remain discoverable through the same file-detail seam, since KaiWebIntake reports the file's current profile id regardless of the profile's review/decision state", () => {
+test("KAI B1A-3B-R2: resolved profiles remain discoverable through the same GK file lookup, since it reports the file's current profile id regardless of the profile's review/decision state", () => {
   const intakeSource = readFileSync("frontend/KaiWebIntake.jsx", "utf8");
-  // The seam is fed directly from the file-detail response's p1_lifecycle
-  // projection, not from any queue-status or decision-status condition - so a
-  // profile with a resolved/superseded decision is reported exactly the same
-  // way as a brand-new one.
+  // The seam is fed directly from the GK file lookup, not from any
+  // queue-status or decision-status condition - so a profile with a
+  // resolved/superseded decision is reported exactly the same way as a
+  // brand-new one.
   const refreshRegion = intakeSource.slice(
     intakeSource.indexOf("const refreshFileStatus"),
     intakeSource.indexOf("const loadBatchFiles"),
   );
   assert.doesNotMatch(refreshRegion, /review_status|queue_status|current_decision/);
-  assert.match(refreshRegion, /reportSensitivityProfileDiscovered\(result\.body\.data\?\.p1_lifecycle\?\.intake_sensitivity_profile_id \|\| null\)/);
+  assert.match(refreshRegion, /readIntakeFileSensitivityProfileId\(\{ organizationId, intakeFileId \}\)/);
+
+  const readModelSource = readFileSync("Backend/kai/db/kaiReviewCockpitReadModels.js", "utf8");
+  const lookupRegion = readModelSource.slice(
+    readModelSource.indexOf("export async function getReviewCockpitIntakeFileSensitivityProfileRecord"),
+  );
+  assert.doesNotMatch(lookupRegion, /review_queue_items|intake_sensitivity_review_decisions/);
 });

@@ -151,6 +151,8 @@ export default function ClientKnowledgeStudio({
           onIntakeBatchIdChange={setFilesIntakeBatchId}
           embedded
           canContribute={canContribute}
+          processingStatus={pipeline}
+          onProcessingStatusRefresh={refreshPipeline}
         />
       ) : null}
       {tab === "files" && organizationId ? (

@@ -820,10 +820,12 @@ export default function ImpactEvidenceLibrary({
   // KAI B1A-3B-R2: the zero-queue pre-claim entry point. KaiWebIntake (the
   // same ordinary product intake/file workflow already embedded below)
   // reports the server-grounded P1-05 intake_sensitivity_profile_id for
-  // whichever file its own file-detail GET last resolved, through the
-  // explicit opt-in `onSensitivityProfileDiscovered` seam - never derived,
-  // never fabricated here. This feeds the SAME canonical
-  // `selectedSensitivityProfileId` as the R1 queue list and claim
+  // whichever file it last refreshed, from the GK-only review-cockpit file
+  // lookup, through the explicit opt-in `onSensitivityProfileDiscovered`
+  // seam - never derived, never fabricated here. The seam is passed only
+  // once the server-grounded capability confirms this actor may manage
+  // sensitivity review, so no other actor issues the GK lookup. This feeds
+  // the SAME canonical `selectedSensitivityProfileId` as the R1 queue list and claim
   // traceability above/below: still exactly one Phase-5 review card. An
   // incidental null report (e.g. the reviewer changed which file is
   // selected inside KaiWebIntake, or its own file-detail read failed) is
@@ -2873,7 +2875,9 @@ export default function ImpactEvidenceLibrary({
           intakeBatchId={filesIntakeBatchId}
           onIntakeBatchIdChange={setFilesIntakeBatchId}
           embedded
-          onSensitivityProfileDiscovered={handleSensitivityProfileDiscoveredFromIntake}
+          onSensitivityProfileDiscovered={
+            sensitivityCapability === true ? handleSensitivityProfileDiscoveredFromIntake : undefined
+          }
         />
       ) : null}
 

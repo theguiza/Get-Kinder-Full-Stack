@@ -35215,3 +35215,88 @@ amendment and update the four tests, or remove it. Neither was performed here.
 No push, deployment, production or shared database, cloud, feature-flag,
 tenant, credential, `.env`, Implementation Baseline, or
 `00_KAI_CURRENT_STATE.md` change.
+
+### P0-04 restricted intake DTO contract restoration and GK zero-queue sensitivity lookup (2026-10-09)
+
+**Owner direction (USER_CONFIRMED):** resolve the release-readiness NO-GO
+recorded above by removing, not authorizing, the `p1_lifecycle` expansion.
+Restore the exact batch-files and file-detail allowlists. Preserve the
+B1A-3B-R2 zero-queue sensitivity first review through a separate GK-only,
+read-only lookup, because no existing authorized read mapped a file to its
+sensitivity profile. Use the client evidence pipeline for Files processing
+status. No push or deployment.
+
+**Starting state (TOOL_VERIFIED):** `main` at `1223fcd`, clean.
+`npm run test:kai-sprint2` 4614 pass / 12 fail / 87 skipped; failure names as
+classified above.
+
+**Controlling allowlists (TOOL_VERIFIED):** batch-files items are the 14-field
+FileSummary (`intake_file_id`, `intake_batch_id`, `organization_id`,
+`engagement_id`, `safe_filename`, `mime_type`, `file_size_bytes`,
+`file_policy_status`, `malware_scan_status`, `processing_status`,
+`parse_status`, `review_status`, `created_at`, `updated_at`). File-detail is
+that FileSummary plus `security_assessment` (15 fields), as asserted by
+`kai-sprint2-file-detail-route.spec.js`. Note (NOT_CONFIRMED):
+`security_assessment` entered at `f60a604`. P0-04 `dto_boundary` above still
+records 14 fields, and no separate owner record for the 15th field was found.
+It is preserved unchanged because the client security remediation depends on
+it, and it is outside this package.
+
+**Repair (TOOL_VERIFIED):**
+- `Backend/kai/db/kaiReadModels.js` is byte-identical to `cf74fac^`. The
+  child-file SELECT is the 14 FileSummary columns from `kai.intake_files`, with
+  no lateral parser-run join and no `checksum` predicate.
+  `getScopedIntakeFileP1Lifecycle` is removed.
+- `Backend/kai/services/kaiIntakeService.js` is byte-identical to `cf74fac^`.
+  `p1LifecycleProjection`, the file-detail lifecycle read, and the batch-files
+  lifecycle projection are removed.
+- New GK-only lookup `GET /admin/review-cockpit/intake-files/:intakeFileId/sensitivity-profile`:
+  route (identifier validation, one service call, no SQL) ->
+  `getReviewCockpitIntakeFileSensitivityProfile` (existing
+  `authorizeReviewCockpitRequest`: feature gate, mapped human, global
+  gk_admin/gk_operator/gk_reviewer plus active same-organization membership,
+  tenant check) -> `getReviewCockpitIntakeFileSensitivityProfileRecord`. That
+  is one organization-and-file-scoped read bound to the current verified
+  checksum, with the same completeness chain as the removed projection. The
+  response is only `{ intake_file_id, intake_sensitivity_profile_id }`. The id
+  is null until a complete profile exists. Missing, cross-tenant, and
+  other-file rows return the same `not_found`.
+- Frontend: `KaiWebIntake` feeds `onSensitivityProfileDiscovered` from that
+  lookup, only when a parent opts in. A delayed result is dropped if the file,
+  organization, or lookup sequence changed. `ImpactEvidenceLibrary` opts in
+  only when `sensitivityCapability === true`. The adminDashboard and client
+  Knowledge Studio mounts do not opt in. The canonical
+  `selectedSensitivityProfileId`, the one review card, and queue/traceability
+  discovery are unchanged. Per-file processing rows in `KaiWebIntake` come from
+  the existing client evidence pipeline (`useClientEvidencePipeline`, same
+  `read_intake` role set as file-detail). Client Knowledge Studio shares its
+  existing read. `ClientEvidencePipelineStatus` is unchanged. A file not
+  listed by the pipeline shows "not available", never an inferred status.
+- Tests: new `kai-sprint2-intake-dto-contract-restoration.spec.js` (20)
+  covers exact SELECT lists, exact DTO keys from lifecycle-carrying rows,
+  cross-tenant `not_found`, lookup authorization and tenant negatives, assembled
+  production middleware/router HTTP, frontend reader, pipeline status text, and
+  mount opt-in. The B1A-3B-R2 source-contract tests and the DB-backed
+  integration spec are retargeted to the lookup.
+  `kai-sprint2-p1-intake-lifecycle-projection.spec.js` is removed (its only
+  subject was the unauthorized expansion).
+
+**Tests (TOOL_VERIFIED; `DATABASE_URL` loopback sentinel; dotenv pointed at a
+nonexistent file, so `.env` is not loaded; synthetic OpenAI placeholder):**
+batch-files, file-detail, new restoration spec, impact-evidence-library,
+client evidence pipeline, Knowledge Studio tabs, web intake, security
+observability, review cockpit boundary, and Impact Library frontend specs:
+321 pass / 1 fail / 1 skipped. The failure is the pre-existing P1-09 comment
+false positive. `npm test` 5315 pass / 5 fail / 97 skipped, failing only the
+four comment-match tests and the route inventory test. `npm run build`
+succeeded. `git diff --check` PASS. Full diff inspected.
+
+**Limitations (NOT_CONFIRMED):** the DB-backed B1A-3B-R2 integration spec was
+updated but not run (database access not separately authorized). No DOM render
+harness exists, so React wiring is proven by source contract plus behavioral
+tests of the functions it calls. No browser walkthrough was performed.
+
+**Status:** P0_04_RESTRICTED_INTAKE_DTO_CONTRACTS_RESTORED_LOCALLY. No push,
+deployment, production or shared database, cloud, feature-flag, tenant,
+credential, `.env`, schema, Implementation Baseline, or
+`00_KAI_CURRENT_STATE.md` change.
