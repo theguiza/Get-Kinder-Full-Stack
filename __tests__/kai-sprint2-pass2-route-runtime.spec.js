@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
+import { executableSource } from "./support/kaiExecutableSource.js";
+
 import { requireKaiSprint2Enabled } from "../Backend/kai/config/kaiSprint2Config.js";
 import router, { __testables as intakeRouteTestables } from "../Backend/kai/routes/sprint2IntakeApi.js";
 import authPreflightRouter, { __testables as authPreflightTestables } from "../Backend/kai/routes/sprint2IntakeAuthPreflightApi.js";
@@ -112,6 +114,14 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // read (GET) and write (POST) on the same path, additive, and every
     // prior entry preserved verbatim.
     "/admin/gk-organizations/:gkOrganizationId/kai-enablement",
+    // JOIN-2 self-service join (authenticated mapped user; requester-only scope;
+    // pending request only, never a membership or role; required audit).
+    "/admin/organization-join/organizations",
+    "/admin/organization-join/requests",
+    "/admin/organization-join/requests/mine",
+    // Caller's own onboarding status (mapped human; own application and own
+    // authorized organizations only).
+    "/admin/organization-onboarding/status",
     // KAI Web Intake organization bootstrap: read-only, additive, and every
     // prior entry preserved verbatim.
     "/admin/organizations",
@@ -227,6 +237,9 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // Client-safe Board Reporting preview over the governed Board packet
     // membership (additive; every prior entry preserved verbatim).
     "/admin/organizations/:organizationId/engagements/:engagementId/client-board-reporting",
+    // Client evidence pipeline: route-level actor context; read_intake roles with
+    // active membership; engagement must belong to the path organization.
+    "/admin/organizations/:organizationId/engagements/:engagementId/client-evidence-pipeline",
     // Client-safe Funder Requirements: governed applicability status and
     // current-assessment readiness projected to client-safe fields
     // (additive; every prior entry preserved verbatim).
@@ -293,6 +306,9 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // packet manifest and no final packet bytes.
     "/admin/organizations/:organizationId/engagements/:engagementId/grant-response-packet/export-candidates/:grantResponsePacketExportCandidateId/final-release-authority",
     "/admin/organizations/:organizationId/engagements/:engagementId/grant-response-packet/markdown",
+    // Project details update: gk_admin/gk_operator/client_admin with active
+    // membership; organization-scoped engagement lock; required audit.
+    "/admin/organizations/:organizationId/engagements/:engagementId/project-details",
     // KAI Package 2B-A: non-authoritative proposal that an external, governed
     // requirement set applies to this engagement.
     "/admin/organizations/:organizationId/engagements/:engagementId/requirement-set-applicability-proposals",
@@ -309,6 +325,9 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // KAI P2-09 human evidence-review completion surface (additive; every
     // prior entry preserved verbatim).
     "/admin/organizations/:organizationId/evidence-items/:evidenceItemId/evidence-review/:reviewQueueItemId/complete",
+    // GK-only evidence library index (gk_admin/gk_operator/gk_reviewer with active
+    // membership; organization-scoped read).
+    "/admin/organizations/:organizationId/evidence-library/candidates",
     // KAI P3-17 human final-release authority, governed P3-19 export-manifest
     // finalization, and Phase-14 ephemeral governed Markdown/CSV/PDF/DOCX delivery
     // surfaces; all are service-delegated and actor-context guarded on the
@@ -342,6 +361,10 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // review-packet read surface (additive; every prior entry preserved
     // verbatim).
     "/admin/organizations/:organizationId/generated-content-drafts/:generatedContentDraftId/review-packet",
+    // Generated drafts with the same GK-only roles, generation flag, idempotency,
+    // org-scoped claim grounding, review queue, and required audit as the
+    // approved generated-content-drafts siblings.
+    "/admin/organizations/:organizationId/generated-content-drafts/annual-report-section",
     // Data Gap Memo draft generation: internal-only generated-content draft
     // creation using the authoritative organization evidence-gap read and
     // server-resolved governed citations. It accepts no caller gap rows,
@@ -357,6 +380,8 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // requested claim must be freshly funder-eligible (pre- and
     // post-generation) before generation may proceed.
     "/admin/organizations/:organizationId/generated-content-drafts/evidence-summary/funder",
+    "/admin/organizations/:organizationId/generated-content-drafts/funder-outcome-table",
+    "/admin/organizations/:organizationId/generated-content-drafts/grant-response-paragraph",
     // KAI P13-01 internal impact-narrative generation surface, reusing the
     // existing P3-01 governed generation vertical (additive; every prior
     // entry preserved verbatim).
@@ -378,6 +403,15 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // Client-safe Impact Home summary: organization-scoped aggregates only
     // (additive; every prior entry preserved verbatim).
     "/admin/organizations/:organizationId/impact-home/summary",
+    // Improvement practices: org-scoped reads for read roles; writes for
+    // gk_admin/gk_operator/client_admin with org-scoped compare-and-set and
+    // required audit.
+    "/admin/organizations/:organizationId/improvement-practices",
+    "/admin/organizations/:organizationId/improvement-practices/:improvementPracticeId",
+    "/admin/organizations/:organizationId/improvement-practices/:improvementPracticeId/status",
+    // Organization display profile: read_intake roles with active membership in
+    // the path organization; name and logo only.
+    "/admin/organizations/:organizationId/profile",
     "/admin/organizations/:organizationId/requirements",
     "/admin/organizations/:organizationId/requirements/:requirementId/assessment",
     "/admin/organizations/:organizationId/review-queue",
@@ -397,6 +431,9 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // getReviewCockpitCapabilities).
     "/admin/review-cockpit/capabilities",
     "/admin/review-cockpit/file-profiles/:fileProfileId",
+    // KAI B1A-3B-R2 GK-only file -> sensitivity-profile lookup (P1-09 cockpit
+    // authorization; read-only; id-only response).
+    "/admin/review-cockpit/intake-files/:intakeFileId/sensitivity-profile",
     "/admin/review-cockpit/queue",
     "/admin/review-cockpit/sensitivity-profiles/:intakeSensitivityProfileId",
     // KAI B1A-2 Phase-5 sensitivity/allowed-use human-decision route (additive).
@@ -463,7 +500,8 @@ test("admin batch list route delegates sanitized query scope with no direct data
     // real inline SQL statement while not false-positiving on the
     // P13-EXT-2 board-update route path's own kebab-case name (the word
     // "update" in "generated-content-drafts/board-update" is not SQL).
-    assert.doesNotMatch(routeSource, /(?<!-)\b(?:SELECT|INSERT|UPDATE|DELETE)\b/i);
+    // Judged on executable code: comments may use SQL verbs in prose.
+    assert.doesNotMatch(executableSource(routeSource), /(?<!-)\b(?:SELECT|INSERT|UPDATE|DELETE)\b/i);
   } finally {
     restore();
   }

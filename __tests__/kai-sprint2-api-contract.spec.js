@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
+import { executableSource } from "./support/kaiExecutableSource.js";
+
 const routeSource = readFileSync("Backend/kai/routes/sprint2IntakeApi.js", "utf8");
 const authPreflightRouteSource = readFileSync("Backend/kai/routes/sprint2IntakeAuthPreflightApi.js", "utf8");
 const legacyKaiRouteSource = readFileSync("Backend/routes/kaiApi.js", "utf8");
@@ -87,8 +89,10 @@ test("sprint2IntakeApi delegates admin metadata operations to service without di
   assert.match(routeSource, /service\.confirmUpload/);
   assert.match(routeSource, /service\.requestUploadUrl/);
   assert.match(routeSource, /service\.updateReviewQueueStatus/);
-  assert.doesNotMatch(routeSource, /\b(?:select|insert|update|delete)\b[\s\S]{0,160}\bkai\./i);
-  assert.doesNotMatch(routeSource, /\bkai\.(?!js\b)[a-z_]+\b/i);
+  // Judged on executable code: comments may name kai.* tables or SQL verbs.
+  const routeCode = executableSource(routeSource, "sprint2IntakeApi.js");
+  assert.doesNotMatch(routeCode, /\b(?:select|insert|update|delete)\b[\s\S]{0,160}\bkai\./i);
+  assert.doesNotMatch(routeCode, /\bkai\.(?!js\b)[a-z_]+\b/i);
 });
 
 test("Pass 1F API contract tests do not import pg or initialize a pool", () => {
@@ -97,9 +101,11 @@ test("Pass 1F API contract tests do not import pg or initialize a pool", () => {
 });
 
 test("route files contain no direct SQL against kai schema", () => {
+  // Judged on executable code: comments may name kai.* tables or SQL verbs.
   for (const source of [routeSource, authPreflightRouteSource, legacyKaiRouteSource, accessAdministrationRouteSource]) {
-    assert.doesNotMatch(source, /\b(?:SELECT|INSERT|UPDATE|DELETE)\b[\s\S]{0,200}\bkai\./i);
-    assert.doesNotMatch(source, /\bkai\.(?!js\b)[a-z_]+\b/i);
+    const code = executableSource(source);
+    assert.doesNotMatch(code, /\b(?:SELECT|INSERT|UPDATE|DELETE)\b[\s\S]{0,200}\bkai\./i);
+    assert.doesNotMatch(code, /\bkai\.(?!js\b)[a-z_]+\b/i);
   }
 });
 

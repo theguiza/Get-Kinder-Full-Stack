@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
+import { executableSource } from "./support/kaiExecutableSource.js";
+
 import {
   getReviewCockpitFileProfileDetail,
   getReviewCockpitSensitivityProfileDetail,
@@ -416,8 +418,10 @@ test("P1-09 read model: the source-candidate detail read never issues a locking 
 test("P1-09 routes call authorized services only: no SQL, no pool import, no kai.* access, no KAI DB helper call", () => {
   assert.doesNotMatch(routeSource, /import\s+pool\s+from/);
   assert.doesNotMatch(routeSource, /kaiDb\.js|kaiIntakeQueries\.js|kaiReadModels\.js|kaiReviewCockpitReadModels\.js/);
-  assert.doesNotMatch(routeSource, /\bkai\.[a-z_]+\b/);
-  assert.doesNotMatch(routeSource, /\bSELECT\b|\bINSERT INTO\b|\bUPDATE\b|\bDELETE FROM\b/);
+  // Judged on executable code: comments may name kai.* tables or SQL verbs.
+  const routeCode = executableSource(routeSource, ROUTE_PATH);
+  assert.doesNotMatch(routeCode, /\bkai\.[a-z_]+\b/);
+  assert.doesNotMatch(routeCode, /\bSELECT\b|\bINSERT INTO\b|\bUPDATE\b|\bDELETE FROM\b/);
   for (const path of [
     '"/admin/review-cockpit/queue"',
     '"/admin/review-cockpit/file-profiles/:fileProfileId"',

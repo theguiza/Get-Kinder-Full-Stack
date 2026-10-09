@@ -35300,3 +35300,81 @@ tests of the functions it calls. No browser walkthrough was performed.
 deployment, production or shared database, cloud, feature-flag, tenant,
 credential, `.env`, schema, Implementation Baseline, or
 `00_KAI_CURRENT_STATE.md` change.
+
+### Sprint 2 route-contract verification repair (2026-10-09)
+
+**Owner direction (USER_CONFIRMED):** repair the four route-source
+comment false positives and the stale route inventory without weakening the
+no-SQL route invariant. Approve only routes verified as conformant. No push or
+deployment.
+
+**Route SQL audit (TOOL_VERIFIED):** each regex was compared on raw and
+executable source. Every `kai.*` and SQL-verb match in
+`Backend/kai/routes/sprint2IntakeApi.js` (lines 208, 2002, 2005, 2033, 2092,
+2093) is in a comment. The executable code has none, and has no pool, `db.query`,
+`../db/`, or KAI DB-helper import. Actual Sprint 2 route SQL violation: NO.
+`Backend/routes/kaiApi.js` (legacy, non-Sprint-2) runs `pool.query("SELECT *
+FROM userdata ...")` against `public.userdata`. That is not `kai.*` and is
+outside this invariant, so it is unchanged and recorded here.
+
+**Repair (TOOL_VERIFIED):** new `__tests__/support/kaiExecutableSource.js`
+blanks only comments, using the TypeScript parser (declared devDependency
+5.9.3). Every token's exact text, including strings, template literals and
+regex literals, is kept. Offsets and newlines are preserved. A source that does
+not parse throws. The comment-sensitive `doesNotMatch` assertions in
+`kai-sprint2-api-contract` (2 tests), `kai-sprint2-p1-09-review-cockpit-boundary`,
+and `kai-sprint2-pass2-route-runtime` now run on that source. Their patterns
+are unchanged, and the positive and import assertions stay on raw source.
+New `kai-sprint2-route-source-executable-scan.spec.js` (5) covers:
+- SQL in comments is ignored.
+- SQL in strings, templates (with `//`, `/*`, or comments inside `${}`), and
+  after string or regex comment-lookalikes is detected.
+- Pool, db, and KAI DB-helper imports and calls are detected.
+- An unparseable source throws.
+- SQL and imports injected into the real route files are caught.
+
+Mutation control: injecting `"SELECT * FROM kai.intake_files"` or a
+`` `UPDATE kai.review_queue_items ...` `` template into the real route file
+failed all four repaired tests. The file was restored byte-clean.
+
+**Inventory (TOOL_VERIFIED):** the router has 115 paths. None was removed, and
+15 were added. All inherit app-level `requireKaiSprint2Enabled`, limiters, and
+`requireKaiSprint2Authenticated`, plus router-level `requireKaiSprint2Enabled`.
+Each was reviewed for service-level actor mapping, role, membership and tenant
+checks, and delegation. Verdicts are all CONFORMANT:
+- Organization join and onboarding self-service routes. These are scoped to
+  the requester's own data. A join creates only a pending request, never a
+  membership or role, with a required audit.
+- `client-evidence-pipeline` (`read_intake`, engagement-in-organization).
+- `project-details` and the improvement-practice routes. These are
+  org-scoped, with an engagement lock or compare-and-set, and a required audit.
+- Organization `profile`.
+- GK-only `evidence-library/candidates`.
+- The three generated-content-draft routes. They match the approved siblings:
+  GK roles, `KAI_GENERATION_ENABLED`, idempotency, org-scoped claim grounding,
+  review queue, and audit.
+- The new GK file sensitivity-profile lookup.
+
+No route security defect was found, so no route implementation changed.
+
+Non-security observations for the owner (NOT_CONFIRMED, unchanged):
+- The annual-report-section and grant-response-paragraph routes accept the
+  `public` audience. The repository migrations pin `claims.public_use_allowed =
+  false`, so VAL-GEN-005 rejects such drafts. That check runs after the model
+  call.
+- Improvement-practice update/status return 409 rather than 404 for a missing
+  or cross-tenant id.
+- A malformed `expected_updated_at` may surface as 500.
+- Users with no existing mapping who hit id-only routes first get
+  `mapped_kai_user_required`.
+
+**Tests (TOOL_VERIFIED; loopback `DATABASE_URL` sentinel; `.env` not loaded;
+synthetic OpenAI placeholder):** `npm run test:kai-sprint2` 4645 pass / 0 fail
+/ 87 skipped of 4732. `npm test` 5325 / 0 / 97 of 5422. P0 acceptance, XLSX,
+internal security executor, and client evidence pipeline: 113/113.
+`git diff --check` PASS. Full diff inspected.
+
+**Status:** SPRINT2_ROUTE_CONTRACT_VERIFICATION_REPAIRED_LOCALLY. No push,
+deployment, production or shared database, cloud, feature-flag, tenant,
+credential, `.env`, schema, Implementation Baseline, or
+`00_KAI_CURRENT_STATE.md` change.
