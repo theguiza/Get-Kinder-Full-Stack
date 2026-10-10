@@ -591,4 +591,507 @@ async function runSuite() {
     }
     assert.equal((await listActionableKaiP1WorkCandidates(poolA)).length, 25);
   });
+
+  // ---------------------------------------------------------------------
+  // Package 2: immediate file-scoped dispatch after a committed `passed`
+  // security-policy decision. The production confirmation path below runs
+  // on the application's own default pool, which the runner points at this
+  // same ephemeral database (empty connection strings + DB_HOST/DB_PORT).
+  // ---------------------------------------------------------------------
+  const { performance } = await import("node:perf_hooks");
+  const { default: appPool } = await import("../Backend/db/pg.js");
+  const runtimeService = await import("../Backend/kai/services/kaiIntakeRuntimeService.js");
+  const { __testables: intakeServiceTestables } = await import("../Backend/kai/services/kaiIntakeService.js");
+  const { createPostgresUploadLifecycleRepository } = await import("../Backend/kai/upload/postgresUploadLifecycleRepository.js");
+  const { createKaiP1FileDispatcher, getKaiP1FileDispatcher } = await import("../Backend/kai/parsing/p1FileDispatch.js");
+  const { POLICY_ELIGIBLE_FAILED_CATEGORIES } = await import("../Backend/kai/security/assessmentPolicyOutcome.js");
+  const { getScopedIntakeFileSecurityAssessmentFacts } = await import("../Backend/kai/db/kaiIntakeQueries.js");
+  const applyConfirmedSecurityAssessment = intakeServiceTestables.applyConfirmedSecurityAssessment;
+
+  test.after(async () => {
+    await appPool.end();
+  });
+
+  const UPLOAD_ENV = Object.freeze({ ...ENABLED_ENV, KAI_FILE_UPLOAD_ENABLED: "true" });
+  const CONFIRM_NOW = new Date(Date.parse(NOW) + 60_000).toISOString();
+  const ACTOR = Object.freeze({
+    actorType: "human",
+    actorUserId: "7fe568b1-5c05-4c42-bb1f-6e20de216c7b",
+    kaiRoles: ["gk_operator"],
+    organizationMemberships: [{ organization_id: ORG, role_name: "gk_operator", membership_status: "active" }],
+  });
+  const PASS = Object.freeze({ policy: "pass" });
+
+  function providerNeutralObjectVersionId(index) {
+    return `ov_${String(index).padStart(32, "0")}`;
+  }
+
+  /** A reservation whose bytes are uploaded but not yet confirmed. */
+  async function seedUploadedUnconfirmed({ index, bytes, organizationId = ORG }) {
+    const intakeFileId = fileId(index);
+    const objectVersionId = providerNeutralObjectVersionId(index);
+    await query(
+      `INSERT INTO kai.intake_files (
+         intake_file_id, intake_batch_id, organization_id, engagement_id, original_filename, safe_filename,
+         checksum, hash_algorithm, force_new_version, processing_status, parse_status,
+         file_policy_status, upload_state, object_version_id,
+         upload_state_changed_at, upload_expires_at, created_at,
+         mime_type, file_extension, file_size_bytes, storage_provider, storage_bucket, storage_object_key
+       )
+       VALUES ($1::uuid, $2::uuid, $3::uuid, NULL, 'synthetic.csv', 'synthetic.csv',
+               $4, 'sha256', true, 'quarantined', 'quarantined',
+               'pending', 'uploaded_unconfirmed', $5,
+               $6::timestamptz, $6::timestamptz + interval '24 hours', $6::timestamptz,
+               'text/csv', '.csv', $7::bigint, 'local', 'synthetic-bucket', $8)`,
+      [intakeFileId, BATCH, organizationId, sha256(bytes), objectVersionId, NOW, bytes.byteLength, `synthetic/${intakeFileId}`],
+    );
+    return { intakeFileId, organizationId, objectVersionId, checksum: sha256(bytes), size: bytes.byteLength };
+  }
+
+  /** Synthetic exact-version storage: streamed reads for verification/assessment, whole reads for P1. */
+  function createSyntheticStorage() {
+    const objects = new Map();
+    const p1Reads = [];
+    return {
+      p1Reads,
+      put(objectVersionId, bytes) {
+        objects.set(objectVersionId, bytes);
+      },
+      adapter: {
+        async openObjectVersionReadStream({ objectVersionId }) {
+          const bytes = objects.get(objectVersionId);
+          if (!bytes) return { ok: false, error: { code: "not_found" } };
+          return {
+            ok: true,
+            data: {
+              object_version_id: objectVersionId,
+              size_bytes: bytes.byteLength,
+              byte_source: {
+                [Symbol.asyncIterator]() {
+                  let done = false;
+                  return {
+                    async next() {
+                      if (done) return { done: true, value: undefined };
+                      done = true;
+                      return { done: false, value: bytes };
+                    },
+                  };
+                },
+                async close() {},
+              },
+            },
+          };
+        },
+        async readObjectVersion({ objectVersionId }) {
+          p1Reads.push(objectVersionId);
+          const bytes = objects.get(objectVersionId);
+          if (!bytes) return { ok: false, data: null, error: { code: "not_found" } };
+          return { ok: true, data: { bytes: new Uint8Array(bytes) }, error: null };
+        },
+      },
+    };
+  }
+
+  /** Synthetic stand-in for the ClamAV-backed executor seam; the policy mapping stays production. */
+  function syntheticExecutor(result) {
+    return {
+      seamKind: "kai_sprint2_internal_security_assessment_executor",
+      identity: { actorType: "internal_service", serviceIdentity: "kai_file_security_executor", operationGroup: "file_security_assessment" },
+      async execute() {
+        return result;
+      },
+    };
+  }
+
+  async function confirmViaProductionComposition(file, { executorResult = PASS, env = UPLOAD_ENV, storage, extra = {} } = {}) {
+    return runtimeService.confirmUpload(
+      { organizationId: file.organizationId, intakeFileId: file.intakeFileId, actorContext: ACTOR, now: CONFIRM_NOW },
+      {
+        env,
+        storageAdapter: storage.adapter,
+        internalSecurityAssessmentExecutor: syntheticExecutor(executorResult),
+        ...extra,
+      },
+    );
+  }
+
+  async function filePolicy(intakeFileId) {
+    const { rows } = await query(
+      "SELECT upload_state, file_policy_status FROM kai.intake_files WHERE intake_file_id = $1::uuid",
+      [intakeFileId],
+    );
+    return rows[0];
+  }
+
+  async function policyAuditCount(intakeFileId) {
+    const { rows } = await query(
+      `SELECT count(*)::int AS count FROM kai.audit_events
+        WHERE action = 'apply_security_assessment_policy_decision' AND metadata->>'object_id' = $1`,
+      [intakeFileId],
+    );
+    return rows[0].count;
+  }
+
+  // The production composition with no GCS providers built from the ambient
+  // environment: only the Postgres lifecycle repository on the app pool.
+  const restoreRuntime = runtimeService.setKaiIntakeRuntimeDependenciesForTest(Object.freeze({
+    env: UPLOAD_ENV,
+    uploadLifecycleRepository: createPostgresUploadLifecycleRepository(),
+  }));
+  test.after(() => restoreRuntime());
+
+  test("9. production composition: a fresh confirmation whose policy commits passed runs P1 through P1-05 via the process-wide dispatcher, without cron; a replay adds nothing", async () => {
+    await resetTables();
+    const storage = createSyntheticStorage();
+    const bytes = csvBytesFor(300);
+    const file = await seedUploadedUnconfirmed({ index: 300, bytes });
+    storage.put(file.objectVersionId, bytes);
+    const dispatcher = getKaiP1FileDispatcher();
+    const before = dispatcher.stats();
+
+    const confirmed = await confirmViaProductionComposition(file, { storage });
+
+    // Observed in the same turn the confirmation resolved: the decision is
+    // committed and the job is scheduled, but P1 has not started.
+    assert.equal(confirmed.ok, true);
+    assert.deepEqual(
+      Object.keys(confirmed.data).sort(),
+      ["intake_batch_id", "intake_file_id", "object_version_id", "organization_id", "replayed", "upload_state", "verified_size_bytes"].sort(),
+    );
+    assert.equal(confirmed.data.upload_state, "confirmed");
+    const atReturn = dispatcher.stats();
+    assert.equal(atReturn.scheduled, before.scheduled + 1);
+    assert.equal(atReturn.started, before.started, "confirmation returned before P1 started");
+    assert.deepEqual(await filePolicy(file.intakeFileId), { upload_state: "confirmed", file_policy_status: "passed" });
+    assert.equal(await policyAuditCount(file.intakeFileId), 1);
+
+    const waitStart = performance.now();
+    await dispatcher.whenIdle();
+    const confirmReturnToP105Ms = performance.now() - waitStart;
+
+    const runs = await parserRun(file.intakeFileId);
+    assert.equal(runs.length, 1);
+    assert.equal(runs[0].parser_status, "completed");
+    assert.equal(runs[0].checksum, file.checksum);
+    const after = await counts(file.intakeFileId);
+    assert.equal(after.fileProfiles, 1);
+    assert.equal(after.dictionaries, 1);
+    assert.equal(after.sensitivityProfiles, 1);
+    assert.deepEqual(storage.p1Reads, [file.objectVersionId]);
+    assert.equal(dispatcher.stats().started, before.started + 1);
+    console.log(`P1_DISPATCH_TIMING production_composition confirm_return_to_p1_05_complete_ms=${confirmReturnToP105Ms.toFixed(1)}`);
+
+    // Replay of an already-passed confirmation: no new dispatch, no new work.
+    const replay = await confirmViaProductionComposition(file, { storage });
+    assert.equal(replay.ok, true);
+    assert.equal(replay.data.replayed, true);
+    await dispatcher.whenIdle();
+    assert.equal(dispatcher.stats().scheduled, before.scheduled + 1);
+    assert.deepEqual(await counts(file.intakeFileId), after);
+    assert.equal(await policyAuditCount(file.intakeFileId), 1);
+    assert.deepEqual(storage.p1Reads, [file.objectVersionId]);
+  });
+
+  test("10. against real PostgreSQL, blocked, failed-policy, pending, rolled-back, and conflicting decisions dispatch nothing", async () => {
+    await resetTables();
+    const storage = createSyntheticStorage();
+    const dispatcher = getKaiP1FileDispatcher();
+    const before = dispatcher.stats();
+    const failedCategory = [...POLICY_ELIGIBLE_FAILED_CATEGORIES][0];
+    assert.ok(failedCategory, "an eligible failed category exists");
+
+    const cases = [
+      { index: 310, executorResult: { policy: "block", category: "malware_failed" }, expected: "blocked" },
+      { index: 311, executorResult: { status: "failed", category: failedCategory }, expected: "failed" },
+      { index: 312, executorResult: { status: "failed", category: "malware_scan_not_configured" }, expected: "pending" },
+      // Required audit rejected: the policy transaction rolls back.
+      {
+        index: 313,
+        executorResult: PASS,
+        expected: "pending",
+        extra: { insertRequiredSuccessfulAuditEvent: async () => ({ ok: false }) },
+      },
+    ];
+    for (const entry of cases) {
+      const bytes = csvBytesFor(entry.index);
+      const file = await seedUploadedUnconfirmed({ index: entry.index, bytes });
+      storage.put(file.objectVersionId, bytes);
+      const result = await confirmViaProductionComposition(file, { storage, executorResult: entry.executorResult, extra: entry.extra });
+      assert.equal(result.ok, true, `confirmation itself succeeds (${entry.expected})`);
+      assert.deepEqual(await filePolicy(file.intakeFileId), { upload_state: "confirmed", file_policy_status: entry.expected });
+    }
+
+    // A CAS conflict: another writer already moved the file to passed, but
+    // this attempt observed it as pending. The real CAS updates no row.
+    const conflictBytes = csvBytesFor(314);
+    const conflict = await seedUploadedUnconfirmed({ index: 314, bytes: conflictBytes });
+    storage.put(conflict.objectVersionId, conflictBytes);
+    await confirmViaProductionComposition(conflict, { storage, env: { ...UPLOAD_ENV, KAI_WORKER_ENABLED: "false" } });
+    assert.equal((await filePolicy(conflict.intakeFileId)).file_policy_status, "passed");
+    const conflictDispatcher = createKaiP1FileDispatcher({ processFile: async () => assert.fail("must not run"), log: () => {} });
+    await applyConfirmedSecurityAssessment(
+      {
+        organizationId: ORG,
+        intakeFileId: conflict.intakeFileId,
+        objectVersionId: conflict.objectVersionId,
+        verifiedChecksum: conflict.checksum,
+        verifiedSizeBytes: conflict.size,
+        requestId: "request_conflict",
+        actorContext: ACTOR,
+      },
+      {
+        env: UPLOAD_ENV,
+        storageAdapter: storage.adapter,
+        internalSecurityAssessmentExecutor: syntheticExecutor(PASS),
+        kaiP1FileDispatcher: conflictDispatcher,
+        async getScopedIntakeFileSecurityAssessmentFacts(identity) {
+          return { ...(await getScopedIntakeFileSecurityAssessmentFacts(identity)), file_policy_status: "pending" };
+        },
+      },
+    );
+    assert.equal(conflictDispatcher.stats().scheduled, 0);
+    assert.equal(await policyAuditCount(conflict.intakeFileId), 1, "the losing attempt wrote no audit");
+
+    await dispatcher.whenIdle();
+    const after = dispatcher.stats();
+    assert.equal(after.scheduled, before.scheduled);
+    assert.equal(after.disabled, before.disabled + 1, "only the gated-off pass reached the dispatcher");
+    const { rows } = await query("SELECT count(*)::int AS count FROM kai.intake_parser_runs");
+    assert.equal(rows[0].count, 0);
+  });
+
+  test("11. with the worker gate off, a passed decision still commits but runs no P1 work, and the file stays visible to the scheduled sweep", async () => {
+    await resetTables();
+    const storage = createSyntheticStorage();
+    const bytes = csvBytesFor(320);
+    const file = await seedUploadedUnconfirmed({ index: 320, bytes });
+    storage.put(file.objectVersionId, bytes);
+    const dispatcher = getKaiP1FileDispatcher();
+    const before = dispatcher.stats();
+
+    for (const env of [{ ...UPLOAD_ENV, KAI_WORKER_ENABLED: "false" }]) {
+      const result = await confirmViaProductionComposition(file, { storage, env });
+      assert.equal(result.ok, true);
+    }
+    await dispatcher.whenIdle();
+    assert.equal((await filePolicy(file.intakeFileId)).file_policy_status, "passed");
+    assert.equal(dispatcher.stats().scheduled, before.scheduled);
+    assert.equal(dispatcher.stats().disabled, before.disabled + 1);
+    assert.equal((await counts(file.intakeFileId)).parserRuns, 0);
+    assert.deepEqual(storage.p1Reads, []);
+    assert.deepEqual((await listActionableKaiP1WorkCandidates(poolA)).map((row) => row.intake_file_id), [file.intakeFileId]);
+  });
+
+  test("12. measured: committed passed decision -> file-scoped P1 start, and -> P1-05 completion", async () => {
+    await resetTables();
+    const storage = createSyntheticStorage();
+    const samples = [];
+    for (let index = 0; index < 5; index += 1) {
+      const bytes = csvBytesFor(330 + index);
+      const file = await seedUploadedUnconfirmed({ index: 330 + index, bytes });
+      storage.put(file.objectVersionId, bytes);
+
+      let committedAt = null;
+      let startedAt = null;
+      const dispatcher = createKaiP1FileDispatcher({
+        processFile: (input, dependencies) => {
+          startedAt = performance.now();
+          return processKaiP1IntakeFile(input, dependencies);
+        },
+        log: () => {},
+      });
+      const result = await confirmViaProductionComposition(file, {
+        storage,
+        extra: {
+          kaiP1FileDispatcher: dispatcher,
+          // The real transaction on the app pool, timestamped once COMMIT resolved.
+          runInTransaction: (callback) => withTransaction(callback).then((value) => {
+            committedAt = performance.now();
+            return value;
+          }),
+        },
+      });
+      assert.equal(result.ok, true);
+      assert.equal(startedAt, null, "P1 had not started when confirmation returned");
+      await dispatcher.whenIdle();
+      const completedAt = performance.now();
+      assert.ok(committedAt !== null && startedAt !== null && startedAt >= committedAt);
+      assert.equal((await counts(file.intakeFileId)).sensitivityProfiles, 1);
+      samples.push({ startMs: startedAt - committedAt, completeMs: completedAt - committedAt });
+    }
+    const max = (key) => Math.max(...samples.map((sample) => sample[key]));
+    const median = (key) => [...samples.map((sample) => sample[key])].sort((a, b) => a - b)[Math.floor(samples.length / 2)];
+    console.log(
+      `P1_DISPATCH_TIMING samples=${samples.length} commit_to_p1_start_ms median=${median("startMs").toFixed(2)} max=${max("startMs").toFixed(2)} `
+      + `commit_to_p1_05_complete_ms median=${median("completeMs").toFixed(1)} max=${max("completeMs").toFixed(1)}`,
+    );
+    assert.ok(max("startMs") < 1000, "dispatch starts well inside one second of the committed decision");
+  });
+
+  /** A dispatcher standing in for one application instance, bound to its own pool. */
+  function instanceDispatcher(pool, byteSource, { overrides = {}, maxConcurrent, maxWaiting, onStart, lines } = {}) {
+    return createKaiP1FileDispatcher({
+      processFile: async (input, dependencies) => {
+        onStart?.(input);
+        try {
+          return await processKaiP1IntakeFile(input, { ...instanceDependencies(pool, byteSource, overrides), env: dependencies.env });
+        } finally {
+          onStart?.(null);
+        }
+      },
+      ...(maxConcurrent ? { maxConcurrent } : {}),
+      ...(maxWaiting !== undefined ? { maxWaiting } : {}),
+      log: (line) => lines?.push(line),
+    });
+  }
+
+  function expectedFor(file) {
+    return { objectVersionId: file.objectVersionId, verifiedChecksum: file.checksum, verifiedSizeBytes: file.size };
+  }
+
+  test("13. competing notifications from two instances plus a concurrent scheduled sweep never duplicate parser, dictionary, or sensitivity records", async () => {
+    await resetTables();
+    const bytes = csvBytesFor(340);
+    const file = await seedFile({ intakeFileId: fileId(340), bytes });
+    const byteSource = createByteSource({ delayMs: 100 });
+    byteSource.register(file.objectVersionId, bytes);
+
+    const instanceA = instanceDispatcher(poolA, byteSource);
+    const instanceB = instanceDispatcher(poolB, byteSource);
+    const notification = { organizationId: ORG, intakeFileId: file.intakeFileId, expectedFileFacts: expectedFor(file) };
+    assert.equal(instanceA.dispatch(notification, { env: ENABLED_ENV }).scheduled, true);
+    assert.equal(instanceB.dispatch(notification, { env: ENABLED_ENV }).scheduled, true);
+    assert.equal(instanceA.dispatch(notification, { env: ENABLED_ENV }).reason, "already_dispatched");
+    const sweep = runKaiP1WorkerTick(instanceDependencies(poolB, byteSource));
+    await Promise.all([instanceA.whenIdle(), instanceB.whenIdle(), sweep]);
+
+    assert.equal(byteSource.reads.length, 1, "parsed exactly once");
+    const after = await counts(file.intakeFileId);
+    assert.equal(after.parserRuns, 1);
+    assert.equal(after.fileProfiles, 1);
+    assert.equal(after.dictionaries, 1);
+    assert.equal(after.sensitivityProfiles, 1);
+    assert.equal(after.lifecycleAudit.data_dictionary_draft_persisted, 1);
+    assert.equal(after.lifecycleAudit.intake_sensitivity_profile_persisted, 1);
+  });
+
+  test("14. a stale expectation fails closed before parsing, and a P1-04 failure is attempted exactly once with no re-dispatch", async () => {
+    await resetTables();
+    const byteSource = createByteSource();
+
+    const staleBytes = csvBytesFor(350);
+    const staleFile = await seedFile({ intakeFileId: fileId(350), bytes: staleBytes });
+    byteSource.register(staleFile.objectVersionId, staleBytes);
+    const staleLines = [];
+    const staleDispatcher = instanceDispatcher(poolA, byteSource, { lines: staleLines });
+    staleDispatcher.dispatch(
+      { organizationId: ORG, intakeFileId: staleFile.intakeFileId, expectedFileFacts: { ...expectedFor(staleFile), verifiedChecksum: sha256(Buffer.from("superseded")) } },
+      { env: ENABLED_ENV },
+    );
+    await staleDispatcher.whenIdle();
+    assert.deepEqual(staleLines, ["[kai-p1-dispatch] outcome=stopped stage=parser_profile_activation code=conflict_current_state_changed"]);
+    assert.equal((await counts(staleFile.intakeFileId)).parserRuns, 0);
+    assert.deepEqual(byteSource.reads, []);
+
+    const failingBytes = csvBytesFor(351);
+    const failingFile = await seedFile({ intakeFileId: fileId(351), bytes: failingBytes });
+    byteSource.register(failingFile.objectVersionId, failingBytes);
+    let dictionaryAttempts = 0;
+    const lines = [];
+    const dispatcher = instanceDispatcher(poolA, byteSource, {
+      lines,
+      overrides: {
+        createProductionMetadataOnlyAudit: rejectingDownstreamAudit,
+        createDraftDataDictionary: async (input, dependencies) => {
+          dictionaryAttempts += 1;
+          const { createDraftDataDictionary } = await import("../Backend/kai/services/kaiDataDictionaryService.js");
+          return createDraftDataDictionary(input, dependencies);
+        },
+      },
+    });
+    dispatcher.dispatch({ organizationId: ORG, intakeFileId: failingFile.intakeFileId, expectedFileFacts: expectedFor(failingFile) }, { env: ENABLED_ENV });
+    await dispatcher.whenIdle();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+
+    assert.equal(dictionaryAttempts, 1, "no recursive or immediate repeat");
+    assert.deepEqual(lines, ["[kai-p1-dispatch] outcome=stopped stage=draft_data_dictionary code=validation_blocker"]);
+    assert.deepEqual(dispatcher.stats(), {
+      running: 0, waiting: 0, scheduled: 1, coalesced: 0, saturated: 0, disabled: 0, invalid: 0, started: 1, settled: 1,
+    });
+    assert.deepEqual(
+      (await parserRun(failingFile.intakeFileId)).map(({ parser_status: status, retry_count: retries }) => ({ status, retries })),
+      [{ status: "completed", retries: 0 }],
+    );
+    assert.equal((await counts(failingFile.intakeFileId)).dictionaries, 0);
+    // Inherited Package 1 behaviour: the scheduled sweep will select it again.
+    assert.equal(
+      (await listActionableKaiP1WorkCandidates(poolA)).some((row) => row.intake_file_id === failingFile.intakeFileId),
+      true,
+    );
+  });
+
+  test("15. a burst of distinct confirmed files is processed with bounded concurrency; overflow is left for the scheduled sweep", async () => {
+    await resetTables();
+    const byteSource = createByteSource({ delayMs: 60 });
+    const files = [];
+    for (let index = 0; index < 6; index += 1) {
+      const bytes = csvBytesFor(360 + index);
+      const file = await seedFile({ intakeFileId: fileId(360 + index), bytes });
+      byteSource.register(file.objectVersionId, bytes);
+      files.push(file);
+    }
+
+    let running = 0;
+    let peak = 0;
+    const dispatcher = instanceDispatcher(poolA, byteSource, {
+      maxConcurrent: 2,
+      maxWaiting: 5,
+      onStart: (input) => {
+        running += input ? 1 : -1;
+        peak = Math.max(peak, running);
+      },
+    });
+    const outcomes = files.map((file) =>
+      dispatcher.dispatch({ organizationId: ORG, intakeFileId: file.intakeFileId, expectedFileFacts: expectedFor(file) }, { env: ENABLED_ENV }));
+    assert.deepEqual(outcomes.map((outcome) => outcome.reason), [null, null, null, null, null, "dispatcher_saturated"]);
+    await dispatcher.whenIdle();
+
+    assert.equal(peak, 2);
+    for (const file of files.slice(0, 5)) {
+      assert.equal((await counts(file.intakeFileId)).sensitivityProfiles, 1);
+    }
+    const overflow = files[5];
+    assert.equal((await counts(overflow.intakeFileId)).parserRuns, 0);
+    assert.deepEqual(
+      (await listActionableKaiP1WorkCandidates(poolA)).map((row) => row.intake_file_id),
+      [overflow.intakeFileId],
+      "the refused file stays persisted and visible to the scheduled sweep",
+    );
+  });
+
+  test("16. P1-06 and later stay unreachable: dispatched work writes nothing beyond P1-03/P1-04/P1-05 and their audits", async () => {
+    await resetTables();
+    const storage = createSyntheticStorage();
+    const bytes = csvBytesFor(370);
+    const file = await seedUploadedUnconfirmed({ index: 370, bytes });
+    storage.put(file.objectVersionId, bytes);
+    await confirmViaProductionComposition(file, { storage });
+    await getKaiP1FileDispatcher().whenIdle();
+    assert.equal((await counts(file.intakeFileId)).sensitivityProfiles, 1);
+
+    const { rows } = await query(
+      `SELECT DISTINCT action FROM kai.audit_events WHERE metadata->>'intake_file_id' = $1 OR metadata->>'object_id' = $1 ORDER BY action`,
+      [file.intakeFileId],
+    );
+    const actions = rows.map((row) => row.action);
+    assert.ok(actions.includes("apply_security_assessment_policy_decision"));
+    for (const action of actions) {
+      assert.doesNotMatch(action, /review_queue|source_candidate|source_promotion|evidence|claim_|generat|export/i, action);
+    }
+    const tables = await query(
+      `SELECT table_name FROM information_schema.tables
+        WHERE table_schema = 'kai' AND table_name ~ '(review_queue|source_candidate|evidence|claim)'`,
+    );
+    assert.deepEqual(tables.rows, [], "no P1-06+ substrate exists in this synthetic database to be written to");
+  });
 }

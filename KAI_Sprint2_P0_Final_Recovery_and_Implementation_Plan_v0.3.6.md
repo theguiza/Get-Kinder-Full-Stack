@@ -36044,3 +36044,156 @@ assembled test 2; files were restored from scratchpad backups.
 No push, deployment, production or shared database, cloud, feature-flag,
 tenant, credential, `.env`, schema/migration, route, frontend, cron
 schedule, or `00_KAI_CURRENT_STATE.md` change.
+
+### KAI processing latency fix, Package 2 of 3: immediate file-scoped P1 dispatch after a committed security pass (2026-10-10)
+
+**Owner direction (USER_CONFIRMED):** after a freshly committed Gate C
+`passed` policy decision, asynchronously start the Package 1 file-scoped
+P1-03 -> P1-04 -> P1-05 operation for that one file, without waiting for
+cron, without invoking the global sweep, without new retry paths, with
+bounded in-process concurrency. No cron interval, ordering, limit, schema,
+route, frontend, queue, worker-process, production, cloud, flag, or Current
+State change. Package 3 is not started.
+
+**Starting state (TOOL_VERIFIED):** `main` at
+`e1cafea2ae2e0af5e49764e78b380e66fbcac0b3` (Package 1), clean.
+
+**Findings (TOOL_VERIFIED):**
+- Both `confirmUpload()` paths (GCS and non-GCS) await
+  `applyConfirmedSecurityAssessment()`, which returns early unless the file
+  is still `pending`, and persists the decision through
+  `orchestrateMutationWithRequiredAudit`. That helper returns the
+  `persistMutation` result only after `withTransaction` has run `COMMIT`; the
+  result is the `casSecurityAssessmentFilePolicyDecision` `RETURNING` row
+  (`pending -> <status>` under exact organization/file/object-version/
+  checksum/size guards). CAS no-match throws, so conflict and audit failure
+  both roll back and never return a row.
+- `isEligible = Boolean(newFilePolicyStatus)` is true for `blocked` and
+  `failed`; it is not used as dispatch permission.
+- No in-process concurrency limiter existed in `Backend/kai` or
+  `package.json`. The P1 runtime's 40 transitive modules import neither the
+  intake service, runtime service, cron, nor routes (no import cycle).
+
+**Implementation (TOOL_VERIFIED):**
+- `Backend/kai/parsing/p1FileDispatch.js` (new): `createKaiP1FileDispatcher`
+  and the process-wide `getKaiP1FileDispatcher()`, bound to the unchanged
+  `processKaiP1IntakeFile`. `dispatch()` is synchronous and never awaits P1;
+  jobs start via `setImmediate`. Requires both worker gates; coalesces a
+  second notification for a file already waiting/running in the process;
+  at most 2 running and 25 waiting per process, beyond which it refuses
+  (`dispatcher_saturated`) and leaves the persisted file to the existing
+  sweep. Each job runs exactly once; its result is classified from
+  `stoppedAt` and the inner `result` / `dataDictionary` /
+  `sensitivityProfile` (an outer `ok: true` is not completion) and logged as
+  safe tokens only (`[kai-p1-dispatch] outcome=... stage=... code=...`, no
+  identifiers or file data). Rejections/throws are contained; nothing is
+  retried or re-dispatched. Only `env`, `storageAdapter`, `gcsProvider`,
+  `gcsParserReaderProvider`, `uploadLifecycleRepository` are forwarded to P1.
+  Imports only the gate config and `processKaiP1IntakeFile`.
+- `Backend/kai/services/kaiIntakeService.js`: `applyConfirmedSecurityAssessment()`
+  keeps the committed orchestration result and, on the existing
+  `policy_persisted` branch, calls `dispatchCommittedPolicyPass()`, which
+  dispatches only if the committed row is `file_policy_status = 'passed'`
+  for the same organization, file, object version, verified checksum, and
+  verified size, passing `expectedFileFacts` from those trusted values.
+  Dispatcher failures are swallowed after commit. `dependencies.kaiP1FileDispatcher`
+  follows the existing injection convention; production uses the
+  process-wide dispatcher.
+- `p1WorkerRuntime.js`, `p1WorkerCron.js`, routes, and `index.js` are
+  unchanged.
+
+**Acceptance (TOOL_VERIFIED, synthetic data):**
+`__tests__/kai-sprint2-p1-immediate-dispatch.spec.js` (21 unit tests) and
+tests 9-16 added to
+`__tests__/kai-sprint2-p1-worker-file-processing.integration.spec.js`
+(runner `npm run verify:kai-sprint2-p1-worker`, real PostgreSQL 16; the
+production `kaiIntakeRuntimeService.confirmUpload` composition on the
+application's default pool, real Postgres lifecycle repository, real CAS,
+real required audit, process-wide dispatcher, real P1 repositories; only the
+exact-version storage and the malware executor seam are synthetic):
+1. Fresh confirmed upload committing `passed`: exactly one dispatch; P1
+   completes through P1-05 without cron (production composition).
+2. Event order `BEGIN, CAS, AUDIT, COMMIT, DISPATCH`; at confirmation return,
+   P1 had not started (`started` unchanged).
+3. Rolled-back audit (unit and real DB), throwing mutation: no dispatch.
+4. `blocked`, eligible `failed`, not-configured/pending, unclassified, and
+   assessment failure: no dispatch; real DB: no parser runs.
+5. CAS no-match (unit) and a real-DB losing CAS against an already-passed
+   row: no dispatch, no audit. Committed rows not proving `passed` for the
+   same identity: no dispatch.
+6. Replay of an already-passed confirmation: no dispatch, no row or audit
+   change, no byte read.
+7. `expectedFileFacts` equals the committed object version/checksum/size.
+8. Stale expectation through the dispatcher:
+   `stopped stage=parser_profile_activation code=conflict_current_state_changed`,
+   no parser run, no byte read.
+9. Either gate off: nothing scheduled; real DB: decision still commits, no
+   P1 work, file remains a sweep candidate.
+10. Confirmation returns its unchanged DTO while a controlled P1 operation is
+    deliberately unresolved.
+11. Production composition reaches the real process-wide dispatcher (stats
+    and completed rows, no injected dispatcher).
+12. P1-05 reached immediately (tests 9, 12, 16).
+13. Two instance dispatchers on separate pools plus a concurrent scheduled
+    sweep: one byte read, one parser run, profile, dictionary, sensitivity
+    profile, one of each downstream audit.
+14. P1-04 failure (rejected required audit): exactly one dictionary attempt,
+    one log line, no re-dispatch after 300 ms; parser run stays `completed`.
+15. Burst: peak concurrency 2 (unit: 8 files; real DB: 6 files with
+    `maxWaiting` 5), every accepted file completes; the refused file stays
+    a sweep candidate.
+16. Static: dispatcher imports only config and the file-scoped operation;
+    service never references the sweep; real DB: only P1-03/P1-04/P1-05 and
+    policy audit actions, no P1-06+ substrate.
+
+Negative controls (TOOL_VERIFIED): dispatching regardless of committed
+status fails 2 unit tests and real-DB test 10; disabling the dispatch call
+fails 4 unit tests and real-DB tests 9-12 and 16. The service file was
+restored byte-identical (`cmp`).
+
+**Measured synthetic latency (TOOL_VERIFIED, local loopback PostgreSQL 16,
+5 samples, `performance.now()` after the policy transaction's COMMIT
+resolved vs. dispatcher job start):** commit -> P1 start median 0.10 ms,
+max 0.36 ms; commit -> P1-05 complete median 14.1 ms, max 18.0 ms.
+Production composition, confirmation return -> P1-05 complete: 18.4 ms.
+Not a production measurement.
+
+**Verification (TOOL_VERIFIED; loopback `DATABASE_URL` sentinel and
+`KAI_FILE_UPLOAD_ENABLED=false` on Node/npm test commands):**
+
+| Command | Pass | Fail | Skipped |
+| --- | --- | --- | --- |
+| `node --test` dispatch, Gate C handoff, C-2A, intake service (+contract), observability, synthetic assessment (2), orchestration boundary, P1 runtime/activation, intake queries, pass2 service/route, duplicate resolution, config (16 files) | 428 | 0 | 0 |
+| `npm run verify:kai-sprint2-p1-worker` | 5 + 16 | 0 | 0 |
+| `node scripts/kai-sprint2-confirm-upload-metadata-boundary-local-postgres.js` | 13 | 0 | 0 |
+| `npm run verify:kai-sprint2-intake-duplicate-resolution-real-db` | 11 | 0 | 0 |
+| `npm run verify:kai-sprint2-api-contract` | 71 | 0 | 0 |
+| P1-03 / P1-04 / P1-05 runners | 14 / 12 / 15 | 0 | 0 |
+| `npm run test:kai-sprint2` | 4699 | 0 | 89 |
+| `npm test` | 5379 | 0 | 99 |
+| `git diff --check` | clean | | |
+
+One read-only `node -e` import-graph scan (reads source files, imports no
+application module) ran before the sentinel was exported in this session.
+
+**NOT_CONFIRMED:**
+- Inherited from Package 1, unchanged: a persistent P1-04/P1-05 failure is
+  re-attempted once per scheduled sweep indefinitely, and 25 or more such
+  oldest candidates starve scheduled recovery of newer files. Dispatch adds
+  exactly one attempt per freshly committed pass and never re-dispatches,
+  but scheduled recovery of anything dispatch drops, refuses, or loses is
+  not guaranteed under that starvation condition.
+- In-memory scheduling is not durable: a process exit after commit loses
+  waiting/running jobs (a `running` parser run orphaned mid-profile is never
+  reclaimed automatically - inherited). Such files rely on the 15-minute
+  sweep, subject to the limitation above.
+- A confirmation retried while the policy is still `pending` (crash
+  recovery) commits a fresh transition and dispatches once; this is by
+  design, not a replay of a passed file.
+- Production GCS exact-generation reads, production runtime composition,
+  flags, deployment, and real latency were not exercised.
+
+**Status:** P1_IMMEDIATE_FILE_DISPATCH_COMPLETE_LOCALLY_DURABLE_RECOVERY_NOT_CONFIRMED.
+No push, deployment, production or shared database, cloud, feature-flag,
+tenant, credential, `.env`, schema/migration, route, frontend, cron
+schedule, sweep ordering/limit, or `00_KAI_CURRENT_STATE.md` change.

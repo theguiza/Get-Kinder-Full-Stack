@@ -31,6 +31,7 @@ import {
   orchestrateMutationWithRequiredAudit,
 } from "../internal/kaiMutationOrchestration.js";
 import { runProductionSecurityAssessment } from "../security/productionSecurityAssessmentComposition.js";
+import { getKaiP1FileDispatcher } from "../parsing/p1FileDispatch.js";
 import {
   getIntakeBatchDetail as readIntakeBatchDetail,
   getIntakeFileMetadata as readIntakeFileMetadata,
@@ -1207,6 +1208,52 @@ function malwareScanStatusForAssessment(outcome, assessmentResult) {
 }
 
 /**
+ * Post-commit hand-off of a freshly committed `passed` policy decision to the
+ * immediate file-scoped P1 dispatcher. `committed` is the value the governed
+ * policy-mutation transaction returned after COMMIT: the CAS row that moved
+ * this exact file from `pending` under these exact verified facts. Anything
+ * short of a `passed` row for the same organization, file, and verified
+ * object version dispatches nothing; `blocked`, `failed`, diagnostic,
+ * conflict, rollback, and already-terminal replay paths never reach here.
+ *
+ * Dispatch is fire-and-forget: it is scheduled, never awaited, and can never
+ * alter the committed decision or the confirmation response. The committed
+ * confirmed/passed row stays visible to the scheduled P1 sweep regardless.
+ */
+function dispatchCommittedPolicyPass(
+  committed,
+  { organizationId, intakeFileId, objectVersionId, verifiedChecksum, verifiedSizeBytes },
+  dependencies,
+) {
+  const row = committed?.ok === true ? committed.data : null;
+  if (
+    !row
+    || row.file_policy_status !== "passed"
+    || row.organization_id !== organizationId
+    || row.intake_file_id !== intakeFileId
+    || row.object_version_id !== objectVersionId
+    || row.verified_checksum !== verifiedChecksum
+    || String(row.verified_size_bytes) !== String(verifiedSizeBytes)
+  ) {
+    return;
+  }
+  try {
+    const dispatcher = dependencies.kaiP1FileDispatcher || getKaiP1FileDispatcher();
+    dispatcher.dispatch(
+      {
+        organizationId,
+        intakeFileId,
+        expectedFileFacts: { objectVersionId, verifiedChecksum, verifiedSizeBytes },
+      },
+      dependencies,
+    );
+  } catch {
+    // The policy decision is already committed; the scheduled sweep remains
+    // the recovery path for this file.
+  }
+}
+
+/**
  * Gate C production post-confirm security-assessment handoff.
  *
  * Invoked unconditionally from confirmUpload's success path, on both a fresh
@@ -1317,8 +1364,9 @@ export async function applyConfirmedSecurityAssessment(
   // persist fails this call closed exactly like a failed policy mutation
   // does, rather than silently claiming the pending state is now
   // operator-explained.
+  let committed;
   try {
-    await orchestrateMutationWithRequiredAudit(
+    committed = await orchestrateMutationWithRequiredAudit(
       {
         mutation: isEligible
           ? { organizationId, intakeFileId, objectVersionId, verifiedChecksum, verifiedSizeBytes, newFilePolicyStatus, newMalwareScanStatus }
@@ -1388,6 +1436,11 @@ export async function applyConfirmedSecurityAssessment(
   }
   if (isEligible) {
     logGateCPostConfirmSecurityPhase("policy_persisted");
+    dispatchCommittedPolicyPass(
+      committed,
+      { organizationId, intakeFileId, objectVersionId, verifiedChecksum, verifiedSizeBytes },
+      dependencies,
+    );
   } else if (assessmentCategory === "malware_scan_not_configured") {
     logGateCPostConfirmSecurityPhase("malware_not_configured");
   } else {
