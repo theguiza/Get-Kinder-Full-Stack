@@ -4,6 +4,7 @@ import { createPostgresParserRunRepository } from "./postgresParserRunRepository
 import { createP1ObjectVersionByteSource } from "./p1ObjectVersionByteSource.js";
 import { createProductionMetadataOnlyAudit } from "../services/kaiMetadataOnlyAuditComposition.js";
 import { getScopedIntakeFileParserProfileEligibilityFacts } from "../db/kaiIntakeQueries.js";
+import { createKaiP1StageTransaction } from "./p1StageTransaction.js";
 
 const CHECKSUM_PATTERN = /^[a-f0-9]{64}$/;
 const EXPECTED_FILE_FACT_KEYS = Object.freeze(["objectVersionId", "verifiedChecksum", "verifiedSizeBytes"]);
@@ -149,7 +150,17 @@ export async function activateParserProfileWorkForIntakeFile(
     extension: facts.file_extension,
   };
 
-  const parserRunRepository = dependencies.parserRunRepository || createPostgresParserRunRepository();
+  // Every default parser-run transaction re-asserts eligibility under a share
+  // lock, so a file blocked after the check above cannot be claimed or
+  // completed.
+  const parserRunRepository = dependencies.parserRunRepository || createPostgresParserRunRepository({
+    runInTransaction: createKaiP1StageTransaction({
+      organizationId,
+      intakeFileId,
+      verifiedChecksum: facts.verified_checksum,
+      runInTransaction: dependencies.runInTransaction,
+    }),
+  });
 
   const objectVersionByteSource = dependencies.objectVersionByteSource || createP1ObjectVersionByteSource({
     trustedIntakeFacts: {
@@ -198,6 +209,30 @@ export async function activateParserProfileWorkForIntakeFile(
       data: { activated: false, queued: queued.data, run: { run: queued.data.run, replayed: true } },
       error: null,
     };
+  }
+
+  // A `running` replay is either live work owned by another worker (its
+  // lease is active: leave it alone) or orphaned by a dead worker (lease
+  // expired: the repository counts the lost attempt and re-queues it, or
+  // records an ordinary safe failure at the retry cap). The original worker
+  // is fenced out of committing in both cases.
+  if (!retry && queued.data.replayed === true && queued.data.run?.parser_status === "running") {
+    const recovered = await orchestration.recoverExpiredParserProfileWork({ trustedFileFacts, now, metadataOnlyAudit });
+    if (!recovered.ok) return { ok: false, data: { queued: queued.data }, error: recovered.error };
+    if (recovered.data.recovered !== true) {
+      return {
+        ok: false,
+        data: { queued: queued.data, lease_active: recovered.data.lease_active === true },
+        error: { code: "conflict_current_state_changed" },
+      };
+    }
+    if (recovered.data.run?.parser_status !== "queued") {
+      return {
+        ok: true,
+        data: { activated: false, queued: queued.data, run: { run: recovered.data.run, recovered: true } },
+        error: null,
+      };
+    }
   }
 
   const run = retry

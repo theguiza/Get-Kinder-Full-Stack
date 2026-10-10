@@ -3,11 +3,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { Client } from "pg";
+import { assertNoFail } from "./kai-sprint2-p1-05-intake-sensitivity-profile-runner-assertions.js";
 
 // Runner-owned, loopback-only PostgreSQL 16 proof for the P1 worker: the
-// actionable-candidate sweep and the shared file-scoped P1-03 -> P1-04 ->
-// P1-05 operation. Each spec gets its own freshly migrated synthetic
-// database on one ephemeral server, which is removed afterwards.
+// additive downstream recovery-state migration pack (catalog verifier,
+// read-only failure checks, smoke seed/verifier, rollback and re-apply), the
+// actionable-candidate sweep, and the shared file-scoped P1-03 -> P1-04 ->
+// P1-05 operation with immediate dispatch and scheduled recovery. Each part
+// gets its own freshly migrated synthetic database on one ephemeral server,
+// which is removed afterwards.
 const repoRoot = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
 const defaultServerBin = "/opt/homebrew/opt/postgresql@16/bin";
 const fallbackBin = "/opt/homebrew/opt/libpq/bin";
@@ -31,7 +35,15 @@ const SCHEMA_FILES = [
   "migrations/kai_sprint2_p1_parser_run_and_file_profile.sql",
   "migrations/kai_sprint2_p1_04_data_dictionary_and_quality.sql",
   "migrations/kai_sprint2_p1_05_intake_sensitivity_profile.sql",
+  "migrations/kai_sprint2_p1_downstream_recovery_state.sql",
 ];
+const RECOVERY_MIGRATION = "migrations/kai_sprint2_p1_downstream_recovery_state.sql";
+const RECOVERY_ROLLBACK = "migrations/kai_sprint2_p1_downstream_recovery_state.rollback.sql";
+const RECOVERY_VERIFIER = "scripts/kai-sprint2-p1-downstream-recovery-state-verifier.sql";
+const RECOVERY_FAILURE_CHECKS = "scripts/kai-sprint2-p1-downstream-recovery-state-failure-checks.sql";
+const RECOVERY_SMOKE_SEED = "scripts/kai-sprint2-p1-downstream-recovery-state-smoke-seed.sql";
+const RECOVERY_SMOKE_VERIFIER = "scripts/kai-sprint2-p1-downstream-recovery-state-smoke-verifier.sql";
+const MIGRATION_PACK_DB = "kai_p1_worker_recovery_migration_synthetic";
 
 const SUITES = [
   {
@@ -104,6 +116,37 @@ try {
   run(pgCtl, ["-D", dataDir, "-l", logFile, "-o", `-k ${socketDir} -h 127.0.0.1 -p ${port}`, "start"], { capture: true });
   started = true;
   console.log(`P1 worker ephemeral PostgreSQL loopback: 127.0.0.1:${port}`);
+
+  // Migration verification pack, in its own disposable database.
+  run(createdb, ["-h", "127.0.0.1", "-p", port, MIGRATION_PACK_DB], { capture: true });
+  await proveRunnerOwnedTarget(MIGRATION_PACK_DB);
+  for (const file of SCHEMA_FILES) psqlFile(MIGRATION_PACK_DB, file);
+  const packSteps = [
+    ["catalog verifier", RECOVERY_VERIFIER],
+    ["read-only failure checks (empty)", RECOVERY_FAILURE_CHECKS],
+    ["smoke seed", RECOVERY_SMOKE_SEED],
+    ["smoke verifier", RECOVERY_SMOKE_VERIFIER],
+    ["read-only failure checks (seeded)", RECOVERY_FAILURE_CHECKS],
+  ];
+  for (const [label, file] of packSteps) {
+    const output = psqlFile(MIGRATION_PACK_DB, file);
+    if (file !== RECOVERY_SMOKE_SEED) {
+      assertNoFail(`P1 downstream recovery ${label}`, output);
+      const passCount = (output.match(/\|\s*PASS\s*\|/g) || []).length;
+      if (passCount === 0) throw new Error(`P1 downstream recovery ${label} returned no PASS rows`);
+      console.log(`P1 downstream recovery ${label}: ${passCount} PASS, 0 FAIL`);
+    }
+  }
+  // Rollback draft in this disposable database only, then re-apply forward.
+  psqlFile(MIGRATION_PACK_DB, RECOVERY_ROLLBACK);
+  const afterRollback = run(psql, ["-At", "-h", "127.0.0.1", "-p", port, "-d", MIGRATION_PACK_DB, "-c",
+    "SELECT to_regclass('kai.intake_p1_downstream_attempts') IS NULL AND to_regclass('kai.intake_file_profiles') IS NOT NULL AND (SELECT count(*) FROM kai.intake_file_profiles) = 2"], { capture: true }).stdout.trim();
+  if (afterRollback !== "t") throw new Error("P1 downstream recovery rollback did not drop exactly the recovery table");
+  console.log("P1 downstream recovery rollback draft: table dropped, earlier-package rows intact");
+  psqlFile(MIGRATION_PACK_DB, RECOVERY_MIGRATION);
+  psqlFile(MIGRATION_PACK_DB, RECOVERY_MIGRATION);
+  assertNoFail("P1 downstream recovery catalog verifier (re-applied twice)", psqlFile(MIGRATION_PACK_DB, RECOVERY_VERIFIER));
+  console.log("P1 downstream recovery forward migration re-applied idempotently: catalog verifier PASS");
 
   for (const suite of SUITES) {
     run(createdb, ["-h", "127.0.0.1", "-p", port, suite.dbName], { capture: true });

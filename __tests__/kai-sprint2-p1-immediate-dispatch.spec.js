@@ -330,7 +330,7 @@ test("P1-06 and later stay unreachable: the dispatcher imports only the gate con
   ]);
   const code = source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
   assert.doesNotMatch(code, /runKaiP1WorkerTick|listActionableKaiP1WorkCandidates|registerKaiP1WorkerCron|retry:\s*true/);
-  assert.doesNotMatch(code, /reviewQueue|review-?queue|createSensitivityReviewQueueItem|sourceCandidate|evidence|claim|generat|exportReview/i);
+  assert.doesNotMatch(code, /reviewQueue|review-?queue|createSensitivityReviewQueueItem|sourceCandidate|evidence|\bclaims?\b|claimProposal|generat|exportReview/i);
 
   const service = readFileSync("Backend/kai/services/kaiIntakeService.js", "utf8");
   assert.match(service, /import \{ getKaiP1FileDispatcher \} from "\.\.\/parsing\/p1FileDispatch\.js";/);

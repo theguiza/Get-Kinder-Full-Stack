@@ -28,6 +28,9 @@ async function runSuite() {
   const BASE_TIME = Date.parse("2026-08-29T10:00:00.000Z");
   const PARSER = { parserName: "kai_local_profiling_kernel", parserVersion: "1.0.0" };
   const MAX_PARSER_RETRY_COUNT = 3;
+  // The sweep's controlled clock: every seeded parser run starts at
+  // BASE_TIME, so a running run is inside its 15-minute claim lease here.
+  const SWEEP_NOW = new Date(BASE_TIME).toISOString();
 
   const pool = new Pool({ connectionString: DATABASE_URL, ssl: false, max: 8 });
   test.after(async () => {
@@ -45,7 +48,7 @@ async function runSuite() {
 
   async function resetTables() {
     await withClient((client) => client.query(
-      "TRUNCATE kai.upload_lifecycle_audit, kai.intake_sensitivity_profiles, kai.data_dictionaries, " +
+      "TRUNCATE kai.intake_p1_downstream_attempts, kai.upload_lifecycle_audit, kai.intake_sensitivity_profiles, kai.data_dictionaries, " +
       "kai.intake_file_profiles, kai.intake_parser_runs, kai.intake_files CASCADE",
     ));
   }
@@ -262,7 +265,7 @@ async function runSuite() {
       await satisfyFile(client, { organizationId: ORG, intakeFileId: files.completedWithSensitivity, checksum: checksumFor(9) });
     });
 
-    const result = await listActionableKaiP1WorkCandidates(pool);
+    const result = await listActionableKaiP1WorkCandidates(pool, { now: SWEEP_NOW });
     const selected = new Set(result.map((row) => row.intake_file_id));
 
     assert.equal(selected.has(files.noParserRun), true, "fresh P1-03 (no parser run) must be selected");
@@ -332,7 +335,78 @@ async function runSuite() {
       }
     });
 
-    const selected = new Set((await listActionableKaiP1WorkCandidates(pool)).map((row) => row.intake_file_id));
+    const selected = new Set((await listActionableKaiP1WorkCandidates(pool, { now: SWEEP_NOW })).map((row) => row.intake_file_id));
+    for (const [index, entry] of cases.entries()) {
+      assert.equal(selected.has(fileFor(index)), entry.selected, entry.key);
+    }
+  });
+
+  test("recovery bounds: an expired parser lease is selectable; live claims, cooldowns, exhausted and operator-attention downstream state are not; superseded state never blocks", async () => {
+    await resetTables();
+    const ORG = "00000000-0000-4000-8000-00000000a004";
+    const fileFor = (index) => `31000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
+    const LEASE_MS = 15 * 60 * 1000;
+    const leaseExpiredStart = new Date(BASE_TIME - LEASE_MS).toISOString();
+    const leaseLiveStart = new Date(BASE_TIME - LEASE_MS + 1000).toISOString();
+    const future = new Date(BASE_TIME + 1000).toISOString();
+    const past = new Date(BASE_TIME - 1000).toISOString();
+
+    const cases = [
+      { key: "runningLeaseExpired", parser: { status: "running", startedAt: leaseExpiredStart }, selected: true },
+      { key: "runningLeaseLive", parser: { status: "running", startedAt: leaseLiveStart }, selected: false },
+      { key: "dictionaryInProgressLive", downstream: { stage: "p1_04_data_dictionary", state: "in_progress", claimExpiresAt: future }, selected: false },
+      { key: "dictionaryInProgressExpired", downstream: { stage: "p1_04_data_dictionary", state: "in_progress", claimExpiresAt: past }, selected: true },
+      { key: "dictionaryCoolingDown", downstream: { stage: "p1_04_data_dictionary", state: "retry_scheduled", nextEligibleAt: future }, selected: false },
+      { key: "dictionaryCooldownOver", downstream: { stage: "p1_04_data_dictionary", state: "retry_scheduled", nextEligibleAt: past }, selected: true },
+      { key: "dictionaryExhausted", downstream: { stage: "p1_04_data_dictionary", state: "exhausted" }, selected: false },
+      { key: "dictionaryOperatorAttention", downstream: { stage: "p1_04_data_dictionary", state: "operator_attention" }, selected: false },
+      { key: "sensitivityExhausted", downstream: { stage: "p1_05_sensitivity_profile", state: "exhausted", withDictionary: true }, selected: false },
+      { key: "dictionarySucceededSensitivityPending", downstream: { stage: "p1_04_data_dictionary", state: "succeeded", withDictionary: true }, selected: true },
+      { key: "exhaustedUnderSupersededChecksum", downstream: { stage: "p1_04_data_dictionary", state: "exhausted", superseded: true }, selected: true },
+    ];
+
+    await withClient(async (client) => {
+      for (const [index, entry] of cases.entries()) {
+        const intakeFileId = fileFor(index);
+        const checksum = `${String(index % 10).repeat(62)}${index < 10 ? "b0" : "b1"}`;
+        // eslint-disable-next-line no-await-in-loop
+        await seedIntakeFile(client, { intakeFileId, organizationId: ORG, checksum });
+        if (entry.parser) {
+          // eslint-disable-next-line no-await-in-loop
+          await seedParserRun(client, { organizationId: ORG, intakeFileId, checksum, parserStatus: entry.parser.status, now: entry.parser.startedAt });
+          continue;
+        }
+        const d = entry.downstream;
+        const profileChecksum = d.superseded ? "e".repeat(64) : checksum;
+        // eslint-disable-next-line no-await-in-loop
+        const runId = await seedParserRun(client, { organizationId: ORG, intakeFileId, checksum: profileChecksum, parserStatus: "running" });
+        // eslint-disable-next-line no-await-in-loop
+        const fileProfileId = await completeParserRun(client, { organizationId: ORG, intakeFileId, checksum: profileChecksum, parserRunId: runId });
+        if (d.withDictionary) {
+          // eslint-disable-next-line no-await-in-loop
+          await seedDictionary(client, { organizationId: ORG, intakeFileId, fileProfileId });
+        }
+        const attemptCount = d.state === "exhausted" ? 3 : 1;
+        // eslint-disable-next-line no-await-in-loop
+        await client.query(
+          `INSERT INTO kai.intake_p1_downstream_attempts (
+             organization_id, intake_file_id, file_profile_id, parser_name, parser_version, checksum, stage,
+             recovery_state, attempt_count, claim_token, claim_expires_at, last_attempt_at, next_eligible_at,
+             last_error_code, created_at, updated_at
+           )
+           VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6, $7, $8, $9,
+                   CASE WHEN $8 = 'in_progress' THEN gen_random_uuid() END, $10::timestamptz, $11::timestamptz,
+                   $12::timestamptz, CASE WHEN $8 IN ('retry_scheduled', 'exhausted', 'operator_attention') THEN 'system_error' END,
+                   $11::timestamptz, $11::timestamptz)`,
+          [
+            ORG, intakeFileId, fileProfileId, PARSER.parserName, PARSER.parserVersion, profileChecksum, d.stage,
+            d.state, attemptCount, d.claimExpiresAt || null, past, d.nextEligibleAt || null,
+          ],
+        );
+      }
+    });
+
+    const selected = new Set((await listActionableKaiP1WorkCandidates(pool, { now: SWEEP_NOW })).map((row) => row.intake_file_id));
     for (const [index, entry] of cases.entries()) {
       assert.equal(selected.has(fileFor(index)), entry.selected, entry.key);
     }
@@ -350,7 +424,7 @@ async function runSuite() {
       await seedIntakeFile(client, { intakeFileId: fileB, organizationId: ORG_B, checksum: checksumFor(2) });
     });
 
-    const result = await listActionableKaiP1WorkCandidates(pool);
+    const result = await listActionableKaiP1WorkCandidates(pool, { now: SWEEP_NOW });
     const byFile = new Map(result.map((row) => [row.intake_file_id, row.organization_id]));
     assert.equal(byFile.get(fileA), ORG_A);
     assert.equal(byFile.get(fileB), ORG_B);
@@ -375,7 +449,7 @@ async function runSuite() {
       }
     });
 
-    const firstTick = await listActionableKaiP1WorkCandidates(pool);
+    const firstTick = await listActionableKaiP1WorkCandidates(pool, { now: SWEEP_NOW });
     assert.equal(firstTick.length, 25, "the bounded per-tick limit must still be respected");
     const firstTickOrgs = new Set(firstTick.map((row) => row.organization_id));
     for (let index = 0; index < 25; index += 1) {
@@ -394,7 +468,7 @@ async function runSuite() {
       }
     });
 
-    const secondTick = await listActionableKaiP1WorkCandidates(pool);
+    const secondTick = await listActionableKaiP1WorkCandidates(pool, { now: SWEEP_NOW });
     const secondTickOrgs = new Set(secondTick.map((row) => row.organization_id));
     assert.equal(secondTick.length, TOTAL_ORGS - 25, "exactly the remaining organizations must now be actionable");
     for (let index = 25; index < TOTAL_ORGS; index += 1) {
@@ -431,7 +505,7 @@ async function runSuite() {
       });
     });
 
-    const firstTick = await listActionableKaiP1WorkCandidates(pool);
+    const firstTick = await listActionableKaiP1WorkCandidates(pool, { now: SWEEP_NOW });
     assert.equal(firstTick.length, 25, "the bounded per-tick limit must still be respected");
     assert.equal(
       firstTick.some((row) => row.intake_file_id === FIXED_FILE),
@@ -460,7 +534,7 @@ async function runSuite() {
       }
     });
 
-    const secondTick = await listActionableKaiP1WorkCandidates(pool);
+    const secondTick = await listActionableKaiP1WorkCandidates(pool, { now: SWEEP_NOW });
     assert.equal(
       secondTick.some((row) => row.intake_file_id === FIXED_FILE),
       true,

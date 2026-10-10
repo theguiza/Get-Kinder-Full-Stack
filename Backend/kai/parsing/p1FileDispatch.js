@@ -55,10 +55,24 @@ function safeToken(value) {
   return typeof value === "string" && SAFE_TOKEN_RE.test(value) ? value : "unclassified";
 }
 
+// Downstream recovery decisions (see postgresP1DownstreamRecoveryRepository.js)
+// mapped to the outcome a stopped P1-04/P1-05 stage is reported as.
+const RECOVERY_DECISION_OUTCOMES = Object.freeze({
+  retry_scheduled: "deferred",
+  deferred: "deferred",
+  busy: "busy",
+  exhausted: "exhausted",
+  operator_attention: "operator_attention",
+  not_eligible: "not_eligible",
+  claim_failed: "failed",
+  unacknowledged: "failed",
+});
+
 /**
  * Classifies a `processKaiP1IntakeFile` result. An outer `ok: true` only
  * means the operation ran; completion through P1-05 requires no `stoppedAt`
- * and a successful sensitivity-profile result.
+ * and a successful sensitivity-profile result. A stopped downstream stage is
+ * reported by its durable recovery decision when one was recorded.
  */
 export function classifyKaiP1DispatchResult(result) {
   if (result?.ok !== true) {
@@ -70,14 +84,17 @@ export function classifyKaiP1DispatchResult(result) {
   }
   const stage = entry?.stoppedAt;
   let code;
+  let outcome = "stopped";
   if (stage === "parser_profile_activation") {
     code = entry.result?.error?.code || entry.result?.data?.reason || entry.result?.data?.run?.run?.parser_status;
-  } else if (stage === "draft_data_dictionary") {
-    code = entry.dataDictionary?.error?.code;
-  } else if (stage === "persist_intake_sensitivity_profile") {
-    code = entry.sensitivityProfile?.error?.code;
+  } else if (stage === "draft_data_dictionary" || stage === "persist_intake_sensitivity_profile") {
+    const recovery = Array.isArray(entry.recovery) ? entry.recovery.at(-1) : null;
+    outcome = RECOVERY_DECISION_OUTCOMES[recovery?.decision] || "stopped";
+    code = recovery?.code
+      || (stage === "draft_data_dictionary" ? entry.dataDictionary?.error?.code : entry.sensitivityProfile?.error?.code)
+      || recovery?.decision;
   }
-  return { outcome: "stopped", stage: safeToken(stage), code: safeToken(code) };
+  return { outcome, stage: safeToken(stage), code: safeToken(code) };
 }
 
 function outcomeLine({ outcome, stage, code }) {

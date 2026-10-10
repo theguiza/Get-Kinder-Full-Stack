@@ -28,14 +28,8 @@ async function runSuite() {
     getScopedIntakeFileParserProfileEligibilityFacts,
     listActionableKaiP1WorkCandidates,
   } = await import("../Backend/kai/db/kaiIntakeQueries.js");
-  const { createPostgresParserRunRepository } = await import("../Backend/kai/parsing/postgresParserRunRepository.js");
-  const { createPostgresDataDictionaryRepository } = await import(
-    "../Backend/kai/dictionary/postgresDataDictionaryRepository.js"
-  );
-  const { createPostgresIntakeSensitivityProfileRepository } = await import(
-    "../Backend/kai/dictionary/postgresIntakeSensitivityProfileRepository.js"
-  );
   const { processKaiP1IntakeFile, runKaiP1WorkerTick } = await import("../Backend/kai/parsing/p1WorkerRuntime.js");
+  const { createProductionMetadataOnlyAudit } = await import("../Backend/kai/services/kaiMetadataOnlyAuditComposition.js");
 
   const DATABASE_URL = process.env.KAI_P1_WORKER_FILE_PROCESSING_DATABASE_URL;
   const ORG = "00000000-0000-4000-8000-00000000c001";
@@ -58,7 +52,7 @@ async function runSuite() {
 
   async function resetTables() {
     await query(
-      "TRUNCATE kai.audit_events, kai.upload_lifecycle_audit, kai.upload_policy_decision_replay, " +
+      "TRUNCATE kai.intake_p1_downstream_attempts, kai.audit_events, kai.upload_lifecycle_audit, kai.upload_policy_decision_replay, " +
       "kai.intake_sensitivity_profiles, kai.data_quality_findings, kai.data_dictionary_mappings, " +
       "kai.data_dictionary_fields, kai.data_dictionaries, kai.intake_file_profiles, kai.intake_parser_runs, " +
       "kai.intake_files CASCADE",
@@ -148,24 +142,63 @@ async function runSuite() {
     };
   }
 
-  /** One "instance": repositories bound only to its own pool. */
+  /**
+   * One "instance": every transaction and read bound to its own pool, and
+   * otherwise the production default composition - the eligibility-guarded
+   * P1-03/P1-04/P1-05 repositories and the downstream recovery repository
+   * are all built by the runtime itself around that callback-only
+   * `runInTransaction`.
+   */
   function instanceDependencies(pool, byteSource, overrides = {}) {
-    const runInTransaction = (callback) => withTransaction(callback, pool);
     return {
       env: ENABLED_ENV,
       now: () => NOW,
+      runInTransaction: (callback) => withTransaction(callback, pool),
       getScopedIntakeFileParserProfileEligibilityFacts: (identity) =>
         getScopedIntakeFileParserProfileEligibilityFacts(identity, pool),
-      listActionableKaiP1WorkCandidates: () => listActionableKaiP1WorkCandidates(pool),
-      parserRunRepository: createPostgresParserRunRepository({ runInTransaction }),
-      dataDictionaryRepository: createPostgresDataDictionaryRepository({ runInTransaction }),
-      intakeSensitivityProfileRepository: createPostgresIntakeSensitivityProfileRepository({ runInTransaction }),
+      listActionableKaiP1WorkCandidates: (options) => listActionableKaiP1WorkCandidates(pool, options),
       objectVersionByteSource: byteSource.dependency,
       ...overrides,
     };
   }
 
-  const rejectingDownstreamAudit = () => ({ prepareMetadataOnlyAudit: () => ({ ok: false }) });
+  function at(offsetSeconds) {
+    return new Date(Date.parse(NOW) + offsetSeconds * 1000).toISOString();
+  }
+
+  /**
+   * The real production audit composition, except that the P1-04 stage's
+   * own required audit is rejected - a deterministic, non-retryable P1-04
+   * failure whose transaction rolls back completely, while the recovery
+   * bookkeeping audits still commit.
+   */
+  function rejectingStageAudit(options) {
+    const real = createProductionMetadataOnlyAudit(options);
+    return {
+      prepareMetadataOnlyAudit(input) {
+        if (input?.payload?.attempted_operation === "data_dictionary_draft_persisted") return { ok: false };
+        return real.prepareMetadataOnlyAudit(input);
+      },
+    };
+  }
+
+  const transientStageFailure = async () => ({ ok: false, data: null, error: { code: "system_error" } });
+
+  async function recoveryRows(intakeFileId) {
+    const { rows } = await query(
+      `SELECT stage, recovery_state, attempt_count, last_error_code,
+              next_eligible_at, claim_token::text AS claim_token, claim_expires_at
+         FROM kai.intake_p1_downstream_attempts
+        WHERE intake_file_id = $1::uuid
+        ORDER BY stage`,
+      [intakeFileId],
+    );
+    return rows.map((row) => ({
+      ...row,
+      next_eligible_at: row.next_eligible_at ? row.next_eligible_at.toISOString() : null,
+      claim_expires_at: row.claim_expires_at ? row.claim_expires_at.toISOString() : null,
+    }));
+  }
 
   async function counts(intakeFileId) {
     const scalar = async (sql) => Number((await query(sql, [intakeFileId])).rows[0].count);
@@ -186,6 +219,7 @@ async function runSuite() {
           WHERE d.intake_file_id = $1::uuid`,
       ),
       sensitivityProfiles: await scalar("SELECT count(*) FROM kai.intake_sensitivity_profiles WHERE intake_file_id = $1::uuid"),
+      recoveryRows: await scalar("SELECT count(*) FROM kai.intake_p1_downstream_attempts WHERE intake_file_id = $1::uuid"),
       auditEvents: await scalar("SELECT count(*) FROM kai.audit_events WHERE metadata->>'intake_file_id' = $1::text"),
       lifecycleAudit: Object.fromEntries(lifecycle.rows.map((row) => [row.operation, row.count])),
     };
@@ -272,7 +306,7 @@ async function runSuite() {
     }
 
     assert.equal(byteSource.reads.length, 0);
-    assert.deepEqual(await listActionableKaiP1WorkCandidates(poolA), []);
+    assert.deepEqual(await listActionableKaiP1WorkCandidates(poolA, { now: NOW }), []);
   });
 
   test("3. stale object-version/checksum records and cross-tenant identities cannot enter the shared operation", async () => {
@@ -308,6 +342,7 @@ async function runSuite() {
       dictionaries: 0,
       dictionaryFields: 0,
       sensitivityProfiles: 0,
+      recoveryRows: 0,
       auditEvents: 0,
       lifecycleAudit: {},
     });
@@ -329,7 +364,7 @@ async function runSuite() {
     assert.equal(refused.data.result.error.code, "validation_blocker");
     assert.equal((await counts(inconsistent.intakeFileId)).parserRuns, 0);
     assert.deepEqual(
-      (await listActionableKaiP1WorkCandidates(poolA)).map((row) => row.intake_file_id),
+      (await listActionableKaiP1WorkCandidates(poolA, { now: NOW })).map((row) => row.intake_file_id),
       [file.intakeFileId],
     );
 
@@ -361,8 +396,13 @@ async function runSuite() {
     const completed = results.filter((result) => result.data.stoppedAt === undefined);
     assert.ok(completed.length >= 1, "at least one attempt carried the file through P1-05");
     for (const result of results.filter((entry) => entry.data.stoppedAt !== undefined)) {
-      assert.equal(result.data.stoppedAt, "parser_profile_activation");
-      assert.equal(result.data.result.error.code, "conflict_current_state_changed");
+      if (result.data.stoppedAt === "parser_profile_activation") {
+        assert.equal(result.data.result.error.code, "conflict_current_state_changed");
+      } else {
+        // Arrived after P1-03 completed, while another instance held the
+        // PostgreSQL downstream claim.
+        assert.equal(result.data.recovery.at(-1).decision, "busy");
+      }
     }
 
     const runs = await parserRun(file.intakeFileId);
@@ -384,44 +424,50 @@ async function runSuite() {
     await resetTables();
     const byteSource = createByteSource();
 
-    // P1-04 recovery: P1-03 completed, P1-04 rolled back (rejected required audit).
+    // P1-04 recovery: P1-03 completed, P1-04 failed transiently (retry scheduled).
     const dictionaryBytes = csvBytesFor(80);
     const dictionaryFile = await seedFile({ intakeFileId: fileId(80), bytes: dictionaryBytes });
     byteSource.register(dictionaryFile.objectVersionId, dictionaryBytes);
     const first = await processKaiP1IntakeFile(
       { organizationId: ORG, intakeFileId: dictionaryFile.intakeFileId },
-      instanceDependencies(poolA, byteSource, { createProductionMetadataOnlyAudit: rejectingDownstreamAudit }),
+      instanceDependencies(poolA, byteSource, { createDraftDataDictionary: transientStageFailure }),
     );
     assert.equal(first.data.stoppedAt, "draft_data_dictionary");
+    assert.equal(first.data.recovery[0].decision, "retry_scheduled");
     assert.equal((await counts(dictionaryFile.intakeFileId)).dictionaries, 0);
 
-    // P1-05 recovery: P1-03 and P1-04 completed, P1-05 never ran.
+    // P1-05 recovery: P1-03 and P1-04 completed, P1-05 failed transiently.
     const sensitivityBytes = csvBytesFor(81);
     const sensitivityFile = await seedFile({ intakeFileId: fileId(81), bytes: sensitivityBytes });
     byteSource.register(sensitivityFile.objectVersionId, sensitivityBytes);
     const partial = await processKaiP1IntakeFile(
       { organizationId: ORG, intakeFileId: sensitivityFile.intakeFileId },
-      instanceDependencies(poolA, byteSource, {
-        persistIntakeSensitivityProfile: async () => ({ ok: false, data: null, error: { code: "system_error" } }),
-      }),
+      instanceDependencies(poolA, byteSource, { persistIntakeSensitivityProfile: transientStageFailure }),
     );
     assert.equal(partial.data.stoppedAt, "persist_intake_sensitivity_profile");
+    assert.equal(partial.data.recovery[1].decision, "retry_scheduled");
     const partialDictionaryId = partial.data.dataDictionary.data.dictionary.data_dictionary_id;
 
     assert.equal(byteSource.reads.length, 2);
     const readsBeforeReplay = byteSource.reads.length;
+    const afterCooldown = { now: () => at(61) };
 
-    for (const file of [dictionaryFile, sensitivityFile]) {
+    for (const [file, stage] of [[dictionaryFile, "p1_04_data_dictionary"], [sensitivityFile, "p1_05_sensitivity_profile"]]) {
       const replays = await Promise.all([poolA, poolB, poolA, poolB, poolA, poolB].map((pool) =>
-        processKaiP1IntakeFile({ organizationId: ORG, intakeFileId: file.intakeFileId }, instanceDependencies(pool, byteSource))));
+        processKaiP1IntakeFile({ organizationId: ORG, intakeFileId: file.intakeFileId }, instanceDependencies(pool, byteSource, afterCooldown))));
 
-      assert.ok(replays.every((result) => result.ok === true && result.data.stoppedAt === undefined));
+      assert.ok(replays.every((result) => result.ok === true));
       for (const result of replays) {
         assert.equal(result.data.result.data.activated, false, "a completed run is replayed, never re-claimed");
         assert.equal(result.data.result.data.run.replayed, true);
       }
-      const dictionaryIds = new Set(replays.map((result) => result.data.dataDictionary.data.dictionary.data_dictionary_id));
-      const sensitivityIds = new Set(replays.map((result) =>
+      const completed = replays.filter((result) => result.data.stoppedAt === undefined);
+      assert.ok(completed.length >= 1);
+      for (const result of replays.filter((entry) => entry.data.stoppedAt !== undefined)) {
+        assert.equal(result.data.recovery.at(-1).decision, "busy", "a concurrent replay never runs a claimed stage twice");
+      }
+      const dictionaryIds = new Set(completed.map((result) => result.data.dataDictionary.data.dictionary.data_dictionary_id));
+      const sensitivityIds = new Set(completed.map((result) =>
         result.data.sensitivityProfile.data.sensitivityProfile.intake_sensitivity_profile_id));
       assert.equal(dictionaryIds.size, 1);
       assert.equal(sensitivityIds.size, 1);
@@ -434,10 +480,14 @@ async function runSuite() {
       assert.equal(settled.sensitivityProfiles, 1);
       assert.equal(settled.lifecycleAudit.data_dictionary_draft_persisted, 1);
       assert.equal(settled.lifecycleAudit.intake_sensitivity_profile_persisted, 1);
+      const retried = (await recoveryRows(file.intakeFileId)).find((row) => row.stage === stage);
+      assert.equal(retried.recovery_state, "succeeded");
+      assert.equal(retried.attempt_count, 2, "one failed attempt plus exactly one successful retry");
 
-      // A further concurrent replay round changes nothing at all.
-      await Promise.all([poolA, poolB].map((pool) =>
-        processKaiP1IntakeFile({ organizationId: ORG, intakeFileId: file.intakeFileId }, instanceDependencies(pool, byteSource))));
+      // A further concurrent replay round reconciles committed outputs and changes nothing.
+      const again = await Promise.all([poolA, poolB].map((pool) =>
+        processKaiP1IntakeFile({ organizationId: ORG, intakeFileId: file.intakeFileId }, instanceDependencies(pool, byteSource, afterCooldown))));
+      assert.ok(again.every((result) => result.data.stoppedAt === undefined));
       assert.deepEqual(await counts(file.intakeFileId), settled);
     }
 
@@ -484,7 +534,7 @@ async function runSuite() {
     );
     assert.equal((await counts(failedFile.intakeFileId)).fileProfiles, 0);
     assert.equal(
-      (await listActionableKaiP1WorkCandidates(poolA)).some((row) => row.intake_file_id === failedFile.intakeFileId),
+      (await listActionableKaiP1WorkCandidates(poolA, { now: NOW })).some((row) => row.intake_file_id === failedFile.intakeFileId),
       false,
       "a failed current-identity run is excluded from automatic selection",
     );
@@ -496,15 +546,16 @@ async function runSuite() {
     const byteSource = createByteSource();
     byteSource.register(downstreamFile.objectVersionId, downstreamBytes);
     const persistentlyFailing = instanceDependencies(poolA, byteSource, {
-      createProductionMetadataOnlyAudit: rejectingDownstreamAudit,
+      createProductionMetadataOnlyAudit: rejectingStageAudit,
     });
     const firstTick = await runKaiP1WorkerTick(persistentlyFailing);
-    const secondTick = await runKaiP1WorkerTick(persistentlyFailing);
-    for (const tick of [firstTick, secondTick]) {
-      const entry = tick.data.activated.find((item) => item.intakeFileId === downstreamFile.intakeFileId);
-      assert.equal(entry.stoppedAt, "draft_data_dictionary");
-      assert.equal(entry.dataDictionary.error.code, "validation_blocker");
-    }
+    const entry = firstTick.data.activated.find((item) => item.intakeFileId === downstreamFile.intakeFileId);
+    assert.equal(entry.stoppedAt, "draft_data_dictionary");
+    assert.equal(entry.dataDictionary.error.code, "validation_blocker");
+    assert.deepEqual(entry.recovery, [{ stage: "p1_04_data_dictionary", decision: "operator_attention", code: "validation_blocker", attempt: 1 }]);
+    // A non-retryable failure is excluded from automatic selection at once.
+    const laterTick = await runKaiP1WorkerTick({ ...persistentlyFailing, now: () => at(24 * 3600) });
+    assert.equal(laterTick.data.activated.some((item) => item.intakeFileId === downstreamFile.intakeFileId), false);
     assert.equal(byteSource.reads.length, 1, "the downstream failure never re-profiled the completed run");
     assert.deepEqual(
       (await parserRun(downstreamFile.intakeFileId)).map(({ parser_status: status, retry_count: retries, error_code: code }) => ({ status, retries, code })),
@@ -513,12 +564,13 @@ async function runSuite() {
     const afterFailures = await counts(downstreamFile.intakeFileId);
     assert.equal(afterFailures.dictionaries, 0);
     assert.equal(afterFailures.lifecycleAudit.data_dictionary_draft_persisted, undefined);
-    // Current, documented behaviour: with no durable downstream attempt
-    // state, the file stays a recovery candidate and every sweep attempts
-    // P1-04 once more.
+    assert.deepEqual(
+      (await recoveryRows(downstreamFile.intakeFileId)).map(({ stage, recovery_state: state, attempt_count: attempts, last_error_code: code }) => ({ stage, state, attempts, code })),
+      [{ stage: "p1_04_data_dictionary", state: "operator_attention", attempts: 1, code: "validation_blocker" }],
+    );
     assert.equal(
-      (await listActionableKaiP1WorkCandidates(poolA)).some((row) => row.intake_file_id === downstreamFile.intakeFileId),
-      true,
+      (await listActionableKaiP1WorkCandidates(poolA, { now: at(24 * 3600) })).some((row) => row.intake_file_id === downstreamFile.intakeFileId),
+      false,
     );
   });
 
@@ -589,7 +641,7 @@ async function runSuite() {
     for (let index = 0; index < 27; index += 1) {
       await seedFile({ intakeFileId: fileId(200 + index), bytes: csvBytesFor(200 + index) });
     }
-    assert.equal((await listActionableKaiP1WorkCandidates(poolA)).length, 25);
+    assert.equal((await listActionableKaiP1WorkCandidates(poolA, { now: NOW })).length, 25);
   });
 
   // ---------------------------------------------------------------------
@@ -879,7 +931,7 @@ async function runSuite() {
     assert.equal(dispatcher.stats().disabled, before.disabled + 1);
     assert.equal((await counts(file.intakeFileId)).parserRuns, 0);
     assert.deepEqual(storage.p1Reads, []);
-    assert.deepEqual((await listActionableKaiP1WorkCandidates(poolA)).map((row) => row.intake_file_id), [file.intakeFileId]);
+    assert.deepEqual((await listActionableKaiP1WorkCandidates(poolA, { now: NOW })).map((row) => row.intake_file_id), [file.intakeFileId]);
   });
 
   test("12. measured: committed passed decision -> file-scoped P1 start, and -> P1-05 completion", async () => {
@@ -1001,7 +1053,7 @@ async function runSuite() {
     const dispatcher = instanceDispatcher(poolA, byteSource, {
       lines,
       overrides: {
-        createProductionMetadataOnlyAudit: rejectingDownstreamAudit,
+        createProductionMetadataOnlyAudit: rejectingStageAudit,
         createDraftDataDictionary: async (input, dependencies) => {
           dictionaryAttempts += 1;
           const { createDraftDataDictionary } = await import("../Backend/kai/services/kaiDataDictionaryService.js");
@@ -1014,7 +1066,7 @@ async function runSuite() {
     await new Promise((resolve) => setTimeout(resolve, 300));
 
     assert.equal(dictionaryAttempts, 1, "no recursive or immediate repeat");
-    assert.deepEqual(lines, ["[kai-p1-dispatch] outcome=stopped stage=draft_data_dictionary code=validation_blocker"]);
+    assert.deepEqual(lines, ["[kai-p1-dispatch] outcome=operator_attention stage=draft_data_dictionary code=validation_blocker"]);
     assert.deepEqual(dispatcher.stats(), {
       running: 0, waiting: 0, scheduled: 1, coalesced: 0, saturated: 0, disabled: 0, invalid: 0, started: 1, settled: 1,
     });
@@ -1023,10 +1075,10 @@ async function runSuite() {
       [{ status: "completed", retries: 0 }],
     );
     assert.equal((await counts(failingFile.intakeFileId)).dictionaries, 0);
-    // Inherited Package 1 behaviour: the scheduled sweep will select it again.
+    // Recorded for operator attention: the scheduled sweep never selects it again.
     assert.equal(
-      (await listActionableKaiP1WorkCandidates(poolA)).some((row) => row.intake_file_id === failingFile.intakeFileId),
-      true,
+      (await listActionableKaiP1WorkCandidates(poolA, { now: at(24 * 3600) })).some((row) => row.intake_file_id === failingFile.intakeFileId),
+      false,
     );
   });
 
@@ -1063,7 +1115,7 @@ async function runSuite() {
     const overflow = files[5];
     assert.equal((await counts(overflow.intakeFileId)).parserRuns, 0);
     assert.deepEqual(
-      (await listActionableKaiP1WorkCandidates(poolA)).map((row) => row.intake_file_id),
+      (await listActionableKaiP1WorkCandidates(poolA, { now: NOW })).map((row) => row.intake_file_id),
       [overflow.intakeFileId],
       "the refused file stays persisted and visible to the scheduled sweep",
     );
@@ -1093,5 +1145,697 @@ async function runSuite() {
         WHERE table_schema = 'kai' AND table_name ~ '(review_queue|source_candidate|evidence|claim)'`,
     );
     assert.deepEqual(tables.rows, [], "no P1-06+ substrate exists in this synthetic database to be written to");
+  });
+
+  // ---------------------------------------------------------------------
+  // Package 3: durable, bounded P1 recovery and the one-minute fallback.
+  // Clocks are controlled through `now`; crashes are real child processes
+  // killed with SIGKILL (their connections and memory die with them).
+  // ---------------------------------------------------------------------
+  const { spawnSync } = await import("node:child_process");
+  const { createDraftDataDictionary: realCreateDraftDataDictionary } = await import("../Backend/kai/services/kaiDataDictionaryService.js");
+  const { persistIntakeSensitivityProfile: realPersistIntakeSensitivityProfile } = await import(
+    "../Backend/kai/services/kaiIntakeSensitivityProfileService.js"
+  );
+  const { createPostgresP1DownstreamRecoveryRepository } = await import(
+    "../Backend/kai/parsing/postgresP1DownstreamRecoveryRepository.js"
+  );
+  const { getKaiP1RecoveryStatus } = await import("../Backend/kai/services/kaiP1RecoveryStatusService.js");
+  const { registerKaiP1WorkerCron } = await import("../Backend/kai/parsing/p1WorkerCron.js");
+
+  const PARSER_LEASE_SECONDS = 15 * 60;
+
+  function tickAt(pool, byteSource, offsetSeconds, overrides = {}) {
+    return runKaiP1WorkerTick(instanceDependencies(pool, byteSource, { now: () => at(offsetSeconds), ...overrides }));
+  }
+
+  function activatedIds(tick) {
+    return tick.data.activated.map((entry) => entry.intakeFileId);
+  }
+
+  /** Wraps a real stage, recording calls and failing the first `failTimes` calls per profile. */
+  function countingStage(realStage, { failWith, failTimes = Infinity } = {}) {
+    const calls = [];
+    const stage = async (input, dependencies) => {
+      calls.push(input);
+      const priorCalls = calls.filter((call) => call.fileProfileId === input.fileProfileId).length - 1;
+      if (failWith && priorCalls < failTimes) return failWith();
+      return realStage(input, dependencies);
+    };
+    stage.calls = calls;
+    return stage;
+  }
+
+  async function profileIdFor(intakeFileId) {
+    const { rows } = await query(
+      "SELECT output_profile_id::text AS id FROM kai.intake_parser_runs WHERE intake_file_id = $1::uuid AND parser_status = 'completed'",
+      [intakeFileId],
+    );
+    return rows[0]?.id ?? null;
+  }
+
+  async function auditActionCount(action) {
+    const { rows } = await query("SELECT count(*)::int AS count FROM kai.audit_events WHERE action = $1", [action]);
+    return rows[0].count;
+  }
+
+  function runCrashChild({ mode, file, bytes, offsetSeconds = 0 }) {
+    const child = spawnSync(process.execPath, [
+      new URL("./support/kaiP1WorkerCrashChild.js", import.meta.url).pathname,
+      JSON.stringify({
+        mode,
+        databaseUrl: DATABASE_URL,
+        organizationId: file.organizationId,
+        intakeFileId: file.intakeFileId,
+        now: at(offsetSeconds),
+        bytesBase64: Buffer.from(bytes).toString("base64"),
+      }),
+    ], { encoding: "utf8", env: process.env, timeout: 60_000 });
+    assert.equal(child.signal, "SIGKILL", `child must die at ${mode} (status=${child.status})`);
+  }
+
+  function systemAudit(file) {
+    return createProductionMetadataOnlyAudit({
+      organizationId: file.organizationId,
+      intakeFileId: file.intakeFileId,
+      actorContext: { actorType: "system", actorUserId: null },
+      now: NOW,
+    });
+  }
+
+  test("P3-2/3. a passed file whose immediate dispatch was lost or refused is recovered by the next scheduled sweep without a repeated confirmation", async () => {
+    await resetTables();
+    const storage = createSyntheticStorage();
+    const files = [];
+    for (const index of [400, 401]) {
+      const bytes = csvBytesFor(index);
+      const file = await seedUploadedUnconfirmed({ index, bytes });
+      storage.put(file.objectVersionId, bytes);
+      files.push(file);
+    }
+    const [lostFile, refusedFile] = files;
+
+    // Accepted, then lost with its process: the in-memory job never runs.
+    let lostDispatches = 0;
+    const lostDispatcher = { dispatch: () => { lostDispatches += 1; return { scheduled: true, reason: null }; } };
+    const refusingDispatcher = createKaiP1FileDispatcher({ maxWaiting: 0, processFile: async () => assert.fail("must not run"), log: () => {} });
+    assert.equal((await confirmViaProductionComposition(lostFile, { storage, extra: { kaiP1FileDispatcher: lostDispatcher } })).ok, true);
+    assert.equal((await confirmViaProductionComposition(refusedFile, { storage, extra: { kaiP1FileDispatcher: refusingDispatcher } })).ok, true);
+    assert.equal(lostDispatches, 1);
+    assert.equal(refusingDispatcher.stats().saturated, 1);
+    for (const file of files) {
+      assert.equal((await filePolicy(file.intakeFileId)).file_policy_status, "passed");
+      assert.equal((await counts(file.intakeFileId)).parserRuns, 0);
+    }
+
+    const tick = await tickAt(poolA, { dependency: storage.adapter }, 120);
+    assert.deepEqual(activatedIds(tick).sort(), files.map((file) => file.intakeFileId).sort());
+    for (const file of files) {
+      assert.equal((await counts(file.intakeFileId)).sensitivityProfiles, 1);
+      assert.equal(await policyAuditCount(file.intakeFileId), 1, "the confirmation was never repeated");
+    }
+  });
+
+  test("P3-5. a transient P1-04 failure observes its 1- then 5-minute cooldowns and completes on its third and last attempt without re-profiling", async () => {
+    await resetTables();
+    const bytes = csvBytesFor(410);
+    const file = await seedFile({ intakeFileId: fileId(410), bytes });
+    const byteSource = createByteSource();
+    byteSource.register(file.objectVersionId, bytes);
+    const dictionary = countingStage(realCreateDraftDataDictionary, { failWith: transientStageFailure, failTimes: 2 });
+    const overrides = { createDraftDataDictionary: dictionary };
+
+    const first = await tickAt(poolA, byteSource, 0, overrides);
+    assert.deepEqual(first.data.activated[0].recovery, [{ stage: "p1_04_data_dictionary", decision: "retry_scheduled", code: "system_error", attempt: 1 }]);
+    assert.equal((await recoveryRows(file.intakeFileId))[0].next_eligible_at, at(60));
+
+    assert.deepEqual(activatedIds(await tickAt(poolA, byteSource, 30, overrides)), [], "cooling down: not selected");
+    const early = await processKaiP1IntakeFile(
+      { organizationId: ORG, intakeFileId: file.intakeFileId },
+      instanceDependencies(poolA, byteSource, { ...overrides, now: () => at(30) }),
+    );
+    assert.equal(early.data.recovery[0].decision, "deferred", "even a direct dispatch respects the cooldown");
+    assert.equal(dictionary.calls.length, 1);
+
+    const second = await tickAt(poolA, byteSource, 61, overrides);
+    assert.equal(second.data.activated[0].recovery[0].decision, "retry_scheduled");
+    assert.equal((await recoveryRows(file.intakeFileId))[0].next_eligible_at, at(361));
+    assert.deepEqual(activatedIds(await tickAt(poolA, byteSource, 360, overrides)), []);
+
+    const third = await tickAt(poolA, byteSource, 362, overrides);
+    assert.equal(third.data.activated[0].stoppedAt, undefined);
+    assert.equal(dictionary.calls.length, 3);
+    assert.deepEqual(
+      (await recoveryRows(file.intakeFileId)).map(({ stage, recovery_state: state, attempt_count: attempts }) => ({ stage, state, attempts })),
+      [
+        { stage: "p1_04_data_dictionary", state: "succeeded", attempts: 3 },
+        { stage: "p1_05_sensitivity_profile", state: "succeeded", attempts: 1 },
+      ],
+    );
+    assert.equal(byteSource.reads.length, 1, "P1-03 ran once; retries never re-profile");
+    const settled = await counts(file.intakeFileId);
+    assert.equal(settled.dictionaries, 1);
+    assert.equal(settled.sensitivityProfiles, 1);
+  });
+
+  test("P3-6. a transient P1-05 failure retries independently without re-running P1-03 or P1-04", async () => {
+    await resetTables();
+    const bytes = csvBytesFor(420);
+    const file = await seedFile({ intakeFileId: fileId(420), bytes });
+    const byteSource = createByteSource();
+    byteSource.register(file.objectVersionId, bytes);
+    const dictionary = countingStage(realCreateDraftDataDictionary);
+    const sensitivity = countingStage(realPersistIntakeSensitivityProfile, { failWith: transientStageFailure, failTimes: 1 });
+    const overrides = { createDraftDataDictionary: dictionary, persistIntakeSensitivityProfile: sensitivity };
+
+    const first = await tickAt(poolA, byteSource, 0, overrides);
+    assert.equal(first.data.activated[0].stoppedAt, "persist_intake_sensitivity_profile");
+    assert.deepEqual(activatedIds(await tickAt(poolA, byteSource, 59, overrides)), []);
+    const second = await tickAt(poolA, byteSource, 61, overrides);
+    assert.equal(second.data.activated[0].stoppedAt, undefined);
+    assert.deepEqual(second.data.activated[0].recovery.map((record) => record.decision), ["already_succeeded", "succeeded"]);
+
+    assert.equal(dictionary.calls.length, 1, "P1-04 was reconciled, not re-run");
+    assert.equal(sensitivity.calls.length, 2);
+    assert.equal(byteSource.reads.length, 1);
+    assert.equal((await counts(file.intakeFileId)).sensitivityProfiles, 1);
+  });
+
+  test("P3-7. a persistent retryable failure exhausts its three attempts and is never selected or invoked again", async () => {
+    await resetTables();
+    const bytes = csvBytesFor(430);
+    const file = await seedFile({ intakeFileId: fileId(430), bytes });
+    const byteSource = createByteSource();
+    byteSource.register(file.objectVersionId, bytes);
+    const dictionary = countingStage(realCreateDraftDataDictionary, { failWith: transientStageFailure });
+    const overrides = { createDraftDataDictionary: dictionary };
+
+    for (const offset of [0, 61, 362]) await tickAt(poolA, byteSource, offset, overrides);
+    assert.deepEqual(
+      (await recoveryRows(file.intakeFileId)).map(({ recovery_state: state, attempt_count: attempts, last_error_code: code }) => ({ state, attempts, code })),
+      [{ state: "exhausted", attempts: 3, code: "system_error" }],
+    );
+    assert.deepEqual(activatedIds(await tickAt(poolA, byteSource, 7 * 24 * 3600, overrides)), []);
+    const direct = await processKaiP1IntakeFile(
+      { organizationId: ORG, intakeFileId: file.intakeFileId },
+      instanceDependencies(poolA, byteSource, { ...overrides, now: () => at(7 * 24 * 3600) }),
+    );
+    assert.equal(direct.data.recovery[0].decision, "exhausted");
+    assert.equal(dictionary.calls.length, 3, "never a fourth attempt");
+    assert.equal(await auditActionCount("p1_04_data_dictionary_attempts_exhausted"), 1);
+    assert.deepEqual(
+      (await parserRun(file.intakeFileId)).map(({ parser_status: status, retry_count: retries }) => ({ status, retries })),
+      [{ status: "completed", retries: 0 }],
+      "the completed profile is preserved and never failed",
+    );
+  });
+
+  test("P3-8. non-retryable, unrecognized, and thrown stage failures go straight to operator attention", async () => {
+    await resetTables();
+    const byteSource = createByteSource();
+    const cases = [
+      { index: 440, stage: async () => ({ ok: false, data: null, error: { code: "conflict_current_state_changed" } }), code: "conflict_current_state_changed" },
+      { index: 441, stage: async () => ({ ok: false, data: null, error: { code: "some_future_code" } }), code: "unclassified_stage_failure" },
+      { index: 442, stage: async () => { throw new Error("synthetic stage defect"); }, code: "unclassified_stage_exception" },
+      { index: 443, stage: async () => ({ ok: true, data: { dictionary: {} }, error: null }), code: "unclassified_stage_failure" },
+    ];
+    for (const entry of cases) {
+      const bytes = csvBytesFor(entry.index);
+      const file = await seedFile({ intakeFileId: fileId(entry.index), bytes });
+      byteSource.register(file.objectVersionId, bytes);
+      const result = await processKaiP1IntakeFile(
+        { organizationId: ORG, intakeFileId: file.intakeFileId },
+        instanceDependencies(poolA, byteSource, { createDraftDataDictionary: entry.stage }),
+      );
+      assert.deepEqual(result.data.recovery, [{ stage: "p1_04_data_dictionary", decision: "operator_attention", code: entry.code, attempt: 1 }]);
+    }
+    assert.deepEqual(activatedIds(await tickAt(poolA, byteSource, 24 * 3600)), []);
+  });
+
+  test("P3-9. a rejected required audit never persists a false success; a lost acknowledgment is reconciled from the committed output", async () => {
+    await resetTables();
+    const byteSource = createByteSource();
+
+    const stageBytes = csvBytesFor(450);
+    const stageFile = await seedFile({ intakeFileId: fileId(450), bytes: stageBytes });
+    byteSource.register(stageFile.objectVersionId, stageBytes);
+    await processKaiP1IntakeFile(
+      { organizationId: ORG, intakeFileId: stageFile.intakeFileId },
+      instanceDependencies(poolA, byteSource, { createProductionMetadataOnlyAudit: rejectingStageAudit }),
+    );
+    assert.equal((await counts(stageFile.intakeFileId)).dictionaries, 0);
+    assert.equal((await recoveryRows(stageFile.intakeFileId))[0].recovery_state, "operator_attention");
+
+    const ackBytes = csvBytesFor(451);
+    const ackFile = await seedFile({ intakeFileId: fileId(451), bytes: ackBytes });
+    byteSource.register(ackFile.objectVersionId, ackBytes);
+    const rejectingAcknowledgment = (options) => {
+      const real = createProductionMetadataOnlyAudit(options);
+      return {
+        prepareMetadataOnlyAudit(input) {
+          if (input?.payload?.attempted_operation === "p1_04_data_dictionary_attempt_succeeded") return { ok: false };
+          return real.prepareMetadataOnlyAudit(input);
+        },
+      };
+    };
+    const lostAck = await processKaiP1IntakeFile(
+      { organizationId: ORG, intakeFileId: ackFile.intakeFileId },
+      instanceDependencies(poolA, byteSource, {
+        createProductionMetadataOnlyAudit: rejectingAcknowledgment,
+        persistIntakeSensitivityProfile: transientStageFailure,
+      }),
+    );
+    assert.equal(lostAck.data.recovery[0].decision, "unacknowledged");
+    const pending = (await recoveryRows(ackFile.intakeFileId)).find((row) => row.stage === "p1_04_data_dictionary");
+    assert.equal(pending.recovery_state, "in_progress", "the success was not recorded without its audit");
+    assert.equal((await counts(ackFile.intakeFileId)).dictionaries, 1);
+
+    const dictionary = countingStage(realCreateDraftDataDictionary);
+    const recovered = await processKaiP1IntakeFile(
+      { organizationId: ORG, intakeFileId: ackFile.intakeFileId },
+      instanceDependencies(poolA, byteSource, { now: () => at(400), createDraftDataDictionary: dictionary }),
+    );
+    assert.equal(recovered.data.stoppedAt, undefined);
+    assert.equal(recovered.data.recovery[0].decision, "already_succeeded");
+    assert.equal(dictionary.calls.length, 0);
+    const reconciled = (await recoveryRows(ackFile.intakeFileId)).find((row) => row.stage === "p1_04_data_dictionary");
+    assert.deepEqual([reconciled.recovery_state, reconciled.attempt_count], ["succeeded", 1]);
+    assert.equal((await counts(ackFile.intakeFileId)).dictionaries, 1);
+    assert.equal(await auditActionCount("p1_04_data_dictionary_output_reconciled"), 1);
+  });
+
+  test("P3-10. a process killed right after reserving a P1-04 attempt keeps that attempt counted; recovery waits out the lease", async () => {
+    await resetTables();
+    const bytes = csvBytesFor(460);
+    const file = await seedFile({ intakeFileId: fileId(460), bytes });
+    runCrashChild({ mode: "kill_after_downstream_reservation", file, bytes });
+
+    const reserved = await recoveryRows(file.intakeFileId);
+    assert.deepEqual([reserved[0].recovery_state, reserved[0].attempt_count], ["in_progress", 1]);
+    assert.equal((await counts(file.intakeFileId)).dictionaries, 0);
+
+    const byteSource = createByteSource();
+    assert.deepEqual(activatedIds(await tickAt(poolA, byteSource, 100)), [], "the dead worker's claim is still leased");
+    const recovered = await tickAt(poolA, byteSource, 121);
+    assert.equal(recovered.data.activated[0].stoppedAt, undefined);
+    const settled = await recoveryRows(file.intakeFileId);
+    assert.deepEqual([settled[0].recovery_state, settled[0].attempt_count], ["succeeded", 2], "the crashed attempt was not forgotten");
+    assert.equal(byteSource.reads.length, 0, "P1-03 was never re-run");
+  });
+
+  test("P3-11. a process killed after P1-04 committed but before acknowledging is reconciled with no second dictionary", async () => {
+    await resetTables();
+    const bytes = csvBytesFor(470);
+    const file = await seedFile({ intakeFileId: fileId(470), bytes });
+    runCrashChild({ mode: "kill_after_downstream_commit", file, bytes });
+
+    assert.equal((await counts(file.intakeFileId)).dictionaries, 1);
+    assert.equal((await recoveryRows(file.intakeFileId))[0].recovery_state, "in_progress");
+
+    const byteSource = createByteSource();
+    const dictionary = countingStage(realCreateDraftDataDictionary);
+    const recovered = await tickAt(poolA, byteSource, 121, { createDraftDataDictionary: dictionary });
+    assert.equal(recovered.data.activated[0].stoppedAt, undefined);
+    assert.equal(recovered.data.activated[0].recovery[0].decision, "already_succeeded");
+    assert.equal(dictionary.calls.length, 0);
+    const settled = await counts(file.intakeFileId);
+    assert.equal(settled.dictionaries, 1);
+    assert.equal(settled.lifecycleAudit.data_dictionary_draft_persisted, 1);
+    assert.equal(settled.sensitivityProfiles, 1);
+    assert.deepEqual(
+      (await recoveryRows(file.intakeFileId)).map(({ recovery_state: state, attempt_count: attempts }) => [state, attempts]),
+      [["succeeded", 1], ["succeeded", 1]],
+    );
+  });
+
+  test("P3-12/13. competing instances get one downstream claim; an expired claim is recovered and a stale owner can never overwrite newer state", async () => {
+    await resetTables();
+    const bytes = csvBytesFor(480);
+    const file = await seedFile({ intakeFileId: fileId(480), bytes });
+    const byteSource = createByteSource();
+    byteSource.register(file.objectVersionId, bytes);
+    await processKaiP1IntakeFile(
+      { organizationId: ORG, intakeFileId: file.intakeFileId },
+      instanceDependencies(poolA, byteSource, { createDraftDataDictionary: transientStageFailure }),
+    );
+    const identity = { organizationId: ORG, intakeFileId: file.intakeFileId, fileProfileId: await profileIdFor(file.intakeFileId), stage: "p1_04_data_dictionary" };
+    const repositories = [poolA, poolB].map((pool) =>
+      createPostgresP1DownstreamRecoveryRepository({ runInTransaction: (callback) => withTransaction(callback, pool) }));
+    const audit = systemAudit(file);
+
+    const claims = await Promise.all([0, 1, 0, 1, 0, 1, 0, 1].map((index) =>
+      repositories[index].claimDownstreamAttempt({ identity, now: at(61), metadataOnlyAudit: audit })));
+    const winners = claims.filter((claim) => claim.data.decision === "claimed");
+    assert.equal(winners.length, 1);
+    assert.ok(claims.filter((claim) => claim.data.decision !== "claimed").every((claim) => claim.data.decision === "busy"));
+    const staleToken = winners[0].data.claimToken;
+    assert.equal(winners[0].data.attemptNumber, 2);
+
+    // The holder dies. After its 120-second lease, its attempt counts as a
+    // failure; the 5-minute cooldown after attempt 2 still applies.
+    const afterLease = await repositories[1].claimDownstreamAttempt({ identity, now: at(182), metadataOnlyAudit: audit });
+    assert.equal(afterLease.data.decision, "deferred");
+    assert.equal(afterLease.data.errorCode, "attempt_lease_expired");
+    const staleAck = await repositories[0].completeDownstreamAttempt({
+      identity, claimToken: staleToken, outcome: "succeeded", errorCode: null, now: at(183), metadataOnlyAudit: audit,
+    });
+    assert.deepEqual([staleAck.data.acknowledged, staleAck.data.reason], [false, "stale_claim"]);
+
+    const fresh = await repositories[1].claimDownstreamAttempt({ identity, now: at(362), metadataOnlyAudit: audit });
+    assert.deepEqual([fresh.data.decision, fresh.data.attemptNumber], ["claimed", 3]);
+    const staleAgain = await repositories[0].completeDownstreamAttempt({
+      identity, claimToken: staleToken, outcome: "non_retryable_failure", errorCode: "validation_blocker", now: at(363), metadataOnlyAudit: audit,
+    });
+    assert.equal(staleAgain.data.acknowledged, false, "the stale owner cannot overwrite the newer claim");
+    const freshAck = await repositories[1].completeDownstreamAttempt({
+      identity, claimToken: fresh.data.claimToken, outcome: "retryable_failure", errorCode: "system_error", now: at(364), metadataOnlyAudit: audit,
+    });
+    assert.deepEqual([freshAck.data.acknowledged, freshAck.data.recoveryState], [true, "exhausted"]);
+    assert.equal((await counts(file.intakeFileId)).dictionaries, 0);
+  });
+
+  test("P3-14. twenty-five persistently failing older files cannot keep a newer eligible file out of the 25-file window", async () => {
+    await resetTables();
+    const byteSource = createByteSource();
+    const failing = new Set();
+    for (let index = 0; index < 25; index += 1) {
+      const bytes = csvBytesFor(500 + index);
+      const file = await seedFile({ intakeFileId: fileId(500 + index), bytes, createdAt: at(-3600 + index) });
+      byteSource.register(file.objectVersionId, bytes);
+      failing.add(file.intakeFileId);
+    }
+    const newerBytes = csvBytesFor(600);
+    const newer = await seedFile({ intakeFileId: fileId(600), bytes: newerBytes, createdAt: at(0) });
+    byteSource.register(newer.objectVersionId, newerBytes);
+
+    const attemptsByFile = new Map();
+    const dictionary = async (input, dependencies) => {
+      const { rows } = await query("SELECT intake_file_id::text AS id FROM kai.intake_file_profiles WHERE file_profile_id = $1::uuid", [input.fileProfileId]);
+      const intakeFileId = rows[0].id;
+      attemptsByFile.set(intakeFileId, (attemptsByFile.get(intakeFileId) || 0) + 1);
+      if (failing.has(intakeFileId)) return transientStageFailure();
+      return realCreateDraftDataDictionary(input, dependencies);
+    };
+    const overrides = { createDraftDataDictionary: dictionary };
+
+    const first = await tickAt(poolA, byteSource, 0, overrides);
+    assert.equal(first.data.activated.length, 25);
+    assert.equal(activatedIds(first).includes(newer.intakeFileId), false, "the window is full of older failing files");
+
+    const second = await tickAt(poolA, byteSource, 10, overrides);
+    assert.deepEqual(activatedIds(second), [newer.intakeFileId], "older files cooling down leave the window to newer work");
+    assert.equal(second.data.activated[0].stoppedAt, undefined);
+
+    await tickAt(poolA, byteSource, 61, overrides);
+    await tickAt(poolA, byteSource, 362, overrides);
+    assert.deepEqual(activatedIds(await tickAt(poolA, byteSource, 30 * 24 * 3600, overrides)), [], "exhausted files never return");
+    for (const intakeFileId of failing) {
+      assert.equal(attemptsByFile.get(intakeFileId), 3);
+      assert.equal((await recoveryRows(intakeFileId))[0].recovery_state, "exhausted");
+    }
+    assert.equal(attemptsByFile.get(newer.intakeFileId), 1);
+  });
+
+  test("P3-15. recovery state, claims, and the operator read stay tenant-isolated", async () => {
+    await resetTables();
+    const byteSource = createByteSource();
+    const aBytes = csvBytesFor(610);
+    const aFile = await seedFile({ intakeFileId: fileId(610), bytes: aBytes });
+    const bBytes = csvBytesFor(611);
+    const bFile = await seedFile({ intakeFileId: fileId(611), organizationId: OTHER_ORG, bytes: bBytes });
+    byteSource.register(aFile.objectVersionId, aBytes);
+    byteSource.register(bFile.objectVersionId, bBytes);
+    const dictionary = async (input, dependencies) =>
+      (input.organizationId === ORG ? { ok: false, data: null, error: { code: "validation_blocker" } } : realCreateDraftDataDictionary(input, dependencies));
+    await tickAt(poolA, byteSource, 0, { createDraftDataDictionary: dictionary });
+
+    assert.equal((await recoveryRows(aFile.intakeFileId))[0].recovery_state, "operator_attention");
+    assert.equal((await counts(bFile.intakeFileId)).sensitivityProfiles, 1, "another tenant's failure never blocks this one");
+
+    const repository = createPostgresP1DownstreamRecoveryRepository({ runInTransaction: (callback) => withTransaction(callback, poolA) });
+    const crossTenantClaim = await repository.claimDownstreamAttempt({
+      identity: { organizationId: OTHER_ORG, intakeFileId: aFile.intakeFileId, fileProfileId: await profileIdFor(aFile.intakeFileId), stage: "p1_04_data_dictionary" },
+      now: at(10),
+      metadataOnlyAudit: systemAudit(bFile),
+    });
+    assert.equal(crossTenantClaim.error.code, "not_found");
+    const crossTenantRead = await repository.readP1RecoveryStatus({ organizationId: OTHER_ORG, intakeFileId: aFile.intakeFileId });
+    assert.deepEqual(crossTenantRead.data, { downstream: [], parser_runs: [] });
+
+    const operator = (organizationId, roleName = "gk_operator") => ({
+      actorType: "human",
+      actorUserId: "7fe568b1-5c05-4c42-bb1f-6e20de216c7b",
+      kaiRoles: [roleName],
+      organizationMemberships: [{ organization_id: organizationId, role_name: roleName, membership_status: "active" }],
+    });
+    const statusDependencies = { env: ENABLED_ENV, p1DownstreamRecoveryRepository: repository };
+    const visible = await getKaiP1RecoveryStatus({ organizationId: ORG, intakeFileId: aFile.intakeFileId, actorContext: operator(ORG) }, statusDependencies);
+    assert.equal(visible.ok, true);
+    assert.deepEqual(
+      visible.data.downstream.map(({ stage, recovery_state: state, last_error_code: code }) => ({ stage, state, code })),
+      [{ stage: "p1_04_data_dictionary", state: "operator_attention", code: "validation_blocker" }],
+    );
+    assert.equal(visible.data.parser_runs[0].parser_status, "completed");
+    const otherTenant = await getKaiP1RecoveryStatus({ organizationId: ORG, intakeFileId: aFile.intakeFileId, actorContext: operator(OTHER_ORG) }, statusDependencies);
+    assert.equal(otherTenant.ok, false);
+    const systemActor = await getKaiP1RecoveryStatus(
+      { organizationId: ORG, intakeFileId: aFile.intakeFileId, actorContext: { actorType: "system", actorUserId: null } },
+      statusDependencies,
+    );
+    assert.equal(systemActor.error.code, "authorization_denied");
+  });
+
+  test("P3-16. repeated scheduled ticks on two instances plus an immediate dispatch create no duplicate records or audits", async () => {
+    await resetTables();
+    const bytes = csvBytesFor(620);
+    const file = await seedFile({ intakeFileId: fileId(620), bytes });
+    const byteSource = createByteSource({ delayMs: 80 });
+    byteSource.register(file.objectVersionId, bytes);
+    const dispatcher = instanceDispatcher(poolA, byteSource);
+    dispatcher.dispatch({ organizationId: ORG, intakeFileId: file.intakeFileId, expectedFileFacts: expectedFor(file) }, { env: ENABLED_ENV });
+    await Promise.all([
+      dispatcher.whenIdle(),
+      tickAt(poolA, byteSource, 0),
+      tickAt(poolB, byteSource, 0),
+      tickAt(poolB, byteSource, 1),
+    ]);
+    await tickAt(poolA, byteSource, 60);
+    await tickAt(poolB, byteSource, 120);
+
+    assert.equal(byteSource.reads.length, 1);
+    const settled = await counts(file.intakeFileId);
+    assert.deepEqual(
+      [settled.parserRuns, settled.fileProfiles, settled.dictionaries, settled.sensitivityProfiles],
+      [1, 1, 1, 1],
+    );
+    assert.equal(settled.lifecycleAudit.file_profile_persisted, 1);
+    assert.equal(settled.lifecycleAudit.data_dictionary_draft_persisted, 1);
+    assert.equal(settled.lifecycleAudit.intake_sensitivity_profile_persisted, 1);
+    assert.equal(await auditActionCount("p1_04_data_dictionary_attempt_succeeded"), 1);
+    assert.equal(await auditActionCount("p1_05_sensitivity_profile_attempt_succeeded"), 1);
+    assert.equal(await auditActionCount("p1_04_data_dictionary_attempt_claimed"), 1);
+  });
+
+  test("P3-17/19. an orphaned P1-03 run is reclaimed only after its lease, is counted, and after three orphanings becomes an ordinary failed run that is never retried", async () => {
+    await resetTables();
+    const bytes = csvBytesFor(630);
+    const file = await seedFile({ intakeFileId: fileId(630), bytes });
+    runCrashChild({ mode: "kill_during_parse", file, bytes });
+    assert.deepEqual((await parserRun(file.intakeFileId)).map(({ parser_status: s, retry_count: r }) => [s, r]), [["running", 0]]);
+
+    const byteSource = createByteSource();
+    byteSource.register(file.objectVersionId, bytes);
+    assert.deepEqual(activatedIds(await tickAt(poolA, byteSource, 60)), [], "lease live: another worker may still own it");
+    const leased = await processKaiP1IntakeFile(
+      { organizationId: ORG, intakeFileId: file.intakeFileId },
+      instanceDependencies(poolA, byteSource, { now: () => at(60) }),
+    );
+    assert.deepEqual([leased.data.stoppedAt, leased.data.result.data.lease_active], ["parser_profile_activation", true]);
+
+    const recovered = await tickAt(poolA, byteSource, PARSER_LEASE_SECONDS);
+    assert.equal(recovered.data.activated[0].stoppedAt, undefined);
+    assert.deepEqual((await parserRun(file.intakeFileId)).map(({ parser_status: s, retry_count: r }) => [s, r]), [["completed", 1]]);
+    assert.equal((await counts(file.intakeFileId)).fileProfiles, 1);
+    assert.equal(await auditActionCount("parser_run_lease_expired_requeued"), 1);
+
+    // Bounded: three consecutive orphaned attempts exhaust the parser budget.
+    const poison = csvBytesFor(631);
+    const poisonFile = await seedFile({ intakeFileId: fileId(631), bytes: poison });
+    runCrashChild({ mode: "kill_during_parse", file: poisonFile, bytes: poison, offsetSeconds: 0 });
+    runCrashChild({ mode: "kill_during_parse", file: poisonFile, bytes: poison, offsetSeconds: PARSER_LEASE_SECONDS });
+    runCrashChild({ mode: "kill_during_parse", file: poisonFile, bytes: poison, offsetSeconds: 2 * PARSER_LEASE_SECONDS });
+    assert.deepEqual((await parserRun(poisonFile.intakeFileId)).map(({ parser_status: s, retry_count: r }) => [s, r]), [["running", 2]]);
+    const exhausted = await tickAt(poolA, byteSource, 3 * PARSER_LEASE_SECONDS);
+    assert.equal(exhausted.data.activated.find((entry) => entry.intakeFileId === poisonFile.intakeFileId).stoppedAt, "parser_profile_activation");
+    assert.deepEqual(
+      (await parserRun(poisonFile.intakeFileId)).map(({ parser_status: s, retry_count: r, error_code: c }) => [s, r, c]),
+      [["failed", 3, "parser_run_lease_expired"]],
+    );
+    assert.deepEqual(activatedIds(await tickAt(poolA, byteSource, 30 * 24 * 3600)), [], "an ordinary failed run is never retried automatically");
+    const status = await createPostgresP1DownstreamRecoveryRepository({ runInTransaction: (callback) => withTransaction(callback, poolA) })
+      .readP1RecoveryStatus({ organizationId: ORG, intakeFileId: poisonFile.intakeFileId });
+    assert.equal(status.data.parser_runs[0].requires_manual_review, true);
+  });
+
+  test("P3-18/20. a stalled parser worker whose lease was taken over is fenced out even while the new owner is still running, and completed runs are never re-profiled", async () => {
+    await resetTables();
+    const bytes = csvBytesFor(640);
+    const file = await seedFile({ intakeFileId: fileId(640), bytes });
+
+    function gatedSource() {
+      let release;
+      const gate = new Promise((resolve) => { release = resolve; });
+      const source = {
+        reads: [],
+        release: () => release(),
+        dependency: {
+          async readObjectVersion() {
+            source.reads.push(1);
+            await gate;
+            return { ok: true, data: { bytes: new Uint8Array(bytes) }, error: null };
+          },
+        },
+      };
+      return source;
+    }
+    async function waitForRead(source) {
+      while (source.reads.length === 0) await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    // Worker A claims at t=0 and stalls mid-profile.
+    const staleSource = gatedSource();
+    const stale = processKaiP1IntakeFile(
+      { organizationId: ORG, intakeFileId: file.intakeFileId },
+      instanceDependencies(poolA, staleSource, { now: () => at(0) }),
+    );
+    await waitForRead(staleSource);
+
+    // After the lease, worker B recovers the run, claims it, and also stalls:
+    // the run is `running` again, under B's claim.
+    const ownerSource = gatedSource();
+    const owner = processKaiP1IntakeFile(
+      { organizationId: ORG, intakeFileId: file.intakeFileId },
+      instanceDependencies(poolB, ownerSource, { now: () => at(PARSER_LEASE_SECONDS + 1) }),
+    );
+    await waitForRead(ownerSource);
+    assert.deepEqual((await parserRun(file.intakeFileId)).map(({ parser_status: s, retry_count: r }) => [s, r]), [["running", 1]]);
+
+    // A finishes first: same run id, still `running` - only the fence refuses it.
+    staleSource.release();
+    const staleResult = await stale;
+    assert.equal(staleResult.data.stoppedAt, "parser_profile_activation");
+    assert.equal(staleResult.data.result.error.code, "conflict_current_state_changed", "the fenced worker's completion was refused");
+    assert.equal((await counts(file.intakeFileId)).fileProfiles, 0, "no profile from the stale worker");
+    assert.deepEqual((await parserRun(file.intakeFileId)).map(({ parser_status: s }) => s), ["running"]);
+
+    ownerSource.release();
+    const ownerResult = await owner;
+    assert.equal(ownerResult.data.stoppedAt, undefined);
+
+    const settled = await counts(file.intakeFileId);
+    assert.equal(settled.fileProfiles, 1);
+    assert.equal(settled.lifecycleAudit.file_profile_persisted, 1);
+    assert.deepEqual((await parserRun(file.intakeFileId)).map(({ parser_status: s, retry_count: r }) => [s, r]), [["completed", 1]]);
+
+    const replaySource = createByteSource();
+    replaySource.register(file.objectVersionId, bytes);
+    await tickAt(poolA, replaySource, 2 * PARSER_LEASE_SECONDS);
+    await processKaiP1IntakeFile({ organizationId: ORG, intakeFileId: file.intakeFileId }, instanceDependencies(poolA, replaySource));
+    assert.equal(replaySource.reads.length, 0, "a completed run is replayed, never re-profiled");
+  });
+
+  test("P3-21/22. the one-minute cron fallback, registered only with both gates, recovers work and never overlaps itself", async () => {
+    await resetTables();
+    const bytes = csvBytesFor(650);
+    const file = await seedFile({ intakeFileId: fileId(650), bytes });
+    const byteSource = createByteSource({ delayMs: 100 });
+    byteSource.register(file.objectVersionId, bytes);
+
+    const scheduled = [];
+    const cronLib = { schedule: (expression, handler, options) => { scheduled.push({ expression, handler, options }); return { stop() {} }; } };
+    for (const env of [{ KAI_SPRINT2_ENABLED: "true" }, { KAI_WORKER_ENABLED: "true" }]) {
+      assert.equal(registerKaiP1WorkerCron({ env, cronLib }).scheduled, false);
+    }
+    assert.equal(scheduled.length, 0);
+
+    let ticks = 0;
+    const lines = [];
+    const registration = registerKaiP1WorkerCron({
+      env: ENABLED_ENV,
+      cronLib,
+      createRuntimeDependencies: () => instanceDependencies(poolA, byteSource),
+      runTick: (dependencies) => {
+        ticks += 1;
+        return runKaiP1WorkerTick(dependencies);
+      },
+      log: (line) => lines.push(line),
+    });
+    assert.equal(registration.scheduled, true);
+    assert.deepEqual([scheduled[0].expression, scheduled[0].options.timezone], ["* * * * *", "America/Vancouver"]);
+
+    // Two fires overlap (a minute boundary while the first tick still runs).
+    await Promise.all([scheduled[0].handler(), scheduled[0].handler()]);
+    assert.equal(ticks, 1, "the overlapping fire was skipped, not queued");
+    assert.ok(lines.includes("[kai-p1-worker] tick skipped: previous tick still running"));
+    assert.ok(lines.some((line) => /^\[kai-p1-worker\] candidates=1 completed_through_p1_05=1$/.test(line)), lines.join("\n"));
+    assert.equal((await counts(file.intakeFileId)).sensitivityProfiles, 1);
+
+    await scheduled[0].handler();
+    assert.equal(ticks, 2, "the next fire runs once the previous tick finished");
+    for (const line of lines) assert.doesNotMatch(line, /[0-9a-f]{8}-[0-9a-f]{4}-|synthetic|ov-|gs:\/\//);
+  });
+
+  test("P3-24. an upload blocked after its eligibility check can neither complete P1-03 nor commit P1-04 output", async () => {
+    await resetTables();
+    const block = (intakeFileId) => poolB.query(
+      "UPDATE kai.intake_files SET upload_state = 'policy_blocked', file_policy_status = 'blocked' WHERE intake_file_id = $1::uuid",
+      [intakeFileId],
+    );
+
+    // Blocked while P1-03 is profiling.
+    const parseBytes = csvBytesFor(660);
+    const parseFile = await seedFile({ intakeFileId: fileId(660), bytes: parseBytes });
+    const blockingSource = {
+      dependency: {
+        async readObjectVersion() {
+          await block(parseFile.intakeFileId);
+          return { ok: true, data: { bytes: new Uint8Array(parseBytes) }, error: null };
+        },
+      },
+    };
+    const parsed = await processKaiP1IntakeFile({ organizationId: ORG, intakeFileId: parseFile.intakeFileId }, instanceDependencies(poolA, blockingSource));
+    assert.equal(parsed.data.stoppedAt, "parser_profile_activation");
+    assert.equal((await counts(parseFile.intakeFileId)).fileProfiles, 0, "no profile committed for a blocked upload");
+
+    // Blocked between P1-03 and the P1-04 commit.
+    const dictBytes = csvBytesFor(661);
+    const dictFile = await seedFile({ intakeFileId: fileId(661), bytes: dictBytes });
+    const byteSource = createByteSource();
+    byteSource.register(dictFile.objectVersionId, dictBytes);
+    const blockingDictionary = async (input, dependencies) => {
+      await block(dictFile.intakeFileId);
+      return realCreateDraftDataDictionary(input, dependencies);
+    };
+    const stopped = await processKaiP1IntakeFile(
+      { organizationId: ORG, intakeFileId: dictFile.intakeFileId },
+      instanceDependencies(poolA, byteSource, { createDraftDataDictionary: blockingDictionary }),
+    );
+    assert.equal(stopped.data.stoppedAt, "draft_data_dictionary");
+    const after = await counts(dictFile.intakeFileId);
+    assert.deepEqual([after.dictionaries, after.sensitivityProfiles], [0, 0]);
+
+    const later = await processKaiP1IntakeFile(
+      { organizationId: ORG, intakeFileId: dictFile.intakeFileId },
+      instanceDependencies(poolA, byteSource, { now: () => at(3600) }),
+    );
+    assert.equal(later.data.result.data.reason, "not_eligible_for_p1");
+    const repository = createPostgresP1DownstreamRecoveryRepository({ runInTransaction: (callback) => withTransaction(callback, poolA) });
+    const claim = await repository.claimDownstreamAttempt({
+      identity: { organizationId: ORG, intakeFileId: dictFile.intakeFileId, fileProfileId: await profileIdFor(dictFile.intakeFileId), stage: "p1_04_data_dictionary" },
+      now: at(3600),
+      metadataOnlyAudit: systemAudit(dictFile),
+    });
+    assert.equal(claim.data.decision, "not_eligible");
+    assert.deepEqual(activatedIds(await tickAt(poolA, byteSource, 3600)), []);
   });
 }

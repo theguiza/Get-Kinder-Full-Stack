@@ -4,6 +4,13 @@ import { listActionableKaiP1WorkCandidates } from "../db/kaiIntakeQueries.js";
 import { createDraftDataDictionary } from "../services/kaiDataDictionaryService.js";
 import { persistIntakeSensitivityProfile } from "../services/kaiIntakeSensitivityProfileService.js";
 import { createProductionMetadataOnlyAudit } from "../services/kaiMetadataOnlyAuditComposition.js";
+import { createPostgresDataDictionaryRepository } from "../dictionary/postgresDataDictionaryRepository.js";
+import { createPostgresIntakeSensitivityProfileRepository } from "../dictionary/postgresIntakeSensitivityProfileRepository.js";
+import { createKaiP1StageTransaction } from "./p1StageTransaction.js";
+import {
+  P1_DOWNSTREAM_STAGES,
+  createPostgresP1DownstreamRecoveryRepository,
+} from "./postgresP1DownstreamRecoveryRepository.js";
 
 /**
  * KAI P1 worker runtime.
@@ -46,12 +53,19 @@ import { createProductionMetadataOnlyAudit } from "../services/kaiMetadataOnlyAu
  * action, gated by the existing `AUTH-KAI-003` mapped-human-actor check in
  * `kaiReviewQueueService.js`, untouched by this package.
  *
- * A P1-04 or P1-05 failure stops the chain at that stage (`stoppedAt`) and
- * is never treated as grounds to re-run P1-03 or to mark the completed parser
- * run failed. The operation never retries within a call. Because a failed
- * P1-04/P1-05 transaction rolls back completely and no durable downstream
- * attempt state exists, such a file remains an actionable recovery candidate
- * and is attempted again on each later scheduled sweep.
+ * Each downstream stage runs only under a PostgreSQL-owned attempt claim
+ * (`postgresP1DownstreamRecoveryRepository.js`): the attempt is reserved
+ * and counted before the stage runs, an already-committed output is
+ * reconciled instead of re-run, and the outcome is acknowledged through the
+ * claim's fencing token. A failure stops the chain at that stage
+ * (`stoppedAt`, with the recovery decision in `recovery`); it is never
+ * grounds to re-run P1-03 or to mark the completed parser run failed, and
+ * the operation never retries within a call. Only the established
+ * infrastructure code `system_error` is retryable (at most three attempts
+ * per stage, cooling down 1 then 5 minutes); every other or unrecognized
+ * outcome is recorded for operator attention and excluded from automatic
+ * selection. The stage transactions re-assert the file's eligibility under
+ * a share lock, so a file blocked mid-chain cannot gain P1-04/P1-05 output.
  *
  * Fails closed (zero work) unless both `KAI_SPRINT2_ENABLED` and
  * `KAI_WORKER_ENABLED` are enabled. Never automatically retries a failed
@@ -63,6 +77,114 @@ export const KAI_P1_WORKER_SYNTHETIC_ACTOR_CONTEXT = Object.freeze({
 });
 
 const PROCESS_INPUT_KEYS = new Set(["organizationId", "intakeFileId", "expectedFileFacts"]);
+
+// Downstream stage outcomes, from the inspected P1-04/P1-05 service and
+// repository taxonomy. `system_error` is the repositories' infrastructure
+// class (its transaction rolled back; the stage is idempotent), so it alone
+// is retried within the bounded budget. Every other code - and anything
+// unrecognized, malformed, or thrown - fails closed to operator attention.
+const RETRYABLE_STAGE_ERROR_CODES = new Set(["system_error"]);
+const NON_RETRYABLE_STAGE_ERROR_CODES = new Set([
+  "validation_blocker",
+  "conflict_current_state_changed",
+  "not_found",
+  "feature_disabled",
+  "authorization_denied",
+  "tenant_boundary_violation",
+  "state_transition_denied",
+  // Assigned below when a stage throws instead of returning a result.
+  "unclassified_stage_exception",
+]);
+const SAFE_CODE_RE = /^[a-z0-9_]{1,64}$/;
+
+export function classifyKaiP1DownstreamStageFailure(result) {
+  const code = result?.error?.code;
+  if (RETRYABLE_STAGE_ERROR_CODES.has(code)) return { outcome: "retryable_failure", errorCode: code };
+  if (NON_RETRYABLE_STAGE_ERROR_CODES.has(code)) return { outcome: "non_retryable_failure", errorCode: code };
+  return { outcome: "non_retryable_failure", errorCode: "unclassified_stage_failure" };
+}
+
+function safeCode(value) {
+  return typeof value === "string" && SAFE_CODE_RE.test(value) ? value : null;
+}
+
+/**
+ * Runs one downstream stage under its durable attempt claim. Returns the
+ * stage result (or a reconciled stand-in carrying the committed output id),
+ * the output id when the stage is satisfied, and the recovery record.
+ */
+async function runClaimedDownstreamStage({ recoveryRepository, identity, nowFn, metadataOnlyAudit, invoke, outputIdOf, reconciledResult }) {
+  let claim;
+  try {
+    claim = await recoveryRepository.claimDownstreamAttempt({ identity, now: nowFn(), metadataOnlyAudit });
+  } catch {
+    claim = null;
+  }
+  if (claim?.ok !== true) {
+    return {
+      outputId: null,
+      result: null,
+      recovery: { stage: identity.stage, decision: "claim_failed", code: safeCode(claim?.error?.code) || "system_error" },
+    };
+  }
+
+  const decision = claim.data.decision;
+  if (decision === "already_succeeded" && typeof claim.data.outputId === "string" && claim.data.outputId.length > 0) {
+    return {
+      outputId: claim.data.outputId,
+      result: reconciledResult(claim.data.outputId),
+      recovery: { stage: identity.stage, decision: "already_succeeded", code: null },
+    };
+  }
+  if (decision !== "claimed") {
+    return {
+      outputId: null,
+      result: null,
+      recovery: {
+        stage: identity.stage,
+        decision: safeCode(decision) || "unclassified",
+        code: safeCode(claim.data.errorCode),
+        attempt: claim.data.attemptNumber ?? null,
+      },
+    };
+  }
+
+  let result;
+  try {
+    result = await invoke();
+  } catch {
+    result = { ok: false, data: null, error: { code: "unclassified_stage_exception" } };
+  }
+  const outputId = result?.ok === true ? outputIdOf(result) : undefined;
+  const succeeded = typeof outputId === "string" && outputId.length > 0;
+  const failure = succeeded ? null : classifyKaiP1DownstreamStageFailure(result);
+
+  let ack;
+  try {
+    ack = await recoveryRepository.completeDownstreamAttempt({
+      identity,
+      claimToken: claim.data.claimToken,
+      outcome: succeeded ? "succeeded" : failure.outcome,
+      errorCode: succeeded ? null : failure.errorCode,
+      now: nowFn(),
+      metadataOnlyAudit,
+    });
+  } catch {
+    ack = null;
+  }
+  const acknowledged = ack?.ok === true && ack.data?.acknowledged === true;
+  return {
+    outputId: succeeded ? outputId : null,
+    result,
+    recovery: {
+      stage: identity.stage,
+      // An unacknowledged attempt stays reserved; its lease expiry counts it.
+      decision: acknowledged ? ack.data.recoveryState : "unacknowledged",
+      code: succeeded ? null : failure.errorCode,
+      attempt: claim.data.attemptNumber,
+    },
+  };
+}
 
 function isProcessInput(input) {
   if (!input || typeof input !== "object" || Array.isArray(input)) return false;
@@ -129,30 +251,64 @@ export async function processKaiP1IntakeFile(input, dependencies = {}) {
     now: nowFn(),
   });
 
-  const dictionaryResult = await draftDataDictionaryFn(
-    { organizationId, fileProfileId: outputProfileId, now: nowFn() },
-    { ...dependencies, metadataOnlyAudit },
-  );
-  entry.dataDictionary = dictionaryResult;
+  const stageTransaction = createKaiP1StageTransaction({
+    organizationId,
+    intakeFileId,
+    verifiedChecksum: result.data.run.run.checksum,
+    runInTransaction: dependencies.runInTransaction,
+  });
+  const stageDependencies = {
+    ...dependencies,
+    metadataOnlyAudit,
+    dataDictionaryRepository: dependencies.dataDictionaryRepository
+      || createPostgresDataDictionaryRepository({ runInTransaction: stageTransaction }),
+    intakeSensitivityProfileRepository: dependencies.intakeSensitivityProfileRepository
+      || createPostgresIntakeSensitivityProfileRepository({ runInTransaction: stageTransaction }),
+  };
+  const recoveryRepository = dependencies.p1DownstreamRecoveryRepository
+    || createPostgresP1DownstreamRecoveryRepository({ runInTransaction: dependencies.runInTransaction });
+  entry.recovery = [];
 
-  const dataDictionaryId =
-    dictionaryResult?.ok === true ? dictionaryResult?.data?.dictionary?.data_dictionary_id : undefined;
-
-  if (!(dictionaryResult?.ok === true && typeof dataDictionaryId === "string" && dataDictionaryId.length > 0)) {
+  const dictionaryStage = await runClaimedDownstreamStage({
+    recoveryRepository,
+    identity: { organizationId, intakeFileId, fileProfileId: outputProfileId, stage: P1_DOWNSTREAM_STAGES.dataDictionary },
+    nowFn,
+    metadataOnlyAudit,
+    invoke: () => draftDataDictionaryFn({ organizationId, fileProfileId: outputProfileId, now: nowFn() }, stageDependencies),
+    outputIdOf: (stageResult) => stageResult?.data?.dictionary?.data_dictionary_id,
+    reconciledResult: (dataDictionaryId) => ({
+      ok: true,
+      data: { dictionary: { data_dictionary_id: dataDictionaryId }, replayed: true, reconciled: true },
+      error: null,
+    }),
+  });
+  entry.recovery.push(dictionaryStage.recovery);
+  if (dictionaryStage.result) entry.dataDictionary = dictionaryStage.result;
+  if (!dictionaryStage.outputId) {
     entry.stoppedAt = "draft_data_dictionary";
     return { ok: true, data: entry, error: null };
   }
+  const dataDictionaryId = dictionaryStage.outputId;
 
-  entry.sensitivityProfile = await persistSensitivityProfileFn(
-    {
-      organizationId,
-      fileProfileId: outputProfileId,
-      dataDictionaryId,
-      now: nowFn(),
-    },
-    { ...dependencies, metadataOnlyAudit },
-  );
-  if (entry.sensitivityProfile?.ok !== true) {
+  const sensitivityStage = await runClaimedDownstreamStage({
+    recoveryRepository,
+    identity: { organizationId, intakeFileId, fileProfileId: outputProfileId, stage: P1_DOWNSTREAM_STAGES.sensitivityProfile },
+    nowFn,
+    metadataOnlyAudit,
+    invoke: () => persistSensitivityProfileFn(
+      { organizationId, fileProfileId: outputProfileId, dataDictionaryId, now: nowFn() },
+      stageDependencies,
+    ),
+    outputIdOf: (stageResult) => stageResult?.data?.sensitivityProfile?.intake_sensitivity_profile_id,
+    reconciledResult: (intakeSensitivityProfileId) => ({
+      ok: true,
+      data: { sensitivityProfile: { intake_sensitivity_profile_id: intakeSensitivityProfileId }, replayed: true, reconciled: true },
+      error: null,
+    }),
+  });
+  entry.recovery.push(sensitivityStage.recovery);
+  if (sensitivityStage.result) entry.sensitivityProfile = sensitivityStage.result;
+  if (!sensitivityStage.outputId) {
     entry.stoppedAt = "persist_intake_sensitivity_profile";
   }
 
@@ -166,12 +322,14 @@ export async function runKaiP1WorkerTick(dependencies = {}) {
     return { ok: true, data: { activated: [], reason: "worker_disabled" }, error: null };
   }
 
+  const nowFn = dependencies.now || (() => new Date().toISOString());
   const listCandidates =
-    dependencies.listActionableKaiP1WorkCandidates || listActionableKaiP1WorkCandidates;
+    dependencies.listActionableKaiP1WorkCandidates
+    || ((options) => listActionableKaiP1WorkCandidates(undefined, options));
 
   let candidates;
   try {
-    candidates = await listCandidates();
+    candidates = await listCandidates({ now: nowFn() });
   } catch {
     return { ok: false, data: null, error: { code: "system_error" } };
   }

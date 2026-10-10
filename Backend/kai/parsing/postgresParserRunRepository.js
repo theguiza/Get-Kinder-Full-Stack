@@ -22,6 +22,14 @@ const PARSER_RUN_RESULT_STATUS = Object.freeze({
 
 const PARSER_STATUSES = Object.freeze(["queued", "running", "completed", "failed", "cancelled"]);
 const MAX_PARSER_RETRY_COUNT = 3;
+// A `running` claim older than this is treated as orphaned by a dead worker.
+// Its `started_at` (set by the claim) is the fencing token: completion and
+// safe failure only commit while `started_at` still equals the value the
+// claiming worker observed, so a reclaim fences the original worker out.
+const PARSER_RUN_LEASE_SECONDS = 15 * 60;
+const PARSER_RUN_LEASE_EXPIRED_ERROR_CODE = "parser_run_lease_expired";
+const PARSER_RUN_LEASE_EXPIRED_ERROR_MESSAGE =
+  "The parser run did not finish within its lease and requires manual review.";
 const PARSER_RUN_AUDIT_CONTRACT = "p1_parser_run_and_file_profile_v1";
 const PARSER_RUN_AUDIT_VALIDATOR_KEY = "VAL-KAI-P1-02-001";
 const PARSER_RUN_AUDIT_OPERATION = "parser_run_recorded";
@@ -119,10 +127,15 @@ function validateAuditedIdentityInput(input) {
   );
 }
 
+function isOptionalClaimFence(value) {
+  return value === undefined || isNormalizedNow(value);
+}
+
 function validateCompletionInput(input) {
-  const allowedKeys = new Set(["identity", "parserRunId", "profile", "now", "metadataOnlyAudit"]);
+  const allowedKeys = new Set(["identity", "parserRunId", "profile", "now", "metadataOnlyAudit", "claimedStartedAt"]);
   if (!isPlainObject(input) || !hasOnlyKeys(input, allowedKeys)) return false;
   return (
+    isOptionalClaimFence(input.claimedStartedAt) &&
     isParserRunIdentity(input.identity) &&
     isNonEmptyString(input.parserRunId) &&
     isMetadataOnlyProfile(input.profile) &&
@@ -139,9 +152,11 @@ function validateFailureInput(input) {
     "errorMessageSafe",
     "now",
     "metadataOnlyAudit",
+    "claimedStartedAt",
   ]);
   if (!isPlainObject(input) || !hasOnlyKeys(input, allowedKeys)) return false;
   return (
+    isOptionalClaimFence(input.claimedStartedAt) &&
     isParserRunIdentity(input.identity) &&
     isNonEmptyString(input.parserRunId) &&
     typeof input.errorCode === "string" &&
@@ -502,7 +517,7 @@ export function createPostgresParserRunRepository({ runInTransaction = withTrans
      */
     async completeParserRunWithProfile(input) {
       if (!validateCompletionInput(input)) return parserRunFailure("validation_blocker");
-      const { identity, parserRunId, profile, now, metadataOnlyAudit } = input;
+      const { identity, parserRunId, profile, now, metadataOnlyAudit, claimedStartedAt } = input;
       try {
         return await runInTransaction(async (tx) => {
           const uploadState = await readScopedUploadState(tx, identity);
@@ -512,6 +527,9 @@ export function createPostgresParserRunRepository({ runInTransaction = withTrans
           if (!locked) return parserRunFailure("not_found");
           if (locked.parser_run_id !== parserRunId) return parserRunFailure("conflict_current_state_changed");
           if (locked.parser_status !== "running") return parserRunFailure("conflict_current_state_changed");
+          if (claimedStartedAt !== undefined && locked.started_at !== claimedStartedAt) {
+            return parserRunFailure("conflict_current_state_changed");
+          }
 
           const profileInsert = await tx.query(
             `INSERT INTO kai.intake_file_profiles (
@@ -540,12 +558,14 @@ export function createPostgresParserRunRepository({ runInTransaction = withTrans
                 AND parser_name = $3
                 AND parser_version = $4
                 AND checksum = $5
-                AND parser_status = 'running'`,
+                AND parser_status = 'running'
+                AND ($9::timestamptz IS NULL OR started_at = $9::timestamptz)`,
             [
               ...identityParameters(identity),
               parserRunId,
               profileInsert.rows[0].file_profile_id,
               now,
+              claimedStartedAt ?? null,
             ],
           );
           if (runUpdate.rowCount !== 1) return parserRunFailure("conflict_current_state_changed");
@@ -582,7 +602,7 @@ export function createPostgresParserRunRepository({ runInTransaction = withTrans
      */
     async failParserRunSafely(input) {
       if (!validateFailureInput(input)) return parserRunFailure("validation_blocker");
-      const { identity, parserRunId, errorCode, errorMessageSafe, now, metadataOnlyAudit } = input;
+      const { identity, parserRunId, errorCode, errorMessageSafe, now, metadataOnlyAudit, claimedStartedAt } = input;
       try {
         return await runInTransaction(async (tx) => {
           const uploadState = await readScopedUploadState(tx, identity);
@@ -592,6 +612,9 @@ export function createPostgresParserRunRepository({ runInTransaction = withTrans
           if (!locked) return parserRunFailure("not_found");
           if (locked.parser_run_id !== parserRunId) return parserRunFailure("conflict_current_state_changed");
           if (locked.parser_status !== "running") return parserRunFailure("conflict_current_state_changed");
+          if (claimedStartedAt !== undefined && locked.started_at !== claimedStartedAt) {
+            return parserRunFailure("conflict_current_state_changed");
+          }
 
           const updated = await tx.query(
             `UPDATE kai.intake_parser_runs
@@ -607,8 +630,9 @@ export function createPostgresParserRunRepository({ runInTransaction = withTrans
                 AND parser_name = $3
                 AND parser_version = $4
                 AND checksum = $5
-                AND parser_status = 'running'`,
-            [...identityParameters(identity), parserRunId, errorCode, errorMessageSafe, now],
+                AND parser_status = 'running'
+                AND ($10::timestamptz IS NULL OR started_at = $10::timestamptz)`,
+            [...identityParameters(identity), parserRunId, errorCode, errorMessageSafe, now, claimedStartedAt ?? null],
           );
           if (updated.rowCount !== 1) return parserRunFailure("conflict_current_state_changed");
 
@@ -623,6 +647,105 @@ export function createPostgresParserRunRepository({ runInTransaction = withTrans
           });
           await preparedAudit.publish();
           return parserRunSuccess({ run: failed, replayed: false });
+        });
+      } catch (error) {
+        return shapeParserRunError(error);
+      }
+    },
+
+    /**
+     * Bounded recovery of a `running` run whose claim lease has expired (its
+     * worker is presumed dead). The orphaned attempt is counted as one failed
+     * attempt in `retry_count`, exactly as a safe failure would be; `started_at`
+     * is moved, which fences the original worker out of completion and safe
+     * failure. Below the cap the run returns to `queued` for the normal claim
+     * path; at the cap it becomes an ordinary `failed` run (requires manual
+     * review), never retried automatically. A run that is not `running`, or
+     * whose lease has not expired, is returned unchanged.
+     */
+    async recoverExpiredRunningParserRun(input) {
+      if (!validateAuditedIdentityInput(input)) return parserRunFailure("validation_blocker");
+      const { identity, now, metadataOnlyAudit } = input;
+      try {
+        return await runInTransaction(async (tx) => {
+          const uploadState = await readScopedUploadState(tx, identity);
+          if (!uploadState) return parserRunFailure("not_found");
+
+          const locked = await lockParserRun(tx, identity);
+          if (!locked) return parserRunFailure("not_found");
+          if (locked.parser_status !== "running") {
+            return parserRunSuccess({ run: locked, recovered: false, lease_active: false });
+          }
+          const leaseExpired =
+            Date.parse(locked.started_at) + PARSER_RUN_LEASE_SECONDS * 1000 <= Date.parse(now);
+          if (!leaseExpired) {
+            return parserRunSuccess({ run: locked, recovered: false, lease_active: true });
+          }
+
+          const exhausted = locked.retry_count + 1 >= MAX_PARSER_RETRY_COUNT;
+          const updated = exhausted
+            ? await tx.query(
+              `UPDATE kai.intake_parser_runs
+                  SET parser_status = 'failed',
+                      completed_at = $8::timestamptz,
+                      retry_count = retry_count + 1,
+                      error_code = $9,
+                      error_message_safe = $10,
+                      output_profile_id = NULL
+                WHERE parser_run_id = $6::uuid
+                  AND organization_id = $1::uuid
+                  AND intake_file_id = $2::uuid
+                  AND parser_name = $3
+                  AND parser_version = $4
+                  AND checksum = $5
+                  AND parser_status = 'running'
+                  AND started_at = $7::timestamptz`,
+              [
+                ...identityParameters(identity),
+                locked.parser_run_id,
+                locked.started_at,
+                now,
+                PARSER_RUN_LEASE_EXPIRED_ERROR_CODE,
+                PARSER_RUN_LEASE_EXPIRED_ERROR_MESSAGE,
+              ],
+            )
+            : await tx.query(
+              `UPDATE kai.intake_parser_runs
+                  SET parser_status = 'queued',
+                      started_at = $8::timestamptz,
+                      completed_at = NULL,
+                      retry_count = retry_count + 1,
+                      error_code = NULL,
+                      error_message_safe = NULL,
+                      output_profile_id = NULL
+                WHERE parser_run_id = $6::uuid
+                  AND organization_id = $1::uuid
+                  AND intake_file_id = $2::uuid
+                  AND parser_name = $3
+                  AND parser_version = $4
+                  AND checksum = $5
+                  AND parser_status = 'running'
+                  AND started_at = $7::timestamptz`,
+              [...identityParameters(identity), locked.parser_run_id, locked.started_at, now],
+            );
+          if (updated.rowCount !== 1) return parserRunFailure("conflict_current_state_changed");
+
+          const recovered = await readParserRun(tx, identity);
+          const preparedAudit = prepareRequiredAudit(
+            metadataOnlyAudit,
+            tx,
+            recovered,
+            exhausted ? "parser_run_lease_expired_failed" : "parser_run_lease_expired_requeued",
+          );
+          await insertAudit(tx, {
+            identity,
+            operation: PARSER_RUN_AUDIT_OPERATION,
+            uploadState,
+            metadata: buildParserRunAuditMetadata(recovered),
+            now,
+          });
+          await preparedAudit.publish();
+          return parserRunSuccess({ run: recovered, recovered: true, lease_active: false });
         });
       } catch (error) {
         return shapeParserRunError(error);
@@ -694,6 +817,8 @@ export function createPostgresParserRunRepository({ runInTransaction = withTrans
 export const __parserRunRepositoryContract = Object.freeze({
   PARSER_STATUSES,
   MAX_PARSER_RETRY_COUNT,
+  PARSER_RUN_LEASE_SECONDS,
+  PARSER_RUN_LEASE_EXPIRED_ERROR_CODE,
   PARSER_RUN_AUDIT_CONTRACT,
   PARSER_RUN_AUDIT_VALIDATOR_KEY,
   PARSER_RUN_AUDIT_OPERATION,

@@ -219,6 +219,10 @@ export function createParserProfileWorkerOrchestration({
     if (!claim.ok) return claim;
 
     const parserRunId = claim.data.run.parser_run_id;
+    // The claim's started_at fences this worker: if the run is reclaimed
+    // after its lease expires, neither completion nor safe failure below can
+    // commit for this (stale) worker.
+    const claimedStartedAt = claim.data.run.started_at;
 
     const read = await objectVersionByteSource.readObjectVersion({
       objectVersionId: trustedFileFacts.objectVersionId,
@@ -231,6 +235,7 @@ export function createParserProfileWorkerOrchestration({
         errorMessageSafe: BYTE_SOURCE_ERROR_MESSAGE,
         now,
         metadataOnlyAudit,
+        claimedStartedAt,
       });
     }
 
@@ -255,6 +260,7 @@ export function createParserProfileWorkerOrchestration({
         errorMessageSafe: outcome.errorMessageSafe,
         now,
         metadataOnlyAudit,
+        claimedStartedAt,
       });
     }
 
@@ -264,6 +270,7 @@ export function createParserProfileWorkerOrchestration({
       profile: JSON.parse(JSON.stringify(outcome.profile)),
       now,
       metadataOnlyAudit,
+      claimedStartedAt,
     });
   }
 
@@ -292,6 +299,22 @@ export function createParserProfileWorkerOrchestration({
       if (!isKaiSprint2Enabled(env)) return buildKaiError("feature_disabled");
       if (!validateExecutionInput(input)) return workerFailure("validation_blocker");
       return await claimAndProfile(input);
+    },
+
+    /**
+     * Bounded recovery of an orphaned `running` run whose claim lease has
+     * expired: delegated entirely to the repository, which counts the lost
+     * attempt and either re-queues the run or, at the retry cap, records an
+     * ordinary safe failure. Performs no byte read and no profiling itself.
+     */
+    async recoverExpiredParserProfileWork(input) {
+      if (!isKaiSprint2Enabled(env)) return buildKaiError("feature_disabled");
+      if (!validateExecutionInput(input)) return workerFailure("validation_blocker");
+      return await parserRunRepository.recoverExpiredRunningParserRun({
+        identity: parserRunIdentity(input.trustedFileFacts),
+        now: input.now,
+        metadataOnlyAudit: input.metadataOnlyAudit,
+      });
     },
 
     /**

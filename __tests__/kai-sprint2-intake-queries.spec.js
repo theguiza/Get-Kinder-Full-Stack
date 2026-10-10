@@ -169,7 +169,11 @@ test("P1 worker candidate discovery sweeps every organization, bounded at 25, ex
   });
 
   assert.deepEqual(result, rows);
-  assert.deepEqual(queryParams, undefined);
+  // Only the sweep clock and the parser lease are bound - never an
+  // organization_id.
+  assert.equal(queryParams.length, 2);
+  assert.ok(Number.isFinite(Date.parse(queryParams[0])));
+  assert.equal(queryParams[1], 15 * 60);
   // No organization_id bound as a query parameter - the candidate sweep is not
   // scoped to any one organization.
   assert.match(queryText, /FROM kai\.intake_files f/);
@@ -193,7 +197,15 @@ test("P1 worker candidate discovery sweeps every organization, bounded at 25, ex
   // always re-derives its identity from the file's current checksum), so the
   // exclusion is scoped by checksum, never by organization_id/intake_file_id
   // alone.
-  assert.match(queryText, /NOT EXISTS[\s\S]*kai\.intake_parser_runs r[\s\S]*r\.organization_id = f\.organization_id[\s\S]*r\.intake_file_id = f\.intake_file_id[\s\S]*r\.checksum = f\.verified_checksum[\s\S]*r\.parser_status IN \('running', 'failed', 'cancelled'\)/);
+  assert.match(queryText, /NOT EXISTS[\s\S]*kai\.intake_parser_runs r[\s\S]*r\.organization_id = f\.organization_id[\s\S]*r\.intake_file_id = f\.intake_file_id[\s\S]*r\.checksum = f\.verified_checksum[\s\S]*r\.parser_status IN \('failed', 'cancelled'\)/);
+  // A running run is excluded only while its lease is live.
+  assert.match(queryText, /r\.parser_status = 'running' AND r\.started_at > \$1::timestamptz - make_interval\(secs => \$2\)/);
+  // Durable downstream recovery state for the current checksum excludes a
+  // live claim, a cooldown, an exhausted budget, and operator attention.
+  assert.match(queryText, /NOT EXISTS[\s\S]*kai\.intake_p1_downstream_attempts a[\s\S]*a\.checksum = f\.verified_checksum/);
+  assert.match(queryText, /a\.recovery_state IN \('exhausted', 'operator_attention'\)/);
+  assert.match(queryText, /a\.recovery_state = 'in_progress' AND a\.claim_expires_at > \$1::timestamptz/);
+  assert.match(queryText, /a\.recovery_state = 'retry_scheduled' AND a\.next_eligible_at > \$1::timestamptz/);
   // Global chronological (created_at) ordering, not a per-organization rank:
   // a fixed candidate's position relative to every other candidate never
   // moves once created, so no organization's backlog - however large or

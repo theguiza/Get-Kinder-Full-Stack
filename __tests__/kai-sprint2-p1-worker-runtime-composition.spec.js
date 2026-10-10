@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 
 import {
   KAI_P1_WORKER_SYNTHETIC_ACTOR_CONTEXT,
+  classifyKaiP1DownstreamStageFailure,
   processKaiP1IntakeFile,
   runKaiP1WorkerTick,
 } from "../Backend/kai/parsing/p1WorkerRuntime.js";
@@ -40,6 +41,35 @@ function fakeActivation(calls) {
   return async (input) => {
     calls.push(input);
     return { ok: true, data: { activated: true, run: { parser_run_id: `run-${calls.length}` } }, error: null };
+  };
+}
+
+/**
+ * In-memory stand-in for the PostgreSQL downstream recovery repository that
+ * grants every claim and acknowledges every outcome, so these composition
+ * tests keep exercising stage ordering and identity; the durable budget,
+ * cooldown, and fencing behaviour is proven against real PostgreSQL in
+ * kai-sprint2-p1-worker-file-processing.integration.spec.js.
+ */
+function grantingRecoveryRepository(calls = []) {
+  let next = 1;
+  return {
+    calls,
+    async claimDownstreamAttempt(input) {
+      calls.push({ kind: "claim", stage: input.identity.stage, fileProfileId: input.identity.fileProfileId });
+      return {
+        ok: true,
+        data: { decision: "claimed", claimToken: `00000000-0000-4000-8000-${String(next++).padStart(12, "0")}`, attemptNumber: 1 },
+        error: null,
+      };
+    },
+    async completeDownstreamAttempt(input) {
+      calls.push({ kind: "complete", stage: input.identity.stage, outcome: input.outcome, errorCode: input.errorCode });
+      const recoveryState = input.outcome === "succeeded"
+        ? "succeeded"
+        : input.outcome === "retryable_failure" ? "retry_scheduled" : "operator_attention";
+      return { ok: true, data: { acknowledged: true, recoveryState, attemptNumber: 1 }, error: null };
+    },
   };
 }
 
@@ -341,6 +371,7 @@ test("A. fresh success: a fresh P1-03 completion continues through P1-04 then P1
       return { ok: true, data: { sensitivityProfile: { intake_sensitivity_profile_id: "sp-1" } }, error: null };
     },
     createProductionMetadataOnlyAudit: () => ({ prepareMetadataOnlyAudit: () => ({ ok: true, publish: async () => {} }) }),
+    p1DownstreamRecoveryRepository: grantingRecoveryRepository(),
     // No P1-06 dependency is ever wired in by the runtime, so a caller cannot
     // even supply a reachable one to spy on - `createSensitivityReviewQueueItem`
     // has no dependency key on this seam at all.
@@ -391,6 +422,7 @@ test("replaying the same tick does not duplicate P1-04 or P1-05 work", async () 
       return { ok: true, data: { sensitivityProfile: { intake_sensitivity_profile_id: "sp-1" }, replayed: sensitivityCalls.length > 1 }, error: null };
     },
     createProductionMetadataOnlyAudit: () => ({ prepareMetadataOnlyAudit: () => ({ ok: true, publish: async () => {} }) }),
+    p1DownstreamRecoveryRepository: grantingRecoveryRepository(),
   };
 
   await runKaiP1WorkerTick(dependencies);
@@ -428,6 +460,7 @@ test("a P1-04 failure stops the chain before P1-05 is ever invoked", async () =>
       return { ok: true, data: { sensitivityProfile: { intake_sensitivity_profile_id: "sp-1" } }, error: null };
     },
     createProductionMetadataOnlyAudit: () => ({ prepareMetadataOnlyAudit: () => ({ ok: true, publish: async () => {} }) }),
+    p1DownstreamRecoveryRepository: grantingRecoveryRepository(),
   });
 
   assert.equal(dictionaryCalls.length, 1);
@@ -467,6 +500,7 @@ test("B. P1-04 recovery: a P1-04 failure on tick 1 is retried on tick 2 against 
       return { ok: true, data: { sensitivityProfile: { intake_sensitivity_profile_id: "sp-1" } }, error: null };
     },
     createProductionMetadataOnlyAudit: () => ({ prepareMetadataOnlyAudit: () => ({ ok: true, publish: async () => {} }) }),
+    p1DownstreamRecoveryRepository: grantingRecoveryRepository(),
   };
 
   const first = await runKaiP1WorkerTick(dependencies);
@@ -520,6 +554,7 @@ test("C. P1-05 recovery: a P1-05 failure on tick 1 is retried on tick 2, idempot
       return { ok: true, data: { sensitivityProfile: { intake_sensitivity_profile_id: "sp-1" }, replayed: false }, error: null };
     },
     createProductionMetadataOnlyAudit: () => ({ prepareMetadataOnlyAudit: () => ({ ok: true, publish: async () => {} }) }),
+    p1DownstreamRecoveryRepository: grantingRecoveryRepository(),
   };
 
   const first = await runKaiP1WorkerTick(dependencies);
@@ -612,6 +647,7 @@ function completedChainDependencies(calls) {
       return { ok: true, data: { sensitivityProfile: { intake_sensitivity_profile_id: "sp-1" } }, error: null };
     },
     createProductionMetadataOnlyAudit: () => ({ prepareMetadataOnlyAudit: () => ({ ok: true, publish: async () => {} }) }),
+    p1DownstreamRecoveryRepository: grantingRecoveryRepository(),
     now: () => "2026-10-10T12:00:00.000Z",
   };
 }
@@ -756,4 +792,174 @@ test("the scheduled tick delegates each candidate to the same shared file operat
   assert.deepEqual(tick.data.activated, direct.map((entry) => entry.data));
   assert.deepEqual(tickCalls, directCalls);
   assert.deepEqual(tickCalls.activation.map((call) => call.intakeFileId), ["file-2", "file-1"]);
+});
+
+// --- Package 3: durable downstream decisions, cron cadence and overlap ---
+
+function decidingRecoveryRepository(decisionFor) {
+  const calls = [];
+  return {
+    calls,
+    async claimDownstreamAttempt(input) {
+      calls.push({ kind: "claim", stage: input.identity.stage });
+      return { ok: true, data: decisionFor(input.identity.stage), error: null };
+    },
+    async completeDownstreamAttempt(input) {
+      calls.push({ kind: "complete", stage: input.identity.stage, outcome: input.outcome });
+      return { ok: true, data: { acknowledged: true, recoveryState: input.outcome === "succeeded" ? "succeeded" : "retry_scheduled" }, error: null };
+    },
+  };
+}
+
+test("a downstream stage that is not claimed - deferred, busy, exhausted, operator attention, not eligible, or an unreadable claim - is never invoked", async () => {
+  for (const decision of [
+    { decision: "deferred", errorCode: "system_error", attemptNumber: 1 },
+    { decision: "busy", attemptNumber: 2 },
+    { decision: "exhausted", errorCode: "system_error", attemptNumber: 3 },
+    { decision: "operator_attention", errorCode: "validation_blocker", attemptNumber: 1 },
+    { decision: "not_eligible" },
+  ]) {
+    const calls = emptyCalls();
+    const repository = decidingRecoveryRepository(() => decision);
+    const result = await processKaiP1IntakeFile(
+      { organizationId: ORG_A, intakeFileId: "file-1" },
+      { ...completedChainDependencies(calls), p1DownstreamRecoveryRepository: repository },
+    );
+    assert.equal(result.data.stoppedAt, "draft_data_dictionary", decision.decision);
+    assert.equal(result.data.recovery[0].decision, decision.decision);
+    assert.equal(calls.dictionary.length, 0, decision.decision);
+    assert.equal(calls.sensitivity.length, 0);
+    assert.equal(repository.calls.some((call) => call.kind === "complete"), false);
+  }
+
+  const calls = emptyCalls();
+  const failing = {
+    async claimDownstreamAttempt() { throw new Error("synthetic connection failure"); },
+    async completeDownstreamAttempt() { throw new Error("unreachable"); },
+  };
+  const unreadable = await processKaiP1IntakeFile(
+    { organizationId: ORG_A, intakeFileId: "file-1" },
+    { ...completedChainDependencies(calls), p1DownstreamRecoveryRepository: failing },
+  );
+  assert.deepEqual(unreadable.data.recovery, [{ stage: "p1_04_data_dictionary", decision: "claim_failed", code: "system_error" }]);
+  assert.equal(calls.dictionary.length, 0, "no stage runs without a durable claim");
+});
+
+test("an already-committed P1-04 output is reconciled: P1-04 is not re-run and P1-05 receives the committed dictionary id", async () => {
+  const calls = emptyCalls();
+  const repository = decidingRecoveryRepository((stage) => (stage === "p1_04_data_dictionary"
+    ? { decision: "already_succeeded", outputId: DATA_DICTIONARY_ID }
+    : { decision: "claimed", claimToken: "00000000-0000-4000-8000-000000000001", attemptNumber: 1 }));
+  const result = await processKaiP1IntakeFile(
+    { organizationId: ORG_A, intakeFileId: "file-1" },
+    { ...completedChainDependencies(calls), p1DownstreamRecoveryRepository: repository },
+  );
+  assert.equal(result.data.stoppedAt, undefined);
+  assert.equal(calls.dictionary.length, 0);
+  assert.equal(calls.sensitivity[0].dataDictionaryId, DATA_DICTIONARY_ID);
+  assert.equal(result.data.dataDictionary.data.reconciled, true);
+});
+
+test("downstream failure classification: only system_error is retryable; known blockers and anything unrecognized need an operator", () => {
+  assert.deepEqual(classifyKaiP1DownstreamStageFailure({ ok: false, error: { code: "system_error" } }), { outcome: "retryable_failure", errorCode: "system_error" });
+  for (const code of ["validation_blocker", "conflict_current_state_changed", "not_found", "feature_disabled", "authorization_denied", "tenant_boundary_violation", "state_transition_denied", "unclassified_stage_exception"]) {
+    assert.deepEqual(classifyKaiP1DownstreamStageFailure({ ok: false, error: { code } }), { outcome: "non_retryable_failure", errorCode: code });
+  }
+  for (const result of [{ ok: false, error: { code: "brand_new_code" } }, { ok: false }, null, { ok: true, data: {} }]) {
+    assert.deepEqual(classifyKaiP1DownstreamStageFailure(result), { outcome: "non_retryable_failure", errorCode: "unclassified_stage_failure" });
+  }
+});
+
+test("the stage outcome reaches the fenced acknowledgment exactly once per claimed attempt", async () => {
+  const calls = emptyCalls();
+  const repository = grantingRecoveryRepository();
+  await processKaiP1IntakeFile(
+    { organizationId: ORG_A, intakeFileId: "file-1" },
+    {
+      ...completedChainDependencies(calls),
+      p1DownstreamRecoveryRepository: repository,
+      persistIntakeSensitivityProfile: async () => ({ ok: false, data: null, error: { code: "system_error" } }),
+    },
+  );
+  assert.deepEqual(repository.calls.map(({ kind, stage, outcome, errorCode }) => [kind, stage, outcome ?? null, errorCode ?? null]), [
+    ["claim", "p1_04_data_dictionary", null, null],
+    ["complete", "p1_04_data_dictionary", "succeeded", null],
+    ["claim", "p1_05_sensitivity_profile", null, null],
+    ["complete", "p1_05_sensitivity_profile", "retryable_failure", "system_error"],
+  ]);
+});
+
+test("the cron fallback is registered every minute in America/Vancouver, only with both gates", () => {
+  const scheduled = [];
+  const cronLib = { schedule: (expression, handler, options) => { scheduled.push({ expression, options }); return {}; } };
+  for (const env of [{ KAI_SPRINT2_ENABLED: "true" }, { KAI_WORKER_ENABLED: "true" }, {}]) {
+    assert.equal(registerKaiP1WorkerCron({ env, cronLib, createRuntimeDependencies: () => ({}) }).scheduled, false);
+  }
+  assert.equal(scheduled.length, 0);
+  registerKaiP1WorkerCron({ env: ENABLED_ENV, cronLib, createRuntimeDependencies: () => ({}) });
+  assert.deepEqual(scheduled, [{ expression: "* * * * *", options: { timezone: "America/Vancouver" } }]);
+});
+
+test("an overlapping cron fire is skipped rather than queued, and a failed or throwing tick never stops later fires or logs diagnostics", async () => {
+  let handler;
+  const cronLib = { schedule: (expression, callback) => { handler = callback; return {}; } };
+  const lines = [];
+  let release;
+  const outcomes = [
+    () => new Promise((resolve) => { release = () => resolve({ ok: true, data: { activated: [] }, error: null }); }),
+    () => Promise.reject(Object.assign(new Error("connect ECONNREFUSED 10.0.0.1:5432 org a5d17c5a"), { stack: "secret" })),
+    () => Promise.resolve({ ok: false, data: null, error: { code: "system_error" } }),
+    () => Promise.resolve({
+      ok: true,
+      data: {
+        activated: [
+          { organizationId: ORG_A, intakeFileId: "file-1", sensitivityProfile: { ok: true } },
+          { organizationId: ORG_A, intakeFileId: "file-2", stoppedAt: "draft_data_dictionary", recovery: [{ decision: "retry_scheduled", code: "system_error" }] },
+          { organizationId: ORG_B, intakeFileId: "file-3", stoppedAt: "draft_data_dictionary", recovery: [{ decision: "exhausted", code: "system_error" }] },
+          { organizationId: ORG_B, intakeFileId: "file-4", stoppedAt: "persist_intake_sensitivity_profile", recovery: [{ decision: "busy" }] },
+          { organizationId: ORG_B, intakeFileId: "file-5", result: { ok: false, error: { code: "feature_disabled" } } },
+        ],
+      },
+      error: null,
+    }),
+  ];
+  let ticks = 0;
+  registerKaiP1WorkerCron({
+    env: ENABLED_ENV,
+    cronLib,
+    createRuntimeDependencies: () => ({}),
+    runTick: () => outcomes[ticks++](),
+    log: (line) => lines.push(line),
+  });
+
+  const first = handler();
+  await handler();
+  assert.equal(ticks, 1);
+  release();
+  await first;
+  await handler();
+  await handler();
+  await handler();
+  assert.equal(ticks, 4);
+  assert.deepEqual(lines, [
+    "[kai-p1-worker] tick skipped: previous tick still running",
+    "[kai-p1-worker] tick failed",
+    "[kai-p1-worker] tick failed",
+    "[kai-p1-worker] candidates=5 completed_through_p1_05=1 deferred=1 busy=1 exhausted=1 rejected=1",
+  ]);
+});
+
+test("P1-06 and later stay unreachable from the new recovery, guard, and cron modules", () => {
+  for (const path of [
+    "Backend/kai/parsing/postgresP1DownstreamRecoveryRepository.js",
+    "Backend/kai/parsing/p1StageTransaction.js",
+    "Backend/kai/parsing/p1WorkerCron.js",
+    "Backend/kai/services/kaiP1RecoveryStatusService.js",
+  ]) {
+    const source = readFileSync(path, "utf8");
+    for (const line of source.match(/^import .+$/gm) || []) {
+      assert.doesNotMatch(line, /reviewQueue|review-?queue|sourceCandidate|sourcePromotion|evidence|\bclaims?\b|claimProposal|generat|exportReview|exportCandidate|humanAuthority/i, `${path}: ${line}`);
+    }
+    assert.doesNotMatch(source, /createSensitivityReviewQueueItem\s*\(|retry:\s*true/, path);
+  }
 });

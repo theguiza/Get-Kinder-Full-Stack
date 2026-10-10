@@ -1,4 +1,5 @@
 import pool from "./kaiDb.js";
+import { __parserRunRepositoryContract } from "../parsing/postgresParserRunRepository.js";
 
 export async function findIntakeBatchByIdempotencyKey({ organizationId, idempotencyKey }, db = pool) {
   if (!organizationId || !idempotencyKey) return null;
@@ -442,6 +443,31 @@ export async function getScopedIntakeFileParserProfileEligibilityFacts(
   return withSafeIntegerVerifiedSizeBytes(rows[0] || null);
 }
 
+/**
+ * P1 stage eligibility guard: inside the caller's transaction, take a share
+ * lock on this file's row only if it is still a confirmed, passed upload
+ * whose verified checksum is the one the P1 work is bound to. Returns false
+ * (no lock) otherwise. Holding FOR SHARE until the stage commits makes a
+ * concurrent policy block wait for that commit, and a block that committed
+ * first makes the stage refuse - so no P1 stage commits for a file blocked
+ * after its initial eligibility check.
+ */
+export async function lockKaiP1EligibleIntakeFileForShare({ organizationId, intakeFileId, verifiedChecksum }, db = pool) {
+  const { rows } = await db.query(
+    `SELECT intake_file_id
+       FROM kai.intake_files
+      WHERE organization_id = $1
+        AND intake_file_id = $2
+        AND upload_state = 'confirmed'
+        AND file_policy_status = 'passed'
+        AND verified_checksum = $3
+        AND checksum = verified_checksum
+      FOR SHARE`,
+    [organizationId, intakeFileId, verifiedChecksum],
+  );
+  return rows.length === 1;
+}
+
 const P1_WORKER_CANDIDATE_SWEEP_LIMIT = 25;
 
 /**
@@ -486,10 +512,8 @@ const P1_WORKER_CANDIDATE_SWEEP_LIMIT = 25;
  *    identity from selection. Matching on `checksum` only reuses the
  *    file-level immutable fact this query already reads; it does not
  *    reimplement `PARSER_REGISTRY`'s extension->parser mapping in SQL. Only
- *    `running` (only a `queued` row is claimable - see
- *    `claimQueuedParserRun` in `postgresParserRunRepository.js` - so a
- *    `running` row can never be reclaimed automatically, whether mid-flight
- *    or orphaned by a crashed worker), `failed` (only explicit
+ *    `running` while its claim lease is live (another worker owns it; see
+ *    the recovery bounds below for an expired lease), `failed` (only explicit
  *    `retry: true`, which this automatic worker never passes, re-queues a
  *    failed run - see `requeueFailedParserRunForRetry`), and `cancelled`
  *    (terminal; `requeueFailedParserRunForRetry` explicitly refuses to
@@ -516,8 +540,19 @@ const P1_WORKER_CANDIDATE_SWEEP_LIMIT = 25;
  * cannot guarantee once more organizations than `LIMIT` are simultaneously
  * backlogged). No file-ID selector, no process-global organization scope -
  * every candidate carries its own persisted `organization_id`.
+ *
+ * Recovery bounds (as of `now`): a `running` run for the current checksum is
+ * excluded only while its claim lease is live - once the lease has expired
+ * the run is selectable so activation can apply the bounded, fenced
+ * orphan recovery. Downstream P1-04/P1-05 state for the current checksum
+ * (`kai.intake_p1_downstream_attempts`) excludes the file while a stage is
+ * claimed by a live worker, cooling down before its next attempt, out of
+ * attempts, or waiting for an operator. A persistently failing file
+ * therefore holds a window slot for at most its bounded attempts, and is
+ * outside the window during every cooldown and after exhaustion, so it can
+ * never indefinitely keep newer eligible work out.
  */
-export async function listActionableKaiP1WorkCandidates(db = pool) {
+export async function listActionableKaiP1WorkCandidates(db = pool, { now = new Date().toISOString() } = {}) {
   const { rows } = await db.query(
     `SELECT f.organization_id::text AS organization_id,
             f.intake_file_id::text AS intake_file_id
@@ -540,10 +575,26 @@ export async function listActionableKaiP1WorkCandidates(db = pool) {
            WHERE r.organization_id = f.organization_id
              AND r.intake_file_id = f.intake_file_id
              AND r.checksum = f.verified_checksum
-             AND r.parser_status IN ('running', 'failed', 'cancelled')
+             AND (
+               r.parser_status IN ('failed', 'cancelled')
+               OR (r.parser_status = 'running' AND r.started_at > $1::timestamptz - make_interval(secs => $2))
+             )
+        )
+        AND NOT EXISTS (
+          SELECT 1
+            FROM kai.intake_p1_downstream_attempts a
+           WHERE a.organization_id = f.organization_id
+             AND a.intake_file_id = f.intake_file_id
+             AND a.checksum = f.verified_checksum
+             AND (
+               a.recovery_state IN ('exhausted', 'operator_attention')
+               OR (a.recovery_state = 'in_progress' AND a.claim_expires_at > $1::timestamptz)
+               OR (a.recovery_state = 'retry_scheduled' AND a.next_eligible_at > $1::timestamptz)
+             )
         )
       ORDER BY f.created_at ASC, f.organization_id ASC, f.intake_file_id ASC
       LIMIT ${P1_WORKER_CANDIDATE_SWEEP_LIMIT}`,
+    [now, __parserRunRepositoryContract.PARSER_RUN_LEASE_SECONDS],
   );
   return rows;
 }

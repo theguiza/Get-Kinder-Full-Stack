@@ -36197,3 +36197,219 @@ application module) ran before the sentinel was exported in this session.
 No push, deployment, production or shared database, cloud, feature-flag,
 tenant, credential, `.env`, schema/migration, route, frontend, cron
 schedule, sweep ordering/limit, or `00_KAI_CURRENT_STATE.md` change.
+
+### KAI processing latency fix, Package 3 of 3: durable P1 recovery, bounded downstream failures, one-minute fallback (2026-10-10)
+
+**Owner direction (USER_CONFIRMED):** add durable, bounded, cross-instance-safe
+P1-04/P1-05 recovery state; prevent persistent failures from starving newer
+files; resolve orphaned P1-03 `running` work with proven fencing or an
+operator-attention outcome; then, only after those safeguards pass
+real-PostgreSQL verification, move the scheduled fallback to every minute.
+Authorizes the smallest additive recovery-state migration and its pack,
+applied only to runner-owned disposable loopback databases. Does not
+authorize applying it to any shared or production database (Gate A remains
+unauthorized for that), deployment, push, flags, or Current State changes.
+
+**Starting state (TOOL_VERIFIED):** `main` at
+`1c2f24a4a1a291e0579dbffff43eee0e7b43c45c` (Package 2; Package 1 `e1cafea`
+is an ancestor), clean.
+
+**Schema (TOOL_VERIFIED, additive):**
+`migrations/kai_sprint2_p1_downstream_recovery_state.sql` (+ `.rollback.sql`)
+adds `kai.intake_p1_downstream_attempts`, with PK `(organization_id,
+file_profile_id, stage)` and a composite FK `(file_profile_id,
+organization_id, intake_file_id, parser_name, parser_version, checksum)` to
+the existing `intake_file_profiles_p1_run_identity_unique`. It holds
+`stage`, `recovery_state` (in_progress / retry_scheduled / succeeded /
+exhausted / operator_attention), `attempt_count` 0-3, `claim_token` and
+`claim_expires_at`, `last_attempt_at`, `next_eligible_at`, a safe-token
+`last_error_code`, a state/fact consistency CHECK, and an index on
+`(organization_id, intake_file_id, checksum)`. No existing table, column,
+constraint, status vocabulary, or audit operation changed (verifier-checked).
+
+**Implementation (TOOL_VERIFIED):**
+- `Backend/kai/parsing/postgresP1DownstreamRecoveryRepository.js` (new).
+  `claimDownstreamAttempt` runs in one transaction: re-check eligibility
+  `FOR SHARE` → lock the row → reconcile a committed dictionary or sensitivity
+  output (`already_succeeded`, no attempt consumed) → else reserve and count
+  the attempt with a new claim token and 120 s lease; or `busy` / `deferred` /
+  `exhausted` / `operator_attention` / `not_eligible`. An expired claim counts
+  as a failed attempt (`attempt_lease_expired`) and observes the cooldown.
+  `completeDownstreamAttempt` is fenced by the claim token (stale →
+  `acknowledged: false`, no write). Every state change commits with its
+  required metadata-only audit (`<stage>_attempt_claimed`,
+  `_attempt_succeeded`, `_retry_scheduled`, `_attempts_exhausted`,
+  `_operator_attention_required`, `_output_reconciled`) or not at all.
+  `readP1RecoveryStatus` is a tenant-scoped read-only view.
+- Retry policy (new for this package): at most 3 total automatic attempts
+  per stage. Cooldown is 60 s after attempt 1 and 300 s after attempt 2;
+  exhausted after the third. Only `system_error` is retryable: the
+  P1-04/P1-05 repositories map every unrecognized database fault to it, the
+  stage transaction is rolled back, and the stage is idempotent. Known
+  blockers (`validation_blocker`, `conflict_current_state_changed`,
+  `not_found`, `feature_disabled`, authorization/tenant/state codes),
+  unrecognized codes, malformed results, and thrown stages go to
+  `operator_attention`.
+- `Backend/kai/parsing/p1WorkerRuntime.js`: each downstream stage runs only
+  under a claim; the outcome is acknowledged through the fence. The result
+  carries `recovery` records. The tick passes its clock to the sweep. A
+  completed P1-03 run is never re-profiled or marked failed.
+- `Backend/kai/db/kaiIntakeQueries.js`: the sweep keeps its eligibility,
+  oldest-first ordering, and `LIMIT 25`, and now takes `now`. It excludes a
+  current-checksum `running` run only while its 15-minute lease is live, and
+  a file whose current-checksum downstream state is live-claimed, cooling
+  down, exhausted, or operator-attention. Adds
+  `lockKaiP1EligibleIntakeFileForShare`.
+- `Backend/kai/parsing/p1StageTransaction.js` (new): wraps the callback-only
+  `runInTransaction` of every default P1-03/P1-04/P1-05 repository with a
+  `FOR SHARE` eligibility re-check (confirmed, passed, bound verified
+  checksum).
+- `Backend/kai/parsing/postgresParserRunRepository.js` /
+  `parserProfileWorkerOrchestration.js` / `parserProfileActivation.js`:
+  completion and safe failure accept the claim's `started_at` as a fencing
+  token (the orchestration always passes it); the UPDATE and the locked check
+  require it unchanged. New `recoverExpiredRunningParserRun`: a `running` run
+  whose `started_at` is at least 15 minutes old has its lost attempt counted
+  in `retry_count`. Below `MAX_PARSER_RETRY_COUNT = 3` it is re-queued with
+  a new `started_at` (fencing the old worker) and claimed normally; at the
+  cap it becomes an ordinary `failed` run (`parser_run_lease_expired`,
+  `requires_manual_review`), never retried automatically. Activation calls
+  it only for a `running` replay under `retry: false`; a leased run is left
+  alone. Activation's default parser repository uses the guarded transaction.
+- `Backend/kai/parsing/p1WorkerCron.js`: default `* * * * *`
+  (`America/Vancouver` unchanged), changed only after the safeguards passed
+  (see below). Still registered only with both gates. An overlapping fire is
+  skipped (`tick skipped: previous tick still running`), and a failed or
+  throwing tick logs `tick failed` without diagnostics and never stops later
+  fires. Summary lines carry outcome counts only.
+- `Backend/kai/parsing/p1FileDispatch.js`: classification reports the durable
+  recovery decision. `Backend/kai/services/kaiP1RecoveryStatusService.js`
+  (new): read-only `getKaiP1RecoveryStatus`, mapped human with GK role,
+  `read_intake`, tenant check, no route.
+- A governance test (`kai-sprint2-orchestration-boundary.spec.js`) rejected
+  an initial pool-provider dependency threaded through production code. It
+  was redesigned to the established callback-only `runInTransaction`
+  injection (default `withTransaction`); tests bind pools in spec code only.
+
+**Ordering evidence (TOOL_VERIFIED):** with the cron still at
+`*/15 * * * *`, the runner passed all durable-safeguard tests (discovery 6/6;
+assembled 31/32, the one failure being the not-yet-implemented cron test).
+Only then was the default changed, after which 32/32 passed.
+
+**Real-PostgreSQL acceptance (TOOL_VERIFIED, `npm run
+verify:kai-sprint2-p1-worker`, synthetic data, controlled clocks, crashes as
+child processes killed with SIGKILL):** discovery 6/6 (adds 11
+recovery-bound selection cases); assembled 32/32 (Packages 1-2 tests 1-16,
+updated where bounded recovery changes expectations, plus):
+1. Immediate dispatch still reaches P1-05 (test 9; confirm return -> P1-05
+   30.5 ms).
+2-3. A passed file whose dispatch was lost (accepted, never run) or refused
+   (saturated) is recovered by the next sweep; the confirmation is not
+   repeated.
+4. Ineligible files never run (tests 2, 11, discovery).
+5. Transient P1-04: deferred at +30 s (not selected; direct dispatch
+   `deferred`), retried at +61 s, deferred until +361 s, completes on
+   attempt 3; one byte read.
+6. Transient P1-05: P1-04 reconciled, not re-run; P1-03 read once.
+7. Persistent `system_error`: exhausted at 3; never selected or invoked again
+   (7 days later); one `p1_04_data_dictionary_attempts_exhausted` audit;
+   parser run stays `completed`.
+8. Non-retryable, unrecognized, malformed, and thrown failures go to
+   operator attention after one attempt.
+9. A rejected stage audit never records success; a rejected acknowledgment
+   audit leaves `in_progress`, later reconciled to `succeeded` with no P1-04
+   call.
+10. SIGKILL after reservation: attempt 1 persisted; not selected while leased
+    (+100 s); recovered at +121 s as attempt 2.
+11. SIGKILL after the P1-04 commit and before acknowledgment: one dictionary,
+    one `data_dictionary_draft_persisted`, reconciled without a P1-04 call.
+12. 8 concurrent claims across two pools: exactly 1 `claimed`, 7 `busy`.
+13. An expired claim is deferred by cooldown, then re-claimed as attempt 3;
+    the stale token's acknowledgments are refused twice.
+14. 25 older persistently failing files fill the window at t=0; at +10 s the
+    newer file is the only candidate and completes; the 25 exhaust after
+    exactly 3 attempts each and never return.
+15. Tenant isolation: another tenant's failure blocks nothing; a cross-tenant
+    claim is `not_found`; a cross-tenant read is empty; the operator read
+    requires a mapped human in that tenant.
+16. Dispatch plus five ticks on two pools: one parser run, profile,
+    dictionary, sensitivity profile, and one of each stage and recovery
+    audit.
+17/19. SIGKILL mid-profile: not reclaimed while leased; reclaimed at 15 min
+    (`retry_count` 1) and completed; three consecutive orphanings end in
+    `failed`/`parser_run_lease_expired`/`retry_count` 3, never retried, with
+    `requires_manual_review`.
+18/20. A stalled worker taken over while the new owner is still `running` is
+    refused (fence) with no profile; the owner completes; completed runs are
+    never re-profiled.
+21/22. Cron: no registration without both gates; `* * * * *` /
+    `America/Vancouver`; an overlapping fire is skipped; the handler recovers
+    the file through P1-05; identifier-free logs.
+23. No P1-06+ path (static checks across the new modules; test 16).
+24. A file blocked during profiling commits no profile; blocked before the
+    P1-04 commit, no dictionary; afterwards `not_eligible` and not selected.
+
+**Migration verification pack (TOOL_VERIFIED, disposable database
+`kai_p1_worker_recovery_migration_synthetic`):** catalog verifier 32 PASS;
+read-only failure checks 7 PASS (empty) and 7 PASS (seeded); smoke seed
+plus smoke verifier 15 PASS (11 rolled-back constraint probes); rollback
+draft dropped only the recovery table, with earlier rows intact; forward
+re-applied twice idempotently, verifier PASS. Artifacts:
+`scripts/kai-sprint2-p1-downstream-recovery-state-{verifier,failure-checks,smoke-seed,smoke-verifier}.sql`,
+`-patch-notes.md`, `-runbook.md`.
+
+**Negative controls (TOOL_VERIFIED; each file restored byte-identical,
+`cmp`):** removing the downstream exclusion fails discovery test 3 and
+assembled 6, 14, P3-5, 6, 7, 8, 10, 14; removing the parser fence fails
+P3-18; removing the claim-token fence fails P3-12/13; removing the
+eligibility guard fails P3-24; removing reconciliation fails 5, P3-6, 9,
+11. The parser-fence control initially passed: the original P3-18 let the
+new owner finish first, so it was strengthened to stall both workers.
+
+**Verification (TOOL_VERIFIED; loopback `DATABASE_URL` sentinel and
+`KAI_FILE_UPLOAD_ENABLED=false`):**
+
+| Command | Pass | Fail | Skipped |
+| --- | --- | --- | --- |
+| `npm run verify:kai-sprint2-p1-worker` (pack + 6 + 32) | all | 0 | 0 |
+| focused P1/cron/dispatch/queries/orchestration-boundary specs | 93 | 0 | 0 |
+| `npm run verify:kai-sprint2-p1-03-parser-profile-worker` | 14 | 0 | 0 |
+| `npm run verify:kai-sprint2-p1-04-data-dictionary-quality` | 12 | 0 | 0 |
+| `npm run verify:kai-sprint2-p1-05-intake-sensitivity-profile` | 15 | 0 | 0 |
+| `node scripts/kai-sprint2-confirm-upload-metadata-boundary-local-postgres.js` | 13 | 0 | 0 |
+| `npm run verify:kai-sprint2-intake-duplicate-resolution-real-db` | 11 | 0 | 0 |
+| `npm run verify:kai-sprint2-api-contract` | 71 | 0 | 0 |
+| `npm run test:kai-sprint2` | 4707 | 0 | 89 |
+| `npm test` | 5387 | 0 | 99 |
+| `git diff --check` | clean | | |
+
+Skipped counts are the opt-in integration specs; their real-PostgreSQL
+coverage is the separately executed runners above. Synthetic local latency
+(5 samples): commit -> P1 start median 0.13 ms; commit -> P1-05 median
+29.4 ms.
+
+**NOT_CONFIRMED:**
+- The migration is not applied to any shared or production database. The
+  required release order is migration (with verifier and failure checks)
+  before the application version; the new sweep and runtime fail closed
+  without the table. Not executed.
+- Production composition, multi-instance cron load (every instance sweeps
+  each minute; PostgreSQL claims keep it safe), real latency, and GCS reads
+  are not exercised.
+- If a recovery claim cannot be recorded (for example the audit store is
+  unavailable), the stage is not run and the file stays selectable each
+  sweep without consuming its budget. This is safe but not bounded in
+  sweeps.
+- A profile that legitimately takes longer than 15 minutes is fenced out and
+  re-run, bounded at three attempts. A `feature_disabled` raised mid-chain
+  goes to operator attention (conservative). A lost acknowledgment on a file
+  that still completes leaves an expired `in_progress` row that is never
+  selected.
+- Exhausted, operator-attention, and lease-expired parser failures need a
+  human decision; no reset path is provided.
+
+**Status:** P1_DURABLE_RECOVERY_AND_ONE_MINUTE_FALLBACK_COMPLETE_LOCALLY_PRODUCTION_NOT_CONFIRMED.
+No push, deployment, shared or production database, cloud, feature-flag,
+tenant, credential, `.env`, route, frontend, or `00_KAI_CURRENT_STATE.md`
+change; the migration and rollback ran only in runner-owned disposable
+loopback databases.
