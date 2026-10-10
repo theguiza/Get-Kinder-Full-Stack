@@ -419,6 +419,9 @@ export async function casSecurityAssessmentFilePolicyDecision(
  * to run it. Mirrors `getScopedIntakeFileSecurityAssessmentFacts` above
  * (same table, same tenant-scoped WHERE clause shape, same bigint-safe
  * `verified_size_bytes` handling); it is additive and changes no other query.
+ * `upload_state` and the declared `checksum` are read so activation can
+ * require the confirmed lifecycle state and the confirmation-time binding
+ * between the declared and verified checksum, not only `file_policy_status`.
  */
 export async function getScopedIntakeFileParserProfileEligibilityFacts(
   { organizationId, intakeFileId },
@@ -426,6 +429,7 @@ export async function getScopedIntakeFileParserProfileEligibilityFacts(
 ) {
   const { rows } = await db.query(
     `SELECT organization_id, intake_file_id, intake_batch_id, engagement_id,
+            upload_state, checksum,
             object_version_id, verified_checksum, verified_size_bytes,
             mime_type, file_extension, file_policy_status,
             storage_provider, storage_object_key
@@ -448,8 +452,13 @@ const P1_WORKER_CANDIDATE_SWEEP_LIMIT = 25;
  * manual action, or other external state change.
  *
  * Eligibility requires the existing Gate C boundary
- * (`file_policy_status = 'passed'`), and excludes two independent classes of
- * work so neither can permanently occupy this bounded window:
+ * (`file_policy_status = 'passed'`) on a `confirmed` upload whose stored
+ * object-version, verified checksum, and verified size are present and whose
+ * verified checksum still equals the declared checksum it was confirmed
+ * against - the same persistent facts `activateParserProfileWorkForIntakeFile`
+ * re-checks before any work, mirrored here so a row it would always refuse
+ * can never permanently occupy this bounded window. It also excludes two
+ * independent classes of work for the same reason:
  *
  *  - automatically satisfied: a persisted P1-05
  *    `kai.intake_sensitivity_profiles` row already exists (the chain already
@@ -514,6 +523,11 @@ export async function listActionableKaiP1WorkCandidates(db = pool) {
             f.intake_file_id::text AS intake_file_id
        FROM kai.intake_files f
       WHERE f.file_policy_status = 'passed'
+        AND f.upload_state = 'confirmed'
+        AND f.object_version_id IS NOT NULL
+        AND f.verified_checksum IS NOT NULL
+        AND f.verified_size_bytes IS NOT NULL
+        AND f.checksum = f.verified_checksum
         AND NOT EXISTS (
           SELECT 1
             FROM kai.intake_sensitivity_profiles s

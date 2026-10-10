@@ -35873,3 +35873,174 @@ Node/npm command):**
 No push, deployment, production or shared database, cloud, feature-flag,
 tenant, credential, `.env`, schema/migration, or `00_KAI_CURRENT_STATE.md`
 change.
+
+### KAI processing latency fix, Package 1 of 3: worker eligibility, reusable file-scoped execution, concurrency safety (2026-10-10)
+
+**Owner direction (USER_CONFIRMED):** prepare the existing P1 worker for both
+immediate file-scoped execution and scheduled recovery: enforce authoritative
+eligibility, provide one trusted file-scoped P1-03 -> P1-04 -> P1-05
+operation shared with the scheduled worker, prove cross-instance concurrency
+and idempotency, and handle persistent downstream failure safely. No
+immediate dispatch, no cron schedule change, no schema, route, frontend,
+production, cloud, flag, or Current State change. Packages 2 and 3 are not
+started.
+
+**Starting state (TOOL_VERIFIED):** `main` at
+`c129d86b16ee0944fc438bda6d2ec03b3031fc41`, clean.
+
+**Findings (TOOL_VERIFIED):**
+- `listActionableKaiP1WorkCandidates` and
+  `activateParserProfileWorkForIntakeFile` checked only
+  `file_policy_status = 'passed'`, never `upload_state = 'confirmed'`. The
+  Gate A trigger and state/fact constraint do not bind the two columns, so a
+  `passed` row in any other upload state was not excluded by the database.
+- Parser-run claiming is database-serialized: `claimQueuedParserRun` uses
+  `SELECT ... FOR UPDATE OF r SKIP LOCKED` plus `UPDATE ... WHERE
+  parser_status = 'queued'` in one transaction; parser identity is
+  `UNIQUE (organization_id, intake_file_id, parser_name, parser_version,
+  checksum)` with `ON CONFLICT DO NOTHING` + locked re-read. P1-04 and P1-05
+  resolve concurrent identical creation with `ON CONFLICT ... DO NOTHING`
+  plus a `FOR UPDATE` re-read in the same transaction. No process-local lock
+  is involved anywhere.
+- A failed P1-04/P1-05 transaction rolls back completely. `dictionary_status`
+  allows only `'draft'`, and `upload_lifecycle_audit.operation` is
+  CHECK-constrained; no durable downstream attempt or failure state exists.
+  The previous runtime docstring ("never retried automatically") was
+  inaccurate: the candidate query reselects such a file on every sweep.
+- `__tests__/kai-sprint2-p1-worker-actionable-candidate-discovery.integration.spec.js`
+  had no runner and could not pass against the migrated schema: its
+  `TRUNCATE` omitted foreign-key-referencing tables, it seeded `reserved`
+  rows carrying a verified checksum (Gate A constraint violation), failed /
+  cancelled parser runs without their required terminal facts, and
+  dictionary/sensitivity rows with a placeholder hash (lineage FK violation).
+
+**Implementation (TOOL_VERIFIED):**
+- `Backend/kai/db/kaiIntakeQueries.js`: the eligibility facts read now also
+  selects `upload_state` and the declared `checksum`. The candidate sweep
+  additionally requires `upload_state = 'confirmed'`, non-null
+  `object_version_id` / `verified_checksum` / `verified_size_bytes`, and
+  `checksum = verified_checksum`, mirroring activation's persistent refusals
+  so a row it always refuses cannot occupy the window. Ordering
+  (`created_at, organization_id, intake_file_id` ascending) and `LIMIT 25`
+  are unchanged.
+- `Backend/kai/parsing/parserProfileActivation.js`: requires
+  `upload_state = 'confirmed'` and `file_policy_status = 'passed'`
+  (otherwise `not_eligible_for_p1`, no queue/claim/read); requires a
+  non-empty object version, a well-formed verified checksum equal to the
+  declared checksum (`transitionUploadLifecycle` only confirms when they
+  match), and a verified size >= 1 (otherwise `validation_blocker`). Accepts
+  an optional `expectedFileFacts` (`objectVersionId`, `verifiedChecksum`,
+  `verifiedSizeBytes`, exact keys) that can only narrow eligibility: any
+  mismatch with the re-read facts returns `conflict_current_state_changed`
+  before any work. The P1-03 orchestration and repository are unchanged.
+- `Backend/kai/parsing/p1WorkerRuntime.js`: new exported
+  `processKaiP1IntakeFile({ organizationId, intakeFileId, expectedFileFacts? })`,
+  the one trusted file-scoped operation. It requires both
+  `KAI_SPRINT2_ENABLED` and `KAI_WORKER_ENABLED` (`feature_disabled`),
+  rejects any other input key (so no caller-supplied `retry`, actor, or
+  eligibility fact), always uses the fixed system actor and `retry: false`,
+  and runs the existing activation -> `createDraftDataDictionary` ->
+  `persistIntakeSensitivityProfile` chain, reporting `stoppedAt`
+  (`parser_profile_activation` / `draft_data_dictionary` /
+  `persist_intake_sensitivity_profile`, the existing reprocessor naming).
+  `runKaiP1WorkerTick` keeps its gate check, candidate source, order, and
+  bound, and delegates each candidate to this operation. No new import; no
+  P1-06+ path.
+- Tests: new
+  `__tests__/kai-sprint2-p1-worker-file-processing.integration.spec.js`
+  (real repositories, real production metadata-only audit composition, two
+  independent `pg` pools as two instances); repaired and extended the
+  candidate-discovery integration spec; new runner
+  `scripts/kai-sprint2-p1-worker-local-postgres.js`
+  (`npm run verify:kai-sprint2-p1-worker`, runner-owned loopback PostgreSQL
+  16, fresh database per spec, existing migrations plus the existing
+  test-only `kai-sprint2-confirm-upload-metadata-boundary-schema-extension.sql`);
+  added unit cases to `kai-sprint2-p1-activation.spec.js`,
+  `kai-sprint2-p1-worker-runtime-composition.spec.js`, and
+  `kai-sprint2-intake-queries.spec.js`.
+
+**Required proofs (TOOL_VERIFIED, synthetic data only):**
+1. Eligible confirmed/passed file completes P1-03 -> P1-04 -> P1-05 through
+   the shared operation, with one parser run bound to the verified checksum
+   and one `file_profile_persisted`, `data_dictionary_draft_persisted`, and
+   `intake_sensitivity_profile_persisted` audit each, plus durable
+   `kai.audit_events` rows.
+2. `confirmed` with `pending`/`blocked`/`failed` policy, and `reserved`,
+   `upload_started`, `uploaded_unconfirmed`, `policy_blocked`, `abandoned`,
+   `expired` with `passed` policy: no parser run, byte read, or audit row;
+   none selected by the sweep.
+3. Stale `expectedFileFacts` (object version, checksum, size) ->
+   `conflict_current_state_changed`; cross-tenant identity -> `not_found`;
+   declared/verified checksum mismatch -> `validation_blocker` and not
+   selected; all with zero writes.
+4. Six concurrent attempts across two pools: exactly one byte read, one
+   parser run (`completed`, `retry_count = 0`), one profile, one dictionary,
+   one sensitivity profile, one of each downstream audit. Observed in the
+   negative-control run: 1 attempt completed, 5 lost the claim with
+   `conflict_current_state_changed`.
+5. Six concurrent completed-parser replays across two pools for a P1-04
+   recovery file and a P1-05 recovery file: every replay reports
+   `activated: false` / `replayed: true`, one dictionary id and one
+   sensitivity id, one of each downstream audit, no re-profiling; a further
+   replay round changes no row count.
+6. A failed parser run stays `failed` with `retry_count = 1` under later
+   concurrent attempts (no requeue, no byte read), the operation rejects
+   `retry: true` as `validation_blocker`, and the sweep excludes it. A
+   persistent P1-04 failure (required audit rejected, full rollback) leaves
+   the parser run `completed` with `error_code = NULL`; nothing is
+   re-profiled.
+7. Either gate off (or neither set): `feature_disabled` / `worker_disabled`,
+   zero facts reads, byte reads, or writes.
+8. Scheduled tick over the real sweep: oldest-first across organizations,
+   each completed via the shared operation; satisfied files leave the
+   window; window remains bounded at 25.
+
+Negative controls (TOOL_VERIFIED): removing the `upload_state` checks fails
+the new discovery eligibility test, the activation and query unit tests, and
+assembled test 2; files were restored from scratchpad backups.
+
+**Verification (TOOL_VERIFIED; loopback `DATABASE_URL` sentinel and
+`KAI_FILE_UPLOAD_ENABLED=false` on every Node/npm command):**
+
+| Command | Pass | Fail | Skipped |
+| --- | --- | --- | --- |
+| `node --test` P1 worker/activation/queries/audit-propagation/P1-03..P1-06 boundary/config/api-contract specs (11 files) | 154 | 0 | 0 |
+| `npm run verify:kai-sprint2-p1-worker` (candidate discovery) | 5 | 0 | 0 |
+| `npm run verify:kai-sprint2-p1-worker` (file processing) | 8 | 0 | 0 |
+| `npm run verify:kai-sprint2-p1-03-parser-profile-worker` | 14 | 0 | 0 |
+| `npm run verify:kai-sprint2-p1-04-data-dictionary-quality` | 12 | 0 | 0 |
+| `npm run verify:kai-sprint2-p1-05-intake-sensitivity-profile` | 15 | 0 | 0 |
+| `npm run test:kai-sprint2` | 4678 | 0 | 89 |
+| `npm test` | 5358 | 0 | 99 |
+| `git diff --check` | clean | | |
+
+**NOT_CONFIRMED (blocks accelerated scheduling):**
+- Persistent downstream failure bound. A file whose P1-04 or P1-05 fails
+  deterministically is re-attempted once per sweep, indefinitely; attempts
+  scale with sweep frequency. Each attempt is bounded (one rolled-back
+  transaction, no re-profiling), but no frequency-independent bound exists.
+- Window starvation. 25 or more persistently failing recovery candidates
+  older than other work permanently occupy the oldest-first 25-row window,
+  so scheduled recovery never reaches newer files.
+- Both require durable per-file downstream attempt state (for example
+  attempt count, last-attempt time, and last safe error code keyed by
+  `organization_id`, `intake_file_id`, `file_profile_id`), which is a schema
+  change under Gate A, or an owner decision to change the established
+  ordering. Package 1 is therefore not claimed safe for accelerated
+  scheduling; the existing 15-minute cadence is unchanged.
+
+**NOT_CONFIRMED (residual, pre-existing):**
+- A parser run orphaned in `running` by a process crash is never reclaimed
+  automatically and is excluded from the sweep; immediate dispatch from
+  request-serving instances may make this more frequent.
+- Activation's eligibility read and the P1-03 claim/completion are separate
+  transactions; a `confirmed -> policy_blocked` transition in between is not
+  serialized against an in-flight run. The P1-03 repository was not changed.
+- Production schema, row compatibility (for example any production row with
+  `checksum <> verified_checksum`, now excluded), flags, and deployment were
+  not inspected.
+
+**Status:** P1_WORKER_PACKAGE_1_SAFE_CHANGES_COMPLETE_LOCALLY_ACCELERATED_SCHEDULING_NOT_CONFIRMED.
+No push, deployment, production or shared database, cloud, feature-flag,
+tenant, credential, `.env`, schema/migration, route, frontend, cron
+schedule, or `00_KAI_CURRENT_STATE.md` change.

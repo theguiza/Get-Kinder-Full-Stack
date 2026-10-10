@@ -45,7 +45,8 @@ async function runSuite() {
 
   async function resetTables() {
     await withClient((client) => client.query(
-      "TRUNCATE kai.intake_sensitivity_profiles, kai.data_dictionaries, kai.intake_file_profiles, kai.intake_parser_runs, kai.intake_files",
+      "TRUNCATE kai.upload_lifecycle_audit, kai.intake_sensitivity_profiles, kai.data_dictionaries, " +
+      "kai.intake_file_profiles, kai.intake_parser_runs, kai.intake_files CASCADE",
     ));
   }
 
@@ -57,34 +58,63 @@ async function runSuite() {
     return new Date(BASE_TIME + offsetSeconds * 1000).toISOString();
   }
 
-  async function seedIntakeFile(client, { intakeFileId, organizationId, checksum, filePolicyStatus = "passed", createdAt = timeOffset(0) }) {
+  async function seedIntakeFile(client, {
+    intakeFileId,
+    organizationId,
+    checksum,
+    filePolicyStatus = "passed",
+    uploadState = "confirmed",
+    verifiedChecksum = checksum,
+    createdAt = timeOffset(0),
+  }) {
     // `verified_checksum` (not `checksum`, the declared pre-confirm value) is
     // the column `listActionableKaiP1WorkCandidates` actually reads - it is
     // the field set once at the real `confirmed` transition
     // (`transitionUploadLifecycle` in `postgresUploadLifecycleRepository.js`)
-    // and never overwritten afterward. A `file_policy_status = 'passed'` file
-    // always has a non-null `verified_checksum` in production, so it must be
-    // populated here too, or the query's checksum-scoped exclusion can never
-    // match anything.
+    // and never overwritten afterward. A confirmed file carries its full
+    // verified object-version identity (the Gate A state/fact consistency
+    // constraint requires it), so it is populated here too; pre-confirmation
+    // states carry only what that constraint allows for them.
+    const confirmedFacts = uploadState === "confirmed" || uploadState === "policy_blocked";
+    const objectVersionId = uploadState === "reserved" || uploadState === "upload_started" ? null : `ov-${intakeFileId}`;
     await client.query(
       `INSERT INTO kai.intake_files (
          intake_file_id, intake_batch_id, organization_id, original_filename, safe_filename,
-         checksum, verified_checksum, hash_algorithm, force_new_version, processing_status, parse_status,
-         file_policy_status, created_at
+         checksum, hash_algorithm, force_new_version, processing_status, parse_status,
+         file_policy_status, upload_state, object_version_id, verified_checksum, verified_size_bytes,
+         verified_at, upload_state_changed_at, upload_expires_at, created_at
        )
-       VALUES ($1::uuid, $2::uuid, $3::uuid, 'fixture', 'fixture', $4, $4, 'sha256', true,
-               'quarantined', 'quarantined', $5, $6::timestamptz)`,
-      [intakeFileId, BATCH, organizationId, checksum, filePolicyStatus, createdAt],
+       VALUES ($1::uuid, $2::uuid, $3::uuid, 'fixture', 'fixture', $4, 'sha256', true,
+               'quarantined', 'quarantined', $5, $6, $7, $8, $9::bigint,
+               $10::timestamptz, $11::timestamptz, $11::timestamptz + interval '24 hours', $11::timestamptz)`,
+      [
+        intakeFileId,
+        BATCH,
+        organizationId,
+        checksum,
+        filePolicyStatus,
+        uploadState,
+        objectVersionId,
+        confirmedFacts ? verifiedChecksum : null,
+        confirmedFacts ? 2048 : null,
+        confirmedFacts ? createdAt : null,
+        createdAt,
+      ],
     );
   }
 
   async function seedParserRun(client, { organizationId, intakeFileId, checksum, parserStatus, retryCount = 0, now = timeOffset(0) }) {
     const result = await client.query(
+      // Terminal statuses carry exactly the facts the P1-02 state/fact
+      // consistency constraint requires of them.
       `INSERT INTO kai.intake_parser_runs (
          organization_id, intake_file_id, parser_name, parser_version, checksum,
-         parser_status, retry_count, started_at, created_at
+         parser_status, retry_count, started_at, created_at, completed_at, error_code, error_message_safe
        )
-       VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8::timestamptz, $8::timestamptz)
+       VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8::timestamptz, $8::timestamptz,
+               CASE WHEN $6 IN ('failed', 'cancelled') THEN $8::timestamptz END,
+               CASE WHEN $6 = 'failed' THEN 'safe_parser_error' END,
+               CASE WHEN $6 = 'failed' THEN 'Deterministic profiling could not safely profile this file.' END)
        RETURNING parser_run_id::text AS parser_run_id`,
       [organizationId, intakeFileId, PARSER.parserName, PARSER.parserVersion, checksum, parserStatus, retryCount, now],
     );
@@ -116,9 +146,11 @@ async function runSuite() {
       `INSERT INTO kai.data_dictionaries (
          organization_id, intake_file_id, file_profile_id, profile_canonical_sha256, created_at
        )
-       VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5::timestamptz)
+       SELECT $1::uuid, $2::uuid, $3::uuid, p.profile_canonical_sha256, $4::timestamptz
+         FROM kai.intake_file_profiles p
+        WHERE p.file_profile_id = $3::uuid
        RETURNING data_dictionary_id::text AS data_dictionary_id`,
-      [organizationId, intakeFileId, fileProfileId, "a".repeat(64), now],
+      [organizationId, intakeFileId, fileProfileId, now],
     );
     return result.rows[0].data_dictionary_id;
   }
@@ -128,8 +160,10 @@ async function runSuite() {
       `INSERT INTO kai.intake_sensitivity_profiles (
          organization_id, intake_file_id, file_profile_id, data_dictionary_id, profile_canonical_sha256, created_at
        )
-       VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6::timestamptz)`,
-      [organizationId, intakeFileId, fileProfileId, dataDictionaryId, "a".repeat(64), now],
+       SELECT $1::uuid, $2::uuid, $3::uuid, $4::uuid, p.profile_canonical_sha256, $5::timestamptz
+         FROM kai.intake_file_profiles p
+        WHERE p.file_profile_id = $3::uuid`,
+      [organizationId, intakeFileId, fileProfileId, dataDictionaryId, now],
     );
   }
 
@@ -257,6 +291,51 @@ async function runSuite() {
       true,
       "a historical running run under a SUPERSEDED checksum must never block the file's current identity",
     );
+  });
+
+  test("eligibility: only a confirmed upload with passed file policy and a consistent verified identity is selected", async () => {
+    await resetTables();
+
+    const ORG = "00000000-0000-4000-8000-00000000a003";
+    const fileFor = (index) => `30000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
+    const cases = [
+      { key: "confirmedPassed", uploadState: "confirmed", filePolicyStatus: "passed", selected: true },
+      { key: "confirmedPending", uploadState: "confirmed", filePolicyStatus: "pending", selected: false },
+      { key: "confirmedBlocked", uploadState: "confirmed", filePolicyStatus: "blocked", selected: false },
+      { key: "confirmedFailed", uploadState: "confirmed", filePolicyStatus: "failed", selected: false },
+      { key: "reservedPassed", uploadState: "reserved", filePolicyStatus: "passed", selected: false },
+      { key: "uploadStartedPassed", uploadState: "upload_started", filePolicyStatus: "passed", selected: false },
+      { key: "uploadedUnconfirmedPassed", uploadState: "uploaded_unconfirmed", filePolicyStatus: "passed", selected: false },
+      { key: "policyBlockedPassed", uploadState: "policy_blocked", filePolicyStatus: "passed", selected: false },
+      { key: "abandonedPassed", uploadState: "abandoned", filePolicyStatus: "passed", selected: false },
+      { key: "expiredPassed", uploadState: "expired", filePolicyStatus: "passed", selected: false },
+      {
+        key: "confirmedPassedStaleVerifiedChecksum",
+        uploadState: "confirmed",
+        filePolicyStatus: "passed",
+        verifiedChecksum: "f".repeat(64),
+        selected: false,
+      },
+    ];
+
+    await withClient(async (client) => {
+      for (const [index, entry] of cases.entries()) {
+        // eslint-disable-next-line no-await-in-loop
+        await seedIntakeFile(client, {
+          intakeFileId: fileFor(index),
+          organizationId: ORG,
+          checksum: checksumFor(index),
+          filePolicyStatus: entry.filePolicyStatus,
+          uploadState: entry.uploadState,
+          ...(entry.verifiedChecksum ? { verifiedChecksum: entry.verifiedChecksum } : {}),
+        });
+      }
+    });
+
+    const selected = new Set((await listActionableKaiP1WorkCandidates(pool)).map((row) => row.intake_file_id));
+    for (const [index, entry] of cases.entries()) {
+      assert.equal(selected.has(fileFor(index)), entry.selected, entry.key);
+    }
   });
 
   test("J: every candidate carries its own persisted organization_id/intake_file_id across two organizations", async () => {

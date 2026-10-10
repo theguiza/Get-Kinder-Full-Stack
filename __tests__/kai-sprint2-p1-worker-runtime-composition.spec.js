@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 
 import {
   KAI_P1_WORKER_SYNTHETIC_ACTOR_CONTEXT,
+  processKaiP1IntakeFile,
   runKaiP1WorkerTick,
 } from "../Backend/kai/parsing/p1WorkerRuntime.js";
 import { registerKaiP1WorkerCron } from "../Backend/kai/parsing/p1WorkerCron.js";
@@ -596,4 +597,163 @@ test("E. P1-06 boundary: no P1-06 seam is ever imported or reachable from the ru
     assert.doesNotMatch(line, /createSensitivityReviewQueueItem|kaiReviewQueueService|review-?queue/i);
   }
   assert.doesNotMatch(source, /createSensitivityReviewQueueItem\s*\(/);
+});
+
+function completedChainDependencies(calls) {
+  return {
+    env: ENABLED_ENV,
+    activateParserProfileWorkForIntakeFile: fakeCompletedActivation(calls.activation),
+    createDraftDataDictionary: async (input) => {
+      calls.dictionary.push(input);
+      return { ok: true, data: { dictionary: { data_dictionary_id: DATA_DICTIONARY_ID } }, error: null };
+    },
+    persistIntakeSensitivityProfile: async (input) => {
+      calls.sensitivity.push(input);
+      return { ok: true, data: { sensitivityProfile: { intake_sensitivity_profile_id: "sp-1" } }, error: null };
+    },
+    createProductionMetadataOnlyAudit: () => ({ prepareMetadataOnlyAudit: () => ({ ok: true, publish: async () => {} }) }),
+    now: () => "2026-10-10T12:00:00.000Z",
+  };
+}
+
+function emptyCalls() {
+  return { activation: [], dictionary: [], sensitivity: [] };
+}
+
+test("shared file operation: either feature gate disabled => feature_disabled with zero activation or downstream work", async () => {
+  for (const env of [
+    { ...ENABLED_ENV, KAI_SPRINT2_ENABLED: "false" },
+    { ...ENABLED_ENV, KAI_WORKER_ENABLED: "false" },
+    {},
+  ]) {
+    const calls = emptyCalls();
+    const result = await processKaiP1IntakeFile(
+      { organizationId: ORG_A, intakeFileId: "file-1" },
+      { ...completedChainDependencies(calls), env },
+    );
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "feature_disabled");
+    assert.equal(calls.activation.length, 0);
+    assert.equal(calls.dictionary.length, 0);
+    assert.equal(calls.sensitivity.length, 0);
+  }
+});
+
+test("shared file operation: accepts only file identity - a caller cannot supply retry, an actor, or any eligibility fact", async () => {
+  for (const input of [
+    { organizationId: ORG_A, intakeFileId: "file-1", retry: true },
+    { organizationId: ORG_A, intakeFileId: "file-1", actorContext: { actorType: "human", actorUserId: "u-1" } },
+    { organizationId: ORG_A, intakeFileId: "file-1", filePolicyStatus: "passed" },
+    { organizationId: ORG_A, intakeFileId: "file-1", uploadState: "confirmed" },
+    { organizationId: ORG_A },
+    { intakeFileId: "file-1" },
+    { organizationId: "", intakeFileId: "file-1" },
+    null,
+    [ORG_A, "file-1"],
+  ]) {
+    const calls = emptyCalls();
+    const result = await processKaiP1IntakeFile(input, completedChainDependencies(calls));
+    assert.equal(result.ok, false, JSON.stringify(input));
+    assert.equal(result.error.code, "validation_blocker", JSON.stringify(input));
+    assert.equal(calls.activation.length, 0);
+  }
+});
+
+test("shared file operation: runs P1-03 -> P1-04 -> P1-05 with the fixed system actor, retry:false, and forwards only a narrowing expectation", async () => {
+  const calls = emptyCalls();
+  const expectedFileFacts = { objectVersionId: "ov-1", verifiedChecksum: "a".repeat(64), verifiedSizeBytes: 57 };
+  const result = await processKaiP1IntakeFile(
+    { organizationId: ORG_A, intakeFileId: "file-1", expectedFileFacts },
+    completedChainDependencies(calls),
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.data.organizationId, ORG_A);
+  assert.equal(result.data.intakeFileId, "file-1");
+  assert.equal(result.data.stoppedAt, undefined);
+  assert.equal(result.data.dataDictionary.ok, true);
+  assert.equal(result.data.sensitivityProfile.ok, true);
+
+  assert.deepEqual(calls.activation, [{
+    organizationId: ORG_A,
+    intakeFileId: "file-1",
+    actorContext: KAI_P1_WORKER_SYNTHETIC_ACTOR_CONTEXT,
+    retry: false,
+    expectedFileFacts,
+  }]);
+  assert.equal(calls.dictionary[0].fileProfileId, OUTPUT_PROFILE_ID);
+  assert.equal(calls.sensitivity[0].dataDictionaryId, DATA_DICTIONARY_ID);
+
+  const withoutExpectation = emptyCalls();
+  await processKaiP1IntakeFile({ organizationId: ORG_A, intakeFileId: "file-1" }, completedChainDependencies(withoutExpectation));
+  assert.equal("expectedFileFacts" in withoutExpectation.activation[0], false);
+});
+
+test("shared file operation: stoppedAt names the stage a chain stopped at, and a downstream failure never re-runs P1-03", async () => {
+  const notCompleted = emptyCalls();
+  const notEligible = await processKaiP1IntakeFile(
+    { organizationId: ORG_A, intakeFileId: "file-1" },
+    {
+      ...completedChainDependencies(notCompleted),
+      activateParserProfileWorkForIntakeFile: async (input) => {
+        notCompleted.activation.push(input);
+        return { ok: true, data: { activated: false, reason: "not_eligible_for_p1" }, error: null };
+      },
+    },
+  );
+  assert.equal(notEligible.data.stoppedAt, "parser_profile_activation");
+  assert.equal(notCompleted.dictionary.length, 0);
+
+  const dictionaryFails = emptyCalls();
+  const p104 = await processKaiP1IntakeFile(
+    { organizationId: ORG_A, intakeFileId: "file-1" },
+    {
+      ...completedChainDependencies(dictionaryFails),
+      createDraftDataDictionary: async (input) => {
+        dictionaryFails.dictionary.push(input);
+        return { ok: false, data: null, error: { code: "validation_blocker" } };
+      },
+    },
+  );
+  assert.equal(p104.data.stoppedAt, "draft_data_dictionary");
+  assert.equal(dictionaryFails.activation.length, 1);
+  assert.equal(dictionaryFails.dictionary.length, 1);
+  assert.equal(dictionaryFails.sensitivity.length, 0);
+
+  const sensitivityFails = emptyCalls();
+  const p105 = await processKaiP1IntakeFile(
+    { organizationId: ORG_A, intakeFileId: "file-1" },
+    {
+      ...completedChainDependencies(sensitivityFails),
+      persistIntakeSensitivityProfile: async (input) => {
+        sensitivityFails.sensitivity.push(input);
+        return { ok: false, data: null, error: { code: "system_error" } };
+      },
+    },
+  );
+  assert.equal(p105.data.stoppedAt, "persist_intake_sensitivity_profile");
+  assert.equal(sensitivityFails.activation.length, 1);
+  assert.equal(sensitivityFails.sensitivity.length, 1);
+});
+
+test("the scheduled tick delegates each candidate to the same shared file operation, in candidate order", async () => {
+  const tickCalls = emptyCalls();
+  const tick = await runKaiP1WorkerTick({
+    ...completedChainDependencies(tickCalls),
+    listActionableKaiP1WorkCandidates: async () => [
+      { organization_id: ORG_B, intake_file_id: "file-2" },
+      { organization_id: ORG_A, intake_file_id: "file-1" },
+    ],
+  });
+
+  const directCalls = emptyCalls();
+  const direct = [
+    await processKaiP1IntakeFile({ organizationId: ORG_B, intakeFileId: "file-2" }, completedChainDependencies(directCalls)),
+    await processKaiP1IntakeFile({ organizationId: ORG_A, intakeFileId: "file-1" }, completedChainDependencies(directCalls)),
+  ];
+
+  assert.equal(tick.ok, true);
+  assert.deepEqual(tick.data.activated, direct.map((entry) => entry.data));
+  assert.deepEqual(tickCalls, directCalls);
+  assert.deepEqual(tickCalls.activation.map((call) => call.intakeFileId), ["file-2", "file-1"]);
 });

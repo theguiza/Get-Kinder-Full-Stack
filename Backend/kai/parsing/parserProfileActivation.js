@@ -5,6 +5,30 @@ import { createP1ObjectVersionByteSource } from "./p1ObjectVersionByteSource.js"
 import { createProductionMetadataOnlyAudit } from "../services/kaiMetadataOnlyAuditComposition.js";
 import { getScopedIntakeFileParserProfileEligibilityFacts } from "../db/kaiIntakeQueries.js";
 
+const CHECKSUM_PATTERN = /^[a-f0-9]{64}$/;
+const EXPECTED_FILE_FACT_KEYS = Object.freeze(["objectVersionId", "verifiedChecksum", "verifiedSizeBytes"]);
+
+/**
+ * An optional expectation of the exact confirmed object version a trusted
+ * internal caller observed (for example the server-side confirmation result).
+ * It can only narrow eligibility: it never substitutes for, or overrides, the
+ * authoritative facts re-read below.
+ */
+function isExpectedFileFacts(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const keys = Object.keys(value);
+  if (keys.length !== EXPECTED_FILE_FACT_KEYS.length) return false;
+  if (!EXPECTED_FILE_FACT_KEYS.every((key) => keys.includes(key))) return false;
+  return (
+    typeof value.objectVersionId === "string"
+    && value.objectVersionId.length > 0
+    && typeof value.verifiedChecksum === "string"
+    && CHECKSUM_PATTERN.test(value.verifiedChecksum)
+    && Number.isSafeInteger(value.verifiedSizeBytes)
+    && value.verifiedSizeBytes >= 1
+  );
+}
+
 /**
  * KAI P1 synthetic-production activation entrypoint.
  *
@@ -28,7 +52,7 @@ import { getScopedIntakeFileParserProfileEligibilityFacts } from "../db/kaiIntak
  * existing P1 queue/claim/retry contract and audit machinery exactly.
  */
 export async function activateParserProfileWorkForIntakeFile(
-  { organizationId, intakeFileId, actorContext, retry = false } = {},
+  { organizationId, intakeFileId, actorContext, retry = false, expectedFileFacts } = {},
   dependencies = {},
 ) {
   const env = dependencies.env || process.env;
@@ -39,6 +63,9 @@ export async function activateParserProfileWorkForIntakeFile(
     return { ok: false, data: null, error: { code: "validation_blocker" } };
   }
   if (typeof intakeFileId !== "string" || intakeFileId.length === 0) {
+    return { ok: false, data: null, error: { code: "validation_blocker" } };
+  }
+  if (expectedFileFacts !== undefined && !isExpectedFileFacts(expectedFileFacts)) {
     return { ok: false, data: null, error: { code: "validation_blocker" } };
   }
 
@@ -64,27 +91,52 @@ export async function activateParserProfileWorkForIntakeFile(
     return { ok: false, data: null, error: { code: "not_found" } };
   }
 
-  // The authoritative boundary this package consumes: only a file whose Gate C
-  // confirmation/security/policy path has already reached the terminal `passed`
-  // file_policy_status is eligible for P1. This is the existing lifecycle value
-  // defined by `postgresUploadLifecycleRepository.js`'s
-  // `POLICY_DECISION_OUTCOMES.passed`, not a value invented by this package.
-  if (facts.file_policy_status !== "passed") {
+  // The authoritative boundary this package consumes: only a `confirmed` upload
+  // whose Gate C confirmation/security/policy path has already reached the
+  // terminal `passed` file_policy_status is eligible for P1. Both are existing
+  // lifecycle values defined by `postgresUploadLifecycleRepository.js`
+  // (`POLICY_DECISION_OUTCOMES.passed` binds `passed` to `confirmed`), not
+  // values invented by this package. Neither is ever accepted from the caller.
+  if (facts.upload_state !== "confirmed" || facts.file_policy_status !== "passed") {
     return {
       ok: true,
-      data: { activated: false, reason: "not_eligible_for_p1", file_policy_status: facts.file_policy_status },
+      data: {
+        activated: false,
+        reason: "not_eligible_for_p1",
+        upload_state: facts.upload_state,
+        file_policy_status: facts.file_policy_status,
+      },
       error: null,
     };
   }
 
+  // The confirmed object version must carry its verified identity, and the
+  // verified checksum must still equal the declared checksum confirmation
+  // bound it to (`transitionUploadLifecycle` only confirms when they match).
+  // The parser-run identity is derived from this verified checksum.
   if (
     typeof facts.object_version_id !== "string"
+    || facts.object_version_id.length === 0
     || typeof facts.verified_checksum !== "string"
+    || !CHECKSUM_PATTERN.test(facts.verified_checksum)
+    || facts.checksum !== facts.verified_checksum
     || !Number.isSafeInteger(facts.verified_size_bytes)
+    || facts.verified_size_bytes < 1
     || typeof facts.mime_type !== "string"
     || typeof facts.file_extension !== "string"
   ) {
     return { ok: false, data: null, error: { code: "validation_blocker" } };
+  }
+
+  if (
+    expectedFileFacts !== undefined
+    && (
+      expectedFileFacts.objectVersionId !== facts.object_version_id
+      || expectedFileFacts.verifiedChecksum !== facts.verified_checksum
+      || expectedFileFacts.verifiedSizeBytes !== facts.verified_size_bytes
+    )
+  ) {
+    return { ok: false, data: null, error: { code: "conflict_current_state_changed" } };
   }
 
   const trustedFileFacts = {

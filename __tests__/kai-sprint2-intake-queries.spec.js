@@ -174,6 +174,13 @@ test("P1 worker candidate discovery sweeps every organization, bounded at 25, ex
   // scoped to any one organization.
   assert.match(queryText, /FROM kai\.intake_files f/);
   assert.match(queryText, /file_policy_status = 'passed'/);
+  // Only a confirmed upload with its verified object-version identity - the
+  // same persistent facts activation re-checks - can enter the window.
+  assert.match(queryText, /f\.upload_state = 'confirmed'/);
+  assert.match(queryText, /f\.object_version_id IS NOT NULL/);
+  assert.match(queryText, /f\.verified_checksum IS NOT NULL/);
+  assert.match(queryText, /f\.verified_size_bytes IS NOT NULL/);
+  assert.match(queryText, /f\.checksum = f\.verified_checksum/);
   // Satisfied automatic P1 work (a persisted P1-05 sensitivity profile) is
   // excluded so it can never permanently occupy the bounded window.
   assert.match(queryText, /NOT EXISTS[\s\S]*kai\.intake_sensitivity_profiles s[\s\S]*s\.organization_id = f\.organization_id[\s\S]*s\.intake_file_id = f\.intake_file_id/);
