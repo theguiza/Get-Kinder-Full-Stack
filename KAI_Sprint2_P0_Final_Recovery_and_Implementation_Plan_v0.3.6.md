@@ -35807,3 +35807,69 @@ test and build commands):**
   connection.
 
 **Status:** BROWSER_MIME_RESERVATION_NORMALIZATION_REPAIRED_LOCALLY.
+
+### Duplicate-resolution regression investigation (2026-10-10)
+
+**Owner direction (USER_CONFIRMED):** the October 9 duplicate-upload
+resolution worked and has since regressed; the reported live response is
+422 `VAL-IDEMP-006` / `duplicate_checksum` carrying
+`kai_intake_duplicate_resolution_v1`, `duplicate_in_batch`, a confirmed/passed
+existing file, and actions `use_existing_file`, `upload_new_intake_version`,
+`cancel`. Find and repair the regression locally, or report the missing
+runtime observation if no local defect is proven.
+
+**Starting state (TOOL_VERIFIED):** `main` at
+`52790fbca36f6a9aac1e54aec5747ed7753490b7`, clean; `2a7094e`, `72e9fbb`,
+`52790fb` are ancestors of HEAD and no later commit exists.
+
+**Findings (TOOL_VERIFIED):**
+- Since `2a7094e`, the only change to `frontend/KaiWebIntake.jsx`,
+  `frontend/kaiWebIntakeLogic.js`, `Backend/kai/routes/sprint2IntakeApi.js`,
+  `Backend/kai/services/kaiIntakeService.js`,
+  `Backend/kai/services/kaiIntakeDuplicateResolution.js`,
+  `frontend/ImpactEvidenceLibrary.jsx` and `frontend/knowledgeStudio/` is
+  `72e9fbb`'s confirm-only 409 handling and `52790fb`'s extension-first
+  `declaredMimeTypeForFile`. Neither alters `duplicateResolutionFromResult`,
+  `setDuplicateResolution`, `resolveDuplicate`, `duplicateResolutionView`,
+  the route `sanitizeDuplicateResolution`, or the service new-version path.
+- The reported payload satisfies every field the route sanitizer and
+  `duplicateResolutionFromResult` require, so the current source renders all
+  three server-listed actions for it.
+- The service runs extension/MIME pairing before the declared-checksum
+  check, so a response that reached `VAL-IDEMP-006` had already passed MIME
+  validation; the new-version request re-sends the same
+  `declaredMimeTypeForFile` value for the same selection.
+- `npm run build` output is byte-identical to the tracked
+  `public/js/bundles/entry.js` (no diff after rebuild).
+- Unmodified HEAD passes the real-PostgreSQL + headless-Chrome runner,
+  including the dialog test that renders the three actions from a
+  same-batch confirmed/passed duplicate and executes Cancel (no request),
+  Use existing file (file-detail GET, no reservation), new intake version
+  (one 201 reservation, confirmed, superseding the original), the stale 409
+  refresh, Continue upload, confirm-only retry, and blocked content.
+
+**Result:** no local code defect proven; no source, test, or bundle change.
+NOT_CONFIRMED: which bundle the affected browser executed, the production
+`ASSET_TAG`/served `entry.js`, what the UI displayed after the reported 422,
+and which action (if any) was chosen and what it returned.
+
+**Verification (TOOL_VERIFIED; loopback `DATABASE_URL` sentinel on every
+Node/npm command):**
+
+| Command | Pass | Fail | Skipped |
+| --- | --- | --- | --- |
+| `node --test __tests__/kai-sprint2-intake-duplicate-resolution.spec.js` | 23 | 0 | 0 |
+| `node --test __tests__/kai-web-intake-batch-idempotency-key.spec.js` | 6 | 0 | 0 |
+| `node --test __tests__/kai-sprint2-uat-enablement-frontend.spec.js` | 14 | 0 | 0 |
+| `node --test __tests__/kai-sprint2-pass2-metadata-intake-service.spec.js` | 64 | 0 | 0 |
+| `node --test __tests__/kai-sprint2-pass2-route-runtime.spec.js` | 38 | 0 | 0 |
+| `node --test __tests__/kai-sprint2-gate-c2a-signed-upload-confirmation.spec.js` | 26 | 0 | 0 |
+| `npm run verify:kai-sprint2-intake-duplicate-resolution-real-db` (runner-owned ephemeral loopback PostgreSQL 16 + headless Chrome) | 11 | 0 | 0 |
+| `npm run verify:kai-sprint2-api-contract` | 71 | 0 | 0 |
+| `npm run test:kai-sprint2-pass2` | 131 | 0 | 0 |
+| `npm run build` | n/a | n/a | n/a |
+
+**Status:** DUPLICATE_RESOLUTION_REGRESSION_NOT_REPRODUCED_LOCALLY_RUNTIME_OBSERVATION_REQUIRED.
+No push, deployment, production or shared database, cloud, feature-flag,
+tenant, credential, `.env`, schema/migration, or `00_KAI_CURRENT_STATE.md`
+change.
