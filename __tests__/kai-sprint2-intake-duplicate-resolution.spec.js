@@ -26,6 +26,7 @@ import {
   declaredMimeTypeForFile,
   duplicateResolutionFromResult,
   duplicateResolutionView,
+  fileExtensionOf,
   uploadUrlResultRequiresConfirmOnly,
 } from "../frontend/kaiWebIntakeLogic.js";
 
@@ -1178,21 +1179,104 @@ test("no source, source version, evidence, claim, or approval is created by any 
   assert.match(statements[2], /force_new_version,\s+original_intake_file_id,\s+supersedes_intake_file_id/);
 });
 
-test("the browser declares a server-allowed MIME for every supported type when the browser reports none", () => {
-  const expectations = {
-    "a.csv": "text/csv",
-    "a.xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    "a.md": "text/markdown",
-    "a.txt": "text/plain",
-    "a.pdf": "application/pdf",
-    "a.exe": "application/octet-stream",
-  };
-  for (const [name, mime] of Object.entries(expectations)) {
-    assert.equal(declaredMimeTypeForFile({ name, type: "" }), mime);
+test("the browser declares committed reservation MIME for supported P0 extensions regardless of File.type", () => {
+  const cases = [
+    ["normal csv", { name: "a.csv", type: "text/csv" }, ".csv", "text/csv"],
+    ["csv excel alias", { name: "a.csv", type: "application/vnd.ms-excel" }, ".csv", "text/csv"],
+    ["csv octet-stream alias", { name: "a.csv", type: "application/octet-stream" }, ".csv", "text/csv"],
+    ["csv empty browser MIME", { name: "a.csv", type: "" }, ".csv", "text/csv"],
+    [
+      "normal xlsx",
+      { name: "a.xlsx", type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" },
+      ".xlsx",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ],
+    ["xlsx empty browser MIME", { name: "a.xlsx", type: "" }, ".xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
+    ["xlsx unexpected browser MIME", { name: "a.xlsx", type: "application/octet-stream" }, ".xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"],
+    ["normal pdf", { name: "a.pdf", type: "application/pdf" }, ".pdf", "application/pdf"],
+    ["pdf empty browser MIME", { name: "a.pdf", type: "" }, ".pdf", "application/pdf"],
+    ["pdf unexpected browser MIME", { name: "a.pdf", type: "application/octet-stream" }, ".pdf", "application/pdf"],
+    ["txt", { name: "a.txt", type: "application/octet-stream" }, ".txt", "text/plain"],
+    ["md", { name: "a.md", type: "text/plain" }, ".md", "text/markdown"],
+    ["uppercase csv", { name: "A.CSV", type: "application/vnd.ms-excel" }, ".csv", "text/csv"],
+    ["uppercase pdf", { name: "A.PDF", type: "application/octet-stream" }, ".pdf", "application/pdf"],
+  ];
+  for (const [label, file, extension, mime] of cases) {
+    assert.equal(fileExtensionOf(file.name), extension, label);
+    assert.equal(declaredMimeTypeForFile(file), mime, label);
   }
-  assert.equal(declaredMimeTypeForFile({ name: "a.md", type: "text/plain" }), "text/plain");
+
+  assert.equal(fileExtensionOf("a"), "");
+  assert.equal(declaredMimeTypeForFile({ name: "a.exe", type: "application/x-msdownload" }), "application/x-msdownload");
+  assert.equal(declaredMimeTypeForFile({ name: "a.exe", type: "" }), "application/octet-stream");
+  assert.equal(declaredMimeTypeForFile({ name: "", type: "" }), "application/octet-stream");
   assert.equal(duplicateResolutionFromResult({ statusCode: 500, body: { data: { duplicate_resolution: {} } } }), null);
   assert.equal(duplicateResolutionFromResult({ statusCode: 422, body: { data: null } }), null);
+});
+
+test("browser-selected supported files reserve through the backend with committed MIME despite browser aliases", async () => {
+  const cases = [
+    ["csv normal", FORMATS[0], { name: "browser.csv", type: "text/csv" }, "text/csv"],
+    ["csv excel alias", FORMATS[0], { name: "browser.csv", type: "application/vnd.ms-excel" }, "text/csv"],
+    ["csv octet-stream alias", FORMATS[0], { name: "browser.csv", type: "application/octet-stream" }, "text/csv"],
+    ["csv empty", FORMATS[0], { name: "browser.csv", type: "" }, "text/csv"],
+    ["xlsx normal", FORMATS[1], { name: "browser.xlsx", type: FORMATS[1].mime }, FORMATS[1].mime],
+    ["xlsx empty", FORMATS[1], { name: "browser.xlsx", type: "" }, FORMATS[1].mime],
+    ["xlsx unexpected", FORMATS[1], { name: "browser.xlsx", type: "application/octet-stream" }, FORMATS[1].mime],
+    ["pdf normal", FORMATS[4], { name: "browser.pdf", type: "application/pdf" }, "application/pdf"],
+    ["pdf empty", FORMATS[4], { name: "browser.pdf", type: "" }, "application/pdf"],
+    ["pdf unexpected", FORMATS[4], { name: "browser.pdf", type: "application/octet-stream" }, "application/pdf"],
+    ["txt", FORMATS[3], { name: "browser.txt", type: "application/octet-stream" }, "text/plain"],
+    ["md", FORMATS[2], { name: "browser.md", type: "text/plain" }, "text/markdown"],
+    ["uppercase csv", FORMATS[0], { name: "BROWSER.CSV", type: "application/vnd.ms-excel" }, "text/csv"],
+    ["uppercase pdf", FORMATS[4], { name: "BROWSER.PDF", type: "application/octet-stream" }, "application/pdf"],
+  ];
+
+  for (const [label, format, file, expectedMime] of cases) {
+    const store = createSyntheticIntakeStore();
+    const result = await reserve(store, {
+      format,
+      filename: file.name,
+      extension: fileExtensionOf(file.name),
+      mime: declaredMimeTypeForFile(file),
+      key: `kai-browser-mime-${label.replace(/\W+/g, "-")}`,
+    });
+    assert.equal(result.ok, true, label);
+    const row = store.row(result.data.intake_file_id);
+    assert.equal(row.file_extension, format.extension, label);
+    assert.equal(row.mime_type, expectedMime, label);
+  }
+
+  const unsupportedStore = createSyntheticIntakeStore();
+  const unsupportedFile = { name: "browser.foo", type: "application/octet-stream" };
+  const unsupported = await reserve(unsupportedStore, {
+    format: FORMATS[0],
+    filename: unsupportedFile.name,
+    extension: fileExtensionOf(unsupportedFile.name),
+    mime: declaredMimeTypeForFile(unsupportedFile),
+    key: "kai-browser-mime-unsupported-extension",
+  });
+  assert.equal(unsupported.ok, false);
+  assert.equal(unsupported.blockers[0].validator_key, "VAL-STO-005");
+  assert.equal(unsupported.blockers[0].blocking_reason, "unsupported_mime_type");
+  assert.equal(unsupportedStore.rows.length, 0);
+
+  for (const [label, file] of [
+    ["missing filename", { name: "", type: "text/csv" }],
+    ["no extension", { name: "browser", type: "text/csv" }],
+  ]) {
+    const store = createSyntheticIntakeStore();
+    const result = await reserve(store, {
+      format: FORMATS[0],
+      filename: file.name,
+      extension: fileExtensionOf(file.name),
+      mime: declaredMimeTypeForFile(file),
+      key: `kai-browser-mime-invalid-${label.replace(/\W+/g, "-")}`,
+    });
+    assert.equal(result.ok, false, label);
+    assert.equal(result.error.status, 422, label);
+    assert.equal(store.rows.length, 0, label);
+  }
 });
 
 test("a retried or continued upload whose record already left \"reserved\" is confirmed, never stopped at the signing 409", () => {

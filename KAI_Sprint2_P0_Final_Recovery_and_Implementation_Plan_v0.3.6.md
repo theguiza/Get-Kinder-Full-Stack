@@ -35698,3 +35698,112 @@ renames. `git diff --check` is clean.
 **Status:** DUPLICATE_UPLOAD_RESOLUTION_REAL_POSTGRES_PROVEN_AND_RETRY_REPAIRED_LOCALLY.
 No push, deployment, production or shared database, cloud, feature-flag, tenant,
 credential, `.env`, schema/migration, index, or `00_KAI_CURRENT_STATE.md` change.
+
+### Browser MIME reservation normalization repair (2026-10-10)
+
+**Owner direction (USER_CONFIRMED):** repair the KAI file-intake MIME mismatch
+without broadening the backend allowlist, preserve the tracked Vite bundle,
+inspect the reservation-to-upload and security-check paths, reconcile validator
+identity, add regression coverage including a browser-selection to backend
+reservation assembled test, rebuild, verify, and stop locally.
+
+**Starting state (TOOL_VERIFIED):** `main` at
+`72e9fbb51f11ddd8ac090a77281e2042bf1890e3`, clean.
+
+**Authority and root cause (TOOL_VERIFIED):**
+- `frontend/kaiWebIntakeLogic.js` previously sent a browser-reported
+  `File.type` whenever it was nonempty and used extension fallback only for an
+  empty browser MIME.
+- `Backend/kai/services/kaiIntakeService.js` enforces the committed
+  metadata-only extension/MIME matrix before inserting a reservation. The
+  accepted pairings used by the repair are `.csv -> text/csv`, `.xlsx ->
+  application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`, `.md ->
+  text/markdown`, `.txt -> text/plain`, and `.pdf -> application/pdf`.
+- Therefore browser aliases such as CSV `application/vnd.ms-excel` or
+  `application/octet-stream`, and PDF/XLSX `application/octet-stream`, produced
+  contract-invalid reservation payloads even for supported filenames and bytes.
+
+**Repair (TOOL_VERIFIED):**
+- `frontend/kaiWebIntakeLogic.js` now derives the reservation MIME declaration
+  from the normalized supported P0 extension before falling back to
+  browser-reported `File.type` for unsupported extensions.
+- Unsupported extensions are not added or accepted. Backend strict pairing,
+  file-size, authorization, quarantine, idempotency, checksum, upload lifecycle,
+  and audit controls are unchanged.
+- `public/js/bundles/entry.js` was rebuilt from the Vite source. The built
+  bundle contains the same extension-first canonical MIME map and fallback
+  order.
+- `__tests__/kai-sprint2-intake-duplicate-resolution.spec.js` adds focused
+  frontend cases and an assembled synthetic path:
+  browser-selected file metadata -> frontend reservation payload fields ->
+  backend `reserveIntakeFileMetadata` validator.
+
+**Before/after behavior (TOOL_VERIFIED):**
+- Before: `.csv` with `application/vnd.ms-excel` or
+  `application/octet-stream`, `.xlsx` with an empty or unexpected browser MIME,
+  and `.pdf` with `application/octet-stream` could be sent to the backend as
+  declared file MIME and fail 422 `unsupported_mime_type`.
+- After: supported extensions declare the committed reservation MIME regardless
+  of browser alias or empty `File.type`; uppercase supported extensions are
+  normalized; unsupported extensions, missing filenames, and missing extensions
+  still fail closed at backend validation.
+
+**Security-check path (TOOL_VERIFIED / NOT_CONFIRMED):**
+- The upload handoff uses trusted stored reservation metadata for signed upload
+  Content-Type and ignores client-supplied storage/MIME overrides; existing
+  Gate C-2A tests remain green.
+- Post-upload file policy does not trust the normalized reservation MIME as
+  proof of content. The inspected path reads confirmed object facts, exact
+  generation/checksum/size metadata, and actual bytes, then runs bounded
+  type-agreement and format-specific checks before transitioning
+  `file_policy_status`.
+- The reported `attendance_renamed.pdf` and
+  `fraserview_budget_summary_2025_26.xlsx` post-upload Security Check failures
+  were not tied to live rows or raw client content in this local repair. Their
+  exact persisted failure reasons remain NOT_CONFIRMED. Because the owner
+  reported they uploaded and then failed Security Check, the reservation MIME
+  mismatch is not confirmed as their direct cause.
+
+**Validator identity reconciliation (TOOL_VERIFIED / NOT_CONFIRMED):**
+- The Backend Contract text describes `VAL-INT-001` as file-policy validation
+  and `VAL-STO-005` as CSV formula-injection protection.
+- The later living ExecPlan runtime-alignment entry explicitly preserves
+  runtime `unsupportedMimeBlocker` as `VAL-STO-005` with
+  `blocking_reason = unsupported_mime_type`.
+- Current runtime, registry-adjacent tests, and route/service expectations use
+  `VAL-STO-005` for reservation unsupported MIME. This package preserved that
+  backend identifier and repaired the frontend boundary independently. Owner
+  decision remains required to rename the backend validator identity without
+  conflicting with the accepted runtime-alignment entry.
+
+**Verification (TOOL_VERIFIED; loopback `DATABASE_URL` sentinel on Node/npm
+test and build commands):**
+
+| Command | Pass | Fail | Skipped | Notes |
+| --- | --- | --- | --- | --- |
+| `node --test __tests__/kai-sprint2-intake-duplicate-resolution.spec.js` | 23 | 0 | 0 | Includes assembled browser-to-backend reservation regression |
+| `node --test __tests__/kai-sprint2-uat-enablement-frontend.spec.js` | 14 | 0 | 0 | Frontend source contract |
+| `node --test __tests__/kai-web-intake-batch-idempotency-key.spec.js` | 6 | 0 | 0 | Reservation payload/idempotency boundary |
+| `node --test __tests__/kai-sprint2-pass2-metadata-intake-service.spec.js` | 64 | 0 | 0 | Backend reservation matrix and blockers |
+| `node --test __tests__/kai-sprint2-pass2-route-runtime.spec.js` | 38 | 0 | 0 | Mounted route behavior |
+| `node --test __tests__/kai-sprint2-gate-c2a-signed-upload-confirmation.spec.js` | 26 | 0 | 0 | Signed upload trusted metadata |
+| `node --test __tests__/kai-sprint2-bounded-file-security-assessor.spec.js` | 7 | 0 | 0 | Actual-file policy assessment |
+| `node --test __tests__/kai-sprint2-formula-injection-boundary.spec.js` | 9 | 0 | 0 | Formula-injection protections |
+| `node --test __tests__/kai-sprint2-batch-files-route.spec.js` | 18 | 0 | 0 | Initial sandbox run hit localhost `listen EPERM`; localhost-capable rerun passed |
+| `node --test __tests__/kai-sprint2-file-policy-block-route.spec.js` | 17 | 0 | 0 | Initial sandbox run hit localhost `listen EPERM`; localhost-capable rerun passed |
+| `node --test __tests__/kai-sprint2-p0-acceptance.spec.js` | 63 | 0 | 0 | Initial sandbox run hit localhost `listen EPERM`; localhost-capable rerun passed |
+| `npm run test:kai-sprint2-pass2` | 131 | 0 | 0 | Aggregate Pass 2 suite |
+| `npm run verify:kai-sprint2-api-contract` | 71 | 0 | 0 | Initial sandbox run hit localhost `listen EPERM`; localhost-capable rerun passed |
+| `npm run build` | n/a | n/a | n/a | Vite build succeeded; `public/js/bundles/entry.js` updated |
+
+**Limitations (NOT_CONFIRMED):**
+- Production is not changed or verified. No deployment, push, cloud access,
+  production mutation, feature-flag change, credential access, schema/database
+  change, Current State update, or Implementation Baseline update occurred.
+- The exact live failure reason for the two owner-named files is not confirmed
+  because this repair did not access raw client content or production records.
+- One local `node -e` package-script listing command ran without the sentinel
+  prefix. It read `package.json`, imported no database module, and made no
+  connection.
+
+**Status:** BROWSER_MIME_RESERVATION_NORMALIZATION_REPAIRED_LOCALLY.

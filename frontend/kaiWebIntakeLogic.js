@@ -155,9 +155,8 @@ export function resolveFileReservationIdempotencyKey(
   return { selectionId, intakeBatchId, checksum, duplicateOfIntakeFileId, key: `file-${mintKey()}` };
 }
 
-// Server-allowed MIME for each supported extension, used only when the
-// browser reports no type for the selected file (common for .md and .txt).
-// A browser-reported type is always sent as reported.
+// Server-allowed reservation MIME for each supported P0 extension. Browser
+// File.type varies by OS/browser and is not the file-policy authority.
 const MIME_TYPE_BY_SUPPORTED_EXTENSION = Object.freeze({
   ".csv": "text/csv",
   ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -167,8 +166,10 @@ const MIME_TYPE_BY_SUPPORTED_EXTENSION = Object.freeze({
 });
 
 export function declaredMimeTypeForFile(file) {
+  const supportedMime = MIME_TYPE_BY_SUPPORTED_EXTENSION[fileExtensionOf(file?.name)];
+  if (supportedMime) return supportedMime;
   if (typeof file?.type === "string" && file.type.length > 0) return file.type;
-  return MIME_TYPE_BY_SUPPORTED_EXTENSION[fileExtensionOf(file?.name)] || "application/octet-stream";
+  return "application/octet-stream";
 }
 
 // The server signs an upload only for a record still in "reserved". A 409
