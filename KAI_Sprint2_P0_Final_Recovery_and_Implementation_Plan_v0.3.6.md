@@ -36676,3 +36676,131 @@ runner-owned ephemeral loopback PostgreSQL and synthetic data):**
 No push, deployment, shared or production database, cloud, feature-flag,
 tenant, membership, credential, `.env`, schema, route, frontend, or
 `00_KAI_CURRENT_STATE.md` change.
+
+### Mixed-role sensitivity review from client Knowledge Studio Reviews (2026-10-11)
+
+**Owner authorization (USER_CONFIRMED):** one bounded frontend package:
+restore the existing human sensitivity review for an already-authorized global
+GK reviewer whose active membership is a client role, from client Knowledge
+Studio -> Reviews, reusing the existing routes, request builders, validators,
+and form. No full GK Studio mount, no authorization or backend change, no new
+review stage or endpoint, no direct P1-07 call, no change to P1-07 eligibility
+or failed-handoff semantics.
+
+**Starting state (TOOL_VERIFIED):** `main` at
+`cabd3a52baf7025173bc006ea8c26ac5f8171ab3`, clean; `fa356f5`, `60b81fc`,
+`4aafed1`, `cabd3a5` are ancestors.
+
+**Root cause (TOOL_VERIFIED):** the client Studio mounts for this actor
+(`ImpactLibraryApp.jsx`, no `internalKnowledgeWorkspace`), and its Reviews tab
+received only the review-cockpit capabilities answer as a text note
+(`getKinderReviewAccessText`). There was no client-side connection from a
+pipeline file (client-safe DTO: `intakeFileId` only) to the existing
+review-cockpit file -> profile lookup, profile detail, review-work, and
+decision routes, which already authorize this actor (`globalRolesOnly` reads;
+`combineGlobalRoles` writes after `4aafed1`). Separately,
+`useNeedsAttention` reset that answer in an effect, so the previous
+organization's answer was reported for one render after a switch.
+
+**Changes (TOOL_VERIFIED):**
+- `frontend/SensitivityReviewCardBody.jsx` (new): the GK Processing card's
+  detail/review-work/decision/form body moved verbatim (only props renamed;
+  start label configurable). `ImpactEvidenceLibrary.jsx` renders it; its
+  state, effects, handlers, and messages are unchanged.
+- `frontend/knowledgeStudio/ClientSensitivityReviewPanel.jsx` (new): on
+  explicit open, the existing lookup then profile detail; "Start review work"
+  -> existing review-work POST; decisions -> existing decision POST via
+  `buildSensitivityDecisionRequestBody` with the detail's queue `updated_at`;
+  re-read after every POST; pipeline refreshed after a recorded decision.
+  Reports `reviewed` + handoff `created`/`replayed`, `reviewed` + `not_created`
+  (error code shown; states a resubmission is a new superseding decision, not
+  a retry), `needs_more_information` (stays open), 409 (existing message), and
+  other errors. Late responses discarded (mounted ref + request sequence).
+- `ClientKnowledgeStudio.jsx`: "Review sensitivity & allowed use" on files
+  whose `currentStage` is `sensitivity_review`, only when the capabilities
+  answer is "allowed" for the selected organization; selection keyed to
+  organization + Project, cleared on leaving Reviews; panel keyed by
+  organization + Project + file. Note text no longer sends this actor
+  elsewhere for this review.
+- `clientEvidencePipelineLogic.js`: `sensitivityReviewActionAvailable`; the
+  "allowed" access text. `impactEvidenceLibraryLogic.js`:
+  `sensitivityReviewFormStateFromDecision`, `projectSensitivityDecisionResult`.
+- `useNeedsAttention.js`: the capabilities answer is keyed to its organization
+  and exposed with `sensitivityReviewAccessOrganizationId`;
+  `ImpactLibraryApp.jsx` passes it. Bundle rebuilt.
+- Tests: the reachability browser spec's old case 9 (gap demonstrated) is
+  replaced by cases 9-14; four source-pinning unit expectations updated to the
+  new structure; new unit tests for the helpers and the panel's request
+  boundary.
+
+**Before the change (TOOL_VERIFIED, unmodified bundle):** reachability spec
+9 pass, 6 fail - case 9 fails on the old note ("Contact a Get Kinder
+administrator"), with no action offered; cases 10-14 fail as dependents.
+
+**Browser and database acceptance (TOOL_VERIFIED, runner-owned loopback
+PostgreSQL, real Chrome, real routes/services, synthetic data; mixed actor =
+global `gk_reviewer`, active Org A `client_admin`):**
+- Case 9: client Studio tabs; action only on the 4 files at sensitivity review;
+  loading issues no review-cockpit read beyond the existing capabilities/queue
+  reads and no POST; no claim/evidence library, review-queue, sources, or
+  board-reporting request.
+- Case 10 (existing queue): open = lookup 200 + detail 200, zero POSTs, queue
+  item reused; `reviewed` = exactly one decision POST 200, re-read, pipeline
+  re-read; delta decisions +1, decision audit +1, lifecycle audit +1, source
+  candidate +1 (`needs_gk_review`, created by the mixed actor), source review
+  item +1; changed tables exactly `audit_events`,
+  `intake_sensitivity_review_decisions`, `intake_source_candidates`,
+  `review_queue_items`, `upload_lifecycle_audit` (zero sources, source
+  versions, evidence, claims, generated output, export, release authority);
+  queue `resolved/resolved`; `decided_by_role` `gk_reviewer`.
+- Case 11 (zero queue): open writes nothing; "Start review work" = one
+  review-work POST 201, one queue item and its `sensitivity_review_queue_item_created`
+  audit, no decision; revisit reuses it with zero POSTs; `reviewed` then hands
+  off one candidate.
+- Case 12: `needs_more_information` stays `open/needs_gk_review`, no
+  candidate; a decision made stale by another reviewer is refused 409, shown,
+  re-read, persists nothing, and is not retried.
+- Case 13: real `not_created` (P1-07 predicate failing in the throwaway DB):
+  one decision POST 200 and nothing else; decision +1, candidate 0; panel
+  shows the recorded decision and `validation_blocker`.
+- Case 14: an ordinary client gets no action, GK read, or write; a non-member
+  GK reviewer's lookup is 403; project change closes the panel; file change
+  replaces it; a held Org A detail response released after switching to Org B
+  populates nothing; no further Org A request; nothing written.
+- Cases 1-8 (existing GK Studio entry points, decisions, 409/422, client,
+  non-member, assistant, feature-disabled) pass unchanged.
+
+**Verification (TOOL_VERIFIED; loopback `DATABASE_URL` sentinel):**
+
+| Command | Pass | Fail | Skipped |
+| --- | --- | --- | --- |
+| sensitivity review reachability browser spec, unmodified bundle | 9 | 6 | 0 |
+| sensitivity review reachability browser spec, repaired bundle | 15 | 0 | 0 |
+| client evidence pipeline browser spec | 7 | 0 | 0 |
+| client Knowledge Studio browser spec | 6 | 0 | 0 |
+| P2-01 evidence extraction handoff browser spec | 5 | 0 | 0 |
+| P2-12 no-claim evidence review browser spec | 11 | 0 | 0 |
+| reviewed evidence claim proposal browser spec | 10 | 0 | 0 |
+| Web Intake Files rehydration browser spec (identical at clean `cabd3a5`) | 2 | 1 | 0 |
+| client pipeline, GK library, Studio tabs, Needs Attention, shell, client authorization, rehydration unit specs | 228 | 0 | 0 |
+| `npm run verify:kai-sprint2-api-contract` | 71 | 0 | 0 |
+| `npm run test:kai-sprint2` | 4713 | 0 | 89 |
+| `npm test` | 5402 | 0 | 100 |
+| `npm run build` (rebuild reproduces the committed bundle), `git diff --check` | ok | | |
+
+**NOT_CONFIRMED:**
+- Deployed behavior and the original screenshot account's roles, memberships,
+  and files.
+- Organization-switch isolation is also provided by the shell remounting the
+  client Studio while capabilities load; the browser case proves the outcome,
+  not which guard produced it. An authenticated-actor change reloads the
+  application and was not exercised separately.
+- Recovery of a committed decision whose handoff failed is not offered: a
+  resubmission records a superseding decision (stated in the panel).
+- P1-08 runner 17/19 (two failures at pre-repair HEAD) was not rerun; no
+  backend change here.
+
+**Status:** MIXED_ROLE_SENSITIVITY_REVIEW_FROM_CLIENT_REVIEWS_COMPLETE_LOCALLY_PRODUCTION_NOT_CONFIRMED.
+No push, deployment, shared or production database, cloud, feature-flag,
+tenant, membership, role, credential, `.env`, backend, schema, or
+`00_KAI_CURRENT_STATE.md` change.
