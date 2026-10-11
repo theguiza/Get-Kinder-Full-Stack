@@ -36804,3 +36804,89 @@ global `gk_reviewer`, active Org A `client_admin`):**
 No push, deployment, shared or production database, cloud, feature-flag,
 tenant, membership, role, credential, `.env`, backend, schema, or
 `00_KAI_CURRENT_STATE.md` change.
+
+### Client Knowledge Studio Reviews: no "no action" message beside an offered sensitivity review (2026-10-11)
+
+**Owner authorization (USER_CONFIRMED):** one bounded frontend messaging
+repair in client Knowledge Studio -> Reviews: when this actor is offered the
+existing "Review sensitivity & allowed use" action, the card must not also say
+"No action is currently required from you." No change to action visibility or
+authorization, file -> profile lookup, the shared form, review work, decisions,
+the P1-07 handoff, state isolation, GK Studio, or any backend, schema, or flag.
+
+**Starting state (TOOL_VERIFIED):** `main` at
+`91562abfeaafe8619d4a31033b0a4e622b5f8b2d`, clean; `8f98a9b` and `91562ab`
+present.
+
+**Root cause (TOOL_VERIFIED):** `ProjectReviews` rendered the no-action
+message from `clientCount > 0 && !canReviewFollowups` and `clientCount === 0`
+alone; neither considered `canReviewSensitivity` with
+`sensitivityReviewActionAvailable(file)`, which gates the per-file action
+rendered further down the same card.
+
+**Before the change (TOOL_VERIFIED, committed bundle):** the reachability spec
+with the new case 9 assertion ran 14 pass, 1 fail. Case 9 failed on "no
+contradictory no-action message beside the review action". The mixed-role
+Reviews card read "No action is currently required from you." directly above
+four "Review sensitivity & allowed use" buttons.
+
+**Changes (TOOL_VERIFIED):**
+- `clientEvidencePipelineLogic.js`: `reviewsTabMessages(view,
+  { canReviewFollowups, canReviewSensitivity })`. It counts offered sensitivity
+  reviews with the existing predicate, only when `canReviewSensitivity`.
+  With one or more: "Get Kinder sensitivity review needed", the file count, and
+  a pointer to the per-file action. Client follow-ups for another client
+  reviewer keep their text under the heading "Waiting for a client reviewer".
+  "No action is currently required from you." appears only when neither the
+  follow-up nor the sensitivity action applies. Other actors' text is
+  unchanged.
+- `ClientKnowledgeStudio.jsx`: `ProjectReviews` renders those messages in
+  place of the three `clientCount` blocks. Bundle rebuilt.
+- Tests: reachability spec gains a `cardText` reader and Reviews-card
+  assertions in cases 1, 9, and 14 (including the empty `PROJECT_2`); one new
+  unit test covers A-D in `kai-client-evidence-pipeline.spec.js`.
+
+**Acceptance (TOOL_VERIFIED, runner-owned loopback PostgreSQL, real Chrome,
+synthetic data):**
+- A (case 9, mixed role): the card shows the action, "Get Kinder sensitivity
+  review needed", and "4 files in this project are waiting for the Get Kinder
+  sensitivity review ...". It shows no no-action message and no "Your action
+  is needed".
+- B (cases 1 and 14, ordinary client): the card keeps "No action is currently
+  required from you.", with no sensitivity message or action. The existing
+  client boundary (no GK read, no write) still holds.
+- C (case 14, two-org reviewer on `PROJECT_2`, no files): no action and the
+  no-action message, with no fabricated sensitivity task. Unit coverage adds
+  source-review-only and failed files.
+- D (unit only; the runner seeds no client follow-ups and no fixture was
+  added): sensitivity + follow-ups for another reviewer gives "Waiting for a
+  client reviewer" and never "No action", "Your action is needed", or
+  "Answer the follow-up". Sensitivity + follow-ups this actor may answer
+  gives both action messages.
+- E: all 15 reachability cases pass, including decisions, zero-queue, 409,
+  `not_created`, and organization isolation.
+
+**Verification (TOOL_VERIFIED; loopback `DATABASE_URL` sentinel):**
+
+| Command | Pass | Fail | Skipped |
+| --- | --- | --- | --- |
+| sensitivity review reachability browser spec, committed bundle + new assertion | 14 | 1 | 0 |
+| sensitivity review reachability browser spec, repaired bundle | 15 | 0 | 0 |
+| client evidence pipeline browser spec | 7 | 0 | 0 |
+| `kai-client-evidence-pipeline.spec.js` | 24 | 0 | 0 |
+| `npm run verify:kai-sprint2-api-contract` | 71 | 0 | 0 |
+| `npm run test:kai-sprint2` | 4713 | 0 | 89 |
+| `npm test` | 5403 | 0 | 100 |
+| `npm run build` (rebuild reproduces the committed bundle), `git diff --check` | ok | | |
+
+**NOT_CONFIRMED:**
+- Deployed behavior.
+- Scenario D in a real browser: no follow-up fixture exists in the
+  reachability runner; covered by unit test only.
+- Web Intake Files rehydration browser spec (2/3 at clean `cabd3a5`) and
+  P1-08 runner (17/19) were not rerun; both are outside this package.
+
+**Status:** CLIENT_REVIEWS_SENSITIVITY_ACTION_MESSAGING_COMPLETE_LOCALLY_PRODUCTION_NOT_CONFIRMED.
+No push, deployment, shared or production database, cloud, feature-flag,
+tenant, membership, role, credential, `.env`, backend, schema, or
+`00_KAI_CURRENT_STATE.md` change.
