@@ -36554,3 +36554,125 @@ after the spec was written. Not changed here.
 No push, deployment, shared or production database, cloud, feature-flag,
 tenant, credential, `.env`, backend, schema, or `00_KAI_CURRENT_STATE.md`
 change.
+
+### Mixed-role authorization for P1-06 review work and P1-07 source candidates (2026-10-11)
+
+**Owner authorization (USER_CONFIRMED):** change authorization for exactly
+`createSensitivityReviewQueueItem` (P1-06) and `createSourceCandidateStub`
+(P1-07), including their direct service callers, so that a mapped human with
+a global `gk_admin`, `gk_operator`, or `gk_reviewer` role and an active
+membership in the organization is admitted even when that membership's role
+is `client_admin` or another client role. Existing GK-membership admission and
+platform-superuser behavior are preserved. Review ownership, tenant scope,
+source-promotion authority, human-decision requirements, and the frontend
+mount are unchanged. No production, schema, membership, credential, flag,
+push, deploy, or Current State change.
+
+**Starting state (TOOL_VERIFIED):** `main` at
+`60b81fce0034a5d3c2f5a1bdce20634b0181790c`, clean; `fa356f5` and `60b81fc`
+are ancestors.
+
+**Impact check (TOOL_VERIFIED):** callers are the B1A-2R review-work route via
+`ensureSensitivityReviewQueueItem`; the cockpit decision seam's handoff
+(`ensureSourceCandidateAfterReviewedDecision`, runs only after a committed
+`reviewed` decision); and the operator-only
+`scripts/kai-sprint2-legacy-cutover-synthetic-reprocessor.js`, whose actor
+context carries no roles or memberships and is denied before and after. Neither
+operation is in `P0_MUTATING_OPERATIONS`, so `combineGlobalRoles` applies
+directly. The feature flag, input shape, mapped-human gate, active membership
+in the requested organization (VAL-AUT-003), tenant consistency, tenant-scoped
+profile reads, VAL-FUP-001-P0 / VAL-KAI-P1-07-001, idempotency, and required
+audit all run independently of the role option.
+
+**Before the change (TOOL_VERIFIED, runner-owned loopback PostgreSQL, synthetic
+actor: global `gk_reviewer`, active Org A `client_admin`, human, no superuser):**
+- Zero-queue review work: `tenant_boundary_violation` (403) with blocker
+  `VAL-AUT-004`/`role_not_allowed`; no table changed; no queue item, decision,
+  or audit.
+- Existing-queue `reviewed` decision: committed (`decided_by_role`
+  `gk_reviewer`, `decided_by` the mixed actor); queue `resolved/resolved`;
+  `sensitivity_review_decision_recorded` in `audit_events` and
+  `upload_lifecycle_audit`; handoff `not_created` /
+  `tenant_boundary_violation`; zero candidates and candidate review items;
+  zero promotion decisions, sources, or source versions. Only
+  `audit_events`, `intake_sensitivity_review_decisions`, and
+  `upload_lifecycle_audit` changed.
+- New positive tests against the original code: P1-06/P1-07 service
+  role-matrix tests 2 fail, 50 pass; handoff runner 6 fail (all
+  `VAL-AUT-004`), 7 pass.
+
+**Change (TOOL_VERIFIED):** `kaiReviewQueueService.js` and
+`kaiSourceCandidateService.js` pass `combineGlobalRoles: true` with their
+unchanged allowlists. One docstring in `kaiSensitivityAllowedUseReviewService.js`
+corrected. No validator, allowlist, actor-context, superuser, attribution,
+predicate, route, DTO, schema, or flag change.
+
+**After the change (TOOL_VERIFIED):** the same probe: review work 201-equivalent
+`ok` with one `sensitivity_review` item (open, created by the mixed actor),
+one `sensitivity_review_queue_item_created` audit, no decision; `reviewed`
+decision plus handoff `created`, one `needs_gk_review` candidate and its open
+`source_candidate_review` item created by the mixed actor, and only
+`audit_events`, `intake_sensitivity_review_decisions`,
+`intake_source_candidates`, `review_queue_items`, and
+`upload_lifecycle_audit` changed. New tests in
+`kai-sprint2-p1-07-source-candidate-handoff.integration.spec.js` (8) and the
+P1-06/P1-07 boundary specs (3 each) cover: review work and zero-write replay;
+an ineligible profile still `validation_blocker`; the decision and handoff with
+exact all-table deltas and zero-write replay; `needs_more_information`
+nonterminal with no candidate; recovery; `gk_admin` and `gk_operator` full
+lifecycles attributed to their own global role; DB-backed negatives
+(client-only, no/other-org/revoked/inactive membership,
+ai/assistant/system/import, feature disabled, a cross-organization profile
+`not_found`) with zero table changes; membership-only `gk_operator`
+preserved; platform superuser unchanged.
+
+**Recovery (TOOL_VERIFIED):** a committed `reviewed` decision whose handoff had
+failed (synthetic, the refusal injected through the existing
+`createSourceCandidateStub` seam) is recovered by resubmitting the identical
+request: `replayed: true`, the same decision id, no decision-ledger or
+decision-audit write, handoff `created`, exactly one candidate and review item;
+a further replay writes nothing.
+
+**Verification (TOOL_VERIFIED; loopback `DATABASE_URL` sentinel; only
+runner-owned ephemeral loopback PostgreSQL and synthetic data):**
+
+| Command | Pass | Fail | Skipped |
+| --- | --- | --- | --- |
+| P1-06 + P1-07 boundary specs | 52 | 0 | 0 |
+| `npm run verify:kai-sprint2-p1-07-source-candidate-handoff` | 13 | 0 | 0 |
+| `npm run verify:kai-sprint2-p1-06-review-queue` | 15 | 0 | 0 |
+| `npm run verify:kai-sprint2-p1-07-source-candidate` | 11 | 0 | 0 |
+| `npm run verify:kai-sprint2-b1a-2r-review-work` | 6 | 0 | 0 |
+| `npm run verify:kai-sprint2-b1a-3b-r2-zero-queue-first-review` | 4 | 0 | 0 |
+| `npm run verify:kai-sprint2-b1a-02-phase5-allowed-use-decision-ledger` | 34 | 0 | 0 |
+| `npm run verify:kai-sprint2-p2-01-evidence-extraction-handoff` | 7 | 0 | 0 |
+| `node scripts/kai-sprint2-legacy-cutover-local-postgres.js` | 2 | 0 | 0 |
+| `npm run verify:kai-sprint2-p1-08-source-promotion` (same 2 failures at clean `60b81fc`) | 17 | 2 | 0 |
+| sensitivity review reachability browser spec | 10 | 0 | 0 |
+| client evidence pipeline browser spec | 7 | 0 | 0 |
+| authorization, tenant, client-org, P1-07 handoff, P1-09, B1A-02, P2-01 boundary specs | 170 | 0 | 0 |
+| assistant boundary specs | 21 | 0 | 0 |
+| `npm run verify:kai-sprint2-api-contract` | 71 | 0 | 0 |
+| `npm run test:kai-sprint2` | 4713 | 0 | 89 |
+| `npm test` | 5397 | 0 | 100 |
+| `git diff --check` | clean | | |
+
+**NOT_CONFIRMED / limitations:**
+- P1-07's own gate is the P1-05 profile predicate; it does not check for a
+  `reviewed` decision. Only its production caller (the decision seam) does.
+  A direct in-process call by any authorized human creates a candidate with no
+  decision (probe: membership `gk_reviewer` before and after, mixed actor
+  after). No route exposes P1-07 directly. Unchanged here; owner decision if a
+  decision check should move into P1-07.
+- Strict replay needs the original `expected_updated_at`, which the API does
+  not return after resolution. A resubmission from a re-read (as the Impact
+  Library UI does) is a re-review: it inserts a second, superseding `reviewed`
+  decision and then runs the handoff (probe). Existing semantics, unchanged.
+- The GK Studio mount for mixed-role actors remains an open frontend owner
+  decision; they still see the client Studio.
+- Deployed behavior, the owner's account, and real latency.
+
+**Status:** P1_06_P1_07_MIXED_ROLE_AUTHORIZATION_REPAIRED_LOCALLY_PRODUCTION_NOT_CONFIRMED.
+No push, deployment, shared or production database, cloud, feature-flag,
+tenant, membership, credential, `.env`, schema, route, frontend, or
+`00_KAI_CURRENT_STATE.md` change.
