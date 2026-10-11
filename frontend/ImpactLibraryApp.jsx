@@ -726,6 +726,7 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
         onEngagementIdChange={setSelectedEngagementId}
         capabilities={accessCapabilities.data}
         getKinderReviewAccess={needsAttention.sensitivityReviewAccess}
+        getKinderReviewAccessOrganizationId={needsAttention.sensitivityReviewAccessOrganizationId}
         facts={clientFactsForOrganization}
         onViewImpactLibrary={() => setActiveSection("impactLibrary")}
       />

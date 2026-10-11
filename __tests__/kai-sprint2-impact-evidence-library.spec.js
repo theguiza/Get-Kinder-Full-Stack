@@ -3515,9 +3515,15 @@ test("KAI B1A-3B-R2 UI: the first-review bootstrap action (existing) sends exact
   // The zero-queue first-review action is rendered exactly when the
   // authoritative GET has confirmed there is no queue item yet - it is never
   // triggered merely by loading/discovering a profile id.
+  // The card body is the shared SensitivityReviewCardBody: the GK card wires
+  // its start action, and the body renders that action only in the
+  // no-queue-item branch, as a click handler.
   const cardStart = uiSource.indexOf('<h5 className="mb-0">Sensitivity &amp; allowed-use review</h5>');
   const cardRegion = uiSource.slice(cardStart, cardStart + 2500);
-  assert.match(cardRegion, /onClick=\{startSensitivityReviewWork\}/);
+  assert.match(cardRegion, /<SensitivityReviewCardBody[\s\S]*?onStartReviewWork=\{startSensitivityReviewWork\}/);
+  const bodySource = readFileSync("frontend/SensitivityReviewCardBody.jsx", "utf8");
+  assert.match(bodySource, /\{detail\.reviewQueueItem \? \([\s\S]*?\) : \([\s\S]*?onClick=\{onStartReviewWork\}[\s\S]*?\)\}/);
+  assert.doesNotMatch(bodySource, /useEffect/);
   assert.doesNotMatch(uiSource, /useEffect\([^)]*loadSensitivityDetail[^)]*startSensitivityReviewWork/);
 });
 

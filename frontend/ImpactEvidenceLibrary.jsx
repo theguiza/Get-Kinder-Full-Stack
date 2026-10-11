@@ -134,18 +134,13 @@ import {
   sensitivityReviewQueuePath,
   sensitivityDecisionPath,
   projectSensitivityReviewQueueItems,
-  SENSITIVITY_PRESENCE_FIELDS,
-  SENSITIVITY_ALLOWED_USE_FIELD,
-  SENSITIVITY_PERMISSION_FIELDS,
-  SENSITIVITY_PRESENCE_VALUES,
-  SENSITIVITY_ALLOWED_USE_VALUES,
   defaultSensitivityReviewFormState,
-  restrictedPermissionEligible,
-  publicUseAllowedEligible,
+  sensitivityReviewFormStateFromDecision,
   buildSensitivityDecisionRequestBody,
   blockerDisplayText,
   projectSensitivityDetail,
 } from "./impactEvidenceLibraryLogic.js";
+import SensitivityReviewCardBody from "./SensitivityReviewCardBody.jsx";
 import {
   exportManifestCsvPath,
   exportManifestDocxPath,
@@ -179,18 +174,6 @@ function StatusBadge({ status }) {
 // loading/pending state stuck true forever, matching the existing rejected-
 // fetch handling for that same request.
 const GRANT_RESPONSE_PACKET_REFETCH_TIMEOUT_MS = 15000;
-
-const SENSITIVITY_FIELD_LABELS = Object.freeze({
-  reviewed_personal_data_status: "Personal data",
-  reviewed_minor_data_status: "Minor data",
-  reviewed_health_housing_justice_immigration_status: "Health / housing / justice / immigration",
-  reviewed_indigenous_governance_status: "Indigenous / governance-sensitive",
-  reviewed_staff_notes_status: "Staff notes",
-  reviewed_story_testimonial_status: "Story / testimonial",
-  reviewed_small_cell_risk_status: "Small-cell risk",
-  reviewed_financial_records_status: "Financial records",
-  reviewed_consent_basis_status: "Consent basis",
-});
 
 export default function ImpactEvidenceLibrary({
   // KAI Impact Library redesign, Package C0 (shared Project/Engagement
@@ -2726,16 +2709,7 @@ export default function ImpactEvidenceLibrary({
   // all-false default. Either way this only ever seeds the form - it is
   // never treated as itself being the current decision.
   useEffect(() => {
-    const current = sensitivityDetail?.currentDecision;
-    if (!current) {
-      setSensitivityFormState(defaultSensitivityReviewFormState());
-      return;
-    }
-    const seeded = defaultSensitivityReviewFormState();
-    for (const field of SENSITIVITY_PRESENCE_FIELDS) seeded[field] = current[field] ?? "unknown";
-    seeded[SENSITIVITY_ALLOWED_USE_FIELD] = current[SENSITIVITY_ALLOWED_USE_FIELD] ?? "unknown";
-    for (const field of SENSITIVITY_PERMISSION_FIELDS) seeded[field] = current[field] === true;
-    setSensitivityFormState(seeded);
+    setSensitivityFormState(sensitivityReviewFormStateFromDecision(sensitivityDetail?.currentDecision));
   }, [sensitivityDetail]);
 
   const startSensitivityReviewWork = useCallback(async () => {
@@ -4714,166 +4688,14 @@ export default function ImpactEvidenceLibrary({
               {sensitivityError ? <div className="alert alert-warning py-2 small">{sensitivityError}</div> : null}
               {sensitivityActionResult ? <div className="alert alert-info py-2 small">{sensitivityActionResult}</div> : null}
 
-              {sensitivityDetail ? (
-                <>
-                  <h6 className="mt-2">What KAI detected</h6>
-                  <ValueRow label="Sensitivity posture" value={JSON.stringify(sensitivityDetail.sensitivityPosture || {})} />
-                  <ValueRow label="Allowed-use restrictions" value={JSON.stringify(sensitivityDetail.allowedUseRestrictions || {})} />
-
-                  <h6 className="mt-3">Review work</h6>
-                  {sensitivityDetail.reviewQueueItem ? (
-                    <ValueRow
-                      label="Review work status"
-                      value={`${sensitivityDetail.reviewQueueItem.queue_status || "none"} / ${sensitivityDetail.reviewQueueItem.review_status || "none"}`}
-                    />
-                  ) : (
-                    <>
-                      <div className="small text-muted mb-2">No sensitivity review work has been started for this source yet.</div>
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-outline-primary"
-                        onClick={startSensitivityReviewWork}
-                        disabled={sensitivityActionPending}
-                      >
-                        Review sensitivity &amp; allowed use
-                      </button>
-                    </>
-                  )}
-
-                  <h6 className="mt-3">Sensitivity &amp; allowed-use decision</h6>
-                  {sensitivityDetail.currentDecision ? (
-                    <>
-                      <ValueRow label="Outcome" value={sensitivityDetail.currentDecision.decision_outcome} />
-                      <ValueRow label="Ordinary KAI processing (allowed use)" value={sensitivityDetail.currentDecision[SENSITIVITY_ALLOWED_USE_FIELD]} />
-                      <ValueRow
-                        label="AI processing (approved LLM provider)"
-                        value={sensitivityDetail.currentDecision.reviewed_llm_processing_allowed ? "allowed" : "not allowed"}
-                      />
-                      <ValueRow
-                        label="Funder/reporting drafts (source-use only, not release approval)"
-                        value={sensitivityDetail.currentDecision.reviewed_funder_use_allowed ? "allowed" : "not allowed"}
-                      />
-                      <ValueRow
-                        label="Product/service improvement (this org's own data only)"
-                        value={sensitivityDetail.currentDecision.reviewed_product_learning_allowed ? "allowed" : "not allowed"}
-                      />
-                      <ValueRow
-                        label="Public-use participation (not final release authority)"
-                        value={sensitivityDetail.currentDecision.reviewed_public_use_allowed ? "allowed" : "not allowed"}
-                      />
-                      <div className="small text-muted mt-1">
-                        Source-use permission does not by itself approve final external release.
-                      </div>
-                    </>
-                  ) : (
-                    <div className="small text-muted">No sensitivity &amp; allowed-use decision recorded yet.</div>
-                  )}
-
-                  {sensitivityDetail.reviewQueueItem ? (
-                    <div className="border rounded p-2 mt-3">
-                      <div className="small fw-semibold mb-2">
-                        {sensitivityDetail.currentDecision ? "Record a new review (re-review)" : "Record review"}
-                      </div>
-                      {SENSITIVITY_PRESENCE_FIELDS.map((field) => (
-                        <div className="row g-2 align-items-center mb-1" key={field}>
-                          <div className="col-7 small text-muted">{SENSITIVITY_FIELD_LABELS[field] || field}</div>
-                          <div className="col-5">
-                            <select
-                              className="form-select form-select-sm"
-                              value={sensitivityFormState[field]}
-                              onChange={(event) => setSensitivityFormState((current) => ({ ...current, [field]: event.target.value }))}
-                            >
-                              {SENSITIVITY_PRESENCE_VALUES.map((value) => <option key={value} value={value}>{value}</option>)}
-                            </select>
-                          </div>
-                        </div>
-                      ))}
-                      <div className="row g-2 align-items-center mb-2 mt-1">
-                        <div className="col-7 small text-muted">Ordinary KAI processing (allowed use)</div>
-                        <div className="col-5">
-                          <select
-                            className="form-select form-select-sm"
-                            value={sensitivityFormState[SENSITIVITY_ALLOWED_USE_FIELD]}
-                            onChange={(event) => setSensitivityFormState((current) => ({ ...current, [SENSITIVITY_ALLOWED_USE_FIELD]: event.target.value }))}
-                          >
-                            {SENSITIVITY_ALLOWED_USE_VALUES.map((value) => <option key={value} value={value}>{value}</option>)}
-                          </select>
-                        </div>
-                      </div>
-
-                      <div className="form-check small">
-                        <input
-                          className="form-check-input"
-                          type="checkbox"
-                          id="sensitivity-llm-processing-allowed"
-                          checked={sensitivityFormState.reviewed_llm_processing_allowed === true}
-                          disabled={!restrictedPermissionEligible(sensitivityFormState)}
-                          onChange={(event) => setSensitivityFormState((current) => ({ ...current, reviewed_llm_processing_allowed: event.target.checked }))}
-                        />
-                        <label className="form-check-label" htmlFor="sensitivity-llm-processing-allowed">
-                          AI processing: may be processed by an approved AI provider for ordinary KAI service delivery
-                        </label>
-                      </div>
-                      <div className="form-check small">
-                        <input
-                          className="form-check-input"
-                          type="checkbox"
-                          id="sensitivity-product-learning-allowed"
-                          checked={sensitivityFormState.reviewed_product_learning_allowed === true}
-                          disabled={!restrictedPermissionEligible(sensitivityFormState)}
-                          onChange={(event) => setSensitivityFormState((current) => ({ ...current, reviewed_product_learning_allowed: event.target.checked }))}
-                        />
-                        <label className="form-check-label" htmlFor="sensitivity-product-learning-allowed">
-                          Product/service improvement: this organization's own KAI/program improvement only
-                        </label>
-                      </div>
-                      <div className="form-check small">
-                        <input
-                          className="form-check-input"
-                          type="checkbox"
-                          id="sensitivity-funder-use-allowed"
-                          checked={sensitivityFormState.reviewed_funder_use_allowed === true}
-                          disabled={!restrictedPermissionEligible(sensitivityFormState)}
-                          onChange={(event) => setSensitivityFormState((current) => ({ ...current, reviewed_funder_use_allowed: event.target.checked }))}
-                        />
-                        <label className="form-check-label" htmlFor="sensitivity-funder-use-allowed">
-                          Funder/reporting drafts: may participate in drafting (not final funder release approval)
-                        </label>
-                      </div>
-                      <div className="form-check small mb-2">
-                        <input
-                          className="form-check-input"
-                          type="checkbox"
-                          id="sensitivity-public-use-allowed"
-                          checked={sensitivityFormState.reviewed_public_use_allowed === true}
-                          disabled={!publicUseAllowedEligible(sensitivityFormState)}
-                          onChange={(event) => setSensitivityFormState((current) => ({ ...current, reviewed_public_use_allowed: event.target.checked }))}
-                        />
-                        <label className="form-check-label" htmlFor="sensitivity-public-use-allowed">
-                          Public-use participation: requires allowed use, consent present, and governance status absent (not final release authority)
-                        </label>
-                      </div>
-
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-primary me-2"
-                        onClick={() => submitSensitivityDecision("reviewed")}
-                        disabled={sensitivityActionPending}
-                      >
-                        Submit review
-                      </button>
-                      <button
-                        type="button"
-                        className="btn btn-sm btn-outline-secondary"
-                        onClick={() => submitSensitivityDecision("needs_more_information")}
-                        disabled={sensitivityActionPending}
-                      >
-                        Needs more information
-                      </button>
-                    </div>
-                  ) : null}
-                </>
-              ) : null}
+              <SensitivityReviewCardBody
+                detail={sensitivityDetail}
+                formState={sensitivityFormState}
+                onFormStateChange={setSensitivityFormState}
+                actionPending={sensitivityActionPending}
+                onStartReviewWork={startSensitivityReviewWork}
+                onSubmitDecision={submitSensitivityDecision}
+              />
             </div>
           ) : null}
 

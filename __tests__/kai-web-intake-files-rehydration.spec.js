@@ -22,6 +22,10 @@ import {
   readIntakeBatchFiles,
   resolveIntakeBatchSelection,
 } from "../frontend/kaiWebIntakeLogic.js";
+import {
+  defaultSensitivityReviewFormState,
+  sensitivityReviewFormStateFromDecision,
+} from "../frontend/impactEvidenceLibraryLogic.js";
 
 const webIntakeSource = readFileSync("frontend/KaiWebIntake.jsx", "utf8");
 const libSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
@@ -369,8 +373,10 @@ test("Project switch A: an authoritative engagementId change clears a profile di
   );
   assert.match(
     libSource,
-    /const current = sensitivityDetail\?\.currentDecision;\s*\n\s*if \(!current\) \{\s*\n\s*setSensitivityFormState\(defaultSensitivityReviewFormState\(\)\);/,
+    /useEffect\(\(\) => \{\s*\n\s*setSensitivityFormState\(sensitivityReviewFormStateFromDecision\(sensitivityDetail\?\.currentDecision\)\);\s*\n\s*\}, \[sensitivityDetail\]\);/,
   );
+  // ...which, with no detail, is exactly the all-unknown default form.
+  assert.deepEqual(sensitivityReviewFormStateFromDecision(null), defaultSensitivityReviewFormState());
   // With no selected id the review card is not rendered, so no prior
   // Project's profile detail can be shown.
   assert.match(libSource, /\{knowledgeStudioTab === "processing" && intakeSensitivityProfileId && sensitivityCapability === true \? \(/);

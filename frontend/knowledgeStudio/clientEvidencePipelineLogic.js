@@ -283,7 +283,9 @@ export const GET_KINDER_STAGE_DESCRIPTIONS = Object.freeze({
  * organization access-capabilities read succeeded. The client Knowledge
  * Studio is mounted only when that read did not report the GK workspace, so
  * an "allowed" actor here holds a global Get Kinder role over a non-Get
- * Kinder membership in this organization.
+ * Kinder membership in this organization. Such an actor completes the file
+ * sensitivity review from Reviews (owner decision 2026-10-11); the other Get
+ * Kinder reviews stay in Get Kinder's own workspace.
  */
 export function getKinderReviewAccessText(access, membershipKnown) {
   if (!membershipKnown || (access !== "allowed" && access !== "not_allowed")) {
@@ -292,9 +294,18 @@ export function getKinderReviewAccessText(access, membershipKnown) {
   if (access === "not_allowed") {
     return "Your account does not have Get Kinder reviewer access for this organization, so no review action is offered here.";
   }
-  return "Your Get Kinder role can complete this organization's sensitivity reviews, but your membership in this organization "
-    + "is not a Get Kinder membership, so the Get Kinder Knowledge Studio where reviews are completed is not shown here. "
-    + "Contact a Get Kinder administrator about your access to it.";
+  return "Your Get Kinder role can complete this organization's sensitivity reviews here: use \u201cReview sensitivity & allowed use\u201d "
+    + "next to a file waiting for sensitivity review. Your membership in this organization is not a Get Kinder membership, so "
+    + "the other Get Kinder reviews are completed in Get Kinder's own review workspace.";
+}
+
+/**
+ * Whether a file's governed pipeline state is the file sensitivity review -
+ * the one Get Kinder review the client Studio can open, and only for an
+ * actor whose review-cockpit capability for this organization is "allowed".
+ */
+export function sensitivityReviewActionAvailable(file) {
+  return file?.currentStage === "sensitivity_review" && file?.responsibleParty === "get_kinder" && file?.currentStatus !== "failed";
 }
 
 /**

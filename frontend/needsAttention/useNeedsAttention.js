@@ -51,8 +51,17 @@ export function useNeedsAttention(organizationId) {
   const [reviewQueueRequestState, setReviewQueueRequestState] = useState("idle");
   const [summary, setSummary] = useState(null);
 
-  const [sensitivityCapability, setSensitivityCapability] = useState(null);
-  const [sensitivityCapabilityRequestState, setSensitivityCapabilityRequestState] = useState("idle");
+  // The review-cockpit capabilities answer, keyed to the organization it was
+  // read for: after an organization change the previous organization's answer
+  // is never reported, not even for the render before the effect below runs.
+  const [sensitivityCapabilityState, setSensitivityCapabilityState] = useState({
+    organizationId: "",
+    requestState: "idle",
+    capability: null,
+  });
+  const capabilityIsCurrent = Boolean(organizationId) && sensitivityCapabilityState.organizationId === organizationId;
+  const sensitivityCapability = capabilityIsCurrent ? sensitivityCapabilityState.capability : null;
+  const sensitivityCapabilityRequestState = capabilityIsCurrent ? sensitivityCapabilityState.requestState : "idle";
   const [sensitivityReviewQueueItems, setSensitivityReviewQueueItems] = useState([]);
   const [loadingSensitivityReviewQueue, setLoadingSensitivityReviewQueue] = useState(false);
   const [sensitivityReviewQueueError, setSensitivityReviewQueueError] = useState("");
@@ -62,8 +71,7 @@ export function useNeedsAttention(organizationId) {
     setReviewQueueCompleteness({ truncated: false, evaluationErrorCount: 0 });
     setReviewQueueRequestState("idle");
     setSummary(null);
-    setSensitivityCapability(null);
-    setSensitivityCapabilityRequestState("idle");
+    setSensitivityCapabilityState({ organizationId, requestState: organizationId ? "loading" : "idle", capability: null });
     setSensitivityReviewQueueItems([]);
     setSensitivityReviewQueueError("");
     if (!organizationId) return undefined;
@@ -98,17 +106,14 @@ export function useNeedsAttention(organizationId) {
     })();
 
     (async () => {
-      setSensitivityCapabilityRequestState("loading");
       const result = await getJson(sensitivityCapabilitiesPath(organizationId));
       if (cancelled) return;
       if (result.statusCode !== 200 || !result.body?.ok) {
-        setSensitivityCapability(false);
-        setSensitivityCapabilityRequestState("error");
+        setSensitivityCapabilityState({ organizationId, requestState: "error", capability: false });
         return;
       }
       const capability = result.body.data?.can_manage_sensitivity_review === true;
-      setSensitivityCapability(capability);
-      setSensitivityCapabilityRequestState("success");
+      setSensitivityCapabilityState({ organizationId, requestState: "success", capability });
       if (!capability) return;
       setLoadingSensitivityReviewQueue(true);
       const queueResult = await getJson(sensitivityReviewQueuePath(organizationId));
@@ -199,6 +204,8 @@ export function useNeedsAttention(organizationId) {
     sensitivityReviewAccess: sensitivityCapabilityRequestState === "success"
       ? (sensitivityCapability === true ? "allowed" : "not_allowed")
       : "unknown",
+    // The organization that answer belongs to ("" while none is current).
+    sensitivityReviewAccessOrganizationId: sensitivityCapabilityRequestState === "success" ? organizationId : "",
     reviewQueueRequestState,
   };
 }

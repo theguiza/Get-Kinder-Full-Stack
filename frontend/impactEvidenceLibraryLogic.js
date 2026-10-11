@@ -2078,6 +2078,46 @@ export function buildSensitivityDecisionRequestBody({ decision, expectedUpdatedA
   return body;
 }
 
+// The form a review starts from: a re-review starts from the current
+// decision's own reviewed facts, a first-ever review from the all-"unknown"/
+// all-false default. This only seeds the form - it is never treated as itself
+// being the current decision.
+export function sensitivityReviewFormStateFromDecision(currentDecision) {
+  const seeded = defaultSensitivityReviewFormState();
+  if (!currentDecision) return seeded;
+  for (const field of SENSITIVITY_PRESENCE_FIELDS) seeded[field] = currentDecision[field] ?? "unknown";
+  seeded[SENSITIVITY_ALLOWED_USE_FIELD] = currentDecision[SENSITIVITY_ALLOWED_USE_FIELD] ?? "unknown";
+  for (const field of SENSITIVITY_PERMISSION_FIELDS) seeded[field] = currentDecision[field] === true;
+  return seeded;
+}
+
+const SOURCE_CANDIDATE_HANDOFF_STATUSES = new Set(["created", "replayed", "not_applicable", "not_created"]);
+
+// What the decision POST's response establishes, kept separate from the
+// re-read detail: whether the human decision was recorded (200), refused as
+// stale (409), or rejected, and - for a recorded decision - the P1-07
+// source-candidate handoff exactly as the server reported it. A recorded
+// decision with a `not_created` handoff is still a recorded decision.
+export function projectSensitivityDecisionResult(result, decision) {
+  if (result?.statusCode === 409) return { status: "conflict" };
+  if (result?.statusCode !== 200 || !result?.body?.ok) {
+    return { status: "error", message: errorText(result) };
+  }
+  const data = result.body.data || {};
+  const handoff = data.source_candidate_handoff;
+  return {
+    status: "recorded",
+    outcome: data.current_decision?.decision_outcome || decision,
+    handoff: handoff && SOURCE_CANDIDATE_HANDOFF_STATUSES.has(handoff.status)
+      ? {
+        status: handoff.status,
+        candidateStatus: typeof handoff.candidate_status === "string" ? handoff.candidate_status : null,
+        errorCode: typeof handoff.error_code === "string" ? handoff.error_code : null,
+      }
+      : null,
+  };
+}
+
 // Light projection of the GET sensitivity-profile detail response. Kept
 // deliberately close to the raw shape (unlike projectTraceability's fuller
 // reshaping) since every field name here already IS the reviewer-facing

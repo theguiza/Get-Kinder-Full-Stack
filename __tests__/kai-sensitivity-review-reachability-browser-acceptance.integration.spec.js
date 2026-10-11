@@ -120,9 +120,14 @@ async function openPage(browser, { baseUrl, legacyUserId }) {
   const requests = [];
   const byId = new Map();
   const exceptions = [];
+  const paused = [];
   const listener = (message) => {
     if (message.sessionId !== sessionId) return;
     const { method, params } = message;
+    if (method === "Fetch.requestPaused") {
+      paused.push({ requestId: params.requestId, url: params.request.url });
+      return;
+    }
     if (method === "Network.requestWillBeSent" && params.type !== "Document" && params.request.url.includes("/api/")) {
       const entry = { url: params.request.url, method: params.request.method, status: null, done: false };
       requests.push(entry);
@@ -187,6 +192,35 @@ async function openPage(browser, { baseUrl, legacyUserId }) {
       .filter((el) => el.offsetParent !== null).find((el) => el.innerText.trim() === ${JSON.stringify(label)})`),
     clickButton: (label) => clickWhere(`button ${label}`, `() => [...document.querySelectorAll("button")]
       .filter((el) => el.offsetParent !== null && !el.disabled).find((el) => el.innerText.trim() === ${JSON.stringify(label)})`),
+    // The Reviews tab's sensitivity review action for one pipeline file.
+    clickFileReviewAction: (intakeFileId) => clickWhere(`sensitivity review action for ${intakeFileId}`,
+      `() => [...document.querySelectorAll('button[data-sensitivity-review-file="${intakeFileId}"]')]
+        .find((el) => el.offsetParent !== null && !el.disabled)`),
+    fileReviewActionIds: () => evaluate(`[...document.querySelectorAll("button[data-sensitivity-review-file]")]
+      .filter((el) => el.offsetParent !== null).map((el) => el.getAttribute("data-sensitivity-review-file")).sort()`),
+    reviewPanelFileId: () => evaluate(`(() => {
+      const el = document.querySelector("[data-client-sensitivity-review-panel]");
+      return el ? el.getAttribute("data-client-sensitivity-review-panel") : null;
+    })()`),
+    switchOrganization: async (name) => {
+      await clickWhere("organization switcher", `() => document.querySelector(".gk-shell-org-switcher-btn")`);
+      await waitFor(async () => evaluate(`Boolean(document.querySelector(".gk-shell-org-switcher-menu"))`), "organization menu");
+      await clickWhere(`organization ${name}`, `() => [...document.querySelectorAll(".gk-shell-org-switcher-menu button")]
+        .find((el) => el.innerText.trim() === ${JSON.stringify(name)})`);
+    },
+    // Holds every matching response in the browser (the server has already
+    // answered) until release(), to prove a late answer cannot populate a
+    // context the reviewer has since left.
+    async holdResponses(urlPattern) {
+      await browser.send("Fetch.enable", { patterns: [{ urlPattern, requestStage: "Response" }] }, sessionId);
+      return {
+        pausedUrls: () => paused.map((entry) => entry.url),
+        async release() {
+          for (const entry of paused.splice(0)) await browser.send("Fetch.continueRequest", { requestId: entry.requestId }, sessionId);
+          await browser.send("Fetch.disable", {}, sessionId);
+        },
+      };
+    },
     // The "Select" button on the visible list row that shows `rowText`.
     selectRow: (rowText) => clickWhere(`Select on ${rowText}`, `() => [...document.querySelectorAll("li")]
       .filter((el) => el.offsetParent !== null && el.innerText.includes(${JSON.stringify(rowText)}))
@@ -273,12 +307,25 @@ async function runBrowserAcceptance() {
   const ORG = "00000000-0000-4000-8000-0000000000f1";
   const ORG_B = "00000000-0000-4000-8000-0000000000f2";
   const PROJECT = "7c000000-0000-4000-8000-0000000000f1";
+  const PROJECT_2 = "7c000000-0000-4000-8000-0000000000f2";
   const BATCH = "10000000-0000-4000-8000-0000000000f1";
   const FILE_QUEUE = "20000000-0000-4000-8000-0000000000f1";
   const FILE_ZERO = "20000000-0000-4000-8000-0000000000f2";
-  const NAMES = Object.freeze({ queue: "synthetic_annual_report_2025_26.csv", zero: "synthetic_programme_log_2025_26.csv" });
+  // Mixed-role fixtures, seeded only when the mixed-role cases start.
+  const FILE_MIXED_QUEUE = "20000000-0000-4000-8000-0000000000f3";
+  const FILE_MIXED_ZERO = "20000000-0000-4000-8000-0000000000f4";
+  const FILE_MIXED_NMI = "20000000-0000-4000-8000-0000000000f5";
+  const FILE_MIXED_NOT_CREATED = "20000000-0000-4000-8000-0000000000f6";
+  const NAMES = Object.freeze({
+    queue: "synthetic_annual_report_2025_26.csv",
+    zero: "synthetic_programme_log_2025_26.csv",
+    mixedQueue: "synthetic_volunteer_hours_2025_26.csv",
+    mixedZero: "synthetic_referrals_2025_26.csv",
+    mixedNmi: "synthetic_survey_results_2025_26.csv",
+    mixedNotCreated: "synthetic_attendance_2025_26.csv",
+  });
   const FIELD_KEYS = ["households_served", "programme_month"];
-  const USERS = Object.freeze({ gkReviewer: 981, clientAdmin: 982, gkOutsider: 983, gkClientMember: 984 });
+  const USERS = Object.freeze({ gkReviewer: 981, clientAdmin: 982, gkOutsider: 983, gkClientMember: 984, gkClientMemberTwoOrgs: 985 });
 
   await query(`INSERT INTO kai.organizations (organization_id, name, organization_code) VALUES
                  ($1::uuid, 'Harbourline Synthetic Review Society', 'harbourline-synthetic-review'),
@@ -286,6 +333,8 @@ async function runBrowserAcceptance() {
                ON CONFLICT (organization_id) DO NOTHING`, [ORG, ORG_B]);
   await query("INSERT INTO kai.engagements (engagement_id, organization_id, engagement_code, project_metadata) VALUES ($1::uuid, $2::uuid, 'Project Synthetic Review', '{}'::jsonb)",
     [PROJECT, ORG]);
+  await query("INSERT INTO kai.engagements (engagement_id, organization_id, engagement_code, project_metadata) VALUES ($1::uuid, $2::uuid, 'Project Synthetic Second', '{}'::jsonb)",
+    [PROJECT_2, ORG]);
   await query(`INSERT INTO kai.intake_batches (intake_batch_id, organization_id, engagement_id, batch_code, processing_status, review_status)
                VALUES ($1::uuid, $2::uuid, $3::uuid, 'synthetic-review-2026', 'received', 'not_reviewed')`, [BATCH, ORG, PROJECT]);
   const kaiUserIds = {};
@@ -296,6 +345,8 @@ async function runBrowserAcceptance() {
     ["gkOutsider", USERS.gkOutsider, "gk_reviewer", true, [ORG_B]],
     // A global GK reviewer whose membership in this organization is a client role.
     ["gkClientMember", USERS.gkClientMember, ["gk_reviewer", "client_admin"], true, [ORG]],
+    // The same mixed role in two organizations, for the context-switch checks.
+    ["gkClientMemberTwoOrgs", USERS.gkClientMemberTwoOrgs, ["gk_reviewer", "client_admin"], true, [ORG, ORG_B]],
   ]) {
     const [globalRole, membershipRole] = Array.isArray(role) ? role : [role, role];
     await query("INSERT INTO public.userdata (id) VALUES ($1) ON CONFLICT DO NOTHING", [legacyId]);
@@ -404,18 +455,20 @@ async function runBrowserAcceptance() {
   const GK_CONTROLS = ["Record decision", "Promote", "Approve", "Reject", "Submit review", "Needs more information",
     "Review sensitivity & allowed use", "Sensitivity & allowed-use review", "Review cockpit"];
   const DECISION_VALUE_LEAKS = ["reviewed_personal_data_status", "needs_more_information", "reviewed_snapshot", "allowed_use_status"];
-  function assertClientBoundary(page, label, body) {
-    for (const r of page.requests()) {
+  // `requests` defaults to the page's whole history; a later check passes its
+  // own window so earlier deliberate direct-route negatives are not counted.
+  function assertClientBoundary(page, label, body, requests = page.requests()) {
+    for (const r of requests) {
       const path = pathOf(r);
       if (ALLOWED_PATHS.has(path)) continue;
       for (const fragment of GK_ONLY_FRAGMENTS) assert.ok(!path.includes(fragment), `${label}: GK-only request ${r.method} ${path}`);
     }
     for (const control of GK_CONTROLS) assert.ok(!body.includes(control), `${label}: GK control visible: ${control}`);
     for (const leak of DECISION_VALUE_LEAKS) assert.ok(!body.includes(leak), `${label}: GK decision data visible: ${leak}`);
-    assert.equal(page.requests().filter((r) => r.method === "POST").length, 0, `${label}: the client issues no write`);
+    assert.equal(requests.filter((r) => r.method === "POST").length, 0, `${label}: the client issues no write`);
   }
 
-  async function governedCounts(profileId) {
+  async function governedCounts(profileId, actorKaiUserId = kaiUserIds.gkReviewer) {
     const [row] = await query(`SELECT
       (SELECT count(*) FROM kai.intake_sensitivity_review_decisions WHERE organization_id = $1::uuid AND intake_sensitivity_profile_id = $2::uuid)::int AS decisions,
       (SELECT count(*) FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = 'sensitivity_review' AND target_object_id = $2::uuid)::int AS sensitivity_queue,
@@ -428,9 +481,22 @@ async function runBrowserAcceptance() {
       (SELECT count(*) FROM kai.sources WHERE organization_id = $1::uuid)::int AS sources,
       (SELECT count(*) FROM kai.source_versions WHERE organization_id = $1::uuid)::int AS source_versions,
       (SELECT count(*) FROM kai.evidence_items WHERE organization_id = $1::uuid)::int AS evidence,
-      (SELECT count(*) FROM kai.claims WHERE organization_id = $1::uuid)::int AS claims`, [ORG, profileId, kaiUserIds.gkReviewer]);
+      (SELECT count(*) FROM kai.claims WHERE organization_id = $1::uuid)::int AS claims`, [ORG, profileId, actorKaiUserId]);
     return row;
   }
+  // Every kai table's row count: a delta over all of them proves which tables
+  // a step wrote, including every downstream source, evidence, claim,
+  // generated-output, export, and release-authority table.
+  async function allKaiCounts() {
+    const counts = {};
+    for (const { table_name: table } of await query(
+      "SELECT table_name FROM information_schema.tables WHERE table_schema = 'kai' AND table_type = 'BASE TABLE' ORDER BY table_name",
+    )) {
+      counts[table] = (await query(`SELECT count(*)::int AS count FROM kai.${table}`))[0].count;
+    }
+    return counts;
+  }
+  const changedTables = (before, after) => Object.keys(after).filter((table) => after[table] !== before[table]).sort();
   const diff = (before, after) => Object.fromEntries(Object.keys(after).map((key) => [key, after[key] - before[key]]));
   async function sensitivityQueueRow(profileId) {
     const [row] = await query(
@@ -467,6 +533,7 @@ async function runBrowserAcceptance() {
   const clientPage = await openPage(browser, { baseUrl, legacyUserId: USERS.clientAdmin });
   const outsiderPage = await openPage(browser, { baseUrl, legacyUserId: USERS.gkOutsider });
   const mixedPage = await openPage(browser, { baseUrl, legacyUserId: USERS.gkClientMember });
+  const twoOrgPage = await openPage(browser, { baseUrl, legacyUserId: USERS.gkClientMemberTwoOrgs });
   const results = {};
   try {
     const profileQueue = await seedFreshFile(FILE_QUEUE, NAMES.queue, "a");
@@ -689,23 +756,355 @@ async function runBrowserAcceptance() {
       results.case8_ai_and_feature_gate = "PASS";
     });
 
-    await test("case 9 (owner decision, not repaired): a global GK reviewer with a client-role membership gets the client Studio although the sensitivity routes authorize them; Reviews says so accurately", async () => {
-      const before = await governedCounts(profileZero);
+    // -----------------------------------------------------------------------
+    // Mixed role (owner decision 2026-10-11): a global gk_reviewer whose
+    // active membership in this organization is client_admin. The client
+    // Studio stays mounted; Reviews offers the existing sensitivity review for
+    // files at that stage, and every read and write still goes through the
+    // existing review-cockpit routes, which authorize this actor.
+    // -----------------------------------------------------------------------
+    const mixedActor = kaiUserIds.gkClientMember;
+    const mixedProfiles = {};
+    const mixedQueueItems = {};
+    const MIXED_ALLOWED_PASSIVE = new Set([`${COCKPIT}/capabilities`, `${COCKPIT}/queue`]);
+    function assertNoUnrelatedGkRequests(page, label, requests) {
+      for (const r of requests) {
+        const path = pathOf(r);
+        for (const fragment of ["/claim-library", "/evidence-library", "/eligible-claims", "/traceability", "/review-queue", "/sources",
+          "/evidence-items", "/source-versions", "/data-dictionaries", "/board-reporting"]) {
+          assert.ok(!path.includes(fragment), `${label}: unrelated GK request ${r.method} ${path}`);
+        }
+      }
+    }
+    function sensitivityWrites(requests) {
+      return posts(requests).filter(([path]) => path.startsWith(`${COCKPIT}/`));
+    }
+    const mixedBody = async () => mixedPage.text();
+
+    await test("case 9 (mixed role): the client Studio mounts, Reviews offers 'Review sensitivity & allowed use' only for files at that stage, and loading it reads no GK detail and writes nothing", async () => {
+      mixedProfiles.queue = await seedFreshFile(FILE_MIXED_QUEUE, NAMES.mixedQueue, "c");
+      mixedProfiles.zero = await seedFreshFile(FILE_MIXED_ZERO, NAMES.mixedZero, "d");
+      mixedProfiles.nmi = await seedFreshFile(FILE_MIXED_NMI, NAMES.mixedNmi, "e");
+      for (const key of ["queue", "nmi"]) {
+        const opened = await ensureSensitivityReviewQueueItem(
+          { organizationId: ORG, intakeSensitivityProfileId: mixedProfiles[key], actorContext: gkReviewerService, now: new Date().toISOString() },
+          { env: ENV, metadataOnlyAudit: noAudit() },
+        );
+        assert.equal(opened.ok, true, JSON.stringify(opened));
+        mixedQueueItems[key] = opened.data.reviewQueueItem.review_queue_item_id;
+      }
+
+      const mark = mixedPage.mark();
       const body = await clientReviewsTab(mixedPage);
       const tabs = await mixedPage.evaluate(`[...document.querySelectorAll(".nav-tabs button")].map((el) => el.innerText.trim())`);
       assert.deepEqual(tabs, ["Files", "Evidence", "Gaps", "Funder Requirements", "Generated Drafts", "Reviews"], "the client Studio, not the GK one");
       const note = await mixedPage.evaluate(`(() => { const el = document.querySelector("[data-get-kinder-review-access]"); return el ? el.innerText : null; })()`);
       console.log(`[sensitivity-review-browser] mixed-role access note: ${note}`);
-      assert.match(note, /^Your Get Kinder role can complete this organization's sensitivity reviews, but your membership in this organization is not a Get Kinder membership/);
-      const capabilities = mixedPage.requests().filter((r) => pathOf(r) === `/api/kai/sprint2/intake/admin/organizations/${ORG}/access-capabilities`);
-      assert.ok(capabilities.length >= 1 && capabilities.every((r) => r.status === 200));
-      // The existing sensitivity read route authorizes this actor (read only; nothing is decided here).
-      const read = await mixedPage.fetchJson("GET", profilePath(profileZero));
-      assert.equal(read.status, 200, JSON.stringify(read));
-      for (const control of GK_CONTROLS) assert.ok(!body.includes(control), `no GK control rendered in the client Studio: ${control}`);
-      assert.deepEqual(await governedCounts(profileZero), before, "nothing persisted");
+      assert.match(note, /^Your Get Kinder role can complete this organization's sensitivity reviews here/);
+      assert.ok(!note.includes("Contact a Get Kinder administrator"), "an authorized reviewer is not sent elsewhere for this review");
+      // Files at sensitivity review (FILE_QUEUE is already at source review).
+      assert.deepEqual(await mixedPage.fileReviewActionIds(), [FILE_ZERO, FILE_MIXED_QUEUE, FILE_MIXED_ZERO, FILE_MIXED_NMI].sort());
+      assert.ok(body.includes(`${NAMES.queue}: Source review (Waiting for Get Kinder)`));
+      assert.equal(await mixedPage.reviewPanelFileId(), null, "no review panel until the reviewer opens one");
+      const since = mixedPage.requestsSince(mark);
+      for (const r of since) {
+        const path = pathOf(r);
+        if (path.includes("/review-cockpit")) assert.ok(MIXED_ALLOWED_PASSIVE.has(path), `no GK lookup or detail read on load: ${r.method} ${path}`);
+      }
+      assert.equal(posts(since).length, 0, "loading the client Studio writes nothing");
+      assertNoUnrelatedGkRequests(mixedPage, "case 9", since);
       assert.deepEqual(mixedPage.exceptions, []);
-      results.case9_mixed_role_gap = "PASS (gap demonstrated, message accurate)";
+      results.case9_mixed_role_action_offered = "PASS";
+    });
+
+    await test("case 10 (mixed role, existing review work): opening the review reads the file's profile and reuses its queue item; 'reviewed' records one decision, resolves the item, and hands off one needs_gk_review candidate - nothing downstream", async () => {
+      const profileId = mixedProfiles.queue;
+      let mark = mixedPage.mark();
+      await mixedPage.clickFileReviewAction(FILE_MIXED_QUEUE);
+      await mixedPage.waitFor(() => mixedPage.visibleButton("Submit review"), "the shared decision form");
+      await mixedPage.idle();
+      let since = mixedPage.requestsSince(mark);
+      assert.deepEqual(since.filter((r) => r.method === "GET" && pathOf(r).includes("/review-cockpit/")).map((r) => [pathOf(r), r.status]), [
+        [`${COCKPIT}/intake-files/${FILE_MIXED_QUEUE}/sensitivity-profile`, 200],
+        [`${COCKPIT}/sensitivity-profiles/${profileId}`, 200],
+      ], "the existing file lookup, then the profile detail");
+      assert.equal(posts(since).length, 0, "opening the review writes nothing");
+      assert.equal(await mixedPage.reviewPanelFileId(), FILE_MIXED_QUEUE);
+      let body = await mixedBody();
+      assert.ok(body.includes(NAMES.mixedQueue));
+      assert.ok(body.includes("open / needs_gk_review"), "the existing queue item is shown");
+      assert.ok(!(await mixedPage.visibleButton("Start review work")), "no start action when review work exists");
+      for (const field of ["Personal data", "Minor data", "Consent basis", "Ordinary KAI processing (allowed use)"]) assert.ok(body.includes(field), field);
+
+      const before = await governedCounts(profileId, mixedActor);
+      const beforeAll = await allKaiCounts();
+      await mixedPage.setFormRow("Personal data", "present");
+      await mixedPage.setFormRow("Minor data", "absent");
+      mark = mixedPage.mark();
+      await mixedPage.clickButton("Submit review");
+      await mixedPage.waitForText("Sensitivity decision recorded.");
+      await mixedPage.waitForText(`${NAMES.mixedQueue}: Source review (Waiting for Get Kinder)`);
+      await mixedPage.idle();
+      since = mixedPage.requestsSince(mark);
+      console.log(`[sensitivity-review-browser] mixed requests after Submit review: ${JSON.stringify(since.map((r) => [r.method, pathOf(r), r.status]))}`);
+      assert.deepEqual(sensitivityWrites(since), [[`${COCKPIT}/sensitivity-profiles/${profileId}/decision`, 200]], "exactly the existing decision request");
+      assert.equal(posts(since).length, 1, "no other write");
+      assert.ok(since.some((r) => r.method === "GET" && r.url.endsWith(profilePath(profileId)) && r.status === 200), "authoritative re-read");
+      assert.ok(since.some((r) => r.method === "GET" && pathOf(r).endsWith(`/engagements/${PROJECT}/client-evidence-pipeline`) && r.status === 200),
+        "the client pipeline is re-read");
+      const delta = diff(before, await governedCounts(profileId, mixedActor));
+      console.log(`[sensitivity-review-browser] mixed existing-queue governed delta: ${JSON.stringify(delta)}`);
+      assert.deepEqual(delta, {
+        decisions: 1, sensitivity_queue: 0, decision_audits: 1, lifecycle_audits: 1, source_candidates: 1, source_queue: 1,
+        sources: 0, source_versions: 0, evidence: 0, claims: 0,
+      });
+      const tables = changedTables(beforeAll, await allKaiCounts());
+      console.log(`[sensitivity-review-browser] mixed existing-queue changed tables: ${JSON.stringify(tables)}`);
+      assert.deepEqual(tables, ["audit_events", "intake_sensitivity_review_decisions", "intake_source_candidates", "review_queue_items", "upload_lifecycle_audit"],
+        "no promotion, source, source version, evidence, claim, generated output, export, or release-authority row");
+      const queue = await sensitivityQueueRow(profileId);
+      assert.equal(queue.review_queue_item_id, mixedQueueItems.queue, "the existing queue item was reused");
+      assert.deepEqual([queue.queue_status, queue.review_status], ["resolved", "resolved"]);
+      const decisions = await query(
+        "SELECT decision_outcome, decided_by::text, decided_by_role FROM kai.intake_sensitivity_review_decisions WHERE organization_id = $1::uuid AND intake_sensitivity_profile_id = $2::uuid",
+        [ORG, profileId]);
+      assert.deepEqual(decisions, [{ decision_outcome: "reviewed", decided_by: mixedActor, decided_by_role: "gk_reviewer" }]);
+      const candidates = await query(
+        "SELECT candidate_status, created_by::text FROM kai.intake_source_candidates WHERE organization_id = $1::uuid AND intake_sensitivity_profile_id = $2::uuid",
+        [ORG, profileId]);
+      assert.deepEqual(candidates, [{ candidate_status: "needs_gk_review", created_by: mixedActor }]);
+      body = await mixedBody();
+      assert.ok(body.includes("Source-candidate handoff completed"));
+      assert.ok(body.includes("No source has been approved or promoted."));
+      assert.match(body, /Outcome\s*reviewed/);
+      assert.deepEqual(mixedPage.exceptions, []);
+      results.case10_mixed_existing_queue_reviewed = "PASS";
+    });
+
+    await test("case 11 (mixed role, zero review work): 'Start review work' is an explicit step that creates one item and its audit; reopening reuses it; the 'reviewed' decision then hands off", async () => {
+      const profileId = mixedProfiles.zero;
+      await mixedPage.clickButton("Close review");
+      let mark = mixedPage.mark();
+      await mixedPage.clickFileReviewAction(FILE_MIXED_ZERO);
+      await mixedPage.waitForText("No sensitivity review work has been started for this source yet.");
+      await mixedPage.waitFor(() => mixedPage.visibleButton("Start review work"), "the explicit start action");
+      await mixedPage.idle();
+      assert.equal(posts(mixedPage.requestsSince(mark)).length, 0, "opening the review writes nothing");
+      assert.equal(await sensitivityQueueRow(profileId), null, "no review work exists yet");
+      assert.ok(!(await mixedPage.visibleButton("Submit review")), "no decision form before review work exists");
+
+      const beforeWork = await allKaiCounts();
+      mark = mixedPage.mark();
+      await mixedPage.clickButton("Start review work");
+      await mixedPage.waitFor(() => mixedPage.visibleButton("Submit review"), "the decision form after review work starts");
+      await mixedPage.idle();
+      let since = mixedPage.requestsSince(mark);
+      assert.deepEqual(posts(since), [[`${COCKPIT}/sensitivity-profiles/${profileId}/review-work`, 201]]);
+      assert.ok(since.some((r) => r.method === "GET" && r.url.endsWith(profilePath(profileId)) && r.status === 200), "authoritative re-read");
+      assert.deepEqual(changedTables(beforeWork, await allKaiCounts()), ["audit_events", "review_queue_items", "upload_lifecycle_audit"]);
+      const created = await sensitivityQueueRow(profileId);
+      assert.deepEqual([created.queue_status, created.review_status], ["open", "needs_gk_review"]);
+      const [workAudit] = await query(
+        `SELECT count(*)::int AS count FROM kai.audit_events
+          WHERE organization_id = $1::uuid AND action = 'sensitivity_review_queue_item_created' AND actor_user_id = $2::uuid AND metadata->>'object_id' = $3`,
+        [ORG, mixedActor, profileId]);
+      assert.equal(workAudit.count, 1, "the review-work audit, attributed to the mixed-role reviewer");
+      assert.equal((await decisionHead(profileId)).length, 0, "starting review work records no decision");
+
+      // Leave and come back: the existing item is reused, never duplicated.
+      await mixedPage.clickTab("Files");
+      await mixedPage.clickTab("Reviews");
+      await mixedPage.waitForText("Waiting for Get Kinder review");
+      await mixedPage.idle();
+      assert.equal(await mixedPage.reviewPanelFileId(), null, "leaving Reviews closes the panel");
+      mark = mixedPage.mark();
+      await mixedPage.clickFileReviewAction(FILE_MIXED_ZERO);
+      await mixedPage.waitFor(() => mixedPage.visibleButton("Submit review"), "the decision form on revisit");
+      await mixedPage.idle();
+      assert.equal(posts(mixedPage.requestsSince(mark)).length, 0, "revisiting writes nothing");
+      assert.ok(!(await mixedPage.visibleButton("Start review work")));
+      assert.equal((await query("SELECT count(*)::int AS count FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = 'sensitivity_review' AND target_object_id = $2::uuid",
+        [ORG, profileId]))[0].count, 1, "still exactly one review item");
+
+      const before = await governedCounts(profileId, mixedActor);
+      mark = mixedPage.mark();
+      await mixedPage.clickButton("Submit review");
+      await mixedPage.waitForText("Sensitivity decision recorded.");
+      await mixedPage.waitForText(`${NAMES.mixedZero}: Source review (Waiting for Get Kinder)`);
+      await mixedPage.idle();
+      since = mixedPage.requestsSince(mark);
+      assert.deepEqual(posts(since), [[`${COCKPIT}/sensitivity-profiles/${profileId}/decision`, 200]]);
+      assert.deepEqual(diff(before, await governedCounts(profileId, mixedActor)), {
+        decisions: 1, sensitivity_queue: 0, decision_audits: 1, lifecycle_audits: 1, source_candidates: 1, source_queue: 1,
+        sources: 0, source_versions: 0, evidence: 0, claims: 0,
+      });
+      const queue = await sensitivityQueueRow(profileId);
+      assert.equal(queue.review_queue_item_id, created.review_queue_item_id);
+      assert.deepEqual([queue.queue_status, queue.review_status], ["resolved", "resolved"]);
+      assert.deepEqual((await decisionHead(profileId)).map((d) => [d.decision_outcome, d.decided_by]), [["reviewed", mixedActor]]);
+      assert.ok((await mixedBody()).includes("Source-candidate handoff completed"));
+      assert.deepEqual(mixedPage.exceptions, []);
+      results.case11_mixed_zero_queue = "PASS";
+    });
+
+    await test("case 12 (mixed role): 'needs_more_information' stays open with no candidate, and a decision made stale underneath is refused (409) and refreshed, never overridden", async () => {
+      const profileId = mixedProfiles.nmi;
+      await mixedPage.clickButton("Close review");
+      await mixedPage.clickFileReviewAction(FILE_MIXED_NMI);
+      await mixedPage.waitFor(() => mixedPage.visibleButton("Needs more information"), "the decision form");
+      await mixedPage.idle();
+      const before = await governedCounts(profileId, mixedActor);
+      let mark = mixedPage.mark();
+      await mixedPage.clickButton("Needs more information");
+      await mixedPage.waitForText("Marked as needing more information.");
+      await mixedPage.idle();
+      assert.deepEqual(posts(mixedPage.requestsSince(mark)), [[`${COCKPIT}/sensitivity-profiles/${profileId}/decision`, 200]]);
+      assert.deepEqual(diff(before, await governedCounts(profileId, mixedActor)), {
+        decisions: 1, sensitivity_queue: 0, decision_audits: 1, lifecycle_audits: 1, source_candidates: 0, source_queue: 0,
+        sources: 0, source_versions: 0, evidence: 0, claims: 0,
+      });
+      let queue = await sensitivityQueueRow(profileId);
+      assert.deepEqual([queue.queue_status, queue.review_status], ["open", "needs_gk_review"], "the review stays open");
+      let body = await mixedBody();
+      assert.ok(body.includes("The sensitivity review stays open; no source candidate is created."));
+      assert.ok(!body.includes("Source-candidate handoff completed"));
+      assert.ok(body.includes(`${NAMES.mixedNmi}: Sensitivity review (Waiting for Get Kinder)`), "the file is still at sensitivity review");
+
+      // Another reviewer records a decision after this form was loaded.
+      const loadedStamp = new Date(queue.updated_at).toISOString();
+      const elsewhere = await submitSensitivityProfileDecision({
+        organizationId: ORG, intakeSensitivityProfileId: profileId, actorContext: gkReviewerService,
+        payload: { expected_updated_at: loadedStamp, review_queue_item_id: queue.review_queue_item_id, decision: "needs_more_information" },
+      }, { env: ENV, metadataOnlyAudit: noAudit() });
+      assert.equal(elsewhere.ok, true, JSON.stringify(elsewhere));
+      const beforeStale = await governedCounts(profileId, mixedActor);
+      mark = mixedPage.mark();
+      await mixedPage.clickButton("Submit review");
+      await mixedPage.waitForText("Sensitivity review state changed since this was loaded - showing the refreshed state.");
+      await mixedPage.idle();
+      const since = mixedPage.requestsSince(mark);
+      assert.deepEqual(posts(since), [[`${COCKPIT}/sensitivity-profiles/${profileId}/decision`, 409]], "one refused request, not retried");
+      assert.ok(since.some((r) => r.method === "GET" && r.url.endsWith(profilePath(profileId)) && r.status === 200), "refreshed");
+      assert.deepEqual(await governedCounts(profileId, mixedActor), beforeStale, "the stale decision persisted nothing");
+      queue = await sensitivityQueueRow(profileId);
+      assert.deepEqual([queue.queue_status, queue.review_status], ["open", "needs_gk_review"]);
+      body = await mixedBody();
+      assert.ok(!body.includes("Sensitivity decision recorded."), "a refused decision is never shown as recorded");
+      assert.deepEqual(mixedPage.exceptions, []);
+      results.case12_mixed_needs_more_information_and_stale = "PASS";
+    });
+
+    await test("case 13 (mixed role): when the P1-07 handoff refuses, the recorded decision is shown with 'Source candidate not created', nothing is retried, and no candidate exists", async () => {
+      // Review work first (the P1-06 predicate holds), then, in this throwaway
+      // runner database only, make the profile fail the P1-07 predicate - the
+      // same technique as the P1-07 handoff integration scenario E.
+      mixedProfiles.notCreated = await seedFreshFile(FILE_MIXED_NOT_CREATED, NAMES.mixedNotCreated, "f");
+      const opened = await ensureSensitivityReviewQueueItem(
+        { organizationId: ORG, intakeSensitivityProfileId: mixedProfiles.notCreated, actorContext: gkReviewerService, now: new Date().toISOString() },
+        { env: ENV, metadataOnlyAudit: noAudit() },
+      );
+      assert.equal(opened.ok, true, JSON.stringify(opened));
+      await query("ALTER TABLE kai.intake_sensitivity_profiles DROP CONSTRAINT intake_sensitivity_profiles_p1_05_public_use_check");
+      await query("UPDATE kai.intake_sensitivity_profiles SET public_use_allowed = true WHERE intake_sensitivity_profile_id = $1::uuid", [mixedProfiles.notCreated]);
+      await query("ALTER TABLE kai.intake_sensitivity_profiles ADD CONSTRAINT intake_sensitivity_profiles_p1_05_public_use_check CHECK (public_use_allowed = false) NOT VALID");
+
+      await mixedPage.clickButton("Close review");
+      await mixedPage.clickTab("Files");
+      await mixedPage.clickTab("Reviews");
+      await mixedPage.waitFor(async () => (await mixedPage.fileReviewActionIds()).includes(FILE_MIXED_NOT_CREATED), "the new file's action");
+      await mixedPage.idle();
+      await mixedPage.clickFileReviewAction(FILE_MIXED_NOT_CREATED);
+      await mixedPage.waitFor(() => mixedPage.visibleButton("Submit review"), "the decision form");
+      await mixedPage.idle();
+      const profileId = mixedProfiles.notCreated;
+      const before = await governedCounts(profileId, mixedActor);
+      const mark = mixedPage.mark();
+      await mixedPage.clickButton("Submit review");
+      await mixedPage.waitForText("Source candidate not created");
+      await mixedPage.idle();
+      await new Promise((r) => setTimeout(r, 1500));
+      await mixedPage.idle();
+      assert.deepEqual(posts(mixedPage.requestsSince(mark)), [[`${COCKPIT}/sensitivity-profiles/${profileId}/decision`, 200]], "exactly one decision; never retried");
+      assert.deepEqual(diff(before, await governedCounts(profileId, mixedActor)), {
+        decisions: 1, sensitivity_queue: 0, decision_audits: 1, lifecycle_audits: 1, source_candidates: 0, source_queue: 0,
+        sources: 0, source_versions: 0, evidence: 0, claims: 0,
+      });
+      const body = await mixedBody();
+      console.log(`[sensitivity-review-browser] not_created panel: ${body.slice(body.indexOf("Sensitivity decision recorded."), body.indexOf("Sensitivity decision recorded.") + 500)}`);
+      assert.ok(body.includes("Sensitivity decision recorded."), "the committed decision is shown");
+      assert.ok(body.includes("validation_blocker"), "the handoff's error code is shown");
+      assert.ok(body.includes("it does not retry this handoff"), "a resubmission is not presented as a retry");
+      assert.ok(!body.includes("Source-candidate handoff completed"));
+      assert.match(body, /Outcome\s*reviewed/);
+      assert.deepEqual(mixedPage.exceptions, []);
+      results.case13_mixed_handoff_not_created = "PASS";
+    });
+
+    await test("case 14: an ordinary client never gets the action or GK data; a non-member GK reviewer cannot look up this organization's file; changing project or organization clears the panel and a late answer populates nothing", async () => {
+      const clientMark = clientPage.mark();
+      const clientBody = await clientReviewsTab(clientPage);
+      assert.deepEqual(await clientPage.fileReviewActionIds(), []);
+      assert.ok(clientBody.includes(`${NAMES.mixedNmi}: Sensitivity review (Waiting for Get Kinder)`));
+      assertClientBoundary(clientPage, "case 14", clientBody, clientPage.requestsSince(clientMark));
+      assertNoUnrelatedGkRequests(clientPage, "case 14", clientPage.requestsSince(clientMark));
+
+      const lookup = await outsiderPage.fetchJson("GET", `${COCKPIT}/intake-files/${FILE_MIXED_NMI}/sensitivity-profile?organization_id=${ORG}`);
+      assert.equal(lookup.status, 403, JSON.stringify(lookup));
+
+      const beforeAll = await allKaiCounts();
+      await clientReviewsTab(twoOrgPage);
+      // Project change closes the panel.
+      await twoOrgPage.clickFileReviewAction(FILE_MIXED_NMI);
+      await twoOrgPage.waitFor(() => twoOrgPage.visibleButton("Submit review"), "the decision form");
+      await twoOrgPage.idle();
+      await twoOrgPage.selectProject(PROJECT_2);
+      await twoOrgPage.waitFor(async () => (await twoOrgPage.reviewPanelFileId()) === null, "the panel to close on project change");
+      await twoOrgPage.idle();
+      assert.ok(!(await twoOrgPage.text()).includes(NAMES.mixedNmi), "no previous-project file shown");
+      await twoOrgPage.selectProject(PROJECT);
+      await twoOrgPage.waitFor(async () => (await twoOrgPage.fileReviewActionIds()).includes(FILE_MIXED_NMI), "the project's actions");
+      await twoOrgPage.idle();
+      assert.equal(await twoOrgPage.reviewPanelFileId(), null, "returning does not reopen the panel");
+
+      // File change replaces the panel.
+      await twoOrgPage.clickFileReviewAction(FILE_MIXED_NMI);
+      await twoOrgPage.waitFor(() => twoOrgPage.visibleButton("Submit review"), "the NMI form");
+      await twoOrgPage.idle();
+      await twoOrgPage.clickFileReviewAction(FILE_ZERO);
+      await twoOrgPage.waitFor(async () => (await twoOrgPage.reviewPanelFileId()) === FILE_ZERO, "the panel to switch files");
+      await twoOrgPage.waitFor(() => twoOrgPage.visibleButton("Submit review"), "the other file's form");
+      await twoOrgPage.idle();
+      const panelText = await twoOrgPage.evaluate(`document.querySelector("[data-client-sensitivity-review-panel]").innerText`);
+      assert.ok(panelText.includes(NAMES.zero) && !panelText.includes(NAMES.mixedNmi), "only the selected file's review is shown");
+
+      // A late detail answer for Organization A arrives after switching to B.
+      await twoOrgPage.clickButton("Close review");
+      const hold = await twoOrgPage.holdResponses("*/review-cockpit/sensitivity-profiles/*");
+      const mark = twoOrgPage.mark();
+      await twoOrgPage.clickFileReviewAction(FILE_MIXED_NMI);
+      await twoOrgPage.waitFor(async () => hold.pausedUrls().length > 0, "the held Organization A detail response");
+      // The switcher lists organization ids (no display binding in this fixture).
+      await twoOrgPage.switchOrganization(ORG_B);
+      await twoOrgPage.waitFor(async () => twoOrgPage.evaluate(`Boolean(document.querySelector(".nav-tabs")
+        && !document.querySelector('#gk-shell-project-select option[value="${PROJECT}"]'))`), "Organization B's Studio");
+      await new Promise((r) => setTimeout(r, 500));
+      await hold.release();
+      await new Promise((r) => setTimeout(r, 1000));
+      await twoOrgPage.idle();
+      const orgBBody = await twoOrgPage.text();
+      assert.equal(await twoOrgPage.reviewPanelFileId(), null, "no review panel in Organization B");
+      for (const name of Object.values(NAMES)) assert.ok(!orgBBody.includes(name), `Organization B shows no Organization A file: ${name}`);
+      assert.ok(!orgBBody.includes("What KAI detected"));
+      assert.deepEqual(await twoOrgPage.fileReviewActionIds(), []);
+      const afterSwitch = twoOrgPage.requestsSince(mark).filter((r) => !pathOf(r).includes(`/sensitivity-profiles/${mixedProfiles.nmi}`)
+        && !pathOf(r).includes(`/intake-files/${FILE_MIXED_NMI}/`));
+      for (const r of afterSwitch) {
+        if (r.url.includes(ORG)) assert.fail(`no further Organization A request after the switch: ${r.method} ${pathOf(r)}`);
+      }
+      assert.equal(posts(twoOrgPage.requestsSince(mark)).length, 0);
+      assert.deepEqual(changedTables(beforeAll, await allKaiCounts()), [], "context switching wrote nothing");
+      assert.deepEqual(twoOrgPage.exceptions, []);
+      results.case14_isolation = "PASS";
     });
 
     console.log(`[sensitivity-review-browser] results ${JSON.stringify(results)}`);
@@ -714,6 +1113,7 @@ async function runBrowserAcceptance() {
     await clientPage.close().catch(() => {});
     await outsiderPage.close().catch(() => {});
     await mixedPage.close().catch(() => {});
+    await twoOrgPage.close().catch(() => {});
     await browser.close();
     await new Promise((resolve) => server.close(resolve));
     await seedPool.end();

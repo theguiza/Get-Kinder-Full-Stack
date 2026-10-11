@@ -5,6 +5,7 @@ import ImpactLibraryKai from "../ImpactLibraryKai.jsx";
 import ClientFunderRequirements from "./ClientFunderRequirements.jsx";
 import ClientGeneratedDrafts from "./ClientGeneratedDrafts.jsx";
 import ClientEvidencePipelineStatus from "./ClientEvidencePipelineStatus.jsx";
+import ClientSensitivityReviewPanel from "./ClientSensitivityReviewPanel.jsx";
 import useClientEvidencePipeline from "./useClientEvidencePipeline.js";
 import {
   GET_KINDER_STAGE_DESCRIPTIONS,
@@ -13,6 +14,7 @@ import {
   getKinderReviewAccessText,
   pipelineReasonMessage,
   reviewsTabView,
+  sensitivityReviewActionAvailable,
   stageStatusLabel,
 } from "./clientEvidencePipelineLogic.js";
 import { CLIENT_FOLLOWUP_REVIEW_HREF } from "../impactEvidenceLibraryLogic.js";
@@ -95,7 +97,17 @@ function PipelineReasonList({ reasons }) {
  * everyone else sees who the project's files are waiting on, never a GK
  * queue. Reviews also says whether this actor may perform Get Kinder reviews
  * (`getKinderReviewAccess`, the shell's existing review-cockpit capabilities
- * answer); no Get Kinder review control is ever rendered here.
+ * answer, for the organization named by `getKinderReviewAccessOrganizationId`).
+ *
+ * One Get Kinder review is offered here: when that answer is "allowed" for
+ * the selected organization (a global Get Kinder reviewer whose membership in
+ * this organization is a client role - owner decision 2026-10-11), a file at
+ * the sensitivity review stage gets "Review sensitivity & allowed use", which
+ * opens ClientSensitivityReviewPanel. Only that explicit action issues the
+ * panel's review-cockpit reads; the review-work and decision writes need a
+ * further explicit action in the panel. The selection is keyed to
+ * organization + Project and cleared on leaving Reviews, so a stale panel is
+ * never rendered for another context.
  */
 export default function ClientKnowledgeStudio({
   organizationId,
@@ -103,6 +115,7 @@ export default function ClientKnowledgeStudio({
   onEngagementIdChange,
   capabilities,
   getKinderReviewAccess = "unknown",
+  getKinderReviewAccessOrganizationId = "",
   facts,
   onViewImpactLibrary,
 }) {
@@ -118,8 +131,22 @@ export default function ClientKnowledgeStudio({
   const [pipelineRefresh, setPipelineRefresh] = useState(0);
   const pipeline = useClientEvidencePipeline(organizationId, engagementId, pipelineRefresh);
   const refreshPipeline = () => setPipelineRefresh((value) => value + 1);
+  // The review-cockpit capabilities answer counts only for the organization
+  // it was read for.
+  const reviewAccess = organizationId && getKinderReviewAccessOrganizationId === organizationId ? getKinderReviewAccess : "unknown";
+  const canReviewSensitivity = reviewAccess === "allowed" && Boolean(capabilities);
+  const reviewContextKey = organizationId && engagementId ? `${organizationId}:${engagementId}` : "";
+  const [sensitivityReviewSelection, setSensitivityReviewSelection] = useState(null);
+  useEffect(() => {
+    setSensitivityReviewSelection(null);
+  }, [organizationId, engagementId]);
+  const openSensitivityReview = canReviewSensitivity && reviewContextKey && tab === "reviews"
+    && sensitivityReviewSelection?.contextKey === reviewContextKey
+    ? sensitivityReviewSelection
+    : null;
   const selectTab = (key) => {
     setTab(key);
+    if (key !== "reviews") setSensitivityReviewSelection(null);
     if (key !== tab && PIPELINE_TABS.has(key)) refreshPipeline();
   };
   const canContribute = capabilities?.intakeContribution === true;
@@ -245,8 +272,24 @@ export default function ClientKnowledgeStudio({
           <ProjectReviews
             view={engagementId ? reviewsTabView(pipeline) : null}
             canReviewFollowups={canReviewFollowups}
-            getKinderReviewAccessNote={getKinderReviewAccessText(getKinderReviewAccess, Boolean(capabilities))}
+            getKinderReviewAccessNote={getKinderReviewAccessText(reviewAccess, Boolean(capabilities))}
+            canReviewSensitivity={canReviewSensitivity}
+            onOpenSensitivityReview={(file) => setSensitivityReviewSelection({
+              contextKey: reviewContextKey,
+              intakeFileId: file.intakeFileId,
+              safeFilename: file.safeFilename,
+            })}
           />
+          {openSensitivityReview ? (
+            <ClientSensitivityReviewPanel
+              key={`${openSensitivityReview.contextKey}:${openSensitivityReview.intakeFileId}`}
+              organizationId={organizationId}
+              intakeFileId={openSensitivityReview.intakeFileId}
+              safeFilename={openSensitivityReview.safeFilename}
+              onClose={() => setSensitivityReviewSelection(null)}
+              onDecisionRecorded={refreshPipeline}
+            />
+          ) : null}
         </div>
       ) : null}
     </section>
@@ -311,7 +354,7 @@ function ProjectEvidence({ view, canReviewFollowups, onViewImpactLibrary, onOpen
   );
 }
 
-function ProjectReviews({ view, canReviewFollowups, getKinderReviewAccessNote }) {
+function ProjectReviews({ view, canReviewFollowups, getKinderReviewAccessNote, canReviewSensitivity, onOpenSensitivityReview }) {
   if (!view) {
     return (
       <>
@@ -365,14 +408,31 @@ function ProjectReviews({ view, canReviewFollowups, getKinderReviewAccessNote })
                   {GET_KINDER_STAGE_DESCRIPTIONS[file.currentStage] ? (
                     <div className="text-muted">{GET_KINDER_STAGE_DESCRIPTIONS[file.currentStage]}</div>
                   ) : null}
+                  {canReviewSensitivity && sensitivityReviewActionAvailable(file) ? (
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-outline-primary mt-1"
+                      data-sensitivity-review-file={file.intakeFileId}
+                      onClick={() => onOpenSensitivityReview(file)}
+                    >
+                      Review sensitivity &amp; allowed use
+                    </button>
+                  ) : null}
                 </li>
               );
             })}
           </ul>
-          <div className="mt-2">
-            Get Kinder reviewers complete these reviews in Get Kinder&rsquo;s own review workspace. This page shows the
-            result once a review is complete.
-          </div>
+          {canReviewSensitivity ? (
+            <div className="mt-2">
+              Sensitivity reviews can be completed here. Get Kinder reviewers complete the other reviews in Get
+              Kinder&rsquo;s own review workspace. This page shows the result once a review is complete.
+            </div>
+          ) : (
+            <div className="mt-2">
+              Get Kinder reviewers complete these reviews in Get Kinder&rsquo;s own review workspace. This page shows the
+              result once a review is complete.
+            </div>
+          )}
           <div className="mt-1" data-get-kinder-review-access="">{getKinderReviewAccessNote}</div>
         </div>
       ) : null}

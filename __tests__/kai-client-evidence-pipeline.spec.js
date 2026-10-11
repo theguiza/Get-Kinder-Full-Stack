@@ -25,8 +25,15 @@ import {
   projectClientEvidencePipeline,
   readClientEvidencePipeline,
   reviewsTabView,
+  sensitivityReviewActionAvailable,
   stageStatusLabel,
 } from "../frontend/knowledgeStudio/clientEvidencePipelineLogic.js";
+import {
+  buildSensitivityDecisionRequestBody,
+  defaultSensitivityReviewFormState,
+  projectSensitivityDecisionResult,
+  sensitivityReviewFormStateFromDecision,
+} from "../frontend/impactEvidenceLibraryLogic.js";
 
 /**
  * Client-safe Project evidence pipeline. The real service, stage derivation,
@@ -525,7 +532,7 @@ test("frontend source: Files shows the status card; Evidence uses the Project pi
   assert.match(studioSource, /\{tab === "files" && organizationId \? \(\s*<ClientEvidencePipelineStatus\s+request=\{pipeline\}/);
   assert.match(studioSource, /\{tab === "evidence" && engagementId \? \(\s*<ProjectEvidence\s+view=\{evidenceTabView\(pipeline\)\}/);
   assert.match(studioSource, /\{tab === "evidence" && !engagementId \? \(/);
-  assert.match(studioSource, /<ProjectReviews\s+view=\{engagementId \? reviewsTabView\(pipeline\) : null\}\s+canReviewFollowups=\{canReviewFollowups\}\s+getKinderReviewAccessNote=\{getKinderReviewAccessText\(getKinderReviewAccess, Boolean\(capabilities\)\)\}\s+\/>/);
+  assert.match(studioSource, /<ProjectReviews\s+view=\{engagementId \? reviewsTabView\(pipeline\) : null\}\s+canReviewFollowups=\{canReviewFollowups\}\s+getKinderReviewAccessNote=\{getKinderReviewAccessText\(reviewAccess, Boolean\(capabilities\)\)\}\s+canReviewSensitivity=\{canReviewSensitivity\}/);
   assert.match(statusSource, /Processing &amp; evidence status/);
   assert.match(statusSource, /file\.nextAction === "answer_client_followups" && canReviewFollowups \?/);
   // The org-wide zero message is reachable only without a selected Project.
@@ -550,7 +557,8 @@ test("frontend Reviews tab: each Get Kinder-owned stage is described, and a file
 
 test("frontend Reviews tab: whether this actor may perform Get Kinder reviews comes from the server answers, never assumed", () => {
   assert.match(getKinderReviewAccessText("not_allowed", true), /^Your account does not have Get Kinder reviewer access for this organization/);
-  assert.match(getKinderReviewAccessText("allowed", true), /^Your Get Kinder role can complete this organization's sensitivity reviews, but your membership/);
+  assert.match(getKinderReviewAccessText("allowed", true), /^Your Get Kinder role can complete this organization's sensitivity reviews here: use \u201cReview sensitivity & allowed use\u201d/);
+  assert.doesNotMatch(getKinderReviewAccessText("allowed", true), /Contact a Get Kinder administrator/);
   for (const [access, membershipKnown] of [["unknown", true], ["allowed", false], ["not_allowed", false], [undefined, true]]) {
     assert.match(getKinderReviewAccessText(access, membershipKnown), /could not be confirmed/, `${access}/${membershipKnown}`);
   }
@@ -560,4 +568,100 @@ test("frontend Reviews tab: whether this actor may perform Get Kinder reviews co
   assert.match(appSource, /getKinderReviewAccess=\{needsAttention\.sensitivityReviewAccess\}/);
   assert.match(needsAttentionSource, /sensitivityReviewAccess: sensitivityCapabilityRequestState === "success"\s+\? \(sensitivityCapability === true \? "allowed" : "not_allowed"\)\s+: "unknown",/);
   assert.doesNotMatch(studioSource, /sensitivityCapabilitiesPath|\/admin\/review-cockpit/);
+  // The answer is keyed to the organization it was read for, and the Studio
+  // uses it only for the selected organization.
+  assert.match(appSource, /getKinderReviewAccessOrganizationId=\{needsAttention\.sensitivityReviewAccessOrganizationId\}/);
+  assert.match(needsAttentionSource, /const capabilityIsCurrent = Boolean\(organizationId\) && sensitivityCapabilityState\.organizationId === organizationId;/);
+  assert.match(needsAttentionSource, /const sensitivityCapability = capabilityIsCurrent \? sensitivityCapabilityState\.capability : null;/);
+  assert.match(needsAttentionSource, /sensitivityReviewAccessOrganizationId: sensitivityCapabilityRequestState === "success" \? organizationId : "",/);
+  assert.match(studioSource, /const reviewAccess = organizationId && getKinderReviewAccessOrganizationId === organizationId \? getKinderReviewAccess : "unknown";/);
+});
+
+// ---------------------------------------------------------------------------
+// Mixed-role sensitivity review from Reviews (owner decision 2026-10-11)
+// ---------------------------------------------------------------------------
+
+const panelSource = readFileSync("frontend/knowledgeStudio/ClientSensitivityReviewPanel.jsx", "utf8");
+const sharedBodySource = readFileSync("frontend/SensitivityReviewCardBody.jsx", "utf8");
+
+test("sensitivity review action: offered only for a file at the Get Kinder sensitivity review stage", () => {
+  const file = { currentStage: "sensitivity_review", responsibleParty: "get_kinder", currentStatus: "waiting_for_get_kinder" };
+  assert.equal(sensitivityReviewActionAvailable(file), true);
+  for (const other of [
+    { ...file, currentStage: "source_review" },
+    { ...file, currentStage: "security_check" },
+    { ...file, responsibleParty: "client" },
+    { ...file, currentStatus: "failed" },
+    null,
+  ]) assert.equal(sensitivityReviewActionAvailable(other), false, JSON.stringify(other));
+});
+
+test("sensitivity decision result: a recorded decision and its P1-07 handoff are reported exactly as the server returned them", () => {
+  const ok = (handoff, outcome = "reviewed") => ({ statusCode: 200, body: { ok: true, data: { current_decision: { decision_outcome: outcome }, source_candidate_handoff: handoff } } });
+  assert.deepEqual(projectSensitivityDecisionResult(ok({ status: "created", candidate_status: "needs_gk_review", error_code: null }), "reviewed"), {
+    status: "recorded", outcome: "reviewed", handoff: { status: "created", candidateStatus: "needs_gk_review", errorCode: null },
+  });
+  assert.deepEqual(projectSensitivityDecisionResult(ok({ status: "not_created", candidate_status: null, error_code: "tenant_boundary_violation" }), "reviewed"), {
+    status: "recorded", outcome: "reviewed", handoff: { status: "not_created", candidateStatus: null, errorCode: "tenant_boundary_violation" },
+  }, "a failed handoff never hides the recorded decision");
+  assert.deepEqual(projectSensitivityDecisionResult(ok({ status: "not_applicable" }, "needs_more_information"), "needs_more_information").outcome, "needs_more_information");
+  assert.equal(projectSensitivityDecisionResult(ok({ status: "invented" }), "reviewed").handoff, null, "an unknown handoff status is not echoed");
+  assert.deepEqual(projectSensitivityDecisionResult({ statusCode: 409, body: { ok: false } }, "reviewed"), { status: "conflict" });
+  assert.deepEqual(projectSensitivityDecisionResult({ statusCode: 422, body: { ok: false, error: { message: "Blocked." } } }, "reviewed"), { status: "error", message: "Blocked." });
+  assert.equal(projectSensitivityDecisionResult({ statusCode: 200, body: { ok: false } }, "reviewed").status, "error");
+});
+
+test("sensitivity review form: a re-review is seeded from the current decision, a first review from the all-unknown default", () => {
+  assert.deepEqual(sensitivityReviewFormStateFromDecision(null), defaultSensitivityReviewFormState());
+  const seeded = sensitivityReviewFormStateFromDecision({
+    reviewed_personal_data_status: "present", reviewed_allowed_use_status: "allowed", reviewed_llm_processing_allowed: true, reviewed_public_use_allowed: "yes",
+  });
+  assert.equal(seeded.reviewed_personal_data_status, "present");
+  assert.equal(seeded.reviewed_minor_data_status, "unknown");
+  assert.equal(seeded.reviewed_allowed_use_status, "allowed");
+  assert.equal(seeded.reviewed_llm_processing_allowed, true);
+  assert.equal(seeded.reviewed_public_use_allowed, false, "only a literal true enables a permission");
+});
+
+test("client Studio: the review action and panel need this organization's 'allowed' answer, an engagement-keyed selection, and the Reviews tab", () => {
+  assert.match(studioSource, /const canReviewSensitivity = reviewAccess === "allowed" && Boolean\(capabilities\);/);
+  assert.match(studioSource, /const reviewContextKey = organizationId && engagementId \? `\$\{organizationId\}:\$\{engagementId\}` : "";/);
+  assert.match(studioSource, /const openSensitivityReview = canReviewSensitivity && reviewContextKey && tab === "reviews"\s+&& sensitivityReviewSelection\?\.contextKey === reviewContextKey/);
+  assert.match(studioSource, /if \(key !== "reviews"\) setSensitivityReviewSelection\(null\);/);
+  assert.match(studioSource, /useEffect\(\(\) => \{\s*setSensitivityReviewSelection\(null\);\s*\}, \[organizationId, engagementId\]\);/);
+  assert.match(studioSource, /\{canReviewSensitivity && sensitivityReviewActionAvailable\(file\) \? \(/);
+  assert.match(studioSource, /key=\{`\$\{openSensitivityReview\.contextKey\}:\$\{openSensitivityReview\.intakeFileId\}`\}/);
+  // The Studio itself still issues no request; only the panel does.
+  assert.doesNotMatch(studioSource, /getJson\(|postJson\(|fetch\(/);
+});
+
+test("client sensitivity panel: reads on explicit open only, writes only from explicit actions, never retries, and never calls P1-07 directly", () => {
+  // Reads: the existing file -> profile lookup on mount (mounted only by the
+  // reviewer's click), then the profile detail.
+  assert.equal((panelSource.match(/getJson\(/g) || []).length, 2);
+  assert.match(panelSource, /getJson\(intakeFileSensitivityProfilePath\(organizationId, intakeFileId\)\)/);
+  assert.match(panelSource, /getJson\(sensitivityProfilePath\(organizationId, profileId\)\)/);
+  // Writes: review work and the decision, each only inside its own handler.
+  assert.equal((panelSource.match(/postJson\(/g) || []).length, 2);
+  const start = panelSource.slice(panelSource.indexOf("const startReviewWork"), panelSource.indexOf("const submitDecision"));
+  assert.match(start, /postJson\(sensitivityReviewWorkPath\(organizationId, profileId\), \{\}\)/);
+  const submit = panelSource.slice(panelSource.indexOf("const submitDecision"), panelSource.lastIndexOf("return (\n    <div"));
+  assert.match(submit, /buildSensitivityDecisionRequestBody\(\{\s*decision,\s*expectedUpdatedAt: queueItem\.updated_at,\s*reviewQueueItemId: queueItem\.review_queue_item_id,\s*formState,\s*\}\)/);
+  assert.equal((submit.match(/postJson\(/g) || []).length, 1, "one decision request per click, never retried");
+  assert.match(submit, /await loadDetail\(profileId\);/);
+  const mountEffect = panelSource.slice(panelSource.indexOf("useEffect(() => {\n    (async () => {"), panelSource.indexOf("const profileId = lookup.profileId;"));
+  assert.doesNotMatch(mountEffect, /postJson|startReviewWork|submitDecision/, "opening the panel writes nothing");
+  for (const forbidden of ["createSourceCandidateStub", "source-candidates", "boardReporting", "claimLibrary", "evidenceLibrary", "submitSourceCandidateDecision"]) {
+    assert.doesNotMatch(panelSource, new RegExp(forbidden), forbidden);
+  }
+  // Late answers: discarded after unmount or when superseded.
+  assert.match(panelSource, /if \(!mountedRef\.current \|\| detailSeqRef\.current !== requestSeq\) return;/);
+  // A failed handoff is reported with the recorded decision and never offered as a retry.
+  assert.match(panelSource, /Source candidate not created \(error: \{handoff\.errorCode \|\| "unknown"\}\)/);
+  assert.match(panelSource, /it does not retry this handoff\./);
+  // The shared body owns no request and no effect.
+  assert.doesNotMatch(sharedBodySource, /getJson|postJson|fetch\(|useEffect/);
+  // The decision DTO is the existing builder's, unchanged.
+  assert.deepEqual(Object.keys(buildSensitivityDecisionRequestBody({ decision: "needs_more_information", expectedUpdatedAt: "t", reviewQueueItemId: "q" })).sort(),
+    ["decision", "expected_updated_at", "review_queue_item_id"]);
 });
