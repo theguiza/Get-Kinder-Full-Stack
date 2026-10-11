@@ -309,6 +309,45 @@ export function sensitivityReviewActionAvailable(file) {
 }
 
 /**
+ * What the Reviews tab says this actor must do, from a ready reviewsTabView.
+ * Client follow-ups and the Get Kinder sensitivity review are separate work:
+ * follow-ups need clientFollowupReview, and a sensitivity review counts only
+ * where the per-file action is offered (canReviewSensitivity and
+ * sensitivityReviewActionAvailable). "No action" is said only when neither
+ * applies.
+ */
+export function reviewsTabMessages(view, { canReviewFollowups = false, canReviewSensitivity = false } = {}) {
+  const clientCount = view.waitingForClient.length;
+  const sensitivityCount = canReviewSensitivity ? view.waitingForGetKinder.filter(sensitivityReviewActionAvailable).length : 0;
+  const messages = [];
+  if (clientCount > 0 && canReviewFollowups) {
+    messages.push({
+      key: "client_followups",
+      heading: "Your action is needed",
+      detail: `Get Kinder sent follow-up questions about evidence from ${pluralFiles(clientCount)} in this project. Evidence cannot be used until they are answered.`,
+    });
+  }
+  if (sensitivityCount > 0) {
+    messages.push({
+      key: "sensitivity_review",
+      heading: "Get Kinder sensitivity review needed",
+      detail: `${pluralFiles(sensitivityCount)} in this project ${sensitivityCount === 1 ? "is" : "are"} waiting for the Get Kinder sensitivity review, which your Get Kinder role can complete here. Use \u201cReview sensitivity & allowed use\u201d next to ${sensitivityCount === 1 ? "the file" : "each file"} below.`,
+    });
+  }
+  if (clientCount > 0 && !canReviewFollowups) {
+    messages.push({
+      key: "client_followups_elsewhere",
+      heading: sensitivityCount > 0 ? "Waiting for a client reviewer" : "No action is currently required from you.",
+      detail: `Follow-up questions about evidence from ${pluralFiles(clientCount)} are waiting for a client reviewer in your organization.`,
+    });
+  }
+  if (clientCount === 0 && sensitivityCount === 0) {
+    messages.push({ key: "none", heading: "No action is currently required from you.", detail: null });
+  }
+  return messages;
+}
+
+/**
  * What the Evidence tab shows for the selected project, from the explicit
  * request state. Only a successful read can produce a zero; an error is an
  * error.

@@ -24,6 +24,7 @@ import {
   pipelineReasonMessage,
   projectClientEvidencePipeline,
   readClientEvidencePipeline,
+  reviewsTabMessages,
   reviewsTabView,
   sensitivityReviewActionAvailable,
   stageStatusLabel,
@@ -594,6 +595,57 @@ test("sensitivity review action: offered only for a file at the Get Kinder sensi
     { ...file, currentStatus: "failed" },
     null,
   ]) assert.equal(sensitivityReviewActionAvailable(other), false, JSON.stringify(other));
+});
+
+test("Reviews messages: an offered sensitivity review is action-required, never 'no action'; client follow-ups stay client work", () => {
+  const atSensitivity = (n) => ({ intakeFileId: `s${n}`, currentStage: "sensitivity_review", responsibleParty: "get_kinder", currentStatus: "waiting_for_get_kinder" });
+  const atSource = { intakeFileId: "src", currentStage: "source_review", responsibleParty: "get_kinder", currentStatus: "waiting_for_get_kinder" };
+  const followup = (n) => ({ intakeFileId: `c${n}`, currentStatus: "waiting_for_client" });
+  const view = (waitingForClient, waitingForGetKinder) => ({ kind: "ready", waitingForClient, waitingForGetKinder });
+  const keys = (messages) => messages.map((m) => m.key);
+  const NO_ACTION = "No action is currently required from you.";
+  const said = (messages) => messages.flatMap((m) => [m.heading, m.detail]).filter(Boolean).join("\n");
+
+  // A: an authorized reviewer with files at sensitivity review.
+  const mixed = reviewsTabMessages(view([], [atSensitivity(1), atSensitivity(2), atSource]), { canReviewSensitivity: true });
+  assert.deepEqual(keys(mixed), ["sensitivity_review"]);
+  assert.equal(mixed[0].heading, "Get Kinder sensitivity review needed");
+  assert.equal(mixed[0].detail, "2 files in this project are waiting for the Get Kinder sensitivity review, which your Get Kinder role can complete here. "
+    + "Use \u201cReview sensitivity & allowed use\u201d next to each file below.", "counts only files the action is offered for");
+  assert.doesNotMatch(said(mixed), /No action is currently required/);
+  assert.match(reviewsTabMessages(view([], [atSensitivity(1)]), { canReviewSensitivity: true })[0].detail, /^1 file in this project is waiting .* next to the file below\.$/);
+
+  // B: the same files, without the capability: unchanged no-action explanation, no GK work.
+  const client = reviewsTabMessages(view([], [atSensitivity(1), atSource]), { canReviewSensitivity: false });
+  assert.deepEqual(client, [{ key: "none", heading: NO_ACTION, detail: null }]);
+
+  // C: a qualified reviewer with no file at sensitivity review (other stages, or a failed file) gets no review task.
+  for (const files of [[], [atSource], [{ ...atSensitivity(1), currentStatus: "failed" }]]) {
+    assert.deepEqual(reviewsTabMessages(view([], files), { canReviewSensitivity: true }), [{ key: "none", heading: NO_ACTION, detail: null }], JSON.stringify(files));
+  }
+
+  // D: client follow-ups and a sensitivity review together.
+  const elsewhere = reviewsTabMessages(view([followup(1)], [atSensitivity(1)]), { canReviewSensitivity: true, canReviewFollowups: false });
+  assert.deepEqual(keys(elsewhere), ["sensitivity_review", "client_followups_elsewhere"]);
+  assert.equal(elsewhere[1].heading, "Waiting for a client reviewer");
+  assert.equal(elsewhere[1].detail, "Follow-up questions about evidence from 1 file are waiting for a client reviewer in your organization.");
+  assert.doesNotMatch(said(elsewhere), /No action is currently required|Your action is needed|Answer the follow-up/, "the GK reviewer is not told to answer client questions");
+  const both = reviewsTabMessages(view([followup(1), followup(2)], [atSensitivity(1)]), { canReviewSensitivity: true, canReviewFollowups: true });
+  assert.deepEqual(keys(both), ["client_followups", "sensitivity_review"]);
+  assert.equal(both[0].detail, "Get Kinder sent follow-up questions about evidence from 2 files in this project. Evidence cannot be used until they are answered.");
+  assert.doesNotMatch(said(both), /No action is currently required/);
+
+  // Unchanged for actors without the sensitivity action.
+  assert.deepEqual(reviewsTabMessages(view([followup(1)], []), { canReviewFollowups: false }), [{
+    key: "client_followups_elsewhere", heading: NO_ACTION,
+    detail: "Follow-up questions about evidence from 1 file are waiting for a client reviewer in your organization.",
+  }]);
+  assert.deepEqual(keys(reviewsTabMessages(view([followup(1)], [atSensitivity(1)]), { canReviewFollowups: true })), ["client_followups"]);
+
+  // The Studio renders these messages from the same two capability inputs as the per-file action.
+  assert.match(studioSource, /reviewsTabMessages\(view, \{ canReviewFollowups, canReviewSensitivity \}\)/);
+  const projectReviews = studioSource.slice(studioSource.indexOf("function ProjectReviews"));
+  assert.doesNotMatch(projectReviews, /No action is currently required/, "the no-action text comes only from reviewsTabMessages");
 });
 
 test("sensitivity decision result: a recorded decision and its P1-07 handoff are reported exactly as the server returned them", () => {

@@ -13,6 +13,7 @@ import {
   evidenceTabView,
   getKinderReviewAccessText,
   pipelineReasonMessage,
+  reviewsTabMessages,
   reviewsTabView,
   sensitivityReviewActionAvailable,
   stageStatusLabel,
@@ -369,28 +370,14 @@ function ProjectReviews({ view, canReviewFollowups, getKinderReviewAccessNote, c
   }
   if (view.kind === "loading") return <div className="text-muted small">Loading review status...</div>;
   if (view.kind === "error") return <div className="alert alert-warning py-2 small mb-0">Review status could not be loaded.</div>;
-  const clientCount = view.waitingForClient.length;
   return (
     <div className="small">
-      {clientCount > 0 && canReviewFollowups ? (
-        <div className="mb-2">
-          <div className="fw-semibold">Your action is needed</div>
-          <div>
-            Get Kinder sent follow-up questions about evidence from {clientCount === 1 ? "1 file" : `${clientCount} files`} in this
-            project. Evidence cannot be used until they are answered.
-          </div>
+      {reviewsTabMessages(view, { canReviewFollowups, canReviewSensitivity }).map((message) => (
+        <div key={message.key} className="mb-2" data-reviews-message={message.key}>
+          <div className="fw-semibold">{message.heading}</div>
+          {message.detail ? <div>{message.detail}</div> : null}
         </div>
-      ) : null}
-      {clientCount > 0 && !canReviewFollowups ? (
-        <div className="mb-2">
-          <div className="fw-semibold">No action is currently required from you.</div>
-          <div>
-            Follow-up questions about evidence from {clientCount === 1 ? "1 file" : `${clientCount} files`} are waiting for a client
-            reviewer in your organization.
-          </div>
-        </div>
-      ) : null}
-      {clientCount === 0 ? <div className="fw-semibold mb-2">No action is currently required from you.</div> : null}
+      ))}
       {canReviewFollowups ? (
         <a className="btn btn-sm btn-outline-primary mb-2" href={CLIENT_FOLLOWUP_REVIEW_HREF}>
           Answer follow-up questions

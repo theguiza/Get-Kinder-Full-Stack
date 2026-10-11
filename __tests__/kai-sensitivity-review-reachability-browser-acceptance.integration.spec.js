@@ -225,6 +225,12 @@ async function openPage(browser, { baseUrl, legacyUserId }) {
     selectRow: (rowText) => clickWhere(`Select on ${rowText}`, `() => [...document.querySelectorAll("li")]
       .filter((el) => el.offsetParent !== null && el.innerText.includes(${JSON.stringify(rowText)}))
       .map((li) => [...li.querySelectorAll("button")].find((b) => b.innerText.trim() === "Select")).find(Boolean)`),
+    // The rendered text of the visible card whose heading is `heading`.
+    cardText: (heading) => evaluate(`(() => {
+      const h = [...document.querySelectorAll("h5")].find((el) => el.offsetParent !== null && el.innerText.trim() === ${JSON.stringify(heading)});
+      const card = h && h.closest(".admin-card");
+      return card ? card.innerText : null;
+    })()`),
     clickInCard: (heading, label) => clickWhere(`${label} in ${heading}`, `() => {
       const h = [...document.querySelectorAll("h5")].find((el) => el.innerText.trim() === ${JSON.stringify(heading)});
       const card = h && h.closest(".admin-card");
@@ -555,6 +561,9 @@ async function runBrowserAcceptance() {
       assert.ok(body.includes(`${NAMES.queue}: Sensitivity review (Waiting for Get Kinder)`));
       assert.ok(body.includes(`${NAMES.zero}: Sensitivity review (Waiting for Get Kinder)`));
       assert.ok(body.includes("No action is currently required from you."));
+      const clientCard = await clientPage.cardText("Reviews");
+      assert.ok(clientCard.includes("No action is currently required from you."), "the ordinary client's Reviews card keeps the no-action explanation");
+      assert.ok(!clientCard.includes("Get Kinder sensitivity review needed"), "no Get Kinder review work is assigned to an ordinary client");
       assert.ok(body.includes("Get Kinder confirms how the file's information may be used"), "the sensitivity review is explained");
       assert.ok(body.includes("This is not an Evidence or Impact Fact review."));
       assert.ok(body.includes("Get Kinder reviewers complete these reviews in Get Kinder\u2019s own review workspace"), "where it is done");
@@ -805,6 +814,15 @@ async function runBrowserAcceptance() {
       // Files at sensitivity review (FILE_QUEUE is already at source review).
       assert.deepEqual(await mixedPage.fileReviewActionIds(), [FILE_ZERO, FILE_MIXED_QUEUE, FILE_MIXED_ZERO, FILE_MIXED_NMI].sort());
       assert.ok(body.includes(`${NAMES.queue}: Source review (Waiting for Get Kinder)`));
+      // The Reviews card offers the action, so it must not also say no action is needed.
+      const reviewsCard = await mixedPage.cardText("Reviews");
+      console.log(`[sensitivity-review-browser] mixed-role Reviews card:\n${reviewsCard}`);
+      assert.ok(reviewsCard.includes("Review sensitivity & allowed use"), "the Reviews card shows the authorized review action");
+      assert.ok(!reviewsCard.includes("No action is currently required from you."), "no contradictory no-action message beside the review action");
+      assert.ok(reviewsCard.includes("Get Kinder sensitivity review needed"), "the action-required message names the Get Kinder sensitivity review");
+      assert.ok(reviewsCard.includes("4 files in this project are waiting for the Get Kinder sensitivity review, which your Get Kinder role can complete here. "
+        + "Use \u201cReview sensitivity & allowed use\u201d next to each file below."), "it counts only the actionable files and points to the per-file action");
+      assert.ok(!reviewsCard.includes("Your action is needed"), "no client follow-up work is claimed");
       assert.equal(await mixedPage.reviewPanelFileId(), null, "no review panel until the reviewer opens one");
       const since = mixedPage.requestsSince(mark);
       for (const r of since) {
@@ -1045,6 +1063,9 @@ async function runBrowserAcceptance() {
       const clientBody = await clientReviewsTab(clientPage);
       assert.deepEqual(await clientPage.fileReviewActionIds(), []);
       assert.ok(clientBody.includes(`${NAMES.mixedNmi}: Sensitivity review (Waiting for Get Kinder)`));
+      const clientCard = await clientPage.cardText("Reviews");
+      assert.ok(clientCard.includes("No action is currently required from you."), "a pending GK review leaves the ordinary client's no-action explanation");
+      assert.ok(!clientCard.includes("Get Kinder sensitivity review needed"));
       assertClientBoundary(clientPage, "case 14", clientBody, clientPage.requestsSince(clientMark));
       assertNoUnrelatedGkRequests(clientPage, "case 14", clientPage.requestsSince(clientMark));
 
@@ -1061,6 +1082,12 @@ async function runBrowserAcceptance() {
       await twoOrgPage.waitFor(async () => (await twoOrgPage.reviewPanelFileId()) === null, "the panel to close on project change");
       await twoOrgPage.idle();
       assert.ok(!(await twoOrgPage.text()).includes(NAMES.mixedNmi), "no previous-project file shown");
+      // A qualified reviewer in a Project with no file at sensitivity review is given no review task.
+      await twoOrgPage.waitFor(async () => (await twoOrgPage.cardText("Reviews") || "").includes("No action is currently required from you."),
+        "the empty Project's no-action message");
+      const emptyProjectCard = await twoOrgPage.cardText("Reviews");
+      assert.deepEqual(await twoOrgPage.fileReviewActionIds(), []);
+      assert.ok(!emptyProjectCard.includes("Get Kinder sensitivity review needed"), "no fabricated sensitivity review task");
       await twoOrgPage.selectProject(PROJECT);
       await twoOrgPage.waitFor(async () => (await twoOrgPage.fileReviewActionIds()).includes(FILE_MIXED_NMI), "the project's actions");
       await twoOrgPage.idle();
