@@ -145,6 +145,98 @@ test("P1-07 service: accepts gk_admin, gk_operator, and gk_reviewer, and forward
   }
 });
 
+// Owner decision (2026-10-11): a mapped human holding a global gk_admin,
+// gk_operator, or gk_reviewer role may create the source-candidate stub in an
+// organization where their active membership is a client role.
+function mixedRoleActor(globalRole, overrides = {}) {
+  return humanActor({
+    kaiRoles: [globalRole],
+    organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_admin" }],
+    ...overrides,
+  });
+}
+
+test("P1-07 service (mixed role): a global gk_admin, gk_operator, or gk_reviewer with an active client_admin membership may create the source-candidate stub", async () => {
+  for (const role of ["gk_admin", "gk_operator", "gk_reviewer"]) {
+    const probe = createRepositoryProbe(successResult);
+    const result = await createSourceCandidateStub(
+      { organizationId: ORG, intakeSensitivityProfileId: PROFILE, actorContext: mixedRoleActor(role), now: NOW },
+      { env: enabled, sourceCandidateRepository: probe.sourceCandidateRepository },
+    );
+    assert.equal(result.ok, true, `${role}: ${JSON.stringify(result)}`);
+    assert.equal(probe.calls.length, 1, role);
+    assert.deepEqual(probe.calls[0].identity, { organizationId: ORG, intakeSensitivityProfileId: PROFILE });
+    assert.equal(probe.calls[0].actorUserId, "user-1");
+  }
+});
+
+test("P1-07 service (mixed role): a global GK role never substitutes for an active membership in the organization, for a human actor, or for an allowed role", async () => {
+  const denied = [
+    ["client_admin membership without a global GK role", humanActor({
+      organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_admin" }],
+    })],
+    ["global client_admin role", mixedRoleActor("client_admin")],
+    ["global gk_reviewer with no membership", mixedRoleActor("gk_reviewer", { organizationMemberships: [] })],
+    ["global gk_reviewer with membership only in another organization", mixedRoleActor("gk_reviewer", {
+      organizationMemberships: [{ organization_id: OTHER_ORG, membership_status: "active", role_name: "client_admin" }],
+    })],
+    ["global gk_reviewer with a revoked membership", mixedRoleActor("gk_reviewer", {
+      organizationMemberships: [{ organization_id: ORG, membership_status: "revoked", role_name: "client_admin" }],
+    })],
+    ["global gk_operator with an inactive membership", mixedRoleActor("gk_operator", {
+      organizationMemberships: [{ organization_id: ORG, membership_status: "inactive", role_name: "client_admin" }],
+    })],
+  ];
+  for (const [label, actorContext] of denied) {
+    const probe = createRepositoryProbe(successResult);
+    const result = await createSourceCandidateStub(
+      { organizationId: ORG, intakeSensitivityProfileId: PROFILE, actorContext, now: NOW },
+      { env: enabled, sourceCandidateRepository: probe.sourceCandidateRepository },
+    );
+    assert.equal(result.ok, false, label);
+    assert.equal(result.error.code, "tenant_boundary_violation", label);
+    assert.equal(probe.calls.length, 0, label);
+  }
+
+  for (const actorType of ["ai", "assistant", "system", "import", "code"]) {
+    const probe = createRepositoryProbe(successResult);
+    const result = await createSourceCandidateStub(
+      { organizationId: ORG, intakeSensitivityProfileId: PROFILE, actorContext: mixedRoleActor("gk_admin", { actorType }), now: NOW },
+      { env: enabled, sourceCandidateRepository: probe.sourceCandidateRepository },
+    );
+    assert.equal(result.ok, false, actorType);
+    assert.equal(result.error.code, "authorization_denied", actorType);
+    assert.equal(probe.calls.length, 0, actorType);
+  }
+
+  const disabledProbe = createRepositoryProbe(successResult);
+  const disabled = await createSourceCandidateStub(
+    { organizationId: ORG, intakeSensitivityProfileId: PROFILE, actorContext: mixedRoleActor("gk_reviewer"), now: NOW },
+    { env: { KAI_SPRINT2_ENABLED: "false" }, sourceCandidateRepository: disabledProbe.sourceCandidateRepository },
+  );
+  assert.equal(disabled.error.code, "feature_disabled");
+  assert.equal(disabledProbe.calls.length, 0);
+});
+
+test("P1-07 service: existing platform-superuser authority is unchanged (human only, no membership or role required)", async () => {
+  const superuser = humanActor({ platformSuperuser: true, organizationMemberships: [] });
+  const probe = createRepositoryProbe(successResult);
+  const allowed = await createSourceCandidateStub(
+    { organizationId: ORG, intakeSensitivityProfileId: PROFILE, actorContext: superuser, now: NOW },
+    { env: enabled, sourceCandidateRepository: probe.sourceCandidateRepository },
+  );
+  assert.equal(allowed.ok, true, JSON.stringify(allowed));
+  assert.equal(probe.calls.length, 1);
+
+  const nonHumanProbe = createRepositoryProbe(successResult);
+  const nonHuman = await createSourceCandidateStub(
+    { organizationId: ORG, intakeSensitivityProfileId: PROFILE, actorContext: { ...superuser, actorType: "assistant" }, now: NOW },
+    { env: enabled, sourceCandidateRepository: nonHumanProbe.sourceCandidateRepository },
+  );
+  assert.equal(nonHuman.error.code, "authorization_denied");
+  assert.equal(nonHumanProbe.calls.length, 0);
+});
+
 test("P1-07 service: createSourceCandidateStub itself contains no SQL and does not import a database pool directly", () => {
   const body = serviceSource.match(/export async function createSourceCandidateStub\([\s\S]*/)?.[0];
   assert.ok(body, "expected to find the createSourceCandidateStub function body");

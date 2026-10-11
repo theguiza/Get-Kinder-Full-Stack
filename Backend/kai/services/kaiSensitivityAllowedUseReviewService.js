@@ -22,8 +22,9 @@ import {
  * Authorization mirrors the existing P1-06 sensitivity_review contract exactly
  * (SENSITIVITY_REVIEW_ALLOWED_ROLES in
  * Backend/kai/services/kaiReviewQueueService.js): a mapped HUMAN actor with an
- * active membership in the target organization holding gk_admin, gk_operator, or
- * gk_reviewer. Every non-human actor type (ai, assistant, system, import, code,
+ * active membership in the target organization who holds gk_admin, gk_operator, or
+ * gk_reviewer as that membership's role or as a global KAI role
+ * (combineGlobalRoles). Every non-human actor type (ai, assistant, system, import, code,
  * or any generic service actor) is rejected outright before any repository call -
  * there is no bypass, and the ledger's own created_by_type/decided_by_role CHECK
  * constraints independently restate the same restriction in SQL.

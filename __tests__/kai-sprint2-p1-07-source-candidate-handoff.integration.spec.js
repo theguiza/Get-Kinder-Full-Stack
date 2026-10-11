@@ -35,12 +35,17 @@ async function runP107HandoffIntegrationSuite() {
   const { createPostgresSensitivityAllowedUseReviewRepository } = await import(
     "../Backend/kai/dictionary/postgresSensitivityAllowedUseReviewRepository.js"
   );
-  const { createPostgresSourceCandidateRepository } = await import("../Backend/kai/dictionary/postgresSourceCandidateRepository.js");
+  const {
+    __sourceCandidateRepositoryTestables,
+    createPostgresSourceCandidateRepository,
+  } = await import("../Backend/kai/dictionary/postgresSourceCandidateRepository.js");
   const { ensureSensitivityReviewQueueItem } = await import("../Backend/kai/services/kaiReviewQueueService.js");
   const { createSourceCandidateStub } = await import("../Backend/kai/services/kaiSourceCandidateService.js");
-  const { createProductionMetadataOnlyAuditForSourceCandidate } = await import(
-    "../Backend/kai/services/kaiMetadataOnlyAuditComposition.js"
-  );
+  const {
+    createProductionMetadataOnlyAuditForSensitivityAllowedUseDecision,
+    createProductionMetadataOnlyAuditForSensitivityReviewQueueItem,
+    createProductionMetadataOnlyAuditForSourceCandidate,
+  } = await import("../Backend/kai/services/kaiMetadataOnlyAuditComposition.js");
   const {
     getReviewCockpitSensitivityProfileDetail,
     getReviewCockpitSourceCandidateDetail,
@@ -447,5 +452,469 @@ async function runP107HandoffIntegrationSuite() {
       [intakeSensitivityProfileId],
     ));
     assert.equal(audits.rows[0].count, 0);
+  });
+
+  // ---------------------------------------------------------------------------
+  // Owner decision (2026-10-11): a mapped human holding a global gk_admin,
+  // gk_operator, or gk_reviewer role whose active membership in the organization
+  // is a client role (here client_admin) may start P1-06 review work and reach
+  // the P1-07 handoff. Every other gate - human only, active membership in the
+  // requested organization, tenant-scoped reads, the VAL-FUP-001-P0 and
+  // VAL-KAI-P1-07-001 predicates, idempotency, and required audit - still applies.
+  // ---------------------------------------------------------------------------
+
+  const MIXED_REVIEWER = "90000000-0000-4000-8000-000000000002";
+  const MIXED_ADMIN = "90000000-0000-4000-8000-000000000003";
+  const MIXED_OPERATOR = "90000000-0000-4000-8000-000000000004";
+  const OTHER_ORG = "00000000-0000-4000-8000-000000000002";
+
+  function mixedRoleActor(globalRole, actorUserId, overrides = {}) {
+    return {
+      actorType: "human",
+      actorUserId,
+      kaiRoles: [globalRole],
+      organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_admin" }],
+      ...overrides,
+    };
+  }
+
+  const mixedReviewer = mixedRoleActor("gk_reviewer", MIXED_REVIEWER);
+
+  // The real production P1-06 and decision audit adapters, with their required
+  // audit inserts bound to the runner-owned database.
+  function productionReviewWorkAudit(intakeSensitivityProfileId, actorContext, organizationId = ORG) {
+    return createProductionMetadataOnlyAuditForSensitivityReviewQueueItem({
+      organizationId,
+      intakeSensitivityProfileId,
+      actorContext,
+      now: NOW,
+      insertAuditEvent: (metadata) => insertRequiredSuccessfulAuditEvent(metadata, pool),
+    });
+  }
+
+  function productionDecisionDependencies(intakeSensitivityProfileId, actorContext) {
+    return {
+      env: ENV,
+      sensitivityAllowedUseReviewRepository: decisionRepository,
+      metadataOnlyAudit: createProductionMetadataOnlyAuditForSensitivityAllowedUseDecision({
+        organizationId: ORG,
+        intakeSensitivityProfileId,
+        actorContext,
+        now: NOW,
+        insertAuditEvent: (metadata) => insertRequiredSuccessfulAuditEvent(metadata, pool),
+      }),
+      sourceCandidateRepository,
+      sourceCandidateMetadataOnlyAudit: productionSourceCandidateAudit(intakeSensitivityProfileId, actorContext),
+    };
+  }
+
+  function ensureReviewWorkAs(actorContext, intakeSensitivityProfileId, { organizationId = ORG, env = ENV } = {}) {
+    return ensureSensitivityReviewQueueItem(
+      { organizationId, intakeSensitivityProfileId, actorContext, now: NOW },
+      {
+        env,
+        reviewQueueRepository,
+        metadataOnlyAudit: productionReviewWorkAudit(intakeSensitivityProfileId, actorContext, organizationId),
+      },
+    );
+  }
+
+  function createCandidateAs(actorContext, intakeSensitivityProfileId, { organizationId = ORG, env = ENV } = {}) {
+    return createSourceCandidateStub(
+      { organizationId, intakeSensitivityProfileId, actorContext, now: NOW },
+      { env, sourceCandidateRepository, metadataOnlyAudit: productionSourceCandidateAudit(intakeSensitivityProfileId, actorContext) },
+    );
+  }
+
+  async function readDetailAs(actorContext, intakeSensitivityProfileId) {
+    const detail = await getReviewCockpitSensitivityProfileDetail(
+      { organizationId: ORG, intakeSensitivityProfileId, actorContext },
+      {
+        env: ENV,
+        getReviewCockpitSensitivityProfileRecord: (organizationId, profileId) =>
+          getReviewCockpitSensitivityProfileRecord(organizationId, profileId, pool),
+      },
+    );
+    assert.equal(detail.ok, true, JSON.stringify(detail));
+    return detail.data;
+  }
+
+  async function sensitivityReviewItems(intakeSensitivityProfileId) {
+    const rows = await withClient((client) => client.query(
+      `SELECT review_queue_item_id::text AS review_queue_item_id, queue_status, review_status,
+              created_by::text AS created_by, created_by_type
+         FROM kai.review_queue_items
+        WHERE organization_id = $1::uuid
+          AND queue_type = 'sensitivity_review'
+          AND target_object_type = 'intake_sensitivity_profile'
+          AND target_object_id = $2::uuid`,
+      [ORG, intakeSensitivityProfileId],
+    ));
+    return rows.rows;
+  }
+
+  async function decisionRows(intakeSensitivityProfileId) {
+    const rows = await withClient((client) => client.query(
+      `SELECT decision_id::text AS decision_id, decision_outcome, decided_by::text AS decided_by, decided_by_role
+         FROM kai.intake_sensitivity_review_decisions
+        WHERE organization_id = $1::uuid AND intake_sensitivity_profile_id = $2::uuid
+        ORDER BY created_at, decision_id`,
+      [ORG, intakeSensitivityProfileId],
+    ));
+    return rows.rows;
+  }
+
+  async function auditActions(intakeSensitivityProfileId) {
+    const rows = await withClient((client) => client.query(
+      `SELECT action, actor_type, actor_user_id::text AS actor_user_id
+         FROM kai.audit_events
+        WHERE metadata->>'object_id' = $1
+        ORDER BY action`,
+      [intakeSensitivityProfileId],
+    ));
+    return rows.rows;
+  }
+
+  async function lifecycleOperations(index) {
+    const rows = await withClient((client) => client.query(
+      `SELECT operation FROM kai.upload_lifecycle_audit WHERE intake_file_id = $1::uuid ORDER BY operation`,
+      [fileId(index)],
+    ));
+    return rows.rows.map((row) => row.operation);
+  }
+
+  // Same throwaway-database-only technique as scenario E: lift one P1-05 CHECK
+  // long enough to make exactly one profile fail the creation-trigger predicate.
+  async function makeProfileIneligible(intakeSensitivityProfileId) {
+    await withClient(async (client) => {
+      await client.query("ALTER TABLE kai.intake_sensitivity_profiles DROP CONSTRAINT intake_sensitivity_profiles_p1_05_public_use_check");
+      await client.query(
+        "UPDATE kai.intake_sensitivity_profiles SET public_use_allowed = true WHERE intake_sensitivity_profile_id = $1::uuid",
+        [intakeSensitivityProfileId],
+      );
+      await client.query(
+        `ALTER TABLE kai.intake_sensitivity_profiles
+           ADD CONSTRAINT intake_sensitivity_profiles_p1_05_public_use_check CHECK (public_use_allowed = false) NOT VALID`,
+      );
+    });
+  }
+
+  test("mixed role (P1-06): a global gk_reviewer with an active client_admin membership starts review work on a zero-queue profile - one sensitivity_review item and its audits, no decision - and a repeat replays with zero writes", async () => {
+    const intakeSensitivityProfileId = await seedPredicateSatisfyingSensitivityProfile(11);
+    assert.deepEqual(await sensitivityReviewItems(intakeSensitivityProfileId), []);
+
+    const before = await kaiTableRowCounts();
+    const ensured = await ensureReviewWorkAs(mixedReviewer, intakeSensitivityProfileId);
+    assert.equal(ensured.ok, true, JSON.stringify(ensured));
+    assert.equal(ensured.data.replayed, false);
+    const after = await kaiTableRowCounts();
+
+    assert.deepEqual(changedTables(before, after), ["audit_events", "review_queue_items", "upload_lifecycle_audit"]);
+    assert.equal(after.review_queue_items - before.review_queue_items, 1);
+    const items = await sensitivityReviewItems(intakeSensitivityProfileId);
+    assert.equal(items.length, 1);
+    assert.equal(items[0].review_queue_item_id, ensured.data.reviewQueueItem.review_queue_item_id);
+    assert.equal(items[0].queue_status, "open");
+    assert.equal(items[0].created_by, MIXED_REVIEWER);
+    assert.equal(items[0].created_by_type, "human");
+    assert.deepEqual(await decisionRows(intakeSensitivityProfileId), []);
+    assert.deepEqual(await auditActions(intakeSensitivityProfileId), [
+      { action: "sensitivity_review_queue_item_created", actor_type: "human", actor_user_id: MIXED_REVIEWER },
+    ]);
+    assert.deepEqual(await lifecycleOperations(11), ["sensitivity_review_queue_item_created"]);
+
+    const detail = await readDetailAs(mixedReviewer, intakeSensitivityProfileId);
+    assert.equal(detail.current_decision, null, "starting review work records no decision");
+    assert.equal(detail.sensitivity_review_queue_item.review_queue_item_id, items[0].review_queue_item_id);
+
+    const replayBefore = await kaiTableRowCounts();
+    const replay = await ensureReviewWorkAs(mixedReviewer, intakeSensitivityProfileId);
+    assert.equal(replay.ok, true, JSON.stringify(replay));
+    assert.equal(replay.data.replayed, true);
+    assert.equal(replay.data.reviewQueueItem.review_queue_item_id, items[0].review_queue_item_id);
+    assert.deepEqual(changedTables(replayBefore, await kaiTableRowCounts()), []);
+  });
+
+  test("mixed role (P1-06): the VAL-FUP-001-P0 predicate still blocks an ineligible profile, with nothing written", async () => {
+    const intakeSensitivityProfileId = await seedPredicateSatisfyingSensitivityProfile(12);
+    await makeProfileIneligible(intakeSensitivityProfileId);
+
+    const before = await kaiTableRowCounts();
+    const ensured = await ensureReviewWorkAs(mixedReviewer, intakeSensitivityProfileId);
+    assert.equal(ensured.ok, false);
+    assert.equal(ensured.error.code, "validation_blocker");
+    assert.deepEqual(changedTables(before, await kaiTableRowCounts()), []);
+  });
+
+  test("mixed role (decision + P1-07): a global gk_reviewer with an active client_admin membership records 'reviewed' and the handoff creates exactly one needs_gk_review candidate and its review item; nothing is promoted; a repeat replays with zero writes", async () => {
+    const intakeSensitivityProfileId = await seedPredicateSatisfyingSensitivityProfile(13);
+    const work = await ensureWorkAndReadDetail(intakeSensitivityProfileId);
+
+    const before = await kaiTableRowCounts();
+    const decided = await submitSensitivityProfileDecision(
+      decisionRequest(intakeSensitivityProfileId, work, "reviewed", mixedReviewer),
+      productionDecisionDependencies(intakeSensitivityProfileId, mixedReviewer),
+    );
+    assert.equal(decided.ok, true, JSON.stringify(decided));
+    assert.equal(decided.data.replayed, false);
+    assert.equal(decided.data.current_decision.decision_outcome, "reviewed");
+    assert.equal(decided.data.current_decision.decided_by, MIXED_REVIEWER);
+    assert.equal(decided.data.current_decision.decided_by_role, "gk_reviewer");
+    assert.equal(decided.data.sensitivity_review_queue_item.queue_status, "resolved");
+    assert.deepEqual(
+      { status: decided.data.source_candidate_handoff.status, error_code: decided.data.source_candidate_handoff.error_code },
+      { status: "created", error_code: null },
+    );
+    assert.equal(decided.data.source_candidate_handoff.candidate_status, "needs_gk_review");
+    assert.equal(decided.data.source_candidate_handoff.queue_status, "open");
+
+    const after = await kaiTableRowCounts();
+    // Every kai table is compared, so this also proves no promotion decision,
+    // source, source version, evidence item, claim, generated output, export, or
+    // release-authority row was written.
+    assert.deepEqual(changedTables(before, after), [
+      "audit_events",
+      "intake_sensitivity_review_decisions",
+      "intake_source_candidates",
+      "review_queue_items",
+      "upload_lifecycle_audit",
+    ]);
+    assert.equal(after.intake_sensitivity_review_decisions - before.intake_sensitivity_review_decisions, 1);
+    assert.equal(after.intake_source_candidates - before.intake_source_candidates, 1);
+    assert.equal(after.review_queue_items - before.review_queue_items, 1);
+
+    assert.deepEqual(await decisionRows(intakeSensitivityProfileId), [{
+      decision_id: decided.data.current_decision.decision_id,
+      decision_outcome: "reviewed",
+      decided_by: MIXED_REVIEWER,
+      decided_by_role: "gk_reviewer",
+    }]);
+    const items = await sensitivityReviewItems(intakeSensitivityProfileId);
+    assert.equal(items.length, 1);
+    assert.equal(items[0].queue_status, "resolved");
+    assert.equal(items[0].review_status, "resolved");
+
+    const profileRow = await withClient((client) => client.query(
+      `SELECT human_review_required, public_use_allowed, funder_use_allowed, llm_processing_allowed,
+              product_learning_allowed, retention_posture
+         FROM kai.intake_sensitivity_profiles WHERE intake_sensitivity_profile_id = $1::uuid`,
+      [intakeSensitivityProfileId],
+    ));
+    assert.equal(__sourceCandidateRepositoryTestables.satisfiesCreationTriggerPredicate(profileRow.rows[0]), true);
+
+    const state = await candidateState(intakeSensitivityProfileId);
+    assert.equal(state.candidates.length, 1);
+    assert.equal(state.queueItems.length, 1);
+    assert.equal(state.candidates[0].intake_source_candidate_id, decided.data.source_candidate_handoff.intake_source_candidate_id);
+    assert.equal(state.candidates[0].candidate_status, "needs_gk_review");
+    assert.equal(state.candidates[0].created_by, MIXED_REVIEWER);
+    assert.equal(state.candidates[0].created_by_type, "human");
+    assert.equal(state.queueItems[0].queue_status, "open");
+
+    const actions = (await auditActions(intakeSensitivityProfileId)).filter((row) => row.actor_user_id === MIXED_REVIEWER);
+    assert.deepEqual(actions.map((row) => row.action), [
+      "intake_source_candidate_persisted",
+      "sensitivity_review_decision_recorded",
+    ]);
+    assert.ok(actions.every((row) => row.actor_type === "human"));
+    assert.deepEqual(await lifecycleOperations(13), [
+      "intake_source_candidate_persisted",
+      "sensitivity_review_decision_recorded",
+      "sensitivity_review_queue_item_created",
+    ]);
+
+    const replayBefore = await kaiTableRowCounts();
+    const replay = await submitSensitivityProfileDecision(
+      decisionRequest(intakeSensitivityProfileId, work, "reviewed", mixedReviewer),
+      productionDecisionDependencies(intakeSensitivityProfileId, mixedReviewer),
+    );
+    assert.equal(replay.ok, true, JSON.stringify(replay));
+    assert.equal(replay.data.replayed, true);
+    assert.equal(replay.data.current_decision.decision_id, decided.data.current_decision.decision_id);
+    assert.equal(replay.data.source_candidate_handoff.status, "replayed");
+    assert.equal(
+      replay.data.source_candidate_handoff.intake_source_candidate_id,
+      decided.data.source_candidate_handoff.intake_source_candidate_id,
+    );
+    assert.deepEqual(changedTables(replayBefore, await kaiTableRowCounts()), []);
+  });
+
+  test("mixed role (decision): 'needs_more_information' stays nonterminal and creates no source candidate", async () => {
+    const intakeSensitivityProfileId = await seedPredicateSatisfyingSensitivityProfile(14);
+    const work = await ensureWorkAndReadDetail(intakeSensitivityProfileId);
+    const decided = await submitSensitivityProfileDecision(
+      decisionRequest(intakeSensitivityProfileId, work, "needs_more_information", mixedReviewer),
+      productionDecisionDependencies(intakeSensitivityProfileId, mixedReviewer),
+    );
+    assert.equal(decided.ok, true, JSON.stringify(decided));
+    assert.equal(decided.data.current_decision.decision_outcome, "needs_more_information");
+    assert.equal(decided.data.sensitivity_review_queue_item.queue_status, "open");
+    assert.equal(decided.data.source_candidate_handoff.status, "not_applicable");
+    assert.deepEqual(await candidateState(intakeSensitivityProfileId), { candidates: [], queueItems: [] });
+  });
+
+  test("mixed role (recovery): a committed 'reviewed' decision whose earlier handoff failed is recovered by replaying the identical request - no second decision, exactly one candidate and review item, and later replays write nothing", async () => {
+    const intakeSensitivityProfileId = await seedPredicateSatisfyingSensitivityProfile(15);
+    const work = await ensureWorkAndReadDetail(intakeSensitivityProfileId);
+
+    // Synthetic prior state: the decision committed but the P1-07 handoff was
+    // refused (the pre-2026-10-11 membership-only P1-07 role check returned
+    // tenant_boundary_violation for this actor).
+    const failedHandoff = await submitSensitivityProfileDecision(
+      decisionRequest(intakeSensitivityProfileId, work, "reviewed", mixedReviewer),
+      {
+        ...productionDecisionDependencies(intakeSensitivityProfileId, mixedReviewer),
+        createSourceCandidateStub: async () => ({ ok: false, data: null, error: { code: "tenant_boundary_violation" } }),
+      },
+    );
+    assert.equal(failedHandoff.ok, true, JSON.stringify(failedHandoff));
+    assert.equal(failedHandoff.data.source_candidate_handoff.status, "not_created");
+    assert.equal(failedHandoff.data.source_candidate_handoff.error_code, "tenant_boundary_violation");
+    const committed = await decisionRows(intakeSensitivityProfileId);
+    assert.equal(committed.length, 1);
+    assert.equal((await sensitivityReviewItems(intakeSensitivityProfileId))[0].queue_status, "resolved");
+    assert.deepEqual(await candidateState(intakeSensitivityProfileId), { candidates: [], queueItems: [] });
+    const decisionAuditsBefore = (await auditActions(intakeSensitivityProfileId))
+      .filter((row) => row.action === "sensitivity_review_decision_recorded");
+    assert.equal(decisionAuditsBefore.length, 1);
+
+    const before = await kaiTableRowCounts();
+    const recovered = await submitSensitivityProfileDecision(
+      decisionRequest(intakeSensitivityProfileId, work, "reviewed", mixedReviewer),
+      productionDecisionDependencies(intakeSensitivityProfileId, mixedReviewer),
+    );
+    assert.equal(recovered.ok, true, JSON.stringify(recovered));
+    assert.equal(recovered.data.replayed, true);
+    assert.equal(recovered.data.current_decision.decision_id, committed[0].decision_id);
+    assert.deepEqual(
+      { status: recovered.data.source_candidate_handoff.status, error_code: recovered.data.source_candidate_handoff.error_code },
+      { status: "created", error_code: null },
+    );
+    // No decision-ledger write: only the candidate, its review item, and their audits.
+    assert.deepEqual(changedTables(before, await kaiTableRowCounts()), [
+      "audit_events",
+      "intake_source_candidates",
+      "review_queue_items",
+      "upload_lifecycle_audit",
+    ]);
+    assert.deepEqual(await decisionRows(intakeSensitivityProfileId), committed);
+    assert.equal(
+      (await auditActions(intakeSensitivityProfileId)).filter((row) => row.action === "sensitivity_review_decision_recorded").length,
+      1,
+    );
+    const state = await candidateState(intakeSensitivityProfileId);
+    assert.equal(state.candidates.length, 1);
+    assert.equal(state.queueItems.length, 1);
+    assert.equal(state.candidates[0].candidate_status, "needs_gk_review");
+
+    const replayBefore = await kaiTableRowCounts();
+    const replay = await submitSensitivityProfileDecision(
+      decisionRequest(intakeSensitivityProfileId, work, "reviewed", mixedReviewer),
+      productionDecisionDependencies(intakeSensitivityProfileId, mixedReviewer),
+    );
+    assert.equal(replay.ok, true, JSON.stringify(replay));
+    assert.equal(replay.data.source_candidate_handoff.status, "replayed");
+    assert.deepEqual(changedTables(replayBefore, await kaiTableRowCounts()), []);
+  });
+
+  test("mixed role (role matrix): global gk_admin and gk_operator with an active client_admin membership complete review work, the 'reviewed' decision, and the handoff, attributed to their own global role", async () => {
+    const cases = [
+      ["gk_admin", MIXED_ADMIN, 16],
+      ["gk_operator", MIXED_OPERATOR, 17],
+    ];
+    for (const [role, actorUserId, index] of cases) {
+      const actor = mixedRoleActor(role, actorUserId);
+      const intakeSensitivityProfileId = await seedPredicateSatisfyingSensitivityProfile(index);
+
+      const ensured = await ensureReviewWorkAs(actor, intakeSensitivityProfileId);
+      assert.equal(ensured.ok, true, `${role}: ${JSON.stringify(ensured)}`);
+      assert.equal(ensured.data.replayed, false, role);
+      const detail = await readDetailAs(actor, intakeSensitivityProfileId);
+      const work = {
+        reviewQueueItemId: ensured.data.reviewQueueItem.review_queue_item_id,
+        expectedUpdatedAt: detail.sensitivity_review_queue_item.updated_at,
+      };
+
+      const decided = await submitSensitivityProfileDecision(
+        decisionRequest(intakeSensitivityProfileId, work, "reviewed", actor),
+        productionDecisionDependencies(intakeSensitivityProfileId, actor),
+      );
+      assert.equal(decided.ok, true, `${role}: ${JSON.stringify(decided)}`);
+      assert.equal(decided.data.current_decision.decided_by, actorUserId, role);
+      assert.equal(decided.data.current_decision.decided_by_role, role, role);
+      assert.equal(decided.data.source_candidate_handoff.status, "created", `${role}: ${JSON.stringify(decided.data.source_candidate_handoff)}`);
+
+      const state = await candidateState(intakeSensitivityProfileId);
+      assert.equal(state.candidates.length, 1, role);
+      assert.equal(state.queueItems.length, 1, role);
+      assert.equal(state.candidates[0].created_by, actorUserId, role);
+      assert.equal(state.candidates[0].candidate_status, "needs_gk_review", role);
+    }
+  });
+
+  test("mixed role (negatives): client-only, missing, other-organization, revoked, or inactive membership, non-human actors, a disabled feature, and a cross-organization profile identifier write nothing at either operation", async () => {
+    const intakeSensitivityProfileId = await seedPredicateSatisfyingSensitivityProfile(18);
+    const otherOrgMembership = [{ organization_id: OTHER_ORG, membership_status: "active", role_name: "client_admin" }];
+    const denied = [
+      ["client_admin without a global GK role", {
+        actorType: "human",
+        actorUserId: MIXED_REVIEWER,
+        organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_admin" }],
+      }, "tenant_boundary_violation"],
+      ["global gk_reviewer with no membership", mixedRoleActor("gk_reviewer", MIXED_REVIEWER, { organizationMemberships: [] }), "tenant_boundary_violation"],
+      ["global gk_reviewer with membership only in another organization", mixedRoleActor("gk_reviewer", MIXED_REVIEWER, {
+        organizationMemberships: otherOrgMembership,
+      }), "tenant_boundary_violation"],
+      ["global gk_reviewer with a revoked membership", mixedRoleActor("gk_reviewer", MIXED_REVIEWER, {
+        organizationMemberships: [{ organization_id: ORG, membership_status: "revoked", role_name: "client_admin" }],
+      }), "tenant_boundary_violation"],
+      ["global gk_operator with an inactive membership", mixedRoleActor("gk_operator", MIXED_OPERATOR, {
+        organizationMemberships: [{ organization_id: ORG, membership_status: "inactive", role_name: "client_admin" }],
+      }), "tenant_boundary_violation"],
+      ...["ai", "assistant", "system", "import"].map((actorType) => [
+        `${actorType} actor carrying a mixed-role context`,
+        mixedRoleActor("gk_admin", MIXED_ADMIN, { actorType }),
+        "authorization_denied",
+      ]),
+    ];
+
+    const before = await kaiTableRowCounts();
+    for (const [label, actorContext, expectedCode] of denied) {
+      const ensured = await ensureReviewWorkAs(actorContext, intakeSensitivityProfileId);
+      assert.equal(ensured.ok, false, `P1-06 ${label}`);
+      assert.equal(ensured.error.code, expectedCode, `P1-06 ${label}`);
+      const candidate = await createCandidateAs(actorContext, intakeSensitivityProfileId);
+      assert.equal(candidate.ok, false, `P1-07 ${label}`);
+      assert.equal(candidate.error.code, expectedCode, `P1-07 ${label}`);
+    }
+
+    const disabledEnv = { KAI_SPRINT2_ENABLED: "false" };
+    assert.equal((await ensureReviewWorkAs(mixedReviewer, intakeSensitivityProfileId, { env: disabledEnv })).error.code, "feature_disabled");
+    assert.equal((await createCandidateAs(mixedReviewer, intakeSensitivityProfileId, { env: disabledEnv })).error.code, "feature_disabled");
+
+    // An actor authorized in another organization cannot reach this
+    // organization's profile by naming its own organization.
+    const otherOrgActor = mixedRoleActor("gk_reviewer", MIXED_REVIEWER, { organizationMemberships: otherOrgMembership });
+    const crossEnsure = await ensureReviewWorkAs(otherOrgActor, intakeSensitivityProfileId, { organizationId: OTHER_ORG });
+    assert.equal(crossEnsure.ok, false);
+    assert.equal(crossEnsure.error.code, "not_found");
+    const crossCandidate = await createCandidateAs(otherOrgActor, intakeSensitivityProfileId, { organizationId: OTHER_ORG });
+    assert.equal(crossCandidate.ok, false);
+    assert.equal(crossCandidate.error.code, "not_found");
+
+    assert.deepEqual(changedTables(before, await kaiTableRowCounts()), []);
+  });
+
+  test("existing membership-role authorization is preserved: a human whose organization membership is gk_operator, with no global role, still starts review work", async () => {
+    const intakeSensitivityProfileId = await seedPredicateSatisfyingSensitivityProfile(19);
+    const membershipOnlyOperator = {
+      actorType: "human",
+      actorUserId: MIXED_OPERATOR,
+      organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "gk_operator" }],
+    };
+    const ensured = await ensureReviewWorkAs(membershipOnlyOperator, intakeSensitivityProfileId);
+    assert.equal(ensured.ok, true, JSON.stringify(ensured));
+    assert.equal(ensured.data.replayed, false);
+    assert.equal((await sensitivityReviewItems(intakeSensitivityProfileId)).length, 1);
   });
 }

@@ -438,11 +438,17 @@ export async function createSensitivityReviewQueueItem(input, dependencies = {})
     return buildKaiError("authorization_denied");
   }
 
+  // Owner decision (2026-10-11): an allowed global KAI role also authorizes the
+  // actor in an organization where their active membership is a client role.
+  // An active membership in the requested organization is still required.
   const auth = validateActorCanPerformOperation(
     actorContext,
     SENSITIVITY_REVIEW_OPERATION,
     input.organizationId,
-    { allowedRoles: SENSITIVITY_REVIEW_ALLOWED_ROLES },
+    {
+      allowedRoles: SENSITIVITY_REVIEW_ALLOWED_ROLES,
+      combineGlobalRoles: true,
+    },
   );
   if (!auth.ok) {
     return buildKaiError("tenant_boundary_violation", { blockers: auth.blockers });

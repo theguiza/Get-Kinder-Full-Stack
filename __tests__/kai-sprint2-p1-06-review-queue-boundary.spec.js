@@ -155,6 +155,106 @@ test("P1-06 service: accepts gk_admin, gk_operator, and gk_reviewer, and forward
   }
 });
 
+// Owner decision (2026-10-11): a mapped human holding a global gk_admin,
+// gk_operator, or gk_reviewer role may create sensitivity review work in an
+// organization where their active membership is a client role.
+function mixedRoleActor(globalRole, overrides = {}) {
+  return humanActor({
+    kaiRoles: [globalRole],
+    organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_admin" }],
+    ...overrides,
+  });
+}
+
+test("P1-06 service (mixed role): a global gk_admin, gk_operator, or gk_reviewer with an active client_admin membership may create review work, through both the P1-06 seam and the B1A-2R ensure path", async () => {
+  for (const role of ["gk_admin", "gk_operator", "gk_reviewer"]) {
+    const direct = createRepositoryProbe(successResult);
+    const created = await createSensitivityReviewQueueItem(
+      { organizationId: ORG, intakeSensitivityProfileId: PROFILE, actorContext: mixedRoleActor(role), now: NOW },
+      { env: enabled, reviewQueueRepository: direct.reviewQueueRepository },
+    );
+    assert.equal(created.ok, true, `${role}: ${JSON.stringify(created)}`);
+    assert.equal(direct.calls.length, 1, role);
+    assert.deepEqual(direct.calls[0].identity, { organizationId: ORG, intakeSensitivityProfileId: PROFILE });
+    assert.equal(direct.calls[0].actorUserId, "user-1");
+
+    const ensuredProbe = createRepositoryProbe(successResult);
+    const ensured = await ensureSensitivityReviewQueueItem(
+      { organizationId: ORG, intakeSensitivityProfileId: PROFILE, actorContext: mixedRoleActor(role), now: NOW },
+      { env: enabled, reviewQueueRepository: ensuredProbe.reviewQueueRepository, metadataOnlyAudit: { prepareMetadataOnlyAudit() {} } },
+    );
+    assert.equal(ensured.ok, true, `${role}: ${JSON.stringify(ensured)}`);
+    assert.equal(ensuredProbe.calls.length, 1, role);
+  }
+});
+
+test("P1-06 service (mixed role): a global GK role never substitutes for an active membership in the organization, for a human actor, or for an allowed role", async () => {
+  const denied = [
+    ["client_admin membership without a global GK role", humanActor({
+      organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_admin" }],
+    })],
+    ["global client_admin role", mixedRoleActor("client_admin")],
+    ["global gk_reviewer with no membership", mixedRoleActor("gk_reviewer", { organizationMemberships: [] })],
+    ["global gk_reviewer with membership only in another organization", mixedRoleActor("gk_reviewer", {
+      organizationMemberships: [{ organization_id: OTHER_ORG, membership_status: "active", role_name: "client_admin" }],
+    })],
+    ["global gk_reviewer with a revoked membership", mixedRoleActor("gk_reviewer", {
+      organizationMemberships: [{ organization_id: ORG, membership_status: "revoked", role_name: "client_admin" }],
+    })],
+    ["global gk_operator with an inactive membership", mixedRoleActor("gk_operator", {
+      organizationMemberships: [{ organization_id: ORG, membership_status: "inactive", role_name: "client_admin" }],
+    })],
+  ];
+  for (const [label, actorContext] of denied) {
+    const probe = createRepositoryProbe(successResult);
+    const result = await createSensitivityReviewQueueItem(
+      { organizationId: ORG, intakeSensitivityProfileId: PROFILE, actorContext, now: NOW },
+      { env: enabled, reviewQueueRepository: probe.reviewQueueRepository },
+    );
+    assert.equal(result.ok, false, label);
+    assert.equal(result.error.code, "tenant_boundary_violation", label);
+    assert.equal(probe.calls.length, 0, label);
+  }
+
+  for (const actorType of ["ai", "assistant", "system", "import", "code"]) {
+    const probe = createRepositoryProbe(successResult);
+    const result = await createSensitivityReviewQueueItem(
+      { organizationId: ORG, intakeSensitivityProfileId: PROFILE, actorContext: mixedRoleActor("gk_admin", { actorType }), now: NOW },
+      { env: enabled, reviewQueueRepository: probe.reviewQueueRepository },
+    );
+    assert.equal(result.ok, false, actorType);
+    assert.equal(result.error.code, "authorization_denied", actorType);
+    assert.equal(probe.calls.length, 0, actorType);
+  }
+
+  const disabledProbe = createRepositoryProbe(successResult);
+  const disabled = await createSensitivityReviewQueueItem(
+    { organizationId: ORG, intakeSensitivityProfileId: PROFILE, actorContext: mixedRoleActor("gk_reviewer"), now: NOW },
+    { env: { KAI_SPRINT2_ENABLED: "false" }, reviewQueueRepository: disabledProbe.reviewQueueRepository },
+  );
+  assert.equal(disabled.error.code, "feature_disabled");
+  assert.equal(disabledProbe.calls.length, 0);
+});
+
+test("P1-06 service: existing platform-superuser authority is unchanged (human only, no membership or role required)", async () => {
+  const superuser = humanActor({ platformSuperuser: true, organizationMemberships: [] });
+  const probe = createRepositoryProbe(successResult);
+  const allowed = await createSensitivityReviewQueueItem(
+    { organizationId: ORG, intakeSensitivityProfileId: PROFILE, actorContext: superuser, now: NOW },
+    { env: enabled, reviewQueueRepository: probe.reviewQueueRepository },
+  );
+  assert.equal(allowed.ok, true, JSON.stringify(allowed));
+  assert.equal(probe.calls.length, 1);
+
+  const nonHumanProbe = createRepositoryProbe(successResult);
+  const nonHuman = await createSensitivityReviewQueueItem(
+    { organizationId: ORG, intakeSensitivityProfileId: PROFILE, actorContext: { ...superuser, actorType: "assistant" }, now: NOW },
+    { env: enabled, reviewQueueRepository: nonHumanProbe.reviewQueueRepository },
+  );
+  assert.equal(nonHuman.error.code, "authorization_denied");
+  assert.equal(nonHumanProbe.calls.length, 0);
+});
+
 test("P1-06 service: createSensitivityReviewQueueItem itself contains no SQL and does not import a database pool directly", () => {
   assert.ok(createSensitivityReviewQueueItemBody, "expected to find the createSensitivityReviewQueueItem function body");
   assert.doesNotMatch(createSensitivityReviewQueueItemBody, /\bimport\s+pool\b/);
