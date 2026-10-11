@@ -36413,3 +36413,144 @@ No push, deployment, shared or production database, cloud, feature-flag,
 tenant, credential, `.env`, route, frontend, or `00_KAI_CURRENT_STATE.md`
 change; the migration and rollback ran only in runner-owned disposable
 loopback databases.
+
+### Human review after the Impact Library redesign: sensitivity review reachability and Reviews messaging (2026-10-11)
+
+**Owner direction (USER_CONFIRMED):** determine whether the Impact Library
+redesign removed, hid, or disconnected implemented human review; repair only
+verified UI regressions through existing components, routes, and services;
+correct the client Reviews messaging. No new approval stage, status, or
+permission; no backend authority change; no database, cloud, flag, tenant,
+push, deploy, or Current State change.
+
+**Starting state (TOOL_VERIFIED):** `main` at
+`dfe7e318cac469d529b54bd9e65b478ec88334ff`, clean.
+
+**Reproduction context (TOOL_VERIFIED from code, NOT_CONFIRMED for the
+owner's account):** the reported screen ("Waiting for Get Kinder review",
+"No action is currently required from you", "Sensitivity review (Waiting for
+Get Kinder)") is `ClientKnowledgeStudio.jsx` `ProjectReviews`, fed by
+`GET /admin/organizations/:org/engagements/:engagement/client-evidence-pipeline`
+(`kaiClientEvidencePipelineService.js`): `sensitivity_review` is
+`waiting_for_get_kinder` whenever the P1-05 profile is complete and the
+current B1A-2 decision is not `reviewed`, whether or not P1-06 review work
+exists. `ImpactLibraryApp.jsx` mounts the client Studio whenever the
+organization access-capabilities read does not report
+`internalKnowledgeWorkspace` (or fails). The owner's roles and memberships
+were not inspected.
+
+**Root cause (TOOL_VERIFIED):**
+1. The only sensitivity decision UI ever built is the B1A-3B card in
+   `ImpactEvidenceLibrary.jsx` (`643e995`, 2026-08-31); the admin cockpit
+   (`/gk-admin/kai-review-cockpit`) only reads sensitivity detail. Package D
+   (`f352f0d`, 2026-09-22) gated that card to the Processing tab, while the
+   Review Queue entry (`b5306cc`, Reviews tab) and the zero-queue Web Intake
+   discovery (B1A-3B-R2, Files tab) only set `selectedSensitivityProfileId`.
+   Clicking "Review sensitivity & allowed use" on Reviews left the card
+   hidden; Processing told the reviewer to "select the file above in KAI Web
+   Intake", which is on another tab. Demonstrated in a real browser on the
+   unmodified bundle: after the click the decision form never appeared.
+2. Not repaired (owner decision): the client-mount gate
+   (`25159f0`, 2026-09-24) uses the claim-library read policy, which needs a
+   GK role on the actor's organization membership row, while every
+   sensitivity route uses the cockpit policy (global GK role plus any active
+   membership, `globalRolesOnly`). A global GK reviewer whose membership in
+   the organization is a client role (stored or binding-derived) is
+   authorized to read and decide that organization's sensitivity reviews but
+   is shown the client Studio, with no way to act. Mounting the GK Studio for
+   them would also run its other GK reads and its automatic board-reporting
+   candidate POST, so the mount rule was not changed.
+
+**Review capability reconciliation (TOOL_VERIFIED):**
+- File sensitivity (B1A-2 decision, P1-06 review work): GK Studio Processing
+  card; entry points Reviews (Review Queue) and Files (Web Intake) were
+  disconnected by Package D - repaired.
+- Source candidate (P1-08): admin cockpit decision controls, unchanged and
+  reachable (also exercised by the P2-01 browser spec).
+- Evidence (P2-12): GK Evidence tab, added after the redesign (`26013bf`) -
+  reachable, not displaced.
+- Claim / Impact Fact (P2-09/P2-10): Traceability panel, never tab-gated;
+  "Review this claim" (Reviews, Gaps) still selects and scrolls to it.
+- Generated drafts, Grant Response Packet, Board Reporting: non-tab sections,
+  unchanged.
+- Client follow-up (P2-11): `/kai/client-followups` link for
+  `clientFollowupReview`, unchanged.
+- Needs Attention (Package H): read-only rows by design; it never had an
+  action.
+
+**Changes (TOOL_VERIFIED):**
+- `frontend/ImpactEvidenceLibrary.jsx`: `openSensitivityReview` selects the
+  profile, switches to Processing, and focuses the existing card; the Review
+  Queue sensitivity entry uses it; Files shows "Open sensitivity &
+  allowed-use review" when the capability is true and a profile is
+  selected; corrected Processing guidance. Card gating, form, and decision
+  calls unchanged.
+- `frontend/knowledgeStudio/clientEvidencePipelineLogic.js`:
+  `GET_KINDER_STAGE_DESCRIPTIONS` (sensitivity review explicitly "not an
+  Evidence or Impact Fact review") and `getKinderReviewAccessText`.
+- `frontend/knowledgeStudio/ClientKnowledgeStudio.jsx`: Reviews names all
+  four GK reviews, describes each waiting file's stage, says GK completes it
+  in its own workspace, and states this actor's access (not allowed /
+  allowed-but-client-membership / could not be confirmed). No GK control or
+  GK read.
+- `frontend/needsAttention/useNeedsAttention.js` exposes its existing
+  review-cockpit capabilities answer as `sensitivityReviewAccess`;
+  `ImpactLibraryApp.jsx` passes it to the client Studio (no new request).
+- New `__tests__/kai-sensitivity-review-reachability-browser-acceptance.integration.spec.js`
+  (allowlisted in the client browser runner); focused tests added to
+  `kai-client-evidence-pipeline.spec.js` and
+  `kai-impact-library-knowledge-studio-tabs.spec.js`. Bundle rebuilt.
+
+**Verification (TOOL_VERIFIED; loopback `DATABASE_URL` sentinel; only
+runner-owned ephemeral loopback PostgreSQL and synthetic data):**
+
+| Command | Pass | Fail | Skipped |
+| --- | --- | --- | --- |
+| new sensitivity reachability browser spec, pre-fix bundle | 1 | 8 | 0 |
+| new sensitivity reachability browser spec, repaired bundle | 10 | 0 | 0 |
+| client Knowledge Studio browser spec | 6 | 0 | 0 |
+| client evidence pipeline browser spec | 7 | 0 | 0 |
+| P2-01 evidence extraction handoff browser spec | 5 | 0 | 0 |
+| P2-12 no-claim evidence review browser spec | 11 | 0 | 0 |
+| reviewed evidence claim proposal browser spec | 10 | 0 | 0 |
+| Web Intake Files rehydration browser spec (also at clean `dfe7e31`) | 2 | 1 | 0 |
+| focused client pipeline + Knowledge Studio tabs specs | 33 | 0 | 0 |
+| `npm test` | 5391 | 0 | 100 |
+| `npm run build`, `git diff --check` | ok | | |
+
+New browser spec, repaired bundle: client sees the pending sensitivity review
+explained, with no GK control, read, or write; GK Reviews entry opens the
+Processing card with no write; "Submit review" sends exactly the existing
+decision POST (200) and a re-read: decisions +1, decision audit +1,
+lifecycle audit +1, the same queue item `resolved/resolved`, decided by the
+human reviewer, one P1-07 `needs_gk_review` candidate and its queue item,
+zero sources, source versions, evidence, or claims; stale 409 and unsupported
+422 persist nothing; the client then sees Sensitivity review Complete and
+Source review waiting; the zero-queue file opened from Files starts review
+work through the existing review-work POST (201) and "Needs more
+information" keeps it open; client_admin and a non-member gk_reviewer get
+403 on read, review work, and decision; assistant actor
+`authorization_denied` and feature-disabled `feature_disabled`, nothing
+persisted; the mixed-role actor gets the client Studio, an accurate access
+note, and 200 on the existing sensitivity read (nothing decided).
+The rehydration failure (`timed out waiting for text: Sensitivity profile`)
+is identical at clean HEAD: that File status row was removed by `82041f4`
+after the spec was written. Not changed here.
+
+**NOT_CONFIRMED:**
+- Deployed behavior and the owner's account: which actor, roles, and
+  memberships produced the screenshot; whether the pending Fraserview item
+  has P1-06 review work.
+- Owner decision: should a global GK reviewer whose membership in a client
+  organization is a client role use the GK Knowledge Studio (or another GK
+  sensitivity-review surface) for that organization? Until decided, such an
+  actor needs a GK-role membership in that organization to act from
+  Knowledge Studio.
+- A gk_reviewer cannot list Projects (`list_engagement_contexts` excludes it
+  by design), so its zero-queue path uses Web Intake's organization-wide
+  batch list.
+
+**Status:** SENSITIVITY_REVIEW_ENTRY_POINTS_RESTORED_LOCALLY_MIXED_ROLE_MOUNT_OWNER_DECISION_PENDING.
+No push, deployment, shared or production database, cloud, feature-flag,
+tenant, credential, `.env`, backend, schema, or `00_KAI_CURRENT_STATE.md`
+change.
