@@ -266,6 +266,37 @@ export function pipelineReasonMessage(reason, fileCount) {
   return REASON_MESSAGES[reason](fileCount);
 }
 
+// What each Get Kinder-owned stage is, for the Reviews tab, so a file's
+// sensitivity review is never read as an Evidence or Impact Fact review.
+export const GET_KINDER_STAGE_DESCRIPTIONS = Object.freeze({
+  sensitivity_review: "Get Kinder confirms how the file's information may be used (sensitivity, consent, and allowed use) before it can become a source. This is not an Evidence or Impact Fact review.",
+  source_review: "Get Kinder decides whether the file becomes a source that evidence can be created from.",
+  evidence_extraction: "Get Kinder creates evidence from the file's promoted source.",
+  evidence_review: "Get Kinder reviews the evidence created from the file.",
+  impact_fact_review: "Get Kinder reviews whether the file's reviewed evidence supports an Impact Fact.",
+});
+
+/**
+ * Whether this actor may perform Get Kinder reviews for the organization, as
+ * text. `access` is the existing review-cockpit capabilities answer
+ * ("allowed" / "not_allowed" / "unknown"); `membershipKnown` is whether the
+ * organization access-capabilities read succeeded. The client Knowledge
+ * Studio is mounted only when that read did not report the GK workspace, so
+ * an "allowed" actor here holds a global Get Kinder role over a non-Get
+ * Kinder membership in this organization.
+ */
+export function getKinderReviewAccessText(access, membershipKnown) {
+  if (!membershipKnown || (access !== "allowed" && access !== "not_allowed")) {
+    return "Your Get Kinder reviewer access could not be confirmed, so no review action is offered here.";
+  }
+  if (access === "not_allowed") {
+    return "Your account does not have Get Kinder reviewer access for this organization, so no review action is offered here.";
+  }
+  return "Your Get Kinder role can complete this organization's sensitivity reviews, but your membership in this organization "
+    + "is not a Get Kinder membership, so the Get Kinder Knowledge Studio where reviews are completed is not shown here. "
+    + "Contact a Get Kinder administrator about your access to it.";
+}
+
 /**
  * What the Evidence tab shows for the selected project, from the explicit
  * request state. Only a successful read can produce a zero; an error is an

@@ -2752,6 +2752,23 @@ export default function ImpactEvidenceLibrary({
     await loadSensitivityDetail();
   }, [organizationId, intakeSensitivityProfileId, sensitivityActionPending, loadSensitivityDetail]);
 
+  // The one sensitivity review card lives on Processing (Package D), so an
+  // entry point on another tab (the Review Queue on Reviews, a file selected
+  // in Files) selects the profile, switches to Processing, and brings the
+  // card into view - selecting alone left the card hidden on another tab.
+  const sensitivityReviewPanelRef = useRef(null);
+  const [sensitivityReviewFocusRequest, setSensitivityReviewFocusRequest] = useState(0);
+  const openSensitivityReview = useCallback((profileId) => {
+    setSelectedSensitivityProfileId(profileId);
+    setKnowledgeStudioTab("processing");
+    setSensitivityReviewFocusRequest((current) => current + 1);
+  }, []);
+  useEffect(() => {
+    if (sensitivityReviewFocusRequest === 0) return;
+    sensitivityReviewPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    sensitivityReviewPanelRef.current?.focus();
+  }, [sensitivityReviewFocusRequest]);
+
   const submitSensitivityDecision = useCallback(async (decision) => {
     const queueItem = sensitivityDetail?.reviewQueueItem;
     if (!organizationId || !intakeSensitivityProfileId || !queueItem || sensitivityActionPending) return;
@@ -2879,6 +2896,18 @@ export default function ImpactEvidenceLibrary({
             sensitivityCapability === true ? handleSensitivityProfileDiscoveredFromIntake : undefined
           }
         />
+      ) : null}
+      {knowledgeStudioTab === "files" && sensitivityCapability === true && intakeSensitivityProfileId ? (
+        <div className="admin-card mb-3 d-flex justify-content-between align-items-center gap-2">
+          <span className="small">The selected source&rsquo;s sensitivity &amp; allowed-use review is on Processing.</span>
+          <button
+            type="button"
+            className="btn btn-sm btn-outline-primary flex-shrink-0"
+            onClick={() => openSensitivityReview(intakeSensitivityProfileId)}
+          >
+            Open sensitivity &amp; allowed-use review
+          </button>
+        </div>
       ) : null}
 
       {message ? <div className="alert alert-warning py-2">{message}</div> : null}
@@ -3135,7 +3164,7 @@ export default function ImpactEvidenceLibrary({
                     <button
                       type="button"
                       className="btn btn-sm btn-outline-primary flex-shrink-0"
-                      onClick={() => setSelectedSensitivityProfileId(item.intakeSensitivityProfileId)}
+                      onClick={() => openSensitivityReview(item.intakeSensitivityProfileId)}
                     >
                       Review sensitivity &amp; allowed use
                     </button>
@@ -4643,8 +4672,8 @@ export default function ImpactEvidenceLibrary({
               <div className="small text-muted mb-2">
                 Pre-claim: no claim, evidence item, or source promotion is required to reach these. This list shows
                 only sources with EXISTING open review work - not every P1-05 sensitivity profile for this
-                organization. To start a first review for a file that has none yet, select the file above in KAI
-                Web Intake once its sensitivity profile is complete.
+                organization. To start a first review for a file that has none yet, select the file in KAI Web
+                Intake on the Files tab once its sensitivity profile is complete, then open its review from there.
               </div>
               {loadingSensitivityReviewQueue ? <div className="text-muted small">Loading review queue...</div> : null}
               {sensitivityReviewQueueError ? <div className="alert alert-warning py-2 small">{sensitivityReviewQueueError}</div> : null}
@@ -4672,7 +4701,7 @@ export default function ImpactEvidenceLibrary({
           ) : null}
 
           {knowledgeStudioTab === "processing" && intakeSensitivityProfileId && sensitivityCapability === true ? (
-            <div className="admin-card mt-3">
+            <div className="admin-card mt-3" ref={sensitivityReviewPanelRef} tabIndex={-1}>
               <div className="d-flex justify-content-between align-items-center mb-2">
                 <h5 className="mb-0">Sensitivity &amp; allowed-use review</h5>
                 {sensitivityDetail?.currentDecision?.decision_outcome === "reviewed" ? (

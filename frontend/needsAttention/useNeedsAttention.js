@@ -194,6 +194,11 @@ export function useNeedsAttention(organizationId) {
     followupItems,
     sensitivityItems: sensitivityAttention.items,
     sensitivityStatus: sensitivityAttention.status,
+    // The review-cockpit capabilities answer itself: "allowed" /
+    // "not_allowed", or "unknown" while loading or after a failed read.
+    sensitivityReviewAccess: sensitivityCapabilityRequestState === "success"
+      ? (sensitivityCapability === true ? "allowed" : "not_allowed")
+      : "unknown",
     reviewQueueRequestState,
   };
 }

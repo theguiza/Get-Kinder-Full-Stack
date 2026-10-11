@@ -12,12 +12,14 @@ import { __clientImpactFactsServiceContract } from "../Backend/kai/services/kaiC
 import { __testables as routeTestables } from "../Backend/kai/routes/sprint2IntakeApi.js";
 import sprint2IntakeApiRouter from "../Backend/kai/routes/sprint2IntakeApi.js";
 import {
+  GET_KINDER_STAGE_DESCRIPTIONS,
   PIPELINE_NEXT_ACTIONS,
   PIPELINE_REASONS,
   PIPELINE_REQUEST_STATUS,
   PIPELINE_STAGE_LABELS,
   clientEvidencePipelinePath,
   evidenceTabView,
+  getKinderReviewAccessText,
   nextActionText,
   pipelineReasonMessage,
   projectClientEvidencePipeline,
@@ -523,11 +525,39 @@ test("frontend source: Files shows the status card; Evidence uses the Project pi
   assert.match(studioSource, /\{tab === "files" && organizationId \? \(\s*<ClientEvidencePipelineStatus\s+request=\{pipeline\}/);
   assert.match(studioSource, /\{tab === "evidence" && engagementId \? \(\s*<ProjectEvidence\s+view=\{evidenceTabView\(pipeline\)\}/);
   assert.match(studioSource, /\{tab === "evidence" && !engagementId \? \(/);
-  assert.match(studioSource, /<ProjectReviews view=\{engagementId \? reviewsTabView\(pipeline\) : null\} canReviewFollowups=\{canReviewFollowups\} \/>/);
+  assert.match(studioSource, /<ProjectReviews\s+view=\{engagementId \? reviewsTabView\(pipeline\) : null\}\s+canReviewFollowups=\{canReviewFollowups\}\s+getKinderReviewAccessNote=\{getKinderReviewAccessText\(getKinderReviewAccess, Boolean\(capabilities\)\)\}\s+\/>/);
   assert.match(statusSource, /Processing &amp; evidence status/);
   assert.match(statusSource, /file\.nextAction === "answer_client_followups" && canReviewFollowups \?/);
   // The org-wide zero message is reachable only without a selected Project.
   const projectEvidence = studioSource.slice(studioSource.indexOf("function ProjectEvidence"));
   assert.doesNotMatch(projectEvidence.slice(0, projectEvidence.indexOf("function ProjectReviews")), /No reviewed evidence yet for this organization/);
   assert.match(studioSource, /This does not mean the project has no evidence\./);
+});
+
+test("frontend Reviews tab: each Get Kinder-owned stage is described, and a file sensitivity review is never presented as Evidence or Impact Fact review", () => {
+  const gkStages = ["sensitivity_review", "source_review", "evidence_extraction", "evidence_review", "impact_fact_review"];
+  assert.deepEqual(Object.keys(GET_KINDER_STAGE_DESCRIPTIONS), gkStages);
+  for (const key of gkStages) assert.ok(Object.hasOwn(PIPELINE_STAGE_LABELS, key), key);
+  assert.match(GET_KINDER_STAGE_DESCRIPTIONS.sensitivity_review, /sensitivity, consent, and allowed use/);
+  assert.match(GET_KINDER_STAGE_DESCRIPTIONS.sensitivity_review, /This is not an Evidence or Impact Fact review\./);
+  assert.doesNotMatch(studioSource, /Evidence and Impact Fact reviews are completed by Get Kinder reviewers\./);
+  assert.match(studioSource, /sensitivity review, source\s+review, evidence review, and Impact Fact review/);
+  // Client-safe: no GK control vocabulary or decision values in the new copy.
+  for (const text of [...Object.values(GET_KINDER_STAGE_DESCRIPTIONS), ...["allowed", "not_allowed", "unknown"].flatMap((a) => [true, false].map((m) => getKinderReviewAccessText(a, m)))]) {
+    assert.doesNotMatch(text, /Sensitivity & allowed-use review|Review cockpit|Submit review|reviewed_|needs_more_information/);
+  }
+});
+
+test("frontend Reviews tab: whether this actor may perform Get Kinder reviews comes from the server answers, never assumed", () => {
+  assert.match(getKinderReviewAccessText("not_allowed", true), /^Your account does not have Get Kinder reviewer access for this organization/);
+  assert.match(getKinderReviewAccessText("allowed", true), /^Your Get Kinder role can complete this organization's sensitivity reviews, but your membership/);
+  for (const [access, membershipKnown] of [["unknown", true], ["allowed", false], ["not_allowed", false], [undefined, true]]) {
+    assert.match(getKinderReviewAccessText(access, membershipKnown), /could not be confirmed/, `${access}/${membershipKnown}`);
+  }
+  // The answer is the shell's existing review-cockpit capabilities read, passed down - no new request.
+  const appSource = readFileSync("frontend/ImpactLibraryApp.jsx", "utf8");
+  const needsAttentionSource = readFileSync("frontend/needsAttention/useNeedsAttention.js", "utf8");
+  assert.match(appSource, /getKinderReviewAccess=\{needsAttention\.sensitivityReviewAccess\}/);
+  assert.match(needsAttentionSource, /sensitivityReviewAccess: sensitivityCapabilityRequestState === "success"\s+\? \(sensitivityCapability === true \? "allowed" : "not_allowed"\)\s+: "unknown",/);
+  assert.doesNotMatch(studioSource, /sensitivityCapabilitiesPath|\/admin\/review-cockpit/);
 });

@@ -7,8 +7,10 @@ import ClientGeneratedDrafts from "./ClientGeneratedDrafts.jsx";
 import ClientEvidencePipelineStatus from "./ClientEvidencePipelineStatus.jsx";
 import useClientEvidencePipeline from "./useClientEvidencePipeline.js";
 import {
+  GET_KINDER_STAGE_DESCRIPTIONS,
   PIPELINE_STAGE_LABELS,
   evidenceTabView,
+  getKinderReviewAccessText,
   pipelineReasonMessage,
   reviewsTabView,
   stageStatusLabel,
@@ -91,13 +93,16 @@ function PipelineReasonList({ reasons }) {
  * Gaps and Reviews are GK review workflow. A client reviewer is linked to
  * the existing client follow-up page (clientFollowupReview capability);
  * everyone else sees who the project's files are waiting on, never a GK
- * queue.
+ * queue. Reviews also says whether this actor may perform Get Kinder reviews
+ * (`getKinderReviewAccess`, the shell's existing review-cockpit capabilities
+ * answer); no Get Kinder review control is ever rendered here.
  */
 export default function ClientKnowledgeStudio({
   organizationId,
   engagementId,
   onEngagementIdChange,
   capabilities,
+  getKinderReviewAccess = "unknown",
   facts,
   onViewImpactLibrary,
 }) {
@@ -233,10 +238,15 @@ export default function ClientKnowledgeStudio({
         <div className="admin-card">
           <h5 className="mb-2">Reviews</h5>
           <div className="small text-muted mb-2">
-            Evidence and Impact Fact reviews are completed by Get Kinder reviewers. Reviewed results appear in the
-            Impact Library and under Evidence.
+            Get Kinder reviewers complete the required reviews of your project&rsquo;s files: sensitivity review, source
+            review, evidence review, and Impact Fact review. Reviewed results appear in the Impact Library and under
+            Evidence.
           </div>
-          <ProjectReviews view={engagementId ? reviewsTabView(pipeline) : null} canReviewFollowups={canReviewFollowups} />
+          <ProjectReviews
+            view={engagementId ? reviewsTabView(pipeline) : null}
+            canReviewFollowups={canReviewFollowups}
+            getKinderReviewAccessNote={getKinderReviewAccessText(getKinderReviewAccess, Boolean(capabilities))}
+          />
         </div>
       ) : null}
     </section>
@@ -301,7 +311,7 @@ function ProjectEvidence({ view, canReviewFollowups, onViewImpactLibrary, onOpen
   );
 }
 
-function ProjectReviews({ view, canReviewFollowups }) {
+function ProjectReviews({ view, canReviewFollowups, getKinderReviewAccessNote }) {
   if (!view) {
     return (
       <>
@@ -352,10 +362,18 @@ function ProjectReviews({ view, canReviewFollowups }) {
               return (
                 <li key={file.intakeFileId}>
                   {file.safeFilename}: {PIPELINE_STAGE_LABELS[file.currentStage]} ({stageStatusLabel(current)})
+                  {GET_KINDER_STAGE_DESCRIPTIONS[file.currentStage] ? (
+                    <div className="text-muted">{GET_KINDER_STAGE_DESCRIPTIONS[file.currentStage]}</div>
+                  ) : null}
                 </li>
               );
             })}
           </ul>
+          <div className="mt-2">
+            Get Kinder reviewers complete these reviews in Get Kinder&rsquo;s own review workspace. This page shows the
+            result once a review is complete.
+          </div>
+          <div className="mt-1" data-get-kinder-review-access="">{getKinderReviewAccessNote}</div>
         </div>
       ) : null}
     </div>

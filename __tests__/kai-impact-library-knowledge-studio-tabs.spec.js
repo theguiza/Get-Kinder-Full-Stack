@@ -134,3 +134,21 @@ test("D-Correction 2: Processing states its real, honest scope and never fabrica
   assert.match(libSource, /Other processing stages \(intake,\s*\n\s*profiling, data-dictionary mapping, source promotion\) are not yet exposed here\./);
   assert.doesNotMatch(libSource, /progress\s*:\s*\d|percentComplete|progressPercent/i, "no fabricated progress metric anywhere in this file");
 });
+
+test("sensitivity review reachability: every entry point outside Processing opens the one review card on Processing", () => {
+  const open = libSource.match(/const openSensitivityReview = useCallback\(\(profileId\) => \{([\s\S]*?)\}, \[\]\);/);
+  assert.ok(open, "one shared opener");
+  assert.match(open[1], /setSelectedSensitivityProfileId\(profileId\);/);
+  assert.match(open[1], /setKnowledgeStudioTab\("processing"\);/);
+  // Review Queue (Reviews tab) entry.
+  const reviews = libSource.slice(libSource.indexOf('{knowledgeStudioTab === "reviews" ? ('), libSource.indexOf('<h5 className="mb-0">Claims</h5>'));
+  assert.match(reviews, /onClick=\{\(\) => openSensitivityReview\(item\.intakeSensitivityProfileId\)\}/);
+  assert.doesNotMatch(reviews, /onClick=\{\(\) => setSelectedSensitivityProfileId\(/, "no selection-only entry that leaves the card hidden");
+  // Files tab entry for a selected (file-derived) profile, capability-gated.
+  assert.match(libSource, /\{knowledgeStudioTab === "files" && sensitivityCapability === true && intakeSensitivityProfileId \? \(/);
+  assert.match(libSource, /onClick=\{\(\) => openSensitivityReview\(intakeSensitivityProfileId\)\}\s*>\s*Open sensitivity &amp; allowed-use review/);
+  // The card itself is unchanged in its gating and receives focus.
+  assert.match(libSource, /\{knowledgeStudioTab === "processing" && intakeSensitivityProfileId && sensitivityCapability === true \? \(\s*<div className="admin-card mt-3" ref=\{sensitivityReviewPanelRef\} tabIndex=\{-1\}>/);
+  assert.doesNotMatch(libSource, /select the file above in KAI/, "Processing no longer points to a Web Intake that is on another tab");
+  assert.match(libSource, /select the file in KAI Web\s+Intake on the Files tab/);
+});
