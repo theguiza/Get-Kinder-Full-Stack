@@ -557,3 +557,19 @@ test("B1A-2 migration: the ledger is append-only, human-only, and adds no column
   // No claim/evidence/export/release table is created or altered.
   assert.doesNotMatch(migration, /(?:CREATE|ALTER) TABLE kai\.(?:claims|evidence_items|generated_content_drafts|export_[a-z_]+|human_authority_decisions)\b/);
 });
+
+test("client-admin sensitivity migration verifier checks the exact validated role constraint in the local PostgreSQL runner", () => {
+  const verifier = readFileSync(
+    "scripts/kai-sprint2-b1a-02-client-admin-sensitivity-review-verifier.sql",
+    "utf8",
+  );
+  assert.match(verifier, /intake_sensitivity_review_decisions_b1a_02_role_check/);
+  assert.match(verifier, /c\.convalidated/);
+  assert.match(verifier, /regexp_matches\(pg_get_constraintdef\(c\.oid\)/);
+  assert.match(verifier, /ARRAY\['client_admin', 'gk_admin', 'gk_operator', 'gk_reviewer'\]::text\[\]/);
+  const runner = readFileSync(
+    "scripts/kai-sprint2-b1a-02-phase5-allowed-use-decision-ledger-local-postgres.js",
+    "utf8",
+  );
+  assert.match(runner, /kai-sprint2-b1a-02-client-admin-sensitivity-review-verifier\.sql/);
+});

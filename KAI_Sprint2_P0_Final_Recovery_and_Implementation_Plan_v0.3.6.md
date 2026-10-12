@@ -37825,3 +37825,15 @@ database, feature flag, or deployment was changed.
 **Status:** OWNER_APPROVED_ORG_ADMIN_SENSITIVITY_REVIEW_IMPLEMENTED_LOCALLY;
 PURE_BOUNDARY_TESTS_PASS; SYNTHETIC_PERSISTENCE_AND_BROWSER_ACCEPTANCE_NOT_CONFIRMED_IN_SANDBOX;
 NO_PRODUCTION_CHANGE.
+
+### Sensitivity role-check migration verifier follow-up (2026-10-12)
+
+Added `scripts/kai-sprint2-b1a-02-client-admin-sensitivity-review-verifier.sql`
+and wired it into the B1A-2 synthetic PostgreSQL runner immediately after the
+additive migration. It checks the named role CHECK constraint is validated and
+that its parsed role literals equal exactly `client_admin`, `gk_admin`,
+`gk_operator`, and `gk_reviewer`. The focused boundary suite passed 20/20,
+including a test that the verifier is present and runner-wired. The PostgreSQL
+runner did not reach migration or verifier execution: `initdb` failed creating
+shared memory (`shmget: Operation not permitted`). The SQL verifier's database
+result therefore remains NOT_CONFIRMED.
