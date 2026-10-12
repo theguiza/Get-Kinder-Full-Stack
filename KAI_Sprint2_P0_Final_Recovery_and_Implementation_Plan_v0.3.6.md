@@ -37030,3 +37030,107 @@ End state: zero `kai.user_roles` rows, Org B unchanged.
 No push, deployment, shared or production database, cloud, feature-flag,
 tenant, live membership, role, credential, `.env`, schema, or
 `00_KAI_CURRENT_STATE.md` change.
+
+### Team & Access: last effective administrator guard correction (2026-10-12)
+
+**Owner authorization (USER_CONFIRMED):** one bounded correction to the
+existing last-effective-administrator guard so that only administrators who
+can actually exercise `client_admin` count; regression tests on the local
+synthetic PostgreSQL infrastructure. No change to the direct user-id
+membership-grant policy, no new controls or features, no push, deploy,
+database, cloud, flag, tenant, credential, or `00_KAI_CURRENT_STATE.md`
+change.
+
+**Starting state (TOOL_VERIFIED):** `main` at
+`68b00670677d58215a9e3f7f63d0b144e33e7520`, clean.
+
+**Effective administrator rule (TOOL_VERIFIED from code):** a request
+administers organization X only if `resolveKaiActorContext` admits the actor
+(a `kai.users` row with `legacy_identity_source = 'public.userdata'` for the
+legacy id and `status = 'active'`; an existing non-active row is never
+resurrected) and `validateActorCanPerformOperation` finds an active
+`client_admin` membership for X. That membership can be stored
+(`kai.organization_memberships`, `membership_status = 'active'`) or derived
+(active GK `admin` membership of the GK organization with an active
+`kai.gk_organization_bindings` row for X). Platform superuser is a separate
+recovery path and bypasses the guard.
+
+**Defect (TOOL_VERIFIED):** at HEAD,
+`Backend/kai/auth/gkOrganizationAdminQueries.js:62-66` returned true for any
+active GK org admin (`return adminIds.length > 0;`). Separately,
+`Backend/kai/db/kaiAccessAdministrationQueries.js:138-149` counted active
+stored `client_admin` rows without reading `kai.users`. The guard at
+`Backend/kai/services/kaiAccessAdministrationService.js:335-345` relied on
+both. A deactivated derived admin, or a stored admin with a deactivated
+account, therefore let the last administrator who could act be demoted.
+Reproduced: with the HEAD helpers, the new real-PostgreSQL cases guard 1,
+guard 4-5, and guard 6 fail.
+
+**Correction (TOOL_VERIFIED):**
+- `hasActiveDerivedClientAdminForOrganization`: after the existing binding
+  and GK admin roster reads, requires a GK admin whose `public.userdata`
+  mappings in `kai.users` exist and are all active. Fail closed: a GK admin
+  never provisioned in KAI does not count until a sign-in provisions them.
+- `countActiveStoredClientAdminMemberships`: counts distinct users with an
+  active stored `client_admin` membership whose `kai.users` row is an active
+  `public.userdata` mapping.
+- Guard structure unchanged: at least one effective derived admin (which a
+  stored-role change cannot remove, so it may be the target) or one effective
+  stored admin other than the target. The OR of two predicates never sums,
+  so a person with both sources is not double counted. The existing
+  `kai_org_admin_lock` advisory transaction lock serializes competing
+  changes; the upsert runs on the same transaction client; rejection returns
+  before any write or audit. Only caller of both helpers: this guard.
+
+**Regression tests (TOOL_VERIFIED):** eight cases added to
+`kai-sprint2-p2-access-administration.integration.spec.js` (P2 runner,
+ephemeral loopback PostgreSQL). They run through the production router with
+no service override: real authentication middleware,
+`resolveKaiActorContext`, org scope, and binding derivation, and default
+repositories on the runner cluster. Only the session login is simulated.
+Guard 1: a deactivated or never-provisioned derived admin does not count,
+and role change and inactive-status PUT are both 409 with no mutation or
+audit. Guard 2: two stored admins: 200, then 409. Guard 3: an active
+derived admin counts and can GET the roster. Guard 4-5: a stored admin
+counts only with an active membership (inactive and revoked rejected) and an
+active account. Guard 6: a person with both sources is one roster row,
+counted once, keeps derived authority after their stored role changes, and
+counts through neither source when deactivated (and gets 403). Guard 7: two
+admins demoting each other concurrently, 3 rounds: one 200, one 409, one
+admin left, one audit. Guard 8: stored `gk_reviewer` rewrite 403
+(`non_client_membership_not_client_managed`) and cross-organization PUT 403,
+nothing written.
+
+**Verification (TOOL_VERIFIED; loopback `DATABASE_URL` sentinel):**
+
+| Command | Pass | Fail | Skipped |
+| --- | --- | --- | --- |
+| `npm run verify:kai-sprint2-p2-access-administration`, HEAD helpers + new cases | 21 | 4 | 0 |
+| `npm run verify:kai-sprint2-p2-access-administration` | 25 | 0 | 0 |
+| Team & Access, access-admin, JOIN-1..5, admin UI, capability, actor-context, organization-context, GK binding, enablement, tenant specs | 301 | 0 | 7 |
+| Team & Access browser spec | 6 | 0 | 0 |
+| `npm run verify:kai-sprint2-join-1-organization-join-requests` | 128 | 0 | 0 |
+| `npm run verify:kai-sprint2-api-contract` | 71 | 0 | 0 |
+| `npm run test:kai-sprint2` | 4713 | 0 | 89 |
+| `npm test` | 5419 | 0 | 101 |
+| `git diff --check` | ok | | |
+
+No frontend change, so no rebuild. The Web Intake Files browser spec and
+P1-08 runner were not run: neither reaches the access-administration guard
+or its helpers.
+
+**NOT_CONFIRMED:**
+- Deployed behavior and production data.
+- A `kai.users` deactivation or a GK organization-membership change made
+  outside this service is not serialized by `kai_org_admin_lock`. A
+  deactivation concurrent with a demotion was not exercised.
+- The Team & Access roster still shows a deactivated person's effective role
+  from membership data. Its advisory sole-administrator count may differ
+  from the server's, and the server's 409 decides.
+- A GK org admin who has never signed in is not counted (fail-closed
+  choice above).
+
+**Status:** TEAM_ACCESS_LAST_EFFECTIVE_ADMIN_GUARD_CORRECTED_LOCALLY_PRODUCTION_NOT_CONFIRMED.
+No push, deployment, shared or production database, cloud, feature-flag,
+tenant, membership, credential, `.env`, schema, frontend, or
+`00_KAI_CURRENT_STATE.md` change.
