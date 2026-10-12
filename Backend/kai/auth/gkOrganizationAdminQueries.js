@@ -53,15 +53,31 @@ export async function listActiveGkOrganizationAdminLegacyUserIds(gkOrganizationI
 }
 
 /**
- * Whether an organization currently has at least one effective active
- * derived client_admin (an active Get Kinder org-admin for the GK
- * organization actively bound to this KAI organization). Used by
- * last-admin protection alongside the stored-membership count; never
- * persisted.
+ * Whether an organization currently has at least one derived client_admin
+ * who can actually exercise it: an active Get Kinder org-admin for the GK
+ * organization actively bound to this KAI organization, whose
+ * public.userdata identity is mapped to kai.users and every such mapping is
+ * active. resolveKaiActorContext refuses an actor whose mapping is not
+ * active (it never resurrects one), so an org-admin row alone - a
+ * deactivated KAI account, or one never provisioned yet - is not counted.
+ * Used by last-admin protection alongside the stored-membership count;
+ * never persisted.
  */
 export async function hasActiveDerivedClientAdminForOrganization(kaiOrganizationId, db = pool) {
   const gkOrganizationId = await getActiveGkOrganizationIdForKaiOrganization(kaiOrganizationId, db);
   if (!gkOrganizationId) return false;
   const adminIds = await listActiveGkOrganizationAdminLegacyUserIds(gkOrganizationId, db);
-  return adminIds.length > 0;
+  if (adminIds.length === 0) return false;
+  const { rows } = await db.query(
+    `SELECT EXISTS (
+       SELECT 1
+         FROM kai.users
+        WHERE legacy_identity_source = 'public.userdata'
+          AND legacy_public_userdata_id = ANY($1::int[])
+        GROUP BY legacy_public_userdata_id
+       HAVING bool_and(status = 'active')
+     ) AS has_effective_admin`,
+    [adminIds],
+  );
+  return rows[0]?.has_effective_admin === true;
 }

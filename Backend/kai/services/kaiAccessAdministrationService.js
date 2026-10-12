@@ -332,6 +332,11 @@ export async function applyOrganizationMembershipChangeInTransaction(
   const isCurrentlyActiveAdmin = previousRow?.role_name === "client_admin" && previousRow?.membership_status === "active";
   const wouldStillBeActiveAdmin = roleName === "client_admin" && membershipStatus === KAI_ACTIVE_ORGANIZATION_MEMBERSHIP_STATUS;
 
+  // At least one effective administrator must remain: a derived one (not
+  // touched by a stored-role change, so it may be the target itself) or a
+  // stored one other than the target. Both helpers count only identities
+  // that can actually exercise client_admin (active public.userdata
+  // mapping), and the organization lock above serializes competing changes.
   if (isCurrentlyActiveAdmin && !wouldStillBeActiveAdmin && !platformSuperuserAuthorized) {
     const orgHasDerivedAdmin = await hasDerivedAdmin(organizationId, tx);
     if (!orgHasDerivedAdmin) {

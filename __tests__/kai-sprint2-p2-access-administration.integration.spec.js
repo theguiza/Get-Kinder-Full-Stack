@@ -325,6 +325,238 @@ async function runIntegrationSuite() {
         assert.deepEqual(await membershipRows(orgId, kaiUserId), [{ role_name: "client_reviewer", membership_status: "active" }]);
       });
 
+      // --- A2. Last effective administrator (real router, real actor) --------
+      //
+      // Every request below goes through the production access-administration
+      // router with no service override: requireKaiSprint2Authenticated ->
+      // attachKaiSprint2ActorContext (real resolveKaiActorContext, real org
+      // scope and GK binding derivation) -> manageOrganizationMembership with
+      // its default repository on the ambient pool, which this runner points
+      // at its own cluster. Only the Get Kinder session login is simulated.
+
+      const express = (await import("express")).default;
+      const accessAdministrationRouter = (await import("../Backend/kai/routes/kaiAccessAdministrationApi.js")).default;
+      const BASE = "/api/kai/sprint2/access-administration";
+      // orgScopeService selects public.organizations.status (the production
+      // column other runners' synthetic mirrors also add).
+      await pool.query("ALTER TABLE public.organizations ADD COLUMN IF NOT EXISTS status text");
+
+      async function withRealRouter(work) {
+        const previousEnabled = process.env.KAI_SPRINT2_ENABLED;
+        process.env.KAI_SPRINT2_ENABLED = "true";
+        const app = express();
+        app.use(express.json());
+        app.use((req, _res, next) => {
+          const legacyId = Number(req.headers["x-harness-user"]);
+          if (Number.isInteger(legacyId) && legacyId > 0) req.user = { id: legacyId, email: `user${legacyId}@guard.test` };
+          req.isAuthenticated = () => Boolean(req.user);
+          next();
+        });
+        app.use(BASE, accessAdministrationRouter);
+        const server = await new Promise((resolve) => {
+          const listening = app.listen(0, "127.0.0.1", () => resolve(listening));
+        });
+        const { port } = server.address();
+        const call = async (asLegacyId, method, path, body) => {
+          const response = await fetch(`http://127.0.0.1:${port}${BASE}${path}`, {
+            method,
+            headers: { "x-harness-user": String(asLegacyId), ...(body ? { "content-type": "application/json" } : {}) },
+            body: body ? JSON.stringify(body) : undefined,
+          });
+          return { status: response.status, body: await response.json().catch(() => null) };
+        };
+        try {
+          return await work(call);
+        } finally {
+          await new Promise((resolve) => server.close(resolve));
+          if (previousEnabled === undefined) delete process.env.KAI_SPRINT2_ENABLED;
+          else process.env.KAI_SPRINT2_ENABLED = previousEnabled;
+        }
+      }
+
+      // One public.userdata identity; optionally a kai.users mapping with the
+      // given status (null = never provisioned) and a Get Kinder org-admin
+      // membership of gkAdminOf.
+      async function seedPerson({ kaiStatus = "active", gkAdminOf = null } = {}) {
+        const legacyId = (await pool.query("INSERT INTO public.userdata (org_id) VALUES ($1) RETURNING id", [gkAdminOf])).rows[0].id;
+        if (gkAdminOf) {
+          await pool.query("INSERT INTO public.user_org_memberships (org_id, user_id, role, is_active) VALUES ($1, $2, 'admin', true)", [gkAdminOf, legacyId]);
+        }
+        let kaiUserId = null;
+        if (kaiStatus) {
+          kaiUserId = (await pool.query(
+            `INSERT INTO kai.users (legacy_identity_source, legacy_public_userdata_id, email, status)
+             VALUES ('public.userdata', $1, $2, $3) RETURNING user_id`,
+            [legacyId, `user${legacyId}@guard.test`, kaiStatus],
+          )).rows[0].user_id;
+        }
+        return { legacyId, kaiUserId };
+      }
+
+      async function storeMembership(organizationId, person, roleName, membershipStatus = "active") {
+        await pool.query(
+          "INSERT INTO kai.organization_memberships (organization_id, user_id, role_name, membership_status) VALUES ($1, $2, $3, $4)",
+          [organizationId, person.kaiUserId, roleName, membershipStatus],
+        );
+      }
+
+      async function boundOrganization() {
+        const orgId = await newOrgId();
+        const gkOrganizationId = (await pool.query("INSERT INTO public.organizations (name, status) VALUES ('Guard Org', 'approved') RETURNING id")).rows[0].id;
+        await pool.query("INSERT INTO kai.gk_organization_bindings (gk_organization_id, kai_organization_id, status) VALUES ($1, $2, 'active')", [gkOrganizationId, orgId]);
+        return { orgId, gkOrganizationId };
+      }
+
+      const demote = (call, actor, orgId, target, body = { role_name: "client_contributor", membership_status: "active" }) =>
+        call(actor.legacyId, "PUT", `/organizations/${orgId}/memberships/${target.legacyId}`, body);
+
+      async function assertRejectedWithoutMutation(result, orgId, target) {
+        assert.equal(result.status, 409, JSON.stringify(result.body));
+        assert.equal(result.body.error.code, "last_admin_protection");
+        assert.deepEqual(await membershipRows(orgId, target.kaiUserId), [{ role_name: "client_admin", membership_status: "active" }]);
+      }
+
+      await t.test("guard 1: a deactivated (or never provisioned) legacy GK administrator does not count, so the only effective administrator cannot be demoted", async () => {
+        for (const derivedStatus of ["inactive", null]) {
+          await resetAllTables();
+          const { orgId, gkOrganizationId } = await boundOrganization();
+          await seedPerson({ kaiStatus: derivedStatus, gkAdminOf: gkOrganizationId });
+          const admin = await seedPerson();
+          await storeMembership(orgId, admin, "client_admin");
+          await withRealRouter(async (call) => {
+            const auditsBefore = await auditCount();
+            await assertRejectedWithoutMutation(await demote(call, admin, orgId, admin), orgId, admin);
+            // The same direct API with an inactive status is refused too.
+            await assertRejectedWithoutMutation(
+              await demote(call, admin, orgId, admin, { role_name: "client_admin", membership_status: "inactive" }), orgId, admin);
+            assert.equal(await auditCount(), auditsBefore, `derived kai status ${derivedStatus}: nothing audited`);
+          });
+        }
+      });
+
+      await t.test("guard 2: with two effective stored administrators one may be demoted, then the remaining one is protected", async () => {
+        await resetAllTables();
+        const orgId = await newOrgId();
+        const first = await seedPerson();
+        const second = await seedPerson();
+        await storeMembership(orgId, first, "client_admin");
+        await storeMembership(orgId, second, "client_admin");
+        await withRealRouter(async (call) => {
+          const allowed = await demote(call, first, orgId, second);
+          assert.equal(allowed.status, 200, JSON.stringify(allowed.body));
+          assert.deepEqual(await membershipRows(orgId, second.kaiUserId), [{ role_name: "client_contributor", membership_status: "active" }]);
+          await assertRejectedWithoutMutation(await demote(call, first, orgId, first), orgId, first);
+        });
+      });
+
+      await t.test("guard 3: an active legacy-derived administrator counts and can actually administer", async () => {
+        await resetAllTables();
+        const { orgId, gkOrganizationId } = await boundOrganization();
+        const derived = await seedPerson({ gkAdminOf: gkOrganizationId });
+        const admin = await seedPerson();
+        await storeMembership(orgId, admin, "client_admin");
+        await withRealRouter(async (call) => {
+          assert.equal((await call(derived.legacyId, "GET", `/organizations/${orgId}/access`)).status, 200, "the derived administrator is effective");
+          const allowed = await demote(call, admin, orgId, admin);
+          assert.equal(allowed.status, 200, JSON.stringify(allowed.body));
+        });
+      });
+
+      await t.test("guard 4-5: a stored administrator counts only while both the membership and the KAI account are active", async () => {
+        for (const other of [
+          { membershipStatus: "active", kaiStatus: "active", counts: true },
+          { membershipStatus: "inactive", kaiStatus: "active", counts: false },
+          { membershipStatus: "revoked", kaiStatus: "active", counts: false },
+          { membershipStatus: "active", kaiStatus: "inactive", counts: false },
+        ]) {
+          await resetAllTables();
+          const orgId = await newOrgId();
+          const admin = await seedPerson();
+          const otherAdmin = await seedPerson({ kaiStatus: other.kaiStatus });
+          await storeMembership(orgId, admin, "client_admin");
+          await storeMembership(orgId, otherAdmin, "client_admin", other.membershipStatus);
+          await withRealRouter(async (call) => {
+            const result = await demote(call, admin, orgId, admin);
+            if (other.counts) assert.equal(result.status, 200, JSON.stringify(other));
+            else await assertRejectedWithoutMutation(result, orgId, admin);
+          });
+        }
+      });
+
+      await t.test("guard 6: a person with both derived and stored authority is one administrator, counted once and only while active", async () => {
+        await resetAllTables();
+        let { orgId, gkOrganizationId } = await boundOrganization();
+        let both = await seedPerson({ gkAdminOf: gkOrganizationId });
+        await storeMembership(orgId, both, "client_admin");
+        const admin = await seedPerson();
+        await storeMembership(orgId, admin, "client_admin");
+        await withRealRouter(async (call) => {
+          const roster = await call(admin.legacyId, "GET", `/organizations/${orgId}/access`);
+          assert.equal(roster.body.data.access.filter((row) => row.legacy_public_userdata_id === both.legacyId).length, 1);
+          assert.equal(roster.body.data.access.find((row) => row.legacy_public_userdata_id === both.legacyId).authority_source, "both");
+          assert.equal((await demote(call, admin, orgId, admin)).status, 200);
+          // Their own stored role may go: the derived authority remains.
+          assert.equal((await demote(call, both, orgId, both)).status, 200);
+          assert.equal((await call(both.legacyId, "GET", `/organizations/${orgId}/access`)).status, 200);
+        });
+
+        // The same person with a deactivated KAI account counts through
+        // neither source.
+        await resetAllTables();
+        ({ orgId, gkOrganizationId } = await boundOrganization());
+        both = await seedPerson({ kaiStatus: "inactive", gkAdminOf: gkOrganizationId });
+        await storeMembership(orgId, both, "client_admin");
+        const soleAdmin = await seedPerson();
+        await storeMembership(orgId, soleAdmin, "client_admin");
+        await withRealRouter(async (call) => {
+          assert.equal((await call(both.legacyId, "GET", `/organizations/${orgId}/access`)).status, 403, "a deactivated account cannot act");
+          await assertRejectedWithoutMutation(await demote(call, soleAdmin, orgId, soleAdmin), orgId, soleAdmin);
+        });
+      });
+
+      await t.test("guard 7: two administrators demoting each other at the same time leave exactly one administrator", async () => {
+        for (let round = 0; round < 3; round += 1) {
+          await resetAllTables();
+          const orgId = await newOrgId();
+          const first = await seedPerson();
+          const second = await seedPerson();
+          await storeMembership(orgId, first, "client_admin");
+          await storeMembership(orgId, second, "client_admin");
+          await withRealRouter(async (call) => {
+            const results = await Promise.all([demote(call, first, orgId, second), demote(call, second, orgId, first)]);
+            assert.deepEqual(results.map((r) => r.status).sort(), [200, 409], JSON.stringify(results.map((r) => r.body)));
+          });
+          const admins = await pool.query(
+            "SELECT count(*)::int AS n FROM kai.organization_memberships WHERE organization_id = $1 AND role_name = 'client_admin' AND membership_status = 'active'",
+            [orgId],
+          );
+          assert.equal(admins.rows[0].n, 1, `round ${round}`);
+          assert.equal(await auditCount(), 1, `round ${round}: one change audited`);
+        }
+      });
+
+      await t.test("guard 8: GK staff-role protection and the organization boundary still hold on the real path", async () => {
+        await resetAllTables();
+        const orgA = await newOrgId();
+        const orgB = await newOrgId();
+        const adminA = await seedPerson();
+        const adminB = await seedPerson();
+        const staff = await seedPerson();
+        await storeMembership(orgA, adminA, "client_admin");
+        await storeMembership(orgB, adminB, "client_admin");
+        await storeMembership(orgA, staff, "gk_reviewer");
+        await withRealRouter(async (call) => {
+          const rewrite = await demote(call, adminA, orgA, staff);
+          assert.equal(rewrite.status, 403);
+          assert.equal(rewrite.body.blockers[0].blocking_reason, "non_client_membership_not_client_managed");
+          const crossOrg = await demote(call, adminB, orgA, adminA);
+          assert.equal(crossOrg.status, 403);
+        });
+        assert.deepEqual(await membershipRows(orgA, staff.kaiUserId), [{ role_name: "gk_reviewer", membership_status: "active" }]);
+        assert.deepEqual(await membershipRows(orgA, adminA.kaiUserId), [{ role_name: "client_admin", membership_status: "active" }]);
+        assert.equal(await auditCount(), 0);
+      });
+
       await t.test("cross-tenant client_admin mutation attempt yields zero mutation", async () => {
         await resetAllTables();
         const orgA = await newOrgId();
@@ -519,6 +751,8 @@ async function runIntegrationSuite() {
       });
     } finally {
       await pool.end();
+      const { default: ambientPool } = await import("../Backend/db/pg.js");
+      await ambientPool.end().catch(() => {});
     }
   });
 }

@@ -128,21 +128,28 @@ export async function listOrganizationMembershipRowsForUserInOrganization(organi
 }
 
 /**
- * Count of stored, active client_admin memberships for an organization,
- * optionally excluding one user (the actor whose own membership a mutation
- * would change) - used to simulate whether a proposed change would leave the
- * organization with zero stored effective admins. Derived client_admin
- * authority is counted separately (see gkOrganizationAdminQueries.js) since
- * it is never a kai.organization_memberships row.
+ * Count of distinct users holding a stored, active client_admin membership
+ * for an organization who can actually exercise it - their kai.users row is
+ * an active public.userdata mapping, the only identity resolveKaiActorContext
+ * admits - optionally excluding one user (the one whose own membership a
+ * mutation would change). Used to simulate whether a proposed change would
+ * leave the organization with zero effective stored admins. Derived
+ * client_admin authority is counted separately (see
+ * gkOrganizationAdminQueries.js) since it is never a
+ * kai.organization_memberships row.
  */
 export async function countActiveStoredClientAdminMemberships(organizationId, db = pool, { excludingUserId = null } = {}) {
   const { rows } = await db.query(
-    `SELECT count(*)::int AS count
-       FROM kai.organization_memberships
-      WHERE organization_id = $1
-        AND role_name = 'client_admin'
-        AND membership_status = 'active'
-        AND ($2::text IS NULL OR user_id::text <> $2::text)`,
+    `SELECT count(DISTINCT om.user_id)::int AS count
+       FROM kai.organization_memberships om
+       JOIN kai.users u ON u.user_id = om.user_id
+      WHERE om.organization_id = $1
+        AND om.role_name = 'client_admin'
+        AND om.membership_status = 'active'
+        AND u.status = 'active'
+        AND u.legacy_identity_source = 'public.userdata'
+        AND u.legacy_public_userdata_id IS NOT NULL
+        AND ($2::text IS NULL OR om.user_id::text <> $2::text)`,
     [organizationId, excludingUserId === null ? null : String(excludingUserId)],
   );
   return rows[0]?.count ?? 0;
