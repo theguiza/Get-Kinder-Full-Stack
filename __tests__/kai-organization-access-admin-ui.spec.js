@@ -23,6 +23,7 @@ import {
   kaiGlobalRolePath,
   kaiOrganizationAccessPath,
   kaiOrganizationMembershipPath,
+  kaiOrganizationRoleGrantMessage,
   kaiOrganizationRoleOptions,
   rosterGlobalKaiRoles,
 } from "../frontend/kaiOrganizationAccessLogic.js";
@@ -294,6 +295,18 @@ test("the global-role controls build only gk_reviewer assign/revoke requests aga
   assert.throws(() => buildKaiGlobalReviewerRolePayload("delete"));
   assert.deepEqual(rosterGlobalKaiRoles({ global_kai_roles: ["gk_admin"] }), ["gk_admin"]);
   assert.equal(rosterGlobalKaiRoles({}), null, "a roster without global roles (non-superuser reader) shows no global column data");
+});
+
+test("granting the gk_reviewer organization role is not reported as reviewer access; client role messages are unchanged", () => {
+  assert.equal(
+    kaiOrganizationRoleGrantMessage("gk_reviewer", "someone@example.org"),
+    "Granted the gk_reviewer role in this organization to someone@example.org. Sensitivity reviews also need the global gk_reviewer role.",
+  );
+  assert.doesNotMatch(kaiOrganizationRoleGrantMessage("gk_reviewer", "someone@example.org"), /reviewer access/);
+  assert.equal(kaiOrganizationRoleGrantMessage("client_reviewer", "someone@example.org"), "Granted client reviewer access to someone@example.org.");
+  assert.equal(kaiOrganizationRoleGrantMessage("client_admin", "someone@example.org"), "Granted client admin access to someone@example.org.");
+  const source = readFileSync("frontend/adminDashboard.jsx", "utf8");
+  assert.match(source, /pushToast\(kaiOrganizationRoleGrantMessage\(roleInput, email\), "success"\)/);
 });
 
 test("adminDashboard.jsx shows global roles and the gk_reviewer controls only when the server reports global_roles_visible", () => {

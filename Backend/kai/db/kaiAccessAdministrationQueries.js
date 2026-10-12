@@ -1,4 +1,5 @@
 import pool from "./kaiDb.js";
+import { findOrCreateKaiUserByLegacyPublicUserdataId } from "./kaiQueries.js";
 
 /**
  * KAI Sprint 2 Package 2 repository: kai.organization_memberships and
@@ -337,4 +338,24 @@ export async function revokeGlobalRole({ userId, roleName }, db = pool) {
  * identity/invitation system - see kaiQueries.js.
  */
 export { findOrCreateKaiUserByLegacyPublicUserdataId } from "./kaiQueries.js";
+
 export const KAI_USER_SELECT_COLUMNS_FOR_ADMINISTRATION = KAI_USER_SELECT_COLUMNS;
+
+/**
+ * Target resolution for the membership and global-role writers. A target who
+ * has never used KAI is mapped here instead of on their first sign-in, so
+ * the mapping gets the same email sign-in would give it: the Get Kinder
+ * account's own public.userdata email (a blank or non-string email becomes
+ * null, as on the onboarding route). The deployed kai.users.email is NOT NULL
+ * (USER_CONFIRMED), so a NULL email fails the JIT insert there. An existing
+ * mapping is returned unchanged.
+ */
+export async function findOrCreateKaiUserForAdministrationTarget({ legacyPublicUserdataId } = {}, db = pool) {
+  if (!Number.isInteger(legacyPublicUserdataId) || legacyPublicUserdataId <= 0) return null;
+  const { rows } = await db.query("SELECT email FROM public.userdata WHERE id = $1 LIMIT 1", [legacyPublicUserdataId]);
+  const email = rows[0]?.email;
+  return findOrCreateKaiUserByLegacyPublicUserdataId(
+    { legacyPublicUserdataId, email: typeof email === "string" && email.trim().length > 0 ? email : null },
+    db,
+  );
+}

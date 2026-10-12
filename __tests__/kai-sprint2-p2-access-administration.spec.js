@@ -1,11 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import {
   viewEffectiveKaiAccess,
   manageOrganizationMembership,
   manageGlobalKaiRole,
 } from "../Backend/kai/services/kaiAccessAdministrationService.js";
+import { findOrCreateKaiUserForAdministrationTarget } from "../Backend/kai/db/kaiAccessAdministrationQueries.js";
 
 const ORG_A = "org-aaaaaaaa";
 const ORG_B = "org-bbbbbbbb";
@@ -717,4 +719,65 @@ test("client_reviewer cannot view the organization access roster", async () => {
   );
   assert.equal(result.ok, false);
   assert.equal(result.error.code, "authorization_denied");
+});
+
+// A query-only fake of the externally managed tables the administration
+// target resolver touches: public.userdata (email) and kai.users. No
+// .connect, so findOrCreateKaiUserByLegacyPublicUserdataId takes its
+// non-transactional branch.
+function fakeIdentityDb({ userdataEmail, existingKaiUser = null } = {}) {
+  const calls = [];
+  return {
+    calls,
+    async query(sql, params) {
+      calls.push({ sql: sql.replace(/\s+/g, " ").trim(), params });
+      if (/FROM public\.userdata/.test(sql)) return { rows: userdataEmail === undefined ? [] : [{ email: userdataEmail }] };
+      if (/^\s*SELECT .* FROM kai\.users/s.test(sql)) return { rows: existingKaiUser ? [existingKaiUser] : [] };
+      if (/INSERT INTO kai\.users/.test(sql)) {
+        return { rows: [{ user_id: "new-kai-user", legacy_identity_source: "public.userdata", legacy_public_userdata_id: params[0], status: "active", email: params[1] }] };
+      }
+      throw new Error(`unexpected query: ${sql}`);
+    },
+  };
+}
+
+test("an administration target who has never used KAI is mapped with their Get Kinder account email", async () => {
+  const db = fakeIdentityDb({ userdataEmail: "reviewer@example.org" });
+  const user = await findOrCreateKaiUserForAdministrationTarget({ legacyPublicUserdataId: 1203 }, db);
+  assert.equal(user.email, "reviewer@example.org");
+  const insert = db.calls.find((call) => /INSERT INTO kai\.users/.test(call.sql));
+  assert.deepEqual(insert.params, [1203, "reviewer@example.org"]);
+  assert.deepEqual(db.calls.find((call) => /public\.userdata/.test(call.sql)).params, [1203]);
+});
+
+test("an administration target with a blank, missing, or non-string account email is mapped with a null email, as on sign-in", async () => {
+  for (const userdataEmail of ["   ", undefined, null, 42]) {
+    const db = fakeIdentityDb({ userdataEmail });
+    await findOrCreateKaiUserForAdministrationTarget({ legacyPublicUserdataId: 1203 }, db);
+    assert.deepEqual(db.calls.find((call) => /INSERT INTO kai\.users/.test(call.sql)).params, [1203, null], String(userdataEmail));
+  }
+});
+
+test("an administration target who already has a KAI identity gets it back unchanged, with no insert", async () => {
+  const existing = { user_id: "existing", legacy_identity_source: "public.userdata", legacy_public_userdata_id: 1203, status: "inactive", email: "old@example.org" };
+  const db = fakeIdentityDb({ userdataEmail: "new@example.org", existingKaiUser: existing });
+  assert.deepEqual(await findOrCreateKaiUserForAdministrationTarget({ legacyPublicUserdataId: 1203 }, db), existing);
+  assert.equal(db.calls.some((call) => /INSERT/.test(call.sql)), false);
+});
+
+test("an invalid administration target id is refused before any query", async () => {
+  const db = fakeIdentityDb({ userdataEmail: "x@example.org" });
+  for (const legacyPublicUserdataId of [0, -1, 1.5, "1203", null]) {
+    assert.equal(await findOrCreateKaiUserForAdministrationTarget({ legacyPublicUserdataId }, db), null);
+  }
+  assert.deepEqual(db.calls, []);
+});
+
+test("both administration writers resolve their target through the email-carrying resolver by default", () => {
+  const source = readFileSync("Backend/kai/services/kaiAccessAdministrationService.js", "utf8");
+  const defaults = source.match(/dependencies\.findOrCreateKaiUserByLegacyPublicUserdataId \|\| (\w+)/g);
+  assert.deepEqual(defaults, [
+    "dependencies.findOrCreateKaiUserByLegacyPublicUserdataId || findOrCreateKaiUserForAdministrationTarget",
+    "dependencies.findOrCreateKaiUserByLegacyPublicUserdataId || findOrCreateKaiUserForAdministrationTarget",
+  ]);
 });

@@ -13,6 +13,7 @@ import {
   kaiGlobalRolePath,
   kaiOrganizationAccessPath,
   kaiOrganizationMembershipPath,
+  kaiOrganizationRoleGrantMessage,
   kaiOrganizationRoleOptions,
   rosterGlobalKaiRoles,
 } from "./kaiOrganizationAccessLogic.js";
@@ -1685,7 +1686,7 @@ export default function AdminDashboard() {
       const payload = buildKaiOrganizationMembershipPayload(roleInput, "active", { includeGkReviewer: globalRolesVisible });
       await kaiMutateJson(kaiOrganizationMembershipPath(kaiOrganizationId, legacyUserId), "PUT", payload);
 
-      pushToast(`Granted ${roleInput.replace(/_/g, " ")} access to ${email}.`, "success");
+      pushToast(kaiOrganizationRoleGrantMessage(roleInput, email), "success");
       setKaiAccessModal((curr) =>
         curr.organizationId === organizationId ? { ...curr, submitting: false, emailInput: "" } : { ...curr, submitting: false }
       );

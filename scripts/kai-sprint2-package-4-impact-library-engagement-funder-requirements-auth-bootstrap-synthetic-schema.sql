@@ -13,10 +13,14 @@ BEGIN;
 -- skipped here since the organization-enablement bootstrap already created
 -- it.
 
+-- email: the existing Get Kinder account column (login and the admin user
+-- lookup read it); the administration writers map a target who has never
+-- used KAI with it.
 CREATE TABLE public.userdata (
   id SERIAL PRIMARY KEY,
   org_id  INTEGER,
-  org_rep BOOLEAN DEFAULT false
+  org_rep BOOLEAN DEFAULT false,
+  email   text
 );
 
 CREATE TABLE public.user_org_memberships (

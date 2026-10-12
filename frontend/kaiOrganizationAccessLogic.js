@@ -91,6 +91,17 @@ export function buildKaiGlobalReviewerRolePayload(action) {
   return { role_name: KAI_GK_REVIEWER_ROLE, action };
 }
 
+// Success text for the "Grant KAI Access" form. The gk_reviewer organization
+// role is one half of a Get Kinder reviewer's access (sensitivity reviews
+// also need the global gk_reviewer role), so it is not reported as reviewer
+// access.
+export function kaiOrganizationRoleGrantMessage(roleName, email) {
+  if (roleName === KAI_GK_REVIEWER_ROLE) {
+    return `Granted the gk_reviewer role in this organization to ${email}. Sensitivity reviews also need the global gk_reviewer role.`;
+  }
+  return `Granted ${String(roleName).replace(/_/g, " ")} access to ${email}.`;
+}
+
 // The roster's global_kai_roles (present only for a platform-superuser
 // reader) as the display list, or null when the server did not send it.
 export function rosterGlobalKaiRoles(row) {

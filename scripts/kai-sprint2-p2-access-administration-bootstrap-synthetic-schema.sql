@@ -11,10 +11,14 @@ BEGIN;
 -- values/triggers. It is not the full application schema and does not
 -- assert completeness beyond what this closure's verifier cases require.
 
+-- email: the existing Get Kinder account column (login and the admin user
+-- lookup read it); the administration writers map a target who has never
+-- used KAI with it.
 CREATE TABLE public.userdata (
   id SERIAL PRIMARY KEY,
   org_id  INTEGER,
-  org_rep BOOLEAN DEFAULT false
+  org_rep BOOLEAN DEFAULT false,
+  email   text
 );
 
 CREATE TABLE public.organizations (

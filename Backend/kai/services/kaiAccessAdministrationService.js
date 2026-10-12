@@ -21,9 +21,9 @@ import {
   assignGlobalRole,
   revokeGlobalRole,
   listGlobalRoleAssignmentRows,
+  findOrCreateKaiUserForAdministrationTarget,
 } from "../db/kaiAccessAdministrationQueries.js";
 import {
-  findOrCreateKaiUserByLegacyPublicUserdataId,
   findKaiUserByLegacyPublicUserdataId,
   listKaiRolesForUser,
 } from "../db/kaiQueries.js";
@@ -272,7 +272,7 @@ export async function manageOrganizationMembership(
     return failure("validation_blocker");
   }
 
-  const findOrCreateTarget = dependencies.findOrCreateKaiUserByLegacyPublicUserdataId || findOrCreateKaiUserByLegacyPublicUserdataId;
+  const findOrCreateTarget = dependencies.findOrCreateKaiUserByLegacyPublicUserdataId || findOrCreateKaiUserForAdministrationTarget;
   const targetKaiUser = await findOrCreateTarget({ legacyPublicUserdataId: targetLegacyPublicUserdataId });
   if (!targetKaiUser?.user_id) return failure("validation_blocker");
 
@@ -461,7 +461,7 @@ export async function manageGlobalKaiRole(
     return failure("validation_blocker");
   }
 
-  const findOrCreateTarget = dependencies.findOrCreateKaiUserByLegacyPublicUserdataId || findOrCreateKaiUserByLegacyPublicUserdataId;
+  const findOrCreateTarget = dependencies.findOrCreateKaiUserByLegacyPublicUserdataId || findOrCreateKaiUserForAdministrationTarget;
   const targetKaiUser = await findOrCreateTarget({ legacyPublicUserdataId: targetLegacyPublicUserdataId });
   if (!targetKaiUser?.user_id) return failure("validation_blocker");
 
