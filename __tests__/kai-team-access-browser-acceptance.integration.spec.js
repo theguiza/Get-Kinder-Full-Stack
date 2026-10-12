@@ -237,6 +237,11 @@ async function runBrowserAcceptance() {
     foreignAdmin: 806, // stored client_admin of Org B
     reviewerStays: 807, // stored client_reviewer of Org A (never changed)
   });
+  // Seeded only in their own case, outside USERS so the setup below never
+  // provisions them: a stored client_admin of Org A whose KAI account is
+  // inactive, and a GK organization admin of Org A with no kai.users mapping.
+  const DEACTIVATED_ADMIN = 808;
+  const UNPROVISIONED_GK_ADMIN = 809;
   const email = (legacyId) => `user${legacyId}@tidewater.test`;
   const query = async (sql, params = []) => (await seedPool.query(sql, params)).rows;
 
@@ -427,6 +432,8 @@ async function runBrowserAcceptance() {
         await page.waitForText(`Team & Access for ${ORG_A_NAME}`);
         await page.waitForText(email(USERS.requester));
         assert.deepEqual(await page.navLabels(), [...FIVE, "Team & Access"]);
+        assert.ok(page.requestsSince(switchMark).some((r) => r.method === "GET" && new URL(r.url).pathname === accessPath(ORG_A)),
+          "Org A's roster and administrator answers are re-read after switching back");
 
         assertNoAdminDashboardOrGlobalRoleRequests(page, "legacy admin");
         assert.deepEqual(page.exceptions, []);
@@ -464,6 +471,88 @@ async function runBrowserAcceptance() {
       }
       assert.equal(await auditCount(), auditsBefore);
       assert.equal((await membershipsOf(ORG_A))[USERS.contributor], "client_contributor/active");
+    });
+
+    await test("browser (stored admin): an inactive or not-yet-activated administrator keeps the role but is not counted; a stale page shows the server's refusal and refreshes", async () => {
+      // A stored administrator whose KAI account is inactive, and a Get
+      // Kinder organization admin who has never signed in to KAI.
+      await query("INSERT INTO public.userdata (id) VALUES ($1), ($2) ON CONFLICT DO NOTHING", [DEACTIVATED_ADMIN, UNPROVISIONED_GK_ADMIN]);
+      const deactivated = await findOrCreateKaiUserByLegacyPublicUserdataId({ legacyPublicUserdataId: DEACTIVATED_ADMIN, email: email(DEACTIVATED_ADMIN) });
+      await query("UPDATE kai.users SET status = 'inactive' WHERE user_id = $1::uuid", [deactivated.user_id]);
+      await query("INSERT INTO kai.organization_memberships (organization_id, user_id, role_name, membership_status) VALUES ($1::uuid, $2::uuid, 'client_admin', 'active')",
+        [ORG_A, deactivated.user_id]);
+      await query("INSERT INTO public.user_org_memberships (org_id, user_id, role, is_active) VALUES ($1, $2, 'admin', true)", [gkOrganization.id, UNPROVISIONED_GK_ADMIN]);
+      const setKaiStatus = (legacyId, status) => query("UPDATE kai.users SET status = $2 WHERE legacy_public_userdata_id = $1", [legacyId, status]);
+      const setOrgARole = (legacyId, role) => query("UPDATE kai.organization_memberships SET role_name = $3 WHERE organization_id = $1::uuid AND user_id = $2::uuid",
+        [ORG_A, kaiUserIds[legacyId], role]);
+
+      const page = await openPage(browser, { baseUrl, legacyUserId: USERS.storedAdmin });
+      try {
+        await page.goto("/impact-library");
+        await page.waitFor("Team & Access nav", `[...document.querySelectorAll(".gk-shell-nav-item")].some((el) => el.innerText.trim() === "Team & Access")`);
+        await page.clickNav("Team & Access");
+        await page.waitForText(`Team & Access for ${ORG_A_NAME}`);
+        await page.waitForText(email(DEACTIVATED_ADMIN));
+
+        const inactiveRow = await page.memberRow(DEACTIVATED_ADMIN);
+        assert.match(inactiveRow.text, /Administrator/);
+        assert.match(inactiveRow.text, /KAI account inactive/);
+        assert.equal(inactiveRow.role, "client_admin", "the stored role is kept and shown");
+        const unprovisionedRow = await page.memberRow(UNPROVISIONED_GK_ADMIN);
+        assert.match(unprovisionedRow.text, new RegExp(`Get Kinder user #${UNPROVISIONED_GK_ADMIN}`));
+        assert.match(unprovisionedRow.text, /Administrator/);
+        assert.match(unprovisionedRow.text, /KAI access not yet activated/);
+        assert.doesNotMatch((await page.memberRow(USERS.legacyAdmin)).text, /KAI account inactive|not yet activated/);
+        // Two effective administrators besides the inactive ones: no blocker.
+        await page.setMemberRole(USERS.storedAdmin, "client_contributor");
+        let self = await page.memberRow(USERS.storedAdmin);
+        assert.doesNotMatch(self.text, /No other administrator/);
+        assert.deepEqual(self.buttons.find((b) => b.label === "Save role"), { label: "Save role", disabled: false });
+
+        // After the page loaded, every other administrator stops being
+        // effective: the legacy admin's account is deactivated and the
+        // promoted reviewer is demoted elsewhere.
+        await setKaiStatus(USERS.legacyAdmin, "inactive");
+        await setOrgARole(USERS.reviewer, "client_reviewer");
+        const auditsBefore = await auditCount();
+        const mark = page.mark();
+        await page.clickMemberButton(USERS.storedAdmin, "Save role");
+        await page.waitForText("will no longer be an administrator");
+        await page.clickMemberButton(USERS.storedAdmin, "Confirm change");
+        await page.waitForText("This change was not made. No other administrator can currently manage this organization.");
+        await page.idle();
+        const since = page.requestsSince(mark);
+        const putIndex = since.findIndex((r) => r.method === "PUT");
+        assert.deepEqual([new URL(since[putIndex].url).pathname, since[putIndex].status], [membershipPath(ORG_A, USERS.storedAdmin), 409]);
+        assert.ok(since.slice(putIndex + 1).some((r) => r.method === "GET" && new URL(r.url).pathname === accessPath(ORG_A) && r.status === 200),
+          "the roster is re-read after the refusal");
+        assert.ok(since.slice(putIndex + 1).some((r) => new URL(r.url).pathname.endsWith(`/organizations/${ORG_A}/access-capabilities`)),
+          "the capability answer is re-read after the refusal");
+        assert.ok(!(await page.text()).includes("is now a contributor"), "no success shown");
+        assert.equal((await membershipsOf(ORG_A))[USERS.storedAdmin], "client_admin/active", "server state preserved");
+        assert.equal(await auditCount(), auditsBefore);
+        // The refreshed roster carries the server's answer: the change is
+        // blocked in place, and the legacy admin shows as inactive.
+        await page.waitFor("blocker on the stored admin row",
+          `document.querySelector('[data-team-access-member="legacy:${USERS.storedAdmin}"]').innerText.includes("Make someone else an administrator first.")`);
+        self = await page.memberRow(USERS.storedAdmin);
+        assert.equal(self.buttons.find((b) => b.label === "Save role").disabled, true);
+        assert.match((await page.memberRow(USERS.legacyAdmin)).text, /KAI account inactive/);
+        assert.match((await page.memberRow(USERS.reviewer)).text, /Reviewer/);
+
+        // Restored: Refresh lifts the blocker again.
+        await setKaiStatus(USERS.legacyAdmin, "active");
+        await setOrgARole(USERS.reviewer, "client_admin");
+        await page.clickButton("Refresh");
+        await page.waitFor("blocker lifted",
+          `!document.querySelector('[data-team-access-member="legacy:${USERS.storedAdmin}"]').innerText.includes("Make someone else an administrator first.")`);
+        assert.equal((await page.memberRow(USERS.storedAdmin)).buttons.find((b) => b.label === "Save role").disabled, false);
+        assert.doesNotMatch((await page.memberRow(USERS.legacyAdmin)).text, /KAI account inactive/);
+        assertNoAdminDashboardOrGlobalRoleRequests(page, "stored admin, account status");
+        assert.deepEqual(page.exceptions, []);
+      } finally {
+        await page.close();
+      }
     });
 
     await test("browser (single-organization stored admin, phone width): the organization menu holds Manage team & access; removing one's own administrator role asks first, then returns to Home", async () => {
@@ -506,6 +595,7 @@ async function runBrowserAcceptance() {
         [USERS.contributor]: "client_contributor/active",
         [USERS.requester]: "client_contributor/active",
         [USERS.reviewerStays]: "client_reviewer/active",
+        [DEACTIVATED_ADMIN]: "client_admin/active",
       });
     });
   } finally {

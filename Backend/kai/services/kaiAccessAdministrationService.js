@@ -128,11 +128,28 @@ export async function viewEffectiveKaiAccess({ actorContext, organizationId } = 
   const keyForKaiUser = (userId) => `kai:${userId}`;
   const keyForLegacyId = (legacyId) => `legacy:${legacyId}`;
 
+  // Whether a kai.users identity can act at all: resolveKaiActorContext
+  // admits only an active public.userdata mapping (the same condition both
+  // last-admin helpers apply). No mapping yet means never signed in to KAI.
+  const accountStatusOf = (kaiUser) => {
+    if (!kaiUser) return "not_activated";
+    return kaiUser.status === "active" &&
+      kaiUser.legacy_identity_source === "public.userdata" &&
+      isPositiveInteger(kaiUser.legacy_public_userdata_id)
+      ? "active"
+      : "inactive";
+  };
+
   for (const row of storedRows) {
     const entry = {
       kai_user_id: row.user_id,
       legacy_public_userdata_id: row.legacy_public_userdata_id,
       email: row.email,
+      account_status: accountStatusOf({
+        status: row.kai_user_status,
+        legacy_identity_source: row.legacy_identity_source,
+        legacy_public_userdata_id: row.legacy_public_userdata_id,
+      }),
       stored: { role_name: row.role_name, membership_status: row.membership_status },
       derived: null,
     };
@@ -151,6 +168,7 @@ export async function viewEffectiveKaiAccess({ actorContext, organizationId } = 
         kai_user_id: mappedKaiUser?.user_id || null,
         legacy_public_userdata_id: legacyId,
         email: mappedKaiUser?.email || null,
+        account_status: accountStatusOf(mappedKaiUser),
         stored: null,
         derived,
       });
@@ -162,8 +180,25 @@ export async function viewEffectiveKaiAccess({ actorContext, organizationId } = 
   // non-client-stored-role guard: only a platform superuser may change a
   // stored membership whose current role is not an assignable client role.
   const canChangeStoredRole = (stored) => includeGlobalRoles || ASSIGNABLE_ORGANIZATION_ROLE_SET.has(stored.role_name);
+
+  // Read-time answer of applyOrganizationMembershipChangeInTransaction's
+  // last-admin protection, from the same rule: an administrator counts only
+  // while their account can act, derived authority is never removed by a
+  // stored-role change, and the stored count excludes the target. Advisory:
+  // the guard re-decides under the organization lock on every change.
+  const isActiveStoredAdmin = (entry) => entry.stored?.role_name === "client_admin" && entry.stored?.membership_status === "active";
+  const hasEffectiveDerived = (entry) => Boolean(entry.derived) && entry.account_status === "active";
+  const hasEffectiveStored = (entry) => isActiveStoredAdmin(entry) && entry.account_status === "active";
+  const entries = [...byKey.values()];
+  const organizationHasEffectiveDerivedAdmin = entries.some(hasEffectiveDerived);
+  const effectiveStoredAdminCount = entries.filter(hasEffectiveStored).length;
+  const lastAdminProtected = (entry) => !authResult.platformSuperuserAuthorized &&
+    isActiveStoredAdmin(entry) &&
+    !organizationHasEffectiveDerivedAdmin &&
+    effectiveStoredAdminCount - (hasEffectiveStored(entry) ? 1 : 0) === 0;
+
   const accessRows = [];
-  for (const entry of byKey.values()) {
+  for (const entry of entries) {
     const isEffectiveClientAdmin = entry.derived?.membership_status === "active" || (
       entry.stored?.role_name === "client_admin" && entry.stored?.membership_status === "active"
     );
@@ -180,6 +215,9 @@ export async function viewEffectiveKaiAccess({ actorContext, organizationId } = 
       effective_role_name: effectiveRoleName,
       effective_membership_status: effectiveMembershipStatus,
       authority_source: authoritySource,
+      kai_account_status: entry.account_status,
+      effective_admin_authority: hasEffectiveDerived(entry) || hasEffectiveStored(entry),
+      last_admin_protected: lastAdminProtected(entry),
       editable: entry.stored ? canChangeStoredRole(entry.stored) : !entry.derived,
       global_kai_roles: includeGlobalRoles && entry.kai_user_id ? await listGlobalRoles(entry.kai_user_id) : undefined,
     });

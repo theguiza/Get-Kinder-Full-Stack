@@ -81,7 +81,7 @@ async function withLockedTransaction(db, lockKeyText, work) {
 export async function listOrganizationMembershipRowsForOrganization(organizationId, db = pool) {
   const { rows } = await db.query(
     `SELECT om.organization_id, om.user_id, om.role_name, om.membership_status,
-            u.legacy_public_userdata_id, u.email, u.status AS kai_user_status
+            u.legacy_identity_source, u.legacy_public_userdata_id, u.email, u.status AS kai_user_status
        FROM kai.organization_memberships om
        JOIN kai.users u ON u.user_id = om.user_id
       WHERE om.organization_id = $1

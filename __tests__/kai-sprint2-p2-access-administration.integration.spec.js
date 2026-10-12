@@ -410,6 +410,15 @@ async function runIntegrationSuite() {
       const demote = (call, actor, orgId, target, body = { role_name: "client_contributor", membership_status: "active" }) =>
         call(actor.legacyId, "PUT", `/organizations/${orgId}/memberships/${target.legacyId}`, body);
 
+      // The roster row the Team & Access UI reads for a person: its account
+      // status, effective authority, and read-time last-administrator answer
+      // must agree with the guard's decision on the same data.
+      async function rosterRow(call, asPerson, orgId, person) {
+        const roster = await call(asPerson.legacyId, "GET", `/organizations/${orgId}/access`);
+        assert.equal(roster.status, 200, JSON.stringify(roster.body));
+        return roster.body.data.access.find((row) => row.legacy_public_userdata_id === person.legacyId);
+      }
+
       async function assertRejectedWithoutMutation(result, orgId, target) {
         assert.equal(result.status, 409, JSON.stringify(result.body));
         assert.equal(result.body.error.code, "last_admin_protection");
@@ -420,10 +429,15 @@ async function runIntegrationSuite() {
         for (const derivedStatus of ["inactive", null]) {
           await resetAllTables();
           const { orgId, gkOrganizationId } = await boundOrganization();
-          await seedPerson({ kaiStatus: derivedStatus, gkAdminOf: gkOrganizationId });
+          const derived = await seedPerson({ kaiStatus: derivedStatus, gkAdminOf: gkOrganizationId });
           const admin = await seedPerson();
           await storeMembership(orgId, admin, "client_admin");
           await withRealRouter(async (call) => {
+            const derivedRow = await rosterRow(call, admin, orgId, derived);
+            assert.equal(derivedRow.effective_role_name, "client_admin");
+            assert.equal(derivedRow.kai_account_status, derivedStatus === null ? "not_activated" : "inactive");
+            assert.equal(derivedRow.effective_admin_authority, false);
+            assert.equal((await rosterRow(call, admin, orgId, admin)).last_admin_protected, true);
             const auditsBefore = await auditCount();
             await assertRejectedWithoutMutation(await demote(call, admin, orgId, admin), orgId, admin);
             // The same direct API with an inactive status is refused too.
@@ -442,9 +456,12 @@ async function runIntegrationSuite() {
         await storeMembership(orgId, first, "client_admin");
         await storeMembership(orgId, second, "client_admin");
         await withRealRouter(async (call) => {
+          assert.equal((await rosterRow(call, first, orgId, first)).last_admin_protected, false);
+          assert.equal((await rosterRow(call, first, orgId, second)).last_admin_protected, false);
           const allowed = await demote(call, first, orgId, second);
           assert.equal(allowed.status, 200, JSON.stringify(allowed.body));
           assert.deepEqual(await membershipRows(orgId, second.kaiUserId), [{ role_name: "client_contributor", membership_status: "active" }]);
+          assert.equal((await rosterRow(call, first, orgId, first)).last_admin_protected, true);
           await assertRejectedWithoutMutation(await demote(call, first, orgId, first), orgId, first);
         });
       });
@@ -457,6 +474,9 @@ async function runIntegrationSuite() {
         await storeMembership(orgId, admin, "client_admin");
         await withRealRouter(async (call) => {
           assert.equal((await call(derived.legacyId, "GET", `/organizations/${orgId}/access`)).status, 200, "the derived administrator is effective");
+          const derivedRow = await rosterRow(call, admin, orgId, derived);
+          assert.deepEqual([derivedRow.kai_account_status, derivedRow.effective_admin_authority], ["active", true]);
+          assert.equal((await rosterRow(call, admin, orgId, admin)).last_admin_protected, false);
           const allowed = await demote(call, admin, orgId, admin);
           assert.equal(allowed.status, 200, JSON.stringify(allowed.body));
         });
@@ -476,6 +496,10 @@ async function runIntegrationSuite() {
           await storeMembership(orgId, admin, "client_admin");
           await storeMembership(orgId, otherAdmin, "client_admin", other.membershipStatus);
           await withRealRouter(async (call) => {
+            const otherRow = await rosterRow(call, admin, orgId, otherAdmin);
+            assert.equal(otherRow.kai_account_status, other.kaiStatus, JSON.stringify(other));
+            assert.equal(otherRow.effective_admin_authority, other.counts, JSON.stringify(other));
+            assert.equal((await rosterRow(call, admin, orgId, admin)).last_admin_protected, !other.counts, JSON.stringify(other));
             const result = await demote(call, admin, orgId, admin);
             if (other.counts) assert.equal(result.status, 200, JSON.stringify(other));
             else await assertRejectedWithoutMutation(result, orgId, admin);
@@ -494,6 +518,8 @@ async function runIntegrationSuite() {
           const roster = await call(admin.legacyId, "GET", `/organizations/${orgId}/access`);
           assert.equal(roster.body.data.access.filter((row) => row.legacy_public_userdata_id === both.legacyId).length, 1);
           assert.equal(roster.body.data.access.find((row) => row.legacy_public_userdata_id === both.legacyId).authority_source, "both");
+          assert.equal(roster.body.data.access.filter((row) => row.effective_admin_authority === true).length, 2, "counted once");
+          assert.equal((await rosterRow(call, admin, orgId, admin)).last_admin_protected, false);
           assert.equal((await demote(call, admin, orgId, admin)).status, 200);
           // Their own stored role may go: the derived authority remains.
           assert.equal((await demote(call, both, orgId, both)).status, 200);
@@ -510,6 +536,10 @@ async function runIntegrationSuite() {
         await storeMembership(orgId, soleAdmin, "client_admin");
         await withRealRouter(async (call) => {
           assert.equal((await call(both.legacyId, "GET", `/organizations/${orgId}/access`)).status, 403, "a deactivated account cannot act");
+          const bothRow = await rosterRow(call, soleAdmin, orgId, both);
+          assert.deepEqual([bothRow.authority_source, bothRow.stored_membership.role_name, bothRow.kai_account_status, bothRow.effective_admin_authority],
+            ["both", "client_admin", "inactive", false]);
+          assert.equal((await rosterRow(call, soleAdmin, orgId, soleAdmin)).last_admin_protected, true);
           await assertRejectedWithoutMutation(await demote(call, soleAdmin, orgId, soleAdmin), orgId, soleAdmin);
         });
       });

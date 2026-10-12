@@ -57,13 +57,19 @@ function membershipOrNull(value) {
   };
 }
 
+const ACCOUNT_STATUSES = new Set(["active", "inactive", "not_activated"]);
+
 /**
  * One roster row per person from viewEffectiveKaiAccess. `inheritedAdmin`
  * is the derived Get Kinder organization-admin authority (never a stored KAI
- * membership, so a role change here cannot remove it). `canChangeRole` is the
- * server's own `editable` answer, narrowed to rows the membership route can
- * address (a stored client-role row with a legacy user id). Global KAI roles
- * are never projected.
+ * membership, so a role change here cannot remove it). `effectiveRole` is the
+ * role the person holds; `effectiveAdmin` and `lastAdminProtected` are the
+ * server's answers to whether they can administer right now (their KAI
+ * account must be active) and whether the last-administrator protection
+ * would refuse removing their stored administrator role. `canChangeRole` is
+ * the server's own `editable` answer, narrowed to rows the membership route
+ * can address (a stored client-role row with a legacy user id). Global KAI
+ * roles are never projected.
  */
 export function projectTeamAccessRoster(data) {
   const rows = Array.isArray(data?.access) ? data.access : [];
@@ -79,7 +85,9 @@ export function projectTeamAccessRoster(data) {
       legacyUserId,
       effectiveRole,
       effectiveStatus,
-      effectiveAdmin: effectiveRole === "client_admin" && effectiveStatus === "active",
+      accountStatus: ACCOUNT_STATUSES.has(row.kai_account_status) ? row.kai_account_status : null,
+      effectiveAdmin: row.effective_admin_authority === true,
+      lastAdminProtected: row.last_admin_protected === true,
       authoritySource: row.authority_source === "derived" || row.authority_source === "both" ? row.authority_source : "stored",
       storedRole: stored?.roleName ?? null,
       storedStatus: stored?.status ?? null,
@@ -103,6 +111,14 @@ export function memberDisplayName(member) {
   return "Unknown member";
 }
 
+// Why a person who holds a role cannot use KAI right now, from the server's
+// account status; empty while their account is active.
+export function teamAccessAccountStatusLabel(member) {
+  if (member?.accountStatus === "inactive") return "KAI account inactive";
+  if (member?.accountStatus === "not_activated") return "KAI access not yet activated";
+  return "";
+}
+
 export function describeMemberAuthority(member) {
   if (member.authoritySource === "derived") {
     return "Administrator through Get Kinder organization admin. Not a KAI membership, so it cannot be changed here.";
@@ -120,6 +136,16 @@ export function roleChangeRemovesAdministrator(member, nextRole) {
   if (!member || member.inheritedAdmin) return false;
   return member.storedRole === "client_admin" && member.storedStatus === "active" && nextRole !== "client_admin";
 }
+
+// True when the server reported, on the last roster read, that its
+// last-administrator protection would refuse this change. The server
+// decides again on save.
+export function roleChangeBlockedAsLastAdministrator(member, nextRole) {
+  return Boolean(member?.lastAdminProtected) && nextRole !== "client_admin";
+}
+
+export const LAST_ADMINISTRATOR_MESSAGE =
+  "No other administrator can currently manage this organization. Make someone else an administrator first.";
 
 export function effectiveAdministratorCount(members) {
   return (Array.isArray(members) ? members : []).filter((member) => member.effectiveAdmin).length;
@@ -146,7 +172,7 @@ export function describeTeamAccessReadError(failure) {
 
 export function describeRoleChangeError(failure) {
   if (failure.code === "last_admin_protection") {
-    return "This is the organization's only administrator. Make someone else an administrator first.";
+    return `This change was not made. ${LAST_ADMINISTRATOR_MESSAGE}`;
   }
   if (failure.blockingReason === "non_client_membership_not_client_managed") {
     return "Get Kinder manages this person's access. Contact a Get Kinder administrator to change it.";

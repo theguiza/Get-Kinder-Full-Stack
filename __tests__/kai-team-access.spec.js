@@ -24,8 +24,11 @@ import {
   describeRoleChangeError,
   describeTeamAccessReadError,
   effectiveAdministratorCount,
+  memberDisplayName,
   projectTeamAccessRoster,
+  roleChangeBlockedAsLastAdministrator,
   roleChangeRemovesAdministrator,
+  teamAccessAccountStatusLabel,
   teamAccessErrorFromResult,
   teamAccessRoleChangeRequest,
   teamAccessRoleLabel,
@@ -65,6 +68,7 @@ const USERS = Object.freeze({
   gkStaff: { user_id: "90000000-0000-4000-8000-000000000106", legacy: 106, email: "gk-staff@synthetic.test" },
   requester: { user_id: "90000000-0000-4000-8000-000000000107", legacy: 107, email: "requester@synthetic.test" },
   bothAdmin: { user_id: "90000000-0000-4000-8000-000000000108", legacy: 108, email: "both-admin@synthetic.test" },
+  secondAdmin: { user_id: "90000000-0000-4000-8000-000000000109", legacy: 109, email: "second-admin@synthetic.test" },
 });
 
 const actor = (user, organizationMemberships, extra = {}) => ({
@@ -93,10 +97,14 @@ const ACTORS = Object.freeze({
 
 /**
  * In-memory synthetic repository behind the real services. Stored
- * memberships, GK->KAI bindings, GK organization admins, and audits.
+ * memberships, GK->KAI bindings, GK organization admins, kai.users account
+ * status (`accounts`: legacy id -> status, or null for never provisioned;
+ * everyone else active), and audits. The last-admin helpers count only an
+ * active account, as the real ones do.
  */
-function createStore({ memberships = [], bindings = { [ORG_A]: GK_ORG_A }, gkAdmins = { [GK_ORG_A]: [USERS.legacyAdmin.legacy] } } = {}) {
+function createStore({ memberships = [], bindings = { [ORG_A]: GK_ORG_A }, gkAdmins = { [GK_ORG_A]: [USERS.legacyAdmin.legacy] }, accounts = {} } = {}) {
   const state = {
+    accounts: { ...accounts },
     memberships: memberships.map((row) => ({ ...row })),
     audits: [],
     upserts: [],
@@ -106,24 +114,38 @@ function createStore({ memberships = [], bindings = { [ORG_A]: GK_ORG_A }, gkAdm
   const userByLegacy = (legacy) => Object.values(USERS).find((user) => user.legacy === legacy) || null;
   const userById = (userId) => Object.values(USERS).find((user) => user.user_id === userId) || null;
   const rowsFor = (organizationId, userId) => state.memberships.filter((row) => row.organization_id === organizationId && row.user_id === userId);
+  const kaiUserOf = (user) => {
+    if (!user || state.accounts[user.legacy] === null) return null;
+    const status = state.accounts[user.legacy] ?? "active";
+    return { user_id: user.user_id, legacy_identity_source: "public.userdata", legacy_public_userdata_id: user.legacy, email: user.email, status };
+  };
+  const accountActive = (user) => kaiUserOf(user)?.status === "active";
 
   const dependencies = {
     env: ENV,
     runInTransaction: async (callback) => callback({ query: async () => ({ rows: [] }) }),
     listOrganizationMembershipRowsForOrganization: async (organizationId) => state.memberships
       .filter((row) => row.organization_id === organizationId)
-      .map((row) => ({ ...row, legacy_public_userdata_id: userById(row.user_id)?.legacy ?? null, email: userById(row.user_id)?.email ?? null })),
+      .map((row) => {
+        const kaiUser = kaiUserOf(userById(row.user_id));
+        return {
+          ...row,
+          legacy_identity_source: kaiUser?.legacy_identity_source ?? null,
+          legacy_public_userdata_id: kaiUser?.legacy_public_userdata_id ?? null,
+          email: kaiUser?.email ?? null,
+          kai_user_status: kaiUser?.status ?? null,
+        };
+      }),
     listOrganizationMembershipRowsForUserInOrganization: async (organizationId, userId) => rowsFor(organizationId, userId).map((row) => ({ ...row })),
     countActiveStoredClientAdminMemberships: async (organizationId, _tx, { excludingUserId = null } = {}) => state.memberships
       .filter((row) => row.organization_id === organizationId && row.role_name === "client_admin" && row.membership_status === "active" && row.user_id !== excludingUserId)
+      .filter((row) => accountActive(userById(row.user_id)))
       .length,
     getActiveGkOrganizationIdForKaiOrganization: async (organizationId) => bindings[organizationId] ?? null,
     listActiveGkOrganizationAdminLegacyUserIds: async (gkOrganizationId) => gkAdmins[gkOrganizationId] || [],
-    hasActiveDerivedClientAdminForOrganization: async (organizationId) => Boolean(bindings[organizationId]) && (gkAdmins[bindings[organizationId]] || []).length > 0,
-    findKaiUserByLegacyPublicUserdataId: async (legacy) => {
-      const user = userByLegacy(legacy);
-      return user ? { user_id: user.user_id, email: user.email } : null;
-    },
+    hasActiveDerivedClientAdminForOrganization: async (organizationId) => Boolean(bindings[organizationId]) &&
+      (gkAdmins[bindings[organizationId]] || []).some((legacy) => accountActive(userByLegacy(legacy))),
+    findKaiUserByLegacyPublicUserdataId: async (legacy) => kaiUserOf(userByLegacy(legacy)),
     findOrCreateKaiUserByLegacyPublicUserdataId: async ({ legacyPublicUserdataId }) => {
       const user = userByLegacy(legacyPublicUserdataId);
       return user ? { user_id: user.user_id, legacy_public_userdata_id: user.legacy, status: "active" } : null;
@@ -331,6 +353,7 @@ test("3-4. client_reviewer and client_contributor are not offered Team & Access 
       const read = await call("GET", teamAccessRosterPath(ORG_A));
       assert.equal(read.statusCode, 403, name);
       assert.equal(read.body.data, null, `${name} receives no roster data`);
+      assert.doesNotMatch(JSON.stringify(read.body), /kai_account_status|effective_admin_authority|last_admin_protected/, `${name}: no administrator status`);
       assert.match(describeTeamAccessReadError(teamAccessErrorFromResult(read)), /do not have permission/);
       const write = await call("PUT", `${BASE}/organizations/${ORG_A}/memberships/${USERS.contributor.legacy}`, { role_name: "client_admin", membership_status: "active" });
       assert.equal(write.statusCode, 403, name);
@@ -460,6 +483,8 @@ test("9. client administrators cannot grant GK global roles or rewrite a stored 
       const staff = byEmail(members, USERS.gkStaff.email);
       assert.equal(staff.canChangeRole, false, "a stored GK staff membership is not offered for change");
       assert.equal(teamAccessRoleLabel(staff.effectiveRole), "Get Kinder staff");
+      assert.equal(staff.effectiveAdmin, false);
+      assert.equal(staff.lastAdminProtected, false);
       // Direct API attempt: refused by the service, no write.
       const rewrite = await call("PUT", `${BASE}/organizations/${ORG_A}/memberships/${USERS.gkStaff.legacy}`, { role_name: "client_contributor", membership_status: "active" });
       assert.equal(rewrite.statusCode, 403, name);
@@ -494,11 +519,13 @@ test("10. the last effective administrator cannot be removed, by the UI or by a 
     const members = await roster(call);
     const self = byEmail(members, USERS.storedAdmin.email);
     assert.equal(effectiveAdministratorCount(members), 1);
+    assert.equal(self.lastAdminProtected, true);
+    assert.equal(roleChangeBlockedAsLastAdministrator(self, "client_contributor"), true);
     assert.equal(roleChangeRemovesAdministrator(self, "client_contributor"), true);
     const result = await changeRole(call, members, USERS.storedAdmin.email, "client_contributor");
     assert.equal(result.statusCode, 409);
     assert.equal(result.body.error.code, "last_admin_protection");
-    assert.match(describeRoleChangeError(teamAccessErrorFromResult(result)), /only administrator/);
+    assert.match(describeRoleChangeError(teamAccessErrorFromResult(result)), /not made\. No other administrator can currently manage this organization/);
     const deactivate = await call("PUT", `${BASE}/organizations/${ORG_A}/memberships/${USERS.storedAdmin.legacy}`, { role_name: "client_admin", membership_status: "inactive" });
     assert.equal(deactivate.statusCode, 409);
   });
@@ -512,12 +539,13 @@ test("10. the last effective administrator cannot be removed, by the UI or by a 
     assert.equal(effectiveAdministratorCount(await roster(call)), 1);
   });
 
-  // The view disables the save for the sole administrator and asks for
-  // confirmation before removing any administrator.
-  assert.match(viewSource, /const blockedAsSoleAdmin = removesAdmin && soleAdministrator;/);
+  // The view disables the save from the server's last-administrator answer
+  // (never its own count) and asks for confirmation before removing any
+  // administrator.
+  assert.match(viewSource, /const blockedAsSoleAdmin = roleChangeBlockedAsLastAdministrator\(member, draftRole\);/);
   assert.match(viewSource, /disabled=\{Boolean\(savingKey\) \|\| unchanged \|\| blockedAsSoleAdmin\}/);
   assert.match(viewSource, /if \(removesAdmin && !confirming\) \{\s*setConfirming\(true\);\s*return;/);
-  assert.match(viewSource, /soleAdministrator=\{member\.effectiveAdmin && adminCount === 1\}/);
+  assert.doesNotMatch(viewSource, /effectiveAdministratorCount|soleAdministrator/);
 });
 
 test("11. derived Get Kinder administrator authority is shown as such and never offered as a revocable KAI membership", async () => {
@@ -546,6 +574,154 @@ test("11. derived Get Kinder administrator authority is shown as such and never 
   });
   assert.match(viewSource, /\{member\.canChangeRole \? \(/);
   assert.match(viewSource, /Get Kinder organization admin/);
+});
+
+// --------------------------------------------------------------------------
+// 11a. Assigned role versus effective administrator authority. The roster's
+// account status, effective authority, and last-administrator answer come
+// from viewEffectiveKaiAccess; every case also asks the real guard.
+// --------------------------------------------------------------------------
+
+const unboundStore = (extraMemberships, accounts = {}) => createStore({
+  memberships: [...standardMemberships(), ...extraMemberships],
+  bindings: {},
+  gkAdmins: {},
+  accounts,
+});
+
+test("11a-1/5. one active and one deactivated administrator: the deactivated one keeps the role but is not counted, so the active one is protected", async () => {
+  const store = unboundStore([member(ORG_A, "client_admin", { user_id: USERS.secondAdmin.user_id })], { [USERS.secondAdmin.legacy]: "inactive" });
+  await withRouter(ACTORS.storedAdmin, store, async (call) => {
+    const members = await roster(call);
+    const deactivated = byEmail(members, USERS.secondAdmin.email);
+    assert.equal(deactivated.effectiveRole, "client_admin", "the assigned role is still shown");
+    assert.deepEqual([deactivated.storedRole, deactivated.storedStatus], ["client_admin", "active"]);
+    assert.equal(deactivated.accountStatus, "inactive");
+    assert.equal(teamAccessAccountStatusLabel(deactivated), "KAI account inactive");
+    assert.equal(deactivated.effectiveAdmin, false);
+    assert.equal(deactivated.lastAdminProtected, false);
+
+    const self = byEmail(members, USERS.storedAdmin.email);
+    assert.equal(self.effectiveAdmin, true);
+    assert.equal(teamAccessAccountStatusLabel(self), "");
+    assert.equal(effectiveAdministratorCount(members), 1);
+    assert.equal(self.lastAdminProtected, true);
+    assert.equal(roleChangeBlockedAsLastAdministrator(self, "client_contributor"), true);
+    assert.equal(roleChangeBlockedAsLastAdministrator(self, "client_admin"), false);
+
+    // The server agrees with the roster.
+    const refused = await changeRole(call, members, USERS.storedAdmin.email, "client_contributor");
+    assert.equal(refused.statusCode, 409);
+    assert.equal(refused.body.error.code, "last_admin_protection");
+    // The deactivated administrator's stored role may still be changed.
+    assert.equal((await changeRole(call, members, USERS.secondAdmin.email, "client_contributor")).statusCode, 200);
+    const after = byEmail(await roster(call), USERS.secondAdmin.email);
+    assert.deepEqual([after.effectiveRole, after.accountStatus], ["client_contributor", "inactive"]);
+  });
+  assert.deepEqual(store.state.audits.map((a) => [a.target_user_id, a.resulting_role_name]), [[USERS.secondAdmin.user_id, "client_contributor"]]);
+  assert.equal(store.state.memberships.find((row) => row.user_id === USERS.storedAdmin.user_id).role_name, "client_admin");
+});
+
+test("11a-2. two effective administrators: neither is protected and the permitted change succeeds", async () => {
+  const store = unboundStore([member(ORG_A, "client_admin", { user_id: USERS.secondAdmin.user_id })]);
+  await withRouter(ACTORS.storedAdmin, store, async (call) => {
+    const members = await roster(call);
+    assert.equal(effectiveAdministratorCount(members), 2);
+    for (const email of [USERS.storedAdmin.email, USERS.secondAdmin.email]) {
+      assert.equal(byEmail(members, email).lastAdminProtected, false, email);
+      assert.equal(roleChangeBlockedAsLastAdministrator(byEmail(members, email), "client_contributor"), false, email);
+    }
+    assert.equal((await changeRole(call, members, USERS.storedAdmin.email, "client_contributor")).statusCode, 200);
+    assert.equal(byEmail(await roster(call), USERS.secondAdmin.email).lastAdminProtected, true, "now the only one left");
+  });
+});
+
+test("11a-3/4. a legacy-derived administrator counts only with an active KAI identity", async () => {
+  for (const [account, expected] of [
+    ["active", { accountStatus: "active", label: "", effectiveAdmin: true, protectedSelf: false, demotion: 200 }],
+    ["inactive", { accountStatus: "inactive", label: "KAI account inactive", effectiveAdmin: false, protectedSelf: true, demotion: 409 }],
+    [null, { accountStatus: "not_activated", label: "KAI access not yet activated", effectiveAdmin: false, protectedSelf: true, demotion: 409 }],
+  ]) {
+    const accounts = account === "active" ? {} : { [USERS.legacyAdmin.legacy]: account };
+    const store = createStore({ memberships: standardMemberships(), accounts });
+    await withRouter(ACTORS.storedAdmin, store, async (call) => {
+      const members = await roster(call);
+      const derived = members.find((entry) => entry.authoritySource === "derived");
+      assert.equal(memberDisplayName(derived), account === null ? `Get Kinder user #${USERS.legacyAdmin.legacy}` : USERS.legacyAdmin.email);
+      assert.equal(derived.effectiveRole, "client_admin", `${account}: still shown as an administrator through Get Kinder`);
+      assert.equal(derived.inheritedAdmin, true);
+      assert.equal(derived.accountStatus, expected.accountStatus);
+      assert.equal(teamAccessAccountStatusLabel(derived), expected.label);
+      assert.equal(derived.effectiveAdmin, expected.effectiveAdmin, String(account));
+      const self = byEmail(members, USERS.storedAdmin.email);
+      assert.equal(self.lastAdminProtected, expected.protectedSelf, String(account));
+      assert.equal((await changeRole(call, members, USERS.storedAdmin.email, "client_contributor")).statusCode, expected.demotion, String(account));
+    });
+  }
+});
+
+test("11a-6. derived plus stored authority is one administrator, counted once, and neither source counts once the account is deactivated", async () => {
+  const memberships = [...standardMemberships(), member(ORG_A, "client_admin", { user_id: USERS.bothAdmin.user_id })];
+  const gkAdmins = { [GK_ORG_A]: [USERS.bothAdmin.legacy] };
+  let store = createStore({ memberships, gkAdmins });
+  await withRouter(ACTORS.storedAdmin, store, async (call) => {
+    const raw = await call("GET", teamAccessRosterPath(ORG_A));
+    assert.equal(raw.body.data.access.filter((row) => row.legacy_public_userdata_id === USERS.bothAdmin.legacy).length, 1);
+    assert.equal(raw.body.data.access.filter((row) => row.effective_admin_authority === true).length, 2);
+    const members = projectTeamAccessRoster(raw.body.data);
+    const both = byEmail(members, USERS.bothAdmin.email);
+    assert.deepEqual([both.authoritySource, both.effectiveAdmin, both.lastAdminProtected], ["both", true, false]);
+    assert.equal(effectiveAdministratorCount(members), 2);
+    assert.equal(byEmail(members, USERS.storedAdmin.email).lastAdminProtected, false, "an effective derived administrator remains");
+  });
+
+  store = createStore({ memberships, gkAdmins, accounts: { [USERS.bothAdmin.legacy]: "inactive" } });
+  await withRouter(ACTORS.storedAdmin, store, async (call) => {
+    const members = await roster(call);
+    const both = byEmail(members, USERS.bothAdmin.email);
+    assert.deepEqual([both.authoritySource, both.storedRole, both.effectiveRole], ["both", "client_admin", "client_admin"]);
+    assert.deepEqual([both.accountStatus, both.effectiveAdmin], ["inactive", false]);
+    assert.equal(effectiveAdministratorCount(members), 1);
+    assert.equal(byEmail(members, USERS.storedAdmin.email).lastAdminProtected, true);
+    assert.equal((await changeRole(call, members, USERS.storedAdmin.email, "client_contributor")).statusCode, 409);
+  });
+});
+
+test("11a-7. a stale roster: the server refuses, nothing changes, and the re-read roster carries the protection", async () => {
+  const store = unboundStore([member(ORG_A, "client_admin", { user_id: USERS.secondAdmin.user_id })]);
+  await withRouter(ACTORS.storedAdmin, store, async (call) => {
+    const stale = await roster(call);
+    assert.equal(byEmail(stale, USERS.storedAdmin.email).lastAdminProtected, false);
+    // The other administrator's account is deactivated after the page loaded.
+    store.state.accounts[USERS.secondAdmin.legacy] = "inactive";
+    const result = await changeRole(call, stale, USERS.storedAdmin.email, "client_contributor");
+    assert.equal(result.statusCode, 409);
+    assert.equal(result.body.ok, false);
+    assert.match(describeRoleChangeError(teamAccessErrorFromResult(result)), /^This change was not made\. No other administrator/);
+    const fresh = await roster(call);
+    assert.equal(byEmail(fresh, USERS.storedAdmin.email).lastAdminProtected, true);
+    assert.equal(byEmail(fresh, USERS.secondAdmin.email).accountStatus, "inactive");
+  });
+  assert.equal(store.state.audits.length, 0);
+  assert.deepEqual(store.state.upserts, []);
+  // The hook shows a success notice only for a 200, and re-reads the roster
+  // on a conflict.
+  assert.match(hookSource, /if \(result\.statusCode === 200 && result\.body\?\.ok\) \{\s*setNotice\(\{ tone: "success"/);
+  assert.match(hookSource, /setNotice\(\{ tone: "error", text: describeRoleChangeError\(failure\) \}\);\s*if \(failure\.status === 409/);
+});
+
+test("11a-8. administrator eligibility is per organization: each roster read answers for its own organization only", async () => {
+  const memberships = [...standardMemberships(), member(ORG_B, "client_admin", { user_id: USERS.storedAdmin.user_id })];
+  const store = createStore({ memberships, bindings: {}, gkAdmins: {} });
+  const adminOfBoth = actor(USERS.storedAdmin, [member(ORG_A, "client_admin"), member(ORG_B, "client_admin")]);
+  await withRouter(adminOfBoth, store, async (call) => {
+    const orgA = await roster(call, ORG_A);
+    const orgB = await roster(call, ORG_B);
+    assert.equal(byEmail(orgA, USERS.storedAdmin.email).lastAdminProtected, true, "sole administrator of Org A");
+    assert.equal(byEmail(orgB, USERS.storedAdmin.email).lastAdminProtected, false, "Org B has another administrator");
+    assert.equal(byEmail(orgA, USERS.otherOrgAdmin.email), undefined);
+    assert.equal(byEmail(orgB, USERS.contributor.email), undefined);
+  });
 });
 
 // --------------------------------------------------------------------------
@@ -585,7 +761,10 @@ test("12. frontend: Team & Access entry points, roster reads, and the section fo
   assert.match(appSource, /if \(activeSection === TEAM_ACCESS_SECTION_KEY && capabilitiesResolved && !canManageTeamAccess\) setActiveSection\("home"\);/);
   assert.match(appSource, /sectionContent = canManageTeamAccess \? \(\s*<TeamAccessView/);
   // An administrator's own role change re-reads the capability answer.
-  assert.match(appSource, /if \(result\.ok && member\.effectiveAdmin\) await refreshAccessCapabilities\(\);/);
+  // An administrator's own role change, or a server conflict, re-reads the
+  // capability answer; the hook re-reads the roster on a conflict.
+  assert.match(appSource, /if \(\(result\.ok && member\.effectiveAdmin\) \|\| result\.failure\?\.status === 409\) await refreshAccessCapabilities\(\);/);
+  assert.match(hookSource, /if \(failure\.status === 409 \|\| failure\.status === 404\) await load\(targetOrganizationId\);/);
 });
 
 // --------------------------------------------------------------------------

@@ -2,11 +2,13 @@ import React, { useState } from "react";
 
 import OrganizationJoinRequestsReviewPanel from "../impactLibrary/OrganizationJoinRequestsReviewPanel.jsx";
 import {
+  LAST_ADMINISTRATOR_MESSAGE,
   TEAM_ACCESS_ROLE_OPTIONS,
   describeMemberAuthority,
-  effectiveAdministratorCount,
   memberDisplayName,
+  roleChangeBlockedAsLastAdministrator,
   roleChangeRemovesAdministrator,
+  teamAccessAccountStatusLabel,
   teamAccessRoleLabel,
 } from "./teamAccessLogic.js";
 
@@ -16,14 +18,15 @@ const ROLE_DESCRIPTIONS = Object.freeze([
   ["client_contributor", "Views your organization's KAI workspace."],
 ]);
 
-function MemberRow({ member, soleAdministrator, savingKey, onChangeRole }) {
+function MemberRow({ member, savingKey, onChangeRole }) {
   const [draftRole, setDraftRole] = useState(member.storedRole || "");
   const [confirming, setConfirming] = useState(false);
   const name = memberDisplayName(member);
   const authority = describeMemberAuthority(member);
+  const accountStatus = teamAccessAccountStatusLabel(member);
   const busy = savingKey === member.key;
   const removesAdmin = roleChangeRemovesAdministrator(member, draftRole);
-  const blockedAsSoleAdmin = removesAdmin && soleAdministrator;
+  const blockedAsSoleAdmin = roleChangeBlockedAsLastAdministrator(member, draftRole);
   const unchanged = draftRole === member.storedRole && member.storedStatus === "active";
   const selectId = `gk-team-access-role-${member.key.replace(/[^a-zA-Z0-9_-]/g, "-")}`;
 
@@ -46,6 +49,9 @@ function MemberRow({ member, soleAdministrator, savingKey, onChangeRole }) {
           </span>
           {member.effectiveStatus && member.effectiveStatus !== "active" ? (
             <span className="gk-team-access-role gk-team-access-role--inactive">Inactive</span>
+          ) : null}
+          {accountStatus ? (
+            <span className="gk-team-access-role gk-team-access-role--inactive">{accountStatus}</span>
           ) : null}
           {member.inheritedAdmin ? (
             <span className="gk-team-access-source">Get Kinder organization admin</span>
@@ -90,9 +96,7 @@ function MemberRow({ member, soleAdministrator, savingKey, onChangeRole }) {
             </button>
           ) : null}
           {blockedAsSoleAdmin ? (
-            <p className="gk-team-access-member-warning">
-              This is the organization's only administrator. Make someone else an administrator first.
-            </p>
+            <p className="gk-team-access-member-warning">{LAST_ADMINISTRATOR_MESSAGE}</p>
           ) : confirming ? (
             <p className="gk-team-access-member-warning" role="alert">
               {name} will no longer be an administrator and will lose access to Team & Access.
@@ -123,7 +127,6 @@ export default function TeamAccessView({
   onDecideJoinRequest,
 }) {
   const members = roster?.members || [];
-  const adminCount = effectiveAdministratorCount(members);
   const title = organizationName ? `Team & Access for ${organizationName}` : "Team & Access";
 
   return (
@@ -166,7 +169,6 @@ export default function TeamAccessView({
               <MemberRow
                 key={`${member.key}:${member.storedRole || ""}:${member.storedStatus || ""}`}
                 member={member}
-                soleAdministrator={member.effectiveAdmin && adminCount === 1}
                 savingKey={savingKey}
                 onChangeRole={onChangeRole}
               />

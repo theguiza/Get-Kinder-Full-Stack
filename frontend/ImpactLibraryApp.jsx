@@ -658,7 +658,10 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
   const openTeamAccess = useCallback(() => setActiveSection(TEAM_ACCESS_SECTION_KEY), []);
   const changeTeamMemberRole = useCallback(async (member, roleName) => {
     const result = await teamAccess.changeRole(member, roleName);
-    if (result.ok && member.effectiveAdmin) await refreshAccessCapabilities();
+    // An administrator's own role change, or a server conflict meaning this
+    // page was stale, re-reads the capability answer (the hook re-reads the
+    // roster).
+    if ((result.ok && member.effectiveAdmin) || result.failure?.status === 409) await refreshAccessCapabilities();
   }, [teamAccess.changeRole, refreshAccessCapabilities]);
 
   useEffect(() => {
