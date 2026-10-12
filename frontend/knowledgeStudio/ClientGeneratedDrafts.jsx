@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import {
-  CLIENT_FOLLOWUP_REVIEW_HREF,
+  clientFollowupReviewHref,
   clientBoardReportingPreviewPath,
   clientGeneratedDraftPath,
   clientGeneratedDraftsPath,
@@ -280,7 +280,7 @@ export default function ClientGeneratedDrafts({ organizationId, engagementId, fa
             <div className="small">
               {list.awaitingClientInputCount} reviewed draft(s) are waiting on answers from your organization.
             </div>
-            <a className="btn btn-sm btn-outline-primary mt-1" href={CLIENT_FOLLOWUP_REVIEW_HREF}>
+            <a className="btn btn-sm btn-outline-primary mt-1" href={clientFollowupReviewHref(organizationId)}>
               Answer follow-up questions
             </a>
           </div>

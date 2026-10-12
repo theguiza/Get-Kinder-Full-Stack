@@ -716,7 +716,7 @@ async function runBrowserAcceptance() {
       await page.waitForText("are waiting for a client");
       body = await page.text();
       assert.ok(body.includes("No action is currently required from you."));
-      assert.ok(!(await page.linkHrefs()).some(([, href]) => href === "/kai/client-followups"), "client_admin gets no follow-up action");
+      assert.ok(!(await page.linkHrefs()).some(([, href]) => href.startsWith("/kai/client-followups")), "client_admin gets no follow-up action");
       results.case5 = "PASS";
 
       // client_reviewer: the authorized follow-up action.
@@ -731,7 +731,7 @@ async function runBrowserAcceptance() {
       await reviewer.waitForText("Your action is needed");
       body = await reviewer.text();
       assert.ok(body.includes("Get Kinder sent follow-up questions about evidence from 1 file in this project."));
-      assert.ok((await reviewer.linkHrefs()).some(([label, href]) => label === "Answer follow-up questions" && href === "/kai/client-followups"));
+      assert.ok((await reviewer.linkHrefs()).some(([label, href]) => label === "Answer follow-up questions" && href === `/kai/client-followups?organizationId=${ORG}`));
       assertClientBoundary(reviewer, "case 3 client_reviewer", body);
       await reviewer.clickTab("Evidence");
       await reviewer.waitForText(eligibleStatement);

@@ -916,7 +916,7 @@ test("frontend: client Knowledge Studio and client Impact Library reference no G
   assert.doesNotMatch(clientStudioSource, /import ImpactEvidenceLibrary|<ImpactEvidenceLibrary/);
   assert.match(clientStudioSource, /<KaiWebIntake[\s\S]*canContribute=\{canContribute\}/);
   assert.match(clientStudioSource, /const canContribute = capabilities\?\.intakeContribution === true;/);
-  assert.match(clientStudioSource, /\{canReviewFollowups \? \(\s*<a className="btn btn-sm btn-outline-primary mt-2" href=\{CLIENT_FOLLOWUP_REVIEW_HREF\}>/);
+  assert.match(clientStudioSource, /\{canReviewFollowups \? \(\s*<a className="btn btn-sm btn-outline-primary mt-2" href=\{clientFollowupReviewHref\(organizationId\)\}>/);
 });
 
 test("frontend: the GK cockpit and GK Impact Library views mount only when the server reports internalKnowledgeWorkspace", () => {

@@ -449,6 +449,93 @@ test("KAI_SPRINT2_ENABLED disabled has zero role-administration side effects", a
   assert.equal(touched, false);
 });
 
+// --- gk_reviewer organization role (platform superuser only) -------------------
+
+function gkReviewerPlacementDependencies({ existingRows = [], upserts = [], audits = [] } = {}) {
+  return {
+    env: enabledEnv,
+    runInTransaction: fakeRunInTransaction(),
+    findOrCreateKaiUserByLegacyPublicUserdataId: baseTargetResolver(),
+    listOrganizationMembershipRowsForUserInOrganization: async () => existingRows,
+    countActiveStoredClientAdminMemberships: async () => 1,
+    hasActiveDerivedClientAdminForOrganization: async () => false,
+    upsertOrganizationMembershipRoleStatus: async (input) => {
+      upserts.push(input);
+      return { previousRow: existingRows[0] || null, newRow: input, mutated: true, replay: false };
+    },
+    createProductionMetadataOnlyAuditForAccessAdministration: trackingAudit(audits),
+  };
+}
+
+test("platform superuser can place a Get Kinder reviewer on an organization (gk_reviewer membership) and remove them, with audit", async () => {
+  const upserts = [];
+  const audits = [];
+  const placed = await manageOrganizationMembership(
+    { actorContext: platformSuperuserActor(), organizationId: ORG_A, targetLegacyPublicUserdataId: 701, roleName: "gk_reviewer", membershipStatus: "active", now: NOW },
+    gkReviewerPlacementDependencies({ upserts, audits }),
+  );
+  assert.equal(placed.ok, true, JSON.stringify(placed));
+  assert.deepEqual(upserts, [{ organizationId: ORG_A, userId: "target-kai-user-1", roleName: "gk_reviewer", membershipStatus: "active" }]);
+  assert.deepEqual([audits[0].attempted_operation, audits[0].resulting_role_name], ["organization_membership_assigned", "gk_reviewer"]);
+
+  const removed = await manageOrganizationMembership(
+    { actorContext: platformSuperuserActor(), organizationId: ORG_A, targetLegacyPublicUserdataId: 701, roleName: "gk_reviewer", membershipStatus: "inactive", now: NOW },
+    gkReviewerPlacementDependencies({
+      existingRows: [{ organization_id: ORG_A, user_id: "target-kai-user-1", role_name: "gk_reviewer", membership_status: "active" }],
+      upserts,
+      audits,
+    }),
+  );
+  assert.equal(removed.ok, true, JSON.stringify(removed));
+  assert.deepEqual([audits[1].attempted_operation, audits[1].previous_membership_status, audits[1].resulting_membership_status],
+    ["organization_membership_role_status_changed", "active", "inactive"]);
+});
+
+test("platform superuser still cannot assign gk_admin or gk_operator as an organization role", async () => {
+  for (const roleName of ["gk_admin", "gk_operator"]) {
+    const upserts = [];
+    const result = await manageOrganizationMembership(
+      { actorContext: platformSuperuserActor(), organizationId: ORG_A, targetLegacyPublicUserdataId: 702, roleName, membershipStatus: "active", now: NOW },
+      gkReviewerPlacementDependencies({ upserts }),
+    );
+    assert.equal(result.error.code, "validation_blocker", roleName);
+    assert.equal(upserts.length, 0, roleName);
+  }
+});
+
+test("an organization administrator (stored or derived) cannot assign the gk_reviewer organization role", async () => {
+  for (const actorContext of [storedClientAdminActor(ORG_A), derivedClientAdminActor(ORG_A)]) {
+    const upserts = [];
+    const audits = [];
+    const result = await manageOrganizationMembership(
+      { actorContext, organizationId: ORG_A, targetLegacyPublicUserdataId: 703, roleName: "gk_reviewer", membershipStatus: "active", now: NOW },
+      gkReviewerPlacementDependencies({ upserts, audits }),
+    );
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "validation_blocker");
+    assert.deepEqual([upserts.length, audits.length], [0, 0]);
+  }
+});
+
+test("a global gk_admin or gk_reviewer without platform-superuser authority cannot assign the gk_reviewer organization role", async () => {
+  for (const globalRole of ["gk_admin", "gk_reviewer"]) {
+    const upserts = [];
+    const actorContext = {
+      actorType: "human",
+      actorUserId: `global-${globalRole}`,
+      kaiRoles: [globalRole],
+      organizationMemberships: [{ organization_id: ORG_A, role_name: globalRole, membership_status: "active" }],
+      platformSuperuser: false,
+    };
+    const result = await manageOrganizationMembership(
+      { actorContext, organizationId: ORG_A, targetLegacyPublicUserdataId: 704, roleName: "gk_reviewer", membershipStatus: "active", now: NOW },
+      gkReviewerPlacementDependencies({ upserts }),
+    );
+    assert.equal(result.error.code, "authorization_denied", globalRole);
+    assert.equal(upserts.length, 0, globalRole);
+  }
+});
+
 // --- manageGlobalKaiRole -----------------------------------------------------------
 
 test("platform superuser can assign and revoke an existing global KAI role", async () => {

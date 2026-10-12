@@ -1,6 +1,6 @@
 import React from "react";
 
-import { CLIENT_FOLLOWUP_REVIEW_HREF } from "../impactEvidenceLibraryLogic.js";
+import { clientFollowupReviewHref } from "../impactEvidenceLibraryLogic.js";
 import {
   PIPELINE_FAILURE_MESSAGES,
   PIPELINE_REQUEST_STATUS,
@@ -26,7 +26,7 @@ const STATUS_BADGE = Object.freeze({
  * renders the server's client-safe pipeline state (see
  * useClientEvidencePipeline) and issues no request of its own.
  */
-export default function ClientEvidencePipelineStatus({ request, canReviewFollowups = false, canContribute = false, onRefresh }) {
+export default function ClientEvidencePipelineStatus({ organizationId, request, canReviewFollowups = false, canContribute = false, onRefresh }) {
   const { status, data } = request;
   return (
     <div className="admin-card mt-3">
@@ -79,7 +79,7 @@ export default function ClientEvidencePipelineStatus({ request, canReviewFollowu
                 {nextActionText(file, { canReviewFollowups, canContribute })}
               </div>
               {file.nextAction === "answer_client_followups" && canReviewFollowups ? (
-                <a className="btn btn-sm btn-outline-primary mt-1" href={CLIENT_FOLLOWUP_REVIEW_HREF}>
+                <a className="btn btn-sm btn-outline-primary mt-1" href={clientFollowupReviewHref(organizationId)}>
                   Answer follow-up questions
                 </a>
               ) : null}

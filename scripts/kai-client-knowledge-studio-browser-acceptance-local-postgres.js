@@ -26,7 +26,10 @@ import { Client } from "pg";
  * Files entry points plus the client Reviews messaging, and
  * __tests__/kai-team-access-browser-acceptance.integration.spec.js runs the
  * Impact Library Team & Access roster, role changes, and join approval for
- * organization administrators.
+ * organization administrators, and
+ * __tests__/kai-reviewer-provisioning-browser-acceptance.integration.spec.js
+ * runs GK reviewer provisioning from /admin KAI Access and NPO client_reviewer
+ * provisioning from Team & Access through to each reviewer's review action.
  *
  * - An ephemeral, loopback-only PostgreSQL cluster owned by this runner,
  *   with the union of the schemas the client product reads, applied in the
@@ -74,6 +77,7 @@ const ACCEPTANCE_SPECS = Object.freeze([
   "__tests__/kai-reviewed-evidence-claim-proposal-browser-acceptance.integration.spec.js",
   "__tests__/kai-sensitivity-review-reachability-browser-acceptance.integration.spec.js",
   "__tests__/kai-team-access-browser-acceptance.integration.spec.js",
+  "__tests__/kai-reviewer-provisioning-browser-acceptance.integration.spec.js",
 ]);
 const acceptanceSpec = process.argv[2] || ACCEPTANCE_SPECS[0];
 if (!ACCEPTANCE_SPECS.includes(acceptanceSpec)) {

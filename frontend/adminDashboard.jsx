@@ -3,13 +3,18 @@ import ImpactEvidenceLibrary from "./ImpactEvidenceLibrary.jsx";
 import KaiWebIntake from "./KaiWebIntake.jsx";
 import KaiReviewCockpit from "./kaiReviewCockpit.jsx";
 import {
+  KAI_GK_REVIEWER_ROLE,
   KAI_ORGANIZATION_ROLE_OPTIONS,
   adminUserLookupPath,
+  buildKaiGlobalReviewerRolePayload,
   buildKaiOrganizationMembershipPayload,
   describeKaiAccessAuthoritySource,
   kaiAccessRowKey,
+  kaiGlobalRolePath,
   kaiOrganizationAccessPath,
   kaiOrganizationMembershipPath,
+  kaiOrganizationRoleOptions,
+  rosterGlobalKaiRoles,
 } from "./kaiOrganizationAccessLogic.js";
 import {
   describeJoinReviewError,
@@ -74,6 +79,7 @@ const INITIAL_KAI_ACCESS_MODAL = Object.freeze({
   formError: "",
   rowDrafts: {},
   rowSavingKey: null,
+  globalRoleSavingKey: null,
   joinRequests: [],
   joinRequestsLoading: false,
   joinRequestsError: "",
@@ -547,10 +553,25 @@ function ConfirmDialog({ open, title, body, confirmLabel, onCancel, onConfirm, v
   );
 }
 
-function KaiAccessRosterRow({ row, roleOptions, draftRole, onDraftChange, onSave, saving }) {
+function KaiAccessRosterRow({
+  row,
+  roleOptions,
+  draftRole,
+  onDraftChange,
+  onSave,
+  saving,
+  globalRolesVisible,
+  onGlobalReviewerRole,
+  globalRoleSaving,
+  onRemoveGkReviewer,
+}) {
   const displayName = row.email || (row.legacy_public_userdata_id ? `User #${row.legacy_public_userdata_id}` : "Unknown user");
+  const globalRoles = rosterGlobalKaiRoles(row);
+  const hasGlobalReviewer = Boolean(globalRoles?.includes(KAI_GK_REVIEWER_ROLE));
+  const isActiveGkReviewerMember =
+    row.stored_membership?.role_name === KAI_GK_REVIEWER_ROLE && row.stored_membership?.membership_status === "active";
   return (
-    <tr>
+    <tr data-kai-access-row={kaiAccessRowKey(row)}>
       <td>{displayName}</td>
       <td>{row.effective_role_name || "—"}</td>
       <td>{row.effective_membership_status || "—"}</td>
@@ -573,11 +594,31 @@ function KaiAccessRosterRow({ row, roleOptions, draftRole, onDraftChange, onSave
             <button type="button" className="btn btn-outline-primary btn-sm" disabled={saving} onClick={onSave}>
               {saving ? "Saving…" : "Save"}
             </button>
+            {globalRolesVisible && isActiveGkReviewerMember ? (
+              <button type="button" className="btn btn-outline-danger btn-sm" disabled={saving} onClick={onRemoveGkReviewer}>
+                Remove gk_reviewer here
+              </button>
+            ) : null}
           </div>
         ) : (
           <span className="text-muted small">Derived — not editable here</span>
         )}
       </td>
+      {globalRolesVisible ? (
+        <td>
+          <div className="small">{globalRoles && globalRoles.length > 0 ? globalRoles.join(", ") : "None"}</div>
+          {globalRoles && row.legacy_public_userdata_id ? (
+            <button
+              type="button"
+              className={`btn btn-sm mt-1 ${hasGlobalReviewer ? "btn-outline-danger" : "btn-outline-primary"}`}
+              disabled={globalRoleSaving}
+              onClick={() => onGlobalReviewerRole(hasGlobalReviewer ? "revoke" : "assign")}
+            >
+              {globalRoleSaving ? "Saving…" : hasGlobalReviewer ? "Revoke gk_reviewer" : "Grant gk_reviewer"}
+            </button>
+          ) : null}
+        </td>
+      ) : null}
     </tr>
   );
 }
@@ -1624,7 +1665,7 @@ export default function AdminDashboard() {
   }, []);
 
   const submitKaiAccessGrant = useCallback(async () => {
-    const { organizationId, kaiOrganizationId, emailInput, roleInput, submitting } = kaiAccessModal;
+    const { organizationId, kaiOrganizationId, emailInput, roleInput, submitting, globalRolesVisible } = kaiAccessModal;
     if (submitting || !kaiOrganizationId) return;
     const email = String(emailInput || "").trim().toLowerCase();
     if (!email || !email.includes("@")) {
@@ -1641,7 +1682,7 @@ export default function AdminDashboard() {
       const legacyUserId = lookupPayload?.user?.id;
       if (!legacyUserId) throw new Error("user_not_found");
 
-      const payload = buildKaiOrganizationMembershipPayload(roleInput, "active");
+      const payload = buildKaiOrganizationMembershipPayload(roleInput, "active", { includeGkReviewer: globalRolesVisible });
       await kaiMutateJson(kaiOrganizationMembershipPath(kaiOrganizationId, legacyUserId), "PUT", payload);
 
       pushToast(`Granted ${roleInput.replace(/_/g, " ")} access to ${email}.`, "success");
@@ -1699,16 +1740,17 @@ export default function AdminDashboard() {
     [kaiAccessModal, kaiMutateJson, pushToast, loadKaiJoinRequests, loadKaiAccess]
   );
 
+  // membershipStatus "inactive" is used only by "Remove gk_reviewer here".
   const submitKaiAccessRoleChange = useCallback(
-    async (row, newRole) => {
-      const { organizationId, kaiOrganizationId } = kaiAccessModal;
+    async (row, newRole, membershipStatus = "active") => {
+      const { organizationId, kaiOrganizationId, globalRolesVisible } = kaiAccessModal;
       const legacyUserId = row?.legacy_public_userdata_id;
       if (!kaiOrganizationId || !legacyUserId || !row?.editable) return;
       const rowKey = kaiAccessRowKey(row);
 
       setKaiAccessModal((curr) => ({ ...curr, rowSavingKey: rowKey, error: "" }));
       try {
-        const payload = buildKaiOrganizationMembershipPayload(newRole, "active");
+        const payload = buildKaiOrganizationMembershipPayload(newRole, membershipStatus, { includeGkReviewer: globalRolesVisible });
         await kaiMutateJson(kaiOrganizationMembershipPath(kaiOrganizationId, legacyUserId), "PUT", payload);
         pushToast(`Updated KAI role for ${row.email || `user #${legacyUserId}`}.`, "success");
         setKaiAccessModal((curr) =>
@@ -1723,6 +1765,36 @@ export default function AdminDashboard() {
           curr.organizationId === organizationId
             ? { ...curr, rowSavingKey: null, error: err?.message || "Unable to update KAI role." }
             : { ...curr, rowSavingKey: null }
+        );
+      }
+    },
+    [kaiAccessModal, kaiMutateJson, pushToast, loadKaiAccess]
+  );
+
+  // Grants or revokes the global gk_reviewer role through the existing
+  // platform-superuser-only PUT .../global-roles/:legacyPublicUserdataId.
+  // Global, not organization-scoped: review access to an organization also
+  // needs that person's active membership there. The roster is re-read
+  // from the server afterwards; a refusal is shown as returned.
+  const submitKaiGlobalReviewerRole = useCallback(
+    async (row, action) => {
+      const { organizationId, kaiOrganizationId, globalRolesVisible, globalRoleSavingKey } = kaiAccessModal;
+      const legacyUserId = row?.legacy_public_userdata_id;
+      if (!kaiOrganizationId || !legacyUserId || !globalRolesVisible || globalRoleSavingKey) return;
+      const rowKey = kaiAccessRowKey(row);
+
+      setKaiAccessModal((curr) => ({ ...curr, globalRoleSavingKey: rowKey, error: "" }));
+      try {
+        await kaiMutateJson(kaiGlobalRolePath(legacyUserId), "PUT", buildKaiGlobalReviewerRolePayload(action));
+        const who = row.email || `user #${legacyUserId}`;
+        pushToast(action === "assign" ? `Granted global gk_reviewer to ${who}.` : `Revoked global gk_reviewer from ${who}.`, "success");
+        setKaiAccessModal((curr) => ({ ...curr, globalRoleSavingKey: null }));
+        loadKaiAccess(organizationId, kaiOrganizationId);
+      } catch (err) {
+        setKaiAccessModal((curr) =>
+          curr.organizationId === organizationId
+            ? { ...curr, globalRoleSavingKey: null, error: err?.message || "Unable to change the global KAI role." }
+            : { ...curr, globalRoleSavingKey: null }
         );
       }
     },
@@ -4187,6 +4259,15 @@ export default function AdminDashboard() {
                 <div className="small text-muted">
                   Assign or change organization-scoped KAI roles for existing Get Kinder users.
                 </div>
+                {kaiAccessModal.globalRolesVisible ? (
+                  <div className="small text-muted mt-1" data-kai-gk-reviewer-note>
+                    A Get Kinder reviewer needs both the <strong>gk_reviewer</strong> role in this organization (opens
+                    the Get Kinder Knowledge Studio for it) and the global <strong>gk_reviewer</strong> role (sensitivity
+                    reviews). The global role applies in every organization where the person has an active role, and
+                    revoking it ends sensitivity reviews there. Most other Get Kinder reviews follow the organization
+                    role, so use “Remove gk_reviewer here” to end the person’s reviewer access to this organization.
+                  </div>
+                ) : null}
               </div>
               <button type="button" className="btn-close" onClick={closeKaiAccessModal} />
             </div>
@@ -4204,18 +4285,19 @@ export default function AdminDashboard() {
                     <th>Status</th>
                     <th>Source</th>
                     <th>Change role</th>
+                    {kaiAccessModal.globalRolesVisible ? <th>Global KAI roles</th> : null}
                   </tr>
                 </thead>
                 <tbody>
                   {kaiAccessModal.loading ? (
                     <tr>
-                      <td colSpan={5} className="text-muted small">
+                      <td colSpan={kaiAccessModal.globalRolesVisible ? 6 : 5} className="text-muted small">
                         Loading…
                       </td>
                     </tr>
                   ) : kaiAccessModal.access.length === 0 ? (
                     <tr>
-                      <td colSpan={5} className="text-muted small">
+                      <td colSpan={kaiAccessModal.globalRolesVisible ? 6 : 5} className="text-muted small">
                         No KAI access recorded for this organization.
                       </td>
                     </tr>
@@ -4231,7 +4313,7 @@ export default function AdminDashboard() {
                         <KaiAccessRosterRow
                           key={rowKey}
                           row={row}
-                          roleOptions={KAI_ORGANIZATION_ROLE_OPTIONS}
+                          roleOptions={kaiOrganizationRoleOptions({ includeGkReviewer: kaiAccessModal.globalRolesVisible })}
                           draftRole={draftRole}
                           onDraftChange={(value) =>
                             setKaiAccessModal((curr) => ({
@@ -4241,6 +4323,10 @@ export default function AdminDashboard() {
                           }
                           onSave={() => submitKaiAccessRoleChange(row, draftRole)}
                           saving={kaiAccessModal.rowSavingKey === rowKey}
+                          globalRolesVisible={kaiAccessModal.globalRolesVisible}
+                          onGlobalReviewerRole={(action) => submitKaiGlobalReviewerRole(row, action)}
+                          globalRoleSaving={kaiAccessModal.globalRoleSavingKey === rowKey}
+                          onRemoveGkReviewer={() => submitKaiAccessRoleChange(row, KAI_GK_REVIEWER_ROLE, "inactive")}
                         />
                       );
                     })
@@ -4340,7 +4426,7 @@ export default function AdminDashboard() {
                     onChange={(e) => setKaiAccessModal((curr) => ({ ...curr, roleInput: e.target.value }))}
                     disabled={kaiAccessModal.submitting || !kaiAccessModal.kaiOrganizationId}
                   >
-                    {KAI_ORGANIZATION_ROLE_OPTIONS.map((role) => (
+                    {kaiOrganizationRoleOptions({ includeGkReviewer: kaiAccessModal.globalRolesVisible }).map((role) => (
                       <option key={role} value={role}>
                         {role}
                       </option>

@@ -648,7 +648,7 @@ test("frontend: the client Funder Requirements tab makes only the client-safe re
   ]) {
     assert.ok(!componentSource.includes(forbidden), forbidden);
   }
-  assert.match(componentSource, /\{data && canReviewFollowups \? \(\s*<a className="btn btn-sm btn-outline-primary mt-2" href=\{CLIENT_FOLLOWUP_REVIEW_HREF\}>/);
+  assert.match(componentSource, /\{data && canReviewFollowups \? \(\s*<a className="btn btn-sm btn-outline-primary mt-2" href=\{clientFollowupReviewHref\(organizationId\)\}>/);
   assert.match(clientStudioSource, /\["funderRequirements", "Funder Requirements"\]/);
   assert.match(clientStudioSource, /<ClientFunderRequirements\s+organizationId=\{organizationId\}\s+engagementId=\{engagementId\}\s+canReviewFollowups=\{canReviewFollowups\}\s+\/>/);
   assert.doesNotMatch(clientStudioSource, /getJson\(|postJson\(|fetch\(/);

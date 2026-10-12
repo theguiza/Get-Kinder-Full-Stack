@@ -16,13 +16,27 @@ export const KAI_ACCESS_ADMINISTRATION_OPERATIONS = Object.freeze({
 /**
  * Organization-scoped roles an effective client_admin (stored or derived) or
  * platform superuser may assign/change within kai.organization_memberships.
- * This package never assigns or modifies platform-superuser authority,
- * gk_admin, gk_operator, or gk_reviewer through this path.
+ * An organization administrator never assigns or modifies platform-superuser
+ * authority, gk_admin, gk_operator, or gk_reviewer through this path.
  */
 export const KAI_ASSIGNABLE_ORGANIZATION_ROLES = Object.freeze([
   "client_admin",
   "client_reviewer",
   "client_contributor",
+]);
+
+/**
+ * The organization roles a platform superuser may assign: the client roles
+ * plus gk_reviewer, which places a Get Kinder reviewer on one organization.
+ * The GK review services already treat an active stored gk_reviewer
+ * membership as that organization's scope (the Knowledge Studio mount reads
+ * it, and the review-cockpit routes combine it with the global gk_reviewer
+ * role), but no governed writer could create one. gk_admin and gk_operator
+ * memberships remain outside this path.
+ */
+export const KAI_PLATFORM_SUPERUSER_ASSIGNABLE_ORGANIZATION_ROLES = Object.freeze([
+  ...KAI_ASSIGNABLE_ORGANIZATION_ROLES,
+  "gk_reviewer",
 ]);
 
 /**

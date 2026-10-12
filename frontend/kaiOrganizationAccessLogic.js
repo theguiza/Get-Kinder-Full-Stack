@@ -5,10 +5,11 @@
 // conventions; this module holds only the parts that are safe and useful to
 // unit-test without rendering React.
 //
-// The role list mirrors Backend/kai/config/kaiAccessAdministrationContract.js
-// KAI_ASSIGNABLE_ORGANIZATION_ROLES exactly - this file must never invent an
-// additional or divergent role set. Package 2's mounted route is the single
-// authority for the actual request/response contract
+// The role lists mirror Backend/kai/config/kaiAccessAdministrationContract.js
+// KAI_ASSIGNABLE_ORGANIZATION_ROLES and
+// KAI_PLATFORM_SUPERUSER_ASSIGNABLE_ORGANIZATION_ROLES exactly - this file
+// must never invent an additional or divergent role set. Package 2's mounted
+// route is the single authority for the actual request/response contract
 // (Backend/kai/routes/kaiAccessAdministrationApi.js); the paths below are
 // built to match that router's exact mount and param names.
 
@@ -18,10 +19,26 @@ export const KAI_ORGANIZATION_ROLE_OPTIONS = Object.freeze([
   "client_contributor",
 ]);
 
+// The Get Kinder reviewer role. As an organization membership it mirrors
+// KAI_PLATFORM_SUPERUSER_ASSIGNABLE_ORGANIZATION_ROLES (superuser only); as
+// a global KAI role it is the one global role this modal grants or revokes.
+export const KAI_GK_REVIEWER_ROLE = "gk_reviewer";
+
+// Offered only when the server reports platform-superuser authority for the
+// roster (global_roles_visible); the backend decides either way.
+export const KAI_SUPERUSER_ORGANIZATION_ROLE_OPTIONS = Object.freeze([
+  ...KAI_ORGANIZATION_ROLE_OPTIONS,
+  KAI_GK_REVIEWER_ROLE,
+]);
+
 const KAI_ACCESS_ADMINISTRATION_BASE_PATH = "/api/kai/sprint2/access-administration";
 
-export function isAssignableKaiOrganizationRole(roleName) {
-  return KAI_ORGANIZATION_ROLE_OPTIONS.includes(roleName);
+export function isAssignableKaiOrganizationRole(roleName, { includeGkReviewer = false } = {}) {
+  return (includeGkReviewer ? KAI_SUPERUSER_ORGANIZATION_ROLE_OPTIONS : KAI_ORGANIZATION_ROLE_OPTIONS).includes(roleName);
+}
+
+export function kaiOrganizationRoleOptions({ includeGkReviewer = false } = {}) {
+  return includeGkReviewer ? KAI_SUPERUSER_ORGANIZATION_ROLE_OPTIONS : KAI_ORGANIZATION_ROLE_OPTIONS;
 }
 
 export function kaiOrganizationAccessPath(kaiOrganizationId) {
@@ -50,14 +67,34 @@ export function adminUserLookupPath(email) {
 // to build a request for anything outside the three assignable client
 // roles or the two known membership statuses - defense in depth beyond the
 // UI only ever rendering a <select> of the same three roles.
-export function buildKaiOrganizationMembershipPayload(roleName, membershipStatus = "active") {
-  if (!isAssignableKaiOrganizationRole(roleName)) {
+export function buildKaiOrganizationMembershipPayload(roleName, membershipStatus = "active", { includeGkReviewer = false } = {}) {
+  if (!isAssignableKaiOrganizationRole(roleName, { includeGkReviewer })) {
     throw new Error(`unsupported KAI organization role: ${roleName}`);
   }
   if (membershipStatus !== "active" && membershipStatus !== "inactive") {
     throw new Error(`unsupported KAI membership status: ${membershipStatus}`);
   }
   return { role_name: roleName, membership_status: membershipStatus };
+}
+
+// Package 2's platform-superuser-only global-role route
+// (PUT .../global-roles/:legacyPublicUserdataId, manageGlobalKaiRole).
+export function kaiGlobalRolePath(legacyPublicUserdataId) {
+  return `${KAI_ACCESS_ADMINISTRATION_BASE_PATH}/global-roles/${encodeURIComponent(legacyPublicUserdataId)}`;
+}
+
+// The modal grants or revokes only the global gk_reviewer role.
+export function buildKaiGlobalReviewerRolePayload(action) {
+  if (action !== "assign" && action !== "revoke") {
+    throw new Error(`unsupported KAI global role action: ${action}`);
+  }
+  return { role_name: KAI_GK_REVIEWER_ROLE, action };
+}
+
+// The roster's global_kai_roles (present only for a platform-superuser
+// reader) as the display list, or null when the server did not send it.
+export function rosterGlobalKaiRoles(row) {
+  return Array.isArray(row?.global_kai_roles) ? row.global_kai_roles : null;
 }
 
 // Presentation-only label for the roster's "Source" column. Never invents an

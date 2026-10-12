@@ -48,6 +48,17 @@ export function projectImpactHomeSummary(dto) {
 // organization workspace) is where a client reviewer completes these.
 export const CLIENT_FOLLOWUP_REVIEW_HREF = "/kai/client-followups";
 
+// The same page opened for the organization the reviewer is working in. The
+// page (index.js /kai/client-followups) reads ?organizationId= to fill its
+// organization; without it the reviewer would have to type the KAI
+// organization id. The id is a navigation hint only - the follow-up read and
+// completion routes authorize the actor for that organization themselves.
+export function clientFollowupReviewHref(organizationId) {
+  return typeof organizationId === "string" && organizationId.length > 0
+    ? `${CLIENT_FOLLOWUP_REVIEW_HREF}?organizationId=${encodeURIComponent(organizationId)}`
+    : CLIENT_FOLLOWUP_REVIEW_HREF;
+}
+
 // Server-derived organization access capabilities. Each flag is the answer
 // of an existing service policy for this actor and organization; the
 // Impact Library client uses them instead of guessing roles or calling a

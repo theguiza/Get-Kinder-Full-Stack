@@ -18,7 +18,7 @@ import {
   sensitivityReviewActionAvailable,
   stageStatusLabel,
 } from "./clientEvidencePipelineLogic.js";
-import { CLIENT_FOLLOWUP_REVIEW_HREF } from "../impactEvidenceLibraryLogic.js";
+import { clientFollowupReviewHref } from "../impactEvidenceLibraryLogic.js";
 
 const CLIENT_KNOWLEDGE_STUDIO_TABS = Object.freeze([
   ["files", "Files"],
@@ -191,6 +191,7 @@ export default function ClientKnowledgeStudio({
       {tab === "files" && organizationId ? (
         <ClientEvidencePipelineStatus
           request={pipeline}
+          organizationId={organizationId}
           canReviewFollowups={canReviewFollowups}
           canContribute={canContribute}
           onRefresh={refreshPipeline}
@@ -238,7 +239,7 @@ export default function ClientKnowledgeStudio({
             Questions that need an answer from your organization are sent to your client reviewers.
           </div>
           {canReviewFollowups ? (
-            <a className="btn btn-sm btn-outline-primary mt-2" href={CLIENT_FOLLOWUP_REVIEW_HREF}>
+            <a className="btn btn-sm btn-outline-primary mt-2" href={clientFollowupReviewHref(organizationId)}>
               Answer follow-up questions
             </a>
           ) : null}
@@ -280,6 +281,7 @@ export default function ClientKnowledgeStudio({
               intakeFileId: file.intakeFileId,
               safeFilename: file.safeFilename,
             })}
+            organizationId={organizationId}
           />
           {openSensitivityReview ? (
             <ClientSensitivityReviewPanel
@@ -355,13 +357,13 @@ function ProjectEvidence({ view, canReviewFollowups, onViewImpactLibrary, onOpen
   );
 }
 
-function ProjectReviews({ view, canReviewFollowups, getKinderReviewAccessNote, canReviewSensitivity, onOpenSensitivityReview }) {
+function ProjectReviews({ organizationId, view, canReviewFollowups, getKinderReviewAccessNote, canReviewSensitivity, onOpenSensitivityReview }) {
   if (!view) {
     return (
       <>
         <div className="small text-muted">Select a project to see whether anything needs your review.</div>
         {canReviewFollowups ? (
-          <a className="btn btn-sm btn-outline-primary mt-2" href={CLIENT_FOLLOWUP_REVIEW_HREF}>
+          <a className="btn btn-sm btn-outline-primary mt-2" href={clientFollowupReviewHref(organizationId)}>
             Answer follow-up questions
           </a>
         ) : null}
@@ -379,7 +381,7 @@ function ProjectReviews({ view, canReviewFollowups, getKinderReviewAccessNote, c
         </div>
       ))}
       {canReviewFollowups ? (
-        <a className="btn btn-sm btn-outline-primary mb-2" href={CLIENT_FOLLOWUP_REVIEW_HREF}>
+        <a className="btn btn-sm btn-outline-primary mb-2" href={clientFollowupReviewHref(organizationId)}>
           Answer follow-up questions
         </a>
       ) : null}

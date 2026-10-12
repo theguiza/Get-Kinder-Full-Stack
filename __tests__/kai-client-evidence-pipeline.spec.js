@@ -30,7 +30,9 @@ import {
   stageStatusLabel,
 } from "../frontend/knowledgeStudio/clientEvidencePipelineLogic.js";
 import {
+  CLIENT_FOLLOWUP_REVIEW_HREF,
   buildSensitivityDecisionRequestBody,
+  clientFollowupReviewHref,
   defaultSensitivityReviewFormState,
   projectSensitivityDecisionResult,
   sensitivityReviewFormStateFromDecision,
@@ -716,4 +718,24 @@ test("client sensitivity panel: reads on explicit open only, writes only from ex
   // The decision DTO is the existing builder's, unchanged.
   assert.deepEqual(Object.keys(buildSensitivityDecisionRequestBody({ decision: "needs_more_information", expectedUpdatedAt: "t", reviewQueueItemId: "q" })).sort(),
     ["decision", "expected_updated_at", "review_queue_item_id"]);
+});
+
+test("client follow-up links open the follow-up page for the selected organization", () => {
+  const organizationId = "00000000-0000-4000-8000-000000000001";
+  assert.equal(clientFollowupReviewHref(organizationId), `/kai/client-followups?organizationId=${organizationId}`);
+  assert.equal(clientFollowupReviewHref(""), CLIENT_FOLLOWUP_REVIEW_HREF);
+  assert.equal(clientFollowupReviewHref(null), CLIENT_FOLLOWUP_REVIEW_HREF);
+  assert.equal(clientFollowupReviewHref("a b&c"), "/kai/client-followups?organizationId=a%20b%26c");
+  // Every client entry point uses the organization-aware link.
+  for (const file of [
+    "frontend/ImpactHomeView.jsx",
+    "frontend/knowledgeStudio/ClientKnowledgeStudio.jsx",
+    "frontend/knowledgeStudio/ClientEvidencePipelineStatus.jsx",
+    "frontend/knowledgeStudio/ClientFunderRequirements.jsx",
+    "frontend/knowledgeStudio/ClientGeneratedDrafts.jsx",
+  ]) {
+    const source = readFileSync(file, "utf8");
+    assert.doesNotMatch(source, /CLIENT_FOLLOWUP_REVIEW_HREF/, file);
+    assert.match(source, /clientFollowupReviewHref\(organizationId\)/, file);
+  }
 });

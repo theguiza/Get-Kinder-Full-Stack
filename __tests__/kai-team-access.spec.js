@@ -787,7 +787,7 @@ test("13. existing organization creation, join, switching, Home join review, and
   // NPO administrators are never sent to the GK superuser dashboard.
   for (const source of [appSource, shellSource, viewSource, hookSource]) assert.doesNotMatch(source, /href="\/admin|\/admin\b(?!istration)/);
   // The /admin modal still uses the shared helpers it used before.
-  assert.match(adminSource, /buildKaiOrganizationMembershipPayload\(roleInput, "active"\)/);
+  assert.match(adminSource, /buildKaiOrganizationMembershipPayload\(roleInput, "active", \{ includeGkReviewer: globalRolesVisible \}\)/);
   assert.match(adminSource, /Derived — not editable here/);
 });
 

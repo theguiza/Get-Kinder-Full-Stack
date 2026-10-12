@@ -3,7 +3,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import {
   impactHomeSummaryPath,
   projectImpactHomeSummary,
-  CLIENT_FOLLOWUP_REVIEW_HREF,
+  clientFollowupReviewHref,
   organizationReviewQueuePath,
   getJson,
   projectReviewQueue,
@@ -165,9 +165,9 @@ export default function ImpactHomeView({ organizationId, onGoToKnowledgeStudio, 
             claimLabel: "Client follow-up",
             blockerText: action.questionText,
             actionability: "ACTION_REQUIRED",
-            actionHref: CLIENT_FOLLOWUP_REVIEW_HREF,
+            actionHref: clientFollowupReviewHref(organizationId),
           })),
-    [internalReviewAvailable, reviewQueueItems, summary],
+    [internalReviewAvailable, reviewQueueItems, summary, organizationId],
   );
 
   const nextAction = attentionPreview.find((item) => item.actionability === "ACTION_REQUIRED") || attentionPreview[0] || null;

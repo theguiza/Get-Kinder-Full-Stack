@@ -2,6 +2,7 @@ import { isKaiSprint2Enabled } from "../config/kaiSprint2Config.js";
 import {
   KAI_ACCESS_ADMINISTRATION_OPERATIONS,
   KAI_ASSIGNABLE_ORGANIZATION_ROLES,
+  KAI_PLATFORM_SUPERUSER_ASSIGNABLE_ORGANIZATION_ROLES,
   KAI_ASSIGNABLE_GLOBAL_ROLES,
   KAI_ACTIVE_ORGANIZATION_MEMBERSHIP_STATUS,
   KAI_INACTIVE_ORGANIZATION_MEMBERSHIP_STATUS,
@@ -40,6 +41,7 @@ const {
 } = KAI_ACCESS_ADMINISTRATION_OPERATIONS;
 
 const ASSIGNABLE_ORGANIZATION_ROLE_SET = new Set(KAI_ASSIGNABLE_ORGANIZATION_ROLES);
+const PLATFORM_SUPERUSER_ASSIGNABLE_ORGANIZATION_ROLE_SET = new Set(KAI_PLATFORM_SUPERUSER_ASSIGNABLE_ORGANIZATION_ROLES);
 const ASSIGNABLE_GLOBAL_ROLE_SET = new Set(KAI_ASSIGNABLE_GLOBAL_ROLES);
 const ORGANIZATION_MEMBERSHIP_ADMIN_ALLOWED_ROLES = new Set(["client_admin"]);
 
@@ -235,8 +237,10 @@ export async function viewEffectiveKaiAccess({ actorContext, organizationId } = 
  * membership. Platform superuser may target any explicit organization;
  * an effective client_admin (stored or derived) may only target its own
  * organization - both enforced solely by validateActorCanPerformOperation,
- * no parallel role check exists here. Refuses to leave an organization with
- * zero effective active client_admin authority through an ordinary
+ * no parallel role check exists here. Only a platform superuser may assign
+ * gk_reviewer (KAI_PLATFORM_SUPERUSER_ASSIGNABLE_ORGANIZATION_ROLES); an
+ * organization administrator may assign client roles only. Refuses to leave
+ * an organization with zero effective active client_admin authority through an ordinary
  * client_admin action (platform superuser retains the recovery path).
  */
 export async function manageOrganizationMembership(
@@ -252,16 +256,21 @@ export async function manageOrganizationMembership(
   });
   if (!authResult.ok) return authorizationFailure(authResult);
 
+  const platformSuperuserAuthorized = Boolean(authResult.platformSuperuserAuthorized);
+  // gk_reviewer is assignable only on platform-superuser authority; for
+  // anyone else it is the same validation_blocker as any other unknown role.
+  const assignableRoles = platformSuperuserAuthorized
+    ? PLATFORM_SUPERUSER_ASSIGNABLE_ORGANIZATION_ROLE_SET
+    : ASSIGNABLE_ORGANIZATION_ROLE_SET;
+
   if (
     !isPositiveInteger(targetLegacyPublicUserdataId) ||
-    !ASSIGNABLE_ORGANIZATION_ROLE_SET.has(roleName) ||
+    !assignableRoles.has(roleName) ||
     (membershipStatus !== KAI_ACTIVE_ORGANIZATION_MEMBERSHIP_STATUS && membershipStatus !== KAI_INACTIVE_ORGANIZATION_MEMBERSHIP_STATUS) ||
     !isNormalizedNow(now)
   ) {
     return failure("validation_blocker");
   }
-
-  const platformSuperuserAuthorized = Boolean(authResult.platformSuperuserAuthorized);
 
   const findOrCreateTarget = dependencies.findOrCreateKaiUserByLegacyPublicUserdataId || findOrCreateKaiUserByLegacyPublicUserdataId;
   const targetKaiUser = await findOrCreateTarget({ legacyPublicUserdataId: targetLegacyPublicUserdataId });

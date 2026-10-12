@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 
 import {
-  CLIENT_FOLLOWUP_REVIEW_HREF,
+  clientFollowupReviewHref,
   clientFunderRequirementsPath,
   getJson,
   projectClientFunderRequirements,
@@ -108,7 +108,7 @@ export default function ClientFunderRequirements({ organizationId, engagementId,
           ))
         : null}
       {data && canReviewFollowups ? (
-        <a className="btn btn-sm btn-outline-primary mt-2" href={CLIENT_FOLLOWUP_REVIEW_HREF}>
+        <a className="btn btn-sm btn-outline-primary mt-2" href={clientFollowupReviewHref(organizationId)}>
           Answer follow-up questions
         </a>
       ) : null}
