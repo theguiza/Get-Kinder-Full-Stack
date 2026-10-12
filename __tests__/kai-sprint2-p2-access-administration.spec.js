@@ -750,12 +750,79 @@ test("an administration target who has never used KAI is mapped with their Get K
   assert.deepEqual(db.calls.find((call) => /public\.userdata/.test(call.sql)).params, [1203]);
 });
 
-test("an administration target with a blank, missing, or non-string account email is mapped with a null email, as on sign-in", async () => {
-  for (const userdataEmail of ["   ", undefined, null, 42]) {
+test("an unmapped administration target with a blank, missing, or non-string account email gets no KAI identity", async () => {
+  for (const userdataEmail of ["", "   ", undefined, null, 42]) {
     const db = fakeIdentityDb({ userdataEmail });
-    await findOrCreateKaiUserForAdministrationTarget({ legacyPublicUserdataId: 1203 }, db);
-    assert.deepEqual(db.calls.find((call) => /INSERT INTO kai\.users/.test(call.sql)).params, [1203, null], String(userdataEmail));
+    assert.equal(await findOrCreateKaiUserForAdministrationTarget({ legacyPublicUserdataId: 1203 }, db), null, String(userdataEmail));
+    assert.equal(db.calls.some((call) => /INSERT/.test(call.sql)), false, String(userdataEmail));
   }
+});
+
+test("a mapped administration target without a usable account email gets its existing identity back unchanged", async () => {
+  const existing = { user_id: "existing", legacy_identity_source: "public.userdata", legacy_public_userdata_id: 1203, status: "active", email: "kept@example.org" };
+  for (const userdataEmail of ["   ", undefined, null]) {
+    const db = fakeIdentityDb({ userdataEmail, existingKaiUser: existing });
+    assert.deepEqual(await findOrCreateKaiUserForAdministrationTarget({ legacyPublicUserdataId: 1203 }, db), existing, String(userdataEmail));
+    assert.equal(db.calls.some((call) => /INSERT|UPDATE/.test(call.sql)), false, String(userdataEmail));
+  }
+});
+
+test("both writers refuse a target with no usable KAI identity email with a structured blocker and no write", async () => {
+  const provisioningRejected = Object.assign(new Error("kai.users JIT provisioning insert failed", {
+    cause: Object.assign(new Error('null value in column "email" violates not-null constraint'), { code: "23502", column: "email" }),
+  }), { kaiUserProvisioningFailed: true });
+  const resolvers = {
+    "no mapping, no usable email": async () => null,
+    "insert rejected by the deployed contract": async () => { throw provisioningRejected; },
+  };
+  const loggedErrors = [];
+  const originalConsoleError = console.error;
+  console.error = (...args) => loggedErrors.push(args);
+  try {
+    for (const [label, resolver] of Object.entries(resolvers)) {
+      let wrote = false;
+      const deps = {
+        env: enabledEnv,
+        findOrCreateKaiUserByLegacyPublicUserdataId: resolver,
+        runInTransaction: async () => { wrote = true; throw new Error("must not open a transaction"); },
+      };
+      const membership = await manageOrganizationMembership(
+        { actorContext: platformSuperuserActor(), organizationId: ORG_A, targetLegacyPublicUserdataId: 1203, roleName: "gk_reviewer", membershipStatus: "active", now: NOW },
+        deps,
+      );
+      const globalRole = await manageGlobalKaiRole(
+        { actorContext: platformSuperuserActor(), targetLegacyPublicUserdataId: 1203, roleName: "gk_reviewer", action: "assign", now: NOW },
+        deps,
+      );
+      for (const [result, validatorKey] of [[membership, "VAL-KAI-P2-ACC-001"], [globalRole, "VAL-KAI-P2-ACC-002"]]) {
+        assert.equal(result.ok, false, label);
+        assert.equal(result.error.code, "validation_blocker", label);
+        assert.equal(result.blockers.length, 1, label);
+        assert.equal(result.blockers[0].validator_key, validatorKey, label);
+        assert.equal(result.blockers[0].blocking_reason, "target_account_email_unusable", label);
+        assert.equal(/null value|constraint|kai\.users|23502/.test(JSON.stringify(result)), false, label);
+      }
+      assert.equal(wrote, false, label);
+    }
+  } finally {
+    console.error = originalConsoleError;
+  }
+  assert.equal(JSON.stringify(loggedErrors).includes("violates"), false);
+});
+
+test("an untagged target-resolution failure is not reported as a missing email", async () => {
+  const deps = {
+    env: enabledEnv,
+    findOrCreateKaiUserByLegacyPublicUserdataId: async () => { throw new Error("connection refused"); },
+  };
+  await assert.rejects(
+    manageGlobalKaiRole({ actorContext: platformSuperuserActor(), targetLegacyPublicUserdataId: 1203, roleName: "gk_reviewer", action: "assign", now: NOW }, deps),
+    /connection refused/,
+  );
+  await assert.rejects(
+    manageOrganizationMembership({ actorContext: platformSuperuserActor(), organizationId: ORG_A, targetLegacyPublicUserdataId: 1203, roleName: "gk_reviewer", membershipStatus: "active", now: NOW }, deps),
+    /connection refused/,
+  );
 });
 
 test("an administration target who already has a KAI identity gets it back unchanged, with no insert", async () => {

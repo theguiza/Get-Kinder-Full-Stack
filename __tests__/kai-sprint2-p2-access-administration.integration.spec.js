@@ -348,7 +348,13 @@ async function runIntegrationSuite() {
         app.use(express.json());
         app.use((req, _res, next) => {
           const legacyId = Number(req.headers["x-harness-user"]);
-          if (Number.isInteger(legacyId) && legacyId > 0) req.user = { id: legacyId, email: `user${legacyId}@guard.test` };
+          if (Number.isInteger(legacyId) && legacyId > 0) {
+            req.user = {
+              id: legacyId,
+              email: req.headers["x-harness-email"] || `user${legacyId}@guard.test`,
+              ...(req.headers["x-harness-admin"] === "1" ? { is_admin: true } : {}),
+            };
+          }
           req.isAuthenticated = () => Boolean(req.user);
           next();
         });
@@ -357,10 +363,10 @@ async function runIntegrationSuite() {
           const listening = app.listen(0, "127.0.0.1", () => resolve(listening));
         });
         const { port } = server.address();
-        const call = async (asLegacyId, method, path, body) => {
+        const call = async (asLegacyId, method, path, body, extraHeaders = {}) => {
           const response = await fetch(`http://127.0.0.1:${port}${BASE}${path}`, {
             method,
-            headers: { "x-harness-user": String(asLegacyId), ...(body ? { "content-type": "application/json" } : {}) },
+            headers: { "x-harness-user": String(asLegacyId), ...extraHeaders, ...(body ? { "content-type": "application/json" } : {}) },
             body: body ? JSON.stringify(body) : undefined,
           });
           return { status: response.status, body: await response.json().catch(() => null) };
@@ -778,6 +784,246 @@ async function runIntegrationSuite() {
         assert.equal(result.error.code, "system_error");
         assert.equal((await pool.query("SELECT count(*)::int AS n FROM kai.user_roles")).rows[0].n, 0);
         assert.equal(await auditCount(), 0);
+      });
+
+      // --- D. Target account without a usable email (real router) --------------
+      //
+      // Both writers map a target who has never used KAI from their Get Kinder
+      // account email. Each case runs under this runner's nullable kai.users
+      // mirror and under the USER_CONFIRMED deployed NOT NULL email (applied
+      // to the empty table for the case, then removed).
+
+      const MIRRORS = [
+        { name: "nullable mirror", apply: async () => {}, remove: async () => {} },
+        {
+          name: "deployed NOT NULL email",
+          apply: () => pool.query("ALTER TABLE kai.users ALTER COLUMN email SET NOT NULL"),
+          remove: () => pool.query("ALTER TABLE kai.users ALTER COLUMN email DROP NOT NULL"),
+        },
+      ];
+
+      async function underMirror(mirror, work) {
+        await resetAllTables();
+        await mirror.apply();
+        try {
+          await work();
+        } finally {
+          await mirror.remove();
+        }
+      }
+
+      const SUPERUSER_HEADERS = { "x-harness-admin": "1" };
+
+      async function seedAccount(email = null) {
+        return (await pool.query("INSERT INTO public.userdata (org_id, email) VALUES (NULL, $1) RETURNING id", [email])).rows[0].id;
+      }
+
+      async function writeState() {
+        const count = async (table) => Number((await pool.query(`SELECT count(*)::int AS n FROM ${table}`)).rows[0].n);
+        return {
+          users: await count("kai.users"),
+          userRoles: await count("kai.user_roles"),
+          memberships: await count("kai.organization_memberships"),
+          audits: await auditCount(),
+          accounts: (await pool.query("SELECT id, org_id, email FROM public.userdata ORDER BY id")).rows,
+        };
+      }
+
+      async function kaiUserRowsFor(legacyId) {
+        return (await pool.query(
+          "SELECT user_id, legacy_identity_source, legacy_public_userdata_id, status, email, created_at, updated_at FROM kai.users WHERE legacy_public_userdata_id = $1",
+          [legacyId],
+        )).rows;
+      }
+
+      const grantGlobal = (call, superuserId, targetId) =>
+        call(superuserId, "PUT", `/global-roles/${targetId}`, { role_name: "gk_reviewer", action: "assign" }, SUPERUSER_HEADERS);
+      const grantGkMembership = (call, superuserId, orgId, targetId) =>
+        call(superuserId, "PUT", `/organizations/${orgId}/memberships/${targetId}`, { role_name: "gk_reviewer", membership_status: "active" }, SUPERUSER_HEADERS);
+
+      function assertUnusableEmailBlocker(result, validatorKey, accountEmail) {
+        assert.equal(result.status, 422, JSON.stringify(result.body));
+        assert.equal(result.body.error.code, "validation_blocker");
+        assert.equal(result.body.blockers.length, 1);
+        assert.equal(result.body.blockers[0].validator_key, validatorKey);
+        assert.equal(result.body.blockers[0].blocking_reason, "target_account_email_unusable");
+        const text = JSON.stringify(result.body);
+        for (const leak of ["kai.users", "constraint", "violates", "null value", "insert", "provisioning", "23502", "23514"]) {
+          assert.equal(text.toLowerCase().includes(leak.toLowerCase()), false, `response leaks ${leak}: ${text}`);
+        }
+        if (accountEmail) assert.equal(text.includes(accountEmail), false, `response leaks the account email: ${text}`);
+      }
+
+      await t.test("missing-email 1: a never-signed-in account with no usable email is refused on both writers with a 422 blocker and nothing written", async () => {
+        for (const mirror of MIRRORS) {
+          for (const accountEmail of [null, "", "   "]) {
+            await underMirror(mirror, async () => {
+              const orgId = await newOrgId();
+              const superuser = await seedPerson();
+              const target = await seedAccount(accountEmail);
+              const before = await writeState();
+              await withRealRouter(async (call) => {
+                assertUnusableEmailBlocker(await grantGlobal(call, superuser.legacyId, target), "VAL-KAI-P2-ACC-002");
+                assertUnusableEmailBlocker(await grantGkMembership(call, superuser.legacyId, orgId, target), "VAL-KAI-P2-ACC-001");
+              });
+              assert.deepEqual(await kaiUserRowsFor(target), [], `${mirror.name} / ${JSON.stringify(accountEmail)}: no identity`);
+              assert.deepEqual(await writeState(), before, `${mirror.name} / ${JSON.stringify(accountEmail)}: nothing written, account unchanged`);
+            });
+          }
+        }
+      });
+
+      await t.test("missing-email 2: an organization administrator provisioning client_reviewer for such an account gets the same blocker, nothing written", async () => {
+        for (const mirror of MIRRORS) {
+          await underMirror(mirror, async () => {
+            const orgId = await newOrgId();
+            const admin = await seedPerson();
+            await storeMembership(orgId, admin, "client_admin");
+            const target = await seedAccount(null);
+            const before = await writeState();
+            await withRealRouter(async (call) => {
+              const result = await call(admin.legacyId, "PUT", `/organizations/${orgId}/memberships/${target}`, { role_name: "client_reviewer", membership_status: "active" });
+              assertUnusableEmailBlocker(result, "VAL-KAI-P2-ACC-001");
+            });
+            assert.deepEqual(await writeState(), before, mirror.name);
+          });
+        }
+      });
+
+      await t.test("missing-email 3: an account email the deployed kai.users contract rejects is the same blocker, not a 500 (synthetic CHECK stand-in)", async () => {
+        // A synthetic stand-in for an email the deployed kai.users email type
+        // refuses; the deployed type's own definition is not mirrored here.
+        await resetAllTables();
+        await pool.query("ALTER TABLE kai.users ADD CONSTRAINT kai_users_email_synthetic_shape_check CHECK (email LIKE '%_@_%')");
+        try {
+          const orgId = await newOrgId();
+          const superuser = await seedPerson();
+          const target = await seedAccount("not-an-email");
+          const before = await writeState();
+          await withRealRouter(async (call) => {
+            assertUnusableEmailBlocker(await grantGlobal(call, superuser.legacyId, target), "VAL-KAI-P2-ACC-002", "not-an-email");
+            assertUnusableEmailBlocker(await grantGkMembership(call, superuser.legacyId, orgId, target), "VAL-KAI-P2-ACC-001", "not-an-email");
+          });
+          assert.deepEqual(await writeState(), before);
+        } finally {
+          await pool.query("ALTER TABLE kai.users DROP CONSTRAINT kai_users_email_synthetic_shape_check");
+        }
+      });
+
+      await t.test("missing-email 4: an existing active identity is reused unchanged whatever the account email now is", async () => {
+        for (const mirror of MIRRORS) {
+          for (const accountEmail of [null, "changed@guard.test"]) {
+            await underMirror(mirror, async () => {
+              const orgId = await newOrgId();
+              const superuser = await seedPerson();
+              const target = await seedAccount(accountEmail);
+              const kaiUserId = (await pool.query(
+                `INSERT INTO kai.users (legacy_identity_source, legacy_public_userdata_id, email, status)
+                 VALUES ('public.userdata', $1, 'kept@guard.test', 'active') RETURNING user_id`,
+                [target],
+              )).rows[0].user_id;
+              const identityBefore = await kaiUserRowsFor(target);
+              await withRealRouter(async (call) => {
+                const global = await grantGlobal(call, superuser.legacyId, target);
+                assert.equal(global.status, 200, JSON.stringify(global.body));
+                assert.equal(global.body.data.user_id, kaiUserId);
+                const membership = await grantGkMembership(call, superuser.legacyId, orgId, target);
+                assert.equal(membership.status, 200, JSON.stringify(membership.body));
+                assert.equal(membership.body.data.user_id, kaiUserId);
+              });
+              const label = `${mirror.name} / ${JSON.stringify(accountEmail)}`;
+              assert.deepEqual(await kaiUserRowsFor(target), identityBefore, `${label}: identity untouched`);
+              assert.equal((await userRolesRows(kaiUserId)).filter((row) => row.active).length, 1, label);
+              assert.deepEqual(await membershipRows(orgId, kaiUserId), [{ role_name: "gk_reviewer", membership_status: "active" }], label);
+              assert.equal(await auditCount(), 2, label);
+              assert.deepEqual(
+                (await pool.query("SELECT email FROM public.userdata WHERE id = $1", [target])).rows,
+                [{ email: accountEmail }],
+                `${label}: account unchanged`,
+              );
+            });
+          }
+        }
+      });
+
+      await t.test("missing-email 5: callers without authority are refused identically whatever the target account's identity or email state", async () => {
+        for (const mirror of MIRRORS) {
+          await underMirror(mirror, async () => {
+            const orgA = await newOrgId();
+            const orgB = await newOrgId();
+            const plain = await seedPerson();
+            const adminA = await seedPerson();
+            const adminB = await seedPerson();
+            await storeMembership(orgA, adminA, "client_admin");
+            await storeMembership(orgB, adminB, "client_admin");
+            const targets = {
+              noEmail: await seedAccount(null),
+              validEmail: await seedAccount("valid@guard.test"),
+              mapped: (await seedPerson()).legacyId,
+              absent: 987654,
+            };
+            const attempts = [
+              ["no-role caller, global role", plain, "PUT", (id) => `/global-roles/${id}`, { role_name: "gk_reviewer", action: "assign" }, 403],
+              ["no-role caller, membership", plain, "PUT", (id) => `/organizations/${orgA}/memberships/${id}`, { role_name: "client_reviewer", membership_status: "active" }, 403],
+              ["organization administrator, global role", adminA, "PUT", (id) => `/global-roles/${id}`, { role_name: "gk_reviewer", action: "assign" }, 403],
+              ["other organization's administrator", adminB, "PUT", (id) => `/organizations/${orgA}/memberships/${id}`, { role_name: "client_reviewer", membership_status: "active" }, 403],
+              ["organization administrator, gk_reviewer membership", adminA, "PUT", (id) => `/organizations/${orgA}/memberships/${id}`, { role_name: "gk_reviewer", membership_status: "active" }, 422],
+            ];
+            const before = await writeState();
+            await withRealRouter(async (call) => {
+              for (const [label, caller, method, path, body, expectedStatus] of attempts) {
+                const responses = [];
+                for (const targetId of Object.values(targets)) responses.push(await call(caller.legacyId, method, path(targetId), body));
+                assert.equal(responses[0].status, expectedStatus, `${mirror.name} / ${label}: ${JSON.stringify(responses[0].body)}`);
+                for (const response of responses.slice(1)) {
+                  assert.deepEqual(response, responses[0], `${mirror.name} / ${label}: same response for every target`);
+                }
+                assert.equal(JSON.stringify(responses[0].body).includes("target_account_email_unusable"), false, label);
+              }
+            });
+            assert.deepEqual(await writeState(), before, `${mirror.name}: nothing written`);
+          });
+        }
+      });
+
+      await t.test("missing-email 6: after the account gets an email, the retry provisions one identity, both grants hold, and first sign-in reuses it", async () => {
+        for (const mirror of MIRRORS) {
+          await underMirror(mirror, async () => {
+            const orgId = await newOrgId();
+            const superuser = await seedPerson();
+            const target = await seedAccount(null);
+            await withRealRouter(async (call) => {
+              assertUnusableEmailBlocker(await grantGlobal(call, superuser.legacyId, target), "VAL-KAI-P2-ACC-002");
+              assertUnusableEmailBlocker(await grantGkMembership(call, superuser.legacyId, orgId, target), "VAL-KAI-P2-ACC-001");
+              assert.deepEqual(await kaiUserRowsFor(target), []);
+
+              await pool.query("UPDATE public.userdata SET email = 'retry@guard.test' WHERE id = $1", [target]);
+              const global = await grantGlobal(call, superuser.legacyId, target);
+              assert.equal(global.status, 200, JSON.stringify(global.body));
+              assert.equal(global.body.data.replayed, false);
+              const membership = await grantGkMembership(call, superuser.legacyId, orgId, target);
+              assert.equal(membership.status, 200, JSON.stringify(membership.body));
+              assert.equal(membership.body.data.user_id, global.body.data.user_id);
+
+              const provisioned = await kaiUserRowsFor(target);
+              assert.equal(provisioned.length, 1, mirror.name);
+              assert.equal(provisioned[0].email, "retry@guard.test");
+              assert.equal(provisioned[0].status, "active");
+              const kaiUserId = provisioned[0].user_id;
+              assert.equal((await userRolesRows(kaiUserId)).filter((row) => row.active && row.organization_id === null).length, 1);
+              assert.deepEqual(await membershipRows(orgId, kaiUserId), [{ role_name: "gk_reviewer", membership_status: "active" }]);
+              assert.equal(await auditCount(), 2);
+
+              // First sign-in: actor resolution maps the signed-in account to
+              // the provisioned identity (an authorization refusal of this
+              // client_admin read, not mapped_kai_user_required).
+              const firstSignIn = await call(target, "GET", `/organizations/${orgId}/access`, undefined, { "x-harness-email": "retry@guard.test" });
+              assert.equal(firstSignIn.status, 403, JSON.stringify(firstSignIn.body));
+              assert.notEqual(firstSignIn.body.error.code, "mapped_kai_user_required");
+              assert.deepEqual(await kaiUserRowsFor(target), provisioned, `${mirror.name}: same single identity after first sign-in`);
+            });
+          });
+        }
       });
     } finally {
       await pool.end();

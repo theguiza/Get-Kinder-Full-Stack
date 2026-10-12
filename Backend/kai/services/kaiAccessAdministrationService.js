@@ -91,6 +91,50 @@ async function publishRequiredAudit(auditFactory, payload, tx) {
   await prepared.publish();
 }
 
+/**
+ * Maps a writer's target to kai.users before any membership or role write.
+ * A target with no mapping whose Get Kinder account has no email the
+ * deployed kai.users contract accepts gets none: the resolver returns null
+ * when the email is missing or blank, and a rejected JIT insert (tagged
+ * kaiUserProvisioningFailed) has already rolled back its own transaction.
+ * As on actor resolution, only PostgreSQL diagnostic identifiers are
+ * logged, never the message, which may echo the email.
+ */
+async function resolveAdministrationTarget(findOrCreateTarget, legacyPublicUserdataId) {
+  try {
+    return await findOrCreateTarget({ legacyPublicUserdataId });
+  } catch (error) {
+    if (!error?.kaiUserProvisioningFailed) throw error;
+    console.error("[kai-access-administration] target kai.users provisioning failed", {
+      code: error.cause?.code || null,
+      constraint: error.cause?.constraint || null,
+      column: error.cause?.column || null,
+      table: error.cause?.table || null,
+    });
+    return null;
+  }
+}
+
+function targetAccountEmailUnusable(validatorKey) {
+  return {
+    ok: false,
+    data: null,
+    error: { code: "validation_blocker" },
+    blockers: [
+      {
+        validator_key: validatorKey,
+        severity: "blocker",
+        object_type: "kai_user",
+        object_id: null,
+        message: "This person's Get Kinder account has no email address KAI can use, so KAI access cannot be given yet.",
+        blocking_reason: "target_account_email_unusable",
+        required_fix: "Give the person's Get Kinder account a valid email address, then try again.",
+        evidence: {},
+      },
+    ],
+  };
+}
+
 function shapeThrownError(error) {
   if (error instanceof RequiredAuditRejectedError) return failure("validation_blocker");
   if (error?.code === "23514" || error?.code === "22P02") return failure("validation_blocker");
@@ -273,8 +317,8 @@ export async function manageOrganizationMembership(
   }
 
   const findOrCreateTarget = dependencies.findOrCreateKaiUserByLegacyPublicUserdataId || findOrCreateKaiUserForAdministrationTarget;
-  const targetKaiUser = await findOrCreateTarget({ legacyPublicUserdataId: targetLegacyPublicUserdataId });
-  if (!targetKaiUser?.user_id) return failure("validation_blocker");
+  const targetKaiUser = await resolveAdministrationTarget(findOrCreateTarget, targetLegacyPublicUserdataId);
+  if (!targetKaiUser?.user_id) return targetAccountEmailUnusable("VAL-KAI-P2-ACC-001");
 
   const runInTransaction = dependencies.runInTransaction || withTransaction;
 
@@ -462,8 +506,8 @@ export async function manageGlobalKaiRole(
   }
 
   const findOrCreateTarget = dependencies.findOrCreateKaiUserByLegacyPublicUserdataId || findOrCreateKaiUserForAdministrationTarget;
-  const targetKaiUser = await findOrCreateTarget({ legacyPublicUserdataId: targetLegacyPublicUserdataId });
-  if (!targetKaiUser?.user_id) return failure("validation_blocker");
+  const targetKaiUser = await resolveAdministrationTarget(findOrCreateTarget, targetLegacyPublicUserdataId);
+  if (!targetKaiUser?.user_id) return targetAccountEmailUnusable("VAL-KAI-P2-ACC-002");
 
   const runInTransaction = dependencies.runInTransaction || withTransaction;
   const listRoles = dependencies.listGlobalRoleAssignmentRows || listGlobalRoleAssignmentRows;
