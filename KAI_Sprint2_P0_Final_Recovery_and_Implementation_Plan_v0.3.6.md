@@ -37857,3 +37857,13 @@ and truncates that session-local results table before inserting checks. The
 runner invokes the verifier twice through `\\i` in one `psql` session. Both
 invocations emitted all three expected `PASS` rows, and the 37 focused tests
 passed. No production or shared database was accessed.
+
+**No-temporary-table verifier correction (TOOL_VERIFIED, 2026-10-12):** to
+remove the verifier's session-state dependency entirely, replaced its
+temporary results table with catalog checks that raise an exception on any
+failed predicate, followed by a result-row SELECT on success. Ran the updated
+verifier twice in one `psql` session against the runner-owned ephemeral
+PostgreSQL database; both executions returned all three expected `PASS` rows.
+Focused boundary tests passed 20/20 and the synthetic PostgreSQL
+boundary/integration suite passed 37/37, including decision persistence,
+audit, and readback. This does not verify the user's SQL-editor/database run.

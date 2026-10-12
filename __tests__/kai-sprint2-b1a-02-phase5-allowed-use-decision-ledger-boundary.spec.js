@@ -564,8 +564,11 @@ test("client-admin sensitivity migration verifier checks the exact validated rol
     "utf8",
   );
   assert.match(verifier, /intake_sensitivity_review_decisions_b1a_02_role_check/);
-  assert.match(verifier, /CREATE TEMP TABLE IF NOT EXISTS kai_client_admin_sensitivity_review_results/);
-  assert.match(verifier, /TRUNCATE TABLE pg_temp\.kai_client_admin_sensitivity_review_results/);
+  assert.doesNotMatch(verifier, /CREATE\s+(?:TEMP|TEMPORARY)\s+TABLE/i);
+  assert.match(verifier, /RAISE EXCEPTION/);
+  assert.match(verifier, /sensitivity_decision_table_exists/);
+  assert.match(verifier, /sensitivity_decision_role_check_exists_and_validated/);
+  assert.match(verifier, /sensitivity_decision_role_check_exact_role_set/);
   assert.match(verifier, /c\.convalidated/);
   assert.match(verifier, /regexp_matches\(pg_get_constraintdef\(c\.oid\)/);
   assert.match(verifier, /ARRAY\['client_admin', 'gk_admin', 'gk_operator', 'gk_reviewer'\]::text\[\]/);
