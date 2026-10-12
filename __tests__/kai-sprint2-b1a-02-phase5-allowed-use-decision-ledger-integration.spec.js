@@ -797,8 +797,7 @@ async function runB1A02IntegrationSuite() {
       `SELECT actor_user_id::text AS actor_user_id, actor_type, metadata
          FROM kai.audit_events
         WHERE organization_id = $1::uuid
-          AND object_type::text = 'intake_sensitivity_profile'
-          AND metadata->>'operation' = 'sensitivity_review_decision_recorded'
+          AND action = 'sensitivity_review_decision_recorded'
           AND metadata->>'object_id' = $2
         ORDER BY audit_event_id DESC LIMIT 1`,
       [ORG, SENSITIVITY_2],

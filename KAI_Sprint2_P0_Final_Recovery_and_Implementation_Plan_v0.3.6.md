@@ -37830,11 +37830,20 @@ NO_PRODUCTION_CHANGE.
 
 Added `scripts/kai-sprint2-b1a-02-client-admin-sensitivity-review-verifier.sql`
 and wired it into the B1A-2 synthetic PostgreSQL runner immediately after the
-additive migration. It checks the named role CHECK constraint is validated and
-It emits separate rows for table existence, named/validated constraint, and the
-exact parsed role set (`client_admin`, `gk_admin`, `gk_operator`,
-`gk_reviewer`). The runner requires and prints all three captured result rows,
-and the focused boundary suite passed 20/20, including runner wiring. The
-PostgreSQL runner did not reach migration or verifier execution: `initdb` failed
-creating shared memory (`shmget: Operation not permitted`). The SQL verifier's
-database result therefore remains NOT_CONFIRMED.
+additive migration. It emits separate rows for table existence, named/validated
+constraint, and the exact parsed role set (`client_admin`, `gk_admin`,
+`gk_operator`, `gk_reviewer`). The runner requires and prints all three
+captured result rows. The focused boundary suite passed 20/20, including runner
+wiring.
+
+**Synthetic PostgreSQL rerun (TOOL_VERIFIED, 2026-10-12):** ran the established
+B1A-2 runner with its loopback `DATABASE_URL` sentinel outside the restricted
+sandbox. The verifier printed all three expected rows as `PASS`. The runner
+then passed all 37 focused boundary/integration tests, including real
+`client_admin` decision persistence, audit persistence, and readback. The
+initial integration failure was the synthetic runner's missing
+`kai.audit_events` table, not the migration verifier. Added a minimal fixture
+following the existing repository synthetic audit schema pattern, and changed
+the audit assertion to check action/metadata rather than assume an enum label
+when the existing `other` fallback is used. The verifier no longer drops any
+unqualified table.

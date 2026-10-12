@@ -88,6 +88,7 @@ try {
   psqlFile("migrations/kai_sprint2_p1_08_source_promotion.sql");
   psqlFile("migrations/kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger.sql");
   psqlFile("migrations/kai_sprint2_b1a_02_client_admin_sensitivity_review.sql");
+  psqlFile("scripts/kai-sprint2-b1a-02-sensitivity-review-audit-synthetic-schema.sql");
   const sensitivityVerifierOutput = psqlFile("scripts/kai-sprint2-b1a-02-client-admin-sensitivity-review-verifier.sql");
   const sensitivityVerifierCheckNames = [
     "sensitivity_decision_table_exists",

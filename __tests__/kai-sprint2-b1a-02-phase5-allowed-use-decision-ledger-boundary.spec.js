@@ -571,6 +571,7 @@ test("client-admin sensitivity migration verifier checks the exact validated rol
     "scripts/kai-sprint2-b1a-02-phase5-allowed-use-decision-ledger-local-postgres.js",
     "utf8",
   );
+  assert.match(runner, /kai-sprint2-b1a-02-sensitivity-review-audit-synthetic-schema\.sql/);
   assert.match(runner, /kai-sprint2-b1a-02-client-admin-sensitivity-review-verifier\.sql/);
   assert.match(runner, /sensitivity_decision_role_check_exists_and_validated/);
   assert.match(runner, /sensitivity_decision_role_check_exact_role_set/);
