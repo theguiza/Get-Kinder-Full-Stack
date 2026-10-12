@@ -37867,3 +37867,119 @@ PostgreSQL database; both executions returned all three expected `PASS` rows.
 Focused boundary tests passed 20/20 and the synthetic PostgreSQL
 boundary/integration suite passed 37/37, including decision persistence,
 audit, and readback. This does not verify the user's SQL-editor/database run.
+
+### P1-07 first failure: bound `client_admin` sensitivity decision with zero source candidates (2026-10-12)
+
+**Scope (USER_CONFIRMED):** prove the first failing boundary for three
+production profiles (`5ee86cab-...`, `0cad4bc2-...`, `31f2fe4d-...`), each with
+two decisions, latest `reviewed` by `client_admin`, queue `resolved`, zero
+source candidates; repair only a proven defect that preserves authority. No
+production query, decision, replay, role, schema, flag, push, or deploy.
+
+**Starting state (TOOL_VERIFIED):** `main` at
+`8c79acdadc300f2e7e38b3fbf93b23026097bfdc`, clean. `333bfd2` (handoff),
+`4aafed1` (P1-07 `combineGlobalRoles`), and `4191684` (bound org-admin
+sensitivity review) are ancestors of HEAD and of the local `origin/main` ref
+(`4af320e`, last updated by push; not fetched). Backend and migrations are
+identical between `4191684` and HEAD; `kaiSourceCandidateService.js` is
+unchanged since `4aafed1`. Deployed revision: NOT_CONFIRMED (no deployment
+record; auto-deploy on push NOT_CONFIRMED).
+
+**Attribution (TOOL_VERIFIED from code):** only `4191684` can persist
+`decided_by_role = 'client_admin'` (no other ref has it in
+`SENSITIVITY_DECISION_ALLOWED_ROLES`; earlier ledger CHECK excluded it).
+`kaiSensitivityAllowedUseReviewService.js:142-152` records `client_admin`
+only when `resolveAuthorizedHumanRole` finds no GK membership role and no
+global GK role, and the actor holds a binding-derived `client_admin`
+(`source = 'gk_organization_binding'`). Platform superuser cannot reach the
+cockpit (actor re-resolved from `{ id }`). So a stored `client_admin`
+decision means that the decider had no effective GK role in that request.
+That is not evidence of the account's current roles.
+
+**First failing check (TOOL_VERIFIED, synthetic):**
+`submitSensitivityProfileDecision` (`kaiReviewCockpitService.js:987`,
+`validateActorCanPerformSensitivityReview` admits the bound admin) commits
+the decision and resolves the queue, then `ensureSourceCandidateAfterReviewedDecision`
+(`:1058`) calls `createSourceCandidateStub` with the same actor.
+`kaiSourceCandidateService.js:90-100` runs `validateActorCanPerformOperation`
+with `{gk_admin, gk_operator, gk_reviewer}` + `combineGlobalRoles`, which fails
+at `kaiAuthorizationService.js:227-246` (`VAL-AUT-004`, `role_not_allowed`).
+The error returned is `tenant_boundary_violation`, mapped at `:1143` to handoff
+`not_created` / `tenant_boundary_violation`. VAL-KAI-P1-07-001
+(`postgresSourceCandidateRepository.js:525`), persistence, and audit are
+never reached (repository call count 0).
+
+**Synthetic reproduction (TOOL_VERIFIED, P1-07 handoff runner, loopback
+PostgreSQL, synthetic data):**
+- Actor A (bound `client_admin`, no global GK role, no superuser): review work
+  ok; `reviewed` committed, `decided_by_role` `client_admin`, queue
+  `resolved/resolved`; handoff `not_created`/`tenant_boundary_violation`;
+  changed tables exactly `audit_events`, `intake_sensitivity_review_decisions`,
+  `upload_lifecycle_audit`; zero candidates and candidate review items; the
+  profile satisfies the predicate. A direct P1-07 call returns one
+  `VAL-AUT-004`/`role_not_allowed` blocker for `create_source_candidate_stub`.
+- Actor B (global `gk_reviewer` + the same bound `client_admin`): decision
+  `gk_reviewer`; handoff `created`; one `needs_gk_review` candidate and one
+  open review item created by Actor B.
+- Negatives: stored unbound `client_admin`, inactive or other-organization
+  bound membership, and a binding without a GK organization id are refused at
+  the decision (`authorization_denied`), P1-06, and P1-07
+  (`tenant_boundary_violation`). A bound admin is refused by P1-07 even on an
+  ineligible profile, while a GK actor gets `validation_blocker`. A
+  cross-tenant request is refused. Zero writes.
+- Mutation check: switching P1-07 to the sensitivity-review policy fails
+  exactly these new tests 14, 16, 17 and no existing test (reverted).
+
+**Classification:** `ROLE_AUTHORIZATION_MISMATCH`. The decision authority
+(`4191684`) is wider than the P1-07 authority (`4aafed1`). The synthetic
+reproduction is a reproduced candidate cause. Given `client_admin` attribution, code
+identical to `4191684`..HEAD can only fail here, but the deployed revision and
+any historical `source_candidate_handoff` response remain NOT_CONFIRMED.
+
+**Repair:** none applied. Admitting a bound `client_admin` to P1-07 changes who
+may create source candidates. The owner decision of `4191684` explicitly kept
+all other GK review ownership unchanged. This is an owner policy decision.
+
+**Decision-preserving recovery (TOOL_VERIFIED, synthetic):** replay is
+recognized by outcome + the head's `target_updated_at` + queue state, not by
+actor. After Actor A's committed decision, Actor A's identical replay is
+`replayed` and still `not_created`, with zero writes. A stamp other than the head's
+is `conflict_current_state_changed`, with zero writes. An authorized GK human's identical
+request with the head's original `target_updated_at` is `replayed: true`
+(same decision id, still `client_admin`). The handoff is `created`, and changed tables
+are exactly `audit_events`, `intake_source_candidates`, `review_queue_items`,
+`upload_lifecycle_audit`. There is one candidate created by the GK human and one
+`intake_source_candidate_persisted` audit, with no decision or decision-audit
+write. A further replay writes nothing. The read API does not expose
+`target_updated_at`, so no UI path performs this. The Impact Library resubmission uses
+the queue's current `updated_at` and records a superseding decision.
+
+**Verification (TOOL_VERIFIED; loopback `DATABASE_URL` sentinel):**
+
+| Command | Pass | Fail | Skipped |
+| --- | --- | --- | --- |
+| `npm run verify:kai-sprint2-p1-07-source-candidate-handoff` | 17 | 0 | 0 |
+| Same, P1-07 temporarily widened (mutation check, reverted) | 14 | 3 | 0 |
+| P1-06, P1-07, P1-07 handoff, B1A-02, P1-09 boundary specs | 127 | 0 | 0 |
+| `npm run verify:kai-sprint2-p1-07-source-candidate` | 11 | 0 | 0 |
+| `npm run verify:kai-sprint2-p1-06-review-queue` | 15 | 0 | 0 |
+| `npm run verify:kai-sprint2-b1a-02-phase5-allowed-use-decision-ledger` | 37 | 0 | 0 |
+| `npm run verify:kai-sprint2-b1a-2r-review-work` | 6 | 0 | 0 |
+| `npm run test:kai-sprint2` | 4728 | 1 | 89 |
+| `git diff --check` | ok | | |
+
+The one `test:kai-sprint2` failure fails identically at clean `8c79acd`. The
+source pin in `kai-sprint2-impact-evidence-library.spec.js:3436` still expects
+`authorizeReviewCockpitRequest`, which `4191684` replaced. It is outside this
+package and was not changed.
+
+**NOT_CONFIRMED:** the deployed revision; any historical handoff response or
+runtime log for the three profiles; the attribution and timing of each
+profile's first decision; the decider's current roles; whether the three
+profiles satisfy VAL-KAI-P1-07-001 in production; each head's
+`target_updated_at`.
+
+**Status:** P1_07_FIRST_FAILURE_REPRODUCED_ROLE_AUTHORIZATION_MISMATCH_OWNER_DECISION_REQUIRED.
+Test-only change. No push, deployment, production or shared database,
+cloud, feature-flag, tenant, membership, role, credential, `.env`, schema,
+or `00_KAI_CURRENT_STATE.md` change.
