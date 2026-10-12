@@ -37134,3 +37134,114 @@ or its helpers.
 No push, deployment, shared or production database, cloud, feature-flag,
 tenant, membership, credential, `.env`, schema, frontend, or
 `00_KAI_CURRENT_STATE.md` change.
+
+### Team & Access: effective administrator authority in the UI (2026-10-12)
+
+**Owner authorization (USER_CONFIRMED):** one bounded correction so the Team
+& Access UI distinguishes a person's assigned role from current effective
+KAI administrator authority, and its last-administrator warning agrees with
+the corrected guard. Smallest sanitized, organization-scoped read
+projection allowed if fields were missing. No change to the guard, legacy
+or stored administrator authority, activation requirements, role-assignment
+permissions, GK staff-role protection, organization isolation, or the direct
+user-id membership-grant policy. No push, deploy, database, cloud, flag,
+tenant, credential, or `00_KAI_CURRENT_STATE.md` change.
+
+**Starting state (TOOL_VERIFIED):** `main` at
+`50c765e4f7e934ef414b8b4c9fa006016eb990d5`, clean.
+
+**Discrepancy (TOOL_VERIFIED from code at that HEAD):**
+`viewEffectiveKaiAccess` (`Backend/kai/services/kaiAccessAdministrationService.js:131-138`,
+`:142-157`) discarded the `kai_user_status` that
+`listOrganizationMembershipRowsForOrganization` already selected and the
+mapped `kai.users.status`, and `:167-172` reported every derived admin and
+every active stored `client_admin` as `client_admin`/`active`.
+`frontend/teamAccess/teamAccessLogic.js:82` derived `effectiveAdmin` from
+those fields, `:124-126` counted them, and
+`frontend/teamAccess/TeamAccessView.jsx:126,169` drove the sole-administrator
+warning and disabled save from that count. So a deactivated or
+never-provisioned administrator counted as a remaining administrator in the
+UI while the guard (`:340-350`) refused with `last_admin_protection`. The
+response had no account-status field, so existing API fields were not
+sufficient.
+
+**Correction (TOOL_VERIFIED):**
+- Read projection (additive): each roster row gains `kai_account_status`
+  (`active` | `inactive` | `not_activated`; `not_activated` only for a
+  derived admin with no `kai.users` mapping), `effective_admin_authority`,
+  and `last_admin_protected`. They are computed inside `viewEffectiveKaiAccess`
+  from data it already reads, using the guard's rule: an account counts only
+  as an active `public.userdata` mapping, at least one effective derived
+  admin (any row) or one effective stored admin other than the target, and
+  never for a platform-superuser actor. The roster query also selects
+  `u.legacy_identity_source`. Existing fields, authorization of the read,
+  and the guard are unchanged. Unauthorized callers still receive
+  `data: null`.
+- UI: the assigned role stays shown. An inactive account is labelled "KAI
+  account inactive" and an unmapped one "KAI access not yet activated".
+  `effectiveAdmin` and the demotion blocker come only from the server's
+  fields; the view no longer counts. A `last_admin_protection` refusal reads
+  "This change was not made. No other administrator can currently manage
+  this organization. Make someone else an administrator first." The hook
+  re-reads the roster on 409 as before, and `ImpactLibraryApp` now also
+  re-reads the capability answer on 409. Bundle rebuilt.
+
+**Regression tests (TOOL_VERIFIED):**
+- `kai-team-access.spec.js` (real router and services, in-memory store
+  whose last-admin helpers honor account status): 11a-1/5 deactivated stored
+  admin keeps the role, is not counted, active admin protected, server 409;
+  11a-2 two effective admins, neither protected, change 200; 11a-3/4 derived
+  admin active, inactive, unprovisioned; 11a-6 combined authority counted
+  once, neither source counted when deactivated; 11a-7 stale roster, server
+  409, nothing written, re-read roster protected; 11a-8 per-organization
+  answers. The 3-4 cases assert no administrator status reaches a
+  contributor or reviewer. Case 9 asserts the GK staff row is neither
+  effective nor protected. Without the backend projection, 9 of 21 fail.
+- `kai-sprint2-p2-access-administration.integration.spec.js` (real
+  PostgreSQL, production router): guard cases 1-6 assert the roster's
+  `kai_account_status`, `effective_admin_authority`, and
+  `last_admin_protected` agree with the guard's 200/409 on the same data.
+  Without the projection, 6 fail.
+- `kai-team-access-browser-acceptance.integration.spec.js` (real Chrome,
+  real PostgreSQL): an inactive stored admin and an unprovisioned GK admin
+  show their labels with the role kept. A page made stale (the derived
+  admin's account deactivated and the second admin demoted after load)
+  attempts self-demotion: PUT 409, refusal shown, no success, roster and
+  capability re-read, row blocked with save disabled, no mutation or audit.
+  After restore and Refresh, the blocker lifts. Switching back to Org A
+  re-reads its roster.
+
+**Verification (TOOL_VERIFIED; loopback `DATABASE_URL` sentinel):**
+
+| Command | Pass | Fail | Skipped |
+| --- | --- | --- | --- |
+| `node --test __tests__/kai-team-access.spec.js` | 21 | 0 | 0 |
+| Same, HEAD backend projection | 12 | 9 | 0 |
+| `npm run verify:kai-sprint2-p2-access-administration` | 25 | 0 | 0 |
+| Same, HEAD backend projection | 19 | 6 | 0 |
+| Team & Access browser spec (browser acceptance runner) | 7 | 0 | 0 |
+| Team & Access, access-admin, JOIN-1..5, admin UI, actor-context, authorization, organization-context, GK binding, enablement, tenant specs (23 files) | 322 | 0 | 0 |
+| `npm run verify:kai-sprint2-api-contract` | 71 | 0 | 0 |
+| `npm run build` | ok | | |
+| `npm run test:kai-sprint2` | 4713 | 0 | 89 |
+| `npm test` | 5425 | 0 | 101 |
+| `git diff --check` | ok | | |
+
+Commit: `b32cdff` Show effective administrator authority in Team & Access.
+
+**NOT_CONFIRMED:**
+- Deployed behavior and production data, including production
+  `kai.users.status` values (every non-`active` value maps to `inactive`).
+- The roster's derived-admin account status reads one `kai.users` mapping
+  (`LIMIT 1`); the guard requires all mappings for that legacy id to be
+  active. They differ only if duplicate mappings exist.
+- Pre-existing multiple stored rows for one user and organization collapse
+  to one roster row (unchanged behavior). The guard counts that user and
+  fails closed for that target.
+- The roster answer is a read-time snapshot. Changes after load are decided
+  by the guard under `kai_org_admin_lock`, and the UI shows that refusal.
+
+**Status:** TEAM_ACCESS_EFFECTIVE_ADMIN_UI_CORRECTED_LOCALLY_PRODUCTION_NOT_CONFIRMED.
+No push, deployment, shared or production database, cloud, feature-flag,
+tenant, membership, credential, `.env`, schema, or `00_KAI_CURRENT_STATE.md`
+change.
