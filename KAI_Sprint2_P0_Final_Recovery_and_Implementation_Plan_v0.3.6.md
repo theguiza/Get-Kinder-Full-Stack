@@ -37495,3 +37495,178 @@ for the right organization.
 No push, deployment, shared or production database, cloud, feature-flag,
 tenant, live membership or role, credential, `.env`, schema, or
 `00_KAI_CURRENT_STATE.md` change.
+
+### Reviewer authorization edge cases: revocation per operation, exact-object status, first sign-in after provisioning (2026-10-12)
+
+**Owner authorization (USER_CONFIRMED):** bounded verification of the
+existing reviewer provisioning, with supported corrections only: reconcile
+global `gk_reviewer` revocation with organization-level `gk_reviewer`
+authority per operation (no blanket global-role check, no silent policy);
+prove fresh, non-replayed writes; verify provisioning of a Get Kinder account
+before its first KAI sign-in; verify the organization's status for the exact
+reviewed object; verify the GK KAI Access UI's effective-state semantics.
+Local synthetic only; no production, push, deploy, schema, flag, credential,
+or Current State change.
+
+**Starting state (TOOL_VERIFIED):** `main` at
+`07eaef3f526438ffb0202b08ed4cbf3fee6d619d`, clean.
+
+**Governing requirements (TOOL_VERIFIED from repository text):**
+- P0 contract (`Backend/kai/contracts/KAI_SPRINT2_P0_REPOSITORY_CONTRACT.md:1558-1569`):
+  every human operation needs a mapped actor and active membership; a global
+  role is required only for the named P0 mutations (`create_intake_batch`,
+  `create_intake_file`, `create_review_queue_item`, ...). `:2528`: the
+  internal GK review-queue read is admitted by an *organization* GK role.
+- P1-06 / P1-07: AUTH-KAI-003 roles `gk_admin`/`gk_operator`/`gk_reviewer`
+  (this plan, P1-06 evidence); owner decision 2026-10-11 (this plan,
+  "Mixed-role authorization for P1-06 review work and P1-07 source
+  candidates") added the global role as an alternative and preserved
+  "existing GK-membership admission".
+- P1-09 cockpit: originally the same membership-role sequence as P1-05..P1-08
+  (P1-09 evidence, `authorization sequence already used by P1-05 through
+  P1-08`); `87f4d82` (2026-08-17) made it global-role-only
+  (`globalRolesOnly`). No owner decision for that change is recorded in this
+  plan; later entries record it as current behavior.
+- P2-09: `gk_reviewer`/`gk_admin`; P2-12: `gk_reviewer`/`gk_admin` with
+  active same-organization membership; P2-10: `gk_reviewer` only. None states
+  whether the role is global or organization-scoped.
+- Decision 11 (Gate D): GK owns KAI review. No requirement found that
+  revoking the global role must end every GK review permission.
+
+**Authorization matrix (TOOL_VERIFIED; predicate at
+`Backend/kai/auth/kaiAuthorizationService.js:220-232`; every row also needs
+an active membership in the organization, VAL-AUT-003):**
+
+| Operation (route -> service) | R/W | Admits | Global revoked, org role kept | Org role removed |
+| --- | --- | --- | --- | --- |
+| Cockpit capabilities, queue, profile/file reads (`sprint2IntakeApi.js:1203-1271` -> `kaiReviewCockpitService.js:212-216, 276-280`, gate at `:737/787/817/849`) | R | global GK role only (`globalRolesOnly`) | false / 403 `role_not_allowed` | false / 403 VAL-AUT-003 |
+| Sensitivity decision (`:1287` -> cockpit gate `kaiReviewCockpitService.js:936`, then `kaiSensitivityAllowedUseReviewService.js:125-129` `combineGlobalRoles`) | W | global GK role (cockpit gate) | 403 `role_not_allowed`, nothing written | 403 |
+| Source-candidate detail/decision (`:1352/1365` -> cockpit gate `:1176/1254`; `kaiSourcePromotionService.js:105-109` membership) | R/W | global GK role (cockpit gate) | refused (same gate; not separately exercised) | refused |
+| P1-06 review work (`:1329` -> `kaiReviewQueueService.js:444-451`) | W | org GK role OR global GK role (`combineGlobalRoles`) | **201, fresh item, audited** | 403 |
+| P1-07 source candidate (decision handoff only; `kaiSourceCandidateService.js:90-96`) | W | org or global | reached only after a cockpit decision | — |
+| P2-12 evidence review (`:5586` -> `kaiHumanReviewService.js:145-149`) | W | org or global `gk_reviewer`/`gk_admin` | **200, fresh decision** | 403 |
+| P2-09 claim review (`:5659` -> `kaiHumanReviewService.js:254-258`) | W | org or global `gk_reviewer`/`gk_admin` | **200, fresh decision** | 403 |
+| P2-10 internal coverage acceptance (`:5759` -> `kaiCoverageReviewDecisionService.js:89-93`) | W | org `gk_reviewer` only (a global role does not count) | **201, fresh decision** | 403 |
+| Claim / evidence library (`:3188/3494` -> `kaiClaimLibraryService.js:153-157`, `kaiEvidenceLibraryService.js:160-164`) | R | org GK role only | 200 | 403 |
+| GK Studio mount (`kaiOrganizationAccessCapabilitiesService.js:131`) | R | org GK role only | true | 403 |
+| External requirement registration (`kaiExternalRequirementSetRegistrationService.js:92-96`) | W | global `gk_admin`/`gk_operator` only | not applicable to `gk_reviewer` | — |
+
+**Section 3 result (TOOL_VERIFIED, new acceptance E0-E4):** every operation
+behaves as its own code and governing decision specify. No established
+contract is violated, so no authorization change was made. The reported
+B11 "review-work replay" is now replaced by a fresh proof: after global
+revocation, review work on a new profile returns 201 `replayed: false` and
+creates one item by the reviewer (changed tables `audit_events`,
+`review_queue_items`, `upload_lifecycle_audit`); P2-12 and P2-09 record new
+decisions (200), P2-10 a new decision (201), each with `decided_by_role`
+`gk_reviewer`; the cockpit reads and the sensitivity decision are refused with
+nothing written. After the organization role is also removed, every write and
+read returns 403 VAL-AUT-003 and no table changes. Cross-organization review
+work: 403, nothing written.
+
+**Section 5 result (TOOL_VERIFIED, G1-G2):** "Source review - Waiting for Get
+Kinder" is a separate requirement. The pipeline read model
+(`kaiClientEvidencePipelineReadModel.js:85-111`) takes the latest unsuperseded
+sensitivity decision of that exact profile and that profile's own source
+candidates; `kaiClientEvidencePipelineService.js:207-221` makes
+`source_review` the P1-08 promotion gate after a `reviewed` decision. For the
+reviewed file: decision `reviewed` on its profile, queue `resolved/resolved`,
+one `needs_gk_review` candidate with an open `source_candidate_review` item;
+the organization's Reviews tab moved from "Sensitivity review (Waiting for Get
+Kinder)" to "Source review (Waiting for Get Kinder)"; an unrelated file stays
+at sensitivity review. Projection correct; unchanged.
+
+**Section 4 defect (TOOL_VERIFIED, reproduced):** `manageOrganizationMembership`
+and `manageGlobalKaiRole` mapped a never-signed-in target with
+`findOrCreateKaiUserByLegacyPublicUserdataId({ legacyPublicUserdataId })`,
+i.e. `email = NULL`. With the USER_CONFIRMED production contract mirrored
+(`kai.users.email` NOT NULL, as in the onboarding bootstrap; this plan,
+2026-09-24), the /admin KAI Access grant returned PUT 500 (`kai.users JIT
+provisioning insert failed`) and wrote nothing; under the runner's shared
+nullable mirror it stored `email = NULL`, which first sign-in never fills
+(an existing row is returned as-is).
+
+**Section 6 findings (TOOL_VERIFIED):** global and organization grants are
+separate controls on separate governed routes; revoke vs "Remove gk_reviewer
+here" are distinct; controls render only on server-reported
+`global_roles_visible`, and NPO administrators get 403/422 on both routes. A
+synthetic failed global grant shows the modal error and the roster still shows
+the organization role, global "None", and "Grant gk_reviewer"; nothing
+persisted; the retry succeeds. One contradiction: granting the `gk_reviewer`
+organization role toasted "Granted gk reviewer access to ...", although
+sensitivity reviews still need the global role.
+
+**Changes (commit `8d0312e`):**
+- `kaiAccessAdministrationQueries.js`: `findOrCreateKaiUserForAdministrationTarget`
+  reads the target's `public.userdata.email` (blank or non-string -> null,
+  as `safeAuthenticatedIdentityForKaiUserProvisioning`) and passes it to the
+  unchanged find-or-create; an existing mapping is returned unchanged.
+  `kaiAccessAdministrationService.js`: both writers use it by default (the
+  injectable dependency is unchanged). No schema, authorization, or route
+  change.
+- `kaiOrganizationAccessLogic.js` `kaiOrganizationRoleGrantMessage`;
+  `adminDashboard.jsx` uses it ("Granted the gk_reviewer role in this
+  organization to ... Sensitivity reviews also need the global gk_reviewer
+  role."; client-role text unchanged). Bundle rebuilt (reproducible).
+- Synthetic mirrors: `email text` on `public.userdata` in
+  `kai-sprint2-p2-access-administration-bootstrap-synthetic-schema.sql` and the
+  Package 4 auth bootstrap (an existing Get Kinder column read by login and
+  `/api/admin/users/lookup`).
+- Tests: new runner-owned
+  `__tests__/kai-reviewer-authorization-edge-cases-browser-acceptance.integration.spec.js`
+  (registered in the client browser runner); 5 unit tests in
+  `kai-sprint2-p2-access-administration.spec.js`, 1 in
+  `kai-organization-access-admin-ui.spec.js`.
+
+**Acceptance (TOOL_VERIFIED; runner-owned loopback PostgreSQL, real Chrome,
+real routers including `/api/admin`, synthetic data):** before the change
+(implementation stashed, final spec) 7 pass / 4 fail: F1 PUT 500 with no
+write, F2-F3 dependents, F4 `email` NULL. After: 11/11. F1 one active
+`kai.users` row with the account email, membership `gk_reviewer/active`,
+changed tables `audit_events`, `organization_memberships`, `users`; roster
+shows the email. F3 first sign-in resolves the same `user_id` (no duplicate,
+`active`); access capabilities and cockpit true; review work 201 and decision
+`reviewed` 200 by that account (`gk_reviewer`), audited, queue resolved.
+
+**Verification (TOOL_VERIFIED; loopback `DATABASE_URL` sentinel):**
+
+| Command | Pass | Fail | Skipped |
+| --- | --- | --- | --- |
+| new edge-case browser spec, before the change | 7 | 4 | 0 |
+| new edge-case browser spec | 11 | 0 | 0 |
+| reviewer provisioning / Team & Access / sensitivity reachability / client evidence pipeline / client Knowledge Studio browser specs | 13 / 7 / 15 / 7 / 6 | 0 | 0 |
+| focused access-admin, admin UI, Team & Access, actor-context, JIT, authorization, tenant, binding, enablement, onboarding, JOIN, P1-05..P1-09, P2-09/10/11/12, follow-up, Home specs (51 files) | 630 | 0 | 13 |
+| `npm run verify:kai-sprint2-p2-access-administration` (fails 17/8 before the mirror column) | 25 | 0 | 0 |
+| onboarding / Package 4 / duplicate resolution / P2-01 handoff / JOIN-1..5 runners | 6 / 21 / 11 / 7 / 128 | 0 | 0 |
+| `npm run verify:kai-sprint2-api-contract` | 71 | 0 | 0 |
+| `npm run test:kai-sprint2` | 4722 | 0 | 89 |
+| `npm test` (+1 skip: the new runner-only spec) | 5441 | 0 | 103 |
+| `npm run build` (reproduces the bundle), `git diff --check` | ok | | |
+
+**NOT_CONFIRMED / limitations:**
+- Deployed behavior. Production `public.userdata.email` values satisfying the
+  deployed `kai.users.email` user-defined type is not confirmed (the
+  onboarding route already passes the same value). The type's definition is
+  not mirrored.
+- A target whose account has no usable email still gets the existing 500
+  (thrown provisioning error); not changed here.
+- Source-candidate cockpit routes were not separately exercised after
+  revocation (same gate as the exercised cockpit reads/decision).
+
+**Open owner decision (unchanged, not imposed):** after the global
+`gk_reviewer` role is revoked, should the organization-scoped `gk_reviewer`
+membership keep authorizing GK review work on its own (P1-06 review work,
+P2-12, P2-09 via `combineGlobalRoles`; P2-10, the GK libraries and Studio
+mount via membership only), as now? (A) Keep: global revocation ends the
+cockpit (sensitivity and source-candidate review) everywhere; "Remove
+gk_reviewer here" ends the rest per organization (what the KAI Access note
+says). (B) Require the global role for those GK review writes too: changes
+the 2026-10-11 decision that preserved GK-membership admission, and would
+refuse membership-only GK actors. Related: the cockpit's own global-only rule
+(`87f4d82`) has no recorded owner decision, and P2-10 does not accept a
+global `gk_reviewer` whose membership is a client role.
+
+**Status:** REVIEWER_AUTHORIZATION_EDGE_CASES_VERIFIED_IDENTITY_PROVISIONING_REPAIRED_LOCALLY_PRODUCTION_NOT_CONFIRMED.
+No push, deployment, shared or production database, cloud, feature-flag,
+tenant, live membership or role, credential, `.env`, schema, or
+`00_KAI_CURRENT_STATE.md` change.
