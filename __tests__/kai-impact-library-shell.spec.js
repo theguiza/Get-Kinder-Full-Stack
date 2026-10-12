@@ -48,7 +48,13 @@ test("frontend/entry.jsx mounts ImpactLibraryApp (the shell) for renderImpactEvi
 test("frontend/impactLibraryShell.jsx exposes exactly the five approved left-navigation sections, in order, and Needs Attention is not one of them", () => {
   const source = readFileSync("frontend/impactLibraryShell.jsx", "utf8");
   const keys = [...source.matchAll(/key:\s*"([a-zA-Z]+)"/g)].map((m) => m[1]);
-  assert.deepEqual(keys, ["home", "knowledgeStudio", "impactLibrary", "improvementPlan", "projects"]);
+  // The five always-visible sections, then the one owner-approved
+  // conditional Team & Access destination (appended only with
+  // onManageTeamAccess).
+  assert.deepEqual(keys, ["home", "knowledgeStudio", "impactLibrary", "improvementPlan", "projects", "teamAccess"]);
+  const alwaysVisible = source.slice(source.indexOf("export const IMPACT_LIBRARY_NAV_SECTIONS"), source.indexOf("export const IMPACT_LIBRARY_TEAM_ACCESS_SECTION"));
+  assert.deepEqual([...alwaysVisible.matchAll(/key:\s*"([a-zA-Z]+)"/g)].map((m) => m[1]), ["home", "knowledgeStudio", "impactLibrary", "improvementPlan", "projects"]);
+  assert.match(source, /const navSections = canManageTeamAccess\s*\? \[\.\.\.IMPACT_LIBRARY_NAV_SECTIONS, IMPACT_LIBRARY_TEAM_ACCESS_SECTION\]\s*: IMPACT_LIBRARY_NAV_SECTIONS;/);
   assert.doesNotMatch(source, /"needsAttention"/, "Needs Attention must not be a left-nav destination");
 });
 

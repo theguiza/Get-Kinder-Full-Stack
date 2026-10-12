@@ -355,15 +355,15 @@ test("P2-08 repository default projection is unchanged when no projection is sup
 // ---------------------------------------------------------------------------
 
 test("access capabilities follow each existing policy: client_admin contributes but is neither GK nor client reviewer", async () => {
-  const flags = (internalKnowledgeWorkspace, intakeContribution, clientFollowupReview, projectManagement, improvementPlanManagement, organizationJoinReview) => ({
-    internalKnowledgeWorkspace, intakeContribution, clientFollowupReview, projectManagement, improvementPlanManagement, organizationJoinReview,
+  const flags = (internalKnowledgeWorkspace, intakeContribution, clientFollowupReview, projectManagement, improvementPlanManagement, organizationJoinReview, organizationAccessManagement) => ({
+    internalKnowledgeWorkspace, intakeContribution, clientFollowupReview, projectManagement, improvementPlanManagement, organizationJoinReview, organizationAccessManagement,
   });
   const expectations = [
-    [await clientAdminActor(), flags(false, true, false, true, true, true)],
-    [memberActor("client_reviewer"), flags(false, false, true, false, false, false)],
-    [memberActor("client_contributor"), flags(false, false, false, false, false, false)],
-    [memberActor("gk_reviewer"), flags(true, false, false, false, false, false)],
-    [memberActor("gk_operator", { kaiRoles: ["gk_operator"] }), flags(true, true, false, true, true, false)],
+    [await clientAdminActor(), flags(false, true, false, true, true, true, true)],
+    [memberActor("client_reviewer"), flags(false, false, true, false, false, false, false)],
+    [memberActor("client_contributor"), flags(false, false, false, false, false, false, false)],
+    [memberActor("gk_reviewer"), flags(true, false, false, false, false, false, false)],
+    [memberActor("gk_operator", { kaiRoles: ["gk_operator"] }), flags(true, true, false, true, true, false, false)],
   ];
   for (const [actorContext, expected] of expectations) {
     const result = await getOrganizationAccessCapabilities({ organizationId: ORG, actorContext }, { env: ENV });

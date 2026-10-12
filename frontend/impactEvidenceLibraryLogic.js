@@ -67,6 +67,7 @@ export function projectOrganizationAccessCapabilities(dto) {
     projectManagement: dto.projectManagement === true,
     improvementPlanManagement: dto.improvementPlanManagement === true,
     organizationJoinReview: dto.organizationJoinReview === true,
+    organizationAccessManagement: dto.organizationAccessManagement === true,
   };
 }
 

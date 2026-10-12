@@ -31,6 +31,9 @@ import NeedsAttentionView from "./needsAttention/NeedsAttentionView.jsx";
 import { useNeedsAttention } from "./needsAttention/useNeedsAttention.js";
 import OrganizationJoinPanel from "./impactLibrary/OrganizationJoinPanel.jsx";
 import OrganizationJoinRequestsReviewPanel from "./impactLibrary/OrganizationJoinRequestsReviewPanel.jsx";
+import TeamAccessView from "./teamAccess/TeamAccessView.jsx";
+import { useTeamAccess } from "./teamAccess/useTeamAccess.js";
+import { TEAM_ACCESS_SECTION_KEY } from "./teamAccess/teamAccessLogic.js";
 import {
   declinedJoinRequestMessage,
   deriveJoinRequestView,
@@ -350,6 +353,9 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
   });
   const [joinReviewOpen, setJoinReviewOpen] = useState(false);
   const joinReviewRequestRef = useRef(0);
+  // Team & Access shows the same join-review state; an approval adds a
+  // member, so its roster is re-read (set once useTeamAccess exists below).
+  const refreshTeamAccessRef = useRef(() => {});
 
   const refetchJoinReview = useCallback(async (organizationId) => {
     const token = ++joinReviewRequestRef.current;
@@ -380,6 +386,7 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
     if (result.statusCode === 200 && result.body?.ok) {
       setJoinReview((curr) => ({ ...curr, actionId: "" }));
       await refetchJoinReview(organizationId);
+      if (decision === "approve") refreshTeamAccessRef.current();
       return;
     }
     const failure = joinReviewErrorFromResult(result);
@@ -619,6 +626,40 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
   const canManageProjects = capabilitiesResolved && accessCapabilities.data?.projectManagement === true;
   const canManageImprovementPlan = capabilitiesResolved && accessCapabilities.data?.improvementPlanManagement === true;
   const canReviewJoinRequests = capabilitiesResolved && accessCapabilities.data?.organizationJoinReview === true;
+  const canManageTeamAccess = capabilitiesResolved && accessCapabilities.data?.organizationAccessManagement === true;
+
+  // Re-reads the capabilities answer in place (no loading state) after a
+  // change that may have removed this user's own administrator access. A
+  // failed read keeps the current answer; the server still decides every
+  // request.
+  const refreshAccessCapabilities = useCallback(async () => {
+    const organizationId = selectedOrganizationId;
+    if (!organizationId) return;
+    const result = await getJson(organizationAccessCapabilitiesPath(organizationId));
+    const data = result.statusCode === 200 && result.body?.ok ? projectOrganizationAccessCapabilities(result.body.data) : null;
+    if (!data) return;
+    setAccessCapabilities((current) => (current.organizationId === organizationId ? { organizationId, status: "success", data } : current));
+  }, [selectedOrganizationId]);
+
+  // Team & Access: the roster is read only while the section is open and the
+  // server reports organizationAccessManagement for the selected
+  // organization. Without it (another organization, a lost role) the
+  // section falls back to Home.
+  const teamAccess = useTeamAccess(
+    selectedOrganizationId,
+    canManageTeamAccess && activeSection === TEAM_ACCESS_SECTION_KEY,
+  );
+  useEffect(() => {
+    refreshTeamAccessRef.current = teamAccess.refresh;
+  }, [teamAccess.refresh]);
+  useEffect(() => {
+    if (activeSection === TEAM_ACCESS_SECTION_KEY && capabilitiesResolved && !canManageTeamAccess) setActiveSection("home");
+  }, [activeSection, capabilitiesResolved, canManageTeamAccess]);
+  const openTeamAccess = useCallback(() => setActiveSection(TEAM_ACCESS_SECTION_KEY), []);
+  const changeTeamMemberRole = useCallback(async (member, roleName) => {
+    const result = await teamAccess.changeRole(member, roleName);
+    if (result.ok && member.effectiveAdmin) await refreshAccessCapabilities();
+  }, [teamAccess.changeRole, refreshAccessCapabilities]);
 
   useEffect(() => {
     setJoinReviewOpen(false);
@@ -716,6 +757,21 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
     );
   } else if (!hasAuthorizedOrganizations) {
     sectionContent = <div style={{ color: "#8890A0", fontSize: 14 }}>Loading organization setup...</div>;
+  } else if (activeSection === TEAM_ACCESS_SECTION_KEY) {
+    sectionContent = canManageTeamAccess ? (
+      <TeamAccessView
+        organizationName={organizationName}
+        roster={teamAccess.roster}
+        savingKey={teamAccess.savingKey}
+        notice={teamAccess.notice}
+        onChangeRole={changeTeamMemberRole}
+        onRefresh={teamAccess.refresh}
+        joinReview={joinReview.organizationId === selectedOrganizationId ? joinReview : null}
+        onDecideJoinRequest={decideJoinRequest}
+      />
+    ) : (
+      <div style={{ color: "#8890A0", fontSize: 14 }}>Loading...</div>
+    );
   } else if ((activeSection === "knowledgeStudio" || activeSection === "impactLibrary") && !capabilitiesResolved) {
     sectionContent = <div style={{ color: "#8890A0", fontSize: 14 }}>Loading...</div>;
   } else if (activeSection === "knowledgeStudio" && !internalKnowledgeWorkspace) {
@@ -832,6 +888,7 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
       organizationActionLabel={hasAuthorizedOrganizations ? "Request another organization" : "Request organization"}
       onJoinOrganization={openJoinOrganization}
       onReviewJoinRequests={hasAuthorizedOrganizations && joinReview.available ? openJoinReview : undefined}
+      onManageTeamAccess={hasAuthorizedOrganizations && canManageTeamAccess ? openTeamAccess : undefined}
       hasAttention={needsAttention.hasAttention}
       onOpenNeedsAttention={() => setActiveSection("needsAttention")}
     >

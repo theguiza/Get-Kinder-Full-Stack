@@ -158,6 +158,10 @@ export async function viewEffectiveKaiAccess({ actorContext, organizationId } = 
   }
 
   const includeGlobalRoles = hasPlatformSuperuserAuthority(actorContext);
+  // Mirrors applyOrganizationMembershipChangeInTransaction's
+  // non-client-stored-role guard: only a platform superuser may change a
+  // stored membership whose current role is not an assignable client role.
+  const canChangeStoredRole = (stored) => includeGlobalRoles || ASSIGNABLE_ORGANIZATION_ROLE_SET.has(stored.role_name);
   const accessRows = [];
   for (const entry of byKey.values()) {
     const isEffectiveClientAdmin = entry.derived?.membership_status === "active" || (
@@ -176,7 +180,7 @@ export async function viewEffectiveKaiAccess({ actorContext, organizationId } = 
       effective_role_name: effectiveRoleName,
       effective_membership_status: effectiveMembershipStatus,
       authority_source: authoritySource,
-      editable: Boolean(entry.stored) || !entry.derived,
+      editable: entry.stored ? canChangeStoredRole(entry.stored) : !entry.derived,
       global_kai_roles: includeGlobalRoles && entry.kai_user_id ? await listGlobalRoles(entry.kai_user_id) : undefined,
     });
   }
@@ -302,6 +306,29 @@ export async function applyOrganizationMembershipChangeInTransaction(
     return failure("membership_state_conflict");
   }
   const previousRow = existingRows[0] || null;
+  // Replacement semantics would otherwise let an organization client_admin
+  // rewrite another user's stored Get Kinder staff membership (gk_admin,
+  // gk_operator, gk_reviewer, or any other non-client role) into a client
+  // role. Only a platform superuser may change such a row.
+  if (previousRow && !ASSIGNABLE_ORGANIZATION_ROLE_SET.has(previousRow.role_name) && !platformSuperuserAuthorized) {
+    return {
+      ok: false,
+      data: null,
+      error: { code: "authorization_denied" },
+      blockers: [
+        {
+          validator_key: "VAL-KAI-P2-ACC-001",
+          severity: "blocker",
+          object_type: "organization_membership",
+          object_id: null,
+          message: "This membership is managed by Get Kinder, not by the organization.",
+          blocking_reason: "non_client_membership_not_client_managed",
+          required_fix: "Ask a Get Kinder administrator to change this membership.",
+          evidence: {},
+        },
+      ],
+    };
+  }
   const isCurrentlyActiveAdmin = previousRow?.role_name === "client_admin" && previousRow?.membership_status === "active";
   const wouldStillBeActiveAdmin = roleName === "client_admin" && membershipStatus === KAI_ACTIVE_ORGANIZATION_MEMBERSHIP_STATUS;
 
@@ -444,4 +471,13 @@ export async function manageGlobalKaiRole(
 
 export const __kaiAccessAdministrationServiceTestables = Object.freeze({
   RequiredAuditRejectedError,
+});
+
+// The exact operations and allowed-role set viewEffectiveKaiAccess and
+// manageOrganizationMembership authorize with, so the access-capabilities
+// read can report this policy's answer without declaring its own role set.
+export const __kaiAccessAdministrationServiceContract = Object.freeze({
+  VIEW_OPERATION: VIEW_KAI_ACCESS,
+  MANAGE_OPERATION: MANAGE_ORGANIZATION_MEMBERSHIP,
+  ORGANIZATION_MEMBERSHIP_ADMIN_ALLOWED_ROLES,
 });

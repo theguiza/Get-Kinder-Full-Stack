@@ -42,6 +42,16 @@ export const IMPACT_LIBRARY_NAV_SECTIONS = Object.freeze([
   },
 ]);
 
+// Team & Access is not one of the five always-visible destinations above: it
+// is appended to the navigation only when the caller passes
+// onManageTeamAccess, which ImpactLibraryApp.jsx does only when the server
+// reports organizationAccessManagement for the selected organization.
+export const IMPACT_LIBRARY_TEAM_ACCESS_SECTION = Object.freeze({
+  key: "teamAccess",
+  label: "Team & Access",
+  icon: "M9.5 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z M4 19.5a5.5 5.5 0 0 1 11 0 M15.5 5.3a3 3 0 0 1 0 5.4 M17.5 14.4a5.5 5.5 0 0 1 2.5 5.1",
+});
+
 function NavIcon({ path, active }) {
   const stroke = active ? "#FFFFFF" : "rgba(255,255,255,0.72)";
   if (!path) {
@@ -131,6 +141,7 @@ export default function ImpactLibraryShell({
   organizationActionLabel = "Request organization",
   onJoinOrganization,
   onReviewJoinRequests,
+  onManageTeamAccess,
   hasAttention = false,
   onOpenNeedsAttention,
   children,
@@ -138,13 +149,20 @@ export default function ImpactLibraryShell({
   const [orgMenuOpen, setOrgMenuOpen] = useState(false);
   const [addOrgMenuOpen, setAddOrgMenuOpen] = useState(false);
   const showOrgSwitcher = Array.isArray(organizations) && organizations.length > 1 && typeof onSelectOrganization === "function";
+  const canManageTeamAccess = typeof onManageTeamAccess === "function";
+  // A single-organization administrator still gets the organization menu,
+  // for its "Manage team & access" entry.
+  const showOrgMenu = showOrgSwitcher || canManageTeamAccess;
+  const navSections = canManageTeamAccess
+    ? [...IMPACT_LIBRARY_NAV_SECTIONS, IMPACT_LIBRARY_TEAM_ACCESS_SECTION]
+    : IMPACT_LIBRARY_NAV_SECTIONS;
   const displayName = typeof organizationName === "string" && organizationName.trim() ? organizationName.trim() : "Your organization";
 
   return (
     <div className="gk-shell-root">
       <aside className="gk-shell-sidebar">
         <div className="gk-shell-nav-group">
-          {IMPACT_LIBRARY_NAV_SECTIONS.map((section) => {
+          {navSections.map((section) => {
             const active = activeSection === section.key;
             return (
               <div
@@ -186,14 +204,19 @@ export default function ImpactLibraryShell({
         <header className="gk-shell-header">
           <div className="gk-shell-header-org">
             <OrgLogo logoUrl={organizationLogoUrl} name={displayName} />
-            {showOrgSwitcher ? (
-              <div className="gk-shell-org-switcher-wrap">
+            {showOrgMenu ? (
+              <div
+                className="gk-shell-org-switcher-wrap"
+                onKeyDown={(event) => {
+                  if (event.key === "Escape") setOrgMenuOpen(false);
+                }}
+              >
                 <button
                   type="button"
                   className="gk-shell-org-switcher-btn"
                   onClick={() => setOrgMenuOpen((open) => !open)}
                   aria-expanded={orgMenuOpen}
-                  aria-haspopup="listbox"
+                  aria-haspopup="true"
                 >
                   <span className="gk-shell-header-org-name">{displayName}</span>
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#455A7C" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -201,22 +224,38 @@ export default function ImpactLibraryShell({
                   </svg>
                 </button>
                 {orgMenuOpen ? (
-                  <div className="gk-shell-org-switcher-menu" role="listbox">
-                    {organizations.map((org) => (
+                  <div className="gk-shell-org-switcher-menu">
+                    {showOrgSwitcher ? (
+                      <div role="listbox" aria-label="Switch organization">
+                        {organizations.map((org) => (
+                          <button
+                            type="button"
+                            key={org.organization_id}
+                            role="option"
+                            aria-selected={org.organization_id === selectedOrganizationId}
+                            className="gk-shell-org-switcher-option"
+                            onClick={() => {
+                              setOrgMenuOpen(false);
+                              onSelectOrganization(org.organization_id);
+                            }}
+                          >
+                            {org.name || org.organization_id}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
+                    {canManageTeamAccess ? (
                       <button
                         type="button"
-                        key={org.organization_id}
-                        role="option"
-                        aria-selected={org.organization_id === selectedOrganizationId}
-                        className="gk-shell-org-switcher-option"
+                        className="gk-shell-org-switcher-option gk-shell-org-menu-action"
                         onClick={() => {
                           setOrgMenuOpen(false);
-                          onSelectOrganization(org.organization_id);
+                          onManageTeamAccess();
                         }}
                       >
-                        {org.name || org.organization_id}
+                        Manage team & access
                       </button>
-                    ))}
+                    ) : null}
                   </div>
                 ) : null}
               </div>

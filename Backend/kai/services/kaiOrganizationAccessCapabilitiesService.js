@@ -8,6 +8,7 @@ import { __clientFollowupReadServiceContract } from "./kaiClientFollowupReadServ
 import { __engagementContextServiceContract } from "./kaiEngagementContextService.js";
 import { __improvementPracticeServiceContract } from "./kaiImprovementPracticeService.js";
 import { __organizationJoinRequestReviewServiceContract } from "./kaiOrganizationJoinRequestReviewService.js";
+import { __kaiAccessAdministrationServiceContract } from "./kaiAccessAdministrationService.js";
 
 /**
  * Organization access capabilities for the Impact Library client. The
@@ -38,6 +39,11 @@ import { __organizationJoinRequestReviewServiceContract } from "./kaiOrganizatio
  * - organizationJoinReview: the JOIN-3 join-request review list policy
  *   (organization client_admin). The shell requests the review queue only
  *   when this is true.
+ * - organizationAccessManagement: the access-administration roster read and
+ *   organization-membership change policies (organization client_admin,
+ *   stored or derived). The Impact Library offers Team & Access only when
+ *   this is true; the access-administration service still authorizes every
+ *   read and change itself.
  *
  * Admission reuses the existing read_intake role set for an active same-org
  * member, then tenant validation. Cross-org actors are denied (VAL-AUT-003).
@@ -57,6 +63,11 @@ const {
 } = __improvementPracticeServiceContract;
 const { REVIEWER_ALLOWED_ROLES: JOIN_REVIEW_ALLOWED_ROLES, LIST_OPERATION: JOIN_REVIEW_LIST_OPERATION } =
   __organizationJoinRequestReviewServiceContract;
+const {
+  VIEW_OPERATION: ACCESS_ADMIN_VIEW_OPERATION,
+  MANAGE_OPERATION: ACCESS_ADMIN_MANAGE_OPERATION,
+  ORGANIZATION_MEMBERSHIP_ADMIN_ALLOWED_ROLES: ACCESS_ADMIN_ALLOWED_ROLES,
+} = __kaiAccessAdministrationServiceContract;
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -132,6 +143,9 @@ export async function getOrganizationAccessCapabilities(input, dependencies = {}
         passes(actorContext, CREATE_IMPROVEMENT_PRACTICE_OPERATION, organizationId, IMPROVEMENT_PRACTICE_ALLOWED_ROLES)
         && passes(actorContext, UPDATE_IMPROVEMENT_PRACTICE_STATUS_OPERATION, organizationId, IMPROVEMENT_PRACTICE_ALLOWED_ROLES),
       organizationJoinReview: passes(actorContext, JOIN_REVIEW_LIST_OPERATION, organizationId, JOIN_REVIEW_ALLOWED_ROLES),
+      organizationAccessManagement:
+        passes(actorContext, ACCESS_ADMIN_VIEW_OPERATION, organizationId, ACCESS_ADMIN_ALLOWED_ROLES)
+        && passes(actorContext, ACCESS_ADMIN_MANAGE_OPERATION, organizationId, ACCESS_ADMIN_ALLOWED_ROLES),
     },
     error: null,
   };

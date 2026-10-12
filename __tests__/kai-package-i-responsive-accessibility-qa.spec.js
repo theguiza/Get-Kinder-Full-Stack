@@ -97,6 +97,9 @@ test("Gap Detail's Add to Plan button is a real control with a real handler - ne
 
 test("the five approved primary destinations and bell-based Needs Attention are unchanged by this continuation (no new top-level nav destination was added)", () => {
   const keys = [...shellSource.matchAll(/key:\s*"([a-zA-Z]+)"/g)].map((m) => m[1]);
-  assert.deepEqual(keys, ["home", "knowledgeStudio", "impactLibrary", "improvementPlan", "projects"]);
+  // Team & Access is the one later owner-approved destination, shown only
+  // to an organization administrator (see kai-team-access.spec.js).
+  assert.deepEqual(keys, ["home", "knowledgeStudio", "impactLibrary", "improvementPlan", "projects", "teamAccess"]);
+  assert.match(shellSource, /export const IMPACT_LIBRARY_TEAM_ACCESS_SECTION = Object\.freeze\(\{\s*key: "teamAccess",/);
   assert.doesNotMatch(shellSource, /"needsAttention"/);
 });
