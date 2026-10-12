@@ -88,7 +88,11 @@ try {
   psqlFile("migrations/kai_sprint2_p1_08_source_promotion.sql");
   psqlFile("migrations/kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger.sql");
   psqlFile("migrations/kai_sprint2_b1a_02_client_admin_sensitivity_review.sql");
-  psqlFile("scripts/kai-sprint2-b1a-02-client-admin-sensitivity-review-verifier.sql");
+  const sensitivityVerifierOutput = psqlFile("scripts/kai-sprint2-b1a-02-client-admin-sensitivity-review-verifier.sql");
+  if (!sensitivityVerifierOutput.includes("sensitivity_decision_role_check_exact_and_validated")) {
+    throw new Error("client-admin sensitivity review verifier produced no result row");
+  }
+  process.stdout.write(sensitivityVerifierOutput);
   psqlFile("scripts/kai-sprint2-b1a-02-phase5-allowed-use-decision-ledger-verifier.sql");
   psqlFile("scripts/kai-sprint2-gate-a-smoke-seed.sql");
   psqlFile("scripts/kai-sprint2-p1-04-data-dictionary-quality-smoke-seed.sql");
