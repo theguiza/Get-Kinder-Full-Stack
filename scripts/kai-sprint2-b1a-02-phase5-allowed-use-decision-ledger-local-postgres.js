@@ -89,8 +89,13 @@ try {
   psqlFile("migrations/kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger.sql");
   psqlFile("migrations/kai_sprint2_b1a_02_client_admin_sensitivity_review.sql");
   const sensitivityVerifierOutput = psqlFile("scripts/kai-sprint2-b1a-02-client-admin-sensitivity-review-verifier.sql");
-  if (!sensitivityVerifierOutput.includes("sensitivity_decision_role_check_exact_and_validated")) {
-    throw new Error("client-admin sensitivity review verifier produced no result row");
+  const sensitivityVerifierCheckNames = [
+    "sensitivity_decision_table_exists",
+    "sensitivity_decision_role_check_exists_and_validated",
+    "sensitivity_decision_role_check_exact_role_set",
+  ];
+  if (!sensitivityVerifierCheckNames.every((checkName) => sensitivityVerifierOutput.includes(checkName))) {
+    throw new Error("client-admin sensitivity review verifier omitted one or more expected result rows");
   }
   process.stdout.write(sensitivityVerifierOutput);
   psqlFile("scripts/kai-sprint2-b1a-02-phase5-allowed-use-decision-ledger-verifier.sql");

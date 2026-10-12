@@ -37831,11 +37831,10 @@ NO_PRODUCTION_CHANGE.
 Added `scripts/kai-sprint2-b1a-02-client-admin-sensitivity-review-verifier.sql`
 and wired it into the B1A-2 synthetic PostgreSQL runner immediately after the
 additive migration. It checks the named role CHECK constraint is validated and
-that its parsed role literals equal exactly `client_admin`, `gk_admin`,
-`gk_operator`, and `gk_reviewer`. The focused boundary suite passed 20/20,
-including a test that the verifier is present and runner-wired. The runner now
-requires the named result row in captured `psql` output and prints that output,
-rather than swallowing the verifier result. The PostgreSQL runner did not reach
-migration or verifier execution: `initdb` failed creating shared memory
-(`shmget: Operation not permitted`). The SQL verifier's database result
-therefore remains NOT_CONFIRMED.
+It emits separate rows for table existence, named/validated constraint, and the
+exact parsed role set (`client_admin`, `gk_admin`, `gk_operator`,
+`gk_reviewer`). The runner requires and prints all three captured result rows,
+and the focused boundary suite passed 20/20, including runner wiring. The
+PostgreSQL runner did not reach migration or verifier execution: `initdb` failed
+creating shared memory (`shmget: Operation not permitted`). The SQL verifier's
+database result therefore remains NOT_CONFIRMED.

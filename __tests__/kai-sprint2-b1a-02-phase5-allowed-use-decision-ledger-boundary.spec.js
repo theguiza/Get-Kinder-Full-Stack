@@ -572,6 +572,8 @@ test("client-admin sensitivity migration verifier checks the exact validated rol
     "utf8",
   );
   assert.match(runner, /kai-sprint2-b1a-02-client-admin-sensitivity-review-verifier\.sql/);
-  assert.match(runner, /sensitivityVerifierOutput\.includes\("sensitivity_decision_role_check_exact_and_validated"\)/);
+  assert.match(runner, /sensitivity_decision_role_check_exists_and_validated/);
+  assert.match(runner, /sensitivity_decision_role_check_exact_role_set/);
+  assert.match(runner, /sensitivityVerifierCheckNames\.every\(\(checkName\) => sensitivityVerifierOutput\.includes\(checkName\)\)/);
   assert.match(runner, /process\.stdout\.write\(sensitivityVerifierOutput\)/);
 });
