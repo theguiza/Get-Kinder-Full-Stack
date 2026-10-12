@@ -37670,3 +37670,112 @@ global `gk_reviewer` whose membership is a client role.
 No push, deployment, shared or production database, cloud, feature-flag,
 tenant, live membership or role, credential, `.env`, schema, or
 `00_KAI_CURRENT_STATE.md` change.
+
+### Reviewer provisioning: a target account without a usable email gets a validation blocker, not a 500 (2026-10-12)
+
+**Owner authorization (USER_CONFIRMED):** bounded correction of the remaining
+reviewer-provisioning defect: an existing Get Kinder account with no usable
+email could get HTTP 500 on a role grant. Reuse an existing KAI identity
+unchanged; when one must be created and cannot be, return a safe structured
+validation blocker with no partial write. Preserve the completed reviewer
+workflows. Local synthetic only; no production, push, deploy, schema, flag,
+credential, or Current State change.
+
+**Starting state (TOOL_VERIFIED):** `main` at
+`15f70fa6bb47999861e48c88a0667f8acfdc017b`, clean.
+
+**Failing path (TOOL_VERIFIED):** both writers resolve the target after
+authorization and request validation and before their transaction:
+`kaiAccessAdministrationService.js` (`manageOrganizationMembership` :276,
+`manageGlobalKaiRole` :465 before the change) call
+`findOrCreateKaiUserForAdministrationTarget`
+(`kaiAccessAdministrationQueries.js:353-361`), which read
+`public.userdata.email`, turned a missing/blank one into `null`, and still
+called `findOrCreateKaiUserByLegacyPublicUserdataId`. With no mapping, its
+JIT insert (`kaiQueries.js:27-41`) ran with `email = NULL`. That call sat
+outside the writers' `try`, so the tagged `kaiUserProvisioningFailed` error
+reached the route's `next(error)` (`kaiAccessAdministrationApi.js:111/134`).
+
+**Before the change (TOOL_VERIFIED, real router, runner PostgreSQL):** a
+never-signed-in account with `email` NULL, superuser grants:
+- deployed NOT NULL email: global PUT 500, membership PUT 500 (stack
+  `kaiQueries.js:37` <- `kaiAccessAdministrationService.js:465` <-
+  `kaiAccessAdministrationApi.js:125`); no `kai.users`, `user_roles`,
+  membership, or audit row (the insert's own transaction rolled back).
+- nullable mirror: both 200; one `kai.users` row with `email` NULL, one
+  global `gk_reviewer` row, one `gk_reviewer/active` membership, two success
+  audits (`global_kai_role_assigned`, `organization_membership_assigned`).
+- an email the schema rejects (synthetic CHECK stand-in): 500.
+
+**Change:**
+- `findOrCreateKaiUserForAdministrationTarget`: without a usable email it
+  only looks up an existing mapping (`findKaiUserByLegacyPublicUserdataId`)
+  and never inserts; with one, unchanged find-or-create. An existing mapping
+  is returned unchanged in both cases (no email refresh).
+- Both writers resolve the target through `resolveAdministrationTarget`,
+  which turns only a tagged `kaiUserProvisioningFailed` into "no identity"
+  (logging PostgreSQL code/constraint/column/table only, as actor
+  resolution does); any other error still throws. No identity ->
+  422 `validation_blocker` with one blocker (`VAL-KAI-P2-ACC-001` membership /
+  `VAL-KAI-P2-ACC-002` global, `object_type` `kai_user`, `blocking_reason`
+  `target_account_email_unusable`, no email or database detail), returned
+  before any transaction, so no role, membership, or audit row. The access
+  administration service records no blocked-attempt audit for refusals;
+  none was added.
+- Authorization order unchanged: callers without authority are refused
+  before target resolution.
+- No schema, migration, route, frontend, flag, or authorization change. The
+  admin UI already shows the KAI error message for a refused grant
+  ("Request failed KAI validation."); the blocker's own message is in the
+  response but not rendered (not changed here).
+
+**After the change (TOOL_VERIFIED, real router, both nullable and deployed
+NOT NULL mirrors):**
+- missing, `""`, or blank email: global and membership PUT 422 with the
+  blocker above; no `kai.users` row, write counts and the account row
+  unchanged. NPO `client_admin` assigning `client_reviewer` to such an
+  account: same 422, nothing written. Schema-rejected email (synthetic CHECK
+  stand-in): both 422, nothing written.
+- existing active identity (`kept@guard.test`) with account email NULL or
+  `changed@guard.test`: both grants 200 on that `user_id`; the `kai.users`
+  row (including `email`, `updated_at`) is byte-identical; one global role,
+  one membership, two audits.
+- no-role caller (global/membership), organization administrator (global),
+  other organization's administrator (membership): 403; organization
+  administrator assigning `gk_reviewer`: 422 without blockers. Each response
+  is identical for a no-email, valid-email, mapped, and nonexistent target;
+  nothing written.
+- retry after the synthetic account gets an email: global 200
+  (`replayed: false`), membership 200 on the same `user_id`; one active
+  `kai.users` row with that email; first sign-in resolves it (no
+  `mapped_kai_user_required`, still one row, unchanged).
+
+**Verification (TOOL_VERIFIED; loopback `DATABASE_URL` sentinel):**
+
+| Command | Pass | Fail | Skipped |
+| --- | --- | --- | --- |
+| `npm run verify:kai-sprint2-p2-access-administration`, original code (6 new route tests) | 26 | 5 | 0 |
+| `npm run verify:kai-sprint2-p2-access-administration` | 31 | 0 | 0 |
+| `kai-sprint2-p2-access-administration.spec.js`, original code | 31 | 2 | 0 |
+| focused access-admin, admin UI, Team & Access, actor-context, JIT, authorization, tenant, binding, onboarding specs (15 files) | 244 | 0 | 0 |
+| edge-case (first sign-in) / reviewer provisioning / Team & Access / sensitivity reachability browser specs | 11 / 13 / 7 / 15 | 0 | 0 |
+| `npm run verify:kai-sprint2-api-contract` | 71 | 0 | 0 |
+| `npm run test:kai-sprint2` | 4725 | 0 | 89 |
+| `npm test` | 5444 | 0 | 103 |
+| `git diff --check` | ok | | |
+
+No `npm run build`: no frontend source or build dependency changed.
+
+**Release impact:** no migration or schema dependency; no environment or
+feature-flag change; no frontend bundle change.
+
+**NOT_CONFIRMED:** the deployed `kai.users.email` type and constraints and
+production runtime behavior. The NOT NULL condition is USER_CONFIRMED prior
+evidence; the custom email type's definition is not mirrored, so a
+production email it rejects is covered only by the tagged-insert path,
+proven here with a synthetic CHECK stand-in.
+
+**Status:** REVIEWER_PROVISIONING_MISSING_EMAIL_BLOCKER_CORRECTED_LOCALLY_PRODUCTION_NOT_CONFIRMED.
+No push, deployment, shared or production database, cloud, feature-flag,
+tenant, live membership or role, credential, `.env`, schema, or
+`00_KAI_CURRENT_STATE.md` change.
