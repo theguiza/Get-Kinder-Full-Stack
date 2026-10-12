@@ -264,12 +264,12 @@ CREATE TABLE kai.intake_sensitivity_review_decisions (
       )
     ),
 
-  -- Human ownership: only the roles the existing P1-06 sensitivity_review contract
-  -- already authorizes (SENSITIVITY_REVIEW_ALLOWED_ROLES in
-  -- Backend/kai/services/kaiReviewQueueService.js) may ever decide a Phase-5 review -
-  -- never a client actor, never an assistant/AI/system/import actor.
+  -- Human ownership: GK reviewers and active bound organization administrators
+  -- may decide this sensitivity review. client_admin is admitted only after the
+  -- service proves the derived GK organization-admin binding; no other client
+  -- actor or non-human actor may decide.
   CONSTRAINT intake_sensitivity_review_decisions_b1a_02_role_check
-    CHECK (decided_by_role IN ('gk_admin', 'gk_operator', 'gk_reviewer')),
+    CHECK (decided_by_role IN ('gk_admin', 'gk_operator', 'gk_reviewer', 'client_admin')),
   CONSTRAINT intake_sensitivity_review_decisions_b1a_02_created_by_type_check
     CHECK (created_by_type = 'human')
 );

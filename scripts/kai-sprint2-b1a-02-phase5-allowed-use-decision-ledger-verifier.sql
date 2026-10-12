@@ -137,13 +137,21 @@ SELECT 'sensitivity_review_decisions_human_only',
                 JOIN pg_namespace n ON n.oid = r.relnamespace
                WHERE n.nspname = 'kai'
                  AND r.relname = 'intake_sensitivity_review_decisions'
-                 AND c.conname IN (
-                   'intake_sensitivity_review_decisions_b1a_02_created_by_type_check',
-                   'intake_sensitivity_review_decisions_b1a_02_role_check'
-                 )
-            ) = 2
+                 AND c.conname = 'intake_sensitivity_review_decisions_b1a_02_created_by_type_check'
+            ) = 1
+            AND EXISTS (
+              SELECT 1
+                FROM pg_constraint c
+                JOIN pg_class r ON r.oid = c.conrelid
+                JOIN pg_namespace n ON n.oid = r.relnamespace
+               WHERE n.nspname = 'kai'
+                 AND r.relname = 'intake_sensitivity_review_decisions'
+                 AND c.conname = 'intake_sensitivity_review_decisions_b1a_02_role_check'
+                 AND pg_get_constraintdef(c.oid) LIKE '%client_admin%'
+                 AND pg_get_constraintdef(c.oid) LIKE '%gk_reviewer%'
+            )
             THEN 'PASS' ELSE 'FAIL' END,
-       'only a human actor holding gk_admin/gk_operator/gk_reviewer can produce a decision row';
+       'only a human actor authorized as GK reviewer or bound organization client_admin can produce a decision row';
 
 INSERT INTO b1a_02_results
 SELECT 'sensitivity_profile_id_org_unique_added',

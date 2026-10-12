@@ -4,7 +4,10 @@ import {
 import { KAI_SPRINT2_P0_PATTERNS } from "../config/kaiSprint2P0Contract.js";
 import { buildKaiError, validationBlocked } from "../errors/kaiErrors.js";
 import { resolveKaiActorContext } from "../auth/kaiActorContext.js";
-import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationService.js";
+import {
+  validateActorCanPerformOperation,
+  validateActorCanPerformSensitivityReview,
+} from "../auth/kaiAuthorizationService.js";
 import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
 import {
   getReviewCockpitFileProfileRecord as readFileProfileRecord,
@@ -34,6 +37,7 @@ import {
   SENSITIVITY_PRESENCE_DECISION_FIELDS,
   SENSITIVITY_PERMISSION_DECISION_FIELDS,
   SENSITIVITY_ALLOWED_USE_DECISION_FIELD,
+  SENSITIVITY_DECISION_ALLOWED_ROLES,
   sensitivityAuthorityFromCurrentDecision,
 } from "../dictionary/sensitivityAllowedUseDecisionContract.js";
 import {
@@ -127,7 +131,7 @@ const SENSITIVITY_RESTRICTION_FLAGS = Object.freeze([
   "human_review_required",
 ]);
 const SENSITIVITY_DECISION_OUTCOME_SET = new Set(SENSITIVITY_ALLOWED_USE_DECISION_OUTCOMES);
-const SENSITIVITY_DECISION_ROLE_SET = new Set(["gk_admin", "gk_operator", "gk_reviewer"]);
+const SENSITIVITY_DECISION_ROLE_SET = new Set(SENSITIVITY_DECISION_ALLOWED_ROLES);
 const DECISION_STATUS_SET = new Set(__sourcePromotionRepositoryContract.ALLOWED_DECISION_OUTCOMES);
 const CANDIDATE_STATUS_SET = new Set([
   __sourcePromotionRepositoryContract.CANDIDATE_STATUS_NEEDS_REVIEW,
@@ -230,6 +234,46 @@ async function authorizeReviewCockpitRequest(input, dependencies) {
   return { ok: true, organizationId, actorContext };
 }
 
+async function authorizeSensitivityReviewRequest(input, dependencies) {
+  if (!isKaiSprint2Enabled(dependencies.env || process.env)) {
+    return { ok: false, error: buildKaiError("feature_disabled") };
+  }
+
+  const organizationId = String(input.organizationId || "").trim().toLowerCase();
+  if (!UUID_RE.test(organizationId)) return { ok: false, error: buildKaiError("invalid_request") };
+
+  const actorResult = input.actorContext
+    ? { ok: true, actorContext: input.actorContext }
+    : await resolveKaiActorContext(input.req, dependencies);
+  if (!actorResult.ok) return { ok: false, error: actorError(actorResult) };
+
+  const actorContext = actorResult.actorContext;
+  if (actorContext.actorType !== "human") {
+    return { ok: false, error: buildKaiError("authorization_denied") };
+  }
+
+  const roleAuth = validateActorCanPerformSensitivityReview(
+    actorContext,
+    "record_sensitivity_allowed_use_decision",
+    organizationId,
+    REVIEW_COCKPIT_READ_ROLES,
+    { globalRolesOnly: true },
+  );
+  if (!roleAuth.ok) {
+    return { ok: false, error: buildKaiError(roleAuth.error_code, { blockers: roleAuth.blockers }) };
+  }
+
+  const tenant = validateTenantBoundaryConsistency({
+    expectedOrganizationId: organizationId,
+    payload: { organization_id: organizationId },
+  });
+  if (tenant.severity === "blocker") {
+    return { ok: false, error: buildKaiError("tenant_boundary_violation", { blockers: [tenant] }) };
+  }
+
+  return { ok: true, organizationId, actorContext, roleAuth };
+}
+
 /**
  * KAI B1A-3B: a safe, read-only "can I" probe for the Impact Library product
  * page (and any other authenticated product surface) to decide
@@ -273,11 +317,12 @@ export async function getReviewCockpitCapabilities(input = {}, dependencies = {}
     return { ok: true, data: { can_manage_sensitivity_review: false } };
   }
 
-  const roleAuth = validateActorCanPerformOperation(
+  const roleAuth = validateActorCanPerformSensitivityReview(
     actorContext,
-    REVIEW_COCKPIT_READ_OPERATION,
+    "record_sensitivity_allowed_use_decision",
     organizationId,
-    { allowedRoles: REVIEW_COCKPIT_READ_ROLES, globalRolesOnly: true },
+    REVIEW_COCKPIT_READ_ROLES,
+    { globalRolesOnly: true },
   );
 
   return { ok: true, data: { can_manage_sensitivity_review: roleAuth.ok === true } };
@@ -734,13 +779,15 @@ function responseSourceVersion(row, organizationId) {
  */
 export async function listReviewCockpitQueue(input = {}, dependencies = {}) {
   const deps = resolvedDependencies(dependencies);
-  const authorization = await authorizeReviewCockpitRequest(input, deps);
-  if (!authorization.ok) return authorization.error;
-  const { organizationId } = authorization;
-
   const selectionResult = validateReviewCockpitQueueSelection(input.selection);
   if (!selectionResult.ok) return buildKaiError("invalid_request");
   const { limit, cursor, queueTypes, queueStatuses } = selectionResult.selection;
+  const sensitivityOnly = queueTypes.length === 1 && queueTypes[0] === "sensitivity_review";
+  const authorization = sensitivityOnly
+    ? await authorizeSensitivityReviewRequest(input, deps)
+    : await authorizeReviewCockpitRequest(input, deps);
+  if (!authorization.ok) return authorization.error;
+  const { organizationId } = authorization;
 
   const readQueue = deps.listReviewCockpitQueueItems || readReviewCockpitQueueItems;
   const rows = await readQueue(organizationId, { limit, cursor, queueTypes, queueStatuses });
@@ -750,6 +797,10 @@ export async function listReviewCockpitQueue(input = {}, dependencies = {}) {
   for (const row of rows) {
     const item = responseReviewCockpitQueueItem(row, organizationId);
     if (!item) return buildKaiError("system_error");
+    if (authorization.roleAuth?.organizationAdminAuthorized === true
+      && (item.queue_type !== "sensitivity_review" || item.target_object_type !== "intake_sensitivity_profile")) {
+      return buildKaiError("system_error");
+    }
     validatedRows.push(item);
   }
 
@@ -814,7 +865,7 @@ export async function getReviewCockpitFileProfileDetail(input = {}, dependencies
  */
 export async function getReviewCockpitIntakeFileSensitivityProfile(input = {}, dependencies = {}) {
   const deps = resolvedDependencies(dependencies);
-  const authorization = await authorizeReviewCockpitRequest(input, deps);
+  const authorization = await authorizeSensitivityReviewRequest(input, deps);
   if (!authorization.ok) return authorization.error;
   const { organizationId } = authorization;
 
@@ -846,7 +897,7 @@ export async function getReviewCockpitIntakeFileSensitivityProfile(input = {}, d
 
 export async function getReviewCockpitSensitivityProfileDetail(input = {}, dependencies = {}) {
   const deps = resolvedDependencies(dependencies);
-  const authorization = await authorizeReviewCockpitRequest(input, deps);
+  const authorization = await authorizeSensitivityReviewRequest(input, deps);
   if (!authorization.ok) return authorization.error;
   const { organizationId } = authorization;
 
@@ -933,7 +984,7 @@ export async function submitSensitivityProfileDecision(input = {}, dependencies 
     return buildKaiError("feature_disabled");
   }
 
-  const authorization = await authorizeReviewCockpitRequest(input, deps);
+  const authorization = await authorizeSensitivityReviewRequest(input, deps);
   if (!authorization.ok) return authorization.error;
   const { organizationId, actorContext } = authorization;
 

@@ -1322,9 +1322,9 @@ router.post("/admin/review-cockpit/sensitivity-profiles/:intakeSensitivityProfil
  * and a strictly empty body - the caller cannot choose actor identity, role,
  * queue_type, target_object_type, queue_status, priority, or any classification/
  * decision field) and then delegates entirely, exactly once, to the existing,
- * unmodified P1-06 `createSensitivityReviewQueueItem` via
- * `ensureSensitivityReviewQueueItem`, which reuses AUTH-KAI-003 and
- * VAL-FUP-001-P0 as-is rather than reimplementing either.
+ * existing P1-06 `createSensitivityReviewQueueItem` via
+ * `ensureSensitivityReviewQueueItem`, which preserves AUTH-KAI-003 and
+ * VAL-FUP-001-P0 while applying the owner-approved sensitivity-specific role rule.
  */
 router.post("/admin/review-cockpit/sensitivity-profiles/:intakeSensitivityProfileId/review-work", async (req, res) => {
   if (!metadataContentTypeIsSupported(req)) return sendKaiError(res, "unsupported_media_type");

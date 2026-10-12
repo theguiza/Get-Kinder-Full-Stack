@@ -289,13 +289,13 @@ export const GET_KINDER_STAGE_DESCRIPTIONS = Object.freeze({
  */
 export function getKinderReviewAccessText(access, membershipKnown) {
   if (!membershipKnown || (access !== "allowed" && access !== "not_allowed")) {
-    return "Your Get Kinder reviewer access could not be confirmed, so no review action is offered here.";
+    return "Your sensitivity-review access could not be confirmed, so no review action is offered here.";
   }
   if (access === "not_allowed") {
-    return "Your account does not have Get Kinder reviewer access for this organization, so no review action is offered here.";
+    return "Your account does not have sensitivity-review access for this organization, so no review action is offered here.";
   }
-  return "Your Get Kinder role can complete this organization's sensitivity reviews here: use \u201cReview sensitivity & allowed use\u201d "
-    + "next to a file waiting for sensitivity review. Your membership in this organization is not a Get Kinder membership, so "
+  return "Your organization-scoped review access can complete this organization's sensitivity reviews here: use \u201cReview sensitivity & allowed use\u201d "
+    + "next to a file waiting for sensitivity review. This access is limited to this organization; "
     + "the other Get Kinder reviews are completed in Get Kinder's own review workspace.";
 }
 
@@ -331,7 +331,7 @@ export function reviewsTabMessages(view, { canReviewFollowups = false, canReview
     messages.push({
       key: "sensitivity_review",
       heading: "Get Kinder sensitivity review needed",
-      detail: `${pluralFiles(sensitivityCount)} in this project ${sensitivityCount === 1 ? "is" : "are"} waiting for the Get Kinder sensitivity review, which your Get Kinder role can complete here. Use \u201cReview sensitivity & allowed use\u201d next to ${sensitivityCount === 1 ? "the file" : "each file"} below.`,
+      detail: `${pluralFiles(sensitivityCount)} in this project ${sensitivityCount === 1 ? "is" : "are"} waiting for the Get Kinder sensitivity review, which your organization-scoped review access can complete here. Use \u201cReview sensitivity & allowed use\u201d next to ${sensitivityCount === 1 ? "the file" : "each file"} below.`,
     });
   }
   if (clientCount > 0 && !canReviewFollowups) {

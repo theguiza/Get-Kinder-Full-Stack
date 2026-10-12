@@ -70,14 +70,18 @@ export const SENSITIVITY_PRESENCE_VALUES = Object.freeze(["unknown", "present", 
 export const SENSITIVITY_ALLOWED_USE_VALUES = Object.freeze(["unknown", "allowed", "not_allowed"]);
 
 /**
- * The authorized decider role set. This is deliberately the SAME set the
- * existing P1-06 sensitivity_review contract already authorizes
- * (SENSITIVITY_REVIEW_ALLOWED_ROLES in
- * Backend/kai/services/kaiReviewQueueService.js) - it is mirrored here rather
- * than widened, and the ledger's own
- * intake_sensitivity_review_decisions_b1a_02_role_check restates it in SQL.
+ * The authorized decider roles for this operation only. client_admin is
+ * accepted here only after the sensitivity-review authorization helper proves
+ * active Get Kinder admin membership and an active binding for this tenant.
+ * The ledger's role check mirrors this persisted attribution vocabulary.
  */
-export const SENSITIVITY_DECISION_ALLOWED_ROLES = Object.freeze(["gk_admin", "gk_operator", "gk_reviewer"]);
+export const SENSITIVITY_DECISION_ALLOWED_ROLES = Object.freeze([
+  "gk_admin",
+  "gk_operator",
+  "gk_reviewer",
+  "client_admin",
+]);
+export const SENSITIVITY_DECISION_GK_ROLES = Object.freeze(["gk_admin", "gk_operator", "gk_reviewer"]);
 
 export function isSensitivityAllowedUseDecisionOutcome(value) {
   return SENSITIVITY_ALLOWED_USE_DECISION_OUTCOMES.includes(value);

@@ -253,3 +253,37 @@ export function validateActorCanPerformOperation(actorContext, operation, organi
 
   return { ok: true, memberships };
 }
+
+/**
+ * Sensitivity review is the one review operation that an active, bound Get
+ * Kinder organization administrator may perform for that exact KAI tenant.
+ * The marker is emitted only by gkOrganizationBindingAuthority; a manually
+ * assigned client_admin membership does not satisfy this policy.
+ */
+export function validateActorCanPerformSensitivityReview(
+  actorContext,
+  operation,
+  organizationId,
+  allowedRoles,
+  { globalRolesOnly = false } = {},
+) {
+  const gkAuthorization = validateActorCanPerformOperation(
+    actorContext,
+    operation,
+    organizationId,
+    globalRolesOnly ? { allowedRoles, globalRolesOnly: true } : { allowedRoles, combineGlobalRoles: true },
+  );
+  if (gkAuthorization.ok) return gkAuthorization;
+
+  const memberships = activeMembershipsForOrg(actorContext, organizationId);
+  const boundOrganizationAdmin = memberships.some((membership) =>
+    membership.role_name === "client_admin"
+    && membership.source === "gk_organization_binding"
+    && typeof membership.gk_organization_id === "number"
+    && Number.isInteger(membership.gk_organization_id)
+    && membership.gk_organization_id > 0,
+  );
+  if (!boundOrganizationAdmin) return gkAuthorization;
+
+  return { ok: true, memberships, organizationAdminAuthorized: true };
+}

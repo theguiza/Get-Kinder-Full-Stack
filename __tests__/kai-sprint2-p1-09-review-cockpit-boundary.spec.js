@@ -6,10 +6,12 @@ import { executableSource } from "./support/kaiExecutableSource.js";
 
 import {
   getReviewCockpitFileProfileDetail,
+  getReviewCockpitIntakeFileSensitivityProfile,
   getReviewCockpitSensitivityProfileDetail,
   getReviewCockpitSourceCandidateDetail,
   getReviewCockpitCapabilities,
   listReviewCockpitQueue,
+  submitSensitivityProfileDecision,
   submitSourceCandidateDecision,
   __reviewCockpitServiceContract,
 } from "../Backend/kai/services/kaiReviewCockpitService.js";
@@ -781,6 +783,99 @@ test("P1-09 service (role enforcement): a global gk_admin/gk_operator/gk_reviewe
   );
   assert.equal(crossTenantMembership.ok, false);
   assert.equal(crossTenantMembership.error.code, "authorization_denied");
+});
+
+test("bound organization admins can reach only the sensitivity review read path for their bound tenant", async () => {
+  const orgC = "c5d17c5a-c55f-43af-9b21-fe63aafe733f";
+  const actor = humanActor({
+    kaiRoles: [],
+    organizationMemberships: [
+      { organization_id: ORG, membership_status: "active", role_name: "client_admin", source: "gk_organization_binding", gk_organization_id: 101 },
+      { organization_id: orgC, membership_status: "active", role_name: "client_admin", source: "gk_organization_binding", gk_organization_id: 303 },
+    ],
+  });
+  let queueReadCount = 0;
+  const dependencies = readDependencies({
+    async listReviewCockpitQueueItems(organizationId, selection) {
+      queueReadCount += 1;
+      assert.equal(organizationId, ORG);
+      assert.deepEqual(selection.queueTypes, ["sensitivity_review"]);
+      return [];
+    },
+    async getReviewCockpitIntakeFileSensitivityProfileRecord(organizationId, intakeFileId) {
+      assert.equal(organizationId, ORG);
+      assert.equal(intakeFileId, INTAKE_FILE);
+      return { organization_id: ORG, intake_file_id: INTAKE_FILE, intake_sensitivity_profile_id: SENSITIVITY };
+    },
+  });
+
+  const queue = await listReviewCockpitQueue({
+    organizationId: ORG,
+    actorContext: actor,
+    selection: { queueType: "sensitivity_review" },
+  }, dependencies);
+  assert.equal(queue.ok, true);
+  assert.deepEqual(queue.data.items, []);
+  assert.equal(queueReadCount, 1);
+
+  const fileLookup = await getReviewCockpitIntakeFileSensitivityProfile({
+    organizationId: ORG,
+    actorContext: actor,
+    intakeFileId: INTAKE_FILE,
+  }, dependencies);
+  assert.equal(fileLookup.ok, true);
+  assert.equal(fileLookup.data.intake_sensitivity_profile_id, SENSITIVITY);
+
+  for (const result of [
+    await listReviewCockpitQueue({ organizationId: ORG, actorContext: actor, selection: { queueType: "source_candidate_review" } }, dependencies),
+    await listReviewCockpitQueue({ organizationId: ORG, actorContext: actor, selection: {} }, dependencies),
+    await getReviewCockpitFileProfileDetail({ organizationId: ORG, actorContext: actor, fileProfileId: FILE_PROFILE }, dependencies),
+    await getReviewCockpitSourceCandidateDetail({ organizationId: ORG, actorContext: actor, intakeSourceCandidateId: CANDIDATE }, dependencies),
+    await submitSourceCandidateDecision({ organizationId: ORG, actorContext: actor, intakeSourceCandidateId: CANDIDATE, payload: { outcome: "rejected" } }, dependencies),
+  ]) {
+    assert.equal(result.ok, false);
+    assert.equal(result.error.code, "authorization_denied");
+  }
+
+  const crossTenantLookup = await getReviewCockpitIntakeFileSensitivityProfile({
+    organizationId: OTHER_ORG,
+    actorContext: actor,
+    intakeFileId: INTAKE_FILE,
+  }, dependencies);
+  assert.equal(crossTenantLookup.ok, false);
+  assert.equal(crossTenantLookup.error.code, "authorization_denied");
+
+  const scopedGkRole = await listReviewCockpitQueue({
+    organizationId: ORG,
+    actorContext: humanActor({
+      kaiRoles: [],
+      organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "gk_reviewer" }],
+    }),
+    selection: { queueType: "sensitivity_review" },
+  }, dependencies);
+  assert.equal(scopedGkRole.ok, false, "the former global-only cockpit GK requirement is preserved");
+  assert.equal(scopedGkRole.error.code, "authorization_denied");
+
+  let protectedDecisionActor = null;
+  const protectedDecision = await submitSensitivityProfileDecision({
+    organizationId: ORG,
+    intakeSensitivityProfileId: SENSITIVITY,
+    actorContext: actor,
+    payload: {
+      expected_updated_at: UPDATED_AT,
+      review_queue_item_id: QUEUE_ITEM,
+      decision: "needs_more_information",
+    },
+  }, {
+    env: SPRINT2_ONLY,
+    async recordSensitivityAllowedUseDecision(input) {
+      protectedDecisionActor = input.actorContext.actorUserId;
+      return { ok: false, error: { code: "conflict_current_state_changed" } };
+    },
+  });
+  assert.equal(protectedDecision.ok, false);
+  assert.equal(protectedDecision.error.code, "conflict_current_state_changed");
+  assert.equal(protectedDecisionActor, actor.actorUserId, "the protected decision service accepted the same organization-admin policy");
 });
 
 test("P1-09 service (tenant isolation): an actor with membership only in another organization is denied, and every read is scoped to the requested organization_id", async () => {

@@ -155,6 +155,44 @@ test("P1-06 service: accepts gk_admin, gk_operator, and gk_reviewer, and forward
   }
 });
 
+test("sensitivity review work admits only active bound organization admins for their own A/C tenants", async () => {
+  const orgC = "00000000-0000-4000-8000-000000000003";
+  const admin = humanActor({
+    kaiRoles: [],
+    organizationMemberships: [
+      { organization_id: ORG, membership_status: "active", role_name: "client_admin", source: "gk_organization_binding", gk_organization_id: 101 },
+      { organization_id: orgC, membership_status: "active", role_name: "client_admin", source: "gk_organization_binding", gk_organization_id: 303 },
+    ],
+  });
+
+  for (const organizationId of [ORG, orgC]) {
+    const probe = createRepositoryProbe(successResult);
+    const result = await createSensitivityReviewQueueItem(
+      { organizationId, intakeSensitivityProfileId: PROFILE, actorContext: admin, now: NOW },
+      { env: enabled, reviewQueueRepository: probe.reviewQueueRepository },
+    );
+    assert.equal(result.ok, true, organizationId);
+    assert.equal(probe.calls.length, 1);
+    assert.equal(probe.calls[0].identity.organizationId, organizationId);
+  }
+
+  for (const membership of [
+    { organization_id: ORG, membership_status: "active", role_name: "client_admin" },
+    { organization_id: ORG, membership_status: "revoked", role_name: "client_admin", source: "gk_organization_binding", gk_organization_id: 101 },
+    { organization_id: OTHER_ORG, membership_status: "active", role_name: "client_admin", source: "gk_organization_binding", gk_organization_id: 101 },
+    { organization_id: ORG, membership_status: "active", role_name: "client_contributor" },
+    { organization_id: ORG, membership_status: "active", role_name: "client_reviewer" },
+  ]) {
+    const probe = createRepositoryProbe(successResult);
+    const result = await createSensitivityReviewQueueItem(
+      { organizationId: ORG, intakeSensitivityProfileId: PROFILE, actorContext: humanActor({ kaiRoles: [], organizationMemberships: [membership] }), now: NOW },
+      { env: enabled, reviewQueueRepository: probe.reviewQueueRepository },
+    );
+    assert.equal(result.ok, false);
+    assert.equal(probe.calls.length, 0);
+  }
+});
+
 // Owner decision (2026-10-11): a mapped human holding a global gk_admin,
 // gk_operator, or gk_reviewer role may create sensitivity review work in an
 // organization where their active membership is a client role.

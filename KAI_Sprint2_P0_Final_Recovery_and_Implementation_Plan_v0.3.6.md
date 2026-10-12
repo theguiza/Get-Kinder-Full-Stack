@@ -2552,7 +2552,7 @@ Gate D policy is governed by `KAI_MVP_Sprint2_Data_Protection_and_Processing_Ope
 8. **AI and KAI learning.** External foundation-model training: NO by default. KAI/Get Kinder service improvement: YES. Client program improvement: YES. Cross-client learning using anonymized/aggregated information: YES. Identifiable information for KAI/Get Kinder improvement: YES where covered by the applicable disclosure/consent/contractual basis. Identifiable disclosure from one client to another: NO unless separately authorized. AI may process personal information where needed for the KAI service and covered by the applicable processing basis; AI-provider processing does not redefine KAI raw-file storage residency. Hard AI boundaries are preserved: no tenant bypass, no validator bypass, no autonomous destructive deletion, no autonomous final release requiring GK approval, and uploaded-document instructions never become authority.
 9. **Residency.** Raw uploaded client files: approved Canadian GCS storage. KAI application processing, metadata, derived records, and runtime/database: Render under the deployed architecture. Approved AI providers may process information required to provide KAI. Get Kinder does not offer client-specific alternative residency configurations during the MVP; a prospect requiring another infrastructure/residency configuration is outside the supported MVP offering unless Get Kinder later changes this policy. AI processing is not literally zero-retention storage; the v0.2 distinction between KAI raw-file storage and provider-side processing/temporary retention is preserved.
 10. **Subprocessors.** A lightweight MVP register only, recording provider, purpose, broad data category, broad processing/location posture where relevant, and external-model-training posture where relevant; updated when a material provider changes. No mandatory backup-region investigations, support-personnel geography studies, quarterly certification, or heavyweight vendor-control matrices.
-11. **Human review.** GK owns KAI review. Client review is recommended/requested only when materially useful for factual uncertainty, client-specific definitions, consent/story issues, governance issues, or material interpretation issues; it is not a mandatory intermediate gate for ordinary KAI processing. Preferred flow: KAI profiles → analyzes/classifies → extracts evidence → proposes claims → identifies limitations/conflicts → drafts output → GK reviews relevant output/package → release. Where the Backend Contract records an older distributed client/GK review recommendation, that historical text is preserved as historical evidence; this decision is the current owner-accepted MVP operating decision controlling Gate D and future execution.
+11. **Human review.** GK owns KAI review, except an owner-accepted organization-scoped exception: an existing Get Kinder organization administrator whose active membership is bound to the exact KAI organization may make the authoritative sensitivity/allowed-use decision for an eligible `intake_sensitivity_profile` in that organization. The authenticated human is attributed as `client_admin`. This grants no global GK role, platform-superuser authority, cross-organization access, unrelated evidence/claim approval, public-release approval, tenant override, or export finalization; all other GK review ownership remains unchanged. Owner acceptance recorded 2026-10-12 (`USER_CONFIRMED`). Client review remains recommended/requested only when materially useful for factual uncertainty, client-specific definitions, consent/story issues, governance issues, or material interpretation issues; it is not a mandatory intermediate gate for ordinary KAI processing. Preferred flow remains KAI profiling and analysis, evidence extraction, claim proposals, limitations/conflicts and draft output, followed by GK review of other relevant output/package before release. Where the Backend Contract records an older distributed client/GK review recommendation, that historical text is preserved as historical evidence.
 12. **Incident response.** CONTAIN → ASSESS → NOTIFY responsible GK person and affected parties when required → FIX → RECORD metadata-only incident/follow-up. No fixed 72-hour contractual promise is added.
 13. **Support access.** Authenticated, need-based access by GK/authorized providers; no shared credentials; raw files accessed only where reasonably necessary for authorized service, review, or support; no credentials, signed URLs, or unnecessary raw client data in ordinary support communications; material raw-data access should be auditable. No geographic-support restriction or separate approval bureaucracy for the MVP.
 14. **Anonymization.** Avoid unnecessary duplication of identifiable information; keep identifiable information when reasonably needed to provide/improve the service; prefer anonymization once identifiers are no longer necessary but analytical/program value remains. Anonymized/aggregated information may be retained longer-term for KAI, Get Kinder, and program improvement. Anonymization does not eliminate the controls in this section while data remains identifiable during intake, processing, or use.
@@ -2577,7 +2577,7 @@ Real data remains blocked until all of the following are accepted and verified:
 * intake schema verification;
 * threat-model review;
 * allowed-use and consent controls reflecting the v0.2 allowed-use position (decision 6) and the release-review trigger list (decision 7);
-* human review ownership: GK owns KAI review; client review recommended/requested, not a mandatory intermediate gate for ordinary KAI processing (decision 11);
+* human review ownership: GK owns KAI review, except the owner-accepted same-organization `client_admin` sensitivity/allowed-use decision for eligible `intake_sensitivity_profile` records; client review remains recommended/requested, not a mandatory intermediate gate for ordinary KAI processing (decision 11);
 * approved KAI-learning/external-model-training posture established: no unauthorized external model training; cross-client learning using anonymized/aggregated information is permitted (decision 8) — replaces the prior blanket "no cross-client reuse" requirement;
 * unrestricted assistant raw-file access blocked;
 * operational monitoring and support-access rules: authenticated, need-based access, no shared credentials, no geographic restriction or separate approval bureaucracy for the MVP (decision 13).
@@ -37530,8 +37530,10 @@ or Current State change.
 - P2-09: `gk_reviewer`/`gk_admin`; P2-12: `gk_reviewer`/`gk_admin` with
   active same-organization membership; P2-10: `gk_reviewer` only. None states
   whether the role is global or organization-scoped.
-- Decision 11 (Gate D): GK owns KAI review. No requirement found that
-  revoking the global role must end every GK review permission.
+- At this recorded 2026-10-11 checkpoint, Decision 11 said GK owns KAI review.
+  The owner accepted a narrow same-organization `client_admin` exception for
+  sensitivity/allowed-use decisions on 2026-10-12; all other GK review ownership
+  remains unchanged (see the current Decision 11 above).
 
 **Authorization matrix (TOOL_VERIFIED; predicate at
 `Backend/kai/auth/kaiAuthorizationService.js:220-232`; every row also needs
@@ -37779,3 +37781,47 @@ proven here with a synthetic CHECK stand-in.
 No push, deployment, shared or production database, cloud, feature-flag,
 tenant, live membership or role, credential, `.env`, schema, or
 `00_KAI_CURRENT_STATE.md` change.
+
+## Owner-approved organization-admin sensitivity review (2026-10-12)
+
+**Owner decision (USER_CONFIRMED):** An existing, active Get Kinder
+organization administrator with an active Get Kinder organization membership
+and active GK-to-KAI binding may make the authoritative sensitivity/allowed-use
+decision for an eligible `intake_sensitivity_profile` in that exact KAI
+organization. Attribute the decision to the authenticated human as
+`client_admin`. No global GK or platform-superuser authority, cross-organization
+access, unrelated review authority, external-release authority, or export
+finalization is granted. All other GK review ownership remains unchanged.
+Section 11 and Gate D above record this exception.
+
+**Local implementation:** added a shared operation-specific authorization
+predicate requiring the derived `client_admin` membership marker, active status,
+exact KAI organization, and positive GK organization binding id. Applied it
+only to sensitivity review capability, sensitivity queue creation/listing,
+sensitivity profile reads, and sensitivity decisions. Generic `read_intake`,
+other Review Cockpit queues/details/decisions, claim-library access, and internal
+GK workspace gates remain unchanged. The Knowledge Studio file-stage
+eligibility check remains unchanged. Added persisted `client_admin` decision
+attribution vocabulary through an additive migration and rollback; validators,
+tenant checks, feature gating, transactions, and audit composition remain in
+the existing paths.
+
+**Verification (TOOL_VERIFIED, `DATABASE_URL` set to loopback sentinel):**
+
+| Check | Result |
+| --- | --- |
+| B1A-2 boundary + P1-09 Review Cockpit boundary + P1-06 review queue boundary | 92 passed, 0 failed |
+| Combined B1A-2/P1-09/P1-06/client evidence pipeline run | 116 passed; 1 existing HTTP route test failed because sandbox localhost listen was denied (`server.address()` null) |
+| Synthetic PostgreSQL persistence/audit runner | NOT_CONFIRMED; local `initdb` failed creating shared memory (`Operation not permitted`) before database setup |
+| Knowledge Studio browser acceptance including bound org-admin journey | NOT_CONFIRMED; same `initdb` shared-memory restriction before browser/schema setup |
+| `git diff --check` | PASS after final package-end record |
+
+The added synthetic DB and browser tests assert real decision, audit,
+attribution, readback, tenant isolation, no downstream evidence/claim writes,
+and normal UI navigation when their supported runners can execute. Stubbed
+service tests are not persistence/audit proof. No production role, binding,
+database, feature flag, or deployment was changed.
+
+**Status:** OWNER_APPROVED_ORG_ADMIN_SENSITIVITY_REVIEW_IMPLEMENTED_LOCALLY;
+PURE_BOUNDARY_TESTS_PASS; SYNTHETIC_PERSISTENCE_AND_BROWSER_ACCEPTANCE_NOT_CONFIRMED_IN_SANDBOX;
+NO_PRODUCTION_CHANGE.

@@ -41,6 +41,7 @@ async function runB1A02IntegrationSuite() {
   const { createPostgresReviewQueueRepository } = await import("../Backend/kai/dictionary/postgresReviewQueueRepository.js");
   const { createPostgresSensitivityAllowedUseReviewRepository } = await import("../Backend/kai/dictionary/postgresSensitivityAllowedUseReviewRepository.js");
   const { recordSensitivityAllowedUseDecision } = await import("../Backend/kai/services/kaiSensitivityAllowedUseReviewService.js");
+  const { createProductionMetadataOnlyAuditForSensitivityAllowedUseDecision } = await import("../Backend/kai/services/kaiMetadataOnlyAuditComposition.js");
   const { getReviewCockpitSensitivityProfileDetail, submitSensitivityProfileDecision } = await import("../Backend/kai/services/kaiReviewCockpitService.js");
   const {
     getReviewCockpitSensitivityProfileRecord,
@@ -55,6 +56,7 @@ async function runB1A02IntegrationSuite() {
   const SENSITIVITY_1 = "80000000-0000-4000-8000-000000000001";
   const SENSITIVITY_2 = "80000000-0000-4000-8000-000000000002";
   const REVIEWER = "90000000-0000-4000-8000-000000000001";
+  const ORG_ADMIN = "90000000-0000-4000-8000-000000000003";
   const NOW = "2026-08-31T10:00:00.000Z";
   const T1 = "2026-08-31T10:05:00.000Z";
   const T2 = "2026-08-31T10:10:00.000Z";
@@ -99,6 +101,18 @@ async function runB1A02IntegrationSuite() {
     actorUserId: "90000000-0000-4000-8000-000000000002",
     kaiRoles: [],
     organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_viewer" }],
+  };
+  const organizationAdminActor = {
+    actorType: "human",
+    actorUserId: ORG_ADMIN,
+    kaiRoles: [],
+    organizationMemberships: [{
+      organization_id: ORG,
+      membership_status: "active",
+      role_name: "client_admin",
+      source: "gk_organization_binding",
+      gk_organization_id: 101,
+    }],
   };
   const systemActor = {
     actorType: "system",
@@ -739,5 +753,97 @@ async function runB1A02IntegrationSuite() {
     assert.equal(accepted.data.current_decision.decided_by, REVIEWER);
     assert.equal(accepted.data.sensitivity_review_queue_item.queue_status, "open");
     assert.equal(accepted.data.current_decision.authority.review_complete, false);
+  });
+
+  test("owner-authorized bound organization admin decision persists client_admin attribution, audit, and readback", async () => {
+    const item = await queueRow(SENSITIVITY_2);
+    const beforeCounts = await schemaRowCounts();
+    const metadataOnlyAudit = createProductionMetadataOnlyAuditForSensitivityAllowedUseDecision({
+      organizationId: ORG,
+      intakeSensitivityProfileId: SENSITIVITY_2,
+      actorContext: organizationAdminActor,
+      now: T4,
+    });
+    const result = await recordSensitivityAllowedUseDecision({
+      organizationId: ORG,
+      intakeSensitivityProfileId: SENSITIVITY_2,
+      reviewQueueItemId: item.review_queue_item_id,
+      expectedUpdatedAt: new Date(item.updated_at).toISOString(),
+      decision: "reviewed",
+      reviewedSnapshot: internalOnlySnapshot(),
+      actorContext: organizationAdminActor,
+      now: T4,
+    }, {
+      env: ENV,
+      sensitivityAllowedUseReviewRepository: decisionRepository,
+      metadataOnlyAudit,
+    });
+
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.data.decision.decided_by, ORG_ADMIN);
+    assert.equal(result.data.decision.decided_by_role, "client_admin");
+    assert.equal(result.data.decision.created_by_type, "human");
+    assert.equal(result.data.decision.decision_outcome, "reviewed");
+
+    const persisted = await query(
+      `SELECT decided_by::text AS decided_by, decided_by_role, created_by_type
+         FROM kai.intake_sensitivity_review_decisions
+        WHERE organization_id = $1::uuid AND decision_id = $2::uuid`,
+      [ORG, result.data.decision.decision_id],
+    );
+    assert.deepEqual(persisted[0], { decided_by: ORG_ADMIN, decided_by_role: "client_admin", created_by_type: "human" });
+
+    const auditRows = await query(
+      `SELECT actor_user_id::text AS actor_user_id, actor_type, metadata
+         FROM kai.audit_events
+        WHERE organization_id = $1::uuid
+          AND object_type::text = 'intake_sensitivity_profile'
+          AND metadata->>'operation' = 'sensitivity_review_decision_recorded'
+          AND metadata->>'object_id' = $2
+        ORDER BY audit_event_id DESC LIMIT 1`,
+      [ORG, SENSITIVITY_2],
+    );
+    assert.equal(auditRows.length, 1);
+    assert.equal(auditRows[0].actor_user_id, ORG_ADMIN);
+    assert.equal(auditRows[0].actor_type, "human");
+    assert.equal(auditRows[0].metadata.metadata_only, true);
+
+    const readback = await getReviewCockpitSensitivityDecisionRecord(ORG, SENSITIVITY_2, pool);
+    assert.equal(readback.lineageAmbiguous, false);
+    assert.equal(readback.currentDecision.decision_id, result.data.decision.decision_id);
+    assert.equal(readback.currentDecision.decided_by_role, "client_admin");
+    const cockpitReadback = await getReviewCockpitSensitivityProfileDetail({
+      organizationId: ORG,
+      intakeSensitivityProfileId: SENSITIVITY_2,
+      actorContext: organizationAdminActor,
+    }, {
+      env: ENV,
+      getReviewCockpitSensitivityProfileRecord: (organizationId, profileId) =>
+        getReviewCockpitSensitivityProfileRecord(organizationId, profileId, pool),
+    });
+    assert.equal(cockpitReadback.ok, true, JSON.stringify(cockpitReadback));
+    assert.equal(cockpitReadback.data.current_decision.decided_by_role, "client_admin");
+    assert.equal((await queueRow(SENSITIVITY_2)).queue_status, "resolved");
+
+    const beforeDenied = await schemaRowCounts();
+    const crossTenant = await recordSensitivityAllowedUseDecision({
+      organizationId: OTHER_ORG,
+      intakeSensitivityProfileId: SENSITIVITY_2,
+      reviewQueueItemId: item.review_queue_item_id,
+      expectedUpdatedAt: new Date(item.updated_at).toISOString(),
+      decision: "needs_more_information",
+      actorContext: organizationAdminActor,
+      now: T4,
+    }, {
+      env: ENV,
+      sensitivityAllowedUseReviewRepository: decisionRepository,
+      metadataOnlyAudit,
+    });
+    assert.equal(crossTenant.ok, false);
+    assert.equal(crossTenant.error.code, "authorization_denied");
+    assert.deepEqual(changedTables(beforeDenied, await schemaRowCounts()), []);
+
+    const changed = changedTables(beforeCounts, await schemaRowCounts());
+    assert.deepEqual(changed, ["audit_events", "intake_sensitivity_review_decisions", "upload_lifecycle_audit"]);
   });
 }

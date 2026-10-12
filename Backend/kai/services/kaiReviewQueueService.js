@@ -13,7 +13,7 @@ import {
 } from "../config/kaiSprint2P0Contract.js";
 import { buildKaiError, validationBlocked } from "../errors/kaiErrors.js";
 import { resolveKaiActorContext } from "../auth/kaiActorContext.js";
-import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationService.js";
+import { validateActorCanPerformOperation, validateActorCanPerformSensitivityReview } from "../auth/kaiAuthorizationService.js";
 import { withTransaction } from "../db/kaiDb.js";
 import { insertRequiredSuccessfulAuditEvent } from "../db/kaiAuditQueries.js";
 import {
@@ -441,14 +441,11 @@ export async function createSensitivityReviewQueueItem(input, dependencies = {})
   // Owner decision (2026-10-11): an allowed global KAI role also authorizes the
   // actor in an organization where their active membership is a client role.
   // An active membership in the requested organization is still required.
-  const auth = validateActorCanPerformOperation(
+  const auth = validateActorCanPerformSensitivityReview(
     actorContext,
     SENSITIVITY_REVIEW_OPERATION,
     input.organizationId,
-    {
-      allowedRoles: SENSITIVITY_REVIEW_ALLOWED_ROLES,
-      combineGlobalRoles: true,
-    },
+    SENSITIVITY_REVIEW_ALLOWED_ROLES,
   );
   if (!auth.ok) {
     return buildKaiError("tenant_boundary_violation", { blockers: auth.blockers });
@@ -491,9 +488,9 @@ export async function createSensitivityReviewQueueItem(input, dependencies = {})
  * This function implements no authorization, idempotency, replay, or
  * persistence logic of its own. It resolves the request's actor context using
  * the exact same seam `updateReviewQueueStatus` above already uses, then hands
- * the operation entirely to the existing, unmodified `createSensitivityReviewQueueItem`:
- * AUTH-KAI-003 (mapped-human-only, gk_admin/gk_operator/gk_reviewer,
- * active-membership), VAL-FUP-001-P0 (the fail-closed creation-trigger
+ * the operation entirely to the existing `createSensitivityReviewQueueItem`:
+ * AUTH-KAI-003 (mapped-human-only, existing GK roles or a bound client_admin
+ * for this exact organization), VAL-FUP-001-P0 (the fail-closed creation-trigger
  * predicate), and the partial-unique-index create/replay semantics all continue
  * to live there, untouched and not reimplemented. This creates no new queue
  * table, no new queue abstraction, and no parallel review-work service; it never

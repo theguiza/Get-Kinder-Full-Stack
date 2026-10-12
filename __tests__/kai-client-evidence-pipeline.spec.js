@@ -559,8 +559,8 @@ test("frontend Reviews tab: each Get Kinder-owned stage is described, and a file
 });
 
 test("frontend Reviews tab: whether this actor may perform Get Kinder reviews comes from the server answers, never assumed", () => {
-  assert.match(getKinderReviewAccessText("not_allowed", true), /^Your account does not have Get Kinder reviewer access for this organization/);
-  assert.match(getKinderReviewAccessText("allowed", true), /^Your Get Kinder role can complete this organization's sensitivity reviews here: use \u201cReview sensitivity & allowed use\u201d/);
+  assert.match(getKinderReviewAccessText("not_allowed", true), /^Your account does not have sensitivity-review access for this organization/);
+  assert.match(getKinderReviewAccessText("allowed", true), /^Your organization-scoped review access can complete this organization's sensitivity reviews here: use \u201cReview sensitivity & allowed use\u201d/);
   assert.doesNotMatch(getKinderReviewAccessText("allowed", true), /Contact a Get Kinder administrator/);
   for (const [access, membershipKnown] of [["unknown", true], ["allowed", false], ["not_allowed", false], [undefined, true]]) {
     assert.match(getKinderReviewAccessText(access, membershipKnown), /could not be confirmed/, `${access}/${membershipKnown}`);
@@ -612,7 +612,7 @@ test("Reviews messages: an offered sensitivity review is action-required, never 
   const mixed = reviewsTabMessages(view([], [atSensitivity(1), atSensitivity(2), atSource]), { canReviewSensitivity: true });
   assert.deepEqual(keys(mixed), ["sensitivity_review"]);
   assert.equal(mixed[0].heading, "Get Kinder sensitivity review needed");
-  assert.equal(mixed[0].detail, "2 files in this project are waiting for the Get Kinder sensitivity review, which your Get Kinder role can complete here. "
+  assert.equal(mixed[0].detail, "2 files in this project are waiting for the Get Kinder sensitivity review, which your organization-scoped review access can complete here. "
     + "Use \u201cReview sensitivity & allowed use\u201d next to each file below.", "counts only files the action is offered for");
   assert.doesNotMatch(said(mixed), /No action is currently required/);
   assert.match(reviewsTabMessages(view([], [atSensitivity(1)]), { canReviewSensitivity: true })[0].detail, /^1 file in this project is waiting .* next to the file below\.$/);

@@ -193,6 +193,7 @@ try {
     "kai_sprint2_p2_09_p2_10_p2_11_forward_reconciliation",
     "kai_sprint2_p14_01_generation_run_engagement_binding",
     "kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger",
+    "kai_sprint2_b1a_02_client_admin_sensitivity_review",
     "kai_sprint2_p2_12_human_review_decision_ledger",
     "kai_sprint2_p2_10_funder_coverage_authority",
     "kai_sprint2_p2_10_public_coverage_authority",

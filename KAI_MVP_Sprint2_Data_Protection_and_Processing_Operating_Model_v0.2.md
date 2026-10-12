@@ -271,7 +271,7 @@ No mandatory backup-region investigations, support-personnel geography studies, 
 
 ## 11. Human review
 
-GK owns KAI review during the MVP.
+GK owns KAI review during the MVP, with one owner-accepted, organization-scoped exception: an existing Get Kinder organization administrator may make the authoritative sensitivity/allowed-use decision for an eligible `intake_sensitivity_profile` belonging to the KAI organization bound to that administrator's active Get Kinder organization membership. The decision is attributed to the authenticated human as `client_admin`. This does not grant a global GK role, platform-superuser authority, cross-organization access, unrelated evidence or claim approval, public-release approval, tenant override, or export finalization. All other GK review ownership remains unchanged. This exception was accepted by the owner in the KAI Project conversation on 2026-10-12 (`USER_CONFIRMED`).
 
 Client review is recommended or requested when client knowledge is materially needed to resolve:
 

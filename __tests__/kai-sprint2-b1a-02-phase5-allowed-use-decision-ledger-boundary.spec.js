@@ -19,6 +19,8 @@ import { validateSensitivityProfileDecisionRequest } from "../Backend/kai/valida
 import { __sensitivityAllowedUseDecisionRepositoryTestables } from "../Backend/kai/dictionary/postgresSensitivityAllowedUseDecisionRepository.js";
 import { __sensitivityAllowedUseReviewRepositoryTestables } from "../Backend/kai/dictionary/postgresSensitivityAllowedUseReviewRepository.js";
 import { __sensitivityAllowedUseReviewServiceContract } from "../Backend/kai/services/kaiSensitivityAllowedUseReviewService.js";
+import { recordSensitivityAllowedUseDecision } from "../Backend/kai/services/kaiSensitivityAllowedUseReviewService.js";
+import { getReviewCockpitCapabilities } from "../Backend/kai/services/kaiReviewCockpitService.js";
 import { __reviewQueueRepositoryContract } from "../Backend/kai/dictionary/postgresReviewQueueRepository.js";
 
 const NOW = "2026-08-31T10:00:00.000Z";
@@ -66,17 +68,113 @@ test("B1A-2 contract: queue projections resolve only on a terminal decision; nee
   assert.equal(sensitivityReviewedSnapshotRequired("needs_more_information"), false);
 });
 
-test("B1A-2 contract: the decider role set mirrors the existing P1-06 sensitivity_review role set exactly", () => {
+test("B1A-2 contract: sensitivity decision roles include only the accepted client_admin extension to existing GK roles", () => {
   const serviceRoles = [...__sensitivityAllowedUseReviewServiceContract.RECORD_SENSITIVITY_DECISION_ALLOWED_ROLES].sort();
-  assert.deepEqual([...SENSITIVITY_DECISION_ALLOWED_ROLES].sort(), ["gk_admin", "gk_operator", "gk_reviewer"]);
-  assert.deepEqual(serviceRoles, ["gk_admin", "gk_operator", "gk_reviewer"]);
-  // The same set the already-accepted P1-06 queue-creation contract authorizes.
+  assert.deepEqual([...SENSITIVITY_DECISION_ALLOWED_ROLES].sort(), ["client_admin", "gk_admin", "gk_operator", "gk_reviewer"]);
+  assert.deepEqual(serviceRoles, ["client_admin", "gk_admin", "gk_operator", "gk_reviewer"]);
+  // Queue creation keeps its existing GK role set; client_admin is admitted only
+  // by the operation-specific bound-administrator authorization.
   const p1_06ServiceSource = readFileSync("Backend/kai/services/kaiReviewQueueService.js", "utf8");
   assert.match(
     p1_06ServiceSource,
     /const SENSITIVITY_REVIEW_ALLOWED_ROLES = new Set\(\["gk_admin", "gk_operator", "gk_reviewer"\]\)/,
   );
   assert.equal(__reviewQueueRepositoryContract.SENSITIVITY_REVIEW_TARGET_OBJECT_TYPE, "intake_sensitivity_profile");
+});
+
+test("organization-admin sensitivity authority is tenant-bound and shared by capability and decision execution", async () => {
+  const orgA = "00000000-0000-4000-8000-00000000000a";
+  const orgB = "00000000-0000-4000-8000-00000000000b";
+  const orgC = "00000000-0000-4000-8000-00000000000c";
+  const actor = {
+    actorType: "human",
+    actorUserId: "90000000-0000-4000-8000-00000000000a",
+    kaiRoles: [],
+    organizationMemberships: [
+      { organization_id: orgA, membership_status: "active", role_name: "client_admin", source: "gk_organization_binding", gk_organization_id: 101 },
+      { organization_id: orgC, membership_status: "active", role_name: "client_admin", source: "gk_organization_binding", gk_organization_id: 303 },
+    ],
+  };
+  const env = { KAI_SPRINT2_ENABLED: "true" };
+
+  for (const organizationId of [orgA, orgC]) {
+    const capability = await getReviewCockpitCapabilities({ organizationId, actorContext: actor }, { env });
+    assert.equal(capability.ok, true);
+    assert.equal(capability.data.can_manage_sensitivity_review, true);
+  }
+  const crossTenantCapability = await getReviewCockpitCapabilities(
+    { organizationId: orgB, actorContext: actor },
+    { env },
+  );
+  assert.equal(crossTenantCapability.data.can_manage_sensitivity_review, false);
+
+  for (const invalidMembership of [
+    { ...actor.organizationMemberships[0], membership_status: "revoked" },
+    { ...actor.organizationMemberships[0], source: "manual_membership" },
+    { ...actor.organizationMemberships[0], source: "gk_organization_binding", gk_organization_id: null },
+  ]) {
+    const denied = await getReviewCockpitCapabilities(
+      { organizationId: orgA, actorContext: { ...actor, organizationMemberships: [invalidMembership] } },
+      { env },
+    );
+    assert.equal(denied.data.can_manage_sensitivity_review, false);
+  }
+
+  for (const role of ["client_contributor", "client_reviewer"]) {
+    const denied = await getReviewCockpitCapabilities({
+      organizationId: orgA,
+      actorContext: {
+        ...actor,
+        organizationMemberships: [{ organization_id: orgA, membership_status: "active", role_name: role }],
+      },
+    }, { env });
+    assert.equal(denied.data.can_manage_sensitivity_review, false);
+  }
+
+  const disabled = await getReviewCockpitCapabilities({ organizationId: orgA, actorContext: actor }, { env: {} });
+  assert.equal(disabled.ok, false);
+  assert.equal(disabled.error.code, "feature_disabled");
+
+  let persistedRole = null;
+  const decision = await recordSensitivityAllowedUseDecision({
+    organizationId: orgA,
+    intakeSensitivityProfileId: "80000000-0000-4000-8000-00000000000a",
+    reviewQueueItemId: QUEUE_ITEM,
+    expectedUpdatedAt: NOW,
+    decision: "needs_more_information",
+    actorContext: { ...actor, organizationMemberships: [actor.organizationMemberships[0]] },
+    now: NOW,
+  }, {
+    env,
+    metadataOnlyAudit: { prepareMetadataOnlyAudit() { return { ok: true, async publish() {} }; } },
+    sensitivityAllowedUseReviewRepository: {
+      async recordSensitivityAllowedUseDecision(input) {
+        persistedRole = input.actorRole;
+        return { ok: true, data: { decision: {}, reviewQueueItem: {}, replayed: false } };
+      },
+    },
+  });
+  assert.equal(decision.ok, true, JSON.stringify(decision));
+  assert.equal(persistedRole, "client_admin");
+
+  const existingGkReviewer = await getReviewCockpitCapabilities({
+    organizationId: orgA,
+    actorContext: {
+      ...actor,
+      kaiRoles: ["gk_reviewer"],
+      organizationMemberships: [{ organization_id: orgA, membership_status: "active", role_name: "client_viewer" }],
+    },
+  }, { env });
+  assert.equal(existingGkReviewer.data.can_manage_sensitivity_review, true);
+  const gkReviewerWithoutTargetMembership = await getReviewCockpitCapabilities({
+    organizationId: orgB,
+    actorContext: {
+      ...actor,
+      kaiRoles: ["gk_reviewer"],
+      organizationMemberships: [actor.organizationMemberships[0]],
+    },
+  }, { env });
+  assert.equal(gkReviewerWithoutTargetMembership.data.can_manage_sensitivity_review, false);
 });
 
 test("B1A-2 snapshot validation: a complete internal-only reviewed snapshot with every permission false is valid", () => {
@@ -447,6 +545,7 @@ test("B1A-2 migration: the ledger is append-only, human-only, and adds no column
   );
   assert.match(migration, /CREATE TRIGGER intake_sensitivity_review_decisions_b1a_02_append_only\n {2}BEFORE UPDATE OR DELETE ON kai\.intake_sensitivity_review_decisions/);
   assert.match(migration, /CHECK \(created_by_type = 'human'\)/);
+  assert.match(migration, /CHECK \(decided_by_role IN \('gk_admin', 'gk_operator', 'gk_reviewer', 'client_admin'\)\)/);
   assert.match(migration, /CHECK \(decision_outcome IN \('reviewed', 'needs_more_information'\)\)/);
   assert.match(migration, /CREATE UNIQUE INDEX ux_intake_sensitivity_review_decisions_b1a_02_root_per_lineage/);
   assert.match(migration, /CREATE UNIQUE INDEX ux_intake_sensitivity_review_decisions_b1a_02_single_successor/);
