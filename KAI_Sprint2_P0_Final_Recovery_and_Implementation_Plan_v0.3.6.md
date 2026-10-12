@@ -37245,3 +37245,253 @@ Commit: `b32cdff` Show effective administrator authority in Team & Access.
 No push, deployment, shared or production database, cloud, feature-flag,
 tenant, membership, credential, `.env`, schema, or `00_KAI_CURRENT_STATE.md`
 change.
+
+### Reviewer provisioning to review action: GK reviewer and NPO client reviewer (2026-10-12)
+
+**Owner authorization (USER_CONFIRMED):** complete the existing role system so
+that an authorized administrator can provision a reviewer who can then perform
+the intended review: (A) baseline, the working superuser sensitivity review;
+(B) GK platform administrator grants `gk_reviewer` -> recipient performs a GK
+sensitivity review through the existing UI and routes; (C) NPO `client_admin`
+assigns `client_reviewer` in Team & Access -> recipient performs the existing
+client follow-up review. Reuse the existing UI, routes, services, validators,
+and persistence. Smallest supported correction only; no new role model,
+bypass, or review engine; GK controls only in the existing superuser
+administration interface; no automatic GK authority for NPO administrators. No
+production, push, deploy, credential, flag, cloud, or Current State change.
+
+**Starting state (TOOL_VERIFIED):** `main` at
+`4a805e4839118ef93b9f9c3643bbc2d968dc7be8`, clean.
+
+**A. Superuser review path and what admits it (TOOL_VERIFIED from code and
+browser):**
+- UI: Impact Library -> Knowledge Studio. `ImpactLibraryApp.jsx:622` mounts
+  the GK Studio (`ImpactEvidenceLibrary.jsx`) when
+  `GET .../organizations/:org/access-capabilities` reports
+  `internalKnowledgeWorkspace` (`kaiOrganizationAccessCapabilitiesService.js`,
+  claim-library read policy: membership role in {gk_admin, gk_operator,
+  gk_reviewer}, or platform superuser). That route resolves the actor from the
+  full request (`attachKaiSprint2ActorContext`), so `is_admin` reaches it.
+- Reviews -> Review Queue "Review sensitivity & allowed use" -> Processing card
+  (`SensitivityReviewCardBody.jsx`), gated by
+  `GET /admin/review-cockpit/capabilities`.
+- Routes: `sprint2IntakeApi.js:1203` (capabilities), `:1246` (profile detail),
+  `:1287` (decision), `:1329` (review work). Every cockpit handler passes
+  `requestContext(req)`, whose `safeAuthenticatedUser` (`:531`) forwards only
+  `{ id }`. The service re-resolves the actor from that id, so
+  `isAdminRequest` is false there: platform-superuser authority never reaches
+  the review cockpit.
+- Authorization: `kaiReviewCockpitService.js` `authorizeReviewCockpitRequest`
+  (`:194`) -> `validateActorCanPerformOperation(read_intake,
+  {gk_admin, gk_operator, gk_reviewer}, globalRolesOnly)`: an active membership
+  in the organization (any role, stored or GK-binding-derived) AND a global GK
+  role in `kai.user_roles`. The decision service
+  `kaiSensitivityAllowedUseReviewService.js:125` repeats it
+  (`combineGlobalRoles`). `resolveAuthorizedHumanRole` attributes
+  `decided_by_role` (membership role first, then global role).
+- Persistence: `postgresSensitivityAllowedUseReviewRepository` append-only
+  decision + queue compare-and-set + `audit_events` and
+  `upload_lifecycle_audit`; then the P1-07 handoff.
+- Projection: `kaiClientEvidencePipelineService.js` (client Studio Files and
+  Reviews).
+- Therefore a superuser completes this review only because they also hold a
+  global GK role and an active membership (for example, derived `client_admin`
+  through a GK organization-admin binding). Proven: a site admin with that
+  derived membership but no global KAI role gets the GK Studio but cockpit
+  capabilities `false` and a decision `403 role_not_allowed`. The deployed
+  owner account's roles are NOT_CONFIRMED.
+
+**Comparison with an ordinary GK reviewer (TOOL_VERIFIED):** the review UI,
+routes, service, validator, and persistence are identical. The first
+difference is organization scope: the recipient of a global `gk_reviewer`
+role with no membership has no organization in the Impact Library
+(`listAuthorizedOrganizations` is membership-based) and every cockpit route
+returns `VAL-AUT-003`. The GK Studio mount additionally needs a stored GK-role
+membership (the claim-library policy reads membership roles only). The only
+membership writer (`manageOrganizationMembership`) accepted only client roles,
+so no governed path could give a GK reviewer an organization. The global-role
+API (`PUT /api/kai/sprint2/access-administration/global-roles/:id`,
+`manageGlobalKaiRole`, platform superuser only, audited) worked but had no
+frontend caller. Of the GK services, only the review cockpit (and
+`kaiExternalRequirementSetRegistrationService`) requires the global role; the
+others (P1-06 review work, P2-09, P2-10, P2-12, claim/evidence libraries, ...)
+authorize the organization membership role.
+
+**C. NPO path (TOOL_VERIFIED):** Team & Access role select ->
+`PUT .../organizations/:org/memberships/:id` -> `manageOrganizationMembership`
+-> `upsertOrganizationMembershipRoleStatus` + audit; the recipient's next
+request resolves the stored `client_reviewer` (`resolveKaiActorContext`);
+`clientFollowupReview` capability -> "Answer follow-up questions" ->
+`/kai/client-followups` (`KaiClientFollowupReview.jsx`) -> `GET
+.../client-followups` and `POST .../claims/:claim/client-followups/:item/complete`
+(`kaiClientFollowupCompletionService.js`, `client_reviewer` only) -> queue
+compare-and-set + `upload_lifecycle_audit` + `audit_events`. Authorization was
+complete. Defect: every Impact Library link was the bare `/kai/client-followups`;
+that page (`index.js:2936`) reads the organization only from
+`?organizationId=`, so the reviewer landed on an empty "Organization id" field
+and had to type the KAI organization UUID. The existing client Studio browser
+spec masked this by hard-coding the organization in its harness page.
+
+**Changes (TOOL_VERIFIED):**
+- `kaiAccessAdministrationContract.js`:
+  `KAI_PLATFORM_SUPERUSER_ASSIGNABLE_ORGANIZATION_ROLES` = client roles +
+  `gk_reviewer`. `kaiAccessAdministrationService.js`
+  `manageOrganizationMembership`: a platform superuser may assign (or set
+  inactive) `gk_reviewer`; anyone else gets the existing `validation_blocker`
+  for it. `gk_admin`/`gk_operator` memberships remain unassignable. Same
+  writer, lock, guards, and audit. No authorization predicate, review service,
+  route, or schema change.
+- `/admin` -> Organizations -> KAI Access (`adminDashboard.jsx`,
+  `kaiOrganizationAccessLogic.js`), only when the roster reports
+  `global_roles_visible` (server-side platform superuser): `gk_reviewer` in the
+  role selector (existing email lookup + membership PUT), a "Global KAI roles"
+  column showing each member's existing global roles, "Grant gk_reviewer" /
+  "Revoke gk_reviewer" (existing global-role PUT), "Remove gk_reviewer here"
+  (membership PUT `inactive`), and an explanation of the two halves. Nothing
+  added to Team & Access.
+- `clientFollowupReviewHref(organizationId)` in `impactEvidenceLibraryLogic.js`;
+  the seven client follow-up links in five components (Home, Studio Gaps and Reviews x2, Files status,
+  Funder Requirements, Generated Drafts) pass the selected organization.
+- Tests: new
+  `__tests__/kai-reviewer-provisioning-browser-acceptance.integration.spec.js`
+  (registered in the client browser runner); unit tests in
+  `kai-sprint2-p2-access-administration.spec.js` (4),
+  `kai-organization-access-admin-ui.spec.js` (3, one pin narrowed to allow the
+  single `gk_reviewer` constant), `kai-client-evidence-pipeline.spec.js` (1);
+  link/option pins updated in `kai-client-authorization-reconciliation.spec.js`,
+  `kai-client-funder-requirements.spec.js`, `kai-team-access.spec.js`. Bundle
+  rebuilt.
+
+**Before the change (TOOL_VERIFIED, implementation stashed, committed bundle,
+same runner):** the new acceptance ran 5 pass, 7 fail after spec fixes.
+B1-B3 failed at the KAI Access modal (no global roles column, no gk_reviewer
+option), with B4-B12 failing as dependents. C4-C8 failed on the link
+(`/kai/client-followups`, no organization). D failed as a dependent: with no
+gk_reviewer membership in place, the NPO "rewrite GK staff row" probe simply
+created a client membership. A2, B0, C1-C3, and C9-C10 passed. A1 and B10
+failed on a spec defect (a direct request from a page that had not navigated
+yet), fixed afterwards; the before-change run was not repeated after that fix.
+
+**Browser and database acceptance (TOOL_VERIFIED, runner-owned loopback
+PostgreSQL, real Chrome, real routers including `/api/admin`, synthetic data,
+one isolated browser context per session; 13/13):**
+- A1: a site admin with a derived `client_admin` membership and no global KAI
+  role gets `internalKnowledgeWorkspace: true` but cockpit capabilities
+  `false`, decision `403 role_not_allowed`, no decision form, nothing written.
+  With a global `gk_admin` role the same superuser is admitted.
+- A2: superuser, GK Studio Reviews -> Processing card -> "Submit review" ->
+  exactly `POST .../decision` 200; decision `reviewed`, decided by the
+  superuser, `decided_by_role` `gk_admin`; queue `resolved/resolved`; decision
+  audit +1, lifecycle audit +1; changed tables exactly `audit_events`,
+  `intake_sensitivity_review_decisions`, `intake_source_candidates`,
+  `review_queue_items`, `upload_lifecycle_audit`.
+- B0: the recipient's first sign-in creates the active `kai.users` mapping;
+  no organization, no capability, no membership or global role.
+- B1-B3: superuser `/admin?tab=organizations` -> KAI Access. Email +
+  `gk_reviewer` -> `GET /api/admin/users/lookup` 200 and
+  `PUT .../memberships/1103` 200; row `gk_reviewer/active`; changed tables
+  `audit_events`, `organization_memberships`; audit
+  `organization_membership_assigned` (resulting role `gk_reviewer`, target the
+  recipient). Recipient with the organization role only: GK Studio, cockpit
+  capabilities `false`. "Grant gk_reviewer" -> `PUT .../global-roles/1103` 200;
+  active global `gk_reviewer`; changed tables `audit_events`, `user_roles`;
+  audit `global_kai_role_assigned`.
+- B4-B9: new recipient session: `internalKnowledgeWorkspace` true,
+  `organizationAccessManagement` and `clientFollowupReview` false, cockpit
+  `true`, no Team & Access. The same GK Studio entry opens the card; "Submit
+  review" -> one decision POST 200; decision `reviewed`, decided by the
+  recipient, `decided_by_role` `gk_reviewer`; queue `resolved/resolved`; one
+  `sensitivity_review_decision_recorded` audit by the recipient; same five
+  changed tables. Org B (no membership): cockpit `false`, read and decision
+  `403 missing_active_organization_membership`, nothing written.
+- B10: Org A `client_admin`: the pipeline shows the file's sensitivity review
+  `complete` and the next stage; Reviews reads "Source review (Waiting for Get
+  Kinder)"; no decision values.
+- B11: "Revoke gk_reviewer" -> `PUT .../global-roles/1103` 200; role row
+  `active=false`, `revoked_at` set; audit `global_kai_role_revoked`. Recipient:
+  cockpit `false`, no decision form, read and decision
+  `403 role_not_allowed`. `POST .../review-work` still answers 201
+  `replayed: true` (P1-06 admits the organization role), with no write.
+- B12: "Remove gk_reviewer here" -> membership PUT 200, row
+  `gk_reviewer/inactive`, audit `organization_membership_role_status_changed`
+  (active -> inactive). Recipient: no organization; access-capabilities, read,
+  review-work, and decision all `403 missing_active_organization_membership`;
+  nothing written.
+- C1-C3: member (`client_contributor`) has no follow-up capability, list 403.
+  Org C `client_admin`, Team & Access -> `client_reviewer` -> "Save role" ->
+  one membership PUT 200; audit `organization_membership_role_status_changed`
+  (`client_contributor` -> `client_reviewer`).
+- C4-C8: new member session: `clientFollowupReview` true,
+  `internalKnowledgeWorkspace` and `organizationAccessManagement` false.
+  Knowledge Studio Reviews link
+  `/kai/client-followups?organizationId=<Org C>`; the page opens with the
+  organization filled; "Load follow-ups" -> "Mark reviewed" -> one
+  `POST .../complete` 200; that item `resolved/resolved`; one
+  `client_followup_completed` audit by the member and one lifecycle audit
+  with `decided_by_role` `client_reviewer`; changed tables `audit_events`,
+  `upload_lifecycle_audit` (queue item updated in place).
+- C9-C10: Team & Access -> `client_contributor` -> PUT 200; member
+  capability false, no link, list and completion of a remaining open
+  follow-up `403`, nothing written, item unchanged.
+- D: NPO `client_admin`: global-role PUT `403 platform_superuser_required`,
+  gk_reviewer membership PUT `422 validation_blocker`, rewrite of the GK
+  reviewer's stored row `403 non_client_membership_not_client_managed`,
+  `/api/admin/users/lookup` 403, cockpit `false`, decision `403`; Team &
+  Access shows the GK row without a control and offers client roles only.
+  `client_reviewer`: cockpit `false`, decision and review-work `403`.
+  Non-superuser global `gk_admin`: global-role PUT
+  `403 platform_superuser_required`, membership PUT `403 role_not_allowed`,
+  lookup 403. Contributor: roster, membership PUT, global-role PUT all 403,
+  no Team & Access. All kai table counts, memberships, and role rows
+  unchanged.
+
+**Verification (TOOL_VERIFIED; loopback `DATABASE_URL` sentinel; only
+runner-owned ephemeral loopback PostgreSQL and synthetic data):**
+
+| Command | Pass | Fail | Skipped |
+| --- | --- | --- | --- |
+| new reviewer provisioning browser spec, before the change | 5 | 7 | 0 |
+| new reviewer provisioning browser spec | 13 | 0 | 0 |
+| sensitivity review reachability browser spec | 15 | 0 | 0 |
+| Team & Access browser spec | 7 | 0 | 0 |
+| client Knowledge Studio browser spec | 6 | 0 | 0 |
+| client evidence pipeline browser spec (link pin updated) | 7 | 0 | 0 |
+| access-admin, admin UI, Team & Access, client authorization, pipeline, Studio, shell, JOIN-1..5, actor-context, authorization, tenant, binding, enablement, sensitivity, cockpit, follow-up, Home specs (38 files) | 571 | 0 | 0 |
+| `npm run verify:kai-sprint2-p2-access-administration` | 25 | 0 | 0 |
+| `npm run verify:kai-sprint2-api-contract` | 71 | 0 | 0 |
+| `npm run verify:kai-sprint2-join-1-organization-join-requests` | 128 | 0 | 0 |
+| `npm run test:kai-sprint2` | 4717 | 0 | 89 |
+| `npm test` (+1 skip: the new runner-only spec) | 5434 | 0 | 102 |
+| `npm run build` (rebuild reproduces the committed bundle), `git diff --check` | ok | | |
+
+Commit: `32ef587` Let superusers provision GK reviewers and open follow-ups
+for the right organization.
+
+**NOT_CONFIRMED / limitations:**
+- Deployed behavior, production roles, and the owner's superuser account.
+  The code requires that account to hold a global GK role and an active
+  membership for the review to work. Which of these it holds in production
+  was not inspected.
+- Production `kai.organization_memberships.role_name` accepting
+  `gk_reviewer`: no CHECK per the USER_CONFIRMED catalog mirror, and existing
+  code already reads GK-role memberships; not re-inspected.
+- Revoking only the global role leaves the `gk_reviewer` organization role,
+  which other GK services (P1-06 review work, P2-09/P2-10/P2-12, GK libraries)
+  authorize on their own. The modal states this, and "Remove gk_reviewer here"
+  ends it. Whether those services should also require the global role is an
+  owner decision.
+- A target who has never signed in is JIT-mapped by the role writers without
+  an email; if production `kai.users.email` is NOT NULL that write fails
+  (pre-existing; the acceptance's recipient signed in first).
+- Global role controls also appear on derived and client rows; granting one
+  there produces the existing mixed-role actor (client Studio sensitivity
+  panel). Nothing does this automatically.
+- `completeClientFollowup` records `client_reviewer` as the role even for a
+  superuser actor (pre-existing, unchanged).
+- Web Intake Files rehydration browser spec and P1-08 runner were not run
+  (no change reaches them).
+
+**Status:** REVIEWER_PROVISIONING_GK_AND_NPO_COMPLETE_LOCALLY_PRODUCTION_NOT_CONFIRMED.
+No push, deployment, shared or production database, cloud, feature-flag,
+tenant, live membership or role, credential, `.env`, schema, or
+`00_KAI_CURRENT_STATE.md` change.
