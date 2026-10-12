@@ -36890,3 +36890,143 @@ synthetic data):**
 No push, deployment, shared or production database, cloud, feature-flag,
 tenant, membership, role, credential, `.env`, backend, schema, or
 `00_KAI_CURRENT_STATE.md` change.
+
+### NPO Team & Access in Impact Evidence (2026-10-12)
+
+**Owner authorization (USER_CONFIRMED):** one bounded feature package:
+an organization-scoped Team & Access interface inside the existing Impact
+Library for effective `client_admin` users of the selected organization,
+reached from a left-navigation entry and a "Manage team & access" entry in
+the organization dropdown. Reuse existing onboarding, memberships, KAI
+authorization, the access-administration API, and the JOIN-3/JOIN-5
+join-request workflow. Smallest safe service additions allowed only where a
+roster, last-administrator, or derived-authority safeguard is missing. No
+registration, organization approval, or GK superuser dashboard rebuild; no
+invitation-by-email; no global GK role provisioning; no push, deploy,
+database, cloud, flag, tenant, membership, or credential change.
+
+**Starting state (TOOL_VERIFIED):** `main` at
+`935d71981a6a69ee2615caf9587be0c3657e9007`, clean. JOIN-4 had recorded that
+a stored/derived `client_admin` had no access-administration UI; JOIN-5 had
+added only a Home join-request panel for them.
+
+**Findings (TOOL_VERIFIED):**
+- The roster read (`viewEffectiveKaiAccess`), role write
+  (`manageOrganizationMembership`), last-admin protection, and JOIN-3
+  approval (server-fixed active `client_contributor`, `onlyCreate`) already
+  existed and authorize organization `client_admin` (stored or derived) and
+  platform superuser only. Global role assignment is platform-superuser-only.
+- Gap: `upsertOrganizationMembershipRoleStatus` replaces whatever single
+  stored row exists, so an organization `client_admin` could rewrite another
+  user's stored non-client organization membership (`gk_admin`,
+  `gk_operator`, `gk_reviewer`) into a client role.
+- The organization dropdown rendered only for users with more than one
+  organization.
+- Not changed (recorded): a `client_admin` may still create a membership
+  for any existing legacy user id through the PUT route. Existing Package 2
+  specs assert this, so restricting it is a policy decision outside this
+  package. The Team & Access UI offers role changes only for listed
+  members.
+
+**Changes (TOOL_VERIFIED):**
+- `kaiAccessAdministrationService.js`: a non-superuser change to a stored
+  membership whose current role is not an assignable client role returns
+  `authorization_denied` with blocker `non_client_membership_not_client_managed`
+  (`VAL-KAI-P2-ACC-001`) before any write. The roster's `editable` reports
+  the same rule. Exports `__kaiAccessAdministrationServiceContract`.
+- `kaiOrganizationAccessCapabilitiesService.js`: new
+  `organizationAccessManagement` = the service's VIEW and MANAGE policies
+  (same operations, same allowed roles); projected in
+  `impactEvidenceLibraryLogic.js`.
+- `frontend/teamAccess/` (new): `teamAccessLogic.js` (roster projection,
+  labels, role-change request through the existing path/payload builders,
+  error copy), `useTeamAccess.js` (roster read only while open and capable;
+  every response keyed to its organization; stale responses discarded),
+  `TeamAccessView.jsx` (members, effective role, inherited Get Kinder
+  admin note, role select for editable client-role rows only, confirmation
+  before removing an administrator, sole-administrator save disabled, the
+  existing `OrganizationJoinRequestsReviewPanel`, role legend).
+- `impactLibraryShell.jsx`: `IMPACT_LIBRARY_TEAM_ACCESS_SECTION` appended to
+  the five unchanged sections only with `onManageTeamAccess`; the
+  organization menu also opens for a single-organization administrator and
+  holds "Manage team & access" (organization options moved into a nested
+  listbox; Escape closes).
+- `ImpactLibraryApp.jsx`: `canManageTeamAccess` from the capability; both
+  entry points open the same section; leaves for Home when the capability
+  is false for the selected organization; re-reads the roster after a join
+  approval; re-reads capabilities in place after an administrator's role
+  changes (self-demotion). Home join-review panel and "+ Add or join
+  organization" unchanged. CSS added; bundle rebuilt.
+- Tests: new `kai-team-access.spec.js` (15) and
+  `kai-team-access-browser-acceptance.integration.spec.js` (6, registered in
+  the client browser runner). Updated pins: capability flags in
+  `kai-client-authorization-reconciliation.spec.js`; five-section nav pins
+  in `kai-impact-library-shell.spec.js` and
+  `kai-package-i-responsive-accessibility-qa.spec.js` now assert the five
+  sections unchanged plus the conditional `teamAccess`.
+
+**Required cases (TOOL_VERIFIED):** 1 legacy GK org admin with active
+binding (real `resolveKaiActorContext`; inactive binding gets nothing);
+2 stored admin; 3-4 reviewer/contributor: no capability, 403 roster, write,
+and approval, nothing written; 5 assign reviewer with audit; 6 additional
+administrator who can then manage; 7 approval writes exactly one active
+`client_contributor`, a role in the body is 422; 8 cross-organization read
+and write 403, nothing written, Org B unchanged; 9 GK global roles 403 and
+stored GK staff membership rewrite 403 for stored and derived admins,
+superuser still 200; 10 last administrator 409 (role and deactivation),
+allowed after appointing another; 11 derived-only not editable, "both" keeps
+inherited admin after a stored-role change; 12 per-organization capability
+plus browser switch; 13 join, create, switch, Home review, and /admin
+modal unchanged. Mutation checks: disabling the guard fails case 9;
+forcing the capability true fails cases 3-4 and 12.
+
+**Browser acceptance (TOOL_VERIFIED, runner-owned loopback PostgreSQL, real
+Chrome, synthetic data):** contributor and reviewer: five sections, no
+organization menu, roster never requested, direct GET/PUT 403, no audit.
+Legacy GK admin (derived Org A, contributor Org B): nav entry and menu entry;
+derived row explained with no control; Org B member absent; approval ->
+`client_contributor/active`, request `approved`, audits; reviewer promoted
+by one PUT 200 and one audit; switching to Org B removes both entries,
+returns to Home, clears the roster, makes no Org B administration request;
+switching back and "Manage team & access" reopens it. Org B admin: Org B
+team only; Org A GET/PUT 403. Single-org stored admin at 390x844: menu holds
+only "Manage team & access"; no horizontal overflow; self-demotion asks
+first (no PUT), then writes, returns to Home, entry points gone, roster 403.
+End state: zero `kai.user_roles` rows, Org B unchanged.
+
+**Verification (TOOL_VERIFIED; loopback `DATABASE_URL` sentinel):**
+
+| Command | Pass | Fail | Skipped |
+| --- | --- | --- | --- |
+| `kai-team-access.spec.js` | 15 | 0 | 0 |
+| Team & Access browser spec | 6 | 0 | 0 |
+| access-admin, capability, Impact Library, shell/responsive, JOIN-1..5, admin UI specs | 361 | 0 | 5 |
+| sensitivity review reachability browser spec | 15 | 0 | 0 |
+| client Knowledge Studio browser spec | 6 | 0 | 0 |
+| client evidence pipeline browser spec | 7 | 0 | 0 |
+| P2-12 no-claim evidence review browser spec | 11 | 0 | 0 |
+| reviewed evidence claim proposal browser spec | 10 | 0 | 0 |
+| `npm run verify:kai-sprint2-p2-access-administration` | 18 | 0 | 0 |
+| `npm run verify:kai-sprint2-join-1-organization-join-requests` | 128 | 0 | 0 |
+| `npm run verify:kai-sprint2-api-contract` | 71 | 0 | 0 |
+| `npm run test:kai-sprint2` | 4713 | 0 | 89 |
+| `npm test` | 5419 | 0 | 101 |
+| `npm run build` (rebuild reproduces the committed bundle), `git diff --check` | ok | | |
+
+**NOT_CONFIRMED / limitations:**
+- Deployed behavior; real organizations, bindings, and memberships.
+- A platform superuser who selects an organization in the Impact Library
+  also gets Team & Access (same backend policy).
+- Last-admin protection counts any active GK org admin of the bound GK
+  organization as a derived administrator, including one whose `kai.users`
+  row is non-active (pre-existing).
+- An organization without a GK binding has no display name, so the heading
+  reads "Team & Access" (existing profile behavior).
+- No membership deactivation control (role changes only, matching the
+  /admin modal); no invitation-by-email.
+- P1-08 runner and Web Intake Files rehydration browser spec not rerun.
+
+**Status:** NPO_TEAM_AND_ACCESS_COMPLETE_LOCALLY_PRODUCTION_NOT_CONFIRMED.
+No push, deployment, shared or production database, cloud, feature-flag,
+tenant, live membership, role, credential, `.env`, schema, or
+`00_KAI_CURRENT_STATE.md` change.
