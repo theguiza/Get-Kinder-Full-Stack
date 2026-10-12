@@ -37847,3 +37847,13 @@ following the existing repository synthetic audit schema pattern, and changed
 the audit assertion to check action/metadata rather than assume an enum label
 when the existing `other` fallback is used. The verifier no longer drops any
 unqualified table.
+
+**Same-session rerun correction (TOOL_VERIFIED, 2026-10-12):** the reported
+`42P07` occurred because an earlier verifier invocation created a temporary
+results table that remained in the user's interactive `psql` session. The local
+runner had been invoking the verifier in a fresh session, so it did not expose
+the repeat-run failure. The verifier now uses `CREATE TEMP TABLE IF NOT EXISTS`
+and truncates that session-local results table before inserting checks. The
+runner invokes the verifier twice through `\\i` in one `psql` session. Both
+invocations emitted all three expected `PASS` rows, and the 37 focused tests
+passed. No production or shared database was accessed.

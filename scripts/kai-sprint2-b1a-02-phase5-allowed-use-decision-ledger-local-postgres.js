@@ -25,7 +25,8 @@ function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
     cwd: repoRoot,
     encoding: "utf8",
-    stdio: options.capture ? ["ignore", "pipe", "pipe"] : "inherit",
+    stdio: options.capture ? [options.input === undefined ? "ignore" : "pipe", "pipe", "pipe"] : "inherit",
+    ...(options.input === undefined ? {} : { input: options.input }),
     env: {
       ...process.env,
       DATABASE_URL: "postgres://127.0.0.1:9/kai_sentinel",
@@ -44,6 +45,11 @@ function run(command, args, options = {}) {
 
 function psqlFile(path) {
   return run(psql, ["-v", "ON_ERROR_STOP=1", "-d", dbName, "-f", path], { capture: true }).stdout;
+}
+
+function psqlFilesInSameSession(paths) {
+  const input = paths.map((path) => `\\i ${path}`).join("\n");
+  return run(psql, ["-v", "ON_ERROR_STOP=1", "-d", dbName], { capture: true, input }).stdout;
 }
 
 async function proveRunnerOwnedTarget() {
@@ -89,7 +95,11 @@ try {
   psqlFile("migrations/kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger.sql");
   psqlFile("migrations/kai_sprint2_b1a_02_client_admin_sensitivity_review.sql");
   psqlFile("scripts/kai-sprint2-b1a-02-sensitivity-review-audit-synthetic-schema.sql");
-  const sensitivityVerifierOutput = psqlFile("scripts/kai-sprint2-b1a-02-client-admin-sensitivity-review-verifier.sql");
+  const sensitivityVerifierPath = "scripts/kai-sprint2-b1a-02-client-admin-sensitivity-review-verifier.sql";
+  const sensitivityVerifierOutput = psqlFilesInSameSession([
+    sensitivityVerifierPath,
+    sensitivityVerifierPath,
+  ]);
   const sensitivityVerifierCheckNames = [
     "sensitivity_decision_table_exists",
     "sensitivity_decision_role_check_exists_and_validated",

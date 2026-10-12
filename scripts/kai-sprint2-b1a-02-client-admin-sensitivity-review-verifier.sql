@@ -1,8 +1,9 @@
-CREATE TEMP TABLE kai_client_admin_sensitivity_review_results (
+CREATE TEMP TABLE IF NOT EXISTS kai_client_admin_sensitivity_review_results (
   check_name text PRIMARY KEY,
   status text NOT NULL,
   detail text NOT NULL
 );
+TRUNCATE TABLE pg_temp.kai_client_admin_sensitivity_review_results;
 
 INSERT INTO kai_client_admin_sensitivity_review_results
 SELECT 'sensitivity_decision_table_exists',
