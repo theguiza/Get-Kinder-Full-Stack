@@ -38740,3 +38740,74 @@ expectations; no application change):**
 AUTHORIZATION CLOSURE NOT_CONFIRMED (J3-3 and decisions A-E open). No push,
 deployment, production, database, flag, tenant, role, credential, schema, or
 `00_KAI_CURRENT_STATE.md` change.
+
+### Package 5: P2-02/P2-03 authorization classification; policy decisions held (2026-10-13)
+
+**Owner direction (USER_CONFIRMED):** repair the P2-02/P2-03 refusal
+classification under existing authority; implement Decisions B, C, and D
+only if explicitly accepted. The direction itself states that it does not
+approve B, C, or D.
+
+**Start (TOOL_VERIFIED):** `main` at `29121d3`, clean.
+
+**Owner-authority check (TOOL_VERIFIED, this plan):**
+- **A:** the P1-08 role set is accepted. The cockpit's global-role read gate
+  is implemented P1-09 design; no owner decision covers organization-only GK
+  reviewers. Confirmation pending; no change.
+- **B:** no acceptance. Organization `gk_operator` is still not grantable.
+- **C:** no acceptance. The 2026-10-11 decision is scoped "exactly" to
+  P1-06/P1-07.
+- **D:** the accepted 2026-08-22 decision makes Get Kinder site-admin
+  authority the central KAI platform-superuser authority, satisfying role and
+  membership checks for the requested operation. Restricting it for human
+  reviews changes accepted policy and is not accepted. The attribution of
+  roles not held (`kaiAuthorizedRoleAttribution.js` `gk_admin` fallback;
+  constant `gk_reviewer`/`client_reviewer` in P2-10/P2-11) arises only under
+  that admission, and the ledger role CHECK has no superuser value, so
+  correcting it needs D or a schema change. It remains an open
+  security-relevant finding.
+- **E:** no accepted decision; current behavior evaluates each grant
+  independently per operation. Confirmation pending.
+
+**Repair (`0302223`):**
+- `assessEvidenceCoverageForSourceVersion` and `proposeClaim` now return the
+  shared validator's own refusal: `authorization_denied` with
+  `VAL-AUT-004`/`role_not_allowed` or
+  `VAL-AUT-003`/`missing_active_organization_membership`.
+  `tenant_boundary_violation` is returned only for a missing organization
+  scope.
+- The tenant-consistency check, role sets, `combineGlobalRoles`, superuser
+  admission, eligibility, lineage, transactions, idempotency, and audit are
+  unchanged.
+- The boundary specs' three pins of the old code are updated, and each
+  service gains a refusal matrix with zero repository reads or writes; a
+  cross-organization object returns `not_found`.
+- The same mislabel remains, out of scope, in P2-04 `kaiClaimGapFollowupService.js:93`,
+  P2-01 `kaiEvidenceLineageService.js:91`, P1-07 `kaiSourceCandidateService.js:111`,
+  and P1-06 `kaiReviewQueueService.js:451`.
+
+**J3-3 (TOOL_VERIFIED):** still failing as before.
+- The P2-12 decision is committed (`gk_reviewer`).
+- The handoff is `not_created`; the coverage assessment is now `blocked`
+  with `authorization_denied`.
+- No claim or claim-review item is created.
+- The failure is the unresolved Decision C, not an error-code issue.
+
+**Verification (TOOL_VERIFIED):**
+- P2-02/P2-03 unit specs: 115/3 before, 120/0 after.
+- Runners: P2-02 7/0, P2-03 15/0, P2-03 reviewed-evidence 17/0, P2-12
+  no-claim 11/0, P1-07 22/0, P1-08 19/0, P2-01 7/0, P2-09 36/0, P2-10 51/0,
+  P2-11 28/0, P2-12 ledger 24/0, access administration 31/0.
+- Campaign: 43 / 42 pass / 1 fail; only J3-3 fails.
+- Browser specs: rehydration 3/0, Knowledge Studio 6/0, evidence pipeline
+  7/0, sensitivity 16/0, provisioning 13/0, P2-01 7/0, edge cases 11/0,
+  Team & Access 7/0, P2-12 11/0, claim proposal 10/0.
+- Suites: `npm test` 5479/0/104; `test:kai-sprint2` 4757/0/89; API contract
+  71/0.
+- Build: the bundle is byte-identical to the committed one.
+- `git diff --check` is clean.
+
+**Status:** PACKAGE_5_SUPPORTED_REPAIR_COMPLETE_LOCAL_SYNTHETIC; REPOSITORY
+AUTHORIZATION CLOSURE NOT_CONFIRMED (J3-3/C, D finding, B, A/E
+confirmation). No push, deployment, production, database, flag, tenant,
+role, credential, schema, or `00_KAI_CURRENT_STATE.md` change.
