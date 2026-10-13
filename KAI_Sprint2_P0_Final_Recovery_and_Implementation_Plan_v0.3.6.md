@@ -38507,3 +38507,120 @@ synthetic data):**
 **Status:** PACKAGE_2_P1_08_SOURCE_REVIEW_REPAIRED_LOCAL_SYNTHETIC. No push,
 deployment, production or shared database, cloud, feature-flag, tenant,
 credential, `.env`, schema, or `00_KAI_CURRENT_STATE.md` change.
+
+### Package 3: organization-facing review readback and authorization freshness (2026-10-13)
+
+**Owner direction (USER_CONFIRMED):** verify through the real application
+that an authorized organization user sees the current, permitted results of
+completed GK work, and that frontend capabilities and actions follow current
+backend authorization across actor, organization, project, and review
+boundaries. No new permission class, backend contract, schema, or product
+capability; J3-3 and Package 1-2 behavior unchanged.
+
+**Start (TOOL_VERIFIED):** `main` at `8ae0f6c`, clean; `4f35a15` and
+`8ae0f6c` present.
+
+**Readback findings (TOOL_VERIFIED, rows -> client-safe API -> page):** the
+backend client-safe reads were already correct and were not changed:
+- `kaiClientEvidencePipelineService` derives every stage from persisted
+  lineage, joined on `organization_id`; project association comes from
+  `kai.intake_files.engagement_id`.
+- The pipeline keeps sensitivity reviewed distinct from source promoted,
+  extracted evidence distinct from reviewed evidence, and reviewed evidence
+  distinct from an approved claim.
+- `listClientImpactFacts` returns only P2-08 internal-audience-eligible
+  claims (claim id, statement, type, accepted limitations).
+
+The defects were in frontend freshness:
+- Client Impact Facts were read once per organization.
+- Access capabilities and the review-cockpit capability were never
+  revalidated.
+- The client follow-up page kept completion actions after revocation or a
+  refusal, and a late list for one organization id could appear under
+  another.
+
+**Repair (frontend only):**
+- `useRevalidateOnReturn` re-runs on focus or visibility, throttled; there is
+  no polling.
+- The shell re-reads capabilities, the cockpit capability
+  (`useNeedsAttention.revalidate`) and facts in place on return.
+- Facts are also re-read on entering Knowledge Studio or the Impact Library
+  and on the Evidence tab, guarded by a request sequence.
+- The client Studio re-reads the pipeline on return.
+- The follow-up page uses a load-sequence guard, discards its list on an
+  organization change, completes only for the organization the list was
+  loaded for, revalidates on return, and re-reads after a refusal.
+- The GK Studio re-reads both cockpit capabilities in place; the source
+  panel re-reads after a refused decision.
+- J5-6 now opens its evidence item by id, using a new
+  `data-evidence-item-id` attribute. The synthetic statements repeat, and
+  J5-6 had reviewed other files' evidence in some runs.
+
+**Campaign P3-A..P3-J (synthetic accounts):** three baseline Org A/B
+contributors were added. `clientReviewerA` gets `client_reviewer` only
+through the governed Team & Access route.
+- **S0-S2:** probe, mixed, and pantry files, each compared from
+  authoritative rows to the API to the rendered "Stage (status)" line.
+- **Rejected source:** a gk_operator Studio rejection (attributed) shows the
+  file as source review `closed`/`source_not_promoted`, not promoted.
+- **S3:** one pantry evidence item reviewed `supported` by gk_reviewer
+  through the governed route (attribution, audit, current lineage); the
+  other stays pending; the proposed claim is `needs_gk_review` and is not an
+  Impact Fact.
+- **S7:** four genuine client follow-ups; `client_reviewer` completions
+  audited `client_reviewer`; an ordinary member gets 403 and no action.
+- **S5:** the reviewed claim, while its coverage is unresolved, is shown as
+  "not currently eligible" (or "Impact Fact review pending", derived from
+  the file's other claims).
+- **S4:** after gk_reviewer P2-10 internal acceptances (five dimensions),
+  traceability shows internal eligible and funder not eligible. The member
+  sees exactly that claim on return, with all seven accepted-limitation
+  badges, in both the project Evidence tab and the Impact Library.
+- **P3-E:** client payloads carry no follow-up, evidence, reviewer, or
+  coverage-decider ids, and fact keys are exactly claimId, claimType,
+  limitationDimensionKeys and statement.
+- **P3-G:** project A2 and a full reload stay correct; Org B sees only its
+  own project.
+- **P3-H:** revocation in another session removes "Mark reviewed" and the
+  Studio follow-up entry on return; the direct POST returns 403 with nothing
+  written; project reads remain 200; a re-grant restores the action.
+- **P3-I:** delayed (instrumented) superseded project and follow-up
+  responses are discarded.
+- **P3-J:** wrong-organization, GK-only, and ineligible reads are refused or
+  withheld.
+- **Client-generated-drafts:** the read returns 200, but no generation was
+  exercised; that is existing scope.
+
+**Red-to-green (TOOL_VERIFIED):** the same campaign against the starting
+frontend (plus only the test attribute) fails P3-B, P3-H, P3-D, and P3-I
+(isolated variant), and P3-E fails by cascade. All pass with the repair.
+
+**Verification (TOOL_VERIFIED):**
+- Campaign: 43 / 42 pass / 1 fail; only J3-3 fails, with an unchanged cause.
+- Browser specs: Knowledge Studio 6/0, evidence pipeline 7/0, sensitivity
+  16/0, provisioning 13/0, P2-01 7/0, edge cases 11/0, Team & Access 7/0,
+  P2-12 11/0, claim proposal 10/0.
+- Rehydration: 2/1. Case 2 (line 471) waits for the intake file-detail
+  "Sensitivity profile" field that `82041f4` (P0-04 DTO restoration)
+  removed. That belongs to the intake DTO contract, not Package 3, so it was
+  left unchanged.
+- Runners: P1-07 handoff 22/0, P1-08 17/2 (lines 550/675, unchanged), P2-01
+  7/0, P2-12 11/0, P2-03 17/0, P2-11 28/0, access administration 31/0.
+- Suites: `npm test` 5474/2/104; `test:kai-sprint2` 4754/1/89; API contract
+  71/0. The only failures are `:441` and `:3436`, with unchanged causes.
+- Build and diff: the build is reproducible; `git diff --check` is clean.
+
+**Residuals (unchanged):**
+- **R1:** `kai.client_followup_items.claim_id` is NOT NULL, so there is no
+  client follow-up for a `waiting_on_client` source candidate; the client
+  pipeline shows source review waiting for Get Kinder.
+- **R2:** an organization-only GK reviewer's source read/write mismatch.
+- **R3:** superuser review authority.
+- **R4:** J3-3.
+- **Not implemented client-side:** data-quality findings, a gap/risk list,
+  and conflicts. The Gaps tab is explanatory, and coverage appears only as
+  accepted-limitation badges on eligible facts.
+
+**Status:** PACKAGE_3_READBACK_AND_FRESHNESS_REPAIRED_LOCAL_SYNTHETIC. No
+push, deployment, production or shared database, cloud, flag, tenant, role,
+credential, `.env`, schema, or `00_KAI_CURRENT_STATE.md` change.
