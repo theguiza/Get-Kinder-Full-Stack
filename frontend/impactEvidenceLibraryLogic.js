@@ -1397,6 +1397,9 @@ export function reviewQueueIsConclusivelyEmpty({
   sensitivityCapability,
   sensitivityAttentionStatus,
   sensitivityAttentionItemsLength,
+  sourceReviewCapability,
+  sourceReviewAttentionStatus,
+  sourceReviewAttentionItemsLength,
 }) {
   const claimConclusiveZero =
     reviewQueueRequestState === "success"
@@ -1409,7 +1412,13 @@ export function reviewQueueIsConclusivelyEmpty({
     && sensitivityAttentionStatus === "ready"
     && sensitivityAttentionItemsLength === 0;
 
-  return claimConclusiveZero && sensitivityConclusiveZero;
+  // Source review counts only for an actor who may read it; for that actor
+  // pending source-candidate work keeps the queue from being "empty".
+  const sourceReviewConclusiveZero =
+    sourceReviewCapability !== true
+    || (sourceReviewAttentionStatus === "ready" && sourceReviewAttentionItemsLength === 0);
+
+  return claimConclusiveZero && sensitivityConclusiveZero && sourceReviewConclusiveZero;
 }
 
 // Presentation-only actionability derivation for one Review Queue item's
@@ -1584,6 +1593,26 @@ export function sensitivityReviewQueueAttention({
     return { status: "error", items: [], error: sensitivityReviewQueueError };
   }
   return { status: "ready", items: asArray(sensitivityReviewQueueItems) };
+}
+
+// P1-08 source review: the same shape as sensitivityReviewQueueAttention,
+// over the open source_candidate_review items the capability allows.
+export function sourceReviewQueueAttention({
+  sourceReviewCapability,
+  loadingSourceReviewQueue,
+  sourceReviewQueueError,
+  sourceReviewQueueItems,
+}) {
+  if (sourceReviewCapability !== true) {
+    return { status: "unavailable", items: [] };
+  }
+  if (loadingSourceReviewQueue) {
+    return { status: "loading", items: [] };
+  }
+  if (sourceReviewQueueError) {
+    return { status: "error", items: [], error: sourceReviewQueueError };
+  }
+  return { status: "ready", items: asArray(sourceReviewQueueItems) };
 }
 
 export function projectRequirementsReadiness(dto) {
@@ -1996,6 +2025,42 @@ export function projectSensitivityReviewQueueItems(dto) {
       updatedAt: item.updated_at,
     }))
     .filter((item) => isRouteUuid(item.reviewQueueItemId) && isRouteUuid(item.intakeSensitivityProfileId));
+}
+
+// P1-08 source review: the same organization-scoped review-cockpit queue,
+// filtered to open source_candidate_review work. It is fetched only after the
+// capability probe reports can_review_source_candidates; whether the actor may
+// then decide is the detail's decision_controls_enabled, never inferred here.
+export function sourceReviewQueuePath(organizationId) {
+  const params = new URLSearchParams({
+    organization_id: organizationId,
+    queue_type: "source_candidate_review",
+    queue_status: "open",
+  });
+  return `${REVIEW_COCKPIT_BASE_PATH}/queue?${params.toString()}`;
+}
+
+export function sourceCandidateDetailPath(organizationId, intakeSourceCandidateId) {
+  const params = new URLSearchParams({ organization_id: organizationId });
+  return `${REVIEW_COCKPIT_BASE_PATH}/source-candidates/${encodeURIComponent(intakeSourceCandidateId)}?${params.toString()}`;
+}
+
+export function sourceCandidateDecisionPath(organizationId, intakeSourceCandidateId) {
+  const params = new URLSearchParams({ organization_id: organizationId });
+  return `${REVIEW_COCKPIT_BASE_PATH}/source-candidates/${encodeURIComponent(intakeSourceCandidateId)}/decision?${params.toString()}`;
+}
+
+export function projectSourceReviewQueueItems(dto) {
+  return asArray(dto?.items)
+    .filter((item) => item?.queue_type === "source_candidate_review" && item?.target_object_type === "intake_source_candidate")
+    .map((item) => ({
+      reviewQueueItemId: item.review_queue_item_id,
+      intakeSourceCandidateId: item.target_object_id,
+      queueStatus: item.queue_status,
+      summary: item.summary,
+      createdAt: item.created_at,
+    }))
+    .filter((item) => isRouteUuid(item.reviewQueueItemId) && isRouteUuid(item.intakeSourceCandidateId));
 }
 
 // The nine presence dimensions (unknown|present|absent), in the exact backend

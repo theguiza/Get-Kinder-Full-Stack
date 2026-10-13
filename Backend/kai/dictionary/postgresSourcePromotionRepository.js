@@ -378,6 +378,24 @@ function satisfiesCandidateReviewCompletenessPredicate(candidateRow, reviewItemR
 }
 
 /**
+ * Read-only: whether a new decision on this candidate could pass the same
+ * VAL-KAI-P1-08-001 completeness predicate the write path enforces - the
+ * initial form with no decision yet, or the follow-up form after
+ * needs_more_information. A rejected or promoted candidate is terminal (only an
+ * identical replay remains). Accepts the candidate, review-item, and decision
+ * projections a detail read already holds; the write path still re-checks
+ * every condition under its own lock.
+ */
+export function isSourceCandidateDecisionActionable({ sourceCandidate, reviewQueueItem, promotionDecision }) {
+  if (!sourceCandidate || !reviewQueueItem) return false;
+  if (!promotionDecision) return satisfiesCandidateReviewCompletenessPredicate(sourceCandidate, reviewQueueItem);
+  if (promotionDecision.decision_status === DECISION_STATUS_NEEDS_MORE_INFORMATION) {
+    return satisfiesFollowupCompletenessPredicate(sourceCandidate, reviewQueueItem);
+  }
+  return false;
+}
+
+/**
  * VAL-KAI-P1-08-001 (needs_more_information -> X follow-up form): the candidate
  * must still be at its P1-07 pinned status (unmoved by needs_more_information),
  * and its matching review item must still be at exactly the

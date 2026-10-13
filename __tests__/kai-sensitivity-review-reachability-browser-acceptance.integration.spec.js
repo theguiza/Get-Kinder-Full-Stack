@@ -573,7 +573,7 @@ async function runBrowserAcceptance() {
       assert.ok(body.includes("Get Kinder confirms how the file's information may be used"), "the sensitivity review is explained");
       assert.ok(body.includes("This is not an Evidence or Impact Fact review."));
       assert.ok(body.includes("Get Kinder reviewers complete these reviews in Get Kinder\u2019s own review workspace"), "where it is done");
-      assert.ok(body.includes("Your account does not have Get Kinder reviewer access for this organization"), "current bundle states whether this user may act");
+      assert.ok(body.includes("Your account does not have sensitivity-review access for this organization"), "whether this user may act");
       assert.ok(!body.includes("Evidence and Impact Fact reviews are completed by Get Kinder reviewers."), "the old Evidence/Impact-Fact-only explanation is gone");
       assertClientBoundary(clientPage, "case 1", body);
       assert.deepEqual(clientPage.exceptions, []);
@@ -815,7 +815,7 @@ async function runBrowserAcceptance() {
       assert.deepEqual(tabs, ["Files", "Evidence", "Gaps", "Funder Requirements", "Generated Drafts", "Reviews"], "the client Studio, not the GK one");
       const note = await mixedPage.evaluate(`(() => { const el = document.querySelector("[data-get-kinder-review-access]"); return el ? el.innerText : null; })()`);
       console.log(`[sensitivity-review-browser] mixed-role access note: ${note}`);
-      assert.match(note, /^Your Get Kinder role can complete this organization's sensitivity reviews here/);
+      assert.match(note, /^Your organization-scoped review access can complete this organization's sensitivity reviews here/);
       assert.ok(!note.includes("Contact a Get Kinder administrator"), "an authorized reviewer is not sent elsewhere for this review");
       // Files at sensitivity review (FILE_QUEUE is already at source review).
       assert.deepEqual(await mixedPage.fileReviewActionIds(), [FILE_ZERO, FILE_MIXED_QUEUE, FILE_MIXED_ZERO, FILE_MIXED_NMI].sort());
@@ -826,7 +826,7 @@ async function runBrowserAcceptance() {
       assert.ok(reviewsCard.includes("Review sensitivity & allowed use"), "the Reviews card shows the authorized review action");
       assert.ok(!reviewsCard.includes("No action is currently required from you."), "no contradictory no-action message beside the review action");
       assert.ok(reviewsCard.includes("Get Kinder sensitivity review needed"), "the action-required message names the Get Kinder sensitivity review");
-      assert.ok(reviewsCard.includes("4 files in this project are waiting for the Get Kinder sensitivity review, which your Get Kinder role can complete here. "
+      assert.ok(reviewsCard.includes("4 files in this project are waiting for the Get Kinder sensitivity review, which your organization-scoped review access can complete here. "
         + "Use \u201cReview sensitivity & allowed use\u201d next to each file below."), "it counts only the actionable files and points to the per-file action");
       assert.ok(!reviewsCard.includes("Your action is needed"), "no client follow-up work is claimed");
       assert.equal(await mixedPage.reviewPanelFileId(), null, "no review panel until the reviewer opens one");
@@ -1173,8 +1173,8 @@ async function runBrowserAcceptance() {
         assert.ok(body.includes("Knowledge Studio"));
         assert.ok((await orgAdminPage.cardText("Reviews")).includes("Review sensitivity & allowed use"));
         const accessNote = await orgAdminPage.evaluate(`document.querySelector('[data-get-kinder-review-access]')?.innerText || ''`);
-        assert.match(accessNote, /^Your Get Kinder role can complete this organization's sensitivity reviews here/);
-        results.case15_bound_admin_copy = "MISMATCH: the browser bundle calls a bound-only client_admin a Get Kinder reviewer";
+        assert.match(accessNote, /^Your organization-scoped review access can complete this organization's sensitivity reviews here/);
+        results.case15_bound_admin_copy = "PASS: the rebuilt bundle names a bound-only client_admin's organization-scoped review access";
 
         const capability = await orgAdminPage.fetchJson("GET", `${COCKPIT}/capabilities?organization_id=${ORG}`);
         assert.equal(capability.status, 200);

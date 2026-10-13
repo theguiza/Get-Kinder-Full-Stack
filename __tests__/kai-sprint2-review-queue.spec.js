@@ -24,6 +24,11 @@ import {
   reviewQueueIsConclusivelyEmpty,
   reviewQueueBlockerActionability,
   sensitivityReviewQueueAttention,
+  projectSourceReviewQueueItems,
+  sourceCandidateDecisionPath,
+  sourceCandidateDetailPath,
+  sourceReviewQueueAttention,
+  sourceReviewQueuePath,
 } from "../frontend/impactEvidenceLibraryLogic.js";
 import { listOrganizationReviewQueue } from "../Backend/kai/services/kaiClaimTraceabilityService.js";
 
@@ -917,4 +922,61 @@ test("impactEvidenceLibraryLogic.js contains no Gaps-and-Risks-specific currentn
   assert.match(projectionSource, /group\.is_current === true/);
   assert.match(projectionSource, /followup\.isCurrent === true/);
   assert.doesNotMatch(projectionSource, /"resolved"|"approved"|"complete"/);
+});
+
+// P1-08 source review in the GK Studio Reviews tab.
+test("source review: the Studio reuses the existing organization-scoped review-cockpit queue, detail, and decision routes", () => {
+  assert.equal(
+    sourceReviewQueuePath(organizationId),
+    `${basePath}/admin/review-cockpit/queue?organization_id=${organizationId}&queue_type=source_candidate_review&queue_status=open`,
+  );
+  assert.equal(
+    sourceCandidateDetailPath(organizationId, claimId),
+    `${basePath}/admin/review-cockpit/source-candidates/${claimId}?organization_id=${organizationId}`,
+  );
+  assert.equal(
+    sourceCandidateDecisionPath(organizationId, claimId),
+    `${basePath}/admin/review-cockpit/source-candidates/${claimId}/decision?organization_id=${organizationId}`,
+  );
+});
+
+test("source review: projectSourceReviewQueueItems keeps only well-formed source-candidate items, never fabricating an id", () => {
+  const candidateId = "00000000-0000-4000-8000-0000000000c1";
+  const queueItemId = "00000000-0000-4000-8000-0000000000a1";
+  const items = projectSourceReviewQueueItems({
+    items: [
+      { review_queue_item_id: queueItemId, queue_type: "source_candidate_review", target_object_type: "intake_source_candidate", target_object_id: candidateId, queue_status: "open", summary: "Review", created_at: "2026-10-13T00:00:00.000Z" },
+      { review_queue_item_id: queueItemId, queue_type: "sensitivity_review", target_object_type: "intake_sensitivity_profile", target_object_id: candidateId, queue_status: "open" },
+      { review_queue_item_id: queueItemId, queue_type: "source_candidate_review", target_object_type: "intake_source_candidate", target_object_id: "not-a-uuid", queue_status: "open" },
+    ],
+  });
+  assert.deepEqual(items, [{ reviewQueueItemId: queueItemId, intakeSourceCandidateId: candidateId, queueStatus: "open", summary: "Review", createdAt: "2026-10-13T00:00:00.000Z" }]);
+  assert.deepEqual(projectSourceReviewQueueItems(null), []);
+});
+
+test("source review attention: unavailable without the capability; loading, error, and ready otherwise", () => {
+  assert.deepEqual(sourceReviewQueueAttention({ sourceReviewCapability: false, sourceReviewQueueItems: [1] }), { status: "unavailable", items: [] });
+  assert.deepEqual(sourceReviewQueueAttention({ sourceReviewCapability: null, sourceReviewQueueItems: [1] }), { status: "unavailable", items: [] });
+  assert.deepEqual(sourceReviewQueueAttention({ sourceReviewCapability: true, loadingSourceReviewQueue: true }), { status: "loading", items: [] });
+  assert.deepEqual(sourceReviewQueueAttention({ sourceReviewCapability: true, sourceReviewQueueError: "x" }), { status: "error", items: [], error: "x" });
+  assert.deepEqual(sourceReviewQueueAttention({ sourceReviewCapability: true, sourceReviewQueueItems: [1] }), { status: "ready", items: [1] });
+});
+
+test("reviewQueueIsConclusivelyEmpty: pending source review keeps the queue from being empty for an actor who may read it", () => {
+  assert.equal(reviewQueueIsConclusivelyEmpty({ ...conclusivelyEmptyBaseInputs, sourceReviewCapability: false }), true);
+  assert.equal(reviewQueueIsConclusivelyEmpty({ ...conclusivelyEmptyBaseInputs, sourceReviewCapability: true, sourceReviewAttentionStatus: "ready", sourceReviewAttentionItemsLength: 0 }), true);
+  assert.equal(reviewQueueIsConclusivelyEmpty({ ...conclusivelyEmptyBaseInputs, sourceReviewCapability: true, sourceReviewAttentionStatus: "ready", sourceReviewAttentionItemsLength: 1 }), false);
+  assert.equal(reviewQueueIsConclusivelyEmpty({ ...conclusivelyEmptyBaseInputs, sourceReviewCapability: true, sourceReviewAttentionStatus: "loading", sourceReviewAttentionItemsLength: 0 }), false);
+  assert.equal(reviewQueueIsConclusivelyEmpty({ ...conclusivelyEmptyBaseInputs, sourceReviewCapability: true, sourceReviewAttentionStatus: "error", sourceReviewAttentionItemsLength: 0 }), false);
+});
+
+test("source review panel: decision controls come only from the server's decision_controls_enabled, with no role policy in the browser", () => {
+  const panelSource = readFileSync("frontend/KaiSourceReviewPanel.jsx", "utf8");
+  const studioSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+  for (const source of [panelSource]) {
+    assert.doesNotMatch(source, /gk_admin|gk_operator|gk_reviewer|client_admin|kaiRoles|organizationMemberships|is_admin/);
+  }
+  assert.match(panelSource, /import \{ SourceCandidateDetail, sourceDecisionResultText \} from "\.\/kaiReviewCockpit\.jsx";/);
+  assert.match(studioSource, /setSourceReviewCapability\(result\.body\.data\?\.can_review_source_candidates === true\);/);
+  assert.match(studioSource, /<KaiSourceReviewPanel\n\s+key=\{organizationId\}/);
 });

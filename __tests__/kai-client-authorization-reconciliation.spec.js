@@ -474,7 +474,7 @@ test("assembled journey, client_admin: every read the client UI issues is admitt
   assert.equal(summary.data.internalReviewAvailable, false, "Review Queue is never requested");
   assert.deepEqual(summary.data.clientActions, []);
   const sensitivity = await getReviewCockpitCapabilities({ organizationId: ORG, actorContext }, { env: ENV });
-  assert.deepEqual(sensitivity, { ok: true, data: { can_manage_sensitivity_review: false } }, "200 false, never a 403 probe");
+  assert.deepEqual(sensitivity, { ok: true, data: { can_manage_sensitivity_review: false, can_review_source_candidates: false } }, "200 false, never a 403 probe");
 
   // Knowledge Studio -> Files / Data Sources (intake reads).
   const batches = await listIntakeBatchesForOrganization(
@@ -690,7 +690,7 @@ for (const role of ["client_reviewer", "client_contributor"]) {
     assert.equal(summary.ok, true, JSON.stringify(summary));
     assert.equal(summary.data.internalReviewAvailable, false);
     const sensitivity = await getReviewCockpitCapabilities({ organizationId: ORG, actorContext }, { env: ENV });
-    assert.deepEqual(sensitivity, { ok: true, data: { can_manage_sensitivity_review: false } });
+    assert.deepEqual(sensitivity, { ok: true, data: { can_manage_sensitivity_review: false, can_review_source_candidates: false } });
     const batches = await listIntakeBatchesForOrganization(
       { organizationId: ORG, actorContext },
       { env: ENV, listIntakeBatchesForOrganization: async () => [] },

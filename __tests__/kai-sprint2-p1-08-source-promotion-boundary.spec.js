@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import {
+  authorizeSourcePromotionDecision,
   createSourcePromotionDecision,
   __sourcePromotionServiceContract,
 } from "../Backend/kai/services/kaiSourcePromotionService.js";
@@ -145,22 +146,46 @@ test("P1-08 service (AUTH-KAI-003): rejects every non-human actor type outright,
   }
 });
 
-test("P1-08 service (VAL-TEN-001): rejects a human actor with no active, correctly-roled membership in the requested organization", async () => {
+test("P1-08 service (VAL-TEN-001): rejects a human actor with no active, correctly-roled membership in the requested organization as authorization_denied with the validator's own blocker", async () => {
   const scenarios = [
-    humanActor({ organizationMemberships: [] }),
-    humanActor({ organizationMemberships: [{ organization_id: OTHER_ORG, membership_status: "active", role_name: "gk_operator" }] }),
-    humanActor({ organizationMemberships: [{ organization_id: ORG, membership_status: "revoked", role_name: "gk_operator" }] }),
-    humanActor({ organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "read_only_role" }] }),
+    [humanActor({ organizationMemberships: [] }), "missing_active_organization_membership"],
+    [humanActor({ organizationMemberships: [{ organization_id: OTHER_ORG, membership_status: "active", role_name: "gk_operator" }] }), "missing_active_organization_membership"],
+    [humanActor({ organizationMemberships: [{ organization_id: ORG, membership_status: "revoked", role_name: "gk_operator" }] }), "missing_active_organization_membership"],
+    [humanActor({ organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "read_only_role" }] }), "role_not_allowed"],
+    [humanActor({ kaiRoles: ["gk_admin"], organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_admin" }] }), "role_not_allowed"],
+    [humanActor({ kaiRoles: ["gk_reviewer"], organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_admin", source: "gk_organization_binding", gk_organization_id: 7 }] }), "role_not_allowed"],
   ];
-  for (const actorContext of scenarios) {
+  for (const [actorContext, blockingReason] of scenarios) {
     const probe = createRepositoryProbe(successResult);
     const result = await createSourcePromotionDecision(
       { organizationId: ORG, intakeSourceCandidateId: CANDIDATE, outcome: "promoted", reviewedSourceType: REVIEWED_TYPE, actorContext, now: NOW },
       { env: sprint2Enabled, sourcePromotionRepository: probe.sourcePromotionRepository },
     );
     assert.equal(result.ok, false);
-    assert.equal(result.error.code, "tenant_boundary_violation");
+    assert.equal(result.error.code, "authorization_denied");
+    assert.equal(result.error.status, 403);
+    assert.deepEqual(result.blockers.map((blocker) => blocker.blocking_reason), [blockingReason]);
     assert.equal(probe.calls.length, 0);
+  }
+});
+
+test("P1-08 authorizeSourcePromotionDecision is the write predicate, read-only: it admits exactly the actors createSourcePromotionDecision admits", async () => {
+  const actors = [
+    humanActor({ organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "gk_reviewer" }] }),
+    humanActor({ organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "gk_operator" }] }),
+    humanActor({ kaiRoles: ["gk_admin"], organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_admin" }] }),
+    humanActor({ organizationMemberships: [] }),
+    { actorType: "system", actorUserId: "user-1", organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "gk_admin" }] },
+  ];
+  for (const actorContext of actors) {
+    const probe = createRepositoryProbe(successResult);
+    const predicate = authorizeSourcePromotionDecision(actorContext, ORG);
+    const write = await createSourcePromotionDecision(
+      { organizationId: ORG, intakeSourceCandidateId: CANDIDATE, outcome: "promoted", reviewedSourceType: REVIEWED_TYPE, actorContext, now: NOW },
+      { env: sprint2Enabled, sourcePromotionRepository: probe.sourcePromotionRepository },
+    );
+    assert.equal(predicate.ok, write.ok);
+    if (!predicate.ok) assert.equal(predicate.error.error.code, write.error.code);
   }
 });
 

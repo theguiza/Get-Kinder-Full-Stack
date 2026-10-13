@@ -494,6 +494,7 @@ async function runBrowserAcceptance() {
       })()`);
       assert.equal(detail.status, 200, JSON.stringify(detail.body));
       assert.equal(detail.body.data.source_candidate.intake_source_candidate_id, candidateId);
+      assert.equal(detail.body.data.decision_controls_enabled, false, "no decision is offered to an actor P1-08 refuses");
       const before = await governedCounts();
       const decisionPathForActor = `${decisionPath(candidateId)}?organization_id=${ORG}`;
       const decision = await mixedPage.evaluate(`(async () => {
@@ -505,10 +506,11 @@ async function runBrowserAcceptance() {
         return { status: response.status, body: await response.json() };
       })()`);
       assert.equal(decision.status, 403, JSON.stringify(decision.body));
-      assert.equal(decision.body.error?.code, "tenant_boundary_violation");
-      assert.deepEqual(decision.body.blockers, [], "the cockpit currently drops P1-08's role blocker");
+      assert.equal(decision.body.error?.code, "authorization_denied");
+      assert.deepEqual(decision.body.blockers.map((blocker) => [blocker.validator_key, blocker.blocking_reason]), [["VAL-AUT-004", "role_not_allowed"]],
+        "P1-08's role blocker reaches the caller");
       assert.deepEqual(await governedCounts(), before, "no promotion, source, evidence, or review decision persisted");
-      results.mixedRoleSourcePromotion = "REPRODUCED: cockpit detail 200; P1-08 role refusal returned as tenant_boundary_violation 403 without blockers; no writes";
+      results.mixedRoleSourcePromotion = "PASS: cockpit detail 200 with no decision controls; P1-08 role refusal returned as authorization_denied 403 with role_not_allowed; no writes";
     });
 
     const normalProfile = await seedFreshFile(FILE.normal, NAMES.normal, "d");

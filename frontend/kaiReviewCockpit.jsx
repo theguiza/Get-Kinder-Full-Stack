@@ -11,9 +11,10 @@ import { organizationsPath } from "./kaiWebIntakeLogic.js";
  * only the allowlisted fields the internal API returns.
  *
  * Source-decision controls are rendered only when the source-candidate detail
- * response reports `decision_controls_enabled: true`, which mirrors
- * KAI_SPRINT2_ENABLED. When that flag is off, the controls are not rendered at
- * all - the read-only review detail remains fully available.
+ * response reports `decision_controls_enabled: true`: the feature is enabled,
+ * the actor passes P1-08's own decision authorization, and the candidate can
+ * still take a decision. Otherwise the controls are not rendered at all - the
+ * read-only review detail remains fully available.
  */
 
 const BASE_PATH = "/api/kai/sprint2/intake";
@@ -184,7 +185,7 @@ function FileProfileDetail({ detail }) {
  * The server-side P2-01 handoff that follows a committed 'promoted' decision.
  * Only the handoff's status, counts, and sanitized error code are shown.
  */
-function evidenceHandoffText(handoff) {
+export function evidenceHandoffText(handoff) {
   if (!handoff || handoff.status === "not_applicable") return "";
   const count = Number.isInteger(handoff.evidence_item_count) ? handoff.evidence_item_count : 0;
   if (handoff.status === "created") {
@@ -197,6 +198,29 @@ function evidenceHandoffText(handoff) {
     + " The promotion is saved; retry evidence extraction below.";
 }
 
+/**
+ * The authoritative result line for a committed P1-08 decision response
+ * (fresh or replayed), shared by every surface that submits the decision.
+ */
+export function sourceDecisionResultText(data) {
+  return `Recorded ${data.promotion_decision.decision_status}`
+    + `${data.replayed ? " (replayed, no new write)" : ""}.`
+    + evidenceHandoffText(data.evidence_extraction_handoff);
+}
+
+/**
+ * Why no decision form is shown. The server reports decision_controls_enabled
+ * only when this actor may decide this candidate now; the text distinguishes
+ * an already-final candidate from one this account may read but not decide.
+ */
+function sourceDecisionUnavailableText(detail) {
+  const status = detail?.promotion_decision?.decision_status;
+  if (status === "promoted" || status === "rejected") {
+    return "This candidate already has a final source decision.";
+  }
+  return "Source decisions for this candidate are not available to your account.";
+}
+
 function decisionSubmitLabel(outcome) {
   if (outcome === "promoted") return "Promote";
   if (outcome === "rejected") return "Reject";
@@ -207,10 +231,11 @@ function SourceDecisionControls({ detail, onSubmit, busy }) {
   const [outcome, setOutcome] = useState("needs_more_information");
   const [reviewedSourceType, setReviewedSourceType] = useState("");
 
-  // KAI_SPRINT2_ENABLED is off: the decision controls are not rendered at all,
-  // not merely made non-functional.
+  // The server does not offer a decision to this actor for this candidate
+  // (feature off, P1-08 authorization, or a final candidate): the controls are
+  // not rendered at all, not merely made non-functional.
   if (!detail?.decision_controls_enabled) {
-    return <p className="kai-cockpit-note">Source-decision controls are disabled.</p>;
+    return <p className="kai-cockpit-note">{sourceDecisionUnavailableText(detail)}</p>;
   }
 
   const allowedTypes = Array.isArray(detail.allowed_reviewed_source_types)
@@ -255,7 +280,7 @@ function SourceDecisionControls({ detail, onSubmit, busy }) {
   );
 }
 
-function SourceCandidateDetail({ detail, onSubmitDecision, busy, decisionResult, retryPayload }) {
+export function SourceCandidateDetail({ detail, onSubmitDecision, busy, decisionResult, retryPayload }) {
   if (!detail) return null;
   const candidate = detail.source_candidate;
   const decision = detail.promotion_decision;
@@ -492,11 +517,7 @@ export default function KaiReviewCockpit(props = {}) {
       return;
     }
     const handoff = result.body.data.evidence_extraction_handoff;
-    setDecisionResult(
-      `Recorded ${result.body.data.promotion_decision.decision_status}` +
-      `${result.body.data.replayed ? " (replayed, no new write)" : ""}.` +
-      evidenceHandoffText(handoff),
-    );
+    setDecisionResult(sourceDecisionResultText(result.body.data));
     if (handoff?.status === "not_created" && payload.outcome === "promoted") setRetryPayload(payload);
     const refreshed = await getJson(
       `${COCKPIT_PATH}/source-candidates/${candidateId}?organization_id=${encodeURIComponent(organization)}`,

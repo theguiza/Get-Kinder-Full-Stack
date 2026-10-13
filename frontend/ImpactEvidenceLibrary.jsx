@@ -139,8 +139,12 @@ import {
   buildSensitivityDecisionRequestBody,
   blockerDisplayText,
   projectSensitivityDetail,
+  projectSourceReviewQueueItems,
+  sourceReviewQueueAttention,
+  sourceReviewQueuePath,
 } from "./impactEvidenceLibraryLogic.js";
 import SensitivityReviewCardBody from "./SensitivityReviewCardBody.jsx";
+import KaiSourceReviewPanel from "./KaiSourceReviewPanel.jsx";
 import {
   exportManifestCsvPath,
   exportManifestDocxPath,
@@ -396,6 +400,13 @@ export default function ImpactEvidenceLibrary({
   const [sensitivityReviewQueueError, setSensitivityReviewQueueError] = useState("");
   const [selectedSensitivityProfileId, setSelectedSensitivityProfileId] = useState("");
 
+  // P1-08 source review: the same capability probe's can_review_source_candidates
+  // (null while unknown) gates the open source_candidate_review list below.
+  const [sourceReviewCapability, setSourceReviewCapability] = useState(null);
+  const [sourceReviewQueueItems, setSourceReviewQueueItems] = useState([]);
+  const [loadingSourceReviewQueue, setLoadingSourceReviewQueue] = useState(false);
+  const [sourceReviewQueueError, setSourceReviewQueueError] = useState("");
+
   // Funder-requirement readiness rollup: one server-authoritative, read-only
   // snapshot of every requirement this organization is governed against.
   // `assessingRequirementId` names the one requirement currently mid-POST (if
@@ -607,6 +618,17 @@ export default function ImpactEvidenceLibrary({
     [sensitivityCapability, loadingSensitivityReviewQueue, sensitivityReviewQueueError, sensitivityReviewQueueItems],
   );
 
+  const sourceReviewAttention = useMemo(
+    () =>
+      sourceReviewQueueAttention({
+        sourceReviewCapability,
+        loadingSourceReviewQueue,
+        sourceReviewQueueError,
+        sourceReviewQueueItems,
+      }),
+    [sourceReviewCapability, loadingSourceReviewQueue, sourceReviewQueueError, sourceReviewQueueItems],
+  );
+
   // Review Queue closure: the single pure authority for the organization-wide
   // "Nothing currently needs attention" assertion - true only when BOTH the
   // claim-attention rollup and the sensitivity/allowed-use rollup are
@@ -621,6 +643,9 @@ export default function ImpactEvidenceLibrary({
         sensitivityCapability,
         sensitivityAttentionStatus: sensitivityAttention.status,
         sensitivityAttentionItemsLength: sensitivityAttention.items.length,
+        sourceReviewCapability,
+        sourceReviewAttentionStatus: sourceReviewAttention.status,
+        sourceReviewAttentionItemsLength: sourceReviewAttention.items.length,
       }),
     [
       reviewQueueRequestState,
@@ -629,6 +654,8 @@ export default function ImpactEvidenceLibrary({
       sensitivityCapabilityRequestState,
       sensitivityCapability,
       sensitivityAttention,
+      sourceReviewCapability,
+      sourceReviewAttention,
     ],
   );
 
@@ -720,6 +747,9 @@ export default function ImpactEvidenceLibrary({
     setSensitivityReviewQueueItems([]);
     setSensitivityReviewQueueError("");
     setSelectedSensitivityProfileId("");
+    setSourceReviewCapability(null);
+    setSourceReviewQueueItems([]);
+    setSourceReviewQueueError("");
     setRequirementsReadiness([]);
     setRequirementsReadinessError("");
     setAssessingRequirementId("");
@@ -759,10 +789,12 @@ export default function ImpactEvidenceLibrary({
       if (cancelled) return;
       if (result.statusCode !== 200 || !result.body?.ok) {
         setSensitivityCapability(false);
+        setSourceReviewCapability(false);
         setSensitivityCapabilityRequestState("error");
         return;
       }
       setSensitivityCapability(result.body.data?.can_manage_sensitivity_review === true);
+      setSourceReviewCapability(result.body.data?.can_review_source_candidates === true);
       setSensitivityCapabilityRequestState("success");
     })();
     return () => {
@@ -799,6 +831,44 @@ export default function ImpactEvidenceLibrary({
       cancelled = true;
     };
   }, [organizationId, sensitivityCapability]);
+
+  // P1-08 source review: open source_candidate_review work for this
+  // organization, fetched only once the capability probe positively confirms
+  // this actor may read it. After a recorded decision the list is refreshed in
+  // place, so the open candidate's result stays on screen.
+  const refreshSourceReviewQueue = useCallback(async () => {
+    if (!organizationId || sourceReviewCapability !== true) return;
+    const requestedOrganizationId = organizationId;
+    const result = await getJson(sourceReviewQueuePath(requestedOrganizationId));
+    if (organizationIdRef.current !== requestedOrganizationId) return;
+    if (result.statusCode !== 200 || !result.body?.ok) {
+      setSourceReviewQueueError(errorText(result));
+      return;
+    }
+    setSourceReviewQueueItems(projectSourceReviewQueueItems(result.body.data));
+  }, [organizationId, sourceReviewCapability]);
+
+  useEffect(() => {
+    setSourceReviewQueueItems([]);
+    setSourceReviewQueueError("");
+    if (!organizationId || sourceReviewCapability !== true) return;
+    let cancelled = false;
+    (async () => {
+      setLoadingSourceReviewQueue(true);
+      const result = await getJson(sourceReviewQueuePath(organizationId));
+      if (cancelled) return;
+      setLoadingSourceReviewQueue(false);
+      if (result.statusCode !== 200 || !result.body?.ok) {
+        setSourceReviewQueueItems([]);
+        setSourceReviewQueueError(errorText(result));
+        return;
+      }
+      setSourceReviewQueueItems(projectSourceReviewQueueItems(result.body.data));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [organizationId, sourceReviewCapability]);
 
   // KAI B1A-3B-R2: the zero-queue pre-claim entry point. KaiWebIntake (the
   // same ordinary product intake/file workflow already embedded below)
@@ -3147,6 +3217,21 @@ export default function ImpactEvidenceLibrary({
               </ul>
             ) : null}
           </div>
+        ) : null}
+
+        {sourceReviewAttention.status === "loading" ? (
+          <div className="text-muted small">Loading source review...</div>
+        ) : null}
+        {sourceReviewAttention.status === "error" ? (
+          <div className="alert alert-warning py-2 small">{sourceReviewAttention.error}</div>
+        ) : null}
+        {sourceReviewAttention.status === "ready" ? (
+          <KaiSourceReviewPanel
+            key={organizationId}
+            organizationId={organizationId}
+            items={sourceReviewAttention.items}
+            onDecisionRecorded={refreshSourceReviewQueue}
+          />
         ) : null}
 
         {reviewQueueConclusivelyEmpty ? (

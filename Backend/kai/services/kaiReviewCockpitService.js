@@ -24,8 +24,11 @@ import {
   validateSourceCandidateDecisionRequest,
 } from "../validators/kaiReviewCockpitRequestSchemas.js";
 import { validateSensitivityProfileDecisionRequest } from "../validators/kaiSprint2RequestSchemas.js";
-import { createSourcePromotionDecision } from "./kaiSourcePromotionService.js";
-import { __sourcePromotionRepositoryContract } from "../dictionary/postgresSourcePromotionRepository.js";
+import { authorizeSourcePromotionDecision, createSourcePromotionDecision } from "./kaiSourcePromotionService.js";
+import {
+  __sourcePromotionRepositoryContract,
+  isSourceCandidateDecisionActionable,
+} from "../dictionary/postgresSourcePromotionRepository.js";
 import { recordSensitivityAllowedUseDecision } from "./kaiSensitivityAllowedUseReviewService.js";
 import { createSourceCandidateStub } from "./kaiSourceCandidateService.js";
 import { __sourceCandidateRepositoryContract } from "../dictionary/postgresSourceCandidateRepository.js";
@@ -213,12 +216,7 @@ async function authorizeReviewCockpitRequest(input, dependencies) {
     return { ok: false, error: buildKaiError("authorization_denied") };
   }
 
-  const roleAuth = validateActorCanPerformOperation(
-    actorContext,
-    REVIEW_COCKPIT_READ_OPERATION,
-    organizationId,
-    { allowedRoles: REVIEW_COCKPIT_READ_ROLES, globalRolesOnly: true },
-  );
+  const roleAuth = authorizeReviewCockpitReadRole(actorContext, organizationId);
   if (!roleAuth.ok) {
     return { ok: false, error: buildKaiError(roleAuth.error_code, { blockers: roleAuth.blockers }) };
   }
@@ -232,6 +230,15 @@ async function authorizeReviewCockpitRequest(input, dependencies) {
   }
 
   return { ok: true, organizationId, actorContext };
+}
+
+function authorizeReviewCockpitReadRole(actorContext, organizationId) {
+  return validateActorCanPerformOperation(
+    actorContext,
+    REVIEW_COCKPIT_READ_OPERATION,
+    organizationId,
+    { allowedRoles: REVIEW_COCKPIT_READ_ROLES, globalRolesOnly: true },
+  );
 }
 
 async function authorizeSensitivityReviewRequest(input, dependencies) {
@@ -309,12 +316,12 @@ export async function getReviewCockpitCapabilities(input = {}, dependencies = {}
     return buildKaiError("unauthorized");
   }
   if (!actorResult.ok) {
-    return { ok: true, data: { can_manage_sensitivity_review: false } };
+    return { ok: true, data: { can_manage_sensitivity_review: false, can_review_source_candidates: false } };
   }
 
   const actorContext = actorResult.actorContext;
   if (actorContext.actorType !== "human") {
-    return { ok: true, data: { can_manage_sensitivity_review: false } };
+    return { ok: true, data: { can_manage_sensitivity_review: false, can_review_source_candidates: false } };
   }
 
   const roleAuth = validateActorCanPerformSensitivityReview(
@@ -325,7 +332,18 @@ export async function getReviewCockpitCapabilities(input = {}, dependencies = {}
     { globalRolesOnly: true },
   );
 
-  return { ok: true, data: { can_manage_sensitivity_review: roleAuth.ok === true } };
+  // Source review reads (queue and candidate detail) use the same gate as
+  // every other cockpit read; whether this actor may then decide is reported
+  // per candidate by the detail's decision_controls_enabled.
+  const sourceReviewAuth = authorizeReviewCockpitReadRole(actorContext, organizationId);
+
+  return {
+    ok: true,
+    data: {
+      can_manage_sensitivity_review: roleAuth.ok === true,
+      can_review_source_candidates: sourceReviewAuth.ok === true,
+    },
+  };
 }
 
 function responseReviewCockpitQueueItem(row, organizationId) {
@@ -1219,8 +1237,10 @@ function composeReviewCockpitFileProfileDetail(record, organizationId) {
  * checksum, queue state, decision state, and the source/source_version result the
  * committed decision row is bound to.
  *
- * `decision_controls_enabled` reflects KAI_SPRINT2_ENABLED so the internal UI can
- * show or hide its decision controls without guessing. `allowed_reviewed_source_types`
+ * `decision_controls_enabled` is true only when KAI_SPRINT2_ENABLED is on, this
+ * actor passes P1-08's own decision authorization, and the candidate can still
+ * take a decision, so the UI shows decision controls exactly when the decision
+ * endpoint could accept one, without guessing. `allowed_reviewed_source_types`
  * is read from P1-08's own exported contract rather than restated here, and is
  * empty whenever decision controls are disabled.
  */
@@ -1228,7 +1248,7 @@ export async function getReviewCockpitSourceCandidateDetail(input = {}, dependen
   const deps = resolvedDependencies(dependencies);
   const authorization = await authorizeReviewCockpitRequest(input, deps);
   if (!authorization.ok) return authorization.error;
-  const { organizationId } = authorization;
+  const { organizationId, actorContext } = authorization;
 
   const intakeSourceCandidateId = typeof input.intakeSourceCandidateId === "string"
     ? input.intakeSourceCandidateId
@@ -1258,7 +1278,14 @@ export async function getReviewCockpitSourceCandidateDetail(input = {}, dependen
     return buildKaiError("system_error");
   }
 
-  const decisionControlsEnabled = isKaiSprint2Enabled(deps.env || process.env);
+  // Decision controls are offered only when the decision endpoint could
+  // accept a decision from this actor now: the feature is enabled, the actor
+  // passes the exact P1-08 write authorization, and the candidate is still at
+  // a state its completeness predicate accepts. Read-only; the write path
+  // re-checks all of it transactionally.
+  const decisionControlsEnabled = isKaiSprint2Enabled(deps.env || process.env)
+    && authorizeSourcePromotionDecision(actorContext, organizationId).ok
+    && isSourceCandidateDecisionActionable({ sourceCandidate, reviewQueueItem, promotionDecision });
 
   return {
     ok: true,
@@ -1345,6 +1372,7 @@ export async function submitSourceCandidateDecision(input = {}, dependencies = {
 
   if (!result?.ok) {
     return buildKaiError(result?.error?.code || "system_error", {
+      ...(Array.isArray(result?.blockers) ? { blockers: result.blockers } : {}),
       ...(result?.data ? { data: result.data } : {}),
     });
   }

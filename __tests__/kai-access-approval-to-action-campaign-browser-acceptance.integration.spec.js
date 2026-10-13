@@ -19,8 +19,10 @@ import { join } from "node:path";
  *      organization-only, full), then the reviewer's own review
  *   J3 mixed-role reviewer (global gk_reviewer + client_admin membership)
  *   J4 bound organization administrator (binding-derived client_admin)
- *   J5 downstream GK review: who can reach P1-08 source review, P1-08 ->
- *      P2-01 evidence, P2-12 evidence review -> P2-02/P2-03 claim proposal
+ *   J5 downstream GK review: P1-08 source review in the GK Studio for the
+ *      actors P1-08 authorizes (and no decision for those it refuses),
+ *      P1-08 -> P2-01 evidence, P2-12 evidence review -> P2-02/P2-03 claim
+ *      proposal
  *   J6 client approval: join request -> approval -> client_reviewer ->
  *      client follow-up completion
  *   J7 revocation and isolation
@@ -748,6 +750,83 @@ async function runBrowserAcceptance() {
     return { controlsOffered, requests: page.requestsSince(mark) };
   }
 
+  // GK Knowledge Studio -> Reviews -> Source review: opens the candidate's
+  // open source_candidate_review entry and reports whether the server offered
+  // this actor a decision form (decision_controls_enabled).
+  async function openSourceReviewInStudio(page, candidateId) {
+    await openKnowledgeStudio(page);
+    await page.clickTab("Reviews");
+    await page.waitForText("Source review");
+    const entry = `document.querySelector('[data-source-candidate-id="${candidateId}"] button')`;
+    await page.waitFor(async () => page.evaluate(`Boolean(${entry})`), `the open source candidate ${candidateId} in Source review`);
+    await page.evaluate(`${entry}.click()`);
+    await page.waitFor(async () => page.evaluate(`[...document.querySelectorAll(".kai-cockpit-detail")].some((el) => el.innerText.includes(${JSON.stringify(candidateId)}))`),
+      "the candidate's source review detail");
+    await page.idle();
+    const controlsOffered = await page.evaluate(`Boolean([...document.querySelectorAll("label")]
+      .find((el) => el.innerText.trim().startsWith("Decision outcome") && el.querySelector("select")))`);
+    return { controlsOffered };
+  }
+  // Promotes the open candidate from the Studio's source review detail and
+  // waits for the authoritative result; returns the requests after the press.
+  async function promoteInStudio(page) {
+    await page.selectByLabel("Decision outcome", "promoted");
+    await page.selectByLabel("Reviewed source type", "organization_primary_record");
+    assert.equal(await page.visibleButton("Promote"), true);
+    const mark = page.mark();
+    await page.clickButton("Promote");
+    await page.waitForText("Recorded promoted.");
+    await page.waitForText("This candidate already has a final source decision.");
+    await page.idle();
+    return page.requestsSince(mark);
+  }
+  async function promotionDecisionRow(candidateId, organizationId = ORG_A) {
+    const [row] = await query(
+      `SELECT d.decision_status, d.created_by::text AS decided_by, c.candidate_status, q.queue_status,
+              v.is_current, d.source_version_id = v.source_version_id AS decided_version
+         FROM kai.intake_promotion_decisions d
+         JOIN kai.intake_source_candidates c ON c.organization_id = d.organization_id AND c.intake_source_candidate_id = d.intake_source_candidate_id
+         JOIN kai.review_queue_items q ON q.organization_id = d.organization_id AND q.review_queue_item_id = d.review_queue_item_id
+         LEFT JOIN kai.source_versions v ON v.organization_id = d.organization_id AND v.intake_source_candidate_id = d.intake_source_candidate_id
+        WHERE d.organization_id = $1::uuid AND d.intake_source_candidate_id = $2::uuid`, [organizationId, candidateId]);
+    return row || null;
+  }
+  async function currentSourceVersionCount(candidateId, organizationId = ORG_A) {
+    return (await query(
+      "SELECT count(*)::int AS count FROM kai.source_versions WHERE organization_id = $1::uuid AND intake_source_candidate_id = $2::uuid AND is_current",
+      [organizationId, candidateId]))[0].count;
+  }
+  // The full UI promotion proof shared by J5-1 and J5-3.
+  async function assertStudioPromotion(page, actorKey, candidate, label) {
+    const candidateId = candidate.intake_source_candidate_id;
+    const before = await allKaiCounts();
+    const auditBefore = await auditActions(kaiUserIds[actorKey]);
+    const { controlsOffered } = await openSourceReviewInStudio(page, candidateId);
+    assert.equal(controlsOffered, true, `${label}: the server offers this authorized actor the P1-08 decision`);
+    const requests = await promoteInStudio(page);
+    assert.deepEqual(writes(requests), [["POST", candidateDecisionPath(candidateId).split("?")[0], 200]], `${label}: exactly the existing decision route`);
+    const changed = changedTables(before, await allKaiCounts());
+    for (const table of ["intake_promotion_decisions", "sources", "source_versions", "evidence_items", "audit_events"]) {
+      assert.ok(changed.includes(table), `${label}: ${table} written`);
+    }
+    const decision = await promotionDecisionRow(candidateId);
+    assert.deepEqual(
+      [decision.decision_status, decision.decided_by, decision.candidate_status, decision.queue_status, decision.is_current, decision.decided_version],
+      ["promoted", kaiUserIds[actorKey], "promoted", "resolved", true, true],
+      `${label}: decision, attribution, candidate, queue, and current version`,
+    );
+    assert.equal(await currentSourceVersionCount(candidateId), 1, `${label}: exactly one current source version`);
+    const newAudit = (await auditActions(kaiUserIds[actorKey])).slice(auditBefore.length);
+    assert.ok(newAudit.length > 0, `${label}: audited as this actor`);
+    const evidence = await evidenceForCandidate(candidateId);
+    assert.equal(evidence.length, 2, `${label}: P2-01 created the evidence`);
+    for (const row of evidence) assert.deepEqual([row.evidence_review_status, row.queue_status], ["needs_gk_review", "open"]);
+    const pageText = await page.text();
+    assert.ok(pageText.includes("2 evidence item(s) created, awaiting GK evidence review."), `${label}: the P2-01 outcome is reported`);
+    assert.ok(!(await page.evaluate(`Boolean(document.querySelector('[data-source-candidate-id="${candidateId}"]'))`)), `${label}: the decided candidate leaves the open list`);
+    return { changed, newAudit };
+  }
+
   const results = {};
   const pages = [];
   const session = async (legacyUserId) => {
@@ -1027,89 +1106,82 @@ async function runBrowserAcceptance() {
     // =====================================================================
     // J5. Downstream GK review: P1-08 source review and promotion
     // =====================================================================
-    await test("J5-1: the next authorized human for source review - the provisioned non-superuser GK reviewer - can reach the P1-08 review in the product UI", async () => {
+    await test("J5-1: the provisioned non-superuser GK reviewer discovers, opens, and promotes the pending source candidate in the GK Studio; decision, attribution, lineage, audit, and P2-01 evidence persist", async () => {
       const candidate = await candidateFor(profiles.reviewer);
-      // The GK Studio: any source-review entry for the pending candidate?
-      await openKnowledgeStudio(reviewerPage);
-      const studioRequests = reviewerPage.requests().map(pathOf);
-      let studioOffersSourceReview = false;
-      for (const tab of ["Reviews", "Processing", "Files", "Evidence"]) {
-        await reviewerPage.clickTab(tab);
-        await reviewerPage.idle();
-        const body = await reviewerPage.text();
-        if (body.includes("source_candidate_review") || body.includes(candidate.intake_source_candidate_id) || (await reviewerPage.visibleButton("Promote"))) {
-          studioOffersSourceReview = true;
-        }
-      }
-      // The only page that renders P1-08 controls.
+      const { changed, newAudit } = await assertStudioPromotion(reviewerPage, "reviewer", candidate, "J5-1");
+      // The client's own pipeline moves past source review to the next actual stage.
+      const pipeline = await storedAdminPage.fetchJson("GET", pipelinePath());
+      const file = findFile(pipeline.data, FILES.reviewer);
+      assert.deepEqual([file.currentStage, file.responsibleParty], ["evidence_review", "get_kinder"]);
+      // The administrative cockpit page keeps its site-admin gate.
       await reviewerPage.goto("/gk-admin/kai-review-cockpit");
-      const cockpitPagePath = await reviewerPage.pathname();
-      const cockpitPageText = await reviewerPage.text();
-      results.J5_1 = {
-        studioOffersSourceReview,
-        studioCalledSourceCandidateRoutes: studioRequests.some((p) => p.includes("/source-candidates")),
-        cockpitPageLandedOn: cockpitPagePath,
-        cockpitRendered: cockpitPageText.includes("KAI internal review cockpit"),
-      };
-      console.log(`[campaign] J5-1 source-review reachability for a non-superuser GK reviewer: ${JSON.stringify(results.J5_1)}`);
-      assert.ok(studioOffersSourceReview || results.J5_1.cockpitRendered,
-        "an authorized GK reviewer must be able to reach pending source review in the product UI");
+      const cockpitPageLandedOn = await reviewerPage.pathname();
+      assert.equal(cockpitPageLandedOn, "/");
+      assert.deepEqual(reviewerPage.exceptions, []);
+      results.J5_1 = { changed, newAudit, clientStage: [file.currentStage, file.responsibleParty], cockpitPageLandedOn };
+      console.log(`[campaign] J5-1 GK reviewer source review in the Studio: ${JSON.stringify(results.J5_1)}`);
     });
 
-    await test("J5-2: the same reviewer's direct P1-08 request is authorized: promotion persists with lineage and the P2-01 evidence handoff; an identical replay writes nothing", async () => {
+    await test("J5-2: the same reviewer's direct P1-08 request after the UI promotion is an authorized identical replay: detail reports the final decision with no controls, lineage is current, and the replay writes nothing", async () => {
       const candidate = await candidateFor(profiles.reviewer);
+      assert.deepEqual([candidate.candidate_status, candidate.queue_status], ["promoted", "resolved"]);
       const queue = await reviewerPage.fetchJson("GET", sourceQueuePath());
       assert.equal(queue.status, 200);
-      assert.ok(queue.data.items.some((item) => item.target_object_id === candidate.intake_source_candidate_id), "the pending item is visible to the reviewer's API session");
+      assert.ok(!queue.data.items.some((item) => item.target_object_id === candidate.intake_source_candidate_id && item.queue_status === "open"), "no longer open work");
       const detail = await reviewerPage.fetchJson("GET", candidatePath(candidate.intake_source_candidate_id));
-      assert.deepEqual([detail.status, detail.data.decision_controls_enabled], [200, true]);
-      const before = await allKaiCounts();
-      const promoted = await reviewerPage.fetchJson("POST", candidateDecisionPath(candidate.intake_source_candidate_id), PROMOTE_BODY);
-      assert.equal(promoted.status, 200, JSON.stringify(promoted));
-      assert.deepEqual([promoted.data.promotion_decision.decision_status, promoted.data.evidence_extraction_handoff.status], ["promoted", "created"]);
-      const changed = changedTables(before, await allKaiCounts());
-      console.log(`[campaign] J5-2 promotion changed tables: ${JSON.stringify(changed)}`);
-      for (const table of ["intake_promotion_decisions", "sources", "source_versions", "evidence_items"]) assert.ok(changed.includes(table), table);
+      assert.deepEqual([detail.status, detail.data.promotion_decision.decision_status, detail.data.decision_controls_enabled], [200, "promoted", false]);
       const [lineage] = await query(
         `SELECT v.is_current, d.source_version_id = v.source_version_id AS decided, d.created_by::text AS decided_by
            FROM kai.source_versions v JOIN kai.intake_promotion_decisions d ON d.organization_id = v.organization_id
             AND d.intake_source_candidate_id = v.intake_source_candidate_id
           WHERE v.organization_id = $1::uuid AND v.intake_source_candidate_id = $2::uuid`, [ORG_A, candidate.intake_source_candidate_id]);
       assert.deepEqual([lineage.is_current, lineage.decided, lineage.decided_by], [true, true, kaiUserIds.reviewer]);
-      const evidence = await evidenceForCandidate(candidate.intake_source_candidate_id);
-      assert.equal(evidence.length, 2);
-      for (const row of evidence) assert.deepEqual([row.evidence_review_status, row.queue_status], ["needs_gk_review", "open"]);
       const replayBefore = await allKaiCounts();
       const replay = await reviewerPage.fetchJson("POST", candidateDecisionPath(candidate.intake_source_candidate_id), PROMOTE_BODY);
-      assert.deepEqual([replay.status, replay.data?.replayed], [200, true]);
+      assert.deepEqual([replay.status, replay.data?.replayed, replay.data?.evidence_extraction_handoff?.status], [200, true, "replayed"]);
       await assertNothingWritten(replayBefore, "P1-08 replay");
-      results.J5_2 = "PASS: API P1-08 promoted by the reviewer; source/version lineage current; 2 evidence items needs_gk_review with open evidence_review items; replay wrote nothing";
+      assert.equal(await currentSourceVersionCount(candidate.intake_source_candidate_id), 1);
+      results.J5_2 = "PASS: detail final with no controls; lineage current and attributed to the reviewer; identical replay 200 replayed, handoff replayed, nothing written";
     });
 
     const gkOperatorPage = await session(USERS.gkOperator);
-    await test("J5-3: an organization + global gk_operator (not a site admin) is also kept from the P1-08 page though its API admits them", async () => {
+    await test("J5-3: an organization + global gk_operator (not a site admin) discovers, opens, and completes source review in the GK Studio, attributed to them", async () => {
       const candidate = await candidateFor(profiles.superGk);
+      const { changed, newAudit } = await assertStudioPromotion(gkOperatorPage, "gkOperator", candidate, "J5-3");
       await gkOperatorPage.goto("/gk-admin/kai-review-cockpit");
-      const landed = await gkOperatorPage.pathname();
-      const detail = await gkOperatorPage.fetchJson("GET", candidatePath(candidate.intake_source_candidate_id));
-      results.J5_3 = { cockpitPageLandedOn: landed, detail: [detail.status, detail.data?.decision_controls_enabled] };
-      console.log(`[campaign] J5-3 gk_operator: ${JSON.stringify(results.J5_3)}`);
-      assert.deepEqual([detail.status, detail.data.decision_controls_enabled], [200, true]);
-      assert.equal(landed, "/gk-admin/kai-review-cockpit", "an authorized GK operator must be able to open the P1-08 review page");
+      const cockpitPageLandedOn = await gkOperatorPage.pathname();
+      assert.equal(cockpitPageLandedOn, "/", "the administrative cockpit page keeps its site-admin gate");
+      assert.deepEqual(gkOperatorPage.exceptions, []);
+      results.J5_3 = { changed, newAudit, cockpitPageLandedOn };
+      console.log(`[campaign] J5-3 gk_operator source review in the Studio: ${JSON.stringify(results.J5_3)}`);
     });
 
-    await test("J5-4: a superuser with global gk_admin and only a derived client_admin membership is offered Promote in the cockpit, and the server refuses it", async () => {
-      const candidate = await candidateFor(profiles.superGk);
+    await test("J5-4: a superuser with global gk_admin and only a derived client_admin membership can read source review but is offered no P1-08 decision anywhere, and a direct request is refused as authorization_denied / role_not_allowed, writing nothing", async () => {
+      const candidate = await candidateFor(profiles.mixed);
+      assert.deepEqual([candidate.candidate_status, candidate.queue_status], ["needs_gk_review", "open"], "a pending candidate");
       const before = await allKaiCounts();
+      const studio = await openSourceReviewInStudio(superGkPage, candidate.intake_source_candidate_id);
+      const studioText = await superGkPage.text();
       const { controlsOffered, requests } = await promoteThroughCockpit(superGkPage, candidate.intake_source_candidate_id);
       const posts = writes(requests);
-      const pageText = await superGkPage.text();
-      await assertNothingWritten(before, "refused superuser promotion");
+      const detail = await superGkPage.fetchJson("GET", candidatePath(candidate.intake_source_candidate_id));
+      await assertNothingWritten(before, "superuser source review reads");
       const direct = await superGkPage.fetchJson("POST", candidateDecisionPath(candidate.intake_source_candidate_id), PROMOTE_BODY);
-      results.J5_4 = { controlsOffered, posts, direct: [direct.status, direct.errorCode, direct.blockers], shownError: (pageText.match(/(Request failed[^\n]*|[^\n]*not allowed[^\n]*|[^\n]*tenant[^\n]*)/i) || [null])[0] };
-      console.log(`[campaign] J5-4 superuser (global gk_admin, derived client_admin) in cockpit: ${JSON.stringify(results.J5_4)}`);
-      assert.ok(!controlsOffered || (posts.length === 1 && posts[0][2] === 200),
-        "the cockpit must not offer a P1-08 decision the server refuses for this actor");
+      await assertNothingWritten(before, "refused superuser promotion");
+      results.J5_4 = {
+        studioControlsOffered: studio.controlsOffered,
+        cockpitControlsOffered: controlsOffered,
+        posts,
+        detail: [detail.status, detail.data?.decision_controls_enabled],
+        direct: [direct.status, direct.errorCode, direct.blockingReason],
+      };
+      console.log(`[campaign] J5-4 superuser (global gk_admin, derived client_admin): ${JSON.stringify(results.J5_4)}`);
+      assert.equal(studio.controlsOffered, false, "no Studio decision form for an actor P1-08 refuses");
+      assert.ok(studioText.includes("Source decisions for this candidate are not available to your account."));
+      assert.equal(controlsOffered, false, "no cockpit decision form for an actor P1-08 refuses");
+      assert.deepEqual(posts, []);
+      assert.deepEqual([detail.status, detail.data.decision_controls_enabled], [200, false]);
+      assert.deepEqual([direct.status, direct.errorCode, direct.blockingReason], [403, "authorization_denied", "role_not_allowed"]);
     });
 
     const superGkStoredPage = await session(USERS.superGkStored);

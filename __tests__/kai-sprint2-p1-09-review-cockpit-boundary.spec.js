@@ -1212,8 +1212,90 @@ test("P1-09 introduces no locator, claim, graph, assistant-tool, generation, exp
   assert.doesNotMatch(uiSource, /client[_-]review|clientPortal/i);
 });
 
-test("P1-09 UI hides the decision controls when the promotion flag is off and never fetches a database directly", () => {
-  assert.match(uiSource, /if \(!detail\?\.decision_controls_enabled\) \{\n\s+return <p className="kai-cockpit-note">Source-decision controls are disabled\.<\/p>;/);
+test("P1-09 source-candidate detail: decision_controls_enabled follows the P1-08 write authorization and the candidate's decidable state, read-only", async () => {
+  const decisionRow = (decisionStatus) => ({
+    intake_promotion_decision_id: "90000000-0000-4000-8000-0000000000d1",
+    organization_id: ORG,
+    intake_source_candidate_id: CANDIDATE,
+    review_queue_item_id: QUEUE_ITEM,
+    reviewed_source_type: null,
+    decision_status: decisionStatus,
+    source_id: null,
+    source_version_id: null,
+    created_at: CREATED_AT,
+    decided_at: decisionStatus === "needs_more_information" ? null : CREATED_AT,
+    promoted_at: null,
+  });
+  const cases = [
+    ["org gk_operator, open candidate", humanActor(), {}, true],
+    ["org gk_reviewer + global gk_reviewer", humanActor({ kaiRoles: ["gk_reviewer"], organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "gk_reviewer" }] }), {}, true],
+    ["global gk_admin + stored client_admin", humanActor({ kaiRoles: ["gk_admin"], organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_admin" }] }), {}, false],
+    ["global gk_admin + derived client_admin", humanActor({ kaiRoles: ["gk_admin"], organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_admin", source: "gk_organization_binding", gk_organization_id: 7 }] }), {}, false],
+    ["global gk_reviewer + stored client_admin (mixed)", humanActor({ kaiRoles: ["gk_reviewer"], organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_admin" }] }), {}, false],
+    ["promoted candidate", humanActor(), { candidate_status: "promoted", queue_status: "resolved", decision: "promoted" }, false],
+    ["rejected candidate", humanActor(), { candidate_status: "rejected", queue_status: "resolved", decision: "rejected" }, false],
+    ["needs_more_information awaiting client", humanActor(), { queue_status: "waiting_on_client", decision: "needs_more_information" }, true],
+    ["open item with no decision but a moved queue", humanActor(), { queue_status: "in_progress" }, false],
+  ];
+  for (const [label, actorContext, state, expected] of cases) {
+    const base = sourceCandidateRecord();
+    let reads = 0;
+    const record = {
+      ...base,
+      sourceCandidate: { ...base.sourceCandidate, ...(state.candidate_status ? { candidate_status: state.candidate_status } : {}) },
+      reviewQueueItem: queueRow(state.queue_status ? { queue_status: state.queue_status } : {}),
+      promotionDecision: null,
+    };
+    const result = await getReviewCockpitSourceCandidateDetail(
+      { organizationId: ORG, actorContext, intakeSourceCandidateId: CANDIDATE },
+      readDependencies({
+        async getReviewCockpitSourceCandidateRecord() {
+          reads += 1;
+          return state.decision ? { ...record, promotionDecision: decisionRow(state.decision) } : record;
+        },
+        async createSourcePromotionDecision() {
+          throw new Error("a detail read never decides");
+        },
+      }),
+    );
+    assert.equal(result.ok, true, `${label}: ${JSON.stringify(result.error)}`);
+    assert.equal(reads, 1);
+    assert.equal(result.data.decision_controls_enabled, expected, label);
+    assert.equal(result.data.allowed_reviewed_source_types.length > 0, expected, label);
+  }
+});
+
+test("P1-09 decision seam: a P1-08 role refusal reaches the caller as authorization_denied with its role_not_allowed blocker, never as a tenant violation, and writes nothing", async () => {
+  let repositoryCalls = 0;
+  const actorContext = humanActor({
+    kaiRoles: ["gk_admin"],
+    organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_admin", source: "gk_organization_binding", gk_organization_id: 7 }],
+  });
+  const result = await submitSourceCandidateDecision(
+    { organizationId: ORG, actorContext, intakeSourceCandidateId: CANDIDATE, payload: { outcome: "promoted", reviewed_source_type: "organization_primary_record" } },
+    readDependencies({
+      sourcePromotionRepository: {
+        async createSourcePromotionDecision() {
+          repositoryCalls += 1;
+          throw new Error("an unauthorized decision never reaches the repository");
+        },
+      },
+      metadataOnlyAudit: { async record() { throw new Error("no audit for a refused decision"); } },
+      async extractEvidenceFromSourceVersion() {
+        throw new Error("no evidence handoff for a refused decision");
+      },
+    }),
+  );
+  assert.equal(result.ok, false);
+  assert.equal(result.error.code, "authorization_denied");
+  assert.equal(result.error.status, 403);
+  assert.deepEqual(result.blockers.map((blocker) => [blocker.validator_key, blocker.blocking_reason]), [["VAL-AUT-004", "role_not_allowed"]]);
+  assert.equal(repositoryCalls, 0);
+});
+
+test("P1-09 UI hides the decision controls unless the server offers this actor a decision, and never fetches a database directly", () => {
+  assert.match(uiSource, /if \(!detail\?\.decision_controls_enabled\) \{\n\s+return <p className="kai-cockpit-note">\{sourceDecisionUnavailableText\(detail\)\}<\/p>;/);
+  assert.doesNotMatch(uiSource, /gk_admin|gk_operator|gk_reviewer|client_admin|kaiRoles|organizationMemberships/, "no role policy in the browser");
   assert.match(uiSource, /if \(featureEnabled !== true\) return null;/);
   assert.doesNotMatch(uiSource, /\bpg\b|\bpool\b|connectionString|process\.env/);
 });
@@ -1319,21 +1401,21 @@ test("KAI B1A-3B getReviewCockpitCapabilities: an authorized global GK role gets
     dependencies,
   );
   assert.equal(authorized.ok, true);
-  assert.deepEqual(authorized.data, { can_manage_sensitivity_review: true });
+  assert.deepEqual(authorized.data, { can_manage_sensitivity_review: true, can_review_source_candidates: true });
 
   const wrongRole = await getReviewCockpitCapabilities(
     { organizationId: ORG, actorContext: humanActor({ kaiRoles: [], organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_admin" }] }) },
     dependencies,
   );
   assert.equal(wrongRole.ok, true);
-  assert.deepEqual(wrongRole.data, { can_manage_sensitivity_review: false });
+  assert.deepEqual(wrongRole.data, { can_manage_sensitivity_review: false, can_review_source_candidates: false });
 
   const nonHuman = await getReviewCockpitCapabilities(
     { organizationId: ORG, actorContext: { actorType: "system", actorUserId: "7fe568b1-5c05-4c42-bb1f-6e20de216c7b" } },
     dependencies,
   );
   assert.equal(nonHuman.ok, true);
-  assert.deepEqual(nonHuman.data, { can_manage_sensitivity_review: false });
+  assert.deepEqual(nonHuman.data, { can_manage_sensitivity_review: false, can_review_source_candidates: false });
 });
 
 test("KAI B1A-3B getReviewCockpitCapabilities: never touches queue/profile/decision data, and fails closed on a disabled feature flag or invalid organization id", async () => {

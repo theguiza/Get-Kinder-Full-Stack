@@ -70,6 +70,40 @@ function isMappedHumanActor(actorContext) {
 }
 
 /**
+ * The P1-08 decision authority, read-only: mapped human, then the shared
+ * tenant-membership/role check, then tenant consistency. It is the exact
+ * predicate createSourcePromotionDecision enforces, exported so a read surface
+ * can report whether this actor may decide without reconstructing the role
+ * policy. A refusal keeps the validator's own error code and blockers (a role
+ * refusal is authorization_denied/role_not_allowed, never a tenant violation).
+ */
+export function authorizeSourcePromotionDecision(actorContext, organizationId) {
+  if (!isMappedHumanActor(actorContext)) {
+    return { ok: false, error: buildKaiError("authorization_denied") };
+  }
+
+  const auth = validateActorCanPerformOperation(
+    actorContext,
+    SOURCE_PROMOTION_OPERATION,
+    organizationId,
+    { allowedRoles: SOURCE_PROMOTION_ALLOWED_ROLES },
+  );
+  if (!auth.ok) {
+    return { ok: false, error: buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers }) };
+  }
+
+  const tenant = validateTenantBoundaryConsistency({
+    expectedOrganizationId: organizationId,
+    payload: { organization_id: organizationId },
+  });
+  if (tenant.severity === "blocker") {
+    return { ok: false, error: buildKaiError("tenant_boundary_violation", { blockers: [tenant] }) };
+  }
+
+  return { ok: true };
+}
+
+/**
  * KAI P1-08 dormant source-promotion seam.
  *
  * Human-authorized creation of exactly one `kai.intake_promotion_decisions` row
@@ -98,27 +132,8 @@ export async function createSourcePromotionDecision(input, dependencies = {}) {
   }
 
   const { actorContext } = input;
-  if (!isMappedHumanActor(actorContext)) {
-    return buildKaiError("authorization_denied");
-  }
-
-  const auth = validateActorCanPerformOperation(
-    actorContext,
-    SOURCE_PROMOTION_OPERATION,
-    input.organizationId,
-    { allowedRoles: SOURCE_PROMOTION_ALLOWED_ROLES },
-  );
-  if (!auth.ok) {
-    return buildKaiError("tenant_boundary_violation", { blockers: auth.blockers });
-  }
-
-  const tenant = validateTenantBoundaryConsistency({
-    expectedOrganizationId: input.organizationId,
-    payload: { organization_id: input.organizationId },
-  });
-  if (tenant.severity === "blocker") {
-    return buildKaiError("tenant_boundary_violation", { blockers: [tenant] });
-  }
+  const authorization = authorizeSourcePromotionDecision(actorContext, input.organizationId);
+  if (!authorization.ok) return authorization.error;
 
   const sourcePromotionRepository = dependencies.sourcePromotionRepository || createPostgresSourcePromotionRepository();
 
