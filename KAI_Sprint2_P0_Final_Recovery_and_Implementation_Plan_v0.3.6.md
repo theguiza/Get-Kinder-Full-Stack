@@ -38811,3 +38811,122 @@ approve B, C, or D.
 AUTHORIZATION CLOSURE NOT_CONFIRMED (J3-3/C, D finding, B, A/E
 confirmation). No push, deployment, production, database, flag, tenant,
 role, credential, schema, or `00_KAI_CURRENT_STATE.md` change.
+
+### Package C: J3-3 decision-bound evidence-to-claim continuation (2026-10-13)
+
+**Owner authorization (USER_CONFIRMED, 2026-10-13):** the owner's J3-3
+execution prompt, confirmed in this session, accepts Decision C Option A.
+After an eligible human P2-12 evidence-review decision commits, the existing
+handoff may run the existing P2-02 assessment and P2-03 proposal as a
+governed continuation bound to that persisted decision. It grants no direct
+P2-02/P2-03 role, library read, or claim-approval authority, and the claim
+stays subject to separate human GK claim review. No migration, superuser
+policy change, role grant, flag, or production action is authorized.
+
+**Start (TOOL_VERIFIED):** `main` at `946b149`, clean.
+
+**Before (TOOL_VERIFIED, campaign runner):** 43 / 42 pass / 1 fail.
+- In J3-3, the P2-12 `supported` decision commits (`decided_by` is the mixed
+  actor, role `gk_reviewer`).
+- The handoff returns `not_created`: coverage is `blocked` with
+  `authorization_denied`, from `assessEvidenceCoverageForSourceVersion`'s
+  organization-role check.
+- No claim is created. Only `audit_events`, `evidence_review_decisions`, and
+  `upload_lifecycle_audit` change.
+
+**Change (`92550e2`):**
+- **Validator:** `kaiEvidenceReviewContinuationValidators.js`
+  (`VAL-KAI-P2-12-003`). It accepts only the current head decision (no
+  successor) for this organization and evidence item, with all of these
+  true:
+  - it was decided by this same actor, in role `gk_reviewer` or `gk_admin`;
+  - its outcome is positive;
+  - it decided this item's own `evidence_review` queue item, which is still
+    resolved/resolved;
+  - the item is still `reviewed` / `reviewed_supported`.
+- **New entries:** `assessEvidenceCoverageFromEvidenceReviewDecision` and
+  `proposeClaimFromEvidenceReviewDecision`.
+  - Input is identity only; no decision object, id, or marker is accepted.
+  - Authorization uses the P2-12 evidence-review roles with
+    `combineGlobalRoles`, so current P2-12 authority is still required.
+  - They then read the persisted decision through the scoped repositories:
+    P2-02 via `readEvidenceReviewContinuationFacts`; P2-03 inside its
+    proposal transaction, after a FOR SHARE lock on the `evidence_review`
+    queue row.
+  - They reuse the unchanged assessment, lineage validators, proposal,
+    replay, and audit code.
+- **Unchanged:** the direct entries, routes, and role sets. No route
+  references the new entries.
+- **Handoff:** calls only the new entries and adds a sanitized
+  `blocking_reason`.
+- **Audit:** the `claim_proposed` `audit_events` row records
+  `authority_source: evidence_review_decision`, `decision_type`,
+  `decision_id`, and `decided_by_role`, all existing allowlisted keys.
+  `upload_lifecycle_audit` is unchanged, because its `claim_proposed`
+  key-set CHECK is exact.
+- **Claim row:** unchanged (`created_by` is the deciding human,
+  `created_by_type` is `human`).
+- **Schema:** none. Inspected:
+  `kai_sprint2_p2_03_claim_proposal.sql` (claim/link/queue uniqueness,
+  `created_by_type` CHECK, audit key set) and
+  `kai_sprint2_p2_12_human_review_decision_ledger.sql` (`decided_by_role`
+  CHECK, single successor).
+
+**After (TOOL_VERIFIED):**
+- **Campaign:** 43 / 43 pass. J3-3 shows:
+  - handoff `created`; the claim is
+    proposed/needs_gk_review/unassessed/internal-only;
+  - one open `claim_review` item; audit provenance recorded; zero claim
+    reviews;
+  - the mixed actor's direct P2-02 GET and P2-03 POST return 403
+    `role_not_allowed`, and a forged-marker POST returns 422, with nothing
+    written;
+  - a separate GK reviewer finds the claim and approves it for internal use
+    (200, `decided_by` reviewer).
+- **New J3-3 PostgreSQL spec:** 16/0. It covers direct refusals; no-decision,
+  other-item, other-organization, forged-marker, and fabricated-decision
+  refusals; the positive path with exact deltas; zero-write replay;
+  incomplete-handoff recovery; concurrent recovery converging to
+  `created`+`replayed`; a stale source_version; a superseded decision;
+  revoked role or membership; not_supported; the not_allowed P2-02 blocker;
+  another human's decision; non-human actors; separate claim review;
+  isolation.
+
+**Verification (TOOL_VERIFIED; loopback sentinel; disposable PostgreSQL):**
+- **Unit and route specs (P2-02, P2-03, P2-12, handoff):** 147/0.
+- **Runners:**
+  - J3-3: 16/0
+  - P2-03 reviewed-evidence: 17/0
+  - P2-12 no-claim: 11/0
+  - P2-02: 7/0
+  - P2-03: 15/0
+  - P2-12 ledger: 24/0
+  - P2-01 handoff: 7/0
+  - P1-07 handoff: 22/0
+  - P2-09: 36/0
+  - P2-10: 51/0
+  - P2-11: 28/0
+- **Browser specs:** P2-12 11/0, claim proposal 10/0.
+- **Suites:** API contract 71/0; `test:kai-sprint2` 4763/0/90; `npm test`
+  5485/0/105.
+- **Build:** the bundle is unchanged.
+- **`git diff --check`:** clean.
+
+**Open findings (unchanged, out of scope):**
+- **Same human proposes and approves:** under the existing P2-12 policy
+  (`combineGlobalRoles`), the mixed actor can also record claim reviews. This
+  continuation adds nothing there, but no rule stops the same human from
+  proposing and then approving a claim.
+- **Decision D:** superuser attribution.
+- **Decision B:** GK operator provisioning.
+- **Decisions A/E:** confirmation still pending.
+- **Error classification:** four sibling services still mislabel role
+  refusals.
+- **Product decisions F and G:** source-stage follow-up and client Gaps.
+- **Replay coordinates:** strict replay still needs the original
+  `expected_updated_at`.
+
+**Status:** J3_3_DECISION_C_REPAIRED_LOCAL_SYNTHETIC. Full authorization
+closure is still NOT_CONFIRMED (B, D, A/E open). No push, deployment,
+production, shared database, flag, tenant, role, credential, schema, or
+`00_KAI_CURRENT_STATE.md` change.
