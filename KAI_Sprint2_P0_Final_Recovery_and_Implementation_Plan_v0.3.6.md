@@ -38280,3 +38280,94 @@ authority on review/client operations, mixed-role P2-02/P2-03 handoff, and
 the P1-08 review surface. No application, push, deployment, production or
 shared database, cloud, feature-flag, tenant, membership, role, credential,
 `.env`, schema, or `00_KAI_CURRENT_STATE.md` change.
+
+### Package 1: repository reconciliation and trusted first-request identity repair (2026-10-13)
+
+**Owner direction (USER_CONFIRMED):** reconcile the repository baseline after
+the system-wide diagnosis and repair the J2-0 first-request identity defect
+only. No P1-08 source-review UI, P2-12, or superuser-policy change; no new
+diagnostic campaign.
+
+**Reconciliation (TOOL_VERIFIED):** `main` at
+`0a46a318e1ca74b0fa515998a92db8ad9a5fd426`, clean, no stash entries;
+`c4c93ac`, `c8170d3`, `4191684` are ancestors. `0a46a318` is test-only plus
+this plan (campaign spec, three browser spec adjustments, runner
+registration). The earlier concurrent diagnostic edits are already folded
+into it; nothing was outstanding in this checkout. The canonical assembled
+campaign is
+`__tests__/kai-access-approval-to-action-campaign-browser-acceptance.integration.spec.js`
+(33 cases). The other worktree with uncommitted edits
+(`.claude/worktrees/affectionate-moser-f245b1`, base `f82b284`: org-portal
+and events files) is unrelated and was not touched. Baseline campaign at
+`0a46a31` in a detached scratch worktree: 28 pass, 5 fail (J2-0, J5-1, J5-3,
+J5-4, J3-3).
+
+**Proven defect (TOOL_VERIFIED, baseline J2-0):** 21 service-level routes in
+`sprint2IntakeApi.js` (including `GET /admin/organizations` and the shared
+`requestContext`) projected `req.user` to `{ id }`, so a never-provisioned
+account's first KAI request reached `kai.users` JIT provisioning without
+its email. Under the NOT NULL mirror, the result was 403
+`mapped_kai_user_required` and no row. Under a nullable column, the request
+persisted `email: null`, which the later email-forwarding onboarding route
+never filled in.
+
+**Repair:**
+- `findOrCreateKaiUserByLegacyPublicUserdataId` never inserts without a
+  usable email (non-blank string, matching the `cef6a83` administration
+  target rule). It returns `null` with nothing written, and existing active
+  or inactive rows are returned unchanged under the existing advisory lock.
+- The 21 routes use the new `safeAuthenticatedIdentityForKaiActorResolution`.
+  It composes `safeAuthenticatedIdentityForKaiUserProvisioning` and forwards
+  `{ id, kaiProvisioningEmail }` from the server-deserialized user only.
+- `resolveKaiActorContext` uses `kaiProvisioningEmail` solely for
+  provisioning. It is not forwarded as `email` because `isAdminRequest` also
+  grants site-admin authority by `ADMIN_EMAILS`, and these routes never
+  carried that authority. `platformSuperuser`, `safeLegacyUser` and
+  `actorContext.email` derivation are unchanged.
+- The onboarding route keeps its existing projection.
+- Test harnesses that seeded null-email identities now give target accounts
+  a synthetic email: the P2 access administration integration dependency and
+  the package-4 requester seed. Production target resolution already reads
+  the account email. Projection shape pins were updated to the new exact
+  shape.
+- Campaign J2-1 now asserts the first page load's provisioned email instead
+  of only recording it.
+
+**Verification (TOOL_VERIFIED, sentinel `DATABASE_URL`, placeholder
+non-secret `OPENAI_API_KEY`, runner-owned loopback PostgreSQL, real Chrome,
+synthetic data):**
+- Assembled campaign: 29 pass, 4 fail. J2-0 passes, with a 200 and the
+  account email under both mirrors. J2-1 passes. The remaining J5-1, J5-3,
+  J5-4 and J3-3 failures are the recorded open owner decisions and are
+  unchanged.
+- JIT spec: 26/26, with new cases for refusal without a usable email,
+  id-only resolution of existing active and inactive mappings, concurrent
+  mixed-route first requests creating exactly one complete row, no
+  `ADMIN_EMAILS` expansion, exact projection, and a route-wide source pin.
+- Focused identity and route specs: 193/0.
+- Browser specs: sensitivity 16/0, reviewer provisioning 13/0, P2-01
+  handoff 7/0, reviewer edge cases 11/0, Team & Access 7/0, P2-12 no-claim
+  11/0, reviewed evidence claim proposal 10/0, client evidence pipeline 7/0,
+  client Knowledge Studio 6/0.
+- Runners: onboarding approved-status 6/0, JOIN-1..5 128/0, P1-07 handoff
+  22/0, P2 access administration 31/0 (10 harness failures before the
+  harness fix), package-4 21/0.
+- `npm test`: 5460/2/104. `test:kai-sprint2`: 4740/1/89.
+  `verify:kai-sprint2-api-contract`: 71/0. The only failures are
+  `kai-client-authorization-reconciliation.spec.js:441` and
+  `kai-sprint2-impact-evidence-library.spec.js:3436`; both also fail at
+  `0a46a31` (verified in the scratch worktree), so neither is attributable
+  to this package.
+- `git diff --check` is clean.
+
+**NOT_CONFIRMED:**
+- The deployed `kai.users.email` NOT NULL contract and the production
+  `ADMIN_EMAILS` value were not read.
+- `Backend/services/kai-tool-executor.js` still resolves its fallback actor
+  from a bare `userId` with no email. An unmapped user there now gets a
+  controlled `mapped_kai_user_required` with nothing written. Under the
+  deployed NOT NULL column the outcome is the same as before.
+
+**Status:** PACKAGE_1_RECONCILED_AND_IDENTITY_REPAIRED_LOCAL_SYNTHETIC. No
+push, deployment, production or shared database, cloud, feature-flag,
+tenant, credential, `.env`, schema, or `00_KAI_CURRENT_STATE.md` change.
