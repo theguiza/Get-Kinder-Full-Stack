@@ -16,6 +16,11 @@ import {
   validateUnsupportedClaimPromotion,
   validateClaimRequirementCoverage,
 } from "../validators/kaiClaimProposalValidators.js";
+import {
+  validateEvidenceReviewDecisionContinuation,
+  EVIDENCE_REVIEW_CONTINUATION_AUTHORITY_SOURCE,
+} from "../validators/kaiEvidenceReviewContinuationValidators.js";
+import { findCurrentEvidenceReviewDecision } from "./postgresHumanReviewDecisionRepository.js";
 
 /**
  * KAI P2-03 deterministic claim-proposal repository adapter: server-derived-only
@@ -49,6 +54,7 @@ import {
  */
 
 const CLAIM_PROPOSAL_RESULT_STATUS = Object.freeze({
+  authorization_denied: 403,
   validation_blocker: 422,
   conflict_current_state_changed: 409,
   not_found: 404,
@@ -96,6 +102,13 @@ function claimProposalFailure(code) {
     },
   };
 }
+
+function continuationFailure({ code, blockers }) {
+  const failure = claimProposalFailure(code);
+  return { ...failure, error: { ...failure.error, blockers: blockers || [] } };
+}
+
+const CANONICAL_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 function claimProposalSuccess(data) {
   return { ok: true, data, error: null };
@@ -231,6 +244,28 @@ async function insertClaimReviewQueueItemIfAbsent(tx, { organizationId, claimId,
       CLAIM_REVIEW_REQUIRED_ACTION,
       createdByType || "system",
     ],
+  );
+  return result.rows[0] ?? null;
+}
+
+/**
+ * J3-3 / Decision C Option A: the decision-bound continuation's first read.
+ * FOR SHARE on the evidence item's own evidence_review queue item - the row
+ * every P2-12 evidence-review decision compare-and-sets - so a concurrent
+ * superseding review cannot commit between this transaction's decision check
+ * and its claim write.
+ */
+async function lockEvidenceReviewQueueItemForContinuation(tx, { organizationId, evidenceItemId }) {
+  const result = await tx.query(
+    `SELECT review_queue_item_id, organization_id, queue_type, target_object_type,
+            target_object_id, queue_status, review_status
+       FROM kai.review_queue_items
+      WHERE organization_id = $1::uuid
+        AND queue_type = 'evidence_review'
+        AND target_object_type = 'evidence_item'
+        AND target_object_id = $2::uuid
+      FOR SHARE`,
+    [organizationId, evidenceItemId],
   );
   return result.rows[0] ?? null;
 }
@@ -390,7 +425,16 @@ function buildClaimProposalAuditMetadata({ evidenceItemId, claimId, warningCount
 }
 
 function buildClaimProposalAuditPayload(context) {
+  const continuation = context.continuationDecision
+    ? {
+      authority_source: EVIDENCE_REVIEW_CONTINUATION_AUTHORITY_SOURCE,
+      decision_type: "evidence_review",
+      decision_id: context.continuationDecision.decision_id,
+      decided_by_role: context.continuationDecision.decided_by_role,
+    }
+    : {};
   return {
+    ...continuation,
     attempted_operation: CLAIM_PROPOSAL_AUDIT_OPERATION,
     actor_type: "human",
     contract: CLAIM_PROPOSAL_AUDIT_CONTRACT,
@@ -470,6 +514,253 @@ export function createPostgresClaimProposalRepository({
   runInTransaction,
   beforeInsert = async () => {},
 } = {}) {
+  /**
+   * The one proposal transaction behind both entries below. With
+   * `decisionBound`, it first locks the evidence item's evidence_review queue
+   * item and requires the persisted current evidence-review decision to
+   * authorize this actor (validateEvidenceReviewDecisionContinuation); every
+   * later read, validator, write, replay rule, and audit is identical.
+   */
+  async function runProposal(input, decisionBound) {
+    if (!validateProposeClaimInput(input)) return claimProposalFailure("validation_blocker");
+    const { organizationId, evidenceItemId, actorUserId, now, metadataOnlyAudit } = input;
+    if (decisionBound && (!CANONICAL_UUID_RE.test(organizationId) || !CANONICAL_UUID_RE.test(evidenceItemId))) {
+      return claimProposalFailure("validation_blocker");
+    }
+    const run = runInTransaction || (await resolveDefaultRunInTransaction());
+    try {
+      return await run(async (tx) => {
+        // Test-only rendezvous seam, called once, before any row is read or
+        // locked - in particular, before the FOR UPDATE lock
+        // getScopedSourceCandidateByIdentity takes below, which is the real
+        // serialization point for two genuinely concurrent calls on the same
+        // identity (mirrors the exact P1-08/P2-01 precedent).
+        await beforeInsert();
+
+        let continuationDecision = null;
+        if (decisionBound) {
+          const lockedEvidenceReviewQueueItemRow = await lockEvidenceReviewQueueItemForContinuation(tx, {
+            organizationId,
+            evidenceItemId,
+          });
+          const currentEvidenceItemRow = await getScopedEvidenceItemById({ organizationId, evidenceItemId }, tx);
+          const currentDecisionRow = currentEvidenceItemRow
+            ? await findCurrentEvidenceReviewDecision(tx, { organizationId, evidenceItemId })
+            : null;
+          const continuation = validateEvidenceReviewDecisionContinuation({
+            organizationId,
+            evidenceItemId,
+            actorUserId,
+            decisionRow: currentDecisionRow,
+            evidenceItemRow: currentEvidenceItemRow,
+            evidenceReviewQueueItemRow: lockedEvidenceReviewQueueItemRow,
+          });
+          if (!continuation.ok) return continuationFailure(continuation);
+          continuationDecision = continuation.decision;
+        }
+
+        const evidenceItemRow = await getScopedEvidenceItemById({ organizationId, evidenceItemId }, tx);
+        if (!evidenceItemRow) return claimProposalFailure("not_found");
+
+        const locatorRow = await getScopedSourceLocatorById(
+          { organizationId, sourceLocatorId: evidenceItemRow.source_locator_id },
+          tx,
+        );
+        if (!locatorRow) return claimProposalFailure("not_found");
+
+        const sourceRow = await getScopedSourceById({ organizationId, sourceId: evidenceItemRow.source_id }, tx);
+        if (!sourceRow) return claimProposalFailure("not_found");
+
+        const sourceVersionRow = await getScopedSourceVersionById(
+          { organizationId, sourceVersionId: evidenceItemRow.source_version_id },
+          tx,
+        );
+        if (!sourceVersionRow) return claimProposalFailure("not_found");
+
+        const candidateRow = await getScopedSourceCandidateByIdentity(
+          { organizationId, intakeSourceCandidateId: sourceVersionRow.intake_source_candidate_id },
+          tx,
+        );
+        if (!candidateRow) return claimProposalFailure("not_found");
+
+        const decisionRow = await getScopedPromotionDecisionBySourceVersionId(
+          { organizationId, sourceVersionId: evidenceItemRow.source_version_id },
+          tx,
+        );
+        if (!decisionRow) return claimProposalFailure("not_found");
+
+        const evidenceReviewQueueItemRow = await getScopedEvidenceReviewQueueItemByEvidenceItemId(
+          { organizationId, evidenceItemId },
+          tx,
+        );
+        if (!evidenceReviewQueueItemRow) return claimProposalFailure("not_found");
+
+        const lineageValidation = validateClaimHasLoadBearingEvidence({
+          evidenceItemRow,
+          locatorRow,
+          sourceRow,
+          sourceVersionRow,
+          candidateRow,
+          decisionRow,
+          evidenceReviewQueueItemRow,
+        });
+        if (!lineageValidation.ok) return claimProposalFailure(lineageValidation.code);
+
+        const promotionValidation = validateUnsupportedClaimPromotion({
+          claimStatus: CLAIM_STATUS_PROPOSED,
+          claimReviewStatus: CLAIM_REVIEW_STATUS_NEEDS_GK_REVIEW,
+          claimStrength: CLAIM_STRENGTH_UNASSESSED,
+          internalOnly: true,
+          publicUseAllowed: false,
+          funderUseAllowed: false,
+          llmProcessingAllowed: false,
+          productLearningAllowed: false,
+          exportReady: false,
+        });
+        if (!promotionValidation.ok) return claimProposalFailure(promotionValidation.code);
+
+        const requirementValidation = validateClaimRequirementCoverage();
+        if (!requirementValidation.ok) return claimProposalFailure(requirementValidation.code);
+
+        const warnings = [
+          ...(lineageValidation.warnings || []),
+          ...(promotionValidation.warnings || []),
+          ...(requirementValidation.warnings || []),
+        ];
+
+        const columnName = locatorRow.coordinates?.column_name;
+        const statement = composeClaimStatement({ columnName, locatorFingerprint: locatorRow.locator_fingerprint });
+        const statementFingerprint = computeClaimStatementFingerprint({
+          organizationId,
+          evidenceItemId,
+          claimType: CLAIM_TYPE_FINDING,
+          statement,
+        });
+
+        const insertedClaimRow = await insertClaimIfAbsent(tx, {
+          organizationId,
+          evidenceItemId,
+          statement,
+          statementFingerprint,
+          createdBy: actorUserId,
+          createdByType: "human",
+        });
+
+        let claimRecord;
+        let isFreshlyCreated;
+        if (insertedClaimRow) {
+          claimRecord = rowToClaimRecord(insertedClaimRow);
+          isFreshlyCreated = true;
+        } else {
+          const existingClaimRow = await getScopedClaimByEvidenceIdentity(
+            { organizationId, evidenceItemId, claimType: CLAIM_TYPE_FINDING },
+            tx,
+          );
+          if (!existingClaimRow) throw new MalformedInsertedRowError("claims");
+          claimRecord = rowToClaimRecord(existingClaimRow);
+          isFreshlyCreated = false;
+          // A mismatched immutable claim identity on reread (statement drift
+          // against what this call would have written for the same identity)
+          // is a genuine conflict, never a silent replay.
+          if (claimRecord.statement_fingerprint !== statementFingerprint) {
+            throw new ConcurrentStateChangedError("claim");
+          }
+        }
+
+        // P1-07/P2-01 correction lesson reapplied: the link and queue-item
+        // writes are gated strictly on THIS call's own isFreshlyCreated result
+        // for THIS claim, never on "a link or queue item happens to be
+        // missing".
+        let linkRecord;
+        let queueRecord;
+        if (isFreshlyCreated) {
+          const insertedLinkRow = await insertClaimEvidenceLinkIfAbsent(tx, {
+            organizationId,
+            claimId: claimRecord.claim_id,
+            evidenceItemId,
+            createdByType: "system",
+          });
+          if (!insertedLinkRow) throw new ConcurrentStateChangedError("claim_evidence_link");
+          linkRecord = rowToClaimEvidenceLinkRecord(insertedLinkRow);
+
+          const insertedQueueRow = await insertClaimReviewQueueItemIfAbsent(tx, {
+            organizationId,
+            claimId: claimRecord.claim_id,
+            createdByType: "system",
+          });
+          if (!insertedQueueRow) throw new ConcurrentStateChangedError("claim_review_queue_item");
+          queueRecord = rowToClaimReviewQueueRecord(insertedQueueRow);
+        } else {
+          const existingLinkRow = await getScopedClaimEvidenceLinkByClaimId(
+            { organizationId, claimId: claimRecord.claim_id },
+            tx,
+          );
+          if (!existingLinkRow) throw new ConcurrentStateChangedError("claim_evidence_link");
+          linkRecord = rowToClaimEvidenceLinkRecord(existingLinkRow);
+
+          const existingQueueRow = await getScopedClaimReviewQueueItemByClaimId(
+            { organizationId, claimId: claimRecord.claim_id },
+            tx,
+          );
+          if (!existingQueueRow) throw new ConcurrentStateChangedError("claim_review_queue_item");
+          queueRecord = rowToClaimReviewQueueRecord(existingQueueRow);
+        }
+
+        verifyPostWriteContract({
+          claimRecord,
+          linkRecord,
+          queueRecord,
+          organizationId,
+          evidenceItemId,
+          expectedStatement: statement,
+          expectedStatementFingerprint: statementFingerprint,
+        });
+
+        if (!isFreshlyCreated) {
+          // Full identical replay: zero writes, zero audit.
+          return claimProposalSuccess({
+            claim: claimRecord,
+            claimEvidenceLink: linkRecord,
+            reviewQueueItem: queueRecord,
+            warnings,
+            replayed: true,
+          });
+        }
+
+        const uploadState = await readScopedUploadState(tx, organizationId, candidateRow.intake_file_id);
+        if (!uploadState) return claimProposalFailure("not_found");
+
+        const auditContext = {
+          continuationDecision,
+          evidenceItemId,
+          claimId: claimRecord.claim_id,
+          warningCount: warnings.length,
+          reviewQueueItemCount: 1,
+          freshWriteCount: 1,
+        };
+        const preparedAudit = prepareRequiredAudit(metadataOnlyAudit, tx, auditContext);
+        await insertAudit(tx, {
+          organizationId,
+          intakeFileId: candidateRow.intake_file_id,
+          uploadState,
+          metadata: buildClaimProposalAuditMetadata(auditContext),
+          now,
+        });
+        await preparedAudit.publish();
+
+        return claimProposalSuccess({
+          claim: claimRecord,
+          claimEvidenceLink: linkRecord,
+          reviewQueueItem: queueRecord,
+          warnings,
+          replayed: false,
+        });
+      });
+    } catch (error) {
+      return shapeClaimProposalError(error);
+    }
+  }
+
   return Object.freeze({
     /**
      * Organization-scoped, human-authorized, idempotent proposal of exactly one
@@ -485,217 +776,17 @@ export function createPostgresClaimProposalRepository({
      * application-level synchronization primitive.
      */
     async proposeClaim(input) {
-      if (!validateProposeClaimInput(input)) return claimProposalFailure("validation_blocker");
-      const { organizationId, evidenceItemId, actorUserId, now, metadataOnlyAudit } = input;
-      const run = runInTransaction || (await resolveDefaultRunInTransaction());
-      try {
-        return await run(async (tx) => {
-          // Test-only rendezvous seam, called once, before any row is read or
-          // locked - in particular, before the FOR UPDATE lock
-          // getScopedSourceCandidateByIdentity takes below, which is the real
-          // serialization point for two genuinely concurrent calls on the same
-          // identity (mirrors the exact P1-08/P2-01 precedent).
-          await beforeInsert();
+      return runProposal(input, false);
+    },
 
-          const evidenceItemRow = await getScopedEvidenceItemById({ organizationId, evidenceItemId }, tx);
-          if (!evidenceItemRow) return claimProposalFailure("not_found");
-
-          const locatorRow = await getScopedSourceLocatorById(
-            { organizationId, sourceLocatorId: evidenceItemRow.source_locator_id },
-            tx,
-          );
-          if (!locatorRow) return claimProposalFailure("not_found");
-
-          const sourceRow = await getScopedSourceById({ organizationId, sourceId: evidenceItemRow.source_id }, tx);
-          if (!sourceRow) return claimProposalFailure("not_found");
-
-          const sourceVersionRow = await getScopedSourceVersionById(
-            { organizationId, sourceVersionId: evidenceItemRow.source_version_id },
-            tx,
-          );
-          if (!sourceVersionRow) return claimProposalFailure("not_found");
-
-          const candidateRow = await getScopedSourceCandidateByIdentity(
-            { organizationId, intakeSourceCandidateId: sourceVersionRow.intake_source_candidate_id },
-            tx,
-          );
-          if (!candidateRow) return claimProposalFailure("not_found");
-
-          const decisionRow = await getScopedPromotionDecisionBySourceVersionId(
-            { organizationId, sourceVersionId: evidenceItemRow.source_version_id },
-            tx,
-          );
-          if (!decisionRow) return claimProposalFailure("not_found");
-
-          const evidenceReviewQueueItemRow = await getScopedEvidenceReviewQueueItemByEvidenceItemId(
-            { organizationId, evidenceItemId },
-            tx,
-          );
-          if (!evidenceReviewQueueItemRow) return claimProposalFailure("not_found");
-
-          const lineageValidation = validateClaimHasLoadBearingEvidence({
-            evidenceItemRow,
-            locatorRow,
-            sourceRow,
-            sourceVersionRow,
-            candidateRow,
-            decisionRow,
-            evidenceReviewQueueItemRow,
-          });
-          if (!lineageValidation.ok) return claimProposalFailure(lineageValidation.code);
-
-          const promotionValidation = validateUnsupportedClaimPromotion({
-            claimStatus: CLAIM_STATUS_PROPOSED,
-            claimReviewStatus: CLAIM_REVIEW_STATUS_NEEDS_GK_REVIEW,
-            claimStrength: CLAIM_STRENGTH_UNASSESSED,
-            internalOnly: true,
-            publicUseAllowed: false,
-            funderUseAllowed: false,
-            llmProcessingAllowed: false,
-            productLearningAllowed: false,
-            exportReady: false,
-          });
-          if (!promotionValidation.ok) return claimProposalFailure(promotionValidation.code);
-
-          const requirementValidation = validateClaimRequirementCoverage();
-          if (!requirementValidation.ok) return claimProposalFailure(requirementValidation.code);
-
-          const warnings = [
-            ...(lineageValidation.warnings || []),
-            ...(promotionValidation.warnings || []),
-            ...(requirementValidation.warnings || []),
-          ];
-
-          const columnName = locatorRow.coordinates?.column_name;
-          const statement = composeClaimStatement({ columnName, locatorFingerprint: locatorRow.locator_fingerprint });
-          const statementFingerprint = computeClaimStatementFingerprint({
-            organizationId,
-            evidenceItemId,
-            claimType: CLAIM_TYPE_FINDING,
-            statement,
-          });
-
-          const insertedClaimRow = await insertClaimIfAbsent(tx, {
-            organizationId,
-            evidenceItemId,
-            statement,
-            statementFingerprint,
-            createdBy: actorUserId,
-            createdByType: "human",
-          });
-
-          let claimRecord;
-          let isFreshlyCreated;
-          if (insertedClaimRow) {
-            claimRecord = rowToClaimRecord(insertedClaimRow);
-            isFreshlyCreated = true;
-          } else {
-            const existingClaimRow = await getScopedClaimByEvidenceIdentity(
-              { organizationId, evidenceItemId, claimType: CLAIM_TYPE_FINDING },
-              tx,
-            );
-            if (!existingClaimRow) throw new MalformedInsertedRowError("claims");
-            claimRecord = rowToClaimRecord(existingClaimRow);
-            isFreshlyCreated = false;
-            // A mismatched immutable claim identity on reread (statement drift
-            // against what this call would have written for the same identity)
-            // is a genuine conflict, never a silent replay.
-            if (claimRecord.statement_fingerprint !== statementFingerprint) {
-              throw new ConcurrentStateChangedError("claim");
-            }
-          }
-
-          // P1-07/P2-01 correction lesson reapplied: the link and queue-item
-          // writes are gated strictly on THIS call's own isFreshlyCreated result
-          // for THIS claim, never on "a link or queue item happens to be
-          // missing".
-          let linkRecord;
-          let queueRecord;
-          if (isFreshlyCreated) {
-            const insertedLinkRow = await insertClaimEvidenceLinkIfAbsent(tx, {
-              organizationId,
-              claimId: claimRecord.claim_id,
-              evidenceItemId,
-              createdByType: "system",
-            });
-            if (!insertedLinkRow) throw new ConcurrentStateChangedError("claim_evidence_link");
-            linkRecord = rowToClaimEvidenceLinkRecord(insertedLinkRow);
-
-            const insertedQueueRow = await insertClaimReviewQueueItemIfAbsent(tx, {
-              organizationId,
-              claimId: claimRecord.claim_id,
-              createdByType: "system",
-            });
-            if (!insertedQueueRow) throw new ConcurrentStateChangedError("claim_review_queue_item");
-            queueRecord = rowToClaimReviewQueueRecord(insertedQueueRow);
-          } else {
-            const existingLinkRow = await getScopedClaimEvidenceLinkByClaimId(
-              { organizationId, claimId: claimRecord.claim_id },
-              tx,
-            );
-            if (!existingLinkRow) throw new ConcurrentStateChangedError("claim_evidence_link");
-            linkRecord = rowToClaimEvidenceLinkRecord(existingLinkRow);
-
-            const existingQueueRow = await getScopedClaimReviewQueueItemByClaimId(
-              { organizationId, claimId: claimRecord.claim_id },
-              tx,
-            );
-            if (!existingQueueRow) throw new ConcurrentStateChangedError("claim_review_queue_item");
-            queueRecord = rowToClaimReviewQueueRecord(existingQueueRow);
-          }
-
-          verifyPostWriteContract({
-            claimRecord,
-            linkRecord,
-            queueRecord,
-            organizationId,
-            evidenceItemId,
-            expectedStatement: statement,
-            expectedStatementFingerprint: statementFingerprint,
-          });
-
-          if (!isFreshlyCreated) {
-            // Full identical replay: zero writes, zero audit.
-            return claimProposalSuccess({
-              claim: claimRecord,
-              claimEvidenceLink: linkRecord,
-              reviewQueueItem: queueRecord,
-              warnings,
-              replayed: true,
-            });
-          }
-
-          const uploadState = await readScopedUploadState(tx, organizationId, candidateRow.intake_file_id);
-          if (!uploadState) return claimProposalFailure("not_found");
-
-          const auditContext = {
-            evidenceItemId,
-            claimId: claimRecord.claim_id,
-            warningCount: warnings.length,
-            reviewQueueItemCount: 1,
-            freshWriteCount: 1,
-          };
-          const preparedAudit = prepareRequiredAudit(metadataOnlyAudit, tx, auditContext);
-          await insertAudit(tx, {
-            organizationId,
-            intakeFileId: candidateRow.intake_file_id,
-            uploadState,
-            metadata: buildClaimProposalAuditMetadata(auditContext),
-            now,
-          });
-          await preparedAudit.publish();
-
-          return claimProposalSuccess({
-            claim: claimRecord,
-            claimEvidenceLink: linkRecord,
-            reviewQueueItem: queueRecord,
-            warnings,
-            replayed: false,
-          });
-        });
-      } catch (error) {
-        return shapeClaimProposalError(error);
-      }
+    /**
+     * J3-3 / Decision C Option A (owner-accepted 2026-10-13): the same proposal,
+     * authorized by the persisted current evidence-review decision of this
+     * same actor, verified inside this transaction. Called only through
+     * `proposeClaimFromEvidenceReviewDecision` in kaiClaimProposalService.js.
+     */
+    async proposeClaimFromEvidenceReviewDecision(input) {
+      return runProposal(input, true);
     },
   });
 }

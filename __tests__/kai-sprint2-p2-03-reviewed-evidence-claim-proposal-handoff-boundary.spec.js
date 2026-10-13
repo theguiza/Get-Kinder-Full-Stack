@@ -10,6 +10,10 @@ import {
 import { assessEvidenceCoverageForSourceVersion } from "../Backend/kai/services/kaiEvidenceCoverageAssessmentService.js";
 import { proposeClaim } from "../Backend/kai/services/kaiClaimProposalService.js";
 import { claimProposalHandoffOutcome } from "../frontend/impactEvidenceLibraryLogic.js";
+import { assessEvidenceCoverageFromEvidenceReviewDecision } from "../Backend/kai/services/kaiEvidenceCoverageAssessmentService.js";
+import { proposeClaimFromEvidenceReviewDecision } from "../Backend/kai/services/kaiClaimProposalService.js";
+import { validateEvidenceReviewDecisionContinuation } from "../Backend/kai/validators/kaiEvidenceReviewContinuationValidators.js";
+import { createProductionMetadataOnlyAuditForClaimProposal } from "../Backend/kai/services/kaiMetadataOnlyAuditComposition.js";
 
 /**
  * KAI P2-12 -> P2-02 -> P2-03 handoff boundary: after a committed POSITIVE
@@ -149,12 +153,12 @@ function harness({ reread = evidenceRow(), assessment = assessmentResult(), prop
         if (reread instanceof Error) throw reread;
         return reread;
       },
-      async assessEvidenceCoverageForSourceVersion(input, deps) {
+      async assessEvidenceCoverageFromEvidenceReviewDecision(input, deps) {
         calls.push(["assess", input, deps]);
         if (assessment instanceof Error) throw assessment;
         return assessment;
       },
-      async proposeClaim(input, deps) {
+      async proposeClaimFromEvidenceReviewDecision(input, deps) {
         calls.push(["propose", input, deps]);
         if (proposal instanceof Error) throw proposal;
         return proposal;
@@ -163,17 +167,50 @@ function harness({ reread = evidenceRow(), assessment = assessmentResult(), prop
   };
 }
 
+// The persisted rows the decision-bound entries read for themselves.
+function persistedContinuationRows({ decision = {}, evidence = {}, queue = {} } = {}) {
+  return {
+    decisionRow: {
+      decision_id: DECISION,
+      organization_id: ORG,
+      evidence_item_id: EVIDENCE,
+      review_queue_item_id: EVIDENCE_QUEUE,
+      decision_outcome: "supported",
+      decided_by: REVIEWER,
+      decided_by_role: "gk_reviewer",
+      ...decision,
+    },
+    evidenceItemRow: {
+      ...evidenceRow(),
+      evidence_review_status: "reviewed",
+      ...evidence,
+    },
+    evidenceReviewQueueItemRow: {
+      review_queue_item_id: EVIDENCE_QUEUE,
+      organization_id: ORG,
+      queue_type: "evidence_review",
+      target_object_type: "evidence_item",
+      target_object_id: EVIDENCE,
+      queue_status: "resolved",
+      review_status: "resolved",
+      ...queue,
+    },
+  };
+}
+
 function handoffInput(decision, actorContext = reviewer) {
   return { organizationId: ORG, evidenceItemId: EVIDENCE, evidenceReviewDecision: decision, actorContext, now: NOW };
 }
 
-test("A: a positive decision assesses coverage (P2-02) for the evidence's own source_version first, then proposes (P2-03) exactly once as the same human actor", async () => {
+test("A: a positive decision continues through the decision-bound P2-02 assessment for the evidence item first, then the decision-bound P2-03 proposal exactly once as the same human actor", async () => {
   for (const outcome of ["supported", "supported_with_limitation"]) {
     const { calls, deps, audit } = harness();
     const result = await proposeClaimAfterEvidenceReviewDecision(handoffInput(evidenceDecision(outcome)), deps);
     assert.deepEqual(calls.map(([name]) => name), ["reread", "assess", "propose"], outcome);
     assert.deepEqual(calls[0][1], { organizationId: ORG, evidenceItemId: EVIDENCE });
-    assert.deepEqual(calls[1][1], { organizationId: ORG, sourceVersionId: SOURCE_VERSION, actorContext: reviewer });
+    // No decision object, id, or marker crosses into P2-02 or P2-03: each
+    // re-reads the persisted decision itself.
+    assert.deepEqual(calls[1][1], { organizationId: ORG, evidenceItemId: EVIDENCE, actorContext: reviewer });
     assert.equal(calls[1][2].env, ENV);
     assert.deepEqual(calls[2][1], { organizationId: ORG, evidenceItemId: EVIDENCE, actorContext: reviewer, now: NOW });
     assert.equal(calls[2][2].env, ENV);
@@ -185,6 +222,7 @@ test("A: a positive decision assesses coverage (P2-02) for the evidence's own so
       claim_review_status: "needs_gk_review",
       claim_review_queue_item_id: CLAIM_QUEUE,
       error_code: null,
+      blocking_reason: null,
     });
     assert.equal(JSON.stringify(result).includes(STATEMENT_SENTINEL), false, "no claim or evidence statement is reported");
   }
@@ -363,8 +401,8 @@ test("H: real P2-12, P2-02, and P2-03 services - only gk_reviewer/gk_admin reach
   ];
   for (const actorContext of refused) {
     const { calls, deps } = harness();
-    delete deps.assessEvidenceCoverageForSourceVersion;
-    delete deps.proposeClaim;
+    delete deps.assessEvidenceCoverageFromEvidenceReviewDecision;
+    delete deps.proposeClaimFromEvidenceReviewDecision;
     const result = await recordEvidenceReviewDecisionWithClaimProposalHandoff(
       {
         organizationId: ORG, evidenceItemId: EVIDENCE, reviewQueueItemId: EVIDENCE_QUEUE, expectedUpdatedAt: TOKEN,
@@ -373,8 +411,8 @@ test("H: real P2-12, P2-02, and P2-03 services - only gk_reviewer/gk_admin reach
       {
         ...deps,
         humanReviewRepository: mustNotRun("recordEvidenceReviewDecision"),
-        evidenceCoverageAssessmentRepository: mustNotRun("readEvidenceCoverageAssessmentFacts"),
-        claimProposalRepository: mustNotRun("proposeClaim"),
+        evidenceCoverageAssessmentRepository: mustNotRun("readEvidenceReviewContinuationFacts"),
+        claimProposalRepository: mustNotRun("proposeClaimFromEvidenceReviewDecision"),
         metadataOnlyAudit: harness().audit,
       },
     );
@@ -384,8 +422,8 @@ test("H: real P2-12, P2-02, and P2-03 services - only gk_reviewer/gk_admin reach
 
   // A gk_reviewer passes P2-12 and then the real P2-02 and P2-03 checks.
   const { deps } = harness();
-  delete deps.assessEvidenceCoverageForSourceVersion;
-  delete deps.proposeClaim;
+  delete deps.assessEvidenceCoverageFromEvidenceReviewDecision;
+  delete deps.proposeClaimFromEvidenceReviewDecision;
   const repositoryCalls = [];
   const result = await recordEvidenceReviewDecisionWithClaimProposalHandoff(
     {
@@ -402,15 +440,19 @@ test("H: real P2-12, P2-02, and P2-03 services - only gk_reviewer/gk_admin reach
         },
       },
       evidenceCoverageAssessmentRepository: {
+        async readEvidenceReviewContinuationFacts(input) {
+          repositoryCalls.push(["p2-12-decision", input.evidenceItemId]);
+          return { ok: true, data: { rows: persistedContinuationRows() }, error: null };
+        },
         async readEvidenceCoverageAssessmentFacts(input) {
           repositoryCalls.push(["p2-02", input.sourceVersionId]);
           return { ok: false, error: { code: "not_found", status: 404 } };
         },
       },
-      claimProposalRepository: mustNotRun("proposeClaim"),
+      claimProposalRepository: mustNotRun("proposeClaimFromEvidenceReviewDecision"),
     },
   );
-  assert.deepEqual(repositoryCalls, [["p2-12", REVIEWER, "gk_reviewer"], ["p2-02", SOURCE_VERSION]]);
+  assert.deepEqual(repositoryCalls, [["p2-12", REVIEWER, "gk_reviewer"], ["p2-12-decision", EVIDENCE], ["p2-02", SOURCE_VERSION]]);
   assert.equal(result.data.claim_proposal_handoff.status, "not_created");
   assert.equal(result.data.claim_proposal_handoff.error_code, "not_found");
 });
@@ -428,6 +470,132 @@ test("H: the real P2-02 and P2-03 services refuse every non-human actor, so the 
       { env: ENV, claimProposalRepository: { async proposeClaim() { throw new Error("unreachable"); } } },
     );
     assert.equal(proposed.error.code, "authorization_denied");
+  }
+});
+
+// J3-3 / Decision C Option A: a global gk_reviewer whose only membership in
+// the organization is client_admin.
+const mixedActor = Object.freeze({ ...gkActor("client_admin"), kaiRoles: ["gk_reviewer"] });
+
+test("K: the continuation validator accepts only this actor's current positive decision on this evidence item's resolved review", () => {
+  const base = { organizationId: ORG, evidenceItemId: EVIDENCE, actorUserId: REVIEWER };
+  const accepted = validateEvidenceReviewDecisionContinuation({ ...base, ...persistedContinuationRows() });
+  assert.deepEqual(accepted, { ok: true, decision: { decision_id: DECISION, decided_by_role: "gk_reviewer", decision_outcome: "supported" } });
+  assert.equal(validateEvidenceReviewDecisionContinuation({
+    ...base, ...persistedContinuationRows({ decision: { decision_outcome: "supported_with_limitation", decided_by_role: "gk_admin" } }),
+  }).ok, true);
+  for (const [rows, code, reason] of [
+    [{ ...persistedContinuationRows(), decisionRow: null }, "authorization_denied", "evidence_review_decision_required"],
+    [persistedContinuationRows({ decision: { organization_id: OTHER_ORG } }), "authorization_denied", "evidence_review_decision_required"],
+    [persistedContinuationRows({ decision: { evidence_item_id: "c0000000-0000-4000-8000-000000000009" } }), "authorization_denied", "evidence_review_decision_required"],
+    [persistedContinuationRows({ decision: { decided_by: "90000000-0000-4000-8000-000000000009" } }), "authorization_denied", "evidence_review_decision_not_by_actor"],
+    [persistedContinuationRows({ decision: { decided_by_role: "gk_operator" } }), "authorization_denied", "evidence_review_decision_role_not_allowed"],
+    [persistedContinuationRows({ decision: { decided_by_role: "client_admin" } }), "authorization_denied", "evidence_review_decision_role_not_allowed"],
+    [persistedContinuationRows({ decision: { decision_outcome: "not_supported" } }), "authorization_denied", "evidence_review_decision_not_positive"],
+    [persistedContinuationRows({ decision: { decision_outcome: "needs_more_information" } }), "authorization_denied", "evidence_review_decision_not_positive"],
+    [persistedContinuationRows({ decision: { review_queue_item_id: "d0000000-0000-4000-8000-000000000009" } }), "conflict_current_state_changed", "evidence_review_decision_not_current"],
+    [persistedContinuationRows({ queue: { queue_status: "in_progress" } }), "conflict_current_state_changed", "evidence_review_decision_not_current"],
+    [persistedContinuationRows({ queue: { target_object_id: "c0000000-0000-4000-8000-000000000009" } }), "conflict_current_state_changed", "evidence_review_decision_not_current"],
+    [persistedContinuationRows({ evidence: { support_strength: "reviewed_not_supported" } }), "conflict_current_state_changed", "evidence_review_decision_not_current"],
+    [persistedContinuationRows({ evidence: { evidence_review_status: "needs_gk_review" } }), "conflict_current_state_changed", "evidence_review_decision_not_current"],
+  ]) {
+    const result = validateEvidenceReviewDecisionContinuation({ ...base, ...rows });
+    assert.deepEqual([result.ok, result.code, result.blockers[0]?.blocking_reason], [false, code, reason], JSON.stringify(rows));
+  }
+  assert.equal(validateEvidenceReviewDecisionContinuation({ ...base, ...persistedContinuationRows(), actorUserId: undefined }).ok, false);
+});
+
+test("K: for the mixed-role reviewer the direct P2-02/P2-03 entries stay role_not_allowed while the decision-bound entries proceed only on the persisted decision", async () => {
+  const unreachable = { async readEvidenceCoverageAssessmentFacts() { throw new Error("unreachable"); }, async proposeClaim() { throw new Error("unreachable"); } };
+  const assessed = await assessEvidenceCoverageForSourceVersion(
+    { organizationId: ORG, sourceVersionId: SOURCE_VERSION, actorContext: mixedActor },
+    { env: ENV, evidenceCoverageAssessmentRepository: unreachable },
+  );
+  const proposed = await proposeClaim(
+    { organizationId: ORG, evidenceItemId: EVIDENCE, actorContext: mixedActor, now: NOW },
+    { env: ENV, claimProposalRepository: unreachable },
+  );
+  for (const result of [assessed, proposed]) {
+    assert.deepEqual([result.error.code, result.blockers[0].blocking_reason], ["authorization_denied", "role_not_allowed"]);
+  }
+
+  // A persisted decision by someone else: refused before any assessment read.
+  const reads = [];
+  const notMine = await assessEvidenceCoverageFromEvidenceReviewDecision(
+    { organizationId: ORG, evidenceItemId: EVIDENCE, actorContext: { ...mixedActor, actorUserId: "90000000-0000-4000-8000-000000000009" } },
+    {
+      env: ENV,
+      evidenceCoverageAssessmentRepository: {
+        async readEvidenceReviewContinuationFacts(input) { reads.push(["continuation", input]); return { ok: true, data: { rows: persistedContinuationRows() } }; },
+        async readEvidenceCoverageAssessmentFacts() { throw new Error("unreachable"); },
+      },
+    },
+  );
+  assert.deepEqual([notMine.error.code, notMine.blockers[0].blocking_reason], ["authorization_denied", "evidence_review_decision_not_by_actor"]);
+  assert.deepEqual(reads, [["continuation", { organizationId: ORG, evidenceItemId: EVIDENCE }]]);
+
+  // The repository receives exactly the P2-03 identity: no decision, marker, or role.
+  const received = [];
+  await proposeClaimFromEvidenceReviewDecision(
+    { organizationId: ORG, evidenceItemId: EVIDENCE, actorContext: mixedActor, now: NOW },
+    {
+      env: ENV,
+      metadataOnlyAudit: harness().audit,
+      claimProposalRepository: {
+        async proposeClaim() { throw new Error("the direct repository entry is not used"); },
+        async proposeClaimFromEvidenceReviewDecision(input) { received.push(Object.keys(input).sort()); return { ok: false, error: { code: "not_found", status: 404 } }; },
+      },
+    },
+  );
+  assert.deepEqual(received, [["actorUserId", "evidenceItemId", "metadataOnlyAudit", "now", "organizationId"]]);
+
+  // Client-only, non-human, and inactive actors never reach a repository.
+  for (const actorContext of [
+    gkActor("client_admin"),
+    { ...mixedActor, actorType: "system" },
+    { ...mixedActor, actorType: "assistant" },
+    { ...mixedActor, organizationMemberships: [{ organization_id: ORG, membership_status: "inactive", role_name: "client_admin" }] },
+    { ...mixedActor, kaiRoles: ["gk_operator"] },
+  ]) {
+    const a = await assessEvidenceCoverageFromEvidenceReviewDecision(
+      { organizationId: ORG, evidenceItemId: EVIDENCE, actorContext }, { env: ENV, evidenceCoverageAssessmentRepository: unreachable });
+    const p = await proposeClaimFromEvidenceReviewDecision(
+      { organizationId: ORG, evidenceItemId: EVIDENCE, actorContext, now: NOW }, { env: ENV, claimProposalRepository: unreachable });
+    assert.deepEqual([a.ok, p.ok], [false, false], JSON.stringify(actorContext));
+  }
+  assert.equal((await proposeClaimFromEvidenceReviewDecision(
+    { organizationId: ORG, evidenceItemId: EVIDENCE, actorContext: mixedActor, now: NOW }, { env: {}, claimProposalRepository: unreachable })).error.code, "feature_disabled");
+});
+
+test("K: the handoff reports the continuation's structured blocking reason; it is never a claim", async () => {
+  const { deps } = harness({
+    assessment: { ok: false, error: { code: "authorization_denied", status: 403 }, blockers: [{ blocking_reason: "evidence_review_decision_not_by_actor" }] },
+  });
+  const result = await proposeClaimAfterEvidenceReviewDecision(handoffInput(evidenceDecision("supported")), deps);
+  assert.deepEqual([result.status, result.error_code, result.blocking_reason, result.claim_id],
+    ["not_created", "authorization_denied", "evidence_review_decision_not_by_actor", null]);
+  const { deps: unsafe } = harness({ proposal: { ok: false, error: { code: "conflict_current_state_changed" }, blockers: [{ blocking_reason: "<b>raw</b>" }] } });
+  assert.equal((await proposeClaimAfterEvidenceReviewDecision(handoffInput(evidenceDecision("supported")), unsafe)).blocking_reason, null);
+});
+
+test("K: the claim-proposal audit records the authorizing evidence-review decision only from a well-formed repository payload", async () => {
+  const written = [];
+  const adapter = createProductionMetadataOnlyAuditForClaimProposal({
+    organizationId: ORG, evidenceItemId: EVIDENCE, actorContext: mixedActor, now: NOW,
+    async insertAuditEvent(metadata) { written.push(metadata); return { ok: true }; },
+  });
+  const payload = { attempted_operation: "claim_proposed", validator_key: "VAL-KAI-P2-03-001", claim_id: CLAIM };
+  await adapter.prepareMetadataOnlyAudit({ payload: { ...payload, authority_source: "evidence_review_decision", decision_type: "evidence_review", decision_id: DECISION, decided_by_role: "gk_reviewer" }, db: {} }).publish();
+  await adapter.prepareMetadataOnlyAudit({ payload, db: {} }).publish();
+  await adapter.prepareMetadataOnlyAudit({ payload: { ...payload, authority_source: "evidence_review_decision", decision_id: "forged" }, db: {} }).publish();
+  await adapter.prepareMetadataOnlyAudit({ payload: { ...payload, authority_source: "something_else", decision_id: DECISION }, db: {} }).publish();
+  assert.deepEqual(
+    [written[0].authority_source, written[0].decision_type, written[0].decision_id, written[0].decided_by_role, written[0].actor_user_id],
+    ["evidence_review_decision", "evidence_review", DECISION, "gk_reviewer", REVIEWER],
+  );
+  for (const metadata of written.slice(1)) {
+    assert.equal(Object.hasOwn(metadata, "authority_source"), false);
+    assert.equal(Object.hasOwn(metadata, "decision_id"), false);
   }
 });
 

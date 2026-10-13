@@ -279,6 +279,20 @@ export function createProductionMetadataOnlyAuditForClaimProposal({
         actor_user_id: actorContext?.actorUserId || null,
         request_id: actorContext?.requestId || null,
         route: "p2_03_claim_proposal",
+        // J3-3 / Decision C Option A: a decision-bound continuation records the
+        // evidence-review decision that authorized it. These keys come only
+        // from the P2-03 repository's own payload, which sets them from the
+        // persisted decision it verified in the proposal transaction.
+        ...(payload.authority_source === "evidence_review_decision"
+          && typeof payload.decision_id === "string"
+          && CLAIM_ID_PATTERN.test(payload.decision_id)
+          ? {
+            authority_source: payload.authority_source,
+            decision_type: "evidence_review",
+            decision_id: payload.decision_id,
+            decided_by_role: typeof payload.decided_by_role === "string" ? payload.decided_by_role : null,
+          }
+          : {}),
         created_at: typeof now === "string" ? now : new Date().toISOString(),
         metadata_only: true,
         contains_raw_file_content: false,

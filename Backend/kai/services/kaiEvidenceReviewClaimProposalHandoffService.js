@@ -1,8 +1,8 @@
 import { KAI_SPRINT2_P0_PATTERNS } from "../config/kaiSprint2P0Contract.js";
 import { getScopedEvidenceItemById } from "../db/kaiIntakeQueries.js";
 import { recordEvidenceReviewDecision } from "./kaiHumanReviewService.js";
-import { assessEvidenceCoverageForSourceVersion } from "./kaiEvidenceCoverageAssessmentService.js";
-import { proposeClaim } from "./kaiClaimProposalService.js";
+import { assessEvidenceCoverageFromEvidenceReviewDecision } from "./kaiEvidenceCoverageAssessmentService.js";
+import { proposeClaimFromEvidenceReviewDecision } from "./kaiClaimProposalService.js";
 import { createProductionMetadataOnlyAuditForClaimProposal } from "./kaiMetadataOnlyAuditComposition.js";
 import { __claimProposalRepositoryContract } from "../dictionary/postgresClaimProposalRepository.js";
 
@@ -51,6 +51,13 @@ function sanitizedCode(code) {
   return typeof code === "string" && MACHINE_TOKEN_RE.test(code) ? code : "system_error";
 }
 
+// The first structured blocker's machine reason (e.g. role_not_allowed,
+// evidence_review_decision_not_current), or null - never a message.
+function sanitizedBlockingReason(result) {
+  const reason = Array.isArray(result?.blockers) ? result.blockers[0]?.blocking_reason : null;
+  return typeof reason === "string" && MACHINE_TOKEN_RE.test(reason) ? reason : null;
+}
+
 function coverageAssessmentSummary(status, { dimensions = null, errorCode = null } = {}) {
   const statuses = dimensions ? COVERAGE_DIMENSION_KEYS.map((key) => dimensions[key].evidence.assessment_status) : [];
   return {
@@ -63,7 +70,7 @@ function coverageAssessmentSummary(status, { dimensions = null, errorCode = null
 
 function claimProposalHandoffResult(
   status,
-  { coverageAssessment = null, claimId = null, claimReviewQueueItemId = null, errorCode = null } = {},
+  { coverageAssessment = null, claimId = null, claimReviewQueueItemId = null, errorCode = null, blockingReason = null } = {},
 ) {
   return {
     status,
@@ -72,6 +79,7 @@ function claimProposalHandoffResult(
     claim_review_status: claimId ? CLAIM_REVIEW_STATUS_NEEDS_GK_REVIEW : null,
     claim_review_queue_item_id: claimReviewQueueItemId,
     error_code: errorCode,
+    blocking_reason: blockingReason,
   };
 }
 
@@ -137,7 +145,19 @@ function isReviewGatedProposal(data, { organizationId, evidenceItemId }) {
  * evidence_review queue item resolved), re-read fresh from the evidence item
  * itself. not_supported and needs_more_information never reach P2-02 or P2-03.
  *
- * Phase 8 before Phase 9: the existing P2-02 `assessEvidenceCoverageForSourceVersion`
+ * J3-3 / Decision C Option A (owner-accepted 2026-10-13): the downstream work
+ * runs as a governed decision-bound continuation, not under the reviewer's
+ * own P2-02/P2-03 role. The `evidenceReviewDecision` passed in is only the
+ * trigger; it is never authority. P2-02 and P2-03 are entered through their
+ * decision-bound entries, which each re-read the persisted current
+ * evidence-review decision through their scoped repositories and require it
+ * to be this same actor's positive decision on this exact evidence item
+ * (P2-03 inside its proposal transaction, under a lock on the evidence_review
+ * queue item), with the actor still holding P2-12 evidence-review authority.
+ * The reviewer gains no direct P2-02/P2-03 route access, no library read, and
+ * no claim-review authority; the claim stays needs_gk_review.
+ *
+ * Phase 8 before Phase 9: the existing P2-02 assessment
  * runs first, over the evidence item's own current source_version. P2-02 is
  * read-only and persists nothing; its fail-closed permission gate (lineage,
  * promotion completeness, checksums, and allowed_use_status 'not_allowed')
@@ -146,10 +166,11 @@ function isReviewGatedProposal(data, { organizationId, evidenceItemId }) {
  * recomputes the same dimensions and blocks every audience on an unresolved
  * dimension until a P2-10 coverage decision accepts it.
  *
- * Only then is the existing P2-03 `proposeClaim` called, exactly once, with
+ * Only then is the existing P2-03 proposal called, exactly once, with
  * the same authenticated human actor, the same `now`, and the production
- * claim-proposal audit adapter the P2-03 route composes. Every P2-02 and P2-03
- * guarantee (KAI_SPRINT2_ENABLED, mapped-human-only, role and active-membership
+ * claim-proposal audit adapter the P2-03 route composes; its audit_events row
+ * also records the authorizing evidence-review decision. Every P2-02 and P2-03
+ * guarantee (KAI_SPRINT2_ENABLED, mapped-human-only, active-membership
  * checks, tenant consistency, current-source-version lineage, deterministic
  * claim text, idempotent replay, required audit) stays inside those services
  * and is not reimplemented here. P2-03 writes one internal-only
@@ -159,8 +180,9 @@ function isReviewGatedProposal(data, { organizationId, evidenceItemId }) {
  *
  * Never throws and never retries. The evidence review is already committed,
  * so any refusal or failure is reported as `not_created` with a sanitized
- * error code; an identical resubmission of the same evidence-review decision
- * replays it and re-attempts this idempotent handoff. The response carries
+ * error code and blocking reason; an identical resubmission of the same
+ * evidence-review decision by the same reviewer replays it and re-attempts
+ * this idempotent handoff. The response carries
  * ids, counts, and statuses only - never a claim or evidence statement.
  */
 export async function proposeClaimAfterEvidenceReviewDecision(
@@ -187,9 +209,9 @@ export async function proposeClaimAfterEvidenceReviewDecision(
     }
     const sourceVersionId = evidenceItem.source_version_id;
 
-    const assess = deps.assessEvidenceCoverageForSourceVersion || assessEvidenceCoverageForSourceVersion;
+    const assess = deps.assessEvidenceCoverageFromEvidenceReviewDecision || assessEvidenceCoverageFromEvidenceReviewDecision;
     const assessment = await assess(
-      { organizationId, sourceVersionId, actorContext },
+      { organizationId, evidenceItemId, actorContext },
       {
         env: deps.env,
         ...(deps.evidenceCoverageAssessmentRepository
@@ -202,6 +224,7 @@ export async function proposeClaimAfterEvidenceReviewDecision(
       return claimProposalHandoffResult("not_created", {
         coverageAssessment: coverageAssessmentSummary("blocked", { errorCode }),
         errorCode,
+        blockingReason: sanitizedBlockingReason(assessment),
       });
     }
     if (!isCompleteCoverageAssessment(assessment.data, { organizationId, sourceVersionId })) {
@@ -214,7 +237,7 @@ export async function proposeClaimAfterEvidenceReviewDecision(
 
     const metadataOnlyAudit = deps.claimProposalMetadataOnlyAudit
       || createProductionMetadataOnlyAuditForClaimProposal({ organizationId, evidenceItemId, actorContext, now });
-    const propose = deps.proposeClaim || proposeClaim;
+    const propose = deps.proposeClaimFromEvidenceReviewDecision || proposeClaimFromEvidenceReviewDecision;
     const proposal = await propose(
       { organizationId, evidenceItemId, actorContext, now },
       {
@@ -227,6 +250,7 @@ export async function proposeClaimAfterEvidenceReviewDecision(
       return claimProposalHandoffResult("not_created", {
         coverageAssessment,
         errorCode: sanitizedCode(proposal?.error?.code),
+        blockingReason: sanitizedBlockingReason(proposal),
       });
     }
     if (!isReviewGatedProposal(proposal.data, { organizationId, evidenceItemId })) {

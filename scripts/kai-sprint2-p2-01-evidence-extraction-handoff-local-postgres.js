@@ -23,11 +23,13 @@ import { Client } from "pg";
 const repoRoot = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
 // The same runner-owned lineage schema also serves the P2-12 no-claim evidence
 // review proof and the reviewed-evidence -> P2-02 -> P2-03 claim proposal
-// proof, which start from this handoff's output. Only these specs run.
+// proof and its J3-3 decision-bound continuation proof, which start from this
+// handoff's output. Only these specs run.
 const RUNNER_SPECS = Object.freeze([
   "__tests__/kai-sprint2-p2-01-evidence-extraction-handoff.integration.spec.js",
   "__tests__/kai-sprint2-p2-12-no-claim-evidence-review.integration.spec.js",
   "__tests__/kai-sprint2-p2-03-reviewed-evidence-claim-proposal.integration.spec.js",
+  "__tests__/kai-sprint2-j3-3-decision-bound-claim-proposal.integration.spec.js",
 ]);
 const handoffSpec = process.argv[2] || RUNNER_SPECS[0];
 if (!RUNNER_SPECS.includes(handoffSpec)) throw new Error(`P2-01 handoff runner refused an unlisted spec: ${handoffSpec}`);

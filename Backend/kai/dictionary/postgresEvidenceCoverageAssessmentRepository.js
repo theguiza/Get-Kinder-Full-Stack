@@ -4,7 +4,10 @@ import {
   getScopedSourceCandidateByIdentity,
   getScopedPromotionDecisionBySourceVersionId,
   getScopedDataDictionaryById,
+  getScopedEvidenceItemById,
+  getScopedEvidenceReviewQueueItemByEvidenceItemId,
 } from "../db/kaiIntakeQueries.js";
+import { findCurrentEvidenceReviewDecision } from "./postgresHumanReviewDecisionRepository.js";
 
 /**
  * KAI P2-02 deterministic evidence-coverage-assessment repository adapter:
@@ -227,6 +230,36 @@ export function createPostgresEvidenceCoverageAssessmentRepository({ runInTransa
         });
       } catch (error) {
         return assessmentFailure(error?.code === "22P02" ? "validation_blocker" : "system_error");
+      }
+    },
+
+    /**
+     * Reads, in one transaction, the persisted state the decision-bound
+     * continuation (J3-3 / Decision C Option A) is authorized by: the
+     * evidence item, its evidence_review queue item, and the current
+     * lineage-head evidence-review decision. Read-only; the judgment belongs
+     * to `validateEvidenceReviewDecisionContinuation`.
+     */
+    async readEvidenceReviewContinuationFacts({ organizationId, evidenceItemId }) {
+      if (!isNonEmptyString(organizationId) || !isNonEmptyString(evidenceItemId)) {
+        return assessmentFailure("validation_blocker");
+      }
+      const run = runInTransaction || (await resolveDefaultRunInTransaction());
+      try {
+        return await run(async (tx) => {
+          const evidenceReviewQueueItemRow = await getScopedEvidenceReviewQueueItemByEvidenceItemId(
+            { organizationId, evidenceItemId },
+            tx,
+          );
+          const evidenceItemRow = await getScopedEvidenceItemById({ organizationId, evidenceItemId }, tx);
+          const decisionRow = evidenceItemRow
+            ? await findCurrentEvidenceReviewDecision(tx, { organizationId, evidenceItemId })
+            : null;
+          return assessmentSuccess({ rows: { evidenceItemRow, evidenceReviewQueueItemRow, decisionRow } });
+        });
+      } catch (error) {
+        if (error?.name === "TypeError" || error?.code === "22P02") return assessmentFailure("validation_blocker");
+        return assessmentFailure("system_error");
       }
     },
   });

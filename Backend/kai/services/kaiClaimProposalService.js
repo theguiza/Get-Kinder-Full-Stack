@@ -3,6 +3,7 @@ import { buildKaiError } from "../errors/kaiErrors.js";
 import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationService.js";
 import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
 import { createPostgresClaimProposalRepository } from "../dictionary/postgresClaimProposalRepository.js";
+import { __humanReviewServiceContract } from "./kaiHumanReviewService.js";
 
 const CLAIM_PROPOSAL_ALLOWED_ROLES = new Set(["gk_admin", "gk_operator", "gk_reviewer"]);
 const CLAIM_PROPOSAL_OPERATION = "propose_claim";
@@ -110,6 +111,76 @@ export async function proposeClaim(input, dependencies = {}) {
 
   if (!result.ok) {
     return buildKaiError(result.error.code, { status: result.error.status });
+  }
+  return { ok: true, data: result.data, error: null, warnings: result.data?.warnings || [] };
+}
+
+/**
+ * J3-3 / Decision C Option A (owner-accepted 2026-10-13): the governed
+ * decision-bound P2-03 continuation, called only by the P2-12 evidence-review
+ * handoff (Backend/kai/services/kaiEvidenceReviewClaimProposalHandoffService.js).
+ *
+ * Same input shape as `proposeClaim` - no decision object, id, or marker is
+ * accepted. Authority is NOT the P2-03 role set: it is the P2-12
+ * evidence-review authority the actor holds now (the roles and
+ * combineGlobalRoles option recordEvidenceReviewDecision applies) together
+ * with the persisted current evidence-review decision this same actor made,
+ * which the repository verifies inside the proposal transaction. Everything
+ * else - the lineage validators, the review-gated internal-only claim, its
+ * evidence link and claim_review queue item, idempotent replay, and the
+ * required audit (which also records the authorizing decision) - is the
+ * unchanged P2-03 path. It grants no claim-review or approval authority. The
+ * direct `proposeClaim` entry above and its route are unchanged.
+ */
+export async function proposeClaimFromEvidenceReviewDecision(input, dependencies = {}) {
+  if (!isKaiSprint2Enabled(dependencies.env || process.env)) {
+    return buildKaiError("feature_disabled");
+  }
+  if (!isProposeClaimInput(input)) {
+    return buildKaiError("validation_blocker");
+  }
+
+  const { actorContext } = input;
+  if (!isMappedHumanActor(actorContext)) {
+    return buildKaiError("authorization_denied");
+  }
+
+  const auth = validateActorCanPerformOperation(
+    actorContext,
+    CLAIM_PROPOSAL_OPERATION,
+    input.organizationId,
+    {
+      allowedRoles: __humanReviewServiceContract.RECORD_EVIDENCE_REVIEW_DECISION_ALLOWED_ROLES,
+      combineGlobalRoles: true,
+    },
+  );
+  if (!auth.ok) {
+    return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers });
+  }
+
+  const tenant = validateTenantBoundaryConsistency({
+    expectedOrganizationId: input.organizationId,
+    payload: { organization_id: input.organizationId },
+  });
+  if (tenant.severity === "blocker") {
+    return buildKaiError("tenant_boundary_violation", { blockers: [tenant] });
+  }
+
+  const claimProposalRepository = dependencies.claimProposalRepository || createPostgresClaimProposalRepository();
+
+  const result = await claimProposalRepository.proposeClaimFromEvidenceReviewDecision({
+    organizationId: input.organizationId,
+    evidenceItemId: input.evidenceItemId,
+    actorUserId: actorContext.actorUserId,
+    now: input.now,
+    metadataOnlyAudit: dependencies.metadataOnlyAudit,
+  });
+
+  if (!result.ok) {
+    return buildKaiError(result.error.code, {
+      status: result.error.status,
+      ...(result.error.blockers ? { blockers: result.error.blockers } : {}),
+    });
   }
   return { ok: true, data: result.data, error: null, warnings: result.data?.warnings || [] };
 }

@@ -16,6 +16,8 @@ import {
   assessCoverageGaps,
 } from "../validators/kaiEvidenceCoverageAssessmentValidators.js";
 import { createPostgresEvidenceCoverageAssessmentRepository } from "../dictionary/postgresEvidenceCoverageAssessmentRepository.js";
+import { validateEvidenceReviewDecisionContinuation } from "../validators/kaiEvidenceReviewContinuationValidators.js";
+import { __humanReviewServiceContract } from "./kaiHumanReviewService.js";
 
 const EVIDENCE_COVERAGE_ASSESSMENT_ALLOWED_ROLES = new Set(["gk_admin", "gk_operator", "gk_reviewer"]);
 const EVIDENCE_COVERAGE_ASSESSMENT_OPERATION = "assess_evidence_coverage";
@@ -119,9 +121,21 @@ export async function assessEvidenceCoverageForSourceVersion(input, dependencies
   const evidenceCoverageAssessmentRepository =
     dependencies.evidenceCoverageAssessmentRepository || createPostgresEvidenceCoverageAssessmentRepository();
 
-  const result = await evidenceCoverageAssessmentRepository.readEvidenceCoverageAssessmentFacts({
+  return assessPermittedSourceVersion(evidenceCoverageAssessmentRepository, {
     organizationId: input.organizationId,
     sourceVersionId: input.sourceVersionId,
+  });
+}
+
+/**
+ * The ten-dimension assessment itself, shared by the direct P2-02 entry above
+ * and the decision-bound continuation below. Callers have already applied
+ * their own authorization.
+ */
+async function assessPermittedSourceVersion(evidenceCoverageAssessmentRepository, { organizationId, sourceVersionId }) {
+  const result = await evidenceCoverageAssessmentRepository.readEvidenceCoverageAssessmentFacts({
+    organizationId,
+    sourceVersionId,
   });
   if (!result.ok) {
     return buildKaiError(result.error.code, { status: result.error.status });
@@ -150,14 +164,102 @@ export async function assessEvidenceCoverageForSourceVersion(input, dependencies
   return {
     ok: true,
     data: {
-      organization_id: input.organizationId,
-      source_version_id: input.sourceVersionId,
+      organization_id: organizationId,
+      source_version_id: sourceVersionId,
       data_dictionary_id: rows.dictionaryRow.data_dictionary_id,
       profile_canonical_sha256: rows.sourceVersionRow.profile_canonical_sha256,
       dimensions,
     },
     error: null,
   };
+}
+
+function isDecisionBoundAssessmentInput(value) {
+  const allowedKeys = new Set(["organizationId", "evidenceItemId", "actorContext"]);
+  if (!isPlainObject(value) || !Object.keys(value).every((key) => allowedKeys.has(key))) return false;
+  return (
+    isNonEmptyString(value.organizationId) &&
+    isNonEmptyString(value.evidenceItemId) &&
+    isPlainObject(value.actorContext)
+  );
+}
+
+/**
+ * J3-3 / Decision C Option A (owner-accepted 2026-10-13): the governed
+ * decision-bound P2-02 continuation, called only by the P2-12 evidence-review
+ * handoff (Backend/kai/services/kaiEvidenceReviewClaimProposalHandoffService.js).
+ *
+ * Authority is NOT the P2-02 role set. It is the P2-12 evidence-review
+ * authority the actor holds now (the same roles and combineGlobalRoles option
+ * recordEvidenceReviewDecision applies) together with the persisted current
+ * evidence-review decision that this same actor made, read here through the
+ * scoped repository and judged by `validateEvidenceReviewDecisionContinuation`.
+ * The input carries only the evidence item id: the source_version assessed is
+ * the evidence item's own, and no decision object, id, or marker is accepted.
+ * The direct P2-02 entry above and its route are unchanged.
+ */
+export async function assessEvidenceCoverageFromEvidenceReviewDecision(input, dependencies = {}) {
+  if (!isKaiSprint2Enabled(dependencies.env || process.env)) {
+    return buildKaiError("feature_disabled");
+  }
+  if (!isDecisionBoundAssessmentInput(input)) {
+    return buildKaiError("validation_blocker");
+  }
+
+  const { actorContext } = input;
+  if (!isMappedHumanActor(actorContext)) {
+    return buildKaiError("authorization_denied");
+  }
+
+  const auth = validateActorCanPerformOperation(
+    actorContext,
+    EVIDENCE_COVERAGE_ASSESSMENT_OPERATION,
+    input.organizationId,
+    {
+      allowedRoles: __humanReviewServiceContract.RECORD_EVIDENCE_REVIEW_DECISION_ALLOWED_ROLES,
+      combineGlobalRoles: true,
+    },
+  );
+  if (!auth.ok) {
+    return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers });
+  }
+
+  const tenant = validateTenantBoundaryConsistency({
+    expectedOrganizationId: input.organizationId,
+    payload: { organization_id: input.organizationId },
+  });
+  if (tenant.severity === "blocker") {
+    return buildKaiError("tenant_boundary_violation", { blockers: [tenant] });
+  }
+
+  const evidenceCoverageAssessmentRepository =
+    dependencies.evidenceCoverageAssessmentRepository || createPostgresEvidenceCoverageAssessmentRepository();
+
+  const facts = await evidenceCoverageAssessmentRepository.readEvidenceReviewContinuationFacts({
+    organizationId: input.organizationId,
+    evidenceItemId: input.evidenceItemId,
+  });
+  if (!facts.ok) {
+    return buildKaiError(facts.error.code, { status: facts.error.status });
+  }
+
+  const { evidenceItemRow, evidenceReviewQueueItemRow, decisionRow } = facts.data.rows;
+  const continuation = validateEvidenceReviewDecisionContinuation({
+    organizationId: input.organizationId,
+    evidenceItemId: input.evidenceItemId,
+    actorUserId: actorContext.actorUserId,
+    decisionRow,
+    evidenceItemRow,
+    evidenceReviewQueueItemRow,
+  });
+  if (!continuation.ok) {
+    return buildKaiError(continuation.code, { blockers: continuation.blockers });
+  }
+
+  return assessPermittedSourceVersion(evidenceCoverageAssessmentRepository, {
+    organizationId: input.organizationId,
+    sourceVersionId: evidenceItemRow.source_version_id,
+  });
 }
 
 export const __evidenceCoverageAssessmentServiceContract = Object.freeze({

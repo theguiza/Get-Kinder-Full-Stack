@@ -560,6 +560,7 @@ async function runReviewedEvidenceClaimProposalSuite() {
       claim_review_status: null,
       claim_review_queue_item_id: null,
       error_code: "validation_blocker",
+      blocking_reason: null,
     });
     assert.deepEqual(deltas(before, await kaiTableRowCounts()), EVIDENCE_DECISION_DELTAS);
     assert.deepEqual(await claimsFor([d1]), []);

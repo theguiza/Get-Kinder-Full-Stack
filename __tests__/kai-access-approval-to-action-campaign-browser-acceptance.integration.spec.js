@@ -1308,6 +1308,58 @@ async function runBrowserAcceptance() {
       console.log(`[campaign] J3-3 mixed P2-12: ${JSON.stringify(results.J3_3)}`);
       assert.ok(reviewed.status === 403 || reviewed.data?.claim_proposal_handoff?.status === "created",
         "the evidence-review decision and its server-side claim proposal must agree on who is authorized");
+
+      // Decision C Option A (owner-accepted 2026-10-13): the committed human
+      // decision continues into the governed P2-02/P2-03 work it authorizes.
+      assert.equal(reviewed.status, 200);
+      assert.deepEqual(changed, ["audit_events", "claim_evidence_links", "claims", "evidence_review_decisions", "review_queue_items", "upload_lifecycle_audit"]);
+      const decisions = await query("SELECT decision_id::text, decided_by::text, decided_by_role FROM kai.evidence_review_decisions WHERE organization_id = $1::uuid AND evidence_item_id = $2::uuid",
+        [ORG_A, second.evidence_item_id]);
+      assert.deepEqual(decisions.map((d) => [d.decided_by, d.decided_by_role]), [[kaiUserIds.mixed, "gk_reviewer"]], "the human decision is committed exactly once");
+      const [claimRow] = await query(
+        `SELECT claim_status, claim_review_status, claim_strength, internal_only, public_use_allowed, funder_use_allowed, export_ready, created_by::text
+           FROM kai.claims WHERE claim_id = $1::uuid`, [claim.claim_id]);
+      assert.deepEqual(Object.values(claimRow), ["proposed", "needs_gk_review", "unassessed", true, false, false, false, kaiUserIds.mixed]);
+      const claimQueues = await query(
+        `SELECT review_queue_item_id::text, queue_status, updated_at FROM kai.review_queue_items
+          WHERE organization_id = $1::uuid AND queue_type = 'claim_review' AND target_object_id = $2::uuid`, [ORG_A, claim.claim_id]);
+      assert.deepEqual(claimQueues.map((q) => [q.review_queue_item_id, q.queue_status]), [[reviewed.data.claim_proposal_handoff.claim_review_queue_item_id, "open"]]);
+      const [audit] = await query("SELECT actor_user_id::text, metadata FROM kai.audit_events WHERE action = 'claim_proposed' AND metadata->>'object_id' = $1", [claim.claim_id]);
+      assert.deepEqual([audit.actor_user_id, audit.metadata.authority_source, audit.metadata.decision_id, audit.metadata.decided_by_role],
+        [kaiUserIds.mixed, "evidence_review_decision", decisions[0].decision_id, "gk_reviewer"], "the claim records the authorizing evidence-review decision");
+      const [{ count: autoReviews }] = await query("SELECT count(*)::int AS count FROM kai.claim_review_decisions WHERE claim_id = $1::uuid", [claim.claim_id]);
+      assert.equal(autoReviews, 0, "no automatic claim review");
+
+      // The mixed actor gains no direct P2-02/P2-03 authority.
+      const [{ source_version_id: sourceVersionId }] = await query("SELECT source_version_id::text FROM kai.evidence_items WHERE evidence_item_id = $1::uuid", [second.evidence_item_id]);
+      const directBefore = await allKaiCounts();
+      const directAssess = await mixedPage.fetchJson("GET", `${INTAKE}/admin/organizations/${ORG_A}/source-versions/${sourceVersionId}/evidence-coverage-assessment`);
+      const [first] = await evidenceForCandidate(candidate.intake_source_candidate_id);
+      const directPropose = await mixedPage.fetchJson("POST", `${INTAKE}/admin/organizations/${ORG_A}/evidence-items/${first.evidence_item_id}/claim-proposal`, {});
+      const forgedPropose = await mixedPage.fetchJson("POST", `${INTAKE}/admin/organizations/${ORG_A}/evidence-items/${first.evidence_item_id}/claim-proposal`,
+        { internal_handoff: true, decision_bound: true, evidence_review_decision_id: decisions[0].decision_id });
+      for (const direct of [directAssess, directPropose]) {
+        assert.deepEqual([direct.status, direct.errorCode, direct.blockers?.[0]?.[1]], [403, "authorization_denied", "role_not_allowed"]);
+      }
+      assert.ok([400, 403, 422].includes(forgedPropose.status), JSON.stringify(forgedPropose));
+      assert.deepEqual(changedTables(directBefore, await allKaiCounts()), [], "the refused direct requests write nothing");
+
+      // Client-safe presentation: the unreviewed proposal is not an Impact Fact.
+      const facts = await mixedPage.fetchJson("GET", `${INTAKE}/admin/organizations/${ORG_A}/impact-facts`);
+      assert.ok(!JSON.stringify(facts.data ?? {}).includes(claim.claim_id), "the proposed claim is not an approved Impact Fact");
+
+      // The separate human claim review by an independently authorized GK reviewer.
+      const library = await reviewerPage.fetchJson("GET", `${INTAKE}/admin/organizations/${ORG_A}/claim-library/candidates`);
+      const listed = library.data?.items?.find((item) => item.claimId === claim.claim_id);
+      assert.ok(listed, "the GK reviewer discovers the proposed claim");
+      const claimReview = await reviewerPage.fetchJson("POST",
+        `${INTAKE}/admin/organizations/${ORG_A}/claims/${claim.claim_id}/claim-review/${claimQueues[0].review_queue_item_id}/complete`,
+        { expected_updated_at: new Date(claimQueues[0].updated_at).toISOString(), decision: "approved", approved_audiences: ["internal"] });
+      assert.equal(claimReview.status, 200, JSON.stringify(claimReview));
+      const claimDecisions = await query("SELECT decided_by::text, decided_by_role FROM kai.claim_review_decisions WHERE claim_id = $1::uuid", [claim.claim_id]);
+      assert.deepEqual(claimDecisions.map((d) => [d.decided_by, d.decided_by_role]), [[kaiUserIds.reviewer, "gk_reviewer"]]);
+      results.J3_3.continuation = { audit: audit.metadata.authority_source, directAssess: directAssess.status, directPropose: directPropose.status, forgedPropose: forgedPropose.status, claimReview: claimReview.status };
+      console.log(`[campaign] J3-3 continuation: ${JSON.stringify(results.J3_3.continuation)}`);
     });
 
     // =====================================================================
