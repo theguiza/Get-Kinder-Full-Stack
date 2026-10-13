@@ -270,7 +270,7 @@ test("assessEvidenceCoverageForSourceVersion: a non-human actor is rejected outr
   assert.equal(result.error.code, "authorization_denied");
 });
 
-test("assessEvidenceCoverageForSourceVersion: an actor with no active membership in the requested organization is denied", async () => {
+test("assessEvidenceCoverageForSourceVersion: an actor with no active membership in the requested organization is denied as authorization_denied / missing_active_organization_membership", async () => {
   const result = await assessEvidenceCoverageForSourceVersion(
     {
       organizationId: OTHER_ORG,
@@ -280,7 +280,9 @@ test("assessEvidenceCoverageForSourceVersion: an actor with no active membership
     { env: { KAI_SPRINT2_ENABLED: "true" }, evidenceCoverageAssessmentRepository: fakeRepository(validRows({ sourceVersionRow: { organization_id: OTHER_ORG }, sourceRow: { organization_id: OTHER_ORG }, candidateRow: { organization_id: OTHER_ORG }, decisionRow: { organization_id: OTHER_ORG }, profileRow: { organization_id: OTHER_ORG }, dictionaryRow: { organization_id: OTHER_ORG } })) },
   );
   assert.equal(result.ok, false);
-  assert.equal(result.error.code, "tenant_boundary_violation");
+  assert.equal(result.error.code, "authorization_denied");
+  assert.equal(result.error.status, 403);
+  assert.deepEqual(result.blockers.map((blocker) => [blocker.validator_key, blocker.blocking_reason]), [["VAL-AUT-003", "missing_active_organization_membership"]]);
 });
 
 test("assessEvidenceCoverageForSourceVersion: a role outside gk_admin/gk_operator/gk_reviewer is denied", async () => {
@@ -293,7 +295,46 @@ test("assessEvidenceCoverageForSourceVersion: a role outside gk_admin/gk_operato
     { env: { KAI_SPRINT2_ENABLED: "true" }, evidenceCoverageAssessmentRepository: fakeRepository(validRows()) },
   );
   assert.equal(result.ok, false);
-  assert.equal(result.error.code, "tenant_boundary_violation");
+  assert.equal(result.error.code, "authorization_denied");
+  assert.deepEqual(result.blockers.map((blocker) => [blocker.validator_key, blocker.blocking_reason]), [["VAL-AUT-004", "role_not_allowed"]]);
+});
+
+test("assessEvidenceCoverageForSourceVersion: authorization outcomes are classified truthfully and every refusal reads nothing", async () => {
+  let reads = 0;
+  const countingRepository = (rows = validRows()) => ({
+    async readEvidenceCoverageAssessmentFacts() {
+      reads += 1;
+      return { ok: true, data: { rows }, error: null };
+    },
+  });
+  const run = (actorContext, { organizationId = ORG, env = { KAI_SPRINT2_ENABLED: "true" }, rows } = {}) =>
+    assessEvidenceCoverageForSourceVersion({ organizationId, sourceVersionId: SOURCE_VERSION, actorContext }, { env, evidenceCoverageAssessmentRepository: countingRepository(rows) });
+
+  for (const role of ["gk_admin", "gk_operator", "gk_reviewer"]) {
+    const allowed = await run(humanActor({ organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: role }] }));
+    assert.equal(allowed.ok, true, `${role}: ${JSON.stringify(allowed.error)}`);
+  }
+  const readsAfterAllowed = reads;
+  for (const [label, actorContext, options, code, reason] of [
+    ["correct tenant, client role", humanActor({ organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_admin" }] }), {}, "authorization_denied", "role_not_allowed"],
+    ["mixed: global gk_reviewer, client membership", humanActor({ kaiRoles: ["gk_reviewer"], organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_admin" }] }), {}, "authorization_denied", "role_not_allowed"],
+    ["no membership in the requested organization", humanActor(), { organizationId: OTHER_ORG }, "authorization_denied", "missing_active_organization_membership"],
+    ["inactive membership", humanActor({ organizationMemberships: [{ organization_id: ORG, membership_status: "inactive", role_name: "gk_operator" }] }), {}, "authorization_denied", "missing_active_organization_membership"],
+    ["non-human actor", humanActor({ actorType: "ai" }), {}, "authorization_denied", null],
+    ["KAI_SPRINT2_ENABLED off", humanActor(), { env: {} }, "feature_disabled", null],
+  ]) {
+    const refused = await run(actorContext, options);
+    assert.equal(refused.ok, false, label);
+    assert.equal(refused.error.code, code, label);
+    assert.notEqual(refused.error.code, "tenant_boundary_violation", label);
+    if (reason) assert.equal(refused.blockers[0].blocking_reason, reason, label);
+  }
+  assert.equal(reads, readsAfterAllowed, "no refused assessment reads any fact");
+
+  // An authorized actor asking about another organization's source version gets
+  // not_found from the organization-scoped read, never that object's details.
+  const crossOrganization = await run(humanActor(), { rows: { sourceVersionRow: { organization_id: OTHER_ORG, source_version_id: SOURCE_VERSION } } });
+  assert.deepEqual([crossOrganization.ok, crossOrganization.error.code, crossOrganization.data], [false, "not_found", undefined]);
 });
 
 test("assessEvidenceCoverageForSourceVersion: repository not_found propagates unchanged", async () => {

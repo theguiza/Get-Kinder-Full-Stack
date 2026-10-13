@@ -335,14 +335,56 @@ test("P2-03 service (AUTH-KAI-003): rejects every non-human actor type outright,
   }
 });
 
-test("P2-03 service: a role without active tenant membership is rejected", async () => {
+test("P2-03 service: a role without active tenant membership is rejected as authorization_denied / missing_active_organization_membership", async () => {
   const throwingRepository = { async proposeClaim() { throw new Error("must not be called"); } };
   const result = await proposeClaim(
     { organizationId: ORG, evidenceItemId: EVIDENCE_ITEM, actorContext: humanActor({ organizationMemberships: [] }), now: NOW },
     { env: sprint2Enabled, claimProposalRepository: throwingRepository },
   );
   assert.equal(result.ok, false);
-  assert.equal(result.error.code, "tenant_boundary_violation");
+  assert.equal(result.error.code, "authorization_denied");
+  assert.equal(result.error.status, 403);
+  assert.deepEqual(result.blockers.map((blocker) => [blocker.validator_key, blocker.blocking_reason]), [["VAL-AUT-003", "missing_active_organization_membership"]]);
+});
+
+test("P2-03 service: authorization outcomes are classified truthfully and every refusal writes nothing", async () => {
+  let writes = 0;
+  const countingRepository = (result = { ok: true, data: { replayed: false, warnings: [] }, error: null }) => ({
+    async proposeClaim() {
+      writes += 1;
+      return result;
+    },
+  });
+  const metadataOnlyAudit = { prepareMetadataOnlyAudit: () => ({ ok: true, publish: async () => {} }) };
+  const run = (actorContext, { organizationId = ORG, env = sprint2Enabled, repositoryResult } = {}) =>
+    proposeClaim({ organizationId, evidenceItemId: EVIDENCE_ITEM, actorContext, now: NOW },
+      { env, claimProposalRepository: countingRepository(repositoryResult), metadataOnlyAudit });
+
+  for (const role of ["gk_admin", "gk_operator", "gk_reviewer"]) {
+    const allowed = await run(humanActor({ organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: role }] }));
+    assert.equal(allowed.ok, true, `${role}: ${JSON.stringify(allowed.error)}`);
+  }
+  const writesAfterAllowed = writes;
+  const OTHER = "00000000-0000-4000-8000-000000000002";
+  for (const [label, actorContext, options, code, reason] of [
+    ["correct tenant, client role", humanActor({ organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_admin" }] }), {}, "authorization_denied", "role_not_allowed"],
+    ["mixed: global gk_reviewer, client membership", humanActor({ kaiRoles: ["gk_reviewer"], organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_admin" }] }), {}, "authorization_denied", "role_not_allowed"],
+    ["membership only in another organization", humanActor({ organizationMemberships: [{ organization_id: OTHER, membership_status: "active", role_name: "gk_operator" }] }), {}, "authorization_denied", "missing_active_organization_membership"],
+    ["non-human actor", humanActor({ actorType: "ai" }), {}, "authorization_denied", null],
+    ["KAI_SPRINT2_ENABLED off", humanActor(), { env: {} }, "feature_disabled", null],
+  ]) {
+    const refused = await run(actorContext, options);
+    assert.equal(refused.ok, false, label);
+    assert.equal(refused.error.code, code, label);
+    assert.notEqual(refused.error.code, "tenant_boundary_violation", label);
+    if (reason) assert.equal(refused.blockers[0].blocking_reason, reason, label);
+  }
+  assert.equal(writes, writesAfterAllowed, "no refused proposal reaches the repository");
+
+  // An evidence item outside the requested organization is the organization-
+  // scoped repository's not_found, passed through with no object detail.
+  const crossOrganization = await run(humanActor(), { repositoryResult: { ok: false, data: null, error: { code: "not_found", status: 404 } } });
+  assert.deepEqual([crossOrganization.ok, crossOrganization.error.code, crossOrganization.error.status], [false, "not_found", 404]);
 });
 
 test("P2-03 service: forwards only organizationId/evidenceItemId/actorUserId/now/metadataOnlyAudit to the repository", async () => {
