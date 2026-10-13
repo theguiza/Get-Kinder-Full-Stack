@@ -7,6 +7,7 @@ import ClientGeneratedDrafts from "./ClientGeneratedDrafts.jsx";
 import ClientEvidencePipelineStatus from "./ClientEvidencePipelineStatus.jsx";
 import ClientSensitivityReviewPanel from "./ClientSensitivityReviewPanel.jsx";
 import useClientEvidencePipeline from "./useClientEvidencePipeline.js";
+import useRevalidateOnReturn from "../useRevalidateOnReturn.js";
 import {
   GET_KINDER_STAGE_DESCRIPTIONS,
   PIPELINE_STAGE_LABELS,
@@ -118,6 +119,7 @@ export default function ClientKnowledgeStudio({
   getKinderReviewAccess = "unknown",
   getKinderReviewAccessOrganizationId = "",
   facts,
+  onRefreshFacts,
   onViewImpactLibrary,
 }) {
   const [tab, setTab] = useState("files");
@@ -149,7 +151,13 @@ export default function ClientKnowledgeStudio({
     setTab(key);
     if (key !== "reviews") setSensitivityReviewSelection(null);
     if (key !== tab && PIPELINE_TABS.has(key)) refreshPipeline();
+    if (key !== tab && key === "evidence") onRefreshFacts?.();
   };
+  // Returning to the page re-reads the selected project's pipeline while a
+  // tab that shows it is open, so a review completed meanwhile is reflected.
+  useRevalidateOnReturn(() => {
+    if (PIPELINE_TABS.has(tab)) refreshPipeline();
+  }, Boolean(organizationId && engagementId));
   const canContribute = capabilities?.intakeContribution === true;
   const canReviewFollowups = capabilities?.clientFollowupReview === true;
   const factsStatus = facts?.status || "loading";

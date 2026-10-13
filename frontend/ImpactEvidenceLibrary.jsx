@@ -145,6 +145,7 @@ import {
 } from "./impactEvidenceLibraryLogic.js";
 import SensitivityReviewCardBody from "./SensitivityReviewCardBody.jsx";
 import KaiSourceReviewPanel from "./KaiSourceReviewPanel.jsx";
+import useRevalidateOnReturn from "./useRevalidateOnReturn.js";
 import {
   exportManifestCsvPath,
   exportManifestDocxPath,
@@ -801,6 +802,19 @@ export default function ImpactEvidenceLibrary({
       cancelled = true;
     };
   }, [organizationId]);
+
+  // Returning to the page re-reads the review-cockpit capabilities in place:
+  // an unchanged answer changes nothing on screen, and a revoked one removes
+  // its review entry points. The server still reauthorizes every request.
+  useRevalidateOnReturn(async () => {
+    const requestedOrganizationId = organizationId;
+    const result = await getJson(sensitivityCapabilitiesPath(requestedOrganizationId));
+    if (organizationIdRef.current !== requestedOrganizationId) return;
+    if (result.statusCode !== 200 || !result.body?.ok) return;
+    setSensitivityCapability(result.body.data?.can_manage_sensitivity_review === true);
+    setSourceReviewCapability(result.body.data?.can_review_source_candidates === true);
+    setSensitivityCapabilityRequestState("success");
+  }, Boolean(organizationId));
 
   // KAI B1A-3B-R1: the pre-claim entry point. Fetched only once the same
   // server-grounded capability check above has positively confirmed this actor
@@ -3305,7 +3319,7 @@ export default function ImpactEvidenceLibrary({
                 // already fetched below - no new lookup).
                 const linkedClaim = claims.find((claim) => claim.evidenceItemId === item.evidenceItemId);
                 return (
-                  <li key={item.evidenceItemId} className="list-group-item">
+                  <li key={item.evidenceItemId} className="list-group-item" data-evidence-item-id={item.evidenceItemId}>
                     <div className="fw-semibold small">
                       {item.statement || "Evidence statement not yet available"}
                     </div>

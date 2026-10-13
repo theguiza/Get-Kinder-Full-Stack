@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   getJson,
@@ -65,6 +65,8 @@ export function useNeedsAttention(organizationId) {
   const [sensitivityReviewQueueItems, setSensitivityReviewQueueItems] = useState([]);
   const [loadingSensitivityReviewQueue, setLoadingSensitivityReviewQueue] = useState(false);
   const [sensitivityReviewQueueError, setSensitivityReviewQueueError] = useState("");
+  const organizationIdRef = useRef(organizationId);
+  organizationIdRef.current = organizationId;
 
   useEffect(() => {
     setReviewQueueItems([]);
@@ -130,6 +132,36 @@ export function useNeedsAttention(organizationId) {
     return () => {
       cancelled = true;
     };
+  }, [organizationId]);
+
+  // Re-reads the review-cockpit capabilities answer in place (no loading
+  // state, so an unchanged answer changes nothing on screen) when the page
+  // revalidates, e.g. on return after another session changed this actor's
+  // roles. A failed read keeps the current answer; the server still decides
+  // every request. A late answer for another organization is discarded.
+  const revalidate = useCallback(async () => {
+    const requestedOrganizationId = organizationId;
+    if (!requestedOrganizationId) return;
+    const result = await getJson(sensitivityCapabilitiesPath(requestedOrganizationId));
+    if (organizationIdRef.current !== requestedOrganizationId) return;
+    if (result.statusCode !== 200 || !result.body?.ok) return;
+    const capability = result.body.data?.can_manage_sensitivity_review === true;
+    setSensitivityCapabilityState((current) => (
+      current.organizationId === requestedOrganizationId && current.requestState === "success" && current.capability === capability
+        ? current
+        : { organizationId: requestedOrganizationId, requestState: "success", capability }
+    ));
+    if (!capability) {
+      setSensitivityReviewQueueItems([]);
+      setSensitivityReviewQueueError("");
+      return;
+    }
+    const queueResult = await getJson(sensitivityReviewQueuePath(requestedOrganizationId));
+    if (organizationIdRef.current !== requestedOrganizationId) return;
+    if (queueResult.statusCode === 200 && queueResult.body?.ok) {
+      setSensitivityReviewQueueItems(projectSensitivityReviewQueueItems(queueResult.body.data));
+      setSensitivityReviewQueueError("");
+    }
   }, [organizationId]);
 
   const sensitivityAttention = useMemo(
@@ -207,5 +239,6 @@ export function useNeedsAttention(organizationId) {
     // The organization that answer belongs to ("" while none is current).
     sensitivityReviewAccessOrganizationId: sensitivityCapabilityRequestState === "success" ? organizationId : "",
     reviewQueueRequestState,
+    revalidate,
   };
 }

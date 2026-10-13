@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useRef, useState } from "react";
 import {
   CLIENT_FOLLOWUP_DISPOSITION_LABEL,
   canCompleteClientFollowup,
@@ -10,6 +10,7 @@ import {
   postJson,
   projectClientFollowupWorkflows,
 } from "./kaiClientFollowupReviewLogic.js";
+import useRevalidateOnReturn from "./useRevalidateOnReturn.js";
 
 export default function KaiClientFollowupReview({ organizationId: initialOrganizationId = "" } = {}) {
   const [organizationId, setOrganizationId] = useState(initialOrganizationId);
@@ -17,17 +18,27 @@ export default function KaiClientFollowupReview({ organizationId: initialOrganiz
   const [loading, setLoading] = useState(false);
   const [pendingItemId, setPendingItemId] = useState("");
   const [message, setMessage] = useState("");
+  // The organization whose follow-ups are on screen ("" before a load); only
+  // the latest load may replace them, so a late response for an earlier
+  // organization id or an earlier load is discarded.
+  const [loadedOrganizationId, setLoadedOrganizationId] = useState("");
+  const loadSeqRef = useRef(0);
 
-  const loadWorkflows = useCallback(async () => {
-    if (!organizationId) {
+  const loadWorkflows = useCallback(async (targetOrganizationId = organizationId) => {
+    if (!targetOrganizationId) {
       setMessage("An organization id is required.");
       return;
     }
+    const loadSeq = ++loadSeqRef.current;
     setLoading(true);
     setMessage("");
-    const result = await getJson(clientFollowupsPath(organizationId));
+    const result = await getJson(clientFollowupsPath(targetOrganizationId));
+    if (loadSeqRef.current !== loadSeq) return;
     setLoading(false);
+    setLoadedOrganizationId(targetOrganizationId);
     if (result.statusCode !== 200 || !result.body?.ok) {
+      // Includes a 403 after this reviewer's access was removed: no
+      // follow-up, and so no completion action, stays on screen.
       setWorkflows([]);
       setMessage(errorText(result));
       return;
@@ -35,21 +46,44 @@ export default function KaiClientFollowupReview({ organizationId: initialOrganiz
     setWorkflows(projectClientFollowupWorkflows(result.body.data));
   }, [organizationId]);
 
+  // Returning to the page re-reads the follow-ups already shown, so a
+  // completion action is offered only while the server still permits it.
+  useRevalidateOnReturn(() => {
+    if (loadedOrganizationId) loadWorkflows(loadedOrganizationId);
+  }, Boolean(loadedOrganizationId));
+
+  // Editing the organization id discards the follow-ups shown for the
+  // previous one and invalidates any load still in flight for it.
+  const changeOrganization = useCallback((nextOrganizationId) => {
+    loadSeqRef.current += 1;
+    setOrganizationId(nextOrganizationId);
+    setWorkflows([]);
+    setLoadedOrganizationId("");
+    setLoading(false);
+    setMessage("");
+  }, []);
+
   const completeWorkflow = useCallback(async (item) => {
-    if (!organizationId || !canCompleteClientFollowup(item) || pendingItemId) return;
+    // A follow-up is completed only for the organization it was loaded for.
+    const workflowOrganizationId = loadedOrganizationId;
+    if (!workflowOrganizationId || !canCompleteClientFollowup(item) || pendingItemId) return;
     setPendingItemId(item.clientFollowupItemId);
     setMessage("");
     const result = await postJson(
-      clientFollowupCompletePath(organizationId, item.claimId, item.clientFollowupItemId),
+      clientFollowupCompletePath(workflowOrganizationId, item.claimId, item.clientFollowupItemId),
       completionBody(item.updatedAt),
     );
     setPendingItemId("");
     if (result.statusCode !== 200 || !result.body?.ok) {
-      setMessage(errorText(result));
+      // A refused or stale completion re-reads the list, so actions the
+      // server no longer permits are removed; the refusal stays visible.
+      const refusal = errorText(result);
+      await loadWorkflows(workflowOrganizationId);
+      setMessage(refusal);
       return;
     }
-    await loadWorkflows();
-  }, [organizationId, pendingItemId, loadWorkflows]);
+    await loadWorkflows(workflowOrganizationId);
+  }, [loadedOrganizationId, pendingItemId, loadWorkflows]);
 
   return (
     <section>
@@ -66,11 +100,11 @@ export default function KaiClientFollowupReview({ organizationId: initialOrganiz
             <input
               className="form-control form-control-sm"
               value={organizationId}
-              onChange={(event) => setOrganizationId(event.target.value.trim())}
+              onChange={(event) => changeOrganization(event.target.value.trim())}
             />
           </div>
           <div className="col-12 col-lg-4">
-            <button type="button" className="btn btn-sm btn-primary w-100" onClick={loadWorkflows} disabled={loading}>
+            <button type="button" className="btn btn-sm btn-primary w-100" onClick={() => loadWorkflows(organizationId)} disabled={loading}>
               {loading ? "Loading..." : "Load follow-ups"}
             </button>
           </div>

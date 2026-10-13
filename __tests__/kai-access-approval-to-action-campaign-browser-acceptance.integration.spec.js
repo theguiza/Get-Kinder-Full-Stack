@@ -249,8 +249,10 @@ async function openPage(browser, { baseUrl, legacyUserId }) {
       const el = document.querySelector('[data-pipeline-file="${intakeFileId}"]');
       return el ? el.innerText : null;
     })()`),
-    clickInEvidenceItem: (statement, label) => evaluate(`(() => {
-      const li = [...document.querySelectorAll("li.list-group-item")].find((el) => el.innerText.includes(${JSON.stringify(statement)}));
+    // Synthetic evidence statements repeat across files, so an item is found
+    // by its evidence item id, not its text.
+    clickInEvidenceItem: (evidenceItemId, label) => evaluate(`(() => {
+      const li = document.querySelector(${JSON.stringify(`li.list-group-item[data-evidence-item-id="${evidenceItemId}"]`)});
       const button = li && [...li.querySelectorAll("button")].find((el) => el.innerText.trim() === ${JSON.stringify(label)} && !el.disabled);
       if (!button) return false;
       button.click();
@@ -355,6 +357,9 @@ async function runBrowserAcceptance() {
     newMember: 2312, // ordinary account; joins Org C in J6
     freshNotNull: 2313, // ordinary account; first KAI request under the deployed NOT NULL email mirror (J2-0)
     freshNullable: 2314, // ordinary account; first KAI request under the runner's nullable mirror (J2-0)
+    memberA: 2315, // ordinary account; stored client_contributor of Org A (P3 organization-facing readback)
+    clientReviewerA: 2316, // ordinary account; stored client_contributor of Org A, made client_reviewer by Team & Access in P3
+    memberB: 2317, // ordinary account; stored client_contributor of Org B (P3 isolation)
   });
   const SITE_ADMINS = new Set([USERS.superGk, USERS.superNoRole, USERS.superGkStored]);
   const FIRST_SIGN_IN = new Set([USERS.reviewer, USERS.reviewerOrgOnly, USERS.newMember, USERS.freshNotNull, USERS.freshNullable]);
@@ -410,6 +415,9 @@ async function runBrowserAcceptance() {
   await insertMembership(ORG_B, "otherOrgReviewer", "gk_reviewer");
   await insertMembership(ORG_A, "gkOperator", "gk_operator");
   await insertMembership(ORG_C, "adminC", "client_admin");
+  await insertMembership(ORG_A, "memberA", "client_contributor");
+  await insertMembership(ORG_A, "clientReviewerA", "client_contributor");
+  await insertMembership(ORG_B, "memberB", "client_contributor");
   await insertGlobalRole("superGk", "gk_admin");
   await insertGlobalRole("superGkStored", "gk_admin");
   await insertGlobalRole("otherOrgReviewer", "gk_reviewer");
@@ -1207,12 +1215,12 @@ async function runBrowserAcceptance() {
       await reviewerPage.clickTab("Evidence");
       await reviewerPage.waitForText(first.statement);
       await reviewerPage.idle();
-      assert.ok(await reviewerPage.clickInEvidenceItem(first.statement, "Review evidence"), "Review evidence offered");
+      assert.ok(await reviewerPage.clickInEvidenceItem(first.evidence_item_id, "Review evidence"), "Review evidence offered");
       await reviewerPage.waitFor(async () => reviewerPage.evaluate(`Boolean(document.querySelector('[aria-label="Evidence review"]'))`), "review panel");
       assert.ok(await reviewerPage.evaluate(`(() => { const el = document.getElementById("evidence-library-review-decision-supported"); if (!el) return false; el.click(); return el.checked; })()`));
       const before = await allKaiCounts();
       const mark = reviewerPage.mark();
-      assert.ok(await reviewerPage.clickInEvidenceItem(first.statement, "Record Evidence Review Decision"));
+      assert.ok(await reviewerPage.clickInEvidenceItem(first.evidence_item_id, "Record Evidence Review Decision"));
       await reviewerPage.waitForText("Evidence review decision recorded: supported.");
       await reviewerPage.idle();
       const posted = writes(reviewerPage.requestsSince(mark));
@@ -1221,6 +1229,7 @@ async function runBrowserAcceptance() {
       const postedMatch = /\/evidence-items\/([0-9a-f-]+)\/evidence-review\/([0-9a-f-]+)\/complete$/.exec(posted[0][1]);
       assert.ok(postedMatch, "the browser used the governed evidence-review route");
       const reviewedEvidenceId = postedMatch[1];
+      assert.equal(reviewedEvidenceId, first.evidence_item_id, "the reviewer file's own evidence item was reviewed");
       const changed = changedTables(before, await allKaiCounts());
       console.log(`[campaign] J5-6 evidence review changed tables: ${JSON.stringify(changed)}`);
       const [claim] = await query("SELECT claim_id::text, created_by::text FROM kai.claims WHERE organization_id = $1::uuid AND evidence_item_id = $2::uuid", [ORG_A, reviewedEvidenceId]);
@@ -1422,6 +1431,510 @@ async function runBrowserAcceptance() {
     // =====================================================================
     // J7. Revocation and isolation
     // =====================================================================
+    // =====================================================================
+    // P3. Organization-facing readback and authorization freshness. The
+    // ordinary Org A member reads the client Knowledge Studio while GK and
+    // client reviewers act in their own sessions. Every case compares the
+    // authoritative rows, the client-safe API, and the rendered page.
+    // =====================================================================
+    const pipelineLogic = await import("../frontend/knowledgeStudio/clientEvidencePipelineLogic.js");
+    const memberAPage = await session(USERS.memberA);
+    const memberBPage = await session(USERS.memberB);
+    const clientReviewerAPage = await session(USERS.clientReviewerA);
+    const clientReviewerAStudioPage = await session(USERS.clientReviewerA);
+    const impactFactsPath = (organizationId = ORG_A) => `${INTAKE}/admin/organizations/${organizationId}/impact-facts`;
+    const followupCompletePathFor = (organizationId, claimId, followupId) =>
+      `${INTAKE}/admin/organizations/${organizationId}/claims/${claimId}/client-followups/${followupId}/complete`;
+    // "Returning" to a page: the window regains focus (the app revalidates on
+    // focus/visibility, throttled to one run per second).
+    async function returnTo(page) {
+      await new Promise((resolve) => setTimeout(resolve, 1100));
+      await page.evaluate(`window.dispatchEvent(new Event("focus"))`);
+      await page.idle();
+    }
+    async function authoritativeFile(intakeFileId) {
+      const [row] = await query(
+        `SELECT f.engagement_id::text AS engagement_id, f.organization_id::text AS organization_id,
+                (SELECT d.decision_outcome FROM kai.intake_sensitivity_review_decisions d
+                   JOIN kai.intake_sensitivity_profiles s ON s.organization_id = d.organization_id AND s.intake_sensitivity_profile_id = d.intake_sensitivity_profile_id
+                  WHERE s.organization_id = f.organization_id AND s.intake_file_id = f.intake_file_id
+                    AND NOT EXISTS (SELECT 1 FROM kai.intake_sensitivity_review_decisions n WHERE n.organization_id = d.organization_id AND n.supersedes_decision_id = d.decision_id)
+                  ORDER BY d.created_at DESC LIMIT 1) AS sensitivity_decision,
+                (SELECT c.candidate_status FROM kai.intake_source_candidates c WHERE c.organization_id = f.organization_id AND c.intake_file_id = f.intake_file_id LIMIT 1) AS candidate_status,
+                (SELECT q.queue_status FROM kai.intake_source_candidates c JOIN kai.review_queue_items q ON q.organization_id = c.organization_id
+                    AND q.queue_type = 'source_candidate_review' AND q.target_object_id = c.intake_source_candidate_id
+                  WHERE c.organization_id = f.organization_id AND c.intake_file_id = f.intake_file_id LIMIT 1) AS source_queue_status,
+                (SELECT p.decision_status FROM kai.intake_source_candidates c JOIN kai.intake_promotion_decisions p ON p.organization_id = c.organization_id
+                    AND p.intake_source_candidate_id = c.intake_source_candidate_id
+                  WHERE c.organization_id = f.organization_id AND c.intake_file_id = f.intake_file_id LIMIT 1) AS promotion_decision,
+                (SELECT count(*)::int FROM kai.intake_source_candidates c JOIN kai.source_versions v ON v.organization_id = c.organization_id
+                    AND v.intake_source_candidate_id = c.intake_source_candidate_id AND v.is_current
+                  WHERE c.organization_id = f.organization_id AND c.intake_file_id = f.intake_file_id) AS current_versions,
+                (SELECT coalesce(array_agg(e.evidence_review_status ORDER BY e.evidence_review_status), ARRAY[]::text[])
+                   FROM kai.intake_source_candidates c JOIN kai.source_versions v ON v.organization_id = c.organization_id
+                    AND v.intake_source_candidate_id = c.intake_source_candidate_id AND v.is_current
+                   JOIN kai.evidence_items e ON e.organization_id = v.organization_id AND e.source_version_id = v.source_version_id
+                  WHERE c.organization_id = f.organization_id AND c.intake_file_id = f.intake_file_id) AS evidence_statuses
+           FROM kai.intake_files f WHERE f.intake_file_id = $1::uuid`, [intakeFileId]);
+      return row;
+    }
+    const apiFile = (pipeline, key) => findFile(pipeline.data, FILES[key]);
+    const currentStageOf = (file) => file.stages.find((stage) => stage.key === file.currentStage);
+    const renderedWaitingLine = (key, file) =>
+      `${NAMES[key]}: ${pipelineLogic.PIPELINE_STAGE_LABELS[file.currentStage]} (${pipelineLogic.stageStatusLabel(currentStageOf(file))})`;
+    async function openClientProject(page, engagementId, tab) {
+      await openKnowledgeStudio(page);
+      await page.waitFor(async () => page.evaluate(`Boolean(document.getElementById("gk-shell-project-select"))`), "project selector");
+      await page.selectProject(engagementId);
+      await page.idle();
+      await page.clickTab(tab);
+      await page.idle();
+    }
+    async function openClientTab(page, tab) {
+      await page.clickTab(tab === "Evidence" ? "Files" : "Evidence");
+      await page.idle();
+      await page.clickTab(tab);
+      await page.idle();
+    }
+    // Every reason the API reports for this project, rendered as the Evidence tab renders it.
+    const evidenceReasonLines = (pipeline) =>
+      pipeline.data.summary.reasons.filter((entry) => entry.reason !== "complete")
+        .map((entry) => pipelineLogic.pipelineReasonMessage(entry.reason, entry.fileCount));
+    async function openFollowups(page, organizationId) {
+      await page.goto(`/kai/client-followups?organizationId=${organizationId}`);
+      await page.waitForText("Client Follow-ups");
+      await page.clickButton("Load follow-ups");
+      await page.idle();
+    }
+    const markReviewedCount = (page) => page.evaluate(`[...document.querySelectorAll("button")].filter((el) => el.offsetParent !== null && el.innerText.trim() === "Mark reviewed").length`);
+    async function openFollowupsFor(claimId) {
+      return query(
+        `SELECT cf.client_followup_item_id::text, cf.dimension_key, rq.queue_status, rq.updated_at FROM kai.client_followup_items cf
+           JOIN kai.review_queue_items rq ON rq.organization_id = cf.organization_id AND rq.queue_type = 'client_followup'
+            AND rq.target_object_type = 'client_followup_item' AND rq.target_object_id = cf.client_followup_item_id
+          WHERE cf.organization_id = $1::uuid AND cf.claim_id = $2::uuid ORDER BY cf.dimension_key`, [ORG_A, claimId]);
+    }
+    async function followupDecisionAudit(followupId) {
+      const [row] = await query(
+        "SELECT metadata FROM kai.upload_lifecycle_audit WHERE organization_id = $1::uuid AND metadata->>'client_followup_item_id' = $2 ORDER BY 1 DESC LIMIT 1",
+        [ORG_A, followupId]);
+      return row?.metadata || null;
+    }
+    // Delivers matching responses late (the request itself is sent at once),
+    // to prove a superseded response never replaces the selected context.
+    async function delayResponses(page, fragment, ms) {
+      await page.evaluate(`(() => {
+        if (!window.__p3OriginalFetch) window.__p3OriginalFetch = window.fetch;
+        const original = window.__p3OriginalFetch;
+        window.__p3Delayed = window.__p3Delayed || 0;
+        window.fetch = async (...args) => {
+          const response = await original(...args);
+          if (String(args[0]).includes(${JSON.stringify(fragment)})) {
+            window.__p3Delayed += 1;
+            await new Promise((resolve) => setTimeout(resolve, ${ms}));
+          }
+          return response;
+        };
+        return true;
+      })()`);
+    }
+    const restoreFetch = (page) => page.evaluate(`(() => { if (window.__p3OriginalFetch) window.fetch = window.__p3OriginalFetch; return true; })()`);
+    const hamperClaimId = () => results.reviewerClaimId;
+    // J5-6 reviews the first GK Studio evidence item carrying the reviewer
+    // file's statement, and every synthetic file's statements are identical,
+    // so the claim's file is read from its lineage rather than assumed.
+    async function fileKeyForClaim(claimId) {
+      const [row] = await query(
+        `SELECT c.intake_file_id::text FROM kai.claims cl
+           JOIN kai.evidence_items e ON e.organization_id = cl.organization_id AND e.evidence_item_id = cl.evidence_item_id
+           JOIN kai.source_versions v ON v.organization_id = e.organization_id AND v.source_version_id = e.source_version_id
+           JOIN kai.intake_source_candidates c ON c.organization_id = v.organization_id AND c.intake_source_candidate_id = v.intake_source_candidate_id
+          WHERE cl.organization_id = $1::uuid AND cl.claim_id = $2::uuid`, [ORG_A, claimId]);
+      return Object.keys(FILES).find((key) => FILES[key] === row?.intake_file_id) || null;
+    }
+
+    await test("P3-A: an ordinary Org A member sees each file's actual sensitivity and source state - authoritative rows, client-safe API, and rendered page agree", async () => {
+      const authoritative = {};
+      for (const key of ["probe", "mixed", "superGk", "bound", "reviewer"]) authoritative[key] = await authoritativeFile(FILES[key]);
+      for (const row of Object.values(authoritative)) assert.deepEqual([row.organization_id, row.engagement_id], [ORG_A, PROJECT_A]);
+      // S0: no sensitivity decision. S1: reviewed, candidate pending in an open source-review item, nothing promoted.
+      assert.deepEqual([authoritative.probe.sensitivity_decision, authoritative.probe.candidate_status], [null, null]);
+      assert.deepEqual(
+        [authoritative.mixed.sensitivity_decision, authoritative.mixed.candidate_status, authoritative.mixed.source_queue_status, authoritative.mixed.promotion_decision, authoritative.mixed.current_versions],
+        ["reviewed", "needs_gk_review", "open", null, 0]);
+      // S2: promoted with one current version; both extracted evidence items await GK review.
+      assert.deepEqual(
+        [authoritative.superGk.candidate_status, authoritative.superGk.promotion_decision, authoritative.superGk.current_versions, authoritative.superGk.evidence_statuses],
+        ["promoted", "promoted", 1, ["needs_gk_review", "needs_gk_review"]]);
+
+      const pipeline = await memberAPage.fetchJson("GET", pipelinePath(ORG_A, PROJECT_A));
+      assert.equal(pipeline.status, 200);
+      const stageOf = (key) => [apiFile(pipeline, key).currentStage, apiFile(pipeline, key).currentStatus, apiFile(pipeline, key).responsibleParty];
+      assert.deepEqual(stageOf("probe"), ["sensitivity_review", "waiting_for_get_kinder", "get_kinder"]);
+      assert.deepEqual(stageOf("mixed"), ["source_review", "waiting_for_get_kinder", "get_kinder"]);
+      assert.deepEqual(stageOf("superGk"), ["evidence_review", "waiting_for_get_kinder", "get_kinder"]);
+      const mixedStages = Object.fromEntries(apiFile(pipeline, "mixed").stages.map((stage) => [stage.key, stage.status]));
+      assert.deepEqual([mixedStages.sensitivity_review, mixedStages.source_review, mixedStages.evidence_extraction], ["complete", "waiting_for_get_kinder", "not_started"],
+        "sensitivity reviewed is not source promoted");
+      const superGkStages = Object.fromEntries(apiFile(pipeline, "superGk").stages.map((stage) => [stage.key, stage]));
+      assert.deepEqual([superGkStages.source_review.status, superGkStages.evidence_extraction.status, superGkStages.evidence_extraction.count, superGkStages.evidence_review.count],
+        ["complete", "complete", 2, 2], "source promoted and evidence extracted, review still pending");
+      assert.equal(findFile(pipeline.data, FILES.projectTwo), null, "Project A2's file is not attributed to Project A");
+      assert.equal(findFile(pipeline.data, FILES.otherOrg), null);
+
+      await openClientProject(memberAPage, PROJECT_A, "Reviews");
+      await memberAPage.waitForText(renderedWaitingLine("superGk", apiFile(pipeline, "superGk")));
+      const body = await memberAPage.text();
+      const waitingOnGetKinder = ["probe", "mixed", "superGk", "bound", "reviewer"].filter((key) => apiFile(pipeline, key).responsibleParty === "get_kinder");
+      assert.ok(waitingOnGetKinder.length >= 4);
+      for (const key of waitingOnGetKinder) {
+        assert.ok(body.includes(renderedWaitingLine(key, apiFile(pipeline, key))), `rendered: ${renderedWaitingLine(key, apiFile(pipeline, key))}`);
+      }
+      assert.deepEqual(await memberAPage.fileReviewActionIds(), [], "an ordinary member is asked to perform no Get Kinder review");
+      assert.equal(await memberAPage.visibleButton("Promote"), false);
+      assert.deepEqual(memberAPage.exceptions, []);
+      results.P3_A = Object.fromEntries(["probe", "mixed", "superGk", "bound", "reviewer"].map((key) => [NAMES[key], stageOf(key)]));
+      console.log(`[campaign] P3-A member A file stages: ${JSON.stringify(results.P3_A)}`);
+    });
+
+    await test("P3-B: a promoted source with pending evidence is not shown as reviewed evidence, and a rejected source is not shown as promoted", async () => {
+      const pipeline = await memberAPage.fetchJson("GET", pipelinePath(ORG_A, PROJECT_A));
+      const facts = await memberAPage.fetchJson("GET", impactFactsPath());
+      assert.deepEqual([facts.status, facts.data.items], [200, []], "no governed-eligible Impact Fact exists yet");
+      assert.deepEqual(pipeline.data.reviewedImpactFacts, []);
+      const pendingEvidence = await query(
+        `SELECT e.evidence_item_id::text FROM kai.evidence_items e WHERE e.organization_id = $1::uuid AND e.evidence_review_status = 'needs_gk_review'`, [ORG_A]);
+      const payloads = JSON.stringify([pipeline.data, facts.data]);
+      for (const { evidence_item_id: id } of pendingEvidence) assert.ok(!payloads.includes(id), "no pending evidence id reaches a client payload");
+      await openClientTab(memberAPage, "Evidence");
+      for (const line of evidenceReasonLines(pipeline)) await memberAPage.waitForText(line);
+      const evidenceText = await memberAPage.text();
+      assert.ok(evidenceText.includes("No reviewed evidence for this project yet."));
+      assert.ok(!evidenceText.includes("Reviewed for internal use"), "nothing pending is presented as reviewed");
+
+      // The GK operator rejects the pending candidate in the GK Studio.
+      const candidate = await candidateFor(profiles.mixed);
+      const before = await allKaiCounts();
+      const { controlsOffered } = await openSourceReviewInStudio(gkOperatorPage, candidate.intake_source_candidate_id);
+      assert.equal(controlsOffered, true);
+      await gkOperatorPage.selectByLabel("Decision outcome", "rejected");
+      const mark = gkOperatorPage.mark();
+      await gkOperatorPage.clickButton("Reject");
+      await gkOperatorPage.waitForText("Recorded rejected.");
+      assert.deepEqual(writes(gkOperatorPage.requestsSince(mark)), [["POST", candidateDecisionPath(candidate.intake_source_candidate_id).split("?")[0], 200]]);
+      assert.ok(changedTables(before, await allKaiCounts()).includes("intake_promotion_decisions"));
+      const rejected = await authoritativeFile(FILES.mixed);
+      assert.deepEqual([rejected.candidate_status, rejected.promotion_decision, rejected.current_versions], ["rejected", "rejected", 0]);
+      const [decision] = await query("SELECT created_by::text FROM kai.intake_promotion_decisions WHERE organization_id = $1::uuid AND intake_source_candidate_id = $2::uuid",
+        [ORG_A, candidate.intake_source_candidate_id]);
+      assert.equal(decision.created_by, kaiUserIds.gkOperator);
+
+      // The member returns to the page: the pipeline is re-read and the rejected source is closed, not promoted.
+      await returnTo(memberAPage);
+      const after = await memberAPage.fetchJson("GET", pipelinePath(ORG_A, PROJECT_A));
+      assert.deepEqual([apiFile(after, "mixed").currentStage, apiFile(after, "mixed").currentStatus, apiFile(after, "mixed").reason],
+        ["source_review", "closed", "source_not_promoted"]);
+      await memberAPage.waitForText(pipelineLogic.pipelineReasonMessage("source_not_promoted", 1));
+      results.P3_B = { pendingEvidence: pendingEvidence.length, rejected: [apiFile(after, "mixed").currentStage, apiFile(after, "mixed").currentStatus] };
+    });
+
+    let pantryReviewedEvidenceId = null;
+    await test("P3-C: an authorized GK evidence review is recorded with attribution, audit, and lineage; the client sees one item still pending and no Impact Fact before its claim is reviewed", async () => {
+      const [target] = await query(
+        `SELECT e.evidence_item_id::text, e.source_version_id::text, q.review_queue_item_id::text, q.updated_at
+           FROM kai.intake_source_candidates c
+           JOIN kai.source_versions v ON v.organization_id = c.organization_id AND v.intake_source_candidate_id = c.intake_source_candidate_id AND v.is_current
+           JOIN kai.evidence_items e ON e.organization_id = v.organization_id AND e.source_version_id = v.source_version_id
+           JOIN kai.review_queue_items q ON q.organization_id = e.organization_id AND q.queue_type = 'evidence_review' AND q.target_object_id = e.evidence_item_id
+          WHERE c.organization_id = $1::uuid AND c.intake_file_id = $2::uuid AND q.queue_status = 'open'
+          ORDER BY e.evidence_item_id LIMIT 1`, [ORG_A, FILES.superGk]);
+      assert.ok(target, "a pending pantry evidence item");
+      const auditBefore = await auditActions(kaiUserIds.reviewer);
+      const reviewed = await reviewerPage.fetchJson("POST", evidenceReviewPath(ORG_A, target.evidence_item_id, target.review_queue_item_id),
+        { expected_updated_at: new Date(target.updated_at).toISOString(), decision: "supported" });
+      assert.equal(reviewed.status, 200, JSON.stringify(reviewed));
+      pantryReviewedEvidenceId = target.evidence_item_id;
+      const [decision] = await query(
+        "SELECT decided_by::text, decided_by_role, decision_outcome FROM kai.evidence_review_decisions WHERE organization_id = $1::uuid AND evidence_item_id = $2::uuid",
+        [ORG_A, target.evidence_item_id]);
+      assert.deepEqual([decision.decided_by, decision.decided_by_role, decision.decision_outcome], [kaiUserIds.reviewer, "gk_reviewer", "supported"]);
+      assert.ok((await auditActions(kaiUserIds.reviewer)).length > auditBefore.length, "audited as the reviewer");
+      const [lineage] = await query(
+        `SELECT e.evidence_review_status, v.is_current, c.intake_file_id::text FROM kai.evidence_items e
+           JOIN kai.source_versions v ON v.organization_id = e.organization_id AND v.source_version_id = e.source_version_id
+           JOIN kai.intake_source_candidates c ON c.organization_id = v.organization_id AND c.intake_source_candidate_id = v.intake_source_candidate_id
+          WHERE e.organization_id = $1::uuid AND e.evidence_item_id = $2::uuid`, [ORG_A, target.evidence_item_id]);
+      assert.deepEqual([lineage.evidence_review_status, lineage.is_current, lineage.intake_file_id], ["reviewed", true, FILES.superGk]);
+      const [claim] = await query("SELECT claim_id::text, claim_review_status FROM kai.claims WHERE organization_id = $1::uuid AND evidence_item_id = $2::uuid",
+        [ORG_A, target.evidence_item_id]);
+      assert.equal(claim?.claim_review_status, "needs_gk_review", "reviewed evidence proposes a claim; it is not an approved claim");
+
+      await returnTo(memberAPage);
+      const pipeline = await memberAPage.fetchJson("GET", pipelinePath(ORG_A, PROJECT_A));
+      const pantry = apiFile(pipeline, "superGk");
+      assert.deepEqual([pantry.currentStage, pantry.currentStatus, currentStageOf(pantry).count], ["evidence_review", "waiting_for_get_kinder", 1],
+        "the other extracted item is still pending");
+      const facts = await memberAPage.fetchJson("GET", impactFactsPath());
+      assert.ok(!facts.data.items.some((fact) => fact.claimId === claim.claim_id), "the unreviewed claim is not an Impact Fact");
+      await openClientTab(memberAPage, "Evidence");
+      for (const line of evidenceReasonLines(pipeline)) await memberAPage.waitForText(line);
+      assert.ok(!(await memberAPage.text()).includes("Reviewed for internal use"));
+      results.P3_C = { evidence: target.evidence_item_id, claim: claim.claim_id, pantryPending: currentStageOf(pantry).count };
+    });
+
+    await test("P3-F: Team & Access makes an Org A member client_reviewer; they complete follow-ups through the governed route with client_reviewer attribution, and the member's readback reflects it; an ordinary member gets no follow-up action", async () => {
+      const claimId = hamperClaimId();
+      assert.ok(claimId, "prerequisite J5-6");
+      const open = (await openFollowupsFor(claimId)).filter((row) => row.queue_status !== "resolved" && row.queue_status !== "cancelled");
+      assert.equal(open.length, 4, "four genuine client follow-ups are pending");
+      const memberList = await memberAPage.fetchJson("GET", followupsPath(ORG_A));
+      const memberAccess = await memberAPage.fetchJson("GET", accessCapabilitiesPath(ORG_A));
+      assert.deepEqual([memberList.status, memberAccess.data.clientFollowupReview], [403, false], "no follow-up action without client-review authority");
+
+      const promoted = await storedAdminPage.fetchJson("PUT", membershipPath(ORG_A, USERS.clientReviewerA), { role_name: "client_reviewer", membership_status: "active" });
+      assert.equal(promoted.status, 200, JSON.stringify(promoted));
+      await openFollowups(clientReviewerAPage, ORG_A);
+      await clientReviewerAPage.waitFor(async () => (await markReviewedCount(clientReviewerAPage)) === 4, "the four open follow-ups");
+      const completedIds = [];
+      for (let index = 0; index < 3; index += 1) {
+        const before = await allKaiCounts();
+        const mark = clientReviewerAPage.mark();
+        await clientReviewerAPage.clickButton("Mark reviewed");
+        await clientReviewerAPage.waitFor(async () => (await markReviewedCount(clientReviewerAPage)) === 3 - index, "the completed follow-up leaves the actionable list");
+        const posted = writes(clientReviewerAPage.requestsSince(mark));
+        assert.equal(posted.length, 1);
+        assert.equal(posted[0][2], 200);
+        const followupId = posted[0][1].split("/client-followups/")[1].replace("/complete", "");
+        completedIds.push(followupId);
+        assert.deepEqual(changedTables(before, await allKaiCounts()), ["audit_events", "upload_lifecycle_audit"]);
+        const audit = await followupDecisionAudit(followupId);
+        assert.equal(audit.decided_by_role, "client_reviewer");
+      }
+      const states = await openFollowupsFor(claimId);
+      assert.deepEqual(states.filter((row) => completedIds.includes(row.client_followup_item_id)).map((row) => row.queue_status), ["resolved", "resolved", "resolved"]);
+
+      await returnTo(memberAPage);
+      const pipeline = await memberAPage.fetchJson("GET", pipelinePath(ORG_A, PROJECT_A));
+      const hamper = apiFile(pipeline, await fileKeyForClaim(claimId));
+      assert.deepEqual([hamper.currentStage, hamper.currentStatus, currentStageOf(hamper).count], ["impact_fact_review", "waiting_for_client", 1],
+        "one follow-up still needs a client answer");
+      results.P3_F = { completed: completedIds.length, hamper: [hamper.currentStage, hamper.currentStatus, currentStageOf(hamper).count] };
+    });
+
+    await test("P3-H: revoking client_reviewer in another session removes the completion action when the reviewer returns, a direct completion is refused writing nothing, and other capabilities remain; re-granting restores it", async () => {
+      const claimId = hamperClaimId();
+      const [remaining] = (await openFollowupsFor(claimId)).filter((row) => row.queue_status !== "resolved" && row.queue_status !== "cancelled");
+      assert.ok(remaining, "one follow-up is still open");
+      assert.equal(await markReviewedCount(clientReviewerAPage), 1, "the authorized form is open");
+      await openKnowledgeStudio(clientReviewerAStudioPage);
+      await clientReviewerAStudioPage.clickTab("Gaps");
+      await clientReviewerAStudioPage.waitForText("Answer follow-up questions");
+
+      const revoked = await storedAdminPage.fetchJson("PUT", membershipPath(ORG_A, USERS.clientReviewerA), { role_name: "client_contributor", membership_status: "active" });
+      assert.equal(revoked.status, 200, JSON.stringify(revoked));
+
+      await returnTo(clientReviewerAPage);
+      await clientReviewerAPage.waitFor(async () => (await markReviewedCount(clientReviewerAPage)) === 0, "the completion action removed after revalidation");
+      await returnTo(clientReviewerAStudioPage);
+      await clientReviewerAStudioPage.waitFor(async () => !(await clientReviewerAStudioPage.text()).includes("Answer follow-up questions"),
+        "the Studio's follow-up entry removed after revalidation");
+
+      const before = await allKaiCounts();
+      const direct = await clientReviewerAPage.fetchJson("POST", followupCompletePathFor(ORG_A, claimId, remaining.client_followup_item_id),
+        { expected_updated_at: new Date(remaining.updated_at).toISOString() });
+      await assertNothingWritten(before, "revoked client reviewer completion");
+      assert.equal(direct.status, 403, JSON.stringify(direct));
+      const stillReads = await clientReviewerAPage.fetchJson("GET", pipelinePath(ORG_A, PROJECT_A));
+      assert.equal(stillReads.status, 200, "the unrevoked membership still reads the project");
+
+      const regranted = await storedAdminPage.fetchJson("PUT", membershipPath(ORG_A, USERS.clientReviewerA), { role_name: "client_reviewer", membership_status: "active" });
+      assert.equal(regranted.status, 200);
+      await openFollowups(clientReviewerAPage, ORG_A);
+      await clientReviewerAPage.waitFor(async () => (await markReviewedCount(clientReviewerAPage)) === 1, "the action back after re-grant");
+      await clientReviewerAPage.clickButton("Mark reviewed");
+      await clientReviewerAPage.waitFor(async () => (await markReviewedCount(clientReviewerAPage)) === 0, "the last follow-up completed");
+      assert.equal((await followupDecisionAudit(remaining.client_followup_item_id)).decided_by_role, "client_reviewer");
+      results.P3_H = { direct: [direct.status, direct.errorCode], stillReads: stillReads.status };
+    });
+
+    await test("P3-D: a reviewed claim blocked by coverage is shown as not currently usable; after GK acceptance it becomes an Impact Fact for the internal audience only, shown to the member on return", async () => {
+      const claimId = hamperClaimId();
+      const claimFileKey = await fileKeyForClaim(claimId);
+      const pipelineBlocked = await memberAPage.fetchJson("GET", pipelinePath(ORG_A, PROJECT_A));
+      const blockedFile = apiFile(pipelineBlocked, claimFileKey);
+      // Authoritative: the file's other claims. A claim still awaiting GK
+      // review keeps the file at Impact Fact review with Get Kinder; with
+      // none, the reviewed-but-ineligible claim is "not currently eligible".
+      const [{ pending: otherClaimsPendingReview }] = await query(
+        `SELECT count(*)::int AS pending FROM kai.claims cl
+           JOIN kai.evidence_items e ON e.organization_id = cl.organization_id AND e.evidence_item_id = cl.evidence_item_id
+           JOIN kai.source_versions v ON v.organization_id = e.organization_id AND v.source_version_id = e.source_version_id AND v.is_current
+           JOIN kai.intake_source_candidates c ON c.organization_id = v.organization_id AND c.intake_source_candidate_id = v.intake_source_candidate_id
+          WHERE cl.organization_id = $1::uuid AND c.intake_file_id = $2::uuid AND cl.claim_review_status = 'needs_gk_review'`, [ORG_A, FILES[claimFileKey]]);
+      const expectedBlocked = otherClaimsPendingReview > 0
+        ? ["impact_fact_review", "waiting_for_get_kinder", "impact_fact_review_pending"]
+        : ["impact_fact_review", "not_currently_eligible", "not_currently_eligible"];
+      assert.deepEqual([blockedFile.currentStage, blockedFile.currentStatus, blockedFile.reason], expectedBlocked);
+      await openClientTab(memberAPage, "Evidence");
+      await memberAPage.waitForText(pipelineLogic.pipelineReasonMessage(expectedBlocked[2], 1));
+      assert.ok(!(await memberAPage.text()).includes("Reviewed for internal use"), "the blocked claim is not shown as usable");
+      const internalBefore = await reviewerPage.fetchJson("GET", `${INTAKE}/admin/organizations/${ORG_A}/claims/${claimId}/traceability?requested_audience=internal`);
+      assert.equal(internalBefore.data.eligible, false);
+      assert.ok(internalBefore.data.blockerCodes.includes("coverage_dimension_unresolved"));
+
+      const accepted = [];
+      for (const [dimensionKey, value] of Object.entries(internalBefore.data.dimensions)) {
+        if (value.assessment_status !== "unresolved" || value.internal_limitation_accepted) continue;
+        const response = await reviewerPage.fetchJson("POST", internalAcceptancePath(ORG_A, claimId, dimensionKey), {});
+        assert.ok([200, 201].includes(response.status), `${dimensionKey}: ${JSON.stringify(response)}`);
+        accepted.push(dimensionKey);
+      }
+      const internalAfter = await reviewerPage.fetchJson("GET", `${INTAKE}/admin/organizations/${ORG_A}/claims/${claimId}/traceability?requested_audience=internal`);
+      const funder = await reviewerPage.fetchJson("GET", `${INTAKE}/admin/organizations/${ORG_A}/claims/${claimId}/traceability?requested_audience=funder`);
+      assert.equal(internalAfter.data.eligible, true, JSON.stringify(internalAfter.data.blockerCodes));
+      assert.equal(funder.data.eligible, false, "approved for internal use is not approved for every audience");
+      const expectedLimitations = Object.entries(internalAfter.data.dimensions)
+        .filter(([, value]) => value.assessment_status === "unresolved" && value.internal_limitation_accepted).map(([key]) => key).sort();
+
+      // Return to the page: the facts and the project pipeline are re-read in place.
+      await returnTo(memberAPage);
+      const facts = await memberAPage.fetchJson("GET", impactFactsPath());
+      assert.deepEqual(facts.data.items.map((fact) => fact.claimId), [claimId], "exactly the eligible claim");
+      const [fact] = facts.data.items;
+      assert.deepEqual([...fact.limitationDimensionKeys].sort(), expectedLimitations);
+      const [claimRow] = await query("SELECT statement FROM kai.claims WHERE organization_id = $1::uuid AND claim_id = $2::uuid", [ORG_A, claimId]);
+      assert.equal(fact.statement, claimRow.statement);
+      await memberAPage.waitForText("Reviewed for internal use");
+      const text = await memberAPage.text();
+      assert.ok(text.includes(claimRow.statement));
+      for (const key of expectedLimitations) assert.ok(text.includes(`Known limitation: ${key.replace(/_/g, " ")}`), key);
+      const pipeline = await memberAPage.fetchJson("GET", pipelinePath(ORG_A, PROJECT_A));
+      const hamper = apiFile(pipeline, claimFileKey);
+      assert.deepEqual([hamper.currentStage, hamper.currentStatus, hamper.reviewedImpactFactCount], [null, "complete", 1]);
+      assert.ok(!pipeline.data.reviewedImpactFacts.some((entry) => entry.claimId === results.P3_C.claim), "the pantry claim awaiting review is not an Impact Fact");
+
+      // The organization-wide view (no project) and the Impact Library show the same fact.
+      await memberAPage.clickNav("Impact Library");
+      await memberAPage.waitForText(claimRow.statement);
+      const generated = await memberAPage.fetchJson("GET", `${INTAKE}/admin/organizations/${ORG_A}/engagements/${PROJECT_A}/client-generated-drafts`);
+      assert.deepEqual(memberAPage.exceptions, []);
+      results.P3_D = { claimFile: NAMES[claimFileKey], blocked: expectedBlocked, accepted, eligibleInternal: true, eligibleFunder: false, limitations: expectedLimitations, generatedDraftsRead: generated.status };
+      console.log(`[campaign] P3-D claim readback: ${JSON.stringify(results.P3_D)}`);
+    });
+
+    await test("P3-E: gaps, coverage limitations, and follow-up requirements appear only as client-safe status; no GK notes, gap text, reviewer ids, or blocked evidence reach the member", async () => {
+      const claimId = hamperClaimId();
+      const facts = await memberAPage.fetchJson("GET", impactFactsPath());
+      for (const fact of facts.data.items) assert.deepEqual(Object.keys(fact).sort(), ["claimId", "claimType", "limitationDimensionKeys", "statement"]);
+      const coverage = await query("SELECT dimension_key, decided_by::text FROM kai.coverage_review_decisions WHERE organization_id = $1::uuid AND claim_id = $2::uuid", [ORG_A, claimId]);
+      assert.ok(coverage.length >= results.P3_D.accepted.length);
+      const pipeline = await memberAPage.fetchJson("GET", pipelinePath(ORG_A, PROJECT_A));
+      const payloads = JSON.stringify([facts.data, pipeline.data]);
+      const forbidden = [
+        ...(await query("SELECT client_followup_item_id::text AS id FROM kai.client_followup_items WHERE organization_id = $1::uuid", [ORG_A])).map((row) => row.id),
+        ...(await query("SELECT evidence_item_id::text AS id FROM kai.evidence_items WHERE organization_id = $1::uuid", [ORG_A])).map((row) => row.id),
+        ...coverage.map((row) => row.decided_by),
+        kaiUserIds.reviewer, kaiUserIds.gkOperator, kaiUserIds.clientReviewerA,
+      ];
+      for (const id of forbidden) assert.ok(!payloads.includes(id), `client payload carries no ${id}`);
+      await memberAPage.clickNav("Knowledge Studio");
+      await memberAPage.waitFor(async () => memberAPage.evaluate(`Boolean(document.querySelector(".nav-tabs"))`), "Knowledge Studio tabs");
+      await memberAPage.clickTab("Gaps");
+      await memberAPage.idle();
+      const gapsText = await memberAPage.text();
+      assert.ok(gapsText.includes("Get Kinder reviewers identify evidence gaps and risks"));
+      assert.ok(!gapsText.includes("Answer follow-up questions"), "no follow-up action for an ordinary member");
+      results.P3_E = { factKeys: ["claimId", "claimType", "limitationDimensionKeys", "statement"], coverageDecisions: coverage.length };
+    });
+
+    await test("P3-G: project switching and a full reload keep each project's files and facts; Org B sees only its own project", async () => {
+      await openClientProject(memberAPage, PROJECT_A2, "Evidence");
+      const a2 = await memberAPage.fetchJson("GET", pipelinePath(ORG_A, PROJECT_A2));
+      assert.deepEqual(a2.data.files.map((file) => file.intakeFileId), [FILES.projectTwo]);
+      assert.deepEqual(a2.data.reviewedImpactFacts, []);
+      await memberAPage.waitForText("No reviewed evidence for this project yet.");
+      assert.ok(!(await memberAPage.text()).includes("Reviewed for internal use"), "Project A's fact is not attributed to Project A2");
+
+      await memberAPage.goto("/impact-library");
+      await openClientProject(memberAPage, PROJECT_A, "Evidence");
+      await memberAPage.waitForText("Reviewed for internal use");
+      await memberAPage.clickTab("Reviews");
+      await memberAPage.idle();
+      assert.ok(!(await memberAPage.text()).includes(NAMES.projectTwo));
+
+      await openClientProject(memberBPage, PROJECT_B, "Reviews");
+      const b = await memberBPage.fetchJson("GET", pipelinePath(ORG_B, PROJECT_B));
+      assert.deepEqual(b.data.files.map((file) => file.intakeFileId), [FILES.otherOrg]);
+      const bText = await memberBPage.text();
+      for (const key of ["probe", "mixed", "superGk", "bound", "reviewer", "projectTwo"]) assert.ok(!bText.includes(NAMES[key]), `Org B sees no ${NAMES[key]}`);
+      assert.deepEqual(memberBPage.exceptions, []);
+      results.P3_G = { a2: a2.data.files.length, b: b.data.files.length };
+    });
+
+    await test("P3-I: late responses for a superseded project or follow-up organization are discarded", async () => {
+      await openClientProject(memberAPage, PROJECT_A, "Reviews");
+      await memberAPage.waitFor(async () => (await memberAPage.text()).includes(NAMES.probe), "Project A loaded");
+      await delayResponses(memberAPage, `/engagements/${PROJECT_A}/client-evidence-pipeline`, 2500);
+      await memberAPage.selectProject(PROJECT_A2);
+      await memberAPage.idle();
+      await memberAPage.selectProject(PROJECT_A);
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      await memberAPage.selectProject(PROJECT_A2);
+      await memberAPage.waitForText(NAMES.projectTwo);
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      const settled = await memberAPage.text();
+      assert.ok(settled.includes(NAMES.projectTwo));
+      for (const key of ["probe", "superGk", "bound"]) assert.ok(!settled.includes(NAMES[key]), `the late Project A response did not replace Project A2 (${NAMES[key]})`);
+      assert.ok(await memberAPage.evaluate("window.__p3Delayed || 0") >= 1, "a Project A response was actually delivered late");
+      await restoreFetch(memberAPage);
+
+      await clientReviewerAPage.goto(`/kai/client-followups?organizationId=${ORG_A}`);
+      await clientReviewerAPage.waitForText("Client Follow-ups");
+      await delayResponses(clientReviewerAPage, `/organizations/${ORG_A}/client-followups`, 2500);
+      await clientReviewerAPage.clickButton("Load follow-ups");
+      await clientReviewerAPage.evaluate(`(() => {
+        const input = document.querySelector("input.form-control");
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(input, ${JSON.stringify(ORG_C)});
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        return true;
+      })()`);
+      // The late Org A answer arrives while the field already names Org C: it
+      // must not appear as Org C's follow-ups (nor offer actions for them).
+      await new Promise((resolve) => setTimeout(resolve, 3000));
+      assert.ok(await clientReviewerAPage.evaluate("window.__p3Delayed || 0") >= 1, "the Org A follow-up response was actually delivered late");
+      const afterLateResponse = await clientReviewerAPage.text();
+      assert.ok(!afterLateResponse.includes(`Claim ${hamperClaimId()}`), "the late Org A list is not shown under Org C");
+      assert.equal(await markReviewedCount(clientReviewerAPage), 0);
+      await clientReviewerAPage.clickButton("Load follow-ups");
+      await clientReviewerAPage.idle();
+      assert.ok(!(await clientReviewerAPage.text()).includes(`Claim ${hamperClaimId()}`));
+      assert.ok(await clientReviewerAPage.evaluate(`Boolean(document.querySelector(".alert-warning"))`), "the Org C refusal is what is shown");
+      await restoreFetch(clientReviewerAPage);
+      results.P3_I = "PASS: superseded project pipeline and follow-up list responses discarded";
+    });
+
+    await test("P3-J: wrong-organization, revoked, and ordinary actors get no other organization's, GK-only, or blocked objects through the API or the page", async () => {
+      const memberBReads = await Promise.all([
+        memberBPage.fetchJson("GET", pipelinePath(ORG_A, PROJECT_A)),
+        memberBPage.fetchJson("GET", impactFactsPath(ORG_A)),
+        memberBPage.fetchJson("GET", followupsPath(ORG_A)),
+      ]);
+      assert.deepEqual(memberBReads.map((read) => read.status), [403, 403, 403]);
+      const memberAReads = await Promise.all([
+        memberAPage.fetchJson("GET", pipelinePath(ORG_B, PROJECT_B)),
+        memberAPage.fetchJson("GET", sourceQueuePath()),
+        memberAPage.fetchJson("GET", `${INTAKE}/admin/organizations/${ORG_A}/claims/${hamperClaimId()}/traceability?requested_audience=internal`),
+        memberAPage.fetchJson("GET", candidatePath((await candidateFor(profiles.superGk)).intake_source_candidate_id)),
+      ]);
+      assert.deepEqual(memberAReads.map((read) => read.status), [403, 403, 403, 403]);
+      const facts = await memberAPage.fetchJson("GET", impactFactsPath());
+      const blockedClaims = await query("SELECT claim_id::text FROM kai.claims WHERE organization_id = $1::uuid AND claim_id <> $2::uuid", [ORG_A, hamperClaimId()]);
+      for (const { claim_id: id } of blockedClaims) assert.ok(!facts.data.items.some((fact) => fact.claimId === id), `ineligible claim ${id} withheld`);
+      const memberBFacts = await memberBPage.fetchJson("GET", impactFactsPath(ORG_B));
+      assert.deepEqual([memberBFacts.status, memberBFacts.data.items], [200, []]);
+      results.P3_J = { memberB: memberBReads.map((read) => read.status), memberA: memberAReads.map((read) => read.status), withheld: blockedClaims.length };
+    });
+
     await test("J7-0: switching between two projects in the same organization changes only the scoped client file and review actions", async () => {
       await openKnowledgeStudio(boundAdminPage);
       await boundAdminPage.waitFor(() => boundAdminPage.evaluate(`(() => {

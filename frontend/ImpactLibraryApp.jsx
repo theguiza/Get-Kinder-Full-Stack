@@ -29,6 +29,7 @@ import ProjectsView from "./projects/ProjectsView.jsx";
 import ImprovementPlanView from "./improvementPlan/ImprovementPlanView.jsx";
 import NeedsAttentionView from "./needsAttention/NeedsAttentionView.jsx";
 import { useNeedsAttention } from "./needsAttention/useNeedsAttention.js";
+import useRevalidateOnReturn from "./useRevalidateOnReturn.js";
 import OrganizationJoinPanel from "./impactLibrary/OrganizationJoinPanel.jsx";
 import OrganizationJoinRequestsReviewPanel from "./impactLibrary/OrganizationJoinRequestsReviewPanel.jsx";
 import TeamAccessView from "./teamAccess/TeamAccessView.jsx";
@@ -675,35 +676,45 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
     refetchJoinReview(selectedOrganizationId);
   }, [selectedOrganizationId, canReviewJoinRequests, refetchJoinReview]);
 
-  // Client-safe reviewed Impact Facts, fetched once per organization and
-  // shared by the client Impact Library and client Knowledge Studio (so
-  // switching between them never re-reads). Requested only for an actor
-  // without the internal workspace, and only once a section that shows them
-  // is opened.
+  // Client-safe reviewed Impact Facts, shared by the client Impact Library
+  // and client Knowledge Studio. Requested only for an actor without the
+  // internal workspace, once a section that shows them is opened, and read
+  // again on entering either section, on Knowledge Studio's Evidence tab, and
+  // when the page revalidates, so a fact reviewed meanwhile by Get Kinder
+  // appears without a reload. The first read for an organization shows
+  // loading; a later read updates in place and a failed one keeps what is
+  // shown. Only the latest request may update the state.
   const [clientImpactFacts, setClientImpactFacts] = useState({ organizationId: "", status: "idle", items: [], truncated: false });
   const clientFactsRequestedForRef = useRef("");
+  const clientFactsRequestSeqRef = useRef(0);
+  const [clientFactsRefresh, setClientFactsRefresh] = useState(0);
+  const refreshClientImpactFacts = useCallback(() => setClientFactsRefresh((value) => value + 1), []);
   const clientFactsNeeded =
     capabilitiesResolved && !internalKnowledgeWorkspace && (activeSection === "impactLibrary" || activeSection === "knowledgeStudio");
   useEffect(() => {
     if (!clientFactsNeeded || !selectedOrganizationId) return;
-    if (clientFactsRequestedForRef.current === selectedOrganizationId) return;
-    clientFactsRequestedForRef.current = selectedOrganizationId;
     const requestOrganizationId = selectedOrganizationId;
-    setClientImpactFacts({ organizationId: requestOrganizationId, status: "loading", items: [], truncated: false });
+    const firstReadForOrganization = clientFactsRequestedForRef.current !== requestOrganizationId;
+    clientFactsRequestedForRef.current = requestOrganizationId;
+    const requestSeq = ++clientFactsRequestSeqRef.current;
+    if (firstReadForOrganization) {
+      setClientImpactFacts({ organizationId: requestOrganizationId, status: "loading", items: [], truncated: false });
+    }
     (async () => {
       const result = await getJson(clientImpactFactsPath(requestOrganizationId));
+      if (clientFactsRequestSeqRef.current !== requestSeq) return;
       const projected = result.statusCode === 200 && result.body?.ok ? projectClientImpactFacts(result.body.data) : null;
       // A late response for a previously selected organization never
       // replaces the current organization's facts.
-      setClientImpactFacts((current) => (
-        current.organizationId !== requestOrganizationId
-          ? current
-          : projected
-            ? { organizationId: requestOrganizationId, status: "success", items: projected.items, truncated: projected.truncated }
-            : { organizationId: requestOrganizationId, status: "error", items: [], truncated: false }
-      ));
+      setClientImpactFacts((current) => {
+        if (current.organizationId !== requestOrganizationId) return current;
+        if (projected) {
+          return { organizationId: requestOrganizationId, status: "success", items: projected.items, truncated: projected.truncated };
+        }
+        return current.status === "success" ? current : { organizationId: requestOrganizationId, status: "error", items: [], truncated: false };
+      });
     })();
-  }, [clientFactsNeeded, selectedOrganizationId]);
+  }, [clientFactsNeeded, selectedOrganizationId, activeSection, clientFactsRefresh]);
   const clientFactsForOrganization =
     clientImpactFacts.organizationId === selectedOrganizationId ? clientImpactFacts : { status: "loading", items: [], truncated: false };
 
@@ -712,6 +723,17 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
   // view - never a fabricated dot, never a second review truth from
   // Knowledge Studio's own Reviews tab.
   const needsAttention = useNeedsAttention(selectedOrganizationId);
+
+  // Returning to the page re-reads, in place, the server answers that another
+  // session may have changed meanwhile: this actor's access capabilities, the
+  // review-cockpit capability, and the client reviewed Impact Facts. A
+  // revoked capability then removes its controls; the server still
+  // reauthorizes every request.
+  useRevalidateOnReturn(() => {
+    refreshAccessCapabilities();
+    needsAttention.revalidate();
+    if (clientFactsNeeded) refreshClientImpactFacts();
+  }, Boolean(selectedOrganizationId));
 
   const activeProfile = organizationProfiles[selectedOrganizationId] || null;
   const organizationName = activeProfile?.name || "";
@@ -787,6 +809,7 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
         getKinderReviewAccess={needsAttention.sensitivityReviewAccess}
         getKinderReviewAccessOrganizationId={needsAttention.sensitivityReviewAccessOrganizationId}
         facts={clientFactsForOrganization}
+        onRefreshFacts={refreshClientImpactFacts}
         onViewImpactLibrary={() => setActiveSection("impactLibrary")}
       />
     );

@@ -63,7 +63,11 @@ export default function KaiSourceReviewPanel({ organizationId, items, onDecision
     if (result.statusCode !== 200 || !result.body?.ok) {
       // A refusal or stale-state conflict is shown as the server returned it;
       // it is never retried or re-sent with a different outcome from here.
-      setDecisionResult(errorText(result));
+      // The detail is re-read so its decision_controls_enabled reflects the
+      // server again (a refused actor loses the form).
+      const refusal = errorText(result);
+      await loadDetail(candidateId);
+      if (selectedRef.current === candidateId) setDecisionResult(refusal);
       return;
     }
     const handoff = result.body.data.evidence_extraction_handoff;

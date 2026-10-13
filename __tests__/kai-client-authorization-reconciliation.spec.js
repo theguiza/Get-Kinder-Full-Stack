@@ -928,9 +928,12 @@ test("frontend: the GK cockpit and GK Impact Library views mount only when the s
   const gkStudio = appSource.indexOf("<ImpactEvidenceLibrary");
   const gkLibrary = appSource.indexOf("<ImpactLibraryListView");
   assert.ok(unresolved > 0 && unresolved < clientStudio && clientStudio < clientLibrary && clientLibrary < gkStudio && gkStudio < gkLibrary);
-  // Client facts: one shared read per organization, never for a GK workspace actor.
+  // Client facts: one shared read path, never for a GK workspace actor,
+  // refreshed in place (section entry, Evidence tab, return to the page) with
+  // only the latest request, for the still-selected organization, applied.
   assert.match(appSource, /capabilitiesResolved && !internalKnowledgeWorkspace && \(activeSection === "impactLibrary" \|\| activeSection === "knowledgeStudio"\)/);
-  assert.match(appSource, /if \(clientFactsRequestedForRef\.current === selectedOrganizationId\) return;/);
+  assert.match(appSource, /if \(clientFactsRequestSeqRef\.current !== requestSeq\) return;/);
+  assert.match(appSource, /if \(current\.organizationId !== requestOrganizationId\) return current;/);
   assert.equal((appSource.match(/clientImpactFactsPath\(/g) || []).length, 1);
 });
 
