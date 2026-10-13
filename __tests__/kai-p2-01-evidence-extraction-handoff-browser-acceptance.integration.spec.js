@@ -244,10 +244,10 @@ async function runBrowserAcceptance() {
   const ORG = "00000000-0000-4000-8000-000000000001";
   const PROJECT = "7c000000-0000-4000-8000-0000000000d1";
   const BATCH = "10000000-0000-4000-8000-0000000000d1";
-  const FILE = Object.freeze({ normal: "20000000-0000-4000-8000-0000000000d1", failing: "20000000-0000-4000-8000-0000000000d2" });
-  const NAMES = Object.freeze({ normal: "handoff-households.csv", failing: "handoff-retry.csv" });
+  const FILE = Object.freeze({ normal: "20000000-0000-4000-8000-0000000000d1", failing: "20000000-0000-4000-8000-0000000000d2", mixed: "20000000-0000-4000-8000-0000000000d3" });
+  const NAMES = Object.freeze({ normal: "handoff-households.csv", failing: "handoff-retry.csv", mixed: "handoff-mixed-role.csv" });
   const FIELD_KEYS = ["households_served", "programme_month"];
-  const USERS = Object.freeze({ gkReviewer: 961, clientAdmin: 962 });
+  const USERS = Object.freeze({ gkReviewer: 961, clientAdmin: 962, mixedReviewer: 963 });
   const NOW = new Date().toISOString();
 
   await query(`INSERT INTO kai.organizations (organization_id, name, organization_code) VALUES ($1::uuid, 'Harbourline Synthetic Society', 'harbourline-synthetic')
@@ -267,6 +267,13 @@ async function runBrowserAcceptance() {
       await query("INSERT INTO kai.user_roles (user_id, role_id) SELECT $1::uuid, role_id FROM kai.roles WHERE role_name = $2", [kaiUser.user_id, role]);
     }
   }
+  await query("INSERT INTO public.userdata (id) VALUES ($1) ON CONFLICT DO NOTHING", [USERS.mixedReviewer]);
+  const mixedKaiUser = await findOrCreateKaiUserByLegacyPublicUserdataId({
+    legacyPublicUserdataId: USERS.mixedReviewer,
+    email: `user${USERS.mixedReviewer}@harbourline.test`,
+  });
+  await query("INSERT INTO kai.organization_memberships (organization_id, user_id, role_name, membership_status) VALUES ($1::uuid, $2::uuid, 'client_admin', 'active')", [ORG, mixedKaiUser.user_id]);
+  await query("INSERT INTO kai.user_roles (user_id, role_id) SELECT $1::uuid, role_id FROM kai.roles WHERE role_name = 'gk_reviewer'", [mixedKaiUser.user_id]);
   const gkReviewerService = {
     actorType: "human",
     actorUserId: kaiUserIds.gk_reviewer,
@@ -472,8 +479,38 @@ async function runBrowserAcceptance() {
 
   const gkPage = await openPage(browser, { baseUrl, legacyUserId: USERS.gkReviewer });
   const clientPage = await openPage(browser, { baseUrl, legacyUserId: USERS.clientAdmin });
+  const mixedPage = await openPage(browser, { baseUrl, legacyUserId: USERS.mixedReviewer });
   const results = {};
   try {
+    await test("mixed global GK reviewer with client_admin membership can read source work but P1-08 refuses promotion without writes", async () => {
+      const profile = await seedFreshFile(FILE.mixed, NAMES.mixed, "f");
+      const candidateId = await reachReviewableSourceCandidate(profile);
+      await mixedPage.goto("/gk-admin/kai-review-cockpit");
+      await mixedPage.waitForText("KAI internal review cockpit");
+      const detailPath = `/api/kai/sprint2/intake/admin/review-cockpit/source-candidates/${candidateId}?organization_id=${ORG}`;
+      const detail = await mixedPage.evaluate(`(async () => {
+        const response = await fetch(${JSON.stringify(detailPath)}, { credentials: "same-origin" });
+        return { status: response.status, body: await response.json() };
+      })()`);
+      assert.equal(detail.status, 200, JSON.stringify(detail.body));
+      assert.equal(detail.body.data.source_candidate.intake_source_candidate_id, candidateId);
+      const before = await governedCounts();
+      const decisionPathForActor = `${decisionPath(candidateId)}?organization_id=${ORG}`;
+      const decision = await mixedPage.evaluate(`(async () => {
+        const response = await fetch(${JSON.stringify(decisionPathForActor)}, {
+          method: "POST", credentials: "same-origin",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify({ outcome: "promoted", reviewed_source_type: "organization_primary_record" }),
+        });
+        return { status: response.status, body: await response.json() };
+      })()`);
+      assert.equal(decision.status, 403, JSON.stringify(decision.body));
+      assert.equal(decision.body.error?.code, "tenant_boundary_violation");
+      assert.deepEqual(decision.body.blockers, [], "the cockpit currently drops P1-08's role blocker");
+      assert.deepEqual(await governedCounts(), before, "no promotion, source, evidence, or review decision persisted");
+      results.mixedRoleSourcePromotion = "REPRODUCED: cockpit detail 200; P1-08 role refusal returned as tenant_boundary_violation 403 without blockers; no writes";
+    });
+
     const normalProfile = await seedFreshFile(FILE.normal, NAMES.normal, "d");
     const normalCandidate = await reachReviewableSourceCandidate(normalProfile);
 
@@ -507,6 +544,25 @@ async function runBrowserAcceptance() {
       results.normalStatements = lineage.evidence.map((row) => row.statement);
       assert.deepEqual(gkPage.exceptions, []);
       results.promotion = "PASS";
+    });
+
+    await test("mixed global GK reviewer with client_admin membership is also refused by the P2-01 extraction route", async () => {
+      const [version] = await query("SELECT source_version_id::text FROM kai.source_versions WHERE organization_id = $1::uuid AND intake_source_candidate_id = $2::uuid", [ORG, normalCandidate]);
+      assert.ok(version?.source_version_id);
+      const before = await governedCounts();
+      const path = `/api/kai/sprint2/intake/admin/organizations/${ORG}/source-versions/${version.source_version_id}/evidence-extraction`;
+      const response = await mixedPage.evaluate(`(async () => {
+        const response = await fetch(${JSON.stringify(path)}, {
+          method: "POST", credentials: "same-origin",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: "{}",
+        });
+        return { status: response.status, body: await response.json() };
+      })()`);
+      assert.equal(response.status, 403, JSON.stringify(response.body));
+      assert.equal(response.body.error?.code, "tenant_boundary_violation");
+      assert.deepEqual(await governedCounts(), before);
+      results.mixedRoleEvidenceExtraction = "REPRODUCED: P2-01 role refusal 403; no writes";
     });
 
     await test("GK internal Knowledge Studio: the new evidence candidates are listed for GK review (needs_gk_review, no claim yet)", async () => {
@@ -608,6 +664,7 @@ async function runBrowserAcceptance() {
   } finally {
     await gkPage.close().catch(() => {});
     await clientPage.close().catch(() => {});
+    await mixedPage.close().catch(() => {});
     await browser.close();
     await new Promise((resolve) => server.close(resolve));
     await seedPool.end();

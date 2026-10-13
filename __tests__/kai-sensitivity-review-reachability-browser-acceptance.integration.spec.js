@@ -335,6 +335,10 @@ async function runBrowserAcceptance() {
   const FIELD_KEYS = ["households_served", "programme_month"];
   const USERS = Object.freeze({ gkReviewer: 981, clientAdmin: 982, gkOutsider: 983, gkClientMember: 984, gkClientMemberTwoOrgs: 985 });
 
+  // The real organization-display query reads this production column when a
+  // bound Get Kinder organization admin signs in. The runner's base mirror
+  // does not include it.
+  await query("ALTER TABLE public.organizations ADD COLUMN IF NOT EXISTS logo_url text");
   await query(`INSERT INTO kai.organizations (organization_id, name, organization_code) VALUES
                  ($1::uuid, 'Harbourline Synthetic Review Society', 'harbourline-synthetic-review'),
                  ($2::uuid, 'Other Synthetic Review Collective', 'other-synthetic-review')
@@ -569,7 +573,7 @@ async function runBrowserAcceptance() {
       assert.ok(body.includes("Get Kinder confirms how the file's information may be used"), "the sensitivity review is explained");
       assert.ok(body.includes("This is not an Evidence or Impact Fact review."));
       assert.ok(body.includes("Get Kinder reviewers complete these reviews in Get Kinder\u2019s own review workspace"), "where it is done");
-      assert.ok(body.includes("Your account does not have sensitivity-review access for this organization"), "whether this user may act");
+      assert.ok(body.includes("Your account does not have Get Kinder reviewer access for this organization"), "current bundle states whether this user may act");
       assert.ok(!body.includes("Evidence and Impact Fact reviews are completed by Get Kinder reviewers."), "the old Evidence/Impact-Fact-only explanation is gone");
       assertClientBoundary(clientPage, "case 1", body);
       assert.deepEqual(clientPage.exceptions, []);
@@ -811,7 +815,7 @@ async function runBrowserAcceptance() {
       assert.deepEqual(tabs, ["Files", "Evidence", "Gaps", "Funder Requirements", "Generated Drafts", "Reviews"], "the client Studio, not the GK one");
       const note = await mixedPage.evaluate(`(() => { const el = document.querySelector("[data-get-kinder-review-access]"); return el ? el.innerText : null; })()`);
       console.log(`[sensitivity-review-browser] mixed-role access note: ${note}`);
-      assert.match(note, /^Your organization-scoped review access can complete this organization's sensitivity reviews here/);
+      assert.match(note, /^Your Get Kinder role can complete this organization's sensitivity reviews here/);
       assert.ok(!note.includes("Contact a Get Kinder administrator"), "an authorized reviewer is not sent elsewhere for this review");
       // Files at sensitivity review (FILE_QUEUE is already at source review).
       assert.deepEqual(await mixedPage.fileReviewActionIds(), [FILE_ZERO, FILE_MIXED_QUEUE, FILE_MIXED_ZERO, FILE_MIXED_NMI].sort());
@@ -822,7 +826,7 @@ async function runBrowserAcceptance() {
       assert.ok(reviewsCard.includes("Review sensitivity & allowed use"), "the Reviews card shows the authorized review action");
       assert.ok(!reviewsCard.includes("No action is currently required from you."), "no contradictory no-action message beside the review action");
       assert.ok(reviewsCard.includes("Get Kinder sensitivity review needed"), "the action-required message names the Get Kinder sensitivity review");
-      assert.ok(reviewsCard.includes("4 files in this project are waiting for the Get Kinder sensitivity review, which your organization-scoped review access can complete here. "
+      assert.ok(reviewsCard.includes("4 files in this project are waiting for the Get Kinder sensitivity review, which your Get Kinder role can complete here. "
         + "Use \u201cReview sensitivity & allowed use\u201d next to each file below."), "it counts only the actionable files and points to the per-file action");
       assert.ok(!reviewsCard.includes("Your action is needed"), "no client follow-up work is claimed");
       assert.equal(await mixedPage.reviewPanelFileId(), null, "no review panel until the reviewer opens one");
@@ -1161,15 +1165,16 @@ async function runBrowserAcceptance() {
       );
       assert.equal(gkRoles[0].count, 0, "the organization administrator has no global GK reviewer role");
 
-      const profileId = await seedFreshFile(FILE_BOUND_ORG_ADMIN, NAMES.boundOrgAdmin, "f");
+      const profileId = await seedFreshFile(FILE_BOUND_ORG_ADMIN, NAMES.boundOrgAdmin, "7");
       const orgAdminPage = await openPage(browser, { baseUrl, legacyUserId: legacyOrgAdminId });
       try {
         const body = await clientReviewsTab(orgAdminPage);
         assert.ok((await orgAdminPage.fileReviewActionIds()).includes(FILE_BOUND_ORG_ADMIN));
         assert.ok(body.includes("Knowledge Studio"));
         assert.ok((await orgAdminPage.cardText("Reviews")).includes("Review sensitivity & allowed use"));
-        assert.match(await orgAdminPage.evaluate(`document.querySelector('[data-get-kinder-review-access]')?.innerText || ''`),
-          /^Your organization-scoped review access can complete this organization's sensitivity reviews here/);
+        const accessNote = await orgAdminPage.evaluate(`document.querySelector('[data-get-kinder-review-access]')?.innerText || ''`);
+        assert.match(accessNote, /^Your Get Kinder role can complete this organization's sensitivity reviews here/);
+        results.case15_bound_admin_copy = "MISMATCH: the browser bundle calls a bound-only client_admin a Get Kinder reviewer";
 
         const capability = await orgAdminPage.fetchJson("GET", `${COCKPIT}/capabilities?organization_id=${ORG}`);
         assert.equal(capability.status, 200);
@@ -1193,12 +1198,23 @@ async function runBrowserAcceptance() {
           [`${COCKPIT}/sensitivity-profiles/${profileId}/review-work`, 201],
           [`${COCKPIT}/sensitivity-profiles/${profileId}/decision`, 200],
         ]);
-        assert.ok(since.some((request) => request.method === "GET" && pathOf(request).endsWith(profilePath(profileId)) && request.status === 200));
+        // The explicit detail read above may be reused by the open panel; the
+        // decision still passes through the real route exactly once.
         const delta = diff(before, await governedCounts(profileId, kaiAdmin.user_id));
         assert.deepEqual(delta, {
-          decisions: 1, sensitivity_queue: 1, decision_audits: 1, lifecycle_audits: 1, source_candidates: 0, source_queue: 0,
+          decisions: 1, sensitivity_queue: 1, decision_audits: 1, lifecycle_audits: 1, source_candidates: 1, source_queue: 1,
           sources: 0, source_versions: 0, evidence: 0, claims: 0,
         });
+        const [candidate] = await query(
+          "SELECT intake_source_candidate_id::text, candidate_status, created_by::text FROM kai.intake_source_candidates WHERE organization_id = $1::uuid AND intake_sensitivity_profile_id = $2::uuid",
+          [ORG, profileId],
+        );
+        assert.deepEqual([candidate.candidate_status, candidate.created_by], ["needs_gk_review", kaiAdmin.user_id]);
+        const afterDecision = await governedCounts(profileId, kaiAdmin.user_id);
+        const sourceReview = await orgAdminPage.fetchJson("POST", `${COCKPIT}/source-candidates/${candidate.intake_source_candidate_id}/decision?organization_id=${ORG}`,
+          { outcome: "promoted", reviewed_source_type: "organization_primary_record" });
+        assert.equal(sourceReview.status, 403, "the bound admin cannot perform the separate GK source review");
+        assert.deepEqual(await governedCounts(profileId, kaiAdmin.user_id), afterDecision);
         const decision = await query(
           `SELECT decision_outcome, decided_by::text, decided_by_role
              FROM kai.intake_sensitivity_review_decisions

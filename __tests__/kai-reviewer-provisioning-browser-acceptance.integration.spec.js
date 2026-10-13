@@ -332,7 +332,7 @@ async function runBrowserAcceptance() {
   const FIELD_KEYS = ["households_served", "programme_month"];
   const USERS = Object.freeze({
     superuser: 1101, // site admin; Get Kinder admin of Org A's bound organization; global gk_admin (baseline precondition)
-    superuserNoKaiRole: 1102, // site admin; Get Kinder admin of Org A's bound organization; no global KAI role
+    superuserNoKaiRole: 1102, // site admin; stored client_contributor of Org A; no global KAI role or bound-admin exception
     recipient: 1103, // existing Get Kinder user with no KAI role; made a Get Kinder reviewer in path B
     npoAdminA: 1104, // stored client_admin of Org A
     clientReviewerA: 1105, // stored client_reviewer of Org A
@@ -384,7 +384,7 @@ async function runBrowserAcceptance() {
     if (key === "recipient") continue;
     kaiUserIds[key] = (await findOrCreateKaiUserByLegacyPublicUserdataId({ legacyPublicUserdataId: legacyId, email: email(legacyId) })).user_id;
   }
-  for (const legacyId of [USERS.superuser, USERS.superuserNoKaiRole]) {
+  for (const legacyId of [USERS.superuser]) {
     await query("INSERT INTO public.user_org_memberships (org_id, user_id, role, is_active) VALUES ($1, $2, 'admin', true)", [gkOrganization.id, legacyId]);
   }
   const insertMembership = (organizationId, key, role) => query(
@@ -393,6 +393,7 @@ async function runBrowserAcceptance() {
   const insertGlobalRole = (key, role) => query(
     "INSERT INTO kai.user_roles (user_id, role_id) SELECT $1::uuid, role_id FROM kai.roles WHERE role_name = $2", [kaiUserIds[key], role]);
   await insertMembership(ORG_A, "npoAdminA", "client_admin");
+  await insertMembership(ORG_A, "superuserNoKaiRole", "client_contributor");
   await insertMembership(ORG_A, "clientReviewerA", "client_reviewer");
   await insertMembership(ORG_A, "contributorA", "client_contributor");
   await insertMembership(ORG_A, "gkAdminNotSuperuser", "gk_admin");
@@ -870,9 +871,15 @@ async function runBrowserAcceptance() {
       results.B10_projection = "PASS: client pipeline shows sensitivity review complete, Source review waiting";
     });
 
-    await test("B11: the superuser revokes the global role; the sensitivity review is refused in the UI and by its direct routes", async () => {
+    await test("B11: revocation denies a fresh session and direct routes while an already-open review form retains stale capability", async () => {
+      const pendingQueue = (await queueRow(profiles.afterRevoke)) || await openReviewWork(ORG_A, profiles.afterRevoke);
+      await recipientPage.goto("/impact-library");
+      await recipientPage.waitForText("Knowledge Studio");
+      await openSensitivityReviewFromQueue(recipientPage, profiles.afterRevoke);
+      assert.equal(await recipientPage.visibleButton("Submit review"), true);
       await openAdminKaiAccess(adminPage);
       const tablesBefore = await allKaiCounts();
+      const stalePageMark = recipientPage.mark();
       const mark = adminPage.mark();
       await adminPage.clickAccessRowButton(USERS.recipient, "Revoke gk_reviewer");
       await adminPage.waitFor(async () => /Grant gk_reviewer/.test(await adminPage.accessRowText(USERS.recipient) || ""), "the revoked global role");
@@ -884,7 +891,11 @@ async function runBrowserAcceptance() {
       const [revokeAudit] = await auditFor("global_kai_role_revoked", kaiUserIds.superuser);
       assert.equal(revokeAudit.metadata.target_user_id, recipientKaiUserId);
 
-      const pendingQueue = (await queueRow(profiles.afterRevoke)) || await openReviewWork(ORG_A, profiles.afterRevoke);
+      await recipientPage.idle();
+      assert.equal(await recipientPage.visibleButton("Submit review"), true, "the already-open form still offers a revoked action");
+      assert.equal(recipientPage.requestsSince(stalePageMark).filter((request) => request.url.includes("/review-cockpit/capabilities")).length, 0,
+        "the already-open page did not refresh its capability after another session revoked the role");
+
       const after = await session(USERS.recipient);
       await after.goto("/impact-library");
       await after.waitForText("Knowledge Studio");
@@ -907,7 +918,7 @@ async function runBrowserAcceptance() {
       const work = await after.fetchJson("POST", reviewWorkPath(profiles.afterRevoke), {});
       assert.deepEqual([work.status, work.data?.replayed], [201, true], JSON.stringify(work));
       assert.deepEqual(changedTables(before, await allKaiCounts()), [], "nothing persisted");
-      results.B11_global_revocation = "PASS: PUT global-roles revoke 200 + audit; capability false; read 403 + decision 403 (role_not_allowed); review-work replay 201 (organization role), no write";
+      results.B11_global_revocation = "PASS: PUT global-roles revoke 200 + audit; fresh capability false; read 403 + decision 403 (role_not_allowed); review-work replay 201 (organization role), no write; an already-open form retained stale capability";
     });
 
     await test("B12: the superuser removes the gk_reviewer organization role; every review route refuses the recipient and nothing persists", async () => {

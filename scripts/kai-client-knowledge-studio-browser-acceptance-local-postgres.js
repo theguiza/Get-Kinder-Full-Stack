@@ -33,7 +33,11 @@ import { Client } from "pg";
  * __tests__/kai-reviewer-authorization-edge-cases-browser-acceptance.integration.spec.js
  * runs fresh GK review writes after global-role revocation and organization-role
  * removal, the organization's view of one reviewed file, and first sign-in after
- * provisioning.
+ * provisioning, and
+ * __tests__/kai-access-approval-to-action-campaign-browser-acceptance.integration.spec.js
+ * runs the assembled approval-to-action campaign: provisioning, effective
+ * authority, page reachability, and every review handoff for each actor
+ * configuration, with revocation and isolation.
  *
  * - An ephemeral, loopback-only PostgreSQL cluster owned by this runner,
  *   with the union of the schemas the client product reads, applied in the
@@ -83,6 +87,7 @@ const ACCEPTANCE_SPECS = Object.freeze([
   "__tests__/kai-team-access-browser-acceptance.integration.spec.js",
   "__tests__/kai-reviewer-provisioning-browser-acceptance.integration.spec.js",
   "__tests__/kai-reviewer-authorization-edge-cases-browser-acceptance.integration.spec.js",
+  "__tests__/kai-access-approval-to-action-campaign-browser-acceptance.integration.spec.js",
 ]);
 const acceptanceSpec = process.argv[2] || ACCEPTANCE_SPECS[0];
 if (!ACCEPTANCE_SPECS.includes(acceptanceSpec)) {

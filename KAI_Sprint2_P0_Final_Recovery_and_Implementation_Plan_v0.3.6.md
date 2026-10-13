@@ -38178,3 +38178,105 @@ recovery PREPARED_NOT_EXECUTED, owner decision required for the read-only stamp
 lookup and the replay. No push, deployment, production or shared database,
 cloud, feature-flag, tenant, membership, role, credential, `.env`, schema, or
 `00_KAI_CURRENT_STATE.md` change.
+
+### System-wide approval-to-action access diagnosis (2026-10-13)
+
+**Owner direction (USER_CONFIRMED):** one system-wide diagnosis of approval ->
+effective authority -> UI reachability -> review action -> downstream
+handoff, with an executable repair specification. Test-only additions only;
+no application, authorization, schema, flag, tenant, production, push,
+deploy, or Current State change.
+
+**Starting state (TOOL_VERIFIED):** `main` at
+`c4c93ac344db5e47d87a9c370373ccce24884133`, clean; `32ef587`, `4aafed1`,
+`8f98a9b`, `4191684`, `c8170d3`, `c4c93ac` are ancestors. Concurrent local
+diagnostic sessions contributed test-only edits in the shared checkout; the
+integrated package preserves and verifies them. Earlier baseline results
+below came from a clean detached worktree at `c4c93ac` (placeholder,
+non-secret `OPENAI_API_KEY` only).
+
+**Added (test-only):**
+`__tests__/kai-access-approval-to-action-campaign-browser-acceptance.integration.spec.js`
+(registered in the client browser runner): 33 cases, J1-J7, two review
+organizations plus the smoke organization, one browser context per actor,
+the real `ensureAdmin` on `/admin` and `/gk-admin/kai-review-cockpit`
+(source-pinned to `index.js`), and a temporary NOT VALID `email IS NOT NULL`
+mirror of the USER_CONFIRMED deployed `kai.users` contract for J2-0.
+
+**Earlier clean-HEAD campaign (TOOL_VERIFIED, runner-owned loopback PostgreSQL, real
+Chrome, synthetic data): 27 pass, 5 fail.** The five failures are the
+demonstrated defects:
+- J2-0: an id-only route (`GET /admin/organizations`) JIT-provisions without
+  the account email. Deployed NOT NULL mirror: 403 `mapped_kai_user_required`;
+  nullable mirror: a permanent NULL email. A real first page load races it
+  against the email-forwarding onboarding-status route (NULL email in 8 of
+  10 real first sign-ins across five campaign runs).
+- J5-1/J5-3: P1-08 source review has no UI for an authorized non-superuser
+  GK reviewer or GK operator (`ensureAdmin` page gate redirects to `/`; the
+  GK Studio has no source-candidate surface), while their API is admitted
+  (J5-2: promotion, lineage, P2-01 evidence, replay without writes).
+- J5-4: the cockpit offers Promote to a superuser with global `gk_admin` and
+  only a derived `client_admin` membership; P1-08 refuses (403
+  `tenant_boundary_violation`, blockers `[]`, page text "Request crosses
+  tenant boundaries."), nothing written.
+- J3-3: a global `gk_reviewer` with a client membership records a P2-12
+  decision, but the same-human P2-02/P2-03 claim handoff is refused
+  (`not_created`, `tenant_boundary_violation`).
+
+**Integrated diagnostic package verification (TOOL_VERIFIED, same HEAD with
+test-only working-tree additions):** the assembled campaign now runs 33
+independent cases: 28 pass and the same five expected defect assertions fail.
+It also proves a same-organization two-project switch keeps the file list and
+sensitivity-review action scoped to the selected project (J7-0), and confirms
+the mixed-role actor's GK evidence and claim library reads both return 403
+while the evidence-review write succeeds (J3-3). The standalone browser
+sensitivity suite passes 16/16, including the bound-admin P1-07 handoff;
+reviewer provisioning passes 13/13, including stale open-form capability
+after a separately audited revocation; P2-01 handoff passes 7/7; reviewer
+edge cases pass 11/11; P1-07 handoff integration passes 22/22.
+`test:kai-sprint2` passes 4731, fails one known stale source-text assertion,
+and skips 89. `npm test` passes 5451, fails two known source/role expectation
+pins (`kai-client-authorization-reconciliation.spec.js:441` and
+`kai-sprint2-impact-evidence-library.spec.js:3436`), and skips 104. The
+initial unprivileged suite run was invalid for HTTP cases because sandbox
+loopback listen returned `EPERM`; the elevated local-only reruns supplied
+these counts. `git diff --check` is clean.
+
+**Additional first-boundary findings (TOOL_VERIFIED):** `internalKnowledgeWorkspace`
+and cockpit sensitivity capability use distinct role policies. The deployed
+bundle's access copy calls a binding-only `client_admin` a Get Kinder reviewer,
+while frontend source copy uses organization-scoped wording. The current
+Cockpit page itself remains `ensureAdmin`-gated, whereas the local campaign
+mounts that same gate and verifies ordinary GK reviewers/operators redirect
+to `/` even though P1-08 detail/promotion APIs admit them. No current
+production role, file or deployment read was made; the owner's historical
+deployment statement is USER_CONFIRMED only.
+
+Recorded, not asserted (open owner decisions): a platform superuser with no
+GK role mounts the GK Studio and is refused every sensitivity route, yet is
+admitted on full-request routes: P2-12 (attributed `gk_admin`), P2-10
+(attributed `gk_reviewer`), and client follow-up completion in an
+organization with no membership (attributed `client_reviewer`).
+
+**Existing suites (TOOL_VERIFIED):** at clean HEAD, sensitivity
+reachability browser spec 13/3 (cases 1 and 9: committed bundle not rebuilt
+after `4191684`'s copy change; case 15: seed checksum collision, so the
+bound-admin browser case never ran), reviewer provisioning browser spec
+12/1 (A1 fixture is a bound admin after `4191684`), P2-01 handoff browser
+spec 5/0. Edge-case 11/0, Team & Access 7/0, P2-12 no-claim 11/0, reviewed
+evidence claim proposal 10/0, client evidence pipeline 7/0, client Knowledge
+Studio 6/0. Runners: P1-07 handoff 22/0, P1-06 15/0, B1A-02 37/0, B1A-2R
+6/0, P2 access administration 31/0, JOIN-1 128/0, P2-01 handoff 7/0, P2-11
+28/0, P2-12 ledger 24/0, P1-08 17/2 (tests 14 and 19 expect a second
+feature flag the service no longer reads). `npm test` 5451/2/104 (the
+`4191684` drift pin `kai-client-authorization-reconciliation.spec.js:441`
+and the known `kai-sprint2-impact-evidence-library.spec.js` cockpit pin);
+`test:kai-sprint2` 4731/1/89; `verify:kai-sprint2-api-contract` 71/0;
+`git diff --check` clean.
+
+**Status:** SYSTEM_WIDE_ACCESS_DIAGNOSIS_COMPLETE_LOCAL_SYNTHETIC;
+REPAIR_SPECIFICATION_DELIVERED; OWNER_DECISIONS_REQUIRED for superuser
+authority on review/client operations, mixed-role P2-02/P2-03 handoff, and
+the P1-08 review surface. No application, push, deployment, production or
+shared database, cloud, feature-flag, tenant, membership, role, credential,
+`.env`, schema, or `00_KAI_CURRENT_STATE.md` change.
