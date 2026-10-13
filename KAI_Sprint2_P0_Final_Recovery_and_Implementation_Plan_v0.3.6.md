@@ -37983,3 +37983,198 @@ profiles satisfy VAL-KAI-P1-07-001 in production; each head's
 Test-only change. No push, deployment, production or shared database,
 cloud, feature-flag, tenant, membership, role, credential, `.env`, schema,
 or `00_KAI_CURRENT_STATE.md` change.
+
+### P1-07 bound organization administrator handoff repair (2026-10-13)
+
+**Owner authorization (USER_CONFIRMED, 2026-10-13, local implementation and
+synthetic verification only):** an authenticated human who is an active Get
+Kinder organization administrator, with an active membership and an active
+GK-to-KAI binding for the exact KAI organization, may cause the creation of one
+metadata-only P1-07 candidate and its `source_candidate_review` item. This is
+allowed only as the governed consequence of that human's committed `reviewed`
+sensitivity decision. The authorization does not cover general `client_admin`
+candidate creation, client approval or promotion, other GK permission changes,
+global role grants, superuser elevation, or any production action. GK operators
+keep source-candidate review authority, and P1-08 stays a separate human decision.
+
+**Starting state (TOOL_VERIFIED):** `main` at
+`87943112195a5ab9cbdd73b1e056c5b6d47f9380`, clean. `5a6f145` and `8794311`
+are present. The inspected code matches the 2026-10-12 reproduction:
+`createSourceCandidateStub` -> `validateActorCanPerformOperation`
+`{gk_admin, gk_operator, gk_reviewer}` + `combineGlobalRoles` ->
+`VAL-AUT-004 role_not_allowed`.
+
+**Change (TOOL_VERIFIED, commit `c8170d3`):**
+- `kaiSourceCandidateService.js`: authorization now uses
+  `validateActorCanPerformSensitivityReview` with the unchanged
+  `SOURCE_CANDIDATE_ALLOWED_ROLES`. GK actors get the identical
+  `validateActorCanPerformOperation` options. A result with
+  `organizationAdminAuthorized` (active, exact-organization, binding-derived
+  `client_admin` with a positive-integer `gk_organization_id`) also requires
+  `kaiUserStatus === "active"`. The repository is then called with
+  `requireOwnCurrentReviewedDecision: true`. GK and superuser calls never carry
+  that flag.
+- `postgresSourceCandidateRepository.js`: with the flag, the transaction reads
+  the profile row `FOR UPDATE`, which is the lock that
+  `postgresSensitivityAllowedUseReviewRepository` takes before appending a
+  decision. It then requires `findCurrentSensitivityAllowedUseDecision`, which
+  is scoped to the organization and profile, uses no-successor head semantics,
+  and throws on ambiguity. The head must be `reviewed`, `created_by_type`
+  `human`, `decided_by_role` `client_admin`, and `decided_by` equal to this
+  actor. `getScopedSensitivityReviewQueueItemByIdentity` (`FOR UPDATE`) must also
+  return the head's `review_queue_item_id` with `queue_status` `resolved`. Any
+  other state returns `authorization_denied` (403) before VAL-KAI-P1-07-001 or
+  any candidate or queue read or write. Every later step is unchanged. No
+  caller-supplied decision id, status, or role is accepted.
+- `kaiReviewCockpitService.js`: doc comment only. No schema, migration, route,
+  flag, or audit-contract change.
+
+**Synthetic results (TOOL_VERIFIED, P1-07 handoff runner, loopback PostgreSQL,
+synthetic data):**
+- Actor A (bound `client_admin`, no global GK role, no superuser): `reviewed`
+  committed as `client_admin`, queue `resolved`. The handoff is `created`, with
+  one `needs_gk_review` candidate and one `open` review item, both created by
+  Actor A. Changed tables are exactly `audit_events`,
+  `intake_sensitivity_review_decisions`, `intake_source_candidates`,
+  `review_queue_items`, and `upload_lifecycle_audit`. There is one decision
+  audit and one candidate audit in each audit table. Promotion decisions,
+  sources, and source versions are unchanged. `evidence_items` and `claims` are
+  not in this runner's schema; P1-07 source pins show no write path to them.
+  Repeats through the decision seam and directly write nothing.
+- Actor B (global `gk_reviewer` + bound admin) is still attributed
+  `gk_reviewer` and creates the candidate. A GK reviewer's direct call on a
+  profile with no review work or decision is still `created`.
+- Refused with zero candidate, queue, or audit writes (`authorization_denied`):
+  - no decision;
+  - a `needs_more_information` head;
+  - an own `reviewed` superseded by `needs_more_information` or by another
+    admin's `reviewed`;
+  - another bound admin's `reviewed`, or a GK reviewer's `reviewed`;
+  - the same human's earlier `gk_reviewer` decision;
+  - an own `reviewed` head with the queue forced `in_progress` (throwaway DB);
+  - an own `needs_more_information` head with the queue forced `resolved`
+    (throwaway DB).
+
+  The other admin's own call on their decision is `created`.
+- Actor negatives, with the human's own `reviewed` head present:
+  - Refused at authorization (`tenant_boundary_violation`): a stored unbound
+    `client_admin`; an inactive or other-organization binding; a GK organization
+    id of `null`, `undefined`, `0`, `"4242"`, or `1.5`; and binding-derived
+    `client_reviewer` or `client_contributor`.
+  - `authorization_denied`: an inactive `kaiUserStatus` (directly, and through
+    the seam as a replayed decision with a `not_created` handoff) and the
+    `ai`/`assistant`/`system`/`import` actors.
+  - `feature_disabled` when the feature flag is off.
+  - Zero writes in every case.
+- Cross-tenant: naming another organization gives
+  `tenant_boundary_violation`. A bound admin of another organization naming that
+  organization gets `not_found`. An ineligible profile with the admin's own
+  resolved `reviewed` head gives handoff `not_created`/`validation_blocker`.
+  Without a decision, authorization still comes before the predicate. A
+  rejected required audit returns `validation_blocker` and rolls back the
+  candidate and the review item.
+- Concurrency: three concurrent identical bound-admin creations give one
+  `created`, two replays, one candidate, one item, and one audit. In the
+  supersession race, another admin's uncommitted superseding `reviewed`
+  decision holds the profile lock. The creation waited for more than 300 ms,
+  then saw the new head and was refused with zero candidate writes.
+- Mutation check (each mutation reverted; runner 21 tests):
+
+  | Guard removed | Fails |
+  | --- | --- |
+  | prerequisite flag | 3 |
+  | profile lock (race) | 1 |
+  | same-human check | 2 |
+  | resolved-queue check | 1 |
+  | `client_admin`-role check | 1 |
+  | active-account check | 1 |
+  | `reviewed`-outcome check | 1, after the forced-resolved case was added (0 before) |
+
+  The new P1-07 unit tests also pin the flag, the denied actors, and the
+  allowed-role set.
+
+**Decision-preserving recovery (TOOL_VERIFIED, synthetic):** the historical
+shape is two `client_admin` decisions, latest `reviewed`, queue `resolved`, no
+candidate. It is reproduced by injecting the pre-fix refusal and then making an
+ordinary UI-style resubmission with the queue's current `updated_at`. The
+resubmission records a new superseding decision (`replayed: false`), which
+confirms it is not a replay.
+
+For each recoverer (an authorized GK human, and the original bound admin after
+the fix), an identical `reviewed` request with the head's original
+`target_updated_at` gave:
+- `replayed: true`;
+- head `decision_id`, `decided_by`, `decided_by_role`, and `target_updated_at`
+  unchanged; decision count 2; decision audits 2/2 unchanged;
+- one candidate created by the recoverer, one open item, and one candidate
+  audit in each table;
+- changed tables exactly `audit_events`, `intake_source_candidates`,
+  `review_queue_items`, and `upload_lifecycle_audit`;
+- no promotion, source, or source version.
+
+A repeat wrote nothing. The earlier decision's stamp and an arbitrary stamp
+each returned `conflict_current_state_changed` with zero writes. The
+cockpit read API returns the head's id, `review_queue_item_id`, decider, role,
+and reviewed snapshot, but not `target_updated_at`. No UI path sends that stamp.
+
+**Verification (TOOL_VERIFIED; loopback `DATABASE_URL` sentinel):**
+
+| Command | Pass | Fail | Skipped |
+| --- | --- | --- | --- |
+| `npm run verify:kai-sprint2-p1-07-source-candidate-handoff` | 21 | 0 | 0 |
+| `npm run verify:kai-sprint2-p1-07-source-candidate` | 11 | 0 | 0 |
+| `npm run verify:kai-sprint2-p1-06-review-queue` | 15 | 0 | 0 |
+| `npm run verify:kai-sprint2-b1a-02-phase5-allowed-use-decision-ledger` | 37 | 0 | 0 |
+| `npm run verify:kai-sprint2-b1a-2r-review-work` | 6 | 0 | 0 |
+| `npm run verify:kai-sprint2-p2-01-evidence-extraction-handoff` | 7 | 0 | 0 |
+| P1-07 + authorization + client-org-authorization unit specs | 84 | 0 | 2 |
+| `npm run test:kai-sprint2` | 4731 | 1 | 89 |
+| `git diff --check` | ok | | |
+
+`test:kai-sprint2` was 4728/1/89 before this change; the 3 extra passes are the
+new P1-07 unit tests. The one failure is unchanged
+(`kai-sprint2-impact-evidence-library.spec.js:3436`, test 1348). A clean
+detached worktree at `8794311` reproduced it. That worktree also failed
+`kai-sprint2-impact-library-kai-surface.spec.js` at import. The cause is an
+environment value that a fresh worktree lacks. It is not a code difference, and
+that spec passes in the main checkout.
+
+**Three-profile recovery (NOT executed; owner decision required):** the
+profiles are `5ee86cab-c769-4bf0-8c4a-e53b1e954d5b`,
+`0cad4bc2-0f0f-4c51-afd2-a0cdba994205`, and
+`31f2fe4d-f0c0-40fb-b48f-0b924c33e51d`.
+
+The supported decision-preserving method is the existing
+`POST /api/kai/sprint2/intake/admin/review-cockpit/sensitivity-profiles/:intakeSensitivityProfileId/decision`
+request, made once per profile. It carries `decision: "reviewed"`, the head's
+`review_queue_item_id`, the head's own reviewed snapshot from the cockpit
+detail, and `expected_updated_at` set to the head's original
+`target_updated_at`. The request is made by an authorized GK human. The
+original deciding admin could make it instead, once this fix is deployed.
+
+The head's `target_updated_at` is not exposed by any supported read interface.
+Obtaining it requires a separately authorized, read-only production query, or a
+new read field. Both are outside this package. The request is also issued
+outside the UI. An ordinary UI resubmission must not be used, because it
+records another superseding decision.
+
+Before any write, the authorized step must verify:
+- the deployed revision (it must contain `4aafed1`, or `c8170d3` for the
+  original admin);
+- exactly one head per profile, with `reviewed`, `client_admin`, the decider's
+  identity, `target_updated_at`, and `review_queue_item_id`;
+- queue `resolved`;
+- VAL-KAI-P1-07-001 satisfied;
+- zero candidates and zero `source_candidate_review` items;
+- the recoverer's current roles, membership, or binding.
+
+**NOT_CONFIRMED:** the deployed revision; the production historical cause; the
+three heads' `target_updated_at`, decision lineage, and predicate state; the
+deciders' current roles and bindings; whether any production candidate exists
+now.
+
+**Status:** P1_07_BOUND_ADMIN_HANDOFF_REPAIRED_LOCAL_SYNTHETIC; three-profile
+recovery PREPARED_NOT_EXECUTED, owner decision required for the read-only stamp
+lookup and the replay. No push, deployment, production or shared database,
+cloud, feature-flag, tenant, membership, role, credential, `.env`, schema, or
+`00_KAI_CURRENT_STATE.md` change.
