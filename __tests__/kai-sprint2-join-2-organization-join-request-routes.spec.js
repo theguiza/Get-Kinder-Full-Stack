@@ -77,7 +77,7 @@ test("discovery route forwards only the q term and the authenticated user id", a
   await withServer({}, async (call, calls) => {
     const response = await call("GET", `/admin/organization-join/organizations?q=Target&user_id=${OTHER_USER}&limit=500`);
     assert.equal(response.status, 200);
-    assert.deepEqual(calls[0], ["search", { searchTerm: "Target", req: { user: { id: 46 } } }]);
+    assert.deepEqual(calls[0], ["search", { searchTerm: "Target", req: { user: { id: 46, kaiProvisioningEmail: "user@example.test" } } }]);
     const noTerm = await call("GET", "/admin/organization-join/organizations?q[]=a");
     assert.equal(noTerm.status, 200);
     assert.equal(calls[1][1].searchTerm, "");
@@ -88,7 +88,7 @@ test("submit route accepts only organization_id; requester/role fields are rejec
   await withServer({ results: { submit: { ok: true, data: { outcome: "created" }, error: null } } }, async (call, calls) => {
     const created = await call("POST", "/admin/organization-join/requests", { organization_id: ORG_TARGET });
     assert.equal(created.status, 200);
-    assert.deepEqual(calls[0], ["submit", { organizationId: ORG_TARGET, req: { user: { id: 46 } } }]);
+    assert.deepEqual(calls[0], ["submit", { organizationId: ORG_TARGET, req: { user: { id: 46, kaiProvisioningEmail: "user@example.test" } } }]);
 
     for (const body of [
       { organization_id: ORG_TARGET, requester_user_id: OTHER_USER },
@@ -129,7 +129,7 @@ test("my-requests route forwards no query/body identity", async () => {
   await withServer({}, async (call, calls) => {
     const response = await call("GET", `/admin/organization-join/requests/mine?requester_user_id=${OTHER_USER}`);
     assert.equal(response.status, 200);
-    assert.deepEqual(calls[0], ["mine", { req: { user: { id: 46 } } }]);
+    assert.deepEqual(calls[0], ["mine", { req: { user: { id: 46, kaiProvisioningEmail: "user@example.test" } } }]);
   });
 });
 
@@ -144,7 +144,7 @@ test("routes require authentication and KAI_SPRINT2_ENABLED", async () => {
   });
 });
 
-test("route source: no SQL, no admin role gate, identity only from safeAuthenticatedUser", () => {
+test("route source: no SQL, no admin role gate, identity only from safeAuthenticatedIdentityForKaiActorResolution", () => {
   const start = routeSource.indexOf('router.get("/admin/organization-join/organizations"');
   const end = routeSource.indexOf('router.get("/admin/organization-join/requests/mine"');
   assert.ok(start > -1 && end > start);
@@ -152,5 +152,5 @@ test("route source: no SQL, no admin role gate, identity only from safeAuthentic
   assert.doesNotMatch(slice, /SELECT|INSERT|UPDATE|DELETE|kai\.|pool|\.query\(/);
   assert.doesNotMatch(slice, /ensureAdmin|client_admin|gk_admin|requireKaiAccessAdministration|allowedRoles/);
   assert.doesNotMatch(slice, /req\.params|user_id|role/);
-  assert.equal((slice.match(/req: \{ user: safeAuthenticatedUser\(req\) \}/g) || []).length, 3);
+  assert.equal((slice.match(/req: \{ user: safeAuthenticatedIdentityForKaiActorResolution\(req\) \}/g) || []).length, 3);
 });

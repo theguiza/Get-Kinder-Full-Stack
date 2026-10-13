@@ -856,10 +856,10 @@ async function runBrowserAcceptance() {
       results.J2_1 = { status: mapping.status, email: mapping.email, organizations: organizations.data?.items?.length, cockpit: cockpit.data?.can_manage_sensitivity_review,
         firstLoadKaiRequests: reviewerPage.requests().slice(0, 6).map((r) => [r.method, pathOf(r), r.status]) };
       console.log(`[campaign] J2-1 first sign-in: ${JSON.stringify(results.J2_1)}`);
-      // The email outcome of a real first page load depends on which
-      // concurrent first request provisions the identity (J2-0 isolates it);
-      // it is recorded, not asserted, here.
+      // Every concurrent first-load KAI request forwards the account email
+      // (J2-0 isolates the id-only route), so whichever provisions wins.
       assert.equal(mapping.status, "active");
+      assert.equal(mapping.email, email(USERS.reviewer), "a real first page load provisions the account email");
       assert.deepEqual([organizations.data.items.length, cockpit.data.can_manage_sensitivity_review], [0, false]);
     });
 

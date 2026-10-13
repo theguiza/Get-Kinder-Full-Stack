@@ -556,6 +556,24 @@ function safeAuthenticatedIdentityForKaiUserProvisioning(req = {}) {
   };
 }
 
+/**
+ * Identity projection for the other service-level routes, whose actor
+ * resolver may also JIT provision the KAI user mapping on a first request.
+ * The same trusted email reaches provisioning, but as kaiProvisioningEmail,
+ * which the resolver uses only to create the mapping. It is deliberately not
+ * forwarded as email: Get Kinder site-admin authority also matches the
+ * session email against ADMIN_EMAILS, and these routes have never carried
+ * that authority, so forwarding it would widen platform superuser access.
+ */
+function safeAuthenticatedIdentityForKaiActorResolution(req = {}) {
+  const identity = safeAuthenticatedIdentityForKaiUserProvisioning(req);
+  if (!identity) return null;
+  return {
+    id: identity.id,
+    kaiProvisioningEmail: identity.email,
+  };
+}
+
 function requestPayload(req = {}) {
   return req.body && typeof req.body === "object" && !Array.isArray(req.body) ? req.body : {};
 }
@@ -712,7 +730,7 @@ function attachTemporarySafeIntakeRouteLogger(req, res, next) {
 function requestContext(req = {}, route) {
   const payload = requestPayload(req);
   return {
-    req: { user: safeAuthenticatedUser(req) },
+    req: { user: safeAuthenticatedIdentityForKaiActorResolution(req) },
     payload,
     organizationId: payload.organization_id,
     engagementId: payload.engagement_id,
@@ -2007,7 +2025,7 @@ const GK_ORGANIZATION_ID_PATTERN = /^[1-9][0-9]{0,9}$/;
 router.get("/admin/organizations", async (req, res) => {
   return invokeService(res, async () => {
     const service = await getOrganizationContextService();
-    return service.listAuthorizedOrganizations({ req: { user: safeAuthenticatedUser(req) } });
+    return service.listAuthorizedOrganizations({ req: { user: safeAuthenticatedIdentityForKaiActorResolution(req) } });
   });
 });
 
@@ -2038,7 +2056,7 @@ router.get("/admin/organization-join/organizations", async (req, res) => {
   const searchTerm = typeof req.query?.q === "string" ? req.query.q : "";
   return invokeService(res, async () => {
     const service = await getOrganizationJoinRequestService();
-    return service.searchJoinableOrganizations({ searchTerm, req: { user: safeAuthenticatedUser(req) } });
+    return service.searchJoinableOrganizations({ searchTerm, req: { user: safeAuthenticatedIdentityForKaiActorResolution(req) } });
   });
 });
 
@@ -2047,14 +2065,14 @@ router.post("/admin/organization-join/requests", async (req, res) => {
   const organizationId = requestPayload(req).organization_id;
   return invokeService(res, async () => {
     const service = await getOrganizationJoinRequestService();
-    return service.submitOrganizationJoinRequest({ organizationId, req: { user: safeAuthenticatedUser(req) } });
+    return service.submitOrganizationJoinRequest({ organizationId, req: { user: safeAuthenticatedIdentityForKaiActorResolution(req) } });
   });
 });
 
 router.get("/admin/organization-join/requests/mine", async (req, res) => {
   return invokeService(res, async () => {
     const service = await getOrganizationJoinRequestService();
-    return service.listMyOrganizationJoinRequests({ req: { user: safeAuthenticatedUser(req) } });
+    return service.listMyOrganizationJoinRequests({ req: { user: safeAuthenticatedIdentityForKaiActorResolution(req) } });
   });
 });
 
@@ -2075,7 +2093,7 @@ router.get("/admin/organizations/:organizationId/engagements", async (req, res) 
     const service = await getEngagementContextService();
     return service.listAuthorizedEngagements({
       organizationId,
-      req: { user: safeAuthenticatedUser(req) },
+      req: { user: safeAuthenticatedIdentityForKaiActorResolution(req) },
     });
   });
 });
@@ -2104,7 +2122,7 @@ router.post("/admin/organizations/:organizationId/engagements", async (req, res)
       engagementType: payload.engagement_type,
       useCaseType: payload.use_case_type,
       engagementStatus: payload.project_status,
-      req: { user: safeAuthenticatedUser(req) },
+      req: { user: safeAuthenticatedIdentityForKaiActorResolution(req) },
     });
   }, 201);
 });
@@ -2147,7 +2165,7 @@ router.patch("/admin/organizations/:organizationId/engagements/:engagementId/pro
     const input = {
       organizationId,
       engagementId,
-      req: { user: safeAuthenticatedUser(req) },
+      req: { user: safeAuthenticatedIdentityForKaiActorResolution(req) },
     };
     if (Object.hasOwn(payload, "use_case_type")) input.useCaseType = payload.use_case_type;
     if (Object.hasOwn(payload, "project_status")) input.projectStatus = payload.project_status;
@@ -2195,7 +2213,7 @@ router.post("/admin/organizations/:organizationId/improvement-practices", async 
       cadence: payload.cadence,
       nextDueDate: payload.next_due_date,
       responsibleActorUserId: payload.responsible_actor_user_id,
-      req: { user: safeAuthenticatedUser(req) },
+      req: { user: safeAuthenticatedIdentityForKaiActorResolution(req) },
     });
   }, 201);
 });
@@ -2218,7 +2236,7 @@ router.get("/admin/organizations/:organizationId/improvement-practices", async (
     return service.listImprovementPracticesForOrganizationOperation({
       organizationId: identifiers.organizationId,
       engagementId,
-      req: { user: safeAuthenticatedUser(req) },
+      req: { user: safeAuthenticatedIdentityForKaiActorResolution(req) },
     });
   });
 });
@@ -2235,7 +2253,7 @@ router.get("/admin/organizations/:organizationId/improvement-practices/:improvem
     return service.getImprovementPracticeOperation({
       organizationId: identifiers.organizationId,
       improvementPracticeId: identifiers.improvementPracticeId,
-      req: { user: safeAuthenticatedUser(req) },
+      req: { user: safeAuthenticatedIdentityForKaiActorResolution(req) },
     });
   });
 });
@@ -2260,7 +2278,7 @@ router.patch("/admin/organizations/:organizationId/improvement-practices/:improv
       cadence: payload.cadence,
       nextDueDate: payload.next_due_date,
       responsibleActorUserId: payload.responsible_actor_user_id,
-      req: { user: safeAuthenticatedUser(req) },
+      req: { user: safeAuthenticatedIdentityForKaiActorResolution(req) },
     });
   });
 });
@@ -2281,7 +2299,7 @@ router.post("/admin/organizations/:organizationId/improvement-practices/:improve
       improvementPracticeId: identifiers.improvementPracticeId,
       expectedUpdatedAt: payload.expected_updated_at,
       status: payload.status,
-      req: { user: safeAuthenticatedUser(req) },
+      req: { user: safeAuthenticatedIdentityForKaiActorResolution(req) },
     });
   });
 });
@@ -2306,7 +2324,7 @@ router.get("/admin/organizations/:organizationId/profile", async (req, res) => {
     const service = await getOrganizationContextService();
     return service.getOrganizationDisplayProfile({
       organizationId,
-      req: { user: safeAuthenticatedUser(req) },
+      req: { user: safeAuthenticatedIdentityForKaiActorResolution(req) },
     });
   });
 });
@@ -2372,7 +2390,7 @@ router.put("/admin/organizations/:organizationId/engagements/:engagementId/requi
       organizationId,
       engagementId,
       target: payload.target,
-      req: { user: safeAuthenticatedUser(req) },
+      req: { user: safeAuthenticatedIdentityForKaiActorResolution(req) },
     });
   });
 });
@@ -2396,7 +2414,7 @@ router.get("/admin/organizations/:organizationId/engagements/:engagementId/funde
     return service.classifyEngagementFunderRequirementsState({
       organizationId,
       engagementId,
-      req: { user: safeAuthenticatedUser(req) },
+      req: { user: safeAuthenticatedIdentityForKaiActorResolution(req) },
     });
   });
 });
@@ -2434,7 +2452,7 @@ router.get(
       return service.getEngagementFunderRequirementsForImpactLibrary({
         organizationId,
         engagementId,
-        req: { user: safeAuthenticatedUser(req) },
+        req: { user: safeAuthenticatedIdentityForKaiActorResolution(req) },
       });
     });
   },
@@ -2486,7 +2504,7 @@ router.post(
         organizationId,
         engagementId,
         requirementSetId,
-        req: { user: safeAuthenticatedUser(req) },
+        req: { user: safeAuthenticatedIdentityForKaiActorResolution(req) },
       });
     });
   },
@@ -2548,7 +2566,7 @@ router.post(
         engagementId,
         requirementSetId,
         decision: payload.decision,
-        req: { user: safeAuthenticatedUser(req) },
+        req: { user: safeAuthenticatedIdentityForKaiActorResolution(req) },
       });
     });
   },
@@ -2577,7 +2595,7 @@ router.get("/admin/gk-organizations/:gkOrganizationId/kai-enablement", async (re
     const service = await getOrganizationEnablementService();
     return service.getKaiEnablementStatusForOrganization({
       gkOrganizationId,
-      req: { user: safeAuthenticatedUser(req) },
+      req: { user: safeAuthenticatedIdentityForKaiActorResolution(req) },
     });
   });
 });
@@ -2601,7 +2619,7 @@ router.post("/admin/gk-organizations/:gkOrganizationId/kai-enablement", async (r
     const service = await getOrganizationEnablementService();
     return service.enableKaiForOrganization({
       gkOrganizationId,
-      req: { user: safeAuthenticatedUser(req) },
+      req: { user: safeAuthenticatedIdentityForKaiActorResolution(req) },
     });
   }, 201);
 });
@@ -6387,6 +6405,7 @@ export const __testables = {
   requestPayload,
   safeAuthenticatedUser,
   safeAuthenticatedIdentityForKaiUserProvisioning,
+  safeAuthenticatedIdentityForKaiActorResolution,
   batchDetailIdentifiers,
   fileDetailIdentifiers,
   uploadIdentifiers,

@@ -22,7 +22,11 @@ export function pickSafeLegacyUser(user = {}) {
  * requiring manual mapping. An existing but explicitly non-active kai.users
  * row (e.g. deprovisioned) is never resurrected here and still fails closed
  * with mapped_kai_user_required, as does a missing mapping whose JIT insert
- * the deployed kai.users table rejects. Organization/role authorization is decided
+ * the deployed kai.users table rejects or for which the authenticated user
+ * carries no usable email (no incomplete mapping is ever created). Callers
+ * that project req.user must therefore forward the authenticated email -
+ * see the safeAuthenticatedIdentityFor* projections in sprint2IntakeApi.js.
+ * Organization/role authorization is decided
  * afterward by validateActorCanPerformOperation and is unaffected by identity
  * provisioning: a freshly provisioned user has no kai.user_roles/
  * kai.organization_memberships rows and so is authorized for nothing until an
@@ -51,9 +55,12 @@ export async function resolveKaiActorContext(reqOrUser, dependencies = {}) {
     dependencies.resolveEffectiveClientOrganizationMembershipsForLegacyUser ||
     resolveEffectiveClientOrganizationMembershipsForLegacyUser;
 
+  // kaiProvisioningEmail is the trusted authenticated email a route projection
+  // forwards for provisioning only; it never confers site-admin authority.
+  const provisioningEmail = user.email || user.kaiProvisioningEmail || null;
   let kaiUser;
   try {
-    kaiUser = await findOrCreateUser({ legacyPublicUserdataId: user.id, email: user.email || null });
+    kaiUser = await findOrCreateUser({ legacyPublicUserdataId: user.id, email: provisioningEmail });
   } catch (error) {
     if (!error?.kaiUserProvisioningFailed) throw error;
     // No mapping exists and the JIT insert was rejected: the caller still has

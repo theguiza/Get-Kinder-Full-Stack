@@ -187,7 +187,7 @@ async function runProofCases(seedPool) {
   }
 
   async function seedRequesterActor(legacyUserId, organizationId, roleName) {
-    const kaiUser = await findOrCreateKaiUserByLegacyPublicUserdataId({ legacyPublicUserdataId: legacyUserId, email: null });
+    const kaiUser = await findOrCreateKaiUserByLegacyPublicUserdataId({ legacyPublicUserdataId: legacyUserId, email: `user${legacyUserId}@package-4.test` });
     await seedPool.query(
       `INSERT INTO kai.organization_memberships (organization_id, user_id, role_name, membership_status)
        VALUES ($1, $2, $3, 'active')`,

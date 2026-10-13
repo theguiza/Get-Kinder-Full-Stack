@@ -67,7 +67,14 @@ async function runIntegrationSuite() {
     return {
       env: enabledEnv,
       runInTransaction: (callback) => withTransaction(callback, pool),
-      findOrCreateKaiUserByLegacyPublicUserdataId: (input) => findOrCreateKaiUserByLegacyPublicUserdataId(input, pool),
+      // Production target resolution supplies the account's own usable email
+      // (findOrCreateKaiUserForAdministrationTarget); a mapping is never
+      // created without one, so the synthetic target accounts carry one too.
+      findOrCreateKaiUserByLegacyPublicUserdataId: (input) =>
+        findOrCreateKaiUserByLegacyPublicUserdataId(
+          { ...input, email: input.email ?? `user${input.legacyPublicUserdataId}@example.com` },
+          pool,
+        ),
       findKaiUserByLegacyPublicUserdataId: (legacyId) => findKaiUserByLegacyPublicUserdataId(legacyId, pool),
       listOrganizationMembershipRowsForOrganization: (orgId) => listOrganizationMembershipRowsForOrganization(orgId, pool),
       listOrganizationMembershipRowsForUserInOrganization: (orgId, userId, db) =>

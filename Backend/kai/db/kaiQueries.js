@@ -41,10 +41,22 @@ async function insertKaiUserForLegacyPublicUserdataId(db, legacyPublicUserdataId
 }
 
 /**
+ * A JIT mapping is created only with the authenticated account's email: the
+ * deployed kai.users.email is NOT NULL (USER_CONFIRMED), and a mapping
+ * created without it is never filled in later because existing rows are
+ * returned as-is. Missing, blank, or non-string emails are not usable.
+ */
+function isUsableKaiUserProvisioningEmail(email) {
+  return typeof email === "string" && email.trim().length > 0;
+}
+
+/**
  * Resolve the internal kai.users principal for an authenticated public.userdata
  * identity, provisioning it on first use. Existing rows (any status) are
  * returned as-is so an explicitly deactivated mapping still fails closed in
- * the caller; only a genuinely absent mapping is created.
+ * the caller; only a genuinely absent mapping is created, and only when a
+ * usable email is supplied - otherwise the result is null (no mapping) and
+ * nothing is written.
  *
  * Concurrency safety does not depend on a kai.users uniqueness constraint
  * (kai.users is externally managed and its constraints are not confirmed from
@@ -64,6 +76,7 @@ export async function findOrCreateKaiUserByLegacyPublicUserdataId(
   if (typeof db.connect !== "function") {
     const existing = await selectKaiUserByLegacyPublicUserdataId(db, legacyPublicUserdataId);
     if (existing) return existing;
+    if (!isUsableKaiUserProvisioningEmail(email)) return null;
     return insertKaiUserForLegacyPublicUserdataId(db, legacyPublicUserdataId, email);
   }
 
@@ -79,6 +92,10 @@ export async function findOrCreateKaiUserByLegacyPublicUserdataId(
     if (existing) {
       await client.query("COMMIT");
       return existing;
+    }
+    if (!isUsableKaiUserProvisioningEmail(email)) {
+      await client.query("COMMIT");
+      return null;
     }
 
     const provisioned = await insertKaiUserForLegacyPublicUserdataId(client, legacyPublicUserdataId, email);

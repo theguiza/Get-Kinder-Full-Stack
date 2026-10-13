@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import { findOrCreateKaiUserByLegacyPublicUserdataId } from "../Backend/kai/db/kaiQueries.js";
 import { resolveKaiActorContext } from "../Backend/kai/auth/kaiActorContext.js";
@@ -111,7 +112,7 @@ test("findOrCreateKaiUserByLegacyPublicUserdataId provisions a kai.users row whe
 test("findOrCreateKaiUserByLegacyPublicUserdataId is idempotent across repeated calls", async () => {
   const pool = createFakeKaiUsersPool();
 
-  const first = await findOrCreateKaiUserByLegacyPublicUserdataId({ legacyPublicUserdataId: 46 }, pool);
+  const first = await findOrCreateKaiUserByLegacyPublicUserdataId({ legacyPublicUserdataId: 46, email: "kai@getkinder.ai" }, pool);
   const second = await findOrCreateKaiUserByLegacyPublicUserdataId({ legacyPublicUserdataId: 46 }, pool);
   const third = await findOrCreateKaiUserByLegacyPublicUserdataId({ legacyPublicUserdataId: 46 }, pool);
 
@@ -148,6 +149,43 @@ test("findOrCreateKaiUserByLegacyPublicUserdataId never resurrects an explicitly
   assert.equal(pool.insertCount, 0);
   assert.equal(kaiUser.status, "inactive");
   assert.equal(kaiUser.user_id, "deprovisioned-kai-user");
+});
+
+test("findOrCreateKaiUserByLegacyPublicUserdataId never creates a mapping without a usable email", async () => {
+  for (const email of [undefined, null, "", "   ", 42, { address: "kai@getkinder.ai" }]) {
+    const pool = createFakeKaiUsersPool();
+    const kaiUser = await findOrCreateKaiUserByLegacyPublicUserdataId({ legacyPublicUserdataId: 46, email }, pool);
+    assert.equal(kaiUser, null);
+    assert.equal(pool.insertCount, 0);
+    assert.equal(pool.rows.length, 0);
+  }
+
+  const statements = [];
+  const queryOnlyDb = {
+    async query(sql) {
+      statements.push(sql);
+      return { rows: [] };
+    },
+  };
+  assert.equal(await findOrCreateKaiUserByLegacyPublicUserdataId({ legacyPublicUserdataId: 46, email: " " }, queryOnlyDb), null);
+  assert.ok(!statements.some((sql) => sql.includes("INSERT")));
+});
+
+test("findOrCreateKaiUserByLegacyPublicUserdataId still returns an existing active mapping when no email is supplied", async () => {
+  const pool = createFakeKaiUsersPool();
+  pool.seed(46, {
+    user_id: "existing-kai-user",
+    legacy_identity_source: "public.userdata",
+    legacy_public_userdata_id: 46,
+    status: "active",
+    email: "kai@getkinder.ai",
+  });
+
+  const kaiUser = await findOrCreateKaiUserByLegacyPublicUserdataId({ legacyPublicUserdataId: 46 }, pool);
+
+  assert.equal(pool.insertCount, 0);
+  assert.equal(kaiUser.user_id, "existing-kai-user");
+  assert.equal(kaiUser.email, "kai@getkinder.ai");
 });
 
 function fakeGetKinderUser(overrides = {}) {
@@ -464,7 +502,7 @@ function withCapturedConsoleError(fn) {
 test("findOrCreateKaiUserByLegacyPublicUserdataId tags a rejected JIT insert and rolls back", async () => {
   const pool = createFailingKaiUsersPool({ failOn: (sql) => sql.startsWith("INSERT INTO kai.users") });
   await assert.rejects(
-    findOrCreateKaiUserByLegacyPublicUserdataId({ legacyPublicUserdataId: 4242 }, pool),
+    findOrCreateKaiUserByLegacyPublicUserdataId({ legacyPublicUserdataId: 4242, email: "unmapped@example.test" }, pool),
     (error) => error.kaiUserProvisioningFailed === true && error.cause?.code === "23502",
   );
   assert.equal(pool.statements.at(-1), "ROLLBACK");
@@ -507,4 +545,156 @@ test("resolveKaiActorContext still surfaces non-provisioning database failures a
     ),
     (error) => !error.kaiUserProvisioningFailed && error.code === "23502",
   );
+});
+
+function poolBackedResolverDependencies(pool, onRoleRead = async () => []) {
+  return {
+    findOrCreateKaiUserByLegacyPublicUserdataId: (input) => findOrCreateKaiUserByLegacyPublicUserdataId(input, pool),
+    listKaiRolesForUser: onRoleRead,
+    async listOrganizationMembershipsForUser() {
+      return [];
+    },
+    async resolveEffectiveClientOrganizationMembershipsForLegacyUser() {
+      return [];
+    },
+  };
+}
+
+async function withAdminEmails(value, fn) {
+  const original = process.env.ADMIN_EMAILS;
+  process.env.ADMIN_EMAILS = value;
+  try {
+    return await fn();
+  } finally {
+    if (original === undefined) delete process.env.ADMIN_EMAILS;
+    else process.env.ADMIN_EMAILS = original;
+  }
+}
+
+test("resolveKaiActorContext provisions a first id-only route request from the forwarded trusted email", async () => {
+  const pool = createFakeKaiUsersPool();
+  const result = await withAdminEmails("", () =>
+    resolveKaiActorContext(
+      { user: { id: 46, kaiProvisioningEmail: "kai@getkinder.ai" } },
+      poolBackedResolverDependencies(pool),
+    ),
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(pool.insertCount, 1);
+  assert.equal(pool.rows[0].email, "kai@getkinder.ai");
+  assert.equal(result.actorContext.email, "kai@getkinder.ai");
+  assert.deepEqual(result.actorContext.kaiRoles, []);
+  assert.deepEqual(result.actorContext.organizationMemberships, []);
+  assert.equal(result.actorContext.platformSuperuser, false);
+});
+
+test("resolveKaiActorContext refuses an unmapped first request without a usable email and writes nothing", async () => {
+  for (const user of [{ id: 46 }, { id: 46, kaiProvisioningEmail: null }, { id: 46, email: "  " }, { id: 46, kaiProvisioningEmail: 42 }]) {
+    const pool = createFakeKaiUsersPool();
+    const result = await resolveKaiActorContext(
+      { user },
+      poolBackedResolverDependencies(pool, async () => {
+        throw new Error("roles must not be read without a mapping");
+      }),
+    );
+    assert.equal(result.ok, false);
+    assert.equal(result.error_code, "mapped_kai_user_required");
+    assert.equal(pool.insertCount, 0);
+    assert.equal(pool.rows.length, 0);
+  }
+});
+
+test("resolveKaiActorContext keeps existing active and inactive mappings unchanged for a route projection", async () => {
+  const pool = createFakeKaiUsersPool();
+  pool.seed(46, {
+    user_id: "existing-kai-user",
+    legacy_identity_source: "public.userdata",
+    legacy_public_userdata_id: 46,
+    status: "active",
+    email: "kai@getkinder.ai",
+  });
+  pool.seed(47, {
+    user_id: "deprovisioned-kai-user",
+    legacy_identity_source: "public.userdata",
+    legacy_public_userdata_id: 47,
+    status: "inactive",
+    email: "former@getkinder.ai",
+  });
+
+  const active = await resolveKaiActorContext({ user: { id: 46, kaiProvisioningEmail: "changed@getkinder.ai" } }, poolBackedResolverDependencies(pool));
+  const activeIdOnly = await resolveKaiActorContext({ user: { id: 46, kaiProvisioningEmail: null } }, poolBackedResolverDependencies(pool));
+  const inactive = await resolveKaiActorContext({ user: { id: 47, kaiProvisioningEmail: "former@getkinder.ai" } }, poolBackedResolverDependencies(pool));
+
+  assert.equal(active.ok, true);
+  assert.equal(active.actorContext.actorUserId, "existing-kai-user");
+  assert.equal(activeIdOnly.ok, true);
+  assert.equal(activeIdOnly.actorContext.actorUserId, "existing-kai-user");
+  assert.equal(inactive.ok, false);
+  assert.equal(inactive.error_code, "mapped_kai_user_required");
+  assert.equal(pool.insertCount, 0);
+  assert.equal(pool.rows.find((row) => row.user_id === "existing-kai-user").email, "kai@getkinder.ai");
+  assert.equal(pool.rows.find((row) => row.user_id === "deprovisioned-kai-user").status, "inactive");
+});
+
+test("concurrent first requests across id-only and email-forwarding routes create exactly one complete mapping", async () => {
+  const pool = createFakeKaiUsersPool({ insertDelayMs: 10 });
+  const requests = [
+    { user: { id: 46, kaiProvisioningEmail: "kai@getkinder.ai" } },
+    { user: { id: 46, email: "kai@getkinder.ai" } },
+    { user: { id: 46, kaiProvisioningEmail: "kai@getkinder.ai" } },
+    { user: { id: 46, kaiProvisioningEmail: "kai@getkinder.ai" } },
+  ];
+
+  const results = await Promise.all(requests.map((req) => resolveKaiActorContext(req, poolBackedResolverDependencies(pool))));
+
+  assert.equal(pool.insertCount, 1);
+  assert.equal(pool.rows.length, 1);
+  assert.equal(pool.rows[0].email, "kai@getkinder.ai");
+  assert.ok(results.every((result) => result.ok && result.actorContext.actorUserId === pool.rows[0].user_id));
+});
+
+test("a forwarded provisioning email never confers ADMIN_EMAILS platform-superuser authority", async () => {
+  const pool = createFakeKaiUsersPool();
+  const result = await withAdminEmails("kai@getkinder.ai", () =>
+    resolveKaiActorContext(
+      { user: { id: 46, kaiProvisioningEmail: "kai@getkinder.ai" } },
+      poolBackedResolverDependencies(pool),
+    ),
+  );
+
+  assert.equal(result.ok, true);
+  assert.equal(result.actorContext.platformSuperuser, false);
+  assert.equal(result.actorContext.platformSuperuserAuthority, null);
+  assert.equal(result.actorContext.safeLegacyUser.email, null);
+});
+
+test("the actor-resolution route projection forwards exactly the authenticated id and email", async () => {
+  const { __testables } = await import("../Backend/kai/routes/sprint2IntakeApi.js");
+  const project = __testables.safeAuthenticatedIdentityForKaiActorResolution;
+  const req = {
+    user: { id: 46, email: "kai@getkinder.ai", password: "hash", is_admin: true, kaiProvisioningEmail: "forged@example.test" },
+    session: { adminPreviewUserId: 999 },
+    body: { user_id: 999, email: "forged@example.test", kaiProvisioningEmail: "forged@example.test", is_admin: true },
+    query: { email: "forged@example.test", kaiProvisioningEmail: "forged@example.test" },
+  };
+
+  assert.deepEqual(project(req), { id: 46, kaiProvisioningEmail: "kai@getkinder.ai" });
+  for (const email of [undefined, null, "", "   ", 42]) {
+    assert.deepEqual(project({ user: { id: 46, email } }), { id: 46, kaiProvisioningEmail: null });
+  }
+  assert.equal(project({}), null);
+  assert.equal(project({ user: [] }), null);
+});
+
+test("every service-level intake route forwards the trusted email to actor resolution", () => {
+  const routeSource = readFileSync("Backend/kai/routes/sprint2IntakeApi.js", "utf8");
+  const projections = [...routeSource.matchAll(/req: \{ user: (\w+)\(req\) \}/g)].map((match) => match[1]);
+
+  assert.ok(projections.length >= 22);
+  assert.deepEqual(
+    [...new Set(projections)].sort(),
+    ["safeAuthenticatedIdentityForKaiActorResolution", "safeAuthenticatedIdentityForKaiUserProvisioning"],
+  );
+  assert.equal((routeSource.match(/safeAuthenticatedUser\(req\)/g) || []).length, 1, "only the projections build on the id-only helper");
 });
