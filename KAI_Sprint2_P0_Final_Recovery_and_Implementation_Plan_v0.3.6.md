@@ -38371,3 +38371,139 @@ synthetic data):**
 **Status:** PACKAGE_1_RECONCILED_AND_IDENTITY_REPAIRED_LOCAL_SYNTHETIC. No
 push, deployment, production or shared database, cloud, feature-flag,
 tenant, credential, `.env`, schema, or `00_KAI_CURRENT_STATE.md` change.
+
+### Package 2: P1-08 source review for authorized GK users (2026-10-13)
+
+**Owner direction (USER_CONFIRMED):** repair J5-1, J5-3 and J5-4 together so
+that a user P1-08 already authorizes can discover, open, decide, and see the
+outcome of source review in the product UI. Preserve the P1-08 role set,
+tenant isolation, validators, transactions, audit, replay, and Package 1.
+J3-3 (P2-12 -> P2-02/P2-03) is out of scope.
+
+**Start (TOOL_VERIFIED):** `main` at `b27119a`, clean; `bb79263`/`b27119a`
+present. Campaign at `b27119a` (scratch worktree): 33 / 29 pass / 4 fail
+(J5-1, J5-3, J5-4, J3-3).
+
+**First failures (TOOL_VERIFIED):**
+- J5-1 (global + org `gk_reviewer`): the GK Studio had no source-review entry
+  and `/gk-admin/kai-review-cockpit` redirected to `/` (`ensureAdmin`).
+- J5-3 (global + org `gk_operator`): the same `/` redirect, while the API
+  returned the detail with `decision_controls_enabled: true`.
+- J5-4 (site admin, global `gk_admin`, derived `client_admin`): the cockpit
+  offered Promote. The POST returned 403 `tenant_boundary_violation` with
+  `blockers: []`, shown as "Request crosses tenant boundaries."
+
+Root causes:
+- `createSourcePromotionDecision` mapped every authorization refusal to
+  `tenant_boundary_violation`.
+- `submitSourceCandidateDecision` rebuilt the error without its blockers.
+- `decision_controls_enabled` reflected only the feature flag.
+
+**Authority (TOOL_VERIFIED, unchanged):**
+- **Read** (queue, candidate detail, and the decision route's own gate): an
+  active membership in the organization plus a global
+  `gk_admin`/`gk_operator`/`gk_reviewer` role (`globalRolesOnly`).
+- **P1-08 decision:** additionally an active organization membership whose
+  `role_name` is in {`gk_admin`, `gk_operator`, `gk_reviewer`}, held by a
+  mapped human.
+- The platform-superuser short-circuit never applies on these routes,
+  because the Package 1 projection carries no `is_admin`.
+- **P2-01:** the existing server-side handoff, run as the same actor; its
+  policy is unchanged.
+- Backend Contract §22 queue ownership was not re-decided. No newer accepted
+  decision changes the P1-08 role set.
+
+**Repair:**
+- `authorizeSourcePromotionDecision` is the P1-08 write predicate, extracted
+  unchanged. It returns the validator's own code and blockers
+  (`authorization_denied`/`role_not_allowed`;
+  `missing_active_organization_membership`; `tenant_boundary_violation`
+  only for missing organization scope or tenant inconsistency).
+- The cockpit decision seam preserves those blockers.
+- `decision_controls_enabled` is now: feature enabled, AND
+  `authorizeSourcePromotionDecision`, AND the repository's own exported
+  completeness predicates (`isSourceCandidateDecisionActionable`: no
+  decision with an open item, or `needs_more_information` with a
+  `waiting_on_client` item). It is read-only, and the write path still
+  re-checks everything.
+- The capability probe adds `can_review_source_candidates`, using the
+  unchanged cockpit read gate.
+- The GK Studio Reviews tab gains a Source review list of open
+  `source_candidate_review` items, using the existing queue, detail, and
+  decision routes and the cockpit's exported `SourceCandidateDetail`.
+- The "nothing needs attention" closure now counts pending source review.
+- No new route, no SQL, no `index.js`/`ensureAdmin` change, no role-set
+  change.
+
+**Campaign:**
+- J5-1 and J5-3 now promote through the Studio UI. They assert:
+  - the existing route only;
+  - decision, candidate, and queue state;
+  - attribution to the deciding actor;
+  - one current source version;
+  - the actor's `source_promotion_decision_persisted` and
+    `evidence_lineage_extracted` audit;
+  - 2 P2-01 evidence items (`needs_gk_review`/open), reported in the UI;
+  - the client pipeline at `evidence_review`;
+  - the cockpit page still redirecting.
+- J5-2 asserts an identical API replay (200, replayed, handoff replayed,
+  nothing written).
+- J5-4 uses the pending mixed candidate and asserts:
+  - read 200;
+  - no decision form in the Studio or the cockpit;
+  - detail `decision_controls_enabled: false`;
+  - direct 403 `authorization_denied`/`role_not_allowed`;
+  - nothing written.
+
+**Rebuilt bundle:**
+- The committed `entry.js` was stale for `4191684`'s 5-line copy change.
+  Rebuilding the starting source alone fails sensitivity cases 1, 9 and 15,
+  because `0a46a31` had pinned them to the stale copy. Their expectations
+  are restored to the committed source copy.
+- The P2-01 browser case 2 pinned the J5-4 defect and now asserts the
+  repaired refusal.
+
+**Verification (TOOL_VERIFIED; sentinel `DATABASE_URL`, placeholder
+non-secret `OPENAI_API_KEY`, runner-owned loopback PostgreSQL, real Chrome,
+synthetic data):**
+- **Campaign:** 33 / 32 pass / 1 fail; only J3-3 fails, with the same cause
+  as at baseline (`tenant_boundary_violation` claim handoff). J3-2 now
+  reports `authorization_denied`/`[VAL-AUT-004, role_not_allowed]`.
+- **Browser specs:** sensitivity 16/0; reviewer provisioning 13/0; P2-01
+  handoff 7/0; reviewer edge cases 11/0; Team & Access 7/0; P2-12 no-claim
+  11/0; claim proposal 10/0; client evidence pipeline 7/0; client Knowledge
+  Studio 6/0.
+- **Rehydration:** 2/1. Case 2 (the `gk_operator` Studio waiting for
+  "Sensitivity profile", spec line 471) fails identically at `b27119a` with
+  both the stale and the rebuilt bundle. It is pre-existing and not
+  attributable.
+- **Runners:** P1-07 handoff 22/0; P1-06 15/0; P2-01 handoff 7/0; P2-12
+  no-claim 11/0; P2-03 reviewed-evidence proposal 17/0; P2 access
+  administration 31/0; P1-08 17/2 (tests 14 and 19 fail at lines 550/675,
+  identically at `b27119a`: an expected second feature flag).
+- **Suites:**
+  - `npm test`: 5468/2/104. `test:kai-sprint2`: 4748/1/89.
+  - `verify:kai-sprint2-api-contract`: 71/0.
+  - The only failures are `kai-client-authorization-reconciliation.spec.js:441`
+    and `kai-sprint2-impact-evidence-library.spec.js:3436`, with the same
+    causes as at `b27119a`.
+- **Build and diff:** `npm run build` is reproducible (identical SHA on
+  rebuild) and the served `entry.js` contains the Source review UI and
+  capability. `git diff --check` is clean.
+
+**NOT_CONFIRMED and remaining dependencies:**
+- **Waiting-on-client follow-ups:** the Studio lists only `open` items. A
+  `needs_more_information` candidate (`waiting_on_client`) stays decidable
+  through the API, and through the admin cockpit for site admins.
+- **Read/decision mismatch:** a global GK reviewer whose organization role
+  is `client_admin` can read source review but not decide. That is the
+  current accepted policy, not re-decided here.
+- **Organization-only role:** an org-only `gk_reviewer` (no global role)
+  passes the P1-08 predicate but not the route's read gate, so it is not
+  offered source review.
+- **Superuser authority** on review routes remains an open owner decision.
+- No production, deployment, or bundle-serving check was made.
+
+**Status:** PACKAGE_2_P1_08_SOURCE_REVIEW_REPAIRED_LOCAL_SYNTHETIC. No push,
+deployment, production or shared database, cloud, feature-flag, tenant,
+credential, `.env`, schema, or `00_KAI_CURRENT_STATE.md` change.
