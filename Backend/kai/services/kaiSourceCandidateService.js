@@ -1,6 +1,6 @@
 import { isKaiSprint2Enabled } from "../config/kaiSprint2Config.js";
 import { buildKaiError } from "../errors/kaiErrors.js";
-import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationService.js";
+import { validateActorCanPerformSensitivityReview } from "../auth/kaiAuthorizationService.js";
 import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
 import { createPostgresSourceCandidateRepository } from "../dictionary/postgresSourceCandidateRepository.js";
 
@@ -64,10 +64,21 @@ function isMappedHumanActor(actorContext) {
  * scheduler: the P1 worker's system actor can never reach it, and AUTH-KAI-003
  * below would reject it if it did.
  *
+ * Owner decision (2026-10-13): an active Get Kinder organization administrator
+ * whose client_admin membership is derived from an active binding to this exact
+ * KAI organization may create the stub only as the consequence of their own
+ * sensitivity review. The repository then also requires, inside its transaction
+ * and with the profile row locked, that the current decision-lineage head is a
+ * 'reviewed' decision recorded by this same human as client_admin and that its
+ * sensitivity_review queue item is resolved. No caller-supplied status, role, or
+ * decision id is consulted. GK-authorized callers are unaffected, and
+ * client_admin is not added to SOURCE_CANDIDATE_ALLOWED_ROLES.
+ *
  * Contains no SQL and imports no database pool: persistence is delegated entirely
  * to the injected P1-07 source-candidate repository. Authorization and
  * tenant-membership checks are delegated to the existing shared validator-group
- * mechanisms (`validateActorCanPerformOperation`, `validateTenantBoundaryConsistency`)
+ * mechanisms (`validateActorCanPerformSensitivityReview`, which applies
+ * `validateActorCanPerformOperation` first, and `validateTenantBoundaryConsistency`)
  * rather than reimplemented locally; their structured blockers are preserved on the
  * returned error.
  */
@@ -87,17 +98,21 @@ export async function createSourceCandidateStub(input, dependencies = {}) {
   // Owner decision (2026-10-11): an allowed global KAI role also authorizes the
   // actor in an organization where their active membership is a client role.
   // An active membership in the requested organization is still required.
-  const auth = validateActorCanPerformOperation(
+  // Owner decision (2026-10-13): failing that, an active binding-derived
+  // client_admin of this exact organization is admitted only with the
+  // repository-enforced own-reviewed-decision prerequisite below.
+  const auth = validateActorCanPerformSensitivityReview(
     actorContext,
     SOURCE_CANDIDATE_OPERATION,
     input.organizationId,
-    {
-      allowedRoles: SOURCE_CANDIDATE_ALLOWED_ROLES,
-      combineGlobalRoles: true,
-    },
+    SOURCE_CANDIDATE_ALLOWED_ROLES,
   );
   if (!auth.ok) {
     return buildKaiError("tenant_boundary_violation", { blockers: auth.blockers });
+  }
+  const organizationAdminAuthorized = auth.organizationAdminAuthorized === true;
+  if (organizationAdminAuthorized && actorContext.kaiUserStatus !== "active") {
+    return buildKaiError("authorization_denied");
   }
 
   const tenant = validateTenantBoundaryConsistency({
@@ -118,6 +133,7 @@ export async function createSourceCandidateStub(input, dependencies = {}) {
     actorUserId: actorContext.actorUserId,
     now: input.now,
     metadataOnlyAudit: dependencies.metadataOnlyAudit,
+    ...(organizationAdminAuthorized ? { requireOwnCurrentReviewedDecision: true } : {}),
   });
 
   if (!result.ok) {

@@ -1,5 +1,10 @@
 import { withTransaction } from "../db/kaiDb.js";
-import { getScopedSourceCandidateReviewQueueItemByIdentity } from "../db/kaiIntakeQueries.js";
+import {
+  getScopedSensitivityReviewQueueItemByIdentity,
+  getScopedSourceCandidateReviewQueueItemByIdentity,
+} from "../db/kaiIntakeQueries.js";
+import { findCurrentSensitivityAllowedUseDecision } from "./postgresSensitivityAllowedUseDecisionRepository.js";
+import { isSensitivityAllowedUseTerminalOutcome } from "./sensitivityAllowedUseDecisionContract.js";
 
 /**
  * KAI P1-07 source-candidate repository adapter: idempotent creation of one
@@ -22,6 +27,7 @@ import { getScopedSourceCandidateReviewQueueItemByIdentity } from "../db/kaiInta
  */
 
 const SOURCE_CANDIDATE_RESULT_STATUS = Object.freeze({
+  authorization_denied: 403,
   validation_blocker: 422,
   conflict_current_state_changed: 409,
   not_found: 404,
@@ -97,13 +103,14 @@ function isSourceCandidateIdentity(value) {
 }
 
 function validateCreateInput(input) {
-  const allowedKeys = new Set(["identity", "actorUserId", "now", "metadataOnlyAudit"]);
+  const allowedKeys = new Set(["identity", "actorUserId", "now", "metadataOnlyAudit", "requireOwnCurrentReviewedDecision"]);
   if (!isPlainObject(input) || !hasOnlyKeys(input, allowedKeys)) return false;
   return (
     isSourceCandidateIdentity(input.identity) &&
     isNonEmptyString(input.actorUserId) &&
     isNormalizedNow(input.now) &&
-    isMetadataOnlyAuditDependency(input.metadataOnlyAudit)
+    isMetadataOnlyAuditDependency(input.metadataOnlyAudit) &&
+    (input.requireOwnCurrentReviewedDecision === undefined || input.requireOwnCurrentReviewedDecision === true)
   );
 }
 
@@ -118,9 +125,11 @@ function asIso(value) {
  * is authorized to depend on: full lineage (intake_file_id, file_profile_id,
  * data_dictionary_id, profile_canonical_sha256) plus the same VAL-FUP-001-P0
  * fail-closed predicate columns P1-06 already reads. Never the raw dictionary or
- * profile content.
+ * profile content. With `lock`, the row is read FOR UPDATE, the same lock the
+ * Phase-5 decision repository takes before appending a decision, so no decision
+ * on this profile can commit between the prerequisite check and candidate creation.
  */
-async function readScopedSensitivityProfile(tx, organizationId, intakeSensitivityProfileId) {
+async function readScopedSensitivityProfile(tx, organizationId, intakeSensitivityProfileId, { lock = false } = {}) {
   const result = await tx.query(
     `SELECT organization_id::text AS organization_id,
             intake_sensitivity_profile_id::text AS intake_sensitivity_profile_id,
@@ -136,10 +145,44 @@ async function readScopedSensitivityProfile(tx, organizationId, intakeSensitivit
             retention_posture
        FROM kai.intake_sensitivity_profiles
       WHERE organization_id = $1::uuid
-        AND intake_sensitivity_profile_id = $2::uuid`,
+        AND intake_sensitivity_profile_id = $2::uuid${lock ? "\n      FOR UPDATE" : ""}`,
     [organizationId, intakeSensitivityProfileId],
   );
   return result.rows[0] ?? null;
+}
+
+/**
+ * The bound-organization-administrator prerequisite (owner decision 2026-10-13),
+ * read only from committed ledger and queue rows under the profile lock: the
+ * current Phase-5 decision-lineage head for this exact tenant-scoped profile is a
+ * human 'reviewed' decision recorded by this same actor as client_admin, and the
+ * 'sensitivity_review' queue item it decided is resolved. A superseded, absent,
+ * non-terminal, or other-actor head, or an ambiguous lineage (which throws), never
+ * satisfies it.
+ */
+async function hasOwnCurrentReviewedDecision(tx, profileRow, actorUserId) {
+  const head = await findCurrentSensitivityAllowedUseDecision(tx, {
+    organizationId: profileRow.organization_id,
+    intakeSensitivityProfileId: profileRow.intake_sensitivity_profile_id,
+  });
+  if (
+    !head ||
+    !isSensitivityAllowedUseTerminalOutcome(head.decision_outcome) ||
+    head.created_by_type !== "human" ||
+    head.decided_by_role !== "client_admin" ||
+    String(head.decided_by) !== actorUserId
+  ) {
+    return false;
+  }
+  const queueItem = await getScopedSensitivityReviewQueueItemByIdentity(
+    { organizationId: profileRow.organization_id, targetObjectId: profileRow.intake_sensitivity_profile_id },
+    tx,
+  );
+  return (
+    Boolean(queueItem) &&
+    String(queueItem.review_queue_item_id) === String(head.review_queue_item_id) &&
+    queueItem.queue_status === "resolved"
+  );
 }
 
 /**
@@ -493,6 +536,12 @@ export function createPostgresSourceCandidateRepository({
      * committed `kai.intake_sensitivity_profiles` row; the caller cannot provide or
      * override lineage, classification, review status, or queue identity.
      *
+     * `requireOwnCurrentReviewedDecision: true` (set by the service only for a
+     * binding-derived client_admin) locks the profile row and requires
+     * hasOwnCurrentReviewedDecision before the predicate is evaluated or any
+     * candidate or review item is read or written; otherwise `authorization_denied`
+     * with zero mutation and zero audit activity.
+     *
      * Same identity that already has a matching candidate row AND a matching review
      * item: replays both, with zero writes and zero audit activity. A pre-existing
      * candidate whose review item is missing, or whose lineage/identity no longer
@@ -512,15 +561,20 @@ export function createPostgresSourceCandidateRepository({
      */
     async createSourceCandidateStub(input) {
       if (!validateCreateInput(input)) return sourceCandidateFailure("validation_blocker");
-      const { identity, actorUserId, now, metadataOnlyAudit } = input;
+      const { identity, actorUserId, now, metadataOnlyAudit, requireOwnCurrentReviewedDecision = false } = input;
       try {
         return await runInTransaction(async (tx) => {
           const profileRow = await readScopedSensitivityProfile(
             tx,
             identity.organizationId,
             identity.intakeSensitivityProfileId,
+            { lock: requireOwnCurrentReviewedDecision },
           );
           if (!profileRow) return sourceCandidateFailure("not_found");
+
+          if (requireOwnCurrentReviewedDecision && !(await hasOwnCurrentReviewedDecision(tx, profileRow, actorUserId))) {
+            return sourceCandidateFailure("authorization_denied");
+          }
 
           if (!satisfiesCreationTriggerPredicate(profileRow)) {
             return sourceCandidateFailure("validation_blocker");

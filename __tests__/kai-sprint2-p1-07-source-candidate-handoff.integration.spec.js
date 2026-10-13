@@ -918,17 +918,26 @@ async function runP107HandoffIntegrationSuite() {
     assert.equal((await sensitivityReviewItems(intakeSensitivityProfileId)).length, 1);
   });
 
+
   // ---------------------------------------------------------------------------
-  // KAI P1-07 first-failure reproduction (2026-10-12). The owner-approved bound
-  // organization administrator (4191684) may record the sensitivity decision,
-  // attributed `client_admin`, but P1-07 createSourceCandidateStub still admits
-  // only gk_admin/gk_operator/gk_reviewer (membership or global). These tests pin
-  // that boundary as it is; they do not widen P1-07.
+  // KAI P1-07 bound organization administrator handoff (owner decision
+  // 2026-10-13). The first-failure reproduction (2026-10-12) pinned the refusal of
+  // an owner-approved bound client_admin (4191684) at P1-07 VAL-AUT-004. That
+  // refusal was the defect. P1-07 now admits an active binding-derived
+  // client_admin of this exact organization only when the current decision-lineage
+  // head is that same human's 'reviewed' decision, recorded as client_admin, and
+  // its sensitivity_review item is resolved. The repository checks this from
+  // committed rows under the profile lock. GK authority and client_admin's absence
+  // from SOURCE_CANDIDATE_ALLOWED_ROLES are unchanged.
   // ---------------------------------------------------------------------------
 
   const BOUND_ADMIN = "90000000-0000-4000-8000-000000000005";
   const BOUND_MIXED_REVIEWER = "90000000-0000-4000-8000-000000000006";
+  const OTHER_BOUND_ADMIN = "90000000-0000-4000-8000-000000000007";
   const GK_ORGANIZATION_ID = 4242;
+  const T1 = "2026-09-25T11:00:00.000Z";
+  const T2 = "2026-09-25T12:00:00.000Z";
+  const T3 = "2026-09-25T13:00:00.000Z";
 
   // Exactly the derived membership gkOrganizationBindingAuthority emits.
   function boundAdminMembership(overrides = {}) {
@@ -942,22 +951,28 @@ async function runP107HandoffIntegrationSuite() {
     };
   }
 
-  // Actor A: mapped human, active bound client_admin, no global GK role, no superuser.
+  // Actor A: mapped active human, active bound client_admin, no global GK role, no superuser.
   const boundAdmin = {
     actorType: "human",
     actorUserId: BOUND_ADMIN,
+    kaiUserStatus: "active",
     kaiRoles: [],
     organizationMemberships: [boundAdminMembership()],
     platformSuperuser: false,
   };
-  // Actor B: mapped human, global gk_reviewer, the same active bound client_admin, no superuser.
+  // Actor B: mapped active human, global gk_reviewer, the same active bound client_admin, no superuser.
   const boundMixedReviewer = {
-    actorType: "human",
+    ...boundAdmin,
     actorUserId: BOUND_MIXED_REVIEWER,
     kaiRoles: ["gk_reviewer"],
-    organizationMemberships: [boundAdminMembership()],
-    platformSuperuser: false,
   };
+  const otherBoundAdmin = { ...boundAdmin, actorUserId: OTHER_BOUND_ADMIN };
+
+  // The pre-fix P1-07 refusal of a bound client_admin, used only to construct the
+  // historical "reviewed, resolved, no candidate" state.
+  async function refusedHandoff() {
+    return { ok: false, data: null, error: { code: "tenant_boundary_violation" } };
+  }
 
   function countingSourceCandidateRepository() {
     const calls = { createSourceCandidateStub: 0 };
@@ -972,6 +987,18 @@ async function runP107HandoffIntegrationSuite() {
     };
   }
 
+  function decideAs(actorContext, intakeSensitivityProfileId, work, decision, { now, refuseHandoff = false, ...overrides } = {}) {
+    return submitSensitivityProfileDecision(
+      decisionRequest(intakeSensitivityProfileId, work, decision, actorContext),
+      {
+        ...productionDecisionDependencies(intakeSensitivityProfileId, actorContext),
+        ...(now ? { now: () => now } : {}),
+        ...(refuseHandoff ? { createSourceCandidateStub: refusedHandoff } : {}),
+        ...overrides,
+      },
+    );
+  }
+
   async function profilePredicate(intakeSensitivityProfileId) {
     const row = await withClient((client) => client.query(
       `SELECT human_review_required, public_use_allowed, funder_use_allowed, llm_processing_allowed,
@@ -982,9 +1009,48 @@ async function runP107HandoffIntegrationSuite() {
     return __sourceCandidateRepositoryTestables.satisfiesCreationTriggerPredicate(row.rows[0]);
   }
 
-  async function decisionAuditCount(intakeSensitivityProfileId) {
-    return (await auditActions(intakeSensitivityProfileId))
-      .filter((row) => row.action === "sensitivity_review_decision_recorded").length;
+  async function currentHead(intakeSensitivityProfileId) {
+    const rows = await withClient((client) => client.query(
+      `SELECT d.decision_id::text AS decision_id, d.decision_outcome, d.decided_by::text AS decided_by,
+              d.decided_by_role, d.target_updated_at
+         FROM kai.intake_sensitivity_review_decisions d
+        WHERE d.organization_id = $1::uuid AND d.intake_sensitivity_profile_id = $2::uuid
+          AND NOT EXISTS (
+                SELECT 1 FROM kai.intake_sensitivity_review_decisions s
+                 WHERE s.supersedes_decision_id = d.decision_id
+              )`,
+      [ORG, intakeSensitivityProfileId],
+    ));
+    assert.equal(rows.rows.length, 1, "exactly one current decision head");
+    return { ...rows.rows[0], target_updated_at: rows.rows[0].target_updated_at.toISOString() };
+  }
+
+  async function auditCounts(intakeSensitivityProfileId, index, action) {
+    const events = await withClient((client) => client.query(
+      `SELECT count(*)::int AS count FROM kai.audit_events WHERE action = $1 AND metadata->>'object_id' = $2`,
+      [action, intakeSensitivityProfileId],
+    ));
+    const lifecycle = await withClient((client) => client.query(
+      `SELECT count(*)::int AS count FROM kai.upload_lifecycle_audit WHERE operation = $1 AND intake_file_id = $2::uuid`,
+      [action, fileId(index)],
+    ));
+    return { audit_events: events.rows[0].count, upload_lifecycle_audit: lifecycle.rows[0].count };
+  }
+
+  const decisionAudits = (id, index) => auditCounts(id, index, "sensitivity_review_decision_recorded");
+  const candidateAudits = (id, index) => auditCounts(id, index, "intake_source_candidate_persisted");
+
+  // Every kai table is compared by changedTables; this also names the downstream
+  // tables explicitly. evidence_items and claims are not part of this runner's
+  // schema, so they can only be asserted unchanged where they exist.
+  function assertNothingDownstream(before, after) {
+    for (const table of ["intake_promotion_decisions", "sources", "source_versions"]) {
+      assert.ok(table in after, `kai.${table} exists in this schema`);
+      assert.equal(after[table], before[table], `kai.${table} must not have been written`);
+    }
+    for (const table of ["evidence_items", "claims", "claim_evidence_links"]) {
+      if (table in after) assert.equal(after[table], before[table], `kai.${table} must not have been written`);
+    }
   }
 
   async function workAs(actorContext, intakeSensitivityProfileId) {
@@ -997,42 +1063,61 @@ async function runP107HandoffIntegrationSuite() {
     };
   }
 
-  test("P1-07 first failure, Actor A (bound client_admin, no global GK role): review work and the 'reviewed' decision commit as client_admin and resolve the queue, the handoff runs, and createSourceCandidateStub refuses it at VAL-AUT-004 role_not_allowed before the repository, so no candidate exists", async () => {
+  // The queue item's current updated_at, as the cockpit detail returns it (the
+  // stamp a UI submission sends). A BEFORE UPDATE trigger sets it from the
+  // database clock, so it is read back, never assumed.
+  async function currentQueueStamp(intakeSensitivityProfileId) {
+    return (await readDetailAs(boundMixedReviewer, intakeSensitivityProfileId)).sensitivity_review_queue_item.updated_at;
+  }
+
+  // The historical condition: a bound admin's committed 'reviewed' decision, queue
+  // resolved, no candidate (handoff refused as before the fix).
+  async function historicalReviewedWithoutCandidate(index, actorContext = boundAdmin) {
+    const intakeSensitivityProfileId = await seedPredicateSatisfyingSensitivityProfile(index);
+    const work = await workAs(actorContext, intakeSensitivityProfileId);
+    const decided = await decideAs(actorContext, intakeSensitivityProfileId, work, "reviewed", { now: T1, refuseHandoff: true });
+    assert.equal(decided.ok, true, JSON.stringify(decided));
+    assert.equal(decided.data.source_candidate_handoff.status, "not_created");
+    assert.deepEqual(await candidateState(intakeSensitivityProfileId), { candidates: [], queueItems: [] });
+    return { intakeSensitivityProfileId, work, decided, resolvedStamp: await currentQueueStamp(intakeSensitivityProfileId) };
+  }
+
+  test("bound admin (positive): Actor A's own committed 'reviewed' decision resolves the queue and the handoff creates exactly one needs_gk_review candidate and one open review item, with both audits; nothing downstream; a repeat replays with zero writes", async () => {
     const intakeSensitivityProfileId = await seedPredicateSatisfyingSensitivityProfile(21);
     const work = await workAs(boundAdmin, intakeSensitivityProfileId);
     assert.equal(await profilePredicate(intakeSensitivityProfileId), true, "the profile satisfies VAL-KAI-P1-07-001");
 
     const counted = countingSourceCandidateRepository();
     const before = await kaiTableRowCounts();
-    const decided = await submitSensitivityProfileDecision(
-      decisionRequest(intakeSensitivityProfileId, work, "reviewed", boundAdmin),
-      {
-        ...productionDecisionDependencies(intakeSensitivityProfileId, boundAdmin),
-        sourceCandidateRepository: counted.repository,
-      },
-    );
+    const decided = await decideAs(boundAdmin, intakeSensitivityProfileId, work, "reviewed", {
+      sourceCandidateRepository: counted.repository,
+    });
     assert.equal(decided.ok, true, JSON.stringify(decided));
     assert.equal(decided.data.replayed, false);
     assert.equal(decided.data.current_decision.decision_outcome, "reviewed");
     assert.equal(decided.data.current_decision.decided_by, BOUND_ADMIN);
     assert.equal(decided.data.current_decision.decided_by_role, "client_admin");
     assert.equal(decided.data.sensitivity_review_queue_item.queue_status, "resolved");
-    assert.deepEqual(decided.data.source_candidate_handoff, {
-      status: "not_created",
-      intake_source_candidate_id: null,
-      candidate_status: null,
-      review_queue_item_id: null,
-      queue_status: null,
-      error_code: "tenant_boundary_violation",
-    });
-    assert.equal(counted.calls.createSourceCandidateStub, 0, "P1-07 never reached its repository (predicate, persistence, audit)");
+    const handoff = decided.data.source_candidate_handoff;
+    assert.deepEqual(
+      { status: handoff.status, candidate_status: handoff.candidate_status, queue_status: handoff.queue_status, error_code: handoff.error_code },
+      { status: "created", candidate_status: "needs_gk_review", queue_status: "open", error_code: null },
+    );
+    assert.equal(counted.calls.createSourceCandidateStub, 1);
 
     const after = await kaiTableRowCounts();
     assert.deepEqual(changedTables(before, after), [
       "audit_events",
       "intake_sensitivity_review_decisions",
+      "intake_source_candidates",
+      "review_queue_items",
       "upload_lifecycle_audit",
     ]);
+    assert.equal(after.intake_sensitivity_review_decisions - before.intake_sensitivity_review_decisions, 1);
+    assert.equal(after.intake_source_candidates - before.intake_source_candidates, 1);
+    assert.equal(after.review_queue_items - before.review_queue_items, 1);
+    assertNothingDownstream(before, after);
+
     assert.deepEqual(await decisionRows(intakeSensitivityProfileId), [{
       decision_id: decided.data.current_decision.decision_id,
       decision_outcome: "reviewed",
@@ -1043,33 +1128,59 @@ async function runP107HandoffIntegrationSuite() {
     assert.equal(items.length, 1);
     assert.equal(items[0].queue_status, "resolved");
     assert.equal(items[0].review_status, "resolved");
-    assert.deepEqual(await candidateState(intakeSensitivityProfileId), { candidates: [], queueItems: [] });
-    assert.equal(await decisionAuditCount(intakeSensitivityProfileId), 1);
 
-    // The same P1-07 check in isolation, against the same otherwise eligible profile.
-    const direct = await createSourceCandidateStub(
-      { organizationId: ORG, intakeSensitivityProfileId, actorContext: boundAdmin, now: NOW },
-      { env: ENV, sourceCandidateRepository: counted.repository, metadataOnlyAudit: productionSourceCandidateAudit(intakeSensitivityProfileId, boundAdmin) },
+    const state = await candidateState(intakeSensitivityProfileId);
+    assert.equal(state.candidates.length, 1);
+    assert.equal(state.queueItems.length, 1);
+    assert.equal(state.candidates[0].intake_source_candidate_id, handoff.intake_source_candidate_id);
+    assert.equal(state.candidates[0].candidate_status, "needs_gk_review");
+    assert.equal(state.candidates[0].created_by, BOUND_ADMIN);
+    assert.equal(state.candidates[0].created_by_type, "human");
+    assert.equal(state.queueItems[0].review_queue_item_id, handoff.review_queue_item_id);
+    assert.equal(state.queueItems[0].queue_status, "open");
+    assert.equal(state.queueItems[0].created_by_type, "human");
+
+    assert.deepEqual(await decisionAudits(intakeSensitivityProfileId, 21), { audit_events: 1, upload_lifecycle_audit: 1 });
+    assert.deepEqual(await candidateAudits(intakeSensitivityProfileId, 21), { audit_events: 1, upload_lifecycle_audit: 1 });
+    const actions = (await auditActions(intakeSensitivityProfileId)).filter((row) => row.actor_user_id === BOUND_ADMIN);
+    assert.deepEqual(actions.map((row) => row.action), [
+      "intake_source_candidate_persisted",
+      "sensitivity_review_decision_recorded",
+      "sensitivity_review_queue_item_created",
+    ]);
+    assert.ok(actions.every((row) => row.actor_type === "human"));
+
+    // The candidate is GK review work: the cockpit candidate detail is readable by a GK reviewer.
+    const candidateDetail = await getReviewCockpitSourceCandidateDetail(
+      { organizationId: ORG, intakeSourceCandidateId: handoff.intake_source_candidate_id, actorContext: reviewerActor },
+      {
+        env: ENV,
+        getReviewCockpitSourceCandidateRecord: (organizationId, candidateId) =>
+          getReviewCockpitSourceCandidateRecord(organizationId, candidateId, pool),
+      },
     );
-    assert.equal(direct.ok, false);
-    assert.equal(direct.error.code, "tenant_boundary_violation");
-    assert.equal(direct.blockers.length, 1);
-    assert.equal(direct.blockers[0].validator_key, "VAL-AUT-004");
-    assert.equal(direct.blockers[0].blocking_reason, "role_not_allowed");
-    assert.equal(direct.blockers[0].object_code, "create_source_candidate_stub");
-    assert.equal(counted.calls.createSourceCandidateStub, 0);
-    assert.deepEqual(changedTables(after, await kaiTableRowCounts()), []);
+    assert.equal(candidateDetail.ok, true, JSON.stringify(candidateDetail));
+
+    // Repeated invocation, through the decision seam and directly, writes nothing.
+    const replayBefore = await kaiTableRowCounts();
+    const replay = await decideAs(boundAdmin, intakeSensitivityProfileId, work, "reviewed");
+    assert.equal(replay.ok, true, JSON.stringify(replay));
+    assert.equal(replay.data.replayed, true);
+    assert.equal(replay.data.current_decision.decision_id, decided.data.current_decision.decision_id);
+    assert.equal(replay.data.source_candidate_handoff.status, "replayed");
+    assert.equal(replay.data.source_candidate_handoff.intake_source_candidate_id, handoff.intake_source_candidate_id);
+    const direct = await createCandidateAs(boundAdmin, intakeSensitivityProfileId);
+    assert.equal(direct.ok, true, JSON.stringify(direct));
+    assert.equal(direct.data.replayed, true);
+    assert.deepEqual(changedTables(replayBefore, await kaiTableRowCounts()), []);
   });
 
-  test("P1-07 first failure, Actor B (global gk_reviewer + bound client_admin): the 'reviewed' decision is attributed gk_reviewer and the handoff creates exactly one needs_gk_review candidate and its review item", async () => {
+  test("existing GK authority unchanged: Actor B (global gk_reviewer + bound client_admin) is attributed gk_reviewer and creates the candidate; a GK reviewer's direct P1-07 call needs no sensitivity decision", async () => {
     const intakeSensitivityProfileId = await seedPredicateSatisfyingSensitivityProfile(22);
     const work = await workAs(boundMixedReviewer, intakeSensitivityProfileId);
 
     const before = await kaiTableRowCounts();
-    const decided = await submitSensitivityProfileDecision(
-      decisionRequest(intakeSensitivityProfileId, work, "reviewed", boundMixedReviewer),
-      productionDecisionDependencies(intakeSensitivityProfileId, boundMixedReviewer),
-    );
+    const decided = await decideAs(boundMixedReviewer, intakeSensitivityProfileId, work, "reviewed");
     assert.equal(decided.ok, true, JSON.stringify(decided));
     assert.equal(decided.data.current_decision.decided_by, BOUND_MIXED_REVIEWER);
     assert.equal(decided.data.current_decision.decided_by_role, "gk_reviewer");
@@ -1091,155 +1202,384 @@ async function runP107HandoffIntegrationSuite() {
     assert.equal(state.candidates[0].created_by, BOUND_MIXED_REVIEWER);
     assert.equal(state.candidates[0].candidate_status, "needs_gk_review");
     assert.equal(state.queueItems[0].queue_status, "open");
-  });
 
-  test("P1-07 recovery without re-review: after Actor A's committed client_admin 'reviewed' decision, Actor A's identical replay still creates nothing; an authorized GK human's identical replay (the head's original stamp) replays the decision and creates exactly one candidate; the API does not expose that stamp; a wrong stamp is refused", async () => {
-    const intakeSensitivityProfileId = await seedPredicateSatisfyingSensitivityProfile(23);
-    const work = await workAs(boundAdmin, intakeSensitivityProfileId);
-    const first = await submitSensitivityProfileDecision(
-      decisionRequest(intakeSensitivityProfileId, work, "reviewed", boundAdmin),
-      productionDecisionDependencies(intakeSensitivityProfileId, boundAdmin),
-    );
-    assert.equal(first.ok, true, JSON.stringify(first));
-    assert.equal(first.data.source_candidate_handoff.status, "not_created");
-    const committed = await decisionRows(intakeSensitivityProfileId);
-    assert.equal(committed.length, 1);
-    assert.equal(committed[0].decided_by_role, "client_admin");
-
-    // The read API returns the committed decision but not its target_updated_at.
-    const detail = await readDetailAs(boundMixedReviewer, intakeSensitivityProfileId);
-    assert.equal(detail.current_decision.decision_id, committed[0].decision_id);
-    assert.equal(Object.hasOwn(detail.current_decision, "target_updated_at"), false);
-    assert.notEqual(detail.sensitivity_review_queue_item.updated_at, work.expectedUpdatedAt);
-
-    // Actor A replays the identical request: replayed, and P1-07 refuses again.
-    const sameActorBefore = await kaiTableRowCounts();
-    const sameActor = await submitSensitivityProfileDecision(
-      decisionRequest(intakeSensitivityProfileId, work, "reviewed", boundAdmin),
-      productionDecisionDependencies(intakeSensitivityProfileId, boundAdmin),
-    );
-    assert.equal(sameActor.ok, true, JSON.stringify(sameActor));
-    assert.equal(sameActor.data.replayed, true);
-    assert.equal(sameActor.data.current_decision.decision_id, committed[0].decision_id);
-    assert.equal(sameActor.data.source_candidate_handoff.status, "not_created");
-    assert.equal(sameActor.data.source_candidate_handoff.error_code, "tenant_boundary_violation");
-    assert.deepEqual(changedTables(sameActorBefore, await kaiTableRowCounts()), []);
-
-    // A stamp that is neither the queue's current one nor the head's is a conflict, never a write.
-    const staleBefore = await kaiTableRowCounts();
-    const stale = await submitSensitivityProfileDecision(
-      decisionRequest(
-        intakeSensitivityProfileId,
-        { ...work, expectedUpdatedAt: "2026-09-24T10:00:00.000Z" },
-        "reviewed",
-        boundMixedReviewer,
-      ),
-      productionDecisionDependencies(intakeSensitivityProfileId, boundMixedReviewer),
-    );
-    assert.equal(stale.ok, false);
-    assert.equal(stale.error.code, "conflict_current_state_changed");
-    assert.deepEqual(changedTables(staleBefore, await kaiTableRowCounts()), []);
-
-    // An authorized GK human replays the identical request with the head's original stamp.
-    const before = await kaiTableRowCounts();
-    const recovered = await submitSensitivityProfileDecision(
-      decisionRequest(intakeSensitivityProfileId, work, "reviewed", boundMixedReviewer),
-      productionDecisionDependencies(intakeSensitivityProfileId, boundMixedReviewer),
-    );
-    assert.equal(recovered.ok, true, JSON.stringify(recovered));
-    assert.equal(recovered.data.replayed, true);
-    assert.equal(recovered.data.current_decision.decision_id, committed[0].decision_id);
-    assert.equal(recovered.data.current_decision.decided_by_role, "client_admin");
-    assert.deepEqual(
-      { status: recovered.data.source_candidate_handoff.status, error_code: recovered.data.source_candidate_handoff.error_code },
-      { status: "created", error_code: null },
-    );
-    assert.deepEqual(changedTables(before, await kaiTableRowCounts()), [
+    // No sensitivity review work and no decision exist for this profile; the GK
+    // reviewer's direct call is not subject to the bound-admin prerequisite.
+    const undecidedProfileId = await seedPredicateSatisfyingSensitivityProfile(23);
+    assert.deepEqual(await decisionRows(undecidedProfileId), []);
+    const directBefore = await kaiTableRowCounts();
+    const direct = await createCandidateAs(reviewerActor, undecidedProfileId);
+    assert.equal(direct.ok, true, JSON.stringify(direct));
+    assert.equal(direct.data.replayed, false);
+    assert.deepEqual(changedTables(directBefore, await kaiTableRowCounts()), [
       "audit_events",
       "intake_source_candidates",
       "review_queue_items",
       "upload_lifecycle_audit",
     ]);
-    assert.deepEqual(await decisionRows(intakeSensitivityProfileId), committed);
-    assert.equal(await decisionAuditCount(intakeSensitivityProfileId), 1);
-    const state = await candidateState(intakeSensitivityProfileId);
-    assert.equal(state.candidates.length, 1);
-    assert.equal(state.queueItems.length, 1);
-    assert.equal(state.candidates[0].created_by, BOUND_MIXED_REVIEWER);
-    assert.equal(state.candidates[0].candidate_status, "needs_gk_review");
-    const candidateAudits = (await auditActions(intakeSensitivityProfileId))
-      .filter((row) => row.action === "intake_source_candidate_persisted");
-    assert.deepEqual(candidateAudits, [
-      { action: "intake_source_candidate_persisted", actor_type: "human", actor_user_id: BOUND_MIXED_REVIEWER },
-    ]);
-
-    const replayBefore = await kaiTableRowCounts();
-    const replay = await submitSensitivityProfileDecision(
-      decisionRequest(intakeSensitivityProfileId, work, "reviewed", boundMixedReviewer),
-      productionDecisionDependencies(intakeSensitivityProfileId, boundMixedReviewer),
-    );
-    assert.equal(replay.ok, true, JSON.stringify(replay));
-    assert.equal(replay.data.replayed, true);
-    assert.equal(replay.data.source_candidate_handoff.status, "replayed");
-    assert.deepEqual(changedTables(replayBefore, await kaiTableRowCounts()), []);
   });
 
-  test("P1-07 first failure negatives: an unbound stored client_admin, an inactive or other-organization bound admin, and a binding without a GK organization id are refused at the decision, review work, and P1-07; a bound admin is refused by P1-07 even on an ineligible profile; nothing is written", async () => {
-    const intakeSensitivityProfileId = await seedPredicateSatisfyingSensitivityProfile(24);
-    const work = await workAs(boundMixedReviewer, intakeSensitivityProfileId);
-    const ineligibleProfileId = await seedPredicateSatisfyingSensitivityProfile(25);
-    await makeProfileIneligible(ineligibleProfileId);
+  test("bound admin (negatives, decision prerequisite): no decision, needs_more_information, a superseded 'reviewed', another human's 'reviewed' (bound admin or GK), the same human's earlier GK-role decision, and an unresolved queue are refused at P1-07 with zero candidate, queue, or audit writes", async () => {
+    const cases = [];
 
+    // No persisted decision (review work only).
+    {
+      const id = await seedPredicateSatisfyingSensitivityProfile(24);
+      await workAs(boundAdmin, id);
+      cases.push(["no persisted decision", id, 24]);
+    }
+    // needs_more_information as the current head.
+    {
+      const id = await seedPredicateSatisfyingSensitivityProfile(25);
+      const work = await workAs(boundAdmin, id);
+      const decided = await decideAs(boundAdmin, id, work, "needs_more_information", { now: T1 });
+      assert.equal(decided.ok, true, JSON.stringify(decided));
+      assert.equal(decided.data.source_candidate_handoff.status, "not_applicable");
+      cases.push(["needs_more_information", id, 25]);
+    }
+    // The bound admin's own 'reviewed' decision, superseded by needs_more_information.
+    {
+      const { intakeSensitivityProfileId: id, work, resolvedStamp } = await historicalReviewedWithoutCandidate(26);
+      const superseding = await decideAs(boundAdmin, id, { ...work, expectedUpdatedAt: resolvedStamp }, "needs_more_information", { now: T2 });
+      assert.equal(superseding.ok, true, JSON.stringify(superseding));
+      assert.equal((await currentHead(id)).decision_outcome, "needs_more_information");
+      cases.push(["superseded own 'reviewed'", id, 26]);
+    }
+    // The bound admin's own 'reviewed' decision, superseded by another human's 'reviewed'.
+    {
+      const { intakeSensitivityProfileId: id, work, resolvedStamp } = await historicalReviewedWithoutCandidate(27);
+      const superseding = await decideAs(otherBoundAdmin, id, { ...work, expectedUpdatedAt: resolvedStamp }, "reviewed", { now: T2, refuseHandoff: true });
+      assert.equal(superseding.ok, true, JSON.stringify(superseding));
+      assert.equal((await currentHead(id)).decided_by, OTHER_BOUND_ADMIN);
+      cases.push(["own 'reviewed' superseded by another bound admin's 'reviewed'", id, 27]);
+    }
+    // Another bound admin's 'reviewed' decision.
+    {
+      const { intakeSensitivityProfileId: id } = await historicalReviewedWithoutCandidate(28, otherBoundAdmin);
+      cases.push(["another bound admin's 'reviewed'", id, 28]);
+    }
+    // A GK reviewer's 'reviewed' decision whose handoff was refused.
+    {
+      const id = await seedPredicateSatisfyingSensitivityProfile(29);
+      const work = await workAs(boundMixedReviewer, id);
+      const decided = await decideAs(boundMixedReviewer, id, work, "reviewed", { now: T1, refuseHandoff: true });
+      assert.equal(decided.data.current_decision.decided_by_role, "gk_reviewer");
+      cases.push(["a GK reviewer's 'reviewed'", id, 29]);
+    }
+    // The same human, who decided under a global GK role, later acting as a bound admin only.
+    {
+      const id = await seedPredicateSatisfyingSensitivityProfile(30);
+      const work = await workAs(boundMixedReviewer, id);
+      await decideAs(boundMixedReviewer, id, work, "reviewed", { now: T1, refuseHandoff: true });
+      cases.push(["own 'reviewed' recorded as gk_reviewer", id, 30, { ...boundMixedReviewer, kaiRoles: [] }]);
+    }
+    // The bound admin's own current 'reviewed' head, but its queue item is not resolved.
+    {
+      const { intakeSensitivityProfileId: id, decided } = await historicalReviewedWithoutCandidate(31);
+      // Throwaway database only: no supported path reopens a resolved item while
+      // the head stays 'reviewed', so construct that state directly.
+      await withClient((client) => client.query(
+        `UPDATE kai.review_queue_items SET queue_status = 'in_progress', review_status = 'needs_gk_review'
+          WHERE review_queue_item_id = $1::uuid`,
+        [decided.data.sensitivity_review_queue_item.review_queue_item_id],
+      ));
+      cases.push(["unresolved sensitivity_review queue", id, 31]);
+    }
+    // The bound admin's own 'needs_more_information' head with its queue item
+    // resolved: the outcome is checked on its own, not inferred from the queue.
+    {
+      const id = await seedPredicateSatisfyingSensitivityProfile(40);
+      const work = await workAs(boundAdmin, id);
+      const decided = await decideAs(boundAdmin, id, work, "needs_more_information", { now: T1 });
+      assert.equal(decided.ok, true, JSON.stringify(decided));
+      // Throwaway database only, as above.
+      await withClient((client) => client.query(
+        `UPDATE kai.review_queue_items SET queue_status = 'resolved', review_status = 'resolved'
+          WHERE review_queue_item_id = $1::uuid`,
+        [work.reviewQueueItemId],
+      ));
+      cases.push(["own needs_more_information head with a resolved queue", id, 40]);
+    }
+
+    for (const [label, id, index, actorContext = boundAdmin] of cases) {
+      const before = await kaiTableRowCounts();
+      const audits = await candidateAudits(id, index);
+      const direct = await createCandidateAs(actorContext, id);
+      assert.equal(direct.ok, false, label);
+      assert.equal(direct.error.code, "authorization_denied", label);
+      assert.deepEqual(changedTables(before, await kaiTableRowCounts()), [], label);
+      assert.deepEqual(await candidateState(id), { candidates: [], queueItems: [] }, label);
+      assert.deepEqual(await candidateAudits(id, index), audits, label);
+      assert.deepEqual(audits, { audit_events: 0, upload_lifecycle_audit: 0 }, label);
+    }
+
+    // The decider of case 28 does satisfy the prerequisite: attribution is what decides.
+    const [, otherAdminProfileId] = cases.find(([label]) => label === "another bound admin's 'reviewed'");
+    const byDecider = await createCandidateAs(otherBoundAdmin, otherAdminProfileId);
+    assert.equal(byDecider.ok, true, JSON.stringify(byDecider));
+    assert.equal(byDecider.data.replayed, false);
+  });
+
+  test("bound admin (negatives, actor): with the human's own current 'reviewed' head in place, an unbound stored client_admin, inactive or other-organization binding, missing or invalid GK organization id, client reviewer/contributor, inactive account, and non-human actors are all refused with zero writes", async () => {
+    const { intakeSensitivityProfileId: id, work } = await historicalReviewedWithoutCandidate(32);
     const denied = [
       ["stored client_admin without a binding", {
         ...boundAdmin,
         organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_admin" }],
-      }],
-      ["bound client_admin with an inactive membership", {
-        ...boundAdmin,
-        organizationMemberships: [boundAdminMembership({ membership_status: "inactive" })],
-      }],
-      ["bound client_admin of another organization", {
-        ...boundAdmin,
-        organizationMemberships: [boundAdminMembership({ organization_id: OTHER_ORG })],
-      }],
-      ["client_admin derived from a binding without a GK organization id", {
-        ...boundAdmin,
-        organizationMemberships: [boundAdminMembership({ gk_organization_id: null })],
-      }],
+      }, "tenant_boundary_violation"],
+      ["inactive binding-derived membership", {
+        ...boundAdmin, organizationMemberships: [boundAdminMembership({ membership_status: "inactive" })],
+      }, "tenant_boundary_violation"],
+      ["binding for another organization", {
+        ...boundAdmin, organizationMemberships: [boundAdminMembership({ organization_id: OTHER_ORG })],
+      }, "tenant_boundary_violation"],
+      ...[null, undefined, 0, "4242", 1.5].map((gkOrganizationId) => [
+        `GK organization id ${String(gkOrganizationId)}`,
+        { ...boundAdmin, organizationMemberships: [boundAdminMembership({ gk_organization_id: gkOrganizationId })] },
+        "tenant_boundary_violation",
+      ]),
+      ...["client_reviewer", "client_contributor"].map((roleName) => [
+        `binding-derived ${roleName}`,
+        { ...boundAdmin, organizationMemberships: [boundAdminMembership({ role_name: roleName })] },
+        "tenant_boundary_violation",
+      ]),
+      ["inactive kai.users account", { ...boundAdmin, kaiUserStatus: "inactive" }, "authorization_denied"],
+      ...["ai", "assistant", "system", "import"].map((actorType) => [
+        `${actorType} actor`, { ...boundAdmin, actorType }, "authorization_denied",
+      ]),
     ];
 
     const before = await kaiTableRowCounts();
-    for (const [label, actorContext] of denied) {
-      const decided = await submitSensitivityProfileDecision(
-        decisionRequest(intakeSensitivityProfileId, work, "reviewed", actorContext),
-        productionDecisionDependencies(intakeSensitivityProfileId, actorContext),
-      );
-      assert.equal(decided.ok, false, `decision ${label}`);
-      assert.equal(decided.error.code, "authorization_denied", `decision ${label}`);
-      const ensured = await ensureReviewWorkAs(actorContext, intakeSensitivityProfileId);
-      assert.equal(ensured.ok, false, `P1-06 ${label}`);
-      assert.equal(ensured.error.code, "tenant_boundary_violation", `P1-06 ${label}`);
-      const candidate = await createCandidateAs(actorContext, intakeSensitivityProfileId);
-      assert.equal(candidate.ok, false, `P1-07 ${label}`);
-      assert.equal(candidate.error.code, "tenant_boundary_violation", `P1-07 ${label}`);
+    for (const [label, actorContext, expectedCode] of denied) {
+      const direct = await createCandidateAs(actorContext, id);
+      assert.equal(direct.ok, false, label);
+      assert.equal(direct.error.code, expectedCode, label);
     }
-
-    const ineligible = await createCandidateAs(boundAdmin, ineligibleProfileId);
-    assert.equal(ineligible.ok, false);
-    assert.equal(ineligible.error.code, "tenant_boundary_violation", "authorization precedes VAL-KAI-P1-07-001");
-    const ineligibleGk = await createCandidateAs(boundMixedReviewer, ineligibleProfileId);
-    assert.equal(ineligibleGk.ok, false);
-    assert.equal(ineligibleGk.error.code, "validation_blocker");
-
-    // A bound admin of another organization naming that organization cannot reach this profile.
-    const otherOrgAdmin = { ...boundAdmin, organizationMemberships: [boundAdminMembership({ organization_id: OTHER_ORG })] };
-    const crossTenant = await createCandidateAs(otherOrgAdmin, intakeSensitivityProfileId, { organizationId: OTHER_ORG });
-    assert.equal(crossTenant.ok, false);
-    assert.equal(crossTenant.error.code, "tenant_boundary_violation");
+    // Through the decision seam, the inactive account's identical request replays the
+    // committed decision (no write) and the handoff is still refused.
+    const viaSeam = await decideAs({ ...boundAdmin, kaiUserStatus: "inactive" }, id, work, "reviewed");
+    assert.equal(viaSeam.ok, true, JSON.stringify(viaSeam));
+    assert.equal(viaSeam.data.replayed, true);
+    assert.deepEqual(
+      { status: viaSeam.data.source_candidate_handoff.status, error_code: viaSeam.data.source_candidate_handoff.error_code },
+      { status: "not_created", error_code: "authorization_denied" },
+    );
+    assert.equal((await createCandidateAs(boundAdmin, id, { env: { KAI_SPRINT2_ENABLED: "false" } })).error.code, "feature_disabled");
 
     assert.deepEqual(changedTables(before, await kaiTableRowCounts()), []);
-    assert.deepEqual(await decisionRows(intakeSensitivityProfileId), []);
+    assert.deepEqual(await candidateState(id), { candidates: [], queueItems: [] });
+    assert.deepEqual(await candidateAudits(id, 32), { audit_events: 0, upload_lifecycle_audit: 0 });
+  });
+
+  test("bound admin (negatives, tenant, eligibility, audit): cross-tenant requests are refused, an ineligible profile is refused by VAL-KAI-P1-07-001 after the prerequisite, and a rejected required audit rolls the candidate back; all with zero candidate writes", async () => {
+    // Cross-tenant: bound to ORG but naming OTHER_ORG; bound to OTHER_ORG and naming it for ORG's profile.
+    const { intakeSensitivityProfileId: id, work } = await historicalReviewedWithoutCandidate(33);
+    const otherOrgAdmin = { ...boundAdmin, organizationMemberships: [boundAdminMembership({ organization_id: OTHER_ORG })] };
+    const crossBefore = await kaiTableRowCounts();
+    const namingOther = await createCandidateAs(boundAdmin, id, { organizationId: OTHER_ORG });
+    assert.equal(namingOther.error.code, "tenant_boundary_violation");
+    const otherTenant = await createCandidateAs(otherOrgAdmin, id, { organizationId: OTHER_ORG });
+    assert.equal(otherTenant.ok, false);
+    assert.equal(otherTenant.error.code, "not_found");
+    assert.deepEqual(changedTables(crossBefore, await kaiTableRowCounts()), []);
+
+    // Ineligible P1-05 profile with the bound admin's own resolved 'reviewed' head.
+    const ineligibleId = await seedPredicateSatisfyingSensitivityProfile(34);
+    const ineligibleWork = await workAs(boundAdmin, ineligibleId);
+    await makeProfileIneligible(ineligibleId);
+    const ineligibleBefore = await kaiTableRowCounts();
+    const ineligible = await decideAs(boundAdmin, ineligibleId, ineligibleWork, "reviewed", { now: T1 });
+    assert.equal(ineligible.ok, true, JSON.stringify(ineligible));
+    assert.equal(ineligible.data.current_decision.decided_by_role, "client_admin");
+    assert.deepEqual(
+      { status: ineligible.data.source_candidate_handoff.status, error_code: ineligible.data.source_candidate_handoff.error_code },
+      { status: "not_created", error_code: "validation_blocker" },
+    );
+    assert.deepEqual(changedTables(ineligibleBefore, await kaiTableRowCounts()), [
+      "audit_events",
+      "intake_sensitivity_review_decisions",
+      "upload_lifecycle_audit",
+    ]);
+    assert.deepEqual(await candidateState(ineligibleId), { candidates: [], queueItems: [] });
+    assert.deepEqual(await candidateAudits(ineligibleId, 34), { audit_events: 0, upload_lifecycle_audit: 0 });
+    // Without a decision, authorization still precedes the predicate.
+    const undecidedIneligibleId = await seedPredicateSatisfyingSensitivityProfile(35);
+    await makeProfileIneligible(undecidedIneligibleId);
+    assert.equal((await createCandidateAs(boundAdmin, undecidedIneligibleId)).error.code, "authorization_denied");
+
+    // Required audit rejected: the candidate and its review item roll back.
+    const auditBefore = await kaiTableRowCounts();
+    const rejected = await decideAs(boundAdmin, id, work, "reviewed", {
+      sourceCandidateMetadataOnlyAudit: { prepareMetadataOnlyAudit() { return { ok: false }; } },
+    });
+    assert.equal(rejected.ok, true, JSON.stringify(rejected));
+    assert.equal(rejected.data.replayed, true);
+    assert.deepEqual(
+      { status: rejected.data.source_candidate_handoff.status, error_code: rejected.data.source_candidate_handoff.error_code },
+      { status: "not_created", error_code: "validation_blocker" },
+    );
+    assert.deepEqual(changedTables(auditBefore, await kaiTableRowCounts()), []);
+    assert.deepEqual(await candidateState(id), { candidates: [], queueItems: [] });
+    assert.deepEqual(await candidateAudits(id, 33), { audit_events: 0, upload_lifecycle_audit: 0 });
+  });
+
+  test("bound admin (concurrency): identical concurrent creations converge on one candidate, one review item, and one audit; another human's superseding decision holding the profile lock makes the creation wait and then refuse it with zero writes", async () => {
+    const { intakeSensitivityProfileId: id } = await historicalReviewedWithoutCandidate(36);
+    const before = await kaiTableRowCounts();
+    const results = await Promise.all([1, 2, 3].map(() => createCandidateAs(boundAdmin, id)));
+    for (const result of results) assert.equal(result.ok, true, JSON.stringify(result));
+    assert.deepEqual(results.map((result) => result.data.replayed).sort(), [false, true, true]);
+    assert.equal(new Set(results.map((result) => result.data.sourceCandidate.intake_source_candidate_id)).size, 1);
+    const after = await kaiTableRowCounts();
+    assert.equal(after.intake_source_candidates - before.intake_source_candidates, 1);
+    assert.equal(after.review_queue_items - before.review_queue_items, 1);
+    assert.deepEqual(await candidateAudits(id, 36), { audit_events: 1, upload_lifecycle_audit: 1 });
+
+    // Supersession race: another bound admin's superseding 'reviewed' decision has
+    // written its row and holds the profile lock, uncommitted. The queue stays
+    // resolved on the same item, so only the profile lock stops the creation from
+    // authorizing against the head it is about to replace.
+    const { intakeSensitivityProfileId: racedId, work, resolvedStamp } = await historicalReviewedWithoutCandidate(37);
+    let signalReached;
+    const reached = new Promise((resolve) => { signalReached = resolve; });
+    let release;
+    const released = new Promise((resolve) => { release = resolve; });
+    const gatedDecisionRepository = createPostgresSensitivityAllowedUseReviewRepository({
+      runInTransaction: (callback) => withTransaction(async (tx) => {
+        const result = await callback(tx);
+        signalReached();
+        await released;
+        return result;
+      }, pool),
+    });
+    const raceBefore = await kaiTableRowCounts();
+    let superseding;
+    let creation;
+    let creationSettledEarly = false;
+    try {
+      superseding = decideAs(otherBoundAdmin, racedId, { ...work, expectedUpdatedAt: resolvedStamp }, "reviewed", {
+        now: T2,
+        refuseHandoff: true,
+        sensitivityAllowedUseReviewRepository: gatedDecisionRepository,
+      });
+      await reached;
+      creation = createCandidateAs(boundAdmin, racedId);
+      creation.then(() => { creationSettledEarly = true; }, () => { creationSettledEarly = true; });
+      await new Promise((resolve) => { setTimeout(resolve, 300); });
+    } finally {
+      release();
+    }
+    assert.equal(creationSettledEarly, false, "the creation waited on the profile lock");
+    const [decided, created] = await Promise.all([superseding, creation]);
+    assert.equal(decided.ok, true, JSON.stringify(decided));
+    assert.equal(decided.data.current_decision.decided_by, OTHER_BOUND_ADMIN);
+    assert.equal((await sensitivityReviewItems(racedId))[0].queue_status, "resolved");
+    assert.equal(created.ok, false, JSON.stringify(created));
+    assert.equal(created.error.code, "authorization_denied");
+    assert.deepEqual(changedTables(raceBefore, await kaiTableRowCounts()), [
+      "audit_events",
+      "intake_sensitivity_review_decisions",
+      "upload_lifecycle_audit",
+    ]);
+    assert.deepEqual(await candidateState(racedId), { candidates: [], queueItems: [] });
+    assert.deepEqual(await candidateAudits(racedId, 37), { audit_events: 0, upload_lifecycle_audit: 0 });
+  });
+
+  // Historical production shape: two decisions, latest 'reviewed' by client_admin,
+  // queue resolved, zero candidates. The second decision is what an ordinary UI
+  // resubmission produces: it sends the queue's current updated_at, which the
+  // compare-and-set accepts, so it records a new superseding decision, not a replay.
+  async function historicalTwoDecisionState(index) {
+    const { intakeSensitivityProfileId, work, decided: first, resolvedStamp } = await historicalReviewedWithoutCandidate(index);
+    const uiResubmission = await decideAs(
+      boundAdmin,
+      intakeSensitivityProfileId,
+      { ...work, expectedUpdatedAt: resolvedStamp },
+      "reviewed",
+      { now: T2, refuseHandoff: true },
+    );
+    assert.equal(uiResubmission.ok, true, JSON.stringify(uiResubmission));
+    assert.equal(uiResubmission.data.replayed, false, "a UI resubmission is a new decision, not a replay");
+    assert.notEqual(uiResubmission.data.current_decision.decision_id, first.data.current_decision.decision_id);
+
+    const decisions = await decisionRows(intakeSensitivityProfileId);
+    assert.equal(decisions.length, 2);
+    const head = await currentHead(intakeSensitivityProfileId);
+    assert.equal(head.decision_id, uiResubmission.data.current_decision.decision_id);
+    assert.equal(head.decision_outcome, "reviewed");
+    assert.equal(head.decided_by_role, "client_admin");
+    assert.equal(head.target_updated_at, resolvedStamp);
+    assert.equal((await sensitivityReviewItems(intakeSensitivityProfileId))[0].queue_status, "resolved");
     assert.deepEqual(await candidateState(intakeSensitivityProfileId), { candidates: [], queueItems: [] });
+    assert.deepEqual(await decisionAudits(intakeSensitivityProfileId, index), { audit_events: 2, upload_lifecycle_audit: 2 });
+
+    // The read API exposes the head but not its target_updated_at.
+    const afterDetail = await readDetailAs(boundMixedReviewer, intakeSensitivityProfileId);
+    assert.equal(afterDetail.current_decision.decision_id, head.decision_id);
+    assert.equal(Object.hasOwn(afterDetail.current_decision, "target_updated_at"), false);
+    assert.notEqual(afterDetail.sensitivity_review_queue_item.updated_at, head.target_updated_at);
+    return { intakeSensitivityProfileId, work, decisions, head };
+  }
+
+  async function assertDecisionPreservingRecovery(index, recoverer) {
+    const { intakeSensitivityProfileId: id, work, decisions, head } = await historicalTwoDecisionState(index);
+    const decisionAuditsBefore = await decisionAudits(id, index);
+
+    // A stamp other than the head's original target_updated_at never writes:
+    // the earlier decision's stamp, and an arbitrary one.
+    for (const expectedUpdatedAt of [work.expectedUpdatedAt, "2026-09-24T10:00:00.000Z"]) {
+      const mismatchBefore = await kaiTableRowCounts();
+      const mismatched = await decideAs(recoverer, id, { ...work, expectedUpdatedAt }, "reviewed", { now: T3 });
+      assert.equal(mismatched.ok, false, expectedUpdatedAt);
+      assert.equal(mismatched.error.code, "conflict_current_state_changed", expectedUpdatedAt);
+      assert.deepEqual(changedTables(mismatchBefore, await kaiTableRowCounts()), [], expectedUpdatedAt);
+    }
+
+    // The identical replay with the head's original stamp.
+    const before = await kaiTableRowCounts();
+    const recovered = await decideAs(recoverer, id, { ...work, expectedUpdatedAt: head.target_updated_at }, "reviewed", { now: T3 });
+    assert.equal(recovered.ok, true, JSON.stringify(recovered));
+    assert.equal(recovered.data.replayed, true);
+    assert.equal(recovered.data.current_decision.decision_id, head.decision_id);
+    assert.equal(recovered.data.current_decision.decided_by, BOUND_ADMIN);
+    assert.equal(recovered.data.current_decision.decided_by_role, "client_admin");
+    assert.deepEqual(
+      { status: recovered.data.source_candidate_handoff.status, error_code: recovered.data.source_candidate_handoff.error_code },
+      { status: "created", error_code: null },
+    );
+    const after = await kaiTableRowCounts();
+    assert.deepEqual(changedTables(before, after), [
+      "audit_events",
+      "intake_source_candidates",
+      "review_queue_items",
+      "upload_lifecycle_audit",
+    ]);
+    assertNothingDownstream(before, after);
+    assert.deepEqual(await decisionRows(id), decisions);
+    assert.deepEqual(await currentHead(id), head);
+    assert.deepEqual(await decisionAudits(id, index), decisionAuditsBefore);
+    const state = await candidateState(id);
+    assert.equal(state.candidates.length, 1);
+    assert.equal(state.queueItems.length, 1);
+    assert.equal(state.candidates[0].candidate_status, "needs_gk_review");
+    assert.equal(state.candidates[0].created_by, recoverer.actorUserId);
+    assert.equal(state.queueItems[0].queue_status, "open");
+    assert.deepEqual(await candidateAudits(id, index), { audit_events: 1, upload_lifecycle_audit: 1 });
+
+    // Repeating the recovery writes nothing.
+    const repeatBefore = await kaiTableRowCounts();
+    const repeat = await decideAs(recoverer, id, { ...work, expectedUpdatedAt: head.target_updated_at }, "reviewed", { now: T3 });
+    assert.equal(repeat.ok, true, JSON.stringify(repeat));
+    assert.equal(repeat.data.replayed, true);
+    assert.equal(repeat.data.source_candidate_handoff.status, "replayed");
+    assert.deepEqual(changedTables(repeatBefore, await kaiTableRowCounts()), []);
+  }
+
+  test("decision-preserving recovery (GK human): for the historical two-decision state, an authorized GK human's identical replay with the head's original stamp keeps the decision ledger and its audits unchanged and creates exactly one candidate; a repeat writes nothing; mismatched stamps write nothing", async () => {
+    await assertDecisionPreservingRecovery(38, boundMixedReviewer);
+  });
+
+  test("decision-preserving recovery (original bound admin): with the fix, the deciding bound admin's identical replay with the head's original stamp recovers the same way", async () => {
+    await assertDecisionPreservingRecovery(39, boundAdmin);
   });
 }

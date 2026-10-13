@@ -1097,8 +1097,10 @@ function sourceCandidateHandoffResult(status, { sourceCandidate = null, reviewQu
  * the same authenticated human actor that just recorded the decision. Every P1-07
  * guarantee stays inside that service and its repository, and none is reimplemented
  * here: KAI_SPRINT2_ENABLED, AUTH-KAI-003 (mapped human only), the
- * gk_admin/gk_operator/gk_reviewer active-membership check, tenant consistency, the
- * VAL-KAI-P1-07-001 creation-trigger predicate, create/replay idempotency, and the
+ * gk_admin/gk_operator/gk_reviewer active-membership check (or, for an active
+ * binding-derived client_admin, the repository-enforced requirement that the
+ * current decision is this same human's resolved 'reviewed' decision), tenant
+ * consistency, the VAL-KAI-P1-07-001 creation-trigger predicate, create/replay idempotency, and the
  * required metadata-only audit (whose failure rolls the candidate back). It creates
  * only the review-only `needs_gk_review` candidate stub and its
  * 'source_candidate_review' queue item -
