@@ -43,6 +43,8 @@ import { handleKaiMessage, __testables as kaiServiceTestables } from "../Backend
 import { IMPACT_EVIDENCE_LIBRARY_SURFACE } from "../Backend/services/kai-tool-definitions.js";
 import { listIntakeBatchesForOrganization } from "../Backend/kai/services/kaiIntakeService.js";
 import { getReviewCockpitCapabilities } from "../Backend/kai/services/kaiReviewCockpitService.js";
+import { recordSensitivityAllowedUseDecision } from "../Backend/kai/services/kaiSensitivityAllowedUseReviewService.js";
+import { authorizeSourcePromotionDecision } from "../Backend/kai/services/kaiSourcePromotionService.js";
 import { listClaimLibraryCandidates, __claimLibraryServiceContract } from "../Backend/kai/services/kaiClaimLibraryService.js";
 import { listOrganizationEvidenceLibrary, __evidenceLibraryServiceContract } from "../Backend/kai/services/kaiEvidenceLibraryService.js";
 import { listEligibleClaimsForAudience, __eligibleClaimsForAudienceServiceContract } from "../Backend/kai/services/kaiEligibleClaimsForAudienceService.js";
@@ -473,8 +475,11 @@ test("assembled journey, client_admin: every read the client UI issues is admitt
   assert.equal(summary.data.reviewedImpactFactCount, 2);
   assert.equal(summary.data.internalReviewAvailable, false, "Review Queue is never requested");
   assert.deepEqual(summary.data.clientActions, []);
+  // Owner decision 2026-10-12 (4191684): an active, exactly bound Get Kinder
+  // organization administrator may make the sensitivity/allowed-use decision
+  // for that KAI organization - nothing else from the Review Cockpit.
   const sensitivity = await getReviewCockpitCapabilities({ organizationId: ORG, actorContext }, { env: ENV });
-  assert.deepEqual(sensitivity, { ok: true, data: { can_manage_sensitivity_review: false, can_review_source_candidates: false } }, "200 false, never a 403 probe");
+  assert.deepEqual(sensitivity, { ok: true, data: { can_manage_sensitivity_review: true, can_review_source_candidates: false } }, "200, never a 403 probe");
 
   // Knowledge Studio -> Files / Data Sources (intake reads).
   const batches = await listIntakeBatchesForOrganization(
@@ -490,6 +495,75 @@ test("assembled journey, client_admin: every read the client UI issues is admitt
   for (const value of [organizations, capabilities, engagements, practices, summary, sensitivity, batches, facts]) {
     assertNoHidden(value, "client_admin journey");
   }
+});
+
+test("bound organization administrator: the owner-approved sensitivity-review exception is exact, attributed client_admin, and grants nothing else", async () => {
+  const bound = await clientAdminActor();
+  const capability = (actorContext, organizationId = ORG) => getReviewCockpitCapabilities({ organizationId, actorContext }, { env: ENV });
+
+  // Positive: the exact bound organization, and the decision is attributed client_admin.
+  assert.deepEqual((await capability(bound)).data, { can_manage_sensitivity_review: true, can_review_source_candidates: false });
+  let persistedRole = null;
+  let repositoryCalls = 0;
+  const decide = (actorContext, organizationId = ORG) => recordSensitivityAllowedUseDecision({
+    organizationId,
+    intakeSensitivityProfileId: "80000000-0000-4000-8000-00000000000a",
+    reviewQueueItemId: "31000000-0000-4000-8000-00000000000a",
+    expectedUpdatedAt: "2026-10-13T00:00:00.000Z",
+    decision: "needs_more_information",
+    actorContext,
+    now: "2026-10-13T00:00:00.000Z",
+  }, {
+    env: ENV,
+    metadataOnlyAudit: { prepareMetadataOnlyAudit() { return { ok: true, async publish() {} }; } },
+    sensitivityAllowedUseReviewRepository: {
+      async recordSensitivityAllowedUseDecision(input) {
+        repositoryCalls += 1;
+        persistedRole = input.actorRole;
+        return { ok: true, data: { decision: {}, reviewQueueItem: {}, replayed: false } };
+      },
+    },
+  });
+  assert.equal((await decide(bound)).ok, true);
+  assert.deepEqual([persistedRole, repositoryCalls], ["client_admin", 1]);
+
+  // Negative: stored-only client_admin, an inactive binding, an invalid binding marker, another organization.
+  const storedOnly = { ...bound, organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_admin" }] };
+  const inactiveBinding = (await resolveKaiActorContext(
+    { user: { id: 501, email: "admin@harbourline.test" } },
+    {
+      findOrCreateKaiUserByLegacyPublicUserdataId: async ({ legacyPublicUserdataId, email }) => ({
+        user_id: bound.actorUserId, legacy_identity_source: "public.userdata", legacy_public_userdata_id: legacyPublicUserdataId, status: "active", email,
+      }),
+      listKaiRolesForUser: async () => [],
+      listOrganizationMembershipsForUser: async () => [],
+      resolveOrgScopeForUserId: async () => ({ memberships: [{ orgId: GK_ORG, role: "admin", is_active: true }] }),
+      listActiveGkOrganizationBindingsForGkOrganizationIds: async () => [],
+    },
+  )).actorContext;
+  assert.deepEqual(inactiveBinding.organizationMemberships, [], "no active binding, no derived membership");
+  const invalidMarker = { ...bound, organizationMemberships: bound.organizationMemberships.map((membership) => ({ ...membership, gk_organization_id: 0 })) };
+  for (const [label, actorContext, organizationId] of [
+    ["stored-only client_admin", storedOnly, ORG],
+    ["inactive binding", inactiveBinding, ORG],
+    ["invalid binding marker", invalidMarker, ORG],
+    ["another organization", bound, OTHER_ORG],
+  ]) {
+    assert.equal((await capability(actorContext, organizationId)).data.can_manage_sensitivity_review, false, label);
+    const before = repositoryCalls;
+    const refused = await decide(actorContext, organizationId);
+    assert.equal(refused.ok, false, label);
+    assert.equal(refused.error.code, "authorization_denied", label);
+    assert.equal(repositoryCalls, before, `${label}: nothing written`);
+  }
+
+  // The exception is sensitivity review only: no P1-08 promotion, no other GK review operation.
+  const promotion = authorizeSourcePromotionDecision(bound, ORG);
+  assert.equal(promotion.ok, false);
+  assert.deepEqual([promotion.error.error.code, promotion.error.blockers[0].blocking_reason], ["authorization_denied", "role_not_allowed"]);
+  assert.equal(validateActorCanPerformOperation(bound, "record_human_review_decision", ORG, { allowedRoles: new Set(DECISION_ALLOWED_ROLES) }).ok, false);
+  assert.equal(validateActorCanPerformOperation(bound, "read_intake", ORG, { allowedRoles: new Set(["gk_admin", "gk_operator", "gk_reviewer"]), globalRolesOnly: true }).ok, false,
+    "no Review Cockpit read beyond the sensitivity operations");
 });
 
 test("assembled journey, client_admin contribution: intake writes pass policy; client-review and GK operations do not", async () => {

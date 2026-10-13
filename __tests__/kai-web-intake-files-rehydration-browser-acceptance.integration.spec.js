@@ -400,15 +400,21 @@ async function runBrowserAcceptance() {
       await assertAlphaReconstructed(page, `${label} case 3 (full reload)`, mark);
 
       if (sensitivity) {
-        // A file-derived sensitivity profile from Project Alpha: select file 1,
-        // read its file detail, and the seam reports the seeded P1-05 profile.
+        // A file-derived sensitivity profile from Project Alpha: select file 1
+        // and read its file detail. Since 82041f4 the restricted file-detail
+        // DTO carries no P1 lineage; the opted-in GK Studio discovers the
+        // seeded P1-05 profile through the GK-only review-cockpit lookup.
         await page.selectRow(NAMES.alphaOne);
         mark = page.mark();
         await page.clickInCard("File status", "Refresh");
-        await page.waitForText("Sensitivity profile");
+        const isProfileLookup = (r) => r.method === "GET"
+          && new URL(r.url).pathname.endsWith(`/review-cockpit/intake-files/${FILE.alphaOne}/sensitivity-profile`);
+        await page.waitFor(async () => page.requestsSince(mark).some((r) => isProfileLookup(r) && r.status === 200),
+          "the GK file -> sensitivity-profile lookup (200)");
         await page.idle();
         const detail = page.requestsSince(mark).filter((r) => r.method === "GET" && r.url.includes(`/admin/files/${FILE.alphaOne}`));
         assert.ok(detail.length === 1 && detail[0].status === 200, `${label}: file detail read (200)`);
+        assert.equal(page.requestsSince(mark).filter(isProfileLookup).length, 1, `${label}: exactly one profile lookup for the selected file`);
         await page.clickTab("Processing");
         await page.waitForText("Sensitivity & allowed-use review");
         await page.idle();

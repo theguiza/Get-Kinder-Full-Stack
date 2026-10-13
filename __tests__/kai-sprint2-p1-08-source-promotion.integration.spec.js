@@ -547,26 +547,39 @@ async function runSourcePromotionIntegrationSuite() {
     }
   });
 
-  test("P1-08: disabled feature gates and unauthorized actors short-circuit with zero repository activity for all three outcomes", async () => {
+  // KAI_SPRINT2_ENABLED is the sole P1-08 feature gate: the owner correction of
+  // 2026-08-18 removed the redundant KAI_SOURCE_PROMOTION_ENABLED flag (see
+  // scripts/kai-sprint2-p1-08-source-promotion-runbook.md). Authorization,
+  // tenant, validator, transition, and audit controls are unchanged.
+  test("P1-08: a disabled KAI_SPRINT2_ENABLED gate and unauthorized actors short-circuit with zero repository activity for all three outcomes", async () => {
     const pair = await seedCompletePair(18);
     for (const outcome of ["needs_more_information", "rejected", "promoted"]) {
       const input = { organizationId: ORG, intakeSourceCandidateId: pair.intakeSourceCandidateId, outcome, actorContext: humanActor(), now: NOW };
       if (outcome === "promoted") input.reviewedSourceType = REVIEWED_TYPE;
 
-      const disabledResult = await createSourcePromotionDecision(input, {
-        env: { KAI_SPRINT2_ENABLED: "true" },
-        sourcePromotionRepository: repository,
-        metadataOnlyAudit: createAuditProbe().dependency,
-      });
-      assert.equal(disabledResult.ok, false, outcome);
-      assert.equal(disabledResult.error.code, "feature_disabled", outcome);
+      for (const env of [{}, { KAI_SPRINT2_ENABLED: "false" }]) {
+        const disabledResult = await createSourcePromotionDecision(input, {
+          env,
+          sourcePromotionRepository: repository,
+          metadataOnlyAudit: createAuditProbe().dependency,
+        });
+        assert.equal(disabledResult.ok, false, outcome);
+        assert.equal(disabledResult.error.code, "feature_disabled", outcome);
+      }
 
-      const deniedResult = await createSourcePromotionDecision(
-        { ...input, actorContext: humanActor({ actorType: "ai" }) },
-        { env: { KAI_SPRINT2_ENABLED: "true" }, sourcePromotionRepository: repository, metadataOnlyAudit: createAuditProbe().dependency },
-      );
-      assert.equal(deniedResult.ok, false, outcome);
-      assert.equal(deniedResult.error.code, "authorization_denied", outcome);
+      for (const [label, actorContext, blockingReason] of [
+        ["non-human", humanActor({ actorType: "ai" }), null],
+        ["role not allowed", humanActor({ organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_admin" }] }), "role_not_allowed"],
+        ["other organization only", humanActor({ organizationMemberships: [{ organization_id: OTHER_ORG, membership_status: "active", role_name: "gk_operator" }] }), "missing_active_organization_membership"],
+      ]) {
+        const deniedResult = await createSourcePromotionDecision(
+          { ...input, actorContext },
+          { env: { KAI_SPRINT2_ENABLED: "true" }, sourcePromotionRepository: repository, metadataOnlyAudit: createAuditProbe().dependency },
+        );
+        assert.equal(deniedResult.ok, false, `${outcome} ${label}`);
+        assert.equal(deniedResult.error.code, "authorization_denied", `${outcome} ${label}`);
+        if (blockingReason) assert.equal(deniedResult.blockers[0].blocking_reason, blockingReason, `${outcome} ${label}`);
+      }
     }
 
     const counts = await withClient((client) => Promise.all([
@@ -672,7 +685,7 @@ async function runSourcePromotionIntegrationSuite() {
     assert.ok(!result.rows.some((row) => row.status === "FAIL"), "catalog verifier reported an unexpected FAIL");
   });
 
-  test("P1-08: end-to-end via the service seam with both feature flags, AUTH-KAI-003, and VAL-TEN-001, using the postgres repository", async () => {
+  test("P1-08: end-to-end via the service seam with the KAI_SPRINT2_ENABLED gate, AUTH-KAI-003, and VAL-TEN-001, using the postgres repository", async () => {
     const pair = await seedCompletePair(9);
 
     const result = await createSourcePromotionDecision(
@@ -693,11 +706,23 @@ async function runSourcePromotionIntegrationSuite() {
     assert.equal(deniedResult.ok, false);
     assert.equal(deniedResult.error.code, "authorization_denied");
 
+    const wrongTenantResult = await createSourcePromotionDecision(
+      { organizationId: ORG, intakeSourceCandidateId: pair.intakeSourceCandidateId, outcome: "promoted", reviewedSourceType: REVIEWED_TYPE,
+        actorContext: humanActor({ organizationMemberships: [{ organization_id: OTHER_ORG, membership_status: "active", role_name: "gk_operator" }] }), now: NOW },
+      { env: { KAI_SPRINT2_ENABLED: "true" }, sourcePromotionRepository: repository, metadataOnlyAudit: createAuditProbe().dependency },
+    );
+    assert.equal(wrongTenantResult.ok, false);
+    assert.deepEqual([wrongTenantResult.error.code, wrongTenantResult.blockers[0].blocking_reason], ["authorization_denied", "missing_active_organization_membership"]);
+
     const disabledResult = await createSourcePromotionDecision(
       { organizationId: ORG, intakeSourceCandidateId: pair.intakeSourceCandidateId, outcome: "promoted", reviewedSourceType: REVIEWED_TYPE, actorContext: humanActor(), now: NOW },
-      { env: { KAI_SPRINT2_ENABLED: "true" }, sourcePromotionRepository: repository, metadataOnlyAudit: createAuditProbe().dependency },
+      { env: {}, sourcePromotionRepository: repository, metadataOnlyAudit: createAuditProbe().dependency },
     );
     assert.equal(disabledResult.ok, false);
     assert.equal(disabledResult.error.code, "feature_disabled");
+
+    const [{ decisions }] = (await pool.query(
+      "SELECT count(*)::int AS decisions FROM kai.intake_promotion_decisions WHERE intake_source_candidate_id = $1::uuid", [pair.intakeSourceCandidateId])).rows;
+    assert.equal(decisions, 1, "only the authorized enabled decision was written");
   });
 }

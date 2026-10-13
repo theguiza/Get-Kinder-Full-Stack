@@ -3433,16 +3433,64 @@ test("KAI B1A-3B-R2: the GK file lookup read model resolves intake_sensitivity_p
   assert.doesNotMatch(intakeReadModels, /getScopedIntakeFileP1Lifecycle|intake_sensitivity_profiles|intake_parser_runs/);
 });
 
-test("KAI B1A-3B-R2: the GK file lookup service reuses the P1-09 cockpit authorization and returns only a canonical id or null", () => {
+// The GK file -> sensitivity-profile lookup is a sensitivity profile read.
+// Since the owner decision of 2026-10-12 (4191684) it uses the sensitivity
+// review authorization: GK review roles, plus the exactly bound Get Kinder
+// organization administrator; nothing broader.
+test("KAI B1A-3B-R2: the GK file lookup admits only sensitivity-review authority and returns only a canonical id or null", async () => {
+  const { getReviewCockpitIntakeFileSensitivityProfile } = await import("../Backend/kai/services/kaiReviewCockpitService.js");
+  const ORG = "a5d17c5a-c55f-43af-9b21-fe63aafe733f";
+  const OTHER = "b5d17c5a-c55f-43af-9b21-fe63aafe733f";
+  const FILE = "21000000-0000-4000-8000-000000000001";
+  const PROFILE = "80000000-0000-4000-8000-000000000001";
+  const human = (kaiRoles, memberships) => ({
+    actorType: "human", actorUserId: "7fe568b1-5c05-4c42-bb1f-6e20de216c7b", kaiRoles, organizationMemberships: memberships,
+  });
+  const member = (role, extra = {}) => ({ organization_id: ORG, membership_status: "active", role_name: role, ...extra });
+  let reads = 0;
+  const lookup = (actorContext, { organizationId = ORG, env = { KAI_SPRINT2_ENABLED: "true" }, record } = {}) =>
+    getReviewCockpitIntakeFileSensitivityProfile({ organizationId, actorContext, intakeFileId: FILE }, {
+      env,
+      async getReviewCockpitIntakeFileSensitivityProfileRecord(organizationId, intakeFileId) {
+        reads += 1;
+        return record === undefined
+          ? { organization_id: organizationId, intake_file_id: intakeFileId, intake_sensitivity_profile_id: PROFILE }
+          : record;
+      },
+    });
+
+  const gkReviewer = human(["gk_reviewer"], [member("gk_reviewer")]);
+  const boundAdmin = human([], [member("client_admin", { source: "gk_organization_binding", gk_organization_id: 7 })]);
+  for (const actor of [gkReviewer, boundAdmin]) {
+    const result = await lookup(actor);
+    assert.deepEqual(result, { ok: true, data: { intake_file_id: FILE, intake_sensitivity_profile_id: PROFILE } });
+  }
+  assert.deepEqual((await lookup(gkReviewer, { record: { organization_id: ORG, intake_file_id: FILE, intake_sensitivity_profile_id: null } })).data,
+    { intake_file_id: FILE, intake_sensitivity_profile_id: null });
+  assert.equal((await lookup(gkReviewer, { record: { organization_id: ORG, intake_file_id: FILE, intake_sensitivity_profile_id: "not-canonical" } })).error.code, "system_error");
+  assert.equal((await lookup(gkReviewer, { record: { organization_id: OTHER, intake_file_id: FILE, intake_sensitivity_profile_id: PROFILE } })).error.code, "not_found");
+
+  const readsBefore = reads;
+  for (const [label, actor, options, code] of [
+    ["stored-only client_admin", human([], [member("client_admin")]), {}, "authorization_denied"],
+    ["client_reviewer", human([], [member("client_reviewer")]), {}, "authorization_denied"],
+    ["global GK role in another organization", gkReviewer, { organizationId: OTHER }, "authorization_denied"],
+    ["bound admin in another organization", boundAdmin, { organizationId: OTHER }, "authorization_denied"],
+    ["non-human actor", { ...gkReviewer, actorType: "system" }, {}, "authorization_denied"],
+    ["feature disabled", gkReviewer, { env: {} }, "feature_disabled"],
+  ]) {
+    const result = await lookup(actor, options);
+    assert.equal(result.ok, false, label);
+    assert.equal(result.error.code, code, label);
+  }
+  assert.equal(reads, readsBefore, "no refused lookup reads a record");
+
   const serviceSource = readFileSync("Backend/kai/services/kaiReviewCockpitService.js", "utf8");
-  const start = serviceSource.indexOf("export async function getReviewCockpitIntakeFileSensitivityProfile");
-  const end = serviceSource.indexOf("export async function getReviewCockpitSensitivityProfileDetail", start);
-  const region = serviceSource.slice(start, end);
-
-  assert.match(region, /await authorizeReviewCockpitRequest\(input, deps\)/);
-  assert.match(region, /intakeSensitivityProfileId !== null && !canonicalUuid\(intakeSensitivityProfileId\)/);
-  assert.match(region, /intake_sensitivity_profile_id: intakeSensitivityProfileId/);
-
+  const region = serviceSource.slice(
+    serviceSource.indexOf("export async function getReviewCockpitIntakeFileSensitivityProfile"),
+    serviceSource.indexOf("export async function getReviewCockpitSensitivityProfileDetail"),
+  );
+  assert.doesNotMatch(region, /\.query\(|\bpool\b|SELECT/, "the read stays in the read model");
   const intakeServiceSource = readFileSync("Backend/kai/services/kaiIntakeService.js", "utf8");
   assert.doesNotMatch(intakeServiceSource, /p1_lifecycle|p1LifecycleProjection|intake_sensitivity_profile_id/);
 });
