@@ -38624,3 +38624,119 @@ frontend (plus only the test attribute) fails P3-B, P3-H, P3-D, and P3-I
 **Status:** PACKAGE_3_READBACK_AND_FRESHNESS_REPAIRED_LOCAL_SYNTHETIC. No
 push, deployment, production or shared database, cloud, flag, tenant, role,
 credential, `.env`, schema, or `00_KAI_CURRENT_STATE.md` change.
+
+### Package 4: test reconciliation, integrated verification, and remaining decisions (2026-10-13)
+
+**Owner direction (USER_CONFIRMED):** correct only test expectations that
+contradict accepted authority, run one integrated verification of Packages
+1-3, disposition J3-3 without implementing a policy change, and return one
+consolidated owner-decision package. No application, permission, schema,
+flag, or product change.
+
+**Start (TOOL_VERIFIED):** `main` at `d997f1a`, clean.
+
+**Test reconciliation (TOOL_VERIFIED; all classified as obsolete
+expectations; no application change):**
+- **`kai-client-authorization-reconciliation.spec.js:441`:** it expected no
+  sensitivity capability for a binding-derived `client_admin`.
+  - Controlling authority: the owner decision of 2026-10-12 (`4191684`).
+  - Change: the journey now expects it.
+  - New test: persisted `client_admin` attribution; stored-only,
+    inactive-binding, invalid-marker, and wrong-organization refusals with
+    nothing written; no P1-08 promotion (`role_not_allowed`), no
+    human-review decision, no cockpit read.
+  - Result: 28/1 before, 30/0 after.
+- **`kai-sprint2-impact-evidence-library.spec.js:3436`:** a source-text pin
+  of `authorizeReviewCockpitRequest` inside
+  `getReviewCockpitIntakeFileSensitivityProfile`. This is a
+  sensitivity-profile read, not P1-08.
+  - Controlling authority: `4191684` moved this read to
+    `authorizeSensitivityReviewRequest`.
+  - Change: replaced by behavior. GK reviewer and bound admin are admitted;
+    stored-only admin, `client_reviewer`, another organization, non-human,
+    and feature-off are refused with no record read.
+  - Result: 131/1 before, 132/0 after.
+- **P1-08 runner cases 14 and 19:** they expected `KAI_SOURCE_PROMOTION_ENABLED`
+  to block.
+  - Controlling authority: the owner correction of 2026-08-18, recorded in
+    `scripts/kai-sprint2-p1-08-source-promotion-runbook.md` (`801675b`),
+    which removed that redundant flag; `KAI_SPRINT2_ENABLED` is the sole
+    gate.
+  - Change: both cases now disable the real gate (absent or "false") and
+    add `role_not_allowed`, other-organization, and decision-count
+    assertions.
+  - Result: 17/2 before, 19/0 after.
+- **Rehydration case 2:** it waited for the "Sensitivity profile" field that
+  `82041f4` (P0-04 DTO restoration) removed.
+  - Change: it now waits for the GK-only
+    `review-cockpit/intake-files/:id/sensitivity-profile` lookup (200,
+    exactly one); the existing card, profile-read, and Beta-clearing checks
+    now execute.
+  - Result: 2/1 before, 3/0 after.
+
+**J3-3 (TOOL_VERIFIED; unchanged and still failing):**
+- **Actor:** mixed (global `gk_reviewer` + Org A `client_admin`).
+- **P2-12 decision:** `supported` is committed (`decided_by_role`
+  `gk_reviewer`, audit).
+- **First rejection:** the handoff's P2-02 `assessEvidenceCoverageForSourceVersion`.
+  - It applies organization roles only, without `combineGlobalRoles`
+    (`kaiEvidenceCoverageAssessmentService.js:97`).
+  - It reports the role refusal as `tenant_boundary_violation`
+    (`kaiEvidenceCoverageAssessmentService.js:104`).
+  - P2-03 `proposeClaim` has the same shape (`kaiClaimProposalService.js:79/86`).
+- **Asymmetry:** P2-12 and P2-09 admit global roles
+  (`kaiHumanReviewService.js:149`, `combineGlobalRoles`).
+- **Precedent:** the 2026-10-11 owner decision resolved the identical pattern
+  for P1-06/P1-07 only ("exactly").
+- **Recovery today:** an identical resubmission replays the decision and
+  retries the handoff, which fails again for the same actor. The standalone
+  P2-02/P2-03 routes let an organization-GK-role actor create the proposal
+  (attributed to that actor).
+- **Status:** NEW_OWNER_POLICY_DECISION_REQUIRED.
+  - Recommended: Option A, governed decision-bound continuation.
+  - The role-refusal misclassification is a separate classification defect
+    under accepted authority (Package 2 precedent).
+
+**Consolidated decisions (detail in the Package 4 report):**
+
+*Authorization and workflow integrity:*
+- **A, P1-08 read/write:** the effective rule is a global GK role plus an
+  organization GK role. Owner confirmation required; recommend confirming it
+  without change.
+- **B, provisioning:** only organization `gk_reviewer` is grantable (by a
+  platform superuser); `gk_operator`/`gk_admin` organization roles have no
+  governed writer. Owner decision required.
+- **C:** see J3-3.
+- **D, superuser:** superusers are admitted on full-request routes, with
+  attribution `gk_admin` (`kaiAuthorizedRoleAttribution.js:33-39`) and
+  constant `gk_reviewer`/`client_reviewer` roles in P2-10/P2-11
+  (`kaiCoverageReviewDecisionService.js:113`,
+  `kaiClientFollowupCompletionService.js:102`), including roles not held.
+  Security-relevant; owner decision required.
+- **E, revocation:** grants are independent per operation (J7-4). Owner
+  confirmation required.
+
+*Product workflow and organization-facing capability:*
+- **F, source waiting_on_client:** `client_followup_items.claim_id` is NOT
+  NULL, so there is no source-stage client request. Product decision
+  required.
+- **G, client gaps:** the GK Studio has the Gaps and Risks card (2026-09-06);
+  the client Gaps tab is explanatory by design. Product decision required if
+  detailed client presentation is wanted.
+
+**Final verification (TOOL_VERIFIED):**
+- Campaign: 43 / 42 pass / 1 fail; only J3-3 fails; P3-A..P3-J pass 10/10.
+- Browser specs: rehydration 3/0, Knowledge Studio 6/0, evidence pipeline
+  7/0, sensitivity 16/0, provisioning 13/0, P2-01 7/0, edge cases 11/0,
+  Team & Access 7/0, P2-12 11/0, claim proposal 10/0.
+- Runners: P1-07 22/0, P1-08 19/0, P2-01 7/0, P2-12 11/0, P2-03 17/0, P2-11
+  28/0, access administration 31/0, onboarding 6/0, JOIN 128/0.
+- Suites: `npm test` 5477/0/104; `test:kai-sprint2` 4755/0/89; API contract
+  71/0.
+- Build: identical to the committed `entry.js`.
+- `git diff --check` is clean.
+
+**Status:** PACKAGE_4_VERIFICATION_COMPLETE_LOCAL_SYNTHETIC; FULL
+AUTHORIZATION CLOSURE NOT_CONFIRMED (J3-3 and decisions A-E open). No push,
+deployment, production, database, flag, tenant, role, credential, schema, or
+`00_KAI_CURRENT_STATE.md` change.
