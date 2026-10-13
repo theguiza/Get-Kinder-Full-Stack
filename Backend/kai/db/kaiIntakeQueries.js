@@ -671,7 +671,7 @@ export async function getScopedSensitivityReviewQueueItemByIdentity(
 ) {
   const { rows } = await db.query(
     `SELECT review_queue_item_id, organization_id, queue_type, target_object_type,
-            target_object_id, priority, queue_status, assigned_to, due_at, summary,
+            target_object_id, priority, queue_status, review_status, assigned_to, due_at, summary,
             required_action, created_at, updated_at
        FROM kai.review_queue_items
       WHERE organization_id = $1

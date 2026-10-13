@@ -1320,6 +1320,67 @@ async function runP107HandoffIntegrationSuite() {
     assert.equal(byDecider.data.replayed, false);
   });
 
+  test("bound admin (negative, paired queue state): the human's own current 'reviewed' head whose sensitivity_review item is resolved/needs_gk_review is refused directly and through the cockpit replay with zero writes; restoring review_status alone admits the same request", async () => {
+    const { intakeSensitivityProfileId: id, work, decided } = await historicalReviewedWithoutCandidate(41);
+    const reviewQueueItemId = decided.data.sensitivity_review_queue_item.review_queue_item_id;
+    // Throwaway database only: no CHECK constraint pairs queue_status with
+    // review_status for sensitivity_review, so change review_status alone.
+    const setReviewStatus = (reviewStatus) => withClient((client) => client.query(
+      `UPDATE kai.review_queue_items SET review_status = $2 WHERE review_queue_item_id = $1::uuid`,
+      [reviewQueueItemId, reviewStatus],
+    ));
+    await setReviewStatus("needs_gk_review");
+
+    // Every other prerequisite holds: one current head, the bound admin's own
+    // human 'reviewed' as client_admin, the decided item resolved, eligible, no candidate.
+    const items = await sensitivityReviewItems(id);
+    assert.equal(items.length, 1);
+    assert.equal(items[0].review_queue_item_id, reviewQueueItemId);
+    assert.equal(items[0].queue_status, "resolved");
+    assert.equal(items[0].review_status, "needs_gk_review");
+    const head = await currentHead(id);
+    assert.equal(head.decision_id, decided.data.current_decision.decision_id);
+    assert.equal(head.decision_outcome, "reviewed");
+    assert.equal(head.decided_by, BOUND_ADMIN);
+    assert.equal(head.decided_by_role, "client_admin");
+    assert.equal(await profilePredicate(id), true);
+    assert.deepEqual(await candidateState(id), { candidates: [], queueItems: [] });
+    const decisions = await decisionRows(id);
+    assert.equal(decisions.length, 1);
+    const decisionAuditsBefore = await decisionAudits(id, 41);
+
+    const before = await kaiTableRowCounts();
+    const direct = await createCandidateAs(boundAdmin, id);
+    assert.equal(direct.ok, false, JSON.stringify(direct));
+    assert.equal(direct.error.code, "authorization_denied");
+    assert.deepEqual(changedTables(before, await kaiTableRowCounts()), []);
+
+    // The cockpit replay never reaches the handoff: the decision workflow only
+    // recognizes a terminal replay against a resolved/resolved item.
+    const replayBefore = await kaiTableRowCounts();
+    const replay = await decideAs(boundAdmin, id, { ...work, expectedUpdatedAt: head.target_updated_at }, "reviewed", { now: T3 });
+    assert.equal(replay.ok, false, JSON.stringify(replay));
+    assert.equal(replay.error.code, "conflict_current_state_changed");
+    assert.deepEqual(changedTables(replayBefore, await kaiTableRowCounts()), []);
+
+    assert.deepEqual(await candidateState(id), { candidates: [], queueItems: [] });
+    assert.deepEqual(await candidateAudits(id, 41), { audit_events: 0, upload_lifecycle_audit: 0 });
+    assert.deepEqual(await decisionRows(id), decisions);
+    assert.deepEqual(await currentHead(id), head);
+    assert.deepEqual(await decisionAudits(id, 41), decisionAuditsBefore);
+
+    // review_status is the only difference from an admitted state.
+    await setReviewStatus("resolved");
+    const admitted = await createCandidateAs(boundAdmin, id);
+    assert.equal(admitted.ok, true, JSON.stringify(admitted));
+    assert.equal(admitted.data.replayed, false);
+    const state = await candidateState(id);
+    assert.equal(state.candidates.length, 1);
+    assert.equal(state.candidates[0].candidate_status, "needs_gk_review");
+    assert.equal(state.queueItems.length, 1);
+    assert.equal(state.queueItems[0].queue_status, "open");
+  });
+
   test("bound admin (negatives, actor): with the human's own current 'reviewed' head in place, an unbound stored client_admin, inactive or other-organization binding, missing or invalid GK organization id, client reviewer/contributor, inactive account, and non-human actors are all refused with zero writes", async () => {
     const { intakeSensitivityProfileId: id, work } = await historicalReviewedWithoutCandidate(32);
     const denied = [

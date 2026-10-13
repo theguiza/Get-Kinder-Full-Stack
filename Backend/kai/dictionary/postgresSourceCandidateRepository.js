@@ -156,9 +156,9 @@ async function readScopedSensitivityProfile(tx, organizationId, intakeSensitivit
  * read only from committed ledger and queue rows under the profile lock: the
  * current Phase-5 decision-lineage head for this exact tenant-scoped profile is a
  * human 'reviewed' decision recorded by this same actor as client_admin, and the
- * 'sensitivity_review' queue item it decided is resolved. A superseded, absent,
- * non-terminal, or other-actor head, or an ambiguous lineage (which throws), never
- * satisfies it.
+ * 'sensitivity_review' queue item it decided is resolved in both queue_status and
+ * review_status. A superseded, absent, non-terminal, or other-actor head, a
+ * partially resolved item, or an ambiguous lineage (which throws), never satisfies it.
  */
 async function hasOwnCurrentReviewedDecision(tx, profileRow, actorUserId) {
   const head = await findCurrentSensitivityAllowedUseDecision(tx, {
@@ -181,7 +181,8 @@ async function hasOwnCurrentReviewedDecision(tx, profileRow, actorUserId) {
   return (
     Boolean(queueItem) &&
     String(queueItem.review_queue_item_id) === String(head.review_queue_item_id) &&
-    queueItem.queue_status === "resolved"
+    queueItem.queue_status === "resolved" &&
+    queueItem.review_status === "resolved"
   );
 }
 
