@@ -1071,7 +1071,7 @@ function extractGenerateDraftHandlerSource(uiSource) {
   const openIdx = uiSource.indexOf(openMarker);
   assert.notEqual(openIdx, -1, "could not locate the generateDraft useCallback handler");
   const bodyStart = openIdx + "const generateDraft = useCallback(".length;
-  const tailMarker = "\n  }, [audience, organizationId, engagementId, selectedGenerationClaimIds, loadGeneratedDrafts]);";
+  const tailMarker = "\n  }, [audience, organizationId, engagementId, selectedGenerationClaimIds, loadGeneratedDrafts, workflowOperations]);";
   const tailIdx = uiSource.indexOf(tailMarker, openIdx);
   assert.notEqual(tailIdx, -1, "could not locate the end of the generateDraft useCallback handler");
   const bodyEnd = tailIdx + "\n  }".length;
@@ -1084,6 +1084,7 @@ function buildGenerateDraft(handlerSource, overrides = {}) {
     "setGeneratingDraft", "setMessage", "setGeneratedDraftPacket",
     "postJson", "getJson", "errorText", "loadGeneratedDrafts", "setSelectedGeneratedDraftId",
     "generatedDraftReviewPacketPath", "projectGeneratedDraftPacket", "organizationIdRef", "engagementIdRef",
+    "workflowOperations",
     `return (${handlerSource});`,
   );
   const state = {
@@ -1121,13 +1122,14 @@ function buildGenerateDraft(handlerSource, overrides = {}) {
     setSelectedGeneratedDraftId: (value) => { state.selectedGeneratedDraftId = value; },
     generatedDraftReviewPacketPath,
     projectGeneratedDraftPacket,
+    workflowOperations: { generateDrafts: true },
     ...overrides,
   };
   const generateDraft = factory(
     defaults.audience, defaults.organizationId, defaults.engagementId, defaults.selectedGenerationClaimIds,
     defaults.setGeneratingDraft, defaults.setMessage, defaults.setGeneratedDraftPacket,
     defaults.postJson, defaults.getJson, defaults.errorText, defaults.loadGeneratedDrafts, defaults.setSelectedGeneratedDraftId,
-    defaults.generatedDraftReviewPacketPath, defaults.projectGeneratedDraftPacket, defaults.organizationIdRef, defaults.engagementIdRef,
+    defaults.generatedDraftReviewPacketPath, defaults.projectGeneratedDraftPacket, defaults.organizationIdRef, defaults.engagementIdRef, defaults.workflowOperations,
   );
   return { generateDraft, state };
 }
@@ -1140,6 +1142,7 @@ test("Impact Evidence Library 'generateDraft' handler: exact extracted source is
     "setGeneratingDraft", "setMessage", "setGeneratedDraftPacket",
     "postJson", "getJson", "errorText", "loadGeneratedDrafts", "setSelectedGeneratedDraftId",
     "generatedDraftReviewPacketPath", "projectGeneratedDraftPacket", "organizationIdRef", "engagementIdRef",
+    "workflowOperations",
     `return (${handlerSource});`,
   ));
 });
@@ -1987,7 +1990,7 @@ test("Package 14-05 wiring: the component's three admission locations delegate t
     /const toggleGenerationClaim = useCallback\(\(claim\) => \{\s*if \(!canSelectClaimForInternalGeneration\(claim, audience\)\) return;/,
   );
   // 3. generation-checkbox/control admission
-  assert.match(uiSource, /\{canSelectClaimForInternalGeneration\(claim, audience\) \? \(/);
+  assert.match(uiSource, /\{workflowOperations\.generateDrafts && canSelectClaimForInternalGeneration\(claim, audience\) \? \(/);
 });
 
 // P14-09: frontend funder Evidence Summary generation wiring. The funder
@@ -2086,7 +2089,7 @@ test("P14-09: createFunderEvidenceSummaryPath matches the governed P14-09 funder
 test("P14-09 wiring: the funder claim checkbox and toggle are gated by canSelectClaimForFunderGeneration, distinct from the internal helper/state", () => {
   const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
   assert.match(uiSource, /import \{[\s\S]*?canSelectClaimForFunderGeneration[\s\S]*?\} from "\.\/impactEvidenceLibraryLogic\.js";/);
-  assert.match(uiSource, /\{canSelectClaimForFunderGeneration\(claim, audience\) \? \(/);
+  assert.match(uiSource, /\{workflowOperations\.generateDrafts && canSelectClaimForFunderGeneration\(claim, audience\) \? \(/);
   assert.match(
     uiSource,
     /const toggleFunderGenerationClaim = useCallback\(\(claim\) => \{\s*if \(!canSelectClaimForFunderGeneration\(claim, audience\)\) return;/,
@@ -2126,7 +2129,7 @@ function extractGenerateFunderEvidenceSummaryHandlerSource(uiSource) {
   const openIdx = uiSource.indexOf(openMarker);
   assert.notEqual(openIdx, -1, "could not locate the generateFunderEvidenceSummary useCallback handler");
   const bodyStart = openIdx + "const generateFunderEvidenceSummary = useCallback(".length;
-  const tailMarker = "\n  }, [audience, organizationId, engagementId, selectedFunderGenerationClaimIds, loadGeneratedDrafts]);";
+  const tailMarker = "\n  }, [audience, organizationId, engagementId, selectedFunderGenerationClaimIds, loadGeneratedDrafts, workflowOperations]);";
   const tailIdx = uiSource.indexOf(tailMarker, openIdx);
   assert.notEqual(tailIdx, -1, "could not locate the end of the generateFunderEvidenceSummary useCallback handler");
   const bodyEnd = tailIdx + "\n  }".length;
@@ -2139,6 +2142,7 @@ function buildGenerateFunderEvidenceSummary(handlerSource, overrides = {}) {
     "setGeneratingDraft", "setMessage", "setGeneratedDraftPacket",
     "postJson", "getJson", "errorText", "loadGeneratedDrafts", "setSelectedGeneratedDraftId",
     "createFunderEvidenceSummaryPath", "generatedDraftReviewPacketPath", "projectGeneratedDraftPacket",
+    "workflowOperations",
     `return (${handlerSource});`,
   );
   const state = {
@@ -2175,13 +2179,14 @@ function buildGenerateFunderEvidenceSummary(handlerSource, overrides = {}) {
     createFunderEvidenceSummaryPath,
     generatedDraftReviewPacketPath,
     projectGeneratedDraftPacket,
+    workflowOperations: { generateDrafts: true },
     ...overrides,
   };
   const generateFunderEvidenceSummary = factory(
     defaults.audience, defaults.organizationId, defaults.engagementId, defaults.selectedFunderGenerationClaimIds,
     defaults.setGeneratingDraft, defaults.setMessage, defaults.setGeneratedDraftPacket,
     defaults.postJson, defaults.getJson, defaults.errorText, defaults.loadGeneratedDrafts, defaults.setSelectedGeneratedDraftId,
-    defaults.createFunderEvidenceSummaryPath, defaults.generatedDraftReviewPacketPath, defaults.projectGeneratedDraftPacket,
+    defaults.createFunderEvidenceSummaryPath, defaults.generatedDraftReviewPacketPath, defaults.projectGeneratedDraftPacket, defaults.workflowOperations,
   );
   return { generateFunderEvidenceSummary, state };
 }
@@ -2194,6 +2199,7 @@ test("P14-09 'generateFunderEvidenceSummary' handler: exact extracted source is 
     "setGeneratingDraft", "setMessage", "setGeneratedDraftPacket",
     "postJson", "getJson", "errorText", "loadGeneratedDrafts", "setSelectedGeneratedDraftId",
     "createFunderEvidenceSummaryPath", "generatedDraftReviewPacketPath", "projectGeneratedDraftPacket",
+    "workflowOperations",
     `return (${handlerSource});`,
   ));
 });
@@ -2823,7 +2829,7 @@ test("KAI P2-10 operability: the Traceability panel exposes a control to accept 
 // merely fail a text match.
 function extractReviewThisClaimHandlerSource(uiSource) {
   const openMarker = "onClick={() => {\n                    setSelectedClaimId(item.claimId);";
-  const openIdx = uiSource.indexOf(openMarker);
+  const openIdx = uiSource.indexOf(openMarker, uiSource.indexOf("{reviewQueueItems.map((item) => ("));
   assert.notEqual(openIdx, -1, "could not locate the Review this claim onClick handler");
   const arrowStart = openIdx + "onClick={".length;
   const tailMarker = "\n                  }}\n                >\n                  Review this claim\n                </button>";
@@ -3602,4 +3608,15 @@ test("KAI B1A-3B-R2: resolved profiles remain discoverable through the same GK f
     readModelSource.indexOf("export async function getReviewCockpitIntakeFileSensitivityProfileRecord"),
   );
   assert.doesNotMatch(lookupRegion, /review_queue_items|intake_sensitivity_review_decisions/);
+});
+
+
+test("generation handlers issue no request without server-projected generation authority", async () => {
+  const source = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
+  const internal = buildGenerateDraft(extractGenerateDraftHandlerSource(source), { workflowOperations: {} });
+  await internal.generateDraft(createEvidenceSummaryPath, "test");
+  assert.deepEqual(internal.state.postJsonCalls, []);
+  const funder = buildGenerateFunderEvidenceSummary(extractGenerateFunderEvidenceSummaryHandlerSource(source), { workflowOperations: {} });
+  await funder.generateFunderEvidenceSummary();
+  assert.deepEqual(funder.state.postJsonCalls, []);
 });

@@ -648,7 +648,7 @@ test("J: the Evidence tab reports the server handoff and re-reads Claims, with n
   assert.equal(claimProposalHandoffOutcome({ status: "not_created", error_code: "validation_blocker" }).message,
     "KAI did not propose a claim from this evidence (validation_blocker). The evidence review decision is recorded.");
   for (const value of [null, undefined, {}, { status: "approved" }]) {
-    assert.deepEqual(claimProposalHandoffOutcome(value), { message: "", reloadClaims: false });
+    assert.deepEqual(claimProposalHandoffOutcome(value), { message: "Claim continuation could not be confirmed. No completed claim is confirmed.", reloadClaims: false });
   }
 
   const handler = librarySource.slice(
@@ -658,7 +658,9 @@ test("J: the Evidence tab reports the server handoff and re-reads Claims, with n
   assert.equal((handler.match(/postJson\(/g) || []).length, 1);
   assert.equal((handler.match(/getJson\(/g) || []).length, 0);
   assert.match(handler, /claimProposalHandoffOutcome\(result\.body\?\.data\?\.claim_proposal_handoff\)/);
-  assert.match(handler, /if \(handoff\.reloadClaims && organizationIdRef\.current === requestOrganizationId\) await loadCandidateClaims\(\);/);
+  assert.match(handler, /if \(handoff\.reloadClaims\) await loadCandidateClaims\(\);/);
+  assert.match(handler, /await loadReviewQueue\(\);/);
+  assert.match(handler, /const recorded = result.statusCode === 200 && result.body\?\.ok === true/);
   assert.doesNotMatch(handler, /claimProposalPath|evidenceCoverageAssessmentPath|claimReviewCompletePath|claimReviewDecisionBody/);
 });
 

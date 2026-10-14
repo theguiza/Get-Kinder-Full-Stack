@@ -601,16 +601,17 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
   // Knowledge Studio (ImpactEvidenceLibrary) and GK Impact Library views make
   // only GK-internal reads, so they are mounted only when
   // internalKnowledgeWorkspace is true; until the answer is known nothing is
-  // mounted for those sections, and an unknown/failed answer falls back to
-  // the client-safe views (which make client-safe reads only).
+  // mounted for those sections. An unavailable answer remains unknown.
   const [accessCapabilities, setAccessCapabilities] = useState({ organizationId: "", status: "idle", data: null });
+  const accessCapabilitiesRequestRef = useRef(0);
   useEffect(() => {
+    const generation = ++accessCapabilitiesRequestRef.current;
     setAccessCapabilities({ organizationId: selectedOrganizationId, status: selectedOrganizationId ? "loading" : "idle", data: null });
     if (!selectedOrganizationId) return undefined;
     let cancelled = false;
     (async () => {
       const result = await getJson(organizationAccessCapabilitiesPath(selectedOrganizationId));
-      if (cancelled) return;
+      if (cancelled || generation !== accessCapabilitiesRequestRef.current) return;
       const data = result.statusCode === 200 && result.body?.ok ? projectOrganizationAccessCapabilities(result.body.data) : null;
       setAccessCapabilities({ organizationId: selectedOrganizationId, status: data ? "success" : "error", data });
     })();
@@ -619,7 +620,7 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
     };
   }, [selectedOrganizationId]);
   const capabilitiesResolved =
-    accessCapabilities.organizationId === selectedOrganizationId && accessCapabilities.status !== "loading" && accessCapabilities.status !== "idle";
+    accessCapabilities.organizationId === selectedOrganizationId && accessCapabilities.status === "success";
   const internalKnowledgeWorkspace = capabilitiesResolved && accessCapabilities.data?.internalKnowledgeWorkspace === true;
   // Mutation controls are offered only on a resolved server answer; while
   // unknown or after a failed read they stay hidden (fail closed). Reading
@@ -631,15 +632,15 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
 
   // Re-reads the capabilities answer in place (no loading state) after a
   // change that may have removed this user's own administrator access. A
-  // failed read keeps the current answer; the server still decides every
-  // request.
+  // failed read invalidates the answer; the server still decides every request.
   const refreshAccessCapabilities = useCallback(async () => {
     const organizationId = selectedOrganizationId;
     if (!organizationId) return;
+    const generation = ++accessCapabilitiesRequestRef.current;
     const result = await getJson(organizationAccessCapabilitiesPath(organizationId));
+    if (generation !== accessCapabilitiesRequestRef.current) return;
     const data = result.statusCode === 200 && result.body?.ok ? projectOrganizationAccessCapabilities(result.body.data) : null;
-    if (!data) return;
-    setAccessCapabilities((current) => (current.organizationId === organizationId ? { organizationId, status: "success", data } : current));
+    setAccessCapabilities((current) => (current.organizationId === organizationId ? { organizationId, status: data ? "success" : "error", data } : current));
   }, [selectedOrganizationId]);
 
   // Team & Access: the roster is read only while the section is open and the
@@ -798,7 +799,9 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
       <div style={{ color: "#8890A0", fontSize: 14 }}>Loading...</div>
     );
   } else if ((activeSection === "knowledgeStudio" || activeSection === "impactLibrary") && !capabilitiesResolved) {
-    sectionContent = <div style={{ color: "#8890A0", fontSize: 14 }}>Loading...</div>;
+    sectionContent = accessCapabilities.status === "error" ? (
+      <div role="alert">Workspace access could not be confirmed. <button type="button" onClick={refreshAccessCapabilities}>Retry access check</button></div>
+    ) : <div style={{ color: "#8890A0", fontSize: 14 }}>Loading...</div>;
   } else if (activeSection === "knowledgeStudio" && !internalKnowledgeWorkspace) {
     sectionContent = (
       <ClientKnowledgeStudio
@@ -829,6 +832,7 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
         onOrganizationIdChange={setSelectedOrganizationId}
         engagementId={selectedEngagementId}
         onEngagementIdChange={setSelectedEngagementId}
+        workflowOperations={accessCapabilities.data?.workflowOperations}
         onAddImprovementPractice={createImprovementPractice}
       />
     );

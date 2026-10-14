@@ -57,11 +57,14 @@ import {
   getJson,
   isRouteUuid,
   mergeClaims,
+  pendingClaimReviewWork,
   nextLibraryStateForAudienceChange,
   nextLibraryStateForOrganizationChange,
   organizationRequirementAssessmentPath,
   organizationRequirementsReadinessPath,
   organizationReviewQueuePath,
+  organizationAccessCapabilitiesPath,
+  projectOrganizationAccessCapabilities,
   organizationSourcesPath,
   projectOrganizationSources,
   engagementFunderRequirementsPath,
@@ -179,8 +182,10 @@ function StatusBadge({ status }) {
 // loading/pending state stuck true forever, matching the existing rejected-
 // fetch handling for that same request.
 const GRANT_RESPONSE_PACKET_REFETCH_TIMEOUT_MS = 15000;
+const NO_WORKFLOW_OPERATIONS = Object.freeze({});
 
 export default function ImpactEvidenceLibrary({
+  workflowOperations: parentWorkflowOperations,
   // KAI Impact Library redesign, Package C0 (shared Project/Engagement
   // context): when a parent (frontend/ImpactLibraryApp.jsx) supplies these,
   // they are the one authoritative organization/engagement for the whole
@@ -203,6 +208,27 @@ export default function ImpactEvidenceLibrary({
   const [organizations, setOrganizations] = useState([]);
   const [localOrganizationId, setLocalOrganizationId] = useState("");
   const organizationId = parentOrganizationId !== undefined ? parentOrganizationId : localOrganizationId;
+  // The admin dashboard also mounts this component without the Library shell.
+  // Resolve its operation capabilities from the same server endpoint; never
+  // infer them from site-admin UI reachability or from object eligibility.
+  const [standaloneAccess, setStandaloneAccess] = useState({ organizationId: "", operations: null });
+  const standaloneAccessRequestRef = useRef(0);
+  const workflowOperations = parentWorkflowOperations ?? (
+    standaloneAccess.organizationId === organizationId ? standaloneAccess.operations : null
+  ) ?? NO_WORKFLOW_OPERATIONS;
+  const refreshStandaloneAccess = useCallback(async () => {
+    if (parentWorkflowOperations !== undefined || !organizationId) return;
+    const generation = ++standaloneAccessRequestRef.current;
+    const result = await getJson(organizationAccessCapabilitiesPath(organizationId));
+    if (generation !== standaloneAccessRequestRef.current) return;
+    const data = result.statusCode === 200 && result.body?.ok ? projectOrganizationAccessCapabilities(result.body.data) : null;
+    setStandaloneAccess({ organizationId, operations: data?.workflowOperations ?? null });
+  }, [organizationId, parentWorkflowOperations]);
+  useEffect(() => {
+    refreshStandaloneAccess();
+    return () => { standaloneAccessRequestRef.current += 1; };
+  }, [refreshStandaloneAccess]);
+  useRevalidateOnReturn(refreshStandaloneAccess, parentWorkflowOperations === undefined && Boolean(organizationId));
   const updateOrganizationId = useCallback((value) => {
     if (parentOrganizationId !== undefined) {
       if (typeof onOrganizationIdChange === "function") onOrganizationIdChange(value);
@@ -678,6 +704,11 @@ export default function ImpactEvidenceLibrary({
     [reviewQueueRequestState, reviewQueueCompleteness, organizationGapsAndRisks],
   );
 
+  const pendingClaimReviews = useMemo(
+    () => pendingClaimReviewWork(candidateClaims, reviewQueueItems),
+    [candidateClaims, reviewQueueItems],
+  );
+
   const selectedClaim = useMemo(
     () => claims.find((claim) => claim.claimId === selectedClaimId) || null,
     [claims, selectedClaimId],
@@ -978,6 +1009,12 @@ export default function ImpactEvidenceLibrary({
     setCandidateClaims(projectCandidateClaims(result.body.data));
   }, [organizationId]);
 
+  // Persisted proposals and their review items must be discoverable by the
+  // next reviewer on a fresh workspace mount, without a manual Load claims.
+  useEffect(() => {
+    if (organizationId) loadCandidateClaims();
+  }, [organizationId, loadCandidateClaims]);
+
   const loadEligibleClaims = useCallback(async () => {
     if (!organizationId) return;
     const requestGeneration = ++eligibleRequestGenerationRef.current;
@@ -1132,7 +1169,7 @@ export default function ImpactEvidenceLibrary({
   }, [audience]);
 
   const loadGeneratedDrafts = useCallback(async () => {
-    if (!organizationId) return;
+    if (!organizationId || !workflowOperations.readGeneratedDrafts) return;
     const requestOrganizationId = organizationId;
     setLoadingGeneratedDrafts(true);
     const result = await getJson(generatedDraftLibraryIndexPath(requestOrganizationId));
@@ -1144,7 +1181,7 @@ export default function ImpactEvidenceLibrary({
       return;
     }
     setGeneratedDrafts(projectGeneratedDraftLibraryItems(result.body.data));
-  }, [organizationId]);
+  }, [organizationId, workflowOperations.readGeneratedDrafts]);
 
   // Rediscover persisted drafts on every fresh Library load, independent of
   // any transient in-browser generation state.
@@ -2205,6 +2242,7 @@ export default function ImpactEvidenceLibrary({
   ]);
 
   const runAssessRequirement = useCallback(async (requirementId) => {
+    if (!workflowOperations.assessRequirement) return;
     if (!organizationId || assessingRequirementId) return;
     setAssessingRequirementId(requirementId);
     setRequirementsReadinessError("");
@@ -2215,7 +2253,7 @@ export default function ImpactEvidenceLibrary({
       return;
     }
     await loadRequirementsReadiness();
-  }, [organizationId, assessingRequirementId, loadRequirementsReadiness]);
+  }, [organizationId, assessingRequirementId, loadRequirementsReadiness, workflowOperations.assessRequirement]);
 
   const selectGeneratedDraft = useCallback(async (generatedContentDraftId) => {
     setSelectedGeneratedDraftId(generatedContentDraftId);
@@ -2230,6 +2268,7 @@ export default function ImpactEvidenceLibrary({
   }, [organizationId]);
 
   const generateDraft = useCallback(async (pathBuilder, idempotencyPrefix, requestBodyBuilder = null) => {
+    if (!workflowOperations.generateDrafts) return;
     // Data Gap Memo is the one generator here with a requestBodyBuilder: its
     // route deliberately accepts no claim_ids (authoritative gap membership
     // is server-derived - see createDataGapMemoDraft), so unlike the other
@@ -2290,7 +2329,7 @@ export default function ImpactEvidenceLibrary({
       return;
     }
     setGeneratedDraftPacket(projectGeneratedDraftPacket(packetResult.body.data));
-  }, [audience, organizationId, engagementId, selectedGenerationClaimIds, loadGeneratedDrafts]);
+  }, [audience, organizationId, engagementId, selectedGenerationClaimIds, loadGeneratedDrafts, workflowOperations]);
 
   const generateEvidenceSummary = useCallback(
     () => generateDraft(createEvidenceSummaryPath, "evidence-summary"),
@@ -2328,6 +2367,7 @@ export default function ImpactEvidenceLibrary({
   // selectedGenerationClaimIds, and there is deliberately no funder Impact
   // Narrative generation control anywhere on this page.
   const generateFunderEvidenceSummary = useCallback(async () => {
+    if (!workflowOperations.generateDrafts) return;
     if (audience !== "funder" || selectedFunderGenerationClaimIds.length === 0 || !engagementId) return;
     setGeneratingDraft(true);
     setMessage("");
@@ -2357,7 +2397,7 @@ export default function ImpactEvidenceLibrary({
       return;
     }
     setGeneratedDraftPacket(projectGeneratedDraftPacket(packetResult.body.data));
-  }, [audience, organizationId, engagementId, selectedFunderGenerationClaimIds, loadGeneratedDrafts]);
+  }, [audience, organizationId, engagementId, selectedFunderGenerationClaimIds, loadGeneratedDrafts, workflowOperations]);
 
   const refetchGeneratedDraftPacket = useCallback(async (draftId) => {
     const packetResult = await getJson(generatedDraftReviewPacketPath(organizationId, draftId));
@@ -2371,6 +2411,7 @@ export default function ImpactEvidenceLibrary({
   }, [organizationId]);
 
   const transitionGeneratedContentReview = useCallback(async (transition) => {
+    if (!workflowOperations.reviewGeneratedDrafts) return;
     if (!generatedDraftPacket || reviewTransitionPending) return;
     setReviewTransitionPending(true);
     setMessage("");
@@ -2386,7 +2427,7 @@ export default function ImpactEvidenceLibrary({
     await refetchGeneratedDraftPacket(generatedDraftPacket.generatedContentDraftId);
     await loadGeneratedDrafts();
     setReviewTransitionPending(false);
-  }, [generatedDraftPacket, organizationId, refetchGeneratedDraftPacket, loadGeneratedDrafts, reviewTransitionPending]);
+  }, [generatedDraftPacket, organizationId, refetchGeneratedDraftPacket, loadGeneratedDrafts, reviewTransitionPending, workflowOperations]);
 
   // Requests (or replays) the existing gk_admin-only export-review queue
   // item for the currently selected, fully-reviewed draft. This never
@@ -2423,6 +2464,7 @@ export default function ImpactEvidenceLibrary({
   }, [generatedDraftPacket, organizationId, exportReviewRequestPending, refetchGeneratedDraftPacket, loadGeneratedDrafts]);
 
   const runExtractEvidence = useCallback(async () => {
+    if (!workflowOperations.extractEvidence) return;
     if (!organizationId || !sourceVersionId || workflowPending) return;
     setWorkflowPending(true);
     setWorkflowResult("");
@@ -2431,7 +2473,7 @@ export default function ImpactEvidenceLibrary({
     setWorkflowResult(result.statusCode === 200 || result.statusCode === 201
       ? `Evidence extracted: ${(result.body?.data?.evidenceItems || []).length} evidence item(s).`
       : errorText(result));
-  }, [organizationId, sourceVersionId, workflowPending]);
+  }, [organizationId, sourceVersionId, workflowPending, workflowOperations]);
 
   // P14-07: governed human final-release authority grant/revoke for the
   // EXACT current grantResponsePacket candidate id - never a latest/newest/
@@ -2523,6 +2565,7 @@ export default function ImpactEvidenceLibrary({
   ]);
 
   const runCoverageAssessment = useCallback(async () => {
+    if (!workflowOperations.assessEvidenceCoverage) return;
     if (!organizationId || !sourceVersionId || workflowPending) return;
     setWorkflowPending(true);
     setWorkflowResult("");
@@ -2534,9 +2577,10 @@ export default function ImpactEvidenceLibrary({
       return;
     }
     setCoverageAssessment(projectCoverageAssessment(result.body.data));
-  }, [organizationId, sourceVersionId, workflowPending]);
+  }, [organizationId, sourceVersionId, workflowPending, workflowOperations]);
 
   const runClaimProposal = useCallback(async () => {
+    if (!workflowOperations.proposeClaim) return;
     if (!organizationId || workflowPending) return;
     if (!isRouteUuid(selectedClaim?.evidenceItemId)) {
       setWorkflowResult("Select a claim with a server-issued evidence item id before proposing a claim.");
@@ -2550,9 +2594,10 @@ export default function ImpactEvidenceLibrary({
       ? `Claim proposal recorded (claim ${result.body?.data?.claim?.claim_id || "unknown"}).`
       : errorText(result));
     if (result.statusCode === 200 || result.statusCode === 201) await loadClaims();
-  }, [organizationId, selectedClaim, workflowPending, loadClaims]);
+  }, [organizationId, selectedClaim, workflowPending, loadClaims, workflowOperations]);
 
   const runClaimGapFollowups = useCallback(async () => {
+    if (!workflowOperations.generateClaimGapFollowups) return;
     if (!organizationId || !selectedClaimId || workflowPending) return;
     setWorkflowPending(true);
     setWorkflowResult("");
@@ -2561,9 +2606,10 @@ export default function ImpactEvidenceLibrary({
     setWorkflowResult(result.statusCode === 200 || result.statusCode === 201
       ? "Claim-gap client-followups generated."
       : errorText(result));
-  }, [organizationId, selectedClaimId, workflowPending]);
+  }, [organizationId, selectedClaimId, workflowPending, workflowOperations]);
 
   const runPotentialConflictCheck = useCallback(async () => {
+    if (!workflowOperations.recordConflict) return;
     if (!organizationId || !selectedClaimId || !secondClaimId || workflowPending) return;
     setWorkflowPending(true);
     setWorkflowResult("");
@@ -2572,9 +2618,10 @@ export default function ImpactEvidenceLibrary({
     setWorkflowResult(result.statusCode === 200 || result.statusCode === 201
       ? "Potential-conflict review candidate recorded."
       : errorText(result));
-  }, [organizationId, selectedClaimId, secondClaimId, workflowPending]);
+  }, [organizationId, selectedClaimId, secondClaimId, workflowPending, workflowOperations]);
 
   const runCoverageInternalAcceptance = useCallback(async () => {
+    if (!workflowOperations.acceptCoverageLimitation) return;
     if (!organizationId || !selectedClaimId || !coverageDimensionKey || workflowPending) return;
     setWorkflowPending(true);
     setWorkflowResult("");
@@ -2584,9 +2631,10 @@ export default function ImpactEvidenceLibrary({
       ? `Internal limitation accepted for ${coverageDimensionKey}.`
       : errorText(result));
     if (result.statusCode === 200 || result.statusCode === 201) await loadTraceability(selectedClaimId);
-  }, [organizationId, selectedClaimId, coverageDimensionKey, workflowPending, loadTraceability]);
+  }, [organizationId, selectedClaimId, coverageDimensionKey, workflowPending, loadTraceability, workflowOperations]);
 
   const runCoverageFunderAcceptance = useCallback(async () => {
+    if (!workflowOperations.acceptCoverageLimitation) return;
     if (!organizationId || !selectedClaimId || !coverageDimensionKey || workflowPending) return;
     setWorkflowPending(true);
     setWorkflowResult("");
@@ -2596,7 +2644,7 @@ export default function ImpactEvidenceLibrary({
       ? `Funder limitation accepted for ${coverageDimensionKey}.`
       : errorText(result));
     if (result.statusCode === 200 || result.statusCode === 201) await loadTraceability(selectedClaimId);
-  }, [organizationId, selectedClaimId, coverageDimensionKey, workflowPending, loadTraceability]);
+  }, [organizationId, selectedClaimId, coverageDimensionKey, workflowPending, loadTraceability, workflowOperations]);
 
   const selectedDimensionAcceptance = useMemo(() => {
     const dimension = traceability?.dimensions?.find((entry) => entry.dimensionKey === coverageDimensionKey);
@@ -2652,20 +2700,24 @@ export default function ImpactEvidenceLibrary({
     const result = await postJson(request.path, request.body);
     if (organizationIdRef.current !== requestOrganizationId) return;
     setEvidenceTabReviewPending(false);
-    const handoff = result.statusCode === 200
+    const recorded = result.statusCode === 200 && result.body?.ok === true;
+    const handoff = recorded
       ? claimProposalHandoffOutcome(result.body?.data?.claim_proposal_handoff)
       : { message: "", reloadClaims: false };
-    setEvidenceTabReviewResult(result.statusCode === 200
+    setEvidenceTabReviewResult(recorded
       ? `Evidence review decision recorded: ${evidenceTabDecision}. ${handoff.message}`.trim()
       : errorText(result));
-    if (result.statusCode === 200) {
+    if (recorded) {
       setEvidenceTabDecision("");
       setEvidenceTabLimitationNotesText("");
     }
     await loadEvidenceItems();
     // Re-read the persisted Claim Library so the proposed claim (and the
     // Evidence item's claim badge) come from the server, not this response.
-    if (handoff.reloadClaims && organizationIdRef.current === requestOrganizationId) await loadCandidateClaims();
+    if (recorded && organizationIdRef.current === requestOrganizationId) {
+      await loadReviewQueue();
+      if (handoff.reloadClaims) await loadCandidateClaims();
+    }
   }, [
     organizationId,
     evidenceReviewTarget,
@@ -2676,11 +2728,12 @@ export default function ImpactEvidenceLibrary({
     evidenceLibraryCapabilities,
     loadEvidenceItems,
     loadCandidateClaims,
+    loadReviewQueue,
   ]);
 
   const runCompleteEvidenceReview = useCallback(async () => {
     if (!organizationId || !traceability?.evidence || workflowPending) return;
-    if (!canCompleteEvidenceReview(traceability.evidence, traceability.evidenceReviewDecision)) return;
+    if (!workflowOperations.recordEvidenceReview || !canCompleteEvidenceReview(traceability.evidence, traceability.evidenceReviewDecision)) return;
     if (evidenceDecisionValidationError) return;
     setWorkflowPending(true);
     setWorkflowResult("");
@@ -2702,6 +2755,7 @@ export default function ImpactEvidenceLibrary({
       await loadTraceability(selectedClaimId);
     }
   }, [
+    workflowOperations,
     organizationId,
     traceability,
     selectedClaimId,
@@ -2714,7 +2768,7 @@ export default function ImpactEvidenceLibrary({
 
   const runCompleteClaimReview = useCallback(async () => {
     if (!organizationId || !selectedClaimId || !traceability?.claimReview || workflowPending) return;
-    if (!canCompleteClaimReview(traceability.evidence, traceability.claimReview, traceability.evidenceReviewDecision, traceability.claimReviewDecision)) return;
+    if (!workflowOperations.recordClaimReview || !canCompleteClaimReview(traceability.evidence, traceability.claimReview, traceability.evidenceReviewDecision, traceability.claimReviewDecision)) return;
     if (claimDecisionValidationError) return;
     setWorkflowPending(true);
     setWorkflowResult("");
@@ -2738,6 +2792,7 @@ export default function ImpactEvidenceLibrary({
       await loadTraceability(selectedClaimId);
     }
   }, [
+    workflowOperations,
     organizationId,
     selectedClaimId,
     traceability,
@@ -3248,7 +3303,26 @@ export default function ImpactEvidenceLibrary({
           />
         ) : null}
 
-        {reviewQueueConclusivelyEmpty ? (
+        {!candidateClaimsError && pendingClaimReviews.length > 0 ? (
+          <div className="border rounded p-2 mb-2">
+            <h6>Pending claim reviews in loaded Claims</h6>
+            <div className="small text-muted">These persisted review items still need an authorized human decision. Eligibility is not confirmed.</div>
+            <ul className="list-unstyled mb-0">
+              {pendingClaimReviews.map((item) => (
+                <li key={item.reviewQueueItemId} data-claim-review-item={item.reviewQueueItemId} className="mt-2">
+                  <div className="small text-break">Claim {item.claimId}</div>
+                  <div className="small text-muted">Review item {item.reviewQueueItemId}</div>
+                  <button type="button" className="btn btn-sm btn-outline-primary" onClick={() => {
+                    setSelectedClaimId(item.claimId);
+                    traceabilityPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                  }}>View claim</button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+
+        {reviewQueueConclusivelyEmpty && !candidateClaimsError && pendingClaimReviews.length === 0 ? (
           <div className="text-muted small">Nothing currently needs attention for this organization.</div>
         ) : null}
         <ul className="list-group">
@@ -3486,7 +3560,7 @@ export default function ImpactEvidenceLibrary({
                     <span className="text-break">{claim.claimId}</span>
                     <StatusBadge status={claim.libraryStatus} />
                   </div>
-                  {canSelectClaimForInternalGeneration(claim, audience) ? (
+                  {workflowOperations.generateDrafts && canSelectClaimForInternalGeneration(claim, audience) ? (
                     <div className="form-check small mt-2" onClick={(event) => event.stopPropagation()}>
                       <input
                         className="form-check-input"
@@ -3497,7 +3571,7 @@ export default function ImpactEvidenceLibrary({
                       <span className="form-check-label">Include in evidence summary</span>
                     </div>
                   ) : null}
-                  {canSelectClaimForFunderGeneration(claim, audience) ? (
+                  {workflowOperations.generateDrafts && canSelectClaimForFunderGeneration(claim, audience) ? (
                     <div className="form-check small mt-2" onClick={(event) => event.stopPropagation()}>
                       <input
                         className="form-check-input"
@@ -3534,7 +3608,7 @@ export default function ImpactEvidenceLibrary({
                 </button>
               ))}
             </div>
-            {audience === "internal" ? (
+            {workflowOperations.generateDrafts && audience === "internal" ? (
               <button
                 type="button"
                 className="btn btn-sm btn-primary mt-3 w-100"
@@ -3544,7 +3618,7 @@ export default function ImpactEvidenceLibrary({
                 {generatingDraft ? "Generating..." : "Generate evidence summary"}
               </button>
             ) : null}
-            {audience === "internal" ? (
+            {workflowOperations.generateDrafts && audience === "internal" ? (
               <button
                 type="button"
                 className="btn btn-sm btn-outline-primary mt-2 w-100"
@@ -3554,7 +3628,7 @@ export default function ImpactEvidenceLibrary({
                 {generatingDraft ? "Generating..." : "Generate Impact Narrative"}
               </button>
             ) : null}
-            {audience === "internal" ? (
+            {workflowOperations.generateDrafts && audience === "internal" ? (
               <button
                 type="button"
                 className="btn btn-sm btn-outline-primary mt-2 w-100"
@@ -3564,7 +3638,7 @@ export default function ImpactEvidenceLibrary({
                 {generatingDraft ? "Generating..." : "Generate Readiness Assessment"}
               </button>
             ) : null}
-            {audience === "internal" ? (
+            {workflowOperations.generateDrafts && audience === "internal" ? (
               <button
                 type="button"
                 className="btn btn-sm btn-outline-primary mt-2 w-100"
@@ -3574,7 +3648,7 @@ export default function ImpactEvidenceLibrary({
                 {generatingDraft ? "Generating..." : "Generate Data Gap Memo"}
               </button>
             ) : null}
-            {audience === "funder" ? (
+            {workflowOperations.generateDrafts && audience === "funder" ? (
               <button
                 type="button"
                 className="btn btn-sm btn-primary mt-3 w-100"
@@ -3649,14 +3723,14 @@ export default function ImpactEvidenceLibrary({
                       assessment is now stale.
                     </div>
                   )}
-                  <button
+                  {workflowOperations.assessRequirement ? <button
                     type="button"
                     className="btn btn-sm btn-outline-primary mt-2"
                     onClick={() => runAssessRequirement(requirement.requirementId)}
                     disabled={Boolean(assessingRequirementId)}
                   >
                     {assessingRequirementId === requirement.requirementId ? "Assessing..." : "Assess now"}
-                  </button>
+                  </button> : null}
                 </li>
               ))}
             </ul>
@@ -4593,7 +4667,7 @@ export default function ImpactEvidenceLibrary({
                 <h6 className="mt-3">Reviews, followups, conflicts</h6>
                 <ValueRow label="Evidence review" value={`${traceability.evidence?.review_queue_status || "none"} / ${traceability.evidence?.review_status || "none"}`} />
                 <ValueRow label="Evidence review decision" value={traceability.evidenceReviewDecision?.decisionOutcome} />
-                {canCompleteEvidenceReview(traceability.evidence, traceability.evidenceReviewDecision) ? (
+                {workflowOperations.recordEvidenceReview && canCompleteEvidenceReview(traceability.evidence, traceability.evidenceReviewDecision) ? (
                   <div className="border rounded p-2 mt-2 mb-3">
                     <div className="small fw-semibold mb-2">Record evidence review decision</div>
                     <div className="d-flex flex-wrap gap-3 mb-2">
@@ -4641,7 +4715,7 @@ export default function ImpactEvidenceLibrary({
                   label="Human-approved scope"
                   value={traceability.claimReviewDecision?.approvedAudiences?.length ? traceability.claimReviewDecision.approvedAudiences.join(", ") : undefined}
                 />
-                {canCompleteClaimReview(traceability.evidence, traceability.claimReview, traceability.evidenceReviewDecision, traceability.claimReviewDecision) ? (
+                {workflowOperations.recordClaimReview && canCompleteClaimReview(traceability.evidence, traceability.claimReview, traceability.evidenceReviewDecision, traceability.claimReviewDecision) ? (
                   <div className="border rounded p-2 mt-2 mb-3">
                     <div className="small fw-semibold mb-2">Record claim review decision</div>
                     <div className="d-flex flex-wrap gap-3 mb-2">
@@ -4870,14 +4944,14 @@ export default function ImpactEvidenceLibrary({
                 />
               </div>
               <div className="col-6 col-lg-3">
-                <button type="button" className="btn btn-sm btn-outline-primary w-100" onClick={runExtractEvidence} disabled={workflowPending}>
+                {workflowOperations.extractEvidence ? <button type="button" className="btn btn-sm btn-outline-primary w-100" onClick={runExtractEvidence} disabled={workflowPending}>
                   Extract evidence
-                </button>
+                </button> : null}
               </div>
               <div className="col-6 col-lg-3">
-                <button type="button" className="btn btn-sm btn-outline-primary w-100" onClick={runCoverageAssessment} disabled={workflowPending}>
+                {workflowOperations.assessEvidenceCoverage ? <button type="button" className="btn btn-sm btn-outline-primary w-100" onClick={runCoverageAssessment} disabled={workflowPending}>
                   View coverage assessment
-                </button>
+                </button> : null}
               </div>
             </div>
 
@@ -4895,14 +4969,14 @@ export default function ImpactEvidenceLibrary({
                 <div className="small text-muted">Selected claim: {selectedClaimId || "none"} · evidence item: {selectedClaim?.evidenceItemId || "none"}</div>
               </div>
               <div className="col-6 col-lg-4">
-                <button type="button" className="btn btn-sm btn-outline-primary w-100" onClick={runClaimProposal} disabled={workflowPending || !isRouteUuid(selectedClaim?.evidenceItemId)}>
+                {workflowOperations.proposeClaim ? <button type="button" className="btn btn-sm btn-outline-primary w-100" onClick={runClaimProposal} disabled={workflowPending || !isRouteUuid(selectedClaim?.evidenceItemId)}>
                   Propose claim
-                </button>
+                </button> : null}
               </div>
               <div className="col-6 col-lg-4">
-                <button type="button" className="btn btn-sm btn-outline-primary w-100" onClick={runClaimGapFollowups} disabled={workflowPending || !selectedClaimId}>
+                {workflowOperations.generateClaimGapFollowups ? <button type="button" className="btn btn-sm btn-outline-primary w-100" onClick={runClaimGapFollowups} disabled={workflowPending || !selectedClaimId}>
                   Generate gap followups
-                </button>
+                </button> : null}
               </div>
               <div className="col-12 col-lg-4">
                 <select className="form-select form-select-sm" value={coverageDimensionKey} onChange={(event) => setCoverageDimensionKey(event.target.value)}>
@@ -4913,14 +4987,14 @@ export default function ImpactEvidenceLibrary({
                 <ValueRow label="Selected dimension acceptance" value={selectedDimensionAcceptance} />
               </div>
               <div className="col-12 col-lg-6">
-                <button type="button" className="btn btn-sm btn-outline-primary w-100" onClick={runCoverageInternalAcceptance} disabled={workflowPending || !selectedClaimId}>
+                {workflowOperations.acceptCoverageLimitation ? <button type="button" className="btn btn-sm btn-outline-primary w-100" onClick={runCoverageInternalAcceptance} disabled={workflowPending || !selectedClaimId}>
                   Accept internal limitation for selected dimension
-                </button>
+                </button> : null}
               </div>
               <div className="col-12 col-lg-6">
-                <button type="button" className="btn btn-sm btn-outline-primary w-100" onClick={runCoverageFunderAcceptance} disabled={workflowPending || !selectedClaimId}>
+                {workflowOperations.acceptCoverageLimitation ? <button type="button" className="btn btn-sm btn-outline-primary w-100" onClick={runCoverageFunderAcceptance} disabled={workflowPending || !selectedClaimId}>
                   Accept funder limitation for selected dimension
-                </button>
+                </button> : null}
               </div>
             </div>
 
@@ -4934,9 +5008,9 @@ export default function ImpactEvidenceLibrary({
                 />
               </div>
               <div className="col-12 col-lg-4">
-                <button type="button" className="btn btn-sm btn-outline-primary w-100" onClick={runPotentialConflictCheck} disabled={workflowPending || !selectedClaimId || !secondClaimId}>
+                {workflowOperations.recordConflict ? <button type="button" className="btn btn-sm btn-outline-primary w-100" onClick={runPotentialConflictCheck} disabled={workflowPending || !selectedClaimId || !secondClaimId}>
                   Record potential conflict
-                </button>
+                </button> : null}
               </div>
             </div>
           </div>
@@ -4952,7 +5026,7 @@ export default function ImpactEvidenceLibrary({
               <ValueRow label="Requested audience" value={generatedDraftPacket.requestedAudience} />
               <ValueRow label="Draft status" value={generatedDraftPacket.draftStatus} />
               <ValueRow label="Review state" value={`${generatedDraftPacket.queueStatus} / ${generatedDraftPacket.reviewStatus}`} />
-              {canStartGeneratedContentReview(generatedDraftPacket) ? (
+              {workflowOperations.reviewGeneratedDrafts && canStartGeneratedContentReview(generatedDraftPacket) ? (
                 <button
                   type="button"
                   className="btn btn-sm btn-outline-primary me-2 mt-2"
@@ -4962,7 +5036,7 @@ export default function ImpactEvidenceLibrary({
                   Start Review
                 </button>
               ) : null}
-              {canCompleteGeneratedContentReview(generatedDraftPacket) ? (
+              {workflowOperations.reviewGeneratedDrafts && canCompleteGeneratedContentReview(generatedDraftPacket) ? (
                 <button
                   type="button"
                   className="btn btn-sm btn-outline-primary mt-2"

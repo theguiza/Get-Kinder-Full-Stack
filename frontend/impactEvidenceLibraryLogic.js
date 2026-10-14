@@ -71,7 +71,10 @@ export function organizationAccessCapabilitiesPath(organizationId) {
 // as "not available", so a failed read never mounts a GK-internal view.
 export function projectOrganizationAccessCapabilities(dto) {
   if (!dto || typeof dto !== "object" || Array.isArray(dto)) return null;
+  const required = ["internalKnowledgeWorkspace", "intakeContribution", "clientFollowupReview", "projectManagement", "improvementPlanManagement", "organizationJoinReview", "organizationAccessManagement"];
+  if (!required.every((key) => typeof dto[key] === "boolean")) return null;
   return {
+    workflowOperations: Object.fromEntries(["generateDrafts", "reviewGeneratedDrafts", "readGeneratedDrafts", "recordEvidenceReview", "recordClaimReview", "extractEvidence", "assessEvidenceCoverage", "proposeClaim", "generateClaimGapFollowups", "recordConflict", "acceptCoverageLimitation", "assessRequirement"].map((key) => [key, dto.workflowOperations?.[key] === true])),
     internalKnowledgeWorkspace: dto.internalKnowledgeWorkspace === true,
     intakeContribution: dto.intakeContribution === true,
     clientFollowupReview: dto.clientFollowupReview === true,
@@ -371,7 +374,9 @@ export function claimProposalHandoffOutcome(handoff) {
   const status = handoff?.status;
   if (status === "created" || status === "replayed") {
     return {
-      message: "KAI proposed an internal-only claim from this evidence. It still needs Get Kinder claim review before any use.",
+      message: status === "created"
+        ? "KAI proposed an internal-only claim from this evidence. It still needs Get Kinder claim review before any use."
+        : "KAI replayed the existing internal-only claim proposal. It still needs Get Kinder claim review before any use.",
       reloadClaims: true,
     };
   }
@@ -381,11 +386,11 @@ export function claimProposalHandoffOutcome(handoff) {
   if (status === "not_created") {
     const code = typeof handoff.error_code === "string" ? handoff.error_code : "unknown";
     return {
-      message: `KAI did not propose a claim from this evidence (${code}). The evidence review decision is recorded.`,
+      message: `KAI did not propose a claim from this evidence (${code}${typeof handoff.blocking_reason === "string" ? `: ${handoff.blocking_reason}` : ""}). The evidence review decision is recorded.`,
       reloadClaims: false,
     };
   }
-  return { message: "", reloadClaims: false };
+  return { message: "Claim continuation could not be confirmed. No completed claim is confirmed.", reloadClaims: false };
 }
 
 export function claimTraceabilityPath(organizationId, claimId, audience) {
@@ -2301,6 +2306,22 @@ export function projectCandidateClaims(dto) {
     evidencePublicUseAllowed: claim.evidencePublicUseAllowed ?? null,
     evidenceFunderUseAllowed: claim.evidenceFunderUseAllowed ?? null,
   })).filter((claim) => isRouteUuid(claim.claimId) && isRouteUuid(claim.evidenceItemId));
+}
+
+// Open persisted human-review work remains discoverable even when the
+// separate traceability/eligibility calculation cannot yet evaluate a claim.
+// This projection makes no eligibility or approval decision.
+export function pendingClaimReviewWork(candidateClaims, evaluatedItems = []) {
+  const evaluated = new Set(evaluatedItems.map((item) => item.claimId));
+  return candidateClaims.flatMap((claim) => {
+    if (evaluated.has(claim.claimId) || claim.claimReviewStatus !== "needs_gk_review") return [];
+    return asArray(claim.reviewQueueItems).filter((item) =>
+      item.queueType === "claim_review" && item.targetObjectType === "claim"
+      && item.targetObjectId === claim.claimId && isRouteUuid(item.reviewQueueItemId)
+      && ["open", "in_progress"].includes(item.queueStatus)
+      && item.reviewStatus === "needs_gk_review",
+    ).map((item) => ({ claimId: claim.claimId, reviewQueueItemId: item.reviewQueueItemId }));
+  });
 }
 
 export function mergeClaims(usableClaims, candidateClaims) {

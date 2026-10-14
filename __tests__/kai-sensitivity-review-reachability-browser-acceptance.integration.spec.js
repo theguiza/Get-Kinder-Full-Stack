@@ -333,7 +333,7 @@ async function runBrowserAcceptance() {
     boundOrgAdmin: "synthetic_bound_org_admin_2025_26.csv",
   });
   const FIELD_KEYS = ["households_served", "programme_month"];
-  const USERS = Object.freeze({ gkReviewer: 981, clientAdmin: 982, gkOutsider: 983, gkClientMember: 984, gkClientMemberTwoOrgs: 985 });
+  const USERS = Object.freeze({ gkReviewer: 981, clientAdmin: 982, gkOutsider: 983, boundClientAdmin: 984, boundClientAdminTwoOrgs: 985 });
 
   // The real organization-display query reads this production column when a
   // bound Get Kinder organization admin signs in. The runner's base mirror
@@ -355,10 +355,10 @@ async function runBrowserAcceptance() {
     ["clientAdmin", USERS.clientAdmin, "client_admin", false, [ORG]],
     // A global GK reviewer whose only active membership is another organization.
     ["gkOutsider", USERS.gkOutsider, "gk_reviewer", true, [ORG_B]],
-    // A global GK reviewer whose membership in this organization is a client role.
-    ["gkClientMember", USERS.gkClientMember, ["gk_reviewer", "client_admin"], true, [ORG]],
-    // The same mixed role in two organizations, for the context-switch checks.
-    ["gkClientMemberTwoOrgs", USERS.gkClientMemberTwoOrgs, ["gk_reviewer", "client_admin"], true, [ORG, ORG_B]],
+    // A bound client administrator without a global GK role.
+    ["boundClientAdmin", USERS.boundClientAdmin, "client_admin", false, [ORG]],
+    // The same client role in two organizations, for context-switch checks.
+    ["boundClientAdminTwoOrgs", USERS.boundClientAdminTwoOrgs, "client_admin", false, [ORG, ORG_B]],
   ]) {
     const [globalRole, membershipRole] = Array.isArray(role) ? role : [role, role];
     await query("INSERT INTO public.userdata (id) VALUES ($1) ON CONFLICT DO NOTHING", [legacyId]);
@@ -371,6 +371,15 @@ async function runBrowserAcceptance() {
     if (global) {
       await query("INSERT INTO kai.user_roles (user_id, role_id) SELECT $1::uuid, role_id FROM kai.roles WHERE role_name = $2", [kaiUser.user_id, globalRole]);
     }
+  }
+  // October 14: global GK actors now mount the GK workspace (covered by
+  // the assembled J3 campaign). Retain client-surface sensitivity, replay,
+  // stale-response, and zero-write coverage using the accepted bound-admin
+  // exception, without granting this client a global GK role.
+  await query("INSERT INTO public.organizations (id, name, status) VALUES (1986, 'Bound Synthetic Admin Organization', 'active')");
+  await query("INSERT INTO kai.gk_organization_bindings (gk_organization_id, kai_organization_id, status) VALUES (1986, $1::uuid, 'active')", [ORG]);
+  for (const legacyId of [USERS.boundClientAdmin, USERS.boundClientAdminTwoOrgs]) {
+    await query("INSERT INTO public.user_org_memberships (user_id, org_id, role, is_active) VALUES ($1, 1986, 'admin', true)", [legacyId]);
   }
   const gkReviewerService = {
     actorType: "human",
@@ -544,8 +553,8 @@ async function runBrowserAcceptance() {
   const gkPage = await openPage(browser, { baseUrl, legacyUserId: USERS.gkReviewer });
   const clientPage = await openPage(browser, { baseUrl, legacyUserId: USERS.clientAdmin });
   const outsiderPage = await openPage(browser, { baseUrl, legacyUserId: USERS.gkOutsider });
-  const mixedPage = await openPage(browser, { baseUrl, legacyUserId: USERS.gkClientMember });
-  const twoOrgPage = await openPage(browser, { baseUrl, legacyUserId: USERS.gkClientMemberTwoOrgs });
+  const mixedPage = await openPage(browser, { baseUrl, legacyUserId: USERS.boundClientAdmin });
+  const twoOrgPage = await openPage(browser, { baseUrl, legacyUserId: USERS.boundClientAdminTwoOrgs });
   const results = {};
   try {
     const profileQueue = await seedFreshFile(FILE_QUEUE, NAMES.queue, "a");
@@ -772,13 +781,10 @@ async function runBrowserAcceptance() {
     });
 
     // -----------------------------------------------------------------------
-    // Mixed role (owner decision 2026-10-11): a global gk_reviewer whose
-    // active membership in this organization is client_admin. The client
-    // Studio stays mounted; Reviews offers the existing sensitivity review for
-    // files at that stage, and every read and write still goes through the
-    // existing review-cockpit routes, which authorize this actor.
-    // -----------------------------------------------------------------------
-    const mixedActor = kaiUserIds.gkClientMember;
+    // Client-surface sensitivity review uses the binding-derived administrator
+    // exception. Mixed global GK reviewers now use the GK workspace, proved
+    // by the integrated campaign instead of pinning the former client UI.
+    const mixedActor = kaiUserIds.boundClientAdmin;
     const mixedProfiles = {};
     const mixedQueueItems = {};
     const MIXED_ALLOWED_PASSIVE = new Set([`${COCKPIT}/capabilities`, `${COCKPIT}/queue`]);
@@ -796,7 +802,7 @@ async function runBrowserAcceptance() {
     }
     const mixedBody = async () => mixedPage.text();
 
-    await test("case 9 (mixed role): the client Studio mounts, Reviews offers 'Review sensitivity & allowed use' only for files at that stage, and loading it reads no GK detail and writes nothing", async () => {
+    await test("case 9 (bound client administrator): the client Studio mounts, Reviews offers 'Review sensitivity & allowed use' only for files at that stage, and loading it reads no GK detail and writes nothing", async () => {
       mixedProfiles.queue = await seedFreshFile(FILE_MIXED_QUEUE, NAMES.mixedQueue, "c");
       mixedProfiles.zero = await seedFreshFile(FILE_MIXED_ZERO, NAMES.mixedZero, "d");
       mixedProfiles.nmi = await seedFreshFile(FILE_MIXED_NMI, NAMES.mixedNmi, "e");
@@ -841,7 +847,7 @@ async function runBrowserAcceptance() {
       results.case9_mixed_role_action_offered = "PASS";
     });
 
-    await test("case 10 (mixed role, existing review work): opening the review reads the file's profile and reuses its queue item; 'reviewed' records one decision, resolves the item, and hands off one needs_gk_review candidate - nothing downstream", async () => {
+    await test("case 10 (bound client administrator, existing review work): opening the review reads the file's profile and reuses its queue item; 'reviewed' records one decision, resolves the item, and hands off one needs_gk_review candidate - nothing downstream", async () => {
       const profileId = mixedProfiles.queue;
       let mark = mixedPage.mark();
       await mixedPage.clickFileReviewAction(FILE_MIXED_QUEUE);
@@ -892,7 +898,7 @@ async function runBrowserAcceptance() {
       const decisions = await query(
         "SELECT decision_outcome, decided_by::text, decided_by_role FROM kai.intake_sensitivity_review_decisions WHERE organization_id = $1::uuid AND intake_sensitivity_profile_id = $2::uuid",
         [ORG, profileId]);
-      assert.deepEqual(decisions, [{ decision_outcome: "reviewed", decided_by: mixedActor, decided_by_role: "gk_reviewer" }]);
+      assert.deepEqual(decisions, [{ decision_outcome: "reviewed", decided_by: mixedActor, decided_by_role: "client_admin" }]);
       const candidates = await query(
         "SELECT candidate_status, created_by::text FROM kai.intake_source_candidates WHERE organization_id = $1::uuid AND intake_sensitivity_profile_id = $2::uuid",
         [ORG, profileId]);
@@ -905,7 +911,7 @@ async function runBrowserAcceptance() {
       results.case10_mixed_existing_queue_reviewed = "PASS";
     });
 
-    await test("case 11 (mixed role, zero review work): 'Start review work' is an explicit step that creates one item and its audit; reopening reuses it; the 'reviewed' decision then hands off", async () => {
+    await test("case 11 (bound client administrator, zero review work): 'Start review work' is an explicit step that creates one item and its audit; reopening reuses it; the 'reviewed' decision then hands off", async () => {
       const profileId = mixedProfiles.zero;
       await mixedPage.clickButton("Close review");
       let mark = mixedPage.mark();
@@ -971,7 +977,7 @@ async function runBrowserAcceptance() {
       results.case11_mixed_zero_queue = "PASS";
     });
 
-    await test("case 12 (mixed role): 'needs_more_information' stays open with no candidate, and a decision made stale underneath is refused (409) and refreshed, never overridden", async () => {
+    await test("case 12 (bound client administrator): 'needs_more_information' stays open with no candidate, and a decision made stale underneath is refused (409) and refreshed, never overridden", async () => {
       const profileId = mixedProfiles.nmi;
       await mixedPage.clickButton("Close review");
       await mixedPage.clickFileReviewAction(FILE_MIXED_NMI);
@@ -1018,7 +1024,7 @@ async function runBrowserAcceptance() {
       results.case12_mixed_needs_more_information_and_stale = "PASS";
     });
 
-    await test("case 13 (mixed role): when the P1-07 handoff refuses, the recorded decision is shown with 'Source candidate not created', nothing is retried, and no candidate exists", async () => {
+    await test("case 13 (bound client administrator): when the P1-07 handoff refuses, the recorded decision is shown with 'Source candidate not created', nothing is retried, and no candidate exists", async () => {
       // Review work first (the P1-06 predicate holds), then, in this throwaway
       // runner database only, make the profile fail the P1-07 predicate - the
       // same technique as the P1-07 handoff integration scenario E.
@@ -1149,7 +1155,7 @@ async function runBrowserAcceptance() {
         [legacyGkOrganizationId, "Bound Synthetic Admin Organization"]);
       await query("INSERT INTO public.user_org_memberships (user_id, org_id, role, is_active) VALUES ($1, $2, 'admin', true)",
         [legacyOrgAdminId, legacyGkOrganizationId]);
-      await query("INSERT INTO kai.gk_organization_bindings (gk_organization_id, kai_organization_id, status) VALUES ($1, $2::uuid, 'active')",
+      await query("INSERT INTO kai.gk_organization_bindings (gk_organization_id, kai_organization_id, status) VALUES ($1, $2::uuid, 'active') ON CONFLICT DO NOTHING",
         [legacyGkOrganizationId, ORG]);
 
       const kaiAdmin = await findOrCreateKaiUserByLegacyPublicUserdataId({

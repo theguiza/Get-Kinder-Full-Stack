@@ -176,7 +176,7 @@ async function openPage(browser, { baseUrl, legacyUserId }) {
       if (requests.some((request) => !request.done)) quietSince = Date.now();
       else if (Date.now() - quietSince > 500) return;
     }
-    throw new Error("network never went idle");
+    throw new Error(`network never went idle: ${JSON.stringify(requests.filter((request) => !request.done))}`);
   };
   const waitFor = async (predicate, description, { timeout = 15000 } = {}) => {
     const deadline = Date.now() + timeout;
@@ -276,6 +276,7 @@ async function openPage(browser, { baseUrl, legacyUserId }) {
         data: parsed?.data ?? null,
       };
     })()`),
+    activate: () => browser.send("Page.bringToFront", {}, sessionId),
     async goto(path) {
       await browser.send("Page.navigate", { url: `${baseUrl}${path}` }, sessionId);
       await idle();
@@ -359,6 +360,7 @@ async function runBrowserAcceptance() {
     freshNullable: 2314, // ordinary account; first KAI request under the runner's nullable mirror (J2-0)
     memberA: 2315, // ordinary account; stored client_contributor of Org A (P3 organization-facing readback)
     clientReviewerA: 2316, // ordinary account; stored client_contributor of Org A, made client_reviewer by Team & Access in P3
+    mixedOperator: 2318, // global GK operator + stored client_admin; no organization GK grant
     memberB: 2317, // ordinary account; stored client_contributor of Org B (P3 isolation)
   });
   const SITE_ADMINS = new Set([USERS.superGk, USERS.superNoRole, USERS.superGkStored]);
@@ -411,6 +413,7 @@ async function runBrowserAcceptance() {
     "INSERT INTO kai.user_roles (user_id, role_id) SELECT $1::uuid, role_id FROM kai.roles WHERE role_name = $2", [kaiUserIds[key], role]);
   await insertMembership(ORG_A, "superNoRole", "client_contributor");
   await insertMembership(ORG_A, "mixed", "client_admin");
+  await insertMembership(ORG_A, "mixedOperator", "client_admin");
   await insertMembership(ORG_A, "storedAdmin", "client_admin");
   await insertMembership(ORG_B, "otherOrgReviewer", "gk_reviewer");
   await insertMembership(ORG_A, "gkOperator", "gk_operator");
@@ -982,6 +985,10 @@ async function runBrowserAcceptance() {
       assert.deepEqual(organizations.data.items.map((item) => item.organization_id), [ORG_A]);
       assert.deepEqual([access.data.internalKnowledgeWorkspace, access.data.organizationAccessManagement, access.data.clientFollowupReview], [true, false, false]);
       assert.equal(cockpit.data.can_manage_sensitivity_review, true);
+      const projects = await reviewerPage.fetchJson("GET", `${INTAKE}/admin/organizations/${ORG_A}/engagements`);
+      assert.equal(projects.status, 200);
+      assert.ok(projects.data.items.some((p) => p.engagement_id === PROJECT_A));
+      assert.equal(access.data.projectManagement, false, "selecting a project grants no mutation");
       results.J2_3 = "PASS: organization ORG_A listed; GK Studio; cockpit capability; no Team & Access or follow-up capability";
     });
 
@@ -1028,26 +1035,77 @@ async function runBrowserAcceptance() {
     // J3. Mixed-role reviewer: global gk_reviewer + client_admin membership
     // =====================================================================
     const mixedPage = await session(USERS.mixed);
-    await test("J3-1: the mixed-role reviewer (granted global gk_reviewer by the governed route) gets the client Studio, the sensitivity capability, and completes the decision with handoff", async () => {
+    await test("J3-1: the mixed-role reviewer (granted global gk_reviewer by the governed route) gets the GK Studio, the sensitivity capability, and completes the decision with handoff", async () => {
       const grant = await superGkPage.fetchJson("PUT", globalRolePath(USERS.mixed), { role_name: "gk_reviewer", action: "assign" });
       assert.equal(grant.status, 200);
       await mixedPage.goto("/impact-library");
       await mixedPage.waitForText("Knowledge Studio");
       const access = await mixedPage.fetchJson("GET", accessCapabilitiesPath(ORG_A));
       const cockpit = await mixedPage.fetchJson("GET", cockpitCapabilitiesPath(ORG_A));
-      assert.deepEqual([access.data.internalKnowledgeWorkspace, cockpit.data.can_manage_sensitivity_review], [false, true]);
+      assert.deepEqual([access.data.internalKnowledgeWorkspace, cockpit.data.can_manage_sensitivity_review], [true, true]);
       await openReviewWork(ORG_A, profiles.mixed);
       const decided = await decideReviewedByApi(mixedPage, profiles.mixed);
       assert.equal(decided.status, 200, JSON.stringify(decided));
       assert.equal(decided.data.source_candidate_handoff.status, "created");
       assert.deepEqual(await decisionRows(profiles.mixed), [{ decision_outcome: "reviewed", decided_by: kaiUserIds.mixed, decided_by_role: "gk_reviewer" }]);
-      results.J3_1 = "PASS: client Studio; cockpit capability; decision gk_reviewer; P1-07 created (client-Studio UI path itself proven by the reachability spec cases 10-11)";
+      results.J3_1 = "PASS: GK Studio; cockpit capability; decision gk_reviewer; P1-07 created (client-Studio UI path itself proven by the reachability spec cases 10-11)";
     });
 
     // =====================================================================
     // J4. Bound organization administrator (binding-derived client_admin)
     // =====================================================================
     const boundAdminPage = await session(USERS.boundAdmin);
+    await test("J3-1A: mixed GK reviewer and operator mount their workspace and all selected-view reads, with operation-specific controls", async () => {
+      const grant = await superGkPage.fetchJson("PUT", globalRolePath(USERS.mixedOperator), { role_name: "gk_operator", action: "assign" });
+      assert.equal(grant.status, 200);
+      const operatorPage = await session(USERS.mixedOperator);
+      for (const [page, reviewer] of [[mixedPage, true], [operatorPage, false]]) {
+        const before = await allKaiCounts();
+        const access = await page.fetchJson("GET", accessCapabilitiesPath(ORG_A));
+        assert.equal(access.data.internalKnowledgeWorkspace, true);
+        assert.equal(access.data.workflowOperations.recordEvidenceReview, reviewer);
+        assert.equal(access.data.workflowOperations.recordClaimReview, reviewer);
+        for (const operation of ["extractEvidence", "assessEvidenceCoverage", "proposeClaim", "acceptCoverageLimitation"]) {
+          assert.equal(access.data.workflowOperations[operation], false, operation);
+        }
+        for (const suffix of ["engagements", "claim-library/candidates", "evidence-library/candidates", "sources", "requirements", "review-queue", `engagements/${PROJECT_A}/funder-requirements`]) {
+          const read = await page.fetchJson("GET", `${INTAKE}/admin/organizations/${ORG_A}/${suffix}`);
+          assert.equal(read.status, 200, `${suffix}: ${JSON.stringify(read)}`);
+        }
+        await openKnowledgeStudio(page);
+        await page.selectProject(PROJECT_A);
+        await page.clickTab("Evidence");
+        await page.idle();
+        assert.equal(await page.evaluate('document.getElementById("gk-shell-project-select").value'), PROJECT_A);
+        for (const label of ["Extract evidence", "View coverage assessment", "Propose claim", "Accept internal limitation for selected dimension"]) {
+          assert.equal(await page.visibleButton(label), false, label);
+        }
+        await assertNothingWritten(before, "mixed GK workspace and readback");
+        const cross = await page.fetchJson("GET", accessCapabilitiesPath(ORG_B));
+        assert.equal(cross.status, 403);
+      }
+      // A failed or malformed refresh is unknown, never a confirmed client.
+      for (const malformed of [false, true]) {
+        await mixedPage.activate();
+        await mixedPage.idle();
+        await new Promise((resolve) => setTimeout(resolve, 1100));
+        await mixedPage.evaluate(`(() => { const original = window.fetch; window.restoreAccessFetch = () => { window.fetch = original; };
+          window.fetch = (...args) => String(args[0]).includes('/access-capabilities')
+            ? Promise.resolve(new Response(JSON.stringify(${malformed ? '{ ok: true, data: {} }' : '{ ok: false }'}), { status: ${malformed ? 200 : 503}, headers: { 'Content-Type': 'application/json' } }))
+            : original(...args);
+          window.dispatchEvent(new Event('focus'));
+        })()`);
+        try {
+          await mixedPage.waitForText("Workspace access could not be confirmed.");
+          assert.equal(await mixedPage.evaluate('Boolean(document.querySelector(".nav-tabs"))'), false);
+        } finally {
+          await mixedPage.evaluate("window.restoreAccessFetch()");
+        }
+        await mixedPage.clickButton("Retry access check");
+        await mixedPage.waitFor(async () => mixedPage.evaluate('Boolean(document.querySelector(".nav-tabs"))'), "workspace restored from authoritative capabilities");
+      }
+    });
+
     await test("J4-1: the bound organization administrator starts review work and records 'reviewed' from client Knowledge Studio Reviews; attributed client_admin; P1-07 created by them", async () => {
       await boundAdminPage.goto("/impact-library");
       await boundAdminPage.waitForText("Knowledge Studio");
@@ -1295,11 +1353,31 @@ async function runBrowserAcceptance() {
       const [, second] = await evidenceForCandidate(candidate.intake_source_candidate_id);
       const evidenceLibrary = await mixedPage.fetchJson("GET", `${INTAKE}/admin/organizations/${ORG_A}/evidence-library/candidates`);
       const claimLibrary = await mixedPage.fetchJson("GET", `${INTAKE}/admin/organizations/${ORG_A}/claim-library/candidates`);
-      assert.deepEqual([evidenceLibrary.status, claimLibrary.status], [403, 403],
-        "the two GK Studio work lists reject the mixed role even though the review write below accepts it");
+      assert.deepEqual([evidenceLibrary.status, claimLibrary.status], [200, 200],
+        "the two GK Studio work lists admit the effective reviewer with exact-organization access");
+      await openKnowledgeStudio(mixedPage);
+      await mixedPage.selectProject(PROJECT_A);
+      await mixedPage.clickTab("Evidence");
+      await mixedPage.idle();
+      assert.ok(await mixedPage.clickInEvidenceItem(second.evidence_item_id, "Review evidence"));
+      await mixedPage.waitFor(async () => mixedPage.evaluate(`Boolean(document.getElementById("evidence-library-review-decision-supported"))`), "mixed reviewer decision");
+      await mixedPage.evaluate(`document.getElementById("evidence-library-review-decision-supported").click()`);
+      await mixedPage.evaluate(`(() => { const original = window.fetch; window.fetch = async (...args) => {
+        const response = await original(...args);
+        if (String(args[0]).includes("/evidence-review/") && args[1]?.method === "POST") {
+          const body = await response.clone().json(); window.evidenceDecisionResponse = { status: response.status, data: body.data };
+        }
+        return response;
+      }; })()`);
       const before = await allKaiCounts();
-      const reviewed = await mixedPage.fetchJson("POST", evidenceReviewPath(ORG_A, second.evidence_item_id, second.queue_item),
-        { expected_updated_at: new Date(second.updated_at).toISOString(), decision: "supported" });
+      const reviewMark = mixedPage.mark();
+      assert.ok(await mixedPage.clickInEvidenceItem(second.evidence_item_id, "Record Evidence Review Decision"));
+      await mixedPage.waitForText("KAI proposed an internal-only claim");
+      await mixedPage.idle();
+      const reviewed = await mixedPage.evaluate("window.evidenceDecisionResponse");
+      for (const suffix of ["/evidence-library/candidates", "/claim-library/candidates", "/review-queue"]) {
+        assert.ok(mixedPage.requestsSince(reviewMark).some((r) => r.url.includes(suffix) && r.status === 200), `persisted readback: ${suffix}`);
+      }
       const changed = changedTables(before, await allKaiCounts());
       const [claim] = await query("SELECT claim_id::text FROM kai.claims WHERE organization_id = $1::uuid AND evidence_item_id = $2::uuid", [ORG_A, second.evidence_item_id]);
       const [row] = await query("SELECT decided_by::text, decided_by_role, decision_outcome FROM kai.evidence_review_decisions WHERE organization_id = $1::uuid AND evidence_item_id = $2::uuid",
@@ -1348,7 +1426,12 @@ async function runBrowserAcceptance() {
       const facts = await mixedPage.fetchJson("GET", `${INTAKE}/admin/organizations/${ORG_A}/impact-facts`);
       assert.ok(!JSON.stringify(facts.data ?? {}).includes(claim.claim_id), "the proposed claim is not an approved Impact Fact");
 
+      await mixedPage.clickTab("Reviews");
+      await mixedPage.waitForText(`Claim ${claim.claim_id}`);
       // The separate human claim review by an independently authorized GK reviewer.
+      await openKnowledgeStudio(reviewerPage);
+      await reviewerPage.clickTab("Reviews");
+      await reviewerPage.waitForText(`Claim ${claim.claim_id}`);
       const library = await reviewerPage.fetchJson("GET", `${INTAKE}/admin/organizations/${ORG_A}/claim-library/candidates`);
       const listed = library.data?.items?.find((item) => item.claimId === claim.claim_id);
       assert.ok(listed, "the GK reviewer discovers the proposed claim");
