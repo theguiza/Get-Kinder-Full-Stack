@@ -64,7 +64,7 @@ export async function listEligibleClaimsForAudience(input, dependencies = {}) {
     actorContext,
     ELIGIBLE_CLAIMS_OPERATION,
     input.organizationId,
-    { allowedRoles: ELIGIBLE_CLAIMS_ALLOWED_ROLES },
+    { allowedRoles: ELIGIBLE_CLAIMS_ALLOWED_ROLES, combineGlobalRoles: true },
   );
   if (!auth.ok) {
     return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers });

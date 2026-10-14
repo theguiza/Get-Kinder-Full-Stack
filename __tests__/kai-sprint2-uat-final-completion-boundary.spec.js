@@ -118,13 +118,13 @@ test("P2-11 read is disabled when KAI_SPRINT2_ENABLED is not true", async () => 
 
 // --- intake-context engagement read ---
 
-test("engagement-context read allowed roles are exactly gk_admin/gk_operator and the three same-org client roles", () => {
+test("engagement-context read allowed roles are the three GK roles and the three same-org client roles", () => {
   assert.deepEqual(
     [...__engagementContextServiceContract.LIST_ENGAGEMENTS_ALLOWED_ROLES].sort(),
-    ["client_admin", "client_contributor", "client_reviewer", "gk_admin", "gk_operator"],
+    ["client_admin", "client_contributor", "client_reviewer", "gk_admin", "gk_operator", "gk_reviewer"],
   );
   // Reading project context never widens creating or updating it.
-  for (const key of ["CREATE_ENGAGEMENT_ALLOWED_ROLES", "UPDATE_ENGAGEMENT_PROJECT_DETAILS_ALLOWED_ROLES", "UPDATE_ENGAGEMENT_TARGET_ALLOWED_ROLES", "CLASSIFY_FUNDER_REQUIREMENTS_ALLOWED_ROLES"]) {
+  for (const key of ["CREATE_ENGAGEMENT_ALLOWED_ROLES", "UPDATE_ENGAGEMENT_PROJECT_DETAILS_ALLOWED_ROLES", "UPDATE_ENGAGEMENT_TARGET_ALLOWED_ROLES"]) {
     assert.deepEqual([...__engagementContextServiceContract[key]].sort(), ["client_admin", "gk_admin", "gk_operator"], key);
   }
 });
@@ -165,7 +165,7 @@ test("engagement-context read allows a bound client_admin to read its own organi
   }]);
 });
 
-test("engagement-context read admits a same-org client_reviewer with the same project DTO, and still rejects gk_reviewer before any repository call", async () => {
+test("engagement-context read admits a same-org client_reviewer with the same project DTO, and admits gk_reviewer without widening mutation roles", async () => {
   const allowed = await listAuthorizedEngagements(
     { organizationId: ORG, actorContext: clientReviewerActor },
     { env: enabledEnv, listEngagementsForOrganization: async () => [{ engagement_id: "e1", organization_id: ORG, extra: "must not leak" }] },
@@ -173,12 +173,11 @@ test("engagement-context read admits a same-org client_reviewer with the same pr
   assert.equal(allowed.ok, true);
   assert.equal(allowed.data.items.length, 1);
   assert.doesNotMatch(JSON.stringify(allowed), /must not leak/);
-  const denied = await listAuthorizedEngagements(
+  const reviewer = await listAuthorizedEngagements(
     { organizationId: ORG, actorContext: gkReviewerActor },
-    { env: enabledEnv, listEngagementsForOrganization: async () => { throw new Error("must not be called"); } },
+    { env: enabledEnv, listEngagementsForOrganization: async () => [] },
   );
-  assert.equal(denied.ok, false);
-  assert.equal(denied.error.code, "authorization_denied");
+  assert.equal(reviewer.ok, true);
 });
 
 test("engagement-context read fails closed for cross-tenant membership", async () => {

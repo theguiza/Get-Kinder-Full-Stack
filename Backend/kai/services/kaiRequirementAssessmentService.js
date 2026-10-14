@@ -156,7 +156,7 @@ export async function getOrganizationRequirementAssessment(input, dependencies =
     actorContext,
     READ_REQUIREMENT_ASSESSMENT_OPERATION,
     input.organizationId,
-    { allowedRoles: READ_REQUIREMENT_ASSESSMENT_ALLOWED_ROLES },
+    { allowedRoles: READ_REQUIREMENT_ASSESSMENT_ALLOWED_ROLES, combineGlobalRoles: true },
   );
   if (!auth.ok) {
     return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers });
@@ -199,7 +199,7 @@ export async function listOrganizationRequirementsReadiness(input, dependencies 
     actorContext,
     LIST_REQUIREMENTS_READINESS_OPERATION,
     input.organizationId,
-    { allowedRoles: LIST_REQUIREMENTS_READINESS_ALLOWED_ROLES },
+    { allowedRoles: LIST_REQUIREMENTS_READINESS_ALLOWED_ROLES, combineGlobalRoles: true },
   );
   if (!auth.ok) {
     return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers });

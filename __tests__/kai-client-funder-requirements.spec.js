@@ -284,7 +284,7 @@ test("contract: client read admits the read_intake set; every GK classify/assess
     [...__clientFunderRequirementsServiceContract.CLIENT_FUNDER_REQUIREMENTS_ALLOWED_ROLES].sort(),
     [...KAI_SPRINT2_P0_OPERATION_ROLES.read_intake].sort(),
   );
-  assert.deepEqual([...__engagementContextServiceContract.CLASSIFY_FUNDER_REQUIREMENTS_ALLOWED_ROLES].sort(), ["client_admin", "gk_admin", "gk_operator"]);
+  assert.deepEqual([...__engagementContextServiceContract.CLASSIFY_FUNDER_REQUIREMENTS_ALLOWED_ROLES].sort(), ["client_admin", "gk_admin", "gk_operator", "gk_reviewer"]);
   assert.deepEqual([...__engagementContextServiceContract.UPDATE_ENGAGEMENT_TARGET_ALLOWED_ROLES].sort(), ["client_admin", "gk_admin", "gk_operator"]);
   assert.deepEqual([...__requirementAssessmentServiceContract.ASSESS_REQUIREMENT_ALLOWED_ROLES].sort(), ["gk_admin", "gk_reviewer"]);
   assert.deepEqual([...__requirementAssessmentServiceContract.READ_REQUIREMENT_ASSESSMENT_ALLOWED_ROLES].sort(), ["gk_admin", "gk_operator", "gk_reviewer"]);

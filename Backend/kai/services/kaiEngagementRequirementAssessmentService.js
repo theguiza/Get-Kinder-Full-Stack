@@ -340,7 +340,7 @@ export async function getEngagementRequirementAssessment(input, dependencies = {
     actorContext,
     READ_ENGAGEMENT_REQUIREMENT_ASSESSMENT_OPERATION,
     input.organizationId,
-    { allowedRoles: READ_ENGAGEMENT_REQUIREMENT_ASSESSMENT_ALLOWED_ROLES },
+    { allowedRoles: READ_ENGAGEMENT_REQUIREMENT_ASSESSMENT_ALLOWED_ROLES, combineGlobalRoles: true },
   );
   if (!auth.ok) {
     return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers });

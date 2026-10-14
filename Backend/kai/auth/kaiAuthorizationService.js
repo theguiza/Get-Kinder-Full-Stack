@@ -25,6 +25,20 @@ const P0_CLIENT_WRITE_OPERATIONS = new Set(["create_intake_batch", "create_intak
 
 const P0_CLIENT_WRITE_ROLES = new Set(["client_admin"]);
 
+// Owner-authorized workspace/read reconciliation (2026-10-14). This is
+// workspace admission only, never promotion, assessment, or approval authority.
+// Preserve existing organization GK grants and admit global GK capability
+// only with active access to the exact organization, through the same validator.
+const KNOWLEDGE_WORKSPACE_ROLES = new Set(["gk_admin", "gk_operator", "gk_reviewer"]);
+
+export function validateActorCanAccessKnowledgeWorkspace(actorContext, organizationId) {
+  if (actorContext?.actorType !== "human") return { ok: false, error_code: "authorization_denied" };
+  return validateActorCanPerformOperation(actorContext, "read_knowledge_workspace", organizationId, {
+    allowedRoles: KNOWLEDGE_WORKSPACE_ROLES,
+    combineGlobalRoles: true,
+  });
+}
+
 function activeMembershipsForOrg(actorContext, organizationId) {
   return (actorContext?.organizationMemberships || []).filter(
     (membership) =>

@@ -161,7 +161,7 @@ export async function listOrganizationEvidenceLibrary(input = {}, dependencies =
     input.actorContext,
     EVIDENCE_LIBRARY_READ_OPERATION,
     organizationId,
-    { allowedRoles: EVIDENCE_LIBRARY_READ_ROLES },
+    { allowedRoles: EVIDENCE_LIBRARY_READ_ROLES, combineGlobalRoles: true },
   );
   if (!roleAuth.ok) {
     return buildKaiError(roleAuth.error_code || "authorization_denied", { blockers: roleAuth.blockers });

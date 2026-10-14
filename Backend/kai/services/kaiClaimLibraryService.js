@@ -154,7 +154,7 @@ export async function listClaimLibraryCandidates(input = {}, dependencies = {}) 
     input.actorContext,
     CLAIM_LIBRARY_READ_OPERATION,
     organizationId,
-    { allowedRoles: CLAIM_LIBRARY_READ_ROLES },
+    { allowedRoles: CLAIM_LIBRARY_READ_ROLES, combineGlobalRoles: true },
   );
   if (!roleAuth.ok) {
     return buildKaiError(roleAuth.error_code || "authorization_denied", { blockers: roleAuth.blockers });

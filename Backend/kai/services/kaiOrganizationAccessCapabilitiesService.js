@@ -1,9 +1,18 @@
+import { __generatedContentServiceContract } from "./kaiGeneratedContentService.js";
+import { __generatedDraftLibraryServiceContract } from "./kaiGeneratedDraftLibraryService.js";
+import { __humanReviewServiceContract } from "./kaiHumanReviewService.js";
+import { __evidenceLineageServiceContract } from "./kaiEvidenceLineageService.js";
+import { __evidenceCoverageAssessmentServiceContract } from "./kaiEvidenceCoverageAssessmentService.js";
+import { __claimProposalServiceContract } from "./kaiClaimProposalService.js";
+import { __claimGapFollowupServiceContract } from "./kaiClaimGapFollowupService.js";
+import { __conflictReviewCandidateServiceContract } from "./kaiConflictReviewCandidateService.js";
+import { __coverageReviewDecisionServiceContract } from "./kaiCoverageReviewDecisionService.js";
+import { __requirementAssessmentServiceContract } from "./kaiRequirementAssessmentService.js";
 import { isKaiSprint2Enabled } from "../config/kaiSprint2Config.js";
 import { KAI_SPRINT2_P0_OPERATION_ROLES, KAI_SPRINT2_P0_PATTERNS } from "../config/kaiSprint2P0Contract.js";
 import { buildKaiError } from "../errors/kaiErrors.js";
-import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationService.js";
+import { validateActorCanPerformOperation, validateActorCanAccessKnowledgeWorkspace } from "../auth/kaiAuthorizationService.js";
 import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
-import { __claimLibraryServiceContract } from "./kaiClaimLibraryService.js";
 import { __clientFollowupReadServiceContract } from "./kaiClientFollowupReadService.js";
 import { __engagementContextServiceContract } from "./kaiEngagementContextService.js";
 import { __improvementPracticeServiceContract } from "./kaiImprovementPracticeService.js";
@@ -23,7 +32,7 @@ import { __kaiAccessAdministrationServiceContract } from "./kaiAccessAdministrat
  * authority is granted; like the review-cockpit capabilities read, it only
  * reports.
  *
- * - internalKnowledgeWorkspace: the GK claim-library read policy. The GK
+ * - internalKnowledgeWorkspace: effective GK workspace admission. The GK
  *   Knowledge Studio / Impact Library views (every GK-internal read they
  *   make) are mounted only when this is true; otherwise the client views use
  *   client-safe reads only.
@@ -52,7 +61,6 @@ const ACCESS_CAPABILITIES_OPERATION = "read_organization_access_capabilities";
 const ACCESS_CAPABILITIES_ALLOWED_ROLES = new Set(KAI_SPRINT2_P0_OPERATION_ROLES.read_intake);
 const UUID_RE = KAI_SPRINT2_P0_PATTERNS.uuid;
 
-const { CLAIM_LIBRARY_READ_OPERATION, CLAIM_LIBRARY_READ_ROLES } = __claimLibraryServiceContract;
 const { LIST_CLIENT_FOLLOWUP_WORKFLOWS_ALLOWED_ROLES, LIST_CLIENT_FOLLOWUP_WORKFLOWS_OPERATION } =
   __clientFollowupReadServiceContract;
 const { CREATE_ENGAGEMENT_ALLOWED_ROLES, CREATE_ENGAGEMENT_OPERATION } = __engagementContextServiceContract;
@@ -94,6 +102,61 @@ function passes(actorContext, operation, organizationId, allowedRoles) {
   return validateActorCanPerformOperation(actorContext, operation, organizationId, options).ok === true;
 }
 
+// Each UI capability projects the governing service's exact role set and mode.
+// These booleans never replace service authorization or object eligibility.
+function workflowOperations(actorContext, organizationId) {
+  return {
+    generateDrafts: validateActorCanPerformOperation(
+      actorContext, __generatedContentServiceContract.CREATE_EVIDENCE_SUMMARY_OPERATION, organizationId,
+      { allowedRoles: __generatedContentServiceContract.GENERATED_CONTENT_ALLOWED_ROLES },
+    ).ok === true,
+    reviewGeneratedDrafts: validateActorCanPerformOperation(
+      actorContext, __generatedContentServiceContract.COMPLETE_GENERATED_CONTENT_REVIEW_OPERATION, organizationId,
+      { allowedRoles: __generatedContentServiceContract.COMPLETE_GENERATED_CONTENT_REVIEW_ALLOWED_ROLES },
+    ).ok === true,
+    readGeneratedDrafts: validateActorCanPerformOperation(
+      actorContext, __generatedDraftLibraryServiceContract.GENERATED_DRAFT_LIBRARY_READ_OPERATION, organizationId,
+      { allowedRoles: __generatedDraftLibraryServiceContract.GENERATED_DRAFT_LIBRARY_READ_ROLES, combineGlobalRoles: true },
+    ).ok === true,
+    recordEvidenceReview: validateActorCanPerformOperation(
+      actorContext, __humanReviewServiceContract.RECORD_EVIDENCE_REVIEW_DECISION_OPERATION, organizationId,
+      { allowedRoles: __humanReviewServiceContract.RECORD_EVIDENCE_REVIEW_DECISION_ALLOWED_ROLES, combineGlobalRoles: true },
+    ).ok === true,
+    recordClaimReview: validateActorCanPerformOperation(
+      actorContext, __humanReviewServiceContract.RECORD_CLAIM_REVIEW_DECISION_OPERATION, organizationId,
+      { allowedRoles: __humanReviewServiceContract.RECORD_CLAIM_REVIEW_DECISION_ALLOWED_ROLES, combineGlobalRoles: true },
+    ).ok === true,
+    extractEvidence: validateActorCanPerformOperation(
+      actorContext, __evidenceLineageServiceContract.EVIDENCE_LINEAGE_OPERATION, organizationId,
+      { allowedRoles: __evidenceLineageServiceContract.EVIDENCE_LINEAGE_ALLOWED_ROLES },
+    ).ok === true,
+    assessEvidenceCoverage: validateActorCanPerformOperation(
+      actorContext, __evidenceCoverageAssessmentServiceContract.EVIDENCE_COVERAGE_ASSESSMENT_OPERATION, organizationId,
+      { allowedRoles: __evidenceCoverageAssessmentServiceContract.EVIDENCE_COVERAGE_ASSESSMENT_ALLOWED_ROLES },
+    ).ok === true,
+    proposeClaim: validateActorCanPerformOperation(
+      actorContext, __claimProposalServiceContract.CLAIM_PROPOSAL_OPERATION, organizationId,
+      { allowedRoles: __claimProposalServiceContract.CLAIM_PROPOSAL_ALLOWED_ROLES },
+    ).ok === true,
+    generateClaimGapFollowups: validateActorCanPerformOperation(
+      actorContext, __claimGapFollowupServiceContract.CLAIM_GAP_FOLLOWUP_OPERATION, organizationId,
+      { allowedRoles: __claimGapFollowupServiceContract.CLAIM_GAP_FOLLOWUP_ALLOWED_ROLES },
+    ).ok === true,
+    recordConflict: validateActorCanPerformOperation(
+      actorContext, __conflictReviewCandidateServiceContract.CONFLICT_REVIEW_CANDIDATE_OPERATION, organizationId,
+      { allowedRoles: __conflictReviewCandidateServiceContract.CONFLICT_REVIEW_CANDIDATE_ALLOWED_ROLES },
+    ).ok === true,
+    acceptCoverageLimitation: validateActorCanPerformOperation(
+      actorContext, __coverageReviewDecisionServiceContract.ACCEPT_INTERNAL_COVERAGE_LIMITATION_OPERATION, organizationId,
+      { allowedRoles: __coverageReviewDecisionServiceContract.ACCEPT_INTERNAL_COVERAGE_LIMITATION_ALLOWED_ROLES },
+    ).ok === true,
+    assessRequirement: validateActorCanPerformOperation(
+      actorContext, __requirementAssessmentServiceContract.ASSESS_REQUIREMENT_OPERATION, organizationId,
+      { allowedRoles: __requirementAssessmentServiceContract.ASSESS_REQUIREMENT_ALLOWED_ROLES },
+    ).ok === true,
+  };
+}
+
 export async function getOrganizationAccessCapabilities(input, dependencies = {}) {
   if (!isKaiSprint2Enabled(dependencies.env || process.env)) {
     return buildKaiError("feature_disabled");
@@ -128,7 +191,8 @@ export async function getOrganizationAccessCapabilities(input, dependencies = {}
   return {
     ok: true,
     data: {
-      internalKnowledgeWorkspace: passes(actorContext, CLAIM_LIBRARY_READ_OPERATION, organizationId, CLAIM_LIBRARY_READ_ROLES),
+      workflowOperations: workflowOperations(actorContext, organizationId),
+      internalKnowledgeWorkspace: validateActorCanAccessKnowledgeWorkspace(actorContext, organizationId).ok === true,
       intakeContribution:
         passes(actorContext, "create_intake_batch", organizationId)
         && passes(actorContext, "create_intake_file", organizationId),

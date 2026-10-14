@@ -81,7 +81,7 @@ export async function listOrganizationSources(input, dependencies = {}) {
     actorContext,
     SOURCE_LIBRARY_OPERATION,
     input.organizationId,
-    { allowedRoles: SOURCE_LIBRARY_ALLOWED_ROLES },
+    { allowedRoles: SOURCE_LIBRARY_ALLOWED_ROLES, combineGlobalRoles: true },
   );
   if (!auth.ok) {
     return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers });

@@ -423,7 +423,7 @@ async function runDecisionBoundClaimProposalSuite() {
   let a1Token;
   let a1Claim;
 
-  test("J3-3 baseline: the mixed actor's direct P2-02 and P2-03 requests stay role_not_allowed, and its GK library reads stay refused, writing nothing", async () => {
+  test("J3-3 baseline: the mixed actor's direct P2-02 and P2-03 requests stay role_not_allowed, while the separately authorized GK library reads succeed, writing nothing", async () => {
     const before = await kaiTableRowCounts();
     const assessed = await assessEvidenceCoverageForSourceVersion(
       { organizationId: ORG, sourceVersionId: projectA.sourceVersionId, actorContext: mixed }, { env: ENV });
@@ -437,7 +437,7 @@ async function runDecisionBoundClaimProposalSuite() {
     assert.deepEqual([proposed.error.code, blockingReason(proposed)], ["authorization_denied", "role_not_allowed"]);
     const claimLibrary = await listClaimLibraryCandidates({ organizationId: ORG, limit: 25, actorContext: mixed }, { env: ENV });
     const evidenceLibrary = await listOrganizationEvidenceLibrary({ organizationId: ORG, limit: 25, afterEvidenceItemId: null, actorContext: mixed }, { env: ENV });
-    assert.deepEqual([claimLibrary.ok, evidenceLibrary.ok], [false, false], "the continuation grants no library read");
+    assert.deepEqual([claimLibrary.ok, evidenceLibrary.ok], [true, true], "the October 14 workspace policy grants reads independently of Decision C");
     assert.deepEqual(deltas(before, await kaiTableRowCounts()), {});
   });
 

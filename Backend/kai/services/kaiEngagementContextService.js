@@ -26,13 +26,14 @@ import { resolveKaiActorContext } from "../auth/kaiActorContext.js";
  * status, use case, requirement target) is the organization's own project
  * configuration - no evidence, claim, review, or GK assessment content - so
  * the read is also admitted for same-org client_reviewer and
- * client_contributor members. Reading context grants nothing else:
- * create/update/classify below keep their own gk_admin/gk_operator/
- * client_admin sets, and batch creation keeps the P0 write policy.
- * gk_reviewer is intentionally unchanged. Read-only: never creates an
- * engagement row.
+ * client_contributor members. Effective GK reviewers may also select and
+ * classify existing Project context with active organization membership.
+ * Reading context grants nothing else: create/update retain their own
+ * organization-role policy, and batch creation keeps the P0 write policy.
+ * Read-only: never creates an engagement row.
  */
 const LIST_ENGAGEMENTS_ALLOWED_ROLES = new Set([
+  "gk_reviewer",
   "gk_admin",
   "gk_operator",
   "client_admin",
@@ -42,12 +43,11 @@ const LIST_ENGAGEMENTS_ALLOWED_ROLES = new Set([
 const LIST_ENGAGEMENTS_OPERATION = "list_engagement_contexts";
 const UPDATE_ENGAGEMENT_TARGET_ALLOWED_ROLES = new Set(["gk_admin", "gk_operator", "client_admin"]);
 const UPDATE_ENGAGEMENT_TARGET_OPERATION = "update_engagement_requirement_target";
-const CLASSIFY_FUNDER_REQUIREMENTS_ALLOWED_ROLES = new Set(["gk_admin", "gk_operator", "client_admin"]);
+const CLASSIFY_FUNDER_REQUIREMENTS_ALLOWED_ROLES = new Set(["gk_admin", "gk_operator", "gk_reviewer", "client_admin"]);
 const CLASSIFY_FUNDER_REQUIREMENTS_OPERATION = "classify_engagement_funder_requirements_state";
 // KAI Impact Library redesign, Package F: "+ New Project" over kai.engagements.
-// Same allowed-role set as every other engagement-scoped operation in this
-// file - a client_admin actor may create a Project/Engagement for its own
-// bound organization, the same as it may list or update one.
+// Project mutation retains its narrower organization-role set independently
+// of the effective-role policy for listing and classifying existing context.
 const CREATE_ENGAGEMENT_ALLOWED_ROLES = new Set(["gk_admin", "gk_operator", "client_admin"]);
 const CREATE_ENGAGEMENT_OPERATION = "create_engagement";
 // KAI Impact Library redesign, Package F completeness repair (project_status/
@@ -292,7 +292,7 @@ async function resolveAuthorizedHumanActor(input, operation, allowedRoles, depen
     actorContext,
     operation,
     input.organizationId,
-    { allowedRoles },
+    { allowedRoles, combineGlobalRoles: true },
   );
   if (!auth.ok) {
     return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers });
@@ -458,7 +458,7 @@ export async function listAuthorizedEngagements(input, dependencies = {}) {
     actorContext,
     LIST_ENGAGEMENTS_OPERATION,
     input.organizationId,
-    { allowedRoles: LIST_ENGAGEMENTS_ALLOWED_ROLES },
+    { allowedRoles: LIST_ENGAGEMENTS_ALLOWED_ROLES, combineGlobalRoles: true },
   );
   if (!auth.ok) {
     return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers });

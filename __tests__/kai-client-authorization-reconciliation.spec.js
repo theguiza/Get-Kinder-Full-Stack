@@ -370,7 +370,9 @@ test("access capabilities follow each existing policy: client_admin contributes 
   for (const [actorContext, expected] of expectations) {
     const result = await getOrganizationAccessCapabilities({ organizationId: ORG, actorContext }, { env: ENV });
     assert.equal(result.ok, true, JSON.stringify(result));
-    assert.deepEqual(result.data, expected, actorContext.organizationMemberships[0].role_name);
+    const { workflowOperations, ...workspaceFlags } = result.data;
+    assert.ok(workflowOperations);
+    assert.deepEqual(workspaceFlags, expected, actorContext.organizationMemberships[0].role_name);
   }
 });
 
@@ -709,7 +711,7 @@ const ENGAGEMENT_ROW = Object.freeze({
 test("contract: read context is widened only for reads; every mutation, join-review, and chat-tool role set is unchanged", () => {
   const clientRead = ["client_admin", "client_contributor", "client_reviewer", "gk_admin", "gk_operator"];
   const adminManaged = ["client_admin", "gk_admin", "gk_operator"];
-  assert.deepEqual([...__engagementContextServiceContract.LIST_ENGAGEMENTS_ALLOWED_ROLES].sort(), clientRead);
+  assert.deepEqual([...__engagementContextServiceContract.LIST_ENGAGEMENTS_ALLOWED_ROLES].sort(), [...clientRead, "gk_reviewer"]);
   assert.deepEqual([...__improvementPracticeServiceContract.IMPROVEMENT_PRACTICE_READ_ROLES].sort(), clientRead);
   assert.deepEqual([...__improvementPracticeServiceContract.IMPROVEMENT_PRACTICE_ALLOWED_ROLES].sort(), adminManaged);
   assert.deepEqual([...__engagementContextServiceContract.CREATE_ENGAGEMENT_ALLOWED_ROLES].sort(), adminManaged);
@@ -865,9 +867,9 @@ test("client_admin keeps its implemented project, plan, and join-review administ
   assert.deepEqual(listAuthorizedAssistantToolNames({ actorContext: { actorType: "service" }, organizationId: ORG }), []);
   const gkReviewerEngagements = await listAuthorizedEngagements(
     { organizationId: ORG, actorContext: memberActor("gk_reviewer") },
-    { env: ENV, listEngagementsForOrganization: throwingRead("engagements") },
+    { env: ENV, listEngagementsForOrganization: async () => [ENGAGEMENT_ROW] },
   );
-  assertRoleDenied(gkReviewerEngagements, "gk_reviewer engagement read (unchanged)");
+  assert.equal(gkReviewerEngagements.ok, true);
 });
 
 test("cross-org client_reviewer / client_contributor are denied (VAL-AUT-003) on every widened read and on chat context", async () => {

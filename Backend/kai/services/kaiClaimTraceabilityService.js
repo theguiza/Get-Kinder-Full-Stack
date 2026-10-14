@@ -83,7 +83,7 @@ export async function getClaimTraceabilitySummary(input, dependencies = {}) {
     actorContext,
     CLAIM_TRACEABILITY_OPERATION,
     input.organizationId,
-    { allowedRoles: CLAIM_TRACEABILITY_ALLOWED_ROLES },
+    { allowedRoles: CLAIM_TRACEABILITY_ALLOWED_ROLES, combineGlobalRoles: true },
   );
   if (!auth.ok) {
     return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers });
@@ -158,7 +158,7 @@ export async function listOrganizationReviewQueue(input, dependencies = {}) {
     actorContext,
     REVIEW_QUEUE_OPERATION,
     input.organizationId,
-    { allowedRoles: REVIEW_QUEUE_ALLOWED_ROLES },
+    { allowedRoles: REVIEW_QUEUE_ALLOWED_ROLES, combineGlobalRoles: true },
   );
   if (!auth.ok) {
     return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers });
