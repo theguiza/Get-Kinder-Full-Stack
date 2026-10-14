@@ -38930,3 +38930,194 @@ policy change, role grant, flag, or production action is authorized.
 closure is still NOT_CONFIRMED (B, D, A/E open). No push, deployment,
 production, shared database, flag, tenant, role, credential, schema, or
 `00_KAI_CURRENT_STATE.md` change.
+
+### Integrated effective GK workspace and review workflow repair (2026-10-14)
+
+**Owner authorization (USER_CONFIRMED):** the current integrated execution
+prompt authorizes local synthetic repository implementation, assembled
+acceptance and local commits across workspace reads, Project selection,
+operation controls and review readback. It explicitly preserves narrower
+controlling policies where source ownership, provisioning or superuser
+attribution remain unresolved. This is the current package boundary; no
+production execution, schema change, flag change or record recovery is included.
+
+**Starting state and historical reconciliation (TOOL_VERIFIED unless marked):**
+- Clean `main`, HEAD `dde680b49d778d2137daadbff62ef52a3bbff03c`.
+- `dde680b` records Decision C; ancestor `92550e2` implements it. The
+  continuation implementation is preserved, not rebuilt. Earlier P1-06/P1-07
+  mixed-role repairs, source-review navigation and client-safe projections
+  remain present and tested.
+- Fresh starting campaign: 43 PASS / 0 FAIL. Fresh `npm test`: 5485 PASS /
+  0 FAIL / 105 SKIP. The October 13 42/1 J3-3 result predates accepted
+  Decision C and is not the current baseline.
+- October 14 P2-01C production constraint success is USER_CONFIRMED by the
+  owner, not independently reverified here. No migration was rerun.
+
+**Implemented root causes and functions:**
+- `kaiAuthorizationService.validateActorCanAccessKnowledgeWorkspace` uses
+  the existing shared validator and GK roles with `combineGlobalRoles`.
+  `kaiOrganizationAccessCapabilitiesService.getOrganizationAccessCapabilities`
+  no longer uses Claim Library permission as workspace identity. It projects
+  workflow operations from governing services' exported role/operation sets.
+- The corresponding GK reads now deliberately combine global and exact-org
+  roles: `kaiClaimLibraryService.listClaimLibraryCandidates`,
+  `kaiEvidenceLibraryService.listOrganizationEvidenceLibrary`,
+  `kaiClaimTraceabilityService.getClaimTraceabilitySummary` and
+  `listOrganizationReviewQueue`,
+  `kaiEligibleClaimsForAudienceService.listEligibleClaimsForAudience`,
+  `kaiSourceLibraryService.listOrganizationSources`,
+  `kaiRequirementAssessmentService.getOrganizationRequirementAssessment` and
+  `listOrganizationRequirementsReadiness`, and
+  `kaiEngagementRequirementAssessmentService.getEngagementRequirementAssessment`.
+  This removes the mounted workspace's corresponding mixed-role read denials.
+- `kaiEngagementContextService.listAuthorizedEngagements` and the read-only
+  `classifyEngagementFunderRequirementsState` admit effective GK reviewers.
+  Project create, detail updates and target mutations retain their policies.
+- `ImpactLibraryApp` distinguishes unresolved/failed/malformed capabilities
+  from confirmed client classification, invalidates failed refreshes and
+  rejects superseded responses. Organization changes and permission-return
+  refreshes retain server authority. `projectOrganizationAccessCapabilities`
+  validates the original seven booleans and fails operation flags closed.
+- `ImpactEvidenceLibrary` consumes operation flags (and resolves them itself
+  when mounted without the shell), gates relevant controls and handlers, and
+  avoids unauthorized generated-draft reads. Evidence submission checks both
+  HTTP status and structured `ok`, distinguishes created/replayed/not-applicable/
+  blocked/unknown continuation, and refreshes Evidence, Claims and Review Queue.
+- Acceptance exposed another real readback gap: traceability can legitimately
+  return `gap_dimension_requires_missing_p204_state` before P2-04, omitting the
+  persisted proposal from the computed queue. `pendingClaimReviewWork` exposes
+  actual open claim-review rows from the authorized Claim Library and labels
+  eligibility unconfirmed. Claims load on fresh mount so the next reviewer can
+  find them. No eligibility waiver, automatic P2-04 or automatic approval.
+- Rebuilt `public/js/bundles/entry.js`; updated affected tests and added
+  `kai-sprint2-integrated-effective-workspace-policy.spec.js` (16 cases).
+
+**Enforced operation-policy matrix:** all normal human operations require an
+authenticated mapped active identity, exact active organization access,
+tenant-consistent objects and operation/workflow eligibility. The separately
+accepted full-request platform exception remains as described below.
+
+| Operation | Enforced role mode | Governing authority |
+| --- | --- | --- |
+| GK workspace; Claims/Evidence/Sources; traceability, queue, eligibility, requirement reads | Existing GK admin/operator/reviewer set, `combineGlobalRoles`; no membership bypass | Current owner prompt sections 2-4; existing shared authorization machinery and read contracts |
+| List/select Project | GK roles and existing three client roles, `combineGlobalRoles` | Current owner section 4; `kaiEngagementContextService` |
+| Read Project funder context | GK roles or client_admin, combined | Current owner sections 3-4; existing classifier is read-only |
+| Create/change Project or targets | Organization gk_admin/gk_operator/client_admin only; unchanged | Existing Project mutation contracts; current owner separation requirement |
+| P1-06/P1-07 | Existing GK role sets, combined | Accepted October 11 decision, previously scoped exactly to these operations |
+| Source cockpit read/discovery | Global GK role plus exact membership (`globalRolesOnly`) | P1-09 design and Package 5 Decision A finding |
+| Mounted P1-08 promotion and Promote control | Cockpit gate above AND organization GK admin/operator/reviewer service authority | Preserved accepted P1-08 set and shared `authorizeSourcePromotionDecision`; Package 2/5 |
+| Evidence and claim human review | Existing gk_admin/gk_reviewer, combined; object/decision eligibility unchanged | P2-12/P2-09 accepted service contracts |
+| Decision-bound P2-02/P2-03 | Current P2-12 authority plus persisted same-human eligible positive current-head decision | Accepted Decision C Option A, `92550e2` |
+| Direct extraction/coverage/proposal/gap/conflict; draft generation | Existing organization GK operation sets, not globally combined | Existing respective service contracts; no direct permission added |
+| Coverage acceptance | Organization gk_reviewer | Existing P2-10 contract; superuser finding held |
+| Requirement assessment write; generated-content review | Organization gk_admin/gk_reviewer | Existing service contracts; no write expansion |
+| Generated draft read | Existing gk_admin/gk_reviewer, combined | Existing generated-draft library contract, unchanged |
+| Client sensitivity exception | Binding-derived exact-org client_admin only where already accepted | Existing P1-09 sensitivity exception; never GK workspace admission |
+| Client follow-up completion | Organization client_reviewer | Existing P2-11 contract; superuser finding held |
+| Access administration | Existing governed global role grants and organization replacement policy | `kaiAccessAdministrationContract`, existing service transaction/audit policy; B/E held |
+
+**Synthetic actor outcomes:**
+
+| Actor in requested organization | Workspace / Project | Review and mutation authority |
+| --- | --- | --- |
+| Global reviewer + client_admin | GK / selectable | Evidence and claim review; decision-bound continuation; direct P2-02/P2-03 and P1-08 denied; existing client-admin Project authority retained |
+| Global operator + client_admin | GK / selectable | GK reads; no reviewer authority, no direct P2-02/P2-03 or P1-08; existing client-admin Project authority retained |
+| Global reviewer + org reviewer | GK / selectable | Accepted source promotion, human reviews, direct GK operations; no Project mutation |
+| Global operator + org operator | GK / selectable | Source promotion positive UI journey; no human evidence/claim approval |
+| Org-only reviewer | GK / selectable | Human review and existing direct org-GK operations; source cockpit still requires global GK role |
+| Client_admin, unbound | Client / selectable | Existing Project/access duties; no GK-internal content or review authority |
+| Client_admin, binding-derived | Client / selectable | Above plus accepted scoped sensitivity exception; no GK workspace |
+| Client_reviewer | Client / selectable | Authorized follow-up work; no GK-internal reads or Project mutation |
+| Client_contributor | Client / selectable | Existing client reads/contribution policy; no GK-internal reads/review/Project mutation |
+| Platform superuser | Full-request exception retained | Existing cockpit projection behaves differently; attribution conflict below remains open |
+| Inactive/revoked exact-org membership, or other-org-only actor | Requested scope denied | No global GK scope bypass; rejected requests make no domain/decision writes |
+
+**Assembled proof (TOOL_VERIFIED):** existing synthetic sessions pass through
+mounted authentication, actor resolution, `ensureAdmin` and service checks.
+No middleware was bypassed. This proves the local synthetic session journey,
+not live identity-provider sign-in. J3-1A proves reviewer/operator workspace,
+Project selection, required reads, denied controls, wrong-org denial and
+failed/malformed capability recovery. J5-3 proves the actual global+org GK
+operator discovers, opens and promotes source work through the website;
+J5-1/J5-2 preserve the accepted reviewer path and zero-write promotion replay.
+J3-2 remains an expected mixed-role denial, not a regression. P1-08 returns
+`authorization_denied / role_not_allowed`, without source/version/evidence/
+decision writes on rejection. J3-3 now records the mixed review through the
+actual Evidence UI, checks database attribution/provenance, creates the internal
+proposed claim and open claim_review, verifies all three refreshed reads, and
+proves a second reviewer sees the persisted work. Separate authorized human
+claim review remains required; existing policy does not mandate a different
+person, although this acceptance journey uses one.
+
+Decision C PostgreSQL proof remains 16/0: positive decision/audit, direct-role
+denials, forged authority rejection, negative/ineligible/stale/superseded/
+other-human/wrong-org/revoked denials, zero-write replay and concurrent failed-
+handoff recovery converging to one claim and review item. Identical retry can
+continue an already-committed decision without redoing it, but requires the
+original `expected_updated_at`, same human and current authority. There is no
+new recovery UI or production recovery operation.
+
+**Final verification (TOOL_VERIFIED):**
+- Assembled campaign: 44 PASS / 0 FAIL.
+- Ten browser suites: 101 PASS / 0 FAIL: Knowledge Studio 6, rehydration 3,
+  evidence pipeline 7, P2-01 7, P2-12 11, reviewed-evidence proposal 10,
+  sensitivity 16, Team & Access 7, provisioning 13, authorization edges 11.
+- Sixteen disposable PostgreSQL runners: 331 PASS / 0 FAIL: P1-06 15,
+  P1-07 candidate 11 and handoff 22, P1-08 19, P2-01 7, P2-12 no-claim 11,
+  reviewed-evidence proposal 17, Decision C 16, P2-02 7, P2-03 15, P2-09 36,
+  P2-10 51, P2-11 28, P2-12 ledger 24, access administration 31, Project 21.
+- API contract: 71/0. Sprint 2: 4780 PASS / 0 FAIL / 90 SKIP.
+  Repository: 5502 PASS / 0 FAIL / 105 SKIP. Skips are explicit and are not
+  counted as executed integrations; affected integrations ran separately above.
+- `npm run build` passed. A second build reproduced the exact bundle SHA-256
+  `40a77079e7b1712be8305da108af15eb05be4ea596375fceb2301b356dc7250c`.
+- Complete source/test diffs inspected; generated bundle verified by reproducible
+  build. `git diff --check` passed. Updated obsolete mixed-role client-workspace
+  pins to current owner policy; retained client sensitivity coverage using the
+  already accepted binding-derived admin actor, with its original failure,
+  stale-state, isolation and write assertions.
+- Commands use the existing package scripts; Project PostgreSQL uses the existing
+  `scripts/kai-sprint2-package-4-impact-library-engagement-funder-requirements-local-postgres.js`
+  directly because no npm alias exists. Node/npm parent shells retained the
+  non-listening loopback sentinel; runners validated their disposable loopback
+  targets. Listener/shared-memory sandbox escalation was only for local tests.
+- Raw session evidence: `/tmp/kai-integrated-campaign-verified.log`,
+  `/tmp/kai-integrated-final-{sprint2,full,api,build}.log`,
+  `/tmp/kai-integrated-verified-browser-results.json`,
+  `/tmp/kai-integrated-verified-postgres-results.json`, and per-runner logs.
+- Implementation commits: `476e0e8` (effective backend reads and Projects),
+  `4ffb23f` (website operation controls, persisted readback, tests and bundle).
+
+**Exact remaining authorization boundaries (not silently changed):**
+- **A, source ownership:** Backend Contract section 22 assigns source-candidate
+  review to the operator, while the accepted implemented P1-08 role set includes
+  admin/operator/reviewer and P1-09 additionally requires a global role. Confirm
+  whether to retain this conjunction or authorize a scoped change; no additional
+  promotion role or org-only cockpit access was granted here.
+- **B/E, independent grants:** database uniqueness permits multiple role rows,
+  but `applyOrganizationMembershipChangeInTransaction` and its writer implement
+  audited replacement, refuse more than one existing row with
+  `membership_state_conflict`, and protect organization administration. They do
+  NOT safely administer independent active role grants. Only org gk_reviewer is
+  superuser-grantable; org operator/admin remain ungrantable. Authorize exact
+  additive versus replacement and per-grant revocation semantics before changing
+  them. Existing governed GLOBAL reviewer/operator grants now enable the repaired
+  workspace without replacing legitimate client membership. No manual role update
+  is required for that path; full operator source provisioning remains pending.
+- **D, superuser attribution:** accepted August 22 authority bypasses role and
+  membership on full-request routes. Existing attribution can fall back to an
+  unheld gk_admin, and P2-10/P2-11 can record constant unheld reviewer roles.
+  Ledger CHECKs have no platform-superuser value. An owner decision must choose
+  held-human-role restrictions or an accepted attribution/schema representation.
+  No blanket authority was added and no false claim of repaired attribution is
+  made. The relevant campaign cases document current behavior rather than certify
+  this security finding resolved.
+
+**Status:** INTEGRATED_SUPPORTED_REPAIR_AND_LOCAL_ACCEPTANCE_COMPLETE;
+FULL_POLICY_CLOSURE_NOT_CONFIRMED because A, B/E and D remain explicitly held.
+Production/runtime behavior, deployment, live sign-in, production role state,
+and recovery of existing production decisions are NOT_CONFIRMED. No push,
+deployment, production/shared database access, migration/schema change, feature
+flag change, credential inspection, production membership change, destructive
+action or `00_KAI_CURRENT_STATE.md` update occurred. This is the single package-end
+evidence update in the living ExecPlan.
