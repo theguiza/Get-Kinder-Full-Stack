@@ -39121,3 +39121,205 @@ deployment, production/shared database access, migration/schema change, feature
 flag change, credential inspection, production membership change, destructive
 action or `00_KAI_CURRENT_STATE.md` update occurred. This is the single package-end
 evidence update in the living ExecPlan.
+
+### Package B/E: independent organization-role grants, explicit replacement, targeted revocation (2026-10-15)
+
+**Owner decision (USER_CONFIRMED, 2026-10-15):** the owner's final B/E
+decision and execution prompt accepts C04-C06 and authorizes this local
+repository package. Organization-role assignments are additive and
+independently managed; a stored-membership user has organization access while
+at least one assignment is active, and each role is effective only while its
+own assignment is active. Adding and replacing are distinct, and a replacement
+names the exact assignment it replaces. Revocation targets one assignment,
+keeps unrelated grants, and is audited. Administration authority:
+- Platform superuser: existing global-role, client-role, and organization
+  gk_reviewer administration, plus NEW organization gk_operator and gk_admin.
+  Existing superuser self-management is kept.
+- Delegated GK administrator: global gk_admin AND an active organization
+  gk_admin of the exact organization. Manages that organization's gk_operator
+  and gk_reviewer only, and never self-elevates.
+- Client administrator: existing client roles only. No GK or global roles, no
+  self-elevation. Self-demotion stays subject to last-admin protection.
+- AI/system actors administer nothing.
+
+Binding-derived client_admin stays under its binding policy and is not a
+revocable stored assignment. No new status vocabulary. Decision C, the P1-08
+role set, and the J3-2 denial are unchanged. No migration, production role,
+flag, tenant, deployment, or real-data action is authorized.
+
+**Start (TOOL_VERIFIED):** `main` at `bae1242`, clean.
+
+**DDL evidence (TOOL_VERIFIED from committed artifacts; live state NOT_CONFIRMED):**
+- `artifacts/kai-db-reconciliation-2026-09-16/PRODUCTION_KAI_SCHEMA.json`
+  (the committed production catalog capture) and
+  `EXPECTED_EXECUTABLE_SCHEMA.json` both show
+  `UNIQUE (organization_id, user_id, role_name)`. The status CHECK is
+  `active/inactive/revoked/invited`, and there is no `role_name` CHECK. The
+  access-administration synthetic schema mirrors the USER_CONFIRMED pgAdmin
+  evidence with the same constraints.
+- Several independent role rows per user and organization are therefore
+  DDL-valid. **No schema change is required.** The capture dates from
+  2026-09-16, and the current live constraint was not re-read.
+
+**Before (TOOL_VERIFIED):**
+- `upsertOrganizationMembershipRoleStatus` replaced the single stored row and
+  failed closed (`membership_state_conflict`) on more than one row.
+- `viewEffectiveKaiAccess` kept one stored row per user (a second row
+  silently overwrote the first in the roster).
+- "Grant KAI Access" in /admin called the replacing PUT, so a grant could
+  overwrite an existing client membership.
+- Organization gk_operator/gk_admin could not be granted, and no
+  per-assignment revocation existed.
+- `kaiAuthorizationService.validateActorCanPerformOperation`, the actor
+  context, intake organization listing, and P1-08 already evaluate each
+  active row independently. They needed no change.
+
+**Change (`fb212f1`):**
+- Contract: superuser organization roles add gk_operator and gk_admin, and a
+  delegated GK administrator manages gk_operator/gk_reviewer.
+- Service:
+  - `resolveOrganizationRoleAdministration` derives each actor's
+    administrable roles and the authority for each, through the shared
+    validator.
+  - New `grantOrganizationRole` (additive; reactivates only that role's row;
+    a first active assignment is audited as access admission) and
+    `revokeOrganizationRole` (that row to `inactive`; replay no-op; absent
+    row `not_found`).
+  - `manageOrganizationMembership` accepts `previousRoleName`: it addresses
+    only the named row. An unnamed change with several rows, a missing named
+    row, or a target role already held is `membership_state_conflict`. The
+    single-row legacy path is unchanged.
+  - Every write checks the actor manages both the removed and the resulting
+    role. A non-superuser may only demote themselves.
+  - Last-admin protection, organization advisory lock, per-user lock,
+    transactions, required metadata-only audit, and replay are kept on all
+    paths. JOIN-3 `onlyCreate` is unchanged.
+- Queries: `grantOrganizationMembershipRole` and
+  `revokeOrganizationMembershipRole` each write one role row (UPDATE/INSERT,
+  never DELETE). The upsert gains an optional named target.
+- Roster read: one entry per person with `stored_memberships` (each with its
+  own status, `replacement_roles`, `can_revoke`, `can_restore`),
+  `effective_role_names`, `grantable_roles`, `is_actor`, and
+  `administrable_roles`. `stored_membership` is kept only for a single
+  assignment.
+- Routes: `POST .../memberships/:id/roles` (body `{role_name}` only),
+  `POST .../memberships/:id/roles/:roleName/revoke` (no body), and optional
+  `previous_role_name` on the PUT.
+- Capabilities: `organizationAccessManagement` uses the same resolver, so a
+  delegated GK administrator gets Team & Access.
+- Audit:
+  - Membership events now record the actor's real authority in
+    `authority_source` (`platform_superuser`, `organization_client_admin`,
+    `delegated_gk_admin`) instead of the constant `stored`.
+  - A role change of an existing row is `organization_role_replaced`.
+  - New operations: `organization_role_granted`,
+    `organization_role_granted_access_admitted`, `organization_role_revoked`.
+- Team & Access:
+  - One change control per changeable assignment (a named replacement).
+  - Remove-role with confirmation for each revocable assignment.
+  - Add-role for Get Kinder staff roles only; client roles keep their single
+    change control.
+  - Capabilities are re-read after a change to an administrator's or the
+    user's own roles.
+- /admin KAI Access: "Grant KAI Access" is the additive POST. Each assignment
+  has Replace, Remove-here, and Restore-here controls. The global-role column
+  grants or revokes gk_reviewer and gk_operator, never gk_admin.
+- Rebuilt `public/js/bundles/entry.js`.
+
+**Tests (TOOL_VERIFIED):**
+- New `kai-sprint2-be-organization-role-administration.spec.js` (24/0): real
+  router, services, validator, actor resolver, and P1-08 predicate over an
+  in-memory store, plus SQL-shape checks. Mutating the global-gk_admin
+  requirement or the self-elevation guard makes it fail (2 and 1 failures).
+- Access-administration PostgreSQL runner 36/0: the 31 existing cases plus
+  B/E 1-5 on the production router with real actor resolution. They cover
+  additive coexistence and persisted audit, named replacement and conflicts,
+  global+organization gk_operator admitting P1-08 on a freshly resolved
+  actor, targeted revocation, three-way concurrent grants and revocations
+  converging to one row and one audit, and delegated-administrator and
+  self-elevation refusals with zero writes.
+- Campaign J8 (new, 4 cases):
+  1. The superuser provisions a delegated GK administrator (global, then
+     organization gk_admin) and the operator's client role and global
+     gk_operator, only through governed routes. The global role alone is
+     refused P1-08 with nothing written.
+  2. The delegated administrator adds organization gk_operator in the Team &
+     Access UI. The client role is kept and the grant is audited
+     `delegated_gk_admin`.
+  3. The operator promotes a pending source in the GK Studio, with decision,
+     lineage, audit, and P2-01 evidence persisted.
+  4. The delegated administrator removes only gk_operator in Team & Access
+     after confirmation. The operator's next P1-08 request is
+     `authorization_denied / role_not_allowed` with nothing written. The
+     client role, global role, and recorded decision remain.
+  This is the connected administration-to-P1-08 proof without seeded
+  organization roles.
+- Updated pins to the accepted policy:
+  - superuser org gk_operator/gk_admin;
+  - the global+organization gk_admin actor is now a delegated administrator,
+    still refused rewriting a client row;
+  - the additive POST and revoke routes and their audit operations;
+  - `organization_role_replaced`;
+  - "Get Kinder reviewer" label;
+  - renamed modal and view handlers.
+
+**Verification (TOOL_VERIFIED):**
+- Unit: B/E 24/0; access administration, mounted route, Team & Access,
+  admin UI, and JOIN-3/JOIN-4 specs 138/0.
+- PostgreSQL runners:
+  - access administration 36/0;
+  - JOIN 1-3 128/0;
+  - P1-06 15/0;
+  - P1-07 candidate 11/0 and handoff 22/0;
+  - P1-08 19/0;
+  - P2-01 7/0;
+  - P2-12 no-claim 11/0;
+  - reviewed-evidence proposal 17/0;
+  - Decision C 16/0;
+  - P2-02 7/0;
+  - P2-03 15/0;
+  - P2-09 36/0;
+  - P2-10 51/0;
+  - P2-11 28/0;
+  - P2-12 ledger 24/0;
+  - GK tenant binding 6/0;
+  - organization enablement 9/0;
+  - Project 21/0.
+- Browser (11 suites, 139/0):
+  - approval-to-action campaign 48/0 (44 existing + J8 1-4);
+  - evidence pipeline 7/0;
+  - Knowledge Studio 6/0;
+  - P2-01 7/0;
+  - P2-12 11/0;
+  - reviewed-evidence proposal 10/0;
+  - authorization edges 11/0;
+  - provisioning 13/0;
+  - sensitivity 16/0;
+  - Team & Access 7/0;
+  - rehydration 3/0.
+- API contract 71/0. `test:kai-sprint2` 4804/0/90. `npm test` 5527/0/105.
+  Skips are unchanged and explicit.
+- `npm run build` passed; bundle SHA-256 `123d7f9f081ea50acbdc4aa7d3a1e1db966939397e9531b4b2f4b5e971835bf2`, reproduced by a second build. `git diff --check` is
+  clean, and the complete diff was inspected.
+- Node/npm parent shells kept the non-listening loopback sentinel.
+  Runners validated their own disposable loopback clusters.
+
+**Exact remaining boundaries:**
+- **B/E:** resolved in the repository for the accepted policy. Production
+  role state, deployment, live sign-in, and the current live constraint are
+  NOT_CONFIRMED.
+- A direct PUT of a role outside the actor's scope still returns the existing
+  `validation_blocker`; the grant and revoke routes return
+  `authorization_denied` with a blocker.
+- An additive grant activates that role's row in any non-active status,
+  including the DDL-valid `revoked`/`invited`, which this package never
+  writes.
+- JOIN-3 approvals now record the reviewer's real authority.
+- **A** (source ownership conjunction) and **D** (superuser attribution) stay
+  held and unchanged.
+- No push, deployment, production/shared database access, migration or schema
+  change, feature flag, credential, tenant, production role, destructive
+  action, or `00_KAI_CURRENT_STATE.md` change occurred.
+
+**Status:** PACKAGE_BE_INDEPENDENT_GRANTS_COMPLETE_LOCAL_SYNTHETIC. This is
+the single package-end evidence update in the living ExecPlan.
