@@ -8,6 +8,8 @@ import {
 import {
   viewEffectiveKaiAccess,
   manageOrganizationMembership,
+  grantOrganizationRole,
+  revokeOrganizationRole,
   manageGlobalKaiRole,
 } from "../services/kaiAccessAdministrationService.js";
 import {
@@ -31,6 +33,7 @@ router.use(requireKaiSprint2Authenticated);
 router.use(attachKaiSprint2ActorContext);
 
 const LEGACY_USER_ID_PATTERN = /^[1-9][0-9]*$/;
+const ROLE_NAME_PATTERN = /^[a-z][a-z_]{0,63}$/;
 
 // Test-only service-boundary override, following the same
 // setXServiceForTest(service)/getXService() idiom already established for
@@ -45,6 +48,8 @@ function getAccessAdministrationService() {
     accessAdministrationServiceOverride || {
       viewEffectiveKaiAccess,
       manageOrganizationMembership,
+      grantOrganizationRole,
+      revokeOrganizationRole,
       manageGlobalKaiRole,
       listPendingOrganizationJoinRequestsForReviewer,
       approveOrganizationJoinRequest,
@@ -93,8 +98,11 @@ router.put("/organizations/:organizationId/memberships/:legacyPublicUserdataId",
     const targetLegacyPublicUserdataId = parseLegacyUserId(req.params.legacyPublicUserdataId);
     const roleName = typeof req.body?.role_name === "string" ? req.body.role_name : null;
     const membershipStatus = typeof req.body?.membership_status === "string" ? req.body.membership_status : null;
+    // Optional: the exact existing assignment an explicit replacement removes.
+    const hasPreviousRoleName = req.body?.previous_role_name !== undefined;
+    const previousRoleName = typeof req.body?.previous_role_name === "string" ? req.body.previous_role_name : null;
 
-    if (!organizationId || !targetLegacyPublicUserdataId || !roleName || !membershipStatus) {
+    if (!organizationId || !targetLegacyPublicUserdataId || !roleName || !membershipStatus || (hasPreviousRoleName && !previousRoleName)) {
       return sendKaiError(res, "validation_blocker");
     }
 
@@ -104,6 +112,58 @@ router.put("/organizations/:organizationId/memberships/:legacyPublicUserdataId",
       targetLegacyPublicUserdataId,
       roleName,
       membershipStatus,
+      ...(hasPreviousRoleName ? { previousRoleName } : {}),
+      now: new Date().toISOString(),
+    });
+    return sendServiceResult(res, result, 200);
+  } catch (error) {
+    return next(error);
+  }
+});
+
+// B/E C04: additive grant of one organization role. Body: { role_name } only.
+router.post("/organizations/:organizationId/memberships/:legacyPublicUserdataId/roles", async (req, res, next) => {
+  try {
+    const organizationId = typeof req.params.organizationId === "string" ? req.params.organizationId : null;
+    const targetLegacyPublicUserdataId = parseLegacyUserId(req.params.legacyPublicUserdataId);
+    const body = req.body;
+    const bodyKeysValid = body && typeof body === "object" && !Array.isArray(body) && Object.keys(body).every((key) => key === "role_name");
+    const roleName = bodyKeysValid && typeof body.role_name === "string" ? body.role_name : null;
+
+    if (!organizationId || !targetLegacyPublicUserdataId || !roleName) {
+      return sendKaiError(res, "validation_blocker");
+    }
+
+    const result = await getAccessAdministrationService().grantOrganizationRole({
+      actorContext: req.kaiSprint2ActorContext,
+      organizationId,
+      targetLegacyPublicUserdataId,
+      roleName,
+      now: new Date().toISOString(),
+    });
+    return sendServiceResult(res, result, 200);
+  } catch (error) {
+    return next(error);
+  }
+});
+
+// B/E C06: targeted revocation of one organization-role assignment, named
+// entirely by the path. Accepts no body fields.
+router.post("/organizations/:organizationId/memberships/:legacyPublicUserdataId/roles/:roleName/revoke", async (req, res, next) => {
+  try {
+    const organizationId = typeof req.params.organizationId === "string" ? req.params.organizationId : null;
+    const targetLegacyPublicUserdataId = parseLegacyUserId(req.params.legacyPublicUserdataId);
+    const roleName = typeof req.params.roleName === "string" && ROLE_NAME_PATTERN.test(req.params.roleName) ? req.params.roleName : null;
+
+    if (!organizationId || !targetLegacyPublicUserdataId || !roleName || !hasNoBodyFields(req)) {
+      return sendKaiError(res, "validation_blocker");
+    }
+
+    const result = await getAccessAdministrationService().revokeOrganizationRole({
+      actorContext: req.kaiSprint2ActorContext,
+      organizationId,
+      targetLegacyPublicUserdataId,
+      roleName,
       now: new Date().toISOString(),
     });
     return sendServiceResult(res, result, 200);

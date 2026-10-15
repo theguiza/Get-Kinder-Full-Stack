@@ -19,26 +19,34 @@ export const KAI_ORGANIZATION_ROLE_OPTIONS = Object.freeze([
   "client_contributor",
 ]);
 
-// The Get Kinder reviewer role. As an organization membership it mirrors
-// KAI_PLATFORM_SUPERUSER_ASSIGNABLE_ORGANIZATION_ROLES (superuser only); as
-// a global KAI role it is the one global role this modal grants or revokes.
+// Get Kinder staff roles. As organization memberships they mirror
+// KAI_PLATFORM_SUPERUSER_ASSIGNABLE_ORGANIZATION_ROLES (gk_reviewer,
+// gk_operator, gk_admin: platform superuser; gk_operator and gk_reviewer
+// also a delegated GK administrator - owner decision B/E). As global KAI
+// roles, gk_reviewer and gk_operator are the ones this modal grants or
+// revokes.
 export const KAI_GK_REVIEWER_ROLE = "gk_reviewer";
+export const KAI_GK_OPERATOR_ROLE = "gk_operator";
+export const KAI_GK_ADMIN_ROLE = "gk_admin";
+export const KAI_MODAL_GLOBAL_ROLE_OPTIONS = Object.freeze([KAI_GK_REVIEWER_ROLE, KAI_GK_OPERATOR_ROLE]);
 
 // Offered only when the server reports platform-superuser authority for the
 // roster (global_roles_visible); the backend decides either way.
 export const KAI_SUPERUSER_ORGANIZATION_ROLE_OPTIONS = Object.freeze([
   ...KAI_ORGANIZATION_ROLE_OPTIONS,
   KAI_GK_REVIEWER_ROLE,
+  KAI_GK_OPERATOR_ROLE,
+  KAI_GK_ADMIN_ROLE,
 ]);
 
 const KAI_ACCESS_ADMINISTRATION_BASE_PATH = "/api/kai/sprint2/access-administration";
 
-export function isAssignableKaiOrganizationRole(roleName, { includeGkReviewer = false } = {}) {
-  return (includeGkReviewer ? KAI_SUPERUSER_ORGANIZATION_ROLE_OPTIONS : KAI_ORGANIZATION_ROLE_OPTIONS).includes(roleName);
+export function isAssignableKaiOrganizationRole(roleName, { includeGkRoles = false } = {}) {
+  return (includeGkRoles ? KAI_SUPERUSER_ORGANIZATION_ROLE_OPTIONS : KAI_ORGANIZATION_ROLE_OPTIONS).includes(roleName);
 }
 
-export function kaiOrganizationRoleOptions({ includeGkReviewer = false } = {}) {
-  return includeGkReviewer ? KAI_SUPERUSER_ORGANIZATION_ROLE_OPTIONS : KAI_ORGANIZATION_ROLE_OPTIONS;
+export function kaiOrganizationRoleOptions({ includeGkRoles = false } = {}) {
+  return includeGkRoles ? KAI_SUPERUSER_ORGANIZATION_ROLE_OPTIONS : KAI_ORGANIZATION_ROLE_OPTIONS;
 }
 
 export function kaiOrganizationAccessPath(kaiOrganizationId) {
@@ -62,19 +70,50 @@ export function adminUserLookupPath(email) {
 }
 
 // Package 2's membership PUT requires both role_name and membership_status
-// on every call (Backend/kai/routes/kaiAccessAdministrationApi.js). This
-// builder is the single place that assembles that payload, and it refuses
-// to build a request for anything outside the three assignable client
-// roles or the two known membership statuses - defense in depth beyond the
-// UI only ever rendering a <select> of the same three roles.
-export function buildKaiOrganizationMembershipPayload(roleName, membershipStatus = "active", { includeGkReviewer = false } = {}) {
-  if (!isAssignableKaiOrganizationRole(roleName, { includeGkReviewer })) {
+// on every call (Backend/kai/routes/kaiAccessAdministrationApi.js), and an
+// explicit replacement (B/E C05) also names the exact existing assignment it
+// replaces (previous_role_name). This builder is the single place that
+// assembles that payload, and it refuses to build a request for anything
+// outside the assignable roles or the two known membership statuses -
+// defense in depth beyond the UI only ever rendering the offered roles.
+export function buildKaiOrganizationMembershipPayload(
+  roleName,
+  membershipStatus = "active",
+  { includeGkRoles = false, previousRoleName = null } = {}
+) {
+  if (!isAssignableKaiOrganizationRole(roleName, { includeGkRoles })) {
     throw new Error(`unsupported KAI organization role: ${roleName}`);
   }
   if (membershipStatus !== "active" && membershipStatus !== "inactive") {
     throw new Error(`unsupported KAI membership status: ${membershipStatus}`);
   }
-  return { role_name: roleName, membership_status: membershipStatus };
+  if (previousRoleName !== null && !isAssignableKaiOrganizationRole(previousRoleName, { includeGkRoles: true })) {
+    throw new Error(`unsupported KAI organization role: ${previousRoleName}`);
+  }
+  return previousRoleName === null
+    ? { role_name: roleName, membership_status: membershipStatus }
+    : { role_name: roleName, membership_status: membershipStatus, previous_role_name: previousRoleName };
+}
+
+// B/E C04 additive grant (POST .../memberships/:legacyId/roles, body
+// { role_name }) and C06 targeted revocation (POST
+// .../memberships/:legacyId/roles/:roleName/revoke, no body).
+export function kaiOrganizationRoleGrantPath(kaiOrganizationId, legacyPublicUserdataId) {
+  return `${kaiOrganizationMembershipPath(kaiOrganizationId, legacyPublicUserdataId)}/roles`;
+}
+
+export function kaiOrganizationRoleRevokePath(kaiOrganizationId, legacyPublicUserdataId, roleName) {
+  if (!isAssignableKaiOrganizationRole(roleName, { includeGkRoles: true })) {
+    throw new Error(`unsupported KAI organization role: ${roleName}`);
+  }
+  return `${kaiOrganizationRoleGrantPath(kaiOrganizationId, legacyPublicUserdataId)}/${encodeURIComponent(roleName)}/revoke`;
+}
+
+export function buildKaiOrganizationRoleGrantPayload(roleName, { includeGkRoles = false } = {}) {
+  if (!isAssignableKaiOrganizationRole(roleName, { includeGkRoles })) {
+    throw new Error(`unsupported KAI organization role: ${roleName}`);
+  }
+  return { role_name: roleName };
 }
 
 // Package 2's platform-superuser-only global-role route
@@ -83,21 +122,36 @@ export function kaiGlobalRolePath(legacyPublicUserdataId) {
   return `${KAI_ACCESS_ADMINISTRATION_BASE_PATH}/global-roles/${encodeURIComponent(legacyPublicUserdataId)}`;
 }
 
-// The modal grants or revokes only the global gk_reviewer role.
-export function buildKaiGlobalReviewerRolePayload(action) {
+// The modal grants or revokes only the global gk_reviewer and gk_operator
+// roles; gk_admin stays outside it.
+export function buildKaiGlobalRolePayload(roleName, action) {
+  if (!KAI_MODAL_GLOBAL_ROLE_OPTIONS.includes(roleName)) {
+    throw new Error(`unsupported KAI global role: ${roleName}`);
+  }
   if (action !== "assign" && action !== "revoke") {
     throw new Error(`unsupported KAI global role action: ${action}`);
   }
-  return { role_name: KAI_GK_REVIEWER_ROLE, action };
+  return { role_name: roleName, action };
 }
 
-// Success text for the "Grant KAI Access" form. The gk_reviewer organization
-// role is one half of a Get Kinder reviewer's access (sensitivity reviews
-// also need the global gk_reviewer role), so it is not reported as reviewer
-// access.
+export function buildKaiGlobalReviewerRolePayload(action) {
+  return buildKaiGlobalRolePayload(KAI_GK_REVIEWER_ROLE, action);
+}
+
+// Success text for the "Grant KAI Access" form. A Get Kinder organization
+// role is one half of that staff member's access (the review cockpit and
+// sensitivity reviews also need the matching global role), so it is not
+// reported as complete access. A grant adds the role; it never replaces
+// another role the person holds.
 export function kaiOrganizationRoleGrantMessage(roleName, email) {
   if (roleName === KAI_GK_REVIEWER_ROLE) {
     return `Granted the gk_reviewer role in this organization to ${email}. Sensitivity reviews also need the global gk_reviewer role.`;
+  }
+  if (roleName === KAI_GK_OPERATOR_ROLE) {
+    return `Granted the gk_operator role in this organization to ${email}. Source review also needs the global gk_operator role.`;
+  }
+  if (roleName === KAI_GK_ADMIN_ROLE) {
+    return `Granted the gk_admin role in this organization to ${email}. Managing this organization's Get Kinder roles also needs the global gk_admin role.`;
   }
   return `Granted ${String(roleName).replace(/_/g, " ")} access to ${email}.`;
 }

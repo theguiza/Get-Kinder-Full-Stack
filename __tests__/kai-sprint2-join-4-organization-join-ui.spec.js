@@ -303,7 +303,7 @@ test("admin: Approve as contributor / Decline call the JOIN-3 endpoints with an 
 });
 
 test("admin: approval refreshes queue and roster; a 409/404 race refreshes the queue; backend decides authorization", () => {
-  const handler = adminSource.slice(adminSource.indexOf("const submitKaiJoinRequestDecision = useCallback("), adminSource.indexOf("const submitKaiAccessRoleChange = useCallback("));
+  const handler = adminSource.slice(adminSource.indexOf("const submitKaiJoinRequestDecision = useCallback("), adminSource.indexOf("const submitKaiAccessAssignmentChange = useCallback("));
   assert.match(handler, /loadKaiJoinRequests\(organizationId, kaiOrganizationId\);\s*if \(decision === "approve"\) loadKaiAccess\(organizationId, kaiOrganizationId\);/);
   assert.match(handler, /if \(shouldRefreshJoinQueueAfterError\(err\?\.status\)\) loadKaiJoinRequests\(organizationId, kaiOrganizationId\);/);
   assert.doesNotMatch(handler, /platformSuperuser|client_admin|is_admin|role_name/);

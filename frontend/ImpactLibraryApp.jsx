@@ -658,13 +658,21 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
     if (activeSection === TEAM_ACCESS_SECTION_KEY && capabilitiesResolved && !canManageTeamAccess) setActiveSection("home");
   }, [activeSection, capabilitiesResolved, canManageTeamAccess]);
   const openTeamAccess = useCallback(() => setActiveSection(TEAM_ACCESS_SECTION_KEY), []);
+  // A change to an administrator's or the user's own roles, or a server
+  // conflict meaning this page was stale, re-reads the capability answer so
+  // obsolete access is never shown as current (the hook re-reads the roster).
+  const afterTeamAccessChange = useCallback(async (member, result) => {
+    if ((result.ok && (member.effectiveAdmin || member.isActor)) || result.failure?.status === 409) await refreshAccessCapabilities();
+  }, [refreshAccessCapabilities]);
   const changeTeamMemberRole = useCallback(async (member, roleName) => {
-    const result = await teamAccess.changeRole(member, roleName);
-    // An administrator's own role change, or a server conflict meaning this
-    // page was stale, re-reads the capability answer (the hook re-reads the
-    // roster).
-    if ((result.ok && member.effectiveAdmin) || result.failure?.status === 409) await refreshAccessCapabilities();
-  }, [teamAccess.changeRole, refreshAccessCapabilities]);
+    await afterTeamAccessChange(member, await teamAccess.changeRole(member, roleName));
+  }, [teamAccess.changeRole, afterTeamAccessChange]);
+  const grantTeamMemberRole = useCallback(async (member, roleName) => {
+    await afterTeamAccessChange(member, await teamAccess.grantRole(member, roleName));
+  }, [teamAccess.grantRole, afterTeamAccessChange]);
+  const revokeTeamMemberRole = useCallback(async (member, roleName) => {
+    await afterTeamAccessChange(member, await teamAccess.revokeRole(member, roleName));
+  }, [teamAccess.revokeRole, afterTeamAccessChange]);
 
   useEffect(() => {
     setJoinReviewOpen(false);
@@ -791,6 +799,8 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
         savingKey={teamAccess.savingKey}
         notice={teamAccess.notice}
         onChangeRole={changeTeamMemberRole}
+        onGrantRole={grantTeamMemberRole}
+        onRevokeRole={revokeTeamMemberRole}
         onRefresh={teamAccess.refresh}
         joinReview={joinReview.organizationId === selectedOrganizationId ? joinReview : null}
         onDecideJoinRequest={decideJoinRequest}

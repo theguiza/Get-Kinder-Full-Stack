@@ -7,6 +7,8 @@ import accessAdministrationRouter, { __testables } from "../Backend/kai/routes/k
 import {
   viewEffectiveKaiAccess,
   manageOrganizationMembership,
+  grantOrganizationRole,
+  revokeOrganizationRole,
   manageGlobalKaiRole,
 } from "../Backend/kai/services/kaiAccessAdministrationService.js";
 import {
@@ -151,17 +153,42 @@ function createStore({ memberships = [], bindings = { [ORG_A]: GK_ORG_A }, gkAdm
       return user ? { user_id: user.user_id, legacy_public_userdata_id: user.legacy, status: "active" } : null;
     },
     listKaiRolesForUser: async (userId) => (userId === USERS.gkStaff.user_id ? ["gk_reviewer"] : []),
-    upsertOrganizationMembershipRoleStatus: async ({ organizationId, userId, roleName, membershipStatus }) => {
-      state.upserts.push({ organizationId, userId, roleName, membershipStatus });
+    upsertOrganizationMembershipRoleStatus: async ({ organizationId, userId, roleName, membershipStatus, previousRoleName = null }) => {
+      state.upserts.push({ organizationId, userId, roleName, membershipStatus, ...(previousRoleName === null ? {} : { previousRoleName }) });
       const existing = rowsFor(organizationId, userId);
-      if (existing.length > 1) return { conflict: true, mutated: false };
-      const previousRow = existing[0] ? { ...existing[0] } : null;
+      if (previousRoleName === null && existing.length > 1) return { conflict: true, mutated: false };
+      const target = previousRoleName === null ? existing[0] : existing.find((row) => row.role_name === previousRoleName);
+      if (previousRoleName !== null && !target) return { conflict: true, mutated: false };
+      if (target && target.role_name !== roleName && existing.some((row) => row.role_name === roleName)) return { conflict: true, mutated: false };
+      const previousRow = target ? { ...target } : null;
       if (previousRow && previousRow.role_name === roleName && previousRow.membership_status === membershipStatus) {
         return { previousRow, newRow: previousRow, mutated: false, replay: true };
       }
-      if (existing[0]) Object.assign(existing[0], { role_name: roleName, membership_status: membershipStatus });
+      if (target) Object.assign(target, { role_name: roleName, membership_status: membershipStatus });
       else state.memberships.push({ organization_id: organizationId, user_id: userId, role_name: roleName, membership_status: membershipStatus });
       return { previousRow, newRow: { organization_id: organizationId, user_id: userId, role_name: roleName, membership_status: membershipStatus }, mutated: true };
+    },
+    grantOrganizationMembershipRole: async ({ organizationId, userId, roleName }) => {
+      state.upserts.push({ organizationId, userId, roleName, grant: true });
+      const existing = rowsFor(organizationId, userId);
+      const hadActiveAccess = existing.some((row) => row.membership_status === "active");
+      const target = existing.find((row) => row.role_name === roleName);
+      const previousRow = target ? { ...target } : null;
+      if (target?.membership_status === "active") return { previousRow, newRow: previousRow, mutated: false, replay: true, hadActiveAccess };
+      if (target) target.membership_status = "active";
+      else state.memberships.push({ organization_id: organizationId, user_id: userId, role_name: roleName, membership_status: "active" });
+      return { previousRow, newRow: { organization_id: organizationId, user_id: userId, role_name: roleName, membership_status: "active" }, mutated: true, replay: false, hadActiveAccess };
+    },
+    revokeOrganizationMembershipRole: async ({ organizationId, userId, roleName }) => {
+      state.upserts.push({ organizationId, userId, roleName, revoke: true });
+      const existing = rowsFor(organizationId, userId);
+      const target = existing.find((row) => row.role_name === roleName);
+      const remainingActiveRoleNames = existing.filter((row) => row !== target && row.membership_status === "active").map((row) => row.role_name);
+      if (!target) return { notFound: true, mutated: false, remainingActiveRoleNames };
+      const previousRow = { ...target };
+      if (target.membership_status !== "active") return { previousRow, newRow: previousRow, mutated: false, replay: true, remainingActiveRoleNames };
+      target.membership_status = "inactive";
+      return { previousRow, newRow: { ...target }, mutated: true, replay: false, remainingActiveRoleNames };
     },
     createProductionMetadataOnlyAuditForAccessAdministration: ({ organizationId }) => ({
       prepareMetadataOnlyAudit: ({ payload }) => ({
@@ -225,6 +252,8 @@ async function withRouter(actorContext, store, work) {
   const restore = __testables.setAccessAdministrationServiceForTest({
     viewEffectiveKaiAccess: (input) => viewEffectiveKaiAccess(input, dependencies),
     manageOrganizationMembership: (input) => manageOrganizationMembership(input, dependencies),
+    grantOrganizationRole: (input) => grantOrganizationRole(input, dependencies),
+    revokeOrganizationRole: (input) => revokeOrganizationRole(input, dependencies),
     manageGlobalKaiRole: (input) => manageGlobalKaiRole(input, dependencies),
     listPendingOrganizationJoinRequestsForReviewer: (input) => listPendingOrganizationJoinRequestsForReviewer(input, dependencies),
     approveOrganizationJoinRequest: (input) => approveOrganizationJoinRequest(input, dependencies),
@@ -378,13 +407,13 @@ test("5. an administrator assigns client_reviewer to an eligible member through 
     assert.equal(contributor.canChangeRole, true);
     const request = teamAccessRoleChangeRequest(ORG_A, contributor, "client_reviewer");
     assert.equal(request.path, `${BASE}/organizations/${ORG_A}/memberships/${USERS.contributor.legacy}`);
-    assert.deepEqual(request.body, { role_name: "client_reviewer", membership_status: "active" });
+    assert.deepEqual(request.body, { role_name: "client_reviewer", membership_status: "active", previous_role_name: "client_contributor" });
     const result = await call("PUT", request.path, request.body);
     assert.equal(result.statusCode, 200);
     assert.equal(byEmail(await roster(call), USERS.contributor.email).effectiveRole, "client_reviewer");
   });
-  assert.deepEqual(store.state.audits.map((a) => [a.attempted_operation, a.previous_role_name, a.resulting_role_name, a.organizationId]), [
-    ["organization_membership_role_status_changed", "client_contributor", "client_reviewer", ORG_A],
+  assert.deepEqual(store.state.audits.map((a) => [a.attempted_operation, a.previous_role_name, a.resulting_role_name, a.organizationId, a.authority_source]), [
+    ["organization_role_replaced", "client_contributor", "client_reviewer", ORG_A, "organization_client_admin"],
   ]);
 });
 
@@ -482,7 +511,8 @@ test("9. client administrators cannot grant GK global roles or rewrite a stored 
       const members = await roster(call);
       const staff = byEmail(members, USERS.gkStaff.email);
       assert.equal(staff.canChangeRole, false, "a stored GK staff membership is not offered for change");
-      assert.equal(teamAccessRoleLabel(staff.effectiveRole), "Get Kinder staff");
+      assert.equal(teamAccessRoleLabel(staff.effectiveRole), "Get Kinder reviewer");
+      assert.deepEqual([staff.grantableRoles.includes("gk_reviewer"), staff.assignments[0].canRevoke], [false, false], "no GK role is offered to a client administrator");
       assert.equal(staff.effectiveAdmin, false);
       assert.equal(staff.lastAdminProtected, false);
       // Direct API attempt: refused by the service, no write.
@@ -572,7 +602,7 @@ test("11. derived Get Kinder administrator authority is shown as such and never 
     assert.equal(after.effectiveRole, "client_admin");
     assert.equal(after.authoritySource, "both");
   });
-  assert.match(viewSource, /\{member\.canChangeRole \? \(/);
+  assert.match(viewSource, /return member\.canChangeRole \? \(/);
   assert.match(viewSource, /Get Kinder organization admin/);
 });
 
@@ -763,7 +793,10 @@ test("12. frontend: Team & Access entry points, roster reads, and the section fo
   // An administrator's own role change re-reads the capability answer.
   // An administrator's own role change, or a server conflict, re-reads the
   // capability answer; the hook re-reads the roster on a conflict.
-  assert.match(appSource, /if \(\(result\.ok && member\.effectiveAdmin\) \|\| result\.failure\?\.status === 409\) await refreshAccessCapabilities\(\);/);
+  assert.match(appSource, /if \(\(result\.ok && \(member\.effectiveAdmin \|\| member\.isActor\)\) \|\| result\.failure\?\.status === 409\) await refreshAccessCapabilities\(\);/);
+  for (const handler of ["changeRole", "grantRole", "revokeRole"]) {
+    assert.match(appSource, new RegExp(`await afterTeamAccessChange\\(member, await teamAccess\\.${handler}\\(member, roleName\\)\\);`), handler);
+  }
   assert.match(hookSource, /if \(failure\.status === 409 \|\| failure\.status === 404\) await load\(targetOrganizationId\);/);
 });
 
@@ -787,7 +820,7 @@ test("13. existing organization creation, join, switching, Home join review, and
   // NPO administrators are never sent to the GK superuser dashboard.
   for (const source of [appSource, shellSource, viewSource, hookSource]) assert.doesNotMatch(source, /href="\/admin|\/admin\b(?!istration)/);
   // The /admin modal still uses the shared helpers it used before.
-  assert.match(adminSource, /buildKaiOrganizationMembershipPayload\(roleInput, "active", \{ includeGkReviewer: globalRolesVisible \}\)/);
+  assert.match(adminSource, /buildKaiOrganizationRoleGrantPayload\(roleInput, \{ includeGkRoles: globalRolesVisible \}\)/);
   assert.match(adminSource, /Derived — not editable here/);
 });
 

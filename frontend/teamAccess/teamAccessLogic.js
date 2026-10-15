@@ -9,10 +9,13 @@
 import {
   KAI_ORGANIZATION_ROLE_OPTIONS,
   buildKaiOrganizationMembershipPayload,
+  buildKaiOrganizationRoleGrantPayload,
   isAssignableKaiOrganizationRole,
   kaiAccessRowKey,
   kaiOrganizationAccessPath,
   kaiOrganizationMembershipPath,
+  kaiOrganizationRoleGrantPath,
+  kaiOrganizationRoleRevokePath,
 } from "../kaiOrganizationAccessLogic.js";
 
 export const TEAM_ACCESS_SECTION_KEY = "teamAccess";
@@ -23,9 +26,12 @@ const ROLE_LABELS = Object.freeze({
   client_admin: "Administrator",
   client_reviewer: "Reviewer",
   client_contributor: "Contributor",
+  gk_admin: "Get Kinder administrator",
+  gk_operator: "Get Kinder operator",
+  gk_reviewer: "Get Kinder reviewer",
 });
 
-const ROLE_ORDER = Object.freeze({ client_admin: 0, client_reviewer: 1, client_contributor: 2 });
+const ROLE_ORDER = Object.freeze({ client_admin: 0, client_reviewer: 1, client_contributor: 2, gk_admin: 3, gk_operator: 4, gk_reviewer: 5 });
 
 export function teamAccessRoleLabel(roleName) {
   if (Object.hasOwn(ROLE_LABELS, roleName)) return ROLE_LABELS[roleName];
@@ -37,11 +43,37 @@ export function teamAccessRosterPath(organizationId) {
   return kaiOrganizationAccessPath(organizationId);
 }
 
+// Explicit replacement (B/E C05) of the member's addressed assignment
+// (storedRole) with one of the roles the server offered for it.
 export function teamAccessRoleChangeRequest(organizationId, member, roleName) {
+  if (!Array.isArray(member?.roleOptions) || !member.roleOptions.includes(roleName)) {
+    throw new Error(`unsupported KAI organization role: ${roleName}`);
+  }
   return {
     path: kaiOrganizationMembershipPath(organizationId, member.legacyUserId),
-    body: buildKaiOrganizationMembershipPayload(roleName, "active"),
+    body: buildKaiOrganizationMembershipPayload(roleName, "active", { includeGkRoles: true, previousRoleName: member.storedRole }),
   };
+}
+
+// Additive grant (B/E C04) of a role the server offered for this member, or
+// restoring one of their inactive assignments the server marked restorable.
+export function teamAccessRoleGrantRequest(organizationId, member, roleName) {
+  const restorable = (member?.assignments || []).some((assignment) => assignment.roleName === roleName && assignment.canRestore);
+  if (!restorable && !(member?.grantableRoles || []).includes(roleName)) {
+    throw new Error(`unsupported KAI organization role: ${roleName}`);
+  }
+  return {
+    path: kaiOrganizationRoleGrantPath(organizationId, member.legacyUserId),
+    body: buildKaiOrganizationRoleGrantPayload(roleName, { includeGkRoles: true }),
+  };
+}
+
+// Targeted revocation (B/E C06) of one assignment the server marked revocable.
+export function teamAccessRoleRevokeRequest(organizationId, member, roleName) {
+  if (!(member?.assignments || []).some((assignment) => assignment.roleName === roleName && assignment.canRevoke)) {
+    throw new Error(`unsupported KAI organization role: ${roleName}`);
+  }
+  return { path: kaiOrganizationRoleRevokePath(organizationId, member.legacyUserId, roleName), body: {} };
 }
 
 function positiveInteger(value) {
@@ -49,51 +81,92 @@ function positiveInteger(value) {
   return Number.isInteger(number) && number > 0 ? number : null;
 }
 
-function membershipOrNull(value) {
-  if (!value || typeof value !== "object") return null;
-  return {
-    roleName: typeof value.role_name === "string" ? value.role_name : null,
-    status: typeof value.membership_status === "string" ? value.membership_status : null,
-  };
+const knownRoles = (value) => (Array.isArray(value) ? value.filter((role) => isAssignableKaiOrganizationRole(role, { includeGkRoles: true })) : []);
+
+// Every stored assignment of one person, each with the server's answer to
+// what this administrator may do with it. A reader that predates
+// stored_memberships still gets its single stored_membership.
+function assignmentsOf(row) {
+  const stored = Array.isArray(row.stored_memberships)
+    ? row.stored_memberships
+    : row.stored_membership && typeof row.stored_membership === "object" ? [row.stored_membership] : [];
+  return stored
+    .filter((value) => value && typeof value === "object" && typeof value.role_name === "string")
+    .map((value) => ({
+      roleName: value.role_name,
+      status: typeof value.membership_status === "string" ? value.membership_status : null,
+      replacementRoles: knownRoles(value.replacement_roles),
+      canRevoke: value.can_revoke === true,
+      canRestore: value.can_restore === true,
+    }));
 }
 
 const ACCOUNT_STATUSES = new Set(["active", "inactive", "not_activated"]);
 
 /**
+ * The member as seen by one assignment's editor: storedRole/storedStatus,
+ * roleOptions, and canChangeRole all describe that one assignment, so the
+ * role-change helpers below address exactly it.
+ */
+export function teamAccessAssignmentMember(member, assignment) {
+  return {
+    ...member,
+    storedRole: assignment?.roleName ?? null,
+    storedStatus: assignment?.status ?? null,
+    roleOptions: assignment ? [assignment.roleName, ...assignment.replacementRoles] : [],
+    canChangeRole: Boolean(assignment) && member.legacyUserId !== null &&
+      (assignment.replacementRoles.length > 0 || assignment.canRestore),
+  };
+}
+
+/**
  * One roster row per person from viewEffectiveKaiAccess. `inheritedAdmin`
  * is the derived Get Kinder organization-admin authority (never a stored KAI
  * membership, so a role change here cannot remove it). `effectiveRole` is the
- * role the person holds; `effectiveAdmin` and `lastAdminProtected` are the
- * server's answers to whether they can administer right now (their KAI
- * account must be active) and whether the last-administrator protection
- * would refuse removing their stored administrator role. `canChangeRole` is
- * the server's own `editable` answer, narrowed to rows the membership route
- * can address (a stored client-role row with a legacy user id). Global KAI
- * roles are never projected.
+ * person's leading effective role and `effectiveRoles` every role whose own
+ * assignment is active (B/E C04); `assignments` are their stored assignments
+ * with the server's per-assignment answers (replacement roles, revoke,
+ * restore) and `grantableRoles` the Get Kinder staff roles this administrator
+ * may add.
+ * `effectiveAdmin` and `lastAdminProtected` are the server's answers to
+ * whether they can administer right now (their KAI account must be active)
+ * and whether the last-administrator protection would refuse removing their
+ * stored administrator role. storedRole/storedStatus/roleOptions/
+ * canChangeRole describe the member's first changeable assignment (else
+ * their first). Global KAI roles are never projected.
  */
 export function projectTeamAccessRoster(data) {
   const rows = Array.isArray(data?.access) ? data.access : [];
   const members = rows.map((row) => {
-    const stored = membershipOrNull(row.stored_membership);
+    const assignments = assignmentsOf(row);
     const inheritedAdmin = Boolean(row.derived_membership) && row.derived_membership.membership_status === "active";
     const legacyUserId = positiveInteger(row.legacy_public_userdata_id);
     const effectiveRole = typeof row.effective_role_name === "string" ? row.effective_role_name : null;
     const effectiveStatus = typeof row.effective_membership_status === "string" ? row.effective_membership_status : null;
-    return {
+    const member = {
       key: kaiAccessRowKey(row),
       email: typeof row.email === "string" && row.email ? row.email : null,
       legacyUserId,
       effectiveRole,
+      effectiveRoles: Array.isArray(row.effective_role_names)
+        ? row.effective_role_names.filter((role) => typeof role === "string")
+        : effectiveRole && effectiveStatus === "active" ? [effectiveRole] : [],
       effectiveStatus,
       accountStatus: ACCOUNT_STATUSES.has(row.kai_account_status) ? row.kai_account_status : null,
       effectiveAdmin: row.effective_admin_authority === true,
       lastAdminProtected: row.last_admin_protected === true,
       authoritySource: row.authority_source === "derived" || row.authority_source === "both" ? row.authority_source : "stored",
-      storedRole: stored?.roleName ?? null,
-      storedStatus: stored?.status ?? null,
       inheritedAdmin,
-      canChangeRole: row.editable === true && Boolean(stored) && legacyUserId !== null && isAssignableKaiOrganizationRole(stored.roleName),
+      isActor: row.is_actor === true,
+      assignments,
+      // Team & Access adds Get Kinder staff roles only; a client role keeps
+      // the one-role change control (an explicit replacement) above.
+      grantableRoles: legacyUserId === null
+        ? []
+        : knownRoles(row.grantable_roles).filter((role) => !KAI_ORGANIZATION_ROLE_OPTIONS.includes(role)),
     };
+    const addressed = assignments.find((assignment) => assignment.replacementRoles.length > 0 || assignment.canRestore) || assignments[0] || null;
+    return teamAccessAssignmentMember(member, addressed);
   });
   members.sort((a, b) => {
     const activeOrder = Number(a.effectiveStatus !== "active") - Number(b.effectiveStatus !== "active");
@@ -103,6 +176,12 @@ export function projectTeamAccessRoster(data) {
     return String(a.email || "").localeCompare(String(b.email || ""));
   });
   return members;
+}
+
+// The roles this administrator may manage in the organization (the server's
+// administrable_roles answer), for the role legend.
+export function projectTeamAccessAdministrableRoles(data) {
+  return knownRoles(data?.administrable_roles);
 }
 
 export function memberDisplayName(member) {
@@ -177,7 +256,13 @@ export function describeRoleChangeError(failure) {
   if (failure.blockingReason === "non_client_membership_not_client_managed") {
     return "Get Kinder manages this person's access. Contact a Get Kinder administrator to change it.";
   }
-  if (failure.code === "membership_state_conflict") {
+  if (failure.blockingReason === "self_role_elevation_not_allowed") {
+    return "You cannot add to or raise your own roles. Ask another administrator.";
+  }
+  if (failure.blockingReason === "organization_role_not_administrable") {
+    return "Your administrator role does not manage this role.";
+  }
+  if (failure.code === "membership_state_conflict" || failure.code === "not_found") {
     return "This person's access changed or needs a Get Kinder administrator. Refresh and try again.";
   }
   if (failure.status === 401) return "Your session has ended. Sign in again to manage your team.";
@@ -186,6 +271,27 @@ export function describeRoleChangeError(failure) {
   return "The role could not be changed. Try again.";
 }
 
+function withArticle(roleName) {
+  const label = teamAccessRoleLabel(roleName);
+  if (label === "Administrator") return "an administrator";
+  return `a ${String(roleName).startsWith("gk_") ? label : label.toLowerCase()}`;
+}
+
 export function roleChangeSuccessMessage(member, roleName) {
-  return `${memberDisplayName(member)} is now ${teamAccessRoleLabel(roleName) === "Administrator" ? "an administrator" : `a ${teamAccessRoleLabel(roleName).toLowerCase()}`}.`;
+  return `${memberDisplayName(member)} is now ${withArticle(roleName)}.`;
+}
+
+export function roleGrantSuccessMessage(member, roleName) {
+  return `${memberDisplayName(member)} is now also ${withArticle(roleName)}.`;
+}
+
+export function roleRevokeSuccessMessage(member, roleName) {
+  return `${memberDisplayName(member)} is no longer ${withArticle(roleName)}. Their other roles are unchanged.`;
+}
+
+// True when removing `roleName` would end this member's administrator
+// access (same rule as a role change).
+export function roleRevokeRemovesAdministrator(member, roleName) {
+  if (!member || member.inheritedAdmin || roleName !== "client_admin") return false;
+  return (member.assignments || []).some((assignment) => assignment.roleName === "client_admin" && assignment.status === "active");
 }

@@ -4,20 +4,25 @@ import { getJson } from "../impactEvidenceLibraryLogic.js";
 import {
   describeRoleChangeError,
   describeTeamAccessReadError,
+  projectTeamAccessAdministrableRoles,
   projectTeamAccessRoster,
   roleChangeSuccessMessage,
+  roleGrantSuccessMessage,
+  roleRevokeSuccessMessage,
   teamAccessErrorFromResult,
   teamAccessRoleChangeRequest,
+  teamAccessRoleGrantRequest,
+  teamAccessRoleRevokeRequest,
   teamAccessRosterPath,
 } from "./teamAccessLogic.js";
 
-const IDLE = Object.freeze({ organizationId: "", status: "idle", members: [], error: "" });
+const IDLE = Object.freeze({ organizationId: "", status: "idle", members: [], administrableRoles: [], error: "" });
 
-// The existing access-administration membership route is a PUT; same
-// { statusCode, body } shape as getJson.
-async function putJson(path, body) {
+// The access-administration role change is a PUT, and the role grant and
+// revocation are POSTs; same { statusCode, body } shape as getJson.
+async function sendJson(method, path, body) {
   const response = await fetch(path, {
-    method: "PUT",
+    method,
     credentials: "same-origin",
     headers: { Accept: "application/json", "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -51,18 +56,26 @@ export function useTeamAccess(organizationId, enabled) {
       organizationId: targetOrganizationId,
       status: current.organizationId === targetOrganizationId && current.status === "success" ? "success" : "loading",
       members: current.organizationId === targetOrganizationId ? current.members : [],
+      administrableRoles: current.organizationId === targetOrganizationId ? current.administrableRoles : [],
       error: "",
     }));
     const result = await getJson(teamAccessRosterPath(targetOrganizationId));
     if (requestRef.current !== token) return;
     if (result.statusCode === 200 && result.body?.ok) {
-      setRoster({ organizationId: targetOrganizationId, status: "success", members: projectTeamAccessRoster(result.body.data), error: "" });
+      setRoster({
+        organizationId: targetOrganizationId,
+        status: "success",
+        members: projectTeamAccessRoster(result.body.data),
+        administrableRoles: projectTeamAccessAdministrableRoles(result.body.data),
+        error: "",
+      });
       return;
     }
     setRoster({
       organizationId: targetOrganizationId,
       status: "error",
       members: [],
+      administrableRoles: [],
       error: describeTeamAccessReadError(teamAccessErrorFromResult(result)),
     });
   }, []);
@@ -83,23 +96,25 @@ export function useTeamAccess(organizationId, enabled) {
     if (currentOrganizationRef.current && enabled) load(currentOrganizationRef.current);
   }, [enabled, load]);
 
-  const changeRole = useCallback(async (member, roleName) => {
+  // One role change (PUT replacement), grant, or revocation (POSTs) for one
+  // member; the server answers, and the roster is always re-read from it.
+  const mutate = useCallback(async (member, buildRequest, method, successText) => {
     const targetOrganizationId = currentOrganizationRef.current;
-    if (!targetOrganizationId || !enabled || savingKey || !member?.canChangeRole) return { ok: false };
+    if (!targetOrganizationId || !enabled || savingKey || !member) return { ok: false };
     let request;
     try {
-      request = teamAccessRoleChangeRequest(targetOrganizationId, member, roleName);
+      request = buildRequest(targetOrganizationId);
     } catch {
       setNotice({ tone: "error", text: "That role is not available." });
       return { ok: false };
     }
     setSavingKey(member.key);
     setNotice(null);
-    const result = await putJson(request.path, request.body);
+    const result = await sendJson(method, request.path, request.body);
     if (currentOrganizationRef.current !== targetOrganizationId) return { ok: false, stale: true };
     setSavingKey("");
     if (result.statusCode === 200 && result.body?.ok) {
-      setNotice({ tone: "success", text: roleChangeSuccessMessage(member, roleName) });
+      setNotice({ tone: "success", text: successText });
       await load(targetOrganizationId);
       return { ok: true };
     }
@@ -109,7 +124,22 @@ export function useTeamAccess(organizationId, enabled) {
     return { ok: false, failure };
   }, [enabled, savingKey, load]);
 
+  const changeRole = useCallback(async (member, roleName) => {
+    if (!member?.canChangeRole) return { ok: false };
+    return mutate(member, (orgId) => teamAccessRoleChangeRequest(orgId, member, roleName), "PUT", roleChangeSuccessMessage(member, roleName));
+  }, [mutate]);
+
+  const grantRole = useCallback(
+    (member, roleName) => mutate(member, (orgId) => teamAccessRoleGrantRequest(orgId, member, roleName), "POST", roleGrantSuccessMessage(member, roleName)),
+    [mutate],
+  );
+
+  const revokeRole = useCallback(
+    (member, roleName) => mutate(member, (orgId) => teamAccessRoleRevokeRequest(orgId, member, roleName), "POST", roleRevokeSuccessMessage(member, roleName)),
+    [mutate],
+  );
+
   const rosterForOrganization = roster.organizationId === organizationId ? roster : { ...IDLE, organizationId, status: enabled ? "loading" : "idle" };
 
-  return { roster: rosterForOrganization, savingKey, notice, refresh, changeRole };
+  return { roster: rosterForOrganization, savingKey, notice, refresh, changeRole, grantRole, revokeRole };
 }

@@ -108,13 +108,10 @@ export async function getOrganizationMembershipRow(organizationId, userId, db = 
  * Every stored kai.organization_memberships row for one user in one
  * organization, ordered deterministically. The deployed uniqueness is
  * UNIQUE (organization_id, user_id, role_name) - not (organization_id,
- * user_id) - so PostgreSQL itself permits more than one stored role row for
- * the same user+organization. This package's own writes never create that
- * state (see upsertOrganizationMembershipRoleStatus), but pre-existing data
- * might; callers use this instead of getOrganizationMembershipRow wherever a
- * mutation decision depends on there being exactly one stored row, so an
- * unexpected extra row is detected and fails closed rather than silently
- * picked between.
+ * user_id) - so one user may hold several independent role assignments in
+ * the same organization (C04, owner decision B/E). Mutation decisions address
+ * one assignment by its role_name; a change that names no assignment while
+ * several exist fails closed rather than silently picking one.
  */
 export async function listOrganizationMembershipRowsForUserInOrganization(organizationId, userId, db = pool) {
   const { rows } = await db.query(
@@ -161,19 +158,33 @@ export async function countActiveStoredClientAdminMemberships(organizationId, db
  * previous row (null if none existed), the resulting row, and whether this
  * call actually changed anything (`mutated: false` on an exact-state replay,
  * so callers can skip writing a duplicate audit event).
+ *
+ * `previousRoleName` identifies the exact assignment being replaced (C05).
+ * Without it the change is addressed to the user's only stored row, and more
+ * than one row is an ambiguous target (conflict). With it, that row must
+ * exist, and a replacement role the user already holds as a separate row is a
+ * conflict - this writer never merges or deletes another assignment.
  */
 export async function upsertOrganizationMembershipRoleStatus(
-  { organizationId, userId, roleName, membershipStatus },
+  { organizationId, userId, roleName, membershipStatus, previousRoleName = null },
   db = pool,
 ) {
   return withLockedTransaction(db, `kai_org_membership:${organizationId}:${userId}`, async (client) => {
     const existingRows = await listOrganizationMembershipRowsForUserInOrganization(organizationId, userId, client);
 
-    if (existingRows.length > 1) {
+    if (previousRoleName === null && existingRows.length > 1) {
       return { previousRow: null, newRow: null, mutated: false, replay: false, conflict: true };
     }
 
-    const previousRow = existingRows[0] || null;
+    const previousRow = previousRoleName === null
+      ? existingRows[0] || null
+      : existingRows.find((row) => row.role_name === previousRoleName) || null;
+    if (previousRoleName !== null && !previousRow) {
+      return { previousRow: null, newRow: null, mutated: false, replay: false, conflict: true };
+    }
+    if (previousRow && previousRow.role_name !== roleName && existingRows.some((row) => row.role_name === roleName)) {
+      return { previousRow, newRow: null, mutated: false, replay: false, conflict: true };
+    }
 
     if (!previousRow) {
       const { rows } = await client.query(
@@ -189,11 +200,11 @@ export async function upsertOrganizationMembershipRoleStatus(
       return { previousRow, newRow: previousRow, mutated: false, replay: true };
     }
 
-    // Replacement semantics: the one stored row this user/org previously had
-    // (identified by its own role_name, matching the deployed UNIQUE
-    // (organization_id, user_id, role_name)) is changed in place to the
-    // requested role/status - never additively inserted alongside it - so no
-    // old privileged role row can remain active after a successful change.
+    // Replacement semantics: the identified stored row (by its own
+    // role_name, matching the deployed UNIQUE (organization_id, user_id,
+    // role_name)) is changed in place to the requested role/status - never
+    // additively inserted alongside it - so the replaced role cannot remain
+    // active, and every other assignment of this user is left untouched.
     const { rows } = await client.query(
       `UPDATE kai.organization_memberships
           SET role_name = $3,
@@ -205,6 +216,81 @@ export async function upsertOrganizationMembershipRoleStatus(
       [organizationId, userId, roleName, membershipStatus, previousRow.role_name],
     );
     return { previousRow, newRow: rows[0] || null, mutated: true, replay: false };
+  });
+}
+
+/**
+ * Additive grant of one organization role (C04): the user's assignment for
+ * exactly this role is created active, or reactivated if it exists in any
+ * other status. No other assignment of the user is read for writing or
+ * changed. `hadActiveAccess` reports whether any assignment of this user in
+ * the organization was already active, so the caller can audit a first
+ * active assignment as an organization-access admission.
+ */
+export async function grantOrganizationMembershipRole({ organizationId, userId, roleName }, db = pool) {
+  return withLockedTransaction(db, `kai_org_membership:${organizationId}:${userId}`, async (client) => {
+    const existingRows = await listOrganizationMembershipRowsForUserInOrganization(organizationId, userId, client);
+    const hadActiveAccess = existingRows.some((row) => row.membership_status === "active");
+    const previousRow = existingRows.find((row) => row.role_name === roleName) || null;
+
+    if (previousRow?.membership_status === "active") {
+      return { previousRow, newRow: previousRow, mutated: false, replay: true, hadActiveAccess };
+    }
+
+    const { rows } = previousRow
+      ? await client.query(
+        `UPDATE kai.organization_memberships
+            SET membership_status = 'active'
+          WHERE organization_id = $1
+            AND user_id = $2
+            AND role_name = $3
+          RETURNING ${MEMBERSHIP_SELECT_COLUMNS}`,
+        [organizationId, userId, roleName],
+      )
+      : await client.query(
+        `INSERT INTO kai.organization_memberships (organization_id, user_id, role_name, membership_status)
+         VALUES ($1, $2, $3, 'active')
+         RETURNING ${MEMBERSHIP_SELECT_COLUMNS}`,
+        [organizationId, userId, roleName],
+      );
+    return { previousRow, newRow: rows[0] || null, mutated: true, replay: false, hadActiveAccess };
+  });
+}
+
+/**
+ * Targeted revocation of one organization role (C06): only the user's
+ * active assignment for exactly this role becomes inactive (a soft-state
+ * UPDATE, never DELETE, so the assignment's history remains). A replay
+ * against an assignment that is already not active is a no-op; an absent
+ * assignment is reported, never created. `remainingActiveRoleNames` are the
+ * user's other active assignments, which this never touches.
+ */
+export async function revokeOrganizationMembershipRole({ organizationId, userId, roleName }, db = pool) {
+  return withLockedTransaction(db, `kai_org_membership:${organizationId}:${userId}`, async (client) => {
+    const existingRows = await listOrganizationMembershipRowsForUserInOrganization(organizationId, userId, client);
+    const previousRow = existingRows.find((row) => row.role_name === roleName) || null;
+    const remainingActiveRoleNames = existingRows
+      .filter((row) => row.role_name !== roleName && row.membership_status === "active")
+      .map((row) => row.role_name);
+
+    if (!previousRow) {
+      return { previousRow: null, newRow: null, mutated: false, replay: false, notFound: true, remainingActiveRoleNames };
+    }
+    if (previousRow.membership_status !== "active") {
+      return { previousRow, newRow: previousRow, mutated: false, replay: true, remainingActiveRoleNames };
+    }
+
+    const { rows } = await client.query(
+      `UPDATE kai.organization_memberships
+          SET membership_status = 'inactive'
+        WHERE organization_id = $1
+          AND user_id = $2
+          AND role_name = $3
+          AND membership_status = 'active'
+        RETURNING ${MEMBERSHIP_SELECT_COLUMNS}`,
+      [organizationId, userId, roleName],
+    );
+    return { previousRow, newRow: rows[0] || null, mutated: rows.length > 0, replay: rows.length === 0, remainingActiveRoleNames };
   });
 }
 

@@ -1032,6 +1032,198 @@ async function runIntegrationSuite() {
           });
         }
       });
+      // --- B/E. Independent grants, explicit replacement, targeted revocation
+      //
+      // Owner decision B/E (C04-C06) on the production router with real actor
+      // resolution: a superuser, a delegated GK administrator (global +
+      // organization gk_admin, both written by governed routes), and the
+      // persisted kai.organization_memberships / kai.audit_events rows.
+
+      const { resolveKaiActorContext } = await import("../Backend/kai/auth/kaiActorContext.js");
+      const { authorizeSourcePromotionDecision } = await import("../Backend/kai/services/kaiSourcePromotionService.js");
+
+      const grantRole = (call, actor, orgId, target, roleName) =>
+        call(actor.legacyId, "POST", `/organizations/${orgId}/memberships/${target.legacyId}/roles`, { role_name: roleName }, actor.headers);
+      const revokeRole = (call, actor, orgId, target, roleName) =>
+        call(actor.legacyId, "POST", `/organizations/${orgId}/memberships/${target.legacyId}/roles/${roleName}/revoke`, {}, actor.headers);
+      const sortedRows = async (orgId, person) => (await membershipRows(orgId, person.kaiUserId))
+        .sort((a, b) => a.role_name.localeCompare(b.role_name));
+      const auditMetadata = async () => (await pool.query(
+        "SELECT actor_user_id, organization_id, metadata FROM kai.audit_events ORDER BY created_at, audit_event_id",
+      )).rows;
+      const freshActor = async (person) => {
+        const resolved = await resolveKaiActorContext({ id: person.legacyId, email: `user${person.legacyId}@guard.test` });
+        assert.equal(resolved.ok, true, JSON.stringify(resolved));
+        return resolved.actorContext;
+      };
+
+      // A superuser and a delegated GK administrator provisioned through the
+      // governed routes only: global gk_admin (superuser global-role route),
+      // then organization gk_admin (superuser organization grant).
+      async function governedAdministrators(call, orgId) {
+        const superuser = { ...(await seedPerson()), headers: { "x-harness-admin": "1" } };
+        const gkAdmin = await seedPerson();
+        assert.equal((await call(superuser.legacyId, "PUT", `/global-roles/${gkAdmin.legacyId}`, { role_name: "gk_admin", action: "assign" }, superuser.headers)).status, 200);
+        assert.equal((await grantRole(call, superuser, orgId, gkAdmin, "gk_admin")).status, 200);
+        return { superuser, gkAdmin };
+      }
+
+      await t.test("B/E 1: additive grants coexist as separate rows, preserve the existing client role, replay writes nothing, and persist truthful audit", async () => {
+        await resetAllTables();
+        const orgId = await newOrgId();
+        const member = await seedPerson();
+        await storeMembership(orgId, member, "client_contributor");
+        await withRealRouter(async (call) => {
+          const { superuser, gkAdmin } = await governedAdministrators(call, orgId);
+          const before = await auditCount();
+          const granted = await grantRole(call, gkAdmin, orgId, member, "gk_operator");
+          assert.equal(granted.status, 200, JSON.stringify(granted.body));
+          assert.equal(granted.body.data.organization_access_admitted, false);
+          assert.equal((await grantRole(call, gkAdmin, orgId, member, "gk_reviewer")).status, 200);
+          const replay = await grantRole(call, gkAdmin, orgId, member, "gk_operator");
+          assert.deepEqual([replay.status, replay.body.data.replayed], [200, true]);
+          assert.deepEqual(await sortedRows(orgId, member), [
+            { role_name: "client_contributor", membership_status: "active" },
+            { role_name: "gk_operator", membership_status: "active" },
+            { role_name: "gk_reviewer", membership_status: "active" },
+          ]);
+          assert.deepEqual((await userRolesRows(member.kaiUserId)).length, 0, "no global role created");
+          assert.equal(await auditCount(), before + 2);
+          const audits = (await auditMetadata()).slice(-2);
+          assert.deepEqual(audits.map((row) => [row.actor_user_id, row.organization_id, row.metadata.operation, row.metadata.role_name, row.metadata.authority_source, row.metadata.target_user_id]), [
+            [gkAdmin.kaiUserId, orgId, "organization_role_granted", "gk_operator", "delegated_gk_admin", member.kaiUserId],
+            [gkAdmin.kaiUserId, orgId, "organization_role_granted", "gk_reviewer", "delegated_gk_admin", member.kaiUserId],
+          ]);
+          // The superuser's own grants were audited with its authority.
+          assert.deepEqual((await auditMetadata()).slice(0, 2).map((row) => [row.metadata.operation, row.metadata.authority_source]), [
+            ["global_kai_role_assigned", "platform_superuser"],
+            ["organization_role_granted_access_admitted", "platform_superuser"],
+          ]);
+          assert.ok(superuser);
+        });
+      });
+
+      await t.test("B/E 2: explicit replacement changes only the named row; an unnamed or conflicting replacement fails closed", async () => {
+        await resetAllTables();
+        const orgId = await newOrgId();
+        const member = await seedPerson();
+        await storeMembership(orgId, member, "client_contributor");
+        await storeMembership(orgId, member, "gk_reviewer");
+        await withRealRouter(async (call) => {
+          const { gkAdmin } = await governedAdministrators(call, orgId);
+          const before = await auditCount();
+          const unnamed = await demote(call, gkAdmin, orgId, member, { role_name: "gk_operator", membership_status: "active" });
+          assert.deepEqual([unnamed.status, unnamed.body.error.code], [409, "membership_state_conflict"]);
+          const intoHeld = await demote(call, gkAdmin, orgId, member, { role_name: "gk_reviewer", membership_status: "active", previous_role_name: "client_contributor" });
+          assert.equal(intoHeld.status, 403, "the delegated GK administrator does not manage the client row");
+          const replaced = await demote(call, gkAdmin, orgId, member, { role_name: "gk_operator", membership_status: "active", previous_role_name: "gk_reviewer" });
+          assert.equal(replaced.status, 200, JSON.stringify(replaced.body));
+          assert.deepEqual(await sortedRows(orgId, member), [
+            { role_name: "client_contributor", membership_status: "active" },
+            { role_name: "gk_operator", membership_status: "active" },
+          ]);
+          assert.equal(await auditCount(), before + 1);
+          const audit = (await auditMetadata()).at(-1).metadata;
+          assert.deepEqual([audit.operation, audit.previous_role_name, audit.resulting_role_name, audit.authority_source], ["organization_role_replaced", "gk_reviewer", "gk_operator", "delegated_gk_admin"]);
+        });
+      });
+
+      await t.test("B/E 3: the governed operator path - global + organization gk_operator admit P1-08 on a freshly resolved actor, and targeted revocation removes it while other roles remain", async () => {
+        await resetAllTables();
+        const orgId = await newOrgId();
+        const operator = await seedPerson();
+        await storeMembership(orgId, operator, "client_contributor");
+        await withRealRouter(async (call) => {
+          const { superuser, gkAdmin } = await governedAdministrators(call, orgId);
+          assert.equal(authorizeSourcePromotionDecision(await freshActor(operator), orgId).ok, false);
+          assert.equal((await call(superuser.legacyId, "PUT", `/global-roles/${operator.legacyId}`, { role_name: "gk_operator", action: "assign" }, superuser.headers)).status, 200);
+          assert.equal(authorizeSourcePromotionDecision(await freshActor(operator), orgId).ok, false, "global role alone");
+          assert.equal((await grantRole(call, gkAdmin, orgId, operator, "gk_operator")).status, 200);
+          const admitted = await freshActor(operator);
+          assert.equal(authorizeSourcePromotionDecision(admitted, orgId).ok, true);
+          assert.equal(authorizeSourcePromotionDecision(admitted, await newOrgId()).ok, false);
+
+          const revoked = await revokeRole(call, gkAdmin, orgId, operator, "gk_operator");
+          assert.deepEqual([revoked.status, revoked.body.data.remaining_active_role_names], [200, ["client_contributor"]]);
+          const after = await freshActor(operator);
+          const denied = authorizeSourcePromotionDecision(after, orgId);
+          assert.deepEqual([denied.ok, denied.error.blockers[0].blocking_reason], [false, "role_not_allowed"]);
+          assert.deepEqual(after.kaiRoles, ["gk_operator"], "the global role is left to its own governed operation");
+          assert.deepEqual(await sortedRows(orgId, operator), [
+            { role_name: "client_contributor", membership_status: "active" },
+            { role_name: "gk_operator", membership_status: "inactive" },
+          ]);
+          const replay = await revokeRole(call, gkAdmin, orgId, operator, "gk_operator");
+          assert.deepEqual([replay.status, replay.body.data.replayed], [200, true]);
+          assert.equal((await auditMetadata()).at(-1).metadata.operation, "organization_role_revoked");
+        });
+      });
+
+      await t.test("B/E 4: concurrent identical grants and revocations converge to one row and one audit; concurrent different grants both hold", async () => {
+        for (let round = 0; round < 3; round += 1) {
+          await resetAllTables();
+          const orgId = await newOrgId();
+          const member = await seedPerson();
+          await withRealRouter(async (call) => {
+            const { gkAdmin } = await governedAdministrators(call, orgId);
+            const before = await auditCount();
+            const grants = await Promise.all([1, 2, 3].map(() => grantRole(call, gkAdmin, orgId, member, "gk_operator")));
+            assert.deepEqual(grants.map((r) => r.status), [200, 200, 200], JSON.stringify(grants.map((r) => r.body)));
+            assert.equal(grants.filter((r) => r.body.data.replayed === false).length, 1, `round ${round}`);
+            assert.equal(await auditCount(), before + 1, `round ${round}`);
+            const both = await Promise.all([grantRole(call, gkAdmin, orgId, member, "gk_reviewer"), revokeRole(call, gkAdmin, orgId, member, "gk_operator"), revokeRole(call, gkAdmin, orgId, member, "gk_operator")]);
+            assert.deepEqual(both.map((r) => r.status), [200, 200, 200], JSON.stringify(both.map((r) => r.body)));
+            assert.deepEqual(await sortedRows(orgId, member), [
+              { role_name: "gk_operator", membership_status: "inactive" },
+              { role_name: "gk_reviewer", membership_status: "active" },
+            ], `round ${round}`);
+            assert.equal(await auditCount(), before + 3, `round ${round}: one grant, one reviewer grant, one revocation`);
+          });
+        }
+      });
+
+      await t.test("B/E 5: delegated GK administrator boundaries and self-elevation refusal hold on the real path with zero mutation", async () => {
+        await resetAllTables();
+        const orgId = await newOrgId();
+        const otherOrg = await newOrgId();
+        const member = await seedPerson();
+        const clientAdmin = await seedPerson();
+        await storeMembership(orgId, member, "client_contributor");
+        await storeMembership(orgId, clientAdmin, "client_admin");
+        await withRealRouter(async (call) => {
+          const { gkAdmin } = await governedAdministrators(call, orgId);
+          const before = await auditCount();
+          const reasons = [];
+          for (const attempt of [
+            grantRole(call, gkAdmin, orgId, member, "gk_admin"),
+            grantRole(call, gkAdmin, orgId, member, "client_reviewer"),
+            grantRole(call, gkAdmin, orgId, gkAdmin, "gk_operator"),
+            grantRole(call, gkAdmin, otherOrg, member, "gk_operator"),
+            revokeRole(call, gkAdmin, orgId, gkAdmin, "gk_admin"),
+            grantRole(call, clientAdmin, orgId, member, "gk_reviewer"),
+            grantRole(call, clientAdmin, orgId, clientAdmin, "client_reviewer"),
+            call(gkAdmin.legacyId, "PUT", `/global-roles/${member.legacyId}`, { role_name: "gk_operator", action: "assign" }),
+          ]) {
+            const result = await attempt;
+            assert.equal(result.status, 403, JSON.stringify(result.body));
+            reasons.push(result.body.blockers[0].blocking_reason);
+          }
+          assert.deepEqual(reasons, [
+            "organization_role_not_administrable",
+            "organization_role_not_administrable",
+            "self_role_elevation_not_allowed",
+            "missing_active_organization_membership",
+            "organization_role_not_administrable",
+            "non_client_membership_not_client_managed",
+            "self_role_elevation_not_allowed",
+            "platform_superuser_required",
+          ]);
+          assert.equal(await auditCount(), before);
+          assert.deepEqual(await sortedRows(orgId, member), [{ role_name: "client_contributor", membership_status: "active" }]);
+          assert.deepEqual(await sortedRows(orgId, gkAdmin), [{ role_name: "gk_admin", membership_status: "active" }]);
+        });
+      });
+
     } finally {
       await pool.end();
       const { default: ambientPool } = await import("../Backend/db/pg.js");

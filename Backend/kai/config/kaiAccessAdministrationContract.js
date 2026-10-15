@@ -26,18 +26,28 @@ export const KAI_ASSIGNABLE_ORGANIZATION_ROLES = Object.freeze([
 ]);
 
 /**
- * The organization roles a platform superuser may assign: the client roles
- * plus gk_reviewer, which places a Get Kinder reviewer on one organization.
- * The GK review services already treat an active stored gk_reviewer
- * membership as that organization's scope (the Knowledge Studio mount reads
- * it, and the review-cockpit routes combine it with the global gk_reviewer
- * role), but no governed writer could create one. gk_admin and gk_operator
- * memberships remain outside this path.
+ * The organization roles a platform superuser may grant, replace, and
+ * revoke: the client roles, gk_reviewer, and (owner decision B/E C04-C06,
+ * 2026-10-15) gk_operator and gk_admin. Each is one stored
+ * kai.organization_memberships row for that organization only; none of them
+ * creates a global kai.user_roles role.
  */
 export const KAI_PLATFORM_SUPERUSER_ASSIGNABLE_ORGANIZATION_ROLES = Object.freeze([
   ...KAI_ASSIGNABLE_ORGANIZATION_ROLES,
   "gk_reviewer",
+  "gk_operator",
+  "gk_admin",
 ]);
+
+/**
+ * Delegated GK administration (owner decision B/E, 2026-10-15): an actor
+ * holding BOTH the global gk_admin role and an active stored gk_admin
+ * membership of the exact target organization may grant, replace, and
+ * revoke that organization's gk_operator and gk_reviewer assignments - never
+ * organization gk_admin, a global role, or another organization.
+ */
+export const KAI_DELEGATED_GK_ADMINISTRATOR_ROLE = "gk_admin";
+export const KAI_DELEGATED_GK_ADMIN_ASSIGNABLE_ORGANIZATION_ROLES = Object.freeze(["gk_operator", "gk_reviewer"]);
 
 /**
  * Existing global KAI staff roles (kai.roles -> kai.user_roles) a platform
@@ -50,14 +60,14 @@ export const KAI_ASSIGNABLE_GLOBAL_ROLES = Object.freeze(["gk_admin", "gk_operat
 
 /**
  * kai.organization_memberships is externally managed (no CREATE TABLE for it
- * exists in this repository - see KAI_Sprint2_P0_Final_Recovery_and_Implementation_Plan_v0.3.6.md
- * and Backend/kai/db/kaiQueries.js), so its membership_status vocabulary is
- * not confirmed by DDL. The only value existing Package 1 code depends on is
- * "active" (Backend/kai/auth/tenantAuthorization.js, kaiAuthorizationService.js).
- * "inactive" is this package's chosen counterpart status for
- * deactivate/revoke, mirroring the same active/inactive vocabulary already
- * used for kai.gk_organization_bindings.status. This is a bounded design
- * choice, not a confirmed schema fact - see the Package 2 completion report.
+ * exists in this repository). The committed production catalog capture
+ * (artifacts/kai-db-reconciliation-2026-09-16/PRODUCTION_KAI_SCHEMA.json)
+ * shows CHECK membership_status IN ('active','inactive','revoked','invited')
+ * and UNIQUE (organization_id, user_id, role_name). Only "active" confers
+ * authority anywhere (Backend/kai/auth/kaiAuthorizationService.js). The
+ * administration writers use only "active" and "inactive" - "inactive" is the
+ * counterpart for deactivation and targeted revocation; "revoked" and
+ * "invited" are DDL-valid but never written here.
  */
 export const KAI_ORGANIZATION_MEMBERSHIP_STATUSES = Object.freeze(["active", "inactive"]);
 export const KAI_ACTIVE_ORGANIZATION_MEMBERSHIP_STATUS = "active";

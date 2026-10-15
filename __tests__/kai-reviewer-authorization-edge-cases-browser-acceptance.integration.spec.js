@@ -929,7 +929,7 @@ async function runBrowserAcceptance() {
       await adminPage.idle();
       const grantWrites = writes(adminPage.requestsSince(mark));
       console.log(`[reviewer-authorization] F1 grant writes: ${JSON.stringify(grantWrites)}; tables ${JSON.stringify(changedTables(before, await allKaiCounts()))}`);
-      assert.deepEqual(grantWrites, [["PUT", paths.membership(USERS.firstTime), 200]]);
+      assert.deepEqual(grantWrites, [["POST", `${paths.membership(USERS.firstTime)}/roles`, 200]], "the additive grant (owner decision B/E C04)");
       const identities = await kaiUserRows(USERS.firstTime);
       assert.equal(identities.length, 1, "exactly one KAI identity");
       assert.deepEqual([identities[0].legacy_identity_source, identities[0].status, identities[0].email],

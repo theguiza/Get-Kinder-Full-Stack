@@ -3,18 +3,21 @@ import ImpactEvidenceLibrary from "./ImpactEvidenceLibrary.jsx";
 import KaiWebIntake from "./KaiWebIntake.jsx";
 import KaiReviewCockpit from "./kaiReviewCockpit.jsx";
 import {
-  KAI_GK_REVIEWER_ROLE,
+  KAI_MODAL_GLOBAL_ROLE_OPTIONS,
   KAI_ORGANIZATION_ROLE_OPTIONS,
   adminUserLookupPath,
-  buildKaiGlobalReviewerRolePayload,
+  buildKaiGlobalRolePayload,
   buildKaiOrganizationMembershipPayload,
+  buildKaiOrganizationRoleGrantPayload,
   describeKaiAccessAuthoritySource,
   kaiAccessRowKey,
   kaiGlobalRolePath,
   kaiOrganizationAccessPath,
   kaiOrganizationMembershipPath,
   kaiOrganizationRoleGrantMessage,
+  kaiOrganizationRoleGrantPath,
   kaiOrganizationRoleOptions,
+  kaiOrganizationRoleRevokePath,
   rosterGlobalKaiRoles,
 } from "./kaiOrganizationAccessLogic.js";
 import {
@@ -554,70 +557,105 @@ function ConfirmDialog({ open, title, body, confirmLabel, onCancel, onConfirm, v
   );
 }
 
+// One person's stored KAI assignments in this organization (B/E C04-C06):
+// each assignment is replaced, revoked, or restored on its own, from the
+// server's per-assignment answers, so changing one never touches another.
 function KaiAccessRosterRow({
   row,
-  roleOptions,
-  draftRole,
+  drafts,
   onDraftChange,
-  onSave,
+  onReplace,
+  onRevoke,
+  onRestore,
   saving,
   globalRolesVisible,
-  onGlobalReviewerRole,
+  onGlobalRole,
   globalRoleSaving,
-  onRemoveGkReviewer,
 }) {
   const displayName = row.email || (row.legacy_public_userdata_id ? `User #${row.legacy_public_userdata_id}` : "Unknown user");
   const globalRoles = rosterGlobalKaiRoles(row);
-  const hasGlobalReviewer = Boolean(globalRoles?.includes(KAI_GK_REVIEWER_ROLE));
-  const isActiveGkReviewerMember =
-    row.stored_membership?.role_name === KAI_GK_REVIEWER_ROLE && row.stored_membership?.membership_status === "active";
+  const assignments = Array.isArray(row.stored_memberships) ? row.stored_memberships : [];
+  const effectiveRoles = Array.isArray(row.effective_role_names) && row.effective_role_names.length > 0
+    ? row.effective_role_names.join(", ")
+    : row.effective_role_name || "—";
   return (
     <tr data-kai-access-row={kaiAccessRowKey(row)}>
       <td>{displayName}</td>
-      <td>{row.effective_role_name || "—"}</td>
+      <td>{effectiveRoles}</td>
       <td>{row.effective_membership_status || "—"}</td>
       <td>{describeKaiAccessAuthoritySource(row.authority_source)}</td>
       <td>
-        {row.editable ? (
-          <div className="d-flex gap-1">
-            <select
-              className="form-select form-select-sm"
-              style={{ minWidth: 140 }}
-              value={draftRole}
-              onChange={(e) => onDraftChange(e.target.value)}
-            >
-              {roleOptions.map((role) => (
-                <option key={role} value={role}>
-                  {role}
-                </option>
-              ))}
-            </select>
-            <button type="button" className="btn btn-outline-primary btn-sm" disabled={saving} onClick={onSave}>
-              {saving ? "Saving…" : "Save"}
-            </button>
-            {globalRolesVisible && isActiveGkReviewerMember ? (
-              <button type="button" className="btn btn-outline-danger btn-sm" disabled={saving} onClick={onRemoveGkReviewer}>
-                Remove gk_reviewer here
-              </button>
-            ) : null}
-          </div>
+        {assignments.length === 0 ? (
+          <span className="text-muted small">{row.derived_membership ? "Derived — not editable here" : "No stored KAI role"}</span>
         ) : (
-          <span className="text-muted small">Derived — not editable here</span>
+          assignments.map((assignment) => {
+            const draftRole = drafts[assignment.role_name] || assignment.role_name;
+            const replacementRoles = Array.isArray(assignment.replacement_roles) ? assignment.replacement_roles : [];
+            return (
+              <div key={assignment.role_name} className="d-flex flex-wrap align-items-center gap-1 mb-1" data-kai-access-assignment={assignment.role_name}>
+                <span className="small">
+                  {assignment.role_name}
+                  {assignment.membership_status !== "active" ? ` (${assignment.membership_status})` : ""}
+                </span>
+                {replacementRoles.length > 0 ? (
+                  <>
+                    <select
+                      className="form-select form-select-sm"
+                      style={{ minWidth: 140, width: "auto" }}
+                      value={draftRole}
+                      aria-label={`Replace ${assignment.role_name} for ${displayName}`}
+                      onChange={(e) => onDraftChange(assignment.role_name, e.target.value)}
+                    >
+                      {[assignment.role_name, ...replacementRoles].map((role) => (
+                        <option key={role} value={role}>
+                          {role}
+                        </option>
+                      ))}
+                    </select>
+                    <button
+                      type="button"
+                      className="btn btn-outline-primary btn-sm"
+                      disabled={saving || draftRole === assignment.role_name}
+                      onClick={() => onReplace(assignment.role_name, draftRole)}
+                    >
+                      {saving ? "Saving…" : "Replace"}
+                    </button>
+                  </>
+                ) : null}
+                {assignment.can_revoke ? (
+                  <button type="button" className="btn btn-outline-danger btn-sm" disabled={saving} onClick={() => onRevoke(assignment.role_name)}>
+                    Remove {assignment.role_name} here
+                  </button>
+                ) : null}
+                {assignment.can_restore ? (
+                  <button type="button" className="btn btn-outline-secondary btn-sm" disabled={saving} onClick={() => onRestore(assignment.role_name)}>
+                    Restore {assignment.role_name} here
+                  </button>
+                ) : null}
+              </div>
+            );
+          })
         )}
       </td>
       {globalRolesVisible ? (
         <td>
           <div className="small">{globalRoles && globalRoles.length > 0 ? globalRoles.join(", ") : "None"}</div>
-          {globalRoles && row.legacy_public_userdata_id ? (
-            <button
-              type="button"
-              className={`btn btn-sm mt-1 ${hasGlobalReviewer ? "btn-outline-danger" : "btn-outline-primary"}`}
-              disabled={globalRoleSaving}
-              onClick={() => onGlobalReviewerRole(hasGlobalReviewer ? "revoke" : "assign")}
-            >
-              {globalRoleSaving ? "Saving…" : hasGlobalReviewer ? "Revoke gk_reviewer" : "Grant gk_reviewer"}
-            </button>
-          ) : null}
+          {globalRoles && row.legacy_public_userdata_id
+            ? KAI_MODAL_GLOBAL_ROLE_OPTIONS.map((role) => {
+                const holds = globalRoles.includes(role);
+                return (
+                  <button
+                    key={role}
+                    type="button"
+                    className={`btn btn-sm mt-1 me-1 ${holds ? "btn-outline-danger" : "btn-outline-primary"}`}
+                    disabled={globalRoleSaving}
+                    onClick={() => onGlobalRole(role, holds ? "revoke" : "assign")}
+                  >
+                    {globalRoleSaving ? "Saving…" : holds ? `Revoke ${role}` : `Grant ${role}`}
+                  </button>
+                );
+              })
+            : null}
         </td>
       ) : null}
     </tr>
@@ -1683,8 +1721,10 @@ export default function AdminDashboard() {
       const legacyUserId = lookupPayload?.user?.id;
       if (!legacyUserId) throw new Error("user_not_found");
 
-      const payload = buildKaiOrganizationMembershipPayload(roleInput, "active", { includeGkReviewer: globalRolesVisible });
-      await kaiMutateJson(kaiOrganizationMembershipPath(kaiOrganizationId, legacyUserId), "PUT", payload);
+      // Additive (B/E C04): adds this role and never replaces another role
+      // the person already holds.
+      const payload = buildKaiOrganizationRoleGrantPayload(roleInput, { includeGkRoles: globalRolesVisible });
+      await kaiMutateJson(kaiOrganizationRoleGrantPath(kaiOrganizationId, legacyUserId), "POST", payload);
 
       pushToast(kaiOrganizationRoleGrantMessage(roleInput, email), "success");
       setKaiAccessModal((curr) =>
@@ -1741,25 +1781,42 @@ export default function AdminDashboard() {
     [kaiAccessModal, kaiMutateJson, pushToast, loadKaiJoinRequests, loadKaiAccess]
   );
 
-  // membershipStatus "inactive" is used only by "Remove gk_reviewer here".
-  const submitKaiAccessRoleChange = useCallback(
-    async (row, newRole, membershipStatus = "active") => {
+  // One assignment change for one person: an explicit replacement of the
+  // named assignment (a PUT that names the replaced role, B/E C05), a targeted
+  // revocation (C06), or restoring an inactive assignment (an additive grant
+  // of that same role, C04). The roster is re-read from the server
+  // afterwards and a refusal is shown as returned - never retried with
+  // weaker semantics (e.g. a last-admin-protection rejection).
+  const submitKaiAccessAssignmentChange = useCallback(
+    async (row, change) => {
       const { organizationId, kaiOrganizationId, globalRolesVisible } = kaiAccessModal;
       const legacyUserId = row?.legacy_public_userdata_id;
       if (!kaiOrganizationId || !legacyUserId || !row?.editable) return;
       const rowKey = kaiAccessRowKey(row);
+      const who = row.email || `user #${legacyUserId}`;
 
       setKaiAccessModal((curr) => ({ ...curr, rowSavingKey: rowKey, error: "" }));
       try {
-        const payload = buildKaiOrganizationMembershipPayload(newRole, membershipStatus, { includeGkReviewer: globalRolesVisible });
-        await kaiMutateJson(kaiOrganizationMembershipPath(kaiOrganizationId, legacyUserId), "PUT", payload);
-        pushToast(`Updated KAI role for ${row.email || `user #${legacyUserId}`}.`, "success");
-        setKaiAccessModal((curr) =>
-          curr.organizationId === organizationId ? { ...curr, rowSavingKey: null } : { ...curr, rowSavingKey: null }
-        );
-        // Authoritative refresh from the server - never fabricate the
-        // resulting roster locally, and never retry with weaker semantics
-        // (e.g. a last-admin-protection rejection is surfaced as-is below).
+        if (change.kind === "replace") {
+          const payload = buildKaiOrganizationMembershipPayload(change.roleName, "active", {
+            includeGkRoles: globalRolesVisible,
+            previousRoleName: change.previousRoleName,
+          });
+          await kaiMutateJson(kaiOrganizationMembershipPath(kaiOrganizationId, legacyUserId), "PUT", payload);
+          pushToast(`Replaced ${change.previousRoleName} with ${change.roleName} for ${who}.`, "success");
+        } else if (change.kind === "revoke") {
+          await kaiMutateJson(kaiOrganizationRoleRevokePath(kaiOrganizationId, legacyUserId, change.roleName), "POST", {});
+          pushToast(`Revoked ${change.roleName} for ${who}. Other roles are unchanged.`, "success");
+        } else {
+          const payload = buildKaiOrganizationRoleGrantPayload(change.roleName, { includeGkRoles: globalRolesVisible });
+          await kaiMutateJson(kaiOrganizationRoleGrantPath(kaiOrganizationId, legacyUserId), "POST", payload);
+          pushToast(`Restored ${change.roleName} for ${who}.`, "success");
+        }
+        setKaiAccessModal((curr) => ({
+          ...curr,
+          rowSavingKey: null,
+          rowDrafts: curr.organizationId === organizationId ? { ...curr.rowDrafts, [rowKey]: {} } : curr.rowDrafts,
+        }));
         loadKaiAccess(organizationId, kaiOrganizationId);
       } catch (err) {
         setKaiAccessModal((curr) =>
@@ -1772,13 +1829,14 @@ export default function AdminDashboard() {
     [kaiAccessModal, kaiMutateJson, pushToast, loadKaiAccess]
   );
 
-  // Grants or revokes the global gk_reviewer role through the existing
-  // platform-superuser-only PUT .../global-roles/:legacyPublicUserdataId.
-  // Global, not organization-scoped: review access to an organization also
-  // needs that person's active membership there. The roster is re-read
-  // from the server afterwards; a refusal is shown as returned.
-  const submitKaiGlobalReviewerRole = useCallback(
-    async (row, action) => {
+  // Grants or revokes a global gk_reviewer or gk_operator role through the
+  // existing platform-superuser-only PUT .../global-roles/:legacyPublicUserdataId.
+  // Global, not organization-scoped: review or source access to an
+  // organization also needs that person's active organization role there.
+  // The roster is re-read from the server afterwards; a refusal is shown as
+  // returned.
+  const submitKaiGlobalRole = useCallback(
+    async (row, roleName, action) => {
       const { organizationId, kaiOrganizationId, globalRolesVisible, globalRoleSavingKey } = kaiAccessModal;
       const legacyUserId = row?.legacy_public_userdata_id;
       if (!kaiOrganizationId || !legacyUserId || !globalRolesVisible || globalRoleSavingKey) return;
@@ -1786,9 +1844,9 @@ export default function AdminDashboard() {
 
       setKaiAccessModal((curr) => ({ ...curr, globalRoleSavingKey: rowKey, error: "" }));
       try {
-        await kaiMutateJson(kaiGlobalRolePath(legacyUserId), "PUT", buildKaiGlobalReviewerRolePayload(action));
+        await kaiMutateJson(kaiGlobalRolePath(legacyUserId), "PUT", buildKaiGlobalRolePayload(roleName, action));
         const who = row.email || `user #${legacyUserId}`;
-        pushToast(action === "assign" ? `Granted global gk_reviewer to ${who}.` : `Revoked global gk_reviewer from ${who}.`, "success");
+        pushToast(action === "assign" ? `Granted global ${roleName} to ${who}.` : `Revoked global ${roleName} from ${who}.`, "success");
         setKaiAccessModal((curr) => ({ ...curr, globalRoleSavingKey: null }));
         loadKaiAccess(organizationId, kaiOrganizationId);
       } catch (err) {
@@ -4285,7 +4343,7 @@ export default function AdminDashboard() {
                     <th>Effective role</th>
                     <th>Status</th>
                     <th>Source</th>
-                    <th>Change role</th>
+                    <th>Stored KAI roles</th>
                     {kaiAccessModal.globalRolesVisible ? <th>Global KAI roles</th> : null}
                   </tr>
                 </thead>
@@ -4305,29 +4363,26 @@ export default function AdminDashboard() {
                   ) : (
                     kaiAccessModal.access.map((row) => {
                       const rowKey = kaiAccessRowKey(row);
-                      const draftRole =
-                        kaiAccessModal.rowDrafts[rowKey] ||
-                        row.stored_membership?.role_name ||
-                        row.effective_role_name ||
-                        KAI_ORGANIZATION_ROLE_OPTIONS[0];
                       return (
                         <KaiAccessRosterRow
                           key={rowKey}
                           row={row}
-                          roleOptions={kaiOrganizationRoleOptions({ includeGkReviewer: kaiAccessModal.globalRolesVisible })}
-                          draftRole={draftRole}
-                          onDraftChange={(value) =>
+                          drafts={kaiAccessModal.rowDrafts[rowKey] || {}}
+                          onDraftChange={(assignmentRole, value) =>
                             setKaiAccessModal((curr) => ({
                               ...curr,
-                              rowDrafts: { ...curr.rowDrafts, [rowKey]: value },
+                              rowDrafts: { ...curr.rowDrafts, [rowKey]: { ...(curr.rowDrafts[rowKey] || {}), [assignmentRole]: value } },
                             }))
                           }
-                          onSave={() => submitKaiAccessRoleChange(row, draftRole)}
+                          onReplace={(previousRoleName, roleName) =>
+                            submitKaiAccessAssignmentChange(row, { kind: "replace", previousRoleName, roleName })
+                          }
+                          onRevoke={(roleName) => submitKaiAccessAssignmentChange(row, { kind: "revoke", roleName })}
+                          onRestore={(roleName) => submitKaiAccessAssignmentChange(row, { kind: "restore", roleName })}
                           saving={kaiAccessModal.rowSavingKey === rowKey}
                           globalRolesVisible={kaiAccessModal.globalRolesVisible}
-                          onGlobalReviewerRole={(action) => submitKaiGlobalReviewerRole(row, action)}
+                          onGlobalRole={(roleName, action) => submitKaiGlobalRole(row, roleName, action)}
                           globalRoleSaving={kaiAccessModal.globalRoleSavingKey === rowKey}
-                          onRemoveGkReviewer={() => submitKaiAccessRoleChange(row, KAI_GK_REVIEWER_ROLE, "inactive")}
                         />
                       );
                     })
@@ -4427,7 +4482,7 @@ export default function AdminDashboard() {
                     onChange={(e) => setKaiAccessModal((curr) => ({ ...curr, roleInput: e.target.value }))}
                     disabled={kaiAccessModal.submitting || !kaiAccessModal.kaiOrganizationId}
                   >
-                    {kaiOrganizationRoleOptions({ includeGkReviewer: kaiAccessModal.globalRolesVisible }).map((role) => (
+                    {kaiOrganizationRoleOptions({ includeGkRoles: kaiAccessModal.globalRolesVisible }).map((role) => (
                       <option key={role} value={role}>
                         {role}
                       </option>

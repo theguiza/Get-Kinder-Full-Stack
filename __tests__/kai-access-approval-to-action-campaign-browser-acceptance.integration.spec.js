@@ -26,6 +26,10 @@ import { join } from "node:path";
  *   J6 client approval: join request -> approval -> client_reviewer ->
  *      client follow-up completion
  *   J7 revocation and isolation
+ *   J8 owner decision B/E: a delegated GK administrator provisioned through
+ *      the governed routes adds organization gk_operator in Team & Access;
+ *      that operator promotes a source in the GK Studio; targeted revocation
+ *      then ends it while the client role and history remain
  *
  * Each case asserts the behavior the controlling contract or an accepted
  * owner decision requires. Where the governing authority is itself open,
@@ -209,6 +213,8 @@ async function openPage(browser, { baseUrl, legacyUserId }) {
     mark: () => requests.length,
     requestsSince: (mark) => requests.slice(mark),
     exceptions,
+    clickWhere,
+    setSelectWhere: setSelect,
     evaluate,
     text,
     idle,
@@ -362,6 +368,8 @@ async function runBrowserAcceptance() {
     clientReviewerA: 2316, // ordinary account; stored client_contributor of Org A, made client_reviewer by Team & Access in P3
     mixedOperator: 2318, // global GK operator + stored client_admin; no organization GK grant
     memberB: 2317, // ordinary account; stored client_contributor of Org B (P3 isolation)
+    gkDelegate: 2319, // ordinary account; made a delegated GK administrator of Org A through the governed routes in J8
+    governedOperator: 2320, // ordinary account; client_contributor + global gk_operator (superuser), organization gk_operator (delegate) in J8
   });
   const SITE_ADMINS = new Set([USERS.superGk, USERS.superNoRole, USERS.superGkStored]);
   const FIRST_SIGN_IN = new Set([USERS.reviewer, USERS.reviewerOrgOnly, USERS.newMember, USERS.freshNotNull, USERS.freshNullable]);
@@ -2181,6 +2189,150 @@ async function runBrowserAcceptance() {
       assert.equal(removed.status, 200);
       const afterRemoval = await reviewerPage.fetchJson("GET", accessCapabilitiesPath(ORG_A));
       assert.equal(afterRemoval.status, 403);
+    });
+
+    // =====================================================================
+    // J8. Owner decision B/E: governed operator provisioning -> P1-08 ->
+    // targeted revocation. Every role below is written by a governed route;
+    // the organization gk_operator grant and its revocation are made in the
+    // Team & Access UI by a delegated GK administrator (global gk_admin +
+    // organization gk_admin), never a superuser and never seeded.
+    // =====================================================================
+    const GOVERNED_FILES = Object.freeze({ promote: "21000000-0000-4000-8000-0000000da108", afterRevoke: "21000000-0000-4000-8000-0000000da109" });
+    const governedProfiles = {};
+    const operatorRowKey = `legacy:${USERS.governedOperator}`;
+    const gkDelegatePage = await session(USERS.gkDelegate);
+    const governedOperatorPage = await session(USERS.governedOperator);
+    const memberRowText = (page, key) => page.evaluate(`(() => {
+      const el = document.querySelector('[data-team-access-member="${key}"]');
+      return el ? el.innerText : null;
+    })()`);
+    // A role badge (never a <select> option, whose label is also in innerText).
+    const memberHasRoleBadge = (page, key, roleName) => page.evaluate(
+      `Boolean(document.querySelector('[data-team-access-member="${key}"] .gk-team-access-role--${roleName}'))`);
+    const clickMemberButton = (page, key, label) => page.clickWhere(`member ${key} ${label}`,
+      `() => [...document.querySelectorAll('[data-team-access-member="${key}"] button')].find((el) => el.innerText.trim() === ${JSON.stringify(label)} && !el.disabled)`);
+    const storedRolesOf = async (key) => (await query(
+      "SELECT role_name, membership_status FROM kai.organization_memberships WHERE organization_id = $1::uuid AND user_id = $2::uuid ORDER BY role_name",
+      [ORG_A, kaiUserIds[key]]));
+    const auditRowsOf = async (key) => query(
+      "SELECT action, metadata FROM kai.audit_events WHERE actor_user_id = $1::uuid ORDER BY audit_event_id", [kaiUserIds[key]]);
+    async function pendingGovernedCandidate(fileKey, checksumChar) {
+      governedProfiles[fileKey] = await seedFreshFile({
+        organizationId: ORG_A, batchId: BATCH_A, engagementId: PROJECT_A, intakeFileId: GOVERNED_FILES[fileKey],
+        name: `synthetic_tidewater_governed_${fileKey}.csv`, checksumChar,
+      });
+      await openReviewWork(ORG_A, governedProfiles[fileKey]);
+      const decided = await decideReviewedByApi(superGkPage, governedProfiles[fileKey]);
+      assert.equal(decided.status, 200, JSON.stringify(decided));
+      const candidate = await candidateFor(governedProfiles[fileKey]);
+      assert.deepEqual([candidate.candidate_status, candidate.queue_status], ["needs_gk_review", "open"]);
+      return candidate;
+    }
+    // The operator's P1-08 authority as the server reports and enforces it,
+    // on a pending candidate: detail controls and a direct decision request.
+    async function operatorPromotionRefused(candidate, label) {
+      const detail = await governedOperatorPage.fetchJson("GET", candidatePath(candidate.intake_source_candidate_id));
+      if (detail.status === 200) assert.equal(detail.data.decision_controls_enabled, false, `${label}: no decision controls`);
+      else assert.equal(detail.status, 403, `${label}: detail refused`);
+      const before = await allKaiCounts();
+      const direct = await governedOperatorPage.fetchJson("POST", candidateDecisionPath(candidate.intake_source_candidate_id), PROMOTE_BODY);
+      await assertNothingWritten(before, label);
+      assert.deepEqual([direct.status, direct.errorCode, direct.blockingReason], [403, "authorization_denied", "role_not_allowed"], label);
+      return { detail: detail.status, direct: [direct.status, direct.blockingReason] };
+    }
+
+    await test("J8-1: the superuser provisions a delegated GK administrator (global gk_admin, organization gk_admin) and the operator's client role and global gk_operator through the governed routes; the global role alone gives no P1-08 decision", async () => {
+      const before = await allKaiCounts();
+      const delegateGlobal = await superGkPage.fetchJson("PUT", globalRolePath(USERS.gkDelegate), { role_name: "gk_admin", action: "assign" });
+      const delegateOrganization = await superGkPage.fetchJson("POST", `${membershipPath(ORG_A, USERS.gkDelegate)}/roles`, { role_name: "gk_admin" });
+      const operatorClient = await superGkPage.fetchJson("POST", `${membershipPath(ORG_A, USERS.governedOperator)}/roles`, { role_name: "client_contributor" });
+      const operatorGlobal = await superGkPage.fetchJson("PUT", globalRolePath(USERS.governedOperator), { role_name: "gk_operator", action: "assign" });
+      assert.deepEqual([delegateGlobal.status, delegateOrganization.status, operatorClient.status, operatorGlobal.status], [200, 200, 200, 200]);
+      assert.deepEqual([delegateOrganization.data.organization_access_admitted, operatorClient.data.organization_access_admitted], [true, true]);
+      assert.deepEqual(changedTables(before, await allKaiCounts()), ["audit_events", "organization_memberships", "user_roles"]);
+      assert.deepEqual(await storedRolesOf("gkDelegate"), [{ role_name: "gk_admin", membership_status: "active" }]);
+      assert.deepEqual(await storedRolesOf("governedOperator"), [{ role_name: "client_contributor", membership_status: "active" }]);
+      const candidate = await pendingGovernedCandidate("promote", "8");
+      results.J8_1 = { globalOnly: await operatorPromotionRefused(candidate, "J8-1 global gk_operator only") };
+    });
+
+    await test("J8-2: the delegated GK administrator adds organization gk_operator in Team & Access; the client role is preserved and the grant is audited with delegated authority", async () => {
+      await gkDelegatePage.goto("/impact-library");
+      await gkDelegatePage.waitForText("Knowledge Studio");
+      const access = await gkDelegatePage.fetchJson("GET", accessCapabilitiesPath(ORG_A));
+      assert.equal(access.data.organizationAccessManagement, true, "Team & Access is offered to the delegated GK administrator");
+      await gkDelegatePage.clickNav("Team & Access");
+      await gkDelegatePage.waitFor(async () => /Contributor/.test(await memberRowText(gkDelegatePage, operatorRowKey) || ""), "the operator's Team & Access row");
+      await gkDelegatePage.idle();
+      const selfRow = await memberRowText(gkDelegatePage, `legacy:${USERS.gkDelegate}`);
+      assert.ok(selfRow && !/Add role/.test(selfRow), "no role may be added to the administrator's own row");
+      await gkDelegatePage.setSelectWhere(`() => document.getElementById("gk-team-access-add-role-legacy-${USERS.governedOperator}")`, "gk_operator");
+      const before = await allKaiCounts();
+      const auditBefore = (await auditRowsOf("gkDelegate")).length;
+      const mark = gkDelegatePage.mark();
+      await clickMemberButton(gkDelegatePage, operatorRowKey, "Add role");
+      assert.equal(await memberHasRoleBadge(gkDelegatePage, operatorRowKey, "gk_operator"), false, "no organization operator role before the grant");
+      await gkDelegatePage.waitFor(() => memberHasRoleBadge(gkDelegatePage, operatorRowKey, "gk_operator"), "the added Get Kinder operator role");
+      await gkDelegatePage.idle();
+      assert.deepEqual(writes(gkDelegatePage.requestsSince(mark)), [["POST", `${membershipPath(ORG_A, USERS.governedOperator)}/roles`, 200]]);
+      assert.deepEqual(changedTables(before, await allKaiCounts()), ["audit_events", "organization_memberships"]);
+      assert.deepEqual(await storedRolesOf("governedOperator"), [
+        { role_name: "client_contributor", membership_status: "active" },
+        { role_name: "gk_operator", membership_status: "active" },
+      ]);
+      const [audit] = (await auditRowsOf("gkDelegate")).slice(auditBefore);
+      assert.deepEqual([audit.action, audit.metadata.role_name, audit.metadata.authority_source, audit.metadata.target_user_id],
+        ["organization_role_granted", "gk_operator", "delegated_gk_admin", kaiUserIds.governedOperator]);
+      assert.deepEqual(gkDelegatePage.exceptions, []);
+      results.J8_2 = "PASS: Team & Access Add role -> POST .../roles 200; client_contributor kept; audit organization_role_granted (delegated_gk_admin)";
+    });
+
+    await test("J8-3: the governed operator discovers, opens, and promotes the pending source in the GK Studio; decision, attribution, lineage, audit, and P2-01 evidence persist", async () => {
+      const candidate = await candidateFor(governedProfiles.promote);
+      const { changed, newAudit } = await assertStudioPromotion(governedOperatorPage, "governedOperator", candidate, "J8-3");
+      assert.deepEqual(governedOperatorPage.exceptions, []);
+      results.J8_3 = { changed, newAudit };
+    });
+
+    await test("J8-4: the delegated GK administrator revokes only organization gk_operator in Team & Access; the operator's next P1-08 request is refused writing nothing, while the client role, the global role, and the recorded decision remain", async () => {
+      const promoted = await candidateFor(governedProfiles.promote);
+      const pending = await pendingGovernedCandidate("afterRevoke", "9");
+      await gkDelegatePage.goto("/impact-library");
+      await gkDelegatePage.waitForText("Knowledge Studio");
+      await gkDelegatePage.clickNav("Team & Access");
+      await gkDelegatePage.waitFor(() => memberHasRoleBadge(gkDelegatePage, operatorRowKey, "gk_operator"), "the operator's active Get Kinder operator role");
+      await gkDelegatePage.idle();
+      const before = await allKaiCounts();
+      const mark = gkDelegatePage.mark();
+      await clickMemberButton(gkDelegatePage, operatorRowKey, "Remove Get Kinder operator role");
+      await gkDelegatePage.waitFor(async () => /keeps their other roles/.test(await memberRowText(gkDelegatePage, operatorRowKey) || ""), "the revocation confirmation");
+      assert.deepEqual(writes(gkDelegatePage.requestsSince(mark)), [], "nothing is sent before confirmation");
+      await clickMemberButton(gkDelegatePage, operatorRowKey, "Confirm removing Get Kinder operator");
+      await gkDelegatePage.waitFor(async () => /Get Kinder operator \(inactive\)/.test(await memberRowText(gkDelegatePage, operatorRowKey) || "")
+        && !(await memberHasRoleBadge(gkDelegatePage, operatorRowKey, "gk_operator")), "the inactive assignment");
+      await gkDelegatePage.idle();
+      assert.deepEqual(writes(gkDelegatePage.requestsSince(mark)), [["POST", `${membershipPath(ORG_A, USERS.governedOperator)}/roles/gk_operator/revoke`, 200]]);
+      assert.deepEqual(changedTables(before, await allKaiCounts()), ["audit_events"]);
+      assert.deepEqual(await storedRolesOf("governedOperator"), [
+        { role_name: "client_contributor", membership_status: "active" },
+        { role_name: "gk_operator", membership_status: "inactive" },
+      ]);
+      const [audit] = (await auditRowsOf("gkDelegate")).slice(-1);
+      assert.deepEqual([audit.action, audit.metadata.previous_membership_status, audit.metadata.resulting_membership_status, audit.metadata.authority_source],
+        ["organization_role_revoked", "active", "inactive", "delegated_gk_admin"]);
+
+      const refused = await operatorPromotionRefused(pending, "J8-4 revoked organization gk_operator");
+      const operatorAccess = await governedOperatorPage.fetchJson("GET", accessCapabilitiesPath(ORG_A));
+      assert.equal(operatorAccess.status, 200, "the client role keeps organization access");
+      const [globalRole] = await query(
+        "SELECT ur.active FROM kai.user_roles ur JOIN kai.roles r ON r.role_id = ur.role_id WHERE ur.user_id = $1::uuid AND r.role_name = 'gk_operator' AND ur.organization_id IS NULL",
+        [kaiUserIds.governedOperator]);
+      assert.equal(globalRole.active, true, "the global role is untouched by the organization revocation");
+      const decision = await promotionDecisionRow(promoted.intake_source_candidate_id);
+      assert.deepEqual([decision.decision_status, decision.decided_by], ["promoted", kaiUserIds.governedOperator], "the recorded human decision remains");
+      assert.deepEqual(gkDelegatePage.exceptions, []);
+      results.J8_4 = { refused, operatorAccess: operatorAccess.status };
     });
   } finally {
     console.log(`[campaign] RESULTS ${JSON.stringify(results, null, 2)}`);

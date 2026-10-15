@@ -755,7 +755,7 @@ async function runBrowserAcceptance() {
       const modal = await adminPage.modalText();
       assert.ok(modal.includes("Global KAI roles"), "the superuser sees each member's global KAI roles");
       assert.ok(modal.includes("A Get Kinder reviewer needs both"), "the two halves are explained");
-      assert.deepEqual(await adminPage.modalRoleOptions(), ["client_admin", "client_reviewer", "client_contributor", "gk_reviewer"]);
+      assert.deepEqual(await adminPage.modalRoleOptions(), ["client_admin", "client_reviewer", "client_contributor", "gk_reviewer", "gk_operator", "gk_admin"]);
       assert.match(await adminPage.accessRowText(USERS.superuser), /gk_admin/, "existing effective global roles are shown");
 
       let tablesBefore = await allKaiCounts();
@@ -766,10 +766,11 @@ async function runBrowserAcceptance() {
       const grantRequests = adminPage.requestsSince(mark).map((r) => [r.method, pathOf(r), r.status]);
       console.log(`[reviewer-provisioning] organization-role grant requests: ${JSON.stringify(grantRequests)}`);
       assert.ok(grantRequests.some(([m, p, s]) => m === "GET" && p === "/api/admin/users/lookup" && s === 200), "existing exact-email lookup");
-      assert.deepEqual(writes(adminPage.requestsSince(mark)), [["PUT", membershipPath(ORG_A, USERS.recipient), 200]]);
+      // "Grant KAI Access" is the additive grant (owner decision B/E C04).
+      assert.deepEqual(writes(adminPage.requestsSince(mark)), [["POST", `${membershipPath(ORG_A, USERS.recipient)}/roles`, 200]]);
       assert.deepEqual(await storedMemberships(USERS.recipient), [{ organization_id: ORG_A, role_name: "gk_reviewer", membership_status: "active" }]);
       assert.deepEqual(changedTables(tablesBefore, await allKaiCounts()), ["audit_events", "organization_memberships"]);
-      const [membershipAudit] = await auditFor("organization_membership_assigned", kaiUserIds.superuser);
+      const [membershipAudit] = await auditFor("organization_role_granted_access_admitted", kaiUserIds.superuser);
       assert.equal(membershipAudit.organization_id, ORG_A);
       assert.equal(membershipAudit.metadata.target_user_id, recipientKaiUserId);
       assert.equal(membershipAudit.metadata.resulting_role_name, "gk_reviewer");
@@ -799,7 +800,7 @@ async function runBrowserAcceptance() {
       assert.equal(roleAudit.metadata.role_name, "gk_reviewer");
       assert.match(await adminPage.accessRowText(USERS.recipient), /Revoke gk_reviewer/);
       assert.deepEqual(adminPage.exceptions, []);
-      results.B1_B3_provisioning = "PASS: PUT membership gk_reviewer 200 + audit organization_membership_assigned; PUT global-roles gk_reviewer 200 + audit global_kai_role_assigned";
+      results.B1_B3_provisioning = "PASS: POST membership role gk_reviewer 200 + audit organization_role_granted_access_admitted; PUT global-roles gk_reviewer 200 + audit global_kai_role_assigned";
     });
 
     const recipientPage = await session(USERS.recipient);
@@ -927,10 +928,11 @@ async function runBrowserAcceptance() {
       await adminPage.clickAccessRowButton(USERS.recipient, "Remove gk_reviewer here");
       await adminPage.waitFor(async () => /inactive/.test(await adminPage.accessRowText(USERS.recipient) || ""), "the inactive organization role");
       await adminPage.idle();
-      assert.deepEqual(writes(adminPage.requestsSince(mark)), [["PUT", membershipPath(ORG_A, USERS.recipient), 200]]);
+      // Targeted revocation of this one assignment (owner decision B/E C06).
+      assert.deepEqual(writes(adminPage.requestsSince(mark)), [["POST", `${membershipPath(ORG_A, USERS.recipient)}/roles/gk_reviewer/revoke`, 200]]);
       assert.deepEqual(await storedMemberships(USERS.recipient), [{ organization_id: ORG_A, role_name: "gk_reviewer", membership_status: "inactive" }]);
       assert.deepEqual(changedTables(tablesBefore, await allKaiCounts()), ["audit_events"]);
-      const changes = await auditFor("organization_membership_role_status_changed", kaiUserIds.superuser);
+      const changes = await auditFor("organization_role_revoked", kaiUserIds.superuser);
       const removal = changes.find((row) => row.metadata.target_user_id === recipientKaiUserId);
       assert.deepEqual([removal.metadata.previous_membership_status, removal.metadata.resulting_membership_status], ["active", "inactive"]);
       assert.equal(await adminPage.visibleButton("Remove gk_reviewer here"), false);
@@ -984,10 +986,11 @@ async function runBrowserAcceptance() {
       assert.deepEqual(await storedMemberships(USERS.memberC), [{ organization_id: ORG_C, role_name: "client_reviewer", membership_status: "active" }]);
       // The stored row is updated in place; only the audit is inserted.
       assert.deepEqual(changedTables(tablesBefore, await allKaiCounts()), ["audit_events"]);
-      const [audit] = await auditFor("organization_membership_role_status_changed", kaiUserIds.npoAdminC);
+      // An explicit replacement of the member's named assignment (B/E C05).
+      const [audit] = await auditFor("organization_role_replaced", kaiUserIds.npoAdminC);
       assert.deepEqual([audit.organization_id, audit.metadata.previous_role_name, audit.metadata.resulting_role_name], [ORG_C, "client_contributor", "client_reviewer"]);
       assert.deepEqual(npoAdminCPage.exceptions, []);
-      results.C1_C3_provisioning = "PASS: Team & Access PUT membership client_reviewer 200 + audit organization_membership_role_status_changed";
+      results.C1_C3_provisioning = "PASS: Team & Access PUT membership client_reviewer 200 + audit organization_role_replaced";
     });
 
     await test("C4-C8: in a new session the member opens the follow-ups from Knowledge Studio and completes one through the existing route, with audit", async () => {
@@ -1120,15 +1123,21 @@ async function runBrowserAcceptance() {
       assert.equal(outcomes.clientReviewerCockpit.data.can_manage_sensitivity_review, false);
       assert.deepEqual([outcomes.clientReviewerDecision.status, outcomes.clientReviewerWork.status], [403, 403]);
 
-      // A non-superuser, even a global gk_admin, cannot grant GK roles.
+      // A non-superuser global gk_admin with an organization gk_admin
+      // membership is a delegated GK administrator (owner decision B/E): it
+      // manages only Org A's gk_operator/gk_reviewer assignments. It cannot
+      // grant a global role, rewrite a client membership into a GK role, or
+      // grant organization gk_admin.
       const gkAdmin = await session(USERS.gkAdminNotSuperuser);
       await gkAdmin.goto("/impact-library");
       await gkAdmin.idle();
       outcomes.gkAdminGlobalRole = await gkAdmin.fetchJson("PUT", globalRolePath(USERS.contributorA), { role_name: "gk_reviewer", action: "assign" });
       outcomes.gkAdminMembership = await gkAdmin.fetchJson("PUT", membershipPath(ORG_A, USERS.contributorA), { role_name: "gk_reviewer", membership_status: "active" });
+      outcomes.gkAdminOrganizationAdmin = await gkAdmin.fetchJson("POST", `${membershipPath(ORG_A, USERS.contributorA)}/roles`, { role_name: "gk_admin" });
       outcomes.gkAdminLookup = await gkAdmin.fetchJson("GET", "/api/admin/users/lookup?email=" + encodeURIComponent(email(USERS.contributorA)));
       assert.deepEqual([outcomes.gkAdminGlobalRole.status, outcomes.gkAdminGlobalRole.blockingReason], [403, "platform_superuser_required"]);
-      assert.deepEqual([outcomes.gkAdminMembership.status, outcomes.gkAdminMembership.blockingReason], [403, "role_not_allowed"]);
+      assert.deepEqual([outcomes.gkAdminMembership.status, outcomes.gkAdminMembership.blockingReason], [403, "organization_role_not_administrable"]);
+      assert.deepEqual([outcomes.gkAdminOrganizationAdmin.status, outcomes.gkAdminOrganizationAdmin.blockingReason], [403, "organization_role_not_administrable"]);
       assert.equal(outcomes.gkAdminLookup.status, 403);
 
       // A contributor administers nothing.

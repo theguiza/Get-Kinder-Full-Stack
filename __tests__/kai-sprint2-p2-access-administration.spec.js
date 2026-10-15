@@ -493,16 +493,25 @@ test("platform superuser can place a Get Kinder reviewer on an organization (gk_
     ["organization_membership_role_status_changed", "active", "inactive"]);
 });
 
-test("platform superuser still cannot assign gk_admin or gk_operator as an organization role", async () => {
+test("platform superuser may assign gk_admin and gk_operator as organization roles (owner decision B/E), with superuser audit authority", async () => {
   for (const roleName of ["gk_admin", "gk_operator"]) {
     const upserts = [];
+    const audits = [];
     const result = await manageOrganizationMembership(
       { actorContext: platformSuperuserActor(), organizationId: ORG_A, targetLegacyPublicUserdataId: 702, roleName, membershipStatus: "active", now: NOW },
-      gkReviewerPlacementDependencies({ upserts }),
+      gkReviewerPlacementDependencies({ upserts, audits }),
     );
-    assert.equal(result.error.code, "validation_blocker", roleName);
-    assert.equal(upserts.length, 0, roleName);
+    assert.equal(result.ok, true, roleName);
+    assert.deepEqual(upserts, [{ organizationId: ORG_A, userId: "target-kai-user-1", roleName, membershipStatus: "active" }], roleName);
+    assert.deepEqual([audits[0].resulting_role_name, audits[0].authority_source], [roleName, "platform_superuser"], roleName);
   }
+  const upserts = [];
+  const unknown = await manageOrganizationMembership(
+    { actorContext: platformSuperuserActor(), organizationId: ORG_A, targetLegacyPublicUserdataId: 702, roleName: "funder_viewer", membershipStatus: "active", now: NOW },
+    gkReviewerPlacementDependencies({ upserts }),
+  );
+  assert.equal(unknown.error.code, "validation_blocker");
+  assert.equal(upserts.length, 0);
 });
 
 test("an organization administrator (stored or derived) cannot assign the gk_reviewer organization role", async () => {
@@ -519,14 +528,14 @@ test("an organization administrator (stored or derived) cannot assign the gk_rev
   }
 });
 
-test("a global gk_admin or gk_reviewer without platform-superuser authority cannot assign the gk_reviewer organization role", async () => {
-  for (const globalRole of ["gk_admin", "gk_reviewer"]) {
+test("a global gk_reviewer, or a gk_admin missing either the global or the organization gk_admin role, cannot assign the gk_reviewer organization role", async () => {
+  for (const [globalRole, organizationRole] of [["gk_reviewer", "gk_reviewer"], ["gk_admin", "gk_reviewer"], ["gk_operator", "gk_admin"]]) {
     const upserts = [];
     const actorContext = {
       actorType: "human",
       actorUserId: `global-${globalRole}`,
       kaiRoles: [globalRole],
-      organizationMemberships: [{ organization_id: ORG_A, role_name: globalRole, membership_status: "active" }],
+      organizationMemberships: [{ organization_id: ORG_A, role_name: organizationRole, membership_status: "active" }],
       platformSuperuser: false,
     };
     const result = await manageOrganizationMembership(
@@ -840,10 +849,11 @@ test("an invalid administration target id is refused before any query", async ()
   assert.deepEqual(db.calls, []);
 });
 
-test("both administration writers resolve their target through the email-carrying resolver by default", () => {
+test("every target-creating administration writer resolves its target through the email-carrying resolver by default", () => {
   const source = readFileSync("Backend/kai/services/kaiAccessAdministrationService.js", "utf8");
   const defaults = source.match(/dependencies\.findOrCreateKaiUserByLegacyPublicUserdataId \|\| (\w+)/g);
   assert.deepEqual(defaults, [
+    "dependencies.findOrCreateKaiUserByLegacyPublicUserdataId || findOrCreateKaiUserForAdministrationTarget",
     "dependencies.findOrCreateKaiUserByLegacyPublicUserdataId || findOrCreateKaiUserForAdministrationTarget",
     "dependencies.findOrCreateKaiUserByLegacyPublicUserdataId || findOrCreateKaiUserForAdministrationTarget",
   ]);

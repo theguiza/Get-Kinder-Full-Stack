@@ -16,7 +16,9 @@ import {
   KAI_SUPERUSER_ORGANIZATION_ROLE_OPTIONS,
   adminUserLookupPath,
   buildKaiGlobalReviewerRolePayload,
+  buildKaiGlobalRolePayload,
   buildKaiOrganizationMembershipPayload,
+  buildKaiOrganizationRoleGrantPayload,
   describeKaiAccessAuthoritySource,
   isAssignableKaiOrganizationRole,
   kaiAccessRowKey,
@@ -24,7 +26,9 @@ import {
   kaiOrganizationAccessPath,
   kaiOrganizationMembershipPath,
   kaiOrganizationRoleGrantMessage,
+  kaiOrganizationRoleGrantPath,
   kaiOrganizationRoleOptions,
+  kaiOrganizationRoleRevokePath,
   rosterGlobalKaiRoles,
 } from "../frontend/kaiOrganizationAccessLogic.js";
 
@@ -240,8 +244,14 @@ test("frontend logic module targets the exact mounted Package 2 access-administr
     .filter((layer) => layer.route && layer.route.methods.put)
     .map((layer) => layer.route.path);
 
+  const postPaths = kaiAccessAdministrationApiRouter.stack
+    .filter((layer) => layer.route && layer.route.methods.post)
+    .map((layer) => layer.route.path);
+
   assert.ok(getPaths.includes("/organizations/:organizationId/access"));
   assert.ok(putPaths.includes("/organizations/:organizationId/memberships/:legacyPublicUserdataId"));
+  assert.ok(postPaths.includes("/organizations/:organizationId/memberships/:legacyPublicUserdataId/roles"));
+  assert.ok(postPaths.includes("/organizations/:organizationId/memberships/:legacyPublicUserdataId/roles/:roleName/revoke"));
 
   const organizationId = "00000000-0000-4000-8000-000000000001";
   assert.equal(
@@ -252,6 +262,15 @@ test("frontend logic module targets the exact mounted Package 2 access-administr
     kaiOrganizationMembershipPath(organizationId, 501),
     `/api/kai/sprint2/access-administration/organizations/${organizationId}/memberships/501`
   );
+  assert.equal(
+    kaiOrganizationRoleGrantPath(organizationId, 501),
+    `/api/kai/sprint2/access-administration/organizations/${organizationId}/memberships/501/roles`
+  );
+  assert.equal(
+    kaiOrganizationRoleRevokePath(organizationId, 501, "gk_operator"),
+    `/api/kai/sprint2/access-administration/organizations/${organizationId}/memberships/501/roles/gk_operator/revoke`
+  );
+  assert.throws(() => kaiOrganizationRoleRevokePath(organizationId, 501, "platform_superuser"));
   assert.equal(adminUserLookupPath(" Someone@Example.org "), "/api/admin/users/lookup?email=someone%40example.org");
 });
 
@@ -259,32 +278,38 @@ test("frontend logic module never builds a request for the mutating +Admin looku
   const source = readFileSync("frontend/kaiOrganizationAccessLogic.js", "utf8");
   assert.doesNotMatch(source, /\/admins`/);
   assert.doesNotMatch(source, /\bDELETE\b/);
-  assert.doesNotMatch(source, /gk_admin|gk_operator|platform_superuser/);
-  // gk_reviewer appears only as the single named constant the superuser
-  // controls use.
-  assert.equal(source.match(/"gk_reviewer"/g).length, 1);
-  assert.match(source, /export const KAI_GK_REVIEWER_ROLE = "gk_reviewer";/);
-});
-
-test("the superuser KAI Access role list adds only gk_reviewer, mirroring the backend contract", () => {
-  assert.deepEqual(KAI_SUPERUSER_ORGANIZATION_ROLE_OPTIONS, KAI_PLATFORM_SUPERUSER_ASSIGNABLE_ORGANIZATION_ROLES);
-  assert.deepEqual(KAI_SUPERUSER_ORGANIZATION_ROLE_OPTIONS, [...KAI_ORGANIZATION_ROLE_OPTIONS, "gk_reviewer"]);
-  assert.equal(kaiOrganizationRoleOptions(), KAI_ORGANIZATION_ROLE_OPTIONS);
-  assert.equal(kaiOrganizationRoleOptions({ includeGkReviewer: true }), KAI_SUPERUSER_ORGANIZATION_ROLE_OPTIONS);
-  assert.deepEqual(buildKaiOrganizationMembershipPayload("gk_reviewer", "active", { includeGkReviewer: true }), {
-    role_name: "gk_reviewer",
-    membership_status: "active",
-  });
-  assert.deepEqual(buildKaiOrganizationMembershipPayload("gk_reviewer", "inactive", { includeGkReviewer: true }), {
-    role_name: "gk_reviewer",
-    membership_status: "inactive",
-  });
-  for (const forbidden of ["gk_admin", "gk_operator", "platform_superuser"]) {
-    assert.throws(() => buildKaiOrganizationMembershipPayload(forbidden, "active", { includeGkReviewer: true }));
+  assert.doesNotMatch(source, /platform_superuser/);
+  // Each Get Kinder role appears only as its single named constant.
+  for (const [constant, role] of [["KAI_GK_REVIEWER_ROLE", "gk_reviewer"], ["KAI_GK_OPERATOR_ROLE", "gk_operator"], ["KAI_GK_ADMIN_ROLE", "gk_admin"]]) {
+    assert.equal(source.match(new RegExp(`"${role}"`, "g")).length, 1, role);
+    assert.match(source, new RegExp(`export const ${constant} = "${role}";`));
   }
 });
 
-test("the global-role controls build only gk_reviewer assign/revoke requests against the mounted platform-superuser route", () => {
+test("the superuser KAI Access role list adds gk_reviewer, gk_operator and gk_admin (owner decision B/E), mirroring the backend contract", () => {
+  assert.deepEqual(KAI_SUPERUSER_ORGANIZATION_ROLE_OPTIONS, KAI_PLATFORM_SUPERUSER_ASSIGNABLE_ORGANIZATION_ROLES);
+  assert.deepEqual(KAI_SUPERUSER_ORGANIZATION_ROLE_OPTIONS, [...KAI_ORGANIZATION_ROLE_OPTIONS, "gk_reviewer", "gk_operator", "gk_admin"]);
+  assert.equal(kaiOrganizationRoleOptions(), KAI_ORGANIZATION_ROLE_OPTIONS);
+  assert.equal(kaiOrganizationRoleOptions({ includeGkRoles: true }), KAI_SUPERUSER_ORGANIZATION_ROLE_OPTIONS);
+  assert.deepEqual(buildKaiOrganizationMembershipPayload("gk_reviewer", "active", { includeGkRoles: true }), {
+    role_name: "gk_reviewer",
+    membership_status: "active",
+  });
+  assert.deepEqual(buildKaiOrganizationMembershipPayload("gk_operator", "active", { includeGkRoles: true, previousRoleName: "gk_reviewer" }), {
+    role_name: "gk_operator",
+    membership_status: "active",
+    previous_role_name: "gk_reviewer",
+  });
+  assert.deepEqual(buildKaiOrganizationRoleGrantPayload("gk_admin", { includeGkRoles: true }), { role_name: "gk_admin" });
+  assert.throws(() => buildKaiOrganizationRoleGrantPayload("gk_operator"), "client-role callers never grant a GK role");
+  for (const forbidden of ["platform_superuser", "funder_viewer"]) {
+    assert.throws(() => buildKaiOrganizationMembershipPayload(forbidden, "active", { includeGkRoles: true }));
+    assert.throws(() => buildKaiOrganizationRoleGrantPayload(forbidden, { includeGkRoles: true }));
+    assert.throws(() => buildKaiOrganizationMembershipPayload("client_admin", "active", { includeGkRoles: true, previousRoleName: forbidden }));
+  }
+});
+
+test("the global-role controls build only gk_reviewer/gk_operator assign/revoke requests against the mounted platform-superuser route", () => {
   const putPaths = kaiAccessAdministrationApiRouter.stack
     .filter((layer) => layer.route && layer.route.methods.put)
     .map((layer) => layer.route.path);
@@ -293,6 +318,8 @@ test("the global-role controls build only gk_reviewer assign/revoke requests aga
   assert.deepEqual(buildKaiGlobalReviewerRolePayload("assign"), { role_name: "gk_reviewer", action: "assign" });
   assert.deepEqual(buildKaiGlobalReviewerRolePayload("revoke"), { role_name: "gk_reviewer", action: "revoke" });
   assert.throws(() => buildKaiGlobalReviewerRolePayload("delete"));
+  assert.deepEqual(buildKaiGlobalRolePayload("gk_operator", "assign"), { role_name: "gk_operator", action: "assign" });
+  assert.throws(() => buildKaiGlobalRolePayload("gk_admin", "assign"), "the modal never grants global gk_admin");
   assert.deepEqual(rosterGlobalKaiRoles({ global_kai_roles: ["gk_admin"] }), ["gk_admin"]);
   assert.equal(rosterGlobalKaiRoles({}), null, "a roster without global roles (non-superuser reader) shows no global column data");
 });
@@ -305,19 +332,33 @@ test("granting the gk_reviewer organization role is not reported as reviewer acc
   assert.doesNotMatch(kaiOrganizationRoleGrantMessage("gk_reviewer", "someone@example.org"), /reviewer access/);
   assert.equal(kaiOrganizationRoleGrantMessage("client_reviewer", "someone@example.org"), "Granted client reviewer access to someone@example.org.");
   assert.equal(kaiOrganizationRoleGrantMessage("client_admin", "someone@example.org"), "Granted client admin access to someone@example.org.");
+  assert.match(kaiOrganizationRoleGrantMessage("gk_operator", "someone@example.org"), /Source review also needs the global gk_operator role\.$/);
   const source = readFileSync("frontend/adminDashboard.jsx", "utf8");
   assert.match(source, /pushToast\(kaiOrganizationRoleGrantMessage\(roleInput, email\), "success"\)/);
 });
 
-test("adminDashboard.jsx shows global roles and the gk_reviewer controls only when the server reports global_roles_visible", () => {
+test("adminDashboard.jsx shows global roles and the GK role controls only when the server reports global_roles_visible", () => {
   const source = readFileSync("frontend/adminDashboard.jsx", "utf8");
   assert.match(source, /\{kaiAccessModal\.globalRolesVisible \? <th>Global KAI roles<\/th> : null\}/);
   assert.match(source, /\{globalRolesVisible \? \(\s*<td>/);
-  assert.match(source, /globalRolesVisible && isActiveGkReviewerMember \?/);
-  assert.match(source, /kaiOrganizationRoleOptions\(\{ includeGkReviewer: kaiAccessModal\.globalRolesVisible \}\)/);
+  assert.match(source, /kaiOrganizationRoleOptions\(\{ includeGkRoles: kaiAccessModal\.globalRolesVisible \}\)/);
   assert.match(source, /if \(!kaiOrganizationId \|\| !legacyUserId \|\| !globalRolesVisible \|\| globalRoleSavingKey\) return;/);
-  assert.match(source, /await kaiMutateJson\(kaiGlobalRolePath\(legacyUserId\), "PUT", buildKaiGlobalReviewerRolePayload\(action\)\);/);
-  assert.match(source, /onRemoveGkReviewer=\{\(\) => submitKaiAccessRoleChange\(row, KAI_GK_REVIEWER_ROLE, "inactive"\)\}/);
+  assert.match(source, /await kaiMutateJson\(kaiGlobalRolePath\(legacyUserId\), "PUT", buildKaiGlobalRolePayload\(roleName, action\)\);/);
+});
+
+test("adminDashboard.jsx grants additively, replaces a named assignment, and revokes one assignment (owner decision B/E C04-C06)", () => {
+  const source = readFileSync("frontend/adminDashboard.jsx", "utf8");
+  // "Grant KAI Access" adds a role (POST .../roles) - never the replacing PUT.
+  assert.match(source, /await kaiMutateJson\(kaiOrganizationRoleGrantPath\(kaiOrganizationId, legacyUserId\), "POST", payload\);/);
+  assert.match(source, /const payload = buildKaiOrganizationRoleGrantPayload\(roleInput, \{ includeGkRoles: globalRolesVisible \}\);/);
+  // Replacement names the exact assignment it replaces.
+  assert.match(source, /previousRoleName: change\.previousRoleName,/);
+  assert.match(source, /await kaiMutateJson\(kaiOrganizationRoleRevokePath\(kaiOrganizationId, legacyUserId, change\.roleName\), "POST", \{\}\);/);
+  // Per-assignment controls come only from the server's per-assignment answers.
+  assert.match(source, /\{replacementRoles\.length > 0 \? \(/);
+  assert.match(source, /\{assignment\.can_revoke \? \(/);
+  assert.match(source, /\{assignment\.can_restore \? \(/);
+  assert.doesNotMatch(source, /onRemoveGkReviewer|submitKaiAccessRoleChange\(/);
 });
 
 test("describeKaiAccessAuthoritySource distinguishes derived from stored authority for the roster UI", () => {
@@ -373,9 +414,9 @@ test("adminDashboard.jsx keeps the existing +Admin control unchanged and adds a 
 
 test("adminDashboard.jsx's KAI Access roster distinguishes derived (read-only) access from editable stored access", () => {
   const source = readFileSync("frontend/adminDashboard.jsx", "utf8");
-  assert.match(source, /row\.editable \? \(/);
-  assert.match(source, /Derived — not editable here/);
-  assert.match(source, /submitKaiAccessRoleChange = useCallback\(/);
+  assert.match(source, /\{assignments\.length === 0 \? \(/);
+  assert.match(source, /row\.derived_membership \? "Derived — not editable here" : "No stored KAI role"/);
+  assert.match(source, /submitKaiAccessAssignmentChange = useCallback\(/);
   assert.match(source, /if \(!kaiOrganizationId \|\| !legacyUserId \|\| !row\?\.editable\) return;/);
 });
 
