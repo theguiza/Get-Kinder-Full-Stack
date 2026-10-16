@@ -40001,3 +40001,128 @@ verified account email; confirm `audit_events`
 deployment, production/shared database, schema, flag, credential, tenant,
 production role, review decision, or `00_KAI_CURRENT_STATE.md` change. This
 is the single package-end evidence update in the living ExecPlan.
+
+### Repair 2: first GK administrator bootstrap and delegated administration through real sign-in (2026-10-16)
+
+**Owner authorization (USER_CONFIRMED):** the owner's Repair 2 prompt
+authorizes local reproduction and repair of the first-administrator
+bootstrap and delegated Team & Access administration on Repair 1
+(`82ad660`, recorded `617549a`; production baseline `3b99a90`), proven
+through the real application and synthetic local PostgreSQL. No production
+database access (Claude Code has none; pgAdmin is owner-operated), push,
+deployment, flag, real-user role grant or real-client data.
+
+**Start (TOOL_VERIFIED):** `main` at `617549a`, clean; `3b99a90` ->
+`82ad660` -> `617549a` ancestry confirmed.
+
+**Gap closed:** every earlier access acceptance simulated the Get Kinder
+session login (`req.user` from a harness cookie). The new acceptance
+`kai-first-gk-administrator-real-sign-in-browser-acceptance.integration.spec.js`
+(browser runner) runs `index.js` itself as a loopback child process
+(minimal environment, empty working directory so no `.env` loads, Neo4j and
+OpenAI on a non-listening loopback port; Chrome resolves only 127.0.0.1)
+and signs every actor in through the real `/login` form: bcrypt check,
+`email_verified`, express-session + connect-pg-simple, passport
+deserialization of `public.userdata` (incl. `is_admin`), the JOIN-4
+`/home` -> `/impact-library` landing, `ensureAuthenticated`/`ensureAdmin`,
+the KAI routers as `index.js` mounts them, JIT actor mapping, governed
+services, local transactions and audit, the real EJS page and bundle; one
+Chrome cookie jar per sign-in; `/logout` ends each session (next request
+401). Fixtures (direct SQL, never the tested action): accounts with bcrypt
+passwords, the site-superuser `is_admin` flag, two organizations and
+Projects, one GK binding (binding-derived client administrator), evidence
+via the real P2-01 extraction over the runner's smoke source.
+
+**Findings (TOOL_VERIFIED, unmodified implementation, 12/0 on first full
+run after correcting three test-harness expectations; no product defect):**
+- Site-superuser authority = `isAdminRequest` (`req.user.is_admin === true`
+  from the deserialized `public.userdata` row, or `ADMIN_EMAILS`), carried
+  as `actorContext.platformSuperuser`; no KAI role or membership satisfies
+  it. The superuser needs no prior KAI identity: the sign-in landing's first
+  KAI request JIT-maps it with zero roles/memberships, and the
+  administration context is then 200 `platform_administration: true`.
+- The recipient needs no prior KAI sign-in: the governed grant maps it
+  (`findOrCreateKaiUserForAdministrationTarget`, the account's own email).
+- Bootstrap from zero `gk_admin` assignments, in `/impact-library` -> Team &
+  Access: Add person (exact-email lookup 200 + `POST
+  .../memberships/:id/roles` gk_admin 200; audited
+  `organization_role_granted_access_admitted`/`platform_superuser`), then
+  global gk_admin with explanation + confirmation (`PUT .../global-roles/:id`
+  200; `global_kai_role_assigned`/`platform_superuser`, organization null);
+  audits attributed to the superuser's KAI identity, no email in metadata.
+  Persisted separately: one active global `gk_admin` `kai.user_roles` row and
+  one active organization `gk_admin` membership.
+- Two separate operations, kept: the intermediate state (organization
+  gk_admin only) signed in independently gets `organizationAccessManagement`
+  false, roster 403, staff onboarding 403 `role_not_allowed`, no Team &
+  Access; readiness `delegated_administration` false until the global half.
+- Independent first-administrator sign-in (superuser signed out): context
+  `platform_administration: false`, `/admin` redirected, lookup 403, own
+  global role change 403 `platform_superuser_required`; Org F workspace,
+  intake, Projects (incl. the fixture Project), evidence, source queue,
+  sensitivity/evidence review and Team & Access true/200; Org G 403
+  everywhere; roster `staff_onboarding_roles` [gk_operator, gk_reviewer],
+  no global controls; Team & Access shows "Add Get Kinder staff", no
+  platform section, no self Add role.
+- Negatives with nothing written: an ordinary account's first sign-in
+  (only its own `kai.users` mapping; no role; capabilities, Projects,
+  evidence, roster 403; global gk_admin for another or itself 403
+  `platform_superuser_required`; organization gk_admin and staff onboarding
+  403 `missing_active_organization_membership`; lookup 403; `/admin`
+  redirect; no Team & Access). Binding-derived client administrator: client
+  Team & Access kept (roster 200, no staff/global roles offered); global 403,
+  organization gk_admin 403 `non_client_membership_not_client_managed`,
+  staff onboarding 403, other organization 403. Delegated administrator
+  limits: staff gk_admin `staff_onboarding_role_not_permitted`, global role
+  `platform_superuser_required`, Org G `missing_active_organization_membership`,
+  self `self_role_elevation_not_allowed`.
+- Operator (never used KAI) onboarded by email in Team & Access (one `POST
+  .../gk-staff` 200; kai.users, organization and global gk_operator, audits
+  `delegated_gk_admin` with organization id), then signs in alone: source
+  queue 200 with the organization's 1 open source review, Project creation
+  201 (engagement + audit as the operator); Org G Project/queue, staff
+  onboarding, roster, global role all 403 with nothing written; no Team &
+  Access.
+- Reviewer likewise: evidence library returns the organization's evidence
+  and the GK Studio Evidence tab lists it (2 items, only this
+  organization's), review queue 200, evidence review true; Project creation,
+  staff onboarding and Org G evidence 403 with nothing written. No review,
+  claim or generated-content decision was made.
+
+**Global-role policy boundaries (observed, unchanged; owner decisions):**
+- A (later cross-organization access): after the superuser adds the onboarded
+  operator to Org G as `client_contributor`, the global gk_operator role
+  takes effect there (workspace, intake, source and sensitivity review,
+  evidence reads true). Repair 1 open item 2; held.
+- B (regrant after superuser revocation): with the organization role kept
+  and no access elsewhere, the delegated administrator's "Complete ...
+  onboarding" recreates the global role (audited `delegated_gk_admin`).
+  Repair 1 open item 3; held.
+- C (existing global role + new assignment): the superuser's organization
+  gk_reviewer in Org G is effective at once through the existing global role.
+- D (pending): a delegated onboarding for a person with access elsewhere is
+  `pending_platform_approval`, writes no global role, offers no completion
+  and is shown as waiting; the organization role written meanwhile is
+  already effective for organization-scoped work (e.g. evidence review).
+- Still held: Decision D, Organization B policy, Decision A.
+
+**Production compatibility (NOT_CONFIRMED):** `public.userdata.email_verified`
+and `is_suspended` - owner read-only `information_schema.columns` query
+pending. Service predicates compare `=== true` (staff onboarding refuses
+unless `email_verified === true`; refuses when `is_suspended === true`), as
+login and `ensureAuthenticated` do; expected `boolean`/`bool` for both.
+
+**Verification (TOOL_VERIFIED; sentinel `DATABASE_URL`; runner-owned loopback
+PostgreSQL; real Chrome; synthetic data):** new real-sign-in acceptance
+12/0; access-administration PostgreSQL runner 46/0; Team & Access browser
+7/0; `npm test` 5553/0/107 (the new spec's 2 source/isolation cases; its
+acceptance skips without the runner); `git diff --check` clean; complete
+diff inspected. Commit `80ffb2c` (test and runner registration only; no
+product, schema, contract or bundle change, so no build or API contract
+rerun).
+
+**Status:** FIRST_GK_ADMIN_BOOTSTRAP_REAL_SIGN_IN_COMPLETE_LOCAL_SYNTHETIC.
+No push, deployment, production/shared database, schema, flag, credential,
+tenant, production role, review decision, or `00_KAI_CURRENT_STATE.md`
+change. This is the single package-end evidence update in the living
+ExecPlan.
