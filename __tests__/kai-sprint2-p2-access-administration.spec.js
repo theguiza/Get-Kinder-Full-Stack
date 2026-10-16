@@ -523,7 +523,9 @@ test("an organization administrator (stored or derived) cannot assign the gk_rev
       gkReviewerPlacementDependencies({ upserts, audits }),
     );
     assert.equal(result.ok, false);
-    assert.equal(result.error.code, "validation_blocker");
+    // The same structured refusal as the additive grant route.
+    assert.equal(result.error.code, "authorization_denied");
+    assert.equal(result.blockers[0].blocking_reason, "non_client_membership_not_client_managed");
     assert.deepEqual([upserts.length, audits.length], [0, 0]);
   }
 });

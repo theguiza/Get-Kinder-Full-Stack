@@ -974,7 +974,7 @@ async function runIntegrationSuite() {
               ["no-role caller, membership", plain, "PUT", (id) => `/organizations/${orgA}/memberships/${id}`, { role_name: "client_reviewer", membership_status: "active" }, 403],
               ["organization administrator, global role", adminA, "PUT", (id) => `/global-roles/${id}`, { role_name: "gk_reviewer", action: "assign" }, 403],
               ["other organization's administrator", adminB, "PUT", (id) => `/organizations/${orgA}/memberships/${id}`, { role_name: "client_reviewer", membership_status: "active" }, 403],
-              ["organization administrator, gk_reviewer membership", adminA, "PUT", (id) => `/organizations/${orgA}/memberships/${id}`, { role_name: "gk_reviewer", membership_status: "active" }, 422],
+              ["organization administrator, gk_reviewer membership", adminA, "PUT", (id) => `/organizations/${orgA}/memberships/${id}`, { role_name: "gk_reviewer", membership_status: "active" }, 403],
             ];
             const before = await writeState();
             await withRealRouter(async (call) => {

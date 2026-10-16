@@ -130,7 +130,9 @@ test("P1-06 service (VAL-TEN-001): rejects a human actor with no active, correct
       { env: enabled, reviewQueueRepository: probe.reviewQueueRepository },
     );
     assert.equal(result.ok, false);
-    assert.equal(result.error.code, "tenant_boundary_violation");
+    // The shared validator's own refusal, not a tenant-boundary violation.
+    assert.equal(result.error.code, "authorization_denied");
+    assert.ok(["missing_active_organization_membership", "role_not_allowed"].includes(result.blockers?.[0]?.blocking_reason));
     assert.equal(probe.calls.length, 0);
   }
 });
@@ -250,7 +252,9 @@ test("P1-06 service (mixed role): a global GK role never substitutes for an acti
       { env: enabled, reviewQueueRepository: probe.reviewQueueRepository },
     );
     assert.equal(result.ok, false, label);
-    assert.equal(result.error.code, "tenant_boundary_violation", label);
+    // The shared validator's own refusal, not a tenant-boundary violation.
+    assert.equal(result.error.code, "authorization_denied", label);
+    assert.ok(["missing_active_organization_membership", "role_not_allowed"].includes(result.blockers?.[0]?.blocking_reason), label);
     assert.equal(probe.calls.length, 0, label);
   }
 
@@ -402,7 +406,9 @@ test("B1A-2R service (VAL-TEN-001 reuse): an unauthorized role or missing/inacti
       { env: enabled, reviewQueueRepository: probe.reviewQueueRepository },
     );
     assert.equal(result.ok, false);
-    assert.equal(result.error.code, "tenant_boundary_violation");
+    // The shared validator's own refusal, not a tenant-boundary violation.
+    assert.equal(result.error.code, "authorization_denied");
+    assert.ok(["missing_active_organization_membership", "role_not_allowed"].includes(result.blockers?.[0]?.blocking_reason));
     assert.equal(probe.calls.length, 0);
   }
 });
@@ -419,7 +425,9 @@ test("B1A-2R service: a cross-tenant organizationId is rejected before any repos
     { env: enabled, reviewQueueRepository: probe.reviewQueueRepository },
   );
   assert.equal(result.ok, false);
-  assert.equal(result.error.code, "tenant_boundary_violation");
+  // The shared validator's own refusal, not a tenant-boundary violation.
+  assert.equal(result.error.code, "authorization_denied");
+  assert.ok(["missing_active_organization_membership", "role_not_allowed"].includes(result.blockers?.[0]?.blocking_reason));
   assert.equal(probe.calls.length, 0);
 });
 

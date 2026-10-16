@@ -1,6 +1,7 @@
 import { isKaiSprint2Enabled } from "../config/kaiSprint2Config.js";
 import { buildKaiError } from "../errors/kaiErrors.js";
 import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationService.js";
+import { resolveAuthorizedHumanRole } from "../auth/kaiAuthorizedRoleAttribution.js";
 import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
 import { createPostgresRequirementAssessmentRepository } from "../dictionary/postgresRequirementAssessmentRepository.js";
 import { createProductionMetadataOnlyAuditForRequirementAssessment } from "./kaiMetadataOnlyAuditComposition.js";
@@ -53,6 +54,24 @@ function isNormalizedNow(value) {
 
 function isMappedHumanActor(actorContext) {
   return actorContext?.actorType === "human" && isNonEmptyString(actorContext?.actorUserId);
+}
+
+/**
+ * The role recorded on a requirement assessment: the active role of the
+ * exact organization that authorized this actor (shared
+ * resolveAuthorizedHumanRole), never a role held in another organization,
+ * in an inactive assignment, or globally (this operation does not combine
+ * global roles). Platform-superuser admission keeps its existing recorded
+ * role unchanged; that attribution is held owner Decision D.
+ */
+export function resolveRequirementAssessmentActorRole(actorContext, auth, allowedRoles) {
+  if (auth?.platformSuperuserAuthorized === true) {
+    return [...allowedRoles].find((role) =>
+      (actorContext.kaiRoles || []).includes(role) ||
+      (actorContext.organizationMemberships || []).some((membership) => membership.role_name === role),
+    ) || "gk_reviewer";
+  }
+  return resolveAuthorizedHumanRole({ actorContext, auth, allowedRoles });
 }
 
 function isAssessOrganizationRequirementInput(value) {
@@ -125,10 +144,7 @@ export async function assessOrganizationRequirement(input, dependencies = {}) {
     organizationId: input.organizationId,
     requirementId: input.requirementId,
     actorUserId: actorContext.actorUserId,
-    actorRole: [...ASSESS_REQUIREMENT_ALLOWED_ROLES].find((role) =>
-      (actorContext.kaiRoles || []).includes(role) ||
-      (actorContext.organizationMemberships || []).some((membership) => membership.role_name === role),
-    ) || "gk_reviewer",
+    actorRole: resolveRequirementAssessmentActorRole(actorContext, auth, ASSESS_REQUIREMENT_ALLOWED_ROLES),
     now: input.now,
     metadataOnlyAudit,
   });

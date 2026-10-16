@@ -444,7 +444,9 @@ test("only the three client roles can be chosen or sent; anything else is refuse
   await withRouter(ACTORS.storedAdmin, store, async (call) => {
     for (const role of ["gk_admin", "gk_operator", "gk_reviewer", "platform_superuser"]) {
       const result = await call("PUT", `${BASE}/organizations/${ORG_A}/memberships/${USERS.contributor.legacy}`, { role_name: role, membership_status: "active" });
-      assert.equal(result.statusCode, 422, role);
+      // A Get Kinder role is refused as not client-managed (as by the grant
+      // route); an unknown role name is a validation blocker.
+      assert.equal(result.statusCode, role === "platform_superuser" ? 422 : 403, role);
     }
   });
   assert.deepEqual(store.state.upserts, []);

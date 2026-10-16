@@ -120,7 +120,9 @@ test("P1-07 service (VAL-TEN-001): rejects a human actor with no active, correct
       { env: enabled, sourceCandidateRepository: probe.sourceCandidateRepository },
     );
     assert.equal(result.ok, false);
-    assert.equal(result.error.code, "tenant_boundary_violation");
+    // The shared validator's own refusal, not a tenant-boundary violation.
+    assert.equal(result.error.code, "authorization_denied");
+    assert.ok(["missing_active_organization_membership", "role_not_allowed"].includes(result.blockers?.[0]?.blocking_reason));
     assert.equal(probe.calls.length, 0);
   }
 });
@@ -194,7 +196,9 @@ test("P1-07 service (mixed role): a global GK role never substitutes for an acti
       { env: enabled, sourceCandidateRepository: probe.sourceCandidateRepository },
     );
     assert.equal(result.ok, false, label);
-    assert.equal(result.error.code, "tenant_boundary_violation", label);
+    // The shared validator's own refusal, not a tenant-boundary violation.
+    assert.equal(result.error.code, "authorization_denied", label);
+    assert.ok(["missing_active_organization_membership", "role_not_allowed"].includes(result.blockers?.[0]?.blocking_reason), label);
     assert.equal(probe.calls.length, 0, label);
   }
 
@@ -299,22 +303,22 @@ test("P1-07 service (bound organization admin): unbound, inactive, other-organiz
   const denied = [
     ["stored client_admin without a binding", boundAdminActor({
       organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_admin" }],
-    }), "tenant_boundary_violation"],
+    }), "authorization_denied"],
     ["inactive binding-derived membership", boundAdminActor({
       organizationMemberships: [boundAdminMembership({ membership_status: "inactive" })],
-    }), "tenant_boundary_violation"],
+    }), "authorization_denied"],
     ["binding for another organization", boundAdminActor({
       organizationMemberships: [boundAdminMembership({ organization_id: OTHER_ORG })],
-    }), "tenant_boundary_violation"],
+    }), "authorization_denied"],
     ...[null, 0, -1, 1.5, "4242"].map((gkOrganizationId) => [
       `GK organization id ${JSON.stringify(gkOrganizationId)}`,
       boundAdminActor({ organizationMemberships: [boundAdminMembership({ gk_organization_id: gkOrganizationId })] }),
-      "tenant_boundary_violation",
+      "authorization_denied",
     ]),
     ...["client_reviewer", "client_contributor"].map((roleName) => [
       `binding-derived ${roleName}`,
       boundAdminActor({ organizationMemberships: [boundAdminMembership({ role_name: roleName })] }),
-      "tenant_boundary_violation",
+      "authorization_denied",
     ]),
     ["inactive kai.users account", boundAdminActor({ kaiUserStatus: "inactive" }), "authorization_denied"],
     ["account status not established", boundAdminActor({ kaiUserStatus: undefined }), "authorization_denied"],

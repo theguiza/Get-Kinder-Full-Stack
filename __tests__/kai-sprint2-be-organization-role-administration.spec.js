@@ -370,7 +370,7 @@ test("C05: the replacing actor must administer both the removed and the resultin
     assert.deepEqual([fromClient.statusCode, blockingReason(fromClient)], [403, "organization_role_not_administrable"]);
     // Nor may it create organization gk_admin.
     const toAdmin = await call("PUT", putPath(ORG_A, USERS.mixed), { role_name: "gk_admin", membership_status: "active", previous_role_name: "gk_reviewer" });
-    assert.equal(toAdmin.statusCode, 422);
+    assert.deepEqual([toAdmin.statusCode, toAdmin.body?.error?.code, blockingReason(toAdmin)], [403, "authorization_denied", "organization_role_not_administrable"]);
   });
   await withRouter(clientAdmin, store, async (call) => {
     const fromGk = await call("PUT", putPath(ORG_A, USERS.mixed), { role_name: "client_reviewer", membership_status: "active", previous_role_name: "gk_reviewer" });

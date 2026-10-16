@@ -488,9 +488,10 @@ function roleDisplayOrder(roleName) {
  * The actor must administer the resulting role and the replaced one
  * (resolveOrganizationRoleAdministration): a platform superuser any
  * superuser-assignable role, an effective client_admin (stored or derived)
- * the client roles, a delegated GK administrator gk_operator/gk_reviewer. A
- * resulting role outside that set is the same validation_blocker as an
- * unknown role. A non-superuser may change their own assignment only to
+ * the client roles, a delegated GK administrator gk_operator/gk_reviewer. An
+ * unknown role is a validation_blocker; a known resulting role outside that
+ * set is refused authorization_denied, exactly as by grantOrganizationRole.
+ * A non-superuser may change their own assignment only to
  * demote themselves, and an ordinary action may not leave the organization
  * with zero effective active client_admin authority (platform superuser
  * retains the recovery path).
@@ -509,13 +510,16 @@ export async function manageOrganizationMembership(
 
   if (
     !isPositiveInteger(targetLegacyPublicUserdataId) ||
-    !authorityByRole.has(roleName) ||
+    !PLATFORM_SUPERUSER_ASSIGNABLE_ORGANIZATION_ROLE_SET.has(roleName) ||
     (membershipStatus !== KAI_ACTIVE_ORGANIZATION_MEMBERSHIP_STATUS && membershipStatus !== KAI_INACTIVE_ORGANIZATION_MEMBERSHIP_STATUS) ||
     (previousRoleName !== null && !isNonEmptyString(previousRoleName)) ||
     !isNormalizedNow(now)
   ) {
     return failure("validation_blocker");
   }
+  // A known role this actor does not administer is the same structured
+  // refusal the additive grant and targeted revocation return.
+  if (!authorityByRole.has(roleName)) return roleNotAdministrable(roleName, authorityByRole);
 
   const findOrCreateTarget = dependencies.findOrCreateKaiUserByLegacyPublicUserdataId || findOrCreateKaiUserForAdministrationTarget;
   const targetKaiUser = await resolveAdministrationTarget(findOrCreateTarget, targetLegacyPublicUserdataId);

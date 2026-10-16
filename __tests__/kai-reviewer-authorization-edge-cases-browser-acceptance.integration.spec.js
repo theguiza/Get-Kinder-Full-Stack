@@ -795,7 +795,7 @@ async function runBrowserAcceptance() {
       const npoGlobal = await api(USERS.npoAdmin, "PUT", paths.globalRole(USERS.reviewer), { role_name: "gk_reviewer", action: "revoke" });
       const npoMembership = await api(USERS.npoAdmin, "PUT", paths.membership(USERS.firstTime), { role_name: "gk_reviewer", membership_status: "active" });
       assert.deepEqual([npoGlobal.status, npoGlobal.blockingReason], [403, "platform_superuser_required"]);
-      assert.deepEqual([npoMembership.status, npoMembership.errorCode], [422, "validation_blocker"]);
+      assert.deepEqual([npoMembership.status, npoMembership.errorCode, npoMembership.blockingReason], [403, "authorization_denied", "non_client_membership_not_client_managed"]);
       results.E0 = "PASS: membership PUT 200 + global-role PUT 200, audited; NPO admin refused both";
     });
 

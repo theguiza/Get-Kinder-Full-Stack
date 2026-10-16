@@ -511,7 +511,9 @@ test("P2-04 service: a role without active tenant membership is rejected", async
     { env: sprint2Enabled, claimGapFollowupRepository: throwingRepository },
   );
   assert.equal(result.ok, false);
-  assert.equal(result.error.code, "tenant_boundary_violation");
+  // The shared validator's own refusal, not a tenant-boundary violation.
+  assert.equal(result.error.code, "authorization_denied");
+  assert.ok(["missing_active_organization_membership", "role_not_allowed"].includes(result.blockers?.[0]?.blocking_reason));
 });
 
 test("P2-04 service: forwards only organizationId/claimId/actorUserId/now/metadataOnlyAudit to the repository", async () => {

@@ -562,7 +562,8 @@ async function runBrowserAcceptance() {
         return { status: response.status, body: await response.json() };
       })()`);
       assert.equal(response.status, 403, JSON.stringify(response.body));
-      assert.equal(response.body.error?.code, "tenant_boundary_violation");
+      assert.equal(response.body.error?.code, "authorization_denied");
+      assert.equal(response.body.blockers?.[0]?.blocking_reason, "role_not_allowed");
       assert.deepEqual(await governedCounts(), before);
       results.mixedRoleEvidenceExtraction = "REPRODUCED: P2-01 role refusal 403; no writes";
     });

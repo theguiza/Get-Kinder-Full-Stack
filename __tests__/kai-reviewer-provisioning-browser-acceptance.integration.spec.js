@@ -1101,7 +1101,7 @@ async function runBrowserAcceptance() {
       outcomes.npoCockpit = await npo.fetchJson("GET", capabilitiesPath(ORG_A));
       outcomes.npoDecision = await npo.fetchJson("POST", decisionPath(profiles.afterRevoke), decisionBody);
       assert.deepEqual([outcomes.npoGlobalRole.status, outcomes.npoGlobalRole.blockingReason], [403, "platform_superuser_required"]);
-      assert.deepEqual([outcomes.npoGkMembership.status, outcomes.npoGkMembership.errorCode], [422, "validation_blocker"]);
+      assert.deepEqual([outcomes.npoGkMembership.status, outcomes.npoGkMembership.errorCode, outcomes.npoGkMembership.blockingReason], [403, "authorization_denied", "non_client_membership_not_client_managed"]);
       assert.deepEqual([outcomes.npoRewriteGkStaff.status, outcomes.npoRewriteGkStaff.blockingReason], [403, "non_client_membership_not_client_managed"]);
       assert.equal(outcomes.npoLookup.status, 403);
       assert.equal(outcomes.npoCockpit.data.can_manage_sensitivity_review, false);

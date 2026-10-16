@@ -448,7 +448,11 @@ export async function createSensitivityReviewQueueItem(input, dependencies = {})
     SENSITIVITY_REVIEW_ALLOWED_ROLES,
   );
   if (!auth.ok) {
-    return buildKaiError("tenant_boundary_violation", { blockers: auth.blockers });
+    // The validator's own refusal: authorization_denied with role_not_allowed
+    // or missing_active_organization_membership, tenant_boundary_violation
+    // only for a missing organization scope. A genuine tenant inconsistency
+    // is the separate check below.
+    return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers });
   }
 
   const tenant = validateTenantBoundaryConsistency({

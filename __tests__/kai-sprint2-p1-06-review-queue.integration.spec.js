@@ -550,7 +550,7 @@ async function runReviewQueueIntegrationSuite() {
       { env: { KAI_SPRINT2_ENABLED: "true" }, reviewQueueRepository: repository, metadataOnlyAudit: createAuditProbe().dependency },
     );
     assert.equal(unauthorizedRole.ok, false);
-    assert.equal(unauthorizedRole.error.code, "tenant_boundary_violation");
+    assert.equal(unauthorizedRole.error.code, "authorization_denied");
 
     const inactiveMembership = await ensureSensitivityReviewQueueItem(
       {
@@ -564,7 +564,7 @@ async function runReviewQueueIntegrationSuite() {
       { env: { KAI_SPRINT2_ENABLED: "true" }, reviewQueueRepository: repository, metadataOnlyAudit: createAuditProbe().dependency },
     );
     assert.equal(inactiveMembership.ok, false);
-    assert.equal(inactiveMembership.error.code, "tenant_boundary_violation");
+    assert.equal(inactiveMembership.error.code, "authorization_denied");
 
     const crossTenant = await ensureSensitivityReviewQueueItem(
       {

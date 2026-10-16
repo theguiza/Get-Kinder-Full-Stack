@@ -860,17 +860,17 @@ async function runP107HandoffIntegrationSuite() {
         actorType: "human",
         actorUserId: MIXED_REVIEWER,
         organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_admin" }],
-      }, "tenant_boundary_violation"],
-      ["global gk_reviewer with no membership", mixedRoleActor("gk_reviewer", MIXED_REVIEWER, { organizationMemberships: [] }), "tenant_boundary_violation"],
+      }, "authorization_denied"],
+      ["global gk_reviewer with no membership", mixedRoleActor("gk_reviewer", MIXED_REVIEWER, { organizationMemberships: [] }), "authorization_denied"],
       ["global gk_reviewer with membership only in another organization", mixedRoleActor("gk_reviewer", MIXED_REVIEWER, {
         organizationMemberships: otherOrgMembership,
-      }), "tenant_boundary_violation"],
+      }), "authorization_denied"],
       ["global gk_reviewer with a revoked membership", mixedRoleActor("gk_reviewer", MIXED_REVIEWER, {
         organizationMemberships: [{ organization_id: ORG, membership_status: "revoked", role_name: "client_admin" }],
-      }), "tenant_boundary_violation"],
+      }), "authorization_denied"],
       ["global gk_operator with an inactive membership", mixedRoleActor("gk_operator", MIXED_OPERATOR, {
         organizationMemberships: [{ organization_id: ORG, membership_status: "inactive", role_name: "client_admin" }],
-      }), "tenant_boundary_violation"],
+      }), "authorization_denied"],
       ...["ai", "assistant", "system", "import"].map((actorType) => [
         `${actorType} actor carrying a mixed-role context`,
         mixedRoleActor("gk_admin", MIXED_ADMIN, { actorType }),
@@ -1387,22 +1387,22 @@ async function runP107HandoffIntegrationSuite() {
       ["stored client_admin without a binding", {
         ...boundAdmin,
         organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_admin" }],
-      }, "tenant_boundary_violation"],
+      }, "authorization_denied"],
       ["inactive binding-derived membership", {
         ...boundAdmin, organizationMemberships: [boundAdminMembership({ membership_status: "inactive" })],
-      }, "tenant_boundary_violation"],
+      }, "authorization_denied"],
       ["binding for another organization", {
         ...boundAdmin, organizationMemberships: [boundAdminMembership({ organization_id: OTHER_ORG })],
-      }, "tenant_boundary_violation"],
+      }, "authorization_denied"],
       ...[null, undefined, 0, "4242", 1.5].map((gkOrganizationId) => [
         `GK organization id ${String(gkOrganizationId)}`,
         { ...boundAdmin, organizationMemberships: [boundAdminMembership({ gk_organization_id: gkOrganizationId })] },
-        "tenant_boundary_violation",
+        "authorization_denied",
       ]),
       ...["client_reviewer", "client_contributor"].map((roleName) => [
         `binding-derived ${roleName}`,
         { ...boundAdmin, organizationMemberships: [boundAdminMembership({ role_name: roleName })] },
-        "tenant_boundary_violation",
+        "authorization_denied",
       ]),
       ["inactive kai.users account", { ...boundAdmin, kaiUserStatus: "inactive" }, "authorization_denied"],
       ...["ai", "assistant", "system", "import"].map((actorType) => [
@@ -1438,7 +1438,7 @@ async function runP107HandoffIntegrationSuite() {
     const otherOrgAdmin = { ...boundAdmin, organizationMemberships: [boundAdminMembership({ organization_id: OTHER_ORG })] };
     const crossBefore = await kaiTableRowCounts();
     const namingOther = await createCandidateAs(boundAdmin, id, { organizationId: OTHER_ORG });
-    assert.equal(namingOther.error.code, "tenant_boundary_violation");
+    assert.deepEqual([namingOther.error.code, namingOther.blockers?.[0]?.blocking_reason], ["authorization_denied", "missing_active_organization_membership"]);
     const otherTenant = await createCandidateAs(otherOrgAdmin, id, { organizationId: OTHER_ORG });
     assert.equal(otherTenant.ok, false);
     assert.equal(otherTenant.error.code, "not_found");

@@ -12,6 +12,7 @@ import {
 } from "../db/kaiQueries.js";
 import {
   __requirementAssessmentServiceContract,
+  resolveRequirementAssessmentActorRole,
 } from "./kaiRequirementAssessmentService.js";
 import {
   __engagementContextServiceTestables,
@@ -309,10 +310,7 @@ export async function assessEngagementRequirement(input, dependencies = {}) {
     engagementId: input.engagementId,
     requirementId: input.requirementId,
     actorUserId: actorContext.actorUserId,
-    actorRole: [...ASSESS_ENGAGEMENT_REQUIREMENT_ALLOWED_ROLES].find((role) =>
-      (actorContext.kaiRoles || []).includes(role) ||
-      (actorContext.organizationMemberships || []).some((membership) => membership.role_name === role),
-    ) || "gk_reviewer",
+    actorRole: resolveRequirementAssessmentActorRole(actorContext, auth, ASSESS_ENGAGEMENT_REQUIREMENT_ALLOWED_ROLES),
     now: input.now,
     metadataOnlyAudit,
   });
