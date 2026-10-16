@@ -186,6 +186,9 @@ function StatusBadge({ status }) {
 // fetch handling for that same request.
 const GRANT_RESPONSE_PACKET_REFETCH_TIMEOUT_MS = 15000;
 const NO_WORKFLOW_OPERATIONS = Object.freeze({});
+// The packet reads admit organization (or global) gk_admin/gk_reviewer only;
+// another GK role is told so instead of being shown a refused request.
+const PACKET_READ_NOT_PERMITTED_TEXT = "Your Get Kinder role for this organization does not include reading reporting packets. A Get Kinder reviewer or administrator can open them.";
 
 export default function ImpactEvidenceLibrary({
   workflowOperations: parentWorkflowOperations,
@@ -1286,6 +1289,11 @@ export default function ImpactEvidenceLibrary({
     setGrantResponsePacketFinalMarkdownExportManifestError("");
     setLoadingGrantResponsePacket(false);
     if (!organizationId || !engagementId) return;
+    // Only an actor the packet read admits (server capability) issues it.
+    if (!workflowOperations.readGrantResponsePacket) {
+      setGrantResponsePacketRequestState("not_permitted");
+      return;
+    }
     let cancelled = false;
     (async () => {
       const requestGeneration = ++grantPacketRequestGenerationRef.current;
@@ -1320,7 +1328,7 @@ export default function ImpactEvidenceLibrary({
     return () => {
       cancelled = true;
     };
-  }, [organizationId, engagementId]);
+  }, [organizationId, engagementId, workflowOperations.readGrantResponsePacket]);
 
   // Board Reporting: changing the selected engagement (or organization) must
   // discard the previous engagement's visible Board state immediately -
@@ -1362,6 +1370,11 @@ export default function ImpactEvidenceLibrary({
     setBoardReportingFinalSummaryMarkdown(null);
     setBoardReportingFinalSummaryError("");
     if (!organizationId || !engagementId) return;
+    // Only an actor the packet read admits (server capability) issues it.
+    if (!workflowOperations.readBoardReportingPacket) {
+      setBoardReportingPacketRequestState("not_permitted");
+      return;
+    }
     let cancelled = false;
     (async () => {
       const requestGeneration = ++boardReportingPacketRequestGenerationRef.current;
@@ -1393,7 +1406,7 @@ export default function ImpactEvidenceLibrary({
     return () => {
       cancelled = true;
     };
-  }, [organizationId, engagementId]);
+  }, [organizationId, engagementId, workflowOperations.readBoardReportingPacket]);
 
   // Shared post-mutation refetch of the authoritative Board Reporting
   // workflow-state for the EXACT candidate id passed in - used after every
@@ -3840,7 +3853,7 @@ export default function ImpactEvidenceLibrary({
               eligibility are all resolved server-side; this section grants no approval or
               export/finalization authority of its own.
             </div>
-            {engagementId ? (
+            {engagementId && workflowOperations.readGrantResponsePacket ? (
               <div className="small mb-2">
                 <a
                   className="btn btn-sm btn-outline-secondary grant-response-packet-preview-markdown-link"
@@ -4126,6 +4139,9 @@ export default function ImpactEvidenceLibrary({
             ) : (
               <>
                 {loadingGrantResponsePacket ? <div className="text-muted small">Loading Grant Response Packet...</div> : null}
+                {grantResponsePacketRequestState === "not_permitted" ? (
+                  <div className="text-muted small" data-packet-not-permitted="grant-response-packet">{PACKET_READ_NOT_PERMITTED_TEXT}</div>
+                ) : null}
                 {!loadingGrantResponsePacket && grantResponsePacketRequestState === "error" ? (
                   <div className="alert alert-warning py-2 small">{grantResponsePacketError}</div>
                 ) : null}
@@ -4279,6 +4295,9 @@ export default function ImpactEvidenceLibrary({
             ) : (
               <>
                 {loadingBoardReportingPacket ? <div className="text-muted small">Loading Board Reporting packet...</div> : null}
+                {boardReportingPacketRequestState === "not_permitted" ? (
+                  <div className="text-muted small" data-packet-not-permitted="board-reporting">{PACKET_READ_NOT_PERMITTED_TEXT}</div>
+                ) : null}
                 {!loadingBoardReportingPacket && boardReportingPacketRequestState === "error" ? (
                   <div className="alert alert-warning py-2 small">{boardReportingPacketError}</div>
                 ) : null}

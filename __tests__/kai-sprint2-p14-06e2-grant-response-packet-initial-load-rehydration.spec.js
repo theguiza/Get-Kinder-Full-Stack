@@ -54,7 +54,7 @@ function extractGrantResponsePacketEffectSource() {
   assert.notEqual(anchorIdx, -1, "could not locate the Grant Response Packet effect");
   const openIdx = uiSource.lastIndexOf("useEffect(() => {", anchorIdx);
   assert.notEqual(openIdx, -1, "could not locate the effect opening");
-  const tailMarker = "}, [organizationId, engagementId]);";
+  const tailMarker = "}, [organizationId, engagementId, workflowOperations.readGrantResponsePacket]);";
   const tailIdx = uiSource.indexOf(tailMarker, anchorIdx);
   assert.notEqual(tailIdx, -1, "could not locate the effect dependency close");
   return uiSource.slice(openIdx + "useEffect(".length, tailIdx + 1);
@@ -67,6 +67,7 @@ function buildEffect({
   grantPacketRequestGenerationRef = { current: 0 },
   organizationIdRef = { current: orgId },
   engagementIdRef = { current: engagementId },
+  workflowOperations = { readGrantResponsePacket: true },
 }) {
   const stateLog = [];
   const getJsonCalls = [];
@@ -102,6 +103,7 @@ function buildEffect({
     "React",
     "organizationId",
     "engagementId",
+    "workflowOperations",
     "grantPacketRequestGenerationRef",
     ...Object.keys(setters),
     "getJson",
@@ -119,6 +121,7 @@ function buildEffect({
     { useEffect: (fn) => fn() },
     orgId,
     engagementId,
+    workflowOperations,
     grantPacketRequestGenerationRef,
     ...Object.values(setters),
     getJson,

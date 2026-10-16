@@ -778,7 +778,8 @@ test("createBoardReportingExportManifest POSTs an empty body to the exact candid
 test("the Board Reporting reset effect clears the retained candidate identity on org/engagement change", () => {
   const start = uiSource.indexOf("boardReportingPacketRequestGenerationRef.current += 1;");
   assert.notEqual(start, -1);
-  const sliceEnd = uiSource.indexOf("}, [organizationId, engagementId]);", start);
+  const sliceEnd = uiSource.indexOf("}, [organizationId, engagementId, workflowOperations.readBoardReportingPacket]);", start);
+  assert.notEqual(sliceEnd, -1);
   const section = uiSource.slice(start, sliceEnd);
   assert.match(section, /setBoardReportingCandidateResult\(null\)/);
   assert.match(section, /setBoardReportingWorkflowState\(null\)/);
@@ -1083,7 +1084,8 @@ test("the fresh-mount auto-recovery effect only replays create/reuse once packet
 test("the auto-attempted guard ref is reset alongside every other Board Reporting reset on organization/engagement change", () => {
   const start = uiSource.indexOf("boardReportingPacketRequestGenerationRef.current += 1;");
   assert.notEqual(start, -1);
-  const sliceEnd = uiSource.indexOf("}, [organizationId, engagementId]);", start);
+  const sliceEnd = uiSource.indexOf("}, [organizationId, engagementId, workflowOperations.readBoardReportingPacket]);", start);
+  assert.notEqual(sliceEnd, -1);
   const section = uiSource.slice(start, sliceEnd);
   assert.match(section, /boardReportingCandidateAutoAttemptedRef\.current = false;/);
 });

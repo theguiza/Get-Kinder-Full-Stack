@@ -401,7 +401,8 @@ test("ImpactEvidenceLibrary.jsx Grant Response Packet packet-level preview link 
   const sectionEnd = uiSource.indexOf('<h5 className="mb-0">Generated Drafts</h5>');
   const section = uiSource.slice(sectionStart, sectionEnd);
 
-  const engagementGateIdx = section.indexOf("{engagementId ? (");
+  // Gated by the same engagement selection, and by the server's packet-read capability.
+  const engagementGateIdx = section.indexOf("{engagementId && workflowOperations.readGrantResponsePacket ? (");
   const previewLinkIdx = section.indexOf("Download Markdown preview");
   assert.notEqual(engagementGateIdx, -1);
   assert.ok(
@@ -645,11 +646,11 @@ function extractGrantResponsePacketEffectSource(source) {
   const openIdx = source.lastIndexOf("useEffect(() => {", anchorIdx);
   assert.notEqual(openIdx, -1, "could not locate the effect's useEffect(...) opening");
   const bodyStart = openIdx + "useEffect(".length;
-  const tailMarker = "}, [organizationId, engagementId]);";
+  const tailMarker = "}, [organizationId, engagementId, workflowOperations.readGrantResponsePacket]);";
   const tailIdx = source.indexOf(tailMarker, anchorIdx);
   assert.notEqual(tailIdx, -1, "could not locate the effect's dependency array close");
   // Stop right after the arrow function's own closing brace - the deps array
-  // that follows (", [organizationId, engagementId]") is useEffect's second
+  // that follows (", [organizationId, engagementId, ...]") is useEffect's second
   // argument, not part of the callback itself.
   const bodyEnd = tailIdx + 1;
   return source.slice(bodyStart, bodyEnd);
@@ -662,6 +663,7 @@ function buildEffect({
   grantPacketRequestGenerationRef = { current: 0 },
   organizationIdRef = { current: orgId },
   engagementIdRef = { current: engId },
+  workflowOperations = { readGrantResponsePacket: true },
 }) {
   const effectSource = extractGrantResponsePacketEffectSource(uiSource);
   const setGrantResponsePacketCalls = [];
@@ -708,6 +710,7 @@ function buildEffect({
     "React",
     "organizationId",
     "engagementId",
+    "workflowOperations",
     "grantPacketRequestGenerationRef",
     "setGrantResponsePacket",
     "setGrantResponsePacketError",
@@ -742,6 +745,7 @@ function buildEffect({
     { useEffect: (fn) => fn() },
     orgId,
     engId,
+    workflowOperations,
     grantPacketRequestGenerationRef,
     setGrantResponsePacket,
     setGrantResponsePacketError,
@@ -896,4 +900,23 @@ test("Grant Response Packet effect (real execution): no organization or engageme
   effect();
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(getJsonCalls.length, 0);
+});
+
+test("Grant Response Packet effect (real execution): an actor the packet read does not admit (server capability false) issues no request and is shown not_permitted", async () => {
+  const getJsonCalls = [];
+  const { effect, stateLog } = buildEffect({
+    organizationId: "11111111-1111-4111-8111-111111111111",
+    engagementId: "22222222-2222-4222-8222-222222222222",
+    workflowOperations: { readGrantResponsePacket: false },
+    async getJsonImpl(path) {
+      getJsonCalls.push(path);
+      return { statusCode: 200, body: { ok: true, data: { drafts: [] } } };
+    },
+  });
+  effect();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(getJsonCalls.length, 0, "no refused read is issued");
+  assert.deepEqual(stateLog.filter(([key]) => key === "requestState").map(([, value]) => value), ["idle", "not_permitted"]);
+  assert.match(uiSource, /grantResponsePacketRequestState === "not_permitted" \? \(/);
+  assert.match(uiSource, /boardReportingPacketRequestState === "not_permitted" \? \(/);
 });

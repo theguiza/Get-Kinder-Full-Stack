@@ -89,10 +89,12 @@ test("4: Board Reporting never reads a stale/diverged KaiWebIntake-local engagem
   assert.ok(effectIndex > -1, "Board Reporting packet state not found");
   const fetchIndex = libSource.indexOf("boardReportingPacketPath(organizationId, engagementId)", effectIndex);
   assert.ok(fetchIndex > -1, "Board Reporting packet fetch call not found after its state declarations");
-  const dependencyArrayIndex = libSource.indexOf("}, [organizationId, engagementId]);", fetchIndex);
+  // Keyed on organizationId/engagementId and the server's packet-read
+  // capability - never on any KaiWebIntake-local engagement state.
+  const dependencyArrayIndex = libSource.indexOf("}, [organizationId, engagementId, workflowOperations.readBoardReportingPacket]);", fetchIndex);
   assert.ok(
     dependencyArrayIndex > -1 && dependencyArrayIndex - fetchIndex < 4000,
-    "Board Reporting packet fetch effect must be keyed only on organizationId/engagementId",
+    "Board Reporting packet fetch effect must be keyed only on organizationId/engagementId (and the packet-read capability)",
   );
   // ImpactEvidenceLibrary's own localEngagementId is only its standalone
   // (no-parent) fallback - it never reads KaiWebIntake's internal engagement

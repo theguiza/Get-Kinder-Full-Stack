@@ -243,7 +243,7 @@ test("the engagement-switch reset effect also clears START/COMPLETE pending/erro
   const anchor = "grantPacketRequestGenerationRef.current += 1;";
   const anchorIdx = uiSource.indexOf(anchor);
   assert.notEqual(anchorIdx, -1);
-  const tailMarker = "}, [organizationId, engagementId]);";
+  const tailMarker = "}, [organizationId, engagementId, workflowOperations.readGrantResponsePacket]);";
   const tailIdx = uiSource.indexOf(tailMarker, anchorIdx);
   assert.notEqual(tailIdx, -1);
   const resetEffect = uiSource.slice(anchorIdx, tailIdx);

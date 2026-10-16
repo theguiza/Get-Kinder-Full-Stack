@@ -128,3 +128,32 @@ test("the GK sensitivity result line reports the P1-07 handoff the server return
   assert.equal(recorded({ status: "not_applicable" }, "needs_more_information"), "Marked as needing more information.");
   assert.equal(sensitivityDecisionResultText(projectSensitivityDecisionResult({ statusCode: 409 }, "reviewed")), "");
 });
+
+test("reporting-packet read capabilities project the packet services' own gk_admin/gk_reviewer combined-role contract", async () => {
+  const { __grantResponsePacketServiceContract: grp } = await import("../Backend/kai/services/kaiGrantResponsePacketService.js");
+  const { __boardReportingPacketServiceContract: board } = await import("../Backend/kai/services/kaiBoardReportingPacketService.js");
+  assert.deepEqual([...grp.GENERATED_CONTENT_REVIEW_ALLOWED_ROLES].sort(), ["gk_admin", "gk_reviewer"]);
+  assert.deepEqual([...board.GENERATED_CONTENT_REVIEW_ALLOWED_ROLES].sort(), ["gk_admin", "gk_reviewer"]);
+  const expected = [
+    ["organization gk_admin", actor("gk_admin"), true],
+    ["organization gk_reviewer", actor("gk_reviewer"), true],
+    ["global gk_reviewer + client_admin", actor("client_admin", ["gk_reviewer"]), true],
+    ["organization gk_operator", actor("gk_operator"), false],
+    ["global gk_operator + client_admin", actor("client_admin", ["gk_operator"]), false],
+    ["client admin", actor("client_admin"), false],
+    ["client reviewer", actor("client_reviewer"), false],
+  ];
+  for (const [label, actorContext, allowed] of expected) {
+    const result = await getOrganizationAccessCapabilities({ organizationId: ORG, actorContext }, { env });
+    assert.deepEqual([result.data.workflowOperations.readGrantResponsePacket, result.data.workflowOperations.readBoardReportingPacket], [allowed, allowed], label);
+    // The flag is exactly the read's own predicate.
+    for (const [contract, operation] of [[grp, grp.GET_GRANT_RESPONSE_PACKET_OPERATION], [board, board.GET_BOARD_REPORTING_PACKET_OPERATION]]) {
+      assert.equal(validateActorCanPerformOperation(actorContext, operation, ORG, { allowedRoles: contract.GENERATED_CONTENT_REVIEW_ALLOWED_ROLES, combineGlobalRoles: true }).ok, allowed, label);
+    }
+  }
+  const projected = projectOrganizationAccessCapabilities((await getOrganizationAccessCapabilities({ organizationId: ORG, actorContext: actor("gk_operator") }, { env })).data);
+  assert.deepEqual([projected.workflowOperations.readGrantResponsePacket, projected.workflowOperations.readBoardReportingPacket], [false, false]);
+  const missing = projectOrganizationAccessCapabilities({ internalKnowledgeWorkspace: true, intakeContribution: false, clientFollowupReview: false, projectManagement: false,
+    improvementPlanManagement: false, organizationJoinReview: false, organizationAccessManagement: false, workflowOperations: {} });
+  assert.deepEqual([missing.workflowOperations.readGrantResponsePacket, missing.workflowOperations.readBoardReportingPacket], [false, false], "an absent flag fails closed");
+});

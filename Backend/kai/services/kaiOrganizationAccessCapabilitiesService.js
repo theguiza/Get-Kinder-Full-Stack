@@ -8,6 +8,8 @@ import { __claimGapFollowupServiceContract } from "./kaiClaimGapFollowupService.
 import { __conflictReviewCandidateServiceContract } from "./kaiConflictReviewCandidateService.js";
 import { __coverageReviewDecisionServiceContract } from "./kaiCoverageReviewDecisionService.js";
 import { __requirementAssessmentServiceContract } from "./kaiRequirementAssessmentService.js";
+import { __grantResponsePacketServiceContract } from "./kaiGrantResponsePacketService.js";
+import { __boardReportingPacketServiceContract } from "./kaiBoardReportingPacketService.js";
 import { isKaiSprint2Enabled } from "../config/kaiSprint2Config.js";
 import { KAI_SPRINT2_P0_OPERATION_ROLES, KAI_SPRINT2_P0_PATTERNS } from "../config/kaiSprint2P0Contract.js";
 import { buildKaiError } from "../errors/kaiErrors.js";
@@ -150,6 +152,14 @@ function workflowOperations(actorContext, organizationId) {
     assessRequirement: validateActorCanPerformOperation(
       actorContext, __requirementAssessmentServiceContract.ASSESS_REQUIREMENT_OPERATION, organizationId,
       { allowedRoles: __requirementAssessmentServiceContract.ASSESS_REQUIREMENT_ALLOWED_ROLES },
+    ).ok === true,
+    readGrantResponsePacket: validateActorCanPerformOperation(
+      actorContext, __grantResponsePacketServiceContract.GET_GRANT_RESPONSE_PACKET_OPERATION, organizationId,
+      { allowedRoles: __grantResponsePacketServiceContract.GENERATED_CONTENT_REVIEW_ALLOWED_ROLES, combineGlobalRoles: true },
+    ).ok === true,
+    readBoardReportingPacket: validateActorCanPerformOperation(
+      actorContext, __boardReportingPacketServiceContract.GET_BOARD_REPORTING_PACKET_OPERATION, organizationId,
+      { allowedRoles: __boardReportingPacketServiceContract.GENERATED_CONTENT_REVIEW_ALLOWED_ROLES, combineGlobalRoles: true },
     ).ok === true,
   };
 }

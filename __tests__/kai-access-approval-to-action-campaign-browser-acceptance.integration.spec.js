@@ -282,6 +282,28 @@ async function openPage(browser, { baseUrl, legacyUserId }) {
         data: parsed?.data ?? null,
       };
     })()`),
+    // /admin -> Organizations -> KAI Access modal.
+    clickOrganizationKaiAccess: (organizationName) => clickWhere(`KAI Access for ${organizationName}`, `() => [...document.querySelectorAll("tr")]
+      .filter((tr) => tr.offsetParent !== null && tr.innerText.includes(${JSON.stringify(organizationName)}))
+      .map((tr) => [...tr.querySelectorAll("button")].find((b) => b.innerText.trim() === "KAI Access")).find(Boolean)`),
+    modalRoleOptions: () => evaluate(`[...document.querySelectorAll(".admin-edit-card .border-top select option")].map((o) => o.value)`),
+    async modalGrant(emailAddress, roleName) {
+      const ok = await evaluate(`(() => {
+        const input = document.querySelector('.admin-edit-card input[type="email"]');
+        if (!input) return false;
+        const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set;
+        setter.call(input, ${JSON.stringify(emailAddress)});
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        return true;
+      })()`);
+      assert.ok(ok, "grant email input");
+      await setSelect(`() => document.querySelector(".admin-edit-card .border-top select")`, roleName);
+      await clickWhere("Grant KAI Access", `() => [...document.querySelectorAll(".admin-edit-card button")].find((b) => b.innerText.trim() === "Grant KAI Access" && !b.disabled)`);
+    },
+    accessRowText: (legacyId) => evaluate(`(() => {
+      const el = document.querySelector('[data-kai-access-row="legacy:${legacyId}"]');
+      return el ? el.innerText : null;
+    })()`),
     activate: () => browser.send("Page.bringToFront", {}, sessionId),
     async goto(path) {
       await browser.send("Page.navigate", { url: `${baseUrl}${path}` }, sessionId);
@@ -370,6 +392,9 @@ async function runBrowserAcceptance() {
     memberB: 2317, // ordinary account; stored client_contributor of Org B (P3 isolation)
     gkDelegate: 2319, // ordinary account; made a delegated GK administrator of Org A through the governed routes in J8
     governedOperator: 2320, // ordinary account; client_contributor + global gk_operator (superuser), organization gk_operator (delegate) in J8
+    newGkAdmin: 2321, // ordinary account, no KAI role; made a delegated GK administrator of Org A from /admin in J9
+    opsRecipient: 2322, // ordinary account; Org A client_contributor (superuser, /admin) then organization gk_operator (J9 delegate)
+    revRecipient: 2323, // ordinary account; Org A client_contributor (superuser, /admin) then organization gk_reviewer (J9 delegate)
   });
   const SITE_ADMINS = new Set([USERS.superGk, USERS.superNoRole, USERS.superGkStored]);
   const FIRST_SIGN_IN = new Set([USERS.reviewer, USERS.reviewerOrgOnly, USERS.newMember, USERS.freshNotNull, USERS.freshNullable]);
@@ -2333,6 +2358,340 @@ async function runBrowserAcceptance() {
       assert.deepEqual([decision.decision_status, decision.decided_by], ["promoted", kaiUserIds.governedOperator], "the recorded human decision remains");
       assert.deepEqual(gkDelegatePage.exceptions, []);
       results.J8_4 = { refused, operatorAccess: operatorAccess.status };
+    });
+
+    // =====================================================================
+    // J9. Platform administrator -> delegated GK administrator -> operator
+    // and reviewer grants -> effective product access -> revocation. Every
+    // role is written by the governed product: the /admin KAI Access modal
+    // where it offers the control, otherwise the same mounted
+    // superuser-only route; Team & Access for every delegated grant.
+    // =====================================================================
+    const newGkAdminPage = await session(USERS.newGkAdmin);
+    const opsPage = await session(USERS.opsRecipient);
+    const revPage = await session(USERS.revRecipient);
+    const rowKeyOf = (legacyId) => `legacy:${legacyId}`;
+    const activeRolesOf = async (key, organizationId = ORG_A) => (await query(
+      "SELECT role_name FROM kai.organization_memberships WHERE organization_id = $1::uuid AND user_id = $2::uuid AND membership_status = 'active' ORDER BY role_name",
+      [organizationId, kaiUserIds[key]])).map((row) => row.role_name);
+    const globalRolesOf = async (key) => (await query(
+      `SELECT r.role_name FROM kai.user_roles ur JOIN kai.roles r ON r.role_id = ur.role_id
+        WHERE ur.user_id = $1::uuid AND ur.organization_id IS NULL AND ur.active AND ur.revoked_at IS NULL ORDER BY r.role_name`,
+      [kaiUserIds[key]])).map((row) => row.role_name);
+    async function openAdminKaiAccess(page) {
+      await page.goto("/admin?tab=organizations");
+      await page.waitForText(ORG_A_NAME);
+      await page.clickOrganizationKaiAccess(ORG_A_NAME);
+      await page.waitForText(`KAI Access — ${ORG_A_NAME}`);
+      await page.idle();
+    }
+    // One read per implemented product surface, from the actor's own session.
+    const SURFACES = Object.freeze({
+      organizations: () => `${INTAKE}/admin/organizations`,
+      capabilities: (org) => accessCapabilitiesPath(org),
+      cockpitCapabilities: (org) => cockpitCapabilitiesPath(org),
+      projects: (org) => `${INTAKE}/admin/organizations/${org}/engagements`,
+      teamAccessRoster: (org) => `${ACCESS}/organizations/${org}/access`,
+      dataSources: (org) => `${INTAKE}/admin/organizations/${org}/sources`,
+      evidenceLibrary: (org) => `${INTAKE}/admin/organizations/${org}/evidence-library/candidates`,
+      claimLibrary: (org) => `${INTAKE}/admin/organizations/${org}/claim-library/candidates`,
+      reviewQueue: (org) => `${INTAKE}/admin/organizations/${org}/review-queue`,
+      sourceReviewQueue: (org) => sourceQueuePath(org),
+      generatedDrafts: (org) => `${INTAKE}/admin/organizations/${org}/generated-content-drafts`,
+      eligibleClaims: (org) => `${INTAKE}/admin/organizations/${org}/eligible-claims?requested_audience=internal&limit=25`,
+      requirements: (org) => `${INTAKE}/admin/organizations/${org}/requirements`,
+      impactFacts: (org) => `${INTAKE}/admin/organizations/${org}/impact-facts`,
+      boardReporting: (org) => `${INTAKE}/admin/organizations/${org}/engagements/${org === ORG_A ? PROJECT_A : PROJECT_B}/board-reporting`,
+      grantResponsePacket: (org) => `${INTAKE}/admin/organizations/${org}/engagements/${org === ORG_A ? PROJECT_A : PROJECT_B}/grant-response-packet`,
+    });
+    async function surfaceStatuses(page, organizationId) {
+      const statuses = {};
+      for (const [name, path] of Object.entries(SURFACES)) {
+        const response = await page.fetchJson("GET", path(organizationId));
+        statuses[name] = name === "organizations"
+          ? (response.data?.items || []).map((item) => item.organization_id).includes(organizationId)
+          // The cockpit probe always answers 200; its booleans are the answer.
+          : name === "cockpitCapabilities"
+            ? `${response.status}:${response.data?.can_review_source_candidates === true}/${response.data?.can_manage_sensitivity_review === true}`
+            : response.status;
+      }
+      return statuses;
+    }
+
+    await test("J9-1: the platform superuser makes an existing account a delegated GK administrator of Org A - organization gk_admin from /admin KAI Access, global gk_admin through the governed superuser-only route (the modal does not offer it); no other actor can", async () => {
+      await openAdminKaiAccess(superGkPage);
+      assert.deepEqual(await superGkPage.modalRoleOptions(), ["client_admin", "client_reviewer", "client_contributor", "gk_reviewer", "gk_operator", "gk_admin"],
+        "the superuser's modal offers organization gk_admin");
+      // Recipients of the later delegated grants become existing Org A members first.
+      for (const legacyId of [USERS.opsRecipient, USERS.revRecipient]) {
+        const mark = superGkPage.mark();
+        await superGkPage.modalGrant(email(legacyId), "client_contributor");
+        await superGkPage.waitFor(async () => Boolean(await superGkPage.accessRowText(legacyId)), `roster row ${legacyId}`);
+        await superGkPage.idle();
+        assert.deepEqual(writes(superGkPage.requestsSince(mark)), [["POST", `${membershipPath(ORG_A, legacyId)}/roles`, 200]]);
+      }
+      const before = await allKaiCounts();
+      let mark = superGkPage.mark();
+      await superGkPage.modalGrant(email(USERS.newGkAdmin), "gk_admin");
+      await superGkPage.waitFor(async () => /gk_admin/.test(await superGkPage.accessRowText(USERS.newGkAdmin) || ""), "the new administrator's roster row");
+      await superGkPage.idle();
+      assert.ok(superGkPage.requestsSince(mark).some((r) => r.method === "GET" && pathOf(r) === "/api/admin/users/lookup" && r.status === 200), "exact-email recipient lookup");
+      assert.deepEqual(writes(superGkPage.requestsSince(mark)), [["POST", `${membershipPath(ORG_A, USERS.newGkAdmin)}/roles`, 200]]);
+      assert.deepEqual(changedTables(before, await allKaiCounts()), ["audit_events", "organization_memberships"]);
+      assert.deepEqual(await activeRolesOf("newGkAdmin"), ["gk_admin"]);
+      const row = await superGkPage.accessRowText(USERS.newGkAdmin);
+      assert.ok(/Grant gk_reviewer/.test(row) && /Grant gk_operator/.test(row), "the modal's global-role controls");
+      assert.ok(!/Grant gk_admin/.test(row), "the modal deliberately offers no global gk_admin control");
+
+      // The organization half alone does not delegate administration.
+      await newGkAdminPage.goto("/impact-library");
+      await newGkAdminPage.waitForText("Knowledge Studio");
+      const orgOnly = await newGkAdminPage.fetchJson("GET", accessCapabilitiesPath(ORG_A));
+      assert.deepEqual([orgOnly.status, orgOnly.data.internalKnowledgeWorkspace, orgOnly.data.organizationAccessManagement], [200, true, false]);
+
+      // No one but the platform superuser may assign global gk_admin.
+      for (const [label, page] of [["delegated GK administrator", gkDelegatePage], ["client administrator", await session(USERS.storedAdmin)],
+        ["ordinary member", await session(USERS.memberA)], ["the recipient (self)", newGkAdminPage]]) {
+        const refusedBefore = await allKaiCounts();
+        const refused = await page.fetchJson("PUT", globalRolePath(USERS.newGkAdmin), { role_name: "gk_admin", action: "assign" });
+        assert.deepEqual([refused.status, refused.errorCode, refused.blockingReason], [403, "authorization_denied", "platform_superuser_required"], label);
+        assert.deepEqual(changedTables(refusedBefore, await allKaiCounts()), [], `${label}: nothing written`);
+      }
+      // The /admin page itself is the existing ensureAdmin gate.
+      await newGkAdminPage.goto("/admin?tab=organizations");
+      assert.equal(await newGkAdminPage.pathname(), "/", "a non-superuser is redirected away from /admin");
+
+      mark = superGkPage.mark();
+      const assigned = await superGkPage.fetchJson("PUT", globalRolePath(USERS.newGkAdmin), { role_name: "gk_admin", action: "assign" });
+      assert.equal(assigned.status, 200, JSON.stringify(assigned));
+      assert.deepEqual(await globalRolesOf("newGkAdmin"), ["gk_admin"]);
+      const audits = (await auditRowsOf("superGk")).filter((a) => a.metadata?.target_user_id === kaiUserIds.newGkAdmin);
+      assert.deepEqual(audits.map((a) => [a.action, a.metadata.role_name, a.metadata.authority_source]), [
+        ["organization_role_granted_access_admitted", "gk_admin", "platform_superuser"],
+        ["global_kai_role_assigned", "gk_admin", "platform_superuser"],
+      ]);
+      await openAdminKaiAccess(superGkPage);
+      assert.match(await superGkPage.accessRowText(USERS.newGkAdmin), /gk_admin/, "roster readback shows the role");
+      // The global role reaches no organization without membership there.
+      const orgB = await newGkAdminPage.fetchJson("GET", accessCapabilitiesPath(ORG_B));
+      assert.deepEqual([orgB.status, orgB.blockingReason], [403, "missing_active_organization_membership"]);
+      results.J9_1 = "PASS: modal org gk_admin + governed global gk_admin; four refused global attempts; /admin redirect; no Org B access";
+    });
+
+    await test("J9-2: the new administrator signs in, is offered Team & Access, grants organization gk_operator and gk_reviewer to existing members through it, and every out-of-scope grant is refused", async () => {
+      await newGkAdminPage.goto("/impact-library");
+      await newGkAdminPage.waitForText("Knowledge Studio");
+      const access = await newGkAdminPage.fetchJson("GET", accessCapabilitiesPath(ORG_A));
+      assert.equal(access.data.organizationAccessManagement, true, "effective on the next request after the global grant");
+      await newGkAdminPage.clickNav("Team & Access");
+      for (const [legacyId, key, role] of [[USERS.opsRecipient, "opsRecipient", "gk_operator"], [USERS.revRecipient, "revRecipient", "gk_reviewer"]]) {
+        await newGkAdminPage.waitFor(async () => /Contributor/.test(await memberRowText(newGkAdminPage, rowKeyOf(legacyId)) || ""), `row ${legacyId}`);
+        await newGkAdminPage.idle();
+        await newGkAdminPage.setSelectWhere(`() => document.getElementById("gk-team-access-add-role-legacy-${legacyId}")`, role);
+        const before = await allKaiCounts();
+        const mark = newGkAdminPage.mark();
+        await clickMemberButton(newGkAdminPage, rowKeyOf(legacyId), "Add role");
+        await newGkAdminPage.waitFor(() => memberHasRoleBadge(newGkAdminPage, rowKeyOf(legacyId), role), `${role} badge`);
+        await newGkAdminPage.idle();
+        assert.deepEqual(writes(newGkAdminPage.requestsSince(mark)), [["POST", `${membershipPath(ORG_A, legacyId)}/roles`, 200]]);
+        assert.deepEqual(changedTables(before, await allKaiCounts()), ["audit_events", "organization_memberships"]);
+        assert.deepEqual(await activeRolesOf(key), ["client_contributor", role].sort(), `${role}: the client role is kept`);
+        assert.deepEqual(await activeRolesOf(key, ORG_B), [], `${role}: no other organization`);
+        const [audit] = (await auditRowsOf("newGkAdmin")).slice(-1);
+        assert.deepEqual([audit.action, audit.metadata.role_name, audit.metadata.authority_source, audit.metadata.target_user_id],
+          ["organization_role_granted", role, "delegated_gk_admin", kaiUserIds[key]]);
+      }
+      const selfRow = await memberRowText(newGkAdminPage, rowKeyOf(USERS.newGkAdmin));
+      assert.ok(selfRow && !/Add role/.test(selfRow), "no Add role on the administrator's own row");
+      const refusedBefore = await allKaiCounts();
+      for (const [label, method, path, body, reason] of [
+        ["organization gk_admin", "POST", `${membershipPath(ORG_A, USERS.revRecipient)}/roles`, { role_name: "gk_admin" }, "organization_role_not_administrable"],
+        ["a client role", "POST", `${membershipPath(ORG_A, USERS.revRecipient)}/roles`, { role_name: "client_reviewer" }, "organization_role_not_administrable"],
+        ["self-elevation", "POST", `${membershipPath(ORG_A, USERS.newGkAdmin)}/roles`, { role_name: "gk_reviewer" }, "self_role_elevation_not_allowed"],
+        ["another organization", "POST", `${membershipPath(ORG_B, USERS.memberB)}/roles`, { role_name: "gk_operator" }, "missing_active_organization_membership"],
+        ["a global role", "PUT", globalRolePath(USERS.revRecipient), { role_name: "gk_reviewer", action: "assign" }, "platform_superuser_required"],
+      ]) {
+        const refused = await newGkAdminPage.fetchJson(method, path, body);
+        assert.deepEqual([refused.status, refused.errorCode, refused.blockingReason], [403, "authorization_denied", reason], label);
+      }
+      assert.deepEqual(changedTables(refusedBefore, await allKaiCounts()), [], "refused grants write nothing");
+      assert.deepEqual(newGkAdminPage.exceptions, []);
+      results.J9_2 = "PASS: Team & Access grants gk_operator, gk_reviewer (delegated_gk_admin audit); five refusals, zero writes";
+    });
+
+    let j9Draft = null;
+    await test("J9-3: effective product access in Org A follows each operation's own contract for the administrator, the operator, and the reviewer; Org B stays closed", async () => {
+      const matrix = {};
+      for (const [key, page] of [["newGkAdmin", newGkAdminPage], ["opsRecipient", opsPage], ["revRecipient", revPage]]) {
+        await page.goto("/impact-library");
+        await page.waitForText("Knowledge Studio");
+        matrix[key] = { orgA: await surfaceStatuses(page, ORG_A), orgB: await surfaceStatuses(page, ORG_B) };
+        const capabilities = (await page.fetchJson("GET", accessCapabilitiesPath(ORG_A))).data;
+        const cockpit = (await page.fetchJson("GET", cockpitCapabilitiesPath(ORG_A))).data;
+        matrix[key].actions = {
+          gkWorkspace: capabilities.internalKnowledgeWorkspace, teamAccess: capabilities.organizationAccessManagement,
+          projectManagement: capabilities.projectManagement, sourceReview: cockpit.can_review_source_candidates,
+          sensitivityReview: cockpit.can_manage_sensitivity_review, ...capabilities.workflowOperations,
+        };
+      }
+      console.log(`[campaign] J9-3 access matrix: ${JSON.stringify(matrix)}`);
+      const ALL_OK = { organizations: true, capabilities: 200, projects: 200, dataSources: 200, evidenceLibrary: 200, claimLibrary: 200,
+        reviewQueue: 200, eligibleClaims: 200, requirements: 200, impactFacts: 200 };
+      // Administrator (global + organization gk_admin).
+      assert.deepEqual(matrix.newGkAdmin.orgA, { ...ALL_OK, cockpitCapabilities: "200:true/true", teamAccessRoster: 200, sourceReviewQueue: 200,
+        generatedDrafts: 200, boardReporting: 200, grantResponsePacket: 200 });
+      // Operator (organization gk_operator + client_contributor, no global role):
+      // the source cockpit needs a global GK role (Decision A, held); drafts and
+      // reporting packets are gk_admin/gk_reviewer reads.
+      assert.deepEqual(matrix.opsRecipient.orgA, { ...ALL_OK, cockpitCapabilities: "200:false/false", teamAccessRoster: 403, sourceReviewQueue: 403,
+        generatedDrafts: 403, boardReporting: 403, grantResponsePacket: 403 });
+      // Reviewer (organization gk_reviewer + client_contributor, no global role).
+      assert.deepEqual(matrix.revRecipient.orgA, { ...ALL_OK, cockpitCapabilities: "200:false/false", teamAccessRoster: 403, sourceReviewQueue: 403,
+        generatedDrafts: 200, boardReporting: 200, grantResponsePacket: 200 });
+      for (const key of ["newGkAdmin", "opsRecipient", "revRecipient"]) {
+        const { organizations, cockpitCapabilities, ...closed } = matrix[key].orgB;
+        assert.equal(organizations, false, `${key}: Org B is not discovered`);
+        assert.equal(cockpitCapabilities, "200:false/false", `${key}: no Org B review capability`);
+        assert.ok(Object.values(closed).every((status) => status === 403), `${key}: every Org B surface is refused: ${JSON.stringify(closed)}`);
+      }
+      const pick = (actions) => [actions.gkWorkspace, actions.teamAccess, actions.sourceReview, actions.recordEvidenceReview, actions.recordClaimReview,
+        actions.extractEvidence, actions.generateDrafts, actions.reviewGeneratedDrafts, actions.readGeneratedDrafts, actions.acceptCoverageLimitation];
+      //                                      ws    team   src    evRev  clRev  extr   gen    revDr  readDr cov
+      assert.deepEqual(pick(matrix.newGkAdmin.actions), [true, true, true, true, true, true, true, true, true, false]);
+      assert.deepEqual(pick(matrix.opsRecipient.actions), [true, false, false, false, false, true, true, false, false, false]);
+      assert.deepEqual(pick(matrix.revRecipient.actions), [true, false, false, true, true, true, true, true, true, true]);
+      // Project creation/change: organization gk_admin, gk_operator, or client_admin (existing contract).
+      assert.deepEqual([matrix.newGkAdmin.actions.projectManagement, matrix.opsRecipient.actions.projectManagement, matrix.revRecipient.actions.projectManagement],
+        [true, true, false]);
+
+      // The administrator's GK Studio presents the organization's GK work
+      // with Project selection, the Evidence tab, and the Reviews tab.
+      await openKnowledgeStudio(newGkAdminPage);
+      await newGkAdminPage.selectProject(PROJECT_A);
+      await newGkAdminPage.clickTab("Evidence");
+      await newGkAdminPage.idle();
+      assert.ok(await newGkAdminPage.evaluate(`Boolean(document.querySelector("li.list-group-item[data-evidence-item-id]"))`), "evidence items are listed");
+      await newGkAdminPage.clickTab("Reviews");
+      await newGkAdminPage.idle();
+      assert.ok((await newGkAdminPage.text()).includes("Source review"), "source review work is discoverable");
+
+      // A generated draft. Every generation route calls an external model, so
+      // this runner writes the generator's output rows (draft, block,
+      // citation of an internally eligible claim, OPEN review item) - no
+      // grant, approval, or review decision. Then who may discover and read it.
+      const eligible = await newGkAdminPage.fetchJson("GET", SURFACES.eligibleClaims(ORG_A));
+      const [eligibleClaim] = eligible.data?.eligibleClaims || [];
+      assert.ok(eligibleClaim?.claimId && eligibleClaim?.evidenceItemId, "the campaign has an internally eligible claim (P3-D)");
+      const j9Ids = { run: "29000000-0000-4000-8000-0000000d0901", draft: "29000000-0000-4000-8000-0000000d0902", block: "29000000-0000-4000-8000-0000000d0903",
+        citation: "29000000-0000-4000-8000-0000000d0904", queue: "29000000-0000-4000-8000-0000000d0905" };
+      await query(`INSERT INTO kai.generation_runs (generation_run_id, organization_id, engagement_id, idempotency_key, request_fingerprint, content_type, requested_audience, created_by_type)
+                   VALUES ($1::uuid, $2::uuid, $3::uuid, 'j9-draft', $4, 'evidence_summary', 'internal', 'system')`, [j9Ids.run, ORG_A, PROJECT_A, "9".repeat(64)]);
+      await query(`INSERT INTO kai.generated_content_drafts (generated_content_draft_id, generation_run_id, organization_id, content_type, requested_audience, draft_status,
+                     review_status, validator_results, created_by_type)
+                   VALUES ($1::uuid, $2::uuid, $3::uuid, 'evidence_summary', 'internal', 'draft', 'needs_gk_review', '[]'::jsonb, 'system')`, [j9Ids.draft, j9Ids.run, ORG_A]);
+      await query("INSERT INTO kai.generated_content_blocks (generated_content_block_id, generated_content_draft_id, organization_id, ordinal, text) VALUES ($1::uuid, $2::uuid, $3::uuid, 1, $4)",
+        [j9Ids.block, j9Ids.draft, ORG_A, "Synthetic J9 evidence summary sentence."]);
+      await query(`INSERT INTO kai.generated_content_citations (generated_content_citation_id, generated_content_block_id, organization_id, claim_id, evidence_item_id)
+                   VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5::uuid)`, [j9Ids.citation, j9Ids.block, ORG_A, eligibleClaim.claimId, eligibleClaim.evidenceItemId]);
+      await query(`INSERT INTO kai.review_queue_items (review_queue_item_id, organization_id, queue_type, target_object_type, target_object_id, priority, queue_status,
+                     review_status, assigned_to, due_at, summary, required_action, queue_metadata, created_by_type)
+                   VALUES ($1::uuid, $2::uuid, 'generated_content_review', 'generated_content_draft', $3::uuid, 'medium', 'open', 'needs_gk_review', NULL, NULL,
+                     'Generated draft requires human review.', 'Review citations, audience eligibility, limitations, unsupported claims, and numeric or causal assertions before any use.', '{}'::jsonb, 'system')`,
+        [j9Ids.queue, ORG_A, j9Ids.draft]);
+      j9Draft = j9Ids.draft;
+      const packetPath = `${INTAKE}/admin/organizations/${ORG_A}/generated-content-drafts/${j9Draft}/review-packet`;
+      const draftReads = {};
+      for (const [key, page] of [["newGkAdmin", newGkAdminPage], ["opsRecipient", opsPage], ["revRecipient", revPage]]) {
+        const library = await page.fetchJson("GET", SURFACES.generatedDrafts(ORG_A));
+        const packet = await page.fetchJson("GET", packetPath);
+        draftReads[key] = { library: library.status, listed: JSON.stringify(library.data ?? {}).includes(j9Draft), packet: packet.status,
+          cites: JSON.stringify(packet.data ?? {}).includes(eligibleClaim.claimId) };
+      }
+      console.log(`[campaign] J9-3 draft reads: ${JSON.stringify(draftReads)}`);
+      assert.deepEqual(draftReads, {
+        newGkAdmin: { library: 200, listed: true, packet: 200, cites: true },
+        opsRecipient: { library: 403, listed: false, packet: 403, cites: false },
+        revRecipient: { library: 200, listed: true, packet: 200, cites: true },
+      });
+      const otherOrgPacket = await newGkAdminPage.fetchJson("GET", `${INTAKE}/admin/organizations/${ORG_B}/generated-content-drafts/${j9Draft}/review-packet`);
+      assert.equal(otherOrgPacket.status, 403, "the draft is not readable through another organization");
+      // Reading a draft confers no decision: nothing is reviewed or released.
+      const [draftRow] = await query("SELECT review_status FROM kai.generated_content_drafts WHERE generated_content_draft_id = $1::uuid", [j9Draft]);
+      assert.equal(draftRow.review_status, "needs_gk_review");
+      // Each actor's own navigation through the product: every request the UI
+      // itself makes is authorized and succeeds (no 401/403/5xx probing),
+      // with no page exceptions.
+      const navigation = {};
+      for (const [key, page] of [["newGkAdmin", newGkAdminPage], ["opsRecipient", opsPage], ["revRecipient", revPage]]) {
+        const mark = page.mark();
+        await page.goto("/impact-library");
+        await page.waitForText("Knowledge Studio");
+        for (const nav of ["Home", "Impact Library", "Projects", "Knowledge Studio"]) {
+          await page.clickNav(nav);
+          await page.idle();
+        }
+        await page.selectProject(PROJECT_A);
+        await page.idle();
+        for (const tab of ["Files", "Processing", "Evidence", "Gaps", "Reviews"]) {
+          await page.clickTab(tab);
+          await page.idle();
+        }
+        const appRequests = page.requestsSince(mark).filter((r) => pathOf(r).startsWith("/api/"));
+        // The one expected non-2xx read: P2-06 traceability of a claim whose
+        // P2-04 gap state does not exist yet fails closed with 409 (Prompt 2).
+        const legitimate = (r) => r.status === 409 && /\/claims\/[^/]+\/traceability$/.test(pathOf(r));
+        navigation[key] = {
+          requests: appRequests.length,
+          failed: appRequests.filter((r) => r.status >= 400 && !legitimate(r)).map((r) => [r.method, pathOf(r), r.status]),
+          packetReads: appRequests.filter((r) => /\/(grant-response-packet|board-reporting)$/.test(pathOf(r))).length,
+        };
+        assert.deepEqual(page.exceptions, [], `${key}: no page exceptions`);
+      }
+      console.log(`[campaign] J9-3 navigation: ${JSON.stringify(navigation)}`);
+      for (const [key, value] of Object.entries(navigation)) {
+        assert.deepEqual(value.failed, [], `${key}: the UI makes only authorized, successful requests`);
+      }
+      assert.equal(navigation.opsRecipient.packetReads, 0, "the operator's UI does not request the reporting packets it may not read");
+      assert.ok(navigation.revRecipient.packetReads > 0 && navigation.newGkAdmin.packetReads > 0, "readers' UIs load the reporting packets");
+      results.J9_3 = { matrix, draftReads, navigation };
+    });
+
+    await test("J9-4: the administrator removes only the reviewer's organization gk_reviewer in Team & Access, and the superuser revokes the administrator's global gk_admin; the next requests enforce both", async () => {
+      await newGkAdminPage.goto("/impact-library");
+      await newGkAdminPage.waitForText("Knowledge Studio");
+      await newGkAdminPage.clickNav("Team & Access");
+      const key = rowKeyOf(USERS.revRecipient);
+      await newGkAdminPage.waitFor(() => memberHasRoleBadge(newGkAdminPage, key, "gk_reviewer"), "the reviewer's active role");
+      await newGkAdminPage.idle();
+      let mark = newGkAdminPage.mark();
+      await clickMemberButton(newGkAdminPage, key, "Remove Get Kinder reviewer role");
+      await newGkAdminPage.waitFor(async () => /keeps their other roles/.test(await memberRowText(newGkAdminPage, key) || ""), "the confirmation");
+      await clickMemberButton(newGkAdminPage, key, "Confirm removing Get Kinder reviewer");
+      await newGkAdminPage.waitFor(async () => !(await memberHasRoleBadge(newGkAdminPage, key, "gk_reviewer")), "the inactive assignment");
+      await newGkAdminPage.idle();
+      assert.deepEqual(writes(newGkAdminPage.requestsSince(mark)), [["POST", `${membershipPath(ORG_A, USERS.revRecipient)}/roles/gk_reviewer/revoke`, 200]]);
+      assert.deepEqual(await activeRolesOf("revRecipient"), ["client_contributor"], "only the revoked role ended");
+      const revCapabilities = (await revPage.fetchJson("GET", accessCapabilitiesPath(ORG_A))).data;
+      assert.deepEqual([revCapabilities.internalKnowledgeWorkspace, revCapabilities.workflowOperations.recordEvidenceReview], [false, false]);
+      assert.equal((await revPage.fetchJson("GET", SURFACES.evidenceLibrary(ORG_A))).status, 403, "GK evidence reads end with the role");
+      assert.equal((await revPage.fetchJson("GET", SURFACES.projects(ORG_A))).status, 200, "the client role still selects Projects");
+      assert.deepEqual(await activeRolesOf("opsRecipient"), ["client_contributor", "gk_operator"], "the operator's grant is untouched");
+
+      mark = superGkPage.mark();
+      const revoked = await superGkPage.fetchJson("PUT", globalRolePath(USERS.newGkAdmin), { role_name: "gk_admin", action: "revoke" });
+      assert.equal(revoked.status, 200);
+      assert.deepEqual(await globalRolesOf("newGkAdmin"), []);
+      const after = await newGkAdminPage.fetchJson("GET", accessCapabilitiesPath(ORG_A));
+      assert.deepEqual([after.data.organizationAccessManagement, after.data.internalKnowledgeWorkspace], [false, true],
+        "delegated administration ends; the organization gk_admin keeps its own GK workspace");
+      const before = await allKaiCounts();
+      const refused = await newGkAdminPage.fetchJson("POST", `${membershipPath(ORG_A, USERS.revRecipient)}/roles`, { role_name: "gk_reviewer" });
+      assert.deepEqual([refused.status, refused.errorCode], [403, "authorization_denied"]);
+      assert.equal((await newGkAdminPage.fetchJson("GET", SURFACES.teamAccessRoster(ORG_A))).status, 403);
+      assert.deepEqual(changedTables(before, await allKaiCounts()), [], "the refused grant writes nothing");
+      assert.deepEqual(await activeRolesOf("newGkAdmin"), ["gk_admin"], "the stored organization assignment is unchanged");
+      assert.deepEqual(newGkAdminPage.exceptions, []);
+      results.J9_4 = "PASS: targeted revoke (reviewer) and global revoke (administrator) enforced on the next requests";
     });
   } finally {
     console.log(`[campaign] RESULTS ${JSON.stringify(results, null, 2)}`);
