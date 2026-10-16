@@ -39469,3 +39469,130 @@ No push, deployment, production/shared database, migration/schema, feature
 flag, credential, tenant, production role, destructive action, or
 `00_KAI_CURRENT_STATE.md` change. This is the single package-end evidence
 update in the living ExecPlan.
+
+### Connected human review, Review Queue, Decision C and workflow integrity (2026-10-16)
+
+**Owner authorization (USER_CONFIRMED):** the owner's Execution Prompt 2
+authorizes local synthetic implementation and integrated acceptance of the
+connected authorization-to-action chain from the P1-06 sensitivity decision
+through the separate human claim decision, consuming the Prompt 1 package
+unchanged. No production role change, review decision, historical recovery,
+deployment, policy change, or v0.2 review-flow simplification.
+
+**Start (TOOL_VERIFIED):** `main` at `7eadaf3`, clean.
+
+**Connected chain already proven (TOOL_VERIFIED, reused, not re-implemented):**
+- Over real HTTP on one file in the approval-to-action campaign: J2-4
+  (browser sensitivity decision, P1-07 candidate created) -> J5-1 (GK Studio
+  P1-08 promotion, one current source_version, two evidence items with open
+  `evidence_review` items) -> J5-2 (identical replay, zero writes, one
+  current source_version) -> J5-6 (P2-12 in the Evidence UI) -> J5-7 / J3-3
+  (Decision C continuation creates one internal-only proposed claim and open
+  `claim_review`; a separate reviewer records the claim decision). The only
+  non-HTTP precondition is P1-06 review work through its real service.
+- Decision C at service level (PostgreSQL, 16/0): direct P2-02/P2-03 refused
+  `role_not_allowed`; forged markers, other item/organization/human,
+  superseded, revoked, stale lineage and non-human refusals; zero-write
+  replay; failed-continuation recovery and concurrent recovery converging on
+  one claim, link, queue item and audit; `not_supported` -> `not_applicable`;
+  allowed-use `not_allowed` -> blocked.
+
+**Materially unproven boundaries found and closed:**
+1. *Stage B/C, separate claim decision through the UI.* No browser test used
+   the claim-review control; J3-3/J5-7 POST it directly. Reproduced
+   (TOOL_VERIFIED, real Chrome): a separate GK reviewer discovers the
+   pending claim review, but for a fresh proposal P2-06 traceability returns
+   409 `gap_dimension_requires_missing_p204_state` until P2-04 gap state
+   exists; the page showed only "Current resource state changed.", no
+   decision form, "View claim" on the already-selected claim issued no
+   re-read, and "Generate gap followups" did not re-read traceability.
+   Repair (frontend only; no policy change): the server's sanitized
+   `traceability_conflict_reason` is shown (`traceabilityUnavailableMessage`:
+   a missing P2-04 prerequisite is named, with who may supply it); View claim
+   re-reads; a successful P2-04 run re-reads traceability and the Review
+   Queue. The existing order (P2-04 before the traceability-gated claim form)
+   is preserved.
+2. *Stage D, a 200 hiding a failed continuation.* The GK Studio sensitivity
+   card reported "Review recorded." for every 200 and never read
+   `source_candidate_handoff` (the client panel already did). It now reports
+   the handoff as returned (`sensitivityDecisionResultText`): completed,
+   `not_created` with its code, or unavailable.
+3. *Allowed-use blocker indistinguishable.* P2-02's permission gate returned
+   a bare `validation_blocker` for a committed allowed-use `not_allowed`
+   source, identical to lineage/promotion failures; the Decision C handoff
+   therefore reported `blocking_reason: null` and the reviewer saw only
+   "(validation_blocker)". The gate now names `VAL-KAI-P2-02-000` /
+   `allowed_use_not_allowed` (metadata only). It is forwarded by the direct
+   P2-02 entry and the decision-bound continuation (shared function) and by
+   the sibling P2-04 gap generation (same gate; repository and service now
+   forward blockers). Lineage refusals are unchanged.
+
+**New and extended proof:**
+- `kai-reviewed-evidence-claim-proposal` browser case 11: Stage A (Reviews
+  lists the claim review), Stage B (409 shown as the P2-04 prerequisite, no
+  form), the existing P2-04 control, traceability 200, Stage C (approved,
+  internal, through the rendered control: one 200 POST), Stage D (one
+  `claim_review_decisions` row by the second reviewer `gk_reviewer`,
+  different from the proposer; claim `reviewed`, queue resolved; no
+  funder/public/export widening); a stale replay is 409 with no second
+  decision. Red before repair: timed out after the generic message.
+- Case 12: a positive P2-12 decision in the Evidence UI on an allowed-use
+  `not_allowed` source returns 200 with `not_created` / `blocked` /
+  `validation_blocker` / `allowed_use_not_allowed`, the UI says the decision
+  is recorded and no claim was proposed, one decision and no claim are
+  written, and an identical retry replays P2-12 (`replayed: true`),
+  re-attempts and re-blocks the continuation, and writes nothing.
+- `kai-sensitivity-review-reachability` case 3 now asserts the completed
+  handoff line; new case 13A proves the GK card reports an uncreated source
+  candidate (red before repair: the card showed "Review recorded.").
+- Unit: traceability message and sensitivity result-line helpers; named
+  allowed-use blocker in P2-02 gate/service and P2-04 validator/service.
+  PostgreSQL pins (P2-03 reviewed-evidence, J3-3) now assert the reason.
+
+**Outcomes (TOOL_VERIFIED, local synthetic):** eligible chain completes with
+human attribution at every decision and `authority_source:
+evidence_review_decision` on the proposal; blocked continuation returns an
+accurate committed-but-not-continued state; unauthorized direct P2-02/P2-03,
+P1-08 for mixed client roles, operator review, client and non-human actors
+are refused with structured codes and no writes (existing suites).
+
+**Error taxonomy coverage:** route/browser level for `unauthorized`
+(review-queue status, P2-03 routes), `authorization_denied`/`role_not_allowed`,
+tenant mismatch (J7-3), not actionable (`state_transition_denied`), stale
+(`conflict_current_state_changed`), allowed-use `validation_blocker` (now
+named), committed-but-incomplete continuations for P1-07, P2-01 and Decision C,
+and completed/replayed continuations. Service/middleware level only:
+`mapped_kai_user_required` on review routes, absent queue item `not_found`.
+Review routes take no Project parameter, so invalid Project does not apply
+to them.
+
+**Verification (TOOL_VERIFIED; sentinel `DATABASE_URL`; runner-owned loopback
+PostgreSQL; real Chrome; synthetic data):**
+- `test:kai-sprint2` 4816/0/90; `npm test` 5539/0/105; API contract 71/0.
+- PostgreSQL: P2-01 handoff 7/0, P2-12 no-claim 11/0, P2-03
+  reviewed-evidence 17/0, Decision C 16/0, P1-07 handoff 22/0, P1-08 19/0,
+  P2-02 7/0, P2-03 15/0, P2-04 18/0, P2-12 ledger 24/0.
+- Browser (11 suites, 142/0): campaign 48, edges 11, provisioning 13, P2-01
+  7, Team & Access 7, sensitivity 17, P2-12 11, reviewed-evidence 12,
+  evidence pipeline 7, Knowledge Studio 6, rehydration 3.
+- `npm run build` twice: `entry.js` SHA-256
+  `b9ca7eb8333c824a427f6d7daa9c6f50c0c34137657afc54ab58efd8b1b738f0`.
+  `git diff --check` clean; complete diff inspected.
+
+**Open (not changed):** whether claim review should require P2-04 gap state
+first (backend P2-12 accepts it without; the UI form needs readable P2-06
+traceability) is an owner decision; the same human may still propose and
+approve a claim; Decisions A and D held.
+
+**Production evidence carried forward (USER_CONFIRMED by owner results;
+not reproduced or touched):** F17 has an open source-review item; F14-F16
+have reviewed sensitivity decisions without corresponding candidates; the F17
+sensitivity actor is not automatically the intended GK reviewer. Live
+acceptance, historical reconciliation, production roles and deployment are
+NOT_CONFIRMED.
+
+**Status:** CONNECTED_REVIEW_CHAIN_ACCEPTANCE_COMPLETE_LOCAL_SYNTHETIC. No
+push, deployment, production/shared database, migration/schema, flag,
+credential, tenant, production role, review decision, destructive action, or
+`00_KAI_CURRENT_STATE.md` change. This is the single package-end evidence
+update in the living ExecPlan.
