@@ -39734,3 +39734,114 @@ No push, deployment, production/shared database, migration/schema, flag,
 credential, tenant, production role, review decision, destructive action, or
 `00_KAI_CURRENT_STATE.md` change. This is the single package-end evidence
 update in the living ExecPlan.
+
+### Team & Access as the KAI permissions administration interface (2026-10-16)
+
+**Owner decision and authorization (USER_CONFIRMED):** Prompt 4 makes
+`/impact-library` -> Team & Access the canonical KAI permissions interface for
+client administrators, delegated GK administrators and platform
+superusers, and directs global `gk_admin` grant/revocation there. This
+resolves Prompt 3 decision 1. `/admin` keeps its existing functions. No
+production, deployment, schema, flag or policy change is authorized.
+
+**Start (TOOL_VERIFIED):** `main` at `6eb15de`, clean; `7fb2cd9`, `e057619`,
+`7eadaf3` ancestors.
+
+**Implementation (no new writer, role, or bypass):**
+- Administration context (new read, superuser-only):
+  `GET /api/kai/sprint2/access-administration/administration-context` ->
+  `getAccessAdministrationContext` (`validateActorCanPerformPlatformOperation`,
+  operation `view_platform_access_administration`) -> organization ids and
+  names; every other actor gets 200 `platform_administration: false`.
+  Query `listOrganizationsForPlatformAdministration` (`kai.organizations`
+  `organization_id, name`, production catalog columns).
+- Roster readback (`viewEffectiveKaiAccess`): administrators of Get Kinder
+  roles (platform superuser, delegated GK administrator) also receive each
+  person's `operation_readiness`; only a superuser receives
+  `global_kai_roles` and `assignable_global_roles`; client administrators
+  see the roster unchanged.
+- `computeOrganizationOperationReadiness` (capabilities service): twelve
+  operations, each the governing service's own exported role set evaluated
+  by the shared validator in that operation's mode (organization, global,
+  combined), with sensitivity review using
+  `validateActorCanPerformSensitivityReview`. Each unmet clause names its
+  scope, roles and grantor (global: platform superuser; organization
+  gk_operator/gk_reviewer: also delegated GK administrator). Categories
+  separate read, process, decide, export and administer; content gates and
+  human decisions are stated as still applying.
+- Team & Access UI: superuser-only Platform administration section
+  (organization selector from the context, add an existing account by exact
+  email through the existing superuser lookup and additive grant), a global
+  role block per person (current global roles shown separately from
+  organization assignments; grant with the role's explanation, gk_admin
+  marked high-risk with export/final-release/funder-public-ready authority,
+  explicit confirmation; confirmed revocation) through the existing
+  `PUT .../global-roles/:id`; a readiness panel for people with Get Kinder
+  assignments; after an organization grant, a handoff notice naming the
+  operations still blocked only by a missing global role and that a
+  platform administrator must assign it. Shell: Team & Access is offered to
+  a platform superuser with or without memberships; its organization choice
+  selects only the roster, and content views keep the membership-based
+  selection.
+
+**Acceptance (campaign J10, real Chrome, `/impact-library` -> Team & Access):**
+- J10-1 client administrator: members, derived administrator shown as
+  derived, client role descriptions; no platform, global or readiness
+  controls; server refuses a global grant, a GK grant and another
+  organization's roster; nothing written.
+- J10-2 platform superuser with no Org B membership: administers Org B's
+  roster (the only Org B request is the roster read); adds an existing
+  account to Org A as organization gk_admin by exact email; readiness shows
+  delegated administration incomplete; grants global gk_admin after the
+  explanation and confirmation (one PUT); readiness completes; audits
+  attributable and metadata-only.
+- J10-3 delegated GK administrator: no platform/global controls or self
+  Add role; grants gk_operator and gk_reviewer in Team & Access with the
+  handoff notice; readiness shows source review incomplete and evidence
+  review ready for the organization reviewer; global, self, other
+  organization and organization gk_admin attempts refused with no writes.
+- J10-4/7: the operator's source review is 403 until the superuser grants
+  global gk_operator in Team & Access, then 200 with the capability true;
+  readiness matches the reviewer's actual reads (workspace, drafts, source
+  queue) and capabilities (evidence review, coverage acceptance).
+- J10-5: confirmed global revocation enforced on the next request with the
+  organization role kept; delegated targeted revocation removes the
+  operator role with the client role and other members intact.
+- J10-8: unknown recipient email and an unknown recipient id refused with
+  nothing written; non-superusers' context is false; access-administration
+  audit metadata contains no email.
+
+**Pre-existing finding, held (Decision D), not changed:** J10-2 measured that
+a site superuser without an Org B membership already receives 200 from Org B
+evidence library, claim library, generated drafts, sources, review queue and
+access capabilities (Projects 403), before and after using Team & Access
+(identical). This is the accepted 2026-08-22 platform-superuser rule on
+full-request routes. Team & Access adds none of it, but Prompt 4's
+requirement that platform administrators not gain unrestricted client data
+conflicts with that accepted rule; an owner decision is required to restrict
+it.
+
+**Tests:** cross-organization spec +4 (context authorization; readiness ==
+real predicates for 7 actors x 3 organizations; roster readback per viewer
+and the incomplete-operator handoff; global-role request rules and server
+refusals). Updated source pins: Team & Access wiring (`kai-team-access`),
+the Knowledge Studio network allowlist (the context probe). The modal's
+"never grants global gk_admin" pin stays (the modal is unchanged).
+
+**Verification (TOOL_VERIFIED):** `test:kai-sprint2` 4822/0/90; `npm test`
+5545/0/105; API contract 71/0; access administration PostgreSQL 36/0;
+browser on the final bundle 152/0 (campaign 58 = 48 + J9 4 + J10 6; Team &
+Access 7, provisioning 13, edges 11, Knowledge Studio 6, sensitivity 17,
+P2-01 7, P2-12 11, reviewed-evidence 12, pipeline 7, rehydration 3);
+`npm run build` reproducible, `entry.js` SHA-256
+`c98ea6b7c2d7e527f54a4d531c76a5bfe2e0e27138b53287c43e162a60909eff`;
+`git diff --check` clean; complete diff inspected. No migration, schema,
+flag or environment dependency.
+
+**Open (owner):** Decision D superuser content reads (above); Organization B
+binding-derived + global GK content policy (unchanged); Decision A.
+
+**Status:** TEAM_ACCESS_KAI_ADMINISTRATION_COMPLETE_LOCAL_SYNTHETIC. No push,
+deployment, production/shared database, schema, flag, credential, tenant,
+production role, review decision, or `00_KAI_CURRENT_STATE.md` change. This
+is the single package-end evidence update in the living ExecPlan.
