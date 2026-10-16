@@ -1,8 +1,9 @@
 /**
  * KAI Sprint 2 Package 2: central access-administration contract.
  *
- * These three operations are the only authority surface for governed
- * role/organization-membership administration. No service may declare its
+ * These operations are the only authority surface for governed
+ * role/organization-membership administration (the fourth, Prompt 4, is the
+ * platform superuser's read-only Team & Access administration context). No service may declare its
  * own parallel role set for these operations - they are always authorized
  * through Backend/kai/auth/kaiAuthorizationService.js using exactly this
  * contract.
@@ -11,6 +12,7 @@ export const KAI_ACCESS_ADMINISTRATION_OPERATIONS = Object.freeze({
   VIEW_KAI_ACCESS: "view_kai_access",
   MANAGE_ORGANIZATION_MEMBERSHIP: "manage_organization_membership",
   MANAGE_GLOBAL_KAI_ROLE: "manage_global_kai_role",
+  VIEW_PLATFORM_ACCESS_ADMINISTRATION: "view_platform_access_administration",
 });
 
 /**

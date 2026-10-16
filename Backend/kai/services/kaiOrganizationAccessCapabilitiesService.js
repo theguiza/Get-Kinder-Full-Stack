@@ -13,7 +13,20 @@ import { __boardReportingPacketServiceContract } from "./kaiBoardReportingPacket
 import { isKaiSprint2Enabled } from "../config/kaiSprint2Config.js";
 import { KAI_SPRINT2_P0_OPERATION_ROLES, KAI_SPRINT2_P0_PATTERNS } from "../config/kaiSprint2P0Contract.js";
 import { buildKaiError } from "../errors/kaiErrors.js";
-import { validateActorCanPerformOperation, validateActorCanAccessKnowledgeWorkspace } from "../auth/kaiAuthorizationService.js";
+import {
+  KAI_KNOWLEDGE_WORKSPACE_ROLES,
+  validateActorCanPerformOperation,
+  validateActorCanAccessKnowledgeWorkspace,
+  validateActorCanPerformSensitivityReview,
+} from "../auth/kaiAuthorizationService.js";
+import { __reviewCockpitServiceContract } from "./kaiReviewCockpitService.js";
+import { __sourcePromotionServiceContract } from "./kaiSourcePromotionService.js";
+import { __exportReviewServiceContract } from "./kaiExportReviewService.js";
+import {
+  KAI_DELEGATED_GK_ADMINISTRATOR_ROLE,
+  KAI_DELEGATED_GK_ADMIN_ASSIGNABLE_ORGANIZATION_ROLES,
+  KAI_ASSIGNABLE_ORGANIZATION_ROLES,
+} from "../config/kaiAccessAdministrationContract.js";
 import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
 import { __clientFollowupReadServiceContract } from "./kaiClientFollowupReadService.js";
 import { __engagementContextServiceContract } from "./kaiEngagementContextService.js";
@@ -163,6 +176,105 @@ function workflowOperations(actorContext, organizationId) {
     ).ok === true,
   };
 }
+
+/**
+ * Team & Access readiness for one person in one organization (Prompt 4):
+ * which product operations their KAI roles admit right now, and for each
+ * that is not yet admitted, which assignment is missing and which
+ * administrator can supply it. Every clause is the governing operation's own
+ * exported role set evaluated by the shared validator in that operation's
+ * own mode: "organization" (an active organization role in the set),
+ * "global" (a global KAI role in the set, plus active organization access),
+ * or "either" (combineGlobalRoles). It grants nothing and reports only KAI
+ * role authority - not site-administrator authority, and not content
+ * eligibility (a ready decision or export operation still needs eligible
+ * content and its own human decision). `category` separates reading,
+ * deciding, administering, and export/release.
+ */
+const GLOBAL = "global";
+const ORGANIZATION = "organization";
+const EITHER = "either";
+const roleSet = (roles) => new Set(roles);
+const OPERATION_READINESS = Object.freeze([
+  { key: "gk_workspace", category: "read", operation: "read_knowledge_workspace",
+    clauses: [{ scope: EITHER, roles: roleSet(KAI_KNOWLEDGE_WORKSPACE_ROLES) }] },
+  { key: "generated_content_read", category: "read", operation: __generatedDraftLibraryServiceContract.GENERATED_DRAFT_LIBRARY_READ_OPERATION,
+    clauses: [{ scope: EITHER, roles: __generatedDraftLibraryServiceContract.GENERATED_DRAFT_LIBRARY_READ_ROLES }] },
+  { key: "evidence_processing", category: "process", operation: __evidenceLineageServiceContract.EVIDENCE_LINEAGE_OPERATION,
+    clauses: [{ scope: ORGANIZATION, roles: __evidenceLineageServiceContract.EVIDENCE_LINEAGE_ALLOWED_ROLES }] },
+  { key: "draft_generation", category: "process", operation: __generatedContentServiceContract.CREATE_EVIDENCE_SUMMARY_OPERATION,
+    clauses: [{ scope: ORGANIZATION, roles: __generatedContentServiceContract.GENERATED_CONTENT_ALLOWED_ROLES }] },
+  { key: "source_review", category: "decide", operation: __sourcePromotionServiceContract.SOURCE_PROMOTION_OPERATION,
+    clauses: [
+      { scope: GLOBAL, roles: __reviewCockpitServiceContract.REVIEW_COCKPIT_READ_ROLES },
+      { scope: ORGANIZATION, roles: __sourcePromotionServiceContract.SOURCE_PROMOTION_ALLOWED_ROLES },
+    ] },
+  { key: "sensitivity_review", category: "decide", operation: "record_sensitivity_allowed_use_decision",
+    clauses: [{ scope: GLOBAL, roles: __reviewCockpitServiceContract.REVIEW_COCKPIT_READ_ROLES }], sensitivity: true },
+  { key: "evidence_review", category: "decide", operation: __humanReviewServiceContract.RECORD_EVIDENCE_REVIEW_DECISION_OPERATION,
+    clauses: [{ scope: EITHER, roles: __humanReviewServiceContract.RECORD_EVIDENCE_REVIEW_DECISION_ALLOWED_ROLES }] },
+  { key: "claim_review", category: "decide", operation: __humanReviewServiceContract.RECORD_CLAIM_REVIEW_DECISION_OPERATION,
+    clauses: [{ scope: EITHER, roles: __humanReviewServiceContract.RECORD_CLAIM_REVIEW_DECISION_ALLOWED_ROLES }] },
+  { key: "coverage_acceptance", category: "decide", operation: __coverageReviewDecisionServiceContract.ACCEPT_INTERNAL_COVERAGE_LIMITATION_OPERATION,
+    clauses: [{ scope: ORGANIZATION, roles: __coverageReviewDecisionServiceContract.ACCEPT_INTERNAL_COVERAGE_LIMITATION_ALLOWED_ROLES }] },
+  { key: "generated_content_review", category: "decide", operation: __generatedContentServiceContract.COMPLETE_GENERATED_CONTENT_REVIEW_OPERATION,
+    clauses: [{ scope: ORGANIZATION, roles: __generatedContentServiceContract.COMPLETE_GENERATED_CONTENT_REVIEW_ALLOWED_ROLES }] },
+  { key: "export_release", category: "export", operation: __exportReviewServiceContract.COMPLETE_EXPORT_REVIEW_OPERATION,
+    clauses: [{ scope: ORGANIZATION, roles: __exportReviewServiceContract.EXPORT_REVIEW_ALLOWED_ROLES }] },
+  { key: "delegated_administration", category: "administer", operation: "manage_organization_membership",
+    clauses: [
+      { scope: ORGANIZATION, roles: roleSet([KAI_DELEGATED_GK_ADMINISTRATOR_ROLE]) },
+      { scope: GLOBAL, roles: roleSet([KAI_DELEGATED_GK_ADMINISTRATOR_ROLE]) },
+    ] },
+]);
+
+const DELEGATED_GRANTABLE = new Set(KAI_DELEGATED_GK_ADMIN_ASSIGNABLE_ORGANIZATION_ROLES);
+const CLIENT_GRANTABLE = new Set(KAI_ASSIGNABLE_ORGANIZATION_ROLES);
+
+function clauseSatisfied(actorContext, operation, organizationId, clause) {
+  const mode = clause.scope === GLOBAL ? { globalRolesOnly: true } : clause.scope === EITHER ? { combineGlobalRoles: true } : {};
+  return validateActorCanPerformOperation(actorContext, operation, organizationId, { allowedRoles: clause.roles, ...mode }).ok === true;
+}
+
+// Who can supply a missing assignment: global roles only a platform
+// superuser; organization Get Kinder roles a platform superuser, and
+// gk_operator/gk_reviewer also a delegated GK administrator; client roles an
+// organization administrator.
+function grantedBy(clause) {
+  const roles = [...clause.roles];
+  const by = ["platform_superuser"];
+  if (clause.scope !== GLOBAL && roles.some((role) => DELEGATED_GRANTABLE.has(role))) by.push("delegated_gk_admin");
+  if (clause.scope !== GLOBAL && roles.some((role) => CLIENT_GRANTABLE.has(role))) by.push("organization_client_admin");
+  return by;
+}
+
+export function computeOrganizationOperationReadiness(actorContext, organizationId) {
+  const hasActiveAccess = (actorContext?.organizationMemberships || []).some(
+    (membership) => String(membership.organization_id) === String(organizationId) && membership.membership_status === "active",
+  );
+  return OPERATION_READINESS.map((definition) => {
+    const missing = definition.clauses
+      .filter((clause) => !clauseSatisfied(actorContext, definition.operation, organizationId, clause))
+      .map((clause) => ({ scope: clause.scope, roles: [...clause.roles].sort(), granted_by: grantedBy(clause) }));
+    // Sensitivity review also admits an active binding-derived organization
+    // administrator (validateActorCanPerformSensitivityReview).
+    const ready = definition.sensitivity
+      ? validateActorCanPerformSensitivityReview(actorContext, definition.operation, organizationId,
+        __reviewCockpitServiceContract.REVIEW_COCKPIT_READ_ROLES, { globalRolesOnly: true }).ok === true
+      : missing.length === 0;
+    return {
+      key: definition.key,
+      category: definition.category,
+      ready,
+      organization_access: hasActiveAccess,
+      missing: ready ? [] : missing,
+    };
+  });
+}
+
+export const __organizationOperationReadinessContract = Object.freeze({
+  OPERATION_READINESS_KEYS: Object.freeze(OPERATION_READINESS.map((definition) => definition.key)),
+});
 
 export async function getOrganizationAccessCapabilities(input, dependencies = {}) {
   if (!isKaiSprint2Enabled(dependencies.env || process.env)) {

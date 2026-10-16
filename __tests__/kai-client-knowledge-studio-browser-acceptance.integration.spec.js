@@ -527,6 +527,11 @@ async function runBrowserAcceptance() {
     new RegExp(`^${orgPath}/engagements/[0-9a-f-]{36}/(client-funder-requirements|client-evidence-pipeline|client-generated-drafts|client-generated-drafts/[0-9a-f-]{36}|client-grant-response-packet|client-board-reporting)$`),
     new RegExp(`^${orgPath}/claims/[0-9a-f-]{36}/client-followups/[0-9a-f-]{36}/complete$`),
     new RegExp(`^/api/kai/sprint2/access-administration/organizations/${ORG}/join-requests$`),
+    // Prompt 4: the shell's Team & Access administration-context probe. For
+    // anyone but a platform superuser it answers only platform_administration
+    // false (no organization, roster, or content data) - asserted by campaign
+    // J10-1 and the cross-organization unit spec.
+    /^\/api\/kai\/sprint2\/access-administration\/administration-context$/,
   ];
   const GK_ROUTE_PATTERN = /generated-content-drafts|review-packet|generated-content-review|\/grant-response-packet|\/board-reporting|export-review|export-candidates|export-manifests|final-release|claim-library|evidence-library|eligible-claims|traceability|review-queue|\/sources|\/requirements|funder-requirements(-state)?$|review-cockpit\/queue/;
 

@@ -11,6 +11,7 @@ import {
   grantOrganizationRole,
   revokeOrganizationRole,
   manageGlobalKaiRole,
+  getAccessAdministrationContext,
 } from "../services/kaiAccessAdministrationService.js";
 import {
   listPendingOrganizationJoinRequestsForReviewer,
@@ -51,6 +52,7 @@ function getAccessAdministrationService() {
       grantOrganizationRole,
       revokeOrganizationRole,
       manageGlobalKaiRole,
+      getAccessAdministrationContext,
       listPendingOrganizationJoinRequestsForReviewer,
       approveOrganizationJoinRequest,
       declineOrganizationJoinRequest,
@@ -76,6 +78,21 @@ function parseLegacyUserId(raw) {
   const value = Number(raw);
   return Number.isInteger(value) && value > 0 ? value : null;
 }
+
+// Prompt 4: the Team & Access administration context (platform superuser:
+// the organizations it may administer; anyone else: not available). No query
+// or body fields.
+router.get("/administration-context", async (req, res, next) => {
+  try {
+    if (Object.keys(req.query || {}).length !== 0) return sendKaiError(res, "validation_blocker");
+    const result = await getAccessAdministrationService().getAccessAdministrationContext({
+      actorContext: req.kaiSprint2ActorContext,
+    });
+    return sendServiceResult(res, result, 200);
+  } catch (error) {
+    return next(error);
+  }
+});
 
 router.get("/organizations/:organizationId/access", async (req, res, next) => {
   try {

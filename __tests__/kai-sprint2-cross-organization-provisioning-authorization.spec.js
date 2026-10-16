@@ -11,10 +11,22 @@ import {
   grantOrganizationRole,
   revokeOrganizationRole,
   manageGlobalKaiRole,
+  getAccessAdministrationContext,
+  resolveOrganizationRoleAdministration,
 } from "../Backend/kai/services/kaiAccessAdministrationService.js";
 import { resolveKaiActorContext } from "../Backend/kai/auth/kaiActorContext.js";
 import { createProductionMetadataOnlyAuditForAccessAdministration } from "../Backend/kai/services/kaiMetadataOnlyAuditComposition.js";
-import { getOrganizationAccessCapabilities } from "../Backend/kai/services/kaiOrganizationAccessCapabilitiesService.js";
+import { getOrganizationAccessCapabilities, computeOrganizationOperationReadiness } from "../Backend/kai/services/kaiOrganizationAccessCapabilitiesService.js";
+import { validateActorCanAccessKnowledgeWorkspace, validateActorCanPerformOperation, validateActorCanPerformSensitivityReview } from "../Backend/kai/auth/kaiAuthorizationService.js";
+import {
+  GLOBAL_ROLE_EXPLANATIONS,
+  describeReadinessGap,
+  projectTeamAccessAdministrationContext,
+  projectTeamAccessGlobalAdministration,
+  projectTeamAccessRoster,
+  teamAccessGlobalRoleRequest,
+  teamAccessHandoffNotice,
+} from "../frontend/teamAccess/teamAccessLogic.js";
 import { getReviewCockpitCapabilities } from "../Backend/kai/services/kaiReviewCockpitService.js";
 import { listAuthorizedOrganizations } from "../Backend/kai/services/kaiOrganizationContextService.js";
 import { authorizeSourcePromotionDecision } from "../Backend/kai/services/kaiSourcePromotionService.js";
@@ -151,6 +163,9 @@ function createStore() {
       target.membership_status = "inactive";
       return { previousRow, newRow: { ...target }, mutated: true, replay: false, remainingActiveRoleNames };
     },
+    listOrganizationsForPlatformAdministration: async () => [
+      { organization_id: ORG_A, name: "Synthetic A" }, { organization_id: ORG_B, name: "Synthetic B" }, { organization_id: ORG_C, name: "Synthetic C" },
+    ],
     listGlobalRoleAssignmentRows: async (userId) => (state.globalRoles[userId] || []).map((roleName) => ({ user_id: userId, role_name: roleName })),
     assignGlobalRole: async ({ userId, roleName }) => {
       const roles = (state.globalRoles[userId] ||= []);
@@ -204,6 +219,7 @@ async function withRouter(store, actorContext, work) {
     grantOrganizationRole: (input) => grantOrganizationRole(input, dependencies),
     revokeOrganizationRole: (input) => revokeOrganizationRole(input, dependencies),
     manageGlobalKaiRole: (input) => manageGlobalKaiRole(input, dependencies),
+    getAccessAdministrationContext: (input) => getAccessAdministrationContext(input, dependencies),
   });
   const previous = process.env.KAI_SPRINT2_ENABLED;
   process.env.KAI_SPRINT2_ENABLED = "true";
@@ -669,4 +685,140 @@ test("no review, intake, or workflow path writes a role: the access-administrati
   };
   visit(root);
   assert.deepEqual(writers, ["kai/db/kaiAccessAdministrationQueries.js"]);
+});
+
+
+// --------------------------------------------------------------------------
+// Prompt 4: Team & Access as the KAI permissions administration interface
+// --------------------------------------------------------------------------
+
+test("administration context: only a platform superuser gets the organizations to administer; everyone else is told it is unavailable (200), and the flag disables it", async () => {
+  const store = createStore();
+  const superuser = await resolveActor(store, USERS.superuser, { superuser: true });
+  await withRouter(store, superuser, async (call) => {
+    const context = await call("GET", "/administration-context");
+    assert.equal(context.status, 200);
+    assert.deepEqual(context.body.data, {
+      platform_administration: true,
+      organizations: [{ organization_id: ORG_A, name: "Synthetic A" }, { organization_id: ORG_B, name: "Synthetic B" }, { organization_id: ORG_C, name: "Synthetic C" }],
+      assignable_global_roles: ["gk_admin", "gk_operator", "gk_reviewer"],
+    });
+    assert.equal((await call("GET", "/administration-context?organization_id=x")).status, 422, "no query fields");
+    // The administration scope opens the roster of an organization with no membership.
+    assert.equal((await call("GET", `/organizations/${ORG_C}/access`)).status, 200);
+  });
+  for (const user of [USERS.delegatedAdmin, USERS.clientAdminA, USERS.reviewerX, USERS.plain]) {
+    const actor = await resolveActor(store, user);
+    await withRouter(store, actor, async (call) => {
+      const context = await call("GET", "/administration-context");
+      assert.deepEqual([context.status, context.body.data], [200, { platform_administration: false, organizations: [], assignable_global_roles: [] }], user.email);
+      assert.equal((await call("GET", `/organizations/${ORG_C}/access`)).status, 403, `${user.email}: no other organization's roster`);
+    });
+  }
+  assert.equal((await getAccessAdministrationContext({ actorContext: superuser }, { ...store.dependencies, env: { KAI_SPRINT2_ENABLED: "false" } })).error.code, "feature_disabled");
+  assert.equal((await getAccessAdministrationContext({ actorContext: { ...superuser, actorType: "ai" } }, store.dependencies)).error.code, "authorization_denied");
+  assert.deepEqual(projectTeamAccessAdministrationContext({ platform_administration: false, organizations: [{ organization_id: ORG_A }] }).organizations, []);
+});
+
+test("operation readiness is exactly each operation's own enforced predicate, for every configured actor in every organization", async () => {
+  const store = createStore();
+  const { __reviewCockpitServiceContract: cockpit } = await import("../Backend/kai/services/kaiReviewCockpitService.js");
+  for (const user of [USERS.reviewerX, USERS.operator, USERS.dual, USERS.delegatedAdmin, USERS.clientAdminA, USERS.plain, USERS.newcomer]) {
+    const actor = await resolveActor(store, user);
+    for (const organizationId of Object.values(ORGS)) {
+      const readiness = Object.fromEntries(computeOrganizationOperationReadiness(actor, organizationId).map((item) => [item.key, item]));
+      const capabilities = await getOrganizationAccessCapabilities({ organizationId, actorContext: actor }, { env: ENV });
+      const ops = capabilities.ok ? capabilities.data.workflowOperations : {};
+      const where = `${user.email} in ${organizationId}`;
+      const expected = {
+        gk_workspace: validateActorCanAccessKnowledgeWorkspace(actor, organizationId).ok === true,
+        generated_content_read: ops.readGeneratedDrafts === true,
+        evidence_processing: ops.extractEvidence === true,
+        draft_generation: ops.generateDrafts === true,
+        source_review: validateActorCanPerformOperation(actor, "read_intake", organizationId, { allowedRoles: cockpit.REVIEW_COCKPIT_READ_ROLES, globalRolesOnly: true }).ok === true
+          && authorizeSourcePromotionDecision(actor, organizationId).ok === true,
+        sensitivity_review: validateActorCanPerformSensitivityReview(actor, "record_sensitivity_allowed_use_decision", organizationId, cockpit.REVIEW_COCKPIT_READ_ROLES, { globalRolesOnly: true }).ok === true,
+        evidence_review: ops.recordEvidenceReview === true,
+        claim_review: ops.recordClaimReview === true,
+        coverage_acceptance: ops.acceptCoverageLimitation === true,
+        generated_content_review: ops.reviewGeneratedDrafts === true,
+        export_release: validateActorCanPerformOperation(actor, "complete_export_review", organizationId, { allowedRoles: new Set(["gk_admin"]) }).ok === true,
+        delegated_administration: [...(resolveOrganizationRoleAdministration(actor, "manage_organization_membership", organizationId).authorityByRole?.values() || [])].includes("delegated_gk_admin"),
+      };
+      assert.deepEqual(Object.fromEntries(Object.entries(readiness).map(([key, item]) => [key, item.ready])), expected, where);
+      // Reading drafts and both reporting packets is one predicate.
+      if (capabilities.ok) {
+        assert.equal(readiness.generated_content_read.ready, ops.readGrantResponsePacket === true && ops.readBoardReportingPacket === true, where);
+      }
+      for (const item of Object.values(readiness)) {
+        if (item.ready) assert.deepEqual(item.missing, [], `${where}: ${item.key} ready has nothing missing`);
+        else if (item.key !== "sensitivity_review") assert.ok(item.missing.length > 0, `${where}: ${item.key} names what is missing`);
+      }
+    }
+  }
+});
+
+test("roster readback: readiness for administrators of Get Kinder roles only, raw global roles for the platform superuser only, and an incomplete operator names the missing global role and its grantor", async () => {
+  const store = createStore();
+  store.state.memberships.push(row(ORG_A, USERS.newcomer, "gk_operator"));
+  const viewers = [
+    ["superuser", await resolveActor(store, USERS.superuser, { superuser: true }), { readiness: true, globals: true }],
+    ["delegated GK administrator", await resolveActor(store, USERS.delegatedAdmin), { readiness: true, globals: false }],
+    ["client administrator", await resolveActor(store, USERS.clientAdminA), { readiness: false, globals: false }],
+  ];
+  for (const [label, actor, expected] of viewers) {
+    const roster = await viewEffectiveKaiAccess({ actorContext: actor, organizationId: ORG_A }, store.dependencies);
+    assert.equal(roster.ok, true, label);
+    const newcomer = roster.data.access.find((entry) => entry.kai_user_id === USERS.newcomer.user_id);
+    assert.equal(Array.isArray(newcomer.operation_readiness), expected.readiness, `${label}: readiness`);
+    assert.equal(Array.isArray(newcomer.global_kai_roles), expected.globals, `${label}: global roles`);
+    assert.deepEqual(roster.data.assignable_global_roles, expected.globals ? ["gk_admin", "gk_operator", "gk_reviewer"] : [], label);
+    if (!expected.readiness) continue;
+    const member = projectTeamAccessRoster(roster.data).find((candidate) => candidate.key === `legacy:${USERS.newcomer.legacy}`);
+    const source = member.operationReadiness.find((item) => item.key === "source_review");
+    assert.deepEqual([source.ready, source.missing.map((gap) => [gap.scope, gap.roles.join("|"), gap.grantedBy.join("|")])],
+      [false, [["global", "gk_admin|gk_operator|gk_reviewer", "platform_superuser"]]], label);
+    assert.match(describeReadinessGap(source.missing[0]), /global .*operator.*platform administrator/i);
+    assert.match(teamAccessHandoffNotice(member), /^Organization role assigned\. A platform administrator must also assign a global .* role before this person can .*review and promote sources/);
+    assert.equal(member.operationReadiness.find((item) => item.key === "evidence_processing").ready, true, "the organization role's own operations are ready");
+  }
+  // Supplying the global role completes it; nothing is inferred client-side.
+  store.state.globalRoles[USERS.newcomer.user_id] = ["gk_operator"];
+  const completed = await viewEffectiveKaiAccess({ actorContext: await resolveActor(store, USERS.delegatedAdmin), organizationId: ORG_A }, store.dependencies);
+  const member = projectTeamAccessRoster(completed.data).find((candidate) => candidate.key === `legacy:${USERS.newcomer.legacy}`);
+  assert.equal(member.operationReadiness.find((item) => item.key === "source_review").ready, true);
+  assert.equal(teamAccessHandoffNotice(member), "");
+  // A binding-derived client_admin is reported as derived, never a stored Get Kinder assignment.
+  const orgB = await viewEffectiveKaiAccess({ actorContext: await resolveActor(store, USERS.superuser, { superuser: true }), organizationId: ORG_B }, store.dependencies);
+  const derived = orgB.data.access.find((entry) => entry.kai_user_id === USERS.reviewerX.user_id);
+  assert.deepEqual([derived.authority_source, derived.derived_membership.source, derived.stored_memberships], ["derived", "gk_organization_binding", []]);
+  assert.deepEqual(derived.global_kai_roles, ["gk_reviewer"]);
+});
+
+test("Team & Access global-role controls: only the server's assignable roles, only a matching assign/revoke, and every non-superuser is refused by the server", async () => {
+  const member = { legacyUserId: 7, globalRoles: ["gk_reviewer"] };
+  const assignable = ["gk_admin", "gk_operator", "gk_reviewer"];
+  assert.deepEqual(teamAccessGlobalRoleRequest(member, "gk_admin", "assign", assignable), { path: "/api/kai/sprint2/access-administration/global-roles/7", body: { role_name: "gk_admin", action: "assign" } });
+  assert.deepEqual(teamAccessGlobalRoleRequest(member, "gk_reviewer", "revoke", assignable).body, { role_name: "gk_reviewer", action: "revoke" });
+  for (const [label, args] of [
+    ["not offered (non-superuser roster)", [member, "gk_admin", "assign", []]],
+    ["already held", [member, "gk_reviewer", "assign", assignable]],
+    ["not held", [member, "gk_admin", "revoke", assignable]],
+    ["unknown action", [member, "gk_admin", "grant", assignable]],
+    ["no global roles visible", [{ legacyUserId: 7, globalRoles: null }, "gk_admin", "assign", assignable]],
+    ["unknown role", [member, "platform_superuser", "assign", ["platform_superuser"]]],
+  ]) {
+    assert.throws(() => teamAccessGlobalRoleRequest(...args), /unsupported/, label);
+  }
+  assert.deepEqual(projectTeamAccessGlobalAdministration({ global_roles_visible: false, assignable_global_roles: ["gk_admin"] }), { globalRolesVisible: false, assignableGlobalRoles: [] });
+  assert.match(GLOBAL_ROLE_EXPLANATIONS.gk_admin, /^High-risk/);
+  assert.match(GLOBAL_ROLE_EXPLANATIONS.gk_admin, /export, final release and funder\/public-ready/);
+  const store = createStore();
+  for (const user of [USERS.delegatedAdmin, USERS.clientAdminA, USERS.plain]) {
+    const actor = await resolveActor(store, user);
+    const refused = await withRouter(store, actor, (call) => call("PUT", globalRole(USERS.newcomer), { role_name: "gk_admin", action: "assign" }));
+    assert.deepEqual([refused.status, refused.reason], [403, "platform_superuser_required"], user.email);
+  }
+  assert.deepEqual(store.state.writes, []);
+  assert.deepEqual(store.state.auditRows, []);
 });

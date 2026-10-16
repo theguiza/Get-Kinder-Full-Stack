@@ -30,6 +30,7 @@ const P0_CLIENT_WRITE_ROLES = new Set(["client_admin"]);
 // Preserve existing organization GK grants and admit global GK capability
 // only with active access to the exact organization, through the same validator.
 const KNOWLEDGE_WORKSPACE_ROLES = new Set(["gk_admin", "gk_operator", "gk_reviewer"]);
+export const KAI_KNOWLEDGE_WORKSPACE_ROLES = Object.freeze([...KNOWLEDGE_WORKSPACE_ROLES]);
 
 export function validateActorCanAccessKnowledgeWorkspace(actorContext, organizationId) {
   if (actorContext?.actorType !== "human") return { ok: false, error_code: "authorization_denied" };

@@ -2,9 +2,13 @@ import React, { useState } from "react";
 
 import OrganizationJoinRequestsReviewPanel from "../impactLibrary/OrganizationJoinRequestsReviewPanel.jsx";
 import {
+  GLOBAL_ROLE_EXPLANATIONS,
   LAST_ADMINISTRATOR_MESSAGE,
   TEAM_ACCESS_ROLE_OPTIONS,
+  TEAM_ACCESS_SUPERUSER_ORGANIZATION_ROLE_OPTIONS,
   describeMemberAuthority,
+  describeReadinessGap,
+  teamAccessReadinessLabel,
   memberDisplayName,
   roleChangeBlockedAsLastAdministrator,
   roleChangeRemovesAdministrator,
@@ -18,8 +22,9 @@ const ROLE_DESCRIPTIONS = Object.freeze([
   ["client_admin", "Uploads files, manages Projects and the Improvement Plan, and manages team & access."],
   ["client_reviewer", "Views your organization's KAI workspace and answers client follow-ups."],
   ["client_contributor", "Views your organization's KAI workspace."],
-  ["gk_operator", "Get Kinder staff who run source review for this organization (also needs the global Get Kinder operator role)."],
+  ["gk_operator", "Get Kinder staff who run source review for this organization (source review also needs a global Get Kinder role)."],
   ["gk_reviewer", "Get Kinder staff who review evidence and claims for this organization."],
+  ["gk_admin", "Get Kinder administrator of this organization: with the global Get Kinder administrator role, manages its operator and reviewer roles; also carries export and release authority."],
 ]);
 
 const domId = (value) => String(value).replace(/[^a-zA-Z0-9_-]/g, "-");
@@ -146,7 +151,105 @@ function AddRoleControl({ member, savingKey, onGrantRole }) {
   );
 }
 
-function MemberRow({ member, savingKey, onChangeRole, onGrantRole, onRevokeRole }) {
+// Platform superuser only: the person's global Get Kinder roles, kept
+// separate from their organization assignments, with a confirmed grant (the
+// explanation of what the role carries is shown first) and a confirmed
+// revocation for each held role. The server decides every change.
+function GlobalRolesControl({ member, assignableGlobalRoles, savingKey, onChangeGlobalRole }) {
+  const grantable = assignableGlobalRoles.filter((role) => !member.globalRoles.includes(role));
+  const [draftRole, setDraftRole] = useState(grantable[0] || "");
+  const [confirming, setConfirming] = useState(null);
+  const role = grantable.includes(draftRole) ? draftRole : grantable[0] || "";
+  const selectId = `gk-team-access-global-role-${domId(member.key)}`;
+  const busy = Boolean(savingKey);
+  const act = (roleName, action) => {
+    const key = `${action}:${roleName}`;
+    if (confirming !== key) {
+      setConfirming(key);
+      return;
+    }
+    setConfirming(null);
+    onChangeGlobalRole?.(member, roleName, action);
+  };
+  return (
+    <div className="gk-team-access-member-global" data-team-access-global-roles={member.key}>
+      <p className="gk-team-access-member-note">
+        Global Get Kinder roles (all organizations): {member.globalRoles.length > 0 ? member.globalRoles.map(teamAccessRoleLabel).join(", ") : "none"}
+      </p>
+      {member.globalRoles.filter((held) => assignableGlobalRoles.includes(held)).map((held) => (
+        <span key={held} className="gk-team-access-member-revoke">
+          <button type="button" className="gk-organization-join-close" disabled={busy} onClick={() => act(held, "revoke")}>
+            {confirming === `revoke:${held}` ? `Confirm revoking global ${teamAccessRoleLabel(held)}` : `Revoke global ${teamAccessRoleLabel(held)}`}
+          </button>
+          {confirming === `revoke:${held}` ? (
+            <>
+              <button type="button" className="gk-organization-join-close" onClick={() => setConfirming(null)}>Cancel</button>
+              <p className="gk-team-access-member-warning" role="alert">
+                {memberDisplayName(member)} loses the global {teamAccessRoleLabel(held)} role in every organization. Their organization assignments stay.
+              </p>
+            </>
+          ) : null}
+        </span>
+      ))}
+      {grantable.length > 0 && member.legacyUserId !== null ? (
+        <div className="gk-team-access-member-edit">
+          <label className="gk-team-access-visually-hidden" htmlFor={selectId}>Global role for {memberDisplayName(member)}</label>
+          <select id={selectId} className="gk-team-access-select" value={role} disabled={busy} onChange={(event) => { setDraftRole(event.target.value); setConfirming(null); }}>
+            {grantable.map((option) => <option key={option} value={option}>{`Global ${teamAccessRoleLabel(option)}`}</option>)}
+          </select>
+          <button type="button" className="gk-organization-join-request-btn" disabled={busy || !role} onClick={() => act(role, "assign")}>
+            {savingKey === member.key ? "Saving..." : confirming === `assign:${role}` ? `Confirm granting global ${teamAccessRoleLabel(role)}` : "Grant global role"}
+          </button>
+          {confirming === `assign:${role}` ? (
+            <button type="button" className="gk-organization-join-close" onClick={() => setConfirming(null)}>Cancel</button>
+          ) : null}
+          {role ? (
+            <p className={confirming === `assign:${role}` ? "gk-team-access-member-warning" : "gk-team-access-member-note"} role={confirming === `assign:${role}` ? "alert" : undefined}
+              data-global-role-explanation={role}>
+              {GLOBAL_ROLE_EXPLANATIONS[role]}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// What this person's KAI roles let them do in this organization now, and
+// for anything not yet possible, which assignment is missing and who can
+// assign it - the server's readiness answer, never inferred from role names.
+function ReadinessPanel({ member }) {
+  const items = member.operationReadiness || [];
+  const ready = items.filter((item) => item.ready);
+  const blocked = items.filter((item) => !item.ready);
+  return (
+    <div className="gk-team-access-member-readiness" data-team-access-readiness={member.key}>
+      <p className="gk-team-access-member-note">Get Kinder access here (from current roles; content and decision gates still apply):</p>
+      <ul className="gk-team-access-readiness-list">
+        {ready.map((item) => (
+          <li key={item.key} data-readiness-key={item.key} data-ready="true" className="gk-team-access-member-note">
+            {teamAccessReadinessLabel(item.key)}: available
+          </li>
+        ))}
+        {blocked.map((item) => (
+          <li key={item.key} data-readiness-key={item.key} data-ready="false" className="gk-team-access-member-note">
+            {teamAccessReadinessLabel(item.key)}: not yet. {item.missing.map(describeReadinessGap).join(" ")}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+// Readiness is shown for people who hold any Get Kinder assignment (global,
+// or an active organization Get Kinder role); client-only members have none
+// to complete.
+function holdsGetKinderAssignment(member) {
+  return (member.globalRoles || []).length > 0
+    || member.assignments.some((assignment) => assignment.roleName.startsWith("gk_") && assignment.status === "active");
+}
+
+function MemberRow({ member, savingKey, onChangeRole, onGrantRole, onRevokeRole, assignableGlobalRoles = [], onChangeGlobalRole }) {
   const name = memberDisplayName(member);
   const authority = describeMemberAuthority(member);
   const accountStatus = teamAccessAccountStatusLabel(member);
@@ -205,7 +308,38 @@ function MemberRow({ member, savingKey, onChangeRole, onGrantRole, onRevokeRole 
       {member.grantableRoles.length > 0 ? (
         <AddRoleControl member={member} savingKey={savingKey} onGrantRole={onGrantRole} />
       ) : null}
+      {Array.isArray(member.globalRoles) && assignableGlobalRoles.length > 0 ? (
+        <GlobalRolesControl member={member} assignableGlobalRoles={assignableGlobalRoles} savingKey={savingKey} onChangeGlobalRole={onChangeGlobalRole} />
+      ) : null}
+      {member.operationReadiness && holdsGetKinderAssignment(member) ? <ReadinessPanel member={member} /> : null}
     </li>
+  );
+}
+
+// Platform superuser only: add an existing Get Kinder account to this
+// organization by exact email, with any organization role.
+function AddPersonControl({ savingKey, onAddPerson }) {
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState("client_contributor");
+  return (
+    <form
+      className="gk-team-access-member-edit gk-team-access-add-person"
+      onSubmit={(event) => {
+        event.preventDefault();
+        onAddPerson?.(email, role);
+      }}
+    >
+      <label className="gk-team-access-visually-hidden" htmlFor="gk-team-access-add-person-email">Existing account email</label>
+      <input id="gk-team-access-add-person-email" type="email" className="gk-team-access-select" placeholder="Exact email of an existing Get Kinder account"
+        value={email} disabled={Boolean(savingKey)} onChange={(event) => setEmail(event.target.value)} />
+      <label className="gk-team-access-visually-hidden" htmlFor="gk-team-access-add-person-role">Organization role</label>
+      <select id="gk-team-access-add-person-role" className="gk-team-access-select" value={role} disabled={Boolean(savingKey)} onChange={(event) => setRole(event.target.value)}>
+        {TEAM_ACCESS_SUPERUSER_ORGANIZATION_ROLE_OPTIONS.map((option) => <option key={option} value={option}>{teamAccessRoleLabel(option)}</option>)}
+      </select>
+      <button type="submit" className="gk-organization-join-request-btn" disabled={Boolean(savingKey) || !email.trim()}>
+        {savingKey === "add-person" ? "Adding..." : "Add person"}
+      </button>
+    </form>
   );
 }
 
@@ -228,9 +362,15 @@ export default function TeamAccessView({
   onRefresh,
   joinReview,
   onDecideJoinRequest,
+  administration = null,
+  onSelectAdministrationOrganization,
+  onChangeGlobalRole,
+  onAddPerson,
 }) {
   const members = roster?.members || [];
   const title = organizationName ? `Team & Access for ${organizationName}` : "Team & Access";
+  const platformAdministration = administration?.platformAdministration === true;
+  const assignableGlobalRoles = roster?.globalRolesVisible ? roster.assignableGlobalRoles || [] : [];
 
   return (
     <section className="gk-team-access" aria-labelledby="gk-team-access-heading">
@@ -240,6 +380,28 @@ export default function TeamAccessView({
           See who can use KAI for this organization, review join requests, and change what each person can do.
         </p>
       </header>
+
+      {platformAdministration ? (
+        <section className="gk-organization-join gk-team-access-administration" aria-labelledby="gk-team-access-administration-heading">
+          <h2 id="gk-team-access-administration-heading" className="gk-organization-join-title">Platform administration</h2>
+          <label className="gk-organization-join-hint" htmlFor="gk-team-access-administration-organization">Organization to administer</label>
+          <select
+            id="gk-team-access-administration-organization"
+            className="gk-team-access-select"
+            value={administration.organizationId || ""}
+            onChange={(event) => onSelectAdministrationOrganization?.(event.target.value)}
+          >
+            {administration.organizations.map((organization) => (
+              <option key={organization.organizationId} value={organization.organizationId}>{organization.name}</option>
+            ))}
+          </select>
+          <p className="gk-organization-join-hint">
+            As a platform administrator you can manage KAI roles for any organization here. This does not open the organization's
+            evidence, claims, files, drafts or reports, and it records no review decision.
+          </p>
+          <AddPersonControl savingKey={savingKey} onAddPerson={onAddPerson} />
+        </section>
+      ) : null}
 
       {joinReview?.available ? (
         <OrganizationJoinRequestsReviewPanel
@@ -276,12 +438,16 @@ export default function TeamAccessView({
                 onChangeRole={onChangeRole}
                 onGrantRole={onGrantRole}
                 onRevokeRole={onRevokeRole}
+                assignableGlobalRoles={assignableGlobalRoles}
+                onChangeGlobalRole={onChangeGlobalRole}
               />
             ))}
           </ul>
         ) : null}
         <p className="gk-organization-join-hint">
-          New people join through a join request and start as contributors. Get Kinder staff access is managed by Get Kinder.
+          {platformAdministration
+            ? "Add an existing account above, or let people join through a join request. Global Get Kinder roles apply in every organization; organization roles apply here only."
+            : "New people join through a join request and start as contributors. Get Kinder staff access is managed by Get Kinder."}
         </p>
       </section>
 

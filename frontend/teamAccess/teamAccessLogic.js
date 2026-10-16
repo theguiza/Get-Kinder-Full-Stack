@@ -8,6 +8,9 @@
 
 import {
   KAI_ORGANIZATION_ROLE_OPTIONS,
+  KAI_SUPERUSER_ORGANIZATION_ROLE_OPTIONS,
+  adminUserLookupPath,
+  kaiGlobalRolePath,
   buildKaiOrganizationMembershipPayload,
   buildKaiOrganizationRoleGrantPayload,
   isAssignableKaiOrganizationRole,
@@ -41,6 +44,144 @@ export function teamAccessRoleLabel(roleName) {
 
 export function teamAccessRosterPath(organizationId) {
   return kaiOrganizationAccessPath(organizationId);
+}
+
+// Prompt 4: the platform superuser's administration context (the
+// organizations Team & Access may administer without a membership there).
+export function teamAccessAdministrationContextPath() {
+  return "/api/kai/sprint2/access-administration/administration-context";
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const GLOBAL_ROLES = Object.freeze(["gk_admin", "gk_operator", "gk_reviewer"]);
+const knownGlobalRoles = (value) => (Array.isArray(value) ? GLOBAL_ROLES.filter((role) => value.includes(role)) : []);
+
+export function projectTeamAccessAdministrationContext(data) {
+  if (data?.platform_administration !== true) return { platformAdministration: false, organizations: [], assignableGlobalRoles: [] };
+  return {
+    platformAdministration: true,
+    organizations: (Array.isArray(data.organizations) ? data.organizations : [])
+      .filter((item) => typeof item?.organization_id === "string" && UUID_RE.test(item.organization_id))
+      .map((item) => ({ organizationId: item.organization_id, name: typeof item.name === "string" && item.name ? item.name : item.organization_id })),
+    assignableGlobalRoles: knownGlobalRoles(data.assignable_global_roles),
+  };
+}
+
+// What each global Get Kinder role does, shown before a platform superuser
+// confirms a grant. gk_admin is not a team-management-only role.
+export const GLOBAL_ROLE_EXPLANATIONS = Object.freeze({
+  gk_admin: "High-risk Get Kinder governance role. In every organization where this person also has access it counts as Get Kinder "
+    + "administrator authority for the workspace, source and sensitivity review, evidence and claim review decisions, and reading "
+    + "generated drafts and reporting packets. Together with an organization Get Kinder administrator assignment it lets them grant and "
+    + "remove that organization's operator and reviewer roles, and that organization assignment also carries export, final "
+    + "release and funder/public-ready decision authority. Each operation still applies its own content, eligibility and human-decision gates.",
+  gk_operator: "Get Kinder operator capability. With access to an organization it opens the Get Kinder workspace and source and "
+    + "sensitivity review; promoting a source also needs an organization Get Kinder role there. It gives no evidence or claim review decision.",
+  gk_reviewer: "Get Kinder reviewer capability. With access to an organization it opens the Get Kinder workspace, source and "
+    + "sensitivity review, evidence and claim review decisions, and reading generated drafts and reporting packets. Promoting a "
+    + "source also needs an organization Get Kinder role there.",
+});
+
+// A platform superuser's grant or revocation of one global role (the existing
+// superuser-only PUT .../global-roles/:legacyId). Refused here unless the
+// server offered the role and the request matches what the person holds.
+export function teamAccessGlobalRoleRequest(member, roleName, action, assignableGlobalRoles) {
+  if (!GLOBAL_ROLES.includes(roleName) || !(assignableGlobalRoles || []).includes(roleName) || !Array.isArray(member?.globalRoles) || member.legacyUserId === null) {
+    throw new Error(`unsupported KAI global role: ${roleName}`);
+  }
+  const holds = member.globalRoles.includes(roleName);
+  if ((action === "assign" && holds) || (action === "revoke" && !holds) || (action !== "assign" && action !== "revoke")) {
+    throw new Error(`unsupported KAI global role action: ${action}`);
+  }
+  return { path: kaiGlobalRolePath(member.legacyUserId), body: { role_name: roleName, action } };
+}
+
+// A platform superuser adding an existing Get Kinder account to the
+// organization: the existing exact-email lookup, then the additive grant.
+export function teamAccessAddPersonLookupPath(email) {
+  const normalized = String(email || "").trim().toLowerCase();
+  if (!normalized || !normalized.includes("@")) throw new Error("invalid_email");
+  return adminUserLookupPath(normalized);
+}
+
+export function teamAccessAddPersonGrantRequest(organizationId, legacyUserId, roleName) {
+  if (!KAI_SUPERUSER_ORGANIZATION_ROLE_OPTIONS.includes(roleName) || positiveInteger(legacyUserId) === null) {
+    throw new Error(`unsupported KAI organization role: ${roleName}`);
+  }
+  return {
+    path: kaiOrganizationRoleGrantPath(organizationId, positiveInteger(legacyUserId)),
+    body: buildKaiOrganizationRoleGrantPayload(roleName, { includeGkRoles: true }),
+  };
+}
+
+export const TEAM_ACCESS_SUPERUSER_ORGANIZATION_ROLE_OPTIONS = KAI_SUPERUSER_ORGANIZATION_ROLE_OPTIONS;
+
+// Labels for the server's operation-readiness keys
+// (kaiOrganizationAccessCapabilitiesService.computeOrganizationOperationReadiness).
+const READINESS_LABELS = Object.freeze({
+  gk_workspace: "Open the Get Kinder workspace (sources, evidence, claims, Review Queue)",
+  generated_content_read: "Read generated drafts and reporting packets",
+  evidence_processing: "Run evidence extraction and claim processing",
+  draft_generation: "Generate drafts",
+  source_review: "Review and promote sources",
+  sensitivity_review: "Record sensitivity and allowed-use reviews",
+  evidence_review: "Record evidence review decisions",
+  claim_review: "Record claim review decisions",
+  coverage_acceptance: "Accept coverage limitations",
+  generated_content_review: "Review generated drafts",
+  export_release: "Export and release (content gates still apply)",
+  delegated_administration: "Manage this organization's Get Kinder operator and reviewer roles",
+});
+const READINESS_CATEGORIES = new Set(["read", "process", "decide", "export", "administer"]);
+const GRANTERS = Object.freeze({
+  platform_superuser: "a platform administrator",
+  delegated_gk_admin: "a Get Kinder administrator of this organization",
+  organization_client_admin: "an organization administrator",
+});
+
+export function teamAccessReadinessLabel(key) {
+  return READINESS_LABELS[key] || key;
+}
+
+function projectReadiness(value) {
+  if (!Array.isArray(value)) return null;
+  return value
+    .filter((item) => item && Object.hasOwn(READINESS_LABELS, item.key) && READINESS_CATEGORIES.has(item.category))
+    .map((item) => ({
+      key: item.key,
+      category: item.category,
+      ready: item.ready === true,
+      missing: (Array.isArray(item.missing) ? item.missing : [])
+        .filter((gap) => gap && ["global", "organization", "either"].includes(gap.scope))
+        .map((gap) => ({
+          scope: gap.scope,
+          roles: (Array.isArray(gap.roles) ? gap.roles : []).filter((role) => typeof role === "string" && role.startsWith("gk_")),
+          grantedBy: (Array.isArray(gap.granted_by) ? gap.granted_by : []).filter((by) => Object.hasOwn(GRANTERS, by)),
+        })),
+    }));
+}
+
+// One missing assignment, in words, with who can supply it.
+export function describeReadinessGap(gap) {
+  const roles = gap.roles.map(teamAccessRoleLabel).join(" or ");
+  const what = gap.scope === "global"
+    ? `a global ${roles} role`
+    : gap.scope === "organization" ? `an organization ${roles} role here` : `a ${roles} role (global or in this organization)`;
+  const who = gap.grantedBy.map((by) => GRANTERS[by]).join(" or ");
+  return `Needs ${what}${who ? ` - assigned by ${who}` : ""}.`;
+}
+
+// After an organization role was added: the operations still blocked only by
+// a missing global role (this organization's requirement is met), named with
+// the role and who must assign it. Empty when nothing is incomplete.
+export function teamAccessHandoffNotice(member) {
+  const blocked = (member?.operationReadiness || []).filter((item) => !item.ready && item.missing.length > 0
+    && item.missing.every((gap) => gap.scope === "global"));
+  if (blocked.length === 0) return "";
+  const roles = [...new Set(blocked.flatMap((item) => item.missing.flatMap((gap) => gap.roles)))].map(teamAccessRoleLabel);
+  const operations = blocked.map((item) => teamAccessReadinessLabel(item.key).toLowerCase());
+  return `Organization role assigned. A platform administrator must also assign a global ${roles.join(" or ")} role `
+    + `before this person can ${operations.join("; ")}.`;
 }
 
 // Explicit replacement (B/E C05) of the member's addressed assignment
@@ -158,6 +299,10 @@ export function projectTeamAccessRoster(data) {
       authoritySource: row.authority_source === "derived" || row.authority_source === "both" ? row.authority_source : "stored",
       inheritedAdmin,
       isActor: row.is_actor === true,
+      // Raw global KAI roles: only in a platform superuser's roster.
+      globalRoles: Array.isArray(row.global_kai_roles) ? knownGlobalRoles(row.global_kai_roles) : null,
+      // Operation readiness: only for an administrator of Get Kinder roles.
+      operationReadiness: projectReadiness(row.operation_readiness),
       assignments,
       // Team & Access adds Get Kinder staff roles only; a client role keeps
       // the one-role change control (an explicit replacement) above.
@@ -182,6 +327,15 @@ export function projectTeamAccessRoster(data) {
 // administrable_roles answer), for the role legend.
 export function projectTeamAccessAdministrableRoles(data) {
   return knownRoles(data?.administrable_roles);
+}
+
+// The roster-level answers: whether this reader sees global roles (platform
+// superuser) and which global roles it may grant or revoke.
+export function projectTeamAccessGlobalAdministration(data) {
+  return {
+    globalRolesVisible: data?.global_roles_visible === true,
+    assignableGlobalRoles: data?.global_roles_visible === true ? knownGlobalRoles(data?.assignable_global_roles) : [],
+  };
 }
 
 export function memberDisplayName(member) {
@@ -247,6 +401,14 @@ export function describeTeamAccessReadError(failure) {
   if (failure.status === 401) return "Your session has ended. Sign in again to manage your team.";
   if (failure.status === 403) return "You do not have permission to manage team access for this organization.";
   return "Team members could not be loaded. Try again.";
+}
+
+export function describeGlobalRoleError(failure) {
+  if (failure.blockingReason === "platform_superuser_required") return "Only a platform administrator can change global Get Kinder roles.";
+  if (failure.blockingReason === "target_account_email_unusable") return "This person's Get Kinder account has no usable email, so KAI access cannot be given yet.";
+  if (failure.status === 401) return "Your session has ended. Sign in again.";
+  if (failure.status === 422) return "That global role change is not allowed.";
+  return "The global role could not be changed. Try again.";
 }
 
 export function describeRoleChangeError(failure) {

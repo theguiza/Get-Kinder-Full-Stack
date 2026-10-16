@@ -26,6 +26,7 @@ import {
   revokeGlobalRole,
   listGlobalRoleAssignmentRows,
   findOrCreateKaiUserForAdministrationTarget,
+  listOrganizationsForPlatformAdministration,
 } from "../db/kaiAccessAdministrationQueries.js";
 import {
   findKaiUserByLegacyPublicUserdataId,
@@ -42,6 +43,7 @@ const {
   VIEW_KAI_ACCESS,
   MANAGE_ORGANIZATION_MEMBERSHIP,
   MANAGE_GLOBAL_KAI_ROLE,
+  VIEW_PLATFORM_ACCESS_ADMINISTRATION,
 } = KAI_ACCESS_ADMINISTRATION_OPERATIONS;
 
 const ASSIGNABLE_ORGANIZATION_ROLE_SET = new Set(KAI_ASSIGNABLE_ORGANIZATION_ROLES);
@@ -386,6 +388,16 @@ export async function viewEffectiveKaiAccess({ actorContext, organizationId } = 
   }
 
   const includeGlobalRoles = hasPlatformSuperuserAuthority(actorContext);
+  // Prompt 4: an administrator of Get Kinder roles (platform superuser or
+  // delegated GK administrator) also reads each person's operation
+  // readiness - what their roles admit now and which assignment is missing.
+  // A client administrator does not; nor does anyone see raw global roles
+  // except a platform superuser.
+  const administersGkRoles = platformSuperuserAuthorized || [...authorityByRole.values()].includes("delegated_gk_admin");
+  const computeReadiness = administersGkRoles
+    ? dependencies.computeOrganizationOperationReadiness
+      || (await import("./kaiOrganizationAccessCapabilitiesService.js")).computeOrganizationOperationReadiness
+    : null;
   const isActive = (assignment) => assignment.membership_status === KAI_ACTIVE_ORGANIZATION_MEMBERSHIP_STATUS;
 
   // Read-time answer of the writers' last-admin protection, from the same
@@ -441,6 +453,26 @@ export async function viewEffectiveKaiAccess({ actorContext, organizationId } = 
       ? administeredRoles.filter((role) => !entry.stored.some((held) => held.role_name === role))
       : [];
 
+    // The person's KAI role authority in this organization, built the way
+    // resolveKaiActorContext would: their stored assignments here, the
+    // derived client_admin, and their global roles. An account that cannot
+    // act (not active) has no readiness to report.
+    const globalRoleNames = entry.kai_user_id && (includeGlobalRoles || computeReadiness) ? await listGlobalRoles(entry.kai_user_id) : null;
+    const operationReadiness = computeReadiness && entry.kai_user_id && entry.account_status === "active"
+      ? computeReadiness({
+        actorType: "human",
+        actorUserId: entry.kai_user_id,
+        kaiUserStatus: "active",
+        kaiRoles: globalRoleNames || [],
+        organizationMemberships: [
+          ...entry.stored.map((assignment) => ({ organization_id: organizationId, user_id: entry.kai_user_id, ...assignment })),
+          ...(entry.derived && gkOrganizationId
+            ? [{ organization_id: organizationId, ...entry.derived, gk_organization_id: Number(gkOrganizationId) }]
+            : []),
+        ],
+      }, organizationId)
+      : null;
+
     accessRows.push({
       kai_user_id: entry.kai_user_id,
       legacy_public_userdata_id: entry.legacy_public_userdata_id,
@@ -461,7 +493,8 @@ export async function viewEffectiveKaiAccess({ actorContext, organizationId } = 
       grantable_roles: grantableRoles,
       editable: grantableRoles.length > 0 || storedMemberships.some((assignment) =>
         assignment.replacement_roles.length > 0 || assignment.can_revoke || assignment.can_restore),
-      global_kai_roles: includeGlobalRoles && entry.kai_user_id ? await listGlobalRoles(entry.kai_user_id) : undefined,
+      global_kai_roles: includeGlobalRoles && entry.kai_user_id ? globalRoleNames : undefined,
+      operation_readiness: computeReadiness ? operationReadiness : undefined,
     });
   }
 
@@ -469,6 +502,9 @@ export async function viewEffectiveKaiAccess({ actorContext, organizationId } = 
     organization_id: organizationId,
     access: accessRows,
     global_roles_visible: includeGlobalRoles,
+    // The global roles a platform superuser may grant or revoke here
+    // (manageGlobalKaiRole); empty for every other administrator.
+    assignable_global_roles: includeGlobalRoles ? [...ASSIGNABLE_GLOBAL_ROLE_SET] : [],
     administrable_roles: administeredRoles,
   });
 }
@@ -966,6 +1002,35 @@ export async function manageGlobalKaiRole(
   } catch (error) {
     return shapeThrownError(error);
   }
+}
+
+/**
+ * Prompt 4: the Team & Access administration context. A platform superuser
+ * administers KAI access for any organization without holding a membership
+ * there, so Team & Access needs the organizations it may choose from. This
+ * read lists only their ids and names; it opens no content, and every roster
+ * read and change is authorized again by its own service. Any other actor is
+ * answered (200) that platform administration is not available, so the page
+ * never has to probe a refusal.
+ */
+export async function getAccessAdministrationContext({ actorContext } = {}, dependencies = {}) {
+  const env = dependencies.env || process.env;
+  if (!isKaiSprint2Enabled(env)) return failure("feature_disabled");
+  if (actorContext?.actorType !== "human" || !actorContext?.actorUserId) return failure("authorization_denied");
+
+  const authResult = validateActorCanPerformPlatformOperation(actorContext, VIEW_PLATFORM_ACCESS_ADMINISTRATION);
+  if (!authResult.ok) {
+    return success({ platform_administration: false, organizations: [], assignable_global_roles: [] });
+  }
+  const listOrganizations = dependencies.listOrganizationsForPlatformAdministration || listOrganizationsForPlatformAdministration;
+  const rows = await listOrganizations();
+  return success({
+    platform_administration: true,
+    organizations: (Array.isArray(rows) ? rows : [])
+      .filter((row) => isNonEmptyString(row?.organization_id))
+      .map((row) => ({ organization_id: row.organization_id, name: typeof row.name === "string" ? row.name : null })),
+    assignable_global_roles: [...ASSIGNABLE_GLOBAL_ROLE_SET],
+  });
 }
 
 export const __kaiAccessAdministrationServiceTestables = Object.freeze({

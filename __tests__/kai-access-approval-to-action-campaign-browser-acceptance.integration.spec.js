@@ -395,6 +395,7 @@ async function runBrowserAcceptance() {
     newGkAdmin: 2321, // ordinary account, no KAI role; made a delegated GK administrator of Org A from /admin in J9
     opsRecipient: 2322, // ordinary account; Org A client_contributor (superuser, /admin) then organization gk_operator (J9 delegate)
     revRecipient: 2323, // ordinary account; Org A client_contributor (superuser, /admin) then organization gk_reviewer (J9 delegate)
+    staffAdmin: 2324, // ordinary account, no KAI role; made a delegated GK administrator of Org A in Team & Access (J10)
   });
   const SITE_ADMINS = new Set([USERS.superGk, USERS.superNoRole, USERS.superGkStored]);
   const FIRST_SIGN_IN = new Set([USERS.reviewer, USERS.reviewerOrgOnly, USERS.newMember, USERS.freshNotNull, USERS.freshNullable]);
@@ -2692,6 +2693,254 @@ async function runBrowserAcceptance() {
       assert.deepEqual(await activeRolesOf("newGkAdmin"), ["gk_admin"], "the stored organization assignment is unchanged");
       assert.deepEqual(newGkAdminPage.exceptions, []);
       results.J9_4 = "PASS: targeted revoke (reviewer) and global revoke (administrator) enforced on the next requests";
+    });
+
+    // =====================================================================
+    // J10. Team & Access is the KAI permissions administration interface
+    // (Prompt 4): client administrator, platform superuser (no membership
+    // needed), delegated GK administrator, incomplete staff provisioning,
+    // revocation, multi-organization scope, readiness vs enforcement, and
+    // privileged negative cases - all in /impact-library -> Team & Access.
+    // =====================================================================
+    const tamPage = await session(USERS.storedAdmin);
+    const platformPage = await session(USERS.superNoRole);
+    const staffAdminPage = await session(USERS.staffAdmin);
+    const contextPath = `${ACCESS}/administration-context`;
+    const rosterPath = (organizationId) => `${ACCESS}/organizations/${organizationId}/access`;
+    const rowKey = (legacyId) => `legacy:${legacyId}`;
+    const readinessOf = (page, legacyId, key) => page.evaluate(`(() => {
+      const el = document.querySelector('[data-team-access-readiness="legacy:${legacyId}"] [data-readiness-key="${key}"]');
+      return el ? el.getAttribute("data-ready") : null;
+    })()`);
+    async function openTeamAccess(page) {
+      await page.goto("/impact-library");
+      await page.waitForText("Knowledge Studio");
+      await page.clickNav("Team & Access");
+      await page.waitForText("Members");
+      await page.idle();
+    }
+    async function setInput(page, id, value) {
+      assert.ok(await page.evaluate(`(() => {
+        const el = document.getElementById(${JSON.stringify(id)});
+        if (!el) return false;
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(el, ${JSON.stringify(value)});
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        return true;
+      })()`), `input ${id}`);
+    }
+    async function confirmGlobalRole(page, legacyId, roleLabel, action) {
+      const key = rowKey(legacyId);
+      if (action === "assign") {
+        await clickMemberButton(page, key, "Grant global role");
+        await page.waitFor(async () => /Confirm granting global/.test(await memberRowText(page, key) || ""), "grant confirmation");
+        assert.deepEqual(writes(page.requestsSince(page.mark())), [], "nothing is sent before confirmation");
+        const mark = page.mark();
+        await clickMemberButton(page, key, `Confirm granting global ${roleLabel}`);
+        await page.waitFor(async () => new RegExp(`Revoke global ${roleLabel}`).test(await memberRowText(page, key) || ""), "the granted global role");
+        await page.idle();
+        return writes(page.requestsSince(mark));
+      }
+      await clickMemberButton(page, key, `Revoke global ${roleLabel}`);
+      await page.waitFor(async () => /Confirm revoking global/.test(await memberRowText(page, key) || ""), "revoke confirmation");
+      const mark = page.mark();
+      await clickMemberButton(page, key, `Confirm revoking global ${roleLabel}`);
+      await page.waitFor(async () => !new RegExp(`Revoke global ${roleLabel}`).test(await memberRowText(page, key) || ""), "the revoked global role");
+      await page.idle();
+      return writes(page.requestsSince(mark));
+    }
+
+    await test("J10-1 (client administrator): Team & Access keeps members, the binding-derived administrator, and client roles; no platform, global, or readiness controls appear and the server refuses them", async () => {
+      await openTeamAccess(tamPage);
+      const body = await tamPage.text();
+      assert.ok(body.includes(`Team & Access for ${ORG_A_NAME}`) || body.includes("Team & Access"), "the existing page");
+      const derivedRow = await memberRowText(tamPage, rowKey(USERS.boundAdmin));
+      assert.ok(derivedRow && /Get Kinder organization admin/.test(derivedRow), "the binding-derived administrator is shown as derived");
+      assert.ok(body.includes("Uploads files, manages Projects"), "client role descriptions stay");
+      for (const marker of ["Platform administration", "Grant global role", "Get Kinder access here"]) {
+        assert.ok(!body.includes(marker), `no ${marker} for a client administrator`);
+      }
+      const context = await tamPage.fetchJson("GET", contextPath);
+      assert.deepEqual([context.status, context.data.platform_administration], [200, false]);
+      const before = await allKaiCounts();
+      const globalAttempt = await tamPage.fetchJson("PUT", globalRolePath(USERS.memberA), { role_name: "gk_admin", action: "assign" });
+      const gkAttempt = await tamPage.fetchJson("POST", `${membershipPath(ORG_A, USERS.memberA)}/roles`, { role_name: "gk_reviewer" });
+      const otherRoster = await tamPage.fetchJson("GET", rosterPath(ORG_B));
+      assert.deepEqual([globalAttempt.status, globalAttempt.blockingReason], [403, "platform_superuser_required"]);
+      assert.deepEqual([gkAttempt.status, gkAttempt.blockingReason], [403, "non_client_membership_not_client_managed"]);
+      assert.deepEqual([otherRoster.status, otherRoster.blockingReason], [403, "missing_active_organization_membership"]);
+      assert.deepEqual(changedTables(before, await allKaiCounts()), []);
+      assert.deepEqual(tamPage.exceptions, []);
+      results.J10_1 = "PASS";
+    });
+
+    await test("J10-2 (platform superuser): Team & Access administers an organization without a membership there, opens no content, adds an existing account, and grants global gk_admin with explanation and confirmation", async () => {
+      // The superuser's direct Org B content reads before any Team & Access
+      // use: the pre-existing platform-superuser rule (Decision D, held)
+      // decides these, independent of this interface.
+      const contentPaths = {
+        evidenceLibrary: `${INTAKE}/admin/organizations/${ORG_B}/evidence-library/candidates`,
+        claimLibrary: `${INTAKE}/admin/organizations/${ORG_B}/claim-library/candidates`,
+        generatedDrafts: `${INTAKE}/admin/organizations/${ORG_B}/generated-content-drafts`,
+        sources: `${INTAKE}/admin/organizations/${ORG_B}/sources`,
+        reviewQueue: `${INTAKE}/admin/organizations/${ORG_B}/review-queue`,
+        capabilities: accessCapabilitiesPath(ORG_B),
+        projects: `${INTAKE}/admin/organizations/${ORG_B}/engagements`,
+      };
+      const contentStatuses = async () => Object.fromEntries(await Promise.all(Object.entries(contentPaths)
+        .map(async ([name, path]) => [name, (await platformPage.fetchJson("GET", path)).status])));
+      await platformPage.goto("/impact-library");
+      const contentBefore = await contentStatuses();
+      await openTeamAccess(platformPage);
+      await platformPage.waitForText("Platform administration");
+      // Org B: no membership of this superuser. Team & Access reads only its roster.
+      let mark = platformPage.mark();
+      await platformPage.setSelectWhere(`() => document.getElementById("gk-team-access-administration-organization")`, ORG_B);
+      await platformPage.waitFor(async () => Boolean(await memberRowText(platformPage, rowKey(USERS.memberB))), "Org B roster");
+      await platformPage.idle();
+      const orgBRequests = platformPage.requestsSince(mark).filter((r) => pathOf(r).includes(ORG_B));
+      assert.deepEqual(orgBRequests.map((r) => [r.method, pathOf(r), r.status]), [["GET", rosterPath(ORG_B), 200]],
+        "choosing an organization to administer requests only its roster - no evidence, claim, file, draft, or report read");
+      const contentAfter = await contentStatuses();
+      console.log(`[campaign] J10-2 superuser direct Org B content statuses (pre-existing Decision D behavior): ${JSON.stringify(contentBefore)}`);
+      assert.deepEqual(contentAfter, contentBefore, "Team & Access administration adds no content access");
+      results.J10_2_preexisting_superuser_content = contentBefore;
+      // Org A: add an existing account by exact email as organization gk_admin.
+      await platformPage.setSelectWhere(`() => document.getElementById("gk-team-access-administration-organization")`, ORG_A);
+      await platformPage.waitFor(async () => Boolean(await memberRowText(platformPage, rowKey(USERS.memberA))), "Org A roster");
+      await platformPage.idle();
+      await setInput(platformPage, "gk-team-access-add-person-email", email(USERS.staffAdmin));
+      await platformPage.setSelectWhere(`() => document.getElementById("gk-team-access-add-person-role")`, "gk_admin");
+      const before = await allKaiCounts();
+      mark = platformPage.mark();
+      await platformPage.clickButton("Add person");
+      await platformPage.waitFor(async () => Boolean(await memberRowText(platformPage, rowKey(USERS.staffAdmin))), "the added person");
+      await platformPage.idle();
+      assert.ok(platformPage.requestsSince(mark).some((r) => pathOf(r) === "/api/admin/users/lookup" && r.status === 200), "exact-email lookup");
+      assert.deepEqual(writes(platformPage.requestsSince(mark)), [["POST", `${membershipPath(ORG_A, USERS.staffAdmin)}/roles`, 200]]);
+      assert.deepEqual(changedTables(before, await allKaiCounts()), ["audit_events", "organization_memberships"]);
+      // Readiness before the global half: not yet a delegated administrator.
+      assert.equal(await readinessOf(platformPage, USERS.staffAdmin, "delegated_administration"), "false");
+      assert.match(await memberRowText(platformPage, rowKey(USERS.staffAdmin)), /Global Get Kinder roles \(all organizations\): none/);
+      await platformPage.setSelectWhere(`() => document.getElementById("gk-team-access-global-role-legacy-${USERS.staffAdmin}")`, "gk_admin");
+      const explanation = await platformPage.evaluate(`document.querySelector('[data-team-access-global-roles="legacy:${USERS.staffAdmin}"] [data-global-role-explanation="gk_admin"]')?.innerText || ""`);
+      assert.match(explanation, /^High-risk Get Kinder governance role/);
+      assert.match(explanation, /export, final release and funder\/public-ready decision authority/);
+      const granted = await confirmGlobalRole(platformPage, USERS.staffAdmin, "Get Kinder administrator", "assign");
+      assert.deepEqual(granted, [["PUT", globalRolePath(USERS.staffAdmin), 200]]);
+      await platformPage.waitFor(async () => (await readinessOf(platformPage, USERS.staffAdmin, "delegated_administration")) === "true", "delegated administration readiness");
+      assert.deepEqual(await globalRolesOf("staffAdmin"), ["gk_admin"]);
+      const audits = (await auditRowsOf("superNoRole")).filter((a) => a.metadata?.target_user_id === kaiUserIds.staffAdmin);
+      assert.deepEqual(audits.map((a) => [a.action, a.metadata.role_name, a.metadata.authority_source]), [
+        ["organization_role_granted_access_admitted", "gk_admin", "platform_superuser"],
+        ["global_kai_role_assigned", "gk_admin", "platform_superuser"],
+      ]);
+      for (const audit of audits) assert.doesNotMatch(JSON.stringify(audit.metadata), /@|tidewater\.test/, "metadata-only audit");
+      assert.deepEqual(platformPage.exceptions, []);
+      results.J10_2 = "PASS";
+    });
+
+    await test("J10-3 (delegated GK administrator): the new administrator manages only organization operator/reviewer roles in Team & Access, sees the incomplete global half named, and every out-of-scope request is refused", async () => {
+      await openTeamAccess(staffAdminPage);
+      const body = await staffAdminPage.text();
+      assert.ok(!body.includes("Platform administration") && !body.includes("Grant global role"), "no platform or global controls");
+      assert.ok(!(await memberRowText(staffAdminPage, rowKey(USERS.staffAdmin)) || "").includes("Add role"), "no self-grant control");
+      for (const [legacyId, key, role] of [[USERS.revRecipient, "revRecipient", "gk_operator"], [USERS.memberA, "memberA", "gk_reviewer"]]) {
+        await staffAdminPage.setSelectWhere(`() => document.getElementById("gk-team-access-add-role-legacy-${legacyId}")`, role);
+        const mark = staffAdminPage.mark();
+        await clickMemberButton(staffAdminPage, rowKey(legacyId), "Add role");
+        await staffAdminPage.waitForText("Organization role assigned. A platform administrator must also assign a global");
+        await staffAdminPage.idle();
+        assert.deepEqual(writes(staffAdminPage.requestsSince(mark)), [["POST", `${membershipPath(ORG_A, legacyId)}/roles`, 200]]);
+        assert.ok((await activeRolesOf(key)).includes(role) && (await activeRolesOf(key)).includes("client_contributor"));
+        assert.deepEqual(await activeRolesOf(key, ORG_B), []);
+        assert.equal(await readinessOf(staffAdminPage, legacyId, "source_review"), "false", "source review still needs a global role");
+      }
+      assert.equal(await readinessOf(staffAdminPage, USERS.memberA, "evidence_review"), "true", "an organization reviewer reviews evidence without a global role");
+      const before = await allKaiCounts();
+      for (const [label, method, path, bodyValue, reason] of [
+        ["global role", "PUT", globalRolePath(USERS.revRecipient), { role_name: "gk_operator", action: "assign" }, "platform_superuser_required"],
+        ["self-elevation", "POST", `${membershipPath(ORG_A, USERS.staffAdmin)}/roles`, { role_name: "gk_reviewer" }, "self_role_elevation_not_allowed"],
+        ["another organization", "POST", `${membershipPath(ORG_B, USERS.memberB)}/roles`, { role_name: "gk_operator" }, "missing_active_organization_membership"],
+        ["organization gk_admin", "POST", `${membershipPath(ORG_A, USERS.memberA)}/roles`, { role_name: "gk_admin" }, "organization_role_not_administrable"],
+      ]) {
+        const refused = await staffAdminPage.fetchJson(method, path, bodyValue);
+        assert.deepEqual([refused.status, refused.blockingReason], [403, reason], label);
+      }
+      assert.deepEqual(changedTables(before, await allKaiCounts()), []);
+      assert.deepEqual(staffAdminPage.exceptions, []);
+      results.J10_3 = "PASS";
+    });
+
+    await test("J10-4/J10-7 (incomplete provisioning; readiness vs enforcement): the operator's source review stays refused until the superuser grants the global role in Team & Access; readiness then agrees with the protected reads", async () => {
+      assert.equal((await revPage.fetchJson("GET", sourceQueuePath(ORG_A))).status, 403, "refused while the global half is missing");
+      await openTeamAccess(platformPage);
+      await platformPage.setSelectWhere(`() => document.getElementById("gk-team-access-administration-organization")`, ORG_A);
+      await platformPage.waitFor(async () => Boolean(await memberRowText(platformPage, rowKey(USERS.revRecipient))), "the operator row");
+      await platformPage.idle();
+      await platformPage.setSelectWhere(`() => document.getElementById("gk-team-access-global-role-legacy-${USERS.revRecipient}")`, "gk_operator");
+      assert.deepEqual(await confirmGlobalRole(platformPage, USERS.revRecipient, "Get Kinder operator", "assign"), [["PUT", globalRolePath(USERS.revRecipient), 200]]);
+      await platformPage.waitFor(async () => (await readinessOf(platformPage, USERS.revRecipient, "source_review")) === "true", "source review readiness");
+      assert.equal((await revPage.fetchJson("GET", sourceQueuePath(ORG_A))).status, 200, "the next protected request is admitted");
+      assert.equal((await revPage.fetchJson("GET", cockpitCapabilitiesPath(ORG_A))).data.can_review_source_candidates, true);
+      // Readiness (server) against the reviewer's actual protected reads.
+      const reviewerChecks = [
+        ["gk_workspace", `${INTAKE}/admin/organizations/${ORG_A}/evidence-library/candidates`],
+        ["generated_content_read", `${INTAKE}/admin/organizations/${ORG_A}/generated-content-drafts`],
+        ["source_review", sourceQueuePath(ORG_A)],
+      ];
+      const memberAPage = await session(USERS.memberA);
+      for (const [key, path] of reviewerChecks) {
+        const ready = await readinessOf(platformPage, USERS.memberA, key);
+        const status = (await memberAPage.fetchJson("GET", path)).status;
+        assert.equal(ready === "true", status === 200, `${key}: readiness ${ready} vs ${path} ${status}`);
+      }
+      const memberCapabilities = (await memberAPage.fetchJson("GET", accessCapabilitiesPath(ORG_A))).data.workflowOperations;
+      assert.equal((await readinessOf(platformPage, USERS.memberA, "evidence_review")) === "true", memberCapabilities.recordEvidenceReview);
+      assert.equal((await readinessOf(platformPage, USERS.memberA, "coverage_acceptance")) === "true", memberCapabilities.acceptCoverageLimitation);
+      results.J10_4 = "PASS";
+    });
+
+    await test("J10-5 (revocation): the superuser revokes the global role in Team & Access and the organization role stays; the delegated administrator removes the organization role; next requests enforce both and the client role remains", async () => {
+      assert.deepEqual(await confirmGlobalRole(platformPage, USERS.revRecipient, "Get Kinder operator", "revoke"), [["PUT", globalRolePath(USERS.revRecipient), 200]]);
+      assert.equal((await revPage.fetchJson("GET", sourceQueuePath(ORG_A))).status, 403, "global revocation applies on the next request");
+      assert.ok((await activeRolesOf("revRecipient")).includes("gk_operator"), "the organization assignment remains");
+      await openTeamAccess(staffAdminPage);
+      const key = rowKey(USERS.revRecipient);
+      const mark = staffAdminPage.mark();
+      await clickMemberButton(staffAdminPage, key, "Remove Get Kinder operator role");
+      await staffAdminPage.waitFor(async () => /keeps their other roles/.test(await memberRowText(staffAdminPage, key) || ""), "confirmation");
+      await clickMemberButton(staffAdminPage, key, "Confirm removing Get Kinder operator");
+      await staffAdminPage.waitFor(async () => !(await memberHasRoleBadge(staffAdminPage, key, "gk_operator")), "removed");
+      await staffAdminPage.idle();
+      assert.deepEqual(writes(staffAdminPage.requestsSince(mark)), [["POST", `${membershipPath(ORG_A, USERS.revRecipient)}/roles/gk_operator/revoke`, 200]]);
+      const capabilities = (await revPage.fetchJson("GET", accessCapabilitiesPath(ORG_A))).data;
+      assert.deepEqual([capabilities.internalKnowledgeWorkspace, capabilities.workflowOperations.extractEvidence], [false, false]);
+      assert.deepEqual(await activeRolesOf("revRecipient"), ["client_contributor"], "unrelated client role intact");
+      assert.deepEqual(await activeRolesOf("memberA"), ["client_contributor", "gk_reviewer"], "other members untouched");
+      results.J10_5 = "PASS";
+    });
+
+    await test("J10-8 (privileged negative cases): an unknown recipient, a mismatched recipient id, and non-superuser context reads are refused with nothing written; errors and audit carry no personal data", async () => {
+      await openTeamAccess(platformPage);
+      await platformPage.setSelectWhere(`() => document.getElementById("gk-team-access-administration-organization")`, ORG_A);
+      await platformPage.idle();
+      const before = await allKaiCounts();
+      await setInput(platformPage, "gk-team-access-add-person-email", "nobody-here@tidewater.test");
+      await platformPage.clickButton("Add person");
+      await platformPage.waitForText("No existing Get Kinder account has that email.");
+      const unknownTarget = await platformPage.fetchJson("PUT", globalRolePath(987654), { role_name: "gk_admin", action: "assign" });
+      assert.notEqual(unknownTarget.status, 200, JSON.stringify(unknownTarget));
+      assert.doesNotMatch(JSON.stringify(unknownTarget), /@|password|token/i);
+      assert.deepEqual(changedTables(before, await allKaiCounts()), [], "nothing written");
+      for (const page of [staffAdminPage, revPage]) {
+        assert.equal((await page.fetchJson("GET", contextPath)).data.platform_administration, false);
+      }
+      const allAudits = await query(`SELECT metadata FROM kai.audit_events WHERE action IN ('organization_role_granted', 'organization_role_granted_access_admitted',
+        'organization_role_revoked', 'organization_role_replaced', 'organization_membership_assigned', 'global_kai_role_assigned', 'global_kai_role_revoked')`);
+      assert.ok(allAudits.length > 0);
+      for (const { metadata } of allAudits) assert.doesNotMatch(JSON.stringify(metadata), /@/, "metadata-only access-administration audit");
+      assert.deepEqual(platformPage.exceptions, []);
+      results.J10_8 = "PASS";
     });
   } finally {
     console.log(`[campaign] RESULTS ${JSON.stringify(results, null, 2)}`);

@@ -738,8 +738,10 @@ test("11a-7. a stale roster: the server refuses, nothing changes, and the re-rea
   assert.deepEqual(store.state.upserts, []);
   // The hook shows a success notice only for a 200, and re-reads the roster
   // on a conflict.
-  assert.match(hookSource, /if \(result\.statusCode === 200 && result\.body\?\.ok\) \{\s*setNotice\(\{ tone: "success"/);
-  assert.match(hookSource, /setNotice\(\{ tone: "error", text: describeRoleChangeError\(failure\) \}\);\s*if \(failure\.status === 409/);
+  assert.match(hookSource, /if \(result\.statusCode === 200 && result\.body\?\.ok\) \{\s*const members = await load\(targetOrganizationId\);[\s\S]{0,200}?setNotice\(\{ tone: "success"/);
+  // Organization-role changes describe their refusal with describeRoleChangeError (the default).
+  assert.match(hookSource, /const mutate = useCallback\(async \(member, buildRequest, method, successText, describeError = describeRoleChangeError\) => \{/);
+  assert.match(hookSource, /setNotice\(\{ tone: "error", text: describeError\(failure\) \}\);\s*if \(failure\.status === 409/);
 });
 
 test("11a-8. administrator eligibility is per organization: each roster read answers for its own organization only", async () => {
@@ -775,7 +777,9 @@ test("12. frontend: Team & Access entry points, roster reads, and the section fo
   assert.match(appSource, /const canManageTeamAccess = capabilitiesResolved && accessCapabilities\.data\?\.organizationAccessManagement === true;/);
   assert.doesNotMatch(appSource, /"client_admin"/);
   // Both entry points exist only with the capability.
-  assert.match(appSource, /onManageTeamAccess=\{hasAuthorizedOrganizations && canManageTeamAccess \? openTeamAccess : undefined\}/);
+  // Prompt 4: also offered to a platform superuser through the server's administration context.
+  assert.match(appSource, /onManageTeamAccess=\{platformAdministration \|\| \(hasAuthorizedOrganizations && canManageTeamAccess\) \? openTeamAccess : undefined\}/);
+  assert.match(appSource, /const platformAdministration = administrationContext\.platformAdministration === true;/);
   assert.match(shellSource, /const canManageTeamAccess = typeof onManageTeamAccess === "function";/);
   assert.match(shellSource, /const navSections = canManageTeamAccess\s*\? \[\.\.\.IMPACT_LIBRARY_NAV_SECTIONS, IMPACT_LIBRARY_TEAM_ACCESS_SECTION\]\s*: IMPACT_LIBRARY_NAV_SECTIONS;/);
   assert.match(shellSource, /\{canManageTeamAccess \? \([\s\S]*?onManageTeamAccess\(\);[\s\S]*?Manage team & access/);
@@ -785,13 +789,16 @@ test("12. frontend: Team & Access entry points, roster reads, and the section fo
   assert.match(shellSource, /key: "teamAccess",/);
   assert.equal([...appSource.matchAll(/<TeamAccessView\b/g)].length, 1);
   // The roster is read only while open with the capability, keyed to the organization.
-  assert.match(appSource, /useTeamAccess\(\s*selectedOrganizationId,\s*canManageTeamAccess && activeSection === TEAM_ACCESS_SECTION_KEY,\s*\)/);
+  assert.match(appSource, /const teamAccessOrganizationId = platformAdministration \? administrationOrganizationId : selectedOrganizationId;/);
+  assert.match(appSource, /const teamAccessAvailable = platformAdministration \? Boolean\(administrationOrganizationId\) : canManageTeamAccess;/);
+  assert.match(appSource, /useTeamAccess\(\s*teamAccessOrganizationId,\s*teamAccessAvailable && activeSection === TEAM_ACCESS_SECTION_KEY,\s*\)/);
   assert.match(hookSource, /if \(requestRef\.current !== token\) return;/);
   assert.match(hookSource, /if \(currentOrganizationRef\.current !== targetOrganizationId\) return \{ ok: false, stale: true \};/);
   assert.match(hookSource, /roster\.organizationId === organizationId \? roster :/);
   // Losing the capability (another organization, a lost role) leaves the section.
-  assert.match(appSource, /if \(activeSection === TEAM_ACCESS_SECTION_KEY && capabilitiesResolved && !canManageTeamAccess\) setActiveSection\("home"\);/);
-  assert.match(appSource, /sectionContent = canManageTeamAccess \? \(\s*<TeamAccessView/);
+  assert.match(appSource, /if \(activeSection === TEAM_ACCESS_SECTION_KEY && !platformAdministration && administrationContext\.status === "success"\s*&& capabilitiesResolved && !canManageTeamAccess\) setActiveSection\("home"\);/);
+  assert.match(appSource, /sectionContent = teamAccessAvailable \? teamAccessView : \(/);
+  assert.match(appSource, /const teamAccessView = \(\s*<TeamAccessView/);
   // An administrator's own role change re-reads the capability answer.
   // An administrator's own role change, or a server conflict, re-reads the
   // capability answer; the hook re-reads the roster on a conflict.

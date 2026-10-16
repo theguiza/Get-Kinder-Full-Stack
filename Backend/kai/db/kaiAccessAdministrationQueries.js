@@ -303,6 +303,22 @@ export async function getRoleIdByName(roleName, db = pool) {
 }
 
 /**
+ * The KAI organizations a platform superuser may choose as the Team & Access
+ * administration context: id and display name only (no membership, content,
+ * or contact data). Read only after validateActorCanPerformPlatformOperation
+ * admitted the caller (kaiAccessAdministrationService.js).
+ */
+export async function listOrganizationsForPlatformAdministration(db = pool) {
+  const { rows } = await db.query(
+    `SELECT organization_id, name
+       FROM kai.organizations
+      ORDER BY name, organization_id
+      LIMIT 1000`,
+  );
+  return rows;
+}
+
+/**
  * Effective GLOBAL kai.user_roles rows for one user: organization_id and
  * engagement_id are both nullable on the deployed table, and a row scoped to
  * an organization or engagement is a different capability than a global one -

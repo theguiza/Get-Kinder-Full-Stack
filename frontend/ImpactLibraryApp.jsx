@@ -34,7 +34,11 @@ import OrganizationJoinPanel from "./impactLibrary/OrganizationJoinPanel.jsx";
 import OrganizationJoinRequestsReviewPanel from "./impactLibrary/OrganizationJoinRequestsReviewPanel.jsx";
 import TeamAccessView from "./teamAccess/TeamAccessView.jsx";
 import { useTeamAccess } from "./teamAccess/useTeamAccess.js";
-import { TEAM_ACCESS_SECTION_KEY } from "./teamAccess/teamAccessLogic.js";
+import {
+  TEAM_ACCESS_SECTION_KEY,
+  projectTeamAccessAdministrationContext,
+  teamAccessAdministrationContextPath,
+} from "./teamAccess/teamAccessLogic.js";
 import {
   declinedJoinRequestMessage,
   deriveJoinRequestView,
@@ -643,20 +647,54 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
     setAccessCapabilities((current) => (current.organizationId === organizationId ? { organizationId, status: data ? "success" : "error", data } : current));
   }, [selectedOrganizationId]);
 
+  // Prompt 4: a platform superuser administers KAI access in Team & Access
+  // for any organization, chosen from the server's administration context,
+  // without a membership there. That choice selects only the roster Team &
+  // Access manages; every content view keeps the membership-based
+  // organization selection and its own server authorization.
+  const [administrationContext, setAdministrationContext] = useState({ status: "loading", platformAdministration: false, organizations: [] });
+  const [administrationOrganizationId, setAdministrationOrganizationId] = useState("");
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const result = await getJson(teamAccessAdministrationContextPath());
+      if (cancelled) return;
+      const context = result.statusCode === 200 && result.body?.ok
+        ? projectTeamAccessAdministrationContext(result.body.data)
+        : projectTeamAccessAdministrationContext(null);
+      setAdministrationContext({ status: "success", ...context });
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const platformAdministration = administrationContext.platformAdministration === true;
+  useEffect(() => {
+    if (!platformAdministration) return;
+    setAdministrationOrganizationId((current) => {
+      const ids = administrationContext.organizations.map((organization) => organization.organizationId);
+      if (ids.includes(current)) return current;
+      return ids.includes(selectedOrganizationId) ? selectedOrganizationId : ids[0] || "";
+    });
+  }, [platformAdministration, administrationContext.organizations, selectedOrganizationId]);
+  const teamAccessOrganizationId = platformAdministration ? administrationOrganizationId : selectedOrganizationId;
+  const teamAccessAvailable = platformAdministration ? Boolean(administrationOrganizationId) : canManageTeamAccess;
+
   // Team & Access: the roster is read only while the section is open and the
   // server reports organizationAccessManagement for the selected
-  // organization. Without it (another organization, a lost role) the
-  // section falls back to Home.
+  // organization (or platform administration for the chosen one). Without
+  // it (another organization, a lost role) the section falls back to Home.
   const teamAccess = useTeamAccess(
-    selectedOrganizationId,
-    canManageTeamAccess && activeSection === TEAM_ACCESS_SECTION_KEY,
+    teamAccessOrganizationId,
+    teamAccessAvailable && activeSection === TEAM_ACCESS_SECTION_KEY,
   );
   useEffect(() => {
     refreshTeamAccessRef.current = teamAccess.refresh;
   }, [teamAccess.refresh]);
   useEffect(() => {
-    if (activeSection === TEAM_ACCESS_SECTION_KEY && capabilitiesResolved && !canManageTeamAccess) setActiveSection("home");
-  }, [activeSection, capabilitiesResolved, canManageTeamAccess]);
+    if (activeSection === TEAM_ACCESS_SECTION_KEY && !platformAdministration && administrationContext.status === "success"
+      && capabilitiesResolved && !canManageTeamAccess) setActiveSection("home");
+  }, [activeSection, capabilitiesResolved, canManageTeamAccess, platformAdministration, administrationContext.status]);
   const openTeamAccess = useCallback(() => setActiveSection(TEAM_ACCESS_SECTION_KEY), []);
   // A change to an administrator's or the user's own roles, or a server
   // conflict meaning this page was stale, re-reads the capability answer so
@@ -673,6 +711,9 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
   const revokeTeamMemberRole = useCallback(async (member, roleName) => {
     await afterTeamAccessChange(member, await teamAccess.revokeRole(member, roleName));
   }, [teamAccess.revokeRole, afterTeamAccessChange]);
+  const changeTeamMemberGlobalRole = useCallback(async (member, roleName, action) => {
+    await afterTeamAccessChange(member, await teamAccess.changeGlobalRole(member, roleName, action));
+  }, [teamAccess.changeGlobalRole, afterTeamAccessChange]);
 
   useEffect(() => {
     setJoinReviewOpen(false);
@@ -770,8 +811,36 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
     activeSection === "home" &&
     REQUEST_STATES_SHOWN_WITH_AUTHORIZED_ORGANIZATIONS.has(onboardingStatus?.status);
 
+  const administrationOrganizationName = platformAdministration
+    ? administrationContext.organizations.find((organization) => organization.organizationId === administrationOrganizationId)?.name || ""
+    : organizationName;
+  const teamAccessView = (
+    <TeamAccessView
+      organizationName={administrationOrganizationName}
+      roster={teamAccess.roster}
+      savingKey={teamAccess.savingKey}
+      notice={teamAccess.notice}
+      onChangeRole={changeTeamMemberRole}
+      onGrantRole={grantTeamMemberRole}
+      onRevokeRole={revokeTeamMemberRole}
+      onRefresh={teamAccess.refresh}
+      joinReview={joinReview.organizationId === teamAccessOrganizationId ? joinReview : null}
+      onDecideJoinRequest={decideJoinRequest}
+      administration={platformAdministration
+        ? { platformAdministration: true, organizations: administrationContext.organizations, organizationId: administrationOrganizationId }
+        : null}
+      onSelectAdministrationOrganization={setAdministrationOrganizationId}
+      onChangeGlobalRole={changeTeamMemberGlobalRole}
+      onAddPerson={teamAccess.addPerson}
+    />
+  );
+
   let sectionContent;
-  if (!hasAuthorizedOrganizations && onboardingLoaded) {
+  if (activeSection === TEAM_ACCESS_SECTION_KEY && platformAdministration) {
+    // A platform superuser reaches Team & Access with or without any
+    // organization membership of their own.
+    sectionContent = teamAccessAvailable ? teamAccessView : <div style={{ color: "#8890A0", fontSize: 14 }}>No KAI organization to administer yet.</div>;
+  } else if (!hasAuthorizedOrganizations && onboardingLoaded) {
     sectionContent = (
       <div className="gk-organization-setup">
         <OrganizationOnboardingPanel
@@ -792,20 +861,7 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
   } else if (!hasAuthorizedOrganizations) {
     sectionContent = <div style={{ color: "#8890A0", fontSize: 14 }}>Loading organization setup...</div>;
   } else if (activeSection === TEAM_ACCESS_SECTION_KEY) {
-    sectionContent = canManageTeamAccess ? (
-      <TeamAccessView
-        organizationName={organizationName}
-        roster={teamAccess.roster}
-        savingKey={teamAccess.savingKey}
-        notice={teamAccess.notice}
-        onChangeRole={changeTeamMemberRole}
-        onGrantRole={grantTeamMemberRole}
-        onRevokeRole={revokeTeamMemberRole}
-        onRefresh={teamAccess.refresh}
-        joinReview={joinReview.organizationId === selectedOrganizationId ? joinReview : null}
-        onDecideJoinRequest={decideJoinRequest}
-      />
-    ) : (
+    sectionContent = teamAccessAvailable ? teamAccessView : (
       <div style={{ color: "#8890A0", fontSize: 14 }}>Loading...</div>
     );
   } else if ((activeSection === "knowledgeStudio" || activeSection === "impactLibrary") && !capabilitiesResolved) {
@@ -928,7 +984,7 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
       organizationActionLabel={hasAuthorizedOrganizations ? "Request another organization" : "Request organization"}
       onJoinOrganization={openJoinOrganization}
       onReviewJoinRequests={hasAuthorizedOrganizations && joinReview.available ? openJoinReview : undefined}
-      onManageTeamAccess={hasAuthorizedOrganizations && canManageTeamAccess ? openTeamAccess : undefined}
+      onManageTeamAccess={platformAdministration || (hasAuthorizedOrganizations && canManageTeamAccess) ? openTeamAccess : undefined}
       hasAttention={needsAttention.hasAttention}
       onOpenNeedsAttention={() => setActiveSection("needsAttention")}
     >
