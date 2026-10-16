@@ -39323,3 +39323,149 @@ flag, tenant, deployment, or real-data action is authorized.
 
 **Status:** PACKAGE_BE_INDEPENDENT_GRANTS_COMPLETE_LOCAL_SYNTHETIC. This is
 the single package-end evidence update in the living ExecPlan.
+
+### Reusable provisioning and effective-authorization conformance (2026-10-16)
+
+**Owner authorization (USER_CONFIRMED):** the owner's Execution Prompt 1
+("Complete the Reusable Provisioning and Effective Authorization System")
+authorizes local synthetic repository verification and correction of the
+existing identity, administrator provisioning, authorization and
+access-control implementation across organizations, Projects, data objects
+and governed processes. No production role grant, database change,
+deployment, real-client data, live human-review decision, policy change,
+second policy engine or new bootstrap path. Decisions A and D stay held.
+
+**Start (TOOL_VERIFIED):** `main` at `3e4e0fc`, clean. B/E (`fb212f1`),
+Decision C (`92550e2`), integrated workspace (`476e0e8`, `4ffb23f`) and
+Packages 1-5 are present and were not rebuilt. Baseline B/E plus integrated
+workspace specs: 40/0.
+
+**Requirement sources (NOT_CONFIRMED in the repository):** the A-Q
+authorization-to-action definition, W0-W9 and INT-01..INT-28 identifiers are
+not present in this repository or this plan (searched all tracked files).
+No requirement text was manufactured from those identifiers. Coverage below
+binds to the accepted sources that are recorded here: the J1-J8 / P3-A..J
+campaign cases, Decisions A-G, the 2026-10-14 operation-policy matrix and
+the 2026-10-15 B/E decision.
+
+**Coverage record (criterion -> source -> implementation -> prior proof -> gap -> result):**
+
+| Criterion | Governing source | Implementation | Prior proof | Uncovered | Result |
+| --- | --- | --- | --- | --- | --- |
+| Website identity -> active KAI actor | Package 1 | `resolveKaiActorContext`, JIT with email | J2-0/J2-1, JIT spec 26/0 | none | unchanged, re-exercised |
+| Superuser global-role administration | Package 2, B/E | `manageGlobalKaiRole` (platform operation) | P2 access admin runner, J8-1 | none | re-proved in the cross-organization lifecycle |
+| Delegated GK administrator | B/E | `resolveOrganizationRoleAdministration` | B/E spec, J8-2/J8-4 | other-organization and global attempts in one matrix | new configuration-4 matrix |
+| Client administrator / ordinary user / self-elevation refusals | Package 2, B/E | access-administration service | B/E spec | PUT returned 422 for a known role the grant route refused with 403 | **repaired** (below) |
+| Additive grant / explicit replacement / targeted revocation | B/E C04-C06 | grant/revoke/manage writers | B/E spec, runner B/E 1-5 | none | unchanged |
+| Activation on next request; revocation per grant | Decision E (as accepted in B/E), J7-4, J8-4, P3-H | per-request actor resolution | browser J7/J8/P3-H | global role retained after the last organization role is revoked | new lifecycle: the retained global role then authorizes nothing |
+| No grant from review work | B/E; single writer | `kaiAccessAdministrationQueries.js` only | none explicit | structural proof | new source scan: the only writer of `kai.organization_memberships`/`kai.user_roles` |
+| Metadata-only, attributable administration audit | Package 2 | `createProductionMetadataOnlyAuditForAccessAdministration` | JOIN-3 PII checks only | no PII assertion for grant/replace/revoke/global audits | new: real composer rows carry actor, target, organization, role, authority; no email, name or legacy id |
+| One actor with different authority in A/B/C | 2026-10-14 matrix, J3 | shared validator, `combineGlobalRoles`, binding derivation | none found (inventory) | whole configuration | new configurations 1-3 |
+| Capability readback equals enforcement | Package 3, 2026-10-14 | `getOrganizationAccessCapabilities`, cockpit capabilities | single-organization specs | multi-organization, per-service | new: 7 actors x 3 organizations x 8 services |
+| Structured refusals (no tenant mislabel) | Package 5 precedent | shared validator | P2-02/P2-03 only | P1-06, P1-07, P2-01, P2-04 still mislabeled | **repaired** (below) |
+| Recorded decider role | `resolveAuthorizedHumanRole` contract | P2-12/P2-09 etc. | human-review specs | requirement assessment recorded a role from another organization, an inactive row, or a global role | **repaired** (below) |
+| Cross-tenant target substitution | Package 5, repositories | organization-scoped SQL | P2-02/P2-03, P1-07, J3-3 runners | none at SQL level | each service forwards exactly the requested organization; refusal reaches no repository |
+| Superuser review attribution | Decision D | `kaiAuthorizedRoleAttribution.js`, constant roles | documented | held | unchanged |
+| Source-review conjunction | Decision A | cockpit `globalRolesOnly` + P1-08 | J5-1..J5-4 | held | unchanged |
+
+**Demonstrated defects and every affected implementation (TOOL_VERIFIED):**
+1. *Role/membership refusals reported as `tenant_boundary_violation`.* The
+   Package 5 repair covered only P2-02/P2-03. P1-06
+   `createSensitivityReviewQueueItem` (and `ensureSensitivityReviewQueueItem`
+   through it), P1-07 `createSourceCandidateStub`, P2-01
+   `extractEvidenceFromSourceVersion` and P2-04 `generateClaimGapFollowups`
+   still replaced the shared validator's code. Both codes are HTTP 403, but
+   users saw "Request crosses tenant boundaries." for a role refusal. All four
+   now return the validator's own code and blockers; the separate
+   tenant-consistency check is unchanged. The inventory found no other remap.
+   `kaiAssistantClaimTraceabilityTool` deliberately maps a missing membership
+   to `tenant_boundary_violation` (P2-07 assistant contract) and keeps role
+   refusals; it is unchanged.
+2. *Inconsistent structured refusal for the same denied grant.* The membership
+   PUT returned 422 `validation_blocker` for a known role outside the actor's
+   administration scope; the additive grant route returned 403
+   `authorization_denied` with `non_client_membership_not_client_managed` /
+   `organization_role_not_administrable`. The PUT now returns the grant
+   route's refusal; unknown roles stay `validation_blocker`. Team & Access
+   already shows these blocking reasons specifically. Authority is unchanged.
+3. *Requirement assessment attribution.* `assessOrganizationRequirement` and
+   `assessEngagementRequirement` authorize with exact-organization membership
+   roles only, but recorded `actorRole` from global roles or memberships of
+   any organization and status. An actor authorized by an active organization
+   gk_admin who held gk_reviewer elsewhere, inactive, or globally was recorded
+   as gk_reviewer. Both now use the shared `resolveAuthorizedHumanRole`
+   through `resolveRequirementAssessmentActorRole`; the platform-superuser
+   branch is exactly the previous expression (Decision D held).
+
+Not reachable, recorded only: `createReviewQueueItem` accepts caller-supplied
+target ids, but no route or worker calls it.
+
+**Changes:** `kaiClaimGapFollowupService.js`, `kaiEvidenceLineageService.js`,
+`kaiSourceCandidateService.js`, `kaiReviewQueueService.js` (validator code
+passthrough); `kaiAccessAdministrationService.js` (PUT refusal);
+`kaiRequirementAssessmentService.js`,
+`kaiEngagementRequirementAssessmentService.js` (attribution). No route, SQL,
+schema, role set, feature flag, frontend source or bundle change.
+
+**Tests:**
+- New `__tests__/kai-sprint2-cross-organization-provisioning-authorization.spec.js`
+  (9 cases): configurations 1-3 per organization (discovery, capabilities,
+  GK/client workspace, review, cockpit, P1-08, Project, Team & Access, and
+  eight real service entry points); capability/enforcement agreement for
+  seven actors in three organizations; requirement-assessment attribution;
+  the lifecycle (superuser global grant -> no access anywhere; delegated
+  organization grant in A only; next-request activation; additive grant;
+  targeted revocation; retained global role authorizes nothing; global
+  revocation; seven attributable PII-free audit rows); configuration-4
+  denials (18 attempts, no writes, no audit); superuser administration of an
+  organization it is not a member of; single-writer source scan.
+- Red-to-green: against the starting services the new spec is 2/7; with the
+  repairs 9/0.
+- Pins updated to the repaired codes: P1-06 boundary (4) and integration (2),
+  P1-07 boundary (7) and handoff integration (11), P2-04 boundary (1), P2-01
+  browser (1, now also `role_not_allowed`), access administration unit (1),
+  B/E (1), Team & Access (1), access-administration integration (1),
+  provisioning and edge-case browser (1 each).
+
+**Verification (TOOL_VERIFIED; sentinel `DATABASE_URL`; runner-owned loopback
+PostgreSQL; real Chrome; synthetic data):**
+- New spec 9/0. Focused boundary/route specs 122/0; access-administration,
+  B/E, Team & Access 78/0; requirement-assessment consumers 80/0.
+- `test:kai-sprint2` 4813/0/90; `npm test` 5536/0/105;
+  `verify:kai-sprint2-api-contract` 71/0. Skips unchanged and explicit.
+- PostgreSQL runners (18, all 0 failures): P1-06 15, P1-07 candidate 11,
+  P1-07 handoff 22, P1-08 19, P2-01 lineage 17, P2-01 handoff 7, P2-02 7,
+  P2-03 15, P2-04 18, P2-12 ledger 24, access administration 36, C2-1 29,
+  C3-A3 (all stages 0 failures), C3-A3-B 20, C3-B2 16, C3-B3 (all stages 0
+  failures), C3B2-C 6, Project 21.
+- Browser (11 suites, 139/0): approval-to-action campaign 48/0, authorization
+  edges 11/0, provisioning 13/0, P2-01 7/0, Team & Access 7/0, sensitivity
+  16/0, P2-12 11/0, reviewed-evidence proposal 10/0, evidence pipeline 7/0,
+  Knowledge Studio 6/0, rehydration 3/0.
+- `npm run build` passed; `entry.js` SHA-256 `123d7f9f081ea50acbdc4aa7d3a1e1db966939397e9531b4b2f4b5e971835bf2`, identical to the committed B/E bundle.
+- `git diff --check` clean; complete diff inspected.
+
+**Policy decisions (minimum, not blocking):**
+- *Binding-derived client_admin as the exact-organization access that admits
+  a global GK role.* Configuration 1 in B: global gk_reviewer + derived
+  client_admin yields GK workspace, evidence/claim review, cockpit source and
+  sensitivity review (never P1-08 or direct organization-GK operations). The
+  accepted rule ("global GK capability only with active access to the exact
+  organization", J3) does not distinguish stored from derived access; the
+  established behavior is preserved. Confirm, or restrict global admission to
+  stored memberships.
+- Held unchanged: A (source-review conjunction), D (superuser attribution and
+  constant P2-10/P2-11/applicability roles), same human may propose and
+  approve a claim (Decision C finding), F/G product decisions.
+
+**Live provisioning remains (NOT_CONFIRMED):** a legitimate production
+platform superuser (`ADMIN_EMAILS`/site-admin state), production role and
+membership rows, the live `kai.organization_memberships` constraint, live
+sign-in, and deployment of these commits. Local synthetic proof does not
+establish production initiation.
+
+**Status:** REUSABLE_PROVISIONING_AND_AUTHORIZATION_CONFORMANCE_COMPLETE_LOCAL_SYNTHETIC.
+No push, deployment, production/shared database, migration/schema, feature
+flag, credential, tenant, production role, destructive action, or
+`00_KAI_CURRENT_STATE.md` change. This is the single package-end evidence
+update in the living ExecPlan.
