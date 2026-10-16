@@ -39596,3 +39596,141 @@ push, deployment, production/shared database, migration/schema, flag,
 credential, tenant, production role, review decision, destructive action, or
 `00_KAI_CURRENT_STATE.md` change. This is the single package-end evidence
 update in the living ExecPlan.
+
+### GK administrator provisioning to organization-scoped product access (2026-10-16)
+
+**Owner authorization (USER_CONFIRMED):** the owner's Prompt 3 authorizes
+local synthetic proof and repair of the platform-superuser -> delegated GK
+administrator -> operator/reviewer -> effective product access -> revocation
+lifecycle, consuming Prompts 1-2 unchanged. No production role, account,
+deployment, schema, flag, review decision, or Fraserview replay.
+
+**Start (TOOL_VERIFIED):** `main` at `e057619`, clean; `1a83a32`, `7eadaf3`,
+`f9f2a54`, `e057619`, `fb212f1`, `92550e2` are ancestors.
+
+**Provisioning mechanism (TOOL_VERIFIED):**
+- Initiator: platform superuser = Get Kinder site admin (`req.user.is_admin`,
+  or `ADMIN_EMAILS`) through the real `ensureAdmin` (`/admin`) and the
+  actor-context `platformSuperuser`; no KAI role satisfies it.
+- Organization `gk_admin`: `/admin` -> Organizations -> KAI Access ->
+  exact-email lookup (`GET /api/admin/users/lookup`) -> role `gk_admin` ->
+  "Grant KAI Access" (additive `POST .../memberships/:legacyId/roles`).
+- Global `gk_admin`: `PUT /api/kai/sprint2/access-administration/global-roles/:legacyId`
+  `{role_name: "gk_admin", action: "assign"}` from a signed-in superuser
+  session (`manageGlobalKaiRole`, superuser-only, audited
+  `global_kai_role_assigned`/`platform_superuser`). The modal's global-role
+  controls offer only `gk_reviewer`/`gk_operator`; `buildKaiGlobalRolePayload`
+  rejects `gk_admin`, pinned by "the modal never grants global gk_admin"
+  (B/E implementation, `fb212f1`). No owner decision records why; the
+  restriction is preserved.
+- Delegated administration requires both halves; organization `gk_admin`
+  alone gives the GK workspace but not Team & Access.
+
+**New acceptance (campaign J9, real Chrome over the real routers):**
+- J9-1: the superuser's modal lists organization `gk_admin`; two existing
+  accounts become Org A `client_contributor` and the recipient organization
+  `gk_admin` through it (lookup + one POST each, audited
+  `organization_role_granted_access_admitted`/`platform_superuser`); the
+  row has no global `gk_admin` control; organization-only capabilities are
+  workspace true, Team & Access false; the delegated administrator, a client
+  administrator, an ordinary member and the recipient each get 403
+  `platform_superuser_required` for global `gk_admin` with zero writes; the
+  recipient is redirected from `/admin`; the superuser's governed PUT
+  assigns it (audited); the roster reads it back; Org B stays 403
+  `missing_active_organization_membership`.
+- J9-2: the recipient signs in, is offered Team & Access on the next
+  request, and adds organization `gk_operator` and `gk_reviewer` to the two
+  members through it (one POST each, client role kept, nothing in Org B,
+  audited `organization_role_granted`/`delegated_gk_admin`); no Add role on
+  its own row; organization `gk_admin`, a client role, self-elevation,
+  another organization and a global role are refused 403 with the
+  structured reason and zero writes.
+- J9-3: per-surface reads for the three actors in Org A and Org B, server
+  capabilities, GK Studio Project/Evidence/Reviews presentation, a
+  generated-draft fixture (generator output rows only: every generation
+  route calls an external model; open review item, no decision) read by
+  library and review packet (with its citation), and each actor's own
+  navigation across Home, Impact Library, Projects and Knowledge Studio
+  (Files, Processing, Evidence, Gaps, Reviews).
+- J9-4: the administrator removes only the reviewer's `gk_reviewer` in Team
+  & Access (confirmation, one revoke POST); the reviewer's next requests lose
+  the GK workspace, evidence review and GK evidence reads while Projects
+  stay readable; the superuser revokes the administrator's global
+  `gk_admin`; Team & Access and the roster are then 403 and a grant is
+  refused with zero writes; the organization assignment remains.
+
+**Effective access (TOOL_VERIFIED, Org A; every Org B surface 403 and no
+Org B review capability for all three):**
+
+| Surface | Admin (global+org gk_admin) | Operator (org gk_operator) | Reviewer (org gk_reviewer) |
+| --- | --- | --- | --- |
+| Org discovery, capabilities, Projects, Data Sources, Evidence/Claim Library, Review Queue, eligible claims, requirements, Impact Facts | read | read | read |
+| Team & Access roster / grants | read / gk_operator, gk_reviewer | 403 | 403 |
+| Source review cockpit queue | read; promote | 403 (no global role, Decision A) | 403 (same) |
+| Sensitivity review | yes | no | no |
+| Evidence / claim review decisions | yes | no | yes |
+| Direct extraction, P2-02/P2-03, gap follow-ups | yes | yes | yes |
+| Coverage acceptance | no (gk_reviewer only) | no | yes |
+| Generated Drafts library, review packet | read | 403 | read |
+| Generated-content review | yes | no | yes |
+| Grant Response Packet, Board Reporting packet | read | 403 (UI no longer requests) | read |
+| Project create/change | yes | yes | no |
+| Export candidate/review/final release/manifest, funder/public-ready decisions | organization `gk_admin` only (existing contracts), still gated by claim eligibility and human decisions | no | no |
+
+**Demonstrated defect and correction:** J9-3 reproduced the operator's own
+UI requesting the Grant Response Packet and Board Reporting packet and
+receiving 403 (shown as "Actor is not authorized for this operation."),
+while draft reads were already capability-gated. Repair:
+`getOrganizationAccessCapabilities.workflowOperations` adds
+`readGrantResponsePacket` and `readBoardReportingPacket`, each the packet
+service's own exported operation and role set (gk_admin/gk_reviewer,
+combined); the frontend projection fails closed on them; the two packet
+effects skip the read and show a not-permitted line when false; the GRP
+Markdown preview link follows the same capability. No server role set
+changed. Before: navigation failed with the two 403s; after: zero failed UI
+requests, operator packet reads 0, readers 2 each.
+
+**Tests:** campaign 52/0 (48 existing + J9-1..4); new unit regressions for
+the two capabilities and the not-permitted effect; harness pins of the two
+effects' dependency arrays updated (GRP real-execution, P14-06, P14-06E2,
+BR-05, shared-engagement ownership).
+
+**Verification (TOOL_VERIFIED; sentinel `DATABASE_URL`; runner-owned loopback
+PostgreSQL; real Chrome; synthetic data):** `test:kai-sprint2` 4818/0/90;
+`npm test` 5541/0/105; API contract 71/0; access administration PostgreSQL
+36/0; browser 11 suites 142/0 plus campaign 52/0; `npm run build` twice,
+`entry.js` SHA-256
+`9ee1a86384d442286005a61e515ad70b0448df19b8aea479c37cc1cab6d1c3ac`;
+`git diff --check` clean; complete diff inspected.
+
+**Owner decisions (not changed):**
+1. Offer global `gk_admin` grant/revoke in the superuser-only `/admin`
+   modal, or keep it on the governed superuser API only.
+2. Organization B (global GK role + binding-derived `client_admin` only):
+   currently GK workspace, evidence/claim review, cockpit source and
+   sensitivity review, drafts and both reporting packets (combined-role
+   reads); no P1-08, direct organization-GK operations, coverage
+   acceptance, export or Team & Access GK grants. Confirm, or require a
+   stored organization GK assignment for some or all of these.
+3. Delegating organization `gk_admin` also delegates export, final-release
+   and funder/public-ready decision authority under the existing contracts.
+- Held: A, D.
+
+**Production handoff (NOT_CONFIRMED until separately executed and verified):**
+a site admin signs in -> `/admin` -> Organizations -> KAI Access for the
+bound organization -> grants the existing account organization `gk_admin`
+by exact email -> issues the governed global `gk_admin` PUT from the same
+session -> confirms the roster and `audit_events`
+(`organization_role_granted_access_admitted`, `global_kai_role_assigned`,
+`platform_superuser`) -> the recipient signs in to `/impact-library`,
+selects the organization and Project, sees Team & Access, and grants
+organization `gk_operator`/`gk_reviewer` to existing members (audited
+`delegated_gk_admin`). Each production grant, the live account and email,
+the binding, and deployment of these commits need separate owner
+authorization.
+
+**Status:** GK_ADMIN_PROVISIONING_TO_PRODUCT_ACCESS_COMPLETE_LOCAL_SYNTHETIC.
+No push, deployment, production/shared database, migration/schema, flag,
+credential, tenant, production role, review decision, destructive action, or
+`00_KAI_CURRENT_STATE.md` change. This is the single package-end evidence
+update in the living ExecPlan.
