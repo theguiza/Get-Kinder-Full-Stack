@@ -854,7 +854,10 @@ test("an invalid administration target id is refused before any query", async ()
 test("every target-creating administration writer resolves its target through the email-carrying resolver by default", () => {
   const source = readFileSync("Backend/kai/services/kaiAccessAdministrationService.js", "utf8");
   const defaults = source.match(/dependencies\.findOrCreateKaiUserByLegacyPublicUserdataId \|\| (\w+)/g);
+  // manageOrganizationMembership, grantOrganizationRole, manageGlobalKaiRole,
+  // and staff onboarding (resolveStaffKaiUser).
   assert.deepEqual(defaults, [
+    "dependencies.findOrCreateKaiUserByLegacyPublicUserdataId || findOrCreateKaiUserForAdministrationTarget",
     "dependencies.findOrCreateKaiUserByLegacyPublicUserdataId || findOrCreateKaiUserForAdministrationTarget",
     "dependencies.findOrCreateKaiUserByLegacyPublicUserdataId || findOrCreateKaiUserForAdministrationTarget",
     "dependencies.findOrCreateKaiUserByLegacyPublicUserdataId || findOrCreateKaiUserForAdministrationTarget",

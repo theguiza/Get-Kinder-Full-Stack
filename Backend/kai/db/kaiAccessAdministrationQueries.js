@@ -434,6 +434,39 @@ export async function revokeGlobalRole({ userId, roleName }, db = pool) {
 }
 
 /**
+ * Get Kinder account identity for delegated GK staff onboarding: the
+ * account's id, email, and the existing verification and suspension columns
+ * login (index.js) and the authenticated-API gate (middleware/auth.js)
+ * enforce. Read-only. The exact-email read returns up to two rows so a
+ * caller can refuse an ambiguous email instead of picking an account.
+ */
+const STAFF_ACCOUNT_COLUMNS = "id, email, email_verified, is_suspended";
+
+export async function listStaffAccountsByExactEmail(normalizedEmail, db = pool) {
+  const { rows } = await db.query(
+    `SELECT ${STAFF_ACCOUNT_COLUMNS}
+       FROM public.userdata
+      WHERE LOWER(TRIM(email)) = $1
+      ORDER BY id
+      LIMIT 2`,
+    [normalizedEmail],
+  );
+  return rows;
+}
+
+export async function getStaffAccountById(legacyPublicUserdataId, db = pool) {
+  if (!Number.isInteger(legacyPublicUserdataId) || legacyPublicUserdataId <= 0) return null;
+  const { rows } = await db.query(
+    `SELECT ${STAFF_ACCOUNT_COLUMNS}
+       FROM public.userdata
+      WHERE id = $1
+      LIMIT 1`,
+    [legacyPublicUserdataId],
+  );
+  return rows[0] || null;
+}
+
+/**
  * Bounded target-user resolution: this package administers only Get Kinder
  * users already (or now, via the same existing JIT mechanism actor
  * resolution already uses) mapped into kai.users. It invents no second

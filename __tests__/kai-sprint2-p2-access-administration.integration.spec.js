@@ -390,8 +390,10 @@ async function runIntegrationSuite() {
       // One public.userdata identity; optionally a kai.users mapping with the
       // given status (null = never provisioned) and a Get Kinder org-admin
       // membership of gkAdminOf.
+      // Every person here signs in, so their Get Kinder account is verified
+      // (delegated GK grants require it - Repair 1).
       async function seedPerson({ kaiStatus = "active", gkAdminOf = null } = {}) {
-        const legacyId = (await pool.query("INSERT INTO public.userdata (org_id) VALUES ($1) RETURNING id", [gkAdminOf])).rows[0].id;
+        const legacyId = (await pool.query("INSERT INTO public.userdata (org_id, email_verified) VALUES ($1, true) RETURNING id", [gkAdminOf])).rows[0].id;
         if (gkAdminOf) {
           await pool.query("INSERT INTO public.user_org_memberships (org_id, user_id, role, is_active) VALUES ($1, $2, 'admin', true)", [gkAdminOf, legacyId]);
         }

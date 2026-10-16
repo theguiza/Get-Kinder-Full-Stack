@@ -714,6 +714,9 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
   const changeTeamMemberGlobalRole = useCallback(async (member, roleName, action) => {
     await afterTeamAccessChange(member, await teamAccess.changeGlobalRole(member, roleName, action));
   }, [teamAccess.changeGlobalRole, afterTeamAccessChange]);
+  const completeTeamMemberStaffOnboarding = useCallback(async (member, roleName) => {
+    await afterTeamAccessChange(member, await teamAccess.completeStaffOnboarding(member, roleName));
+  }, [teamAccess.completeStaffOnboarding, afterTeamAccessChange]);
 
   useEffect(() => {
     setJoinReviewOpen(false);
@@ -832,6 +835,8 @@ export default function ImpactLibraryApp({ initialSection = "home" } = {}) {
       onSelectAdministrationOrganization={setAdministrationOrganizationId}
       onChangeGlobalRole={changeTeamMemberGlobalRole}
       onAddPerson={teamAccess.addPerson}
+      onAddStaff={teamAccess.addStaff}
+      onCompleteStaffOnboarding={completeTeamMemberStaffOnboarding}
     />
   );
 

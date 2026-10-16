@@ -738,7 +738,9 @@ test("11a-7. a stale roster: the server refuses, nothing changes, and the re-rea
   assert.deepEqual(store.state.upserts, []);
   // The hook shows a success notice only for a 200, and re-reads the roster
   // on a conflict.
-  assert.match(hookSource, /if \(result\.statusCode === 200 && result\.body\?\.ok\) \{\s*const members = await load\(targetOrganizationId\);[\s\S]{0,200}?setNotice\(\{ tone: "success"/);
+  // (A string outcome is a success notice; staff onboarding's pending outcome
+  // carries its own warning tone - Repair 1.)
+  assert.match(hookSource, /if \(result\.statusCode === 200 && result\.body\?\.ok\) \{\s*const members = await load\(targetOrganizationId\);[\s\S]{0,320}?setNotice\(typeof outcome === "string" \? \{ tone: "success"/);
   // Organization-role changes describe their refusal with describeRoleChangeError (the default).
   assert.match(hookSource, /const mutate = useCallback\(async \(member, buildRequest, method, successText, describeError = describeRoleChangeError\) => \{/);
   assert.match(hookSource, /setNotice\(\{ tone: "error", text: describeError\(failure\) \}\);\s*if \(failure\.status === 409/);

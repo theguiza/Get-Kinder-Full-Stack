@@ -5,8 +5,16 @@ import {
   describeGlobalRoleError,
   describeRoleChangeError,
   describeTeamAccessReadError,
+  describeStaffOnboardingError,
   projectTeamAccessAdministrableRoles,
   projectTeamAccessGlobalAdministration,
+  projectTeamAccessStaffOnboardingRoles,
+  staffOffboardingResultMessage,
+  staffOnboardingResultMessage,
+  teamAccessStaffOffboardingRequest,
+  teamAccessStaffOnboardingByEmailRequest,
+  teamAccessStaffOnboardingRequest,
+  memberDisplayName,
   teamAccessAddPersonGrantRequest,
   teamAccessAddPersonLookupPath,
   teamAccessGlobalRoleRequest,
@@ -24,7 +32,8 @@ import {
 } from "./teamAccessLogic.js";
 
 const IDLE = Object.freeze({
-  organizationId: "", status: "idle", members: [], administrableRoles: [], globalRolesVisible: false, assignableGlobalRoles: [], error: "",
+  organizationId: "", status: "idle", members: [], administrableRoles: [], globalRolesVisible: false, assignableGlobalRoles: [],
+  staffOnboardingRoles: [], error: "",
 });
 
 // The access-administration role change is a PUT, and the role grant and
@@ -44,6 +53,15 @@ async function sendJson(method, path, body) {
   }
   return { statusCode: response.status, body: responseBody };
 }
+
+// Staff onboarding (organization role plus, when it affects no other
+// organization, the global role the work needs): the server's answer says
+// whether it is complete or waits for platform approval of the global role.
+function staffOnboardingNotice(data, displayName) {
+  return { tone: data?.onboarding_status === "complete" ? "success" : "warning", text: staffOnboardingResultMessage(data, displayName) };
+}
+
+const staffOnboardingOutcome = (member) => (_members, data) => staffOnboardingNotice(data, memberDisplayName(member));
 
 /**
  * Team & Access roster for one organization, read only while `enabled` (the
@@ -68,6 +86,7 @@ export function useTeamAccess(organizationId, enabled) {
       administrableRoles: current.organizationId === targetOrganizationId ? current.administrableRoles : [],
       globalRolesVisible: current.organizationId === targetOrganizationId ? current.globalRolesVisible : false,
       assignableGlobalRoles: current.organizationId === targetOrganizationId ? current.assignableGlobalRoles : [],
+      staffOnboardingRoles: current.organizationId === targetOrganizationId ? current.staffOnboardingRoles : [],
       error: "",
     }));
     const result = await getJson(teamAccessRosterPath(targetOrganizationId));
@@ -80,6 +99,7 @@ export function useTeamAccess(organizationId, enabled) {
         members,
         administrableRoles: projectTeamAccessAdministrableRoles(result.body.data),
         ...projectTeamAccessGlobalAdministration(result.body.data),
+        staffOnboardingRoles: projectTeamAccessStaffOnboardingRoles(result.body.data),
         error: "",
       });
       return members;
@@ -91,6 +111,7 @@ export function useTeamAccess(organizationId, enabled) {
       administrableRoles: [],
       globalRolesVisible: false,
       assignableGlobalRoles: [],
+      staffOnboardingRoles: [],
       error: describeTeamAccessReadError(teamAccessErrorFromResult(result)),
     });
     return null;
@@ -114,7 +135,8 @@ export function useTeamAccess(organizationId, enabled) {
 
   // One role change (PUT replacement), grant, or revocation (POSTs) for one
   // member; the server answers, and the roster is always re-read from it.
-  // `successText` may read the re-read roster (the post-grant handoff).
+  // `successText` may read the re-read roster (the post-grant handoff) and
+  // the response data, and may return { tone, text } for a pending outcome.
   const mutate = useCallback(async (member, buildRequest, method, successText, describeError = describeRoleChangeError) => {
     const targetOrganizationId = currentOrganizationRef.current;
     if (!targetOrganizationId || !enabled || savingKey || !member) return { ok: false };
@@ -133,7 +155,8 @@ export function useTeamAccess(organizationId, enabled) {
     if (result.statusCode === 200 && result.body?.ok) {
       const members = await load(targetOrganizationId);
       if (currentOrganizationRef.current !== targetOrganizationId) return { ok: true, stale: true };
-      setNotice({ tone: "success", text: typeof successText === "function" ? successText(members) : successText });
+      const outcome = typeof successText === "function" ? successText(members, result.body.data) : successText;
+      setNotice(typeof outcome === "string" ? { tone: "success", text: outcome } : outcome);
       return { ok: true };
     }
     const failure = teamAccessErrorFromResult(result);
@@ -147,15 +170,55 @@ export function useTeamAccess(organizationId, enabled) {
     return mutate(member, (orgId) => teamAccessRoleChangeRequest(orgId, member, roleName), "PUT", roleChangeSuccessMessage(member, roleName));
   }, [mutate]);
 
-  // An added organization role that still leaves an operation blocked only by
-  // a missing global role says so, from the re-read server readiness.
+  // A delegated GK administrator's operator/reviewer grant is staff
+  // onboarding (see staffOnboardingNotice). Any other added organization
+  // role that still leaves an operation blocked only by a missing global
+  // role says so, from the re-read server readiness.
   const grantRole = useCallback(
-    (member, roleName) => mutate(member, (orgId) => teamAccessRoleGrantRequest(orgId, member, roleName), "POST", (members) => {
-      const refreshed = (members || []).find((candidate) => candidate.key === member.key);
-      return teamAccessHandoffNotice(refreshed) || roleGrantSuccessMessage(member, roleName);
-    }),
-    [mutate],
+    (member, roleName) => (roster.staffOnboardingRoles.includes(roleName)
+      ? mutate(member, (orgId) => teamAccessStaffOnboardingRequest(orgId, member, roleName, roster.staffOnboardingRoles), "POST",
+        staffOnboardingOutcome(member), describeStaffOnboardingError)
+      : mutate(member, (orgId) => teamAccessRoleGrantRequest(orgId, member, roleName), "POST", (members) => {
+        const refreshed = (members || []).find((candidate) => candidate.key === member.key);
+        return teamAccessHandoffNotice(refreshed) || roleGrantSuccessMessage(member, roleName);
+      })),
+    [mutate, roster.staffOnboardingRoles],
   );
+
+  // Finish a staff assignment whose onboarding is pending (its global role
+  // is not in place yet); the server re-decides everything.
+  const completeStaffOnboarding = useCallback(
+    (member, roleName) => mutate(member, (orgId) => teamAccessStaffOnboardingRequest(orgId, member, roleName, roster.staffOnboardingRoles), "POST",
+      staffOnboardingOutcome(member), describeStaffOnboardingError),
+    [mutate, roster.staffOnboardingRoles],
+  );
+
+  // A delegated GK administrator adds a person by the exact email of their
+  // verified Get Kinder account; nothing is created for an unknown email.
+  const addStaff = useCallback(async (email, roleName) => {
+    const targetOrganizationId = currentOrganizationRef.current;
+    if (!targetOrganizationId || !enabled || savingKey) return { ok: false };
+    let request;
+    try {
+      request = teamAccessStaffOnboardingByEmailRequest(targetOrganizationId, email, roleName, roster.staffOnboardingRoles);
+    } catch {
+      setNotice({ tone: "error", text: "Enter the exact email of the person's verified Get Kinder account." });
+      return { ok: false };
+    }
+    setSavingKey("add-staff");
+    setNotice(null);
+    const result = await sendJson("POST", request.path, request.body);
+    if (currentOrganizationRef.current !== targetOrganizationId) return { ok: false, stale: true };
+    setSavingKey("");
+    if (result.statusCode === 200 && result.body?.ok) {
+      await load(targetOrganizationId);
+      if (currentOrganizationRef.current !== targetOrganizationId) return { ok: true, stale: true };
+      setNotice(staffOnboardingNotice(result.body.data, request.body.email));
+      return { ok: true };
+    }
+    setNotice({ tone: "error", text: describeStaffOnboardingError(teamAccessErrorFromResult(result)) });
+    return { ok: false };
+  }, [enabled, savingKey, load, roster.staffOnboardingRoles]);
 
   // Platform superuser only (the server decides): grant or revoke one global
   // Get Kinder role through the existing global-role service.
@@ -212,12 +275,20 @@ export function useTeamAccess(organizationId, enabled) {
     return { ok: false };
   }, [enabled, savingKey, load]);
 
+  // A delegated GK administrator's operator/reviewer removal is staff
+  // offboarding: the server also removes the global role unless another
+  // assignment or organization still needs it, and says which.
   const revokeRole = useCallback(
-    (member, roleName) => mutate(member, (orgId) => teamAccessRoleRevokeRequest(orgId, member, roleName), "POST", roleRevokeSuccessMessage(member, roleName)),
-    [mutate],
+    (member, roleName) => (roster.staffOnboardingRoles.includes(roleName)
+      ? mutate(member, (orgId) => teamAccessStaffOffboardingRequest(orgId, member, roleName, roster.staffOnboardingRoles), "POST",
+        (_members, data) => staffOffboardingResultMessage(data, memberDisplayName(member)), describeStaffOnboardingError)
+      : mutate(member, (orgId) => teamAccessRoleRevokeRequest(orgId, member, roleName), "POST", roleRevokeSuccessMessage(member, roleName))),
+    [mutate, roster.staffOnboardingRoles],
   );
 
   const rosterForOrganization = roster.organizationId === organizationId ? roster : { ...IDLE, organizationId, status: enabled ? "loading" : "idle" };
 
-  return { roster: rosterForOrganization, savingKey, notice, refresh, changeRole, grantRole, revokeRole, changeGlobalRole, addPerson };
+  return {
+    roster: rosterForOrganization, savingKey, notice, refresh, changeRole, grantRole, revokeRole, changeGlobalRole, addPerson, addStaff, completeStaffOnboarding,
+  };
 }

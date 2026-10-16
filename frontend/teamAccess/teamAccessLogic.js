@@ -19,6 +19,8 @@ import {
   kaiOrganizationMembershipPath,
   kaiOrganizationRoleGrantPath,
   kaiOrganizationRoleRevokePath,
+  kaiOrganizationStaffPath,
+  kaiOrganizationStaffRevokePath,
 } from "../kaiOrganizationAccessLogic.js";
 
 export const TEAM_ACCESS_SECTION_KEY = "teamAccess";
@@ -136,6 +138,7 @@ const READINESS_CATEGORIES = new Set(["read", "process", "decide", "export", "ad
 const GRANTERS = Object.freeze({
   platform_superuser: "a platform administrator",
   delegated_gk_admin: "a Get Kinder administrator of this organization",
+  delegated_gk_admin_staff_onboarding: "a Get Kinder administrator of this organization through staff onboarding (when the person has no access to another organization)",
   organization_client_admin: "an organization administrator",
 });
 
@@ -182,6 +185,116 @@ export function teamAccessHandoffNotice(member) {
   const operations = blocked.map((item) => teamAccessReadinessLabel(item.key).toLowerCase());
   return `Organization role assigned. A platform administrator must also assign a global ${roles.join(" or ")} role `
     + `before this person can ${operations.join("; ")}.`;
+}
+
+// Repair 1: delegated GK staff onboarding. The roles this administrator
+// onboards (the server's staff_onboarding_roles answer: a delegated GK
+// administrator's operator and reviewer roles), and each request builder
+// refuses anything the server did not offer.
+const STAFF_ROLES = Object.freeze(["gk_operator", "gk_reviewer"]);
+
+export function projectTeamAccessStaffOnboardingRoles(data) {
+  return Array.isArray(data?.staff_onboarding_roles) ? STAFF_ROLES.filter((role) => data.staff_onboarding_roles.includes(role)) : [];
+}
+
+function normalizedStaffEmail(email) {
+  const normalized = String(email || "").trim().toLowerCase();
+  if (!/^[^\s@]+@[^\s@]+$/.test(normalized)) throw new Error("invalid_email");
+  return normalized;
+}
+
+// Add a person to the organization as Get Kinder staff by the exact email of
+// their verified Get Kinder account.
+export function teamAccessStaffOnboardingByEmailRequest(organizationId, email, roleName, staffOnboardingRoles) {
+  if (!(staffOnboardingRoles || []).includes(roleName)) throw new Error(`unsupported KAI staff role: ${roleName}`);
+  return { path: kaiOrganizationStaffPath(organizationId), body: { email: normalizedStaffEmail(email), role_name: roleName } };
+}
+
+// Onboard a person already on the roster: a staff role the server offered
+// them (grantable or restorable), or completing one they hold whose
+// onboarding is pending.
+export function teamAccessStaffOnboardingRequest(organizationId, member, roleName, staffOnboardingRoles) {
+  const offered = (member?.grantableRoles || []).includes(roleName)
+    || (member?.assignments || []).some((assignment) => assignment.roleName === roleName && assignment.canRestore)
+    || (member?.staffOnboarding || []).some((item) => item.roleName === roleName && item.status === "pending_completion");
+  if (!(staffOnboardingRoles || []).includes(roleName) || !offered || member.legacyUserId === null) {
+    throw new Error(`unsupported KAI staff role: ${roleName}`);
+  }
+  return { path: kaiOrganizationStaffPath(organizationId, member.legacyUserId), body: { role_name: roleName } };
+}
+
+export function teamAccessStaffOffboardingRequest(organizationId, member, roleName, staffOnboardingRoles) {
+  if (!(staffOnboardingRoles || []).includes(roleName)
+    || !(member?.assignments || []).some((assignment) => assignment.roleName === roleName && assignment.canRevoke)) {
+    throw new Error(`unsupported KAI staff role: ${roleName}`);
+  }
+  return { path: kaiOrganizationStaffRevokePath(organizationId, member.legacyUserId, roleName), body: {} };
+}
+
+const STAFF_ONBOARDING_STATUSES = new Set(["complete", "pending_completion", "pending_platform_approval"]);
+
+function projectStaffOnboarding(value) {
+  if (!Array.isArray(value)) return null;
+  return value
+    .filter((item) => item && STAFF_ROLES.includes(item.role_name) && STAFF_ONBOARDING_STATUSES.has(item.status))
+    .map((item) => ({ roleName: item.role_name, globalRole: STAFF_ROLES.includes(item.global_role) ? item.global_role : item.role_name, status: item.status }));
+}
+
+// One pending staff assignment, in words; empty once onboarding is complete.
+export function staffOnboardingStatusText(item) {
+  const globalLabel = `global ${teamAccessRoleLabel(item.globalRole)}`;
+  if (item.status === "pending_completion") {
+    return `Onboarding not finished: the ${globalLabel} role this work needs is not in place yet.`;
+  }
+  if (item.status === "pending_platform_approval") {
+    return `Waiting for a platform administrator: this person also has KAI access in another organization, so the ${globalLabel} role needs platform approval.`;
+  }
+  return "";
+}
+
+// The server's answer to one onboarding: complete (the person can sign in and
+// work now), or pending platform approval of the global role.
+export function staffOnboardingResultMessage(data, displayName) {
+  const roleLabel = teamAccessRoleLabel(data?.role_name);
+  const globalLabel = `global ${teamAccessRoleLabel(data?.global_role?.role_name)}`;
+  const who = displayName || "This person";
+  if (data?.onboarding_status === "complete") {
+    return `${who} is now a ${roleLabel} here with the ${globalLabel} role, and can sign in and start now.`;
+  }
+  return `${who} is now a ${roleLabel} here, but the ${globalLabel} role was not granted: they also have KAI access in another `
+    + "organization, so a platform administrator must approve it.";
+}
+
+export function staffOffboardingResultMessage(data, displayName) {
+  const roleLabel = teamAccessRoleLabel(data?.role_name);
+  const globalLabel = `global ${teamAccessRoleLabel(data?.global_role?.role_name)}`;
+  const who = displayName || "This person";
+  const status = data?.global_role?.status;
+  if (status === "revoked") return `${who} is no longer a ${roleLabel}, and the ${globalLabel} role was removed. Their other roles are unchanged.`;
+  if (status === "retained" && data.global_role.reason === "required_by_another_assignment") {
+    return `${who} is no longer a ${roleLabel} here. The ${globalLabel} role stays because another of their assignments needs it.`;
+  }
+  if (status === "retained") {
+    return `${who} is no longer a ${roleLabel} here. The ${globalLabel} role stays because they have KAI access in another organization; `
+      + "a platform administrator decides whether to remove it.";
+  }
+  return `${who} is no longer a ${roleLabel}. Their other roles are unchanged.`;
+}
+
+const STAFF_ONBOARDING_ERRORS = Object.freeze({
+  target_account_not_found: "No Get Kinder account has that email. Ask the person to register at Get Kinder and verify their email, then add them.",
+  target_account_not_verified: "That person has not verified their Get Kinder email yet. Ask them to finish verification, then try again.",
+  target_account_suspended: "That Get Kinder account is suspended, so it cannot be given KAI access.",
+  target_account_ambiguous: "More than one Get Kinder account uses that email. Ask Get Kinder support to resolve it first.",
+  target_kai_account_inactive: "That person's KAI account is deactivated. A platform administrator must review it.",
+  target_account_email_unusable: "This person's Get Kinder account has no usable email, so KAI access cannot be given yet.",
+  staff_onboarding_role_not_permitted: "Staff onboarding gives only the Get Kinder operator or reviewer role.",
+});
+
+export function describeStaffOnboardingError(failure) {
+  if (Object.hasOwn(STAFF_ONBOARDING_ERRORS, failure.blockingReason)) return STAFF_ONBOARDING_ERRORS[failure.blockingReason];
+  if (failure.status === 422 && !failure.blockingReason) return "Enter the exact email of the person's verified Get Kinder account.";
+  return describeRoleChangeError(failure);
 }
 
 // Explicit replacement (B/E C05) of the member's addressed assignment
@@ -303,6 +416,9 @@ export function projectTeamAccessRoster(data) {
       globalRoles: Array.isArray(row.global_kai_roles) ? knownGlobalRoles(row.global_kai_roles) : null,
       // Operation readiness: only for an administrator of Get Kinder roles.
       operationReadiness: projectReadiness(row.operation_readiness),
+      // Staff onboarding state of each active operator/reviewer assignment
+      // (administrators of Get Kinder roles only).
+      staffOnboarding: projectStaffOnboarding(row.staff_onboarding),
       assignments,
       // Team & Access adds Get Kinder staff roles only; a client role keeps
       // the one-role change control (an explicit replacement) above.

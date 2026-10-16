@@ -109,6 +109,18 @@ export function kaiOrganizationRoleRevokePath(kaiOrganizationId, legacyPublicUse
   return `${kaiOrganizationRoleGrantPath(kaiOrganizationId, legacyPublicUserdataId)}/${encodeURIComponent(roleName)}/revoke`;
 }
 
+// Repair 1 delegated GK staff onboarding: POST .../gk-staff ({ email,
+// role_name }) or .../gk-staff/:legacyId ({ role_name }), and offboarding
+// POST .../gk-staff/:legacyId/roles/:roleName/revoke (no body).
+export function kaiOrganizationStaffPath(kaiOrganizationId, legacyPublicUserdataId = null) {
+  const base = `${KAI_ACCESS_ADMINISTRATION_BASE_PATH}/organizations/${encodeURIComponent(kaiOrganizationId)}/gk-staff`;
+  return legacyPublicUserdataId === null ? base : `${base}/${encodeURIComponent(legacyPublicUserdataId)}`;
+}
+
+export function kaiOrganizationStaffRevokePath(kaiOrganizationId, legacyPublicUserdataId, roleName) {
+  return `${kaiOrganizationStaffPath(kaiOrganizationId, legacyPublicUserdataId)}/roles/${encodeURIComponent(roleName)}/revoke`;
+}
+
 export function buildKaiOrganizationRoleGrantPayload(roleName, { includeGkRoles = false } = {}) {
   if (!isAssignableKaiOrganizationRole(roleName, { includeGkRoles })) {
     throw new Error(`unsupported KAI organization role: ${roleName}`);

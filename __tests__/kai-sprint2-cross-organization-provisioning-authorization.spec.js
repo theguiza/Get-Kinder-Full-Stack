@@ -13,6 +13,8 @@ import {
   manageGlobalKaiRole,
   getAccessAdministrationContext,
   resolveOrganizationRoleAdministration,
+  onboardGkStaffMember,
+  offboardGkStaffRole,
 } from "../Backend/kai/services/kaiAccessAdministrationService.js";
 import { resolveKaiActorContext } from "../Backend/kai/auth/kaiActorContext.js";
 import { createProductionMetadataOnlyAuditForAccessAdministration } from "../Backend/kai/services/kaiMetadataOnlyAuditComposition.js";
@@ -26,6 +28,14 @@ import {
   projectTeamAccessRoster,
   teamAccessGlobalRoleRequest,
   teamAccessHandoffNotice,
+  describeStaffOnboardingError,
+  projectTeamAccessStaffOnboardingRoles,
+  staffOffboardingResultMessage,
+  staffOnboardingResultMessage,
+  staffOnboardingStatusText,
+  teamAccessStaffOffboardingRequest,
+  teamAccessStaffOnboardingByEmailRequest,
+  teamAccessStaffOnboardingRequest,
 } from "../frontend/teamAccess/teamAccessLogic.js";
 import { getReviewCockpitCapabilities } from "../Backend/kai/services/kaiReviewCockpitService.js";
 import { listAuthorizedOrganizations } from "../Backend/kai/services/kaiOrganizationContextService.js";
@@ -100,9 +110,15 @@ function createStore() {
       [USERS.operator.user_id]: ["gk_operator"],
       [USERS.dual.user_id]: ["gk_operator", "gk_reviewer"],
     },
+    // Get Kinder account columns by legacy id; every synthetic account is
+    // verified and unsuspended unless a test overrides it here.
+    accounts: {},
     auditRows: [],
     writes: [],
   };
+  const accountOf = (user) => (user
+    ? { id: user.legacy, email: user.email, email_verified: true, is_suspended: false, ...(state.accounts[user.legacy] || {}) }
+    : null);
   const userByLegacy = (legacy) => Object.values(USERS).find((user) => user.legacy === legacy) || null;
   const userById = (userId) => Object.values(USERS).find((user) => user.user_id === userId) || null;
   const rowsFor = (organizationId, userId) => state.memberships.filter((entry) => entry.organization_id === organizationId && entry.user_id === userId);
@@ -128,6 +144,14 @@ function createStore() {
     listActiveGkOrganizationAdminLegacyUserIds: async (gkOrganizationId) => (gkOrganizationId === GK_ORG_B ? derivedAdminsOf(ORG_B).map((user) => user.legacy) : []),
     findKaiUserByLegacyPublicUserdataId: async (legacy) => kaiUserOf(userByLegacy(legacy)),
     findOrCreateKaiUserByLegacyPublicUserdataId: async ({ legacyPublicUserdataId }) => kaiUserOf(userByLegacy(legacyPublicUserdataId)),
+    getStaffAccountById: async (legacy) => accountOf(userByLegacy(legacy)),
+    listStaffAccountsByExactEmail: async (email) => Object.values(USERS).filter((user) => user.email === email).map(accountOf),
+    // Every organization the person has stored access to, and the derived
+    // client_admin access sign-in derives from an active binding.
+    listOrganizationMembershipsForUser: async (userId) => state.memberships.filter((entry) => entry.user_id === userId).map((entry) => ({ ...entry })),
+    resolveEffectiveClientOrganizationMembershipsForLegacyUser: async (legacy) => ((userByLegacy(legacy)?.gkAdminOf || []).includes(GK_ORG_B)
+      ? [{ organization_id: ORG_B, role_name: "client_admin", membership_status: "active", source: "gk_organization_binding", gk_organization_id: GK_ORG_B }]
+      : []),
     listKaiRolesForUser: async (userId) => [...(state.globalRoles[userId] || [])],
     upsertOrganizationMembershipRoleStatus: async ({ organizationId, userId, roleName, membershipStatus, previousRoleName = null }) => {
       const existing = rowsFor(organizationId, userId);
@@ -220,6 +244,8 @@ async function withRouter(store, actorContext, work) {
     revokeOrganizationRole: (input) => revokeOrganizationRole(input, dependencies),
     manageGlobalKaiRole: (input) => manageGlobalKaiRole(input, dependencies),
     getAccessAdministrationContext: (input) => getAccessAdministrationContext(input, dependencies),
+    onboardGkStaffMember: (input) => onboardGkStaffMember(input, dependencies),
+    offboardGkStaffRole: (input) => offboardGkStaffRole(input, dependencies),
   });
   const previous = process.env.KAI_SPRINT2_ENABLED;
   process.env.KAI_SPRINT2_ENABLED = "true";
@@ -776,9 +802,14 @@ test("roster readback: readiness for administrators of Get Kinder roles only, ra
     if (!expected.readiness) continue;
     const member = projectTeamAccessRoster(roster.data).find((candidate) => candidate.key === `legacy:${USERS.newcomer.legacy}`);
     const source = member.operationReadiness.find((item) => item.key === "source_review");
+    // Repair 1: the missing global operator/reviewer role is also supplied by
+    // delegated staff onboarding when it affects no other organization.
     assert.deepEqual([source.ready, source.missing.map((gap) => [gap.scope, gap.roles.join("|"), gap.grantedBy.join("|")])],
-      [false, [["global", "gk_admin|gk_operator|gk_reviewer", "platform_superuser"]]], label);
-    assert.match(describeReadinessGap(source.missing[0]), /global .*operator.*platform administrator/i);
+      [false, [["global", "gk_admin|gk_operator|gk_reviewer", "platform_superuser|delegated_gk_admin_staff_onboarding"]]], label);
+    assert.match(describeReadinessGap(source.missing[0]), /global .*operator.*platform administrator or a Get Kinder administrator of this organization through staff onboarding/i);
+    // The newcomer has no access outside Org A, so onboarding can be completed here.
+    assert.deepEqual(member.staffOnboarding, [{ roleName: "gk_operator", globalRole: "gk_operator", status: "pending_completion" }], label);
+    assert.deepEqual(roster.data.staff_onboarding_roles, label === "delegated GK administrator" ? ["gk_operator", "gk_reviewer"] : [], label);
     assert.match(teamAccessHandoffNotice(member), /^Organization role assigned\. A platform administrator must also assign a global .* role before this person can .*review and promote sources/);
     assert.equal(member.operationReadiness.find((item) => item.key === "evidence_processing").ready, true, "the organization role's own operations are ready");
   }
@@ -821,4 +852,186 @@ test("Team & Access global-role controls: only the server's assignable roles, on
   }
   assert.deepEqual(store.state.writes, []);
   assert.deepEqual(store.state.auditRows, []);
+});
+
+// ---------------------------------------------------------------------------
+// Repair 1: delegated GK staff onboarding and offboarding (router + service
+// over the three-organization store). The real-PostgreSQL proof is
+// __tests__/kai-sprint2-gk-staff-onboarding.integration.spec.js.
+// ---------------------------------------------------------------------------
+
+const staffPath = (organizationId, user) => `/organizations/${organizationId}/gk-staff${user ? `/${user.legacy}` : ""}`;
+const staffRevokePath = (organizationId, user, roleName) => `${staffPath(organizationId, user)}/roles/${roleName}/revoke`;
+
+test("Repair 1: a delegated GK administrator completes operator and reviewer onboarding - organization role plus the global role - and the recipient's next request carries it, in that organization only", async () => {
+  const store = createStore();
+  const delegated = await resolveActor(store, USERS.delegatedAdmin);
+  await withRouter(store, delegated, async (call) => {
+    const byEmail = await call("POST", staffPath(ORG_A), { email: ` ${USERS.newcomer.email.toUpperCase()}`, role_name: "gk_reviewer" });
+    assert.equal(byEmail.status, 200, JSON.stringify(byEmail.body));
+    assert.deepEqual([byEmail.body.data.onboarding_status, byEmail.body.data.global_role, byEmail.body.data.organization_role.organization_access_admitted],
+      ["complete", { role_name: "gk_reviewer", status: "assigned" }, true]);
+    const byId = await call("POST", staffPath(ORG_A, USERS.plain), { role_name: "gk_operator" });
+    assert.deepEqual([byId.status, byId.body.data.onboarding_status], [200, "complete"]);
+  });
+  assert.deepEqual(store.state.writes, [
+    { kind: "grant", organizationId: ORG_A, userId: USERS.newcomer.user_id, roleName: "gk_reviewer" },
+    { kind: "global_assign", userId: USERS.newcomer.user_id, roleName: "gk_reviewer" },
+    { kind: "grant", organizationId: ORG_A, userId: USERS.plain.user_id, roleName: "gk_operator" },
+    { kind: "global_assign", userId: USERS.plain.user_id, roleName: "gk_operator" },
+  ]);
+  assert.deepEqual(store.state.auditRows.map((row) => [row.operation, row.role_name, row.authority_source, row.organization_id, row.actor_user_id]), [
+    ["organization_role_granted_access_admitted", "gk_reviewer", "delegated_gk_admin", ORG_A, USERS.delegatedAdmin.user_id],
+    ["global_kai_role_assigned", "gk_reviewer", "delegated_gk_admin", ORG_A, USERS.delegatedAdmin.user_id],
+    ["organization_role_granted", "gk_operator", "delegated_gk_admin", ORG_A, USERS.delegatedAdmin.user_id],
+    ["global_kai_role_assigned", "gk_operator", "delegated_gk_admin", ORG_A, USERS.delegatedAdmin.user_id],
+  ]);
+  const operator = await resolveActor(store, USERS.plain);
+  const reviewer = await resolveActor(store, USERS.newcomer);
+  for (const [label, actor, sourceReview, intake, evidenceReview] of [["operator", operator, true, true, false], ["reviewer", reviewer, true, false, true]]) {
+    const cockpit = await getReviewCockpitCapabilities({ organizationId: ORG_A, actorContext: actor }, { env: ENV });
+    const capabilities = await getOrganizationAccessCapabilities({ organizationId: ORG_A, actorContext: actor }, { env: ENV });
+    assert.deepEqual([cockpit.data.can_review_source_candidates, validateActorCanPerformOperation(actor, "create_intake_batch", ORG_A).ok,
+      capabilities.data.workflowOperations.recordEvidenceReview, capabilities.data.organizationAccessManagement], [sourceReview, intake, evidenceReview, false], label);
+    for (const organizationId of [ORG_B, ORG_C]) {
+      assert.equal(validateActorCanAccessKnowledgeWorkspace(actor, organizationId).ok, false, `${label}: nothing in ${organizationId}`);
+    }
+  }
+});
+
+test("Repair 1: binding-derived or stored access elsewhere keeps the global role on the platform path - the organization role is the pending state, and the blocker names no other organization", async () => {
+  const store = createStore();
+  const delegated = await resolveActor(store, USERS.delegatedAdmin);
+  store.state.memberships.push(row(ORG_C, USERS.newcomer, "client_contributor"));
+  await withRouter(store, delegated, async (call) => {
+    // reviewerX: Get Kinder organization admin of Org B's bound organization (derived client_admin there).
+    for (const [user, roleName] of [[USERS.reviewerX, "gk_operator"], [USERS.newcomer, "gk_reviewer"]]) {
+      const pending = await call("POST", staffPath(ORG_A, user), { role_name: roleName });
+      assert.equal(pending.status, 200, JSON.stringify(pending.body));
+      const [blocker] = pending.body.data.pending_blockers;
+      assert.deepEqual([pending.body.data.onboarding_status, blocker.blocking_reason, blocker.evidence],
+        ["pending_platform_approval", "cross_organization_global_role_side_effect",
+          { bypass_allowed: false, global_role: roleName, organization_role: roleName, approval_path: "platform_superuser_global_role" }]);
+      assert.doesNotMatch(JSON.stringify(pending.body), new RegExp(`${ORG_B}|${ORG_C}|${GK_ORG_B}`), "no other organization is disclosed");
+    }
+    const roster = await call("GET", `/organizations/${ORG_A}/access`);
+    const statusOf = (user) => roster.body.data.access.find((entry) => entry.kai_user_id === user.user_id).staff_onboarding;
+    assert.deepEqual(statusOf(USERS.reviewerX), [
+      { role_name: "gk_operator", global_role: "gk_operator", status: "pending_platform_approval" },
+      { role_name: "gk_reviewer", global_role: "gk_reviewer", status: "complete" },
+    ]);
+    assert.deepEqual(statusOf(USERS.newcomer), [{ role_name: "gk_reviewer", global_role: "gk_reviewer", status: "pending_platform_approval" }]);
+    assert.deepEqual(roster.body.data.staff_onboarding_roles, ["gk_operator", "gk_reviewer"]);
+  });
+  assert.deepEqual(store.state.writes.map((write) => write.kind), ["grant", "grant"], "no global role was written");
+  assert.deepEqual(store.state.globalRoles[USERS.newcomer.user_id], undefined);
+  const superuserRoster = await viewEffectiveKaiAccess({ actorContext: await resolveActor(store, USERS.superuser, { superuser: true }), organizationId: ORG_A }, store.dependencies);
+  assert.deepEqual(superuserRoster.data.staff_onboarding_roles, [], "a platform superuser keeps the explicit organization and global controls");
+});
+
+test("Repair 1: offboarding revokes the global role only when it can take effect nowhere else, and keeps it (with a blocker) when the person has access elsewhere", async () => {
+  const store = createStore();
+  const delegated = await resolveActor(store, USERS.delegatedAdmin);
+  await withRouter(store, delegated, async (call) => {
+    const confined = await call("POST", staffRevokePath(ORG_A, USERS.dual, "gk_operator"));
+    assert.deepEqual([confined.status, confined.body.data.global_role, confined.body.data.remaining_active_role_names],
+      [200, { role_name: "gk_operator", status: "revoked", reason: null }, ["gk_reviewer"]]);
+    const elsewhere = await call("POST", staffRevokePath(ORG_A, USERS.operator, "gk_operator"));
+    assert.deepEqual([elsewhere.body.data.global_role.status, elsewhere.body.data.global_role.reason, elsewhere.body.data.pending_blockers[0].blocking_reason],
+      ["retained", "access_in_another_organization", "cross_organization_global_role_side_effect"]);
+    const bound = await call("POST", staffRevokePath(ORG_A, USERS.reviewerX, "gk_reviewer"));
+    assert.deepEqual([bound.body.data.global_role.status, bound.body.data.global_role.reason], ["retained", "access_in_another_organization"]);
+    // Refusals: a client role, gk_admin, a body, an unknown assignment.
+    assert.deepEqual([(await call("POST", staffRevokePath(ORG_A, USERS.clientAdminA, "client_admin"))).reason], ["staff_onboarding_role_not_permitted"]);
+    assert.deepEqual([(await call("POST", staffRevokePath(ORG_A, USERS.delegatedAdmin, "gk_admin"))).reason], ["staff_onboarding_role_not_permitted"]);
+    assert.equal((await call("POST", staffRevokePath(ORG_A, USERS.plain, "gk_operator"), { role_name: "gk_operator" })).status, 422);
+    assert.equal((await call("POST", staffRevokePath(ORG_A, USERS.plain, "gk_operator"))).status, 404);
+  });
+  assert.deepEqual(store.state.globalRoles[USERS.dual.user_id], ["gk_reviewer"], "the unrelated global reviewer role stays");
+  assert.deepEqual(store.state.globalRoles[USERS.operator.user_id], ["gk_operator"]);
+  assert.deepEqual(store.state.globalRoles[USERS.reviewerX.user_id], ["gk_reviewer"]);
+  assert.ok(store.state.memberships.some((entry) => entry.organization_id === ORG_B && entry.user_id === USERS.operator.user_id && entry.membership_status === "active"),
+    "the client role in Org B is untouched");
+  assert.deepEqual(store.state.auditRows.map((entry) => [entry.operation, entry.role_name]), [
+    ["organization_role_revoked", "gk_operator"], ["global_kai_role_revoked", "gk_operator"],
+    ["organization_role_revoked", "gk_operator"], ["organization_role_revoked", "gk_reviewer"],
+  ]);
+});
+
+test("Repair 1: refusals are structured and write nothing - identity, role, self, tenant, client administrators, request shape, and the feature flag", async () => {
+  const store = createStore();
+  store.state.accounts[USERS.newcomer.legacy] = { email_verified: false };
+  store.state.accounts[USERS.plain.legacy] = { is_suspended: true };
+  const delegated = await resolveActor(store, USERS.delegatedAdmin);
+  await withRouter(store, delegated, async (call) => {
+    for (const [label, path, body, status, reason] of [
+      ["unverified account", staffPath(ORG_A, USERS.newcomer), { role_name: "gk_operator" }, 422, "target_account_not_verified"],
+      ["suspended account", staffPath(ORG_A, USERS.plain), { role_name: "gk_reviewer" }, 422, "target_account_suspended"],
+      ["unknown email", staffPath(ORG_A), { email: "nobody@cross-org.synthetic.test", role_name: "gk_operator" }, 404, "target_account_not_found"],
+      ["gk_admin", staffPath(ORG_A, USERS.clientAdminA), { role_name: "gk_admin" }, 403, "staff_onboarding_role_not_permitted"],
+      ["self", staffPath(ORG_A, USERS.delegatedAdmin), { role_name: "gk_reviewer" }, 403, "self_role_elevation_not_allowed"],
+      ["self by email", staffPath(ORG_A), { email: USERS.delegatedAdmin.email, role_name: "gk_reviewer" }, 403, "self_role_elevation_not_allowed"],
+      ["another organization", staffPath(ORG_B, USERS.clientAdminA), { role_name: "gk_reviewer" }, 403, "missing_active_organization_membership"],
+      ["both identifiers", staffPath(ORG_A, USERS.clientAdminA), { email: USERS.clientAdminA.email, role_name: "gk_reviewer" }, 422, null],
+      ["no role", staffPath(ORG_A), { email: USERS.clientAdminA.email }, 422, null],
+      ["array body", staffPath(ORG_A, USERS.clientAdminA), ["gk_reviewer"], 422, null],
+      ["organization-only grant to an unverified account", `/organizations/${ORG_A}/memberships/${USERS.newcomer.legacy}/roles`, { role_name: "gk_reviewer" }, 422, "target_account_not_verified"],
+    ]) {
+      const refused = await call("POST", path, body);
+      assert.deepEqual([refused.status, refused.reason], [status, reason], `${label}: ${JSON.stringify(refused.body)}`);
+    }
+  });
+  for (const user of [USERS.clientAdminA, USERS.reviewerX]) {
+    // A stored client administrator of A; a binding-derived client administrator of B.
+    const organizationId = user === USERS.clientAdminA ? ORG_A : ORG_B;
+    const refused = await withRouter(store, await resolveActor(store, user), (call) => call("POST", staffPath(organizationId, USERS.newcomer), { role_name: "gk_reviewer" }));
+    assert.deepEqual([refused.status, refused.reason], [403, "non_client_membership_not_client_managed"], user.email);
+  }
+  assert.equal((await onboardGkStaffMember({ actorContext: delegated, organizationId: ORG_A, targetLegacyPublicUserdataId: USERS.clientAdminA.legacy, roleName: "gk_reviewer", now: NOW },
+    { ...store.dependencies, env: { KAI_SPRINT2_ENABLED: "false" } })).error.code, "feature_disabled");
+  assert.equal((await offboardGkStaffRole({ actorContext: { ...delegated, actorType: "ai" }, organizationId: ORG_A, targetLegacyPublicUserdataId: USERS.reviewerX.legacy, roleName: "gk_reviewer", now: NOW },
+    store.dependencies)).error.code, "authorization_denied");
+  assert.deepEqual(store.state.writes, []);
+  assert.deepEqual(store.state.auditRows, []);
+});
+
+test("Repair 1 Team & Access: staff onboarding requests carry only what the server offered, and every outcome and refusal is stated in words", () => {
+  const roles = projectTeamAccessStaffOnboardingRoles({ staff_onboarding_roles: ["gk_reviewer", "gk_admin", "gk_operator"] });
+  assert.deepEqual(roles, ["gk_operator", "gk_reviewer"]);
+  assert.deepEqual(projectTeamAccessStaffOnboardingRoles({}), []);
+  assert.deepEqual(teamAccessStaffOnboardingByEmailRequest(ORG_A, "  New.Staff@Example.TEST ", "gk_operator", roles), {
+    path: `${BASE}/organizations/${ORG_A}/gk-staff`, body: { email: "new.staff@example.test", role_name: "gk_operator" },
+  });
+  assert.throws(() => teamAccessStaffOnboardingByEmailRequest(ORG_A, "not-an-email", "gk_operator", roles), /invalid_email/);
+  assert.throws(() => teamAccessStaffOnboardingByEmailRequest(ORG_A, "a@b.test", "gk_admin", roles), /unsupported/);
+  assert.throws(() => teamAccessStaffOnboardingByEmailRequest(ORG_A, "a@b.test", "gk_operator", []), /unsupported/, "not offered to this administrator");
+  const member = {
+    legacyUserId: 7, grantableRoles: ["gk_reviewer"], assignments: [{ roleName: "gk_operator", status: "active", canRevoke: true, canRestore: false }],
+    staffOnboarding: [{ roleName: "gk_operator", globalRole: "gk_operator", status: "pending_completion" }],
+  };
+  assert.deepEqual(teamAccessStaffOnboardingRequest(ORG_A, member, "gk_reviewer", roles), { path: `${BASE}/organizations/${ORG_A}/gk-staff/7`, body: { role_name: "gk_reviewer" } });
+  assert.deepEqual(teamAccessStaffOnboardingRequest(ORG_A, member, "gk_operator", roles).body, { role_name: "gk_operator" }, "completing a pending onboarding");
+  assert.throws(() => teamAccessStaffOnboardingRequest(ORG_A, { ...member, staffOnboarding: [] }, "gk_operator", roles), /unsupported/);
+  assert.deepEqual(teamAccessStaffOffboardingRequest(ORG_A, member, "gk_operator", roles), { path: `${BASE}/organizations/${ORG_A}/gk-staff/7/roles/gk_operator/revoke`, body: {} });
+  assert.throws(() => teamAccessStaffOffboardingRequest(ORG_A, member, "gk_reviewer", roles), /unsupported/);
+
+  assert.match(staffOnboardingResultMessage({ role_name: "gk_operator", global_role: { role_name: "gk_operator" }, onboarding_status: "complete" }, "a@b.test"),
+    /^a@b\.test is now a Get Kinder operator here with the global Get Kinder operator role, and can sign in and start now\.$/);
+  assert.match(staffOnboardingResultMessage({ role_name: "gk_reviewer", global_role: { role_name: "gk_reviewer" }, onboarding_status: "pending_platform_approval" }, "a@b.test"),
+    /was not granted: they also have KAI access in another organization, so a platform administrator must approve it\.$/);
+  assert.match(staffOffboardingResultMessage({ role_name: "gk_operator", global_role: { role_name: "gk_operator", status: "revoked" } }, "x"), /global Get Kinder operator role was removed/);
+  assert.match(staffOffboardingResultMessage({ role_name: "gk_operator", global_role: { role_name: "gk_operator", status: "retained", reason: "required_by_another_assignment" } }, "x"), /another of their assignments needs it/);
+  assert.match(staffOffboardingResultMessage({ role_name: "gk_operator", global_role: { role_name: "gk_operator", status: "retained", reason: "access_in_another_organization" } }, "x"), /platform administrator decides/);
+  assert.match(staffOnboardingStatusText({ globalRole: "gk_operator", status: "pending_completion" }), /^Onboarding not finished/);
+  assert.match(staffOnboardingStatusText({ globalRole: "gk_reviewer", status: "pending_platform_approval" }), /^Waiting for a platform administrator/);
+  for (const [reason, expected] of [
+    ["target_account_not_found", /register at Get Kinder and verify their email/],
+    ["target_account_not_verified", /not verified their Get Kinder email/],
+    ["target_account_suspended", /suspended/],
+    ["target_account_ambiguous", /More than one Get Kinder account/],
+    ["target_kai_account_inactive", /deactivated/],
+    ["self_role_elevation_not_allowed", /cannot add to or raise your own roles/],
+  ]) {
+    assert.match(describeStaffOnboardingError({ status: 422, code: "validation_blocker", blockingReason: reason }), expected, reason);
+  }
 });

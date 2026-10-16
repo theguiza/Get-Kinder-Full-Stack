@@ -8,6 +8,8 @@ import {
   KAI_ASSIGNABLE_GLOBAL_ROLES,
   KAI_ACTIVE_ORGANIZATION_MEMBERSHIP_STATUS,
   KAI_INACTIVE_ORGANIZATION_MEMBERSHIP_STATUS,
+  KAI_STAFF_ONBOARDING_ROLES,
+  KAI_STAFF_ONBOARDING_GLOBAL_ROLE_BY_ORGANIZATION_ROLE,
 } from "../config/kaiAccessAdministrationContract.js";
 import {
   validateActorCanPerformOperation,
@@ -27,16 +29,20 @@ import {
   listGlobalRoleAssignmentRows,
   findOrCreateKaiUserForAdministrationTarget,
   listOrganizationsForPlatformAdministration,
+  listStaffAccountsByExactEmail,
+  getStaffAccountById,
 } from "../db/kaiAccessAdministrationQueries.js";
 import {
   findKaiUserByLegacyPublicUserdataId,
   listKaiRolesForUser,
+  listOrganizationMembershipsForUser,
 } from "../db/kaiQueries.js";
 import {
   getActiveGkOrganizationIdForKaiOrganization,
   listActiveGkOrganizationAdminLegacyUserIds,
   hasActiveDerivedClientAdminForOrganization,
 } from "../auth/gkOrganizationAdminQueries.js";
+import { resolveEffectiveClientOrganizationMembershipsForLegacyUser } from "../auth/gkOrganizationBindingAuthority.js";
 import { createProductionMetadataOnlyAuditForAccessAdministration } from "./kaiMetadataOnlyAuditComposition.js";
 
 const {
@@ -50,6 +56,10 @@ const ASSIGNABLE_ORGANIZATION_ROLE_SET = new Set(KAI_ASSIGNABLE_ORGANIZATION_ROL
 const PLATFORM_SUPERUSER_ASSIGNABLE_ORGANIZATION_ROLE_SET = new Set(KAI_PLATFORM_SUPERUSER_ASSIGNABLE_ORGANIZATION_ROLES);
 const DELEGATED_GK_ADMIN_ASSIGNABLE_ORGANIZATION_ROLE_SET = new Set(KAI_DELEGATED_GK_ADMIN_ASSIGNABLE_ORGANIZATION_ROLES);
 const ASSIGNABLE_GLOBAL_ROLE_SET = new Set(KAI_ASSIGNABLE_GLOBAL_ROLES);
+const STAFF_ONBOARDING_ROLE_SET = new Set(KAI_STAFF_ONBOARDING_ROLES);
+const STAFF_ONBOARDING_VALIDATOR_KEY = "VAL-KAI-P2-ACC-003";
+// The authorities that may onboard Get Kinder staff (never organization_client_admin).
+const STAFF_ONBOARDING_AUTHORITIES = new Set(["delegated_gk_admin", "platform_superuser"]);
 // The organization roles that can make a non-superuser an organization-role
 // administrator at all; resolveOrganizationRoleAdministration decides which
 // roles each one actually administers.
@@ -301,6 +311,150 @@ async function lockOrganizationAdministration(tx, organizationId) {
   ]);
 }
 
+// Serializes every write that can give one person organization access with
+// staff onboarding's check of where that person's global role would take
+// effect, so a concurrent first grant in another organization cannot slip
+// between the check and the global-role write. Always taken after the
+// organization lock.
+async function lockUserAccessAdministration(tx, userId) {
+  await tx.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
+    `kai_user_access_admin_lock:${userId}`,
+  ]);
+}
+
+function staffOnboardingBlocker(blockingReason, message, requiredFix, evidence = {}) {
+  return {
+    validator_key: STAFF_ONBOARDING_VALIDATOR_KEY,
+    severity: "blocker",
+    object_type: "kai_user",
+    object_id: null,
+    message,
+    blocking_reason: blockingReason,
+    required_fix: requiredFix,
+    evidence: { bypass_allowed: false, ...evidence },
+  };
+}
+
+function staffOnboardingRefusal(code, blocker) {
+  return { ok: false, data: null, error: { code }, blockers: [blocker] };
+}
+
+const ACCOUNT_REGISTRATION_FIX =
+  "Ask the person to create a Get Kinder account and verify its email address, then add them with that exact email.";
+
+/**
+ * The Get Kinder account a delegated GK staff grant may be given to: exactly
+ * one account (by id, or by exact normalized email - an email two accounts
+ * share is refused, never resolved by picking one), its email verified, and
+ * not suspended - the same conditions Get Kinder login and the authenticated
+ * API gate already enforce. Nothing is created here; a person without an
+ * account must first register and verify through Get Kinder.
+ */
+async function resolveEligibleStaffAccount({ legacyPublicUserdataId = null, email = null }, dependencies) {
+  let account;
+  if (email !== null) {
+    const listByEmail = dependencies.listStaffAccountsByExactEmail || listStaffAccountsByExactEmail;
+    const rows = await listByEmail(email);
+    if (Array.isArray(rows) && rows.length > 1) {
+      return { ok: false, refusal: staffOnboardingRefusal("validation_blocker", staffOnboardingBlocker(
+        "target_account_ambiguous",
+        "More than one Get Kinder account uses this email address, so KAI cannot tell which person to add.",
+        "Ask Get Kinder support to resolve the duplicate accounts, then try again.",
+      )) };
+    }
+    account = Array.isArray(rows) ? rows[0] || null : null;
+  } else {
+    const getById = dependencies.getStaffAccountById || getStaffAccountById;
+    account = await getById(legacyPublicUserdataId);
+  }
+  if (!isPositiveInteger(Number(account?.id))) {
+    return { ok: false, refusal: staffOnboardingRefusal("not_found", staffOnboardingBlocker(
+      "target_account_not_found",
+      "No Get Kinder account was found for this person.",
+      ACCOUNT_REGISTRATION_FIX,
+    )) };
+  }
+  if (account.is_suspended === true) {
+    return { ok: false, refusal: staffOnboardingRefusal("validation_blocker", staffOnboardingBlocker(
+      "target_account_suspended",
+      "This Get Kinder account is suspended, so it cannot be given KAI access.",
+      "Resolve the account suspension with Get Kinder support first.",
+    )) };
+  }
+  if (account.email_verified !== true) {
+    return { ok: false, refusal: staffOnboardingRefusal("validation_blocker", staffOnboardingBlocker(
+      "target_account_not_verified",
+      "This person has not verified their Get Kinder email address yet, so KAI access cannot be given.",
+      "Ask the person to finish Get Kinder email verification (the link in their registration email), then try again.",
+    )) };
+  }
+  return { ok: true, legacyPublicUserdataId: Number(account.id) };
+}
+
+/**
+ * The person's kai.users identity for staff onboarding: the existing mapping,
+ * or the same JIT mapping their first sign-in would create. A mapping that
+ * is not an active public.userdata identity cannot act (resolveKaiActorContext
+ * refuses it) and is never resurrected here.
+ */
+async function resolveStaffKaiUser(legacyPublicUserdataId, dependencies) {
+  const findOrCreateTarget = dependencies.findOrCreateKaiUserByLegacyPublicUserdataId || findOrCreateKaiUserForAdministrationTarget;
+  const kaiUser = await resolveAdministrationTarget(findOrCreateTarget, legacyPublicUserdataId);
+  if (!kaiUser?.user_id) return { ok: false, refusal: targetAccountEmailUnusable(STAFF_ONBOARDING_VALIDATOR_KEY) };
+  const canAct = kaiUser.status === "active" &&
+    kaiUser.legacy_identity_source === "public.userdata" &&
+    String(kaiUser.legacy_public_userdata_id) === String(legacyPublicUserdataId);
+  if (!canAct) {
+    return { ok: false, refusal: staffOnboardingRefusal("validation_blocker", staffOnboardingBlocker(
+      "target_kai_account_inactive",
+      "This person's KAI account is deactivated, so KAI access cannot be given.",
+      "A platform administrator must review the deactivated KAI account.",
+    )) };
+  }
+  return { ok: true, kaiUser };
+}
+
+/**
+ * Where a global KAI role given to this person would take effect besides
+ * organizationId. Every reader of global roles first requires active access
+ * to the exact organization (validateActorCanPerformOperation), so a global
+ * role reaches exactly the organizations where the person has active access:
+ * their active stored memberships of any role, and the binding-derived
+ * client_admin access sign-in derives (the same resolver, so the answer
+ * matches what their next request will carry). Only whether such access
+ * exists is reported - never which organizations.
+ */
+async function findGlobalRoleReachOutsideOrganization({ kaiUserId, legacyPublicUserdataId, organizationId }, db, dependencies) {
+  const listMemberships = dependencies.listOrganizationMembershipsForUser || listOrganizationMembershipsForUser;
+  const resolveDerived = dependencies.resolveEffectiveClientOrganizationMembershipsForLegacyUser ||
+    resolveEffectiveClientOrganizationMembershipsForLegacyUser;
+  const outside = (membership) => membership?.membership_status === KAI_ACTIVE_ORGANIZATION_MEMBERSHIP_STATUS &&
+    String(membership.organization_id) !== String(organizationId);
+  const stored = await listMemberships(kaiUserId, db);
+  const derived = await resolveDerived(legacyPublicUserdataId, dependencies);
+  const storedElsewhere = (Array.isArray(stored) ? stored : []).some(outside);
+  const bindingDerivedElsewhere = (Array.isArray(derived) ? derived : []).some(outside);
+  return { reachesOtherOrganization: storedElsewhere || bindingDerivedElsewhere, storedElsewhere, bindingDerivedElsewhere };
+}
+
+// Access elsewhere of any kind - including binding-derived organization-admin
+// access, whose combination with global Get Kinder roles is an open owner
+// policy question - leaves the global role to the platform path. The blocker
+// never says which other organization or what access it is.
+function crossOrganizationGlobalRoleBlocker(globalRoleName, organizationRoleName) {
+  return staffOnboardingBlocker(
+    "cross_organization_global_role_side_effect",
+    `This person also has KAI access in another organization, where a global ${globalRoleName} role would take effect too. `
+      + "A platform administrator must approve that global role.",
+    `The organization ${organizationRoleName} role here is kept. A platform administrator can grant the global ${globalRoleName} role in Team & Access after reviewing the person's other access.`,
+    {
+      global_role: globalRoleName,
+      organization_role: organizationRoleName,
+      approval_path: "platform_superuser_global_role",
+    },
+  );
+}
+
 /**
  * Package 2 read: effective KAI access for one explicitly scoped
  * organization, one entry per person. Every stored
@@ -473,6 +627,35 @@ export async function viewEffectiveKaiAccess({ actorContext, organizationId } = 
       }, organizationId)
       : null;
 
+    // Repair 1: for an administrator of Get Kinder roles, each active
+    // organization gk_operator/gk_reviewer assignment's onboarding state -
+    // complete when the person holds the same-named global role, otherwise
+    // whether staff onboarding can complete it here or the global role
+    // needs platform approval (the person has access elsewhere). Advisory:
+    // onboardGkStaffMember re-decides under the locks.
+    let staffOnboarding;
+    if (computeReadiness) {
+      staffOnboarding = [];
+      const pendingStaffRoles = [];
+      if (entry.kai_user_id && entry.account_status === "active") {
+        for (const assignment of entry.stored) {
+          if (!STAFF_ONBOARDING_ROLE_SET.has(assignment.role_name) || !isActive(assignment)) continue;
+          const globalRole = KAI_STAFF_ONBOARDING_GLOBAL_ROLE_BY_ORGANIZATION_ROLE[assignment.role_name];
+          const item = { role_name: assignment.role_name, global_role: globalRole, status: "complete" };
+          staffOnboarding.push(item);
+          if (!(globalRoleNames || []).includes(globalRole)) pendingStaffRoles.push(item);
+        }
+      }
+      if (pendingStaffRoles.length > 0) {
+        const reach = await findGlobalRoleReachOutsideOrganization(
+          { kaiUserId: entry.kai_user_id, legacyPublicUserdataId: entry.legacy_public_userdata_id, organizationId },
+          undefined,
+          dependencies,
+        );
+        for (const item of pendingStaffRoles) item.status = reach.reachesOtherOrganization ? "pending_platform_approval" : "pending_completion";
+      }
+    }
+
     accessRows.push({
       kai_user_id: entry.kai_user_id,
       legacy_public_userdata_id: entry.legacy_public_userdata_id,
@@ -495,6 +678,7 @@ export async function viewEffectiveKaiAccess({ actorContext, organizationId } = 
         assignment.replacement_roles.length > 0 || assignment.can_revoke || assignment.can_restore),
       global_kai_roles: includeGlobalRoles && entry.kai_user_id ? globalRoleNames : undefined,
       operation_readiness: computeReadiness ? operationReadiness : undefined,
+      staff_onboarding: staffOnboarding,
     });
   }
 
@@ -506,6 +690,12 @@ export async function viewEffectiveKaiAccess({ actorContext, organizationId } = 
     // (manageGlobalKaiRole); empty for every other administrator.
     assignable_global_roles: includeGlobalRoles ? [...ASSIGNABLE_GLOBAL_ROLE_SET] : [],
     administrable_roles: administeredRoles,
+    // The staff roles this administrator grants and removes through staff
+    // onboarding (onboardGkStaffMember / offboardGkStaffRole): a delegated GK
+    // administrator's. A platform superuser keeps the explicit organization
+    // and global controls.
+    staff_onboarding_roles: administeredRoles.filter((role) =>
+      STAFF_ONBOARDING_ROLE_SET.has(role) && authorityByRole.get(role) === "delegated_gk_admin"),
   });
 }
 
@@ -556,6 +746,10 @@ export async function manageOrganizationMembership(
   // A known role this actor does not administer is the same structured
   // refusal the additive grant and targeted revocation return.
   if (!authorityByRole.has(roleName)) return roleNotAdministrable(roleName, authorityByRole);
+  if (authorityByRole.get(roleName) === "delegated_gk_admin" && membershipStatus === KAI_ACTIVE_ORGANIZATION_MEMBERSHIP_STATUS) {
+    const eligibility = await resolveEligibleStaffAccount({ legacyPublicUserdataId: targetLegacyPublicUserdataId }, dependencies);
+    if (!eligibility.ok) return eligibility.refusal;
+  }
 
   const findOrCreateTarget = dependencies.findOrCreateKaiUserByLegacyPublicUserdataId || findOrCreateKaiUserForAdministrationTarget;
   const targetKaiUser = await resolveAdministrationTarget(findOrCreateTarget, targetLegacyPublicUserdataId);
@@ -635,6 +829,7 @@ export async function applyOrganizationMembershipChangeInTransaction(
     createProductionMetadataOnlyAuditForAccessAdministration;
 
   await lockOrganizationAdministration(tx, organizationId);
+  await lockUserAccessAdministration(tx, targetUserId);
 
   // The deployed uniqueness is UNIQUE (organization_id, user_id, role_name),
   // so one user may hold several assignments here (C04). A change addresses
@@ -765,6 +960,12 @@ export async function grantOrganizationRole(
   if (!platformSuperuserAuthorized && String(actorContext.legacyPublicUserdataId) === String(targetLegacyPublicUserdataId)) {
     return selfRoleElevationRefused();
   }
+  // A delegated GK administrator gives Get Kinder staff authority only to a
+  // verified, unsuspended Get Kinder account (Repair 1).
+  if (authorityByRole.get(roleName) === "delegated_gk_admin") {
+    const eligibility = await resolveEligibleStaffAccount({ legacyPublicUserdataId: targetLegacyPublicUserdataId }, dependencies);
+    if (!eligibility.ok) return eligibility.refusal;
+  }
 
   const findOrCreateTarget = dependencies.findOrCreateKaiUserByLegacyPublicUserdataId || findOrCreateKaiUserForAdministrationTarget;
   const targetKaiUser = await resolveAdministrationTarget(findOrCreateTarget, targetLegacyPublicUserdataId);
@@ -780,6 +981,7 @@ export async function grantOrganizationRole(
   try {
     return await runInTransaction(async (tx) => {
       await lockOrganizationAdministration(tx, organizationId);
+      await lockUserAccessAdministration(tx, targetKaiUser.user_id);
       const grantResult = await grantRole({ organizationId, userId: targetKaiUser.user_id, roleName }, tx);
       const accessAdmitted = Boolean(grantResult.mutated) && !grantResult.hadActiveAccess;
 
@@ -1000,6 +1202,338 @@ export async function manageGlobalKaiRole(
       });
     });
   } catch (error) {
+    return shapeThrownError(error);
+  }
+}
+
+/**
+ * The staff-administration authority for one staff role in exactly
+ * organizationId: the shared resolveOrganizationRoleAdministration decides
+ * tenant and actor authority, and only a delegated GK administrator or a
+ * platform superuser administers Get Kinder staff - an organization client
+ * administrator (stored or binding-derived) never does.
+ */
+function resolveStaffAdministration(actorContext, operation, organizationId, roleName) {
+  const administration = resolveOrganizationRoleAdministration(actorContext, operation, organizationId);
+  if (!administration.ok) return { ok: false, refusal: authorizationFailure(administration) };
+  if (typeof roleName !== "string" || !PLATFORM_SUPERUSER_ASSIGNABLE_ORGANIZATION_ROLE_SET.has(roleName)) {
+    return { ok: false, refusal: failure("validation_blocker") };
+  }
+  if (!STAFF_ONBOARDING_ROLE_SET.has(roleName)) {
+    return { ok: false, refusal: membershipRefusal("authorization_denied", membershipBlocker(
+      "staff_onboarding_role_not_permitted",
+      "Staff onboarding gives only the Get Kinder operator or reviewer role.",
+      "Organization Get Kinder administrator and client roles are managed through their own governed paths.",
+    )) };
+  }
+  const authority = administration.authorityByRole.get(roleName);
+  if (!STAFF_ONBOARDING_AUTHORITIES.has(authority)) {
+    return { ok: false, refusal: roleNotAdministrable(roleName, administration.authorityByRole) };
+  }
+  return { ok: true, authority, platformSuperuserAuthorized: administration.platformSuperuserAuthorized };
+}
+
+/**
+ * The person's operation readiness in this organization after a staff change,
+ * read inside the change's transaction the way their next sign-in resolves
+ * them: stored assignments here, binding-derived access here, global roles.
+ */
+async function staffReadinessInOrganization({ kaiUserId, organizationId, derivedHere }, tx, dependencies) {
+  const listRoles = dependencies.listGlobalRoleAssignmentRows || listGlobalRoleAssignmentRows;
+  const listExistingRows = dependencies.listOrganizationMembershipRowsForUserInOrganization || listOrganizationMembershipRowsForUserInOrganization;
+  const computeReadiness = dependencies.computeOrganizationOperationReadiness
+    || (await import("./kaiOrganizationAccessCapabilitiesService.js")).computeOrganizationOperationReadiness;
+  const globalRoles = (await listRoles(kaiUserId, tx)).map((row) => row.role_name);
+  const storedHere = await listExistingRows(organizationId, kaiUserId, tx);
+  return computeReadiness({
+    actorType: "human",
+    actorUserId: kaiUserId,
+    kaiUserStatus: "active",
+    kaiRoles: globalRoles,
+    organizationMemberships: [
+      ...storedHere.map((row) => ({ organization_id: organizationId, user_id: kaiUserId, role_name: row.role_name, membership_status: row.membership_status })),
+      ...derivedHere,
+    ],
+  }, organizationId);
+}
+
+async function derivedAccessHere(legacyPublicUserdataId, organizationId, dependencies) {
+  const resolveDerived = dependencies.resolveEffectiveClientOrganizationMembershipsForLegacyUser ||
+    resolveEffectiveClientOrganizationMembershipsForLegacyUser;
+  const derived = await resolveDerived(legacyPublicUserdataId, dependencies);
+  return (Array.isArray(derived) ? derived : []).filter((membership) => String(membership.organization_id) === String(organizationId));
+}
+
+class StaffGlobalRoleUnavailableError extends Error {
+  constructor() {
+    super("staff onboarding global role is not defined in kai.roles");
+    this.name = "StaffGlobalRoleUnavailableError";
+  }
+}
+
+/**
+ * Repair 1: delegated GK staff onboarding. A delegated GK administrator of
+ * exactly organizationId (global gk_admin + active stored organization
+ * gk_admin) - or a platform superuser - completes routine operator/reviewer
+ * onboarding of an existing, verified Get Kinder account without returning to
+ * the platform superuser:
+ *  1. the account is identified by id or exact email and must be verified,
+ *     unsuspended, and unambiguous; it is mapped to kai.users exactly as its
+ *     first sign-in would (an inactive mapping is refused, never revived);
+ *  2. in one transaction under the organization and person locks, the
+ *     organization gk_operator/gk_reviewer role is granted (additive, the
+ *     same writer and audit as grantOrganizationRole) and
+ *  3. the same-named global role its operations need is established only if
+ *     the person has no active access to any other organization (stored or
+ *     binding-derived) - otherwise the global role is not written, a
+ *     cross_organization_global_role_side_effect blocker is returned, and the
+ *     organization role stays as the pending, actionable onboarding state for
+ *     the existing platform-superuser global-role path;
+ *  4. every write is audited (metadata only), and the person's resulting
+ *     operation readiness here is returned.
+ * Never grants gk_admin (organization or global), never to the actor
+ * themselves (outside platform-superuser authority), never in another
+ * organization, and never creates an account or a client membership.
+ * Replaying a completed onboarding writes nothing.
+ */
+export async function onboardGkStaffMember(
+  { actorContext, organizationId, targetLegacyPublicUserdataId = null, targetEmail = null, roleName, now } = {},
+  dependencies = {},
+) {
+  const env = dependencies.env || process.env;
+  if (!isKaiSprint2Enabled(env)) return failure("feature_disabled");
+  if (actorContext?.actorType !== "human") return failure("authorization_denied");
+
+  const staffAdministration = resolveStaffAdministration(actorContext, MANAGE_ORGANIZATION_MEMBERSHIP, organizationId, roleName);
+  if (!staffAdministration.ok) return staffAdministration.refusal;
+  const { authority, platformSuperuserAuthorized } = staffAdministration;
+
+  const normalizedEmail = typeof targetEmail === "string" ? targetEmail.trim().toLowerCase() : null;
+  const identifiedById = targetLegacyPublicUserdataId !== null;
+  if (
+    identifiedById === (targetEmail !== null) ||
+    (identifiedById && !isPositiveInteger(targetLegacyPublicUserdataId)) ||
+    (!identifiedById && (!normalizedEmail || normalizedEmail.length > 320 || !/^[^\s@]+@[^\s@]+$/.test(normalizedEmail))) ||
+    !isNormalizedNow(now)
+  ) {
+    return failure("validation_blocker");
+  }
+  if (!platformSuperuserAuthorized && identifiedById && String(actorContext.legacyPublicUserdataId) === String(targetLegacyPublicUserdataId)) {
+    return selfRoleElevationRefused();
+  }
+
+  const account = await resolveEligibleStaffAccount(
+    identifiedById ? { legacyPublicUserdataId: targetLegacyPublicUserdataId } : { email: normalizedEmail },
+    dependencies,
+  );
+  if (!account.ok) return account.refusal;
+  const legacyId = account.legacyPublicUserdataId;
+  if (!platformSuperuserAuthorized && String(actorContext.legacyPublicUserdataId) === String(legacyId)) {
+    return selfRoleElevationRefused();
+  }
+  const mapping = await resolveStaffKaiUser(legacyId, dependencies);
+  if (!mapping.ok) return mapping.refusal;
+  const kaiUserId = mapping.kaiUser.user_id;
+  if (!platformSuperuserAuthorized && kaiUserId === actorContext.actorUserId) return selfRoleElevationRefused();
+
+  const globalRoleName = KAI_STAFF_ONBOARDING_GLOBAL_ROLE_BY_ORGANIZATION_ROLE[roleName];
+  const runInTransaction = dependencies.runInTransaction || withTransaction;
+  const grantRole = dependencies.grantOrganizationMembershipRole || grantOrganizationMembershipRole;
+  const listRoles = dependencies.listGlobalRoleAssignmentRows || listGlobalRoleAssignmentRows;
+  const assignRole = dependencies.assignGlobalRole || assignGlobalRole;
+  const auditFactory =
+    dependencies.createProductionMetadataOnlyAuditForAccessAdministration ||
+    createProductionMetadataOnlyAuditForAccessAdministration;
+
+  try {
+    return await runInTransaction(async (tx) => {
+      await lockOrganizationAdministration(tx, organizationId);
+      await lockUserAccessAdministration(tx, kaiUserId);
+
+      const grantResult = await grantRole({ organizationId, userId: kaiUserId, roleName }, tx);
+      const accessAdmitted = Boolean(grantResult.mutated) && !grantResult.hadActiveAccess;
+      if (grantResult.mutated) {
+        await publishRequiredAudit(auditFactory({ organizationId, targetUserId: kaiUserId, objectType: "organization_membership", actorContext, now }), {
+          target_user_id: kaiUserId,
+          attempted_operation: accessAdmitted ? "organization_role_granted_access_admitted" : "organization_role_granted",
+          role_name: roleName,
+          previous_role_name: null,
+          resulting_role_name: roleName,
+          previous_membership_status: grantResult.previousRow?.membership_status ?? null,
+          resulting_membership_status: KAI_ACTIVE_ORGANIZATION_MEMBERSHIP_STATUS,
+          authority_source: authority,
+          validator_key: STAFF_ONBOARDING_VALIDATOR_KEY,
+        }, tx);
+      }
+
+      const previousGlobalRoles = (await listRoles(kaiUserId, tx)).map((row) => row.role_name);
+      let globalRoleStatus = "already_held";
+      const pendingBlockers = [];
+      if (!previousGlobalRoles.includes(globalRoleName)) {
+        const reach = await findGlobalRoleReachOutsideOrganization({ kaiUserId, legacyPublicUserdataId: legacyId, organizationId }, tx, dependencies);
+        if (reach.reachesOtherOrganization) {
+          globalRoleStatus = "pending_platform_approval";
+          pendingBlockers.push(crossOrganizationGlobalRoleBlocker(globalRoleName, roleName));
+        } else {
+          const assigned = await assignRole({ userId: kaiUserId, roleName: globalRoleName }, tx);
+          // A missing kai.roles row rolls the whole onboarding back.
+          if (assigned.error_code === "role_not_found") throw new StaffGlobalRoleUnavailableError();
+          globalRoleStatus = "assigned";
+          if (assigned.mutated) {
+            await publishRequiredAudit(auditFactory({ organizationId, targetUserId: kaiUserId, objectType: "kai_user", actorContext, now }), {
+              target_user_id: kaiUserId,
+              attempted_operation: "global_kai_role_assigned",
+              role_name: globalRoleName,
+              previous_role_name: previousGlobalRoles.join(","),
+              resulting_role_name: [...previousGlobalRoles, globalRoleName].sort().join(","),
+              authority_source: authority,
+              validator_key: STAFF_ONBOARDING_VALIDATOR_KEY,
+            }, tx);
+          }
+        }
+      }
+
+      const operationReadiness = await staffReadinessInOrganization(
+        { kaiUserId, organizationId, derivedHere: await derivedAccessHere(legacyId, organizationId, dependencies) },
+        tx,
+        dependencies,
+      );
+      return success({
+        organization_id: organizationId,
+        user_id: kaiUserId,
+        legacy_public_userdata_id: legacyId,
+        role_name: roleName,
+        organization_role: {
+          role_name: roleName,
+          membership_status: KAI_ACTIVE_ORGANIZATION_MEMBERSHIP_STATUS,
+          granted: Boolean(grantResult.mutated),
+          organization_access_admitted: accessAdmitted,
+        },
+        global_role: { role_name: globalRoleName, status: globalRoleStatus },
+        onboarding_status: pendingBlockers.length > 0 ? "pending_platform_approval" : "complete",
+        pending_blockers: pendingBlockers,
+        operation_readiness: operationReadiness,
+        replayed: !grantResult.mutated && globalRoleStatus === "already_held",
+      });
+    });
+  } catch (error) {
+    if (error instanceof StaffGlobalRoleUnavailableError) return failure("role_not_found");
+    return shapeThrownError(error);
+  }
+}
+
+/**
+ * Repair 1: delegated GK staff offboarding - the counterpart of
+ * onboardGkStaffMember. Targeted revocation of the organization
+ * gk_operator/gk_reviewer assignment (same writer and audit as
+ * revokeOrganizationRole; already inactive is a replay, never present is
+ * not_found and nothing is written), then the same-named global role:
+ *  - kept when another active stored assignment of that role (any
+ *    organization) still requires it;
+ *  - kept, with a cross_organization_global_role_side_effect blocker, when
+ *    the person has active access to another organization - the global role
+ *    may serve that access, so only the platform superuser decides;
+ *  - otherwise revoked (it could take effect only here, where the role
+ *    has just been revoked), audited.
+ * Other assignments, client roles, derived authority and history are
+ * untouched.
+ */
+export async function offboardGkStaffRole(
+  { actorContext, organizationId, targetLegacyPublicUserdataId, roleName, now } = {},
+  dependencies = {},
+) {
+  const env = dependencies.env || process.env;
+  if (!isKaiSprint2Enabled(env)) return failure("feature_disabled");
+  if (actorContext?.actorType !== "human") return failure("authorization_denied");
+
+  const staffAdministration = resolveStaffAdministration(actorContext, MANAGE_ORGANIZATION_MEMBERSHIP, organizationId, roleName);
+  if (!staffAdministration.ok) return staffAdministration.refusal;
+  const { authority } = staffAdministration;
+  if (!isPositiveInteger(targetLegacyPublicUserdataId) || !isNormalizedNow(now)) return failure("validation_blocker");
+
+  const findTarget = dependencies.findKaiUserByLegacyPublicUserdataId || findKaiUserByLegacyPublicUserdataId;
+  const targetKaiUser = await findTarget(targetLegacyPublicUserdataId);
+  if (!targetKaiUser?.user_id) return failure("not_found");
+  const kaiUserId = targetKaiUser.user_id;
+
+  const globalRoleName = KAI_STAFF_ONBOARDING_GLOBAL_ROLE_BY_ORGANIZATION_ROLE[roleName];
+  const runInTransaction = dependencies.runInTransaction || withTransaction;
+  const revokeRole = dependencies.revokeOrganizationMembershipRole || revokeOrganizationMembershipRole;
+  const listMemberships = dependencies.listOrganizationMembershipsForUser || listOrganizationMembershipsForUser;
+  const listRoles = dependencies.listGlobalRoleAssignmentRows || listGlobalRoleAssignmentRows;
+  const revokeGlobal = dependencies.revokeGlobalRole || revokeGlobalRole;
+  const auditFactory =
+    dependencies.createProductionMetadataOnlyAuditForAccessAdministration ||
+    createProductionMetadataOnlyAuditForAccessAdministration;
+
+  try {
+    return await runInTransaction(async (tx) => {
+      await lockOrganizationAdministration(tx, organizationId);
+      await lockUserAccessAdministration(tx, kaiUserId);
+
+      const revokeResult = await revokeRole({ organizationId, userId: kaiUserId, roleName }, tx);
+      if (revokeResult.notFound) return failure("not_found");
+      if (revokeResult.mutated) {
+        await publishRequiredAudit(auditFactory({ organizationId, targetUserId: kaiUserId, objectType: "organization_membership", actorContext, now }), {
+          target_user_id: kaiUserId,
+          attempted_operation: "organization_role_revoked",
+          role_name: roleName,
+          previous_role_name: roleName,
+          resulting_role_name: roleName,
+          previous_membership_status: revokeResult.previousRow.membership_status,
+          resulting_membership_status: KAI_INACTIVE_ORGANIZATION_MEMBERSHIP_STATUS,
+          authority_source: authority,
+          validator_key: STAFF_ONBOARDING_VALIDATOR_KEY,
+        }, tx);
+      }
+
+      const previousGlobalRoles = (await listRoles(kaiUserId, tx)).map((row) => row.role_name);
+      const globalRole = { role_name: globalRoleName, status: "not_held", reason: null };
+      const pendingBlockers = [];
+      if (previousGlobalRoles.includes(globalRoleName)) {
+        const memberships = await listMemberships(kaiUserId, tx);
+        const requiredByAnotherAssignment = (Array.isArray(memberships) ? memberships : []).some((membership) =>
+          membership.role_name === roleName && membership.membership_status === KAI_ACTIVE_ORGANIZATION_MEMBERSHIP_STATUS);
+        const reach = requiredByAnotherAssignment
+          ? null
+          : await findGlobalRoleReachOutsideOrganization({ kaiUserId, legacyPublicUserdataId: targetLegacyPublicUserdataId, organizationId }, tx, dependencies);
+        if (requiredByAnotherAssignment) {
+          Object.assign(globalRole, { status: "retained", reason: "required_by_another_assignment" });
+        } else if (reach.reachesOtherOrganization) {
+          Object.assign(globalRole, { status: "retained", reason: "access_in_another_organization" });
+          pendingBlockers.push(crossOrganizationGlobalRoleBlocker(globalRoleName, roleName));
+        } else {
+          const revoked = await revokeGlobal({ userId: kaiUserId, roleName: globalRoleName }, tx);
+          if (revoked.error_code === "role_not_found") throw new StaffGlobalRoleUnavailableError();
+          Object.assign(globalRole, { status: "revoked" });
+          if (revoked.mutated) {
+            await publishRequiredAudit(auditFactory({ organizationId, targetUserId: kaiUserId, objectType: "kai_user", actorContext, now }), {
+              target_user_id: kaiUserId,
+              attempted_operation: "global_kai_role_revoked",
+              role_name: globalRoleName,
+              previous_role_name: previousGlobalRoles.join(","),
+              resulting_role_name: previousGlobalRoles.filter((role) => role !== globalRoleName).join(","),
+              authority_source: authority,
+              validator_key: STAFF_ONBOARDING_VALIDATOR_KEY,
+            }, tx);
+          }
+        }
+      }
+
+      return success({
+        organization_id: organizationId,
+        user_id: kaiUserId,
+        legacy_public_userdata_id: targetLegacyPublicUserdataId,
+        role_name: roleName,
+        membership_status: revokeResult.newRow?.membership_status ?? revokeResult.previousRow?.membership_status ?? null,
+        remaining_active_role_names: revokeResult.remainingActiveRoleNames || [],
+        global_role: globalRole,
+        pending_blockers: pendingBlockers,
+        replayed: !revokeResult.mutated && globalRole.status !== "revoked",
+      });
+    });
+  } catch (error) {
+    if (error instanceof StaffGlobalRoleUnavailableError) return failure("role_not_found");
     return shapeThrownError(error);
   }
 }

@@ -13,12 +13,17 @@ BEGIN;
 
 -- email: the existing Get Kinder account column (login and the admin user
 -- lookup read it); the administration writers map a target who has never
--- used KAI with it.
+-- used KAI with it. email_verified and is_suspended: the existing account
+-- columns login (index.js) and the authenticated-API gate
+-- (middleware/auth.js) enforce; delegated GK staff onboarding admits only a
+-- verified, unsuspended account.
 CREATE TABLE public.userdata (
   id SERIAL PRIMARY KEY,
   org_id  INTEGER,
   org_rep BOOLEAN DEFAULT false,
-  email   text
+  email   text,
+  email_verified BOOLEAN DEFAULT false,
+  is_suspended   BOOLEAN DEFAULT false
 );
 
 CREATE TABLE public.organizations (

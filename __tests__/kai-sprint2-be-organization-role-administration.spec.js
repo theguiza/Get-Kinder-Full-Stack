@@ -108,6 +108,15 @@ function createStore({ memberships = [], globalRoles = {}, derivedAdmins = [] } 
     listActiveGkOrganizationAdminLegacyUserIds: async () => derivedAdmins.map((user) => user.legacy),
     findKaiUserByLegacyPublicUserdataId: async (legacy) => kaiUserOf(userByLegacy(legacy)),
     findOrCreateKaiUserByLegacyPublicUserdataId: async ({ legacyPublicUserdataId }) => kaiUserOf(userByLegacy(legacyPublicUserdataId)),
+    // Every synthetic account is a verified, unsuspended Get Kinder account.
+    getStaffAccountById: async (legacy) => {
+      const user = userByLegacy(legacy);
+      return user ? { id: user.legacy, email: user.email, email_verified: true, is_suspended: false } : null;
+    },
+    listOrganizationMembershipsForUser: async (userId) => state.memberships.filter((entry) => entry.user_id === userId).map((entry) => ({ ...entry })),
+    resolveEffectiveClientOrganizationMembershipsForLegacyUser: async (legacy) => (derivedAdmins.some((user) => user.legacy === legacy)
+      ? [{ organization_id: ORG_A, role_name: "client_admin", membership_status: "active", source: "gk_organization_binding", gk_organization_id: GK_ORG_A }]
+      : []),
     listKaiRolesForUser: async (userId) => [...(state.globalRoles[userId] || [])],
     upsertOrganizationMembershipRoleStatus: async ({ organizationId, userId, roleName, membershipStatus, previousRoleName = null }) => {
       const existing = rowsFor(organizationId, userId);

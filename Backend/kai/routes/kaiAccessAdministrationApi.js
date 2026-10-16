@@ -12,6 +12,8 @@ import {
   revokeOrganizationRole,
   manageGlobalKaiRole,
   getAccessAdministrationContext,
+  onboardGkStaffMember,
+  offboardGkStaffRole,
 } from "../services/kaiAccessAdministrationService.js";
 import {
   listPendingOrganizationJoinRequestsForReviewer,
@@ -53,6 +55,8 @@ function getAccessAdministrationService() {
       revokeOrganizationRole,
       manageGlobalKaiRole,
       getAccessAdministrationContext,
+      onboardGkStaffMember,
+      offboardGkStaffRole,
       listPendingOrganizationJoinRequestsForReviewer,
       approveOrganizationJoinRequest,
       declineOrganizationJoinRequest,
@@ -177,6 +181,81 @@ router.post("/organizations/:organizationId/memberships/:legacyPublicUserdataId/
     }
 
     const result = await getAccessAdministrationService().revokeOrganizationRole({
+      actorContext: req.kaiSprint2ActorContext,
+      organizationId,
+      targetLegacyPublicUserdataId,
+      roleName,
+      now: new Date().toISOString(),
+    });
+    return sendServiceResult(res, result, 200);
+  } catch (error) {
+    return next(error);
+  }
+});
+
+// Repair 1: delegated GK staff onboarding. A person is identified by the
+// exact email of their verified Get Kinder account (body { email, role_name })
+// or, already on the roster, by their account id in the path (body
+// { role_name }). No other body field is accepted.
+function hasOnlyBodyKeys(req, allowedKeys) {
+  const body = req.body;
+  return Boolean(body) && typeof body === "object" && !Array.isArray(body) && Object.keys(body).every((key) => allowedKeys.includes(key));
+}
+
+router.post("/organizations/:organizationId/gk-staff", async (req, res, next) => {
+  try {
+    const organizationId = typeof req.params.organizationId === "string" ? req.params.organizationId : null;
+    const valid = hasOnlyBodyKeys(req, ["email", "role_name"]);
+    const email = valid && typeof req.body.email === "string" ? req.body.email : null;
+    const roleName = valid && typeof req.body.role_name === "string" ? req.body.role_name : null;
+    if (!organizationId || !email || !roleName) return sendKaiError(res, "validation_blocker");
+
+    const result = await getAccessAdministrationService().onboardGkStaffMember({
+      actorContext: req.kaiSprint2ActorContext,
+      organizationId,
+      targetEmail: email,
+      roleName,
+      now: new Date().toISOString(),
+    });
+    return sendServiceResult(res, result, 200);
+  } catch (error) {
+    return next(error);
+  }
+});
+
+router.post("/organizations/:organizationId/gk-staff/:legacyPublicUserdataId", async (req, res, next) => {
+  try {
+    const organizationId = typeof req.params.organizationId === "string" ? req.params.organizationId : null;
+    const targetLegacyPublicUserdataId = parseLegacyUserId(req.params.legacyPublicUserdataId);
+    const valid = hasOnlyBodyKeys(req, ["role_name"]);
+    const roleName = valid && typeof req.body.role_name === "string" ? req.body.role_name : null;
+    if (!organizationId || !targetLegacyPublicUserdataId || !roleName) return sendKaiError(res, "validation_blocker");
+
+    const result = await getAccessAdministrationService().onboardGkStaffMember({
+      actorContext: req.kaiSprint2ActorContext,
+      organizationId,
+      targetLegacyPublicUserdataId,
+      roleName,
+      now: new Date().toISOString(),
+    });
+    return sendServiceResult(res, result, 200);
+  } catch (error) {
+    return next(error);
+  }
+});
+
+// Repair 1: delegated GK staff offboarding of one staff role, named entirely
+// by the path. Accepts no body fields.
+router.post("/organizations/:organizationId/gk-staff/:legacyPublicUserdataId/roles/:roleName/revoke", async (req, res, next) => {
+  try {
+    const organizationId = typeof req.params.organizationId === "string" ? req.params.organizationId : null;
+    const targetLegacyPublicUserdataId = parseLegacyUserId(req.params.legacyPublicUserdataId);
+    const roleName = typeof req.params.roleName === "string" && ROLE_NAME_PATTERN.test(req.params.roleName) ? req.params.roleName : null;
+    if (!organizationId || !targetLegacyPublicUserdataId || !roleName || !hasNoBodyFields(req)) {
+      return sendKaiError(res, "validation_blocker");
+    }
+
+    const result = await getAccessAdministrationService().offboardGkStaffRole({
       actorContext: req.kaiSprint2ActorContext,
       organizationId,
       targetLegacyPublicUserdataId,

@@ -26,6 +26,7 @@ import {
   KAI_DELEGATED_GK_ADMINISTRATOR_ROLE,
   KAI_DELEGATED_GK_ADMIN_ASSIGNABLE_ORGANIZATION_ROLES,
   KAI_ASSIGNABLE_ORGANIZATION_ROLES,
+  KAI_STAFF_ONBOARDING_GLOBAL_ROLE_BY_ORGANIZATION_ROLE,
 } from "../config/kaiAccessAdministrationContract.js";
 import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
 import { __clientFollowupReadServiceContract } from "./kaiClientFollowupReadService.js";
@@ -230,19 +231,23 @@ const OPERATION_READINESS = Object.freeze([
 
 const DELEGATED_GRANTABLE = new Set(KAI_DELEGATED_GK_ADMIN_ASSIGNABLE_ORGANIZATION_ROLES);
 const CLIENT_GRANTABLE = new Set(KAI_ASSIGNABLE_ORGANIZATION_ROLES);
+const STAFF_ONBOARDING_GLOBAL_ROLES = new Set(Object.values(KAI_STAFF_ONBOARDING_GLOBAL_ROLE_BY_ORGANIZATION_ROLE));
 
 function clauseSatisfied(actorContext, operation, organizationId, clause) {
   const mode = clause.scope === GLOBAL ? { globalRolesOnly: true } : clause.scope === EITHER ? { combineGlobalRoles: true } : {};
   return validateActorCanPerformOperation(actorContext, operation, organizationId, { allowedRoles: clause.roles, ...mode }).ok === true;
 }
 
-// Who can supply a missing assignment: global roles only a platform
-// superuser; organization Get Kinder roles a platform superuser, and
-// gk_operator/gk_reviewer also a delegated GK administrator; client roles an
-// organization administrator.
+// Who can supply a missing assignment: global roles a platform superuser, and
+// global gk_operator/gk_reviewer also a delegated GK administrator through
+// staff onboarding (only while the person has no access to another
+// organization - Repair 1); organization Get Kinder roles a platform
+// superuser, and gk_operator/gk_reviewer also a delegated GK administrator;
+// client roles an organization administrator.
 function grantedBy(clause) {
   const roles = [...clause.roles];
   const by = ["platform_superuser"];
+  if (clause.scope === GLOBAL && roles.some((role) => STAFF_ONBOARDING_GLOBAL_ROLES.has(role))) by.push("delegated_gk_admin_staff_onboarding");
   if (clause.scope !== GLOBAL && roles.some((role) => DELEGATED_GRANTABLE.has(role))) by.push("delegated_gk_admin");
   if (clause.scope !== GLOBAL && roles.some((role) => CLIENT_GRANTABLE.has(role))) by.push("organization_client_admin");
   return by;

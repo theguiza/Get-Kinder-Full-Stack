@@ -87,7 +87,9 @@ try {
 
   const testResult = spawnSync("node", [
     "--test",
+    "--test-concurrency=1",
     "__tests__/kai-sprint2-p2-access-administration.integration.spec.js",
+    "__tests__/kai-sprint2-gk-staff-onboarding.integration.spec.js",
   ], {
     cwd: repoRoot,
     encoding: "utf8",

@@ -156,6 +156,11 @@ try {
   // The Package 4 auth mirror lists the GK and reviewer roles only; the
   // client roles this acceptance signs in as are added as synthetic rows.
   psqlExec("INSERT INTO kai.roles (role_name) VALUES ('client_admin'), ('client_contributor') ON CONFLICT (role_name) DO NOTHING;");
+  // The existing Get Kinder account verification and suspension columns
+  // (login and the authenticated-API gate enforce them; delegated GK staff
+  // grants require a verified, unsuspended account). Every synthetic account
+  // in these journeys signs in, so it is verified unless a case says otherwise.
+  psqlExec("ALTER TABLE public.userdata ADD COLUMN IF NOT EXISTS email_verified boolean DEFAULT true, ADD COLUMN IF NOT EXISTS is_suspended boolean DEFAULT false;");
   // orgScopeService selects public.organizations.status (the production
   // column the onboarding runner's bootstrap also adds).
   psqlExec("ALTER TABLE public.organizations ADD COLUMN IF NOT EXISTS status text;");

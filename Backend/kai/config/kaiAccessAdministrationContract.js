@@ -52,6 +52,22 @@ export const KAI_DELEGATED_GK_ADMINISTRATOR_ROLE = "gk_admin";
 export const KAI_DELEGATED_GK_ADMIN_ASSIGNABLE_ORGANIZATION_ROLES = Object.freeze(["gk_operator", "gk_reviewer"]);
 
 /**
+ * Delegated GK staff onboarding (Repair 1, 2026-10-16): the organization
+ * roles a delegated GK administrator (or platform superuser) onboards a
+ * verified Get Kinder account into, each with the global role its operations
+ * also need (source review, sensitivity review, and for operators intake
+ * creation read global roles). The global role is the same-named role and is
+ * established by onboarding only while it can take effect in no organization
+ * other than the onboarding one; otherwise it stays with the existing
+ * platform-superuser global-role path. gk_admin is never onboarded this way.
+ */
+export const KAI_STAFF_ONBOARDING_GLOBAL_ROLE_BY_ORGANIZATION_ROLE = Object.freeze({
+  gk_operator: "gk_operator",
+  gk_reviewer: "gk_reviewer",
+});
+export const KAI_STAFF_ONBOARDING_ROLES = Object.freeze(Object.keys(KAI_STAFF_ONBOARDING_GLOBAL_ROLE_BY_ORGANIZATION_ROLE));
+
+/**
  * Existing global KAI staff roles (kai.roles -> kai.user_roles) a platform
  * superuser may assign/revoke. Platform-superuser authority itself is never
  * represented as a kai.user_roles row - it is carried on the actor context

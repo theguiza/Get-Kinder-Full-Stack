@@ -13,6 +13,7 @@ import {
   roleChangeBlockedAsLastAdministrator,
   roleChangeRemovesAdministrator,
   roleRevokeRemovesAdministrator,
+  staffOnboardingStatusText,
   teamAccessAccountStatusLabel,
   teamAccessAssignmentMember,
   teamAccessRoleLabel,
@@ -22,8 +23,8 @@ const ROLE_DESCRIPTIONS = Object.freeze([
   ["client_admin", "Uploads files, manages Projects and the Improvement Plan, and manages team & access."],
   ["client_reviewer", "Views your organization's KAI workspace and answers client follow-ups."],
   ["client_contributor", "Views your organization's KAI workspace."],
-  ["gk_operator", "Get Kinder staff who run source review for this organization (source review also needs a global Get Kinder role)."],
-  ["gk_reviewer", "Get Kinder staff who review evidence and claims for this organization."],
+  ["gk_operator", "Get Kinder staff who run intake, processing and source review for this organization (source review also needs the global Get Kinder operator role, which staff onboarding sets up)."],
+  ["gk_reviewer", "Get Kinder staff who review evidence and claims for this organization (source and sensitivity review also need the global Get Kinder reviewer role, which staff onboarding sets up)."],
   ["gk_admin", "Get Kinder administrator of this organization: with the global Get Kinder administrator role, manages its operator and reviewer roles; also carries export and release authority."],
 ]);
 
@@ -94,16 +95,19 @@ function AssignmentEditor({ member, savingKey, onChangeRole }) {
 
 // Targeted revocation (B/E C06) of one assignment; every other role stays.
 // Always confirmed first, naming what the person loses.
-function RevokeRoleButton({ member, roleName, savingKey, onRevokeRole }) {
+function RevokeRoleButton({ member, roleName, savingKey, onRevokeRole, staffOffboarding = false }) {
   const [confirming, setConfirming] = useState(false);
   const name = memberDisplayName(member);
   const label = teamAccessRoleLabel(roleName);
   const otherActiveRoles = member.assignments.filter((assignment) => assignment.roleName !== roleName && assignment.status === "active");
-  const consequence = roleRevokeRemovesAdministrator(member, roleName)
+  const baseConsequence = roleRevokeRemovesAdministrator(member, roleName)
     ? `${name} will no longer be an administrator and will lose access to Team & Access.`
     : otherActiveRoles.length === 0 && !member.inheritedAdmin
       ? `${name} will lose access to this organization.`
       : `${name} keeps their other roles.`;
+  const consequence = staffOffboarding
+    ? `${baseConsequence} Their global ${label} role is removed too, unless another assignment or organization still needs it.`
+    : baseConsequence;
   return (
     <span className="gk-team-access-member-revoke">
       <button
@@ -249,7 +253,33 @@ function holdsGetKinderAssignment(member) {
     || member.assignments.some((assignment) => assignment.roleName.startsWith("gk_") && assignment.status === "active");
 }
 
-function MemberRow({ member, savingKey, onChangeRole, onGrantRole, onRevokeRole, assignableGlobalRoles = [], onChangeGlobalRole }) {
+// Each active operator/reviewer assignment whose staff onboarding is not
+// finished: why, and - for a delegated GK administrator when nothing outside
+// this organization is affected - the action that finishes it.
+function StaffOnboardingStatus({ member, staffOnboardingRoles, savingKey, onCompleteStaffOnboarding }) {
+  const pending = (member.staffOnboarding || []).filter((item) => item.status !== "complete");
+  if (pending.length === 0) return null;
+  return (
+    <div className="gk-team-access-member-onboarding" data-team-access-staff-onboarding={member.key}>
+      {pending.map((item) => (
+        <div key={item.roleName} className="gk-team-access-member-edit" data-staff-onboarding-role={item.roleName} data-staff-onboarding-status={item.status}>
+          <p className="gk-team-access-member-warning">{staffOnboardingStatusText(item)}</p>
+          {item.status === "pending_completion" && staffOnboardingRoles.includes(item.roleName) ? (
+            <button type="button" className="gk-organization-join-request-btn" disabled={Boolean(savingKey)}
+              onClick={() => onCompleteStaffOnboarding?.(member, item.roleName)}>
+              {savingKey === member.key ? "Saving..." : `Complete ${teamAccessRoleLabel(item.roleName)} onboarding`}
+            </button>
+          ) : null}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function MemberRow({
+  member, savingKey, onChangeRole, onGrantRole, onRevokeRole, assignableGlobalRoles = [], onChangeGlobalRole,
+  staffOnboardingRoles = [], onCompleteStaffOnboarding,
+}) {
   const name = memberDisplayName(member);
   const authority = describeMemberAuthority(member);
   const accountStatus = teamAccessAccountStatusLabel(member);
@@ -300,7 +330,8 @@ function MemberRow({ member, savingKey, onChangeRole, onGrantRole, onRevokeRole,
             ) : null}
             <AssignmentEditor member={assignmentMember} savingKey={savingKey} onChangeRole={onChangeRole} />
             {assignment.canRevoke ? (
-              <RevokeRoleButton member={member} roleName={assignment.roleName} savingKey={savingKey} onRevokeRole={onRevokeRole} />
+              <RevokeRoleButton member={member} roleName={assignment.roleName} savingKey={savingKey} onRevokeRole={onRevokeRole}
+                staffOffboarding={staffOnboardingRoles.includes(assignment.roleName)} />
             ) : null}
           </div>
         );
@@ -311,8 +342,48 @@ function MemberRow({ member, savingKey, onChangeRole, onGrantRole, onRevokeRole,
       {Array.isArray(member.globalRoles) && assignableGlobalRoles.length > 0 ? (
         <GlobalRolesControl member={member} assignableGlobalRoles={assignableGlobalRoles} savingKey={savingKey} onChangeGlobalRole={onChangeGlobalRole} />
       ) : null}
+      <StaffOnboardingStatus member={member} staffOnboardingRoles={staffOnboardingRoles} savingKey={savingKey}
+        onCompleteStaffOnboarding={onCompleteStaffOnboarding} />
       {member.operationReadiness && holdsGetKinderAssignment(member) ? <ReadinessPanel member={member} /> : null}
     </li>
+  );
+}
+
+// Delegated GK administrator: add Get Kinder staff by the exact email of
+// their verified Get Kinder account. The server checks the account, grants the
+// organization role and, when it affects no other organization, the global
+// role the work needs; a person without an account registers first.
+function AddStaffControl({ staffOnboardingRoles, savingKey, onAddStaff }) {
+  const [email, setEmail] = useState("");
+  const [role, setRole] = useState(staffOnboardingRoles[0] || "");
+  const selectedRole = staffOnboardingRoles.includes(role) ? role : staffOnboardingRoles[0] || "";
+  return (
+    <section className="gk-organization-join gk-team-access-add-staff" aria-labelledby="gk-team-access-add-staff-heading">
+      <h2 id="gk-team-access-add-staff-heading" className="gk-organization-join-title">Add Get Kinder staff</h2>
+      <p className="gk-organization-join-hint">
+        Enter the exact email of the person's verified Get Kinder account. Someone without an account must first register at
+        Get Kinder and verify their email. They can sign in and start as soon as their onboarding is complete.
+      </p>
+      <form
+        className="gk-team-access-member-edit"
+        onSubmit={(event) => {
+          event.preventDefault();
+          onAddStaff?.(email, selectedRole);
+        }}
+      >
+        <label className="gk-team-access-visually-hidden" htmlFor="gk-team-access-add-staff-email">Staff member's Get Kinder account email</label>
+        <input id="gk-team-access-add-staff-email" type="email" className="gk-team-access-select" placeholder="Exact email of a verified Get Kinder account"
+          value={email} disabled={Boolean(savingKey)} onChange={(event) => setEmail(event.target.value)} />
+        <label className="gk-team-access-visually-hidden" htmlFor="gk-team-access-add-staff-role">Get Kinder staff role</label>
+        <select id="gk-team-access-add-staff-role" className="gk-team-access-select" value={selectedRole} disabled={Boolean(savingKey)}
+          onChange={(event) => setRole(event.target.value)}>
+          {staffOnboardingRoles.map((option) => <option key={option} value={option}>{teamAccessRoleLabel(option)}</option>)}
+        </select>
+        <button type="submit" className="gk-organization-join-request-btn" disabled={Boolean(savingKey) || !email.trim() || !selectedRole}>
+          {savingKey === "add-staff" ? "Adding..." : "Add staff member"}
+        </button>
+      </form>
+    </section>
   );
 }
 
@@ -366,11 +437,14 @@ export default function TeamAccessView({
   onSelectAdministrationOrganization,
   onChangeGlobalRole,
   onAddPerson,
+  onAddStaff,
+  onCompleteStaffOnboarding,
 }) {
   const members = roster?.members || [];
   const title = organizationName ? `Team & Access for ${organizationName}` : "Team & Access";
   const platformAdministration = administration?.platformAdministration === true;
   const assignableGlobalRoles = roster?.globalRolesVisible ? roster.assignableGlobalRoles || [] : [];
+  const staffOnboardingRoles = roster?.staffOnboardingRoles || [];
 
   return (
     <section className="gk-team-access" aria-labelledby="gk-team-access-heading">
@@ -403,6 +477,10 @@ export default function TeamAccessView({
         </section>
       ) : null}
 
+      {staffOnboardingRoles.length > 0 ? (
+        <AddStaffControl staffOnboardingRoles={staffOnboardingRoles} savingKey={savingKey} onAddStaff={onAddStaff} />
+      ) : null}
+
       {joinReview?.available ? (
         <OrganizationJoinRequestsReviewPanel
           items={joinReview.items}
@@ -424,7 +502,9 @@ export default function TeamAccessView({
           {roster?.status === "loading" ? "Loading team members..." : null}
           {roster?.status === "error" ? <span className="gk-organization-join-error">{roster.error}</span> : null}
           {notice ? (
-            <span className={notice.tone === "success" ? "gk-organization-join-success" : "gk-organization-join-error"}>{notice.text}</span>
+            <span className={notice.tone === "success" ? "gk-organization-join-success" : notice.tone === "warning" ? "gk-team-access-member-warning" : "gk-organization-join-error"}>
+              {notice.text}
+            </span>
           ) : null}
           {roster?.status === "success" && members.length === 0 ? "No members yet." : null}
         </div>
@@ -440,6 +520,8 @@ export default function TeamAccessView({
                 onRevokeRole={onRevokeRole}
                 assignableGlobalRoles={assignableGlobalRoles}
                 onChangeGlobalRole={onChangeGlobalRole}
+                staffOnboardingRoles={staffOnboardingRoles}
+                onCompleteStaffOnboarding={onCompleteStaffOnboarding}
               />
             ))}
           </ul>
@@ -447,7 +529,9 @@ export default function TeamAccessView({
         <p className="gk-organization-join-hint">
           {platformAdministration
             ? "Add an existing account above, or let people join through a join request. Global Get Kinder roles apply in every organization; organization roles apply here only."
-            : "New people join through a join request and start as contributors. Get Kinder staff access is managed by Get Kinder."}
+            : staffOnboardingRoles.length > 0
+              ? "Add Get Kinder operators and reviewers above, or give a member a staff role here. A global role is set up only when it affects no other organization; otherwise a platform administrator approves it."
+              : "New people join through a join request and start as contributors. Get Kinder staff access is managed by Get Kinder."}
         </p>
       </section>
 
