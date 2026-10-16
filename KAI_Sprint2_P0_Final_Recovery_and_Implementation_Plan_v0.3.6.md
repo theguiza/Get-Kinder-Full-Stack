@@ -39845,3 +39845,159 @@ binding-derived + global GK content policy (unchanged); Decision A.
 deployment, production/shared database, schema, flag, credential, tenant,
 production role, review decision, or `00_KAI_CURRENT_STATE.md` change. This
 is the single package-end evidence update in the living ExecPlan.
+
+### Repair 1: delegated GK staff onboarding without the platform superuser (2026-10-16)
+
+**Owner authorization (USER_CONFIRMED):** the owner's Repair 1 prompt
+authorizes correcting the incomplete delegated-administration workflow
+accepted in Prompt 4 (`3b99a90`, reported deployed to getkinder.ai) after
+Prompt 5 reported that only the platform site administrator could add
+existing users to GK administration or grant the required global GK roles,
+and that delegated organization operator/reviewer grants reached existing
+members only. Local synthetic work only; no production role, account, data,
+deployment, schema, flag, or policy change.
+
+**Start (TOOL_VERIFIED):** `main` at `3b99a902be1b1922728a647234ae5859100f60fd`,
+clean; `7e9efba`, `7fb2cd9`, `6eb15de` ancestors.
+
+**Defect (TOOL_VERIFIED, reproduced before the repair on runner-owned
+loopback PostgreSQL with the real services and the recipient's real
+`resolveKaiActorContext`):** a delegated GK administrator (global + stored
+organization `gk_admin` of Org A) granted a verified account organization
+`gk_operator` (`grantOrganizationRole` 200, access admitted), then could not
+supply the global role the operator's work reads:
+`manageGlobalKaiRole` -> `authorization_denied`, `VAL-AUT-005`
+`platform_superuser_required`. The operator's next sign-in carried
+`kaiRoles: []`: review cockpit `can_review_source_candidates: false`,
+`can_manage_sensitivity_review: false`, and `create_intake_batch` refused
+`missing_global_gk_write_role`. Sources:
+- `Backend/kai/services/kaiAccessAdministrationService.js#manageGlobalKaiRole`
+  (global roles: `validateActorCanPerformPlatformOperation` only) with
+  global-only readers (`kaiReviewCockpitService` `globalRolesOnly`,
+  sensitivity review, P0 intake writes in `kaiAuthorizationService`);
+- account identification only through `GET /api/admin/users/lookup`
+  (`routes/adminApi.js`, `ensureAdminApi`), so Team & Access offered a
+  delegated administrator no way to reach anyone outside the roster
+  (`frontend/teamAccess/TeamAccessView.jsx` `AddPersonControl` superuser-only);
+- delegated targeted revocation left the global role, so global
+  operator/reviewer capability survived in Org A through any remaining
+  membership (campaign J8-4 had pinned this).
+
+**Repair (extends the governed access-administration service; no new identity,
+invitation, schema, role, or bypass):**
+- `onboardGkStaffMember` (`POST .../organizations/:org/gk-staff` `{email,
+  role_name}` or `.../gk-staff/:legacyId` `{role_name}`): admitted only to a
+  delegated GK administrator of exactly that organization (or a platform
+  superuser) through `resolveOrganizationRoleAdministration`; roles
+  `gk_operator`/`gk_reviewer` only (`staff_onboarding_role_not_permitted`
+  for `gk_admin` and client roles); never self (outside superuser); identity
+  = exactly one Get Kinder account by id or exact normalized email, email
+  verified (`public.userdata.email_verified`), not suspended
+  (`is_suspended`), unambiguous; kai.users mapping by the existing JIT
+  resolver (an inactive mapping is refused, never revived). One transaction
+  under the organization lock and a new per-person lock: additive
+  organization grant (existing writer and audit), then the same-named global
+  role only if the person has no active access to any other organization
+  (stored memberships of any role, or binding-derived access from the same
+  resolver sign-in uses). Otherwise no global write: 200
+  `onboarding_status: pending_platform_approval` with
+  `cross_organization_global_role_side_effect` (`VAL-KAI-P2-ACC-003`,
+  `approval_path: platform_superuser_global_role`, no other organization
+  named) and the organization role kept as the actionable pending state.
+  Returns the person's operation readiness. Audits
+  `organization_role_granted[_access_admitted]` and `global_kai_role_assigned`
+  (organization id, `authority_source: delegated_gk_admin`, metadata only).
+  A missing `kai.roles` row or a failed required audit rolls the whole
+  onboarding back.
+- `offboardGkStaffRole` (`POST .../gk-staff/:legacyId/roles/:role/revoke`):
+  targeted organization revocation, then the global role is revoked only if
+  no other active assignment of that role needs it and the person has no
+  access elsewhere; otherwise kept (`required_by_another_assignment`, or
+  `access_in_another_organization` with the cross-organization blocker).
+  Audited `organization_role_revoked` / `global_kai_role_revoked`.
+- The existing delegated organization grant and replacement now require the
+  same verified, unsuspended account (`target_account_not_verified` etc.).
+- Every membership writer takes the per-person lock after the organization
+  lock (`grantOrganizationRole`, `applyOrganizationMembershipChangeInTransaction`
+  incl. JOIN-3 approval), serializing a concurrent first grant elsewhere with
+  the onboarding check.
+- Roster (`viewEffectiveKaiAccess`, administrators of Get Kinder roles only):
+  per-person `staff_onboarding` (`complete` / `pending_completion` /
+  `pending_platform_approval`) and `staff_onboarding_roles` (delegated GK
+  administrator only). Readiness names
+  `delegated_gk_admin_staff_onboarding` as a grantor of a missing global
+  operator/reviewer role.
+- Team & Access: "Add Get Kinder staff" (exact email of a verified account;
+  unregistered/unverified answers name the registration/verification step),
+  delegated Add role and Remove route through onboarding/offboarding, pending
+  rows say why and offer "Complete ... onboarding" when nothing else is
+  affected; platform superuser controls unchanged.
+- Unchanged: `manageGlobalKaiRole` (superuser only, the exceptional path),
+  the superuser bootstrap, `KAI_SPRINT2_ENABLED`, the 2026-08-22
+  platform-superuser admission and held attribution (Decision D), join
+  requests (always `client_contributor`, client administrators only - not a
+  staff path; no staff-access request model exists).
+
+**Tests (TOOL_VERIFIED):**
+- New real-PostgreSQL proof `kai-sprint2-gk-staff-onboarding.integration.spec.js`
+  (added to `scripts/kai-sprint2-p2-access-administration-local-postgres.js`):
+  production router, real actor resolution, default repositories; cases
+  1-14 of the prompt (bootstrap; operator by email for a never-signed-in
+  account incl. JIT mapping and next-request authority; reviewer by id with
+  the client role kept; unknown/unverified/suspended/ambiguous/deactivated;
+  gk_admin, client role, self, Org B, stored and binding-derived client
+  administrators; stored and binding-derived cross-organization blockers
+  with platform completion; offboarding retention rules; audit; rollback).
+- Cross-organization spec +5 (router/service/frontend helpers);
+  harness readers added to B/E and cross-organization specs; source pins
+  updated (writer count, hook notice); integration `seedPerson` accounts
+  marked verified.
+- Campaign: J8-2/J8-4, J9-2..4, J10-3..5 updated from the incomplete
+  workflow they pinned to the corrected one; new J11-1..6 (delegated staff
+  onboarding by email in Team & Access, sign-in to work, identity refusals,
+  cross-organization pending -> superuser approval in Team & Access,
+  offboarding, client administrators refused).
+
+**Verification (TOOL_VERIFIED; sentinel `DATABASE_URL`; runner-owned loopback
+PostgreSQL; real Chrome; synthetic data):** `test:kai-sprint2` 4828/0/91;
+`npm test` 5551/0/106; API contract 71/0; access-administration PostgreSQL
+runner 46/0 (36 existing + 10 new); JOIN-1..5 PostgreSQL runner 128/0;
+organization-onboarding PostgreSQL runner (shares the access bootstrap) 6/0;
+browser on the final bundle 157/0 (campaign 63 = 48 + J9 4 + J10 6 + J11 5,
+Team & Access 7, provisioning 13, edges 11, Knowledge Studio 6, sensitivity 17,
+P2-01 7, P2-12 11, reviewed-evidence 12, pipeline 7, rehydration 3);
+`npm run build` reproducible, `entry.js` SHA-256
+`3808ff6e3cfaa484bf7fade648d4dfa370a62ce6d03c9b3f3322a15e189a18b5`;
+`git diff --check` clean; complete diff inspected. Implementation commit
+`82ad660`.
+
+**Remaining exceptional platform approval / open (owner):**
+1. A global operator/reviewer role for a person with any other organization
+   access (stored or binding-derived) stays a platform-superuser decision
+   (`PUT .../global-roles/:id`, Team & Access global control).
+2. Global roles are not organization-specific: after a confined onboarding,
+   a later grant of access in another organization (client administrator
+   grant, join approval, binding) lets the global role take effect there,
+   as for every platform-issued global role. Whether such later access
+   should be refused or flagged is the open global-role policy (Organization
+   B decision); not decided here.
+3. A delegated GK administrator may re-complete a pending onboarding the
+   platform superuser left incomplete by revoking only the global role
+   (confined to that organization); a platform superuser ends it by
+   revoking the organization role or the delegation.
+4. Production `public.userdata.email_verified`/`is_suspended`: read and
+   written by existing repository code (login, registration, admin
+   suspension) - production catalog NOT_CONFIRMED by direct inspection.
+- Still held: Decision D, Organization B policy, Decision A.
+
+**Production handoff (NOT_CONFIRMED until separately authorized and
+verified):** deploy these commits; a delegated GK administrator signs in to
+`/impact-library` -> Team & Access -> Add Get Kinder staff with the person's
+verified account email; confirm `audit_events`
+(`organization_role_granted*`, `global_kai_role_assigned`,
+`delegated_gk_admin`) and the person's next-request access.
+
+**Status:** DELEGATED_GK_STAFF_ONBOARDING_COMPLETE_LOCAL_SYNTHETIC. No push,
+deployment, production/shared database, schema, flag, credential, tenant,
+production role, review decision, or `00_KAI_CURRENT_STATE.md` change. This
+is the single package-end evidence update in the living ExecPlan.
