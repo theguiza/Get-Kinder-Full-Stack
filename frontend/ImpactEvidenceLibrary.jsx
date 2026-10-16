@@ -20,6 +20,9 @@ import {
   evidenceLibraryCandidatesPath,
   projectEvidenceLibraryItems,
   claimProposalHandoffOutcome,
+  traceabilityUnavailableMessage,
+  projectSensitivityDecisionResult,
+  sensitivityDecisionResultText,
   claimProposalPath,
   claimReviewCompletePath,
   claimReviewDecisionBody,
@@ -359,6 +362,7 @@ export default function ImpactEvidenceLibrary({
   const [selectedGeneratedDraftId, setSelectedGeneratedDraftId] = useState("");
   const [loadingGeneratedDrafts, setLoadingGeneratedDrafts] = useState(false);
   const [traceability, setTraceability] = useState(null);
+  const [traceabilityUnavailable, setTraceabilityUnavailable] = useState("");
   const [loadingTraceability, setLoadingTraceability] = useState(false);
   const [generatingDraft, setGeneratingDraft] = useState(false);
   const [reviewTransitionPending, setReviewTransitionPending] = useState(false);
@@ -1089,6 +1093,7 @@ export default function ImpactEvidenceLibrary({
     }
     setMessage("");
     setTraceability(null);
+    setTraceabilityUnavailable("");
     setGeneratedDraftPacket(null);
     loadCandidateClaims();
     loadEligibleClaims();
@@ -1111,11 +1116,16 @@ export default function ImpactEvidenceLibrary({
     setLoadingTraceability(false);
     if (result.statusCode !== 200 || !result.body?.ok) {
       setTraceability(null);
-      setMessage(errorText(result));
+      const unavailable = traceabilityUnavailableMessage(result, {
+        canGenerateGapFollowups: workflowOperations.generateClaimGapFollowups,
+      });
+      setTraceabilityUnavailable(unavailable);
+      setMessage(unavailable);
       return;
     }
+    setTraceabilityUnavailable("");
     setTraceability(projectTraceability(result.body.data));
-  }, [audience, organizationId, selectedClaimId]);
+  }, [audience, organizationId, selectedClaimId, workflowOperations.generateClaimGapFollowups]);
 
   useEffect(() => {
     if (selectedClaimId) loadTraceability(selectedClaimId);
@@ -1124,6 +1134,7 @@ export default function ImpactEvidenceLibrary({
   // A selected claim change must never carry over another claim's
   // in-progress evidence/claim review decision form state.
   useEffect(() => {
+    setTraceabilityUnavailable("");
     setEvidenceDecision("");
     setEvidenceLimitationNotesText("");
     setClaimDecision("");
@@ -2603,10 +2614,15 @@ export default function ImpactEvidenceLibrary({
     setWorkflowResult("");
     const result = await postJson(claimGapFollowupsPath(organizationId, selectedClaimId), {});
     setWorkflowPending(false);
-    setWorkflowResult(result.statusCode === 200 || result.statusCode === 201
-      ? "Claim-gap client-followups generated."
-      : errorText(result));
-  }, [organizationId, selectedClaimId, workflowPending, workflowOperations]);
+    const generated = result.statusCode === 200 || result.statusCode === 201;
+    setWorkflowResult(generated ? "Claim-gap client-followups generated." : errorText(result));
+    // The persisted gap state is what P2-06 traceability (and so the claim
+    // review form) depends on; re-read it rather than keep the earlier refusal.
+    if (generated) {
+      await loadTraceability(selectedClaimId);
+      await loadReviewQueue();
+    }
+  }, [organizationId, selectedClaimId, workflowPending, workflowOperations, loadTraceability, loadReviewQueue]);
 
   const runPotentialConflictCheck = useCallback(async () => {
     if (!workflowOperations.recordConflict) return;
@@ -2898,7 +2914,7 @@ export default function ImpactEvidenceLibrary({
     );
     setSensitivityActionPending(false);
     if (result.statusCode === 200) {
-      setSensitivityActionResult(decision === "reviewed" ? "Review recorded." : "Marked as needing more information.");
+      setSensitivityActionResult(sensitivityDecisionResultText(projectSensitivityDecisionResult(result, decision)));
     } else if (result.statusCode === 409) {
       setSensitivityActionResult("Sensitivity review state changed since this was loaded - showing the refreshed state.");
     } else {
@@ -3313,7 +3329,10 @@ export default function ImpactEvidenceLibrary({
                   <div className="small text-break">Claim {item.claimId}</div>
                   <div className="small text-muted">Review item {item.reviewQueueItemId}</div>
                   <button type="button" className="btn btn-sm btn-outline-primary" onClick={() => {
-                    setSelectedClaimId(item.claimId);
+                    // Re-read even when this claim is already selected, so the
+                    // reviewer sees its current traceability and decision form.
+                    if (item.claimId === selectedClaimId) loadTraceability(item.claimId);
+                    else setSelectedClaimId(item.claimId);
                     traceabilityPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
                   }}>View claim</button>
                 </li>
@@ -4631,6 +4650,9 @@ export default function ImpactEvidenceLibrary({
             </div>
             {!selectedClaim ? <div className="text-muted">Select a claim to inspect traceability.</div> : null}
             {loadingTraceability ? <div className="text-muted">Loading traceability...</div> : null}
+            {!loadingTraceability && !traceability && selectedClaim && traceabilityUnavailable ? (
+              <div className="small text-muted" data-traceability-unavailable>{traceabilityUnavailable}</div>
+            ) : null}
             {traceability ? (
               <>
                 <ValueRow label="Governed internal availability" value="internally available (governed)" />

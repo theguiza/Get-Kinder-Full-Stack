@@ -323,6 +323,7 @@ async function runBrowserAcceptance() {
   const FILE_MIXED_NMI = "20000000-0000-4000-8000-0000000000f5";
   const FILE_MIXED_NOT_CREATED = "20000000-0000-4000-8000-0000000000f6";
   const FILE_BOUND_ORG_ADMIN = "20000000-0000-4000-8000-0000000000f7";
+  const FILE_GK_NOT_CREATED = "20000000-0000-4000-8000-0000000000f8";
   const NAMES = Object.freeze({
     queue: "synthetic_annual_report_2025_26.csv",
     zero: "synthetic_programme_log_2025_26.csv",
@@ -331,6 +332,7 @@ async function runBrowserAcceptance() {
     mixedNmi: "synthetic_survey_results_2025_26.csv",
     mixedNotCreated: "synthetic_attendance_2025_26.csv",
     boundOrgAdmin: "synthetic_bound_org_admin_2025_26.csv",
+    gkNotCreated: "synthetic_site_visits_2025_26.csv",
   });
   const FIELD_KEYS = ["households_served", "programme_month"];
   const USERS = Object.freeze({ gkReviewer: 981, clientAdmin: 982, gkOutsider: 983, boundClientAdmin: 984, boundClientAdminTwoOrgs: 985 });
@@ -639,6 +641,8 @@ async function runBrowserAcceptance() {
       const body = await gkPage.text();
       assert.ok(body.includes("Reviewed"));
       assert.match(body, /Outcome\s*reviewed/);
+      assert.ok(body.includes("Review recorded. This file is now a source candidate waiting for Get Kinder source review"),
+        "the result line reports the server's completed P1-07 handoff");
       assert.deepEqual(gkPage.exceptions, []);
       results.case3_reviewed_decision = "PASS";
     });
@@ -1068,6 +1072,52 @@ async function runBrowserAcceptance() {
       assert.match(body, /Outcome\s*reviewed/);
       assert.deepEqual(mixedPage.exceptions, []);
       results.case13_mixed_handoff_not_created = "PASS";
+    });
+
+    await test("case 13A (GK reviewer): when the P1-07 handoff refuses, the GK Studio card reports the recorded decision and the uncreated source candidate - never plain success", async () => {
+      // The same throwaway-database technique as case 13, for the GK card.
+      const profileId = await seedFreshFile(FILE_GK_NOT_CREATED, NAMES.gkNotCreated, "9");
+      const opened = await ensureSensitivityReviewQueueItem(
+        { organizationId: ORG, intakeSensitivityProfileId: profileId, actorContext: gkReviewerService, now: new Date().toISOString() },
+        { env: ENV, metadataOnlyAudit: noAudit() },
+      );
+      assert.equal(opened.ok, true, JSON.stringify(opened));
+      await query("ALTER TABLE kai.intake_sensitivity_profiles DROP CONSTRAINT intake_sensitivity_profiles_p1_05_public_use_check");
+      await query("UPDATE kai.intake_sensitivity_profiles SET public_use_allowed = true WHERE intake_sensitivity_profile_id = $1::uuid", [profileId]);
+      await query("ALTER TABLE kai.intake_sensitivity_profiles ADD CONSTRAINT intake_sensitivity_profiles_p1_05_public_use_check CHECK (public_use_allowed = false) NOT VALID");
+
+      await openKnowledgeStudio(gkPage);
+      await gkPage.clickTab("Reviews");
+      await gkPage.waitFor(() => gkPage.visibleButton("Review sensitivity & allowed use"), "a Review Queue sensitivity entry");
+      // Open the entry whose card reads this file's profile.
+      const entries = await gkPage.evaluate(`[...document.querySelectorAll("button")].filter((el) => el.offsetParent !== null && el.innerText.trim() === "Review sensitivity & allowed use").length`);
+      let opened13A = false;
+      for (let index = 0; index < entries && !opened13A; index += 1) {
+        if (index > 0) await gkPage.clickTab("Reviews");
+        const mark = gkPage.mark();
+        await gkPage.evaluate(`[...document.querySelectorAll("button")].filter((el) => el.offsetParent !== null && el.innerText.trim() === "Review sensitivity & allowed use")[${index}].click()`);
+        await gkPage.idle();
+        opened13A = gkPage.requestsSince(mark).some((r) => r.method === "GET" && r.url.endsWith(profilePath(profileId)) && r.status === 200);
+      }
+      assert.ok(opened13A, "the GK card opened this file's profile");
+      await gkPage.waitFor(() => gkPage.visibleButton("Submit review"), "the decision form");
+      await gkPage.setFormRow("Personal data", "present");
+      await gkPage.setFormRow("Minor data", "absent");
+      const before = await governedCounts(profileId);
+      const mark = gkPage.mark();
+      await gkPage.clickButton("Submit review");
+      await gkPage.waitForText("the source candidate was not created");
+      await gkPage.idle();
+      assert.deepEqual(posts(gkPage.requestsSince(mark)), [[`${COCKPIT}/sensitivity-profiles/${profileId}/decision`, 200]], "exactly one decision; never retried");
+      assert.deepEqual(diff(before, await governedCounts(profileId)), {
+        decisions: 1, sensitivity_queue: 0, decision_audits: 1, lifecycle_audits: 1, source_candidates: 0, source_queue: 0,
+        sources: 0, source_versions: 0, evidence: 0, claims: 0,
+      });
+      const body = await gkPage.text();
+      assert.ok(body.includes("Review recorded, but the source candidate was not created (validation_blocker). No source review item exists for this file yet."));
+      assert.ok(!body.includes("This file is now a source candidate"), "a refused handoff is never reported as done");
+      assert.deepEqual(gkPage.exceptions, []);
+      results.case13A_gk_handoff_not_created = "PASS";
     });
 
     await test("case 14: an ordinary client never gets the action or GK data; a non-member GK reviewer cannot look up this organization's file; changing project or organization clears the panel and a late answer populates nothing", async () => {

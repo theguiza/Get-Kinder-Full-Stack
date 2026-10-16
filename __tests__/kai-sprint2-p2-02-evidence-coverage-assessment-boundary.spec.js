@@ -120,6 +120,11 @@ test("validateEvidenceCoverageAssessmentIsPermitted: allowed_use_status 'not_all
   );
   assert.equal(result.ok, false);
   assert.equal(result.code, "validation_blocker");
+  assert.deepEqual(result.blockers.map((blocker) => [blocker.validator_key, blocker.severity, blocker.blocking_reason]),
+    [["VAL-KAI-P2-02-000", "blocker", "allowed_use_not_allowed"]]);
+  // A lineage failure stays the bare lineage code; only the allowed-use prohibition is named here.
+  const lineage = validateEvidenceCoverageAssessmentIsPermitted(validRows({ sourceVersionRow: { is_current: false } }));
+  assert.deepEqual([lineage.ok, lineage.code, lineage.blockers], [false, "conflict_current_state_changed", undefined]);
 });
 
 for (const status of ["unknown", "allowed"]) {
@@ -375,6 +380,7 @@ test("assessEvidenceCoverageForSourceVersion: allowed_use_status 'not_allowed' f
   );
   assert.equal(result.ok, false);
   assert.equal(result.error.code, "validation_blocker");
+  assert.equal(result.blockers[0].blocking_reason, "allowed_use_not_allowed");
 });
 
 test("assessEvidenceCoverageForSourceVersion: a fully permitted lineage returns all ten dimensions, computed fresh, with no persistence side effect", async () => {

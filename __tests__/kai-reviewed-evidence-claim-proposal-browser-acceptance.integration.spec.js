@@ -249,10 +249,11 @@ async function runBrowserAcceptance() {
   const BATCH_B = "1e000000-0000-4000-8000-0000000000e8";
   const FILE = "2e000000-0000-4000-8000-0000000000e7";
   const FILE_B = "2e000000-0000-4000-8000-0000000000e8";
+  const FILE_C = "2e000000-0000-4000-8000-0000000000e9";
   const FILE_NAME = "reviewed-claim-households.csv";
   const FILE_B_NAME = "reviewed-claim-project-b.csv";
   const FIELD_KEYS = ["households_served", "programme_month"];
-  const USERS = Object.freeze({ gkReviewer: 981, clientAdmin: 982, gkOperator: 983 });
+  const USERS = Object.freeze({ gkReviewer: 981, clientAdmin: 982, gkOperator: 983, claimReviewer: 984 });
 
   await query(`INSERT INTO kai.organizations (organization_id, name, organization_code) VALUES
                  ($1::uuid, 'Harbourline Synthetic Society', 'harbourline-synthetic'),
@@ -265,14 +266,16 @@ async function runBrowserAcceptance() {
                  VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'received', 'not_reviewed')`, [batchId, ORG, engagementId, `batch-${code}`]);
   }
   const kaiUserIds = {};
-  for (const [legacyId, role, global, organizations] of [
+  for (const [legacyId, role, global, organizations, key = role] of [
     [USERS.gkReviewer, "gk_reviewer", true, [ORG, ORG_B]],
     [USERS.clientAdmin, "client_admin", false, [ORG]],
     [USERS.gkOperator, "gk_operator", true, [ORG]],
+    // A second, independently authorized GK reviewer for the separate claim review.
+    [USERS.claimReviewer, "gk_reviewer", true, [ORG], "claim_reviewer"],
   ]) {
     await query("INSERT INTO public.userdata (id) VALUES ($1) ON CONFLICT DO NOTHING", [legacyId]);
     const kaiUser = await findOrCreateKaiUserByLegacyPublicUserdataId({ legacyPublicUserdataId: legacyId, email: `user${legacyId}@harbourline.test` });
-    kaiUserIds[role] = kaiUser.user_id;
+    kaiUserIds[key] = kaiUser.user_id;
     for (const organizationId of organizations) {
       await query("INSERT INTO kai.organization_memberships (organization_id, user_id, role_name, membership_status) VALUES ($1::uuid, $2::uuid, $3, 'active')",
         [organizationId, kaiUser.user_id, role]);
@@ -291,7 +294,7 @@ async function runBrowserAcceptance() {
   };
 
   /** P1-03..P1-05 rows of one fresh confirmed Project file (the P1 worker's output). */
-  async function seedFreshFile(intakeFileId, name, checksumChar, { engagementId = PROJECT, batchId = BATCH, fieldKeys = FIELD_KEYS } = {}) {
+  async function seedFreshFile(intakeFileId, name, checksumChar, { engagementId = PROJECT, batchId = BATCH, fieldKeys = FIELD_KEYS, allowedUseStatus = "unknown" } = {}) {
     const checksum = checksumChar.repeat(64);
     await query(
       `INSERT INTO kai.intake_files (intake_file_id, intake_batch_id, organization_id, engagement_id, original_filename, safe_filename,
@@ -332,9 +335,9 @@ async function runBrowserAcceptance() {
       );
     }
     const [sensitivity] = await query(
-      `INSERT INTO kai.intake_sensitivity_profiles (organization_id, intake_file_id, file_profile_id, data_dictionary_id, profile_canonical_sha256)
-       VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5) RETURNING intake_sensitivity_profile_id::text`,
-      [ORG, intakeFileId, fileProfile.file_profile_id, dictionary.data_dictionary_id, fileProfile.profile_canonical_sha256],
+      `INSERT INTO kai.intake_sensitivity_profiles (organization_id, intake_file_id, file_profile_id, data_dictionary_id, profile_canonical_sha256, allowed_use_status)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6) RETURNING intake_sensitivity_profile_id::text`,
+      [ORG, intakeFileId, fileProfile.file_profile_id, dictionary.data_dictionary_id, fileProfile.profile_canonical_sha256, allowedUseStatus],
     );
     return sensitivity.intake_sensitivity_profile_id;
   }
@@ -547,6 +550,7 @@ async function runBrowserAcceptance() {
   const gkPage = await openPage(browser, { baseUrl, legacyUserId: USERS.gkReviewer });
   const clientPage = await openPage(browser, { baseUrl, legacyUserId: USERS.clientAdmin });
   const operatorPage = await openPage(browser, { baseUrl, legacyUserId: USERS.gkOperator });
+  const claimReviewerPage = await openPage(browser, { baseUrl, legacyUserId: USERS.claimReviewer });
   const results = {};
   let evidence;
   let supportedItem;
@@ -798,11 +802,145 @@ async function runBrowserAcceptance() {
       results.case10_zero_approval = "PASS";
     });
 
+    await test("case 11: a separate GK reviewer discovers the claim review, reads why its traceability is not yet available, completes the P2-04 prerequisite through the existing control, and records the claim decision through the UI", async () => {
+      const page = claimReviewerPage;
+      const [claim] = await claimRows();
+      const claimReviewPost = (r) => r.method === "POST" && /\/claim-review\/[^/]+\/complete$/.test(new URL(r.url).pathname);
+      // Stage A: discover the persisted claim_review work.
+      await page.goto("/impact-library");
+      await page.waitForText("Knowledge Studio");
+      await page.clickNav("Knowledge Studio");
+      await page.waitFor(async () => page.evaluate(`Boolean(document.querySelector(".nav-tabs"))`), "Knowledge Studio tabs");
+      await page.clickTab("Reviews");
+      await page.waitForText(`Claim ${claim.claim_id}`);
+      // Stage B: open the target. Before P2-04 gap state exists, P2-06
+      // traceability fails closed (409 gap_dimension_requires_missing_p204_state);
+      // the reviewer is told exactly that, not that the state went stale.
+      let mark = page.mark();
+      assert.ok(await page.evaluate(`(() => {
+        const li = document.querySelector('[data-claim-review-item="${claim.claim_queue_id}"]');
+        const button = li && [...li.querySelectorAll("button")].find((el) => el.innerText.trim() === "View claim");
+        if (!button) return false;
+        button.click();
+        return true;
+      })()`), "View claim offered for the pending claim review");
+      await page.waitFor(async () => page.requestsSince(mark).some((r) => /\/traceability/.test(new URL(r.url).pathname)), "traceability read");
+      await page.idle();
+      const blockedRead = page.requestsSince(mark).filter((r) => /\/traceability/.test(new URL(r.url).pathname));
+      console.log(`[reviewed-claim-browser] claim reviewer traceability before P2-04: ${JSON.stringify(blockedRead.map((r) => r.status))}`);
+      assert.ok(blockedRead.some((r) => r.status === 409));
+      await page.waitForText("coverage gaps have not been generated yet");
+      assert.ok(!(await page.text()).includes("Record claim review decision"), "no decision form without readable traceability");
+      const beforeGaps = await governedCounts();
+      // The existing P2-04 control (organization gk_reviewer), then the
+      // traceability is re-read and the decision form becomes available.
+      mark = page.mark();
+      await page.clickButton("Generate gap followups");
+      await page.waitForText("Record claim review decision");
+      await page.idle();
+      const afterGapRequests = page.requestsSince(mark);
+      console.log(`[reviewed-claim-browser] requests after gap followups: ${JSON.stringify(afterGapRequests.map((r) => [r.method, new URL(r.url).pathname, r.status]))}`);
+      assert.ok(afterGapRequests.some((r) => r.method === "POST" && /\/claim-gap-followups$/.test(new URL(r.url).pathname) && [200, 201].includes(r.status)));
+      assert.ok(afterGapRequests.some((r) => r.method === "GET" && /\/traceability/.test(new URL(r.url).pathname) && r.status === 200));
+      assert.equal(diff(beforeGaps, await governedCounts()).claim_decisions, 0, "generating gaps decides nothing");
+      // Stage C: the decision through the rendered control.
+      assert.ok(await page.evaluate(`(() => { const el = document.getElementById("claim-review-decision-approved"); if (!el) return false; el.click(); return el.checked; })()`));
+      await page.waitFor(async () => page.evaluate(`Boolean(document.getElementById("claim-approved-audience-internal"))`), "approved audience control");
+      assert.ok(await page.evaluate(`(() => { const el = document.getElementById("claim-approved-audience-internal"); el.click(); return el.checked; })()`));
+      const beforeDecision = await governedCounts();
+      mark = page.mark();
+      await page.clickButton("Record Claim Review Decision");
+      await page.waitForText("Claim review decision recorded: approved.");
+      await page.idle();
+      const decisionPosts = page.requestsSince(mark).filter(claimReviewPost);
+      assert.deepEqual(decisionPosts.map((r) => r.status), [200]);
+      // Stage D: the consequence, attributed to this separate human.
+      assert.deepEqual(diff(beforeDecision, await governedCounts()), {
+        evidence: 0, queue_items: 0, evidence_queue: 0, evidence_decisions: 0, claims: 0, claim_links: 0, claim_queue: 0, claim_decisions: 1,
+      });
+      const decisions = await query(
+        "SELECT decided_by::text, decided_by_role, decision_outcome, approved_audiences FROM kai.claim_review_decisions WHERE claim_id = $1::uuid", [claim.claim_id]);
+      assert.deepEqual(decisions.map((d) => [d.decided_by, d.decided_by_role, d.decision_outcome]), [[kaiUserIds.claim_reviewer, "gk_reviewer", "approved"]]);
+      assert.notEqual(kaiUserIds.claim_reviewer, claim.created_by, "the claim is decided by a different human than its proposer");
+      const [after] = await claimRows();
+      assert.deepEqual([after.claim_review_status, after.queue_status, after.review_status], ["reviewed", "resolved", "resolved"]);
+      assert.deepEqual([after.public_use_allowed, after.funder_use_allowed, after.export_ready], [false, false, false]);
+      // Replaying the same POST cannot record a second decision.
+      const replay = await page.evaluate(`(async () => {
+        const response = await fetch(${JSON.stringify(`/api/kai/sprint2/intake/admin/organizations/${ORG}/claims/${claim.claim_id}/claim-review/${claim.claim_queue_id}/complete`)}, {
+          method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: ${JSON.stringify(JSON.stringify({ expected_updated_at: new Date(0).toISOString(), decision: "approved", approved_audiences: ["internal"] }))},
+        });
+        return { status: response.status, code: (await response.json())?.error?.code ?? null };
+      })()`);
+      assert.deepEqual(replay, { status: 409, code: "conflict_current_state_changed" });
+      assert.equal((await governedCounts()).claim_decisions, 1);
+      assert.deepEqual(page.exceptions, []);
+      results.case11_separate_claim_review = "PASS";
+    });
+
+    await test("case 12: a committed positive review whose Decision C continuation is legitimately blocked (allowed use 'not_allowed') returns 200 with the named blocker, is shown as recorded-but-not-continued, and an identical retry neither duplicates the decision nor creates a claim", async () => {
+      // A third file in the same Project whose committed P1-05 allowed-use
+      // fact is 'not_allowed', through the same real P1-06..P2-01 paths.
+      const candidateC = await reachReviewableSourceCandidate(
+        await seedFreshFile(FILE_C, "reviewed-claim-not-allowed.csv", "c", { fieldKeys: ["meals_distributed", "delivery_week"], allowedUseStatus: "not_allowed" }));
+      await promoteThroughCockpit(gkPage, candidateC);
+      const [item] = await evidenceRows(FILE_C);
+      assert.ok(item, "P2-01 created evidence for the not_allowed source");
+      const [queueBefore] = await query("SELECT updated_at FROM kai.review_queue_items WHERE review_queue_item_id = $1::uuid", [item.review_queue_item_id]);
+      const expectedUpdatedAt = new Date(queueBefore.updated_at).toISOString();
+      await openGkEvidenceTab(gkPage);
+      await gkPage.waitForText(item.statement);
+      await gkPage.evaluate(`(() => { const original = window.fetch; window.fetch = async (...args) => {
+        const response = await original(...args);
+        if (String(args[0]).includes("/evidence-review/") && args[1]?.method === "POST") {
+          const body = await response.clone().json(); window.blockedDecisionResponse = { status: response.status, handoff: body.data?.claim_proposal_handoff ?? null };
+        }
+        return response;
+      }; })()`);
+      const before = await governedCounts();
+      const requests = await recordDecision(gkPage, item.statement, "supported");
+      assert.deepEqual(requests.filter((r) => r.method === "POST").map((r) => r.status), [200]);
+      assert.equal(requests.filter(isHiddenProposalRequest).length, 0, "the browser sends no direct P2-02/P2-03 request");
+      const response = await gkPage.evaluate("window.blockedDecisionResponse");
+      assert.equal(response.status, 200);
+      assert.deepEqual(
+        [response.handoff.status, response.handoff.coverage_assessment?.status, response.handoff.error_code, response.handoff.blocking_reason, response.handoff.claim_id],
+        ["not_created", "blocked", "validation_blocker", "allowed_use_not_allowed", null]);
+      await gkPage.waitForText("KAI did not propose a claim from this evidence (validation_blocker: allowed_use_not_allowed). The evidence review decision is recorded.");
+      assert.deepEqual(diff(before, await governedCounts()), {
+        evidence: 0, queue_items: 0, evidence_queue: 0, evidence_decisions: 1, claims: 0, claim_links: 0, claim_queue: 0, claim_decisions: 0,
+      });
+      const decisions = await query("SELECT decided_by::text, decided_by_role, decision_outcome FROM kai.evidence_review_decisions WHERE evidence_item_id = $1::uuid", [item.evidence_item_id]);
+      assert.deepEqual(decisions.map((d) => [d.decided_by, d.decided_by_role, d.decision_outcome]), [[kaiUserIds.gk_reviewer, "gk_reviewer", "supported"]]);
+      const [reviewed] = (await evidenceRows(FILE_C)).filter((row) => row.evidence_item_id === item.evidence_item_id);
+      assert.deepEqual([reviewed.evidence_review_status, reviewed.support_strength, reviewed.queue_status], ["reviewed", "reviewed_supported", "resolved"]);
+      // The identical decision retried (original coordinates): P2-12 replays,
+      // the continuation is re-attempted and blocked again, nothing is written.
+      const retryBefore = await governedCounts();
+      const retry = await gkPage.evaluate(`(async () => {
+        const response = await fetch(${JSON.stringify(reviewPath(item.evidence_item_id, item.review_queue_item_id))}, {
+          method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: ${JSON.stringify(JSON.stringify({ expected_updated_at: expectedUpdatedAt, decision: "supported" }))},
+        });
+        const body = await response.json();
+        return { status: response.status, replayed: body.data?.replayed ?? null, handoff: body.data?.claim_proposal_handoff?.status ?? null, reason: body.data?.claim_proposal_handoff?.blocking_reason ?? null };
+      })()`);
+      console.log(`[reviewed-claim-browser] blocked continuation retry: ${JSON.stringify(retry)}`);
+      assert.deepEqual(retry, { status: 200, replayed: true, handoff: "not_created", reason: "allowed_use_not_allowed" });
+      assert.deepEqual(diff(retryBefore, await governedCounts()), {
+        evidence: 0, queue_items: 0, evidence_queue: 0, evidence_decisions: 0, claims: 0, claim_links: 0, claim_queue: 0, claim_decisions: 0,
+      });
+      assert.deepEqual(gkPage.exceptions, []);
+      results.case12_blocked_continuation = "PASS";
+    });
+
     console.log(`[reviewed-claim-browser] results ${JSON.stringify(results)}`);
   } finally {
     await gkPage.close().catch(() => {});
     await clientPage.close().catch(() => {});
     await operatorPage.close().catch(() => {});
+    await claimReviewerPage.close().catch(() => {});
     await browser.close();
     await new Promise((resolve) => server.close(resolve));
     await seedPool.end();

@@ -388,6 +388,7 @@ async function runReviewedEvidenceClaimProposalSuite() {
       { organizationId: ORG, sourceVersionId: projectD.sourceVersionId, actorContext: reviewer }, { env: ENV });
     assert.equal(refused.ok, false);
     assert.equal(refused.error.code, "validation_blocker", "allowed_use_status 'not_allowed' fails P2-02 closed");
+    assert.equal(refused.blockers?.[0]?.blocking_reason, "allowed_use_not_allowed", "the allowed-use prohibition is named, not a bare blocker");
   });
 
   test("Evidence A 'supported' through the route composition: P2-02 passes, P2-03 proposes exactly one review-gated claim with its link and claim_review item", async () => {
@@ -560,7 +561,7 @@ async function runReviewedEvidenceClaimProposalSuite() {
       claim_review_status: null,
       claim_review_queue_item_id: null,
       error_code: "validation_blocker",
-      blocking_reason: null,
+      blocking_reason: "allowed_use_not_allowed",
     });
     assert.deepEqual(deltas(before, await kaiTableRowCounts()), EVIDENCE_DECISION_DELTAS);
     assert.deepEqual(await claimsFor([d1]), []);

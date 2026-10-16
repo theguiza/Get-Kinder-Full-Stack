@@ -393,6 +393,24 @@ export function claimProposalHandoffOutcome(handoff) {
   return { message: "Claim continuation could not be confirmed. No completed claim is confirmed.", reloadClaims: false };
 }
 
+// Why a claim's traceability (and so its claim review form) is unavailable,
+// from the server's own sanitized conflict reason. A claim whose coverage
+// gaps P2-04 has not generated yet is not stale state: the reviewer is told
+// what is missing and who can supply it.
+export function traceabilityUnavailableMessage(result, { canGenerateGapFollowups = false } = {}) {
+  const reason = result?.body?.data?.traceability_conflict_reason;
+  if (reason === "gap_dimension_requires_missing_p204_state") {
+    return "This claim's coverage gaps have not been generated yet, so its traceability and claim review are not available. "
+      + (canGenerateGapFollowups
+        ? "Use Generate gap followups for this claim first."
+        : "A Get Kinder user with an organization Get Kinder role must generate its gap followups first.");
+  }
+  if (typeof reason === "string" && /^[a-z0-9_]{1,64}$/.test(reason)) {
+    return `This claim's traceability is not currently consistent (${reason}), so claim review is not available. Refresh, or ask Get Kinder to reconcile it.`;
+  }
+  return errorText(result);
+}
+
 export function claimTraceabilityPath(organizationId, claimId, audience) {
   const params = new URLSearchParams({ requested_audience: audience });
   return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}`
@@ -2198,6 +2216,22 @@ export function projectSensitivityDecisionResult(result, decision) {
       }
       : null,
   };
+}
+
+// The GK Studio result line for a recorded sensitivity decision: the human
+// decision and, for 'reviewed', the P1-07 handoff exactly as the server
+// reported it, so a 200 can never present a failed continuation as done.
+export function sensitivityDecisionResultText(projected) {
+  if (projected?.status !== "recorded") return "";
+  if (projected.outcome === "needs_more_information") return "Marked as needing more information.";
+  const handoff = projected.handoff;
+  if (handoff && (handoff.status === "created" || handoff.status === "replayed")) {
+    return "Review recorded. This file is now a source candidate waiting for Get Kinder source review; nothing has been promoted.";
+  }
+  if (handoff && handoff.status === "not_created") {
+    return `Review recorded, but the source candidate was not created (${handoff.errorCode || "unknown"}). No source review item exists for this file yet.`;
+  }
+  return "Review recorded. The source-candidate handoff status is not available.";
 }
 
 // Light projection of the GET sensitivity-profile detail response. Kept

@@ -160,6 +160,18 @@ test("validateClaimGapLineage: a not-allowed sensitivity-profile use status fail
   const result = validateClaimGapLineage(validRows({ profileRow: { allowed_use_status: "not_allowed" } }));
   assert.equal(result.ok, false);
   assert.equal(result.code, "validation_blocker");
+  assert.equal(result.blockers[0].blocking_reason, "allowed_use_not_allowed");
+});
+
+test("P2-04 service: a repository refusal keeps its named blocker", async () => {
+  const blockers = [{ validator_key: "VAL-KAI-P2-02-000", severity: "blocker", blocking_reason: "allowed_use_not_allowed" }];
+  const result = await generateClaimGapFollowups(
+    { organizationId: ORG, claimId: CLAIM, actorContext: humanActor(), now: NOW },
+    { env: { KAI_SPRINT2_ENABLED: "true" }, claimGapFollowupRepository: {
+      async generateClaimGapsAndFollowups() { return { ok: false, data: null, error: { code: "validation_blocker", status: 422 }, blockers }; },
+    } },
+  );
+  assert.deepEqual([result.ok, result.error.code, result.blockers], [false, "validation_blocker", blockers]);
 });
 
 test("dimensionResultRequiresGap: every assessment_status other than resolved_clear requires a gap", () => {

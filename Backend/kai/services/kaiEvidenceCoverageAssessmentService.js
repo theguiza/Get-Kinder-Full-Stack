@@ -145,7 +145,7 @@ async function assessPermittedSourceVersion(evidenceCoverageAssessmentRepository
 
   const permitted = validateEvidenceCoverageAssessmentIsPermitted(rows);
   if (!permitted.ok) {
-    return buildKaiError(permitted.code);
+    return buildKaiError(permitted.code, permitted.blockers ? { blockers: permitted.blockers } : {});
   }
 
   const dimensions = {

@@ -103,11 +103,12 @@ const {
   readEvidenceCoverageFieldKeys,
 } = __evidenceCoverageAssessmentRepositoryTestables;
 
-function claimGapFollowupFailure(code) {
+function claimGapFollowupFailure(code, blockers = null) {
   return {
     ok: false,
     data: null,
     error: { code, status: CLAIM_GAP_FOLLOWUP_RESULT_STATUS[code] },
+    ...(Array.isArray(blockers) ? { blockers } : {}),
   };
 }
 
@@ -848,7 +849,7 @@ export function createPostgresClaimGapFollowupRepository({
           };
 
           const lineageValidation = validateClaimGapLineage(rows);
-          if (!lineageValidation.ok) return claimGapFollowupFailure(lineageValidation.code);
+          if (!lineageValidation.ok) return claimGapFollowupFailure(lineageValidation.code, lineageValidation.blockers);
 
           const dimensions = computeDimensionsFn({ dictionaryFieldRows, qualityFindingRows, profileRow, evidenceFieldKeys });
           const expectedGapPlans = buildExpectedGapPlans(dimensions);

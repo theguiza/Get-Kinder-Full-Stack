@@ -6,7 +6,7 @@ import { listClaimLibraryCandidates } from "../Backend/kai/services/kaiClaimLibr
 import { listOrganizationEvidenceLibrary } from "../Backend/kai/services/kaiEvidenceLibraryService.js";
 import { listAuthorizedEngagements, __engagementContextServiceContract as project } from "../Backend/kai/services/kaiEngagementContextService.js";
 import { authorizeSourcePromotionDecision } from "../Backend/kai/services/kaiSourcePromotionService.js";
-import { projectOrganizationAccessCapabilities, claimProposalHandoffOutcome, pendingClaimReviewWork } from "../frontend/impactEvidenceLibraryLogic.js";
+import { projectOrganizationAccessCapabilities, claimProposalHandoffOutcome, pendingClaimReviewWork, traceabilityUnavailableMessage, projectSensitivityDecisionResult, sensitivityDecisionResultText } from "../frontend/impactEvidenceLibraryLogic.js";
 
 const ORG = "10000000-0000-4000-8000-000000000001";
 const OTHER = "10000000-0000-4000-8000-000000000002";
@@ -101,4 +101,30 @@ test("persisted pending claim review remains discoverable without successful tra
   for (const change of [{ queueStatus: "resolved" }, { targetObjectId: OTHER }, { queueType: "evidence_review" }, { reviewStatus: "resolved" }]) {
     assert.deepEqual(pendingClaimReviewWork([{ ...claim, reviewQueueItems: [{ ...queue, ...change }] }]), []);
   }
+});
+
+test("an unavailable claim traceability states the server's reason: missing P2-04 gap state is a prerequisite, not stale state", () => {
+  const missingGaps = { statusCode: 409, body: { ok: false, error: { code: "conflict_current_state_changed", message: "Current resource state changed." }, data: { traceability_conflict_reason: "gap_dimension_requires_missing_p204_state" } } };
+  assert.match(traceabilityUnavailableMessage(missingGaps, { canGenerateGapFollowups: true }), /coverage gaps have not been generated yet.*Use Generate gap followups/);
+  assert.match(traceabilityUnavailableMessage(missingGaps), /organization Get Kinder role must generate/);
+  assert.doesNotMatch(traceabilityUnavailableMessage(missingGaps), /state changed/);
+  const notCurrent = { statusCode: 409, body: { ok: false, error: { message: "Current resource state changed." }, data: { traceability_conflict_reason: "source_version_not_current" } } };
+  assert.match(traceabilityUnavailableMessage(notCurrent), /not currently consistent \(source_version_not_current\)/);
+  // No reason, or an unsafe one, keeps the server's message; nothing is invented.
+  assert.equal(traceabilityUnavailableMessage({ statusCode: 403, body: { error: { message: "Actor is not authorized for this operation." } } }), "Actor is not authorized for this operation.");
+  assert.equal(traceabilityUnavailableMessage({ statusCode: 409, body: { error: { message: "Current resource state changed." }, data: { traceability_conflict_reason: "<b>x</b>" } } }), "Current resource state changed.");
+});
+
+test("the GK sensitivity result line reports the P1-07 handoff the server returned; a 200 never hides an uncreated source candidate", () => {
+  const recorded = (handoff, decision = "reviewed") => sensitivityDecisionResultText(projectSensitivityDecisionResult(
+    { statusCode: 200, body: { ok: true, data: { current_decision: { decision_outcome: decision }, source_candidate_handoff: handoff } } }, decision));
+  assert.match(recorded({ status: "created", candidate_status: "needs_gk_review" }), /^Review recorded\. This file is now a source candidate/);
+  assert.match(recorded({ status: "replayed" }), /now a source candidate/);
+  assert.equal(recorded({ status: "not_created", error_code: "authorization_denied" }),
+    "Review recorded, but the source candidate was not created (authorization_denied). No source review item exists for this file yet.");
+  for (const handoff of [null, { status: "not_applicable" }, { status: "surprise" }]) {
+    assert.equal(recorded(handoff), "Review recorded. The source-candidate handoff status is not available.");
+  }
+  assert.equal(recorded({ status: "not_applicable" }, "needs_more_information"), "Marked as needing more information.");
+  assert.equal(sensitivityDecisionResultText(projectSensitivityDecisionResult({ statusCode: 409 }, "reviewed")), "");
 });

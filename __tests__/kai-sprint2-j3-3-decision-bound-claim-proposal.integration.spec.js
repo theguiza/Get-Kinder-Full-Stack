@@ -673,8 +673,9 @@ async function runDecisionBoundClaimProposalSuite() {
     before = await kaiTableRowCounts();
     const { result: blocked } = await review({ evidenceItemId: d1, decision: "supported" });
     assert.equal(blocked.ok, true, JSON.stringify(blocked));
-    assert.deepEqual([blocked.data.claim_proposal_handoff.status, blocked.data.claim_proposal_handoff.error_code],
-      ["not_created", "validation_blocker"], "an independent eligibility blocker is reported as-is");
+    assert.deepEqual(
+      [blocked.data.claim_proposal_handoff.status, blocked.data.claim_proposal_handoff.error_code, blocked.data.claim_proposal_handoff.blocking_reason],
+      ["not_created", "validation_blocker", "allowed_use_not_allowed"], "an independent eligibility blocker is reported as-is, with its reason");
     assert.deepEqual(deltas(before, await kaiTableRowCounts()), EVIDENCE_DECISION_DELTAS);
     assert.equal((await headDecision(d1)).decision_outcome, "supported", "the human decision is unchanged");
     assert.deepEqual(await claimsFor([a2, d1]), []);

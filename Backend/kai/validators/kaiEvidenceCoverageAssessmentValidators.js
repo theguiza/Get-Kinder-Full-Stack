@@ -1,4 +1,4 @@
-import { createValidatorResult } from "./types.js";
+import { createValidatorResult, blocker } from "./types.js";
 import { validateEvidenceHasSourceLineage } from "./kaiEvidenceLineageValidators.js";
 
 /**
@@ -57,7 +57,17 @@ export function validateEvidenceCoverageAssessmentIsPermitted(rows) {
   if (!lineage.ok) return lineage;
 
   if (rows.profileRow.allowed_use_status === "not_allowed") {
-    return { ok: false, code: "validation_blocker" };
+    // Named, so a reviewer can tell an allowed-use prohibition from a lineage
+    // or checksum failure (both validation_blocker). Metadata only.
+    return {
+      ok: false,
+      code: "validation_blocker",
+      blockers: [blocker("VAL-KAI-P2-02-000", "The committed allowed-use decision for this source does not allow this use.", {
+        object_type: "intake_sensitivity_profile",
+        blocking_reason: "allowed_use_not_allowed",
+        required_fix: "Only a new human sensitivity and allowed-use decision can change this source's allowed use.",
+      })],
+    };
   }
 
   return { ok: true };

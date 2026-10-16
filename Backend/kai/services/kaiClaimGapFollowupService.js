@@ -117,7 +117,10 @@ export async function generateClaimGapFollowups(input, dependencies = {}) {
   });
 
   if (!result.ok) {
-    return buildKaiError(result.error.code, { status: result.error.status });
+    return buildKaiError(result.error.code, {
+      status: result.error.status,
+      ...(Array.isArray(result.blockers) ? { blockers: result.blockers } : {}),
+    });
   }
   return { ok: true, data: result.data, error: null };
 }
