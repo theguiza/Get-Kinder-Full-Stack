@@ -40558,3 +40558,147 @@ No push, deployment, production/shared database, migration/schema, flag,
 `ADMIN_EMAILS`, credential, real email, role grant or
 `00_KAI_CURRENT_STATE.md` change. This is the single package-end evidence
 update in the living ExecPlan.
+
+### Organization application decision request integrity and decline state (2026-10-17)
+
+**Owner authorization (USER_CONFIRMED):** the owner's "Complete Organization
+Application Decision Security" prompt authorizes local inspection, before-fix
+reproduction, the smallest server-enforced CSRF and decline-state repair, and
+synthetic PostgreSQL / real-browser proof for the existing Approve and Decline
+operations. No push, deployment, production database, migration/schema, flag,
+environment, `ADMIN_EMAILS`, site-admin, GK staff, removal or transfer change.
+
+**Start (TOOL_VERIFIED):** `main` at `a99c322`, clean.
+
+**Mechanism (TOOL_VERIFIED from code):**
+- `routes/orgApplyApi.js` `POST /admin/org-applications/:id/approve` and
+  `/decline`: `ensureAuthenticated` (redirect to `/login`) and `ensureAdmin`
+  (`is_admin` or `ADMIN_EMAILS`; redirect to `/`), no request-integrity check.
+  Router mounted at `index.js` `app.use("/", orgApplyRouter)`, before the
+  session token middleware (`req.session.csrfToken`, 24 random bytes hex).
+- The established convention is per-route: `routes/adminApi.js` `requireCsrf`
+  compares the `X-CSRF-Token` header with `req.session.csrfToken` (403). There
+  is no global CSRF middleware, Origin/Referer or Fetch Metadata check.
+  `cors()` is the default (wildcard, no credentials).
+- Session cookie: `SameSite=Lax`, `Secure` only in production.
+- `views/admin-org-applications.ejs` already sent `X-CSRF-Token` from its meta
+  tag, but the page rendered `req.csrfToken`, which the router never had: the
+  token was empty.
+- Decline: no transaction, no lock, no pending check; unconditional
+  `UPDATE ... status = 'declined'`, then the decline email.
+
+**Before-fix reproduction (TOOL_VERIFIED, real `index.js`, `/login`,
+`/admin/org-applications`, Chrome, loopback SMTP sink; final spec against
+HEAD route code: 12 pass / 19 fail):**
+- The page rendered an empty token (length 0).
+- A site admin's request with no, empty, wrong or another session's token
+  approved (organization, admin membership, legacy fields, KAI organization +
+  binding, derived `client_admin`, approval email) and declined (decline
+  email).
+- Same-site cross-origin (`http://127.0.0.1:<other port>`, opened in the
+  signed-in admin's browser): an auto-submitted form and a `no-cors` fetch
+  approved and declined with the same effects. Cross-site exploitation
+  through a same-site origin was demonstrated locally.
+- Cross-site (`csrf-attacker.test`, mapped to loopback): the Lax cookie was
+  withheld; sign-in redirect, nothing written.
+- Unauthenticated and ordinary users: redirected, nothing written.
+- Decline: re-declining succeeded (second email); an approved application
+  became `declined` while its organization, admin membership, binding and
+  `client_admin` stayed (contradictory email). Simultaneous approve + decline
+  both returned 200: application `declined`, applicant admin of the new
+  organization, both emails. Two simultaneous declines: both 200, two emails.
+- Declined -> approve was already refused (400). KAI disabled: token-less
+  approve and decline succeeded; an approved application could be declined.
+
+**Change (`routes/orgApplyApi.js`):**
+- `requireCsrfToken`, after `ensureAuthenticated, ensureAdmin` on both
+  routes: `X-CSRF-Token` must equal `req.session.csrfToken`, else 403
+  `{success:false, error:"invalid csrf token"}` before any database work.
+- `GET /admin/org-applications` renders `sessionCsrfToken(req)` (issues the
+  session token as `index.js` does when missing). A first attempt moved the
+  router after the `index.js` token middleware instead. That let a cross-site
+  POST create an anonymous session before `ensureAuthenticated`, and its
+  cookie replaced the admin's session (observed sign-out). It was reverted;
+  `index.js` is unchanged.
+- Decline: `BEGIN`, `SELECT ... FOR UPDATE OF oa` (the approval's row lock),
+  404 / 400 `application not pending` with `ROLLBACK`, update, `COMMIT`,
+  then the email. Approve is unchanged apart from the token check.
+- No view change: the existing page code now sends a real token.
+- Tests: the real-application harness `launchChrome` takes optional
+  `loopbackHostnames` (cross-site origin on loopback). Existing site-admin
+  approval calls in the takeover, approval-triggered and revocation specs
+  carry the page's token. The new spec is added to the runner allowlist.
+
+**Acceptance (TOOL_VERIFIED, 31/0): new
+`kai-organization-application-decision-security-browser-acceptance.integration.spec.js`.**
+- A/B: for approve and decline, each forged attempt has its own pending
+  application:
+  - unauthenticated: 302 `/login`;
+  - ordinary user: redirect to `/`;
+  - no, empty, wrong or another session's token: 403;
+  - same-site form and `no-cors` fetch: 403;
+  - cross-site form and fetch: sign-in redirect, the victim still signed in.
+  Each attempt left the application, organizations, legacy fields,
+  memberships, resolved authority, notifications and KAI tables unchanged.
+  The bound organization was also unchanged.
+- Legitimate page Approve (token length 48, per session): one organization,
+  applicant admin + derived `client_admin`, KAI organization + binding, zero
+  Projects, no global role or stored membership, one approval email. The
+  applicant's own sign-in: their organization only, no `/admin`.
+- Legitimate page Decline: declined, nothing granted, no KAI write, one
+  decline email.
+- C1/C2: pending -> declined once; again 400, row and notifications
+  unchanged. C3: approved -> decline 400; organization, administrator,
+  binding, `client_admin` intact, no decline email. C4: declined -> approve
+  400, nothing created.
+- C5: four rounds, alternating send order: approve won twice (decline 400,
+  approval effects and email only), decline won twice (approve 400, nothing
+  granted, decline email only).
+- C6: two declines: 200 + 400, one email.
+- D (KAI disabled): token-less approve/decline 403; takeover 409
+  `organization_name_conflict`; page approval `not_enabled` with zero KAI
+  writes; decline of the approved application 400.
+
+**Verification (TOOL_VERIFIED; sentinel `DATABASE_URL`; runner-owned
+loopback PostgreSQL):**
+
+| Command | Pass | Fail | Skipped |
+| --- | --- | --- | --- |
+| New acceptance, HEAD route code (final spec) | 12 | 19 | 0 |
+| New acceptance | 31 | 0 | 0 |
+| Name-based takeover browser acceptance | 11 | 0 | 0 |
+| Approval-triggered organization administrator browser acceptance | 14 | 0 | 0 |
+| Administrator revocation browser acceptance | 9 | 0 | 0 |
+| First GK administrator real sign-in browser acceptance | 12 | 0 | 0 |
+| Team & Access browser acceptance | 7 | 0 | 0 |
+| `npm run verify:kai-sprint2-organization-enablement` | 9 | 0 | 0 |
+| `npm run verify:kai-sprint2-p2-access-administration` | 46 | 0 | 0 |
+| `npm run verify:kai-sprint2-join-1-organization-join-requests` | 128 | 0 | 0 |
+| Onboarding approved-status PostgreSQL runner | 6 | 0 | 0 |
+| GK organization tenant binding PostgreSQL runner | 6 | 0 | 0 |
+| `npm run verify:kai-sprint2-api-contract` | 71 | 0 | 0 |
+| `npm test` | 5570 | 0 | 111 |
+| `git diff --check` | ok | | |
+
+Commit `0b7bb29`. Complete diff inspected.
+
+**Remaining (not changed):**
+- Production exposure depends on which origins share the production site
+  (other subdomains of the registrable domain). NOT_CONFIRMED.
+- Other routes mounted before the `index.js` token middleware
+  (`/api/admin` uses `requireCsrf`; `/org-apply` and the organization
+  description form post no checked token) and the site-wide
+  default `cors()` were not changed. `POST /org-apply` remains token-less.
+- Forced sign-out: observed only for these two routes under the reverted
+  remount. From code, a cross-site POST to any path served after the
+  `index.js` token middleware may likewise create an anonymous session whose
+  cookie replaces a signed-in one. Not exercised; NOT_CONFIRMED; unchanged.
+- The CSRF comparison is a plain string comparison, as in `routes/adminApi.js`.
+- Email delivery stays after COMMIT; a delivery failure returns 500 for a
+  committed decision, as approval already did.
+
+**Status:** ORGANIZATION_APPLICATION_DECISION_SECURITY_COMPLETE_LOCAL_SYNTHETIC.
+No push, deployment, production/shared database, migration/schema, flag,
+`ADMIN_EMAILS`, credential, real email, role grant or
+`00_KAI_CURRENT_STATE.md` change. This is the single package-end evidence
+update in the living ExecPlan.
