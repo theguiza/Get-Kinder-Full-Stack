@@ -48,10 +48,58 @@ function normalizeOrganizationName(value) {
   return String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
 }
 
+// Approvals resolving to the same normalized organization name take this
+// transaction-scoped lock, so one approval's name match and the organization
+// another creates cannot interleave.
+const ORGANIZATION_NAME_APPROVAL_LOCK_PREFIX = "gk-organization-application-approval:";
+
+const ORGANIZATION_NAME_CONFLICT_MESSAGE =
+  "An organization with this name already exists and this applicant is not its administrator. The application was not approved and remains pending.";
+
+/**
+ * Whether the applicant already administers this existing organization: an
+ * active admin membership row, or (with no membership row for it at all) the
+ * legacy userdata.org_id link, as services/orgScopeService.js resolves it. A
+ * deactivated membership row is never overridden by the legacy link here.
+ * Read inside the approval transaction, under the organization row lock.
+ * A matching name alone is never ownership.
+ */
+async function applicantAdministersOrganization(client, applicantUserId, organizationId) {
+  if (!(await hasUserOrgMembershipTable())) {
+    const { rows } = await client.query(
+      "SELECT 1 FROM public.userdata WHERE id = $1 AND org_id = $2",
+      [applicantUserId, organizationId]
+    );
+    return rows.length > 0;
+  }
+  const { rows: [authority] } = await client.query(
+    `
+      SELECT
+        EXISTS (
+          SELECT 1 FROM public.user_org_memberships
+          WHERE user_id = $1 AND org_id = $2
+            AND COALESCE(is_active, true) = true
+            AND COALESCE(role, 'admin') = 'admin'
+        ) AS active_admin_membership,
+        EXISTS (
+          SELECT 1 FROM public.user_org_memberships
+          WHERE user_id = $1 AND org_id = $2
+        ) AS any_membership,
+        EXISTS (
+          SELECT 1 FROM public.userdata
+          WHERE id = $1 AND org_id = $2
+        ) AS legacy_organization
+    `,
+    [applicantUserId, organizationId]
+  );
+  return authority.active_admin_membership || (!authority.any_membership && authority.legacy_organization);
+}
+
 /**
  * After an approval commits: make the approved organization available in KAI
  * to its applicant (KAI organization + binding; the applicant's client_admin
- * is derived from the admin membership the approval just granted). Runs in
+ * is derived from the admin membership the approval granted or, for an
+ * organization the applicant already administers, already held). Runs in
  * its own transaction, so a KAI failure never undoes or misreports the
  * committed approval; it is reported as setup_incomplete and the applicant
  * still has the existing KAI setup action. Without KAI Sprint 2 nothing is
@@ -186,6 +234,10 @@ orgApplyRouter.post("/admin/org-applications/:id/approve", ensureAuthenticated, 
       return res.status(400).json({ success: false, error: "invalid id" });
     }
 
+    await client.query("BEGIN");
+
+    // Locked, so a concurrent approval of the same application waits and
+    // then sees it decided.
     const { rows: [application] } = await client.query(
       `
         SELECT
@@ -197,38 +249,56 @@ orgApplyRouter.post("/admin/org-applications/:id/approve", ensureAuthenticated, 
         JOIN userdata u ON u.id = oa.user_id
         WHERE oa.id = $1
         LIMIT 1
+        FOR UPDATE OF oa
       `,
       [applicationId]
     );
 
-    if (!application) return res.status(404).json({ success: false, error: "not found" });
+    if (!application) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ success: false, error: "not found" });
+    }
     if (String(application.status) !== "pending") {
+      await client.query("ROLLBACK");
       return res.status(400).json({ success: false, error: "application not pending" });
     }
 
-    await client.query("BEGIN");
-
     const normalizedOrgName = normalizeOrganizationName(application.org_name);
+    await client.query("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", [
+      `${ORGANIZATION_NAME_APPROVAL_LOCK_PREFIX}${normalizedOrgName}`,
+    ]);
+
+    const { rows: [existingOrganization] } = await client.query(
+      `
+        SELECT id
+        FROM organizations
+        WHERE LOWER(REGEXP_REPLACE(TRIM(name), '\\s+', ' ', 'g')) = $1
+        ORDER BY id ASC
+        LIMIT 1
+        FOR UPDATE
+      `,
+      [normalizedOrgName]
+    );
+
     let approvedOrgId = null;
-
-    if (normalizedOrgName) {
-      const { rows: [existingOrganization] } = await client.query(
-        `
-          SELECT id, rep_user_id
-          FROM organizations
-          WHERE LOWER(REGEXP_REPLACE(TRIM(name), '\s+', ' ', 'g')) = $1
-          ORDER BY id ASC
-          LIMIT 1
-          FOR UPDATE
-        `,
-        [normalizedOrgName]
-      );
-      if (existingOrganization?.id != null) {
-        approvedOrgId = Number(existingOrganization.id);
+    if (existingOrganization?.id != null) {
+      // An existing organization is approved against only for an applicant
+      // who already administers it; approval then changes nobody's authority.
+      approvedOrgId = Number(existingOrganization.id);
+      if (!(await applicantAdministersOrganization(client, application.user_id, approvedOrgId))) {
+        await client.query("ROLLBACK");
+        console.warn("[org-applications] approval refused", {
+          code: "organization_name_conflict",
+          application_id: applicationId,
+          organization_id: approvedOrgId,
+        });
+        return res.status(409).json({
+          success: false,
+          error: "organization_name_conflict",
+          message: ORGANIZATION_NAME_CONFLICT_MESSAGE,
+        });
       }
-    }
-
-    if (!approvedOrgId) {
+    } else {
       const { rows: [organization] } = await client.query(
         `
           INSERT INTO organizations
@@ -247,33 +317,33 @@ orgApplyRouter.post("/admin/org-applications/:id/approve", ensureAuthenticated, 
         ]
       );
       approvedOrgId = Number(organization.id);
-    }
 
-    await client.query(
-      `
-        UPDATE userdata
-        SET org_rep = true,
-            org_id = $1
-        WHERE id = $2
-      `,
-      [approvedOrgId, application.user_id]
-    );
-
-    if (await hasUserOrgMembershipTable()) {
       await client.query(
         `
-          INSERT INTO public.user_org_memberships
-            (user_id, org_id, role, is_active, added_by_user_id)
-          VALUES
-            ($1, $2, 'admin', true, $3)
-          ON CONFLICT (user_id, org_id)
-          DO UPDATE SET
-            role = 'admin',
-            is_active = true,
-            added_by_user_id = COALESCE(EXCLUDED.added_by_user_id, public.user_org_memberships.added_by_user_id)
+          UPDATE userdata
+          SET org_rep = true,
+              org_id = $1
+          WHERE id = $2
         `,
-        [application.user_id, approvedOrgId, req.user?.id || null]
+        [approvedOrgId, application.user_id]
       );
+
+      if (await hasUserOrgMembershipTable()) {
+        await client.query(
+          `
+            INSERT INTO public.user_org_memberships
+              (user_id, org_id, role, is_active, added_by_user_id)
+            VALUES
+              ($1, $2, 'admin', true, $3)
+            ON CONFLICT (user_id, org_id)
+            DO UPDATE SET
+              role = 'admin',
+              is_active = true,
+              added_by_user_id = COALESCE(EXCLUDED.added_by_user_id, public.user_org_memberships.added_by_user_id)
+          `,
+          [application.user_id, approvedOrgId, req.user?.id || null]
+        );
+      }
     }
 
     await client.query(

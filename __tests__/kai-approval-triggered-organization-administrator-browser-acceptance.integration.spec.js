@@ -416,32 +416,30 @@ async function runAcceptance() {
       results.B = refusals;
     });
 
-    await test("B (same name): an application under an existing bound organization's name creates no KAI organization or binding and changes none of its people; the approval's existing name-based reuse is recorded", async () => {
+    await test("B (same name): an application under an existing bound organization's name is refused at approval; it creates no KAI organization or binding, changes none of its people, and gives the applicant nothing", async () => {
       const page = await signIn(USERS.sameNameApplicant);
       await apply(page, `  seabright   SYNTHETIC food bank `);
       await signOut(page);
       const sitePage = await signIn(USERS.site);
       const before = await allKaiCounts();
-      const response = await decide(sitePage, (await applicationOf(USERS.sameNameApplicant)).id, "approve");
+      const { id: applicationId } = await applicationOf(USERS.sameNameApplicant);
+      const response = await sitePage.fetchJson("POST", `/admin/org-applications/${applicationId}/approve`);
       await signOut(sitePage);
+      assert.deepEqual([response.status, response.body.success, response.body.error], [409, false, "organization_name_conflict"]);
+      assert.equal((await applicationOf(USERS.sameNameApplicant)).status, "pending");
       assert.deepEqual(await gkOrganizationsNamed(EXISTING_ORG_NAME), [{ id: existingGk.id, rep_user_id: null, status: "approved" }], "no second organization");
       assert.deepEqual(await bindingsFor(existingGk.id), [{ kai_organization_id: EXISTING_KAI, status: "active" }]);
       assert.equal((await kaiOrganizationsFor(existingGk.id)).length, 0, "the pre-existing KAI organization is untouched (it was not created by enablement)");
-      assert.deepEqual(changedTables(before, await allKaiCounts()).filter((table) => table !== "users"), ["audit_events"], "only the reuse audit");
+      assert.deepEqual(changedTables(before, await allKaiCounts()).filter((table) => table !== "users"), [], "nothing written to KAI");
       assert.deepEqual(await storedMembershipsOf(USERS.existingMember), [{ organization_id: EXISTING_KAI, role_name: "client_contributor", membership_status: "active" }]);
       assert.deepEqual(await projectsOf(EXISTING_KAI), [{ engagement_id: EXISTING_PROJECT, engagement_code: "Seabright Existing Project" }]);
-      // What the existing approval did (unchanged by this package): it made the
-      // applicant an admin of the existing organization by name.
+      assert.deepEqual(await gkAdminMembershipsOf(USERS.sameNameApplicant), [], "no Get Kinder membership");
+      assert.equal(smtp.messages.some((message) => message.to.includes(email(USERS.sameNameApplicant)) && /approved as an Organization Representative/.test(message.data)), false);
       const sameNamePage = await signIn(USERS.sameNameApplicant);
-      const observed = {
-        approvalResponse: response,
-        gkAdminOfExisting: (await gkAdminMembershipsOf(USERS.sameNameApplicant)).some((m) => m.org_id === existingGk.id && m.is_active),
-        kaiOrganizations: await authorizedOrganizationIds(sameNamePage),
-        teamAccess: (await sameNamePage.fetchJson("GET", capabilitiesPath(EXISTING_KAI))).data?.organizationAccessManagement ?? null,
-      };
+      assert.deepEqual(await authorizedOrganizationIds(sameNamePage), []);
+      assert.equal((await sameNamePage.fetchJson("GET", capabilitiesPath(EXISTING_KAI))).status, 403);
       await signOut(sameNamePage);
-      console.log(`[approval-org-admin] PRE-EXISTING name-based approval reuse: ${JSON.stringify(observed)}`);
-      results.B_same_name = observed;
+      results.B_same_name = { status: response.status, error: response.body.error };
     });
 
     // =====================================================================

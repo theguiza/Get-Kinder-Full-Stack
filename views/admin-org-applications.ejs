@@ -190,7 +190,12 @@
                 "X-CSRF-Token": csrf
               }
             });
-            if (!response.ok) throw new Error("request failed");
+            if (!response.ok) {
+              const failure = await response.json().catch(function () { return null; });
+              const requestError = new Error("request failed");
+              requestError.displayMessage = failure && typeof failure.message === "string" ? failure.message : null;
+              throw requestError;
+            }
             card.remove();
             decrementCount();
             showEmptyStateIfNeeded();
@@ -199,7 +204,7 @@
               btn.disabled = false;
             });
             if (errorEl) {
-              errorEl.textContent = "Action failed. Please try again.";
+              errorEl.textContent = (error && error.displayMessage) || "Action failed. Please try again.";
               errorEl.classList.remove("d-none");
             }
           }

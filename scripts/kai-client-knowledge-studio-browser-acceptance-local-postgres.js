@@ -43,7 +43,10 @@ import { Client } from "pg";
  * through the real index.js application and its real sign-in and sessions, and
  * __tests__/kai-approval-triggered-organization-administrator-browser-acceptance.integration.spec.js
  * runs organization application -> site-admin approval -> the applicant as
- * their organization's KAI administrator, the same way.
+ * their organization's KAI administrator, the same way, and
+ * __tests__/kai-approval-organization-name-takeover-browser-acceptance.integration.spec.js
+ * runs the refusal of an approval that would hand an existing organization to
+ * an unrelated applicant by name, the same way.
  *
  * - An ephemeral, loopback-only PostgreSQL cluster owned by this runner,
  *   with the union of the schemas the client product reads, applied in the
@@ -99,6 +102,7 @@ const ACCEPTANCE_SPECS = Object.freeze([
   "__tests__/kai-access-approval-to-action-campaign-browser-acceptance.integration.spec.js",
   "__tests__/kai-first-gk-administrator-real-sign-in-browser-acceptance.integration.spec.js",
   "__tests__/kai-approval-triggered-organization-administrator-browser-acceptance.integration.spec.js",
+  "__tests__/kai-approval-organization-name-takeover-browser-acceptance.integration.spec.js",
 ]);
 const acceptanceSpec = process.argv[2] || ACCEPTANCE_SPECS[0];
 if (!ACCEPTANCE_SPECS.includes(acceptanceSpec)) {
