@@ -274,12 +274,17 @@ async function runAcceptance() {
     const cardText = await page.evaluate(`(() => { const card = document.getElementById("app-card-${applicationId}"); return card ? card.innerText : null; })()`);
     return { status: decisions[0].status, body: await page.responseJson(decisions[0]), cardText };
   }
-  // Simultaneous approval requests from the signed-in site admin's page.
-  const approveConcurrently = (page, applicationIds) => page.evaluate(`Promise.all(${JSON.stringify(applicationIds)}.map(async (id) => {
-    const response = await fetch("/admin/org-applications/" + id + "/approve", { method: "POST", credentials: "same-origin",
-      headers: { "Content-Type": "application/json", Accept: "application/json" } });
-    return { id, status: response.status, body: await response.json().catch(() => null) };
-  }))`);
+  // Simultaneous approval requests from the signed-in site admin's page, with
+  // the session CSRF token that page renders and sends.
+  const approveConcurrently = (page, applicationIds) => page.evaluate(`(async () => {
+    const html = await (await fetch("/admin/org-applications", { credentials: "same-origin" })).text();
+    const token = html.match(/<meta name="csrf-token" content="([^"]+)">/)[1];
+    return Promise.all(${JSON.stringify(applicationIds)}.map(async (id) => {
+      const response = await fetch("/admin/org-applications/" + id + "/approve", { method: "POST", credentials: "same-origin",
+        headers: { "Content-Type": "application/json", Accept: "application/json", "X-CSRF-Token": token } });
+      return { id, status: response.status, body: await response.json().catch(() => null) };
+    }));
+  })()`);
   const authorizedOrganizationIds = async (page) => ((await page.fetchJson("GET", organizationsPath)).data?.items || []).map((item) => item.organization_id).sort();
   // The applicant's own independent sign-in: what they can actually do.
   async function effectiveAccessOf(legacyId, kaiOrganizationId, url = baseUrl) {

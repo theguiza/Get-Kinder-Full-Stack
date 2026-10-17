@@ -218,6 +218,14 @@ async function runAcceptance() {
   const memberHasRoleBadge = (page, legacyId, roleName) => page.evaluate(
     `Boolean(document.querySelector('[data-team-access-member="${rowKey(legacyId)}"] .gk-team-access-role--${roleName}'))`);
   const authorizedOrganizationIds = async (page) => ((await page.fetchJson("GET", organizationsPath)).data?.items || []).map((item) => item.organization_id).sort();
+  // The site admin's approval request as the signed-in /admin/org-applications page sends it, with its session CSRF token.
+  const approveWithPageToken = (page, applicationId) => page.evaluate(`(async () => {
+    const html = await (await fetch("/admin/org-applications", { credentials: "same-origin" })).text();
+    const token = html.match(/<meta name="csrf-token" content="([^"]+)">/)[1];
+    const response = await fetch("/admin/org-applications/${applicationId}/approve", { method: "POST", credentials: "same-origin",
+      headers: { "Content-Type": "application/json", Accept: "application/json", "X-CSRF-Token": token } });
+    return { status: response.status, body: await response.json().catch(() => null) };
+  })()`);
 
   let newGk = null;
   let newKai = null;
@@ -423,7 +431,7 @@ async function runAcceptance() {
       const sitePage = await signIn(USERS.site);
       const before = await allKaiCounts();
       const { id: applicationId } = await applicationOf(USERS.sameNameApplicant);
-      const response = await sitePage.fetchJson("POST", `/admin/org-applications/${applicationId}/approve`);
+      const response = await approveWithPageToken(sitePage, applicationId);
       await signOut(sitePage);
       assert.deepEqual([response.status, response.body.success, response.body.error], [409, false, "organization_name_conflict"]);
       assert.equal((await applicationOf(USERS.sameNameApplicant)).status, "pending");
@@ -456,7 +464,7 @@ async function runAcceptance() {
 
       const sitePage = await signIn(USERS.site);
       const before = await allKaiCounts();
-      const repeat = await sitePage.fetchJson("POST", `/admin/org-applications/${(await applicationOf(USERS.applicant)).id}/approve`);
+      const repeat = await approveWithPageToken(sitePage, (await applicationOf(USERS.applicant)).id);
       assert.equal(repeat.status, 400, "an approved application cannot be approved again");
       assert.deepEqual(changedTables(before, await allKaiCounts()), []);
       await signOut(sitePage);

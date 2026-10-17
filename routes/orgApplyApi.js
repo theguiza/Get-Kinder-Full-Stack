@@ -1,3 +1,4 @@
+import crypto from "crypto";
 import express from "express";
 import pool from "../Backend/db/pg.js";
 import { sendNudgeEmail } from "../kindnessEmailer.js";
@@ -23,6 +24,29 @@ async function resolveUserId(req) {
   );
   if (!rows[0]) throw new Error("User record not found.");
   return Number(rows[0].id);
+}
+
+const CSRF_HEADER_NAME = "X-CSRF-Token";
+
+// The session's CSRF token, issued as index.js issues it to the pages it
+// serves. This router is mounted before that middleware, so its admin page
+// issues the token itself.
+function sessionCsrfToken(req) {
+  if (!req.session) return "";
+  if (!req.session.csrfToken) req.session.csrfToken = crypto.randomBytes(24).toString("hex");
+  return req.session.csrfToken;
+}
+
+// The session's CSRF token, rendered into the admin page, must accompany
+// each decision, as in routes/adminApi.js. Checked after site-admin
+// authorization and before any database or session work.
+function requireCsrfToken(req, res, next) {
+  const expectedCsrf = req.session?.csrfToken;
+  const providedCsrf = req.get(CSRF_HEADER_NAME);
+  if (!expectedCsrf || !providedCsrf || providedCsrf !== expectedCsrf) {
+    return res.status(403).json({ success: false, error: "invalid csrf token" });
+  }
+  return next();
 }
 
 function getAdminEmails() {
@@ -218,7 +242,7 @@ orgApplyRouter.get("/admin/org-applications", ensureAuthenticated, ensureAdmin, 
       applications,
       user: req.user,
       assetTag: Date.now(),
-      csrfToken: typeof req.csrfToken === "function" ? req.csrfToken() : "",
+      csrfToken: sessionCsrfToken(req),
     });
   } catch (err) {
     console.error("GET /admin/org-applications error:", err);
@@ -226,7 +250,7 @@ orgApplyRouter.get("/admin/org-applications", ensureAuthenticated, ensureAdmin, 
   }
 });
 
-orgApplyRouter.post("/admin/org-applications/:id/approve", ensureAuthenticated, ensureAdmin, async (req, res) => {
+orgApplyRouter.post("/admin/org-applications/:id/approve", ensureAuthenticated, ensureAdmin, requireCsrfToken, async (req, res) => {
   const client = await pool.connect();
   try {
     const applicationId = Number.parseInt(req.params.id, 10);
@@ -378,7 +402,7 @@ orgApplyRouter.post("/admin/org-applications/:id/approve", ensureAuthenticated, 
   }
 });
 
-orgApplyRouter.post("/admin/org-applications/:id/decline", ensureAuthenticated, ensureAdmin, async (req, res) => {
+orgApplyRouter.post("/admin/org-applications/:id/decline", ensureAuthenticated, ensureAdmin, requireCsrfToken, async (req, res) => {
   const client = await pool.connect();
   try {
     const applicationId = Number.parseInt(req.params.id, 10);
@@ -386,6 +410,10 @@ orgApplyRouter.post("/admin/org-applications/:id/decline", ensureAuthenticated, 
       return res.status(400).json({ success: false, error: "invalid id" });
     }
 
+    await client.query("BEGIN");
+
+    // Locked like the approval, so concurrent decisions on one application
+    // wait and then see it decided; only a pending application is declined.
     const { rows: [application] } = await client.query(
       `
         SELECT
@@ -398,11 +426,19 @@ orgApplyRouter.post("/admin/org-applications/:id/decline", ensureAuthenticated, 
         JOIN userdata u ON u.id = oa.user_id
         WHERE oa.id = $1
         LIMIT 1
+        FOR UPDATE OF oa
       `,
       [applicationId]
     );
 
-    if (!application) return res.status(404).json({ success: false, error: "not found" });
+    if (!application) {
+      await client.query("ROLLBACK");
+      return res.status(404).json({ success: false, error: "not found" });
+    }
+    if (String(application.status) !== "pending") {
+      await client.query("ROLLBACK");
+      return res.status(400).json({ success: false, error: "application not pending" });
+    }
 
     await client.query(
       `
@@ -415,6 +451,8 @@ orgApplyRouter.post("/admin/org-applications/:id/decline", ensureAuthenticated, 
       [req.user?.email || "", applicationId]
     );
 
+    await client.query("COMMIT");
+
     await sendNudgeEmail({
       to: application.email,
       subject: "Update on your GetKinder organization application",
@@ -423,6 +461,7 @@ orgApplyRouter.post("/admin/org-applications/:id/decline", ensureAuthenticated, 
 
     return res.json({ success: true });
   } catch (err) {
+    try { await client.query("ROLLBACK"); } catch (_) {}
     console.error("POST /admin/org-applications/:id/decline error:", err);
     return res.status(500).json({ success: false, error: "decline failed" });
   } finally {

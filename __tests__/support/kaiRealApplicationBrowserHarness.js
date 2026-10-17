@@ -151,7 +151,9 @@ export async function startRealApplication({ databaseUrl, workdir, name = "real-
 }
 
 // Minimal Chrome DevTools protocol client, as in the other acceptance specs.
-export async function launchChrome({ chrome, workdir, profileName }) {
+// loopbackHostnames (optional) resolve to 127.0.0.1, so a spec can serve a
+// page from a different site than the application; nothing leaves loopback.
+export async function launchChrome({ chrome, workdir, profileName, loopbackHostnames = [] }) {
   const profileDir = join(workdir, `chrome-profile-${profileName}`);
   mkdirSync(profileDir, { recursive: true });
   const child = spawn(chrome, [
@@ -164,7 +166,7 @@ export async function launchChrome({ chrome, workdir, profileName }) {
     "--disable-extensions",
     "--disable-background-networking",
     // The real pages link CDN stylesheets and fonts; nothing leaves loopback.
-    "--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1",
+    `--host-resolver-rules=${[...loopbackHostnames.map((hostname) => `MAP ${hostname} 127.0.0.1`), "MAP * ~NOTFOUND , EXCLUDE 127.0.0.1"].join(" , ")}`,
     "about:blank",
   ], { stdio: "ignore" });
   const portFile = join(profileDir, "DevToolsActivePort");

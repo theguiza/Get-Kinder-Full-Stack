@@ -219,6 +219,14 @@ async function runAcceptance() {
     await signOutThroughLogout(page, contextPath);
   };
   const authorizedOrganizationIds = async (page) => ((await page.fetchJson("GET", organizationsPath)).data?.items || []).map((item) => item.organization_id).sort();
+  // The site admin's approval request as the signed-in /admin/org-applications page sends it, with its session CSRF token.
+  const approveWithPageToken = (page, applicationId) => page.evaluate(`(async () => {
+    const html = await (await fetch("/admin/org-applications", { credentials: "same-origin" })).text();
+    const token = html.match(/<meta name="csrf-token" content="([^"]+)">/)[1];
+    const response = await fetch("/admin/org-applications/${applicationId}/approve", { method: "POST", credentials: "same-origin",
+      headers: { "Content-Type": "application/json", Accept: "application/json", "X-CSRF-Token": token } });
+    return { status: response.status, body: await response.json().catch(() => null) };
+  })()`);
   // The real organization-description form post (no CSRF field on this form).
   const postDescription = (page, text) => page.evaluate(`(async () => {
     const response = await fetch("/org-portal/description", { method: "POST", credentials: "same-origin",
@@ -510,8 +518,8 @@ async function runAcceptance() {
       const legacyApplication = await applyAs(USERS.legacyOnly);
       const before = { state: await tenantState(), memberships: await gkMembershipRows() };
       const site = await signIn(USERS.site);
-      const refused = await site.fetchJson("POST", `/admin/org-applications/${revokedApplication}/approve`);
-      const approved = await site.fetchJson("POST", `/admin/org-applications/${legacyApplication}/approve`);
+      const refused = await approveWithPageToken(site, revokedApplication);
+      const approved = await approveWithPageToken(site, legacyApplication);
       await signOut(site);
       results.F = { refused: [refused.status, refused.body?.error], approved: [approved.status, approved.body] };
       console.log(`[admin-revocation] F observed ${JSON.stringify(results.F)}`);
