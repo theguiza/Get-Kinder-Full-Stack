@@ -12,6 +12,7 @@ import { executeToolCall } from "./kai-tool-executor.js";
 import { determineKaiTier, getModelForTier } from "../middleware/kai-tier.js";
 import { resolveKaiRequestContext } from "../kai/services/kaiContextService.js";
 import { listAuthorizedAssistantToolNames } from "../kai/services/kaiAssistantClaimTraceabilityTool.js";
+import { resolveOrgScopeForUserId } from "../../services/orgScopeService.js";
 
 const anthropic = new Anthropic();
 const GUEST_TOOL_ALLOWLIST = new Set([
@@ -240,6 +241,10 @@ async function getOrgContextForUser(userId) {
   );
   const orgRow = rows?.[0];
   if (!orgRow) return null;
+  // The legacy organization link scopes the organization tools only while
+  // Get Kinder still resolves it: never over a deactivated membership.
+  const scope = await resolveOrgScopeForUserId(userId, { includeOrgMembersForOrgRep: false });
+  if (!scope.memberships.some((membership) => membership.orgId === Number(orgRow.id))) return null;
   return {
     orgId: orgRow.id,
     orgName: orgRow.name,
@@ -807,6 +812,7 @@ export async function handleKaiMessage({
 
 export const __testables = {
   MAX_REQUEST_CONTEXT_TOKENS,
+  getOrgContextForUser,
   estimateMessageTokens,
   prepareMessagesForAnthropic,
   selectDiscoveryToolHint,

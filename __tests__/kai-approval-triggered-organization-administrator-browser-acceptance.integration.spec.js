@@ -581,14 +581,15 @@ async function runAcceptance() {
     await test("C (revocation): after the applicant stops being the organization's Get Kinder admin, the next request, a new sign-in, a repeated initialization and KAI setup all leave them without the organization", async () => {
       // No application route removes a Get Kinder organization admin, so the
       // removal is out of band. Get Kinder derives organization admin from
-      // two places (services/orgScopeService.js): an active
-      // public.user_org_memberships admin row, and - as a legacy fallback -
-      // public.userdata.org_id, which the approval also sets. Deactivating
-      // the membership row alone therefore leaves the person an admin
-      // (recorded; pre-existing behavior, not decided here).
+      // an active public.user_org_memberships admin row and, only for an
+      // organization with no membership row at all, from the legacy
+      // public.userdata.org_id that the approval also sets
+      // (services/orgScopeService.js). Deactivating the membership row alone
+      // ends the authority although the legacy fields still name it.
       await query("UPDATE public.user_org_memberships SET is_active = false WHERE user_id = $1 AND org_id = $2", [USERS.applicant, newGk.id]);
       results.C_revocation_membership_row_only = await authorizedOrganizationIds(applicantPage);
-      console.log(`[approval-org-admin] PRE-EXISTING after deactivating only the membership row: ${JSON.stringify(results.C_revocation_membership_row_only)}`);
+      assert.deepEqual(results.C_revocation_membership_row_only, [], "the next request after deactivating only the membership row");
+      assert.equal((await applicantPage.fetchJson("GET", rosterPath(newKai))).status, 403);
       await query("UPDATE public.userdata SET org_id = NULL, org_rep = false WHERE id = $1", [USERS.applicant]);
       assert.deepEqual(await authorizedOrganizationIds(applicantPage), [], "the next request");
       assert.equal((await applicantPage.fetchJson("GET", rosterPath(newKai))).status, 403);

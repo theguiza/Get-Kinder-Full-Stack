@@ -309,7 +309,12 @@ async function resolveEventCreatorContext(req, body = {}) {
     allowAdminPreview: false,
     includeOrgMembersForOrgRep: false,
   });
-  const orgId = scope?.orgId || userRow?.org_id;
+  // The scope already falls back to userdata.org_id, except where an
+  // explicitly deactivated membership revoked that legacy link.
+  if (!scope?.hasOrgRepAccess) {
+    return { error: { statusCode: 403, message: "Organization representative access required." } };
+  }
+  const orgId = scope.orgId;
   if (!orgId) {
     return { error: { statusCode: 400, message: "Event creation requires an organization context." } };
   }

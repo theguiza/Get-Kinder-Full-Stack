@@ -66,8 +66,17 @@ async function resolveAuthenticatedUserId(req, { allowAdminPreview = false } = {
   return { userId: String(rows[0].id), previewUserId: null, previewOrgId: null };
 }
 
+/**
+ * The user's active organization memberships. The legacy userdata.org_id
+ * link counts as an admin membership only when the user has no membership
+ * row at all for that organization (legacy-only administration). Any row for
+ * it decides instead: an inactive one is never overridden by the legacy
+ * link, and legacyLinkRevoked tells callers to stop honoring userdata.org_rep
+ * and userdata.org_id for it too.
+ */
 async function loadMembershipsForUser(userId, { legacyOrgId = null } = {}) {
   const memberships = [];
+  const explicitOrgIds = new Set();
   if (await hasUserOrgMembershipTable()) {
     const { rows } = await pool.query(
       `
@@ -81,7 +90,6 @@ async function loadMembershipsForUser(userId, { legacyOrgId = null } = {}) {
         LEFT JOIN public.organizations o
           ON o.id = m.org_id
         WHERE m.user_id = $1
-          AND COALESCE(m.is_active, true) = true
         ORDER BY LOWER(COALESCE(o.name, '')), m.org_id ASC
       `,
       [userId]
@@ -89,19 +97,23 @@ async function loadMembershipsForUser(userId, { legacyOrgId = null } = {}) {
     rows.forEach((row) => {
       const orgId = normalizeOrgId(row?.org_id);
       if (!orgId) return;
+      explicitOrgIds.add(orgId);
+      if (row?.is_active === false) return;
       memberships.push({
         orgId,
         org_name: row?.org_name || "",
         org_status: row?.org_status || "",
         role: String(row?.role || "admin"),
-        is_active: row?.is_active !== false,
+        is_active: true,
       });
     });
   }
 
   const hasLegacyOrg = legacyOrgId != null && Number.isFinite(Number(legacyOrgId));
-  const knownOrgIds = new Set(memberships.map((entry) => entry.orgId));
-  if (hasLegacyOrg && !knownOrgIds.has(Number(legacyOrgId))) {
+  const legacyLinkRevoked = hasLegacyOrg
+    && explicitOrgIds.has(Number(legacyOrgId))
+    && !memberships.some((entry) => entry.orgId === Number(legacyOrgId));
+  if (hasLegacyOrg && !explicitOrgIds.has(Number(legacyOrgId))) {
     const { rows: [legacyOrg] = [] } = await pool.query(
       `
         SELECT id, name, status
@@ -122,11 +134,12 @@ async function loadMembershipsForUser(userId, { legacyOrgId = null } = {}) {
     }
   }
 
-  return memberships.sort((a, b) => {
+  memberships.sort((a, b) => {
     const nameCmp = String(a.org_name || "").localeCompare(String(b.org_name || ""));
     if (nameCmp !== 0) return nameCmp;
     return Number(a.orgId) - Number(b.orgId);
   });
+  return { memberships, legacyLinkRevoked };
 }
 
 function resolveSessionActiveOrgId(req, previewUserId) {
@@ -176,7 +189,7 @@ export async function setSessionActiveOrg(req, orgId, { allowAdminPreview = true
     [userId]
   );
   const legacyOrgId = normalizeOrgId(userRow?.org_id);
-  const memberships = await loadMembershipsForUser(userId, { legacyOrgId });
+  const { memberships } = await loadMembershipsForUser(userId, { legacyOrgId });
   const knownOrgIds = new Set(memberships.map((entry) => normalizeOrgId(entry.orgId)).filter(Boolean));
   if (!knownOrgIds.has(targetOrgId)) {
     return { ok: false, error: "forbidden" };
@@ -196,8 +209,10 @@ export async function resolveOrgScope(
     [userId]
   );
 
-  const legacyOrgId = normalizeOrgId(userRow?.org_id);
-  const memberships = await loadMembershipsForUser(userId, { legacyOrgId });
+  const { memberships, legacyLinkRevoked } = await loadMembershipsForUser(userId, {
+    legacyOrgId: normalizeOrgId(userRow?.org_id),
+  });
+  const legacyOrgId = legacyLinkRevoked ? null : normalizeOrgId(userRow?.org_id);
   const sessionActiveOrgId = resolveSessionActiveOrgId(req, previewUserId);
   const orgId = pickActiveOrgId({
     memberships,
@@ -208,7 +223,8 @@ export async function resolveOrgScope(
   persistSessionActiveOrgId(req, previewUserId, orgId);
 
   const hasOrg = orgId != null;
-  const hasOrgRepAccess = Boolean(previewUserId) || memberships.length > 0 || userRow?.org_rep === true;
+  const isLegacyOrgRep = userRow?.org_rep === true && !legacyLinkRevoked;
+  const hasOrgRepAccess = Boolean(previewUserId) || memberships.length > 0 || isLegacyOrgRep;
   const canExpandToOrgMembers = includeOrgMembersForOrgRep && hasOrg && hasOrgRepAccess;
 
   let memberUserIds = [String(userId)];
@@ -289,8 +305,10 @@ export async function resolveOrgScopeForUserId(
     };
   }
 
-  const legacyOrgId = normalizeOrgId(userRow?.org_id);
-  const memberships = await loadMembershipsForUser(normalizedUserId, { legacyOrgId });
+  const { memberships, legacyLinkRevoked } = await loadMembershipsForUser(normalizedUserId, {
+    legacyOrgId: normalizeOrgId(userRow?.org_id),
+  });
+  const legacyOrgId = legacyLinkRevoked ? null : normalizeOrgId(userRow?.org_id);
   const orgId = pickActiveOrgId({
     memberships,
     previewOrgId: null,
@@ -299,7 +317,8 @@ export async function resolveOrgScopeForUserId(
   });
 
   const hasOrg = orgId != null;
-  const hasOrgRepAccess = memberships.length > 0 || userRow?.org_rep === true;
+  const isLegacyOrgRep = userRow?.org_rep === true && !legacyLinkRevoked;
+  const hasOrgRepAccess = memberships.length > 0 || isLegacyOrgRep;
   const canExpandToOrgMembers = includeOrgMembersForOrgRep && hasOrg && hasOrgRepAccess;
 
   let memberUserIds = [String(normalizedUserId)];
