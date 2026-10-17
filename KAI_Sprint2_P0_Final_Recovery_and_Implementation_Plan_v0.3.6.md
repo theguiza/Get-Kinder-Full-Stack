@@ -40255,3 +40255,124 @@ No push, deployment, production/shared database, migration/schema, flag,
 `ADMIN_EMAILS`, credential, real email, production role or
 `00_KAI_CURRENT_STATE.md` change. This is the single package-end evidence
 update in the living ExecPlan.
+
+### Name-based organization takeover at the original approval boundary (2026-10-17)
+
+**Owner authorization (USER_CONFIRMED):** the owner's "Repair Name-Based
+Organization Takeover at the Original Approval Boundary" prompt authorizes
+local reproduction, repair and synthetic proof that approving an
+organization application cannot give the applicant authority over an
+existing organization by name. No push, deployment, production mutation,
+migration, environment, `ADMIN_EMAILS`, flag, claims workflow or
+administrator-revocation change.
+
+**Start (TOOL_VERIFIED):** `main` at `36daf4e`, clean.
+
+**Cause (TOOL_VERIFIED):** `routes/orgApplyApi.js`
+`POST /admin/org-applications/:id/approve` matched `public.organizations` by
+normalized name only (applicant-supplied `org_name`), reused the match, and
+then, for any applicant, set `userdata.org_rep/org_id` and upserted an active
+`user_org_memberships` `admin` row before COMMIT. No ownership was checked.
+The binding-derived `client_admin` then followed; the KAI initializer saw an
+admin and audited `reuse_...`. The same path ran with KAI Sprint 2 disabled.
+Also:
+- The SQL normalization was `'\s+'` inside a JavaScript template literal,
+  which sends `'s+'`. It collapsed runs of lowercase "s", not whitespace.
+  Names with a lowercase "s" never matched their own organization, so
+  approval created a same-named duplicate. Names without one matched and
+  were taken over.
+- The pending check ran before BEGIN, without a lock. Concurrent approvals
+  of one application both committed. Concurrent approvals of one new name
+  each created an organization.
+
+**Pre-change reproduction (TOOL_VERIFIED, new acceptance 2/9 failing):**
+- Bound organization: the applicant gets an admin membership, `org_rep`
+  and `org_id`, and derived `client_admin` of the existing KAI organization.
+  Through their own sign-in: Team & Access, roster and Projects 200. An
+  approval email is sent.
+- Unbound organization: same takeover. KAI initialization also created a
+  KAI organization and binding for it.
+- Lowercase-"s" name: a duplicate organization.
+- Two further same-name applicants approved concurrently both became admins.
+- New-name race: 2 organizations. Double approval: 2 organizations,
+  2 emails.
+- KAI disabled: takeover.
+- Existing admin reapplying: approval rewrote their `added_by_user_id`.
+
+**Change (`routes/orgApplyApi.js`):**
+- One transaction. It locks the application row (`FOR UPDATE OF oa`) and
+  checks `pending` inside the transaction, then takes
+  `pg_advisory_xact_lock(hashtextextended('gk-organization-application-approval:'
+  || normalized name))`. Then it looks up the existing organization
+  (`FOR UPDATE`) with the corrected `'\\s+'` regex.
+- An existing match is approved only if the applicant already administers
+  it. That means an active admin membership row, or the legacy `org_id` link
+  with no membership row for that organization. A deactivated row is not
+  overridden by the legacy link here. Even then, approval writes no
+  organization, representative, legacy field or membership.
+- Otherwise: ROLLBACK before any write, `409
+  {success:false, error:"organization_name_conflict", message}`, the
+  application stays `pending`, and no notification is sent. The KAI
+  initializer is not reached. The log line carries only the code and ids.
+  Legacy approval has no persisted audit table; this was already the case.
+- New organizations: unchanged writes.
+- `views/admin-org-applications.ejs` shows the server's `message`. Otherwise
+  it keeps its generic error.
+
+**Acceptance (TOOL_VERIFIED, 11/0): real `index.js`, `/login`, `/org-apply`,
+`/admin/org-applications`, Chrome, loopback SMTP sink, synthetic data.**
+- A, bound: 409. Organization, representative, legacy fields, memberships,
+  KAI organization, binding, Project, stored memberships and audits are
+  byte-identical. Resolvers return no GK admin and no derived `client_admin`.
+  The applicant's own sign-in gets no organizations, capabilities, roster or
+  Projects (403), and onboarding is `PENDING`. No email. The existing admin
+  and member keep access.
+- B, unbound: 409, nothing written, no binding.
+- B, lowercase "s": 409, no duplicate.
+- Trusted: the existing admin reapplying is approved (`ready/reused`).
+  Nothing changes except one reuse audit.
+- C, new organization: approved (`ready/created`). Applicant is GK admin
+  and derived `client_admin`, zero Projects, no stored membership, no global
+  role. Their own sign-in gets `KAI_AVAILABLE` and the Team & Access page.
+  Another organization, GK role, global role and `/admin` are refused.
+- D: three concurrent same-name approvals plus a repeat are all 409, with
+  nothing changed. New-name race: one organization; the loser gets 409 and
+  stays pending. Double approval: 200 + 400, one organization, one email.
+- E, KAI disabled: takeover 409; a new organization is approved with zero
+  KAI writes.
+
+**Verification (TOOL_VERIFIED; sentinel `DATABASE_URL`; runner-owned
+loopback PostgreSQL):**
+- New acceptance 11/0 (pre-change 2/9).
+- Approval-triggered acceptance 14/0. Its same-name case now asserts the
+  refusal instead of recording the takeover.
+- Enablement PostgreSQL 9/0; onboarding-status PostgreSQL 6/0; enablement +
+  onboarding unit 51/0.
+- First-GK-admin real sign-in 12/0; Team & Access browser 7/0; API contract
+  71/0.
+- `npm test` 5561/0/109.
+- `git diff --check` clean; complete diff inspected. Commit `2789ac8`.
+
+**Remaining (not changed):**
+- Legitimate claims to an existing organization by someone not already its
+  administrator have no workflow. Policy decision; such applications are
+  refused and stay pending.
+- Matching is exact after whitespace and case normalization. Look-alike
+  names (Unicode spaces, homoglyphs) can still create a separate,
+  similarly named organization. That organization is not the existing one,
+  and grants no authority over it.
+- Separate administrator lifecycle findings remain open:
+  - a deactivated membership row with a legacy `org_id` still resolves as
+    admin;
+  - there is no route that removes a GK organization admin;
+  - manual KAI setup recovery still creates its initial Project.
+- Approve/decline do not check the CSRF token: token-less requests were
+  accepted. Cross-site exploitability is NOT_CONFIRMED.
+- Decline has no pending check. Production behavior and data are
+  NOT_CONFIRMED.
+
+**Status:** ORGANIZATION_NAME_TAKEOVER_REPAIR_COMPLETE_LOCAL_SYNTHETIC. No
+push, deployment, production/shared database, migration/schema, flag,
+`ADMIN_EMAILS`, credential, real email, role grant or
+`00_KAI_CURRENT_STATE.md` change. This is the single package-end evidence
+update in the living ExecPlan.
