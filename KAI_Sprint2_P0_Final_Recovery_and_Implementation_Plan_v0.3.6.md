@@ -40376,3 +40376,185 @@ push, deployment, production/shared database, migration/schema, flag,
 `ADMIN_EMAILS`, credential, real email, role grant or
 `00_KAI_CURRENT_STATE.md` change. This is the single package-end evidence
 update in the living ExecPlan.
+
+### Ineffective organization administrator revocation through legacy fields (2026-10-17)
+
+**Owner authorization (USER_CONFIRMED):** the owner's "Repair Ineffective
+Organization Administrator Revocation" prompt authorizes local inspection,
+before-fix reproduction, the smallest effective-authorization repair and
+synthetic PostgreSQL / real sign-in proof that an explicitly deactivated
+Get Kinder organization-administrator membership is not overridden by the
+legacy `public.userdata` `org_rep`/`org_id` fields. No push, deployment,
+production database, migration/schema, flag, environment, site-admin,
+global-role, removal UI/API, transfer, last-admin, CSRF or decline change.
+
+**Start (TOOL_VERIFIED):** `main` at `e878d0e`, clean.
+
+**Model (TOOL_VERIFIED from code):**
+- `public.user_org_memberships` (`scripts/migrations/add_user_org_memberships.sql`):
+  `UNIQUE (user_id, org_id)`, `role` default `'admin'`, `is_active` default
+  `true`. No application route sets `is_active = false`; the only row
+  removal is the `ON DELETE CASCADE` of an organization delete. Approval
+  and `/api/admin/organizations/:id/admins` write only `role = 'admin'`.
+- Legacy `public.userdata.org_rep` / `org_id`: set by approval and admin
+  assignment; `syncLegacyOrgAccessForUser` (organization delete) points them
+  at the first remaining active membership or clears them.
+- KAI membership status (`kai.organization_memberships.membership_status`)
+  is a separate stored grant and is not applied to the Get Kinder table.
+- Sessions store only the email; `deserializeUser` and the bearer path
+  reload `public.userdata` on every request. The session's `activeOrgId` is
+  re-validated against the resolved memberships. No authority is cached.
+
+**Cause (TOOL_VERIFIED):** `services/orgScopeService.js`
+`loadMembershipsForUser` read only active rows (`AND COALESCE(m.is_active,
+true) = true`), then added a synthetic active `admin` membership for
+`userdata.org_id` whenever that organization was not among them. A
+deactivated row was therefore indistinguishable from no row. Also
+`hasOrgRepAccess` was `memberships.length > 0 || org_rep === true`, and
+`pickActiveOrgId` fell back to `org_id`. Every consumer inherits this:
+`ensureOrgRep`/`ensureOrgRepPage`, `/api/org/*`, `/org-portal/*` forms,
+`/api/me/events`, event invitations, the KAI binding derivation
+(`gkOrganizationBindingAuthority.js`) behind `resolveKaiActorContext`, Team &
+Access, join-request review, role changes, Projects, KAI enablement and
+onboarding, and the legacy assistant's host scope. Two consumers also read
+the legacy fields directly: `resolveEventCreatorContext`
+(`scope?.orgId || userRow?.org_id`) and the legacy assistant's
+`getOrgContextForUser` (`userdata.org_id`, used to scope its organization
+tools). The approval guard `applicantAdministersOrganization`
+(`routes/orgApplyApi.js`) already used the intended precedence.
+
+**Pre-change reproduction (TOOL_VERIFIED, real `index.js`, `/login`,
+Chrome; final spec against HEAD authorization code: 4 pass / 5 fail):**
+after only adminA's organization-A row was set `is_active = false`, legacy
+fields unchanged, both the session established before the change and a
+fresh sign-in still: read `/api/org/context` (200), rewrote the
+organization description, passed the event-creation gate, held derived
+`client_admin` (capabilities, roster, Projects 200), created Projects (201),
+approved a pending join request (200; the joiner became
+`client_contributor`), granted another member `client_admin` (200) and
+revoked another member's `client_reviewer` (200), with audits written. The
+resolvers returned derived `client_admin` and the assistant organization A.
+An administrator of A and B whose legacy fields name A kept A and could
+switch the session back to it. The KAI-disabled instance behaved the same
+on the Get Kinder side. The approval guard already refused the deactivated
+administrator's application (409) while the resolver still granted
+`client_admin` on the same data.
+
+**Change:**
+- `services/orgScopeService.js` `loadMembershipsForUser` reads every row
+  for the user, keeps the active ones, and synthesizes the legacy admin
+  membership only when the user has no row at all for `org_id`. It returns
+  `legacyLinkRevoked` when the row for `org_id` exists but is inactive.
+  `resolveOrgScope` and `resolveOrgScopeForUserId` then ignore `org_rep`
+  and `org_id` for it (no `hasOrgRepAccess` from `org_rep`, no `org_id`
+  active-organization fallback).
+- `controllers/eventsApiController.js` `resolveEventCreatorContext`:
+  requires `scope.hasOrgRepAccess` (403 otherwise) and uses `scope.orgId`
+  only. The removed `|| userRow.org_id` differed from `scope.orgId` only
+  for a revoked legacy link.
+- `Backend/services/kai.js` `getOrgContextForUser`: the legacy organization
+  scopes the assistant's organization tools only while the shared resolver
+  still returns it. Exposed through the existing `__testables`.
+- Precedence: active admin row grants; inactive row denies and is never
+  overridden; active non-admin row keeps its own role (the projection
+  derives `client_admin` only from `admin`); legacy-only (no row) keeps
+  admin. Scoped per organization. No schema, flag, role, membership or
+  legacy-field write.
+
+**Acceptance (TOOL_VERIFIED, 9/0): new
+`kai-organization-administrator-revocation-browser-acceptance.integration.spec.js`,
+real `index.js`, `/login`, Chrome, loopback SMTP sink, synthetic data.**
+- A: active adminA: Get Kinder portal, description edit, event gate; KAI
+  `client_admin`, Team & Access, join approval, role grant, Project
+  creation; organization B 403.
+- B: row deactivated, legacy fields byte-identical. Existing session and
+  fresh sign-in: `/api/org/context` 403, description form redirected to
+  `/org-apply` and unchanged, event creation 403, no KAI organization,
+  capabilities/roster/Projects 403, Project create, join approval, role
+  grant and revoke 403, B 403, global role 403, no site administration.
+  No KAI table count changes (no audit), join request pending, member roles
+  unchanged. Every organization, binding, KAI organization, Project, stored
+  membership, global role and legacy field unchanged. The roster no longer
+  shows adminA as an effective administrator. Resolvers: no organization,
+  representative access, derived `client_admin` or assistant organization.
+- C: active `member` row + legacy fields naming A + stored
+  `client_contributor`: role stays `member`, no derived `client_admin`,
+  contributor access to A (organizations, Projects 200), Team & Access
+  management false, roster 403, description edit refused, join approval and
+  role grant 403, B 403.
+- D: legacy-only administrator keeps Get Kinder and KAI administration of
+  A throughout.
+- D (deleted row): deleting adminA's deactivated row makes them
+  legacy-only again and they regain A (recorded limitation, asserted);
+  re-inserting the inactive row removes it on the next request.
+- E: dualAdmin (A and B, legacy A): deactivating A leaves B; the existing
+  session's active organization moves to B, switching to A is 403, roster
+  A 403 / B 200, join approval in A 403, events still allowed for B.
+  Organization B's administrator, the site admin (`/admin/org-applications`,
+  platform administration) and a global GK operator observe the same before
+  and after. No tenant state moved.
+- F: the approval guard agrees: deactivated adminA's application under A's
+  name 409 `organization_name_conflict`; the legacy-only administrator's is
+  approved `ready/reused`; no membership written; adminA still has no
+  derived `client_admin`.
+- F (KAI disabled): deactivated adminA `/api/org/context` 403 and events
+  403; legacy-only 200 and 400 (gate passed); KAI route unavailable.
+
+**Verification (TOOL_VERIFIED; sentinel `DATABASE_URL`; runner-owned
+loopback PostgreSQL):**
+
+| Command | Pass | Fail | Skipped |
+| --- | --- | --- | --- |
+| New acceptance, HEAD authorization code (final spec) | 4 | 5 | 0 |
+| New acceptance | 9 | 0 | 0 |
+| `node --test __tests__/org-scope-membership-revocation.spec.js`, HEAD resolver | 3 | 3 | 0 |
+| Same, fixed | 6 | 0 | 0 |
+| Focused unit/route specs (resolver, rsvp guards, binding, actor context, enablement, onboarding, Team & Access, join service/routes, legacy assistant) | 243 | 0 | 0 |
+| `npm run verify:kai-sprint2-p2-access-administration` | 46 | 0 | 0 |
+| `npm run verify:kai-sprint2-organization-enablement` | 9 | 0 | 0 |
+| Onboarding approved-status PostgreSQL runner | 6 | 0 | 0 |
+| GK organization tenant binding PostgreSQL runner | 6 | 0 | 0 |
+| `npm run verify:kai-sprint2-join-1-organization-join-requests` | 128 | 0 | 0 |
+| `npm run verify:kai-sprint2-api-contract` | 71 | 0 | 0 |
+| Approval-triggered organization administrator browser acceptance | 14 | 0 | 0 |
+| Name-based takeover browser acceptance | 11 | 0 | 0 |
+| First GK administrator real sign-in browser acceptance | 12 | 0 | 0 |
+| Team & Access browser acceptance | 7 | 0 | 0 |
+| New acceptance (rerun in the same sequence) | 9 | 0 | 0 |
+| `npm test` | 5568 | 0 | 110 |
+| `git diff --check` | ok | | |
+
+Commit `fdd38ab`. Complete diff inspected.
+
+**Remaining (not changed):**
+- Physically deleting a membership row cannot be told apart from
+  legacy-only administration; the legacy fields then grant the organization
+  again. Secure removal needs a removal policy (keep the inactive row, or
+  clear the legacy link in the same transaction). Owner decision; no
+  removal route exists.
+- No route deactivates a Get Kinder organization membership; this package
+  makes an out-of-band deactivation effective.
+- Get Kinder representative access (`/api/org`, `/org-portal`, events) is
+  granted by any active membership row, whatever its role; only the
+  description edit checks `role = 'admin'`. No code writes a non-admin role.
+  The KAI projection derives `client_admin` only from `admin`. Policy
+  question, unchanged.
+- Event notification recipients (`getEventNotificationRecipients`) still
+  include `org_rep`/`org_id` users, so a deactivated administrator with
+  unchanged legacy fields can still receive organization event emails. Not
+  an authorization decision; unchanged.
+- The legacy assistant tier (`determineKaiTier`, `org_growth`) and the
+  mobile JWT `org_rep` claim still read `org_rep`; the tier offers the
+  organization tools, which now refuse without an organization context; the
+  server re-reads the user on each bearer request.
+- `listActiveGkOrganizationAdminLegacyUserIds` (last-admin guard, roster)
+  counts only membership rows, not legacy-only administrators (fail-closed;
+  unchanged).
+- Production data (how many inactive rows have matching legacy fields, and
+  who loses access) is NOT_CONFIRMED.
+
+**Status:** ORGANIZATION_ADMIN_REVOCATION_REPAIR_COMPLETE_LOCAL_SYNTHETIC.
+No push, deployment, production/shared database, migration/schema, flag,
+`ADMIN_EMAILS`, credential, real email, role grant or
+`00_KAI_CURRENT_STATE.md` change. This is the single package-end evidence
+update in the living ExecPlan.
