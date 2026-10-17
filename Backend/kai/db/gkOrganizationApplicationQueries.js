@@ -31,3 +31,26 @@ export async function selectLatestOwnOrganizationApplication(legacyPublicUserdat
   );
   return row || null;
 }
+
+/**
+ * Read-only lookup of one public.org_applications row by id, for the
+ * approval-triggered KAI organization initialization: it re-reads the
+ * application's own applicant and status rather than trusting the caller.
+ * Returns only the fields that decision needs.
+ */
+export async function selectOrganizationApplicationById(applicationId, db = pool) {
+  const normalizedApplicationId = normalizeUserdataId(applicationId);
+  if (!normalizedApplicationId) return null;
+  const {
+    rows: [row] = [],
+  } = await db.query(
+    `
+      SELECT id, user_id, org_name, status
+      FROM public.org_applications
+      WHERE id = $1
+      LIMIT 1
+    `,
+    [normalizedApplicationId]
+  );
+  return row || null;
+}

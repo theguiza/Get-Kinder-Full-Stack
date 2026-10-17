@@ -16,6 +16,7 @@ import {
 import {
   enableKaiForOrganization,
   getKaiEnablementStatusForOrganization,
+  initializeKaiOrganizationForApprovedApplication,
 } from "../Backend/kai/services/kaiOrganizationEnablementService.js";
 import { deriveEffectiveClientOrganizationMemberships } from "../Backend/kai/auth/gkOrganizationBindingAuthority.js";
 
@@ -415,7 +416,7 @@ test("getKaiEnablementStatusForOrganization issues no INSERT/UPDATE/DELETE and d
   assert.equal(pool.engagements.length, 0);
 });
 
-test("getKaiEnablementStatusForOrganization reports enabled only once organization, binding, and engagement all exist", async () => {
+test("getKaiEnablementStatusForOrganization reports enabled with the initial engagement once manual setup has run", async () => {
   const pool = createFakeEnablementPool();
   const dependencies = buildDependencies(pool);
 
@@ -426,6 +427,100 @@ test("getKaiEnablementStatusForOrganization reports enabled only once organizati
   assert.equal(after.data.kai_enabled, true);
   assert.ok(after.data.kai_organization_id);
   assert.ok(after.data.engagement_id);
+});
+
+// Approval-triggered initialization (routes/orgApplyApi.js): organization and
+// binding only, decided from the approved application, never from the caller.
+const APPROVER_ACTOR_USER_ID = "22222222-2222-4222-8222-222222222222";
+const APPLICANT_KAI_USER_ID = "33333333-3333-4333-8333-333333333333";
+
+function buildApprovalDependencies(pool, {
+  platformSuperuser = true,
+  application = { id: 7, user_id: 601, org_name: "  test   ORG ", status: "approved" },
+  applicantMemberships = [{ orgId: 1, role: "admin", is_active: true }],
+  audits = [],
+  env = { KAI_SPRINT2_ENABLED: "true" },
+} = {}) {
+  return buildDependencies(pool, {
+    overrides: {
+      env,
+      resolveKaiActorContext: async () => ({
+        ok: true,
+        actorContext: { actorType: "human", actorUserId: APPROVER_ACTOR_USER_ID, legacyPublicUserdataId: 900, organizationMemberships: [], platformSuperuser },
+      }),
+      selectOrganizationApplicationById: async (id) => (application && id === application.id ? application : null),
+      resolveOrgScopeForUserId: async (userId) => ({ memberships: userId === application?.user_id ? applicantMemberships : [] }),
+      findOrCreateKaiUserForAdministrationTarget: async ({ legacyPublicUserdataId }) =>
+        (legacyPublicUserdataId === application?.user_id ? { user_id: APPLICANT_KAI_USER_ID, status: "active" } : null),
+      createProductionMetadataOnlyAuditForOrganizationKaiEnablement: ({ kaiOrganizationId, actorContext }) => ({
+        prepareMetadataOnlyAudit: ({ payload }) => ({
+          ok: true,
+          async publish() { audits.push({ kaiOrganizationId, actorUserId: actorContext.actorUserId, ...payload }); },
+        }),
+      }),
+    },
+  });
+}
+
+const approvalInput = (overrides = {}) => ({ applicationId: 7, gkOrganizationId: 1, req: { user: { id: 900 } }, ...overrides });
+
+test("getKaiEnablementStatusForOrganization reports enabled for an organization and binding with no Project", async () => {
+  const pool = createFakeEnablementPool();
+  const created = await initializeKaiOrganizationForApprovedApplication(approvalInput(), buildApprovalDependencies(pool));
+  assert.equal(created.ok, true);
+  const status = await getKaiEnablementStatusForOrganization({ gkOrganizationId: 1, req: { user: { id: 501 } } }, buildDependencies(pool));
+  assert.deepEqual(status.data, { kai_enabled: true, kai_organization_id: created.data.kai_organization_id, engagement_id: null, engagement_code: null });
+});
+
+test("initializeKaiOrganizationForApprovedApplication creates the organization and binding only, audited approver -> applicant, and replays as reuse", async () => {
+  const pool = createFakeEnablementPool();
+  const audits = [];
+  const dependencies = buildApprovalDependencies(pool, { audits });
+  const first = await initializeKaiOrganizationForApprovedApplication(approvalInput(), dependencies);
+  assert.deepEqual([first.ok, first.data.outcome], [true, "created"]);
+  assert.equal(pool.kaiOrganizations.length, 1);
+  assert.equal(pool.kaiOrganizations[0].name, "Test Org", "named from public.organizations, not the application");
+  assert.equal(pool.bindings.length, 1);
+  assert.equal(pool.engagements.length, 0, "no Project");
+  const second = await initializeKaiOrganizationForApprovedApplication(approvalInput(), dependencies);
+  assert.deepEqual([second.data.outcome, second.data.kai_organization_id], ["reused", first.data.kai_organization_id]);
+  assert.equal(pool.kaiOrganizations.length, 1);
+  assert.equal(pool.bindings.length, 1);
+  assert.deepEqual(audits.map((audit) => [audit.attempted_operation, audit.actorUserId, audit.target_user_id, audit.role_name, audit.authority_source]), [
+    ["initialize_kai_organization_for_approved_application", APPROVER_ACTOR_USER_ID, APPLICANT_KAI_USER_ID, "client_admin", "approved_organization_application"],
+    ["reuse_kai_organization_for_approved_application", APPROVER_ACTOR_USER_ID, APPLICANT_KAI_USER_ID, "client_admin", "approved_organization_application"],
+  ]);
+});
+
+test("initializeKaiOrganizationForApprovedApplication refuses every case the approval does not authorize, writing nothing", async () => {
+  const cases = [
+    ["feature disabled", { env: { KAI_SPRINT2_ENABLED: "false" } }, approvalInput(), "feature_disabled"],
+    ["not a site admin", { platformSuperuser: false }, approvalInput(), "authorization_denied"],
+    ["pending application", { application: { id: 7, user_id: 601, org_name: "Test Org", status: "pending" } }, approvalInput(), "authorization_denied"],
+    ["declined application", { application: { id: 7, user_id: 601, org_name: "Test Org", status: "declined" } }, approvalInput(), "authorization_denied"],
+    ["unknown application", {}, approvalInput({ applicationId: 8 }), "not_found"],
+    ["another organization's name", { application: { id: 7, user_id: 601, org_name: "Other Org", status: "approved" } }, approvalInput(), "conflict"],
+    ["applicant no longer its admin", { applicantMemberships: [{ orgId: 1, role: "admin", is_active: false }] }, approvalInput(), "authorization_denied"],
+    ["applicant admin elsewhere only", { applicantMemberships: [{ orgId: 2, role: "admin", is_active: true }] }, approvalInput(), "authorization_denied"],
+    ["missing organization id", {}, approvalInput({ gkOrganizationId: null }), "validation_blocker"],
+  ];
+  for (const [label, options, input, code] of cases) {
+    const pool = createFakeEnablementPool();
+    const result = await initializeKaiOrganizationForApprovedApplication(input, buildApprovalDependencies(pool, options));
+    assert.deepEqual([result.ok, result.error?.code], [false, code], label);
+    assert.deepEqual([pool.kaiOrganizations.length, pool.bindings.length, pool.engagements.length], [0, 0, 0], `${label}: nothing written`);
+  }
+});
+
+test("initializeKaiOrganizationForApprovedApplication rolls back the organization and binding when its audit fails", async () => {
+  const pool = createFakeEnablementPool();
+  const dependencies = buildApprovalDependencies(pool);
+  dependencies.createProductionMetadataOnlyAuditForOrganizationKaiEnablement = () => ({
+    prepareMetadataOnlyAudit: () => ({ ok: true, async publish() { throw new Error("audit rejected"); } }),
+  });
+  const result = await initializeKaiOrganizationForApprovedApplication(approvalInput(), dependencies);
+  assert.equal(result.ok, false);
+  assert.deepEqual([pool.kaiOrganizations.length, pool.bindings.length], [0, 0]);
 });
 
 test("getKaiEnablementStatusForOrganization fails closed on an active binding with no corresponding organization row", async () => {

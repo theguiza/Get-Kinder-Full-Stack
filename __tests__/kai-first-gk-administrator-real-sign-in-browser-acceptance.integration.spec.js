@@ -1,9 +1,13 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
-import { createServer } from "node:net";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
+import {
+  assertLoopbackDatabaseUrl,
+  launchChrome,
+  openBrowserContext,
+  signIn as signInThroughLogin,
+  startRealApplication,
+} from "./support/kaiRealApplicationBrowserHarness.js";
 
 /**
  * Repair 2: first GK administrator bootstrap and delegated GK staff
@@ -44,14 +48,6 @@ import { join } from "node:path";
 const RUNNER_DATABASE_URL = process.env.KAI_CLIENT_BROWSER_ACCEPTANCE_DATABASE_URL;
 const CHROME = process.env.KAI_CLIENT_BROWSER_ACCEPTANCE_CHROME;
 const WORKDIR = process.env.KAI_CLIENT_BROWSER_ACCEPTANCE_WORKDIR;
-const REPO_ROOT = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
-
-function assertLoopbackDatabaseUrl(urlString) {
-  const host = new URL(urlString).hostname.toLowerCase();
-  if (!["127.0.0.1", "localhost", "::1"].includes(host)) {
-    throw new Error(`browser acceptance refused a non-loopback database URL host: ${host}`);
-  }
-}
 
 test("first GK administrator acceptance isolation: a non-loopback runner URL is refused", () => {
   assert.throws(() => assertLoopbackDatabaseUrl("postgresql://user@example.com:5432/db"), /refused a non-loopback/);
@@ -73,270 +69,6 @@ if (!RUNNER_DATABASE_URL || !CHROME || !WORKDIR) {
 } else {
   assertLoopbackDatabaseUrl(RUNNER_DATABASE_URL);
   await runAcceptance();
-}
-
-// ---------------------------------------------------------------------------
-// The real application, loopback only
-// ---------------------------------------------------------------------------
-
-async function freeLoopbackPort() {
-  return new Promise((resolve, reject) => {
-    const server = createServer();
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const { port } = server.address();
-      server.close(() => resolve(port));
-    });
-  });
-}
-
-async function startRealApplication() {
-  const runnerUrl = new URL(RUNNER_DATABASE_URL);
-  const appCwd = join(WORKDIR, "real-app-cwd");
-  mkdirSync(appCwd, { recursive: true });
-  assert.equal(existsSync(join(appCwd, ".env")), false, "the application's working directory has no .env");
-  const port = await freeLoopbackPort();
-  const sentinel = "127.0.0.1:9";
-  const env = {
-    PATH: process.env.PATH,
-    HOME: process.env.HOME,
-    NODE_ENV: "development",
-    PORT: String(port),
-    DATABASE_URL: "",
-    DATABASE_URL_LOCAL: "",
-    PGURL_LOCAL: "",
-    RENDER_DATABASE_URL: "",
-    PROD_DATABASE_URL: "",
-    DB_HOST: runnerUrl.hostname,
-    DB_PORT: runnerUrl.port,
-    DB_NAME: runnerUrl.pathname.replace(/^\//, ""),
-    DB_USER: decodeURIComponent(runnerUrl.username),
-    DB_PASSWORD: "",
-    SESSION_SECRET: `first-gk-admin-${Date.now()}-${Math.random()}`,
-    KAI_SPRINT2_ENABLED: "true",
-    NEO4J_URI: `bolt://${sentinel}`,
-    NEO4J_USERNAME: "loopback-sentinel",
-    NEO4J_PASSWORD: "loopback-sentinel",
-    OPENAI_API_KEY: "sk-loopback-sentinel",
-    OPENAI_BASE_URL: `http://${sentinel}/v1`,
-  };
-  const child = spawn(process.execPath, [join(REPO_ROOT, "index.js")], { cwd: appCwd, env, stdio: ["ignore", "pipe", "pipe"] });
-  let log = "";
-  child.stdout.on("data", (chunk) => { log += chunk; });
-  child.stderr.on("data", (chunk) => { log += chunk; });
-  const deadline = Date.now() + 60000;
-  while (!log.includes(`App running on port ${port}`)) {
-    if (child.exitCode !== null) throw new Error(`index.js exited during start-up:\n${log.slice(-4000)}`);
-    if (Date.now() > deadline) throw new Error(`index.js did not start:\n${log.slice(-4000)}`);
-    await new Promise((r) => setTimeout(r, 100));
-  }
-  // The password-reset column set-up is index.js's own start-up write.
-  for (let i = 0; i < 100 && !/Password reset columns ready|Could not initialize password reset columns/.test(log); i += 1) {
-    await new Promise((r) => setTimeout(r, 100));
-  }
-  assert.match(log, /\[pg\] Using local connection/, "index.js uses the runner's loopback cluster, not a URL from any environment file");
-  return {
-    baseUrl: `http://127.0.0.1:${port}`,
-    log: () => log,
-    async stop() {
-      if (child.exitCode !== null) return;
-      child.kill("SIGTERM");
-      for (let i = 0; i < 50 && child.exitCode === null; i += 1) await new Promise((r) => setTimeout(r, 100));
-      if (child.exitCode === null) child.kill("SIGKILL");
-    },
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Minimal Chrome DevTools protocol client, as in the other acceptance specs.
-// ---------------------------------------------------------------------------
-
-async function launchChrome() {
-  const profileDir = join(WORKDIR, "chrome-profile-first-gk-admin");
-  mkdirSync(profileDir, { recursive: true });
-  const child = spawn(CHROME, [
-    "--headless=new",
-    "--remote-debugging-port=0",
-    `--user-data-dir=${profileDir}`,
-    "--no-first-run",
-    "--no-default-browser-check",
-    "--disable-gpu",
-    "--disable-extensions",
-    "--disable-background-networking",
-    // The real pages link CDN stylesheets and fonts; nothing leaves loopback.
-    "--host-resolver-rules=MAP * ~NOTFOUND , EXCLUDE 127.0.0.1",
-    "about:blank",
-  ], { stdio: "ignore" });
-  const portFile = join(profileDir, "DevToolsActivePort");
-  for (let attempt = 0; attempt < 100 && !existsSync(portFile); attempt += 1) await new Promise((r) => setTimeout(r, 100));
-  const [port] = readFileSync(portFile, "utf8").split("\n");
-  const version = await (await fetch(`http://127.0.0.1:${port}/json/version`)).json();
-  const socket = new WebSocket(version.webSocketDebuggerUrl);
-  await new Promise((resolve, reject) => {
-    socket.addEventListener("open", resolve, { once: true });
-    socket.addEventListener("error", reject, { once: true });
-  });
-  let nextId = 1;
-  const pending = new Map();
-  const listeners = new Set();
-  socket.addEventListener("message", (event) => {
-    const message = JSON.parse(event.data);
-    if (message.id && pending.has(message.id)) {
-      const { resolve, reject } = pending.get(message.id);
-      pending.delete(message.id);
-      if (message.error) reject(new Error(`${message.error.message}`));
-      else resolve(message.result);
-      return;
-    }
-    for (const listener of listeners) listener(message);
-  });
-  const send = (method, params = {}, sessionId) => new Promise((resolve, reject) => {
-    const id = nextId++;
-    pending.set(id, { resolve, reject });
-    socket.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
-  });
-  return {
-    send,
-    listeners,
-    async close() {
-      try { await send("Browser.close"); } catch { /* already closing */ }
-      socket.close();
-      child.kill("SIGKILL");
-    },
-  };
-}
-
-// A fresh browser context (its own cookie jar): nothing is shared with any
-// other sign-in, and no cookie is set except by the application itself.
-async function openBrowserContext(browser, baseUrl) {
-  const { browserContextId } = await browser.send("Target.createBrowserContext", { disposeOnDetach: true });
-  const { targetId } = await browser.send("Target.createTarget", { url: "about:blank", browserContextId });
-  const { sessionId } = await browser.send("Target.attachToTarget", { targetId, flatten: true });
-  const requests = [];
-  const byId = new Map();
-  const exceptions = [];
-  const listener = (message) => {
-    if (message.sessionId !== sessionId) return;
-    const { method, params } = message;
-    if (method === "Network.requestWillBeSent" && params.type !== "Document" && params.request.url.includes("/api/")) {
-      const entry = { url: params.request.url, method: params.request.method, status: null, done: false };
-      requests.push(entry);
-      byId.set(params.requestId, entry);
-    } else if (method === "Network.responseReceived" && byId.has(params.requestId)) {
-      byId.get(params.requestId).status = params.response.status;
-    } else if ((method === "Network.loadingFinished" || method === "Network.loadingFailed") && byId.has(params.requestId)) {
-      byId.get(params.requestId).done = true;
-    } else if (method === "Runtime.exceptionThrown") {
-      exceptions.push(params.exceptionDetails?.exception?.description || params.exceptionDetails?.text);
-    }
-  };
-  browser.listeners.add(listener);
-  for (const domain of ["Page", "Network", "Runtime"]) await browser.send(`${domain}.enable`, {}, sessionId);
-
-  const evaluate = async (expression) => {
-    const result = await browser.send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true }, sessionId);
-    if (result.exceptionDetails) throw new Error(`evaluate failed: ${result.exceptionDetails.text} ${expression.slice(0, 120)}`);
-    return result.result.value;
-  };
-  const text = () => evaluate("document.body ? document.body.innerText : ''");
-  const idle = async () => {
-    let quietSince = Date.now();
-    for (let i = 0; i < 400; i += 1) {
-      await new Promise((r) => setTimeout(r, 50));
-      if (requests.some((request) => !request.done)) quietSince = Date.now();
-      else if (Date.now() - quietSince > 500) return;
-    }
-    throw new Error(`network never went idle: ${JSON.stringify(requests.filter((request) => !request.done))}`);
-  };
-  const waitFor = async (predicate, description, { timeout = 15000 } = {}) => {
-    const deadline = Date.now() + timeout;
-    while (Date.now() < deadline) {
-      if (await predicate()) return;
-      await new Promise((r) => setTimeout(r, 100));
-    }
-    throw new Error(`timed out waiting for ${description}\n--- page ---\n${(await text()).slice(0, 4000)}`);
-  };
-  const clickWhere = async (description, finder) => {
-    const clicked = await evaluate(`(() => { const el = (${finder})(); if (!el) return false; el.click(); return true; })()`);
-    if (!clicked) throw new Error(`no visible control: ${description}\n--- page ---\n${(await text()).slice(0, 3000)}`);
-  };
-  const visibleControl = (label) => evaluate(`Boolean([...document.querySelectorAll("[role=button], a, button")]
-    .find((el) => el.offsetParent !== null && !el.disabled && el.innerText.trim() === ${JSON.stringify(label)}))`);
-  const setSelect = async (selectorExpression, value) => {
-    const ok = await evaluate(`(() => {
-      const el = (${selectorExpression})();
-      if (!el) return false;
-      const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set;
-      setter.call(el, ${JSON.stringify(value)});
-      el.dispatchEvent(new Event("change", { bubbles: true }));
-      return el.value === ${JSON.stringify(value)};
-    })()`);
-    assert.ok(ok, `select set to ${value}`);
-  };
-  const setInput = async (id, value) => {
-    assert.ok(await evaluate(`(() => {
-      const el = document.getElementById(${JSON.stringify(id)});
-      if (!el) return false;
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(el, ${JSON.stringify(value)});
-      el.dispatchEvent(new Event("input", { bubbles: true }));
-      return true;
-    })()`), `input ${id}`);
-  };
-  const page = {
-    mark: () => requests.length,
-    requestsSince: (mark) => requests.slice(mark),
-    exceptions,
-    evaluate,
-    text,
-    idle,
-    waitFor,
-    waitForText: (needle, options) => waitFor(async () => (await text()).includes(needle), `text: ${needle}`, options),
-    visibleControl,
-    setSelect,
-    setInput,
-    clickWhere,
-    pathname: () => evaluate("location.pathname"),
-    clickNav: (label) => clickWhere(`nav ${label}`, `() => [...document.querySelectorAll("[role=button], a, button")]
-      .filter((el) => el.offsetParent !== null).find((el) => el.innerText.trim() === ${JSON.stringify(label)})`),
-    clickTab: (label) => clickWhere(`tab ${label}`, `() => [...document.querySelectorAll(".nav-tabs button")]
-      .filter((el) => el.offsetParent !== null).find((el) => el.innerText.trim() === ${JSON.stringify(label)})`),
-    clickButton: (label) => clickWhere(`button ${label}`, `() => [...document.querySelectorAll("button")]
-      .filter((el) => el.offsetParent !== null && !el.disabled).find((el) => el.innerText.trim() === ${JSON.stringify(label)})`),
-    async cookies() {
-      return (await browser.send("Network.getCookies", { urls: [baseUrl] }, sessionId)).cookies.map((cookie) => cookie.name).sort();
-    },
-    // A same-origin request carrying only this context's application cookie.
-    fetchJson: (method, path, body) => evaluate(`(async () => {
-      const response = await fetch(${JSON.stringify(`${baseUrl}${path}`)}, {
-        method: ${JSON.stringify(method)},
-        credentials: "same-origin",
-        redirect: "manual",
-        headers: { "Content-Type": "application/json", Accept: "application/json" },
-        ${body === undefined ? "" : `body: ${JSON.stringify(JSON.stringify(body))},`}
-      });
-      let parsed = null;
-      try { parsed = await response.json(); } catch { parsed = null; }
-      return {
-        status: response.status,
-        errorCode: parsed?.error?.code ?? (typeof parsed?.error === "string" ? parsed.error : null),
-        blockingReason: Array.isArray(parsed?.blockers) ? parsed.blockers[0]?.blocking_reason ?? null : null,
-        data: parsed?.data ?? null,
-        body: parsed,
-      };
-    })()`),
-    // The final document path of a top-level navigation (after redirects).
-    async goto(path) {
-      await browser.send("Page.navigate", { url: `${baseUrl}${path}` }, sessionId);
-      await waitFor(async () => (await evaluate("document.readyState")) === "complete", `load of ${path}`);
-      await idle();
-      return evaluate("location.pathname");
-    },
-    async close() {
-      browser.listeners.delete(listener);
-      await browser.send("Target.closeTarget", { targetId });
-    },
-  };
-  return page;
 }
 
 // ---------------------------------------------------------------------------
@@ -457,42 +189,17 @@ async function runAcceptance() {
   }
 
   // --- application, browser, sign-in ----------------------------------------
-  const app = await startRealApplication();
+  const app = await startRealApplication({ databaseUrl: RUNNER_DATABASE_URL, workdir: WORKDIR, name: "first-gk-admin" });
   const { baseUrl } = app;
-  const browser = await launchChrome();
+  const browser = await launchChrome({ chrome: CHROME, workdir: WORKDIR, profileName: "first-gk-admin" });
   const contexts = [];
   const results = {};
 
   // Real Get Kinder sign-in: the /login form posted by the browser; the
   // application sets the session cookie. Returns the signed-in context.
   async function signIn(legacyId, password = PASSWORD) {
-    const page = await openBrowserContext(browser, baseUrl);
+    const page = await signInThroughLogin(browser, baseUrl, email(legacyId), password);
     contexts.push(page);
-    assert.equal(await page.goto("/login"), "/login");
-    // The login page clears its form shortly after load; fill it afterwards.
-    await new Promise((r) => setTimeout(r, 300));
-    assert.ok(await page.evaluate(`(() => {
-      const form = document.getElementById("login-form");
-      if (!form) return false;
-      const set = (name, value) => {
-        const input = form.querySelector('input[name="' + name + '"]');
-        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(input, value);
-        input.dispatchEvent(new Event("input", { bubbles: true }));
-      };
-      set("email", ${JSON.stringify(email(legacyId))});
-      set("password", ${JSON.stringify(password)});
-      form.querySelector('button[type="submit"]').click();
-      return true;
-    })()`), "the real login form");
-    await page.waitFor(async () => {
-      try {
-        return (await page.evaluate("document.readyState")) === "complete"
-          && ((await page.pathname()) !== "/login" || (await page.text()).includes("Invalid email or password"));
-      } catch {
-        return false; // the document is being replaced by the form post
-      }
-    }, `sign-in of ${legacyId}`);
-    await page.idle();
     return page;
   }
   async function signOut(page) {

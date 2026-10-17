@@ -1,9 +1,12 @@
 import { isKaiSprint2Enabled } from "../config/kaiSprint2Config.js";
 import { buildKaiError } from "../errors/kaiErrors.js";
 import { resolveKaiActorContext } from "../auth/kaiActorContext.js";
+import { hasPlatformSuperuserAuthority } from "../auth/kaiAuthorizationService.js";
 import { GK_ORGANIZATION_ADMIN_ROLE } from "../auth/gkOrganizationBindingAuthority.js";
 import { resolveOrgScopeForUserId } from "../../../services/orgScopeService.js";
 import { listActiveGkOrganizationBindingsForGkOrganizationIds } from "../db/kaiOrganizationBindingQueries.js";
+import { selectOrganizationApplicationById } from "../db/gkOrganizationApplicationQueries.js";
+import { findOrCreateKaiUserForAdministrationTarget } from "../db/kaiAccessAdministrationQueries.js";
 import {
   DEFAULT_INITIAL_ENGAGEMENT_CODE,
   acquireOrganizationEnablementLock,
@@ -101,6 +104,13 @@ function throwEnablementFailure(errorCode) {
  * only SELECTs - never creates or mutates a binding, organization, or
  * engagement row. Used by the organization-admin UI to decide between
  * "Not enabled" / "Enable KAI" and "Enabled" / "Open KAI".
+ *
+ * KAI is enabled once the organization's active binding resolves to a real
+ * kai.organizations row: that is what makes the organization (and the
+ * binding-derived client_admin of its Get Kinder administrators) available.
+ * A Project is not part of readiness - an organization initialized at
+ * approval has none until its administrator creates one - so the initial
+ * engagement is reported when it exists and is null otherwise.
  */
 export async function getKaiEnablementStatusForOrganization(input, dependencies = {}) {
   if (!isKaiSprint2Enabled(dependencies.env || process.env)) {
@@ -133,20 +143,59 @@ export async function getKaiEnablementStatusForOrganization(input, dependencies 
     organizationId: binding.kai_organization_id,
     engagementCode: DEFAULT_INITIAL_ENGAGEMENT_CODE,
   });
-  if (!engagement) {
-    return { ok: true, data: { kai_enabled: false, kai_organization_id: binding.kai_organization_id }, error: null };
-  }
 
   return {
     ok: true,
     data: {
       kai_enabled: true,
       kai_organization_id: binding.kai_organization_id,
-      engagement_id: engagement.engagement_id,
-      engagement_code: engagement.engagement_code,
+      engagement_id: engagement?.engagement_id ?? null,
+      engagement_code: engagement?.engagement_code ?? null,
     },
     error: null,
   };
+}
+
+/**
+ * The organization half of KAI provisioning, inside the caller's
+ * transaction and under its organization-enablement advisory lock: re-read
+ * the active GK<->KAI binding; reuse it when its kai.organizations row exists
+ * (throwing kai_organization_binding_inconsistent, never repairing, when it
+ * does not), otherwise INSERT one kai.organizations row named from the
+ * authoritative public.organizations row and its active binding. Creates no
+ * engagement, membership, role, or identity. Every failure throws so the
+ * caller's transaction rolls back with nothing written.
+ */
+async function ensureKaiOrganizationForGkOrganization(client, { gkOrganizationId, gkOrganization }, dependencies) {
+  const listBindings =
+    dependencies.listActiveGkOrganizationBindingsForGkOrganizationIds ||
+    listActiveGkOrganizationBindingsForGkOrganizationIds;
+  const selectKaiOrganization = dependencies.selectKaiOrganizationRow || selectKaiOrganizationRow;
+  const insertOrganization = dependencies.insertKaiOrganization || insertKaiOrganization;
+  const insertBinding = dependencies.insertGkOrganizationBinding || insertGkOrganizationBinding;
+
+  const existingBindings = await listBindings([gkOrganizationId], client);
+  const existingBinding = existingBindings[0] || null;
+  if (existingBinding) {
+    const kaiOrganizationRow = await selectKaiOrganization(existingBinding.kai_organization_id, client);
+    if (!kaiOrganizationRow) {
+      throwEnablementFailure("kai_organization_binding_inconsistent");
+    }
+    return { kaiOrganizationId: existingBinding.kai_organization_id, bindingCreated: false };
+  }
+
+  const organizationResult = await insertOrganization(
+    { name: gkOrganization.name, legacyPublicOrganizationId: gkOrganizationId },
+    client,
+  );
+  if (!organizationResult.ok) {
+    throwEnablementFailure(organizationResult.error_code);
+  }
+  const bindingResult = await insertBinding({ gkOrganizationId, kaiOrganizationId: organizationResult.organizationId }, client);
+  if (!bindingResult.ok) {
+    throwEnablementFailure(bindingResult.error_code);
+  }
+  return { kaiOrganizationId: organizationResult.organizationId, bindingCreated: true };
 }
 
 /**
@@ -191,12 +240,6 @@ export async function enableKaiForOrganization(input, dependencies = {}) {
 
   const runInTransaction = dependencies.withTransaction || withTransaction;
   const acquireLock = dependencies.acquireOrganizationEnablementLock || acquireOrganizationEnablementLock;
-  const listBindings =
-    dependencies.listActiveGkOrganizationBindingsForGkOrganizationIds ||
-    listActiveGkOrganizationBindingsForGkOrganizationIds;
-  const selectKaiOrganization = dependencies.selectKaiOrganizationRow || selectKaiOrganizationRow;
-  const insertOrganization = dependencies.insertKaiOrganization || insertKaiOrganization;
-  const insertBinding = dependencies.insertGkOrganizationBinding || insertGkOrganizationBinding;
   const selectEngagement = dependencies.selectInitialEngagementForOrganization || selectInitialEngagementForOrganization;
   const insertEngagement = dependencies.insertInitialEngagement || insertInitialEngagement;
   const buildAudit =
@@ -208,34 +251,11 @@ export async function enableKaiForOrganization(input, dependencies = {}) {
     transactionResult = await runInTransaction(async (client) => {
       await acquireLock(gkOrganizationId, client);
 
-      const existingBindings = await listBindings([gkOrganizationId], client);
-      const existingBinding = existingBindings[0] || null;
-
-      let kaiOrganizationId;
-      let bindingCreated = false;
-
-      if (existingBinding) {
-        const kaiOrganizationRow = await selectKaiOrganization(existingBinding.kai_organization_id, client);
-        if (!kaiOrganizationRow) {
-          throwEnablementFailure("kai_organization_binding_inconsistent");
-        }
-        kaiOrganizationId = existingBinding.kai_organization_id;
-      } else {
-        const organizationResult = await insertOrganization(
-          { name: gkOrganization.name, legacyPublicOrganizationId: gkOrganizationId },
-          client,
-        );
-        if (!organizationResult.ok) {
-          throwEnablementFailure(organizationResult.error_code);
-        }
-        kaiOrganizationId = organizationResult.organizationId;
-
-        const bindingResult = await insertBinding({ gkOrganizationId, kaiOrganizationId }, client);
-        if (!bindingResult.ok) {
-          throwEnablementFailure(bindingResult.error_code);
-        }
-        bindingCreated = true;
-      }
+      const { kaiOrganizationId, bindingCreated } = await ensureKaiOrganizationForGkOrganization(
+        client,
+        { gkOrganizationId, gkOrganization },
+        dependencies,
+      );
 
       let engagement = await selectEngagement(
         { organizationId: kaiOrganizationId, engagementCode: DEFAULT_INITIAL_ENGAGEMENT_CODE },
@@ -286,6 +306,147 @@ export async function enableKaiForOrganization(input, dependencies = {}) {
       kai_organization_id: transactionResult.kaiOrganizationId,
       engagement_id: transactionResult.engagement.engagement_id,
       engagement_code: transactionResult.engagement.engagement_code,
+    },
+    error: null,
+  };
+}
+
+// The approval route's own organization-name rule (routes/orgApplyApi.js).
+function normalizeOrganizationName(value) {
+  return String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+function isPositiveInteger(value) {
+  return Number.isInteger(value) && value > 0;
+}
+
+/**
+ * Approval-triggered KAI organization readiness. Called by the Get Kinder
+ * organization-application approval (routes/orgApplyApi.js) after that
+ * approval has committed, so an approved organization is available in KAI to
+ * its applicant without a manual setup step.
+ *
+ * Authority is the approval itself, re-read here rather than trusted from the
+ * caller:
+ *  - the caller must hold Get Kinder site-admin (platform-superuser)
+ *    authority - the approver, who is the audit actor and never the
+ *    entitlement recipient;
+ *  - the application must be approved, and it names the applicant;
+ *  - the Get Kinder organization must be the one the approval resolves for
+ *    that application (same normalized name), and the applicant must
+ *    currently be its active Get Kinder organization admin. An applicant
+ *    whose admin membership has since been removed gets nothing, so this is
+ *    never a privilege-restoration path.
+ *
+ * It then ensures, in one transaction under the same advisory lock as manual
+ * KAI setup, the organization's kai.organizations row and active binding
+ * (reused when present). It writes no membership, role, or Project: the
+ * applicant's client_admin is the existing binding-derived authority of a
+ * Get Kinder organization admin, recomputed on every request, so removing
+ * that admin membership ends it. The applicant's kai.users mapping is the
+ * same JIT mapping their first sign-in would create, made here only so the
+ * audit names the recipient. One metadata-only audit records the outcome
+ * (created or reused) with the approver as actor and the applicant as target.
+ */
+export async function initializeKaiOrganizationForApprovedApplication(input, dependencies = {}) {
+  if (!isKaiSprint2Enabled(dependencies.env || process.env)) {
+    return buildKaiError("feature_disabled");
+  }
+  if (!isPlainObject(input) || !isPlainObject(input.req)) {
+    return buildKaiError("validation_blocker");
+  }
+  const applicationId = Number(input.applicationId);
+  const gkOrganizationId = normalizeGkOrganizationId(input.gkOrganizationId);
+  if (!isPositiveInteger(applicationId) || !gkOrganizationId) {
+    return buildKaiError("validation_blocker");
+  }
+
+  const resolveActor = dependencies.resolveKaiActorContext || resolveKaiActorContext;
+  const actorResult = await resolveActor(input.req, dependencies);
+  if (!actorResult.ok) return actorError(actorResult);
+  const { actorContext } = actorResult;
+  if (!hasPlatformSuperuserAuthority(actorContext)) {
+    return buildKaiError("authorization_denied");
+  }
+
+  const selectApplication = dependencies.selectOrganizationApplicationById || selectOrganizationApplicationById;
+  const application = await selectApplication(applicationId);
+  if (!application) return buildKaiError("not_found");
+  if (application.status !== "approved") return buildKaiError("authorization_denied");
+  const applicantLegacyUserId = Number(application.user_id);
+  if (!isPositiveInteger(applicantLegacyUserId)) return buildKaiError("validation_blocker");
+
+  const selectGkOrganization = dependencies.selectGkOrganizationRow || selectGkOrganizationRow;
+  const gkOrganization = await selectGkOrganization(gkOrganizationId);
+  if (!gkOrganization) return buildKaiError("not_found");
+  if (normalizeOrganizationName(gkOrganization.name) !== normalizeOrganizationName(application.org_name)) {
+    return buildKaiError("conflict");
+  }
+
+  const resolveScope = dependencies.resolveOrgScopeForUserId || resolveOrgScopeForUserId;
+  const scope = await resolveScope(applicantLegacyUserId, { includeOrgMembersForOrgRep: false });
+  const applicantIsOrganizationAdmin = (Array.isArray(scope?.memberships) ? scope.memberships : []).some(
+    (membership) =>
+      Number(membership?.orgId) === gkOrganizationId &&
+      membership?.role === GK_ORGANIZATION_ADMIN_ROLE &&
+      membership?.is_active !== false,
+  );
+  if (!applicantIsOrganizationAdmin) {
+    return buildKaiError("authorization_denied");
+  }
+
+  let applicantKaiUser = null;
+  try {
+    const mapApplicant = dependencies.findOrCreateKaiUserForAdministrationTarget || findOrCreateKaiUserForAdministrationTarget;
+    applicantKaiUser = await mapApplicant({ legacyPublicUserdataId: applicantLegacyUserId });
+  } catch (error) {
+    if (!error?.kaiUserProvisioningFailed) throw error;
+    applicantKaiUser = null;
+  }
+
+  const runInTransaction = dependencies.withTransaction || withTransaction;
+  const acquireLock = dependencies.acquireOrganizationEnablementLock || acquireOrganizationEnablementLock;
+  const buildAudit =
+    dependencies.createProductionMetadataOnlyAuditForOrganizationKaiEnablement ||
+    createProductionMetadataOnlyAuditForOrganizationKaiEnablement;
+
+  let transactionResult;
+  try {
+    transactionResult = await runInTransaction(async (client) => {
+      await acquireLock(gkOrganizationId, client);
+      const { kaiOrganizationId, bindingCreated } = await ensureKaiOrganizationForGkOrganization(
+        client,
+        { gkOrganizationId, gkOrganization },
+        dependencies,
+      );
+      const audit = buildAudit({ kaiOrganizationId, actorContext, now: new Date().toISOString() });
+      const prepared = audit.prepareMetadataOnlyAudit({
+        payload: {
+          attempted_operation: bindingCreated
+            ? "initialize_kai_organization_for_approved_application"
+            : "reuse_kai_organization_for_approved_application",
+          target_user_id: applicantKaiUser?.user_id || null,
+          role_name: "client_admin",
+          authority_source: "approved_organization_application",
+        },
+        db: client,
+      });
+      if (!prepared.ok) {
+        throwEnablementFailure("audit_preparation_failed");
+      }
+      await prepared.publish();
+      return { kaiOrganizationId, bindingCreated };
+    });
+  } catch (error) {
+    return buildKaiError(mapEnablementFailureErrorCode(error?.enablementErrorCode));
+  }
+
+  return {
+    ok: true,
+    data: {
+      kai_enabled: true,
+      kai_organization_id: transactionResult.kaiOrganizationId,
+      outcome: transactionResult.bindingCreated ? "created" : "reused",
     },
     error: null,
   };

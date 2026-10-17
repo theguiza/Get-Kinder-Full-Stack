@@ -3,6 +3,8 @@ import pool from "../Backend/db/pg.js";
 import { sendNudgeEmail } from "../kindnessEmailer.js";
 import { ensureAdmin } from "../Backend/middleware/ensureAdmin.js";
 import { hasUserOrgMembershipTable, resolveOrgScope } from "../services/orgScopeService.js";
+import { isKaiSprint2Enabled } from "../Backend/kai/config/kaiSprint2Config.js";
+import { initializeKaiOrganizationForApprovedApplication } from "../Backend/kai/services/kaiOrganizationEnablementService.js";
 
 const orgApplyRouter = express.Router();
 
@@ -44,6 +46,27 @@ function appBaseUrl(req) {
 
 function normalizeOrganizationName(value) {
   return String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+/**
+ * After an approval commits: make the approved organization available in KAI
+ * to its applicant (KAI organization + binding; the applicant's client_admin
+ * is derived from the admin membership the approval just granted). Runs in
+ * its own transaction, so a KAI failure never undoes or misreports the
+ * committed approval; it is reported as setup_incomplete and the applicant
+ * still has the existing KAI setup action. Without KAI Sprint 2 nothing is
+ * written. Only error codes are logged.
+ */
+async function initializeKaiForApprovedApplication(req, applicationId, gkOrganizationId) {
+  if (!isKaiSprint2Enabled(process.env)) return { status: "not_enabled" };
+  try {
+    const result = await initializeKaiOrganizationForApprovedApplication({ req, applicationId, gkOrganizationId });
+    if (result?.ok) return { status: "ready", outcome: result.data.outcome };
+    console.error("[org-applications] KAI organization initialization incomplete", { code: result?.error?.code || null });
+  } catch (error) {
+    console.error("[org-applications] KAI organization initialization failed", { code: error?.code || null });
+  }
+  return { status: "setup_incomplete" };
 }
 
 orgApplyRouter.get("/org-apply", ensureAuthenticated, async (req, res) => {
@@ -266,6 +289,8 @@ orgApplyRouter.post("/admin/org-applications/:id/approve", ensureAuthenticated, 
 
     await client.query("COMMIT");
 
+    const kaiOrganization = await initializeKaiForApprovedApplication(req, applicationId, approvedOrgId);
+
     const baseUrl = appBaseUrl(req);
     await sendNudgeEmail({
       to: application.email,
@@ -273,7 +298,7 @@ orgApplyRouter.post("/admin/org-applications/:id/approve", ensureAuthenticated, 
       text: `Hi ${application.firstname || "there"}, your organization ${application.org_name} has been approved.\nPlease sign in at ${baseUrl}/home for the current GetKinder experience.\nWelcome aboard! — The GetKinder Team`,
     });
 
-    return res.json({ success: true });
+    return res.json({ success: true, kai_organization: kaiOrganization });
   } catch (err) {
     try { await client.query("ROLLBACK"); } catch (_) {}
     console.error("POST /admin/org-applications/:id/approve error:", err);

@@ -1260,6 +1260,11 @@ export function createProductionMetadataOnlyAuditForOrganizationKaiEnablement({
         operation: typeof payload.attempted_operation === "string" ? payload.attempted_operation : "enable_kai_for_organization",
         operation_type: typeof payload.attempted_operation === "string" ? payload.attempted_operation : "enable_kai_for_organization",
         validator_key: typeof payload.validator_key === "string" ? payload.validator_key : null,
+        // Approval-triggered initialization: the applicant who receives the
+        // organization's administration (the actor is the approver).
+        target_user_id: typeof payload.target_user_id === "string" ? payload.target_user_id : null,
+        role_name: typeof payload.role_name === "string" ? payload.role_name : null,
+        authority_source: typeof payload.authority_source === "string" ? payload.authority_source : null,
         actor_type: actorContext?.actorType || "human",
         actor_user_id: actorContext?.actorUserId || null,
         request_id: actorContext?.requestId || null,

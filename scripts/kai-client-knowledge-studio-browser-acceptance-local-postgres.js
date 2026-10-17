@@ -40,7 +40,10 @@ import { Client } from "pg";
  * configuration, with revocation and isolation, and
  * __tests__/kai-first-gk-administrator-real-sign-in-browser-acceptance.integration.spec.js
  * runs the first GK administrator bootstrap and delegated staff onboarding
- * through the real index.js application and its real sign-in and sessions.
+ * through the real index.js application and its real sign-in and sessions, and
+ * __tests__/kai-approval-triggered-organization-administrator-browser-acceptance.integration.spec.js
+ * runs organization application -> site-admin approval -> the applicant as
+ * their organization's KAI administrator, the same way.
  *
  * - An ephemeral, loopback-only PostgreSQL cluster owned by this runner,
  *   with the union of the schemas the client product reads, applied in the
@@ -56,8 +59,9 @@ import { Client } from "pg";
  * The only simulated layer is the Get Kinder session login: the harness app
  * sets req.user from a harness cookie, as the route tests set req.user. Every
  * KAI actor, membership, and authorization decision is the real one. The
- * first GK administrator spec is the exception: it runs index.js itself and
- * signs in through the real /login.
+ * first GK administrator and approval-triggered organization administrator
+ * specs are the exception: they run index.js itself and sign in through the
+ * real /login.
  */
 
 const repoRoot = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
@@ -94,6 +98,7 @@ const ACCEPTANCE_SPECS = Object.freeze([
   "__tests__/kai-reviewer-authorization-edge-cases-browser-acceptance.integration.spec.js",
   "__tests__/kai-access-approval-to-action-campaign-browser-acceptance.integration.spec.js",
   "__tests__/kai-first-gk-administrator-real-sign-in-browser-acceptance.integration.spec.js",
+  "__tests__/kai-approval-triggered-organization-administrator-browser-acceptance.integration.spec.js",
 ]);
 const acceptanceSpec = process.argv[2] || ACCEPTANCE_SPECS[0];
 if (!ACCEPTANCE_SPECS.includes(acceptanceSpec)) {
