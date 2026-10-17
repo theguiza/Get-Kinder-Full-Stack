@@ -40126,3 +40126,132 @@ No push, deployment, production/shared database, schema, flag, credential,
 tenant, production role, review decision, or `00_KAI_CURRENT_STATE.md`
 change. This is the single package-end evidence update in the living
 ExecPlan.
+
+### Approval-triggered first organization administrator (2026-10-17)
+
+**Owner authorization (USER_CONFIRMED):** the owner's "Approval-Triggered First
+Organization Administrator" prompt authorizes local implementation and
+synthetic proof that a site-admin approval of an organization application
+makes the applicant their organization's KAI administrator without manual
+setup or an invented Project. This is the client organization-administrator
+workflow, not GK staff administration. No push, deployment, production
+mutation, migration, environment, `ADMIN_EMAILS`, approval-policy or GK
+staff change.
+
+**Start (TOOL_VERIFIED):** `main` at `6a25567`, clean.
+
+**Gap (TOOL_VERIFIED):** approval (`routes/orgApplyApi.js`
+`POST /admin/org-applications/:id/approve`, `ensureAuthenticated, ensureAdmin`)
+creates or reuses `public.organizations`, sets `userdata.org_rep/org_id`, and
+grants a `public.user_org_memberships` `admin` row. KAI administration is
+the binding-derived `client_admin` of a Get Kinder organization admin
+(`gkOrganizationBindingAuthority.js`), which needs an active
+`kai.gk_organization_bindings` row. Only the applicant's manual "Complete KAI
+setup" (`enableKaiForOrganization`) created the KAI organization and binding,
+together with an `initial-pilot-assessment` Project, and
+`getKaiEnablementStatusForOrganization` reported KAI unavailable until that
+Project existed. Pre-change run of the new acceptance: the approval response
+had no KAI result and no KAI organization or binding existed.
+
+**Change:**
+- `initializeKaiOrganizationForApprovedApplication` (enablement service),
+  called by the approval route after its COMMIT and only when
+  `KAI_SPRINT2_ENABLED`. It re-reads the authority:
+  - the caller must have site-admin (platform-superuser) authority;
+  - the application must be `approved` (new `selectOrganizationApplicationById`);
+  - the Get Kinder organization must match the application by the approval's
+    own normalized-name rule;
+  - the applicant must currently be that organization's active admin
+    (`resolveOrgScopeForUserId`).
+  It then ensures the KAI organization and active binding under the
+  manual-setup advisory lock, reusing them when present. It writes no
+  membership, role or Project. The applicant gets the same JIT `kai.users`
+  mapping sign-in creates, used only to name the recipient in the audit
+  (`initialize_`/`reuse_kai_organization_for_approved_application`,
+  approver as actor, applicant as `target_user_id`, `role_name client_admin`,
+  `authority_source approved_organization_application`). The enablement
+  audit composition now passes these allowlisted keys through.
+- Organization-and-binding step extracted from `enableKaiForOrganization`
+  (`ensureKaiOrganizationForGkOrganization`); manual setup is unchanged.
+- KAI counts as enabled once the binding resolves to a `kai.organizations`
+  row; `engagement_id`/`engagement_code` are null without the initial Project.
+- The approval response adds `kai_organization`: `ready` (created or reused),
+  `setup_incomplete` (KAI failure; the approval is committed and the
+  notification unchanged), or `not_enabled`.
+
+**Acceptance (TOOL_VERIFIED, 14/0): real `index.js`, real `/login`, real
+`/org-apply` form, real `/admin/org-applications` page, real Chrome, loopback
+SMTP sink, synthetic data.**
+- Journey:
+  - the applicant applies;
+  - non-admins cannot approve;
+  - the site admin approves;
+  - KAI organization `active` + binding, zero Projects, no stored membership,
+    no global role; audit approver -> applicant; email captured;
+  - the applicant signs in alone: `KAI_AVAILABLE`, organization listed,
+    Team & Access, no setup prompt, no platform/GK/other-organization
+    authority;
+  - a joiner requests membership; the applicant approves them in Team &
+    Access and promotes them to `client_reviewer` (audited as the applicant);
+  - the applicant creates the first Project (201);
+  - the member signs in to that organization as a reviewer.
+- Negatives (nothing written):
+  - the applicant is refused `/admin`, another organization, GK roles, staff
+    onboarding, global roles (self and others), and another organization's
+    KAI setup;
+  - pending and declined applicants get nothing;
+  - a decline writes nothing to KAI.
+- Existing data:
+  - the existing bound organization's administrator, member and Project are
+    unchanged;
+  - re-approval is 400 with no writes;
+  - manual setup after approval-time initialization reuses the organization
+    and binding and grants no global role;
+  - 3 concurrent initializations -> `created, reused, reused`, one
+    organization and binding;
+  - an account that had never signed in is mapped by the initialization and
+    administers on its first sign-in.
+- Failure: an injected `kai.organizations` insert failure ->
+  `setup_incomplete`, approval committed, nothing partial, email still sent;
+  the applicant's existing "Complete KAI setup" recovers.
+- Feature gate: a KAI-disabled instance approves (legacy) with zero KAI
+  writes; that organization is later initialized and its applicant
+  administers it.
+- Revocation: once the applicant is no longer the organization's admin, the
+  next request, a new sign-in, a repeated initialization
+  (`authorization_denied`) and KAI setup (403) all leave them without it;
+  added members keep their roles.
+
+**Pre-existing findings, not changed (owner decisions):**
+1. Name-based takeover. Approval reuses an existing `public.organizations`
+   row by normalized name and makes the applicant its admin. For an
+   already-bound organization that alone gives binding-derived `client_admin`
+   of the existing KAI organization, with Team & Access (observed:
+   `gkAdminOfExisting true`, `teamAccess true`). Initialization creates
+   nothing there and audits `reuse_...`. Closing this needs an approval-policy
+   change.
+2. Two sources of organization admin. Get Kinder admin comes from an active
+   `user_org_memberships` admin row or the legacy `userdata.org_id` fallback
+   (`orgScopeService.loadMembershipsForUser`), which approval also sets.
+   Deactivating only the membership row leaves the person an admin (observed).
+3. No removal route. No application route removes a Get Kinder organization
+   admin. The revocation test removes the admin out of band; a derived
+   administrator cannot be changed in Team & Access.
+4. Manual-setup Project. Recovery via "Complete KAI setup" (and manual setup
+   generally) still creates its `initial-pilot-assessment` Project.
+5. Production defaults. Production `kai.organizations.status` default and
+   approval-time behavior are NOT_CONFIRMED.
+
+**Verification (TOOL_VERIFIED; sentinel `DATABASE_URL`; runner-owned
+loopback PostgreSQL):** new acceptance 14/0 (pre-change: 2/12); enablement
+unit 25/0 (+4); onboarding + enablement unit 47/0; enablement PostgreSQL 9/0;
+onboarding-status PostgreSQL 6/0; first-GK-admin real sign-in 12/0 (shared
+harness); Team & Access browser 7/0; API contract 71/0; `npm test`
+5559/0/108; `git diff --check` clean; complete diff inspected. No frontend
+change, so no build. Commit `1666e42`.
+
+**Status:** APPROVAL_TRIGGERED_ORGANIZATION_ADMINISTRATOR_COMPLETE_LOCAL_SYNTHETIC.
+No push, deployment, production/shared database, migration/schema, flag,
+`ADMIN_EMAILS`, credential, real email, production role or
+`00_KAI_CURRENT_STATE.md` change. This is the single package-end evidence
+update in the living ExecPlan.
