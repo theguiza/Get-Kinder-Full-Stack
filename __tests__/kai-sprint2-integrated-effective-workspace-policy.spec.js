@@ -19,8 +19,9 @@ const actor = (role, global = [], extra = {}) => ({
 // service authority, project mutation, direct P2-03 claim proposal, and the
 // claim/evidence library reads. Each policy remains independent. Owner
 // decision 2026-10-18: an active organization client_admin may propose a
-// claim and read the organization's claim/evidence libraries; P2-02 coverage,
-// human review, and P1-08 promotion are unchanged.
+// claim and read the organization's claim/evidence libraries; P2-02 coverage
+// and human review are unchanged, and P1-08 promotion is admitted only for the
+// binding-derived administrator (owner decision 2026-10-18, second ruling).
 const cases = [
   ["global reviewer + client admin", actor("client_admin", ["gk_reviewer"]), [true, true, false, false, true, true, true]],
   ["global operator + client admin", actor("client_admin", ["gk_operator"]), [true, false, false, false, true, true, true]],
@@ -28,7 +29,9 @@ const cases = [
   ["org-only reviewer", actor("gk_reviewer"), [true, true, true, true, false, true, true]],
   ["global reviewer + contributor", actor("client_contributor", ["gk_reviewer"]), [true, true, false, false, false, false, true]],
   ["client admin", actor("client_admin"), [false, false, false, false, true, true, true]],
-  ["bound client admin", actor("client_admin", [], { organizationMemberships: [{ organization_id: ORG, role_name: "client_admin", membership_status: "active", source: "gk_organization_binding", gk_organization_id: 42 }] }), [false, false, false, false, true, true, true]],
+  // Owner decision 2026-10-18: the binding-derived administrator gains P1-08 only.
+  ["bound client admin", actor("client_admin", [], { organizationMemberships: [{ organization_id: ORG, role_name: "client_admin", membership_status: "active", source: "gk_organization_binding", gk_organization_id: 42 }] }), [false, false, false, true, true, true, true]],
+  ["bound client admin, inactive KAI account", actor("client_admin", [], { kaiUserStatus: "suspended", organizationMemberships: [{ organization_id: ORG, role_name: "client_admin", membership_status: "active", source: "gk_organization_binding", gk_organization_id: 42 }] }), [false, false, false, false, true, true, true]],
   ["client reviewer", actor("client_reviewer"), [false, false, false, false, false, false, false]],
   ["client contributor", actor("client_contributor"), [false, false, false, false, false, false, false]],
   ["platform exception (full actor only)", actor("client_contributor", [], { platformSuperuser: true, platformSuperuserAuthority: "get_kinder_site_admin" }), [true, true, true, true, true, true, true]],

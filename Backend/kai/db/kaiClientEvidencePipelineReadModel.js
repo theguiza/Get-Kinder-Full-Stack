@@ -14,8 +14,15 @@ import pool from "./kaiDb.js";
  *
  * Only statuses, booleans, counts, a safe parser error code, and claim ids
  * (used by the service solely to intersect with the governed eligible-claim
- * read) are selected. No file content, profile/dictionary/sensitivity values,
- * evidence or claim statements, reviewer identities, notes, or queue metadata.
+ * read) are selected. `sensitivity_permission_predicate` is the server-side
+ * result of the unchanged P1-07/P1-08 fail-closed permission predicate over
+ * the sensitivity profile row, and `source_candidate_actionable_count` counts
+ * candidates a P1-08 decision could act on now (the repository's own
+ * completeness predicate: needs_gk_review with an open review item and no
+ * decision, or needs_more_information awaiting the client); the service uses
+ * them only to choose the file's next action and never returns them. No file
+ * content, profile/dictionary/sensitivity values, evidence or claim
+ * statements, reviewer identities, notes, or queue metadata.
  */
 export async function getClientEvidencePipelineEngagement(organizationId, engagementId, db = pool) {
   const { rows } = await db.query(
@@ -50,11 +57,18 @@ export async function listClientEvidencePipelineFiles(organizationId, engagement
             (r.parser_status = 'completed' AND p.file_profile_id IS NOT NULL) AS file_profile_complete,
             (d.data_dictionary_id IS NOT NULL) AS data_dictionary_complete,
             (s.intake_sensitivity_profile_id IS NOT NULL) AS sensitivity_profile_complete,
+            (s.human_review_required = true
+              AND s.public_use_allowed = false
+              AND s.funder_use_allowed = false
+              AND s.llm_processing_allowed = false
+              AND s.product_learning_allowed = false
+              AND s.retention_posture = 'restricted_pending_review') AS sensitivity_permission_predicate,
             sd.decision_outcome AS sensitivity_decision_outcome,
             COALESCE(c.candidate_count, 0)::int AS source_candidate_count,
             COALESCE(c.needs_review_count, 0)::int AS source_candidate_needs_review_count,
             COALESCE(c.promoted_count, 0)::int AS source_candidate_promoted_count,
             COALESCE(c.rejected_count, 0)::int AS source_candidate_rejected_count,
+            COALESCE(c.actionable_count, 0)::int AS source_candidate_actionable_count,
             COALESCE(sv.source_version_count, 0)::int AS source_version_count,
             COALESCE(e.evidence_count, 0)::int AS evidence_item_count,
             COALESCE(e.evidence_needs_review_count, 0)::int AS evidence_needs_review_count,
@@ -103,8 +117,23 @@ export async function listClientEvidencePipelineFiles(organizationId, engagement
          SELECT count(*) AS candidate_count,
                 count(*) FILTER (WHERE ic.candidate_status = 'needs_gk_review') AS needs_review_count,
                 count(*) FILTER (WHERE ic.candidate_status = 'promoted') AS promoted_count,
-                count(*) FILTER (WHERE ic.candidate_status = 'rejected') AS rejected_count
+                count(*) FILTER (WHERE ic.candidate_status = 'rejected') AS rejected_count,
+                count(*) FILTER (
+                  WHERE ic.candidate_status = 'needs_gk_review'
+                    AND (
+                      (pd.decision_status IS NULL AND rq.queue_status = 'open')
+                      OR (pd.decision_status = 'needs_more_information' AND rq.queue_status = 'waiting_on_client')
+                    )
+                ) AS actionable_count
            FROM kai.intake_source_candidates ic
+           LEFT JOIN kai.intake_promotion_decisions pd
+             ON pd.organization_id = ic.organization_id
+            AND pd.intake_source_candidate_id = ic.intake_source_candidate_id
+           LEFT JOIN kai.review_queue_items rq
+             ON rq.organization_id = ic.organization_id
+            AND rq.queue_type = 'source_candidate_review'
+            AND rq.target_object_type = 'intake_source_candidate'
+            AND rq.target_object_id = ic.intake_source_candidate_id
           WHERE ic.organization_id = s.organization_id
             AND ic.intake_file_id = files.intake_file_id
             AND ic.intake_sensitivity_profile_id = s.intake_sensitivity_profile_id

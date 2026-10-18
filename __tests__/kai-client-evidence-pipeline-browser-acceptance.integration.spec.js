@@ -676,12 +676,14 @@ async function runBrowserAcceptance() {
     await test("governed progression: Alpha's reviewed sensitivity decision, then evidence extraction, each move the client-visible stage", async () => {
       await recordReviewedSensitivityDecision();
       await page.selectProject(PROJECT.alpha);
-      await page.waitForText("The source from 1 file has been promoted. Get Kinder has not yet created evidence from it.");
+      // A client_admin holds P2-01 extraction itself (owner decision
+      // 2026-10-18), so the promoted source is its own next step.
+      await page.waitForText("The source from 1 file has been promoted. Extract evidence from it in Data Sources.");
       await extractEvidence();
       await page.clickTab("Files");
       await page.clickTab("Evidence");
       await page.waitForText("Evidence has been created from 1 file and is waiting for Get Kinder evidence review.");
-      assert.ok(!(await page.text()).includes("Get Kinder has not yet created evidence"));
+      assert.ok(!(await page.text()).includes("Extract evidence from it in Data Sources"));
     });
 
     let eligibleStatement = "";

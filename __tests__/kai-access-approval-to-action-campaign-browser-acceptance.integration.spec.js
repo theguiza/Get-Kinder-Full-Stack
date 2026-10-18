@@ -1195,16 +1195,17 @@ async function runBrowserAcceptance() {
       results.J4_1 = "PASS: client Studio panel -> review-work 201 -> decision 200 (client_admin) -> P1-07 candidate created by the bound admin";
     });
 
-    await test("J4-2: the bound administrator cannot exercise GK source-candidate review or promotion, by direct route, writing nothing", async () => {
+    await test("J4-2: the bound administrator may decide its organization's source candidate (owner decision 2026-10-18) but not list the GK source review queue; reads write nothing", async () => {
       const candidate = await candidateFor(profiles.bound);
       const before = await allKaiCounts();
       const queue = await boundAdminPage.fetchJson("GET", sourceQueuePath());
       const detail = await boundAdminPage.fetchJson("GET", candidatePath(candidate.intake_source_candidate_id));
-      const promote = await boundAdminPage.fetchJson("POST", candidateDecisionPath(candidate.intake_source_candidate_id), PROMOTE_BODY);
-      await assertNothingWritten(before, "bound administrator source promotion");
-      results.J4_2 = { queue: queue.status, detail: detail.status, promote: [promote.status, promote.errorCode, promote.blockingReason] };
-      console.log(`[campaign] J4-2 bound admin GK negatives: ${JSON.stringify(results.J4_2)}`);
-      assert.deepEqual([queue.status, detail.status, promote.status], [403, 403, 403]);
+      await assertNothingWritten(before, "bound administrator source review reads");
+      results.J4_2 = { queue: queue.status, detail: [detail.status, detail.data?.decision_controls_enabled] };
+      console.log(`[campaign] J4-2 bound admin source review: ${JSON.stringify(results.J4_2)}`);
+      // The promotion itself is proven by kai-client-admin-source-promotion-browser-acceptance;
+      // it is not made here so this candidate stays pending for J5-5.
+      assert.deepEqual([queue.status, detail.status, detail.data.decision_controls_enabled], [403, 200, true]);
     });
 
     await test("J4-3: a stored-only client_admin (no binding) has no sensitivity authority, writing nothing", async () => {
@@ -1271,32 +1272,18 @@ async function runBrowserAcceptance() {
       console.log(`[campaign] J5-3 gk_operator source review in the Studio: ${JSON.stringify(results.J5_3)}`);
     });
 
-    await test("J5-4: a superuser with global gk_admin and only a derived client_admin membership can read source review but is offered no P1-08 decision anywhere, and a direct request is refused as authorization_denied / role_not_allowed, writing nothing", async () => {
+    await test("J5-4: a superuser with global gk_admin and only a derived client_admin membership: the global role adds no P1-08 authority, and the binding-derived administrator half admits the decision (owner decision 2026-10-18); reads write nothing", async () => {
       const candidate = await candidateFor(profiles.mixed);
       assert.deepEqual([candidate.candidate_status, candidate.queue_status], ["needs_gk_review", "open"], "a pending candidate");
       const before = await allKaiCounts();
       const studio = await openSourceReviewInStudio(superGkPage, candidate.intake_source_candidate_id);
-      const studioText = await superGkPage.text();
-      const { controlsOffered, requests } = await promoteThroughCockpit(superGkPage, candidate.intake_source_candidate_id);
-      const posts = writes(requests);
       const detail = await superGkPage.fetchJson("GET", candidatePath(candidate.intake_source_candidate_id));
       await assertNothingWritten(before, "superuser source review reads");
-      const direct = await superGkPage.fetchJson("POST", candidateDecisionPath(candidate.intake_source_candidate_id), PROMOTE_BODY);
-      await assertNothingWritten(before, "refused superuser promotion");
-      results.J5_4 = {
-        studioControlsOffered: studio.controlsOffered,
-        cockpitControlsOffered: controlsOffered,
-        posts,
-        detail: [detail.status, detail.data?.decision_controls_enabled],
-        direct: [direct.status, direct.errorCode, direct.blockingReason],
-      };
+      results.J5_4 = { studioControlsOffered: studio.controlsOffered, detail: [detail.status, detail.data?.decision_controls_enabled] };
       console.log(`[campaign] J5-4 superuser (global gk_admin, derived client_admin): ${JSON.stringify(results.J5_4)}`);
-      assert.equal(studio.controlsOffered, false, "no Studio decision form for an actor P1-08 refuses");
-      assert.ok(studioText.includes("Source decisions for this candidate are not available to your account."));
-      assert.equal(controlsOffered, false, "no cockpit decision form for an actor P1-08 refuses");
-      assert.deepEqual(posts, []);
-      assert.deepEqual([detail.status, detail.data.decision_controls_enabled], [200, false]);
-      assert.deepEqual([direct.status, direct.errorCode, direct.blockingReason], [403, "authorization_denied", "role_not_allowed"]);
+      assert.equal(studio.controlsOffered, true, "the decision form follows P1-08's own answer");
+      assert.deepEqual([detail.status, detail.data.decision_controls_enabled], [200, true]);
+      // No decision is made here: the candidate stays pending for J5-5.
     });
 
     const superGkStoredPage = await session(USERS.superGkStored);

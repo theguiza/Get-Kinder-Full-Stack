@@ -481,7 +481,7 @@ test("assembled journey, client_admin: every read the client UI issues is admitt
   // organization administrator may make the sensitivity/allowed-use decision
   // for that KAI organization - nothing else from the Review Cockpit.
   const sensitivity = await getReviewCockpitCapabilities({ organizationId: ORG, actorContext }, { env: ENV });
-  assert.deepEqual(sensitivity, { ok: true, data: { can_manage_sensitivity_review: true, can_review_source_candidates: false } }, "200, never a 403 probe");
+  assert.deepEqual(sensitivity, { ok: true, data: { can_manage_sensitivity_review: true, can_review_source_candidates: false, can_promote_source_candidates: true } }, "200, never a 403 probe");
 
   // Knowledge Studio -> Files / Data Sources (intake reads).
   const batches = await listIntakeBatchesForOrganization(
@@ -504,7 +504,8 @@ test("bound organization administrator: the owner-approved sensitivity-review ex
   const capability = (actorContext, organizationId = ORG) => getReviewCockpitCapabilities({ organizationId, actorContext }, { env: ENV });
 
   // Positive: the exact bound organization, and the decision is attributed client_admin.
-  assert.deepEqual((await capability(bound)).data, { can_manage_sensitivity_review: true, can_review_source_candidates: false });
+  // Owner decision 2026-10-18: the bound administrator may also promote source candidates.
+  assert.deepEqual((await capability(bound)).data, { can_manage_sensitivity_review: true, can_review_source_candidates: false, can_promote_source_candidates: true });
   let persistedRole = null;
   let repositoryCalls = 0;
   const decide = (actorContext, organizationId = ORG) => recordSensitivityAllowedUseDecision({
@@ -559,10 +560,20 @@ test("bound organization administrator: the owner-approved sensitivity-review ex
     assert.equal(repositoryCalls, before, `${label}: nothing written`);
   }
 
-  // The exception is sensitivity review only: no P1-08 promotion, no other GK review operation.
-  const promotion = authorizeSourcePromotionDecision(bound, ORG);
-  assert.equal(promotion.ok, false);
-  assert.deepEqual([promotion.error.error.code, promotion.error.blockers[0].blocking_reason], ["authorization_denied", "role_not_allowed"]);
+  // The exceptions are sensitivity review and (owner decision 2026-10-18) P1-08
+  // promotion for this exact organization; no other GK review operation.
+  assert.deepEqual(authorizeSourcePromotionDecision(bound, ORG), { ok: true, organizationAdminAuthorized: true });
+  for (const [label, actorContext, organizationId] of [
+    ["stored-only client_admin", storedOnly, ORG],
+    ["inactive binding", inactiveBinding, ORG],
+    ["invalid binding marker", invalidMarker, ORG],
+    ["another organization", bound, OTHER_ORG],
+    ["inactive KAI account", { ...bound, kaiUserStatus: "suspended" }, ORG],
+  ]) {
+    const promotion = authorizeSourcePromotionDecision(actorContext, organizationId);
+    assert.equal(promotion.ok, false, label);
+    assert.equal(promotion.error.error.code, "authorization_denied", label);
+  }
   assert.equal(validateActorCanPerformOperation(bound, "record_human_review_decision", ORG, { allowedRoles: new Set(DECISION_ALLOWED_ROLES) }).ok, false);
   assert.equal(validateActorCanPerformOperation(bound, "read_intake", ORG, { allowedRoles: new Set(["gk_admin", "gk_operator", "gk_reviewer"]), globalRolesOnly: true }).ok, false,
     "no Review Cockpit read beyond the sensitivity operations");
@@ -776,7 +787,7 @@ for (const role of ["client_reviewer", "client_contributor"]) {
     assert.equal(summary.ok, true, JSON.stringify(summary));
     assert.equal(summary.data.internalReviewAvailable, false);
     const sensitivity = await getReviewCockpitCapabilities({ organizationId: ORG, actorContext }, { env: ENV });
-    assert.deepEqual(sensitivity, { ok: true, data: { can_manage_sensitivity_review: false, can_review_source_candidates: false } });
+    assert.deepEqual(sensitivity, { ok: true, data: { can_manage_sensitivity_review: false, can_review_source_candidates: false, can_promote_source_candidates: false } });
     const batches = await listIntakeBatchesForOrganization(
       { organizationId: ORG, actorContext },
       { env: ENV, listIntakeBatchesForOrganization: async () => [] },

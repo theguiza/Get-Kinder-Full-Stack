@@ -434,6 +434,7 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // KAI B1A-3B-R2 GK-only file -> sensitivity-profile lookup (P1-09 cockpit
     // authorization; read-only; id-only response).
     "/admin/review-cockpit/intake-files/:intakeFileId/sensitivity-profile",
+    "/admin/review-cockpit/intake-files/:intakeFileId/source-candidate",
     "/admin/review-cockpit/queue",
     "/admin/review-cockpit/sensitivity-profiles/:intakeSensitivityProfileId",
     // KAI B1A-2 Phase-5 sensitivity/allowed-use human-decision route (additive).

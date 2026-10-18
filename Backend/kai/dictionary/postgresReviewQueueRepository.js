@@ -85,12 +85,19 @@ function isSensitivityReviewIdentity(value) {
   return isNonEmptyString(value.organizationId) && isNonEmptyString(value.intakeSensitivityProfileId);
 }
 
+/**
+ * The creator is either a mapped human (`actorUserId`) or, with
+ * `createdByType: "system"` and no actor user, the P1 worker's post-profiling
+ * handoff (owner decision 2026-10-18). Never both, never neither.
+ */
 function validateCreateInput(input) {
-  const allowedKeys = new Set(["identity", "actorUserId", "now", "metadataOnlyAudit"]);
+  const allowedKeys = new Set(["identity", "actorUserId", "createdByType", "now", "metadataOnlyAudit"]);
   if (!isPlainObject(input) || !hasOnlyKeys(input, allowedKeys)) return false;
+  const humanCreator = input.createdByType === undefined && isNonEmptyString(input.actorUserId);
+  const systemCreator = input.createdByType === "system" && input.actorUserId === undefined;
   return (
     isSensitivityReviewIdentity(input.identity) &&
-    isNonEmptyString(input.actorUserId) &&
+    (humanCreator || systemCreator) &&
     isNormalizedNow(input.now) &&
     isMetadataOnlyAuditDependency(input.metadataOnlyAudit)
   );
@@ -244,10 +251,10 @@ function buildSensitivityReviewAuditMetadata(record) {
   };
 }
 
-function buildSensitivityReviewAuditPayload(record) {
+function buildSensitivityReviewAuditPayload(record, actorType) {
   return {
     attempted_operation: SENSITIVITY_REVIEW_AUDIT_OPERATION,
-    actor_type: "human",
+    actor_type: actorType,
     contract: SENSITIVITY_REVIEW_AUDIT_CONTRACT,
     object_type: "review_queue_item",
     request_scope: "organization_intake_sensitivity_profile",
@@ -284,9 +291,9 @@ class RequiredAuditRejectedError extends Error {
  * P1-04's/P1-05's `prepareRequiredAudit`: an own-property descriptor read (never a
  * getter) whose `value` is exactly `true`, alongside a callable `publish`.
  */
-function prepareRequiredAudit(metadataOnlyAudit, record) {
+function prepareRequiredAudit(metadataOnlyAudit, record, actorType) {
   const prepared = metadataOnlyAudit.prepareMetadataOnlyAudit({
-    payload: buildSensitivityReviewAuditPayload(record),
+    payload: buildSensitivityReviewAuditPayload(record, actorType),
   });
 
   const okDescriptor =
@@ -404,6 +411,7 @@ export function createPostgresReviewQueueRepository({
     async createSensitivityReviewQueueItem(input) {
       if (!validateCreateInput(input)) return reviewQueueFailure("validation_blocker");
       const { identity, actorUserId, now, metadataOnlyAudit } = input;
+      const creatorType = input.createdByType === "system" ? "system" : "human";
       try {
         return await runInTransaction(async (tx) => {
           const profileRow = await readScopedSensitivityProfile(
@@ -447,8 +455,8 @@ export function createPostgresReviewQueueRepository({
             summary: SENSITIVITY_REVIEW_SUMMARY,
             requiredAction: SENSITIVITY_REVIEW_REQUIRED_ACTION,
             queueMetadata: {},
-            createdBy: actorUserId,
-            createdByType: "human",
+            createdBy: creatorType === "human" ? actorUserId : null,
+            createdByType: creatorType,
           });
 
           if (!insertedRow) {
@@ -488,7 +496,7 @@ export function createPostgresReviewQueueRepository({
             throw new MalformedInsertedRowError();
           }
 
-          const preparedAudit = prepareRequiredAudit(metadataOnlyAudit, record);
+          const preparedAudit = prepareRequiredAudit(metadataOnlyAudit, record, creatorType);
           await insertAudit(tx, {
             organizationId: profileRow.organization_id,
             intakeFileId: profileRow.intake_file_id,

@@ -90,6 +90,8 @@ function row(n, overrides = {}) {
     claim_needs_review_count: 0,
     claim_ids: [],
     open_client_followup_count: 0,
+    sensitivity_permission_predicate: true,
+    source_candidate_actionable_count: 0,
     // Hidden internal values the read model never selects; if a projection
     // leaked row fields, these would surface.
     intake_sensitivity_profile_id: "sensitivity-profile-secret",
@@ -125,7 +127,9 @@ const fact = (n, statement = `Reviewed fact ${n}`) => ({ claimId: claimId(n), st
 async function read(rows, options = {}) {
   const calls = [];
   const result = await getClientEvidencePipeline(
-    { organizationId: ORG, engagementId: ENGAGEMENT, actorContext: options.actor || memberActor("client_admin") },
+    // Default: a member with no step authority of its own, so every GK gate
+    // reads as Get Kinder's; the client_admin authority cases are explicit.
+    { organizationId: ORG, engagementId: ENGAGEMENT, actorContext: options.actor || memberActor("client_contributor") },
     dependencies({ rows, calls, ...options }),
   );
   return { result, calls };
@@ -213,7 +217,7 @@ test("stages: automatic processing, failures, and every human gate map to the re
     row(10),
     row(11, { sensitivity_decision_outcome: "needs_more_information" }),
     row(12, { sensitivity_decision_outcome: "reviewed" }),
-    row(13, { sensitivity_decision_outcome: "reviewed", source_candidate_count: 1, source_candidate_needs_review_count: 1 }),
+    row(13, { sensitivity_decision_outcome: "reviewed", source_candidate_count: 1, source_candidate_needs_review_count: 1, source_candidate_actionable_count: 1 }),
     row(14, { sensitivity_decision_outcome: "reviewed", source_candidate_count: 1, source_candidate_rejected_count: 1 }),
     row(15, promoted),
     row(16, extracted),
@@ -237,7 +241,8 @@ test("stages: automatic processing, failures, and every human gate map to the re
     9: ["data_dictionary", "in_progress", "kai", "none_waiting_for_kai_processing", "processing"],
     10: ["sensitivity_review", "waiting_for_get_kinder", "get_kinder", "none_waiting_for_get_kinder", "waiting_for_get_kinder_review"],
     11: ["sensitivity_review", "waiting_for_get_kinder", "get_kinder", "none_waiting_for_get_kinder", "waiting_for_get_kinder_review"],
-    12: ["source_review", "waiting_for_get_kinder", "get_kinder", "none_waiting_for_get_kinder", "waiting_for_source_promotion"],
+    // A reviewed sensitivity decision with no P1-07 candidate: nothing to promote.
+    12: ["source_review", "waiting_for_get_kinder", "get_kinder", "contact_get_kinder", "source_candidate_missing"],
     13: ["source_review", "waiting_for_get_kinder", "get_kinder", "none_waiting_for_get_kinder", "waiting_for_source_promotion"],
     14: ["source_review", "closed", "none", "none", "source_not_promoted"],
     15: ["evidence_extraction", "waiting_for_get_kinder", "get_kinder", "none_waiting_for_get_kinder", "evidence_extraction_pending"],
@@ -445,7 +450,9 @@ test("frontend Evidence tab: distinguishes loading, error, no files, each upstre
     [row(1, { parser_status: "failed", file_profile_complete: false }), "failed", /could not be processed/],
     [row(1, { ...reviewed, claim_count: 1, claim_ids: [claimId(1)], open_client_followup_count: 1 }), "waiting_for_client", /client reviewer/],
     [row(1), "waiting_for_get_kinder_review", /^Your data has been processed and is waiting for Get Kinder review/],
-    [row(1, { sensitivity_decision_outcome: "reviewed" }), "waiting_for_source_promotion", /promoted source/],
+    [row(1, { sensitivity_decision_outcome: "reviewed", source_candidate_count: 1, source_candidate_needs_review_count: 1, source_candidate_actionable_count: 1 }), "waiting_for_source_promotion", /promoted source/],
+    [row(1, { sensitivity_decision_outcome: "reviewed" }), "source_candidate_missing", /no source candidate was created/],
+    [row(1, { sensitivity_decision_outcome: "reviewed", source_candidate_count: 1, source_candidate_needs_review_count: 1, source_candidate_actionable_count: 1, sensitivity_permission_predicate: false }), "source_promotion_blocked", /cannot be promoted/],
     [row(1, promoted), "evidence_extraction_pending", /has been promoted\. Get Kinder has not yet created evidence/],
     [row(1, extracted), "evidence_awaiting_review", /waiting for Get Kinder evidence review/],
     [row(1, { ...reviewed, claim_count: 1, claim_ids: [claimId(1)] }), "not_currently_eligible", /not currently usable/],
@@ -738,4 +745,112 @@ test("client follow-up links open the follow-up page for the selected organizati
     assert.doesNotMatch(source, /CLIENT_FOLLOWUP_REVIEW_HREF/, file);
     assert.match(source, /clientFollowupReviewHref\(organizationId\)/, file);
   }
+});
+
+// ---------------------------------------------------------------------------
+// Source preparation next actions follow persisted eligibility and the actor's
+// own authority (owner decision 2026-10-18)
+// ---------------------------------------------------------------------------
+
+function boundAdminActor({ organizationId = ORG, kaiUserStatus = "active", kaiRoles = [] } = {}) {
+  return {
+    actorType: "human",
+    actorUserId: "user-bound-admin",
+    kaiUserStatus,
+    kaiRoles,
+    platformSuperuser: false,
+    organizationMemberships: [{
+      organization_id: organizationId,
+      role_name: "client_admin",
+      membership_status: "active",
+      source: "gk_organization_binding",
+      gk_organization_id: 4242,
+    }],
+  };
+}
+
+const actionableCandidate = {
+  sensitivity_decision_outcome: "reviewed",
+  source_candidate_count: 1,
+  source_candidate_needs_review_count: 1,
+  source_candidate_actionable_count: 1,
+};
+
+test("source review: a promotable candidate is the binding-derived administrator's own next action; restricted or missing candidates keep a Get Kinder state with the real reason", async () => {
+  const rows = [
+    row(1, actionableCandidate),
+    row(2, { ...actionableCandidate, sensitivity_permission_predicate: false }),
+    row(3, { sensitivity_decision_outcome: "reviewed" }),
+    row(4, { ...actionableCandidate, source_candidate_actionable_count: 0 }),
+    row(5, { sensitivity_decision_outcome: "reviewed", source_candidate_count: 1, source_candidate_rejected_count: 1 }),
+    row(6, promoted),
+    row(7, extracted),
+    row(8),
+  ];
+  const { result } = await read(rows, { actor: boundAdminActor() });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  const expected = {
+    1: ["source_review", "waiting_for_client", "client", "promote_source", "source_promotion_ready"],
+    2: ["source_review", "waiting_for_get_kinder", "get_kinder", "contact_get_kinder", "source_promotion_blocked"],
+    3: ["source_review", "waiting_for_get_kinder", "get_kinder", "contact_get_kinder", "source_candidate_missing"],
+    4: ["source_review", "waiting_for_get_kinder", "get_kinder", "contact_get_kinder", "source_promotion_blocked"],
+    5: ["source_review", "closed", "none", "none", "source_not_promoted"],
+    // P2-01 normally runs as the promotion's handoff; if it did not, the
+    // administrator can extract.
+    6: ["evidence_extraction", "waiting_for_client", "client", "extract_evidence", "evidence_extraction_ready"],
+    7: ["evidence_review", "waiting_for_get_kinder", "get_kinder", "none_waiting_for_get_kinder", "evidence_awaiting_review"],
+    // The sensitivity review stage is unchanged by this decision.
+    8: ["sensitivity_review", "waiting_for_get_kinder", "get_kinder", "none_waiting_for_get_kinder", "waiting_for_get_kinder_review"],
+  };
+  for (const [n, values] of Object.entries(expected)) {
+    assert.deepEqual(Object.values(currentOf(result, Number(n))).slice(0, 5), values, `file ${n}`);
+  }
+  assert.equal(currentOf(result, 7).file.evidenceItemCount, 3);
+  // The stage DTO never carries the internal derivation detail.
+  for (const file of result.data.files) for (const entry of file.stages) assert.equal(Object.hasOwn(entry, "detail"), false);
+  assert.equal(JSON.stringify(result).includes("sensitivity_permission_predicate"), false);
+  assert.equal(JSON.stringify(result).includes("actionable_count"), false);
+});
+
+test("source review: other actors see the same promotable candidate as Get Kinder's work", async () => {
+  const rows = [row(1, actionableCandidate), row(2, promoted)];
+  const cases = [
+    ["stored (unbound) client_admin", memberActor("client_admin"), "waiting_for_get_kinder", "extract_evidence"],
+    ["client_reviewer", memberActor("client_reviewer"), "waiting_for_get_kinder", "none_waiting_for_get_kinder"],
+    ["client_contributor", memberActor("client_contributor"), "waiting_for_get_kinder", "none_waiting_for_get_kinder"],
+    ["inactive bound administrator account", boundAdminActor({ kaiUserStatus: "suspended" }), "waiting_for_get_kinder", "extract_evidence"],
+    ["organization gk_operator", memberActor("gk_operator"), "waiting_for_get_kinder", "none_waiting_for_get_kinder"],
+    ["global gk_reviewer over a client_contributor membership", memberActor("client_contributor", { kaiRoles: ["gk_reviewer"] }), "waiting_for_get_kinder", "none_waiting_for_get_kinder"],
+  ];
+  for (const [label, actor, sourceStatus, extractionNext] of cases) {
+    const { result } = await read(rows, { actor });
+    assert.equal(result.ok, true, `${label}: ${JSON.stringify(result)}`);
+    assert.deepEqual(Object.values(currentOf(result, 1)).slice(0, 5),
+      ["source_review", sourceStatus, "get_kinder", "none_waiting_for_get_kinder", "waiting_for_source_promotion"], label);
+    assert.equal(currentOf(result, 2).next, extractionNext, label);
+  }
+  // A bound administrator of another organization is refused before any read.
+  const foreign = await read(rows, { actor: boundAdminActor({ organizationId: OTHER_ORG }) });
+  assert.equal(foreign.result.ok, false);
+  assert.deepEqual(foreign.calls, []);
+});
+
+test("frontend: source work is listed for the actor and never counted as client follow-ups", async () => {
+  const { result } = await read([
+    row(1, actionableCandidate),
+    row(2, { ...reviewed, claim_count: 1, claim_ids: [claimId(2)], open_client_followup_count: 1 }),
+    row(3, { sensitivity_decision_outcome: "reviewed" }),
+  ], { actor: boundAdminActor() });
+  const data = projectClientEvidencePipeline(result.data, ENGAGEMENT);
+  assert.ok(data, "the new vocabulary projects");
+  const view = reviewsTabView({ status: PIPELINE_REQUEST_STATUS.SUCCESS_WITH_DATA, data });
+  assert.deepEqual(view.waitingForClient.map((f) => f.intakeFileId), [fileId(2)]);
+  assert.deepEqual(view.sourceWork.map((f) => f.intakeFileId), [fileId(1)]);
+  assert.deepEqual(view.waitingForGetKinder.map((f) => f.intakeFileId), [fileId(3)]);
+  const promote = data.files.find((f) => f.intakeFileId === fileId(1));
+  const missing = data.files.find((f) => f.intakeFileId === fileId(3));
+  assert.match(nextActionText(promote), /^Your action is needed: review this file's source candidate and promote it/);
+  assert.match(nextActionText(missing), /no source candidate was created/);
+  assert.match(pipelineReasonMessage("source_promotion_ready", 2), /you can review and promote in Data Sources/);
+  assert.match(pipelineReasonMessage("evidence_extraction_ready", 1), /Extract evidence from it in Data Sources/);
 });

@@ -74,7 +74,7 @@ export function projectOrganizationAccessCapabilities(dto) {
   const required = ["internalKnowledgeWorkspace", "intakeContribution", "clientFollowupReview", "projectManagement", "improvementPlanManagement", "organizationJoinReview", "organizationAccessManagement"];
   if (!required.every((key) => typeof dto[key] === "boolean")) return null;
   return {
-    workflowOperations: Object.fromEntries(["generateDrafts", "generateAllDraftTypes", "reviewGeneratedDrafts", "readGeneratedDrafts", "recordEvidenceReview", "recordClaimReview", "extractEvidence", "assessEvidenceCoverage", "proposeClaim", "generateClaimGapFollowups", "recordConflict", "acceptCoverageLimitation", "assessRequirement", "readGrantResponsePacket", "readBoardReportingPacket"].map((key) => [key, dto.workflowOperations?.[key] === true])),
+    workflowOperations: Object.fromEntries(["reviewSensitivity", "promoteSource", "generateDrafts", "generateAllDraftTypes", "reviewGeneratedDrafts", "readGeneratedDrafts", "recordEvidenceReview", "recordClaimReview", "extractEvidence", "assessEvidenceCoverage", "proposeClaim", "generateClaimGapFollowups", "recordConflict", "acceptCoverageLimitation", "assessRequirement", "readGrantResponsePacket", "readBoardReportingPacket"].map((key) => [key, dto.workflowOperations?.[key] === true])),
     internalKnowledgeWorkspace: dto.internalKnowledgeWorkspace === true,
     intakeContribution: dto.intakeContribution === true,
     clientFollowupReview: dto.clientFollowupReview === true,
@@ -2066,6 +2066,14 @@ export function sourceReviewQueuePath(organizationId) {
 export function sourceCandidateDetailPath(organizationId, intakeSourceCandidateId) {
   const params = new URLSearchParams({ organization_id: organizationId });
   return `${REVIEW_COCKPIT_BASE_PATH}/source-candidates/${encodeURIComponent(intakeSourceCandidateId)}?${params.toString()}`;
+}
+
+// Owner decision 2026-10-18: one file of one Project -> its current P1-07
+// source candidate id (null while none exists), so the client Knowledge
+// Studio can open the existing candidate detail above.
+export function intakeFileSourceCandidatePath(organizationId, engagementId, intakeFileId) {
+  const params = new URLSearchParams({ organization_id: organizationId, engagement_id: engagementId });
+  return `${REVIEW_COCKPIT_BASE_PATH}/intake-files/${encodeURIComponent(intakeFileId)}/source-candidate?${params.toString()}`;
 }
 
 export function sourceCandidateDecisionPath(organizationId, intakeSourceCandidateId) {

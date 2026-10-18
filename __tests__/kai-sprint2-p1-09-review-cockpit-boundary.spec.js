@@ -1401,21 +1401,21 @@ test("KAI B1A-3B getReviewCockpitCapabilities: an authorized global GK role gets
     dependencies,
   );
   assert.equal(authorized.ok, true);
-  assert.deepEqual(authorized.data, { can_manage_sensitivity_review: true, can_review_source_candidates: true });
+  assert.deepEqual(authorized.data, { can_manage_sensitivity_review: true, can_review_source_candidates: true, can_promote_source_candidates: true });
 
   const wrongRole = await getReviewCockpitCapabilities(
     { organizationId: ORG, actorContext: humanActor({ kaiRoles: [], organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_admin" }] }) },
     dependencies,
   );
   assert.equal(wrongRole.ok, true);
-  assert.deepEqual(wrongRole.data, { can_manage_sensitivity_review: false, can_review_source_candidates: false });
+  assert.deepEqual(wrongRole.data, { can_manage_sensitivity_review: false, can_review_source_candidates: false, can_promote_source_candidates: false });
 
   const nonHuman = await getReviewCockpitCapabilities(
     { organizationId: ORG, actorContext: { actorType: "system", actorUserId: "7fe568b1-5c05-4c42-bb1f-6e20de216c7b" } },
     dependencies,
   );
   assert.equal(nonHuman.ok, true);
-  assert.deepEqual(nonHuman.data, { can_manage_sensitivity_review: false, can_review_source_candidates: false });
+  assert.deepEqual(nonHuman.data, { can_manage_sensitivity_review: false, can_review_source_candidates: false, can_promote_source_candidates: false });
 });
 
 test("KAI B1A-3B getReviewCockpitCapabilities: never touches queue/profile/decision data, and fails closed on a disabled feature flag or invalid organization id", async () => {

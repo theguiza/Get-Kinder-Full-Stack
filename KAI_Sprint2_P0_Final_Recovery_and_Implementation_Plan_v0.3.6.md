@@ -2552,7 +2552,7 @@ Gate D policy is governed by `KAI_MVP_Sprint2_Data_Protection_and_Processing_Ope
 8. **AI and KAI learning.** External foundation-model training: NO by default. KAI/Get Kinder service improvement: YES. Client program improvement: YES. Cross-client learning using anonymized/aggregated information: YES. Identifiable information for KAI/Get Kinder improvement: YES where covered by the applicable disclosure/consent/contractual basis. Identifiable disclosure from one client to another: NO unless separately authorized. AI may process personal information where needed for the KAI service and covered by the applicable processing basis; AI-provider processing does not redefine KAI raw-file storage residency. Hard AI boundaries are preserved: no tenant bypass, no validator bypass, no autonomous destructive deletion, no autonomous final release requiring GK approval, and uploaded-document instructions never become authority.
 9. **Residency.** Raw uploaded client files: approved Canadian GCS storage. KAI application processing, metadata, derived records, and runtime/database: Render under the deployed architecture. Approved AI providers may process information required to provide KAI. Get Kinder does not offer client-specific alternative residency configurations during the MVP; a prospect requiring another infrastructure/residency configuration is outside the supported MVP offering unless Get Kinder later changes this policy. AI processing is not literally zero-retention storage; the v0.2 distinction between KAI raw-file storage and provider-side processing/temporary retention is preserved.
 10. **Subprocessors.** A lightweight MVP register only, recording provider, purpose, broad data category, broad processing/location posture where relevant, and external-model-training posture where relevant; updated when a material provider changes. No mandatory backup-region investigations, support-personnel geography studies, quarterly certification, or heavyweight vendor-control matrices.
-11. **Human review.** GK owns KAI review, except an owner-accepted organization-scoped exception: an existing Get Kinder organization administrator whose active membership is bound to the exact KAI organization may make the authoritative sensitivity/allowed-use decision for an eligible `intake_sensitivity_profile` in that organization. The authenticated human is attributed as `client_admin`. This grants no global GK role, platform-superuser authority, cross-organization access, unrelated evidence/claim approval, public-release approval, tenant override, or export finalization; all other GK review ownership remains unchanged. Owner acceptance recorded 2026-10-12 (`USER_CONFIRMED`). Client review remains recommended/requested only when materially useful for factual uncertainty, client-specific definitions, consent/story issues, governance issues, or material interpretation issues; it is not a mandatory intermediate gate for ordinary KAI processing. Preferred flow remains KAI profiling and analysis, evidence extraction, claim proposals, limitations/conflicts and draft output, followed by GK review of other relevant output/package before release. Where the Backend Contract records an older distributed client/GK review recommendation, that historical text is preserved as historical evidence.
+11. **Human review.** GK owns KAI review, except an owner-accepted organization-scoped exception: an existing Get Kinder organization administrator whose active membership is bound to the exact KAI organization may make the authoritative sensitivity/allowed-use decision for an eligible `intake_sensitivity_profile` in that organization. The authenticated human is attributed as `client_admin`. This grants no global GK role, platform-superuser authority, cross-organization access, unrelated evidence/claim approval, public-release approval, tenant override, or export finalization; all other GK review ownership remains unchanged. Owner acceptance recorded 2026-10-12 (`USER_CONFIRMED`). A second owner-directed, organization-scoped departure (2026-10-18, `USER_CONFIRMED`, Package A below) lets the same active binding-derived `client_admin` also record the P1-08 source-promotion decision for an eligible source candidate in that organization, with every P1-08 validator, transaction, audit, and replay unchanged, and lets the P1 worker's system actor create the pending P1-06 `sensitivity_review` item (no review decision is made by any non-human actor). Backend Contract section 22 still records GK ownership of source-candidate review; this is a recorded departure, not a reading of that contract. Client review remains recommended/requested only when materially useful for factual uncertainty, client-specific definitions, consent/story issues, governance issues, or material interpretation issues; it is not a mandatory intermediate gate for ordinary KAI processing. Preferred flow remains KAI profiling and analysis, evidence extraction, claim proposals, limitations/conflicts and draft output, followed by GK review of other relevant output/package before release. Where the Backend Contract records an older distributed client/GK review recommendation, that historical text is preserved as historical evidence.
 12. **Incident response.** CONTAIN → ASSESS → NOTIFY responsible GK person and affected parties when required → FIX → RECORD metadata-only incident/follow-up. No fixed 72-hour contractual promise is added.
 13. **Support access.** Authenticated, need-based access by GK/authorized providers; no shared credentials; raw files accessed only where reasonably necessary for authorized service, review, or support; no credentials, signed URLs, or unnecessary raw client data in ordinary support communications; material raw-data access should be auditable. No geographic-support restriction or separate approval bureaucracy for the MVP.
 14. **Anonymization.** Avoid unnecessary duplication of identifiable information; keep identifiable information when reasonably needed to provide/improve the service; prefer anonymization once identifiers are no longer necessary but analytical/program value remains. Anonymized/aggregated information may be retained longer-term for KAI, Get Kinder, and program improvement. Anonymization does not eliminate the controls in this section while data remains identifiable during intake, processing, or use.
@@ -40996,3 +40996,208 @@ and assembled pipeline completion stays NOT_CONFIRMED. No push, deployment,
 production/shared database, migration/schema, flag, tenant, credential, real
 client data, or `00_KAI_CURRENT_STATE.md` change. This is the single
 package-end evidence update in the living ExecPlan.
+
+### Package A: client-admin source review and promotion (2026-10-18)
+
+**Owner authorization (USER_CONFIRMED):** the owner's "KAI Package A - Fix
+Client-Admin Source Review and Promotion" prompt directs, narrowly: a
+binding-derived, active `client_admin` may complete permitted internal
+sensitivity review and P1-08 source promotion for its own organization without
+a GK staff action; the P1 worker/system handoff creates the pending P1-06
+review item; capabilities, the client Knowledge Studio, and the client
+pipeline's next action follow actual authority. Not authorized: signup or
+provisioning, later-user role grants, generated-draft reads, claim/P2-04
+logic, generators, scanning/parsing rules, unrelated `runWrite` behavior,
+schema/migration, flags, production, push, deployment, or Current State.
+
+**Contract departure (recorded, not re-read into the contract):** Backend
+Contract section 22 assigns sensitivity/source-candidate review to GK, and the
+2026-10-12 exception (section 11 above) covered the sensitivity decision only.
+This package adds a second organization-scoped departure for P1-08 promotion
+by the binding-derived `client_admin`, and lets the worker's system actor
+create the pending P1-06 item (AUTH-KAI-003 previously required a mapped
+human; the August 2026 "stop before P1-06" boundary is superseded by this
+prompt). Section 11 is amended accordingly. No review decision is made by any
+non-human actor; consent, sensitivity, file-policy, allowed-use, tenant,
+audit, and external-release rules are unchanged.
+
+**Start (TOOL_VERIFIED):** `main` at `6715231`, clean.
+
+**Original restrictions (TOOL_VERIFIED at `6715231`):**
+- P1-06: `p1WorkerRuntime.js:50-54` stops after P1-05 ("no worker/system/
+  internal P1-06 write path exists"); `kaiReviewQueueService.js:437`
+  (AUTH-KAI-003) refuses every non-human creator;
+  `postgresReviewQueueRepository.js:451` writes `created_by_type 'human'` only.
+  A bound `client_admin` could create the item only by clicking "Start review
+  work" (`ClientSensitivityReviewPanel.jsx`).
+- Sensitivity decision and P1-07: already admitted the bound `client_admin`
+  (`4191684`, `c8170d3`; `kaiSourceCandidateService.js:104`,
+  `postgresSourceCandidateRepository.js:106,565`). Unchanged.
+- P1-08: `kaiSourcePromotionService.js:7,89` (`{gk_admin, gk_operator,
+  gk_reviewer}`, organization-membership mode); the candidate detail and
+  decision used the cockpit read gate `kaiReviewCockpitService.js:240,1249,1334`
+  (global GK role only). `SOURCE_PROMOTION_ALLOWED_ROLES` is used only by
+  P1-08 and the Team & Access `source_review` row
+  (`kaiOrganizationAccessCapabilitiesService.js:216`); it was not widened.
+- Capabilities: no `promoteSource` / `reviewSensitivity` in
+  `workflowOperations` (`kaiOrganizationAccessCapabilitiesService.js:124`); the
+  sensitivity answer existed only in the cockpit probe.
+- Pipeline: every unpromoted `source_review` file was
+  `waiting_for_get_kinder` / `get_kinder` (`kaiClientEvidencePipelineService.js:220`),
+  and evidence extraction likewise (`:227`, `:282`).
+
+**Change:**
+- P1-06: `ensureSensitivityReviewQueueItemAfterProfiling`
+  (`kaiReviewQueueService.js`), reachable only from the worker runtime, uses a
+  fixed system identity and the unchanged repository predicate
+  (VAL-FUP-001-P0), idempotency, and required audit; the repository accepts a
+  human creator or `createdByType: "system"` (never both/neither), writing
+  `created_by NULL`, `created_by_type 'system'`, audit `actor_type system`.
+  `processKaiP1IntakeFile` calls it after a committed (fresh, replayed, or
+  reconciled) P1-05 profile; a failure is reported (`stoppedAt:
+  "sensitivity_review_work"`) and never undoes P1-05. The human review-work
+  route and AUTH-KAI-003 on every human seam are unchanged.
+- P1-08: `validateActorIsBoundOrganizationAdministrator`
+  (`kaiAuthorizationService.js`, sharing the bound-membership predicate with
+  `validateActorCanPerformSensitivityReview`); `authorizeSourcePromotionDecision`
+  keeps the GK check first and, only if it fails, admits the active
+  binding-derived `client_admin` with an active KAI account
+  (`organizationAdminAuthorized`). A stored `client_admin`, any global role
+  (including a global GK role over a client membership), and platform-superuser
+  authority do not satisfy the new half. Repository validators, transaction,
+  audit, outcomes, source-type vocabulary, and replay are untouched.
+- Cockpit: `authorizeSourceCandidateRequest` (cockpit read gate, else the
+  bound administrator) for the candidate detail and decision only; the GK
+  queue and every other cockpit read keep `authorizeReviewCockpitRequest`.
+  New read-only `GET .../review-cockpit/intake-files/:intakeFileId/source-candidate?organization_id&engagement_id`
+  (organization-, Project-, and file-scoped; ids only). Probe adds
+  `can_promote_source_candidates`.
+- Capabilities: `workflowOperations.reviewSensitivity` (the cockpit sensitivity
+  gate) and `promoteSource` (P1-08 authorization plus the matching read gate);
+  Team & Access `source_review` readiness follows the same rule.
+- Pipeline: read model adds the server-side P1-07/P1-08 permission predicate
+  and an actionable-candidate count (the repository's completeness
+  predicate); never returned. `source_review` now distinguishes:
+  promotable + actor holds P1-08 administrator authority ->
+  `waiting_for_client` / `client` / `promote_source` / `source_promotion_ready`;
+  promotable, other actor -> unchanged `waiting_for_source_promotion`; no
+  candidate -> `source_candidate_missing` / `contact_get_kinder`; predicate
+  fails or nothing actionable -> `source_promotion_blocked` /
+  `contact_get_kinder`. Evidence extraction with zero evidence is
+  `extract_evidence` / `evidence_extraction_ready` for a client_admin
+  extraction holder. No stage status was added; the sensitivity stage is
+  unchanged.
+- Client Knowledge Studio: Data Sources gains "Source preparation" for the
+  selected Project (sensitivity review panel; new `ClientSourcePromotionPanel`
+  reusing the cockpit `SourceCandidateDetail` decision form and the server's
+  `decision_controls_enabled` / `allowed_reviewed_source_types`; structured
+  refusal text; pipeline and Sources/Evidence/Claims refresh). Reviews lists
+  the actor's source work and links to Data Sources. Bundle rebuilt.
+
+**Acceptance (TOOL_VERIFIED):** see the verification table. The assembled
+`kai-client-admin-source-promotion-browser-acceptance` (runner-owned loopback
+PostgreSQL, real routes, real Chrome, built bundle; no GK user in X):
+- WORKER SIMULATION (labelled): P1-03..P1-05 rows seeded as the worker's
+  output; inside the real `processKaiP1IntakeFile` the P1-03 activation stub
+  reports the seeded completed run and the P1-04/P1-05 recovery claims report
+  those rows as already succeeded. Session login is the harness cookie. No
+  model call exists in this chain. Everything else is real.
+- P1-06: the runtime's real handoff created 3 open `sensitivity_review` items
+  (`created_by NULL`, `created_by_type system`), each with a `kai.audit_events`
+  row (`actor_type system`) and a lifecycle audit; a re-run replayed (no
+  write). The P1-05 CHECK constraints refuse a non-fail-closed profile
+  (23514), so P1-06/P1-07/P1-08 only ever see the restricted posture.
+- UI: the binding-derived administrator (first request JIT-mapped, no stored
+  role/membership/global role) sees Data Sources > Source preparation;
+  capabilities `reviewSensitivity`/`promoteSource`/`extractEvidence` true,
+  `readGeneratedDrafts`, review, and release flags false; probe
+  `can_promote_source_candidates` true.
+- Sensitivity decision on the worker-created item through the panel (one
+  POST to the existing decision route, no review-work POST): decision
+  `reviewed` / `client_admin` / the administrator; queue resolved; P1-07
+  candidate `needs_gk_review` created by the administrator.
+- Pipeline before promotion: administrator `source_review` /
+  `waiting_for_client` / `client` / `promote_source` /
+  `source_promotion_ready`, evidence 0; contributor and stored client_admin
+  `waiting_for_get_kinder` / `waiting_for_source_promotion`.
+- Denied, nothing written: contributor, client_reviewer, stored client_admin
+  (lookup/detail/decision 403 `role_not_allowed`); deactivated GK
+  administrator membership and inactive binding (403
+  `missing_active_organization_membership`); another Project (404); X
+  admin on Y (403), Y candidate under X (404), Y admin on X (403).
+- P1-08 through "Review & promote source" (lookup + detail reads, then one
+  POST to the existing decision route): promotion `promoted` /
+  `organization_primary_record` / created_by the administrator; one source and
+  one current source_version (created_by the administrator, bound to the
+  decision); P2-01 handoff created 2 `needs_gk_review` evidence items with
+  open review items; audits `source_promotion_decision_persisted` and
+  `evidence_lineage_extracted` by the administrator; the administrator is the
+  only human actor in X's audit.
+- After: pipeline `evidence_review`, `evidenceItemCount` 2, sensitivity,
+  source, and extraction stages complete; the Sources card's "Extract
+  evidence" replays (P2-01 uses the governed source); promotion replay 200
+  `replayed`, zero writes.
+- Protected: evidence review decision 403 `role_not_allowed`; GK source queue
+  403; generated-draft read, review, release, and all-generator flags false.
+- Allowed use / sensitivity: three prohibited snapshots (LLM with
+  not_allowed, public use without consent, funder use with unknown allowed
+  use) 422, nothing written; a committed P1-05 `not_allowed` source is
+  promotable and extractable (no gate there, unchanged) and P2-04 refuses
+  422 `allowed_use_not_allowed`.
+- Failed file policy: the blocked file is `security_check` / `failed`, with
+  no profile, candidate, or action.
+
+**Updated pins (coupled to the decision):** worker composition (P1-06 import
+boundary), client evidence pipeline (vocabulary, default actor, new reasons),
+client-admin workflow D/F, client authorization reconciliation (probe shape,
+bound P1-08), cross-organization configuration 1 (the global reviewer + bound
+admin in B now promotes through the administrator half), integrated policy
+(bound admin P1-08), P1-09 probe shape, Pass 2 route list, sensitivity
+browser cases 9/10/11/15, client pipeline browser case 6, client-admin
+browser D, campaign J4-2 and J5-4 (the bound administrator, and the superuser
+whose only organization role is the derived client_admin, are now offered the
+P1-08 decision; neither decides there so the candidate stays pending for
+J5-5), and P1 worker file processing test 16 (new P1-06 boundary).
+
+**Observed, not changed (out of scope or pre-existing):**
+- Direct P2-03 `propose_claim` does not consult allowed use; the P2-02/P2-04
+  gate reads the committed P1-05 `allowed_use_status`, not the sensitivity
+  decision's `reviewed_allowed_use_status` (a reviewed `not_allowed` decision
+  on an `unknown` profile gates nothing downstream).
+- A Project claim the governed eligibility evaluator cannot evaluate (e.g. no
+  P2-04 state) makes the client pipeline read fail closed with 409
+  (`postgresEligibleClaimsForAudienceRepository.js:150`).
+- The pipeline is per actor: a contributor sees a promotable candidate as a
+  Get Kinder wait although the organization administrator can promote it.
+- The sensitivity stage still reads as Get Kinder's in the pipeline; the
+  Data Sources guidance tells an authorized administrator it is theirs.
+- Files profiled before this change get no worker-created item (no backfill);
+  the human "Start review work" path remains.
+- The five production files: not inspected; whether each is promotable
+  (candidate present, predicate, queue state) is NOT_CONFIRMED.
+
+**Verification (TOOL_VERIFIED; sentinel `DATABASE_URL`):**
+
+| Command | Pass | Fail | Skipped |
+| --- | --- | --- | --- |
+| `npm test` (baseline recorded at `6715231`) | 5593 | 0 | 112 |
+| `npm test` | 5611 | 0 | 113 |
+| New unit spec `kai-client-admin-source-promotion.spec.js` | 11 | 0 | 0 |
+| Affected unit specs (pipeline 28, workflow 22, reconciliation 30, cross-org 18, integrated 20, P1-09 45, worker composition 32, Pass 2 routes 38) | 233 | 0 | 0 |
+| New assembled acceptance `kai-client-admin-source-promotion` | 12 | 0 | 0 |
+| Browser: campaign 63, sensitivity 17, client pipeline 7, client-admin draft 21, P2-01 7, Knowledge Studio 6, rehydration 3, P2-12 11, reviewed-evidence 12, Team & Access 7, provisioning 13, edges 11 | 178 | 0 | 0 |
+| Runners: P1 worker 6/32, P1-06 15, P1-07 11, P1-07 handoff 22, P1-08 19, P2-01 lineage 17, P2-01 handoff 7, P2-12 no-claim 11, P2-03 reviewed-evidence 17, B1A-02 37, B1A-2R 6, B1A-3B-R2 4 | 205 | 0 | 0 |
+| `npm run verify:kai-sprint2-api-contract` | 71 | 0 | 0 |
+| `npm run build` twice (`entry.js` SHA-256 `2ed291ba...9ac6`) | identical | | |
+| `git diff --check` | ok | | |
+
+The P1 worker runner now applies the P1-06 migration (its schema previously
+stopped at P1-05); its test 16 asserts the new boundary (one system-created
+pending item, no P1-07+ substrate). The first campaign rerun failed only
+because it ran while a mid-edit file was missing helper functions; the
+final run is 63/0.
+
+**Status:** CLIENT_ADMIN_SOURCE_PROMOTION_COMPLETE_LOCAL_SYNTHETIC. No push,
+deployment, production/shared database, migration/schema, flag, tenant,
+credential, real client data, or `00_KAI_CURRENT_STATE.md` change. This is
+the single package-end evidence update in the living ExecPlan.

@@ -51,6 +51,8 @@ export const PIPELINE_NEXT_ACTIONS = Object.freeze([
   "answer_client_followups",
   "upload_new_file",
   "contact_get_kinder",
+  "promote_source",
+  "extract_evidence",
 ]);
 
 export const PIPELINE_REASONS = Object.freeze([
@@ -59,6 +61,10 @@ export const PIPELINE_REASONS = Object.freeze([
   "processing",
   "waiting_for_get_kinder_review",
   "waiting_for_source_promotion",
+  "source_promotion_ready",
+  "source_candidate_missing",
+  "source_promotion_blocked",
+  "evidence_extraction_ready",
   "evidence_extraction_pending",
   "evidence_awaiting_review",
   "impact_fact_review_pending",
@@ -239,9 +245,19 @@ export function nextActionText(file, { canReviewFollowups = false, canContribute
     case "upload_new_file":
       return canContribute ? "Upload a corrected file." : "A client admin in your organization can upload a corrected file.";
     case "contact_get_kinder":
+      if (file.reason === "source_candidate_missing") {
+        return "Contact Get Kinder. The sensitivity review is recorded, but no source candidate was created for this file, so there is nothing to promote yet.";
+      }
+      if (file.reason === "source_promotion_blocked") {
+        return "Contact Get Kinder. This file's source candidate cannot be promoted in its current state (for example, its allowed-use restrictions no longer permit it).";
+      }
       return file.currentStage === "security_check"
         ? "Contact Get Kinder for help with this file's security check."
         : "Contact Get Kinder. Processing cannot be retried from here.";
+    case "promote_source":
+      return "Your action is needed: review this file's source candidate and promote it as a source in Data Sources. Evidence can only be created from a promoted source.";
+    case "extract_evidence":
+      return "Your action is needed: this file's source is promoted. Extract evidence from it in Data Sources.";
     default:
       return file.currentStatus === "complete" ? "No action required. Reviewed evidence from this file is available." : "No action required from you.";
   }
@@ -253,6 +269,10 @@ const REASON_MESSAGES = Object.freeze({
   processing: (n) => `${pluralFiles(n)} ${n === 1 ? "is" : "are"} still being processed by KAI.`,
   waiting_for_get_kinder_review: (n) => `Your data has been processed and is waiting for Get Kinder review (${pluralFiles(n)}).`,
   waiting_for_source_promotion: (n) => `${pluralFiles(n)} passed the Get Kinder sensitivity review and ${n === 1 ? "is" : "are"} waiting for Get Kinder to review and promote ${n === 1 ? "it" : "them"} as a source. Evidence can only be created from a promoted source.`,
+  source_promotion_ready: (n) => `${pluralFiles(n)} passed the sensitivity review and ${n === 1 ? "is a source candidate" : "are source candidates"} you can review and promote in Data Sources. Evidence can only be created from a promoted source.`,
+  source_candidate_missing: (n) => `${pluralFiles(n)} passed the sensitivity review, but no source candidate was created, so ${n === 1 ? "it" : "they"} cannot be promoted yet. Contact Get Kinder.`,
+  source_promotion_blocked: (n) => `${pluralFiles(n)} ${n === 1 ? "has a source candidate that" : "have source candidates that"} cannot be promoted in ${n === 1 ? "its" : "their"} current state. Contact Get Kinder.`,
+  evidence_extraction_ready: (n) => `The source from ${pluralFiles(n)} has been promoted. Extract evidence from it in Data Sources.`,
   evidence_extraction_pending: (n) => `The source from ${pluralFiles(n)} has been promoted. Get Kinder has not yet created evidence from it.`,
   evidence_awaiting_review: (n) => `Evidence has been created from ${pluralFiles(n)} and is waiting for Get Kinder evidence review.`,
   impact_fact_review_pending: (n) => `Evidence from ${pluralFiles(n)} has been reviewed. Get Kinder has not yet completed the Impact Fact review.`,
@@ -341,7 +361,15 @@ export function reviewsTabMessages(view, { canReviewFollowups = false, canReview
       detail: `Follow-up questions about evidence from ${pluralFiles(clientCount)} are waiting for a client reviewer in your organization.`,
     });
   }
-  if (clientCount === 0 && sensitivityCount === 0) {
+  const sourceCount = Array.isArray(view.sourceWork) ? view.sourceWork.length : 0;
+  if (sourceCount > 0) {
+    messages.push({
+      key: "source_work",
+      heading: "Your action is needed",
+      detail: `${pluralFiles(sourceCount)} in this project ${sourceCount === 1 ? "is" : "are"} ready for source promotion or evidence extraction, which your role can complete in Data Sources.`,
+    });
+  }
+  if (clientCount === 0 && sensitivityCount === 0 && sourceCount === 0) {
     messages.push({ key: "none", heading: "No action is currently required from you.", detail: null });
   }
   return messages;
@@ -370,7 +398,17 @@ export function reviewsTabView(request) {
   const files = request.data.files;
   return {
     kind: "ready",
-    waitingForClient: files.filter((file) => file.currentStatus === "waiting_for_client"),
+    waitingForClient: files.filter((file) => file.nextAction === "answer_client_followups"),
+    sourceWork: files.filter(isClientSourceWork),
     waitingForGetKinder: files.filter((file) => file.responsibleParty === "get_kinder" && file.currentStatus !== "failed"),
   };
+}
+
+/**
+ * Source preparation the requesting actor itself may do (owner decision
+ * 2026-10-18): the server reports promote_source / extract_evidence only for
+ * an actor holding that organization-scoped authority and an eligible file.
+ */
+export function isClientSourceWork(file) {
+  return file?.responsibleParty === "client" && (file.nextAction === "promote_source" || file.nextAction === "extract_evidence");
 }

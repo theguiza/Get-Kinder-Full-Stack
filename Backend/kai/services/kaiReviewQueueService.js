@@ -564,3 +564,67 @@ export async function ensureSensitivityReviewQueueItem(input = {}, dependencies 
     error: null,
   };
 }
+
+/**
+ * The P1 worker's fixed system identity for the post-profiling handoff. It is
+ * defined here, not accepted from a caller: no route or request can supply it.
+ */
+const P1_06_WORKER_HANDOFF_ACTOR_CONTEXT = Object.freeze({ actorType: "system", actorUserId: null });
+
+/**
+ * KAI P1-05 -> P1-06 worker handoff (owner decision 2026-10-18): once the P1
+ * worker has committed a file's sensitivity profile, it ensures that profile's
+ * pending 'sensitivity_review' work item exists, so the review is ready for an
+ * authorized reviewer (a GK reviewer, or the organization's binding-derived
+ * client_admin) without a separate "start review work" step.
+ *
+ * Ensuring the item exists grants no authority: it records no classification,
+ * consent, allowed-use, or Phase-5 decision, and the decision itself remains a
+ * mapped-human-only action (AUTH-KAI-003 is unchanged for every human-facing
+ * path above, including createSensitivityReviewQueueItem). Its only caller is
+ * the worker runtime, which passes the organization id from the file's own
+ * persisted row. The repository re-reads the tenant-scoped profile, applies the
+ * unchanged VAL-FUP-001-P0 creation-trigger predicate, and replays an existing
+ * item; the item is attributed to the system (created_by NULL,
+ * created_by_type 'system') with the same required audit.
+ */
+export async function ensureSensitivityReviewQueueItemAfterProfiling(input = {}, dependencies = {}) {
+  if (!isKaiSprint2Enabled(dependencies.env || process.env)) {
+    return buildKaiError("feature_disabled");
+  }
+  const allowedKeys = new Set(["organizationId", "intakeSensitivityProfileId", "now"]);
+  if (!isPlainObject(input) || !Object.keys(input).every((key) => allowedKeys.has(key))) {
+    return buildKaiError("validation_blocker");
+  }
+  const { organizationId, intakeSensitivityProfileId } = input;
+  if (!canonicalUuid(organizationId) || !canonicalUuid(intakeSensitivityProfileId) || !isNormalizedNow(input.now)) {
+    return buildKaiError("validation_blocker");
+  }
+
+  const metadataOnlyAudit = dependencies.metadataOnlyAudit
+    || createProductionMetadataOnlyAuditForSensitivityReviewQueueItem({
+      organizationId,
+      intakeSensitivityProfileId,
+      actorContext: P1_06_WORKER_HANDOFF_ACTOR_CONTEXT,
+      now: input.now,
+    });
+  const reviewQueueRepository = dependencies.reviewQueueRepository || createPostgresReviewQueueRepository();
+  const result = await reviewQueueRepository.createSensitivityReviewQueueItem({
+    identity: { organizationId, intakeSensitivityProfileId },
+    createdByType: "system",
+    now: input.now,
+    metadataOnlyAudit,
+  });
+  if (!result?.ok) {
+    return buildKaiError(result?.error?.code || "system_error", { status: result?.error?.status });
+  }
+  return {
+    ok: true,
+    data: { reviewQueueItem: result.data.reviewQueueItem, replayed: result.data.replayed },
+    error: null,
+  };
+}
+
+export const __reviewQueueServiceContract = Object.freeze({
+  P1_06_WORKER_HANDOFF_ACTOR_CONTEXT,
+});

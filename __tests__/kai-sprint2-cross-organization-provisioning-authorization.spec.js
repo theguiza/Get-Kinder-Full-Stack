@@ -428,11 +428,14 @@ test("configuration 1: global gk_reviewer + stored gk_reviewer in A + binding-de
   // no P1-08 promotion and no direct organization-GK operation. The derived
   // client_admin itself admits P2-01 extraction, P2-03 proposal, and P2-04
   // gap follow-ups (owner decision 2026-10-18); P2-02 coverage stays GK-only.
+  // P1-08 promotion is admitted through the binding-derived administrator
+  // half (second owner decision 2026-10-18), never through the global role.
   assert.deepEqual(await surfaceFor(actor, ORG_B), {
     listed: true, capabilities: "ok", gkWorkspace: true,
     recordEvidenceReview: true, recordClaimReview: true, extractEvidence: true, proposeClaim: true, acceptCoverageLimitation: false,
-    projectManagement: true, teamAccess: true, sourceReview: true, sensitivityReview: true, promoteSource: false,
+    projectManagement: true, teamAccess: true, sourceReview: true, sensitivityReview: true, promoteSource: true,
   });
+  assert.equal(authorizeSourcePromotionDecision(actor, ORG_B).organizationAdminAuthorized, true);
   assert.deepEqual(await enforcementFor(actor, ORG_B), {
     recordEvidenceReview: true, extractEvidence: true, assessEvidenceCoverage: false, proposeClaim: true, generateClaimGapFollowups: true,
     createSourceCandidate: true, createSensitivityReviewItem: true, readClaimLibrary: true,

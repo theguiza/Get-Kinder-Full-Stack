@@ -15,6 +15,7 @@ import {
   PIPELINE_STAGE_LABELS,
   evidenceTabView,
   getKinderReviewAccessText,
+  nextActionText,
   pipelineReasonMessage,
   reviewsTabMessages,
   reviewsTabView,
@@ -38,7 +39,7 @@ const DATA_SOURCES_TAB = Object.freeze(["dataSources", "Data Sources"]);
 
 // Tabs that render the selected project's evidence pipeline; entering one
 // re-reads it so a status never lags behind an upload or a review.
-const PIPELINE_TABS = new Set(["files", "evidence", "reviews"]);
+const PIPELINE_TABS = new Set(["files", "dataSources", "evidence", "reviews"]);
 
 function dimensionLabel(dimensionKey) {
   return String(dimensionKey || "").replace(/_/g, " ");
@@ -222,7 +223,13 @@ export default function ClientKnowledgeStudio({
       ) : null}
 
       {tab === "dataSources" && workflowAccess.visible && organizationId ? (
-        <ClientEvidenceWorkflow organizationId={organizationId} engagementId={engagementId} access={workflowAccess} />
+        <ClientEvidenceWorkflow
+          organizationId={organizationId}
+          engagementId={engagementId}
+          access={workflowAccess}
+          pipeline={pipeline}
+          onPipelineRefresh={refreshPipeline}
+        />
       ) : null}
 
       {tab === "evidence" && engagementId ? (
@@ -309,6 +316,7 @@ export default function ClientKnowledgeStudio({
               safeFilename: file.safeFilename,
             })}
             organizationId={organizationId}
+            onOpenDataSources={workflowAccess.visible ? () => selectTab("dataSources") : null}
           />
           {openSensitivityReview ? (
             <ClientSensitivityReviewPanel
@@ -384,7 +392,7 @@ function ProjectEvidence({ view, canReviewFollowups, onViewImpactLibrary, onOpen
   );
 }
 
-function ProjectReviews({ organizationId, view, canReviewFollowups, getKinderReviewAccessNote, canReviewSensitivity, onOpenSensitivityReview }) {
+function ProjectReviews({ organizationId, view, canReviewFollowups, getKinderReviewAccessNote, canReviewSensitivity, onOpenSensitivityReview, onOpenDataSources }) {
   if (!view) {
     return (
       <>
@@ -411,6 +419,19 @@ function ProjectReviews({ organizationId, view, canReviewFollowups, getKinderRev
         <a className="btn btn-sm btn-outline-primary mb-2" href={clientFollowupReviewHref(organizationId)}>
           Answer follow-up questions
         </a>
+      ) : null}
+      {view.sourceWork.length > 0 ? (
+        <div className="mb-2" data-reviews-source-work="">
+          <div className="fw-semibold">Ready for you in Data Sources</div>
+          <ul className="mb-1">
+            {view.sourceWork.map((file) => (
+              <li key={file.intakeFileId}>{file.safeFilename}: {nextActionText(file)}</li>
+            ))}
+          </ul>
+          {onOpenDataSources ? (
+            <button type="button" className="btn btn-sm btn-outline-primary" onClick={onOpenDataSources}>Open Data Sources</button>
+          ) : null}
+        </div>
       ) : null}
       {view.waitingForGetKinder.length > 0 ? (
         <div>

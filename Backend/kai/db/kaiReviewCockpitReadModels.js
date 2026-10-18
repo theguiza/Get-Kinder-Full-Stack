@@ -377,3 +377,58 @@ export async function getReviewCockpitIntakeFileSensitivityProfileRecord(
   );
   return rows[0] || null;
 }
+
+/**
+ * Organization + engagement scoped lookup of one intake file's current P1-07
+ * source candidate (owner decision 2026-10-18), so the client Knowledge
+ * Studio can open the existing candidate detail for a file of the selected
+ * Project. The file must belong to that engagement; the candidate must
+ * descend from the file's CURRENT complete sensitivity profile (same lineage
+ * as the file -> sensitivity-profile lookup above). Returns the file row with
+ * a null candidate id when none exists; null when the file is not in this
+ * organization and engagement. Ids only.
+ */
+export async function getReviewCockpitIntakeFileSourceCandidateRecord(
+  organizationId,
+  engagementId,
+  intakeFileId,
+  db = pool,
+) {
+  const { rows } = await db.query(
+    `SELECT f.organization_id, f.engagement_id, f.intake_file_id, c.intake_source_candidate_id
+       FROM kai.intake_files f
+       LEFT JOIN LATERAL (
+         SELECT pr.parser_status, pr.output_profile_id
+           FROM kai.intake_parser_runs pr
+          WHERE pr.organization_id = f.organization_id
+            AND pr.intake_file_id = f.intake_file_id
+            AND pr.checksum = f.verified_checksum
+          ORDER BY pr.created_at DESC, pr.parser_run_id DESC
+          LIMIT 1
+       ) r ON true
+       LEFT JOIN kai.intake_file_profiles p
+         ON p.organization_id = f.organization_id
+        AND p.intake_file_id = f.intake_file_id
+        AND p.file_profile_id = r.output_profile_id
+        AND r.parser_status = 'completed'
+       LEFT JOIN kai.intake_sensitivity_profiles s
+         ON s.organization_id = f.organization_id
+        AND s.intake_file_id = f.intake_file_id
+        AND s.file_profile_id = p.file_profile_id
+       LEFT JOIN LATERAL (
+         SELECT ic.intake_source_candidate_id
+           FROM kai.intake_source_candidates ic
+          WHERE ic.organization_id = s.organization_id
+            AND ic.intake_file_id = f.intake_file_id
+            AND ic.intake_sensitivity_profile_id = s.intake_sensitivity_profile_id
+          ORDER BY ic.created_at DESC, ic.intake_source_candidate_id DESC
+          LIMIT 1
+       ) c ON true
+      WHERE f.organization_id = $1
+        AND f.engagement_id = $2
+        AND f.intake_file_id = $3
+      LIMIT 1`,
+    [organizationId, engagementId, intakeFileId],
+  );
+  return rows[0] || null;
+}

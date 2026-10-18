@@ -35,6 +35,8 @@ const SCHEMA_FILES = [
   "migrations/kai_sprint2_p1_parser_run_and_file_profile.sql",
   "migrations/kai_sprint2_p1_04_data_dictionary_and_quality.sql",
   "migrations/kai_sprint2_p1_05_intake_sensitivity_profile.sql",
+  // The worker's P1-05 -> P1-06 handoff (owner decision 2026-10-18).
+  "migrations/kai_sprint2_p1_06_review_queue.sql",
   "migrations/kai_sprint2_p1_downstream_recovery_state.sql",
 ];
 const RECOVERY_MIGRATION = "migrations/kai_sprint2_p1_downstream_recovery_state.sql";

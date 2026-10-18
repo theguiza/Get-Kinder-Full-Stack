@@ -896,11 +896,10 @@ async function runBrowserAcceptance() {
     });
 
     // --- D. protected operations ---------------------------------------------
-    await test("D: the client_admin cannot reach funder or other generators, GK review decisions, review packets, source promotion, P2-06 traceability, follow-up answers, or coverage acceptance", async () => {
+    await test("D: the client_admin cannot reach funder or other generators, GK review decisions, review packets, the GK source review list, P2-06 traceability, follow-up answers, or coverage acceptance", async () => {
       const before = await counts(ORG_X);
       const evidenceQueue = (await query("SELECT review_queue_item_id::text, updated_at FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = 'evidence_review' AND target_object_id = $2::uuid", [ORG_X, ids.x.usableEvidenceId]))[0];
       const claimQueue = (await query("SELECT review_queue_item_id::text, updated_at FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = 'claim_review' AND target_object_id = $2::uuid", [ORG_X, ids.x.usableClaimId]))[0];
-      const [candidate] = await query("SELECT intake_source_candidate_id::text FROM kai.intake_source_candidates WHERE organization_id = $1::uuid", [ORG_X]);
       const protectedRequests = [
         ["funder evidence summary", "POST", createFunderEvidenceSummaryPath(ORG_X), DRAFT_BODY([ids.x.usableClaimId], "client-admin-funder")],
         ["readiness assessment", "POST", createReadinessAssessmentPath(ORG_X), DRAFT_BODY([ids.x.usableClaimId], "client-admin-readiness")],
@@ -910,7 +909,10 @@ async function runBrowserAcceptance() {
         ["claim review decision", "POST", claimReviewCompletePath(ORG_X, ids.x.usableClaimId, claimQueue.review_queue_item_id),
           claimReviewDecisionBody({ expectedUpdatedAt: new Date(claimQueue.updated_at).toISOString(), decision: "approved", approvedAudiences: ["internal"] })],
         ["GK review packet", "GET", generatedDraftReviewPacketPath(ORG_X, ids.x.draftIds[0])],
-        ["P1-08 source promotion", "POST", decisionPath(ORG_X, candidate.intake_source_candidate_id), { outcome: "rejected" }],
+        // P1-08 promotion is admitted for this binding-derived administrator
+        // (owner decision 2026-10-18; kai-client-admin-source-promotion acceptance);
+        // the GK source review list stays GK-only.
+        ["GK source review queue", "GET", `/api/kai/sprint2/intake/admin/review-cockpit/queue?organization_id=${ORG_X}&queue_type=source_candidate_review&queue_status=open`],
         ["P2-06 traceability read", "GET", claimTraceabilityPath(ORG_X, ids.x.usableClaimId, "internal")],
         ["client follow-up list", "GET", `/api/kai/sprint2/intake/admin/organizations/${ORG_X}/client-followups`],
         ["P2-10 internal coverage limitation acceptance", "POST", coverageInternalAcceptancePath(ORG_X, ids.x.usableClaimId, ids.x.gapDimensionKey), {}],

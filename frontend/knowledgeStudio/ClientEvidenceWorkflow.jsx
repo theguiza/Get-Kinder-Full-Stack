@@ -31,7 +31,12 @@ import {
   internalDraftRequestBody,
   internalDraftResultSummary,
   retainSelectableClaimIds,
+  sourcePreparationFiles,
+  sourcePreparationGuidance,
 } from "./clientEvidenceWorkflowLogic.js";
+import { PIPELINE_STAGE_LABELS, isPipelineSuccess, stageStatusLabel } from "./clientEvidencePipelineLogic.js";
+import ClientSensitivityReviewPanel from "./ClientSensitivityReviewPanel.jsx";
+import ClientSourcePromotionPanel from "./ClientSourcePromotionPanel.jsx";
 
 const DRAFT_LABELS = Object.freeze({
   evidence_summary: "Internal evidence summary",
@@ -71,10 +76,20 @@ function useOrganizationRead(organizationId, path, project, refreshToken) {
  * Library reads; the P2-01 extraction, P2-03 claim-proposal, and P2-04 claim
  * gap follow-up writes; and the internal evidence-summary and
  * impact-narrative generation writes. Never the funder or any other
- * generator, a review decision, a follow-up answer, the GK traceability read,
- * or a GK review packet.
+ * generator, an evidence or claim review decision, a follow-up answer, the
+ * GK traceability read, or a GK review packet.
+ *
+ * Source preparation (owner decision 2026-10-18): for the selected Project,
+ * the files the client evidence pipeline (`pipeline`, the parent's read) puts
+ * at sensitivity review, source review, or extraction. Each offers only the
+ * step the server reports this actor may take: the existing sensitivity
+ * review panel (reviewSensitivity), the source review panel
+ * (promote_source, decided by the candidate detail's own
+ * decision_controls_enabled), or the server's reason the file waits. Panels
+ * open only from an explicit action; a recorded decision refreshes the
+ * pipeline and the Sources / Evidence / Claim reads.
  */
-export default function ClientEvidenceWorkflow({ organizationId, engagementId, access }) {
+export default function ClientEvidenceWorkflow({ organizationId, engagementId, access, pipeline, onPipelineRefresh }) {
   const [refreshToken, setRefreshToken] = useState(0);
   const refresh = () => setRefreshToken((value) => value + 1);
   const sources = useOrganizationRead(organizationId, organizationSourcesPath, projectOrganizationSources, refreshToken);
@@ -148,22 +163,102 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
 
   const proposedByEvidence = claimIdsByEvidenceItem(claims.items);
 
+  // One open source-preparation panel, keyed to organization + Project + file.
+  const [preparation, setPreparation] = useState(null);
+  useEffect(() => { setPreparation(null); }, [organizationId, engagementId]);
+  const openPreparation = preparation && preparation.contextKey === contextKey ? preparation : null;
+  const preparationRecorded = () => {
+    onPipelineRefresh?.();
+    refresh();
+  };
+  const pipelineReady = isPipelineSuccess(pipeline?.status) && Boolean(pipeline?.data);
+  const preparationFiles = pipelineReady ? sourcePreparationFiles(pipeline.data, access) : [];
+
   return (
     <div data-client-evidence-workflow="">
       {notice ? (
         <div className={`alert alert-${notice.kind} py-2 small`} role="status" data-client-workflow-notice="">{notice.text}</div>
       ) : null}
 
+      {access.reviewSensitivity || access.promoteSource ? (
+        <div className="admin-card mb-3" data-client-source-preparation="">
+          <h5 className="mb-2">Source preparation</h5>
+          <div className="small text-muted mb-2">
+            Before evidence can be extracted, each uploaded file needs its sensitivity &amp; allowed-use review and then a source
+            review that promotes it as a governed source. Promotion keeps the file&rsquo;s recorded restrictions and approves no
+            evidence, claim, or external use.
+          </div>
+          {!engagementId ? <div className="text-muted small">Select a Project to see its files.</div> : null}
+          {engagementId && pipeline?.status === "error" ? (
+            <div className="alert alert-warning py-2 small">This Project&rsquo;s file status could not be loaded.</div>
+          ) : null}
+          {engagementId && !pipelineReady && pipeline?.status !== "error" ? <div className="text-muted small">Loading this Project&rsquo;s files...</div> : null}
+          {engagementId && pipelineReady && preparationFiles.length === 0 ? (
+            <div className="text-muted small">No files in this Project are waiting for sensitivity review or source promotion.</div>
+          ) : null}
+          {engagementId && preparationFiles.length > 0 ? (
+            <ul className="list-group">
+              {preparationFiles.map((file) => {
+                const current = file.stages.find((entry) => entry.key === file.currentStage);
+                return (
+                  <li key={file.intakeFileId} className="list-group-item small" data-client-preparation-file={file.intakeFileId}
+                    data-client-preparation-next={file.nextAction}>
+                    <div className="fw-semibold">{file.safeFilename}</div>
+                    <div className="text-muted">
+                      {PIPELINE_STAGE_LABELS[file.currentStage]}: {current ? stageStatusLabel(current) : "Unknown"}
+                    </div>
+                    <div className="mt-1" data-client-preparation-guidance="">{sourcePreparationGuidance(file, access)}</div>
+                    {file.currentStage === "sensitivity_review" && access.reviewSensitivity ? (
+                      <button type="button" className="btn btn-sm btn-outline-primary mt-1" data-client-open-sensitivity-review={file.intakeFileId}
+                        onClick={() => setPreparation({ contextKey, kind: "sensitivity", file })}>
+                        Review sensitivity &amp; allowed use
+                      </button>
+                    ) : null}
+                    {file.currentStage === "source_review" && file.nextAction === "promote_source" && access.promoteSource ? (
+                      <button type="button" className="btn btn-sm btn-primary mt-1" data-client-open-source-review={file.intakeFileId}
+                        onClick={() => setPreparation({ contextKey, kind: "source", file })}>
+                        Review &amp; promote source
+                      </button>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
+          ) : null}
+          {openPreparation?.kind === "sensitivity" ? (
+            <ClientSensitivityReviewPanel
+              key={`${contextKey}:sensitivity:${openPreparation.file.intakeFileId}`}
+              organizationId={organizationId}
+              intakeFileId={openPreparation.file.intakeFileId}
+              safeFilename={openPreparation.file.safeFilename}
+              onClose={() => setPreparation(null)}
+              onDecisionRecorded={preparationRecorded}
+            />
+          ) : null}
+          {openPreparation?.kind === "source" ? (
+            <ClientSourcePromotionPanel
+              key={`${contextKey}:source:${openPreparation.file.intakeFileId}`}
+              organizationId={organizationId}
+              engagementId={engagementId}
+              intakeFileId={openPreparation.file.intakeFileId}
+              safeFilename={openPreparation.file.safeFilename}
+              onClose={() => setPreparation(null)}
+              onDecisionRecorded={preparationRecorded}
+            />
+          ) : null}
+        </div>
+      ) : null}
+
       <div className="admin-card mb-3">
         <h5 className="mb-2">Data Sources</h5>
         <div className="small text-muted mb-2">
-          Sources appear here after Get Kinder has reviewed and promoted an uploaded file. Extract evidence from a source
-          version to see what it supports.
+          Sources appear here once an uploaded file has been reviewed and promoted. Extract evidence from a source version
+          to see what it supports.
         </div>
         {sources.status === "loading" ? <div className="text-muted small">Loading sources...</div> : null}
         {sources.status === "error" ? <div className="alert alert-warning py-2 small">Sources could not be loaded. {sources.message}</div> : null}
         {sources.status === "success" && sources.items.length === 0 ? (
-          <div className="text-muted small">No promoted sources yet. Upload data in Files; Get Kinder reviews it before it becomes a source.</div>
+          <div className="text-muted small">No promoted sources yet. Upload data in Files; each file is reviewed before it becomes a source.</div>
         ) : null}
         {sources.status === "success" && sources.items.length > 0 ? (
           <ul className="list-group">

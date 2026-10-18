@@ -1,8 +1,10 @@
 import { errorText, isRouteUuid } from "../impactEvidenceLibraryLogic.js";
+import { nextActionText } from "./clientEvidencePipelineLogic.js";
 
 /**
  * Client organization-administrator evidence-to-draft workflow (owner
- * decision 2026-10-18): governed source -> evidence extraction -> evidence ->
+ * decision 2026-10-18): sensitivity review -> source candidate promotion ->
+ * governed source -> evidence extraction -> evidence ->
  * claim proposal -> claim gap follow-ups (P2-04) -> claim selection ->
  * internal evidence summary / impact narrative. Every flag is the server's
  * access-capabilities answer; nothing here grants or infers authority.
@@ -10,7 +12,17 @@ import { errorText, isRouteUuid } from "../impactEvidenceLibraryLogic.js";
  * can still be missing a Project or a claim, and is told which.
  */
 
-const WORKFLOW_OPERATION_KEYS = Object.freeze(["extractEvidence", "proposeClaim", "generateClaimGapFollowups", "generateDrafts"]);
+// reviewSensitivity / promoteSource: the governed source preparation an
+// organization administrator may complete itself (owner decisions 2026-10-12
+// and 2026-10-18), shown in the same tab for the selected Project.
+const WORKFLOW_OPERATION_KEYS = Object.freeze([
+  "reviewSensitivity",
+  "promoteSource",
+  "extractEvidence",
+  "proposeClaim",
+  "generateClaimGapFollowups",
+  "generateDrafts",
+]);
 
 // Terminal claim review outcome the generation repository always rejects
 // (claim_reviewed_not_supported). Server-authoritative claimStrength.
@@ -154,4 +166,75 @@ export function internalDraftResultSummary(data, contentType) {
     citedClaimCount: citedClaimIds.size,
     replayed: data.replayed === true,
   };
+}
+
+/**
+ * The selected Project's files whose next step is governed source
+ * preparation, from the client evidence pipeline (server-derived stage and
+ * next action). Sensitivity review is listed only for an actor the
+ * capabilities admit; a source_review file is always listed so the actor sees
+ * its actual state (promotable by this actor, or the server's blocker).
+ */
+export function sourcePreparationFiles(pipelineData, access) {
+  const files = Array.isArray(pipelineData?.files) ? pipelineData.files : [];
+  return files.filter((file) => (
+    (file.currentStage === "sensitivity_review" && access?.reviewSensitivity === true && file.currentStatus !== "failed")
+    || file.currentStage === "source_review"
+    || (file.currentStage === "evidence_extraction" && file.nextAction === "extract_evidence")
+  ));
+}
+
+// The decision response, as one line: what was recorded and what the
+// server-side evidence extraction handoff did. Counts only.
+export function sourcePromotionResultMessage(data) {
+  const status = data?.promotion_decision?.decision_status;
+  const handoff = data?.evidence_extraction_handoff;
+  const replayed = data?.replayed === true ? " (already recorded; nothing new was written)" : "";
+  if (status === "promoted") {
+    if (handoff?.status === "created" || handoff?.status === "replayed") {
+      return `Source promoted${replayed}. Evidence extraction ${handoff.status === "created" ? "created" : "already had"} ${handoff.evidence_item_count ?? 0} evidence item(s), awaiting Get Kinder evidence review.`;
+    }
+    if (handoff?.status === "not_created") {
+      return `Source promoted${replayed}. Evidence was not created automatically (${handoff.error_code || "unknown"}); use "Extract evidence" on the source below.`;
+    }
+    return `Source promoted${replayed}.`;
+  }
+  if (status === "rejected") return `Source candidate rejected${replayed}. No source or evidence will be created from this file.`;
+  if (status === "needs_more_information") return `Marked as needing more information${replayed}. The candidate stays open; nothing was promoted.`;
+  return "Decision recorded.";
+}
+
+// Why a P1-08 decision wrote nothing, from the server's own structured
+// refusal (error code, blockers, and the repository's diagnostic phase).
+const SOURCE_PROMOTION_PHASE_MESSAGES = Object.freeze({
+  source_promotion_permission_predicate_failed:
+    "this file's recorded sensitivity and allowed-use restrictions do not permit promotion",
+  source_promotion_reviewed_source_type_invalid: "the reviewed source type is not one of the allowed types",
+  source_promotion_candidate_review_incomplete: "the candidate or its review item is not in a state that can take this decision",
+});
+
+export function sourcePromotionFailureMessage(result) {
+  const code = result?.body?.error?.code;
+  const phase = result?.body?.data?.exact_verification_phase;
+  if (code === "validation_blocker" && SOURCE_PROMOTION_PHASE_MESSAGES[phase]) {
+    return `Source not promoted: ${SOURCE_PROMOTION_PHASE_MESSAGES[phase]} (${phase}). Nothing was written.`;
+  }
+  if (code === "conflict_current_state_changed") {
+    return "Source not promoted: this candidate changed since it was loaded. The refreshed state is shown. Nothing new was written.";
+  }
+  const reason = result?.body?.blockers?.[0]?.blocking_reason;
+  if (code === "authorization_denied" && typeof reason === "string" && /^[a-z0-9_]+$/.test(reason)) {
+    return `Source not promoted: your account may not record this decision (${reason}). Nothing was written.`;
+  }
+  return errorText(result);
+}
+
+// The guidance line for one source-preparation file. The pipeline's file
+// sensitivity stage names Get Kinder's review; an actor the capabilities
+// admit to that review is told it is theirs to do here.
+export function sourcePreparationGuidance(file, access) {
+  if (file?.currentStage === "sensitivity_review" && access?.reviewSensitivity === true) {
+    return "Your action is needed: review this file's sensitivity & allowed use. Recording a \"reviewed\" decision creates its source candidate.";
+  }
+  return nextActionText(file);
 }

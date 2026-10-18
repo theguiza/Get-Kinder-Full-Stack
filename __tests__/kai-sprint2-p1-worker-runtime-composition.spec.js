@@ -265,11 +265,20 @@ test("no automatic retry: the tick never sets retry: true", async () => {
   }
 });
 
-test("no P1-06+ activation: the runtime module imports only the P1-03/P1-04/P1-05 seams", () => {
+test("no P1-07+ activation: the runtime module imports only the P1-03/P1-04/P1-05 seams and the P1-06 worker handoff", () => {
   const source = readFileSync("Backend/kai/parsing/p1WorkerRuntime.js", "utf8");
   const importLines = source.match(/^import .+$/gm) || [];
   assert.ok(importLines.length > 0);
   for (const line of importLines) {
+    if (/kaiReviewQueueService|postgresReviewQueueRepository/.test(line)) {
+      // Owner decision 2026-10-18: only the post-profiling handoff and its
+      // repository (bound to the worker's transaction), never the human seams.
+      assert.ok([
+        'import { ensureSensitivityReviewQueueItemAfterProfiling } from "../services/kaiReviewQueueService.js";',
+        'import { createPostgresReviewQueueRepository } from "../dictionary/postgresReviewQueueRepository.js";',
+      ].includes(line), line);
+      continue;
+    }
     assert.doesNotMatch(
       line,
       /evidence|claim|generat|review-?cockpit|reviewQueue|sourceCandidate|sourcePromotion|exportReview|exportCandidate|humanAuthority/i,
@@ -372,12 +381,14 @@ test("A. fresh success: a fresh P1-03 completion continues through P1-04 then P1
     },
     createProductionMetadataOnlyAudit: () => ({ prepareMetadataOnlyAudit: () => ({ ok: true, publish: async () => {} }) }),
     p1DownstreamRecoveryRepository: grantingRecoveryRepository(),
-    // No P1-06 dependency is ever wired in by the runtime, so a caller cannot
-    // even supply a reachable one to spy on - `createSensitivityReviewQueueItem`
-    // has no dependency key on this seam at all.
-    createSensitivityReviewQueueItem: async (input) => {
-      reviewQueueCalls.push(input);
+    // The human P1-06 seam has no dependency key on the runtime; only the
+    // post-profiling handoff (owner decision 2026-10-18) is reached.
+    createSensitivityReviewQueueItem: async () => {
       throw new Error("must never be reachable");
+    },
+    ensureSensitivityReviewQueueItemAfterProfiling: async (input) => {
+      reviewQueueCalls.push(input);
+      return { ok: true, data: { reviewQueueItem: { review_queue_item_id: "rq-1" }, replayed: false }, error: null };
     },
   });
 
@@ -393,9 +404,13 @@ test("A. fresh success: a fresh P1-03 completion continues through P1-04 then P1
   assert.equal(sensitivityCalls[0].fileProfileId, OUTPUT_PROFILE_ID);
   assert.equal(sensitivityCalls[0].dataDictionaryId, DATA_DICTIONARY_ID);
 
-  assert.equal(reviewQueueCalls.length, 0);
+  assert.equal(reviewQueueCalls.length, 1);
+  assert.equal(reviewQueueCalls[0].organizationId, ORG_A);
+  assert.equal(reviewQueueCalls[0].intakeSensitivityProfileId, "sp-1");
+  assert.deepEqual(Object.keys(reviewQueueCalls[0]).sort(), ["intakeSensitivityProfileId", "now", "organizationId"]);
 
   const entry = result.data.activated[0];
+  assert.deepEqual(entry.sensitivityReviewWork, { ok: true, replayed: false, reviewQueueItemId: "rq-1" });
   assert.equal(entry.dataDictionary.ok, true);
   assert.equal(entry.sensitivityProfile.ok, true);
 });
@@ -625,13 +640,54 @@ test("D. non-completed P1-03 results never reach P1-04, even a malformed/fake re
   assert.equal(sensitivityCalls.length, 0);
 });
 
-test("E. P1-06 boundary: no P1-06 seam is ever imported or reachable from the runtime module", () => {
+test("E. P1-06 boundary: only the post-profiling handoff is imported; the human P1-06 seams are never reachable", () => {
   const source = readFileSync("Backend/kai/parsing/p1WorkerRuntime.js", "utf8");
   const importLines = source.match(/^import .+$/gm) || [];
   for (const line of importLines) {
-    assert.doesNotMatch(line, /createSensitivityReviewQueueItem|kaiReviewQueueService|review-?queue/i);
+    if (/kaiReviewQueueService|postgresReviewQueueRepository/.test(line)) {
+      assert.ok([
+        'import { ensureSensitivityReviewQueueItemAfterProfiling } from "../services/kaiReviewQueueService.js";',
+        'import { createPostgresReviewQueueRepository } from "../dictionary/postgresReviewQueueRepository.js";',
+      ].includes(line), line);
+      continue;
+    }
+    assert.doesNotMatch(line, /createSensitivityReviewQueueItem|review-?queue/i);
   }
   assert.doesNotMatch(source, /createSensitivityReviewQueueItem\s*\(/);
+  assert.match(source, /ensureSensitivityReviewQueueItemAfterProfiling/);
+});
+
+test("E2. P1-06 handoff failure is reported, never undoes P1-05, and a thrown handoff is contained", async () => {
+  for (const handoff of [
+    async () => ({ ok: false, data: null, error: { code: "validation_blocker" } }),
+    async () => { throw new Error("boom"); },
+  ]) {
+    const calls = emptyCalls();
+    const result = await processKaiP1IntakeFile(
+      { organizationId: ORG_A, intakeFileId: "file-1" },
+      { ...completedChainDependencies(calls), ensureSensitivityReviewQueueItemAfterProfiling: handoff },
+    );
+    assert.equal(result.ok, true);
+    assert.equal(result.data.sensitivityProfile.ok, true);
+    assert.equal(result.data.stoppedAt, "sensitivity_review_work");
+    assert.equal(result.data.sensitivityReviewWork.ok, false);
+    assert.match(result.data.sensitivityReviewWork.code, /^(validation_blocker|system_error)$/);
+  }
+});
+
+test("E3. a P1-05 failure never reaches the P1-06 handoff", async () => {
+  const calls = emptyCalls();
+  let handoffs = 0;
+  const result = await processKaiP1IntakeFile(
+    { organizationId: ORG_A, intakeFileId: "file-1" },
+    {
+      ...completedChainDependencies(calls),
+      persistIntakeSensitivityProfile: async () => ({ ok: false, data: null, error: { code: "validation_blocker" } }),
+      ensureSensitivityReviewQueueItemAfterProfiling: async () => { handoffs += 1; return { ok: true, data: {} }; },
+    },
+  );
+  assert.equal(result.data.stoppedAt, "persist_intake_sensitivity_profile");
+  assert.equal(handoffs, 0);
 });
 
 function completedChainDependencies(calls) {
@@ -648,6 +704,9 @@ function completedChainDependencies(calls) {
     },
     createProductionMetadataOnlyAudit: () => ({ prepareMetadataOnlyAudit: () => ({ ok: true, publish: async () => {} }) }),
     p1DownstreamRecoveryRepository: grantingRecoveryRepository(),
+    ensureSensitivityReviewQueueItemAfterProfiling: async () => ({
+      ok: true, data: { reviewQueueItem: { review_queue_item_id: "rq-1" }, replayed: false }, error: null,
+    }),
     now: () => "2026-10-10T12:00:00.000Z",
   };
 }

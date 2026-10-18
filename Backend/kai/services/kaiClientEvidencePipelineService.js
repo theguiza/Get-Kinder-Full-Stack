@@ -8,6 +8,8 @@ import {
   listClientEvidencePipelineFiles,
 } from "../db/kaiClientEvidencePipelineReadModel.js";
 import { listClientImpactFacts } from "./kaiClientImpactFactsService.js";
+import { authorizeSourcePromotionDecision } from "./kaiSourcePromotionService.js";
+import { __evidenceLineageServiceContract } from "./kaiEvidenceLineageService.js";
 
 /**
  * Client-safe evidence pipeline for one organization + engagement/project:
@@ -21,7 +23,14 @@ import { listClientImpactFacts } from "./kaiClientImpactFactsService.js";
  * current source versions, evidence items, claims, and open client
  * follow-ups; see kaiClientEvidencePipelineReadModel.js). No stage is
  * advanced here and no review is performed. The GK review gates stay GK
- * work: the client is told only that a Get Kinder review is pending.
+ * work: the client is told only that a Get Kinder review is pending - except
+ * where the requesting actor itself holds the organization-scoped authority
+ * for the step (owner decision 2026-10-18): a source candidate a P1-08
+ * decision can act on now, for the binding-derived organization
+ * administrator, and evidence extraction from a promoted source, for a
+ * client_admin. Those become the client's own next action; a source that
+ * cannot be promoted (no candidate, or the fail-closed permission predicate
+ * no longer holds) keeps a Get Kinder state with its actual reason.
  *
  * Never returned: file content, profile/dictionary/sensitivity values,
  * sensitivity decision outcomes, evidence or claim statements for anything
@@ -80,6 +89,8 @@ const NEXT_ACTION = Object.freeze({
   answerClientFollowups: "answer_client_followups",
   uploadNewFile: "upload_new_file",
   contactGetKinder: "contact_get_kinder",
+  promoteSource: "promote_source",
+  extractEvidence: "extract_evidence",
 });
 
 // Only these parser error codes are ever written (parserProfileWorkerOrchestration.js);
@@ -96,6 +107,10 @@ const PIPELINE_REASONS = Object.freeze([
   "processing",
   "waiting_for_get_kinder_review",
   "waiting_for_source_promotion",
+  "source_promotion_ready",
+  "source_candidate_missing",
+  "source_promotion_blocked",
+  "evidence_extraction_ready",
   "evidence_extraction_pending",
   "evidence_awaiting_review",
   "impact_fact_review_pending",
@@ -106,6 +121,31 @@ const PIPELINE_REASONS = Object.freeze([
 ]);
 
 class ClientPipelineProjectionError extends Error {}
+
+const NO_CLIENT_AUTHORITY = Object.freeze({ promoteSource: false, extractEvidence: false });
+const EXTRACTION_ROLES = [...__evidenceLineageServiceContract.EVIDENCE_LINEAGE_ALLOWED_ROLES];
+const CLIENT_EXTRACTION_ROLES = new Set(EXTRACTION_ROLES.filter((role) => role.startsWith("client_")));
+const GK_EXTRACTION_ROLES = new Set(EXTRACTION_ROLES.filter((role) => !role.startsWith("client_")));
+
+/**
+ * The organization-scoped client authority the requesting actor holds for a
+ * pipeline step, from each governing service's own predicate: P1-08's
+ * authorizeSourcePromotionDecision (its binding-derived organization
+ * administrator half only - a GK decider is still Get Kinder), and P2-01's
+ * role set restricted to its client roles (client_admin) for an actor that
+ * does not also pass it as Get Kinder. Object eligibility is still decided
+ * per file from persisted state, and every write re-authorizes.
+ */
+function resolveClientAuthority(actorContext, organizationId) {
+  const promotion = authorizeSourcePromotionDecision(actorContext, organizationId);
+  const passesExtraction = (allowedRoles) => allowedRoles.size > 0 && validateActorCanPerformOperation(
+    actorContext, __evidenceLineageServiceContract.EVIDENCE_LINEAGE_OPERATION, organizationId, { allowedRoles },
+  ).ok === true;
+  return {
+    promoteSource: promotion.ok === true && promotion.organizationAdminAuthorized === true,
+    extractEvidence: passesExtraction(CLIENT_EXTRACTION_ROLES) && !passesExtraction(GK_EXTRACTION_ROLES),
+  };
+}
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -145,7 +185,7 @@ function stage(key, status, responsible, extra = {}) {
  * first blocking stage are "not_started" (nothing downstream can exist
  * without it); a downstream object that exists anyway is still counted.
  */
-function deriveFileStages(row, reviewedImpactFactCount) {
+function deriveFileStages(row, reviewedImpactFactCount, clientAuthority = NO_CLIENT_AUTHORITY) {
   const stages = [];
   const upload = row.upload_state;
   if (upload === "confirmed") stages.push(stage("upload", STAGE_STATUS.complete, RESPONSIBLE.none));
@@ -216,15 +256,32 @@ function deriveFileStages(row, reviewedImpactFactCount) {
     stages.push(stage("source_review", STAGE_STATUS.complete, RESPONSIBLE.none));
   } else if (candidates > 0 && rejected === candidates) {
     stages.push(stage("source_review", STAGE_STATUS.closed, RESPONSIBLE.none));
+  } else if (candidates === 0) {
+    // A reviewed sensitivity decision with no P1-07 candidate: nothing exists
+    // to promote; the handoff did not create one.
+    stages.push(stage("source_review", STAGE_STATUS.waitingForGetKinder, RESPONSIBLE.getKinder, { detail: "source_candidate_missing" }));
+  } else if (row.sensitivity_permission_predicate !== true) {
+    // VAL-KAI-P1-08-002 would refuse any promotion of this candidate.
+    stages.push(stage("source_review", STAGE_STATUS.waitingForGetKinder, RESPONSIBLE.getKinder, { detail: "source_promotion_blocked" }));
+  } else if (count(row.source_candidate_actionable_count) > 0) {
+    stages.push(clientAuthority.promoteSource
+      ? stage("source_review", STAGE_STATUS.waitingForClient, RESPONSIBLE.client, { detail: "source_promotion_ready" })
+      : stage("source_review", STAGE_STATUS.waitingForGetKinder, RESPONSIBLE.getKinder));
   } else {
-    stages.push(stage("source_review", STAGE_STATUS.waitingForGetKinder, RESPONSIBLE.getKinder));
+    // A candidate exists but no P1-08 decision can act on it now (for example
+    // a promoted candidate whose source version is not current).
+    stages.push(stage("source_review", STAGE_STATUS.waitingForGetKinder, RESPONSIBLE.getKinder, { detail: "source_promotion_blocked" }));
   }
   if (stages.at(-1).status !== STAGE_STATUS.complete) return stages;
 
   const evidence = count(row.evidence_item_count);
-  stages.push(evidence > 0
-    ? stage("evidence_extraction", STAGE_STATUS.complete, RESPONSIBLE.none, { count: evidence })
-    : stage("evidence_extraction", STAGE_STATUS.waitingForGetKinder, RESPONSIBLE.getKinder, { count: 0 }));
+  if (evidence > 0) {
+    stages.push(stage("evidence_extraction", STAGE_STATUS.complete, RESPONSIBLE.none, { count: evidence }));
+  } else if (clientAuthority.extractEvidence) {
+    stages.push(stage("evidence_extraction", STAGE_STATUS.waitingForClient, RESPONSIBLE.client, { count: 0, detail: "evidence_extraction_ready" }));
+  } else {
+    stages.push(stage("evidence_extraction", STAGE_STATUS.waitingForGetKinder, RESPONSIBLE.getKinder, { count: 0 }));
+  }
   if (stages.at(-1).status !== STAGE_STATUS.complete) return stages;
 
   const evidenceNeedsReview = count(row.evidence_needs_review_count);
@@ -255,6 +312,7 @@ function reasonForCurrentStage(current) {
   if (!current) return "complete";
   const { key, status } = current;
   if (status === STAGE_STATUS.complete) return "complete";
+  if (current.detail) return current.detail;
   if (status === STAGE_STATUS.failed) return "failed";
   if (status === STAGE_STATUS.waitingForClient) return "waiting_for_client";
   if (status === STAGE_STATUS.unknown) return "unknown";
@@ -273,6 +331,8 @@ function nextActionFor(current) {
   if (!current || current.status === STAGE_STATUS.complete) return NEXT_ACTION.none;
   switch (current.status) {
     case STAGE_STATUS.waitingForClient:
+      if (current.detail === "source_promotion_ready") return NEXT_ACTION.promoteSource;
+      if (current.detail === "evidence_extraction_ready") return NEXT_ACTION.extractEvidence;
       return NEXT_ACTION.answerClientFollowups;
     case STAGE_STATUS.failed:
       return current.responsible === RESPONSIBLE.getKinder ? NEXT_ACTION.contactGetKinder : NEXT_ACTION.uploadNewFile;
@@ -280,6 +340,10 @@ function nextActionFor(current) {
     case STAGE_STATUS.notStarted:
       return current.responsible === RESPONSIBLE.kai ? NEXT_ACTION.waitForProcessing : NEXT_ACTION.none;
     case STAGE_STATUS.waitingForGetKinder:
+      if (current.detail === "source_candidate_missing" || current.detail === "source_promotion_blocked") {
+        return NEXT_ACTION.contactGetKinder;
+      }
+      return NEXT_ACTION.waitForGetKinder;
     case STAGE_STATUS.notCurrentlyEligible:
       return NEXT_ACTION.waitForGetKinder;
     default:
@@ -291,16 +355,19 @@ function nextActionFor(current) {
  * Pure projection of one lineage row plus the set of governed-eligible claim
  * ids. Exported for tests.
  */
-function projectPipelineFile(row, eligibleClaimIds) {
+function projectPipelineFile(row, eligibleClaimIds, clientAuthority = NO_CLIENT_AUTHORITY) {
   if (!isPlainObject(row) || !isCanonicalUuid(row.intake_file_id)) {
     throw new ClientPipelineProjectionError("invalid file row");
   }
   const claimIds = Array.isArray(row.claim_ids) ? row.claim_ids : [];
   const reviewedImpactFactClaimIds = claimIds.filter((claimId) => eligibleClaimIds.has(claimId));
-  const stages = deriveFileStages(row, reviewedImpactFactClaimIds.length);
+  const stages = deriveFileStages(row, reviewedImpactFactClaimIds.length, clientAuthority);
   const current = stages.find((entry) => entry.status !== STAGE_STATUS.complete) || null;
+  // `detail` is internal to the derivation (it becomes `reason`); stages carry
+  // only key, status, responsible, and the optional count / failure category.
   const fullStages = PIPELINE_STAGES.map((key) => stages.find((entry) => entry.key === key)
-    || stage(key, STAGE_STATUS.notStarted, RESPONSIBLE.none));
+    || stage(key, STAGE_STATUS.notStarted, RESPONSIBLE.none))
+    .map(({ detail, ...rest }) => rest);
   return {
     file: {
       intakeFileId: row.intake_file_id,
@@ -381,11 +448,12 @@ export async function getClientEvidencePipeline(input, dependencies = {}) {
   }
   const eligibleClaimIds = new Set(eligibleFacts.map((fact) => fact.claimId));
 
+  const clientAuthority = resolveClientAuthority(actorContext, organizationId);
   try {
     const files = [];
     const projectClaimIds = new Set();
     for (const row of pageRows) {
-      const projected = projectPipelineFile(row, eligibleClaimIds);
+      const projected = projectPipelineFile(row, eligibleClaimIds, clientAuthority);
       files.push(projected.file);
       for (const claimId of projected.reviewedImpactFactClaimIds) projectClaimIds.add(claimId);
     }
@@ -430,4 +498,5 @@ export const __clientEvidencePipelineServiceContract = Object.freeze({
   PIPELINE_REASONS,
   PARSER_FAILURE_CATEGORY,
   projectPipelineFile,
+  resolveClientAuthority,
 });

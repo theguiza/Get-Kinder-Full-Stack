@@ -56,7 +56,11 @@ import { Client } from "pg";
  * __tests__/kai-client-admin-evidence-to-draft-browser-acceptance.integration.spec.js
  * runs a binding-derived client_admin's Data Sources -> extraction -> evidence
  * -> claim proposal -> claim selection -> internal draft generation workflow,
- * with organization isolation and the protected operations.
+ * with organization isolation and the protected operations, and
+ * __tests__/kai-client-admin-source-promotion-browser-acceptance.integration.spec.js
+ * runs the worker's P1-06 handoff -> the binding-derived client_admin's
+ * sensitivity decision, P1-07 candidate, and P1-08 promotion -> P2-01
+ * evidence, with no Get Kinder human, plus the pipeline guidance and denials.
  *
  * - An ephemeral, loopback-only PostgreSQL cluster owned by this runner,
  *   with the union of the schemas the client product reads, applied in the
@@ -116,6 +120,7 @@ const ACCEPTANCE_SPECS = Object.freeze([
   "__tests__/kai-organization-administrator-revocation-browser-acceptance.integration.spec.js",
   "__tests__/kai-organization-application-decision-security-browser-acceptance.integration.spec.js",
   "__tests__/kai-client-admin-evidence-to-draft-browser-acceptance.integration.spec.js",
+  "__tests__/kai-client-admin-source-promotion-browser-acceptance.integration.spec.js",
 ]);
 const acceptanceSpec = process.argv[2] || ACCEPTANCE_SPECS[0];
 if (!ACCEPTANCE_SPECS.includes(acceptanceSpec)) {

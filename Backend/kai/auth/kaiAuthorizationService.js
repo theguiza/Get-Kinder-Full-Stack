@@ -291,14 +291,54 @@ export function validateActorCanPerformSensitivityReview(
   if (gkAuthorization.ok) return gkAuthorization;
 
   const memberships = activeMembershipsForOrg(actorContext, organizationId);
-  const boundOrganizationAdmin = memberships.some((membership) =>
-    membership.role_name === "client_admin"
-    && membership.source === "gk_organization_binding"
-    && typeof membership.gk_organization_id === "number"
-    && Number.isInteger(membership.gk_organization_id)
-    && membership.gk_organization_id > 0,
-  );
-  if (!boundOrganizationAdmin) return gkAuthorization;
+  if (!memberships.some(isBoundOrganizationAdministratorMembership)) return gkAuthorization;
 
   return { ok: true, memberships, organizationAdminAuthorized: true };
 }
+
+function isBoundOrganizationAdministratorMembership(membership) {
+  return membership.role_name === "client_admin"
+    && membership.source === "gk_organization_binding"
+    && typeof membership.gk_organization_id === "number"
+    && Number.isInteger(membership.gk_organization_id)
+    && membership.gk_organization_id > 0;
+}
+
+/**
+ * The organization-administrator half of validateActorCanPerformSensitivityReview
+ * alone, for an operation whose GK authority is checked separately in its own
+ * mode (owner decision 2026-10-18: P1-08 source promotion). Admits only an
+ * active, binding-derived client_admin membership in this exact organization:
+ * a stored client_admin, any global role, and platform-superuser authority do
+ * not satisfy it. The shared validator still applies the assistant boundary,
+ * mapped actor, organization scope, and active-membership checks first.
+ */
+export function validateActorIsBoundOrganizationAdministrator(actorContext, operation, organizationId) {
+  const base = validateActorCanPerformOperation(actorContext, operation, organizationId, {
+    allowedRoles: BOUND_ORGANIZATION_ADMINISTRATOR_ROLES,
+  });
+  const memberships = activeMembershipsForOrg(actorContext, organizationId);
+  if (base.ok && memberships.some(isBoundOrganizationAdministratorMembership)) {
+    return { ok: true, memberships, organizationAdminAuthorized: true };
+  }
+  if (!base.ok) return base;
+  return {
+    ok: false,
+    error_code: "authorization_denied",
+    blockers: [
+      {
+        validator_key: "VAL-AUT-004",
+        severity: "blocker",
+        object_type: "operation",
+        object_code: operation,
+        object_id: organizationId,
+        message: "Actor role is not allowed for this operation.",
+        blocking_reason: "role_not_allowed",
+        required_fix: "Use an active organization-scoped role allowed for this operation.",
+        evidence: { bypass_allowed: false },
+      },
+    ],
+  };
+}
+
+const BOUND_ORGANIZATION_ADMINISTRATOR_ROLES = new Set(["client_admin"]);

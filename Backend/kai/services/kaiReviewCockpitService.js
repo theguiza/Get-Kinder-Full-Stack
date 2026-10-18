@@ -7,11 +7,13 @@ import { resolveKaiActorContext } from "../auth/kaiActorContext.js";
 import {
   validateActorCanPerformOperation,
   validateActorCanPerformSensitivityReview,
+  validateActorIsBoundOrganizationAdministrator,
 } from "../auth/kaiAuthorizationService.js";
 import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
 import {
   getReviewCockpitFileProfileRecord as readFileProfileRecord,
   getReviewCockpitIntakeFileSensitivityProfileRecord as readIntakeFileSensitivityProfileRecord,
+  getReviewCockpitIntakeFileSourceCandidateRecord as readIntakeFileSourceCandidateRecord,
   getReviewCockpitSensitivityProfileRecord as readSensitivityProfileRecord,
   getReviewCockpitSourceCandidateRecord as readSourceCandidateRecord,
   listReviewCockpitQueueItems as readReviewCockpitQueueItems,
@@ -241,6 +243,57 @@ function authorizeReviewCockpitReadRole(actorContext, organizationId) {
   );
 }
 
+/**
+ * Source-candidate read and decision gate (owner decision 2026-10-18): the
+ * unchanged cockpit read gate (global GK role plus exact membership), or, when
+ * that fails, an active binding-derived client_admin of this exact
+ * organization with an active KAI account. The second half reaches only the
+ * candidate lookup, candidate detail, and decision endpoints; every other
+ * cockpit read keeps authorizeReviewCockpitRequest. Whether the actor may then
+ * decide is still P1-08's own authorizeSourcePromotionDecision.
+ */
+function authorizeSourceCandidateReadRole(actorContext, organizationId) {
+  const roleAuth = authorizeReviewCockpitReadRole(actorContext, organizationId);
+  if (roleAuth.ok) return roleAuth;
+  const adminAuth = validateActorIsBoundOrganizationAdministrator(actorContext, REVIEW_COCKPIT_READ_OPERATION, organizationId);
+  if (adminAuth.ok && actorContext?.kaiUserStatus === "active") return adminAuth;
+  return roleAuth;
+}
+
+async function authorizeSourceCandidateRequest(input, dependencies) {
+  if (!isKaiSprint2Enabled(dependencies.env || process.env)) {
+    return { ok: false, error: buildKaiError("feature_disabled") };
+  }
+
+  const organizationId = String(input.organizationId || "").trim().toLowerCase();
+  if (!UUID_RE.test(organizationId)) return { ok: false, error: buildKaiError("invalid_request") };
+
+  const actorResult = input.actorContext
+    ? { ok: true, actorContext: input.actorContext }
+    : await resolveKaiActorContext(input.req, dependencies);
+  if (!actorResult.ok) return { ok: false, error: actorError(actorResult) };
+
+  const actorContext = actorResult.actorContext;
+  if (actorContext.actorType !== "human") {
+    return { ok: false, error: buildKaiError("authorization_denied") };
+  }
+
+  const roleAuth = authorizeSourceCandidateReadRole(actorContext, organizationId);
+  if (!roleAuth.ok) {
+    return { ok: false, error: buildKaiError(roleAuth.error_code, { blockers: roleAuth.blockers }) };
+  }
+
+  const tenant = validateTenantBoundaryConsistency({
+    expectedOrganizationId: organizationId,
+    payload: { organization_id: organizationId },
+  });
+  if (tenant.severity === "blocker") {
+    return { ok: false, error: buildKaiError("tenant_boundary_violation", { blockers: [tenant] }) };
+  }
+
+  return { ok: true, organizationId, actorContext, roleAuth };
+}
+
 async function authorizeSensitivityReviewRequest(input, dependencies) {
   if (!isKaiSprint2Enabled(dependencies.env || process.env)) {
     return { ok: false, error: buildKaiError("feature_disabled") };
@@ -315,13 +368,14 @@ export async function getReviewCockpitCapabilities(input = {}, dependencies = {}
   if (!actorResult.ok && actorResult.error_code !== "mapped_kai_user_required") {
     return buildKaiError("unauthorized");
   }
+  const denied = { can_manage_sensitivity_review: false, can_review_source_candidates: false, can_promote_source_candidates: false };
   if (!actorResult.ok) {
-    return { ok: true, data: { can_manage_sensitivity_review: false, can_review_source_candidates: false } };
+    return { ok: true, data: denied };
   }
 
   const actorContext = actorResult.actorContext;
   if (actorContext.actorType !== "human") {
-    return { ok: true, data: { can_manage_sensitivity_review: false, can_review_source_candidates: false } };
+    return { ok: true, data: denied };
   }
 
   const roleAuth = validateActorCanPerformSensitivityReview(
@@ -332,16 +386,21 @@ export async function getReviewCockpitCapabilities(input = {}, dependencies = {}
     { globalRolesOnly: true },
   );
 
-  // Source review reads (queue and candidate detail) use the same gate as
-  // every other cockpit read; whether this actor may then decide is reported
-  // per candidate by the detail's decision_controls_enabled.
+  // The GK source review list (queue reads) uses the same gate as every other
+  // cockpit read; whether this actor may then decide is reported per
+  // candidate by the detail's decision_controls_enabled.
   const sourceReviewAuth = authorizeReviewCockpitReadRole(actorContext, organizationId);
+  // P1-08 decision authority through the candidate gate (GK, or the bound
+  // organization administrator - owner decision 2026-10-18).
+  const sourcePromotionAuth = authorizeSourceCandidateReadRole(actorContext, organizationId).ok === true
+    && authorizeSourcePromotionDecision(actorContext, organizationId).ok === true;
 
   return {
     ok: true,
     data: {
       can_manage_sensitivity_review: roleAuth.ok === true,
       can_review_source_candidates: sourceReviewAuth.ok === true,
+      can_promote_source_candidates: sourcePromotionAuth,
     },
   };
 }
@@ -913,6 +972,48 @@ export async function getReviewCockpitIntakeFileSensitivityProfile(input = {}, d
   };
 }
 
+/**
+ * Owner decision (2026-10-18): resolves one intake file of one Project to its
+ * current P1-07 source candidate id, so the client Knowledge Studio can open
+ * the existing candidate detail. Source-candidate gate; read-only; one
+ * organization-, engagement-, and file-scoped read. A file outside this
+ * organization or engagement is not_found. Ids only; the candidate id is null
+ * while none exists, and is never inferred.
+ */
+export async function getReviewCockpitIntakeFileSourceCandidate(input = {}, dependencies = {}) {
+  const deps = resolvedDependencies(dependencies);
+  const authorization = await authorizeSourceCandidateRequest(input, deps);
+  if (!authorization.ok) return authorization.error;
+  const { organizationId } = authorization;
+
+  const intakeFileId = typeof input.intakeFileId === "string" ? input.intakeFileId : "";
+  const engagementId = typeof input.engagementId === "string" ? input.engagementId : "";
+  if (!canonicalUuid(intakeFileId) || !canonicalUuid(engagementId)) return buildKaiError("invalid_request");
+
+  const readRecord = deps.getReviewCockpitIntakeFileSourceCandidateRecord || readIntakeFileSourceCandidateRecord;
+  const record = await readRecord(organizationId, engagementId, intakeFileId);
+  if (!record) return buildKaiError("not_found");
+  if (!isPlainObject(record)) return buildKaiError("system_error");
+  if (
+    record.organization_id !== organizationId
+    || record.engagement_id !== engagementId
+    || record.intake_file_id !== intakeFileId
+  ) {
+    return buildKaiError("not_found");
+  }
+  const intakeSourceCandidateId = record.intake_source_candidate_id ?? null;
+  if (intakeSourceCandidateId !== null && !canonicalUuid(intakeSourceCandidateId)) return buildKaiError("system_error");
+
+  return {
+    ok: true,
+    data: {
+      intake_file_id: intakeFileId,
+      engagement_id: engagementId,
+      intake_source_candidate_id: intakeSourceCandidateId,
+    },
+  };
+}
+
 export async function getReviewCockpitSensitivityProfileDetail(input = {}, dependencies = {}) {
   const deps = resolvedDependencies(dependencies);
   const authorization = await authorizeSensitivityReviewRequest(input, deps);
@@ -1246,7 +1347,7 @@ function composeReviewCockpitFileProfileDetail(record, organizationId) {
  */
 export async function getReviewCockpitSourceCandidateDetail(input = {}, dependencies = {}) {
   const deps = resolvedDependencies(dependencies);
-  const authorization = await authorizeReviewCockpitRequest(input, deps);
+  const authorization = await authorizeSourceCandidateRequest(input, deps);
   if (!authorization.ok) return authorization.error;
   const { organizationId, actorContext } = authorization;
 
@@ -1331,7 +1432,7 @@ export async function submitSourceCandidateDecision(input = {}, dependencies = {
     return buildKaiError("feature_disabled");
   }
 
-  const authorization = await authorizeReviewCockpitRequest(input, deps);
+  const authorization = await authorizeSourceCandidateRequest(input, deps);
   if (!authorization.ok) return authorization.error;
   const { organizationId, actorContext } = authorization;
 

@@ -1294,6 +1294,31 @@ router.get("/admin/review-cockpit/intake-files/:intakeFileId/sensitivity-profile
 });
 
 /**
+ * Owner decision (2026-10-18): read-only lookup of one intake file's current
+ * P1-07 source candidate id for an explicit Project (engagement_id query
+ * parameter), so the client Knowledge Studio can open the existing candidate
+ * detail. Validates identifiers and delegates once to the review-cockpit
+ * service, which owns authorization and the organization/engagement/file
+ * scoped read.
+ */
+router.get("/admin/review-cockpit/intake-files/:intakeFileId/source-candidate", async (req, res) => {
+  const identifiers = reviewCockpitIdentifiers(req, "intakeFileId");
+  const engagementId = typeof req.query?.engagement_id === "string" ? req.query.engagement_id : "";
+  if (!identifiers || !KAI_SPRINT2_P0_PATTERNS.uuid.test(engagementId) || engagementId !== engagementId.toLowerCase()) {
+    return sendKaiError(res, "invalid_request");
+  }
+  return invokeService(res, async () => {
+    const service = await getReviewCockpitService();
+    return service.getReviewCockpitIntakeFileSourceCandidate({
+      ...requestContext(req, "/api/kai/sprint2/intake/admin/review-cockpit/intake-files/:intakeFileId/source-candidate"),
+      organizationId: identifiers.organizationId,
+      engagementId,
+      intakeFileId: identifiers.objectId,
+    });
+  });
+});
+
+/**
  * KAI B1A-2 Phase-5 sensitivity/allowed-use decision route. Structurally identical
  * to the source-candidate decision route below (validator -> service ->
  * repository): it contains no SQL, imports no database pool, and calls exactly one

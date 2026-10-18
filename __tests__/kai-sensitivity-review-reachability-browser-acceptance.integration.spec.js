@@ -831,7 +831,9 @@ async function runBrowserAcceptance() {
       assert.ok(!note.includes("Contact a Get Kinder administrator"), "an authorized reviewer is not sent elsewhere for this review");
       // Files at sensitivity review (FILE_QUEUE is already at source review).
       assert.deepEqual(await mixedPage.fileReviewActionIds(), [FILE_ZERO, FILE_MIXED_QUEUE, FILE_MIXED_ZERO, FILE_MIXED_NMI].sort());
-      assert.ok(body.includes(`${NAMES.queue}: Source review (Waiting for Get Kinder)`));
+      // Owner decision 2026-10-18: FILE_QUEUE's open source candidate is this
+      // administrator's own promotion step (Data Sources), not a Get Kinder wait.
+      assert.ok(body.includes(`${NAMES.queue}: Your action is needed: review this file's source candidate and promote it`));
       // The Reviews card offers the action, so it must not also say no action is needed.
       const reviewsCard = await mixedPage.cardText("Reviews");
       console.log(`[sensitivity-review-browser] mixed-role Reviews card:\n${reviewsCard}`);
@@ -840,7 +842,9 @@ async function runBrowserAcceptance() {
       assert.ok(reviewsCard.includes("Get Kinder sensitivity review needed"), "the action-required message names the Get Kinder sensitivity review");
       assert.ok(reviewsCard.includes("4 files in this project are waiting for the Get Kinder sensitivity review, which your organization-scoped review access can complete here. "
         + "Use \u201cReview sensitivity & allowed use\u201d next to each file below."), "it counts only the actionable files and points to the per-file action");
-      assert.ok(!reviewsCard.includes("Your action is needed"), "no client follow-up work is claimed");
+      assert.ok(!reviewsCard.includes("Get Kinder sent follow-up questions"), "no client follow-up work is claimed");
+      // Owner decision 2026-10-18: FILE_QUEUE's promotable candidate is this administrator's source work.
+      assert.ok(reviewsCard.includes("Ready for you in Data Sources"), "the administrator's source work is listed");
       assert.equal(await mixedPage.reviewPanelFileId(), null, "no review panel until the reviewer opens one");
       const since = mixedPage.requestsSince(mark);
       for (const r of since) {
@@ -879,7 +883,7 @@ async function runBrowserAcceptance() {
       mark = mixedPage.mark();
       await mixedPage.clickButton("Submit review");
       await mixedPage.waitForText("Sensitivity decision recorded.");
-      await mixedPage.waitForText(`${NAMES.mixedQueue}: Source review (Waiting for Get Kinder)`);
+      await mixedPage.waitForText(`${NAMES.mixedQueue}: Your action is needed: review this file's source candidate and promote it`);
       await mixedPage.idle();
       since = mixedPage.requestsSince(mark);
       console.log(`[sensitivity-review-browser] mixed requests after Submit review: ${JSON.stringify(since.map((r) => [r.method, pathOf(r), r.status]))}`);
@@ -966,7 +970,7 @@ async function runBrowserAcceptance() {
       mark = mixedPage.mark();
       await mixedPage.clickButton("Submit review");
       await mixedPage.waitForText("Sensitivity decision recorded.");
-      await mixedPage.waitForText(`${NAMES.mixedZero}: Source review (Waiting for Get Kinder)`);
+      await mixedPage.waitForText(`${NAMES.mixedZero}: Your action is needed: review this file's source candidate and promote it`);
       await mixedPage.idle();
       since = mixedPage.requestsSince(mark);
       assert.deepEqual(posts(since), [[`${COCKPIT}/sensitivity-profiles/${profileId}/decision`, 200]]);
@@ -1271,8 +1275,14 @@ async function runBrowserAcceptance() {
         const afterDecision = await governedCounts(profileId, kaiAdmin.user_id);
         const sourceReview = await orgAdminPage.fetchJson("POST", `${COCKPIT}/source-candidates/${candidate.intake_source_candidate_id}/decision?organization_id=${ORG}`,
           { outcome: "promoted", reviewed_source_type: "organization_primary_record" });
-        assert.equal(sourceReview.status, 403, "the bound admin cannot perform the separate GK source review");
-        assert.deepEqual(await governedCounts(profileId, kaiAdmin.user_id), afterDecision);
+        // Owner decision 2026-10-18: the bound administrator may also make the
+        // P1-08 promotion for its own organization, attributed to itself.
+        assert.equal(sourceReview.status, 200, JSON.stringify(sourceReview.body));
+        const afterPromotion = await governedCounts(profileId, kaiAdmin.user_id);
+        assert.deepEqual([afterPromotion.sources - afterDecision.sources, afterPromotion.source_versions - afterDecision.source_versions], [1, 1]);
+        assert.deepEqual(await query(
+          "SELECT decision_status, created_by::text FROM kai.intake_promotion_decisions WHERE organization_id = $1::uuid AND intake_source_candidate_id = $2::uuid",
+          [ORG, candidate.intake_source_candidate_id]), [{ decision_status: "promoted", created_by: kaiAdmin.user_id }]);
         const decision = await query(
           `SELECT decision_outcome, decided_by::text, decided_by_role
              FROM kai.intake_sensitivity_review_decisions

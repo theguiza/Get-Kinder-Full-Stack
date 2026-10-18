@@ -1121,7 +1121,7 @@ async function runSuite() {
     );
   });
 
-  test("16. P1-06 and later stay unreachable: dispatched work writes nothing beyond P1-03/P1-04/P1-05 and their audits", async () => {
+  test("16. dispatched work hands off to P1-06 only: one pending system-created sensitivity review item, and nothing beyond it", async () => {
     await resetTables();
     const storage = createSyntheticStorage();
     const bytes = csvBytesFor(370);
@@ -1131,6 +1131,20 @@ async function runSuite() {
     await getKaiP1FileDispatcher().whenIdle();
     assert.equal((await counts(file.intakeFileId)).sensitivityProfiles, 1);
 
+    // Owner decision 2026-10-18: the worker ensures the profile's pending
+    // P1-06 item exists, attributed to the system; no decision is recorded.
+    const { rows: items } = await query(
+      `SELECT q.queue_type, q.queue_status, q.created_by, q.created_by_type
+         FROM kai.review_queue_items q
+         JOIN kai.intake_sensitivity_profiles s
+           ON s.organization_id = q.organization_id AND s.intake_sensitivity_profile_id = q.target_object_id
+        WHERE s.intake_file_id = $1`,
+      [file.intakeFileId],
+    );
+    assert.deepEqual(items, [{ queue_type: "sensitivity_review", queue_status: "open", created_by: null, created_by_type: "system" }]);
+    const { rows: allItems } = await query("SELECT DISTINCT queue_type FROM kai.review_queue_items");
+    assert.deepEqual(allItems, [{ queue_type: "sensitivity_review" }], "no other review work");
+
     const { rows } = await query(
       `SELECT DISTINCT action FROM kai.audit_events WHERE metadata->>'intake_file_id' = $1 OR metadata->>'object_id' = $1 ORDER BY action`,
       [file.intakeFileId],
@@ -1138,13 +1152,13 @@ async function runSuite() {
     const actions = rows.map((row) => row.action);
     assert.ok(actions.includes("apply_security_assessment_policy_decision"));
     for (const action of actions) {
-      assert.doesNotMatch(action, /review_queue|source_candidate|source_promotion|evidence|claim_|generat|export/i, action);
+      assert.doesNotMatch(action, /source_candidate|source_promotion|evidence|claim_|generat|export|decision_recorded/i, action);
     }
     const tables = await query(
       `SELECT table_name FROM information_schema.tables
-        WHERE table_schema = 'kai' AND table_name ~ '(review_queue|source_candidate|evidence|claim)'`,
+        WHERE table_schema = 'kai' AND table_name ~ '(source_candidate|evidence|claim)'`,
     );
-    assert.deepEqual(tables.rows, [], "no P1-06+ substrate exists in this synthetic database to be written to");
+    assert.deepEqual(tables.rows, [], "no P1-07+ substrate exists in this synthetic database to be written to");
   });
 
   // ---------------------------------------------------------------------

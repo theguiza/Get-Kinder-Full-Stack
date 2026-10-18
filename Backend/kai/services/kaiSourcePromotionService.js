@@ -1,6 +1,9 @@
 import { isKaiSprint2Enabled } from "../config/kaiSprint2Config.js";
 import { buildKaiError } from "../errors/kaiErrors.js";
-import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationService.js";
+import {
+  validateActorCanPerformOperation,
+  validateActorIsBoundOrganizationAdministrator,
+} from "../auth/kaiAuthorizationService.js";
 import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
 import { createPostgresSourcePromotionRepository } from "../dictionary/postgresSourcePromotionRepository.js";
 
@@ -76,6 +79,17 @@ function isMappedHumanActor(actorContext) {
  * can report whether this actor may decide without reconstructing the role
  * policy. A refusal keeps the validator's own error code and blockers (a role
  * refusal is authorization_denied/role_not_allowed, never a tenant violation).
+ *
+ * Owner decision (2026-10-18), a scoped departure from Backend Contract
+ * section 22's GK source-candidate ownership: when the GK check fails, an
+ * active, binding-derived client_admin of this exact organization with an
+ * active KAI account may decide (`organizationAdminAuthorized`). The GK role
+ * set and its organization-membership mode are unchanged, so a global GK role
+ * over a client membership still does not satisfy the GK half, and a stored
+ * client_admin, client_reviewer, or client_contributor satisfies neither.
+ * Every repository validator (candidate/review completeness, lineage,
+ * VAL-KAI-P1-08-002 permission predicate, reviewed-source-type vocabulary),
+ * the transaction, the audit, and replay are identical for both halves.
  */
 export function authorizeSourcePromotionDecision(actorContext, organizationId) {
   if (!isMappedHumanActor(actorContext)) {
@@ -88,8 +102,13 @@ export function authorizeSourcePromotionDecision(actorContext, organizationId) {
     organizationId,
     { allowedRoles: SOURCE_PROMOTION_ALLOWED_ROLES },
   );
+  let organizationAdminAuthorized = false;
   if (!auth.ok) {
-    return { ok: false, error: buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers }) };
+    const adminAuth = validateActorIsBoundOrganizationAdministrator(actorContext, SOURCE_PROMOTION_OPERATION, organizationId);
+    if (!adminAuth.ok || actorContext.kaiUserStatus !== "active") {
+      return { ok: false, error: buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers }) };
+    }
+    organizationAdminAuthorized = true;
   }
 
   const tenant = validateTenantBoundaryConsistency({
@@ -100,7 +119,7 @@ export function authorizeSourcePromotionDecision(actorContext, organizationId) {
     return { ok: false, error: buildKaiError("tenant_boundary_violation", { blockers: [tenant] }) };
   }
 
-  return { ok: true };
+  return { ok: true, organizationAdminAuthorized };
 }
 
 /**

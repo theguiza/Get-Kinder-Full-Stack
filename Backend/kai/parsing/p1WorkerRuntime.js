@@ -4,8 +4,10 @@ import { listActionableKaiP1WorkCandidates } from "../db/kaiIntakeQueries.js";
 import { createDraftDataDictionary } from "../services/kaiDataDictionaryService.js";
 import { persistIntakeSensitivityProfile } from "../services/kaiIntakeSensitivityProfileService.js";
 import { createProductionMetadataOnlyAudit } from "../services/kaiMetadataOnlyAuditComposition.js";
+import { ensureSensitivityReviewQueueItemAfterProfiling } from "../services/kaiReviewQueueService.js";
 import { createPostgresDataDictionaryRepository } from "../dictionary/postgresDataDictionaryRepository.js";
 import { createPostgresIntakeSensitivityProfileRepository } from "../dictionary/postgresIntakeSensitivityProfileRepository.js";
+import { createPostgresReviewQueueRepository } from "../dictionary/postgresReviewQueueRepository.js";
 import { createKaiP1StageTransaction } from "./p1StageTransaction.js";
 import {
   P1_DOWNSTREAM_STAGES,
@@ -47,11 +49,15 @@ import {
  * PostgreSQL (`ON CONFLICT ... DO NOTHING` plus a locked re-read), so
  * overlapping operations for one file replay rather than duplicate. An
  * already-completed P1-03 run is never re-profiled or re-queued merely to
- * resume P1-04/P1-05. The operation stops there: it never imports, calls, or
- * otherwise reaches the P1-06 review-queue seam, so no worker/system/internal
- * P1-06 write path exists. P1-06 initiation remains exclusively a human
- * action, gated by the existing `AUTH-KAI-003` mapped-human-actor check in
- * `kaiReviewQueueService.js`, untouched by this package.
+ * resume P1-04/P1-05. Once P1-05 has a committed sensitivity profile (fresh,
+ * replayed, or reconciled), the operation hands off to the P1-06 seam
+ * `ensureSensitivityReviewQueueItemAfterProfiling` (owner decision
+ * 2026-10-18), which ensures the profile's pending 'sensitivity_review' work
+ * item exists, attributed to the system. That handoff records no review
+ * decision of any kind; the decision stays a mapped-human action under
+ * AUTH-KAI-003. Its failure is reported (`stoppedAt`) and never undoes P1-05;
+ * the human review-work route remains available, and a later re-run of this
+ * operation replays the idempotent handoff. Nothing beyond P1-06 is reached.
  *
  * Each downstream stage runs only under a PostgreSQL-owned attempt claim
  * (`postgresP1DownstreamRecoveryRepository.js`): the attempt is reserved
@@ -310,7 +316,28 @@ export async function processKaiP1IntakeFile(input, dependencies = {}) {
   if (sensitivityStage.result) entry.sensitivityProfile = sensitivityStage.result;
   if (!sensitivityStage.outputId) {
     entry.stoppedAt = "persist_intake_sensitivity_profile";
+    return { ok: true, data: entry, error: null };
   }
+
+  const ensureReviewWorkFn = dependencies.ensureSensitivityReviewQueueItemAfterProfiling
+    || ensureSensitivityReviewQueueItemAfterProfiling;
+  let reviewWork;
+  try {
+    reviewWork = await ensureReviewWorkFn(
+      { organizationId, intakeSensitivityProfileId: sensitivityStage.outputId, now: nowFn() },
+      {
+        env,
+        reviewQueueRepository: dependencies.reviewQueueRepository
+          || createPostgresReviewQueueRepository({ runInTransaction: dependencies.runInTransaction }),
+      },
+    );
+  } catch {
+    reviewWork = { ok: false, data: null, error: { code: "system_error" } };
+  }
+  entry.sensitivityReviewWork = reviewWork?.ok === true
+    ? { ok: true, replayed: reviewWork.data?.replayed === true, reviewQueueItemId: reviewWork.data?.reviewQueueItem?.review_queue_item_id ?? null }
+    : { ok: false, code: safeCode(reviewWork?.error?.code) || "system_error" };
+  if (reviewWork?.ok !== true) entry.stoppedAt = "sensitivity_review_work";
 
   return { ok: true, data: entry, error: null };
 }

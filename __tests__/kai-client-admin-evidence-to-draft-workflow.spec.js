@@ -450,7 +450,12 @@ test("D: client_admin is denied the seven other generators, funder evidence summ
     coverage: await assessEvidenceCoverageForSourceVersion({ organizationId: ORG_X, sourceVersionId: SOURCE_VERSION, actorContext: actor }, { env: ENV, evidenceCoverageAssessmentRepository: tripwire }),
   };
   for (const [label, result] of Object.entries(results)) assertDenied(result, "role_not_allowed", label);
-  assert.equal(authorizeSourcePromotionDecision(actor, ORG_X).ok, false, "P1-08 promotion stays GK-only");
+  // Owner decision 2026-10-18: P1-08 admits the binding-derived administrator
+  // through its dedicated organization-administrator half only.
+  assert.deepEqual(authorizeSourcePromotionDecision(actor, ORG_X), { ok: true, organizationAdminAuthorized: true });
+  assert.equal(authorizeSourcePromotionDecision({ ...memberActor("client_admin"), kaiUserStatus: "active" }, ORG_X).ok, false,
+    "a stored (unbound) client_admin still may not promote");
+  assert.equal(authorizeSourcePromotionDecision(actor, ORG_Y).ok, false, "never in another organization");
 });
 
 test("D: client_contributor and client_reviewer gain none of the eight operations", async () => {
@@ -517,13 +522,15 @@ test("F: capabilities - client_admin gets extraction, proposal, gap follow-ups, 
   const operations = capabilities.data.workflowOperations;
   assert.deepEqual(
     Object.fromEntries(Object.entries(operations).filter(([, value]) => value === true)),
-    { generateDrafts: true, extractEvidence: true, proposeClaim: true, generateClaimGapFollowups: true },
+    // reviewSensitivity / promoteSource: owner decisions 2026-10-12 and 2026-10-18.
+    { reviewSensitivity: true, promoteSource: true, generateDrafts: true, extractEvidence: true, proposeClaim: true, generateClaimGapFollowups: true },
   );
   assert.equal(capabilities.data.internalKnowledgeWorkspace, false);
   const readiness = Object.fromEntries(computeOrganizationOperationReadiness(actor, ORG_X).map((row) => [row.key, row.ready]));
   assert.equal(readiness.evidence_processing, true);
   assert.equal(readiness.draft_generation, true);
-  for (const key of ["evidence_review", "claim_review", "source_review", "generated_content_review", "export_release", "coverage_acceptance"]) {
+  assert.equal(readiness.source_review, true);
+  for (const key of ["evidence_review", "claim_review", "generated_content_review", "export_release", "coverage_acceptance"]) {
     assert.equal(readiness[key], false, key);
   }
   for (const role of ["client_contributor", "client_reviewer"]) {
@@ -535,7 +542,9 @@ test("F: capabilities - client_admin gets extraction, proposal, gap follow-ups, 
   // The browser projection carries the split and fails closed.
   const projected = projectOrganizationAccessCapabilities(capabilities.data);
   assert.deepEqual([projected.workflowOperations.generateDrafts, projected.workflowOperations.generateAllDraftTypes], [true, false]);
-  assert.deepEqual(clientEvidenceWorkflowAccess(projected), { visible: true, extractEvidence: true, proposeClaim: true, generateClaimGapFollowups: true, generateDrafts: true });
+  assert.deepEqual(clientEvidenceWorkflowAccess(projected), {
+    visible: true, reviewSensitivity: true, promoteSource: true, extractEvidence: true, proposeClaim: true, generateClaimGapFollowups: true, generateDrafts: true,
+  });
 });
 
 test("F: the client workflow is offered to client_admin only, never to other client roles or the GK workspace", async () => {

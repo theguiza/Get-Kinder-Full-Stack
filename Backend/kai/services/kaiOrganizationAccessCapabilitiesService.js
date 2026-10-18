@@ -20,7 +20,7 @@ import {
   validateActorCanPerformSensitivityReview,
 } from "../auth/kaiAuthorizationService.js";
 import { __reviewCockpitServiceContract } from "./kaiReviewCockpitService.js";
-import { __sourcePromotionServiceContract } from "./kaiSourcePromotionService.js";
+import { __sourcePromotionServiceContract, authorizeSourcePromotionDecision } from "./kaiSourcePromotionService.js";
 import { __exportReviewServiceContract } from "./kaiExportReviewService.js";
 import {
   KAI_DELEGATED_GK_ADMINISTRATOR_ROLE,
@@ -121,8 +121,29 @@ function passes(actorContext, operation, organizationId, allowedRoles) {
 // authority (CLIENT_ADMIN_DRAFT_ALLOWED_ROLES); generateAllDraftTypes is the
 // funder evidence summary and the seven other generators
 // (GENERATED_CONTENT_ALLOWED_ROLES), which client_admin never holds.
+// reviewSensitivity is the review-cockpit sensitivity decision gate
+// (GK roles, or the binding-derived organization administrator). promoteSource
+// is P1-08's own authorizeSourcePromotionDecision; for a GK actor the decision
+// route additionally requires the cockpit read gate (a global GK role), and
+// for the binding-derived organization administrator the source-candidate
+// gate admits the same actor P1-08 does (owner decision 2026-10-18).
+function canPromoteSource(actorContext, organizationId) {
+  const decision = authorizeSourcePromotionDecision(actorContext, organizationId);
+  if (!decision.ok) return false;
+  if (decision.organizationAdminAuthorized === true) return true;
+  return validateActorCanPerformOperation(
+    actorContext, __reviewCockpitServiceContract.REVIEW_COCKPIT_READ_OPERATION, organizationId,
+    { allowedRoles: __reviewCockpitServiceContract.REVIEW_COCKPIT_READ_ROLES, globalRolesOnly: true },
+  ).ok === true;
+}
+
 function workflowOperations(actorContext, organizationId) {
   return {
+    reviewSensitivity: actorContext?.actorType === "human" && validateActorCanPerformSensitivityReview(
+      actorContext, "record_sensitivity_allowed_use_decision", organizationId,
+      __reviewCockpitServiceContract.REVIEW_COCKPIT_READ_ROLES, { globalRolesOnly: true },
+    ).ok === true,
+    promoteSource: canPromoteSource(actorContext, organizationId),
     generateDrafts: validateActorCanPerformOperation(
       actorContext, __generatedContentServiceContract.CREATE_EVIDENCE_SUMMARY_OPERATION, organizationId,
       { allowedRoles: __generatedContentServiceContract.CLIENT_ADMIN_DRAFT_ALLOWED_ROLES },
@@ -217,7 +238,7 @@ const OPERATION_READINESS = Object.freeze([
     clauses: [
       { scope: GLOBAL, roles: __reviewCockpitServiceContract.REVIEW_COCKPIT_READ_ROLES },
       { scope: ORGANIZATION, roles: __sourcePromotionServiceContract.SOURCE_PROMOTION_ALLOWED_ROLES },
-    ] },
+    ], sourcePromotion: true },
   { key: "sensitivity_review", category: "decide", operation: "record_sensitivity_allowed_use_decision",
     clauses: [{ scope: GLOBAL, roles: __reviewCockpitServiceContract.REVIEW_COCKPIT_READ_ROLES }], sensitivity: true },
   { key: "evidence_review", category: "decide", operation: __humanReviewServiceContract.RECORD_EVIDENCE_REVIEW_DECISION_OPERATION,
@@ -271,10 +292,14 @@ export function computeOrganizationOperationReadiness(actorContext, organization
       .map((clause) => ({ scope: clause.scope, roles: [...clause.roles].sort(), granted_by: grantedBy(clause) }));
     // Sensitivity review also admits an active binding-derived organization
     // administrator (validateActorCanPerformSensitivityReview).
+    // Source promotion also admits an active binding-derived organization
+    // administrator (authorizeSourcePromotionDecision, owner decision 2026-10-18).
     const ready = definition.sensitivity
       ? validateActorCanPerformSensitivityReview(actorContext, definition.operation, organizationId,
         __reviewCockpitServiceContract.REVIEW_COCKPIT_READ_ROLES, { globalRolesOnly: true }).ok === true
-      : missing.length === 0;
+      : definition.sourcePromotion
+        ? canPromoteSource(actorContext, organizationId)
+        : missing.length === 0;
     return {
       key: definition.key,
       category: definition.category,
