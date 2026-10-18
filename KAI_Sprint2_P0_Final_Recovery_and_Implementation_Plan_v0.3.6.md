@@ -40702,3 +40702,162 @@ No push, deployment, production/shared database, migration/schema, flag,
 `ADMIN_EMAILS`, credential, real email, role grant or
 `00_KAI_CURRENT_STATE.md` change. This is the single package-end evidence
 update in the living ExecPlan.
+
+### Client administrator evidence-to-draft workflow (2026-10-18)
+
+**Owner authorization (USER_CONFIRMED):** the owner's "Complete the
+Non-Superuser Client-Admin Evidence-to-Draft Workflow" prompt authorizes, for
+an active `client_admin` of the exact organization (stored or binding-derived),
+seven operations: the Sources, Evidence Library, and Claim Library reads; P2-01
+`extract_evidence_lineage`; P2-03 `propose_claim`; and INTERNAL
+`create_evidence_summary_draft` / `create_impact_narrative_draft` through a
+dedicated `CLIENT_ADMIN_DRAFT_ALLOWED_ROLES`, plus the directly coupled
+capabilities, UI, and tests. Not authorized: the other seven generators,
+funder generation, review decisions, source promotion,
+`kaiAuthorizationService.js`, `kaiSprint2P0Contract.js`, schema, flags, push,
+or deployment. The earlier precheck STOP (shared `GENERATED_CONTENT_ALLOWED_ROLES`)
+is resolved by that dedicated set.
+
+**Start (TOOL_VERIFIED):** `main` at `684428c`, clean.
+
+**Shared-constant findings (TOOL_VERIFIED):** `GENERATED_CONTENT_ALLOWED_ROLES`
+gates nine generators and feeds the `generateDrafts` / `draft_generation`
+capability projections. `createEvidenceSummaryDraft` also serves the funder
+route (same operation name). `EVIDENCE_LINEAGE_ALLOWED_ROLES` and
+`CLAIM_PROPOSAL_ALLOWED_ROLES` each gate one service call site plus capability
+projections; `proposeClaimFromEvidenceReviewDecision` uses its own P2-12 set.
+The three library sets are unshared but use `combineGlobalRoles`.
+
+**Change:**
+- `EVIDENCE_LINEAGE_ALLOWED_ROLES`, `CLAIM_PROPOSAL_ALLOWED_ROLES`: add
+  `client_admin` (organization membership mode, unchanged).
+- `kaiGeneratedContentService.js`: `CLIENT_ADMIN_DRAFT_ALLOWED_ROLES` (GK roles +
+  `client_admin`) for impact narrative and for evidence summary only when
+  `requestedAudience === "internal"`; funder/public evidence summaries and the
+  other seven generators keep `GENERATED_CONTENT_ALLOWED_ROLES`.
+- Sources, Evidence Library, Claim Library: the GK set and its
+  `combineGlobalRoles` mode are unchanged; a dedicated `*_CLIENT_ADMIN_ROLES`
+  (`client_admin`, organization membership only, so no global role satisfies
+  it) is checked when the GK check fails. A reader admitted only that way gets
+  each claim's review-queue posture without the queue item and target ids;
+  Evidence write coordinates still follow `canRecordEvidenceReviewDecision`
+  (false for `client_admin`). Source DTO was already ids/code/type/currentness.
+- Capabilities: `generateDrafts` = internal summary/narrative set;
+  new `generateAllDraftTypes` = `GENERATED_CONTENT_ALLOWED_ROLES`;
+  `draft_generation` readiness row uses the internal set (Team & Access label
+  updated). `extractEvidence` / `proposeClaim` / `evidence_processing` follow the
+  widened constants.
+- GK Knowledge Studio: readiness assessment, data gap memo, and the funder
+  evidence summary (button, checkbox, handler) now require
+  `generateAllDraftTypes`.
+- Client Knowledge Studio: a "Data Sources" tab, shown only when the
+  capabilities admit extraction/proposal/internal drafts outside the GK
+  workspace (`ClientEvidenceWorkflow.jsx`, `clientEvidenceWorkflowLogic.js`):
+  sources with "Extract evidence", evidence with "Propose claim", claims
+  selectable for internal drafts (terminal `reviewed_not_supported` shown as
+  unusable), Project/claim readiness messages separate from authorization, and
+  the two internal generation actions. All requests are issued only while the
+  tab is open. Draft text is not shown; the client Generated Drafts read still
+  shows reviewed drafts only.
+- Bundle rebuilt (byte-identical on rebuild).
+
+**Acceptance (TOOL_VERIFIED):**
+- New unit spec `kai-client-admin-evidence-to-draft-workflow.spec.js` 18/0:
+  real `resolveKaiActorContext` + binding (no stored membership or global role,
+  `platformSuperuser` false), real validator and services with recording
+  repositories. All seven pass in X; all seven deny in Y
+  (`missing_active_organization_membership`, zero repository calls); inactive
+  GK admin membership, non-admin GK role, no membership, or inactive binding
+  derive nothing; foreign engagement -> `tenant_boundary_violation`, foreign
+  objects -> `not_found`, foreign rows fail closed; client_contributor and
+  client_reviewer denied all seven; a global `client_admin` role satisfies
+  nothing; the other seven generators, funder and public evidence summary,
+  generated-content review start/complete, both P2-12 decisions, P2-02, and
+  P1-08 deny `client_admin` with `role_not_allowed`; GK roles and the platform
+  superuser keep everything; `KAI_SPRINT2_ENABLED` off -> `feature_disabled`.
+- New assembled browser acceptance
+  `kai-client-admin-evidence-to-draft-browser-acceptance.integration.spec.js`
+  17/0 (runner-owned loopback PostgreSQL, real routes, real Chrome, built
+  bundle). The binding-derived administrator's first request JIT-maps
+  `kai.users` with no role or membership row. Through the UI: Data Sources ->
+  Extract evidence (2 evidence items, created_by the administrator, production
+  audit) -> Propose claim x2 (proposed / needs_gk_review / unassessed /
+  internal-only, audited) -> select the unreviewed claim (the GK-rejected
+  claim shown unusable) -> internal evidence summary and impact narrative
+  (201; two `draft` / `needs_gk_review` / internal drafts bound to Project X,
+  open `generated_content_review` items, citations to the claim/evidence pair,
+  two audits). Y: 7 x 403; foreign source/evidence 404; foreign engagement
+  `tenant_boundary_violation`; foreign claim 422; nothing written. Funder,
+  readiness, data gap memo, P2-12 decisions, review packet, P1-08, and P2-04 ->
+  403 `role_not_allowed`. Contributor: no tab, 7 x 403. Empty `claim_ids` 422;
+  the rejected claim 422 `claim_reviewed_not_supported` before any generator
+  call.
+- Substituted or simulated in that run (not pipeline proof): session login
+  harness; P1-03..P1-05 file rows (upload, scan, parsing, profiling NOT
+  executed); P1-06 / sensitivity decision via services with stubbed audit; a
+  trigger that fails the P1-08 -> P2-01 handoff so the administrator's
+  extraction creates the evidence; the model provider (SDK prototype patched,
+  dummy key, 2 calls, no network).
+
+**Observed dependency (TOOL_VERIFIED, not changed):** internal generation
+revalidates P2-06 traceability, which for a claim with coverage gaps needs
+its P2-04 gap follow-ups (`gap_dimension_requires_missing_p204_state`). P2-04
+is GK-only. Until a GK user generates them, the administrator's authorized
+request returns 422 `traceability_result_contract_invalid` and writes nothing
+(B5a); the client UI explains this instead of the generic message. The run
+proceeds after a GK reviewer runs P2-04 through the real route (B5-pre).
+
+**Updated pins (coupled to the decision):** P2-01 boundary G, P2-03 boundary,
+P2-03 handoff K, P2-12 least-privilege, integrated effective policy,
+cross-organization provisioning, client authorization reconciliation, impact
+home summary, client generated content (contract + real role denials), impact
+evidence library (funder gating), and browser/runner specs: P2-01 handoff
+(mixed actor now replays), reviewed-evidence proposal (cross-org refusal),
+sensitivity reachability (tab list), approval-to-action campaign (J3-1A
+flags, J3-3), P2-03 reviewed-evidence runner, J3-3 runner (admission proven
+against a recording repository).
+
+**Verification (TOOL_VERIFIED; sentinel `DATABASE_URL`):**
+
+| Command | Pass | Fail | Skipped |
+| --- | --- | --- | --- |
+| `npm test` (baseline at `684428c`) | 5570 | 0 | 111 |
+| `npm test` | 5589 | 0 | 112 |
+| New unit spec | 18 | 0 | 0 |
+| New assembled browser acceptance | 17 | 0 | 0 |
+| 16 existing browser acceptance specs | 234 | 0 | 0 |
+| P2-01 lineage / handoff / P2-12 no-claim runners | 17 / 7 / 11 | 0 | 0 |
+| P2-02 / P2-03 / P2-04 / P2-06 / P2-08 runners | 7 / 15 / 18 / 33 / 19 | 0 | 0 |
+| P2-03 reviewed-evidence / J3-3 runners | 17 / 16 | 0 | 0 |
+| P2-11 / P2-12 ledger / P13-01 runners | 28 / 24 / 29 | 0 | 0 |
+| Access administration / organization enablement | 46 / 9 | 0 | 0 |
+| `npm run verify:kai-sprint2-api-contract` | 71 | 0 | 0 |
+| P3-01 runner | 18 | 1 | 0 |
+| `git diff --check` | ok | | |
+
+The P3-01 failure (`relation "kai.evidence_review_decisions" does not exist`,
+Package 14-05 case) reproduces identically at `684428c` in a clean worktree:
+pre-existing runner schema gap, unchanged.
+
+**Remaining (not changed):**
+- Direct P2-03 on evidence whose claim was since reviewed returns 500
+  `system_error` for every authorized actor: the replay path's
+  `verifyPostWriteContract` (`postgresClaimProposalRepository.js`) requires the
+  initial claim state. Observed for the mixed client_admin and a GK reviewer
+  alike (campaign J3-3); no writes. The client UI hides "Propose claim" once a
+  claim is listed, but a claim beyond the 25-item Claim Library page or a
+  direct request reaches it.
+- Write responses (extraction, proposal, generation) still return the created
+  records with review-queue item ids and locator coordinates to the actor that
+  created them; no review authority follows from them.
+- Unreviewed drafts are not client-readable (existing reviewed-only rule); the
+  administrator sees identity and status only until GK review.
+- Sources, Evidence, and Claim reads are single 25-item pages in the client tab.
+- Production upload/scan/parse/profile and the live model were not executed.
+
+**Status:** CLIENT_ADMIN_EVIDENCE_TO_DRAFT_WORKFLOW_COMPLETE_LOCAL_SYNTHETIC;
+assembled pipeline completion NOT_CONFIRMED (simulated P1 worker stages,
+substituted model, GK-only P2-04 prerequisite). No push, deployment,
+production/shared database, migration/schema, flag, tenant, credential, real
+client data, or `00_KAI_CURRENT_STATE.md` change. This is the single
+package-end evidence update in the living ExecPlan.

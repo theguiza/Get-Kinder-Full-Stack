@@ -548,7 +548,7 @@ async function runBrowserAcceptance() {
       results.promotion = "PASS";
     });
 
-    await test("mixed global GK reviewer with client_admin membership is also refused by the P2-01 extraction route", async () => {
+    await test("mixed global GK reviewer with client_admin membership: P2-01 admits its organization client_admin membership and replays the existing extraction without writing", async () => {
       const [version] = await query("SELECT source_version_id::text FROM kai.source_versions WHERE organization_id = $1::uuid AND intake_source_candidate_id = $2::uuid", [ORG, normalCandidate]);
       assert.ok(version?.source_version_id);
       const before = await governedCounts();
@@ -561,11 +561,13 @@ async function runBrowserAcceptance() {
         });
         return { status: response.status, body: await response.json() };
       })()`);
-      assert.equal(response.status, 403, JSON.stringify(response.body));
-      assert.equal(response.body.error?.code, "authorization_denied");
-      assert.equal(response.body.blockers?.[0]?.blocking_reason, "role_not_allowed");
+      // Owner decision 2026-10-18: an active organization client_admin may
+      // extract evidence; P1-08 promotion (above) stays refused.
+      assert.equal(response.status, 200, JSON.stringify(response.body));
+      assert.equal(response.body.data.replayed, true);
+      assert.equal(response.body.data.evidenceItems.length, 2);
       assert.deepEqual(await governedCounts(), before);
-      results.mixedRoleEvidenceExtraction = "REPRODUCED: P2-01 role refusal 403; no writes";
+      results.mixedRoleEvidenceExtraction = "PASS: admitted by organization client_admin; replayed, no writes";
     });
 
     await test("GK internal Knowledge Studio: the new evidence candidates are listed for GK review (needs_gk_review, no claim yet)", async () => {

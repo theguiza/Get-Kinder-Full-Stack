@@ -407,11 +407,12 @@ test("E: an identical replayed promotion re-attempts the idempotent P2-01 handof
   assert.equal(retried.data.evidence_extraction_handoff.status, "created");
 });
 
-test("G: the real P1-08 and P2-01 services share one GK role set and one attribution mode; client, system, AI, and cross-organization actors are refused before any repository call", async () => {
+test("G: the real P1-08 and P2-01 services share one attribution mode; P1-08 stays GK-only, P2-01 also admits the organization's client_admin; other client, system, AI, and cross-organization actors are refused before any repository call", async () => {
   const { __sourcePromotionServiceContract } = await import("../Backend/kai/services/kaiSourcePromotionService.js");
   const { __evidenceLineageServiceContract } = await import("../Backend/kai/services/kaiEvidenceLineageService.js");
   assert.deepEqual([...__sourcePromotionServiceContract.SOURCE_PROMOTION_ALLOWED_ROLES].sort(), ["gk_admin", "gk_operator", "gk_reviewer"]);
-  assert.deepEqual([...__evidenceLineageServiceContract.EVIDENCE_LINEAGE_ALLOWED_ROLES].sort(), ["gk_admin", "gk_operator", "gk_reviewer"]);
+  // Owner decision 2026-10-18: client_admin may extract evidence (never promote).
+  assert.deepEqual([...__evidenceLineageServiceContract.EVIDENCE_LINEAGE_ALLOWED_ROLES].sort(), ["client_admin", "gk_admin", "gk_operator", "gk_reviewer"]);
   const promotionSource = readFileSync(new URL("../Backend/kai/services/kaiSourcePromotionService.js", import.meta.url), "utf8");
   const lineageSource = readFileSync(new URL("../Backend/kai/services/kaiEvidenceLineageService.js", import.meta.url), "utf8");
   // Same membership-role attribution: neither passes globalRolesOnly.
@@ -430,27 +431,29 @@ test("G: the real P1-08 and P2-01 services share one GK role set and one attribu
       },
     };
   };
+  // [label, actor, P2-01 extraction admitted, P1-08 promotion admitted]
   const actors = [
-    ["gk_admin", gkActor("gk_admin"), true],
-    ["gk_operator", gkActor("gk_operator"), true],
-    ["gk_reviewer", gkActor("gk_reviewer"), true],
-    ["client_admin", gkActor("client_admin"), false],
-    ["client_reviewer", gkActor("client_reviewer"), false],
-    ["client_contributor", gkActor("client_contributor"), false],
-    ["system actor", { ...gkActor(), actorType: "system" }, false],
-    ["AI actor", { ...gkActor(), actorType: "ai" }, false],
-    ["assistant actor", { ...gkActor(), actorType: "assistant" }, false],
-    ["cross-organization GK", gkActor("gk_reviewer", OTHER_ORG), false],
-    ["inactive membership", { ...gkActor(), organizationMemberships: [{ organization_id: ORG, membership_status: "inactive", role_name: "gk_reviewer" }] }, false],
+    ["gk_admin", gkActor("gk_admin"), true, true],
+    ["gk_operator", gkActor("gk_operator"), true, true],
+    ["gk_reviewer", gkActor("gk_reviewer"), true, true],
+    ["client_admin", gkActor("client_admin"), true, false],
+    ["client_admin in another organization", gkActor("client_admin", OTHER_ORG), false, false],
+    ["client_reviewer", gkActor("client_reviewer"), false, false],
+    ["client_contributor", gkActor("client_contributor"), false, false],
+    ["system actor", { ...gkActor(), actorType: "system" }, false, false],
+    ["AI actor", { ...gkActor(), actorType: "ai" }, false, false],
+    ["assistant actor", { ...gkActor(), actorType: "assistant" }, false, false],
+    ["cross-organization GK", gkActor("gk_reviewer", OTHER_ORG), false, false],
+    ["inactive membership", { ...gkActor(), organizationMemberships: [{ organization_id: ORG, membership_status: "inactive", role_name: "gk_reviewer" }] }, false, false],
   ];
-  for (const [label, actorContext, allowed] of actors) {
+  for (const [label, actorContext, extractionAllowed, allowed] of actors) {
     const tripwire = repositoryTripwire();
     const direct = await extractEvidenceFromSourceVersion(
       { organizationId: ORG, sourceVersionId: SOURCE_VERSION, actorContext, now: NOW },
       { env: ENV, evidenceLineageRepository: tripwire.evidenceLineageRepository, metadataOnlyAudit: noAudit() },
     );
-    assert.equal(direct.ok, allowed, `P2-01 ${label}`);
-    assert.equal(tripwire.calls.length, allowed ? 1 : 0, `P2-01 repository ${label}`);
+    assert.equal(direct.ok, extractionAllowed, `P2-01 ${label}`);
+    assert.equal(tripwire.calls.length, extractionAllowed ? 1 : 0, `P2-01 repository ${label}`);
 
     const promotionCalls = [];
     const promotion = await createSourcePromotionDecision(

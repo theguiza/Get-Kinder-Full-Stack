@@ -567,7 +567,7 @@ async function runReviewedEvidenceClaimProposalSuite() {
     assert.deepEqual(await claimsFor([d1]), []);
   });
 
-  test("authorization: operator, client, system, and AI actors cannot review or propose; nothing is written", async () => {
+  test("authorization: operator, client, system, and AI actors cannot review; only GK and the organization's client_admin may propose; nothing is written", async () => {
     const [b1] = projectB.evidenceItemIds;
     const before = await kaiTableRowCounts();
     for (const actorContext of [operator, client, { ...reviewer, actorType: "system" }, { ...reviewer, actorType: "ai" }]) {
@@ -575,8 +575,20 @@ async function runReviewedEvidenceClaimProposalSuite() {
       assert.equal(result.ok, false, JSON.stringify(actorContext));
       assert.equal(result.data?.claim_proposal_handoff, undefined);
     }
-    // The direct P2-03 route's service refuses the client and every non-human actor.
-    for (const actorContext of [client, { ...reviewer, actorType: "system" }, { ...reviewer, actorType: "assistant" }]) {
+    // The direct P2-03 route's service refuses non-administrator client roles
+    // and every non-human actor. An organization client_admin is admitted
+    // (owner decision 2026-10-18), proven against a recording repository so
+    // this case writes nothing.
+    const admitted = [];
+    const clientAdminNow = new Date().toISOString();
+    const clientAdminProposal = await proposeClaim({ organizationId: ORG, evidenceItemId: b1, actorContext: client, now: clientAdminNow }, {
+      env: ENV,
+      metadataOnlyAudit: createProductionMetadataOnlyAuditForClaimProposal({ organizationId: ORG, evidenceItemId: b1, actorContext: client, now: clientAdminNow }),
+      claimProposalRepository: { async proposeClaim(input) { admitted.push(input.organizationId); return { ok: false, error: { code: "not_found", status: 404 } }; } },
+    });
+    assert.deepEqual([clientAdminProposal.error.code, admitted], ["not_found", [ORG]]);
+    const contributor = { ...client, organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_contributor" }] };
+    for (const actorContext of [contributor, { ...reviewer, actorType: "system" }, { ...reviewer, actorType: "assistant" }]) {
       const now = new Date().toISOString();
       const proposed = await proposeClaim({ organizationId: ORG, evidenceItemId: b1, actorContext, now }, {
         env: ENV, metadataOnlyAudit: createProductionMetadataOnlyAuditForClaimProposal({ organizationId: ORG, evidenceItemId: b1, actorContext, now }),
@@ -651,8 +663,18 @@ async function runReviewedEvidenceClaimProposalSuite() {
     assert.equal(byId[evidenceA].supportStrength, "reviewed_supported");
     assert.equal(byId[evidenceB].supportStrength, "reviewed_not_supported");
 
-    const refused = await listClaimLibraryCandidates({ organizationId: ORG, limit: 25, actorContext: client }, { env: ENV });
-    assert.equal(refused.ok, false, "the client cannot read the GK Claim Library");
+    // Owner decision 2026-10-18: the organization's client_admin reads the
+    // Claim Library with each queue's posture but no GK queue identifiers;
+    // other client roles stay refused.
+    const clientRead = await listClaimLibraryCandidates({ organizationId: ORG, limit: 25, actorContext: client }, { env: ENV });
+    assert.equal(clientRead.ok, true, JSON.stringify(clientRead));
+    assert.ok(clientRead.data.items.length > 0);
+    for (const item of clientRead.data.items) {
+      for (const queueItem of item.reviewQueueItems) assert.deepEqual(Object.keys(queueItem).sort(), ["queue_status", "queue_type", "review_status", "target_object_type"]);
+    }
+    const contributor = { ...client, organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_contributor" }] };
+    const refused = await listClaimLibraryCandidates({ organizationId: ORG, limit: 25, actorContext: contributor }, { env: ENV });
+    assert.equal(refused.ok, false, "a client_contributor cannot read the GK Claim Library");
   });
 
   test("client pipeline: with the claim proposed but not reviewed, Project A shows evidence review complete and Impact Fact review waiting for Get Kinder, with no internal ids", async () => {

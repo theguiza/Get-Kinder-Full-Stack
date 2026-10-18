@@ -586,15 +586,26 @@ test("assembled journey, client_admin contribution: intake writes pass policy; c
 test("assembled journey, client_admin: GK-internal, client-reviewer, and high-risk surfaces deny with role_not_allowed before any read", async () => {
   const actorContext = await clientAdminActor();
   const now = "2026-09-24T12:00:00.000Z";
+  // Owner decision 2026-10-18: the organization's own client_admin now reads
+  // the Sources, Evidence Library, and Claim Library (proved in
+  // kai-client-admin-evidence-to-draft-workflow.spec.js). The other client
+  // roles stay denied before any read.
+  for (const role of ["client_reviewer", "client_contributor"]) {
+    const other = memberActor(role);
+    const otherDenials = {
+      "evidence-library/candidates": await listOrganizationEvidenceLibrary(
+        { organizationId: ORG, limit: 25, afterEvidenceItemId: null, actorContext: other },
+        { env: ENV, listOrganizationEvidenceItems: throwingRead("evidence items") },
+      ),
+      "claim-library/candidates": await listClaimLibraryCandidates(
+        { organizationId: ORG, actorContext: other, limit: 25 },
+        { env: ENV, listClaimLibraryReviewCandidates: throwingRead("claim library") },
+      ),
+      sources: await listOrganizationSources({ organizationId: ORG, actorContext: other }, { env: ENV }),
+    };
+    for (const [label, result] of Object.entries(otherDenials)) assertRoleDenied(result, `${role} ${label}`);
+  }
   const denials = {
-    "evidence-library/candidates": await listOrganizationEvidenceLibrary(
-      { organizationId: ORG, limit: 25, afterEvidenceItemId: null, actorContext },
-      { env: ENV, listOrganizationEvidenceItems: throwingRead("evidence items") },
-    ),
-    "claim-library/candidates": await listClaimLibraryCandidates(
-      { organizationId: ORG, actorContext, limit: 25 },
-      { env: ENV, listClaimLibraryReviewCandidates: throwingRead("claim library") },
-    ),
     "eligible-claims": await listEligibleClaimsForAudience(
       { organizationId: ORG, requestedAudience: "internal", limit: 25, afterClaimId: null, actorContext },
       { env: ENV, eligibleClaimsForAudienceRepository: { listEligibleClaimsForAudience: throwingRead("eligible claims") } },
@@ -607,7 +618,6 @@ test("assembled journey, client_admin: GK-internal, client-reviewer, and high-ri
       { organizationId: ORG, actorContext },
       { env: ENV, claimTraceabilityRepository: { listOrganizationReviewQueue: throwingRead("review queue") } },
     ),
-    sources: await listOrganizationSources({ organizationId: ORG, actorContext }, { env: ENV }),
     requirements: await listOrganizationRequirementsReadiness({ organizationId: ORG, actorContext }, { env: ENV }),
     "generated-content-drafts": await listGeneratedDraftLibraryIndex({ organizationId: ORG, limit: 25, actorContext }, { env: ENV }),
     "grant-response-packet": await getGrantResponsePacket({ organizationId: ORG, engagementId: ENGAGEMENT, actorContext }, { env: ENV }),

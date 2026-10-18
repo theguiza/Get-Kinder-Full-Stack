@@ -275,6 +275,8 @@ test("contract: client reads admit the read_intake set; every GK generation, rev
     [...KAI_SPRINT2_P0_OPERATION_ROLES.read_intake].sort(),
   );
   assert.deepEqual([...__generatedContentServiceContract.GENERATED_CONTENT_ALLOWED_ROLES].sort(), ["gk_admin", "gk_operator", "gk_reviewer"]);
+  // Owner decision 2026-10-18: internal evidence summary / impact narrative only.
+  assert.deepEqual([...__generatedContentServiceContract.CLIENT_ADMIN_DRAFT_ALLOWED_ROLES].sort(), ["client_admin", "gk_admin", "gk_operator", "gk_reviewer"]);
   assert.deepEqual([...__generatedContentServiceContract.GENERATED_CONTENT_REVIEW_ALLOWED_ROLES].sort(), ["gk_admin", "gk_reviewer"]);
   assert.deepEqual([...__generatedContentServiceContract.COMPLETE_GENERATED_CONTENT_REVIEW_ALLOWED_ROLES].sort(), ["gk_admin", "gk_reviewer"]);
   assert.deepEqual([...__exportReviewServiceContract.EXPORT_REVIEW_ALLOWED_ROLES], ["gk_admin"]);
@@ -506,11 +508,20 @@ test("roles: binding-derived client_admin, client_reviewer, client_contributor, 
   }
 });
 
-test("no client role gains generation, GK review, GK draft/packet reads, export, or final authority", async () => {
+test("no client role gains funder generation, GK review, GK draft/packet reads, export, or final authority; only client_admin gains internal generation", async () => {
   const deps = dependencies();
+  const generationRequest = (actorContext, requestedAudience) => ({
+    organizationId: ORG, engagementId: ENGAGEMENT, requestedAudience, claimIds: [CLAIM_A],
+    idempotencyKey: "client-generation-denial", actorContext, now: NOW,
+  });
+  const noGeneration = { env: ENV, getEngagementForOrganization: async () => assert.fail("no engagement read for a denied actor") };
+  for (const actorContext of [memberActor("client_reviewer"), memberActor("client_contributor")]) {
+    const internal = await createEvidenceSummaryDraft(generationRequest(actorContext, "internal"), noGeneration);
+    assert.deepEqual([internal.error.code, internal.blockers[0].blocking_reason], ["authorization_denied", "role_not_allowed"]);
+  }
   for (const actorContext of [await clientAdminActor(), memberActor("client_reviewer"), memberActor("client_contributor")]) {
     const denials = {
-      generate: await createEvidenceSummaryDraft({ organizationId: ORG, claimIds: [CLAIM_A], requestedAudience: "internal", actorContext, now: NOW }, deps),
+      funderGenerate: await createEvidenceSummaryDraft(generationRequest(actorContext, "funder"), noGeneration),
       startReview: await startGeneratedContentReview({ organizationId: ORG, generatedContentDraftId: DRAFT_VISIBLE, reviewQueueItemId: id("9", 1), expectedUpdatedAt: NOW, actorContext, now: NOW }, deps),
       completeReview: await completeGeneratedContentReview({ organizationId: ORG, generatedContentDraftId: DRAFT_VISIBLE, reviewQueueItemId: id("9", 1), expectedUpdatedAt: NOW, actorContext, now: NOW }, deps),
       gkPacket: await getGeneratedDraftReviewPacket({ organizationId: ORG, generatedContentDraftId: DRAFT_VISIBLE, actorContext }, deps),

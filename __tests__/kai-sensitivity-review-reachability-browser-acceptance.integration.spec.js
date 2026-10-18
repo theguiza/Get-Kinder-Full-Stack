@@ -822,7 +822,9 @@ async function runBrowserAcceptance() {
       const mark = mixedPage.mark();
       const body = await clientReviewsTab(mixedPage);
       const tabs = await mixedPage.evaluate(`[...document.querySelectorAll(".nav-tabs button")].map((el) => el.innerText.trim())`);
-      assert.deepEqual(tabs, ["Files", "Evidence", "Gaps", "Funder Requirements", "Generated Drafts", "Reviews"], "the client Studio, not the GK one");
+      // Data Sources: the organization administrator's evidence-to-draft
+      // workflow (owner decision 2026-10-18), offered by the client Studio only.
+      assert.deepEqual(tabs, ["Files", "Data Sources", "Evidence", "Gaps", "Funder Requirements", "Generated Drafts", "Reviews"], "the client Studio, not the GK one");
       const note = await mixedPage.evaluate(`(() => { const el = document.querySelector("[data-get-kinder-review-access]"); return el ? el.innerText : null; })()`);
       console.log(`[sensitivity-review-browser] mixed-role access note: ${note}`);
       assert.match(note, /^Your organization-scoped review access can complete this organization's sensitivity reviews here/);

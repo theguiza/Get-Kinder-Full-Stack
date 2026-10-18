@@ -505,19 +505,26 @@ test("K: the continuation validator accepts only this actor's current positive d
   assert.equal(validateEvidenceReviewDecisionContinuation({ ...base, ...persistedContinuationRows(), actorUserId: undefined }).ok, false);
 });
 
-test("K: for the mixed-role reviewer the direct P2-02/P2-03 entries stay role_not_allowed while the decision-bound entries proceed only on the persisted decision", async () => {
+test("K: for the mixed-role reviewer the direct P2-02 entry stays role_not_allowed, direct P2-03 is admitted only by the organization client_admin membership, and the decision-bound entries proceed only on the persisted decision", async () => {
   const unreachable = { async readEvidenceCoverageAssessmentFacts() { throw new Error("unreachable"); }, async proposeClaim() { throw new Error("unreachable"); } };
   const assessed = await assessEvidenceCoverageForSourceVersion(
     { organizationId: ORG, sourceVersionId: SOURCE_VERSION, actorContext: mixedActor },
     { env: ENV, evidenceCoverageAssessmentRepository: unreachable },
   );
+  assert.deepEqual([assessed.error.code, assessed.blockers[0].blocking_reason], ["authorization_denied", "role_not_allowed"]);
+  // Owner decision 2026-10-18: direct P2-03 admits an active organization
+  // client_admin membership (never the global gk_reviewer role).
+  const directCalls = [];
   const proposed = await proposeClaim(
     { organizationId: ORG, evidenceItemId: EVIDENCE, actorContext: mixedActor, now: NOW },
+    { env: ENV, metadataOnlyAudit: harness().audit, claimProposalRepository: { async proposeClaim(input) { directCalls.push(input.organizationId); return { ok: false, error: { code: "not_found", status: 404 } }; } } },
+  );
+  assert.deepEqual([proposed.error.code, directCalls], ["not_found", [ORG]]);
+  const globalOnly = await proposeClaim(
+    { organizationId: ORG, evidenceItemId: EVIDENCE, actorContext: { ...mixedActor, organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_contributor" }] }, now: NOW },
     { env: ENV, claimProposalRepository: unreachable },
   );
-  for (const result of [assessed, proposed]) {
-    assert.deepEqual([result.error.code, result.blockers[0].blocking_reason], ["authorization_denied", "role_not_allowed"]);
-  }
+  assert.deepEqual([globalOnly.error.code, globalOnly.blockers[0].blocking_reason], ["authorization_denied", "role_not_allowed"]);
 
   // A persisted decision by someone else: refused before any assessment read.
   const reads = [];

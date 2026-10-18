@@ -324,7 +324,7 @@ test("route: mounted summary route forwards only the organization id and the res
   }
 });
 
-test("unchanged GK surfaces: claim-library and Review Queue still deny client_admin and still serve a GK reviewer", async () => {
+test("GK surfaces: the Review Queue still denies client_admin; the claim-library admits only the organization's client_admin among client roles; both serve a GK reviewer", async () => {
   const { listClaimLibraryCandidates } = await import("../Backend/kai/services/kaiClaimLibraryService.js");
   const { listOrganizationReviewQueue } = await import("../Backend/kai/services/kaiClaimTraceabilityService.js");
   const clientAdmin = await clientAdminActor();
@@ -335,7 +335,10 @@ test("unchanged GK surfaces: claim-library and Review Queue still deny client_ad
     claimTraceabilityRepository: { listOrganizationReviewQueue: async () => ({ ok: true, data: { items: [], truncated: false, evaluationErrorCount: 0 } }) },
   };
 
-  const deniedClaims = await listClaimLibraryCandidates({ organizationId: ORG, actorContext: clientAdmin, limit: 25 }, claimDeps);
+  // Owner decision 2026-10-18: client_admin selects claims for internal
+  // drafts from the claim-library; other client roles stay denied.
+  assert.equal((await listClaimLibraryCandidates({ organizationId: ORG, actorContext: clientAdmin, limit: 25 }, claimDeps)).ok, true);
+  const deniedClaims = await listClaimLibraryCandidates({ organizationId: ORG, actorContext: memberActor("client_contributor"), limit: 25 }, claimDeps);
   assert.equal(deniedClaims.blockers[0].blocking_reason, "role_not_allowed");
   const deniedQueue = await listOrganizationReviewQueue({ organizationId: ORG, actorContext: clientAdmin }, queueDeps);
   assert.equal(deniedQueue.blockers[0].blocking_reason, "role_not_allowed");

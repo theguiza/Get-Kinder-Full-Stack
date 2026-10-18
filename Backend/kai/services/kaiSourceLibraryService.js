@@ -21,6 +21,12 @@ import {
  * rows as if they were governed sources.
  */
 const SOURCE_LIBRARY_ALLOWED_ROLES = new Set(["gk_admin", "gk_operator", "gk_reviewer"]);
+// Owner decision 2026-10-18: an active organization administrator of this
+// exact organization may browse its governed sources to select one for
+// evidence extraction (the same client_admin admission P2-01 now has).
+// Organization membership only - never combineGlobalRoles - so no global
+// role satisfies it. The GK set and its mode above are unchanged.
+const SOURCE_LIBRARY_CLIENT_ADMIN_ROLES = new Set(["client_admin"]);
 const SOURCE_LIBRARY_OPERATION = "list_organization_sources";
 
 function isPlainObject(value) {
@@ -77,12 +83,20 @@ export async function listOrganizationSources(input, dependencies = {}) {
     return buildKaiError("authorization_denied");
   }
 
-  const auth = validateActorCanPerformOperation(
+  const gkAuth = validateActorCanPerformOperation(
     actorContext,
     SOURCE_LIBRARY_OPERATION,
     input.organizationId,
     { allowedRoles: SOURCE_LIBRARY_ALLOWED_ROLES, combineGlobalRoles: true },
   );
+  const auth = gkAuth.ok
+    ? gkAuth
+    : validateActorCanPerformOperation(
+      actorContext,
+      SOURCE_LIBRARY_OPERATION,
+      input.organizationId,
+      { allowedRoles: SOURCE_LIBRARY_CLIENT_ADMIN_ROLES },
+    );
   if (!auth.ok) {
     return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers });
   }
@@ -119,6 +133,7 @@ export async function listOrganizationSources(input, dependencies = {}) {
 
 export const __sourceLibraryServiceContract = Object.freeze({
   SOURCE_LIBRARY_ALLOWED_ROLES,
+  SOURCE_LIBRARY_CLIENT_ADMIN_ROLES,
   SOURCE_LIBRARY_OPERATION,
 });
 

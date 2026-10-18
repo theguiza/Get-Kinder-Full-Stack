@@ -2365,21 +2365,28 @@ export default function ImpactEvidenceLibrary({
     [generateDraft],
   );
 
+  // Readiness Assessment, Data Gap Memo, and the funder evidence summary also
+  // need generateAllDraftTypes (GK generation roles only); the internal
+  // evidence summary and Impact Narrative need generateDrafts alone.
   const generateReadinessAssessment = useCallback(
-    () => generateDraft(createReadinessAssessmentPath, "readiness-assessment"),
-    [generateDraft],
+    () => (workflowOperations.generateAllDraftTypes
+      ? generateDraft(createReadinessAssessmentPath, "readiness-assessment")
+      : undefined),
+    [generateDraft, workflowOperations],
   );
 
   const generateDataGapMemo = useCallback(
-    () => generateDraft(
-      createDataGapMemoPath,
-      "data-gap-memo",
-      ({ idempotencyKey, engagementId: requestEngagementId }) => ({
-        idempotency_key: idempotencyKey,
-        engagement_id: requestEngagementId,
-      }),
-    ),
-    [generateDraft],
+    () => (workflowOperations.generateAllDraftTypes
+      ? generateDraft(
+        createDataGapMemoPath,
+        "data-gap-memo",
+        ({ idempotencyKey, engagementId: requestEngagementId }) => ({
+          idempotency_key: idempotencyKey,
+          engagement_id: requestEngagementId,
+        }),
+      )
+      : undefined),
+    [generateDraft, workflowOperations],
   );
 
   // P14-09: governed FUNDER Evidence Summary generation for an explicit
@@ -2391,7 +2398,7 @@ export default function ImpactEvidenceLibrary({
   // selectedGenerationClaimIds, and there is deliberately no funder Impact
   // Narrative generation control anywhere on this page.
   const generateFunderEvidenceSummary = useCallback(async () => {
-    if (!workflowOperations.generateDrafts) return;
+    if (!workflowOperations.generateAllDraftTypes) return;
     if (audience !== "funder" || selectedFunderGenerationClaimIds.length === 0 || !engagementId) return;
     setGeneratingDraft(true);
     setMessage("");
@@ -3603,7 +3610,7 @@ export default function ImpactEvidenceLibrary({
                       <span className="form-check-label">Include in evidence summary</span>
                     </div>
                   ) : null}
-                  {workflowOperations.generateDrafts && canSelectClaimForFunderGeneration(claim, audience) ? (
+                  {workflowOperations.generateAllDraftTypes && canSelectClaimForFunderGeneration(claim, audience) ? (
                     <div className="form-check small mt-2" onClick={(event) => event.stopPropagation()}>
                       <input
                         className="form-check-input"
@@ -3660,7 +3667,7 @@ export default function ImpactEvidenceLibrary({
                 {generatingDraft ? "Generating..." : "Generate Impact Narrative"}
               </button>
             ) : null}
-            {workflowOperations.generateDrafts && audience === "internal" ? (
+            {workflowOperations.generateAllDraftTypes && audience === "internal" ? (
               <button
                 type="button"
                 className="btn btn-sm btn-outline-primary mt-2 w-100"
@@ -3670,7 +3677,7 @@ export default function ImpactEvidenceLibrary({
                 {generatingDraft ? "Generating..." : "Generate Readiness Assessment"}
               </button>
             ) : null}
-            {workflowOperations.generateDrafts && audience === "internal" ? (
+            {workflowOperations.generateAllDraftTypes && audience === "internal" ? (
               <button
                 type="button"
                 className="btn btn-sm btn-outline-primary mt-2 w-100"
@@ -3680,7 +3687,7 @@ export default function ImpactEvidenceLibrary({
                 {generatingDraft ? "Generating..." : "Generate Data Gap Memo"}
               </button>
             ) : null}
-            {workflowOperations.generateDrafts && audience === "funder" ? (
+            {workflowOperations.generateAllDraftTypes && audience === "funder" ? (
               <button
                 type="button"
                 className="btn btn-sm btn-primary mt-3 w-100"

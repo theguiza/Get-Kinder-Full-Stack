@@ -6,6 +6,12 @@ import { validateTenantBoundaryConsistency } from "../validators/tenantValidator
 import { listClaimLibraryReviewCandidates as readClaimLibraryReviewCandidates } from "../db/kaiClaimLibraryReadModels.js";
 
 const CLAIM_LIBRARY_READ_ROLES = new Set(["gk_admin", "gk_operator", "gk_reviewer"]);
+// Owner decision 2026-10-18: an active organization administrator of this
+// exact organization may list the organization's claims to select them for
+// an internal draft. Organization membership only (never combineGlobalRoles);
+// the GK set and its mode are unchanged. Such a reader gets each review
+// queue's posture without the GK queue item and target identifiers.
+const CLAIM_LIBRARY_CLIENT_ADMIN_ROLES = new Set(["client_admin"]);
 const CLAIM_LIBRARY_READ_OPERATION = "read_intake";
 const CLAIM_LIBRARY_DEFAULT_LIMIT = 25;
 const CLAIM_LIBRARY_MAX_LIMIT = 25;
@@ -80,7 +86,16 @@ function isOptionalStatement(value) {
   return value === null || (typeof value === "string" && value.length > 0 && value.length <= 4000);
 }
 
-function responseClaimCandidate(row, organizationId) {
+function clientQueuePosture(item) {
+  return {
+    queue_type: item.queue_type,
+    target_object_type: item.target_object_type,
+    queue_status: item.queue_status,
+    review_status: item.review_status,
+  };
+}
+
+function responseClaimCandidate(row, organizationId, { clientProjection = false } = {}) {
   if (
     !isPlainObject(row)
     || !canonicalUuid(row.claim_id)
@@ -108,8 +123,9 @@ function responseClaimCandidate(row, organizationId) {
   ) {
     return null;
   }
-  const reviewQueueItems = row.review_queue_items.map(responseQueueItem);
-  if (reviewQueueItems.some((item) => !item)) return null;
+  const queueItems = row.review_queue_items.map(responseQueueItem);
+  if (queueItems.some((item) => !item)) return null;
+  const reviewQueueItems = clientProjection ? queueItems.map(clientQueuePosture) : queueItems;
   return {
     claimId: row.claim_id,
     evidenceItemId: row.evidence_item_id,
@@ -150,12 +166,20 @@ export async function listClaimLibraryCandidates(input = {}, dependencies = {}) 
   if (!genericAuth.ok) {
     return buildKaiError(genericAuth.error_code || "authorization_denied", { blockers: genericAuth.blockers });
   }
-  const roleAuth = validateActorCanPerformOperation(
+  const gkRoleAuth = validateActorCanPerformOperation(
     input.actorContext,
     CLAIM_LIBRARY_READ_OPERATION,
     organizationId,
     { allowedRoles: CLAIM_LIBRARY_READ_ROLES, combineGlobalRoles: true },
   );
+  const roleAuth = gkRoleAuth.ok
+    ? gkRoleAuth
+    : validateActorCanPerformOperation(
+      input.actorContext,
+      CLAIM_LIBRARY_READ_OPERATION,
+      organizationId,
+      { allowedRoles: CLAIM_LIBRARY_CLIENT_ADMIN_ROLES },
+    );
   if (!roleAuth.ok) {
     return buildKaiError(roleAuth.error_code || "authorization_denied", { blockers: roleAuth.blockers });
   }
@@ -174,7 +198,7 @@ export async function listClaimLibraryCandidates(input = {}, dependencies = {}) 
 
   const candidates = [];
   for (const row of rows) {
-    const candidate = responseClaimCandidate(row, organizationId);
+    const candidate = responseClaimCandidate(row, organizationId, { clientProjection: !gkRoleAuth.ok });
     if (!candidate) return buildKaiError("system_error");
     candidates.push(candidate);
   }
@@ -197,6 +221,7 @@ export async function listClaimLibraryCandidates(input = {}, dependencies = {}) 
 export const __claimLibraryServiceContract = Object.freeze({
   CLAIM_LIBRARY_READ_OPERATION,
   CLAIM_LIBRARY_READ_ROLES,
+  CLAIM_LIBRARY_CLIENT_ADMIN_ROLES,
   CLAIM_LIBRARY_DEFAULT_LIMIT,
   CLAIM_LIBRARY_MAX_LIMIT,
 });

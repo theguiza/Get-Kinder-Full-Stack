@@ -5,7 +5,10 @@ import { validateTenantBoundaryConsistency } from "../validators/tenantValidator
 import { createPostgresClaimProposalRepository } from "../dictionary/postgresClaimProposalRepository.js";
 import { __humanReviewServiceContract } from "./kaiHumanReviewService.js";
 
-const CLAIM_PROPOSAL_ALLOWED_ROLES = new Set(["gk_admin", "gk_operator", "gk_reviewer"]);
+// client_admin (owner decision 2026-10-18): an active organization administrator
+// of this exact organization may propose a review-gated claim. Organization
+// membership only. The decision-bound continuation below keeps its own set.
+const CLAIM_PROPOSAL_ALLOWED_ROLES = new Set(["gk_admin", "gk_operator", "gk_reviewer", "client_admin"]);
 const CLAIM_PROPOSAL_OPERATION = "propose_claim";
 
 function isPlainObject(value) {

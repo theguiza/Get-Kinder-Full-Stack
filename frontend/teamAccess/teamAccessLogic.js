@@ -124,7 +124,7 @@ const READINESS_LABELS = Object.freeze({
   gk_workspace: "Open the Get Kinder workspace (sources, evidence, claims, Review Queue)",
   generated_content_read: "Read generated drafts and reporting packets",
   evidence_processing: "Run evidence extraction and claim processing",
-  draft_generation: "Generate drafts",
+  draft_generation: "Generate internal evidence summaries and impact narratives",
   source_review: "Review and promote sources",
   sensitivity_review: "Record sensitivity and allowed-use reviews",
   evidence_review: "Record evidence review decisions",

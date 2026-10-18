@@ -1108,7 +1108,13 @@ async function runBrowserAcceptance() {
         assert.equal(access.data.internalKnowledgeWorkspace, true);
         assert.equal(access.data.workflowOperations.recordEvidenceReview, reviewer);
         assert.equal(access.data.workflowOperations.recordClaimReview, reviewer);
-        for (const operation of ["extractEvidence", "assessEvidenceCoverage", "proposeClaim", "acceptCoverageLimitation"]) {
+        // Both hold an organization client_admin membership, which admits
+        // P2-01 extraction and P2-03 proposal (owner decision 2026-10-18);
+        // P2-02 coverage and P2-10 acceptance stay organization-GK only.
+        for (const operation of ["extractEvidence", "proposeClaim"]) {
+          assert.equal(access.data.workflowOperations[operation], true, operation);
+        }
+        for (const operation of ["assessEvidenceCoverage", "acceptCoverageLimitation"]) {
           assert.equal(access.data.workflowOperations[operation], false, operation);
         }
         for (const suffix of ["engagements", "claim-library/candidates", "evidence-library/candidates", "sources", "requirements", "review-queue", `engagements/${PROJECT_A}/funder-requirements`]) {
@@ -1120,7 +1126,7 @@ async function runBrowserAcceptance() {
         await page.clickTab("Evidence");
         await page.idle();
         assert.equal(await page.evaluate('document.getElementById("gk-shell-project-select").value'), PROJECT_A);
-        for (const label of ["Extract evidence", "View coverage assessment", "Propose claim", "Accept internal limitation for selected dimension"]) {
+        for (const label of ["View coverage assessment", "Accept internal limitation for selected dimension"]) {
           assert.equal(await page.visibleButton(label), false, label);
         }
         await assertNothingWritten(before, "mixed GK workspace and readback");
@@ -1451,7 +1457,9 @@ async function runBrowserAcceptance() {
       const [{ count: autoReviews }] = await query("SELECT count(*)::int AS count FROM kai.claim_review_decisions WHERE claim_id = $1::uuid", [claim.claim_id]);
       assert.equal(autoReviews, 0, "no automatic claim review");
 
-      // The mixed actor gains no direct P2-02/P2-03 authority.
+      // The mixed actor gains no direct P2-02 authority. Direct P2-03 is now
+      // admitted by its organization client_admin membership (owner decision
+      // 2026-10-18); see below.
       const [{ source_version_id: sourceVersionId }] = await query("SELECT source_version_id::text FROM kai.evidence_items WHERE evidence_item_id = $1::uuid", [second.evidence_item_id]);
       const directBefore = await allKaiCounts();
       const directAssess = await mixedPage.fetchJson("GET", `${INTAKE}/admin/organizations/${ORG_A}/source-versions/${sourceVersionId}/evidence-coverage-assessment`);
@@ -1459,11 +1467,17 @@ async function runBrowserAcceptance() {
       const directPropose = await mixedPage.fetchJson("POST", `${INTAKE}/admin/organizations/${ORG_A}/evidence-items/${first.evidence_item_id}/claim-proposal`, {});
       const forgedPropose = await mixedPage.fetchJson("POST", `${INTAKE}/admin/organizations/${ORG_A}/evidence-items/${first.evidence_item_id}/claim-proposal`,
         { internal_handoff: true, decision_bound: true, evidence_review_decision_id: decisions[0].decision_id });
-      for (const direct of [directAssess, directPropose]) {
-        assert.deepEqual([direct.status, direct.errorCode, direct.blockers?.[0]?.[1]], [403, "authorization_denied", "role_not_allowed"]);
-      }
+      assert.deepEqual([directAssess.status, directAssess.errorCode, directAssess.blockers?.[0]?.[1]], [403, "authorization_denied", "role_not_allowed"]);
+      // `first` already carries the claim J5-6 proposed and J5-7 approved. The
+      // direct P2-03 replay of a since-reviewed claim fails the repository's
+      // post-write contract for every authorized actor alike (pre-existing,
+      // recorded in the ExecPlan); the GK reviewer gets the identical result.
+      const reviewerPropose = await reviewerPage.fetchJson("POST", `${INTAKE}/admin/organizations/${ORG_A}/evidence-items/${first.evidence_item_id}/claim-proposal`, {});
+      console.log(`[campaign] J3-3 direct P2-03 on a reviewed claim: mixed ${directPropose.status}/${directPropose.errorCode}, GK reviewer ${reviewerPropose.status}/${reviewerPropose.errorCode}`);
+      assert.notEqual(directPropose.errorCode, "authorization_denied");
+      assert.deepEqual([directPropose.status, directPropose.errorCode], [reviewerPropose.status, reviewerPropose.errorCode]);
       assert.ok([400, 403, 422].includes(forgedPropose.status), JSON.stringify(forgedPropose));
-      assert.deepEqual(changedTables(directBefore, await allKaiCounts()), [], "the refused direct requests write nothing");
+      assert.deepEqual(changedTables(directBefore, await allKaiCounts()), [], "the direct requests write nothing");
 
       // Client-safe presentation: the unreviewed proposal is not an Impact Fact.
       const facts = await mixedPage.fetchJson("GET", `${INTAKE}/admin/organizations/${ORG_A}/impact-facts`);

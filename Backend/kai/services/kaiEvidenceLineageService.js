@@ -4,7 +4,10 @@ import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationServic
 import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
 import { createPostgresEvidenceLineageRepository } from "../dictionary/postgresEvidenceLineageRepository.js";
 
-const EVIDENCE_LINEAGE_ALLOWED_ROLES = new Set(["gk_admin", "gk_operator", "gk_reviewer"]);
+// client_admin (owner decision 2026-10-18): an active organization administrator
+// of this exact organization, stored or binding-derived, may extract evidence.
+// Organization membership only - no combineGlobalRoles.
+const EVIDENCE_LINEAGE_ALLOWED_ROLES = new Set(["gk_admin", "gk_operator", "gk_reviewer", "client_admin"]);
 const EVIDENCE_LINEAGE_OPERATION = "extract_evidence_lineage";
 
 function isPlainObject(value) {

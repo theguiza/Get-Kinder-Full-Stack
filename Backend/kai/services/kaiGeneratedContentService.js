@@ -14,6 +14,12 @@
   const { EXPORT_REVIEW_ALLOWED_ROLES } = __exportReviewServiceContract;
 
   const GENERATED_CONTENT_ALLOWED_ROLES = new Set(["gk_admin", "gk_operator", "gk_reviewer"]);
+  // Owner decision 2026-10-18: an active organization administrator of this
+  // exact organization (client_admin, stored or binding-derived) may create
+  // INTERNAL evidence-summary and impact-narrative drafts only. Funder
+  // evidence summaries and the other seven generators keep
+  // GENERATED_CONTENT_ALLOWED_ROLES. Organization membership only.
+  const CLIENT_ADMIN_DRAFT_ALLOWED_ROLES = new Set(["gk_admin", "gk_operator", "gk_reviewer", "client_admin"]);
   const GENERATED_CONTENT_REVIEW_ALLOWED_ROLES = new Set(["gk_admin", "gk_reviewer"]);
   const COMPLETE_GENERATED_CONTENT_REVIEW_ALLOWED_ROLES = new Set(["gk_reviewer", "gk_admin"]);
   const CREATE_EVIDENCE_SUMMARY_OPERATION = "create_evidence_summary_draft";
@@ -213,7 +219,11 @@
       input.actorContext,
       CREATE_EVIDENCE_SUMMARY_OPERATION,
       input.organizationId,
-      { allowedRoles: GENERATED_CONTENT_ALLOWED_ROLES },
+      {
+        allowedRoles: input.requestedAudience === "internal"
+          ? CLIENT_ADMIN_DRAFT_ALLOWED_ROLES
+          : GENERATED_CONTENT_ALLOWED_ROLES,
+      },
     );
     if (!auth.ok) {
       return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers });
@@ -266,7 +276,7 @@
       input.actorContext,
       CREATE_IMPACT_NARRATIVE_OPERATION,
       input.organizationId,
-      { allowedRoles: GENERATED_CONTENT_ALLOWED_ROLES },
+      { allowedRoles: CLIENT_ADMIN_DRAFT_ALLOWED_ROLES },
     );
     if (!auth.ok) {
       return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers });
@@ -1010,6 +1020,7 @@
 
   export const __generatedContentServiceContract = Object.freeze({
     GENERATED_CONTENT_ALLOWED_ROLES,
+    CLIENT_ADMIN_DRAFT_ALLOWED_ROLES,
     GENERATED_CONTENT_REVIEW_ALLOWED_ROLES,
     COMPLETE_GENERATED_CONTENT_REVIEW_ALLOWED_ROLES,
     CREATE_EVIDENCE_SUMMARY_OPERATION,

@@ -360,15 +360,19 @@ test("P2-03 service: authorization outcomes are classified truthfully and every 
     proposeClaim({ organizationId, evidenceItemId: EVIDENCE_ITEM, actorContext, now: NOW },
       { env, claimProposalRepository: countingRepository(repositoryResult), metadataOnlyAudit });
 
-  for (const role of ["gk_admin", "gk_operator", "gk_reviewer"]) {
+  // Owner decision 2026-10-18: the organization's own client_admin may also
+  // propose (organization membership only); other client roles may not.
+  for (const role of ["gk_admin", "gk_operator", "gk_reviewer", "client_admin"]) {
     const allowed = await run(humanActor({ organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: role }] }));
     assert.equal(allowed.ok, true, `${role}: ${JSON.stringify(allowed.error)}`);
   }
   const writesAfterAllowed = writes;
   const OTHER = "00000000-0000-4000-8000-000000000002";
   for (const [label, actorContext, options, code, reason] of [
-    ["correct tenant, client role", humanActor({ organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_admin" }] }), {}, "authorization_denied", "role_not_allowed"],
-    ["mixed: global gk_reviewer, client membership", humanActor({ kaiRoles: ["gk_reviewer"], organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_admin" }] }), {}, "authorization_denied", "role_not_allowed"],
+    ["correct tenant, client_contributor", humanActor({ organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_contributor" }] }), {}, "authorization_denied", "role_not_allowed"],
+    ["correct tenant, client_reviewer", humanActor({ organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_reviewer" }] }), {}, "authorization_denied", "role_not_allowed"],
+    ["mixed: global gk_reviewer, client_contributor membership", humanActor({ kaiRoles: ["gk_reviewer"], organizationMemberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_contributor" }] }), {}, "authorization_denied", "role_not_allowed"],
+    ["client_admin only in another organization", humanActor({ organizationMemberships: [{ organization_id: OTHER, membership_status: "active", role_name: "client_admin" }] }), {}, "authorization_denied", "missing_active_organization_membership"],
     ["membership only in another organization", humanActor({ organizationMemberships: [{ organization_id: OTHER, membership_status: "active", role_name: "gk_operator" }] }), {}, "authorization_denied", "missing_active_organization_membership"],
     ["non-human actor", humanActor({ actorType: "ai" }), {}, "authorization_denied", null],
     ["KAI_SPRINT2_ENABLED off", humanActor(), { env: {} }, "feature_disabled", null],

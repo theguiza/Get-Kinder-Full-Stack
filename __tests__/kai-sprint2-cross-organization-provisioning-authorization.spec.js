@@ -425,14 +425,16 @@ test("configuration 1: global gk_reviewer + stored gk_reviewer in A + binding-de
 
   // B: the global role meets the derived client_admin's active access (the
   // established J3 mixed-role rule). It never becomes stored GK authority:
-  // no P1-08 promotion and no direct organization-GK operation.
+  // no P1-08 promotion and no direct organization-GK operation. The derived
+  // client_admin itself admits P2-01 extraction and P2-03 proposal (owner
+  // decision 2026-10-18); P2-02 coverage and gap follow-ups stay GK-only.
   assert.deepEqual(await surfaceFor(actor, ORG_B), {
     listed: true, capabilities: "ok", gkWorkspace: true,
-    recordEvidenceReview: true, recordClaimReview: true, extractEvidence: false, proposeClaim: false, acceptCoverageLimitation: false,
+    recordEvidenceReview: true, recordClaimReview: true, extractEvidence: true, proposeClaim: true, acceptCoverageLimitation: false,
     projectManagement: true, teamAccess: true, sourceReview: true, sensitivityReview: true, promoteSource: false,
   });
   assert.deepEqual(await enforcementFor(actor, ORG_B), {
-    recordEvidenceReview: true, extractEvidence: false, assessEvidenceCoverage: false, proposeClaim: false, generateClaimGapFollowups: false,
+    recordEvidenceReview: true, extractEvidence: true, assessEvidenceCoverage: false, proposeClaim: true, generateClaimGapFollowups: false,
     createSourceCandidate: true, createSensitivityReviewItem: true, readClaimLibrary: true,
   });
 
@@ -493,8 +495,11 @@ test("capability readback agrees with service enforcement for every configured a
       assert.equal(surface.recordEvidenceReview, enforced.recordEvidenceReview, where);
       assert.equal(surface.extractEvidence, enforced.extractEvidence, where);
       assert.equal(surface.proposeClaim, enforced.proposeClaim, where);
-      assert.equal(surface.proposeClaim, enforced.assessEvidenceCoverage, where);
-      assert.equal(surface.gkWorkspace, enforced.readClaimLibrary, where);
+      const capabilities = await getOrganizationAccessCapabilities({ organizationId, actorContext: actor }, { env: ENV });
+      assert.equal(capabilities.ok && capabilities.data.workflowOperations.assessEvidenceCoverage === true, enforced.assessEvidenceCoverage, where);
+      // The Claim Library admits the GK workspace and the organization's
+      // own client_admin (who also holds extraction), and no one else.
+      assert.equal(surface.gkWorkspace || surface.extractEvidence, enforced.readClaimLibrary, where);
     }
   }
 });

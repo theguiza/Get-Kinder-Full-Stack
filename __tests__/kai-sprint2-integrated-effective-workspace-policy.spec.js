@@ -15,19 +15,23 @@ const actor = (role, global = [], extra = {}) => ({
   actorType: "human", actorUserId: "10000000-0000-4000-8000-000000000003", kaiUserStatus: "active",
   kaiRoles: global, organizationMemberships: [{ organization_id: ORG, role_name: role, membership_status: "active" }], ...extra,
 });
-// Expected: workspace, human evidence/claim review, direct P2-02/P2-03,
-// P1-08 service authority, project mutation. Each policy remains independent.
+// Expected: workspace, human evidence/claim review, direct P2-02, P1-08
+// service authority, project mutation, direct P2-03 claim proposal, and the
+// claim/evidence library reads. Each policy remains independent. Owner
+// decision 2026-10-18: an active organization client_admin may propose a
+// claim and read the organization's claim/evidence libraries; P2-02 coverage,
+// human review, and P1-08 promotion are unchanged.
 const cases = [
-  ["global reviewer + client admin", actor("client_admin", ["gk_reviewer"]), [true, true, false, false, true]],
-  ["global operator + client admin", actor("client_admin", ["gk_operator"]), [true, false, false, false, true]],
-  ["global reviewer + org reviewer", actor("gk_reviewer", ["gk_reviewer"]), [true, true, true, true, false]],
-  ["org-only reviewer", actor("gk_reviewer"), [true, true, true, true, false]],
-  ["global reviewer + contributor", actor("client_contributor", ["gk_reviewer"]), [true, true, false, false, false]],
-  ["client admin", actor("client_admin"), [false, false, false, false, true]],
-  ["bound client admin", actor("client_admin", [], { organizationMemberships: [{ organization_id: ORG, role_name: "client_admin", membership_status: "active", source: "gk_organization_binding", gk_organization_id: 42 }] }), [false, false, false, false, true]],
-  ["client reviewer", actor("client_reviewer"), [false, false, false, false, false]],
-  ["client contributor", actor("client_contributor"), [false, false, false, false, false]],
-  ["platform exception (full actor only)", actor("client_contributor", [], { platformSuperuser: true, platformSuperuserAuthority: "get_kinder_site_admin" }), [true, true, true, true, true]],
+  ["global reviewer + client admin", actor("client_admin", ["gk_reviewer"]), [true, true, false, false, true, true, true]],
+  ["global operator + client admin", actor("client_admin", ["gk_operator"]), [true, false, false, false, true, true, true]],
+  ["global reviewer + org reviewer", actor("gk_reviewer", ["gk_reviewer"]), [true, true, true, true, false, true, true]],
+  ["org-only reviewer", actor("gk_reviewer"), [true, true, true, true, false, true, true]],
+  ["global reviewer + contributor", actor("client_contributor", ["gk_reviewer"]), [true, true, false, false, false, false, true]],
+  ["client admin", actor("client_admin"), [false, false, false, false, true, true, true]],
+  ["bound client admin", actor("client_admin", [], { organizationMemberships: [{ organization_id: ORG, role_name: "client_admin", membership_status: "active", source: "gk_organization_binding", gk_organization_id: 42 }] }), [false, false, false, false, true, true, true]],
+  ["client reviewer", actor("client_reviewer"), [false, false, false, false, false, false, false]],
+  ["client contributor", actor("client_contributor"), [false, false, false, false, false, false, false]],
+  ["platform exception (full actor only)", actor("client_contributor", [], { platformSuperuser: true, platformSuperuserAuthority: "get_kinder_site_admin" }), [true, true, true, true, true, true, true]],
 ];
 
 for (const [name, actorContext, expected] of cases) {
@@ -35,9 +39,8 @@ for (const [name, actorContext, expected] of cases) {
     const result = await getOrganizationAccessCapabilities({ organizationId: ORG, actorContext }, { env });
     assert.equal(result.ok, true);
     const c = result.data;
-    assert.deepEqual([c.internalKnowledgeWorkspace, c.workflowOperations.recordEvidenceReview, c.workflowOperations.proposeClaim, authorizeSourcePromotionDecision(actorContext, ORG).ok, c.projectManagement], expected);
+    assert.deepEqual([c.internalKnowledgeWorkspace, c.workflowOperations.recordEvidenceReview, c.workflowOperations.assessEvidenceCoverage, authorizeSourcePromotionDecision(actorContext, ORG).ok, c.projectManagement, c.workflowOperations.proposeClaim], expected.slice(0, 6));
     assert.equal(c.workflowOperations.recordClaimReview, expected[1]);
-    assert.equal(c.workflowOperations.assessEvidenceCoverage, expected[2]);
     const projects = await listAuthorizedEngagements({ organizationId: ORG, actorContext }, {
       env, listEngagementsForOrganization: async ({ organizationId }) => { assert.equal(organizationId, ORG); return []; },
     });
@@ -48,10 +51,10 @@ for (const [name, actorContext, expected] of cases) {
     let reads = 0;
     for (const [service, dependency] of [[listClaimLibraryCandidates, "listClaimLibraryReviewCandidates"], [listOrganizationEvidenceLibrary, "listOrganizationEvidenceItems"]]) {
       const read = await service({ organizationId: ORG, actorContext }, { env, [dependency]: async () => { reads++; return []; } });
-      assert.equal(read.ok, expected[0], JSON.stringify(read));
-      if (!expected[0]) assert.equal(read.blockers[0].blocking_reason, "role_not_allowed");
+      assert.equal(read.ok, expected[6], JSON.stringify(read));
+      if (!expected[6]) assert.equal(read.blockers[0].blocking_reason, "role_not_allowed");
     }
-    assert.equal(reads, expected[0] ? 2 : 0, "client denials reach no internal reader");
+    assert.equal(reads, expected[6] ? 2 : 0, "denials reach no internal reader");
   });
 }
 

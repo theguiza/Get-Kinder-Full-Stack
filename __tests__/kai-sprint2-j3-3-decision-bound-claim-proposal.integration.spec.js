@@ -423,18 +423,28 @@ async function runDecisionBoundClaimProposalSuite() {
   let a1Token;
   let a1Claim;
 
-  test("J3-3 baseline: the mixed actor's direct P2-02 and P2-03 requests stay role_not_allowed, while the separately authorized GK library reads succeed, writing nothing", async () => {
+  test("J3-3 baseline: the mixed actor's direct P2-02 request stays role_not_allowed, direct P2-03 is admitted only by its organization client_admin membership, and the library reads succeed, writing nothing", async () => {
     const before = await kaiTableRowCounts();
     const assessed = await assessEvidenceCoverageForSourceVersion(
       { organizationId: ORG, sourceVersionId: projectA.sourceVersionId, actorContext: mixed }, { env: ENV });
     assert.equal(assessed.ok, false);
     assert.deepEqual([assessed.error.code, blockingReason(assessed)], ["authorization_denied", "role_not_allowed"]);
     const now = new Date().toISOString();
+    // Owner decision 2026-10-18: an organization client_admin may propose
+    // directly. Proven against a recording repository so this baseline writes
+    // nothing and the decision-bound continuation below still creates the claim.
+    const admitted = [];
     const proposed = await proposeClaim({ organizationId: ORG, evidenceItemId: a1, actorContext: mixed, now }, {
-      env: ENV, metadataOnlyAudit: createProductionMetadataOnlyAuditForClaimProposal({ organizationId: ORG, evidenceItemId: a1, actorContext: mixed, now }),
+      env: ENV,
+      metadataOnlyAudit: createProductionMetadataOnlyAuditForClaimProposal({ organizationId: ORG, evidenceItemId: a1, actorContext: mixed, now }),
+      claimProposalRepository: { async proposeClaim(input) { admitted.push(input.organizationId); return { ok: false, error: { code: "not_found", status: 404 } }; } },
     });
-    assert.equal(proposed.ok, false);
-    assert.deepEqual([proposed.error.code, blockingReason(proposed)], ["authorization_denied", "role_not_allowed"]);
+    assert.deepEqual([proposed.error.code, admitted], ["not_found", [ORG]]);
+    const globalOnly = { ...mixed, organizationMemberships: mixed.organizationMemberships.map((membership) => ({ ...membership, role_name: "client_contributor" })) };
+    const refused = await proposeClaim({ organizationId: ORG, evidenceItemId: a1, actorContext: globalOnly, now }, {
+      env: ENV, metadataOnlyAudit: createProductionMetadataOnlyAuditForClaimProposal({ organizationId: ORG, evidenceItemId: a1, actorContext: globalOnly, now }),
+    });
+    assert.deepEqual([refused.ok, refused.error.code, blockingReason(refused)], [false, "authorization_denied", "role_not_allowed"], "the global gk_reviewer role alone never admits P2-03");
     const claimLibrary = await listClaimLibraryCandidates({ organizationId: ORG, limit: 25, actorContext: mixed }, { env: ENV });
     const evidenceLibrary = await listOrganizationEvidenceLibrary({ organizationId: ORG, limit: 25, afterEvidenceItemId: null, actorContext: mixed }, { env: ENV });
     assert.deepEqual([claimLibrary.ok, evidenceLibrary.ok], [true, true], "the October 14 workspace policy grants reads independently of Decision C");

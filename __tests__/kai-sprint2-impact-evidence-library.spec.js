@@ -2089,7 +2089,9 @@ test("P14-09: createFunderEvidenceSummaryPath matches the governed P14-09 funder
 test("P14-09 wiring: the funder claim checkbox and toggle are gated by canSelectClaimForFunderGeneration, distinct from the internal helper/state", () => {
   const uiSource = readFileSync("frontend/ImpactEvidenceLibrary.jsx", "utf8");
   assert.match(uiSource, /import \{[\s\S]*?canSelectClaimForFunderGeneration[\s\S]*?\} from "\.\/impactEvidenceLibraryLogic\.js";/);
-  assert.match(uiSource, /\{workflowOperations\.generateDrafts && canSelectClaimForFunderGeneration\(claim, audience\) \? \(/);
+  // Funder generation is generateAllDraftTypes (GK generation roles only),
+  // never the internal generateDrafts authority a client_admin holds.
+  assert.match(uiSource, /\{workflowOperations\.generateAllDraftTypes && canSelectClaimForFunderGeneration\(claim, audience\) \? \(/);
   assert.match(
     uiSource,
     /const toggleFunderGenerationClaim = useCallback\(\(claim\) => \{\s*if \(!canSelectClaimForFunderGeneration\(claim, audience\)\) return;/,
@@ -2179,7 +2181,7 @@ function buildGenerateFunderEvidenceSummary(handlerSource, overrides = {}) {
     createFunderEvidenceSummaryPath,
     generatedDraftReviewPacketPath,
     projectGeneratedDraftPacket,
-    workflowOperations: { generateDrafts: true },
+    workflowOperations: { generateDrafts: true, generateAllDraftTypes: true },
     ...overrides,
   };
   const generateFunderEvidenceSummary = factory(
@@ -3619,4 +3621,11 @@ test("generation handlers issue no request without server-projected generation a
   const funder = buildGenerateFunderEvidenceSummary(extractGenerateFunderEvidenceSummaryHandlerSource(source), { workflowOperations: {} });
   await funder.generateFunderEvidenceSummary();
   assert.deepEqual(funder.state.postJsonCalls, []);
+  // The internal-draft authority alone (client_admin) never reaches the funder route.
+  const internalOnly = buildGenerateFunderEvidenceSummary(
+    extractGenerateFunderEvidenceSummaryHandlerSource(source),
+    { workflowOperations: { generateDrafts: true, generateAllDraftTypes: false } },
+  );
+  await internalOnly.generateFunderEvidenceSummary();
+  assert.deepEqual(internalOnly.state.postJsonCalls, []);
 });

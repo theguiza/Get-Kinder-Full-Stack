@@ -754,7 +754,7 @@ async function runBrowserAcceptance() {
       results.case8_isolation = "PASS";
     });
 
-    await test("case 9: the operator gets no review or proposal control; the client's direct review and proposal requests are refused and write nothing", async () => {
+    await test("case 9: the operator gets no review or proposal control; the client's direct review request, and its proposal outside its organization, are refused and write nothing", async () => {
       await openGkEvidenceTab(operatorPage);
       for (const row of evidence) await operatorPage.waitForText(row.statement);
       const body = await operatorPage.text();
@@ -767,7 +767,10 @@ async function runBrowserAcceptance() {
         const post = (path, body) => fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) })
           .then((r) => r.status);
         return {
-          proposal: await post(${JSON.stringify(claimProposalPathFor(pendingB.evidence_item_id))}, {}),
+          // In its own organization the owner decision of 2026-10-18 admits
+          // client_admin's proposal (kai-client-admin-evidence-to-draft-
+          // browser-acceptance); here it targets another organization.
+          proposal: await post(${JSON.stringify(`/api/kai/sprint2/intake/admin/organizations/${ORG_B}/evidence-items/${pendingB.evidence_item_id}/claim-proposal`)}, {}),
           review: await post(${JSON.stringify(reviewPath(pendingB.evidence_item_id, pendingB.review_queue_item_id))},
             { expected_updated_at: new Date().toISOString(), decision: "supported" }),
         };

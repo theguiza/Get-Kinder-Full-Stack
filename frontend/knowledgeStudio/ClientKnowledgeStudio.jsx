@@ -6,6 +6,8 @@ import ClientFunderRequirements from "./ClientFunderRequirements.jsx";
 import ClientGeneratedDrafts from "./ClientGeneratedDrafts.jsx";
 import ClientEvidencePipelineStatus from "./ClientEvidencePipelineStatus.jsx";
 import ClientSensitivityReviewPanel from "./ClientSensitivityReviewPanel.jsx";
+import ClientEvidenceWorkflow from "./ClientEvidenceWorkflow.jsx";
+import { clientEvidenceWorkflowAccess } from "./clientEvidenceWorkflowLogic.js";
 import useClientEvidencePipeline from "./useClientEvidencePipeline.js";
 import useRevalidateOnReturn from "../useRevalidateOnReturn.js";
 import {
@@ -29,6 +31,10 @@ const CLIENT_KNOWLEDGE_STUDIO_TABS = Object.freeze([
   ["generatedDrafts", "Generated Drafts"],
   ["reviews", "Reviews"],
 ]);
+
+// Offered only when the access-capabilities read admits the organization
+// administrator's evidence-to-draft workflow (clientEvidenceWorkflowAccess).
+const DATA_SOURCES_TAB = Object.freeze(["dataSources", "Data Sources"]);
 
 // Tabs that render the selected project's evidence pipeline; entering one
 // re-reads it so a status never lags behind an upload or a review.
@@ -89,6 +95,11 @@ function PipelineReasonList({ reasons }) {
  *   selected project (Files, Evidence, and Reviews tabs): per uploaded file
  *   its governed stage, responsible party, and next permitted action, plus
  *   the governed reviewed Impact Facts descending from the project's files;
+ * - only for an organization administrator the access-capabilities read
+ *   admits (extractEvidence / proposeClaim / generateDrafts), and only while
+ *   the Data Sources tab is open: ClientEvidenceWorkflow's Sources, Evidence
+ *   Library, and Claim Library reads, extraction, claim proposal, and
+ *   internal evidence-summary / impact-narrative generation;
  * - nothing else: organization-wide reviewed Impact Facts arrive as the
  *   `facts` prop, fetched once per organization by ImpactLibraryApp from the
  *   client-safe impact-facts read, and are shown only when no project is
@@ -159,6 +170,10 @@ export default function ClientKnowledgeStudio({
     if (PIPELINE_TABS.has(tab)) refreshPipeline();
   }, Boolean(organizationId && engagementId));
   const canContribute = capabilities?.intakeContribution === true;
+  const workflowAccess = clientEvidenceWorkflowAccess(capabilities);
+  const tabs = workflowAccess.visible
+    ? [...CLIENT_KNOWLEDGE_STUDIO_TABS.slice(0, 1), DATA_SOURCES_TAB, ...CLIENT_KNOWLEDGE_STUDIO_TABS.slice(1)]
+    : CLIENT_KNOWLEDGE_STUDIO_TABS;
   const canReviewFollowups = capabilities?.clientFollowupReview === true;
   const factsStatus = facts?.status || "loading";
   const factItems = Array.isArray(facts?.items) ? facts.items : [];
@@ -168,7 +183,7 @@ export default function ClientKnowledgeStudio({
       <h1 className="admin-title mb-3">Knowledge Studio</h1>
 
       <ul className="nav nav-tabs mb-3">
-        {CLIENT_KNOWLEDGE_STUDIO_TABS.map(([key, label]) => (
+        {tabs.map(([key, label]) => (
           <li className="nav-item" key={key}>
             <button
               type="button"
@@ -204,6 +219,10 @@ export default function ClientKnowledgeStudio({
           canContribute={canContribute}
           onRefresh={refreshPipeline}
         />
+      ) : null}
+
+      {tab === "dataSources" && workflowAccess.visible && organizationId ? (
+        <ClientEvidenceWorkflow organizationId={organizationId} engagementId={engagementId} access={workflowAccess} />
       ) : null}
 
       {tab === "evidence" && engagementId ? (

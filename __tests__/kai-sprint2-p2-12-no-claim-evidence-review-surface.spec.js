@@ -292,11 +292,13 @@ test("capability: canRecordEvidenceReviewDecision agrees with the P2-12 service'
   assert.equal(canRecordEvidenceReviewDecision({}), false);
 });
 
-test("least privilege: write coordinates are returned only to actors with P2-12 authority; every GK reader keeps the review posture", async () => {
+test("least privilege: write coordinates are returned only to actors with P2-12 authority; every reader, including the organization's client_admin, keeps only the review posture", async () => {
   for (const [label, actorContext, expected] of ACTORS) {
     const result = await listWith([evidenceRow({ evidence_review_decision_outcome: "needs_more_information", evidence_review_decision_head_count: 1 })], actorContext);
-    const readable = ["gk_reviewer", "gk_admin", "gk_operator"].includes(label);
-    assert.equal(result.ok, readable, `${label}: Evidence Library read contract unchanged`);
+    // Owner decision 2026-10-18: the organization's client_admin reads the
+    // Evidence Library (never with P2-12 write coordinates).
+    const readable = ["gk_reviewer", "gk_admin", "gk_operator", "client_admin"].includes(label);
+    assert.equal(result.ok, readable, `${label}: Evidence Library read admission`);
     if (!readable) continue;
     assert.deepEqual(result.data.capabilities, { canRecordEvidenceReviewDecision: expected }, label);
     const review = result.data.items[0].evidenceReview;

@@ -117,10 +117,18 @@ function passes(actorContext, operation, organizationId, allowedRoles) {
 
 // Each UI capability projects the governing service's exact role set and mode.
 // These booleans never replace service authorization or object eligibility.
+// generateDrafts is the internal evidence-summary and impact-narrative
+// authority (CLIENT_ADMIN_DRAFT_ALLOWED_ROLES); generateAllDraftTypes is the
+// funder evidence summary and the seven other generators
+// (GENERATED_CONTENT_ALLOWED_ROLES), which client_admin never holds.
 function workflowOperations(actorContext, organizationId) {
   return {
     generateDrafts: validateActorCanPerformOperation(
       actorContext, __generatedContentServiceContract.CREATE_EVIDENCE_SUMMARY_OPERATION, organizationId,
+      { allowedRoles: __generatedContentServiceContract.CLIENT_ADMIN_DRAFT_ALLOWED_ROLES },
+    ).ok === true,
+    generateAllDraftTypes: validateActorCanPerformOperation(
+      actorContext, __generatedContentServiceContract.CREATE_READINESS_ASSESSMENT_OPERATION, organizationId,
       { allowedRoles: __generatedContentServiceContract.GENERATED_CONTENT_ALLOWED_ROLES },
     ).ok === true,
     reviewGeneratedDrafts: validateActorCanPerformOperation(
@@ -204,7 +212,7 @@ const OPERATION_READINESS = Object.freeze([
   { key: "evidence_processing", category: "process", operation: __evidenceLineageServiceContract.EVIDENCE_LINEAGE_OPERATION,
     clauses: [{ scope: ORGANIZATION, roles: __evidenceLineageServiceContract.EVIDENCE_LINEAGE_ALLOWED_ROLES }] },
   { key: "draft_generation", category: "process", operation: __generatedContentServiceContract.CREATE_EVIDENCE_SUMMARY_OPERATION,
-    clauses: [{ scope: ORGANIZATION, roles: __generatedContentServiceContract.GENERATED_CONTENT_ALLOWED_ROLES }] },
+    clauses: [{ scope: ORGANIZATION, roles: __generatedContentServiceContract.CLIENT_ADMIN_DRAFT_ALLOWED_ROLES }] },
   { key: "source_review", category: "decide", operation: __sourcePromotionServiceContract.SOURCE_PROMOTION_OPERATION,
     clauses: [
       { scope: GLOBAL, roles: __reviewCockpitServiceContract.REVIEW_COCKPIT_READ_ROLES },

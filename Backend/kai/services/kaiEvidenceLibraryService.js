@@ -16,6 +16,12 @@ import { canRecordEvidenceReviewDecision } from "./kaiHumanReviewService.js";
  * persistence, no schema change - reads only.
  */
 const EVIDENCE_LIBRARY_READ_ROLES = new Set(["gk_admin", "gk_operator", "gk_reviewer"]);
+// Owner decision 2026-10-18: an active organization administrator of this
+// exact organization may inspect the organization's evidence to propose a
+// claim. Organization membership only (never combineGlobalRoles); the GK set
+// and its mode are unchanged. Review write coordinates still follow
+// canRecordEvidenceReviewDecision, which client_admin never satisfies.
+const EVIDENCE_LIBRARY_CLIENT_ADMIN_ROLES = new Set(["client_admin"]);
 const EVIDENCE_LIBRARY_READ_OPERATION = "read_intake";
 const EVIDENCE_LIBRARY_DEFAULT_LIMIT = 25;
 const EVIDENCE_LIBRARY_MAX_LIMIT = 25;
@@ -157,12 +163,20 @@ export async function listOrganizationEvidenceLibrary(input = {}, dependencies =
   if (!genericAuth.ok) {
     return buildKaiError(genericAuth.error_code || "authorization_denied", { blockers: genericAuth.blockers });
   }
-  const roleAuth = validateActorCanPerformOperation(
+  const gkRoleAuth = validateActorCanPerformOperation(
     input.actorContext,
     EVIDENCE_LIBRARY_READ_OPERATION,
     organizationId,
     { allowedRoles: EVIDENCE_LIBRARY_READ_ROLES, combineGlobalRoles: true },
   );
+  const roleAuth = gkRoleAuth.ok
+    ? gkRoleAuth
+    : validateActorCanPerformOperation(
+      input.actorContext,
+      EVIDENCE_LIBRARY_READ_OPERATION,
+      organizationId,
+      { allowedRoles: EVIDENCE_LIBRARY_CLIENT_ADMIN_ROLES },
+    );
   if (!roleAuth.ok) {
     return buildKaiError(roleAuth.error_code || "authorization_denied", { blockers: roleAuth.blockers });
   }
@@ -209,6 +223,7 @@ export async function listOrganizationEvidenceLibrary(input = {}, dependencies =
 export const __evidenceLibraryServiceContract = Object.freeze({
   EVIDENCE_LIBRARY_READ_OPERATION,
   EVIDENCE_LIBRARY_READ_ROLES,
+  EVIDENCE_LIBRARY_CLIENT_ADMIN_ROLES,
   EVIDENCE_LIBRARY_DEFAULT_LIMIT,
   EVIDENCE_LIBRARY_MAX_LIMIT,
 });

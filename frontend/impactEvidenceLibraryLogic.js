@@ -74,7 +74,7 @@ export function projectOrganizationAccessCapabilities(dto) {
   const required = ["internalKnowledgeWorkspace", "intakeContribution", "clientFollowupReview", "projectManagement", "improvementPlanManagement", "organizationJoinReview", "organizationAccessManagement"];
   if (!required.every((key) => typeof dto[key] === "boolean")) return null;
   return {
-    workflowOperations: Object.fromEntries(["generateDrafts", "reviewGeneratedDrafts", "readGeneratedDrafts", "recordEvidenceReview", "recordClaimReview", "extractEvidence", "assessEvidenceCoverage", "proposeClaim", "generateClaimGapFollowups", "recordConflict", "acceptCoverageLimitation", "assessRequirement", "readGrantResponsePacket", "readBoardReportingPacket"].map((key) => [key, dto.workflowOperations?.[key] === true])),
+    workflowOperations: Object.fromEntries(["generateDrafts", "generateAllDraftTypes", "reviewGeneratedDrafts", "readGeneratedDrafts", "recordEvidenceReview", "recordClaimReview", "extractEvidence", "assessEvidenceCoverage", "proposeClaim", "generateClaimGapFollowups", "recordConflict", "acceptCoverageLimitation", "assessRequirement", "readGrantResponsePacket", "readBoardReportingPacket"].map((key) => [key, dto.workflowOperations?.[key] === true])),
     internalKnowledgeWorkspace: dto.internalKnowledgeWorkspace === true,
     intakeContribution: dto.intakeContribution === true,
     clientFollowupReview: dto.clientFollowupReview === true,
