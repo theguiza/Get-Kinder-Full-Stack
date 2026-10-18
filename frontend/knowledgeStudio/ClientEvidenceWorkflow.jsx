@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import {
+  claimGapFollowupsPath,
   claimLibraryCandidatesPath,
   claimProposalPath,
   createEvidenceSummaryPath,
@@ -23,6 +24,8 @@ import {
   claimProposalResultMessage,
   claimSelectabilityMessage,
   extractionResultMessage,
+  gapFollowupFailureMessage,
+  gapFollowupResultMessage,
   internalDraftFailureMessage,
   internalDraftReadiness,
   internalDraftRequestBody,
@@ -60,13 +63,16 @@ function useOrganizationRead(organizationId, path, project, refreshToken) {
  * Data Sources tab of the client Knowledge Studio for an organization
  * administrator (owner decision 2026-10-18). Mounted only while the tab is
  * open and only when the access-capabilities read admits at least one of
- * extractEvidence / proposeClaim / generateDrafts; each action is shown only
- * for its own flag, and the server re-authorizes every request.
+ * extractEvidence / proposeClaim / generateClaimGapFollowups /
+ * generateDrafts; each action is shown only for its own flag, and the server
+ * re-authorizes every request.
  *
  * Requests: the organization-scoped Sources, Evidence Library, and Claim
- * Library reads; the P2-01 extraction and P2-03 claim-proposal writes; and the
- * internal evidence-summary and impact-narrative generation writes. Never the
- * funder or any other generator, a review decision, or a GK review packet.
+ * Library reads; the P2-01 extraction, P2-03 claim-proposal, and P2-04 claim
+ * gap follow-up writes; and the internal evidence-summary and
+ * impact-narrative generation writes. Never the funder or any other
+ * generator, a review decision, a follow-up answer, the GK traceability read,
+ * or a GK review packet.
  */
 export default function ClientEvidenceWorkflow({ organizationId, engagementId, access }) {
   const [refreshToken, setRefreshToken] = useState(0);
@@ -80,6 +86,7 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
   const [selectedClaimIds, setSelectedClaimIds] = useState([]);
   const [draftKeys, setDraftKeys] = useState({});
   const [lastDraft, setLastDraft] = useState(null);
+  const [gapFollowupsByClaim, setGapFollowupsByClaim] = useState({});
   const contextRef = useRef("");
   const contextKey = `${organizationId}:${engagementId || ""}`;
   contextRef.current = contextKey;
@@ -88,6 +95,7 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
     setSelectedClaimIds([]);
     setDraftKeys({});
     setLastDraft(null);
+    setGapFollowupsByClaim({});
     setNotice(null);
   }, [organizationId, engagementId]);
   useEffect(() => {
@@ -113,6 +121,13 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
     (data) => setNotice({ kind: "success", text: extractionResultMessage(data) }));
   const propose = (evidenceItemId) => runWrite(`propose:${evidenceItemId}`, claimProposalPath(organizationId, evidenceItemId), {},
     (data) => setNotice({ kind: "success", text: claimProposalResultMessage(data) }));
+  // P2-04 is idempotent per claim: a repeat request replays the same rows.
+  const generateGapFollowups = (claimId) => runWrite(`gaps:${claimId}`, claimGapFollowupsPath(organizationId, claimId), {},
+    (data) => {
+      const text = gapFollowupResultMessage(data);
+      setGapFollowupsByClaim((current) => ({ ...current, [claimId]: text }));
+      setNotice({ kind: "success", text });
+    }, gapFollowupFailureMessage);
 
   const toggleClaim = (claimId) => {
     setDraftKeys({});
@@ -127,7 +142,8 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
     setDraftKeys((current) => ({ ...current, [contentType]: idempotencyKey }));
     return runWrite(`generate:${contentType}`, pathBuilder(organizationId),
       internalDraftRequestBody({ claimIds: selectedClaimIds, idempotencyKey, engagementId }),
-      (data) => setLastDraft(internalDraftResultSummary(data, contentType)), internalDraftFailureMessage);
+      (data) => setLastDraft(internalDraftResultSummary(data, contentType)),
+      (result) => internalDraftFailureMessage(result, { canGenerateGapFollowups: access.generateClaimGapFollowups }));
   };
 
   const proposedByEvidence = claimIdsByEvidenceItem(claims.items);
@@ -210,6 +226,9 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
         <div className="small text-muted mb-2">
           Internal drafts may use claims still awaiting Get Kinder review. Using a claim here does not approve it for funders
           or the public.
+          {access.generateClaimGapFollowups
+            ? " Generate a claim's gap follow-ups before drafting from it; they record open questions and resolve nothing."
+            : null}
         </div>
         {claims.status === "loading" ? <div className="text-muted small">Loading claims...</div> : null}
         {claims.status === "error" ? <div className="alert alert-warning py-2 small">Claims could not be loaded. {claims.message}</div> : null}
@@ -231,6 +250,13 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
                       <span className="form-check-label">Use in an internal draft</span>
                     </label>
                   ) : null}
+                  {access.generateClaimGapFollowups && selectability.selectable ? (
+                    <button type="button" className="btn btn-sm btn-outline-secondary mt-1" disabled={Boolean(pending)}
+                      data-client-claim-gap-followups={claim.claimId} onClick={() => generateGapFollowups(claim.claimId)}>
+                      {pending === `gaps:${claim.claimId}` ? "Generating..." : "Generate gap follow-ups"}
+                    </button>
+                  ) : null}
+                  {gapFollowupsByClaim[claim.claimId] ? <div className="mt-1 text-muted">{gapFollowupsByClaim[claim.claimId]}</div> : null}
                   {!selectability.selectable ? <div className="mt-1">{claimSelectabilityMessage(selectability.reason)}</div> : null}
                 </li>
               );

@@ -7,6 +7,11 @@ import { extractEvidenceFromSourceVersion, __evidenceLineageServiceContract } fr
 import { listOrganizationEvidenceLibrary, __evidenceLibraryServiceContract } from "../Backend/kai/services/kaiEvidenceLibraryService.js";
 import { proposeClaim, __claimProposalServiceContract } from "../Backend/kai/services/kaiClaimProposalService.js";
 import { listClaimLibraryCandidates, __claimLibraryServiceContract } from "../Backend/kai/services/kaiClaimLibraryService.js";
+import { generateClaimGapFollowups, __claimGapFollowupServiceContract } from "../Backend/kai/services/kaiClaimGapFollowupService.js";
+import { completeClientFollowup, __clientFollowupCompletionServiceContract } from "../Backend/kai/services/kaiClientFollowupCompletionService.js";
+import { listClientFollowupWorkflows, __clientFollowupReadServiceContract } from "../Backend/kai/services/kaiClientFollowupReadService.js";
+import { getClaimTraceabilitySummary } from "../Backend/kai/services/kaiClaimTraceabilityService.js";
+import { acceptInternalCoverageLimitation } from "../Backend/kai/services/kaiCoverageReviewDecisionService.js";
 import {
   createEvidenceSummaryDraft,
   createImpactNarrativeDraft,
@@ -34,6 +39,8 @@ import {
   claimIdsByEvidenceItem,
   claimInternalDraftSelectability,
   clientEvidenceWorkflowAccess,
+  gapFollowupFailureMessage,
+  gapFollowupResultMessage,
   internalDraftFailureMessage,
   internalDraftReadiness,
   internalDraftRequestBody,
@@ -45,8 +52,11 @@ import {
  * Owner decision 2026-10-18: a non-superuser, binding-derived client_admin
  * may run the organization's evidence-to-draft workflow - Sources read,
  * P2-01 extraction, Evidence Library read, P2-03 claim proposal, Claim
- * Library read, and INTERNAL evidence-summary / impact-narrative generation -
- * in the exact organization it administers, and nothing else.
+ * Library read, P2-04 claim gap follow-up generation, and INTERNAL
+ * evidence-summary / impact-narrative generation - in the exact organization
+ * it administers, and nothing else. P2-04 generation records open gaps and
+ * open client follow-ups only: answering a follow-up, accepting a coverage
+ * limitation, and every review decision keep their own role sets.
  *
  * Real: resolveKaiActorContext with the GK organization binding (no stored
  * kai.organization_memberships row, no kai.user_roles row, no site-admin
@@ -168,7 +178,18 @@ function draftResult(contentType) {
 
 const noAudit = () => ({ prepareMetadataOnlyAudit() { return { ok: true, async publish() {} }; } });
 
-// Runs one of the seven workflow operations in `organizationId` with
+const GAP = "41000000-0000-4000-8000-000000000001";
+const FOLLOWUP = "42000000-0000-4000-8000-000000000001";
+function gapFollowupData(organizationId, replayed = false) {
+  return {
+    gapItems: [{ gap_log_item_id: GAP, organization_id: organizationId, claim_id: CLAIM, dimension_key: "definition_clarity", assessment_status: "unresolved", safe_summary: "Field definitions are not yet confirmed." }],
+    clientFollowupItems: [{ client_followup_item_id: FOLLOWUP, organization_id: organizationId, claim_id: CLAIM, gap_log_item_id: GAP, dimension_key: "definition_clarity", question_text: "How is this field defined?" }],
+    reviewQueueItems: [{ review_queue_item_id: QUEUE, organization_id: organizationId, queue_type: "client_followup", target_object_type: "client_followup_item", target_object_id: FOLLOWUP, queue_status: "waiting_on_client", review_status: "proposed" }],
+    replayed,
+  };
+}
+
+// Runs one of the eight workflow operations in `organizationId` with
 // recording doubles; returns the result and every repository/read call.
 async function runWorkflowOperation(name, actorContext, organizationId, { engagementId = ENGAGEMENT_X, engagementOrganizationId = organizationId, rows = null } = {}) {
   const calls = [];
@@ -213,6 +234,12 @@ async function runWorkflowOperation(name, actorContext, organizationId, { engage
         env: ENV,
         listClaimLibraryReviewCandidates: async (scoped) => { record("claims", scoped); return rows ?? [claimRow(scoped)]; },
       }) };
+    case "gapFollowups":
+      return { calls, result: await generateClaimGapFollowups({ organizationId, claimId: CLAIM, actorContext, now: NOW }, {
+        env: ENV,
+        metadataOnlyAudit: noAudit(),
+        claimGapFollowupRepository: { async generateClaimGapsAndFollowups(input) { record("gaps", input.organizationId); return { ok: true, data: gapFollowupData(input.organizationId), error: null }; } },
+      }) };
     case "evidenceSummary":
       return { calls, result: await createEvidenceSummaryDraft(generationInput, generationDeps) };
     case "impactNarrative":
@@ -222,7 +249,7 @@ async function runWorkflowOperation(name, actorContext, organizationId, { engage
   }
 }
 
-const WORKFLOW_OPERATIONS = Object.freeze(["sources", "extract", "evidence", "propose", "claims", "evidenceSummary", "impactNarrative"]);
+const WORKFLOW_OPERATIONS = Object.freeze(["sources", "extract", "evidence", "propose", "claims", "gapFollowups", "evidenceSummary", "impactNarrative"]);
 
 function assertDenied(result, reason, label) {
   assert.equal(result.ok, false, label);
@@ -244,10 +271,10 @@ test("the principal actor is a binding-derived client_admin: no stored membershi
 });
 
 // ---------------------------------------------------------------------------
-// A. Organization X: all seven operations authorized
+// A. Organization X: all eight operations authorized
 // ---------------------------------------------------------------------------
 
-test("A: binding-derived client_admin is authorized for all seven operations in organization X, each scoped to X", async () => {
+test("A: binding-derived client_admin is authorized for all eight operations in organization X, each scoped to X", async () => {
   const actor = await bindingDerivedClientAdmin();
   const expectedCalls = {
     sources: [["sources", ORG_X], ["versions", ORG_X]],
@@ -255,6 +282,7 @@ test("A: binding-derived client_admin is authorized for all seven operations in 
     evidence: [["evidence", ORG_X]],
     propose: [["propose", ORG_X]],
     claims: [["claims", ORG_X]],
+    gapFollowups: [["gaps", ORG_X]],
     evidenceSummary: [["engagement", ORG_X], ["generate", ORG_X]],
     impactNarrative: [["engagement", ORG_X], ["generate", ORG_X]],
   };
@@ -265,8 +293,13 @@ test("A: binding-derived client_admin is authorized for all seven operations in 
   }
 });
 
-test("A: role sets - the four write operations admit client_admin by organization membership; the three reads admit it through a dedicated organization-only set", () => {
+test("A: role sets - the five write operations admit client_admin by organization membership; the three reads admit it through a dedicated organization-only set", () => {
   const gk = ["gk_admin", "gk_operator", "gk_reviewer"];
+  assert.deepEqual([...__claimGapFollowupServiceContract.CLAIM_GAP_FOLLOWUP_ALLOWED_ROLES].sort(), ["client_admin", ...gk]);
+  assert.equal(__claimGapFollowupServiceContract.CLAIM_GAP_FOLLOWUP_OPERATION, "generate_claim_gap_followups");
+  // Answering and listing client follow-ups stay client_reviewer only.
+  assert.deepEqual([...__clientFollowupCompletionServiceContract.COMPLETE_CLIENT_FOLLOWUP_ALLOWED_ROLES], ["client_reviewer"]);
+  assert.deepEqual([...__clientFollowupReadServiceContract.LIST_CLIENT_FOLLOWUP_WORKFLOWS_ALLOWED_ROLES], ["client_reviewer"]);
   assert.deepEqual([...__evidenceLineageServiceContract.EVIDENCE_LINEAGE_ALLOWED_ROLES].sort(), ["client_admin", ...gk]);
   assert.deepEqual([...__claimProposalServiceContract.CLAIM_PROPOSAL_ALLOWED_ROLES].sort(), ["client_admin", ...gk]);
   assert.deepEqual([...__generatedContentServiceContract.CLIENT_ADMIN_DRAFT_ALLOWED_ROLES].sort(), ["client_admin", ...gk]);
@@ -294,7 +327,7 @@ test("A: a stored client_admin membership in X is admitted the same way", async 
 // C. Organization Y and foreign identifiers
 // ---------------------------------------------------------------------------
 
-test("C: the same actor is denied all seven operations in organization Y before any read or write", async () => {
+test("C: the same actor is denied all eight operations in organization Y before any read or write", async () => {
   const actor = await bindingDerivedClientAdmin();
   for (const name of WORKFLOW_OPERATIONS) {
     const { result, calls } = await runWorkflowOperation(name, actor, ORG_Y);
@@ -420,7 +453,7 @@ test("D: client_admin is denied the seven other generators, funder evidence summ
   assert.equal(authorizeSourcePromotionDecision(actor, ORG_X).ok, false, "P1-08 promotion stays GK-only");
 });
 
-test("D: client_contributor and client_reviewer gain none of the seven operations", async () => {
+test("D: client_contributor and client_reviewer gain none of the eight operations", async () => {
   for (const role of ["client_contributor", "client_reviewer"]) {
     for (const name of WORKFLOW_OPERATIONS) {
       const { result, calls } = await runWorkflowOperation(name, memberActor(role), ORG_X);
@@ -438,7 +471,7 @@ test("D: a global client_admin role never satisfies the reads, and a global GK r
     assert.deepEqual(calls, [], name);
   }
   const mixed = memberActor("client_contributor", { kaiRoles: ["gk_reviewer"] });
-  for (const name of ["extract", "propose", "evidenceSummary", "impactNarrative"]) {
+  for (const name of ["extract", "propose", "gapFollowups", "evidenceSummary", "impactNarrative"]) {
     assertDenied((await runWorkflowOperation(name, mixed, ORG_X)).result, "role_not_allowed", `mixed ${name}`);
   }
   for (const name of ["sources", "evidence", "claims"]) {
@@ -457,7 +490,7 @@ test("D: GK staff and the platform superuser keep every operation, including the
   }
 });
 
-test("disabled: KAI_SPRINT2_ENABLED off returns feature_disabled for all seven before any read", async () => {
+test("disabled: KAI_SPRINT2_ENABLED off returns feature_disabled for all eight before any read", async () => {
   const actor = await bindingDerivedClientAdmin();
   const off = { KAI_SPRINT2_ENABLED: "false", KAI_GENERATION_ENABLED: "true" };
   const never = async () => assert.fail("read while disabled");
@@ -467,6 +500,7 @@ test("disabled: KAI_SPRINT2_ENABLED off returns feature_disabled for all seven b
     await listOrganizationEvidenceLibrary({ organizationId: ORG_X, actorContext: actor }, { env: off, listOrganizationEvidenceItems: never }),
     await proposeClaim({ organizationId: ORG_X, evidenceItemId: EVIDENCE, actorContext: actor, now: NOW }, { env: off }),
     await listClaimLibraryCandidates({ organizationId: ORG_X, actorContext: actor }, { env: off, listClaimLibraryReviewCandidates: never }),
+    await generateClaimGapFollowups({ organizationId: ORG_X, claimId: CLAIM, actorContext: actor, now: NOW }, { env: off, claimGapFollowupRepository: { generateClaimGapsAndFollowups: never } }),
     await createEvidenceSummaryDraft({ organizationId: ORG_X, engagementId: ENGAGEMENT_X, requestedAudience: "internal", claimIds: [CLAIM], idempotencyKey: "client-admin-off-1", actorContext: actor, now: NOW }, { env: off }),
     await createImpactNarrativeDraft({ organizationId: ORG_X, engagementId: ENGAGEMENT_X, requestedAudience: "internal", claimIds: [CLAIM], idempotencyKey: "client-admin-off-1", actorContext: actor, now: NOW }, { env: off }),
   ];
@@ -477,13 +511,13 @@ test("disabled: KAI_SPRINT2_ENABLED off returns feature_disabled for all seven b
 // F. Capabilities and the client workflow logic
 // ---------------------------------------------------------------------------
 
-test("F: capabilities - client_admin gets extraction, proposal, and internal drafts only; readiness reports role authority, not content", async () => {
+test("F: capabilities - client_admin gets extraction, proposal, gap follow-ups, and internal drafts only; readiness reports role authority, not content", async () => {
   const actor = await bindingDerivedClientAdmin();
   const capabilities = await getOrganizationAccessCapabilities({ organizationId: ORG_X, actorContext: actor }, { env: ENV });
   const operations = capabilities.data.workflowOperations;
   assert.deepEqual(
     Object.fromEntries(Object.entries(operations).filter(([, value]) => value === true)),
-    { generateDrafts: true, extractEvidence: true, proposeClaim: true },
+    { generateDrafts: true, extractEvidence: true, proposeClaim: true, generateClaimGapFollowups: true },
   );
   assert.equal(capabilities.data.internalKnowledgeWorkspace, false);
   const readiness = Object.fromEntries(computeOrganizationOperationReadiness(actor, ORG_X).map((row) => [row.key, row.ready]));
@@ -501,7 +535,7 @@ test("F: capabilities - client_admin gets extraction, proposal, and internal dra
   // The browser projection carries the split and fails closed.
   const projected = projectOrganizationAccessCapabilities(capabilities.data);
   assert.deepEqual([projected.workflowOperations.generateDrafts, projected.workflowOperations.generateAllDraftTypes], [true, false]);
-  assert.deepEqual(clientEvidenceWorkflowAccess(projected), { visible: true, extractEvidence: true, proposeClaim: true, generateDrafts: true });
+  assert.deepEqual(clientEvidenceWorkflowAccess(projected), { visible: true, extractEvidence: true, proposeClaim: true, generateClaimGapFollowups: true, generateDrafts: true });
 });
 
 test("F: the client workflow is offered to client_admin only, never to other client roles or the GK workspace", async () => {
@@ -543,7 +577,70 @@ test("F: authorization and input readiness stay distinct; internal selection adm
   assert.ok(!JSON.stringify(summary).includes(QUEUE), "the browser summary keeps no review queue id");
   assert.equal(internalDraftResultSummary({ generatedContentDraftId: "nope" }, "evidence_summary"), null);
   // An authorized request refused for content readiness is explained, never shown as success.
-  assert.match(internalDraftFailureMessage({ statusCode: 422, body: { error: { code: "validation_blocker", message: "Request failed KAI validation." }, blockers: [{ blocking_reason: "traceability_result_contract_invalid" }] } }), /cannot be drafted from yet.*Nothing was created\./);
+  const traceabilityRefusal = { statusCode: 422, body: { error: { code: "validation_blocker", message: "Request failed KAI validation." }, blockers: [{ blocking_reason: "traceability_result_contract_invalid" }] } };
+  assert.match(internalDraftFailureMessage(traceabilityRefusal), /cannot be drafted from yet: Get Kinder has not completed.*Nothing was created\./);
+  assert.match(internalDraftFailureMessage(traceabilityRefusal, { canGenerateGapFollowups: true }), /cannot be drafted from yet: its traceability checks did not pass\. .*"Generate gap follow-ups".*Nothing was created\./);
   assert.match(internalDraftFailureMessage({ statusCode: 422, body: { error: { code: "claim_reviewed_not_supported", message: "x" } } }), /not supported by Get Kinder review/);
   assert.equal(internalDraftFailureMessage({ statusCode: 403, body: { error: { code: "authorization_denied", message: "Denied." } } }), "Denied.");
+});
+
+// ---------------------------------------------------------------------------
+// G. P2-04 claim gap follow-up generation
+// ---------------------------------------------------------------------------
+
+test("G: P2-04 for the binding-derived client_admin forwards only organization X, the claim, and its own KAI user, and returns the repository's open records unchanged", async () => {
+  const actor = await bindingDerivedClientAdmin();
+  const inputs = [];
+  const result = await generateClaimGapFollowups({ organizationId: ORG_X, claimId: CLAIM, actorContext: actor, now: NOW }, {
+    env: ENV,
+    metadataOnlyAudit: noAudit(),
+    claimGapFollowupRepository: { async generateClaimGapsAndFollowups(input) { inputs.push(input); return { ok: true, data: gapFollowupData(ORG_X), error: null }; } },
+  });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(inputs.length, 1);
+  const { metadataOnlyAudit, ...forwarded } = inputs[0];
+  assert.deepEqual(forwarded, { organizationId: ORG_X, claimId: CLAIM, actorUserId: KAI_USER, now: NOW });
+  assert.ok(metadataOnlyAudit, "the required audit is forwarded");
+  assert.deepEqual(result.data, gapFollowupData(ORG_X), "no state is rewritten by the service");
+  assert.deepEqual(result.data.reviewQueueItems.map((item) => [item.queue_status, item.review_status]), [["waiting_on_client", "proposed"]], "follow-ups stay open");
+});
+
+test("G: P2-04 on a claim that is not organization X's passes the repository's not_found through without data", async () => {
+  const actor = await bindingDerivedClientAdmin();
+  const result = await generateClaimGapFollowups({ organizationId: ORG_X, claimId: CLAIM, actorContext: actor, now: NOW }, {
+    env: ENV,
+    metadataOnlyAudit: noAudit(),
+    claimGapFollowupRepository: { async generateClaimGapsAndFollowups() { return { ok: false, data: null, error: { code: "not_found", status: 404 } }; } },
+  });
+  assert.deepEqual([result.ok, result.error.code, result.data ?? null], [false, "not_found", null]);
+});
+
+test("G: P2-04 authority opens no follow-up answer or list, no GK traceability read, and no coverage acceptance for client_admin", async () => {
+  const actor = await bindingDerivedClientAdmin();
+  const tripwire = new Proxy({}, { get: (_target, property) => (property === "then" ? undefined : async () => assert.fail(`repository ${String(property)} reached`)) });
+  const never = async () => assert.fail("read reached");
+  const results = {
+    completeFollowup: await completeClientFollowup({ organizationId: ORG_X, claimId: CLAIM, clientFollowupItemId: FOLLOWUP, expectedUpdatedAt: NOW, actorContext: actor, now: NOW }, { env: ENV, clientFollowupCompletionRepository: tripwire, metadataOnlyAudit: noAudit() }),
+    listFollowups: await listClientFollowupWorkflows({ organizationId: ORG_X, actorContext: actor }, { env: ENV, listClientFollowupWorkflowsForOrganization: never }),
+    traceability: await getClaimTraceabilitySummary({ organizationId: ORG_X, claimId: CLAIM, requestedAudience: "internal", actorContext: actor }, { env: ENV, claimTraceabilityRepository: tripwire }),
+    acceptCoverage: await acceptInternalCoverageLimitation({ organizationId: ORG_X, claimId: CLAIM, dimensionKey: "definition_clarity", actorContext: actor, now: NOW }, { env: ENV, coverageReviewDecisionRepository: tripwire, metadataOnlyAudit: noAudit() }),
+  };
+  for (const [label, result] of Object.entries(results)) assertDenied(result, "role_not_allowed", label);
+});
+
+test("G: the P2-04 client messages report counts only, and refusals name the server's reason without detail", () => {
+  assert.equal(gapFollowupResultMessage(gapFollowupData(ORG_X)),
+    "Gap follow-ups generated: 1 open gap(s) and 1 client follow-up question(s) recorded. They stay open until answered and reviewed; the claim is not approved.");
+  assert.equal(gapFollowupResultMessage(gapFollowupData(ORG_X, true)),
+    "Gap follow-ups were already generated for this claim (1 open gap(s) and 1 client follow-up question(s)). Nothing new was written.");
+  for (const text of [gapFollowupResultMessage(gapFollowupData(ORG_X)), gapFollowupResultMessage(gapFollowupData(ORG_X, true))]) {
+    assert.ok(!text.includes("How is this field defined?") && !text.includes(QUEUE) && !text.includes(GAP), "no record content or ids");
+  }
+  assert.match(gapFollowupFailureMessage({ statusCode: 404, body: { error: { code: "not_found", message: "x" } } }), /not found in this organization\. Nothing was written\./);
+  assert.match(gapFollowupFailureMessage({ statusCode: 409, body: { error: { code: "conflict_current_state_changed", message: "x" } } }), /Refresh and try again/);
+  assert.equal(gapFollowupFailureMessage({ statusCode: 422, body: { error: { code: "validation_blocker", message: "x" }, blockers: [{ blocking_reason: "allowed_use_not_allowed" }] } }),
+    "Gap follow-ups cannot be generated for this claim: it did not pass validation (allowed use not allowed). Nothing was written.");
+  assert.equal(gapFollowupFailureMessage({ statusCode: 422, body: { error: { code: "validation_blocker", message: "x" } } }),
+    "Gap follow-ups cannot be generated for this claim: it did not pass validation. Nothing was written.");
+  assert.equal(gapFollowupFailureMessage({ statusCode: 403, body: { error: { code: "authorization_denied", message: "Denied." } } }), "Denied.");
 });

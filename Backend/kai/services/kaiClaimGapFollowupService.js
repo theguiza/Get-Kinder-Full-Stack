@@ -3,7 +3,14 @@ import { buildKaiError } from "../errors/kaiErrors.js";
 import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationService.js";
 import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
 
-const CLAIM_GAP_FOLLOWUP_ALLOWED_ROLES = new Set(["gk_admin", "gk_operator", "gk_reviewer"]);
+// client_admin (owner decision 2026-10-18): an active organization administrator
+// of this exact organization, stored or binding-derived, may generate a
+// claim's gap follow-ups so its internal drafts can revalidate traceability.
+// Organization membership only - no combineGlobalRoles. Generation resolves
+// nothing: follow-up completion and every review decision keep their own sets.
+// This set gates this operation only (and its generateClaimGapFollowups
+// capability projection).
+const CLAIM_GAP_FOLLOWUP_ALLOWED_ROLES = new Set(["gk_admin", "gk_operator", "gk_reviewer", "client_admin"]);
 const CLAIM_GAP_FOLLOWUP_OPERATION = "generate_claim_gap_followups";
 
 function isPlainObject(value) {

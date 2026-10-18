@@ -3,14 +3,14 @@ import { errorText, isRouteUuid } from "../impactEvidenceLibraryLogic.js";
 /**
  * Client organization-administrator evidence-to-draft workflow (owner
  * decision 2026-10-18): governed source -> evidence extraction -> evidence ->
- * claim proposal -> claim selection -> internal evidence summary / impact
- * narrative. Every flag is the server's access-capabilities answer; nothing
- * here grants or infers authority. Authorization and input readiness are
- * kept separate: an authorized actor can still be missing a Project or a
- * claim, and is told which.
+ * claim proposal -> claim gap follow-ups (P2-04) -> claim selection ->
+ * internal evidence summary / impact narrative. Every flag is the server's
+ * access-capabilities answer; nothing here grants or infers authority.
+ * Authorization and input readiness are kept separate: an authorized actor
+ * can still be missing a Project or a claim, and is told which.
  */
 
-const WORKFLOW_OPERATION_KEYS = Object.freeze(["extractEvidence", "proposeClaim", "generateDrafts"]);
+const WORKFLOW_OPERATION_KEYS = Object.freeze(["extractEvidence", "proposeClaim", "generateClaimGapFollowups", "generateDrafts"]);
 
 // Terminal claim review outcome the generation repository always rejects
 // (claim_reviewed_not_supported). Server-authoritative claimStrength.
@@ -89,15 +89,46 @@ export function claimProposalResultMessage(data) {
     : "Claim proposed. It is internal-only and awaits Get Kinder claim review.";
 }
 
+// P2-04 outcome: counts only. Generation records open gaps and open client
+// follow-up questions; it answers, resolves, and approves nothing.
+export function gapFollowupResultMessage(data) {
+  const gaps = Array.isArray(data?.gapItems) ? data.gapItems.length : 0;
+  const followups = Array.isArray(data?.clientFollowupItems) ? data.clientFollowupItems.length : 0;
+  const counts = `${gaps} open gap(s) and ${followups} client follow-up question(s)`;
+  return data?.replayed === true
+    ? `Gap follow-ups were already generated for this claim (${counts}). Nothing new was written.`
+    : `Gap follow-ups generated: ${counts} recorded. They stay open until answered and reviewed; the claim is not approved.`;
+}
+
+// Why a P2-04 request wrote nothing, from the server's own refusal.
+export function gapFollowupFailureMessage(result) {
+  const code = result?.body?.error?.code;
+  if (code === "not_found") {
+    return "This claim or part of its evidence lineage was not found in this organization. Nothing was written.";
+  }
+  if (code === "conflict_current_state_changed") {
+    return "This claim's gap follow-up state changed or no longer matches its evidence. Refresh and try again. Nothing new was written.";
+  }
+  if (code === "validation_blocker") {
+    const reason = result?.body?.blockers?.[0]?.blocking_reason;
+    const detail = typeof reason === "string" && /^[a-z0-9_]+$/.test(reason) ? ` (${reason.replace(/_/g, " ")})` : "";
+    return `Gap follow-ups cannot be generated for this claim: it did not pass validation${detail}. Nothing was written.`;
+  }
+  return errorText(result);
+}
+
 // Why an authorized internal-draft request created nothing, from the
-// server's own refusal. Generation revalidates each claim's traceability;
-// until Get Kinder has completed a claim's prerequisite traceability work
-// (for example its coverage gap follow-ups) the claim cannot be drafted from.
-export function internalDraftFailureMessage(result) {
+// server's own refusal. Generation revalidates each claim's traceability,
+// which fails until the claim's gap follow-ups exist (or for another
+// traceability reason the server does not detail here).
+export function internalDraftFailureMessage(result, { canGenerateGapFollowups = false } = {}) {
   const blockingReason = result?.body?.blockers?.[0]?.blocking_reason;
   if (blockingReason === "traceability_result_contract_invalid") {
-    return "A selected claim cannot be drafted from yet: Get Kinder has not completed its traceability checks "
-      + "(such as generating its coverage gap follow-ups). Nothing was created.";
+    return canGenerateGapFollowups
+      ? "A selected claim cannot be drafted from yet: its traceability checks did not pass. If you have not generated "
+        + "its gap follow-ups, use \"Generate gap follow-ups\" on the claim, then try again. Nothing was created."
+      : "A selected claim cannot be drafted from yet: Get Kinder has not completed its traceability checks "
+        + "(such as generating its coverage gap follow-ups). Nothing was created.";
   }
   if (result?.body?.error?.code === "claim_reviewed_not_supported") {
     return "A selected claim was found not supported by Get Kinder review and cannot be used in a draft. Nothing was created.";

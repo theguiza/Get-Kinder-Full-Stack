@@ -40861,3 +40861,138 @@ substituted model, GK-only P2-04 prerequisite). No push, deployment,
 production/shared database, migration/schema, flag, tenant, credential, real
 client data, or `00_KAI_CURRENT_STATE.md` change. This is the single
 package-end evidence update in the living ExecPlan.
+
+### Fresh-claim internal drafting through client_admin P2-04 (2026-10-18)
+
+**Owner authorization (USER_CONFIRMED):** the owner's "Complete Fresh-Claim
+Internal Drafting Through P2-04" prompt authorizes adding `client_admin` to the
+P2-04 `generate_claim_gap_followups` role set (organization membership, stored
+or binding-derived), the directly coupled capability, client Knowledge Studio
+action, bundle rebuild, and tests. Not authorized: follow-up completion,
+review decisions, traceability or eligibility rules, P2-02, source promotion,
+funder/public or the other seven generators, platform-superuser or shared
+tenant authorization, schema, flags, push, or deployment.
+
+**Start (TOOL_VERIFIED):** `main` at `173613d`, clean. The full `173613d` diff
+was inspected: its frontend changes (Data Sources tab, `generateAllDraftTypes`
+split gating the GK-only generators, Team & Access label) and the runner
+registration are directly coupled to that package's client_admin workflow; no
+authorization, privacy, or coverage regression was found.
+
+**Cause (TOOL_VERIFIED):** internal generation re-runs P2-06 traceability for
+each claim (`postgresGeneratedContentRepository.js`); with no persisted P2-04
+rows and any coverage dimension requiring a gap, P2-06 returns
+`gap_dimension_requires_missing_p204_state`, which generation reports as 422
+`validation_blocker` / `traceability_result_contract_invalid`. Internal
+generation does not require resolved follow-ups, a GK review decision, or
+`eligible=true`. Differential at `173613d` (unchanged acceptance, 17/0): the
+binding-derived client_admin's draft 422 and nothing written (B5a); a GK
+reviewer's P2-04 alone, with no review decision on that claim (B5-pre); the
+same client_admin's evidence summary and impact narrative 201 (B5); the
+client_admin's own P2-04 403 `role_not_allowed` (D).
+
+**P2-04 facts (TOOL_VERIFIED):** operation `generate_claim_gap_followups`,
+`CLAIM_GAP_FOLLOWUP_ALLOWED_ROLES` in `kaiClaimGapFollowupService.js`; used only
+by that service and its own `generateClaimGapFollowups` capability projection,
+so no shared constant is widened and no dedicated constant was needed. P2-04 is
+deterministic (P2-02 dimension functions; no model call). It writes
+`kai.gap_log_items`, `kai.client_followup_items`, and `client_followup` queue
+items (`waiting_on_client` / `proposed`), a lifecycle audit row, and a required
+`kai.audit_events` row attributed to the actor. Route (`POST
+.../claims/:claimId/claim-gap-followups`) has no staff-only guard; same mount,
+JSON-only body, and authentication as P2-01/P2-03. `/impact-library` requires
+only sign-in; the shell picks the client Knowledge Studio from capabilities.
+
+**Change:**
+- `CLAIM_GAP_FOLLOWUP_ALLOWED_ROLES`: add `client_admin` (organization
+  membership mode, unchanged). Capability `generateClaimGapFollowups` follows it
+  with no edit; no other capability changes.
+- Client Knowledge Studio Data Sources tab: "Generate gap follow-ups" on each
+  selectable claim, shown only for `generateClaimGapFollowups`; pending-state
+  duplicate guard; P2-04 replay is the idempotency; counts-only success text;
+  structured refusal text; the three organization reads refresh after success.
+  The draft refusal message now points an authorized administrator at the
+  action. Rejected claims offer no action. Bundle rebuilt (byte-identical on
+  rebuild).
+
+**Acceptance (TOOL_VERIFIED):**
+- Unit spec `kai-client-admin-evidence-to-draft-workflow.spec.js` 22/0 (P2-04
+  added to the operation matrix): allowed in X for the binding-derived and
+  stored client_admin, scoped to X with the actor's own KAI user; denied in Y,
+  for inactive GK admin membership, non-admin GK role, no membership, inactive
+  binding, client_contributor, client_reviewer, a global `client_admin`, and a
+  global GK role with a client_contributor membership; GK roles and the
+  platform superuser unchanged; feature-disabled; follow-up completion and
+  list (client_reviewer only), P2-06 read, and P2-10 acceptance still deny
+  client_admin.
+- Browser acceptance `kai-client-admin-evidence-to-draft-browser-acceptance`
+  21/0 (fresh claim, real routes, real Chrome, built bundle):
+  B3 proposal -> B5a both drafts 422 `traceability_result_contract_invalid`,
+  nothing written, no model call -> B5b synthetic gap-insert fault: P2-04 422
+  shown in the UI, nothing written -> B5c the client_admin's UI action: P2-04
+  200, 9 gaps and 4 `waiting_on_client` / `proposed` follow-ups for the claim,
+  lifecycle audit and `kai.audit_events` actor = client_admin, claim still
+  `proposed` / `needs_gk_review` / `unassessed` / internal-only, replay 200
+  `replayed`, no claim/evidence text in the response -> B5 evidence summary
+  201 and impact narrative 201 (internal, `draft` / `needs_gk_review`, Project
+  X, citation to the claim/evidence pair, two audits) with zero GK audit
+  events and zero review decisions since the proposal. GK P2-06 afterwards:
+  internal/funder/public `eligible=false` (claim/evidence review, support
+  strength, coverage, and follow-up blockers; funder/public also audience
+  gate). Y 8 x 403 (incl. P2-04); foreign claim P2-04 404; contributor and
+  client_reviewer P2-04 403 `role_not_allowed` (reviewer still lists the
+  follow-ups); funder/readiness/gap memo, P2-12 decisions, review packet,
+  P1-08, P2-06 read, follow-up list and completion, P2-10 acceptance 403; the
+  client_admin's P2-04 on the later-rejected claim does not make it usable
+  (422 `claim_reviewed_not_supported`); deactivated GK admin membership and
+  inactive binding 403, restored replay 200; nothing written by any refusal.
+- Substituted or simulated (not pipeline proof): session login harness;
+  P1-03..P1-05 file rows; P1-06 / sensitivity decision via services with
+  stubbed audit; the P1-08 -> P2-01 handoff fault trigger; the B5b gap-insert
+  fault trigger; the model provider (SDK prototype patched, 2 calls, no
+  network). P2-04 itself makes no model call.
+
+**Updated pins:** cross-organization provisioning configuration 1 (the
+binding-derived client_admin in B now admits P2-04).
+
+**Verification (TOOL_VERIFIED; sentinel `DATABASE_URL`):**
+
+| Command | Pass | Fail | Skipped |
+| --- | --- | --- | --- |
+| Client-admin browser acceptance at `173613d` (differential baseline) | 17 | 0 | 0 |
+| `npm test` (baseline recorded at `173613d`) | 5589 | 0 | 112 |
+| `npm test` | 5593 | 0 | 112 |
+| Unit spec (22) + cross-organization + P2-04 boundary/route + P14-15 conformance + UAT frontend | 109 | 0 | 0 |
+| Client-admin browser acceptance (fresh claim) | 21 | 0 | 0 |
+| 16 other browser acceptance specs | 234 | 0 | 0 |
+| P2-04 / P2-06 / P2-11 / P2-12 ledger runners | 18 / 33 / 28 / 24 | 0 | 0 |
+| `npm run verify:kai-sprint2-api-contract` | 71 | 0 | 0 |
+| P3-01 runner (this tree and `173613d` worktree) | 18 | 1 | 0 |
+| `git diff --check` | ok | | |
+
+The P3-01 failure (`relation "kai.evidence_review_decisions" does not exist`,
+Package 14-05 case) reproduces identically at `173613d`: the pre-existing
+runner schema gap, unchanged. The owner's production `information_schema`
+result (USER_CONFIRMED) shows that table exists in production; it does not
+show the production evidence-review operations work.
+
+**Remaining (not changed):**
+- The P2-04 write response returns its gap, follow-up, and queue records
+  (fixed safe summaries, counts, fixed questions, and ids, including
+  `client_followup` queue item ids) to the client_admin that requested it;
+  the UI shows counts only. No answer or review authority follows from them.
+- The client UI does not read P2-04 state; it shows the outcome of the
+  session's own request, and a repeat request replays.
+- A draft refused for another P2-06 reason still shows the generic
+  traceability message (the server does not name the reason to the client).
+- The P2-03 replay 500 and the reviewed-only Generated Drafts rule are
+  unchanged.
+- Production upload/scan/parse/profile and the live model were not executed.
+
+**Status:** FRESH_CLAIM_INTERNAL_DRAFTING_THROUGH_P2_04_COMPLETE_LOCAL_SYNTHETIC;
+the newly enabled claim-to-draft segment needs no GK action; the earlier
+governed preparation (sensitivity review, source promotion) remains GK work,
+and assembled pipeline completion stays NOT_CONFIRMED. No push, deployment,
+production/shared database, migration/schema, flag, tenant, credential, real
+client data, or `00_KAI_CURRENT_STATE.md` change. This is the single
+package-end evidence update in the living ExecPlan.

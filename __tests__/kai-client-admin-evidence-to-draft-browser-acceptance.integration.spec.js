@@ -17,9 +17,9 @@ import { join } from "node:path";
  * built frontend bundle in a real headless Chrome; the GK reviewer's P1-08
  * promotion, P2-12 evidence and claim decisions, and organization-Y setup
  * through the real routes; and every client_admin stage (Data Sources read,
- * P2-01 extraction, Evidence read, P2-03 proposal, Claim read, internal
- * evidence summary, internal impact narrative) through the client Knowledge
- * Studio UI and the real routes.
+ * P2-01 extraction, Evidence read, P2-03 proposal, Claim read, P2-04 claim
+ * gap follow-ups, internal evidence summary, internal impact narrative)
+ * through the client Knowledge Studio UI and the real routes.
  * Simulated / substituted (reported as such, never as pipeline proof):
  * - the Get Kinder session login (req.user from a harness cookie);
  * - the runner's synthetic kai.intake_batches / kai.intake_files mirrors and
@@ -29,12 +29,18 @@ import { join } from "node:path";
  *   with a stubbed metadata-only audit (GK setup, not a client stage);
  * - a throwaway trigger that fails the P1-08 -> P2-01 server-side handoff for
  *   organization X, so the client_admin's own extraction creates the evidence;
+ * - a throwaway trigger that fails one P2-04 gap insert (B5b), so the UI shows
+ *   a real refused request;
  * - the model provider: the Anthropic SDK Messages prototype is patched in
  *   this process to a deterministic response (no network or model call).
- * GK-only prerequisite (not a client stage): internal generation revalidates
- * each claim's P2-06 traceability, which needs the claim's P2-04 coverage gap
- * follow-ups; a GK reviewer generates them through the real route (B5-pre),
- * after B5a records the client's refused attempt without them.
+ * Fresh claim to internal drafts (owner decision 2026-10-18): internal
+ * generation revalidates each claim's P2-06 traceability, which needs the
+ * claim's P2-04 gap follow-ups. B5a records both drafts refused without them;
+ * the client_admin generates them from the claim (B5c); both drafts follow
+ * (B5) with no GK action of any kind between the claim proposal (B3) and the
+ * drafts. The earlier governed preparation (GK sensitivity review and source
+ * promotion) is unchanged and still GK work. The GK reviewer's P2-12
+ * decisions on the second claim come afterwards (E-setup).
  */
 
 const RUNNER_DATABASE_URL = process.env.KAI_CLIENT_BROWSER_ACCEPTANCE_DATABASE_URL;
@@ -269,6 +275,9 @@ async function runBrowserAcceptance() {
   const { requireKaiSprint2Authenticated } = await import("../Backend/kai/middleware/kaiSprint2Authentication.js");
   const {
     claimGapFollowupsPath,
+    claimTraceabilityPath,
+    coverageInternalAcceptancePath,
+    organizationAccessCapabilitiesPath,
     claimLibraryCandidatesPath,
     claimProposalPath,
     claimReviewCompletePath,
@@ -299,7 +308,7 @@ async function runBrowserAcceptance() {
   const FILE_X = "20000000-0000-4000-8000-0000000000e1";
   const FILE_Y = "20000000-0000-4000-8000-0000000000e2";
   const FIELD_KEYS = ["households_served", "programme_month"];
-  const USERS = Object.freeze({ gkReviewer: 981, clientAdmin: 982, contributor: 983 });
+  const USERS = Object.freeze({ gkReviewer: 981, clientAdmin: 982, contributor: 983, clientReviewer: 984 });
 
   // --- organizations, projects, GK binding, users ---------------------------
   await query("ALTER TABLE public.organizations ADD COLUMN IF NOT EXISTS logo_url text");
@@ -326,6 +335,8 @@ async function runBrowserAcceptance() {
   await query("INSERT INTO kai.user_roles (user_id, role_id) SELECT $1::uuid, role_id FROM kai.roles WHERE role_name = 'gk_reviewer'", [gkReviewer.user_id]);
   const contributor = await findOrCreateKaiUserByLegacyPublicUserdataId({ legacyPublicUserdataId: USERS.contributor, email: `user${USERS.contributor}@harbourline.test` });
   await query("INSERT INTO kai.organization_memberships (organization_id, user_id, role_name, membership_status) VALUES ($1::uuid, $2::uuid, 'client_contributor', 'active')", [ORG_X, contributor.user_id]);
+  const clientReviewer = await findOrCreateKaiUserByLegacyPublicUserdataId({ legacyPublicUserdataId: USERS.clientReviewer, email: `user${USERS.clientReviewer}@harbourline.test` });
+  await query("INSERT INTO kai.organization_memberships (organization_id, user_id, role_name, membership_status) VALUES ($1::uuid, $2::uuid, 'client_reviewer', 'active')", [ORG_X, clientReviewer.user_id]);
   const gkReviewerService = {
     actorType: "human",
     actorUserId: gkReviewer.user_id,
@@ -432,7 +443,10 @@ async function runBrowserAcceptance() {
       (SELECT count(*) FROM kai.generated_content_drafts WHERE organization_id = $1::uuid)::int AS drafts,
       (SELECT count(*) FROM kai.evidence_review_decisions WHERE organization_id = $1::uuid)::int AS evidence_decisions,
       (SELECT count(*) FROM kai.claim_review_decisions WHERE organization_id = $1::uuid)::int AS claim_decisions,
-      (SELECT count(*) FROM kai.intake_promotion_decisions WHERE organization_id = $1::uuid)::int AS promotions`, [organizationId]);
+      (SELECT count(*) FROM kai.intake_promotion_decisions WHERE organization_id = $1::uuid)::int AS promotions,
+      (SELECT count(*) FROM kai.gap_log_items WHERE organization_id = $1::uuid)::int AS gaps,
+      (SELECT count(*) FROM kai.client_followup_items WHERE organization_id = $1::uuid)::int AS followups,
+      (SELECT count(*) FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = 'client_followup')::int AS followup_queue`, [organizationId]);
     return row;
   }
   const delta = (after, before) => Object.fromEntries(Object.keys(after).map((key) => [key, after[key] - before[key]]));
@@ -465,6 +479,7 @@ async function runBrowserAcceptance() {
   const gkPage = await openPage(browser, { baseUrl, legacyUserId: USERS.gkReviewer });
   const adminPage = await openPage(browser, { baseUrl, legacyUserId: USERS.clientAdmin });
   const contributorPage = await openPage(browser, { baseUrl, legacyUserId: USERS.contributor });
+  const reviewerPage = await openPage(browser, { baseUrl, legacyUserId: USERS.clientReviewer });
   const results = {};
   const ids = {};
   try {
@@ -503,7 +518,7 @@ async function runBrowserAcceptance() {
       const [version] = await query("SELECT source_version_id::text, is_current FROM kai.source_versions WHERE organization_id = $1::uuid", [ORG_X]);
       assert.equal(version.is_current, true);
       ids.x = { sourceId: source.source_id, sourceCode: source.source_code, sourceVersionId: version.source_version_id };
-      assert.deepEqual(await counts(ORG_X), { sources: 1, evidence: 0, claims: 0, generation_runs: 0, drafts: 0, evidence_decisions: 0, claim_decisions: 0, promotions: 1 });
+      assert.deepEqual(await counts(ORG_X), { sources: 1, evidence: 0, claims: 0, generation_runs: 0, drafts: 0, evidence_decisions: 0, claim_decisions: 0, promotions: 1, gaps: 0, followups: 0, followup_queue: 0 });
     });
 
     // --- B. the assembled client_admin workflow in the real UI ---------------
@@ -539,7 +554,7 @@ async function runBrowserAcceptance() {
       await adminPage.idle();
       const posts = adminPage.requestsSince(mark).filter((r) => r.method === "POST").map((r) => [new URL(r.url).pathname, r.status]);
       assert.deepEqual(posts, [[evidenceExtractionPath(ORG_X, ids.x.sourceVersionId), 200]]);
-      assert.deepEqual(delta(await counts(ORG_X), before), { sources: 0, evidence: 2, claims: 0, generation_runs: 0, drafts: 0, evidence_decisions: 0, claim_decisions: 0, promotions: 0 });
+      assert.deepEqual(delta(await counts(ORG_X), before), { sources: 0, evidence: 2, claims: 0, generation_runs: 0, drafts: 0, evidence_decisions: 0, claim_decisions: 0, promotions: 0, gaps: 0, followups: 0, followup_queue: 0 });
       const evidence = await query(
         `SELECT e.evidence_item_id::text, e.statement, e.evidence_review_status, e.created_by::text, e.source_version_id::text, q.queue_status
            FROM kai.evidence_items e JOIN kai.review_queue_items q ON q.organization_id = e.organization_id
@@ -556,6 +571,8 @@ async function runBrowserAcceptance() {
     });
 
     await test("B3: Propose claim on each evidence item creates a review-gated internal claim through the real P2-03 route", async () => {
+      // Audit high-water mark: no GK audit event may follow until both drafts exist (B5).
+      ids.x.auditMarkBeforeProposal = (await query("SELECT coalesce(max(audit_event_id), 0)::bigint AS id FROM kai.audit_events"))[0].id;
       for (const [index, row] of ids.x.evidence.entries()) {
         const mark = adminPage.mark();
         await adminPage.clickIn(`[data-client-evidence="${row.evidence_item_id}"] button`, `Propose claim ${index}`);
@@ -580,64 +597,141 @@ async function runBrowserAcceptance() {
       results.b3 = "PASS";
     });
 
-    await test("E-setup: a GK reviewer rejects the second claim (real P2-12 routes); the client then sees it as not usable", async () => {
-      const [evidenceB, claimB] = [ids.x.evidence.find((row) => row.evidence_item_id === ids.x.claims[1].evidence_item_id), ids.x.claims[1]];
-      // P2-04 for claim B, so its traceability can be revalidated and the
-      // terminal claim-strength rule (not a traceability gap) refuses it in E.
-      const gapsB = await gkPage.api("POST", claimGapFollowupsPath(ORG_X, claimB.claim_id), {});
-      assert.ok([200, 201].includes(gapsB.status), JSON.stringify(gapsB.body));
-      const [evidenceQueue] = await query("SELECT review_queue_item_id::text, updated_at FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = 'evidence_review' AND target_object_id = $2::uuid", [ORG_X, evidenceB.evidence_item_id]);
-      const evidenceDecision = await gkPage.api("POST", evidenceReviewCompletePath(ORG_X, evidenceB.evidence_item_id, evidenceQueue.review_queue_item_id),
-        evidenceReviewDecisionBody({ expectedUpdatedAt: new Date(evidenceQueue.updated_at).toISOString(), decision: "supported" }));
-      assert.equal(evidenceDecision.status, 200, JSON.stringify(evidenceDecision.body));
-      const [claimQueue] = await query("SELECT review_queue_item_id::text, updated_at FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = 'claim_review' AND target_object_id = $2::uuid", [ORG_X, claimB.claim_id]);
-      const claimDecision = await gkPage.api("POST", claimReviewCompletePath(ORG_X, claimB.claim_id, claimQueue.review_queue_item_id),
-        claimReviewDecisionBody({ expectedUpdatedAt: new Date(claimQueue.updated_at).toISOString(), decision: "rejected" }));
-      assert.equal(claimDecision.status, 200, JSON.stringify(claimDecision.body));
-      const [rejected] = await query("SELECT claim_strength FROM kai.claims WHERE claim_id = $1::uuid", [claimB.claim_id]);
-      assert.equal(rejected.claim_strength, "reviewed_not_supported");
-      ids.x.rejectedClaimId = claimB.claim_id;
+    await test("B4: claim selection - both fresh claims are selectable, each offers Generate gap follow-ups, and the first is selected", async () => {
       ids.x.usableClaimId = ids.x.claims[0].claim_id;
       ids.x.usableEvidenceId = ids.x.claims[0].evidence_item_id;
-    });
-
-    await test("B4: claim selection - the unreviewed claim is selectable for an internal draft; the rejected claim is shown as not usable", async () => {
-      await adminPage.clickTab("Files");
-      await adminPage.clickTab("Data Sources");
-      await adminPage.waitFor(async () => adminPage.evaluate(`Boolean(document.querySelector('[data-client-claim="${ids.x.rejectedClaimId}"]'))`), "claims listed");
+      ids.x.secondClaimId = ids.x.claims[1].claim_id;
+      ids.x.secondEvidenceId = ids.x.claims[1].evidence_item_id;
+      await adminPage.waitFor(async () => adminPage.evaluate(`Boolean(document.querySelector('[data-client-claim="${ids.x.secondClaimId}"]'))`), "claims listed");
       await adminPage.idle();
-      const rejectedEntry = await adminPage.evaluate(`document.querySelector('[data-client-claim="${ids.x.rejectedClaimId}"]').innerText`);
-      assert.match(rejectedEntry, /Strength: reviewed_not_supported/);
-      assert.match(rejectedEntry, /Get Kinder review found this claim not supported, so it cannot be used in a draft\./);
-      assert.equal(await adminPage.evaluate(`Boolean(document.querySelector('[data-client-claim="${ids.x.rejectedClaimId}"] input'))`), false);
-      const usableEntry = await adminPage.evaluate(`document.querySelector('[data-client-claim="${ids.x.usableClaimId}"]').innerText`);
-      assert.match(usableEntry, /Review: needs_gk_review · Strength: unassessed/, "actual status shown, not promoted");
+      for (const claimId of [ids.x.usableClaimId, ids.x.secondClaimId]) {
+        const entry = await adminPage.evaluate(`document.querySelector('[data-client-claim="${claimId}"]').innerText`);
+        assert.match(entry, /Review: needs_gk_review · Strength: unassessed/, "actual status shown, not promoted");
+        assert.equal(await adminPage.evaluate(`Boolean(document.querySelector('[data-client-claim-gap-followups="${claimId}"]'))`), true, "Generate gap follow-ups offered");
+        assert.equal(await adminPage.evaluate(`Boolean(document.querySelector('[data-client-claim="${claimId}"] input'))`), true, "selectable");
+      }
       await adminPage.clickIn(`[data-client-claim="${ids.x.usableClaimId}"] input`, "Use in an internal draft");
       await adminPage.waitFor(async () => !(await adminPage.text()).includes("Select at least one claim below to draft from."), "draft readiness satisfied");
       results.b4 = "PASS";
     });
 
-    await test("B5a (observed dependency): before the claim's GK P2-04 gap follow-ups exist, the authorized generation is refused at traceability revalidation and creates nothing", async () => {
+    await test("B5a (before P2-04): both internal draft requests for the fresh claim are refused at traceability revalidation and create nothing", async () => {
       const before = await counts(ORG_X);
       const mark = adminPage.mark();
       await adminPage.clickButton("Generate internal evidence summary");
-      await adminPage.waitForText("A selected claim cannot be drafted from yet: Get Kinder has not completed its traceability checks");
+      await adminPage.waitForText("A selected claim cannot be drafted from yet: its traceability checks did not pass. If you have not generated its gap follow-ups, use \"Generate gap follow-ups\" on the claim, then try again. Nothing was created.");
+      await adminPage.idle();
+      await adminPage.clickButton("Generate internal impact narrative");
       await adminPage.idle();
       assert.deepEqual(adminPage.requestsSince(mark).filter((r) => r.method === "POST").map((r) => [new URL(r.url).pathname, r.status]),
-        [[createEvidenceSummaryPath(ORG_X), 422]]);
-      const direct = await adminPage.api("POST", createImpactNarrativePath(ORG_X), DRAFT_BODY([ids.x.usableClaimId], "client-admin-before-p204"));
-      assert.deepEqual([direct.status, direct.body.error.code, direct.body.blockers[0].blocking_reason], [422, "validation_blocker", "traceability_result_contract_invalid"]);
+        [[createEvidenceSummaryPath(ORG_X), 422], [createImpactNarrativePath(ORG_X), 422]]);
+      for (const [path, key] of [[createEvidenceSummaryPath(ORG_X), "client-admin-before-p204-summary"], [createImpactNarrativePath(ORG_X), "client-admin-before-p204-narrative"]]) {
+        const direct = await adminPage.api("POST", path, DRAFT_BODY([ids.x.usableClaimId], key));
+        assert.deepEqual([direct.status, direct.body.error.code, direct.body.blockers[0].blocking_reason], [422, "validation_blocker", "traceability_result_contract_invalid"], path);
+      }
       assert.equal(modelCalls.length, 0, "no generator call");
       assert.deepEqual(await counts(ORG_X), before);
-      results.b5a = "OBSERVED: generation 422 traceability_result_contract_invalid until GK P2-04 runs; nothing written";
+      results.b5a = "OBSERVED: evidence summary 422 + impact narrative 422 traceability_result_contract_invalid before P2-04; nothing written";
     });
 
-    await test("B5-pre (GK-only prerequisite): the GK reviewer generates claim A's P2-04 coverage gap follow-ups through the real route", async () => {
-      const gaps = await gkPage.api("POST", claimGapFollowupsPath(ORG_X, ids.x.usableClaimId), {});
-      assert.ok([200, 201].includes(gaps.status), JSON.stringify(gaps.body));
+    await test("B5b (refused P2-04): a synthetic gap-insert fault returns a real 422 the UI explains, and writes nothing", async () => {
+      await query(`CREATE FUNCTION kai.client_admin_workflow_fail_gaps() RETURNS trigger LANGUAGE plpgsql AS $$
+                   BEGIN RAISE EXCEPTION 'synthetic gap write fault'; END $$`);
+      await query(`CREATE TRIGGER client_admin_workflow_fail_gaps BEFORE INSERT ON kai.gap_log_items
+                   FOR EACH ROW EXECUTE FUNCTION kai.client_admin_workflow_fail_gaps()`);
+      try {
+        const before = await counts(ORG_X);
+        const mark = adminPage.mark();
+        await adminPage.clickIn(`[data-client-claim-gap-followups="${ids.x.usableClaimId}"]`, "Generate gap follow-ups (fault)");
+        await adminPage.waitForText("Gap follow-ups cannot be generated for this claim: it did not pass validation");
+        await adminPage.idle();
+        assert.deepEqual(adminPage.requestsSince(mark).filter((r) => r.method === "POST").map((r) => [new URL(r.url).pathname, r.status]),
+          [[claimGapFollowupsPath(ORG_X, ids.x.usableClaimId), 422]]);
+        assert.ok((await adminPage.text()).includes("Nothing was written."));
+        assert.deepEqual(await counts(ORG_X), before, "the refused request wrote nothing");
+        const [audit] = await query("SELECT count(*)::int AS n FROM kai.upload_lifecycle_audit WHERE organization_id = $1::uuid AND operation = 'claim_gap_and_followup_generated'", [ORG_X]);
+        assert.equal(audit.n, 0);
+      } finally {
+        await query("DROP TRIGGER client_admin_workflow_fail_gaps ON kai.gap_log_items");
+        await query("DROP FUNCTION kai.client_admin_workflow_fail_gaps()");
+      }
+      results.b5b = "PASS: P2-04 422 shown as a blocker; nothing written";
     });
 
-    await test("B5: Generate internal evidence summary and internal impact narrative persist two internal, unreviewed drafts for project X", async () => {
+    await test("B5c: the client_admin's Generate gap follow-ups persists the claim's open gaps and client follow-ups through the real P2-04 route, audited, and resolves nothing", async () => {
+      const before = await counts(ORG_X);
+      const mark = adminPage.mark();
+      await adminPage.clickIn(`[data-client-claim-gap-followups="${ids.x.usableClaimId}"]`, "Generate gap follow-ups");
+      await adminPage.waitForText("Gap follow-ups generated:");
+      await adminPage.idle();
+      const since = adminPage.requestsSince(mark);
+      const posts = since.filter((r) => r.method === "POST").map((r) => [new URL(r.url).pathname, r.status]);
+      assert.equal(posts.length, 1);
+      assert.equal(posts[0][0], claimGapFollowupsPath(ORG_X, ids.x.usableClaimId));
+      assert.ok([200, 201].includes(posts[0][1]), JSON.stringify(posts));
+      const refreshed = since.filter((r) => r.method === "GET").map((r) => new URL(r.url).pathname);
+      for (const path of [organizationSourcesPath(ORG_X), evidenceLibraryCandidatesPath(ORG_X).split("?")[0], claimLibraryCandidatesPath(ORG_X).split("?")[0]]) {
+        assert.ok(refreshed.includes(path), `refreshed ${path}`);
+      }
+
+      const gaps = await query(
+        `SELECT gap_log_item_id::text, claim_id::text, evidence_item_id::text, source_version_id::text, dimension_key, assessment_status, created_by_type
+           FROM kai.gap_log_items WHERE organization_id = $1::uuid ORDER BY dimension_key`, [ORG_X]);
+      assert.ok(gaps.length > 0, "the fresh claim has coverage gaps");
+      for (const gap of gaps) {
+        assert.deepEqual([gap.claim_id, gap.evidence_item_id, gap.source_version_id], [ids.x.usableClaimId, ids.x.usableEvidenceId, ids.x.sourceVersionId]);
+      }
+      const followups = await query(
+        `SELECT f.client_followup_item_id::text, f.claim_id::text, f.dimension_key, q.queue_status, q.review_status, q.target_object_type
+           FROM kai.client_followup_items f
+           JOIN kai.review_queue_items q ON q.organization_id = f.organization_id AND q.queue_type = 'client_followup' AND q.target_object_id = f.client_followup_item_id
+          WHERE f.organization_id = $1::uuid ORDER BY f.dimension_key`, [ORG_X]);
+      for (const followup of followups) {
+        assert.deepEqual([followup.claim_id, followup.queue_status, followup.review_status, followup.target_object_type],
+          [ids.x.usableClaimId, "waiting_on_client", "proposed", "client_followup_item"], "open, unanswered follow-up");
+        assert.ok(gaps.some((gap) => gap.dimension_key === followup.dimension_key));
+      }
+      assert.deepEqual(delta(await counts(ORG_X), before), {
+        sources: 0, evidence: 0, claims: 0, generation_runs: 0, drafts: 0, evidence_decisions: 0, claim_decisions: 0, promotions: 0,
+        gaps: gaps.length, followups: followups.length, followup_queue: followups.length,
+      });
+      await adminPage.waitForText(`Gap follow-ups generated: ${gaps.length} open gap(s) and ${followups.length} client follow-up question(s) recorded.`);
+
+      const [lifecycleAudit] = await query("SELECT count(*)::int AS n FROM kai.upload_lifecycle_audit WHERE organization_id = $1::uuid AND operation = 'claim_gap_and_followup_generated'", [ORG_X]);
+      assert.equal(lifecycleAudit.n, 1, "the P2-04 lifecycle audit row");
+      // The only fresh P2-04 write in organization X so far (B5b rolled back).
+      const auditEvents = await query(
+        `SELECT actor_user_id::text, actor_type, action FROM kai.audit_events
+          WHERE organization_id = $1::uuid AND action = 'claim_gap_and_followup_generated'`, [ORG_X]);
+      assert.equal(auditEvents.length, 1, JSON.stringify(auditEvents));
+      assert.deepEqual([auditEvents[0].actor_user_id, auditEvents[0].actor_type], [ids.adminKaiUser, "human"], "attributed to the client_admin");
+
+      const [claim] = await query(
+        `SELECT claim_status, claim_review_status, claim_strength, internal_only, funder_use_allowed, public_use_allowed, statement AS claim_statement
+           FROM kai.claims WHERE claim_id = $1::uuid`, [ids.x.usableClaimId]);
+      assert.deepEqual([claim.claim_status, claim.claim_review_status, claim.claim_strength, claim.internal_only, claim.funder_use_allowed, claim.public_use_allowed],
+        ["proposed", "needs_gk_review", "unassessed", true, false, false], "the claim is not reviewed, approved, or released by P2-04");
+
+      // Replay: idempotent, nothing new, and the response carries no evidence or claim text.
+      const replay = await adminPage.api("POST", claimGapFollowupsPath(ORG_X, ids.x.usableClaimId), {});
+      assert.equal(replay.status, 200, JSON.stringify(replay.body));
+      assert.equal(replay.body.data.replayed, true);
+      assert.deepEqual(replay.body.data.gapItems.map((gap) => gap.gap_log_item_id).sort(), gaps.map((gap) => gap.gap_log_item_id).sort());
+      const replayText = JSON.stringify(replay.body);
+      for (const statement of [claim.claim_statement, ...ids.x.evidence.map((row) => row.statement), ...ids.y.statements]) {
+        assert.ok(!replayText.includes(statement), "no claim or evidence statement in the P2-04 response");
+      }
+      assert.ok(!replayText.includes(ORG_Y));
+      assert.deepEqual(delta(await counts(ORG_X), before), {
+        sources: 0, evidence: 0, claims: 0, generation_runs: 0, drafts: 0, evidence_decisions: 0, claim_decisions: 0, promotions: 0,
+        gaps: gaps.length, followups: followups.length, followup_queue: followups.length,
+      }, "replay wrote nothing");
+      ids.x.gapDimensionKey = gaps[0].dimension_key;
+      ids.x.followup = followups[0] || null;
+      results.b5c = `PASS: client_admin P2-04 ${posts[0][1]}; ${gaps.length} gap(s) [${gaps.map((gap) => gap.dimension_key).join(", ")}], ${followups.length} follow-up(s) waiting_on_client/proposed; audit actor client_admin; replay 200 replayed`;
+    });
+
+    await test("B5: with no GK action since the claim was proposed, both internal drafts persist for project X citing the fresh claim", async () => {
       const before = await counts(ORG_X);
       const mark = adminPage.mark();
       await adminPage.clickButton("Generate internal evidence summary");
@@ -652,7 +746,7 @@ async function runBrowserAcceptance() {
       ]);
       assert.equal(modelCalls.length, 2, "the substituted model was called once per draft");
       assert.deepEqual(modelCalls.map((call) => call.claimIds), [[ids.x.usableClaimId], [ids.x.usableClaimId]]);
-      assert.deepEqual(delta(await counts(ORG_X), before), { sources: 0, evidence: 0, claims: 0, generation_runs: 2, drafts: 2, evidence_decisions: 0, claim_decisions: 0, promotions: 0 });
+      assert.deepEqual(delta(await counts(ORG_X), before), { sources: 0, evidence: 0, claims: 0, generation_runs: 2, drafts: 2, evidence_decisions: 0, claim_decisions: 0, promotions: 0, gaps: 0, followups: 0, followup_queue: 0 });
       const drafts = await query(
         `SELECT d.generated_content_draft_id::text, d.content_type, d.requested_audience, d.draft_status, d.review_status, r.engagement_id::text,
                 q.queue_status, q.queue_type
@@ -669,11 +763,32 @@ async function runBrowserAcceptance() {
       assert.deepEqual(citations, [{ claim_id: ids.x.usableClaimId, evidence_item_id: ids.x.usableEvidenceId }]);
       const [audit] = await query("SELECT count(*)::int AS n FROM kai.upload_lifecycle_audit WHERE organization_id = $1::uuid AND operation = 'generated_content_draft_created'", [ORG_X]);
       assert.equal(audit.n, 2);
+      // No GK action of any kind between the claim proposal (B3) and here: no
+      // GK audit event, no review decision, no GK-run P2-04.
+      const gkEvents = await query("SELECT action FROM kai.audit_events WHERE audit_event_id > $1 AND actor_user_id = $2::uuid", [ids.x.auditMarkBeforeProposal, gkReviewer.user_id]);
+      assert.deepEqual(gkEvents, [], "no GK audit event since the proposal");
+      const actors = await query("SELECT DISTINCT actor_user_id::text FROM kai.audit_events WHERE audit_event_id > $1 AND organization_id = $2::uuid", [ids.x.auditMarkBeforeProposal, ORG_X]);
+      assert.deepEqual(actors.map((row) => row.actor_user_id), [ids.adminKaiUser], "every audited action since the proposal is the client_admin's");
       ids.x.draftIds = drafts.map((row) => row.generated_content_draft_id);
       const body = await adminPage.text();
       assert.ok(body.includes("Internal use only. It appears under Generated Drafts once Get Kinder has reviewed it."));
       assert.ok(!body.includes("Internal draft text for:"), "unreviewed draft text is not rendered on the client page");
-      results.b5 = "PASS";
+      results.b5 = "PASS: proposal -> client P2-04 -> evidence summary 201 + impact narrative 201; zero GK audit events or decisions in between";
+    });
+
+    await test("B5-verify: a GK read of the fresh claim's P2-06 traceability (after drafting) is valid, and the claim is not eligible for funders or the public", async () => {
+      const eligibility = {};
+      for (const audience of ["internal", "funder", "public"]) {
+        const response = await gkPage.api("GET", claimTraceabilityPath(ORG_X, ids.x.usableClaimId, audience));
+        assert.equal(response.status, 200, `${audience}: ${JSON.stringify(response.body)}`);
+        assert.equal(response.body.data.claim.claim_id, ids.x.usableClaimId);
+        eligibility[audience] = { eligible: response.body.data.eligible, blockers: response.body.data.blockerCodes };
+      }
+      assert.equal(eligibility.funder.eligible, false, JSON.stringify(eligibility.funder));
+      assert.equal(eligibility.public.eligible, false, JSON.stringify(eligibility.public));
+      const [claim] = await query("SELECT claim_review_status, claim_strength, funder_use_allowed, public_use_allowed FROM kai.claims WHERE claim_id = $1::uuid", [ids.x.usableClaimId]);
+      assert.deepEqual(claim, { claim_review_status: "needs_gk_review", claim_strength: "unassessed", funder_use_allowed: false, public_use_allowed: false });
+      results.b5verify = eligibility;
     });
 
     await test("B6: the client-visible Generated Drafts path does not show the unreviewed drafts (existing reviewed-only rule)", async () => {
@@ -683,14 +798,15 @@ async function runBrowserAcceptance() {
       results.b6 = "PASS: persisted drafts await GK review before the client Generated Drafts read shows them";
     });
 
-    await test("B7: the Data Sources requests were organization X's Sources, Evidence, Claim reads and the four permitted writes only", async () => {
+    await test("B7: the Data Sources requests were organization X's Sources, Evidence, Claim reads and the five permitted writes only", async () => {
       const allowedPrefixes = [
         organizationSourcesPath(ORG_X), evidenceLibraryCandidatesPath(ORG_X).split("?")[0], claimLibraryCandidatesPath(ORG_X).split("?")[0],
         `/api/kai/sprint2/intake/admin/organizations/${ORG_X}/source-versions/`, `/api/kai/sprint2/intake/admin/organizations/${ORG_X}/evidence-items/`,
         createEvidenceSummaryPath(ORG_X), createImpactNarrativePath(ORG_X),
       ];
+      const gapFollowupPost = new RegExp(`^/api/kai/sprint2/intake/admin/organizations/${ORG_X}/claims/[0-9a-f-]{36}/claim-gap-followups$`);
       const forbidden = ["/evidence-summary/funder", "/readiness-assessment", "/data-gap-memo", "/review-packet", "/review-queue", "/eligible-claims",
-        "/traceability", "/review-cockpit", "/evidence-review/", "/claim-review/", "/start", "/complete", "/claim-gap-followups"];
+        "/traceability", "/review-cockpit", "/evidence-review/", "/claim-review/", "/start", "/complete", "/client-followups", "/coverage-dimensions"];
       // The shell's existing Needs Attention reads for the bound organization
       // administrator's sensitivity review (owner decision 2026-10-12) are not
       // part of this workflow: review-cockpit capabilities and its queue GET.
@@ -699,10 +815,39 @@ async function runBrowserAcceptance() {
         const path = new URL(request.url).pathname;
         if (shellReads.has(path) && request.method === "GET") continue;
         for (const fragment of forbidden) assert.ok(!path.includes(fragment), `forbidden request ${request.method} ${path}`);
-        if (request.method === "POST") assert.ok(allowedPrefixes.some((prefix) => path.startsWith(prefix)), `unexpected POST ${path}`);
+        if (request.method === "POST") assert.ok(allowedPrefixes.some((prefix) => path.startsWith(prefix)) || gapFollowupPost.test(path), `unexpected POST ${path}`);
         assert.ok(!path.includes(ORG_Y), `organization Y request ${path}`);
       }
       assert.deepEqual(adminPage.exceptions, []);
+    });
+
+    await test("E-setup (after the drafts): the client_admin generates the second claim's gap follow-ups, then a GK reviewer rejects that claim (real P2-12 routes); the client sees it as not usable", async () => {
+      await adminPage.clickIn(`[data-client-claim-gap-followups="${ids.x.secondClaimId}"]`, "Generate gap follow-ups (second claim)");
+      await adminPage.waitFor(async () => (await adminPage.evaluate(`document.querySelector('[data-client-claim="${ids.x.secondClaimId}"]').innerText`)).includes("Gap follow-ups generated:"), "second claim follow-ups");
+      await adminPage.idle();
+      const [secondGaps] = await query("SELECT count(*)::int AS n FROM kai.gap_log_items WHERE organization_id = $1::uuid AND claim_id = $2::uuid", [ORG_X, ids.x.secondClaimId]);
+      assert.ok(secondGaps.n > 0);
+      const [evidenceQueue] = await query("SELECT review_queue_item_id::text, updated_at FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = 'evidence_review' AND target_object_id = $2::uuid", [ORG_X, ids.x.secondEvidenceId]);
+      const evidenceDecision = await gkPage.api("POST", evidenceReviewCompletePath(ORG_X, ids.x.secondEvidenceId, evidenceQueue.review_queue_item_id),
+        evidenceReviewDecisionBody({ expectedUpdatedAt: new Date(evidenceQueue.updated_at).toISOString(), decision: "supported" }));
+      assert.equal(evidenceDecision.status, 200, JSON.stringify(evidenceDecision.body));
+      const [claimQueue] = await query("SELECT review_queue_item_id::text, updated_at FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = 'claim_review' AND target_object_id = $2::uuid", [ORG_X, ids.x.secondClaimId]);
+      const claimDecision = await gkPage.api("POST", claimReviewCompletePath(ORG_X, ids.x.secondClaimId, claimQueue.review_queue_item_id),
+        claimReviewDecisionBody({ expectedUpdatedAt: new Date(claimQueue.updated_at).toISOString(), decision: "rejected" }));
+      assert.equal(claimDecision.status, 200, JSON.stringify(claimDecision.body));
+      const [rejected] = await query("SELECT claim_strength FROM kai.claims WHERE claim_id = $1::uuid", [ids.x.secondClaimId]);
+      assert.equal(rejected.claim_strength, "reviewed_not_supported");
+      ids.x.rejectedClaimId = ids.x.secondClaimId;
+
+      await adminPage.clickTab("Files");
+      await adminPage.clickTab("Data Sources");
+      await adminPage.waitFor(async () => adminPage.evaluate(`Boolean(document.querySelector('[data-client-claim="${ids.x.rejectedClaimId}"]'))`), "claims listed");
+      await adminPage.idle();
+      const rejectedEntry = await adminPage.evaluate(`document.querySelector('[data-client-claim="${ids.x.rejectedClaimId}"]').innerText`);
+      assert.match(rejectedEntry, /Strength: reviewed_not_supported/);
+      assert.match(rejectedEntry, /Get Kinder review found this claim not supported, so it cannot be used in a draft\./);
+      assert.equal(await adminPage.evaluate(`Boolean(document.querySelector('[data-client-claim="${ids.x.rejectedClaimId}"] input'))`), false);
+      assert.equal(await adminPage.evaluate(`Boolean(document.querySelector('[data-client-claim-gap-followups="${ids.x.rejectedClaimId}"]'))`), false);
     });
 
     // --- C. organization Y and foreign identifiers -----------------------------
@@ -715,6 +860,7 @@ async function runBrowserAcceptance() {
         ["GET", claimLibraryCandidatesPath(ORG_Y)],
         ["POST", evidenceExtractionPath(ORG_Y, ids.y.sourceVersionId), {}],
         ["POST", claimProposalPath(ORG_Y, ids.y.evidenceItemId), {}],
+        ["POST", claimGapFollowupsPath(ORG_Y, ids.y.claimId), {}],
         ["POST", createEvidenceSummaryPath(ORG_Y), DRAFT_BODY([ids.y.claimId], "client-admin-y-summary", PROJECT_Y)],
         ["POST", createImpactNarrativePath(ORG_Y), DRAFT_BODY([ids.y.claimId], "client-admin-y-narrative", PROJECT_Y)],
       ];
@@ -728,11 +874,13 @@ async function runBrowserAcceptance() {
       const foreign = [
         ["extract Y's source version in X", evidenceExtractionPath(ORG_X, ids.y.sourceVersionId), {}, 404],
         ["propose from Y's evidence in X", claimProposalPath(ORG_X, ids.y.evidenceItemId), {}, 404],
+        ["P2-04 on Y's claim in X", claimGapFollowupsPath(ORG_X, ids.y.claimId), {}, 404],
       ];
       for (const [label, path, body, status] of foreign) {
         const response = await adminPage.api("POST", path, body);
         assert.equal(response.status, status, `${label}: ${JSON.stringify(response.body)}`);
         assert.equal(response.body.error.code, "not_found", label);
+        for (const statement of ids.y.statements) assert.ok(!JSON.stringify(response.body).includes(statement));
       }
       const yEngagement = await adminPage.api("POST", createEvidenceSummaryPath(ORG_X), DRAFT_BODY([ids.x.usableClaimId], "client-admin-foreign-engagement", PROJECT_Y));
       assert.equal(yEngagement.body.error?.code, "tenant_boundary_violation", JSON.stringify(yEngagement.body));
@@ -744,11 +892,11 @@ async function runBrowserAcceptance() {
       }
       assert.deepEqual(await counts(ORG_X), beforeX, "nothing written in X");
       assert.deepEqual(await counts(ORG_Y), beforeY, "nothing written in Y");
-      results.c = `PASS: Y 403 x${inY.length}; foreign source/evidence 404; foreign engagement ${yEngagement.status} tenant_boundary_violation; foreign claim ${yClaim.status} ${yClaim.body.error?.code}`;
+      results.c = `PASS: Y 403 x${inY.length} (incl. P2-04); foreign source/evidence/claim 404; foreign engagement ${yEngagement.status} tenant_boundary_violation; foreign claim draft ${yClaim.status} ${yClaim.body.error?.code}`;
     });
 
     // --- D. protected operations ---------------------------------------------
-    await test("D: the client_admin cannot reach funder or other generators, GK review decisions, review packets, or source promotion", async () => {
+    await test("D: the client_admin cannot reach funder or other generators, GK review decisions, review packets, source promotion, P2-06 traceability, follow-up answers, or coverage acceptance", async () => {
       const before = await counts(ORG_X);
       const evidenceQueue = (await query("SELECT review_queue_item_id::text, updated_at FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = 'evidence_review' AND target_object_id = $2::uuid", [ORG_X, ids.x.usableEvidenceId]))[0];
       const claimQueue = (await query("SELECT review_queue_item_id::text, updated_at FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = 'claim_review' AND target_object_id = $2::uuid", [ORG_X, ids.x.usableClaimId]))[0];
@@ -763,8 +911,16 @@ async function runBrowserAcceptance() {
           claimReviewDecisionBody({ expectedUpdatedAt: new Date(claimQueue.updated_at).toISOString(), decision: "approved", approvedAudiences: ["internal"] })],
         ["GK review packet", "GET", generatedDraftReviewPacketPath(ORG_X, ids.x.draftIds[0])],
         ["P1-08 source promotion", "POST", decisionPath(ORG_X, candidate.intake_source_candidate_id), { outcome: "rejected" }],
-        ["P2-04 gap follow-ups", "POST", claimGapFollowupsPath(ORG_X, ids.x.usableClaimId), {}],
+        ["P2-06 traceability read", "GET", claimTraceabilityPath(ORG_X, ids.x.usableClaimId, "internal")],
+        ["client follow-up list", "GET", `/api/kai/sprint2/intake/admin/organizations/${ORG_X}/client-followups`],
+        ["P2-10 internal coverage limitation acceptance", "POST", coverageInternalAcceptancePath(ORG_X, ids.x.usableClaimId, ids.x.gapDimensionKey), {}],
       ];
+      if (ids.x.followup) {
+        const [followupQueue] = await query("SELECT updated_at FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = 'client_followup' AND target_object_id = $2::uuid", [ORG_X, ids.x.followup.client_followup_item_id]);
+        protectedRequests.push(["P2-11 client follow-up completion", "POST",
+          `/api/kai/sprint2/intake/admin/organizations/${ORG_X}/claims/${ids.x.usableClaimId}/client-followups/${ids.x.followup.client_followup_item_id}/complete`,
+          { expected_updated_at: new Date(followupQueue.updated_at).toISOString() }]);
+      }
       const outcomes = {};
       for (const [label, method, path, body] of protectedRequests) {
         const response = await adminPage.api(method, path, body);
@@ -773,10 +929,12 @@ async function runBrowserAcceptance() {
         outcomes[label] = response.body.blockers?.[0]?.blocking_reason || response.body.error.code;
       }
       assert.deepEqual(await counts(ORG_X), before, "no protected write");
+      const followupStates = await query("SELECT DISTINCT queue_status, review_status FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = 'client_followup'", [ORG_X]);
+      assert.deepEqual(followupStates, [{ queue_status: "waiting_on_client", review_status: "proposed" }], "every follow-up is still open");
       results.d = outcomes;
     });
 
-    await test("D: client_contributor gets no Data Sources tab and is refused the workflow writes and reads", async () => {
+    await test("D: client_contributor gets no Data Sources tab and is refused the workflow writes and reads, including P2-04", async () => {
       await contributorPage.goto("/impact-library");
       await contributorPage.waitForText("Knowledge Studio");
       await contributorPage.clickNav("Knowledge Studio");
@@ -790,6 +948,7 @@ async function runBrowserAcceptance() {
         ["GET", claimLibraryCandidatesPath(ORG_X)],
         ["POST", evidenceExtractionPath(ORG_X, ids.x.sourceVersionId), {}],
         ["POST", claimProposalPath(ORG_X, ids.x.usableEvidenceId), {}],
+        ["POST", claimGapFollowupsPath(ORG_X, ids.x.usableClaimId), {}],
         ["POST", createEvidenceSummaryPath(ORG_X), DRAFT_BODY([ids.x.usableClaimId], "contributor-summary")],
         ["POST", createImpactNarrativePath(ORG_X), DRAFT_BODY([ids.x.usableClaimId], "contributor-narrative")],
       ]) {
@@ -801,16 +960,38 @@ async function runBrowserAcceptance() {
       assert.deepEqual(contributorPage.exceptions, []);
     });
 
+    await test("D: client_reviewer gets no Data Sources tab or P2-04, and keeps its own follow-up list over the client_admin-generated follow-ups", async () => {
+      await reviewerPage.goto("/impact-library");
+      await reviewerPage.waitForText("Knowledge Studio");
+      await reviewerPage.clickNav("Knowledge Studio");
+      await reviewerPage.waitFor(async () => reviewerPage.evaluate(`Boolean(document.querySelector(".nav-tabs"))`), "Knowledge Studio tabs");
+      await reviewerPage.idle();
+      assert.ok(!(await reviewerPage.tabLabels()).includes("Data Sources"));
+      const capabilities = await reviewerPage.api("GET", organizationAccessCapabilitiesPath(ORG_X));
+      assert.equal(capabilities.status, 200, JSON.stringify(capabilities.body));
+      assert.equal(capabilities.body.data.workflowOperations.generateClaimGapFollowups, false);
+      const before = await counts(ORG_X);
+      const denied = await reviewerPage.api("POST", claimGapFollowupsPath(ORG_X, ids.x.usableClaimId), {});
+      assert.deepEqual([denied.status, denied.body.error.code, denied.body.blockers[0].blocking_reason], [403, "authorization_denied", "role_not_allowed"]);
+      assert.deepEqual(await counts(ORG_X), before);
+      const list = await reviewerPage.api("GET", `/api/kai/sprint2/intake/admin/organizations/${ORG_X}/client-followups`);
+      assert.equal(list.status, 200, JSON.stringify(list.body));
+      if (ids.x.followup) assert.ok(JSON.stringify(list.body).includes(ids.x.followup.client_followup_item_id), "the client_reviewer's existing follow-up read is unchanged");
+      assert.deepEqual(reviewerPage.exceptions, []);
+    });
+
     // --- E. claim eligibility and draft governance -----------------------------
-    await test("E: internal generation requires explicit claim ids; a reviewed_not_supported claim is refused before generation", async () => {
+    await test("E: internal generation requires explicit claim ids; a reviewed_not_supported claim is refused before generation even though its P2-04 ran", async () => {
       const before = await counts(ORG_X);
       const modelCallsBefore = modelCalls.length;
       const empty = await adminPage.api("POST", createEvidenceSummaryPath(ORG_X), DRAFT_BODY([], "client-admin-empty-claims"));
       assert.equal(empty.status, 422, JSON.stringify(empty.body));
       assert.equal(empty.body.error.code, "validation_blocker");
-      const rejected = await adminPage.api("POST", createEvidenceSummaryPath(ORG_X), DRAFT_BODY([ids.x.rejectedClaimId], "client-admin-rejected-claim"));
-      assert.equal(rejected.status, 422, JSON.stringify(rejected.body));
-      assert.equal(rejected.body.error.code, "claim_reviewed_not_supported");
+      for (const [path, key] of [[createEvidenceSummaryPath(ORG_X), "client-admin-rejected-summary"], [createImpactNarrativePath(ORG_X), "client-admin-rejected-narrative"]]) {
+        const rejected = await adminPage.api("POST", path, DRAFT_BODY([ids.x.rejectedClaimId], key));
+        assert.equal(rejected.status, 422, JSON.stringify(rejected.body));
+        assert.equal(rejected.body.error.code, "claim_reviewed_not_supported");
+      }
       assert.equal(modelCalls.length, modelCallsBefore, "no generator call for a refused request");
       assert.deepEqual(await counts(ORG_X), before);
       // The persisted drafts stay internal, unreviewed drafts.
@@ -819,12 +1000,37 @@ async function runBrowserAcceptance() {
       results.e = "PASS";
     });
 
+    // --- R. revoked authority ------------------------------------------------
+    await test("R: a deactivated Get Kinder administrator membership, then an inactive binding, give no P2-04 authority and write nothing", async () => {
+      const before = await counts(ORG_X);
+      const path = claimGapFollowupsPath(ORG_X, ids.x.usableClaimId);
+      await query("UPDATE public.user_org_memberships SET is_active = false WHERE org_id = $1 AND user_id = $2", [gkOrganization.id, USERS.clientAdmin]);
+      try {
+        const revoked = await adminPage.api("POST", path, {});
+        assert.deepEqual([revoked.status, revoked.body.error.code, revoked.body.blockers[0].blocking_reason], [403, "authorization_denied", "missing_active_organization_membership"], JSON.stringify(revoked.body));
+      } finally {
+        await query("UPDATE public.user_org_memberships SET is_active = true WHERE org_id = $1 AND user_id = $2", [gkOrganization.id, USERS.clientAdmin]);
+      }
+      await query("UPDATE kai.gk_organization_bindings SET status = 'inactive' WHERE gk_organization_id = $1", [gkOrganization.id]);
+      try {
+        const unbound = await adminPage.api("POST", path, {});
+        assert.deepEqual([unbound.status, unbound.body.error.code, unbound.body.blockers[0].blocking_reason], [403, "authorization_denied", "missing_active_organization_membership"], JSON.stringify(unbound.body));
+      } finally {
+        await query("UPDATE kai.gk_organization_bindings SET status = 'active' WHERE gk_organization_id = $1", [gkOrganization.id]);
+      }
+      const restored = await adminPage.api("POST", path, {});
+      assert.deepEqual([restored.status, restored.body.data?.replayed], [200, true], "restored authority replays, proving the denials were authority-only");
+      assert.deepEqual(await counts(ORG_X), before, "no write");
+      results.r = "PASS: revoked membership 403; inactive binding 403; restored replay 200";
+    });
+
     console.log(`[client-admin-workflow-browser] results ${JSON.stringify(results)}`);
     console.log(`[client-admin-workflow-browser] model substitution calls ${modelCalls.length}`);
   } finally {
     await gkPage.close().catch(() => {});
     await adminPage.close().catch(() => {});
     await contributorPage.close().catch(() => {});
+    await reviewerPage.close().catch(() => {});
     await browser.close();
     await new Promise((resolve) => server.close(resolve));
     await seedPool.end();
