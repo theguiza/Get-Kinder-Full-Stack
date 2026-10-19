@@ -41618,3 +41618,144 @@ model reached), non-AI forms unaffected, wiring.
 push, deployment, production/shared database, migration/schema, flag, tenant,
 credential, real client data, UI, or `00_KAI_CURRENT_STATE.md` change. This is
 the single package-end evidence update in the living ExecPlan.
+
+### Sensitivity review form and AI-permission workflow completion (2026-10-19)
+
+**Owner authorization (USER_CONFIRMED):** the owner's "KAI — Complete
+Sensitivity Review and AI-Permission Workflow Repair" prompt directs, locally:
+reproduce whether the unchanged sensitivity form records a completed human
+AI-denial decision; repair the submission so an untouched form cannot, while a
+deliberate prohibition and a deliberately unresolved review stay recordable;
+keep the established permission rules (no human decision, reviewed allowed +
+AI true/false, reviewed `unknown` conservative, needs more information,
+not_allowed, independent restrictions); prove authorized correction and user
+continuation through both internal drafts. Not authorized: migration, new
+table or permission authority, a reviewed-`unknown` policy change, push,
+deployment, production/shared database, flags, tenants, credentials, real
+data, Current State.
+
+**Start (TOOL_VERIFIED):** `main` at `1e3d275`, clean.
+
+**Reproduction (TOOL_VERIFIED at `1e3d275`, assembled source-to-impact
+acceptance on the runner's loopback PostgreSQL, real Chrome, built bundle):**
+Admin A's untouched form (Data Sources > Use for impact > Start review work >
+Submit review) sent `decision: "reviewed"` with all nine presence dimensions
+and the allowed use `unknown` and an explicit
+`reviewed_llm_processing_allowed: false` (also product learning, funder,
+public use false); the route returned 200 and the ledger stored a terminal
+`reviewed` head `unknown`/AI `false`; VAL-KAI-B1A-02-004 then refused both
+internal drafts for the file's claim (422 `ai_processing_not_permitted`,
+0 model calls). Root cause: the frontend form state seeded the AI permission
+as `false` (`defaultSensitivityReviewFormState`, and
+`sensitivityReviewFormStateFromDecision` restated the prior value) and
+`buildReviewedSnapshotBody` always emitted a boolean, so "never chosen" was
+sent as a deliberate prohibition. The backend already distinguishes an omitted
+field (`reviewed_snapshot_incomplete`), `null` and non-booleans
+(`invalid_permission_flag`) and an unbased permission
+(`llm_processing_basis_not_established`) at the route validator, the service,
+the repository, and the ledger CHECKs; an explicit API `false` is, and stays,
+a deliberate prohibition. Only the AI permission is asymmetric: a stored
+`false` prohibits what no decision at all does not (Operating Model 7.1/8.2),
+while funder/product-learning/public use already require a stored `true`.
+
+**Change (frontend only; no backend, schema, route, or authority change):**
+- The AI disposition is an explicit "Permitted" / "Not permitted" choice with
+  nothing preselected, on every review (a re-review never restates the earlier
+  AI fact). "Permitted" needs allowed use `allowed`; changing the allowed use
+  returns a chosen "Permitted" to not selected (`withSensitivityAllowedUse`),
+  never to a prohibition. A deliberate "Not permitted" is recorded under any
+  allowed use.
+- Submit review with no disposition sends nothing and says so; Needs more
+  information (the existing unresolved outcome) needs none.
+- `buildReviewedSnapshotBody` sends the disposition only as chosen and omits an
+  unchosen or inconsistent one, so a bypassing caller is refused by the server
+  (`reviewed_snapshot_incomplete`); the other permissions keep their force-clear.
+- The current decision shows AI processing as permitted / not permitted /
+  "not decided (needs more information)", with the restriction's effect.
+
+**Preserved:** reviewed `unknown` stays conservative (historical rows are not
+reinterpreted; no authorized-purpose fallback); needs more information,
+not_allowed, intake not_allowed, lineage ambiguity, and every actor/tenant
+control unchanged; both model seams unchanged (re-verified: every
+source-derived model call is `createGeneratedContentDraft`'s one generator
+call or the two impact-evaluation paths; the legacy assistant callers read no
+claims, evidence, or intake content).
+
+**Acceptance (TOOL_VERIFIED; runner-owned loopback PostgreSQL, real routes,
+services, transactions, and audits, real Chrome, the rebuilt bundle):**
+source-to-impact 15/0. Case 1: the untouched form shows no AI disposition
+selected ("Permitted" disabled under `unknown`); Submit review sends no POST
+and says "Review not submitted"; direct route submissions of the untouched
+form's body (AI field omitted), `null`, `"false"`, and `true` under `unknown`
+are 422 `reviewed_snapshot_incomplete` / `invalid_permission_flag` /
+`invalid_permission_flag` / `llm_processing_basis_not_established` with zero
+writes (audit included); Admin A's deliberate "Not permitted" is sent as
+chosen (14 keys, AI `false`) and recorded; the candidate follows. Case 4: the
+affected reviewer's source authorization shows "recorded AI processing
+permission: not permitted." Case 8b (unchanged): non-AI claim and follow-ups
+succeed, both drafts alone and mixed 422 VAL-KAI-B1A-02-004, 0 model calls,
+and the refusal message names the restriction. New case 8c, on a file whose
+decision was recorded with the exact pre-repair untouched payload
+(HISTORICAL SIMULATION): the row is preserved, claim proposal and follow-ups
+succeed, both drafts and a mixed request 422 (0 calls); a contributor, a
+revoked delegated admin, a client_reviewer, and another organization's
+administrator are 403 with zero writes; Admin B (delegated client_admin)
+records a deliberate `allowed` + AI-permitted decision through the normal
+decision route, built by the form's own builder from a re-review seed whose
+AI disposition starts unselected; it supersedes the historical head (both
+rows kept, one head, `supersedes_decision_id` set; one lifecycle audit and
+one actor audit per decision); a replay is 200 `replayed` and a different
+outcome on the consumed stamp 409, with zero writes; Admin B then selects the
+claim in Data Sources and generates both internal drafts (201, 201; 2 model
+calls, each carrying only that claim), read back through the routes with the
+cited claim, `awaiting_get_kinder_review`, and the internal limitations;
+mixing it with the deliberately prohibited claim is 422 (0 calls); a
+deliberate needs-more-information head is 422 again (0 calls) while a non-AI
+claim proposal is 200. No claim, evidence, or draft approval; no export.
+Unit: `kai-effective-ai-processing-enforcement` adds the no-decision + intake
+`not_allowed` and ambiguous-lineage precedence cases and the historical
+reviewed-`unknown` and needs-more-information heads on both impact-evaluation
+paths (0 model calls, no writes); the form specs cover every disposition and
+run the server's request validator on the built bodies.
+
+**Model calls (TOOL_VERIFIED, assembled):** permitted `hist` drafts 2;
+corrected `legacy` drafts 2; `not_allowed` 0; deliberate AI prohibition
+alone and mixed 0; historical reviewed `unknown` alone and mixed 0; mixed with
+the deliberate prohibition after correction 0; needs more information 0.
+
+**Verification (TOOL_VERIFIED; sentinel `DATABASE_URL`):**
+
+| Command | Pass | Fail | Skipped |
+| --- | --- | --- | --- |
+| `npm test` (baseline 5661/0/115 plus two new tests) | 5663 | 0 | 115 |
+| `npm run verify:kai-sprint2-api-contract` | 71 | 0 | 0 |
+| `npm run build` (bundle rebuilt and committed) | ok | | |
+| Browser, final bundle: source-to-impact 15, access-approval campaign 63, sensitivity reachability 17, client-admin source promotion 12, reviewer provisioning 13, reviewer edge cases 11, evidence-to-draft 21, continuation 12 | 164 | 0 | 0 |
+| Runners: B1A-02 ledger 37, B1A-2R 6, B1A-3B-R2 4, P1-07 handoff 22, P2-06 33, P13-01 29, P14-09 8, P14-11 4, P14-12 3 | 146 | 0 | 0 |
+| `git diff --check` | ok | | |
+
+Not re-run (no backend change; recorded pre-existing failures unchanged):
+P3-01, P3-04, A2, P14-13, P14-14.
+
+**Remaining (not changed here):**
+- First remaining workflow blocker (TOOL_VERIFIED): once a file leaves the
+  `sensitivity_review` stage, the client Knowledge Studio offers an
+  organization administrator no entry to re-review it (Data Sources lists
+  only files at sensitivity or source review; source rows carry no intake
+  file). The correction itself is supported by the decision route and the
+  shared panel ("Record a new review (re-review)"), and the GK Studio
+  Processing card offers it to GK reviewers; where a client entry belongs is
+  an owner/UI decision.
+- Owner policy still open: whether a historical reviewed-`unknown` decision
+  (including those recorded by the pre-repair untouched form) should ever
+  admit AI processing under the authorized purpose; this package keeps the
+  conservative rule.
+- An explicit API `false` remains a deliberate prohibition; a client bundle
+  loaded before this change could still send the old defaults until reloaded
+  (deployment concern, NOT_CONFIRMED).
+- Production state NOT_CONFIRMED.
+
+**Status:** SENSITIVITY_REVIEW_AI_PERMISSION_WORKFLOW_COMPLETE_LOCAL_SYNTHETIC.
+No push, deployment, production/shared database, migration/schema, flag,
+tenant, credential, real client data, or `00_KAI_CURRENT_STATE.md` change.
+This is the single package-end evidence update in the living ExecPlan.
