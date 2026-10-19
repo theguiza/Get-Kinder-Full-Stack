@@ -41358,3 +41358,149 @@ records a decision), and the client pipeline read arguments (`actorUserId`).
 deployment, production/shared database, migration/schema, flag, tenant,
 credential, real client data, or `00_KAI_CURRENT_STATE.md` change. This is
 the single package-end evidence update in the living ExecPlan.
+
+### Source-to-impact workflow usability and permission repair (2026-10-19)
+
+**Owner authorization (USER_CONFIRMED):** the owner's "KAI — Source-to-Impact
+Workflow Usability and Permission Repair" prompt directs, locally: operation-
+specific effective allowed-use enforcement at every content-processing seam;
+equivalent organization-scoped source-preparation authority for a
+legitimately delegated, active organization `client_admin` and continuation by
+any active administrator of an already-reviewed file; one contextual "Use for
+impact" action in Data Sources with an explicit source authorization before
+P1-08; read access for the organization administrator to its permitted
+internal drafts; and a readable client pipeline when a Project claim cannot be
+evaluated. Not authorized: push, deployment, production, schema/migration,
+flags, tenants, credentials, real data, Current State, new approval
+processes, generator or P1 rewrites, or AI/system approval authority.
+
+**Start (TOOL_VERIFIED):** `main` at `f2eb7f4`, clean. `f2eb7f4` is `HEAD`
+itself (the reported continuation commit), not replayed. Reported deployment
+of `6dc4d05` and the earlier browser counts are USER_CONFIRMED only.
+
+**Findings (TOOL_VERIFIED at `f2eb7f4`):**
+- Allowed use. P1-05 inserts only the `'unknown'` default (no application
+  writes `not_allowed`; CHECK constraints pin every permission flag false),
+  and the B1A-02 ledger never propagates the human decision onto the profile.
+  Consequently: the P1-07 decision seam created a candidate for a reviewed
+  `not_allowed` decision; P1-08 and P2-01 checked only the always-true pinned
+  predicate; P2-03 (both entries) read no permission fact at all; P2-02/P2-04/
+  P2-05/P2-06 read only the P1-05 column; internal generation sent claim
+  statements to the model provider with no allowed-use check. Only the
+  2026-10-19 continuation refused it.
+- Administrators. `isBoundOrganizationAdministratorMembership` (one predicate
+  behind sensitivity review, P1-07, the candidate reads, P1-08, and the
+  continuation) required the binding marker; P1-07 and the continuation also
+  required the continuing administrator to be the decider. The sensitivity
+  decision service carried its own binding-only attribution copy. Stored
+  `kai.organization_memberships` rows are written only by the governed,
+  audited access-administration service; the row has no populated
+  `created_by`, so the active row is the grant record and its status is its
+  revocation.
+- Drafts. Client reads showed only GK-reviewed, currently eligible drafts;
+  `readGeneratedDrafts` is the GK library; the generation response already
+  returned the unreviewed text to the administrator.
+- Pipeline 409. Not the missing P2-04 state itself (that per-claim conflict was
+  already skipped): P2-08 relabelled any other per-claim evaluator failure,
+  e.g. `validation_blocker` / `allowed_use_not_allowed`, as a whole-list
+  `conflict_current_state_changed`, which the pipeline returned as 409.
+
+**Change 1 (`f909b16`): effective allowed use (VAL-KAI-B1A-02-003).**
+`sensitivityEffectiveAllowedUseProhibition` (decision contract): ambiguous
+lineage fails closed; a current terminal `reviewed` head with
+`not_allowed` prohibits; the P1-05 `not_allowed` fact still prohibits (also
+under a reviewed `allowed` head - the safer existing rule, owner decision
+held); `unknown`/`allowed` prohibit nothing. One resolver
+(`postgresEffectiveAllowedUseResolver.js`, profile/batch/claim forms, inside
+the caller's transaction) and one validator (structured blocker,
+`blocking_reason: allowed_use_not_allowed`) applied at P1-07 (every caller),
+P1-08 (`promoted` work only; new phase `source_promotion_allowed_use_not_allowed`),
+P2-01, both P2-03 entries, `readSensitivityProfileForAssessment` (P2-02/P2-04/
+P2-05/P2-06 and generation's re-check), the organization evidence-gap read
+model (parity), and generation before P2-06 and before the generator.
+Metadata reads, review actions, and re-decisions are not gated. Historical
+runners now apply the existing ledger migration to their disposable schemas.
+
+**Change 2 (`1365020`): delegated administrators.** Stored memberships are
+tagged `source: kai_organization_membership` by the actor resolver;
+`isOrganizationAdministratorMembership` admits that marker or the binding
+marker, for a human actor only (`validateActorIsOrganizationAdministrator`).
+An untagged or inactive membership, a global `client_admin`, and the
+superuser never satisfy it. The decision service attributes `client_admin`
+from the shared predicate. P1-07 `requireCurrentReviewedDecision`: any
+authorized human decider's current resolved `reviewed` head, only read. The
+continuation drops its other-decider refusal; the pipeline predicate follows.
+
+**Change 3 (`d01d50b`): Use for impact, internal drafts, pipeline.**
+- "Use for impact" (Data Sources): runs the existing authorized P1-07
+  continuation and P2-01 extraction from persisted state, re-reading the
+  pipeline after each, and opens the existing sensitivity or source panel for
+  human decisions; a recorded decision resumes the flow. The source panel
+  shows the file, proposed type, intended internal use, and the recorded
+  restrictions, and never sends `promoted` without the explicit confirmation.
+- `GET .../client-internal-drafts[/:id]` for an active `client_admin` (stored
+  or binding-derived): internal evidence summaries and impact narratives of
+  the Project in any review state, true review state, cited claim ids,
+  current eligibility, fixed limitations; packets re-read through P2-06;
+  client-safe projection. Capability `readInternalDrafts`.
+- Pipeline: `review_sensitivity` for the administrator;
+  `ask_organization_administrator` for non-GK members when the organization
+  has an administrator path; `allowed_use_not_allowed` closure.
+- P2-08 treats a per-claim `validation_blocker` as not eligible.
+
+**Acceptance (TOOL_VERIFIED):** `kai-source-to-impact-workflow-browser-acceptance`
+(runner-owned loopback PostgreSQL, real routes/services, real Chrome, built
+bundle) 13/0 - see the commit message of `d01d50b` for each case. Simulated:
+session login; P1-03..P1-05 rows (WORKER SIMULATION); one historical decision
+recorded with the pre-`c8170d3` P1-07 refusal; one failed policy state; the
+model provider (2 calls, no network). A mutation that drops the P2-03 and
+generation gates fails case 6; mutations of the P2-08 skip and the stored-
+administrator predicate fail 7 unit tests.
+
+**Updated pins (coupled to the decisions):** listed in the three commit
+messages.
+
+**Verification (TOOL_VERIFIED; sentinel `DATABASE_URL`):**
+
+| Command | Pass | Fail | Skipped |
+| --- | --- | --- | --- |
+| `npm test` (`f2eb7f4` baseline, recorded) | 5627 | 0 | 114 |
+| `npm test` | 5654 | 0 | 115 |
+| New unit specs: effective allowed use 7, organization-administrator authority 7, source-to-impact client workflow 10 (in `npm test`) | 24 | 0 | 0 |
+| New assembled acceptance `kai-source-to-impact-workflow-browser-acceptance` | 13 | 0 | 0 |
+| Browser (real Chrome, built bundle, runner-owned PostgreSQL): Knowledge Studio 6, rehydration 3, client pipeline 7, P2-01 7, P2-12 11, reviewed-evidence 12, sensitivity 17, Team & Access 7, provisioning 13, edges 11, campaign 63, first GK admin 12, approval-triggered admin 14, name takeover 11, revocation 9, application decision 31, client-admin draft 21, source promotion 12, continuation 12, source-to-impact 13 | 292 | 0 | 0 |
+| Runners: P1 worker 6/32, P1-06 15, P1-07 11, P1-07 handoff 22, P1-08 19, B1A-02 37, B1A-2R 6, B1A-3B-R2 4, P2-01 lineage 17, P2-01 handoff 7, P2-12 no-claim 11, P2-03 reviewed 17, J3-3 16, P2-02 7, P2-03 15, P2-04 18, P2-05 18, P2-06 33, P2-08 20, P2-11 28, P2-12 ledger 24, P13-01 29, review-start 3/8/67, P2 access 46, GK binding 6, enablement 9 | 551 | 0 | 0 |
+| Runner P3-01 (pre-existing `evidence_review_decisions` schema gap) | 18 | 1 | 0 |
+| Runner P3-04 (the same four completion cases fail at `f2eb7f4`, `conflict_current_state_changed`) | 66 | 4 | 0 |
+| `npm run verify:kai-sprint2-api-contract` | 71 | 0 | 0 |
+| `npm run build` twice (`entry.js` SHA-256 `47f26f11...7ad59a`) | identical | | |
+| `git diff --check` | ok | | |
+
+**Remaining (NOT_CONFIRMED or owner decisions; not changed):**
+- Owner decision: whether a human `allowed` may lift a P1-05 `not_allowed`
+  (kept: it may not; moot while P1-05 writes only `unknown`).
+- Owner decision: whether `reviewed_llm_processing_allowed = false` (the only
+  value a decision without `allowed` may carry) should block internal AI
+  drafting. Not enforced (existing behavior; Operating Model 7.1/8.2 allow AI
+  processing within the authorized purpose). The source authorization shows
+  the recorded value ("recorded AI processing permission: not permitted").
+- Stored-grant provenance is the active row; an out-of-band SQL insert would
+  be indistinguishable from a governed grant (the same trust every other
+  stored role already has). Production rows were not inspected.
+- "Organization administrator available" treats an active GK organization
+  binding as an administrator path; whether every bound organization has an
+  active Get Kinder admin is NOT_CONFIRMED.
+- P1-07 holds the profile lock only on the administrator path (unchanged); a
+  `not_allowed` decision committed concurrently with a GK caller is enforced
+  by P1-08 and every later seam.
+- Pre-existing, unchanged: the generation write response returns draft text;
+  the P2-03 replay 500 after claim review; the P3-01 runner's
+  `evidence_review_decisions` schema gap; the P3-04 runner's four completion
+  cases (identical at `f2eb7f4`).
+- Production state, the five production files, live sign-in, and the live
+  model are NOT_CONFIRMED.
+
+**Status:** SOURCE_TO_IMPACT_WORKFLOW_REPAIR_COMPLETE_LOCAL_SYNTHETIC. No
+push, deployment, production/shared database, migration/schema, flag, tenant,
+credential, real client data, or `00_KAI_CURRENT_STATE.md` change. This is
+the single package-end evidence update in the living ExecPlan.
