@@ -2188,19 +2188,46 @@ export const SENSITIVITY_PERMISSION_FIELDS = Object.freeze([
   "reviewed_funder_use_allowed",
 ]);
 
+// The AI-processing disposition is the one permission a reviewer must state
+// explicitly on every completed review: a stored false prohibits AI
+// processing that no decision at all would not (VAL-KAI-B1A-02-004), so an
+// unselected control must never be read as a prohibition. In form state it is
+// null (not selected), true (permitted), or false (not permitted).
+export const SENSITIVITY_AI_PROCESSING_FIELD = "reviewed_llm_processing_allowed";
+
 export const SENSITIVITY_PRESENCE_VALUES = Object.freeze(["unknown", "present", "absent"]);
 export const SENSITIVITY_ALLOWED_USE_VALUES = Object.freeze(["unknown", "allowed", "not_allowed"]);
 
 export const SENSITIVITY_DECISION_OUTCOMES = Object.freeze(["reviewed", "needs_more_information"]);
 
 // The internal-only default: every presence dimension and the allowed-use
-// status start at "unknown" (never coerced to "absent"/"safe"), and every
-// permission starts false. A reviewer must positively choose each value.
+// status start at "unknown" (never coerced to "absent"/"safe"), the AI
+// disposition starts not selected, and every other permission starts false.
+// A reviewer must positively choose each value.
 export function defaultSensitivityReviewFormState() {
   const state = { [SENSITIVITY_ALLOWED_USE_FIELD]: "unknown" };
   for (const field of SENSITIVITY_PRESENCE_FIELDS) state[field] = "unknown";
   for (const field of SENSITIVITY_PERMISSION_FIELDS) state[field] = false;
+  state[SENSITIVITY_AI_PROCESSING_FIELD] = null;
   return state;
+}
+
+// Changing the allowed use never turns a chosen "permitted" into a
+// prohibition: if AI processing can no longer be permitted, the disposition
+// returns to not selected and the reviewer chooses again.
+export function withSensitivityAllowedUse(formState, value) {
+  const next = { ...formState, [SENSITIVITY_ALLOWED_USE_FIELD]: value };
+  if (next[SENSITIVITY_AI_PROCESSING_FIELD] === true && !restrictedPermissionEligible(next)) {
+    next[SENSITIVITY_AI_PROCESSING_FIELD] = null;
+  }
+  return next;
+}
+
+// Whether a "reviewed" decision can be submitted: the AI disposition is an
+// explicit, consistent choice. Needs more information never needs one.
+export function sensitivityAiProcessingDispositionChosen(formState) {
+  const disposition = formState?.[SENSITIVITY_AI_PROCESSING_FIELD];
+  return disposition === false || (disposition === true && restrictedPermissionEligible(formState));
 }
 
 // Client-side defense in depth only, mirroring (never replacing) the
@@ -2223,17 +2250,21 @@ export function publicUseAllowedEligible(formState) {
 }
 
 // Builds the exact 14-key reviewed_snapshot object a "reviewed" decision
-// requires - nothing added, nothing omitted, and every permission the
-// client-side gate would disable is force-cleared to false so an invalid
-// combination can never be sent even if a disabled control's stale value
-// lingers in form state.
+// requires, and every permission the client-side gate would disable is
+// force-cleared to false so an invalid combination can never be sent even if
+// a disabled control's stale value lingers in form state. The AI disposition
+// is the exception: it is sent only as chosen, and an unchosen or
+// inconsistent one is omitted - never manufactured as false - so the server
+// refuses the incomplete snapshot (reviewed_snapshot_incomplete).
 export function buildReviewedSnapshotBody(formState) {
   const snapshot = {};
   for (const field of SENSITIVITY_PRESENCE_FIELDS) snapshot[field] = formState?.[field] ?? "unknown";
   snapshot[SENSITIVITY_ALLOWED_USE_FIELD] = formState?.[SENSITIVITY_ALLOWED_USE_FIELD] ?? "unknown";
   const restrictedEligible = restrictedPermissionEligible(snapshot);
   const publicEligible = publicUseAllowedEligible(snapshot);
-  snapshot.reviewed_llm_processing_allowed = restrictedEligible && formState?.reviewed_llm_processing_allowed === true;
+  if (sensitivityAiProcessingDispositionChosen({ ...formState, ...snapshot })) {
+    snapshot[SENSITIVITY_AI_PROCESSING_FIELD] = formState[SENSITIVITY_AI_PROCESSING_FIELD];
+  }
   snapshot.reviewed_product_learning_allowed = restrictedEligible && formState?.reviewed_product_learning_allowed === true;
   snapshot.reviewed_funder_use_allowed = restrictedEligible && formState?.reviewed_funder_use_allowed === true;
   snapshot.reviewed_public_use_allowed = publicEligible && formState?.reviewed_public_use_allowed === true;
@@ -2257,14 +2288,17 @@ export function buildSensitivityDecisionRequestBody({ decision, expectedUpdatedA
 
 // The form a review starts from: a re-review starts from the current
 // decision's own reviewed facts, a first-ever review from the all-"unknown"/
-// all-false default. This only seeds the form - it is never treated as itself
-// being the current decision.
+// all-false default. The AI disposition always starts not selected, so every
+// review states it deliberately rather than restating an earlier one. This
+// only seeds the form - it is never treated as itself being the current
+// decision.
 export function sensitivityReviewFormStateFromDecision(currentDecision) {
   const seeded = defaultSensitivityReviewFormState();
   if (!currentDecision) return seeded;
   for (const field of SENSITIVITY_PRESENCE_FIELDS) seeded[field] = currentDecision[field] ?? "unknown";
   seeded[SENSITIVITY_ALLOWED_USE_FIELD] = currentDecision[SENSITIVITY_ALLOWED_USE_FIELD] ?? "unknown";
   for (const field of SENSITIVITY_PERMISSION_FIELDS) seeded[field] = currentDecision[field] === true;
+  seeded[SENSITIVITY_AI_PROCESSING_FIELD] = null;
   return seeded;
 }
 

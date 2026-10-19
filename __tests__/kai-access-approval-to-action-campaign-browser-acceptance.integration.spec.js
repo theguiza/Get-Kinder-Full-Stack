@@ -751,6 +751,8 @@ async function runBrowserAcceptance() {
     await page.setFormRow("Personal data", "present");
     await page.setFormRow("Minor data", "absent");
     const mark = page.mark();
+    // The AI-processing disposition is a deliberate choice; Submit review sends nothing without it.
+    await page.evaluate(`document.getElementById("sensitivity-ai-processing-not-permitted").click()`);
     await page.clickButton("Submit review");
     await page.waitForText("Review recorded.");
     await page.idle();
@@ -1183,6 +1185,8 @@ async function runBrowserAcceptance() {
       await boundAdminPage.setFormRow("Minor data", "absent");
       const before = await allKaiCounts();
       mark = boundAdminPage.mark();
+      // The AI-processing disposition is a deliberate choice; Submit review sends nothing without it.
+      await boundAdminPage.evaluate(`document.getElementById("sensitivity-ai-processing-not-permitted").click()`);
       await boundAdminPage.clickButton("Submit review");
       await boundAdminPage.waitForText("Sensitivity decision recorded.");
       await boundAdminPage.idle();

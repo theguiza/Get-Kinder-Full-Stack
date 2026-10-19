@@ -75,13 +75,17 @@ import {
   SENSITIVITY_PRESENCE_FIELDS,
   SENSITIVITY_ALLOWED_USE_FIELD,
   SENSITIVITY_PERMISSION_FIELDS,
+  SENSITIVITY_AI_PROCESSING_FIELD,
   defaultSensitivityReviewFormState,
   restrictedPermissionEligible,
   publicUseAllowedEligible,
+  sensitivityAiProcessingDispositionChosen,
+  withSensitivityAllowedUse,
   buildReviewedSnapshotBody,
   buildSensitivityDecisionRequestBody,
   projectSensitivityDetail,
 } from "../frontend/impactEvidenceLibraryLogic.js";
+import { validateSensitivityProfileDecisionRequest } from "../Backend/kai/validators/kaiSprint2RequestSchemas.js";
 
 const basePath = "/api/kai/sprint2/intake";
 const organizationId = "00000000-0000-4000-8000-000000000001";
@@ -3030,11 +3034,56 @@ test("KAI B1A-3B path builders use the review-cockpit sub-tree's organization_id
   );
 });
 
-test("KAI B1A-3B defaultSensitivityReviewFormState: every presence dimension and allowed-use start at unknown, every permission starts false", () => {
+test("KAI B1A-3B defaultSensitivityReviewFormState: every presence dimension and allowed-use start at unknown, the AI disposition starts not selected, every other permission starts false", () => {
   const state = defaultSensitivityReviewFormState();
   for (const field of SENSITIVITY_PRESENCE_FIELDS) assert.equal(state[field], "unknown");
   assert.equal(state[SENSITIVITY_ALLOWED_USE_FIELD], "unknown");
-  for (const field of SENSITIVITY_PERMISSION_FIELDS) assert.equal(state[field], false);
+  assert.equal(SENSITIVITY_AI_PROCESSING_FIELD, "reviewed_llm_processing_allowed");
+  assert.equal(state[SENSITIVITY_AI_PROCESSING_FIELD], null);
+  for (const field of SENSITIVITY_PERMISSION_FIELDS.filter((f) => f !== SENSITIVITY_AI_PROCESSING_FIELD)) assert.equal(state[field], false);
+});
+
+test("sensitivity AI disposition: unselected, permitted, not permitted, and needs more information are distinct; the untouched form cannot submit a completed review", () => {
+  const untouched = defaultSensitivityReviewFormState();
+  const allowed = withSensitivityAllowedUse(untouched, "allowed");
+  assert.equal(sensitivityAiProcessingDispositionChosen(untouched), false, "untouched: not selected");
+  assert.equal(sensitivityAiProcessingDispositionChosen({ ...untouched, [SENSITIVITY_AI_PROCESSING_FIELD]: false }), true, "deliberately not permitted, under unknown");
+  assert.equal(sensitivityAiProcessingDispositionChosen({ ...untouched, [SENSITIVITY_AI_PROCESSING_FIELD]: true }), false, "permitted needs allowed use 'allowed'");
+  assert.equal(sensitivityAiProcessingDispositionChosen({ ...allowed, [SENSITIVITY_AI_PROCESSING_FIELD]: true }), true);
+  assert.equal(sensitivityAiProcessingDispositionChosen({ ...allowed, [SENSITIVITY_AI_PROCESSING_FIELD]: undefined }), false, "a missing field is not a choice");
+  // A chosen "permitted" is never turned into a prohibition by an allowed-use change.
+  const permitted = { ...allowed, [SENSITIVITY_AI_PROCESSING_FIELD]: true };
+  assert.equal(withSensitivityAllowedUse(permitted, "unknown")[SENSITIVITY_AI_PROCESSING_FIELD], null);
+  assert.equal(withSensitivityAllowedUse(permitted, "not_allowed")[SENSITIVITY_AI_PROCESSING_FIELD], null);
+  assert.equal(withSensitivityAllowedUse({ ...allowed, [SENSITIVITY_AI_PROCESSING_FIELD]: false }, "unknown")[SENSITIVITY_AI_PROCESSING_FIELD], false, "a deliberate prohibition stays");
+  assert.equal(withSensitivityAllowedUse(permitted, "allowed")[SENSITIVITY_AI_PROCESSING_FIELD], true);
+
+  // The untouched form's 'reviewed' body omits the AI field, and the server's own request validator refuses it.
+  const body = (formState, decision = "reviewed") => buildSensitivityDecisionRequestBody({
+    decision, expectedUpdatedAt: "2026-08-31T10:00:00.000Z", reviewQueueItemId: "90000000-0000-4000-8000-000000000099", formState,
+  });
+  const untouchedBody = body(untouched);
+  assert.equal(Object.hasOwn(untouchedBody.reviewed_snapshot, SENSITIVITY_AI_PROCESSING_FIELD), false, "never manufactured as false");
+  const refusalOf = (requestBody) => {
+    const validation = validateSensitivityProfileDecisionRequest(requestBody);
+    return [validation.ok, validation.blockers[0]?.blocking_reason];
+  };
+  assert.deepEqual(refusalOf(untouchedBody), [false, "reviewed_snapshot_incomplete"]);
+  assert.deepEqual(refusalOf(body({ ...untouched, [SENSITIVITY_AI_PROCESSING_FIELD]: true })), [false, "reviewed_snapshot_incomplete"],
+    "an inconsistent 'permitted' is omitted, so refused");
+  for (const [label, formState, expected] of [
+    ["not permitted under unknown", { ...untouched, [SENSITIVITY_AI_PROCESSING_FIELD]: false }, false],
+    ["not permitted under allowed", { ...allowed, [SENSITIVITY_AI_PROCESSING_FIELD]: false }, false],
+    ["permitted under allowed", { ...allowed, [SENSITIVITY_AI_PROCESSING_FIELD]: true }, true],
+  ]) {
+    const chosen = body(formState);
+    assert.equal(chosen.reviewed_snapshot[SENSITIVITY_AI_PROCESSING_FIELD], expected, label);
+    assert.equal(validateSensitivityProfileDecisionRequest(chosen).ok, true, label);
+  }
+  // Needs more information needs no disposition and carries no snapshot.
+  const unresolved = body(untouched, "needs_more_information");
+  assert.equal("reviewed_snapshot" in unresolved, false);
+  assert.equal(validateSensitivityProfileDecisionRequest(unresolved).ok, true);
 });
 
 test("KAI B1A-3B client-side gating mirrors the server's fail-closed invariant: restricted permissions require allowed-use=allowed; public use additionally requires consent=present and governance=absent", () => {
@@ -3059,15 +3108,15 @@ test("KAI B1A-3B client-side gating mirrors the server's fail-closed invariant: 
   assert.equal(publicUseAllowedEligible(established), true);
 });
 
-test("KAI B1A-3B buildReviewedSnapshotBody: emits exactly the 14 contract keys, never coerces unknown, and force-clears any permission the client-side gate would disable", () => {
+test("KAI B1A-3B buildReviewedSnapshotBody: emits exactly the 14 contract keys for a chosen AI disposition, never coerces unknown, and force-clears any other permission the client-side gate would disable", () => {
   const formState = {
     ...defaultSensitivityReviewFormState(),
     reviewed_personal_data_status: "present",
     reviewed_indigenous_governance_status: "unknown",
-    // These permissions are set true in form state even though the gate
-    // would disable them (allowed-use is still "unknown") - the snapshot
-    // builder must force them back to false rather than trust stale UI state.
-    reviewed_llm_processing_allowed: true,
+    reviewed_llm_processing_allowed: false,
+    // Set true in form state even though the gate would disable it
+    // (allowed-use is still "unknown") - the snapshot builder must force it
+    // back to false rather than trust stale UI state.
     reviewed_public_use_allowed: true,
   };
   const snapshot = buildReviewedSnapshotBody(formState);
@@ -3080,6 +3129,8 @@ test("KAI B1A-3B buildReviewedSnapshotBody: emits exactly the 14 contract keys, 
   assert.equal(snapshot.reviewed_indigenous_governance_status, "unknown");
   assert.equal(snapshot.reviewed_llm_processing_allowed, false);
   assert.equal(snapshot.reviewed_public_use_allowed, false);
+  // A stale "permitted" under 'unknown' is not a choice: omitted, never coerced to false.
+  assert.equal(Object.hasOwn(buildReviewedSnapshotBody({ ...formState, reviewed_llm_processing_allowed: true }), "reviewed_llm_processing_allowed"), false);
 
   const eligible = {
     ...defaultSensitivityReviewFormState(),

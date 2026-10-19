@@ -1,12 +1,15 @@
-import React from "react";
+import React, { useState } from "react";
 
 import {
+  SENSITIVITY_AI_PROCESSING_FIELD,
   SENSITIVITY_ALLOWED_USE_FIELD,
   SENSITIVITY_ALLOWED_USE_VALUES,
   SENSITIVITY_PRESENCE_FIELDS,
   SENSITIVITY_PRESENCE_VALUES,
   publicUseAllowedEligible,
   restrictedPermissionEligible,
+  sensitivityAiProcessingDispositionChosen,
+  withSensitivityAllowedUse,
 } from "./impactEvidenceLibraryLogic.js";
 
 const SENSITIVITY_FIELD_LABELS = Object.freeze({
@@ -20,6 +23,13 @@ const SENSITIVITY_FIELD_LABELS = Object.freeze({
   reviewed_financial_records_status: "Financial records",
   reviewed_consent_basis_status: "Consent basis",
 });
+
+// The current decision's AI fact, as recorded: a needs_more_information head
+// stores none, so it is shown as undecided rather than as a prohibition.
+function recordedAiProcessing(decision) {
+  if (decision.decision_outcome !== "reviewed") return "not decided (needs more information)";
+  return decision[SENSITIVITY_AI_PROCESSING_FIELD] === true ? "permitted" : "not permitted";
+}
 
 function ValueRow({ label, value }) {
   return (
@@ -49,7 +59,19 @@ export default function SensitivityReviewCardBody({
   onSubmitDecision,
   startReviewWorkLabel = "Review sensitivity & allowed use",
 }) {
+  // The exact form state a Submit review click was refused for, made before
+  // the AI disposition was chosen: nothing is sent, and the form says why
+  // until the form changes (a new choice, or another file's form).
+  const [unsubmittedFormState, setUnsubmittedFormState] = useState(null);
   if (!detail) return null;
+  const aiDispositionChosen = sensitivityAiProcessingDispositionChosen(formState);
+  const submitReviewed = () => {
+    if (!aiDispositionChosen) {
+      setUnsubmittedFormState(formState);
+      return;
+    }
+    onSubmitDecision("reviewed");
+  };
   return (
     <>
       <h6 className="mt-2">What KAI detected</h6>
@@ -83,8 +105,14 @@ export default function SensitivityReviewCardBody({
           <ValueRow label="Ordinary KAI processing (allowed use)" value={detail.currentDecision[SENSITIVITY_ALLOWED_USE_FIELD]} />
           <ValueRow
             label="AI processing (approved LLM provider)"
-            value={detail.currentDecision.reviewed_llm_processing_allowed ? "allowed" : "not allowed"}
+            value={recordedAiProcessing(detail.currentDecision)}
           />
+          {detail.currentDecision[SENSITIVITY_AI_PROCESSING_FIELD] !== true ? (
+            <div className="small text-muted mt-1" data-sensitivity-ai-restriction>
+              AI drafting and impact evaluation are refused for this file until a new review permits AI processing.
+              This restriction alone does not block non-AI processing.
+            </div>
+          ) : null}
           <ValueRow
             label="Funder/reporting drafts (source-use only, not release approval)"
             value={detail.currentDecision.reviewed_funder_use_allowed ? "allowed" : "not allowed"}
@@ -130,26 +158,57 @@ export default function SensitivityReviewCardBody({
               <select
                 className="form-select form-select-sm"
                 value={formState[SENSITIVITY_ALLOWED_USE_FIELD]}
-                onChange={(event) => onFormStateChange((current) => ({ ...current, [SENSITIVITY_ALLOWED_USE_FIELD]: event.target.value }))}
+                onChange={(event) => onFormStateChange((current) => withSensitivityAllowedUse(current, event.target.value))}
               >
                 {SENSITIVITY_ALLOWED_USE_VALUES.map((value) => <option key={value} value={value}>{value}</option>)}
               </select>
             </div>
           </div>
 
-          <div className="form-check small">
-            <input
-              className="form-check-input"
-              type="checkbox"
-              id="sensitivity-llm-processing-allowed"
-              checked={formState.reviewed_llm_processing_allowed === true}
-              disabled={!restrictedPermissionEligible(formState)}
-              onChange={(event) => onFormStateChange((current) => ({ ...current, reviewed_llm_processing_allowed: event.target.checked }))}
-            />
-            <label className="form-check-label" htmlFor="sensitivity-llm-processing-allowed">
-              AI processing: may be processed by an approved AI provider for ordinary KAI service delivery
-            </label>
-          </div>
+          <fieldset className="mb-2" data-sensitivity-ai-processing>
+            <legend className="small mb-1">
+              AI processing: may this file be processed by an approved AI provider for ordinary KAI service delivery
+              (internal drafts, impact evaluation)?
+            </legend>
+            <div className="form-check form-check-inline small">
+              <input
+                className="form-check-input"
+                type="radio"
+                name="sensitivity-ai-processing"
+                id="sensitivity-ai-processing-permitted"
+                value="permitted"
+                checked={formState[SENSITIVITY_AI_PROCESSING_FIELD] === true}
+                disabled={!restrictedPermissionEligible(formState)}
+                onChange={() => onFormStateChange((current) => ({ ...current, [SENSITIVITY_AI_PROCESSING_FIELD]: true }))}
+              />
+              <label className="form-check-label" htmlFor="sensitivity-ai-processing-permitted">Permitted</label>
+            </div>
+            <div className="form-check form-check-inline small">
+              <input
+                className="form-check-input"
+                type="radio"
+                name="sensitivity-ai-processing"
+                id="sensitivity-ai-processing-not-permitted"
+                value="not_permitted"
+                checked={formState[SENSITIVITY_AI_PROCESSING_FIELD] === false}
+                onChange={() => onFormStateChange((current) => ({ ...current, [SENSITIVITY_AI_PROCESSING_FIELD]: false }))}
+              />
+              <label className="form-check-label" htmlFor="sensitivity-ai-processing-not-permitted">Not permitted</label>
+            </div>
+            {!restrictedPermissionEligible(formState) ? (
+              <div className="small text-muted">AI processing can be permitted only when ordinary KAI processing is set to allowed.</div>
+            ) : null}
+            {!aiDispositionChosen ? (
+              <div className="small text-muted" data-sensitivity-ai-processing-required>
+                Not selected. Choose whether AI processing is permitted before submitting this review. If it cannot be decided yet, use Needs more information.
+              </div>
+            ) : null}
+          </fieldset>
+          {unsubmittedFormState === formState && !aiDispositionChosen ? (
+            <div className="alert alert-warning py-2 small" data-sensitivity-ai-processing-not-submitted>
+              Review not submitted: choose whether AI processing is permitted, or use Needs more information. Nothing was sent.
+            </div>
+          ) : null}
           <div className="form-check small">
             <input
               className="form-check-input"
@@ -193,7 +252,7 @@ export default function SensitivityReviewCardBody({
           <button
             type="button"
             className="btn btn-sm btn-primary me-2"
-            onClick={() => onSubmitDecision("reviewed")}
+            onClick={submitReviewed}
             disabled={actionPending}
           >
             Submit review

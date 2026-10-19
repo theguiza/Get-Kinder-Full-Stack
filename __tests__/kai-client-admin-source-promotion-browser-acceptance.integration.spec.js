@@ -606,6 +606,8 @@ async function runBrowserAcceptance() {
       assert.equal(adminPage.requestsSince(mark).filter((r) => r.method !== "GET").length, 0, "opening writes nothing");
       assert.ok(!(await adminPage.text()).includes("Start review work"), "the worker already created the review work");
       mark = adminPage.mark();
+      // The AI-processing disposition is a deliberate choice; Submit review sends nothing without it.
+      await adminPage.evaluate(`document.getElementById("sensitivity-ai-processing-not-permitted").click()`);
       await adminPage.clickButton("Submit review");
       await adminPage.waitForText("Sensitivity decision recorded.");
       await adminPage.waitForText("Source-candidate handoff completed");

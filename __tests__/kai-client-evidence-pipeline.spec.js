@@ -677,16 +677,33 @@ test("sensitivity decision result: a recorded decision and its P1-07 handoff are
   assert.equal(projectSensitivityDecisionResult({ statusCode: 200, body: { ok: false } }, "reviewed").status, "error");
 });
 
-test("sensitivity review form: a re-review is seeded from the current decision, a first review from the all-unknown default", () => {
+test("sensitivity review form: a re-review is seeded from the current decision, a first review from the all-unknown default; the AI disposition is chosen afresh every time", () => {
   assert.deepEqual(sensitivityReviewFormStateFromDecision(null), defaultSensitivityReviewFormState());
   const seeded = sensitivityReviewFormStateFromDecision({
-    reviewed_personal_data_status: "present", reviewed_allowed_use_status: "allowed", reviewed_llm_processing_allowed: true, reviewed_public_use_allowed: "yes",
+    reviewed_personal_data_status: "present", reviewed_allowed_use_status: "allowed", reviewed_llm_processing_allowed: true,
+    reviewed_funder_use_allowed: true, reviewed_public_use_allowed: "yes",
   });
   assert.equal(seeded.reviewed_personal_data_status, "present");
   assert.equal(seeded.reviewed_minor_data_status, "unknown");
   assert.equal(seeded.reviewed_allowed_use_status, "allowed");
-  assert.equal(seeded.reviewed_llm_processing_allowed, true);
+  assert.equal(seeded.reviewed_funder_use_allowed, true);
   assert.equal(seeded.reviewed_public_use_allowed, false, "only a literal true enables a permission");
+  for (const recorded of [true, false]) {
+    const reReview = sensitivityReviewFormStateFromDecision({ reviewed_allowed_use_status: "unknown", reviewed_llm_processing_allowed: recorded });
+    assert.equal(reReview.reviewed_llm_processing_allowed, null, `a recorded ${recorded} is not restated by an untouched re-review`);
+  }
+});
+
+test("shared sensitivity form: the AI disposition is an explicit permitted / not permitted choice, and Submit review sends nothing until it is made", () => {
+  assert.match(sharedBodySource, /type="radio"\s+name="sensitivity-ai-processing"\s+id="sensitivity-ai-processing-permitted"/);
+  assert.match(sharedBodySource, /id="sensitivity-ai-processing-not-permitted"/);
+  assert.doesNotMatch(sharedBodySource, /id="sensitivity-llm-processing-allowed"/, "no checkbox whose unchecked state reads as a prohibition");
+  const submit = sharedBodySource.slice(sharedBodySource.indexOf("const submitReviewed"), sharedBodySource.indexOf("const submitReviewed") + 260);
+  assert.match(submit, /if \(!aiDispositionChosen\) \{\s*setUnsubmittedFormState\(formState\);\s*return;\s*\}/, "an unchosen disposition sends nothing");
+  assert.equal((sharedBodySource.match(/onSubmitDecision\("reviewed"\)/g) || []).length, 1, "the only reviewed submission is the guarded one");
+  assert.match(sharedBodySource, /onClick=\{submitReviewed\}/);
+  assert.match(sharedBodySource, /onClick=\{\(\) => onSubmitDecision\("needs_more_information"\)\}\s+disabled=\{actionPending\}/, "needs more information needs no disposition");
+  assert.match(sharedBodySource, /withSensitivityAllowedUse\(current, event\.target\.value\)/);
 });
 
 test("client Studio: the review action and panel need this organization's 'allowed' answer, an engagement-keyed selection, and the Reviews tab", () => {

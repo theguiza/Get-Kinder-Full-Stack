@@ -63,6 +63,9 @@ test("precedence: only a stored reviewed AI permission or no human decision lets
     // The existing allowed-use prohibitions are applied first, unchanged.
     [{ profileAllowedUseStatus: "unknown", currentHead: reviewed("not_allowed", false) }, "reviewed_allowed_use_not_allowed"],
     [{ profileAllowedUseStatus: "not_allowed", currentHead: reviewed("allowed", true) }, "intake_allowed_use_not_allowed"],
+    // No human decision never lifts an independently established restriction.
+    [{ profileAllowedUseStatus: "not_allowed", currentHead: null }, "intake_allowed_use_not_allowed"],
+    [{ profileAllowedUseStatus: "unknown", currentHead: null, lineageAmbiguous: true }, "sensitivity_decision_lineage_ambiguous"],
     [{ profileAllowedUseStatus: "unknown", currentHead: reviewed("allowed", true), lineageAmbiguous: true }, "sensitivity_decision_lineage_ambiguous"],
   ];
   for (const [input, expected] of cases) {
@@ -256,11 +259,18 @@ test("impact evaluation (read and persist paths): an AI-prohibited claim never r
     return { result, modelCalls, writes: tx.writes };
   };
   for (const method of ["evaluateImpactOutcomeContext", "createImpactEvaluationSnapshot"]) {
-    const refused = await run(method, headsFor(reviewed("allowed", false)), [CLAIM_PERMITTED, CLAIM_RESTRICTED]);
-    assert.deepEqual([refused.result.error.code, refused.result.blockers[0].validator_key, refused.result.blockers[0].object_id],
-      ["validation_blocker", EFFECTIVE_AI_PROCESSING_VALIDATOR_KEY, CLAIM_RESTRICTED], method);
-    assert.deepEqual(refused.modelCalls, [], method);
-    assert.deepEqual(refused.writes, [], method);
+    // The same heads generation refuses: explicit, historical reviewed 'unknown', and unresolved.
+    for (const [label, restrictedHead, basis] of [
+      ["explicit", reviewed("allowed", false), "reviewed_llm_processing_not_allowed"],
+      ["historical reviewed unknown", reviewed("unknown", false), "reviewed_llm_processing_not_allowed"],
+      ["needs more information", NEEDS_MORE_INFORMATION, "sensitivity_ai_processing_unresolved"],
+    ]) {
+      const refused = await run(method, headsFor(restrictedHead), [CLAIM_PERMITTED, CLAIM_RESTRICTED]);
+      assert.deepEqual([refused.result.error.code, refused.result.blockers[0].validator_key, refused.result.blockers[0].object_id, refused.result.blockers[0].evidence.basis],
+        ["validation_blocker", EFFECTIVE_AI_PROCESSING_VALIDATOR_KEY, CLAIM_RESTRICTED, basis], `${method} / ${label}`);
+      assert.deepEqual(refused.modelCalls, [], `${method} / ${label}`);
+      assert.deepEqual(refused.writes, [], `${method} / ${label}`);
+    }
     const permitted = await run(method, headsFor(reviewed("allowed", true)), [CLAIM_PERMITTED, CLAIM_RESTRICTED]);
     assert.deepEqual(permitted.modelCalls, [[CLAIM_PERMITTED, CLAIM_RESTRICTED]], method);
   }

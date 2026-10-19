@@ -624,6 +624,8 @@ async function runBrowserAcceptance() {
       await gkPage.setFormRow("Personal data", "present");
       await gkPage.setFormRow("Minor data", "absent");
       const mark = gkPage.mark();
+      // The AI-processing disposition is a deliberate choice; Submit review sends nothing without it.
+      await gkPage.evaluate(`document.getElementById("sensitivity-ai-processing-not-permitted").click()`);
       await gkPage.clickButton("Submit review");
       await gkPage.waitForText("Review recorded.");
       await gkPage.idle();
@@ -888,6 +890,8 @@ async function runBrowserAcceptance() {
       await mixedPage.setFormRow("Personal data", "present");
       await mixedPage.setFormRow("Minor data", "absent");
       mark = mixedPage.mark();
+      // The AI-processing disposition is a deliberate choice; Submit review sends nothing without it.
+      await mixedPage.evaluate(`document.getElementById("sensitivity-ai-processing-not-permitted").click()`);
       await mixedPage.clickButton("Submit review");
       await mixedPage.waitForText("Sensitivity decision recorded.");
       await mixedPage.waitForText(`${NAMES.mixedQueue}: Your action is needed: review this file's source candidate and promote it`);
@@ -975,6 +979,8 @@ async function runBrowserAcceptance() {
 
       const before = await governedCounts(profileId, mixedActor);
       mark = mixedPage.mark();
+      // The AI-processing disposition is a deliberate choice; Submit review sends nothing without it.
+      await mixedPage.evaluate(`document.getElementById("sensitivity-ai-processing-not-permitted").click()`);
       await mixedPage.clickButton("Submit review");
       await mixedPage.waitForText("Sensitivity decision recorded.");
       await mixedPage.waitForText(`${NAMES.mixedZero}: Your action is needed: review this file's source candidate and promote it`);
@@ -1026,6 +1032,8 @@ async function runBrowserAcceptance() {
       assert.equal(elsewhere.ok, true, JSON.stringify(elsewhere));
       const beforeStale = await governedCounts(profileId, mixedActor);
       mark = mixedPage.mark();
+      // The AI-processing disposition is a deliberate choice; Submit review sends nothing without it.
+      await mixedPage.evaluate(`document.getElementById("sensitivity-ai-processing-not-permitted").click()`);
       await mixedPage.clickButton("Submit review");
       await mixedPage.waitForText("Sensitivity review state changed since this was loaded - showing the refreshed state.");
       await mixedPage.idle();
@@ -1066,6 +1074,8 @@ async function runBrowserAcceptance() {
       const profileId = mixedProfiles.notCreated;
       const before = await governedCounts(profileId, mixedActor);
       const mark = mixedPage.mark();
+      // The AI-processing disposition is a deliberate choice; Submit review sends nothing without it.
+      await mixedPage.evaluate(`document.getElementById("sensitivity-ai-processing-not-permitted").click()`);
       await mixedPage.clickButton("Submit review");
       await mixedPage.waitForText("Source candidate not created");
       await mixedPage.idle();
@@ -1118,6 +1128,8 @@ async function runBrowserAcceptance() {
       await gkPage.setFormRow("Minor data", "absent");
       const before = await governedCounts(profileId);
       const mark = gkPage.mark();
+      // The AI-processing disposition is a deliberate choice; Submit review sends nothing without it.
+      await gkPage.evaluate(`document.getElementById("sensitivity-ai-processing-not-permitted").click()`);
       await gkPage.clickButton("Submit review");
       await gkPage.waitForText("the source candidate was not created");
       await gkPage.idle();
@@ -1258,6 +1270,8 @@ async function runBrowserAcceptance() {
         await orgAdminPage.waitFor(() => orgAdminPage.visibleButton("Start review work"), "organization admin review-work control");
         await orgAdminPage.clickButton("Start review work");
         await orgAdminPage.waitFor(() => orgAdminPage.visibleButton("Submit review"), "organization admin decision form");
+        // The AI-processing disposition is a deliberate choice; Submit review sends nothing without it.
+        await orgAdminPage.evaluate(`document.getElementById("sensitivity-ai-processing-not-permitted").click()`);
         await orgAdminPage.clickButton("Submit review");
         await orgAdminPage.waitForText("Sensitivity decision recorded.");
         await orgAdminPage.idle();

@@ -31,6 +31,10 @@ import { join } from "node:path";
  * - HISTORICAL SIMULATION: one file's 'reviewed' decision is recorded through
  *   the real services by Admin A with P1-07 replaced, for that call only, by
  *   the refusal the pre-c8170d3 P1-07 returned (no candidate);
+ * - HISTORICAL SIMULATION: another file's 'reviewed' decision is recorded
+ *   through the real services with the exact payload the pre-repair form sent
+ *   when submitted untouched (captured at 1e3d275): every dimension 'unknown'
+ *   and an explicit AI-processing false the reviewer never chose;
  * - SYNTHETIC: one file's policy state is set to failed after profiling;
  * - the Anthropic messages client used by internal generation (a
  *   deterministic stand-in that cites the requested claims).
@@ -127,7 +131,7 @@ async function openPage(browser, { baseUrl, legacyUserId }) {
     if (message.sessionId !== sessionId) return;
     const { method, params } = message;
     if (method === "Network.requestWillBeSent" && params.type !== "Document" && params.request.url.includes("/api/")) {
-      const entry = { url: params.request.url, method: params.request.method, status: null, done: false };
+      const entry = { url: params.request.url, method: params.request.method, body: params.request.postData ?? null, status: null, done: false };
       requests.push(entry);
       byId.set(params.requestId, entry);
     } else if (method === "Network.responseReceived" && byId.has(params.requestId)) {
@@ -270,15 +274,20 @@ async function runBrowserAcceptance() {
   const { requireKaiSprint2Enabled } = await import("../Backend/kai/config/kaiSprint2Config.js");
   const { requireKaiSprint2Authenticated } = await import("../Backend/kai/middleware/kaiSprint2Authentication.js");
   const {
+    buildSensitivityDecisionRequestBody,
     claimGapFollowupsPath,
     claimProposalPath,
     clientInternalDraftPath,
     clientInternalDraftsPath,
     createEvidenceSummaryPath,
     createImpactNarrativePath,
+    defaultSensitivityReviewFormState,
     evidenceExtractionPath,
     intakeFileSourceCandidatePath,
     organizationAccessCapabilitiesPath,
+    sensitivityProfilePath,
+    sensitivityReviewFormStateFromDecision,
+    withSensitivityAllowedUse,
   } = await import("../frontend/impactEvidenceLibraryLogic.js");
   const query = async (sql, params = []) => (await seedPool.query(sql, params)).rows;
   const ENV = { KAI_SPRINT2_ENABLED: "true" };
@@ -296,6 +305,7 @@ async function runBrowserAcceptance() {
     conc: "2e100000-0000-4000-8000-0000000000a3", // concurrency
     notAllowed: "2e100000-0000-4000-8000-0000000000b1", // A records reviewed not_allowed
     later: "2e100000-0000-4000-8000-0000000000b2", // promoted under 'unknown', later re-reviewed not_allowed
+    legacy: "2e100000-0000-4000-8000-0000000000a4", // historical: the pre-repair untouched form's decision, later corrected
     policyFailed: "2e100000-0000-4000-8000-0000000000b3",
     y: "2e100000-0000-4000-8000-0000000000d1",
   });
@@ -411,6 +421,14 @@ async function runBrowserAcceptance() {
   });
   // A reviewed decision that establishes the allowed-use basis and permits AI processing.
   const AI_PERMITTED_SNAPSHOT = Object.freeze({ ...REVIEWED_SNAPSHOT, reviewed_allowed_use_status: "allowed", reviewed_llm_processing_allowed: true });
+  // The reviewed_snapshot the pre-repair form sent when submitted untouched (captured at 1e3d275).
+  const PRE_REPAIR_UNTOUCHED_FORM_SNAPSHOT = Object.freeze({
+    reviewed_personal_data_status: "unknown", reviewed_minor_data_status: "unknown", reviewed_health_housing_justice_immigration_status: "unknown",
+    reviewed_indigenous_governance_status: "unknown", reviewed_staff_notes_status: "unknown", reviewed_story_testimonial_status: "unknown",
+    reviewed_small_cell_risk_status: "unknown", reviewed_financial_records_status: "unknown", reviewed_consent_basis_status: "unknown",
+    reviewed_allowed_use_status: "unknown", reviewed_llm_processing_allowed: false, reviewed_product_learning_allowed: false,
+    reviewed_funder_use_allowed: false, reviewed_public_use_allowed: false,
+  });
 
   async function sensitivityQueue(organizationId, profileId) {
     const [item] = await query(
@@ -464,6 +482,7 @@ async function runBrowserAcceptance() {
   async function decisionsOf(organizationId, profileId) {
     return query(
       `SELECT d.decision_id::text, d.decision_outcome, d.decided_by::text, d.decided_by_role, d.reviewed_allowed_use_status,
+              d.reviewed_llm_processing_allowed, d.supersedes_decision_id::text,
               NOT EXISTS (SELECT 1 FROM kai.intake_sensitivity_review_decisions s WHERE s.supersedes_decision_id = d.decision_id) AS is_head
          FROM kai.intake_sensitivity_review_decisions d WHERE d.organization_id = $1::uuid AND d.intake_sensitivity_profile_id = $2::uuid ORDER BY d.created_at`,
       [organizationId, profileId]);
@@ -533,6 +552,7 @@ async function runBrowserAcceptance() {
   async function authorizeAndPromote(page, candidateId) {
     await page.waitFor(() => has(page, "[data-client-source-authorization]"), "source authorization shown");
     await page.waitFor(() => has(page, "[data-client-source-restrictions]"), "recorded restrictions shown");
+    const restrictions = await page.evaluate(`document.querySelector("[data-client-source-restrictions]").innerText`);
     const authorization = await page.evaluate(`document.querySelector("[data-client-source-authorization]").innerText`);
     assert.ok(authorization.includes("Intended use: Internal impact evidence for this organization"), authorization);
     assert.ok(authorization.includes("Funder use: not permitted; public use: not permitted"), authorization);
@@ -550,7 +570,7 @@ async function runBrowserAcceptance() {
     await page.idle();
     const posts = postsSince(page, mark);
     assert.deepEqual(posts[0], [`${COCKPIT}/source-candidates/${candidateId}/decision`, 200], JSON.stringify(posts));
-    return posts;
+    return { posts, restrictions };
   }
 
   try {
@@ -605,6 +625,15 @@ async function runBrowserAcceptance() {
       assert.equal(promoted.status, 200, JSON.stringify(promoted.body));
       assert.equal(promoted.body.data.evidence_extraction_handoff.status, "created");
       ids.laterSourceVersion = promoted.body.data.source_version.source_version_id;
+      // HISTORICAL SIMULATION: the decision the pre-repair form recorded when submitted untouched, then promoted.
+      await seed("legacy", "8");
+      const [legacyHandoff] = await recordDecisions({ organizationId: ORG_X, profileId: ids.profile.legacy, actorContext: adminA, outcomes: ["reviewed"],
+        snapshot: PRE_REPAIR_UNTOUCHED_FORM_SNAPSHOT });
+      assert.equal(legacyHandoff.status, "created");
+      const legacyPromoted = await adminAPage.api("POST", decisionPath(ORG_X, legacyHandoff.intake_source_candidate_id), PROMOTE);
+      assert.equal(legacyPromoted.status, 200, JSON.stringify(legacyPromoted.body));
+      assert.equal(legacyPromoted.body.data.evidence_extraction_handoff.status, "created");
+      ids.legacySourceVersion = legacyPromoted.body.data.source_version.source_version_id;
       await seed("policyFailed", "6");
       await recordDecisions({ organizationId: ORG_X, profileId: ids.profile.policyFailed, actorContext: adminA, outcomes: ["reviewed"], p1_07: PRE_FIX_P1_07_REFUSAL });
       // SYNTHETIC: the file's policy state is failed after profiling.
@@ -612,11 +641,11 @@ async function runBrowserAcceptance() {
       await seed("y", "7", ORG_Y, PROJECT_Y, BATCH_Y);
       await recordDecisions({ organizationId: ORG_Y, profileId: ids.profile.y, actorContext: await actorOf(USERS.adminY), outcomes: ["reviewed"], p1_07: PRE_FIX_P1_07_REFUSAL });
       for (const key of ["hist", "conc", "notAllowed", "policyFailed"]) assert.deepEqual(await candidateOf(ORG_X, ids.profile[key]), [], key);
-      results.files = "PASS: historical (A, no candidate), concurrency, not_allowed (normal seam refused the candidate), later (promoted under 'unknown'), failed policy, Y";
+      results.files = "PASS: historical (A, no candidate), concurrency, not_allowed (normal seam refused the candidate), later (promoted under 'unknown'), legacy (pre-repair untouched-form decision, promoted), failed policy, Y";
     });
 
     // --- 1: Admin A's review through the UI ------------------------------------
-    await test("1: Admin A records an authorized sensitivity review through Data Sources > Use for impact (review work, then the decision); the P1-07 handoff creates the candidate", async () => {
+    await test("1: Admin A's untouched review form sends nothing and direct submissions without a valid AI disposition are refused; Admin A's deliberate review through Data Sources > Use for impact is recorded and the P1-07 handoff creates the candidate", async () => {
       await openDataSources(adminAPage);
       await adminAPage.waitFor(() => has(adminAPage, `[data-client-use-for-impact="${FILE.ui}"]`), "Use for impact offered");
       const before = await counts(ORG_X);
@@ -627,12 +656,48 @@ async function runBrowserAcceptance() {
       assert.deepEqual(postsSince(adminAPage, mark), [], "opening the review writes nothing");
       await adminAPage.clickButton("Start review work");
       await adminAPage.waitFor(async () => (await adminAPage.text()).includes("Submit review"), "decision form");
+      await adminAPage.idle();
+      // The untouched form: allowed use 'unknown', no AI disposition selected ("Permitted" needs allowed use 'allowed').
+      const radios = `["sensitivity-ai-processing-permitted", "sensitivity-ai-processing-not-permitted"].map((id) => document.getElementById(id))`;
+      assert.deepEqual(await adminAPage.evaluate(`${radios}.map((el) => [el.checked, el.disabled])`), [[false, true], [false, false]]);
+      assert.ok((await adminAPage.text()).includes("Not selected. Choose whether AI processing is permitted before submitting this review."));
+      const untouchedBefore = await counts(ORG_X);
+      mark = adminAPage.mark();
+      await adminAPage.clickButton("Submit review");
+      await adminAPage.waitForText("Review not submitted: choose whether AI processing is permitted, or use Needs more information. Nothing was sent.");
+      await adminAPage.idle();
+      assert.deepEqual(postsSince(adminAPage, mark), [], "the untouched form sends no decision");
+      // Direct submissions bypassing the form, through the real route: the untouched form's body (AI field
+      // omitted by the builder), a null, a non-boolean, and an AI permission without the allowed-use basis.
+      const queue = await sensitivityQueue(ORG_X, ids.profile.ui);
+      const untouchedBody = buildSensitivityDecisionRequestBody({
+        decision: "reviewed", expectedUpdatedAt: new Date(queue.updated_at).toISOString(), reviewQueueItemId: queue.review_queue_item_id,
+        formState: defaultSensitivityReviewFormState(),
+      });
+      const withAi = (value) => ({ ...untouchedBody, reviewed_snapshot: { ...untouchedBody.reviewed_snapshot, reviewed_llm_processing_allowed: value } });
+      const bypasses = [
+        ["untouched form body", untouchedBody, "reviewed_snapshot_incomplete"],
+        ["null", withAi(null), "invalid_permission_flag"],
+        ["string \"false\"", withAi("false"), "invalid_permission_flag"],
+        ["true under unknown allowed use", withAi(true), "llm_processing_basis_not_established"],
+      ];
+      for (const [label, requestBody, reason] of bypasses) {
+        const refused = await adminAPage.api("POST", sensitivityDecisionPath(ORG_X, ids.profile.ui), requestBody);
+        assert.deepEqual([refused.status, refused.body.blockers?.[0]?.blocking_reason], [422, reason], `${label}: ${JSON.stringify(refused.body)}`);
+      }
+      assert.deepEqual(delta(await counts(ORG_X), untouchedBefore), ZERO, "no write (audit included) by the untouched form or any refused submission");
+      // The reviewer deliberately records AI processing as not permitted.
+      await adminAPage.evaluate(`document.getElementById("sensitivity-ai-processing-not-permitted").click()`);
       mark = adminAPage.mark();
       await adminAPage.clickButton("Submit review");
       // The recorded decision resumes the flow at the next human step: the source authorization.
       await adminAPage.waitFor(() => has(adminAPage, "[data-client-source-authorization]"), "flow resumed at the source authorization");
       await adminAPage.idle();
       assert.deepEqual(postsSince(adminAPage, mark)[0], [`${COCKPIT}/sensitivity-profiles/${ids.profile.ui}/decision`, 200]);
+      const sent = JSON.parse(adminAPage.requestsSince(mark).find((r) => r.method === "POST").body);
+      assert.equal(Object.keys(sent.reviewed_snapshot).length, 14);
+      assert.equal(sent.reviewed_snapshot.reviewed_llm_processing_allowed, false, "the deliberate choice is sent as chosen");
+      console.log(`[source-to-impact-workflow-browser] deliberate decision payload ${JSON.stringify(sent)}`);
       const [decision] = await decisionsOf(ORG_X, ids.profile.ui);
       assert.deepEqual([decision.decision_outcome, decision.decided_by, decision.decided_by_role], ["reviewed", ids.adminA, "client_admin"]);
       const [candidate] = await candidateOf(ORG_X, ids.profile.ui);
@@ -643,7 +708,7 @@ async function runBrowserAcceptance() {
       await adminAPage.clickButton("Close source review");
       const d = delta(await counts(ORG_X), before);
       assert.deepEqual({ ...d, audit_events: 0 }, { ...ZERO, sensitivity_items: 1, sensitivity_decisions: 1, candidates: 1, candidate_items: 1 });
-      results.step1 = "PASS: review work + decision through the UI (client_admin, Admin A); candidate by Admin A; the flow resumed at the source authorization";
+      results.step1 = "PASS: untouched form: no POST; direct untouched/null/non-boolean/unbased bodies 422 with zero writes; deliberate review through the UI (client_admin, Admin A, AI not permitted as chosen); candidate by Admin A; the flow resumed at the source authorization";
     });
 
     // --- before: responsibility -----------------------------------------------
@@ -679,7 +744,8 @@ async function runBrowserAcceptance() {
       assert.equal(candidate.created_by, kai.adminB, "the continuation runs as Admin B");
       ids.candidate.hist = candidate.intake_source_candidate_id;
       assert.deepEqual(postsSince(adminBPage, mark)[0], [continuationPath(ORG_X, PROJECT_X, FILE.hist).split("?")[0], 200], "the existing continuation route");
-      await authorizeAndPromote(adminBPage, ids.candidate.hist);
+      const { restrictions } = await authorizeAndPromote(adminBPage, ids.candidate.hist);
+      assert.ok(restrictions.includes("recorded AI processing permission: permitted."), restrictions);
       const d = delta(await counts(ORG_X), before);
       assert.deepEqual([d.candidates, d.candidate_items, d.promotions, d.sources, d.source_versions, d.sensitivity_decisions, d.evidence],
         [1, 1, 1, 1, 1, 0, 2], JSON.stringify(d));
@@ -709,7 +775,8 @@ async function runBrowserAcceptance() {
       await adminBPage.clickIn(`[data-client-use-for-impact="${FILE.ui}"]`, "Use for impact");
       await adminBPage.waitForText("Use for impact: confirm the source authorization below");
       assert.deepEqual(postsSince(adminBPage, mark), [], "nothing is posted before the confirmation");
-      await authorizeAndPromote(adminBPage, ids.candidate.ui);
+      const { restrictions } = await authorizeAndPromote(adminBPage, ids.candidate.ui);
+      assert.ok(restrictions.includes("recorded AI processing permission: not permitted."), `the affected reviewer sees the recorded AI restriction: ${restrictions}`);
       const d = delta(await counts(ORG_X), before);
       assert.deepEqual([d.candidates, d.candidate_items, d.promotions, d.sources, d.source_versions, d.evidence], [0, 0, 1, 1, 1, 2], JSON.stringify(d));
       assert.equal((await candidateOf(ORG_X, ids.profile.ui)).length, 1);
@@ -864,7 +931,7 @@ async function runBrowserAcceptance() {
 
     // --- 8b: AI processing not permitted ------------------------------------------
     await test("8b: a file whose current reviewed decision does not permit AI processing keeps its non-AI processing (claim, gap follow-ups), but its claim reaches the model through neither draft, alone or mixed with a permitted claim, and nothing is written", async () => {
-      // The 'ui' file's decision was recorded through the UI form, whose AI permission starts unchecked.
+      // The 'ui' file's decision was recorded through the UI form, where Admin A deliberately chose "Not permitted".
       const [uiDecision] = await query(
         `SELECT reviewed_allowed_use_status, reviewed_llm_processing_allowed FROM kai.intake_sensitivity_review_decisions
           WHERE organization_id = $1::uuid AND decision_id = $2::uuid`, [ORG_X, ids.uiDecision]);
@@ -876,6 +943,7 @@ async function runBrowserAcceptance() {
       const proposed = await adminBPage.api("POST", claimProposalPath(ORG_X, uiEvidence.evidence_item_id), {});
       assert.equal(proposed.status, 200, `non-AI claim proposal: ${JSON.stringify(proposed.body)}`);
       const uiClaim = proposed.body.data.claim.claim_id;
+      ids.uiClaim = uiClaim;
       const followups = await adminBPage.api("POST", claimGapFollowupsPath(ORG_X, uiClaim), {});
       assert.ok([200, 201].includes(followups.status), `non-AI gap follow-ups: ${JSON.stringify(followups.body)}`);
       const before = await counts(ORG_X);
@@ -892,10 +960,157 @@ async function runBrowserAcceptance() {
         // The route's blocker projection carries the key and reason (the basis is proven in kai-effective-ai-processing-enforcement.spec.js).
         const [blocker] = response.body.blockers || [];
         assert.deepEqual([blocker?.validator_key, blocker?.blocking_reason], ["VAL-KAI-B1A-02-004", "ai_processing_not_permitted"], label);
+        assert.match(blocker.message, /does not permit AI processing/, `${label}: the refusal names the restriction`);
       }
       assert.deepEqual(delta(await counts(ORG_X), before), ZERO, "no write by any refusal");
       assert.equal(modelCalls.length, callsBefore, "no claim of the file reached the model");
       results.step8b = "PASS: claim proposal 200 + gap follow-ups for the AI-restricted file; both drafts, alone and mixed with the permitted claim, 422 ai_processing_not_permitted; zero writes; 0 model calls";
+    });
+
+    // --- 8c: historical reviewed 'unknown', authorized correction, continuation ---
+    await test("8c: the pre-repair untouched-form decision keeps its conservative AI restriction; a deliberate new decision by Admin B supersedes it through the normal decision route (history preserved, replay idempotent, others refused); Admin B then drafts from the file through the UI; explicit and unresolved restrictions still hold", async () => {
+      const draftCounts = {};
+      const profileId = ids.profile.legacy;
+      const legacyEvidence = await query("SELECT evidence_item_id::text FROM kai.evidence_items WHERE organization_id = $1::uuid AND source_version_id = $2::uuid ORDER BY statement",
+        [ORG_X, ids.legacySourceVersion]);
+      assert.equal(legacyEvidence.length, 2);
+      // The historical record is preserved as recorded and stays conservative (reviewed 'unknown' cannot carry AI permission).
+      const [historical, ...none] = await decisionsOf(ORG_X, profileId);
+      assert.deepEqual(none, []);
+      assert.deepEqual([historical.decision_outcome, historical.reviewed_allowed_use_status, historical.reviewed_llm_processing_allowed, historical.is_head],
+        ["reviewed", "unknown", false, true]);
+      // Non-AI processing continues under the AI-only restriction.
+      const proposed = await adminBPage.api("POST", claimProposalPath(ORG_X, legacyEvidence[0].evidence_item_id), {});
+      assert.equal(proposed.status, 200, JSON.stringify(proposed.body));
+      const legacyClaim = proposed.body.data.claim.claim_id;
+      const followups = await adminBPage.api("POST", claimGapFollowupsPath(ORG_X, legacyClaim), {});
+      assert.ok([200, 201].includes(followups.status), JSON.stringify(followups.body));
+      let before = await counts(ORG_X);
+      let callsBefore = modelCalls.length;
+      for (const [label, path, claimIds] of [
+        ["historical summary", createEvidenceSummaryPath(ORG_X), [legacyClaim]],
+        ["historical narrative", createImpactNarrativePath(ORG_X), [legacyClaim]],
+        ["historical mixed with a permitted claim", createEvidenceSummaryPath(ORG_X), [ids.histClaim, legacyClaim].sort()],
+      ]) {
+        const refused = await adminBPage.api("POST", path, DRAFT_BODY(claimIds, `legacy-${label.replace(/\W+/g, "-")}`));
+        assert.deepEqual([refused.status, refused.body.blockers?.[0]?.validator_key, refused.body.blockers?.[0]?.blocking_reason], [422, "VAL-KAI-B1A-02-004", "ai_processing_not_permitted"], label);
+      }
+      assert.deepEqual(delta(await counts(ORG_X), before), ZERO);
+      draftCounts.historicalRefusals = modelCalls.length - callsBefore;
+      assert.equal(draftCounts.historicalRefusals, 0, "no model call for the historical reviewed-unknown file");
+
+      // The correction body is the form's own: a re-review seeded from the current decision, with the
+      // allowed use and the AI disposition deliberately chosen (the seed never restates the old AI fact).
+      const detail = await adminBPage.api("GET", sensitivityProfilePath(ORG_X, profileId));
+      assert.equal(detail.status, 200, JSON.stringify(detail.body));
+      const seeded = sensitivityReviewFormStateFromDecision(detail.body.data.current_decision);
+      assert.equal(seeded.reviewed_llm_processing_allowed, null, "the re-review starts with no AI disposition");
+      const queue = await sensitivityQueue(ORG_X, profileId);
+      const correction = buildSensitivityDecisionRequestBody({
+        decision: "reviewed", expectedUpdatedAt: new Date(queue.updated_at).toISOString(), reviewQueueItemId: queue.review_queue_item_id,
+        formState: { ...withSensitivityAllowedUse(seeded, "allowed"), reviewed_llm_processing_allowed: true },
+      });
+      // Unauthorized and cross-tenant review attempts are refused first, writing nothing.
+      const refusedReviewers = [["client_contributor", pages.contributor], ["revoked delegated admin", pages.revokedB], ["client_reviewer", pages.clientReviewer], ["other organization's administrator", pages.adminY]];
+      for (const [, page] of refusedReviewers) await page.goto("/impact-library");
+      before = await counts(ORG_X);
+      for (const [label, page] of refusedReviewers) {
+        const refused = await page.api("POST", sensitivityDecisionPath(ORG_X, profileId), correction);
+        assert.equal(refused.status, 403, `${label}: ${JSON.stringify(refused.body)}`);
+      }
+      assert.deepEqual(delta(await counts(ORG_X), before), ZERO, "no write by any refused reviewer");
+      // Admin B (a delegated client_admin) records the correction through the normal decision route.
+      before = await counts(ORG_X);
+      const corrected = await adminBPage.api("POST", sensitivityDecisionPath(ORG_X, profileId), correction);
+      assert.equal(corrected.status, 200, JSON.stringify(corrected.body));
+      assert.deepEqual([corrected.body.data.replayed, corrected.body.data.current_decision.reviewed_allowed_use_status, corrected.body.data.current_decision.reviewed_llm_processing_allowed],
+        [false, "allowed", true]);
+      const afterCorrection = delta(await counts(ORG_X), before);
+      assert.deepEqual([afterCorrection.sensitivity_decisions, afterCorrection.candidates, afterCorrection.sources, afterCorrection.evidence], [1, 0, 0, 0], JSON.stringify(afterCorrection));
+      // A replay of the same request is idempotent; a different outcome on the consumed stamp is a conflict.
+      before = await counts(ORG_X);
+      const replay = await adminBPage.api("POST", sensitivityDecisionPath(ORG_X, profileId), correction);
+      assert.deepEqual([replay.status, replay.body.data?.replayed], [200, true], JSON.stringify(replay.body));
+      const stale = await adminBPage.api("POST", sensitivityDecisionPath(ORG_X, profileId),
+        { expected_updated_at: correction.expected_updated_at, review_queue_item_id: correction.review_queue_item_id, decision: "needs_more_information" });
+      assert.equal(stale.status, 409, JSON.stringify(stale.body));
+      assert.deepEqual(delta(await counts(ORG_X), before), ZERO, "no write by the replay or the conflict");
+      // History: the historical decision is preserved unchanged and superseded; the correction is the one current head.
+      const history = await decisionsOf(ORG_X, profileId);
+      assert.deepEqual(history.map((d) => [d.decision_outcome, d.reviewed_allowed_use_status, d.reviewed_llm_processing_allowed, d.decided_by, d.is_head, d.supersedes_decision_id]), [
+        ["reviewed", "unknown", false, ids.adminA, false, null],
+        ["reviewed", "allowed", true, kai.adminB, true, historical.decision_id],
+      ]);
+      // Each decision's two required same-transaction audits: the lifecycle row (decision lineage) and the metadata-only event (actor).
+      const lifecycleAudits = await query(
+        `SELECT metadata->>'decision_id' AS decision_id, metadata->>'supersedes_decision_id' AS supersedes FROM kai.upload_lifecycle_audit
+          WHERE organization_id = $1::uuid AND operation = 'sensitivity_review_decision_recorded' AND metadata->>'intake_sensitivity_profile_id' = $2 ORDER BY created_at`,
+        [ORG_X, profileId]);
+      assert.deepEqual(lifecycleAudits.map((a) => [a.decision_id, a.supersedes]),
+        [[historical.decision_id, null], [history[1].decision_id, historical.decision_id]], "each decision's lineage audited once");
+      const actorAudits = await query(
+        `SELECT actor_user_id::text AS actor FROM kai.audit_events
+          WHERE organization_id = $1::uuid AND metadata->>'object_id' = $2 AND metadata->>'operation' = 'sensitivity_review_decision_recorded' ORDER BY audit_event_id`,
+        [ORG_X, profileId]);
+      assert.deepEqual(actorAudits.map((a) => a.actor), [ids.adminA, kai.adminB], "each decision's actor audited once");
+
+      // Continuation: Admin B selects the corrected file's claim in Data Sources and generates both internal drafts.
+      await openDataSources(adminBPage);
+      await adminBPage.waitFor(() => has(adminBPage, `[data-client-claim="${legacyClaim}"] input`), "the corrected file's claim offered for drafting");
+      await adminBPage.clickIn(`[data-client-claim="${legacyClaim}"] input`, "Use in an internal draft");
+      await adminBPage.waitFor(async () => !(await adminBPage.text()).includes("Select at least one claim below to draft from."), "draft readiness");
+      callsBefore = modelCalls.length;
+      const draftsBefore = new Set((await query("SELECT generated_content_draft_id::text AS id FROM kai.generated_content_drafts WHERE organization_id = $1::uuid", [ORG_X])).map((d) => d.id));
+      const mark = adminBPage.mark();
+      await adminBPage.clickButton("Generate internal evidence summary");
+      await adminBPage.waitForText("Internal evidence summary created: 1 block(s) citing 1 claim(s).");
+      await adminBPage.idle();
+      await adminBPage.clickButton("Generate internal impact narrative");
+      await adminBPage.waitForText("Internal impact narrative created: 1 block(s) citing 1 claim(s).");
+      await adminBPage.idle();
+      assert.deepEqual(postsSince(adminBPage, mark), [[createEvidenceSummaryPath(ORG_X), 201], [createImpactNarrativePath(ORG_X), 201]]);
+      assert.deepEqual(modelCalls.slice(callsBefore).map((call) => call.claimIds), [[legacyClaim], [legacyClaim]]);
+      draftCounts.afterCorrection = modelCalls.length - callsBefore;
+      const created = (await query(
+        `SELECT generated_content_draft_id::text AS id, content_type, requested_audience FROM kai.generated_content_drafts
+          WHERE organization_id = $1::uuid ORDER BY content_type`, [ORG_X])).filter((d) => !draftsBefore.has(d.id));
+      assert.deepEqual(created.map((d) => [d.content_type, d.requested_audience]), [["evidence_summary", "internal"], ["impact_narrative", "internal"]]);
+      for (const draft of created) {
+        const read = await adminBPage.api("GET", clientInternalDraftPath(ORG_X, PROJECT_X, draft.id));
+        assert.equal(read.status, 200, JSON.stringify(read.body));
+        assert.deepEqual([read.body.data.audience, read.body.data.reviewState], ["internal", "awaiting_get_kinder_review"]);
+        assert.deepEqual(read.body.data.blocks.map((block) => block.supportingClaimIds), [[legacyClaim]]);
+        assert.ok(read.body.data.blocks[0].text.startsWith("Internal draft text for:"));
+        assert.deepEqual(read.body.data.limitations, ["internal_use_only", "not_approved_for_external_use", "awaiting_get_kinder_review", "cited_claims_not_currently_eligible"]);
+      }
+
+      // The deliberate prohibition on another file still holds, alone or mixed with the corrected claim.
+      before = await counts(ORG_X);
+      callsBefore = modelCalls.length;
+      const mixed = await adminBPage.api("POST", createImpactNarrativePath(ORG_X), DRAFT_BODY([legacyClaim, ids.uiClaim].sort(), "legacy-ui-mixed"));
+      assert.deepEqual([mixed.status, mixed.body.blockers?.[0]?.validator_key, mixed.body.blockers?.[0]?.blocking_reason], [422, "VAL-KAI-B1A-02-004", "ai_processing_not_permitted"]);
+      assert.deepEqual(delta(await counts(ORG_X), before), ZERO);
+      draftCounts.mixedWithExplicitProhibition = modelCalls.length - callsBefore;
+      assert.equal(draftCounts.mixedWithExplicitProhibition, 0);
+
+      // A deliberately unresolved decision (needs more information) restricts AI again; non-AI processing continues.
+      const reopenQueue = await sensitivityQueue(ORG_X, profileId);
+      const reopened = await adminAPage.api("POST", sensitivityDecisionPath(ORG_X, profileId),
+        { expected_updated_at: new Date(reopenQueue.updated_at).toISOString(), review_queue_item_id: reopenQueue.review_queue_item_id, decision: "needs_more_information" });
+      assert.equal(reopened.status, 200, JSON.stringify(reopened.body));
+      const nonAi = await adminBPage.api("POST", claimProposalPath(ORG_X, legacyEvidence[1].evidence_item_id), {});
+      assert.equal(nonAi.status, 200, `non-AI claim proposal under an unresolved review: ${JSON.stringify(nonAi.body)}`);
+      before = await counts(ORG_X);
+      callsBefore = modelCalls.length;
+      const unresolved = await adminBPage.api("POST", createEvidenceSummaryPath(ORG_X), DRAFT_BODY([legacyClaim], "legacy-unresolved"));
+      assert.deepEqual([unresolved.status, unresolved.body.blockers?.[0]?.validator_key, unresolved.body.blockers?.[0]?.blocking_reason], [422, "VAL-KAI-B1A-02-004", "ai_processing_not_permitted"]);
+      assert.deepEqual(delta(await counts(ORG_X), before), ZERO);
+      draftCounts.unresolved = modelCalls.length - callsBefore;
+      assert.equal(draftCounts.unresolved, 0);
+      assert.deepEqual((await decisionsOf(ORG_X, profileId)).map((d) => [d.decision_outcome, d.is_head]), [["reviewed", false], ["reviewed", false], ["needs_more_information", true]]);
+      assert.deepEqual(adminBPage.exceptions, []);
+      console.log(`[source-to-impact-workflow-browser] 8c model calls ${JSON.stringify(draftCounts)}`);
+      results.step8c = `PASS: historical reviewed-unknown preserved and refused (0 calls); 4 unauthorized/cross-tenant reviewers 403; Admin B's correction superseded it (history + audits preserved, replay idempotent, stale 409); UI drafts 201 x2 (${draftCounts.afterCorrection} calls) read back with citations; mixed with the explicit prohibition 422 (0 calls); needs-more-information 422 (0 calls) with non-AI proposal 200`;
     });
 
     // --- 9: refusals --------------------------------------------------------------

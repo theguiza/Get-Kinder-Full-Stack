@@ -689,7 +689,8 @@ async function runBrowserAcceptance() {
     decision: "reviewed",
     expectedUpdatedAt: new Date(queue.updated_at).toISOString(),
     reviewQueueItemId: queue.review_queue_item_id,
-    formState: { ...defaultSensitivityReviewFormState(), reviewed_personal_data_status: "present", reviewed_minor_data_status: "absent" },
+    formState: { ...defaultSensitivityReviewFormState(), reviewed_personal_data_status: "present", reviewed_minor_data_status: "absent",
+      reviewed_llm_processing_allowed: false },
   });
   const needsMoreInformation = (queue) => ({ expected_updated_at: new Date(queue.updated_at).toISOString(), decision: "needs_more_information" });
 
