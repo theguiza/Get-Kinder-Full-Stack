@@ -218,6 +218,8 @@ function fakeQueryHandler(sql, params = []) {
       rowCount: 1,
     };
   }
+  // VAL-KAI-B1A-02-003: no human sensitivity decision is recorded in this fixture.
+  if (sql.includes("FROM kai.intake_sensitivity_review_decisions")) return { rows: [] };
   if (sql.includes("FROM kai.intake_sensitivity_profiles")) {
     return {
       rows: [

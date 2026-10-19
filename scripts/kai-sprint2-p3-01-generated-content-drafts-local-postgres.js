@@ -108,6 +108,9 @@ try {
   psqlFile("migrations/kai_sprint2_p1_04_data_dictionary_and_quality.sql");
   psqlFile("migrations/kai_sprint2_p1_05_intake_sensitivity_profile.sql");
   psqlFile("migrations/kai_sprint2_p1_06_review_queue.sql");
+  // VAL-KAI-B1A-02-003: every content-processing seam reads the file's effective
+  // allowed use, including the Phase-5 decision ledger (production has it).
+  psqlFile("migrations/kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger.sql");
   psqlFile("migrations/kai_sprint2_p1_07_intake_source_candidate.sql");
   psqlFile("migrations/kai_sprint2_p1_08_source_promotion.sql");
   psqlFile("migrations/kai_sprint2_p2_01_evidence_lineage.sql");

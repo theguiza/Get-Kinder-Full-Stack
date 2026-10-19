@@ -172,6 +172,7 @@ export async function createSourcePromotionDecision(input, dependencies = {}) {
     return buildKaiError(result.error.code, {
       status: result.error.status,
       ...(result.data ? { data: result.data } : {}),
+      ...(Array.isArray(result.error.blockers) ? { blockers: result.error.blockers } : {}),
     });
   }
   return { ok: true, data: result.data, error: null };

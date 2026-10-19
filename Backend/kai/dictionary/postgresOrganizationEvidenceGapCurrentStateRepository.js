@@ -3,6 +3,7 @@ import {
   dimensionResultRequiresGap,
 } from "../validators/kaiClaimGapFollowupValidators.js";
 import { validateConflictGroupCompleteness } from "../validators/kaiConflictGroupValidators.js";
+import { readEffectiveAllowedUseProhibitions } from "./postgresEffectiveAllowedUseResolver.js";
 import { __claimGapFollowupRepositoryTestables } from "./postgresClaimGapFollowupRepository.js";
 import {
   __claimTraceabilityRepositoryTestables,
@@ -275,7 +276,21 @@ async function loadCurrentStateBatches(tx, { organizationId, claimIds }) {
        FROM kai.intake_sensitivity_profiles
       WHERE organization_id = $1::uuid AND intake_sensitivity_profile_id = ANY($2::uuid[])`,
   );
-  const profilesById = toMapByKey(profiles, "intake_sensitivity_profile_id");
+  // Same effective allowed-use fact readSensitivityProfileForAssessment
+  // attaches for P2-06 (VAL-KAI-B1A-02-003), so parity holds.
+  const prohibitions = await readEffectiveAllowedUseProhibitions(tx, {
+    organizationId,
+    intakeSensitivityProfileIds: profiles.map((row) => row.intake_sensitivity_profile_id),
+  });
+  const profilesById = toMapByKey(
+    profiles.map((row) => ({
+      ...row,
+      effective_allowed_use_prohibition: prohibitions.has(row.intake_sensitivity_profile_id)
+        ? prohibitions.get(row.intake_sensitivity_profile_id)
+        : "sensitivity_profile_missing",
+    })),
+    "intake_sensitivity_profile_id",
+  );
 
   const dictionaries = await batchRead(
     tx, organizationId, dictionaryIds,

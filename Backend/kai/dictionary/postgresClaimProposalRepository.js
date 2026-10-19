@@ -21,6 +21,8 @@ import {
   EVIDENCE_REVIEW_CONTINUATION_AUTHORITY_SOURCE,
 } from "../validators/kaiEvidenceReviewContinuationValidators.js";
 import { findCurrentEvidenceReviewDecision } from "./postgresHumanReviewDecisionRepository.js";
+import { readEffectiveAllowedUseProhibition } from "./postgresEffectiveAllowedUseResolver.js";
+import { validateEffectiveAllowedUsePermitsOperation } from "../validators/kaiEffectiveAllowedUseValidators.js";
 
 /**
  * KAI P2-03 deterministic claim-proposal repository adapter: server-derived-only
@@ -605,6 +607,17 @@ export function createPostgresClaimProposalRepository({
           evidenceReviewQueueItemRow,
         });
         if (!lineageValidation.ok) return claimProposalFailure(lineageValidation.code);
+
+        // VAL-KAI-B1A-02-003: no claim is proposed from evidence whose file's
+        // effective allowed use is not_allowed, through either entry.
+        const allowedUse = validateEffectiveAllowedUsePermitsOperation(
+          await readEffectiveAllowedUseProhibition(tx, {
+            organizationId,
+            intakeSensitivityProfileId: sourceVersionRow.intake_sensitivity_profile_id,
+          }),
+          { operation: "propose_claim", objectType: "evidence_item", objectId: evidenceItemId },
+        );
+        if (!allowedUse.ok) return continuationFailure(allowedUse);
 
         const promotionValidation = validateUnsupportedClaimPromotion({
           claimStatus: CLAIM_STATUS_PROPOSED,

@@ -247,6 +247,8 @@ function makeFakeTransactionClient(tables) {
       if (sql.includes("queue_type = 'claim_review'")) return { rows: scoped(tables.claim_review_queue, organizationId, "target_object_id", ids) };
       if (sql.includes("queue_type = 'client_followup'")) return { rows: scoped(tables.client_followup_queue, organizationId, "target_object_id", ids) };
       if (sql.includes("queue_type = 'conflict_resolution'")) return { rows: [] };
+      // VAL-KAI-B1A-02-003: no human sensitivity decision is recorded in this fixture.
+      if (sql.includes("FROM kai.intake_sensitivity_review_decisions")) return { rows: [] };
       if (sql.includes("FROM kai.intake_sensitivity_profiles")) return { rows: scoped(tables.intake_sensitivity_profiles, organizationId, "intake_sensitivity_profile_id", ids) };
       if (sql.includes("FROM kai.data_dictionary_fields")) return { rows: scoped(tables.data_dictionary_fields, organizationId, "data_dictionary_id", ids) };
       if (sql.includes("FROM kai.data_quality_findings")) return { rows: scoped(tables.data_quality_findings, organizationId, "data_dictionary_id", ids) };

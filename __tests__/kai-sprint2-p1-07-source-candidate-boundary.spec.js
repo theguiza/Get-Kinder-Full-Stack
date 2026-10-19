@@ -407,6 +407,8 @@ test("P1-07 repository never lets the caller override any server-pinned or serve
 function fakeTxFor({ profileRow, existingCandidateRow = null, existingQueueRow = null }) {
   return {
     async query(sql) {
+      // VAL-KAI-B1A-02-003: no human sensitivity decision is recorded in this fixture.
+      if (sql.includes("FROM kai.intake_sensitivity_review_decisions")) return { rows: [] };
       if (sql.includes("FROM kai.intake_sensitivity_profiles")) return { rows: profileRow ? [profileRow] : [] };
       if (sql.includes("FROM kai.intake_files")) return { rows: [{ upload_state: "confirmed" }] };
       if (sql.includes("FROM kai.intake_source_candidates") && sql.includes("FOR UPDATE")) {
@@ -533,6 +535,8 @@ test("P1-07 repository: candidate exists but its review item is missing returns 
   let publishCalls = 0;
   const tx = {
     async query(sql) {
+      // VAL-KAI-B1A-02-003: no human sensitivity decision is recorded in this fixture.
+      if (sql.includes("FROM kai.intake_sensitivity_review_decisions")) return { rows: [] };
       if (sql.includes("FROM kai.intake_sensitivity_profiles")) return { rows: [predicateSatisfyingProfileRow] };
       if (sql.includes("FROM kai.intake_files")) return { rows: [{ upload_state: "confirmed" }] };
       if (sql.includes("FROM kai.intake_source_candidates") && sql.includes("FOR UPDATE")) return { rows: [existingCandidateRow] };
@@ -708,6 +712,8 @@ test("P1-07 repository rolls back the candidate and review-item inserts when the
     let queueInsertReached = false;
     const tx = {
       async query(sql, params) {
+        // VAL-KAI-B1A-02-003: no human sensitivity decision is recorded in this fixture.
+        if (sql.includes("FROM kai.intake_sensitivity_review_decisions")) return { rows: [] };
         if (sql.includes("FROM kai.intake_sensitivity_profiles")) return { rows: [predicateSatisfyingProfileRow] };
         if (sql.includes("FROM kai.intake_files")) return { rows: [{ upload_state: "confirmed" }] };
         if (sql.includes("FROM kai.intake_source_candidates") && sql.includes("FOR UPDATE")) return { rows: [] };

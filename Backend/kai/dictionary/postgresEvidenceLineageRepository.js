@@ -12,6 +12,8 @@ import {
   getScopedEvidenceReviewQueueItemByEvidenceItemId,
 } from "../db/kaiIntakeQueries.js";
 import { validateEvidenceHasSourceLineage } from "../validators/kaiEvidenceLineageValidators.js";
+import { readEffectiveAllowedUseProhibition } from "./postgresEffectiveAllowedUseResolver.js";
+import { validateEffectiveAllowedUsePermitsOperation } from "../validators/kaiEffectiveAllowedUseValidators.js";
 
 /**
  * KAI P2-01 deterministic evidence-lineage repository adapter: server-derived-only
@@ -79,13 +81,14 @@ const REVIEW_STATUS_NEEDS_GK_REVIEW = "needs_gk_review";
  */
 const REVIEW_SUMMARY_NEW_EVIDENCE_ITEM = "New evidence item requires GK review.";
 
-function evidenceLineageFailure(code) {
+function evidenceLineageFailure(code, blockers = null) {
   return {
     ok: false,
     data: null,
     error: {
       code,
       status: EVIDENCE_LINEAGE_RESULT_STATUS[code],
+      ...(blockers ? { blockers } : {}),
     },
   };
 }
@@ -596,6 +599,17 @@ export function createPostgresEvidenceLineageRepository({
             dictionaryRow,
           });
           if (!validation.ok) return evidenceLineageFailure(validation.code);
+
+          // VAL-KAI-B1A-02-003: no evidence is extracted from a file whose
+          // effective allowed use is not_allowed, whoever asks.
+          const allowedUse = validateEffectiveAllowedUsePermitsOperation(
+            await readEffectiveAllowedUseProhibition(tx, {
+              organizationId,
+              intakeSensitivityProfileId: profileRow.intake_sensitivity_profile_id,
+            }),
+            { operation: "extract_evidence_lineage", objectType: "source_version", objectId: sourceVersionId },
+          );
+          if (!allowedUse.ok) return evidenceLineageFailure(allowedUse.code, allowedUse.blockers);
 
           const fieldRows = await getScopedDataDictionaryFieldsByDictionaryId(
             { organizationId, dataDictionaryId: dictionaryRow.data_dictionary_id },

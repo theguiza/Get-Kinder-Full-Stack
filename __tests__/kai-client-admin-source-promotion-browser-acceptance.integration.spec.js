@@ -244,8 +244,6 @@ async function runBrowserAcceptance() {
   const { requireKaiSprint2Enabled } = await import("../Backend/kai/config/kaiSprint2Config.js");
   const { requireKaiSprint2Authenticated } = await import("../Backend/kai/middleware/kaiSprint2Authentication.js");
   const {
-    claimGapFollowupsPath,
-    claimProposalPath,
     evidenceExtractionPath,
     evidenceReviewCompletePath,
     evidenceReviewDecisionBody,
@@ -837,7 +835,7 @@ async function runBrowserAcceptance() {
       results.blocked = "PASS: policy-blocked file failed at security_check; no profile, no candidate, no action";
     });
 
-    await test("sensitivity and allowed use: prohibited permission grants are refused at the decision; a committed 'not_allowed' allowed use still blocks downstream gap generation after the administrator's promotion", async () => {
+    await test("sensitivity and allowed use: prohibited permission grants are refused at the decision; an effective 'not_allowed' allowed use records the decision but prepares no source (VAL-KAI-B1A-02-003)", async () => {
       const profileId = ids.seeded.allowedUse.intakeSensitivityProfileId;
       const [item] = await sensitivityQueue(ORG_X, profileId);
       const before = await counts(ORG_X);
@@ -851,30 +849,23 @@ async function runBrowserAcceptance() {
         assert.equal(refused.status, 422, `${label}: ${JSON.stringify(refused.body)}`);
       }
       assert.deepEqual(await counts(ORG_X), before, "refused decisions write nothing");
+      // The file's committed P1-05 allowed use is not_allowed (WORKER SIMULATION
+      // above) and the administrator also records a reviewed not_allowed: the
+      // decision is recorded, the P1-07 handoff refuses, and nothing downstream exists.
       const decided = await adminPage.api("POST", sensitivityDecisionPath(ORG_X, profileId), {
         ...base, reviewed_snapshot: { ...REVIEWED_SNAPSHOT, reviewed_allowed_use_status: "not_allowed" },
       });
       assert.equal(decided.status, 200, JSON.stringify(decided.body));
-      const candidateId = decided.body.data.source_candidate_handoff.intake_source_candidate_id;
-      const promoted = await adminPage.api("POST", decisionPath(ORG_X, candidateId), PROMOTE);
-      assert.equal(promoted.status, 200, JSON.stringify(promoted.body));
-      const [evidence] = await query(
-        `SELECT e.evidence_item_id::text FROM kai.evidence_items e JOIN kai.source_versions v ON v.organization_id = e.organization_id AND v.source_version_id = e.source_version_id
-          WHERE e.organization_id = $1::uuid AND v.intake_source_candidate_id = $2::uuid ORDER BY e.statement LIMIT 1`, [ORG_X, candidateId]);
-      assert.ok(evidence, "P1-08 and P2-01 have no allowed-use gate (unchanged contract)");
-      // Observed, unchanged: direct P2-03 proposal does not consult allowed use.
-      const proposal = await adminPage.api("POST", claimProposalPath(ORG_X, evidence.evidence_item_id), {});
-      results.allowed_use_direct_p2_03_status = proposal.status;
-      if (proposal.status === 200) {
-        const followupsBefore = await query("SELECT count(*)::int AS n FROM kai.gap_log_items WHERE organization_id = $1::uuid", [ORG_X]);
-        const gaps = await adminPage.api("POST", claimGapFollowupsPath(ORG_X, proposal.body.data.claim.claim_id), {});
-        assert.deepEqual([gaps.status, gaps.body.error?.code, gaps.body.blockers?.[0]?.blocking_reason], [422, "validation_blocker", "allowed_use_not_allowed"], JSON.stringify(gaps.body));
-        assert.deepEqual(await query("SELECT count(*)::int AS n FROM kai.gap_log_items WHERE organization_id = $1::uuid", [ORG_X]), followupsBefore, "no gap rows");
-      }
-      // Observed, unchanged (P2-08 / claim scope): a Project claim the governed
-      // eligibility evaluator cannot evaluate makes the client pipeline fail closed.
-      results.pipeline_with_unevaluable_claim_status = (await adminPage.api("GET", pipelinePath(ORG_X, PROJECT_X))).status;
-      results.allowed_use = `PASS: 3 prohibited snapshots 422; not_allowed promoted and extracted (no gate there, unchanged); direct P2-03 ${proposal.status}; P2-04 422 allowed_use_not_allowed`;
+      assert.deepEqual([decided.body.data.source_candidate_handoff.status, decided.body.data.source_candidate_handoff.error_code],
+        ["not_created", "validation_blocker"]);
+      const after = await counts(ORG_X);
+      assert.equal(after.sensitivity_decisions - before.sensitivity_decisions, 1, "the human decision is recorded");
+      assert.deepEqual([after.candidates - before.candidates, after.promotions - before.promotions, after.sources - before.sources, after.evidence - before.evidence],
+        [0, 0, 0, 0], "no candidate, promotion, source, or evidence");
+      const lookup = await adminPage.api("GET", lookupPath(ORG_X, PROJECT_X, FILE.allowedUse));
+      assert.equal(lookup.body.data?.intake_source_candidate_id ?? null, null);
+      results.pipeline_with_prohibited_file_status = (await adminPage.api("GET", pipelinePath(ORG_X, PROJECT_X))).status;
+      results.allowed_use = "PASS: 3 prohibited snapshots 422; reviewed not_allowed recorded (200), P1-07 handoff not_created validation_blocker; 0 candidates/promotions/sources/evidence";
     });
 
     console.log(`[client-admin-source-promotion-browser] results ${JSON.stringify(results)}`);

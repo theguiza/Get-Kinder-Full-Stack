@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 import { withTransaction } from "../db/kaiDb.js";
+import { readEffectiveAllowedUseProhibition } from "./postgresEffectiveAllowedUseResolver.js";
+import { validateEffectiveAllowedUsePermitsOperation } from "../validators/kaiEffectiveAllowedUseValidators.js";
 import {
   getScopedSourceCandidateByIdentity,
   getScopedSourceCandidateReviewQueueItemByIdentity,
@@ -131,6 +133,7 @@ const SOURCE_PROMOTION_EXACT_VERIFICATION_PHASE = Object.freeze({
   DB_CONSTRAINT_VIOLATION: "source_promotion_db_constraint_violation",
   REVIEWED_SOURCE_TYPE_INVALID: "source_promotion_reviewed_source_type_invalid",
   PERMISSION_PREDICATE_FAILED: "source_promotion_permission_predicate_failed",
+  ALLOWED_USE_NOT_ALLOWED: "source_promotion_allowed_use_not_allowed",
   CANDIDATE_REVIEW_INCOMPLETE: "source_promotion_candidate_review_incomplete",
 });
 
@@ -213,13 +216,14 @@ async function taggedQuery(tx, stage, sql, params) {
   }
 }
 
-function sourcePromotionFailure(code, data = null) {
+function sourcePromotionFailure(code, data = null, blockers = null) {
   return {
     ok: false,
     data,
     error: {
       code,
       status: SOURCE_PROMOTION_RESULT_STATUS[code],
+      ...(blockers ? { blockers } : {}),
     },
   };
 }
@@ -934,6 +938,26 @@ export function createPostgresSourcePromotionRepository({
       };
     }
 
+    // VAL-KAI-B1A-02-003: a file whose effective allowed use is not_allowed
+    // never becomes a governed source. Rejection and needs_more_information
+    // remain decidable; only this 'promoted' work is refused.
+    const allowedUse = validateEffectiveAllowedUsePermitsOperation(
+      await readEffectiveAllowedUseProhibition(tx, {
+        organizationId: candidateRow.organization_id,
+        intakeSensitivityProfileId: candidateRow.intake_sensitivity_profile_id,
+      }),
+      { operation: "create_source_promotion_decision", objectType: "intake_source_candidate", objectId: candidateRow.intake_source_candidate_id },
+    );
+    if (!allowedUse.ok) {
+      return {
+        blocker: allowedUse.code,
+        blockers: allowedUse.blockers,
+        exactVerificationPhase: allowedUse.code === "validation_blocker"
+          ? SOURCE_PROMOTION_EXACT_VERIFICATION_PHASE.ALLOWED_USE_NOT_ALLOWED
+          : null,
+      };
+    }
+
     const sourceCode = computeSourceCode({
       organizationId: candidateRow.organization_id,
       intakeSensitivityProfileId: candidateRow.intake_sensitivity_profile_id,
@@ -1161,6 +1185,7 @@ export function createPostgresSourcePromotionRepository({
               return sourcePromotionFailure(
                 promotionWork.blocker,
                 promotionWork.exactVerificationPhase ? { exact_verification_phase: promotionWork.exactVerificationPhase } : null,
+                promotionWork.blockers || null,
               );
             }
             const { sourceRecord, sourceVersionRecord } = promotionWork;
@@ -1347,6 +1372,7 @@ export function createPostgresSourcePromotionRepository({
             return sourcePromotionFailure(
               promotionWork.blocker,
               promotionWork.exactVerificationPhase ? { exact_verification_phase: promotionWork.exactVerificationPhase } : null,
+              promotionWork.blockers || null,
             );
           }
           const { sourceRecord, sourceVersionRecord } = promotionWork;

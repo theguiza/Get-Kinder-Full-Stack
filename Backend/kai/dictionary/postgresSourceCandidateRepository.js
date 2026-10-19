@@ -5,6 +5,8 @@ import {
 } from "../db/kaiIntakeQueries.js";
 import { findCurrentSensitivityAllowedUseDecision } from "./postgresSensitivityAllowedUseDecisionRepository.js";
 import { isSensitivityAllowedUseTerminalOutcome } from "./sensitivityAllowedUseDecisionContract.js";
+import { readEffectiveAllowedUseProhibition } from "./postgresEffectiveAllowedUseResolver.js";
+import { validateEffectiveAllowedUsePermitsOperation } from "../validators/kaiEffectiveAllowedUseValidators.js";
 
 /**
  * KAI P1-07 source-candidate repository adapter: idempotent creation of one
@@ -58,13 +60,14 @@ const SOURCE_CANDIDATE_AUDIT_CONTRACT = "p1_intake_source_candidate_v1";
 const SOURCE_CANDIDATE_VALIDATOR_KEY = "VAL-KAI-P1-07-001";
 const SOURCE_CANDIDATE_AUDIT_OPERATION = "intake_source_candidate_persisted";
 
-function sourceCandidateFailure(code) {
+function sourceCandidateFailure(code, blockers = null) {
   return {
     ok: false,
     data: null,
     error: {
       code,
       status: SOURCE_CANDIDATE_RESULT_STATUS[code],
+      ...(blockers ? { blockers } : {}),
     },
   };
 }
@@ -541,7 +544,8 @@ export function createPostgresSourceCandidateRepository({
      * binding-derived client_admin) locks the profile row and requires
      * hasOwnCurrentReviewedDecision before the predicate is evaluated or any
      * candidate or review item is read or written; otherwise `authorization_denied`
-     * with zero mutation and zero audit activity.
+     * with zero mutation and zero audit activity. For every caller the file's
+     * effective allowed use (VAL-KAI-B1A-02-003) must not be not_allowed.
      *
      * Same identity that already has a matching candidate row AND a matching review
      * item: replays both, with zero writes and zero audit activity. A pre-existing
@@ -576,6 +580,20 @@ export function createPostgresSourceCandidateRepository({
           if (requireOwnCurrentReviewedDecision && !(await hasOwnCurrentReviewedDecision(tx, profileRow, actorUserId))) {
             return sourceCandidateFailure("authorization_denied");
           }
+
+          // VAL-KAI-B1A-02-003: source preparation of a file whose effective
+          // allowed use is not_allowed is refused for every actor and caller
+          // (under the profile lock on the organization-administrator path; a
+          // decision committed concurrently with a GK caller is still enforced
+          // by P1-08 and every later seam, which re-read it).
+          const allowedUse = validateEffectiveAllowedUsePermitsOperation(
+            await readEffectiveAllowedUseProhibition(tx, {
+              organizationId: profileRow.organization_id,
+              intakeSensitivityProfileId: profileRow.intake_sensitivity_profile_id,
+            }),
+            { operation: "create_source_candidate_stub", objectType: "intake_sensitivity_profile", objectId: profileRow.intake_sensitivity_profile_id },
+          );
+          if (!allowedUse.ok) return sourceCandidateFailure(allowedUse.code, allowedUse.blockers);
 
           if (!satisfiesCreationTriggerPredicate(profileRow)) {
             return sourceCandidateFailure("validation_blocker");

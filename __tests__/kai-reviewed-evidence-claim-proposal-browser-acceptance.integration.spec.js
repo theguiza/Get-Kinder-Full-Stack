@@ -883,11 +883,15 @@ async function runBrowserAcceptance() {
     });
 
     await test("case 12: a committed positive review whose Decision C continuation is legitimately blocked (allowed use 'not_allowed') returns 200 with the named blocker, is shown as recorded-but-not-continued, and an identical retry neither duplicates the decision nor creates a claim", async () => {
-      // A third file in the same Project whose committed P1-05 allowed-use
-      // fact is 'not_allowed', through the same real P1-06..P2-01 paths.
+      // A third file in the same Project, through the same real P1-06..P2-01
+      // paths. VAL-KAI-B1A-02-003 refuses a not_allowed file before it becomes a
+      // source, so this is a source promoted while its allowed use was
+      // 'unknown' (as every source promoted before that repair was) whose
+      // committed P1-05 allowed-use fact is then set to 'not_allowed' (SYNTHETIC).
       const candidateC = await reachReviewableSourceCandidate(
-        await seedFreshFile(FILE_C, "reviewed-claim-not-allowed.csv", "c", { fieldKeys: ["meals_distributed", "delivery_week"], allowedUseStatus: "not_allowed" }));
+        await seedFreshFile(FILE_C, "reviewed-claim-not-allowed.csv", "c", { fieldKeys: ["meals_distributed", "delivery_week"] }));
       await promoteThroughCockpit(gkPage, candidateC);
+      await query("UPDATE kai.intake_sensitivity_profiles SET allowed_use_status = 'not_allowed' WHERE intake_file_id = $1::uuid", [FILE_C]);
       const [item] = await evidenceRows(FILE_C);
       assert.ok(item, "P2-01 created evidence for the not_allowed source");
       const [queueBefore] = await query("SELECT updated_at FROM kai.review_queue_items WHERE review_queue_item_id = $1::uuid", [item.review_queue_item_id]);

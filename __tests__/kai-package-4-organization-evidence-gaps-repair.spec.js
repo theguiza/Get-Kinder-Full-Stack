@@ -354,6 +354,8 @@ function buildBatchFakeTx(fixtures) {
         return { rows: scoped(all("followupQueue"), organizationId, "target_object_id", ids) };
       }
       if (sql.includes("queue_type = 'conflict_resolution'")) return { rows: [] };
+      // VAL-KAI-B1A-02-003: no human sensitivity decision is recorded in this fixture.
+      if (sql.includes("FROM kai.intake_sensitivity_review_decisions")) return { rows: [] };
       if (sql.includes("FROM kai.intake_sensitivity_profiles")) {
         return { rows: scoped(singles("profile"), organizationId, "intake_sensitivity_profile_id", ids) };
       }
@@ -529,8 +531,9 @@ test("Multi-claim boundedness: repository query count is constant regardless of 
     oneClaimCalls.length,
     `query count must be identical for 8 distinct claims (${nonIsolationCalls.length}) and 1 claim (${oneClaimCalls.length}) - no per-claim fan-out`,
   );
-  // Sanity bound: never more than the 20 documented batched-read call sites.
-  assert.ok(nonIsolationCalls.length <= 20, `expected at most 20 batched reads, got ${nonIsolationCalls.length}`);
+  // Sanity bound: never more than the 22 documented batched-read call sites
+  // (20, plus the two constant effective allowed-use reads, VAL-KAI-B1A-02-003).
+  assert.ok(nonIsolationCalls.length <= 22, `expected at most 22 batched reads, got ${nonIsolationCalls.length}`);
 });
 
 test("Tenant isolation: organization A's candidate page can never be validated as current using organization B's rows", async () => {

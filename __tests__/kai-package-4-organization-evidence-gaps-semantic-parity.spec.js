@@ -316,6 +316,8 @@ function buildFakeTx({ qualityFindingRows }) {
       if (sql.includes("kai.conflict_groups")) return { rows: [] };
       if (sql.includes("FROM kai.intake_source_candidates")) return { rows: [candidateRow] };
       if (sql.includes("FROM kai.intake_promotion_decisions")) return { rows: [decisionRow] };
+      // VAL-KAI-B1A-02-003: no human sensitivity decision is recorded in this fixture.
+      if (sql.includes("FROM kai.intake_sensitivity_review_decisions")) return { rows: [] };
       if (sql.includes("FROM kai.intake_sensitivity_profiles")) return { rows: [profileRow] };
       if (sql.includes("FROM kai.evidence_items e")) return { rows: evidenceFieldKeyRows };
       if (sql.includes("FROM kai.data_dictionary_fields")) return { rows: dictionaryFieldRows };

@@ -240,6 +240,44 @@ export function sensitivityAuthorityFromCurrentDecision(currentHead) {
   });
 }
 
+/**
+ * VAL-KAI-B1A-02-003: the effective allowed-use prohibition for one
+ * sensitivity profile. It gates every operation that uses a file's content
+ * beyond its metadata (P1-07 source preparation, P1-08 promotion, P2-01
+ * extraction, P2-02 assessment, P2-03 claim proposal, P2-04 follow-ups, and
+ * P2-06 eligibility, which generation re-evaluates). Reading, reviewing, or
+ * re-deciding the file is never gated by it.
+ *
+ * A prohibition is never lifted by anything weaker than its source, and
+ * nothing here grants a permission:
+ *   - an ambiguous decision lineage has no authoritative decision, so it
+ *     fails closed ('sensitivity_decision_lineage_ambiguous');
+ *   - the current lineage head, when it is a terminal 'reviewed' decision,
+ *     is the authoritative human allowed-use fact; 'not_allowed' prohibits
+ *     ('reviewed_allowed_use_not_allowed'). A superseded decision and a
+ *     'needs_more_information' head state no allowed use;
+ *   - the committed P1-05 allowed_use_status 'not_allowed' also prohibits
+ *     ('intake_allowed_use_not_allowed'), even under a reviewed 'allowed'
+ *     head. That is the restriction P2-02/P2-04 already applied; whether a
+ *     human decision may lift it is not decided by any governing source, so
+ *     the safer rule is kept (P1-05 itself only writes the 'unknown' default).
+ * 'unknown' and 'allowed' prohibit nothing (Operating Model section 7.1:
+ * normal processing within the authorized purpose needs no per-step consent).
+ * Returns null when nothing prohibits, otherwise the reason token.
+ */
+export function sensitivityEffectiveAllowedUseProhibition({ profileAllowedUseStatus, currentHead, lineageAmbiguous }) {
+  if (lineageAmbiguous === true) return "sensitivity_decision_lineage_ambiguous";
+  if (
+    isPlainObject(currentHead)
+    && isSensitivityAllowedUseTerminalOutcome(currentHead.decision_outcome)
+    && currentHead[SENSITIVITY_ALLOWED_USE_DECISION_FIELD] === "not_allowed"
+  ) {
+    return "reviewed_allowed_use_not_allowed";
+  }
+  if (profileAllowedUseStatus === "not_allowed") return "intake_allowed_use_not_allowed";
+  return null;
+}
+
 export const __sensitivityAllowedUseDecisionContractTestables = Object.freeze({
   SENSITIVITY_ALLOWED_USE_DECISION_OUTCOMES,
   SENSITIVITY_REVIEWED_SNAPSHOT_FIELDS,

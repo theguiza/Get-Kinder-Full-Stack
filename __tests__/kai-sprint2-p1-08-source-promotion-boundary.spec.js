@@ -323,6 +323,8 @@ function fakeTxFor({
       if (sql.includes("FROM kai.review_queue_items") && sql.includes("FOR UPDATE")) {
         return { rows: reviewItemRow ? [reviewItemRow] : [] };
       }
+      // VAL-KAI-B1A-02-003: no human sensitivity decision is recorded in this fixture.
+      if (sql.includes("FROM kai.intake_sensitivity_review_decisions")) return { rows: [] };
       if (sql.includes("FROM kai.intake_sensitivity_profiles")) {
         return { rows: profileRow ? [profileRow] : [] };
       }
@@ -556,6 +558,8 @@ test("P1-08 repository: the sensitivity-profile read stage (reachable only on th
   const reviewItem = openReviewItemRow();
   const tx = {
     async query(sql) {
+      // VAL-KAI-B1A-02-003: no human sensitivity decision is recorded in this fixture.
+      if (sql.includes("FROM kai.intake_sensitivity_review_decisions")) return { rows: [] };
       if (sql.includes("FROM kai.intake_sensitivity_profiles")) throw error;
       if (sql.includes("FROM kai.intake_promotion_decisions") && sql.includes("FOR UPDATE")) return { rows: [] };
       if (sql.includes("FROM kai.intake_source_candidates") && sql.includes("FOR UPDATE")) return { rows: [candidate] };
@@ -849,6 +853,8 @@ test("P1-08 repository: full 'promoted' creation success path inserts the decisi
       if (sql.includes("FROM kai.intake_promotion_decisions") && sql.includes("FOR UPDATE")) return { rows: [] };
       if (sql.includes("FROM kai.intake_source_candidates") && sql.includes("FOR UPDATE")) return { rows: [candidateRow] };
       if (sql.includes("FROM kai.review_queue_items") && sql.includes("FOR UPDATE")) return { rows: [reviewItemRow] };
+      // VAL-KAI-B1A-02-003: no human sensitivity decision is recorded in this fixture.
+      if (sql.includes("FROM kai.intake_sensitivity_review_decisions")) return { rows: [] };
       if (sql.includes("FROM kai.intake_sensitivity_profiles")) return { rows: [profileRow] };
       if (sql.includes("FROM kai.intake_files")) return { rows: [{ upload_state: "confirmed" }] };
       if (sql.includes("FROM kai.sources") && sql.includes("FOR UPDATE")) return { rows: [] };
@@ -1057,6 +1063,8 @@ test("P1-08 repository: needs_more_information -> promoted follow-up creates the
       if (sql.includes("FROM kai.intake_promotion_decisions") && sql.includes("FOR UPDATE")) return { rows: [decisionRow] };
       if (sql.includes("FROM kai.intake_source_candidates") && sql.includes("FOR UPDATE")) return { rows: [candidateRow] };
       if (sql.includes("FROM kai.review_queue_items") && sql.includes("FOR UPDATE")) return { rows: [waitingReviewItemRow] };
+      // VAL-KAI-B1A-02-003: no human sensitivity decision is recorded in this fixture.
+      if (sql.includes("FROM kai.intake_sensitivity_review_decisions")) return { rows: [] };
       if (sql.includes("FROM kai.intake_sensitivity_profiles")) return { rows: [profileRow] };
       if (sql.includes("FROM kai.intake_files")) return { rows: [{ upload_state: "confirmed" }] };
       if (sql.includes("FROM kai.sources") && sql.includes("FOR UPDATE")) return { rows: [] };

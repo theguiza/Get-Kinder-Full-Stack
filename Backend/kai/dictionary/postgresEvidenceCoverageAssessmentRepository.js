@@ -8,6 +8,7 @@ import {
   getScopedEvidenceReviewQueueItemByEvidenceItemId,
 } from "../db/kaiIntakeQueries.js";
 import { findCurrentEvidenceReviewDecision } from "./postgresHumanReviewDecisionRepository.js";
+import { readEffectiveAllowedUseProhibition } from "./postgresEffectiveAllowedUseResolver.js";
 
 /**
  * KAI P2-02 deterministic evidence-coverage-assessment repository adapter:
@@ -66,6 +67,11 @@ function isNonEmptyString(value) {
  * closed gate). Added here rather than widening the existing P2-01-owned
  * export, so no other package's read shape changes. Never locked FOR UPDATE:
  * this package never mutates this table.
+ *
+ * The row also carries `effective_allowed_use_prohibition` (VAL-KAI-B1A-02-003,
+ * postgresEffectiveAllowedUseResolver.js), read on the same connection, so
+ * every consumer of validateEvidenceCoverageAssessmentIsPermitted (P2-02,
+ * P2-04, P2-05, P2-06) honours the current human allowed-use decision.
  */
 async function readSensitivityProfileForAssessment({ organizationId, intakeSensitivityProfileId }, db) {
   const { rows } = await db.query(
@@ -88,7 +94,15 @@ async function readSensitivityProfileForAssessment({ organizationId, intakeSensi
         AND intake_sensitivity_profile_id = $2`,
     [organizationId, intakeSensitivityProfileId],
   );
-  return rows[0] || null;
+  const profileRow = rows[0] || null;
+  if (!profileRow) return null;
+  return {
+    ...profileRow,
+    effective_allowed_use_prohibition: await readEffectiveAllowedUseProhibition(db, {
+      organizationId: profileRow.organization_id,
+      intakeSensitivityProfileId: profileRow.intake_sensitivity_profile_id,
+    }),
+  };
 }
 
 /**

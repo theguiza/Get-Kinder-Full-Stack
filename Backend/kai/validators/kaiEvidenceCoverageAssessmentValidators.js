@@ -1,5 +1,6 @@
 import { createValidatorResult, blocker } from "./types.js";
 import { validateEvidenceHasSourceLineage } from "./kaiEvidenceLineageValidators.js";
+import { validateEffectiveAllowedUsePermitsOperation } from "./kaiEffectiveAllowedUseValidators.js";
 
 /**
  * KAI P2-02 deterministic evidence-coverage-assessment validators: pure
@@ -51,6 +52,12 @@ function isNonEmptyString(value) {
  * unresolved allowed-use fact is not itself a prohibition, it only leaves the
  * `requirement_alignment`/`conflicting_source_indicators` dimensions
  * unresolved below.
+ *
+ * VAL-KAI-B1A-02-003: the profile row read by
+ * readSensitivityProfileForAssessment also carries
+ * `effective_allowed_use_prohibition`, the current human decision's
+ * allowed-use fact combined with this one; a reviewed not_allowed decision
+ * (or an ambiguous decision lineage) fails closed here too.
  */
 export function validateEvidenceCoverageAssessmentIsPermitted(rows) {
   const lineage = validateEvidenceHasSourceLineage(rows);
@@ -68,6 +75,15 @@ export function validateEvidenceCoverageAssessmentIsPermitted(rows) {
         required_fix: "Only a new human sensitivity and allowed-use decision can change this source's allowed use.",
       })],
     };
+  }
+
+  const prohibition = rows.profileRow.effective_allowed_use_prohibition;
+  if (prohibition !== undefined && prohibition !== null) {
+    return validateEffectiveAllowedUsePermitsOperation(prohibition, {
+      operation: "assess_evidence_coverage",
+      objectType: "intake_sensitivity_profile",
+      objectId: rows.profileRow.intake_sensitivity_profile_id ?? null,
+    });
   }
 
   return { ok: true };

@@ -1,6 +1,8 @@
 import crypto from "node:crypto";
 
 import { withTransaction } from "../db/kaiDb.js";
+import { readEffectiveAllowedUseProhibitionsForClaims } from "./postgresEffectiveAllowedUseResolver.js";
+import { validateEffectiveAllowedUsePermitsOperation } from "../validators/kaiEffectiveAllowedUseValidators.js";
 import {
   evaluateClaimTraceabilityInTransaction,
   AUDIENCE_AUTHORITY_BLOCKER_CODES,
@@ -1366,6 +1368,24 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
       // (result.data.eligible) is a separate, stricter downstream fact
       // and is intentionally NOT required here. `eligible=false` alone
       // must never reject INTERNAL draft creation.
+      // VAL-KAI-B1A-02-003: a claim whose file's effective allowed use is
+      // not_allowed never reaches traceability or the generator (the model
+      // provider), for any audience or content type. A claim whose lineage
+      // cannot be walked is left to the P2-06 revalidation below.
+      const allowedUseProhibitions = await readEffectiveAllowedUseProhibitionsForClaims(tx, {
+        organizationId: input.organizationId,
+        claimIds: input.claimIds,
+      });
+      for (const claimId of input.claimIds) {
+        const prohibition = allowedUseProhibitions.has(claimId) ? allowedUseProhibitions.get(claimId) : "claim_lineage_missing";
+        const allowedUse = validateEffectiveAllowedUsePermitsOperation(prohibition, {
+          operation: `create_${contentType}_draft`,
+          objectType: "claim",
+          objectId: claimId,
+        });
+        if (!allowedUse.ok && allowedUse.code !== "not_found") rollbackFailure(allowedUse.code, allowedUse.blockers);
+      }
+
       const traceabilityResults = [];
       for (const claimId of input.claimIds) {
         const result = await evaluator(tx, {

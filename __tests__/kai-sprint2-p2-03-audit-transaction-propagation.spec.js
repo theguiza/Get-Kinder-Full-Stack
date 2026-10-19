@@ -30,6 +30,7 @@ const CLAIM_ID = "a0000000-0000-4000-8000-000000000001";
 const CLAIM_LINK_ID = "b0000000-0000-4000-8000-000000000001";
 const CLAIM_REVIEW_QUEUE_ID = "c0000000-0000-4000-8000-000000000001";
 const INTAKE_FILE = "20000000-0000-4000-8000-000000000001";
+const SENSITIVITY_PROFILE = "80000000-0000-4000-8000-000000000001";
 const NOW = "2026-08-15T10:00:00.000Z";
 
 function createFakeTransactionProvider(queryHandler) {
@@ -75,6 +76,12 @@ function runInTransactionFor(provider) {
 }
 
 function fakeQueryHandler(sql, params = []) {
+  // VAL-KAI-B1A-02-003: the file's effective allowed use (P1-05 'unknown', no
+  // human sensitivity decision recorded in this fixture).
+  if (sql.includes("FROM kai.intake_sensitivity_review_decisions")) return { rows: [], rowCount: 0 };
+  if (sql.includes("FROM kai.intake_sensitivity_profiles")) {
+    return { rows: [{ intake_sensitivity_profile_id: SENSITIVITY_PROFILE, allowed_use_status: "unknown" }], rowCount: 1 };
+  }
   if (sql.includes("FROM kai.evidence_items")) {
     return {
       rows: [
@@ -117,6 +124,7 @@ function fakeQueryHandler(sql, params = []) {
           organization_id: ORG,
           source_id: SOURCE,
           intake_source_candidate_id: CANDIDATE,
+          intake_sensitivity_profile_id: SENSITIVITY_PROFILE,
           is_current: true,
           created_at: NOW,
         },

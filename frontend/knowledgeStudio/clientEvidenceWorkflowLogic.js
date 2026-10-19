@@ -209,6 +209,7 @@ export function sourcePromotionResultMessage(data) {
 const SOURCE_PROMOTION_PHASE_MESSAGES = Object.freeze({
   source_promotion_permission_predicate_failed:
     "this file's recorded sensitivity and allowed-use restrictions do not permit promotion",
+  source_promotion_allowed_use_not_allowed: "this file's effective allowed use is not_allowed",
   source_promotion_reviewed_source_type_invalid: "the reviewed source type is not one of the allowed types",
   source_promotion_candidate_review_incomplete: "the candidate or its review item is not in a state that can take this decision",
 });

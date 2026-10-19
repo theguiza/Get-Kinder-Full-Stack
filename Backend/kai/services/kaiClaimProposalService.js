@@ -113,7 +113,10 @@ export async function proposeClaim(input, dependencies = {}) {
   });
 
   if (!result.ok) {
-    return buildKaiError(result.error.code, { status: result.error.status });
+    return buildKaiError(result.error.code, {
+      status: result.error.status,
+      ...(Array.isArray(result.error.blockers) ? { blockers: result.error.blockers } : {}),
+    });
   }
   return { ok: true, data: result.data, error: null, warnings: result.data?.warnings || [] };
 }

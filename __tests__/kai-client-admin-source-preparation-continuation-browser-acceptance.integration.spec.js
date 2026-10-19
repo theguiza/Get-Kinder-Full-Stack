@@ -939,14 +939,16 @@ async function runBrowserAcceptance() {
       results.downstream = `PASS: recovered source -> claim (needs_gk_review, internal) -> P2-04 ${p204[0][1]} -> evidence summary 201 + impact narrative 201 citing it; only the administrator acted`;
     });
 
-    await test("observed, unchanged: the decision seam still creates a candidate for a reviewed not_allowed decision on a new file (separate downstream allowed-use concern)", async () => {
+    await test("the decision seam and the continuation agree: a reviewed not_allowed decision on a new file is recorded but creates no candidate (VAL-KAI-B1A-02-003)", async () => {
       const intakeFileId = "2b000000-0000-4000-8000-0000000000e9";
       const profileId = await seedProfiledFile({ organizationId: ORG_X, engagementId: PROJECT_X, batchId: BATCH_X, intakeFileId, name: "harbourline-observed.csv", checksumChar: "f" });
       const [handoff] = await recordDecisions({ organizationId: ORG_X, profileId, actorContext: await actorOf(USERS.adminX), outcomes: ["reviewed"], p1_07: null,
         snapshot: { ...REVIEWED_SNAPSHOT, reviewed_allowed_use_status: "not_allowed" } });
-      results.observed_decision_seam_reviewed_not_allowed_handoff = handoff.status;
+      assert.deepEqual([handoff.status, handoff.error_code], ["not_created", "validation_blocker"]);
+      assert.deepEqual(await candidateOf(ORG_X, profileId), []);
       const refusedContinuation = await adminPage.api("POST", continuationPath(ORG_X, PROJECT_X, FILE.reviewedNotAllowed), {});
       assert.equal(refusedContinuation.body.blockers?.[0]?.blocking_reason, "allowed_use_not_allowed");
+      results.decision_seam_reviewed_not_allowed = "PASS: decision recorded, handoff not_created validation_blocker, 0 candidates; continuation 422 allowed_use_not_allowed";
     });
 
     console.log(`[client-admin-source-preparation-continuation-browser] results ${JSON.stringify(results)}`);

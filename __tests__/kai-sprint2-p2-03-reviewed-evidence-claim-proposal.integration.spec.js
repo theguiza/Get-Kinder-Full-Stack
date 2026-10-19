@@ -192,7 +192,11 @@ async function runReviewedEvidenceClaimProposalSuite() {
 
   /** Real P1-06 -> P1-07 -> P1-08 -> P2-01 handoff chain; returns the file and its evidence ids. */
   async function reachPromotedEvidence({ index, organizationId, engagementId, actorContext, allowedUseStatus }) {
-    const lineage = await seedFreshProfile({ index, organizationId, engagementId, batchId: batchFor(index), allowedUseStatus });
+    // VAL-KAI-B1A-02-003: a not_allowed file can no longer become a source, so
+    // the downstream gates below are exercised on a source promoted while its
+    // committed allowed use was 'unknown' (as every source promoted before that
+    // repair was), whose P1-05 allowed use is then set (SYNTHETIC) after promotion.
+    const lineage = await seedFreshProfile({ index, organizationId, engagementId, batchId: batchFor(index) });
     const ensured = await ensureSensitivityReviewQueueItem(
       { organizationId, intakeSensitivityProfileId: lineage.intakeSensitivityProfileId, actorContext, now: new Date().toISOString() },
       { env: ENV, metadataOnlyAudit: noAudit() },
@@ -242,6 +246,12 @@ async function runReviewedEvidenceClaimProposalSuite() {
       [organizationId, promoted.data.source_version.source_version_id],
     );
     assert.equal(evidence.length, FIELD_KEYS.length);
+    if (allowedUseStatus && allowedUseStatus !== "unknown") {
+      await query(
+        "UPDATE kai.intake_sensitivity_profiles SET allowed_use_status = $3 WHERE organization_id = $1::uuid AND intake_sensitivity_profile_id = $2::uuid",
+        [organizationId, lineage.intakeSensitivityProfileId, allowedUseStatus],
+      );
+    }
     return {
       ...lineage,
       intakeSourceCandidateId,

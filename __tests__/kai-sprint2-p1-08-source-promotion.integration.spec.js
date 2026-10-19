@@ -43,7 +43,7 @@ async function runSourcePromotionIntegrationSuite() {
 
   async function resetTables() {
     await withClient((client) => client.query(
-      "TRUNCATE kai.upload_lifecycle_audit, kai.source_versions, kai.sources, kai.intake_promotion_decisions, " +
+      "TRUNCATE kai.upload_lifecycle_audit, kai.intake_sensitivity_review_decisions, kai.source_versions, kai.sources, kai.intake_promotion_decisions, " +
       "kai.review_queue_items, kai.intake_source_candidates, kai.upload_policy_decision_replay, " +
       "kai.intake_sensitivity_profiles, kai.data_quality_findings, kai.data_dictionary_mappings, " +
       "kai.data_dictionary_fields, kai.data_dictionaries, kai.intake_file_profiles, kai.intake_parser_runs, kai.intake_files",
