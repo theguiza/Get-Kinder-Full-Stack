@@ -2309,6 +2309,9 @@ const SOURCE_CANDIDATE_HANDOFF_STATUSES = new Set(["created", "replayed", "not_a
 // stale (409), or rejected, and - for a recorded decision - the P1-07
 // source-candidate handoff exactly as the server reported it. A recorded
 // decision with a `not_created` handoff is still a recorded decision.
+// `replayed` is the server's own answer that the request matched the decision
+// already recorded for that review state (same outcome and stamp), whose
+// values may be another reviewer's: nothing new was written.
 export function projectSensitivityDecisionResult(result, decision) {
   if (result?.statusCode === 409) return { status: "conflict" };
   if (result?.statusCode !== 200 || !result?.body?.ok) {
@@ -2319,6 +2322,7 @@ export function projectSensitivityDecisionResult(result, decision) {
   return {
     status: "recorded",
     outcome: data.current_decision?.decision_outcome || decision,
+    replayed: data.replayed === true,
     handoff: handoff && SOURCE_CANDIDATE_HANDOFF_STATUSES.has(handoff.status)
       ? {
         status: handoff.status,

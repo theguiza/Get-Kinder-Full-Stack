@@ -18,6 +18,8 @@ import {
 import {
   clientEvidenceWorkflowAccess,
   isUseForImpactCandidate,
+  processingPermissionReviewFiles,
+  sourcePreparationFiles,
   sourceRestrictionLines,
   useForImpactStep,
 } from "../frontend/knowledgeStudio/clientEvidenceWorkflowLogic.js";
@@ -27,6 +29,7 @@ import {
   isClientSourceWork,
   nextActionText,
   pipelineReasonMessage,
+  projectClientEvidencePipeline,
   reviewsTabView,
 } from "../frontend/knowledgeStudio/clientEvidencePipelineLogic.js";
 
@@ -312,6 +315,53 @@ test("Use for impact: each step is the actor's authorized existing operation or 
   assert.deepEqual([closed.kind, /not_allowed/.test(closed.text)], ["blocked", true]);
   assert.equal(isUseForImpactCandidate(file("promote_source"), access), true);
   assert.equal(isUseForImpactCandidate(file("contact_get_kinder"), access), false);
+});
+
+test("processing permissions: every file whose current decision is a completed review is offered for a corrective re-review at any later stage, by its own intake file id, and only to an actor with the review capability", () => {
+  const fileId = (n) => `2c000000-0000-4000-8000-0000000000${String(n).padStart(2, "0")}`;
+  const rows = {
+    unreviewed: row({ intake_file_id: fileId(1), sensitivity_decision_outcome: null }),
+    needsMoreInformation: row({ intake_file_id: fileId(2), sensitivity_decision_outcome: "needs_more_information" }),
+    noCandidate: row({ intake_file_id: fileId(3), source_candidate_count: 0, source_candidate_actionable_count: 0, source_candidate_continuation_ready: true }),
+    openCandidate: row({ intake_file_id: fileId(4) }),
+    promoted: row({ intake_file_id: fileId(5), source_candidate_promoted_count: 1, source_version_count: 1, evidence_item_count: 2, evidence_needs_review_count: 2 }),
+    closed: row({ intake_file_id: fileId(6), effective_allowed_use_not_allowed: true }),
+    policyFailed: row({ intake_file_id: fileId(7), file_policy_status: "failed" }),
+  };
+  const pipeline = projectClientEvidencePipeline({
+    engagementId: ENGAGEMENT,
+    files: Object.values(rows).map((r) => projectPipelineFile(r, new Set(), ADMIN).file),
+    reviewedImpactFacts: [],
+  }, ENGAGEMENT);
+  const ids = (files) => files.map((file) => file.intakeFileId);
+  const access = { reviewSensitivity: true, promoteSource: true, extractEvidence: true };
+  assert.deepEqual(ids(processingPermissionReviewFiles(pipeline, access)),
+    [rows.noCandidate, rows.openCandidate, rows.promoted, rows.closed].map((r) => r.intake_file_id));
+  // The defect: Source preparation never lists a promoted file, and offers no review on any reviewed file.
+  assert.equal(ids(sourcePreparationFiles(pipeline, access)).includes(rows.promoted.intake_file_id), false);
+  assert.deepEqual(sourcePreparationFiles(pipeline, access).filter((file) => file.currentStage === "sensitivity_review").map((file) => file.intakeFileId),
+    [rows.unreviewed.intake_file_id, rows.needsMoreInformation.intake_file_id], "unreviewed and unresolved files keep their review in Source preparation");
+  for (const denied of [{ ...access, reviewSensitivity: false }, {}, null]) assert.deepEqual(processingPermissionReviewFiles(pipeline, denied), []);
+  assert.deepEqual(processingPermissionReviewFiles(null, access), []);
+  assert.deepEqual(processingPermissionReviewFiles({ files: [{ intakeFileId: fileId(9) }] }, access), [], "a file without stages is never offered");
+});
+
+test("UI wiring: Review processing permissions opens the existing sensitivity panel on the pipeline's intake file and refreshes without resuming any processing", () => {
+  const workflow = readFileSync(new URL("../frontend/knowledgeStudio/ClientEvidenceWorkflow.jsx", import.meta.url), "utf8");
+  assert.match(workflow, /processingPermissionReviewFiles\(pipeline\.data, access\)/);
+  assert.match(workflow, /\{access\.reviewSensitivity \? \(\s*<div className="admin-card mb-3" data-client-processing-permissions="">/);
+  assert.match(workflow, /data-client-review-processing-permissions=\{file\.intakeFileId\}\s*onClick=\{\(\) => setPreparation\(\{ contextKey, kind: "permissions", file \}\)\}/);
+  assert.match(workflow, /intakeFileId=\{openPreparation\.file\.intakeFileId\}\s*safeFilename=\{openPreparation\.file\.safeFilename\}\s*purpose="processing_permissions"/);
+  const recorded = workflow.slice(workflow.indexOf("const permissionsRecorded"), workflow.indexOf("// --- Use for impact"));
+  assert.match(recorded, /onPipelineRefresh\?\.\(\);\s*refresh\(\);\s*\};/);
+  assert.doesNotMatch(recorded, /UseForImpact|postJson/, "a correction runs no step");
+  const panel = readFileSync(new URL("../frontend/knowledgeStudio/ClientSensitivityReviewPanel.jsx", import.meta.url), "utf8");
+  assert.match(panel, /data-client-processing-permissions-panel=\{permissionsReview \? intakeFileId : undefined\}/);
+  assert.match(panel, /if \(result\.replayed\) \{/, "a server replay is never shown as a new decision");
+  assert.match(panel, /handoff && handoff\.status === "replayed" \? \(\s*<div>\s*This file&rsquo;s existing source candidate is unchanged/);
+  const body = readFileSync(new URL("../frontend/SensitivityReviewCardBody.jsx", import.meta.url), "utf8");
+  assert.match(body, /<div data-sensitivity-current-decision>/);
+  assert.match(body, /data-sensitivity-new-review/);
 });
 
 test("source authorization: the recorded restrictions are shown from the current decision, and a missing review says so", () => {

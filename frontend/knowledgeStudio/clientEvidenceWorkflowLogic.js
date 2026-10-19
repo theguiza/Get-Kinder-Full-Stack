@@ -186,6 +186,25 @@ export function sourcePreparationFiles(pipelineData, access) {
   ));
 }
 
+/**
+ * The selected Project's files whose sensitivity & allowed-use review is
+ * complete, offered for a corrective re-review ("Review processing
+ * permissions") to an actor the capabilities admit to that review. The
+ * pipeline marks the stage complete only while the file's current decision is
+ * a human 'reviewed' one, so a file at any later stage - promoted, with
+ * evidence, or closed as not_allowed - stays listed, and a needs-more-
+ * information file returns to Source preparation. Each row is the pipeline's
+ * own intake file, so the panel opens on that file's identity, never on one
+ * derived from a source. Exception recovery only: no file needs it to
+ * continue.
+ */
+export function processingPermissionReviewFiles(pipelineData, access) {
+  if (access?.reviewSensitivity !== true) return [];
+  const files = Array.isArray(pipelineData?.files) ? pipelineData.files : [];
+  return files.filter((file) => Array.isArray(file?.stages)
+    && file.stages.some((stage) => stage?.key === "sensitivity_review" && stage.status === "complete"));
+}
+
 // The decision response, as one line: what was recorded and what the
 // server-side evidence extraction handoff did. Counts only.
 export function sourcePromotionResultMessage(data) {

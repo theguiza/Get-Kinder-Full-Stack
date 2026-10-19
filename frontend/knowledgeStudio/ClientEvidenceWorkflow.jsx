@@ -35,6 +35,7 @@ import {
   internalDraftRequestBody,
   internalDraftResultSummary,
   isUseForImpactCandidate,
+  processingPermissionReviewFiles,
   retainSelectableClaimIds,
   sourcePreparationContinuationFailureMessage,
   sourcePreparationContinuationMessage,
@@ -117,6 +118,14 @@ function useOrganizationRead(organizationId, path, project, refreshToken) {
  * re-read state. Every step is the existing route, which re-authorizes and
  * replays idempotently, so a repeat or an interrupted flow continues from
  * whatever is persisted.
+ *
+ * "Processing permissions" (reviewSensitivity; exception recovery): every file
+ * of the Project whose sensitivity review is complete, at whatever later
+ * stage, with "Review processing permissions", which opens the same
+ * sensitivity review panel on that pipeline intake file to record a
+ * corrective, superseding decision through the existing decision route. A
+ * recorded correction refreshes the pipeline and the reads only; it runs no
+ * step and resumes no "Use for impact" flow.
  *
  * "Your internal drafts" (readInternalDrafts) reads the administrator's own
  * persisted internal drafts with their true review state; a draft just
@@ -220,6 +229,13 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
     }, sourcePreparationContinuationFailureMessage);
   const pipelineReady = isPipelineSuccess(pipeline?.status) && Boolean(pipeline?.data);
   const preparationFiles = pipelineReady ? sourcePreparationFiles(pipeline.data, access) : [];
+  const reviewedFiles = pipelineReady ? processingPermissionReviewFiles(pipeline.data, access) : [];
+  // A corrected decision refreshes the pipeline and the reads; it never runs
+  // a processing step (Use for impact stays the person's separate action).
+  const permissionsRecorded = () => {
+    onPipelineRefresh?.();
+    refresh();
+  };
 
   // --- Use for impact ---------------------------------------------------------
   const [impactFlow, setImpactFlow] = useState(null);
@@ -386,6 +402,57 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
               safeFilename={openPreparation.file.safeFilename}
               onClose={() => setPreparation(null)}
               onDecisionRecorded={preparationRecorded}
+            />
+          ) : null}
+        </div>
+      ) : null}
+
+      {access.reviewSensitivity ? (
+        <div className="admin-card mb-3" data-client-processing-permissions="">
+          <h5 className="mb-2">Processing permissions</h5>
+          <div className="small text-muted mb-2">
+            Files whose sensitivity &amp; allowed-use review is complete. If a recorded decision is wrong - for example, AI
+            processing was recorded as not permitted by mistake - review the file&rsquo;s processing permissions again. A new
+            review supersedes the current decision, which stays in the file&rsquo;s history. Ordinary processing does not need
+            this, and recording a review runs no processing.
+          </div>
+          {!engagementId ? <div className="text-muted small">Select a Project to see its files.</div> : null}
+          {engagementId && pipeline?.status === "error" ? (
+            <div className="alert alert-warning py-2 small">This Project&rsquo;s file status could not be loaded.</div>
+          ) : null}
+          {engagementId && !pipelineReady && pipeline?.status !== "error" ? <div className="text-muted small">Loading this Project&rsquo;s files...</div> : null}
+          {engagementId && pipelineReady && reviewedFiles.length === 0 ? (
+            <div className="text-muted small">No file in this Project has a completed sensitivity &amp; allowed-use review yet.</div>
+          ) : null}
+          {engagementId && reviewedFiles.length > 0 ? (
+            <ul className="list-group">
+              {reviewedFiles.map((file) => {
+                const current = file.stages.find((entry) => entry.key === file.currentStage);
+                return (
+                  <li key={file.intakeFileId} className="list-group-item small" data-client-reviewed-file={file.intakeFileId}>
+                    <div className="fw-semibold">{file.safeFilename}</div>
+                    <div className="text-muted">
+                      Sensitivity review: Complete
+                      {file.currentStage ? ` · ${PIPELINE_STAGE_LABELS[file.currentStage]}: ${current ? stageStatusLabel(current) : "Unknown"}` : ""}
+                    </div>
+                    <button type="button" className="btn btn-sm btn-outline-secondary mt-1" data-client-review-processing-permissions={file.intakeFileId}
+                      onClick={() => setPreparation({ contextKey, kind: "permissions", file })}>
+                      Review processing permissions
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : null}
+          {openPreparation?.kind === "permissions" ? (
+            <ClientSensitivityReviewPanel
+              key={`${contextKey}:permissions:${openPreparation.file.intakeFileId}`}
+              organizationId={organizationId}
+              intakeFileId={openPreparation.file.intakeFileId}
+              safeFilename={openPreparation.file.safeFilename}
+              purpose="processing_permissions"
+              onClose={() => setPreparation(null)}
+              onDecisionRecorded={permissionsRecorded}
             />
           ) : null}
         </div>

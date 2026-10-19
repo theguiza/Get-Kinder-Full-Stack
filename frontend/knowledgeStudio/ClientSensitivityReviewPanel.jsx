@@ -24,6 +24,17 @@ function DecisionResult({ result }) {
   if (result.status === "work_started") return <div className="alert alert-info py-2 small">Sensitivity review work started.</div>;
   if (result.status === "conflict") return <div className="alert alert-warning py-2 small">{STALE_DECISION_MESSAGE}</div>;
   if (result.status === "error") return <div className="alert alert-warning py-2 small">{result.message}</div>;
+  // The server matched this request to the decision already recorded for the
+  // same review state (same outcome and stamp); that decision may carry
+  // another reviewer's values, so it is never reported as this one.
+  if (result.replayed) {
+    return (
+      <div className="alert alert-info py-2 small" data-sensitivity-decision-result="">
+        <div className="fw-semibold">Nothing new was recorded: this review state already has a decision with this outcome.</div>
+        <div>The decision shown below is the one currently in effect.</div>
+      </div>
+    );
+  }
   if (result.outcome !== "reviewed") {
     return (
       <div className="alert alert-info py-2 small">
@@ -35,10 +46,16 @@ function DecisionResult({ result }) {
   return (
     <div className="alert alert-info py-2 small" data-sensitivity-decision-result="">
       <div className="fw-semibold">Sensitivity decision recorded.</div>
-      {handoff && (handoff.status === "created" || handoff.status === "replayed") ? (
+      {handoff && handoff.status === "created" ? (
         <div>
           Source-candidate handoff completed: this file is now a source candidate waiting for Get Kinder source review
           ({handoff.candidateStatus || "needs_gk_review"}). No source has been approved or promoted.
+        </div>
+      ) : null}
+      {handoff && handoff.status === "replayed" ? (
+        <div>
+          This file&rsquo;s existing source candidate is unchanged ({handoff.candidateStatus || "unknown"}). This review did
+          not create, promote, or approve anything.
         </div>
       ) : null}
       {handoff && handoff.status === "not_created" ? (
@@ -69,8 +86,13 @@ function DecisionResult({ result }) {
  * nothing is retried, and every POST is followed by an authoritative re-read.
  * A response for a request this panel has since superseded, or that arrives
  * after it unmounted, is discarded.
+ *
+ * `purpose="processing_permissions"` is the Data Sources corrective re-review
+ * of a file whose review is complete: the same reads, form, and decision
+ * route, worded as a correction of the recorded decision.
  */
-export default function ClientSensitivityReviewPanel({ organizationId, intakeFileId, safeFilename, onClose, onDecisionRecorded }) {
+export default function ClientSensitivityReviewPanel({ organizationId, intakeFileId, safeFilename, purpose = "review", onClose, onDecisionRecorded }) {
+  const permissionsReview = purpose === "processing_permissions";
   const [lookup, setLookup] = useState({ status: "loading", profileId: "", error: "" });
   const [detailState, setDetailState] = useState({ status: "idle", detail: null, error: "" });
   const [formState, setFormState] = useState(defaultSensitivityReviewFormState());
@@ -160,9 +182,13 @@ export default function ClientSensitivityReviewPanel({ organizationId, intakeFil
   }, [organizationId, profileId, detail, actionPending, formState, loadDetail, onDecisionRecorded]);
 
   return (
-    <div className="admin-card mt-3" data-client-sensitivity-review-panel={intakeFileId}>
+    <div
+      className="admin-card mt-3"
+      data-client-sensitivity-review-panel={intakeFileId}
+      data-client-processing-permissions-panel={permissionsReview ? intakeFileId : undefined}
+    >
       <div className="d-flex justify-content-between align-items-center mb-2">
-        <h5 className="mb-0">Sensitivity &amp; allowed-use review</h5>
+        <h5 className="mb-0">{permissionsReview ? "Review processing permissions" : <>Sensitivity &amp; allowed-use review</>}</h5>
         <div className="d-flex align-items-center gap-2">
           {detail?.currentDecision?.decision_outcome === "reviewed" ? (
             <span className="badge text-bg-success">Reviewed</span>
@@ -178,6 +204,14 @@ export default function ClientSensitivityReviewPanel({ organizationId, intakeFil
         {safeFilename}. This is the Get Kinder sensitivity &amp; allowed-use review of the file, recorded through the same
         review service as in the Get Kinder workspace. It is not an Evidence or Impact Fact review.
       </div>
+      {permissionsReview ? (
+        <div className="small text-muted mb-2" data-client-processing-permissions-guidance="">
+          The decision currently recorded for this file is shown first and stays in effect until a new review is submitted.
+          The form below starts a new review: AI processing is not preselected, and nothing is recorded until you submit it.
+          A submitted review supersedes the current decision, which stays in the file&rsquo;s history. Recording a review runs
+          no processing; continue with Use for impact.
+        </div>
+      ) : null}
       {lookup.status === "loading" ? <div className="text-muted small">Loading this file&rsquo;s sensitivity review...</div> : null}
       {lookup.status === "not_ready" ? (
         <div className="small text-muted">

@@ -100,7 +100,8 @@ export default function SensitivityReviewCardBody({
 
       <h6 className="mt-3">Sensitivity &amp; allowed-use decision</h6>
       {detail.currentDecision ? (
-        <>
+        <div data-sensitivity-current-decision>
+          <div className="small text-muted">Current recorded decision - in effect until a new review is submitted.</div>
           <ValueRow label="Outcome" value={detail.currentDecision.decision_outcome} />
           <ValueRow label="Ordinary KAI processing (allowed use)" value={detail.currentDecision[SENSITIVITY_ALLOWED_USE_FIELD]} />
           <ValueRow
@@ -128,7 +129,7 @@ export default function SensitivityReviewCardBody({
           <div className="small text-muted mt-1">
             Source-use permission does not by itself approve final external release.
           </div>
-        </>
+        </div>
       ) : (
         <div className="small text-muted">No sensitivity &amp; allowed-use decision recorded yet.</div>
       )}
@@ -138,6 +139,11 @@ export default function SensitivityReviewCardBody({
           <div className="small fw-semibold mb-2">
             {detail.currentDecision ? "Record a new review (re-review)" : "Record review"}
           </div>
+          {detail.currentDecision ? (
+            <div className="small text-muted mb-2" data-sensitivity-new-review>
+              Your selections below are a new review. They change nothing until you submit them.
+            </div>
+          ) : null}
           {SENSITIVITY_PRESENCE_FIELDS.map((field) => (
             <div className="row g-2 align-items-center mb-1" key={field}>
               <div className="col-7 small text-muted">{SENSITIVITY_FIELD_LABELS[field] || field}</div>

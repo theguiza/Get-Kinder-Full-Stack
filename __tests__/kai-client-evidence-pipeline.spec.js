@@ -665,11 +665,17 @@ test("Reviews messages: an offered sensitivity review is action-required, never 
 test("sensitivity decision result: a recorded decision and its P1-07 handoff are reported exactly as the server returned them", () => {
   const ok = (handoff, outcome = "reviewed") => ({ statusCode: 200, body: { ok: true, data: { current_decision: { decision_outcome: outcome }, source_candidate_handoff: handoff } } });
   assert.deepEqual(projectSensitivityDecisionResult(ok({ status: "created", candidate_status: "needs_gk_review", error_code: null }), "reviewed"), {
-    status: "recorded", outcome: "reviewed", handoff: { status: "created", candidateStatus: "needs_gk_review", errorCode: null },
+    status: "recorded", outcome: "reviewed", replayed: false, handoff: { status: "created", candidateStatus: "needs_gk_review", errorCode: null },
   });
   assert.deepEqual(projectSensitivityDecisionResult(ok({ status: "not_created", candidate_status: null, error_code: "tenant_boundary_violation" }), "reviewed"), {
-    status: "recorded", outcome: "reviewed", handoff: { status: "not_created", candidateStatus: null, errorCode: "tenant_boundary_violation" },
+    status: "recorded", outcome: "reviewed", replayed: false, handoff: { status: "not_created", candidateStatus: null, errorCode: "tenant_boundary_violation" },
   }, "a failed handoff never hides the recorded decision");
+  // A server replay (same outcome and stamp, possibly another reviewer's values) is reported as such, never as a new decision.
+  const replayed = { statusCode: 200, body: { ok: true, data: { current_decision: { decision_outcome: "reviewed" }, replayed: true, source_candidate_handoff: { status: "replayed", candidate_status: "promoted" } } } };
+  assert.deepEqual(projectSensitivityDecisionResult(replayed, "reviewed"), {
+    status: "recorded", outcome: "reviewed", replayed: true, handoff: { status: "replayed", candidateStatus: "promoted", errorCode: null },
+  });
+  assert.equal(projectSensitivityDecisionResult(ok({ status: "replayed" }), "reviewed").replayed, false, "only the server's own replayed flag counts");
   assert.deepEqual(projectSensitivityDecisionResult(ok({ status: "not_applicable" }, "needs_more_information"), "needs_more_information").outcome, "needs_more_information");
   assert.equal(projectSensitivityDecisionResult(ok({ status: "invented" }), "reviewed").handoff, null, "an unknown handoff status is not echoed");
   assert.deepEqual(projectSensitivityDecisionResult({ statusCode: 409, body: { ok: false } }, "reviewed"), { status: "conflict" });
