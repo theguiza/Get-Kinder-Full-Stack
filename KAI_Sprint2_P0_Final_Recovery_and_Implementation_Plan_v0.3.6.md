@@ -41759,3 +41759,139 @@ P3-01, P3-04, A2, P14-13, P14-14.
 No push, deployment, production/shared database, migration/schema, flag,
 tenant, credential, real client data, or `00_KAI_CURRENT_STATE.md` change.
 This is the single package-end evidence update in the living ExecPlan.
+
+### Client self-service sensitivity re-review access (2026-10-19)
+
+**Owner authorization (USER_CONFIRMED):** the owner's "KAI — Close Client
+Self-Service Sensitivity Re-Review Access" prompt directs, locally: make the
+existing authorized correction of a recorded sensitivity decision reachable
+from client Knowledge Studio > Data Sources for a previously reviewed intake
+file, without a new approval stage, review service, role, or backend
+authority change, and prove correction -> Use for impact -> both internal
+drafts. Not authorized: schema/migration, push, deployment, production/shared
+database, flags, tenants, credentials, real data, Current State, or reopening
+the form-default, allowed-use, AI-validator, promotion, or generation repairs.
+
+**Start (TOOL_VERIFIED):** `main` at `861429f`, clean; `004c7a6` and
+`861429f` present as reported.
+
+**Authority (TOOL_VERIFIED):** sensitivity decisions are admitted by
+`validateActorCanPerformSensitivityReview`: the GK review roles, or an active
+`client_admin` membership of the exact organization with verified provenance
+(binding-derived, owner acceptance 2026-10-12; delegated stored grant, owner
+decision 2026-10-19, `1365020`). Backend Contract section 22's GK ownership
+is a recorded departure (see section 11 above), not a conflict left open. The
+client `reviewSensitivity` capability is the same predicate. Not every
+organization administrator: revoked, invited, global-role, contributor, and
+client_reviewer actors are refused.
+
+**Reproduction (TOOL_VERIFIED at `861429f`, assembled source-to-impact
+acceptance, HEAD bundle):** Data Sources > Source preparation listed only the
+open-candidate, no-candidate, not_allowed, concurrency, and two
+sensitivity-stage files; the promoted files were absent, and no reviewed row
+carried any review action, so the new case timed out waiting for a re-review
+control. Root cause: `sourcePreparationFiles`
+(`clientEvidenceWorkflowLogic.js`) admits only sensitivity_review,
+source_review, and extract-ready files, and `ClientEvidenceWorkflow.jsx`
+renders "Review sensitivity & allowed use" only when `currentStage ===
+"sensitivity_review"`. The not_allowed row read "Only a new sensitivity &
+allowed-use review can change this" with no control. The backend was
+already complete: the profile detail returns the review item in any status,
+and the repository accepts a re-review on resolved/resolved.
+
+**Identity path:** the client pipeline row *is* the intake file. The panel
+opens on `pipeline.files[].intakeFileId` ->
+`/intake-files/:intakeFileId/sensitivity-profile` (org-scoped, the response's
+`intake_file_id` checked) -> the profile detail. Source rows carry no intake
+file and are never used. For a promoted file the persisted lineage
+(source_version -> intake_source_candidate -> intake_file) was verified to
+equal the pipeline id the UI targeted.
+
+**Change (frontend only; no backend, route, schema, or authority change):**
+- `processingPermissionReviewFiles`: the Project's files whose pipeline
+  `sensitivity_review` stage is complete (current human `reviewed` head), for
+  an actor with `reviewSensitivity` only.
+- Data Sources > Processing permissions: those files at any later stage, each
+  with "Review processing permissions", opening the existing
+  `ClientSensitivityReviewPanel` (`purpose="processing_permissions"`). A
+  recorded correction refreshes the pipeline and reads; it runs no step and
+  resumes no Use for impact flow.
+- Shared card body marks the current recorded decision and the new-review
+  form separately; AI disposition still unselected; untouched submit sends
+  nothing.
+- No false success: a server `replayed` decision (same outcome + stamp, which
+  may carry another reviewer's values) is shown as "nothing new was
+  recorded"; an existing candidate is reported unchanged instead of "no source
+  has been promoted"; 403 / 409 shown as such.
+
+**Acceptance (TOOL_VERIFIED; runner-owned loopback PostgreSQL, real routes,
+services, transactions, audits, real Chrome, rebuilt bundle):**
+source-to-impact 16/0 with new case 8d (three new synthetic files; one
+HISTORICAL SIMULATION of the pre-repair untouched-form decision):
+- Discovery: exactly the 7 reviewed files are offered (no candidate, open
+  candidate, 3 promoted past source preparation, not_allowed closed,
+  concurrency); pending stays in Source preparation with its review;
+  needs-more-information, failed-policy, and other-organization files are
+  not offered. Opening writes nothing and reads the correct file and profile.
+- Correction by Admin B (delegated, not the original reviewer) of Admin A's
+  reviewed `unknown`/AI `false`: recorded decision shown; no AI preselected;
+  untouched submit no POST, zero writes; deliberate `allowed` + Permitted 200
+  (14-key snapshot); re-read shows the new current decision, restriction
+  note gone; historical row unchanged and superseded, one head; 2 lifecycle +
+  2 actor audits; UI body replayed 200 `replayed`; other outcome on its stamp
+  409; zero writes for both; 0 model calls for the correction.
+- Continuation: Use for impact -> explicit source authorization (restrictions
+  show allowed / AI permitted) -> P1-08 by B -> 2 evidence -> claim -> P2-04 ->
+  both internal drafts 201 (2 model calls, each only that claim) -> read back
+  through the routes: internal, `awaiting_get_kinder_review`, real claim
+  citation, limitations; queue open / needs_gk_review; claim needs_gk_review.
+- Restrictions: mixed with the deliberate prohibition 422
+  VAL-KAI-B1A-02-004 (0 calls); non-AI proposal on the prohibited file 200;
+  needs more information through the panel: unresolved, back in Source
+  preparation, continuation 422 `sensitivity_review_not_complete`.
+- Authorization: contributor, revoked delegated admin, invited grant,
+  client_reviewer, global client_admin role, other organization's
+  administrator: capability false; file lookup, detail, decision 403; no
+  control rendered; body role claims 422; role header 403; cross-organization
+  403/404; other Project 404 / empty pipeline; zero domain writes.
+- Stale panel (Admin A) after Admin B's decision: 409 shown as changed state,
+  refreshed, no "recorded"; revoked Admin B's open panel: 403 shown, zero
+  writes; regranted.
+
+**Verification (TOOL_VERIFIED; sentinel `DATABASE_URL`):**
+
+| Command | Pass | Fail | Skipped |
+| --- | --- | --- | --- |
+| `npm test` (baseline 5663/0/115 plus two new tests) | 5665 | 0 | 115 |
+| `npm run verify:kai-sprint2-api-contract` | 71 | 0 | 0 |
+| `npm run build` (bundle rebuilt, identical on rebuild) | ok | | |
+| Browser: source-to-impact 16, access-approval campaign 63, sensitivity reachability 17, client-admin source promotion 12, reviewer provisioning 13, reviewer edge cases 11, evidence-to-draft 21, continuation 12, client Knowledge Studio 6, client evidence pipeline 7 | 178 | 0 | 0 |
+| Runners: B1A-02 ledger 37, B1A-2R 6, B1A-3B-R2 4, P1-07 handoff 22 | 69 | 0 | 0 |
+| `git diff --check` | ok | | |
+
+Not re-run (no backend change; recorded pre-existing failures unchanged):
+P3-01, P3-04, A2, P14-13, P14-14.
+
+**Remaining (not changed here):**
+- FINDING (TOOL_VERIFIED, SYNTHETIC state only): on a file whose
+  `file_policy_status` was set to `failed` after profiling by direct SQL, a
+  decision recorded through the existing decision route returns 200, its
+  P1-07 handoff creates a candidate, and P1-08 promotes it (+1 source, +2
+  evidence); only the continuation checks file policy. The client UI never
+  offers such a file, and no supported transition leaves `passed`
+  (`stateTransitionValidators.js`: only `pending->*`), so it is not reachable
+  through application paths. Whether P1-07/P1-08/P2-01 should re-check file
+  policy is an owner decision.
+- Replay is keyed on outcome + stamp, not snapshot or actor: a second
+  reviewer's same-outcome submission on the same stamp returns the first
+  decision as `replayed`. The client panel now says nothing new was
+  recorded; the GK Studio result line is unchanged.
+- Owner policy still open: historical reviewed-`unknown` decisions stay
+  conservative until deliberately corrected.
+- Not fresh-upload-to-impact acceptance (worker stages are simulated);
+  production state NOT_CONFIRMED.
+
+**Status:** CLIENT_SELF_SERVICE_SENSITIVITY_RE_REVIEW_COMPLETE_LOCAL_SYNTHETIC.
+No push, deployment, production/shared database, migration/schema, flag,
+tenant, credential, real client data, or `00_KAI_CURRENT_STATE.md` change.
+This is the single package-end evidence update in the living ExecPlan.
