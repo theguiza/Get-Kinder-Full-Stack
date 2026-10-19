@@ -41504,3 +41504,117 @@ messages.
 push, deployment, production/shared database, migration/schema, flag, tenant,
 credential, real client data, or `00_KAI_CURRENT_STATE.md` change. This is
 the single package-end evidence update in the living ExecPlan.
+
+### AI-specific permission enforcement before the model (2026-10-19)
+
+**Owner authorization (USER_CONFIRMED):** the owner's "KAI — Enforce
+AI-Specific Permissions Without Blocking Authorized Processing" prompt reports
+that a separately recorded "AI processing not permitted" classification still
+reaches internal AI generation, and directs, locally: establish the permission
+source and precedence from the repository, enforce the effective AI-processing
+permission server-side for every source-derived claim in a model request, keep
+`not_allowed`, and never block permitted non-AI processing. This resolves the
+owner decision held in the previous package ("whether
+`reviewed_llm_processing_allowed = false` should block internal AI
+drafting"). Not authorized: push, deployment, production, migration, flags,
+tenants, credentials, real data, UI, new authorization framework, Current State.
+
+**Start (TOOL_VERIFIED):** `main` at `cd66328`, clean.
+
+**Findings (TOOL_VERIFIED at `cd66328`):**
+- Entry points: every generated-content type (internal evidence summary and
+  impact narrative included) goes route -> `kaiGeneratedContentService` ->
+  `createGeneratedContentDraft`, the one shared boundary that calls
+  `dependencies.draftGenerator`. The model request carries each requested
+  claim's statement/type and evidence/source/source-version ids (readiness and
+  data-gap inputs carry only codes, ids, and requirement labels). Impact
+  evaluation (A2.1 read, A2.2 persist) is the only other path that sends claim
+  statements to the model; the assistant tools return metadata-only output.
+- Lineage: claim -> claim_evidence_link -> evidence item -> source version ->
+  `intake_sensitivity_profile_id` (the resolver's existing claim form).
+- Permission source: `kai.intake_sensitivity_profiles.llm_processing_allowed`,
+  `kai.evidence_items.llm_processing_allowed`, and
+  `kai.claims.llm_processing_allowed` are CHECK-pinned `false` for every row
+  (machine/pinned placeholders that state no classification). The only
+  recorded AI permission is the human ledger's
+  `reviewed_llm_processing_allowed` (`kai.intake_sensitivity_review_decisions`),
+  which may be true only with `reviewed_allowed_use_status = 'allowed'`
+  (VAL-KAI-B1A-02-001 and its CHECK); `sensitivityAuthorityFromCurrentDecision`
+  is the contract's only authorized read of it; the funder resolver records
+  that it "governs a separate (LLM/generation) authority". The UI shows it as
+  "recorded AI processing permission: not permitted".
+- Defect: generation's last boundary before the model checked only the
+  effective allowed use; nothing read `reviewed_llm_processing_allowed`.
+  Reproduced: the assembled source-to-impact acceptance (unchanged, 13/0) sent
+  two model calls for a claim whose current reviewed decision records AI
+  processing not permitted; a repository probe with a model spy showed 1 call
+  each for reviewed `allowed`+AI false, reviewed `unknown`+AI false, and a
+  `needs_more_information` head.
+
+**Change: effective AI processing (VAL-KAI-B1A-02-004).**
+`sensitivityEffectiveAiProcessingProhibition` (decision contract) applies the
+unchanged allowed-use prohibition first; then no human decision prohibits
+nothing more (Operating Model 7.1/8.2; the pinned machine columns are never
+read as a classification); a current terminal `reviewed` head permits AI only
+when it stores `reviewed_llm_processing_allowed = true`
+(`reviewed_llm_processing_not_allowed`); a `needs_more_information` head is
+unresolved (`sensitivity_ai_processing_unresolved`) and lifts no earlier
+prohibition. The resolver gains profile/claim AI forms over the same two
+tenant-scoped reads (the head read now also selects the AI fact); the shared
+validator returns `VAL-KAI-B1A-02-004` / `ai_processing_not_permitted` (the
+allowed-use outcomes keep `VAL-KAI-B1A-02-003`). Applied at the two model
+seams only: `createGeneratedContentDraft` (before P2-06 and the generator;
+one prohibited claim refuses the whole request, never dropped) and both
+impact-evaluation paths (before the generator; the service now forwards the
+blocker). P1-07..P2-06 keep the allowed-use form alone, so an AI-only
+restriction blocks no non-AI processing. No schema, route, UI, or approval
+change.
+
+**Fixtures (coupled to the decision):** the decisions behind scenarios that
+expect drafting now record AI permission explicitly (`allowed` + AI true):
+source-to-impact `hist`, evidence-to-draft, continuation `hist1`, P14-09,
+P14-12. The impact-evaluation unit fakes answer the new lineage read with a
+profile and no decision.
+
+**Acceptance (TOOL_VERIFIED):** source-to-impact 14/0 (runner-owned loopback
+PostgreSQL, real routes/services, real Chrome, built bundle): 6 - `not_allowed`
+still 422 `allowed_use_not_allowed` with 0 model calls; 7-8 - AI permitted:
+both internal drafts 201, 2 model calls, persisted drafts and citations read
+back; new 8b - the UI-recorded decision (`unknown`, AI not permitted): P2-03
+claim 200 and P2-04 follow-ups (non-AI) succeed, both drafts alone and mixed
+with the permitted claim 422 `VAL-KAI-B1A-02-004` / `ai_processing_not_permitted`,
+zero writes (audit included), 0 model calls. New unit spec
+`kai-effective-ai-processing-enforcement` (7): precedence, blocker, real
+generation (both content types) and impact-evaluation repositories with a
+model spy (prohibited/mixed/reopened: 0 model calls, P2-06 not reached, only
+the rolled-back reservation, no audit; reviewed-permitted and no-decision:
+model reached), non-AI forms unaffected, wiring.
+
+**Verification (TOOL_VERIFIED; sentinel `DATABASE_URL`):**
+
+| Command | Pass | Fail | Skipped |
+| --- | --- | --- | --- |
+| `npm test` | 5661 | 0 | 115 |
+| Focused: AI 7, allowed use 7, A2 impact evaluation specs (in `npm test`) | 49 | 0 | 1 |
+| `npm run verify:kai-sprint2-api-contract` | 71 | 0 | 0 |
+| Browser: source-to-impact 14, evidence-to-draft 21, continuation 12 | 47 | 0 | 0 |
+| Runners: P13-01 29, P14-09 8, P14-11 4, P14-12 3, review-start 3/8/67, P2-06 33 | 155 | 0 | 0 |
+| Runner P3-01 (pre-existing schema gap, as recorded) | 18 | 1 | 0 |
+| Runner P3-04 (the same four pre-existing cases) | 66 | 4 | 0 |
+| Runners A2 2/2, P14-13 2/6, P14-14 fixture (identical at `cd66328` with this change stashed) | 4 | 8 | 0 |
+| `git diff --check` | ok | | |
+
+**Remaining (owner decisions; not changed):**
+- A reviewed decision that leaves allowed use `unknown` cannot carry AI
+  permission (VAL-KAI-B1A-02-001), so it now blocks AI drafting for that file
+  until a reviewer records `allowed` with AI permitted; files with no human
+  decision are unaffected. The UI form starts AI unchecked and `unknown`.
+- The client UI does not yet explain `ai_processing_not_permitted` beyond the
+  server message (UI out of scope).
+- Pre-existing, unchanged: the A2, P14-13, and P14-14 runner failures; the
+  P3-01 and P3-04 runner cases; production state NOT_CONFIRMED.
+
+**Status:** AI_PROCESSING_PERMISSION_ENFORCEMENT_COMPLETE_LOCAL_SYNTHETIC. No
+push, deployment, production/shared database, migration/schema, flag, tenant,
+credential, real client data, UI, or `00_KAI_CURRENT_STATE.md` change. This is
+the single package-end evidence update in the living ExecPlan.
