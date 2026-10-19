@@ -45,7 +45,7 @@ const ADMIN = "5f000000-0000-4000-8000-0000000000e1";
 const OTHER_ADMIN = "5f000000-0000-4000-8000-0000000000e2";
 const NOW = "2026-10-19T12:00:00.000Z";
 
-function actor({ role = "client_admin", organizationId = ORG, bound = true, kaiRoles = [], kaiUserStatus = "active", gkOrganizationId = 4242, actorType = "human", membershipStatus = "active", actorUserId = ADMIN } = {}) {
+function actor({ role = "client_admin", organizationId = ORG, bound = true, stored = false, kaiRoles = [], kaiUserStatus = "active", gkOrganizationId = 4242, actorType = "human", membershipStatus = "active", actorUserId = ADMIN } = {}) {
   return {
     actorType,
     actorUserId,
@@ -57,6 +57,8 @@ function actor({ role = "client_admin", organizationId = ORG, bound = true, kaiR
       role_name: role,
       membership_status: membershipStatus,
       ...(bound ? { source: "gk_organization_binding", gk_organization_id: gkOrganizationId } : {}),
+      // kaiActorContext tags every kai.organization_memberships row it reads.
+      ...(stored ? { source: "kai_organization_membership" } : {}),
     }],
   };
 }
@@ -255,10 +257,23 @@ test("continuation refusals: a head that breaks the reviewed-snapshot rules, and
   await refused({ file: fileRecord({ allowed_use_status: "not_allowed" }) }, "validation_blocker", "allowed_use_not_allowed");
 });
 
-test("continuation refusals: a current decision recorded by another administrator, or by Get Kinder, is not this administrator's to continue", async () => {
+test("continuation (owner decision 2026-10-19): a current decision recorded by another administrator, or by Get Kinder, is continued by this administrator without replacing or re-attributing it", async () => {
   const decision = (head) => ({ reviewQueueItem: queueRow(), currentDecision: head, lineageAmbiguous: false });
-  await refused({ decision: decision(headRow({ decided_by: OTHER_ADMIN })) }, "authorization_denied", "sensitivity_decision_recorded_by_another_reviewer");
-  await refused({ decision: decision(headRow({ decided_by_role: "gk_reviewer" })) }, "authorization_denied", "sensitivity_decision_recorded_by_another_reviewer");
+  for (const head of [headRow({ decided_by: OTHER_ADMIN }), headRow({ decided_by: OTHER_ADMIN, decided_by_role: "gk_reviewer" })]) {
+    const { calls, deps } = harness({ decision: decision(head) });
+    const result = await continueIntakeFileSourcePreparation(request(), deps);
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(result.data.source_candidate_handoff.status, "created");
+    // P1-07 runs as the requesting administrator; no decision is recorded.
+    assert.equal(calls.candidate[0].actorContext.actorUserId, ADMIN);
+    assert.deepEqual([calls.recordDecision, calls.promotion], [0, 0]);
+  }
+  // A delegated (stored) administrator continues the binding-derived administrator's review.
+  const stored = harness({ decision: decision(headRow({ decided_by: OTHER_ADMIN })) });
+  const storedActor = actor({ bound: false, stored: true, actorUserId: "5f000000-0000-4000-8000-0000000000e3" });
+  const result = await continueIntakeFileSourcePreparation(request({ actorContext: storedActor }), stored.deps);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(stored.calls.candidate[0].actorContext.actorUserId, storedActor.actorUserId);
 });
 
 test("continuation: a P1-07 refusal (prerequisite, predicate, conflict) is returned with the handoff's code and nothing else is attempted", async () => {
@@ -278,9 +293,11 @@ test("continuation: a P1-07 refusal (prerequisite, predicate, conflict) is retur
 // Authority and scope (nothing is read)
 // ---------------------------------------------------------------------------
 
-test("continuation authority: only an active, binding-derived client_admin of the exact organization with an active account", async () => {
+test("continuation authority: only an active client_admin of the exact organization with verified provenance (binding-derived or a stored grant) and an active account", async () => {
   const denied = [
-    ["stored client_admin", actor({ bound: false })],
+    ["client_admin membership with no verified provenance", actor({ bound: false })],
+    ["inactive stored client_admin grant", actor({ bound: false, stored: true, membershipStatus: "inactive" })],
+    ["global client_admin role with a contributor membership", actor({ role: "client_contributor", bound: false, stored: true, kaiRoles: ["client_admin"] })],
     ["binding-derived client_reviewer", actor({ role: "client_reviewer" })],
     ["binding-derived client_contributor", actor({ role: "client_contributor" })],
     ["stored client_contributor", actor({ role: "client_contributor", bound: false })],
@@ -301,7 +318,9 @@ test("continuation authority: only an active, binding-derived client_admin of th
     assert.equal(authorizeSourceCandidateContinuation(actorContext, ORG).ok === true, false, label);
   }
   assert.equal(authorizeSourceCandidateContinuation(actor(), ORG).ok, true);
+  assert.equal(authorizeSourceCandidateContinuation(actor({ bound: false, stored: true }), ORG).ok, true, "a delegated, active stored grant");
   assert.equal(authorizeSourceCandidateContinuation(actor(), OTHER_ORG).ok, false);
+  assert.equal(authorizeSourceCandidateContinuation(actor({ bound: false, stored: true }), OTHER_ORG).ok, false);
 });
 
 test("continuation scope: another Project's or organization's file is not_found; feature flag and identifiers are enforced first", async () => {
@@ -325,7 +344,7 @@ test("continuation scope: another Project's or organization's file is not_found;
   assert.equal(foreignHead.calls.candidate.length, 0);
 });
 
-test("P1-07 itself still enforces the administrator's own-current-reviewed-decision prerequisite for the continuation's call", async () => {
+test("P1-07 itself still enforces the current-reviewed-decision prerequisite for the continuation's call", async () => {
   const calls = [];
   const repository = { async createSourceCandidateStub(input) { calls.push(input); return { ok: false, error: { code: "authorization_denied", status: 403 } }; } };
   const result = await createSourceCandidateStub(
@@ -333,7 +352,7 @@ test("P1-07 itself still enforces the administrator's own-current-reviewed-decis
     { env: ENV, sourceCandidateRepository: repository, metadataOnlyAudit: { prepareMetadataOnlyAudit: () => ({ ok: true, publish: async () => {} }) } },
   );
   assert.equal(result.error.code, "authorization_denied");
-  assert.equal(calls[0].requireOwnCurrentReviewedDecision, true);
+  assert.equal(calls[0].requireCurrentReviewedDecision, true);
 });
 
 // ---------------------------------------------------------------------------
@@ -421,8 +440,9 @@ test("pipeline: a reviewed file with no candidate is the administrator's continu
   assert.ok(__clientEvidencePipelineServiceContract.PIPELINE_REASONS.includes("source_preparation_ready"));
 });
 
-test("pipeline authority: continueSourcePreparation is the binding-derived administrator only", () => {
+test("pipeline authority: continueSourcePreparation is an organization administrator (binding-derived or a stored grant) only", () => {
   assert.equal(resolveClientAuthority(actor(), ORG).continueSourcePreparation, true);
+  assert.equal(resolveClientAuthority(actor({ bound: false, stored: true }), ORG).continueSourcePreparation, true);
   for (const actorContext of [actor({ bound: false }), actor({ role: "client_reviewer" }), actor({ kaiUserStatus: "inactive" }), actor({ organizationId: OTHER_ORG })]) {
     assert.equal(resolveClientAuthority(actorContext, ORG).continueSourcePreparation, false);
   }

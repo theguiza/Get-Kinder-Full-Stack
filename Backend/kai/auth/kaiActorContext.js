@@ -5,6 +5,7 @@ import {
 } from "../db/kaiQueries.js";
 import { isAdminRequest } from "../../middleware/ensureAdmin.js";
 import { resolveEffectiveClientOrganizationMembershipsForLegacyUser } from "./gkOrganizationBindingAuthority.js";
+import { STORED_ORGANIZATION_MEMBERSHIP_SOURCE } from "./kaiOrganizationMembershipSource.js";
 
 export function pickSafeLegacyUser(user = {}) {
   return {
@@ -96,7 +97,15 @@ export async function resolveKaiActorContext(reqOrUser, dependencies = {}) {
     listMemberships(kaiUser.user_id),
     resolveEffectiveClientMemberships(user.id, dependencies),
   ]);
-  const organizationMemberships = [...internalOrganizationMemberships, ...effectiveClientOrganizationMemberships];
+  // Each stored kai.organization_memberships row is tagged with its
+  // provenance, as each binding-derived membership is: authorization that
+  // depends on how an organization role was granted (the organization
+  // administrator's source-preparation authority, kaiAuthorizationService.js)
+  // reads this server-set marker, never a caller-supplied or global role.
+  const organizationMemberships = [
+    ...internalOrganizationMemberships.map((membership) => ({ ...membership, source: STORED_ORGANIZATION_MEMBERSHIP_SOURCE })),
+    ...effectiveClientOrganizationMemberships,
+  ];
   const reqForAdminAuthority = reqOrUser?.user ? reqOrUser : { user };
   const platformSuperuser = isAdminRequest(reqForAdminAuthority);
 

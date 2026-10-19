@@ -335,7 +335,7 @@ async function runBrowserAcceptance() {
     gkNotCreated: "synthetic_site_visits_2025_26.csv",
   });
   const FIELD_KEYS = ["households_served", "programme_month"];
-  const USERS = Object.freeze({ gkReviewer: 981, clientAdmin: 982, gkOutsider: 983, boundClientAdmin: 984, boundClientAdminTwoOrgs: 985 });
+  const USERS = Object.freeze({ gkReviewer: 981, ordinaryClient: 982, gkOutsider: 983, boundClientAdmin: 984, boundClientAdminTwoOrgs: 985 });
 
   // The real organization-display query reads this production column when a
   // bound Get Kinder organization admin signs in. The runner's base mirror
@@ -354,7 +354,10 @@ async function runBrowserAcceptance() {
   const kaiUserIds = {};
   for (const [key, legacyId, role, global, organizations] of [
     ["gkReviewer", USERS.gkReviewer, "gk_reviewer", true, [ORG]],
-    ["clientAdmin", USERS.clientAdmin, "client_admin", false, [ORG]],
+    // An ordinary client with no sensitivity-review access. A stored
+    // client_admin grant is now organization-administrator authority (owner
+    // decision 2026-10-19), so the ordinary client is a client_contributor.
+    ["ordinaryClient", USERS.ordinaryClient, "client_contributor", false, [ORG]],
     // A global GK reviewer whose only active membership is another organization.
     ["gkOutsider", USERS.gkOutsider, "gk_reviewer", true, [ORG_B]],
     // A bound client administrator without a global GK role.
@@ -553,7 +556,7 @@ async function runBrowserAcceptance() {
   }
 
   const gkPage = await openPage(browser, { baseUrl, legacyUserId: USERS.gkReviewer });
-  const clientPage = await openPage(browser, { baseUrl, legacyUserId: USERS.clientAdmin });
+  const clientPage = await openPage(browser, { baseUrl, legacyUserId: USERS.ordinaryClient });
   const outsiderPage = await openPage(browser, { baseUrl, legacyUserId: USERS.gkOutsider });
   const mixedPage = await openPage(browser, { baseUrl, legacyUserId: USERS.boundClientAdmin });
   const twoOrgPage = await openPage(browser, { baseUrl, legacyUserId: USERS.boundClientAdminTwoOrgs });
@@ -743,7 +746,7 @@ async function runBrowserAcceptance() {
         },
       };
       await outsiderPage.goto("/impact-library");
-      for (const [label, page] of [["client_admin", clientPage], ["non-member gk_reviewer", outsiderPage]]) {
+      for (const [label, page] of [["client_contributor", clientPage], ["non-member gk_reviewer", outsiderPage]]) {
         const decided = await page.fetchJson("POST", decisionPath(profileZero), body);
         assert.equal(decided.status, 403, `${label} decision: ${JSON.stringify(decided)}`);
         const work = await page.fetchJson("POST", reviewWorkPath(profileQueue));

@@ -241,8 +241,8 @@ test("P1-07 service: existing platform-superuser authority is unchanged (human o
   assert.equal(nonHumanProbe.calls.length, 0);
 });
 
-// Owner decision (2026-10-13): an active binding-derived client_admin of this exact
-// organization reaches the repository only with the own-current-reviewed-decision
+// Owner decisions (2026-10-13, 2026-10-19): an active administrator of this exact
+// organization reaches the repository only with the current-reviewed-decision
 // prerequisite, which the repository enforces from committed rows.
 function boundAdminMembership(overrides = {}) {
   return {
@@ -265,7 +265,7 @@ function boundAdminActor(overrides = {}) {
   });
 }
 
-test("P1-07 service (bound organization admin): reaches the repository only with requireOwnCurrentReviewedDecision; GK actors never carry it; client_admin is not an allowed P1-07 role", async () => {
+test("P1-07 service (organization admin): reaches the repository only with requireCurrentReviewedDecision; GK actors never carry it; client_admin is not an allowed P1-07 role", async () => {
   const probe = createRepositoryProbe(successResult);
   const allowed = await createSourceCandidateStub(
     { organizationId: ORG, intakeSensitivityProfileId: PROFILE, actorContext: boundAdminActor(), now: NOW },
@@ -274,9 +274,9 @@ test("P1-07 service (bound organization admin): reaches the repository only with
   assert.equal(allowed.ok, true, JSON.stringify(allowed));
   assert.equal(probe.calls.length, 1);
   assert.deepEqual(Object.keys(probe.calls[0]).sort(), [
-    "actorUserId", "identity", "metadataOnlyAudit", "now", "requireOwnCurrentReviewedDecision",
+    "actorUserId", "identity", "metadataOnlyAudit", "now", "requireCurrentReviewedDecision",
   ]);
-  assert.equal(probe.calls[0].requireOwnCurrentReviewedDecision, true);
+  assert.equal(probe.calls[0].requireCurrentReviewedDecision, true);
   assert.equal(probe.calls[0].actorUserId, "user-1");
 
   const gkActors = [
@@ -292,7 +292,7 @@ test("P1-07 service (bound organization admin): reaches the repository only with
       { env: enabled, sourceCandidateRepository: gkProbe.sourceCandidateRepository },
     );
     assert.equal(result.ok, true, JSON.stringify(result));
-    assert.equal(Object.hasOwn(gkProbe.calls[0], "requireOwnCurrentReviewedDecision"), false);
+    assert.equal(Object.hasOwn(gkProbe.calls[0], "requireCurrentReviewedDecision"), false);
   }
 
   const { __sourceCandidateServiceContract } = await import("../Backend/kai/services/kaiSourceCandidateService.js");
@@ -342,7 +342,7 @@ test("P1-07 service (bound organization admin): unbound, inactive, other-organiz
 
   // Caller-controlled assertions are not an input: the service accepts no decision,
   // status, or role field, so no such claim can reach the repository.
-  for (const extra of [{ decisionId: "d-1" }, { decision: "reviewed" }, { requireOwnCurrentReviewedDecision: false }]) {
+  for (const extra of [{ decisionId: "d-1" }, { decision: "reviewed" }, { requireCurrentReviewedDecision: false }]) {
     const probe = createRepositoryProbe(successResult);
     const result = await createSourceCandidateStub(
       { organizationId: ORG, intakeSensitivityProfileId: PROFILE, actorContext: boundAdminActor(), now: NOW, ...extra },
@@ -353,7 +353,7 @@ test("P1-07 service (bound organization admin): unbound, inactive, other-organiz
   }
 });
 
-test("P1-07 repository: requireOwnCurrentReviewedDecision accepts only true, and a refused prerequisite is authorization_denied (403)", async () => {
+test("P1-07 repository: requireCurrentReviewedDecision accepts only true, and a refused prerequisite is authorization_denied (403)", async () => {
   const audit = { prepareMetadataOnlyAudit() { return { ok: true, async publish() {} }; } };
   const base = {
     identity: { organizationId: ORG, intakeSensitivityProfileId: PROFILE },
@@ -366,11 +366,11 @@ test("P1-07 repository: requireOwnCurrentReviewedDecision accepts only true, and
     runInTransaction: async () => { transactions += 1; throw new Error("unreachable"); },
   });
   for (const value of [false, "true", 1, null]) {
-    const result = await repository.createSourceCandidateStub({ ...base, requireOwnCurrentReviewedDecision: value });
+    const result = await repository.createSourceCandidateStub({ ...base, requireCurrentReviewedDecision: value });
     assert.equal(result.error.code, "validation_blocker", String(value));
   }
   assert.equal(transactions, 0);
-  assert.match(repositorySource, /if \(requireOwnCurrentReviewedDecision && !\(await hasOwnCurrentReviewedDecision\(tx, profileRow, actorUserId\)\)\) \{\s*return sourceCandidateFailure\("authorization_denied"\);/);
+  assert.match(repositorySource, /if \(requireCurrentReviewedDecision && !\(await hasCurrentReviewedDecision\(tx, profileRow\)\)\) \{\s*return sourceCandidateFailure\("authorization_denied"\);/);
 });
 
 test("P1-07 service: createSourceCandidateStub itself contains no SQL and does not import a database pool directly", () => {

@@ -1219,8 +1219,9 @@ async function runP107HandoffIntegrationSuite() {
     ]);
   });
 
-  test("bound admin (negatives, decision prerequisite): no decision, needs_more_information, a superseded 'reviewed', another human's 'reviewed' (bound admin or GK), the same human's earlier GK-role decision, and an unresolved queue are refused at P1-07 with zero candidate, queue, or audit writes", async () => {
+  test("bound admin (decision prerequisite): no decision, needs_more_information, a superseded 'reviewed', and an unresolved queue are refused at P1-07 with zero writes; another authorized human's current 'reviewed' (bound admin or GK) is continued as this administrator without changing the decision (owner decision 2026-10-19)", async () => {
     const cases = [];
+    const admitted = [];
 
     // No persisted decision (review work only).
     {
@@ -1251,12 +1252,12 @@ async function runP107HandoffIntegrationSuite() {
       const superseding = await decideAs(otherBoundAdmin, id, { ...work, expectedUpdatedAt: resolvedStamp }, "reviewed", { now: T2, refuseHandoff: true });
       assert.equal(superseding.ok, true, JSON.stringify(superseding));
       assert.equal((await currentHead(id)).decided_by, OTHER_BOUND_ADMIN);
-      cases.push(["own 'reviewed' superseded by another bound admin's 'reviewed'", id, 27]);
+      admitted.push(["own 'reviewed' superseded by another bound admin's 'reviewed'", id, 27]);
     }
     // Another bound admin's 'reviewed' decision.
     {
       const { intakeSensitivityProfileId: id } = await historicalReviewedWithoutCandidate(28, otherBoundAdmin);
-      cases.push(["another bound admin's 'reviewed'", id, 28]);
+      admitted.push(["another bound admin's 'reviewed'", id, 28]);
     }
     // A GK reviewer's 'reviewed' decision whose handoff was refused.
     {
@@ -1264,14 +1265,14 @@ async function runP107HandoffIntegrationSuite() {
       const work = await workAs(boundMixedReviewer, id);
       const decided = await decideAs(boundMixedReviewer, id, work, "reviewed", { now: T1, refuseHandoff: true });
       assert.equal(decided.data.current_decision.decided_by_role, "gk_reviewer");
-      cases.push(["a GK reviewer's 'reviewed'", id, 29]);
+      admitted.push(["a GK reviewer's 'reviewed'", id, 29]);
     }
     // The same human, who decided under a global GK role, later acting as a bound admin only.
     {
       const id = await seedPredicateSatisfyingSensitivityProfile(30);
       const work = await workAs(boundMixedReviewer, id);
       await decideAs(boundMixedReviewer, id, work, "reviewed", { now: T1, refuseHandoff: true });
-      cases.push(["own 'reviewed' recorded as gk_reviewer", id, 30, { ...boundMixedReviewer, kaiRoles: [] }]);
+      admitted.push(["own 'reviewed' recorded as gk_reviewer", id, 30, { ...boundMixedReviewer, kaiRoles: [] }]);
     }
     // The bound admin's own current 'reviewed' head, but its queue item is not resolved.
     {
@@ -1313,11 +1314,16 @@ async function runP107HandoffIntegrationSuite() {
       assert.deepEqual(audits, { audit_events: 0, upload_lifecycle_audit: 0 }, label);
     }
 
-    // The decider of case 28 does satisfy the prerequisite: attribution is what decides.
-    const [, otherAdminProfileId] = cases.find(([label]) => label === "another bound admin's 'reviewed'");
-    const byDecider = await createCandidateAs(otherBoundAdmin, otherAdminProfileId);
-    assert.equal(byDecider.ok, true, JSON.stringify(byDecider));
-    assert.equal(byDecider.data.replayed, false);
+    // Any current, human 'reviewed' decision by an authorized decider is
+    // continued by the requesting administrator; the decision is only read.
+    for (const [label, id, , actorContext = boundAdmin] of admitted) {
+      const headBefore = await currentHead(id);
+      const created = await createCandidateAs(actorContext, id);
+      assert.equal(created.ok, true, `${label}: ${JSON.stringify(created)}`);
+      assert.equal(created.data.replayed, false, label);
+      assert.equal((await candidateState(id)).candidates.length, 1, label);
+      assert.deepEqual(await currentHead(id), headBefore, `${label}: decision and attribution unchanged`);
+    }
   });
 
   test("bound admin (negative, paired queue state): the human's own current 'reviewed' head whose sensitivity_review item is resolved/needs_gk_review is refused directly and through the cockpit replay with zero writes; restoring review_status alone admits the same request", async () => {
@@ -1484,7 +1490,7 @@ async function runP107HandoffIntegrationSuite() {
     assert.deepEqual(await candidateAudits(id, 33), { audit_events: 0, upload_lifecycle_audit: 0 });
   });
 
-  test("bound admin (concurrency): identical concurrent creations converge on one candidate, one review item, and one audit; another human's superseding decision holding the profile lock makes the creation wait and then refuse it with zero writes", async () => {
+  test("bound admin (concurrency): identical concurrent creations converge on one candidate, one review item, and one audit; another human's superseding needs_more_information decision holding the profile lock makes the creation wait and then refuse it with zero writes", async () => {
     const { intakeSensitivityProfileId: id } = await historicalReviewedWithoutCandidate(36);
     const before = await kaiTableRowCounts();
     const results = await Promise.all([1, 2, 3].map(() => createCandidateAs(boundAdmin, id)));
@@ -1496,9 +1502,10 @@ async function runP107HandoffIntegrationSuite() {
     assert.equal(after.review_queue_items - before.review_queue_items, 1);
     assert.deepEqual(await candidateAudits(id, 36), { audit_events: 1, upload_lifecycle_audit: 1 });
 
-    // Supersession race: another bound admin's superseding 'reviewed' decision has
-    // written its row and holds the profile lock, uncommitted. The queue stays
-    // resolved on the same item, so only the profile lock stops the creation from
+    // Supersession race: another bound admin's superseding needs_more_information
+    // decision has written its row and holds the profile lock, uncommitted. Until
+    // it commits, the old 'reviewed' head and its resolved item are what a reader
+    // without the lock would see, so only the profile lock stops the creation from
     // authorizing against the head it is about to replace.
     const { intakeSensitivityProfileId: racedId, work, resolvedStamp } = await historicalReviewedWithoutCandidate(37);
     let signalReached;
@@ -1518,9 +1525,8 @@ async function runP107HandoffIntegrationSuite() {
     let creation;
     let creationSettledEarly = false;
     try {
-      superseding = decideAs(otherBoundAdmin, racedId, { ...work, expectedUpdatedAt: resolvedStamp }, "reviewed", {
+      superseding = decideAs(otherBoundAdmin, racedId, { ...work, expectedUpdatedAt: resolvedStamp }, "needs_more_information", {
         now: T2,
-        refuseHandoff: true,
         sensitivityAllowedUseReviewRepository: gatedDecisionRepository,
       });
       await reached;
@@ -1534,7 +1540,7 @@ async function runP107HandoffIntegrationSuite() {
     const [decided, created] = await Promise.all([superseding, creation]);
     assert.equal(decided.ok, true, JSON.stringify(decided));
     assert.equal(decided.data.current_decision.decided_by, OTHER_BOUND_ADMIN);
-    assert.equal((await sensitivityReviewItems(racedId))[0].queue_status, "resolved");
+    assert.equal(decided.data.current_decision.decision_outcome, "needs_more_information");
     assert.equal(created.ok, false, JSON.stringify(created));
     assert.equal(created.error.code, "authorization_denied");
     assert.deepEqual(changedTables(raceBefore, await kaiTableRowCounts()), [

@@ -444,9 +444,18 @@ test("assembled production middleware and router enforce the GK file sensitivity
     assert.deepEqual(scenario.repositoryCalls, []);
   });
 
-  await t.test("client roles and other-tenant GK reviewers are denied before any read", async () => {
+  await t.test("a delegated (stored, active) organization client_admin receives the same file and profile ids (owner decision 2026-10-19)", async () => {
+    scenario = createScenario({ kaiRoles: [], memberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_admin" }] });
+    const response = await withFeatureFlag("true", () => getJson(server, path()));
+    assert.equal(response.statusCode, 200);
+    assert.deepEqual(response.body, { ok: true, data: { intake_file_id: FILE, intake_sensitivity_profile_id: SENSITIVITY }, warnings: [] });
+  });
+
+  await t.test("other client roles, an inactive client_admin grant, and other-tenant GK reviewers are denied before any read", async () => {
     for (const overrides of [
-      { kaiRoles: [], memberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_admin" }] },
+      { kaiRoles: [], memberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_contributor" }] },
+      { kaiRoles: [], memberships: [{ organization_id: ORG, membership_status: "inactive", role_name: "client_admin" }] },
+      { kaiRoles: ["client_admin"], memberships: [{ organization_id: ORG, membership_status: "active", role_name: "client_reviewer" }] },
       { kaiRoles: [], memberships: [{ organization_id: ORG, membership_status: "active", role_name: "gk_reviewer" }] },
       { memberships: [{ organization_id: OTHER_ORG, membership_status: "active", role_name: "gk_reviewer" }] },
     ]) {

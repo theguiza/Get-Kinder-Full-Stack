@@ -19,7 +19,7 @@ import {
   listReviewCockpitQueue,
   submitSourceCandidateDecision,
 } from "../Backend/kai/services/kaiReviewCockpitService.js";
-import { validateActorIsBoundOrganizationAdministrator } from "../Backend/kai/auth/kaiAuthorizationService.js";
+import { validateActorIsOrganizationAdministrator } from "../Backend/kai/auth/kaiAuthorizationService.js";
 import { getOrganizationAccessCapabilities } from "../Backend/kai/services/kaiOrganizationAccessCapabilitiesService.js";
 import {
   sourcePreparationFiles,
@@ -163,7 +163,7 @@ test("P1-08 authorization: the binding-derived client_admin of this organization
   for (const role of ["gk_admin", "gk_operator", "gk_reviewer"]) {
     assert.deepEqual(authorizeSourcePromotionDecision(actor({ role }), ORG), { ok: true, organizationAdminAuthorized: false }, role);
   }
-  assert.equal(validateActorIsBoundOrganizationAdministrator(actor({ role: "client_contributor", platformSuperuser: true }), "create_source_promotion_decision", ORG).ok, false,
+  assert.equal(validateActorIsOrganizationAdministrator(actor({ role: "client_contributor", platformSuperuser: true }), "create_source_promotion_decision", ORG).ok, false,
     "platform-superuser authority is not organization-administrator authority");
 });
 

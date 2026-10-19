@@ -1,6 +1,7 @@
 import { validateAssistantBoundary } from "../validators/assistantBoundaryValidators.js";
 
 import { KAI_SPRINT2_P0_OPERATION_ROLES } from "../config/kaiSprint2P0Contract.js";
+import { STORED_ORGANIZATION_MEMBERSHIP_SOURCE } from "./kaiOrganizationMembershipSource.js";
 
 const OPERATION_ROLES = Object.freeze(
   Object.fromEntries(
@@ -270,10 +271,9 @@ export function validateActorCanPerformOperation(actorContext, operation, organi
 }
 
 /**
- * Sensitivity review is the one review operation that an active, bound Get
- * Kinder organization administrator may perform for that exact KAI tenant.
- * The marker is emitted only by gkOrganizationBindingAuthority; a manually
- * assigned client_admin membership does not satisfy this policy.
+ * Sensitivity review is the one review operation that an active organization
+ * administrator may perform for that exact KAI tenant (owner decisions
+ * 2026-10-12 and 2026-10-19; see isOrganizationAdministratorMembership).
  */
 export function validateActorCanPerformSensitivityReview(
   actorContext,
@@ -291,14 +291,32 @@ export function validateActorCanPerformSensitivityReview(
   if (gkAuthorization.ok) return gkAuthorization;
 
   const memberships = activeMembershipsForOrg(actorContext, organizationId);
-  if (!memberships.some(isBoundOrganizationAdministratorMembership)) return gkAuthorization;
+  if (actorContext?.actorType !== "human" || !memberships.some(isOrganizationAdministratorMembership)) return gkAuthorization;
 
   return { ok: true, memberships, organizationAdminAuthorized: true };
 }
 
-function isBoundOrganizationAdministratorMembership(membership) {
-  return membership.role_name === "client_admin"
-    && membership.source === "gk_organization_binding"
+/**
+ * An active client_admin membership of the organization (already filtered to
+ * this organization and to membership_status 'active'), with verified
+ * provenance. Owner decision 2026-10-19: a legitimately delegated, active
+ * organization client_admin has the same organization-scoped
+ * source-preparation authority as a binding-derived one. Either
+ *   - binding-derived: emitted only by gkOrganizationBindingAuthority for an
+ *     active Get Kinder organization-admin membership and an active binding
+ *     to this KAI tenant (positive GK organization id); or
+ *   - stored: an active kai.organization_memberships client_admin row of this
+ *     user, tagged by kaiActorContext. Those rows are written only by the
+ *     governed, audited access-administration grants (Team & Access, /admin
+ *     KAI Access, JOIN-3), and a revoked grant is not 'active'.
+ * A membership object with any other or no provenance, a global (kai.user_roles)
+ * client_admin, and platform-superuser authority never satisfy it, and only a
+ * human actor ever holds organization-administrator authority.
+ */
+function isOrganizationAdministratorMembership(membership) {
+  if (membership.role_name !== "client_admin") return false;
+  if (membership.source === STORED_ORGANIZATION_MEMBERSHIP_SOURCE) return true;
+  return membership.source === "gk_organization_binding"
     && typeof membership.gk_organization_id === "number"
     && Number.isInteger(membership.gk_organization_id)
     && membership.gk_organization_id > 0;
@@ -307,18 +325,20 @@ function isBoundOrganizationAdministratorMembership(membership) {
 /**
  * The organization-administrator half of validateActorCanPerformSensitivityReview
  * alone, for an operation whose GK authority is checked separately in its own
- * mode (owner decision 2026-10-18: P1-08 source promotion). Admits only an
- * active, binding-derived client_admin membership in this exact organization:
- * a stored client_admin, any global role, and platform-superuser authority do
- * not satisfy it. The shared validator still applies the assistant boundary,
- * mapped actor, organization scope, and active-membership checks first.
+ * mode (P1-07 continuation, P1-08 source promotion, and the source-candidate
+ * reads; owner decisions 2026-10-18 and 2026-10-19). Admits only an active
+ * client_admin membership in this exact organization with verified provenance
+ * (isOrganizationAdministratorMembership): any global role and
+ * platform-superuser authority do not satisfy it. The shared validator still
+ * applies the assistant boundary, mapped actor, organization scope, and
+ * active-membership checks first.
  */
-export function validateActorIsBoundOrganizationAdministrator(actorContext, operation, organizationId) {
+export function validateActorIsOrganizationAdministrator(actorContext, operation, organizationId) {
   const base = validateActorCanPerformOperation(actorContext, operation, organizationId, {
-    allowedRoles: BOUND_ORGANIZATION_ADMINISTRATOR_ROLES,
+    allowedRoles: ORGANIZATION_ADMINISTRATOR_ROLES,
   });
   const memberships = activeMembershipsForOrg(actorContext, organizationId);
-  if (base.ok && memberships.some(isBoundOrganizationAdministratorMembership)) {
+  if (base.ok && actorContext?.actorType === "human" && memberships.some(isOrganizationAdministratorMembership)) {
     return { ok: true, memberships, organizationAdminAuthorized: true };
   }
   if (!base.ok) return base;
@@ -341,4 +361,4 @@ export function validateActorIsBoundOrganizationAdministrator(actorContext, oper
   };
 }
 
-const BOUND_ORGANIZATION_ADMINISTRATOR_ROLES = new Set(["client_admin"]);
+const ORGANIZATION_ADMINISTRATOR_ROLES = new Set(["client_admin"]);

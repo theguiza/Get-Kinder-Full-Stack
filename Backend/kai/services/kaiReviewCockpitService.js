@@ -7,7 +7,7 @@ import { resolveKaiActorContext } from "../auth/kaiActorContext.js";
 import {
   validateActorCanPerformOperation,
   validateActorCanPerformSensitivityReview,
-  validateActorIsBoundOrganizationAdministrator,
+  validateActorIsOrganizationAdministrator,
 } from "../auth/kaiAuthorizationService.js";
 import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
 import {
@@ -248,10 +248,11 @@ function authorizeReviewCockpitReadRole(actorContext, organizationId) {
 }
 
 /**
- * Source-candidate read and decision gate (owner decision 2026-10-18): the
- * unchanged cockpit read gate (global GK role plus exact membership), or, when
- * that fails, an active binding-derived client_admin of this exact
- * organization with an active KAI account. The second half reaches only the
+ * Source-candidate read and decision gate (owner decisions 2026-10-18 and
+ * 2026-10-19): the unchanged cockpit read gate (global GK role plus exact
+ * membership), or, when that fails, an active administrator of this exact
+ * organization (binding-derived or a delegated stored client_admin grant)
+ * with an active KAI account. The second half reaches only the
  * candidate lookup, candidate detail, and decision endpoints; every other
  * cockpit read keeps authorizeReviewCockpitRequest. Whether the actor may then
  * decide is still P1-08's own authorizeSourcePromotionDecision.
@@ -259,7 +260,7 @@ function authorizeReviewCockpitReadRole(actorContext, organizationId) {
 function authorizeSourceCandidateReadRole(actorContext, organizationId) {
   const roleAuth = authorizeReviewCockpitReadRole(actorContext, organizationId);
   if (roleAuth.ok) return roleAuth;
-  const adminAuth = validateActorIsBoundOrganizationAdministrator(actorContext, REVIEW_COCKPIT_READ_OPERATION, organizationId);
+  const adminAuth = validateActorIsOrganizationAdministrator(actorContext, REVIEW_COCKPIT_READ_OPERATION, organizationId);
   if (adminAuth.ok && actorContext?.kaiUserStatus === "active") return adminAuth;
   return roleAuth;
 }
@@ -1313,8 +1314,6 @@ const SOURCE_PREPARATION_BLOCKERS = Object.freeze({
   sensitivity_review_not_complete: "The file's current sensitivity decision is not a completed 'reviewed' decision with a resolved review item.",
   sensitivity_decision_invalid: "The file's current sensitivity decision does not satisfy the reviewed-snapshot rules.",
   allowed_use_not_allowed: "The file's recorded allowed use is not_allowed, so it is not prepared as a source.",
-  sensitivity_decision_recorded_by_another_reviewer:
-    "The file's current sensitivity decision was not recorded by you as this organization's administrator.",
 });
 
 function sourcePreparationBlocked(code, blockingReason, intakeFileId) {
@@ -1378,18 +1377,22 @@ async function authorizeSourcePreparationContinuationRequest(input, dependencies
  * administrator. It records no sensitivity decision, changes no queue item
  * of its own, and acts as no one else.
  *
- * Authority: only an active, binding-derived client_admin of the exact
- * organization (authorizeSourceCandidateContinuation); the file must belong
- * to the organization and the requested engagement. Eligibility, from the
+ * Authority: an active administrator of the exact organization - binding-
+ * derived or a delegated stored client_admin grant
+ * (authorizeSourceCandidateContinuation, owner decisions 2026-10-19); the
+ * file must belong to the organization and the requested engagement. The
+ * administrator need not be the one who recorded the decision: the
+ * continuation never records, replaces, or re-attributes a decision.
+ * Eligibility, from the
  * committed rows only: confirmed upload with a passed file policy; a complete
  * current sensitivity profile; exactly one current decision-lineage head
  * (a superseded decision is never used and an ambiguous lineage is refused,
  * never resolved by picking a row); that head is 'reviewed', human, valid
- * under the current reviewed-snapshot rules, recorded by this administrator
- * as client_admin, with its own sensitivity_review item resolved; and
- * neither the reviewed allowed use nor the committed P1-05 allowed use is
- * not_allowed. P1-07 then re-applies, under the profile lock, its own
- * prerequisite (the same own-current-reviewed-decision check),
+ * under the current reviewed-snapshot rules, recorded by an authorized human
+ * decider, with its own sensitivity_review item resolved; and neither the
+ * reviewed allowed use nor the committed P1-05 allowed use is not_allowed.
+ * P1-07 then re-applies, under the profile lock, its own prerequisite (the
+ * same current-reviewed-decision check), the effective allowed use,
  * VAL-KAI-P1-07-001, tenant consistency, idempotency, duplicate protection,
  * and required audit. An existing candidate is returned as it is, with no
  * write. Every refusal is a structured VAL-KAI-P1-07-002 blocker, or P1-07's
@@ -1478,10 +1481,6 @@ export async function continueIntakeFileSourcePreparation(input = {}, dependenci
   ) {
     return sourcePreparationBlocked("validation_blocker", "allowed_use_not_allowed", intakeFileId);
   }
-  if (head.decided_by_role !== "client_admin" || head.decided_by !== actorContext.actorUserId) {
-    return sourcePreparationBlocked("authorization_denied", "sensitivity_decision_recorded_by_another_reviewer", intakeFileId);
-  }
-
   const now = (deps.now ? new Date(deps.now()) : new Date()).toISOString();
   const handoff = await ensureSourceCandidateAfterReviewedDecision(
     { organizationId, intakeSensitivityProfileId, actorContext, now },

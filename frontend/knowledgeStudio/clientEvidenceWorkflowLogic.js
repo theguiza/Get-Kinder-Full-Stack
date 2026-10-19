@@ -235,7 +235,7 @@ export function sourcePromotionFailureMessage(result) {
 export function sourcePreparationContinuationMessage(data) {
   const status = data?.source_candidate_handoff?.status;
   if (status === "created") {
-    return "Source preparation continued: the source candidate was created from your recorded sensitivity review. Review & promote it below. Your review was not changed.";
+    return "Source preparation continued: the source candidate was created from the file's recorded sensitivity review. Review & promote it below. The review and its reviewer were not changed.";
   }
   if (status === "replayed" || status === "existing") {
     return "This file already has its source candidate. Nothing new was written.";
@@ -252,7 +252,6 @@ const SOURCE_PREPARATION_BLOCKER_MESSAGES = Object.freeze({
   sensitivity_review_not_complete: "the file's current sensitivity review is not a completed 'reviewed' decision",
   sensitivity_decision_invalid: "the file's current sensitivity decision does not meet the review rules",
   allowed_use_not_allowed: "the file's recorded allowed use is not_allowed",
-  sensitivity_decision_recorded_by_another_reviewer: "its current sensitivity review was not recorded by you as this organization's administrator",
 });
 
 export function sourcePreparationContinuationFailureMessage(result) {

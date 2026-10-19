@@ -866,10 +866,11 @@ async function runBrowserAcceptance() {
       await npoAdminPage.clickTab("Reviews");
       await npoAdminPage.waitForText("Waiting for Get Kinder review");
       const body = await npoAdminPage.text();
-      assert.ok(body.includes(`${NAMES.reviewer}: Source review (Waiting for Get Kinder)`), "the client sees the next stage");
+      // The stored client_admin now holds the P1-08 step itself (owner decision 2026-10-19).
+      assert.ok(body.includes(`${NAMES.reviewer}: Your action is needed: review this file's source candidate and promote it as a source in Data Sources.`), "the client sees the next stage");
       assert.ok(!body.includes(`${NAMES.reviewer}: Sensitivity review (Waiting for Get Kinder)`));
       assert.ok(!body.includes("reviewed_personal_data_status"), "no decision values reach the client");
-      results.B10_projection = "PASS: client pipeline shows sensitivity review complete, Source review waiting";
+      results.B10_projection = "PASS: client pipeline shows sensitivity review complete, Source review the organization administrator's step";
     });
 
     await test("B11: revocation denies a fresh session and direct routes while an already-open review form retains stale capability", async () => {
@@ -1090,7 +1091,9 @@ async function runBrowserAcceptance() {
       const before = await allKaiCounts();
       const outcomes = {};
 
-      // NPO client_admin: no GK global role, no gk_reviewer membership, no GK review.
+      // NPO client_admin: no GK global role, no gk_reviewer membership, no GK
+      // review. Its organization's sensitivity review is now within its own
+      // administrator role (owner decision 2026-10-19), so no decision is posted here.
       const npo = await session(USERS.npoAdminA);
       await npo.goto("/impact-library");
       await npo.waitForText("Team & Access");
@@ -1099,13 +1102,12 @@ async function runBrowserAcceptance() {
       outcomes.npoRewriteGkStaff = await npo.fetchJson("PUT", membershipPath(ORG_A, USERS.recipient), { role_name: "client_contributor", membership_status: "active" });
       outcomes.npoLookup = await npo.fetchJson("GET", "/api/admin/users/lookup?email=" + encodeURIComponent(email(USERS.recipient)));
       outcomes.npoCockpit = await npo.fetchJson("GET", capabilitiesPath(ORG_A));
-      outcomes.npoDecision = await npo.fetchJson("POST", decisionPath(profiles.afterRevoke), decisionBody);
       assert.deepEqual([outcomes.npoGlobalRole.status, outcomes.npoGlobalRole.blockingReason], [403, "platform_superuser_required"]);
       assert.deepEqual([outcomes.npoGkMembership.status, outcomes.npoGkMembership.errorCode, outcomes.npoGkMembership.blockingReason], [403, "authorization_denied", "non_client_membership_not_client_managed"]);
       assert.deepEqual([outcomes.npoRewriteGkStaff.status, outcomes.npoRewriteGkStaff.blockingReason], [403, "non_client_membership_not_client_managed"]);
       assert.equal(outcomes.npoLookup.status, 403);
-      assert.equal(outcomes.npoCockpit.data.can_manage_sensitivity_review, false);
-      assert.deepEqual([outcomes.npoDecision.status, outcomes.npoDecision.errorCode], [403, "authorization_denied"]);
+      assert.equal(outcomes.npoCockpit.data.can_manage_sensitivity_review, true, "its own organization's sensitivity review, as administrator");
+      assert.equal(outcomes.npoCockpit.data.can_review_source_candidates, false, "never the GK source review queue");
       // Team & Access shows the Get Kinder reviewer's membership without a control and offers no GK role.
       await npo.clickNav("Team & Access");
       await npo.waitFor(async () => Boolean(await npo.memberRowText(USERS.recipient)), "the GK reviewer's Team & Access row");

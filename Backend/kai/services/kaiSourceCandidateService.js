@@ -2,7 +2,7 @@ import { isKaiSprint2Enabled } from "../config/kaiSprint2Config.js";
 import { buildKaiError } from "../errors/kaiErrors.js";
 import {
   validateActorCanPerformSensitivityReview,
-  validateActorIsBoundOrganizationAdministrator,
+  validateActorIsOrganizationAdministrator,
 } from "../auth/kaiAuthorizationService.js";
 import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
 import { createPostgresSourceCandidateRepository } from "../dictionary/postgresSourceCandidateRepository.js";
@@ -64,19 +64,22 @@ function isMappedHumanActor(actorContext) {
  * the human sensitivity-decision seam (submitSensitivityProfileDecision), after
  * a committed terminal 'reviewed' Phase-5 decision, as the same authenticated
  * human actor; and the source-preparation continuation
- * (continueIntakeFileSourcePreparation, owner decision 2026-10-19), for a file
+ * (continueIntakeFileSourcePreparation, owner decisions 2026-10-19), for a file
  * whose current 'reviewed' decision is already committed but whose candidate
- * was never created, as the authenticated organization administrator who
- * recorded that decision. It is not composed into any worker, listener, or
+ * was never created, as the authenticated organization administrator who asks
+ * (any active administrator of the organization, not only the decider). It
+ * is not composed into any worker, listener, or
  * scheduler: the P1 worker's system actor can never reach it, and AUTH-KAI-003
  * below would reject it if it did.
  *
- * Owner decision (2026-10-13): an active Get Kinder organization administrator
- * whose client_admin membership is derived from an active binding to this exact
- * KAI organization may create the stub only as the consequence of their own
- * sensitivity review. The repository then also requires, inside its transaction
- * and with the profile row locked, that the current decision-lineage head is a
- * 'reviewed' decision recorded by this same human as client_admin and that its
+ * Owner decisions (2026-10-13, 2026-10-19): an active administrator of this
+ * exact organization (a binding-derived client_admin, or a delegated, active
+ * stored client_admin grant; validateActorCanPerformSensitivityReview) may
+ * create the stub only for a file whose sensitivity review is complete. The
+ * repository then also requires, inside its transaction and with the profile
+ * row locked, that the current decision-lineage head is a human 'reviewed'
+ * decision by an authorized decider (not necessarily this administrator; the
+ * decision and its attribution are never replaced) and that its
  * sensitivity_review queue item is resolved. No caller-supplied status, role, or
  * decision id is consulted. GK-authorized callers are unaffected, and
  * client_admin is not added to SOURCE_CANDIDATE_ALLOWED_ROLES.
@@ -105,9 +108,9 @@ export async function createSourceCandidateStub(input, dependencies = {}) {
   // Owner decision (2026-10-11): an allowed global KAI role also authorizes the
   // actor in an organization where their active membership is a client role.
   // An active membership in the requested organization is still required.
-  // Owner decision (2026-10-13): failing that, an active binding-derived
-  // client_admin of this exact organization is admitted only with the
-  // repository-enforced own-reviewed-decision prerequisite below.
+  // Owner decisions (2026-10-13, 2026-10-19): failing that, an active
+  // administrator of this exact organization is admitted only with the
+  // repository-enforced current-reviewed-decision prerequisite below.
   const auth = validateActorCanPerformSensitivityReview(
     actorContext,
     SOURCE_CANDIDATE_OPERATION,
@@ -144,7 +147,7 @@ export async function createSourceCandidateStub(input, dependencies = {}) {
     actorUserId: actorContext.actorUserId,
     now: input.now,
     metadataOnlyAudit: dependencies.metadataOnlyAudit,
-    ...(organizationAdminAuthorized ? { requireOwnCurrentReviewedDecision: true } : {}),
+    ...(organizationAdminAuthorized ? { requireCurrentReviewedDecision: true } : {}),
   });
 
   if (!result.ok) {
@@ -157,21 +160,23 @@ export async function createSourceCandidateStub(input, dependencies = {}) {
 }
 
 /**
- * Who may ask for the source-preparation continuation (owner decision
- * 2026-10-19): an active, binding-derived client_admin of this exact
- * organization with an active KAI account, as a mapped human (AUTH-KAI-003)
- * - the organization-administrator
- * half of the P1-07 rule above, alone. A stored client_admin, other client
- * roles, global roles, and platform-superuser authority do not satisfy it.
- * Pure; object eligibility (the administrator's own current 'reviewed'
- * decision, resolved review, VAL-KAI-P1-07-001) is still decided per file and
- * re-checked by createSourceCandidateStub and its repository on every write.
+ * Who may ask for the source-preparation continuation (owner decisions
+ * 2026-10-19): an active administrator of this exact organization - a
+ * binding-derived client_admin or a delegated, active stored client_admin
+ * grant (validateActorIsOrganizationAdministrator) - with an active KAI
+ * account, as a mapped human (AUTH-KAI-003): the organization-administrator
+ * half of the P1-07 rule above, alone. Other client roles, global roles
+ * (including a global client_admin), and platform-superuser authority do not
+ * satisfy it. Pure; object eligibility (a current human 'reviewed' decision,
+ * resolved review, VAL-KAI-P1-07-001, effective allowed use) is still decided
+ * per file and re-checked by createSourceCandidateStub and its repository on
+ * every write.
  */
 export function authorizeSourceCandidateContinuation(actorContext, organizationId) {
   if (!isMappedHumanActor(actorContext)) {
     return { ok: false, error_code: "authorization_denied", blockers: [] };
   }
-  const auth = validateActorIsBoundOrganizationAdministrator(actorContext, SOURCE_CANDIDATE_OPERATION, organizationId);
+  const auth = validateActorIsOrganizationAdministrator(actorContext, SOURCE_CANDIDATE_OPERATION, organizationId);
   if (!auth.ok) return auth;
   if (actorContext?.kaiUserStatus !== "active") {
     return { ok: false, error_code: "authorization_denied", blockers: [] };

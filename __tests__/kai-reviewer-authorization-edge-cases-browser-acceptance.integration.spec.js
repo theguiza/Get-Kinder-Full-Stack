@@ -857,16 +857,19 @@ async function runBrowserAcceptance() {
       const pipeline = await api(USERS.npoAdmin, "GET", paths.pipeline());
       const byId = Object.fromEntries(pipeline.data.files.map((file) => [file.intakeFileId, file]));
       const stageStatus = (fileId, key) => byId[fileId].stages.find((s) => s.key === key)?.status ?? null;
-      assert.deepEqual([stageStatus(FILES.withBoth, "sensitivity_review"), stageStatus(FILES.withBoth, "source_review"), byId[FILES.withBoth].currentStage],
-        ["complete", "waiting_for_get_kinder", "source_review"]);
+      // The viewer is the organization's (stored) client_admin, which now holds
+      // the P1-08 step itself (owner decision 2026-10-19): the source review is
+      // the organization's own next action, still separate from the sensitivity review.
+      assert.deepEqual([stageStatus(FILES.withBoth, "sensitivity_review"), stageStatus(FILES.withBoth, "source_review"), byId[FILES.withBoth].currentStage, byId[FILES.withBoth].nextAction],
+        ["complete", "waiting_for_client", "source_review", "promote_source"]);
       assert.deepEqual([stageStatus(FILES.unrelated, "sensitivity_review"), byId[FILES.unrelated].currentStage], ["waiting_for_get_kinder", "sensitivity_review"],
         "an unrelated file is not marked reviewed");
       const body = await clientReviewsText(npoPage);
-      assert.ok(body.includes(`${NAMES.withBoth}: Source review (Waiting for Get Kinder)`), body.slice(0, 3000));
+      assert.ok(body.includes(`${NAMES.withBoth}: Your action is needed: review this file's source candidate and promote it as a source in Data Sources.`), body.slice(0, 3000));
       assert.ok(!body.includes(`${NAMES.withBoth}: Sensitivity review (Waiting for Get Kinder)`));
       assert.ok(body.includes(`${NAMES.unrelated}: Sensitivity review (Waiting for Get Kinder)`));
       assert.deepEqual(npoPage.exceptions, []);
-      results.G2 = `PASS: decision ${decisions[0].decision_id} on profile ${profiles.withBoth}; pipeline sensitivity_review complete, source_review waiting (candidate ${candidate.intake_source_candidate_id}, open source_candidate_review); unrelated file still at sensitivity review`;
+      results.G2 = `PASS: decision ${decisions[0].decision_id} on profile ${profiles.withBoth}; pipeline sensitivity_review complete, source_review the organization administrator's promote_source (candidate ${candidate.intake_source_candidate_id}, open source_candidate_review); unrelated file still at sensitivity review`;
     });
 
     await test("E2-E3: after the global role is revoked (organization role unchanged) each operation answers by its own policy", async () => {

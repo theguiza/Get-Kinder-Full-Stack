@@ -769,8 +769,11 @@ test("operation readiness is exactly each operation's own enforced predicate, fo
         generated_content_read: ops.readGeneratedDrafts === true,
         evidence_processing: ops.extractEvidence === true,
         draft_generation: ops.generateDrafts === true,
-        source_review: validateActorCanPerformOperation(actor, "read_intake", organizationId, { allowedRoles: cockpit.REVIEW_COCKPIT_READ_ROLES, globalRolesOnly: true }).ok === true
-          && authorizeSourcePromotionDecision(actor, organizationId).ok === true,
+        // P1-08 through the GK cockpit gate, or as the organization's
+        // administrator (binding-derived or a stored grant, owner decision 2026-10-19).
+        source_review: authorizeSourcePromotionDecision(actor, organizationId).ok === true
+          && (authorizeSourcePromotionDecision(actor, organizationId).organizationAdminAuthorized === true
+            || validateActorCanPerformOperation(actor, "read_intake", organizationId, { allowedRoles: cockpit.REVIEW_COCKPIT_READ_ROLES, globalRolesOnly: true }).ok === true),
         sensitivity_review: validateActorCanPerformSensitivityReview(actor, "record_sensitivity_allowed_use_decision", organizationId, cockpit.REVIEW_COCKPIT_READ_ROLES, { globalRolesOnly: true }).ok === true,
         evidence_review: ops.recordEvidenceReview === true,
         claim_review: ops.recordClaimReview === true,

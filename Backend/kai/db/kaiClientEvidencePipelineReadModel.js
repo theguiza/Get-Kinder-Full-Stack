@@ -21,12 +21,13 @@ import pool from "./kaiDb.js";
  * completeness predicate: needs_gk_review with an open review item and no
  * decision, or needs_more_information awaiting the client); the service uses
  * them only to choose the file's next action and never returns them.
- * `source_candidate_continuation_ready` (owner decision 2026-10-19) is the
+ * `source_candidate_continuation_ready` (owner decisions 2026-10-19) is the
  * server-side result of the source-preparation continuation's eligibility
- * over committed rows for the requesting actor (`actorUserId`): exactly one
- * current decision-lineage head, 'reviewed', human, recorded by this actor as
- * client_admin, its sensitivity_review item resolved, and neither reviewed
- * nor P1-05 allowed use not_allowed; it is false without an actor. The
+ * over committed rows: exactly one current decision-lineage head, 'reviewed',
+ * human, recorded by an authorized decider (any of the ledger's decider roles;
+ * any organization administrator may continue it), its sensitivity_review
+ * item resolved, and neither reviewed nor P1-05 allowed use not_allowed; it
+ * is false without a requesting actor (`actorUserId`). The
  * service uses it only to choose the next action, and the continuation
  * re-checks everything on the write. No file content,
  * profile/dictionary/sensitivity values, evidence or claim statements,
@@ -76,8 +77,9 @@ export async function listClientEvidencePipelineFiles(organizationId, engagement
               sd.head_count = 1
                 AND sd.decision_outcome = 'reviewed'
                 AND sd.created_by_type = 'human'
-                AND sd.decided_by_role = 'client_admin'
-                AND sd.decided_by = $4::uuid
+                AND sd.decided_by_role IN ('gk_admin', 'gk_operator', 'gk_reviewer', 'client_admin')
+                AND sd.decided_by IS NOT NULL
+                AND $4::uuid IS NOT NULL
                 AND sq.review_queue_item_id = sd.review_queue_item_id
                 AND sq.queue_status = 'resolved'
                 AND sq.review_status = 'resolved'

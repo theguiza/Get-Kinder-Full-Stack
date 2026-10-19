@@ -601,17 +601,26 @@ test("readers: mixed active/inactive assignments - only active assignments autho
   const mixed = await resolveActor(store, USERS.mixed);
   assert.deepEqual(mixed.organizationMemberships.map((membership) => [membership.role_name, membership.membership_status]), [["client_admin", "active"], ["gk_operator", "inactive"]]);
   assert.equal(validateActorCanPerformOperation(mixed, "manage_organization_membership", ORG_A, { allowedRoles: new Set(["client_admin"]) }).ok, true);
-  assert.equal(authorizeSourcePromotionDecision(mixed, ORG_A).ok, false, "an inactive gk_operator assignment never authorizes P1-08");
+  // An inactive gk_operator assignment never authorizes P1-08: the actor is
+  // admitted only as the organization's administrator through its active
+  // client_admin grant (owner decision 2026-10-19).
+  assert.deepEqual(authorizeSourcePromotionDecision(mixed, ORG_A), { ok: true, organizationAdminAuthorized: true });
   assert.deepEqual((await listAuthorizedOrganizations({ actorContext: mixed }, { env: ENV })).data.items, [{ organization_id: ORG_A }]);
   const capabilities = await getOrganizationAccessCapabilities({ organizationId: ORG_A, actorContext: mixed }, { env: ENV });
   assert.equal(capabilities.data.organizationAccessManagement, true);
 });
 
-test("readers: the retained J3-2 denial - global gk_reviewer with organization client_admin is not P1-08 promotion authority", async () => {
+test("readers: J3-2 - a global gk_reviewer never satisfies P1-08's GK half; with an active organization client_admin grant the actor decides only as that organization's administrator (owner decision 2026-10-19)", async () => {
   const store = createStore({ memberships: [row(ORG_A, USERS.mixed, "client_admin")], globalRoles: { [USERS.mixed.user_id]: ["gk_reviewer"] } });
   const mixed = await resolveActor(store, USERS.mixed);
-  const denied = authorizeSourcePromotionDecision(mixed, ORG_A);
+  assert.deepEqual(authorizeSourcePromotionDecision(mixed, ORG_A), { ok: true, organizationAdminAuthorized: true });
+  // The same global role over a non-administrator organization role is still denied.
+  const contributorStore = createStore({ memberships: [row(ORG_A, USERS.mixed, "client_contributor")], globalRoles: { [USERS.mixed.user_id]: ["gk_reviewer"] } });
+  const denied = authorizeSourcePromotionDecision(await resolveActor(contributorStore, USERS.mixed), ORG_A);
   assert.deepEqual([denied.ok, denied.error.error.code, denied.error.blockers[0].blocking_reason], [false, "authorization_denied", "role_not_allowed"]);
+  // A global client_admin role with no organization grant is never organization authority.
+  const globalOnly = createStore({ memberships: [row(ORG_A, USERS.mixed, "client_contributor")], globalRoles: { [USERS.mixed.user_id]: ["client_admin"] } });
+  assert.equal(authorizeSourcePromotionDecision(await resolveActor(globalOnly, USERS.mixed), ORG_A).ok, false);
 });
 
 test("readers: the governed path - superuser grants global gk_operator, a delegated GK administrator grants organization gk_operator, P1-08 admits the operator, and targeted revocation removes it", async () => {

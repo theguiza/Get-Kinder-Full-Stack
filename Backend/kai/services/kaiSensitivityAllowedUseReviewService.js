@@ -20,8 +20,10 @@ import {
  * same-transaction audit are all delegated to
  * Backend/kai/dictionary/postgresSensitivityAllowedUseReviewRepository.js.
  *
- * Authorization permits the existing GK review roles or a client_admin derived
- * from active Get Kinder admin membership and an active exact-tenant binding.
+ * Authorization permits the existing GK review roles or an active organization
+ * administrator of the exact tenant: a client_admin derived from active Get
+ * Kinder admin membership and an active binding, or a delegated, active stored
+ * client_admin grant (owner decision 2026-10-19).
  * Every non-human actor type (ai, assistant, system, import, code,
  * or any generic service actor) is rejected outright before any repository call -
  * there is no bypass, and the ledger's own created_by_type/decided_by_role CHECK
@@ -144,12 +146,10 @@ export async function recordSensitivityAllowedUseDecision(input, dependencies = 
     auth,
     allowedRoles: RECORD_SENSITIVITY_DECISION_GK_ROLES,
   });
-  const boundAdminMembership = (auth.memberships || []).some((membership) =>
-    membership.role_name === "client_admin"
-    && membership.source === "gk_organization_binding"
-    && String(membership.organization_id) === String(input.organizationId),
-  );
-  const decidedByRole = gkRole || (boundAdminMembership ? "client_admin" : null);
+  // An organization administrator (binding-derived or a delegated stored
+  // client_admin grant, owner decisions 2026-10-12 and 2026-10-19) decides as
+  // client_admin; the shared predicate is the only judge of that authority.
+  const decidedByRole = gkRole || (auth.organizationAdminAuthorized === true ? "client_admin" : null);
   if (!decidedByRole) {
     return buildKaiError("authorization_denied");
   }

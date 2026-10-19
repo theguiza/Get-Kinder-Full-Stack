@@ -4,7 +4,10 @@ import {
   getScopedSourceCandidateReviewQueueItemByIdentity,
 } from "../db/kaiIntakeQueries.js";
 import { findCurrentSensitivityAllowedUseDecision } from "./postgresSensitivityAllowedUseDecisionRepository.js";
-import { isSensitivityAllowedUseTerminalOutcome } from "./sensitivityAllowedUseDecisionContract.js";
+import {
+  SENSITIVITY_DECISION_ALLOWED_ROLES,
+  isSensitivityAllowedUseTerminalOutcome,
+} from "./sensitivityAllowedUseDecisionContract.js";
 import { readEffectiveAllowedUseProhibition } from "./postgresEffectiveAllowedUseResolver.js";
 import { validateEffectiveAllowedUsePermitsOperation } from "../validators/kaiEffectiveAllowedUseValidators.js";
 
@@ -106,14 +109,14 @@ function isSourceCandidateIdentity(value) {
 }
 
 function validateCreateInput(input) {
-  const allowedKeys = new Set(["identity", "actorUserId", "now", "metadataOnlyAudit", "requireOwnCurrentReviewedDecision"]);
+  const allowedKeys = new Set(["identity", "actorUserId", "now", "metadataOnlyAudit", "requireCurrentReviewedDecision"]);
   if (!isPlainObject(input) || !hasOnlyKeys(input, allowedKeys)) return false;
   return (
     isSourceCandidateIdentity(input.identity) &&
     isNonEmptyString(input.actorUserId) &&
     isNormalizedNow(input.now) &&
     isMetadataOnlyAuditDependency(input.metadataOnlyAudit) &&
-    (input.requireOwnCurrentReviewedDecision === undefined || input.requireOwnCurrentReviewedDecision === true)
+    (input.requireCurrentReviewedDecision === undefined || input.requireCurrentReviewedDecision === true)
   );
 }
 
@@ -155,15 +158,18 @@ async function readScopedSensitivityProfile(tx, organizationId, intakeSensitivit
 }
 
 /**
- * The bound-organization-administrator prerequisite (owner decision 2026-10-13),
- * read only from committed ledger and queue rows under the profile lock: the
- * current Phase-5 decision-lineage head for this exact tenant-scoped profile is a
- * human 'reviewed' decision recorded by this same actor as client_admin, and the
- * 'sensitivity_review' queue item it decided is resolved in both queue_status and
- * review_status. A superseded, absent, non-terminal, or other-actor head, a
- * partially resolved item, or an ambiguous lineage (which throws), never satisfies it.
+ * The organization-administrator prerequisite (owner decisions 2026-10-13 and
+ * 2026-10-19), read only from committed ledger and queue rows under the profile
+ * lock: the current Phase-5 decision-lineage head for this exact tenant-scoped
+ * profile is a human 'reviewed' decision recorded by an authorized decider (one of
+ * the ledger's decider roles; any active administrator of the organization may
+ * continue it, not only the one who recorded it), and the 'sensitivity_review'
+ * queue item it decided is resolved in both queue_status and review_status. The
+ * decision and its attribution are only read, never replaced. A superseded,
+ * absent, non-terminal, or machine head, a partially resolved item, or an
+ * ambiguous lineage (which throws), never satisfies it.
  */
-async function hasOwnCurrentReviewedDecision(tx, profileRow, actorUserId) {
+async function hasCurrentReviewedDecision(tx, profileRow) {
   const head = await findCurrentSensitivityAllowedUseDecision(tx, {
     organizationId: profileRow.organization_id,
     intakeSensitivityProfileId: profileRow.intake_sensitivity_profile_id,
@@ -172,8 +178,8 @@ async function hasOwnCurrentReviewedDecision(tx, profileRow, actorUserId) {
     !head ||
     !isSensitivityAllowedUseTerminalOutcome(head.decision_outcome) ||
     head.created_by_type !== "human" ||
-    head.decided_by_role !== "client_admin" ||
-    String(head.decided_by) !== actorUserId
+    !SENSITIVITY_DECISION_ALLOWED_ROLES.includes(head.decided_by_role) ||
+    !head.decided_by
   ) {
     return false;
   }
@@ -540,9 +546,9 @@ export function createPostgresSourceCandidateRepository({
      * committed `kai.intake_sensitivity_profiles` row; the caller cannot provide or
      * override lineage, classification, review status, or queue identity.
      *
-     * `requireOwnCurrentReviewedDecision: true` (set by the service only for a
-     * binding-derived client_admin) locks the profile row and requires
-     * hasOwnCurrentReviewedDecision before the predicate is evaluated or any
+     * `requireCurrentReviewedDecision: true` (set by the service only for an
+     * organization administrator) locks the profile row and requires
+     * hasCurrentReviewedDecision before the predicate is evaluated or any
      * candidate or review item is read or written; otherwise `authorization_denied`
      * with zero mutation and zero audit activity. For every caller the file's
      * effective allowed use (VAL-KAI-B1A-02-003) must not be not_allowed.
@@ -566,18 +572,18 @@ export function createPostgresSourceCandidateRepository({
      */
     async createSourceCandidateStub(input) {
       if (!validateCreateInput(input)) return sourceCandidateFailure("validation_blocker");
-      const { identity, actorUserId, now, metadataOnlyAudit, requireOwnCurrentReviewedDecision = false } = input;
+      const { identity, actorUserId, now, metadataOnlyAudit, requireCurrentReviewedDecision = false } = input;
       try {
         return await runInTransaction(async (tx) => {
           const profileRow = await readScopedSensitivityProfile(
             tx,
             identity.organizationId,
             identity.intakeSensitivityProfileId,
-            { lock: requireOwnCurrentReviewedDecision },
+            { lock: requireCurrentReviewedDecision },
           );
           if (!profileRow) return sourceCandidateFailure("not_found");
 
-          if (requireOwnCurrentReviewedDecision && !(await hasOwnCurrentReviewedDecision(tx, profileRow, actorUserId))) {
+          if (requireCurrentReviewedDecision && !(await hasCurrentReviewedDecision(tx, profileRow))) {
             return sourceCandidateFailure("authorization_denied");
           }
 

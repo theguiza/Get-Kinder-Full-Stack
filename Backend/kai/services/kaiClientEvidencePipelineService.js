@@ -27,14 +27,15 @@ import { __evidenceLineageServiceContract } from "./kaiEvidenceLineageService.js
  * work: the client is told only that a Get Kinder review is pending - except
  * where the requesting actor itself holds the organization-scoped authority
  * for the step (owner decision 2026-10-18): a source candidate a P1-08
- * decision can act on now, for the binding-derived organization
- * administrator, and evidence extraction from a promoted source, for a
+ * decision can act on now, for an organization administrator (binding-derived
+ * or a delegated stored client_admin grant; owner decisions 2026-10-19), and
+ * evidence extraction from a promoted source, for a
  * client_admin. Those become the client's own next action; a source that
  * cannot be promoted (no candidate, or the fail-closed permission predicate
  * no longer holds) keeps a Get Kinder state with its actual reason - except
  * (owner decision 2026-10-19) a reviewed file with no candidate that the
- * requesting binding-derived administrator's own committed decision makes
- * eligible for the source-preparation continuation, which becomes that
+ * committed decision (by any authorized human decider) makes eligible for the
+ * source-preparation continuation, which becomes the requesting
  * administrator's next action.
  *
  * Never returned: file content, profile/dictionary/sensitivity values,
@@ -137,12 +138,12 @@ const GK_EXTRACTION_ROLES = new Set(EXTRACTION_ROLES.filter((role) => !role.star
 /**
  * The organization-scoped client authority the requesting actor holds for a
  * pipeline step, from each governing service's own predicate: P1-08's
- * authorizeSourcePromotionDecision (its binding-derived organization
- * administrator half only - a GK decider is still Get Kinder), and P2-01's
+ * authorizeSourcePromotionDecision (its organization-administrator half only -
+ * a GK decider is still Get Kinder), and P2-01's
  * role set restricted to its client roles (client_admin) for an actor that
  * does not also pass it as Get Kinder; and the source-preparation
- * continuation's authorizeSourceCandidateContinuation (binding-derived
- * organization administrator only). Object eligibility is still decided per
+ * continuation's authorizeSourceCandidateContinuation (organization
+ * administrator only). Object eligibility is still decided per
  * file from persisted state, and every write re-authorizes.
  */
 function resolveClientAuthority(actorContext, organizationId) {

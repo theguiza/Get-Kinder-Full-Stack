@@ -2,7 +2,7 @@ import { isKaiSprint2Enabled } from "../config/kaiSprint2Config.js";
 import { buildKaiError } from "../errors/kaiErrors.js";
 import {
   validateActorCanPerformOperation,
-  validateActorIsBoundOrganizationAdministrator,
+  validateActorIsOrganizationAdministrator,
 } from "../auth/kaiAuthorizationService.js";
 import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
 import { createPostgresSourcePromotionRepository } from "../dictionary/postgresSourcePromotionRepository.js";
@@ -80,12 +80,13 @@ function isMappedHumanActor(actorContext) {
  * policy. A refusal keeps the validator's own error code and blockers (a role
  * refusal is authorization_denied/role_not_allowed, never a tenant violation).
  *
- * Owner decision (2026-10-18), a scoped departure from Backend Contract
- * section 22's GK source-candidate ownership: when the GK check fails, an
- * active, binding-derived client_admin of this exact organization with an
- * active KAI account may decide (`organizationAdminAuthorized`). The GK role
- * set and its organization-membership mode are unchanged, so a global GK role
- * over a client membership still does not satisfy the GK half, and a stored
+ * Owner decisions (2026-10-18, 2026-10-19), a scoped departure from Backend
+ * Contract section 22's GK source-candidate ownership: when the GK check
+ * fails, an active administrator of this exact organization - binding-derived
+ * or a delegated, active stored client_admin grant - with an active KAI
+ * account may decide (`organizationAdminAuthorized`). The GK role set and its
+ * organization-membership mode are unchanged, so a global GK role over a
+ * client membership still does not satisfy the GK half, and a global
  * client_admin, client_reviewer, or client_contributor satisfies neither.
  * Every repository validator (candidate/review completeness, lineage,
  * VAL-KAI-P1-08-002 permission predicate, reviewed-source-type vocabulary),
@@ -104,7 +105,7 @@ export function authorizeSourcePromotionDecision(actorContext, organizationId) {
   );
   let organizationAdminAuthorized = false;
   if (!auth.ok) {
-    const adminAuth = validateActorIsBoundOrganizationAdministrator(actorContext, SOURCE_PROMOTION_OPERATION, organizationId);
+    const adminAuth = validateActorIsOrganizationAdministrator(actorContext, SOURCE_PROMOTION_OPERATION, organizationId);
     if (!adminAuth.ok || actorContext.kaiUserStatus !== "active") {
       return { ok: false, error: buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers }) };
     }

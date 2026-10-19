@@ -261,7 +261,7 @@ export function nextActionText(file, { canReviewFollowups = false, canContribute
     case "extract_evidence":
       return "Your action is needed: this file's source is promoted. Extract evidence from it in Data Sources.";
     case "continue_source_preparation":
-      return "Your action is needed: your sensitivity review of this file is recorded, but its source candidate was not created. Continue source preparation in Data Sources to create it; your review is not changed.";
+      return "Your action is needed: this file's sensitivity review is recorded, but its source candidate was not created. Continue source preparation in Data Sources to create it; the review is not changed.";
     default:
       return file.currentStatus === "complete" ? "No action required. Reviewed evidence from this file is available." : "No action required from you.";
   }
@@ -274,7 +274,7 @@ const REASON_MESSAGES = Object.freeze({
   waiting_for_get_kinder_review: (n) => `Your data has been processed and is waiting for Get Kinder review (${pluralFiles(n)}).`,
   waiting_for_source_promotion: (n) => `${pluralFiles(n)} passed the Get Kinder sensitivity review and ${n === 1 ? "is" : "are"} waiting for Get Kinder to review and promote ${n === 1 ? "it" : "them"} as a source. Evidence can only be created from a promoted source.`,
   source_promotion_ready: (n) => `${pluralFiles(n)} passed the sensitivity review and ${n === 1 ? "is a source candidate" : "are source candidates"} you can review and promote in Data Sources. Evidence can only be created from a promoted source.`,
-  source_preparation_ready: (n) => `${pluralFiles(n)} passed your sensitivity review, but ${n === 1 ? "its source candidate was" : "their source candidates were"} not created. Continue source preparation in Data Sources; evidence can only be created from a promoted source.`,
+  source_preparation_ready: (n) => `${pluralFiles(n)} passed the sensitivity review, but ${n === 1 ? "its source candidate was" : "their source candidates were"} not created. Continue source preparation in Data Sources; evidence can only be created from a promoted source.`,
   source_candidate_missing: (n) => `${pluralFiles(n)} passed the sensitivity review, but no source candidate was created, so ${n === 1 ? "it" : "they"} cannot be promoted yet. Contact Get Kinder.`,
   source_promotion_blocked: (n) => `${pluralFiles(n)} ${n === 1 ? "has a source candidate that" : "have source candidates that"} cannot be promoted in ${n === 1 ? "its" : "their"} current state. Contact Get Kinder.`,
   evidence_extraction_ready: (n) => `The source from ${pluralFiles(n)} has been promoted. Extract evidence from it in Data Sources.`,

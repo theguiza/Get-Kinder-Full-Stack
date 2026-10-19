@@ -640,20 +640,29 @@ async function runBrowserAcceptance() {
       const body = await adminPage.text();
       assert.ok(body.includes("Your action is needed: review this file's source candidate and promote it as a source in Data Sources."));
       assert.ok(body.includes("Review & promote source"));
-      for (const page of [contributorPage, storedAdminPage]) {
-        await page.goto("/impact-library");
-        const other = await page.api("GET", pipelinePath(ORG_X, PROJECT_X));
-        assert.equal(other.status, 200);
-        assert.deepEqual(currentOf(fileOf(other, FILE.main)), ["source_review", "waiting_for_get_kinder", "get_kinder", "none_waiting_for_get_kinder", "waiting_for_source_promotion"]);
-      }
-      results.pipeline_before = "PASS: promote_source for the administrator; waiting_for_source_promotion (GK) for contributor and stored client_admin";
+      await contributorPage.goto("/impact-library");
+      const contributor = await contributorPage.api("GET", pipelinePath(ORG_X, PROJECT_X));
+      assert.equal(contributor.status, 200);
+      assert.deepEqual(currentOf(fileOf(contributor, FILE.main)), ["source_review", "waiting_for_get_kinder", "get_kinder", "none_waiting_for_get_kinder", "waiting_for_source_promotion"]);
+      // A delegated (stored, active) client_admin holds the same authority (owner decision 2026-10-19).
+      await storedAdminPage.goto("/impact-library");
+      const stored = await storedAdminPage.api("GET", pipelinePath(ORG_X, PROJECT_X));
+      assert.deepEqual(currentOf(fileOf(stored, FILE.main)), ["source_review", "waiting_for_client", "client", "promote_source", "source_promotion_ready"]);
+      results.pipeline_before = "PASS: promote_source for the binding-derived and the stored administrator; waiting_for_source_promotion (GK) for the contributor";
     });
 
     await test("negatives before promotion: other roles, revoked authority, another Project, and another organization are refused; nothing is written", async () => {
       const before = await counts(ORG_X);
       const candidate = ids.mainCandidate;
-      for (const [label, page] of [["client_contributor", contributorPage], ["client_reviewer", reviewerPage], ["stored client_admin", storedAdminPage]]) {
-        if (page !== contributorPage && page !== storedAdminPage) await page.goto("/impact-library");
+      // The stored administrator may read the candidate it could promote; nothing is decided here.
+      const storedCapabilities = await storedAdminPage.api("GET", organizationAccessCapabilitiesPath(ORG_X));
+      assert.equal(storedCapabilities.body.data.workflowOperations.promoteSource, true);
+      for (const path of [lookupPath(ORG_X, PROJECT_X, FILE.main), detailPath(ORG_X, candidate)]) {
+        const read = await storedAdminPage.api("GET", path);
+        assert.equal(read.status, 200, `stored client_admin GET ${path}: ${JSON.stringify(read.body)}`);
+      }
+      for (const [label, page] of [["client_contributor", contributorPage], ["client_reviewer", reviewerPage]]) {
+        if (page !== contributorPage) await page.goto("/impact-library");
         const capabilities = await page.api("GET", organizationAccessCapabilitiesPath(ORG_X));
         assert.equal(capabilities.body.data.workflowOperations.promoteSource, false, label);
         for (const [method, path, body] of [["GET", lookupPath(ORG_X, PROJECT_X, FILE.main)], ["GET", detailPath(ORG_X, candidate)], ["POST", decisionPath(ORG_X, candidate), PROMOTE]]) {
@@ -707,7 +716,7 @@ async function runBrowserAcceptance() {
       }
       assert.deepEqual(await counts(ORG_X), before, "no write in X by any refusal");
       assert.equal((await counts(ORG_Y)).promotions, 0, "no promotion in Y");
-      results.negatives = "PASS: contributor/reviewer/stored client_admin 403 role_not_allowed; revoked membership and inactive binding 403; other Project 404; cross-organization 403/404";
+      results.negatives = "PASS: stored client_admin may read (200); contributor/reviewer 403 role_not_allowed; revoked membership and inactive binding 403; other Project 404; cross-organization 403/404";
     });
 
     await test("P1-08 -> P2-01: the administrator promotes through Source preparation; source, source_version, and evidence follow, attributed to the administrator", async () => {

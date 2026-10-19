@@ -1044,10 +1044,12 @@ async function runBrowserAcceptance() {
       assert.deepEqual([candidate.candidate_status, candidate.created_by, candidate.queue_status], ["needs_gk_review", kaiUserIds.reviewer, "open"]);
       assert.deepEqual(changedTables(before, await allKaiCounts()),
         ["audit_events", "intake_sensitivity_review_decisions", "intake_source_candidates", "review_queue_items", "upload_lifecycle_audit"]);
+      // The viewer is the organization's stored client_admin, which now holds
+      // the P1-08 step itself (owner decision 2026-10-19).
       const pipeline = await storedAdminPage.fetchJson("GET", pipelinePath());
       const file = findFile(pipeline.data, FILES.reviewer);
-      assert.deepEqual([file.currentStage, file.responsibleParty], ["source_review", "get_kinder"]);
-      results.J2_4 = `PASS: reviewed by reviewer (gk_reviewer); candidate ${candidate.intake_source_candidate_id}; client pipeline currentStage source_review`;
+      assert.deepEqual([file.currentStage, file.responsibleParty, file.nextAction], ["source_review", "client", "promote_source"]);
+      results.J2_4 = `PASS: reviewed by reviewer (gk_reviewer); candidate ${candidate.intake_source_candidate_id}; client pipeline source_review, the organization administrator's promote_source`;
     });
 
     const reviewerOrgOnlyPage = await session(USERS.reviewerOrgOnly);
@@ -1208,15 +1210,18 @@ async function runBrowserAcceptance() {
       assert.deepEqual([queue.status, detail.status, detail.data.decision_controls_enabled], [403, 200, true]);
     });
 
-    await test("J4-3: a stored-only client_admin (no binding) has no sensitivity authority, writing nothing", async () => {
+    await test("J4-3: a stored-only client_admin (no binding) holds its organization's sensitivity authority (owner decision 2026-10-19); a forged decision is still refused and writes nothing", async () => {
       const cockpit = await storedAdminPage.fetchJson("GET", cockpitCapabilitiesPath(ORG_A));
       const before = await allKaiCounts();
+      // A fabricated queue item and stamp: admitted as administrator, refused by the ledger.
       const decision = await storedAdminPage.fetchJson("POST", decisionPath(profiles.probe), FAKE_DECISION_BODY);
-      const work = await storedAdminPage.fetchJson("POST", reviewWorkPath(profiles.probe), {});
-      await assertNothingWritten(before, "stored client_admin");
-      assert.equal(cockpit.data.can_manage_sensitivity_review, false);
-      assert.deepEqual([decision.status, work.status], [403, 403]);
-      results.J4_3 = "PASS: capability false; decision 403; review work 403";
+      await assertNothingWritten(before, "stored client_admin forged decision");
+      assert.equal(cockpit.data.can_manage_sensitivity_review, true);
+      // Refused by the decision ledger's own checks of the forged item, not by role.
+      assert.notEqual(decision.status, 200);
+      assert.notEqual(decision.blockingReason, "role_not_allowed", JSON.stringify(decision));
+      assert.notEqual(decision.blockingReason, "missing_active_organization_membership", JSON.stringify(decision));
+      results.J4_3 = `PASS: capability true; forged decision ${decision.status} ${decision.errorCode} (not a role refusal); nothing written`;
     });
 
     // =====================================================================
@@ -1374,14 +1379,17 @@ async function runBrowserAcceptance() {
     // =====================================================================
     // J3 (continued). The mixed-role reviewer downstream
     // =====================================================================
-    await test("J3-2: the mixed-role reviewer's P1-08 promotion is refused (source-promotion authority unchanged by the 2026-10-11 decision), writing nothing", async () => {
+    await test("J3-2: the mixed-role reviewer's global gk_reviewer role is still not P1-08 authority; its stored organization client_admin grant now is (owner decision 2026-10-19) - reads only, writing nothing", async () => {
       const candidate = await candidateFor(profiles.mixed);
       const before = await allKaiCounts();
-      const promote = await mixedPage.fetchJson("POST", candidateDecisionPath(candidate.intake_source_candidate_id), PROMOTE_BODY);
-      await assertNothingWritten(before, "mixed-role promotion");
-      results.J3_2 = [promote.status, promote.errorCode, promote.blockers];
+      const detail = await mixedPage.fetchJson("GET", candidatePath(candidate.intake_source_candidate_id));
+      const access = await mixedPage.fetchJson("GET", accessCapabilitiesPath(ORG_A));
+      await assertNothingWritten(before, "mixed-role source review reads");
+      results.J3_2 = { detail: [detail.status, detail.data?.decision_controls_enabled], promoteSource: access.data?.workflowOperations?.promoteSource };
       console.log(`[campaign] J3-2 mixed P1-08: ${JSON.stringify(results.J3_2)}`);
-      assert.equal(promote.status, 403);
+      // The promotion itself is proven by kai-source-to-impact-workflow-browser-acceptance;
+      // it is not made here so this candidate stays pending for the later steps.
+      assert.deepEqual([detail.status, detail.data.decision_controls_enabled, access.data.workflowOperations.promoteSource], [200, true, true]);
     });
 
     await test("J3-3: the mixed-role reviewer's P2-12 evidence review is admitted; its claim-proposal handoff must succeed for the same human or the decision must be refused", async () => {

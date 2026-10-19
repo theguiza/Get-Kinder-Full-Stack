@@ -647,29 +647,31 @@ async function runBrowserAcceptance() {
     });
 
     // --- before: the pipeline and the Data Sources step ----------------------
-    await test("pipeline: each historical file is the deciding administrator's continue_source_preparation; every ineligible file and every other actor keeps its actual state", async () => {
+    await test("pipeline: each historical file is continue_source_preparation for every active administrator (owner decision 2026-10-19); ineligible files and non-administrators keep their actual state", async () => {
       await adminPage.goto("/impact-library");
       const pipeline = await adminPage.api("GET", pipelinePath(ORG_X, PROJECT_X));
       assert.equal(pipeline.status, 200, JSON.stringify(pipeline.body));
       for (const key of ["hist1", "hist2", "hist3"]) assert.deepEqual(currentOf(fileOf(pipeline, FILE[key])), CONTINUE, key);
       for (const key of ["cand1", "cand2"]) assert.deepEqual(currentOf(fileOf(pipeline, FILE[key])), PROMOTE_READY, key);
-      for (const key of ["otherAdmin", "reviewedNotAllowed", "profileNotAllowed"]) assert.deepEqual(currentOf(fileOf(pipeline, FILE[key])), MISSING, key);
+      assert.deepEqual(currentOf(fileOf(pipeline, FILE.otherAdmin)), CONTINUE, "another administrator's review is continuable");
+      for (const key of ["reviewedNotAllowed", "profileNotAllowed"]) assert.deepEqual(currentOf(fileOf(pipeline, FILE[key])), MISSING, key);
       assert.equal(fileOf(pipeline, FILE.needsMore).currentStage, "sensitivity_review");
       assert.deepEqual(currentOf(fileOf(pipeline, FILE.policyFailed)).slice(0, 3), ["security_check", "failed", "get_kinder"]);
-      // The other administrator: only the file whose current decision is theirs.
-      await admin2Page.goto("/impact-library");
-      const pipeline2 = await admin2Page.api("GET", pipelinePath(ORG_X, PROJECT_X));
-      assert.deepEqual(currentOf(fileOf(pipeline2, FILE.otherAdmin)), CONTINUE);
-      assert.deepEqual(currentOf(fileOf(pipeline2, FILE.hist1)), MISSING);
+      // The other administrator and the delegated (stored) administrator: every eligible file.
+      for (const page of [admin2Page, storedAdminPage]) {
+        await page.goto("/impact-library");
+        const other = await page.api("GET", pipelinePath(ORG_X, PROJECT_X));
+        for (const key of ["hist1", "otherAdmin"]) assert.deepEqual(currentOf(fileOf(other, FILE[key])), CONTINUE, key);
+      }
       // Other client roles are never offered it.
-      for (const [label, page] of [["client_contributor", contributorPage], ["client_reviewer", reviewerPage], ["stored client_admin", storedAdminPage]]) {
+      for (const [label, page] of [["client_contributor", contributorPage], ["client_reviewer", reviewerPage]]) {
         await page.goto("/impact-library");
         const other = await page.api("GET", pipelinePath(ORG_X, PROJECT_X));
         assert.equal(other.status, 200, `${label}: ${JSON.stringify(other.body)}`);
         assert.equal(fileOf(other, FILE.hist1).nextAction, "contact_get_kinder", label);
         assert.ok(!other.body.data.files.some((file) => file.nextAction === "continue_source_preparation"), label);
       }
-      results.pipeline_before = "PASS: hist1-3 continue_source_preparation for the decider only; cand1-2 promote_source; refusal shapes unchanged";
+      results.pipeline_before = "PASS: hist1-3 and otherAdmin continue_source_preparation for every active administrator (bound or stored); cand1-2 promote_source; contributor/reviewer not offered";
     });
 
     await test("Data Sources > Source preparation offers Continue source preparation only on the eligible reviewed files", async () => {
@@ -689,12 +691,13 @@ async function runBrowserAcceptance() {
         assert.equal(await has(adminPage, `[data-client-open-source-review="${FILE[key]}"]`), true, key);
         assert.equal(await has(adminPage, `[data-client-continue-source-preparation="${FILE[key]}"]`), false, key);
       }
-      for (const key of ["otherAdmin", "reviewedNotAllowed", "profileNotAllowed", "needsMore", "policyFailed"]) {
+      assert.equal(await has(adminPage, `[data-client-continue-source-preparation="${FILE.otherAdmin}"]`), true, "another administrator's reviewed file");
+      for (const key of ["reviewedNotAllowed", "profileNotAllowed", "needsMore", "policyFailed"]) {
         assert.equal(await has(adminPage, `[data-client-continue-source-preparation="${FILE[key]}"]`), false, key);
         assert.equal(await has(adminPage, `[data-client-open-source-review="${FILE[key]}"]`), false, key);
       }
       const text = await adminPage.text();
-      assert.ok(text.includes("Continue source preparation in Data Sources to create it; your review is not changed."));
+      assert.ok(text.includes("Continue source preparation in Data Sources to create it; the review is not changed."));
       assert.ok(text.includes("Contact Get Kinder. The sensitivity review is recorded, but no source candidate was created"), "the actual blocker stays visible");
       results.ui_offer = "PASS";
     });
@@ -704,7 +707,6 @@ async function runBrowserAcceptance() {
       const beforeX = await counts(ORG_X);
       const beforeY = await counts(ORG_Y);
       for (const [key, status, reason] of [
-        ["otherAdmin", 403, "sensitivity_decision_recorded_by_another_reviewer"],
         ["reviewedNotAllowed", 422, "allowed_use_not_allowed"],
         ["profileNotAllowed", 422, "allowed_use_not_allowed"],
         ["needsMore", 422, "sensitivity_review_not_complete"],
@@ -714,7 +716,7 @@ async function runBrowserAcceptance() {
         assert.deepEqual([refused.status, refused.body.blockers?.[0]?.blocking_reason, refused.body.blockers?.[0]?.validator_key],
           [status, reason, "VAL-KAI-P1-07-002"], `${key}: ${JSON.stringify(refused.body)}`);
       }
-      for (const [label, page] of [["client_contributor", contributorPage], ["client_reviewer", reviewerPage], ["stored client_admin", storedAdminPage]]) {
+      for (const [label, page] of [["client_contributor", contributorPage], ["client_reviewer", reviewerPage]]) {
         const refused = await page.api("POST", continuationPath(ORG_X, PROJECT_X, FILE.hist3), {});
         assert.deepEqual([refused.status, refused.body.error.code, refused.body.blockers?.[0]?.blocking_reason], [403, "authorization_denied", "role_not_allowed"], label);
       }
@@ -755,7 +757,7 @@ async function runBrowserAcceptance() {
       assert.deepEqual(delta(await counts(ORG_X), beforeX), ZERO, "no write in X");
       assert.deepEqual(delta(await counts(ORG_Y), beforeY), ZERO, "no write in Y");
       assert.deepEqual(await candidateOf(ORG_X, ids.profile.otherAdmin), []);
-      results.refusals = "PASS: other reviewer 403; reviewed/P1-05 not_allowed 422; needs_more_information 422; failed policy 422; contributor/reviewer/stored admin 403 role_not_allowed; revoked membership/binding 403; other Project 404; cross-organization 403/404; body 422; zero writes";
+      results.refusals = "PASS: reviewed/P1-05 not_allowed 422; needs_more_information 422; failed policy 422; contributor/reviewer 403 role_not_allowed; revoked membership/binding 403; other Project 404; cross-organization 403/404; body 422; zero writes";
     });
 
     // --- continuation -> candidate -> promotion -> source -> evidence -------
@@ -763,7 +765,7 @@ async function runBrowserAcceptance() {
       const before = await counts(ORG_X);
       const mark = adminPage.mark();
       await adminPage.clickIn(`[data-client-continue-source-preparation="${FILE.hist1}"]`, "Continue source preparation");
-      await adminPage.waitForText("Source preparation continued: the source candidate was created from your recorded sensitivity review.");
+      await adminPage.waitForText("Source preparation continued: the source candidate was created from the file's recorded sensitivity review.");
       await adminPage.waitFor(() => has(adminPage, `[data-client-open-source-review="${FILE.hist1}"]`), "Review & promote source offered");
       await adminPage.idle();
       assert.deepEqual(postsSince(adminPage, mark), [[continuationPath(ORG_X, PROJECT_X, FILE.hist1).split("?")[0], 200]], "exactly the continuation route");

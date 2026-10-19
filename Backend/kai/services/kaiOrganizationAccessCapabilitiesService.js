@@ -122,10 +122,11 @@ function passes(actorContext, operation, organizationId, allowedRoles) {
 // funder evidence summary and the seven other generators
 // (GENERATED_CONTENT_ALLOWED_ROLES), which client_admin never holds.
 // reviewSensitivity is the review-cockpit sensitivity decision gate
-// (GK roles, or the binding-derived organization administrator). promoteSource
+// (GK roles, or an organization administrator: binding-derived or a delegated
+// stored client_admin grant, owner decisions 2026-10-19). promoteSource
 // is P1-08's own authorizeSourcePromotionDecision; for a GK actor the decision
 // route additionally requires the cockpit read gate (a global GK role), and
-// for the binding-derived organization administrator the source-candidate
+// for an organization administrator the source-candidate
 // gate admits the same actor P1-08 does (owner decision 2026-10-18).
 function canPromoteSource(actorContext, organizationId) {
   const decision = authorizeSourcePromotionDecision(actorContext, organizationId);
@@ -290,9 +291,9 @@ export function computeOrganizationOperationReadiness(actorContext, organization
     const missing = definition.clauses
       .filter((clause) => !clauseSatisfied(actorContext, definition.operation, organizationId, clause))
       .map((clause) => ({ scope: clause.scope, roles: [...clause.roles].sort(), granted_by: grantedBy(clause) }));
-    // Sensitivity review also admits an active binding-derived organization
+    // Sensitivity review also admits an active organization
     // administrator (validateActorCanPerformSensitivityReview).
-    // Source promotion also admits an active binding-derived organization
+    // Source promotion also admits an active organization
     // administrator (authorizeSourcePromotionDecision, owner decision 2026-10-18).
     const ready = definition.sensitivity
       ? validateActorCanPerformSensitivityReview(actorContext, definition.operation, organizationId,
