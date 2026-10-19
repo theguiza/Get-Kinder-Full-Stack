@@ -771,8 +771,16 @@ async function runBrowserAcceptance() {
       assert.deepEqual(actors.map((row) => row.actor_user_id), [ids.adminKaiUser], "every audited action since the proposal is the client_admin's");
       ids.x.draftIds = drafts.map((row) => row.generated_content_draft_id);
       const body = await adminPage.text();
-      assert.ok(body.includes("Internal use only. It appears under Generated Drafts once Get Kinder has reviewed it."));
-      assert.ok(!body.includes("Internal draft text for:"), "unreviewed draft text is not rendered on the client page");
+      assert.ok(body.includes("Internal use only; it awaits Get Kinder review. It is opened from your saved drafts below."), "owner decision 2026-10-19: the persisted draft is read back");
+      // Owner decision 2026-10-19: the administrator reads its own persisted
+      // draft back, only inside the internal-draft view with its true review
+      // state and limitations.
+      await adminPage.waitFor(async () => adminPage.evaluate(`Boolean(document.querySelector("[data-client-internal-draft-detail]"))`), "internal draft detail");
+      const detail = await adminPage.evaluate(`(() => { const el = document.querySelector("[data-client-internal-draft-detail]"); return el ? el.innerText : null; })()`);
+      assert.ok(detail && detail.includes("Internal draft text for:"), `the persisted draft is read back: ${detail}`);
+      for (const text of ["Awaiting Get Kinder review", "Internal use only.", "Not approved for funder or public use, export, or release.", "Get Kinder has not reviewed this draft."]) {
+        assert.ok(detail.includes(text), text);
+      }
       results.b5 = "PASS: proposal -> client P2-04 -> evidence summary 201 + impact narrative 201; zero GK audit events or decisions in between";
     });
 

@@ -91,7 +91,10 @@ async function createDefaultGeneratedContentRepository() {
   return createPostgresGeneratedContentRepository();
 }
 
-function admit(input, keys, dependencies) {
+function admit(input, keys, dependencies, {
+  operation = CLIENT_GENERATED_CONTENT_OPERATION,
+  allowedRoles = CLIENT_GENERATED_CONTENT_ALLOWED_ROLES,
+} = {}) {
   const env = dependencies.env || process.env;
   if (!isKaiSprint2Enabled(env) || !isKaiGenerationEnabled(env)) return buildKaiError("feature_disabled");
   if (!hasOnlyKeys(input, keys)) return buildKaiError("validation_blocker");
@@ -99,12 +102,7 @@ function admit(input, keys, dependencies) {
     if (key !== "actorContext" && !isCanonicalUuid(input[key])) return buildKaiError("validation_blocker");
   }
   if (!isMappedHumanActor(input.actorContext)) return buildKaiError("authorization_denied");
-  const auth = validateActorCanPerformOperation(
-    input.actorContext,
-    CLIENT_GENERATED_CONTENT_OPERATION,
-    input.organizationId,
-    { allowedRoles: CLIENT_GENERATED_CONTENT_ALLOWED_ROLES },
-  );
+  const auth = validateActorCanPerformOperation(input.actorContext, operation, input.organizationId, { allowedRoles });
   if (!auth.ok) return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers });
   const tenant = validateTenantBoundaryConsistency({
     expectedOrganizationId: input.organizationId,
@@ -329,7 +327,176 @@ export async function getClientBoardReportingPreview(input, dependencies = {}) {
   return readClientPacketPreview(input, dependencies, { method: "getBoardReportingPacket", audience: BOARD_REPORTING_PACKET_AUDIENCE });
 }
 
+/**
+ * The organization administrator's own internal drafts (owner decision
+ * 2026-10-19). An active client_admin of the organization (stored or
+ * binding-derived; the same organization-membership check that admits it to
+ * generate them, CLIENT_ADMIN_DRAFT_ALLOWED_ROLES) may read the INTERNAL
+ * evidence summaries and impact narratives of one selected Project, in any
+ * Get Kinder review state, with their true review state. That is the content
+ * the same administrator's generation response already returns; reading it
+ * back grants nothing.
+ *
+ * - Only requested_audience 'internal' and content types evidence_summary /
+ *   impact_narrative (the two an organization administrator generates);
+ *   every other type and audience is not_found here.
+ * - The draft's packet must be readable now: the repository re-runs P2-06
+ *   for every cited claim (and so the effective allowed use), and a draft
+ *   whose cited claim is no longer traceable is withheld, never shown stale.
+ * - Projection: content type, audience, a client review state
+ *   (awaiting_get_kinder_review / in_get_kinder_review / reviewed_by_get_kinder),
+ *   whether every cited claim is currently eligible for internal use, fixed
+ *   limitation codes, and per block its text and cited claim ids. Never
+ *   queue/run/evidence/source ids, GK review vocabulary, blocker codes,
+ *   prompts, validator results, or export state.
+ * - No approval, release, funder/public eligibility, or export authority:
+ *   `internal_use_only` and `not_approved_for_external_use` are always listed.
+ */
+const CLIENT_INTERNAL_DRAFT_OPERATION = "read_client_internal_drafts";
+const CLIENT_INTERNAL_DRAFT_READ_ROLES = new Set(["client_admin"]);
+const CLIENT_INTERNAL_DRAFT_CONTENT_TYPES = new Set(["evidence_summary", "impact_narrative"]);
+const INTERNAL_AUDIENCE = "internal";
+const CLIENT_INTERNAL_REVIEW_STATE = Object.freeze({
+  "open/needs_gk_review": "awaiting_get_kinder_review",
+  "in_progress/needs_gk_review": "in_get_kinder_review",
+  "resolved/resolved": "reviewed_by_get_kinder",
+});
+const INTERNAL_DRAFT_ADMISSION = Object.freeze({
+  operation: CLIENT_INTERNAL_DRAFT_OPERATION,
+  allowedRoles: CLIENT_INTERNAL_DRAFT_READ_ROLES,
+});
+
+function internalReviewState({ queueStatus, reviewStatus }) {
+  return CLIENT_INTERNAL_REVIEW_STATE[`${queueStatus}/${reviewStatus}`] ?? null;
+}
+
+function isInternalDraftSummary(summary) {
+  return CLIENT_INTERNAL_DRAFT_CONTENT_TYPES.has(summary.contentType) && summary.requestedAudience === INTERNAL_AUDIENCE;
+}
+
+function internalDraftLimitations(packet, reviewState) {
+  return [
+    "internal_use_only",
+    "not_approved_for_external_use",
+    ...(reviewState === "reviewed_by_get_kinder" ? [] : ["awaiting_get_kinder_review"]),
+    ...(packet.currentUseEligible === true ? [] : ["cited_claims_not_currently_eligible"]),
+  ];
+}
+
+function toClientInternalDraft(packet, reviewState) {
+  return {
+    generatedContentDraftId: packet.generatedContentDraftId,
+    contentType: packet.contentType,
+    audience: INTERNAL_AUDIENCE,
+    reviewState,
+    citedClaimsCurrentlyEligible: packet.currentUseEligible === true,
+    limitations: internalDraftLimitations(packet, reviewState),
+    blocks: packet.blocks.map((block) => ({
+      ordinal: block.ordinal,
+      text: block.text,
+      supportingClaimIds: [...new Set(block.citations.map((citation) => citation.claimId))].sort(),
+    })),
+  };
+}
+
+export async function listClientInternalDrafts(input, dependencies = {}) {
+  const { cursor, ...required } = isPlainObject(input) ? input : {};
+  const denied = admit(required, ["organizationId", "engagementId", "actorContext"], dependencies, INTERNAL_DRAFT_ADMISSION);
+  if (denied) return denied;
+  const after = cursor === undefined || cursor === null ? null : decodeCursor(cursor);
+  if (cursor !== undefined && cursor !== null && after === null) return buildKaiError("validation_blocker");
+  const { organizationId, engagementId } = required;
+  const engagementError = await resolveEngagement({ organizationId, engagementId }, dependencies);
+  if (engagementError) return engagementError;
+
+  const readIndex = dependencies.listGeneratedDraftLibraryIndex || readGeneratedDraftLibraryIndex;
+  const repository = dependencies.generatedContentRepository || (await createDefaultGeneratedContentRepository());
+
+  const items = [];
+  let scanned = 0;
+  let position = after;
+  let lastScanned = null;
+  let moreRows = false;
+  for (;;) {
+    const rows = await readIndex(organizationId, {
+      limit: CLIENT_DRAFT_INDEX_PAGE_LIMIT,
+      afterGeneratedContentDraftId: position,
+      engagementId,
+    });
+    if (!Array.isArray(rows) || rows.length > CLIENT_DRAFT_INDEX_PAGE_LIMIT + 1) return buildKaiError("system_error");
+    const page = rows.slice(0, CLIENT_DRAFT_INDEX_PAGE_LIMIT);
+    for (const [index, row] of page.entries()) {
+      if (scanned >= CLIENT_DRAFT_SCAN_LIMIT) {
+        moreRows = true;
+        break;
+      }
+      const summary = responseDraftSummary(row, organizationId, false);
+      if (!summary) return buildKaiError("system_error");
+      scanned += 1;
+      lastScanned = summary.generatedContentDraftId;
+      if (index === page.length - 1 && rows.length > CLIENT_DRAFT_INDEX_PAGE_LIMIT) moreRows = true;
+      if (!isInternalDraftSummary(summary)) continue;
+      const reviewState = internalReviewState(summary);
+      if (!reviewState) continue;
+      const result = await repository.getGeneratedDraftReviewPacket({
+        organizationId,
+        generatedContentDraftId: summary.generatedContentDraftId,
+      });
+      if (!result.ok) {
+        if (DRAFT_NOT_PRESENTABLE_CODES.has(result.error?.code)) continue;
+        return buildKaiError(result.error?.code || "system_error");
+      }
+      const packet = singleDraftPacket(result.data);
+      if (!packet) return buildKaiError("system_error");
+      items.push({
+        generatedContentDraftId: packet.generatedContentDraftId,
+        contentType: packet.contentType,
+        audience: INTERNAL_AUDIENCE,
+        reviewState,
+        createdAt: summary.createdAt,
+        blockCount: packet.blocks.length,
+      });
+    }
+    if (scanned >= CLIENT_DRAFT_SCAN_LIMIT || rows.length <= CLIENT_DRAFT_INDEX_PAGE_LIMIT) break;
+    moreRows = false;
+    position = page.at(-1).generated_content_draft_id;
+  }
+
+  return {
+    ok: true,
+    data: { items, nextCursor: moreRows && lastScanned ? encodeCursor(lastScanned) : null },
+    error: null,
+  };
+}
+
+export async function getClientInternalDraft(input, dependencies = {}) {
+  const denied = admit(input, ["organizationId", "engagementId", "generatedContentDraftId", "actorContext"], dependencies, INTERNAL_DRAFT_ADMISSION);
+  if (denied) return denied;
+  const { organizationId, engagementId, generatedContentDraftId } = input;
+  const engagementError = await resolveEngagement({ organizationId, engagementId }, dependencies);
+  if (engagementError) return engagementError;
+  const readDraftEngagement = dependencies.readGeneratedDraftEngagementId || readGeneratedDraftEngagementId;
+  if ((await readDraftEngagement(organizationId, generatedContentDraftId)) !== engagementId) return buildKaiError("not_found");
+  const repository = dependencies.generatedContentRepository || (await createDefaultGeneratedContentRepository());
+  const result = await repository.getGeneratedDraftReviewPacket({ organizationId, generatedContentDraftId });
+  if (!result.ok) {
+    return buildKaiError(DRAFT_NOT_PRESENTABLE_CODES.has(result.error?.code) ? "not_found" : result.error?.code || "system_error");
+  }
+  const packet = singleDraftPacket(result.data);
+  if (!packet) return buildKaiError("system_error");
+  const reviewState = internalReviewState(packet);
+  // Another audience or content type, or an unknown review state, is
+  // indistinguishable from a draft that does not exist.
+  if (!isInternalDraftSummary({ contentType: packet.contentType, requestedAudience: packet.requestedAudience }) || !reviewState) {
+    return buildKaiError("not_found");
+  }
+  return { ok: true, data: toClientInternalDraft(packet, reviewState), error: null };
+}
+
 export const __clientGeneratedContentServiceContract = Object.freeze({
+  CLIENT_INTERNAL_DRAFT_OPERATION,
+  CLIENT_INTERNAL_DRAFT_READ_ROLES,
+  CLIENT_INTERNAL_DRAFT_CONTENT_TYPES,
   CLIENT_GENERATED_CONTENT_OPERATION,
   CLIENT_GENERATED_CONTENT_ALLOWED_ROLES,
   CLIENT_DRAFT_SCAN_LIMIT,

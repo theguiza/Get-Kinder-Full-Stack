@@ -758,7 +758,9 @@ async function runBrowserAcceptance() {
     await page.selectProject(PROJECT);
     await page.idle();
     await page.clickTab("Reviews");
-    await page.waitForText("Waiting for Get Kinder review");
+    // The viewer is the organization's stored client_admin: its sensitivity
+    // reviews and promotions are its own work (owner decision 2026-10-19).
+    await page.waitForText("Ready for you in Data Sources");
     return page.text();
   }
   async function openAdminKaiAccess(page) {
@@ -803,9 +805,9 @@ async function runBrowserAcceptance() {
     const npoPage = await session(USERS.npoAdmin);
     await test("G1: before the decision the organization sees the chosen file waiting for sensitivity review", async () => {
       const body = await clientReviewsText(npoPage);
-      assert.ok(body.includes(`${NAMES.withBoth}: Sensitivity review (Waiting for Get Kinder)`), body.slice(0, 3000));
-      assert.ok(body.includes(`${NAMES.unrelated}: Sensitivity review (Waiting for Get Kinder)`));
-      results.G1 = `PASS: ${NAMES.withBoth} at Sensitivity review (Waiting for Get Kinder)`;
+      assert.ok(body.includes(`${NAMES.withBoth}: Your action is needed: review this file's sensitivity & allowed use`), body.slice(0, 3000));
+      assert.ok(body.includes(`${NAMES.unrelated}: Your action is needed: review this file's sensitivity & allowed use`));
+      results.G1 = `PASS: ${NAMES.withBoth} at sensitivity review, the organization administrator's own step`;
     });
 
     let withBothOutcome = null;
@@ -862,12 +864,12 @@ async function runBrowserAcceptance() {
       // the organization's own next action, still separate from the sensitivity review.
       assert.deepEqual([stageStatus(FILES.withBoth, "sensitivity_review"), stageStatus(FILES.withBoth, "source_review"), byId[FILES.withBoth].currentStage, byId[FILES.withBoth].nextAction],
         ["complete", "waiting_for_client", "source_review", "promote_source"]);
-      assert.deepEqual([stageStatus(FILES.unrelated, "sensitivity_review"), byId[FILES.unrelated].currentStage], ["waiting_for_get_kinder", "sensitivity_review"],
+      assert.deepEqual([stageStatus(FILES.unrelated, "sensitivity_review"), byId[FILES.unrelated].currentStage], ["waiting_for_client", "sensitivity_review"],
         "an unrelated file is not marked reviewed");
       const body = await clientReviewsText(npoPage);
       assert.ok(body.includes(`${NAMES.withBoth}: Your action is needed: review this file's source candidate and promote it as a source in Data Sources.`), body.slice(0, 3000));
-      assert.ok(!body.includes(`${NAMES.withBoth}: Sensitivity review (Waiting for Get Kinder)`));
-      assert.ok(body.includes(`${NAMES.unrelated}: Sensitivity review (Waiting for Get Kinder)`));
+      assert.ok(!body.includes(`${NAMES.withBoth}: Your action is needed: review this file's sensitivity & allowed use`));
+      assert.ok(body.includes(`${NAMES.unrelated}: Your action is needed: review this file's sensitivity & allowed use`));
       assert.deepEqual(npoPage.exceptions, []);
       results.G2 = `PASS: decision ${decisions[0].decision_id} on profile ${profiles.withBoth}; pipeline sensitivity_review complete, source_review the organization administrator's promote_source (candidate ${candidate.intake_source_candidate_id}, open source_candidate_review); unrelated file still at sensitivity review`;
     });

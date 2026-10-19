@@ -492,6 +492,10 @@ try {
   const cleanRowsAfterP3_04 = proveCleanPredecessorCase(cleanDbName);
   proveReplayConvergence(cleanDbName, cleanRowsAfterP3_04);
   const cleanVerifierProof = runAndAssertVerifier(cleanDbName);
+  // VAL-KAI-B1A-02-003: generation reads the file's effective allowed use,
+  // including the later Phase-5 decision ledger, which only the integration
+  // suite's database needs (applied after the P3-04 proofs, its production order).
+  psqlFile(cleanDbName, "migrations/kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger.sql");
   psqlFile(cleanDbName, "scripts/kai-sprint2-gate-a-smoke-seed.sql");
   psqlFile(cleanDbName, "scripts/kai-sprint2-p1-04-data-dictionary-quality-smoke-seed.sql");
   psqlFile(cleanDbName, "scripts/kai-sprint2-p1-05-intake-sensitivity-profile-smoke-seed.sql");

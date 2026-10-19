@@ -34,6 +34,7 @@ import { __engagementContextServiceContract } from "./kaiEngagementContextServic
 import { __improvementPracticeServiceContract } from "./kaiImprovementPracticeService.js";
 import { __organizationJoinRequestReviewServiceContract } from "./kaiOrganizationJoinRequestReviewService.js";
 import { hasOrganizationRoleAdministrationAuthority } from "./kaiAccessAdministrationService.js";
+import { __clientGeneratedContentServiceContract } from "./kaiClientGeneratedContentService.js";
 
 /**
  * Organization access capabilities for the Impact Library client. The
@@ -156,6 +157,12 @@ function workflowOperations(actorContext, organizationId) {
     reviewGeneratedDrafts: validateActorCanPerformOperation(
       actorContext, __generatedContentServiceContract.COMPLETE_GENERATED_CONTENT_REVIEW_OPERATION, organizationId,
       { allowedRoles: __generatedContentServiceContract.COMPLETE_GENERATED_CONTENT_REVIEW_ALLOWED_ROLES },
+    ).ok === true,
+    // The organization administrator's own internal drafts (owner decision
+    // 2026-10-19): listClientInternalDrafts / getClientInternalDraft's own check.
+    readInternalDrafts: validateActorCanPerformOperation(
+      actorContext, __clientGeneratedContentServiceContract.CLIENT_INTERNAL_DRAFT_OPERATION, organizationId,
+      { allowedRoles: __clientGeneratedContentServiceContract.CLIENT_INTERNAL_DRAFT_READ_ROLES },
     ).ok === true,
     readGeneratedDrafts: validateActorCanPerformOperation(
       actorContext, __generatedDraftLibraryServiceContract.GENERATED_DRAFT_LIBRARY_READ_OPERATION, organizationId,

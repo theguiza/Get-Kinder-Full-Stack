@@ -543,9 +543,15 @@ async function runBrowserAcceptance() {
     }))].sort();
     console.log(`[browser-acceptance] ${label} requests:\n  ${observed.join("\n  ")}`);
     for (const request of page.requests()) {
-      const { pathname } = new URL(request.url);
-      assert.ok(ALLOWED_CLIENT_ROUTES.some((pattern) => pattern.test(pathname)), `${label}: unexpected client request ${request.method} ${pathname}`);
-      if (!/client-(generated-drafts|grant-response-packet|board-reporting|funder-requirements)/.test(pathname)) {
+      const { pathname, search } = new URL(request.url);
+      // An organization administrator (binding-derived or a stored grant, owner
+      // decisions 2026-10-12 and 2026-10-19) lists its own open sensitivity
+      // reviews; never any other review-cockpit queue (e.g. source review).
+      const ownSensitivityQueue = label === "client_admin"
+        && pathname === "/api/kai/sprint2/intake/admin/review-cockpit/queue"
+        && new URLSearchParams(search).get("queue_type") === "sensitivity_review";
+      assert.ok(ownSensitivityQueue || ALLOWED_CLIENT_ROUTES.some((pattern) => pattern.test(pathname)), `${label}: unexpected client request ${request.method} ${pathname}${search}`);
+      if (!ownSensitivityQueue && !/client-(generated-drafts|grant-response-packet|board-reporting|funder-requirements)/.test(pathname)) {
         assert.doesNotMatch(pathname, GK_ROUTE_PATTERN, `${label}: GK-internal route called ${pathname}`);
       }
       if (pathname.includes("/join-requests")) assert.ok(allowJoinReview, `${label}: join review probed without capability`);

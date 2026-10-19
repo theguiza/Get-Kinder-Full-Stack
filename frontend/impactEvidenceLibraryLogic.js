@@ -74,7 +74,7 @@ export function projectOrganizationAccessCapabilities(dto) {
   const required = ["internalKnowledgeWorkspace", "intakeContribution", "clientFollowupReview", "projectManagement", "improvementPlanManagement", "organizationJoinReview", "organizationAccessManagement"];
   if (!required.every((key) => typeof dto[key] === "boolean")) return null;
   return {
-    workflowOperations: Object.fromEntries(["reviewSensitivity", "promoteSource", "generateDrafts", "generateAllDraftTypes", "reviewGeneratedDrafts", "readGeneratedDrafts", "recordEvidenceReview", "recordClaimReview", "extractEvidence", "assessEvidenceCoverage", "proposeClaim", "generateClaimGapFollowups", "recordConflict", "acceptCoverageLimitation", "assessRequirement", "readGrantResponsePacket", "readBoardReportingPacket"].map((key) => [key, dto.workflowOperations?.[key] === true])),
+    workflowOperations: Object.fromEntries(["reviewSensitivity", "promoteSource", "generateDrafts", "generateAllDraftTypes", "reviewGeneratedDrafts", "readGeneratedDrafts", "readInternalDrafts", "recordEvidenceReview", "recordClaimReview", "extractEvidence", "assessEvidenceCoverage", "proposeClaim", "generateClaimGapFollowups", "recordConflict", "acceptCoverageLimitation", "assessRequirement", "readGrantResponsePacket", "readBoardReportingPacket"].map((key) => [key, dto.workflowOperations?.[key] === true])),
     internalKnowledgeWorkspace: dto.internalKnowledgeWorkspace === true,
     intakeContribution: dto.intakeContribution === true,
     clientFollowupReview: dto.clientFollowupReview === true,
@@ -186,6 +186,75 @@ export function clientGrantResponsePacketPath(organizationId, engagementId) {
 export function clientBoardReportingPreviewPath(organizationId, engagementId) {
   return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}`
     + `/engagements/${encodeURIComponent(engagementId)}/client-board-reporting`;
+}
+
+// The organization administrator's own internal drafts of one Project, in any
+// Get Kinder review state (owner decision 2026-10-19). Internal only; reading
+// one approves, releases, or exports nothing.
+export function clientInternalDraftsPath(organizationId, engagementId, cursor = null) {
+  const base = `${clientEngagementBasePath(organizationId, engagementId)}/client-internal-drafts`;
+  return cursor ? `${base}?cursor=${encodeURIComponent(cursor)}` : base;
+}
+
+export function clientInternalDraftPath(organizationId, engagementId, generatedContentDraftId) {
+  return `${clientEngagementBasePath(organizationId, engagementId)}/client-internal-drafts/${encodeURIComponent(generatedContentDraftId)}`;
+}
+
+export const CLIENT_INTERNAL_DRAFT_REVIEW_STATES = Object.freeze(["awaiting_get_kinder_review", "in_get_kinder_review", "reviewed_by_get_kinder"]);
+export const CLIENT_INTERNAL_DRAFT_LIMITATIONS = Object.freeze([
+  "internal_use_only",
+  "not_approved_for_external_use",
+  "awaiting_get_kinder_review",
+  "cited_claims_not_currently_eligible",
+]);
+const CLIENT_INTERNAL_DRAFT_TYPES = Object.freeze(["evidence_summary", "impact_narrative"]);
+
+function isClientInternalDraftHeader(item) {
+  return isPlainClientObject(item)
+    && isRouteUuid(item.generatedContentDraftId)
+    && CLIENT_INTERNAL_DRAFT_TYPES.includes(item.contentType)
+    && item.audience === "internal"
+    && CLIENT_INTERNAL_DRAFT_REVIEW_STATES.includes(item.reviewState);
+}
+
+// Returns null (unknown) for any malformed DTO, type, audience, or review state.
+export function projectClientInternalDraftList(dto) {
+  if (!isPlainClientObject(dto) || !Array.isArray(dto.items)) return null;
+  const items = [];
+  for (const item of dto.items) {
+    if (!isClientInternalDraftHeader(item) || !Number.isInteger(item.blockCount)) return null;
+    items.push({
+      generatedContentDraftId: item.generatedContentDraftId,
+      contentType: item.contentType,
+      audience: item.audience,
+      reviewState: item.reviewState,
+      createdAt: typeof item.createdAt === "string" ? item.createdAt : null,
+      blockCount: item.blockCount,
+    });
+  }
+  if (!(dto.nextCursor === null || (typeof dto.nextCursor === "string" && dto.nextCursor.length > 0))) return null;
+  return { items, nextCursor: dto.nextCursor };
+}
+
+export function projectClientInternalDraft(dto) {
+  if (!isClientInternalDraftHeader(dto) || typeof dto.citedClaimsCurrentlyEligible !== "boolean") return null;
+  if (!Array.isArray(dto.limitations) || !dto.limitations.every((code) => CLIENT_INTERNAL_DRAFT_LIMITATIONS.includes(code))) return null;
+  if (!Array.isArray(dto.blocks) || dto.blocks.length === 0) return null;
+  const blocks = [];
+  for (const block of dto.blocks) {
+    if (!isPlainClientObject(block) || !Number.isInteger(block.ordinal) || typeof block.text !== "string") return null;
+    if (!Array.isArray(block.supportingClaimIds) || !block.supportingClaimIds.every(isRouteUuid)) return null;
+    blocks.push({ ordinal: block.ordinal, text: block.text, supportingClaimIds: [...block.supportingClaimIds] });
+  }
+  return {
+    generatedContentDraftId: dto.generatedContentDraftId,
+    contentType: dto.contentType,
+    audience: dto.audience,
+    reviewState: dto.reviewState,
+    citedClaimsCurrentlyEligible: dto.citedClaimsCurrentlyEligible,
+    limitations: [...dto.limitations],
+    blocks,
+  };
 }
 
 export const CLIENT_GENERATED_CONTENT_TYPES = Object.freeze([

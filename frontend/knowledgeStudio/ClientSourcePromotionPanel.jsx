@@ -6,11 +6,21 @@ import {
   intakeFileSourceCandidatePath,
   isRouteUuid,
   postJson,
+  projectSensitivityDetail,
+  sensitivityProfilePath,
   sourceCandidateDecisionPath,
   sourceCandidateDetailPath,
 } from "../impactEvidenceLibraryLogic.js";
+import { intakeFileSensitivityProfilePath } from "../kaiWebIntakeLogic.js";
 import { SourceCandidateDetail } from "../kaiReviewCockpit.jsx";
-import { sourcePromotionFailureMessage, sourcePromotionResultMessage } from "./clientEvidenceWorkflowLogic.js";
+import {
+  SOURCE_AUTHORIZATION_INTENDED_USE,
+  sourcePromotionFailureMessage,
+  sourcePromotionResultMessage,
+  sourceRestrictionLines,
+} from "./clientEvidenceWorkflowLogic.js";
+
+const CONFIRMATION_REQUIRED = "Confirm the source authorization above before promoting. Nothing was sent.";
 
 /**
  * P1-08 source review of one file of the selected Project in the client
@@ -26,6 +36,13 @@ import { sourcePromotionFailureMessage, sourcePromotionResultMessage } from "./c
  * allowed_reviewed_source_types, never a role list here. A refusal is shown
  * as the server returned it and never retried; every POST is followed by an
  * authoritative re-read.
+ *
+ * Source authorization (owner decision 2026-10-19): before a 'promoted'
+ * decision is sent, the person confirms, for this exact file, its identity,
+ * the proposed source type, the intended internal use, and the restrictions
+ * its current sensitivity decision records (read through the existing review
+ * reads). A 'promoted' decision is never sent without that confirmation;
+ * rejection and needs_more_information are unaffected.
  */
 export default function ClientSourcePromotionPanel({ organizationId, engagementId, intakeFileId, safeFilename, onClose, onDecisionRecorded }) {
   const [lookup, setLookup] = useState({ status: "loading", candidateId: "", error: "" });
@@ -33,6 +50,8 @@ export default function ClientSourcePromotionPanel({ organizationId, engagementI
   const [detailError, setDetailError] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
+  const [confirmed, setConfirmed] = useState(false);
+  const [restrictions, setRestrictions] = useState({ status: "loading", lines: [] });
   const mountedRef = useRef(true);
 
   useEffect(() => {
@@ -53,6 +72,25 @@ export default function ClientSourcePromotionPanel({ organizationId, engagementI
     setDetailError("");
     setDetail(response.body.data);
   }, [organizationId]);
+
+  // The restrictions the file's current sensitivity decision records.
+  useEffect(() => {
+    (async () => {
+      const lookup = await getJson(intakeFileSensitivityProfilePath(organizationId, intakeFileId));
+      const profileId = lookup.statusCode === 200 && lookup.body?.ok ? lookup.body.data?.intake_sensitivity_profile_id : null;
+      if (!mountedRef.current) return;
+      if (!isRouteUuid(profileId)) {
+        setRestrictions({ status: "error", lines: [] });
+        return;
+      }
+      const profile = await getJson(sensitivityProfilePath(organizationId, profileId));
+      if (!mountedRef.current) return;
+      const projected = profile.statusCode === 200 && profile.body?.ok ? projectSensitivityDetail(profile.body.data) : null;
+      setRestrictions(projected
+        ? { status: "ready", lines: sourceRestrictionLines(projected.currentDecision) }
+        : { status: "error", lines: [] });
+    })();
+  }, [organizationId, intakeFileId]);
 
   useEffect(() => {
     (async () => {
@@ -75,6 +113,10 @@ export default function ClientSourcePromotionPanel({ organizationId, engagementI
   const submitDecision = useCallback(async (payload) => {
     const candidateId = detail?.source_candidate?.intake_source_candidate_id;
     if (!candidateId || candidateId !== lookup.candidateId || busy) return;
+    if (payload?.outcome === "promoted" && !confirmed) {
+      setResult({ kind: "warning", text: CONFIRMATION_REQUIRED });
+      return;
+    }
     setBusy(true);
     setResult(null);
     const response = await postJson(sourceCandidateDecisionPath(organizationId, candidateId), payload);
@@ -86,7 +128,7 @@ export default function ClientSourcePromotionPanel({ organizationId, engagementI
       : { kind: "warning", text: sourcePromotionFailureMessage(response) });
     await loadDetail(candidateId);
     if (recorded && mountedRef.current) onDecisionRecorded?.();
-  }, [organizationId, detail, lookup.candidateId, busy, loadDetail, onDecisionRecorded]);
+  }, [organizationId, detail, lookup.candidateId, busy, confirmed, loadDetail, onDecisionRecorded]);
 
   return (
     <div className="admin-card mt-3" data-client-source-promotion-panel={intakeFileId}>
@@ -109,6 +151,30 @@ export default function ClientSourcePromotionPanel({ organizationId, engagementI
       {detailError ? <div className="alert alert-warning py-2 small">{detailError}</div> : null}
       {result ? (
         <div className={`alert alert-${result.kind} py-2 small`} role="status" data-client-source-promotion-result="">{result.text}</div>
+      ) : null}
+      {detail?.decision_controls_enabled ? (
+        <div className="border rounded p-2 mb-2 small" data-client-source-authorization="">
+          <div className="fw-semibold mb-1">Source authorization</div>
+          <ul className="mb-1">
+            <li>Source: {safeFilename} (this file&rsquo;s source candidate, proposed type &ldquo;{detail.source_candidate.proposed_source_type}&rdquo;; you choose the reviewed source type below).</li>
+            <li>Intended use: {SOURCE_AUTHORIZATION_INTENDED_USE}</li>
+            <li>
+              Restrictions recorded by the sensitivity &amp; allowed-use review:
+              {restrictions.status === "loading" ? " loading..." : null}
+              {restrictions.status === "error" ? " could not be loaded; the server still applies them." : null}
+              {restrictions.status === "ready" ? (
+                <ul className="mb-0" data-client-source-restrictions="">
+                  {restrictions.lines.map((line) => <li key={line}>{line}</li>)}
+                </ul>
+              ) : null}
+            </li>
+          </ul>
+          <label className="form-check">
+            <input className="form-check-input" type="checkbox" checked={confirmed} data-client-source-authorization-confirm=""
+              onChange={(event) => setConfirmed(event.target.checked)} />
+            <span className="form-check-label">I confirm this file may become a governed source for the intended use above, under these restrictions.</span>
+          </label>
+        </div>
       ) : null}
       {detail ? <SourceCandidateDetail detail={detail} onSubmitDecision={submitDecision} busy={busy} decisionResult="" retryPayload={null} /> : null}
     </div>

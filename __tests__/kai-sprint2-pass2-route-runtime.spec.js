@@ -253,6 +253,10 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // membership; no export/final state (additive; every prior entry
     // preserved verbatim).
     "/admin/organizations/:organizationId/engagements/:engagementId/client-grant-response-packet",
+    // The organization administrator's own internal drafts of one Project, in
+    // any review state (owner decision 2026-10-19; additive).
+    "/admin/organizations/:organizationId/engagements/:engagementId/client-internal-drafts",
+    "/admin/organizations/:organizationId/engagements/:engagementId/client-internal-drafts/:generatedContentDraftId",
     // KAI Package 4: read-only /impact-library Funder Requirements
     // composition (classifier + Package 3A/3B current engagement assessment
     // per applicable requirement), no applicability or assessment write.

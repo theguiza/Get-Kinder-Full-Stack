@@ -804,8 +804,8 @@ test("source review: a promotable candidate is the binding-derived administrator
     // administrator can extract.
     6: ["evidence_extraction", "waiting_for_client", "client", "extract_evidence", "evidence_extraction_ready"],
     7: ["evidence_review", "waiting_for_get_kinder", "get_kinder", "none_waiting_for_get_kinder", "evidence_awaiting_review"],
-    // The sensitivity review stage is unchanged by this decision.
-    8: ["sensitivity_review", "waiting_for_get_kinder", "get_kinder", "none_waiting_for_get_kinder", "waiting_for_get_kinder_review"],
+    // The sensitivity review is the administrator's own step (owner decision 2026-10-19).
+    8: ["sensitivity_review", "waiting_for_client", "client", "review_sensitivity", "sensitivity_review_ready"],
   };
   for (const [n, values] of Object.entries(expected)) {
     assert.deepEqual(Object.values(currentOf(result, Number(n))).slice(0, 5), values, `file ${n}`);

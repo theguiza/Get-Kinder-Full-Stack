@@ -546,6 +546,8 @@ async function runBrowserAcceptance() {
   const CONTINUE = ["source_review", "waiting_for_client", "client", "continue_source_preparation", "source_preparation_ready"];
   const MISSING = ["source_review", "waiting_for_get_kinder", "get_kinder", "contact_get_kinder", "source_candidate_missing"];
   const PROMOTE_READY = ["source_review", "waiting_for_client", "client", "promote_source", "source_promotion_ready"];
+  // VAL-KAI-B1A-02-003: a file whose effective allowed use is not_allowed is closed, nobody's next action.
+  const ALLOWED_USE_CLOSED = ["source_review", "closed", "none", "none", "allowed_use_not_allowed"];
   const has = (page, selector) => page.evaluate(`Boolean(document.querySelector(${JSON.stringify(selector)}))`);
   const setPanelSelect = (labelText, value) => adminPage.evaluate(`(() => {
     const panel = document.querySelector("[data-client-source-promotion-panel]");
@@ -564,6 +566,9 @@ async function runBrowserAcceptance() {
     assert.ok(await setPanelSelect("Decision outcome", "promoted"), "outcome");
     await adminPage.waitForText("Reviewed source type");
     assert.ok(await setPanelSelect("Reviewed source type", "organization_primary_record"), "source type");
+    // The explicit source authorization (owner decision 2026-10-19).
+    await adminPage.waitFor(() => has(adminPage, "[data-client-source-restrictions]"), "recorded restrictions shown");
+    await adminPage.clickIn("[data-client-source-authorization-confirm]", "source authorization confirmation");
     const mark = adminPage.mark();
     await adminPage.clickButton("Promote");
     await adminPage.waitForText("Source promoted. Evidence extraction created 2 evidence item(s)");
@@ -654,7 +659,7 @@ async function runBrowserAcceptance() {
       for (const key of ["hist1", "hist2", "hist3"]) assert.deepEqual(currentOf(fileOf(pipeline, FILE[key])), CONTINUE, key);
       for (const key of ["cand1", "cand2"]) assert.deepEqual(currentOf(fileOf(pipeline, FILE[key])), PROMOTE_READY, key);
       assert.deepEqual(currentOf(fileOf(pipeline, FILE.otherAdmin)), CONTINUE, "another administrator's review is continuable");
-      for (const key of ["reviewedNotAllowed", "profileNotAllowed"]) assert.deepEqual(currentOf(fileOf(pipeline, FILE[key])), MISSING, key);
+      for (const key of ["reviewedNotAllowed", "profileNotAllowed"]) assert.deepEqual(currentOf(fileOf(pipeline, FILE[key])), ALLOWED_USE_CLOSED, key);
       assert.equal(fileOf(pipeline, FILE.needsMore).currentStage, "sensitivity_review");
       assert.deepEqual(currentOf(fileOf(pipeline, FILE.policyFailed)).slice(0, 3), ["security_check", "failed", "get_kinder"]);
       // The other administrator and the delegated (stored) administrator: every eligible file.
@@ -668,7 +673,8 @@ async function runBrowserAcceptance() {
         await page.goto("/impact-library");
         const other = await page.api("GET", pipelinePath(ORG_X, PROJECT_X));
         assert.equal(other.status, 200, `${label}: ${JSON.stringify(other.body)}`);
-        assert.equal(fileOf(other, FILE.hist1).nextAction, "contact_get_kinder", label);
+        // The step is the organization administrator's (owner decision 2026-10-19): it waits on them, not Get Kinder.
+        assert.equal(fileOf(other, FILE.hist1).nextAction, "ask_organization_administrator", label);
         assert.ok(!other.body.data.files.some((file) => file.nextAction === "continue_source_preparation"), label);
       }
       results.pipeline_before = "PASS: hist1-3 and otherAdmin continue_source_preparation for every active administrator (bound or stored); cand1-2 promote_source; contributor/reviewer not offered";
@@ -698,7 +704,7 @@ async function runBrowserAcceptance() {
       }
       const text = await adminPage.text();
       assert.ok(text.includes("Continue source preparation in Data Sources to create it; the review is not changed."));
-      assert.ok(text.includes("Contact Get Kinder. The sensitivity review is recorded, but no source candidate was created"), "the actual blocker stays visible");
+      assert.ok(text.includes("This file's recorded allowed use is not_allowed, so it is not used as a source"), "the actual reason stays visible");
       results.ui_offer = "PASS";
     });
 
@@ -878,7 +884,7 @@ async function runBrowserAcceptance() {
       assert.equal(candidate.created_by, ids.adminX2);
       const pipeline = await adminPage.api("GET", pipelinePath(ORG_X, PROJECT_X));
       for (const key of ["hist2", "hist3", "otherAdmin", "cand2"]) assert.deepEqual(currentOf(fileOf(pipeline, FILE[key])), PROMOTE_READY, key);
-      for (const key of ["reviewedNotAllowed", "profileNotAllowed"]) assert.deepEqual(currentOf(fileOf(pipeline, FILE[key])), MISSING, key);
+      for (const key of ["reviewedNotAllowed", "profileNotAllowed"]) assert.deepEqual(currentOf(fileOf(pipeline, FILE[key])), ALLOWED_USE_CLOSED, key);
       assert.deepEqual(adminPage.exceptions, []);
       results.all_recovered = "PASS: hist1-3 each have one candidate; the other administrator's own file continued by them";
     });

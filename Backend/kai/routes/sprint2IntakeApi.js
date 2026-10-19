@@ -138,7 +138,7 @@ export function sendServiceResult(res, result, successStatus = 200) {
 }
 
 const EXACT_VERIFICATION_PHASE_PATTERN =
-  /^(confirm_upload_authorization|upload_lifecycle_read|gcs_generation_binding_lookup|gcs_head_object|gcs_stat_exact_generation|gcs_open_exact_generation|gcs_stream_exact_generation|gcs_size_check|gcs_checksum_check|gcs_lifecycle_start|gcs_lifecycle_complete|gcs_generation_bind|gcs_lifecycle_confirm|confirm_upload_route_service|upload_url_storage_provider_not_gcs|upload_url_object_key_missing|upload_url_mime_type_missing|upload_url_lifecycle_repository_missing|upload_url_gcs_provider_missing|upload_url_gcs_provider_disabled|upload_url_gcs_provider_signed_url_capability_missing|upload_url_gcs_provider_max_upload_size_missing|upload_url_gcs_provider_unclassified_storage_not_configured|source_promotion_repository_input_shape|source_promotion_required_audit_rejected|source_promotion_db_constraint_violation|source_promotion_reviewed_source_type_invalid|source_promotion_permission_predicate_failed|source_promotion_candidate_review_incomplete|source_promotion_service_input_shape|source_promotion_sensitivity_profile_read_23514|source_promotion_sensitivity_profile_read_p0001|source_promotion_sensitivity_profile_read_22p02|source_promotion_upload_state_read_23514|source_promotion_upload_state_read_p0001|source_promotion_upload_state_read_22p02|source_promotion_decision_insert_23514|source_promotion_decision_insert_p0001|source_promotion_decision_insert_22p02|source_promotion_decision_transition_23514|source_promotion_decision_transition_p0001|source_promotion_decision_transition_22p02|source_promotion_source_insert_23514|source_promotion_source_insert_p0001|source_promotion_source_insert_22p02|source_promotion_source_version_insert_23514|source_promotion_source_version_insert_p0001|source_promotion_source_version_insert_22p02|source_promotion_candidate_status_update_23514|source_promotion_candidate_status_update_p0001|source_promotion_candidate_status_update_22p02|source_promotion_review_queue_resolve_23514|source_promotion_review_queue_resolve_p0001|source_promotion_review_queue_resolve_22p02|source_promotion_review_queue_waiting_on_client_23514|source_promotion_review_queue_waiting_on_client_p0001|source_promotion_review_queue_waiting_on_client_22p02|source_promotion_audit_insert_23514|source_promotion_audit_insert_p0001|source_promotion_audit_insert_22p02)$/;
+  /^(confirm_upload_authorization|upload_lifecycle_read|gcs_generation_binding_lookup|gcs_head_object|gcs_stat_exact_generation|gcs_open_exact_generation|gcs_stream_exact_generation|gcs_size_check|gcs_checksum_check|gcs_lifecycle_start|gcs_lifecycle_complete|gcs_generation_bind|gcs_lifecycle_confirm|confirm_upload_route_service|upload_url_storage_provider_not_gcs|upload_url_object_key_missing|upload_url_mime_type_missing|upload_url_lifecycle_repository_missing|upload_url_gcs_provider_missing|upload_url_gcs_provider_disabled|upload_url_gcs_provider_signed_url_capability_missing|upload_url_gcs_provider_max_upload_size_missing|upload_url_gcs_provider_unclassified_storage_not_configured|source_promotion_repository_input_shape|source_promotion_required_audit_rejected|source_promotion_db_constraint_violation|source_promotion_reviewed_source_type_invalid|source_promotion_permission_predicate_failed|source_promotion_allowed_use_not_allowed|source_promotion_candidate_review_incomplete|source_promotion_service_input_shape|source_promotion_sensitivity_profile_read_23514|source_promotion_sensitivity_profile_read_p0001|source_promotion_sensitivity_profile_read_22p02|source_promotion_upload_state_read_23514|source_promotion_upload_state_read_p0001|source_promotion_upload_state_read_22p02|source_promotion_decision_insert_23514|source_promotion_decision_insert_p0001|source_promotion_decision_insert_22p02|source_promotion_decision_transition_23514|source_promotion_decision_transition_p0001|source_promotion_decision_transition_22p02|source_promotion_source_insert_23514|source_promotion_source_insert_p0001|source_promotion_source_insert_22p02|source_promotion_source_version_insert_23514|source_promotion_source_version_insert_p0001|source_promotion_source_version_insert_22p02|source_promotion_candidate_status_update_23514|source_promotion_candidate_status_update_p0001|source_promotion_candidate_status_update_22p02|source_promotion_review_queue_resolve_23514|source_promotion_review_queue_resolve_p0001|source_promotion_review_queue_resolve_22p02|source_promotion_review_queue_waiting_on_client_23514|source_promotion_review_queue_waiting_on_client_p0001|source_promotion_review_queue_waiting_on_client_22p02|source_promotion_audit_insert_23514|source_promotion_audit_insert_p0001|source_promotion_audit_insert_22p02)$/;
 
 const SAFE_SERVICE_WARNING_MESSAGES = Object.freeze({
   blocked_attempt_audit_not_written: "Blocked-attempt audit was not written.",
@@ -3512,6 +3512,18 @@ for (const [path, keys, method] of [
     ["organizationId", "engagementId"],
     "getClientBoardReportingPreview",
   ],
+  // The organization administrator's own internal drafts, in any review
+  // state (owner decision 2026-10-19; kaiClientGeneratedContentService.js).
+  [
+    "/admin/organizations/:organizationId/engagements/:engagementId/client-internal-drafts",
+    ["organizationId", "engagementId"],
+    "listClientInternalDrafts",
+  ],
+  [
+    "/admin/organizations/:organizationId/engagements/:engagementId/client-internal-drafts/:generatedContentDraftId",
+    ["organizationId", "engagementId", "generatedContentDraftId"],
+    "getClientInternalDraft",
+  ],
 ]) {
   router.get(path, sprint2ActorContextMiddleware, async (req, res) => {
     const ids = clientContentPathIds(req, keys);
@@ -3522,7 +3534,9 @@ for (const [path, keys, method] of [
     }
     // Only the draft list takes a query value: its opaque continuation
     // cursor, validated by the service.
-    const cursor = method === "listClientGeneratedDrafts" && typeof req.query?.cursor === "string" ? { cursor: req.query.cursor } : {};
+    const cursor = (method === "listClientGeneratedDrafts" || method === "listClientInternalDrafts") && typeof req.query?.cursor === "string"
+      ? { cursor: req.query.cursor }
+      : {};
     return invokeService(res, async () => {
       const service = await getClientGeneratedContentService();
       return service[method]({ ...ids, ...cursor, actorContext: sprint2MappedActorContext(req) });

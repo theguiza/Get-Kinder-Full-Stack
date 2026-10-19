@@ -423,6 +423,10 @@ async function runBrowserAcceptance() {
     for (const r of page.requests()) {
       const path = new URL(r.url).pathname;
       if (ALLOWED_PATHS.has(path)) continue;
+      // An organization administrator (a stored client_admin grant, owner
+      // decision 2026-10-19) lists its own open sensitivity reviews; the server
+      // authorizes that read, and no other review-cockpit queue is allowed.
+      if (path === "/api/kai/sprint2/intake/admin/review-cockpit/queue" && new URL(r.url).searchParams.get("queue_type") === "sensitivity_review") continue;
       for (const fragment of GK_ONLY_FRAGMENTS) assert.ok(!path.includes(fragment), `${label}: GK-only request ${r.method} ${path}`);
     }
     for (const control of GK_CONTROLS) assert.ok(!body.includes(control), `${label}: GK control visible: ${control}`);

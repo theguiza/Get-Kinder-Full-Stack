@@ -517,6 +517,10 @@ async function runBrowserAcceptance() {
     for (const r of page.requests()) {
       const path = new URL(r.url).pathname;
       if (ALLOWED_PATHS.has(path)) continue;
+      // An organization administrator (here a stored client_admin grant, owner
+      // decision 2026-10-19) lists its own open sensitivity reviews; the server
+      // authorizes that read, and no other review-cockpit queue is allowed.
+      if (path === "/api/kai/sprint2/intake/admin/review-cockpit/queue" && new URL(r.url).searchParams.get("queue_type") === "sensitivity_review") continue;
       for (const fragment of GK_ONLY_FRAGMENTS) assert.ok(!path.includes(fragment), `${label}: GK-only request ${r.method} ${path}`);
     }
     for (const control of GK_CONTROLS) assert.ok(!body.includes(control), `${label}: GK control visible: ${control}`);
@@ -552,7 +556,7 @@ async function runBrowserAcceptance() {
       assert.equal(caps.data.internalKnowledgeWorkspace, false, `${label} is a client actor`);
     }
 
-    await test("case 1 + case 4: an uploaded Alpha file shows its authoritative stage, responsible party, and next action (waiting for Get Kinder review)", async () => {
+    await test("case 1 + case 4: an uploaded Alpha file shows its authoritative stage, responsible party, and next action (the organization administrator's own sensitivity review)", async () => {
       const before = await governedCounts();
       const mark = page.mark();
       await page.selectProject(PROJECT.alpha);
@@ -563,20 +567,22 @@ async function runBrowserAcceptance() {
       console.log(`[evidence-pipeline-browser] case 1 Alpha entry:\n${entry}`);
       assert.match(entry, new RegExp(NAMES.alpha.replace(".", "\\.")));
       for (const [label, status] of [["Uploaded", "Complete"], ["Security check", "Complete"], ["Processing", "Complete"], ["Data dictionary", "Complete"],
-        ["Sensitivity classification", "Complete"], ["Sensitivity review", "Waiting for Get Kinder"], ["Source review", "Not available yet"],
+        ["Sensitivity classification", "Complete"], ["Sensitivity review", "Waiting for your organization"], ["Source review", "Not available yet"],
         ["Evidence creation", "Not available yet"]]) {
         assert.match(entry, new RegExp(`${label}\\s+${status}`), `${label} -> ${status}`);
       }
-      assert.match(entry, /Next action: No action required from you\. Waiting for Get Kinder sensitivity review\./);
+      // The viewer is the organization's (stored) client_admin: the sensitivity
+      // review is its own step (owner decisions 2026-10-12 and 2026-10-19).
+      assert.match(entry, /Next action: Your action is needed: review this file's sensitivity & allowed use in Data Sources\./);
       // The Files persistence surface is still present alongside the status.
       await page.waitForText(NAMES.alpha);
       const body = await page.text();
       assertClientBoundary(page, "case 1", body);
       await page.clickTab("Reviews");
-      await page.waitForText("Waiting for Get Kinder review");
+      await page.waitForText("Ready for you in Data Sources");
       const reviews = await page.text();
-      assert.ok(reviews.includes("No action is currently required from you."), "client_admin has nothing to approve");
-      assert.ok(reviews.includes(`${NAMES.alpha}: Sensitivity review (Waiting for Get Kinder)`));
+      assert.ok(!reviews.includes("No action is currently required from you."), "the administrator's own review is pending");
+      assert.ok(reviews.includes(`${NAMES.alpha}: Your action is needed: review this file's sensitivity & allowed use in Data Sources.`));
       assertClientBoundary(page, "case 4", reviews);
       assert.deepEqual(await governedCounts(), before, "browsing wrote nothing");
       results.case1 = results.case4 = "PASS";
@@ -585,7 +591,7 @@ async function runBrowserAcceptance() {
     await test("case 2: with no reviewed Impact Fact, Evidence explains the upstream state instead of '0 shown / No reviewed evidence yet'", async () => {
       const mark = page.mark();
       await page.clickTab("Evidence");
-      await page.waitForText("Your data has been processed and is waiting for Get Kinder review (1 file).");
+      await page.waitForText("1 file needs your sensitivity & allowed-use review in Data Sources before it can become a source.");
       await pipelineRead(page, PROJECT.alpha, mark, "case 2");
       const body = await page.text();
       assert.ok(body.includes("No reviewed evidence for this project yet. Here is where its files are:"));

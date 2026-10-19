@@ -22,6 +22,7 @@ const WORKFLOW_OPERATION_KEYS = Object.freeze([
   "proposeClaim",
   "generateClaimGapFollowups",
   "generateDrafts",
+  "readInternalDrafts",
 ]);
 
 // Terminal claim review outcome the generation repository always rejects
@@ -148,8 +149,9 @@ export function internalDraftFailureMessage(result, { canGenerateGapFollowups = 
   return errorText(result);
 }
 
-// What the actor is told about a created draft: identity and status only.
-// Draft text is shown under Generated Drafts once Get Kinder has reviewed it.
+// What the actor is told about a created draft: identity and status. The
+// persisted draft itself is then read back and shown under "Your internal
+// drafts" (owner decision 2026-10-19), never from this response.
 export function internalDraftResultSummary(data, contentType) {
   if (!data || !isRouteUuid(data.generatedContentDraftId)) return null;
   const blocks = Array.isArray(data.blocks) ? data.blocks : [];
@@ -275,3 +277,85 @@ export function sourcePreparationGuidance(file, access) {
   }
   return nextActionText(file);
 }
+
+// ---------------------------------------------------------------------------
+// "Use for impact" (owner decision 2026-10-19): one contextual action that
+// takes a file through the existing governed steps, from persisted state
+// only. Automated steps are the existing authorized operations (P1-07
+// continuation, P2-01 extraction); a human decision (the sensitivity review,
+// the source authorization) is opened for the person, never made for them.
+// ---------------------------------------------------------------------------
+
+export const USE_FOR_IMPACT_MAX_STEPS = 4;
+
+export function useForImpactStep(file, access) {
+  if (!file || typeof file !== "object") return { kind: "blocked", text: "This file's status is not available." };
+  const action = file.nextAction;
+  if (action === "review_sensitivity" && access?.reviewSensitivity === true) return { kind: "review_sensitivity" };
+  if (file.currentStage === "sensitivity_review" && file.currentStatus !== "failed" && access?.reviewSensitivity === true) {
+    return { kind: "review_sensitivity" };
+  }
+  if (action === "continue_source_preparation" && access?.promoteSource === true) return { kind: "continue" };
+  if (action === "promote_source" && access?.promoteSource === true) return { kind: "confirm_promotion" };
+  if (action === "extract_evidence" && access?.extractEvidence === true) return { kind: "extract" };
+  if (file.currentStatus === "complete" || ["evidence_review", "impact_fact_review"].includes(file.currentStage)) {
+    return { kind: "done" };
+  }
+  return { kind: "blocked", text: nextActionText(file) };
+}
+
+// Offered on a file when its next governed step is one this actor may take.
+export function isUseForImpactCandidate(file, access) {
+  return ["review_sensitivity", "continue", "confirm_promotion", "extract"].includes(useForImpactStep(file, access).kind);
+}
+
+export const USE_FOR_IMPACT_MESSAGES = Object.freeze({
+  review_sensitivity: "Use for impact: this file first needs your sensitivity & allowed-use review. Record your decision below; nothing is decided for you.",
+  confirm_promotion: "Use for impact: confirm the source authorization below, then choose the reviewed source type and promote. Nothing is promoted without your confirmation.",
+  done: "Use for impact: this file's evidence exists. Propose claims from it below, generate their gap follow-ups, then internal drafts.",
+  interrupted: "Use for impact stopped. Every completed step is kept; use the action again to continue from the current state.",
+});
+
+// The restrictions a promotion keeps, from the file's current sensitivity
+// decision (the existing review read). Lines only; nothing is inferred.
+const PRESENCE_LABELS = Object.freeze({
+  reviewed_personal_data_status: "personal information",
+  reviewed_minor_data_status: "information about minors",
+  reviewed_health_housing_justice_immigration_status: "health, housing, justice, or immigration information",
+  reviewed_indigenous_governance_status: "Indigenous or governance-sensitive information",
+  reviewed_staff_notes_status: "staff notes",
+  reviewed_story_testimonial_status: "stories or testimonials",
+  reviewed_small_cell_risk_status: "small-cell re-identification risk",
+  reviewed_financial_records_status: "financial records",
+});
+
+export function sourceRestrictionLines(decision) {
+  if (!decision || decision.decision_outcome !== "reviewed") {
+    return ["No completed sensitivity & allowed-use review is recorded for this file."];
+  }
+  const permission = (value) => (value === true ? "permitted" : "not permitted");
+  const present = Object.entries(PRESENCE_LABELS).filter(([key]) => decision[key] === "present").map(([, label]) => label);
+  return [
+    `Allowed use: ${decision.reviewed_allowed_use_status || "unknown"}; consent basis: ${decision.reviewed_consent_basis_status || "unknown"}.`,
+    `Funder use: ${permission(decision.reviewed_funder_use_allowed)}; public use: ${permission(decision.reviewed_public_use_allowed)}; `
+      + `product learning: ${permission(decision.reviewed_product_learning_allowed)}; recorded AI processing permission: ${permission(decision.reviewed_llm_processing_allowed)}.`,
+    present.length > 0 ? `Recorded as present: ${present.join(", ")}.` : "No sensitive category is recorded as present.",
+  ];
+}
+
+export const SOURCE_AUTHORIZATION_INTENDED_USE =
+  "Internal impact evidence for this organization: evidence items, proposed claims, gap follow-ups, and internal drafts. "
+  + "Promotion keeps the restrictions above and approves no evidence, claim, funder or public use, export, or release.";
+
+export const INTERNAL_DRAFT_REVIEW_STATE_LABELS = Object.freeze({
+  awaiting_get_kinder_review: "Awaiting Get Kinder review",
+  in_get_kinder_review: "In Get Kinder review",
+  reviewed_by_get_kinder: "Reviewed by Get Kinder",
+});
+
+export const INTERNAL_DRAFT_LIMITATION_MESSAGES = Object.freeze({
+  internal_use_only: "Internal use only.",
+  not_approved_for_external_use: "Not approved for funder or public use, export, or release.",
+  awaiting_get_kinder_review: "Get Kinder has not reviewed this draft.",
+  cited_claims_not_currently_eligible: "At least one cited claim is not yet eligible for use (for example, it awaits Get Kinder claim review).",
+});

@@ -1757,11 +1757,14 @@ async function runBrowserAcceptance() {
       const pipeline = await memberAPage.fetchJson("GET", pipelinePath(ORG_A, PROJECT_A));
       assert.equal(pipeline.status, 200);
       const stageOf = (key) => [apiFile(pipeline, key).currentStage, apiFile(pipeline, key).currentStatus, apiFile(pipeline, key).responsibleParty];
-      assert.deepEqual(stageOf("probe"), ["sensitivity_review", "waiting_for_get_kinder", "get_kinder"]);
-      assert.deepEqual(stageOf("mixed"), ["source_review", "waiting_for_get_kinder", "get_kinder"]);
+      // Org A has administrators (owner decision 2026-10-19): an ordinary member
+      // sees the sensitivity review and the promotion waiting on them, not on Get Kinder.
+      assert.deepEqual(stageOf("probe"), ["sensitivity_review", "waiting_for_client", "client"]);
+      assert.deepEqual(stageOf("mixed"), ["source_review", "waiting_for_client", "client"]);
+      for (const key of ["probe", "mixed"]) assert.equal(apiFile(pipeline, key).nextAction, "ask_organization_administrator", key);
       assert.deepEqual(stageOf("superGk"), ["evidence_review", "waiting_for_get_kinder", "get_kinder"]);
       const mixedStages = Object.fromEntries(apiFile(pipeline, "mixed").stages.map((stage) => [stage.key, stage.status]));
-      assert.deepEqual([mixedStages.sensitivity_review, mixedStages.source_review, mixedStages.evidence_extraction], ["complete", "waiting_for_get_kinder", "not_started"],
+      assert.deepEqual([mixedStages.sensitivity_review, mixedStages.source_review, mixedStages.evidence_extraction], ["complete", "waiting_for_client", "not_started"],
         "sensitivity reviewed is not source promoted");
       const superGkStages = Object.fromEntries(apiFile(pipeline, "superGk").stages.map((stage) => [stage.key, stage]));
       assert.deepEqual([superGkStages.source_review.status, superGkStages.evidence_extraction.status, superGkStages.evidence_extraction.count, superGkStages.evidence_review.count],
@@ -1772,11 +1775,14 @@ async function runBrowserAcceptance() {
       await openClientProject(memberAPage, PROJECT_A, "Reviews");
       await memberAPage.waitForText(renderedWaitingLine("superGk", apiFile(pipeline, "superGk")));
       const body = await memberAPage.text();
-      const waitingOnGetKinder = ["probe", "mixed", "superGk", "bound", "reviewer"].filter((key) => apiFile(pipeline, key).responsibleParty === "get_kinder");
-      assert.ok(waitingOnGetKinder.length >= 4);
-      for (const key of waitingOnGetKinder) {
+      // Rendered as waiting lines: Get Kinder's steps and the organization administrator's.
+      const waiting = ["probe", "mixed", "superGk", "bound", "reviewer"].filter((key) => apiFile(pipeline, key).responsibleParty === "get_kinder"
+        || apiFile(pipeline, key).nextAction === "ask_organization_administrator");
+      assert.ok(waiting.length >= 4);
+      for (const key of waiting) {
         assert.ok(body.includes(renderedWaitingLine(key, apiFile(pipeline, key))), `rendered: ${renderedWaitingLine(key, apiFile(pipeline, key))}`);
       }
+      assert.ok(body.includes("Waiting for your organization\u2019s administrator"));
       assert.deepEqual(await memberAPage.fileReviewActionIds(), [], "an ordinary member is asked to perform no Get Kinder review");
       assert.equal(await memberAPage.visibleButton("Promote"), false);
       assert.deepEqual(memberAPage.exceptions, []);

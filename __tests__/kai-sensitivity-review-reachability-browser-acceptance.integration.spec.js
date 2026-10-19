@@ -550,7 +550,10 @@ async function runBrowserAcceptance() {
     await page.selectProject(PROJECT);
     await page.waitFor(async () => Boolean(await page.pipelineFileText(FILE_QUEUE)), "pipeline entry");
     await page.clickTab("Reviews");
-    await page.waitForText("Waiting for Get Kinder review");
+    // Owner decision 2026-10-19: a file may wait on Get Kinder, on this actor,
+    // or on the organization's administrator; wait for the card itself.
+    await page.waitFor(async () => /Waiting for Get Kinder review|Waiting for your organization\u2019s administrator|Ready for you in Data Sources|No action is currently required from you\./
+      .test(await page.text()), "the Reviews card");
     await page.idle();
     return page.text();
   }
@@ -578,15 +581,16 @@ async function runBrowserAcceptance() {
       const body = await clientReviewsTab(clientPage);
       const reviews = body.slice(body.indexOf("Reviews\n"));
       console.log(`[sensitivity-review-browser] client Reviews (before):\n${reviews.slice(0, 1600)}`);
-      assert.ok(body.includes(`${NAMES.queue}: Sensitivity review (Waiting for Get Kinder)`));
-      assert.ok(body.includes(`${NAMES.zero}: Sensitivity review (Waiting for Get Kinder)`));
+      // The organization has administrators (owner decision 2026-10-19): the
+      // ordinary client is told its organization's administrator does this step.
+      assert.ok(body.includes(`${NAMES.queue}: Sensitivity review (Waiting for your organization)`));
+      assert.ok(body.includes(`${NAMES.zero}: Sensitivity review (Waiting for your organization)`));
+      assert.ok(body.includes("Waiting for your organization\u2019s administrator"));
       assert.ok(body.includes("No action is currently required from you."));
       const clientCard = await clientPage.cardText("Reviews");
       assert.ok(clientCard.includes("No action is currently required from you."), "the ordinary client's Reviews card keeps the no-action explanation");
       assert.ok(!clientCard.includes("Get Kinder sensitivity review needed"), "no Get Kinder review work is assigned to an ordinary client");
-      assert.ok(body.includes("Get Kinder confirms how the file's information may be used"), "the sensitivity review is explained");
-      assert.ok(body.includes("This is not an Evidence or Impact Fact review."));
-      assert.ok(body.includes("Get Kinder reviewers complete these reviews in Get Kinder\u2019s own review workspace"), "where it is done");
+      assert.ok(body.includes("Your organization\u2019s administrator completes these steps in Data Sources. No action is required from you."), "who does it is explained");
       assert.ok(body.includes("Your account does not have sensitivity-review access for this organization"), "whether this user may act");
       assert.ok(!body.includes("Evidence and Impact Fact reviews are completed by Get Kinder reviewers."), "the old Evidence/Impact-Fact-only explanation is gone");
       assertClientBoundary(clientPage, "case 1", body);
@@ -666,15 +670,14 @@ async function runBrowserAcceptance() {
 
     await test("case 5: the client sees the sensitivity review complete and the next Get Kinder stage, never the decision values", async () => {
       const body = await clientReviewsTab(clientPage);
-      console.log(`[sensitivity-review-browser] client Reviews (after):\n${body.slice(body.indexOf("Waiting for Get Kinder review"), body.indexOf("Waiting for Get Kinder review") + 900)}`);
-      assert.ok(body.includes(`${NAMES.queue}: Source review (Waiting for Get Kinder)`));
-      assert.ok(body.includes("Get Kinder decides whether the file becomes a source that evidence can be created from."));
-      assert.ok(body.includes(`${NAMES.zero}: Sensitivity review (Waiting for Get Kinder)`));
+      console.log(`[sensitivity-review-browser] client Reviews (after):\n${body.slice(body.indexOf("Reviews"), body.indexOf("Reviews") + 900)}`);
+      assert.ok(body.includes(`${NAMES.queue}: Source review (Waiting for your organization)`));
+      assert.ok(body.includes(`${NAMES.zero}: Sensitivity review (Waiting for your organization)`));
       await clientPage.clickTab("Files");
       await clientPage.waitFor(async () => Boolean(await clientPage.pipelineFileText(FILE_QUEUE)), "Files pipeline entry");
       const entry = await clientPage.pipelineFileText(FILE_QUEUE);
       assert.match(entry, /Sensitivity review\s+Complete/);
-      assert.match(entry, /Source review\s+Waiting for Get Kinder/);
+      assert.match(entry, /Source review\s+Waiting for your organization/);
       assertClientBoundary(clientPage, "case 5", await clientPage.text());
       assert.deepEqual(clientPage.exceptions, []);
       results.case5_client_after = "PASS";
@@ -842,9 +845,10 @@ async function runBrowserAcceptance() {
       console.log(`[sensitivity-review-browser] mixed-role Reviews card:\n${reviewsCard}`);
       assert.ok(reviewsCard.includes("Review sensitivity & allowed use"), "the Reviews card shows the authorized review action");
       assert.ok(!reviewsCard.includes("No action is currently required from you."), "no contradictory no-action message beside the review action");
-      assert.ok(reviewsCard.includes("Get Kinder sensitivity review needed"), "the action-required message names the Get Kinder sensitivity review");
-      assert.ok(reviewsCard.includes("4 files in this project are waiting for the Get Kinder sensitivity review, which your organization-scoped review access can complete here. "
-        + "Use \u201cReview sensitivity & allowed use\u201d next to each file below."), "it counts only the actionable files and points to the per-file action");
+      // Owner decision 2026-10-19: the four sensitivity reviews and the promotion
+      // are this administrator's own work, counted together.
+      assert.ok(reviewsCard.includes("5 files in this project are ready for sensitivity review, source preparation, source promotion, or evidence extraction, "
+        + "which your role can complete in Data Sources."), "it counts only the actionable files");
       assert.ok(!reviewsCard.includes("Get Kinder sent follow-up questions"), "no client follow-up work is claimed");
       // Owner decision 2026-10-18: FILE_QUEUE's promotable candidate is this administrator's source work.
       assert.ok(reviewsCard.includes("Ready for you in Data Sources"), "the administrator's source work is listed");
@@ -957,7 +961,7 @@ async function runBrowserAcceptance() {
       // Leave and come back: the existing item is reused, never duplicated.
       await mixedPage.clickTab("Files");
       await mixedPage.clickTab("Reviews");
-      await mixedPage.waitForText("Waiting for Get Kinder review");
+      await mixedPage.waitForText("Ready for you in Data Sources");
       await mixedPage.idle();
       assert.equal(await mixedPage.reviewPanelFileId(), null, "leaving Reviews closes the panel");
       mark = mixedPage.mark();
@@ -1011,7 +1015,7 @@ async function runBrowserAcceptance() {
       let body = await mixedBody();
       assert.ok(body.includes("The sensitivity review stays open; no source candidate is created."));
       assert.ok(!body.includes("Source-candidate handoff completed"));
-      assert.ok(body.includes(`${NAMES.mixedNmi}: Sensitivity review (Waiting for Get Kinder)`), "the file is still at sensitivity review");
+      assert.ok(body.includes(`${NAMES.mixedNmi}: Your action is needed: review this file's sensitivity & allowed use`), "the file is still at sensitivity review");
 
       // Another reviewer records a decision after this form was loaded.
       const loadedStamp = new Date(queue.updated_at).toISOString();
@@ -1133,9 +1137,9 @@ async function runBrowserAcceptance() {
       const clientMark = clientPage.mark();
       const clientBody = await clientReviewsTab(clientPage);
       assert.deepEqual(await clientPage.fileReviewActionIds(), []);
-      assert.ok(clientBody.includes(`${NAMES.mixedNmi}: Sensitivity review (Waiting for Get Kinder)`));
+      assert.ok(clientBody.includes(`${NAMES.mixedNmi}: Sensitivity review (Waiting for your organization)`));
       const clientCard = await clientPage.cardText("Reviews");
-      assert.ok(clientCard.includes("No action is currently required from you."), "a pending GK review leaves the ordinary client's no-action explanation");
+      assert.ok(clientCard.includes("No action is currently required from you."), "a pending administrator step leaves the ordinary client's no-action explanation");
       assert.ok(!clientCard.includes("Get Kinder sensitivity review needed"));
       assertClientBoundary(clientPage, "case 14", clientBody, clientPage.requestsSince(clientMark));
       assertNoUnrelatedGkRequests(clientPage, "case 14", clientPage.requestsSince(clientMark));

@@ -54,6 +54,8 @@ export const PIPELINE_NEXT_ACTIONS = Object.freeze([
   "promote_source",
   "extract_evidence",
   "continue_source_preparation",
+  "review_sensitivity",
+  "ask_organization_administrator",
 ]);
 
 export const PIPELINE_REASONS = Object.freeze([
@@ -61,6 +63,9 @@ export const PIPELINE_REASONS = Object.freeze([
   "failed",
   "processing",
   "waiting_for_get_kinder_review",
+  "sensitivity_review_ready",
+  "organization_administrator_action_ready",
+  "allowed_use_not_allowed",
   "waiting_for_source_promotion",
   "source_promotion_ready",
   "source_preparation_ready",
@@ -262,7 +267,14 @@ export function nextActionText(file, { canReviewFollowups = false, canContribute
       return "Your action is needed: this file's source is promoted. Extract evidence from it in Data Sources.";
     case "continue_source_preparation":
       return "Your action is needed: this file's sensitivity review is recorded, but its source candidate was not created. Continue source preparation in Data Sources to create it; the review is not changed.";
+    case "review_sensitivity":
+      return "Your action is needed: review this file's sensitivity & allowed use in Data Sources. Your recorded decision governs how its content may be used.";
+    case "ask_organization_administrator":
+      return `No action required from you. Your organization's administrator can complete this file's ${stageLabel} in Data Sources.`;
     default:
+      if (file.reason === "allowed_use_not_allowed") {
+        return "This file's recorded allowed use is not_allowed, so it is not used as a source or for evidence, claims, or drafts. Only a new sensitivity & allowed-use review can change this.";
+      }
       return file.currentStatus === "complete" ? "No action required. Reviewed evidence from this file is available." : "No action required from you.";
   }
 }
@@ -272,6 +284,9 @@ const REASON_MESSAGES = Object.freeze({
   failed: (n) => `${pluralFiles(n)} could not be processed. See Files for details.`,
   processing: (n) => `${pluralFiles(n)} ${n === 1 ? "is" : "are"} still being processed by KAI.`,
   waiting_for_get_kinder_review: (n) => `Your data has been processed and is waiting for Get Kinder review (${pluralFiles(n)}).`,
+  sensitivity_review_ready: (n) => `${pluralFiles(n)} ${n === 1 ? "needs" : "need"} your sensitivity & allowed-use review in Data Sources before ${n === 1 ? "it" : "they"} can become a source.`,
+  organization_administrator_action_ready: (n) => `${pluralFiles(n)} ${n === 1 ? "is" : "are"} waiting for your organization's administrator to prepare ${n === 1 ? "it" : "them"} in Data Sources.`,
+  allowed_use_not_allowed: (n) => `${pluralFiles(n)} ${n === 1 ? "has" : "have"} a recorded allowed use of not_allowed, so ${n === 1 ? "it is" : "they are"} not used for evidence, claims, or drafts.`,
   waiting_for_source_promotion: (n) => `${pluralFiles(n)} passed the Get Kinder sensitivity review and ${n === 1 ? "is" : "are"} waiting for Get Kinder to review and promote ${n === 1 ? "it" : "them"} as a source. Evidence can only be created from a promoted source.`,
   source_promotion_ready: (n) => `${pluralFiles(n)} passed the sensitivity review and ${n === 1 ? "is a source candidate" : "are source candidates"} you can review and promote in Data Sources. Evidence can only be created from a promoted source.`,
   source_preparation_ready: (n) => `${pluralFiles(n)} passed the sensitivity review, but ${n === 1 ? "its source candidate was" : "their source candidates were"} not created. Continue source preparation in Data Sources; evidence can only be created from a promoted source.`,
@@ -371,7 +386,7 @@ export function reviewsTabMessages(view, { canReviewFollowups = false, canReview
     messages.push({
       key: "source_work",
       heading: "Your action is needed",
-      detail: `${pluralFiles(sourceCount)} in this project ${sourceCount === 1 ? "is" : "are"} ready for source preparation, source promotion, or evidence extraction, which your role can complete in Data Sources.`,
+      detail: `${pluralFiles(sourceCount)} in this project ${sourceCount === 1 ? "is" : "are"} ready for sensitivity review, source preparation, source promotion, or evidence extraction, which your role can complete in Data Sources.`,
     });
   }
   if (clientCount === 0 && sensitivityCount === 0 && sourceCount === 0) {
@@ -405,17 +420,20 @@ export function reviewsTabView(request) {
     kind: "ready",
     waitingForClient: files.filter((file) => file.nextAction === "answer_client_followups"),
     sourceWork: files.filter(isClientSourceWork),
+    // Steps only the organization's administrator may take (owner decision 2026-10-19).
+    waitingForAdministrator: files.filter((file) => file.nextAction === "ask_organization_administrator"),
     waitingForGetKinder: files.filter((file) => file.responsibleParty === "get_kinder" && file.currentStatus !== "failed"),
   };
 }
 
 /**
- * Source preparation the requesting actor itself may do (owner decision
- * 2026-10-18, 2026-10-19): the server reports promote_source /
- * extract_evidence / continue_source_preparation only for an actor holding
- * that organization-scoped authority and an eligible file.
+ * Source preparation the requesting actor itself may do (owner decisions
+ * 2026-10-18, 2026-10-19): the server reports review_sensitivity /
+ * promote_source / extract_evidence / continue_source_preparation only for an
+ * actor holding that organization-scoped authority and an eligible file.
  */
+const CLIENT_SOURCE_WORK_ACTIONS = new Set(["review_sensitivity", "promote_source", "extract_evidence", "continue_source_preparation"]);
+
 export function isClientSourceWork(file) {
-  return file?.responsibleParty === "client"
-    && (file.nextAction === "promote_source" || file.nextAction === "extract_evidence" || file.nextAction === "continue_source_preparation");
+  return file?.responsibleParty === "client" && CLIENT_SOURCE_WORK_ACTIONS.has(file.nextAction);
 }

@@ -586,8 +586,9 @@ async function runBrowserAcceptance() {
       await adminPage.idle();
       await adminPage.waitFor(async () => adminPage.evaluate(`Boolean(document.querySelector('[data-client-preparation-file="${FILE.main}"]'))`), "main file listed");
       const pipeline = await adminPage.api("GET", pipelinePath(ORG_X, PROJECT_X));
+      // Owner decision 2026-10-19: the sensitivity review is the administrator's own step.
       assert.deepEqual(currentOf(fileOf(pipeline, FILE.main)),
-        ["sensitivity_review", "waiting_for_get_kinder", "get_kinder", "none_waiting_for_get_kinder", "waiting_for_get_kinder_review"]);
+        ["sensitivity_review", "waiting_for_client", "client", "review_sensitivity", "sensitivity_review_ready"]);
       const body = await adminPage.text();
       assert.ok(body.includes("Your action is needed: review this file's sensitivity & allowed use."), "actor-accurate guidance");
       assert.ok(!body.includes(NAMES.y), "no organization-Y file");
@@ -643,12 +644,14 @@ async function runBrowserAcceptance() {
       await contributorPage.goto("/impact-library");
       const contributor = await contributorPage.api("GET", pipelinePath(ORG_X, PROJECT_X));
       assert.equal(contributor.status, 200);
-      assert.deepEqual(currentOf(fileOf(contributor, FILE.main)), ["source_review", "waiting_for_get_kinder", "get_kinder", "none_waiting_for_get_kinder", "waiting_for_source_promotion"]);
+      // The organization has administrators: the contributor sees the promotion waiting on them (owner decision 2026-10-19).
+      assert.deepEqual(currentOf(fileOf(contributor, FILE.main)),
+        ["source_review", "waiting_for_client", "client", "ask_organization_administrator", "organization_administrator_action_ready"]);
       // A delegated (stored, active) client_admin holds the same authority (owner decision 2026-10-19).
       await storedAdminPage.goto("/impact-library");
       const stored = await storedAdminPage.api("GET", pipelinePath(ORG_X, PROJECT_X));
       assert.deepEqual(currentOf(fileOf(stored, FILE.main)), ["source_review", "waiting_for_client", "client", "promote_source", "source_promotion_ready"]);
-      results.pipeline_before = "PASS: promote_source for the binding-derived and the stored administrator; waiting_for_source_promotion (GK) for the contributor";
+      results.pipeline_before = "PASS: promote_source for the binding-derived and the stored administrator; the contributor waits on the organization's administrator";
     });
 
     await test("negatives before promotion: other roles, revoked authority, another Project, and another organization are refused; nothing is written", async () => {
@@ -726,10 +729,15 @@ async function runBrowserAcceptance() {
       await adminPage.waitForText("Decision outcome");
       await adminPage.idle();
       const reads = adminPage.requestsSince(mark).filter((r) => r.method === "GET" && pathOf(r).startsWith(COCKPIT)).map((r) => [pathOf(r), r.status]);
-      assert.deepEqual(reads, [
-        [`${COCKPIT}/intake-files/${FILE.main}/source-candidate`, 200],
-        [`${COCKPIT}/source-candidates/${ids.mainCandidate}`, 200],
-      ]);
+      // The candidate reads, plus the file's current sensitivity decision for the
+      // source authorization's restrictions (owner decision 2026-10-19).
+      assert.deepEqual(reads.map(([path]) => path.replace(/sensitivity-profiles\/[0-9a-f-]{36}$/, "sensitivity-profiles/:id")).sort(), [
+        `${COCKPIT}/intake-files/${FILE.main}/sensitivity-profile`,
+        `${COCKPIT}/intake-files/${FILE.main}/source-candidate`,
+        `${COCKPIT}/sensitivity-profiles/:id`,
+        `${COCKPIT}/source-candidates/${ids.mainCandidate}`,
+      ].sort());
+      assert.ok(reads.every(([, status]) => status === 200), JSON.stringify(reads));
       assert.equal(adminPage.requestsSince(mark).filter((r) => r.method !== "GET").length, 0, "opening writes nothing");
       const detail = await adminPage.api("GET", detailPath(ORG_X, ids.mainCandidate));
       assert.equal(detail.body.data.decision_controls_enabled, true);
@@ -738,6 +746,15 @@ async function runBrowserAcceptance() {
       assert.ok(await setPanelSelect("Decision outcome", "promoted"), "outcome");
       await adminPage.waitForText("Reviewed source type");
       assert.ok(await setPanelSelect("Reviewed source type", "organization_primary_record"), "source type");
+      // Without the explicit source authorization nothing is sent (owner decision 2026-10-19).
+      mark = adminPage.mark();
+      await adminPage.clickButton("Promote");
+      await adminPage.waitForText("Confirm the source authorization above before promoting. Nothing was sent.");
+      assert.deepEqual(adminPage.requestsSince(mark).filter((r) => r.method === "POST"), []);
+      const authorization = await adminPage.evaluate(`document.querySelector("[data-client-source-authorization]").innerText`);
+      assert.ok(authorization.includes("Intended use: Internal impact evidence for this organization"), authorization);
+      assert.ok(authorization.includes("Allowed use: unknown; consent basis: unknown."), authorization);
+      await adminPage.clickIn("[data-client-source-authorization-confirm]", "source authorization confirmation");
       mark = adminPage.mark();
       await adminPage.clickButton("Promote");
       await adminPage.waitForText("Source promoted. Evidence extraction created 2 evidence item(s)");

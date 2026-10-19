@@ -425,12 +425,43 @@ function ProjectReviews({ organizationId, view, canReviewFollowups, getKinderRev
           <div className="fw-semibold">Ready for you in Data Sources</div>
           <ul className="mb-1">
             {view.sourceWork.map((file) => (
-              <li key={file.intakeFileId}>{file.safeFilename}: {nextActionText(file)}</li>
+              <li key={file.intakeFileId}>
+                {file.safeFilename}: {nextActionText(file)}
+                {/* The administrator's own sensitivity review stays reachable here (owner decision 2026-10-19). */}
+                {canReviewSensitivity && file.nextAction === "review_sensitivity" ? (
+                  <div>
+                    <button
+                      type="button"
+                      className="btn btn-sm btn-outline-primary mt-1"
+                      data-sensitivity-review-file={file.intakeFileId}
+                      onClick={() => onOpenSensitivityReview(file)}
+                    >
+                      Review sensitivity &amp; allowed use
+                    </button>
+                  </div>
+                ) : null}
+              </li>
             ))}
           </ul>
           {onOpenDataSources ? (
             <button type="button" className="btn btn-sm btn-outline-primary" onClick={onOpenDataSources}>Open Data Sources</button>
           ) : null}
+        </div>
+      ) : null}
+      {Array.isArray(view.waitingForAdministrator) && view.waitingForAdministrator.length > 0 ? (
+        <div className="mb-2" data-reviews-waiting-for-administrator="">
+          <div className="fw-semibold">Waiting for your organization&rsquo;s administrator</div>
+          <ul className="mb-1">
+            {view.waitingForAdministrator.map((file) => {
+              const current = file.stages.find((stage) => stage.key === file.currentStage);
+              return (
+                <li key={file.intakeFileId}>
+                  {file.safeFilename}: {PIPELINE_STAGE_LABELS[file.currentStage]} ({stageStatusLabel(current)})
+                </li>
+              );
+            })}
+          </ul>
+          <div className="text-muted">Your organization&rsquo;s administrator completes these steps in Data Sources. No action is required from you.</div>
         </div>
       ) : null}
       {view.waitingForGetKinder.length > 0 ? (
@@ -470,9 +501,16 @@ function ProjectReviews({ organizationId, view, canReviewFollowups, getKinderRev
               result once a review is complete.
             </div>
           )}
-          <div className="mt-1" data-get-kinder-review-access="">{getKinderReviewAccessNote}</div>
         </div>
       ) : null}
+      {/* Whether this account may act, wherever review work is listed (a
+          sensitivity review may wait on the organization's administrator, not
+          Get Kinder; owner decision 2026-10-19). */}
+      {view.waitingForGetKinder.length > 0
+        || (Array.isArray(view.waitingForAdministrator) && view.waitingForAdministrator.length > 0)
+        || view.sourceWork.some((file) => file.nextAction === "review_sensitivity") ? (
+          <div className="mt-1" data-get-kinder-review-access="">{getKinderReviewAccessNote}</div>
+        ) : null}
     </div>
   );
 }

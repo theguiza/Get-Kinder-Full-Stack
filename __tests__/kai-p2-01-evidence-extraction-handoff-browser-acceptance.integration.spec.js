@@ -440,6 +440,10 @@ async function runBrowserAcceptance() {
     for (const r of page.requests()) {
       const path = new URL(r.url).pathname;
       if (ALLOWED_PATHS.has(path)) continue;
+      // An organization administrator (a stored client_admin grant, owner
+      // decision 2026-10-19) lists its own open sensitivity reviews; the server
+      // authorizes that read, and no other review-cockpit queue is allowed.
+      if (path === "/api/kai/sprint2/intake/admin/review-cockpit/queue" && new URL(r.url).searchParams.get("queue_type") === "sensitivity_review") continue;
       for (const fragment of GK_ONLY_FRAGMENTS) assert.ok(!path.includes(fragment), `${label}: GK-only request ${r.method} ${path}`);
     }
     for (const control of GK_CONTROLS) assert.ok(!body.includes(control), `${label}: GK control visible: ${control}`);
@@ -482,11 +486,12 @@ async function runBrowserAcceptance() {
   const mixedPage = await openPage(browser, { baseUrl, legacyUserId: USERS.mixedReviewer });
   const results = {};
   try {
-    await test("mixed global GK reviewer with client_admin membership can read source work but P1-08 refuses promotion without writes", async () => {
+    await test("mixed global GK reviewer with client_admin membership: the global role is not P1-08 authority, but the organization client_admin grant now is (owner decision 2026-10-19); reads only, without writes", async () => {
       const profile = await seedFreshFile(FILE.mixed, NAMES.mixed, "f");
       const candidateId = await reachReviewableSourceCandidate(profile);
       await mixedPage.goto("/gk-admin/kai-review-cockpit");
       await mixedPage.waitForText("KAI internal review cockpit");
+      const before = await governedCounts();
       const detailPath = `/api/kai/sprint2/intake/admin/review-cockpit/source-candidates/${candidateId}?organization_id=${ORG}`;
       const detail = await mixedPage.evaluate(`(async () => {
         const response = await fetch(${JSON.stringify(detailPath)}, { credentials: "same-origin" });
@@ -494,23 +499,11 @@ async function runBrowserAcceptance() {
       })()`);
       assert.equal(detail.status, 200, JSON.stringify(detail.body));
       assert.equal(detail.body.data.source_candidate.intake_source_candidate_id, candidateId);
-      assert.equal(detail.body.data.decision_controls_enabled, false, "no decision is offered to an actor P1-08 refuses");
-      const before = await governedCounts();
-      const decisionPathForActor = `${decisionPath(candidateId)}?organization_id=${ORG}`;
-      const decision = await mixedPage.evaluate(`(async () => {
-        const response = await fetch(${JSON.stringify(decisionPathForActor)}, {
-          method: "POST", credentials: "same-origin",
-          headers: { "Content-Type": "application/json", Accept: "application/json" },
-          body: JSON.stringify({ outcome: "promoted", reviewed_source_type: "organization_primary_record" }),
-        });
-        return { status: response.status, body: await response.json() };
-      })()`);
-      assert.equal(decision.status, 403, JSON.stringify(decision.body));
-      assert.equal(decision.body.error?.code, "authorization_denied");
-      assert.deepEqual(decision.body.blockers.map((blocker) => [blocker.validator_key, blocker.blocking_reason]), [["VAL-AUT-004", "role_not_allowed"]],
-        "P1-08's role blocker reaches the caller");
-      assert.deepEqual(await governedCounts(), before, "no promotion, source, evidence, or review decision persisted");
-      results.mixedRoleSourcePromotion = "PASS: cockpit detail 200 with no decision controls; P1-08 role refusal returned as authorization_denied 403 with role_not_allowed; no writes";
+      assert.equal(detail.body.data.decision_controls_enabled, true, "decision offered as the organization's administrator");
+      // The promotion itself is proven by kai-source-to-impact-workflow-browser-acceptance;
+      // nothing is decided here so the fixture state stays unchanged.
+      assert.deepEqual(await governedCounts(), before, "reads write nothing");
+      results.mixedRoleSourcePromotion = "PASS: cockpit detail 200 with decision controls (organization client_admin grant); no writes";
     });
 
     const normalProfile = await seedFreshFile(FILE.normal, NAMES.normal, "d");

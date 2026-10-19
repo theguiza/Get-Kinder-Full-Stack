@@ -1,7 +1,10 @@
 import { isKaiSprint2Enabled } from "../config/kaiSprint2Config.js";
 import { KAI_SPRINT2_P0_OPERATION_ROLES, KAI_SPRINT2_P0_PATTERNS } from "../config/kaiSprint2P0Contract.js";
 import { buildKaiError } from "../errors/kaiErrors.js";
-import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationService.js";
+import {
+  validateActorCanPerformOperation,
+  validateActorCanPerformSensitivityReview,
+} from "../auth/kaiAuthorizationService.js";
 import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
 import {
   getClientEvidencePipelineEngagement,
@@ -37,6 +40,15 @@ import { __evidenceLineageServiceContract } from "./kaiEvidenceLineageService.js
  * committed decision (by any authorized human decider) makes eligible for the
  * source-preparation continuation, which becomes the requesting
  * administrator's next action.
+ *
+ * Owner decision 2026-10-19: the sensitivity review is the organization
+ * administrator's own step (review_sensitivity); a step only the
+ * organization's administrator may take, viewed by anyone else in the
+ * organization who is not Get Kinder, waits on that administrator
+ * (ask_organization_administrator) when the organization has one, rather
+ * than on Get Kinder; and a file whose effective allowed use is not_allowed
+ * (VAL-KAI-B1A-02-003) is closed (allowed_use_not_allowed), nobody's next
+ * action. Get Kinder viewers keep the Get Kinder wording.
  *
  * Never returned: file content, profile/dictionary/sensitivity values,
  * sensitivity decision outcomes, evidence or claim statements for anything
@@ -98,6 +110,8 @@ const NEXT_ACTION = Object.freeze({
   promoteSource: "promote_source",
   extractEvidence: "extract_evidence",
   continueSourcePreparation: "continue_source_preparation",
+  reviewSensitivity: "review_sensitivity",
+  askOrganizationAdministrator: "ask_organization_administrator",
 });
 
 // Only these parser error codes are ever written (parserProfileWorkerOrchestration.js);
@@ -113,6 +127,9 @@ const PIPELINE_REASONS = Object.freeze([
   "failed",
   "processing",
   "waiting_for_get_kinder_review",
+  "sensitivity_review_ready",
+  "organization_administrator_action_ready",
+  "allowed_use_not_allowed",
   "waiting_for_source_promotion",
   "source_promotion_ready",
   "source_preparation_ready",
@@ -130,7 +147,14 @@ const PIPELINE_REASONS = Object.freeze([
 
 class ClientPipelineProjectionError extends Error {}
 
-const NO_CLIENT_AUTHORITY = Object.freeze({ promoteSource: false, extractEvidence: false, continueSourcePreparation: false });
+const NO_CLIENT_AUTHORITY = Object.freeze({
+  promoteSource: false,
+  extractEvidence: false,
+  continueSourcePreparation: false,
+  reviewSensitivity: false,
+  getKinderViewer: false,
+});
+const GK_ROLES = new Set(["gk_admin", "gk_operator", "gk_reviewer"]);
 const EXTRACTION_ROLES = [...__evidenceLineageServiceContract.EVIDENCE_LINEAGE_ALLOWED_ROLES];
 const CLIENT_EXTRACTION_ROLES = new Set(EXTRACTION_ROLES.filter((role) => role.startsWith("client_")));
 const GK_EXTRACTION_ROLES = new Set(EXTRACTION_ROLES.filter((role) => !role.startsWith("client_")));
@@ -143,8 +167,11 @@ const GK_EXTRACTION_ROLES = new Set(EXTRACTION_ROLES.filter((role) => !role.star
  * role set restricted to its client roles (client_admin) for an actor that
  * does not also pass it as Get Kinder; and the source-preparation
  * continuation's authorizeSourceCandidateContinuation (organization
- * administrator only). Object eligibility is still decided per
- * file from persisted state, and every write re-authorizes.
+ * administrator only), and the sensitivity review's organization-administrator
+ * half. `getKinderViewer` (any GK role in this organization, global or
+ * organization-scoped) keeps the Get Kinder wording for a Get Kinder viewer of
+ * the client surface. Object eligibility is still decided per file from
+ * persisted state, and every write re-authorizes.
  */
 function resolveClientAuthority(actorContext, organizationId) {
   const promotion = authorizeSourcePromotionDecision(actorContext, organizationId);
@@ -155,7 +182,30 @@ function resolveClientAuthority(actorContext, organizationId) {
     promoteSource: promotion.ok === true && promotion.organizationAdminAuthorized === true,
     extractEvidence: passesExtraction(CLIENT_EXTRACTION_ROLES) && !passesExtraction(GK_EXTRACTION_ROLES),
     continueSourcePreparation: authorizeSourceCandidateContinuation(actorContext, organizationId).ok === true,
+    reviewSensitivity: validateActorCanPerformSensitivityReview(
+      actorContext, "record_sensitivity_allowed_use_decision", organizationId, GK_ROLES, { globalRolesOnly: true },
+    ).organizationAdminAuthorized === true,
+    getKinderViewer: validateActorCanPerformOperation(
+      actorContext, "read_intake", organizationId, { allowedRoles: GK_ROLES, combineGlobalRoles: true },
+    ).ok === true,
   };
+}
+
+/**
+ * Who a step the organization's administrator may take waits on, for a
+ * viewer who cannot take it (owner decision 2026-10-19): the organization's
+ * administrator when the organization has one (`organization_administrator_available`,
+ * never returned) and the viewer is not Get Kinder; otherwise the existing
+ * Get Kinder state.
+ */
+function waitingOnAdministratorOr(row, clientAuthority, key, fallback) {
+  if (row.organization_administrator_available === true && clientAuthority.getKinderViewer !== true) {
+    return stage(key, STAGE_STATUS.waitingForClient, RESPONSIBLE.client, {
+      ...(fallback.count === undefined ? {} : { count: fallback.count }),
+      detail: "organization_administrator_action_ready",
+    });
+  }
+  return fallback;
 }
 
 function isPlainObject(value) {
@@ -255,34 +305,51 @@ function deriveFileStages(row, reviewedImpactFactCount, clientAuthority = NO_CLI
   if (stages.at(-1).status !== STAGE_STATUS.complete) return stages;
 
   // Human gates from here on. The decision outcome itself is never returned.
-  stages.push(row.sensitivity_decision_outcome === "reviewed"
-    ? stage("sensitivity_review", STAGE_STATUS.complete, RESPONSIBLE.none)
-    : stage("sensitivity_review", STAGE_STATUS.waitingForGetKinder, RESPONSIBLE.getKinder));
+  // The sensitivity review is the organization administrator's own step
+  // (owner decisions 2026-10-12 and 2026-10-19).
+  if (row.sensitivity_decision_outcome === "reviewed") {
+    stages.push(stage("sensitivity_review", STAGE_STATUS.complete, RESPONSIBLE.none));
+  } else if (clientAuthority.reviewSensitivity) {
+    stages.push(stage("sensitivity_review", STAGE_STATUS.waitingForClient, RESPONSIBLE.client, { detail: "sensitivity_review_ready" }));
+  } else {
+    stages.push(waitingOnAdministratorOr(row, clientAuthority, "sensitivity_review",
+      stage("sensitivity_review", STAGE_STATUS.waitingForGetKinder, RESPONSIBLE.getKinder)));
+  }
   if (stages.at(-1).status !== STAGE_STATUS.complete) return stages;
+
+  // VAL-KAI-B1A-02-003: a file whose effective allowed use is not_allowed is
+  // intentionally not prepared as a source; only a new human sensitivity
+  // decision changes that. Nobody's next action, and not a Get Kinder wait.
+  const allowedUseClosed = row.effective_allowed_use_not_allowed === true;
 
   const promoted = count(row.source_candidate_promoted_count);
   const candidates = count(row.source_candidate_count);
   const rejected = count(row.source_candidate_rejected_count);
   if (promoted > 0 && count(row.source_version_count) > 0) {
     stages.push(stage("source_review", STAGE_STATUS.complete, RESPONSIBLE.none));
+  } else if (allowedUseClosed) {
+    stages.push(stage("source_review", STAGE_STATUS.closed, RESPONSIBLE.none, { detail: "allowed_use_not_allowed" }));
   } else if (candidates > 0 && rejected === candidates) {
     stages.push(stage("source_review", STAGE_STATUS.closed, RESPONSIBLE.none));
   } else if (candidates === 0) {
     // A reviewed sensitivity decision with no P1-07 candidate: nothing exists
-    // to promote; the handoff did not create one. The administrator whose own
-    // committed decision makes the file eligible can continue it.
-    stages.push(clientAuthority.continueSourcePreparation
-      && row.source_candidate_continuation_ready === true
-      && row.sensitivity_permission_predicate === true
-      ? stage("source_review", STAGE_STATUS.waitingForClient, RESPONSIBLE.client, { detail: "source_preparation_ready" })
-      : stage("source_review", STAGE_STATUS.waitingForGetKinder, RESPONSIBLE.getKinder, { detail: "source_candidate_missing" }));
+    // to promote; the handoff did not create one. Any organization
+    // administrator can continue a file whose committed state makes it eligible.
+    const continuable = row.source_candidate_continuation_ready === true && row.sensitivity_permission_predicate === true;
+    const missing = stage("source_review", STAGE_STATUS.waitingForGetKinder, RESPONSIBLE.getKinder, { detail: "source_candidate_missing" });
+    if (continuable && clientAuthority.continueSourcePreparation) {
+      stages.push(stage("source_review", STAGE_STATUS.waitingForClient, RESPONSIBLE.client, { detail: "source_preparation_ready" }));
+    } else {
+      stages.push(continuable ? waitingOnAdministratorOr(row, clientAuthority, "source_review", missing) : missing);
+    }
   } else if (row.sensitivity_permission_predicate !== true) {
     // VAL-KAI-P1-08-002 would refuse any promotion of this candidate.
     stages.push(stage("source_review", STAGE_STATUS.waitingForGetKinder, RESPONSIBLE.getKinder, { detail: "source_promotion_blocked" }));
   } else if (count(row.source_candidate_actionable_count) > 0) {
     stages.push(clientAuthority.promoteSource
       ? stage("source_review", STAGE_STATUS.waitingForClient, RESPONSIBLE.client, { detail: "source_promotion_ready" })
-      : stage("source_review", STAGE_STATUS.waitingForGetKinder, RESPONSIBLE.getKinder));
+      : waitingOnAdministratorOr(row, clientAuthority, "source_review",
+        stage("source_review", STAGE_STATUS.waitingForGetKinder, RESPONSIBLE.getKinder)));
   } else {
     // A candidate exists but no P1-08 decision can act on it now (for example
     // a promoted candidate whose source version is not current).
@@ -293,10 +360,14 @@ function deriveFileStages(row, reviewedImpactFactCount, clientAuthority = NO_CLI
   const evidence = count(row.evidence_item_count);
   if (evidence > 0) {
     stages.push(stage("evidence_extraction", STAGE_STATUS.complete, RESPONSIBLE.none, { count: evidence }));
+  } else if (allowedUseClosed) {
+    // A source promoted before its allowed use became not_allowed: P2-01 refuses it.
+    stages.push(stage("evidence_extraction", STAGE_STATUS.closed, RESPONSIBLE.none, { count: 0, detail: "allowed_use_not_allowed" }));
   } else if (clientAuthority.extractEvidence) {
     stages.push(stage("evidence_extraction", STAGE_STATUS.waitingForClient, RESPONSIBLE.client, { count: 0, detail: "evidence_extraction_ready" }));
   } else {
-    stages.push(stage("evidence_extraction", STAGE_STATUS.waitingForGetKinder, RESPONSIBLE.getKinder, { count: 0 }));
+    stages.push(waitingOnAdministratorOr(row, clientAuthority, "evidence_extraction",
+      stage("evidence_extraction", STAGE_STATUS.waitingForGetKinder, RESPONSIBLE.getKinder, { count: 0 })));
   }
   if (stages.at(-1).status !== STAGE_STATUS.complete) return stages;
 
@@ -350,6 +421,8 @@ function nextActionFor(current) {
       if (current.detail === "source_promotion_ready") return NEXT_ACTION.promoteSource;
       if (current.detail === "source_preparation_ready") return NEXT_ACTION.continueSourcePreparation;
       if (current.detail === "evidence_extraction_ready") return NEXT_ACTION.extractEvidence;
+      if (current.detail === "sensitivity_review_ready") return NEXT_ACTION.reviewSensitivity;
+      if (current.detail === "organization_administrator_action_ready") return NEXT_ACTION.askOrganizationAdministrator;
       return NEXT_ACTION.answerClientFollowups;
     case STAGE_STATUS.failed:
       return current.responsible === RESPONSIBLE.getKinder ? NEXT_ACTION.contactGetKinder : NEXT_ACTION.uploadNewFile;

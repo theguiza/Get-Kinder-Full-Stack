@@ -864,8 +864,11 @@ async function runBrowserAcceptance() {
       await npoAdminPage.selectProject(PROJECT_A);
       await npoAdminPage.idle();
       await npoAdminPage.clickTab("Reviews");
-      await npoAdminPage.waitForText("Waiting for Get Kinder review");
+      // Owner decision 2026-10-19: the stored administrator's remaining
+      // sensitivity review and the promotion are its own work in Data Sources.
+      await npoAdminPage.waitForText("Ready for you in Data Sources");
       const body = await npoAdminPage.text();
+      assert.ok(body.includes(`${NAMES.afterRevoke}: Your action is needed: review this file's sensitivity & allowed use`), "the unreviewed file is the administrator's step");
       // The stored client_admin now holds the P1-08 step itself (owner decision 2026-10-19).
       assert.ok(body.includes(`${NAMES.reviewer}: Your action is needed: review this file's source candidate and promote it as a source in Data Sources.`), "the client sees the next stage");
       assert.ok(!body.includes(`${NAMES.reviewer}: Sensitivity review (Waiting for Get Kinder)`));

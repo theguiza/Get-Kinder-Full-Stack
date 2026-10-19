@@ -17,9 +17,12 @@ import {
   projectCandidateClaims,
   projectEvidenceLibraryItems,
   projectOrganizationSources,
+  sourceCandidateDetailPath,
 } from "../impactEvidenceLibraryLogic.js";
 import {
   INTERNAL_DRAFT_READINESS_MESSAGES,
+  USE_FOR_IMPACT_MAX_STEPS,
+  USE_FOR_IMPACT_MESSAGES,
   claimIdsByEvidenceItem,
   claimInternalDraftSelectability,
   claimProposalResultMessage,
@@ -31,13 +34,22 @@ import {
   internalDraftReadiness,
   internalDraftRequestBody,
   internalDraftResultSummary,
+  isUseForImpactCandidate,
   retainSelectableClaimIds,
   sourcePreparationContinuationFailureMessage,
   sourcePreparationContinuationMessage,
   sourcePreparationFiles,
   sourcePreparationGuidance,
+  useForImpactStep,
 } from "./clientEvidenceWorkflowLogic.js";
-import { PIPELINE_STAGE_LABELS, isPipelineSuccess, stageStatusLabel } from "./clientEvidencePipelineLogic.js";
+import {
+  PIPELINE_STAGE_LABELS,
+  clientEvidencePipelinePath,
+  isPipelineSuccess,
+  projectClientEvidencePipeline,
+  stageStatusLabel,
+} from "./clientEvidencePipelineLogic.js";
+import ClientInternalDrafts from "./ClientInternalDrafts.jsx";
 import ClientSensitivityReviewPanel from "./ClientSensitivityReviewPanel.jsx";
 import ClientSourcePromotionPanel from "./ClientSourcePromotionPanel.jsx";
 
@@ -94,6 +106,21 @@ function useOrganizationRead(organizationId, path, project, refreshToken) {
  * server's reason the file waits. Panels open only from an explicit action;
  * a recorded decision or continuation refreshes the pipeline and the
  * Sources / Evidence / Claim reads.
+ *
+ * "Use for impact" (owner decision 2026-10-19) is each eligible file's
+ * primary action: from the file's persisted pipeline state it runs the
+ * already-authorized automated steps (the P1-07 continuation, P2-01
+ * extraction from the file's current source version), re-reading the
+ * pipeline after each, and stops at a human decision - the sensitivity
+ * review or the source authorization and P1-08 decision - by opening that
+ * existing panel; once the person records it, the flow resumes from the
+ * re-read state. Every step is the existing route, which re-authorizes and
+ * replays idempotently, so a repeat or an interrupted flow continues from
+ * whatever is persisted.
+ *
+ * "Your internal drafts" (readInternalDrafts) reads the administrator's own
+ * persisted internal drafts with their true review state; a draft just
+ * generated is opened from that read.
  */
 export default function ClientEvidenceWorkflow({ organizationId, engagementId, access, pipeline, onPipelineRefresh }) {
   const [refreshToken, setRefreshToken] = useState(0);
@@ -155,6 +182,7 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
     setSelectedClaimIds((current) => (current.includes(claimId) ? current.filter((id) => id !== claimId) : [...current, claimId]));
   };
   const readiness = internalDraftReadiness({ canGenerate: access.generateDrafts, engagementId, selectedClaimIds });
+  const [draftsRefreshToken, setDraftsRefreshToken] = useState(0);
   const generate = (contentType, pathBuilder) => {
     if (!readiness.ready) return;
     // One idempotency key per selection and content type: a repeated click
@@ -163,7 +191,11 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
     setDraftKeys((current) => ({ ...current, [contentType]: idempotencyKey }));
     return runWrite(`generate:${contentType}`, pathBuilder(organizationId),
       internalDraftRequestBody({ claimIds: selectedClaimIds, idempotencyKey, engagementId }),
-      (data) => setLastDraft(internalDraftResultSummary(data, contentType)),
+      (data) => {
+        setLastDraft(internalDraftResultSummary(data, contentType));
+        // The persisted draft is read back and opened below, never shown from this response.
+        setDraftsRefreshToken((value) => value + 1);
+      },
       (result) => internalDraftFailureMessage(result, { canGenerateGapFollowups: access.generateClaimGapFollowups }));
   };
 
@@ -176,6 +208,9 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
   const preparationRecorded = () => {
     onPipelineRefresh?.();
     refresh();
+    if (activeImpactFlow && openPreparation?.file?.intakeFileId === activeImpactFlow.intakeFileId) {
+      resumeUseForImpact(activeImpactFlow.intakeFileId);
+    }
   };
   const continuePreparation = (file) => runWrite(`continue:${file.intakeFileId}`,
     intakeFileSourceCandidatePath(organizationId, engagementId, file.intakeFileId), {},
@@ -185,6 +220,89 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
     }, sourcePreparationContinuationFailureMessage);
   const pipelineReady = isPipelineSuccess(pipeline?.status) && Boolean(pipeline?.data);
   const preparationFiles = pipelineReady ? sourcePreparationFiles(pipeline.data, access) : [];
+
+  // --- Use for impact ---------------------------------------------------------
+  const [impactFlow, setImpactFlow] = useState(null);
+  useEffect(() => { setImpactFlow(null); }, [organizationId, engagementId]);
+  const activeImpactFlow = impactFlow && impactFlow.contextKey === contextKey ? impactFlow : null;
+
+  const rereadPipelineFile = async (intakeFileId) => {
+    const result = await getJson(clientEvidencePipelinePath(organizationId, engagementId));
+    const data = result.statusCode === 200 && result.body?.ok ? projectClientEvidencePipeline(result.body.data, engagementId) : null;
+    onPipelineRefresh?.();
+    return data ? data.files.find((entry) => entry.intakeFileId === intakeFileId) || null : null;
+  };
+  // P2-01 for the file's own current source version, resolved through the
+  // file -> candidate -> detail reads (never a browser guess).
+  const extractForFile = async (intakeFileId) => {
+    const lookup = await getJson(intakeFileSourceCandidatePath(organizationId, engagementId, intakeFileId));
+    const candidateId = lookup.statusCode === 200 && lookup.body?.ok ? lookup.body.data?.intake_source_candidate_id : null;
+    if (!isRouteUuid(candidateId)) return { ok: false, text: errorText(lookup) };
+    const detail = await getJson(sourceCandidateDetailPath(organizationId, candidateId));
+    const version = detail.statusCode === 200 && detail.body?.ok ? detail.body.data?.source_version : null;
+    if (!version || version.is_current !== true || !isRouteUuid(version.source_version_id)) return { ok: false, text: errorText(detail) };
+    const extracted = await postJson(evidenceExtractionPath(organizationId, version.source_version_id), {});
+    return extracted.statusCode === 200 && extracted.body?.ok ? { ok: true } : { ok: false, text: errorText(extracted) };
+  };
+  const continueForFile = async (intakeFileId) => {
+    const continued = await postJson(intakeFileSourceCandidatePath(organizationId, engagementId, intakeFileId), {});
+    return continued.statusCode === 200 && continued.body?.ok
+      ? { ok: true }
+      : { ok: false, text: sourcePreparationContinuationFailureMessage(continued) };
+  };
+  const runUseForImpact = async (startFile) => {
+    const requestContext = contextRef.current;
+    setImpactFlow({ contextKey, intakeFileId: startFile.intakeFileId });
+    setPending(`impact:${startFile.intakeFileId}`);
+    setNotice(null);
+    let file = startFile;
+    try {
+      for (let step = 0; step < USE_FOR_IMPACT_MAX_STEPS; step += 1) {
+        const next = useForImpactStep(file, access);
+        if (next.kind === "review_sensitivity" || next.kind === "confirm_promotion") {
+          setPreparation({ contextKey, kind: next.kind === "review_sensitivity" ? "sensitivity" : "source", file });
+          setNotice({ kind: "info", text: USE_FOR_IMPACT_MESSAGES[next.kind] });
+          return;
+        }
+        if (next.kind === "done" || next.kind === "blocked") {
+          setImpactFlow(null);
+          setNotice(next.kind === "done" ? { kind: "success", text: USE_FOR_IMPACT_MESSAGES.done } : { kind: "warning", text: next.text });
+          refresh();
+          return;
+        }
+        const outcome = next.kind === "continue" ? await continueForFile(file.intakeFileId) : await extractForFile(file.intakeFileId);
+        if (contextRef.current !== requestContext) return;
+        refresh();
+        if (!outcome.ok) {
+          setImpactFlow(null);
+          setNotice({ kind: "warning", text: `${outcome.text} ${USE_FOR_IMPACT_MESSAGES.interrupted}` });
+          return;
+        }
+        const reread = await rereadPipelineFile(file.intakeFileId);
+        if (contextRef.current !== requestContext) return;
+        if (!reread) {
+          setImpactFlow(null);
+          setNotice({ kind: "warning", text: USE_FOR_IMPACT_MESSAGES.interrupted });
+          return;
+        }
+        file = reread;
+      }
+      setImpactFlow(null);
+      setNotice({ kind: "warning", text: USE_FOR_IMPACT_MESSAGES.interrupted });
+    } finally {
+      if (contextRef.current === requestContext) setPending("");
+    }
+  };
+  // A human step recorded inside the flow resumes it from the re-read state.
+  const resumeUseForImpact = async (intakeFileId) => {
+    const requestContext = contextRef.current;
+    const file = await rereadPipelineFile(intakeFileId);
+    if (contextRef.current !== requestContext || !file) return;
+    const next = useForImpactStep(file, access);
+    if (next.kind === "confirm_promotion" && preparation?.kind === "source") return; // the open panel already shows it
+    if (next.kind !== "review_sensitivity") setPreparation(null);
+    runUseForImpact(file);
+  };
 
   return (
     <div data-client-evidence-workflow="">
@@ -220,6 +338,12 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
                       {PIPELINE_STAGE_LABELS[file.currentStage]}: {current ? stageStatusLabel(current) : "Unknown"}
                     </div>
                     <div className="mt-1" data-client-preparation-guidance="">{sourcePreparationGuidance(file, access)}</div>
+                    {isUseForImpactCandidate(file, access) ? (
+                      <button type="button" className="btn btn-sm btn-primary mt-1 me-2" data-client-use-for-impact={file.intakeFileId}
+                        disabled={Boolean(pending)} onClick={() => runUseForImpact(file)}>
+                        {pending === `impact:${file.intakeFileId}` ? "Working..." : "Use for impact"}
+                      </button>
+                    ) : null}
                     {file.currentStage === "sensitivity_review" && access.reviewSensitivity ? (
                       <button type="button" className="btn btn-sm btn-outline-primary mt-1" data-client-open-sensitivity-review={file.intakeFileId}
                         onClick={() => setPreparation({ contextKey, kind: "sensitivity", file })}>
@@ -227,13 +351,13 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
                       </button>
                     ) : null}
                     {file.currentStage === "source_review" && file.nextAction === "continue_source_preparation" && access.promoteSource ? (
-                      <button type="button" className="btn btn-sm btn-primary mt-1" data-client-continue-source-preparation={file.intakeFileId}
+                      <button type="button" className="btn btn-sm btn-outline-primary mt-1" data-client-continue-source-preparation={file.intakeFileId}
                         disabled={Boolean(pending)} onClick={() => continuePreparation(file)}>
                         {pending === `continue:${file.intakeFileId}` ? "Continuing..." : "Continue source preparation"}
                       </button>
                     ) : null}
                     {file.currentStage === "source_review" && file.nextAction === "promote_source" && access.promoteSource ? (
-                      <button type="button" className="btn btn-sm btn-primary mt-1" data-client-open-source-review={file.intakeFileId}
+                      <button type="button" className="btn btn-sm btn-outline-primary mt-1" data-client-open-source-review={file.intakeFileId}
                         onClick={() => setPreparation({ contextKey, kind: "source", file })}>
                         Review &amp; promote source
                       </button>
@@ -398,11 +522,24 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
                 {DRAFT_LABELS[lastDraft.contentType]} {lastDraft.replayed ? "already created" : "created"}: {lastDraft.blockCount} block(s) citing {lastDraft.citedClaimCount} claim(s).
               </div>
               <div>
-                Status: {lastDraft.draftStatus || "unknown"}, {lastDraft.reviewStatus || "review status unknown"}. Internal use only. It
-                appears under Generated Drafts once Get Kinder has reviewed it.
+                Internal use only; it awaits Get Kinder review. {access.readInternalDrafts
+                  ? "It is opened from your saved drafts below."
+                  : "It appears under Generated Drafts once Get Kinder has reviewed it."}
               </div>
             </div>
           ) : null}
+        </div>
+      ) : null}
+
+      {access.readInternalDrafts ? (
+        <div className="admin-card mb-3" data-client-internal-drafts="">
+          <h5 className="mb-2">Your internal drafts</h5>
+          <div className="small text-muted mb-2">
+            Drafts generated for this Project, with their actual Get Kinder review state. Internal use only: reading a draft does not
+            approve it for funders or the public, and nothing here exports or releases it.
+          </div>
+          <ClientInternalDrafts organizationId={organizationId} engagementId={engagementId} claims={claims.items}
+            refreshToken={draftsRefreshToken} focusDraftId={lastDraft?.generatedContentDraftId || null} />
         </div>
       ) : null}
     </div>

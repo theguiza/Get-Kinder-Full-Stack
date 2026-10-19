@@ -522,8 +522,9 @@ test("F: capabilities - client_admin gets extraction, proposal, gap follow-ups, 
   const operations = capabilities.data.workflowOperations;
   assert.deepEqual(
     Object.fromEntries(Object.entries(operations).filter(([, value]) => value === true)),
-    // reviewSensitivity / promoteSource: owner decisions 2026-10-12 and 2026-10-18.
-    { reviewSensitivity: true, promoteSource: true, generateDrafts: true, extractEvidence: true, proposeClaim: true, generateClaimGapFollowups: true },
+    // reviewSensitivity / promoteSource: owner decisions 2026-10-12 and 2026-10-18;
+    // readInternalDrafts (the administrator's own internal drafts): owner decision 2026-10-19.
+    { reviewSensitivity: true, promoteSource: true, generateDrafts: true, readInternalDrafts: true, extractEvidence: true, proposeClaim: true, generateClaimGapFollowups: true },
   );
   assert.equal(capabilities.data.internalKnowledgeWorkspace, false);
   const readiness = Object.fromEntries(computeOrganizationOperationReadiness(actor, ORG_X).map((row) => [row.key, row.ready]));
@@ -544,6 +545,7 @@ test("F: capabilities - client_admin gets extraction, proposal, gap follow-ups, 
   assert.deepEqual([projected.workflowOperations.generateDrafts, projected.workflowOperations.generateAllDraftTypes], [true, false]);
   assert.deepEqual(clientEvidenceWorkflowAccess(projected), {
     visible: true, reviewSensitivity: true, promoteSource: true, extractEvidence: true, proposeClaim: true, generateClaimGapFollowups: true, generateDrafts: true,
+    readInternalDrafts: true,
   });
 });
 

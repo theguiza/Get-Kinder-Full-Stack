@@ -29,7 +29,14 @@ import pool from "./kaiDb.js";
  * item resolved, and neither reviewed nor P1-05 allowed use not_allowed; it
  * is false without a requesting actor (`actorUserId`). The
  * service uses it only to choose the next action, and the continuation
- * re-checks everything on the write. No file content,
+ * re-checks everything on the write. `effective_allowed_use_not_allowed` is
+ * VAL-KAI-B1A-02-003 over the same rows (the single current head's reviewed
+ * allowed use, or the committed P1-05 fact, is not_allowed), and
+ * `organization_administrator_available` is whether the organization has an
+ * administrator path at all (an active GK organization binding, whose Get
+ * Kinder organization administrators are its binding-derived client_admins,
+ * or an active stored client_admin grant of an active account); both only
+ * choose who the file waits on and are never returned. No file content,
  * profile/dictionary/sensitivity values, evidence or claim statements,
  * reviewer identities, notes, or queue metadata.
  */
@@ -87,6 +94,26 @@ export async function listClientEvidencePipelineFiles(organizationId, engagement
                 AND s.allowed_use_status IS DISTINCT FROM 'not_allowed',
               false
             ) AS source_candidate_continuation_ready,
+            COALESCE(
+              (sd.head_count = 1 AND sd.decision_outcome = 'reviewed' AND sd.reviewed_allowed_use_status = 'not_allowed')
+                OR s.allowed_use_status = 'not_allowed',
+              false
+            ) AS effective_allowed_use_not_allowed,
+            (
+              EXISTS (
+                SELECT 1 FROM kai.gk_organization_bindings b
+                 WHERE b.kai_organization_id = files.organization_id AND b.status = 'active'
+              )
+              OR EXISTS (
+                SELECT 1
+                  FROM kai.organization_memberships om
+                  JOIN kai.users u ON u.user_id = om.user_id
+                 WHERE om.organization_id = files.organization_id
+                   AND om.role_name = 'client_admin'
+                   AND om.membership_status = 'active'
+                   AND u.status = 'active'
+              )
+            ) AS organization_administrator_available,
             COALESCE(c.candidate_count, 0)::int AS source_candidate_count,
             COALESCE(c.needs_review_count, 0)::int AS source_candidate_needs_review_count,
             COALESCE(c.promoted_count, 0)::int AS source_candidate_promoted_count,

@@ -86,11 +86,15 @@ function toEligibleClaim(resultData) {
   };
 }
 
+// A candidate the evaluator cannot use is simply not eligible: missing or
+// stale lineage (not_found / conflict_current_state_changed), or a claim its
+// own validators refuse (validation_blocker - for example an effective
+// allowed use of not_allowed, VAL-KAI-B1A-02-003). It never fails the whole
+// list; any other failure (system_error) still does.
+const UNUSABLE_CANDIDATE_CODES = new Set(["not_found", "conflict_current_state_changed", "validation_blocker"]);
+
 function isUnusableCandidateResult(result) {
-  return (
-    result?.ok === false &&
-    (result.error?.code === "not_found" || result.error?.code === "conflict_current_state_changed")
-  );
+  return result?.ok === false && UNUSABLE_CANDIDATE_CODES.has(result.error?.code);
 }
 
 function shapeError(error) {

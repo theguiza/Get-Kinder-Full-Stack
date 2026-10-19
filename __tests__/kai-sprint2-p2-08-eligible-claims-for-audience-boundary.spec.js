@@ -318,6 +318,23 @@ test("P2-08 repository: current-state conflicts on one candidate are skipped and
   assert.equal(result.data.nextAfterClaimId, id(3));
 });
 
+test("P2-08 repository: a claim the evaluator's own validators refuse (e.g. effective allowed use not_allowed) is not eligible and never fails the whole list", async () => {
+  const failures = new Map([[id(2), { ok: false, data: null, error: { code: "validation_blocker", status: 422 } }]]);
+  const { repository } = repositoryWithCandidates({
+    candidateIds: [id(1), id(2), id(3)],
+    eligibleIds: new Set([id(1), id(2), id(3)]),
+    failures,
+  });
+  const result = await repository.listEligibleClaimsForAudience({
+    organizationId: ORG,
+    requestedAudience: "internal",
+    limit: 10,
+    afterClaimId: null,
+  });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.deepEqual(result.data.eligibleClaims.map((claim) => claim.claimId), [id(1), id(3)]);
+});
+
 test("P2-08 repository: unexpected evaluator failures still fail the whole list request", async () => {
   const failures = new Map([[id(2), { ok: false, data: null, error: { code: "system_error", status: 500 } }]]);
   const { repository } = repositoryWithCandidates({

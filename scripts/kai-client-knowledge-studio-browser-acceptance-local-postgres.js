@@ -126,6 +126,7 @@ const ACCEPTANCE_SPECS = Object.freeze([
   "__tests__/kai-client-admin-evidence-to-draft-browser-acceptance.integration.spec.js",
   "__tests__/kai-client-admin-source-promotion-browser-acceptance.integration.spec.js",
   "__tests__/kai-client-admin-source-preparation-continuation-browser-acceptance.integration.spec.js",
+  "__tests__/kai-source-to-impact-workflow-browser-acceptance.integration.spec.js",
 ]);
 const acceptanceSpec = process.argv[2] || ACCEPTANCE_SPECS[0];
 if (!ACCEPTANCE_SPECS.includes(acceptanceSpec)) {
