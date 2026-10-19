@@ -1319,6 +1319,40 @@ router.get("/admin/review-cockpit/intake-files/:intakeFileId/source-candidate", 
 });
 
 /**
+ * Owner decision (2026-10-19): source-preparation continuation for one intake
+ * file of an explicit Project (engagement_id query parameter) whose current
+ * 'reviewed' sensitivity decision is committed but whose P1-07 source
+ * candidate was never created. The body must be empty: the caller chooses no
+ * actor, role, decision, outcome, or permission. Validates identifiers and
+ * delegates once to the review-cockpit service, which owns authorization,
+ * eligibility, and the existing P1-07 handoff.
+ */
+router.post("/admin/review-cockpit/intake-files/:intakeFileId/source-candidate", async (req, res) => {
+  if (!metadataContentTypeIsSupported(req)) return sendKaiError(res, "unsupported_media_type");
+  const identifiers = reviewCockpitIdentifiers(req, "intakeFileId");
+  const engagementId = typeof req.query?.engagement_id === "string" ? req.query.engagement_id : "";
+  if (!identifiers || !KAI_SPRINT2_P0_PATTERNS.uuid.test(engagementId) || engagementId !== engagementId.toLowerCase()) {
+    return sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id_or_engagement_id_or_intake_file_id")],
+    });
+  }
+  if (Object.keys(requestPayload(req)).length !== 0) {
+    return sendKaiError(res, "validation_blocker", {
+      blockers: [routeValidationBlocker("unknown_field", "body")],
+    });
+  }
+  return invokeService(res, async () => {
+    const service = await getReviewCockpitService();
+    return service.continueIntakeFileSourcePreparation({
+      ...requestContext(req, "/api/kai/sprint2/intake/admin/review-cockpit/intake-files/:intakeFileId/source-candidate"),
+      organizationId: identifiers.organizationId,
+      engagementId,
+      intakeFileId: identifiers.objectId,
+    });
+  });
+});
+
+/**
  * KAI B1A-2 Phase-5 sensitivity/allowed-use decision route. Structurally identical
  * to the source-candidate decision route below (validator -> service ->
  * repository): it contains no SQL, imports no database pool, and calls exactly one

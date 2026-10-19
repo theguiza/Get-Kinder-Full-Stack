@@ -20,9 +20,17 @@ import pool from "./kaiDb.js";
  * candidates a P1-08 decision could act on now (the repository's own
  * completeness predicate: needs_gk_review with an open review item and no
  * decision, or needs_more_information awaiting the client); the service uses
- * them only to choose the file's next action and never returns them. No file
- * content, profile/dictionary/sensitivity values, evidence or claim
- * statements, reviewer identities, notes, or queue metadata.
+ * them only to choose the file's next action and never returns them.
+ * `source_candidate_continuation_ready` (owner decision 2026-10-19) is the
+ * server-side result of the source-preparation continuation's eligibility
+ * over committed rows for the requesting actor (`actorUserId`): exactly one
+ * current decision-lineage head, 'reviewed', human, recorded by this actor as
+ * client_admin, its sensitivity_review item resolved, and neither reviewed
+ * nor P1-05 allowed use not_allowed; it is false without an actor. The
+ * service uses it only to choose the next action, and the continuation
+ * re-checks everything on the write. No file content,
+ * profile/dictionary/sensitivity values, evidence or claim statements,
+ * reviewer identities, notes, or queue metadata.
  */
 export async function getClientEvidencePipelineEngagement(organizationId, engagementId, db = pool) {
   const { rows } = await db.query(
@@ -36,7 +44,7 @@ export async function getClientEvidencePipelineEngagement(organizationId, engage
   return rows[0] || null;
 }
 
-export async function listClientEvidencePipelineFiles(organizationId, engagementId, { limit }, db = pool) {
+export async function listClientEvidencePipelineFiles(organizationId, engagementId, { limit, actorUserId = null }, db = pool) {
   const { rows } = await db.query(
     `WITH files AS (
        SELECT f.organization_id, f.intake_file_id, f.safe_filename, f.upload_state, f.file_policy_status,
@@ -64,6 +72,19 @@ export async function listClientEvidencePipelineFiles(organizationId, engagement
               AND s.product_learning_allowed = false
               AND s.retention_posture = 'restricted_pending_review') AS sensitivity_permission_predicate,
             sd.decision_outcome AS sensitivity_decision_outcome,
+            COALESCE(
+              sd.head_count = 1
+                AND sd.decision_outcome = 'reviewed'
+                AND sd.created_by_type = 'human'
+                AND sd.decided_by_role = 'client_admin'
+                AND sd.decided_by = $4::uuid
+                AND sq.review_queue_item_id = sd.review_queue_item_id
+                AND sq.queue_status = 'resolved'
+                AND sq.review_status = 'resolved'
+                AND sd.reviewed_allowed_use_status IS DISTINCT FROM 'not_allowed'
+                AND s.allowed_use_status IS DISTINCT FROM 'not_allowed',
+              false
+            ) AS source_candidate_continuation_ready,
             COALESCE(c.candidate_count, 0)::int AS source_candidate_count,
             COALESCE(c.needs_review_count, 0)::int AS source_candidate_needs_review_count,
             COALESCE(c.promoted_count, 0)::int AS source_candidate_promoted_count,
@@ -100,7 +121,9 @@ export async function listClientEvidencePipelineFiles(organizationId, engagement
         AND s.intake_file_id = files.intake_file_id
         AND s.file_profile_id = p.file_profile_id
        LEFT JOIN LATERAL (
-         SELECT dec.decision_outcome
+         SELECT dec.decision_outcome, dec.created_by_type, dec.decided_by_role, dec.decided_by,
+                dec.review_queue_item_id, dec.reviewed_allowed_use_status,
+                count(*) OVER () AS head_count
            FROM kai.intake_sensitivity_review_decisions dec
           WHERE dec.organization_id = s.organization_id
             AND dec.intake_sensitivity_profile_id = s.intake_sensitivity_profile_id
@@ -113,6 +136,11 @@ export async function listClientEvidencePipelineFiles(organizationId, engagement
           ORDER BY dec.created_at DESC
           LIMIT 1
        ) sd ON true
+       LEFT JOIN kai.review_queue_items sq
+         ON sq.organization_id = s.organization_id
+        AND sq.queue_type = 'sensitivity_review'
+        AND sq.target_object_type = 'intake_sensitivity_profile'
+        AND sq.target_object_id = s.intake_sensitivity_profile_id
        LEFT JOIN LATERAL (
          SELECT count(*) AS candidate_count,
                 count(*) FILTER (WHERE ic.candidate_status = 'needs_gk_review') AS needs_review_count,
@@ -197,7 +225,7 @@ export async function listClientEvidencePipelineFiles(organizationId, engagement
             AND rq.queue_status NOT IN ('resolved', 'cancelled')
        ) fu ON true
       ORDER BY files.created_at DESC, files.intake_file_id DESC`,
-    [organizationId, engagementId, limit],
+    [organizationId, engagementId, limit, actorUserId],
   );
   return rows;
 }

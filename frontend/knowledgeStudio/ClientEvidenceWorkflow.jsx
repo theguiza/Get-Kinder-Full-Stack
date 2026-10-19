@@ -10,6 +10,7 @@ import {
   evidenceExtractionPath,
   evidenceLibraryCandidatesPath,
   getJson,
+  intakeFileSourceCandidatePath,
   isRouteUuid,
   organizationSourcesPath,
   postJson,
@@ -31,6 +32,8 @@ import {
   internalDraftRequestBody,
   internalDraftResultSummary,
   retainSelectableClaimIds,
+  sourcePreparationContinuationFailureMessage,
+  sourcePreparationContinuationMessage,
   sourcePreparationFiles,
   sourcePreparationGuidance,
 } from "./clientEvidenceWorkflowLogic.js";
@@ -85,9 +88,12 @@ function useOrganizationRead(organizationId, path, project, refreshToken) {
  * step the server reports this actor may take: the existing sensitivity
  * review panel (reviewSensitivity), the source review panel
  * (promote_source, decided by the candidate detail's own
- * decision_controls_enabled), or the server's reason the file waits. Panels
- * open only from an explicit action; a recorded decision refreshes the
- * pipeline and the Sources / Evidence / Claim reads.
+ * decision_controls_enabled), the source-preparation continuation
+ * (continue_source_preparation, owner decision 2026-10-19: one empty-body
+ * POST that creates a reviewed file's missing source candidate), or the
+ * server's reason the file waits. Panels open only from an explicit action;
+ * a recorded decision or continuation refreshes the pipeline and the
+ * Sources / Evidence / Claim reads.
  */
 export default function ClientEvidenceWorkflow({ organizationId, engagementId, access, pipeline, onPipelineRefresh }) {
   const [refreshToken, setRefreshToken] = useState(0);
@@ -171,6 +177,12 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
     onPipelineRefresh?.();
     refresh();
   };
+  const continuePreparation = (file) => runWrite(`continue:${file.intakeFileId}`,
+    intakeFileSourceCandidatePath(organizationId, engagementId, file.intakeFileId), {},
+    (data) => {
+      setNotice({ kind: "success", text: sourcePreparationContinuationMessage(data) });
+      onPipelineRefresh?.();
+    }, sourcePreparationContinuationFailureMessage);
   const pipelineReady = isPipelineSuccess(pipeline?.status) && Boolean(pipeline?.data);
   const preparationFiles = pipelineReady ? sourcePreparationFiles(pipeline.data, access) : [];
 
@@ -212,6 +224,12 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
                       <button type="button" className="btn btn-sm btn-outline-primary mt-1" data-client-open-sensitivity-review={file.intakeFileId}
                         onClick={() => setPreparation({ contextKey, kind: "sensitivity", file })}>
                         Review sensitivity &amp; allowed use
+                      </button>
+                    ) : null}
+                    {file.currentStage === "source_review" && file.nextAction === "continue_source_preparation" && access.promoteSource ? (
+                      <button type="button" className="btn btn-sm btn-primary mt-1" data-client-continue-source-preparation={file.intakeFileId}
+                        disabled={Boolean(pending)} onClick={() => continuePreparation(file)}>
+                        {pending === `continue:${file.intakeFileId}` ? "Continuing..." : "Continue source preparation"}
                       </button>
                     ) : null}
                     {file.currentStage === "source_review" && file.nextAction === "promote_source" && access.promoteSource ? (

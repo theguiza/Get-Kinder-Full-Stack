@@ -196,7 +196,12 @@ test("scope: an engagement of another organization is not_found and no file is r
   assert.equal(crossOrg.result.error.code, "not_found");
   const { calls } = await read([row(1)]);
   assert.deepEqual(calls[0], ["engagement", ORG, ENGAGEMENT]);
-  assert.deepEqual(calls[1], ["files", ORG, ENGAGEMENT, { limit: contract.CLIENT_EVIDENCE_PIPELINE_FILE_LIMIT + 1 }]);
+  assert.deepEqual(calls[1][0], "files");
+  assert.deepEqual(calls[1].slice(1, 3), [ORG, ENGAGEMENT]);
+  assert.equal(calls[1][3].limit, contract.CLIENT_EVIDENCE_PIPELINE_FILE_LIMIT + 1);
+  // The requesting actor, only for the source-preparation continuation predicate.
+  assert.equal(typeof calls[1][3].actorUserId, "string");
+  assert.deepEqual(Object.keys(calls[1][3]).sort(), ["actorUserId", "limit"]);
 });
 
 // ---------------------------------------------------------------------------

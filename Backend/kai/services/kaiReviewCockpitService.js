@@ -2,7 +2,7 @@ import {
   isKaiSprint2Enabled,
 } from "../config/kaiSprint2Config.js";
 import { KAI_SPRINT2_P0_PATTERNS } from "../config/kaiSprint2P0Contract.js";
-import { buildKaiError, validationBlocked } from "../errors/kaiErrors.js";
+import { KAI_ERROR_STATUS, buildKaiError, validationBlocked } from "../errors/kaiErrors.js";
 import { resolveKaiActorContext } from "../auth/kaiActorContext.js";
 import {
   validateActorCanPerformOperation,
@@ -14,6 +14,8 @@ import {
   getReviewCockpitFileProfileRecord as readFileProfileRecord,
   getReviewCockpitIntakeFileSensitivityProfileRecord as readIntakeFileSensitivityProfileRecord,
   getReviewCockpitIntakeFileSourceCandidateRecord as readIntakeFileSourceCandidateRecord,
+  getReviewCockpitIntakeFileSourcePreparationRecord as readIntakeFileSourcePreparationRecord,
+  getReviewCockpitSensitivityDecisionRecord as readSensitivityDecisionRecord,
   getReviewCockpitSensitivityProfileRecord as readSensitivityProfileRecord,
   getReviewCockpitSourceCandidateRecord as readSourceCandidateRecord,
   listReviewCockpitQueueItems as readReviewCockpitQueueItems,
@@ -32,7 +34,7 @@ import {
   isSourceCandidateDecisionActionable,
 } from "../dictionary/postgresSourcePromotionRepository.js";
 import { recordSensitivityAllowedUseDecision } from "./kaiSensitivityAllowedUseReviewService.js";
-import { createSourceCandidateStub } from "./kaiSourceCandidateService.js";
+import { authorizeSourceCandidateContinuation, createSourceCandidateStub } from "./kaiSourceCandidateService.js";
 import { __sourceCandidateRepositoryContract } from "../dictionary/postgresSourceCandidateRepository.js";
 import { extractEvidenceFromSourceVersion } from "./kaiEvidenceLineageService.js";
 import { __evidenceLineageRepositoryContract } from "../dictionary/postgresEvidenceLineageRepository.js";
@@ -43,7 +45,9 @@ import {
   SENSITIVITY_PERMISSION_DECISION_FIELDS,
   SENSITIVITY_ALLOWED_USE_DECISION_FIELD,
   SENSITIVITY_DECISION_ALLOWED_ROLES,
+  SENSITIVITY_REVIEWED_SNAPSHOT_FIELDS,
   sensitivityAuthorityFromCurrentDecision,
+  validateSensitivityReviewedSnapshot,
 } from "../dictionary/sensitivityAllowedUseDecisionContract.js";
 import {
   createProductionMetadataOnlyAuditForSensitivityAllowedUseDecision,
@@ -1292,6 +1296,208 @@ async function ensureSourceCandidateAfterReviewedDecision(
     sourceCandidate,
     reviewQueueItem,
   });
+}
+
+/**
+ * VAL-KAI-P1-07-002 is an implementation decision of the source-preparation
+ * continuation (owner decision 2026-10-19), chosen as the smallest
+ * convention-consistent key for its eligibility blockers. Like
+ * VAL-KAI-P1-07-001 it is not quoted from any governing source.
+ */
+const SOURCE_PREPARATION_CONTINUATION_VALIDATOR_KEY = "VAL-KAI-P1-07-002";
+const SOURCE_PREPARATION_CONTINUATION_OPERATION = "continue_source_preparation";
+const SOURCE_PREPARATION_BLOCKERS = Object.freeze({
+  file_policy_not_passed: "The file has not passed the upload file policy, so it cannot become a source candidate.",
+  sensitivity_profile_not_ready: "The file has no complete current sensitivity profile.",
+  sensitivity_decision_lineage_ambiguous: "The file's sensitivity decision history has no single current decision.",
+  sensitivity_review_not_complete: "The file's current sensitivity decision is not a completed 'reviewed' decision with a resolved review item.",
+  sensitivity_decision_invalid: "The file's current sensitivity decision does not satisfy the reviewed-snapshot rules.",
+  allowed_use_not_allowed: "The file's recorded allowed use is not_allowed, so it is not prepared as a source.",
+  sensitivity_decision_recorded_by_another_reviewer:
+    "The file's current sensitivity decision was not recorded by you as this organization's administrator.",
+});
+
+function sourcePreparationBlocked(code, blockingReason, intakeFileId) {
+  return buildKaiError(code, {
+    blockers: [{
+      validator_key: SOURCE_PREPARATION_CONTINUATION_VALIDATOR_KEY,
+      severity: "blocker",
+      object_type: "intake_file",
+      object_code: SOURCE_PREPARATION_CONTINUATION_OPERATION,
+      object_id: intakeFileId,
+      message: SOURCE_PREPARATION_BLOCKERS[blockingReason],
+      blocking_reason: blockingReason,
+      evidence: { bypass_allowed: false },
+    }],
+  });
+}
+
+async function authorizeSourcePreparationContinuationRequest(input, dependencies) {
+  if (!isKaiSprint2Enabled(dependencies.env || process.env)) {
+    return { ok: false, error: buildKaiError("feature_disabled") };
+  }
+
+  const organizationId = String(input.organizationId || "").trim().toLowerCase();
+  if (!UUID_RE.test(organizationId)) return { ok: false, error: buildKaiError("invalid_request") };
+
+  const actorResult = input.actorContext
+    ? { ok: true, actorContext: input.actorContext }
+    : await resolveKaiActorContext(input.req, dependencies);
+  if (!actorResult.ok) return { ok: false, error: actorError(actorResult) };
+
+  const actorContext = actorResult.actorContext;
+  if (actorContext.actorType !== "human") {
+    return { ok: false, error: buildKaiError("authorization_denied") };
+  }
+
+  const roleAuth = authorizeSourceCandidateContinuation(actorContext, organizationId);
+  if (!roleAuth.ok) {
+    return { ok: false, error: buildKaiError(roleAuth.error_code || "authorization_denied", { blockers: roleAuth.blockers }) };
+  }
+
+  const tenant = validateTenantBoundaryConsistency({
+    expectedOrganizationId: organizationId,
+    payload: { organization_id: organizationId },
+  });
+  if (tenant.severity === "blocker") {
+    return { ok: false, error: buildKaiError("tenant_boundary_violation", { blockers: [tenant] }) };
+  }
+
+  return { ok: true, organizationId, actorContext };
+}
+
+/**
+ * Source-preparation continuation (owner decision 2026-10-19): for one file
+ * of one Project whose current sensitivity decision is an already-committed,
+ * resolved 'reviewed' decision but whose P1-07 candidate was never created
+ * (for example, the decision was recorded while P1-07 still refused the
+ * organization administrator, and a replay needs the head's unexposed
+ * target_updated_at stamp), runs the same P1-07 handoff the decision seam
+ * runs - ensureSourceCandidateAfterReviewedDecision, i.e. the unmodified
+ * createSourceCandidateStub service and repository - as the requesting
+ * administrator. It records no sensitivity decision, changes no queue item
+ * of its own, and acts as no one else.
+ *
+ * Authority: only an active, binding-derived client_admin of the exact
+ * organization (authorizeSourceCandidateContinuation); the file must belong
+ * to the organization and the requested engagement. Eligibility, from the
+ * committed rows only: confirmed upload with a passed file policy; a complete
+ * current sensitivity profile; exactly one current decision-lineage head
+ * (a superseded decision is never used and an ambiguous lineage is refused,
+ * never resolved by picking a row); that head is 'reviewed', human, valid
+ * under the current reviewed-snapshot rules, recorded by this administrator
+ * as client_admin, with its own sensitivity_review item resolved; and
+ * neither the reviewed allowed use nor the committed P1-05 allowed use is
+ * not_allowed. P1-07 then re-applies, under the profile lock, its own
+ * prerequisite (the same own-current-reviewed-decision check),
+ * VAL-KAI-P1-07-001, tenant consistency, idempotency, duplicate protection,
+ * and required audit. An existing candidate is returned as it is, with no
+ * write. Every refusal is a structured VAL-KAI-P1-07-002 blocker, or P1-07's
+ * own refusal code, with nothing written.
+ */
+export async function continueIntakeFileSourcePreparation(input = {}, dependencies = {}) {
+  const deps = resolvedDependencies(dependencies);
+  const env = deps.env || process.env;
+  const authorization = await authorizeSourcePreparationContinuationRequest(input, deps);
+  if (!authorization.ok) return authorization.error;
+  const { organizationId, actorContext } = authorization;
+
+  const intakeFileId = typeof input.intakeFileId === "string" ? input.intakeFileId : "";
+  const engagementId = typeof input.engagementId === "string" ? input.engagementId : "";
+  if (!canonicalUuid(intakeFileId) || !canonicalUuid(engagementId)) return buildKaiError("invalid_request");
+
+  const readFileRecord = deps.getReviewCockpitIntakeFileSourcePreparationRecord || readIntakeFileSourcePreparationRecord;
+  const record = await readFileRecord(organizationId, engagementId, intakeFileId);
+  if (!record) return buildKaiError("not_found");
+  if (!isPlainObject(record)) return buildKaiError("system_error");
+  if (
+    record.organization_id !== organizationId
+    || record.engagement_id !== engagementId
+    || record.intake_file_id !== intakeFileId
+  ) {
+    return buildKaiError("not_found");
+  }
+
+  if (record.upload_state !== "confirmed" || record.file_policy_status !== "passed") {
+    return sourcePreparationBlocked("validation_blocker", "file_policy_not_passed", intakeFileId);
+  }
+  const intakeSensitivityProfileId = record.intake_sensitivity_profile_id ?? null;
+  if (intakeSensitivityProfileId === null) {
+    return sourcePreparationBlocked("validation_blocker", "sensitivity_profile_not_ready", intakeFileId);
+  }
+  if (!canonicalUuid(intakeSensitivityProfileId)) return buildKaiError("system_error");
+
+  // An existing candidate is never recreated, repaired, or re-audited here.
+  const existingCandidateId = record.intake_source_candidate_id ?? null;
+  if (existingCandidateId !== null) {
+    if (!canonicalUuid(existingCandidateId) || typeof record.candidate_status !== "string" || !MACHINE_TOKEN_RE.test(record.candidate_status)) {
+      return buildKaiError("system_error");
+    }
+    return {
+      ok: true,
+      data: {
+        intake_file_id: intakeFileId,
+        intake_sensitivity_profile_id: intakeSensitivityProfileId,
+        source_candidate_handoff: sourceCandidateHandoffResult("existing", {
+          sourceCandidate: { intake_source_candidate_id: existingCandidateId, candidate_status: record.candidate_status },
+        }),
+      },
+      warnings: [],
+    };
+  }
+
+  const readDecisionRecord = deps.getReviewCockpitSensitivityDecisionRecord || readSensitivityDecisionRecord;
+  const decisionRecord = await readDecisionRecord(organizationId, intakeSensitivityProfileId);
+  if (!isPlainObject(decisionRecord)) return buildKaiError("system_error");
+  if (decisionRecord.lineageAmbiguous === true) {
+    return sourcePreparationBlocked("conflict_current_state_changed", "sensitivity_decision_lineage_ambiguous", intakeFileId);
+  }
+  const head = responseSensitivityDecision(decisionRecord.currentDecision ?? null, organizationId, intakeSensitivityProfileId);
+  const queueRow = decisionRecord.reviewQueueItem ?? null;
+  const queueItem = responseSensitivityQueueState(queueRow, organizationId);
+  if (head === undefined || queueItem === undefined) return buildKaiError("system_error");
+  if (
+    head === null
+    || !isSensitivityAllowedUseTerminalOutcome(head.decision_outcome)
+    || queueItem === null
+    || queueItem.target_object_id !== intakeSensitivityProfileId
+    || queueItem.review_queue_item_id !== head.review_queue_item_id
+    || queueItem.queue_status !== "resolved"
+    || queueItem.review_status !== "resolved"
+  ) {
+    return sourcePreparationBlocked("validation_blocker", "sensitivity_review_not_complete", intakeFileId);
+  }
+
+  const reviewedSnapshot = Object.fromEntries(SENSITIVITY_REVIEWED_SNAPSHOT_FIELDS.map((field) => [field, head[field]]));
+  if (!validateSensitivityReviewedSnapshot(reviewedSnapshot).ok) {
+    return sourcePreparationBlocked("validation_blocker", "sensitivity_decision_invalid", intakeFileId);
+  }
+  if (
+    head[SENSITIVITY_ALLOWED_USE_DECISION_FIELD] === "not_allowed"
+    || record.allowed_use_status === "not_allowed"
+  ) {
+    return sourcePreparationBlocked("validation_blocker", "allowed_use_not_allowed", intakeFileId);
+  }
+  if (head.decided_by_role !== "client_admin" || head.decided_by !== actorContext.actorUserId) {
+    return sourcePreparationBlocked("authorization_denied", "sensitivity_decision_recorded_by_another_reviewer", intakeFileId);
+  }
+
+  const now = (deps.now ? new Date(deps.now()) : new Date()).toISOString();
+  const handoff = await ensureSourceCandidateAfterReviewedDecision(
+    { organizationId, intakeSensitivityProfileId, actorContext, now },
+    deps,
+    env,
+  );
+  const data = {
+    intake_file_id: intakeFileId,
+    intake_sensitivity_profile_id: intakeSensitivityProfileId,
+    source_candidate_handoff: handoff,
+  };
+  if (handoff.status !== "created" && handoff.status !== "replayed") {
+    const code = handoff.error_code && KAI_ERROR_STATUS[handoff.error_code] ? handoff.error_code : "system_error";
+    return buildKaiError(code, { data });
+  }
+  return { ok: true, data, warnings: [] };
 }
 
 function composeReviewCockpitFileProfileDetail(record, organizationId) {

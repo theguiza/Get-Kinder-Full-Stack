@@ -229,6 +229,43 @@ export function sourcePromotionFailureMessage(result) {
   return errorText(result);
 }
 
+// The source-preparation continuation response, as one line (owner decision
+// 2026-10-19): the P1-07 handoff status the server reports. Ids are not shown.
+export function sourcePreparationContinuationMessage(data) {
+  const status = data?.source_candidate_handoff?.status;
+  if (status === "created") {
+    return "Source preparation continued: the source candidate was created from your recorded sensitivity review. Review & promote it below. Your review was not changed.";
+  }
+  if (status === "replayed" || status === "existing") {
+    return "This file already has its source candidate. Nothing new was written.";
+  }
+  return "Source preparation continued.";
+}
+
+// Why the continuation wrote nothing, from the server's structured blocker or
+// the P1-07 handoff's own refusal code.
+const SOURCE_PREPARATION_BLOCKER_MESSAGES = Object.freeze({
+  file_policy_not_passed: "the file has not passed the upload file policy",
+  sensitivity_profile_not_ready: "the file has no complete sensitivity profile yet",
+  sensitivity_decision_lineage_ambiguous: "the file's sensitivity decision history has no single current decision",
+  sensitivity_review_not_complete: "the file's current sensitivity review is not a completed 'reviewed' decision",
+  sensitivity_decision_invalid: "the file's current sensitivity decision does not meet the review rules",
+  allowed_use_not_allowed: "the file's recorded allowed use is not_allowed",
+  sensitivity_decision_recorded_by_another_reviewer: "its current sensitivity review was not recorded by you as this organization's administrator",
+});
+
+export function sourcePreparationContinuationFailureMessage(result) {
+  const reason = result?.body?.blockers?.[0]?.blocking_reason;
+  if (typeof reason === "string" && SOURCE_PREPARATION_BLOCKER_MESSAGES[reason]) {
+    return `Source preparation not continued: ${SOURCE_PREPARATION_BLOCKER_MESSAGES[reason]} (${reason}). Nothing was written.`;
+  }
+  const handoffCode = result?.body?.data?.source_candidate_handoff?.error_code;
+  if (typeof handoffCode === "string" && /^[a-z0-9_]+$/.test(handoffCode)) {
+    return `Source preparation not continued: the source candidate step refused (${handoffCode}). Nothing was written.`;
+  }
+  return errorText(result);
+}
+
 // The guidance line for one source-preparation file. The pipeline's file
 // sensitivity stage names Get Kinder's review; an actor the capabilities
 // admit to that review is told it is theirs to do here.

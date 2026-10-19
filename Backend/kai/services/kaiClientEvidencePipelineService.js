@@ -9,6 +9,7 @@ import {
 } from "../db/kaiClientEvidencePipelineReadModel.js";
 import { listClientImpactFacts } from "./kaiClientImpactFactsService.js";
 import { authorizeSourcePromotionDecision } from "./kaiSourcePromotionService.js";
+import { authorizeSourceCandidateContinuation } from "./kaiSourceCandidateService.js";
 import { __evidenceLineageServiceContract } from "./kaiEvidenceLineageService.js";
 
 /**
@@ -30,7 +31,11 @@ import { __evidenceLineageServiceContract } from "./kaiEvidenceLineageService.js
  * administrator, and evidence extraction from a promoted source, for a
  * client_admin. Those become the client's own next action; a source that
  * cannot be promoted (no candidate, or the fail-closed permission predicate
- * no longer holds) keeps a Get Kinder state with its actual reason.
+ * no longer holds) keeps a Get Kinder state with its actual reason - except
+ * (owner decision 2026-10-19) a reviewed file with no candidate that the
+ * requesting binding-derived administrator's own committed decision makes
+ * eligible for the source-preparation continuation, which becomes that
+ * administrator's next action.
  *
  * Never returned: file content, profile/dictionary/sensitivity values,
  * sensitivity decision outcomes, evidence or claim statements for anything
@@ -91,6 +96,7 @@ const NEXT_ACTION = Object.freeze({
   contactGetKinder: "contact_get_kinder",
   promoteSource: "promote_source",
   extractEvidence: "extract_evidence",
+  continueSourcePreparation: "continue_source_preparation",
 });
 
 // Only these parser error codes are ever written (parserProfileWorkerOrchestration.js);
@@ -108,6 +114,7 @@ const PIPELINE_REASONS = Object.freeze([
   "waiting_for_get_kinder_review",
   "waiting_for_source_promotion",
   "source_promotion_ready",
+  "source_preparation_ready",
   "source_candidate_missing",
   "source_promotion_blocked",
   "evidence_extraction_ready",
@@ -122,7 +129,7 @@ const PIPELINE_REASONS = Object.freeze([
 
 class ClientPipelineProjectionError extends Error {}
 
-const NO_CLIENT_AUTHORITY = Object.freeze({ promoteSource: false, extractEvidence: false });
+const NO_CLIENT_AUTHORITY = Object.freeze({ promoteSource: false, extractEvidence: false, continueSourcePreparation: false });
 const EXTRACTION_ROLES = [...__evidenceLineageServiceContract.EVIDENCE_LINEAGE_ALLOWED_ROLES];
 const CLIENT_EXTRACTION_ROLES = new Set(EXTRACTION_ROLES.filter((role) => role.startsWith("client_")));
 const GK_EXTRACTION_ROLES = new Set(EXTRACTION_ROLES.filter((role) => !role.startsWith("client_")));
@@ -133,8 +140,10 @@ const GK_EXTRACTION_ROLES = new Set(EXTRACTION_ROLES.filter((role) => !role.star
  * authorizeSourcePromotionDecision (its binding-derived organization
  * administrator half only - a GK decider is still Get Kinder), and P2-01's
  * role set restricted to its client roles (client_admin) for an actor that
- * does not also pass it as Get Kinder. Object eligibility is still decided
- * per file from persisted state, and every write re-authorizes.
+ * does not also pass it as Get Kinder; and the source-preparation
+ * continuation's authorizeSourceCandidateContinuation (binding-derived
+ * organization administrator only). Object eligibility is still decided per
+ * file from persisted state, and every write re-authorizes.
  */
 function resolveClientAuthority(actorContext, organizationId) {
   const promotion = authorizeSourcePromotionDecision(actorContext, organizationId);
@@ -144,6 +153,7 @@ function resolveClientAuthority(actorContext, organizationId) {
   return {
     promoteSource: promotion.ok === true && promotion.organizationAdminAuthorized === true,
     extractEvidence: passesExtraction(CLIENT_EXTRACTION_ROLES) && !passesExtraction(GK_EXTRACTION_ROLES),
+    continueSourcePreparation: authorizeSourceCandidateContinuation(actorContext, organizationId).ok === true,
   };
 }
 
@@ -258,8 +268,13 @@ function deriveFileStages(row, reviewedImpactFactCount, clientAuthority = NO_CLI
     stages.push(stage("source_review", STAGE_STATUS.closed, RESPONSIBLE.none));
   } else if (candidates === 0) {
     // A reviewed sensitivity decision with no P1-07 candidate: nothing exists
-    // to promote; the handoff did not create one.
-    stages.push(stage("source_review", STAGE_STATUS.waitingForGetKinder, RESPONSIBLE.getKinder, { detail: "source_candidate_missing" }));
+    // to promote; the handoff did not create one. The administrator whose own
+    // committed decision makes the file eligible can continue it.
+    stages.push(clientAuthority.continueSourcePreparation
+      && row.source_candidate_continuation_ready === true
+      && row.sensitivity_permission_predicate === true
+      ? stage("source_review", STAGE_STATUS.waitingForClient, RESPONSIBLE.client, { detail: "source_preparation_ready" })
+      : stage("source_review", STAGE_STATUS.waitingForGetKinder, RESPONSIBLE.getKinder, { detail: "source_candidate_missing" }));
   } else if (row.sensitivity_permission_predicate !== true) {
     // VAL-KAI-P1-08-002 would refuse any promotion of this candidate.
     stages.push(stage("source_review", STAGE_STATUS.waitingForGetKinder, RESPONSIBLE.getKinder, { detail: "source_promotion_blocked" }));
@@ -332,6 +347,7 @@ function nextActionFor(current) {
   switch (current.status) {
     case STAGE_STATUS.waitingForClient:
       if (current.detail === "source_promotion_ready") return NEXT_ACTION.promoteSource;
+      if (current.detail === "source_preparation_ready") return NEXT_ACTION.continueSourcePreparation;
       if (current.detail === "evidence_extraction_ready") return NEXT_ACTION.extractEvidence;
       return NEXT_ACTION.answerClientFollowups;
     case STAGE_STATUS.failed:
@@ -430,7 +446,10 @@ export async function getClientEvidencePipeline(input, dependencies = {}) {
     return buildKaiError("not_found");
   }
 
-  const rows = await readFiles(organizationId, engagementId, { limit: CLIENT_EVIDENCE_PIPELINE_FILE_LIMIT + 1 });
+  const rows = await readFiles(organizationId, engagementId, {
+    limit: CLIENT_EVIDENCE_PIPELINE_FILE_LIMIT + 1,
+    actorUserId: actorContext.actorUserId,
+  });
   if (!Array.isArray(rows)) return buildKaiError("system_error");
   const truncated = rows.length > CLIENT_EVIDENCE_PIPELINE_FILE_LIMIT;
   const pageRows = rows.slice(0, CLIENT_EVIDENCE_PIPELINE_FILE_LIMIT);

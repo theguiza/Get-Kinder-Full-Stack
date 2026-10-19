@@ -41201,3 +41201,160 @@ final run is 63/0.
 deployment, production/shared database, migration/schema, flag, tenant,
 credential, real client data, or `00_KAI_CURRENT_STATE.md` change. This is
 the single package-end evidence update in the living ExecPlan.
+
+### Reviewed files missing source candidates: client-admin source-preparation continuation (2026-10-19)
+
+**Owner authorization (USER_CONFIRMED):** the owner's "KAI - Fix Reviewed
+Files Missing Source Candidates" prompt directs one bounded local correction on
+`6dc4d05`: an authorized client administrator can continue an existing file
+whose authoritative sensitivity review is complete but whose P1-07 candidate
+was never created, through KAI's real P1-07 handoff, with the Data Sources >
+Source preparation step and the existing P1-08 step after it. Not authorized:
+signup, stored-administrator delegation, GK claim/release review,
+generated-draft reads, schema/migration, unrelated pipeline-409 behavior, the
+five production files or production SQL, push, deployment, flags,
+credentials, real client data, or Current State.
+
+**Start (TOOL_VERIFIED):** `main` at `6dc4d05`, clean.
+
+**Original cause (TOOL_VERIFIED, file:line at `6dc4d05`):**
+- `submitSensitivityProfileDecision` (`kaiReviewCockpitService.js:1098`)
+  commits the decision first, then calls
+  `ensureSourceCandidateAfterReviewedDecision` (`:1176`, `:1235`) only for a
+  terminal `reviewed` outcome. Every P1-07 refusal becomes handoff
+  `not_created` (`:1259-1288`); the decision is never undone or retried. The
+  only documented recovery is resubmitting "the same decision" (`:1232`), which
+  replays only when `expected_updated_at` equals the head's
+  `target_updated_at` (`postgresSensitivityAllowedUseReviewRepository.js:338-342`).
+  No read API exposes that stamp, and a UI resubmission with the queue's
+  current stamp records a new superseding decision (the observed repeated
+  decisions).
+- Historical refusal: before `c8170d3`, P1-07 refused a binding-derived
+  `client_admin` (`VAL-AUT-004 role_not_allowed`, returned as
+  `tenant_boundary_violation`; section of 2026-10-12). `c8170d3` admits that
+  administrator only for their own current `reviewed` head
+  (`kaiSourceCandidateService.js:111,147`;
+  `postgresSourceCandidateRepository.js:163,576`) but never re-runs the handoff
+  for decisions already committed.
+- Client surface: the pipeline maps `candidates === 0` to
+  `source_candidate_missing` / `contact_get_kinder`
+  (`kaiClientEvidencePipelineService.js:259`), and Data Sources offered only
+  sensitivity review and `promote_source` (`ClientEvidenceWorkflow.jsx:211,217`).
+  A reviewed file with no candidate had no product path.
+
+**Change:**
+- `continueIntakeFileSourcePreparation` (`kaiReviewCockpitService.js`) and
+  `POST /admin/review-cockpit/intake-files/:intakeFileId/source-candidate?organization_id&engagement_id`
+  (empty body). Authority: `authorizeSourceCandidateContinuation`
+  (`kaiSourceCandidateService.js`): mapped human, active binding-derived
+  `client_admin` of the exact organization, active KAI account. A stored
+  `client_admin`, other client roles, GK and global roles, and system/AI
+  actors are refused before any read.
+- Eligibility, from committed rows (new organization + engagement + file read
+  `getReviewCockpitIntakeFileSourcePreparationRecord`, plus the existing
+  `getReviewCockpitSensitivityDecisionRecord`): confirmed upload and passed
+  file policy; complete current profile; an existing candidate is returned as
+  `existing` with no write; exactly one current head (ambiguous lineage is
+  refused, never resolved by picking a row); head `reviewed`, human, valid
+  under `validateSensitivityReviewedSnapshot`, its own `sensitivity_review` item
+  resolved/resolved; neither reviewed nor P1-05 allowed use `not_allowed`; head
+  recorded by this administrator as `client_admin`. Each refusal is a
+  structured `VAL-KAI-P1-07-002` blocker (an implementation key). Otherwise it
+  calls the same `ensureSourceCandidateAfterReviewedDecision`, so the
+  unmodified P1-07 service and repository re-apply, under the profile lock,
+  the own-current-reviewed-decision prerequisite, VAL-KAI-P1-07-001, tenant
+  consistency, idempotency, the unique constraints, and the required audit. A
+  P1-07 refusal is returned with its code and the `not_created` handoff. No
+  sensitivity decision, queue transition of its own, P1-08 call, or GK
+  identity.
+- Pipeline: the read model adds `source_candidate_continuation_ready` (the
+  same eligibility for the requesting actor, `head_count = 1`; never
+  returned). A reviewed file with no candidate becomes `waiting_for_client` /
+  `client` / `continue_source_preparation` / `source_preparation_ready` only
+  for an actor holding the continuation authority whose committed state
+  qualifies, with the P1-07 permission predicate holding. Otherwise it stays
+  `source_candidate_missing`.
+- Data Sources > Source preparation: "Continue source preparation" for
+  `continue_source_preparation` (with `promoteSource` access), one POST, the
+  server's result or blocker text, then a pipeline and Sources/Evidence/Claims
+  refresh. "Review & promote source" then appears from the existing
+  `promote_source` rule. Reviews counts the step. Bundle rebuilt.
+
+**Acceptance (TOOL_VERIFIED):**
+`kai-client-admin-source-preparation-continuation-browser-acceptance`
+(runner-owned loopback PostgreSQL, real routes and services, real Chrome,
+built bundle), 12/0. HISTORICAL SIMULATION (labelled): three files' human
+review work and two real `reviewed` decisions each (the second a UI-style
+resubmission superseding the first) were recorded through the real services
+as the deciding administrator, with P1-07 replaced for those calls only by the
+pre-`c8170d3` refusal. Result: one lineage per file, queue resolved, zero
+candidates. Two more files have open candidates from the current handoff. The
+production-style join returns 8 rows for 5 files. No GK human in X.
+- Before: the deciding administrator's pipeline shows the three files as
+  `continue_source_preparation`; another administrator, contributor,
+  client_reviewer, and stored `client_admin` are not offered it.
+- Continue (UI): one POST, 200; one `needs_gk_review` candidate and one open
+  `source_candidate_review` item created by the administrator; one
+  `kai.audit_events` and one lifecycle row; decisions still 2 with the same
+  head. "Review & promote source" appears. P1-08 through the existing panel:
+  promoted, one source, one current source_version, two P2-01 evidence items.
+- Idempotency: repeat `existing` (zero writes); three concurrent POSTs give
+  `[created, replayed, replayed]`, one candidate/item/audit; a later repeat is
+  `existing`; nothing is promoted automatically.
+- Existing candidates: continuation `existing` with zero writes; one was
+  promoted through the existing step; the other is still open with no
+  decision.
+- Refusals, zero writes in X and Y: decision by another administrator 403;
+  reviewed `not_allowed` and P1-05 `not_allowed` 422; `needs_more_information`
+  head 422; failed file policy 422; contributor/client_reviewer/stored
+  `client_admin` 403 `role_not_allowed`; deactivated GK membership and inactive
+  binding 403 `missing_active_organization_membership`; another Project 404;
+  cross-organization 403/404; non-empty body 422.
+- All three historical files recovered; the other administrator continued
+  their own file.
+- Downstream: from the recovered source, P2-03 claim (internal,
+  `needs_gk_review`, lineage to the continued candidate), P2-04 200, and the
+  internal evidence summary and impact narrative 201 citing it. The generator
+  stand-in was called once per draft. Only the administrator acted.
+  `readGeneratedDrafts` is still false. Generators are unchanged.
+- Mutation check (reverted): dropping the allowed-use gate and the pipeline
+  eligibility predicate fails 6 of the 12 tests.
+
+**Updated pins (coupled to the decision):** P1-09 cockpit POST list (adds the
+continuation route), P1-07 handoff boundary F (the handoff now has two
+callers, the decision seam and the continuation; neither reaches P1-08 or
+records a decision), and the client pipeline read arguments (`actorUserId`).
+
+**Observed, not changed:**
+- Downstream reviewed-allowed-use enforcement is still separate: the decision
+  seam creates a candidate for a `reviewed` decision whose
+  `reviewed_allowed_use_status` is `not_allowed` (observed `created`), and
+  P1-08/P2-01/P2-03 do not consult it. The continuation alone refuses it. This
+  package does not fix the broader behavior.
+- A reviewed file whose current decision was recorded by another
+  administrator (or by GK) can be continued only by that decider, by P1-07's
+  own-decision rule. That is a legitimate blocker
+  (`sensitivity_decision_recorded_by_another_reviewer`).
+- The pipeline-409 path for unevaluable claims was not touched. The pipeline
+  read was 200 after the claim and after the drafts in this run.
+- The five production files: not inspected or touched. Whether each one's
+  decider is the administrator who will press Continue is NOT_CONFIRMED.
+
+**Verification (TOOL_VERIFIED; sentinel `DATABASE_URL`):**
+
+| Command | Pass | Fail | Skipped |
+| --- | --- | --- | --- |
+| `npm test` (`6dc4d05` baseline, recorded) | 5611 | 0 | 113 |
+| `npm test` | 5627 | 0 | 114 |
+| New unit spec `kai-client-admin-source-preparation-continuation.spec.js` | 15 | 0 | 0 |
+| New assembled acceptance `kai-client-admin-source-preparation-continuation` | 12 | 0 | 0 |
+| Browser: source promotion 12, client-admin draft 21, client pipeline 7, sensitivity 17, P2-01 7, Knowledge Studio 6, campaign 63, rehydration 3, P2-12 11, reviewed-evidence 12, Team & Access 7, provisioning 13, edges 11 | 190 | 0 | 0 |
+| Runners: P1 worker 6/32, P1-06 15, P1-07 11, P1-07 handoff 22, P1-08 19, P2-01 lineage 17, P2-01 handoff 7, B1A-02 37, B1A-2R 6 | 172 | 0 | 0 |
+| `npm run verify:kai-sprint2-api-contract` | 71 | 0 | 0 |
+| `npm run build` twice (`entry.js` SHA-256 `ba315367...bfff5`) | identical | | |
+| `git diff --check` | ok | | |
+
+**Status:** SOURCE_PREPARATION_CONTINUATION_COMPLETE_LOCAL_SYNTHETIC. No push,
+deployment, production/shared database, migration/schema, flag, tenant,
+credential, real client data, or `00_KAI_CURRENT_STATE.md` change. This is
+the single package-end evidence update in the living ExecPlan.

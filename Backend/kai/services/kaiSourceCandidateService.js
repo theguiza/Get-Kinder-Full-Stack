@@ -1,6 +1,9 @@
 import { isKaiSprint2Enabled } from "../config/kaiSprint2Config.js";
 import { buildKaiError } from "../errors/kaiErrors.js";
-import { validateActorCanPerformSensitivityReview } from "../auth/kaiAuthorizationService.js";
+import {
+  validateActorCanPerformSensitivityReview,
+  validateActorIsBoundOrganizationAdministrator,
+} from "../auth/kaiAuthorizationService.js";
 import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
 import { createPostgresSourceCandidateRepository } from "../dictionary/postgresSourceCandidateRepository.js";
 
@@ -56,11 +59,15 @@ function isMappedHumanActor(actorContext) {
  * product-learning use all still denied, retention still restricted pending
  * review). This never creates a source, source_version, evidence, claim, or any
  * promotion/approval record, and it never transitions candidate_status beyond
- * null -> 'needs_gk_review'. Its one production caller is the Review Cockpit's
- * human sensitivity-decision seam
- * (kaiReviewCockpitService.js#submitSensitivityProfileDecision), which invokes it
- * only after a committed terminal 'reviewed' Phase-5 decision, as the same
- * authenticated human actor. It is not composed into any worker, listener, or
+ * null -> 'needs_gk_review'. Its production callers both go through the Review
+ * Cockpit's one handoff (kaiReviewCockpitService.js#ensureSourceCandidateAfterReviewedDecision):
+ * the human sensitivity-decision seam (submitSensitivityProfileDecision), after
+ * a committed terminal 'reviewed' Phase-5 decision, as the same authenticated
+ * human actor; and the source-preparation continuation
+ * (continueIntakeFileSourcePreparation, owner decision 2026-10-19), for a file
+ * whose current 'reviewed' decision is already committed but whose candidate
+ * was never created, as the authenticated organization administrator who
+ * recorded that decision. It is not composed into any worker, listener, or
  * scheduler: the P1 worker's system actor can never reach it, and AUTH-KAI-003
  * below would reject it if it did.
  *
@@ -144,6 +151,29 @@ export async function createSourceCandidateStub(input, dependencies = {}) {
     return buildKaiError(result.error.code, { status: result.error.status });
   }
   return { ok: true, data: result.data, error: null };
+}
+
+/**
+ * Who may ask for the source-preparation continuation (owner decision
+ * 2026-10-19): an active, binding-derived client_admin of this exact
+ * organization with an active KAI account, as a mapped human (AUTH-KAI-003)
+ * - the organization-administrator
+ * half of the P1-07 rule above, alone. A stored client_admin, other client
+ * roles, global roles, and platform-superuser authority do not satisfy it.
+ * Pure; object eligibility (the administrator's own current 'reviewed'
+ * decision, resolved review, VAL-KAI-P1-07-001) is still decided per file and
+ * re-checked by createSourceCandidateStub and its repository on every write.
+ */
+export function authorizeSourceCandidateContinuation(actorContext, organizationId) {
+  if (!isMappedHumanActor(actorContext)) {
+    return { ok: false, error_code: "authorization_denied", blockers: [] };
+  }
+  const auth = validateActorIsBoundOrganizationAdministrator(actorContext, SOURCE_CANDIDATE_OPERATION, organizationId);
+  if (!auth.ok) return auth;
+  if (actorContext?.kaiUserStatus !== "active") {
+    return { ok: false, error_code: "authorization_denied", blockers: [] };
+  }
+  return auth;
 }
 
 export const __sourceCandidateServiceContract = Object.freeze({

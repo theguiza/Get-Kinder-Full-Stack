@@ -370,11 +370,17 @@ test("F: the sensitivity decision and its P1-07 handoff never invoke P1-08 promo
     assert.doesNotMatch(body, /deps\.createSourcePromotionDecision|createSourcePromotionDecision\(|await decide\(|submitSourceCandidateDecision\(/);
   }
   // P1-07 is resolved exactly once in the module, inside the handoff only, and the
-  // handoff is invoked only from the sensitivity-decision seam.
+  // handoff is invoked only from the sensitivity-decision seam and (owner
+  // decision 2026-10-19) the source-preparation continuation, which records no
+  // decision and never reaches P1-08 either.
   assert.equal((source.match(/deps\.createSourceCandidateStub \|\| createSourceCandidateStub/g) || []).length, 1);
   assert.match(handoffBody, /deps\.createSourceCandidateStub \|\| createSourceCandidateStub/);
-  assert.equal((source.match(/await ensureSourceCandidateAfterReviewedDecision\(/g) || []).length, 1);
+  assert.equal((source.match(/await ensureSourceCandidateAfterReviewedDecision\(/g) || []).length, 2);
   assert.match(decisionBody, /await ensureSourceCandidateAfterReviewedDecision\(/);
+  const continuationBody = source.match(/export async function continueIntakeFileSourcePreparation\([\s\S]*?\n}\n/)?.[0];
+  assert.ok(continuationBody);
+  assert.match(continuationBody, /await ensureSourceCandidateAfterReviewedDecision\(/);
+  assert.doesNotMatch(continuationBody, /deps\.createSourcePromotionDecision|createSourcePromotionDecision\(|await decide\(|submitSourceCandidateDecision\(|recordSensitivityAllowedUseDecision|recordDecision\(/);
 });
 
 test("G: the P1 worker still stops at P1-05 and cannot reach P1-06 or P1-07", () => {

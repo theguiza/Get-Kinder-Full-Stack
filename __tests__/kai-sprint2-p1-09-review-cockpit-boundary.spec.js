@@ -998,9 +998,13 @@ test("P1-09 file-profile review is read-only: the package exposes no file-profil
   // decision) plus B1A-2R's review-work route, which only ensures the P1-06
   // 'sensitivity_review' work item exists - it starts no substantive review
   // authority and records no classification/consent/allowed-use/decision. None of
-  // the three mutates a file profile, and no other cockpit POST exists.
+  // the three mutates a file profile, and no other cockpit POST exists - except
+  // the source-preparation continuation (owner decision 2026-10-19), which only
+  // re-runs the P1-07 handoff after an already-committed 'reviewed' decision
+  // and records no decision or classification.
   const cockpitPosts = routeSource.match(/router\.post\("\/admin\/review-cockpit[^"]*"/g) || [];
   assert.deepEqual(cockpitPosts, [
+    'router.post("/admin/review-cockpit/intake-files/:intakeFileId/source-candidate"',
     'router.post("/admin/review-cockpit/sensitivity-profiles/:intakeSensitivityProfileId/decision"',
     'router.post("/admin/review-cockpit/sensitivity-profiles/:intakeSensitivityProfileId/review-work"',
     'router.post("/admin/review-cockpit/source-candidates/:intakeSourceCandidateId/decision"',

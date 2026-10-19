@@ -53,6 +53,7 @@ export const PIPELINE_NEXT_ACTIONS = Object.freeze([
   "contact_get_kinder",
   "promote_source",
   "extract_evidence",
+  "continue_source_preparation",
 ]);
 
 export const PIPELINE_REASONS = Object.freeze([
@@ -62,6 +63,7 @@ export const PIPELINE_REASONS = Object.freeze([
   "waiting_for_get_kinder_review",
   "waiting_for_source_promotion",
   "source_promotion_ready",
+  "source_preparation_ready",
   "source_candidate_missing",
   "source_promotion_blocked",
   "evidence_extraction_ready",
@@ -258,6 +260,8 @@ export function nextActionText(file, { canReviewFollowups = false, canContribute
       return "Your action is needed: review this file's source candidate and promote it as a source in Data Sources. Evidence can only be created from a promoted source.";
     case "extract_evidence":
       return "Your action is needed: this file's source is promoted. Extract evidence from it in Data Sources.";
+    case "continue_source_preparation":
+      return "Your action is needed: your sensitivity review of this file is recorded, but its source candidate was not created. Continue source preparation in Data Sources to create it; your review is not changed.";
     default:
       return file.currentStatus === "complete" ? "No action required. Reviewed evidence from this file is available." : "No action required from you.";
   }
@@ -270,6 +274,7 @@ const REASON_MESSAGES = Object.freeze({
   waiting_for_get_kinder_review: (n) => `Your data has been processed and is waiting for Get Kinder review (${pluralFiles(n)}).`,
   waiting_for_source_promotion: (n) => `${pluralFiles(n)} passed the Get Kinder sensitivity review and ${n === 1 ? "is" : "are"} waiting for Get Kinder to review and promote ${n === 1 ? "it" : "them"} as a source. Evidence can only be created from a promoted source.`,
   source_promotion_ready: (n) => `${pluralFiles(n)} passed the sensitivity review and ${n === 1 ? "is a source candidate" : "are source candidates"} you can review and promote in Data Sources. Evidence can only be created from a promoted source.`,
+  source_preparation_ready: (n) => `${pluralFiles(n)} passed your sensitivity review, but ${n === 1 ? "its source candidate was" : "their source candidates were"} not created. Continue source preparation in Data Sources; evidence can only be created from a promoted source.`,
   source_candidate_missing: (n) => `${pluralFiles(n)} passed the sensitivity review, but no source candidate was created, so ${n === 1 ? "it" : "they"} cannot be promoted yet. Contact Get Kinder.`,
   source_promotion_blocked: (n) => `${pluralFiles(n)} ${n === 1 ? "has a source candidate that" : "have source candidates that"} cannot be promoted in ${n === 1 ? "its" : "their"} current state. Contact Get Kinder.`,
   evidence_extraction_ready: (n) => `The source from ${pluralFiles(n)} has been promoted. Extract evidence from it in Data Sources.`,
@@ -366,7 +371,7 @@ export function reviewsTabMessages(view, { canReviewFollowups = false, canReview
     messages.push({
       key: "source_work",
       heading: "Your action is needed",
-      detail: `${pluralFiles(sourceCount)} in this project ${sourceCount === 1 ? "is" : "are"} ready for source promotion or evidence extraction, which your role can complete in Data Sources.`,
+      detail: `${pluralFiles(sourceCount)} in this project ${sourceCount === 1 ? "is" : "are"} ready for source preparation, source promotion, or evidence extraction, which your role can complete in Data Sources.`,
     });
   }
   if (clientCount === 0 && sensitivityCount === 0 && sourceCount === 0) {
@@ -406,9 +411,11 @@ export function reviewsTabView(request) {
 
 /**
  * Source preparation the requesting actor itself may do (owner decision
- * 2026-10-18): the server reports promote_source / extract_evidence only for
- * an actor holding that organization-scoped authority and an eligible file.
+ * 2026-10-18, 2026-10-19): the server reports promote_source /
+ * extract_evidence / continue_source_preparation only for an actor holding
+ * that organization-scoped authority and an eligible file.
  */
 export function isClientSourceWork(file) {
-  return file?.responsibleParty === "client" && (file.nextAction === "promote_source" || file.nextAction === "extract_evidence");
+  return file?.responsibleParty === "client"
+    && (file.nextAction === "promote_source" || file.nextAction === "extract_evidence" || file.nextAction === "continue_source_preparation");
 }

@@ -432,3 +432,68 @@ export async function getReviewCockpitIntakeFileSourceCandidateRecord(
   );
   return rows[0] || null;
 }
+
+/**
+ * Organization + engagement scoped read of what a source-preparation
+ * continuation must check before it hands one intake file's CURRENT complete
+ * sensitivity profile to the P1-07 handoff: the file's upload and file-policy
+ * state, the profile id (same current-checksum lineage and dictionary
+ * requirement as getReviewCockpitIntakeFileSensitivityProfileRecord), the
+ * profile's committed P1-05 allowed_use_status, and that profile's P1-07
+ * candidate (at most one: UNIQUE (organization_id,
+ * intake_sensitivity_profile_id)). Null when the file is not in this
+ * organization and engagement. The sensitivity decision itself is read
+ * separately through getReviewCockpitSensitivityDecisionRecord.
+ */
+export async function getReviewCockpitIntakeFileSourcePreparationRecord(
+  organizationId,
+  engagementId,
+  intakeFileId,
+  db = pool,
+) {
+  const { rows } = await db.query(
+    `SELECT f.organization_id, f.engagement_id, f.intake_file_id, f.upload_state, f.file_policy_status,
+            ps.intake_sensitivity_profile_id, ps.allowed_use_status,
+            c.intake_source_candidate_id, c.candidate_status
+       FROM kai.intake_files f
+       LEFT JOIN LATERAL (
+         SELECT pr.parser_status, pr.output_profile_id
+           FROM kai.intake_parser_runs pr
+          WHERE pr.organization_id = f.organization_id
+            AND pr.intake_file_id = f.intake_file_id
+            AND pr.checksum = f.verified_checksum
+          ORDER BY pr.created_at DESC, pr.parser_run_id DESC
+          LIMIT 1
+       ) r ON true
+       LEFT JOIN kai.intake_file_profiles p
+         ON p.organization_id = f.organization_id
+        AND p.intake_file_id = f.intake_file_id
+        AND p.file_profile_id = r.output_profile_id
+        AND r.parser_status = 'completed'
+       LEFT JOIN LATERAL (
+         SELECT s.intake_sensitivity_profile_id, s.allowed_use_status
+           FROM kai.intake_sensitivity_profiles s
+          WHERE s.organization_id = f.organization_id
+            AND s.intake_file_id = f.intake_file_id
+            AND s.file_profile_id = p.file_profile_id
+            AND EXISTS (
+                  SELECT 1
+                    FROM kai.data_dictionaries d
+                   WHERE d.organization_id = f.organization_id
+                     AND d.intake_file_id = f.intake_file_id
+                     AND d.file_profile_id = p.file_profile_id
+                )
+          LIMIT 1
+       ) ps ON true
+       LEFT JOIN kai.intake_source_candidates c
+         ON c.organization_id = f.organization_id
+        AND c.intake_file_id = f.intake_file_id
+        AND c.intake_sensitivity_profile_id = ps.intake_sensitivity_profile_id
+      WHERE f.organization_id = $1
+        AND f.engagement_id = $2
+        AND f.intake_file_id = $3
+      LIMIT 1`,
+    [organizationId, engagementId, intakeFileId],
+  );
+  return rows[0] || null;
+}
