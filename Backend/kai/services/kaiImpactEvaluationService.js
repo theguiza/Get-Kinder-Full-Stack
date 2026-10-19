@@ -156,7 +156,12 @@ export async function evaluateImpactOutcomeContext(input, dependencies = {}) {
     },
     { generator },
   );
-  if (!result.ok) return buildKaiError(result.error.code, { status: result.error.status });
+  if (!result.ok) {
+    return buildKaiError(result.error.code, {
+      status: result.error.status,
+      ...(result.blockers ? { blockers: result.blockers } : {}),
+    });
+  }
   return { ok: true, data: result.data, error: null };
 }
 
@@ -221,7 +226,12 @@ export async function createImpactEvaluation(input, dependencies = {}) {
     },
     { generator, metadataOnlyAudit },
   );
-  if (!result.ok) return buildKaiError(result.error.code, { status: result.error.status });
+  if (!result.ok) {
+    return buildKaiError(result.error.code, {
+      status: result.error.status,
+      ...(result.blockers ? { blockers: result.blockers } : {}),
+    });
+  }
 
   const analysis = buildDerivedImpactAnalysis(result.data.results);
   return {

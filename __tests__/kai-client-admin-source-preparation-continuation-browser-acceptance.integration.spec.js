@@ -420,6 +420,8 @@ async function runBrowserAcceptance() {
     reviewed_public_use_allowed: false,
     reviewed_funder_use_allowed: false,
   });
+  // The downstream file's decision also permits AI processing, so its internal drafts may reach the model (VAL-KAI-B1A-02-004).
+  const AI_PERMITTED_SNAPSHOT = Object.freeze({ ...REVIEWED_SNAPSHOT, reviewed_allowed_use_status: "allowed", reviewed_llm_processing_allowed: true });
 
   async function sensitivityQueue(organizationId, profileId) {
     const [item] = await query(
@@ -592,7 +594,8 @@ async function runBrowserAcceptance() {
 
       for (const [key, char] of [["hist1", "1"], ["hist2", "2"], ["hist3", "3"]]) {
         await seed(key, char);
-        const handoffs = await recordDecisions({ organizationId: ORG_X, profileId: ids.profile[key], actorContext: adminX, outcomes: ["reviewed", "reviewed"] });
+        const handoffs = await recordDecisions({ organizationId: ORG_X, profileId: ids.profile[key], actorContext: adminX, outcomes: ["reviewed", "reviewed"],
+          ...(key === "hist1" ? { snapshot: AI_PERMITTED_SNAPSHOT } : {}) });
         assert.deepEqual(handoffs.map((h) => [h.status, h.error_code]), [["not_created", "tenant_boundary_violation"], ["not_created", "tenant_boundary_violation"]]);
       }
       // Two files whose candidate exists (the current, repaired handoff).

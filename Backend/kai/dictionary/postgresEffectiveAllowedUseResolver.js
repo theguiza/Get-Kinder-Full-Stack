@@ -18,9 +18,17 @@
  *
  * Fails closed: a profile that is not found, or a lineage with more than one
  * head, is prohibited.
+ *
+ * The AI-processing forms (VAL-KAI-B1A-02-004) read the same two facts and
+ * project them through sensitivityEffectiveAiProcessingProhibition, which
+ * applies the allowed-use prohibition first; only the seams that send content
+ * to an AI provider use them.
  */
 
-import { sensitivityEffectiveAllowedUseProhibition } from "./sensitivityAllowedUseDecisionContract.js";
+import {
+  sensitivityEffectiveAiProcessingProhibition,
+  sensitivityEffectiveAllowedUseProhibition,
+} from "./sensitivityAllowedUseDecisionContract.js";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -28,19 +36,13 @@ function isUuid(value) {
   return typeof value === "string" && UUID_PATTERN.test(value);
 }
 
-/**
- * Returns a Map of intake_sensitivity_profile_id -> prohibition reason (null
- * when nothing prohibits) for every requested id. Ids are read with one query
- * per table; an id whose profile row is absent maps to
- * 'sensitivity_profile_missing'.
- */
-export async function readEffectiveAllowedUseProhibitions(tx, { organizationId, intakeSensitivityProfileIds }) {
+async function readProfileProhibitions(tx, { organizationId, intakeSensitivityProfileIds }, project, name) {
   if (!isUuid(organizationId)) {
-    throw new TypeError("readEffectiveAllowedUseProhibitions requires an organizationId UUID.");
+    throw new TypeError(`${name} requires an organizationId UUID.`);
   }
   const ids = [...new Set(intakeSensitivityProfileIds || [])];
   if (!ids.every(isUuid)) {
-    throw new TypeError("readEffectiveAllowedUseProhibitions requires intakeSensitivityProfileId UUIDs.");
+    throw new TypeError(`${name} requires intakeSensitivityProfileId UUIDs.`);
   }
   const result = new Map();
   if (ids.length === 0) return result;
@@ -54,7 +56,7 @@ export async function readEffectiveAllowedUseProhibitions(tx, { organizationId, 
   );
   const heads = await tx.query(
     `SELECT d.intake_sensitivity_profile_id::text AS intake_sensitivity_profile_id,
-            d.decision_outcome, d.reviewed_allowed_use_status
+            d.decision_outcome, d.reviewed_allowed_use_status, d.reviewed_llm_processing_allowed
        FROM kai.intake_sensitivity_review_decisions d
       WHERE d.organization_id = $1::uuid
         AND d.intake_sensitivity_profile_id = ANY($2::uuid[])
@@ -80,13 +82,28 @@ export async function readEffectiveAllowedUseProhibitions(tx, { organizationId, 
       continue;
     }
     const profileHeads = headsById.get(key) || [];
-    result.set(id, sensitivityEffectiveAllowedUseProhibition({
+    result.set(id, project({
       profileAllowedUseStatus: profile.allowed_use_status,
       currentHead: profileHeads.length === 1 ? profileHeads[0] : null,
       lineageAmbiguous: profileHeads.length > 1,
     }));
   }
   return result;
+}
+
+/**
+ * Returns a Map of intake_sensitivity_profile_id -> prohibition reason (null
+ * when nothing prohibits) for every requested id. Ids are read with one query
+ * per table; an id whose profile row is absent maps to
+ * 'sensitivity_profile_missing'.
+ */
+export async function readEffectiveAllowedUseProhibitions(tx, args) {
+  return readProfileProhibitions(tx, args, sensitivityEffectiveAllowedUseProhibition, "readEffectiveAllowedUseProhibitions");
+}
+
+/** The AI-processing form of readEffectiveAllowedUseProhibitions. */
+export async function readEffectiveAiProcessingProhibitions(tx, args) {
+  return readProfileProhibitions(tx, args, sensitivityEffectiveAiProcessingProhibition, "readEffectiveAiProcessingProhibitions");
 }
 
 /** The single-profile form: the prohibition reason, or null. */
@@ -98,20 +115,13 @@ export async function readEffectiveAllowedUseProhibition(tx, { organizationId, i
   return prohibitions.has(intakeSensitivityProfileId) ? prohibitions.get(intakeSensitivityProfileId) : "sensitivity_profile_missing";
 }
 
-/**
- * The claim form, for generation: every claim's own lineage
- * (claim -> claim_evidence_link -> evidence item -> source version ->
- * intake_sensitivity_profile_id), read in one query, then the profile form.
- * Returns a Map of claim_id -> prohibition reason; a claim whose lineage
- * cannot be walked maps to 'claim_lineage_missing'.
- */
-export async function readEffectiveAllowedUseProhibitionsForClaims(tx, { organizationId, claimIds }) {
+async function readClaimProhibitions(tx, { organizationId, claimIds }, readProfiles, name) {
   if (!isUuid(organizationId)) {
-    throw new TypeError("readEffectiveAllowedUseProhibitionsForClaims requires an organizationId UUID.");
+    throw new TypeError(`${name} requires an organizationId UUID.`);
   }
   const ids = [...new Set(claimIds || [])];
   if (!ids.every(isUuid)) {
-    throw new TypeError("readEffectiveAllowedUseProhibitionsForClaims requires claimId UUIDs.");
+    throw new TypeError(`${name} requires claimId UUIDs.`);
   }
   const result = new Map();
   if (ids.length === 0) return result;
@@ -141,7 +151,7 @@ export async function readEffectiveAllowedUseProhibitionsForClaims(tx, { organiz
     profileByClaim.set(key, profileByClaim.has(key) ? null : row.intake_sensitivity_profile_id);
   }
   const profileIds = [...profileByClaim.values()].filter(isUuid);
-  const prohibitions = await readEffectiveAllowedUseProhibitions(tx, {
+  const prohibitions = await readProfiles(tx, {
     organizationId,
     intakeSensitivityProfileIds: profileIds,
   });
@@ -151,4 +161,23 @@ export async function readEffectiveAllowedUseProhibitionsForClaims(tx, { organiz
     else result.set(id, prohibitions.has(profileId) ? prohibitions.get(profileId) : "sensitivity_profile_missing");
   }
   return result;
+}
+
+/**
+ * The claim form, for generation: every claim's own lineage
+ * (claim -> claim_evidence_link -> evidence item -> source version ->
+ * intake_sensitivity_profile_id), read in one query, then the profile form.
+ * Returns a Map of claim_id -> prohibition reason; a claim whose lineage
+ * cannot be walked maps to 'claim_lineage_missing'.
+ */
+export async function readEffectiveAllowedUseProhibitionsForClaims(tx, args) {
+  return readClaimProhibitions(tx, args, readEffectiveAllowedUseProhibitions, "readEffectiveAllowedUseProhibitionsForClaims");
+}
+
+/**
+ * The AI-processing claim form, for every seam that sends claim content to an
+ * AI provider (generated-content drafting, impact evaluation).
+ */
+export async function readEffectiveAiProcessingProhibitionsForClaims(tx, args) {
+  return readClaimProhibitions(tx, args, readEffectiveAiProcessingProhibitions, "readEffectiveAiProcessingProhibitionsForClaims");
 }

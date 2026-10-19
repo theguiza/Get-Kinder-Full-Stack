@@ -421,8 +421,9 @@ async function runBrowserAcceptance() {
           reviewed_small_cell_risk_status: "unknown",
           reviewed_financial_records_status: "absent",
           reviewed_consent_basis_status: "unknown",
-          reviewed_allowed_use_status: "unknown",
-          reviewed_llm_processing_allowed: false,
+          // AI processing is permitted, so the internal drafts may reach the model (VAL-KAI-B1A-02-004).
+          reviewed_allowed_use_status: "allowed",
+          reviewed_llm_processing_allowed: true,
           reviewed_product_learning_allowed: false,
           reviewed_public_use_allowed: false,
           reviewed_funder_use_allowed: false,

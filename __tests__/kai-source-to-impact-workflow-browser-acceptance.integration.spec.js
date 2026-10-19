@@ -11,8 +11,9 @@ import { join } from "node:path";
  * access-administration route) take files of one Project from a recorded
  * sensitivity review to governed sources, evidence, claims, gap follow-ups,
  * and both internal drafts, which Admin B then reads - with the effective
- * allowed use enforced at every seam, every refusal writing nothing, and the
- * pipeline readable throughout. Run only by
+ * allowed use enforced at every seam, the effective AI-processing permission
+ * enforced before the model (VAL-KAI-B1A-02-004), every refusal writing
+ * nothing, and the pipeline readable throughout. Run only by
  *   node scripts/kai-client-knowledge-studio-browser-acceptance-local-postgres.js \
  *     __tests__/kai-source-to-impact-workflow-browser-acceptance.integration.spec.js
  * against that runner's ephemeral loopback PostgreSQL. Skipped otherwise.
@@ -408,6 +409,8 @@ async function runBrowserAcceptance() {
     reviewed_allowed_use_status: "unknown", reviewed_llm_processing_allowed: false, reviewed_product_learning_allowed: false,
     reviewed_public_use_allowed: false, reviewed_funder_use_allowed: false,
   });
+  // A reviewed decision that establishes the allowed-use basis and permits AI processing.
+  const AI_PERMITTED_SNAPSHOT = Object.freeze({ ...REVIEWED_SNAPSHOT, reviewed_allowed_use_status: "allowed", reviewed_llm_processing_allowed: true });
 
   async function sensitivityQueue(organizationId, profileId) {
     const [item] = await query(
@@ -585,7 +588,8 @@ async function runBrowserAcceptance() {
           .then((profileId) => { ids.profile[key] = profileId; });
       await seed("ui", "1");
       await seed("hist", "2");
-      const [historical] = await recordDecisions({ organizationId: ORG_X, profileId: ids.profile.hist, actorContext: adminA, outcomes: ["reviewed"], p1_07: PRE_FIX_P1_07_REFUSAL });
+      const [historical] = await recordDecisions({ organizationId: ORG_X, profileId: ids.profile.hist, actorContext: adminA, outcomes: ["reviewed"], p1_07: PRE_FIX_P1_07_REFUSAL,
+        snapshot: AI_PERMITTED_SNAPSHOT });
       assert.deepEqual([historical.status, historical.error_code], ["not_created", "tenant_boundary_violation"]);
       await seed("conc", "3");
       await recordDecisions({ organizationId: ORG_X, profileId: ids.profile.conc, actorContext: adminA, outcomes: ["reviewed"], p1_07: PRE_FIX_P1_07_REFUSAL });
@@ -856,6 +860,42 @@ async function runBrowserAcceptance() {
       assert.ok(rendered.includes("claim review: needs_gk_review"), rendered);
       assert.deepEqual(adminBPage.exceptions, []);
       results.steps7_8 = "PASS: claim -> P2-04 -> evidence summary 201 + impact narrative 201 (2 model calls) -> Admin B lists and reads both persisted drafts (awaiting review, cited claim, limitations) via the routes and the page";
+    });
+
+    // --- 8b: AI processing not permitted ------------------------------------------
+    await test("8b: a file whose current reviewed decision does not permit AI processing keeps its non-AI processing (claim, gap follow-ups), but its claim reaches the model through neither draft, alone or mixed with a permitted claim, and nothing is written", async () => {
+      // The 'ui' file's decision was recorded through the UI form, whose AI permission starts unchecked.
+      const [uiDecision] = await query(
+        `SELECT reviewed_allowed_use_status, reviewed_llm_processing_allowed FROM kai.intake_sensitivity_review_decisions
+          WHERE organization_id = $1::uuid AND decision_id = $2::uuid`, [ORG_X, ids.uiDecision]);
+      assert.deepEqual([uiDecision.reviewed_allowed_use_status, uiDecision.reviewed_llm_processing_allowed], ["unknown", false]);
+      const [uiEvidence] = await query(
+        `SELECT e.evidence_item_id::text FROM kai.evidence_items e
+           JOIN kai.source_versions v ON v.organization_id = e.organization_id AND v.source_version_id = e.source_version_id
+          WHERE e.organization_id = $1::uuid AND v.intake_source_candidate_id = $2::uuid ORDER BY e.statement`, [ORG_X, ids.candidate.ui]);
+      const proposed = await adminBPage.api("POST", claimProposalPath(ORG_X, uiEvidence.evidence_item_id), {});
+      assert.equal(proposed.status, 200, `non-AI claim proposal: ${JSON.stringify(proposed.body)}`);
+      const uiClaim = proposed.body.data.claim.claim_id;
+      const followups = await adminBPage.api("POST", claimGapFollowupsPath(ORG_X, uiClaim), {});
+      assert.ok([200, 201].includes(followups.status), `non-AI gap follow-ups: ${JSON.stringify(followups.body)}`);
+      const before = await counts(ORG_X);
+      const callsBefore = modelCalls.length;
+      const mixed = [ids.histClaim, uiClaim].sort();
+      const refusals = {
+        summary: await adminBPage.api("POST", createEvidenceSummaryPath(ORG_X), DRAFT_BODY([uiClaim], "ai-summary")),
+        narrative: await adminBPage.api("POST", createImpactNarrativePath(ORG_X), DRAFT_BODY([uiClaim], "ai-narrative")),
+        mixedSummary: await adminBPage.api("POST", createEvidenceSummaryPath(ORG_X), DRAFT_BODY(mixed, "ai-mixed-summary")),
+        mixedNarrative: await adminBPage.api("POST", createImpactNarrativePath(ORG_X), DRAFT_BODY(mixed, "ai-mixed-narrative")),
+      };
+      for (const [label, response] of Object.entries(refusals)) {
+        assert.equal(response.status, 422, `${label}: ${JSON.stringify(response.body)}`);
+        // The route's blocker projection carries the key and reason (the basis is proven in kai-effective-ai-processing-enforcement.spec.js).
+        const [blocker] = response.body.blockers || [];
+        assert.deepEqual([blocker?.validator_key, blocker?.blocking_reason], ["VAL-KAI-B1A-02-004", "ai_processing_not_permitted"], label);
+      }
+      assert.deepEqual(delta(await counts(ORG_X), before), ZERO, "no write by any refusal");
+      assert.equal(modelCalls.length, callsBefore, "no claim of the file reached the model");
+      results.step8b = "PASS: claim proposal 200 + gap follow-ups for the AI-restricted file; both drafts, alone and mixed with the permitted claim, 422 ai_processing_not_permitted; zero writes; 0 model calls";
     });
 
     // --- 9: refusals --------------------------------------------------------------

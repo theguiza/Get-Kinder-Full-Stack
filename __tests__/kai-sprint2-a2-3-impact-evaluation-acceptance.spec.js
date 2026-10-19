@@ -242,6 +242,14 @@ function fakeTx({
       if (/FROM kai\.impact_evaluation_criteria/.test(text)) {
         return { rows: criteria };
       }
+      // VAL-KAI-B1A-02-004 resolver: each claim's file has a sensitivity profile
+      // and no human decision, so AI processing is not restricted.
+      if (/JOIN kai\.claim_evidence_links/.test(text)) {
+        return { rows: params[1].map((claimId) => ({ claim_id: claimId, intake_sensitivity_profile_id: "8e000000-0000-4000-8000-0000000000c1" })) };
+      }
+      if (/FROM kai\.intake_sensitivity_profiles/.test(text)) {
+        return { rows: params[1].map((id) => ({ intake_sensitivity_profile_id: id, allowed_use_status: "unknown" })) };
+      }
       if (/FROM kai\.claims c/.test(text)) {
         const ids = new Set(params[1]);
         return { rows: claims.filter((claim) => ids.has(claim.claim_id)) };

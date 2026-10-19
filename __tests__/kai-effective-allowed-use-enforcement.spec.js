@@ -208,13 +208,15 @@ test("wiring: every content-processing seam reads the shared resolver inside its
     ["Backend/kai/dictionary/postgresClaimProposalRepository.js", "readEffectiveAllowedUseProhibition("],
     ["Backend/kai/dictionary/postgresEvidenceCoverageAssessmentRepository.js", "readEffectiveAllowedUseProhibition("],
     ["Backend/kai/dictionary/postgresOrganizationEvidenceGapCurrentStateRepository.js", "readEffectiveAllowedUseProhibitions("],
-    ["Backend/kai/dictionary/postgresGeneratedContentRepository.js", "readEffectiveAllowedUseProhibitionsForClaims("],
+    // Generation reads the AI-processing form, which applies this prohibition first
+    // (kai-effective-ai-processing-enforcement.spec.js).
+    ["Backend/kai/dictionary/postgresGeneratedContentRepository.js", "readEffectiveAiProcessingProhibitionsForClaims("],
   ]) {
     assert.ok(source(path).includes(symbol), path);
   }
   // Generation checks allowed use before P2-06 and before the generator call.
   const generation = source("Backend/kai/dictionary/postgresGeneratedContentRepository.js");
-  const check = generation.indexOf("readEffectiveAllowedUseProhibitionsForClaims(tx");
+  const check = generation.indexOf("readEffectiveAiProcessingProhibitionsForClaims(tx");
   assert.ok(check > 0 && check < generation.indexOf("const traceabilityResults = [];"));
   assert.ok(check < generation.indexOf("await dependencies.draftGenerator(generatorInput)"));
   // P1-08 refuses only the 'promoted' work; rejection stays decidable.

@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 
 import { withTransaction } from "../db/kaiDb.js";
-import { readEffectiveAllowedUseProhibitionsForClaims } from "./postgresEffectiveAllowedUseResolver.js";
+import { readEffectiveAiProcessingProhibitionsForClaims } from "./postgresEffectiveAllowedUseResolver.js";
 import { validateEffectiveAllowedUsePermitsOperation } from "../validators/kaiEffectiveAllowedUseValidators.js";
 import {
   evaluateClaimTraceabilityInTransaction,
@@ -1370,9 +1370,12 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
       // must never reject INTERNAL draft creation.
       // VAL-KAI-B1A-02-003: a claim whose file's effective allowed use is
       // not_allowed never reaches traceability or the generator (the model
-      // provider), for any audience or content type. A claim whose lineage
-      // cannot be walked is left to the P2-06 revalidation below.
-      const allowedUseProhibitions = await readEffectiveAllowedUseProhibitionsForClaims(tx, {
+      // provider), for any audience or content type. VAL-KAI-B1A-02-004: nor
+      // does a claim whose file's current human decision does not permit AI
+      // processing; one such claim refuses the whole request, never dropped.
+      // A claim whose lineage cannot be walked is left to the P2-06
+      // revalidation below.
+      const allowedUseProhibitions = await readEffectiveAiProcessingProhibitionsForClaims(tx, {
         organizationId: input.organizationId,
         claimIds: input.claimIds,
       });

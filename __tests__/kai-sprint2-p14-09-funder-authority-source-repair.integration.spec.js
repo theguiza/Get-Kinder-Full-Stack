@@ -284,7 +284,7 @@ async function runSuite() {
          'unknown', 'unknown',
          'unknown', 'unknown', 'unknown',
          'unknown', 'present', 'allowed',
-         false, false, false,
+         true, false, false,
          $4, $5::uuid, 'gk_reviewer', $6::timestamptz,
          $7, 'human', now()
        )`,

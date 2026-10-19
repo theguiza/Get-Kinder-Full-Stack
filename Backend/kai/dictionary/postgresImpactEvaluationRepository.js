@@ -1,4 +1,6 @@
 import { evaluateClaimTraceabilityInTransaction } from "./postgresClaimTraceabilityRepository.js";
+import { readEffectiveAiProcessingProhibitionsForClaims } from "./postgresEffectiveAllowedUseResolver.js";
+import { validateEffectiveAllowedUsePermitsOperation } from "../validators/kaiEffectiveAllowedUseValidators.js";
 import { validateImpactEvaluationResults } from "../validators/kaiImpactEvaluationValidators.js";
 
 const RESULT_STATUS = Object.freeze({
@@ -17,8 +19,13 @@ const AUDIENCES = new Set(["internal", "funder", "public"]);
 const FRAMEWORK_USABLE_STATUSES = new Set(["draft", "active"]);
 const MAX_CLAIM_IDS = 50;
 
-function failure(code) {
-  return { ok: false, data: null, error: { code, status: RESULT_STATUS[code] || 500 } };
+function failure(code, blockers) {
+  return {
+    ok: false,
+    data: null,
+    error: { code, status: RESULT_STATUS[code] || 500 },
+    ...(blockers?.length ? { blockers } : {}),
+  };
 }
 
 function success(data) {
@@ -125,6 +132,24 @@ async function loadCriteria(tx, { frameworkVersionId }) {
     [frameworkVersionId],
   );
   return rows;
+}
+
+/**
+ * VAL-KAI-B1A-02-004: no requested claim whose file's current human decision
+ * does not permit AI processing reaches the generator (the model provider);
+ * one such claim refuses the whole evaluation. The traceability revalidation
+ * before it already refuses a not_allowed file (eligible must be true).
+ */
+async function refuseAiProcessingProhibitedClaims(tx, { organizationId, claimIds }) {
+  const prohibitions = await readEffectiveAiProcessingProhibitionsForClaims(tx, { organizationId, claimIds });
+  for (const claimId of claimIds) {
+    const permitted = validateEffectiveAllowedUsePermitsOperation(
+      prohibitions.has(claimId) ? prohibitions.get(claimId) : "claim_lineage_missing",
+      { operation: "evaluate_impact_outcome_context", objectType: "claim", objectId: claimId },
+    );
+    if (!permitted.ok) return failure(permitted.code, permitted.blockers);
+  }
+  return null;
 }
 
 async function loadGovernedClaimProjection(tx, { organizationId, claimIds }) {
@@ -465,6 +490,9 @@ export function createPostgresImpactEvaluationRepository({ runInTransaction, eva
             }
           }
 
+          const aiProcessingRefusal = await refuseAiProcessingProhibitedClaims(tx, { organizationId, claimIds });
+          if (aiProcessingRefusal) return aiProcessingRefusal;
+
           const governedClaims = await loadGovernedClaimProjection(tx, { organizationId, claimIds });
           if (!governedClaims) return failure("conflict_current_state_changed");
 
@@ -559,6 +587,9 @@ export function createPostgresImpactEvaluationRepository({ runInTransaction, eva
               return failure("validation_blocker");
             }
           }
+
+          const aiProcessingRefusal = await refuseAiProcessingProhibitedClaims(tx, { organizationId, claimIds });
+          if (aiProcessingRefusal) return aiProcessingRefusal;
 
           const governedClaims = await loadGovernedClaimProjection(tx, { organizationId, claimIds });
           if (!governedClaims) return failure("conflict_current_state_changed");

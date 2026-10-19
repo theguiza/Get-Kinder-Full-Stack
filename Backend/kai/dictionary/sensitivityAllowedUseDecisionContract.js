@@ -246,7 +246,8 @@ export function sensitivityAuthorityFromCurrentDecision(currentHead) {
  * beyond its metadata (P1-07 source preparation, P1-08 promotion, P2-01
  * extraction, P2-02 assessment, P2-03 claim proposal, P2-04 follow-ups, and
  * P2-06 eligibility, which generation re-evaluates). Reading, reviewing, or
- * re-deciding the file is never gated by it.
+ * re-deciding the file is never gated by it. AI processing additionally
+ * applies sensitivityEffectiveAiProcessingProhibition below.
  *
  * A prohibition is never lifted by anything weaker than its source, and
  * nothing here grants a permission:
@@ -276,6 +277,38 @@ export function sensitivityEffectiveAllowedUseProhibition({ profileAllowedUseSta
   }
   if (profileAllowedUseStatus === "not_allowed") return "intake_allowed_use_not_allowed";
   return null;
+}
+
+/**
+ * VAL-KAI-B1A-02-004: the effective AI-processing prohibition for one
+ * sensitivity profile. It gates only the operations that send a file's
+ * content to an AI provider (generated-content drafting, impact evaluation);
+ * an AI-only restriction never gates P1-07..P2-06, which keep
+ * sensitivityEffectiveAllowedUseProhibition alone.
+ *
+ * The effective allowed-use prohibition applies first, unchanged. Then:
+ *   - no human decision at all: nothing more is prohibited. The P1-05/P2-01/
+ *     P2-03 llm_processing_allowed columns are CHECK-pinned false for every
+ *     row, so they state no classification, and are never read as one;
+ *     Operating Model 7.1/8.2 cover AI processing within the authorized
+ *     purpose without a per-step decision;
+ *   - a terminal 'reviewed' head is the authoritative human AI fact, read
+ *     only through sensitivityAuthorityFromCurrentDecision: only a stored
+ *     reviewed_llm_processing_allowed = true permits it
+ *     ('reviewed_llm_processing_not_allowed' otherwise);
+ *   - a 'needs_more_information' head reopens the review and states no
+ *     permission, so AI processing is unresolved
+ *     ('sensitivity_ai_processing_unresolved'); it never lifts an earlier
+ *     prohibition.
+ * Returns null when nothing prohibits, otherwise the reason token.
+ */
+export function sensitivityEffectiveAiProcessingProhibition(facts) {
+  const allowedUseProhibition = sensitivityEffectiveAllowedUseProhibition(facts);
+  if (allowedUseProhibition !== null) return allowedUseProhibition;
+  const { currentHead } = facts;
+  if (!isPlainObject(currentHead)) return null;
+  if (!isSensitivityAllowedUseTerminalOutcome(currentHead.decision_outcome)) return "sensitivity_ai_processing_unresolved";
+  return sensitivityAuthorityFromCurrentDecision(currentHead).llm_processing_allowed ? null : "reviewed_llm_processing_not_allowed";
 }
 
 export const __sensitivityAllowedUseDecisionContractTestables = Object.freeze({
