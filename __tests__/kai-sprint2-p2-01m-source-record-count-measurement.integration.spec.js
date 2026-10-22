@@ -65,6 +65,10 @@ async function runSuite() {
   const { createPostgresSensitivityAllowedUseReviewRepository } = await import("../Backend/kai/dictionary/postgresSensitivityAllowedUseReviewRepository.js");
   const { createPostgresClientFollowupCompletionRepository } = await import("../Backend/kai/dictionary/postgresClientFollowupCompletionRepository.js");
   const { createPostgresEvidenceLineageRepository } = await import("../Backend/kai/dictionary/postgresEvidenceLineageRepository.js");
+  const { createEvidenceSummaryDraft } = await import("../Backend/kai/services/kaiGeneratedContentService.js");
+  const { createPostgresGeneratedContentRepository } = await import("../Backend/kai/dictionary/postgresGeneratedContentRepository.js");
+  const { createProductionEvidenceSummaryDraftGenerator } = await import("../Backend/kai/services/kaiEvidenceSummaryDraftGenerator.js");
+  const { getEngagementForOrganization } = await import("../Backend/kai/db/kaiQueries.js");
 
   const ENV = Object.freeze({ KAI_SPRINT2_ENABLED: "true" });
   const ORG = "0e000000-0000-4000-8000-000000000a01";
@@ -530,6 +534,8 @@ async function runSuite() {
       [ORG, evidenceRow.evidence_item_id]);
     const proposal = await propose(evidenceRow.evidence_item_id);
     assert.equal(proposal.ok, true, JSON.stringify(proposal));
+    ids.legacyFieldClaimId = proposal.data.claim.claim_id;
+    ids.legacyFieldEvidenceId = evidenceRow.evidence_item_id;
     assert.equal(proposal.data.claim.statement,
       `The promoted source contains the committed data-dictionary field "field_1" identified by locator ${locatorRow.locator_fingerprint}.`);
     // A field-presence claim keeps today's lifecycle: no gap state at
@@ -680,6 +686,39 @@ async function runSuite() {
       [ids.measurementEvidenceId, ids.main.sourceVersionId, "reviewed_supported", "reviewed"]);
   });
 
+  // Synthetic human sensitivity decision through the real P1-06 queue and the
+  // real decision service (never an inserted decision row).
+  async function decideSensitivity(sensitivityProfileId, decision, snapshot) {
+    const queue = await ensureSensitivityReviewQueueItemAfterProfiling(
+      { organizationId: ORG, intakeSensitivityProfileId: sensitivityProfileId, now: NOW },
+      { env: ENV, reviewQueueRepository: createPostgresReviewQueueRepository({ runInTransaction: withTx }), metadataOnlyAudit: noAudit() },
+    );
+    assert.equal(queue.ok, true, `queue: ${JSON.stringify(queue)}`);
+    const [item] = await query(
+      "SELECT review_queue_item_id::text, updated_at FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = 'sensitivity_review' AND target_object_id = $2::uuid",
+      [ORG, sensitivityProfileId]);
+    const decided = await recordSensitivityAllowedUseDecision({
+      organizationId: ORG,
+      intakeSensitivityProfileId: sensitivityProfileId,
+      reviewQueueItemId: item.review_queue_item_id,
+      expectedUpdatedAt: new Date(item.updated_at).toISOString(),
+      decision,
+      ...(snapshot ? { reviewedSnapshot: snapshot } : {}),
+      actorContext: { ...GK_REVIEWER, kaiRoles: ["gk_reviewer"] },
+      now: NOW,
+    }, { env: ENV, sensitivityAllowedUseReviewRepository: createPostgresSensitivityAllowedUseReviewRepository({ runInTransaction: withTx }), metadataOnlyAudit: noAudit() });
+    assert.equal(decided.ok, true, `decision: ${JSON.stringify(decided)}`);
+  }
+  const reviewedSnapshot = (overrides) => ({
+    reviewed_personal_data_status: "absent", reviewed_minor_data_status: "absent",
+    reviewed_health_housing_justice_immigration_status: "absent", reviewed_indigenous_governance_status: "absent",
+    reviewed_staff_notes_status: "absent", reviewed_story_testimonial_status: "absent", reviewed_small_cell_risk_status: "absent",
+    reviewed_financial_records_status: "absent", reviewed_consent_basis_status: "present", reviewed_allowed_use_status: "allowed",
+    reviewed_llm_processing_allowed: false, reviewed_product_learning_allowed: false,
+    reviewed_public_use_allowed: false, reviewed_funder_use_allowed: false,
+    ...overrides,
+  });
+
   test("generation permission is the source's effective AI decision, independent of eligibility: none, permitted, and prohibited", async () => {
     // The pinned evidence/claim AI flags are false on every row (legacy too)
     // and are not what generation reads: VAL-KAI-B1A-02-004 reads the file's
@@ -738,5 +777,266 @@ async function runSuite() {
     assert.equal(refused.permitted, false);
     // The prohibited claim is still traceable for its non-AI uses.
     assert.equal((await trace(prohibitedClaim)).ok, true);
+  });
+
+  // ---- Plan A Prompt 6: the measured claim through the real evidence_summary
+  // generation service. Real: the service, flags, role and tenant checks, the
+  // engagement read, the AI gate, P2-06 revalidation, the production
+  // generator adapter (request payload, prompt, JSON parsing), every VAL-GEN
+  // validator, and persistence. Simulated: only the provider call
+  // (createMessage), which records the payload and returns a fixed response.
+  const ENGAGEMENT = "0e000000-0000-4000-8000-00000000ea01";
+  const OTHER_ENGAGEMENT = "0e000000-0000-4000-8000-00000000eb01";
+  const GEN_ENV = Object.freeze({ KAI_SPRINT2_ENABLED: "true", KAI_GENERATION_ENABLED: "true" });
+  const MEASURED_LIMITATION_CODES = [
+    "coverage.conflicting_source_indicators.accepted_internal_limitation",
+    "coverage.duplicates.resolved_risk_flagged",
+    "coverage.missingness.resolved_risk_flagged",
+    "coverage.requirement_alignment.accepted_internal_limitation",
+    "coverage.small_cell_risk.accepted_internal_limitation",
+    "coverage.time_period_clarity.resolved_risk_flagged",
+    "measurement.blank_records_excluded",
+    "measurement.duplicate_records_included",
+    "measurement.period_human_attested_not_row_verified",
+    "measurement.record_meaning_human_defined",
+  ];
+  // Every number is from the cited claim statement; every limitation is
+  // stated; the records are not called distinct and the period not verified.
+  const COMPLIANT_TEXT = "The promoted source records 5 programme sessions for the reporting period 2026-09-01 to 2026-09-30. "
+    + "This is a count of source records, each counted as one programme session under the human-confirmed definition; "
+    + "the period is attested in that definition and not verified against record dates. "
+    + "1 blank record was excluded and 2 exact-duplicate records were included. "
+    + "Internal limitations: small-cell risk, conflicting source indicators, and requirement alignment were accepted for internal use only.";
+  const LEGACY_SYSTEM_PROMPT = [
+    "You generate internal evidence summaries for Get Kinder.",
+    "Use only the supplied governed claim projection.",
+    "Every block must cite at least one supplied claim/evidence pair.",
+    "Do not add numbers or causal language unless it appears in a cited claim statement.",
+  ].join(" ");
+
+  function providerDouble(respond) {
+    const calls = [];
+    const createMessage = async (payload) => {
+      calls.push(payload);
+      return { content: [{ type: "text", text: JSON.stringify(respond(JSON.parse(payload.messages[0].content))) }] };
+    };
+    return { calls, draftGenerator: createProductionEvidenceSummaryDraftGenerator({ createMessage }) };
+  }
+  const measuredBlock = (text, claimId = ids.measurementClaimId, evidenceItemId = ids.measurementEvidenceId) =>
+    ({ text, citations: [{ claimId, evidenceItemId }] });
+  const replying = (...blocks) => providerDouble(() => ({ blocks }));
+
+  let idempotency = 0;
+  const generate = (claimIds, provider, { actor = ADMIN, organizationId = ORG, engagementId = ENGAGEMENT, env = GEN_ENV } = {}) => createEvidenceSummaryDraft({
+    organizationId, engagementId, requestedAudience: "internal", claimIds: [...claimIds].sort(),
+    idempotencyKey: `p2-01m-generation-${++idempotency}`, actorContext: actor, now: NOW,
+  }, {
+    env,
+    getEngagementForOrganization: (args) => getEngagementForOrganization(args, pool),
+    generatedContentRepository: createPostgresGeneratedContentRepository({ runInTransaction: withTx }),
+    draftGenerator: provider.draftGenerator,
+    metadataOnlyAudit: noAudit(),
+  });
+  async function generationCounts() {
+    const [row] = await query(`SELECT
+      (SELECT count(*) FROM kai.generation_runs WHERE organization_id = ANY($1::uuid[]))::int AS runs,
+      (SELECT count(*) FROM kai.generated_content_drafts WHERE organization_id = ANY($1::uuid[]))::int AS drafts,
+      (SELECT count(*) FROM kai.generated_content_blocks WHERE organization_id = ANY($1::uuid[]))::int AS blocks,
+      (SELECT count(*) FROM kai.generated_content_citations WHERE organization_id = ANY($1::uuid[]))::int AS citations`, [[ORG, OTHER_ORG]]);
+    return row;
+  }
+  const blockerKeys = (result) => (result.blockers || []).filter((item) => item.severity === "blocker").map((item) => item.validator_key);
+
+  test("generation: the eligible measured claim reaches the generator with its value, definition, and every limitation, and a compliant response persists a review-gated internal draft", async () => {
+    await query("INSERT INTO kai.engagements (engagement_id, organization_id, engagement_code) VALUES ($1::uuid, $2::uuid, 'p2-01m'), ($3::uuid, $4::uuid, 'p2-01m-other')",
+      [ENGAGEMENT, ORG, OTHER_ENGAGEMENT, OTHER_ORG]);
+    const before = await generationCounts();
+    // The response also claims an approval: the adapter keeps only text and
+    // citations, so the model cannot approve, finalize, or export anything.
+    const provider = providerDouble(() => ({ blocks: [measuredBlock(COMPLIANT_TEXT)], approved: true, draftStatus: "approved", exportReady: true }));
+    const result = await generate([ids.measurementClaimId], provider);
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(provider.calls.length, 1);
+    const [payload] = provider.calls;
+    const sent = JSON.parse(payload.messages[0].content);
+    assert.deepEqual([sent.contentType, sent.requestedAudience, sent.claims.length], ["evidence_summary", "internal", 1]);
+    const [claim] = sent.claims;
+    assert.deepEqual([claim.claimId, claim.evidenceItemId, claim.sourceVersionId], [ids.measurementClaimId, ids.measurementEvidenceId, ids.main.sourceVersionId]);
+    assert.match(claim.claimStatement, /^The promoted source records 5 programme sessions for the reporting period 2026-09-01 to 2026-09-30 \(record count: one programme session per CSV data record; 1 blank record excluded, 2 exact-duplicate records included\)\.$/);
+    assert.deepEqual(claim.limitationCodes, MEASURED_LIMITATION_CODES);
+    assert.equal(payload.system.startsWith(LEGACY_SYSTEM_PROMPT), true, "the existing instructions are kept");
+    assert.match(payload.system, /count of source records under the human-confirmed record definition/);
+    assert.match(payload.system, /never call the records distinct or the period verified/);
+    // Only the governed projection is sent: no row values, file names, or ids beyond the projection.
+    assert.doesNotMatch(payload.messages[0].content, /literacy|mentoring|attendees|sessions\.csv|2026-09-16/);
+
+    const { data } = result;
+    assert.equal(data.requestedAudience, "internal");
+    assert.equal(data.replayed, false);
+    assert.equal(data.blocks.length, 1);
+    assert.equal(data.blocks[0].text, COMPLIANT_TEXT);
+    assert.deepEqual(data.blocks[0].citations.map((citation) => [citation.claimId, citation.evidenceItemId]), [[ids.measurementClaimId, ids.measurementEvidenceId]]);
+    const [draft] = await query(
+      `SELECT d.content_type, d.draft_status, d.review_status, d.requested_audience, d.validator_results, q.queue_type, q.queue_status, q.review_status AS queue_review_status
+         FROM kai.generated_content_drafts d
+         JOIN kai.review_queue_items q ON q.review_queue_item_id = $2::uuid AND q.target_object_id = d.generated_content_draft_id
+        WHERE d.generated_content_draft_id = $1::uuid`, [data.generatedContentDraftId, data.reviewQueueItemId]);
+    console.log(`[p2-01m] persisted draft: status=${draft.draft_status} review=${draft.review_status} queue=${draft.queue_type}/${draft.queue_status}/${draft.queue_review_status}`);
+    assert.deepEqual([draft.content_type, draft.requested_audience, draft.draft_status, draft.review_status], ["evidence_summary", "internal", data.draftStatus, data.reviewStatus]);
+    assert.notEqual(draft.draft_status, "approved");
+    assert.equal(draft.queue_status, "open", "a human still has to review it");
+    const validators = Object.fromEntries((draft.validator_results.results || draft.validator_results).map((item) => [item.validator_key, item.severity]));
+    for (const key of ["VAL-GEN-001", "VAL-GEN-002", "VAL-GEN-003", "VAL-GEN-004", "VAL-GEN-005", "VAL-GEN-008"]) assert.equal(validators[key], "pass", `${key}: ${JSON.stringify(draft.validator_results)}`);
+    const [persistedBlock] = await query(
+      `SELECT b.text, c.claim_id::text, c.evidence_item_id::text FROM kai.generated_content_blocks b
+         JOIN kai.generated_content_citations c ON c.generated_content_block_id = b.generated_content_block_id
+        WHERE b.generated_content_draft_id = $1::uuid`, [data.generatedContentDraftId]);
+    assert.deepEqual(persistedBlock, { text: COMPLIANT_TEXT, claim_id: ids.measurementClaimId, evidence_item_id: ids.measurementEvidenceId });
+    assert.deepEqual(await generationCounts(), { runs: before.runs + 1, drafts: before.drafts + 1, blocks: before.blocks + 1, citations: before.citations + 1 });
+    ids.measuredDraftId = data.generatedContentDraftId;
+  });
+
+  test("generation: fabricated numbers, causal language, missing citations, undisclosed limitations, and 'distinct'/'verified' wording are rejected with nothing persisted", async () => {
+    const before = await generationCounts();
+    const cases = [
+      ["fabricated count", COMPLIANT_TEXT.replace("records 5 programme", "records 6 programme"), ["VAL-GEN-004"]],
+      ["fabricated rate", `${COMPLIANT_TEXT} That is 83% of planned sessions.`, ["VAL-GEN-004"]],
+      ["causal language", `${COMPLIANT_TEXT} The programme improves literacy.`, ["VAL-GEN-004"]],
+      ["no blank or duplicate disclosure", COMPLIANT_TEXT.replace("1 blank record was excluded and 2 exact-duplicate records were included. ", ""), ["VAL-GEN-008"]],
+      ["no coverage limitation", COMPLIANT_TEXT.replace(/ Internal limitations:.*$/, ""), ["VAL-GEN-008"]],
+      ["period called verified", COMPLIANT_TEXT.replace("is attested in that definition and not verified against record dates", "was verified against the record dates"), ["VAL-GEN-008"]],
+      ["records called distinct sessions", `${COMPLIANT_TEXT} These are 5 distinct sessions delivered.`, ["VAL-GEN-008"]],
+    ];
+    for (const [label, text, expected] of cases) {
+      const provider = replying(measuredBlock(text));
+      const result = await generate([ids.measurementClaimId], provider);
+      assert.deepEqual([result.ok, result.error?.code], [false, "validation_blocker"], `${label}: ${JSON.stringify(result)}`);
+      assert.equal(provider.calls.length, 1, label);
+      for (const key of expected) assert.ok(blockerKeys(result).includes(key), `${label}: ${JSON.stringify(result.blockers)}`);
+    }
+    // An uncited block (even beside a compliant one) is not accepted.
+    const uncited = await generate([ids.measurementClaimId], replying(measuredBlock(COMPLIANT_TEXT), { text: "The source records 5 programme sessions.", citations: [] }));
+    assert.equal(uncited.ok, false);
+    // Refused by the generator-result contract, before the VAL-GEN set runs.
+    assert.ok(blockerKeys(uncited).some((key) => key === "VAL-GEN-002" || key === "VAL-GEN-RESULT-P0-001"), JSON.stringify(uncited.blockers));
+    // A citation to evidence that is not the claim's is not accepted.
+    const wrongPair = await generate([ids.measurementClaimId], replying(measuredBlock(COMPLIANT_TEXT, ids.measurementClaimId, ids.legacyFieldEvidenceId)));
+    assert.equal(wrongPair.ok, false);
+    assert.ok(blockerKeys(wrongPair).includes("VAL-GEN-003"), JSON.stringify(wrongPair.blockers));
+    assert.deepEqual(await generationCounts(), before, "no rejected draft is persisted");
+  });
+
+  test("generation: unauthorized roles, another tenant, and disabled flags never reach the provider", async () => {
+    const before = await generationCounts();
+    for (const [label, options, code] of [
+      ["client_reviewer", { actor: REVIEWER }, "authorization_denied"],
+      ["client_contributor", { actor: CONTRIBUTOR }, "authorization_denied"],
+      ["another organization's administrator", { actor: OTHER_ADMIN }, "authorization_denied"],
+      ["system actor", { actor: { ...ADMIN, actorType: "system" } }, "authorization_denied"],
+      ["generation flag off", { env: { KAI_SPRINT2_ENABLED: "true", KAI_GENERATION_ENABLED: "false" } }, "feature_disabled"],
+      ["Sprint 2 flag off", { env: { KAI_SPRINT2_ENABLED: "false", KAI_GENERATION_ENABLED: "true" } }, "feature_disabled"],
+      ["another organization's engagement", { engagementId: OTHER_ENGAGEMENT }, "tenant_boundary_violation"],
+    ]) {
+      const provider = replying(measuredBlock(COMPLIANT_TEXT));
+      const result = await generate([ids.measurementClaimId], provider, options);
+      assert.deepEqual([result.ok, result.error?.code], [false, code], `${label}: ${JSON.stringify(result)}`);
+      assert.equal(provider.calls.length, 0, label);
+    }
+    // The other organization, in its own scope, cannot reach this claim.
+    const provider = replying(measuredBlock(COMPLIANT_TEXT));
+    const crossScope = await generate([ids.measurementClaimId], provider, { actor: OTHER_ADMIN, organizationId: OTHER_ORG, engagementId: OTHER_ENGAGEMENT });
+    console.log(`[p2-01m] cross-organization generation: ${crossScope.error?.code}`);
+    assert.equal(crossScope.ok, false);
+    assert.equal(provider.calls.length, 0);
+    assert.deepEqual(await generationCounts(), before);
+  });
+
+  test("generation: a source whose human decision prohibits AI, or leaves it unknown or unresolved, is refused before the provider", async () => {
+    const before = await generationCounts();
+    for (const [label, decision, snapshot] of [
+      ["reviewed, AI not permitted", "reviewed", reviewedSnapshot({ reviewed_llm_processing_allowed: false })],
+      ["reviewed, allowed use unknown", "reviewed", reviewedSnapshot({ reviewed_allowed_use_status: "unknown", reviewed_consent_basis_status: "unknown" })],
+      ["needs more information", "needs_more_information", null],
+    ]) {
+      const seeded = await seedPromotedSource({ profile: ids.profile });
+      await decideSensitivity(seeded.sensitivityProfileId, decision, snapshot);
+      const recorded = await record(seeded.sourceVersionId);
+      assert.equal(recorded.ok, true, `${label}: ${JSON.stringify(recorded)}`);
+      const proposal = await propose(recorded.data.evidenceItem.evidence_item_id);
+      assert.equal(proposal.ok, true, `${label}: ${JSON.stringify(proposal)}`);
+      const provider = replying(measuredBlock(COMPLIANT_TEXT, proposal.data.claim.claim_id, recorded.data.evidenceItem.evidence_item_id));
+      const result = await generate([proposal.data.claim.claim_id], provider);
+      assert.deepEqual([result.ok, result.error?.code], [false, "validation_blocker"], `${label}: ${JSON.stringify(result)}`);
+      assert.deepEqual(result.blockers.map((item) => [item.validator_key, item.blocking_reason]), [["VAL-KAI-B1A-02-004", "ai_processing_not_permitted"]], label);
+      assert.equal(provider.calls.length, 0, label);
+    }
+    assert.deepEqual(await generationCounts(), before);
+  });
+
+  test("generation: an unreviewed or rejected measured claim is refused before the provider; GK review authority is unchanged", async () => {
+    const before = await generationCounts();
+    const seeded = await seedPromotedSource({ profile: ids.profile });
+    const recorded = await record(seeded.sourceVersionId);
+    const proposal = await propose(recorded.data.evidenceItem.evidence_item_id);
+    const claimId = proposal.data.claim.claim_id;
+    const evidenceItemId = recorded.data.evidenceItem.evidence_item_id;
+    // Unreviewed: unlike an internal field-presence claim (Package 14-05), a
+    // count is never summarized before it is eligible.
+    const unreviewedProvider = replying(measuredBlock(COMPLIANT_TEXT, claimId, evidenceItemId));
+    const unreviewed = await generate([claimId], unreviewedProvider);
+    assert.deepEqual([unreviewed.ok, unreviewed.error?.code], [false, "validation_blocker"], JSON.stringify(unreviewed));
+    assert.deepEqual(unreviewed.blockers.map((item) => [item.validator_key, item.blocking_reason]), [["VAL-GEN-MEASURED-P2-01M-001", "measured_claim_not_currently_eligible"]]);
+    assert.equal(unreviewedProvider.calls.length, 0);
+    // The organization administrator who requests drafts cannot review the
+    // claim; a GK reviewer supports the evidence, then rejects the claim.
+    const humanReviewRepository = createPostgresHumanReviewRepository({ runInTransaction: withTx });
+    const [evidenceQueue] = await query(
+      "SELECT review_queue_item_id::text, updated_at FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = 'evidence_review' AND target_object_id = $2::uuid",
+      [ORG, evidenceItemId]);
+    const evidenceReview = await recordEvidenceReviewDecision({
+      organizationId: ORG, evidenceItemId, reviewQueueItemId: evidenceQueue.review_queue_item_id,
+      expectedUpdatedAt: new Date(evidenceQueue.updated_at).toISOString(), decision: "supported", actorContext: GK_REVIEWER, now: NOW,
+    }, { env: ENV, humanReviewRepository, metadataOnlyAudit: noAudit() });
+    assert.equal(evidenceReview.ok, true, JSON.stringify(evidenceReview));
+    const [claimQueue] = await query(
+      "SELECT review_queue_item_id::text, updated_at FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = 'claim_review' AND target_object_id = $2::uuid",
+      [ORG, claimId]);
+    const reviewInput = (actorContext, decision) => ({
+      organizationId: ORG, claimId, reviewQueueItemId: claimQueue.review_queue_item_id,
+      expectedUpdatedAt: new Date(claimQueue.updated_at).toISOString(), decision, actorContext, now: NOW,
+    });
+    const adminReview = await recordClaimReviewDecision(reviewInput(ADMIN, "rejected"), { env: ENV, humanReviewRepository, metadataOnlyAudit: noAudit() });
+    assert.deepEqual([adminReview.ok, adminReview.error?.code], [false, "authorization_denied"]);
+    const rejected = await recordClaimReviewDecision(reviewInput(GK_REVIEWER, "rejected"), { env: ENV, humanReviewRepository, metadataOnlyAudit: noAudit() });
+    assert.equal(rejected.ok, true, JSON.stringify(rejected));
+    const rejectedProvider = replying(measuredBlock(COMPLIANT_TEXT, claimId, evidenceItemId));
+    const refused = await generate([claimId], rejectedProvider);
+    assert.deepEqual([refused.ok, refused.error?.code], [false, "claim_reviewed_not_supported"], JSON.stringify(refused));
+    assert.equal(rejectedProvider.calls.length, 0);
+    assert.deepEqual(await generationCounts(), before);
+  });
+
+  test("generation: a field-presence claim keeps today's internal generation exactly (prompt, limitation codes, validators)", async () => {
+    const provider = replying({ text: "The promoted source contains a committed data-dictionary field.", citations: [{ claimId: ids.legacyFieldClaimId, evidenceItemId: ids.legacyFieldEvidenceId }] });
+    const result = await generate([ids.legacyFieldClaimId], provider);
+    assert.equal(result.ok, true, JSON.stringify(result));
+    const [payload] = provider.calls;
+    assert.equal(payload.system, LEGACY_SYSTEM_PROMPT, "the internal system prompt is byte-for-byte unchanged");
+    const [claim] = JSON.parse(payload.messages[0].content).claims;
+    assert.equal(claim.limitationCodes.some((code) => code.startsWith("measurement.") || code.startsWith("coverage.")), false, JSON.stringify(claim.limitationCodes));
+    const [draft] = await query("SELECT validator_results FROM kai.generated_content_drafts WHERE generated_content_draft_id = $1::uuid", [result.data.generatedContentDraftId]);
+    const keys = (draft.validator_results.results || draft.validator_results).map((item) => item.validator_key);
+    assert.equal(keys.includes("VAL-GEN-008"), false, JSON.stringify(keys));
+  });
+
+  test("generation: once the measured source version is superseded, the claim is stale and is refused before the provider", async () => {
+    const before = await generationCounts();
+    await query("UPDATE kai.source_versions SET is_current = false WHERE source_version_id = $1::uuid", [ids.main.sourceVersionId]);
+    const provider = replying(measuredBlock(COMPLIANT_TEXT));
+    const result = await generate([ids.measurementClaimId], provider);
+    console.log(`[p2-01m] stale measured claim: ${result.error?.code} ${JSON.stringify(result.blockers)}`);
+    assert.equal(result.ok, false, JSON.stringify(result));
+    assert.equal(provider.calls.length, 0);
+    assert.deepEqual(await generationCounts(), before);
   });
 }

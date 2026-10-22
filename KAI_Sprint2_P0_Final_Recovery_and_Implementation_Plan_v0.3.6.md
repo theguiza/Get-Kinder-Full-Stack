@@ -42554,3 +42554,177 @@ sensitivity-decision service can run.
 No push, deployment, production/shared database, migration, flag, tenant,
 credential, real client data, or `00_KAI_CURRENT_STATE.md` change. This is
 the single package-end evidence update in the living ExecPlan.
+
+### Plan A Prompt 6: substantive internal Evidence Summary from the measured claim (2026-10-22)
+
+**Owner authorization (USER_CONFIRMED):** the owner's "KAI Revised Plan A /
+Step 6" prompt directs, locally: connect the P2-01M measured claim to the
+existing `evidence_summary` generator and produce a validated, persisted
+internal draft through the real generation service with a local provider test
+double. It does not authorize a migration, a live provider or credentials,
+Markdown export, final release, UI, changes to GK review/release authority,
+legacy P2 reassessment, or production/shared resources.
+
+**Start (TOOL_VERIFIED):** `main` at `38bb602`, clean.
+
+**Authorization rules established (TOOL_VERIFIED from code and tests):**
+- Source AI decision: VAL-KAI-B1A-02-004
+  (`readEffectiveAiProcessingProhibitionsForClaims`) runs before traceability
+  and before the provider. It reads the source file's current human
+  sensitivity decision:
+  - no decision: not prohibited;
+  - reviewed with AI permitted: not prohibited;
+  - reviewed with AI not permitted: refused;
+  - reviewed with allowed use `unknown`, which cannot store AI permission:
+    refused;
+  - `needs_more_information`: unresolved, refused.
+- No decision: not prohibited rests on Operating Model §7.1/§8.2 coverage of
+  AI-assisted analysis within the authorized purpose. Whether a given
+  organization's agreement provides that purpose is a contractual fact:
+  NOT_CONFIRMED by code.
+- Evidence, claim, and profile `llm_processing_allowed` are CHECK-pinned to
+  false placeholders. They are never read (owner-accepted 2026-10-19).
+  `eligible=true` is not an AI permission.
+- Currentness: P2-06 is re-evaluated in the generation transaction, before
+  the provider and again after it.
+
+**Gap found (TOOL_VERIFIED):** generator `limitationCodes` carried only
+P2-06 `blockerCodes`. Those are empty for an eligible measured claim, so the
+model never received the material limitations:
+- the human-defined record meaning;
+- the attested period;
+- the excluded blank and included duplicate records;
+- the risk-flagged and GK-accepted coverage dimensions.
+
+Nothing required that a draft disclose them, and Package 14-05 would also
+admit an unreviewed (ineligible) measured claim to internal generation.
+
+**Change (no migration; field-presence generation unchanged):**
+- The generation projection reads `evidence_type`. For
+  `source_record_count_measurement` only, the repository:
+  - refuses the request before the provider unless the fresh P2-06
+    evaluation is `eligible=true` (`VAL-GEN-MEASURED-P2-01M-001`,
+    `measured_claim_not_currently_eligible`);
+  - reads the persisted measurement;
+  - appends `measurementLimitationCodes`:
+    - `measurement.record_meaning_human_defined`;
+    - `measurement.period_human_attested_not_row_verified` or
+      `measurement.no_reporting_period`;
+    - `measurement.blank_records_excluded` and
+      `measurement.duplicate_records_included` when nonzero;
+    - `coverage.<dimension>.<status>` or
+      `coverage.<dimension>.accepted_internal_limitation` for every
+      dimension that is not clear.
+- The `evidence_summary` system prompt gains one instruction sentence only
+  when a claim carries these codes. Every other prompt is byte-for-byte
+  unchanged (tested).
+- VAL-GEN-008 (`material_limitation_not_disclosed`), evaluated only when a
+  claim carries these codes, requires each block that cites a measured claim
+  to disclose:
+  - the human-defined record meaning ("count of … records" and
+    "human-confirmed/defined");
+  - the attested or absent period;
+  - the blanks;
+  - the duplicates;
+  - the coverage limitations.
+
+  It rejects calling the period verified, and calling the records distinct,
+  unique, or deduplicated.
+- VAL-GEN-001..007 are unchanged:
+  - VAL-GEN-004 still rejects numbers and causal words that are not in the
+    cited statement;
+  - VAL-GEN-002/003 still require exact citations.
+
+**Generation proof (TOOL_VERIFIED, disposable PostgreSQL, P2-01M runner):**
+- **Path:** the real service `createEvidenceSummaryDraft`, with:
+  - flags, role, and tenant checks;
+  - the engagement read;
+  - the AI gate;
+  - P2-06;
+  - the production generator adapter, with only `createMessage` replaced
+    by a recording double;
+  - all validators;
+  - persistence.
+- **Payload sent:** exactly one claim projection:
+  - the statement with 5 programme sessions, 2026-09-01 to 2026-09-30, the
+    record definition, and 1 blank excluded / 2 exact duplicates included;
+  - the claim, evidence, and source-version ids;
+  - the ten limitation codes.
+
+  No row values or file names were sent.
+- **Persisted draft:** a compliant response persisted one internal
+  `evidence_summary` draft (`draft`/`needs_gk_review`), one block, and one
+  exact citation (claim plus measurement evidence), with an open
+  `generated_content_review` queue item.
+  - VAL-GEN-001..005 and VAL-GEN-008 pass.
+  - The response's extra `approved`/`draftStatus`/`exportReady` fields had
+    no effect: the AI cannot approve.
+- **Rejected, nothing persisted:**
+  - VAL-GEN-004: a fabricated count ("6"), a fabricated rate ("83%"), and
+    causal language.
+  - VAL-GEN-008: an omitted blank/duplicate disclosure, an omitted coverage
+    limitation, "verified" for the period, and "distinct sessions".
+  - The generator-result contract (VAL-GEN-RESULT-P0-001): an uncited block.
+  - VAL-GEN-003: a citation to evidence other than the claim's.
+- **Refused with zero provider calls:**
+  - `client_reviewer`, `client_contributor`, another organization's
+    administrator, and a system actor: `authorization_denied`.
+  - Either flag off: `feature_disabled`.
+  - Another organization's engagement: `tenant_boundary_violation`.
+  - Another organization's own scope: refused.
+  - Each AI-prohibited decision listed above: VAL-KAI-B1A-02-004
+    `ai_processing_not_permitted`.
+  - An unreviewed measured claim: `measured_claim_not_currently_eligible`.
+  - A GK-rejected claim: `claim_reviewed_not_supported`. The organization
+    administrator cannot record that review (403).
+  - A superseded source version: refused by P2-06 revalidation
+    (`traceability_result_contract_invalid`).
+- **Legacy:** a field-presence claim's internal draft has the unchanged
+  prompt, no measurement codes, and no VAL-GEN-008.
+- **Numerical integrity:** 5 is stated as a count of source records under the
+  human definition, never as verified distinct sessions. The period is
+  attested, not row-date-verified. The value is not recomputed by the model.
+  Every number in the draft appears in the cited statement.
+
+**Verification (TOOL_VERIFIED; sentinel `DATABASE_URL`):**
+
+| Command | Pass | Fail | Skipped |
+| --- | --- | --- | --- |
+| `npm test` (baseline 5684/0/116) | 5687 | 0 | 116 |
+| `npm run verify:kai-sprint2-api-contract` | 71 | 0 | 0 |
+| P2-01M runner: legacy seed 2; main (P2-01M 21 + unchanged P2-06 suites); migration compatibility and refused rollback | 2 + 54 | 0 | 0 |
+| P2-01M unit spec | 14 | 0 | 0 |
+| P2-06 runner | 33 | 0 | 0 |
+| Generation runners: P14-11 4, review-start audit contract 3 + 8 + 67, Gate C1 binding 59 | 141 | 0 | 0 |
+| Browser: evidence-to-draft 21, source-to-impact 16 | 37 | 0 | 0 |
+| `git diff --check` | ok | | |
+
+These runners also fail on unchanged `38bb602`, with the same output in the
+same places (TOOL_VERIFIED by stashing this change and rerunning). Those
+schemas no longer match the current code; this change did not cause it:
+- P3-01: 1 failure (`kai.evidence_review_decisions` missing).
+- P14-13: 6 failures.
+- P14-14: aborts in its P2-01 fixture.
+
+**Runner CHECK-union limit:** the P2-01M runner keeps the union of the
+shared `upload_lifecycle_audit` operation/metadata CHECKs, as P2-06 does for
+P3-01. This is a test-schema accommodation for migrations that redefine one
+shared CHECK from different lists and do not record their relative order.
+It does not prove that the normal deployment migration sequence produces a
+CHECK admitting every operation used here: NOT_CONFIRMED.
+
+**Remaining:**
+- VAL-GEN-008 is a lexical check. It proves each limitation is mentioned and
+  that the named contradictions are absent; it cannot prove faithful
+  meaning, and it does not require each coverage dimension to be named.
+  GK review of the draft remains the semantic control.
+- Field-presence internal generation keeps the Package 14-05 admission of
+  ineligible claims.
+- Not exercised: a real external provider, and human-reviewed Markdown
+  export or delivery. Production schema application: NOT_CONFIRMED (not
+  authorized).
+
+**Status:** PLAN_A_MEASURED_EVIDENCE_SUMMARY_DRAFT_COMPLETE_LOCAL_SYNTHETIC.
+No push, deployment, production/shared database, migration, flag, tenant,
+credential, live provider, real client data, or `00_KAI_CURRENT_STATE.md`
+change. This is the single package-end evidence update in the living ExecPlan.

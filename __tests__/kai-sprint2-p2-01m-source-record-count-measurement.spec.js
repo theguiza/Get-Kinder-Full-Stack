@@ -19,6 +19,9 @@ import {
   MEASUREMENT_ANSWERED_DIMENSION_KEYS,
   applyMeasurementCoverageDimensions,
 } from "../Backend/kai/validators/kaiSourceMeasurementValidators.js";
+import { measurementLimitationCodes } from "../Backend/kai/validators/kaiSourceMeasurementValidators.js";
+import { validateGeneratedContentDraft } from "../Backend/kai/validators/kaiGeneratedContentValidators.js";
+import { createProductionEvidenceSummaryDraftGenerator } from "../Backend/kai/services/kaiEvidenceSummaryDraftGenerator.js";
 import { __claimGapFollowupRepositoryTestables } from "../Backend/kai/dictionary/postgresClaimGapFollowupRepository.js";
 import { proposeClaim } from "../Backend/kai/services/kaiClaimProposalService.js";
 import sprint2IntakeApiRouter, { __testables as routeTestables } from "../Backend/kai/routes/sprint2IntakeApi.js";
@@ -293,4 +296,88 @@ test("proposal service: only a measured claim gets its gap state in the same com
     generateClaimGapFollowups: async () => { throw new Error("boom"); },
   }));
   assert.equal(thrown.data.claim_gap_state.error_code, "system_error");
+});
+
+test("measured-claim limitation codes: always the human-defined meaning, the period basis, nonzero blanks and duplicates, and every non-clear dimension", () => {
+  const dimensions = {
+    definition_clarity: { assessment_status: "resolved_clear", internal_limitation_accepted: false },
+    duplicates: { assessment_status: "resolved_risk_flagged", internal_limitation_accepted: false },
+    small_cell_risk: { assessment_status: "unresolved", internal_limitation_accepted: true },
+    requirement_alignment: { assessment_status: "unresolved", internal_limitation_accepted: false },
+  };
+  assert.deepEqual(measurementLimitationCodes({ measurementRow: { period_start: "2026-09-01", blank_record_count: 1, duplicate_record_count: 2 }, dimensions }), [
+    "coverage.duplicates.resolved_risk_flagged",
+    "coverage.requirement_alignment.unresolved",
+    "coverage.small_cell_risk.accepted_internal_limitation",
+    "measurement.blank_records_excluded",
+    "measurement.duplicate_records_included",
+    "measurement.period_human_attested_not_row_verified",
+    "measurement.record_meaning_human_defined",
+  ]);
+  assert.deepEqual(measurementLimitationCodes({ measurementRow: { period_start: null, blank_record_count: 0, duplicate_record_count: 0 }, dimensions: null }),
+    ["measurement.no_reporting_period", "measurement.record_meaning_human_defined"]);
+});
+
+const MEASURED = Object.freeze({
+  claimId: "11111111-1111-4111-8111-111111111111",
+  evidenceItemId: "22222222-2222-4222-8222-222222222222",
+  claimStatement: "The promoted source records 5 programme sessions for the reporting period 2026-09-01 to 2026-09-30 (record count: one programme session per CSV data record; 1 blank record excluded, 2 exact-duplicate records included).",
+  requestedAudience: "internal",
+  revalidatedForGeneration: true,
+  currentEligible: true,
+  audienceAuthority: { internal: true, funder: false, public: false },
+  limitationCodes: [
+    "coverage.small_cell_risk.accepted_internal_limitation",
+    "measurement.blank_records_excluded",
+    "measurement.duplicate_records_included",
+    "measurement.period_human_attested_not_row_verified",
+    "measurement.record_meaning_human_defined",
+  ],
+});
+const GOOD = "The promoted source records 5 programme sessions for the reporting period 2026-09-01 to 2026-09-30, a count of source records each counted as one programme session under the human-confirmed definition. "
+  + "The period is attested in that definition and not verified against record dates. 1 blank record was excluded and 2 exact-duplicate records were included. Internal limitation: small-cell risk.";
+const val008 = (text, claims = [MEASURED]) => validateGeneratedContentDraft({
+  requestedAudience: "internal",
+  generationClaims: claims,
+  blocks: [{ ordinal: 1, text, citations: [{ claimId: claims[0].claimId, evidenceItemId: claims[0].evidenceItemId }] }],
+}).results.find((item) => item.validator_key === "VAL-GEN-008");
+
+test("VAL-GEN-008: a block citing a measured claim must disclose each limitation and must not call the records distinct or the period verified", () => {
+  assert.equal(val008(GOOD).severity, "pass");
+  for (const [label, text] of [
+    ["record meaning", GOOD.replace(", a count of source records each counted as one programme session under the human-confirmed definition", "")],
+    ["period basis", GOOD.replace("The period is attested in that definition and not verified against record dates. ", "")],
+    ["period verified", GOOD.replace("is attested in that definition and not verified against record dates", "is verified against record dates")],
+    ["blanks", GOOD.replace("1 blank record was excluded and ", "")],
+    ["duplicates", GOOD.replace(" and 2 exact-duplicate records were included", "")],
+    ["distinct", `${GOOD} They are distinct sessions.`],
+    ["coverage", GOOD.replace(" Internal limitation: small-cell risk.", "")],
+  ]) {
+    const result = val008(text);
+    assert.equal(result.severity, "blocker", label);
+    assert.equal(result.blocking_reason, "material_limitation_not_disclosed", label);
+    assert.deepEqual(result.evidence.block_ordinals, [1], label);
+  }
+  // Not evaluated at all when no claim carries a measurement code.
+  const legacy = { ...MEASURED, limitationCodes: ["coverage_dimension_unresolved"] };
+  const results = validateGeneratedContentDraft({
+    requestedAudience: "internal",
+    generationClaims: [legacy],
+    blocks: [{ ordinal: 1, text: "The promoted source records 5 programme sessions.", citations: [{ claimId: legacy.claimId, evidenceItemId: legacy.evidenceItemId }] }],
+  });
+  const keys = results.results.map((item) => item.validator_key);
+  assert.equal(keys.includes("VAL-GEN-008"), false, JSON.stringify(results));
+});
+
+test("the evidence-summary prompt adds the measurement instruction only for measured claims", async () => {
+  const systems = [];
+  const generator = createProductionEvidenceSummaryDraftGenerator({
+    createMessage: async (payload) => { systems.push(payload.system); return { content: [{ type: "text", text: "{\"blocks\":[]}" }] }; },
+  });
+  const claim = { claimId: MEASURED.claimId, claimStatement: "x", claimType: "finding", evidenceItemId: MEASURED.evidenceItemId, sourceId: MEASURED.claimId, sourceVersionId: MEASURED.claimId };
+  await generator({ contentType: "evidence_summary", requestedAudience: "internal", claims: [{ ...claim, limitationCodes: [] }] });
+  await generator({ contentType: "evidence_summary", requestedAudience: "internal", claims: [{ ...claim, limitationCodes: MEASURED.limitationCodes }] });
+  assert.equal(systems[0], "You generate internal evidence summaries for Get Kinder. Use only the supplied governed claim projection. Every block must cite at least one supplied claim/evidence pair. Do not add numbers or causal language unless it appears in a cited claim statement.");
+  assert.equal(systems[1].startsWith(systems[0]), true);
+  assert.match(systems[1], /never call the records distinct or the period verified/);
 });

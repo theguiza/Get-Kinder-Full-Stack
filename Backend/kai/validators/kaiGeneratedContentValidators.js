@@ -1,3 +1,5 @@
+import { MEASUREMENT_DISCLOSURE_RULES, isMeasurementLimitationCode } from "./kaiSourceMeasurementValidators.js";
+
 const VALIDATOR_KEYS = Object.freeze([
   "VAL-GEN-001",
   "VAL-GEN-002",
@@ -6,6 +8,7 @@ const VALIDATOR_KEYS = Object.freeze([
   "VAL-GEN-005",
   "VAL-GEN-006",
   "VAL-GEN-007",
+  "VAL-GEN-008",
 ]);
 
 const NUMERIC_LITERAL_PATTERN = /(?<![A-Za-z0-9_])[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:%|\b)/g;
@@ -124,6 +127,37 @@ export function validateGeneratedContentDraft({
           block_ordinals: unique(assertionViolations.map((violation) => violation.block_ordinal).filter((ordinal) => Number.isInteger(ordinal))).sort((a, b) => a - b),
         }),
   );
+
+  // VAL-GEN-008 (Plan A Prompt 6): a block citing a measured claim must
+  // disclose every material limitation that claim carries (human-defined
+  // record meaning, attested or absent period, excluded blanks, included
+  // duplicates, every coverage dimension that is not clear) and must not
+  // present the period as verified or the records as distinct. Evaluated
+  // only when a generation claim carries measurement limitation codes, so
+  // every other draft's validator set is unchanged.
+  if ((generationClaims || []).some((claim) => (claim.limitationCodes || []).some(isMeasurementLimitationCode))) {
+    const disclosureViolations = [];
+    for (const block of blocks || []) {
+      const codes = new Set((block.citations || []).flatMap((citation) => (
+        (claimById.get(citation.claimId)?.limitationCodes || []).filter(isMeasurementLimitationCode)
+      )));
+      for (const rule of MEASUREMENT_DISCLOSURE_RULES) {
+        const applies = rule.code ? codes.has(rule.code) : [...codes].some((code) => code.startsWith(rule.codePrefix));
+        if (!applies) continue;
+        if (![rule.requires].flat().every((pattern) => pattern.test(block.text || ""))) disclosureViolations.push({ type: "limitation_not_disclosed", block_ordinal: block.ordinal });
+        if (rule.forbids && rule.forbids.test(block.text || "")) disclosureViolations.push({ type: "limitation_contradicted", block_ordinal: block.ordinal });
+      }
+    }
+    results.push(
+      disclosureViolations.length === 0
+        ? pass("VAL-GEN-008")
+        : blocker("VAL-GEN-008", "material_limitation_not_disclosed", {
+            violation_count: disclosureViolations.length,
+            violation_classes: unique(disclosureViolations.map((violation) => violation.type)).sort(),
+            block_ordinals: unique(disclosureViolations.map((violation) => violation.block_ordinal).filter((ordinal) => Number.isInteger(ordinal))).sort((a, b) => a - b),
+          }),
+    );
+  }
 
   // VAL-GEN-005 checks the draft's requested-audience authority only. It must
   // not become a substitute eligibility gate: a governed INTERNAL claim with

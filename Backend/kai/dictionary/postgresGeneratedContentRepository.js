@@ -8,6 +8,8 @@ import {
   AUDIENCE_AUTHORITY_BLOCKER_CODES,
 } from "./postgresClaimTraceabilityRepository.js";
 import { validateGeneratedContentDraft } from "../validators/kaiGeneratedContentValidators.js";
+import { getScopedEvidenceMeasurementByEvidenceItemId } from "../db/kaiIntakeQueries.js";
+import { MEASUREMENT_EVIDENCE_TYPE, measurementLimitationCodes } from "../validators/kaiSourceMeasurementValidators.js";
 import {
   validateExportManifestEligibility,
   __exportManifestEligibilityValidatorContract,
@@ -173,6 +175,11 @@ const PERSISTENCE_VALIDATION_VALIDATOR_KEY = "VAL-GEN-PERSIST-P0-001";
 // (postgresClaimTraceabilityRepository.js line 770) and must not be used to
 // detect this instead.
 const CLAIM_STRENGTH_VALIDATOR_KEY = "VAL-GEN-CLAIM-STRENGTH-P0-001";
+// P2-01M (Plan A Prompt 6): a measured claim states a count, so unlike the
+// Package 14-05 internal admission of ineligible field-presence claims, it
+// reaches the generator only while its fresh P2-06 evaluation is eligible
+// (GK-reviewed, current lineage, every coverage dimension clear or accepted).
+const MEASURED_CLAIM_ELIGIBILITY_VALIDATOR_KEY = "VAL-GEN-MEASURED-P2-01M-001";
 const TERMINAL_REJECTED_CLAIM_STRENGTH = "reviewed_not_supported";
 
 // P14-09-FUND-GEN-RESULT-001: closed, metadata-only subreason vocabulary for
@@ -1144,6 +1151,7 @@ async function loadGenerationProjection(tx, { organizationId, claimIds, requeste
             c.public_use_allowed,
             e.source_id::text AS source_id,
             e.source_version_id::text AS source_version_id,
+            e.evidence_type,
             f.intake_file_id::text AS intake_file_id,
             f.upload_state
        FROM kai.claims c
@@ -1175,6 +1183,7 @@ async function loadGenerationProjection(tx, { organizationId, claimIds, requeste
     sourceVersionId: row.source_version_id,
     requestedAudience,
     limitationCodes: [],
+    evidenceType: row.evidence_type,
     intakeFileId: row.intake_file_id,
     uploadState: row.upload_state,
     audienceAuthority: {
@@ -1471,7 +1480,27 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
         // currently ineligible claim must not have its blockers silently
         // erased. Deterministic ordering, de-duplicated, no fabrication.
         const blockerCodes = Array.isArray(traceability.blockerCodes) ? traceability.blockerCodes : [];
-        projection.limitationCodes = [...new Set(blockerCodes)].sort();
+        // P2-01M: a measured claim also carries its material limitations
+        // (human-defined record meaning, attested or absent period, excluded
+        // blanks, included duplicates, every coverage dimension that is not
+        // clear - accepted or not), which blockerCodes alone lose once the
+        // claim is eligible. Field-presence claims keep exactly blockerCodes.
+        let measurementCodes = [];
+        if (projection.evidenceType === MEASUREMENT_EVIDENCE_TYPE) {
+          if (traceability.eligible !== true) {
+            rollbackFailure(
+              "validation_blocker",
+              stageBlocker(MEASURED_CLAIM_ELIGIBILITY_VALIDATOR_KEY, "measured_claim_not_currently_eligible"),
+            );
+          }
+          const measurementRow = await getScopedEvidenceMeasurementByEvidenceItemId(
+            { organizationId: input.organizationId, evidenceItemId: projection.evidenceItemId },
+            tx,
+          );
+          if (!measurementRow) rollbackFailure("conflict_current_state_changed");
+          measurementCodes = measurementLimitationCodes({ measurementRow, dimensions: traceability.dimensions });
+        }
+        projection.limitationCodes = [...new Set([...blockerCodes, ...measurementCodes])].sort();
       }
 
       const generatorInput = toGeneratorInput({

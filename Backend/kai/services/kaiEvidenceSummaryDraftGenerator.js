@@ -4,6 +4,7 @@ import {
   GENERATOR_RESULT_REASON,
   GENERATOR_RESULT_REASONS,
 } from "../dictionary/postgresGeneratedContentRepository.js";
+import { isMeasurementLimitationCode } from "../validators/kaiSourceMeasurementValidators.js";
 
 const CONTENT_TYPE = "evidence_summary";
 const REQUESTED_AUDIENCE = "internal";
@@ -55,6 +56,24 @@ const EVIDENCE_SUMMARY_OUTPUT_SCHEMA = Object.freeze({
 });
 
 const anthropic = new Anthropic();
+
+// The generator-side counterpart of VAL-GEN-008: a measured claim's count is
+// a count of source records under a human-confirmed definition, and each of
+// its limitationCodes must be stated in the block that cites it.
+const MEASUREMENT_INSTRUCTION = [
+  "For a claim whose limitationCodes include measurement. or coverage. codes:",
+  "describe the number as a count of source records under the human-confirmed record definition;",
+  "say a reporting period is attested in that definition and not verified against record dates (or that none is defined);",
+  "state that blank records were excluded and exact-duplicate records included where those codes appear;",
+  "and name the coverage limitations; never call the records distinct or the period verified.",
+].join(" ");
+
+function hasMeasurementLimitations(claims) {
+  return Array.isArray(claims) && claims.some((claim) => (
+    Array.isArray(claim?.limitationCodes)
+    && claim.limitationCodes.some(isMeasurementLimitationCode)
+  ));
+}
 
 // P14-09-FUND-GEN-RESULT-001: attaches the closed, metadata-only reason a
 // generator result would otherwise be rejected for, at the earliest point
@@ -122,6 +141,9 @@ export function createProductionEvidenceSummaryDraftGenerator({
         "Use only the supplied governed claim projection.",
         "Every block must cite at least one supplied claim/evidence pair.",
         "Do not add numbers or causal language unless it appears in a cited claim statement.",
+        // P2-01M measured claims only, so every other request's prompt is
+        // byte-for-byte unchanged.
+        ...(hasMeasurementLimitations(generatorInput.claims) ? [MEASUREMENT_INSTRUCTION] : []),
       ].join(" "),
       messages: [{
         role: "user",

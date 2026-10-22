@@ -404,3 +404,57 @@ export function applyMeasurementCoverageDimensions(dimensions, measurementRow) {
     ),
   };
 }
+
+/**
+ * Generator-input limitation codes for a measured claim (Plan A Prompt 6): the
+ * facts the model must carry beside the claim statement. They separate what
+ * a human established (the meaning of a record, the reporting period) from
+ * what the P1 parser established (record, blank, and duplicate counts), and
+ * name every coverage dimension that is not clear, including those GK
+ * accepted as an internal limitation. Derived only from the persisted
+ * measurement and the claim's current P2-06 dimensions; nothing is inferred.
+ */
+export const MEASUREMENT_LIMITATION_CODES = Object.freeze({
+  RECORD_MEANING_HUMAN_DEFINED: "measurement.record_meaning_human_defined",
+  PERIOD_HUMAN_ATTESTED: "measurement.period_human_attested_not_row_verified",
+  NO_REPORTING_PERIOD: "measurement.no_reporting_period",
+  BLANK_RECORDS_EXCLUDED: "measurement.blank_records_excluded",
+  DUPLICATE_RECORDS_INCLUDED: "measurement.duplicate_records_included",
+});
+
+export function measurementLimitationCodes({ measurementRow, dimensions }) {
+  const codes = [MEASUREMENT_LIMITATION_CODES.RECORD_MEANING_HUMAN_DEFINED];
+  codes.push(measurementRow.period_start ? MEASUREMENT_LIMITATION_CODES.PERIOD_HUMAN_ATTESTED : MEASUREMENT_LIMITATION_CODES.NO_REPORTING_PERIOD);
+  if (measurementRow.blank_record_count > 0) codes.push(MEASUREMENT_LIMITATION_CODES.BLANK_RECORDS_EXCLUDED);
+  if (measurementRow.duplicate_record_count > 0) codes.push(MEASUREMENT_LIMITATION_CODES.DUPLICATE_RECORDS_INCLUDED);
+  for (const [dimensionKey, dimension] of Object.entries(isPlainObject(dimensions) ? dimensions : {})) {
+    const status = dimension?.assessment_status;
+    if (typeof status !== "string" || status === "resolved_clear") continue;
+    codes.push(dimension.internal_limitation_accepted === true
+      ? `coverage.${dimensionKey}.accepted_internal_limitation`
+      : `coverage.${dimensionKey}.${status}`);
+  }
+  return [...new Set(codes)].sort();
+}
+
+/**
+ * What a generated block citing a measured claim must say for each of its
+ * limitation codes (VAL-GEN-008), and what it must not say. Deliberately
+ * wording-tolerant: it checks that a limitation is disclosed, not how.
+ * `requires` is one pattern or a list that must all match.
+ */
+export const MEASUREMENT_DISCLOSURE_RULES = Object.freeze([
+  // The count is of source records under a human's definition: "records"
+  // alone is not enough, since the claim statement itself says "the source
+  // records 5 ...".
+  Object.freeze({ code: MEASUREMENT_LIMITATION_CODES.RECORD_MEANING_HUMAN_DEFINED, requires: [/\bcount of (?:\w+ )?records\b/i, /\bhuman[- ](?:confirmed|defined)\b/i] }),
+  Object.freeze({ code: MEASUREMENT_LIMITATION_CODES.PERIOD_HUMAN_ATTESTED, requires: /\b(attested|as stated|stated in the definition|reported period|not (?:been )?verified|unverified)\b/i, forbids: /(?<!not |un|n't |not been )\bverified\b/i }),
+  Object.freeze({ code: MEASUREMENT_LIMITATION_CODES.NO_REPORTING_PERIOD, requires: /\bno reporting period\b|\bnot (?:bounded|tied|limited) to a (?:reporting )?period\b/i }),
+  Object.freeze({ code: MEASUREMENT_LIMITATION_CODES.BLANK_RECORDS_EXCLUDED, requires: /\bblank\b/i }),
+  Object.freeze({ code: MEASUREMENT_LIMITATION_CODES.DUPLICATE_RECORDS_INCLUDED, requires: /\bduplicate/i, forbids: /\b(distinct|unique|deduplicated)\b/i }),
+  Object.freeze({ codePrefix: "coverage.", requires: /\blimitations?\b/i }),
+]);
+
+export function isMeasurementLimitationCode(code) {
+  return typeof code === "string" && (code.startsWith("measurement.") || code.startsWith("coverage."));
+}
