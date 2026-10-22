@@ -41895,3 +41895,100 @@ P3-01, P3-04, A2, P14-13, P14-14.
 No push, deployment, production/shared database, migration/schema, flag,
 tenant, credential, real client data, or `00_KAI_CURRENT_STATE.md` change.
 This is the single package-end evidence update in the living ExecPlan.
+
+### Plan A governance simplification start: customer authority matches the capability answer (2026-10-22)
+
+**Owner authorization (USER_CONFIRMED):** the owner's "KAI Plan A: Start
+Authorized Governance Simplification" prompt directs, locally: inspect the
+next customer-authority or approval operation in the accepted sequence;
+correct a confirmed unjustified restriction in the smallest existing path;
+consolidate a duplicated human action only if it carries no independent
+permission, factual, or release judgment; make customer actions match the
+backend capability; add positive and negative regressions. Not authorized:
+new roles or a permissions framework, transfer of GK review/release
+authority contrary to Operating Model v0.2 section 11, schema/database,
+push, deployment, flags, tenants, credentials, real data, Current State.
+
+**Start (TOOL_VERIFIED):** `main` at `99a6693`, clean.
+
+**Sequence (TOOL_VERIFIED):** this ExecPlan records no accepted order for the
+governance-simplification packages proposed by the read-only audit
+(USER_CONFIRMED, delivered in chat; none accepted here). No package was
+invented or reordered: the work stayed on the prompt's named customer
+authority and UI-capability consistency.
+
+**Inspection, already correct (TOOL_VERIFIED, preserved unchanged):** the
+customer file-to-internal-draft path is admitted for an active organization
+administrator by each governing service's own predicate: upload
+(`create_intake_batch`/`create_intake_file` organization client_admin
+branch, `kaiAuthorizationService.js`), sensitivity review
+(`validateActorCanPerformSensitivityReview`), P1-08 promotion
+(`authorizeSourcePromotionDecision`, active KAI account required), P2-01,
+claim proposal, P2-04, and internal evidence summary / impact narrative.
+`workflowOperations` in `kaiOrganizationAccessCapabilitiesService.js` projects
+each with the service's own role set and mode, and the client Knowledge
+Studio and evidence pipeline (`resolveClientAuthority`) read only those
+answers. No unjustified backend restriction on a customer operation was
+found. P1-08 was not merged into the sensitivity decision: it records its own
+outcome (`promoted`/`rejected`/`needs_more_information`) and a human
+`reviewedSourceType` classification, which is an independent judgment.
+
+**Defect (TOOL_VERIFIED at `99a6693`):** the Team & Access role legend, shown
+to every organization administrator choosing whom to make an administrator,
+described `client_admin` as "Uploads files, manages Projects and the
+Improvement Plan, and manages team & access." Root cause: the legend in
+`frontend/teamAccess/TeamAccessView.jsx` predates the owner decisions of
+2026-10-12 to 2026-10-19 and was never tied to the capability answer.
+
+**Change (frontend text only; no backend, route, role, or authority change):**
+the legend states the administrator's actual authority: upload, sensitivity
+and allowed-use review, source preparation, evidence extraction, claim
+proposal, and internal drafts for Get Kinder review, plus Projects, the
+Improvement Plan, and team & access. It claims no approval, release, or
+export. Bundle rebuilt (identical on rebuild). The campaign browser spec's
+legend pin was updated to the new text.
+
+**Regression (TOOL_VERIFIED):** `kai-team-access.spec.js` test 14 checks each
+legend claim against the real `getOrganizationAccessCapabilities`: binding-
+derived and stored (provenance-tagged, active account) administrators admit
+every named operation and none of evidence/claim review, generated-content
+review, the GK-only generators, or coverage acceptance; a deactivated
+account's `promoteSource` is false; client_reviewer admits follow-up review
+only and client_contributor nothing; another organization's administrator is
+`authorization_denied`. It fails against the `99a6693` legend (0/1).
+
+**Verification (TOOL_VERIFIED; sentinel `DATABASE_URL`):**
+
+| Command | Pass | Fail | Skipped |
+| --- | --- | --- | --- |
+| `kai-team-access.spec.js` (baseline 21/0) | 22 | 0 | 0 |
+| `npm test` (baseline 5665/0/115 plus one new test) | 5666 | 0 | 115 |
+| `npm run verify:kai-sprint2-api-contract` | 71 | 0 | 0 |
+| `npm run build` (identical on rebuild) | ok | | |
+| Browser, runner-owned ephemeral loopback PostgreSQL, real Chrome, rebuilt bundle: access-approval campaign 63, Team & Access 7 | 70 | 0 | 0 |
+| `git diff --check` | ok | | |
+
+Implementation commit: `954ad08`.
+
+**Remaining (not changed here):**
+- Policy boundary (Operating Model v0.2 section 11): evidence and claim
+  review, coverage acceptance, generated-content review, the funder/public
+  generators, and export/release stay with Get Kinder. No narrow owner
+  amendment transferring them was found, and none was applied.
+- Owner decision: client follow-up completion is `client_reviewer` only
+  (P2-11 contract), and access administration refuses self-elevation, so an
+  organization whose only member is its administrator cannot clear P2-04
+  follow-ups without a second person.
+- Owner decision: merging P1-08 into the sensitivity decision would remove
+  an independent human judgment (outcome + source type).
+- GK legend accuracy (not customer): the `gk_operator` line omits that intake
+  writes also need the global Get Kinder operator or administrator role.
+- Sensitivity review does not check `kaiUserStatus`, while P1-08 and the
+  source-candidate reads require an active KAI account (pre-existing,
+  unchanged).
+- Production state NOT_CONFIRMED.
+
+**Status:** PLAN_A_CUSTOMER_AUTHORITY_CAPABILITY_CONSISTENCY_COMPLETE_LOCAL_SYNTHETIC.
+No push, deployment, production/shared database, migration/schema, flag,
+tenant, credential, real client data, or `00_KAI_CURRENT_STATE.md` change.
+This is the single package-end evidence update in the living ExecPlan.
