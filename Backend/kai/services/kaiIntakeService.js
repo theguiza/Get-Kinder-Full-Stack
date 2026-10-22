@@ -6,6 +6,7 @@ import {
 import {
   KAI_SPRINT2_MAX_FILE_SIZE_BYTES,
   KAI_SPRINT2_P0_PATTERNS,
+  KAI_SPRINT2_P0_RESOURCE_LIMITS,
 } from "../config/kaiSprint2P0Contract.js";
 import { buildKaiError, validationBlocked, withUploadUrlPhase } from "../errors/kaiErrors.js";
 import { kaiIdempotentWriteConflict } from "../internal/kaiIdempotentWriteConflict.js";
@@ -14,6 +15,7 @@ import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationServic
 import {
   blockIntakeFilePolicyStatus,
   casSecurityAssessmentFilePolicyDecision,
+  expireLapsedIntakeFileReservations,
   findIntakeBatchByIdempotencyKey,
   findIntakeFileReservationByChecksum,
   findIntakeFileReservationByIdempotencyKey,
@@ -2802,10 +2804,12 @@ export async function reserveIntakeFileMetadata(input = {}, dependencies = {}) {
 
   const fileMetadata = normalizeReservationMetadata({ payload, idempotencyKey, reservationPayloadHash });
   const insertFile = dependencies.insertIntakeFileMetadata || insertIntakeFileMetadata;
+  await expireLapsedReservationsInBatch(fileFields, dependencies);
   let row;
   try {
     row = await insertFile({ ...fileFields, fileMetadata });
   } catch (error) {
+    if (isActiveUploadLimitError(error)) return activeUploadLimitResponse(fileFields.intakeBatchId);
     if (isDeclaredChecksumUniqueViolation(error)) {
       // A concurrent reservation of the same content won the
       // declared-checksum unique index: answer exactly as the preliminary
@@ -2834,6 +2838,50 @@ export async function reserveIntakeFileMetadata(input = {}, dependencies = {}) {
       operation: "reserve_intake_file_metadata",
     },
   };
+}
+
+// The Gate A lifecycle trigger's own refusal when a batch already holds
+// KAI_SPRINT2_P0_RESOURCE_LIMITS.maxFilesPerBatch unfinished uploads.
+const ACTIVE_UPLOAD_LIMIT_TRIGGER_MESSAGE = "Gate A P0 active upload limit exceeded";
+
+function isActiveUploadLimitError(error) {
+  return error?.code === "P0001" && String(error?.message || "").includes(ACTIVE_UPLOAD_LIMIT_TRIGGER_MESSAGE);
+}
+
+function activeUploadLimitResponse(intakeBatchId) {
+  const limit = KAI_SPRINT2_P0_RESOURCE_LIMITS.maxFilesPerBatch;
+  const message = `This batch already has ${limit} uploads in progress, so another file cannot be reserved in it yet.`;
+  return buildKaiError("conflict", {
+    message,
+    blockers: [
+      {
+        validator_key: "VAL-KAI-UPLOAD-ACTIVE-LIMIT",
+        severity: "blocker",
+        object_type: "intake_batch",
+        object_code: "reserve_intake_file_metadata",
+        object_id: intakeBatchId,
+        message,
+        blocking_reason: "active_upload_limit_reached",
+        required_fix: "Finish the uploads already in progress in this batch, or upload this file to another batch. An unfinished upload stops counting once its 24-hour upload window ends.",
+        evidence: { active_upload_limit: limit },
+      },
+    ],
+  });
+}
+
+/**
+ * Housekeeping before a reservation is counted: lapsed, uncontinuable
+ * reservations in this batch move to `expired` (expireLapsedIntakeFileReservations)
+ * so they stop holding active-upload capacity. A failure here never blocks
+ * or alters the reservation; the trigger still enforces the limit.
+ */
+async function expireLapsedReservationsInBatch({ organizationId, intakeBatchId }, dependencies, db) {
+  const expire = dependencies.expireLapsedIntakeFileReservations || expireLapsedIntakeFileReservations;
+  try {
+    await expire({ organizationId, intakeBatchId }, db);
+  } catch {
+    // Expiry is retried by the next reservation in this batch.
+  }
 }
 
 class NewIntakeVersionAuditRequiredError extends Error {
@@ -2902,6 +2950,7 @@ async function reserveNewIntakeVersion({
           duplicate_status: classification.duplicateStatus,
         },
       });
+      await expireLapsedReservationsInBatch(fileFields, dependencies, tx);
       const row = await insertNewVersion({
         ...fileFields,
         fileMetadata,
@@ -2936,6 +2985,7 @@ async function reserveNewIntakeVersion({
     });
   } catch (error) {
     if (error instanceof NewIntakeVersionAuditRequiredError) return buildKaiError("system_error");
+    if (isActiveUploadLimitError(error)) return activeUploadLimitResponse(fileFields.intakeBatchId);
     throw error;
   }
 

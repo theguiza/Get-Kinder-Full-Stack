@@ -106,7 +106,9 @@ async function runSuite() {
     );
   }
 
-  async function seedParserRun(client, { organizationId, intakeFileId, checksum, parserStatus, retryCount = 0, now = timeOffset(0) }) {
+  async function seedParserRun(client, {
+    organizationId, intakeFileId, checksum, parserStatus, retryCount = 0, now = timeOffset(0), errorCode = "safe_parser_error",
+  }) {
     const result = await client.query(
       // Terminal statuses carry exactly the facts the P1-02 state/fact
       // consistency constraint requires of them.
@@ -116,10 +118,10 @@ async function runSuite() {
        )
        VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8::timestamptz, $8::timestamptz,
                CASE WHEN $6 IN ('failed', 'cancelled') THEN $8::timestamptz END,
-               CASE WHEN $6 = 'failed' THEN 'safe_parser_error' END,
+               CASE WHEN $6 = 'failed' THEN $9 END,
                CASE WHEN $6 = 'failed' THEN 'Deterministic profiling could not safely profile this file.' END)
        RETURNING parser_run_id::text AS parser_run_id`,
-      [organizationId, intakeFileId, PARSER.parserName, PARSER.parserVersion, checksum, parserStatus, retryCount, now],
+      [organizationId, intakeFileId, PARSER.parserName, PARSER.parserVersion, checksum, parserStatus, retryCount, now, errorCode],
     );
     return result.rows[0].parser_run_id;
   }
@@ -406,6 +408,38 @@ async function runSuite() {
       }
     });
 
+    const selected = new Set((await listActionableKaiP1WorkCandidates(pool, { now: SWEEP_NOW })).map((row) => row.intake_file_id));
+    for (const [index, entry] of cases.entries()) {
+      assert.equal(selected.has(fileFor(index)), entry.selected, entry.key);
+    }
+  });
+
+  test("parser infrastructure failure: byte_source_unavailable is selectable for its bounded retry only after its cooldown and while budget remains; a failure about the file never is", async () => {
+    await resetTables();
+    const ORG = "00000000-0000-4000-8000-00000000a005";
+    const fileFor = (index) => `32000000-0000-4000-8000-${String(index).padStart(12, "0")}`;
+    const failedAt = (secondsAgo) => new Date(BASE_TIME - secondsAgo * 1000).toISOString();
+    const cases = [
+      { key: "firstFailureCooldownOver", errorCode: "byte_source_unavailable", retryCount: 1, failedAt: failedAt(60), selected: true },
+      { key: "firstFailureCoolingDown", errorCode: "byte_source_unavailable", retryCount: 1, failedAt: failedAt(59), selected: false },
+      { key: "secondFailureCooldownOver", errorCode: "byte_source_unavailable", retryCount: 2, failedAt: failedAt(300), selected: true },
+      { key: "secondFailureCoolingDown", errorCode: "byte_source_unavailable", retryCount: 2, failedAt: failedAt(299), selected: false },
+      { key: "budgetExhausted", errorCode: "byte_source_unavailable", retryCount: MAX_PARSER_RETRY_COUNT, failedAt: failedAt(3600), selected: false },
+      { key: "fileCouldNotBeParsed", errorCode: "safe_parser_error", retryCount: 1, failedAt: failedAt(3600), selected: false },
+      { key: "leaseExpiredAtCap", errorCode: "parser_run_lease_expired", retryCount: 1, failedAt: failedAt(3600), selected: false },
+    ];
+    await withClient(async (client) => {
+      for (const [index, entry] of cases.entries()) {
+        const checksum = `${String(index).repeat(62)}c${index}`;
+        // eslint-disable-next-line no-await-in-loop
+        await seedIntakeFile(client, { intakeFileId: fileFor(index), organizationId: ORG, checksum });
+        // eslint-disable-next-line no-await-in-loop
+        await seedParserRun(client, {
+          organizationId: ORG, intakeFileId: fileFor(index), checksum, parserStatus: "failed",
+          retryCount: entry.retryCount, now: entry.failedAt, errorCode: entry.errorCode,
+        });
+      }
+    });
     const selected = new Set((await listActionableKaiP1WorkCandidates(pool, { now: SWEEP_NOW })).map((row) => row.intake_file_id));
     for (const [index, entry] of cases.entries()) {
       assert.equal(selected.has(fileFor(index)), entry.selected, entry.key);

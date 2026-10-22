@@ -56,10 +56,12 @@ export const PIPELINE_NEXT_ACTIONS = Object.freeze([
   "continue_source_preparation",
   "review_sensitivity",
   "ask_organization_administrator",
+  "retry_security_check",
 ]);
 
 export const PIPELINE_REASONS = Object.freeze([
   "waiting_for_client",
+  "security_check_retry_ready",
   "failed",
   "processing",
   "waiting_for_get_kinder_review",
@@ -85,6 +87,7 @@ export const PIPELINE_FAILURE_MESSAGES = Object.freeze({
   file_blocked_by_policy: "The file was blocked by the file safety policy.",
   upload_not_completed: "The upload was not completed.",
   security_check_failed: "The file security check did not complete successfully.",
+  security_check_unavailable: "The security scanner was not available, so this file has not been checked yet. It stays quarantined and is not processed until a check succeeds.",
   file_could_not_be_read: "KAI could not read this file's contents.",
   file_content_unavailable: "The file's stored contents were not available for processing.",
   processing_cancelled: "Processing was cancelled.",
@@ -269,6 +272,10 @@ export function nextActionText(file, { canReviewFollowups = false, canContribute
       return "Your action is needed: this file's sensitivity review is recorded, but its source candidate was not created. Continue source preparation in Data Sources to create it; the review is not changed.";
     case "review_sensitivity":
       return "Your action is needed: review this file's sensitivity & allowed use in Data Sources. Your recorded decision governs how its content may be used.";
+    case "retry_security_check":
+      return canContribute
+        ? "Check security again when the scanner is available. Nothing is processed until the check succeeds."
+        : "A client admin in your organization can check this file's security again. Nothing is processed until the check succeeds.";
     case "ask_organization_administrator":
       return `No action required from you. Your organization's administrator can complete this file's ${stageLabel} in Data Sources.`;
     default:
@@ -281,6 +288,7 @@ export function nextActionText(file, { canReviewFollowups = false, canContribute
 
 const REASON_MESSAGES = Object.freeze({
   waiting_for_client: (n) => `${pluralFiles(n)} need an answer from a client reviewer in your organization before evidence can be used.`,
+  security_check_retry_ready: (n) => `${pluralFiles(n)} could not be security-checked because the scanner was not available. See Files to check again.`,
   failed: (n) => `${pluralFiles(n)} could not be processed. See Files for details.`,
   processing: (n) => `${pluralFiles(n)} ${n === 1 ? "is" : "are"} still being processed by KAI.`,
   waiting_for_get_kinder_review: (n) => `Your data has been processed and is waiting for Get Kinder review (${pluralFiles(n)}).`,
@@ -301,6 +309,24 @@ const REASON_MESSAGES = Object.freeze({
   unknown: (n) => `The status of ${pluralFiles(n)} could not be determined.`,
   complete: (n) => `${pluralFiles(n)} ${n === 1 ? "has" : "have"} reviewed evidence shown here.`,
 });
+
+// The supported re-attempt of a security check that could not run: the
+// existing upload confirmation, which re-authorizes the actor, re-verifies the
+// stored bytes, and re-runs the assessment only while the file is pending.
+export function securityCheckRetryPath(organizationId, intakeFileId) {
+  return `${BASE_PATH}/admin/files/${encodeURIComponent(intakeFileId)}/confirm-upload?organization_id=${encodeURIComponent(organizationId)}`;
+}
+
+export function securityCheckRetryResultText(result) {
+  if (result?.statusCode === 200 && result.body?.ok) {
+    return "Security check requested. The status below shows its result.";
+  }
+  const code = result?.body?.error?.code;
+  if (["unauthorized", "authorization_denied", "mapped_kai_user_required", "tenant_boundary_violation"].includes(code)) {
+    return "Your role cannot check this file's security again.";
+  }
+  return "The security check could not be requested. Try again later.";
+}
 
 export function pipelineReasonMessage(reason, fileCount) {
   return REASON_MESSAGES[reason](fileCount);

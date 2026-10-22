@@ -20,6 +20,7 @@ const ASSESSOR_FAILED_CATEGORY_CLASSIFICATIONS = Object.freeze({
   input_size_exceeds_pre_parse_gate: Object.freeze({ policyFailureEligible: true }),
   malware_scan_failed: Object.freeze({ policyFailureEligible: true }),
   malware_scan_not_configured: Object.freeze({ policyFailureEligible: false }),
+  malware_scan_unavailable: Object.freeze({ policyFailureEligible: false }),
   maximum_concurrent_pdf_assessor_workers_exceeded: Object.freeze({ policyFailureEligible: false }),
 });
 

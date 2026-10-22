@@ -30,6 +30,33 @@ const PARSER_RUN_LEASE_SECONDS = 15 * 60;
 const PARSER_RUN_LEASE_EXPIRED_ERROR_CODE = "parser_run_lease_expired";
 const PARSER_RUN_LEASE_EXPIRED_ERROR_MESSAGE =
   "The parser run did not finish within its lease and requires manual review.";
+// Failure codes that describe the infrastructure, not the file: the exact
+// object version could not be read (parserProfileWorkerOrchestration.js
+// BYTE_SOURCE_ERROR_CODE). Only these are re-queued automatically, through
+// requeueFailedParserRunForRetry and within MAX_PARSER_RETRY_COUNT, after the
+// cooldown for the stored retry_count (the same 1- then 5-minute schedule as
+// the P1-04/P1-05 downstream stages). Every other failure is a result about
+// the bytes and is never retried automatically.
+const AUTOMATIC_PARSER_RETRY_ERROR_CODES = Object.freeze(["byte_source_unavailable"]);
+const AUTOMATIC_PARSER_RETRY_COOLDOWN_SECONDS = Object.freeze({ 1: 60, 2: 300 });
+
+/**
+ * Whether a failed run is due for its bounded automatic retry at `now`:
+ * an infrastructure-only failure code, retry budget left, and the cooldown
+ * for its stored retry_count elapsed since it failed.
+ */
+export function isAutomaticParserRetryDue(run, now) {
+  if (!run || run.parser_status !== "failed") return false;
+  if (!AUTOMATIC_PARSER_RETRY_ERROR_CODES.includes(run.error_code)) return false;
+  const retryCount = Number(run.retry_count);
+  if (!Number.isSafeInteger(retryCount) || retryCount >= MAX_PARSER_RETRY_COUNT) return false;
+  const cooldownSeconds = AUTOMATIC_PARSER_RETRY_COOLDOWN_SECONDS[retryCount];
+  const failedAt = Date.parse(run.completed_at);
+  const at = Date.parse(now);
+  if (!Number.isSafeInteger(cooldownSeconds) || !Number.isFinite(failedAt) || !Number.isFinite(at)) return false;
+  return at >= failedAt + cooldownSeconds * 1000;
+}
+
 const PARSER_RUN_AUDIT_CONTRACT = "p1_parser_run_and_file_profile_v1";
 const PARSER_RUN_AUDIT_VALIDATOR_KEY = "VAL-KAI-P1-02-001";
 const PARSER_RUN_AUDIT_OPERATION = "parser_run_recorded";
@@ -753,8 +780,8 @@ export function createPostgresParserRunRepository({ runInTransaction = withTrans
     },
 
     /**
-     * Explicit internal re-queue of one failed run. There is no scheduler,
-     * listener, timer, or automatic retry loop. A run whose stored retry_count has
+     * Re-queue of one failed run, explicit or (for an infrastructure-only
+     * failure, see isAutomaticParserRetryDue) by the P1 worker. A run whose stored retry_count has
      * already reached the contract cap is not re-queued and is reported with the
      * derived `requires_manual_review` value only. retry_count is never reset or
      * decremented, and a cancelled run is never re-queued.
@@ -817,6 +844,8 @@ export function createPostgresParserRunRepository({ runInTransaction = withTrans
 export const __parserRunRepositoryContract = Object.freeze({
   PARSER_STATUSES,
   MAX_PARSER_RETRY_COUNT,
+  AUTOMATIC_PARSER_RETRY_ERROR_CODES,
+  AUTOMATIC_PARSER_RETRY_COOLDOWN_SECONDS,
   PARSER_RUN_LEASE_SECONDS,
   PARSER_RUN_LEASE_EXPIRED_ERROR_CODE,
   PARSER_RUN_AUDIT_CONTRACT,

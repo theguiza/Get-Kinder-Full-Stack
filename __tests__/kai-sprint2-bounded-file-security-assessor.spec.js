@@ -237,6 +237,7 @@ test("bounded assessor failed-category vocabulary records policy classifications
     input_size_exceeds_pre_parse_gate: { policyFailureEligible: true },
     malware_scan_failed: { policyFailureEligible: true },
     malware_scan_not_configured: { policyFailureEligible: false },
+    malware_scan_unavailable: { policyFailureEligible: false },
     maximum_concurrent_pdf_assessor_workers_exceeded: { policyFailureEligible: false },
   });
 });

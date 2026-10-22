@@ -366,6 +366,7 @@ async function runDuplicateResolutionRealPostgresSuite() {
   const { createInternalSecurityAssessmentExecutor } = await import("../Backend/kai/security/internalSecurityAssessmentExecutor.js");
   const { assessBoundedFileSecurity } = await import("../Backend/kai/security/boundedFileSecurityAssessor.js");
   const intakeLogic = await import("../frontend/kaiWebIntakeLogic.js");
+  const { securityCheckRetryPath } = await import("../frontend/knowledgeStudio/clientEvidencePipelineLogic.js");
   const {
     confirmUploadPath,
     declaredMimeTypeForFile,
@@ -432,6 +433,7 @@ async function runDuplicateResolutionRealPostgresSuite() {
   let baseUrl = "";
   const malwareDetected = new Set();
   const malwareScanFailures = new Set();
+  const malwareScanOutages = new Set();
   // Set by a test: the next confirm completes on the server, but its response
   // is replaced by a gateway timeout, as a proxy in front of a long confirm does.
   const gateway = { dropNextConfirmResponse: false };
@@ -471,6 +473,7 @@ async function runDuplicateResolutionRealPostgresSuite() {
     async scan({ sha256: digest }) {
       if (malwareDetected.has(digest)) return { status: "malware_detected", provenance: { ...syntheticProvenance } };
       if (malwareScanFailures.has(digest)) return { status: "failed", category: "malware_scan_failed" };
+      if (malwareScanOutages.has(digest)) return { status: "failed", category: "malware_scan_unavailable" };
       return { status: "clean", provenance: { ...syntheticProvenance } };
     },
   });
@@ -928,7 +931,14 @@ async function runDuplicateResolutionRealPostgresSuite() {
       assert.equal(replacementRow.original_intake_file_id, lapsedId);
       assert.equal(replacementRow.supersedes_intake_file_id, lapsedId);
       assert.equal(replacementRow.file_policy_status, "passed");
-      assert.equal((await fileRow(lapsedId)).upload_state, "reserved", "the lapsed record's history is kept");
+      // The lapsed reservation was expired (it stopped holding capacity) by the
+      // next reservation in its batch; its record and history are kept.
+      assert.equal((await fileRow(lapsedId)).upload_state, "expired");
+      assert.deepEqual(
+        (await query("SELECT operation, from_state, to_state FROM kai.upload_lifecycle_audit WHERE intake_file_id = $1::uuid ORDER BY created_at", [lapsedId]))
+          .map((entry) => [entry.operation, entry.from_state, entry.to_state]),
+        [["expire_upload", "reserved", "expired"]],
+      );
     }
   });
 
@@ -967,6 +977,132 @@ async function runDuplicateResolutionRealPostgresSuite() {
         assert.equal((await rowsForChecksum(ORG_A, file.checksum)).length, 1, "no override record exists");
       }
     }
+  });
+
+  await test("scanner outage: the file stays pending and quarantined, the customer is told to check again, only an authorized actor can, and a later check decides it on its real result", async () => {
+    const engagement = await createEngagement(ORG_A, "scan-outage");
+    const batch = await createBatch(ORG_A, engagement, "scan-outage");
+    const ctx = { organizationId: ORG_A, engagementId: engagement, intakeBatchId: batch };
+    const csv = FORMATS.find((format) => format.extension === ".csv");
+    const diagnostics = async (intakeFileId) => (await query(
+      `SELECT action, reason_code, metadata->>'assessment_category' AS category FROM kai.audit_events
+        WHERE metadata->>'object_id' = $1 AND action IN ('record_security_assessment_diagnostic', 'apply_security_assessment_policy_decision')
+        ORDER BY created_at`,
+      [intakeFileId],
+    )).map((entry) => [entry.action, entry.reason_code, entry.category]);
+    // The file-detail read's existing security_assessment projection (the
+    // client pipeline's projection of the same diagnostic is proven by the
+    // client Knowledge Studio browser acceptance, which carries its schema).
+    const detail = async (intakeFileId) => {
+      const read = await call(USERS.clientAdminA, "GET", fileDetailPath(ORG_A, intakeFileId));
+      assert.equal(read.statusCode, 200, JSON.stringify(read.body));
+      return read.body.data;
+    };
+
+    const file = selectedFile(csv, "scan-outage");
+    malwareScanOutages.add(file.checksum);
+    const intakeFileId = await uploadNew(USERS.clientAdminA, ctx, file, keyFor("outage"));
+    let row = await fileRow(intakeFileId);
+    assert.deepEqual([row.upload_state, row.file_policy_status], ["confirmed", "pending"], "an outage is never a pass and never a terminal failure");
+    assert.deepEqual(await diagnostics(intakeFileId), [["record_security_assessment_diagnostic", "no_policy_decision", "malware_scan_unavailable"]]);
+
+    assert.deepEqual((await detail(intakeFileId)).security_assessment, { category: "malware_scan_unavailable", policy_outcome: null });
+
+    // The same bytes are not barred organization-wide by an outage.
+    const repeat = await reserve(USERS.clientAdminA, { ...ctx, file, key: keyFor("outage", "repeat") });
+    assertDuplicate422(repeat, {
+      status: "duplicate_in_batch",
+      existingId: intakeFileId,
+      actions: ["use_existing_file", "upload_new_intake_version", "cancel"],
+      checksum: file.checksum,
+    });
+
+    // Re-checks by a non-contributor and by another organization's
+    // administrator are refused and change nothing.
+    for (const legacyUserId of [USERS.clientViewerA, USERS.clientAdminB]) {
+      const refused = await call(legacyUserId, "POST", securityCheckRetryPath(ORG_A, intakeFileId), { organization_id: ORG_A });
+      assert.ok([403, 404].includes(refused.statusCode), `${legacyUserId}: ${refused.statusCode}`);
+    }
+    assert.equal((await diagnostics(intakeFileId)).length, 1);
+
+    // While the scanner is still out, a re-check records another diagnostic only.
+    const stillOut = await call(USERS.clientAdminA, "POST", securityCheckRetryPath(ORG_A, intakeFileId), { organization_id: ORG_A });
+    assert.equal(stillOut.statusCode, 200, JSON.stringify(stillOut.body));
+    assert.equal((await fileRow(intakeFileId)).file_policy_status, "pending");
+    assert.equal((await diagnostics(intakeFileId)).length, 2);
+
+    // Scanner back: the re-check decides the file on its actual scan result.
+    malwareScanOutages.delete(file.checksum);
+    const recovered = await call(USERS.clientAdminA, "POST", securityCheckRetryPath(ORG_A, intakeFileId), { organization_id: ORG_A });
+    assert.equal(recovered.statusCode, 200, JSON.stringify(recovered.body));
+    row = await fileRow(intakeFileId);
+    assert.equal(row.file_policy_status, "passed");
+    assert.deepEqual((await diagnostics(intakeFileId)).at(-1), ["apply_security_assessment_policy_decision", "passed", null]);
+    assert.deepEqual((await detail(intakeFileId)).security_assessment, { category: null, policy_outcome: "passed" });
+    // A further re-check changes nothing: the decision is final.
+    assert.equal((await call(USERS.clientAdminA, "POST", securityCheckRetryPath(ORG_A, intakeFileId), { organization_id: ORG_A })).statusCode, 200);
+    assert.equal((await diagnostics(intakeFileId)).length, 3);
+
+    // A re-check can never bypass the scan: infected content found once the
+    // scanner returns is blocked, not passed.
+    const infected = selectedFile(csv, "scan-outage-infected");
+    malwareScanOutages.add(infected.checksum);
+    const infectedId = await uploadNew(USERS.clientAdminA, ctx, infected, keyFor("outage", "infected"));
+    assert.equal((await fileRow(infectedId)).file_policy_status, "pending");
+    malwareScanOutages.delete(infected.checksum);
+    malwareDetected.add(infected.checksum);
+    assert.equal((await call(USERS.clientAdminA, "POST", securityCheckRetryPath(ORG_A, infectedId), { organization_id: ORG_A })).statusCode, 200);
+    assert.equal((await fileRow(infectedId)).file_policy_status, "blocked");
+    assert.equal((await detail(infectedId)).security_assessment.policy_outcome, "blocked");
+  });
+
+  await test("active upload capacity: lapsed reservations stop counting when the batch reserves again; a genuinely full batch answers a structured 409 and writes nothing", async () => {
+    const engagement = await createEngagement(ORG_A, "upload-capacity");
+    const batch = await createBatch(ORG_A, engagement, "upload-capacity");
+    const ctx = { organizationId: ORG_A, engagementId: engagement, intakeBatchId: batch };
+    const csv = FORMATS.find((format) => format.extension === ".csv");
+    const batchRows = () => query("SELECT intake_file_id, upload_state FROM kai.intake_files WHERE intake_batch_id = $1::uuid", [batch]);
+
+    const reservedIds = [];
+    for (let index = 0; index < 25; index += 1) {
+      // eslint-disable-next-line no-await-in-loop
+      const reserved = await reserve(USERS.clientAdminA, { ...ctx, file: selectedFile(csv, `capacity-${index}`), key: keyFor("capacity", String(index)) });
+      assert.equal(reserved.statusCode, 201, JSON.stringify(reserved.body));
+      reservedIds.push(reserved.body.data.intake_file_id);
+    }
+
+    // 25 live unfinished uploads: the 26th is a structured conflict, not a 500.
+    const full = await reserve(USERS.clientAdminA, { ...ctx, file: selectedFile(csv, "capacity-26"), key: keyFor("capacity", "26") });
+    assert.equal(full.statusCode, 409, JSON.stringify(full.body));
+    assert.equal(full.body.error.code, "conflict");
+    assert.equal(full.body.blockers[0].blocking_reason, "active_upload_limit_reached");
+    assert.match(full.body.blockers[0].message, /already has 25 uploads in progress/);
+    assert.match(full.body.blockers[0].required_fix, /another batch/);
+    assert.equal((await batchRows()).length, 25, "nothing was written");
+
+    // Three of them lapse (synthetic clock: their 24-hour window is moved into the past).
+    const lapsedIds = reservedIds.slice(0, 3);
+    await query("UPDATE kai.intake_files SET upload_expires_at = now() - interval '1 minute' WHERE intake_file_id = ANY($1::uuid[])", [lapsedIds]);
+    const afterLapse = await reserve(USERS.clientAdminA, { ...ctx, file: selectedFile(csv, "capacity-26"), key: keyFor("capacity", "26b") });
+    assert.equal(afterLapse.statusCode, 201, JSON.stringify(afterLapse.body));
+    const states = Object.fromEntries((await batchRows()).map((entry) => [entry.intake_file_id, entry.upload_state]));
+    for (const id of lapsedIds) assert.equal(states[id], "expired", id);
+    for (const id of reservedIds.slice(3)) assert.equal(states[id], "reserved", id);
+    assert.equal((await query(
+      "SELECT count(*)::int AS count FROM kai.upload_lifecycle_audit WHERE intake_file_id = ANY($1::uuid[]) AND operation = 'expire_upload' AND to_state = 'expired'",
+      [lapsedIds],
+    ))[0].count, 3);
+    // An expired reservation can never be continued.
+    const continued = await call(USERS.clientAdminA, "POST", requestUploadUrlPath(batch), {
+      organization_id: ORG_A, engagement_id: engagement, intake_file_id: lapsedIds[0],
+    });
+    assert.notEqual(continued.statusCode, 200);
+    // Another batch's live reservations are never expired by this one.
+    const otherBatch = await createBatch(ORG_A, engagement, "upload-capacity-other");
+    const otherReserved = await reserve(USERS.clientAdminA, { organizationId: ORG_A, engagementId: engagement, intakeBatchId: otherBatch, file: selectedFile(csv, "capacity-other"), key: keyFor("capacity", "other") });
+    assert.equal(otherReserved.statusCode, 201);
+    await reserve(USERS.clientAdminA, { ...ctx, file: selectedFile(csv, "capacity-27"), key: keyFor("capacity", "27") });
+    assert.equal((await fileRow(otherReserved.body.data.intake_file_id)).upload_state, "reserved");
   });
 
   // -------------------------------------------------------------------------

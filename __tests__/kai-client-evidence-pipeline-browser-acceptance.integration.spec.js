@@ -275,20 +275,35 @@ async function runBrowserAcceptance() {
     alpha: "7c000000-0000-4000-8000-00000000a1f0",
     beta: "7c000000-0000-4000-8000-00000000b2f0",
     gamma: "7c000000-0000-4000-8000-00000000c3f0",
+    delta: "7c000000-0000-4000-8000-00000000d4f0",
   });
-  const BATCH = Object.freeze({ alpha: "10000000-0000-4000-8000-000000000001", beta: "10000000-0000-4000-8000-0000000000c2" });
+  const BATCH = Object.freeze({
+    alpha: "10000000-0000-4000-8000-000000000001",
+    beta: "10000000-0000-4000-8000-0000000000c2",
+    delta: "10000000-0000-4000-8000-0000000000d4",
+  });
   const FILE = Object.freeze({
     alpha: "20000000-0000-4000-8000-000000000001",
     betaQueued: "20000000-0000-4000-8000-0000000000c1",
     betaFailed: "20000000-0000-4000-8000-0000000000c2",
+    deltaOutage: "20000000-0000-4000-8000-0000000000d1",
+    deltaRetrying: "20000000-0000-4000-8000-0000000000d2",
+    deltaLapsed: "20000000-0000-4000-8000-0000000000d3",
   });
   const SENSITIVITY_A = "80000000-0000-4000-8000-000000000001";
-  const NAMES = Object.freeze({ alpha: "gate-a-one.pdf", betaQueued: "beta-queued-outcomes.csv", betaFailed: "beta-unreadable-roster.csv" });
+  const NAMES = Object.freeze({
+    alpha: "gate-a-one.pdf",
+    betaQueued: "beta-queued-outcomes.csv",
+    betaFailed: "beta-unreadable-roster.csv",
+    deltaOutage: "delta-unscanned-survey.csv",
+    deltaRetrying: "delta-storage-read-retry.csv",
+    deltaLapsed: "delta-abandoned-upload.csv",
+  });
   const USERS = Object.freeze({ clientAdmin: 901, clientReviewer: 902, gkReviewer: 903, gkOperator: 904 });
 
   await query(`INSERT INTO kai.organizations (organization_id, name, organization_code) VALUES ($1::uuid, 'Harbourline Synthetic Society', 'harbourline-synthetic')
                ON CONFLICT (organization_id) DO NOTHING`, [ORG]);
-  for (const [engagementId, code] of [[PROJECT.alpha, "Project Alpha"], [PROJECT.beta, "Project Beta"], [PROJECT.gamma, "Project Gamma"]]) {
+  for (const [engagementId, code] of [[PROJECT.alpha, "Project Alpha"], [PROJECT.beta, "Project Beta"], [PROJECT.gamma, "Project Gamma"], [PROJECT.delta, "Project Delta"]]) {
     await query("INSERT INTO kai.engagements (engagement_id, organization_id, engagement_code, project_metadata) VALUES ($1::uuid, $2::uuid, $3, '{}'::jsonb)",
       [engagementId, ORG, code]);
   }
@@ -320,7 +335,7 @@ async function runBrowserAcceptance() {
   const clientReviewerService = serviceActor("client_reviewer");
 
   // Batches (runner mirror) and files.
-  for (const [batchId, engagementId, code] of [[BATCH.alpha, PROJECT.alpha, "alpha-intake-2026"], [BATCH.beta, PROJECT.beta, "beta-intake-2026"]]) {
+  for (const [batchId, engagementId, code] of [[BATCH.alpha, PROJECT.alpha, "alpha-intake-2026"], [BATCH.beta, PROJECT.beta, "beta-intake-2026"], [BATCH.delta, PROJECT.delta, "delta-intake-2026"]]) {
     await query(`INSERT INTO kai.intake_batches (intake_batch_id, organization_id, engagement_id, batch_code, processing_status, review_status)
                  VALUES ($1::uuid, $2::uuid, $3::uuid, $4, 'received', 'not_reviewed')`, [batchId, ORG, engagementId, code]);
   }
@@ -355,6 +370,54 @@ async function runBrowserAcceptance() {
     errorMessageSafe: "Deterministic profiling could not safely profile this file.", now: now(), metadataOnlyAudit: noAudit(),
   });
   assert.equal(failed.ok, true, JSON.stringify(failed));
+
+  // Delta: the three recovery states. The outage file is confirmed but its
+  // security check could not run (pending, with the diagnostic audit the
+  // post-confirmation assessment writes); the retrying file's parser run
+  // failed reading its stored bytes once (the worker's infrastructure code);
+  // the lapsed file was reserved and its upload window ended.
+  const { insertRequiredSuccessfulAuditEvent } = await import("../Backend/kai/db/kaiAuditQueries.js");
+  for (const [fileId, name, checksumChar, policy] of [[FILE.deltaOutage, NAMES.deltaOutage, "e", "pending"], [FILE.deltaRetrying, NAMES.deltaRetrying, "f", "passed"]]) {
+    await query(`INSERT INTO kai.intake_files (intake_file_id, intake_batch_id, organization_id, engagement_id, original_filename, safe_filename,
+                   checksum, hash_algorithm, upload_state, object_version_id, verified_checksum, verified_size_bytes, verified_at,
+                   mime_type, file_size_bytes, malware_scan_status, review_status, file_policy_status, created_at)
+                 VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $5, repeat($6, 64), 'sha256', 'confirmed', 'synthetic-v1', repeat($6, 64), 512, now(),
+                   'text/csv', 512, 'not_configured', 'not_reviewed', $7, now())`,
+      [fileId, BATCH.delta, ORG, PROJECT.delta, name, checksumChar, policy]);
+  }
+  const outageAudit = await insertRequiredSuccessfulAuditEvent({
+    operation: "record_security_assessment_diagnostic",
+    operation_type: "record_security_assessment_diagnostic",
+    actor_user_id: kaiUserIds.client_admin,
+    actor_type: "human",
+    organization_id: ORG,
+    object_type: "intake_file",
+    target_object_type: "intake_file",
+    object_id: FILE.deltaOutage,
+    reason_code: "no_policy_decision",
+    assessment_category: "malware_scan_unavailable",
+    validator_key: "VAL-STA-001",
+    route: "/api/kai/sprint2/intake/admin/files/:intakeFileId/confirm-upload",
+    from_state: "pending",
+    to_state: "pending",
+    prior_status: "pending",
+    new_status: "pending",
+    created_at: now(),
+  }, seedPool);
+  assert.equal(outageAudit.ok, true, JSON.stringify(outageAudit));
+  const retryingIdentity = { organizationId: ORG, intakeFileId: FILE.deltaRetrying, parserName: "kai_local_profiling_kernel", parserVersion: "1.0.0", checksum: "f".repeat(64) };
+  assert.equal((await parserRuns.ensureQueuedParserRun({ identity: retryingIdentity, now: now() })).ok, true);
+  const retryingClaim = await parserRuns.claimQueuedParserRun({ identity: retryingIdentity, now: now(), metadataOnlyAudit: noAudit() });
+  assert.equal((await parserRuns.failParserRunSafely({
+    identity: retryingIdentity, parserRunId: retryingClaim.data.run.parser_run_id, errorCode: "byte_source_unavailable",
+    errorMessageSafe: "The exact object version could not be read for deterministic profiling.", now: now(), metadataOnlyAudit: noAudit(),
+  })).ok, true);
+  await query(`INSERT INTO kai.intake_files (intake_file_id, intake_batch_id, organization_id, engagement_id, original_filename, safe_filename,
+                 checksum, hash_algorithm, upload_state, upload_expires_at, mime_type, file_size_bytes, malware_scan_status, review_status,
+                 file_policy_status, created_at)
+               VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $5, repeat('9', 64), 'sha256', 'reserved', now() - interval '1 minute',
+                 'text/csv', 512, 'not_configured', 'not_reviewed', 'pending', now())`,
+    [FILE.deltaLapsed, BATCH.delta, ORG, PROJECT.delta, NAMES.deltaLapsed]);
 
   // --- governed steps (advanced between browser phases) -------------------
   async function recordReviewedSensitivityDecision() {
@@ -636,6 +699,69 @@ async function runBrowserAcceptance() {
         await page.interceptPipeline(null);
       }
       results.case7 = "PASS";
+    });
+
+    await test("case 8: an unscanned file, a retrying content read, and a lapsed upload each say what happened, why, and what can be done - never 'processing' for the unscanned file", async () => {
+      const filePolicy = async () => (await query("SELECT file_policy_status FROM kai.intake_files WHERE intake_file_id = $1::uuid", [FILE.deltaOutage]))[0].file_policy_status;
+      const mark = page.mark();
+      await page.selectProject(PROJECT.delta);
+      await page.clickTab("Files");
+      await page.waitFor(async () => Boolean(await page.pipelineFileText(FILE.deltaOutage)), "Delta outage entry");
+      await pipelineRead(page, PROJECT.delta, mark, "case 8");
+      const outage = await page.pipelineFileText(FILE.deltaOutage);
+      const retrying = await page.pipelineFileText(FILE.deltaRetrying);
+      const lapsed = await page.pipelineFileText(FILE.deltaLapsed);
+      console.log(`[evidence-pipeline-browser] case 8 Delta entries:\n${outage}\n---\n${retrying}\n---\n${lapsed}`);
+      assert.match(outage, /Security check\s+Waiting for your organization/);
+      assert.match(outage, /Security check: The security scanner was not available, so this file has not been checked yet\. It stays quarantined and is not processed until a check succeeds\./);
+      assert.match(outage, /Next action: Check security again when the scanner is available\./);
+      assert.match(outage, /Processing\s+Not available yet/);
+      assert.ok(!/KAI is processing this file/.test(outage), "an unscanned file is not described as processing");
+      assert.match(retrying, /Processing\s+In progress/);
+      assert.match(retrying, /KAI is processing this file\./);
+      assert.ok(!/Contact Get Kinder/.test(retrying), "a read failure with retries left is not a dead end");
+      assert.match(lapsed, /Uploaded\s+Failed/);
+      assert.match(lapsed, /Uploaded failed: The upload was not completed\./);
+      assert.match(lapsed, /Next action: Upload a corrected file\./);
+      assert.doesNotMatch(`${outage}${retrying}`, /malware_scan|byte_source|object version/i, "no internal code reaches the client");
+
+      // The re-check: one POST to the existing confirmation for this file;
+      // the server's answer is shown, and nothing is decided by the browser.
+      const before = await governedCounts();
+      const clickMark = page.mark();
+      await page.clickButton("Check security again");
+      await page.waitFor(async () => /Security check requested|could not be requested|cannot check/.test(await page.pipelineFileText(FILE.deltaOutage) || ""), "re-check result");
+      await page.idle();
+      const writes = page.requestsSince(clickMark).filter((r) => r.method !== "GET");
+      assert.deepEqual(writes.map((r) => [r.method, new URL(r.url).pathname]), [["POST", `/api/kai/sprint2/intake/admin/files/${FILE.deltaOutage}/confirm-upload`]]);
+      const result = await page.pipelineFileText(FILE.deltaOutage);
+      // This runner's synthetic kai.intake_files mirror has no storage
+      // columns, so the confirmation fails here (500 system_error); the
+      // browser reports a failed request, never a role problem or a pass.
+      // The successful re-check on the production-shape schema is proven by
+      // the duplicate-resolution real-PostgreSQL suite ("scanner outage").
+      assert.match(result, /The security check could not be requested\. Try again later\./);
+      assert.equal(await filePolicy(), "pending", "the file stays quarantined");
+      assert.deepEqual(await governedCounts(), before, "the refused re-check wrote nothing");
+
+      await page.clickTab("Evidence");
+      await page.waitForText("1 file could not be security-checked because the scanner was not available. See Files to check again.");
+      assertClientBoundary(page, "case 8", await page.text());
+
+      // A client reviewer is told who can act, and gets no control.
+      const reviewer = clientReviewerPage;
+      await reviewer.selectProject(PROJECT.delta);
+      await reviewer.clickTab("Files");
+      await reviewer.waitFor(async () => Boolean(await reviewer.pipelineFileText(FILE.deltaOutage)), "reviewer Delta entry");
+      const reviewerEntry = await reviewer.pipelineFileText(FILE.deltaOutage);
+      assert.match(reviewerEntry, /A client admin in your organization can check this file's security again\./);
+      assert.ok(!(await reviewer.text()).includes("Check security again"), "no re-check control for a non-contributor");
+      const reviewerAttempt = await reviewer.evaluate(`fetch("/api/kai/sprint2/intake/admin/files/${FILE.deltaOutage}/confirm-upload?organization_id=${ORG}", {
+        method: "POST", credentials: "same-origin", headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ organization_id: "${ORG}" }) }).then((r) => r.status)`);
+      assert.ok([403, 404].includes(reviewerAttempt), `reviewer re-check refused (${reviewerAttempt})`);
+      assert.equal(await filePolicy(), "pending");
+      results.case8 = "PASS";
     });
 
     await test("case 6: Project isolation - Alpha status, files, and evidence disappear on Beta, and a late Alpha response never repopulates Beta", async () => {

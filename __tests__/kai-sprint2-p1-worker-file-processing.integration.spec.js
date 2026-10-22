@@ -510,9 +510,9 @@ async function runSuite() {
       [{ status: "failed", retries: 1, code: "byte_source_unavailable" }],
     );
 
-    // Later automatic attempts from both instances never re-queue, re-read, or
-    // re-count a failed run: only an explicit retry may, and the operation
-    // cannot express one.
+    // Before its cooldown, attempts from both instances never re-queue,
+    // re-read, or re-count the failed run, and a caller cannot request a
+    // retry through the operation.
     const readable = createByteSource();
     readable.register(failedFile.objectVersionId, failedBytes);
     const again = await Promise.all([poolA, poolB].map((pool) =>
@@ -536,8 +536,59 @@ async function runSuite() {
     assert.equal(
       (await listActionableKaiP1WorkCandidates(poolA, { now: NOW })).some((row) => row.intake_file_id === failedFile.intakeFileId),
       false,
-      "a failed current-identity run is excluded from automatic selection",
+      "an infrastructure failure cooling down is excluded from automatic selection",
     );
+
+    // After the cooldown the infrastructure-only failure is retried once,
+    // through the capped re-queue: two concurrent instances produce exactly
+    // one re-read and one profile, and the chain continues to P1-05.
+    const afterCooldown = at(60);
+    assert.equal(
+      (await listActionableKaiP1WorkCandidates(poolA, { now: afterCooldown })).some((row) => row.intake_file_id === failedFile.intakeFileId),
+      true,
+      "a cooled-down infrastructure failure with budget left is selectable",
+    );
+    const retried = await Promise.all([poolA, poolB].map((pool) => processKaiP1IntakeFile(
+      { organizationId: ORG, intakeFileId: failedFile.intakeFileId },
+      instanceDependencies(pool, readable, { now: () => afterCooldown }),
+    )));
+    assert.equal(readable.reads.length, 1, "exactly one instance re-read the bytes");
+    assert.equal(retried.filter((result) => result.data.stoppedAt === undefined).length, 1);
+    assert.deepEqual(
+      (await parserRun(failedFile.intakeFileId)).map(({ parser_status: status, retry_count: retries, error_code: code }) => ({ status, retries, code })),
+      [{ status: "completed", retries: 1, code: null }],
+    );
+    const recoveredCounts = await counts(failedFile.intakeFileId);
+    assert.equal(recoveredCounts.fileProfiles, 1);
+    assert.equal(recoveredCounts.dictionaries, 1);
+    assert.equal(recoveredCounts.sensitivityProfiles, 1);
+
+    // A file whose stored bytes stay unreadable exhausts the bounded budget
+    // and is then excluded for good: no further reads, no profile.
+    const lostBytes = csvBytesFor(102);
+    const lostFile = await seedFile({ intakeFileId: fileId(102), bytes: lostBytes });
+    for (const offset of [0, 60, 360]) {
+      // eslint-disable-next-line no-await-in-loop
+      await processKaiP1IntakeFile(
+        { organizationId: ORG, intakeFileId: lostFile.intakeFileId },
+        instanceDependencies(poolA, unreadable, { now: () => at(offset) }),
+      );
+    }
+    assert.deepEqual(
+      (await parserRun(lostFile.intakeFileId)).map(({ parser_status: status, retry_count: retries, error_code: code }) => ({ status, retries, code })),
+      [{ status: "failed", retries: 3, code: "byte_source_unavailable" }],
+    );
+    assert.equal(
+      (await listActionableKaiP1WorkCandidates(poolA, { now: at(24 * 3600) })).some((row) => row.intake_file_id === lostFile.intakeFileId),
+      false,
+      "an exhausted infrastructure failure is never selected again",
+    );
+    const exhaustedAttempt = await processKaiP1IntakeFile(
+      { organizationId: ORG, intakeFileId: lostFile.intakeFileId },
+      instanceDependencies(poolA, readable, { now: () => at(24 * 3600) }),
+    );
+    assert.equal(exhaustedAttempt.data.stoppedAt, "parser_profile_activation");
+    assert.equal((await counts(lostFile.intakeFileId)).fileProfiles, 0);
 
     // A persistent P1-04 failure (required audit rejected -> full rollback)
     // stops the chain but leaves the completed parser run completed.

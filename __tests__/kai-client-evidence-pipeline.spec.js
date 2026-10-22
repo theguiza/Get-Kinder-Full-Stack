@@ -26,6 +26,8 @@ import {
   readClientEvidencePipeline,
   reviewsTabMessages,
   reviewsTabView,
+  securityCheckRetryPath,
+  securityCheckRetryResultText,
   sensitivityReviewActionAvailable,
   stageStatusLabel,
 } from "../frontend/knowledgeStudio/clientEvidencePipelineLogic.js";
@@ -518,6 +520,95 @@ test("frontend next actions: a failed security check says to contact Get Kinder,
   assert.equal(securityFailed.stages.some((s) => s.status === "complete" && s.key !== "upload"), false);
 });
 
+test("stages: a security check that could not run is an actionable, quarantined wait, not processing and not a terminal failure", async () => {
+  const pending = { upload_state: "confirmed", file_policy_status: "pending", parser_status: null, file_profile_complete: false };
+  const rows = [
+    row(1, { ...pending, security_assessment_pending_category: "malware_scan_unavailable" }),
+    row(2, { ...pending, security_assessment_pending_category: "malware_scan_not_configured" }),
+    row(3, { ...pending, security_assessment_pending_category: "maximum_concurrent_pdf_assessor_workers_exceeded" }),
+    // No diagnostic yet (assessment not attempted or still running): processing.
+    row(4, { ...pending, security_assessment_pending_category: null }),
+    // A genuine scanner failure keeps the recorded terminal path.
+    row(5, { upload_state: "confirmed", file_policy_status: "failed", parser_status: null, file_profile_complete: false }),
+  ];
+  for (const actor of [memberActor("client_admin"), memberActor("client_contributor")]) {
+    const { result } = await read(rows, { actor });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    for (const n of [1, 2, 3]) {
+      const current = currentOf(result, n);
+      assert.deepEqual(
+        [current.stage, current.status, current.responsible, current.next, current.reason, current.file.failureCategory],
+        ["security_check", "waiting_for_client", "client", "retry_security_check", "security_check_retry_ready", "security_check_unavailable"],
+        `file ${n}`,
+      );
+      // Nothing downstream is reached while the file is unchecked.
+      assert.deepEqual(current.file.stages.slice(2).map((s) => s.status), Array(8).fill("not_started"));
+    }
+    assert.deepEqual(Object.values(currentOf(result, 4)).slice(0, 5), ["security_check", "in_progress", "kai", "none_waiting_for_kai_processing", "processing"]);
+    assert.deepEqual(Object.values(currentOf(result, 5)).slice(0, 5), ["security_check", "failed", "get_kinder", "contact_get_kinder", "failed"]);
+  }
+  // The diagnostic category itself is never returned to the client.
+  const { result } = await read(rows);
+  assert.doesNotMatch(JSON.stringify(result.data), /malware_scan_unavailable|malware_scan_not_configured|maximum_concurrent/);
+});
+
+test("stages: a temporary content-read failure is shown as KAI processing while its automatic retry remains; exhausted, it is a Get Kinder failure", async () => {
+  const failedRead = (retries) => ({ parser_status: "failed", parser_error_code: "byte_source_unavailable", parser_retry_count: retries, file_profile_complete: false });
+  const { result } = await read([
+    row(1, failedRead(1)),
+    row(2, failedRead(2)),
+    row(3, failedRead(3)),
+    row(4, { parser_status: "failed", parser_error_code: "safe_parser_error", parser_retry_count: 1, file_profile_complete: false }),
+  ]);
+  assert.deepEqual(Object.values(currentOf(result, 1)).slice(0, 5), ["processing", "in_progress", "kai", "none_waiting_for_kai_processing", "processing"]);
+  assert.deepEqual(Object.values(currentOf(result, 2)).slice(0, 5), ["processing", "in_progress", "kai", "none_waiting_for_kai_processing", "processing"]);
+  assert.deepEqual(
+    [...Object.values(currentOf(result, 3)).slice(0, 5), currentOf(result, 3).file.failureCategory],
+    ["processing", "failed", "get_kinder", "contact_get_kinder", "failed", "file_content_unavailable"],
+  );
+  assert.deepEqual(
+    [...Object.values(currentOf(result, 4)).slice(0, 5), currentOf(result, 4).file.failureCategory],
+    ["processing", "failed", "get_kinder", "contact_get_kinder", "failed", "file_could_not_be_read"],
+  );
+});
+
+test("stages: an unfinished upload whose window has lapsed is shown as not completed, never as still in progress", async () => {
+  const { result } = await read([
+    row(1, { upload_state: "reserved", file_policy_status: "pending", upload_window_lapsed: true }),
+    row(2, { upload_state: "upload_started", file_policy_status: "pending", upload_window_lapsed: false }),
+  ]);
+  assert.deepEqual(
+    [...Object.values(currentOf(result, 1)).slice(0, 5), currentOf(result, 1).file.failureCategory],
+    ["upload", "failed", "client", "upload_new_file", "failed", "upload_not_completed"],
+  );
+  assert.deepEqual(Object.values(currentOf(result, 2)).slice(0, 4), ["upload", "in_progress", "client", "none"]);
+});
+
+test("frontend: the security re-check is offered only to an actor who can contribute, explains the quarantine, and reports the server's answer", async () => {
+  const pending = { upload_state: "confirmed", file_policy_status: "pending", parser_status: null, file_profile_complete: false };
+  const data = projectClientEvidencePipeline(await serviceDto([
+    row(1, { ...pending, security_assessment_pending_category: "malware_scan_unavailable" }),
+  ]), ENGAGEMENT);
+  assert.ok(data, "the new next action and reason are accepted by the client projection");
+  const [file] = data.files;
+  assert.equal(file.nextAction, "retry_security_check");
+  assert.equal(file.failureCategory, "security_check_unavailable");
+  assert.match(nextActionText(file, { canContribute: true }), /^Check security again/);
+  assert.match(nextActionText(file, { canContribute: false }), /^A client admin in your organization can check this file's security again/);
+  assert.equal(stageStatusLabel(file.stages.find((s) => s.key === "security_check")), "Waiting for your organization");
+  assert.match(pipelineReasonMessage("security_check_retry_ready", 1), /scanner was not available/);
+  // The file is never described as checked, passed, or being processed.
+  for (const canContribute of [true, false]) assert.doesNotMatch(nextActionText(file, { canContribute }), /processing this file|passed/i);
+  // Not client follow-up work.
+  assert.equal(reviewsTabView({ status: PIPELINE_REQUEST_STATUS.SUCCESS_WITH_DATA, data }).waitingForClient.length, 0);
+  assert.equal(securityCheckRetryResultText({ statusCode: 200, body: { ok: true } }), "Security check requested. The status below shows its result.");
+  assert.equal(securityCheckRetryResultText({ statusCode: 403, body: { ok: false, error: { code: "authorization_denied" } } }), "Your role cannot check this file's security again.");
+  // A disabled feature or unavailable storage is not a role problem.
+  assert.equal(securityCheckRetryResultText({ statusCode: 403, body: { ok: false, error: { code: "feature_disabled" } } }), "The security check could not be requested. Try again later.");
+  assert.equal(securityCheckRetryResultText({ statusCode: 503, body: { ok: false, error: { code: "storage_provider_not_configured" } } }), "The security check could not be requested. Try again later.");
+  assert.equal(securityCheckRetryResultText(null), "The security check could not be requested. Try again later.");
+});
+
 // ---------------------------------------------------------------------------
 // Frontend source contract
 // ---------------------------------------------------------------------------
@@ -526,6 +617,7 @@ const studioSource = readFileSync("frontend/knowledgeStudio/ClientKnowledgeStudi
 const hookSource = readFileSync("frontend/knowledgeStudio/useClientEvidencePipeline.js", "utf8");
 const statusSource = readFileSync("frontend/knowledgeStudio/ClientEvidencePipelineStatus.jsx", "utf8");
 const logicSource = readFileSync("frontend/knowledgeStudio/clientEvidencePipelineLogic.js", "utf8");
+const retrySource = readFileSync("frontend/knowledgeStudio/securityCheckRetry.js", "utf8");
 
 test("frontend source: one pipeline request, keyed to organization + Project, with late responses discarded", () => {
   assert.equal((hookSource.match(/readClientEvidencePipeline\(getJson, organizationId, engagementId\)/g) || []).length, 1);
@@ -535,6 +627,13 @@ test("frontend source: one pipeline request, keyed to organization + Project, wi
   assert.match(hookSource, /\}, \[key, organizationId, engagementId, refreshToken\]\);/);
   assert.match(studioSource, /const pipeline = useClientEvidencePipeline\(organizationId, engagementId, pipelineRefresh\);/);
   for (const source of [studioSource, statusSource]) assert.doesNotMatch(source, /getJson\(|postJson\(|fetch\(/);
+  // The status card's only write: a security check re-attempt through the
+  // existing upload confirmation, offered only for that next action.
+  assert.equal((statusSource.match(/requestSecurityCheckRetry\(/g) || []).length, 1);
+  assert.match(statusSource, /file\.nextAction === "retry_security_check" && canContribute \?/);
+  assert.match(retrySource, /postJson\(securityCheckRetryPath\(organizationId, intakeFileId\), \{ organization_id: organizationId \}\)/);
+  assert.equal((retrySource.match(/postJson\(|getJson\(|fetch\(/g) || []).length, 1);
+  assert.equal(securityCheckRetryPath(ORG, fileId(1)), `/api/kai/sprint2/intake/admin/files/${fileId(1)}/confirm-upload?organization_id=${ORG}`);
   for (const source of [studioSource, statusSource, hookSource, logicSource]) {
     for (const builder of ["evidenceLibraryCandidatesPath", "claimLibraryCandidatesPath", "organizationReviewQueuePath", "organizationSourcesPath",
       "sensitivityReviewQueuePath", "reviewCockpit", "claimTraceabilityPath", "eligibleClaimsPath", "clientFollowupsPath", "postJson"]) {

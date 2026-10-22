@@ -169,9 +169,9 @@ test("P1 worker candidate discovery sweeps every organization, bounded at 25, ex
   });
 
   assert.deepEqual(result, rows);
-  // Only the sweep clock and the parser lease are bound - never an
-  // organization_id.
-  assert.equal(queryParams.length, 2);
+  // Only the sweep clock, the parser lease, and the bounded automatic
+  // parser-retry rule are bound - never an organization_id.
+  assert.equal(queryParams.length, 5);
   assert.ok(Number.isFinite(Date.parse(queryParams[0])));
   assert.equal(queryParams[1], 15 * 60);
   // No organization_id bound as a query parameter - the candidate sweep is not
@@ -189,15 +189,19 @@ test("P1 worker candidate discovery sweeps every organization, bounded at 25, ex
   // excluded so it can never permanently occupy the bounded window.
   assert.match(queryText, /NOT EXISTS[\s\S]*kai\.intake_sensitivity_profiles s[\s\S]*s\.organization_id = f\.organization_id[\s\S]*s\.intake_file_id = f\.intake_file_id/);
   // A parser run stuck running/failed/cancelled can never auto-advance under
-  // retry:false (only a queued row is claimable, and only explicit retry:true
-  // - never issued by the automatic worker - re-queues a failed run), so it
-  // is excluded rather than permanently occupying the window - but only for
+  // retry:false (only a queued row is claimable; a failed run is re-queued
+  // only by explicit retry:true or, for an infrastructure-only failure code
+  // with budget left and its cooldown over, by the activation's bounded
+  // automatic retry), so it is excluded rather than permanently occupying
+  // the window - but only for
   // the file's CURRENT parser-run identity: a historical row under a
   // superseded checksum is irrelevant to a fresh activation call (which
   // always re-derives its identity from the file's current checksum), so the
   // exclusion is scoped by checksum, never by organization_id/intake_file_id
   // alone.
-  assert.match(queryText, /NOT EXISTS[\s\S]*kai\.intake_parser_runs r[\s\S]*r\.organization_id = f\.organization_id[\s\S]*r\.intake_file_id = f\.intake_file_id[\s\S]*r\.checksum = f\.verified_checksum[\s\S]*r\.parser_status IN \('failed', 'cancelled'\)/);
+  assert.match(queryText, /NOT EXISTS[\s\S]*kai\.intake_parser_runs r[\s\S]*r\.organization_id = f\.organization_id[\s\S]*r\.intake_file_id = f\.intake_file_id[\s\S]*r\.checksum = f\.verified_checksum[\s\S]*r\.parser_status = 'cancelled'[\s\S]*r\.parser_status = 'failed'[\s\S]*AND NOT \(/);
+  assert.match(queryText, /r\.error_code = ANY\(\$3::text\[\]\)\s+AND r\.retry_count < \$4\s+AND r\.completed_at <= \$1::timestamptz - make_interval\(secs => \(\$5::jsonb ->> r\.retry_count::text\)::int\)/);
+  assert.deepEqual(queryParams.slice(2), [["byte_source_unavailable"], 3, JSON.stringify({ 1: 60, 2: 300 })]);
   // A running run is excluded only while its lease is live.
   assert.match(queryText, /r\.parser_status = 'running' AND r\.started_at > \$1::timestamptz - make_interval\(secs => \$2\)/);
   // Durable downstream recovery state for the current checksum excludes a

@@ -91,6 +91,49 @@ export async function insertIntakeBatchMetadata(batch, db = pool) {
   return rows[0] || null;
 }
 
+/**
+ * Expires this batch's unfinished reservations whose upload window has
+ * lapsed, before a new reservation is counted against the Gate A active
+ * upload limit (which counts every reserved/upload_started/uploaded_unconfirmed
+ * row in the batch, lapsed or not). Uses only the existing authorized
+ * `->expired` edges: the lifecycle trigger itself refuses an expiry before
+ * upload_expires_at, and each expiry writes its `expire_upload` lifecycle
+ * audit in the same statement. A lapsed row can never be continued (the
+ * trigger denies every non-expiry transition after expiry), so nothing
+ * recoverable is lost. Rows another transaction holds are skipped.
+ */
+export async function expireLapsedIntakeFileReservations({ organizationId, intakeBatchId }, db = pool) {
+  const { rows } = await db.query(
+    `WITH lapsed AS (
+       SELECT f.intake_file_id, f.upload_state AS from_state
+         FROM kai.intake_files f
+        WHERE f.organization_id = $1::uuid
+          AND f.intake_batch_id = $2::uuid
+          AND f.upload_state IN ('reserved', 'upload_started', 'uploaded_unconfirmed')
+          AND f.upload_expires_at <= now()
+        FOR UPDATE SKIP LOCKED
+     ), expired AS (
+       UPDATE kai.intake_files f
+          SET upload_state = 'expired',
+              upload_state_changed_at = now()
+         FROM lapsed
+        WHERE f.organization_id = $1::uuid
+          AND f.intake_file_id = lapsed.intake_file_id
+          AND f.upload_state = lapsed.from_state
+       RETURNING f.organization_id, f.intake_file_id, lapsed.from_state
+     )
+     INSERT INTO kai.upload_lifecycle_audit (
+       organization_id, intake_file_id, operation, from_state, to_state, outcome, metadata, created_at
+     )
+     SELECT organization_id, intake_file_id, 'expire_upload', from_state, 'expired', 'success',
+            '{"metadata_only": true}'::jsonb, now()
+       FROM expired
+     RETURNING intake_file_id::text AS intake_file_id`,
+    [organizationId, intakeBatchId],
+  );
+  return rows.length;
+}
+
 export async function insertIntakeFileMetadata(file, db = pool) {
   const { rows } = await db.query(
     `INSERT INTO kai.intake_files (
@@ -513,9 +556,10 @@ const P1_WORKER_CANDIDATE_SWEEP_LIMIT = 25;
  *    file-level immutable fact this query already reads; it does not
  *    reimplement `PARSER_REGISTRY`'s extension->parser mapping in SQL. Only
  *    `running` while its claim lease is live (another worker owns it; see
- *    the recovery bounds below for an expired lease), `failed` (only explicit
- *    `retry: true`, which this automatic worker never passes, re-queues a
- *    failed run - see `requeueFailedParserRunForRetry`), and `cancelled`
+ *    the recovery bounds below for an expired lease), `failed` (re-queued only
+ *    through `requeueFailedParserRunForRetry`: by explicit `retry: true`, or
+ *    automatically for an infrastructure-only failure code once its cooldown
+ *    ends and while retry budget remains - `isAutomaticParserRetryDue`), and `cancelled`
  *    (terminal; `requeueFailedParserRunForRetry` explicitly refuses to
  *    re-queue it) block selection, and only for the file's current checksum.
  *    `queued` and `completed` rows, and files with no matching parser run at
@@ -576,7 +620,17 @@ export async function listActionableKaiP1WorkCandidates(db = pool, { now = new D
              AND r.intake_file_id = f.intake_file_id
              AND r.checksum = f.verified_checksum
              AND (
-               r.parser_status IN ('failed', 'cancelled')
+               r.parser_status = 'cancelled'
+               OR (
+                 r.parser_status = 'failed'
+                 -- isAutomaticParserRetryDue: an infrastructure-only failure
+                 -- with retry budget left is selectable once its cooldown ends.
+                 AND NOT (
+                   r.error_code = ANY($3::text[])
+                   AND r.retry_count < $4
+                   AND r.completed_at <= $1::timestamptz - make_interval(secs => ($5::jsonb ->> r.retry_count::text)::int)
+                 )
+               )
                OR (r.parser_status = 'running' AND r.started_at > $1::timestamptz - make_interval(secs => $2))
              )
         )
@@ -594,7 +648,13 @@ export async function listActionableKaiP1WorkCandidates(db = pool, { now = new D
         )
       ORDER BY f.created_at ASC, f.organization_id ASC, f.intake_file_id ASC
       LIMIT ${P1_WORKER_CANDIDATE_SWEEP_LIMIT}`,
-    [now, __parserRunRepositoryContract.PARSER_RUN_LEASE_SECONDS],
+    [
+      now,
+      __parserRunRepositoryContract.PARSER_RUN_LEASE_SECONDS,
+      [...__parserRunRepositoryContract.AUTOMATIC_PARSER_RETRY_ERROR_CODES],
+      __parserRunRepositoryContract.MAX_PARSER_RETRY_COUNT,
+      JSON.stringify(__parserRunRepositoryContract.AUTOMATIC_PARSER_RETRY_COOLDOWN_SECONDS),
+    ],
   );
   return rows;
 }

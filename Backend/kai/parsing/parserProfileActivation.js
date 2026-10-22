@@ -1,6 +1,6 @@
 import { isKaiSprint2Enabled } from "../config/kaiSprint2Config.js";
 import { createParserProfileWorkerOrchestration } from "./parserProfileWorkerOrchestration.js";
-import { createPostgresParserRunRepository } from "./postgresParserRunRepository.js";
+import { createPostgresParserRunRepository, isAutomaticParserRetryDue } from "./postgresParserRunRepository.js";
 import { createP1ObjectVersionByteSource } from "./p1ObjectVersionByteSource.js";
 import { createProductionMetadataOnlyAudit } from "../services/kaiMetadataOnlyAuditComposition.js";
 import { getScopedIntakeFileParserProfileEligibilityFacts } from "../db/kaiIntakeQueries.js";
@@ -235,7 +235,15 @@ export async function activateParserProfileWorkForIntakeFile(
     }
   }
 
-  const run = retry
+  // A failed run whose failure was the infrastructure, not the file (the
+  // exact object version could not be read), is retried automatically within
+  // the existing retry cap once its cooldown has passed; the repository
+  // re-checks the cap and the failed state under its row lock.
+  const automaticRetry = !retry
+    && queued.data.replayed === true
+    && isAutomaticParserRetryDue(queued.data.run, now);
+
+  const run = retry || automaticRetry
     ? await orchestration.retryParserProfileWork({ trustedFileFacts, now, metadataOnlyAudit })
     : await orchestration.runQueuedParserProfileWork({ trustedFileFacts, now, metadataOnlyAudit });
 

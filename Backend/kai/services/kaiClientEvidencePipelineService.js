@@ -14,6 +14,7 @@ import { listClientImpactFacts } from "./kaiClientImpactFactsService.js";
 import { authorizeSourcePromotionDecision } from "./kaiSourcePromotionService.js";
 import { authorizeSourceCandidateContinuation } from "./kaiSourceCandidateService.js";
 import { __evidenceLineageServiceContract } from "./kaiEvidenceLineageService.js";
+import { __parserRunRepositoryContract } from "../parsing/postgresParserRunRepository.js";
 
 /**
  * Client-safe evidence pipeline for one organization + engagement/project:
@@ -112,7 +113,18 @@ const NEXT_ACTION = Object.freeze({
   continueSourcePreparation: "continue_source_preparation",
   reviewSensitivity: "review_sensitivity",
   askOrganizationAdministrator: "ask_organization_administrator",
+  retrySecurityCheck: "retry_security_check",
 });
+
+// Non-policy security assessment outcomes (boundedFileSecurityAssessor.js,
+// policyFailureEligible: false): no scan result exists, so the file stays
+// pending and quarantined. Confirming the upload again re-attempts the
+// assessment (applyConfirmedSecurityAssessment); nothing else can move it.
+const SECURITY_CHECK_RETRY_CATEGORIES = new Set([
+  "malware_scan_unavailable",
+  "malware_scan_not_configured",
+  "maximum_concurrent_pdf_assessor_workers_exceeded",
+]);
 
 // Only these parser error codes are ever written (parserProfileWorkerOrchestration.js);
 // anything else is reported as the generic category.
@@ -124,6 +136,7 @@ const PARSER_FAILURE_CATEGORY = Object.freeze({
 // Evidence tab explanation codes, in the order they are listed.
 const PIPELINE_REASONS = Object.freeze([
   "waiting_for_client",
+  "security_check_retry_ready",
   "failed",
   "processing",
   "waiting_for_get_kinder_review",
@@ -254,6 +267,9 @@ function deriveFileStages(row, reviewedImpactFactCount, clientAuthority = NO_CLI
     stages.push(stage("upload", STAGE_STATUS.failed, RESPONSIBLE.client, { failureCategory: "file_blocked_by_policy" }));
   } else if (upload === "abandoned" || upload === "expired") {
     stages.push(stage("upload", STAGE_STATUS.failed, RESPONSIBLE.client, { failureCategory: "upload_not_completed" }));
+  } else if (["reserved", "upload_started", "uploaded_unconfirmed"].includes(upload) && row.upload_window_lapsed === true) {
+    // Its upload window ended: it can never be continued, only uploaded again.
+    stages.push(stage("upload", STAGE_STATUS.failed, RESPONSIBLE.client, { failureCategory: "upload_not_completed" }));
   } else if (["reserved", "upload_started", "uploaded_unconfirmed"].includes(upload)) {
     stages.push(stage("upload", STAGE_STATUS.inProgress, RESPONSIBLE.client));
   } else {
@@ -269,6 +285,14 @@ function deriveFileStages(row, reviewedImpactFactCount, clientAuthority = NO_CLI
     // The assessment itself did not complete; replacing the file is not a
     // remedy the client can be told to apply.
     stages.push(stage("security_check", STAGE_STATUS.failed, RESPONSIBLE.getKinder, { failureCategory: "security_check_failed" }));
+  } else if ((policy === null || policy === undefined || policy === "pending")
+    && SECURITY_CHECK_RETRY_CATEGORIES.has(row.security_assessment_pending_category)) {
+    // The check could not run; the file is not passed and stays quarantined.
+    // Not "KAI is processing": nothing will happen until it is re-attempted.
+    stages.push(stage("security_check", STAGE_STATUS.waitingForClient, RESPONSIBLE.client, {
+      detail: "security_check_retry_ready",
+      failureCategory: "security_check_unavailable",
+    }));
   } else if (policy === null || policy === undefined || policy === "pending") {
     stages.push(stage("security_check", STAGE_STATUS.inProgress, RESPONSIBLE.kai));
   } else {
@@ -282,6 +306,14 @@ function deriveFileStages(row, reviewedImpactFactCount, clientAuthority = NO_CLI
   } else if (parser === null || parser === undefined) {
     stages.push(stage("processing", STAGE_STATUS.notStarted, RESPONSIBLE.kai));
   } else if (parser === "queued" || parser === "running") {
+    stages.push(stage("processing", STAGE_STATUS.inProgress, RESPONSIBLE.kai));
+  } else if (
+    parser === "failed"
+    && __parserRunRepositoryContract.AUTOMATIC_PARSER_RETRY_ERROR_CODES.includes(row.parser_error_code)
+    && Number(row.parser_retry_count) < __parserRunRepositoryContract.MAX_PARSER_RETRY_COUNT
+  ) {
+    // An infrastructure-only read failure with retry budget left: the P1
+    // worker retries it automatically after its cooldown.
     stages.push(stage("processing", STAGE_STATUS.inProgress, RESPONSIBLE.kai));
   } else if (parser === "failed" || parser === "cancelled") {
     stages.push(stage("processing", STAGE_STATUS.failed, RESPONSIBLE.getKinder, {
@@ -423,6 +455,7 @@ function nextActionFor(current) {
       if (current.detail === "evidence_extraction_ready") return NEXT_ACTION.extractEvidence;
       if (current.detail === "sensitivity_review_ready") return NEXT_ACTION.reviewSensitivity;
       if (current.detail === "organization_administrator_action_ready") return NEXT_ACTION.askOrganizationAdministrator;
+      if (current.detail === "security_check_retry_ready") return NEXT_ACTION.retrySecurityCheck;
       return NEXT_ACTION.answerClientFollowups;
     case STAGE_STATUS.failed:
       return current.responsible === RESPONSIBLE.getKinder ? NEXT_ACTION.contactGetKinder : NEXT_ACTION.uploadNewFile;

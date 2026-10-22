@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 
 import { clientFollowupReviewHref } from "../impactEvidenceLibraryLogic.js";
 import {
@@ -6,8 +6,10 @@ import {
   PIPELINE_REQUEST_STATUS,
   PIPELINE_STAGE_LABELS,
   nextActionText,
+  securityCheckRetryResultText,
   stageStatusLabel,
 } from "./clientEvidencePipelineLogic.js";
+import { requestSecurityCheckRetry } from "./securityCheckRetry.js";
 
 const STATUS_BADGE = Object.freeze({
   complete: "text-bg-success",
@@ -24,10 +26,21 @@ const STATUS_BADGE = Object.freeze({
 /**
  * Files tab: "Processing & evidence status" for the selected project. It
  * renders the server's client-safe pipeline state (see
- * useClientEvidencePipeline) and issues no request of its own.
+ * useClientEvidencePipeline). Its one request: for a file whose security
+ * check could not run, an actor with intake contribution may re-attempt it
+ * through the existing upload confirmation (the server authorizes it again).
  */
 export default function ClientEvidencePipelineStatus({ organizationId, request, canReviewFollowups = false, canContribute = false, onRefresh }) {
   const { status, data } = request;
+  const [retrying, setRetrying] = useState(null);
+  const [retryResults, setRetryResults] = useState({});
+  const retrySecurityCheck = async (intakeFileId) => {
+    setRetrying(intakeFileId);
+    const result = await requestSecurityCheckRetry(organizationId, intakeFileId);
+    setRetrying(null);
+    setRetryResults((previous) => ({ ...previous, [intakeFileId]: securityCheckRetryResultText(result) }));
+    if (typeof onRefresh === "function") onRefresh();
+  };
   return (
     <div className="admin-card mt-3">
       <div className="d-flex justify-content-between align-items-center mb-2">
@@ -74,6 +87,11 @@ export default function ClientEvidencePipelineStatus({ organizationId, request, 
                   {PIPELINE_STAGE_LABELS[file.currentStage]} failed: {PIPELINE_FAILURE_MESSAGES[file.failureCategory]}
                 </div>
               ) : null}
+              {file.currentStatus !== "failed" && file.failureCategory ? (
+                <div className="alert alert-warning py-1 small mb-1">
+                  {PIPELINE_STAGE_LABELS[file.currentStage]}: {PIPELINE_FAILURE_MESSAGES[file.failureCategory]}
+                </div>
+              ) : null}
               <div className="small">
                 <span className="fw-semibold">Next action: </span>
                 {nextActionText(file, { canReviewFollowups, canContribute })}
@@ -82,6 +100,20 @@ export default function ClientEvidencePipelineStatus({ organizationId, request, 
                 <a className="btn btn-sm btn-outline-primary mt-1" href={clientFollowupReviewHref(organizationId)}>
                   Answer follow-up questions
                 </a>
+              ) : null}
+              {file.nextAction === "retry_security_check" && canContribute ? (
+                <button
+                  type="button"
+                  className="btn btn-sm btn-outline-primary mt-1"
+                  data-security-check-retry={file.intakeFileId}
+                  onClick={() => retrySecurityCheck(file.intakeFileId)}
+                  disabled={retrying !== null}
+                >
+                  {retrying === file.intakeFileId ? "Checking security..." : "Check security again"}
+                </button>
+              ) : null}
+              {retryResults[file.intakeFileId] ? (
+                <div className="small text-muted mt-1" role="status">{retryResults[file.intakeFileId]}</div>
               ) : null}
               {file.reviewedImpactFactCount > 0 ? (
                 <div className="small text-muted mt-1">

@@ -1308,3 +1308,60 @@ test("a retried or continued upload whose record already left \"reserved\" is co
   assert.ok(transferBody.indexOf("putToSignedUrl") > fallbackIndex);
   assert.ok(transferBody.indexOf("const confirmResult") > transferBody.indexOf("putToSignedUrl"));
 });
+
+test("active upload limit: lapsed reservations in the batch are expired before the reservation is counted, and a full batch answers a structured 409 instead of a server error", async () => {
+  const csv = FORMATS.find((format) => format.extension === ".csv");
+
+  // Expiry runs for exactly this organization and batch, before the insert.
+  const store = createSyntheticIntakeStore();
+  const expiries = [];
+  store.dependencies.expireLapsedIntakeFileReservations = async (scope) => {
+    store.calls.push("expireLapsedIntakeFileReservations");
+    expiries.push(scope);
+    return 0;
+  };
+  const created = await reserve(store, { format: csv, bytes: Buffer.from("a,b\n1,2\n"), key: "limit-key-1" });
+  assert.equal(created.ok, true, JSON.stringify(created));
+  assert.deepEqual(expiries, [{ organizationId: ORG, intakeBatchId: BATCH_A }]);
+  assert.ok(store.calls.indexOf("expireLapsedIntakeFileReservations") < store.calls.indexOf("insertIntakeFileMetadata"));
+
+  // A failed expiry is housekeeping only: the reservation still proceeds.
+  const failingExpiry = createSyntheticIntakeStore();
+  failingExpiry.dependencies.expireLapsedIntakeFileReservations = async () => {
+    throw new Error("synthetic expiry failure");
+  };
+  const stillCreated = await reserve(failingExpiry, { format: csv, bytes: Buffer.from("a,b\n3,4\n"), key: "limit-key-2" });
+  assert.equal(stillCreated.ok, true);
+
+  // The trigger's own refusal for a full batch: a structured blocker, no row.
+  const full = createSyntheticIntakeStore();
+  full.dependencies.expireLapsedIntakeFileReservations = async () => 0;
+  full.dependencies.insertIntakeFileMetadata = async () => {
+    const error = new Error("Gate A P0 active upload limit exceeded");
+    error.code = "P0001";
+    throw error;
+  };
+  const refused = await reserve(full, { format: csv, bytes: Buffer.from("a,b\n5,6\n"), key: "limit-key-3" });
+  assert.equal(refused.ok, false);
+  assert.equal(refused.error.code, "conflict");
+  assert.equal(refused.error.status, 409);
+  assert.equal(refused.blockers.length, 1);
+  assert.equal(refused.blockers[0].blocking_reason, "active_upload_limit_reached");
+  assert.equal(refused.blockers[0].object_id, BATCH_A);
+  assert.equal(refused.blockers[0].evidence.active_upload_limit, 25);
+  assert.match(refused.blockers[0].required_fix, /another batch/);
+  assert.equal(full.rows.length, 0);
+
+  // Any other trigger refusal is not reinterpreted.
+  const other = createSyntheticIntakeStore();
+  other.dependencies.expireLapsedIntakeFileReservations = async () => 0;
+  other.dependencies.insertIntakeFileMetadata = async () => {
+    const error = new Error("Gate A P0 lifecycle transition denied");
+    error.code = "P0001";
+    throw error;
+  };
+  await assert.rejects(
+    () => reserve(other, { format: csv, bytes: Buffer.from("a,b\n7,8\n"), key: "limit-key-4" }),
+    /lifecycle transition denied/,
+  );
+});

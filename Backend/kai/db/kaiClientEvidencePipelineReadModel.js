@@ -56,7 +56,7 @@ export async function listClientEvidencePipelineFiles(organizationId, engagement
   const { rows } = await db.query(
     `WITH files AS (
        SELECT f.organization_id, f.intake_file_id, f.safe_filename, f.upload_state, f.file_policy_status,
-              f.verified_checksum, f.created_at
+              f.verified_checksum, f.upload_expires_at, f.created_at
          FROM kai.intake_files f
         WHERE f.organization_id = $1
           AND f.engagement_id = $2
@@ -68,8 +68,14 @@ export async function listClientEvidencePipelineFiles(organizationId, engagement
             files.upload_state,
             files.file_policy_status,
             files.created_at,
+            -- An unfinished upload whose window has ended can never be
+            -- continued (the lifecycle trigger denies it), expired or not yet.
+            (files.upload_state IN ('reserved', 'upload_started', 'uploaded_unconfirmed')
+              AND files.upload_expires_at <= now()) AS upload_window_lapsed,
+            sa.assessment_category AS security_assessment_pending_category,
             r.parser_status,
             r.error_code AS parser_error_code,
+            r.retry_count AS parser_retry_count,
             (r.parser_status = 'completed' AND p.file_profile_id IS NOT NULL) AS file_profile_complete,
             (d.data_dictionary_id IS NOT NULL) AS data_dictionary_complete,
             (s.intake_sensitivity_profile_id IS NOT NULL) AS sensitivity_profile_complete,
@@ -129,7 +135,7 @@ export async function listClientEvidencePipelineFiles(organizationId, engagement
             COALESCE(fu.open_client_followup_count, 0)::int AS open_client_followup_count
        FROM files
        LEFT JOIN LATERAL (
-         SELECT pr.parser_status, pr.output_profile_id, pr.error_code
+         SELECT pr.parser_status, pr.output_profile_id, pr.error_code, pr.retry_count
            FROM kai.intake_parser_runs pr
           WHERE pr.organization_id = files.organization_id
             AND pr.intake_file_id = files.intake_file_id
@@ -137,6 +143,20 @@ export async function listClientEvidencePipelineFiles(organizationId, engagement
           ORDER BY pr.created_at DESC, pr.parser_run_id DESC
           LIMIT 1
        ) r ON true
+       -- Why a confirmed file is still pending its security check: the
+       -- latest non-policy assessment outcome (the safe category of the
+       -- record_security_assessment_diagnostic audit), or none.
+       LEFT JOIN LATERAL (
+         SELECT ae.metadata->>'assessment_category' AS assessment_category
+           FROM kai.audit_events ae
+          WHERE files.upload_state = 'confirmed'
+            AND files.file_policy_status = 'pending'
+            AND ae.organization_id = files.organization_id
+            AND ae.action = 'record_security_assessment_diagnostic'
+            AND ae.metadata->>'object_id' = files.intake_file_id::text
+          ORDER BY ae.created_at DESC
+          LIMIT 1
+       ) sa ON true
        LEFT JOIN kai.intake_file_profiles p
          ON p.organization_id = files.organization_id
         AND p.intake_file_id = files.intake_file_id

@@ -74,8 +74,10 @@ import {
  * a share lock, so a file blocked mid-chain cannot gain P1-04/P1-05 output.
  *
  * Fails closed (zero work) unless both `KAI_SPRINT2_ENABLED` and
- * `KAI_WORKER_ENABLED` are enabled. Never automatically retries a failed
- * parser run - every activation passes `retry: false`.
+ * `KAI_WORKER_ENABLED` are enabled. Every activation passes `retry: false`:
+ * a failed parser run is retried only when the activation finds its failure
+ * was infrastructure-only and due (`isAutomaticParserRetryDue`); a failure
+ * about the file itself is never retried.
  */
 export const KAI_P1_WORKER_SYNTHETIC_ACTOR_CONTEXT = Object.freeze({
   actorType: "system",

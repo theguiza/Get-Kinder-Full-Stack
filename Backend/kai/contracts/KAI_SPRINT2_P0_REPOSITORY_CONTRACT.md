@@ -1662,6 +1662,13 @@ malware_scan_not_configured:
   exact_keys: status, category
   policy_failure_eligible: false
 
+malware_scan_unavailable:
+  status: failed
+  category: malware_scan_unavailable
+  exact_keys: status, category
+  policy_failure_eligible: false
+  meaning: the configured scanner was unreachable or reported itself unavailable (identity token, transport or timeout failure, or HTTP 429/503); no scan result exists, so the file stays pending and quarantined, and a later confirmation replay re-attempts the assessment
+
 pdf_active_content_detected:
   policy: block
 
