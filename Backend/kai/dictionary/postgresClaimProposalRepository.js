@@ -10,6 +10,7 @@ import {
   getScopedClaimByEvidenceIdentity,
   getScopedClaimEvidenceLinkByClaimId,
   getScopedClaimReviewQueueItemByClaimId,
+  getScopedEvidenceMeasurementByEvidenceItemId,
 } from "../db/kaiIntakeQueries.js";
 import {
   validateClaimHasLoadBearingEvidence,
@@ -23,6 +24,12 @@ import {
 import { findCurrentEvidenceReviewDecision } from "./postgresHumanReviewDecisionRepository.js";
 import { readEffectiveAllowedUseProhibition } from "./postgresEffectiveAllowedUseResolver.js";
 import { validateEffectiveAllowedUsePermitsOperation } from "../validators/kaiEffectiveAllowedUseValidators.js";
+import {
+  MEASUREMENT_EVIDENCE_TYPE,
+  composeMeasurementClaimStatement,
+  validateComposedStatement,
+  validateMeasurementClaimBasis,
+} from "../validators/kaiSourceMeasurementValidators.js";
 
 /**
  * KAI P2-03 deterministic claim-proposal repository adapter: server-derived-only
@@ -641,8 +648,21 @@ export function createPostgresClaimProposalRepository({
           ...(requirementValidation.warnings || []),
         ];
 
-        const columnName = locatorRow.coordinates?.column_name;
-        const statement = composeClaimStatement({ columnName, locatorFingerprint: locatorRow.locator_fingerprint });
+        // P2-01M: a measurement evidence item's claim states its persisted,
+        // human-defined value; every other evidence item keeps the unchanged
+        // field-presence composition (and so its existing claim identity).
+        let statement;
+        if (evidenceItemRow.evidence_type === MEASUREMENT_EVIDENCE_TYPE) {
+          const measurementRow = await getScopedEvidenceMeasurementByEvidenceItemId({ organizationId, evidenceItemId }, tx);
+          const basis = validateMeasurementClaimBasis({ evidenceItemRow, locatorRow, sourceVersionRow, measurementRow });
+          if (!basis.ok) return continuationFailure(basis);
+          statement = composeMeasurementClaimStatement({ measurementRow, definitionRow: measurementRow });
+          const composable = validateComposedStatement(statement);
+          if (!composable.ok) return continuationFailure(composable);
+        } else {
+          const columnName = locatorRow.coordinates?.column_name;
+          statement = composeClaimStatement({ columnName, locatorFingerprint: locatorRow.locator_fingerprint });
+        }
         const statementFingerprint = computeClaimStatementFingerprint({
           organizationId,
           evidenceItemId,

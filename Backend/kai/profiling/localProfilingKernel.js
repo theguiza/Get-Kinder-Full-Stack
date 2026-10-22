@@ -262,9 +262,13 @@ function summarizeTabularRecords(records, { headerRow = true } = {}) {
   for (let index = 0; index < columnCount; index += 1) {
     columns[index].header_present = typeof header[index] === "string" && header[index].trim().length > 0;
   }
+  // A data record whose every field is missing or blank (an empty line in the
+  // source) carries no data; it is counted here so a record count can exclude it.
+  let blank_record_count = 0;
   for (const row of dataRows) {
     const signature = JSON.stringify(Array.from({ length: columnCount }, (_, index) => row[index] ?? ""));
     rowSignatures.set(signature, (rowSignatures.get(signature) ?? 0) + 1);
+    let recordHasValue = false;
     for (let index = 0; index < columnCount; index += 1) {
       const value = row[index] ?? "";
       const hint = primitiveType(value);
@@ -272,10 +276,12 @@ function summarizeTabularRecords(records, { headerRow = true } = {}) {
         columns[index].missing_count += 1;
       } else {
         columns[index].present_count += 1;
+        recordHasValue = true;
       }
       if (hint !== "missing") columns[index].primitive_type_hints[hint] += 1;
       if (isFormulaLike(value)) formula_count += 1;
     }
+    if (!recordHasValue) blank_record_count += 1;
   }
 
   const duplicate_row_count = [...rowSignatures.values()]
@@ -309,6 +315,7 @@ function summarizeTabularRecords(records, { headerRow = true } = {}) {
     header_count: headers.filter((headerShape) => headerShape.present).length,
     headers,
     row_count: dataRows.length,
+    blank_record_count,
     column_count: columnCount,
     field_count: columnCount,
     formula_count,
@@ -356,6 +363,7 @@ async function profileCsv({ extension, declaredMime, bytes }) {
       counts: Object.freeze({
         header_count: summary.header_count,
         row_count: summary.row_count,
+        blank_record_count: summary.blank_record_count,
         column_count: summary.column_count,
         field_count: summary.field_count,
         formula_count: summary.formula_count,

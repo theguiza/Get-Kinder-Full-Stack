@@ -1369,3 +1369,30 @@ export async function listClientFollowupWorkflowsForOrganization({ organizationI
   );
   return rows;
 }
+
+/**
+ * The persisted measurement and definition behind one measurement evidence
+ * item (P2-01M), read on the caller's transaction for P2-03 claim composition.
+ */
+export async function getScopedEvidenceMeasurementByEvidenceItemId({ organizationId, evidenceItemId }, db = pool) {
+  const { rows } = await db.query(
+    `SELECT m.evidence_item_id::text AS evidence_item_id,
+            m.organization_id::text AS organization_id,
+            m.source_version_id::text AS source_version_id,
+            m.source_measurement_definition_id::text AS source_measurement_definition_id,
+            m.measurement_type, m.measured_value::int AS measured_value, m.unit_label, m.calculation_method,
+            m.profile_canonical_sha256, m.total_record_count::int AS total_record_count,
+            m.blank_record_count::int AS blank_record_count, m.duplicate_record_count::int AS duplicate_record_count,
+            d.counted_unit, d.unit_label AS definition_unit_label, d.definition_status,
+            d.source_version_id::text AS definition_source_version_id,
+            d.period_start::text AS period_start, d.period_end::text AS period_end
+       FROM kai.evidence_measurements m
+       JOIN kai.source_measurement_definitions d
+         ON d.source_measurement_definition_id = m.source_measurement_definition_id
+        AND d.organization_id = m.organization_id
+      WHERE m.organization_id = $1::uuid
+        AND m.evidence_item_id = $2::uuid`,
+    [organizationId, evidenceItemId],
+  );
+  return rows[0] || null;
+}

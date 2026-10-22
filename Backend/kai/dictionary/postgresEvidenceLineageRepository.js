@@ -785,3 +785,18 @@ export const __evidenceLineageRepositoryTestables = Object.freeze({
   ConcurrentStateChangedError,
   MalformedInsertedRowError,
 });
+
+// Shared with the P2-01M record-count measurement repository so its evidence
+// gets the identical evidence-review queue item, record shapes, and error mapping.
+export const __evidenceLineageRepositorySharedWrites = Object.freeze({
+  insertEvidenceReviewQueueItemIfAbsent,
+  rowToEvidenceRecord,
+  rowToLocatorRecord,
+  rowToReviewQueueRecord,
+  rowToSourceVersionRecord,
+  shapeEvidenceLineageError,
+  MalformedInsertedRowError,
+  ConcurrentStateChangedError,
+  REVIEW_QUEUE_TYPE,
+  REVIEW_TARGET_OBJECT_TYPE,
+});

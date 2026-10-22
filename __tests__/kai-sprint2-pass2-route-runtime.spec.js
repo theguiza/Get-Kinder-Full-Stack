@@ -425,6 +425,9 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // KAI P2-01 evidence-lineage extraction surface (additive; every prior
     // entry preserved verbatim).
     "/admin/organizations/:organizationId/source-versions/:sourceVersionId/evidence-extraction",
+    // KAI P2-01M record-count measurement surface (additive; every prior
+    // entry preserved verbatim).
+    "/admin/organizations/:organizationId/source-versions/:sourceVersionId/record-count-measurement",
     // KAI Data Sources completion package: organization-scoped browse read of
     // governed sources/source versions (additive; every prior entry
     // preserved verbatim).

@@ -103,6 +103,7 @@ let boardReportingCandidateExportManifestMarkdownServicePromise = null;
 let evidenceLineageServicePromise = null;
 let evidenceCoverageAssessmentServicePromise = null;
 let claimProposalServicePromise = null;
+let sourceMeasurementServicePromise = null;
 let claimGapFollowupServicePromise = null;
 let conflictReviewCandidateServicePromise = null;
 let generatedContentServicePromise = null;
@@ -2791,6 +2792,44 @@ router.post(
           actorContext,
           now,
         }),
+      });
+    });
+  },
+);
+
+async function getSourceMeasurementService() {
+  if (intakeServiceOverride?.recordSourceRecordCountMeasurement) return intakeServiceOverride;
+  sourceMeasurementServicePromise ||= import("../services/kaiSourceMeasurementService.js");
+  return sourceMeasurementServicePromise;
+}
+
+/**
+ * KAI P2-01M record-count measurement route. Same organization/source-version
+ * path, JSON-only body, and server-resolved actorContext/now as the P2-01
+ * evidence-extraction route; the body is only the human definition of what
+ * one data record represents (the service validates every field).
+ */
+router.post(
+  "/admin/organizations/:organizationId/source-versions/:sourceVersionId/record-count-measurement",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    if (!metadataContentTypeIsSupported(req)) return sendKaiError(res, "unsupported_media_type");
+    const identifiers = sourceVersionEvidenceExtractionIdentifiers(req);
+    if (!identifiers) {
+      return sendKaiError(res, "validation_blocker", {
+        blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id_or_source_version_id")],
+      });
+    }
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    return invokeService(res, async () => {
+      const service = await getSourceMeasurementService();
+      return service.recordSourceRecordCountMeasurement({
+        organizationId: identifiers.organizationId,
+        sourceVersionId: identifiers.sourceVersionId,
+        definition: requestPayload(req),
+        actorContext,
+        now,
       });
     });
   },

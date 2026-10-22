@@ -42269,3 +42269,148 @@ No production code change, push, deployment, production/shared database,
 migration/schema, flag, tenant, credential, real client data, or
 `00_KAI_CURRENT_STATE.md` change. This is the single package-end evidence
 update in the living ExecPlan.
+
+### Plan A Prompt 4: minimum source-derived measurement evidence, P2-01M (2026-10-22)
+
+**Owner authorization (USER_CONFIRMED):** the owner's "KAI Plan A: Implement
+Minimum Source-Derived Measurement Evidence" prompt authorizes the smallest
+additive, source-controlled schema migration for one source-derived
+measurement and its governed evidence/claim representation, the matching
+local service, repository, validator, and test changes, and applying that
+migration only in disposable local synthetic PostgreSQL created by the
+repository runners. Not authorized: production or shared database migration,
+deployment, flags, credentials, destructive actions, real data, push, GK
+review or release authority changes, reinstating the automatic P2-04 hook,
+Current State.
+
+**Start (TOOL_VERIFIED):** `main` at `a142c9f`, clean.
+
+**Root cause (TOOL_VERIFIED):** the three P2-01 CHECKs (evidence type, data
+class, column locator) still pinned every evidence item to a field-presence
+fact. P2-03 composes claims from the locator only, and statement fingerprints
+are claim/evidence identity. No representation could carry a value, unit,
+definition, period, or method, and nothing recorded what a data record
+represents. The P1 profile counted CSV records (`row_count`, including empty
+lines) but not blank records.
+
+**Change:**
+- **Migration** `kai_sprint2_p2_01m_source_record_count_measurement.sql`
+  (and its rollback), additive only:
+  - One new value each for `evidence_type`
+    (`source_record_count_measurement`), `data_class`
+    (`source_derived_aggregate`), and `locator_type` (`source_data_records`,
+    coordinates exactly `{"scope":"data_records_after_header"}`), plus a
+    type/class pairing CHECK.
+  - Every other evidence governance pin is untouched: sensitivity, support
+    strength, review status, internal-only, and audience flags.
+  - New `kai.source_measurement_definitions`: the human-confirmed meaning of
+    one counted record, unit, definition, inclusion and exclusion rules, and
+    an optional period. One immutable definition per version and type, with
+    fingerprint, label, text, and period CHECKs.
+  - New `kai.evidence_measurements`: value, unit, method, profile hash, and
+    total/blank/duplicate counts, with `measured_value = total - blank`
+    enforced, bound 1:1 to the evidence item, the definition, and the source
+    version.
+  - No existing row is read, rewritten, or re-keyed. The rollback refuses
+    while measurements exist.
+- **P1** `localProfilingKernel.js`: CSV counts gain `blank_record_count`
+  (records whose every field is empty). Existing profiles are unchanged and
+  are refused for measurement rather than assumed to have no blanks.
+- **New operation** `record_source_record_count_measurement`
+  (`kaiSourceMeasurementService.js`, `postgresSourceMeasurementRepository.js`,
+  `kaiSourceMeasurementValidators.js`, POST
+  `.../source-versions/:sourceVersionId/record-count-measurement`):
+  - Authority is the P2-01 extraction role set (organization membership:
+    `client_admin` or a GK role).
+  - One transaction, with the unchanged P2-01 lineage/currentness and
+    effective allowed-use validators, the profile-hash binding, the
+    measurement derived only from committed P1 counts (no model, no raw
+    read, no row-level data), the immutable definition, the whole-version
+    locator, the internal-only GK-review-gated evidence item, its
+    evidence-review queue item, and one required actor-attributed audit.
+  - Identical repeats replay with zero writes. A different definition is 409
+    `measurement_definition_already_recorded`. Concurrent calls serialize on
+    the candidate lock.
+  - A missing or incomplete definition writes nothing and returns
+    `measurement_definition_*` / `measurement_period_*` blockers. Duplicates
+    are counted and reported, because no rule makes them invalid.
+- **P2-03:** a measurement evidence item's claim is composed from the
+  persisted measurement and definition rows, never from the evidence
+  statement. It passes `validateMeasurementClaimBasis` (same evidence,
+  version, definition, locator, arithmetic, and profile hash). Every other
+  evidence item keeps the unchanged field-presence composition and identity.
+- **Unchanged:** P2-04/P2-06/eligibility code, GK review, release, export,
+  and generation. No automatic P2-04.
+
+**Verification (TOOL_VERIFIED; sentinel `DATABASE_URL`; disposable loopback PostgreSQL only):**
+
+| Command | Pass | Fail | Skipped |
+| --- | --- | --- | --- |
+| `node scripts/kai-sprint2-p2-01m-source-record-count-measurement-local-postgres.js`: legacy seed phase (pre-migration) | 2 | 0 | 0 |
+| same runner, after migration: P2-01M integration (12) + unchanged P2-06 integration and boundary suites | 45 | 0 | 0 |
+| same runner: legacy evidence/locator/claim snapshot identical across the migration and its re-application; rollback refused with measurements present, nothing changed | ok | | |
+| P2-01M unit spec | 8 | 0 | 0 |
+| `npm test` (baseline 5672/0/115 at `801effc`) | 5681 | 0 | 116 |
+| `npm run verify:kai-sprint2-api-contract` | 71 | 0 | 0 |
+| Existing runners: P2-01 lineage 17, P2-01 handoff 7, P2-02 7, P2-03 15, P2-04 18, P2-05 18, P2-06 33, P1 worker 7+32, P1-04 12, P1-08 19 | 185 | 0 | 0 |
+| Browser: evidence-to-draft 21, source-to-impact 16, reviewed-evidence claim 12, evidence pipeline 8 | 57 | 0 | 0 |
+| `git diff --check` | ok | | |
+
+**Measurement proof (TOOL_VERIFIED, synthetic):**
+- **Fixture:** a session log of 6 CSV data records after the header. One is
+  empty, two are identical, and one has a missing attendee value.
+- **Counts:** the real P1 kernel gave row_count 6, blank 1, duplicates 2. An
+  independent count of the same bytes gave 5 non-empty records. The governed
+  value is 5 "programme sessions" for 2026-09-01 to 2026-09-30, method
+  `p1_csv_profile_data_records_excluding_blank_v1`, bound to the source
+  version, the `source_data_records` locator, and the profile hash.
+- **Claim:** "The promoted source records 5 programme sessions for the
+  reporting period 2026-09-01 to 2026-09-30 (record count: one programme
+  session per CSV data record; 1 blank record excluded, 2 exact-duplicate
+  records included)". It is proposed, `needs_gk_review`, `unassessed`, and
+  internal-only. It contains no causal, outcome, rate, or denominator
+  language, and no row value appears in any response.
+- **Negatives (zero writes):** missing, incomplete, unsafe, unknown-field,
+  and invalid-period definitions; client_reviewer, client_contributor,
+  another organization's administrator, a non-human actor, and the feature
+  flag off; effective `not_allowed`; a superseded version; a pre-P2-01M
+  profile without blank counting; a non-CSV profile; a different definition
+  on a recorded version. The mixed type/class pairing is rejected by the
+  database.
+- **Legacy:** field-presence evidence and a claim created through the real
+  P2-01/P2-03 paths before the migration replay unchanged (same ids,
+  statements, fingerprints).
+- **No premature P2-04:** zero gap and follow-up rows after the measurement
+  and the claim.
+- **P2-06 and eligibility:**
+  - Before P2-04, traceability returns the existing
+    `gap_dimension_requires_missing_p204_state`.
+  - After the explicit P2-04 step it traces, `eligible=false`.
+  - After GK evidence review `supported` and GK claim review `approved`
+    (internal), the blockers are `coverage_dimension_unresolved` and
+    `client_followup_unresolved`.
+  - After GK internal coverage acceptance of each unresolved dimension and
+    `client_reviewer` completion of the follow-ups, the existing evaluator
+    returns `eligible=true` with no blockers. The claim and evidence
+    statements carry the value, period, and arithmetic. Every accepted
+    limitation is attached, funder use stays ineligible, and the existing
+    eligible-claims reader lists the claim with `reviewed_supported`.
+
+**Remaining:**
+- Production/shared database application of the P2-01M migration, and live
+  runtime verification: NOT_CONFIRMED, separately authorized.
+- Only CSV sources profiled after this change qualify. An existing source
+  needs a new intake version to be re-profiled with blank-record counting.
+- The internal eligibility path still needs the explicit P2-04 step, the GK
+  reviews, the internal coverage acceptances, and a `client_reviewer` to
+  complete the follow-ups. The single-administrator follow-up dependency is
+  still an owner decision.
+- No UI exists for recording a definition (API only). Generating an internal
+  Evidence Summary from the eligible measured claim was not executed (it
+  needs a model provider; generation is out of scope).
+- Production state NOT_CONFIRMED.
+
+**Status:** PLAN_A_P2_01M_SOURCE_RECORD_COUNT_MEASUREMENT_COMPLETE_LOCAL_SYNTHETIC.
+No push, deployment, production/shared database, flag, tenant, credential,
+real client data, or `00_KAI_CURRENT_STATE.md` change. This is the single
+package-end evidence update in the living ExecPlan.
