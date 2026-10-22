@@ -20,7 +20,7 @@ import {
 } from "./teamAccessLogic.js";
 
 const ROLE_DESCRIPTIONS = Object.freeze([
-  ["client_admin", "Uploads files, manages Projects and the Improvement Plan, and manages team & access."],
+  ["client_admin", "Uploads files, reviews their sensitivity and allowed use, prepares sources, extracts evidence, proposes claims and creates internal drafts for Get Kinder review; manages Projects, the Improvement Plan, and team & access."],
   ["client_reviewer", "Views your organization's KAI workspace and answers client follow-ups."],
   ["client_contributor", "Views your organization's KAI workspace."],
   ["gk_operator", "Get Kinder staff who run intake, processing and source review for this organization (source review also needs the global Get Kinder operator role, which staff onboarding sets up)."],

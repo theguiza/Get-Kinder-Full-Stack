@@ -18,6 +18,7 @@ import {
 } from "../Backend/kai/services/kaiOrganizationJoinRequestReviewService.js";
 import { getOrganizationAccessCapabilities } from "../Backend/kai/services/kaiOrganizationAccessCapabilitiesService.js";
 import { resolveKaiActorContext } from "../Backend/kai/auth/kaiActorContext.js";
+import { STORED_ORGANIZATION_MEMBERSHIP_SOURCE } from "../Backend/kai/auth/kaiOrganizationMembershipSource.js";
 import { projectOrganizationAccessCapabilities } from "../frontend/impactEvidenceLibraryLogic.js";
 import {
   TEAM_ACCESS_ROLE_OPTIONS,
@@ -833,6 +834,39 @@ test("13. existing organization creation, join, switching, Home join review, and
   // The /admin modal still uses the shared helpers it used before.
   assert.match(adminSource, /buildKaiOrganizationRoleGrantPayload\(roleInput, \{ includeGkRoles: globalRolesVisible \}\)/);
   assert.match(adminSource, /Derived — not editable here/);
+});
+
+test("14. the role legend describes what the server's capability answer admits for each client role, and nothing more", async () => {
+  const legend = (role) => viewSource.match(new RegExp(`\\["${role}", "([^"]+)"\\]`))?.[1];
+  const ADMIN_OPERATIONS = ["reviewSensitivity", "promoteSource", "extractEvidence", "proposeClaim", "generateClaimGapFollowups", "generateDrafts"];
+  const GK_ONLY_OPERATIONS = ["recordEvidenceReview", "recordClaimReview", "reviewGeneratedDrafts", "generateAllDraftTypes", "acceptCoverageLimitation"];
+
+  assert.equal(legend("client_admin"), "Uploads files, reviews their sensitivity and allowed use, prepares sources, extracts evidence, proposes claims and creates internal drafts for Get Kinder review; manages Projects, the Improvement Plan, and team & access.");
+  // As resolveKaiActorContext emits them: tagged provenance and an active KAI account.
+  const derived = { ...ACTORS.legacyAdmin, kaiUserStatus: "active" };
+  const stored = actor(USERS.storedAdmin, [member(ORG_A, "client_admin", { source: STORED_ORGANIZATION_MEMBERSHIP_SOURCE })], { kaiUserStatus: "active" });
+  for (const [name, actorContext] of [["derived", derived], ["stored", stored]]) {
+    const capabilities = await capabilitiesFor(actorContext, ORG_A);
+    for (const key of ["intakeContribution", "projectManagement", "improvementPlanManagement", "organizationAccessManagement"]) assert.equal(capabilities[key], true, `${name} ${key}`);
+    for (const key of ADMIN_OPERATIONS) assert.equal(capabilities.workflowOperations[key], true, `${name} ${key}`);
+    // Get Kinder review and release stay with Get Kinder (Operating Model section 11).
+    for (const key of GK_ONLY_OPERATIONS) assert.equal(capabilities.workflowOperations[key], false, `${name} ${key}`);
+    assert.equal(capabilities.internalKnowledgeWorkspace, false, name);
+  }
+  assert.doesNotMatch(legend("client_admin"), /approv|releas|export|publish/i);
+  // Source preparation still needs an active KAI account.
+  assert.equal((await capabilitiesFor({ ...stored, kaiUserStatus: "deactivated" }, ORG_A)).workflowOperations.promoteSource, false);
+
+  assert.equal(legend("client_reviewer"), "Views your organization's KAI workspace and answers client follow-ups.");
+  assert.equal(legend("client_contributor"), "Views your organization's KAI workspace.");
+  for (const name of ["reviewer", "contributor"]) {
+    const capabilities = await capabilitiesFor(ACTORS[name], ORG_A);
+    assert.equal(capabilities.clientFollowupReview, name === "reviewer", name);
+    for (const key of ["intakeContribution", "projectManagement", "improvementPlanManagement", "organizationAccessManagement"]) assert.equal(capabilities[key], false, `${name} ${key}`);
+    for (const key of [...ADMIN_OPERATIONS, ...GK_ONLY_OPERATIONS]) assert.equal(capabilities.workflowOperations[key], false, `${name} ${key}`);
+  }
+  // Another organization's administrator is refused this organization's answer.
+  assert.equal((await capabilitiesFor(ACTORS.otherOrgAdmin, ORG_A)).error.code, "authorization_denied");
 });
 
 test("feature flag: with KAI_SPRINT2_ENABLED off, the capability read and the roster and role services do nothing", async () => {

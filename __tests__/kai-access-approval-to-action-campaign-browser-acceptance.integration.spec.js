@@ -2810,7 +2810,7 @@ async function runBrowserAcceptance() {
       assert.ok(body.includes(`Team & Access for ${ORG_A_NAME}`) || body.includes("Team & Access"), "the existing page");
       const derivedRow = await memberRowText(tamPage, rowKey(USERS.boundAdmin));
       assert.ok(derivedRow && /Get Kinder organization admin/.test(derivedRow), "the binding-derived administrator is shown as derived");
-      assert.ok(body.includes("Uploads files, manages Projects"), "client role descriptions stay");
+      assert.ok(body.includes("Uploads files, reviews their sensitivity and allowed use, prepares sources"), "client role descriptions stay");
       for (const marker of ["Platform administration", "Grant global role", "Get Kinder access here"]) {
         assert.ok(!body.includes(marker), `no ${marker} for a client administrator`);
       }
