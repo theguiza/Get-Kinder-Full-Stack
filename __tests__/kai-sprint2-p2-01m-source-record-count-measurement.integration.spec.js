@@ -49,6 +49,7 @@ async function runSuite() {
   const { getClaimTraceabilitySummary } = await import("../Backend/kai/services/kaiClaimTraceabilityService.js");
   const { createPostgresClaimTraceabilityRepository } = await import("../Backend/kai/dictionary/postgresClaimTraceabilityRepository.js");
   const { listEligibleClaimsForAudience } = await import("../Backend/kai/services/kaiEligibleClaimsForAudienceService.js");
+  const { filterCurrentOrganizationEvidenceGaps } = await import("../Backend/kai/dictionary/postgresOrganizationEvidenceGapCurrentStateRepository.js");
   const { createPostgresEligibleClaimsForAudienceRepository } = await import("../Backend/kai/dictionary/postgresEligibleClaimsForAudienceRepository.js");
   const { extractEvidenceFromSourceVersion } = await import("../Backend/kai/services/kaiEvidenceLineageService.js");
   const { recordEvidenceReviewDecision, recordClaimReviewDecision } = await import("../Backend/kai/services/kaiHumanReviewService.js");
@@ -56,6 +57,12 @@ async function runSuite() {
   const { acceptInternalCoverageLimitation } = await import("../Backend/kai/services/kaiCoverageReviewDecisionService.js");
   const { createPostgresCoverageReviewDecisionRepository } = await import("../Backend/kai/dictionary/postgresCoverageReviewDecisionRepository.js");
   const { completeClientFollowup } = await import("../Backend/kai/services/kaiClientFollowupCompletionService.js");
+  const { readEffectiveAiProcessingProhibitionsForClaims } = await import("../Backend/kai/dictionary/postgresEffectiveAllowedUseResolver.js");
+  const { validateEffectiveAllowedUsePermitsOperation } = await import("../Backend/kai/validators/kaiEffectiveAllowedUseValidators.js");
+  const { ensureSensitivityReviewQueueItemAfterProfiling } = await import("../Backend/kai/services/kaiReviewQueueService.js");
+  const { createPostgresReviewQueueRepository } = await import("../Backend/kai/dictionary/postgresReviewQueueRepository.js");
+  const { recordSensitivityAllowedUseDecision } = await import("../Backend/kai/services/kaiSensitivityAllowedUseReviewService.js");
+  const { createPostgresSensitivityAllowedUseReviewRepository } = await import("../Backend/kai/dictionary/postgresSensitivityAllowedUseReviewRepository.js");
   const { createPostgresClientFollowupCompletionRepository } = await import("../Backend/kai/dictionary/postgresClientFollowupCompletionRepository.js");
   const { createPostgresEvidenceLineageRepository } = await import("../Backend/kai/dictionary/postgresEvidenceLineageRepository.js");
 
@@ -256,7 +263,13 @@ async function runSuite() {
     );
   const propose = (evidenceItemId, actor = ADMIN) =>
     proposeClaim({ organizationId: ORG, evidenceItemId, actorContext: actor, now: NOW },
-      { env: ENV, claimProposalRepository: claimRepository, metadataOnlyAudit: noAudit() });
+      { env: ENV, claimProposalRepository: claimRepository, metadataOnlyAudit: noAudit(), claimGapFollowupRepository: gapRepository, claimGapFollowupMetadataOnlyAudit: noAudit() });
+  const gapStateOf = async (claimId) => ({
+    gaps: (await query("SELECT dimension_key, assessment_status FROM kai.gap_log_items WHERE organization_id = $1::uuid AND claim_id = $2::uuid ORDER BY dimension_key", [ORG, claimId]))
+      .map((row) => [row.dimension_key, row.assessment_status]),
+    followups: (await query("SELECT dimension_key FROM kai.client_followup_items WHERE organization_id = $1::uuid AND claim_id = $2::uuid ORDER BY dimension_key", [ORG, claimId]))
+      .map((row) => row.dimension_key),
+  });
   const trace = (claimId) => getClaimTraceabilitySummary(
     { organizationId: ORG, claimId, requestedAudience: "internal", actorContext: GK_REVIEWER },
     { env: ENV, claimTraceabilityRepository: traceRepository },
@@ -414,7 +427,22 @@ async function runSuite() {
     assert.deepEqual(await measurementCounts(), before);
   });
 
-  test("P2-03: the proposed claim states the measured value and definition, stays unreviewed, and creates no follow-up", async () => {
+  // Measured-claim gap state as P2-04 records it at proposal (Prompt 5): the
+  // human definition answers definition, entity level, denominator, and
+  // period; the period stays a visible, attested-not-verified limitation;
+  // missingness and duplicates are the committed counts; small-cell risk,
+  // conflicting sources, requirement alignment, and field coverage are the
+  // unchanged source-level dimensions.
+  const MEASURED_GAPS = [
+    ["conflicting_source_indicators", "unresolved"],
+    ["duplicates", "resolved_risk_flagged"],
+    ["missingness", "resolved_risk_flagged"],
+    ["requirement_alignment", "unresolved"],
+    ["small_cell_risk", "unresolved"],
+    ["time_period_clarity", "resolved_risk_flagged"],
+  ];
+
+  test("P2-03: the proposed claim states the measured value, gets its deterministic gap state in the same command, and creates no client follow-up", async () => {
     const before = await measurementCounts();
     const proposal = await propose(ids.measurementEvidenceId);
     assert.equal(proposal.ok, true, JSON.stringify(proposal));
@@ -424,14 +452,43 @@ async function runSuite() {
       "The promoted source records 5 programme sessions for the reporting period 2026-09-01 to 2026-09-30 (record count: one programme session per CSV data record; 1 blank record excluded, 2 exact-duplicate records included).");
     assert.deepEqual([claim.claim_type, claim.claim_status, claim.claim_review_status, claim.claim_strength, claim.internal_only, claim.export_ready],
       ["finding", "proposed", "needs_gk_review", "unassessed", true, false]);
+    assert.deepEqual([claim.llm_processing_allowed, claim.public_use_allowed, claim.funder_use_allowed], [false, false, false]);
     assert.equal(claim.evidence_item_id, ids.measurementEvidenceId);
     assert.doesNotMatch(claim.statement, /because|caused|improv|impact|increase|per cent|%|participants|households/i, "no causal, outcome, or denominator language");
+    assert.deepEqual(proposal.data.claim_gap_state, { status: "generated", gap_item_count: MEASURED_GAPS.length, client_followup_item_count: 0, error_code: null });
+    assert.deepEqual(await gapStateOf(claim.claim_id), { gaps: MEASURED_GAPS, followups: [] });
     const replay = await propose(ids.measurementEvidenceId);
     assert.equal(replay.data.replayed, true);
     assert.equal(replay.data.claim.claim_id, claim.claim_id);
+    assert.equal(replay.data.claim_gap_state.status, "replayed", "repeated preparation is idempotent");
     const after = await measurementCounts();
-    assert.deepEqual([after.claims, after.gaps, after.followups], [before.claims + 1, before.gaps, before.followups], "no premature P2-04 state");
+    assert.deepEqual([after.claims, after.gaps, after.followups], [before.claims + 1, before.gaps + MEASURED_GAPS.length, before.followups], "no client follow-up for a measured claim");
     ids.measurementClaimId = claim.claim_id;
+  });
+
+  test("zero counts are clear, positive counts stay visible, and a definition without a period is a recorded limitation, not a client question", async () => {
+    const cleanCsv = "session_date,programme,attendees\n2026-09-02,literacy,12\n2026-09-09,mentoring,9\n";
+    const clean = await seedPromotedSource({ profile: await kernelProfile(cleanCsv) });
+    const noPeriod = { ...DEFINITION };
+    delete noPeriod.period_start;
+    delete noPeriod.period_end;
+    const recorded = await record(clean.sourceVersionId, { definition: noPeriod });
+    assert.equal(recorded.ok, true, JSON.stringify(recorded));
+    assert.deepEqual([recorded.data.measurement.measured_value, recorded.data.measurement.blank_record_count, recorded.data.measurement.duplicate_record_count], [2, 0, 0]);
+    const proposal = await propose(recorded.data.evidenceItem.evidence_item_id);
+    assert.equal(proposal.ok, true, JSON.stringify(proposal));
+    assert.match(proposal.data.claim.statement, /records 2 programme sessions with no reporting period defined/);
+    const state = await gapStateOf(proposal.data.claim.claim_id);
+    assert.deepEqual(state.followups, []);
+    const gapKeys = state.gaps.map(([key]) => key);
+    assert.equal(gapKeys.includes("missingness"), false, "zero missing values in counted records is clear");
+    assert.equal(gapKeys.includes("duplicates"), false, "zero duplicates is clear");
+    assert.ok(state.gaps.some(([key, status]) => key === "time_period_clarity" && status === "resolved_risk_flagged"), "no period stays a limitation");
+    const traced = await trace(proposal.data.claim.claim_id);
+    assert.equal(traced.ok, true, JSON.stringify(traced));
+    assert.equal(traced.data.dimensions.missingness.assessment_status, "resolved_clear");
+    assert.equal(traced.data.dimensions.duplicates.assessment_status, "resolved_clear");
+    assert.equal(traced.data.dimensions.denominator_clarity.assessment_status, "resolved_clear");
   });
 
   test("legacy records created before the migration keep their identities, and their P2-01/P2-03 replays are unchanged", async () => {
@@ -475,28 +532,62 @@ async function runSuite() {
     assert.equal(proposal.ok, true, JSON.stringify(proposal));
     assert.equal(proposal.data.claim.statement,
       `The promoted source contains the committed data-dictionary field "field_1" identified by locator ${locatorRow.locator_fingerprint}.`);
+    // A field-presence claim keeps today's lifecycle: no gap state at
+    // proposal, P2-06 still needs the explicit P2-04 step, and that step still
+    // routes its unresolved client-answerable dimensions as follow-ups.
+    assert.equal(proposal.data.claim_gap_state, undefined);
+    assert.equal(proposal.data.measurementClaim, undefined);
+    const untraced = await trace(proposal.data.claim.claim_id);
+    assert.equal(untraced.data?.traceability_conflict_reason, "gap_dimension_requires_missing_p204_state");
+    const legacyGaps = await generateClaimGapFollowups(
+      { organizationId: ORG, claimId: proposal.data.claim.claim_id, actorContext: ADMIN, now: NOW },
+      { env: ENV, claimGapFollowupRepository: gapRepository, metadataOnlyAudit: noAudit() },
+    );
+    assert.equal(legacyGaps.ok, true, JSON.stringify(legacyGaps));
+    assert.deepEqual(legacyGaps.data.clientFollowupItems.map((row) => row.dimension_key).sort(),
+      ["definition_clarity", "denominator_clarity", "entity_level_clarity", "time_period_clarity"]);
+    const legacyState = await gapStateOf(proposal.data.claim.claim_id);
+    // Same source version, legacy rule unchanged: with no committed P1-04
+    // finding, missingness and duplicates stay unresolved for the field claim.
+    assert.ok(legacyState.gaps.some(([key, status]) => key === "missingness" && status === "unresolved"), JSON.stringify(legacyState));
+    assert.ok(legacyState.gaps.some(([key, status]) => key === "duplicates" && status === "unresolved"), JSON.stringify(legacyState));
+    assert.equal((await trace(proposal.data.claim.claim_id)).ok, true);
     // The database still rejects a mixed type/class pairing.
     await assert.rejects(() => query(
       `UPDATE kai.evidence_items SET data_class = 'source_derived_aggregate' WHERE evidence_item_id = $1::uuid`, [evidenceRow.evidence_item_id]),
     /evidence_items_p2_01m_type_class_pairing_check/);
   });
 
-  test("P2-06/eligibility: the measured claim needs the explicit P2-04 step, then traces with its value and stays ineligible until GK review", async () => {
-    const before = await trace(ids.measurementClaimId);
-    console.log(`[p2-01m] traceability before P2-04: ${JSON.stringify(before)}`);
-    assert.equal(before.ok, false);
-    assert.equal(before.error.code, "conflict_current_state_changed");
-    assert.equal(before.data.traceability_conflict_reason, "gap_dimension_requires_missing_p204_state");
-    const gaps = await generateClaimGapFollowups(
+  test("P2-06: the measured claim traces at once (no manual P2-04), its snapshot agrees with recomputation, and an explicit P2-04 replays", async () => {
+    const traced = await trace(ids.measurementClaimId);
+    assert.equal(traced.ok, true, JSON.stringify(traced));
+    console.log(`[p2-01m] traceability after proposal: eligible=${traced.data.eligible} blockers=${JSON.stringify(traced.data.blockerCodes)}`);
+    assert.equal(traced.data.eligible, false, "an unreviewed measured claim is not eligible");
+    const dims = Object.fromEntries(Object.entries(traced.data.dimensions).map(([key, value]) => [key, value.assessment_status]));
+    assert.deepEqual(dims, {
+      missingness: "resolved_risk_flagged",
+      duplicates: "resolved_risk_flagged",
+      definition_clarity: "resolved_clear",
+      denominator_clarity: "resolved_clear",
+      time_period_clarity: "resolved_risk_flagged",
+      entity_level_clarity: "resolved_clear",
+      small_cell_risk: "unresolved",
+      conflicting_source_indicators: "unresolved",
+      requirement_alignment: "unresolved",
+      coverage_gaps: "resolved_clear",
+    });
+    const before = await measurementCounts();
+    const explicit = await generateClaimGapFollowups(
       { organizationId: ORG, claimId: ids.measurementClaimId, actorContext: ADMIN, now: NOW },
       { env: ENV, claimGapFollowupRepository: gapRepository, metadataOnlyAudit: noAudit() },
     );
-    assert.equal(gaps.ok, true, JSON.stringify(gaps));
-    const traced = await trace(ids.measurementClaimId);
-    assert.equal(traced.ok, true, JSON.stringify(traced));
-    console.log(`[p2-01m] traceability after explicit P2-04: eligible=${traced.data.eligible} blockers=${JSON.stringify(traced.data.blockerCodes)}`);
-    assert.equal(traced.data.eligible, false, "an unreviewed measured claim is not eligible");
-    assert.ok(JSON.stringify(traced.data).includes(ids.measurementEvidenceId), "traceability resolves the measurement evidence lineage");
+    assert.deepEqual([explicit.ok, explicit.data.replayed], [true, true]);
+    assert.deepEqual(await measurementCounts(), before);
+    // The organization gap view applies the same rule: every persisted gap of
+    // the measured claim is current.
+    const gapRows = await query("SELECT * FROM kai.gap_log_items WHERE organization_id = $1::uuid AND claim_id = $2::uuid", [ORG, ids.measurementClaimId]);
+    const current = await withTx((tx) => filterCurrentOrganizationEvidenceGaps(tx, { organizationId: ORG, candidateGapRows: gapRows }));
+    assert.equal(current.length, gapRows.length);
     const eligible = await listEligibleClaimsForAudience(
       { organizationId: ORG, requestedAudience: "internal", limit: 100, afterClaimId: null, actorContext: GK_REVIEWER },
       { env: ENV, eligibleClaimsForAudienceRepository: createPostgresEligibleClaimsForAudienceRepository({ runInTransaction: withTx }) },
@@ -525,15 +616,18 @@ async function runSuite() {
       actorContext: GK_REVIEWER, now: NOW,
     }, reviewDeps);
     assert.equal(claimReview.ok, true, JSON.stringify(claimReview));
-    // Still not eligible: unresolved coverage dimensions and open client follow-ups.
+    // Still not eligible: only the unresolved source-level coverage dimensions
+    // remain; no client follow-up exists or is needed.
     const reviewed = await trace(ids.measurementClaimId);
     assert.equal(reviewed.ok, true, JSON.stringify(reviewed));
     assert.equal(reviewed.data.eligible, false);
+    assert.deepEqual(reviewed.data.blockerCodes, ["coverage_dimension_unresolved"]);
     console.log(`[p2-01m] after GK review: blockers=${JSON.stringify(reviewed.data.blockerCodes)}`);
     // The GK reviewer accepts each unresolved internal limitation; a
     // client_reviewer answers the follow-ups (P2-11 role unchanged).
     const coverageRepository = createPostgresCoverageReviewDecisionRepository({ runInTransaction: withTx });
     const unresolved = Object.entries(reviewed.data.dimensions).filter(([, value]) => value.assessment_status === "unresolved").map(([key]) => key).sort();
+    assert.deepEqual(unresolved, ["conflicting_source_indicators", "requirement_alignment", "small_cell_risk"]);
     for (const dimensionKey of unresolved) {
       const accepted = await acceptInternalCoverageLimitation(
         { organizationId: ORG, claimId: ids.measurementClaimId, dimensionKey, actorContext: GK_REVIEWER, now: NOW },
@@ -541,12 +635,19 @@ async function runSuite() {
       );
       assert.equal(accepted.ok, true, `${dimensionKey}: ${JSON.stringify(accepted)}`);
     }
+    // The organization administrator cannot make the GK coverage decision.
+    const adminAcceptance = await acceptInternalCoverageLimitation(
+      { organizationId: ORG, claimId: ids.measurementClaimId, dimensionKey: "small_cell_risk", actorContext: ADMIN, now: NOW },
+      { env: ENV, coverageReviewDecisionRepository: createPostgresCoverageReviewDecisionRepository({ runInTransaction: withTx }), metadataOnlyAudit: noAudit() },
+    );
+    assert.deepEqual([adminAcceptance.ok, adminAcceptance.error?.code], [false, "authorization_denied"]);
     const followupRepository = createPostgresClientFollowupCompletionRepository({ runInTransaction: withTx });
     const followups = await query(
       `SELECT cfi.client_followup_item_id::text, rq.updated_at FROM kai.client_followup_items cfi
          JOIN kai.review_queue_items rq ON rq.organization_id = cfi.organization_id AND rq.queue_type = 'client_followup'
           AND rq.target_object_type = 'client_followup_item' AND rq.target_object_id = cfi.client_followup_item_id
         WHERE cfi.organization_id = $1::uuid AND cfi.claim_id = $2::uuid`, [ORG, ids.measurementClaimId]);
+    assert.equal(followups.length, 0, "a measured claim never waits on a client reviewer");
     for (const row of followups) {
       const completed = await completeClientFollowup({
         organizationId: ORG, claimId: ids.measurementClaimId, clientFollowupItemId: row.client_followup_item_id,
@@ -577,5 +678,65 @@ async function runSuite() {
     const projected = eligible.data.eligibleClaims.find((item) => item.claimId === ids.measurementClaimId);
     assert.deepEqual(projected && [projected.evidenceItemId, projected.sourceVersionId, projected.supportStrength, projected.claimReviewStatus],
       [ids.measurementEvidenceId, ids.main.sourceVersionId, "reviewed_supported", "reviewed"]);
+  });
+
+  test("generation permission is the source's effective AI decision, independent of eligibility: none, permitted, and prohibited", async () => {
+    // The pinned evidence/claim AI flags are false on every row (legacy too)
+    // and are not what generation reads: VAL-KAI-B1A-02-004 reads the file's
+    // current human AI decision (readEffectiveAiProcessingProhibitionsForClaims).
+    const [flags] = await query("SELECT e.llm_processing_allowed AS evidence, c.llm_processing_allowed AS claim FROM kai.claims c JOIN kai.evidence_items e ON e.evidence_item_id = c.evidence_item_id WHERE c.claim_id = $1::uuid", [ids.measurementClaimId]);
+    assert.deepEqual(flags, { evidence: false, claim: false });
+    const verdict = async (claimId) => withTx(async (tx) => {
+      const prohibitions = await readEffectiveAiProcessingProhibitionsForClaims(tx, { organizationId: ORG, claimIds: [claimId] });
+      const prohibition = prohibitions.has(claimId) ? prohibitions.get(claimId) : "claim_lineage_missing";
+      const checked = validateEffectiveAllowedUsePermitsOperation(prohibition, { operation: "create_evidence_summary_draft", objectType: "claim", objectId: claimId });
+      return { prohibition, permitted: checked.ok, code: checked.ok ? null : checked.code };
+    });
+    // No human sensitivity decision on this synthetic source: the existing
+    // rule does not prohibit (eligible=true does not decide this either way).
+    assert.deepEqual(await verdict(ids.measurementClaimId), { prohibition: null, permitted: true, code: null });
+
+    async function measuredClaimWithDecision(llmAllowed) {
+      const seeded = await seedPromotedSource({ profile: ids.profile });
+      const queue = await ensureSensitivityReviewQueueItemAfterProfiling(
+        { organizationId: ORG, intakeSensitivityProfileId: seeded.sensitivityProfileId, now: NOW },
+        { env: ENV, reviewQueueRepository: createPostgresReviewQueueRepository({ runInTransaction: withTx }), metadataOnlyAudit: noAudit() },
+      );
+      assert.equal(queue.ok, true, `queue: ${JSON.stringify(queue)}`);
+      const [item] = await query(
+        "SELECT review_queue_item_id::text, updated_at FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = 'sensitivity_review' AND target_object_id = $2::uuid",
+        [ORG, seeded.sensitivityProfileId]);
+      const decided = await recordSensitivityAllowedUseDecision({
+        organizationId: ORG,
+        intakeSensitivityProfileId: seeded.sensitivityProfileId,
+        reviewQueueItemId: item.review_queue_item_id,
+        expectedUpdatedAt: new Date(item.updated_at).toISOString(),
+        decision: "reviewed",
+        reviewedSnapshot: {
+          reviewed_personal_data_status: "absent", reviewed_minor_data_status: "absent",
+          reviewed_health_housing_justice_immigration_status: "absent", reviewed_indigenous_governance_status: "absent",
+          reviewed_staff_notes_status: "absent", reviewed_story_testimonial_status: "absent", reviewed_small_cell_risk_status: "absent",
+          reviewed_financial_records_status: "absent", reviewed_consent_basis_status: "present", reviewed_allowed_use_status: "allowed",
+          reviewed_llm_processing_allowed: llmAllowed, reviewed_product_learning_allowed: false,
+          reviewed_public_use_allowed: false, reviewed_funder_use_allowed: false,
+        },
+        actorContext: { ...GK_REVIEWER, kaiRoles: ["gk_reviewer"] },
+        now: NOW,
+      }, { env: ENV, sensitivityAllowedUseReviewRepository: createPostgresSensitivityAllowedUseReviewRepository({ runInTransaction: withTx }), metadataOnlyAudit: noAudit() });
+      assert.equal(decided.ok, true, `decision: ${JSON.stringify(decided)}`);
+      const recorded = await record(seeded.sourceVersionId);
+      assert.equal(recorded.ok, true, `measurement under either AI decision: ${JSON.stringify(recorded)}`);
+      const proposal = await propose(recorded.data.evidenceItem.evidence_item_id);
+      assert.equal(proposal.ok, true, `proposal: ${JSON.stringify(proposal)}`);
+      return proposal.data.claim.claim_id;
+    }
+    const permittedClaim = await measuredClaimWithDecision(true);
+    assert.deepEqual(await verdict(permittedClaim), { prohibition: null, permitted: true, code: null });
+    const prohibitedClaim = await measuredClaimWithDecision(false);
+    const refused = await verdict(prohibitedClaim);
+    assert.equal(refused.prohibition, "reviewed_llm_processing_not_allowed");
+    assert.equal(refused.permitted, false);
+    // The prohibited claim is still traceable for its non-AI uses.
+    assert.equal((await trace(prohibitedClaim)).ok, true);
   });
 }

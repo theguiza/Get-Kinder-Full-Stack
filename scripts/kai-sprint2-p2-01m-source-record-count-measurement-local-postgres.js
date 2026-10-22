@@ -111,6 +111,12 @@ try {
   psqlFile("migrations/kai_sprint2_p1_07_intake_source_candidate.sql");
   psqlFile("migrations/kai_sprint2_p1_08_source_promotion.sql");
   psqlFile("migrations/kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger.sql");
+  // The Phase-5 ledger adds its sensitivity-decision lifecycle audit; P2-01
+  // then redefines the shared upload_lifecycle_audit CHECKs from its own older
+  // list. As the P3-01 handling below does, the runner keeps the union so the
+  // real sensitivity-decision service can run here (the AI-permission proof).
+  const operationCheckAfterB1a02 = await constraintCheckExpression("upload_lifecycle_audit", "upload_lifecycle_audit_gate_a_operation_check");
+  const metadataCheckAfterB1a02 = await constraintCheckExpression("upload_lifecycle_audit", "upload_lifecycle_audit_gate_a_metadata_object_check");
   psqlFile("migrations/kai_sprint2_p2_01_evidence_lineage.sql");
   psqlFile("migrations/kai_sprint2_p2_03_claim_proposal.sql");
   psqlFile("migrations/kai_sprint2_p2_04_claim_gap_followup.sql");
@@ -154,6 +160,13 @@ try {
   psqlFile("migrations/kai_sprint2_p13_01_impact_narrative_content_type.sql");
   psqlFile("migrations/kai_sprint2_p14_14_generated_content_type_evolution.sql");
   psqlFile("migrations/kai_sprint2_p3_04_generated_content_review_completion.sql");
+  const operationCheckNow = await constraintCheckExpression("upload_lifecycle_audit", "upload_lifecycle_audit_gate_a_operation_check");
+  const metadataCheckNow = await constraintCheckExpression("upload_lifecycle_audit", "upload_lifecycle_audit_gate_a_metadata_object_check");
+  psqlExec(`ALTER TABLE kai.upload_lifecycle_audit
+    DROP CONSTRAINT upload_lifecycle_audit_gate_a_operation_check,
+    ADD CONSTRAINT upload_lifecycle_audit_gate_a_operation_check CHECK ((${operationCheckNow}) OR (${operationCheckAfterB1a02})),
+    DROP CONSTRAINT upload_lifecycle_audit_gate_a_metadata_object_check,
+    ADD CONSTRAINT upload_lifecycle_audit_gate_a_metadata_object_check CHECK ((${metadataCheckNow}) OR (${metadataCheckAfterB1a02}));`);
   psqlFile("scripts/kai-sprint2-gate-a-smoke-seed.sql");
   psqlFile("scripts/kai-sprint2-p1-04-data-dictionary-quality-smoke-seed.sql");
   psqlFile("scripts/kai-sprint2-p1-05-intake-sensitivity-profile-smoke-seed.sql");

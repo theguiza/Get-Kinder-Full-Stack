@@ -652,7 +652,8 @@ export function createPostgresClaimProposalRepository({
         // human-defined value; every other evidence item keeps the unchanged
         // field-presence composition (and so its existing claim identity).
         let statement;
-        if (evidenceItemRow.evidence_type === MEASUREMENT_EVIDENCE_TYPE) {
+        const isMeasurementClaim = evidenceItemRow.evidence_type === MEASUREMENT_EVIDENCE_TYPE;
+        if (isMeasurementClaim) {
           const measurementRow = await getScopedEvidenceMeasurementByEvidenceItemId({ organizationId, evidenceItemId }, tx);
           const basis = validateMeasurementClaimBasis({ evidenceItemRow, locatorRow, sourceVersionRow, measurementRow });
           if (!basis.ok) return continuationFailure(basis);
@@ -757,6 +758,7 @@ export function createPostgresClaimProposalRepository({
             reviewQueueItem: queueRecord,
             warnings,
             replayed: true,
+            ...(isMeasurementClaim ? { measurementClaim: true } : {}),
           });
         }
 
@@ -787,6 +789,7 @@ export function createPostgresClaimProposalRepository({
           reviewQueueItem: queueRecord,
           warnings,
           replayed: false,
+          ...(isMeasurementClaim ? { measurementClaim: true } : {}),
         });
       });
     } catch (error) {

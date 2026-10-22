@@ -10,7 +10,13 @@ import {
   getScopedPromotionDecisionBySourceVersionId,
   getScopedEvidenceReviewQueueItemByEvidenceItemId,
   getScopedDataDictionaryById,
+  getScopedEvidenceMeasurementByEvidenceItemId,
 } from "../db/kaiIntakeQueries.js";
+import {
+  MEASUREMENT_ANSWERED_DIMENSION_KEYS,
+  MEASUREMENT_EVIDENCE_TYPE,
+  applyMeasurementCoverageDimensions,
+} from "../validators/kaiSourceMeasurementValidators.js";
 import {
   assessMissingness,
   assessDuplicates,
@@ -218,9 +224,38 @@ function buildExpectedGapPlans(dimensions) {
   return plans;
 }
 
-function buildExpectedFollowupDimensionKeys(expectedGapPlans) {
+// answeredDimensionKeys: client-answerable dimensions a human has already
+// answered for this claim (a P2-01M measurement definition); their gaps stay
+// recorded but are never routed back to the client as a question.
+function buildExpectedFollowupDimensionKeys(expectedGapPlans, answeredDimensionKeys = []) {
   const gapDimensionKeys = new Set(expectedGapPlans.map((plan) => plan.dimension_key));
-  return CLIENT_ANSWERABLE_DIMENSION_KEYS.filter((dimensionKey) => gapDimensionKeys.has(dimensionKey));
+  const answered = new Set(answeredDimensionKeys);
+  return CLIENT_ANSWERABLE_DIMENSION_KEYS.filter((dimensionKey) => gapDimensionKeys.has(dimensionKey) && !answered.has(dimensionKey));
+}
+
+/**
+ * The claim's coverage dimensions and its already-answered dimensions: the
+ * P2-02 dimensions, made measurement-aware for a claim on P2-01M measurement
+ * evidence (applyMeasurementCoverageDimensions). Shared by P2-04, P2-06, and
+ * the organization gap state so the persisted gap snapshot and every later
+ * recomputation agree. Field-presence claims are unchanged.
+ */
+async function claimCoverageDimensions(tx, { organizationId, evidenceItemRow, baseDimensions }) {
+  if (evidenceItemRow?.evidence_type !== MEASUREMENT_EVIDENCE_TYPE) {
+    return { dimensions: baseDimensions, answeredDimensionKeys: [] };
+  }
+  const measurementRow = await getScopedEvidenceMeasurementByEvidenceItemId(
+    { organizationId, evidenceItemId: evidenceItemRow.evidence_item_id },
+    tx,
+  );
+  return measurementCoverageDimensions(baseDimensions, measurementRow);
+}
+
+function measurementCoverageDimensions(baseDimensions, measurementRow) {
+  return {
+    dimensions: applyMeasurementCoverageDimensions(baseDimensions, measurementRow),
+    answeredDimensionKeys: measurementRow ? [...MEASUREMENT_ANSWERED_DIMENSION_KEYS] : [],
+  };
 }
 
 async function readExistingGapRows(tx, { organizationId, claimId }) {
@@ -851,9 +886,13 @@ export function createPostgresClaimGapFollowupRepository({
           const lineageValidation = validateClaimGapLineage(rows);
           if (!lineageValidation.ok) return claimGapFollowupFailure(lineageValidation.code, lineageValidation.blockers);
 
-          const dimensions = computeDimensionsFn({ dictionaryFieldRows, qualityFindingRows, profileRow, evidenceFieldKeys });
+          const { dimensions, answeredDimensionKeys } = await claimCoverageDimensions(tx, {
+            organizationId,
+            evidenceItemRow,
+            baseDimensions: computeDimensionsFn({ dictionaryFieldRows, qualityFindingRows, profileRow, evidenceFieldKeys }),
+          });
           const expectedGapPlans = buildExpectedGapPlans(dimensions);
-          const expectedFollowupDimensionKeys = buildExpectedFollowupDimensionKeys(expectedGapPlans);
+          const expectedFollowupDimensionKeys = buildExpectedFollowupDimensionKeys(expectedGapPlans, answeredDimensionKeys);
 
           const evidenceItemId = evidenceItemRow.evidence_item_id;
           const sourceVersionId = evidenceItemRow.source_version_id;
@@ -1070,6 +1109,8 @@ export const __claimGapFollowupRepositoryContract = Object.freeze({
 export const __claimGapFollowupRepositoryTestables = Object.freeze({
   buildExpectedGapPlans,
   buildExpectedFollowupDimensionKeys,
+  claimCoverageDimensions,
+  measurementCoverageDimensions,
   extractSafeCounts,
   safeSummaryFor,
   gapRowsMatchExpectation,

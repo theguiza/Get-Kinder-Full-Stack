@@ -67,6 +67,53 @@ function isMappedHumanActor(actorContext) {
  * existing shared validator-group mechanisms (`validateActorCanPerformOperation`,
  * `validateTenantBoundaryConsistency`) rather than reimplemented locally.
  */
+/**
+ * A measured claim's deterministic P2-04 gap state, established in the same
+ * command that proposes it (P2-01M; owner Plan A Prompt 5). For a claim on
+ * record-count measurement evidence every client-answerable coverage question
+ * is already answered by the human measurement definition, so P2-04 records
+ * the claim's gaps and limitations and routes no client follow-up; P2-06 can
+ * then trace the claim without anyone running P2-04 by hand. Field-presence
+ * claims are untouched (their P2-04 still creates client follow-ups, so it
+ * stays the explicit step it is). Post-commit and never thrown: P2-04 applies
+ * its own feature gate, role set, tenant, lineage, and allowed-use checks and
+ * replays idempotently; a refusal leaves the committed claim as it is and is
+ * reported by machine code, and the explicit P2-04 action remains available.
+ * Nothing is reviewed, approved, or answered here.
+ */
+async function withMeasuredClaimGapState(result, { organizationId, actorContext, now }, dependencies) {
+  if (!result.ok || result.data?.measurementClaim !== true) return result;
+  const claimId = result.data.claim?.claim_id;
+  let preparation;
+  try {
+    const { generateClaimGapFollowups } = dependencies.generateClaimGapFollowups
+      ? { generateClaimGapFollowups: dependencies.generateClaimGapFollowups }
+      : await import("./kaiClaimGapFollowupService.js");
+    const metadataOnlyAudit = dependencies.claimGapFollowupMetadataOnlyAudit
+      || (await import("./kaiMetadataOnlyAuditComposition.js"))
+        .createProductionMetadataOnlyAuditForClaimGapFollowup({ organizationId, claimId, actorContext, now });
+    const generated = await generateClaimGapFollowups(
+      { organizationId, claimId, actorContext, now },
+      {
+        ...(dependencies.env ? { env: dependencies.env } : {}),
+        ...(dependencies.claimGapFollowupRepository ? { claimGapFollowupRepository: dependencies.claimGapFollowupRepository } : {}),
+        metadataOnlyAudit,
+      },
+    );
+    preparation = generated.ok
+      ? {
+        status: generated.data.replayed === true ? "replayed" : "generated",
+        gap_item_count: Array.isArray(generated.data.gapItems) ? generated.data.gapItems.length : null,
+        client_followup_item_count: Array.isArray(generated.data.clientFollowupItems) ? generated.data.clientFollowupItems.length : null,
+        error_code: null,
+      }
+      : { status: "not_generated", gap_item_count: null, client_followup_item_count: null, error_code: generated.error?.code || "system_error" };
+  } catch {
+    preparation = { status: "not_generated", gap_item_count: null, client_followup_item_count: null, error_code: "system_error" };
+  }
+  return { ...result, data: { ...result.data, claim_gap_state: preparation } };
+}
+
 export async function proposeClaim(input, dependencies = {}) {
   if (!isKaiSprint2Enabled(dependencies.env || process.env)) {
     return buildKaiError("feature_disabled");
@@ -118,7 +165,11 @@ export async function proposeClaim(input, dependencies = {}) {
       ...(Array.isArray(result.error.blockers) ? { blockers: result.error.blockers } : {}),
     });
   }
-  return { ok: true, data: result.data, error: null, warnings: result.data?.warnings || [] };
+  return withMeasuredClaimGapState(
+    { ok: true, data: result.data, error: null, warnings: result.data?.warnings || [] },
+    { organizationId: input.organizationId, actorContext, now: input.now },
+    dependencies,
+  );
 }
 
 /**
@@ -188,7 +239,11 @@ export async function proposeClaimFromEvidenceReviewDecision(input, dependencies
       ...(result.error.blockers ? { blockers: result.error.blockers } : {}),
     });
   }
-  return { ok: true, data: result.data, error: null, warnings: result.data?.warnings || [] };
+  return withMeasuredClaimGapState(
+    { ok: true, data: result.data, error: null, warnings: result.data?.warnings || [] },
+    { organizationId: input.organizationId, actorContext, now: input.now },
+    dependencies,
+  );
 }
 
 export const __claimProposalServiceContract = Object.freeze({

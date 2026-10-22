@@ -1371,10 +1371,15 @@ export async function listClientFollowupWorkflowsForOrganization({ organizationI
 }
 
 /**
- * The persisted measurement and definition behind one measurement evidence
- * item (P2-01M), read on the caller's transaction for P2-03 claim composition.
+ * The persisted measurement and definition behind measurement evidence items
+ * (P2-01M), read on the caller's transaction (P2-03 claim composition and the
+ * P2-04/P2-06 measurement-aware coverage assessment). profile_field_missing_counts
+ * is each field's committed missing_count from the exact P1 profile the
+ * measurement was derived from (null when that profile is no longer the one
+ * bound to the version, so the assessment stays unknown).
  */
-export async function getScopedEvidenceMeasurementByEvidenceItemId({ organizationId, evidenceItemId }, db = pool) {
+export async function listScopedEvidenceMeasurementsByEvidenceItemIds({ organizationId, evidenceItemIds }, db = pool) {
+  if (!Array.isArray(evidenceItemIds) || evidenceItemIds.length === 0) return [];
   const { rows } = await db.query(
     `SELECT m.evidence_item_id::text AS evidence_item_id,
             m.organization_id::text AS organization_id,
@@ -1385,14 +1390,32 @@ export async function getScopedEvidenceMeasurementByEvidenceItemId({ organizatio
             m.blank_record_count::int AS blank_record_count, m.duplicate_record_count::int AS duplicate_record_count,
             d.counted_unit, d.unit_label AS definition_unit_label, d.definition_status,
             d.source_version_id::text AS definition_source_version_id,
-            d.period_start::text AS period_start, d.period_end::text AS period_end
+            d.period_start::text AS period_start, d.period_end::text AS period_end,
+            (SELECT jsonb_agg(field->'missing_count' ORDER BY ordinality)
+               FROM jsonb_array_elements(p.profile->'fields') WITH ORDINALITY AS fields(field, ordinality)) AS profile_field_missing_counts
        FROM kai.evidence_measurements m
        JOIN kai.source_measurement_definitions d
          ON d.source_measurement_definition_id = m.source_measurement_definition_id
         AND d.organization_id = m.organization_id
+       LEFT JOIN kai.source_versions sv
+         ON sv.organization_id = m.organization_id
+        AND sv.source_version_id = m.source_version_id
+       LEFT JOIN kai.intake_source_candidates c
+         ON c.organization_id = sv.organization_id
+        AND c.intake_source_candidate_id = sv.intake_source_candidate_id
+       LEFT JOIN kai.intake_file_profiles p
+         ON p.organization_id = c.organization_id
+        AND p.file_profile_id = c.file_profile_id
+        AND p.profile_canonical_sha256 = m.profile_canonical_sha256
       WHERE m.organization_id = $1::uuid
-        AND m.evidence_item_id = $2::uuid`,
-    [organizationId, evidenceItemId],
+        AND m.evidence_item_id = ANY($2::uuid[])
+      ORDER BY m.evidence_item_id`,
+    [organizationId, evidenceItemIds],
   );
+  return rows;
+}
+
+export async function getScopedEvidenceMeasurementByEvidenceItemId({ organizationId, evidenceItemId }, db = pool) {
+  const rows = await listScopedEvidenceMeasurementsByEvidenceItemIds({ organizationId, evidenceItemIds: [evidenceItemId] }, db);
   return rows[0] || null;
 }

@@ -15,6 +15,12 @@ import {
   validateRecordCountDefinition,
 } from "../Backend/kai/validators/kaiSourceMeasurementValidators.js";
 import { recordSourceRecordCountMeasurement } from "../Backend/kai/services/kaiSourceMeasurementService.js";
+import {
+  MEASUREMENT_ANSWERED_DIMENSION_KEYS,
+  applyMeasurementCoverageDimensions,
+} from "../Backend/kai/validators/kaiSourceMeasurementValidators.js";
+import { __claimGapFollowupRepositoryTestables } from "../Backend/kai/dictionary/postgresClaimGapFollowupRepository.js";
+import { proposeClaim } from "../Backend/kai/services/kaiClaimProposalService.js";
 import sprint2IntakeApiRouter, { __testables as routeTestables } from "../Backend/kai/routes/sprint2IntakeApi.js";
 
 /**
@@ -217,4 +223,74 @@ test("migration: additive only - widens three vocabularies, keeps every other go
   }
   const rollback = readFileSync("migrations/kai_sprint2_p2_01m_source_record_count_measurement.rollback.sql", "utf8");
   assert.match(rollback, /rollback refused: source record-count measurement evidence exists/);
+});
+
+test("measured-claim dimensions: zero counts clear, positive counts flagged, unknown counts unresolved; definition, entity, denominator, and coverage answered; period an attested limitation", () => {
+  const base = Object.fromEntries(["missingness", "duplicates", "definition_clarity", "denominator_clarity", "time_period_clarity",
+    "entity_level_clarity", "small_cell_risk", "conflicting_source_indicators", "requirement_alignment", "coverage_gaps"]
+    .map((key) => [key, { validator_key: `base-${key}`, evidence: { assessment_status: "unresolved" } }]));
+  const row = (overrides = {}) => ({
+    measurement_type: "source_record_count", definition_status: "human_confirmed", blank_record_count: 1,
+    duplicate_record_count: 0, profile_field_missing_counts: [1, 1, 1], period_start: "2026-09-01", period_end: "2026-09-30", ...overrides,
+  });
+  const status = (dims) => Object.fromEntries(Object.entries(dims).map(([key, value]) => [key, value.evidence.assessment_status]));
+  assert.deepEqual(status(applyMeasurementCoverageDimensions(base, row())), {
+    missingness: "resolved_clear", duplicates: "resolved_clear", definition_clarity: "resolved_clear", denominator_clarity: "resolved_clear",
+    time_period_clarity: "resolved_risk_flagged", entity_level_clarity: "resolved_clear", coverage_gaps: "resolved_clear",
+    small_cell_risk: "unresolved", conflicting_source_indicators: "unresolved", requirement_alignment: "unresolved",
+  });
+  // Source-level dimensions are passed through untouched.
+  assert.equal(applyMeasurementCoverageDimensions(base, row()).small_cell_risk, base.small_cell_risk);
+  const flagged = applyMeasurementCoverageDimensions(base, row({ profile_field_missing_counts: [1, 3, 1], duplicate_record_count: 2 }));
+  assert.deepEqual([flagged.missingness.evidence.assessment_status, flagged.missingness.evidence.open_finding_count], ["resolved_risk_flagged", 1]);
+  assert.deepEqual([flagged.duplicates.evidence.assessment_status, flagged.duplicates.evidence.open_finding_count], ["resolved_risk_flagged", 2]);
+  for (const counts of [null, [], [0, 1, 1], [1, "2"], [1.5]]) {
+    assert.equal(applyMeasurementCoverageDimensions(base, row({ profile_field_missing_counts: counts })).missingness.evidence.assessment_status, "unresolved", JSON.stringify(counts));
+  }
+  assert.equal(applyMeasurementCoverageDimensions(base, row({ duplicate_record_count: null })).duplicates.evidence.assessment_status, "unresolved");
+  assert.match(applyMeasurementCoverageDimensions(base, row()).time_period_clarity.message, /not verified against record dates/);
+  assert.match(applyMeasurementCoverageDimensions(base, row({ period_start: null, period_end: null })).time_period_clarity.message, /no reporting period/);
+  // A missing or unconfirmed measurement leaves every measurement-decided dimension unresolved.
+  for (const measurement of [null, row({ definition_status: "proposed" }), row({ measurement_type: "other" })]) {
+    const dims = applyMeasurementCoverageDimensions(base, measurement);
+    for (const key of ["missingness", "duplicates", "definition_clarity", "denominator_clarity", "time_period_clarity", "entity_level_clarity", "coverage_gaps"]) {
+      assert.equal(dims[key].evidence.assessment_status, "unresolved", key);
+    }
+  }
+});
+
+test("follow-up routing: answered dimensions keep their gap but are never sent to the client; other claims route exactly as before", () => {
+  const { buildExpectedFollowupDimensionKeys, measurementCoverageDimensions } = __claimGapFollowupRepositoryTestables;
+  const plans = ["definition_clarity", "denominator_clarity", "time_period_clarity", "entity_level_clarity", "small_cell_risk"].map((dimension_key) => ({ dimension_key }));
+  assert.deepEqual(buildExpectedFollowupDimensionKeys(plans), ["definition_clarity", "denominator_clarity", "time_period_clarity", "entity_level_clarity"]);
+  assert.deepEqual(buildExpectedFollowupDimensionKeys(plans, MEASUREMENT_ANSWERED_DIMENSION_KEYS), []);
+  assert.deepEqual(measurementCoverageDimensions({}, null).answeredDimensionKeys, [], "without a measurement nothing counts as answered");
+});
+
+test("proposal service: only a measured claim gets its gap state in the same command, through P2-04 by the same actor; a P2-04 refusal never undoes the claim", async () => {
+  const calls = [];
+  const claim = { claim_id: "4e000000-0000-4000-8000-000000000001" };
+  const repository = (data) => ({ async proposeClaim() { return { ok: true, data }; } });
+  const generate = async (input) => { calls.push(input); return { ok: true, data: { replayed: false, gapItems: [1, 2, 3, 4, 5, 6], clientFollowupItems: [] } }; };
+  const deps = (data, extra = {}) => ({ env: ENV, claimProposalRepository: repository(data), metadataOnlyAudit: {}, generateClaimGapFollowups: generate, claimGapFollowupMetadataOnlyAudit: {}, ...extra });
+  const input = { organizationId: ORG, evidenceItemId: "5e000000-0000-4000-8000-000000000001", actorContext: ADMIN, now: NOW };
+
+  const legacy = await proposeClaim(input, deps({ claim, replayed: false }));
+  assert.equal(legacy.ok, true);
+  assert.equal(legacy.data.claim_gap_state, undefined);
+  assert.equal(calls.length, 0, "a field-presence claim's P2-04 stays explicit");
+
+  const measured = await proposeClaim(input, deps({ claim, replayed: false, measurementClaim: true }));
+  assert.deepEqual(measured.data.claim_gap_state, { status: "generated", gap_item_count: 6, client_followup_item_count: 0, error_code: null });
+  assert.deepEqual(calls, [{ organizationId: ORG, claimId: claim.claim_id, actorContext: ADMIN, now: NOW }]);
+
+  const refused = await proposeClaim(input, deps({ claim, replayed: false, measurementClaim: true }, {
+    generateClaimGapFollowups: async () => ({ ok: false, error: { code: "authorization_denied" } }),
+  }));
+  assert.equal(refused.ok, true, "the committed claim stands");
+  assert.deepEqual(refused.data.claim_gap_state, { status: "not_generated", gap_item_count: null, client_followup_item_count: null, error_code: "authorization_denied" });
+  const thrown = await proposeClaim(input, deps({ claim, replayed: false, measurementClaim: true }, {
+    generateClaimGapFollowups: async () => { throw new Error("boom"); },
+  }));
+  assert.equal(thrown.data.claim_gap_state.error_code, "system_error");
 });

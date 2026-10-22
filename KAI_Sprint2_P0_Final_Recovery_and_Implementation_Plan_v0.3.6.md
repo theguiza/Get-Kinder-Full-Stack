@@ -42414,3 +42414,143 @@ lines) but not blank records.
 No push, deployment, production/shared database, flag, tenant, credential,
 real client data, or `00_KAI_CURRENT_STATE.md` change. This is the single
 package-end evidence update in the living ExecPlan.
+
+### Plan A Prompt 5: measured-claim traceability and report-use readiness (2026-10-22)
+
+**Owner authorization (USER_CONFIRMED):** the owner's "KAI Plan A / Prompt 5"
+prompt directs, locally: remove the hidden manual P2-04 trigger and incorrect
+quality/coverage blockers for the P2-01M measured claim, without restoring the
+reverted automatic P2-04 hook, creating premature client follow-ups, adding a
+migration, changing human review/release authority, or modifying the
+generator. Establish the measured claim's AI-generation permission boundary
+explicitly. Synthetic local tests only.
+
+**Start (TOOL_VERIFIED):** `main` at `27ba167`, clean.
+
+**Root cause (TOOL_VERIFIED):**
+- P2-06 requires persisted P2-04 gap state whenever any dimension needs a gap.
+  `conflicting_source_indicators` and `requirement_alignment` are always
+  unresolved by design, so every claim needs P2-04, and it was reachable
+  only through the explicit action.
+- P2-04 couples gap recording with client follow-up routing: any gap on
+  definition, denominator, period, or entity level becomes a client question.
+  For the measured claim it raised four follow-ups whose answers the human
+  measurement definition already records. That was the premature-follow-up
+  objection that got the generic hook reverted.
+- Zero-count defect: missingness and duplicates read only P1-04 findings,
+  which exist only for counts above zero, so clean data stayed unresolved.
+- Snapshot-currentness defect: the measured claim's `coverage_gaps`
+  dimension depended on field-presence evidence of the same version, so
+  adding field evidence after its P2-04 snapshot made every later P2-06
+  recomputation `gap_followup_queue_mismatch`.
+
+**Change (no migration; legacy field-presence claims unchanged):**
+- `applyMeasurementCoverageDimensions` (`kaiSourceMeasurementValidators.js`)
+  covers measurement claims only:
+  - Missingness and duplicates come from the exact committed profile and
+    measurement. A count of 0 is `resolved_clear`, a positive count is
+    `resolved_risk_flagged` (still counted, never removed), and a missing or
+    inconsistent count is `unresolved`.
+  - Definition and entity level are `resolved_clear` (human-confirmed
+    definition). Denominator is `resolved_clear` (a count states no rate).
+  - The period is `resolved_risk_flagged`: attested and not verified against
+    record dates, or recorded as not defined.
+  - Field coverage is `resolved_clear`: the evidence covers every data
+    record.
+  - Small-cell risk, conflicting sources, and requirement alignment are
+    unchanged.
+  - A missing or unconfirmed measurement leaves every one of these
+    unresolved.
+- `buildExpectedFollowupDimensionKeys(plans, answeredDimensionKeys)`: the
+  dimensions the definition answered keep their gap but are never routed to
+  the client. One shared `claimCoverageDimensions` is used by P2-04 (the
+  snapshot), P2-06, and the organization gap state (a batched measurement
+  read), so the snapshot and every recomputation agree. Generation reuses
+  P2-06.
+- Lifecycle point: `proposeClaim` and `proposeClaimFromEvidenceReviewDecision`
+  establish a measured claim's P2-04 gap state in the same command, through
+  the unchanged P2-04 service and its own authorization. This happens only
+  for measured claims, which create no client follow-up by construction. It
+  runs post-commit, is idempotent (replays), and a refusal leaves the claim
+  intact and is reported as `claim_gap_state`.
+- Field-presence claims keep the explicit P2-04 step and their follow-ups.
+  This is not the reverted generic hook.
+
+**Measured-claim proof (TOOL_VERIFIED, disposable PostgreSQL):**
+- **Claim:** value 5 programme sessions, 2026-09-01 to 2026-09-30, current
+  source version, `source_data_records` locator.
+- **Gap state:**
+  - Before (Prompt 4): 9 gaps and 4 client follow-ups, after a manual P2-04.
+  - After: the proposal records 6 gaps (missingness flagged, 1 field with a
+    missing value among counted records; duplicates flagged, 2; period
+    flagged, attested; small-cell, conflicting, and requirement alignment
+    unresolved) and 0 follow-ups.
+  - A repeat proposal and an explicit P2-04 both replay with zero writes.
+- **Clean fixture:** missingness and duplicates are `resolved_clear` with no
+  gap. "No reporting period defined" is a flagged limitation with no client
+  question.
+- **Traceability:**
+  - Before: `gap_dimension_requires_missing_p204_state`.
+  - After: it traces immediately, and the organization gap view finds every
+    persisted gap current.
+  - After GK evidence review (`supported`) and claim review (`approved`,
+    internal), the only blocker is `coverage_dimension_unresolved`. The
+    organization administrator cannot make the GK coverage decision (403).
+  - After the GK reviewer accepts the three unresolved source-level
+    dimensions it is `eligible=true` with no blockers and no
+    `client_reviewer` step. The value, period, arithmetic, and accepted
+    limitations stay attached, funder use stays ineligible, and the claim
+    appears in the eligible-claims reader.
+- **Legacy, same version:** a field-presence claim gets no gap state at
+  proposal, still needs P2-04, still gets its four follow-ups, and keeps
+  `unresolved` missingness and duplicates.
+
+**Generation permission verdict (TOOL_VERIFIED):**
+- Evidence and claim `llm_processing_allowed` are CHECK-pinned to false on
+  every row (legacy included), and nothing reads them for model input.
+- Generation's model-input gate is VAL-KAI-B1A-02-004 through
+  `readEffectiveAiProcessingProhibitionsForClaims`, which reads the source
+  file's current human AI decision, plus P2-06 revalidation. Evidence type
+  and `eligible` are not part of it.
+- With the real decision services, the same check returns: no human
+  decision, not prohibited; reviewed with AI permitted, not prohibited;
+  reviewed with AI not permitted, `reviewed_llm_processing_not_allowed`
+  (refused, while the claim stays traceable for non-AI use).
+- The existing internal `evidence_summary` model-input path may therefore
+  consume the measured claim exactly when its source's effective AI decision
+  permits AI processing. No restriction was changed, and no provider was
+  invoked.
+
+**Verification (TOOL_VERIFIED; sentinel `DATABASE_URL`):**
+
+| Command | Pass | Fail | Skipped |
+| --- | --- | --- | --- |
+| `npm test` (baseline 5681/0/116) | 5684 | 0 | 116 |
+| `npm run verify:kai-sprint2-api-contract` | 71 | 0 | 0 |
+| P2-01M runner: legacy seed 2; main (P2-01M 14 + unchanged P2-06 suites); migration compatibility and refused rollback | 2 + 47 | 0 | 0 |
+| P2-01M unit spec | 11 | 0 | 0 |
+| P2 runners: P2-01 lineage 17, P2-01 handoff 7, P2-02 7, P2-03 15, P2-04 18, P2-05 18, P2-06 33 | 115 | 0 | 0 |
+| Browser: evidence-to-draft 21, source-to-impact 16, reviewed-evidence claim 12, evidence pipeline 8, access-approval campaign 63 | 120 | 0 | 0 |
+| `git diff --check` | ok | | |
+
+Runner note: the P2-01M runner keeps the union of the shared
+`upload_lifecycle_audit` CHECKs as they stood after the Phase-5 ledger
+migration, because P2-01 redefines them from an older list. This is the
+technique the P2-06 runner already uses for P3-01, applied so the real
+sensitivity-decision service can run.
+
+**Remaining:**
+- Legacy field-presence claims keep the absence-based missingness/duplicates
+  rule and the explicit P2-04 step with follow-ups. Changing them needs a
+  reassessment path for already persisted gap snapshots (owner decision; no
+  such mechanism exists).
+- Internal eligibility of a measured claim still requires the GK reviews and
+  GK acceptance of the three unresolved source-level dimensions (legitimate
+  human judgment).
+- Actual generation of an internal Evidence Summary from the claim and
+  production schema application: NOT_CONFIRMED (not authorized here).
+
+**Status:** PLAN_A_MEASURED_CLAIM_TRACEABILITY_COMPLETE_LOCAL_SYNTHETIC.
+No push, deployment, production/shared database, migration, flag, tenant,
+credential, real client data, or `00_KAI_CURRENT_STATE.md` change. This is
+the single package-end evidence update in the living ExecPlan.

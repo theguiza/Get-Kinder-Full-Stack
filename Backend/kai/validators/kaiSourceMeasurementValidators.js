@@ -1,4 +1,7 @@
 import { createHash } from "node:crypto";
+import { __evidenceCoverageAssessmentValidatorsTestables } from "./kaiEvidenceCoverageAssessmentValidators.js";
+
+const { dimensionResult } = __evidenceCoverageAssessmentValidatorsTestables;
 
 /**
  * KAI P2-01M source record-count measurement: pure validators and the
@@ -285,4 +288,119 @@ export function validateMeasurementClaimBasis({ evidenceItemRow, locatorRow, sou
     );
   }
   return { ok: true };
+}
+
+/**
+ * The client-answerable coverage questions a human-confirmed record-count
+ * definition already answers: what one record means, its entity level, that
+ * a count has no denominator, and the reporting period (stated, or recorded
+ * as not defined). A measured claim never routes these to a client follow-up;
+ * the gap of a stated-but-unverified period stays visible as a limitation.
+ */
+export const MEASUREMENT_ANSWERED_DIMENSION_KEYS = Object.freeze([
+  "definition_clarity",
+  "denominator_clarity",
+  "time_period_clarity",
+  "entity_level_clarity",
+]);
+
+function measurementMissingnessDimension(measurementRow) {
+  const counts = measurementRow.profile_field_missing_counts;
+  const blank = measurementRow.blank_record_count;
+  // Each field's committed missing_count includes the excluded blank records.
+  if (!Array.isArray(counts) || counts.length === 0 || !isCount(blank)
+    || !counts.every((value) => isCount(value) && value >= blank)) {
+    return dimensionResult("missingness", "unresolved", "The committed profile does not state missing values for the counted records.");
+  }
+  const fieldsWithMissing = counts.filter((value) => value - blank > 0).length;
+  if (fieldsWithMissing === 0) {
+    return dimensionResult("missingness", "resolved_clear", "The committed profile records no missing values in the counted records.", { field_count: counts.length });
+  }
+  return dimensionResult(
+    "missingness",
+    "resolved_risk_flagged",
+    "The committed profile records missing values in some counted records; each record is still counted.",
+    { open_finding_count: fieldsWithMissing, field_count: counts.length },
+  );
+}
+
+function measurementDuplicatesDimension(measurementRow) {
+  const duplicates = measurementRow.duplicate_record_count;
+  if (!isCount(duplicates)) return dimensionResult("duplicates", "unresolved", "The committed profile does not state duplicate records.");
+  if (duplicates === 0) return dimensionResult("duplicates", "resolved_clear", "The committed profile records no exact-duplicate records.");
+  return dimensionResult(
+    "duplicates",
+    "resolved_risk_flagged",
+    "The committed profile records exact-duplicate records; they are counted, not removed.",
+    { open_finding_count: duplicates },
+  );
+}
+
+/**
+ * Coverage dimensions for a claim on P2-01M measurement evidence: the
+ * source-level dimensions (small-cell risk, conflicting sources, requirement
+ * alignment) are kept exactly as assessed; the seven that the measurement and
+ * its human definition decide are assessed from them. A missing or
+ * inconsistent measurement leaves every one of the seven unresolved.
+ * Legacy field-presence claims never reach this function.
+ */
+export function applyMeasurementCoverageDimensions(dimensions, measurementRow) {
+  const valid = isPlainObject(measurementRow)
+    && measurementRow.definition_status === MEASUREMENT_DEFINITION_STATUS
+    && measurementRow.measurement_type === MEASUREMENT_TYPE_RECORD_COUNT;
+  if (!valid) {
+    const unresolved = (key) => dimensionResult(key, "unresolved", "The measurement or its human definition is not available.");
+    return {
+      ...dimensions,
+      coverage_gaps: unresolved("coverage_gaps"),
+      missingness: unresolved("missingness"),
+      duplicates: unresolved("duplicates"),
+      definition_clarity: unresolved("definition_clarity"),
+      denominator_clarity: unresolved("denominator_clarity"),
+      time_period_clarity: unresolved("time_period_clarity"),
+      entity_level_clarity: unresolved("entity_level_clarity"),
+    };
+  }
+  return {
+    ...dimensions,
+    missingness: measurementMissingnessDimension(measurementRow),
+    duplicates: measurementDuplicatesDimension(measurementRow),
+    definition_clarity: dimensionResult(
+      "definition_clarity",
+      "resolved_clear",
+      "A human-confirmed definition states what one counted record represents.",
+      { field_count: 1 },
+    ),
+    denominator_clarity: dimensionResult(
+      "denominator_clarity",
+      "resolved_clear",
+      "The measurement is a record count; it states no rate, so no denominator applies.",
+    ),
+    time_period_clarity: measurementRow.period_start
+      ? dimensionResult(
+        "time_period_clarity",
+        "resolved_risk_flagged",
+        "The reporting period is attested in the human definition; it is not verified against record dates.",
+      )
+      : dimensionResult(
+        "time_period_clarity",
+        "resolved_risk_flagged",
+        "The human definition records no reporting period; the count is not bounded to a period.",
+      ),
+    entity_level_clarity: dimensionResult(
+      "entity_level_clarity",
+      "resolved_clear",
+      "A human-confirmed definition states the counted unit.",
+      { field_count: 1 },
+    ),
+    // Field coverage asks whether each dictionary field has field-presence
+    // evidence; a record count's evidence is the whole-version data-records
+    // locator, so later field evidence can never change this claim's coverage.
+    coverage_gaps: dimensionResult(
+      "coverage_gaps",
+      "resolved_clear",
+      "The measurement evidence covers every data record of the source version.",
+      { field_count: 1 },
+    ),
+  };
 }

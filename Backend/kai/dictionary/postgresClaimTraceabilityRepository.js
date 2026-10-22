@@ -89,6 +89,7 @@ const {
 const {
   buildExpectedGapPlans,
   buildExpectedFollowupDimensionKeys,
+  claimCoverageDimensions,
   gapRowsMatchExpectation,
   followupRowsMatchExpectation,
   queueRowsMatchExpectation,
@@ -579,9 +580,13 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
   });
   if (!lineageValidation.ok) return failure(lineageValidation.code);
 
-  const dimensions = computeDimensions({ dictionaryFieldRows, qualityFindingRows, profileRow, evidenceFieldKeys });
+  const { dimensions, answeredDimensionKeys } = await claimCoverageDimensions(tx, {
+    organizationId,
+    evidenceItemRow,
+    baseDimensions: computeDimensions({ dictionaryFieldRows, qualityFindingRows, profileRow, evidenceFieldKeys }),
+  });
   const expectedGapPlans = buildExpectedGapPlans(dimensions);
-  const expectedFollowupDimensionKeys = buildExpectedFollowupDimensionKeys(expectedGapPlans);
+  const expectedFollowupDimensionKeys = buildExpectedFollowupDimensionKeys(expectedGapPlans, answeredDimensionKeys);
   const gapRows = await readGapRows(tx, { organizationId, claimId });
   const followupRows = await readFollowupRows(tx, { organizationId, claimId });
   const followupQueueRows = await readFollowupQueueRows(tx, {

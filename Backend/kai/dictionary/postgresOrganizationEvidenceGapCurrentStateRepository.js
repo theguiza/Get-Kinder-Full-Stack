@@ -5,6 +5,8 @@ import {
 import { validateConflictGroupCompleteness } from "../validators/kaiConflictGroupValidators.js";
 import { readEffectiveAllowedUseProhibitions } from "./postgresEffectiveAllowedUseResolver.js";
 import { __claimGapFollowupRepositoryTestables } from "./postgresClaimGapFollowupRepository.js";
+import { listScopedEvidenceMeasurementsByEvidenceItemIds } from "../db/kaiIntakeQueries.js";
+import { MEASUREMENT_EVIDENCE_TYPE } from "../validators/kaiSourceMeasurementValidators.js";
 import {
   __claimTraceabilityRepositoryTestables,
   __claimTraceabilityRepositoryContract,
@@ -127,8 +129,14 @@ import {
  * file.
  */
 
-const { buildExpectedGapPlans, buildExpectedFollowupDimensionKeys, gapRowsMatchExpectation, followupRowsMatchExpectation, queueRowsMatchExpectation } =
-  __claimGapFollowupRepositoryTestables;
+const {
+  buildExpectedGapPlans,
+  buildExpectedFollowupDimensionKeys,
+  measurementCoverageDimensions,
+  gapRowsMatchExpectation,
+  followupRowsMatchExpectation,
+  queueRowsMatchExpectation,
+} = __claimGapFollowupRepositoryTestables;
 const { computeDimensions, toConflictGroupValidatorRecord, toConflictQueueValidatorRecord } = __claimTraceabilityRepositoryTestables;
 const { DIMENSION_KEYS } = __claimTraceabilityRepositoryContract;
 
@@ -185,11 +193,18 @@ async function loadCurrentStateBatches(tx, { organizationId, claimIds }) {
   const evidenceItems = await batchRead(
     tx, organizationId, evidenceItemIds,
     `SELECT evidence_item_id, organization_id, source_id, source_version_id, source_locator_id,
-            evidence_review_status, support_strength, sensitivity_level
+            evidence_review_status, support_strength, sensitivity_level, evidence_type
        FROM kai.evidence_items
       WHERE organization_id = $1::uuid AND evidence_item_id = ANY($2::uuid[])`,
   );
   const evidenceItemsById = toMapByKey(evidenceItems, "evidence_item_id");
+  // P2-01M measurements behind measurement evidence, for the same
+  // measurement-aware dimensions P2-04/P2-06 apply (claimCoverageDimensions).
+  const measurementRows = await listScopedEvidenceMeasurementsByEvidenceItemIds({
+    organizationId,
+    evidenceItemIds: evidenceItems.filter((row) => row.evidence_type === MEASUREMENT_EVIDENCE_TYPE).map((row) => row.evidence_item_id),
+  }, tx);
+  const measurementsByEvidenceItemId = toMapByKey(measurementRows, "evidence_item_id");
 
   const locatorIds = distinctDefined(evidenceItems.map((row) => row.source_locator_id));
   const sourceIds = distinctDefined(evidenceItems.map((row) => row.source_id));
@@ -413,6 +428,7 @@ async function loadCurrentStateBatches(tx, { organizationId, claimIds }) {
     claimsById,
     claimEvidenceLinksByClaimId,
     evidenceItemsById,
+    measurementsByEvidenceItemId,
     sourceLocatorsById,
     sourcesById,
     sourceVersionsById,
@@ -492,9 +508,12 @@ function claimIsCurrentForGapExposure(claimId, batches) {
   const qualityFindingRows = batches.qualityFindingsByDictionaryId.get(dictionaryRow.data_dictionary_id) || [];
   const evidenceFieldKeys = batches.evidenceFieldKeysBySourceVersionId.get(evidenceItemRow.source_version_id) || [];
 
-  const dimensions = computeDimensions({ dictionaryFieldRows, qualityFindingRows, profileRow, evidenceFieldKeys });
+  const baseDimensions = computeDimensions({ dictionaryFieldRows, qualityFindingRows, profileRow, evidenceFieldKeys });
+  const { dimensions, answeredDimensionKeys } = evidenceItemRow.evidence_type === MEASUREMENT_EVIDENCE_TYPE
+    ? measurementCoverageDimensions(baseDimensions, batches.measurementsByEvidenceItemId.get(evidenceItemRow.evidence_item_id) || null)
+    : { dimensions: baseDimensions, answeredDimensionKeys: [] };
   const expectedGapPlans = buildExpectedGapPlans(dimensions);
-  const expectedFollowupDimensionKeys = buildExpectedFollowupDimensionKeys(expectedGapPlans);
+  const expectedFollowupDimensionKeys = buildExpectedFollowupDimensionKeys(expectedGapPlans, answeredDimensionKeys);
 
   const gapRows = batches.gapRowsByClaimId.get(claimId) || [];
   const followupRows = batches.followupRowsByClaimId.get(claimId) || [];
