@@ -42142,3 +42142,130 @@ schema above.
 No push, deployment, production/shared database, migration/schema, flag,
 tenant, credential, real client data, or `00_KAI_CURRENT_STATE.md` change.
 This is the single package-end evidence update in the living ExecPlan.
+
+### Plan A Prompt 3: actual file content to substantive evidence and supported claims (2026-10-22)
+
+**Owner authorization (USER_CONFIRMED):** the owner's "KAI Plan A / Prompt 3"
+prompt scopes the existing P2 source-to-evidence, claim, coverage, and
+traceability path locally. It asks: determine whether promoted source contents
+already become substantive evidence (A works, B disconnected, C defective, D
+absent), repair the smallest proven gap, and connect P2-04 at the correct
+claim/coverage lifecycle point if traceability depends on manual P2-04 state.
+Not authorized: schema/migration, generation/review/export changes, a new
+evidence architecture, broadening client follow-up roles, push, deployment,
+production/shared database, flags, tenants, credentials, real data, Current
+State.
+
+**Start (TOOL_VERIFIED):** `main` at `801effc`, clean.
+
+**Determination: D (genuinely absent), blocked by schema; no production code
+changed.**
+
+**Findings (TOOL_VERIFIED):**
+- **Content is really parsed.** The P1 profile is computed from the actual
+  bytes and is exhaustive for tabular files (every data row; the security gate
+  refuses files over the record limit). A synthetic probe through the real
+  `profileLocalTrustedFile` gave `row_count` 4, `duplicate_row_count` 2, and
+  field_3 present 3 / missing 1. An independent count of the same bytes agreed
+  exactly. Header names are redacted (`field_1..n`), and raw values are never
+  persisted.
+- **Only metadata reaches evidence and claims.**
+  - P2-01 writes one `dictionary_field_presence_fact` per dictionary field:
+    "committed data dictionary includes field "field_3" of committed type
+    "integer"".
+  - P2-03 composes the claim from the locator alone: "the promoted source
+    contains the committed data-dictionary field "field_3" identified by
+    locator ...".
+  - The probe found no count, value, or sum in any statement. Value-derived
+    measurements (for example a sum of a numeric column) are not computed
+    anywhere.
+- **Exact schema restriction (separate authorization required):**
+  `kai_sprint2_p2_01_evidence_lineage.sql` and the 2026-08-17 cutover pin
+  three CHECKs:
+  - `evidence_items_p2_01_evidence_type_check` (`dictionary_field_presence_fact`);
+  - `evidence_items_p2_01_data_class_check` (`organization_committed_metadata`);
+  - `source_locators_p2_01_locator_type_check` (`column`).
+
+  `kai_sprint2_p2_03_claim_proposal.sql` derives claims "never from the
+  evidence item's own statement ... raw file content or a sample value". The
+  statement fingerprints are claim and evidence identity, and a re-read with a
+  different composed statement fails closed ("statement drift"). Changing
+  either template in code would therefore break every existing evidence item
+  and claim. A measurement evidence type, locator, and claim composition need
+  a migration.
+- **Data restriction:** nothing writes `kai.data_dictionary_fields`
+  `business_meaning` or `entity_level` (no UPDATE path exists), and no fact
+  records a denominator or reporting period. Even with a new representation,
+  a count could not say what a record is, which population, or which period.
+  The synthetic fixtures define no activity unit or period either.
+  `definition_clarity` and `entity_level_clarity` (risk-flagged) and
+  `denominator_clarity` and `time_period_clarity` (always unresolved) are
+  correct limitations, not defects.
+- **Confirmed defect, not changed (not necessary for a persisted finding, and
+  it carries a compatibility constraint):**
+  - P2-02 `assessMissingness` and `assessDuplicates` read only P1-04
+    `data_quality_findings`, which P1-04 writes only for counts above 0. A
+    clean, fully profiled file therefore stays `unresolved` on both
+    dimensions, although its committed profile counts establish zero.
+  - Four consumers compute these dimensions: P2-02, P2-04, P2-06, and the
+    organization gap state. P2-06 requires persisted P2-04 gap rows to match
+    the recomputed dimensions exactly. Changing the rule would make every
+    claim that already has P2-04 state fail traceability. A repair needs an
+    owner decision on how to treat existing P2-04 state.
+- **P2-04 dependency (confirmed):** P2-06 returns
+  `gap_dimension_requires_missing_p204_state` whenever no P2-04 state exists.
+  Because denominator and reporting period are always unresolved, that is
+  every claim. P2-04 is reachable only by the explicit route and UI action.
+- **Proposal-time connection: implemented, tested, reverted.**
+  - Chaining the existing P2-04 service after each committed P2-03 proposal,
+    and after the P2-12 decision-bound proposal, worked: unit 5679/0/115, and
+    a handoff spec 7/0.
+  - Browser acceptance showed the consequence. Every "supported" evidence
+    review and every claim proposal immediately creates four open client
+    follow-up questions and their queue items. That happens before Get Kinder
+    claim review and before any use, and the client Project flips to "Impact
+    Fact review: Waiting for your organization". Acceptance was
+    evidence-to-draft 13 pass / 8 fail, reviewed-evidence 6/6,
+    source-to-impact 14/2, and campaign 56/7. The failures were the expected
+    old-state pins plus this visible change.
+  - Operating Model v0.2 section 11: client review is requested when client
+    knowledge is materially needed, and "earlier review should occur only
+    when an actual blocker requires it". The P2-04 gap state blocks only when
+    a claim is used: drafting, eligibility, or the review packet. That point
+    is inside generation, which this prompt places out of scope. The wiring
+    was reverted, and the explicit P2-04 action remains.
+- **Already correct and preserved:** current-source-version, allowed-use, and
+  AI-permission gating of P2-01/P2-02/P2-03; negative evidence reviews
+  (`not_supported`) never propose a claim; `reviewed_not_supported` claims are
+  refused by generation; P2-11 follow-up completion remains `client_reviewer`
+  only.
+
+**Verification (TOOL_VERIFIED; sentinel `DATABASE_URL`; runner-owned ephemeral loopback PostgreSQL):**
+
+| Command | Pass | Fail | Skipped |
+| --- | --- | --- | --- |
+| P2-01 extraction handoff 7, P2-01 lineage 17, P2-02 coverage 7, P2-03 proposal 15, P2-04 gap follow-up 18, P2-05 conflict 18, P2-06 traceability 33 | 115 | 0 | 0 |
+| Synthetic content probe (kernel counts vs independent count; P2-01/P2-03 composition) | match | | |
+| Final tree identical to `801effc` (wiring reverted; `git status` clean before this entry) | ok | | |
+| `git diff --check` | ok | | |
+
+**Remaining:**
+- Owner/schema authorization (Gate A class): a governed source-derived
+  measurement evidence type, its locator, and a claim composition that
+  carries the value, unit, definition, period, and calculation method.
+- A governed human operation to commit field meaning, entity level,
+  denominator, and reporting period. Without it, no measurement is
+  defensible.
+- Owner decision: profile-count-based missingness and duplicates assessment,
+  and how existing P2-04 state is treated.
+- Owner/scope decision: running P2-04 at the point of use (generation, review
+  packet, eligibility), which is outside this package.
+- Single-administrator organizations still need a `client_reviewer` to
+  complete follow-ups (unchanged).
+- Production state NOT_CONFIRMED.
+
+**Status:** PLAN_A_P2_SUBSTANTIVE_EVIDENCE_BLOCKED_SCHEMA_AND_DEFINITION_AUTHORITY.
+No production code change, push, deployment, production/shared database,
+migration/schema, flag, tenant, credential, real client data, or
+`00_KAI_CURRENT_STATE.md` change. This is the single package-end evidence
+update in the living ExecPlan.
