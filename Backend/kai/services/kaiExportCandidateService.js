@@ -48,6 +48,10 @@ const CONFIRM_LIMITATION_SNAPSHOT_BLOCKER_DETAIL = Object.freeze({
     message: "The limitation snapshot entries do not exactly match the draft's currently persisted cited claim/evidence pairs.",
     required_fix: "Re-read the draft's current cited pairs and resubmit entries that cover them exactly, with no additions or omissions.",
   },
+  measured_claim_limitations_omitted: {
+    message: "A cited measured claim's entry omits one or more of its current material limitations.",
+    required_fix: "Include every limitation code the measured claim currently carries; they cannot be confirmed away.",
+  },
 });
 
 function buildConfirmLimitationSnapshotValidationBlocker(reason, input) {
@@ -180,9 +184,10 @@ export async function confirmGeneratedDraftLimitationSnapshot(input, dependencie
 // confirmGeneratedDraftLimitationSnapshot capability. The browser never
 // curates claim/evidence/limitation-code entries here - entries are derived
 // server-side, exclusively from the draft's own persisted citation pairs
-// (loadCitedPairsForDraft), each with an empty limitationCodes array. This
-// reuses the existing limitation-snapshot entry contract exactly (isLimitationCodeSet
-// accepts an empty array) and delegates to the unmodified
+// (loadCitedPairsForDraft), each with the limitation codes the repository
+// derives server-side: a P2-01M measured claim's material limitations, and an
+// empty array for every other pair. This reuses the existing limitation-snapshot
+// entry contract exactly and delegates to the unmodified
 // repository.confirmLimitationSnapshot for every currentness/fingerprint/
 // audit/authority check - this function adds no new semantics of its own.
 export async function confirmGeneratedDraftLimitationSnapshotFromCitedPairs(input, dependencies = {}) {
@@ -244,7 +249,7 @@ export async function confirmGeneratedDraftLimitationSnapshotFromCitedPairs(inpu
   const entries = citedPairsResult.data.citedPairs.map((pair) => ({
     claimId: pair.claimId,
     evidenceItemId: pair.evidenceItemId,
-    limitationCodes: [],
+    limitationCodes: Array.isArray(pair.limitationCodes) ? pair.limitationCodes : [],
   }));
 
   const result = await repository.confirmLimitationSnapshot({

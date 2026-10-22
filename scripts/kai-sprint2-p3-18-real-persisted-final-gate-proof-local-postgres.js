@@ -117,6 +117,10 @@ try {
   psqlFile("migrations/kai_sprint2_p2_04_claim_gap_followup.sql");
   psqlFile("migrations/kai_sprint2_p2_05_conflict_review_candidate.sql");
   psqlFile("migrations/kai_sprint2_p3_01_generated_content_drafts.sql");
+  // Generation's VAL-KAI-B1A-02-003/004 gates read the Phase-5 sensitivity
+  // decision ledger, which every migrated environment has (as in the P3-01
+  // runner and the Plan A normal migration chain).
+  psqlFile("migrations/kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger.sql");
   psqlFile("migrations/kai_sprint2_p14_01_generation_run_engagement_binding.sql");
   psqlFile("migrations/kai_sprint2_p3_04_generated_content_review_completion.sql");
   psqlFile("migrations/kai_sprint2_p3_05_export_review_request.sql");

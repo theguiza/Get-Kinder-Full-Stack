@@ -158,7 +158,7 @@ function isCreateExportManifestInput(input) {
     && isCanonicalUtcTimestamp(input.now);
 }
 
-async function createDefaultEligibilityDependencies() {
+export async function createDefaultEligibilityDependencies() {
   const { evaluateGeneratedDraftExportReviewPacketInTransaction } = await import(
     "./postgresGeneratedContentRepository.js"
   );

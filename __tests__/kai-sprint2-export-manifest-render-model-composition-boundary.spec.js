@@ -44,6 +44,7 @@ function manifestRow(overrides = {}) {
     export_candidate_id: CANDIDATE,
     effective_authority_decision_id: DECISION,
     effective_authority_decision_type: "export_authority_granted",
+    export_review_queue_item_id: "00000000-0000-4000-8000-000000000701",
     fingerprint_contract_version: "kai-sprint2-p3-19-export-manifest-fingerprint-v1",
     canonical_fingerprint: "a".repeat(64),
     created_at: "2026-09-06T10:20:00.000Z",
@@ -111,6 +112,7 @@ function repositoryDeps({
   representation = canonicalRepresentation({ blockOrder: [1, 2], citationOrder: [0, 1] }),
   fingerprint,
   calls = {},
+  eligibility = { ok: true, data: { finalExportEligible: true, effectiveHumanExportAuthority: true }, error: null },
 } = {}) {
   const computedFingerprint = fingerprint
     || __exportCandidateRepositoryTestables.canonicalFingerprint(
@@ -138,6 +140,12 @@ function repositoryDeps({
     );
   return {
     runInTransaction: async (callback) => callback(fakeTx(row)),
+    loadReportContext: async () => null,
+    evaluateFinalEligibility: async (...args) => {
+      calls.eligibility = (calls.eligibility || 0) + 1;
+      calls.eligibilityArgs = args;
+      return eligibility;
+    },
     evaluateCandidateCurrentness: async (...args) => {
       calls.currentness = (calls.currentness || 0) + 1;
       calls.currentnessArgs = args;
@@ -202,6 +210,27 @@ test("stale P3-16 candidate fails closed before representation composition", asy
   assert.equal(result.error.code, "conflict_current_state_changed");
   assert.equal(result.error.reason, "fingerprint_mismatch");
   assert.equal(calls.representation || 0, 0);
+});
+
+test("Plan A: every render re-runs the final export gate for the manifest's candidate and export review, and an ineligible or revoked release fails closed before composition", async () => {
+  const calls = {};
+  const passing = createPostgresExportManifestRenderModelRepository(repositoryDeps({ calls }));
+  assert.equal((await passing.composeExportManifestRenderModel({ organizationId: ORG, exportManifestId: MANIFEST })).ok, true);
+  assert.equal(calls.eligibility, 1);
+  assert.deepEqual(calls.eligibilityArgs[1], {
+    organizationId: ORG, exportCandidateId: CANDIDATE, exportReviewQueueItemId: "00000000-0000-4000-8000-000000000701",
+  });
+  for (const [eligibility, reason] of [
+    [{ ok: true, data: { finalExportEligible: false, effectiveHumanExportAuthority: false }, error: null }, "release_authority_not_effective"],
+    [{ ok: true, data: { finalExportEligible: false, effectiveHumanExportAuthority: true }, error: null }, "final_export_ineligible"],
+    [{ ok: false, data: null, error: { code: "conflict_current_state_changed" } }, "final_export_eligibility_unavailable"],
+  ]) {
+    const blockedCalls = {};
+    const repository = createPostgresExportManifestRenderModelRepository(repositoryDeps({ eligibility, calls: blockedCalls }));
+    const result = await repository.composeExportManifestRenderModel({ organizationId: ORG, exportManifestId: MANIFEST });
+    assert.deepEqual([result.ok, result.error.code, result.error.reason], [false, "conflict_current_state_changed", reason]);
+    assert.equal(blockedCalls.representation || 0, 0, reason);
+  }
 });
 
 test("changed candidate-bound citation or limitation state cannot silently render under the manifest", async () => {

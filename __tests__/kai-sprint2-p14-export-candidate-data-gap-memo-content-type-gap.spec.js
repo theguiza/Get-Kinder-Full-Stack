@@ -208,6 +208,9 @@ function makeTx(state) {
         return { rows: match ? [state.draft] : [] };
       }
 
+      // Plan A Prompt 7: which cited evidence is P2-01M measurement evidence
+      // (none here, so every entry keeps an empty limitationCodes array).
+      if (s.includes("FROM kai.evidence_items") && s.includes("evidence_type = $3")) return { rows: [] };
       throw new Error(`unhandled fake query: ${s}`);
     },
   };

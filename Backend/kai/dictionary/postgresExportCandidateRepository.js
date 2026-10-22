@@ -14,6 +14,9 @@ import {
 } from "./exportCandidateContract.js";
 import { GENERATED_CONTENT_REVIEW_LIFECYCLE_PROFILES } from "./generatedContentReviewQueueContract.js";
 import { EXPORT_REVIEW_LIFECYCLE_PROFILES } from "./exportReviewQueueContract.js";
+import { evaluateClaimTraceabilityInTransaction } from "./postgresClaimTraceabilityRepository.js";
+import { getScopedEvidenceMeasurementByEvidenceItemId } from "../db/kaiIntakeQueries.js";
+import { MEASUREMENT_EVIDENCE_TYPE, measurementLimitationCodes } from "../validators/kaiSourceMeasurementValidators.js";
 
 const RESULT_STATUS = Object.freeze({
   validation_blocker: 422,
@@ -159,6 +162,29 @@ async function loadCitedPairs(tx, { organizationId, generatedContentDraftId }) {
     [organizationId, generatedContentDraftId],
   );
   return rows;
+}
+
+// Plan A Prompt 7: the material limitations of a cited P2-01M measured claim,
+// derived exactly as generation derives them (the persisted measurement and
+// the claim's current P2-06 dimensions), so a snapshot built from cited pairs
+// carries them instead of an empty list. Field-presence pairs keep [].
+async function loadCitedPairLimitationCodes(tx, { organizationId, requestedAudience }, citedPairs) {
+  const { rows } = await tx.query(
+    `SELECT evidence_item_id::text AS evidence_item_id
+       FROM kai.evidence_items
+      WHERE organization_id = $1::uuid AND evidence_item_id = ANY($2::uuid[]) AND evidence_type = $3`,
+    [organizationId, citedPairs.map((pair) => pair.evidence_item_id), MEASUREMENT_EVIDENCE_TYPE],
+  );
+  const measured = new Set(rows.map((row) => row.evidence_item_id));
+  const codesByPair = new Map();
+  for (const pair of citedPairs) {
+    if (!measured.has(pair.evidence_item_id)) continue;
+    const traceability = await evaluateClaimTraceabilityInTransaction(tx, { organizationId, claimId: pair.claim_id, requestedAudience });
+    const measurementRow = await getScopedEvidenceMeasurementByEvidenceItemId({ organizationId, evidenceItemId: pair.evidence_item_id }, tx);
+    if (!traceability.ok || traceability.data?.evidence?.evidence_item_id !== pair.evidence_item_id || !measurementRow) return null;
+    codesByPair.set(pairKey(pair.claim_id, pair.evidence_item_id), measurementLimitationCodes({ measurementRow, dimensions: traceability.data.dimensions }));
+  }
+  return codesByPair;
 }
 
 function validateEntriesCoverExactCitedPairs(entries, citedPairs) {
@@ -707,10 +733,13 @@ export function createPostgresExportCandidateRepository({ runInTransaction = wit
           const draft = await loadDraftRow(tx, input);
           if (!draft) return failure("not_found");
           const citedPairs = await loadCitedPairs(tx, input);
+          const codesByPair = await loadCitedPairLimitationCodes(tx, { organizationId: input.organizationId, requestedAudience: draft.requested_audience }, citedPairs);
+          if (!codesByPair) return failure("conflict_current_state_changed");
           return success({
             citedPairs: citedPairs.map((pair) => ({
               claimId: pair.claim_id,
               evidenceItemId: pair.evidence_item_id,
+              limitationCodes: codesByPair.get(pairKey(pair.claim_id, pair.evidence_item_id)) || [],
             })),
           });
         });
@@ -749,6 +778,19 @@ export function createPostgresExportCandidateRepository({ runInTransaction = wit
               entriesFingerprint,
               replayed: true,
             }));
+          }
+
+          // A measured claim's material limitations cannot be confirmed away:
+          // each such entry must carry every code derived for it right now.
+          // Checked after the snapshot lock and the replay short-circuit, and
+          // before any write.
+          const derivedCodesByPair = await loadCitedPairLimitationCodes(tx, { organizationId: input.organizationId, requestedAudience: draft.requested_audience }, citedPairs);
+          if (!derivedCodesByPair) return failure("conflict_current_state_changed");
+          for (const entry of input.entries) {
+            const derived = derivedCodesByPair.get(pairKey(entry.claimId, entry.evidenceItemId)) || [];
+            if (!derived.every((code) => entry.limitationCodes.includes(code))) {
+              return failure("validation_blocker", "measured_claim_limitations_omitted");
+            }
           }
 
           const newSnapshotId = crypto.randomUUID();

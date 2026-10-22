@@ -3,6 +3,8 @@ import {
   evaluateExportCandidateCurrentnessInTransaction,
   loadExportCandidateCanonicalRepresentationInTransaction,
 } from "./postgresExportCandidateRepository.js";
+import { createDefaultEligibilityDependencies } from "./postgresExportManifestRepository.js";
+import { evaluateFinalExportEligibilityInTransaction } from "../services/kaiFinalExportEligibilityGateService.js";
 
 const RESULT_STATUS = Object.freeze({
   validation_blocker: 422,
@@ -43,6 +45,7 @@ async function loadExportManifest(tx, { organizationId, exportManifestId }) {
             export_candidate_id::text AS export_candidate_id,
             effective_authority_decision_id::text AS effective_authority_decision_id,
             effective_authority_decision_type,
+            export_review_queue_item_id::text AS export_review_queue_item_id,
             fingerprint_contract_version,
             canonical_fingerprint,
             created_at
@@ -70,7 +73,30 @@ function pairKey(entry) {
   return `${entry.claimId}:${entry.evidenceItemId}`;
 }
 
-function composeRenderModel({ manifest, candidate, representation }) {
+// Plan A Prompt 7: who the released content is about. The organization and the
+// engagement the draft was generated under (P14-01 binding), read in the same
+// render transaction. Display context only: not part of any fingerprint.
+async function loadReportContextInTransaction(tx, { organizationId, generatedContentDraftId }) {
+  const { rows } = await tx.query(
+    `SELECT r.engagement_id::text AS engagement_id, e.engagement_code,
+            (SELECT o.name FROM kai.organizations o WHERE o.organization_id = d.organization_id) AS organization_name
+       FROM kai.generated_content_drafts d
+       JOIN kai.generation_runs r ON r.organization_id = d.organization_id AND r.generation_run_id = d.generation_run_id
+       LEFT JOIN kai.engagements e ON e.organization_id = r.organization_id AND e.engagement_id = r.engagement_id
+      WHERE d.organization_id = $1::uuid AND d.generated_content_draft_id = $2::uuid`,
+    [organizationId, generatedContentDraftId],
+  );
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    organizationId,
+    organizationName: row.organization_name ?? null,
+    engagementId: row.engagement_id ?? null,
+    engagementCode: row.engagement_code ?? null,
+  };
+}
+
+function composeRenderModel({ manifest, candidate, representation, context = null }) {
   const citationsByKey = new Map();
   const blocks = [...representation.blocks]
     .sort((a, b) => a.ordinal - b.ordinal)
@@ -117,6 +143,7 @@ function composeRenderModel({ manifest, candidate, representation }) {
       createdAt: manifest.created_at instanceof Date ? manifest.created_at.toISOString() : manifest.created_at,
     },
     exportCandidate: candidate,
+    ...(context ? { context } : {}),
     authority: {
       effectiveAuthorityDecisionId: manifest.effective_authority_decision_id,
       effectiveAuthorityDecisionType: manifest.effective_authority_decision_type,
@@ -131,10 +158,22 @@ function composeRenderModel({ manifest, candidate, representation }) {
   };
 }
 
+// Plan A Prompt 7: a manifest is released content, so every render (and so
+// every Markdown/CSV/PDF/DOCX retrieval) re-runs the same P3-18 final
+// eligibility gate the manifest was created under, in this read-only
+// transaction: a revoked release authority, a claim that is no longer
+// currently eligible (stale source, withdrawn review), or an audience
+// mismatch now fails closed instead of rendering.
+async function evaluateFinalEligibilityForRender(tx, input) {
+  return evaluateFinalExportEligibilityInTransaction(tx, input, await createDefaultEligibilityDependencies());
+}
+
 export function createPostgresExportManifestRenderModelRepository({
   runInTransaction = withTransaction,
   evaluateCandidateCurrentness = evaluateExportCandidateCurrentnessInTransaction,
   loadCandidateRepresentation = loadExportCandidateCanonicalRepresentationInTransaction,
+  evaluateFinalEligibility = evaluateFinalEligibilityForRender,
+  loadReportContext = loadReportContextInTransaction,
 } = {}) {
   return Object.freeze({
     async composeExportManifestRenderModel(input) {
@@ -155,6 +194,19 @@ export function createPostgresExportManifestRenderModelRepository({
             return failure("conflict_current_state_changed", { reason: currentness.data.reason });
           }
 
+          const eligibility = await evaluateFinalEligibility(tx, {
+            organizationId: input.organizationId,
+            exportCandidateId: manifest.export_candidate_id,
+            exportReviewQueueItemId: manifest.export_review_queue_item_id,
+          });
+          if (!eligibility?.ok || eligibility.data?.finalExportEligible !== true) {
+            return failure("conflict_current_state_changed", {
+              reason: eligibility?.ok
+                ? (eligibility.data.effectiveHumanExportAuthority === true ? "final_export_ineligible" : "release_authority_not_effective")
+                : "final_export_eligibility_unavailable",
+            });
+          }
+
           const candidateRepresentation = await loadCandidateRepresentation(tx, {
             organizationId: input.organizationId,
             exportCandidateId: manifest.export_candidate_id,
@@ -170,10 +222,16 @@ export function createPostgresExportManifestRenderModelRepository({
             return failure("conflict_current_state_changed", { reason: "fingerprint_mismatch" });
           }
 
+          const context = await loadReportContext(tx, {
+            organizationId: input.organizationId,
+            generatedContentDraftId: candidateRepresentation.data.candidate.generatedContentDraftId,
+          });
+
           return success(composeRenderModel({
             manifest,
             candidate: candidateRepresentation.data.candidate,
             representation: candidateRepresentation.data.representation,
+            context,
           }));
         });
       } catch {

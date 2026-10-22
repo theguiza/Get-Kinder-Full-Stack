@@ -52,9 +52,14 @@ export function serializeExportManifestRenderModelToMarkdown(renderModel) {
     `Render model contract: ${inlineCode(renderModel.renderModelContractVersion)}`,
     `Content type: ${inlineCode(renderModel.exportCandidate.contentType)}`,
     `Requested audience: ${inlineCode(renderModel.exportCandidate.requestedAudience)}`,
-    "",
-    "## Content",
   ];
+  // Report context (Plan A Prompt 7), present when the render model carries it.
+  if (isNonArrayObject(renderModel.context)) {
+    const { organizationName, organizationId, engagementCode, engagementId } = renderModel.context;
+    lines.push(`Organization: ${organizationName ? `${normalizeScalar(organizationName)} ` : ""}(${inlineCode(organizationId)})`);
+    if (engagementId) lines.push(`Engagement: ${engagementCode ? `${inlineCode(engagementCode)} ` : ""}(${inlineCode(engagementId)})`);
+  }
+  lines.push("", "## Content");
 
   for (const block of renderModel.content.blocks) {
     lines.push(

@@ -118,6 +118,10 @@ try {
   psqlFile("migrations/kai_sprint2_p2_04_claim_gap_followup.sql");
   psqlFile("migrations/kai_sprint2_p2_05_conflict_review_candidate.sql");
   psqlFile("migrations/kai_sprint2_p2_10_coverage_review_decision.sql");
+  // Current P2-06 traceability reads the P2-12 human-review decision ledger
+  // (kai.evidence_review_decisions / kai.claim_review_decisions), which every
+  // migrated environment has (Plan A normal migration chain).
+  psqlFile("migrations/kai_sprint2_p2_12_human_review_decision_ledger.sql");
   psqlFile("migrations/kai_sprint2_p3_01_generated_content_drafts.sql");
   psqlFile("migrations/kai_sprint2_p14_01_generation_run_engagement_binding.sql");
   psqlFile("scripts/kai-sprint2-p3-01-generated-content-drafts-verifier.sql");

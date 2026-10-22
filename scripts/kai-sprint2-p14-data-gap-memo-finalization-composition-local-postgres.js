@@ -109,6 +109,10 @@ try {
   // own proven ordering) required only for the real, unstubbed
   // createDataGapMemoDraft -> listOrganizationEvidenceGapsForImpactLibrary
   // read path this composition proof exercises for real.
+  // Generation's VAL-KAI-B1A-02-003/004 gates read the Phase-5 sensitivity
+  // decision ledger, which every migrated environment has (as in the P3-01
+  // runner and the Plan A normal migration chain).
+  psqlFile("migrations/kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger.sql");
   psqlFile("migrations/kai_sprint2_a1_1_impact_outcome_context.sql");
   psqlFile("migrations/kai_sprint2_a1_2_impact_evaluation_framework_and_criteria.sql");
   psqlFile("migrations/kai_sprint2_a1_3_impact_evaluations_and_results.sql");

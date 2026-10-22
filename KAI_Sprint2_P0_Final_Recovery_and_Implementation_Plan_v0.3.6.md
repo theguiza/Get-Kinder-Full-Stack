@@ -42728,3 +42728,214 @@ CHECK admitting every operation used here: NOT_CONFIRMED.
 No push, deployment, production/shared database, migration, flag, tenant,
 credential, live provider, real client data, or `00_KAI_CURRENT_STATE.md`
 change. This is the single package-end evidence update in the living ExecPlan.
+
+### Plan A Prompt 7: schema-verified review to Markdown delivery (2026-10-22)
+
+**Owner authorization (USER_CONFIRMED):** the owner's "KAI Plan A Step 7"
+prompt directs, locally:
+- prove the normal migration chain, without the CHECK-union workaround;
+- take the validated internal `evidence_summary` draft through the existing
+  GK review, export, release-authority, manifest, Markdown and
+  controlled-retrieval services;
+- repair confirmed defects with the smallest existing-code change.
+
+It does not authorize a new migration, production or shared resources,
+deployment or push, flag/tenant/credential changes, real client data,
+changes to GK review/release ownership, a new renderer, report type or
+generator, or a Current State update.
+
+**Start (TOOL_VERIFIED):** `main` at `9f13d65`, clean.
+
+**Normal migration chain (TOOL_VERIFIED, disposable loopback PostgreSQL):**
+`scripts/kai-sprint2-plan-a-normal-migration-chain-local-postgres.js`
+- **Order:** no recorded authoritative order exists (no numeric prefixes, no
+  manifest, no ExecPlan list). The order used is the commit that first added
+  each file. The runner verifies it against `git log --diff-filter=A` and
+  requires that it lists exactly the repository's 79 non-rollback
+  `kai_sprint2_*` migrations.
+  - The repository's own repairs presuppose this order: the 08-22 P2-09/10/11
+    forward reconciliation and the 09-06 P3-17 operation repair follow the
+    fixed-list replacing migrations they correct.
+  - Same-commit pairs keep the browser runner's order.
+- **Pre-migration base:** synthetic mirrors of the production-owned tables no
+  migration creates (`kai.organizations`, `kai.engagements` with
+  `UNIQUE (engagement_id, organization_id)` as A1-1 requires, `kai.users`,
+  `kai.audit_events`, `kai.intake_files`), applied before any migration.
+- **Result:** 77 migrations applied unmodified, in order, with no CHECK
+  union, constraint patch or mid-chain mirror. Two production-history
+  repairs are applied and refuse the fresh state by design; the runner
+  checks that each refusal leaves the schema fingerprint unchanged:
+  - `kai_sprint2_legacy_generation_cutover_20260817` accepts only
+    production's legacy shape or its own converged state. Its section-4
+    changes, including a full-list operation-CHECK replacement, therefore
+    never reach a fresh build: a fresh/production divergence.
+  - `kai_sprint2_p1_06_review_status_column_repair`: its converged-state
+    guard requires exactly one CHECK mentioning `review_status`. P2-04,
+    P2-05, P3-04 and P3-13 legitimately add queue-type contract CHECKs that
+    mention it (five on a fresh chain), so the intended no-op refuses.
+    - This is a source-controlled guard defect, harmless to a fresh build
+      (its state-B path is a no-op).
+    - Minimum correction, NOT applied (it would edit an existing migration):
+      match the named `review_queue_items_p1_06_review_status_check`, not a
+      count of CHECKs mentioning `review_status`.
+- **Catalog:** every table this path uses exists:
+  - measurement: `source_measurement_definitions`, `evidence_measurements`;
+  - lineage, claims and decisions: evidence, claims,
+    `intake_sensitivity_review_decisions`, `evidence_review_decisions`,
+    `claim_review_decisions`, `coverage_review_decisions`, gaps, follow-ups;
+  - generation: `generation_runs`, drafts, blocks, citations;
+  - review and export: `review_queue_items`, `limitation_snapshots`,
+    `limitation_snapshot_entries`, `export_candidates`,
+    `human_authority_decisions`, `export_manifests`;
+  - audit: `upload_lifecycle_audit`, `audit_events`.
+
+  The schema fingerprint was identical before and after the proof.
+- **CHECK comparison:**
+  - The normal operation CHECK admits 35 operations, a strict superset of
+    the adjusted P2-01M runner's 28. It adds `export_review_requested`,
+    `export_review_started`, `export_review_completed`,
+    `limitation_snapshot_confirmed`, `export_candidate_created`,
+    `generated_content_review_started` and
+    `human_authority_decision_recorded`.
+  - The adjusted runner's metadata CHECK is the looser OR-union; the normal
+    chain also carries six metadata CHECKs the adjusted one lacks (GCRS,
+    P3-05/09/13/16).
+  - Every value the exercised services wrote satisfied the normal
+    constraints.
+- **Production schema:** NOT_CONFIRMED. No production inspection was
+  performed; the pgAdmin path remains the established route for any
+  separately authorized read-only check.
+
+**Defects found and repaired (no migration):**
+1. **Snapshot dropped the measured claim's limitations.** The route-used
+   `confirmGeneratedDraftLimitationSnapshotFromCitedPairs` gave every cited
+   pair `limitationCodes: []`, so the snapshot, the candidate fingerprint
+   and the final Markdown lost the measured claim's ten limitations.
+   - `loadCitedPairsForDraft` now derives each P2-01M measured pair's codes
+     exactly as generation does (the persisted measurement plus the claim's
+     current P2-06 dimensions). Other pairs keep `[]`.
+   - `confirmLimitationSnapshot` refuses any entry that omits a measured
+     pair's derived codes (`measured_claim_limitations_omitted`), checked
+     after the snapshot lock and the replay short-circuit.
+2. **Retrieval ignored release status.** Rendering an existing manifest
+   re-checked only candidate currentness, so a revoked release, a claim no
+   longer currently eligible (for example a stale source) or an audience
+   mismatch still rendered.
+   - The render repository now re-runs the existing P3-18
+     `evaluateFinalExportEligibilityInTransaction` (the manifest
+     repository's own default dependencies, read-only), bound to the
+     manifest's candidate and export review. Any failure is
+     `conflict_current_state_changed`, before composition.
+   - This applies to every Markdown/CSV/PDF/DOCX retrieval. Who may release
+     or retrieve is unchanged.
+3. **No organization or engagement context.** The Markdown stated neither.
+   The render model now carries the organization name and id and the
+   engagement code and id (from the P14-01 run binding; not fingerprinted).
+   The existing serializer prints them when present; render models without
+   context serialize byte-for-byte as before.
+
+**Stale runner fixtures repaired (directly relevant; the migrations
+themselves are correct):**
+- P3-01 lacked P2-12, which current P2-06 traceability reads: 18/1 → 19/0.
+- P14-13, P3-16, P3-17, P3-18, P3-19, P14-08-A and the data-gap-memo
+  composition lacked the B1A-02 phase-5 ledger that generation's AI gate
+  reads. It is now applied at its chronological slot (after P3-01, before
+  P14-01).
+  - P14-13: 2/6 → 8 + 50 / 0.
+  - P3-16: 6 → 2 failures. P3-17: 7 → 3. P3-18: 13 → 1. P3-19: 32 → 18.
+    Data-gap: 37 → 23. P14-08-A: unchanged at 9.
+  - The remaining failures are a subset of the baseline set, with no new
+    names (TOOL_VERIFIED by stash-and-rerun on `9f13d65`). They are not
+    repaired here.
+- P14-14 (not on this path) is untouched; probably the same cause
+  (NOT_CONFIRMED).
+
+**Review to Markdown proof (TOOL_VERIFIED, normal chain, real services):**
+- **Actors and audit:** every human decision is a service call by an
+  authorized synthetic actor, with the production metadata-only audit
+  factories (their `kai.audit_events` writer bound to the test pool, as the
+  ambient pool is in production). Nothing was approved through SQL.
+- **Steps:**
+  - review-packet read (block, exact citation, VAL-GEN-008 pass);
+  - GK reviewer starts and completes the review;
+  - GK administrator requests (internal only; funder not accepted), starts
+    and completes the export review;
+  - GK reviewer confirms the snapshot (the ten codes are persisted);
+  - GK administrator creates the candidate, grants final-release authority
+    and creates the manifest (a replay converges);
+  - the real Markdown delivery route returns `kai-export-manifest.md`.
+- **Audit trail:** `generated_content_review_started/completed`,
+  `export_review_requested/started/completed`,
+  `limitation_snapshot_confirmed`, `export_candidate_created`,
+  `human_authority_decision_recorded`, `export_manifest_created`.
+- **Count agreement:** the independent count of the CSV (5) equals the
+  value at every stage: measurement, evidence, claim, generator input,
+  draft, reviewed packet and Markdown.
+- **The Markdown states:**
+  - organization "Riverside Literacy Collective (synthetic)" and engagement
+    `p2-01m`, audience `internal`;
+  - "records 5 programme sessions for the reporting period 2026-09-01 to
+    2026-09-30", a count of source records under the human-confirmed
+    definition;
+  - the period attested and not verified against record dates;
+  - 1 blank record excluded and 2 exact-duplicate records included;
+  - the accepted internal limitations;
+  - `[CIT-001]` with claim, evidence, source and source version;
+  - all ten limitation codes.
+
+  It contains no distinct/unique/people/participant/rate/outcome/causal
+  wording and no row values or file names.
+- **Negatives:**
+  - Before review: no export review is accepted (409) and no candidate.
+  - The organization administrator, the AI, and another organization's
+    administrator cannot review. The AI cannot complete.
+  - `client_admin` and `gk_reviewer` cannot request or start export review.
+    With `KAI_PUBLIC_EXPORT_ENABLED` off, export review is
+    `feature_disabled`.
+  - A snapshot dropping the limitations, or citing a wrong pair, is refused.
+  - `client_admin`, `gk_reviewer` and the AI cannot create the candidate,
+    grant authority or create the manifest. Neither can another
+    organization's GK administrator. Authority for another audience is
+    refused. No manifest exists without authority.
+  - Route retrieval: `client_admin`, `gk_reviewer`, another organization's
+    GK administrator and the AI get 403. The other organization's path gets
+    404.
+  - After a revoke: 409 and no new manifest. After a re-grant: 200 again.
+  - After the source version is superseded: retrieval 409, no new release,
+    and generation is refused.
+- **Exists only as a resolve:** GK generated-content review and export
+  review have no reject or needs-changes outcome. Declining means not
+  completing, and nothing downstream accepts an unresolved review.
+
+**Verification (TOOL_VERIFIED; sentinel `DATABASE_URL`):**
+
+| Command | Pass | Fail | Skipped |
+| --- | --- | --- | --- |
+| Plan A normal chain: legacy seed 2; P2-01M + review-to-Markdown 27 | 2 + 27 | 0 | 0 |
+| `npm test` (baseline 5687/0/116) | 5689 | 0 | 116 |
+| `npm run verify:kai-sprint2-api-contract` | 71 | 0 | 0 |
+| P2-01M adjusted runner (export tests skipped there) | 2 + 54 | 0 | 6 |
+| P2-06 33, P3-01 19, P14-13 8 + 50 | 110 | 0 | 0 |
+| Generation runners: review-start audit 3 + 8 + 67, P14-11 4, Gate C1 59 | 141 | 0 | 0 |
+| Board reporting mixed 7, P14-03 36 | 43 | 0 | 0 |
+| P3-16 / P3-17 / P3-18 / P3-19 / data-gap / P14-08-A (baseline-subset failures) | 211 / 256 / 312 / 375 / 293 / 19 | 2 / 3 / 1 / 18 / 23 / 9 | 1 / 1 / 0 / 0 / 1 / 0 |
+| Browser: evidence-to-draft 21, source-to-impact 16 | 37 | 0 | 0 |
+| `git diff --check` | ok | | |
+
+**Remaining for the ordinary customer's file-to-report journey:**
+- An organization administrator cannot retrieve the released Markdown.
+  Delivery is `gk_admin`-only and there is no client route. That needs an
+  owner policy decision and a client delivery surface.
+- No reject or needs-changes review outcome exists.
+- Limitations appear in the Markdown as codes; only the block text states
+  them in prose.
+- No measurement-definition UI exists.
+- A live provider has not been exercised.
+- Export requires `KAI_PUBLIC_EXPORT_ENABLED`, even for internal.
+- Production schema and deployment are NOT_CONFIRMED.
+- The pre-existing runner failures listed above remain.
+
+**Status:** PLAN_A_REVIEW_TO_MARKDOWN_COMPLETE_LOCAL_SYNTHETIC_NORMAL_CHAIN.
+No push, deployment, production/shared database, migration, flag, tenant,
+credential, live provider, real client data, or `00_KAI_CURRENT_STATE.md`
+change.

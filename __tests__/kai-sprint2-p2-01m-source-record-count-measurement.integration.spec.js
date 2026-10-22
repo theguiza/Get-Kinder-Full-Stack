@@ -1,6 +1,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import http from "node:http";
+import express from "express";
 
 /**
  * KAI P2-01M real-PostgreSQL proof, run only by
@@ -69,6 +71,19 @@ async function runSuite() {
   const { createPostgresGeneratedContentRepository } = await import("../Backend/kai/dictionary/postgresGeneratedContentRepository.js");
   const { createProductionEvidenceSummaryDraftGenerator } = await import("../Backend/kai/services/kaiEvidenceSummaryDraftGenerator.js");
   const { getEngagementForOrganization } = await import("../Backend/kai/db/kaiQueries.js");
+  const { default: sprint2IntakeApiRouter, __testables: routeTestables } = await import("../Backend/kai/routes/sprint2IntakeApi.js");
+  const { startGeneratedContentReview, completeGeneratedContentReview, getGeneratedDraftReviewPacket } = await import("../Backend/kai/services/kaiGeneratedContentService.js");
+  const { requestGeneratedDraftExportReview, startGeneratedDraftExportReview, completeGeneratedDraftExportReview } = await import("../Backend/kai/services/kaiExportReviewService.js");
+  const { confirmGeneratedDraftLimitationSnapshot, confirmGeneratedDraftLimitationSnapshotFromCitedPairs, createGeneratedDraftExportCandidate } = await import("../Backend/kai/services/kaiExportCandidateService.js");
+  const { createPostgresExportCandidateRepository } = await import("../Backend/kai/dictionary/postgresExportCandidateRepository.js");
+  const { recordHumanFinalReleaseAuthorityDecision } = await import("../Backend/kai/services/kaiHumanAuthorityDecisionService.js");
+  const { createPostgresHumanAuthorityDecisionRepository } = await import("../Backend/kai/dictionary/postgresHumanAuthorityDecisionRepository.js");
+  const { createExportManifest } = await import("../Backend/kai/services/kaiExportManifestService.js");
+  const { createPostgresExportManifestRepository } = await import("../Backend/kai/dictionary/postgresExportManifestRepository.js");
+  const { createPostgresExportManifestRenderModelRepository } = await import("../Backend/kai/dictionary/postgresExportManifestRenderModelRepository.js");
+  const { serializeExportManifestToMarkdown } = await import("../Backend/kai/services/kaiExportManifestMarkdownSerializer.js");
+  const audits = await import("../Backend/kai/services/kaiMetadataOnlyAuditComposition.js");
+  const { insertRequiredSuccessfulAuditEvent } = await import("../Backend/kai/db/kaiAuditQueries.js");
 
   const ENV = Object.freeze({ KAI_SPRINT2_ENABLED: "true" });
   const ORG = "0e000000-0000-4000-8000-000000000a01";
@@ -80,7 +95,11 @@ async function runSuite() {
   const BATCH = "1e000000-0000-4000-8000-000000000001";
   const NOW = "2026-10-22T12:00:00.000Z";
   const pool = new Pool({ connectionString: DATABASE_URL, ssl: false, max: 8 });
-  test.after(async () => { await pool.end(); });
+  const cleanups = [];
+  test.after(async () => {
+    for (const cleanup of cleanups.reverse()) await cleanup();
+    await pool.end();
+  });
 
   async function withTx(callback) {
     const client = await pool.connect();
@@ -116,6 +135,8 @@ async function runSuite() {
   const CONTRIBUTOR = human(ORG, "client_contributor", "03");
   const OTHER_ADMIN = human(OTHER_ORG, "client_admin", "04");
   const GK_REVIEWER = human(ORG, "gk_reviewer", "05");
+  const GK_ADMIN = human(ORG, "gk_admin", "07");
+  const OTHER_GK_ADMIN = human(OTHER_ORG, "gk_admin", "08");
 
   // Synthetic activity log: one data record per programme session. It has an
   // empty line (not a record), a record with a missing attendee count (still a
@@ -848,6 +869,13 @@ async function runSuite() {
   const blockerKeys = (result) => (result.blockers || []).filter((item) => item.severity === "blocker").map((item) => item.validator_key);
 
   test("generation: the eligible measured claim reaches the generator with its value, definition, and every limitation, and a compliant response persists a review-gated internal draft", async () => {
+    // The normal chain's pre-migration base has the real engagement ->
+    // organization foreign key; the P2-01M runner's engagement mirror does not.
+    if ((await query("SELECT to_regclass('kai.organizations') IS NOT NULL AS present"))[0].present) {
+      await query(`INSERT INTO kai.organizations (organization_id, name, organization_code) VALUES
+        ($1::uuid, 'Riverside Literacy Collective (synthetic)', 'plan-a-synthetic'), ($2::uuid, 'Other Synthetic Organization', 'plan-a-other')
+        ON CONFLICT (organization_id) DO NOTHING`, [ORG, OTHER_ORG]);
+    }
     await query("INSERT INTO kai.engagements (engagement_id, organization_id, engagement_code) VALUES ($1::uuid, $2::uuid, 'p2-01m'), ($3::uuid, $4::uuid, 'p2-01m-other')",
       [ENGAGEMENT, ORG, OTHER_ENGAGEMENT, OTHER_ORG]);
     const before = await generationCounts();
@@ -864,6 +892,7 @@ async function runSuite() {
     assert.deepEqual([claim.claimId, claim.evidenceItemId, claim.sourceVersionId], [ids.measurementClaimId, ids.measurementEvidenceId, ids.main.sourceVersionId]);
     assert.match(claim.claimStatement, /^The promoted source records 5 programme sessions for the reporting period 2026-09-01 to 2026-09-30 \(record count: one programme session per CSV data record; 1 blank record excluded, 2 exact-duplicate records included\)\.$/);
     assert.deepEqual(claim.limitationCodes, MEASURED_LIMITATION_CODES);
+    ids.generatorClaimStatement = claim.claimStatement;
     assert.equal(payload.system.startsWith(LEGACY_SYSTEM_PROMPT), true, "the existing instructions are kept");
     assert.match(payload.system, /count of source records under the human-confirmed record definition/);
     assert.match(payload.system, /never call the records distinct or the period verified/);
@@ -1029,6 +1058,301 @@ async function runSuite() {
     assert.equal(keys.includes("VAL-GEN-008"), false, JSON.stringify(keys));
   });
 
+  // ---- Plan A Prompt 7: the persisted measured draft through the existing GK
+  // review, export review, limitation snapshot, export candidate, final-release
+  // authority, manifest, render model, Markdown serializer, and the Markdown
+  // delivery route. Runs only on the normal migration chain (the P2-01M
+  // runner's adjusted schema has no export tables). Every human decision is a
+  // service call by an authorized synthetic actor; nothing is written by SQL.
+  const NORMAL_CHAIN = process.env.KAI_PLAN_A_NORMAL_CHAIN === "1";
+  const onNormalChain = { skip: NORMAL_CHAIN ? false : "needs the Plan A normal migration chain (export schema)" };
+  const EXPORT_ENV = Object.freeze({ ...GEN_ENV, KAI_PUBLIC_EXPORT_ENABLED: "true" });
+  const AI_ACTOR = { ...GK_ADMIN, actorType: "ai" };
+  let clock = Date.parse("2026-10-22T13:00:00.000Z");
+  const tick = () => new Date(clock += 1000).toISOString();
+  const queueRow = async (queueType, targetId) => (await query(
+    `SELECT review_queue_item_id::text, queue_status, review_status, updated_at FROM kai.review_queue_items
+      WHERE organization_id = $1::uuid AND queue_type = $2 AND target_object_id = $3::uuid`, [ORG, queueType, targetId]))[0];
+  const generatedRepository = () => createPostgresGeneratedContentRepository({ runInTransaction: withTx });
+  const candidateRepository = () => createPostgresExportCandidateRepository({ runInTransaction: withTx });
+  const authorityRepository = () => createPostgresHumanAuthorityDecisionRepository({ runInTransaction: withTx });
+  const renderRepository = () => createPostgresExportManifestRenderModelRepository({ runInTransaction: withTx });
+  const auditEvents = async () => (await query("SELECT action FROM kai.audit_events WHERE organization_id = $1::uuid ORDER BY audit_event_id", [ORG])).map((row) => row.action);
+  const reviewStep = (fn, queueType, actor, now = tick()) => async () => {
+    const queue = await queueRow(queueType, ids.measuredDraftId);
+    return fn({
+      organizationId: ORG, generatedContentDraftId: ids.measuredDraftId,
+      ...(queueType === "generated_content_review" ? { reviewQueueItemId: queue.review_queue_item_id } : { exportReviewQueueItemId: queue.review_queue_item_id }),
+      expectedUpdatedAt: new Date(queue.updated_at).toISOString(), actorContext: actor, now,
+    }, {
+      env: EXPORT_ENV,
+      generatedContentRepository: generatedRepository(),
+      metadataOnlyAudit: queueType === "generated_content_review"
+        ? auditFor(audits.createProductionMetadataOnlyAuditForGeneratedContentReview, { organizationId: ORG, generatedContentDraftId: ids.measuredDraftId, reviewQueueItemId: queue.review_queue_item_id, actorContext: actor, now })
+        : auditFor(audits.createProductionMetadataOnlyAuditForGeneratedDraftExportReview, { organizationId: ORG, generatedContentDraftId: ids.measuredDraftId, actorContext: actor, now, route: "p3_09_export_review_start" }),
+    });
+  };
+  const requestExportReview = (actor, requestedExportAudience = "internal", now = tick()) => requestGeneratedDraftExportReview(
+    { organizationId: ORG, generatedContentDraftId: ids.measuredDraftId, requestedExportAudience, actorContext: actor, now },
+    { env: EXPORT_ENV, generatedContentRepository: generatedRepository(), metadataOnlyAudit: auditFor(audits.createProductionMetadataOnlyAuditForGeneratedDraftExportReview, { organizationId: ORG, generatedContentDraftId: ids.measuredDraftId, actorContext: actor, now }) });
+  const confirmSnapshot = (actor, now = tick()) => confirmGeneratedDraftLimitationSnapshotFromCitedPairs(
+    { organizationId: ORG, generatedContentDraftId: ids.measuredDraftId, actorContext: actor, now },
+    { env: EXPORT_ENV, exportCandidateRepository: candidateRepository(), metadataOnlyAudit: auditFor(audits.createProductionMetadataOnlyAuditForGeneratedDraftLimitationSnapshot, { organizationId: ORG, generatedContentDraftId: ids.measuredDraftId, actorContext: actor, now }) });
+  const createCandidate = (actor, now = tick()) => createGeneratedDraftExportCandidate(
+    { organizationId: ORG, generatedContentDraftId: ids.measuredDraftId, actorContext: actor, now },
+    { env: EXPORT_ENV, exportCandidateRepository: candidateRepository(), metadataOnlyAudit: auditFor(audits.createProductionMetadataOnlyAuditForGeneratedDraftExportCandidate, { organizationId: ORG, generatedContentDraftId: ids.measuredDraftId, actorContext: actor, now }) });
+  const decideAuthority = (actor, decisionAction, requestedAudience = "internal", now = tick()) => recordHumanFinalReleaseAuthorityDecision(
+    { organizationId: ORG, exportCandidateId: ids.exportCandidateId, requestedAudience, decisionAction, actorContext: actor, now },
+    { env: EXPORT_ENV, humanAuthorityDecisionRepository: authorityRepository(), metadataOnlyAudit: auditFor(audits.createProductionMetadataOnlyAuditForHumanFinalReleaseAuthority, { organizationId: ORG, exportCandidateId: ids.exportCandidateId, actorContext: actor, now }) });
+  const releaseManifest = (actor, now = tick()) => createExportManifest(
+    { organizationId: ORG, exportCandidateId: ids.exportCandidateId, exportReviewQueueItemId: ids.exportReviewQueueItemId, actorContext: actor },
+    { env: EXPORT_ENV, now, repository: createPostgresExportManifestRepository({ runInTransaction: withTx }), metadataOnlyAudit: auditFor(audits.createProductionMetadataOnlyAuditForExportManifest, { organizationId: ORG, exportCandidateId: ids.exportCandidateId, actorContext: actor, now }) });
+  // The production metadata-only audit writer, bound to this suite's pool (in
+  // production it writes through the ambient pool, which here is the sentinel).
+  const auditFor = (factory, options) => factory({ ...options, insertAuditEvent: (metadata) => insertRequiredSuccessfulAuditEvent(metadata, pool) });
+  const exportCounts = async () => (await query(`SELECT
+      (SELECT count(*) FROM kai.limitation_snapshots WHERE organization_id = $1::uuid)::int AS snapshots,
+      (SELECT count(*) FROM kai.export_candidates WHERE organization_id = $1::uuid)::int AS candidates,
+      (SELECT count(*) FROM kai.human_authority_decisions WHERE organization_id = $1::uuid)::int AS decisions,
+      (SELECT count(*) FROM kai.export_manifests WHERE organization_id = $1::uuid)::int AS manifests`, [ORG]))[0];
+
+  test("review: the persisted measured draft, its citation and limitations are read back; only a GK reviewer completes its review; nothing is releasable before", onNormalChain, async () => {
+    const packet = await getGeneratedDraftReviewPacket(
+      { organizationId: ORG, generatedContentDraftId: ids.measuredDraftId, actorContext: GK_REVIEWER },
+      { env: EXPORT_ENV, generatedContentRepository: generatedRepository() });
+    assert.equal(packet.ok, true, JSON.stringify(packet));
+    assert.equal(packet.data.blocks.length, 1);
+    assert.equal(packet.data.blocks[0].text, COMPLIANT_TEXT);
+    assert.deepEqual(packet.data.blocks[0].citations.map((citation) => [citation.claimId, citation.evidenceItemId]), [[ids.measurementClaimId, ids.measurementEvidenceId]]);
+    const [draftRow] = await query("SELECT validator_results FROM kai.generated_content_drafts WHERE generated_content_draft_id = $1::uuid", [ids.measuredDraftId]);
+    const vals = draftRow.validator_results.results || draftRow.validator_results;
+    assert.equal(vals.find((item) => item.validator_key === "VAL-GEN-008").severity, "pass", "the limitation-disclosure check is recorded with the draft");
+
+    // Before any review: no export review can be accepted and no candidate created.
+    const before = await exportCounts();
+    const early = await requestExportReview(GK_ADMIN);
+    console.log(`[p2-01m] export review requested before GK review: ${JSON.stringify(early.error || early.data?.exportReviewRequestAccepted)}`);
+    assert.ok(!early.ok || early.data.exportReviewRequestAccepted === false, `an unreviewed draft is not ready for export review: ${JSON.stringify(early)}`);
+    assert.equal(await queueRow("export_review", ids.measuredDraftId), undefined, "no export review exists");
+    const earlyCandidate = await createCandidate(GK_ADMIN);
+    assert.equal(earlyCandidate.ok, false, JSON.stringify(earlyCandidate));
+    assert.deepEqual(await exportCounts(), before);
+
+    // The drafting organization administrator and the AI cannot review.
+    for (const actor of [ADMIN, AI_ACTOR, OTHER_ADMIN]) {
+      const refused = await reviewStep(startGeneratedContentReview, "generated_content_review", actor)();
+      assert.equal(refused.ok, false, JSON.stringify(refused));
+      assert.equal(refused.error.code, "authorization_denied");
+    }
+    const started = await reviewStep(startGeneratedContentReview, "generated_content_review", GK_REVIEWER)();
+    assert.equal(started.ok, true, JSON.stringify(started));
+    assert.deepEqual([started.data.queueStatus, started.data.reviewStatus], ["in_progress", "needs_gk_review"]);
+    const aiComplete = await reviewStep(completeGeneratedContentReview, "generated_content_review", AI_ACTOR)();
+    assert.deepEqual([aiComplete.ok, aiComplete.error?.code], [false, "authorization_denied"], "AI cannot complete a review");
+    const completed = await reviewStep(completeGeneratedContentReview, "generated_content_review", GK_REVIEWER)();
+    assert.equal(completed.ok, true, JSON.stringify(completed));
+    assert.deepEqual([completed.data.queueStatus, completed.data.reviewStatus], ["resolved", "resolved"]);
+    assert.ok((await auditEvents()).length > 0, "metadata-only audit events were written");
+  });
+
+  test("export review: only a GK administrator requests, starts, and completes it, for the draft's own audience only", onNormalChain, async () => {
+    const before = await exportCounts();
+    const byAdmin = await requestExportReview(ADMIN);
+    assert.deepEqual([byAdmin.ok, byAdmin.error?.code], [false, "authorization_denied"]);
+    const byReviewer = await requestExportReview(GK_REVIEWER);
+    assert.deepEqual([byReviewer.ok, byReviewer.error?.code], [false, "authorization_denied"]);
+    const flagOff = await requestGeneratedDraftExportReview(
+      { organizationId: ORG, generatedContentDraftId: ids.measuredDraftId, requestedExportAudience: "internal", actorContext: GK_ADMIN, now: tick() },
+      { env: GEN_ENV, generatedContentRepository: generatedRepository() });
+    assert.deepEqual([flagOff.ok, flagOff.error?.code], [false, "feature_disabled"], "export stays behind KAI_PUBLIC_EXPORT_ENABLED");
+    const wrongAudience = await requestExportReview(GK_ADMIN, "funder");
+    assert.equal(wrongAudience.ok, true, JSON.stringify(wrongAudience));
+    assert.equal(wrongAudience.data.exportReviewRequestAccepted, false, "a funder export of an internal draft is not accepted");
+    const accepted = await requestExportReview(GK_ADMIN);
+    assert.equal(accepted.ok, true, JSON.stringify(accepted));
+    assert.equal(accepted.data.exportReviewRequestAccepted, true, JSON.stringify(accepted.data.validatorResult));
+    ids.exportReviewQueueItemId = accepted.data.reviewQueueItemId;
+    const startedByReviewer = await reviewStep(startGeneratedDraftExportReview, "export_review", GK_REVIEWER)();
+    assert.deepEqual([startedByReviewer.ok, startedByReviewer.error?.code], [false, "authorization_denied"]);
+    const started = await reviewStep(startGeneratedDraftExportReview, "export_review", GK_ADMIN)();
+    assert.equal(started.ok, true, JSON.stringify(started));
+    const completed = await reviewStep(completeGeneratedDraftExportReview, "export_review", GK_ADMIN)();
+    assert.equal(completed.ok, true, JSON.stringify(completed));
+    assert.deepEqual([completed.data.queueStatus, completed.data.reviewStatus], ["resolved", "resolved"]);
+    assert.deepEqual(await exportCounts(), before);
+  });
+
+  test("limitation snapshot and candidate: the measured claim's material limitations are snapshotted and cannot be confirmed away; only a GK administrator creates the candidate", onNormalChain, async () => {
+    const byAdmin = await confirmSnapshot(ADMIN);
+    assert.deepEqual([byAdmin.ok, byAdmin.error?.code], [false, "authorization_denied"]);
+    // A hand-built confirmation that drops the limitations is refused.
+    const discarded = await confirmGeneratedDraftLimitationSnapshot(
+      { organizationId: ORG, generatedContentDraftId: ids.measuredDraftId, entries: [{ claimId: ids.measurementClaimId, evidenceItemId: ids.measurementEvidenceId, limitationCodes: [] }], actorContext: GK_REVIEWER, now: tick() },
+      { env: EXPORT_ENV, exportCandidateRepository: candidateRepository(), metadataOnlyAudit: auditFor(audits.createProductionMetadataOnlyAuditForGeneratedDraftLimitationSnapshot, { organizationId: ORG, generatedContentDraftId: ids.measuredDraftId, actorContext: GK_REVIEWER, now: NOW }) });
+    assert.deepEqual([discarded.ok, discarded.error?.code], [false, "validation_blocker"], JSON.stringify(discarded));
+    const wrongPair = await confirmGeneratedDraftLimitationSnapshot(
+      { organizationId: ORG, generatedContentDraftId: ids.measuredDraftId, entries: [{ claimId: ids.measurementClaimId, evidenceItemId: ids.legacyFieldEvidenceId, limitationCodes: MEASURED_LIMITATION_CODES }], actorContext: GK_REVIEWER, now: tick() },
+      { env: EXPORT_ENV, exportCandidateRepository: candidateRepository(), metadataOnlyAudit: auditFor(audits.createProductionMetadataOnlyAuditForGeneratedDraftLimitationSnapshot, { organizationId: ORG, generatedContentDraftId: ids.measuredDraftId, actorContext: GK_REVIEWER, now: NOW }) });
+    assert.deepEqual([wrongPair.ok, wrongPair.error?.code], [false, "validation_blocker"], "an incorrect citation pair is refused");
+    assert.equal((await exportCounts()).snapshots, 0);
+
+    const snapshot = await confirmSnapshot(GK_REVIEWER);
+    assert.equal(snapshot.ok, true, JSON.stringify(snapshot));
+    assert.equal(snapshot.data.citedPairCount, 1);
+    const entries = await query("SELECT claim_id::text, evidence_item_id::text, limitation_codes FROM kai.limitation_snapshot_entries WHERE limitation_snapshot_id = $1::uuid", [snapshot.data.limitationSnapshotId]);
+    assert.deepEqual(entries, [{ claim_id: ids.measurementClaimId, evidence_item_id: ids.measurementEvidenceId, limitation_codes: MEASURED_LIMITATION_CODES }]);
+
+    for (const actor of [ADMIN, GK_REVIEWER, AI_ACTOR]) {
+      const refused = await createCandidate(actor);
+      assert.deepEqual([refused.ok, refused.error?.code], [false, "authorization_denied"], JSON.stringify(refused));
+    }
+    const candidate = await createCandidate(GK_ADMIN);
+    assert.equal(candidate.ok, true, JSON.stringify(candidate));
+    assert.deepEqual([candidate.data.requestedAudience, candidate.data.limitationSnapshotId], ["internal", snapshot.data.limitationSnapshotId]);
+    ids.exportCandidateId = candidate.data.exportCandidateId;
+  });
+
+  test("release: without authority nothing is released; only a GK administrator's final-release decision, for the candidate's audience, permits the manifest", onNormalChain, async () => {
+    const before = await exportCounts();
+    const unauthorized = await releaseManifest(GK_ADMIN);
+    assert.deepEqual([unauthorized.ok, unauthorized.error?.code], [false, "validation_blocker"], JSON.stringify(unauthorized));
+    for (const actor of [ADMIN, GK_REVIEWER, AI_ACTOR, OTHER_GK_ADMIN]) {
+      const refused = await decideAuthority(actor, "grant");
+      assert.equal(refused.ok, false, JSON.stringify(refused));
+      assert.equal(refused.error.code, "authorization_denied");
+    }
+    const wrongAudience = await decideAuthority(GK_ADMIN, "grant", "funder");
+    assert.equal(wrongAudience.ok, false, "authority for another audience is refused");
+    for (const actor of [ADMIN, GK_REVIEWER, AI_ACTOR]) {
+      const refused = await releaseManifest(actor);
+      assert.deepEqual([refused.ok, refused.error?.code], [false, "authorization_denied"], JSON.stringify(refused));
+    }
+    assert.deepEqual(await exportCounts(), before);
+
+    const granted = await decideAuthority(GK_ADMIN, "grant");
+    assert.equal(granted.ok, true, JSON.stringify(granted));
+    assert.deepEqual([granted.data.effective, granted.data.decidedByRole, granted.data.requestedAudience], [true, "gk_admin", "internal"]);
+    const manifest = await releaseManifest(GK_ADMIN);
+    assert.equal(manifest.ok, true, JSON.stringify(manifest));
+    assert.equal(manifest.data.effectiveAuthorityDecisionId, granted.data.decisionId);
+    ids.exportManifestId = manifest.data.exportManifestId;
+    const replay = await releaseManifest(GK_ADMIN);
+    assert.deepEqual([replay.ok, replay.data?.exportManifestId, replay.data?.replayed], [true, ids.exportManifestId, true]);
+    const actions = await auditEvents();
+    console.log(`[p2-01m] audit_events actions: ${[...new Set(actions)].join(", ")}`);
+  });
+
+  // Independent reading of a rendered or stored text: the number of
+  // programme sessions it states.
+  const statedCount = (text) => Number((/(\d+) programme sessions/.exec(text) || [])[1]);
+
+  test("Markdown: retrieved through the delivery route, the document states the same independently computed count, qualified, cited, and with every material limitation", onNormalChain, async () => {
+    const app = express();
+    const actors = { gk_admin: GK_ADMIN, client_admin: ADMIN, gk_reviewer: GK_REVIEWER, other_gk_admin: OTHER_GK_ADMIN, ai: AI_ACTOR };
+    // Real route (path validation, actor mapping, attachment, error mapping)
+    // and real service/repositories; only the database binding (the ambient
+    // pool is the sentinel here) and the signed-in actor are supplied, as in
+    // the existing route tests.
+    cleanups.push(routeTestables.setIntakeServiceForTest({
+      serializeExportManifestToMarkdown: (input) => serializeExportManifestToMarkdown(input, { renderModelDependencies: { env: EXPORT_ENV, repository: renderRepository() } }),
+    }));
+    cleanups.push(routeTestables.setActorContextMiddlewareForTest((req, _res, next) => { req.kaiSprint2ActorContext = actors[req.headers["x-plan-a-actor"]]; next(); }));
+    const previous = process.env.KAI_SPRINT2_ENABLED;
+    process.env.KAI_SPRINT2_ENABLED = "true";
+    cleanups.push(() => { if (previous === undefined) delete process.env.KAI_SPRINT2_ENABLED; else process.env.KAI_SPRINT2_ENABLED = previous; });
+    app.use((req, _res, next) => { req.user = { id: 1 }; req.isAuthenticated = () => true; next(); });
+    app.use(sprint2IntakeApiRouter);
+    const server = await new Promise((resolve) => { const s = app.listen(0, "127.0.0.1", () => resolve(s)); });
+    cleanups.push(() => new Promise((resolve) => server.close(resolve)));
+    const get = (organizationId, actor) => new Promise((resolve, reject) => {
+      http.get({ hostname: "127.0.0.1", port: server.address().port, path: `/admin/organizations/${organizationId}/export-manifests/${ids.exportManifestId}/markdown`, headers: { "x-plan-a-actor": actor } }, (response) => {
+        const chunks = [];
+        response.on("data", (chunk) => chunks.push(chunk));
+        response.on("end", () => resolve({ statusCode: response.statusCode, headers: response.headers, body: Buffer.concat(chunks).toString("utf8") }));
+      }).on("error", reject);
+    });
+    ids.getMarkdown = get;
+
+    const delivered = await get(ORG, "gk_admin");
+    assert.equal(delivered.statusCode, 200, delivered.body);
+    assert.match(delivered.headers["content-type"], /markdown/);
+    assert.match(delivered.headers["content-disposition"], /attachment; filename="kai-export-manifest\.md"/);
+    const markdown = delivered.body;
+    console.log(`[p2-01m] delivered Markdown:\n${markdown}`);
+
+    // Original file -> evidence -> claim -> generator input -> draft -> reviewed content -> Markdown.
+    const expected = independentRecordCount(CSV);
+    const [stored] = await query(
+      `SELECT m.measured_value, e.statement AS evidence, c.statement AS claim, b.text AS block
+         FROM kai.evidence_measurements m JOIN kai.evidence_items e ON e.evidence_item_id = m.evidence_item_id
+         JOIN kai.claims c ON c.evidence_item_id = e.evidence_item_id
+         JOIN kai.generated_content_citations gc ON gc.claim_id = c.claim_id
+         JOIN kai.generated_content_blocks b ON b.generated_content_block_id = gc.generated_content_block_id
+        WHERE b.generated_content_draft_id = $1::uuid`, [ids.measuredDraftId]);
+    const packet = await getGeneratedDraftReviewPacket({ organizationId: ORG, generatedContentDraftId: ids.measuredDraftId, actorContext: GK_ADMIN }, { env: EXPORT_ENV, generatedContentRepository: generatedRepository() });
+    const stages = {
+      file: expected,
+      measurement: Number(stored.measured_value),
+      evidence: Number((/record count: (\d+) programme sessions/.exec(stored.evidence) || [])[1]),
+      claim: statedCount(stored.claim),
+      generatorInput: statedCount(ids.generatorClaimStatement),
+      draft: statedCount(stored.block),
+      reviewed: statedCount(packet.data.blocks[0].text),
+      markdown: statedCount(markdown),
+    };
+    console.log(`[p2-01m] count by stage: ${JSON.stringify(stages)}`);
+    for (const [stage, value] of Object.entries(stages)) assert.equal(value, 5, stage);
+
+    // Context, qualified count, definition, blanks, duplicates, period.
+    assert.match(markdown, new RegExp(`Organization: Riverside Literacy Collective \\(synthetic\\) \\(\`${ORG}\`\\)`));
+    assert.match(markdown, new RegExp(`Engagement: \`p2-01m\` \\(\`${ENGAGEMENT}\`\\)`));
+    assert.match(markdown, /Requested audience: `internal`/);
+    assert.match(markdown, /records 5 programme sessions for the reporting period 2026-09-01 to 2026-09-30/);
+    assert.match(markdown, /count of source records, each counted as one programme session under the human-confirmed definition/);
+    assert.match(markdown, /1 blank record was excluded/);
+    assert.match(markdown, /2 exact-duplicate records were included/);
+    assert.match(markdown, /period is attested in that definition and not verified against record dates/);
+    // Citation to the claim, the measurement evidence, the source, and the version.
+    assert.match(markdown, /References: \[CIT-001\]/);
+    assert.ok(markdown.includes(`- [CIT-001] Claim \`${ids.measurementClaimId}\`; evidence \`${ids.measurementEvidenceId}\`; source \`${ids.main.sourceId}\`; source version \`${ids.main.sourceVersionId}\`.`), markdown);
+    // Every material limitation, by code, attached to that citation.
+    const limitationLine = markdown.split("\n").find((line) => line.startsWith("- [CIT-001] limitation codes:"));
+    assert.ok(limitationLine, markdown);
+    for (const code of MEASURED_LIMITATION_CODES) assert.ok(limitationLine.includes(`\`${code}\``), code);
+    // Nothing the evidence does not support.
+    const prose = markdown.split("## Citation Appendix")[0];
+    assert.doesNotMatch(prose, /\b(distinct|unique|individuals?|people|participants?|attendees|households?|rate|per cent|percent|outcomes?|because|caused?|improv\w*|impact\w*|increase\w*|led to|result\w* in)\b|%/i);
+    assert.doesNotMatch(prose.replace(/not verified/g, ""), /\bverified\b/i);
+    assert.doesNotMatch(markdown, /literacy|mentoring|2026-09-16|sessions\.csv/, "no row values or file names");
+  });
+
+  test("retrieval: the organization administrator, a GK reviewer, another organization, and the AI cannot retrieve; a revoked release cannot be retrieved until re-granted", onNormalChain, async () => {
+    for (const [organizationId, actor, status] of [
+      [ORG, "client_admin", 403], [ORG, "gk_reviewer", 403], [ORG, "other_gk_admin", 403], [OTHER_ORG, "other_gk_admin", 404], [ORG, "ai", 403],
+    ]) {
+      const refused = await ids.getMarkdown(organizationId, actor);
+      assert.equal(refused.statusCode, status, `${actor}@${organizationId}: ${refused.body}`);
+      assert.doesNotMatch(refused.body, /programme sessions/);
+    }
+    const before = await exportCounts();
+    const revoked = await decideAuthority(GK_ADMIN, "revoke");
+    assert.equal(revoked.ok, true, JSON.stringify(revoked));
+    assert.equal(revoked.data.effective, false);
+    const afterRevoke = await ids.getMarkdown(ORG, "gk_admin");
+    assert.equal(afterRevoke.statusCode, 409, afterRevoke.body);
+    assert.match(afterRevoke.body, /conflict_current_state_changed/);
+    assert.doesNotMatch(afterRevoke.body, /programme sessions/);
+    const noNewRelease = await releaseManifest(GK_ADMIN, tick());
+    assert.equal(noNewRelease.ok, false, "no new manifest while authority is revoked");
+    const regranted = await decideAuthority(GK_ADMIN, "grant");
+    assert.equal(regranted.ok, true, JSON.stringify(regranted));
+    assert.equal(regranted.data.effective, true);
+    assert.equal((await ids.getMarkdown(ORG, "gk_admin")).statusCode, 200);
+    const after = await exportCounts();
+    assert.deepEqual([after.snapshots, after.candidates, after.manifests], [before.snapshots, before.candidates, before.manifests]);
+    assert.equal(after.decisions, before.decisions + 2, "revoke and re-grant are two appended decisions");
+  });
+
   test("generation: once the measured source version is superseded, the claim is stale and is refused before the provider", async () => {
     const before = await generationCounts();
     await query("UPDATE kai.source_versions SET is_current = false WHERE source_version_id = $1::uuid", [ids.main.sourceVersionId]);
@@ -1038,5 +1362,13 @@ async function runSuite() {
     assert.equal(result.ok, false, JSON.stringify(result));
     assert.equal(provider.calls.length, 0);
     assert.deepEqual(await generationCounts(), before);
+    if (NORMAL_CHAIN) {
+      // The released document is no longer retrievable, and nothing new can be released.
+      const retrieval = await ids.getMarkdown(ORG, "gk_admin");
+      assert.equal(retrieval.statusCode, 409, retrieval.body);
+      assert.doesNotMatch(retrieval.body, /programme sessions/);
+      const release = await releaseManifest(GK_ADMIN);
+      assert.equal(release.ok, false, JSON.stringify(release));
+    }
   });
 }

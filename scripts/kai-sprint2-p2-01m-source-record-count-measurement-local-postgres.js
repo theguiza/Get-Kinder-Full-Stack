@@ -181,6 +181,21 @@ try {
   // Legacy compatibility: every pre-existing evidence/locator row (the P2-01
   // smoke seed's field-presence lineage) is fingerprinted before the
   // additive P2-01M migration and must be byte-identical after it.
+  // Optional: write this adjusted schema's audit CHECK definitions so they
+  // can be compared with the Plan A normal migration chain.
+  if (process.env.KAI_RUNNER_CATALOG_OUT) {
+    const { writeFileSync } = await import("node:fs");
+    const client = new Client({ connectionString: targetUrl, ssl: false });
+    await client.connect();
+    try {
+      const { rows } = await client.query(
+        `SELECT conname, pg_get_constraintdef(oid) AS definition FROM pg_constraint
+          WHERE conrelid = 'kai.upload_lifecycle_audit'::regclass AND contype = 'c' ORDER BY conname`);
+      writeFileSync(process.env.KAI_RUNNER_CATALOG_OUT, JSON.stringify(rows, null, 2));
+    } finally {
+      await client.end();
+    }
+  }
   const legacySnapshotSql = `SELECT md5(string_agg(row_to_json(t)::text, '|' ORDER BY t::text)) FROM (
       SELECT evidence_item_id, evidence_type, data_class, statement, statement_fingerprint, source_locator_id, created_at FROM kai.evidence_items
       UNION ALL SELECT source_locator_id, locator_type, coordinates::text, locator_fingerprint, '', source_version_id, created_at FROM kai.source_locators

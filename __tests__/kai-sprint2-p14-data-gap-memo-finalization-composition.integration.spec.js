@@ -107,7 +107,8 @@ async function runDataGapMemoFinalizationCompositionSuite() {
   const { EXPORT_CANDIDATE_CONTENT_TYPES } = await import("../Backend/kai/dictionary/exportCandidateContract.js");
   const { createPostgresHumanAuthorityDecisionRepository } =
     await import("../Backend/kai/dictionary/postgresHumanAuthorityDecisionRepository.js");
-  const { createPostgresExportManifestRepository } = await import("../Backend/kai/dictionary/postgresExportManifestRepository.js");
+  const { createPostgresExportManifestRepository, createDefaultEligibilityDependencies } = await import("../Backend/kai/dictionary/postgresExportManifestRepository.js");
+  const { evaluateFinalExportEligibilityInTransaction } = await import("../Backend/kai/services/kaiFinalExportEligibilityGateService.js");
   const { createProductionMetadataOnlyAuditForExportManifest } = await import("../Backend/kai/services/kaiMetadataOnlyAuditComposition.js");
   const { createPostgresExportManifestRenderModelRepository } = await import("../Backend/kai/dictionary/postgresExportManifestRenderModelRepository.js");
   const { serializeExportManifestRenderModelToMarkdown } = await import("../Backend/kai/services/kaiExportManifestMarkdownSerializer.js");
@@ -256,7 +257,17 @@ async function runDataGapMemoFinalizationCompositionSuite() {
 
   const humanAuthorityDecisionRepository = createPostgresHumanAuthorityDecisionRepository({ runInTransaction: withRunnerOwnedTransaction });
   const exportManifestRepository = createPostgresExportManifestRepository({ runInTransaction: withRunnerOwnedTransaction });
-  const exportManifestRenderModelRepository = createPostgresExportManifestRenderModelRepository({ runInTransaction: withRunnerOwnedTransaction });
+  // Render re-runs the real final export gate (Plan A Prompt 7); it uses the
+  // same disclosed P2-06 stand-in the manifest steps use, set once the
+  // pipeline's evidence exists.
+  let renderCurrentUseEvaluator = null;
+  const exportManifestRenderModelRepository = createPostgresExportManifestRenderModelRepository({
+    runInTransaction: withRunnerOwnedTransaction,
+    evaluateFinalEligibility: async (tx, eligibilityInput) => evaluateFinalExportEligibilityInTransaction(tx, eligibilityInput, {
+      ...(await createDefaultEligibilityDependencies()),
+      evaluator: renderCurrentUseEvaluator,
+    }),
+  });
 
   test.after(async () => {
     await pool.end();
@@ -629,6 +640,7 @@ async function runDataGapMemoFinalizationCompositionSuite() {
       ...overrides,
     });
 
+    renderCurrentUseEvaluator = currentUseEvaluator(pipeline.evidenceId, { eligible: true });
     const manifestDependencies = (now) => ({
       metadataOnlyAudit: createProductionMetadataOnlyAuditForExportManifest({
         organizationId: ORG,

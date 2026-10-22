@@ -240,3 +240,21 @@ test("existing render-model behavior remains unchanged for serializer input", ()
   assert.equal(model.limitations[0].citationRef, "CIT-001");
   assert.equal(model.methodNotes.limitationSnapshotId, SNAPSHOT);
 });
+
+test("Plan A: report context, when the render model carries it, is stated after the audience; without it the Markdown is unchanged", () => {
+  const withoutContext = serializeExportManifestRenderModelToMarkdown(renderModel());
+  const withContext = serializeExportManifestRenderModelToMarkdown({
+    ...renderModel(),
+    context: { organizationId: ORG, organizationName: "Example Org", engagementId: DRAFT, engagementCode: "pilot-1" },
+  });
+  const lines = withContext.split("\n");
+  const audience = lines.findIndex((line) => line.startsWith("Requested audience: "));
+  assert.equal(lines[audience + 1], `Organization: Example Org (\`${ORG}\`)`);
+  assert.equal(lines[audience + 2], `Engagement: \`pilot-1\` (\`${DRAFT}\`)`);
+  assert.equal(withContext.replace(`${lines[audience + 1]}\n${lines[audience + 2]}\n`, ""), withoutContext);
+  const nameless = serializeExportManifestRenderModelToMarkdown({
+    ...renderModel(),
+    context: { organizationId: ORG, organizationName: null, engagementId: null, engagementCode: null },
+  });
+  assert.match(nameless, new RegExp(`\\nOrganization: \\(\`${ORG}\`\\)\\n\\n## Content`));
+});
