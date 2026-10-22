@@ -41992,3 +41992,153 @@ Implementation commit: `954ad08`.
 No push, deployment, production/shared database, migration/schema, flag,
 tenant, credential, real client data, or `00_KAI_CURRENT_STATE.md` change.
 This is the single package-end evidence update in the living ExecPlan.
+
+### Plan A Prompt 2: secure intake, processing recovery, accurate customer states (2026-10-22)
+
+**Owner authorization (USER_CONFIRMED):** the owner's "KAI Plan A / Prompt 2:
+Secure Intake and Effective Recovery" prompt selects secure file intake,
+processing recovery, and accurate customer-facing states as the next bounded
+local scope: verify the historical intake failure mechanisms, repair only
+demonstrated defects in the existing services, worker transitions,
+validators, projections, or UI actions, and test them. Not authorized:
+reopening Prompt 1, merging source promotion with sensitivity review,
+broadening client follow-up roles, schema/migration, push, deployment,
+production/shared database, flags, tenants, credentials, real data, Current
+State, or a new package sequence.
+
+**Start (TOOL_VERIFIED):** `main` at `f5b0d30`, clean.
+
+**Findings and root causes (TOOL_VERIFIED at `f5b0d30`):**
+- A. Scanner outage: the ClamAV Cloud Run adapter returned
+  `malware_scan_failed` for an identity-token failure, a transport error or
+  abort timeout, and every non-2xx response, including the scanner's own 503
+  `scanner_unavailable`. That category is policy-failure eligible, so the
+  file moved to terminal `file_policy_status = failed` (no edge leaves
+  `failed`). Duplicate resolution then barred the same bytes
+  organization-wide (`security_check_failed`). An outage was never reported
+  as a pass. The recorded classification already makes "scanner unavailable
+  or not configured" non-policy (`malware_scan_not_configured`), and a file
+  left `pending` already has a durable, idempotent re-attempt: a confirmation
+  replay re-runs `applyConfirmedSecurityAssessment`.
+- A. Parser: `byte_source_unavailable` (the exact object version could not be
+  read) ended the run as `failed`. The P1 worker always passes
+  `retry: false`, and nothing in production reaches
+  `retryParserProfileWork`. So a temporary storage read permanently stopped
+  the file, with no action available to anyone. `retry:false` itself is
+  correct for failures about the bytes, and the orphaned-lease recovery was
+  already bounded.
+- B. Reservations: the Gate A trigger counts every reserved, upload_started,
+  and uploaded_unconfirmed row in the batch whether or not
+  `upload_expires_at` has passed. Nothing moves a lapsed row to `expired`, so
+  25 lapsed reservations filled a batch permanently. The trigger's refusal
+  escaped `reserveIntakeFileMetadata` uncaught as a 500.
+- C. Customer states: a confirmed file left pending by a non-policy outcome
+  showed "Security check: In progress / KAI is processing this file"
+  indefinitely. A lapsed reservation showed "Uploaded: In progress".
+- D. Promotion integrity (no change): P1-08 runner 19/0 and P1-07 handoff
+  22/0 at the final tree. The difference in account checks is not a defect.
+  `resolveKaiActorContext` refuses any non-`active` `kai.users` account
+  (`mapped_kai_user_required`) before any mounted route, so a deactivated
+  account cannot reach a sensitivity decision. P1-08's own `kaiUserStatus`
+  check is defense in depth.
+
+**Changes (no schema, migration, role, or authority change):**
+- `malwareScanAdapter.js`, `clamavCloudRunMalwareScanAdapter.js`,
+  `boundedFileSecurityAssessor.js`, repository contract: a new exact
+  `malware_scan_unavailable` result for an identity-token, transport, or
+  timeout failure, and for HTTP 429/503. It is non-policy, so the file stays
+  pending and quarantined with a `record_security_assessment_diagnostic`
+  audit. Malformed input, integrity mismatch, 400/413/500/502/504, a
+  malformed body, and `not_ready` keep `malware_scan_failed`.
+- `postgresParserRunRepository.js` (`isAutomaticParserRetryDue`,
+  `AUTOMATIC_PARSER_RETRY_*`), `parserProfileActivation.js`,
+  `listActionableKaiP1WorkCandidates`: an infrastructure-only failure is
+  retried through the existing capped `requeueFailedParserRunForRetry`. The
+  schedule is 60 s after the first failure and 300 s after the second, the
+  downstream stages' cooldowns, up to `MAX_PARSER_RETRY_COUNT` (3).
+  `retry_count` is never reset, and the row lock decides concurrent retries.
+- `expireLapsedIntakeFileReservations` and `reserveIntakeFileMetadata` (both
+  reservation paths): the batch's lapsed rows move through the authorized
+  `->expired` edge with `expire_upload` audits in one statement, and the
+  trigger still guards each row. A full batch returns 409 `conflict` with
+  blocker `active_upload_limit_reached`. A failed expiry never blocks a
+  reservation.
+- Client pipeline (read model, service, frontend): a pending file whose
+  latest diagnostic is a non-policy category shows `waiting_for_client` /
+  `retry_security_check` / `security_check_unavailable` ("scanner was not
+  available ... stays quarantined"). An actor with `intakeContribution`
+  gets "Check security again", which is the existing confirmation POST
+  (`securityCheckRetry.js`, the status card's only write; the server
+  re-authorizes `create_intake_file`, re-verifies the bytes, and changes
+  only a pending file). A retrying read shows as KAI processing, and an
+  exhausted one as the existing Get Kinder failure. A lapsed reservation
+  shows as not completed. The diagnostic code is never returned. Bundle
+  rebuilt, identical on rebuild.
+
+**Not weakened:** an unscanned or outage file is never `passed` and nothing
+downstream is reached. Detections still block, and genuine scan failures
+still fail. A re-check after the scanner returns decides on the real result
+(infected becomes `blocked`). Parse failures about the bytes, cancelled runs,
+and exhausted runs are never retried. Source promotion, its outcomes, and
+`reviewedSourceType` are untouched.
+
+**Verification (TOOL_VERIFIED; sentinel `DATABASE_URL`; runner-owned ephemeral loopback PostgreSQL; real Chrome; rebuilt bundle):**
+
+| Command | Pass | Fail | Skipped |
+| --- | --- | --- | --- |
+| `npm test` (baseline 5666/0/115) | 5672 | 0 | 115 |
+| `npm run verify:kai-sprint2-api-contract` | 71 | 0 | 0 |
+| Security unit specs (ClamAV adapter, assessor, malware boundary, P0 contract, Gate C handoff, observability) | 106 | 0 | 0 |
+| P1 worker runner: candidate discovery 7, file processing 32 | 39 | 0 | 0 |
+| Duplicate-resolution real-PostgreSQL HTTP suite (new: scanner outage, active upload capacity) | 13 | 0 | 0 |
+| Confirm-upload metadata boundary runner; Gate A lifecycle repair proof | 13; passed | 0 | 0 |
+| P1-08 source promotion 19, P1-07 handoff 22 | 41 | 0 | 0 |
+| Browser: client evidence pipeline 8 (new case 8), source-to-impact 16, client-admin source promotion 12, client Knowledge Studio 6, access-approval campaign 63, evidence-to-draft 21, continuation 12, Files rehydration 3 | 141 | 0 | 0 |
+| `git diff --check` | ok | | |
+
+Recovery proof (real PostgreSQL):
+- Outage: confirm 200, the file stays pending with one diagnostic, and the
+  same bytes are offered "use existing / new version", not barred. Re-checks
+  by `client_viewer` and by another organization's administrator are refused
+  with zero writes. A re-check during the outage adds a diagnostic only.
+  After the scanner returns, a re-check moves the file to `passed`, and a
+  further re-check changes nothing. Infected content becomes `blocked` after
+  an outage.
+- Parser: no retry before the cooldown, and an explicit caller `retry` is
+  rejected. After the cooldown, of two concurrent instances exactly one
+  re-reads, giving one profile, one dictionary, one sensitivity profile, and
+  `retry_count` 1. A file that stays unreadable ends `failed` with retries 3
+  and is never selected again. `parser_run_lease_expired` is unchanged.
+- Capacity: 25 live reservations → 409 with nothing written; 3 lapsed → the
+  next reservation is 201, the 3 lapsed rows are expired with
+  `expire_upload` audits, the other 22 are untouched, an expired row cannot
+  be continued, and another batch is unaffected.
+- The existing duplicate test's lapsed record now reads `expired`, with its
+  history kept.
+
+Actual content parsing (TOOL_VERIFIED): the P1 worker file-processing suite
+profiles real CSV bytes, including the bytes re-read on the retry, through
+P1-03 to P1-05 on PostgreSQL. The browser case 8 re-check hit this runner's
+storage-less `kai.intake_files` mirror (500, shown as "could not be
+requested"); the successful re-check is proven on the production-shape
+schema above.
+
+**Remaining (not changed here):**
+- A scanner that stays unavailable leaves files pending until someone
+  re-checks them. There is no automatic re-assessment sweep, because the
+  security assessment runs only on confirmation.
+- Scanner 502 `scanner_failure` and 504 stay terminal `malware_scan_failed`.
+  Whether a clamd failure for one file should also be treated as an outage is
+  an owner/security decision.
+- `assessment_read_integrity_failure` (pre-assessment storage read) leaves
+  the file pending with no diagnostic audit, so it still shows as KAI
+  processing.
+- No route lets a customer abandon a live reservation before its 24-hour
+  window ends.
+- Fresh upload with a live ClamAV scanner, live GCS, and live worker
+  deployment: NOT_CONFIRMED. Production state: NOT_CONFIRMED.
+
+**Status:** PLAN_A_SECURE_INTAKE_RECOVERY_COMPLETE_LOCAL_SYNTHETIC.
+No push, deployment, production/shared database, migration/schema, flag,
+tenant, credential, real client data, or `00_KAI_CURRENT_STATE.md` change.
+This is the single package-end evidence update in the living ExecPlan.
