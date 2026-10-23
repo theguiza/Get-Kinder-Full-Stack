@@ -43136,3 +43136,200 @@ documents):**
 No push, deployment, production/shared database, migration, flag, tenant,
 credential, real client data, GK role change, or `00_KAI_CURRENT_STATE.md`
 change.
+
+### Plan A Prompt 9: assembled synthetic customer file-to-report acceptance (2026-10-23)
+
+**Owner authorization (USER_CONFIRMED):** the owner's "Plan A Prompt 9:
+Complete Assembled Synthetic Customer File-to-Report Acceptance" prompt
+directs, locally:
+- the supported customer journey from actual CSV upload bytes to the
+  released internal Evidence Summary Markdown;
+- one customer-operated recovery case;
+- only the verified missing local connections.
+
+It does not authorize a migration, production or shared resources,
+deployment or push, flag/tenant/credential changes, real client data, GK
+review or release reassignment, or a Current State update.
+
+**Start (TOOL_VERIFIED):** `main` at `bc9d076`, clean.
+
+**Preflight (TOOL_VERIFIED):**
+- The Prompt 8 harness seeded the P1-03..P1-05 rows. Upload, scan, and
+  parsing were not executed there, and the sensitivity decision was a GK
+  service call.
+- The browser runner's `kai.intake_files` mirror has no storage columns, so
+  its case 8 security re-check returns 500. That spec still asserts the 500;
+  the successful re-check was proven only over HTTP, in the duplicate-
+  resolution suite.
+- The production paths already connect end to end:
+  - confirmation → bounded assessment → policy CAS → immediate P1 dispatch
+    (`getKaiP1FileDispatcher`) → `processKaiP1IntakeFile` (P1-03 parser on
+    the exact stored object version, P1-04, P1-05, P1-06 handoff);
+  - the client Files tab (batch creation, reservation, signed PUT,
+    confirmation, "Check security again") and Data Sources (sensitivity
+    decision, P1-07, P1-08 promotion, Count records, claim, generation,
+    released-report receipt).
+- No missing product connection was found. The gap was a proof on a
+  production-shape schema that drives this whole path.
+
+**Changes (test infrastructure only; no product code, migration, or
+schema change):**
+- `scripts/kai-sprint2-plan-a-migration-chain.js`: the normal-chain list,
+  production-history refusals, and git-order verification, moved out of the
+  normal-chain runner unchanged so that both runners share them. The
+  normal-chain runner imports them.
+- `scripts/kai-sprint2-plan-a-assembled-file-to-report-local-postgres.js`:
+  a disposable loopback cluster. Its base is:
+  - the organization and auth mirrors the real `resolveKaiActorContext`
+    reads;
+  - the production-shaped `kai.intake_batches` / `kai.intake_files`
+    (2026-09-16 capture, with storage columns; the file the duplicate-
+    resolution proof uses).
+
+  On that base it applies all 79 chain migrations unmodified, in
+  introduction order: 77 apply and the two production-history repairs
+  refuse with the schema unchanged. There is no CHECK union or patch. It
+  runs with `KAI_SPRINT2_ENABLED`, `KAI_FILE_UPLOAD_ENABLED`,
+  `KAI_WORKER_ENABLED` and `KAI_GENERATION_ENABLED` in the child process
+  only.
+- `__tests__/kai-customer-file-to-report-assembled-browser-acceptance.integration.spec.js`
+  (15 tests; it skips without the runner).
+
+**Simulated, external boundaries only:**
+- the session (harness cookie);
+- object storage (an in-process signed-PUT / exact-generation stand-in; the
+  browser PUTs the selected bytes to it);
+- the malware scanner (a deterministic adapter behind the real
+  `assessBoundedFileSecurity` and executor);
+- the model provider (patched SDK `Messages.create`);
+- `KAI_PUBLIC_EXPORT_ENABLED=true` in the test process.
+
+**Injected state, labeled:** the stale-source refusal flips
+`source_versions.is_current`, because no application operation supersedes a
+source version. No other business state is written by SQL.
+
+**Proof (TOOL_VERIFIED, headless Chrome, 15/0):**
+- **Upload, as the binding-derived `client_admin` in Files:**
+  - Create batch: 201, `created_by` the administrator.
+  - Upload sequence: reservation 201 → upload-url 200 → PUT 200 →
+    confirm 200.
+  - Declared and verified checksum `5adcc1e1…91e7` equal the independent
+    sha256 of the bytes.
+  - The stored object is exactly the selected bytes, in organization X,
+    Project X and the batch.
+- **Recovery:**
+  - With the scanner unavailable, the file is confirmed but stays pending
+    and quarantined. One `malware_scan_unavailable` diagnostic is recorded.
+    There is no parser run, profile or dispatch.
+  - The Files entry says the scanner was not available and offers "Check
+    security again".
+  - A re-check during the outage writes a diagnostic only.
+  - Once the scanner returns, the administrator's click (one POST to
+    confirm-upload, no new transfer) passes the existing stored bytes and
+    triggers exactly one P1 dispatch.
+  - The worker produces one completed parser run (checksum = verified),
+    one profile (6 / 1 / 2), one dictionary, one sensitivity profile and
+    the system's P1-06 review item.
+- **Idempotency:** a confirmation replay is 200 with no dispatch. A worker
+  re-run replays. Re-selecting the same file returns 422 duplicate
+  resolution. There is no new file, run, profile, source or policy
+  decision.
+- **Source:**
+  - The administrator records the sensitivity review in Data Sources
+    (allowed use `allowed`, AI `permitted`; human `client_admin`).
+  - P1-07 and P1-08 promotion follow; the version is current.
+  - Lineage runs version → sensitivity profile → the uploaded file and the
+    worker's profile.
+- **Measurement and claim:**
+  - Count records shows 6 / 1 / 2 and "= 5".
+  - The administrator records the definition and attested period.
+  - The measurement is 5, and the claim states 5. Gap state is recorded
+    with 0 client follow-ups.
+- **GK review and release:**
+  - GK records the evidence and claim reviews and 3 coverage acceptances;
+    the claim is eligible.
+  - The administrator generates the summary in the UI. The generator
+    receives the claim, evidence and ten limitation codes. The model's
+    `approved`/`released` fields leave the draft at `draft` /
+    `needs_gk_review`.
+  - GK runs the content review, then `gk_admin` the export review,
+    snapshot, candidate, grant and manifest.
+- **Receipt:** "Open released report" makes one GET, 200. The Markdown is
+  byte-identical to GK's release, and the download is an attachment.
+- **Report content:**
+  - 5 programme sessions, the attested period, the blank and duplicate
+    treatment, and claim, evidence and source-version citations;
+  - all ten codes, with their wording;
+  - no rate, participant, outcome or causal wording, and no row values or
+    file names.
+- **Byte-to-report:** independent count 5 = profile (6 − 1) 5 =
+  measurement 5 = claim 5 = generated 5 = Markdown 5.
+- **Human actors in X:** only the administrator, the GK reviewer and the GK
+  administrator. The administrator has no global role.
+- **Refusals:**
+  - Detected malware is `blocked`, is never parsed, and a re-check cannot
+    reverse it.
+  - Another organization's administrator: 403 on file read, re-check,
+    pipeline and reservation into X.
+  - The inactive administrator: 403 on reserve and re-check.
+  - `client_reviewer`: 403 on re-check.
+  - `KAI_SPRINT2_ENABLED=false`: 403 `feature_disabled`.
+  - A second file decided `not_allowed`: AI-permitted is 422; the decision
+    is recorded, with no candidate or source.
+  - A conflicting definition: 409. An invalid definition: 422.
+  - The basis read: 403 for contributor, reviewer, inactive administrator
+    and another organization.
+  - The administrator: 403 on evidence and claim review, coverage, content
+    review, export review, snapshot, grant and manifest. The GK reviewer:
+    403 on grant and manifest.
+  - Report route: 403 for other roles, the inactive administrator, the GK
+    reviewer and another organization; 404 for another Project; 403 for
+    the GK route.
+  - A revoked release is 409, and the UI says it is no longer available.
+    After a re-grant: 200. Stale source (injected): 409.
+  - Covered by the P2-01M integration spec, re-run in this execution, not
+    by this browser run:
+    - prohibited, unknown, or unresolved AI use refused before the
+      provider;
+    - an unreviewed or rejected measured claim refused before the provider;
+    - fabricated numbers, causal language, and undisclosed limitations
+      rejected with nothing persisted.
+
+**Verification (TOOL_VERIFIED; sentinel `DATABASE_URL`):**
+
+| Command | Pass | Fail | Skipped |
+| --- | --- | --- | --- |
+| Assembled runner (new) | 15 | 0 | 0 |
+| `npm test` (baseline 5698/0/117) | 5699 | 0 | 118 |
+| `npm run verify:kai-sprint2-api-contract` | 71 | 0 | 0 |
+| `npm run build` (bundle unchanged) | ok | | |
+| Plan A normal chain (after the list moved; same 79/77) | 2 + 29 | 0 | 0 |
+| P2-01M runner | 2 + 55 | 0 | 7 |
+| Duplicate-resolution real PostgreSQL (scanner outage) | 13 | 0 | 0 |
+| P1 worker runner (discovery 7, file processing 32) | 39 | 0 | 0 |
+| Browser: measurement-to-release 13, source promotion 12, evidence pipeline 8, evidence-to-draft 21, source-to-impact 16 | 70 | 0 | 0 |
+| `git diff --check` | ok | | |
+
+Data-gap composition and P3-19 were not re-run; no product code changed.
+
+**Remaining Plan A (precise):**
+- Deployed customer-session acceptance (real login): NOT_CONFIRMED.
+- Production GCS signed upload, ClamAV scanner, and worker deployment
+  behaviour: NOT_CONFIRMED.
+- A real external model-provider call: NOT_CONFIRMED.
+- An organization-owned factual review and release amendment: not
+  accepted. GK review and release remain in force.
+- Internal export still requires `KAI_PUBLIC_EXPORT_ENABLED`. Decoupling
+  it needs an owner contract/policy decision.
+- Production schema, migration order and deployment: NOT_CONFIRMED. The
+  chain order is reconstructed from git, not the recorded production order.
+- Newly established by this execution:
+  - no application operation supersedes a source version, so stale-source
+    protection can be shown only by injected state;
+  - the browser runner's case 8 still asserts the storage-less 500, which
+    this proof supersedes but does not change.
+
+**Status:** PLAN_A_ASSEMBLED_FILE_TO_REPORT_ACCEPTANCE_COMPLETE_LOCAL_SYNTHETIC.
+No push, deployment, production/shared database, migration, flag, tenant,
+credential, real client data, GK role change, or `00_KAI_CURRENT_STATE.md`
+change.
