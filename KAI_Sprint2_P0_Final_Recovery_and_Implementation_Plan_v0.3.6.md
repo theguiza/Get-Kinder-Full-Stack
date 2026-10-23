@@ -43827,3 +43827,41 @@ real client data, global GK role change, or `00_KAI_CURRENT_STATE.md` change.
 **Remaining:** today's production catalog and the owner's reported CSV are not present in this repository, so live production readiness is NOT_CONFIRMED. The correction is proven against the documented schema shape containing the exact P2-01 CHECK and against the local packet rehearsal. No migration was run in production or any shared database; no deployment or `00_KAI_CURRENT_STATE.md` change occurred.
 
 **Status:** PGADMIN_PREFLIGHT_ROW_324_RECONCILED_LOCAL; production result awaits the owner's next read-only preflight CSV.
+
+### Plan A: production synthetic canary implementation attempt (2026-10-23)
+
+**Owner authorization (USER_CONFIRMED):** local implementation and validation
+of a production synthetic canary only. This does not authorize running it in
+production, changing flags or tenancy, reading real client data, deploying,
+or pushing.
+
+**Local work (TOOL_VERIFIED):** added an executable Chrome DevTools Protocol
+guided-runner prototype, synthetic six-row CSV fixture, report assertion
+helpers, and focused tests. The browser harness launched headless Chrome
+locally after an approved local-process escalation; the test process used the
+loopback `DATABASE_URL` sentinel. No live target was opened and no production
+application or data was accessed.
+
+**Verification (TOOL_VERIFIED; sentinel `DATABASE_URL`):**
+- `npm run test:kai-plan-a-production-canary`: 6 passed, 0 failed; includes
+  the real local Chrome CDP launch, fixture count, authorization guard,
+  mock-free implementation check, and Markdown rejection cases.
+- `npm run verify:kai-sprint2-api-contract`: 71 passed, 0 failed after
+  granting the focused local listener test its required loopback access.
+- `git diff --check`: passed.
+
+**Blocker:** the prototype does not yet implement authoritative per-stage
+readbacks for upload/scan/P1 profile, source review/promotion, measurement and
+claim linkage, GK evidence/claim/coverage decisions, provider-backed draft,
+customer factual review, release, and Markdown receipt. It stops with
+`NOT_CONFIRMED` after a human checkpoint and cannot safely resume past that
+checkpoint. The preflight can open the login page and make authorized API
+reads after interactive login, but it does not establish the selected
+synthetic organization's eligibility or deployed feature-gate/runtime state.
+The latest test therefore proves browser launch and local assertions, not an
+executable end-to-end canary. Production URL and synthetic workspace IDs were
+not supplied; no production attempt was made.
+
+**Status:** PLAN_A_PRODUCTION_SYNTHETIC_CANARY_INCOMPLETE_BLOCKED_READBACKS.
+No production login, upload, database access, mutation, flag change, deploy,
+push, or real client data use.
