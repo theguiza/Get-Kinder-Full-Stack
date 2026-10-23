@@ -43761,3 +43761,55 @@ concurrency test passed this time.
 **Status:** PLAN_A_ORGANIZATION_INTERNAL_RELEASE_COMPLETE_LOCAL_SYNTHETIC.
 No push, deployment, production/shared database, flag, tenant, credential,
 real client data, global GK role change, or `00_KAI_CURRENT_STATE.md` change.
+
+### Plan A: owner-executed pgAdmin production migration packet (2026-10-23)
+
+**Owner authorization (USER_CONFIRMED):** the owner's "Prepare the exact pgAdmin production migration and closure package" prompt. It authorizes preparing source-verified SQL for the owner to run in pgAdmin. It does not authorize executing production SQL, pushing, deploying, or changing flags.
+
+**Start (TOOL_VERIFIED):** `main` at `637a9ca`, clean.
+
+**Production evidence:**
+- The owner's `KAI_PGADMIN_01_READ_ONLY_SCHEMA_PREFLIGHT.sql` CSV was **not supplied** in this execution, and that file does not exist in the repository. Production's current schema is therefore NOT_CONFIRMED.
+- The newest recorded production catalog is the owner's 2026-09-16 pgAdmin capture (`artifacts/kai-db-reconciliation-2026-09-16/PRODUCTION_KAI_SCHEMA.json`, USER_CONFIRMED historical). The packet compares against it.
+- The repository has no migration-ledger table, so state is decided from catalog objects.
+
+**Delta findings (TOOL_VERIFIED against the capture and the normal chain):**
+- **Required on the 2026-09-16 state:**
+  - `kai_sprint2_p1_downstream_recovery_state` (`intake_p1_downstream_attempts` absent);
+  - `kai_sprint2_b1a_02_client_admin_sensitivity_review` (role CHECK has no `client_admin`);
+  - `kai_sprint2_p2_01m_source_record_count_measurement`;
+  - `kai_sprint2_plan_a_organization_internal_release_authority`.
+- Commit `4191684` also edited the already-applied historical `kai_sprint2_b1a_02_phase5_allowed_use_decision_ledger.sql` to admit `client_admin`. A fresh chain therefore already admits it, while the 2026-09-16 production capture does not.
+- The reported-deployed `3b99a90` already contains `dfe7e31` and `4191684`.
+- **Not needed for the workflow:**
+  - the ten P13 content-type extensions (the preflight accepts the CHECKs with or without them);
+  - `package_g`;
+  - `join_1`.
+- **Already converged in production:** the legacy cutover and the P1-06 repair.
+- **Equal admitted sets:** production's `upload_lifecycle_audit` operation CHECK differs in shape from the chain's but admits the same 35 operations. A delegated sweep of `3b99a90..HEAD` writes found no new value that needs any other schema change. This was confirmed against the capture: the expiry trigger edges, `retry_count` 0–3, and the claim statement CHECK.
+
+**Packet:** `KAI_PGADMIN_PRODUCTION_MIGRATION_PACKET/`.
+- `00` preflight: decides REQUIRED / ALREADY_APPLIED / STOP_INCOMPATIBLE per migration, and compares 43 workflow tables exactly with the capture.
+- `01`–`04`: byte-identical migrations.
+- `01V`–`04V` verifiers and `99` final verification. Role and vocabulary rules are evaluated by running the live CHECK expressions through `query_to_xml`; no rows are inserted.
+- `RP` rollback precheck and verbatim `rollback/R01`–`R04`.
+- `RUN_IN_PGADMIN.md`, `ROLLOUT_AND_ACCEPTANCE.md`, `SOURCE_MANIFEST.md` (SHA-256 checksums).
+- Generator: `scripts/kai-sprint2-pgadmin-production-packet-build.js` (deterministic). Capture and rehearsal: `scripts/kai-sprint2-pgadmin-production-packet-rehearsal-local-postgres.js`.
+
+**Verification (TOOL_VERIFIED; sentinel `DATABASE_URL`; disposable loopback PostgreSQL 16.14 only):**
+
+| Command | Pass | Fail | Skipped |
+| --- | --- | --- | --- |
+| Packet rehearsal on a schema-only replica of the 2026-09-16 capture (read-only sessions; forward, verifiers, 99, idempotent re-preflight, R04 refusal, full reverse rollback, partial history, partial 04, drift, narrowed audit vocabulary, repository chain) | 26 | 0 | 0 |
+| Plan A normal chain (04 forward / replay / rollback / forward; refusal with `client_admin` rows) | 2 + 30 | 0 | 0 |
+| `npm test` | 5713 | 0 | 119 |
+| `git diff --check` | ok | | |
+
+**Remaining (NOT_CONFIRMED):**
+- the production schema today;
+- the deployed revision and whether a push auto-deploys;
+- `KAI_PUBLIC_EXPORT_ENABLED` and the current upload, worker and generation flags;
+- live provider, storage and scanner behavior;
+- deployed customer acceptance.
+
+**Status:** PGADMIN_PRODUCTION_MIGRATION_PACKET_PREPARED_LOCAL; production readiness is not claimed until the owner's `00` CSV is reviewed. No production SQL, push, deployment, flag, tenant, credential, real client data, or `00_KAI_CURRENT_STATE.md` change.

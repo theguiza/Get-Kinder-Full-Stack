@@ -1,0 +1,1482 @@
+{
+  "description": "PostgreSQL-rendered definitions before and after the four packet migrations, captured from a disposable loopback cluster built from the repository's normal migration chain. 'before' reflects the repository chain (which already admits client_admin in the B1A-02 role CHECK through a later edit of a historical migration); the production starting state comes from the owner's 2026-09-16 capture instead.",
+  "migrations": [
+    "kai_sprint2_p1_downstream_recovery_state",
+    "kai_sprint2_b1a_02_client_admin_sensitivity_review",
+    "kai_sprint2_p2_01m_source_record_count_measurement",
+    "kai_sprint2_plan_a_organization_internal_release_authority"
+  ],
+  "before": {
+    "postgresql_version": "PostgreSQL 16.14 (Homebrew) on aarch64-apple-darwin25.6.0, compiled by Apple clang version 21.0.0 (clang-2100.1.1.101), 64-bit",
+    "constraints": [
+      {
+        "table_name": "evidence_items",
+        "name": "evidence_items_p2_01_created_by_type_check",
+        "type": "c",
+        "definition": "CHECK (created_by_type = ANY (ARRAY['human'::text, 'system'::text]))"
+      },
+      {
+        "table_name": "evidence_items",
+        "name": "evidence_items_p2_01_data_class_check",
+        "type": "c",
+        "definition": "CHECK (data_class = 'organization_committed_metadata'::text)"
+      },
+      {
+        "table_name": "evidence_items",
+        "name": "evidence_items_p2_01_evidence_type_check",
+        "type": "c",
+        "definition": "CHECK (evidence_type = 'dictionary_field_presence_fact'::text)"
+      },
+      {
+        "table_name": "evidence_items",
+        "name": "evidence_items_p2_01_funder_use_check",
+        "type": "c",
+        "definition": "CHECK (funder_use_allowed = false)"
+      },
+      {
+        "table_name": "evidence_items",
+        "name": "evidence_items_p2_01_id_org_unique",
+        "type": "u",
+        "definition": "UNIQUE (evidence_item_id, organization_id)"
+      },
+      {
+        "table_name": "evidence_items",
+        "name": "evidence_items_p2_01_identity_unique",
+        "type": "u",
+        "definition": "UNIQUE (organization_id, source_version_id, statement_fingerprint)"
+      },
+      {
+        "table_name": "evidence_items",
+        "name": "evidence_items_p2_01_internal_only_check",
+        "type": "c",
+        "definition": "CHECK (internal_only = true)"
+      },
+      {
+        "table_name": "evidence_items",
+        "name": "evidence_items_p2_01_llm_processing_check",
+        "type": "c",
+        "definition": "CHECK (llm_processing_allowed = false)"
+      },
+      {
+        "table_name": "evidence_items",
+        "name": "evidence_items_p2_01_product_learning_check",
+        "type": "c",
+        "definition": "CHECK (product_learning_allowed = false)"
+      },
+      {
+        "table_name": "evidence_items",
+        "name": "evidence_items_p2_01_public_use_check",
+        "type": "c",
+        "definition": "CHECK (public_use_allowed = false)"
+      },
+      {
+        "table_name": "evidence_items",
+        "name": "evidence_items_p2_01_review_status_check",
+        "type": "c",
+        "definition": "CHECK (evidence_review_status = ANY (ARRAY['needs_gk_review'::text, 'reviewed'::text]))"
+      },
+      {
+        "table_name": "evidence_items",
+        "name": "evidence_items_p2_01_sensitivity_level_check",
+        "type": "c",
+        "definition": "CHECK (sensitivity_level = 'unknown'::text)"
+      },
+      {
+        "table_name": "evidence_items",
+        "name": "evidence_items_p2_01_source_locator_fk",
+        "type": "f",
+        "definition": "FOREIGN KEY (source_locator_id, organization_id) REFERENCES kai.source_locators(source_locator_id, organization_id) ON DELETE RESTRICT"
+      },
+      {
+        "table_name": "evidence_items",
+        "name": "evidence_items_p2_01_source_version_fk",
+        "type": "f",
+        "definition": "FOREIGN KEY (source_version_id, source_id, organization_id) REFERENCES kai.source_versions(source_version_id, source_id, organization_id) ON DELETE RESTRICT"
+      },
+      {
+        "table_name": "evidence_items",
+        "name": "evidence_items_p2_01_statement_check",
+        "type": "c",
+        "definition": "CHECK (length(statement) >= 1 AND length(statement) <= 500 AND statement !~* '(https?://|/Users/|/private/|/var/|/etc/|password|secret|api[_-]?key|token|credential|Bearer\\s|stack ?trace|traceback|\\s{2}at [A-Za-z])'::text)"
+      },
+      {
+        "table_name": "evidence_items",
+        "name": "evidence_items_p2_01_statement_fingerprint_check",
+        "type": "c",
+        "definition": "CHECK (statement_fingerprint ~ '^[a-f0-9]{64}$'::text)"
+      },
+      {
+        "table_name": "evidence_items",
+        "name": "evidence_items_p2_01_support_strength_check",
+        "type": "c",
+        "definition": "CHECK (support_strength = ANY (ARRAY['unassessed'::text, 'reviewed_supported'::text, 'reviewed_not_supported'::text]))"
+      },
+      {
+        "table_name": "evidence_items",
+        "name": "evidence_items_pkey",
+        "type": "p",
+        "definition": "PRIMARY KEY (evidence_item_id)"
+      },
+      {
+        "table_name": "human_authority_decisions",
+        "name": "human_authority_decisions_p3_17_candidate_fk",
+        "type": "f",
+        "definition": "FOREIGN KEY (export_candidate_id, organization_id) REFERENCES kai.export_candidates(export_candidate_id, organization_id) ON DELETE RESTRICT"
+      },
+      {
+        "table_name": "human_authority_decisions",
+        "name": "human_authority_decisions_p3_17_created_by_type_check",
+        "type": "c",
+        "definition": "CHECK (created_by_type = 'human'::text)"
+      },
+      {
+        "table_name": "human_authority_decisions",
+        "name": "human_authority_decisions_p3_17_decision_action_check",
+        "type": "c",
+        "definition": "CHECK (decision_action = ANY (ARRAY['grant'::text, 'revoke'::text]))"
+      },
+      {
+        "table_name": "human_authority_decisions",
+        "name": "human_authority_decisions_p3_17_decision_type_check",
+        "type": "c",
+        "definition": "CHECK (decision_type = ANY (ARRAY['client_reviewed'::text, 'funder_ready'::text, 'public_ready'::text, 'export_authority_granted'::text]))"
+      },
+      {
+        "table_name": "human_authority_decisions",
+        "name": "human_authority_decisions_p3_17_id_org_candidate_type_unique",
+        "type": "u",
+        "definition": "UNIQUE (decision_id, organization_id, export_candidate_id, decision_type)"
+      },
+      {
+        "table_name": "human_authority_decisions",
+        "name": "human_authority_decisions_p3_17_id_org_unique",
+        "type": "u",
+        "definition": "UNIQUE (decision_id, organization_id)"
+      },
+      {
+        "table_name": "human_authority_decisions",
+        "name": "human_authority_decisions_p3_17_not_self_superseding",
+        "type": "c",
+        "definition": "CHECK (supersedes_decision_id IS DISTINCT FROM decision_id)"
+      },
+      {
+        "table_name": "human_authority_decisions",
+        "name": "human_authority_decisions_p3_17_role_by_type_check",
+        "type": "c",
+        "definition": "CHECK (decision_type = 'client_reviewed'::text AND decided_by_role = 'client_reviewer'::text OR decision_type <> 'client_reviewed'::text AND decided_by_role = 'gk_admin'::text)"
+      },
+      {
+        "table_name": "human_authority_decisions",
+        "name": "human_authority_decisions_p3_17_root_is_grant_check",
+        "type": "c",
+        "definition": "CHECK (supersedes_decision_id IS NOT NULL OR decision_action = 'grant'::text)"
+      },
+      {
+        "table_name": "human_authority_decisions",
+        "name": "human_authority_decisions_p3_17_supersedes_fk",
+        "type": "f",
+        "definition": "FOREIGN KEY (supersedes_decision_id, organization_id, export_candidate_id, decision_type) REFERENCES kai.human_authority_decisions(decision_id, organization_id, export_candidate_id, decision_type) ON DELETE RESTRICT"
+      },
+      {
+        "table_name": "human_authority_decisions",
+        "name": "human_authority_decisions_pkey",
+        "type": "p",
+        "definition": "PRIMARY KEY (decision_id)"
+      },
+      {
+        "table_name": "intake_sensitivity_review_decisions",
+        "name": "intake_sensitivity_review_decisions_b1a_02_allowed_use_check",
+        "type": "c",
+        "definition": "CHECK (reviewed_allowed_use_status IS NULL OR (reviewed_allowed_use_status = ANY (ARRAY['unknown'::text, 'allowed'::text, 'not_allowed'::text])))"
+      },
+      {
+        "table_name": "intake_sensitivity_review_decisions",
+        "name": "intake_sensitivity_review_decisions_b1a_02_consent_basis_check",
+        "type": "c",
+        "definition": "CHECK (reviewed_consent_basis_status IS NULL OR (reviewed_consent_basis_status = ANY (ARRAY['unknown'::text, 'present'::text, 'absent'::text])))"
+      },
+      {
+        "table_name": "intake_sensitivity_review_decisions",
+        "name": "intake_sensitivity_review_decisions_b1a_02_created_by_type_chec",
+        "type": "c",
+        "definition": "CHECK (created_by_type = 'human'::text)"
+      },
+      {
+        "table_name": "intake_sensitivity_review_decisions",
+        "name": "intake_sensitivity_review_decisions_b1a_02_fin_records_check",
+        "type": "c",
+        "definition": "CHECK (reviewed_financial_records_status IS NULL OR (reviewed_financial_records_status = ANY (ARRAY['unknown'::text, 'present'::text, 'absent'::text])))"
+      },
+      {
+        "table_name": "intake_sensitivity_review_decisions",
+        "name": "intake_sensitivity_review_decisions_b1a_02_funder_use_basis_che",
+        "type": "c",
+        "definition": "CHECK (reviewed_funder_use_allowed IS NOT TRUE OR reviewed_allowed_use_status = 'allowed'::text)"
+      },
+      {
+        "table_name": "intake_sensitivity_review_decisions",
+        "name": "intake_sensitivity_review_decisions_b1a_02_hhji_check",
+        "type": "c",
+        "definition": "CHECK (reviewed_health_housing_justice_immigration_status IS NULL OR (reviewed_health_housing_justice_immigration_status = ANY (ARRAY['unknown'::text, 'present'::text, 'absent'::text])))"
+      },
+      {
+        "table_name": "intake_sensitivity_review_decisions",
+        "name": "intake_sensitivity_review_decisions_b1a_02_id_org_profile_uniqu",
+        "type": "u",
+        "definition": "UNIQUE (decision_id, organization_id, intake_sensitivity_profile_id)"
+      },
+      {
+        "table_name": "intake_sensitivity_review_decisions",
+        "name": "intake_sensitivity_review_decisions_b1a_02_id_org_unique",
+        "type": "u",
+        "definition": "UNIQUE (decision_id, organization_id)"
+      },
+      {
+        "table_name": "intake_sensitivity_review_decisions",
+        "name": "intake_sensitivity_review_decisions_b1a_02_indig_gov_check",
+        "type": "c",
+        "definition": "CHECK (reviewed_indigenous_governance_status IS NULL OR (reviewed_indigenous_governance_status = ANY (ARRAY['unknown'::text, 'present'::text, 'absent'::text])))"
+      },
+      {
+        "table_name": "intake_sensitivity_review_decisions",
+        "name": "intake_sensitivity_review_decisions_b1a_02_llm_use_basis_check",
+        "type": "c",
+        "definition": "CHECK (reviewed_llm_processing_allowed IS NOT TRUE OR reviewed_allowed_use_status = 'allowed'::text)"
+      },
+      {
+        "table_name": "intake_sensitivity_review_decisions",
+        "name": "intake_sensitivity_review_decisions_b1a_02_minor_data_check",
+        "type": "c",
+        "definition": "CHECK (reviewed_minor_data_status IS NULL OR (reviewed_minor_data_status = ANY (ARRAY['unknown'::text, 'present'::text, 'absent'::text])))"
+      },
+      {
+        "table_name": "intake_sensitivity_review_decisions",
+        "name": "intake_sensitivity_review_decisions_b1a_02_not_self_superseding",
+        "type": "c",
+        "definition": "CHECK (supersedes_decision_id IS DISTINCT FROM decision_id)"
+      },
+      {
+        "table_name": "intake_sensitivity_review_decisions",
+        "name": "intake_sensitivity_review_decisions_b1a_02_outcome_check",
+        "type": "c",
+        "definition": "CHECK (decision_outcome = ANY (ARRAY['reviewed'::text, 'needs_more_information'::text]))"
+      },
+      {
+        "table_name": "intake_sensitivity_review_decisions",
+        "name": "intake_sensitivity_review_decisions_b1a_02_personal_data_check",
+        "type": "c",
+        "definition": "CHECK (reviewed_personal_data_status IS NULL OR (reviewed_personal_data_status = ANY (ARRAY['unknown'::text, 'present'::text, 'absent'::text])))"
+      },
+      {
+        "table_name": "intake_sensitivity_review_decisions",
+        "name": "intake_sensitivity_review_decisions_b1a_02_product_learning_bas",
+        "type": "c",
+        "definition": "CHECK (reviewed_product_learning_allowed IS NOT TRUE OR reviewed_allowed_use_status = 'allowed'::text)"
+      },
+      {
+        "table_name": "intake_sensitivity_review_decisions",
+        "name": "intake_sensitivity_review_decisions_b1a_02_profile_fk",
+        "type": "f",
+        "definition": "FOREIGN KEY (intake_sensitivity_profile_id, organization_id) REFERENCES kai.intake_sensitivity_profiles(intake_sensitivity_profile_id, organization_id) ON DELETE RESTRICT"
+      },
+      {
+        "table_name": "intake_sensitivity_review_decisions",
+        "name": "intake_sensitivity_review_decisions_b1a_02_public_use_basis_che",
+        "type": "c",
+        "definition": "CHECK (reviewed_public_use_allowed IS NOT TRUE OR reviewed_allowed_use_status = 'allowed'::text AND reviewed_consent_basis_status = 'present'::text AND reviewed_indigenous_governance_status = 'absent'::text)"
+      },
+      {
+        "table_name": "intake_sensitivity_review_decisions",
+        "name": "intake_sensitivity_review_decisions_b1a_02_queue_item_fk",
+        "type": "f",
+        "definition": "FOREIGN KEY (review_queue_item_id) REFERENCES kai.review_queue_items(review_queue_item_id) ON DELETE RESTRICT"
+      },
+      {
+        "table_name": "intake_sensitivity_review_decisions",
+        "name": "intake_sensitivity_review_decisions_b1a_02_role_check",
+        "type": "c",
+        "definition": "CHECK (decided_by_role = ANY (ARRAY['gk_admin'::text, 'gk_operator'::text, 'gk_reviewer'::text, 'client_admin'::text]))"
+      },
+      {
+        "table_name": "intake_sensitivity_review_decisions",
+        "name": "intake_sensitivity_review_decisions_b1a_02_small_cell_risk_chec",
+        "type": "c",
+        "definition": "CHECK (reviewed_small_cell_risk_status IS NULL OR (reviewed_small_cell_risk_status = ANY (ARRAY['unknown'::text, 'present'::text, 'absent'::text])))"
+      },
+      {
+        "table_name": "intake_sensitivity_review_decisions",
+        "name": "intake_sensitivity_review_decisions_b1a_02_snapshot_completenes",
+        "type": "c",
+        "definition": "CHECK (decision_outcome = 'reviewed'::text AND reviewed_personal_data_status IS NOT NULL AND reviewed_minor_data_status IS NOT NULL AND reviewed_health_housing_justice_immigration_status IS NOT NULL AND reviewed_indigenous_governance_status IS NOT NULL AND reviewed_staff_notes_status IS NOT NULL AND reviewed_story_testimonial_status IS NOT NULL AND reviewed_small_cell_risk_status IS NOT NULL AND reviewed_financial_records_status IS NOT NULL AND reviewed_consent_basis_status IS NOT NULL AND reviewed_allowed_use_status IS NOT NULL AND reviewed_llm_processing_allowed IS NOT NULL AND reviewed_product_learning_allowed IS NOT NULL AND reviewed_public_use_allowed IS NOT NULL AND reviewed_funder_use_allowed IS NOT NULL OR decision_outcome = 'needs_more_information'::text AND reviewed_personal_data_status IS NULL AND reviewed_minor_data_status IS NULL AND reviewed_health_housing_justice_immigration_status IS NULL AND reviewed_indigenous_governance_status IS NULL AND reviewed_staff_notes_status IS NULL AND reviewed_story_testimonial_status IS NULL AND reviewed_small_cell_risk_status IS NULL AND reviewed_financial_records_status IS NULL AND reviewed_consent_basis_status IS NULL AND reviewed_allowed_use_status IS NULL AND reviewed_llm_processing_allowed IS NULL AND reviewed_product_learning_allowed IS NULL AND reviewed_public_use_allowed IS NULL AND reviewed_funder_use_allowed IS NULL)"
+      },
+      {
+        "table_name": "intake_sensitivity_review_decisions",
+        "name": "intake_sensitivity_review_decisions_b1a_02_staff_notes_check",
+        "type": "c",
+        "definition": "CHECK (reviewed_staff_notes_status IS NULL OR (reviewed_staff_notes_status = ANY (ARRAY['unknown'::text, 'present'::text, 'absent'::text])))"
+      },
+      {
+        "table_name": "intake_sensitivity_review_decisions",
+        "name": "intake_sensitivity_review_decisions_b1a_02_story_testimonial_ch",
+        "type": "c",
+        "definition": "CHECK (reviewed_story_testimonial_status IS NULL OR (reviewed_story_testimonial_status = ANY (ARRAY['unknown'::text, 'present'::text, 'absent'::text])))"
+      },
+      {
+        "table_name": "intake_sensitivity_review_decisions",
+        "name": "intake_sensitivity_review_decisions_b1a_02_supersedes_fk",
+        "type": "f",
+        "definition": "FOREIGN KEY (supersedes_decision_id, organization_id, intake_sensitivity_profile_id) REFERENCES kai.intake_sensitivity_review_decisions(decision_id, organization_id, intake_sensitivity_profile_id) ON DELETE RESTRICT"
+      },
+      {
+        "table_name": "intake_sensitivity_review_decisions",
+        "name": "intake_sensitivity_review_decisions_pkey",
+        "type": "p",
+        "definition": "PRIMARY KEY (decision_id)"
+      },
+      {
+        "table_name": "limitation_snapshots",
+        "name": "limitation_snapshots_p3_16_confirmed_by_role_check",
+        "type": "c",
+        "definition": "CHECK (confirmed_by_role = ANY (ARRAY['gk_reviewer'::text, 'gk_admin'::text]))"
+      },
+      {
+        "table_name": "limitation_snapshots",
+        "name": "limitation_snapshots_p3_16_created_by_type_check",
+        "type": "c",
+        "definition": "CHECK (created_by_type = 'human'::text)"
+      },
+      {
+        "table_name": "limitation_snapshots",
+        "name": "limitation_snapshots_p3_16_draft_fk",
+        "type": "f",
+        "definition": "FOREIGN KEY (generated_content_draft_id, organization_id) REFERENCES kai.generated_content_drafts(generated_content_draft_id, organization_id) ON DELETE RESTRICT"
+      },
+      {
+        "table_name": "limitation_snapshots",
+        "name": "limitation_snapshots_p3_16_entries_fingerprint_check",
+        "type": "c",
+        "definition": "CHECK (entries_fingerprint ~ '^[a-f0-9]{64}$'::text)"
+      },
+      {
+        "table_name": "limitation_snapshots",
+        "name": "limitation_snapshots_p3_16_id_org_draft_unique",
+        "type": "u",
+        "definition": "UNIQUE (limitation_snapshot_id, organization_id, generated_content_draft_id)"
+      },
+      {
+        "table_name": "limitation_snapshots",
+        "name": "limitation_snapshots_p3_16_id_org_unique",
+        "type": "u",
+        "definition": "UNIQUE (limitation_snapshot_id, organization_id)"
+      },
+      {
+        "table_name": "limitation_snapshots",
+        "name": "limitation_snapshots_p3_16_not_self_superseding",
+        "type": "c",
+        "definition": "CHECK (supersedes_snapshot_id IS DISTINCT FROM limitation_snapshot_id)"
+      },
+      {
+        "table_name": "limitation_snapshots",
+        "name": "limitation_snapshots_p3_16_supersedes_fk",
+        "type": "f",
+        "definition": "FOREIGN KEY (supersedes_snapshot_id, organization_id, generated_content_draft_id) REFERENCES kai.limitation_snapshots(limitation_snapshot_id, organization_id, generated_content_draft_id) ON DELETE RESTRICT"
+      },
+      {
+        "table_name": "limitation_snapshots",
+        "name": "limitation_snapshots_pkey",
+        "type": "p",
+        "definition": "PRIMARY KEY (limitation_snapshot_id)"
+      },
+      {
+        "table_name": "source_locators",
+        "name": "source_locators_p2_01_coordinates_check",
+        "type": "c",
+        "definition": "CHECK (jsonb_typeof(coordinates) = 'object'::text AND coordinates ? 'column_name'::text AND (coordinates - ARRAY['column_name'::text]) = '{}'::jsonb AND jsonb_typeof(coordinates -> 'column_name'::text) = 'string'::text)"
+      },
+      {
+        "table_name": "source_locators",
+        "name": "source_locators_p2_01_created_by_type_check",
+        "type": "c",
+        "definition": "CHECK (created_by_type = ANY (ARRAY['human'::text, 'system'::text]))"
+      },
+      {
+        "table_name": "source_locators",
+        "name": "source_locators_p2_01_fingerprint_check",
+        "type": "c",
+        "definition": "CHECK (locator_fingerprint ~ '^[a-f0-9]{64}$'::text)"
+      },
+      {
+        "table_name": "source_locators",
+        "name": "source_locators_p2_01_id_org_unique",
+        "type": "u",
+        "definition": "UNIQUE (source_locator_id, organization_id)"
+      },
+      {
+        "table_name": "source_locators",
+        "name": "source_locators_p2_01_identity_unique",
+        "type": "u",
+        "definition": "UNIQUE (organization_id, source_version_id, locator_fingerprint)"
+      },
+      {
+        "table_name": "source_locators",
+        "name": "source_locators_p2_01_locator_type_check",
+        "type": "c",
+        "definition": "CHECK (locator_type = 'column'::text)"
+      },
+      {
+        "table_name": "source_locators",
+        "name": "source_locators_p2_01_source_version_fk",
+        "type": "f",
+        "definition": "FOREIGN KEY (source_version_id, organization_id) REFERENCES kai.source_versions(source_version_id, organization_id) ON DELETE RESTRICT"
+      },
+      {
+        "table_name": "source_locators",
+        "name": "source_locators_pkey",
+        "type": "p",
+        "definition": "PRIMARY KEY (source_locator_id)"
+      }
+    ],
+    "columns": null,
+    "indexes": null,
+    "triggers": null,
+    "functions": null
+  },
+  "after": {
+    "postgresql_version": "PostgreSQL 16.14 (Homebrew) on aarch64-apple-darwin25.6.0, compiled by Apple clang version 21.0.0 (clang-2100.1.1.101), 64-bit",
+    "constraints": [
+      {
+        "table_name": "evidence_items",
+        "name": "evidence_items_p2_01_created_by_type_check",
+        "type": "c",
+        "definition": "CHECK (created_by_type = ANY (ARRAY['human'::text, 'system'::text]))"
+      },
+      {
+        "table_name": "evidence_items",
+        "name": "evidence_items_p2_01_data_class_check",
+        "type": "c",
+        "definition": "CHECK (data_class = ANY (ARRAY['organization_committed_metadata'::text, 'source_derived_aggregate'::text]))"
+      },
+      {
+        "table_name": "evidence_items",
+        "name": "evidence_items_p2_01_evidence_type_check",
+        "type": "c",
+        "definition": "CHECK (evidence_type = ANY (ARRAY['dictionary_field_presence_fact'::text, 'source_record_count_measurement'::text]))"
+      },
+      {
+        "table_name": "evidence_items",
+        "name": "evidence_items_p2_01_funder_use_check",
+        "type": "c",
+        "definition": "CHECK (funder_use_allowed = false)"
+      },
+      {
+        "table_name": "evidence_items",
+        "name": "evidence_items_p2_01_id_org_unique",
+        "type": "u",
+        "definition": "UNIQUE (evidence_item_id, organization_id)"
+      },
+      {
+        "table_name": "evidence_items",
+        "name": "evidence_items_p2_01_identity_unique",
+        "type": "u",
+        "definition": "UNIQUE (organization_id, source_version_id, statement_fingerprint)"
+      },
+      {
+        "table_name": "evidence_items",
+        "name": "evidence_items_p2_01_internal_only_check",
+        "type": "c",
+        "definition": "CHECK (internal_only = true)"
+      },
+      {
+        "table_name": "evidence_items",
+        "name": "evidence_items_p2_01_llm_processing_check",
+        "type": "c",
+        "definition": "CHECK (llm_processing_allowed = false)"
+      },
+      {
+        "table_name": "evidence_items",
+        "name": "evidence_items_p2_01_product_learning_check",
+        "type": "c",
+        "definition": "CHECK (product_learning_allowed = false)"
+      },
+      {
+        "table_name": "evidence_items",
+        "name": "evidence_items_p2_01_public_use_check",
+        "type": "c",
+        "definition": "CHECK (public_use_allowed = false)"
+      },
+      {
+        "table_name": "evidence_items",
+        "name": "evidence_items_p2_01_review_status_check",
+        "type": "c",
+        "definition": "CHECK (evidence_review_status = ANY (ARRAY['needs_gk_review'::text, 'reviewed'::text]))"
+      },
+      {
+        "table_name": "evidence_items",
+        "name": "evidence_items_p2_01_sensitivity_level_check",
+        "type": "c",
+        "definition": "CHECK (sensitivity_level = 'unknown'::text)"
+      },
+      {
+        "table_name": "evidence_items",
+        "name": "evidence_items_p2_01_source_locator_fk",
+        "type": "f",
+        "definition": "FOREIGN KEY (source_locator_id, organization_id) REFERENCES kai.source_locators(source_locator_id, organization_id) ON DELETE RESTRICT"
+      },
+      {
+        "table_name": "evidence_items",
+        "name": "evidence_items_p2_01_source_version_fk",
+        "type": "f",
+        "definition": "FOREIGN KEY (source_version_id, source_id, organization_id) REFERENCES kai.source_versions(source_version_id, source_id, organization_id) ON DELETE RESTRICT"
+      },
+      {
+        "table_name": "evidence_items",
+        "name": "evidence_items_p2_01_statement_check",
+        "type": "c",
+        "definition": "CHECK (length(statement) >= 1 AND length(statement) <= 500 AND statement !~* '(https?://|/Users/|/private/|/var/|/etc/|password|secret|api[_-]?key|token|credential|Bearer\\s|stack ?trace|traceback|\\s{2}at [A-Za-z])'::text)"
+      },
+      {
+        "table_name": "evidence_items",
+        "name": "evidence_items_p2_01_statement_fingerprint_check",
+        "type": "c",
+        "definition": "CHECK (statement_fingerprint ~ '^[a-f0-9]{64}$'::text)"
+      },
+      {
+        "table_name": "evidence_items",
+        "name": "evidence_items_p2_01_support_strength_check",
+        "type": "c",
+        "definition": "CHECK (support_strength = ANY (ARRAY['unassessed'::text, 'reviewed_supported'::text, 'reviewed_not_supported'::text]))"
+      },
+      {
+        "table_name": "evidence_items",
+        "name": "evidence_items_p2_01m_type_class_pairing_check",
+        "type": "c",
+        "definition": "CHECK (evidence_type = 'dictionary_field_presence_fact'::text AND data_class = 'organization_committed_metadata'::text OR evidence_type = 'source_record_count_measurement'::text AND data_class = 'source_derived_aggregate'::text)"
+      },
+      {
+        "table_name": "evidence_items",
+        "name": "evidence_items_pkey",
+        "type": "p",
+        "definition": "PRIMARY KEY (evidence_item_id)"
+      },
+      {
+        "table_name": "evidence_measurements",
+        "name": "evidence_measurements_p2_01m_counts_check",
+        "type": "c",
+        "definition": "CHECK (total_record_count >= 0 AND blank_record_count >= 0 AND duplicate_record_count >= 0 AND blank_record_count <= total_record_count AND measured_value = (total_record_count - blank_record_count))"
+      },
+      {
+        "table_name": "evidence_measurements",
+        "name": "evidence_measurements_p2_01m_definition_fk",
+        "type": "f",
+        "definition": "FOREIGN KEY (source_measurement_definition_id, organization_id) REFERENCES kai.source_measurement_definitions(source_measurement_definition_id, organization_id) ON DELETE RESTRICT"
+      },
+      {
+        "table_name": "evidence_measurements",
+        "name": "evidence_measurements_p2_01m_evidence_item_fk",
+        "type": "f",
+        "definition": "FOREIGN KEY (evidence_item_id, organization_id) REFERENCES kai.evidence_items(evidence_item_id, organization_id) ON DELETE RESTRICT"
+      },
+      {
+        "table_name": "evidence_measurements",
+        "name": "evidence_measurements_p2_01m_identity_unique",
+        "type": "u",
+        "definition": "UNIQUE (organization_id, source_version_id, measurement_type)"
+      },
+      {
+        "table_name": "evidence_measurements",
+        "name": "evidence_measurements_p2_01m_measurement_type_check",
+        "type": "c",
+        "definition": "CHECK (measurement_type = 'source_record_count'::text)"
+      },
+      {
+        "table_name": "evidence_measurements",
+        "name": "evidence_measurements_p2_01m_method_check",
+        "type": "c",
+        "definition": "CHECK (calculation_method = 'p1_csv_profile_data_records_excluding_blank_v1'::text)"
+      },
+      {
+        "table_name": "evidence_measurements",
+        "name": "evidence_measurements_p2_01m_profile_sha_check",
+        "type": "c",
+        "definition": "CHECK (profile_canonical_sha256 ~ '^[a-f0-9]{64}$'::text)"
+      },
+      {
+        "table_name": "evidence_measurements",
+        "name": "evidence_measurements_p2_01m_source_version_fk",
+        "type": "f",
+        "definition": "FOREIGN KEY (source_version_id, organization_id) REFERENCES kai.source_versions(source_version_id, organization_id) ON DELETE RESTRICT"
+      },
+      {
+        "table_name": "evidence_measurements",
+        "name": "evidence_measurements_p2_01m_unit_label_check",
+        "type": "c",
+        "definition": "CHECK (unit_label ~ '^[A-Za-z][A-Za-z0-9 ''()-]{0,79}$'::text)"
+      },
+      {
+        "table_name": "evidence_measurements",
+        "name": "evidence_measurements_pkey",
+        "type": "p",
+        "definition": "PRIMARY KEY (evidence_item_id)"
+      },
+      {
+        "table_name": "human_authority_decisions",
+        "name": "human_authority_decisions_p3_17_candidate_fk",
+        "type": "f",
+        "definition": "FOREIGN KEY (export_candidate_id, organization_id) REFERENCES kai.export_candidates(export_candidate_id, organization_id) ON DELETE RESTRICT"
+      },
+      {
+        "table_name": "human_authority_decisions",
+        "name": "human_authority_decisions_p3_17_created_by_type_check",
+        "type": "c",
+        "definition": "CHECK (created_by_type = 'human'::text)"
+      },
+      {
+        "table_name": "human_authority_decisions",
+        "name": "human_authority_decisions_p3_17_decision_action_check",
+        "type": "c",
+        "definition": "CHECK (decision_action = ANY (ARRAY['grant'::text, 'revoke'::text]))"
+      },
+      {
+        "table_name": "human_authority_decisions",
+        "name": "human_authority_decisions_p3_17_decision_type_check",
+        "type": "c",
+        "definition": "CHECK (decision_type = ANY (ARRAY['client_reviewed'::text, 'funder_ready'::text, 'public_ready'::text, 'export_authority_granted'::text]))"
+      },
+      {
+        "table_name": "human_authority_decisions",
+        "name": "human_authority_decisions_p3_17_id_org_candidate_type_unique",
+        "type": "u",
+        "definition": "UNIQUE (decision_id, organization_id, export_candidate_id, decision_type)"
+      },
+      {
+        "table_name": "human_authority_decisions",
+        "name": "human_authority_decisions_p3_17_id_org_unique",
+        "type": "u",
+        "definition": "UNIQUE (decision_id, organization_id)"
+      },
+      {
+        "table_name": "human_authority_decisions",
+        "name": "human_authority_decisions_p3_17_not_self_superseding",
+        "type": "c",
+        "definition": "CHECK (supersedes_decision_id IS DISTINCT FROM decision_id)"
+      },
+      {
+        "table_name": "human_authority_decisions",
+        "name": "human_authority_decisions_p3_17_role_by_type_check",
+        "type": "c",
+        "definition": "CHECK (decision_type = 'client_reviewed'::text AND decided_by_role = 'client_reviewer'::text OR decision_type <> 'client_reviewed'::text AND decided_by_role = 'gk_admin'::text OR decision_type = 'export_authority_granted'::text AND decided_by_role = 'client_admin'::text AND decision_action = 'grant'::text)"
+      },
+      {
+        "table_name": "human_authority_decisions",
+        "name": "human_authority_decisions_p3_17_root_is_grant_check",
+        "type": "c",
+        "definition": "CHECK (supersedes_decision_id IS NOT NULL OR decision_action = 'grant'::text)"
+      },
+      {
+        "table_name": "human_authority_decisions",
+        "name": "human_authority_decisions_p3_17_supersedes_fk",
+        "type": "f",
+        "definition": "FOREIGN KEY (supersedes_decision_id, organization_id, export_candidate_id, decision_type) REFERENCES kai.human_authority_decisions(decision_id, organization_id, export_candidate_id, decision_type) ON DELETE RESTRICT"
+      },
+      {
+        "table_name": "human_authority_decisions",
+        "name": "human_authority_decisions_pkey",
+        "type": "p",
+        "definition": "PRIMARY KEY (decision_id)"
+      },
+      {
+        "table_name": "intake_p1_downstream_attempts",
+        "name": "intake_p1_downstream_attempts_attempt_count_check",
+        "type": "c",
+        "definition": "CHECK (attempt_count >= 0 AND attempt_count <= 3)"
+      },
+      {
+        "table_name": "intake_p1_downstream_attempts",
+        "name": "intake_p1_downstream_attempts_checksum_check",
+        "type": "c",
+        "definition": "CHECK (checksum ~ '^[a-f0-9]{64}$'::text)"
+      },
+      {
+        "table_name": "intake_p1_downstream_attempts",
+        "name": "intake_p1_downstream_attempts_error_code_check",
+        "type": "c",
+        "definition": "CHECK (last_error_code IS NULL OR last_error_code ~ '^[a-z0-9_]{1,64}$'::text)"
+      },
+      {
+        "table_name": "intake_p1_downstream_attempts",
+        "name": "intake_p1_downstream_attempts_pkey",
+        "type": "p",
+        "definition": "PRIMARY KEY (organization_id, file_profile_id, stage)"
+      },
+      {
+        "table_name": "intake_p1_downstream_attempts",
+        "name": "intake_p1_downstream_attempts_profile_fk",
+        "type": "f",
+        "definition": "FOREIGN KEY (file_profile_id, organization_id, intake_file_id, parser_name, parser_version, checksum) REFERENCES kai.intake_file_profiles(file_profile_id, organization_id, intake_file_id, parser_name, parser_version, checksum) ON DELETE RESTRICT"
+      },
+      {
+        "table_name": "intake_p1_downstream_attempts",
+        "name": "intake_p1_downstream_attempts_stage_check",
+        "type": "c",
+        "definition": "CHECK (stage = ANY (ARRAY['p1_04_data_dictionary'::text, 'p1_05_sensitivity_profile'::text]))"
+      },
+      {
+        "table_name": "intake_p1_downstream_attempts",
+        "name": "intake_p1_downstream_attempts_state_check",
+        "type": "c",
+        "definition": "CHECK (recovery_state = ANY (ARRAY['in_progress'::text, 'retry_scheduled'::text, 'succeeded'::text, 'exhausted'::text, 'operator_attention'::text]))"
+      },
+      {
+        "table_name": "intake_p1_downstream_attempts",
+        "name": "intake_p1_downstream_attempts_state_fact_consistency_check",
+        "type": "c",
+        "definition": "CHECK (recovery_state = 'in_progress'::text AND claim_token IS NOT NULL AND claim_expires_at IS NOT NULL AND last_attempt_at IS NOT NULL AND next_eligible_at IS NULL AND attempt_count >= 1 AND attempt_count <= 3 OR recovery_state = 'retry_scheduled'::text AND claim_token IS NULL AND claim_expires_at IS NULL AND last_attempt_at IS NOT NULL AND next_eligible_at IS NOT NULL AND last_error_code IS NOT NULL AND attempt_count >= 1 AND attempt_count <= 2 OR recovery_state = 'succeeded'::text AND claim_token IS NULL AND claim_expires_at IS NULL AND next_eligible_at IS NULL AND last_error_code IS NULL OR recovery_state = 'exhausted'::text AND claim_token IS NULL AND claim_expires_at IS NULL AND next_eligible_at IS NULL AND last_error_code IS NOT NULL AND attempt_count = 3 OR recovery_state = 'operator_attention'::text AND claim_token IS NULL AND claim_expires_at IS NULL AND next_eligible_at IS NULL AND last_error_code IS NOT NULL AND attempt_count >= 1 AND attempt_count <= 3)"
+      },
+      {
+        "table_name": "intake_sensitivity_review_decisions",
+        "name": "intake_sensitivity_review_decisions_b1a_02_allowed_use_check",
+        "type": "c",
+        "definition": "CHECK (reviewed_allowed_use_status IS NULL OR (reviewed_allowed_use_status = ANY (ARRAY['unknown'::text, 'allowed'::text, 'not_allowed'::text])))"
+      },
+      {
+        "table_name": "intake_sensitivity_review_decisions",
+        "name": "intake_sensitivity_review_decisions_b1a_02_consent_basis_check",
+        "type": "c",
+        "definition": "CHECK (reviewed_consent_basis_status IS NULL OR (reviewed_consent_basis_status = ANY (ARRAY['unknown'::text, 'present'::text, 'absent'::text])))"
+      },
+      {
+        "table_name": "intake_sensitivity_review_decisions",
+        "name": "intake_sensitivity_review_decisions_b1a_02_created_by_type_chec",
+        "type": "c",
+        "definition": "CHECK (created_by_type = 'human'::text)"
+      },
+      {
+        "table_name": "intake_sensitivity_review_decisions",
+        "name": "intake_sensitivity_review_decisions_b1a_02_fin_records_check",
+        "type": "c",
+        "definition": "CHECK (reviewed_financial_records_status IS NULL OR (reviewed_financial_records_status = ANY (ARRAY['unknown'::text, 'present'::text, 'absent'::text])))"
+      },
+      {
+        "table_name": "intake_sensitivity_review_decisions",
+        "name": "intake_sensitivity_review_decisions_b1a_02_funder_use_basis_che",
+        "type": "c",
+        "definition": "CHECK (reviewed_funder_use_allowed IS NOT TRUE OR reviewed_allowed_use_status = 'allowed'::text)"
+      },
+      {
+        "table_name": "intake_sensitivity_review_decisions",
+        "name": "intake_sensitivity_review_decisions_b1a_02_hhji_check",
+        "type": "c",
+        "definition": "CHECK (reviewed_health_housing_justice_immigration_status IS NULL OR (reviewed_health_housing_justice_immigration_status = ANY (ARRAY['unknown'::text, 'present'::text, 'absent'::text])))"
+      },
+      {
+        "table_name": "intake_sensitivity_review_decisions",
+        "name": "intake_sensitivity_review_decisions_b1a_02_id_org_profile_uniqu",
+        "type": "u",
+        "definition": "UNIQUE (decision_id, organization_id, intake_sensitivity_profile_id)"
+      },
+      {
+        "table_name": "intake_sensitivity_review_decisions",
+        "name": "intake_sensitivity_review_decisions_b1a_02_id_org_unique",
+        "type": "u",
+        "definition": "UNIQUE (decision_id, organization_id)"
+      },
+      {
+        "table_name": "intake_sensitivity_review_decisions",
+        "name": "intake_sensitivity_review_decisions_b1a_02_indig_gov_check",
+        "type": "c",
+        "definition": "CHECK (reviewed_indigenous_governance_status IS NULL OR (reviewed_indigenous_governance_status = ANY (ARRAY['unknown'::text, 'present'::text, 'absent'::text])))"
+      },
+      {
+        "table_name": "intake_sensitivity_review_decisions",
+        "name": "intake_sensitivity_review_decisions_b1a_02_llm_use_basis_check",
+        "type": "c",
+        "definition": "CHECK (reviewed_llm_processing_allowed IS NOT TRUE OR reviewed_allowed_use_status = 'allowed'::text)"
+      },
+      {
+        "table_name": "intake_sensitivity_review_decisions",
+        "name": "intake_sensitivity_review_decisions_b1a_02_minor_data_check",
+        "type": "c",
+        "definition": "CHECK (reviewed_minor_data_status IS NULL OR (reviewed_minor_data_status = ANY (ARRAY['unknown'::text, 'present'::text, 'absent'::text])))"
+      },
+      {
+        "table_name": "intake_sensitivity_review_decisions",
+        "name": "intake_sensitivity_review_decisions_b1a_02_not_self_superseding",
+        "type": "c",
+        "definition": "CHECK (supersedes_decision_id IS DISTINCT FROM decision_id)"
+      },
+      {
+        "table_name": "intake_sensitivity_review_decisions",
+        "name": "intake_sensitivity_review_decisions_b1a_02_outcome_check",
+        "type": "c",
+        "definition": "CHECK (decision_outcome = ANY (ARRAY['reviewed'::text, 'needs_more_information'::text]))"
+      },
+      {
+        "table_name": "intake_sensitivity_review_decisions",
+        "name": "intake_sensitivity_review_decisions_b1a_02_personal_data_check",
+        "type": "c",
+        "definition": "CHECK (reviewed_personal_data_status IS NULL OR (reviewed_personal_data_status = ANY (ARRAY['unknown'::text, 'present'::text, 'absent'::text])))"
+      },
+      {
+        "table_name": "intake_sensitivity_review_decisions",
+        "name": "intake_sensitivity_review_decisions_b1a_02_product_learning_bas",
+        "type": "c",
+        "definition": "CHECK (reviewed_product_learning_allowed IS NOT TRUE OR reviewed_allowed_use_status = 'allowed'::text)"
+      },
+      {
+        "table_name": "intake_sensitivity_review_decisions",
+        "name": "intake_sensitivity_review_decisions_b1a_02_profile_fk",
+        "type": "f",
+        "definition": "FOREIGN KEY (intake_sensitivity_profile_id, organization_id) REFERENCES kai.intake_sensitivity_profiles(intake_sensitivity_profile_id, organization_id) ON DELETE RESTRICT"
+      },
+      {
+        "table_name": "intake_sensitivity_review_decisions",
+        "name": "intake_sensitivity_review_decisions_b1a_02_public_use_basis_che",
+        "type": "c",
+        "definition": "CHECK (reviewed_public_use_allowed IS NOT TRUE OR reviewed_allowed_use_status = 'allowed'::text AND reviewed_consent_basis_status = 'present'::text AND reviewed_indigenous_governance_status = 'absent'::text)"
+      },
+      {
+        "table_name": "intake_sensitivity_review_decisions",
+        "name": "intake_sensitivity_review_decisions_b1a_02_queue_item_fk",
+        "type": "f",
+        "definition": "FOREIGN KEY (review_queue_item_id) REFERENCES kai.review_queue_items(review_queue_item_id) ON DELETE RESTRICT"
+      },
+      {
+        "table_name": "intake_sensitivity_review_decisions",
+        "name": "intake_sensitivity_review_decisions_b1a_02_role_check",
+        "type": "c",
+        "definition": "CHECK (decided_by_role = ANY (ARRAY['gk_admin'::text, 'gk_operator'::text, 'gk_reviewer'::text, 'client_admin'::text]))"
+      },
+      {
+        "table_name": "intake_sensitivity_review_decisions",
+        "name": "intake_sensitivity_review_decisions_b1a_02_small_cell_risk_chec",
+        "type": "c",
+        "definition": "CHECK (reviewed_small_cell_risk_status IS NULL OR (reviewed_small_cell_risk_status = ANY (ARRAY['unknown'::text, 'present'::text, 'absent'::text])))"
+      },
+      {
+        "table_name": "intake_sensitivity_review_decisions",
+        "name": "intake_sensitivity_review_decisions_b1a_02_snapshot_completenes",
+        "type": "c",
+        "definition": "CHECK (decision_outcome = 'reviewed'::text AND reviewed_personal_data_status IS NOT NULL AND reviewed_minor_data_status IS NOT NULL AND reviewed_health_housing_justice_immigration_status IS NOT NULL AND reviewed_indigenous_governance_status IS NOT NULL AND reviewed_staff_notes_status IS NOT NULL AND reviewed_story_testimonial_status IS NOT NULL AND reviewed_small_cell_risk_status IS NOT NULL AND reviewed_financial_records_status IS NOT NULL AND reviewed_consent_basis_status IS NOT NULL AND reviewed_allowed_use_status IS NOT NULL AND reviewed_llm_processing_allowed IS NOT NULL AND reviewed_product_learning_allowed IS NOT NULL AND reviewed_public_use_allowed IS NOT NULL AND reviewed_funder_use_allowed IS NOT NULL OR decision_outcome = 'needs_more_information'::text AND reviewed_personal_data_status IS NULL AND reviewed_minor_data_status IS NULL AND reviewed_health_housing_justice_immigration_status IS NULL AND reviewed_indigenous_governance_status IS NULL AND reviewed_staff_notes_status IS NULL AND reviewed_story_testimonial_status IS NULL AND reviewed_small_cell_risk_status IS NULL AND reviewed_financial_records_status IS NULL AND reviewed_consent_basis_status IS NULL AND reviewed_allowed_use_status IS NULL AND reviewed_llm_processing_allowed IS NULL AND reviewed_product_learning_allowed IS NULL AND reviewed_public_use_allowed IS NULL AND reviewed_funder_use_allowed IS NULL)"
+      },
+      {
+        "table_name": "intake_sensitivity_review_decisions",
+        "name": "intake_sensitivity_review_decisions_b1a_02_staff_notes_check",
+        "type": "c",
+        "definition": "CHECK (reviewed_staff_notes_status IS NULL OR (reviewed_staff_notes_status = ANY (ARRAY['unknown'::text, 'present'::text, 'absent'::text])))"
+      },
+      {
+        "table_name": "intake_sensitivity_review_decisions",
+        "name": "intake_sensitivity_review_decisions_b1a_02_story_testimonial_ch",
+        "type": "c",
+        "definition": "CHECK (reviewed_story_testimonial_status IS NULL OR (reviewed_story_testimonial_status = ANY (ARRAY['unknown'::text, 'present'::text, 'absent'::text])))"
+      },
+      {
+        "table_name": "intake_sensitivity_review_decisions",
+        "name": "intake_sensitivity_review_decisions_b1a_02_supersedes_fk",
+        "type": "f",
+        "definition": "FOREIGN KEY (supersedes_decision_id, organization_id, intake_sensitivity_profile_id) REFERENCES kai.intake_sensitivity_review_decisions(decision_id, organization_id, intake_sensitivity_profile_id) ON DELETE RESTRICT"
+      },
+      {
+        "table_name": "intake_sensitivity_review_decisions",
+        "name": "intake_sensitivity_review_decisions_pkey",
+        "type": "p",
+        "definition": "PRIMARY KEY (decision_id)"
+      },
+      {
+        "table_name": "limitation_snapshots",
+        "name": "limitation_snapshots_p3_16_confirmed_by_role_check",
+        "type": "c",
+        "definition": "CHECK (confirmed_by_role = ANY (ARRAY['gk_reviewer'::text, 'gk_admin'::text, 'client_admin'::text]))"
+      },
+      {
+        "table_name": "limitation_snapshots",
+        "name": "limitation_snapshots_p3_16_created_by_type_check",
+        "type": "c",
+        "definition": "CHECK (created_by_type = 'human'::text)"
+      },
+      {
+        "table_name": "limitation_snapshots",
+        "name": "limitation_snapshots_p3_16_draft_fk",
+        "type": "f",
+        "definition": "FOREIGN KEY (generated_content_draft_id, organization_id) REFERENCES kai.generated_content_drafts(generated_content_draft_id, organization_id) ON DELETE RESTRICT"
+      },
+      {
+        "table_name": "limitation_snapshots",
+        "name": "limitation_snapshots_p3_16_entries_fingerprint_check",
+        "type": "c",
+        "definition": "CHECK (entries_fingerprint ~ '^[a-f0-9]{64}$'::text)"
+      },
+      {
+        "table_name": "limitation_snapshots",
+        "name": "limitation_snapshots_p3_16_id_org_draft_unique",
+        "type": "u",
+        "definition": "UNIQUE (limitation_snapshot_id, organization_id, generated_content_draft_id)"
+      },
+      {
+        "table_name": "limitation_snapshots",
+        "name": "limitation_snapshots_p3_16_id_org_unique",
+        "type": "u",
+        "definition": "UNIQUE (limitation_snapshot_id, organization_id)"
+      },
+      {
+        "table_name": "limitation_snapshots",
+        "name": "limitation_snapshots_p3_16_not_self_superseding",
+        "type": "c",
+        "definition": "CHECK (supersedes_snapshot_id IS DISTINCT FROM limitation_snapshot_id)"
+      },
+      {
+        "table_name": "limitation_snapshots",
+        "name": "limitation_snapshots_p3_16_supersedes_fk",
+        "type": "f",
+        "definition": "FOREIGN KEY (supersedes_snapshot_id, organization_id, generated_content_draft_id) REFERENCES kai.limitation_snapshots(limitation_snapshot_id, organization_id, generated_content_draft_id) ON DELETE RESTRICT"
+      },
+      {
+        "table_name": "limitation_snapshots",
+        "name": "limitation_snapshots_pkey",
+        "type": "p",
+        "definition": "PRIMARY KEY (limitation_snapshot_id)"
+      },
+      {
+        "table_name": "source_locators",
+        "name": "source_locators_p2_01_coordinates_check",
+        "type": "c",
+        "definition": "CHECK (locator_type = 'column'::text AND jsonb_typeof(coordinates) = 'object'::text AND coordinates ? 'column_name'::text AND (coordinates - ARRAY['column_name'::text]) = '{}'::jsonb AND jsonb_typeof(coordinates -> 'column_name'::text) = 'string'::text OR locator_type = 'source_data_records'::text AND coordinates = '{\"scope\": \"data_records_after_header\"}'::jsonb)"
+      },
+      {
+        "table_name": "source_locators",
+        "name": "source_locators_p2_01_created_by_type_check",
+        "type": "c",
+        "definition": "CHECK (created_by_type = ANY (ARRAY['human'::text, 'system'::text]))"
+      },
+      {
+        "table_name": "source_locators",
+        "name": "source_locators_p2_01_fingerprint_check",
+        "type": "c",
+        "definition": "CHECK (locator_fingerprint ~ '^[a-f0-9]{64}$'::text)"
+      },
+      {
+        "table_name": "source_locators",
+        "name": "source_locators_p2_01_id_org_unique",
+        "type": "u",
+        "definition": "UNIQUE (source_locator_id, organization_id)"
+      },
+      {
+        "table_name": "source_locators",
+        "name": "source_locators_p2_01_identity_unique",
+        "type": "u",
+        "definition": "UNIQUE (organization_id, source_version_id, locator_fingerprint)"
+      },
+      {
+        "table_name": "source_locators",
+        "name": "source_locators_p2_01_locator_type_check",
+        "type": "c",
+        "definition": "CHECK (locator_type = ANY (ARRAY['column'::text, 'source_data_records'::text]))"
+      },
+      {
+        "table_name": "source_locators",
+        "name": "source_locators_p2_01_source_version_fk",
+        "type": "f",
+        "definition": "FOREIGN KEY (source_version_id, organization_id) REFERENCES kai.source_versions(source_version_id, organization_id) ON DELETE RESTRICT"
+      },
+      {
+        "table_name": "source_locators",
+        "name": "source_locators_pkey",
+        "type": "p",
+        "definition": "PRIMARY KEY (source_locator_id)"
+      },
+      {
+        "table_name": "source_measurement_definitions",
+        "name": "source_measurement_definitions_p2_01m_created_by_type_check",
+        "type": "c",
+        "definition": "CHECK (created_by_type = 'human'::text)"
+      },
+      {
+        "table_name": "source_measurement_definitions",
+        "name": "source_measurement_definitions_p2_01m_fingerprint_check",
+        "type": "c",
+        "definition": "CHECK (definition_fingerprint ~ '^[a-f0-9]{64}$'::text)"
+      },
+      {
+        "table_name": "source_measurement_definitions",
+        "name": "source_measurement_definitions_p2_01m_id_org_unique",
+        "type": "u",
+        "definition": "UNIQUE (source_measurement_definition_id, organization_id)"
+      },
+      {
+        "table_name": "source_measurement_definitions",
+        "name": "source_measurement_definitions_p2_01m_identity_unique",
+        "type": "u",
+        "definition": "UNIQUE (organization_id, source_version_id, measurement_type)"
+      },
+      {
+        "table_name": "source_measurement_definitions",
+        "name": "source_measurement_definitions_p2_01m_label_check",
+        "type": "c",
+        "definition": "CHECK (counted_unit ~ '^[A-Za-z][A-Za-z0-9 ''()-]{0,79}$'::text AND unit_label ~ '^[A-Za-z][A-Za-z0-9 ''()-]{0,79}$'::text)"
+      },
+      {
+        "table_name": "source_measurement_definitions",
+        "name": "source_measurement_definitions_p2_01m_measurement_type_check",
+        "type": "c",
+        "definition": "CHECK (measurement_type = 'source_record_count'::text)"
+      },
+      {
+        "table_name": "source_measurement_definitions",
+        "name": "source_measurement_definitions_p2_01m_period_check",
+        "type": "c",
+        "definition": "CHECK (period_start IS NULL AND period_end IS NULL OR period_start IS NOT NULL AND period_end IS NOT NULL AND period_end >= period_start)"
+      },
+      {
+        "table_name": "source_measurement_definitions",
+        "name": "source_measurement_definitions_p2_01m_source_version_fk",
+        "type": "f",
+        "definition": "FOREIGN KEY (source_version_id, organization_id) REFERENCES kai.source_versions(source_version_id, organization_id) ON DELETE RESTRICT"
+      },
+      {
+        "table_name": "source_measurement_definitions",
+        "name": "source_measurement_definitions_p2_01m_status_check",
+        "type": "c",
+        "definition": "CHECK (definition_status = 'human_confirmed'::text)"
+      },
+      {
+        "table_name": "source_measurement_definitions",
+        "name": "source_measurement_definitions_p2_01m_text_check",
+        "type": "c",
+        "definition": "CHECK (length(definition_text) >= 1 AND length(definition_text) <= 300 AND length(inclusion_rule) >= 1 AND length(inclusion_rule) <= 300 AND length(exclusion_rule) >= 1 AND length(exclusion_rule) <= 300 AND ((((definition_text || ' '::text) || inclusion_rule) || ' '::text) || exclusion_rule) !~* '(https?://|/Users/|/private/|/var/|/etc/|password|secret|api[_-]?key|token|credential|Bearer\\s|stack ?trace|traceback|\\s{2}at [A-Za-z])'::text)"
+      },
+      {
+        "table_name": "source_measurement_definitions",
+        "name": "source_measurement_definitions_pkey",
+        "type": "p",
+        "definition": "PRIMARY KEY (source_measurement_definition_id)"
+      }
+    ],
+    "columns": [
+      {
+        "table_name": "evidence_measurements",
+        "column_name": "evidence_item_id",
+        "attnum": 1,
+        "type": "uuid",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "table_name": "evidence_measurements",
+        "column_name": "organization_id",
+        "attnum": 2,
+        "type": "uuid",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "table_name": "evidence_measurements",
+        "column_name": "source_version_id",
+        "attnum": 3,
+        "type": "uuid",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "table_name": "evidence_measurements",
+        "column_name": "source_measurement_definition_id",
+        "attnum": 4,
+        "type": "uuid",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "table_name": "evidence_measurements",
+        "column_name": "measurement_type",
+        "attnum": 5,
+        "type": "text",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "table_name": "evidence_measurements",
+        "column_name": "measured_value",
+        "attnum": 6,
+        "type": "bigint",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "table_name": "evidence_measurements",
+        "column_name": "unit_label",
+        "attnum": 7,
+        "type": "text",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "table_name": "evidence_measurements",
+        "column_name": "calculation_method",
+        "attnum": 8,
+        "type": "text",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "table_name": "evidence_measurements",
+        "column_name": "profile_canonical_sha256",
+        "attnum": 9,
+        "type": "text",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "table_name": "evidence_measurements",
+        "column_name": "total_record_count",
+        "attnum": 10,
+        "type": "bigint",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "table_name": "evidence_measurements",
+        "column_name": "blank_record_count",
+        "attnum": 11,
+        "type": "bigint",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "table_name": "evidence_measurements",
+        "column_name": "duplicate_record_count",
+        "attnum": 12,
+        "type": "bigint",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "table_name": "evidence_measurements",
+        "column_name": "created_at",
+        "attnum": 13,
+        "type": "timestamp with time zone",
+        "not_null": true,
+        "default": "now()"
+      },
+      {
+        "table_name": "intake_p1_downstream_attempts",
+        "column_name": "organization_id",
+        "attnum": 1,
+        "type": "uuid",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "table_name": "intake_p1_downstream_attempts",
+        "column_name": "intake_file_id",
+        "attnum": 2,
+        "type": "uuid",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "table_name": "intake_p1_downstream_attempts",
+        "column_name": "file_profile_id",
+        "attnum": 3,
+        "type": "uuid",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "table_name": "intake_p1_downstream_attempts",
+        "column_name": "parser_name",
+        "attnum": 4,
+        "type": "text",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "table_name": "intake_p1_downstream_attempts",
+        "column_name": "parser_version",
+        "attnum": 5,
+        "type": "text",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "table_name": "intake_p1_downstream_attempts",
+        "column_name": "checksum",
+        "attnum": 6,
+        "type": "text",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "table_name": "intake_p1_downstream_attempts",
+        "column_name": "stage",
+        "attnum": 7,
+        "type": "text",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "table_name": "intake_p1_downstream_attempts",
+        "column_name": "recovery_state",
+        "attnum": 8,
+        "type": "text",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "table_name": "intake_p1_downstream_attempts",
+        "column_name": "attempt_count",
+        "attnum": 9,
+        "type": "integer",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "table_name": "intake_p1_downstream_attempts",
+        "column_name": "claim_token",
+        "attnum": 10,
+        "type": "uuid",
+        "not_null": false,
+        "default": null
+      },
+      {
+        "table_name": "intake_p1_downstream_attempts",
+        "column_name": "claim_expires_at",
+        "attnum": 11,
+        "type": "timestamp with time zone",
+        "not_null": false,
+        "default": null
+      },
+      {
+        "table_name": "intake_p1_downstream_attempts",
+        "column_name": "last_attempt_at",
+        "attnum": 12,
+        "type": "timestamp with time zone",
+        "not_null": false,
+        "default": null
+      },
+      {
+        "table_name": "intake_p1_downstream_attempts",
+        "column_name": "next_eligible_at",
+        "attnum": 13,
+        "type": "timestamp with time zone",
+        "not_null": false,
+        "default": null
+      },
+      {
+        "table_name": "intake_p1_downstream_attempts",
+        "column_name": "last_error_code",
+        "attnum": 14,
+        "type": "text",
+        "not_null": false,
+        "default": null
+      },
+      {
+        "table_name": "intake_p1_downstream_attempts",
+        "column_name": "created_at",
+        "attnum": 15,
+        "type": "timestamp with time zone",
+        "not_null": true,
+        "default": "now()"
+      },
+      {
+        "table_name": "intake_p1_downstream_attempts",
+        "column_name": "updated_at",
+        "attnum": 16,
+        "type": "timestamp with time zone",
+        "not_null": true,
+        "default": "now()"
+      },
+      {
+        "table_name": "source_measurement_definitions",
+        "column_name": "source_measurement_definition_id",
+        "attnum": 1,
+        "type": "uuid",
+        "not_null": true,
+        "default": "gen_random_uuid()"
+      },
+      {
+        "table_name": "source_measurement_definitions",
+        "column_name": "organization_id",
+        "attnum": 2,
+        "type": "uuid",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "table_name": "source_measurement_definitions",
+        "column_name": "source_version_id",
+        "attnum": 3,
+        "type": "uuid",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "table_name": "source_measurement_definitions",
+        "column_name": "measurement_type",
+        "attnum": 4,
+        "type": "text",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "table_name": "source_measurement_definitions",
+        "column_name": "counted_unit",
+        "attnum": 5,
+        "type": "text",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "table_name": "source_measurement_definitions",
+        "column_name": "unit_label",
+        "attnum": 6,
+        "type": "text",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "table_name": "source_measurement_definitions",
+        "column_name": "definition_text",
+        "attnum": 7,
+        "type": "text",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "table_name": "source_measurement_definitions",
+        "column_name": "inclusion_rule",
+        "attnum": 8,
+        "type": "text",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "table_name": "source_measurement_definitions",
+        "column_name": "exclusion_rule",
+        "attnum": 9,
+        "type": "text",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "table_name": "source_measurement_definitions",
+        "column_name": "period_start",
+        "attnum": 10,
+        "type": "date",
+        "not_null": false,
+        "default": null
+      },
+      {
+        "table_name": "source_measurement_definitions",
+        "column_name": "period_end",
+        "attnum": 11,
+        "type": "date",
+        "not_null": false,
+        "default": null
+      },
+      {
+        "table_name": "source_measurement_definitions",
+        "column_name": "definition_fingerprint",
+        "attnum": 12,
+        "type": "text",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "table_name": "source_measurement_definitions",
+        "column_name": "definition_status",
+        "attnum": 13,
+        "type": "text",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "table_name": "source_measurement_definitions",
+        "column_name": "created_by",
+        "attnum": 14,
+        "type": "uuid",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "table_name": "source_measurement_definitions",
+        "column_name": "created_by_type",
+        "attnum": 15,
+        "type": "text",
+        "not_null": true,
+        "default": null
+      },
+      {
+        "table_name": "source_measurement_definitions",
+        "column_name": "created_at",
+        "attnum": 16,
+        "type": "timestamp with time zone",
+        "not_null": true,
+        "default": "now()"
+      }
+    ],
+    "indexes": [
+      {
+        "table_name": "evidence_measurements",
+        "name": "evidence_measurements_p2_01m_identity_unique",
+        "definition": "CREATE UNIQUE INDEX evidence_measurements_p2_01m_identity_unique ON kai.evidence_measurements USING btree (organization_id, source_version_id, measurement_type)"
+      },
+      {
+        "table_name": "evidence_measurements",
+        "name": "evidence_measurements_pkey",
+        "definition": "CREATE UNIQUE INDEX evidence_measurements_pkey ON kai.evidence_measurements USING btree (evidence_item_id)"
+      },
+      {
+        "table_name": "intake_p1_downstream_attempts",
+        "name": "intake_p1_downstream_attempts_pkey",
+        "definition": "CREATE UNIQUE INDEX intake_p1_downstream_attempts_pkey ON kai.intake_p1_downstream_attempts USING btree (organization_id, file_profile_id, stage)"
+      },
+      {
+        "table_name": "intake_p1_downstream_attempts",
+        "name": "ix_intake_p1_downstream_attempts_tenant_file",
+        "definition": "CREATE INDEX ix_intake_p1_downstream_attempts_tenant_file ON kai.intake_p1_downstream_attempts USING btree (organization_id, intake_file_id, checksum)"
+      },
+      {
+        "table_name": "source_measurement_definitions",
+        "name": "source_measurement_definitions_p2_01m_id_org_unique",
+        "definition": "CREATE UNIQUE INDEX source_measurement_definitions_p2_01m_id_org_unique ON kai.source_measurement_definitions USING btree (source_measurement_definition_id, organization_id)"
+      },
+      {
+        "table_name": "source_measurement_definitions",
+        "name": "source_measurement_definitions_p2_01m_identity_unique",
+        "definition": "CREATE UNIQUE INDEX source_measurement_definitions_p2_01m_identity_unique ON kai.source_measurement_definitions USING btree (organization_id, source_version_id, measurement_type)"
+      },
+      {
+        "table_name": "source_measurement_definitions",
+        "name": "source_measurement_definitions_pkey",
+        "definition": "CREATE UNIQUE INDEX source_measurement_definitions_pkey ON kai.source_measurement_definitions USING btree (source_measurement_definition_id)"
+      }
+    ],
+    "triggers": [
+      {
+        "table_name": "human_authority_decisions",
+        "name": "trg_organization_release_decision_scope",
+        "definition": "CREATE TRIGGER trg_organization_release_decision_scope BEFORE INSERT ON kai.human_authority_decisions FOR EACH ROW EXECUTE FUNCTION kai.organization_release_enforce_decision_scope()",
+        "enabled": "O"
+      },
+      {
+        "table_name": "limitation_snapshots",
+        "name": "trg_organization_release_limitation_snapshot_scope",
+        "definition": "CREATE TRIGGER trg_organization_release_limitation_snapshot_scope BEFORE INSERT ON kai.limitation_snapshots FOR EACH ROW EXECUTE FUNCTION kai.organization_release_enforce_snapshot_scope()",
+        "enabled": "O"
+      }
+    ],
+    "functions": [
+      {
+        "name": "organization_release_enforce_decision_scope",
+        "prosrc_md5": "dac7a307bea9882822fd545edab574ee",
+        "language": "plpgsql",
+        "result_type": "trigger"
+      },
+      {
+        "name": "organization_release_enforce_snapshot_scope",
+        "prosrc_md5": "30a9a09b2b796b633161bdefc58c0977",
+        "language": "plpgsql",
+        "result_type": "trigger"
+      }
+    ]
+  }
+}
