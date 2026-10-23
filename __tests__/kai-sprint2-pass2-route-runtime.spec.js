@@ -258,6 +258,7 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     "/admin/organizations/:organizationId/engagements/:engagementId/client-internal-drafts",
     "/admin/organizations/:organizationId/engagements/:engagementId/client-internal-drafts/:generatedContentDraftId",
     // Plan A Prompt 8: read-only receipt of a GK-released internal report (Markdown).
+    "/admin/organizations/:organizationId/engagements/:engagementId/client-internal-drafts/:generatedContentDraftId/factual-review",
     "/admin/organizations/:organizationId/engagements/:engagementId/client-released-reports/:exportManifestId/markdown",
     // KAI Package 4: read-only /impact-library Funder Requirements
     // composition (classifier + Package 3A/3B current engagement assessment

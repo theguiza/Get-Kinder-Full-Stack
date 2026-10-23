@@ -128,6 +128,7 @@ const ACCEPTANCE_SPECS = Object.freeze([
   "__tests__/kai-client-admin-source-preparation-continuation-browser-acceptance.integration.spec.js",
   "__tests__/kai-source-to-impact-workflow-browser-acceptance.integration.spec.js",
   "__tests__/kai-client-admin-measurement-to-released-report-browser-acceptance.integration.spec.js",
+  "__tests__/kai-client-admin-internal-factual-review-browser-acceptance.integration.spec.js",
 ]);
 // Specs that also need the generated-draft export path (review start audit,
 // export review, limitation snapshot, candidate, final-release authority,
@@ -136,6 +137,7 @@ const ACCEPTANCE_SPECS = Object.freeze([
 // spec keeps exactly its fixture.
 const EXPORT_PATH_SPECS = new Set([
   "__tests__/kai-client-admin-measurement-to-released-report-browser-acceptance.integration.spec.js",
+  "__tests__/kai-client-admin-internal-factual-review-browser-acceptance.integration.spec.js",
 ]);
 const EXPORT_PATH_MIGRATIONS = Object.freeze([
   "kai_sprint2_p3_05_export_review_request",

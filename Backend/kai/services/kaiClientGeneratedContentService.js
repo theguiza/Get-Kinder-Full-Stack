@@ -24,16 +24,19 @@ import { BOARD_REPORTING_PACKET_AUDIENCE } from "./kaiBoardReportingPacketServic
  * Visibility rule (one rule for every surface): a draft is shown to a client
  * only when it satisfies the repository's own packet-membership rule
  * (postgresGeneratedContentRepository.js
- * evaluateGrantResponsePacketMembershipInTransaction) - its GK
- * generated_content_review is resolved/resolved AND currentUseEligible is
+ * evaluateGrantResponsePacketMembershipInTransaction) - its
+ * generated_content_review is resolved/resolved (by Get Kinder, or for an
+ * ordinary internal evidence summary by the organization's own administrator
+ * under the 2026-10-23 amendment) AND currentUseEligible is
  * true (every cited claim is currently eligible for the draft's requested
  * audience through the P2-06 evaluator). Not-yet-reviewed, blocked,
  * superseded-evidence, or audience-ineligible drafts are never shown; a
  * draft outside the organization is not_found. Packets are the repository's
  * own membership, which applies the same rule.
  *
- * Conditional client review is NOT generated_content_review (GK-only,
- * needs_gk_review). It is the existing P2-11 client follow-up on a cited
+ * Conditional client review is NOT generated_content_review (GK, plus the
+ * organization-owned review of ordinary internal evidence summaries below).
+ * It is the existing P2-11 client follow-up on a cited
  * claim: an unresolved follow-up makes the claim ineligible, which holds the
  * draft back. The list reports how many GK-reviewed drafts are held only by
  * an unresolved client follow-up (a count, never their content), so a
@@ -344,15 +347,19 @@ export async function getClientBoardReportingPreview(input, dependencies = {}) {
  * - The draft's packet must be readable now: the repository re-runs P2-06
  *   for every cited claim (and so the effective allowed use), and a draft
  *   whose cited claim is no longer traceable is withheld, never shown stale.
- * - Projection: content type, audience, a client review state
- *   (awaiting_get_kinder_review / in_get_kinder_review / reviewed_by_get_kinder),
- *   whether every cited claim is currently eligible for internal use, fixed
+ * - Projection: content type, audience, a client review state, whether
+ *   every cited claim is currently eligible for internal use, fixed
  *   limitation codes, and per block its text and cited claim ids. Never
- *   queue/run/evidence/source ids, GK review vocabulary, blocker codes,
- *   prompts, validator results, or export-review/candidate state. The detail
- *   adds only the release state (Plan A Prompt 8): whether Get Kinder's
- *   latest internal release of the draft renders now, and its report id.
- * - No approval, release, funder/public eligibility, or export authority:
+ *   queue/run/evidence/source ids, GK review vocabulary, validator results,
+ *   prompts, or export-review/candidate state. The detail adds the release
+ *   state (Plan A Prompt 8) and the factual-review view below.
+ * - Review state (owner amendment 2026-10-23): an unreviewed ordinary
+ *   internal evidence summary (postgresOrganizationInternalReviewRepository.js)
+ *   is awaiting_organization_review; any other unreviewed draft is
+ *   awaiting_get_kinder_review / in_get_kinder_review. A completed review is
+ *   reviewed_by_your_organization when the organization-owned operation
+ *   recorded it, otherwise reviewed_by_get_kinder.
+ * - No release, funder/public eligibility, or export authority:
  *   `internal_use_only` and `not_approved_for_external_use` are always listed.
  */
 const CLIENT_INTERNAL_DRAFT_OPERATION = "read_client_internal_drafts";
@@ -360,17 +367,57 @@ const CLIENT_INTERNAL_DRAFT_READ_ROLES = new Set(["client_admin"]);
 const CLIENT_INTERNAL_DRAFT_CONTENT_TYPES = new Set(["evidence_summary", "impact_narrative"]);
 const INTERNAL_AUDIENCE = "internal";
 const CLIENT_INTERNAL_REVIEW_STATE = Object.freeze({
-  "open/needs_gk_review": "awaiting_get_kinder_review",
-  "in_progress/needs_gk_review": "in_get_kinder_review",
-  "resolved/resolved": "reviewed_by_get_kinder",
+  AWAITING_GET_KINDER: "awaiting_get_kinder_review",
+  IN_GET_KINDER: "in_get_kinder_review",
+  AWAITING_ORGANIZATION: "awaiting_organization_review",
+  REVIEWED_BY_GET_KINDER: "reviewed_by_get_kinder",
+  REVIEWED_BY_ORGANIZATION: "reviewed_by_your_organization",
 });
+const REVIEWED_STATES = new Set([CLIENT_INTERNAL_REVIEW_STATE.REVIEWED_BY_GET_KINDER, CLIENT_INTERNAL_REVIEW_STATE.REVIEWED_BY_ORGANIZATION]);
 const INTERNAL_DRAFT_ADMISSION = Object.freeze({
   operation: CLIENT_INTERNAL_DRAFT_OPERATION,
   allowedRoles: CLIENT_INTERNAL_DRAFT_READ_ROLES,
 });
 
-function internalReviewState({ queueStatus, reviewStatus }) {
-  return CLIENT_INTERNAL_REVIEW_STATE[`${queueStatus}/${reviewStatus}`] ?? null;
+function queueLifecycle({ queueStatus, reviewStatus }) {
+  if (queueStatus === "open" && reviewStatus === "needs_gk_review") return "open";
+  if (queueStatus === "in_progress" && reviewStatus === "needs_gk_review") return "in_progress";
+  if (queueStatus === "resolved" && reviewStatus === "resolved") return "resolved";
+  return null;
+}
+
+async function organizationReviewRepository(dependencies) {
+  return dependencies.organizationReviewRepository
+    || (await import("../dictionary/postgresOrganizationInternalReviewRepository.js")).createPostgresOrganizationInternalReviewRepository();
+}
+
+// The draft's client review state and, while it is unreviewed, the
+// organization-review evaluation it was derived from (null once reviewed).
+async function internalReviewView({ organizationId, packet }, dependencies) {
+  const lifecycle = queueLifecycle(packet);
+  if (!lifecycle) return null;
+  const organizationReview = await organizationReviewRepository(dependencies);
+  if (lifecycle === "resolved") {
+    const reviewer = await organizationReview.readCompletedReviewer({
+      organizationId,
+      generatedContentDraftId: packet.generatedContentDraftId,
+      reviewQueueItemId: packet.reviewQueueItemId,
+    });
+    return {
+      reviewState: reviewer === "organization"
+        ? CLIENT_INTERNAL_REVIEW_STATE.REVIEWED_BY_ORGANIZATION
+        : CLIENT_INTERNAL_REVIEW_STATE.REVIEWED_BY_GET_KINDER,
+      evaluation: null,
+    };
+  }
+  const evaluation = await organizationReview.evaluate({ organizationId, packet });
+  if (evaluation.getKinderReviewReasons.length === 0) {
+    return { reviewState: CLIENT_INTERNAL_REVIEW_STATE.AWAITING_ORGANIZATION, evaluation };
+  }
+  return {
+    reviewState: lifecycle === "open" ? CLIENT_INTERNAL_REVIEW_STATE.AWAITING_GET_KINDER : CLIENT_INTERNAL_REVIEW_STATE.IN_GET_KINDER,
+    evaluation,
+  };
 }
 
 function isInternalDraftSummary(summary) {
@@ -381,7 +428,10 @@ function internalDraftLimitations(packet, reviewState) {
   return [
     "internal_use_only",
     "not_approved_for_external_use",
-    ...(reviewState === "reviewed_by_get_kinder" ? [] : ["awaiting_get_kinder_review"]),
+    ...(reviewState === CLIENT_INTERNAL_REVIEW_STATE.AWAITING_GET_KINDER || reviewState === CLIENT_INTERNAL_REVIEW_STATE.IN_GET_KINDER
+      ? ["awaiting_get_kinder_review"]
+      : []),
+    ...(reviewState === CLIENT_INTERNAL_REVIEW_STATE.AWAITING_ORGANIZATION ? ["awaiting_organization_review"] : []),
     ...(packet.currentUseEligible === true ? [] : ["cited_claims_not_currently_eligible"]),
   ];
 }
@@ -439,8 +489,7 @@ export async function listClientInternalDrafts(input, dependencies = {}) {
       lastScanned = summary.generatedContentDraftId;
       if (index === page.length - 1 && rows.length > CLIENT_DRAFT_INDEX_PAGE_LIMIT) moreRows = true;
       if (!isInternalDraftSummary(summary)) continue;
-      const reviewState = internalReviewState(summary);
-      if (!reviewState) continue;
+      if (!queueLifecycle(summary)) continue;
       const result = await repository.getGeneratedDraftReviewPacket({
         organizationId,
         generatedContentDraftId: summary.generatedContentDraftId,
@@ -451,11 +500,13 @@ export async function listClientInternalDrafts(input, dependencies = {}) {
       }
       const packet = singleDraftPacket(result.data);
       if (!packet) return buildKaiError("system_error");
+      const view = await internalReviewView({ organizationId, packet }, dependencies);
+      if (!view) continue;
       items.push({
         generatedContentDraftId: packet.generatedContentDraftId,
         contentType: packet.contentType,
         audience: INTERNAL_AUDIENCE,
-        reviewState,
+        reviewState: view.reviewState,
         createdAt: summary.createdAt,
         blockCount: packet.blocks.length,
       });
@@ -487,22 +538,155 @@ export async function getClientInternalDraft(input, dependencies = {}) {
   }
   const packet = singleDraftPacket(result.data);
   if (!packet) return buildKaiError("system_error");
-  const reviewState = internalReviewState(packet);
   // Another audience or content type, or an unknown review state, is
   // indistinguishable from a draft that does not exist.
-  if (!isInternalDraftSummary({ contentType: packet.contentType, requestedAudience: packet.requestedAudience }) || !reviewState) {
+  if (!isInternalDraftSummary({ contentType: packet.contentType, requestedAudience: packet.requestedAudience }) || !queueLifecycle(packet)) {
     return buildKaiError("not_found");
   }
+  const { reviewState, evaluation } = await internalReviewView({ organizationId, packet }, dependencies);
   const release = await clientReleaseState({
     organizationId, generatedContentDraftId, reviewState, actorContext: input.actorContext,
   }, dependencies);
   if (release.error) return release.error;
-  return { ok: true, data: { ...toClientInternalDraft(packet, reviewState), release: release.value }, error: null };
+  return {
+    ok: true,
+    data: {
+      ...toClientInternalDraft(packet, reviewState),
+      release: release.value,
+      factualReview: clientFactualReviewView({ reviewState, evaluation, actorContext: input.actorContext, organizationId }),
+    },
+    error: null,
+  };
+}
+
+// What the detail shows about the factual review: whether this actor may
+// approve it now, and the reason codes that hold it for Get Kinder or block
+// it. Server-authoritative; the UI shows the approval action only when
+// actorMayApprove is true.
+function clientFactualReviewView({ reviewState, evaluation, actorContext, organizationId }) {
+  const getKinderReviewReasons = evaluation ? [...evaluation.getKinderReviewReasons] : [];
+  const blockedReasons = evaluation ? [...evaluation.blockedReasons] : [];
+  const actorMayApprove = reviewState === CLIENT_INTERNAL_REVIEW_STATE.AWAITING_ORGANIZATION
+    && evaluation?.organizationMayReview === true
+    && validateActorCanPerformOperation(actorContext, CLIENT_INTERNAL_FACTUAL_REVIEW_OPERATION, organizationId, {
+      allowedRoles: CLIENT_INTERNAL_FACTUAL_REVIEW_ROLES,
+    }).ok === true;
+  return { actorMayApprove, getKinderReviewReasons, blockedReasons };
+}
+
+/**
+ * Organization-owned factual review of an ordinary internal Evidence Summary
+ * (owner amendment 2026-10-23; Operating Model v0.2 section 11). An active
+ * client_admin of this organization, for a draft generated under this
+ * Project, records the factual approval through the existing generated-
+ * content review lifecycle (start, then complete), with its transactions,
+ * optimistic concurrency, replay and audit. Each transition re-evaluates the
+ * review packet (P2-06 for every cited claim) and then the organization-
+ * review admission (postgresOrganizationInternalReviewRepository.js) inside
+ * its own transaction before writing, so a high-risk, unsupported, stale or
+ * no-longer-permitted draft is refused with structured blockers and nothing
+ * is written. The completion audit records the organization contract.
+ *
+ * Only `decision: "approved"` exists: the review lifecycle has no reject or
+ * needs-changes outcome (it would need a new schema contract). Declining is
+ * not approving; a corrected draft is generated anew.
+ *
+ * This is the factual review only. It grants no export review, limitation
+ * snapshot, release authority or manifest: those stay Get Kinder's, because
+ * limitation_snapshots.confirmed_by_role and the export_authority_granted
+ * decided_by_role are schema-pinned to GK roles (P3-16, P3-17).
+ */
+const CLIENT_INTERNAL_FACTUAL_REVIEW_OPERATION = "record_client_internal_draft_factual_review";
+const CLIENT_INTERNAL_FACTUAL_REVIEW_ROLES = new Set(["client_admin"]);
+const CLIENT_INTERNAL_FACTUAL_REVIEW_DECISIONS = new Set(["approved"]);
+const FACTUAL_REVIEW_ADMISSION = Object.freeze({
+  operation: CLIENT_INTERNAL_FACTUAL_REVIEW_OPERATION,
+  allowedRoles: CLIENT_INTERNAL_FACTUAL_REVIEW_ROLES,
+});
+
+function repositoryError(result) {
+  return buildKaiError(result.error?.code || "system_error", result.blockers ? { blockers: result.blockers } : {});
+}
+
+export async function approveClientInternalDraftFactualReview(input, dependencies = {}) {
+  const { decision, ...scope } = isPlainObject(input) ? input : {};
+  const denied = admit(scope, ["organizationId", "engagementId", "generatedContentDraftId", "actorContext"], dependencies, FACTUAL_REVIEW_ADMISSION);
+  if (denied) return denied;
+  if (!CLIENT_INTERNAL_FACTUAL_REVIEW_DECISIONS.has(decision)) return buildKaiError("validation_blocker");
+  if (typeof dependencies.createReviewAudit !== "function") return buildKaiError("system_error");
+  const { organizationId, engagementId, generatedContentDraftId, actorContext } = scope;
+  const engagementError = await resolveEngagement({ organizationId, engagementId }, dependencies);
+  if (engagementError) return engagementError;
+  const readDraftEngagement = dependencies.readGeneratedDraftEngagementId || readGeneratedDraftEngagementId;
+  if ((await readDraftEngagement(organizationId, generatedContentDraftId)) !== engagementId) return buildKaiError("not_found");
+
+  const repository = dependencies.generatedContentRepository || (await createDefaultGeneratedContentRepository());
+  const readPacket = async () => {
+    const result = await repository.getGeneratedDraftReviewPacket({ organizationId, generatedContentDraftId });
+    if (!result.ok) return { error: repositoryError(result) };
+    const packet = singleDraftPacket(result.data);
+    return packet ? { packet } : { error: buildKaiError("system_error") };
+  };
+  let current = await readPacket();
+  if (current.error) return current.error;
+  if (!isInternalDraftSummary({ contentType: current.packet.contentType, requestedAudience: current.packet.requestedAudience })) {
+    return buildKaiError("not_found");
+  }
+  const lifecycle = queueLifecycle(current.packet);
+  if (!lifecycle) return buildKaiError("conflict_current_state_changed");
+  if (lifecycle === "resolved") {
+    const { reviewState } = await internalReviewView({ organizationId, packet: current.packet }, dependencies);
+    return { ok: true, data: { generatedContentDraftId, reviewState, replayed: true }, error: null };
+  }
+
+  const evaluateInTransaction = dependencies.evaluateOrganizationInternalReviewInTransaction
+    || (await import("../dictionary/postgresOrganizationInternalReviewRepository.js")).evaluateOrganizationInternalReviewInTransaction;
+  const { organizationReviewBlockers, ORGANIZATION_REVIEW_COMPLETION_AUDIT_CONTRACT } = await import(
+    "../dictionary/postgresOrganizationInternalReviewRepository.js"
+  );
+  const reviewAdmission = async (tx, packet) => {
+    const evaluation = await evaluateInTransaction(tx, { organizationId, packet });
+    if (evaluation.organizationMayReview) return null;
+    return { ok: false, data: null, error: { code: "blocked", status: 422 }, blockers: organizationReviewBlockers(evaluation) };
+  };
+  const clock = dependencies.now || (() => new Date().toISOString());
+  const transition = (method, packet, extra = {}) => {
+    const now = clock();
+    return repository[method]({
+      organizationId,
+      generatedContentDraftId,
+      reviewQueueItemId: packet.reviewQueueItemId,
+      expectedUpdatedAt: packet.reviewUpdatedAt,
+      actorContext,
+      now,
+    }, {
+      metadataOnlyAudit: dependencies.createReviewAudit({ reviewQueueItemId: packet.reviewQueueItemId, now }),
+      reviewAdmission,
+      ...extra,
+    });
+  };
+
+  if (lifecycle === "open") {
+    const started = await transition("startGeneratedContentReview", current.packet);
+    if (!started.ok) return repositoryError(started);
+    current = await readPacket();
+    if (current.error) return current.error;
+  }
+  const completed = await transition("completeGeneratedContentReview", current.packet, {
+    completionAuditContract: ORGANIZATION_REVIEW_COMPLETION_AUDIT_CONTRACT,
+  });
+  if (!completed.ok) return repositoryError(completed);
+  return {
+    ok: true,
+    data: { generatedContentDraftId, reviewState: CLIENT_INTERNAL_REVIEW_STATE.REVIEWED_BY_ORGANIZATION, replayed: completed.data?.replayed === true },
+    error: null,
+  };
 }
 
 /**
  * Read-only receipt of an already GK-released internal report (Plan A
- * Prompt 8). Factual review and final release stay Get Kinder's: the
+ * Prompt 8). Final release stays Get Kinder's (factual review of an ordinary
+ * internal evidence summary may be the organization's, above): the
  * organization administrator only reads the Markdown of a release Get Kinder
  * has already made, and only while it is still valid. Operating Model v0.2
  * section 11 ("GK reviews the relevant output ... Release") and section 7.1
@@ -528,6 +712,7 @@ const RELEASED_REPORT_ADMISSION = Object.freeze({
 });
 const RELEASE_STATE = Object.freeze({
   AWAITING_REVIEW: "awaiting_get_kinder_review",
+  AWAITING_ORGANIZATION_REVIEW: "awaiting_organization_review",
   AWAITING_RELEASE: "awaiting_get_kinder_release",
   RELEASED: "released_for_internal_use",
   NO_LONGER_AVAILABLE: "release_no_longer_valid",
@@ -553,7 +738,11 @@ function mayReceiveReleasedReports(actorContext, organizationId, env) {
 // latest internal manifest, and whether that manifest renders now.
 async function clientReleaseState({ organizationId, generatedContentDraftId, reviewState, actorContext }, dependencies) {
   const none = (state) => ({ value: { state, releasedReportId: null } });
-  if (reviewState !== "reviewed_by_get_kinder") return none(RELEASE_STATE.AWAITING_REVIEW);
+  if (!REVIEWED_STATES.has(reviewState)) {
+    return none(reviewState === CLIENT_INTERNAL_REVIEW_STATE.AWAITING_ORGANIZATION
+      ? RELEASE_STATE.AWAITING_ORGANIZATION_REVIEW
+      : RELEASE_STATE.AWAITING_REVIEW);
+  }
   if (!mayReceiveReleasedReports(actorContext, organizationId, dependencies.env || process.env)) return none(RELEASE_STATE.UNAVAILABLE);
   const { releasedReportRepository, renderModelRepository } = await releasedReportRepositories(dependencies);
   const latest = await releasedReportRepository.readLatestInternalReleaseForDraft({ organizationId, generatedContentDraftId });
@@ -591,6 +780,9 @@ export async function getClientReleasedReportMarkdown(input, dependencies = {}) 
 }
 
 export const __clientGeneratedContentServiceContract = Object.freeze({
+  CLIENT_INTERNAL_FACTUAL_REVIEW_OPERATION,
+  CLIENT_INTERNAL_FACTUAL_REVIEW_ROLES,
+  CLIENT_INTERNAL_REVIEW_STATE,
   CLIENT_RELEASED_REPORT_OPERATION,
   CLIENT_RELEASED_REPORT_READ_ROLES,
   RELEASE_STATE,

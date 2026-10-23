@@ -298,6 +298,16 @@ const EXPORT_REVIEW_COMPLETE_AUDIT_OPERATION = "export_review_completed";
 const EXPORT_REVIEW_COMPLETE_AUDIT_CONTRACT = "p3_13_export_review_completion_v1";
 const EXPORT_REVIEW_COMPLETE_VALIDATOR_KEYS = Object.freeze(["VAL-EXP-003"]);
 
+// Optional caller admission for a review transition (the organization-owned
+// internal review, kaiClientGeneratedContentService.js): evaluated inside the
+// transition's own transaction, after the packet re-evaluation and before
+// any write. Returns null to proceed or a failure result. Absent for the GK
+// routes, whose behavior is unchanged.
+async function admitReviewTransition(tx, packet, dependencies) {
+  if (typeof dependencies.reviewAdmission !== "function") return null;
+  return dependencies.reviewAdmission(tx, packet);
+}
+
 function failure(code, blockers) {
   return {
     ok: false,
@@ -2124,9 +2134,9 @@ function buildGeneratedContentStartReviewAuditMetadata({ input, packet, previous
   };
 }
 
-function buildCompleteReviewAuditMetadata({ input, packet, previousQueueStatus, previousReviewStatus }) {
+function buildCompleteReviewAuditMetadata({ input, packet, previousQueueStatus, previousReviewStatus, contract = COMPLETE_REVIEW_AUDIT_CONTRACT }) {
   return {
-    contract: COMPLETE_REVIEW_AUDIT_CONTRACT,
+    contract,
     organization_id: input.organizationId,
     generation_run_id: packet.generationRunId,
     generated_content_draft_id: input.generatedContentDraftId,
@@ -2167,7 +2177,7 @@ async function loadAuditFileContext(tx, { organizationId, generatedContentDraftI
   return rows[0] || null;
 }
 
-async function insertCompleteReviewAudit(tx, { input, packet, auditFileContext }) {
+async function insertCompleteReviewAudit(tx, { input, packet, auditFileContext, contract }) {
   await tx.query(
     `INSERT INTO kai.upload_lifecycle_audit (
        organization_id, intake_file_id, operation, from_state, to_state, outcome, metadata, created_at
@@ -2183,6 +2193,7 @@ async function insertCompleteReviewAudit(tx, { input, packet, auditFileContext }
         packet,
         previousQueueStatus: COMPLETE_REVIEW_FRESH_PROFILE.queueStatus,
         previousReviewStatus: COMPLETE_REVIEW_FRESH_PROFILE.reviewStatus,
+        contract,
       })),
       input.now,
     ],
@@ -3022,6 +3033,8 @@ export function createPostgresGeneratedContentRepository({
           }
           const packet = packetResult.data;
           if (packet.reviewQueueItemId !== input.reviewQueueItemId) return failure("conflict_current_state_changed");
+          const refusal = await admitReviewTransition(tx, packet, dependencies);
+          if (refusal) return refusal;
 
           const updateResult = await tx.query(
             `UPDATE kai.review_queue_items
@@ -3114,6 +3127,8 @@ export function createPostgresGeneratedContentRepository({
           }
           const packet = packetResult.data;
           if (packet.reviewQueueItemId !== input.reviewQueueItemId) return failure("conflict_current_state_changed");
+          const refusal = await admitReviewTransition(tx, packet, dependencies);
+          if (refusal) return refusal;
 
           const updateResult = await tx.query(
             `UPDATE kai.review_queue_items
@@ -3167,7 +3182,12 @@ export function createPostgresGeneratedContentRepository({
             request_scope: "organization_generated_content_review_queue_item",
             contract: COMPLETE_REVIEW_AUDIT_CONTRACT,
           });
-          await insertCompleteReviewAudit(tx, { input, packet: postWrite.data, auditFileContext });
+          await insertCompleteReviewAudit(tx, {
+            input,
+            packet: postWrite.data,
+            auditFileContext,
+            contract: dependencies.completionAuditContract,
+          });
           await preparedAudit.publish();
 
           return success(toCompleteReviewResult(postWrite.data, false));

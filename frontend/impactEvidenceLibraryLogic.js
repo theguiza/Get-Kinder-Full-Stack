@@ -74,7 +74,7 @@ export function projectOrganizationAccessCapabilities(dto) {
   const required = ["internalKnowledgeWorkspace", "intakeContribution", "clientFollowupReview", "projectManagement", "improvementPlanManagement", "organizationJoinReview", "organizationAccessManagement"];
   if (!required.every((key) => typeof dto[key] === "boolean")) return null;
   return {
-    workflowOperations: Object.fromEntries(["reviewSensitivity", "promoteSource", "generateDrafts", "generateAllDraftTypes", "reviewGeneratedDrafts", "readGeneratedDrafts", "readInternalDrafts", "recordEvidenceReview", "recordClaimReview", "extractEvidence", "assessEvidenceCoverage", "proposeClaim", "generateClaimGapFollowups", "recordConflict", "acceptCoverageLimitation", "assessRequirement", "readGrantResponsePacket", "readBoardReportingPacket", "recordSourceMeasurement", "readReleasedInternalReports"].map((key) => [key, dto.workflowOperations?.[key] === true])),
+    workflowOperations: Object.fromEntries(["reviewSensitivity", "promoteSource", "generateDrafts", "generateAllDraftTypes", "reviewGeneratedDrafts", "readGeneratedDrafts", "readInternalDrafts", "recordEvidenceReview", "recordClaimReview", "extractEvidence", "assessEvidenceCoverage", "proposeClaim", "generateClaimGapFollowups", "recordConflict", "acceptCoverageLimitation", "assessRequirement", "readGrantResponsePacket", "readBoardReportingPacket", "recordSourceMeasurement", "readReleasedInternalReports", "reviewInternalDraftFactualContent"].map((key) => [key, dto.workflowOperations?.[key] === true])),
     internalKnowledgeWorkspace: dto.internalKnowledgeWorkspace === true,
     intakeContribution: dto.intakeContribution === true,
     clientFollowupReview: dto.clientFollowupReview === true,
@@ -200,11 +200,52 @@ export function clientInternalDraftPath(organizationId, engagementId, generatedC
   return `${clientEngagementBasePath(organizationId, engagementId)}/client-internal-drafts/${encodeURIComponent(generatedContentDraftId)}`;
 }
 
-export const CLIENT_INTERNAL_DRAFT_REVIEW_STATES = Object.freeze(["awaiting_get_kinder_review", "in_get_kinder_review", "reviewed_by_get_kinder"]);
+export const CLIENT_INTERNAL_DRAFT_REVIEW_STATES = Object.freeze([
+  "awaiting_get_kinder_review",
+  "in_get_kinder_review",
+  "awaiting_organization_review",
+  "reviewed_by_get_kinder",
+  "reviewed_by_your_organization",
+]);
+// Owner amendment 2026-10-23: the organization administrator's factual
+// approval of an ordinary internal evidence summary, and the server's reason
+// codes for a draft held for Get Kinder or blocked.
+export const CLIENT_INTERNAL_DRAFT_FACTUAL_REVIEW_REASONS = Object.freeze([
+  "content_type_requires_get_kinder_review",
+  "audience_requires_get_kinder_review",
+  "sensitivity_review_not_complete",
+  "personal_information_not_cleared",
+  "minor_information_not_cleared",
+  "sensitive_information_not_cleared",
+  "indigenous_governance_not_cleared",
+  "story_testimonial_not_cleared",
+  "small_cell_risk_not_cleared",
+  "cited_claims_not_currently_eligible",
+  "source_version_not_current",
+  "processing_permission_not_established",
+]);
+
+export function clientInternalDraftFactualReviewPath(organizationId, engagementId, generatedContentDraftId) {
+  return `${clientInternalDraftPath(organizationId, engagementId, generatedContentDraftId)}/factual-review`;
+}
+
+// Fails closed: a missing or malformed view offers no approval.
+function projectClientInternalDraftFactualReview(view) {
+  const reasons = (value) => Array.isArray(value) && value.every((code) => CLIENT_INTERNAL_DRAFT_FACTUAL_REVIEW_REASONS.includes(code));
+  if (!isPlainClientObject(view) || !reasons(view.getKinderReviewReasons) || !reasons(view.blockedReasons)) {
+    return { actorMayApprove: false, getKinderReviewReasons: [], blockedReasons: [] };
+  }
+  return {
+    actorMayApprove: view.actorMayApprove === true,
+    getKinderReviewReasons: [...view.getKinderReviewReasons],
+    blockedReasons: [...view.blockedReasons],
+  };
+}
 // Plan A Prompt 8: the server's release state for an internal draft, and the
 // organization administrator's read-only receipt of a released report.
 export const CLIENT_INTERNAL_DRAFT_RELEASE_STATES = Object.freeze([
   "awaiting_get_kinder_review",
+  "awaiting_organization_review",
   "awaiting_get_kinder_release",
   "released_for_internal_use",
   "release_no_longer_valid",
@@ -225,6 +266,7 @@ export const CLIENT_INTERNAL_DRAFT_LIMITATIONS = Object.freeze([
   "internal_use_only",
   "not_approved_for_external_use",
   "awaiting_get_kinder_review",
+  "awaiting_organization_review",
   "cited_claims_not_currently_eligible",
 ]);
 const CLIENT_INTERNAL_DRAFT_TYPES = Object.freeze(["evidence_summary", "impact_narrative"]);
@@ -275,6 +317,7 @@ export function projectClientInternalDraft(dto) {
     limitations: [...dto.limitations],
     blocks,
     release: projectClientInternalDraftRelease(dto.release),
+    factualReview: projectClientInternalDraftFactualReview(dto.factualReview),
   };
 }
 

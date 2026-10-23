@@ -83,7 +83,8 @@ async function runSuite() {
   const { createPostgresExportManifestRenderModelRepository } = await import("../Backend/kai/dictionary/postgresExportManifestRenderModelRepository.js");
   const { serializeExportManifestToMarkdown } = await import("../Backend/kai/services/kaiExportManifestMarkdownSerializer.js");
   const audits = await import("../Backend/kai/services/kaiMetadataOnlyAuditComposition.js");
-  const { getClientInternalDraft, getClientReleasedReportMarkdown } = await import("../Backend/kai/services/kaiClientGeneratedContentService.js");
+  const { getClientInternalDraft, getClientReleasedReportMarkdown, approveClientInternalDraftFactualReview } = await import("../Backend/kai/services/kaiClientGeneratedContentService.js");
+  const { createPostgresOrganizationInternalReviewRepository, ORGANIZATION_REVIEW_COMPLETION_AUDIT_CONTRACT } = await import("../Backend/kai/dictionary/postgresOrganizationInternalReviewRepository.js");
   const { createPostgresClientReleasedReportRepository } = await import("../Backend/kai/dictionary/postgresClientReleasedReportRepository.js");
   const { readGeneratedDraftEngagementId } = await import("../Backend/kai/db/kaiGeneratedDraftLibraryReadModels.js");
   const { insertRequiredSuccessfulAuditEvent } = await import("../Backend/kai/db/kaiAuditQueries.js");
@@ -850,6 +851,11 @@ async function runSuite() {
       assert.equal(recorded.ok, true, `measurement under either AI decision: ${JSON.stringify(recorded)}`);
       const proposal = await propose(recorded.data.evidenceItem.evidence_item_id);
       assert.equal(proposal.ok, true, `proposal: ${JSON.stringify(proposal)}`);
+      // The AI-permitted source is an ordinary one (every section 7.2
+      // high-risk category 'absent'); the organization-review test uses it.
+      if (llmAllowed) {
+        ids.ordinary = { claimId: proposal.data.claim.claim_id, evidenceItemId: recorded.data.evidenceItem.evidence_item_id, sourceVersionId: seeded.sourceVersionId };
+      }
       return proposal.data.claim.claim_id;
     }
     const permittedClaim = await measuredClaimWithDecision(true);
@@ -1140,35 +1146,37 @@ async function runSuite() {
   const authorityRepository = () => createPostgresHumanAuthorityDecisionRepository({ runInTransaction: withTx });
   const renderRepository = () => createPostgresExportManifestRenderModelRepository({ runInTransaction: withTx });
   const auditEvents = async () => (await query("SELECT action FROM kai.audit_events WHERE organization_id = $1::uuid ORDER BY audit_event_id", [ORG])).map((row) => row.action);
-  const reviewStep = (fn, queueType, actor, now = tick()) => async () => {
-    const queue = await queueRow(queueType, ids.measuredDraftId);
+  // Each release helper acts on `target` (default: the measured draft and
+  // its export ids); the organization-review test passes its own draft.
+  const reviewStep = (fn, queueType, actor, now = tick(), target = ids) => async () => {
+    const queue = await queueRow(queueType, target.measuredDraftId);
     return fn({
-      organizationId: ORG, generatedContentDraftId: ids.measuredDraftId,
+      organizationId: ORG, generatedContentDraftId: target.measuredDraftId,
       ...(queueType === "generated_content_review" ? { reviewQueueItemId: queue.review_queue_item_id } : { exportReviewQueueItemId: queue.review_queue_item_id }),
       expectedUpdatedAt: new Date(queue.updated_at).toISOString(), actorContext: actor, now,
     }, {
       env: EXPORT_ENV,
       generatedContentRepository: generatedRepository(),
       metadataOnlyAudit: queueType === "generated_content_review"
-        ? auditFor(audits.createProductionMetadataOnlyAuditForGeneratedContentReview, { organizationId: ORG, generatedContentDraftId: ids.measuredDraftId, reviewQueueItemId: queue.review_queue_item_id, actorContext: actor, now })
-        : auditFor(audits.createProductionMetadataOnlyAuditForGeneratedDraftExportReview, { organizationId: ORG, generatedContentDraftId: ids.measuredDraftId, actorContext: actor, now, route: "p3_09_export_review_start" }),
+        ? auditFor(audits.createProductionMetadataOnlyAuditForGeneratedContentReview, { organizationId: ORG, generatedContentDraftId: target.measuredDraftId, reviewQueueItemId: queue.review_queue_item_id, actorContext: actor, now })
+        : auditFor(audits.createProductionMetadataOnlyAuditForGeneratedDraftExportReview, { organizationId: ORG, generatedContentDraftId: target.measuredDraftId, actorContext: actor, now, route: "p3_09_export_review_start" }),
     });
   };
-  const requestExportReview = (actor, requestedExportAudience = "internal", now = tick()) => requestGeneratedDraftExportReview(
-    { organizationId: ORG, generatedContentDraftId: ids.measuredDraftId, requestedExportAudience, actorContext: actor, now },
-    { env: EXPORT_ENV, generatedContentRepository: generatedRepository(), metadataOnlyAudit: auditFor(audits.createProductionMetadataOnlyAuditForGeneratedDraftExportReview, { organizationId: ORG, generatedContentDraftId: ids.measuredDraftId, actorContext: actor, now }) });
-  const confirmSnapshot = (actor, now = tick()) => confirmGeneratedDraftLimitationSnapshotFromCitedPairs(
-    { organizationId: ORG, generatedContentDraftId: ids.measuredDraftId, actorContext: actor, now },
-    { env: EXPORT_ENV, exportCandidateRepository: candidateRepository(), metadataOnlyAudit: auditFor(audits.createProductionMetadataOnlyAuditForGeneratedDraftLimitationSnapshot, { organizationId: ORG, generatedContentDraftId: ids.measuredDraftId, actorContext: actor, now }) });
-  const createCandidate = (actor, now = tick()) => createGeneratedDraftExportCandidate(
-    { organizationId: ORG, generatedContentDraftId: ids.measuredDraftId, actorContext: actor, now },
-    { env: EXPORT_ENV, exportCandidateRepository: candidateRepository(), metadataOnlyAudit: auditFor(audits.createProductionMetadataOnlyAuditForGeneratedDraftExportCandidate, { organizationId: ORG, generatedContentDraftId: ids.measuredDraftId, actorContext: actor, now }) });
-  const decideAuthority = (actor, decisionAction, requestedAudience = "internal", now = tick()) => recordHumanFinalReleaseAuthorityDecision(
-    { organizationId: ORG, exportCandidateId: ids.exportCandidateId, requestedAudience, decisionAction, actorContext: actor, now },
-    { env: EXPORT_ENV, humanAuthorityDecisionRepository: authorityRepository(), metadataOnlyAudit: auditFor(audits.createProductionMetadataOnlyAuditForHumanFinalReleaseAuthority, { organizationId: ORG, exportCandidateId: ids.exportCandidateId, actorContext: actor, now }) });
-  const releaseManifest = (actor, now = tick()) => createExportManifest(
-    { organizationId: ORG, exportCandidateId: ids.exportCandidateId, exportReviewQueueItemId: ids.exportReviewQueueItemId, actorContext: actor },
-    { env: EXPORT_ENV, now, repository: createPostgresExportManifestRepository({ runInTransaction: withTx }), metadataOnlyAudit: auditFor(audits.createProductionMetadataOnlyAuditForExportManifest, { organizationId: ORG, exportCandidateId: ids.exportCandidateId, actorContext: actor, now }) });
+  const requestExportReview = (actor, requestedExportAudience = "internal", now = tick(), target = ids) => requestGeneratedDraftExportReview(
+    { organizationId: ORG, generatedContentDraftId: target.measuredDraftId, requestedExportAudience, actorContext: actor, now },
+    { env: EXPORT_ENV, generatedContentRepository: generatedRepository(), metadataOnlyAudit: auditFor(audits.createProductionMetadataOnlyAuditForGeneratedDraftExportReview, { organizationId: ORG, generatedContentDraftId: target.measuredDraftId, actorContext: actor, now }) });
+  const confirmSnapshot = (actor, now = tick(), target = ids) => confirmGeneratedDraftLimitationSnapshotFromCitedPairs(
+    { organizationId: ORG, generatedContentDraftId: target.measuredDraftId, actorContext: actor, now },
+    { env: EXPORT_ENV, exportCandidateRepository: candidateRepository(), metadataOnlyAudit: auditFor(audits.createProductionMetadataOnlyAuditForGeneratedDraftLimitationSnapshot, { organizationId: ORG, generatedContentDraftId: target.measuredDraftId, actorContext: actor, now }) });
+  const createCandidate = (actor, now = tick(), target = ids) => createGeneratedDraftExportCandidate(
+    { organizationId: ORG, generatedContentDraftId: target.measuredDraftId, actorContext: actor, now },
+    { env: EXPORT_ENV, exportCandidateRepository: candidateRepository(), metadataOnlyAudit: auditFor(audits.createProductionMetadataOnlyAuditForGeneratedDraftExportCandidate, { organizationId: ORG, generatedContentDraftId: target.measuredDraftId, actorContext: actor, now }) });
+  const decideAuthority = (actor, decisionAction, requestedAudience = "internal", now = tick(), target = ids) => recordHumanFinalReleaseAuthorityDecision(
+    { organizationId: ORG, exportCandidateId: target.exportCandidateId, requestedAudience, decisionAction, actorContext: actor, now },
+    { env: EXPORT_ENV, humanAuthorityDecisionRepository: authorityRepository(), metadataOnlyAudit: auditFor(audits.createProductionMetadataOnlyAuditForHumanFinalReleaseAuthority, { organizationId: ORG, exportCandidateId: target.exportCandidateId, actorContext: actor, now }) });
+  const releaseManifest = (actor, now = tick(), target = ids) => createExportManifest(
+    { organizationId: ORG, exportCandidateId: target.exportCandidateId, exportReviewQueueItemId: target.exportReviewQueueItemId, actorContext: actor },
+    { env: EXPORT_ENV, now, repository: createPostgresExportManifestRepository({ runInTransaction: withTx }), metadataOnlyAudit: auditFor(audits.createProductionMetadataOnlyAuditForExportManifest, { organizationId: ORG, exportCandidateId: target.exportCandidateId, actorContext: actor, now }) });
   // The production metadata-only audit writer, bound to this suite's pool (in
   // production it writes through the ambient pool, which here is the sentinel).
   const auditFor = (factory, options) => factory({ ...options, insertAuditEvent: (metadata) => insertRequiredSuccessfulAuditEvent(metadata, pool) });
@@ -1180,9 +1188,20 @@ async function runSuite() {
     generatedContentRepository: generatedRepository(),
     releasedReportRepository: createPostgresClientReleasedReportRepository({ runInTransaction: withTx }),
     renderModelRepository: renderRepository(),
+    organizationReviewRepository: createPostgresOrganizationInternalReviewRepository({ runInTransaction: withTx }),
   });
-  const clientDraft = (actor) => getClientInternalDraft(
-    { organizationId: ORG, engagementId: ENGAGEMENT, generatedContentDraftId: ids.measuredDraftId, actorContext: actor }, clientDependencies());
+  const clientDraft = (actor, target = ids) => getClientInternalDraft(
+    { organizationId: ORG, engagementId: ENGAGEMENT, generatedContentDraftId: target.measuredDraftId, actorContext: actor }, clientDependencies());
+  // The organization administrator's factual approval through the real
+  // service and repositories, with the production audit factory the route uses.
+  const approveFactualReview = (actor, target, { decision = "approved", env = EXPORT_ENV, engagementId = ENGAGEMENT } = {}) => approveClientInternalDraftFactualReview(
+    { organizationId: ORG, engagementId, generatedContentDraftId: target.measuredDraftId, decision, actorContext: actor },
+    {
+      ...clientDependencies(),
+      env,
+      createReviewAudit: ({ reviewQueueItemId, now }) => auditFor(audits.createProductionMetadataOnlyAuditForGeneratedContentReview,
+        { organizationId: ORG, generatedContentDraftId: target.measuredDraftId, reviewQueueItemId, actorContext: actor, now }),
+    });
   const exportCounts = async () => (await query(`SELECT
       (SELECT count(*) FROM kai.limitation_snapshots WHERE organization_id = $1::uuid)::int AS snapshots,
       (SELECT count(*) FROM kai.export_candidates WHERE organization_id = $1::uuid)::int AS candidates,
@@ -1486,6 +1505,175 @@ async function runSuite() {
     const after = await exportCounts();
     assert.deepEqual([after.snapshots, after.candidates, after.manifests], [before.snapshots, before.candidates, before.manifests]);
     assert.equal(after.decisions, before.decisions + 2, "revoke and re-grant are two appended decisions");
+  });
+
+  test("organization review: the administrator reviews an ordinary internal evidence summary through the real lifecycle; Get Kinder keeps the high-risk review and every release step; the administrator receives the released Markdown", onNormalChain, async () => {
+    const ordinary = { ...ids.ordinary };
+    assert.ok(ordinary.claimId, "the AI-permitted, all-absent source's measured claim exists");
+    // The claim becomes eligible through the same GK steps as the measured claim.
+    const reviewDeps = { env: ENV, humanReviewRepository: createPostgresHumanReviewRepository({ runInTransaction: withTx }), metadataOnlyAudit: noAudit() };
+    const evidenceQueue = await queueRow("evidence_review", ordinary.evidenceItemId);
+    assert.equal((await recordEvidenceReviewDecision({
+      organizationId: ORG, evidenceItemId: ordinary.evidenceItemId, reviewQueueItemId: evidenceQueue.review_queue_item_id,
+      expectedUpdatedAt: new Date(evidenceQueue.updated_at).toISOString(), decision: "supported", actorContext: GK_REVIEWER, now: NOW,
+    }, reviewDeps)).ok, true);
+    const claimQueue = await queueRow("claim_review", ordinary.claimId);
+    assert.equal((await recordClaimReviewDecision({
+      organizationId: ORG, claimId: ordinary.claimId, reviewQueueItemId: claimQueue.review_queue_item_id,
+      expectedUpdatedAt: new Date(claimQueue.updated_at).toISOString(), decision: "approved", approvedAudiences: ["internal"], actorContext: GK_REVIEWER, now: NOW,
+    }, reviewDeps)).ok, true);
+    const reviewed = await trace(ordinary.claimId);
+    for (const [dimensionKey, value] of Object.entries(reviewed.data.dimensions)) {
+      if (value.assessment_status !== "unresolved") continue;
+      const accepted = await acceptInternalCoverageLimitation(
+        { organizationId: ORG, claimId: ordinary.claimId, dimensionKey, actorContext: GK_REVIEWER, now: NOW },
+        { env: ENV, coverageReviewDecisionRepository: createPostgresCoverageReviewDecisionRepository({ runInTransaction: withTx }), metadataOnlyAudit: noAudit() });
+      assert.equal(accepted.ok, true, `${dimensionKey}: ${JSON.stringify(accepted)}`);
+    }
+    assert.equal((await trace(ordinary.claimId)).data.eligible, true);
+
+    // The administrator generates the ordinary draft; the provider double's
+    // approval fields change nothing.
+    const generated = await generate([ordinary.claimId], providerDouble(() => ({
+      blocks: [measuredBlock(COMPLIANT_TEXT, ordinary.claimId, ordinary.evidenceItemId)], approved: true, draftStatus: "approved", reviewStatus: "resolved",
+    })));
+    assert.equal(generated.ok, true, JSON.stringify(generated));
+    ordinary.measuredDraftId = generated.data.generatedContentDraftId;
+    // A second draft from the measured claim, whose source has no completed
+    // sensitivity review: Get Kinder's alone.
+    const heldDraft = await generate([ids.measurementClaimId], replying(measuredBlock(COMPLIANT_TEXT)));
+    assert.equal(heldDraft.ok, true, JSON.stringify(heldDraft));
+    const held = { measuredDraftId: heldDraft.data.generatedContentDraftId };
+
+    // Read back: the actual text, its citation and limitations, and who may review.
+    const detail = await clientDraft(ADMIN, ordinary);
+    assert.equal(detail.ok, true, JSON.stringify(detail));
+    assert.equal(detail.data.blocks[0].text, COMPLIANT_TEXT);
+    assert.deepEqual(detail.data.blocks[0].supportingClaimIds, [ordinary.claimId]);
+    assert.equal(detail.data.reviewState, "awaiting_organization_review");
+    assert.deepEqual(detail.data.factualReview, { actorMayApprove: true, getKinderReviewReasons: [], blockedReasons: [] });
+    assert.deepEqual(detail.data.release, { state: "awaiting_organization_review", releasedReportId: null });
+    const heldDetail = await clientDraft(ADMIN, held);
+    assert.equal(heldDetail.data.reviewState, "awaiting_get_kinder_review");
+    assert.deepEqual(heldDetail.data.factualReview, { actorMayApprove: false, getKinderReviewReasons: ["sensitivity_review_not_complete"], blockedReasons: [] });
+
+    const lifecycleAudits = async (draftId) => query(
+      `SELECT operation, metadata->>'actor_id' AS actor_id, metadata->>'contract' AS contract FROM kai.upload_lifecycle_audit
+        WHERE organization_id = $1::uuid AND metadata->>'generated_content_draft_id' = $2 AND operation LIKE 'generated_content_review_%' ORDER BY created_at, operation`,
+      [ORG, draftId]);
+    const reviewEvents = async () => (await query(
+      "SELECT action, actor_user_id::text AS actor FROM kai.audit_events WHERE organization_id = $1::uuid AND action IN ('generated_content_review_started', 'generated_content_review_completed') ORDER BY audit_event_id",
+      [ORG])).map((row) => `${row.action}:${row.actor}`);
+
+    // GK-only: the high-risk draft is refused with the structured blocker and nothing is written.
+    const queueBefore = await queueRow("generated_content_review", held.measuredDraftId);
+    const refusedHeld = await approveFactualReview(ADMIN, held);
+    assert.deepEqual([refusedHeld.ok, refusedHeld.error?.code, refusedHeld.error?.status], [false, "blocked", 422], JSON.stringify(refusedHeld));
+    assert.deepEqual(refusedHeld.blockers, [{ validator_key: "VAL-KAI-ORG-REVIEW-001", severity: "blocker", blocking_reason: "sensitivity_review_not_complete" }]);
+    assert.deepEqual(await queueRow("generated_content_review", held.measuredDraftId), queueBefore);
+    assert.deepEqual(await lifecycleAudits(held.measuredDraftId), []);
+
+    // Unreviewed: no export review is accepted for the ordinary draft yet.
+    const early = await requestExportReview(GK_ADMIN, "internal", tick(), ordinary);
+    assert.ok(!early.ok || early.data.exportReviewRequestAccepted === false, JSON.stringify(early));
+
+    // Refused before any write: other roles, GK (its own route), another
+    // organization, an inactive administrator, the AI, other decisions, flags off, another Project.
+    const eventsBefore = await reviewEvents();
+    const INACTIVE_ADMIN = { ...ADMIN, organizationMemberships: [{ ...ADMIN.organizationMemberships[0], membership_status: "inactive" }] };
+    for (const [label, actor] of [["client_reviewer", REVIEWER], ["client_contributor", CONTRIBUTOR], ["gk_reviewer", GK_REVIEWER], ["gk_admin", GK_ADMIN],
+      ["another organization's administrator", OTHER_ADMIN], ["inactive administrator", INACTIVE_ADMIN], ["AI", { ...ADMIN, actorType: "ai" }]]) {
+      const refused = await approveFactualReview(actor, ordinary);
+      assert.deepEqual([refused.ok, refused.error?.status], [false, 403], `${label}: ${JSON.stringify(refused)}`);
+    }
+    for (const decision of ["rejected", "needs_changes"]) {
+      assert.equal((await approveFactualReview(ADMIN, ordinary, { decision })).error?.code, "validation_blocker", decision);
+    }
+    assert.equal((await approveFactualReview(ADMIN, ordinary, { env: ENV })).error?.code, "feature_disabled", "generation flag off");
+    const [secondProject] = await query("INSERT INTO kai.engagements (organization_id, engagement_code) VALUES ($1::uuid, 'p2-01m-org-review') RETURNING engagement_id::text", [ORG]);
+    assert.equal((await approveFactualReview(ADMIN, ordinary, { engagementId: secondProject.engagement_id })).error?.code, "not_found");
+    assert.deepEqual(await reviewEvents(), eventsBefore);
+    assert.deepEqual(await lifecycleAudits(ordinary.measuredDraftId), []);
+
+    // The administrator's approval: the existing start and completion, attributed to the human.
+    const approved = await approveFactualReview(ADMIN, ordinary);
+    assert.equal(approved.ok, true, JSON.stringify(approved));
+    assert.deepEqual(approved.data, { generatedContentDraftId: ordinary.measuredDraftId, reviewState: "reviewed_by_your_organization", replayed: false });
+    const queue = await queueRow("generated_content_review", ordinary.measuredDraftId);
+    assert.deepEqual([queue.queue_status, queue.review_status], ["resolved", "resolved"]);
+    assert.deepEqual(await lifecycleAudits(ordinary.measuredDraftId), [
+      { operation: "generated_content_review_started", actor_id: ADMIN.actorUserId, contract: "p3_stage_b_generated_content_review_start_v1" },
+      { operation: "generated_content_review_completed", actor_id: ADMIN.actorUserId, contract: ORGANIZATION_REVIEW_COMPLETION_AUDIT_CONTRACT },
+    ]);
+    assert.deepEqual((await reviewEvents()).slice(eventsBefore.length),
+      [`generated_content_review_started:${ADMIN.actorUserId}`, `generated_content_review_completed:${ADMIN.actorUserId}`]);
+    const [draftRow] = await query("SELECT draft_status FROM kai.generated_content_drafts WHERE generated_content_draft_id = $1::uuid", [ordinary.measuredDraftId]);
+    assert.equal(draftRow.draft_status, "draft", "the draft itself is unchanged; nothing is approved for release");
+    const replay = await approveFactualReview(ADMIN, ordinary);
+    assert.deepEqual([replay.ok, replay.data?.replayed], [true, true]);
+    assert.equal((await lifecycleAudits(ordinary.measuredDraftId)).length, 2, "a repeat records nothing");
+    const reviewedDetail = await clientDraft(ADMIN, ordinary);
+    assert.equal(reviewedDetail.data.reviewState, "reviewed_by_your_organization");
+    assert.deepEqual(reviewedDetail.data.release, { state: "awaiting_get_kinder_release", releasedReportId: null });
+    console.log(`[p2-01m] organization review: ${JSON.stringify(approved.data)}; held draft blockers=${JSON.stringify(refusedHeld.blockers.map((b) => b.blocking_reason))}`);
+
+    // The customer still cannot release, for any audience.
+    for (const audience of ["internal", "funder", "public"]) {
+      const refused = await requestExportReview(ADMIN, audience, tick(), ordinary);
+      assert.deepEqual([refused.ok, refused.error?.code], [false, "authorization_denied"], audience);
+    }
+    assert.deepEqual([(await confirmSnapshot(ADMIN, tick(), ordinary)).error?.code, (await createCandidate(ADMIN, tick(), ordinary)).error?.code],
+      ["authorization_denied", "authorization_denied"]);
+
+    // Get Kinder's release, unchanged: export review, snapshot, candidate, authority, manifest.
+    const accepted = await requestExportReview(GK_ADMIN, "internal", tick(), ordinary);
+    assert.equal(accepted.data?.exportReviewRequestAccepted, true, JSON.stringify(accepted));
+    ordinary.exportReviewQueueItemId = accepted.data.reviewQueueItemId;
+    assert.equal((await reviewStep(startGeneratedDraftExportReview, "export_review", GK_ADMIN, tick(), ordinary)()).ok, true);
+    assert.equal((await reviewStep(completeGeneratedDraftExportReview, "export_review", GK_ADMIN, tick(), ordinary)()).ok, true);
+    const snapshot = await confirmSnapshot(GK_REVIEWER, tick(), ordinary);
+    assert.equal(snapshot.ok, true, JSON.stringify(snapshot));
+    const candidate = await createCandidate(GK_ADMIN, tick(), ordinary);
+    assert.equal(candidate.ok, true, JSON.stringify(candidate));
+    ordinary.exportCandidateId = candidate.data.exportCandidateId;
+    for (const audience of ["internal", "funder", "public"]) {
+      const refused = await decideAuthority(ADMIN, "grant", audience, tick(), ordinary);
+      assert.deepEqual([refused.ok, refused.error?.code], [false, "authorization_denied"], `customer ${audience} release`);
+    }
+    assert.equal((await decideAuthority(GK_ADMIN, "grant", "internal", tick(), ordinary)).ok, true);
+    const manifest = await releaseManifest(GK_ADMIN, tick(), ordinary);
+    assert.equal(manifest.ok, true, JSON.stringify(manifest));
+    const manifestId = manifest.data.exportManifestId;
+
+    // The same administrator opens the released Markdown through the client route.
+    const releasedDetail = await clientDraft(ADMIN, ordinary);
+    assert.deepEqual([releasedDetail.data.reviewState, releasedDetail.data.release], ["reviewed_by_your_organization", { state: "released_for_internal_use", releasedReportId: manifestId }]);
+    const received = await ids.getClientMarkdown(ORG, ENGAGEMENT, manifestId, "client_admin");
+    assert.equal(received.statusCode, 200, received.body);
+    assert.match(received.headers["content-disposition"], /attachment; filename="kai-export-manifest\.md"/);
+    const markdown = received.body;
+    console.log(`[p2-01m] organization-reviewed released Markdown:\n${markdown}`);
+    assert.equal(statedCount(markdown), independentRecordCount(CSV));
+    assert.match(markdown, /records 5 programme sessions for the reporting period 2026-09-01 to 2026-09-30/);
+    assert.match(markdown, /period is attested in that definition and not verified against record dates/);
+    assert.ok(markdown.includes(`- [CIT-001] Claim \`${ordinary.claimId}\`; evidence \`${ordinary.evidenceItemId}\`; source `), markdown);
+    assert.ok(markdown.includes(`source version \`${ordinary.sourceVersionId}\`.`), markdown);
+    const limitationLine = markdown.split("\n").find((line) => line.startsWith("- [CIT-001] limitation codes:"));
+    for (const code of MEASURED_LIMITATION_CODES.filter((code) => code.startsWith("measurement."))) assert.ok(limitationLine.includes(`\`${code}\``), code);
+    assert.equal(snapshot.data.citedPairCount, 1);
+    const [entry] = await query("SELECT limitation_codes FROM kai.limitation_snapshot_entries WHERE limitation_snapshot_id = $1::uuid", [snapshot.data.limitationSnapshotId]);
+    for (const code of entry.limitation_codes) assert.ok(limitationLine.includes(`\`${code}\``), `snapshotted ${code} is in the report`);
+    ids.organizationReviewedLimitationCodes = entry.limitation_codes;
+    const prose = markdown.split("## Citation Appendix")[0];
+    assert.doesNotMatch(prose, /\b(distinct|unique|individuals?|people|participants?|attendees|households?|rate|per cent|percent|outcomes?|because|caused?|improv\w*|impact\w*|increase\w*|led to|result\w* in)\b|%/i);
+    assert.doesNotMatch(markdown, /literacy|mentoring|2026-09-16|sessions\.csv/, "no row values or file names");
+
+    // A revoked release is no longer received; the organization's review does not substitute for it.
+    assert.equal((await decideAuthority(GK_ADMIN, "revoke", "internal", tick(), ordinary)).ok, true);
+    assert.equal((await ids.getClientMarkdown(ORG, ENGAGEMENT, manifestId, "client_admin")).statusCode, 409);
+    assert.equal((await clientDraft(ADMIN, ordinary)).data.release.state, "release_no_longer_valid");
+    assert.equal((await decideAuthority(GK_ADMIN, "grant", "internal", tick(), ordinary)).ok, true);
+    assert.equal((await ids.getClientMarkdown(ORG, ENGAGEMENT, manifestId, "client_admin")).statusCode, 200);
   });
 
   test("generation: once the measured source version is superseded, the claim is stale and is refused before the provider", async () => {

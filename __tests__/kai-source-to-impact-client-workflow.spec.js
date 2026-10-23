@@ -10,6 +10,7 @@ import {
 import { getOrganizationAccessCapabilities } from "../Backend/kai/services/kaiOrganizationAccessCapabilitiesService.js";
 import { __clientEvidencePipelineServiceContract } from "../Backend/kai/services/kaiClientEvidencePipelineService.js";
 import { STORED_ORGANIZATION_MEMBERSHIP_SOURCE } from "../Backend/kai/auth/kaiOrganizationMembershipSource.js";
+import { classifyDraftPacket, classifySourceDecision } from "../Backend/kai/dictionary/postgresOrganizationInternalReviewRepository.js";
 import {
   projectClientInternalDraft,
   projectClientInternalDraftList,
@@ -104,6 +105,12 @@ function indexRow(draftId, p) {
   };
 }
 
+const CLEARED_DECISION = Object.freeze({
+  decision_outcome: "reviewed", reviewed_allowed_use_status: "allowed", reviewed_llm_processing_allowed: true,
+  reviewed_personal_data_status: "absent", reviewed_minor_data_status: "absent", reviewed_health_housing_justice_immigration_status: "absent",
+  reviewed_indigenous_governance_status: "absent", reviewed_story_testimonial_status: "absent", reviewed_small_cell_risk_status: "absent",
+});
+
 function dependencies(calls = []) {
   const engagementOf = (draftId) => (draftId === D_OTHER_PROJECT ? ENGAGEMENT_B : ENGAGEMENT);
   const ids = Object.keys(PACKETS).sort();
@@ -117,6 +124,20 @@ function dependencies(calls = []) {
       return ids.filter((draftId) => engagementOf(draftId) === engagementId)
         .filter((draftId) => afterGeneratedContentDraftId === null || draftId > afterGeneratedContentDraftId)
         .slice(0, limit + 1).map((draftId) => indexRow(draftId, PACKETS[draftId]));
+    },
+    // The organization-review read over the real classifiers. Every cited
+    // source here records personal information as 'present', so each
+    // unreviewed draft stays Get Kinder's (the ordinary path is covered in
+    // kai-organization-internal-review.spec.js); a completed review is GK's.
+    organizationReviewRepository: {
+      async evaluate({ packet: p }) {
+        const draft = classifyDraftPacket(p);
+        const source = classifySourceDecision({ ...CLEARED_DECISION, reviewed_personal_data_status: "present" });
+        const getKinderReviewReasons = [...draft.getKinderReviewReasons, ...source.getKinderReviewReasons];
+        const blockedReasons = [...draft.blockedReasons, ...source.blockedReasons];
+        return { getKinderReviewReasons, blockedReasons, organizationMayReview: getKinderReviewReasons.length + blockedReasons.length === 0 };
+      },
+      async readCompletedReviewer() { return "get_kinder"; },
     },
     generatedContentRepository: {
       async getGeneratedDraftReviewPacket({ organizationId, generatedContentDraftId }) {
@@ -170,6 +191,8 @@ test("internal drafts: the detail is the persisted text with cited claim ids, th
     blocks: [{ ordinal: 1, text: `Draft text of ${D_SUMMARY}.`, supportingClaimIds: [CLAIM_A, CLAIM_B].sort() }],
     // Plan A Prompt 8: nothing can be released before Get Kinder's review.
     release: { state: "awaiting_get_kinder_review", releasedReportId: null },
+    // Owner amendment 2026-10-23: personal information keeps this draft Get Kinder's.
+    factualReview: { actorMayApprove: false, getKinderReviewReasons: ["personal_information_not_cleared"], blockedReasons: ["cited_claims_not_currently_eligible"] },
   });
   assertNoHidden(detail, "detail");
   assert.deepEqual(projectClientInternalDraft(detail.data).limitations, detail.data.limitations);

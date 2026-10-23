@@ -27,6 +27,9 @@ const WORKFLOW_OPERATION_KEYS = Object.freeze([
   // receive an internal report Get Kinder has already reviewed and released.
   "recordSourceMeasurement",
   "readReleasedInternalReports",
+  // Owner amendment 2026-10-23: the organization administrator's factual
+  // review of an ordinary internal evidence summary.
+  "reviewInternalDraftFactualContent",
 ]);
 
 // Terminal claim review outcome the generation repository always rejects
@@ -373,19 +376,40 @@ export const SOURCE_AUTHORIZATION_INTENDED_USE =
 export const INTERNAL_DRAFT_REVIEW_STATE_LABELS = Object.freeze({
   awaiting_get_kinder_review: "Awaiting Get Kinder review",
   in_get_kinder_review: "In Get Kinder review",
+  awaiting_organization_review: "Awaiting your factual review",
   reviewed_by_get_kinder: "Reviewed by Get Kinder",
+  reviewed_by_your_organization: "Factual review completed by your organization",
+});
+
+// Owner amendment 2026-10-23: why a draft is held for Get Kinder review, or
+// blocked for everyone, from the server's factualReview reason codes.
+export const INTERNAL_DRAFT_FACTUAL_REVIEW_REASON_MESSAGES = Object.freeze({
+  content_type_requires_get_kinder_review: "Only internal evidence summaries can be reviewed by your organization; Get Kinder reviews this type.",
+  audience_requires_get_kinder_review: "Only internal drafts can be reviewed by your organization.",
+  sensitivity_review_not_complete: "A cited source has no completed sensitivity and allowed-use review.",
+  personal_information_not_cleared: "A cited source is not recorded as free of personal information.",
+  minor_information_not_cleared: "A cited source is not recorded as free of information about minors.",
+  sensitive_information_not_cleared: "A cited source is not recorded as free of health, housing, justice, or immigration information.",
+  indigenous_governance_not_cleared: "A cited source is not recorded as free of Indigenous or governance-sensitive information.",
+  story_testimonial_not_cleared: "A cited source is not recorded as free of stories or testimonials.",
+  small_cell_risk_not_cleared: "A cited source is not recorded as free of small-cell re-identification risk.",
+  cited_claims_not_currently_eligible: "At least one cited claim is not currently eligible for internal use.",
+  source_version_not_current: "A cited source has been replaced by a newer version.",
+  processing_permission_not_established: "A cited source no longer permits this use or AI processing.",
 });
 
 export const INTERNAL_DRAFT_LIMITATION_MESSAGES = Object.freeze({
   internal_use_only: "Internal use only.",
   not_approved_for_external_use: "Not approved for funder or public use, export, or release.",
   awaiting_get_kinder_review: "Get Kinder has not reviewed this draft.",
+  awaiting_organization_review: "Nobody has completed the factual review of this draft yet.",
   cited_claims_not_currently_eligible: "At least one cited claim is not yet eligible for use (for example, it awaits Get Kinder claim review).",
 });
 
 // Plan A Prompt 8: the server's release state for a reviewed internal draft.
 export const INTERNAL_DRAFT_RELEASE_STATE_LABELS = Object.freeze({
   awaiting_get_kinder_review: "Awaiting Get Kinder review",
+  awaiting_organization_review: "Awaiting your factual review",
   awaiting_get_kinder_release: "Reviewed; awaiting Get Kinder release",
   released_for_internal_use: "Released by Get Kinder for internal use",
   release_no_longer_valid: "Released earlier; no longer available",
@@ -394,7 +418,8 @@ export const INTERNAL_DRAFT_RELEASE_STATE_LABELS = Object.freeze({
 
 export const INTERNAL_DRAFT_RELEASE_STATE_MESSAGES = Object.freeze({
   awaiting_get_kinder_review: "Get Kinder reviews a draft before it can be released.",
-  awaiting_get_kinder_release: "Get Kinder has reviewed this draft but has not released it yet; there is nothing to download.",
+  awaiting_organization_review: "A draft's factual review is completed before Get Kinder can release it.",
+  awaiting_get_kinder_release: "The factual review of this draft is complete. Get Kinder has not released it yet; there is nothing to download.",
   released_for_internal_use: "Get Kinder released this report for your organization's internal use. It is not approved for funders or the public.",
   release_no_longer_valid: "This release can no longer be opened: Get Kinder withdrew it, or a source or claim it relies on changed. Ask Get Kinder to review it again.",
   release_status_unavailable: "Released reports cannot be opened from here right now.",

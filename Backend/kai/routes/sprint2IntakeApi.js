@@ -5698,6 +5698,45 @@ router.post(
   },
 );
 
+// The organization administrator's factual approval of an ordinary internal
+// evidence summary of this Project (owner amendment 2026-10-23;
+// approveClientInternalDraftFactualReview). The body names only the decision;
+// the service resolves the review item and re-checks every condition in the
+// review's own transactions. Grants no release. No SQL here.
+router.post(
+  "/admin/organizations/:organizationId/engagements/:engagementId/client-internal-drafts/:generatedContentDraftId/factual-review",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    if (!metadataContentTypeIsSupported(req)) return sendKaiError(res, "unsupported_media_type");
+    const keys = ["organizationId", "engagementId", "generatedContentDraftId"];
+    const ids = clientContentPathIds(req, keys);
+    if (!ids) {
+      return sendKaiError(res, "validation_blocker", {
+        blockers: [routeValidationBlocker("invalid_uuid_field", keys.join("_or_"))],
+      });
+    }
+    const payload = requestPayload(req);
+    if (Object.keys(payload).length !== 1 || payload.decision !== "approved") {
+      return sendKaiError(res, "validation_blocker", {
+        blockers: [routeValidationBlocker("invalid_factual_review_decision", "decision")],
+      });
+    }
+    const actorContext = sprint2MappedActorContext(req);
+    return invokeService(res, async () => {
+      const service = await getClientGeneratedContentService();
+      return service.approveClientInternalDraftFactualReview({ ...ids, decision: payload.decision, actorContext }, {
+        createReviewAudit: ({ reviewQueueItemId, now }) => createProductionMetadataOnlyAuditForGeneratedContentReview({
+          organizationId: ids.organizationId,
+          generatedContentDraftId: ids.generatedContentDraftId,
+          reviewQueueItemId,
+          actorContext,
+          now,
+        }),
+      });
+    });
+  },
+);
+
 let evidenceReviewServicePromise = null;
 async function getHumanReviewServiceForEvidenceReview() {
   if (intakeServiceOverride?.recordEvidenceReviewDecisionWithClaimProposalHandoff) return intakeServiceOverride;

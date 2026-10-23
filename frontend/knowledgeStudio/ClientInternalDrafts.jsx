@@ -1,15 +1,18 @@
 import React, { useEffect, useRef, useState } from "react";
 
 import {
+  clientInternalDraftFactualReviewPath,
   clientInternalDraftPath,
   clientInternalDraftsPath,
   clientReleasedReportMarkdownPath,
   errorText,
   getJson,
+  postJson,
   projectClientInternalDraft,
   projectClientInternalDraftList,
 } from "../impactEvidenceLibraryLogic.js";
 import {
+  INTERNAL_DRAFT_FACTUAL_REVIEW_REASON_MESSAGES,
   INTERNAL_DRAFT_LIMITATION_MESSAGES,
   INTERNAL_DRAFT_RELEASE_STATE_LABELS,
   INTERNAL_DRAFT_RELEASE_STATE_MESSAGES,
@@ -35,13 +38,27 @@ const DRAFT_LABELS = Object.freeze({
  * the actor holds readReleasedInternalReports, can it be opened or downloaded
  * through the client-released-reports route, which re-checks the release on
  * every request. Opening it grants no review or release authority.
+ *
+ * Factual review (owner amendment 2026-10-23): for an ordinary internal
+ * evidence summary the server marks actorMayApprove, and an actor holding
+ * reviewInternalDraftFactualContent may record the factual approval after
+ * confirming they read the text, citations and limitations. Otherwise the
+ * server's reasons say why Get Kinder reviews it or why it is blocked.
+ * Approval releases nothing; release stays Get Kinder's.
  */
-export default function ClientInternalDrafts({ organizationId, engagementId, claims, refreshToken, focusDraftId, canReadReleasedReports = false }) {
+export default function ClientInternalDrafts({
+  organizationId, engagementId, claims, refreshToken, focusDraftId, canReadReleasedReports = false, canReviewFactualContent = false,
+}) {
   const [list, setList] = useState({ status: "idle", items: [], error: "" });
+  const [listRefresh, setListRefresh] = useState(0);
+  const [approval, setApproval] = useState({ status: "idle", draftId: "", confirmed: false, error: "" });
   const [detail, setDetail] = useState({ status: "idle", draft: null, error: "" });
   const [report, setReport] = useState({ status: "idle", draftId: "", markdown: "", error: "" });
   const keyRef = useRef("");
   const detailSeqRef = useRef(0);
+  // The generated draft opened once after generation; a later list reload
+  // (for example after an approval) must not switch the open draft back.
+  const focusedRef = useRef("");
 
   const openReleasedReport = async (draftId, releasedReportId) => {
     setReport({ status: "loading", draftId, markdown: "", error: "" });
@@ -57,6 +74,21 @@ export default function ClientInternalDrafts({ organizationId, engagementId, cla
     let body = null;
     try { body = await response.json(); } catch { body = null; }
     setReport({ status: "error", draftId, markdown: "", error: errorText({ statusCode: response.status, body }) });
+  };
+
+  const approveFactualContent = async (generatedContentDraftId) => {
+    setApproval({ status: "saving", draftId: generatedContentDraftId, confirmed: true, error: "" });
+    const result = await postJson(clientInternalDraftFactualReviewPath(organizationId, engagementId, generatedContentDraftId), { decision: "approved" });
+    if (result.statusCode === 200 && result.body?.ok) {
+      setApproval({ status: "success", draftId: generatedContentDraftId, confirmed: false, error: "" });
+      setListRefresh((value) => value + 1);
+      await openDraft(generatedContentDraftId);
+      return;
+    }
+    const reasons = Array.isArray(result.body?.blockers)
+      ? result.body.blockers.map((blocker) => INTERNAL_DRAFT_FACTUAL_REVIEW_REASON_MESSAGES[blocker?.blocking_reason]).filter(Boolean)
+      : [];
+    setApproval({ status: "error", draftId: generatedContentDraftId, confirmed: false, error: [errorText(result), ...reasons].join(" ") });
   };
 
   const openDraft = async (generatedContentDraftId) => {
@@ -80,15 +112,18 @@ export default function ClientInternalDrafts({ organizationId, engagementId, cla
       setList(projected ? { status: "success", items: projected.items, error: "" } : { status: "error", items: [], error: errorText(result) });
     });
     return () => { keyRef.current = ""; };
-  }, [organizationId, engagementId, refreshToken]);
+  }, [organizationId, engagementId, refreshToken, listRefresh]);
 
   useEffect(() => {
     setDetail({ status: "idle", draft: null, error: "" });
     setReport({ status: "idle", draftId: "", markdown: "", error: "" });
+    setApproval({ status: "idle", draftId: "", confirmed: false, error: "" });
   }, [organizationId, engagementId]);
 
   useEffect(() => {
-    if (focusDraftId && list.status === "success" && list.items.some((item) => item.generatedContentDraftId === focusDraftId)) {
+    if (focusDraftId && focusDraftId !== focusedRef.current && list.status === "success"
+      && list.items.some((item) => item.generatedContentDraftId === focusDraftId)) {
+      focusedRef.current = focusDraftId;
       openDraft(focusDraftId);
     }
     // openDraft is recreated each render; the focus id and list are the triggers.
@@ -156,6 +191,8 @@ export default function ClientInternalDrafts({ organizationId, engagementId, cla
           {report.draftId === draft.generatedContentDraftId && report.status === "success" ? (
             <pre className="small border rounded p-2 mb-2" style={{ whiteSpace: "pre-wrap" }} data-client-released-report-markdown="">{report.markdown}</pre>
           ) : null}
+          <FactualReview draft={draft} approval={approval} setApproval={setApproval}
+            canReview={canReviewFactualContent} onApprove={() => approveFactualContent(draft.generatedContentDraftId)} />
           <ul className="small mb-2" data-client-internal-draft-limitations="">
             {draft.limitations.map((code) => <li key={code}>{INTERNAL_DRAFT_LIMITATION_MESSAGES[code]}</li>)}
           </ul>
@@ -178,6 +215,60 @@ export default function ClientInternalDrafts({ organizationId, engagementId, cla
               </div>
             </div>
           ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function FactualReview({ draft, approval, setApproval, canReview, onApprove }) {
+  const view = draft.factualReview;
+  const mine = approval.draftId === draft.generatedContentDraftId;
+  const held = view.getKinderReviewReasons.length > 0;
+  const blocked = view.blockedReasons.length > 0;
+  return (
+    <div className="small mb-2" data-client-internal-draft-factual-review="">
+      {mine && approval.status === "success" ? (
+        <div className="alert alert-success py-1 mb-1" data-client-factual-review-recorded="">
+          Your factual approval is recorded. Get Kinder releases the report; nothing has been released yet.
+        </div>
+      ) : null}
+      {mine && approval.status === "error" ? (
+        <div className="alert alert-warning py-1 mb-1" data-client-factual-review-error="">The approval was not recorded. {approval.error}</div>
+      ) : null}
+      {held ? (
+        <div data-client-factual-review-get-kinder-required="">
+          Get Kinder reviews this draft:
+          <ul className="mb-1">
+            {view.getKinderReviewReasons.map((code) => <li key={code}>{INTERNAL_DRAFT_FACTUAL_REVIEW_REASON_MESSAGES[code]}</li>)}
+          </ul>
+        </div>
+      ) : null}
+      {blocked ? (
+        <div data-client-factual-review-blocked="">
+          This draft cannot be approved now:
+          <ul className="mb-1">
+            {view.blockedReasons.map((code) => <li key={code}>{INTERNAL_DRAFT_FACTUAL_REVIEW_REASON_MESSAGES[code]}</li>)}
+          </ul>
+        </div>
+      ) : null}
+      {canReview && view.actorMayApprove ? (
+        <div className="border rounded p-2" data-client-factual-review-action="">
+          <div className="mb-1">
+            Read the draft text below, each cited claim and its review status, and the limitations. Approve only if every statement
+            is supported by the cited claims and states their limitations. Approval records your factual review; it does not release the report.
+            If something is wrong, do not approve it: generate a corrected draft from the claims instead.
+          </div>
+          <label className="form-check mb-1">
+            <input type="checkbox" className="form-check-input" data-client-factual-review-confirm=""
+              checked={mine && approval.confirmed}
+              onChange={(event) => setApproval({ status: "idle", draftId: draft.generatedContentDraftId, confirmed: event.target.checked, error: "" })} />
+            <span className="form-check-label">I have read the text, the cited claims and the limitations, and the facts are supported.</span>
+          </label>
+          <button type="button" className="btn btn-sm btn-primary" data-client-factual-review-approve=""
+            disabled={!(mine && approval.confirmed) || approval.status === "saving"} onClick={onApprove}>
+            {mine && approval.status === "saving" ? "Recording..." : "Approve factual content"}
+          </button>
         </div>
       ) : null}
     </div>

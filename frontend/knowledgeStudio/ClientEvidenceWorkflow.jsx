@@ -622,13 +622,15 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
         <div className="admin-card mb-3" data-client-internal-drafts="">
           <h5 className="mb-2">Your internal drafts</h5>
           <div className="small text-muted mb-2">
-            Drafts generated for this Project, with their actual Get Kinder review and release state. Internal use only: reading a
-            draft does not approve it for funders or the public, and nothing here releases it. A report Get Kinder has released for
-            internal use can be opened here while that release is valid.
+            Drafts generated for this Project, with their actual review and release state. You can complete the factual review of an
+            ordinary internal evidence summary; Get Kinder reviews the rest and releases every report. Internal use only: nothing here
+            approves a draft for funders or the public or releases it. A report Get Kinder has released for internal use can be opened
+            here while that release is valid.
           </div>
           <ClientInternalDrafts organizationId={organizationId} engagementId={engagementId} claims={claims.items}
             refreshToken={draftsRefreshToken} focusDraftId={lastDraft?.generatedContentDraftId || null}
-            canReadReleasedReports={access.readReleasedInternalReports === true} />
+            canReadReleasedReports={access.readReleasedInternalReports === true}
+            canReviewFactualContent={access.reviewInternalDraftFactualContent === true} />
         </div>
       ) : null}
     </div>
