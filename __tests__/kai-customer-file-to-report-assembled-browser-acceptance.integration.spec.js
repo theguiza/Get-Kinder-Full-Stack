@@ -5,6 +5,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Readable } from "node:stream";
+import vm from "node:vm";
 
 /**
  * Plan A Prompt 9: the assembled customer journey from actual CSV upload
@@ -331,19 +332,21 @@ async function runAssembledAcceptance() {
   const PROJECT_X2 = "7e000000-0000-4000-8000-0000000000e3";
   const PROJECT_Y = "7e000000-0000-4000-8000-0000000000e2";
   const USERS = Object.freeze({ gkReviewer: 981, gkAdmin: 982, clientAdmin: 983, contributor: 984, clientReviewer: 985, inactiveAdmin: 986, adminY: 987 });
-  // The established synthetic programme-session log: one data record per
-  // session, one empty line (not a record), and two identical records (both
-  // counted).
-  const CSV = [
-    "session_date,programme,attendees",
-    "2026-09-02,literacy,12",
-    "2026-09-09,literacy,",
-    "",
-    "2026-09-16,mentoring,8",
-    "2026-09-16,mentoring,8",
-    "2026-09-23,mentoring,11",
-    "",
-  ].join("\n");
+  // The production browser-console canary is exercised against this assembled
+  // app. Its fixture is the established synthetic programme-session log (one
+  // data record per session, one empty line, two identical records, all
+  // counted) plus a canary_run column carrying the run tag, so the customer
+  // uploads exactly the bytes the canary generates.
+  const CANARY_SOURCE = readFileSync(new URL("../scripts/kai-production-browser-console-canary.js", import.meta.url), "utf8");
+  const CANARY_TAG = "kc202610231200c0ffee";
+  const CANARY_STORE_KEY = "kai.productionConsoleCanary.v1";
+  const canaryHelpers = (() => {
+    const silent = { log() {}, warn() {}, error() {}, table() {} };
+    const context = { console: silent, TextEncoder, URL, setTimeout, location: { origin: "vm://canary", pathname: "/" } };
+    vm.runInNewContext(CANARY_SOURCE, context);
+    return context.KAI_CANARY._test;
+  })();
+  const CSV = canaryHelpers.fixtureText(CANARY_TAG);
   const CSV_BYTES = Buffer.from(CSV, "utf8");
   // Independent verifier over the same bytes: non-empty lines after the header.
   const independentRecordCount = (text) => text.split(/\r?\n/).slice(1).filter((line) => line.split(",").some((cell) => cell.trim() !== "")).length;
@@ -379,7 +382,7 @@ async function runAssembledAcceptance() {
     writeFileSync(path, bytes);
     return { name, path, bytes, checksum: sha256(bytes) };
   };
-  const SESSIONS = customerFile("programme-sessions-september.csv", CSV_BYTES);
+  const SESSIONS = customerFile(canaryHelpers.fixtureFilename(CANARY_TAG), CSV_BYTES);
   const FLAGGED = customerFile("flagged-attachment.csv", Buffer.from("session_date,programme\n2026-09-30,flagged\n", "utf8"));
   const PARTNER = customerFile("partner-shared-sessions.csv", Buffer.from("session_date,programme\n2026-09-05,partner\n2026-09-12,partner\n", "utf8"));
 
@@ -578,9 +581,19 @@ async function runAssembledAcceptance() {
     await adminPage.selectProject(projectId);
     await adminPage.idle();
   };
+  // A navigation clears the page; the operator pastes the same script again.
+  async function pasteCanaryIfAbsent(page) {
+    if (await page.evaluate("typeof window.KAI_CANARY") === "undefined") await page.evaluate(CANARY_SOURCE);
+  }
+  // The canary's own file is chosen by KAI_CANARY.attachFixture(), the
+  // console helper an operator uses; every other file through the dialog.
   const uploadThroughFiles = async (file) => {
+    if (file === SESSIONS) {
+      await pasteCanaryIfAbsent(adminPage);
+      await adminPage.evaluate("KAI_CANARY.attachFixture()");
+    }
     const mark = adminPage.mark();
-    await adminPage.chooseFile(file.path);
+    if (file !== SESSIONS) await adminPage.chooseFile(file.path);
     await adminPage.clickButton("Upload the selected file");
     await adminPage.waitFor(async () => /File reserved, uploaded, and confirmed\.|This file has already been added|could not|failed/i.test(await adminPage.text()), `upload result for ${file.name}`);
     await adminPage.idle();
@@ -593,6 +606,30 @@ async function runAssembledAcceptance() {
   };
   const created = (response, label) => assert.ok([200, 201].includes(response.status), `${label}: ${response.status} ${JSON.stringify(response.body)}`);
 
+  // A console canary call, as typed into DevTools: while it runs, only GET
+  // requests to the KAI API may leave the page.
+  const J = JSON.stringify;
+  const canaryCall = async (page, expression) => {
+    await pasteCanaryIfAbsent(page);
+    await page.idle();
+    const mark = page.mark();
+    const value = await page.evaluate(`(async () => JSON.parse(JSON.stringify(await (${expression}))))()`);
+    await page.idle();
+    const sent = page.requestsSince(mark);
+    assert.deepEqual(sent.filter((r) => r.method !== "GET").map((r) => `${r.method} ${pathOf(r)}`), [], "the canary sends only GET requests");
+    assert.ok(sent.every((r) => pathOf(r).startsWith(`${BASE_PATH}/`)), `the canary reads only the KAI API: ${sent.map(pathOf).join(", ")}`);
+    return value;
+  };
+  const canaryState = (page) => page.evaluate(`JSON.parse(localStorage.getItem(${J(CANARY_STORE_KEY)}) || "null")`);
+  const expectCanary = async (page, summary, expected) => {
+    const state = await canaryState(page);
+    for (const [key, status] of Object.entries(expected)) {
+      assert.equal(summary.stages[key], status, `${key}: ${J(state?.stages?.[key])}`);
+    }
+    return state;
+  };
+  const CANARY_START = `KAI_CANARY.start({ organizationId: ${J(ORG_X)}, engagementId: ${J(PROJECT_X)}, confirm: KAI_CANARY.confirmPhrase })`;
+
   const results = { simulatedBoundaries: ["session (harness cookie)", "object storage (in-process signed-PUT/exact-generation stand-in)", "malware scanner (deterministic adapter behind the real assessor)", "model provider (patched SDK Messages.create)"] };
   const ids = {};
   try {
@@ -603,6 +640,42 @@ async function runAssembledAcceptance() {
     // Step A + recovery: the actual bytes enter through the upload boundary
     // while the scanner is unavailable.
     // -----------------------------------------------------------------------
+    await test("Console canary: the pasted script initializes, runs only a read-only preflight, generates the synthetic CSV, and starts only with the owner's phrase", async () => {
+      await openStudioTab("Files");
+      const mark = adminPage.mark();
+      await adminPage.evaluate(CANARY_SOURCE);
+      const methods = await adminPage.evaluate(`["preflight", "makeFixture", "start", "next", "status", "report", "resume"].filter((name) => typeof window.KAI_CANARY?.[name] === "function")`);
+      assert.deepEqual(methods, ["preflight", "makeFixture", "start", "next", "status", "report", "resume"]);
+      const preflight = await canaryCall(adminPage, `KAI_CANARY.preflight({ organizationId: ${J(ORG_X)}, engagementId: ${J(PROJECT_X)} })`);
+      assert.deepEqual(adminPage.requestsSince(mark).filter((r) => r.method !== "GET").map(pathOf), [], "the paste-time and explicit preflights write nothing");
+      const byCheck = Object.fromEntries(preflight.checks.map((check) => [check.Check, check.Status]));
+      assert.equal(preflight.readOnly, true);
+      assert.equal(byCheck["Signed-in session"], "PASS");
+      assert.equal(byCheck["Customer workspace & capabilities"], "PASS", J(preflight.checks));
+      assert.equal(byCheck["Synthetic CSV (in memory)"], "PASS");
+      assert.equal(byCheck["Origin class"], "NOT_CONFIRMED", "a loopback origin can never yield a production pass");
+      assert.equal(byCheck["Internal release flag (KAI_PUBLIC_EXPORT_ENABLED)"], "NOT_CONFIRMED", "no reviewed draft yet, so the flag is not observable read-only");
+      assert.equal(await adminPage.evaluate(`KAI_CANARY._test.fixtureText(${J(CANARY_TAG)})`), CSV, "the browser generates exactly the bytes the customer uploads");
+      const fixture = await adminPage.evaluate(`(() => { const f = KAI_CANARY.makeFixture({ download: false }); return { name: f.name, bytes: f.bytes, counts: f.counts, type: f.file.type }; })()`);
+      assert.deepEqual(fixture.counts, { dataRecords: 6, blankRecords: 1, duplicateRecords: 2, counted: 5 });
+      assert.match(fixture.name, /^kai_canary_kc\d{12}[0-9a-f]{6}\.csv$/);
+      assert.equal(fixture.type, "text/csv");
+      // The run adopts a fixture the operator generated before start(); here
+      // the one whose bytes this harness uploads.
+      await adminPage.evaluate(`localStorage.setItem(${J(`${CANARY_STORE_KEY}.pendingTag`)}, ${J(CANARY_TAG)})`);
+      const refused = await adminPage.evaluate(`KAI_CANARY.start({ organizationId: ${J(ORG_X)}, engagementId: ${J(PROJECT_X)} }).then(() => "started", (error) => error.message)`);
+      assert.match(refused, /explicit authorization/);
+      assert.equal(await canaryState(adminPage), null, "no run without the owner's phrase");
+      const started = await canaryCall(adminPage, CANARY_START);
+      const state = await expectCanary(adminPage, started, { workspace: "PASS", fixture: "PASS", upload_processing: "WAITING_FOR_HUMAN", gk_review: "NOT_CONFIRMED" });
+      assert.equal(state.tag, CANARY_TAG);
+      assert.match(started.verdict, /^IN_PROGRESS at 3 Upload/);
+      assert.match(state.stages.upload_processing.next, /Upload the selected file/);
+      const again = await adminPage.evaluate(`${CANARY_START}.then(() => "started", (error) => error.message)`);
+      assert.match(again, /already exists/, "a second start never replaces the run");
+      results.canary = { preflight: "read-only PASS", start: started.verdict };
+    });
+
     await test("A: the organization administrator creates a batch and uploads the CSV in Files; with the scanner unavailable the confirmed bytes stay quarantined and nothing is processed", async () => {
       await openStudioTab("Files");
       await adminPage.waitForText("Upload the selected file");
@@ -661,6 +734,15 @@ async function runAssembledAcceptance() {
       assert.match(entry, /Check security again/);
       assert.doesNotMatch(entry, /KAI is processing this file|malware_scan/);
       results.a = { requests: sequence.filter(([method]) => method !== "GET"), stored: row.file_policy_status, checksumMatchesIndependent: true };
+    });
+
+    await test("Console canary: with the scanner unavailable it reports the real BLOCKED stage and the existing recovery action", async () => {
+      const summary = await canaryCall(adminPage, "KAI_CANARY.next()");
+      const state = await expectCanary(adminPage, summary, { upload_processing: "BLOCKED", sensitivity_source: "NOT_CONFIRMED" });
+      assert.match(state.stages.upload_processing.observed, /scanner unavailable/i);
+      assert.match(state.stages.upload_processing.next, /Check security again/);
+      assert.equal(state.ids.intakeFileId, ids.fileId);
+      results.canary.scannerOutage = state.stages.upload_processing.status;
     });
 
     await test("Recovery: the administrator's 'Check security again' during the outage changes nothing; after the scanner returns it passes the existing stored bytes and the real worker parses them", async () => {
@@ -726,6 +808,13 @@ async function runAssembledAcceptance() {
         parserRun: run.parser_status,
         profileCounts: ids.profileCounts,
       };
+    });
+
+    await test("Console canary: after recovery the deployed upload, scan and P1 results pass and it waits for the human sensitivity review", async () => {
+      const summary = await canaryCall(adminPage, "KAI_CANARY.next()");
+      const state = await expectCanary(adminPage, summary, { upload_processing: "PASS", sensitivity_source: "WAITING_FOR_HUMAN" });
+      assert.match(state.stages.upload_processing.observed, new RegExp(`${CSV_BYTES.byteLength} bytes; policy passed`));
+      assert.match(state.stages.sensitivity_source.next, /Review sensitivity & allowed use/);
     });
 
     await test("Idempotency: a replayed confirmation, a re-run of the worker, and the same bytes selected again create no duplicate file, profile, source, or decision", async () => {
@@ -890,6 +979,15 @@ async function runAssembledAcceptance() {
       results.c = { decision: "reviewed by client_admin: allowed use allowed, AI permitted", sourceVersion: "current", lineage: "file -> P1 profile -> source version" };
     });
 
+    await test("Console canary: the human decision and promotion are read back from the server with the deployed parser counts", async () => {
+      const summary = await canaryCall(adminPage, "KAI_CANARY.next()");
+      const state = await expectCanary(adminPage, summary, { sensitivity_source: "PASS", measurement: "WAITING_FOR_HUMAN" });
+      assert.equal(state.ids.sourceVersionId, ids.sourceVersionId);
+      assert.equal(state.ordinary, true);
+      assert.match(state.stages.sensitivity_source.observed, /decision reviewed by client_admin \(human\); allowed use allowed; AI true/);
+      assert.match(state.stages.measurement.next, /Count records/);
+    });
+
     await test("C boundary: a second uploaded file whose administrator decision is 'not_allowed' records the decision but never becomes a source", async () => {
       await openStudioTab("Files");
       await adminPage.waitForText("Upload the selected file");
@@ -1006,6 +1104,32 @@ async function runAssembledAcceptance() {
     // -----------------------------------------------------------------------
     // Step E: GK review, generation, release.
     // -----------------------------------------------------------------------
+    await test("Console canary: the measurement and claim pass; after a page reload the re-pasted canary reconnects without repeating anything and waits for GK, whose read-only helper lists what is outstanding", async () => {
+      let summary = await canaryCall(adminPage, "KAI_CANARY.next()");
+      let state = await expectCanary(adminPage, summary, { measurement: "PASS", gk_review: "WAITING_FOR_HUMAN" });
+      assert.deepEqual([state.ids.evidenceItemId, state.ids.claimId], [ids.evidenceItemId, ids.claimId]);
+      assert.match(state.stages.gk_review.next, /KAI_CANARY\.gk\(/);
+      const runId = state.runId;
+      await adminPage.goto("/impact-library");
+      assert.equal(await adminPage.evaluate("typeof window.KAI_CANARY"), "undefined", "the reload cleared the page");
+      const mark = adminPage.mark();
+      await adminPage.evaluate(CANARY_SOURCE);
+      const offline = await adminPage.evaluate("KAI_CANARY.status()");
+      assert.deepEqual(offline.stages, summary.stages, "status() reads the saved run");
+      summary = await canaryCall(adminPage, "KAI_CANARY.resume()");
+      state = await expectCanary(adminPage, summary, { workspace: "PASS", measurement: "PASS", gk_review: "WAITING_FOR_HUMAN" });
+      assert.equal(state.runId, runId, "the same run, reconnected");
+      assert.deepEqual(adminPage.requestsSince(mark).filter((r) => r.method !== "GET").map(pathOf), [], "re-paste and resume write nothing");
+      const customerGk = await canaryCall(adminPage, `KAI_CANARY.gk({ organizationId: ${J(ORG_X)}, claimId: ${J(ids.claimId)} })`);
+      assert.equal(customerGk.status, "BLOCKED", "the customer cannot read GK traceability");
+      await gkReviewerPage.evaluate(CANARY_SOURCE);
+      const gk = await canaryCall(gkReviewerPage, `KAI_CANARY.gk({ organizationId: ${J(ORG_X)}, claimId: ${J(ids.claimId)} })`);
+      assert.equal(gk.eligible, false);
+      assert.ok(gk.blockerCodes.length > 0, J(gk));
+      results.canary.reloadRecovery = "PASS: same run, no write";
+      results.canary.gkOutstanding = gk;
+    });
+
     await test("E1: GK reviews the evidence and claim and accepts the source-level limitations; the administrator cannot", async () => {
       const evidenceQueue = await queueOf("evidence_review", ids.evidenceItemId);
       const evidenceBody = evidenceReviewDecisionBody({ expectedUpdatedAt: new Date(evidenceQueue.updated_at).toISOString(), decision: "supported" });
@@ -1029,6 +1153,14 @@ async function runAssembledAcceptance() {
       const [followups] = await query("SELECT count(*)::int AS n FROM kai.client_followup_items WHERE claim_id = $1::uuid", [ids.claimId]);
       assert.equal(followups.n, 0);
       results.e1 = { acceptedDimensions: unresolved, eligible: true };
+    });
+
+    await test("Console canary: once GK's reviews make the claim eligible it passes and waits for the customer's generation", async () => {
+      const gk = await canaryCall(gkReviewerPage, `KAI_CANARY.gk({ organizationId: ${J(ORG_X)}, claimId: ${J(ids.claimId)} })`);
+      assert.equal(gk.eligible, true, J(gk));
+      const summary = await canaryCall(adminPage, "KAI_CANARY.next()");
+      const state = await expectCanary(adminPage, summary, { gk_review: "PASS", generation: "WAITING_FOR_HUMAN" });
+      assert.match(state.stages.generation.next, /Generate internal evidence summary/);
     });
 
     await test("E2: the administrator generates the internal Evidence Summary in the UI; the generator receives the measured claim and its limitations; the model's 'approval' changes nothing", async () => {
@@ -1055,6 +1187,14 @@ async function runAssembledAcceptance() {
       assert.equal(await textOf(adminPage, "[data-client-open-released-report]"), null, "nothing to open before review");
       assert.equal(await textOf(adminPage, "[data-client-internal-release-action]"), null, "no release before the factual review");
       results.e2 = { modelCalls: modelCalls.length, generatedValue: ids.generatedValue, draft: [draft.draft_status, draft.review_status] };
+    });
+
+    await test("Console canary: the generated draft is validated for count, unit, period, citation and disclosures, and it waits for the human factual review", async () => {
+      const summary = await canaryCall(adminPage, "KAI_CANARY.next()");
+      const state = await expectCanary(adminPage, summary, { generation: "PASS", factual_review: "WAITING_FOR_HUMAN" });
+      assert.equal(state.ids.draftId, ids.draftId);
+      assert.ok(Object.values(state.generation.checks).every(Boolean), J(state.generation));
+      assert.match(state.stages.factual_review.next, /Approve factual content/);
     });
 
     await test("E3: the same administrator completes the factual review in the UI, then makes the separate final-release decision there; the existing chain records both under the administrator's identity, with no Get Kinder actor; GK's release routes still refuse the customer", async () => {
@@ -1138,6 +1278,27 @@ async function runAssembledAcceptance() {
     // -----------------------------------------------------------------------
     // Step F: the administrator obtains the released Markdown.
     // -----------------------------------------------------------------------
+    await test("Console canary: after the human review and release it validates the actual Markdown download; a loopback run is never a production pass; a disabled export flag is reported, not bypassed", async () => {
+      const summary = await canaryCall(adminPage, "KAI_CANARY.next()");
+      const state = await expectCanary(adminPage, summary, { factual_review: "PASS", release: "PASS", download_validation: "PASS" });
+      assert.equal(state.ids.exportManifestId, ids.exportManifestId);
+      assert.ok(Object.values(state.validation.checks).every(Boolean), J(state.validation));
+      assert.match(summary.verdict, /^LOCAL_SIMULATION_ONLY/);
+      assert.ok(!/END_TO_END_PASS/.test(summary.verdict));
+      const report = await canaryCall(adminPage, "KAI_CANARY.report()");
+      assert.deepEqual(new Set(Object.values(report.stages)), new Set(["PASS"]));
+      process.env.KAI_PUBLIC_EXPORT_ENABLED = "false";
+      try {
+        const preflight = await canaryCall(adminPage, "KAI_CANARY.preflight()");
+        const flag = preflight.checks.find((check) => check.Check === "Internal release flag (KAI_PUBLIC_EXPORT_ENABLED)");
+        assert.equal(flag.Status, "BLOCKED", J(flag));
+        assert.match(flag.Observed, /feature_disabled/);
+      } finally {
+        process.env.KAI_PUBLIC_EXPORT_ENABLED = "true";
+      }
+      results.canary.final = { verdict: summary.verdict, markdownChecks: Object.keys(state.validation.checks).length, coverageCodes: state.validation.coverageCodes, disabledFlag: "BLOCKED feature_disabled" };
+    });
+
     await test("F: the administrator sees the release, opens it (HTTP 200), and receives exactly the released Markdown with the five-session measurement, citations, and limitations", async () => {
       await adminPage.clickIn(`[data-client-internal-draft="${ids.draftId}"] button`, "Read draft");
       await adminPage.waitForText("Released by your organization");

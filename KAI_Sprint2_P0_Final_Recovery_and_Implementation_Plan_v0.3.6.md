@@ -43900,3 +43900,91 @@ account was accessed or changed.
 
 **Status:** PLAN_A_EXISTING_SIGNED_IN_BROWSER_ATTACHMENT_IMPLEMENTED;
 production runtime and end-to-end result remain NOT_CONFIRMED.
+
+### Plan A production browser-console canary (2026-10-23)
+
+**Authorization (USER_CONFIRMED):** the owner's 2026-10-23 prompt authorized
+building and locally verifying a paste-ready Chrome DevTools Console canary for
+the deployed customer file-to-report journey. It did not authorize running it
+against production; the owner initiates that run separately in the browser.
+
+**Deliverable (TOOL_VERIFIED):** `scripts/kai-production-browser-console-canary.js`,
+one self-contained browser script (no imports, Node APIs, helpers, or server).
+Pasting it defines `window.KAI_CANARY` (`preflight`, `makeFixture`,
+`attachFixture`, `start`, `next`, `status`, `report`, `resume`, and a read-only
+`gk` helper for the GK reviewer's own session) and immediately runs a read-only
+preflight. Its only network primitive is a same-origin `GET` to
+`/api/kai/sprint2/intake/*` with the page's session cookie. Every upload,
+decision, measurement, claim proposal, generation, factual approval and release
+remains a human click in the existing UI. `start()` requires the exact phrase
+`I AUTHORIZE A SYNTHETIC PRODUCTION RUN`. localStorage holds only the run tag,
+workspace and object ids, and stage outcomes. A re-paste after navigation
+reconnects through `resume()` without repeating any action.
+
+The ten stages are verified from server reads, not button clicks:
+1. Workspace capabilities.
+2. Browser-generated CSV: the Plan A log plus a `canary_run` column, giving
+   unique bytes per run with counts 6/1/2/5.
+3. Pipeline stages plus file detail: size, persisted `passed` security decision,
+   organization and Project.
+4. Current sensitivity decision, promotion, and deployed P1 basis counts.
+5. P2-01M measurement, definition, period, limitation codes and claim
+   statement.
+6. Claim present in the client `/impact-facts` internal-eligibility read. GK
+   traceability is GK-only.
+7. A new draft since run start citing only the claim, checked for count, unit,
+   period, disclosures, and no unsupported findings (negation-aware).
+8. `reviewed_by_your_organization`.
+9. `released_for_internal_use` by `your_organization`.
+10. Validation of the authorized Markdown receipt against the serializer
+    contract: org and engagement ids, citations, four measurement limitation
+    codes, no raw rows.
+
+`END_TO_END_PASS` requires all ten PASS on an HTTPS non-loopback origin.
+Otherwise the verdict is `LOCAL_SIMULATION_ONLY`.
+
+**Corrections to the earlier canary prototypes (TOOL_VERIFIED against code):**
+- The file detail DTO exposes no checksum, so size is compared instead.
+- `file_size_bytes` can arrive as a string.
+- `workflowOperations.releaseInternalReports` is a role check and does not
+  reflect `KAI_PUBLIC_EXPORT_ENABLED`. The flag is observable only through a
+  reviewed draft's `release.state === "release_status_unavailable"`, so the
+  preflight reports it NOT_CONFIRMED until such a draft exists.
+- The disabled-release value is `release_status_unavailable`, not `unavailable`.
+- Measurement and claim are separate UI actions ("Record definition and
+  count", then "Propose a claim").
+
+**Verification (TOOL_VERIFIED; sentinel `DATABASE_URL`):**
+- `node scripts/kai-sprint2-plan-a-assembled-file-to-report-local-postgres.js`:
+  baseline 15 passed, then 23 passed / 0 failed with eight console-canary
+  checkpoints. The exact file is evaluated in the real page, as a console paste
+  is.
+  - The customer uploads the canary's own fixture via `attachFixture()` through
+    the real Files UI; the stored bytes equal the fixture.
+  - Every canary call sent only KAI-API GETs.
+  - Observed results: scanner outage BLOCKED with "Check security again"; each
+    human step WAITING_FOR_HUMAN; reload, re-paste and `resume()` reconnected
+    to the same run with no write; the GK helper listed the outstanding blockers
+    and dimensions, and the customer was refused traceability.
+  - All ten stages passed, with 11/11 Markdown checks, and the verdict was
+    `LOCAL_SIMULATION_ONLY`.
+  - With `KAI_PUBLIC_EXPORT_ENABLED=false` the preflight reported
+    `feature_disabled` as BLOCKED.
+  - Simulated boundaries are unchanged: session, object storage, scanner, and
+    model provider.
+- `npm run test:kai-production-console-canary`: 6 passed, 0 failed.
+- `npm run test:kai-plan-a-production-canary`: 13 passed, 0 failed.
+- `npm run verify:kai-sprint2-api-contract`: 71 passed, 0 failed.
+- `git diff --check`: passed.
+
+**Known limits (NOT_CONFIRMED until a live run):**
+- The customer projection exposes no generation metadata, so the provider call
+  is shown only by a new draft created after the run started. The deployed
+  generator has no non-provider path.
+- Processing pending for 20 minutes or more is reported as BLOCKED (scanner or
+  worker unavailable).
+- The pipeline read covers the first 100 files of a Project.
+
+**Status:** PLAN_A_PRODUCTION_BROWSER_CONSOLE_CANARY_LOCALLY_VERIFIED. The
+production run was not executed. No production login, upload, database access,
+mutation, flag change, deploy, push, or real client data.
