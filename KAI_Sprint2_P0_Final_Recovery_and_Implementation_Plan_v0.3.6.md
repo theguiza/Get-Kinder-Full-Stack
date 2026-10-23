@@ -43876,17 +43876,27 @@ and detach without closing the browser. If the endpoint or signed-in app tab is
 not available, the runner stops before canary work. The fresh Chrome launch
 remains limited to the local browser-harness test.
 
+**Browser-terminal entry point (TOOL_VERIFIED):** added
+`scripts/kai-sprint2-plan-a-production-synthetic-canary.browser-terminal.mjs`
+for the supported in-app browser JavaScript terminal. It uses the selected
+signed-in tab directly and same-origin read-only fetches, persists minimal
+correlation state under the gitignored canary directory, and leaves uploads,
+measurements, reviews, generation, and release decisions to the operator in the
+product UI. This avoids requiring a separate Chrome process or DevTools port.
+
 **Verification (TOOL_VERIFIED; sentinel `DATABASE_URL`):**
-- `npm run test:kai-plan-a-production-canary`: 10 passed, 0 failed, including
-  local Chrome harness launch and existing-session attachment boundary checks.
+- `npm run test:kai-plan-a-production-canary`: 12 passed, 0 failed, including
+  local Chrome harness launch, selected-tab authentication failure, and
+  owner-authorization boundary checks.
 - `npm run verify:kai-sprint2-api-contract`: 71 passed, 0 failed.
 - `git diff --check`: passed.
 
 **Live execution (NOT_CONFIRMED):** no signed-in production tab was attached
-and no production workflow was attempted. The live runner expects the browser
-terminal's already signed-in Chrome to expose local DevTools, by default at
-`http://127.0.0.1:9222` or through `KAI_BROWSER_CDP_URL`. No production data,
-configuration, feature flag, deployment, or account was accessed or changed.
+and no production workflow was attempted. The browser-terminal entry point is
+intended to run inside the in-app browser JavaScript terminal with its selected
+tab binding; the CLI mode remains available for an existing local DevTools
+endpoint. No production data, configuration, feature flag, deployment, or
+account was accessed or changed.
 
 **Status:** PLAN_A_EXISTING_SIGNED_IN_BROWSER_ATTACHMENT_IMPLEMENTED;
 production runtime and end-to-end result remain NOT_CONFIRMED.

@@ -12,6 +12,7 @@ import {
   shouldRepeatHumanAction,
   safeCdpEndpoint,
 } from "../scripts/kai-sprint2-plan-a-production-synthetic-canary.js";
+import { preflight as browserTerminalPreflight, start as browserTerminalStart } from "../scripts/kai-sprint2-plan-a-production-synthetic-canary.browser-terminal.mjs";
 
 test("production canary fixture counts six rows, excludes one blank, and includes both exact duplicate rows", async () => {
   const csv = await readFile(SYNTHETIC_CSV_PATH, "utf8");
@@ -42,6 +43,22 @@ test("live modes attach the existing signed-in tab and never launch or close its
   assert.doesNotMatch(source.slice(source.indexOf("async function attachExistingChrome"), source.indexOf("function cleanResult")), /Browser\.close|spawn\(/);
   assert.match(source, /signed_in_app_tab_not_found/);
   assert.match(source, /Connected to the existing browser tab/);
+});
+
+test("browser-terminal canary uses the selected signed-in tab and stops when authentication is missing", async () => {
+  const tab = {
+    url: async () => "https://app.example.test/customer",
+    playwright: { evaluate: async (_fn, arg) => ({ status: 401, body: { error: { code: "authentication_required" } }, requestedPath: arg.path }) },
+  };
+  await assert.rejects(browserTerminalPreflight({ tab }), /authentication_required/);
+});
+
+test("browser-terminal execution requires owner authorization and keeps approval actions in the UI", async () => {
+  await assert.rejects(browserTerminalStart({ ownerAuthorized: false }), /separate_owner_authorization/);
+  const source = await readFile(new URL("../scripts/kai-sprint2-plan-a-production-synthetic-canary.browser-terminal.mjs", import.meta.url), "utf8");
+  assert.match(source, /credentials: "same-origin"/);
+  assert.match(source, /every workflow[\s\S]*human action in the product UI/i);
+  assert.doesNotMatch(source, /\.post\(|\.put\(|\.patch\(|\.delete\(|Browser\.close|remote-debugging|spawn\(/i);
 });
 
 test("initial execution without the separate owner-authorization attestation stops before browser launch", () => {
