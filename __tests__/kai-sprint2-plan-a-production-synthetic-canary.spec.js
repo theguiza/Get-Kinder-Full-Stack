@@ -7,6 +7,9 @@ import {
   countCsvRecords,
   launchBrowserHarnessForTest,
   validateMarkdown,
+  authenticationBlocker,
+  capabilityBlocker,
+  shouldRepeatHumanAction,
 } from "../scripts/kai-sprint2-plan-a-production-synthetic-canary.js";
 
 test("production canary fixture counts six rows, excludes one blank, and includes both exact duplicate rows", async () => {
@@ -34,6 +37,20 @@ test("initial execution without the separate owner-authorization attestation sto
   assert.doesNotMatch(run.stderr, /DevTools|Chrome/);
 });
 
+test("missing authentication and unavailable release gates fail closed", () => {
+  assert.equal(authenticationBlocker(200), null);
+  assert.match(authenticationBlocker(401), /authentication_required/);
+  assert.match(authenticationBlocker(403), /authentication_required/);
+  assert.equal(capabilityBlocker({ intake: true, internalRelease: true }), null);
+  assert.match(capabilityBlocker({ intake: true, internalRelease: false }), /feature_disabled/);
+  assert.match(capabilityBlocker({ intake: false, internalRelease: true }), /required_role_capability_missing/);
+});
+
+test("resume re-reads a human-completed action instead of prompting the canary to repeat it", () => {
+  assert.equal(shouldRepeatHumanAction("not_started"), true);
+  assert.equal(shouldRepeatHumanAction("awaiting_verification"), false);
+});
+
 test("the live runner has no login, scanner, storage, or generation mocks", async () => {
   const source = await readFile(new URL("../scripts/kai-sprint2-plan-a-production-synthetic-canary.js", import.meta.url), "utf8");
   assert.doesNotMatch(source, /kai_harness_user|deterministicCreate|Messages\.create\s*=|synthetic-storage|ANTHROPIC_API_KEY/);
@@ -56,8 +73,14 @@ test("Markdown validation fails for incorrect count semantics, stale or absent c
   assert.equal(validateMarkdown(noDuplicateLimitation, identifiers).ok, false);
 });
 
-test("a local synthetic report cannot be reported as production evidence", async () => {
+test("production PASS requires live authorized reads and validated downloaded Markdown", async () => {
   const source = await readFile(new URL("../scripts/kai-sprint2-plan-a-production-synthetic-canary.js", import.meta.url), "utf8");
   assert.match(source, /NOT_CONFIRMED/);
-  assert.match(source, /authoritative stage-specific verification is not implemented/);
+  assert.match(source, /credentials:'same-origin'/);
+  assert.match(source, /resume_prior_source_state_stale_or_unverified/);
+  assert.match(source, /feature_disabled:KAI_PUBLIC_EXPORT_ENABLED/);
+  assert.match(source, /downloaded_markdown_assertions_failed/);
+  assert.match(source, /CANARY PASS: \$\{state\.canaryId\}/);
+  assert.doesNotMatch(source, /authoritative stage-specific verification is not implemented/);
+  assert.doesNotMatch(source, /simulated production PASS|mocked provider accepted/);
 });
