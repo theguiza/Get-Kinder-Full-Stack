@@ -151,6 +151,7 @@ const EXPORT_PATH_MIGRATIONS = Object.freeze([
   "kai_sprint2_generated_content_review_start_audit_contract",
   "kai_sprint2_p14_15_export_candidate_content_type_evolution",
   "kai_sprint2_p2_01m_source_record_count_measurement",
+  "kai_sprint2_plan_a_organization_internal_release_authority",
 ]);
 const acceptanceSpec = process.argv[2] || ACCEPTANCE_SPECS[0];
 if (!ACCEPTANCE_SPECS.includes(acceptanceSpec)) {

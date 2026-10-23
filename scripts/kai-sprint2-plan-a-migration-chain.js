@@ -91,7 +91,9 @@ export const MIGRATION_CHAIN = [
   "kai_sprint2_join_1_organization_join_requests",
   "kai_sprint2_p1_downstream_recovery_state",
   "kai_sprint2_b1a_02_client_admin_sensitivity_review",
-  "kai_sprint2_p2_01m_source_record_count_measurement",];
+  "kai_sprint2_p2_01m_source_record_count_measurement",
+  "kai_sprint2_plan_a_organization_internal_release_authority",
+];
 
 export const PRODUCTION_HISTORY_ONLY = new Map([
   ["kai_sprint2_legacy_generation_cutover_20260817", /only accepts a fully-legacy pre-cutover state or its own fully-converged post-cutover state/],

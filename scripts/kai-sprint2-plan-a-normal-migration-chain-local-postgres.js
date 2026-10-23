@@ -17,6 +17,13 @@
  * review, export, and Markdown path depend on, and runs the P2-01M proof
  * (legacy seed before the P2-01M migration, as in its own runner) with
  * KAI_PLAN_A_NORMAL_CHAIN=1, which enables the review-to-Markdown proof.
+ *
+ * The organization internal release authority migration (owner amendment
+ * 2026-10-23) is also proven here: its two role constraints before and after,
+ * a replay that changes nothing, a rollback on the empty state that restores
+ * the P3-16 / P3-17 definitions exactly, and, after the proof has recorded
+ * real client_admin release decisions, a rollback that refuses and changes
+ * nothing.
  */
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -94,6 +101,11 @@ async function proveRunnerOwnedTarget() {
 }
 
 const P2_01M_MIGRATION = "kai_sprint2_p2_01m_source_record_count_measurement";
+const ORGANIZATION_RELEASE_MIGRATION = "kai_sprint2_plan_a_organization_internal_release_authority";
+const releaseRoleConstraintsSql = `SELECT conrelid::regclass::text || '.' || conname AS name, pg_get_constraintdef(oid) AS definition FROM pg_constraint
+    WHERE conname IN ('limitation_snapshots_p3_16_confirmed_by_role_check', 'human_authority_decisions_p3_17_role_by_type_check') ORDER BY 1`;
+const releaseTriggersSql = `SELECT tgrelid::regclass::text || '.' || tgname AS name FROM pg_trigger
+    WHERE tgname IN ('trg_organization_release_limitation_snapshot_scope', 'trg_organization_release_decision_scope') ORDER BY 1`;
 
 async function catalog(sql, params = []) {
   const client = new Client({ connectionString: targetUrl, ssl: false });
@@ -152,6 +164,48 @@ async function printCatalog() {
   }
 }
 
+async function proveOrganizationReleaseMigration() {
+  const original = await catalog(releaseRoleConstraintsSql);
+  for (const row of original) console.log(`Plan A release migration: original ${row.name}: ${row.definition}`);
+  if (original.length !== 2) throw new Error("both P3-16 / P3-17 role constraints must exist before the organization release migration");
+  psqlFile(`migrations/${ORGANIZATION_RELEASE_MIGRATION}.sql`);
+  const widened = await catalog(releaseRoleConstraintsSql);
+  for (const row of widened) console.log(`Plan A release migration: resulting ${row.name}: ${row.definition}`);
+  console.log(`Plan A release migration: triggers ${(await catalog(releaseTriggersSql)).map((row) => row.name).join(", ")}`);
+  const applied = (await catalog(schemaFingerprintSql))[0].fingerprint;
+  psqlFile(`migrations/${ORGANIZATION_RELEASE_MIGRATION}.sql`);
+  if ((await catalog(schemaFingerprintSql))[0].fingerprint !== applied) throw new Error("re-applying the organization release migration changed the schema");
+  console.log("Plan A release migration: a replay changed nothing.");
+  psqlFile(`migrations/${ORGANIZATION_RELEASE_MIGRATION}.rollback.sql`);
+  if (JSON.stringify(await catalog(releaseRoleConstraintsSql)) !== JSON.stringify(original) || (await catalog(releaseTriggersSql)).length !== 0) {
+    throw new Error("the organization release rollback did not restore the P3-16 / P3-17 definitions exactly");
+  }
+  console.log("Plan A release migration: rollback on the empty state restored the original definitions exactly.");
+  psqlFile(`migrations/${ORGANIZATION_RELEASE_MIGRATION}.sql`);
+  if ((await catalog(schemaFingerprintSql))[0].fingerprint !== applied) throw new Error("re-applying after rollback did not converge");
+  console.log("Plan A release migration: forward -> replay -> rollback -> forward converged.");
+}
+
+async function proveOrganizationReleaseRollbackRefuses() {
+  const counts = `SELECT (SELECT count(*) FROM kai.limitation_snapshots WHERE confirmed_by_role = 'client_admin')::int AS snapshots,
+      (SELECT count(*) FROM kai.human_authority_decisions WHERE decided_by_role = 'client_admin')::int AS decisions`;
+  const before = (await catalog(counts))[0];
+  if (before.snapshots < 1 || before.decisions < 1) throw new Error(`the proof recorded no client_admin release decision: ${JSON.stringify(before)}`);
+  const fingerprint = (await catalog(schemaFingerprintSql))[0].fingerprint;
+  let refused = false;
+  try {
+    psqlFile(`migrations/${ORGANIZATION_RELEASE_MIGRATION}.rollback.sql`);
+  } catch (error) {
+    refused = /rollback refused: client_admin release decisions exist/.test(String(error.message));
+    if (!refused) throw error;
+  }
+  if (!refused) throw new Error("the organization release rollback did not refuse with client_admin decisions present");
+  if ((await catalog(schemaFingerprintSql))[0].fingerprint !== fingerprint || JSON.stringify((await catalog(counts))[0]) !== JSON.stringify(before)) {
+    throw new Error("the refused organization release rollback changed the schema or the decisions");
+  }
+  console.log(`Plan A release migration: rollback refused with ${before.snapshots} client_admin snapshot(s) and ${before.decisions} decision(s); nothing changed.`);
+}
+
 const testEnv = {
   ...process.env,
   DATABASE_URL: "postgres://127.0.0.1:9/kai_sentinel",
@@ -197,6 +251,10 @@ try {
       if (seed.status !== 0) throw new Error("P2-01M legacy seed phase failed on the normal chain");
     }
     const refusal = PRODUCTION_HISTORY_ONLY.get(migration);
+    if (migration === ORGANIZATION_RELEASE_MIGRATION) {
+      await proveOrganizationReleaseMigration();
+      continue;
+    }
     if (!refusal) {
       psqlFile(`migrations/${migration}.sql`);
       continue;
@@ -221,6 +279,7 @@ try {
     { cwd: repoRoot, encoding: "utf8", stdio: "inherit", env: testEnv });
   if (testResult.status !== 0) throw new Error("Plan A normal-chain measured-claim to Markdown proof failed");
   console.log(`Plan A chain schema fingerprint after the proof: ${(await catalog(schemaFingerprintSql))[0].fingerprint}`);
+  await proveOrganizationReleaseRollbackRefuses();
   console.log("Plan A normal-chain proof passed.");
 } finally {
   if (started) spawnSync(pgCtl, ["-D", dataDir, "stop", "-m", "fast"], { encoding: "utf8", stdio: "ignore" });
