@@ -278,7 +278,7 @@ Second owner-accepted, organization-scoped exception (2026-10-23, `USER_CONFIRME
 Implemented scope of the second exception (repository record, not a change of the policy above):
 
 - **Factual review: implemented.** The administrator records the factual approval of an ordinary internal evidence summary through the existing generated-content review lifecycle. A draft is ordinary only when every cited claim is currently eligible for internal use and every cited source's current sensitivity decision is complete, permits the use and AI processing, and records personal information, minors, health/housing/justice/immigration information, Indigenous or governance-sensitive information, stories or testimonials, and small-cell risk as `absent`. `present` or `unknown` keeps GK review.
-- **Final release: not implemented.** The release ledgers are schema-pinned to GK roles (`limitation_snapshots.confirmed_by_role` and the `export_authority_granted` `decided_by_role`). Recording an organization administrator there needs a separately authorized schema change. Until then GK releases every report, including ordinary internal ones.
+- **Final release: implemented (local synthetic proof only; production schema not changed).** After the factual review, the administrator makes a separate, explicit release decision for an ordinary internal evidence summary, confirming its limitations. The existing release chain records it under the administrator's own identity: the export review, the limitation snapshot (`confirmed_by_role = client_admin`), the export candidate, the `export_authority_granted` grant (`decided_by_role = client_admin`) and the manifest. Each step re-checks, in its own transaction, that the draft is still ordinary. The migration `kai_sprint2_plan_a_organization_internal_release_authority` admits `client_admin` only for an internal `evidence_summary` snapshot or grant (owner authorization 2026-10-23, local synthetic databases only). Get Kinder releases everything else, keeps its own release routes, and may revoke an organization's release; only Get Kinder can re-grant a release it revoked. Releasing still depends on `KAI_PUBLIC_EXPORT_ENABLED`.
 
 Client review is recommended or requested when client knowledge is materially needed to resolve:
 
@@ -421,7 +421,7 @@ Only genuinely missing conditions should be inspected or remediated.
 - **Long-term value:** prefer anonymization when identifiable information is no longer needed but analytical/program value remains.
 - **Audit:** metadata-only audit trail retained for 24 months.
 - **AI:** AI may process information needed for KAI; external foundation-model training is off by default; KAI/Get Kinder improvement is allowed under the applicable disclosures.
-- **Review:** GK owns review; client review only where materially useful or required; an organization's own administrator may review an ordinary internal evidence summary (section 11, 2026-10-23).
+- **Review:** GK owns review; client review only where materially useful or required; an organization's own administrator may review and release an ordinary internal evidence summary (section 11, 2026-10-23).
 - **Raw storage:** Canada.
 - **Application:** Render.
 - **Subprocessors:** lightweight register.

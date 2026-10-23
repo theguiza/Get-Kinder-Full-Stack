@@ -43540,3 +43540,224 @@ it separately.
 ORGANIZATION_INTERNAL_RELEASE_BLOCKED_ON_SCHEMA. No push, deployment,
 production/shared database, migration, flag, tenant, credential, real client
 data, global GK role change, or `00_KAI_CURRENT_STATE.md` change.
+
+### Plan A Prompt 11: organization-owned internal report release (2026-10-23)
+
+**Owner authorization (USER_CONFIRMED):** the owner's "KAI Revised Plan A:
+Finish Organization-Owned Internal Report Release" prompt authorizes, for an
+eligible ordinary internal `evidence_summary` only:
+- the smallest new source-controlled migration recording genuine
+  `client_admin` limitation-snapshot confirmations and final-release
+  decisions;
+- the directly related service, authorization, UI and test changes;
+- applying it only to disposable local synthetic PostgreSQL.
+
+It reaffirms the 2026-10-23 amendment; GK keeps high-risk, funder, public
+and restricted review and release. No production or shared database,
+deployment, push, flag, credential, real client data or GK privilege change.
+
+**Start (TOOL_VERIFIED):** `main` at `cf849d2`, clean. Baseline `npm test`
+5706 / 0 / 119 skipped.
+
+**Remaining blockers found (TOOL_VERIFIED, source):**
+- the two CHECKs reported in Prompt 10;
+- the repositories also pin GK roles in code:
+  - `confirmLimitationSnapshot` accepts only `LIMITATION_SNAPSHOT_ALLOWED_ROLES`;
+  - `recordDecision` accepts only `roleRequiredForDecisionType` (`gk_admin`).
+- Every service on the chain is `gk_admin`-only (`gk_reviewer` for the
+  snapshot).
+- The export review (P3-05 / P3-09 / P3-13) has no database role pin and
+  records no outcome:
+  - its request runs the deterministic VAL-EXP-001 readiness;
+  - start and complete are state transitions.
+
+  It is procedural preparation, not an independent human decision. The
+  organization's release advances it, audited as that human.
+- The candidate and manifest rows carry no role. The P3-18 gate consults
+  only whether `export_authority_granted` is effective, not who decided it.
+
+**Migration `kai_sprint2_plan_a_organization_internal_release_authority`
+(TOOL_VERIFIED on the normal chain):**
+- Original:
+  - `limitation_snapshots_p3_16_confirmed_by_role_check`:
+    `confirmed_by_role IN ('gk_reviewer','gk_admin')`;
+  - `human_authority_decisions_p3_17_role_by_type_check`:
+    `client_reviewed`↔`client_reviewer`, every other type↔`gk_admin`.
+- Resulting (same names):
+  - the snapshot CHECK adds `client_admin`;
+  - the decision CHECK adds only `(export_authority_granted, client_admin,
+    grant)`.
+- Two `BEFORE INSERT` triggers pin a `client_admin` snapshot or decision to
+  an internal `evidence_summary` draft or candidate (SQLSTATE 23514). The
+  rows have no audience or content-type column; this follows P3-17's
+  audience trigger.
+- Not enforceable in SQL, so enforced in the service transaction: ordinary
+  classification, eligibility, currentness, permitted use.
+- Rollback refuses while any `client_admin` snapshot or decision exists.
+  Otherwise it restores both definitions exactly.
+- Normal-chain proof:
+  - forward → replay (schema unchanged) → rollback (definitions identical) →
+    forward;
+  - after the proof, the rollback refuses with 1 `client_admin` snapshot
+    and 1 decision, and changes nothing.
+- Constraint probes (each rolled back):
+  - `client_admin` refused by the role CHECK: `client_reviewed`, `revoke`;
+    `gk_reviewer` `export_authority_granted` is refused the same way.
+  - `client_admin` refused by the P3-17 audience trigger: `funder_ready`
+    and `public_ready` on an internal candidate.
+  - `client_admin` refused by the new scope trigger: any decision on a
+    funder candidate, and a snapshot on a funder draft.
+  - `client_reviewer` snapshot: refused by the snapshot role CHECK.
+  - Still accepted: `client_reviewer` `client_reviewed`, `gk_admin`
+    `funder_ready` (funder candidate), `gk_admin` revoke.
+- Limitation:
+  - The chain order is reconstructed from git first-add order on synthetic
+    production-owned base tables; it is not production migration history.
+  - The migration was not applied to any production or shared database.
+
+**Implementation:**
+- **Operation:** `releaseClientInternalReport`
+  (`release_client_internal_report`, `{client_admin}`).
+  - **Route:** `POST .../client-internal-drafts/:id/release`, with body
+    exactly `{"decision":"release_for_internal_use","limitations_confirmed":true}`.
+  - **Admission:** mapped human, active same-organization membership, tenant
+    check, the Project, and the draft generated under it.
+  - **Flags:** `KAI_SPRINT2_ENABLED`, `KAI_GENERATION_ENABLED`,
+    `KAI_PUBLIC_EXPORT_ENABLED`.
+- **Chain:** the existing repositories under the human's own identity:
+  - export review request (skipped if one exists), start, complete;
+  - snapshot from the draft's cited pairs with every derived limitation;
+  - candidate;
+  - `export_authority_granted` grant;
+  - manifest.
+
+  Each step writes the production audits (`createProductionMetadataOnlyAuditsForOrganizationInternalRelease`
+  reuses each GK route's factory).
+- **Release admission:** `evaluateOrganizationInternalReleaseInTransaction`,
+  called inside every write's transaction before writing. It requires:
+  - a completed factual review (Get Kinder's or the organization's);
+  - Prompt 10's ordinary classification, re-evaluated: P2-06 eligibility
+    of every cited claim, current source version, allowed use and AI
+    permitted, all six section 7.2 categories `absent`.
+
+  Consent basis is not consulted for internal use (Prompt 10
+  interpretation, still for owner confirmation).
+- **Repository guards:** `client_admin` is recorded only when the caller
+  supplies `releaseAdmission`, and only as an internal
+  `export_authority_granted` grant.
+  - A revoke head means Get Kinder withdrew the release. The organization
+    then gets 422 `release_withdrawn_by_get_kinder`.
+  - A replayed decision now reports the head's recorded role, not the
+    caller's. For GK this is unchanged.
+- **Unchanged:** GK role sets and routes.
+- **Steps:** idempotent, in separate transactions. A repeat resumes or
+  replays.
+- **UI (Internal Drafts):**
+  - new release state `awaiting_organization_release`;
+  - `organizationRelease`: `actorMayRelease`, reasons, `releasedBy`;
+  - a confirmed "Release internal report" action, shown only on the server's
+    `actorMayRelease` and `releaseInternalReports`;
+  - "Released by your organization" or "Released by Get Kinder".
+
+**Proof (TOOL_VERIFIED):**
+- **Normal chain (80 listed / 78 applied), 2 + 30 / 0:**
+  - the administrator reviews, then separately releases.
+  - The stored records are all `9e…01` (`client_admin`):
+    - decision `decided_by` / `decided_by_role`, `export_authority_granted`
+      grant;
+    - snapshot `confirmed_by` / `confirmed_by_role`;
+    - candidate and manifest `created_by`.
+  - Six lifecycle audits and seven `kai.audit_events` rows, all the
+    administrator's.
+  - Refused before any write (403): reviewer, contributor, GK reviewer, GK
+    admin, other organization, inactive administrator, AI.
+  - Other refusals:
+    - unconfirmed or other decision: 422;
+    - export flag off: `feature_disabled`;
+    - other Project: 404;
+    - undecided source: 422.
+  - A repeat replays.
+  - The Markdown via the client route (200): count 5, the attested period,
+    `[CIT-001]` to claim, evidence and source version, ten limitation codes
+    with wording; no row values, file names, rate, participant or causal
+    wording.
+  - GK revoke → 409; the organization's re-release is 422; a GK re-grant →
+    200.
+  - The undecided-source draft: GK reviews and releases it through its own
+    routes (`gk_admin`). The organization is refused
+    (`sensitivity_review_not_complete`).
+- **Browser, factual review + release (15 / 0):**
+  - The administrator approves, then confirms limitations and releases (one
+    POST, 200).
+  - E1 refusals; no GK actor in any release step.
+  - The opened and downloaded Markdown equals the GK route's rendering of
+    the same manifest.
+  - Revoke → 409, organization re-grant 422, GK re-grant 200; stale → 409.
+- **Assembled CSV-to-report (15 / 0):** the same administrator (synthetic
+  sensitivity decision: all six 7.2 categories `absent`, consent `unknown`)
+  does every step:
+  - upload, recovery, sensitivity and promotion;
+  - measurement (5) and generation;
+  - factual review and release;
+  - Markdown (200).
+
+  The chain independent → P1 → measurement → claim → generated → Markdown
+  is 5 throughout (6 rows, 1 blank, 2 duplicates). Review and release
+  `kai.audit_events` actors are only the administrator.
+
+  GK actions remaining: `gk_reviewer` evidence review, claim review and
+  coverage acceptance (upstream); `gk_admin` revoke and re-grant (boundary
+  test only).
+- **Simulated (unchanged from Prompts 8–10):**
+  - session;
+  - storage, scanner and model provider;
+  - the P1-03..P1-05 rows (factual-review suite only);
+  - `KAI_PUBLIC_EXPORT_ENABLED=true` in the test process;
+  - the stale flip of `is_current`.
+
+**Feature flag (TOOL_VERIFIED):**
+- Organization release, like every GK release step, is `feature_disabled`
+  without `KAI_PUBLIC_EXPORT_ENABLED`. The detail then shows
+  `release_status_unavailable` and offers no action.
+- The flag was not changed. Internal export stays gated by the public-export
+  flag (owner decision).
+
+**Verification (TOOL_VERIFIED; sentinel `DATABASE_URL`):**
+
+| Command | Pass | Fail | Skipped |
+| --- | --- | --- | --- |
+| `npm test` (baseline 5706/0/119) | 5713 | 0 | 119 |
+| `npm run verify:kai-sprint2-api-contract` | 71 | 0 | 0 |
+| `npm run build` | ok | | |
+| New unit spec `kai-organization-internal-release.spec.js` (in `npm test`) | 7 | 0 | 0 |
+| Plan A normal chain (legacy seed + full path, migration proof) | 2 + 30 | 0 | 0 |
+| Assembled file-to-report runner | 15 | 0 | 0 |
+| Browser: factual review + release 15, measurement-to-release 13, evidence-to-draft 21, source-to-impact 16, Knowledge Studio 6, source promotion 12, evidence pipeline 8 | 91 | 0 | 0 |
+| Review-start audit 78, P14-11 4, Gate C1 59, board mixed 7, P2-01M runner 57 (8 skipped) | 205 | 0 | 8 |
+| P3-05 / P3-09 / P3-13 / P3-16 / P3-17 / P3-18 / P3-19 runners | 86 / 138 / 171 / 211 / 256 / 312 / 375 | 1 / 5 / 5 / 2 / 3 / 1 / 18 | 0 / 0 / 1 / 1 / 1 / 0 / 0 |
+| `git diff --check` | ok | | |
+
+The P3 failures are pre-existing. Each failing name matches a run of the same
+runner at `cf849d2` in a scratch worktree. P3-19 failed 19 there; one
+concurrency test passed this time.
+
+**Remaining (precise):**
+- **GK dependencies (still required):**
+  - evidence review, claim review and coverage acceptance before a claim is
+    eligible;
+  - review and release of every non-ordinary, funder or public output.
+- **Organization revocation:** the organization cannot revoke its own
+  release. Only GK can, and only GK can re-grant after a GK revocation.
+- **Internal-export flag policy:** `KAI_PUBLIC_EXPORT_ENABLED` gates internal
+  release (owner decision).
+- **Explicit reject or needs-changes outcomes:** need a schema contract.
+- **Consent basis:** the interpretation for internal use awaits owner
+  confirmation.
+- **Project Source:** the Operating Model copy is not updated by this
+  repository edit (NOT_CONFIRMED).
+- **Production:** production schema, migration order, deployment, deployed
+  customer acceptance and a live provider are NOT_CONFIRMED.
+
+**Status:** PLAN_A_ORGANIZATION_INTERNAL_RELEASE_COMPLETE_LOCAL_SYNTHETIC.
+No push, deployment, production/shared database, flag, tenant, credential,
+real client data, global GK role change, or `00_KAI_CURRENT_STATE.md` change.
