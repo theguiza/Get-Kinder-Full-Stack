@@ -7,6 +7,7 @@ import {
   roleRequiredForDecisionType,
 } from "./humanAuthorityDecisionContract.js";
 import { evaluateExportCandidateCurrentnessInTransaction } from "./postgresExportCandidateRepository.js";
+import { ORGANIZATION_INTERNAL_RELEASE_ROLE } from "./exportCandidateContract.js";
 
 const RESULT_STATUS = Object.freeze({
   validation_blocker: 422,
@@ -89,6 +90,20 @@ function isCanonicalDecidedByRole(decidedByRole, decisionType) {
   return Boolean(requiredRole) && decidedByRole === requiredRole;
 }
 
+// Owner amendment 2026-10-23: an organization administrator's own grant of
+// final release for an internal candidate. Only export_authority_granted,
+// only a grant, and only with the caller's in-transaction releaseAdmission
+// (kaiClientGeneratedContentService.js); the internal audience is checked
+// against the candidate below, and the database pins the row to an internal
+// evidence_summary candidate.
+function isOrganizationInternalReleaseDecision(input, dependencies) {
+  return input.decidedByRole === ORGANIZATION_INTERNAL_RELEASE_ROLE
+    && input.decisionType === "export_authority_granted"
+    && input.decisionAction === "grant"
+    && input.requestedAudience === "internal"
+    && typeof dependencies.releaseAdmission === "function";
+}
+
 export async function loadExportCandidateForAuthority(tx, { organizationId, exportCandidateId }) {
   const { rows } = await tx.query(
     `SELECT export_candidate_id::text AS export_candidate_id,
@@ -104,7 +119,7 @@ export async function loadExportCandidateForAuthority(tx, { organizationId, expo
 
 async function loadCurrentDecisionHeadForUpdate(tx, { organizationId, exportCandidateId, decisionType }) {
   const { rows } = await tx.query(
-    `SELECT d.decision_id::text AS decision_id, d.decision_action
+    `SELECT d.decision_id::text AS decision_id, d.decision_action, d.decided_by_role
        FROM kai.human_authority_decisions d
       WHERE d.organization_id = $1::uuid
         AND d.export_candidate_id = $2::uuid
@@ -265,7 +280,8 @@ export function createPostgresHumanAuthorityDecisionRepository({
     async recordDecision(input, dependencies = {}) {
       if (!isRecordDecisionInput(input)) return failure("validation_blocker");
       if (!dependencies.metadataOnlyAudit) return failure("validation_blocker");
-      if (!isCanonicalDecidedByRole(input.decidedByRole, input.decisionType)) return failure("validation_blocker");
+      const organizationRelease = isOrganizationInternalReleaseDecision(input, dependencies);
+      if (!isCanonicalDecidedByRole(input.decidedByRole, input.decisionType) && !organizationRelease) return failure("validation_blocker");
       const { decidedByRole } = input;
 
       try {
@@ -278,6 +294,10 @@ export function createPostgresHumanAuthorityDecisionRepository({
 
           const currentness = await isExportCandidateCurrentForAuthority(tx, input, evaluateCandidateCurrentness);
           if (!currentness.current) return failure("conflict_current_state_changed");
+          if (organizationRelease) {
+            const refusal = await dependencies.releaseAdmission(tx);
+            if (refusal) return refusal;
+          }
 
           const headRows = await loadCurrentDecisionHeadForUpdate(tx, input);
           if (headRows.length > 1) return failure("conflict_current_state_changed");
@@ -288,6 +308,17 @@ export function createPostgresHumanAuthorityDecisionRepository({
             decisionType: input.decisionType,
           };
           if (!head && input.decisionAction === "revoke") return failure("validation_blocker");
+          // The organization path records grants only, so a revoke head is
+          // Get Kinder's withdrawal of this release: only Get Kinder may
+          // re-grant it.
+          if (organizationRelease && head?.decision_action === "revoke") {
+            return {
+              ok: false,
+              data: null,
+              error: { code: "blocked", status: 422 },
+              blockers: [{ validator_key: "VAL-KAI-ORG-REVIEW-001", severity: "blocker", blocking_reason: "release_withdrawn_by_get_kinder" }],
+            };
+          }
           if (head?.decision_action === input.decisionAction) {
             const effectiveness = await evaluateHumanAuthorityEffectivenessInTransaction(tx, effectivenessInput, evaluateCandidateCurrentness);
             return success({
@@ -297,7 +328,10 @@ export function createPostgresHumanAuthorityDecisionRepository({
               decisionAction: input.decisionAction,
               requestedAudience: input.requestedAudience,
               supersedesDecisionId: null,
-              decidedByRole,
+              // The replayed head's own recorded role, which may be another
+              // authorized role's (a GK grant replayed by an organization
+              // release, or the reverse); never the caller's.
+              decidedByRole: head.decided_by_role,
               effective: effectiveness.data.effective,
               effectivenessReason: effectiveness.data.reason,
               headDecisionId: effectiveness.data.headDecisionId,
@@ -394,6 +428,7 @@ export const __humanAuthorityDecisionRepositoryTestables = Object.freeze({
   isEvaluateEffectivenessInput,
   isRecordDecisionInput,
   isCanonicalDecidedByRole,
+  isOrganizationInternalReleaseDecision,
   isExportCandidateCurrentForAuthority,
   evaluateHumanAuthorityEffectivenessInTransaction,
 });

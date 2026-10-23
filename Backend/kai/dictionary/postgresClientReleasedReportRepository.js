@@ -49,16 +49,22 @@ export function createPostgresClientReleasedReportRepository({ runInTransaction 
     },
 
     // The draft's most recent internal-audience manifest (the latest release),
-    // or null when nothing has been released for it.
+    // or null when nothing has been released for it, with the role recorded
+    // on the final-release decision the manifest was made under (gk_admin, or
+    // client_admin for the organization's own release, owner amendment
+    // 2026-10-23).
     async readLatestInternalReleaseForDraft({ organizationId, generatedContentDraftId }) {
       if (!UUID_PATTERN.test(organizationId) || !UUID_PATTERN.test(generatedContentDraftId)) return null;
       return readOnly(async (tx) => {
         const { rows } = await tx.query(
-          `SELECT m.export_manifest_id::text AS export_manifest_id
+          `SELECT m.export_manifest_id::text AS export_manifest_id, d.decided_by_role
              FROM kai.export_manifests m
              JOIN kai.export_candidates c
                ON c.organization_id = m.organization_id
               AND c.export_candidate_id = m.export_candidate_id
+             JOIN kai.human_authority_decisions d
+               ON d.organization_id = m.organization_id
+              AND d.decision_id = m.effective_authority_decision_id
             WHERE m.organization_id = $1::uuid
               AND c.generated_content_draft_id = $2::uuid
               AND c.requested_audience = 'internal'
@@ -66,7 +72,7 @@ export function createPostgresClientReleasedReportRepository({ runInTransaction 
             LIMIT 1`,
           [organizationId, generatedContentDraftId],
         );
-        return rows[0] ? { exportManifestId: rows[0].export_manifest_id } : null;
+        return rows[0] ? { exportManifestId: rows[0].export_manifest_id, decidedByRole: rows[0].decided_by_role } : null;
       });
     },
   });

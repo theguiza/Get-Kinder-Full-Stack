@@ -193,6 +193,8 @@ test("internal drafts: the detail is the persisted text with cited claim ids, th
     release: { state: "awaiting_get_kinder_review", releasedReportId: null },
     // Owner amendment 2026-10-23: personal information keeps this draft Get Kinder's.
     factualReview: { actorMayApprove: false, getKinderReviewReasons: ["personal_information_not_cleared"], blockedReasons: ["cited_claims_not_currently_eligible"] },
+    // Unreviewed: nothing to release, and no release decision is offered.
+    organizationRelease: { actorMayRelease: false, getKinderReleaseReasons: [], blockedReasons: [], releasedBy: null },
   });
   assertNoHidden(detail, "detail");
   assert.deepEqual(projectClientInternalDraft(detail.data).limitations, detail.data.limitations);

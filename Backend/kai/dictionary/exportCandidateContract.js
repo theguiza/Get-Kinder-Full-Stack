@@ -1,5 +1,12 @@
 export const LIMITATION_SNAPSHOT_ALLOWED_ROLES = Object.freeze(["gk_reviewer", "gk_admin"]);
 export const EXPORT_CANDIDATE_ALLOWED_ROLES = Object.freeze(["gk_admin"]);
+// Owner amendment 2026-10-23: the organization administrator's own release
+// of an ordinary internal evidence summary. The limitation-snapshot, final-
+// release-decision and manifest repositories record this role only when the
+// caller supplies its in-transaction releaseAdmission
+// (kaiClientGeneratedContentService.js releaseClientInternalReport); the GK
+// routes never do, and their role sets above are unchanged.
+export const ORGANIZATION_INTERNAL_RELEASE_ROLE = "client_admin";
 
 export const LIMITATION_CODE_PATTERN = /^[a-z][a-z0-9_.:-]{0,95}$/;
 export const LIMITATION_CODES_MAX_COUNT = 32;

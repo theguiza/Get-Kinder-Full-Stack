@@ -359,8 +359,11 @@ export async function getClientBoardReportingPreview(input, dependencies = {}) {
  *   awaiting_get_kinder_review / in_get_kinder_review. A completed review is
  *   reviewed_by_your_organization when the organization-owned operation
  *   recorded it, otherwise reviewed_by_get_kinder.
- * - No release, funder/public eligibility, or export authority:
- *   `internal_use_only` and `not_approved_for_external_use` are always listed.
+ * - Reading grants no release, funder/public eligibility, or export
+ *   authority: `internal_use_only` and `not_approved_for_external_use` are
+ *   always listed. The detail adds organizationRelease (whether this actor
+ *   may make the separate releaseClientInternalReport decision, and who
+ *   released it).
  */
 const CLIENT_INTERNAL_DRAFT_OPERATION = "read_client_internal_drafts";
 const CLIENT_INTERNAL_DRAFT_READ_ROLES = new Set(["client_admin"]);
@@ -554,6 +557,7 @@ export async function getClientInternalDraft(input, dependencies = {}) {
       ...toClientInternalDraft(packet, reviewState),
       release: release.value,
       factualReview: clientFactualReviewView({ reviewState, evaluation, actorContext: input.actorContext, organizationId }),
+      organizationRelease: clientOrganizationReleaseView({ release, actorContext: input.actorContext, organizationId }),
     },
     error: null,
   };
@@ -592,9 +596,8 @@ function clientFactualReviewView({ reviewState, evaluation, actorContext, organi
  * not approving; a corrected draft is generated anew.
  *
  * This is the factual review only. It grants no export review, limitation
- * snapshot, release authority or manifest: those stay Get Kinder's, because
- * limitation_snapshots.confirmed_by_role and the export_authority_granted
- * decided_by_role are schema-pinned to GK roles (P3-16, P3-17).
+ * snapshot, release authority or manifest; final release is the separate,
+ * explicit releaseClientInternalReport decision below.
  */
 const CLIENT_INTERNAL_FACTUAL_REVIEW_OPERATION = "record_client_internal_draft_factual_review";
 const CLIENT_INTERNAL_FACTUAL_REVIEW_ROLES = new Set(["client_admin"]);
@@ -684,15 +687,14 @@ export async function approveClientInternalDraftFactualReview(input, dependencie
 }
 
 /**
- * Read-only receipt of an already GK-released internal report (Plan A
- * Prompt 8). Final release stays Get Kinder's (factual review of an ordinary
- * internal evidence summary may be the organization's, above): the
- * organization administrator only reads the Markdown of a release Get Kinder
- * has already made, and only while it is still valid. Operating Model v0.2
- * section 11 ("GK reviews the relevant output ... Release") and section 7.1
- * ("generate internal/client drafts") cover delivering a GK-released internal
- * output to the organization; this grants no review, export, or release
- * authority.
+ * Read-only receipt of an already released internal report (Plan A Prompt 8):
+ * released by Get Kinder, or, for an ordinary internal evidence summary, by
+ * the organization's own administrator (releaseClientInternalReport below).
+ * The organization administrator only reads the Markdown of a release that
+ * has already been made, and only while it is still valid. Operating Model
+ * v0.2 section 11 and section 7.1 ("generate internal/client drafts") cover
+ * delivering a released internal output to the organization; reading grants
+ * no review, export, or release authority.
  *
  * Admission: mapped human, client_admin with an active same-organization
  * membership, tenant validation, the Project (engagement) in this
@@ -714,10 +716,14 @@ const RELEASE_STATE = Object.freeze({
   AWAITING_REVIEW: "awaiting_get_kinder_review",
   AWAITING_ORGANIZATION_REVIEW: "awaiting_organization_review",
   AWAITING_RELEASE: "awaiting_get_kinder_release",
+  AWAITING_ORGANIZATION_RELEASE: "awaiting_organization_release",
   RELEASED: "released_for_internal_use",
   NO_LONGER_AVAILABLE: "release_no_longer_valid",
   UNAVAILABLE: "release_status_unavailable",
 });
+// Who made the release a manifest was created under, from the role recorded
+// on its final-release decision.
+const RELEASED_BY = Object.freeze({ client_admin: "your_organization", gk_admin: "get_kinder" });
 
 async function releasedReportRepositories(dependencies) {
   const releasedReportRepository = dependencies.releasedReportRepository
@@ -735,9 +741,14 @@ function mayReceiveReleasedReports(actorContext, organizationId, env) {
 }
 
 // The draft's release state from the same authorities retrieval uses: its
-// latest internal manifest, and whether that manifest renders now.
+// latest internal manifest, and whether that manifest renders now. A
+// reviewed draft with no release is awaiting_organization_release when the
+// organization may release it now (evaluateRelease, the same evaluation the
+// release writes repeat in their transactions), otherwise
+// awaiting_get_kinder_release. Alongside the state: that evaluation (null
+// when it was not needed) and who made the latest release.
 async function clientReleaseState({ organizationId, generatedContentDraftId, reviewState, actorContext }, dependencies) {
-  const none = (state) => ({ value: { state, releasedReportId: null } });
+  const none = (state, extra = {}) => ({ value: { state, releasedReportId: null }, evaluation: null, releasedBy: null, ...extra });
   if (!REVIEWED_STATES.has(reviewState)) {
     return none(reviewState === CLIENT_INTERNAL_REVIEW_STATE.AWAITING_ORGANIZATION
       ? RELEASE_STATE.AWAITING_ORGANIZATION_REVIEW
@@ -746,11 +757,34 @@ async function clientReleaseState({ organizationId, generatedContentDraftId, rev
   if (!mayReceiveReleasedReports(actorContext, organizationId, dependencies.env || process.env)) return none(RELEASE_STATE.UNAVAILABLE);
   const { releasedReportRepository, renderModelRepository } = await releasedReportRepositories(dependencies);
   const latest = await releasedReportRepository.readLatestInternalReleaseForDraft({ organizationId, generatedContentDraftId });
-  if (!latest) return none(RELEASE_STATE.AWAITING_RELEASE);
+  if (!latest) {
+    const evaluation = await (await organizationReviewRepository(dependencies)).evaluateRelease({ organizationId, generatedContentDraftId });
+    return none(evaluation.organizationMayRelease ? RELEASE_STATE.AWAITING_ORGANIZATION_RELEASE : RELEASE_STATE.AWAITING_RELEASE, { evaluation });
+  }
+  const releasedBy = RELEASED_BY[latest.decidedByRole] || null;
   const rendered = await renderModelRepository.composeExportManifestRenderModel({ organizationId, exportManifestId: latest.exportManifestId });
-  if (rendered.ok) return { value: { state: RELEASE_STATE.RELEASED, releasedReportId: latest.exportManifestId } };
-  if (DRAFT_NOT_PRESENTABLE_CODES.has(rendered.error?.code)) return none(RELEASE_STATE.NO_LONGER_AVAILABLE);
+  if (rendered.ok) return { value: { state: RELEASE_STATE.RELEASED, releasedReportId: latest.exportManifestId }, evaluation: null, releasedBy };
+  if (DRAFT_NOT_PRESENTABLE_CODES.has(rendered.error?.code)) return none(RELEASE_STATE.NO_LONGER_AVAILABLE, { releasedBy });
   return { error: buildKaiError(rendered.error?.code || "system_error") };
+}
+
+// What the detail shows about final release: whether this actor may release
+// it now, the reasons that keep it for Get Kinder or block it, and who made
+// the latest release. Server-authoritative; the UI shows the release action
+// only when actorMayRelease is true.
+function clientOrganizationReleaseView({ release, actorContext, organizationId }) {
+  const { evaluation, releasedBy } = release;
+  const actorMayRelease = release.value.state === RELEASE_STATE.AWAITING_ORGANIZATION_RELEASE
+    && evaluation?.organizationMayRelease === true
+    && validateActorCanPerformOperation(actorContext, CLIENT_INTERNAL_RELEASE_OPERATION, organizationId, {
+      allowedRoles: CLIENT_INTERNAL_RELEASE_ROLES,
+    }).ok === true;
+  return {
+    actorMayRelease,
+    getKinderReleaseReasons: evaluation ? [...evaluation.getKinderReviewReasons] : [],
+    blockedReasons: evaluation ? [...evaluation.blockedReasons] : [],
+    releasedBy,
+  };
 }
 
 export async function getClientReleasedReportMarkdown(input, dependencies = {}) {
@@ -779,7 +813,216 @@ export async function getClientReleasedReportMarkdown(input, dependencies = {}) 
   };
 }
 
+/**
+ * Organization-owned final release of an ordinary internal Evidence Summary
+ * (owner amendment 2026-10-23; Operating Model v0.2 section 11; migration
+ * kai_sprint2_plan_a_organization_internal_release_authority). An active
+ * client_admin of this organization, for a draft generated under this
+ * Project whose factual review is complete, records the final-release
+ * decision under their own identity and role through the existing release
+ * chain, unchanged:
+ *
+ * 1. the P3-05 / P3-09 / P3-13 export review for the internal audience. It
+ *    records no outcome or judgment of its own (request runs VAL-EXP-001
+ *    readiness; start and complete are state transitions), so the
+ *    organization's release advances it, audited as this human;
+ * 2. the P3-16 limitation snapshot from the draft's own cited pairs, with
+ *    every measured claim's material limitations (they cannot be confirmed
+ *    away), confirmed_by_role client_admin;
+ * 3. the P3-16 export candidate;
+ * 4. the P3-17 export_authority_granted grant, decided_by_role client_admin:
+ *    the release decision itself;
+ * 5. the P3-19 manifest, through the P3-18 final export gate.
+ *
+ * Each write re-evaluates, inside its own transaction and before writing,
+ * that the draft is still an ordinary internal evidence summary with a
+ * completed factual review (evaluateOrganizationInternalReleaseInTransaction:
+ * every cited claim currently eligible, every cited source current, its use
+ * and AI processing permitted, and no section 7.2 category present or
+ * unknown). Anything else is refused with structured blockers: Get Kinder
+ * keeps the release of high-risk, funder and public content, and its GK
+ * routes and role sets are unchanged. A release Get Kinder withdrew is not
+ * re-granted here. The steps are separate transactions, each idempotent; a
+ * repeat resumes where an interrupted release stopped.
+ *
+ * The request is explicit: `decision: "release_for_internal_use"` with
+ * `limitationsConfirmed: true`, the administrator's confirmation of the
+ * limitations they read. Behind the same KAI_PUBLIC_EXPORT_ENABLED flag as
+ * every release step; the flag is not changed here.
+ */
+const CLIENT_INTERNAL_RELEASE_OPERATION = "release_client_internal_report";
+const CLIENT_INTERNAL_RELEASE_ROLES = new Set(["client_admin"]);
+const CLIENT_INTERNAL_RELEASE_DECISION = "release_for_internal_use";
+const CLIENT_INTERNAL_RELEASE_ROLE = "client_admin";
+const INTERNAL_RELEASE_ADMISSION = Object.freeze({
+  operation: CLIENT_INTERNAL_RELEASE_OPERATION,
+  allowedRoles: CLIENT_INTERNAL_RELEASE_ROLES,
+});
+const RELEASE_AUDIT_STEPS = Object.freeze([
+  "export_review_request", "export_review_start", "export_review_complete",
+  "limitation_snapshot", "export_candidate", "final_release_authority", "export_manifest",
+]);
+
+async function organizationReleaseRepositories(dependencies) {
+  const exportCandidateRepository = dependencies.exportCandidateRepository
+    || (await import("../dictionary/postgresExportCandidateRepository.js")).createPostgresExportCandidateRepository();
+  const humanAuthorityDecisionRepository = dependencies.humanAuthorityDecisionRepository
+    || (await import("../dictionary/postgresHumanAuthorityDecisionRepository.js")).createPostgresHumanAuthorityDecisionRepository();
+  const exportManifestRepository = dependencies.exportManifestRepository
+    || (await import("../dictionary/postgresExportManifestRepository.js")).createPostgresExportManifestRepository();
+  return { exportCandidateRepository, humanAuthorityDecisionRepository, exportManifestRepository };
+}
+
+export async function releaseClientInternalReport(input, dependencies = {}) {
+  const { decision, limitationsConfirmed, ...scope } = isPlainObject(input) ? input : {};
+  const denied = admit(scope, ["organizationId", "engagementId", "generatedContentDraftId", "actorContext"], dependencies, INTERNAL_RELEASE_ADMISSION);
+  if (denied) return denied;
+  if (!isKaiPublicExportEnabled(dependencies.env || process.env)) return buildKaiError("feature_disabled");
+  if (decision !== CLIENT_INTERNAL_RELEASE_DECISION || limitationsConfirmed !== true) return buildKaiError("validation_blocker");
+  if (typeof dependencies.createReleaseAudit !== "function") return buildKaiError("system_error");
+  const { organizationId, engagementId, generatedContentDraftId, actorContext } = scope;
+  const engagementError = await resolveEngagement({ organizationId, engagementId }, dependencies);
+  if (engagementError) return engagementError;
+  const readDraftEngagement = dependencies.readGeneratedDraftEngagementId || readGeneratedDraftEngagementId;
+  if ((await readDraftEngagement(organizationId, generatedContentDraftId)) !== engagementId) return buildKaiError("not_found");
+
+  const repository = dependencies.generatedContentRepository || (await createDefaultGeneratedContentRepository());
+  const packetResult = await repository.getGeneratedDraftReviewPacket({ organizationId, generatedContentDraftId });
+  if (!packetResult.ok) {
+    return buildKaiError(DRAFT_NOT_PRESENTABLE_CODES.has(packetResult.error?.code) ? "not_found" : packetResult.error?.code || "system_error");
+  }
+  const packet = singleDraftPacket(packetResult.data);
+  if (!packet) return buildKaiError("system_error");
+  if (!isInternalDraftSummary({ contentType: packet.contentType, requestedAudience: packet.requestedAudience })) return buildKaiError("not_found");
+
+  const { organizationReviewBlockers, evaluateOrganizationInternalReleaseInTransaction } = await import(
+    "../dictionary/postgresOrganizationInternalReviewRepository.js"
+  );
+  const evaluateInTransaction = dependencies.evaluateOrganizationInternalReleaseInTransaction || evaluateOrganizationInternalReleaseInTransaction;
+  const blocked = (evaluation) => ({ ok: false, data: null, error: { code: "blocked", status: 422 }, blockers: organizationReviewBlockers(evaluation) });
+  const releaseAdmission = async (tx) => {
+    const evaluation = await evaluateInTransaction(tx, { organizationId, generatedContentDraftId });
+    return evaluation.organizationMayRelease ? null : blocked(evaluation);
+  };
+
+  // Already released and still valid: a repeat writes nothing.
+  const { releasedReportRepository, renderModelRepository } = await releasedReportRepositories(dependencies);
+  const latest = await releasedReportRepository.readLatestInternalReleaseForDraft({ organizationId, generatedContentDraftId });
+  if (latest && (await renderModelRepository.composeExportManifestRenderModel({ organizationId, exportManifestId: latest.exportManifestId })).ok) {
+    return {
+      ok: true,
+      data: {
+        generatedContentDraftId,
+        releaseState: RELEASE_STATE.RELEASED,
+        releasedReportId: latest.exportManifestId,
+        releasedBy: RELEASED_BY[latest.decidedByRole] || null,
+        replayed: true,
+      },
+      error: null,
+    };
+  }
+  const organizationReview = await organizationReviewRepository(dependencies);
+  const evaluation = await organizationReview.evaluateRelease({ organizationId, generatedContentDraftId });
+  if (!evaluation.organizationMayRelease) return repositoryError(blocked(evaluation));
+
+  const clock = dependencies.now || (() => new Date().toISOString());
+  const audit = (step, extra = {}) => dependencies.createReleaseAudit({ step, ...extra });
+  const { exportCandidateRepository, humanAuthorityDecisionRepository, exportManifestRepository } = await organizationReleaseRepositories(dependencies);
+
+  // 1. Export review for the internal audience (request, start, complete).
+  // A draft has at most one; an existing one (an interrupted release, or one
+  // Get Kinder began) is advanced, never requested again.
+  let now = clock();
+  let exportReviewQueueItemId = packet.exportReviewQueueItemId;
+  if (!exportReviewQueueItemId) {
+    const requested = await repository.requestGeneratedDraftExportReview(
+      { organizationId, generatedContentDraftId, requestedExportAudience: INTERNAL_AUDIENCE, actorContext, now },
+      { metadataOnlyAudit: audit("export_review_request", { now }), releaseAdmission },
+    );
+    if (!requested.ok) return repositoryError(requested);
+    if (requested.data.exportReviewRequestAccepted !== true) {
+      return buildKaiError("validation_blocker", { blockers: [requested.data.validatorResult] });
+    }
+    exportReviewQueueItemId = requested.data.reviewQueueItemId;
+  }
+  for (const [queueStatus, method, step] of [
+    ["open", "startGeneratedDraftExportReview", "export_review_start"],
+    ["in_progress", "completeGeneratedDraftExportReview", "export_review_complete"],
+  ]) {
+    const state = await organizationReview.readExportReviewState({ organizationId, generatedContentDraftId, exportReviewQueueItemId });
+    if (!state || state.requestedExportAudience !== INTERNAL_AUDIENCE) return buildKaiError("conflict_current_state_changed");
+    if (state.exportReviewQueueStatus !== queueStatus) continue;
+    now = clock();
+    const advanced = await repository[method](
+      { organizationId, generatedContentDraftId, exportReviewQueueItemId, expectedUpdatedAt: state.exportReviewUpdatedAt, actorContext, now },
+      { metadataOnlyAudit: audit(step, { now }), releaseAdmission },
+    );
+    if (!advanced.ok) return repositoryError(advanced);
+  }
+
+  // 2. The limitation snapshot from the draft's own cited pairs.
+  const citedPairs = await exportCandidateRepository.loadCitedPairsForDraft({ organizationId, generatedContentDraftId });
+  if (!citedPairs.ok) return repositoryError(citedPairs);
+  if (citedPairs.data.citedPairs.length === 0) return buildKaiError("validation_blocker");
+  now = clock();
+  const snapshot = await exportCandidateRepository.confirmLimitationSnapshot({
+    organizationId,
+    generatedContentDraftId,
+    entries: citedPairs.data.citedPairs.map((pair) => ({ claimId: pair.claimId, evidenceItemId: pair.evidenceItemId, limitationCodes: pair.limitationCodes })),
+    actorContext,
+    confirmedByRole: CLIENT_INTERNAL_RELEASE_ROLE,
+    now,
+  }, { metadataOnlyAudit: audit("limitation_snapshot", { now }), releaseAdmission });
+  if (!snapshot.ok) return repositoryError(snapshot);
+
+  // 3. The export candidate.
+  now = clock();
+  const candidate = await exportCandidateRepository.createExportCandidate(
+    { organizationId, generatedContentDraftId, actorContext, now },
+    { metadataOnlyAudit: audit("export_candidate", { now }), releaseAdmission },
+  );
+  if (!candidate.ok) return repositoryError(candidate);
+  const { exportCandidateId } = candidate.data;
+
+  // 4. The final-release decision.
+  now = clock();
+  const granted = await humanAuthorityDecisionRepository.recordDecision({
+    organizationId,
+    exportCandidateId,
+    decisionType: "export_authority_granted",
+    decisionAction: "grant",
+    requestedAudience: INTERNAL_AUDIENCE,
+    actorContext,
+    decidedByRole: CLIENT_INTERNAL_RELEASE_ROLE,
+    now,
+  }, { metadataOnlyAudit: audit("final_release_authority", { now, exportCandidateId }), releaseAdmission });
+  if (!granted.ok) return repositoryError(granted);
+
+  // 5. The manifest, through the final export gate.
+  now = clock();
+  const manifest = await exportManifestRepository.createExportManifest(
+    { organizationId, exportCandidateId, exportReviewQueueItemId, actorContext, now },
+    { metadataOnlyAudit: audit("export_manifest", { now, exportCandidateId }), releaseAdmission },
+  );
+  if (!manifest.ok) return repositoryError(manifest);
+  return {
+    ok: true,
+    data: {
+      generatedContentDraftId,
+      releaseState: RELEASE_STATE.RELEASED,
+      releasedReportId: manifest.data.exportManifestId,
+      releasedBy: RELEASED_BY[granted.data.decidedByRole] || null,
+      replayed: false,
+    },
+    error: null,
+  };
+}
+
 export const __clientGeneratedContentServiceContract = Object.freeze({
+  CLIENT_INTERNAL_RELEASE_OPERATION,
+  CLIENT_INTERNAL_RELEASE_ROLES,
+  CLIENT_INTERNAL_RELEASE_DECISION,
+  RELEASE_AUDIT_STEPS,
   CLIENT_INTERNAL_FACTUAL_REVIEW_OPERATION,
   CLIENT_INTERNAL_FACTUAL_REVIEW_ROLES,
   CLIENT_INTERNAL_REVIEW_STATE,

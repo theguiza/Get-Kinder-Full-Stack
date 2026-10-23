@@ -526,10 +526,12 @@ test("F: capabilities - client_admin gets extraction, proposal, gap follow-ups, 
     // readInternalDrafts (the administrator's own internal drafts): owner decision 2026-10-19.
     // recordSourceMeasurement (P2-01M, the extraction authority) and
     // readReleasedInternalReports (read-only receipt of a GK-released internal report): Plan A Prompt 8.
-    // reviewInternalDraftFactualContent (factual review of an ordinary internal evidence summary): owner amendment 2026-10-23.
+    // reviewInternalDraftFactualContent (factual review of an ordinary internal evidence summary) and
+    // releaseInternalReports (its separate final release): owner amendment 2026-10-23.
     {
       reviewSensitivity: true, promoteSource: true, generateDrafts: true, readInternalDrafts: true, extractEvidence: true, proposeClaim: true,
       generateClaimGapFollowups: true, recordSourceMeasurement: true, readReleasedInternalReports: true, reviewInternalDraftFactualContent: true,
+      releaseInternalReports: true,
     },
   );
   assert.equal(capabilities.data.internalKnowledgeWorkspace, false);
@@ -552,6 +554,7 @@ test("F: capabilities - client_admin gets extraction, proposal, gap follow-ups, 
   assert.deepEqual(clientEvidenceWorkflowAccess(projected), {
     visible: true, reviewSensitivity: true, promoteSource: true, extractEvidence: true, proposeClaim: true, generateClaimGapFollowups: true, generateDrafts: true,
     readInternalDrafts: true, recordSourceMeasurement: true, readReleasedInternalReports: true, reviewInternalDraftFactualContent: true,
+    releaseInternalReports: true,
   });
 });
 

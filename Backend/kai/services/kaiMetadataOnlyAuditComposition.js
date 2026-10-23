@@ -1225,6 +1225,43 @@ export function createProductionMetadataOnlyAuditForExportManifest({
 }
 
 /**
+ * The production metadata-only audits of the organization's own internal
+ * release (owner amendment 2026-10-23,
+ * kaiClientGeneratedContentService.js releaseClientInternalReport), one per
+ * step, each the same factory the corresponding GK release route uses, bound
+ * to the releasing human. `exportCandidateId` exists only once the candidate
+ * step has run.
+ */
+export function createProductionMetadataOnlyAuditsForOrganizationInternalRelease({
+  organizationId,
+  generatedContentDraftId,
+  actorContext,
+  route = "organization_internal_release",
+  insertAuditEvent = insertRequiredSuccessfulAuditEvent,
+} = {}) {
+  return ({ step, now, exportCandidateId } = {}) => {
+    const draft = { organizationId, generatedContentDraftId, actorContext, now, insertAuditEvent };
+    const candidate = { organizationId, exportCandidateId, actorContext, now, insertAuditEvent };
+    switch (step) {
+      case "export_review_request":
+      case "export_review_start":
+      case "export_review_complete":
+        return createProductionMetadataOnlyAuditForGeneratedDraftExportReview({ ...draft, route: `${route}:${step}` });
+      case "limitation_snapshot":
+        return createProductionMetadataOnlyAuditForGeneratedDraftLimitationSnapshot(draft);
+      case "export_candidate":
+        return createProductionMetadataOnlyAuditForGeneratedDraftExportCandidate(draft);
+      case "final_release_authority":
+        return createProductionMetadataOnlyAuditForHumanFinalReleaseAuthority(candidate);
+      case "export_manifest":
+        return createProductionMetadataOnlyAuditForExportManifest(candidate);
+      default:
+        throw new TypeError(`unknown organization internal release audit step: ${step}`);
+    }
+  };
+}
+
+/**
  * Production composition of the `metadataOnlyAudit` contract for the KAI
  * organization-enablement package (Get Kinder organization -> KAI
  * organization/binding/initial-engagement provisioning). Bound at

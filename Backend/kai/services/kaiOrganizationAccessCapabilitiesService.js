@@ -196,6 +196,13 @@ function workflowOperations(actorContext, organizationId) {
       actorContext, __clientGeneratedContentServiceContract.CLIENT_INTERNAL_FACTUAL_REVIEW_OPERATION, organizationId,
       { allowedRoles: __clientGeneratedContentServiceContract.CLIENT_INTERNAL_FACTUAL_REVIEW_ROLES },
     ).ok === true,
+    // Owner amendment 2026-10-23: releaseClientInternalReport's own role
+    // check. Whether a given draft may be released is per draft (the Internal
+    // Drafts detail's organizationRelease.actorMayRelease).
+    releaseInternalReports: validateActorCanPerformOperation(
+      actorContext, __clientGeneratedContentServiceContract.CLIENT_INTERNAL_RELEASE_OPERATION, organizationId,
+      { allowedRoles: __clientGeneratedContentServiceContract.CLIENT_INTERNAL_RELEASE_ROLES },
+    ).ok === true,
     assessEvidenceCoverage: validateActorCanPerformOperation(
       actorContext, __evidenceCoverageAssessmentServiceContract.EVIDENCE_COVERAGE_ASSESSMENT_OPERATION, organizationId,
       { allowedRoles: __evidenceCoverageAssessmentServiceContract.EVIDENCE_COVERAGE_ASSESSMENT_ALLOWED_ROLES },

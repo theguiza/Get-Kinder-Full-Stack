@@ -308,6 +308,15 @@ async function admitReviewTransition(tx, packet, dependencies) {
   return dependencies.reviewAdmission(tx, packet);
 }
 
+// Optional caller admission for an export-review write (the organization-
+// owned internal release, kaiClientGeneratedContentService.js): evaluated at
+// the start of the write's own transaction. Returns null to proceed or a
+// failure result. Absent for the GK routes, whose behavior is unchanged.
+async function admitReleaseWrite(tx, dependencies) {
+  if (typeof dependencies.releaseAdmission !== "function") return null;
+  return dependencies.releaseAdmission(tx);
+}
+
 function failure(code, blockers) {
   return {
     ok: false,
@@ -3208,6 +3217,8 @@ export function createPostgresGeneratedContentRepository({
 
       try {
         return await runInTransaction(async (tx) => {
+          const releaseRefusal = await admitReleaseWrite(tx, dependencies);
+          if (releaseRefusal) return releaseRefusal;
           const existingRows = await loadExportReviewQueueRows(tx, input);
           if (existingRows.length > 1) return failure("conflict_current_state_changed");
           if (existingRows.length === 1) {
@@ -3303,6 +3314,8 @@ export function createPostgresGeneratedContentRepository({
 
       try {
         return await runInTransaction(async (tx) => {
+          const releaseRefusal = await admitReleaseWrite(tx, dependencies);
+          if (releaseRefusal) return releaseRefusal;
           const queueRow = await loadExportReviewQueueRowById(tx, {
             organizationId: input.organizationId,
             exportReviewQueueItemId: input.exportReviewQueueItemId,
@@ -3406,6 +3419,8 @@ export function createPostgresGeneratedContentRepository({
 
       try {
         return await runInTransaction(async (tx) => {
+          const releaseRefusal = await admitReleaseWrite(tx, dependencies);
+          if (releaseRefusal) return releaseRefusal;
           const queueRow = await loadExportReviewQueueRowById(tx, {
             organizationId: input.organizationId,
             exportReviewQueueItemId: input.exportReviewQueueItemId,

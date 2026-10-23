@@ -83,7 +83,7 @@ async function runSuite() {
   const { createPostgresExportManifestRenderModelRepository } = await import("../Backend/kai/dictionary/postgresExportManifestRenderModelRepository.js");
   const { serializeExportManifestToMarkdown } = await import("../Backend/kai/services/kaiExportManifestMarkdownSerializer.js");
   const audits = await import("../Backend/kai/services/kaiMetadataOnlyAuditComposition.js");
-  const { getClientInternalDraft, getClientReleasedReportMarkdown, approveClientInternalDraftFactualReview } = await import("../Backend/kai/services/kaiClientGeneratedContentService.js");
+  const { getClientInternalDraft, getClientReleasedReportMarkdown, approveClientInternalDraftFactualReview, releaseClientInternalReport } = await import("../Backend/kai/services/kaiClientGeneratedContentService.js");
   const { createPostgresOrganizationInternalReviewRepository, ORGANIZATION_REVIEW_COMPLETION_AUDIT_CONTRACT } = await import("../Backend/kai/dictionary/postgresOrganizationInternalReviewRepository.js");
   const { createPostgresClientReleasedReportRepository } = await import("../Backend/kai/dictionary/postgresClientReleasedReportRepository.js");
   const { readGeneratedDraftEngagementId } = await import("../Backend/kai/db/kaiGeneratedDraftLibraryReadModels.js");
@@ -1202,6 +1202,22 @@ async function runSuite() {
       createReviewAudit: ({ reviewQueueItemId, now }) => auditFor(audits.createProductionMetadataOnlyAuditForGeneratedContentReview,
         { organizationId: ORG, generatedContentDraftId: target.measuredDraftId, reviewQueueItemId, actorContext: actor, now }),
     });
+  // The organization administrator's own release through the real service
+  // and repositories, with the production audits the route composes.
+  const releaseInternal = (actor, target, { decision = "release_for_internal_use", limitationsConfirmed = true, env = EXPORT_ENV, engagementId = ENGAGEMENT } = {}) => releaseClientInternalReport(
+    { organizationId: ORG, engagementId, generatedContentDraftId: target.measuredDraftId, decision, limitationsConfirmed, actorContext: actor },
+    {
+      ...clientDependencies(),
+      env,
+      exportCandidateRepository: candidateRepository(),
+      humanAuthorityDecisionRepository: authorityRepository(),
+      exportManifestRepository: createPostgresExportManifestRepository({ runInTransaction: withTx }),
+      now: tick,
+      createReleaseAudit: audits.createProductionMetadataOnlyAuditsForOrganizationInternalRelease({
+        organizationId: ORG, generatedContentDraftId: target.measuredDraftId, actorContext: actor,
+        insertAuditEvent: (metadata) => insertRequiredSuccessfulAuditEvent(metadata, pool),
+      }),
+    });
   const exportCounts = async () => (await query(`SELECT
       (SELECT count(*) FROM kai.limitation_snapshots WHERE organization_id = $1::uuid)::int AS snapshots,
       (SELECT count(*) FROM kai.export_candidates WHERE organization_id = $1::uuid)::int AS candidates,
@@ -1507,9 +1523,10 @@ async function runSuite() {
     assert.equal(after.decisions, before.decisions + 2, "revoke and re-grant are two appended decisions");
   });
 
-  test("organization review: the administrator reviews an ordinary internal evidence summary through the real lifecycle; Get Kinder keeps the high-risk review and every release step; the administrator receives the released Markdown", onNormalChain, async () => {
+  test("organization review and release: the administrator reviews, then separately releases, an ordinary internal evidence summary under their own identity through the real chain; Get Kinder keeps the high-risk review and release and can withdraw it; the administrator receives the released Markdown", onNormalChain, async () => {
     const ordinary = { ...ids.ordinary };
     assert.ok(ordinary.claimId, "the AI-permitted, all-absent source's measured claim exists");
+    const exportCountsAtStart = await exportCounts();
     // The claim becomes eligible through the same GK steps as the measured claim.
     const reviewDeps = { env: ENV, humanReviewRepository: createPostgresHumanReviewRepository({ runInTransaction: withTx }), metadataOnlyAudit: noAudit() };
     const evidenceQueue = await queueRow("evidence_review", ordinary.evidenceItemId);
@@ -1614,10 +1631,13 @@ async function runSuite() {
     assert.equal((await lifecycleAudits(ordinary.measuredDraftId)).length, 2, "a repeat records nothing");
     const reviewedDetail = await clientDraft(ADMIN, ordinary);
     assert.equal(reviewedDetail.data.reviewState, "reviewed_by_your_organization");
-    assert.deepEqual(reviewedDetail.data.release, { state: "awaiting_get_kinder_release", releasedReportId: null });
+    // Reviewed is not released: release is the separate decision below.
+    assert.deepEqual(reviewedDetail.data.release, { state: "awaiting_organization_release", releasedReportId: null });
+    assert.deepEqual(reviewedDetail.data.organizationRelease, { actorMayRelease: true, getKinderReleaseReasons: [], blockedReasons: [], releasedBy: null });
+    assert.deepEqual(await exportCounts(), exportCountsAtStart, "the factual review writes no release record");
     console.log(`[p2-01m] organization review: ${JSON.stringify(approved.data)}; held draft blockers=${JSON.stringify(refusedHeld.blockers.map((b) => b.blocking_reason))}`);
 
-    // The customer still cannot release, for any audience.
+    // The GK release routes stay Get Kinder's, for every audience.
     for (const audience of ["internal", "funder", "public"]) {
       const refused = await requestExportReview(ADMIN, audience, tick(), ordinary);
       assert.deepEqual([refused.ok, refused.error?.code], [false, "authorization_denied"], audience);
@@ -1625,34 +1645,92 @@ async function runSuite() {
     assert.deepEqual([(await confirmSnapshot(ADMIN, tick(), ordinary)).error?.code, (await createCandidate(ADMIN, tick(), ordinary)).error?.code],
       ["authorization_denied", "authorization_denied"]);
 
-    // Get Kinder's release, unchanged: export review, snapshot, candidate, authority, manifest.
-    const accepted = await requestExportReview(GK_ADMIN, "internal", tick(), ordinary);
-    assert.equal(accepted.data?.exportReviewRequestAccepted, true, JSON.stringify(accepted));
-    ordinary.exportReviewQueueItemId = accepted.data.reviewQueueItemId;
-    assert.equal((await reviewStep(startGeneratedDraftExportReview, "export_review", GK_ADMIN, tick(), ordinary)()).ok, true);
-    assert.equal((await reviewStep(completeGeneratedDraftExportReview, "export_review", GK_ADMIN, tick(), ordinary)()).ok, true);
-    const snapshot = await confirmSnapshot(GK_REVIEWER, tick(), ordinary);
-    assert.equal(snapshot.ok, true, JSON.stringify(snapshot));
-    const candidate = await createCandidate(GK_ADMIN, tick(), ordinary);
-    assert.equal(candidate.ok, true, JSON.stringify(candidate));
-    ordinary.exportCandidateId = candidate.data.exportCandidateId;
-    for (const audience of ["internal", "funder", "public"]) {
-      const refused = await decideAuthority(ADMIN, "grant", audience, tick(), ordinary);
-      assert.deepEqual([refused.ok, refused.error?.code], [false, "authorization_denied"], `customer ${audience} release`);
+    // Refused before any write: other roles (GK releases through its own
+    // routes), another organization, an inactive administrator, the AI, an
+    // unconfirmed or other decision, the export flag off, another Project.
+    const countsBefore = await exportCounts();
+    const INACTIVE_RELEASER = { ...ADMIN, organizationMemberships: [{ ...ADMIN.organizationMemberships[0], membership_status: "inactive" }] };
+    for (const [label, actor] of [["client_reviewer", REVIEWER], ["client_contributor", CONTRIBUTOR], ["gk_reviewer", GK_REVIEWER], ["gk_admin", GK_ADMIN],
+      ["another organization's administrator", OTHER_ADMIN], ["inactive administrator", INACTIVE_RELEASER], ["AI", { ...ADMIN, actorType: "ai" }]]) {
+      const refused = await releaseInternal(actor, ordinary);
+      assert.deepEqual([refused.ok, refused.error?.status], [false, 403], `${label}: ${JSON.stringify(refused)}`);
     }
-    assert.equal((await decideAuthority(GK_ADMIN, "grant", "internal", tick(), ordinary)).ok, true);
-    const manifest = await releaseManifest(GK_ADMIN, tick(), ordinary);
-    assert.equal(manifest.ok, true, JSON.stringify(manifest));
-    const manifestId = manifest.data.exportManifestId;
+    for (const [label, options] of [["unconfirmed", { limitationsConfirmed: false }], ["approved", { decision: "approved" }], ["funder", { decision: "release_for_funder_use" }]]) {
+      assert.equal((await releaseInternal(ADMIN, ordinary, options)).error?.code, "validation_blocker", label);
+    }
+    const flagOff = await releaseInternal(ADMIN, ordinary, { env: GEN_ENV });
+    assert.equal(flagOff.error?.code, "feature_disabled", "KAI_PUBLIC_EXPORT_ENABLED off: no internal release");
+    assert.equal((await releaseInternal(ADMIN, ordinary, { engagementId: secondProject.engagement_id })).error?.code, "not_found");
+    // The held draft: unreviewed, and its source has no sensitivity decision.
+    const heldRelease = await releaseInternal(ADMIN, held);
+    assert.deepEqual([heldRelease.error?.code, heldRelease.blockers?.map((b) => b.blocking_reason)],
+      ["blocked", ["sensitivity_review_not_complete", "factual_review_not_complete"]], JSON.stringify(heldRelease));
+    assert.deepEqual(await exportCounts(), countsBefore, "nothing written by any refusal");
 
-    // The same administrator opens the released Markdown through the client route.
+    // The release decision: the existing chain under the administrator's identity.
+    const released = await releaseInternal(ADMIN, ordinary);
+    assert.equal(released.ok, true, JSON.stringify(released));
+    assert.deepEqual({ ...released.data, releasedReportId: undefined }, {
+      generatedContentDraftId: ordinary.measuredDraftId, releaseState: "released_for_internal_use", releasedReportId: undefined, releasedBy: "your_organization", replayed: false,
+    });
+    const manifestId = released.data.releasedReportId;
+    const [decisionRow] = await query(
+      `SELECT d.decision_id::text, d.decided_by::text, d.decided_by_role, d.decision_type, d.decision_action, d.created_by_type,
+              c.export_candidate_id::text, c.created_by::text AS candidate_by, c.requested_audience, c.content_type,
+              s.confirmed_by::text AS snapshot_by, s.confirmed_by_role, m.created_by::text AS manifest_by, m.export_review_queue_item_id::text
+         FROM kai.export_manifests m
+         JOIN kai.human_authority_decisions d ON d.decision_id = m.effective_authority_decision_id
+         JOIN kai.export_candidates c ON c.export_candidate_id = m.export_candidate_id
+         JOIN kai.limitation_snapshots s ON s.limitation_snapshot_id = c.limitation_snapshot_id
+        WHERE m.export_manifest_id = $1::uuid`, [manifestId]);
+    assert.deepEqual(
+      [decisionRow.decided_by, decisionRow.decided_by_role, decisionRow.decision_type, decisionRow.decision_action, decisionRow.created_by_type],
+      [ADMIN.actorUserId, "client_admin", "export_authority_granted", "grant", "human"], "the final-release decision is the administrator's own");
+    assert.deepEqual([decisionRow.snapshot_by, decisionRow.confirmed_by_role], [ADMIN.actorUserId, "client_admin"], "the limitation snapshot is the administrator's own");
+    assert.deepEqual([decisionRow.candidate_by, decisionRow.manifest_by, decisionRow.requested_audience, decisionRow.content_type],
+      [ADMIN.actorUserId, ADMIN.actorUserId, "internal", "evidence_summary"]);
+    ordinary.exportCandidateId = decisionRow.export_candidate_id;
+    ordinary.exportReviewQueueItemId = decisionRow.export_review_queue_item_id;
+    const exportQueue = await queueRow("export_review", ordinary.measuredDraftId);
+    assert.deepEqual([exportQueue.queue_status, exportQueue.review_status], ["resolved", "resolved"]);
+    const releaseAudits = await query(
+      `SELECT operation, metadata->>'actor_id' AS actor_id, metadata->>'decided_by' AS decided_by,
+              coalesce(metadata->>'decided_by_role', metadata->>'confirmed_by_role') AS role
+         FROM kai.upload_lifecycle_audit
+        WHERE organization_id = $1::uuid AND operation IN ('export_review_requested', 'export_review_started', 'export_review_completed',
+              'limitation_snapshot_confirmed', 'export_candidate_created', 'human_authority_decision_recorded')
+          AND (metadata->>'generated_content_draft_id' = $2 OR metadata->>'export_candidate_id' = $3)
+        ORDER BY created_at, operation`, [ORG, ordinary.measuredDraftId, ordinary.exportCandidateId]);
+    assert.deepEqual(releaseAudits.map((row) => row.operation), [
+      "export_review_requested", "export_review_started", "export_review_completed", "limitation_snapshot_confirmed", "export_candidate_created", "human_authority_decision_recorded",
+    ]);
+    for (const row of releaseAudits) assert.equal(row.actor_id ?? row.decided_by, ADMIN.actorUserId, `${row.operation} is attributed to the administrator`);
+    assert.deepEqual(releaseAudits.filter((row) => row.role).map((row) => `${row.operation}:${row.role}`),
+      ["limitation_snapshot_confirmed:client_admin", "human_authority_decision_recorded:client_admin"]);
+    const releaseEvents = await query(
+      `SELECT action, actor_user_id::text AS actor FROM kai.audit_events WHERE organization_id = $1::uuid
+          AND action IN ('export_review_requested', 'export_review_started', 'export_review_completed', 'limitation_snapshot_confirmed', 'export_candidate_created', 'human_authority_decision_recorded', 'export_manifest_created')
+          AND actor_user_id = $2::uuid ORDER BY audit_event_id`, [ORG, ADMIN.actorUserId]);
+    assert.deepEqual(releaseEvents.map((row) => row.action), [
+      "export_review_requested", "export_review_started", "export_review_completed", "limitation_snapshot_confirmed", "export_candidate_created", "human_authority_decision_recorded", "export_manifest_created",
+    ], "one kai.audit_events row per step, as the administrator");
+    console.log(`[p2-01m] organization release: decision=${JSON.stringify(decisionRow)}; audits=${JSON.stringify(releaseAudits)}; events=${JSON.stringify(releaseEvents.map((row) => `${row.action}:${row.actor}`))}`);
+
+    // A repeat writes nothing; the detail shows the organization's release.
+    const countsAfter = await exportCounts();
+    const repeat = await releaseInternal(ADMIN, ordinary);
+    assert.deepEqual([repeat.ok, repeat.data?.replayed, repeat.data?.releasedReportId], [true, true, manifestId]);
+    assert.deepEqual(await exportCounts(), countsAfter);
     const releasedDetail = await clientDraft(ADMIN, ordinary);
     assert.deepEqual([releasedDetail.data.reviewState, releasedDetail.data.release], ["reviewed_by_your_organization", { state: "released_for_internal_use", releasedReportId: manifestId }]);
+    assert.deepEqual(releasedDetail.data.organizationRelease, { actorMayRelease: false, getKinderReleaseReasons: [], blockedReasons: [], releasedBy: "your_organization" });
+
+    // The same administrator opens the released Markdown through the client route.
     const received = await ids.getClientMarkdown(ORG, ENGAGEMENT, manifestId, "client_admin");
     assert.equal(received.statusCode, 200, received.body);
     assert.match(received.headers["content-disposition"], /attachment; filename="kai-export-manifest\.md"/);
     const markdown = received.body;
-    console.log(`[p2-01m] organization-reviewed released Markdown:\n${markdown}`);
+    console.log(`[p2-01m] organization-released Markdown:\n${markdown}`);
     assert.equal(statedCount(markdown), independentRecordCount(CSV));
     assert.match(markdown, /records 5 programme sessions for the reporting period 2026-09-01 to 2026-09-30/);
     assert.match(markdown, /period is attested in that definition and not verified against record dates/);
@@ -1660,20 +1738,128 @@ async function runSuite() {
     assert.ok(markdown.includes(`source version \`${ordinary.sourceVersionId}\`.`), markdown);
     const limitationLine = markdown.split("\n").find((line) => line.startsWith("- [CIT-001] limitation codes:"));
     for (const code of MEASURED_LIMITATION_CODES.filter((code) => code.startsWith("measurement."))) assert.ok(limitationLine.includes(`\`${code}\``), code);
-    assert.equal(snapshot.data.citedPairCount, 1);
-    const [entry] = await query("SELECT limitation_codes FROM kai.limitation_snapshot_entries WHERE limitation_snapshot_id = $1::uuid", [snapshot.data.limitationSnapshotId]);
-    for (const code of entry.limitation_codes) assert.ok(limitationLine.includes(`\`${code}\``), `snapshotted ${code} is in the report`);
-    ids.organizationReviewedLimitationCodes = entry.limitation_codes;
+    const [snapshotRow] = await query("SELECT limitation_snapshot_id::text FROM kai.export_candidates WHERE export_candidate_id = $1::uuid", [ordinary.exportCandidateId]);
+    const entries = await query("SELECT limitation_codes FROM kai.limitation_snapshot_entries WHERE limitation_snapshot_id = $1::uuid", [snapshotRow.limitation_snapshot_id]);
+    assert.equal(entries.length, 1, "one cited pair");
+    for (const code of entries[0].limitation_codes) assert.ok(limitationLine.includes(`\`${code}\``), `snapshotted ${code} is in the report`);
+    ids.organizationReviewedLimitationCodes = entries[0].limitation_codes;
     const prose = markdown.split("## Citation Appendix")[0];
     assert.doesNotMatch(prose, /\b(distinct|unique|individuals?|people|participants?|attendees|households?|rate|per cent|percent|outcomes?|because|caused?|improv\w*|impact\w*|increase\w*|led to|result\w* in)\b|%/i);
     assert.doesNotMatch(markdown, /literacy|mentoring|2026-09-16|sessions\.csv/, "no row values or file names");
 
-    // A revoked release is no longer received; the organization's review does not substitute for it.
+    // Get Kinder keeps authority over it: a GK revocation withdraws it, the
+    // organization cannot re-grant what Get Kinder withdrew, and only a GK
+    // re-grant restores it.
     assert.equal((await decideAuthority(GK_ADMIN, "revoke", "internal", tick(), ordinary)).ok, true);
     assert.equal((await ids.getClientMarkdown(ORG, ENGAGEMENT, manifestId, "client_admin")).statusCode, 409);
-    assert.equal((await clientDraft(ADMIN, ordinary)).data.release.state, "release_no_longer_valid");
+    const withdrawnDetail = await clientDraft(ADMIN, ordinary);
+    assert.deepEqual([withdrawnDetail.data.release.state, withdrawnDetail.data.organizationRelease.releasedBy], ["release_no_longer_valid", "your_organization"]);
+    const reRelease = await releaseInternal(ADMIN, ordinary);
+    assert.deepEqual([reRelease.error?.code, reRelease.blockers?.map((b) => b.blocking_reason)], ["blocked", ["release_withdrawn_by_get_kinder"]], JSON.stringify(reRelease));
     assert.equal((await decideAuthority(GK_ADMIN, "grant", "internal", tick(), ordinary)).ok, true);
     assert.equal((await ids.getClientMarkdown(ORG, ENGAGEMENT, manifestId, "client_admin")).statusCode, 200);
+
+    // Get Kinder's release, unchanged, for the draft the organization may not
+    // release: GK reviews and releases it through its own routes.
+    assert.equal((await reviewStep(startGeneratedContentReview, "generated_content_review", GK_REVIEWER, tick(), held)()).ok, true);
+    assert.equal((await reviewStep(completeGeneratedContentReview, "generated_content_review", GK_REVIEWER, tick(), held)()).ok, true);
+    const heldReviewed = await clientDraft(ADMIN, held);
+    assert.deepEqual([heldReviewed.data.reviewState, heldReviewed.data.release.state], ["reviewed_by_get_kinder", "awaiting_get_kinder_release"]);
+    assert.deepEqual(heldReviewed.data.organizationRelease, { actorMayRelease: false, getKinderReleaseReasons: ["sensitivity_review_not_complete"], blockedReasons: [], releasedBy: null });
+    const heldRefused = await releaseInternal(ADMIN, held);
+    assert.deepEqual([heldRefused.error?.code, heldRefused.blockers?.map((b) => b.blocking_reason)], ["blocked", ["sensitivity_review_not_complete"]]);
+    const heldAccepted = await requestExportReview(GK_ADMIN, "internal", tick(), held);
+    assert.equal(heldAccepted.data?.exportReviewRequestAccepted, true, JSON.stringify(heldAccepted));
+    held.exportReviewQueueItemId = heldAccepted.data.reviewQueueItemId;
+    assert.equal((await reviewStep(startGeneratedDraftExportReview, "export_review", GK_ADMIN, tick(), held)()).ok, true);
+    assert.equal((await reviewStep(completeGeneratedDraftExportReview, "export_review", GK_ADMIN, tick(), held)()).ok, true);
+    const heldSnapshot = await confirmSnapshot(GK_REVIEWER, tick(), held);
+    assert.equal(heldSnapshot.data?.confirmedByRole, "gk_reviewer", JSON.stringify(heldSnapshot));
+    const heldCandidate = await createCandidate(GK_ADMIN, tick(), held);
+    held.exportCandidateId = heldCandidate.data.exportCandidateId;
+    const heldGrant = await decideAuthority(GK_ADMIN, "grant", "internal", tick(), held);
+    assert.deepEqual([heldGrant.ok, heldGrant.data?.decidedByRole], [true, "gk_admin"]);
+    const heldManifest = await releaseManifest(GK_ADMIN, tick(), held);
+    assert.equal(heldManifest.ok, true, JSON.stringify(heldManifest));
+    const heldReleased = await clientDraft(ADMIN, held);
+    assert.deepEqual([heldReleased.data.release.state, heldReleased.data.organizationRelease.releasedBy], ["released_for_internal_use", "get_kinder"]);
+    assert.equal((await ids.getClientMarkdown(ORG, ENGAGEMENT, heldManifest.data.exportManifestId, "client_admin")).statusCode, 200);
+
+    // The database itself admits client_admin only as an internal
+    // evidence_summary limitation snapshot or export_authority_granted grant.
+    // Each probe runs in a transaction that is always rolled back. BEFORE
+    // INSERT triggers run before CHECKs, so each refusal names the first
+    // layer that refuses it: funder_ready / public_ready on this internal
+    // candidate hit the P3-17 audience trigger (P0001), and on a funder
+    // candidate the new scope trigger; types and actions that pass both
+    // triggers reach the widened role CHECK.
+    const probe = async (statements) => {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        for (const [sql, params] of statements.slice(0, -1)) await client.query(sql, params);
+        const [sql, params] = statements.at(-1);
+        await client.query(sql, params);
+        return "accepted";
+      } catch (error) {
+        return `${error.code}:${error.constraint || "trigger"}`;
+      } finally {
+        await client.query("ROLLBACK");
+        client.release();
+      }
+    };
+    const decisionInsert = (role, type, action, candidateId = ordinary.exportCandidateId, supersedes = null) => [
+      `INSERT INTO kai.human_authority_decisions (organization_id, export_candidate_id, decision_type, decision_action, decided_by, decided_by_role, supersedes_decision_id)
+       VALUES ($1::uuid, $2::uuid, $3, $4, $5::uuid, $6, $7::uuid)`, [ORG, candidateId, type, action, ADMIN.actorUserId, role, supersedes]];
+    const [head] = await query(
+      `SELECT d.decision_id::text FROM kai.human_authority_decisions d WHERE d.export_candidate_id = $1::uuid AND d.decision_type = 'export_authority_granted'
+          AND NOT EXISTS (SELECT 1 FROM kai.human_authority_decisions s WHERE s.supersedes_decision_id = d.decision_id)`, [ordinary.exportCandidateId]);
+    const ROLE_CHECK = "23514:human_authority_decisions_p3_17_role_by_type_check";
+    const FUNDER_CANDIDATE = "0e000000-0000-4000-8000-0000000fc001";
+    const funderCandidate = [
+      `INSERT INTO kai.export_candidates (export_candidate_id, organization_id, generated_content_draft_id, content_type, requested_audience, limitation_snapshot_id,
+         fingerprint_contract_version, canonical_fingerprint, created_by)
+       VALUES ($1::uuid, $2::uuid, $3::uuid, 'evidence_summary', 'funder', $4::uuid, 'kai-sprint2-p3-16-export-candidate-fingerprint-v1', repeat('a', 64), $5::uuid)`,
+      [FUNDER_CANDIDATE, ORG, ordinary.measuredDraftId, snapshotRow.limitation_snapshot_id, GK_ADMIN.actorUserId]];
+    const probes = {
+      "client_admin funder_ready": await probe([decisionInsert("client_admin", "funder_ready", "grant")]),
+      "client_admin public_ready": await probe([decisionInsert("client_admin", "public_ready", "grant")]),
+      "client_admin funder_ready on a funder candidate": await probe([funderCandidate, decisionInsert("client_admin", "funder_ready", "grant", FUNDER_CANDIDATE)]),
+      "client_admin client_reviewed": await probe([decisionInsert("client_admin", "client_reviewed", "grant")]),
+      "client_admin revoke": await probe([decisionInsert("client_admin", "export_authority_granted", "revoke", ordinary.exportCandidateId, head.decision_id)]),
+      "gk_reviewer export_authority_granted": await probe([decisionInsert("gk_reviewer", "export_authority_granted", "revoke", ordinary.exportCandidateId, head.decision_id)]),
+      "client_admin grant on a funder candidate": await probe([funderCandidate, decisionInsert("client_admin", "export_authority_granted", "grant", FUNDER_CANDIDATE)]),
+      "client_admin snapshot on a funder draft": await probe([
+        ["UPDATE kai.generated_content_drafts SET requested_audience = 'funder' WHERE generated_content_draft_id = $1::uuid", [ordinary.measuredDraftId]],
+        [`INSERT INTO kai.limitation_snapshots (organization_id, generated_content_draft_id, confirmed_by, confirmed_by_role, entries_fingerprint, supersedes_snapshot_id)
+          VALUES ($1::uuid, $2::uuid, $3::uuid, 'client_admin', repeat('b', 64), $4::uuid)`, [ORG, ordinary.measuredDraftId, ADMIN.actorUserId, snapshotRow.limitation_snapshot_id]],
+      ]),
+      "client_reviewer snapshot": await probe([[`INSERT INTO kai.limitation_snapshots (organization_id, generated_content_draft_id, confirmed_by, confirmed_by_role, entries_fingerprint, supersedes_snapshot_id)
+          VALUES ($1::uuid, $2::uuid, $3::uuid, 'client_reviewer', repeat('b', 64), $4::uuid)`, [ORG, ordinary.measuredDraftId, REVIEWER.actorUserId, snapshotRow.limitation_snapshot_id]]]),
+      // Existing combinations are unchanged.
+      "client_reviewer client_reviewed": await probe([decisionInsert("client_reviewer", "client_reviewed", "grant")]),
+      "gk_admin funder_ready on a funder candidate": await probe([funderCandidate, decisionInsert("gk_admin", "funder_ready", "grant", FUNDER_CANDIDATE)]),
+      "gk_admin export_authority_granted revoke": await probe([decisionInsert("gk_admin", "export_authority_granted", "revoke", ordinary.exportCandidateId, head.decision_id)]),
+    };
+    console.log(`[p2-01m] organization release constraint probes: ${JSON.stringify(probes)}`);
+    assert.deepEqual(probes, {
+      "client_admin funder_ready": "P0001:trigger",
+      "client_admin public_ready": "P0001:trigger",
+      "client_admin funder_ready on a funder candidate": "23514:trigger",
+      "client_admin client_reviewed": ROLE_CHECK,
+      "client_admin revoke": ROLE_CHECK,
+      "gk_reviewer export_authority_granted": ROLE_CHECK,
+      "client_admin grant on a funder candidate": "23514:trigger",
+      "client_admin snapshot on a funder draft": "23514:trigger",
+      "client_reviewer snapshot": "23514:limitation_snapshots_p3_16_confirmed_by_role_check",
+      "client_reviewer client_reviewed": "accepted",
+      "gk_admin funder_ready on a funder candidate": "accepted",
+      "gk_admin export_authority_granted revoke": "accepted",
+    });
+    const [ledger] = await query(`SELECT
+        (SELECT count(*) FROM kai.human_authority_decisions WHERE decided_by_role NOT IN ('gk_admin', 'client_admin'))::int AS other_roles,
+        (SELECT count(*) FROM kai.export_candidates WHERE export_candidate_id = $1::uuid)::int AS probe_candidates`, [FUNDER_CANDIDATE]);
+    assert.deepEqual(ledger, { other_roles: 0, probe_candidates: 0 }, "every probe was rolled back");
   });
 
   test("generation: once the measured source version is superseded, the claim is stale and is refused before the provider", async () => {

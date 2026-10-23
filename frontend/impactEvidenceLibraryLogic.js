@@ -74,7 +74,7 @@ export function projectOrganizationAccessCapabilities(dto) {
   const required = ["internalKnowledgeWorkspace", "intakeContribution", "clientFollowupReview", "projectManagement", "improvementPlanManagement", "organizationJoinReview", "organizationAccessManagement"];
   if (!required.every((key) => typeof dto[key] === "boolean")) return null;
   return {
-    workflowOperations: Object.fromEntries(["reviewSensitivity", "promoteSource", "generateDrafts", "generateAllDraftTypes", "reviewGeneratedDrafts", "readGeneratedDrafts", "readInternalDrafts", "recordEvidenceReview", "recordClaimReview", "extractEvidence", "assessEvidenceCoverage", "proposeClaim", "generateClaimGapFollowups", "recordConflict", "acceptCoverageLimitation", "assessRequirement", "readGrantResponsePacket", "readBoardReportingPacket", "recordSourceMeasurement", "readReleasedInternalReports", "reviewInternalDraftFactualContent"].map((key) => [key, dto.workflowOperations?.[key] === true])),
+    workflowOperations: Object.fromEntries(["reviewSensitivity", "promoteSource", "generateDrafts", "generateAllDraftTypes", "reviewGeneratedDrafts", "readGeneratedDrafts", "readInternalDrafts", "recordEvidenceReview", "recordClaimReview", "extractEvidence", "assessEvidenceCoverage", "proposeClaim", "generateClaimGapFollowups", "recordConflict", "acceptCoverageLimitation", "assessRequirement", "readGrantResponsePacket", "readBoardReportingPacket", "recordSourceMeasurement", "readReleasedInternalReports", "reviewInternalDraftFactualContent", "releaseInternalReports"].map((key) => [key, dto.workflowOperations?.[key] === true])),
     internalKnowledgeWorkspace: dto.internalKnowledgeWorkspace === true,
     intakeContribution: dto.intakeContribution === true,
     clientFollowupReview: dto.clientFollowupReview === true,
@@ -229,6 +229,35 @@ export function clientInternalDraftFactualReviewPath(organizationId, engagementI
   return `${clientInternalDraftPath(organizationId, engagementId, generatedContentDraftId)}/factual-review`;
 }
 
+// Owner amendment 2026-10-23: the organization administrator's own final
+// release of an ordinary internal evidence summary, and the server's reason
+// codes for a reviewed draft Get Kinder releases or nobody may release now.
+export const CLIENT_INTERNAL_DRAFT_RELEASE_REASONS = Object.freeze([
+  ...CLIENT_INTERNAL_DRAFT_FACTUAL_REVIEW_REASONS,
+  "factual_review_not_complete",
+  "release_state_not_current",
+  "release_withdrawn_by_get_kinder",
+]);
+const CLIENT_INTERNAL_DRAFT_RELEASED_BY = Object.freeze(["your_organization", "get_kinder"]);
+
+export function clientInternalDraftReleasePath(organizationId, engagementId, generatedContentDraftId) {
+  return `${clientInternalDraftPath(organizationId, engagementId, generatedContentDraftId)}/release`;
+}
+
+// Fails closed: a missing or malformed view offers no release.
+function projectClientInternalDraftOrganizationRelease(view) {
+  const reasons = (value) => Array.isArray(value) && value.every((code) => CLIENT_INTERNAL_DRAFT_RELEASE_REASONS.includes(code));
+  if (!isPlainClientObject(view) || !reasons(view.getKinderReleaseReasons) || !reasons(view.blockedReasons)) {
+    return { actorMayRelease: false, getKinderReleaseReasons: [], blockedReasons: [], releasedBy: null };
+  }
+  return {
+    actorMayRelease: view.actorMayRelease === true,
+    getKinderReleaseReasons: [...view.getKinderReleaseReasons],
+    blockedReasons: [...view.blockedReasons],
+    releasedBy: CLIENT_INTERNAL_DRAFT_RELEASED_BY.includes(view.releasedBy) ? view.releasedBy : null,
+  };
+}
+
 // Fails closed: a missing or malformed view offers no approval.
 function projectClientInternalDraftFactualReview(view) {
   const reasons = (value) => Array.isArray(value) && value.every((code) => CLIENT_INTERNAL_DRAFT_FACTUAL_REVIEW_REASONS.includes(code));
@@ -247,6 +276,7 @@ export const CLIENT_INTERNAL_DRAFT_RELEASE_STATES = Object.freeze([
   "awaiting_get_kinder_review",
   "awaiting_organization_review",
   "awaiting_get_kinder_release",
+  "awaiting_organization_release",
   "released_for_internal_use",
   "release_no_longer_valid",
   "release_status_unavailable",
@@ -318,6 +348,7 @@ export function projectClientInternalDraft(dto) {
     blocks,
     release: projectClientInternalDraftRelease(dto.release),
     factualReview: projectClientInternalDraftFactualReview(dto.factualReview),
+    organizationRelease: projectClientInternalDraftOrganizationRelease(dto.organizationRelease),
   };
 }
 

@@ -1,5 +1,11 @@
 import { withTransaction } from "../db/kaiDb.js";
 import { getScopedSourceVersionById } from "../db/kaiIntakeQueries.js";
+import { evaluateClaimTraceabilityInTransaction } from "./postgresClaimTraceabilityRepository.js";
+import { GENERATED_CONTENT_REVIEW_LIFECYCLE_PROFILES } from "./generatedContentReviewQueueContract.js";
+import {
+  evaluateExportReviewRequestStateInTransaction,
+  evaluateGeneratedDraftReviewPacketInTransaction,
+} from "./postgresGeneratedContentRepository.js";
 import {
   AmbiguousSensitivityDecisionLineageError,
   findCurrentSensitivityAllowedUseDecision,
@@ -131,6 +137,46 @@ export async function evaluateOrganizationInternalReviewInTransaction(tx, { orga
   };
 }
 
+/**
+ * Organization-owned final release of the same ordinary internal Evidence
+ * Summary (owner amendment 2026-10-23; migration
+ * kai_sprint2_plan_a_organization_internal_release_authority). Read-only and
+ * transaction-scoped: every release write (export review, limitation
+ * snapshot, final-release decision, manifest) calls it inside its own
+ * transaction, before writing. The draft must have a completed factual
+ * review (by Get Kinder or by the organization) and must still be ordinary
+ * by exactly the classification above, re-evaluated now: a source that has
+ * since become high-risk, stale or no longer permitted goes back to Get
+ * Kinder or is blocked.
+ */
+export const RELEASE_BLOCKED_REASONS = Object.freeze([
+  "factual_review_not_complete",
+  "release_state_not_current",
+]);
+
+const RESOLVED_REVIEW_PROFILE = GENERATED_CONTENT_REVIEW_LIFECYCLE_PROFILES[2];
+
+export async function evaluateOrganizationInternalReleaseInTransaction(tx, { organizationId, generatedContentDraftId }) {
+  const notReleasable = (reason) => ({ getKinderReviewReasons: [], blockedReasons: [reason], organizationMayRelease: false });
+  if (![organizationId, generatedContentDraftId].every((id) => UUID_PATTERN.test(id ?? ""))) return notReleasable("release_state_not_current");
+  const packetResult = await evaluateGeneratedDraftReviewPacketInTransaction(
+    tx,
+    { organizationId, generatedContentDraftId },
+    evaluateClaimTraceabilityInTransaction,
+    { allowedLifecycleProfiles: GENERATED_CONTENT_REVIEW_LIFECYCLE_PROFILES },
+  );
+  if (!packetResult.ok) return notReleasable("release_state_not_current");
+  const packet = packetResult.data;
+  const evaluation = await evaluateOrganizationInternalReviewInTransaction(tx, { organizationId, packet });
+  const reviewed = packet.queueStatus === RESOLVED_REVIEW_PROFILE.queueStatus && packet.reviewStatus === RESOLVED_REVIEW_PROFILE.reviewStatus;
+  const blockedReasons = [...evaluation.blockedReasons, ...(reviewed ? [] : ["factual_review_not_complete"])];
+  return {
+    getKinderReviewReasons: evaluation.getKinderReviewReasons,
+    blockedReasons,
+    organizationMayRelease: evaluation.getKinderReviewReasons.length === 0 && blockedReasons.length === 0,
+  };
+}
+
 export function organizationReviewBlockers({ getKinderReviewReasons, blockedReasons }) {
   return [...getKinderReviewReasons, ...blockedReasons].map((reason) => ({
     validator_key: ORGANIZATION_INTERNAL_REVIEW_VALIDATOR_KEY,
@@ -150,6 +196,20 @@ export function createPostgresOrganizationInternalReviewRepository({ runInTransa
   return Object.freeze({
     async evaluate({ organizationId, packet }) {
       return readOnly((tx) => evaluateOrganizationInternalReviewInTransaction(tx, { organizationId, packet }));
+    },
+
+    async evaluateRelease({ organizationId, generatedContentDraftId }) {
+      return readOnly((tx) => evaluateOrganizationInternalReleaseInTransaction(tx, { organizationId, generatedContentDraftId }));
+    },
+
+    // The draft's export-review lifecycle state (P3-05 / P3-09 / P3-13),
+    // which the organization's release advances; null when it cannot be read.
+    async readExportReviewState({ organizationId, generatedContentDraftId, exportReviewQueueItemId }) {
+      if (![organizationId, generatedContentDraftId, exportReviewQueueItemId].every((id) => UUID_PATTERN.test(id ?? ""))) return null;
+      return readOnly(async (tx) => {
+        const result = await evaluateExportReviewRequestStateInTransaction(tx, { organizationId, generatedContentDraftId, exportReviewQueueItemId });
+        return result.ok ? result.data : null;
+      });
     },
 
     // Who completed the draft's factual review: 'organization' when the

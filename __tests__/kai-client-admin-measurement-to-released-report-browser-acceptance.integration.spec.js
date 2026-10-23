@@ -674,7 +674,9 @@ async function runBrowserAcceptance() {
 
     await test("E: the organization administrator opens the released report in the UI and receives exactly the released Markdown", async () => {
       await adminPage.clickIn(`[data-client-internal-draft="${ids.draftId}"] button`, "Read draft");
-      await adminPage.waitForText("Released by Get Kinder for internal use");
+      await adminPage.waitForText("Released for internal use");
+      // Owner amendment 2026-10-23: the detail now says who made the release.
+      await adminPage.waitForText("Released by Get Kinder");
       const mark = adminPage.mark();
       await adminPage.clickIn(`[data-client-open-released-report="${ids.exportManifestId}"]`, "Open released report");
       await adminPage.waitFor(async () => Boolean(await textOf(adminPage, "[data-client-released-report-markdown]")), "the released Markdown");

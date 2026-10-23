@@ -316,6 +316,14 @@ export function createPostgresExportManifestRepository({ runInTransaction = with
 
       try {
         return await runInTransaction(async (tx) => {
+          // The organization's own release (owner amendment 2026-10-23,
+          // kaiClientGeneratedContentService.js) re-checks, in this same
+          // transaction, that the draft is still ordinary before the
+          // manifest is written. Absent for the GK route.
+          if (typeof dependencies.releaseAdmission === "function") {
+            const refusal = await dependencies.releaseAdmission(tx);
+            if (refusal) return refusal;
+          }
           // Single authoritative composition - the SAME function the public,
           // read-only evaluateFinalExportEligibility uses - executed inside
           // this write transaction. No P3-16 currentness, P3-17

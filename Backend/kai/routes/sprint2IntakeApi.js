@@ -70,6 +70,7 @@ import {
   createProductionMetadataOnlyAuditForGrantResponsePacketHumanAuthorityDecision,
   createProductionMetadataOnlyAuditForExportManifest,
   createProductionMetadataOnlyAuditForHumanFinalReleaseAuthority,
+  createProductionMetadataOnlyAuditsForOrganizationInternalRelease,
   createProductionMetadataOnlyAuditForRequirementAssessment,
   createProductionMetadataOnlyAuditForSourceVersion,
 } from "../services/kaiMetadataOnlyAuditComposition.js";
@@ -5731,6 +5732,46 @@ router.post(
           reviewQueueItemId,
           actorContext,
           now,
+        }),
+      });
+    });
+  },
+);
+
+// The organization administrator's own final release of an ordinary internal
+// evidence summary (owner amendment 2026-10-23;
+// releaseClientInternalReport). The body is exactly the explicit decision and
+// the confirmation of the limitations; the service runs the existing release
+// chain under this human's identity. No SQL here.
+router.post(
+  "/admin/organizations/:organizationId/engagements/:engagementId/client-internal-drafts/:generatedContentDraftId/release",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    if (!metadataContentTypeIsSupported(req)) return sendKaiError(res, "unsupported_media_type");
+    const keys = ["organizationId", "engagementId", "generatedContentDraftId"];
+    const ids = clientContentPathIds(req, keys);
+    if (!ids) {
+      return sendKaiError(res, "validation_blocker", {
+        blockers: [routeValidationBlocker("invalid_uuid_field", keys.join("_or_"))],
+      });
+    }
+    const payload = requestPayload(req);
+    if (Object.keys(payload).length !== 2 || payload.decision !== "release_for_internal_use" || payload.limitations_confirmed !== true) {
+      return sendKaiError(res, "validation_blocker", {
+        blockers: [routeValidationBlocker("invalid_internal_release_decision", "decision_or_limitations_confirmed")],
+      });
+    }
+    const actorContext = sprint2MappedActorContext(req);
+    return invokeService(res, async () => {
+      const service = await getClientGeneratedContentService();
+      return service.releaseClientInternalReport({
+        ...ids, decision: payload.decision, limitationsConfirmed: payload.limitations_confirmed, actorContext,
+      }, {
+        createReleaseAudit: createProductionMetadataOnlyAuditsForOrganizationInternalRelease({
+          organizationId: ids.organizationId,
+          generatedContentDraftId: ids.generatedContentDraftId,
+          actorContext,
+          route: "/admin/organizations/:organizationId/engagements/:engagementId/client-internal-drafts/:generatedContentDraftId/release",
         }),
       });
     });

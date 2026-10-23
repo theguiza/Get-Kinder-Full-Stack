@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import { withTransaction } from "../db/kaiDb.js";
 import {
   LIMITATION_SNAPSHOT_ALLOWED_ROLES,
+  ORGANIZATION_INTERNAL_RELEASE_ROLE,
   EXPORT_CANDIDATE_CONTENT_TYPES,
   EXPORT_CANDIDATE_AUDIENCES,
   EXPORT_CANDIDATE_FINGERPRINT_CONTRACT_VERSION,
@@ -753,7 +754,9 @@ export function createPostgresExportCandidateRepository({ runInTransaction = wit
       if (!validateConfirmLimitationSnapshotInput(input)) return failure("validation_blocker", "invalid_confirm_input_shape");
       if (!dependencies.metadataOnlyAudit) return failure("validation_blocker", "missing_metadata_only_audit_dependency");
       const { confirmedByRole } = input;
-      if (!LIMITATION_SNAPSHOT_ALLOWED_ROLES.includes(confirmedByRole)) {
+      const releaseAdmission = typeof dependencies.releaseAdmission === "function" ? dependencies.releaseAdmission : null;
+      if (!LIMITATION_SNAPSHOT_ALLOWED_ROLES.includes(confirmedByRole)
+        && !(confirmedByRole === ORGANIZATION_INTERNAL_RELEASE_ROLE && releaseAdmission)) {
         return failure("validation_blocker", "confirmed_by_role_not_derivable");
       }
 
@@ -761,6 +764,10 @@ export function createPostgresExportCandidateRepository({ runInTransaction = wit
         return await runInTransaction(async (tx) => {
           const draft = await loadDraftRow(tx, input);
           if (!draft) return failure("not_found");
+          if (releaseAdmission) {
+            const refusal = await releaseAdmission(tx);
+            if (refusal) return refusal;
+          }
 
           const citedPairs = await loadCitedPairs(tx, input);
           if (citedPairs.length === 0) return failure("validation_blocker", "no_cited_pairs");
@@ -883,6 +890,12 @@ export function createPostgresExportCandidateRepository({ runInTransaction = wit
         return await runInTransaction(async (tx) => {
           const draft = await loadDraftRow(tx, input);
           if (!draft) return failure("not_found");
+          // The organization's own release (owner amendment 2026-10-23)
+          // re-checks the draft here; absent for the GK route.
+          if (typeof dependencies.releaseAdmission === "function") {
+            const refusal = await dependencies.releaseAdmission(tx);
+            if (refusal) return refusal;
+          }
           if (!EXPORT_CANDIDATE_CONTENT_TYPES.includes(draft.content_type)) return failure("conflict_current_state_changed");
           if (!EXPORT_CANDIDATE_AUDIENCES.includes(draft.requested_audience)) return failure("conflict_current_state_changed");
 

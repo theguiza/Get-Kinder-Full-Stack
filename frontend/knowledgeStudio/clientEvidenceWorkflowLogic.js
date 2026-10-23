@@ -28,8 +28,9 @@ const WORKFLOW_OPERATION_KEYS = Object.freeze([
   "recordSourceMeasurement",
   "readReleasedInternalReports",
   // Owner amendment 2026-10-23: the organization administrator's factual
-  // review of an ordinary internal evidence summary.
+  // review and final release of an ordinary internal evidence summary.
   "reviewInternalDraftFactualContent",
+  "releaseInternalReports",
 ]);
 
 // Terminal claim review outcome the generation repository always rejects
@@ -398,6 +399,17 @@ export const INTERNAL_DRAFT_FACTUAL_REVIEW_REASON_MESSAGES = Object.freeze({
   processing_permission_not_established: "A cited source no longer permits this use or AI processing.",
 });
 
+// Owner amendment 2026-10-23: why a reviewed draft is released by Get Kinder,
+// or cannot be released now, from the server's organizationRelease codes.
+export const INTERNAL_DRAFT_RELEASE_REASON_MESSAGES = Object.freeze({
+  ...INTERNAL_DRAFT_FACTUAL_REVIEW_REASON_MESSAGES,
+  content_type_requires_get_kinder_review: "Only internal evidence summaries can be released by your organization; Get Kinder releases this type.",
+  audience_requires_get_kinder_review: "Only internal drafts can be released by your organization.",
+  factual_review_not_complete: "The factual review of this draft is not complete.",
+  release_state_not_current: "A cited claim, source or citation changed since this draft was generated.",
+  release_withdrawn_by_get_kinder: "Get Kinder withdrew this release; only Get Kinder can release it again.",
+});
+
 export const INTERNAL_DRAFT_LIMITATION_MESSAGES = Object.freeze({
   internal_use_only: "Internal use only.",
   not_approved_for_external_use: "Not approved for funder or public use, export, or release.",
@@ -411,16 +423,25 @@ export const INTERNAL_DRAFT_RELEASE_STATE_LABELS = Object.freeze({
   awaiting_get_kinder_review: "Awaiting Get Kinder review",
   awaiting_organization_review: "Awaiting your factual review",
   awaiting_get_kinder_release: "Reviewed; awaiting Get Kinder release",
-  released_for_internal_use: "Released by Get Kinder for internal use",
+  awaiting_organization_release: "Reviewed; awaiting your release decision",
+  released_for_internal_use: "Released for internal use",
   release_no_longer_valid: "Released earlier; no longer available",
   release_status_unavailable: "Release status not available",
 });
 
 export const INTERNAL_DRAFT_RELEASE_STATE_MESSAGES = Object.freeze({
   awaiting_get_kinder_review: "Get Kinder reviews a draft before it can be released.",
-  awaiting_organization_review: "A draft's factual review is completed before Get Kinder can release it.",
+  awaiting_organization_review: "A draft's factual review is completed before it can be released.",
   awaiting_get_kinder_release: "The factual review of this draft is complete. Get Kinder has not released it yet; there is nothing to download.",
-  released_for_internal_use: "Get Kinder released this report for your organization's internal use. It is not approved for funders or the public.",
+  awaiting_organization_release: "The factual review of this draft is complete. Nothing is released until your organization's administrator decides to release it.",
+  released_for_internal_use: "This report is released for your organization's internal use. It is not approved for funders or the public.",
   release_no_longer_valid: "This release can no longer be opened: Get Kinder withdrew it, or a source or claim it relies on changed. Ask Get Kinder to review it again.",
   release_status_unavailable: "Released reports cannot be opened from here right now.",
+});
+
+// Owner amendment 2026-10-23: who made the release, from the role recorded on
+// its final-release decision.
+export const INTERNAL_DRAFT_RELEASED_BY_LABELS = Object.freeze({
+  your_organization: "Released by your organization",
+  get_kinder: "Released by Get Kinder",
 });
