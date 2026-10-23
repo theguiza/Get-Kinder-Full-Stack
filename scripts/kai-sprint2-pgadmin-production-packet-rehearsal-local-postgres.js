@@ -252,7 +252,7 @@ function rehearse() {
   // Scenario 1: the 2026-09-16 production state, full forward run.
   console.log("Scenario 1: replica of the owner-captured production schema; full forward run");
   buildReplica("kai_pgadmin_packet_replica_forward_synthetic");
-  let rows = runPacketQuery("00_PRODUCTION_PREFLIGHT_READ_ONLY.sql");
+  let rows = runPacketQuery("00_RECONCILED_PRODUCTION_PREFLIGHT_READ_ONLY.sql");
   expect(rows.filter((row) => row.status === "FAIL").length === 0, "preflight on the captured production state has no FAIL row", rows);
   expect(JSON.stringify(migrationStates(rows)) === JSON.stringify({ M01: "REQUIRED", M02: "REQUIRED", M03: "REQUIRED", M04: "REQUIRED" }),
     "preflight reports all four packet migrations REQUIRED on the captured production state", rows);
@@ -269,7 +269,7 @@ function rehearse() {
   }
   rows = runPacketQuery("99_FINAL_SCHEMA_VERIFICATION_READ_ONLY.sql");
   expect(overall(rows).status === "PASS" && rows.every((row) => ["PASS", "INFO"].includes(row.status)), "final verification PASSES after the four migrations", rows);
-  rows = runPacketQuery("00_PRODUCTION_PREFLIGHT_READ_ONLY.sql");
+  rows = runPacketQuery("00_RECONCILED_PRODUCTION_PREFLIGHT_READ_ONLY.sql");
   expect(JSON.stringify(migrationStates(rows)) === JSON.stringify({ M01: "ALREADY_APPLIED", M02: "ALREADY_APPLIED", M03: "ALREADY_APPLIED", M04: "ALREADY_APPLIED" }),
     "a second preflight reports every migration ALREADY_APPLIED", rows);
   expect(overall(rows).status === "NOTHING_TO_RUN", "a second preflight OVERALL is NOTHING_TO_RUN", rows);
@@ -295,7 +295,7 @@ function rehearse() {
 
   // Full rollback in reverse order returns the captured production state.
   for (let i = 3; i >= 0; i -= 1) psqlFile(join(packetDir, rollbackFile(i)));
-  rows = runPacketQuery("00_PRODUCTION_PREFLIGHT_READ_ONLY.sql");
+  rows = runPacketQuery("00_RECONCILED_PRODUCTION_PREFLIGHT_READ_ONLY.sql");
   expect(JSON.stringify(migrationStates(rows)) === JSON.stringify({ M01: "REQUIRED", M02: "REQUIRED", M03: "REQUIRED", M04: "REQUIRED" })
     && overall(rows).status === "READY", "after R04..R01 the preflight again reports the captured production state", rows);
 
@@ -304,23 +304,49 @@ function rehearse() {
   buildReplica("kai_pgadmin_packet_replica_partial_history_synthetic");
   psqlFile(join(packetDir, packetMigrationFile(0)));
   psqlFile(join(packetDir, packetMigrationFile(1)));
-  rows = runPacketQuery("00_PRODUCTION_PREFLIGHT_READ_ONLY.sql");
+  psqlExec(`ALTER TABLE kai.review_queue_items
+    ADD CONSTRAINT review_queue_items_p2_01_evidence_review_required_action_check
+    CHECK (queue_type <> 'evidence_review'::text OR required_action IS NOT NULL
+      AND length(btrim(required_action)) >= 1 AND length(btrim(required_action)) <= 2000);`);
+  rows = runPacketQuery("00_RECONCILED_PRODUCTION_PREFLIGHT_READ_ONLY.sql");
+  expect(rows.find((row) => row.check_id === "B_TABLE kai.review_queue_items").status === "PASS",
+    "row 324 PASSES with the exact additional P2-01 evidence-review CHECK", rows);
   expect(JSON.stringify(migrationStates(rows)) === JSON.stringify({ M01: "ALREADY_APPLIED", M02: "ALREADY_APPLIED", M03: "REQUIRED", M04: "REQUIRED" })
-    && /run in order: 03, 04$/.test(overall(rows).observed), "preflight asks only for 03, 04 when 01 and 02 are present", rows);
+    && overall(rows).status === "READY" && /run in order: 03, 04$/.test(overall(rows).observed),
+    "preflight is READY for only 03, 04 when 01 and 02 and the documented P2-01 CHECK are present", rows);
+
+  console.log("Scenario 2b: same constraint name with a different definition remains drift");
+  buildReplica("kai_pgadmin_packet_replica_constraint_drift_synthetic");
+  psqlExec(`ALTER TABLE kai.review_queue_items
+    ADD CONSTRAINT review_queue_items_p2_01_evidence_review_required_action_check
+    CHECK (queue_type <> 'evidence_review'::text OR required_action IS NOT NULL);`);
+  rows = runPacketQuery("00_RECONCILED_PRODUCTION_PREFLIGHT_READ_ONLY.sql");
+  expect(rows.find((row) => row.check_id === "B_TABLE kai.review_queue_items").status === "FAIL"
+    && overall(rows).status === "STOP",
+    "row 324 still FAILS for a same-name P2-01 CHECK with a different definition", rows);
+
+  console.log("Scenario 2c: missing captured constraint remains drift");
+  buildReplica("kai_pgadmin_packet_replica_missing_constraint_synthetic");
+  psqlExec("ALTER TABLE kai.review_queue_items DROP CONSTRAINT review_queue_items_p2_03_claim_review_required_action_check;");
+  rows = runPacketQuery("00_RECONCILED_PRODUCTION_PREFLIGHT_READ_ONLY.sql");
+  expect(rows.find((row) => row.check_id === "B_TABLE kai.review_queue_items").status === "FAIL"
+    && /review_queue_items_p2_03_claim_review_required_action_check missing/.test(rows.find((row) => row.check_id === "B_TABLE kai.review_queue_items").observed)
+    && overall(rows).status === "STOP",
+    "row 324 still detects a missing captured CHECK", rows);
 
   // Scenario 3: a half-applied release migration must STOP.
   console.log("Scenario 3: partial release-authority state");
   buildReplica("kai_pgadmin_packet_replica_partial_release_synthetic");
   psqlExec(`ALTER TABLE kai.limitation_snapshots DROP CONSTRAINT limitation_snapshots_p3_16_confirmed_by_role_check,
     ADD CONSTRAINT limitation_snapshots_p3_16_confirmed_by_role_check CHECK (confirmed_by_role IN ('gk_reviewer', 'gk_admin', 'client_admin'));`);
-  rows = runPacketQuery("00_PRODUCTION_PREFLIGHT_READ_ONLY.sql");
+  rows = runPacketQuery("00_RECONCILED_PRODUCTION_PREFLIGHT_READ_ONLY.sql");
   expect(migrationStates(rows).M04 === "STOP_INCOMPATIBLE" && overall(rows).status === "STOP", "a widened snapshot CHECK without the decision CHECK and triggers is STOP_INCOMPATIBLE", rows);
 
   // Scenario 4: drift on a workflow table must STOP.
   console.log("Scenario 4: unexpected constraint on a workflow table");
   buildReplica("kai_pgadmin_packet_replica_drift_synthetic");
   psqlExec("ALTER TABLE kai.generated_content_drafts ADD CONSTRAINT unexpected_drift_check CHECK (requested_audience <> 'internal');");
-  rows = runPacketQuery("00_PRODUCTION_PREFLIGHT_READ_ONLY.sql");
+  rows = runPacketQuery("00_RECONCILED_PRODUCTION_PREFLIGHT_READ_ONLY.sql");
   expect(rows.find((row) => row.check_id === "B_TABLE kai.generated_content_drafts").status === "FAIL" && overall(rows).status === "STOP",
     "an extra CHECK on kai.generated_content_drafts FAILS the baseline and STOPS", rows);
 
@@ -330,7 +356,7 @@ function rehearse() {
   const opDef = scalar("SELECT pg_get_constraintdef(oid) FROM pg_constraint WHERE conname = 'upload_lifecycle_audit_gate_a_operation_check'");
   psqlExec(`ALTER TABLE kai.upload_lifecycle_audit DROP CONSTRAINT upload_lifecycle_audit_gate_a_operation_check;
     ALTER TABLE kai.upload_lifecycle_audit ADD CONSTRAINT upload_lifecycle_audit_gate_a_operation_check ${opDef.replace(" OR (operation = ANY (ARRAY['limitation_snapshot_confirmed'::text, 'export_candidate_created'::text]))", "")};`);
-  rows = runPacketQuery("00_PRODUCTION_PREFLIGHT_READ_ONLY.sql");
+  rows = runPacketQuery("00_RECONCILED_PRODUCTION_PREFLIGHT_READ_ONLY.sql");
   expect(rows.find((row) => row.check_id === "B04").status === "FAIL" && /limitation_snapshot_confirmed/.test(rows.find((row) => row.check_id === "B04").observed) && overall(rows).status === "STOP",
     "B04 FAILS and names limitation_snapshot_confirmed when the audit vocabulary lacks it", rows);
 
@@ -338,7 +364,7 @@ function rehearse() {
   console.log("Scenario 6: the repository's normal chain without the packet migrations");
   createDatabase("kai_pgadmin_packet_chain_synthetic");
   buildChainWithout(PACKET_MIGRATIONS);
-  rows = runPacketQuery("00_PRODUCTION_PREFLIGHT_READ_ONLY.sql");
+  rows = runPacketQuery("00_RECONCILED_PRODUCTION_PREFLIGHT_READ_ONLY.sql");
   const chainStates = migrationStates(rows);
   expect(chainStates.M01 === "REQUIRED" && chainStates.M02 === "ALREADY_APPLIED" && chainStates.M03 === "REQUIRED" && chainStates.M04 === "REQUIRED",
     "on the repository chain the preflight sees B1A-02 already admitted by the edited historical migration", rows);

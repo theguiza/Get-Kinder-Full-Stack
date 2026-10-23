@@ -43813,3 +43813,17 @@ real client data, global GK role change, or `00_KAI_CURRENT_STATE.md` change.
 - deployed customer acceptance.
 
 **Status:** PGADMIN_PRODUCTION_MIGRATION_PACKET_PREPARED_LOCAL; production readiness is not claimed until the owner's `00` CSV is reviewed. No production SQL, push, deployment, flag, tenant, credential, real client data, or `00_KAI_CURRENT_STATE.md` change.
+
+### Plan A: reconcile the P2-01 evidence-review CHECK in the read-only preflight (2026-10-23)
+
+**Owner authorization (USER_CONFIRMED):** the request to correct the production preflight's row 324 result and rehearse the correction. This permits local packet changes and the disposable local rehearsal only; production remains untouched.
+
+**Cause (TOOL_VERIFIED):** the generated row 324 full-joins observed `kai.review_queue_items` constraints to the 2026-09-16 capture. That capture predates `review_queue_items_p2_01_evidence_review_required_action_check`, so the live CHECK was reported as an unexpected constraint and made row 324 FAIL. The P2-01 migration and provenance-aware table-diff evidence identify the exact intended definition. The prior SQL had no corresponding exception.
+
+**Correction:** the builder now exempts only that constraint name with normalized definition fingerprint `d621e22614c0cb9ed33d0b32c4190f31`, and only in the `review_queue_items` comparison. `IS DISTINCT FROM` keeps missing captured constraints detectable. The canonical `00_PRODUCTION_PREFLIGHT_READ_ONLY.sql` and delivery copy `00_RECONCILED_PRODUCTION_PREFLIGHT_READ_ONLY.sql` are generated from the same query. All other table comparisons remain strict. `99` uses the same narrow reconciliation in its workflow-table comparison.
+
+**Verification (TOOL_VERIFIED; disposable PostgreSQL 16 loopback rehearsal; `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel`):** `node scripts/kai-sprint2-pgadmin-production-packet-rehearsal-local-postgres.js rehearse` passed 29 assertions. With 01/02 present and the exact P2-01 CHECK present, row 324 PASSes, M01/M02 are `ALREADY_APPLIED`, M03/M04 are `REQUIRED`, and OVERALL is `READY` with `run in order: 03, 04`. The same-name CHECK with a different definition still FAILs row 324; removing a captured CHECK still FAILs row 324; unrelated extra CHECK drift still stops. The historical 2026-09-16 replica without the additional CHECK continues to pass preflight.
+
+**Remaining:** today's production catalog and the owner's reported CSV are not present in this repository, so live production readiness is NOT_CONFIRMED. The correction is proven against the documented schema shape containing the exact P2-01 CHECK and against the local packet rehearsal. No migration was run in production or any shared database; no deployment or `00_KAI_CURRENT_STATE.md` change occurred.
+
+**Status:** PGADMIN_PREFLIGHT_ROW_324_RECONCILED_LOCAL; production result awaits the owner's next read-only preflight CSV.

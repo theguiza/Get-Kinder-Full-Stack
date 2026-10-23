@@ -360,12 +360,17 @@ function sectionB(final) {
                FROM ${valuesBlock(baselineEnums, ["name", "labels"], "e")}
               WHERE NOT coalesce((SELECT array_agg(en.enumlabel::text) FROM pg_enum en JOIN pg_type t ON t.oid = en.enumtypid
                                    WHERE t.typnamespace = 'kai'::regnamespace AND t.typname = e.name), '{}') @> string_to_array(e.labels, ',')) x`);
-  // Per-table exact comparison with the 2026-09-16 production capture.
+  // Per-table comparison with the 2026-09-16 production capture. The one
+  // documented P2-01 CHECK is accepted only when its name and definition hash
+  // exactly match the repository migration and supplied table-diff evidence.
   const tableRows = WORKFLOW_TABLES.map((table, i) => {
     const owned = PRODUCTION_OWNED_TABLES.includes(table);
+    const constraintProblemCondition = table === "review_queue_items"
+      ? "(e.name IS NULL OR a.name IS NULL OR a.md5 <> e.md5) AND (a.name IS DISTINCT FROM 'review_queue_items_p2_01_evidence_review_required_action_check' OR a.md5 IS DISTINCT FROM 'd621e22614c0cb9ed33d0b32c4190f31')"
+      : "e.name IS NULL OR a.name IS NULL OR a.md5 <> e.md5";
     return `SELECT ${300 + i}, 'B_BASELINE', ${lit(`B_TABLE kai.${table}`)},
             CASE WHEN p.problems IS NULL THEN 'PASS' WHEN ${owned ? "true" : "false"} THEN 'WARN' ELSE 'FAIL' END,
-            ${lit(`columns, constraints, unique indexes and triggers identical to the 2026-09-16 production capture${owned ? " (production-owned table)" : ""}`)},
+            ${lit(`${table === "review_queue_items" ? "columns, constraints, unique indexes and triggers match the 2026-09-16 capture, allowing only the exact documented P2-01 evidence-review CHECK" : "columns, constraints, unique indexes and triggers identical to the 2026-09-16 production capture"}${owned ? " (production-owned table)" : ""}`)},
             coalesce(p.problems, 'identical'),
             ${lit(owned ? "Production-owned: no packet migration touches it; a WARN is reported, not blocking" : final ? "Packet-owned objects are checked in section C" : "Any difference here means production changed after the last capture: STOP")}
        FROM (SELECT nullif(concat_ws('; ',
@@ -378,7 +383,7 @@ function sectionB(final) {
               (SELECT string_agg('constraint ' || coalesce(e.name, a.name) || CASE WHEN e.name IS NULL THEN ' unexpected: ' || a.def WHEN a.name IS NULL THEN ' missing' ELSE ' changed: ' || a.def END, ', ' ORDER BY coalesce(e.name, a.name))
                  FROM (SELECT * FROM baseline_constraints WHERE tbl = ${lit(table)}) e
                  FULL JOIN (SELECT * FROM actual_constraints WHERE tbl = ${lit(table)}) a ON a.name = e.name
-                WHERE e.name IS NULL OR a.name IS NULL OR a.md5 <> e.md5),
+                WHERE ${constraintProblemCondition}),
               (SELECT string_agg('unique index ' || coalesce(e.name, a.name) || CASE WHEN e.name IS NULL THEN ' unexpected: ' || a.def WHEN a.name IS NULL THEN ' missing' ELSE ' changed: ' || a.def END, ', ' ORDER BY coalesce(e.name, a.name))
                  FROM (SELECT * FROM baseline_unique_indexes WHERE tbl = ${lit(table)}) e
                  FULL JOIN (SELECT * FROM actual_unique_indexes WHERE tbl = ${lit(table)}) a ON a.name = e.name
@@ -558,11 +563,15 @@ const passOverall = (what) => `SELECT 999, 'OVERALL', 'OVERALL',
 const files = {};
 files["00_PRODUCTION_PREFLIGHT_READ_ONLY.sql"] = header("00 production preflight",
   "Decides, from the live catalog, which of the four migrations production needs.", [
-    "Sections: A environment and privileges; B prerequisites and an exact comparison of every",
-    "workflow table with the 2026-09-16 production capture; C the state of each packet migration",
+    "Sections: A environment and privileges; B prerequisites and comparison of every workflow",
+    "table with the 2026-09-16 capture (including one exact, documented P2-01 CHECK); C migration state",
     "(REQUIRED / ALREADY_APPLIED / STOP_INCOMPATIBLE). Last row OVERALL: READY (with the exact run",
     "order), NOTHING_TO_RUN, or STOP.",
   ]) + wrap([...sectionA(), ...sectionB(false).rows, ...migrationStateRows()], baselineCtes(), preflightOverall);
+// Reconciled delivery name for the owner-reported production state. Keep the
+// canonical packet filename above as well so existing packet tooling remains
+// compatible; both files contain the same read-only query.
+files["00_RECONCILED_PRODUCTION_PREFLIGHT_READ_ONLY.sql"] = files["00_PRODUCTION_PREFLIGHT_READ_ONLY.sql"];
 const verifierTitles = {
   "01": ["01V_VERIFY_AFTER_p1_downstream_recovery_state_READ_ONLY.sql", "01V verification after 01 (P1 downstream recovery state)"],
   "02": ["02V_VERIFY_AFTER_b1a_02_client_admin_sensitivity_review_READ_ONLY.sql", "02V verification after 02 (client_admin sensitivity review)"],

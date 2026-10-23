@@ -10,7 +10,8 @@
 
 | File | Kind | Changes production? |
 | --- | --- | --- |
-| `00_PRODUCTION_PREFLIGHT_READ_ONLY.sql` | one `SELECT` | No |
+| `00_RECONCILED_PRODUCTION_PREFLIGHT_READ_ONLY.sql` | one `SELECT` (recommended reconciled preflight) | No |
+| `00_PRODUCTION_PREFLIGHT_READ_ONLY.sql` | same corrected query under the original packet name | No |
 | `01_MIGRATION_kai_sprint2_p1_downstream_recovery_state.sql` | migration (verbatim) | **Yes** |
 | `01V_VERIFY_AFTER_p1_downstream_recovery_state_READ_ONLY.sql` | one `SELECT` | No |
 | `02_MIGRATION_kai_sprint2_b1a_02_client_admin_sensitivity_review.sql` | migration (verbatim) | **Yes** |
@@ -43,7 +44,7 @@ Source paths and SHA-256 checksums are listed in `SOURCE_MANIFEST.md`. Each migr
 
 | | |
 | --- | --- |
-| Open | `00_PRODUCTION_PREFLIGHT_READ_ONLY.sql` |
+| Open | `00_RECONCILED_PRODUCTION_PREFLIGHT_READ_ONLY.sql` |
 | Prerequisite | none |
 | Action | Execute script (F5) |
 | Expected | Data Output: 60 rows (59 checks, then `OVERALL`); it runs in well under a second locally |
@@ -61,7 +62,7 @@ What the rows mean:
   - `evidence_summary` admitted by the three content-type CHECKs;
   - all 35 audit operations admitted;
   - the enum labels.
-- **`B_TABLE kai.<table>`**, one row per workflow table: an exact comparison of columns, constraints, unique indexes and triggers with your 2026-09-16 pgAdmin capture.
+- **`B_TABLE kai.<table>`**, one row per workflow table: a comparison of columns, constraints, unique indexes and triggers with your 2026-09-16 pgAdmin capture. Row 324 also accepts the exact named and defined P2-01 evidence-review required-action CHECK documented in the repository; every other extra, missing or changed constraint still blocks.
   - `FAIL` (repository-owned table) means production changed after that capture in a way these files were not built for: STOP.
   - `WARN` appears only for production-owned tables (`users`, `organizations`, `engagements`, `audit_events`, `intake_files`, `organization_memberships`, `user_roles`, `roles`). It does not block, because no migration here touches them. Still include WARN rows when you report back.
 - **M01–M04**: one of `REQUIRED`, `ALREADY_APPLIED`, or `STOP_INCOMPATIBLE` (a partial or different state).

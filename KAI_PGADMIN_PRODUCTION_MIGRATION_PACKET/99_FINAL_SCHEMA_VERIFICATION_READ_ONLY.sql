@@ -1947,7 +1947,7 @@ checks(seq, section, check_id, status, expected, observed, detail) AS (
   UNION ALL
   SELECT 324, 'B_BASELINE', 'B_TABLE kai.review_queue_items',
               CASE WHEN p.problems IS NULL THEN 'PASS' WHEN false THEN 'WARN' ELSE 'FAIL' END,
-              'columns, constraints, unique indexes and triggers identical to the 2026-09-16 production capture',
+              'columns, constraints, unique indexes and triggers match the 2026-09-16 capture, allowing only the exact documented P2-01 evidence-review CHECK',
               coalesce(p.problems, 'identical'),
               'Packet-owned objects are checked in section C'
          FROM (SELECT nullif(concat_ws('; ',
@@ -1960,7 +1960,7 @@ checks(seq, section, check_id, status, expected, observed, detail) AS (
                 (SELECT string_agg('constraint ' || coalesce(e.name, a.name) || CASE WHEN e.name IS NULL THEN ' unexpected: ' || a.def WHEN a.name IS NULL THEN ' missing' ELSE ' changed: ' || a.def END, ', ' ORDER BY coalesce(e.name, a.name))
                    FROM (SELECT * FROM baseline_constraints WHERE tbl = 'review_queue_items') e
                    FULL JOIN (SELECT * FROM actual_constraints WHERE tbl = 'review_queue_items') a ON a.name = e.name
-                  WHERE e.name IS NULL OR a.name IS NULL OR a.md5 <> e.md5),
+                  WHERE (e.name IS NULL OR a.name IS NULL OR a.md5 <> e.md5) AND (a.name IS DISTINCT FROM 'review_queue_items_p2_01_evidence_review_required_action_check' OR a.md5 IS DISTINCT FROM 'd621e22614c0cb9ed33d0b32c4190f31')),
                 (SELECT string_agg('unique index ' || coalesce(e.name, a.name) || CASE WHEN e.name IS NULL THEN ' unexpected: ' || a.def WHEN a.name IS NULL THEN ' missing' ELSE ' changed: ' || a.def END, ', ' ORDER BY coalesce(e.name, a.name))
                    FROM (SELECT * FROM baseline_unique_indexes WHERE tbl = 'review_queue_items') e
                    FULL JOIN (SELECT * FROM actual_unique_indexes WHERE tbl = 'review_queue_items') a ON a.name = e.name
