@@ -127,6 +127,28 @@ const ACCEPTANCE_SPECS = Object.freeze([
   "__tests__/kai-client-admin-source-promotion-browser-acceptance.integration.spec.js",
   "__tests__/kai-client-admin-source-preparation-continuation-browser-acceptance.integration.spec.js",
   "__tests__/kai-source-to-impact-workflow-browser-acceptance.integration.spec.js",
+  "__tests__/kai-client-admin-measurement-to-released-report-browser-acceptance.integration.spec.js",
+]);
+// Specs that also need the generated-draft export path (review start audit,
+// export review, limitation snapshot, candidate, final-release authority,
+// manifest) and the P2-01M measurement schema. Applied after the shared list,
+// in repository introduction order, only for these specs, so every other
+// spec keeps exactly its fixture.
+const EXPORT_PATH_SPECS = new Set([
+  "__tests__/kai-client-admin-measurement-to-released-report-browser-acceptance.integration.spec.js",
+]);
+const EXPORT_PATH_MIGRATIONS = Object.freeze([
+  "kai_sprint2_p3_05_export_review_request",
+  "kai_sprint2_p3_09_export_review_start",
+  "kai_sprint2_p3_13_export_review_completion",
+  "kai_sprint2_p3_16_export_candidate_foundation",
+  "kai_sprint2_p3_17_human_authority_decision_ledger",
+  "kai_sprint2_p3_17_authority_audit_gate_a_operation_repair",
+  "kai_sprint2_p3_19_export_manifest_foundation",
+  "kai_sprint2_p3_20_export_manifest_review_binding",
+  "kai_sprint2_generated_content_review_start_audit_contract",
+  "kai_sprint2_p14_15_export_candidate_content_type_evolution",
+  "kai_sprint2_p2_01m_source_record_count_measurement",
 ]);
 const acceptanceSpec = process.argv[2] || ACCEPTANCE_SPECS[0];
 if (!ACCEPTANCE_SPECS.includes(acceptanceSpec)) {
@@ -256,6 +278,9 @@ try {
     "kai_sprint2_gk_organization_tenant_binding",
   ]) {
     psqlFile(`migrations/${migration}.sql`);
+  }
+  if (EXPORT_PATH_SPECS.has(acceptanceSpec)) {
+    for (const migration of EXPORT_PATH_MIGRATIONS) psqlFile(`migrations/${migration}.sql`);
   }
   // No repository migration creates kai.intake_batches (a pre-migration base
   // table, like kai.audit_events), and the synthetic kai.intake_files above

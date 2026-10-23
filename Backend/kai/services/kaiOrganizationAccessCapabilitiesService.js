@@ -2,6 +2,7 @@ import { __generatedContentServiceContract } from "./kaiGeneratedContentService.
 import { __generatedDraftLibraryServiceContract } from "./kaiGeneratedDraftLibraryService.js";
 import { __humanReviewServiceContract } from "./kaiHumanReviewService.js";
 import { __evidenceLineageServiceContract } from "./kaiEvidenceLineageService.js";
+import { __sourceMeasurementServiceContract } from "./kaiSourceMeasurementService.js";
 import { __evidenceCoverageAssessmentServiceContract } from "./kaiEvidenceCoverageAssessmentService.js";
 import { __claimProposalServiceContract } from "./kaiClaimProposalService.js";
 import { __claimGapFollowupServiceContract } from "./kaiClaimGapFollowupService.js";
@@ -179,6 +180,14 @@ function workflowOperations(actorContext, organizationId) {
     extractEvidence: validateActorCanPerformOperation(
       actorContext, __evidenceLineageServiceContract.EVIDENCE_LINEAGE_OPERATION, organizationId,
       { allowedRoles: __evidenceLineageServiceContract.EVIDENCE_LINEAGE_ALLOWED_ROLES },
+    ).ok === true,
+    recordSourceMeasurement: validateActorCanPerformOperation(
+      actorContext, __sourceMeasurementServiceContract.SOURCE_MEASUREMENT_OPERATION, organizationId,
+      { allowedRoles: __sourceMeasurementServiceContract.SOURCE_MEASUREMENT_ALLOWED_ROLES },
+    ).ok === true,
+    readReleasedInternalReports: validateActorCanPerformOperation(
+      actorContext, __clientGeneratedContentServiceContract.CLIENT_RELEASED_REPORT_OPERATION, organizationId,
+      { allowedRoles: __clientGeneratedContentServiceContract.CLIENT_RELEASED_REPORT_READ_ROLES },
     ).ok === true,
     assessEvidenceCoverage: validateActorCanPerformOperation(
       actorContext, __evidenceCoverageAssessmentServiceContract.EVIDENCE_COVERAGE_ASSESSMENT_OPERATION, organizationId,

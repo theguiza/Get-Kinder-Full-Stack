@@ -53,6 +53,7 @@ import {
 import ClientInternalDrafts from "./ClientInternalDrafts.jsx";
 import ClientSensitivityReviewPanel from "./ClientSensitivityReviewPanel.jsx";
 import ClientSourcePromotionPanel from "./ClientSourcePromotionPanel.jsx";
+import ClientSourceMeasurementPanel from "./ClientSourceMeasurementPanel.jsx";
 
 const DRAFT_LABELS = Object.freeze({
   evidence_summary: "Internal evidence summary",
@@ -209,6 +210,12 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
   };
 
   const proposedByEvidence = claimIdsByEvidenceItem(claims.items);
+
+  // One open record-count measurement panel (Plan A Prompt 8), for one
+  // current source version of this organization.
+  const [measuring, setMeasuring] = useState(null);
+  useEffect(() => { setMeasuring(null); }, [organizationId, engagementId]);
+  const openMeasurement = measuring && measuring.contextKey === contextKey ? measuring.sourceVersionId : null;
 
   // One open source-preparation panel, keyed to organization + Project + file.
   const [preparation, setPreparation] = useState(null);
@@ -462,7 +469,7 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
         <h5 className="mb-2">Data Sources</h5>
         <div className="small text-muted mb-2">
           Sources appear here once an uploaded file has been reviewed and promoted. Extract evidence from a source version
-          to see what it supports.
+          to see what it supports, or count its records under your own definition of what one record represents.
         </div>
         {sources.status === "loading" ? <div className="text-muted small">Loading sources...</div> : null}
         {sources.status === "error" ? <div className="alert alert-warning py-2 small">Sources could not be loaded. {sources.message}</div> : null}
@@ -483,6 +490,19 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
                         onClick={() => extract(version.sourceVersionId)}>
                         {pending === `extract:${version.sourceVersionId}` ? "Extracting..." : "Extract evidence"}
                       </button>
+                    ) : null}
+                    {access.recordSourceMeasurement && version.isCurrent && isRouteUuid(version.sourceVersionId) ? (
+                      <button type="button" className="btn btn-sm btn-outline-secondary" data-client-open-source-measurement={version.sourceVersionId}
+                        onClick={() => setMeasuring({ contextKey, sourceVersionId: version.sourceVersionId })}>
+                        Count records
+                      </button>
+                    ) : null}
+                    {openMeasurement === version.sourceVersionId ? (
+                      <div className="w-100">
+                        <ClientSourceMeasurementPanel key={`${contextKey}:${version.sourceVersionId}`} organizationId={organizationId}
+                          sourceVersionId={version.sourceVersionId} canProposeClaim={access.proposeClaim}
+                          onClose={() => setMeasuring(null)} onRecorded={refresh} />
+                      </div>
                     ) : null}
                   </div>
                 ))}
@@ -602,11 +622,13 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
         <div className="admin-card mb-3" data-client-internal-drafts="">
           <h5 className="mb-2">Your internal drafts</h5>
           <div className="small text-muted mb-2">
-            Drafts generated for this Project, with their actual Get Kinder review state. Internal use only: reading a draft does not
-            approve it for funders or the public, and nothing here exports or releases it.
+            Drafts generated for this Project, with their actual Get Kinder review and release state. Internal use only: reading a
+            draft does not approve it for funders or the public, and nothing here releases it. A report Get Kinder has released for
+            internal use can be opened here while that release is valid.
           </div>
           <ClientInternalDrafts organizationId={organizationId} engagementId={engagementId} claims={claims.items}
-            refreshToken={draftsRefreshToken} focusDraftId={lastDraft?.generatedContentDraftId || null} />
+            refreshToken={draftsRefreshToken} focusDraftId={lastDraft?.generatedContentDraftId || null}
+            canReadReleasedReports={access.readReleasedInternalReports === true} />
         </div>
       ) : null}
     </div>

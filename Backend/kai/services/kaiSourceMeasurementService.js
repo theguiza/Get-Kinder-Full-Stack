@@ -37,6 +37,24 @@ function isRecordInput(value) {
     && isNormalizedNow(value.now);
 }
 
+// One admission for the write and the read-only basis: a mapped human with
+// the P2-01 extraction authority in this organization, before any read.
+function admitMeasurementActor(actorContext, organizationId) {
+  if (actorContext?.actorType !== "human" || !isNonEmptyString(actorContext?.actorUserId)) {
+    return buildKaiError("authorization_denied");
+  }
+  const auth = validateActorCanPerformOperation(actorContext, SOURCE_MEASUREMENT_OPERATION, organizationId, {
+    allowedRoles: SOURCE_MEASUREMENT_ALLOWED_ROLES,
+  });
+  if (!auth.ok) return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers });
+  const tenant = validateTenantBoundaryConsistency({
+    expectedOrganizationId: organizationId,
+    payload: { organization_id: organizationId },
+  });
+  if (tenant.severity === "blocker") return buildKaiError("tenant_boundary_violation", { blockers: [tenant] });
+  return null;
+}
+
 async function createDefaultRepository() {
   const { createPostgresSourceMeasurementRepository } = await import("../dictionary/postgresSourceMeasurementRepository.js");
   return createPostgresSourceMeasurementRepository();
@@ -57,19 +75,8 @@ export async function recordSourceRecordCountMeasurement(input, dependencies = {
   if (!isRecordInput(input)) return buildKaiError("validation_blocker");
 
   const { actorContext } = input;
-  if (actorContext.actorType !== "human" || !isNonEmptyString(actorContext.actorUserId)) {
-    return buildKaiError("authorization_denied");
-  }
-  const auth = validateActorCanPerformOperation(actorContext, SOURCE_MEASUREMENT_OPERATION, input.organizationId, {
-    allowedRoles: SOURCE_MEASUREMENT_ALLOWED_ROLES,
-  });
-  if (!auth.ok) return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers });
-
-  const tenant = validateTenantBoundaryConsistency({
-    expectedOrganizationId: input.organizationId,
-    payload: { organization_id: input.organizationId },
-  });
-  if (tenant.severity === "blocker") return buildKaiError("tenant_boundary_violation", { blockers: [tenant] });
+  const denied = admitMeasurementActor(actorContext, input.organizationId);
+  if (denied) return denied;
 
   const definition = validateRecordCountDefinition(input.definition);
   if (!definition.ok) return buildKaiError(definition.code, { blockers: definition.blockers });
@@ -81,6 +88,36 @@ export async function recordSourceRecordCountMeasurement(input, dependencies = {
     definition: definition.definition,
     actorUserId: actorContext.actorUserId,
     now: input.now,
+  });
+  if (!result.ok) {
+    return buildKaiError(result.error.code, {
+      status: result.error.status,
+      ...(Array.isArray(result.error.blockers) ? { blockers: result.error.blockers } : {}),
+    });
+  }
+  return { ok: true, data: result.data, error: null };
+}
+
+/**
+ * Read-only basis for recording the measurement (Plan A Prompt 8): the
+ * authoritative profile counts and calculation for the exact promoted,
+ * current, permitted version (or the structured reason it cannot be
+ * measured), and any definition, measurement, limitations, and claim already
+ * recorded for it. Same admission as the write; writes nothing.
+ */
+export async function getSourceRecordCountMeasurementBasis(input, dependencies = {}) {
+  if (!isKaiSprint2Enabled(dependencies.env || process.env)) return buildKaiError("feature_disabled");
+  const allowedKeys = new Set(["organizationId", "sourceVersionId", "actorContext"]);
+  if (!isPlainObject(input) || Object.keys(input).length !== allowedKeys.size || !Object.keys(input).every((key) => allowedKeys.has(key))
+    || !isNonEmptyString(input.organizationId) || !isNonEmptyString(input.sourceVersionId) || !isPlainObject(input.actorContext)) {
+    return buildKaiError("validation_blocker");
+  }
+  const denied = admitMeasurementActor(input.actorContext, input.organizationId);
+  if (denied) return denied;
+  const repository = dependencies.sourceMeasurementRepository || (await createDefaultRepository());
+  const result = await repository.readSourceRecordCountMeasurementBasis({
+    organizationId: input.organizationId,
+    sourceVersionId: input.sourceVersionId,
   });
   if (!result.ok) {
     return buildKaiError(result.error.code, {

@@ -27,6 +27,8 @@ import {
   computeDefinitionFingerprint,
   composeMeasurementEvidenceStatement,
   deriveRecordCountMeasurement,
+  describeMeasurementLimitationCode,
+  measurementLimitationCodes,
   validateComposedStatement,
 } from "../validators/kaiSourceMeasurementValidators.js";
 
@@ -227,6 +229,50 @@ function sameMeasurement(row, { evidenceItemId, definitionId, measurement, profi
     && row.profile_canonical_sha256 === profileCanonicalSha256;
 }
 
+// The exact promoted, current, permitted source version a record count is
+// measured from: the unchanged P2-01 lineage and currentness validators, the
+// effective allowed use, the committed P1 profile the version was derived
+// from, and the deterministic derivation. Shared by the write and the
+// read-only basis so both answer from the same rules.
+async function loadMeasurableSourceVersion(tx, { organizationId, sourceVersionId }) {
+  const refuse = (code, blockers) => ({ ok: false, failure: failure(code, blockers) });
+  const sourceVersionRow = await getScopedSourceVersionById({ organizationId, sourceVersionId }, tx);
+  if (!sourceVersionRow) return refuse("not_found");
+  const sourceRow = await getScopedSourceById({ organizationId, sourceId: sourceVersionRow.source_id }, tx);
+  if (!sourceRow) return refuse("not_found");
+  const candidateRow = await getScopedSourceCandidateByIdentity(
+    { organizationId, intakeSourceCandidateId: sourceVersionRow.intake_source_candidate_id },
+    tx,
+  );
+  if (!candidateRow) return refuse("not_found");
+  const decisionRow = await getScopedPromotionDecisionBySourceVersionId({ organizationId, sourceVersionId }, tx);
+  if (!decisionRow) return refuse("not_found");
+  const profileRow = await getScopedSensitivityProfileById(
+    { organizationId, intakeSensitivityProfileId: candidateRow.intake_sensitivity_profile_id },
+    tx,
+  );
+  if (!profileRow) return refuse("not_found");
+  const dictionaryRow = await getScopedDataDictionaryById({ organizationId, dataDictionaryId: candidateRow.data_dictionary_id }, tx);
+  if (!dictionaryRow) return refuse("not_found");
+
+  const lineage = validateEvidenceHasSourceLineage({ sourceVersionRow, sourceRow, candidateRow, decisionRow, profileRow, dictionaryRow });
+  if (!lineage.ok) return refuse(lineage.code);
+
+  const allowedUse = validateEffectiveAllowedUsePermitsOperation(
+    await readEffectiveAllowedUseProhibition(tx, { organizationId, intakeSensitivityProfileId: profileRow.intake_sensitivity_profile_id }),
+    { operation: "record_source_record_count_measurement", objectType: "source_version", objectId: sourceVersionId },
+  );
+  if (!allowedUse.ok) return refuse(allowedUse.code, allowedUse.blockers);
+
+  // The exact profile the promoted version was derived from.
+  const fileProfileRow = await readFileProfile(tx, { organizationId, fileProfileId: candidateRow.file_profile_id });
+  if (!fileProfileRow) return refuse("not_found");
+  if (fileProfileRow.profile_canonical_sha256 !== sourceVersionRow.profile_canonical_sha256) {
+    return refuse("conflict_current_state_changed");
+  }
+  return { ok: true, sourceVersionRow, sourceRow, fileProfileRow, derived: deriveRecordCountMeasurement(fileProfileRow.profile) };
+}
+
 async function resolveDefaultRunInTransaction() {
   const { withTransaction } = await import("../db/kaiDb.js");
   return withTransaction;
@@ -245,45 +291,68 @@ async function resolveDefaultRunInTransaction() {
  */
 export function createPostgresSourceMeasurementRepository({ runInTransaction, insertAuditEvent = insertRequiredSuccessfulAuditEvent } = {}) {
   return Object.freeze({
+    // Read-only (Plan A Prompt 8): what an organization administrator needs
+    // to define the count - the authoritative profile counts and the
+    // calculation, or why this version cannot be measured - and whatever is
+    // already recorded for it, with the measured claim's status.
+    async readSourceRecordCountMeasurementBasis({ organizationId, sourceVersionId }) {
+      const run = runInTransaction || (await resolveDefaultRunInTransaction());
+      try {
+        // Writes nothing. Not a READ ONLY transaction: the shared loader takes
+        // the same source-candidate row lock the write serializes on, so the
+        // basis is read in the write's own order.
+        return await run(async (tx) => {
+          const measurable = await loadMeasurableSourceVersion(tx, { organizationId, sourceVersionId });
+          if (!measurable.ok) return measurable.failure;
+          const { sourceVersionRow, sourceRow, derived } = measurable;
+          const definitionRow = await readDefinition(tx, { organizationId, sourceVersionId });
+          const measurementRow = definitionRow ? await readMeasurement(tx, { organizationId, sourceVersionId }) : null;
+          const claimRow = measurementRow ? (await tx.query(
+            `SELECT claim_id::text AS claim_id, statement, claim_status, claim_review_status, claim_strength
+               FROM kai.claims
+              WHERE organization_id = $1::uuid AND evidence_item_id = $2::uuid
+              ORDER BY created_at ASC, claim_id ASC
+              LIMIT 1`,
+            [organizationId, measurementRow.evidence_item_id],
+          )).rows[0] || null : null;
+          const limitationCodes = measurementRow
+            ? measurementLimitationCodes({ measurementRow: { ...measurementRow, period_start: definitionRow.period_start }, dimensions: null })
+            : [];
+          return success({
+            sourceVersion: rowToSourceVersionRecord(sourceVersionRow),
+            source: { source_id: sourceRow.source_id, source_code: sourceRow.source_code, reviewed_source_type: sourceRow.reviewed_source_type },
+            basis: derived.ok
+              ? {
+                  measurable: true,
+                  calculation_method: MEASUREMENT_CALCULATION_METHOD,
+                  data_record_count: derived.measurement.totalRecordCount,
+                  blank_record_count: derived.measurement.blankRecordCount,
+                  duplicate_record_count: derived.measurement.duplicateRecordCount,
+                  counted_record_count: derived.measurement.measuredValue,
+                }
+              : { measurable: false, blockers: derived.blockers || [] },
+            recorded: definitionRow
+              ? {
+                  definition: rowToDefinitionRecord(definitionRow),
+                  measurement: measurementRow ? rowToMeasurementRecord(measurementRow) : null,
+                  claim: claimRow,
+                  limitations: limitationCodes.map((code) => ({ code, description: describeMeasurementLimitationCode(code) })),
+                }
+              : null,
+          });
+        });
+      } catch (error) {
+        const shaped = shapeEvidenceLineageError(error);
+        return failure(shaped.error.code);
+      }
+    },
     async recordSourceRecordCountMeasurement({ organizationId, sourceVersionId, definition, actorUserId, now }) {
       const run = runInTransaction || (await resolveDefaultRunInTransaction());
       try {
         return await run(async (tx) => {
-          const sourceVersionRow = await getScopedSourceVersionById({ organizationId, sourceVersionId }, tx);
-          if (!sourceVersionRow) return failure("not_found");
-          const sourceRow = await getScopedSourceById({ organizationId, sourceId: sourceVersionRow.source_id }, tx);
-          if (!sourceRow) return failure("not_found");
-          const candidateRow = await getScopedSourceCandidateByIdentity(
-            { organizationId, intakeSourceCandidateId: sourceVersionRow.intake_source_candidate_id },
-            tx,
-          );
-          if (!candidateRow) return failure("not_found");
-          const decisionRow = await getScopedPromotionDecisionBySourceVersionId({ organizationId, sourceVersionId }, tx);
-          if (!decisionRow) return failure("not_found");
-          const profileRow = await getScopedSensitivityProfileById(
-            { organizationId, intakeSensitivityProfileId: candidateRow.intake_sensitivity_profile_id },
-            tx,
-          );
-          if (!profileRow) return failure("not_found");
-          const dictionaryRow = await getScopedDataDictionaryById({ organizationId, dataDictionaryId: candidateRow.data_dictionary_id }, tx);
-          if (!dictionaryRow) return failure("not_found");
-
-          const lineage = validateEvidenceHasSourceLineage({ sourceVersionRow, sourceRow, candidateRow, decisionRow, profileRow, dictionaryRow });
-          if (!lineage.ok) return failure(lineage.code);
-
-          const allowedUse = validateEffectiveAllowedUsePermitsOperation(
-            await readEffectiveAllowedUseProhibition(tx, { organizationId, intakeSensitivityProfileId: profileRow.intake_sensitivity_profile_id }),
-            { operation: "record_source_record_count_measurement", objectType: "source_version", objectId: sourceVersionId },
-          );
-          if (!allowedUse.ok) return failure(allowedUse.code, allowedUse.blockers);
-
-          // The exact profile the promoted version was derived from.
-          const fileProfileRow = await readFileProfile(tx, { organizationId, fileProfileId: candidateRow.file_profile_id });
-          if (!fileProfileRow) return failure("not_found");
-          if (fileProfileRow.profile_canonical_sha256 !== sourceVersionRow.profile_canonical_sha256) {
-            return failure("conflict_current_state_changed");
-          }
-          const derived = deriveRecordCountMeasurement(fileProfileRow.profile);
+          const measurable = await loadMeasurableSourceVersion(tx, { organizationId, sourceVersionId });
+          if (!measurable.ok) return measurable.failure;
+          const { sourceVersionRow, sourceRow, fileProfileRow, derived } = measurable;
           if (!derived.ok) return failure(derived.code, derived.blockers);
           const { measurement } = derived;
 

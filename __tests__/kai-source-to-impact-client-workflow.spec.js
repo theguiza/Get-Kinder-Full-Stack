@@ -168,6 +168,8 @@ test("internal drafts: the detail is the persisted text with cited claim ids, th
     citedClaimsCurrentlyEligible: false,
     limitations: ["internal_use_only", "not_approved_for_external_use", "awaiting_get_kinder_review", "cited_claims_not_currently_eligible"],
     blocks: [{ ordinal: 1, text: `Draft text of ${D_SUMMARY}.`, supportingClaimIds: [CLAIM_A, CLAIM_B].sort() }],
+    // Plan A Prompt 8: nothing can be released before Get Kinder's review.
+    release: { state: "awaiting_get_kinder_review", releasedReportId: null },
   });
   assertNoHidden(detail, "detail");
   assert.deepEqual(projectClientInternalDraft(detail.data).limitations, detail.data.limitations);

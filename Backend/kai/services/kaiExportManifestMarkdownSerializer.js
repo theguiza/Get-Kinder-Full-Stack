@@ -1,4 +1,5 @@
 import { composeExportManifestRenderModel } from "./kaiExportManifestRenderModelService.js";
+import { describeMeasurementLimitationCode } from "../validators/kaiSourceMeasurementValidators.js";
 
 const MARKDOWN_CONTRACT_VERSION = "kai-sprint2-export-manifest-markdown-v1";
 
@@ -85,6 +86,12 @@ export function serializeExportManifestRenderModelToMarkdown(renderModel) {
       ? citationMarker(entry.citationRef)
       : `Claim ${inlineCode(entry.claimId)} / evidence ${inlineCode(entry.evidenceItemId)}`;
     lines.push("", `- ${subject} limitation codes: ${formatLimitationCodes(entry.limitationCodes)}.`);
+    // Plan A Prompt 8: what each measured-claim limitation means, in words,
+    // under its code (codes with no description are listed as before).
+    for (const code of entry.limitationCodes || []) {
+      const description = describeMeasurementLimitationCode(code);
+      if (description) lines.push(`  - ${inlineCode(code)}: ${normalizeScalar(description)}`);
+    }
   }
   if (renderModel.methodNotes.limitationEntries.length === 0) lines.push("", "- none");
 

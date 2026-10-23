@@ -1,4 +1,4 @@
-import { isKaiSprint2Enabled, isKaiGenerationEnabled } from "../config/kaiSprint2Config.js";
+import { isKaiSprint2Enabled, isKaiGenerationEnabled, isKaiPublicExportEnabled } from "../config/kaiSprint2Config.js";
 import { KAI_SPRINT2_P0_OPERATION_ROLES, KAI_SPRINT2_P0_PATTERNS } from "../config/kaiSprint2P0Contract.js";
 import { buildKaiError } from "../errors/kaiErrors.js";
 import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationService.js";
@@ -10,6 +10,7 @@ import {
 import { getEngagementForOrganization } from "../db/kaiQueries.js";
 import { __generatedContentReviewPacketServiceTestables } from "./kaiGeneratedContentService.js";
 import { __testables as generatedDraftLibraryTestables } from "./kaiGeneratedDraftLibraryService.js";
+import { serializeExportManifestRenderModelToMarkdown, __exportManifestMarkdownSerializerTestables } from "./kaiExportManifestMarkdownSerializer.js";
 import { BOARD_REPORTING_PACKET_AUDIENCE } from "./kaiBoardReportingPacketService.js";
 
 /**
@@ -348,7 +349,9 @@ export async function getClientBoardReportingPreview(input, dependencies = {}) {
  *   whether every cited claim is currently eligible for internal use, fixed
  *   limitation codes, and per block its text and cited claim ids. Never
  *   queue/run/evidence/source ids, GK review vocabulary, blocker codes,
- *   prompts, validator results, or export state.
+ *   prompts, validator results, or export-review/candidate state. The detail
+ *   adds only the release state (Plan A Prompt 8): whether Get Kinder's
+ *   latest internal release of the draft renders now, and its report id.
  * - No approval, release, funder/public eligibility, or export authority:
  *   `internal_use_only` and `not_approved_for_external_use` are always listed.
  */
@@ -490,10 +493,107 @@ export async function getClientInternalDraft(input, dependencies = {}) {
   if (!isInternalDraftSummary({ contentType: packet.contentType, requestedAudience: packet.requestedAudience }) || !reviewState) {
     return buildKaiError("not_found");
   }
-  return { ok: true, data: toClientInternalDraft(packet, reviewState), error: null };
+  const release = await clientReleaseState({
+    organizationId, generatedContentDraftId, reviewState, actorContext: input.actorContext,
+  }, dependencies);
+  if (release.error) return release.error;
+  return { ok: true, data: { ...toClientInternalDraft(packet, reviewState), release: release.value }, error: null };
+}
+
+/**
+ * Read-only receipt of an already GK-released internal report (Plan A
+ * Prompt 8). Factual review and final release stay Get Kinder's: the
+ * organization administrator only reads the Markdown of a release Get Kinder
+ * has already made, and only while it is still valid. Operating Model v0.2
+ * section 11 ("GK reviews the relevant output ... Release") and section 7.1
+ * ("generate internal/client drafts") cover delivering a GK-released internal
+ * output to the organization; this grants no review, export, or release
+ * authority.
+ *
+ * Admission: mapped human, client_admin with an active same-organization
+ * membership, tenant validation, the Project (engagement) in this
+ * organization, before any read. Then the manifest must be this
+ * organization's, for the internal audience, of an internal draft type, and
+ * its draft generated under this Project; anything else is not_found, never
+ * disclosed. Every retrieval re-runs the existing render-model repository,
+ * which checks candidate currentness and the P3-18 final export gate
+ * (effective release authority, current-use eligibility, audience): a revoked
+ * release or a stale source is conflict_current_state_changed. Markdown only.
+ */
+const CLIENT_RELEASED_REPORT_OPERATION = "read_client_released_internal_report";
+const CLIENT_RELEASED_REPORT_READ_ROLES = new Set(["client_admin"]);
+const RELEASED_REPORT_ADMISSION = Object.freeze({
+  operation: CLIENT_RELEASED_REPORT_OPERATION,
+  allowedRoles: CLIENT_RELEASED_REPORT_READ_ROLES,
+});
+const RELEASE_STATE = Object.freeze({
+  AWAITING_REVIEW: "awaiting_get_kinder_review",
+  AWAITING_RELEASE: "awaiting_get_kinder_release",
+  RELEASED: "released_for_internal_use",
+  NO_LONGER_AVAILABLE: "release_no_longer_valid",
+  UNAVAILABLE: "release_status_unavailable",
+});
+
+async function releasedReportRepositories(dependencies) {
+  const releasedReportRepository = dependencies.releasedReportRepository
+    || (await import("../dictionary/postgresClientReleasedReportRepository.js")).createPostgresClientReleasedReportRepository();
+  const renderModelRepository = dependencies.renderModelRepository
+    || (await import("../dictionary/postgresExportManifestRenderModelRepository.js")).createPostgresExportManifestRenderModelRepository();
+  return { releasedReportRepository, renderModelRepository };
+}
+
+function mayReceiveReleasedReports(actorContext, organizationId, env) {
+  return isKaiPublicExportEnabled(env)
+    && validateActorCanPerformOperation(actorContext, CLIENT_RELEASED_REPORT_OPERATION, organizationId, {
+      allowedRoles: CLIENT_RELEASED_REPORT_READ_ROLES,
+    }).ok === true;
+}
+
+// The draft's release state from the same authorities retrieval uses: its
+// latest internal manifest, and whether that manifest renders now.
+async function clientReleaseState({ organizationId, generatedContentDraftId, reviewState, actorContext }, dependencies) {
+  const none = (state) => ({ value: { state, releasedReportId: null } });
+  if (reviewState !== "reviewed_by_get_kinder") return none(RELEASE_STATE.AWAITING_REVIEW);
+  if (!mayReceiveReleasedReports(actorContext, organizationId, dependencies.env || process.env)) return none(RELEASE_STATE.UNAVAILABLE);
+  const { releasedReportRepository, renderModelRepository } = await releasedReportRepositories(dependencies);
+  const latest = await releasedReportRepository.readLatestInternalReleaseForDraft({ organizationId, generatedContentDraftId });
+  if (!latest) return none(RELEASE_STATE.AWAITING_RELEASE);
+  const rendered = await renderModelRepository.composeExportManifestRenderModel({ organizationId, exportManifestId: latest.exportManifestId });
+  if (rendered.ok) return { value: { state: RELEASE_STATE.RELEASED, releasedReportId: latest.exportManifestId } };
+  if (DRAFT_NOT_PRESENTABLE_CODES.has(rendered.error?.code)) return none(RELEASE_STATE.NO_LONGER_AVAILABLE);
+  return { error: buildKaiError(rendered.error?.code || "system_error") };
+}
+
+export async function getClientReleasedReportMarkdown(input, dependencies = {}) {
+  const denied = admit(input, ["organizationId", "engagementId", "exportManifestId", "actorContext"], dependencies, RELEASED_REPORT_ADMISSION);
+  if (denied) return denied;
+  if (!isKaiPublicExportEnabled(dependencies.env || process.env)) return buildKaiError("feature_disabled");
+  const { organizationId, engagementId, exportManifestId } = input;
+  const engagementError = await resolveEngagement({ organizationId, engagementId }, dependencies);
+  if (engagementError) return engagementError;
+  const { releasedReportRepository, renderModelRepository } = await releasedReportRepositories(dependencies);
+  const scope = await releasedReportRepository.readReleasedReportScope({ organizationId, exportManifestId });
+  if (!scope || scope.requestedAudience !== INTERNAL_AUDIENCE || !CLIENT_INTERNAL_DRAFT_CONTENT_TYPES.has(scope.contentType)) {
+    return buildKaiError("not_found");
+  }
+  const readDraftEngagement = dependencies.readGeneratedDraftEngagementId || readGeneratedDraftEngagementId;
+  if ((await readDraftEngagement(organizationId, scope.generatedContentDraftId)) !== engagementId) return buildKaiError("not_found");
+  const rendered = await renderModelRepository.composeExportManifestRenderModel({ organizationId, exportManifestId });
+  if (!rendered.ok) return buildKaiError(rendered.error?.code || "system_error");
+  return {
+    ok: true,
+    data: {
+      markdownContractVersion: __exportManifestMarkdownSerializerTestables.MARKDOWN_CONTRACT_VERSION,
+      markdown: serializeExportManifestRenderModelToMarkdown(rendered.data),
+    },
+    error: null,
+  };
 }
 
 export const __clientGeneratedContentServiceContract = Object.freeze({
+  CLIENT_RELEASED_REPORT_OPERATION,
+  CLIENT_RELEASED_REPORT_READ_ROLES,
+  RELEASE_STATE,
   CLIENT_INTERNAL_DRAFT_OPERATION,
   CLIENT_INTERNAL_DRAFT_READ_ROLES,
   CLIENT_INTERNAL_DRAFT_CONTENT_TYPES,

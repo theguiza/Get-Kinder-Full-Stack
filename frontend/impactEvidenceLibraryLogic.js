@@ -74,7 +74,7 @@ export function projectOrganizationAccessCapabilities(dto) {
   const required = ["internalKnowledgeWorkspace", "intakeContribution", "clientFollowupReview", "projectManagement", "improvementPlanManagement", "organizationJoinReview", "organizationAccessManagement"];
   if (!required.every((key) => typeof dto[key] === "boolean")) return null;
   return {
-    workflowOperations: Object.fromEntries(["reviewSensitivity", "promoteSource", "generateDrafts", "generateAllDraftTypes", "reviewGeneratedDrafts", "readGeneratedDrafts", "readInternalDrafts", "recordEvidenceReview", "recordClaimReview", "extractEvidence", "assessEvidenceCoverage", "proposeClaim", "generateClaimGapFollowups", "recordConflict", "acceptCoverageLimitation", "assessRequirement", "readGrantResponsePacket", "readBoardReportingPacket"].map((key) => [key, dto.workflowOperations?.[key] === true])),
+    workflowOperations: Object.fromEntries(["reviewSensitivity", "promoteSource", "generateDrafts", "generateAllDraftTypes", "reviewGeneratedDrafts", "readGeneratedDrafts", "readInternalDrafts", "recordEvidenceReview", "recordClaimReview", "extractEvidence", "assessEvidenceCoverage", "proposeClaim", "generateClaimGapFollowups", "recordConflict", "acceptCoverageLimitation", "assessRequirement", "readGrantResponsePacket", "readBoardReportingPacket", "recordSourceMeasurement", "readReleasedInternalReports"].map((key) => [key, dto.workflowOperations?.[key] === true])),
     internalKnowledgeWorkspace: dto.internalKnowledgeWorkspace === true,
     intakeContribution: dto.intakeContribution === true,
     clientFollowupReview: dto.clientFollowupReview === true,
@@ -201,6 +201,26 @@ export function clientInternalDraftPath(organizationId, engagementId, generatedC
 }
 
 export const CLIENT_INTERNAL_DRAFT_REVIEW_STATES = Object.freeze(["awaiting_get_kinder_review", "in_get_kinder_review", "reviewed_by_get_kinder"]);
+// Plan A Prompt 8: the server's release state for an internal draft, and the
+// organization administrator's read-only receipt of a released report.
+export const CLIENT_INTERNAL_DRAFT_RELEASE_STATES = Object.freeze([
+  "awaiting_get_kinder_review",
+  "awaiting_get_kinder_release",
+  "released_for_internal_use",
+  "release_no_longer_valid",
+  "release_status_unavailable",
+]);
+
+export function clientReleasedReportMarkdownPath(organizationId, engagementId, exportManifestId) {
+  return `${clientEngagementBasePath(organizationId, engagementId)}/client-released-reports/${encodeURIComponent(exportManifestId)}/markdown`;
+}
+
+function projectClientInternalDraftRelease(release) {
+  if (!isPlainClientObject(release) || !CLIENT_INTERNAL_DRAFT_RELEASE_STATES.includes(release.state)) return null;
+  const releasedReportId = release.state === "released_for_internal_use" && isRouteUuid(release.releasedReportId) ? release.releasedReportId : null;
+  if (release.state === "released_for_internal_use" && !releasedReportId) return null;
+  return { state: release.state, releasedReportId };
+}
 export const CLIENT_INTERNAL_DRAFT_LIMITATIONS = Object.freeze([
   "internal_use_only",
   "not_approved_for_external_use",
@@ -254,6 +274,7 @@ export function projectClientInternalDraft(dto) {
     citedClaimsCurrentlyEligible: dto.citedClaimsCurrentlyEligible,
     limitations: [...dto.limitations],
     blocks,
+    release: projectClientInternalDraftRelease(dto.release),
   };
 }
 

@@ -3,12 +3,18 @@ import React, { useEffect, useRef, useState } from "react";
 import {
   clientInternalDraftPath,
   clientInternalDraftsPath,
+  clientReleasedReportMarkdownPath,
   errorText,
   getJson,
   projectClientInternalDraft,
   projectClientInternalDraftList,
 } from "../impactEvidenceLibraryLogic.js";
-import { INTERNAL_DRAFT_LIMITATION_MESSAGES, INTERNAL_DRAFT_REVIEW_STATE_LABELS } from "./clientEvidenceWorkflowLogic.js";
+import {
+  INTERNAL_DRAFT_LIMITATION_MESSAGES,
+  INTERNAL_DRAFT_RELEASE_STATE_LABELS,
+  INTERNAL_DRAFT_RELEASE_STATE_MESSAGES,
+  INTERNAL_DRAFT_REVIEW_STATE_LABELS,
+} from "./clientEvidenceWorkflowLogic.js";
 
 const DRAFT_LABELS = Object.freeze({
   evidence_summary: "Internal evidence summary",
@@ -23,12 +29,35 @@ const DRAFT_LABELS = Object.freeze({
  * (statement and review status from the organization's Claim Library read),
  * and its limitations. Reading a draft approves, releases, or exports nothing.
  * `focusDraftId` opens that draft once it is listed (after generation).
+ *
+ * Release (Plan A Prompt 8): the detail carries the server's release state.
+ * Only when Get Kinder has released the report and it is still valid, and
+ * the actor holds readReleasedInternalReports, can it be opened or downloaded
+ * through the client-released-reports route, which re-checks the release on
+ * every request. Opening it grants no review or release authority.
  */
-export default function ClientInternalDrafts({ organizationId, engagementId, claims, refreshToken, focusDraftId }) {
+export default function ClientInternalDrafts({ organizationId, engagementId, claims, refreshToken, focusDraftId, canReadReleasedReports = false }) {
   const [list, setList] = useState({ status: "idle", items: [], error: "" });
   const [detail, setDetail] = useState({ status: "idle", draft: null, error: "" });
+  const [report, setReport] = useState({ status: "idle", draftId: "", markdown: "", error: "" });
   const keyRef = useRef("");
   const detailSeqRef = useRef(0);
+
+  const openReleasedReport = async (draftId, releasedReportId) => {
+    setReport({ status: "loading", draftId, markdown: "", error: "" });
+    const response = await fetch(clientReleasedReportMarkdownPath(organizationId, engagementId, releasedReportId), {
+      method: "GET",
+      credentials: "same-origin",
+      headers: { Accept: "text/markdown" },
+    });
+    if (response.status === 200) {
+      setReport({ status: "success", draftId, markdown: await response.text(), error: "" });
+      return;
+    }
+    let body = null;
+    try { body = await response.json(); } catch { body = null; }
+    setReport({ status: "error", draftId, markdown: "", error: errorText({ statusCode: response.status, body }) });
+  };
 
   const openDraft = async (generatedContentDraftId) => {
     detailSeqRef.current += 1;
@@ -55,6 +84,7 @@ export default function ClientInternalDrafts({ organizationId, engagementId, cla
 
   useEffect(() => {
     setDetail({ status: "idle", draft: null, error: "" });
+    setReport({ status: "idle", draftId: "", markdown: "", error: "" });
   }, [organizationId, engagementId]);
 
   useEffect(() => {
@@ -101,6 +131,31 @@ export default function ClientInternalDrafts({ organizationId, engagementId, cla
               {INTERNAL_DRAFT_REVIEW_STATE_LABELS[draft.reviewState]}
             </span>
           </div>
+          {draft.release ? (
+            <div className="small mb-2" data-client-internal-draft-release-state={draft.release.state}>
+              <span className="badge text-bg-light me-2">{INTERNAL_DRAFT_RELEASE_STATE_LABELS[draft.release.state]}</span>
+              {INTERNAL_DRAFT_RELEASE_STATE_MESSAGES[draft.release.state]}
+              {canReadReleasedReports && draft.release.state === "released_for_internal_use" ? (
+                <div className="d-flex flex-wrap gap-2 mt-1">
+                  <button type="button" className="btn btn-sm btn-primary" data-client-open-released-report={draft.release.releasedReportId}
+                    disabled={report.status === "loading"}
+                    onClick={() => openReleasedReport(draft.generatedContentDraftId, draft.release.releasedReportId)}>
+                    {report.status === "loading" ? "Opening..." : "Open released report"}
+                  </button>
+                  <a className="btn btn-sm btn-outline-primary" data-client-download-released-report={draft.release.releasedReportId}
+                    href={clientReleasedReportMarkdownPath(organizationId, engagementId, draft.release.releasedReportId)} download="kai-released-report.md">
+                    Download Markdown
+                  </a>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+          {report.draftId === draft.generatedContentDraftId && report.status === "error" ? (
+            <div className="alert alert-warning py-2 small" data-client-released-report-error="">The released report could not be opened. {report.error}</div>
+          ) : null}
+          {report.draftId === draft.generatedContentDraftId && report.status === "success" ? (
+            <pre className="small border rounded p-2 mb-2" style={{ whiteSpace: "pre-wrap" }} data-client-released-report-markdown="">{report.markdown}</pre>
+          ) : null}
           <ul className="small mb-2" data-client-internal-draft-limitations="">
             {draft.limitations.map((code) => <li key={code}>{INTERNAL_DRAFT_LIMITATION_MESSAGES[code]}</li>)}
           </ul>

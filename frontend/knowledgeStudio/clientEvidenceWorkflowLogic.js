@@ -23,6 +23,10 @@ const WORKFLOW_OPERATION_KEYS = Object.freeze([
   "generateClaimGapFollowups",
   "generateDrafts",
   "readInternalDrafts",
+  // Plan A Prompt 8: record the P2-01M source record-count measurement, and
+  // receive an internal report Get Kinder has already reviewed and released.
+  "recordSourceMeasurement",
+  "readReleasedInternalReports",
 ]);
 
 // Terminal claim review outcome the generation repository always rejects
@@ -377,4 +381,21 @@ export const INTERNAL_DRAFT_LIMITATION_MESSAGES = Object.freeze({
   not_approved_for_external_use: "Not approved for funder or public use, export, or release.",
   awaiting_get_kinder_review: "Get Kinder has not reviewed this draft.",
   cited_claims_not_currently_eligible: "At least one cited claim is not yet eligible for use (for example, it awaits Get Kinder claim review).",
+});
+
+// Plan A Prompt 8: the server's release state for a reviewed internal draft.
+export const INTERNAL_DRAFT_RELEASE_STATE_LABELS = Object.freeze({
+  awaiting_get_kinder_review: "Awaiting Get Kinder review",
+  awaiting_get_kinder_release: "Reviewed; awaiting Get Kinder release",
+  released_for_internal_use: "Released by Get Kinder for internal use",
+  release_no_longer_valid: "Released earlier; no longer available",
+  release_status_unavailable: "Release status not available",
+});
+
+export const INTERNAL_DRAFT_RELEASE_STATE_MESSAGES = Object.freeze({
+  awaiting_get_kinder_review: "Get Kinder reviews a draft before it can be released.",
+  awaiting_get_kinder_release: "Get Kinder has reviewed this draft but has not released it yet; there is nothing to download.",
+  released_for_internal_use: "Get Kinder released this report for your organization's internal use. It is not approved for funders or the public.",
+  release_no_longer_valid: "This release can no longer be opened: Get Kinder withdrew it, or a source or claim it relies on changed. Ask Get Kinder to review it again.",
+  release_status_unavailable: "Released reports cannot be opened from here right now.",
 });

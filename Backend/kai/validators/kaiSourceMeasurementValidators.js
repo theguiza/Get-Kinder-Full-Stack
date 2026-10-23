@@ -458,3 +458,44 @@ export const MEASUREMENT_DISCLOSURE_RULES = Object.freeze([
 export function isMeasurementLimitationCode(code) {
   return typeof code === "string" && (code.startsWith("measurement.") || code.startsWith("coverage."));
 }
+
+// Plain-language meaning of each measured-claim limitation code (Plan A
+// Prompt 8), the one description the released document and the
+// organization's measurement screen both show. A code keeps its exact
+// meaning: an accepted limitation stays a limitation, never a resolved fact.
+const MEASUREMENT_LIMITATION_DESCRIPTIONS = Object.freeze({
+  [MEASUREMENT_LIMITATION_CODES.RECORD_MEANING_HUMAN_DEFINED]:
+    "What one record represents was defined by a person at the organization; KAI counted the records but did not verify what they represent.",
+  [MEASUREMENT_LIMITATION_CODES.PERIOD_HUMAN_ATTESTED]:
+    "The reporting period was stated in that definition; it was not checked against dates in the records.",
+  [MEASUREMENT_LIMITATION_CODES.NO_REPORTING_PERIOD]: "No reporting period was defined for the count.",
+  [MEASUREMENT_LIMITATION_CODES.BLANK_RECORDS_EXCLUDED]: "Blank records were excluded from the count.",
+  [MEASUREMENT_LIMITATION_CODES.DUPLICATE_RECORDS_INCLUDED]:
+    "Exact-duplicate records are included in the count; they were not removed or merged, so the count is not of distinct events.",
+});
+const COVERAGE_DIMENSION_LABELS = Object.freeze({
+  missingness: "Missing values",
+  duplicates: "Duplicate records",
+  definition_clarity: "Record definition",
+  denominator_clarity: "Denominator",
+  time_period_clarity: "Reporting period",
+  entity_level_clarity: "What is counted",
+  small_cell_risk: "Small-number (small-cell) risk",
+  conflicting_source_indicators: "Conflicting sources",
+  requirement_alignment: "Alignment with funder requirements",
+  coverage_gaps: "Field coverage",
+});
+const COVERAGE_STATUS_DESCRIPTIONS = Object.freeze({
+  resolved_risk_flagged: "a known limitation of this source, recorded and not removed",
+  unresolved: "not yet resolved",
+  accepted_internal_limitation: "not resolved; Get Kinder accepted it as a limitation for internal use only",
+});
+
+/** The plain-language description of a measurement./coverage. limitation code, or null. */
+export function describeMeasurementLimitationCode(code) {
+  if (typeof code !== "string") return null;
+  if (MEASUREMENT_LIMITATION_DESCRIPTIONS[code]) return MEASUREMENT_LIMITATION_DESCRIPTIONS[code];
+  const match = /^coverage\.([a-z_]+)\.([a-z_]+)$/.exec(code);
+  if (!match || !COVERAGE_DIMENSION_LABELS[match[1]] || !COVERAGE_STATUS_DESCRIPTIONS[match[2]]) return null;
+  return `${COVERAGE_DIMENSION_LABELS[match[1]]}: ${COVERAGE_STATUS_DESCRIPTIONS[match[2]]}.`;
+}

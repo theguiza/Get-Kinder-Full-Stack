@@ -42,7 +42,7 @@ if (!DATABASE_URL) {
 async function runSuite() {
   const { Pool } = await import("pg");
   const { profileLocalTrustedFile } = await import("../Backend/kai/profiling/localProfilingKernel.js");
-  const { recordSourceRecordCountMeasurement } = await import("../Backend/kai/services/kaiSourceMeasurementService.js");
+  const { recordSourceRecordCountMeasurement, getSourceRecordCountMeasurementBasis } = await import("../Backend/kai/services/kaiSourceMeasurementService.js");
   const { createPostgresSourceMeasurementRepository } = await import("../Backend/kai/dictionary/postgresSourceMeasurementRepository.js");
   const { proposeClaim } = await import("../Backend/kai/services/kaiClaimProposalService.js");
   const { createPostgresClaimProposalRepository } = await import("../Backend/kai/dictionary/postgresClaimProposalRepository.js");
@@ -83,6 +83,9 @@ async function runSuite() {
   const { createPostgresExportManifestRenderModelRepository } = await import("../Backend/kai/dictionary/postgresExportManifestRenderModelRepository.js");
   const { serializeExportManifestToMarkdown } = await import("../Backend/kai/services/kaiExportManifestMarkdownSerializer.js");
   const audits = await import("../Backend/kai/services/kaiMetadataOnlyAuditComposition.js");
+  const { getClientInternalDraft, getClientReleasedReportMarkdown } = await import("../Backend/kai/services/kaiClientGeneratedContentService.js");
+  const { createPostgresClientReleasedReportRepository } = await import("../Backend/kai/dictionary/postgresClientReleasedReportRepository.js");
+  const { readGeneratedDraftEngagementId } = await import("../Backend/kai/db/kaiGeneratedDraftLibraryReadModels.js");
   const { insertRequiredSuccessfulAuditEvent } = await import("../Backend/kai/db/kaiAuditQueries.js");
 
   const ENV = Object.freeze({ KAI_SPRINT2_ENABLED: "true" });
@@ -489,6 +492,65 @@ async function runSuite() {
     const after = await measurementCounts();
     assert.deepEqual([after.claims, after.gaps, after.followups], [before.claims + 1, before.gaps + MEASURED_GAPS.length, before.followups], "no client follow-up for a measured claim");
     ids.measurementClaimId = claim.claim_id;
+  });
+
+  // Plan A Prompt 8: the organization administrator's read-only basis.
+  const basisOf = (sourceVersionId, { actor = ADMIN, organizationId = ORG, env = ENV } = {}) => getSourceRecordCountMeasurementBasis(
+    { organizationId, sourceVersionId, actorContext: actor }, { env, sourceMeasurementRepository: measurementRepository });
+
+  test("basis: the administrator reads the authoritative counts, the recorded definition, the measurement, its limitations, and the claim; unauthorized, other-tenant, unknown, and stale versions fail safely", async () => {
+    const basis = await basisOf(ids.main.sourceVersionId);
+    assert.equal(basis.ok, true, JSON.stringify(basis));
+    const { basis: counts, recorded } = basis.data;
+    assert.deepEqual(counts, {
+      measurable: true, calculation_method: "p1_csv_profile_data_records_excluding_blank_v1",
+      data_record_count: 6, blank_record_count: 1, duplicate_record_count: 2, counted_record_count: independentRecordCount(CSV),
+    });
+    assert.equal(recorded.definition.counted_unit, DEFINITION.counted_unit);
+    assert.deepEqual([recorded.measurement.measured_value, recorded.measurement.evidence_item_id], [5, ids.measurementEvidenceId]);
+    assert.deepEqual(recorded.limitations.map((entry) => entry.code), [
+      "measurement.blank_records_excluded", "measurement.duplicate_records_included",
+      "measurement.period_human_attested_not_row_verified", "measurement.record_meaning_human_defined",
+    ]);
+    assert.ok(recorded.limitations.every((entry) => typeof entry.description === "string" && entry.description.length > 20));
+    assert.deepEqual([recorded.claim.claim_id, recorded.claim.claim_status, recorded.claim.claim_review_status], [ids.measurementClaimId, "proposed", "needs_gk_review"]);
+    assert.doesNotMatch(JSON.stringify(basis.data), /literacy|mentoring|2026-09-16|attendees/, "no row values");
+
+    const fresh = await seedPromotedSource({ profile: ids.profile });
+    const unrecorded = await basisOf(fresh.sourceVersionId);
+    assert.deepEqual([unrecorded.ok, unrecorded.data.recorded, unrecorded.data.basis.counted_record_count], [true, null, 5]);
+    const sheet = await seedPromotedSource({ profile: { status: "profiled", format: "xlsx", sheets: [], fields: [{ field_key: "field_1" }] } });
+    const unmeasurable = await basisOf(sheet.sourceVersionId);
+    assert.equal(unmeasurable.data.basis.measurable, false);
+    assert.equal(unmeasurable.data.basis.blockers[0].blocking_reason, "measurement_source_not_single_table_csv");
+
+    const before = await measurementCounts();
+    for (const [label, options, code] of [
+      ["client_reviewer", { actor: REVIEWER }, "authorization_denied"],
+      ["client_contributor", { actor: CONTRIBUTOR }, "authorization_denied"],
+      ["another organization's administrator", { actor: OTHER_ADMIN }, "authorization_denied"],
+      ["inactive administrator", { actor: { ...ADMIN, organizationMemberships: [{ ...ADMIN.organizationMemberships[0], membership_status: "inactive" }] } }, "authorization_denied"],
+      ["system actor", { actor: { ...ADMIN, actorType: "system" } }, "authorization_denied"],
+      ["feature off", { env: { KAI_SPRINT2_ENABLED: "false" } }, "feature_disabled"],
+    ]) {
+      const refused = await basisOf(ids.main.sourceVersionId, options);
+      assert.deepEqual([refused.ok, refused.error.code], [false, code], label);
+    }
+    const otherScope = await basisOf(ids.main.sourceVersionId, { actor: OTHER_ADMIN, organizationId: OTHER_ORG });
+    assert.deepEqual([otherScope.ok, otherScope.error.code], [false, "not_found"], "another organization's version is never found");
+    assert.equal((await basisOf("0e000000-0000-4000-8000-0000000ffff1")).error.code, "not_found");
+    const prohibited = await seedPromotedSource({ profile: ids.profile, allowedUse: "not_allowed" });
+    const refusedUse = await basisOf(prohibited.sourceVersionId);
+    assert.equal(refusedUse.blockers[0].blocking_reason, "allowed_use_not_allowed");
+    const stale = await seedPromotedSource({ profile: ids.profile });
+    await query("UPDATE kai.source_versions SET is_current = false WHERE source_version_id = $1::uuid", [stale.sourceVersionId]);
+    assert.equal((await basisOf(stale.sourceVersionId)).error.code, "conflict_current_state_changed");
+    // A conflicting second definition is refused, and the basis still shows the recorded one.
+    const conflict = await record(ids.main.sourceVersionId, { definition: { ...DEFINITION, counted_unit: "attendance record" } });
+    assert.deepEqual([conflict.ok, conflict.error.code, conflict.blockers[0].blocking_reason], [false, "conflict_current_state_changed", "measurement_definition_already_recorded"]);
+    assert.match(conflict.blockers[0].required_fix, /upload a new intake version/);
+    assert.equal((await basisOf(ids.main.sourceVersionId)).data.recorded.definition.counted_unit, DEFINITION.counted_unit);
+    assert.deepEqual(await measurementCounts(), before, "reads and refusals write nothing");
   });
 
   test("zero counts are clear, positive counts stay visible, and a definition without a period is a recorded limitation, not a client question", async () => {
@@ -1110,6 +1172,17 @@ async function runSuite() {
   // The production metadata-only audit writer, bound to this suite's pool (in
   // production it writes through the ambient pool, which here is the sentinel).
   const auditFor = (factory, options) => factory({ ...options, insertAuditEvent: (metadata) => insertRequiredSuccessfulAuditEvent(metadata, pool) });
+  // The organization administrator's client reads, bound to this suite's pool.
+  const clientDependencies = () => ({
+    env: EXPORT_ENV,
+    getEngagementForOrganization: (args) => getEngagementForOrganization(args, pool),
+    readGeneratedDraftEngagementId: (organizationId, draftId) => readGeneratedDraftEngagementId(organizationId, draftId, pool),
+    generatedContentRepository: generatedRepository(),
+    releasedReportRepository: createPostgresClientReleasedReportRepository({ runInTransaction: withTx }),
+    renderModelRepository: renderRepository(),
+  });
+  const clientDraft = (actor) => getClientInternalDraft(
+    { organizationId: ORG, engagementId: ENGAGEMENT, generatedContentDraftId: ids.measuredDraftId, actorContext: actor }, clientDependencies());
   const exportCounts = async () => (await query(`SELECT
       (SELECT count(*) FROM kai.limitation_snapshots WHERE organization_id = $1::uuid)::int AS snapshots,
       (SELECT count(*) FROM kai.export_candidates WHERE organization_id = $1::uuid)::int AS candidates,
@@ -1149,9 +1222,11 @@ async function runSuite() {
     assert.deepEqual([started.data.queueStatus, started.data.reviewStatus], ["in_progress", "needs_gk_review"]);
     const aiComplete = await reviewStep(completeGeneratedContentReview, "generated_content_review", AI_ACTOR)();
     assert.deepEqual([aiComplete.ok, aiComplete.error?.code], [false, "authorization_denied"], "AI cannot complete a review");
+    assert.deepEqual((await clientDraft(ADMIN)).data.release, { state: "awaiting_get_kinder_review", releasedReportId: null }, "before the review is complete");
     const completed = await reviewStep(completeGeneratedContentReview, "generated_content_review", GK_REVIEWER)();
     assert.equal(completed.ok, true, JSON.stringify(completed));
     assert.deepEqual([completed.data.queueStatus, completed.data.reviewStatus], ["resolved", "resolved"]);
+    assert.deepEqual((await clientDraft(ADMIN)).data.release, { state: "awaiting_get_kinder_release", releasedReportId: null }, "reviewed but not released");
     assert.ok((await auditEvents()).length > 0, "metadata-only audit events were written");
   });
 
@@ -1248,13 +1323,17 @@ async function runSuite() {
 
   test("Markdown: retrieved through the delivery route, the document states the same independently computed count, qualified, cited, and with every material limitation", onNormalChain, async () => {
     const app = express();
-    const actors = { gk_admin: GK_ADMIN, client_admin: ADMIN, gk_reviewer: GK_REVIEWER, other_gk_admin: OTHER_GK_ADMIN, ai: AI_ACTOR };
+    const actors = {
+      gk_admin: GK_ADMIN, client_admin: ADMIN, gk_reviewer: GK_REVIEWER, other_gk_admin: OTHER_GK_ADMIN, ai: AI_ACTOR,
+      client_reviewer: REVIEWER, client_contributor: CONTRIBUTOR, other_admin: OTHER_ADMIN,
+    };
     // Real route (path validation, actor mapping, attachment, error mapping)
     // and real service/repositories; only the database binding (the ambient
     // pool is the sentinel here) and the signed-in actor are supplied, as in
     // the existing route tests.
     cleanups.push(routeTestables.setIntakeServiceForTest({
       serializeExportManifestToMarkdown: (input) => serializeExportManifestToMarkdown(input, { renderModelDependencies: { env: EXPORT_ENV, repository: renderRepository() } }),
+      getClientReleasedReportMarkdown: (input) => getClientReleasedReportMarkdown(input, clientDependencies()),
     }));
     cleanups.push(routeTestables.setActorContextMiddlewareForTest((req, _res, next) => { req.kaiSprint2ActorContext = actors[req.headers["x-plan-a-actor"]]; next(); }));
     const previous = process.env.KAI_SPRINT2_ENABLED;
@@ -1272,12 +1351,23 @@ async function runSuite() {
       }).on("error", reject);
     });
     ids.getMarkdown = get;
+    ids.getClientMarkdown = (organizationId, engagementId, exportManifestId, actor) => new Promise((resolve, reject) => {
+      http.get({
+        hostname: "127.0.0.1", port: server.address().port, headers: { "x-plan-a-actor": actor },
+        path: `/admin/organizations/${organizationId}/engagements/${engagementId}/client-released-reports/${exportManifestId}/markdown`,
+      }, (response) => {
+        const chunks = [];
+        response.on("data", (chunk) => chunks.push(chunk));
+        response.on("end", () => resolve({ statusCode: response.statusCode, headers: response.headers, body: Buffer.concat(chunks).toString("utf8") }));
+      }).on("error", reject);
+    });
 
     const delivered = await get(ORG, "gk_admin");
     assert.equal(delivered.statusCode, 200, delivered.body);
     assert.match(delivered.headers["content-type"], /markdown/);
     assert.match(delivered.headers["content-disposition"], /attachment; filename="kai-export-manifest\.md"/);
     const markdown = delivered.body;
+    ids.gkMarkdown = markdown;
     console.log(`[p2-01m] delivered Markdown:\n${markdown}`);
 
     // Original file -> evidence -> claim -> generator input -> draft -> reviewed content -> Markdown.
@@ -1326,6 +1416,45 @@ async function runSuite() {
     assert.doesNotMatch(markdown, /literacy|mentoring|2026-09-16|sessions\.csv/, "no row values or file names");
   });
 
+  test("customer receipt: the organization administrator sees the release and retrieves the same released Markdown through the client route; nothing else can", onNormalChain, async () => {
+    const detail = await clientDraft(ADMIN);
+    assert.equal(detail.ok, true, JSON.stringify(detail));
+    assert.equal(detail.data.reviewState, "reviewed_by_get_kinder");
+    assert.deepEqual(detail.data.release, { state: "released_for_internal_use", releasedReportId: ids.exportManifestId });
+    const received = await ids.getClientMarkdown(ORG, ENGAGEMENT, ids.exportManifestId, "client_admin");
+    assert.equal(received.statusCode, 200, received.body);
+    assert.match(received.headers["content-disposition"], /attachment; filename="kai-export-manifest\.md"/);
+    assert.equal(received.body, ids.gkMarkdown, "the organization receives exactly the document Get Kinder released");
+    assert.equal(statedCount(received.body), independentRecordCount(CSV));
+    for (const code of MEASURED_LIMITATION_CODES) assert.ok(received.body.includes(`\`${code}\``), code);
+    assert.match(received.body, /Missing values: a known limitation of this source, recorded and not removed\./);
+    assert.match(received.body, /Exact-duplicate records are included in the count; they were not removed or merged, so the count is not of distinct events\./);
+    assert.match(received.body, /The reporting period was stated in that definition; it was not checked against dates in the records\./);
+    assert.match(received.body, /Small-number \(small-cell\) risk: not resolved; Get Kinder accepted it as a limitation for internal use only\./);
+
+    const [otherEngagement] = await query("INSERT INTO kai.engagements (organization_id, engagement_code) VALUES ($1::uuid, 'p2-01m-second') RETURNING engagement_id::text", [ORG]);
+    for (const [label, organizationId, engagementId, manifestId, actor, status] of [
+      ["client_reviewer", ORG, ENGAGEMENT, ids.exportManifestId, "client_reviewer", 403],
+      ["client_contributor", ORG, ENGAGEMENT, ids.exportManifestId, "client_contributor", 403],
+      ["GK reviewer (not a customer receipt role)", ORG, ENGAGEMENT, ids.exportManifestId, "gk_reviewer", 403],
+      ["AI actor", ORG, ENGAGEMENT, ids.exportManifestId, "ai", 403],
+      ["another organization's administrator", ORG, ENGAGEMENT, ids.exportManifestId, "other_admin", 403],
+      ["another organization's path", OTHER_ORG, OTHER_ENGAGEMENT, ids.exportManifestId, "other_admin", 404],
+      ["another Project of the same organization", ORG, otherEngagement.engagement_id, ids.exportManifestId, "client_admin", 404],
+      ["no such report", ORG, ENGAGEMENT, "0e000000-0000-4000-8000-0000000fff01", "client_admin", 404],
+    ]) {
+      const refused = await ids.getClientMarkdown(organizationId, engagementId, manifestId, actor);
+      assert.equal(refused.statusCode, status, `${label}: ${refused.body}`);
+      assert.doesNotMatch(refused.body, /programme sessions/, label);
+    }
+    // The customer route never reaches the GK delivery route or any GK decision.
+    assert.equal((await ids.getMarkdown(ORG, "client_admin")).statusCode, 403);
+    for (const attempt of [() => decideAuthority(ADMIN, "grant"), () => decideAuthority(ADMIN, "revoke"), () => releaseManifest(ADMIN)]) {
+      const refused = await attempt();
+      assert.deepEqual([refused.ok, refused.error?.code], [false, "authorization_denied"]);
+    }
+  });
+
   test("retrieval: the organization administrator, a GK reviewer, another organization, and the AI cannot retrieve; a revoked release cannot be retrieved until re-granted", onNormalChain, async () => {
     for (const [organizationId, actor, status] of [
       [ORG, "client_admin", 403], [ORG, "gk_reviewer", 403], [ORG, "other_gk_admin", 403], [OTHER_ORG, "other_gk_admin", 404], [ORG, "ai", 403],
@@ -1340,6 +1469,10 @@ async function runSuite() {
     assert.equal(revoked.data.effective, false);
     const afterRevoke = await ids.getMarkdown(ORG, "gk_admin");
     assert.equal(afterRevoke.statusCode, 409, afterRevoke.body);
+    const clientAfterRevoke = await ids.getClientMarkdown(ORG, ENGAGEMENT, ids.exportManifestId, "client_admin");
+    assert.equal(clientAfterRevoke.statusCode, 409, clientAfterRevoke.body);
+    assert.doesNotMatch(clientAfterRevoke.body, /programme sessions/);
+    assert.deepEqual((await clientDraft(ADMIN)).data.release, { state: "release_no_longer_valid", releasedReportId: null });
     assert.match(afterRevoke.body, /conflict_current_state_changed/);
     assert.doesNotMatch(afterRevoke.body, /programme sessions/);
     const noNewRelease = await releaseManifest(GK_ADMIN, tick());
@@ -1348,6 +1481,8 @@ async function runSuite() {
     assert.equal(regranted.ok, true, JSON.stringify(regranted));
     assert.equal(regranted.data.effective, true);
     assert.equal((await ids.getMarkdown(ORG, "gk_admin")).statusCode, 200);
+    assert.equal((await ids.getClientMarkdown(ORG, ENGAGEMENT, ids.exportManifestId, "client_admin")).statusCode, 200);
+    assert.equal((await clientDraft(ADMIN)).data.release.state, "released_for_internal_use");
     const after = await exportCounts();
     assert.deepEqual([after.snapshots, after.candidates, after.manifests], [before.snapshots, before.candidates, before.manifests]);
     assert.equal(after.decisions, before.decisions + 2, "revoke and re-grant are two appended decisions");
@@ -1369,6 +1504,9 @@ async function runSuite() {
       assert.doesNotMatch(retrieval.body, /programme sessions/);
       const release = await releaseManifest(GK_ADMIN);
       assert.equal(release.ok, false, JSON.stringify(release));
+      const clientRetrieval = await ids.getClientMarkdown(ORG, ENGAGEMENT, ids.exportManifestId, "client_admin");
+      assert.equal(clientRetrieval.statusCode, 409, clientRetrieval.body);
+      assert.doesNotMatch(clientRetrieval.body, /programme sessions/);
     }
   });
 }

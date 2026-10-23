@@ -2798,7 +2798,7 @@ router.post(
 );
 
 async function getSourceMeasurementService() {
-  if (intakeServiceOverride?.recordSourceRecordCountMeasurement) return intakeServiceOverride;
+  if (intakeServiceOverride?.recordSourceRecordCountMeasurement || intakeServiceOverride?.getSourceRecordCountMeasurementBasis) return intakeServiceOverride;
   sourceMeasurementServicePromise ||= import("../services/kaiSourceMeasurementService.js");
   return sourceMeasurementServicePromise;
 }
@@ -2830,6 +2830,31 @@ router.post(
         definition: requestPayload(req),
         actorContext,
         now,
+      });
+    });
+  },
+);
+
+// Read-only basis for the same measurement (Plan A Prompt 8): the profile
+// counts and calculation the organization administrator defines the count
+// from, and whatever is already recorded for the version.
+router.get(
+  "/admin/organizations/:organizationId/source-versions/:sourceVersionId/record-count-measurement",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    const identifiers = sourceVersionEvidenceExtractionIdentifiers(req);
+    if (!identifiers) {
+      return sendKaiError(res, "validation_blocker", {
+        blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id_or_source_version_id")],
+      });
+    }
+    const actorContext = sprint2MappedActorContext(req);
+    return invokeService(res, async () => {
+      const service = await getSourceMeasurementService();
+      return service.getSourceRecordCountMeasurementBasis({
+        organizationId: identifiers.organizationId,
+        sourceVersionId: identifiers.sourceVersionId,
+        actorContext,
       });
     });
   },
@@ -3505,7 +3530,7 @@ router.get(
 
 let clientGeneratedContentServicePromise = null;
 async function getClientGeneratedContentService() {
-  if (intakeServiceOverride?.listClientGeneratedDrafts) return intakeServiceOverride;
+  if (intakeServiceOverride?.listClientGeneratedDrafts || intakeServiceOverride?.getClientReleasedReportMarkdown) return intakeServiceOverride;
   clientGeneratedContentServicePromise ||= import("../services/kaiClientGeneratedContentService.js");
   return clientGeneratedContentServicePromise;
 }
@@ -3582,6 +3607,31 @@ for (const [path, keys, method] of [
     });
   });
 }
+
+// The organization administrator's read-only receipt of an internal report
+// Get Kinder has already reviewed and released (Plan A Prompt 8;
+// getClientReleasedReportMarkdown). Markdown only; the service re-runs the
+// final export gate on every request. No SQL here.
+router.get(
+  "/admin/organizations/:organizationId/engagements/:engagementId/client-released-reports/:exportManifestId/markdown",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    const keys = ["organizationId", "engagementId", "exportManifestId"];
+    const ids = clientContentPathIds(req, keys);
+    if (!ids) {
+      return sendKaiError(res, "validation_blocker", {
+        blockers: [routeValidationBlocker("invalid_uuid_field", keys.join("_or_"))],
+      });
+    }
+    try {
+      const service = await getClientGeneratedContentService();
+      return sendMarkdownAttachment(res, await service.getClientReleasedReportMarkdown({ ...ids, actorContext: sprint2MappedActorContext(req) }));
+    } catch (error) {
+      console.error("[kai-sprint2-intake] system_error", error);
+      return sendKaiError(res, "system_error");
+    }
+  },
+);
 
 let evidenceLibraryServicePromise = null;
 async function getEvidenceLibraryService() {

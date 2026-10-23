@@ -42939,3 +42939,200 @@ themselves are correct):**
 No push, deployment, production/shared database, migration, flag, tenant,
 credential, live provider, real client data, or `00_KAI_CURRENT_STATE.md`
 change.
+
+### Plan A Prompt 8: customer measurement and read-only receipt of the released report (2026-10-22)
+
+**Owner authorization (USER_CONFIRMED):** the owner's "KAI Revised Plan A:
+Complete the Customer-Facing File-to-Report Connection" prompt directs,
+locally:
+- an ordinary organization administrator records the existing P2-01M
+  measurement through Get Kinder;
+- where the controlling authority permits, the same administrator retrieves
+  the already GK-reviewed and released internal Evidence Summary, read-only.
+
+It does not authorize a migration, production or shared resources,
+deployment or push, flag/tenant/credential changes, real client data, GK
+role or release reassignment, or a Current State update.
+
+**Start (TOOL_VERIFIED):** `main` at `8c58f4a`, clean.
+
+**Preflight (TOOL_VERIFIED):**
+- No client UI called the P2-01M route, no capability flag existed for it,
+  and no client route returned profile counts (the only profile read is
+  GK-only and carries no counts).
+- The customer 403 came from `composeExportManifestRenderModel`. Every
+  retrieval (GK Markdown, CSV, PDF and DOCX routes) checked
+  `create_export_manifest` / `{gk_admin}`, so read-only retrieval inherited
+  the release (manifest-creation) authority.
+- The client Generated Drafts and Internal Drafts reads deliberately strip
+  manifest linkage; no client download existed.
+
+**Controlling authority for customer receipt (TOOL_VERIFIED reading; owner
+documents):**
+- Operating Model v0.2 §11's flow is "7. GK reviews the relevant
+  output/package. 8. Release."
+- §7.1 authorizes "internal/client drafts".
+- §2: the client owns its data; outputs are service work product.
+- The Addendum (draft) §8 places "consequential external release" under GK
+  review, which a GK release satisfies.
+- Package 3 (2026-09-24, accepted) already shows `client_admin` the text of
+  GK-reviewed, currently eligible drafts, read-only.
+- The "GK only / HIGH_RISK_FINAL" entries in the authorization-closure
+  packages classify the routes as they then stood. They record no owner
+  decision against receipt, and no recorded owner decision denies it.
+- **Conclusion:** read-only receipt by the organization's own administrator
+  of an internal report GK has already released is within this authority.
+  Review and release stay GK's.
+- Explicit owner wording naming "customer download": NOT_CONFIRMED (none
+  exists). The basis is the documents above.
+
+**Operation A, customer measurement (no migration):**
+- **Repository:** the record path's preconditions become one shared loader:
+  - the P2-01 lineage and currentness validators;
+  - the effective allowed use;
+  - the exact committed profile;
+  - the derivation.
+
+  A new read-only `readSourceRecordCountMeasurementBasis` uses that loader.
+  It returns the profile counts and counted value, or the structured reason
+  the version cannot be measured, plus any recorded definition, measurement,
+  measurement limitations (with descriptions) and claim. It writes nothing.
+  It takes the same candidate row lock as the write, so it is not a READ ONLY
+  transaction.
+- **Service and route:** `getSourceRecordCountMeasurementBasis` has the same
+  admission as the write (P2-01 extraction authority). It is served by
+  `GET .../source-versions/:id/record-count-measurement`.
+- **Capability:** `workflowOperations.recordSourceMeasurement`. The
+  frontend capability projection gained the key; without it the projection
+  failed closed and the action stayed hidden.
+- **UI:** Knowledge Studio > Data Sources > "Count records" opens
+  `ClientSourceMeasurementPanel` for current versions only. It shows:
+  - the server's counts (data records, blanks not counted, exact duplicates
+    still counted);
+  - "Counted records = data records minus blank records = N", with N from
+    the server;
+  - a definition form, where a reporting period requires an explicit
+    attestation that KAI does not verify it against record dates;
+  - after submitting through the existing POST: the recorded definition,
+    the measurement, its limitations in words, and the claim with its next
+    step ("Propose a claim from this measurement" through the existing P2-03
+    route).
+
+  It computes nothing and never shows a record.
+- **Correction:** a recorded definition is immutable. A conflicting one
+  returns 409 `measurement_definition_already_recorded`, whose existing
+  `required_fix` names the supported recovery, a new intake version. The
+  panel shows that message and the recorded definition.
+  - Recovery deficiency: no operation corrects a definition on the same
+    version (by design; it would change evidence identity).
+
+**Operation B, read-only receipt:**
+- **New operation** `read_client_released_internal_report`, `{client_admin}`
+  only, in `kaiClientGeneratedContentService`:
+  `getClientReleasedReportMarkdown`.
+- **Admission, before any read:** mapped human, active same-organization
+  membership, tenant check, and the Project in that organization.
+- **Scope:** read through the new read-only
+  `postgresClientReleasedReportRepository`. The manifest must be this
+  organization's, internal audience, an internal draft type, and its draft
+  generated under this Project. Anything else is `not_found`.
+- **Rendering:** through the existing render repository, which re-runs
+  candidate currentness and the P3-18 final gate on every request. A revoked
+  release or stale source is 409, with no reason disclosed. Markdown only.
+- **Route:** `GET .../engagements/:id/client-released-reports/:manifestId/markdown`.
+  It contains no SQL.
+- **Unchanged:** the GK routes, roles and release ownership, and
+  `KAI_PUBLIC_EXPORT_ENABLED` (still required, as for every export).
+- **Status:** the Internal Drafts detail now carries `release`:
+  `awaiting_get_kinder_review`, `awaiting_get_kinder_release`,
+  `released_for_internal_use` (with the report id), `release_no_longer_valid`
+  or `release_status_unavailable`. It comes from the latest internal manifest
+  and whether it renders now. "Open released report" and "Download Markdown"
+  appear only for `released_for_internal_use` with the
+  `readReleasedInternalReports` capability.
+- **Report readability:** the block prose explained the count, definition,
+  blanks, duplicates and attested period, but missingness and the coverage
+  limitations were only codes. One backend description map
+  (`describeMeasurementLimitationCode`) now feeds both the panel and the
+  Markdown, which adds a plain-language line under each measured-claim code.
+  Accepted limitations stay limitations, the ten codes are unchanged, and
+  other codes render as before.
+
+**Proof (TOOL_VERIFIED):**
+- **Normal migration chain (real PostgreSQL), 29 tests:**
+  - The basis returns counts 6/1/2 and counted 5 (the independent count),
+    the recorded definition, measurement 5, the four measurement limitations
+    and the proposed claim.
+  - Refused: client_reviewer, client_contributor, another organization,
+    inactive, system, flag off, unknown, prohibited use, stale and non-CSV.
+    A conflict refusal writes nothing.
+  - Release state moves `awaiting_get_kinder_review` →
+    `awaiting_get_kinder_release` → `released_for_internal_use`.
+  - The client route returns exactly the GK-released Markdown, with value 5,
+    citations, the ten codes and their descriptions.
+  - Client route refusals:
+    - 403: client_reviewer, contributor, gk_reviewer, AI, another
+      organization's administrator.
+    - 404: another organization's path, another Project, unknown report.
+  - `client_admin` gets 403 on the GK route and cannot grant, revoke or
+    create a manifest.
+  - After a revoke: 409 and `release_no_longer_valid`. After a re-grant:
+    200. After a stale source: 409.
+- **Browser (headless Chrome, temporary local infrastructure),
+  `kai-client-admin-measurement-to-released-report`, 13/0:**
+  1. The administrator opens Data Sources, sees 6/1/2 and the calculation
+     = 5, records the definition with an attested September period, sees
+     "Measurement: 5 programme sessions" and four limitations, and proposes
+     the claim (gap state recorded, 0 follow-ups). A conflicting definition
+     returns 409 with the recovery step.
+  2. The basis read is refused for other roles (403), an inactive
+     administrator (403), another organization (403), an unknown version
+     (404) and a malformed id (422).
+  3. GK reviews the evidence and claim and accepts the coverage limitations.
+  4. The administrator generates the internal summary in the UI. The model
+     response's `approved`/`released` fields change nothing.
+  5. GK completes the review; the UI shows "awaiting release" with no
+     action. gk_admin runs export review, snapshot (ten codes), candidate,
+     grant and manifest. client_admin and gk_reviewer are refused authority
+     and manifest creation.
+  6. The administrator clicks "Open released report": one GET, 200. The
+     shown Markdown equals GK's release byte for byte, and the download link
+     returns it as an attachment.
+  7. Then: other roles, inactive, another organization or Project, the GK
+     route → 403/404; revoke → 409, and the UI says "no longer available"
+     with no action; re-grant → 200; stale source → 409.
+- **Infrastructure only, not deployed results:** the session login, the P1
+  persistence, the sensitivity setup audit and the model provider are
+  simulated. `KAI_PUBLIC_EXPORT_ENABLED=true` is set in the test process
+  only.
+
+**Verification (TOOL_VERIFIED; sentinel `DATABASE_URL`):**
+
+| Command | Pass | Fail | Skipped |
+| --- | --- | --- | --- |
+| `npm run build` | ok | | |
+| `npm test` (baseline 5689/0/116) | 5698 | 0 | 117 |
+| `npm run verify:kai-sprint2-api-contract` | 71 | 0 | 0 |
+| Plan A normal chain (legacy seed + full path) | 2 + 29 | 0 | 0 |
+| P2-01M adjusted runner | 2 + 55 | 0 | 7 |
+| P2-06 33, P3-01 19, P14-13 8 + 50 | 110 | 0 | 0 |
+| Review-start audit 78, P14-11 4, Gate C1 59, board mixed 7 | 148 | 0 | 0 |
+| Data-gap composition / P3-19 (failure names identical to the post-Prompt-7 set) | 293 / 375 | 23 / 18 | 1 / 0 |
+| Browser: new 13, evidence-to-draft 21, source-to-impact 16, source promotion 12, evidence pipeline 8, Knowledge Studio 6 | 76 | 0 | 0 |
+| `git diff --check` | ok | | |
+
+**Remaining Plan A:**
+- No organization-owned review or release, by design: GK owns both. There
+  is no reject or needs-changes outcome.
+- Internal export still requires `KAI_PUBLIC_EXPORT_ENABLED`. Narrowing it
+  needs a separate owner decision.
+- Not done:
+  - correcting a measurement definition on the same version;
+  - a live provider;
+  - production schema, rollout and deployment (NOT_CONFIRMED);
+  - customer-operated acceptance on a deployed environment (NOT_CONFIRMED).
+
+**Status:** PLAN_A_CUSTOMER_MEASUREMENT_AND_RELEASED_REPORT_RECEIPT_COMPLETE_LOCAL_SYNTHETIC.
+No push, deployment, production/shared database, migration, flag, tenant,
+credential, real client data, GK role change, or `00_KAI_CURRENT_STATE.md`
+change.
