@@ -273,6 +273,13 @@ No mandatory backup-region investigations, support-personnel geography studies, 
 
 GK owns KAI review during the MVP, with one owner-accepted, organization-scoped exception: an existing Get Kinder organization administrator may make the authoritative sensitivity/allowed-use decision for an eligible `intake_sensitivity_profile` belonging to the KAI organization bound to that administrator's active Get Kinder organization membership. The decision is attributed to the authenticated human as `client_admin`. This does not grant a global GK role, platform-superuser authority, cross-organization access, unrelated evidence or claim approval, public-release approval, tenant override, or export finalization. All other GK review ownership remains unchanged. This exception was accepted by the owner in the KAI Project conversation on 2026-10-12 (`USER_CONFIRMED`).
 
+Second owner-accepted, organization-scoped exception (2026-10-23, `USER_CONFIRMED`, submitted by the owner in the "KAI Revised Plan A: Complete Organization-Owned Internal Evidence Summary Review and Release" execution prompt): an authenticated, active `client_admin` may be the accountable human reviewer and final-release decision-maker for a supported internal `evidence_summary` belonging to their own organization and engagement, provided the output satisfies the existing evidence, claim, audience, processing-permission, currentness and final-eligibility requirements. GK review and release authority remain required wherever the section 7.2 controls apply: sensitive disclosure, identifying participant information, public story/testimonial use, unresolved consent/governance issues, and materially unsupported or high-risk claims. The exception grants no GK role, cross-tenant authority, validator override, funder/public release authority, or unrestricted access to evidence. The owner also confirmed that a client administrator may receive an already valid, GK-released internal report for their organization through the read-only delivery operation.
+
+Implemented scope of the second exception (repository record, not a change of the policy above):
+
+- **Factual review: implemented.** The administrator records the factual approval of an ordinary internal evidence summary through the existing generated-content review lifecycle. A draft is ordinary only when every cited claim is currently eligible for internal use and every cited source's current sensitivity decision is complete, permits the use and AI processing, and records personal information, minors, health/housing/justice/immigration information, Indigenous or governance-sensitive information, stories or testimonials, and small-cell risk as `absent`. `present` or `unknown` keeps GK review.
+- **Final release: not implemented.** The release ledgers are schema-pinned to GK roles (`limitation_snapshots.confirmed_by_role` and the `export_authority_granted` `decided_by_role`). Recording an organization administrator there needs a separately authorized schema change. Until then GK releases every report, including ordinary internal ones.
+
 Client review is recommended or requested when client knowledge is materially needed to resolve:
 
 - factual uncertainty;
@@ -414,7 +421,7 @@ Only genuinely missing conditions should be inspected or remediated.
 - **Long-term value:** prefer anonymization when identifiable information is no longer needed but analytical/program value remains.
 - **Audit:** metadata-only audit trail retained for 24 months.
 - **AI:** AI may process information needed for KAI; external foundation-model training is off by default; KAI/Get Kinder improvement is allowed under the applicable disclosures.
-- **Review:** GK owns review; client review only where materially useful or required.
+- **Review:** GK owns review; client review only where materially useful or required; an organization's own administrator may review an ordinary internal evidence summary (section 11, 2026-10-23).
 - **Raw storage:** Canada.
 - **Application:** Render.
 - **Subprocessors:** lightweight register.

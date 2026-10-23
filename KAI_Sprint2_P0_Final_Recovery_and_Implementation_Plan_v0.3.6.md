@@ -43333,3 +43333,210 @@ Data-gap composition and P3-19 were not re-run; no product code changed.
 No push, deployment, production/shared database, migration, flag, tenant,
 credential, real client data, GK role change, or `00_KAI_CURRENT_STATE.md`
 change.
+
+### Plan A Prompt 10: organization-owned internal Evidence Summary review (2026-10-23)
+
+**Owner authorization (USER_CONFIRMED):** the owner's "KAI Revised Plan A:
+Complete Organization-Owned Internal Evidence Summary Review and Release"
+prompt accepts a narrow amendment. An active `client_admin` may be the
+accountable reviewer and final-release decision-maker for a supported
+internal `evidence_summary` of their own organization and engagement. GK
+keeps review and release wherever the section 7.2 high-risk controls apply.
+It authorizes:
+- recording the amendment in source-controlled governing documentation;
+- local synthetic implementation and tests.
+
+It does not authorize a migration or schema change, production or shared
+resources, deployment or push, flag/tenant/credential changes, real client
+data, global GK role changes, or a Current State update.
+
+**Start (TOOL_VERIFIED):** `main` at `8815380` (the Prompt 9 commit, one past
+the prompt's reported `bc9d076`), clean.
+
+**Governing record:** Operating Model v0.2 section 11 gains a second
+organization-scoped exception paragraph (and a section 18 summary clause). It
+records:
+- the amendment as accepted;
+- the implemented scope: factual review implemented, final release not.
+
+This is a repository edit only. The owner's ChatGPT Project Source copy of the
+Operating Model is NOT updated by it (NOT_CONFIRMED); the owner must replace
+it separately.
+
+**Blocker: organization-owned final release needs a schema change
+(TOOL_VERIFIED, source):**
+- A release needs a confirmed `kai.limitation_snapshots` row. P3-16's
+  `limitation_snapshots_p3_16_confirmed_by_role_check` admits only
+  `gk_reviewer` / `gk_admin`.
+- A release needs an effective `export_authority_granted` decision. P3-17's
+  `human_authority_decisions_p3_17_role_by_type_check` pins it to
+  `decided_by_role = 'gk_admin'`. The P3-18 gate consults only that decision
+  type.
+- Recording a `client_admin` there needs DDL (not authorized). Writing GK
+  roles for an organization administrator would be the identity substitution
+  the prompt forbids.
+- Minimum future change (NOT applied):
+  - admit `client_admin` in both CHECKs, only for an internal-audience
+    candidate of an `evidence_summary` (by trigger, as P3-17 already enforces
+    audience compatibility);
+  - widen the service role sets for the export review, snapshot, candidate,
+    authority and manifest operations to the same organization-scoped
+    admission.
+
+  This needs a separate owner decision.
+
+**What was implemented (no migration; global GK role sets unchanged):**
+- **Classification:** `postgresOrganizationInternalReviewRepository.js`
+  (read-only) splits reasons into two kinds.
+  - Get Kinder review reasons, which keep the existing GK path:
+    - a content type other than `evidence_summary`, or an audience other
+      than `internal`;
+    - a cited source with no complete sensitivity decision;
+    - any of the six section 7.2 categories not `absent` on a cited source's
+      current decision: personal information, minors,
+      health/housing/justice/immigration, Indigenous/governance, story or
+      testimonial, small-cell risk. `unknown` counts as not cleared.
+  - Blocked reasons, where nobody should approve now: a cited claim not
+    currently eligible (P2-06), a non-current source version, or the use or
+    AI processing no longer permitted.
+
+  Consent basis, staff notes and financial records are not consulted: with
+  the six categories `absent`, internal processing is section 7.1 ordinary
+  processing. This is an interpretation for the owner to confirm.
+- **Review operation:** `approveClientInternalDraftFactualReview`
+  (`record_client_internal_draft_factual_review`, `{client_admin}`).
+  - **Admission:** mapped human, active same-organization membership, tenant
+    check; `KAI_SPRINT2_ENABLED` and `KAI_GENERATION_ENABLED`.
+  - **Scope:** the Project in the organization, the draft generated under
+    that Project, internal audience.
+  - **Writes:** one action runs the existing repository start
+    (open → in_progress) then complete (→ resolved). These use the existing
+    transactions, optimistic `expectedUpdatedAt`, replay and both audits
+    (`upload_lifecycle_audit` and `kai.audit_events`, the production
+    factory).
+- **Repository change:** `postgresGeneratedContentRepository.js`
+  start/complete accept two optional dependencies, both absent on the GK
+  routes, whose behavior is unchanged.
+  - `reviewAdmission`, called inside the transaction after the packet
+    re-evaluation (P2-06 per cited claim) and before any write.
+  - `completionAuditContract`. The organization completion is recorded under
+    `kai_organization_internal_factual_review_completion_v1`, which is how
+    the client view attributes the reviewer.
+- **Route:** `POST .../engagements/:engagementId/client-internal-drafts/:id/factual-review`
+  with body exactly `{"decision":"approved"}`. It contains no SQL.
+- **No reject or needs-changes outcome:** the `generated_content_review`
+  contract has only open, in_progress and resolved. A rejection would need a
+  new schema contract, so none was invented. `rejected` and `needs_changes`
+  return 422. The supported correction path is to not approve and generate a
+  corrected draft.
+- **AI:** non-human actors are refused before any read. The generator's
+  `approved` / `released` fields remain non-authoritative.
+- **Customer UI (Internal Drafts):** new states `awaiting_organization_review`
+  and `reviewed_by_your_organization`. The existing GK states stay where they
+  are true.
+  - The detail adds `factualReview` (`actorMayApprove`, Get Kinder reasons,
+    blocked reasons) and the release state `awaiting_organization_review`.
+  - The "Approve factual content" action shows only with the
+    `reviewInternalDraftFactualContent` capability and the server's
+    `actorMayApprove`. It needs a confirmation that the reviewer read the
+    text, cited claims and limitations.
+  - Held and blocked drafts show their reasons.
+  - Release and receipt reuse the Prompt 8 surface.
+  - Repaired: a list reload no longer re-focuses the last generated draft.
+
+**Proof (TOOL_VERIFIED):**
+- **Normal migration chain (real PostgreSQL, 79 migrations / 77 applied),
+  2 + 30 / 0:**
+  - The existing measured draft cites a source with no sensitivity decision,
+    so it stays GK-reviewed. The existing GK review → release → receipt
+    tests are unchanged and pass.
+  - New test, on the spec's AI-permitted, all-`absent` source:
+    - the claim becomes eligible through GK review and coverage acceptance;
+    - the administrator generates the draft; the detail is
+      `awaiting_organization_review` with the approval offered;
+    - a second draft from the undecided source is refused with 422
+      `sensitivity_review_not_complete`, writing nothing;
+    - the export review is not accepted before approval;
+    - refused before any write: `client_reviewer`, `client_contributor`,
+      `gk_reviewer`, `gk_admin`, another organization's administrator, an
+      inactive administrator, AI (all 403); rejected and needs_changes (422);
+      generation flag off; another Project (404).
+  - The approval writes the start and completion attributed to the
+    administrator (organization contract) and both `kai.audit_events` rows.
+    The draft row is unchanged, and a repeat is a replay.
+  - The administrator is refused export review, snapshot, candidate and
+    authority for internal, funder and public. GK runs the unchanged release.
+  - The administrator receives the Markdown through the client route:
+    - 5 programme sessions, equal to the independent count;
+    - the attested-period qualification;
+    - `[CIT-001]` to the ordinary claim, evidence and source version;
+    - all ten limitation codes with their wording;
+    - no row values, file names, rate, participant or causal wording.
+
+    A revoked release returns 409 (`release_no_longer_valid`); a re-grant
+    returns 200.
+- **Browser (headless Chrome, new
+  `kai-client-admin-internal-factual-review-browser-acceptance`), 14 / 0:**
+  - The administrator records the five-record measurement and claim in the
+    UI; GK reviews the evidence, claim and coverage.
+  - The administrator generates the summary (awaiting its own review, with
+    the actual text, citation and limitations shown and the approval
+    disabled until confirmed) and an impact narrative (GK-only, no action).
+  - Route refusals: contributor, reviewer, inactive administrator, GK
+    reviewer, GK administrator, another organization (403); another Project
+    (404); rejected, needs_changes, and the narrative (422, with
+    `content_type_requires_get_kinder_review`). Nothing is written.
+  - The administrator confirms reading and clicks Approve: one POST, 200.
+    The UI shows "Factual review completed by your organization" and
+    "Reviewed; awaiting Get Kinder release". Nothing is released.
+  - GK runs export review, snapshot (ten codes), candidate, grant and
+    manifest. The administrator is refused for every audience.
+  - The administrator opens the report (one GET, 200) and downloads it: byte
+    for byte GK's release, count 5.
+  - Revoke → 409 and "no longer available"; re-grant → 200; injected stale
+    source → 409.
+- **Simulated, as in Prompt 8:** the session login, the P1-03..P1-05 rows,
+  the GK sensitivity setup audit, the model provider, and
+  `KAI_PUBLIC_EXPORT_ENABLED=true` in the test process.
+
+**Feature flag (TOOL_VERIFIED):**
+- The organization review needs only `KAI_SPRINT2_ENABLED` and
+  `KAI_GENERATION_ENABLED`.
+- With `KAI_PUBLIC_EXPORT_ENABLED` off, internal release is impossible:
+  export review, snapshot, candidate, authority and manifest return
+  `feature_disabled`. Customer receipt is `feature_disabled`, and the detail
+  shows `release_status_unavailable`.
+- The flag was not changed. Decoupling internal release from it needs an
+  owner decision: either a separate internal-export flag, or gating internal
+  release on `KAI_GENERATION_ENABLED`.
+
+**Verification (TOOL_VERIFIED; sentinel `DATABASE_URL`):**
+
+| Command | Pass | Fail | Skipped |
+| --- | --- | --- | --- |
+| `npm test` (baseline 5699/0/118) | 5706 | 0 | 119 |
+| `npm run verify:kai-sprint2-api-contract` | 71 | 0 | 0 |
+| `npm run build` | ok | | |
+| New unit spec `kai-organization-internal-review.spec.js` (in `npm test`) | 6 | 0 | 0 |
+| Plan A normal chain (legacy seed + full path) | 2 + 30 | 0 | 0 |
+| P2-01M adjusted runner (new test is normal-chain only) | 2 + 55 | 0 | 8 |
+| Review-start audit 3 + 8 + 67, P14-11 4, Gate C1 59, board mixed 7 | 148 | 0 | 0 |
+| Browser: new 14, measurement-to-release 13, evidence-to-draft 21, source-to-impact 16, Knowledge Studio 6, source promotion 12, evidence pipeline 8 | 90 | 0 | 0 |
+| Assembled file-to-report runner | 15 | 0 | 0 |
+| `git diff --check` | ok | | |
+
+**Remaining (precise):**
+- Organization-owned final release: blocked on the schema change above
+  (owner decision and separately authorized DDL). GK releases every report.
+- Explicit reject or needs-changes review outcome: needs a new
+  `generated_content_review` contract (schema).
+- Internal export behind `KAI_PUBLIC_EXPORT_ENABLED`: owner decision.
+- The consent-basis interpretation above: owner confirmation.
+- Project Source copy of the Operating Model: owner update.
+- Deployed customer acceptance, production schema, migration order,
+  deployment and a live provider: NOT_CONFIRMED.
+
+**Status:** PLAN_A_ORGANIZATION_INTERNAL_FACTUAL_REVIEW_COMPLETE_LOCAL_SYNTHETIC;
+ORGANIZATION_INTERNAL_RELEASE_BLOCKED_ON_SCHEMA. No push, deployment,
+production/shared database, migration, flag, tenant, credential, real client
+data, global GK role change, or `00_KAI_CURRENT_STATE.md` change.
