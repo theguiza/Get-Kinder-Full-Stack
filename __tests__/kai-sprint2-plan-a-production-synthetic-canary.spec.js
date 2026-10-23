@@ -10,6 +10,7 @@ import {
   authenticationBlocker,
   capabilityBlocker,
   shouldRepeatHumanAction,
+  safeCdpEndpoint,
 } from "../scripts/kai-sprint2-plan-a-production-synthetic-canary.js";
 
 test("production canary fixture counts six rows, excludes one blank, and includes both exact duplicate rows", async () => {
@@ -25,6 +26,22 @@ test("production canary fixture counts six rows, excludes one blank, and include
 test("existing Chrome DevTools Protocol browser harness launches and evaluates locally", async () => {
   const userAgent = await launchBrowserHarnessForTest();
   assert.match(userAgent, /Chrome\//);
+});
+
+test("production browser connection is restricted to an existing local Chrome session", () => {
+  assert.equal(safeCdpEndpoint(undefined).origin, "http://127.0.0.1:9222");
+  assert.equal(safeCdpEndpoint("http://localhost:9222").hostname, "localhost");
+  assert.throws(() => safeCdpEndpoint("https://example.com:9222"), /loopback/);
+  assert.throws(() => safeCdpEndpoint("http://user:pass@127.0.0.1:9222"), /loopback/);
+});
+
+test("live modes attach the existing signed-in tab and never launch or close its browser", async () => {
+  const source = await readFile(new URL("../scripts/kai-sprint2-plan-a-production-synthetic-canary.js", import.meta.url), "utf8");
+  assert.match(source, /browser = await attachExistingChrome\(target, args\["browser-cdp-url"\]\)/);
+  assert.match(source, /Target\.detachFromTarget/);
+  assert.doesNotMatch(source.slice(source.indexOf("async function attachExistingChrome"), source.indexOf("function cleanResult")), /Browser\.close|spawn\(/);
+  assert.match(source, /signed_in_app_tab_not_found/);
+  assert.match(source, /Connected to the existing browser tab/);
 });
 
 test("initial execution without the separate owner-authorization attestation stops before browser launch", () => {

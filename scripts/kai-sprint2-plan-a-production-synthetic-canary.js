@@ -13,6 +13,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const STATE_ROOT = join(ROOT, ".kai-production-canary", "runs");
 const SENTINEL_DATABASE_URL = "postgres://127.0.0.1:9/kai_sentinel";
 const DEFAULT_CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+const DEFAULT_CDP_ENDPOINT = "http://127.0.0.1:9222";
 const API_PREFIX = "/api/kai/sprint2/intake";
 export const SYNTHETIC_CSV_PATH = join(ROOT, "scripts", "fixtures", "kai-plan-a-production-synthetic-records.csv");
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -208,6 +209,88 @@ async function launchChrome(url, { headless = false } = {}) {
   };
 }
 
+export function safeCdpEndpoint(value) {
+  let endpoint;
+  try { endpoint = new URL(value || DEFAULT_CDP_ENDPOINT); } catch { throw new Error("Browser connection must be a local Chrome DevTools URL, such as http://127.0.0.1:9222"); }
+  if (!new Set(["http:", "https:"]).has(endpoint.protocol) || !new Set(["127.0.0.1", "localhost", "[::1]"]).has(endpoint.hostname) || endpoint.username || endpoint.password || endpoint.search || endpoint.hash) {
+    throw new Error("Refusing browser connection: only a local loopback Chrome DevTools endpoint is allowed");
+  }
+  endpoint.pathname = endpoint.pathname.replace(/\/$/, "");
+  return endpoint;
+}
+
+async function attachExistingChrome(url, endpointValue) {
+  const endpoint = safeCdpEndpoint(endpointValue || process.env.KAI_BROWSER_CDP_URL);
+  let versionResponse;
+  let targetsResponse;
+  try {
+    [versionResponse, targetsResponse] = await Promise.all([
+      fetch(new URL(`${endpoint.pathname}/json/version`, endpoint)),
+      fetch(new URL(`${endpoint.pathname}/json/list`, endpoint)),
+    ]);
+  } catch {
+    throw new Error(`signed_in_browser_unavailable: cannot reach ${endpoint.origin}; open the browser terminal's signed-in Chrome with remote debugging enabled and set KAI_BROWSER_CDP_URL`);
+  }
+  if (!versionResponse.ok || !targetsResponse.ok) throw new Error(`signed_in_browser_unavailable: ${endpoint.origin} did not expose Chrome DevTools page targets`);
+  const version = await versionResponse.json();
+  const targets = await targetsResponse.json();
+  const target = (Array.isArray(targets) ? targets : []).find((candidate) => {
+    if (candidate.type !== "page" || typeof candidate.url !== "string") return false;
+    try {
+      const current = new URL(candidate.url);
+      return current.origin === url.origin && (url.pathname === "/" || current.pathname === url.pathname);
+    } catch { return false; }
+  });
+  if (!target?.id || !version.webSocketDebuggerUrl) throw new Error(`signed_in_app_tab_not_found: open ${url.origin} in the already signed-in browser, then rerun; no new browser or login window was opened`);
+
+  const socket = new WebSocket(version.webSocketDebuggerUrl);
+  await new Promise((resolveOpen, reject) => {
+    socket.addEventListener("open", resolveOpen, { once: true });
+    socket.addEventListener("error", reject, { once: true });
+  });
+  let nextId = 1;
+  const pending = new Map();
+  socket.addEventListener("message", ({ data }) => {
+    const message = JSON.parse(data);
+    if (!message.id || !pending.has(message.id)) return;
+    const task = pending.get(message.id); pending.delete(message.id);
+    message.error ? task.reject(new Error(message.error.message)) : task.resolve(message.result);
+  });
+  const send = (method, params = {}, sessionId) => new Promise((resolveSend, reject) => {
+    const id = nextId++;
+    pending.set(id, { resolve: resolveSend, reject });
+    socket.send(JSON.stringify({ id, method, params, ...(sessionId ? { sessionId } : {}) }));
+  });
+  const { sessionId } = await send("Target.attachToTarget", { targetId: target.id, flatten: true });
+  await send("Page.enable", {}, sessionId);
+  await send("Runtime.enable", {}, sessionId);
+  const evaluate = async (expression) => {
+    const result = await send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true }, sessionId);
+    if (result.exceptionDetails) throw new Error("Browser page evaluation failed");
+    return result.result.value;
+  };
+  const probe = async (path, accept = "application/json") => {
+    const apiPath = path.startsWith(`${API_PREFIX}/`) ? path : `${API_PREFIX}${path.startsWith("/") ? path : `/${path}`}`;
+    if (!apiPath.startsWith(`${API_PREFIX}/`)) throw new Error("Only the known KAI application API prefix is allowed");
+    return evaluate(`(async()=>{const r=await fetch(${JSON.stringify(apiPath)},{credentials:'same-origin',headers:{Accept:${JSON.stringify(accept)}}});if(${JSON.stringify(accept)}==='text/markdown')return {status:r.status,disposition:r.headers.get('content-disposition'),text:await r.text()};let j=null;try{j=await r.json()}catch{};return {status:r.status,body:j}})()`);
+  };
+  return {
+    targetUrl: target.url,
+    async navigate(destination) {
+      const next = safeTarget(destination);
+      if (next.origin !== url.origin) throw new Error("Navigation outside the selected application origin refused");
+      await send("Page.navigate", { url: next.href }, sessionId);
+    },
+    evaluate,
+    probe: (path) => probe(path),
+    probeText: (path) => probe(path, "text/markdown"),
+    async close() {
+      try { await send("Target.detachFromTarget", { sessionId }); } catch {}
+      socket.close();
+    }
+  };
+}
+
 function cleanResult(result) {
   const status = Number(result?.status || 0);
   const body = result?.body;
@@ -351,9 +434,9 @@ async function interactive(args) {
   const rl = createInterface({ input: stdin, output: stdout });
   let browser;
   try {
-    browser = await launchChrome(new URL("/login", target).href);
-    console.log(`Chrome opened at ${new URL("/login", target).href}. Authenticate interactively as the authorized ${role === "gk" ? "GK reviewer" : "customer administrator"}; enter no credentials in this terminal.`);
-    await promptLine(rl, `Sign in through the visible application window, then select the existing synthetic organization and engagement ${state.engagementId || "in the customer application"}; do not inspect any other organization's data.`);
+    browser = await attachExistingChrome(target, args["browser-cdp-url"]);
+    console.log(`Connected to the existing browser tab ${browser.targetUrl}. No new browser, profile, login window, or test account was created.`);
+    await promptLine(rl, `Confirm the already signed-in ${role === "gk" ? "GK reviewer" : "customer administrator"} is active in that tab and the existing synthetic organization/engagement ${state.engagementId || "is selected"}; do not inspect any other organization's data.`);
     const organizationList = await browser.probe("/admin/organizations");
     if (organizationList.status !== 200) throw new Error(`${authenticationBlocker(organizationList.status)}:${apiCode(organizationList)}`);
 

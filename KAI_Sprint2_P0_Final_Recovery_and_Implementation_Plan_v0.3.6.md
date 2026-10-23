@@ -43865,3 +43865,28 @@ stops with `feature_disabled` and does not change the flag.
 live runtime and end-to-end result remain NOT_CONFIRMED. No production login,
 upload, database access, mutation, flag change, deploy, push, or real client
 data use.
+
+### Plan A correction: attach to the operator's signed-in browser (2026-10-23)
+
+**Correction (TOOL_VERIFIED):** the first runner opened a fresh Chrome profile,
+which could not use the operator's existing signed-in session. Live modes now
+attach only to an existing local Chrome DevTools endpoint, select a page already
+open at the requested application origin, use that page's same-origin session,
+and detach without closing the browser. If the endpoint or signed-in app tab is
+not available, the runner stops before canary work. The fresh Chrome launch
+remains limited to the local browser-harness test.
+
+**Verification (TOOL_VERIFIED; sentinel `DATABASE_URL`):**
+- `npm run test:kai-plan-a-production-canary`: 10 passed, 0 failed, including
+  local Chrome harness launch and existing-session attachment boundary checks.
+- `npm run verify:kai-sprint2-api-contract`: 71 passed, 0 failed.
+- `git diff --check`: passed.
+
+**Live execution (NOT_CONFIRMED):** no signed-in production tab was attached
+and no production workflow was attempted. The live runner expects the browser
+terminal's already signed-in Chrome to expose local DevTools, by default at
+`http://127.0.0.1:9222` or through `KAI_BROWSER_CDP_URL`. No production data,
+configuration, feature flag, deployment, or account was accessed or changed.
+
+**Status:** PLAN_A_EXISTING_SIGNED_IN_BROWSER_ATTACHMENT_IMPLEMENTED;
+production runtime and end-to-end result remain NOT_CONFIRMED.
