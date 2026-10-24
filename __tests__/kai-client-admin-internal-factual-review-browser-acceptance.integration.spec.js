@@ -259,7 +259,12 @@ async function runBrowserAcceptance() {
         text: JSON.stringify({
           approved: true,
           draftStatus: "released",
-          blocks: requestBody.claims.map((claim) => ({ text: COMPLIANT_TEXT, citations: [{ claimId: claim.claimId, evidenceItemId: claim.evidenceItemId }] })),
+          blocks: requestBody.claims.map((claim) => ({
+            text: claim.claimStatement.startsWith("The promoted source records 5 programme sessions")
+              ? COMPLIANT_TEXT
+              : claim.claimStatement,
+            citations: [{ claimId: claim.claimId, evidenceItemId: claim.evidenceItemId }],
+          })),
         }),
       }],
     };
@@ -284,8 +289,11 @@ async function runBrowserAcceptance() {
     coverageInternalAcceptancePath,
     evidenceReviewCompletePath,
     evidenceReviewDecisionBody,
+    clientInternalDraftPath,
     clientInternalDraftFactualReviewPath,
     clientInternalDraftReleasePath,
+    evidenceExtractionPath,
+    claimProposalPath,
   } = await import("../frontend/impactEvidenceLibraryLogic.js");
   const { sourceRecordCountMeasurementPath } = await import("../frontend/knowledgeStudio/clientSourceMeasurementLogic.js");
   const query = async (sql, params = []) => (await seedPool.query(sql, params)).rows;
@@ -556,6 +564,25 @@ async function runBrowserAcceptance() {
       ids.claimId = claim.claim_id;
     });
 
+    await test("A2b: create a legacy field-presence claim through P2-01/P2-03 and leave its P2-04 state absent", async () => {
+      const extracted = await adminPage.api("POST", evidenceExtractionPath(ORG_X, ids.sourceVersionId), {});
+      created(extracted, "field-presence evidence extraction");
+      const evidenceItem = extracted.body.data.evidenceItems.find((item) => item.evidence_type === "dictionary_field_presence_fact");
+      assert.ok(evidenceItem, JSON.stringify(extracted.body.data));
+      const proposed = await adminPage.api("POST", claimProposalPath(ORG_X, evidenceItem.evidence_item_id), {});
+      created(proposed, "legacy field-presence claim proposal");
+      ids.legacyClaimId = proposed.body.data.claim.claim_id;
+      const traceability = await gkReviewerPage.api("GET", claimTraceabilityPath(ORG_X, ids.legacyClaimId, "internal"));
+      assert.equal(traceability.status, 409);
+      assert.equal(traceability.body.data.traceability_conflict_reason, "gap_dimension_requires_missing_p204_state");
+      const [state] = await query(
+        `SELECT (SELECT count(*) FROM kai.gap_log_items WHERE organization_id = $1::uuid AND claim_id = $2::uuid)::int AS gaps,
+                (SELECT count(*) FROM kai.client_followup_items WHERE organization_id = $1::uuid AND claim_id = $2::uuid)::int AS followups`,
+        [ORG_X, ids.legacyClaimId],
+      );
+      assert.deepEqual(state, { gaps: 0, followups: 0 });
+    });
+
     await test("A3: a conflicting second definition is refused with the recovery step, and the recorded one is still what the panel shows", async () => {
       const conflict = await adminPage.api("POST", sourceRecordCountMeasurementPath(ORG_X, ids.sourceVersionId), {
         counted_unit: "attendance record", unit_label: "attendance records", definition_text: "Each row is one attendance record.",
@@ -651,6 +678,38 @@ async function runBrowserAcceptance() {
       assert.match(await textOf(adminPage, "[data-client-factual-review-get-kinder-required]"), /Only internal evidence summaries can be reviewed by your organization/);
       assert.equal(await textOf(adminPage, "[data-client-factual-review-action]"), null, "no approval action for a Get Kinder-only draft");
       results.c = { summary: "awaiting_organization_review", narrative: "awaiting_get_kinder_review" };
+    });
+
+    await test("C2: a legacy field-presence draft shows its eligibility blocker, next action, and no factual-approval control", async () => {
+      await openDataSources();
+      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `[data-client-claim="${ids.legacyClaimId}"]`)), "the legacy field-presence claim");
+      await adminPage.clickIn(`[data-client-claim="${ids.legacyClaimId}"] input[type=checkbox]`, "Use the legacy claim in an internal draft");
+      await adminPage.clickButton("Generate internal evidence summary");
+      await adminPage.waitForText("Internal evidence summary created");
+      await adminPage.idle();
+      const [blockedDraft] = await query(
+        `SELECT d.generated_content_draft_id::text
+           FROM kai.generated_content_drafts d
+           JOIN kai.generated_content_citations c ON c.generated_content_block_id IN (
+             SELECT generated_content_block_id FROM kai.generated_content_blocks WHERE generated_content_draft_id = d.generated_content_draft_id)
+          WHERE d.organization_id = $1::uuid AND d.content_type = 'evidence_summary'
+            AND d.generated_content_draft_id <> $2::uuid AND c.claim_id = $3::uuid
+          ORDER BY d.created_at DESC LIMIT 1`,
+        [ORG_X, ids.draftId, ids.legacyClaimId],
+      );
+      assert.ok(blockedDraft, "the legacy claim's generated draft is persisted");
+      ids.blockedDraftId = blockedDraft.generated_content_draft_id;
+      await adminPage.waitFor(async () => (await textOf(adminPage, `[data-client-internal-draft-detail="${ids.blockedDraftId}"]`)) !== null, "the ineligible draft opens");
+      await adminPage.idle();
+      const blockedDetail = await textOf(adminPage, `[data-client-internal-draft-detail="${ids.blockedDraftId}"]`);
+      assert.match(blockedDetail, /Factual approval blocked/);
+      assert.match(blockedDetail, /At least one cited claim is not currently eligible for internal use/);
+      assert.match(blockedDetail, /Ask Get Kinder to review the cited claims/);
+      assert.equal(await textOf(adminPage, "[data-client-factual-review-action]"), null, "no approval control while the service blocks it");
+      const factualReview = await adminPage.api("GET", clientInternalDraftPath(ORG_X, PROJECT_X, ids.blockedDraftId));
+      assert.equal(factualReview.body.data.factualReview.actorMayApprove, false);
+      assert.deepEqual(factualReview.body.data.factualReview.blockedReasons, ["cited_claims_not_currently_eligible"]);
+      results.c2 = { heading: "Factual approval blocked", blocker: "cited_claims_not_currently_eligible", approvalControl: false };
     });
 
     await test("D1: the factual-review route refuses other roles, inactive or other-organization administrators, GK staff, other Projects, other decisions, and a Get Kinder-only draft, writing nothing", async () => {

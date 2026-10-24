@@ -20,6 +20,8 @@ import {
   INTERNAL_DRAFT_RELEASE_STATE_LABELS,
   INTERNAL_DRAFT_RELEASE_STATE_MESSAGES,
   INTERNAL_DRAFT_REVIEW_STATE_LABELS,
+  internalDraftFactualReviewHeading,
+  internalDraftFactualReviewNextActions,
 } from "./clientEvidenceWorkflowLogic.js";
 
 const DRAFT_LABELS = Object.freeze({
@@ -192,7 +194,7 @@ export default function ClientInternalDrafts({
           <div className="d-flex flex-wrap align-items-center gap-2 mb-1">
             <span className="fw-semibold">{DRAFT_LABELS[draft.contentType]}</span>
             <span className="badge text-bg-warning" data-client-internal-draft-detail-review-state={draft.reviewState}>
-              {INTERNAL_DRAFT_REVIEW_STATE_LABELS[draft.reviewState]}
+              {internalDraftFactualReviewHeading(draft.reviewState, draft.factualReview)}
             </span>
           </div>
           {draft.release ? (
@@ -262,6 +264,7 @@ function FactualReview({ draft, approval, setApproval, canReview, onApprove }) {
   const mine = approval.draftId === draft.generatedContentDraftId;
   const held = view.getKinderReviewReasons.length > 0;
   const blocked = view.blockedReasons.length > 0;
+  const nextActions = internalDraftFactualReviewNextActions(view.blockedReasons);
   return (
     <div className="small mb-2" data-client-internal-draft-factual-review="">
       {mine && approval.status === "success" ? (
@@ -286,6 +289,7 @@ function FactualReview({ draft, approval, setApproval, canReview, onApprove }) {
           <ul className="mb-1">
             {view.blockedReasons.map((code) => <li key={code}>{INTERNAL_DRAFT_FACTUAL_REVIEW_REASON_MESSAGES[code]}</li>)}
           </ul>
+          {nextActions.map((message) => <p key={message} className="mb-1" data-client-factual-review-next-action="">{message}</p>)}
         </div>
       ) : null}
       {canReview && view.actorMayApprove ? (

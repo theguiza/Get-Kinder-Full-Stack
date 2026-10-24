@@ -459,6 +459,25 @@ export const INTERNAL_DRAFT_FACTUAL_REVIEW_REASON_MESSAGES = Object.freeze({
   processing_permission_not_established: "A cited source no longer permits this use or AI processing.",
 });
 
+export const INTERNAL_DRAFT_FACTUAL_REVIEW_NEXT_ACTIONS = Object.freeze({
+  cited_claims_not_currently_eligible: "Ask Get Kinder to review the cited claims. Factual approval is unavailable until the claims are currently eligible for internal use.",
+  source_version_not_current: "Ask Get Kinder to reconcile the cited source version, then reload this draft.",
+  processing_permission_not_established: "Ask Get Kinder to review the cited source's current processing permission, then reload this draft.",
+});
+
+export function internalDraftFactualReviewHeading(reviewState, factualReview) {
+  return factualReview?.actorMayApprove === false
+    && Array.isArray(factualReview.blockedReasons)
+    && factualReview.blockedReasons.length > 0
+    ? "Factual approval blocked"
+    : INTERNAL_DRAFT_REVIEW_STATE_LABELS[reviewState] || "Review state unavailable";
+}
+
+export function internalDraftFactualReviewNextActions(blockedReasons) {
+  if (!Array.isArray(blockedReasons)) return [];
+  return [...new Set(blockedReasons.map((code) => INTERNAL_DRAFT_FACTUAL_REVIEW_NEXT_ACTIONS[code]).filter(Boolean))];
+}
+
 // Owner amendment 2026-10-23: why a reviewed draft is released by Get Kinder,
 // or cannot be released now, from the server's organizationRelease codes.
 export const INTERNAL_DRAFT_RELEASE_REASON_MESSAGES = Object.freeze({

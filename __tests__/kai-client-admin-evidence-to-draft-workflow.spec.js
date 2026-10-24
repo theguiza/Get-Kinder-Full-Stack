@@ -208,7 +208,14 @@ async function runWorkflowOperation(name, actorContext, organizationId, { engage
     async createImpactNarrativeDraft(input) { record("generate", input.organizationId); return draftResult("impact_narrative"); },
   };
   const generationInput = { organizationId, engagementId, requestedAudience: "internal", claimIds: [CLAIM], idempotencyKey: "client-admin-workflow-1", actorContext, now: NOW };
-  const generationDeps = { env: ENV, getEngagementForOrganization: engagementRead, generatedContentRepository: generationRepository, draftGenerator: async () => ({ blocks: [] }), metadataOnlyAudit: noAudit() };
+  const generationDeps = {
+    env: ENV,
+    getEngagementForOrganization: engagementRead,
+    generatedContentRepository: generationRepository,
+    draftGenerator: async () => ({ blocks: [] }),
+    metadataOnlyAudit: noAudit(),
+    reconcileClaimGapsForGeneration(input) { record("p204", input.organizationId); return null; },
+  };
   switch (name) {
     case "sources":
       return { calls, result: await listOrganizationSources({ organizationId, actorContext }, {
@@ -287,8 +294,8 @@ test("A: binding-derived client_admin is authorized for all eight operations in 
     propose: [["propose", ORG_X]],
     claims: [["claims", ORG_X]],
     gapFollowups: [["gaps", ORG_X]],
-    evidenceSummary: [["engagement", ORG_X], ["generate", ORG_X]],
-    impactNarrative: [["engagement", ORG_X], ["generate", ORG_X]],
+    evidenceSummary: [["engagement", ORG_X], ["p204", ORG_X], ["generate", ORG_X]],
+    impactNarrative: [["engagement", ORG_X], ["p204", ORG_X], ["generate", ORG_X]],
   };
   for (const name of WORKFLOW_OPERATIONS) {
     const { result, calls } = await runWorkflowOperation(name, actor, ORG_X);

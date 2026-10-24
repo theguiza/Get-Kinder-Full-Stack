@@ -55,6 +55,9 @@ async function runP206IntegrationSuite() {
   } = await import("../Backend/kai/services/kaiCoverageReviewDecisionService.js");
   const { completeClientFollowup } = await import("../Backend/kai/services/kaiClientFollowupCompletionService.js");
   const { createPostgresClientFollowupCompletionRepository } = await import("../Backend/kai/dictionary/postgresClientFollowupCompletionRepository.js");
+  const { createImpactNarrativeDraft } = await import("../Backend/kai/services/kaiGeneratedContentService.js");
+  const { createPostgresGeneratedContentRepository } = await import("../Backend/kai/dictionary/postgresGeneratedContentRepository.js");
+  const { getEngagementForOrganization } = await import("../Backend/kai/db/kaiQueries.js");
 
   const ORG = "00000000-0000-4000-8000-000000000001";
   const NOW = "2026-08-06T10:00:00.000Z";
@@ -526,7 +529,7 @@ async function runP206IntegrationSuite() {
     publicP206FieldsSeeded = true;
   }
 
-  async function supersedePhase5PublicDecision(sourceVersionId, { publicUseAllowed }) {
+  async function supersedePhase5PublicDecision(sourceVersionId, { publicUseAllowed, aiProcessingAllowed = false }) {
     const [lineage] = await query(
       `SELECT intake_sensitivity_profile_id FROM kai.source_versions WHERE organization_id = $1::uuid AND source_version_id = $2::uuid`,
       [ORG, sourceVersionId],
@@ -571,18 +574,20 @@ async function runP206IntegrationSuite() {
          'unknown', 'absent',
          'unknown', 'unknown', 'unknown',
          'unknown', 'present', 'allowed',
-         false, false, $4,
-         false, $5::uuid, 'gk_reviewer', $6::timestamptz,
-         $7, 'human', now()
+         $4, false, $5,
+         false, $6::uuid, 'gk_reviewer', $7::timestamptz,
+         $8, 'human', now()
        )`,
-      [ORG, intakeSensitivityProfileId, sensitivityQueue.review_queue_item_id, publicUseAllowed, actorContext.actorUserId, NOW, currentHead?.decision_id ?? null],
+      [ORG, intakeSensitivityProfileId, sensitivityQueue.review_queue_item_id, aiProcessingAllowed, publicUseAllowed, actorContext.actorUserId, NOW, currentHead?.decision_id ?? null],
     );
   }
 
   async function buildPublicP206Claim({
     phase5PublicAllowed = true,
+    phase5AiProcessingAllowed = false,
     claimReviewApprovedAudiences = ["internal", "public"],
     forceRawClaimReviewInsert = false,
+    createGapState = true,
   } = {}) {
     await seedPublicP206DictionaryFields();
     const [sourceVersion] = await query(
@@ -607,11 +612,13 @@ async function runP206IntegrationSuite() {
     );
     assert.equal(claimResult.ok, true, JSON.stringify(claimResult));
     const claimId = claimResult.data.claim.claim_id;
-    const gapResult = await generateClaimGapFollowups(
-      { organizationId: ORG, claimId, actorContext, now: NOW },
-      { env: { KAI_SPRINT2_ENABLED: "true" }, claimGapFollowupRepository: gapRepo, metadataOnlyAudit: auditRecorder() },
-    );
-    assert.equal(gapResult.ok, true, JSON.stringify(gapResult));
+    if (createGapState) {
+      const gapResult = await generateClaimGapFollowups(
+        { organizationId: ORG, claimId, actorContext, now: NOW },
+        { env: { KAI_SPRINT2_ENABLED: "true" }, claimGapFollowupRepository: gapRepo, metadataOnlyAudit: auditRecorder() },
+      );
+      assert.equal(gapResult.ok, true, JSON.stringify(gapResult));
+    }
 
     const [evidenceQueue] = await query(
       `SELECT review_queue_item_id, updated_at FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = 'evidence_review' AND target_object_type = 'evidence_item' AND target_object_id = $2::uuid`,
@@ -626,7 +633,10 @@ async function runP206IntegrationSuite() {
     );
     assert.equal(evidenceReviewResult.ok, true, JSON.stringify(evidenceReviewResult));
 
-    await supersedePhase5PublicDecision(sourceVersion.source_version_id, { publicUseAllowed: phase5PublicAllowed });
+    await supersedePhase5PublicDecision(sourceVersion.source_version_id, {
+      publicUseAllowed: phase5PublicAllowed,
+      aiProcessingAllowed: phase5AiProcessingAllowed,
+    });
 
     if (claimReviewApprovedAudiences && forceRawClaimReviewInsert) {
       // recordClaimReviewDecision itself enforces the Phase-5 governance
@@ -1178,6 +1188,100 @@ async function runP206IntegrationSuite() {
     );
   });
 
+  test("legacy P2-03 claim: internal Impact Narrative reconciles missing P2-04 through the authorized service before real P2-06 generation preflight", async () => {
+    const legacy = await buildPublicP206Claim({
+      phase5PublicAllowed: false,
+      phase5AiProcessingAllowed: true,
+      claimReviewApprovedAudiences: ["internal"],
+      createGapState: false,
+    });
+    const beforeRows = await query(
+      `SELECT
+         (SELECT count(*)::int FROM kai.gap_log_items WHERE organization_id = $1::uuid AND claim_id = $2::uuid) AS gaps,
+         (SELECT count(*)::int FROM kai.client_followup_items WHERE organization_id = $1::uuid AND claim_id = $2::uuid) AS followups`,
+      [ORG, legacy.claimId],
+    );
+    assert.deepEqual(beforeRows[0], { gaps: 0, followups: 0 });
+
+    const beforeTrace = await trace(legacy.claimId, "internal");
+    assert.equal(beforeTrace.ok, false);
+    assert.equal(beforeTrace.error.code, "conflict_current_state_changed");
+    assert.equal(beforeTrace.data.traceability_conflict_reason, "gap_dimension_requires_missing_p204_state");
+
+    await pool.query(
+      `INSERT INTO kai.engagements (engagement_id, organization_id, engagement_code)
+       VALUES ($1::uuid, $2::uuid, 'legacy-impact-narrative')`,
+      ["5a000000-0000-4000-8000-00000000a0e4", ORG],
+    );
+    const generatedContentRepository = createPostgresGeneratedContentRepository({ runInTransaction: withRunnerOwnedTransaction });
+    const generationInput = {
+      organizationId: ORG,
+      engagementId: "5a000000-0000-4000-8000-00000000a0e4",
+      requestedAudience: "internal",
+      claimIds: [legacy.claimId],
+      idempotencyKey: "legacy-p204-impact-narrative",
+      actorContext,
+      now: NOW,
+    };
+    let preflightProviderCalls = 0;
+    const preflight = await generatedContentRepository.createImpactNarrativeDraft(generationInput, {
+      draftGenerator: async () => { preflightProviderCalls += 1; return { blocks: [] }; },
+      metadataOnlyAudit: auditRecorder(),
+    });
+    assert.equal(preflight.ok, false);
+    assert.equal(preflight.error.code, "validation_blocker");
+    assert.deepEqual(preflight.blockers, [{
+      validator_key: "VAL-GEN-TRACE-P0-001",
+      severity: "blocker",
+      blocking_reason: "traceability_result_contract_invalid",
+    }]);
+    assert.equal(preflightProviderCalls, 0);
+
+    const providerCalls = [];
+    const generated = await createImpactNarrativeDraft(generationInput, {
+      env: { KAI_SPRINT2_ENABLED: "true", KAI_GENERATION_ENABLED: "true" },
+      getEngagementForOrganization: (input) => getEngagementForOrganization(input, pool),
+      claimGapFollowupRepository: gapRepo,
+      claimGapFollowupMetadataOnlyAuditFactory: () => auditRecorder(),
+      generatedContentRepository,
+      draftGenerator: async ({ claims }) => {
+        providerCalls.push(claims[0]);
+        return {
+          blocks: [{
+            ordinal: 1,
+            text: claims[0].claimStatement,
+            citations: [{ claimId: claims[0].claimId, evidenceItemId: claims[0].evidenceItemId }],
+          }],
+        };
+      },
+      metadataOnlyAudit: auditRecorder(),
+    });
+    assert.equal(generated.ok, true, JSON.stringify(generated));
+    assert.equal(providerCalls.length, 1);
+    const afterTrace = await trace(legacy.claimId, "internal");
+    assert.equal(afterTrace.ok, true, JSON.stringify(afterTrace));
+    assert.equal(afterTrace.data.eligible, false, "P2-04 reconciliation does not approve the claim or clear eligibility blockers");
+    assert.ok(afterTrace.data.blockerCodes.length > 0);
+    const afterRows = await query(
+      `SELECT
+         (SELECT count(*)::int FROM kai.gap_log_items WHERE organization_id = $1::uuid AND claim_id = $2::uuid) AS gaps,
+         (SELECT count(*)::int FROM kai.client_followup_items WHERE organization_id = $1::uuid AND claim_id = $2::uuid) AS followups,
+         (SELECT count(*)::int FROM kai.review_queue_items q JOIN kai.client_followup_items f ON f.client_followup_item_id = q.target_object_id
+            WHERE q.organization_id = $1::uuid AND f.claim_id = $2::uuid AND q.queue_type = 'client_followup') AS queues`,
+      [ORG, legacy.claimId],
+    );
+    assert.ok(afterRows[0].gaps > 0);
+    assert.equal(afterRows[0].followups, 4, "only P2-04's four currently outstanding client-answerable dimensions are routed");
+    assert.equal(afterRows[0].queues, 4);
+    const replay = await generateClaimGapFollowups(
+      { organizationId: ORG, claimId: legacy.claimId, actorContext, now: NOW },
+      { env: { KAI_SPRINT2_ENABLED: "true" }, claimGapFollowupRepository: gapRepo, metadataOnlyAudit: auditRecorder() },
+    );
+    assert.equal(replay.ok, true);
+    assert.equal(replay.data.replayed, true);
+    assert.equal(providerCalls.length, 1, "idempotent P2-04 replay does not invoke generation again");
+  });
+
   // ===================================================================
   // Client Generated Drafts over the REAL P2-06 evaluator: real governed
   // claims (built and reviewed through the real services above), real
@@ -1189,7 +1293,6 @@ async function runP206IntegrationSuite() {
     listClientGeneratedDrafts,
     getClientGeneratedDraft,
   } = await import("../Backend/kai/services/kaiClientGeneratedContentService.js");
-  const { createPostgresGeneratedContentRepository } = await import("../Backend/kai/dictionary/postgresGeneratedContentRepository.js");
   const {
     listGeneratedDraftLibraryIndex: readDraftIndexSql,
     readGeneratedDraftEngagementId: readDraftEngagementSql,

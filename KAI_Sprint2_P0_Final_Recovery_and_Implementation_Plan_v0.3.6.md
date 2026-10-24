@@ -44325,3 +44325,34 @@ real client data. Rollout needs separate owner authorization.
 - deployed acceptance.
 
 **Status:** MIGRATION_05_PGADMIN_DELTA_PACKET_PREPARED_LOCAL. It is ready for separately authorized owner execution in pgAdmin. No production SQL, push, deployment, flag, tenant, credential, real client data, or `00_KAI_CURRENT_STATE.md` change.
+
+### Existing-claim P2-04 lifecycle and internal generation handoff (2026-10-24)
+
+**Owner authorization (USER_CONFIRMED):** the owner's "Repair Existing-Claim P2-04 Lifecycle and Internal Generation Handoff" prompt. It authorizes this bounded local implementation, synthetic PostgreSQL/browser regression work, and a local commit. It explicitly excludes production writes, deployment, Step E1 reopening, and the live canary.
+
+**Cause (TOOL_VERIFIED):** P2-03 proposal creates the claim but does not invoke P2-04, consistent with the documented reverted proposal-time hook. The production internal Evidence Summary and Impact Narrative generation services also did not invoke P2-04 before the generated-content repository consumed its read-only P2-06 result. In `kaiGeneratedContentService.js`, the P2-06 preflight failure therefore propagated through the existing generation contract as `VAL-GEN-TRACE-P0-001 / traceability_result_contract_invalid`; the adapter was correct for the invalid traceability result and was left unchanged.
+
+**Repair:** `Backend/kai/services/kaiGeneratedContentService.js` now calls the existing authorized `generateClaimGapFollowups` service for each internal claim after feature, actor, and tenant admission and before generated-content persistence/provider invocation. This uses the existing P2-04 transaction, authoritative coverage dimensions, idempotent persistence/currentness checks, and metadata-only audit. The production route supplies the existing P2-04 audit factory. External/funder Evidence Summary requests are unchanged. No proposal-time state or new customer step was added. Current, consistent state replays; stale or mismatched persisted review history remains a P2-04 conflict. The traceability contract is re-evaluated by the existing generated-content repository after P2-04 completes.
+
+**Legacy synthetic before/after (TOOL_VERIFIED; ephemeral loopback PostgreSQL):** before use, the real P2-03 legacy `dictionary_field_presence_fact` claim had 0 gap snapshots and 0 follow-ups. Real internal P2-06 returned HTTP 409 with `gap_dimension_requires_missing_p204_state`. Calling the real generated-content repository directly reproduced `VAL-GEN-TRACE-P0-001 / traceability_result_contract_invalid` and invoked the provider 0 times. After invoking the real internal Impact Narrative service, P2-04 persisted deterministic gap state and four currently unanswered client-answerable follow-ups/queue rows; traceability returned `ok=true`, while `eligible=false` and eligibility blockers remained. The internal draft persisted, the provider was called once, and explicit P2-04 replay reported `replayed=true` without duplication. The follow-ups correspond to authoritative outstanding dimensions; proposal itself still creates none.
+
+**Draft presentation:** the existing draft detail previously rendered "Awaiting your factual review" even with `actorMayApprove=false` and `cited_claims_not_currently_eligible`. It now shows "Factual approval blocked", the authoritative blocker, and the permitted next action to ask Get Kinder to review the cited claims. No approval control appears. The stored review state and backend factual-review status are unchanged. An eligible reviewable draft retains its existing heading and approval control.
+
+**Verification (TOOL_VERIFIED; `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel` for Node/npm commands):**
+
+| Command or suite | Result |
+| --- | --- |
+| `npm run verify:kai-sprint2-p2-04-claim-gap-followup` (ephemeral PostgreSQL) | 18 passed; idempotency, concurrency, stale state and audit checks passed |
+| `npm run verify:kai-sprint2-p2-06-claim-traceability` (ephemeral PostgreSQL) | 34 passed, including legacy P2-04 → Impact Narrative generation |
+| `node scripts/kai-sprint2-p2-01m-source-record-count-measurement-local-postgres.js` | 56 passed, 0 failed, 8 skipped; measured-claim automatic P2-04 still has zero unnecessary follow-ups |
+| `node scripts/kai-sprint2-p3-01-generated-content-drafts-local-postgres.js` | 19 passed |
+| Targeted generation/review boundary tests | 40 passed |
+| P2-04, P2-06, P3-01, P13-01 and P14-09 boundary/diagnostic regression tests | 69 passed; existing traceability-result adapter behavior preserved |
+| Internal factual-review browser acceptance | 17 passed; blocked legacy draft, eligible controls, and five-record draft/review/release journey verified |
+| Assembled Plan A customer file-to-report browser acceptance | 25 passed; five-record value, audience/tenant restrictions, measurement-only administrator review, and GK supersession protections verified |
+| `npm run build` | passed |
+| `git diff --check` | passed |
+
+Migration 05 and its measurement-only administrator authority were not changed. Generation eligibility, claim/evidence review, support strength, coverage decisions, and public/funder release rules remain authoritative. No unsupported numerical/impact assertion was approved; internal draft generation remains distinct from factual approval and release.
+
+**Status:** EXISTING_CLAIM_P2_04_INTERNAL_GENERATION_HANDOFF_LOCALLY_VERIFIED. Production state, the four historical claims, and any production canary remain untouched. No push, deployment, flag change, production follow-up, or Current State update.

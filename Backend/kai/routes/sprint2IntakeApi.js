@@ -3888,6 +3888,7 @@ router.post(
         now,
       }, {
         draftGenerator: createProductionEvidenceSummaryDraftGenerator(),
+        claimGapFollowupMetadataOnlyAuditFactory: createProductionMetadataOnlyAuditForClaimGapFollowup,
         metadataOnlyAudit: createProductionMetadataOnlyAuditForGeneratedContentDraft({
           organizationId: parsed.organizationId,
           actorContext,
@@ -4045,6 +4046,7 @@ router.post(
         now,
       }, {
         draftGenerator: createProductionImpactNarrativeDraftGenerator(),
+        claimGapFollowupMetadataOnlyAuditFactory: createProductionMetadataOnlyAuditForClaimGapFollowup,
         metadataOnlyAudit: createProductionMetadataOnlyAuditForGeneratedContentDraft({
           organizationId: parsed.organizationId,
           actorContext,

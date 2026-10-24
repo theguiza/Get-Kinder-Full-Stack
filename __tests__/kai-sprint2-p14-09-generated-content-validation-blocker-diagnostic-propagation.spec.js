@@ -352,6 +352,7 @@ test("P14-09 diagnostic propagation CASE A/B: an unresolved citation reference s
       createEvidenceSummaryDraft: (input, deps) => repository.createEvidenceSummaryDraft(input, deps),
     },
     getEngagementForOrganization: async () => ({ engagement_id: ENGAGEMENT, organization_id: ORG }),
+    reconcileClaimGapsForGeneration: async () => null,
     draftGenerator: mismatchedGenerator,
     metadataOnlyAudit: auditRecorder(),
     env: { KAI_SPRINT2_ENABLED: "true", KAI_GENERATION_ENABLED: "true" },

@@ -202,6 +202,64 @@
     return createPostgresGeneratedContentRepository();
   }
 
+  // Internal evidence summaries and Impact Narratives are the first
+  // generation/use operation for some legacy P2-03 claims. Reconcile their
+  // deterministic P2-04 snapshot through its existing authorized service
+  // transaction before the generated-content repository opens its own
+  // transaction and consumes the read-only P2-06 result. P2-04 owns its
+  // organization/actor checks, idempotent persistence, currentness checks,
+  // and required metadata-only audit; a failed reconciliation is returned
+  // without invoking the model provider.
+  async function reconcileInternalClaimGapsForGeneration(input, dependencies) {
+    if (typeof dependencies.reconcileClaimGapsForGeneration === "function") {
+      return dependencies.reconcileClaimGapsForGeneration(input);
+    }
+    const { generateClaimGapFollowups } = await import("./kaiClaimGapFollowupService.js");
+    const { createProductionMetadataOnlyAuditForClaimGapFollowup } = await import("./kaiMetadataOnlyAuditComposition.js");
+    for (const claimId of input.claimIds) {
+      const metadataOnlyAudit = dependencies.claimGapFollowupMetadataOnlyAuditFactory
+        ? dependencies.claimGapFollowupMetadataOnlyAuditFactory({
+            organizationId: input.organizationId,
+            claimId,
+            actorContext: input.actorContext,
+            now: input.now,
+          })
+        : dependencies.metadataOnlyAudit
+          ? dependencies.metadataOnlyAudit
+          : createProductionMetadataOnlyAuditForClaimGapFollowup({
+            organizationId: input.organizationId,
+            claimId,
+            actorContext: input.actorContext,
+            now: input.now,
+          });
+      const result = await generateClaimGapFollowups({
+        organizationId: input.organizationId,
+        claimId,
+        actorContext: input.actorContext,
+        now: input.now,
+      }, {
+        env: dependencies.env || process.env,
+        ...(dependencies.claimGapFollowupRepository
+          ? { claimGapFollowupRepository: dependencies.claimGapFollowupRepository }
+          : {}),
+        metadataOnlyAudit,
+      });
+      if (!result.ok) {
+        // Generation owns its existing reservation/idempotency and
+        // traceability result contracts. P2-04's not_found is a read-only
+        // refusal for that claim, so let the repository preserve those
+        // generation outcomes (for example, duplicate_conflict for a reused
+        // key) before it applies its ordinary fail-closed traceability gate.
+        if (result.error.code === "not_found") return null;
+        return buildKaiError(result.error.code, {
+          status: result.error.status,
+          ...(result.blockers ? { blockers: result.blockers } : {}),
+        });
+      }
+    }
+    return null;
+  }
+
   export async function createEvidenceSummaryDraft(input, dependencies = {}) {
     const env = dependencies.env || process.env;
     if (!isKaiSprint2Enabled(env)) return buildKaiError("feature_disabled");
@@ -242,6 +300,11 @@
     });
     if (tenant.severity === "blocker") {
       return buildKaiError("tenant_boundary_violation", { blockers: [tenant] });
+    }
+
+    if (input.requestedAudience === "internal") {
+      const reconciliation = await reconcileInternalClaimGapsForGeneration(input, dependencies);
+      if (reconciliation) return reconciliation;
     }
 
     const repository =
@@ -296,6 +359,9 @@
     if (tenant.severity === "blocker") {
       return buildKaiError("tenant_boundary_violation", { blockers: [tenant] });
     }
+
+    const reconciliation = await reconcileInternalClaimGapsForGeneration(input, dependencies);
+    if (reconciliation) return reconciliation;
 
     const repository =
       dependencies.generatedContentRepository || (await createDefaultGeneratedContentRepository());

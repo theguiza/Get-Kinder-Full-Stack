@@ -922,6 +922,8 @@ async function runSuite() {
   }, {
     env,
     getEngagementForOrganization: (args) => getEngagementForOrganization(args, pool),
+    claimGapFollowupRepository: gapRepository,
+    claimGapFollowupMetadataOnlyAuditFactory: () => noAudit(),
     generatedContentRepository: createPostgresGeneratedContentRepository({ runInTransaction: withTx }),
     draftGenerator: provider.draftGenerator,
     metadataOnlyAudit: noAudit(),

@@ -22,7 +22,13 @@ import {
   projectClientInternalDraft,
   projectOrganizationAccessCapabilities,
 } from "../frontend/impactEvidenceLibraryLogic.js";
-import { clientEvidenceWorkflowAccess, INTERNAL_DRAFT_FACTUAL_REVIEW_REASON_MESSAGES } from "../frontend/knowledgeStudio/clientEvidenceWorkflowLogic.js";
+import {
+  clientEvidenceWorkflowAccess,
+  INTERNAL_DRAFT_FACTUAL_REVIEW_REASON_MESSAGES,
+  INTERNAL_DRAFT_FACTUAL_REVIEW_NEXT_ACTIONS,
+  internalDraftFactualReviewHeading,
+  internalDraftFactualReviewNextActions,
+} from "../frontend/knowledgeStudio/clientEvidenceWorkflowLogic.js";
 
 /**
  * Owner amendment 2026-10-23: an active client_admin is the accountable
@@ -267,6 +273,7 @@ test("detail: an ordinary unreviewed summary is awaiting the organization's revi
   const detail = await read(ordinary.dependencies);
   assert.equal(detail.ok, true, JSON.stringify(detail));
   assert.equal(detail.data.reviewState, "awaiting_organization_review");
+  assert.equal(internalDraftFactualReviewHeading(detail.data.reviewState, detail.data.factualReview), "Awaiting your factual review");
   assert.deepEqual(detail.data.limitations, ["internal_use_only", "not_approved_for_external_use", "awaiting_organization_review"]);
   assert.deepEqual(detail.data.release, { state: "awaiting_organization_review", releasedReportId: null });
   assert.deepEqual(detail.data.factualReview, { actorMayApprove: true, getKinderReviewReasons: [], blockedReasons: [] });
@@ -284,6 +291,12 @@ test("detail: an ordinary unreviewed summary is awaiting the organization's revi
   const blockedDetail = await read(blocked.dependencies);
   assert.equal(blockedDetail.data.reviewState, "awaiting_organization_review");
   assert.deepEqual(blockedDetail.data.factualReview, { actorMayApprove: false, getKinderReviewReasons: [], blockedReasons: ["cited_claims_not_currently_eligible"] });
+  assert.equal(internalDraftFactualReviewHeading(blockedDetail.data.reviewState, blockedDetail.data.factualReview), "Factual approval blocked");
+  assert.deepEqual(internalDraftFactualReviewNextActions(blockedDetail.data.factualReview.blockedReasons), [
+    INTERNAL_DRAFT_FACTUAL_REVIEW_NEXT_ACTIONS.cited_claims_not_currently_eligible,
+  ]);
+  assert.match(INTERNAL_DRAFT_FACTUAL_REVIEW_NEXT_ACTIONS.cited_claims_not_currently_eligible, /Ask Get Kinder/);
+  assert.equal(blockedDetail.data.factualReview.actorMayApprove, false, "no approval action is exposed for the blocked draft");
 
   assert.equal((await approve(ordinary.dependencies)).ok, true);
   const after = await read(ordinary.dependencies);

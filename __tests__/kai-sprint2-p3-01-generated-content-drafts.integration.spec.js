@@ -129,6 +129,10 @@ async function runP301IntegrationSuite() {
   const evidenceRepo = createPostgresEvidenceLineageRepository({ runInTransaction: withRunnerOwnedTransaction });
   const claimRepo = createPostgresClaimProposalRepository({ runInTransaction: withRunnerOwnedTransaction });
   const gapRepo = createPostgresClaimGapFollowupRepository({ runInTransaction: withRunnerOwnedTransaction });
+  const p204ReplayDependencies = {
+    claimGapFollowupRepository: gapRepo,
+    claimGapFollowupMetadataOnlyAuditFactory: () => auditRecorder(),
+  };
 
   test.after(async () => {
     await pool.end();
@@ -272,6 +276,7 @@ async function runP301IntegrationSuite() {
       {
         env: { KAI_SPRINT2_ENABLED: "true", KAI_GENERATION_ENABLED: "true" },
         getEngagementForOrganization: engagementLookup,
+        ...p204ReplayDependencies,
         generatedContentRepository: createPostgresGeneratedContentRepository({
           runInTransaction: withRunnerOwnedTransaction,
         }),
@@ -360,6 +365,7 @@ async function runP301IntegrationSuite() {
       {
         env: { KAI_SPRINT2_ENABLED: "true", KAI_GENERATION_ENABLED: "true" },
         getEngagementForOrganization: engagementLookup,
+        ...p204ReplayDependencies,
         generatedContentRepository: generatedRepo(),
         draftGenerator: generator({ calls }),
         metadataOnlyAudit: auditRecorder({ published }),
@@ -390,6 +396,7 @@ async function runP301IntegrationSuite() {
       {
         env: { KAI_SPRINT2_ENABLED: "true", KAI_GENERATION_ENABLED: "true" },
         getEngagementForOrganization: engagementLookup,
+        ...p204ReplayDependencies,
         generatedContentRepository: generatedRepo(),
         draftGenerator: generator({ calls }),
         metadataOnlyAudit: auditRecorder(),
@@ -409,6 +416,7 @@ async function runP301IntegrationSuite() {
       {
         env: { KAI_SPRINT2_ENABLED: "true", KAI_GENERATION_ENABLED: "true" },
         getEngagementForOrganization: engagementLookup,
+        ...p204ReplayDependencies,
         generatedContentRepository: generatedRepo(),
         draftGenerator() {
           calls += 1;
@@ -434,6 +442,7 @@ async function runP301IntegrationSuite() {
       {
         env: { KAI_SPRINT2_ENABLED: "true", KAI_GENERATION_ENABLED: "true" },
         getEngagementForOrganization: engagementLookup,
+        ...p204ReplayDependencies,
         generatedContentRepository: generatedRepo(),
         draftGenerator: generator(),
         metadataOnlyAudit: auditRecorder(),
@@ -451,6 +460,7 @@ async function runP301IntegrationSuite() {
     const deps = {
       env: { KAI_SPRINT2_ENABLED: "true", KAI_GENERATION_ENABLED: "true" },
       getEngagementForOrganization: engagementLookup,
+      ...p204ReplayDependencies,
       generatedContentRepository: repo,
       draftGenerator: generator({ calls }),
       metadataOnlyAudit: auditRecorder(),
@@ -482,6 +492,7 @@ async function runP301IntegrationSuite() {
         {
           env: { KAI_SPRINT2_ENABLED: "true", KAI_GENERATION_ENABLED: "true" },
           getEngagementForOrganization: engagementLookup,
+          ...p204ReplayDependencies,
           generatedContentRepository: overrides.repository || generatedRepo(),
           draftGenerator: overrides.draftGenerator,
           metadataOnlyAudit: overrides.metadataOnlyAudit || auditRecorder(),
@@ -503,6 +514,7 @@ async function runP301IntegrationSuite() {
       {
         env: { KAI_SPRINT2_ENABLED: "true", KAI_GENERATION_ENABLED: "true" },
         getEngagementForOrganization: engagementLookup,
+        ...p204ReplayDependencies,
         generatedContentRepository: generatedRepo(),
         draftGenerator: generator({ calls }),
         metadataOnlyAudit: auditRecorder({ published }),
@@ -549,6 +561,7 @@ async function runP301IntegrationSuite() {
       {
         env: { KAI_SPRINT2_ENABLED: "true", KAI_GENERATION_ENABLED: "true" },
         getEngagementForOrganization: engagementLookup,
+        ...p204ReplayDependencies,
         generatedContentRepository: generatedRepo(),
         draftGenerator: generator({ calls }),
         metadataOnlyAudit: auditRecorder(),
@@ -569,6 +582,7 @@ async function runP301IntegrationSuite() {
       {
         env: { KAI_SPRINT2_ENABLED: "true", KAI_GENERATION_ENABLED: "true" },
         getEngagementForOrganization: engagementLookup,
+        ...p204ReplayDependencies,
         generatedContentRepository: generatedRepo(),
         draftGenerator: generator(),
         metadataOnlyAudit: auditRecorder(),
@@ -583,6 +597,7 @@ async function runP301IntegrationSuite() {
       {
         env: { KAI_SPRINT2_ENABLED: "true", KAI_GENERATION_ENABLED: "true" },
         getEngagementForOrganization: engagementLookup,
+        ...p204ReplayDependencies,
         generatedContentRepository: generatedRepo(),
         draftGenerator: async () => {
           impactNarrativeGeneratorCalls += 1;
@@ -616,6 +631,7 @@ async function runP301IntegrationSuite() {
       {
         env: { KAI_SPRINT2_ENABLED: "true", KAI_GENERATION_ENABLED: "true" },
         getEngagementForOrganization: engagementLookup,
+        ...p204ReplayDependencies,
         generatedContentRepository: generatedRepo(),
         draftGenerator: async (generatorInput) => ({
           blocks: [{
