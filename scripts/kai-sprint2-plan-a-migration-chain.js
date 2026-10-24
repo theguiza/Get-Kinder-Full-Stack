@@ -93,6 +93,7 @@ export const MIGRATION_CHAIN = [
   "kai_sprint2_b1a_02_client_admin_sensitivity_review",
   "kai_sprint2_p2_01m_source_record_count_measurement",
   "kai_sprint2_plan_a_organization_internal_release_authority",
+  "kai_sprint2_plan_a_organization_internal_factual_review_authority",
 ];
 
 export const PRODUCTION_HISTORY_ONLY = new Map([

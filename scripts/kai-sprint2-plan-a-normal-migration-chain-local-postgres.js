@@ -107,6 +107,14 @@ const releaseRoleConstraintsSql = `SELECT conrelid::regclass::text || '.' || con
 const releaseTriggersSql = `SELECT tgrelid::regclass::text || '.' || tgname AS name FROM pg_trigger
     WHERE tgname IN ('trg_organization_release_limitation_snapshot_scope', 'trg_organization_release_decision_scope') ORDER BY 1`;
 
+const FACTUAL_REVIEW_MIGRATION = "kai_sprint2_plan_a_organization_internal_factual_review_authority";
+const factualReviewConstraintsSql = `SELECT conrelid::regclass::text || '.' || conname AS name, pg_get_constraintdef(oid) AS definition FROM pg_constraint
+    WHERE conname IN ('evidence_review_decisions_p2_12_role_check', 'claim_review_decisions_p2_12_role_check',
+      'claim_review_decisions_organization_internal_audience_check', 'coverage_review_decisions_p2_10_decided_by_role_check') ORDER BY 1`;
+const factualReviewTriggersSql = `SELECT tgrelid::regclass::text || '.' || tgname AS name FROM pg_trigger
+    WHERE tgname IN ('trg_organization_factual_review_evidence_scope', 'trg_organization_factual_review_claim_scope',
+      'trg_organization_factual_review_coverage_scope') ORDER BY 1`;
+
 async function catalog(sql, params = []) {
   const client = new Client({ connectionString: targetUrl, ssl: false });
   await client.connect();
@@ -186,6 +194,156 @@ async function proveOrganizationReleaseMigration() {
   console.log("Plan A release migration: forward -> replay -> rollback -> forward converged.");
 }
 
+async function proveOrganizationFactualReviewMigration() {
+  const original = await catalog(factualReviewConstraintsSql);
+  for (const row of original) console.log(`Plan A factual review migration: original ${row.name}: ${row.definition}`);
+  if (original.length !== 3) throw new Error("the three P2-12 / P2-10 decision-role constraints must exist before the organization factual review migration");
+  psqlFile(`migrations/${FACTUAL_REVIEW_MIGRATION}.sql`);
+  for (const row of await catalog(factualReviewConstraintsSql)) console.log(`Plan A factual review migration: resulting ${row.name}: ${row.definition}`);
+  console.log(`Plan A factual review migration: triggers ${(await catalog(factualReviewTriggersSql)).map((row) => row.name).join(", ")}`);
+  const applied = (await catalog(schemaFingerprintSql))[0].fingerprint;
+  psqlFile(`migrations/${FACTUAL_REVIEW_MIGRATION}.sql`);
+  if ((await catalog(schemaFingerprintSql))[0].fingerprint !== applied) throw new Error("re-applying the organization factual review migration changed the schema");
+  console.log("Plan A factual review migration: a replay changed nothing.");
+  psqlFile(`migrations/${FACTUAL_REVIEW_MIGRATION}.rollback.sql`);
+  if (JSON.stringify(await catalog(factualReviewConstraintsSql)) !== JSON.stringify(original) || (await catalog(factualReviewTriggersSql)).length !== 0) {
+    throw new Error("the organization factual review rollback did not restore the P2-12 / P2-10 definitions exactly");
+  }
+  console.log("Plan A factual review migration: rollback on the empty state restored the original definitions exactly.");
+  psqlFile(`migrations/${FACTUAL_REVIEW_MIGRATION}.sql`);
+  if ((await catalog(schemaFingerprintSql))[0].fingerprint !== applied) throw new Error("re-applying the factual review migration after rollback did not converge");
+  console.log("Plan A factual review migration: forward -> replay -> rollback -> forward converged.");
+}
+
+// One INSERT inside its own transaction, always rolled back unless keep:
+// returns null when it succeeded, else the PostgreSQL error.
+async function tryInsert(sql, params, { disableTrigger = null, keep = false } = {}) {
+  const client = new Client({ connectionString: targetUrl, ssl: false });
+  await client.connect();
+  try {
+    await client.query("BEGIN");
+    if (disableTrigger) await client.query(`ALTER TABLE ${disableTrigger.table} DISABLE TRIGGER ${disableTrigger.trigger}`);
+    try {
+      await client.query(sql, params);
+    } catch (error) {
+      await client.query("ROLLBACK");
+      return error;
+    }
+    await client.query(keep ? "COMMIT" : "ROLLBACK");
+    return null;
+  } finally {
+    await client.end();
+  }
+}
+
+// Direct database inserts against the real lineage the P2-01M proof
+// created (GK-reviewed measured and field-presence claims): the client_admin
+// scope the migration pins, and GK inserts unchanged. The real
+// organization decisions through the routes are proven by the assembled
+// browser acceptance.
+async function proveOrganizationFactualReviewScope() {
+  const [measured] = await catalog(`SELECT c.organization_id::text AS organization_id, c.claim_id::text AS claim_id, e.evidence_item_id::text AS evidence_item_id,
+      (SELECT d.decision_id::text FROM kai.evidence_review_decisions d WHERE d.evidence_item_id = e.evidence_item_id
+        AND NOT EXISTS (SELECT 1 FROM kai.evidence_review_decisions s WHERE s.supersedes_decision_id = d.decision_id)) AS evidence_head,
+      (SELECT d.decided_by_role FROM kai.evidence_review_decisions d WHERE d.evidence_item_id = e.evidence_item_id
+        AND NOT EXISTS (SELECT 1 FROM kai.evidence_review_decisions s WHERE s.supersedes_decision_id = d.decision_id)) AS evidence_head_role,
+      (SELECT d.decision_id::text FROM kai.claim_review_decisions d WHERE d.claim_id = c.claim_id
+        AND NOT EXISTS (SELECT 1 FROM kai.claim_review_decisions s WHERE s.supersedes_decision_id = d.decision_id)) AS claim_head
+    FROM kai.claims c JOIN kai.evidence_items e ON e.evidence_item_id = c.evidence_item_id AND e.organization_id = c.organization_id
+   WHERE e.evidence_type = 'source_record_count_measurement'
+     AND EXISTS (SELECT 1 FROM kai.claim_review_decisions d WHERE d.claim_id = c.claim_id)
+     AND EXISTS (SELECT 1 FROM kai.gap_log_items g WHERE g.claim_id = c.claim_id AND g.dimension_key = 'small_cell_risk')
+   ORDER BY c.claim_id LIMIT 1`);
+  const [presence] = await catalog(`SELECT c.organization_id::text AS organization_id, c.claim_id::text AS claim_id, e.evidence_item_id::text AS evidence_item_id
+    FROM kai.claims c JOIN kai.evidence_items e ON e.evidence_item_id = c.evidence_item_id AND e.organization_id = c.organization_id
+   WHERE e.evidence_type = 'dictionary_field_presence_fact' ORDER BY c.claim_id LIMIT 1`);
+  if (!measured?.evidence_head || !measured.claim_head || !presence) throw new Error(`the P2-01M proof left no reviewed measured and field-presence claims: ${JSON.stringify({ measured, presence })}`);
+  if (!["gk_reviewer", "gk_admin"].includes(measured.evidence_head_role)) throw new Error(`the measured evidence head is not a GK decision: ${measured.evidence_head_role}`);
+  const actor = "00000000-0000-4000-8000-00000000c0a1";
+  const evidenceInsert = `INSERT INTO kai.evidence_review_decisions (organization_id, evidence_item_id, review_queue_item_id, decision_outcome,
+      decided_by, decided_by_role, target_updated_at, supersedes_decision_id)
+    VALUES ($1::uuid, $2::uuid, gen_random_uuid(), 'supported', $3::uuid, $4, now(), $5::uuid)`;
+  const claimInsert = `INSERT INTO kai.claim_review_decisions (organization_id, claim_id, review_queue_item_id, decision_outcome, approved_audiences,
+      decided_by, decided_by_role, target_updated_at, supersedes_decision_id)
+    VALUES ($1::uuid, $2::uuid, gen_random_uuid(), 'approved', $3::text[], $4::uuid, $5, now(), $6::uuid)`;
+  const coverageInsert = `INSERT INTO kai.coverage_review_decisions (organization_id, claim_id, dimension_key, decision, state_fingerprint, decided_by, decided_by_role)
+    VALUES ($1::uuid, $2::uuid, $3, $4, encode(sha256(gen_random_uuid()::text::bytea), 'hex'), $5::uuid, $6)`;
+  const presenceEvidenceHead = (await catalog(`SELECT d.decision_id::text AS id FROM kai.evidence_review_decisions d WHERE d.evidence_item_id = $1::uuid
+      AND NOT EXISTS (SELECT 1 FROM kai.evidence_review_decisions s WHERE s.supersedes_decision_id = d.decision_id)`, [presence.evidence_item_id]))[0]?.id ?? null;
+  const presenceClaimHead = (await catalog(`SELECT d.decision_id::text AS id FROM kai.claim_review_decisions d WHERE d.claim_id = $1::uuid
+      AND NOT EXISTS (SELECT 1 FROM kai.claim_review_decisions s WHERE s.supersedes_decision_id = d.decision_id)`, [presence.claim_id]))[0]?.id ?? null;
+
+  const rejected = [
+    ["client_admin evidence decision on field-presence evidence", evidenceInsert,
+      [presence.organization_id, presence.evidence_item_id, actor, "client_admin", presenceEvidenceHead], {}, /may only bind source-record-count measurement evidence/],
+    ["client_admin evidence decision superseding a GK decision", evidenceInsert,
+      [measured.organization_id, measured.evidence_item_id, actor, "client_admin", measured.evidence_head], {}, /may not supersede a Get Kinder decision/],
+    ["client_admin claim decision on a field-presence claim", claimInsert,
+      [presence.organization_id, presence.claim_id, ["internal"], actor, "client_admin", presenceClaimHead], {}, /claim on source-record-count measurement evidence/],
+    ["client_admin claim decision superseding a GK decision", claimInsert,
+      [measured.organization_id, measured.claim_id, ["internal"], actor, "client_admin", measured.claim_head], {}, /may not supersede a Get Kinder decision/],
+    ["client_admin claim approval for funder", claimInsert,
+      [measured.organization_id, measured.claim_id, ["internal", "funder"], actor, "client_admin", measured.claim_head],
+      { disableTrigger: { table: "kai.claim_review_decisions", trigger: "trg_organization_factual_review_claim_scope" } }, /claim_review_decisions_organization_internal_audience_check/],
+    ["client_admin claim approval for public", claimInsert,
+      [measured.organization_id, measured.claim_id, ["public"], actor, "client_admin", measured.claim_head],
+      { disableTrigger: { table: "kai.claim_review_decisions", trigger: "trg_organization_factual_review_claim_scope" } }, /claim_review_decisions_organization_internal_audience_check/],
+    ["client_admin funder coverage acceptance", coverageInsert,
+      [measured.organization_id, measured.claim_id, "small_cell_risk", "accepted_funder_with_limitation", actor, "client_admin"], {}, /coverage_review_decisions_p2_10_decided_by_role_check/],
+    ["client_admin public coverage acceptance", coverageInsert,
+      [measured.organization_id, measured.claim_id, "small_cell_risk", "accepted_public_with_limitation", actor, "client_admin"], {}, /coverage_review_decisions_p2_10_decided_by_role_check/],
+    ["client_admin acceptance of a measurement-decided dimension", coverageInsert,
+      [measured.organization_id, measured.claim_id, "missingness", "accepted_internal_with_limitation", actor, "client_admin"], {}, /coverage_review_decisions_p2_10_decided_by_role_check/],
+    ["client_admin acceptance on a field-presence claim", coverageInsert,
+      [presence.organization_id, presence.claim_id, "small_cell_risk", "accepted_internal_with_limitation", actor, "client_admin"], {}, /claim on source-record-count measurement evidence/],
+    ["client_reviewer evidence decision", evidenceInsert,
+      [measured.organization_id, measured.evidence_item_id, actor, "client_reviewer", measured.evidence_head], {}, /evidence_review_decisions_p2_12_role_check/],
+    ["gk_operator coverage acceptance", coverageInsert,
+      [measured.organization_id, measured.claim_id, "small_cell_risk", "accepted_internal_with_limitation", actor, "gk_operator"], {}, /coverage_review_decisions_p2_10_decided_by_role_check/],
+    ["gk_admin coverage acceptance (P2-10 unchanged)", coverageInsert,
+      [measured.organization_id, measured.claim_id, "small_cell_risk", "accepted_internal_with_limitation", actor, "gk_admin"], {}, /coverage_review_decisions_p2_10_decided_by_role_check/],
+  ];
+  for (const [label, sql, params, options, pattern] of rejected) {
+    const error = await tryInsert(sql, params, options);
+    if (!error || error.code !== "23514" || !pattern.test(`${error.message} ${error.constraint || ""}`)) {
+      throw new Error(`direct insert was not rejected as expected (${label}): ${error ? `${error.code} ${error.message}` : "accepted"}`);
+    }
+    console.log(`Plan A factual review scope: rejected ${label} (${error.constraint || error.message})`);
+  }
+  const accepted = [
+    ["gk_reviewer evidence decision superseding a GK decision", evidenceInsert,
+      [measured.organization_id, measured.evidence_item_id, actor, "gk_reviewer", measured.evidence_head]],
+    ["gk_admin claim decision approving funder", claimInsert,
+      [measured.organization_id, measured.claim_id, ["internal", "funder"], actor, "gk_admin", measured.claim_head]],
+    ["gk_reviewer funder coverage acceptance", coverageInsert,
+      [measured.organization_id, measured.claim_id, "small_cell_risk", "accepted_funder_with_limitation", actor, "gk_reviewer"]],
+  ];
+  for (const [label, sql, params] of accepted) {
+    const error = await tryInsert(sql, params);
+    if (error) throw new Error(`a GK insert was refused (${label}): ${error.code} ${error.message}`);
+    console.log(`Plan A factual review scope: accepted (rolled back) ${label}`);
+  }
+  // Kept: the client_admin row the rollback refusal below needs. Its random
+  // fingerprint never matches the claim's current state, so P2-06 never
+  // counts it.
+  const kept = await tryInsert(coverageInsert,
+    [measured.organization_id, measured.claim_id, "small_cell_risk", "accepted_internal_with_limitation", actor, "client_admin"], { keep: true });
+  if (kept) throw new Error(`the in-scope client_admin coverage acceptance was refused: ${kept.code} ${kept.message}`);
+  console.log("Plan A factual review scope: accepted (kept) client_admin internal acceptance of small_cell_risk on the measured claim");
+
+  const fingerprint = (await catalog(schemaFingerprintSql))[0].fingerprint;
+  let refused = false;
+  try {
+    psqlFile(`migrations/${FACTUAL_REVIEW_MIGRATION}.rollback.sql`);
+  } catch (error) {
+    refused = /rollback refused: client_admin review decisions exist/.test(String(error.message));
+    if (!refused) throw error;
+  }
+  if (!refused) throw new Error("the organization factual review rollback did not refuse with a client_admin decision present");
+  if ((await catalog(schemaFingerprintSql))[0].fingerprint !== fingerprint) throw new Error("the refused factual review rollback changed the schema");
+  console.log("Plan A factual review migration: rollback refused with a client_admin decision present; nothing changed.");
+}
+
 async function proveOrganizationReleaseRollbackRefuses() {
   const counts = `SELECT (SELECT count(*) FROM kai.limitation_snapshots WHERE confirmed_by_role = 'client_admin')::int AS snapshots,
       (SELECT count(*) FROM kai.human_authority_decisions WHERE decided_by_role = 'client_admin')::int AS decisions`;
@@ -255,6 +413,10 @@ try {
       await proveOrganizationReleaseMigration();
       continue;
     }
+    if (migration === FACTUAL_REVIEW_MIGRATION) {
+      await proveOrganizationFactualReviewMigration();
+      continue;
+    }
     if (!refusal) {
       psqlFile(`migrations/${migration}.sql`);
       continue;
@@ -280,6 +442,7 @@ try {
   if (testResult.status !== 0) throw new Error("Plan A normal-chain measured-claim to Markdown proof failed");
   console.log(`Plan A chain schema fingerprint after the proof: ${(await catalog(schemaFingerprintSql))[0].fingerprint}`);
   await proveOrganizationReleaseRollbackRefuses();
+  await proveOrganizationFactualReviewScope();
   console.log("Plan A normal-chain proof passed.");
 } finally {
   if (started) spawnSync(pgCtl, ["-D", dataDir, "stop", "-m", "fast"], { encoding: "utf8", stdio: "ignore" });
