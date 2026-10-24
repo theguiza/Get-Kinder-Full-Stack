@@ -503,7 +503,7 @@ function funderGenerator({ calls = [] } = {}) {
   return async (input) => {
     calls.push(input);
     return {
-      blocks: [{ ordinal: 1, text: "Enrollment increased by 12% in 2025.", citations: [{ claimId: CLAIM, evidenceItemId: EVIDENCE }] }],
+      blocks: [{ ordinal: 1, text: "Provisional internal draft: current eligibility remains unresolved. Enrollment increased by 12% in 2025.", citations: [{ claimId: CLAIM, evidenceItemId: EVIDENCE }] }],
     };
   };
 }

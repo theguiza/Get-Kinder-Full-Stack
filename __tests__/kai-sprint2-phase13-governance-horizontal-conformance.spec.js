@@ -68,8 +68,8 @@
 //   4. required limitation handling remains enforced
 //        -> readiness_assessment only: VAL-GEN-006's
 //           generationClaimsContainBlockers(claim.limitationCodes) branch
-//        -> evidence_summary / impact_narrative / data_gap_memo: no VAL-GEN
-//           branch reads claim.limitationCodes at all (documented variance)
+//        -> VAL-GEN-009 requires limitation disclosure for every cited
+//           claim with currentEligible=false (all content types)
 //   5. unsupported numeric/metric assertions rejected
 //        -> VAL-GEN-004, "unsupported_numeric_or_causal_assertion",
 //           assertion_classes includes "numeric_literal" (all 4 types)
@@ -227,7 +227,7 @@ for (const contentType of CONTENT_TYPES) {
     assert.equal(result.ok, true, JSON.stringify(result.blockers));
     assert.deepEqual(result.blockers, []);
     const passedKeys = result.results.filter((r) => r.severity === "pass").map((r) => r.validator_key).sort();
-    const expectedKeys = ["VAL-GEN-001", "VAL-GEN-002", "VAL-GEN-003", "VAL-GEN-004", "VAL-GEN-005"];
+    const expectedKeys = ["VAL-GEN-001", "VAL-GEN-002", "VAL-GEN-003", "VAL-GEN-004", "VAL-GEN-005", "VAL-GEN-009"];
     if (contentType === "readiness_assessment") expectedKeys.push("VAL-GEN-006");
     if (contentType === "data_gap_memo") expectedKeys.push("VAL-GEN-007");
     assert.deepEqual(passedKeys, expectedKeys.sort());
@@ -645,19 +645,34 @@ test("[data_gap_memo] predicate 2 - the authoritative current gap set cannot be 
 //     predicate 7 below).
 // A claim already excluded by either of those two controls never reaches
 // this test's fixture at all - it never becomes part of `generationClaims`.
-test("[impact_narrative] predicate 2 - documented variance: the PURE VALIDATOR (validateGeneratedContentDraft) has no visibility into an opaque currentEligible:false/limitationCodes signal and does not, by itself, block INTERNAL generation on it (no VAL-GEN-006/007-equivalent exists for this type at this layer; the repository-layer terminal-claim-strength gate proven below is the real enforcement point for a formally rejected claim)", () => {
-  const result = validateGeneratedContentDraft(validArgs("impact_narrative", {
-    generationClaims: [governedClaim({ limitationCodes: ["evidence_gap_unresolved"], currentEligible: false })],
-  }));
-  assert.equal(result.ok, true, JSON.stringify(result.blockers));
+test("[impact_narrative] predicate 2 - a governed but currently ineligible internal claim requires disclosure of each current limitation (VAL-GEN-009)", () => {
+  const limitations = ["coverage_dimension_unresolved", "client_followup_unresolved"];
+  const claim = governedClaim({ limitationCodes: limitations, currentEligible: false });
+  const omitted = validateGeneratedContentDraft(validArgs("impact_narrative", { generationClaims: [claim] }));
+  assert.equal(omitted.ok, false);
+  assert.deepEqual(blockerKeys(omitted), ["VAL-GEN-009"]);
+  assert.deepEqual(omitted.blockers[0].evidence.limitation_codes, [...limitations].sort());
 
-  // Even a `limitationCodes` string that names the terminal blocker code
-  // does not, by itself, change this pure-validator outcome: it only ever
-  // sees an opaque string array, never claim_strength itself.
-  const rejectedResult = validateGeneratedContentDraft(validArgs("impact_narrative", {
-    generationClaims: [governedClaim({ limitationCodes: ["support_strength_unassessed"], currentEligible: false })],
+  const noProvisionalLabel = validateGeneratedContentDraft(validArgs("impact_narrative", {
+    generationClaims: [claim],
+    blocks: [block({ text: "Coverage gaps remain unresolved and client follow-ups remain unanswered." })],
   }));
-  assert.equal(rejectedResult.ok, true, JSON.stringify(rejectedResult.blockers));
+  assert.equal(noProvisionalLabel.ok, false);
+  assert.deepEqual(blockerKeys(noProvisionalLabel), ["VAL-GEN-009"]);
+  assert.deepEqual(noProvisionalLabel.blockers[0].evidence.missing_provisional_label_block_ordinals, [1]);
+
+  const lateProvisionalLabel = validateGeneratedContentDraft(validArgs("impact_narrative", {
+    generationClaims: [claim],
+    blocks: [block({ text: "This is an established fact. Provisional internal draft: coverage gaps remain unresolved and client follow-ups remain unanswered." })],
+  }));
+  assert.equal(lateProvisionalLabel.ok, false);
+  assert.deepEqual(lateProvisionalLabel.blockers[0].evidence.missing_provisional_label_block_ordinals, [1]);
+
+  const disclosed = validateGeneratedContentDraft(validArgs("impact_narrative", {
+    generationClaims: [claim],
+    blocks: [block({ text: "Provisional internal draft: coverage gaps remain unresolved and client follow-ups remain unanswered." })],
+  }));
+  assert.equal(disclosed.ok, true, JSON.stringify(disclosed.blockers));
 });
 
 test("[evidence_summary] predicate 2 - a currently-ineligible governed claim requested for FUNDER use cannot become an accepted generated assertion (repository pre-generation gate, funder_use_not_currently_eligible)", async () => {
@@ -726,10 +741,9 @@ test("[funder_outcome_table] predicate 2 - a currently-ineligible governed claim
 // admission boundary shared by all four content types.
 //
 // CASE A - unresolved/unassessed INTERNAL claim: existing accepted INTERNAL
-// drafting behavior is unchanged for a claim that is governed,
-// audience-authorized, and merely unresolved/unassessed (claim_strength
-// "unassessed", eligible:false). This must NOT become a blanket
-// currentEligible===false rejection.
+// drafting behavior remains available for a governed, audience-authorized
+// claim whose claim_strength is "unassessed" and eligible is false, provided
+// the draft is explicitly provisional and discloses the known limitation.
 // ---------------------------------------------------------------------
 
 // funder_outcome_table is excluded from this loop: it is funder-audience-only
@@ -848,19 +862,14 @@ test("[readiness_assessment] predicate 4 - claim.limitationCodes feeds VAL-GEN-0
   assert.equal(withoutLimitation.ok, true, JSON.stringify(withoutLimitation.blockers));
 });
 
-// Documented, non-divergent type-specific variance: unlike
-// readiness_assessment, neither VAL-GEN-007 (data_gap_memo) nor any branch
-// reachable for evidence_summary/impact_narrative reads claim.limitationCodes
-// at all. VAL-GEN-007's own predicate,
-// authoritativeDataGapsContainReturnedGap(authoritativeReadiness)
-// (kaiGeneratedContentValidators.js lines 181-183), inspects only the
-// authoritative gap-set argument, never the per-claim limitationCodes array.
-// This is confirmed directly: a claim with a non-empty limitationCodes array
-// produces the exact same validateGeneratedContentDraft outcome as the same
-// claim with limitationCodes: [] for these three content types, proving
-// limitationCodes is not itself a distinct governance signal for them.
+// Documented, non-divergent type-specific variance: VAL-GEN-009 reads
+// limitationCodes only when a cited claim is currently ineligible. For an
+// eligible claim, adding limitationCodes alone does not change the outcome.
+// VAL-GEN-007's own predicate,
+// authoritativeDataGapsContainReturnedGap(authoritativeReadiness), inspects
+// only the authoritative gap-set argument, never per-claim limitationCodes.
 for (const contentType of ["evidence_summary", "impact_narrative", "data_gap_memo", "case_for_support", "board_update", "annual_report_section", "funder_outcome_table", "grant_response_paragraph"]) {
-  test(`[${contentType}] predicate 4 - documented variance: no VAL-GEN branch reads claim.limitationCodes for this type (outcome is identical with and without it)`, () => {
+  test(`[${contentType}] predicate 4 - eligible claims' limitationCodes alone do not require disclosure`, () => {
     const withLimitation = validateGeneratedContentDraft(validArgs(contentType, {
       generationClaims: [governedClaim({ limitationCodes: ["evidence_gap_unresolved"] })],
     }));
@@ -1083,19 +1092,23 @@ function withFakeTransaction(state) {
 }
 
 function makeEvaluator({ eligibleForClaim = () => true, claimStrengthForClaim = () => "reviewed_supported" } = {}) {
-  return async (tx, { claimId, requestedAudience }) => ({
-    ok: true,
-    data: {
-      claim: { claim_id: claimId, claim_strength: claimStrengthForClaim(claimId) },
-      evidence: { evidence_item_id: EVIDENCE },
-      requestedAudience,
-      eligible: eligibleForClaim(claimId),
-      blockerCodes: [],
-      affectedDimensionKeys: [],
-      affectedObjectIds: [],
-    },
-    error: null,
-  });
+  return async (tx, { claimId, requestedAudience }) => {
+    const claimStrength = claimStrengthForClaim(claimId);
+    const eligible = eligibleForClaim(claimId);
+    return {
+      ok: true,
+      data: {
+        claim: { claim_id: claimId, claim_strength: claimStrength },
+        evidence: { evidence_item_id: EVIDENCE },
+        requestedAudience,
+        eligible,
+        blockerCodes: eligible ? [] : [claimStrength === "unassessed" ? "support_strength_unassessed" : "claim_review_unresolved"],
+        affectedDimensionKeys: [],
+        affectedObjectIds: [],
+      },
+      error: null,
+    };
+  };
 }
 
 function makeRepository(state, evaluator) {
@@ -1110,13 +1123,34 @@ function auditRecorder() {
 }
 
 function goodGenerator() {
-  return async (generatorInput) => ({
-    blocks: [{
-      ordinal: 1,
-      text: generatorInput.claims[0].claimStatement,
-      citations: [{ claimId: generatorInput.claims[0].claimId, evidenceItemId: generatorInput.claims[0].evidenceItemId }],
-    }],
-  });
+  return async (generatorInput) => {
+    const disclosures = {
+      evidence_gap_unresolved: "Evidence gaps remain unresolved",
+      claim_review_unresolved: "Claim review remains unresolved",
+      claim_review_missing: "Claims need review",
+      evidence_review_unresolved: "Evidence review remains unresolved",
+      support_strength_unassessed: "Claim support is unassessed",
+      coverage_dimension_unresolved: "Coverage gaps remain unresolved",
+      client_followup_unresolved: "Client follow-ups remain unanswered",
+      potential_conflict_review_unresolved: "Potential conflict remains unresolved",
+      claim_not_approved_for_requested_audience: `Claim is not approved for ${generatorInput.requestedAudience}`,
+      audience_gate_closed: "Audience gate is closed",
+      requirement_authority_absent: "Requirement authority is absent",
+      traceability_incomplete: "Traceability is incomplete",
+    };
+    const limitationText = generatorInput.claims[0].limitationCodes
+      .map((code) => disclosures[code] || `Unresolved limitation ${code}`)
+      .join("; ");
+    return {
+      blocks: [{
+        ordinal: 1,
+        text: limitationText
+          ? `Provisional internal draft: current claim limitations remain unresolved: ${limitationText}. ${generatorInput.claims[0].claimStatement}`
+          : generatorInput.claims[0].claimStatement,
+        citations: [{ claimId: generatorInput.claims[0].claimId, evidenceItemId: generatorInput.claims[0].evidenceItemId }],
+      }],
+    };
+  };
 }
 
 function creationDependenciesFor(contentType) {

@@ -926,6 +926,7 @@ test("NEGATIVE 3: an internal-audience evidence-summary draft (requested_audienc
   const repository = makeRepository(state, makeEvaluator({ eligibleForClaim: () => true }));
   const createResult = await createEvidenceSummaryDraft(funderCreateInput({ requestedAudience: "internal" }), {
     env: enabledEnv,
+    reconcileClaimGapsForGeneration: async () => null,
     generatedContentRepository: repository,
     draftGenerator: draftGenerator(),
     metadataOnlyAudit: auditRecorder(),
@@ -964,6 +965,7 @@ test("NEGATIVE 4: an internal impact-narrative draft is excluded from packet mem
 
   const createResult = await createImpactNarrativeDraft(funderCreateInput({ requestedAudience: "internal" }), {
     env: enabledEnv,
+    reconcileClaimGapsForGeneration: async () => null,
     generatedContentRepository: repository,
     draftGenerator: draftGenerator(),
     metadataOnlyAudit: auditRecorder(),

@@ -321,6 +321,7 @@ test("ASSEMBLED GENERIC RELEASE-CANDIDATE PROOF: draft -> review -> export-revie
       },
       {
         env: enabledEnv,
+        reconcileClaimGapsForGeneration: async () => null,
         generatedContentRepository,
         metadataOnlyAudit: draftAudit.metadataOnlyAudit,
         async getEngagementForOrganization({ organizationId, engagementId }) {

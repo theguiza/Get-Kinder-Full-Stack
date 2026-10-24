@@ -278,7 +278,12 @@ test("the diagnostic grants no GK review queue or generation authority (the orga
   const refusal = { ok: false, error: { code: "validation_blocker", status: 422 }, blockers: [{ validator_key: "VAL-GEN-TRACE-P0-001", severity: "blocker", blocking_reason: "traceability_result_contract_invalid" }] };
   const generationRepository = { async createEvidenceSummaryDraft() { return refusal; }, async createImpactNarrativeDraft() { return refusal; } };
   const base = { organizationId: ORG_X, engagementId: ENGAGEMENT_X, requestedAudience: "internal", claimIds: [CLAIM], idempotencyKey: "diag-isolation-1", actorContext: actor, now: NOW };
-  const deps = { env: ENV, getEngagementForOrganization: async () => ({ engagement_id: ENGAGEMENT_X, organization_id: ORG_X }), generatedContentRepository: generationRepository };
+  const deps = {
+    env: ENV,
+    getEngagementForOrganization: async () => ({ engagement_id: ENGAGEMENT_X, organization_id: ORG_X }),
+    reconcileClaimGapsForGeneration: async () => null,
+    generatedContentRepository: generationRepository,
+  };
   for (const generate of [createEvidenceSummaryDraft, createImpactNarrativeDraft]) {
     const result = await generate(base, deps);
     assert.deepEqual([result.ok, result.error.code, result.blockers[0].validator_key], [false, "validation_blocker", "VAL-GEN-TRACE-P0-001"], generate.name);

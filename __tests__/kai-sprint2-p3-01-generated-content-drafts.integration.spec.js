@@ -116,10 +116,29 @@ async function runP301IntegrationSuite() {
   function generator({ calls = [] } = {}) {
     return async (input) => {
       calls.push(input);
+      const disclosureByCode = {
+        evidence_gap_unresolved: "Evidence gaps remain unresolved",
+        claim_review_unresolved: "Claim review remains unresolved",
+        claim_review_missing: "Claims need review",
+        evidence_review_unresolved: "Evidence review remains unresolved",
+        support_strength_unassessed: "Claim support is unassessed",
+        coverage_dimension_unresolved: "Coverage gaps remain unresolved",
+        client_followup_unresolved: "Client follow-ups remain unanswered",
+        potential_conflict_review_unresolved: "Potential conflict remains unresolved",
+        claim_not_approved_for_requested_audience: `Claim is not approved for ${input.requestedAudience}`,
+        audience_gate_closed: "Audience gate is closed",
+        requirement_authority_absent: "Requirement authority is absent",
+        traceability_incomplete: "Traceability is incomplete",
+      };
+      const limitationDisclosure = input.claims[0].limitationCodes
+        .map((code) => disclosureByCode[code] || `Unresolved limitation ${code}`)
+        .join("; ");
       return {
         blocks: [{
           ordinal: 1,
-          text: input.claims[0].claimStatement,
+          text: limitationDisclosure
+            ? `Provisional internal draft: ${limitationDisclosure}. ${input.claims[0].claimStatement}`
+            : input.claims[0].claimStatement,
           citations: [{ claimId: input.claims[0].claimId, evidenceItemId: input.claims[0].evidenceItemId }],
         }],
       };

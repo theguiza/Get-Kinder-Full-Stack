@@ -1237,19 +1237,82 @@ async function runP206IntegrationSuite() {
     }]);
     assert.equal(preflightProviderCalls, 0);
 
+    const { createProductionMetadataOnlyAuditForClaimGapFollowup } = await import("../Backend/kai/services/kaiMetadataOnlyAuditComposition.js");
+    const p204AuditEvents = [];
+    const p204AuditFactory = ({ organizationId, claimId, actorContext: attributedActor, now }) => createProductionMetadataOnlyAuditForClaimGapFollowup({
+      organizationId, claimId, actorContext: attributedActor, now,
+      insertAuditEvent: async (metadata) => { p204AuditEvents.push(metadata); return { ok: true }; },
+    });
+    const downstreamFailure = await createImpactNarrativeDraft(generationInput, {
+      env: { KAI_SPRINT2_ENABLED: "true", KAI_GENERATION_ENABLED: "true" },
+      getEngagementForOrganization: (input) => getEngagementForOrganization(input, pool),
+      claimGapFollowupRepository: gapRepo,
+      claimGapFollowupMetadataOnlyAuditFactory: p204AuditFactory,
+      generatedContentRepository,
+      draftGenerator: async () => ({ blocks: [] }),
+      metadataOnlyAudit: auditRecorder(),
+    });
+    assert.equal(downstreamFailure.ok, false);
+    assert.equal(downstreamFailure.error.code, "validation_blocker");
+    assert.deepEqual(await query(
+      `SELECT
+         (SELECT count(*)::int FROM kai.gap_log_items WHERE organization_id = $1::uuid AND claim_id = $2::uuid) AS gaps,
+         (SELECT count(*)::int FROM kai.client_followup_items WHERE organization_id = $1::uuid AND claim_id = $2::uuid) AS followups,
+         (SELECT count(*)::int FROM kai.review_queue_items q JOIN kai.client_followup_items f ON f.client_followup_item_id = q.target_object_id
+            WHERE q.organization_id = $1::uuid AND f.claim_id = $2::uuid AND q.queue_type = 'client_followup') AS queues,
+         (SELECT count(*)::int FROM kai.upload_lifecycle_audit WHERE organization_id = $1::uuid AND operation = 'claim_gap_and_followup_generated' AND metadata->>'claim_id' = $2::text) AS p204_lifecycle_audits,
+         (SELECT count(*)::int FROM kai.generation_runs WHERE organization_id = $1::uuid AND idempotency_key = $3) AS generation_runs`,
+      [ORG, legacy.claimId, generationInput.idempotencyKey],
+    ), [{ gaps: 9, followups: 4, queues: 4, p204_lifecycle_audits: 1, generation_runs: 0 }], "P2-04 must commit before downstream validation fails; generation reservation must roll back");
+    const persistedFollowups = await query(
+      `SELECT f.dimension_key, f.question_text, f.claim_id::text AS claim_id,
+              f.gap_log_item_id::text AS gap_log_item_id, g.claim_id::text AS gap_claim_id,
+              g.evidence_item_id::text AS gap_evidence_item_id, g.source_version_id::text AS source_version_id,
+              g.assessment_status, g.validator_key, g.safe_summary,
+              q.target_object_type, q.queue_status, q.review_status
+         FROM kai.client_followup_items f
+         JOIN kai.gap_log_items g ON g.organization_id = f.organization_id AND g.gap_log_item_id = f.gap_log_item_id
+         JOIN kai.claims c ON c.organization_id = f.organization_id AND c.claim_id = f.claim_id AND c.evidence_item_id = g.evidence_item_id
+         JOIN kai.evidence_items e ON e.organization_id = f.organization_id AND e.evidence_item_id = g.evidence_item_id AND e.source_version_id = g.source_version_id
+         JOIN kai.review_queue_items q ON q.organization_id = f.organization_id AND q.target_object_id = f.client_followup_item_id
+        WHERE f.organization_id = $1::uuid AND f.claim_id = $2::uuid AND q.queue_type = 'client_followup'
+        ORDER BY f.dimension_key`,
+      [ORG, legacy.claimId],
+    );
+    assert.deepEqual(persistedFollowups.map((row) => row.dimension_key), [
+      "definition_clarity", "denominator_clarity", "entity_level_clarity", "time_period_clarity",
+    ]);
+    for (const row of persistedFollowups) {
+      assert.equal(row.claim_id, legacy.claimId);
+      assert.equal(row.gap_claim_id, legacy.claimId, `${row.dimension_key} snapshot must belong to its supporting claim`);
+      assert.equal(row.gap_evidence_item_id, legacy.evidenceItemId);
+      assert.ok(row.gap_log_item_id, `${row.dimension_key} follow-up must reference its authoritative gap snapshot`);
+      assert.notEqual(row.assessment_status, "resolved_clear", `${row.dimension_key} question must be backed by a non-clear coverage finding`);
+      assert.ok(row.validator_key && row.safe_summary, `${row.dimension_key} must retain its authoritative coverage finding provenance`);
+      assert.ok(row.question_text, `${row.dimension_key} must persist its client-answerable question`);
+      assert.equal(row.target_object_type, "client_followup_item");
+      assert.equal(row.queue_status, "waiting_on_client");
+      assert.equal(row.review_status, "proposed");
+    }
+    assert.equal(p204AuditEvents.length, 1);
+    assert.equal(p204AuditEvents[0].actor_type, "human");
+    assert.equal(p204AuditEvents[0].actor_user_id, actorContext.actorUserId);
+    assert.equal(p204AuditEvents[0].operation, "claim_gap_and_followup_generated");
+    assert.equal(p204AuditEvents[0].object_id, legacy.claimId);
+
     const providerCalls = [];
     const generated = await createImpactNarrativeDraft(generationInput, {
       env: { KAI_SPRINT2_ENABLED: "true", KAI_GENERATION_ENABLED: "true" },
       getEngagementForOrganization: (input) => getEngagementForOrganization(input, pool),
       claimGapFollowupRepository: gapRepo,
-      claimGapFollowupMetadataOnlyAuditFactory: () => auditRecorder(),
+      claimGapFollowupMetadataOnlyAuditFactory: p204AuditFactory,
       generatedContentRepository,
       draftGenerator: async ({ claims }) => {
         providerCalls.push(claims[0]);
         return {
           blocks: [{
             ordinal: 1,
-            text: claims[0].claimStatement,
+            text: `Provisional internal draft: coverage gaps remain unresolved and client follow-ups remain unanswered. ${claims[0].claimStatement}`,
             citations: [{ claimId: claims[0].claimId, evidenceItemId: claims[0].evidenceItemId }],
           }],
         };
@@ -1258,6 +1321,21 @@ async function runP206IntegrationSuite() {
     });
     assert.equal(generated.ok, true, JSON.stringify(generated));
     assert.equal(providerCalls.length, 1);
+    assert.equal(generated.data.draftStatus, "draft");
+    assert.equal(generated.data.requestedAudience, "internal");
+    assert.equal(generated.data.blocks.length, 1);
+    assert.match(generated.data.blocks[0].text, /^Provisional internal draft:/);
+    assert.deepEqual(generated.data.blocks[0].citations.map(({ claimId, evidenceItemId }) => ({ claimId, evidenceItemId })), [
+      { claimId: legacy.claimId, evidenceItemId: providerCalls[0].evidenceItemId },
+    ]);
+    const [generationAudit] = await query(
+      `SELECT metadata FROM kai.upload_lifecycle_audit
+        WHERE organization_id = $1::uuid AND operation = 'generated_content_draft_created'
+          AND metadata->>'generated_content_draft_id' = $2::text`,
+      [ORG, generated.data.generatedContentDraftId],
+    );
+    assert.ok(generationAudit);
+    assert.ok(generationAudit.metadata.validator_keys.includes("VAL-GEN-009"));
     const afterTrace = await trace(legacy.claimId, "internal");
     assert.equal(afterTrace.ok, true, JSON.stringify(afterTrace));
     assert.equal(afterTrace.data.eligible, false, "P2-04 reconciliation does not approve the claim or clear eligibility blockers");
@@ -1273,6 +1351,10 @@ async function runP206IntegrationSuite() {
     assert.ok(afterRows[0].gaps > 0);
     assert.equal(afterRows[0].followups, 4, "only P2-04's four currently outstanding client-answerable dimensions are routed");
     assert.equal(afterRows[0].queues, 4);
+    assert.equal(Number((await query(
+      `SELECT count(*)::int AS n FROM kai.upload_lifecycle_audit WHERE organization_id = $1::uuid AND operation = 'claim_gap_and_followup_generated' AND metadata->>'claim_id' = $2`,
+      [ORG, legacy.claimId],
+    ))[0].n), 1, "the retry after downstream failure replays the single committed P2-04 audit");
     const replay = await generateClaimGapFollowups(
       { organizationId: ORG, claimId: legacy.claimId, actorContext, now: NOW },
       { env: { KAI_SPRINT2_ENABLED: "true" }, claimGapFollowupRepository: gapRepo, metadataOnlyAudit: auditRecorder() },

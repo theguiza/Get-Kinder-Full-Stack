@@ -262,7 +262,7 @@ async function runBrowserAcceptance() {
           blocks: requestBody.claims.map((claim) => ({
             text: claim.claimStatement.startsWith("The promoted source records 5 programme sessions")
               ? COMPLIANT_TEXT
-              : claim.claimStatement,
+              : `Provisional internal draft: claim review remains unresolved; evidence review remains unresolved; support has not yet been assessed; coverage gaps remain unresolved; client follow-ups remain unanswered. ${claim.claimStatement}`,
             citations: [{ claimId: claim.claimId, evidenceItemId: claim.evidenceItemId }],
           })),
         }),
@@ -702,6 +702,8 @@ async function runBrowserAcceptance() {
       await adminPage.waitFor(async () => (await textOf(adminPage, `[data-client-internal-draft-detail="${ids.blockedDraftId}"]`)) !== null, "the ineligible draft opens");
       await adminPage.idle();
       const blockedDetail = await textOf(adminPage, `[data-client-internal-draft-detail="${ids.blockedDraftId}"]`);
+      assert.match(blockedDetail, /Provisional internal draft: claim review remains unresolved/);
+      assert.match(blockedDetail, /coverage gaps remain unresolved; client follow-ups remain unanswered/);
       assert.match(blockedDetail, /Factual approval blocked/);
       assert.match(blockedDetail, /At least one cited claim is not currently eligible for internal use/);
       assert.match(blockedDetail, /Ask Get Kinder to review the cited claims/);

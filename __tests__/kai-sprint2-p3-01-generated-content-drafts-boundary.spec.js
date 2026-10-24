@@ -174,14 +174,18 @@ test("P3-01 validators VAL-GEN-001 through VAL-GEN-005 enforce generation revali
   }).blockers.map((blocker) => blocker.validator_key), ["VAL-GEN-005"]);
 
   // Package 14-05: a governed claim's current audience/use eligibility being
-  // false must not, by itself, produce a VAL-GEN-001 blocker -- only a
-  // missing/failed generation revalidation or a requestedAudience mismatch
-  // may. currentEligible is preserved as a separate truthful fact.
-  assert.equal(validateGeneratedContentDraft({
+  // currentEligible remains a separate fact from traceability, and internal
+  // drafting remains possible when the output labels itself provisional and
+  // discloses the current limitation.
+  const qualifiedIneligible = validateGeneratedContentDraft({
     requestedAudience: "internal",
-    generationClaims: [eligibleClaim({ currentEligible: false })],
-    blocks: blocks(),
-  }).ok, true);
+    generationClaims: [eligibleClaim({ currentEligible: false, limitationCodes: ["evidence_gap_unresolved"] })],
+    blocks: [{
+      ...blocks()[0],
+      text: "Provisional internal draft: evidence gaps remain unresolved.",
+    }],
+  });
+  assert.equal(qualifiedIneligible.ok, true, JSON.stringify(qualifiedIneligible.blockers));
 });
 
 test("P3-01 request fingerprint is deterministic and sensitive only to content type, audience, ordered claim ids, and engagement", () => {

@@ -306,6 +306,7 @@ test("ASSEMBLED PRE-ARTIFACT RELEASE PROOF: generated draft -> ... -> P3-17 auth
       },
       {
         env: enabledEnv,
+        reconcileClaimGapsForGeneration: async () => null,
         generatedContentRepository,
         async getEngagementForOrganization({ organizationId, engagementId }) {
           if (organizationId === ORG && engagementId === ENGAGEMENT) {

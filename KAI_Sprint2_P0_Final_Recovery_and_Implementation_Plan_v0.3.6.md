@@ -44356,3 +44356,47 @@ real client data. Rollout needs separate owner authorization.
 Migration 05 and its measurement-only administrator authority were not changed. Generation eligibility, claim/evidence review, support strength, coverage decisions, and public/funder release rules remain authoritative. No unsupported numerical/impact assertion was approved; internal draft generation remains distinct from factual approval and release.
 
 **Status:** EXISTING_CLAIM_P2_04_INTERNAL_GENERATION_HANDOFF_LOCALLY_VERIFIED. Production state, the four historical claims, and any production canary remain untouched. No push, deployment, flag change, production follow-up, or Current State update.
+
+### Final local release verification and generation-eligibility correction (2026-10-24)
+
+**Scope (USER_CONFIRMED):** verify local `fa87ece` and the existing-claim P2-04/P2-06 generation handoff. No push, deployment, production SQL, production claim mutation, feature flag, tenant, credential, or `00_KAI_CURRENT_STATE.md` change is authorized.
+
+**Release-candidate inspection (TOOL_VERIFIED):** `fa87ecec8e8aa7fc6172fb45568cf6b988ab505b` is on `main`, descends from `cb4ec2f7d8a1e20cc19df7f4de41759bd561c240`, and its one-commit delta is the P2-04 handoff repair; it adds no migration. The local correction below creates a new candidate and must not be treated as `fa87ece`. The existing Step E1 organization-admin factual-review authority and P2-06 audience restrictions remain unchanged. Migration 05 is a previously accepted prerequisite (USER_CONFIRMED), not a new migration for this repair.
+
+**Four persisted P2-04 follow-ups (TOOL_VERIFIED; legacy P2-03 claim, ephemeral PostgreSQL):** each follow-up belongs to the claim and its supporting evidence/source-version lineage, references its specific non-clear authoritative gap snapshot, and has a persisted queue status `waiting_on_client` / review status `proposed`.
+
+| Dimension | Authoritative P2-02 finding | Persisted client question | Why the client can answer |
+| --- | --- | --- | --- |
+| `definition_clarity` | `resolved_risk_flagged`: one or more committed dictionary fields have no defined business meaning | Confirm the business meaning of the unresolved field or measure. | The organization's data/business owner can define the field or measure. |
+| `denominator_clarity` | `unresolved`: no committed fact establishes a denominator for this source version | Confirm the denominator and how it is calculated. | The client owns the measure's business calculation and denominator. |
+| `time_period_clarity` | `unresolved`: no committed fact establishes a reporting time period for this source version | Confirm the reporting period represented by this source. | The client can identify the period this source is intended to represent. |
+| `entity_level_clarity` | `resolved_risk_flagged`: one or more committed dictionary fields have no defined entity level | Confirm the entity level represented by the unresolved field or measure. | The client can identify whether the data describes people, activities, programs, organizations, or another level. |
+
+Each persisted row was checked for question text, claim/gap relationship, authoritative validator and summary provenance, and non-clear status. The already-clear `coverage_gaps` dimension produces no follow-up; all-clear dimensions produce none; the P2-01M answered-measure fixture produces no duplicate questions; and reconciliation replay creates no duplicate gap, follow-up, queue, or audit rows. Four is specific to this legacy fixture, not a universal count.
+
+**Commit-persistence proof (TOOL_VERIFIED):** the real internal generation service completed and committed P2-04 before a test-controlled invalid generated-content result failed at the supported repository validation boundary. The returned error was `validation_blocker`; the failed generation reservation rolled back, while nine P2-04 gap snapshots, four follow-ups, four waiting queues, and one claim-attributed P2-04 lifecycle audit remained. The audit attribution was the initiating human actor. Retrying through the same service and replaying P2-04 did not duplicate these rows. The subsequent real generation followed ordinary P2-06 checks and did not approve the claim.
+
+**Eligibility ambiguity and local correction (TOOL_VERIFIED):** the accepted Package 14-05 generation contract permits a governed, traceable but currently ineligible claim in an INTERNAL draft; it does not permit an unconditional factual assertion. The synthetic provider previously returned the bare claim statement while P2-06 reported `eligible=false`, and the generated-content validator accepted and persisted it. `VAL-GEN-009` now requires every block citing a currently ineligible claim to carry an explicit `Provisional internal draft` label and disclose each current limitation using its supported factual description; missing labels and unknown limitation codes fail closed. Positive/negative validator regressions cover both controls, and the P2-06 synthetic draft persisted the provisional label, limitation text, citation, `draft` status, and no change to eligibility. The existing internal factual-review and release paths still block an ineligible cited claim; no approval or funder/public authority is acquired.
+
+**Verification (TOOL_VERIFIED; loopback-only sentinel for Node/npm and disposable local PostgreSQL):**
+
+| Command or suite | Result |
+| --- | --- |
+| P2-04 lifecycle and replay | 18/18 passed |
+| P2-06 traceability/currentness and post-reconciliation downstream-failure proof | 34/34 passed |
+| P2-01M measurement and answered-follow-up integration | 56 passed, 0 failed, 8 skipped |
+| P3-01 generated-content drafts | 19/19 passed |
+| P2-08 audience eligibility | 20/20 passed |
+| focused Phase 13, P3-01, P14-09, and readiness generation boundaries | 126/126 passed |
+| generation, review, cross-organization authorization, and Phase 13 boundary regressions | 177/177 passed |
+| Step E1 internal factual-review browser acceptance | 17/17 passed |
+| Five-record assembled customer file-to-report acceptance | 25/25 passed |
+| API contract verification | 71/71 passed |
+| Frontend build | passed |
+| Full `npm test` | 5,756 passed, 0 failed, 120 skipped (5,876 total) |
+
+The isolated P14-09/P14-11/P3-18 generation-service fixtures and the traceability-diagnostic fixture now use the existing `reconcileClaimGapsForGeneration` test seam, so these tests continue to isolate their intended downstream behavior without opening a real P2-04 repository. Real P2-04 reconciliation remains covered by the ephemeral PostgreSQL P2-06 proof above.
+
+**Release handoff boundary (NOT_CONFIRMED):** no repository script, workflow, platform manifest, or documented application publish/deploy command was found. The local remote target is `origin/main`, but this repository inspection does not establish the remote's deployment automation or an application health endpoint. The exact production publish mechanism and health/revision check must therefore be obtained from the authorized deployment operator before publication. The repaired candidate has a new local commit and is not authorized under the prior `fa87ece` candidate reference.
+
+**Status:** P2_04_P2_06_GENERATION_SAFETY_CORRECTION_VERIFIED_LOCALLY; RELEASE_CANDIDATE_CHANGED; DEPLOYMENT_MECHANISM_AND_NEW_CANDIDATE_AUTHORIZATION_NOT_CONFIRMED. No push, deployment, production retest, or canary was performed.

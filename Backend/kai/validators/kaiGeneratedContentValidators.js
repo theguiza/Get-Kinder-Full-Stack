@@ -9,7 +9,24 @@ const VALIDATOR_KEYS = Object.freeze([
   "VAL-GEN-006",
   "VAL-GEN-007",
   "VAL-GEN-008",
+  "VAL-GEN-009",
 ]);
+
+const CURRENT_LIMITATION_DISCLOSURE = Object.freeze({
+  evidence_gap_unresolved: /\bevidence\b.*\b(gap|unresolved|incomplete)\b/i,
+  claim_review_unresolved: /\bclaim review\b.*\b(unresolved|incomplete|pending|under review)\b/i,
+  claim_review_missing: /\bclaim(s)?\b.*\b(needs? review|requires? review|awaiting review|not reviewed)\b/i,
+  evidence_review_unresolved: /\bevidence review\b.*\b(unresolved|incomplete|pending|under review)\b/i,
+  support_strength_unassessed: /\b(support|claim strength)\b.*\b(not yet assessed|not yet been assessed|not been assessed|unassessed|unverified)\b/i,
+  coverage_dimension_unresolved: /\bcoverage\b.*\b(gap|unresolved|incomplete|not cleared)\b/i,
+  client_followup_unresolved: /\bclient follow[- ]?ups?\b.*\b(unanswered|unresolved|pending|open)\b/i,
+  potential_conflict_review_unresolved: /\bpotential conflict\b.*\b(unresolved|under review|pending)\b/i,
+  claim_not_approved_for_requested_audience: /\bclaim\b.*\bnot approved for (the )?(internal|funder|public)\b/i,
+  audience_gate_closed: /\baudience\b.*\b(gate closed|not authorized|not approved)\b/i,
+  requirement_authority_absent: /\b(requirement|authority)\b.*\b(absent|not established|not linked)\b/i,
+  traceability_incomplete: /\btraceability\b.*\b(incomplete|not established)\b/i,
+});
+const PROVISIONAL_INTERNAL_DRAFT_LABEL = /^\s*provisional internal draft\b/i;
 
 const NUMERIC_LITERAL_PATTERN = /(?<![A-Za-z0-9_])[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:%|\b)/g;
 const CAUSAL_PATTERN = /\b(causes?|caused|causing|because|due to|drives?|driven by|leads? to|led to|results? in|resulted in|attribut(?:e|ed|able) to|impact(?:s|ed)?|increases?|decreases?|reduces?|improves?|worsens?)\b/gi;
@@ -169,6 +186,38 @@ export function validateGeneratedContentDraft({
     audienceOk
       ? pass("VAL-GEN-005", { requested_audience: requestedAudience })
       : blocker("VAL-GEN-005", "draft_audience_exceeds_authority"),
+  );
+
+  // Package 14-05 allows internal drafting from a governed claim whose
+  // current-use eligibility is false. The provider instruction is not an
+  // output guarantee: each cited block must name every current limitation so
+  // an ineligible claim is not persisted as an unconditional assertion.
+  const limitationDisclosureViolations = [];
+  const missingProvisionalDraftLabels = [];
+  for (const block of blocks || []) {
+    for (const citation of block.citations || []) {
+      const claim = claimById.get(citation.claimId);
+      if (!claim || claim.currentEligible !== false) continue;
+      if (!PROVISIONAL_INTERNAL_DRAFT_LABEL.test(block.text || "")) {
+        missingProvisionalDraftLabels.push(block.ordinal);
+      }
+      for (const code of claim.limitationCodes || []) {
+        const disclosure = CURRENT_LIMITATION_DISCLOSURE[code];
+        if (!disclosure || !disclosure.test(block.text || "")) {
+          limitationDisclosureViolations.push({ block_ordinal: block.ordinal, limitation_code: code });
+        }
+      }
+    }
+  }
+  results.push(
+    limitationDisclosureViolations.length === 0 && missingProvisionalDraftLabels.length === 0
+      ? pass("VAL-GEN-009")
+      : blocker("VAL-GEN-009", "ineligible_claim_context_not_disclosed", {
+          violation_count: limitationDisclosureViolations.length + missingProvisionalDraftLabels.length,
+          limitation_codes: unique(limitationDisclosureViolations.map((violation) => violation.limitation_code)).sort(),
+          block_ordinals: unique(limitationDisclosureViolations.map((violation) => violation.block_ordinal).filter(Number.isInteger)).sort((a, b) => a - b),
+          missing_provisional_label_block_ordinals: unique(missingProvisionalDraftLabels.filter(Number.isInteger)).sort((a, b) => a - b),
+        }),
   );
 
   if (contentType === "readiness_assessment") {

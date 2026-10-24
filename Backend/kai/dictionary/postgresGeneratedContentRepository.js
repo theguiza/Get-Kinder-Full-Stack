@@ -1332,7 +1332,7 @@ async function insertAudit(tx, { input, persisted, projections }) {
         requested_audience: input.requestedAudience,
         claim_count: projections.length,
         block_count: persisted.blocks.length,
-        validator_keys: ["VAL-GEN-001", "VAL-GEN-002", "VAL-GEN-003", "VAL-GEN-004", "VAL-GEN-005"],
+        validator_keys: ["VAL-GEN-001", "VAL-GEN-002", "VAL-GEN-003", "VAL-GEN-004", "VAL-GEN-005", "VAL-GEN-009"],
       }),
       input.now,
     ],
