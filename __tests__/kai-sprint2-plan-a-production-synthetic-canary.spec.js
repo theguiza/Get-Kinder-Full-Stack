@@ -53,6 +53,25 @@ test("browser-terminal canary uses the selected signed-in tab and stops when aut
   await assert.rejects(browserTerminalPreflight({ tab }), /authentication_required/);
 });
 
+test("browser-terminal preflight verifies the authorized synthetic workspace and fails closed on disabled release", async () => {
+  const organizationId = "11111111-1111-4111-8111-111111111111";
+  const engagementId = "22222222-2222-4222-8222-222222222222";
+  const makeTab = (releaseAllowed) => ({
+    url: async () => "https://app.example.test/customer",
+    playwright: { evaluate: async (_fn, arg) => {
+      if (arg.path.endsWith("/admin/organizations")) return { status: 200, body: { data: [] } };
+      if (arg.path.endsWith("/access-capabilities")) return { status: 200, body: { data: { intakeContribution: true, workflowOperations: { promoteSource: true, recordSourceMeasurement: true, generateDrafts: true, reviewInternalDraftFactualContent: true, releaseInternalReports: releaseAllowed } } } };
+      if (arg.path.endsWith("/engagements")) return { status: 200, body: { data: [{ engagementId }] } };
+      return { status: 404, body: { error: { code: "not_found" } } };
+    } },
+  });
+  const result = await browserTerminalPreflight({ tab: makeTab(true), organizationId, engagementId });
+  assert.equal(result.capabilities, "PASS");
+  assert.equal(result.engagement, "PASS");
+  assert.deepEqual(result.fixture, { totalDataRows: 6, blankDataRows: 1, countedRecords: 5, duplicateNonblankRowsIncluded: 2 });
+  await assert.rejects(browserTerminalPreflight({ tab: makeTab(false), organizationId, engagementId }), /feature_disabled:KAI_PUBLIC_EXPORT_ENABLED/);
+});
+
 test("browser-terminal execution requires owner authorization and keeps approval actions in the UI", async () => {
   await assert.rejects(browserTerminalStart({ ownerAuthorized: false }), /separate_owner_authorization/);
   const source = await readFile(new URL("../scripts/kai-sprint2-plan-a-production-synthetic-canary.browser-terminal.mjs", import.meta.url), "utf8");

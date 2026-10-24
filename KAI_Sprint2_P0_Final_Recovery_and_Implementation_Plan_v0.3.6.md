@@ -43885,9 +43885,12 @@ measurements, reviews, generation, and release decisions to the operator in the
 product UI. This avoids requiring a separate Chrome process or DevTools port.
 
 **Verification (TOOL_VERIFIED; sentinel `DATABASE_URL`):**
-- `npm run test:kai-plan-a-production-canary`: 12 passed, 0 failed, including
+- `npm run test:kai-plan-a-production-canary`: 13 passed, 0 failed, including
   local Chrome harness launch, selected-tab authentication failure, and
   owner-authorization boundary checks.
+- Browser-terminal-only local checks: 3 passed, 0 failed, covering missing
+  authentication, authorized workspace preflight, disabled release, and the
+  explicit owner-authorization boundary.
 - `npm run verify:kai-sprint2-api-contract`: 71 passed, 0 failed.
 - `git diff --check`: passed.
 
