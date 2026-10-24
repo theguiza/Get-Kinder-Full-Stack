@@ -154,6 +154,10 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     "/admin/organizations/:organizationId/claims/:claimId/coverage-dimensions/:dimensionKey/funder-acceptance",
     "/admin/organizations/:organizationId/claims/:claimId/coverage-dimensions/:dimensionKey/internal-acceptance",
     "/admin/organizations/:organizationId/claims/:claimId/coverage-dimensions/:dimensionKey/public-acceptance",
+    // Owner authorization 2026-10-24: the organization administrator's own
+    // measured-claim factual-review read (additive; every prior entry
+    // preserved verbatim).
+    "/admin/organizations/:organizationId/claims/:claimId/organization-factual-review",
     // KAI P2-06 human claim-traceability read surface (additive; every prior
     // entry preserved verbatim).
     "/admin/organizations/:organizationId/claims/:claimId/traceability",

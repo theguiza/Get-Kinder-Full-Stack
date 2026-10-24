@@ -134,7 +134,7 @@ test("limitation descriptions: every measured-claim code is stated in words, acc
     "coverage.requirement_alignment.unresolved",
   ];
   for (const code of codes) assert.match(describeMeasurementLimitationCode(code) || "", /\w{4,}/, code);
-  assert.match(describeMeasurementLimitationCode("coverage.small_cell_risk.accepted_internal_limitation"), /not resolved; Get Kinder accepted it as a limitation for internal use only/);
+  assert.match(describeMeasurementLimitationCode("coverage.small_cell_risk.accepted_internal_limitation"), /not resolved; accepted as a limitation for internal use only/);
   assert.match(describeMeasurementLimitationCode("measurement.duplicate_records_included"), /not of distinct events/);
   assert.match(describeMeasurementLimitationCode("measurement.period_human_attested_not_row_verified"), /not checked against dates in the records/);
   for (const code of ["sample_size_small", "coverage.unknown_dimension.unresolved", "coverage.missingness.resolved_clear", null]) {

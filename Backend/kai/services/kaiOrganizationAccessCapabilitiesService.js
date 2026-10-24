@@ -1,6 +1,6 @@
 import { __generatedContentServiceContract } from "./kaiGeneratedContentService.js";
 import { __generatedDraftLibraryServiceContract } from "./kaiGeneratedDraftLibraryService.js";
-import { __humanReviewServiceContract } from "./kaiHumanReviewService.js";
+import { __humanReviewServiceContract, canRecordOrganizationFactualReview } from "./kaiHumanReviewService.js";
 import { __evidenceLineageServiceContract } from "./kaiEvidenceLineageService.js";
 import { __sourceMeasurementServiceContract } from "./kaiSourceMeasurementService.js";
 import { __evidenceCoverageAssessmentServiceContract } from "./kaiEvidenceCoverageAssessmentService.js";
@@ -221,6 +221,14 @@ function workflowOperations(actorContext, organizationId) {
     // organization administrator: the client-safe diagnostic only).
     readClaimTraceabilityDiagnostics: actorContext?.actorType === "human"
       && authorizeClaimTraceabilityRead(actorContext, organizationId, "internal").ok === true,
+    // Owner authorization 2026-10-24: the organization administrator's own
+    // factual review of an ordinary measured claim (evidence review, internal
+    // claim review, internal coverage-limitation acceptance). Whether a given
+    // claim may be reviewed is per claim (getOrganizationFactualReview); the
+    // GK recordEvidenceReview / recordClaimReview / acceptCoverageLimitation
+    // flags above are unchanged. False for an actor GK authorization admits:
+    // that actor's decisions are recorded as GK's.
+    reviewMeasuredClaimFactualContent: canRecordOrganizationFactualReview({ actorContext, organizationId }),
     recordConflict: validateActorCanPerformOperation(
       actorContext, __conflictReviewCandidateServiceContract.CONFLICT_REVIEW_CANDIDATE_OPERATION, organizationId,
       { allowedRoles: __conflictReviewCandidateServiceContract.CONFLICT_REVIEW_CANDIDATE_ALLOWED_ROLES },

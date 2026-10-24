@@ -21,8 +21,6 @@ import {
   listOrganizationReviewQueue,
   __claimTraceabilityServiceContract,
 } from "../Backend/kai/services/kaiClaimTraceabilityService.js";
-import { recordEvidenceReviewDecision, recordClaimReviewDecision } from "../Backend/kai/services/kaiHumanReviewService.js";
-import { acceptInternalCoverageLimitation } from "../Backend/kai/services/kaiCoverageReviewDecisionService.js";
 import { createEvidenceSummaryDraft, createImpactNarrativeDraft } from "../Backend/kai/services/kaiGeneratedContentService.js";
 import { getOrganizationAccessCapabilities } from "../Backend/kai/services/kaiOrganizationAccessCapabilitiesService.js";
 import { projectOrganizationAccessCapabilities } from "../frontend/impactEvidenceLibraryLogic.js";
@@ -265,14 +263,11 @@ test("conflicts keep only the allowlisted reason, and 404/422/500 keep the GK er
 // Governance isolation
 // ---------------------------------------------------------------------------
 
-test("the diagnostic grants no GK review, coverage acceptance, review queue, or generation authority", async () => {
+test("the diagnostic grants no GK review queue or generation authority (the organization's own factual review is separate: kai-organization-factual-review-authority.spec.js)", async () => {
   const tripwire = new Proxy({}, { get: (_target, property) => (property === "then" ? undefined : async () => assert.fail(`repository ${String(property)} reached`)) });
   const noAudit = () => ({ prepareMetadataOnlyAudit() { return { ok: true, async publish() {} }; } });
   for (const actor of [await bindingDerivedClientAdmin(), storedClientAdmin()]) {
     const results = {
-      evidenceDecision: await recordEvidenceReviewDecision({ organizationId: ORG_X, evidenceItemId: EVIDENCE, reviewQueueItemId: QUEUE, expectedUpdatedAt: NOW, decision: "supported", actorContext: actor, now: NOW }, { env: ENV, humanReviewRepository: tripwire, metadataOnlyAudit: noAudit() }),
-      claimDecision: await recordClaimReviewDecision({ organizationId: ORG_X, claimId: CLAIM, reviewQueueItemId: QUEUE, expectedUpdatedAt: NOW, decision: "approved", approvedAudiences: ["internal"], actorContext: actor, now: NOW }, { env: ENV, humanReviewRepository: tripwire, metadataOnlyAudit: noAudit() }),
-      acceptCoverage: await acceptInternalCoverageLimitation({ organizationId: ORG_X, claimId: CLAIM, dimensionKey: "definition_clarity", actorContext: actor, now: NOW }, { env: ENV, coverageReviewDecisionRepository: tripwire, metadataOnlyAudit: noAudit() }),
       reviewQueue: await listOrganizationReviewQueue({ organizationId: ORG_X, actorContext: actor }, { env: ENV, claimTraceabilityRepository: tripwire }),
     };
     for (const [label, result] of Object.entries(results)) assertDenied(result, "role_not_allowed", label);

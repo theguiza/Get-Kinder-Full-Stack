@@ -759,10 +759,17 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
     addOrderedBlocker(blockers, "claim_review_unresolved");
     affectedObjectIds.add(claimReviewQueueItemRow.review_queue_item_id);
   }
+  // An organization administrator's (client_admin) evidence decision is an
+  // internal factual review only (owner authorization 2026-10-24): it is
+  // never Get Kinder's evidence review for funder or public use. A client_admin
+  // claim decision cannot approve those audiences at all (the
+  // claim_review_decisions organization audience CHECK), so approvalForAudience
+  // already refuses it.
   if (
     unresolvedReviewStatus(evidenceReviewQueueItemRow.review_status) ||
     !evidenceReviewHead ||
-    evidenceReviewHead.decision_outcome === "needs_more_information"
+    evidenceReviewHead.decision_outcome === "needs_more_information" ||
+    (requestedAudience !== "internal" && evidenceReviewHead.decided_by_role === "client_admin")
   ) {
     addOrderedBlocker(blockers, "evidence_review_unresolved");
     affectedObjectIds.add(evidenceReviewQueueItemRow.review_queue_item_id);

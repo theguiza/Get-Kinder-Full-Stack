@@ -25,6 +25,8 @@ import { resolveEffectivePublicAuthority } from "./postgresEffectivePublicAuthor
  * funder/public/export authority.
  */
 
+const ORGANIZATION_COVERAGE_DECISION_ROLE = "client_admin";
+
 const COVERAGE_REVIEW_DECISION_RESULT_STATUS = Object.freeze({
   validation_blocker: 422,
   not_found: 404,
@@ -74,14 +76,21 @@ function isMetadataOnlyAuditDependency(value) {
 function isAcceptInternalCoverageLimitationInput(input) {
   const allowedKeys = new Set([
     "organizationId", "claimId", "dimensionKey", "actorUserId", "actorRole", "now", "metadataOnlyAudit",
+    "acceptanceAdmission",
   ]);
   if (!isPlainObject(input) || !hasOnlyKeys(input, allowedKeys)) return false;
+  // A gk_reviewer decision carries no admission; an organization
+  // administrator's (client_admin) internal acceptance always carries its
+  // in-transaction admission (kaiCoverageReviewDecisionService.js).
+  const roleAdmitted = input.acceptanceAdmission === undefined
+    ? input.actorRole === COVERAGE_REVIEW_DECISION_ROLE
+    : input.actorRole === ORGANIZATION_COVERAGE_DECISION_ROLE && typeof input.acceptanceAdmission === "function";
   return (
     isNonEmptyString(input.organizationId) &&
     isNonEmptyString(input.claimId) &&
     isCoverageReviewDimensionKey(input.dimensionKey) &&
     isNonEmptyString(input.actorUserId) &&
-    input.actorRole === COVERAGE_REVIEW_DECISION_ROLE &&
+    roleAdmitted &&
     isNormalizedNow(input.now) &&
     isMetadataOnlyAuditDependency(input.metadataOnlyAudit)
   );
@@ -213,7 +222,8 @@ export function createPostgresCoverageReviewDecisionRepository({
 } = {}) {
   async function acceptCoverageLimitation(input, decision) {
     if (!isAcceptInternalCoverageLimitationInput(input)) return failure("validation_blocker");
-    const { organizationId, claimId, dimensionKey, actorUserId, actorRole, now, metadataOnlyAudit } = input;
+    const { organizationId, claimId, dimensionKey, actorUserId, actorRole, now, metadataOnlyAudit, acceptanceAdmission } = input;
+    if (acceptanceAdmission && decision !== COVERAGE_REVIEW_DECISION_TYPE) return failure("validation_blocker");
     const run = runInTransaction || (await resolveDefaultRunInTransaction());
     const evaluate = evaluateClaimTraceability || evaluateClaimTraceabilityInTransaction;
     const resolveFunder = resolveFunderAuthority || resolveEffectiveFunderAuthority;
@@ -254,6 +264,11 @@ export function createPostgresCoverageReviewDecisionRepository({
 
         const gapItem = data.gap_items.find((row) => row.dimension_key === dimensionKey);
         if (!gapItem) return failure("conflict_current_state_changed");
+
+        if (acceptanceAdmission) {
+          const refused = await acceptanceAdmission(tx, { data, dimensionKey });
+          if (refused) return refused;
+        }
 
         const stateFingerprint = computeCoverageReviewDecisionFingerprint({
           claimId,

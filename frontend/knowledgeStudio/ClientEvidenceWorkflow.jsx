@@ -57,6 +57,7 @@ import ClientInternalDrafts from "./ClientInternalDrafts.jsx";
 import ClientSensitivityReviewPanel from "./ClientSensitivityReviewPanel.jsx";
 import ClientSourcePromotionPanel from "./ClientSourcePromotionPanel.jsx";
 import ClientSourceMeasurementPanel from "./ClientSourceMeasurementPanel.jsx";
+import ClientMeasuredClaimReviewPanel from "./ClientMeasuredClaimReviewPanel.jsx";
 
 const DRAFT_LABELS = Object.freeze({
   evidence_summary: "Internal evidence summary",
@@ -243,6 +244,9 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
   const [measuring, setMeasuring] = useState(null);
   useEffect(() => { setMeasuring(null); }, [organizationId, engagementId]);
   const openMeasurement = measuring && measuring.contextKey === contextKey ? measuring.sourceVersionId : null;
+  const [reviewing, setReviewing] = useState(null);
+  useEffect(() => { setReviewing(null); }, [organizationId, engagementId]);
+  const openReview = reviewing && reviewing.contextKey === contextKey ? reviewing.claimId : null;
 
   // One open source-preparation panel, keyed to organization + Project + file.
   const [preparation, setPreparation] = useState(null);
@@ -542,7 +546,10 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
       <div className="admin-card mb-3">
         <h5 className="mb-2">Evidence</h5>
         <div className="small text-muted mb-2">
-          Evidence extracted from your sources. Every item awaits Get Kinder evidence review; proposing a claim does not approve it.
+          Evidence extracted from your sources. Every item awaits evidence review; proposing a claim does not approve it.
+          {access.reviewMeasuredClaimFactualContent
+            ? " You review an ordinary record-count measurement yourself, for internal use, from its claim below; Get Kinder reviews everything else."
+            : " Get Kinder reviews it."}
         </div>
         {evidence.status === "loading" ? <div className="text-muted small">Loading evidence...</div> : null}
         {evidence.status === "error" ? <div className="alert alert-warning py-2 small">Evidence could not be loaded. {evidence.message}</div> : null}
@@ -575,7 +582,7 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
       <div className="admin-card mb-3">
         <h5 className="mb-2">Claims for internal drafts</h5>
         <div className="small text-muted mb-2">
-          Internal drafts may use claims still awaiting Get Kinder review. Using a claim here does not approve it for funders
+          Internal drafts may use claims still awaiting review. Using a claim here does not approve it for funders
           or the public.
           {access.generateClaimGapFollowups
             ? " Generate a claim's gap follow-ups before drafting from it; they record open questions and resolve nothing."
@@ -608,11 +615,22 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
                     </button>
                   ) : null}
                   {gapFollowupsByClaim[claim.claimId] ? <div className="mt-1 text-muted">{gapFollowupsByClaim[claim.claimId]}</div> : null}
+                  {access.reviewMeasuredClaimFactualContent && openReview !== claim.claimId && isRouteUuid(claim.claimId) ? (
+                    <button type="button" className="btn btn-sm btn-outline-primary mt-1 ms-1" data-client-open-measured-claim-review={claim.claimId}
+                      onClick={() => setReviewing({ contextKey, claimId: claim.claimId })}>
+                      Review measurement
+                    </button>
+                  ) : null}
                   {!selectability.selectable ? <div className="mt-1">{claimSelectabilityMessage(selectability.reason)}</div> : null}
                 </li>
               );
             })}
           </ul>
+        ) : null}
+        {openReview ? (
+          // Outside the list, so the list's own refresh after a decision does not unmount it.
+          <ClientMeasuredClaimReviewPanel key={`${contextKey}:${openReview}`} organizationId={organizationId} claimId={openReview}
+            onClose={() => setReviewing(null)} onRecorded={refresh} />
         ) : null}
       </div>
 

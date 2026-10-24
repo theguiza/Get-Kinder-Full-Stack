@@ -442,6 +442,9 @@ try {
   if (testResult.status !== 0) throw new Error("Plan A normal-chain measured-claim to Markdown proof failed");
   console.log(`Plan A chain schema fingerprint after the proof: ${(await catalog(schemaFingerprintSql))[0].fingerprint}`);
   await proveOrganizationReleaseRollbackRefuses();
+  const factualReviewResult = spawnSync("node", ["--test", "--test-concurrency=1", "__tests__/kai-organization-factual-review-authority.integration.spec.js"],
+    { cwd: repoRoot, encoding: "utf8", stdio: "inherit", env: testEnv });
+  if (factualReviewResult.status !== 0) throw new Error("Plan A normal-chain organization factual review service proof failed");
   await proveOrganizationFactualReviewScope();
   console.log("Plan A normal-chain proof passed.");
 } finally {

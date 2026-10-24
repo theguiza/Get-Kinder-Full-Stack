@@ -387,6 +387,15 @@ async function enforcementFor(actorContext, organizationId) {
     if (calls.length > 0) {
       assert.equal(calls.length, 1, name);
       assert.equal(calls[0].organizationId ?? calls[0].identity?.organizationId, organizationId, `${name}: the repository is scoped to the requested organization`);
+      // Owner authorization 2026-10-24: an organization administrator's own
+      // evidence review reaches the repository only as client_admin and with
+      // its in-transaction admission; it is not GK evidence-review authority.
+      if (name === "recordEvidenceReview" && calls[0].reviewAdmission) {
+        assert.equal(calls[0].actorRole, "client_admin", name);
+        authorized[name] = false;
+        authorized.organizationFactualReview = true;
+        continue;
+      }
       authorized[name] = true;
       continue;
     }
@@ -497,6 +506,9 @@ test("capability readback agrees with service enforcement for every configured a
       const where = `${user.email} in ${label}`;
       assert.equal(surface.recordEvidenceReview, enforced.recordEvidenceReview, where);
       assert.equal(surface.extractEvidence, enforced.extractEvidence, where);
+      const reviewsAsOrganization = (await getOrganizationAccessCapabilities({ organizationId, actorContext: actor }, { env: ENV }))
+        .data?.workflowOperations?.reviewMeasuredClaimFactualContent === true;
+      assert.equal(reviewsAsOrganization, enforced.organizationFactualReview === true, where);
       assert.equal(surface.proposeClaim, enforced.proposeClaim, where);
       const capabilities = await getOrganizationAccessCapabilities({ organizationId, actorContext: actor }, { env: ENV });
       assert.equal(capabilities.ok && capabilities.data.workflowOperations.assessEvidenceCoverage === true, enforced.assessEvidenceCoverage, where);

@@ -926,10 +926,6 @@ async function runBrowserAcceptance() {
         ["funder evidence summary", "POST", createFunderEvidenceSummaryPath(ORG_X), DRAFT_BODY([ids.x.usableClaimId], "client-admin-funder")],
         ["readiness assessment", "POST", createReadinessAssessmentPath(ORG_X), DRAFT_BODY([ids.x.usableClaimId], "client-admin-readiness")],
         ["data gap memo", "POST", createDataGapMemoPath(ORG_X), { idempotency_key: "client-admin-gap-memo", engagement_id: PROJECT_X }],
-        ["evidence review decision", "POST", evidenceReviewCompletePath(ORG_X, ids.x.usableEvidenceId, evidenceQueue.review_queue_item_id),
-          evidenceReviewDecisionBody({ expectedUpdatedAt: new Date(evidenceQueue.updated_at).toISOString(), decision: "supported" })],
-        ["claim review decision", "POST", claimReviewCompletePath(ORG_X, ids.x.usableClaimId, claimQueue.review_queue_item_id),
-          claimReviewDecisionBody({ expectedUpdatedAt: new Date(claimQueue.updated_at).toISOString(), decision: "approved", approvedAudiences: ["internal"] })],
         ["GK review packet", "GET", generatedDraftReviewPacketPath(ORG_X, ids.x.draftIds[0])],
         // P1-08 promotion is admitted for this binding-derived administrator
         // (owner decision 2026-10-18; kai-client-admin-source-promotion acceptance);
@@ -938,6 +934,16 @@ async function runBrowserAcceptance() {
         // Owner authorization 2026-10-24: internal reads return only the client-safe diagnostic (below).
         ["P2-06 funder traceability read", "GET", claimTraceabilityPath(ORG_X, ids.x.usableClaimId, "funder")],
         ["client follow-up list", "GET", `/api/kai/sprint2/intake/admin/organizations/${ORG_X}/client-followups`],
+      ];
+      // Owner authorization 2026-10-24: the administrator's own evidence,
+      // claim, and internal coverage decisions are admitted only for an
+      // ordinary record-count measurement; this field-presence evidence stays
+      // Get Kinder's, refused before any write.
+      const organizationDecisions = [
+        ["evidence review decision", "POST", evidenceReviewCompletePath(ORG_X, ids.x.usableEvidenceId, evidenceQueue.review_queue_item_id),
+          evidenceReviewDecisionBody({ expectedUpdatedAt: new Date(evidenceQueue.updated_at).toISOString(), decision: "supported" })],
+        ["claim review decision", "POST", claimReviewCompletePath(ORG_X, ids.x.usableClaimId, claimQueue.review_queue_item_id),
+          claimReviewDecisionBody({ expectedUpdatedAt: new Date(claimQueue.updated_at).toISOString(), decision: "approved", approvedAudiences: ["internal"] })],
         ["P2-10 internal coverage limitation acceptance", "POST", coverageInternalAcceptancePath(ORG_X, ids.x.usableClaimId, ids.x.gapDimensionKey), {}],
       ];
       if (ids.x.followup) {
@@ -953,6 +959,16 @@ async function runBrowserAcceptance() {
         assert.equal(response.body.error.code, "authorization_denied", label);
         outcomes[label] = response.body.blockers?.[0]?.blocking_reason || response.body.error.code;
       }
+      for (const [label, method, path, body] of organizationDecisions) {
+        const response = await adminPage.api(method, path, body);
+        assert.ok([409, 422].includes(response.status), `${label}: ${response.status} ${JSON.stringify(response.body)}`);
+        if (response.status === 409) assert.ok(["evidence_review_unresolved", "human_review_incomplete", "conflict_current_state_changed"].includes(response.body.error.code), label);
+        if (response.status === 422) {
+          assert.deepEqual(response.body.blockers?.map((b) => b.blocking_reason), ["evidence_type_requires_get_kinder_review"], label);
+        }
+        outcomes[label] = response.body.blockers?.[0]?.blocking_reason || response.body.error.code;
+      }
+      assert.equal(outcomes["evidence review decision"], "evidence_type_requires_get_kinder_review");
       const diagnostic = await adminPage.api("GET", claimTraceabilityPath(ORG_X, ids.x.usableClaimId, "internal"));
       if (diagnostic.status === 200) {
         assert.equal(diagnostic.body.data.view, "organization_internal_traceability_diagnostic", JSON.stringify(diagnostic.body));

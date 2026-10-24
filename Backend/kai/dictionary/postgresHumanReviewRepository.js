@@ -108,6 +108,15 @@ function isMetadataOnlyAuditDependency(value) {
   return Boolean(value) && typeof value.prepareMetadataOnlyAudit === "function";
 }
 
+// Optional caller admission (the organization-owned factual review,
+// kaiHumanReviewService.js): evaluated inside the decision's own transaction
+// with the lineage's current decision, before any write. Returns null to
+// proceed or a failure result. Absent for the GK path, whose behavior is
+// unchanged.
+function isOptionalReviewAdmission(value) {
+  return value === undefined || typeof value === "function";
+}
+
 class MalformedResultRowError extends Error {
   constructor(what) {
     super(`${what} row failed post-write validation`);
@@ -299,7 +308,7 @@ async function resolveDefaultRunInTransaction() {
 
 const EVIDENCE_REVIEW_INPUT_ALLOWED_KEYS = new Set([
   "organizationId", "evidenceItemId", "reviewQueueItemId", "expectedUpdatedAt",
-  "decisionOutcome", "limitationNotes", "actorUserId", "actorRole", "now", "metadataOnlyAudit",
+  "decisionOutcome", "limitationNotes", "actorUserId", "actorRole", "now", "metadataOnlyAudit", "reviewAdmission",
 ]);
 
 function isRecordEvidenceReviewDecisionInput(input) {
@@ -314,13 +323,15 @@ function isRecordEvidenceReviewDecisionInput(input) {
     isNonEmptyString(input.actorUserId) &&
     isNonEmptyString(input.actorRole) &&
     isNormalizedNow(input.now) &&
-    isMetadataOnlyAuditDependency(input.metadataOnlyAudit)
+    isMetadataOnlyAuditDependency(input.metadataOnlyAudit) &&
+    isOptionalReviewAdmission(input.reviewAdmission)
   );
 }
 
 const CLAIM_REVIEW_INPUT_ALLOWED_KEYS = new Set([
   "organizationId", "claimId", "reviewQueueItemId", "expectedUpdatedAt",
   "decisionOutcome", "limitationNotes", "approvedAudiences", "actorUserId", "actorRole", "now", "metadataOnlyAudit",
+  "reviewAdmission",
 ]);
 
 function isRecordClaimReviewDecisionInput(input) {
@@ -336,7 +347,8 @@ function isRecordClaimReviewDecisionInput(input) {
     isNonEmptyString(input.actorUserId) &&
     isNonEmptyString(input.actorRole) &&
     isNormalizedNow(input.now) &&
-    isMetadataOnlyAuditDependency(input.metadataOnlyAudit)
+    isMetadataOnlyAuditDependency(input.metadataOnlyAudit) &&
+    isOptionalReviewAdmission(input.reviewAdmission)
   );
 }
 
@@ -383,7 +395,7 @@ export function createPostgresHumanReviewRepository({ runInTransaction } = {}) {
       if (!isRecordEvidenceReviewDecisionInput(input)) return failure("validation_blocker");
       const {
         organizationId, evidenceItemId, reviewQueueItemId, expectedUpdatedAt,
-        decisionOutcome, limitationNotes, actorUserId, actorRole, now, metadataOnlyAudit,
+        decisionOutcome, limitationNotes, actorUserId, actorRole, now, metadataOnlyAudit, reviewAdmission,
       } = input;
       const isTerminal = isEvidenceReviewTerminalOutcome(decisionOutcome);
       const run = runInTransaction || (await resolveDefaultRunInTransaction());
@@ -396,6 +408,10 @@ export function createPostgresHumanReviewRepository({ runInTransaction } = {}) {
           if (!intakeFileId) return failure("conflict_current_state_changed");
 
           const currentHead = await findCurrentEvidenceReviewDecision(tx, { organizationId, evidenceItemId });
+          if (reviewAdmission) {
+            const refused = await reviewAdmission(tx, { evidenceItemId, currentHead });
+            if (refused) return refused;
+          }
 
           const preImageQueueRow = await readReviewQueueItemById(tx, {
             organizationId,
@@ -534,7 +550,7 @@ export function createPostgresHumanReviewRepository({ runInTransaction } = {}) {
       if (!isRecordClaimReviewDecisionInput(input)) return failure("validation_blocker");
       const {
         organizationId, claimId, reviewQueueItemId, expectedUpdatedAt,
-        decisionOutcome, limitationNotes, approvedAudiences, actorUserId, actorRole, now, metadataOnlyAudit,
+        decisionOutcome, limitationNotes, approvedAudiences, actorUserId, actorRole, now, metadataOnlyAudit, reviewAdmission,
       } = input;
       const isTerminal = isClaimReviewTerminalOutcome(decisionOutcome);
       const run = runInTransaction || (await resolveDefaultRunInTransaction());
@@ -594,6 +610,10 @@ export function createPostgresHumanReviewRepository({ runInTransaction } = {}) {
           }
 
           const currentHead = await findCurrentClaimReviewDecision(tx, { organizationId, claimId });
+          if (reviewAdmission) {
+            const refused = await reviewAdmission(tx, { evidenceItemId, currentHead });
+            if (refused) return refused;
+          }
 
           const preImageQueueRow = await readReviewQueueItemById(tx, {
             organizationId,

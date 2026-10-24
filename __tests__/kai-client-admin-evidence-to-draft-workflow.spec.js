@@ -11,7 +11,11 @@ import { generateClaimGapFollowups, __claimGapFollowupServiceContract } from "..
 import { completeClientFollowup, __clientFollowupCompletionServiceContract } from "../Backend/kai/services/kaiClientFollowupCompletionService.js";
 import { listClientFollowupWorkflows, __clientFollowupReadServiceContract } from "../Backend/kai/services/kaiClientFollowupReadService.js";
 import { getClaimTraceabilitySummary } from "../Backend/kai/services/kaiClaimTraceabilityService.js";
-import { acceptInternalCoverageLimitation } from "../Backend/kai/services/kaiCoverageReviewDecisionService.js";
+import {
+  acceptFunderCoverageLimitation,
+  acceptInternalCoverageLimitation,
+  acceptPublicCoverageLimitation,
+} from "../Backend/kai/services/kaiCoverageReviewDecisionService.js";
 import {
   createEvidenceSummaryDraft,
   createImpactNarrativeDraft,
@@ -428,7 +432,7 @@ test("read safety: Claims keep status, review status, and strength but drop the 
 // D. Protected operations
 // ---------------------------------------------------------------------------
 
-test("D: client_admin is denied the seven other generators, funder evidence summary, generated-content review, P2-12 decisions, P2-02, and P1-08", async () => {
+test("D: client_admin is denied the seven other generators, funder evidence summary, generated-content review, P2-02, and P1-08; its P2-12 decisions are its own, admitted per claim", async () => {
   const actor = await bindingDerivedClientAdmin();
   const tripwire = new Proxy({}, { get: (_target, property) => (property === "then" ? undefined : async () => assert.fail(`repository ${String(property)} reached`)) });
   const deps = { env: ENV, getEngagementForOrganization: async () => assert.fail("engagement read"), generatedContentRepository: tripwire, draftGenerator: async () => ({ blocks: [] }), metadataOnlyAudit: noAudit() };
@@ -445,11 +449,20 @@ test("D: client_admin is denied the seven other generators, funder evidence summ
     publicEvidenceSummary: await createEvidenceSummaryDraft({ ...base, requestedAudience: "public" }, deps),
     startReview: await startGeneratedContentReview({ organizationId: ORG_X, generatedContentDraftId: DRAFT, reviewQueueItemId: QUEUE, expectedUpdatedAt: NOW, actorContext: actor, now: NOW }, { env: ENV, generatedContentRepository: tripwire }),
     completeReview: await completeGeneratedContentReview({ organizationId: ORG_X, generatedContentDraftId: DRAFT, reviewQueueItemId: QUEUE, expectedUpdatedAt: NOW, actorContext: actor, now: NOW }, { env: ENV, generatedContentRepository: tripwire }),
-    evidenceDecision: await recordEvidenceReviewDecision({ organizationId: ORG_X, evidenceItemId: EVIDENCE, reviewQueueItemId: QUEUE, expectedUpdatedAt: NOW, decision: "supported", actorContext: actor, now: NOW }, { env: ENV, humanReviewRepository: tripwire, metadataOnlyAudit: noAudit() }),
-    claimDecision: await recordClaimReviewDecision({ organizationId: ORG_X, claimId: CLAIM, reviewQueueItemId: QUEUE, expectedUpdatedAt: NOW, decision: "approved", approvedAudiences: ["internal"], actorContext: actor, now: NOW }, { env: ENV, humanReviewRepository: tripwire, metadataOnlyAudit: noAudit() }),
     coverage: await assessEvidenceCoverageForSourceVersion({ organizationId: ORG_X, sourceVersionId: SOURCE_VERSION, actorContext: actor }, { env: ENV, evidenceCoverageAssessmentRepository: tripwire }),
   };
   for (const [label, result] of Object.entries(results)) assertDenied(result, "role_not_allowed", label);
+  // Owner authorization 2026-10-24: the administrator's P2-12 evidence and
+  // claim decisions reach the repository only as client_admin, each with its
+  // in-transaction admission (ordinary measurement, no GK decision), and a
+  // claim approval only for the internal audience.
+  const calls = [];
+  const probe = { async recordEvidenceReviewDecision(input) { calls.push(input); return { ok: true, data: {} }; }, async recordClaimReviewDecision(input) { calls.push(input); return { ok: true, data: {} }; } };
+  await recordEvidenceReviewDecision({ organizationId: ORG_X, evidenceItemId: EVIDENCE, reviewQueueItemId: QUEUE, expectedUpdatedAt: NOW, decision: "supported", actorContext: actor, now: NOW }, { env: ENV, humanReviewRepository: probe, metadataOnlyAudit: noAudit() });
+  await recordClaimReviewDecision({ organizationId: ORG_X, claimId: CLAIM, reviewQueueItemId: QUEUE, expectedUpdatedAt: NOW, decision: "approved", approvedAudiences: ["internal"], actorContext: actor, now: NOW }, { env: ENV, humanReviewRepository: probe, metadataOnlyAudit: noAudit() });
+  assert.deepEqual(calls.map((input) => [input.actorRole, input.actorUserId, typeof input.reviewAdmission]), [["client_admin", KAI_USER, "function"], ["client_admin", KAI_USER, "function"]]);
+  const funder = await recordClaimReviewDecision({ organizationId: ORG_X, claimId: CLAIM, reviewQueueItemId: QUEUE, expectedUpdatedAt: NOW, decision: "approved", approvedAudiences: ["internal", "funder"], actorContext: actor, now: NOW }, { env: ENV, humanReviewRepository: tripwire, metadataOnlyAudit: noAudit() });
+  assertDenied(funder, "audience_requires_get_kinder_review", "funder approval");
   // Owner decision 2026-10-18: P1-08 admits the binding-derived administrator
   // through its dedicated organization-administrator half only.
   assert.deepEqual(authorizeSourcePromotionDecision(actor, ORG_X), { ok: true, organizationAdminAuthorized: true });
@@ -528,11 +541,12 @@ test("F: capabilities - client_admin gets extraction, proposal, gap follow-ups, 
     // readReleasedInternalReports (read-only receipt of a GK-released internal report): Plan A Prompt 8.
     // reviewInternalDraftFactualContent (factual review of an ordinary internal evidence summary) and
     // releaseInternalReports (its separate final release): owner amendment 2026-10-23.
-    // readClaimTraceabilityDiagnostics (the client-safe internal traceability diagnostic): owner authorization 2026-10-24.
+    // readClaimTraceabilityDiagnostics (the client-safe internal traceability diagnostic) and
+    // reviewMeasuredClaimFactualContent (the organization's own measured-claim factual review): owner authorization 2026-10-24.
     {
       reviewSensitivity: true, promoteSource: true, generateDrafts: true, readInternalDrafts: true, extractEvidence: true, proposeClaim: true,
       generateClaimGapFollowups: true, recordSourceMeasurement: true, readReleasedInternalReports: true, reviewInternalDraftFactualContent: true,
-      releaseInternalReports: true, readClaimTraceabilityDiagnostics: true,
+      releaseInternalReports: true, readClaimTraceabilityDiagnostics: true, reviewMeasuredClaimFactualContent: true,
     },
   );
   assert.equal(capabilities.data.internalKnowledgeWorkspace, false);
@@ -555,7 +569,7 @@ test("F: capabilities - client_admin gets extraction, proposal, gap follow-ups, 
   assert.deepEqual(clientEvidenceWorkflowAccess(projected), {
     visible: true, reviewSensitivity: true, promoteSource: true, extractEvidence: true, proposeClaim: true, generateClaimGapFollowups: true, generateDrafts: true,
     readInternalDrafts: true, recordSourceMeasurement: true, readReleasedInternalReports: true, reviewInternalDraftFactualContent: true,
-    releaseInternalReports: true, readClaimTraceabilityDiagnostics: true,
+    releaseInternalReports: true, readClaimTraceabilityDiagnostics: true, reviewMeasuredClaimFactualContent: true,
   });
 });
 
@@ -640,7 +654,7 @@ test("G: P2-04 on a claim that is not organization X's passes the repository's n
   assert.deepEqual([result.ok, result.error.code, result.data ?? null], [false, "not_found", null]);
 });
 
-test("G: P2-04 authority opens no follow-up answer or list, no GK traceability DTO, and no coverage acceptance for client_admin", async () => {
+test("G: P2-04 authority opens no follow-up answer or list, no GK traceability DTO, and no funder or public coverage acceptance for client_admin", async () => {
   const actor = await bindingDerivedClientAdmin();
   const tripwire = new Proxy({}, { get: (_target, property) => (property === "then" ? undefined : async () => assert.fail(`repository ${String(property)} reached`)) });
   const never = async () => assert.fail("read reached");
@@ -652,9 +666,16 @@ test("G: P2-04 authority opens no follow-up answer or list, no GK traceability D
     // and public traceability stay GK-only.
     funderTraceability: await getClaimTraceabilitySummary({ organizationId: ORG_X, claimId: CLAIM, requestedAudience: "funder", actorContext: actor }, { env: ENV, claimTraceabilityRepository: tripwire }),
     publicTraceability: await getClaimTraceabilitySummary({ organizationId: ORG_X, claimId: CLAIM, requestedAudience: "public", actorContext: actor }, { env: ENV, claimTraceabilityRepository: tripwire }),
-    acceptCoverage: await acceptInternalCoverageLimitation({ organizationId: ORG_X, claimId: CLAIM, dimensionKey: "definition_clarity", actorContext: actor, now: NOW }, { env: ENV, coverageReviewDecisionRepository: tripwire, metadataOnlyAudit: noAudit() }),
+    acceptFunderCoverage: await acceptFunderCoverageLimitation({ organizationId: ORG_X, claimId: CLAIM, dimensionKey: "small_cell_risk", actorContext: actor, now: NOW }, { env: ENV, coverageReviewDecisionRepository: tripwire, metadataOnlyAudit: noAudit() }),
+    acceptPublicCoverage: await acceptPublicCoverageLimitation({ organizationId: ORG_X, claimId: CLAIM, dimensionKey: "small_cell_risk", actorContext: actor, now: NOW }, { env: ENV, coverageReviewDecisionRepository: tripwire, metadataOnlyAudit: noAudit() }),
   };
   for (const [label, result] of Object.entries(results)) assertDenied(result, "role_not_allowed", label);
+  // Owner authorization 2026-10-24: the internal acceptance reaches the
+  // repository only as client_admin, with its in-transaction admission.
+  const coverageCalls = [];
+  await acceptInternalCoverageLimitation({ organizationId: ORG_X, claimId: CLAIM, dimensionKey: "small_cell_risk", actorContext: actor, now: NOW },
+    { env: ENV, coverageReviewDecisionRepository: { async acceptInternalCoverageLimitation(input) { coverageCalls.push(input); return { ok: true, data: {} }; } }, metadataOnlyAudit: noAudit() });
+  assert.deepEqual(coverageCalls.map((input) => [input.actorRole, typeof input.acceptanceAdmission]), [["client_admin", "function"]]);
   const internal = await getClaimTraceabilitySummary({ organizationId: ORG_X, claimId: CLAIM, requestedAudience: "internal", actorContext: actor }, {
     env: ENV,
     claimTraceabilityRepository: { async getClaimTraceabilitySummary() { return { ok: true, data: { claim: { claim_id: CLAIM, statement: "GK only" }, eligible: false, blockerCodes: ["claim_review_unresolved"] }, error: null }; } },

@@ -1,9 +1,17 @@
 import { isKaiSprint2Enabled } from "../config/kaiSprint2Config.js";
 import { buildKaiError } from "../errors/kaiErrors.js";
-import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationService.js";
+import {
+  validateActorCanPerformOperation,
+  validateActorIsOrganizationAdministrator,
+} from "../auth/kaiAuthorizationService.js";
 import { resolveAuthorizedHumanRole } from "../auth/kaiAuthorizedRoleAttribution.js";
 import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
 import { createPostgresHumanReviewRepository } from "../dictionary/postgresHumanReviewRepository.js";
+import {
+  ORGANIZATION_DECISION_ROLE,
+  evaluateOrganizationFactualReviewInTransaction,
+  organizationFactualReviewRefusal,
+} from "../dictionary/postgresOrganizationFactualReviewRepository.js";
 import {
   EVIDENCE_REVIEW_DECISION_OUTCOMES,
   CLAIM_REVIEW_DECISION_OUTCOMES,
@@ -18,13 +26,23 @@ import {
  * P3-04 `completeGeneratedContentReview` allowed-role precedent
  * (Backend/kai/services/kaiGeneratedContentService.js) exactly: `gk_reviewer`
  * and `gk_admin` only, never `gk_operator`, `client`, `assistant`, or any
- * generic system actor. Both operations require a mapped human actor before
- * any repository call.
+ * generic system actor - except the organization administrator's own review
+ * of an ordinary measurement (ORGANIZATION_APPROVED_AUDIENCES below). Both
+ * operations require a mapped human actor before any repository call.
  */
 const RECORD_EVIDENCE_REVIEW_DECISION_ALLOWED_ROLES = new Set(["gk_reviewer", "gk_admin"]);
 const RECORD_CLAIM_REVIEW_DECISION_ALLOWED_ROLES = new Set(["gk_reviewer", "gk_admin"]);
 const RECORD_EVIDENCE_REVIEW_DECISION_OPERATION = "record_evidence_review_decision";
 const RECORD_CLAIM_REVIEW_DECISION_OPERATION = "record_claim_review_decision";
+// Owner authorization 2026-10-24 (Operating Model v0.2 section 11
+// exception): when the GK authorization above fails, an active client_admin
+// of this organization (validateActorIsOrganizationAdministrator) may record
+// both decisions for their own ordinary source-record-count measurement,
+// recorded as client_admin and admitted inside the decision's transaction
+// (evaluateOrganizationFactualReviewInTransaction). A client_admin claim
+// approval is for the internal audience only. GK authorization, roles, and
+// attribution are unchanged, and checked first.
+const ORGANIZATION_APPROVED_AUDIENCES = Object.freeze(["internal"]);
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -113,6 +131,75 @@ function isRecordClaimReviewDecisionInput(value) {
   return true;
 }
 
+// GK first, exactly as before; then the organization administrator.
+function authorizeReviewDecision(actorContext, operation, organizationId, allowedRoles) {
+  const auth = validateActorCanPerformOperation(
+    actorContext,
+    operation,
+    organizationId,
+    { allowedRoles, combineGlobalRoles: true },
+  );
+  if (auth.ok) return { auth, organizationReview: false };
+  const adminAuth = validateActorIsOrganizationAdministrator(actorContext, operation, organizationId);
+  if (adminAuth.ok) return { auth: adminAuth, organizationReview: true };
+  return { auth, organizationReview: false };
+}
+
+/**
+ * Whether this actor's evidence and claim decisions in this organization
+ * would be the organization administrator's own (recorded as client_admin):
+ * an active client_admin whom the GK authorization does not admit. Grants
+ * nothing; every decision re-checks itself and is admitted per claim.
+ */
+export function canRecordOrganizationFactualReview({ actorContext, organizationId } = {}) {
+  if (!isNonEmptyString(organizationId) || !isMappedHumanActor(actorContext)) return false;
+  return [
+    [RECORD_EVIDENCE_REVIEW_DECISION_OPERATION, RECORD_EVIDENCE_REVIEW_DECISION_ALLOWED_ROLES],
+    [RECORD_CLAIM_REVIEW_DECISION_OPERATION, RECORD_CLAIM_REVIEW_DECISION_ALLOWED_ROLES],
+  ].every(([operation, allowedRoles]) => {
+    const { auth, organizationReview } = authorizeReviewDecision(actorContext, operation, organizationId, allowedRoles);
+    return auth.ok && organizationReview;
+  });
+}
+
+function organizationReviewAdmission(organizationId) {
+  return async (tx, { evidenceItemId, currentHead }) => {
+    const evaluation = await evaluateOrganizationFactualReviewInTransaction(tx, { organizationId, evidenceItemId, currentHead });
+    return evaluation.organizationMayReview ? null : organizationFactualReviewRefusal(evaluation);
+  };
+}
+
+function isOrganizationApprovedAudiences(approvedAudiences) {
+  return approvedAudiences === undefined
+    || approvedAudiences === null
+    || (Array.isArray(approvedAudiences)
+      && approvedAudiences.length === ORGANIZATION_APPROVED_AUDIENCES.length
+      && approvedAudiences.every((audience, index) => audience === ORGANIZATION_APPROVED_AUDIENCES[index]));
+}
+
+function organizationAudienceRefusal(organizationId) {
+  return buildKaiError("authorization_denied", {
+    blockers: [{
+      validator_key: "VAL-KAI-ORG-FACTUAL-REVIEW-001",
+      severity: "blocker",
+      object_type: "operation",
+      object_code: RECORD_CLAIM_REVIEW_DECISION_OPERATION,
+      object_id: organizationId,
+      message: "An organization administrator may approve a claim for internal use only.",
+      blocking_reason: "audience_requires_get_kinder_review",
+      required_fix: "Approve the claim for the internal audience, or ask Get Kinder to review it for funders or the public.",
+      evidence: { bypass_allowed: false },
+    }],
+  });
+}
+
+function repositoryError(result) {
+  return buildKaiError(result.error.code, {
+    status: result.error.status,
+    ...(Array.isArray(result.blockers) ? { blockers: result.blockers } : {}),
+  });
+}
+
 /**
  * KAI P2-12 human evidence-review decision recording. See
  * Backend/kai/dictionary/postgresHumanReviewRepository.js for the exact
@@ -142,11 +229,11 @@ export async function recordEvidenceReviewDecision(input, dependencies = {}) {
     return buildKaiError("authorization_denied");
   }
 
-  const auth = validateActorCanPerformOperation(
+  const { auth, organizationReview } = authorizeReviewDecision(
     actorContext,
     RECORD_EVIDENCE_REVIEW_DECISION_OPERATION,
     input.organizationId,
-    { allowedRoles: RECORD_EVIDENCE_REVIEW_DECISION_ALLOWED_ROLES, combineGlobalRoles: true },
+    RECORD_EVIDENCE_REVIEW_DECISION_ALLOWED_ROLES,
   );
   if (!auth.ok) {
     return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers });
@@ -160,17 +247,20 @@ export async function recordEvidenceReviewDecision(input, dependencies = {}) {
     return buildKaiError("tenant_boundary_violation", { blockers: [tenant] });
   }
 
-  const decidedByRole = resolveAuthorizedHumanRole({
-    actorContext,
-    auth,
-    allowedRoles: RECORD_EVIDENCE_REVIEW_DECISION_ALLOWED_ROLES,
-  });
+  const decidedByRole = organizationReview
+    ? ORGANIZATION_DECISION_ROLE
+    : resolveAuthorizedHumanRole({
+      actorContext,
+      auth,
+      allowedRoles: RECORD_EVIDENCE_REVIEW_DECISION_ALLOWED_ROLES,
+    });
   if (!decidedByRole) {
     return buildKaiError("authorization_denied");
   }
 
   const repository = dependencies.humanReviewRepository || createPostgresHumanReviewRepository();
   const result = await repository.recordEvidenceReviewDecision({
+    ...(organizationReview ? { reviewAdmission: organizationReviewAdmission(input.organizationId) } : {}),
     organizationId: input.organizationId,
     evidenceItemId: input.evidenceItemId,
     reviewQueueItemId: input.reviewQueueItemId,
@@ -184,7 +274,7 @@ export async function recordEvidenceReviewDecision(input, dependencies = {}) {
   });
 
   if (!result.ok) {
-    return buildKaiError(result.error.code, { status: result.error.status });
+    return repositoryError(result);
   }
   return { ok: true, data: result.data, error: null };
 }
@@ -251,14 +341,17 @@ export async function recordClaimReviewDecision(input, dependencies = {}) {
     return buildKaiError("authorization_denied");
   }
 
-  const auth = validateActorCanPerformOperation(
+  const { auth, organizationReview } = authorizeReviewDecision(
     actorContext,
     RECORD_CLAIM_REVIEW_DECISION_OPERATION,
     input.organizationId,
-    { allowedRoles: RECORD_CLAIM_REVIEW_DECISION_ALLOWED_ROLES, combineGlobalRoles: true },
+    RECORD_CLAIM_REVIEW_DECISION_ALLOWED_ROLES,
   );
   if (!auth.ok) {
     return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers });
+  }
+  if (organizationReview && !isOrganizationApprovedAudiences(input.approvedAudiences)) {
+    return organizationAudienceRefusal(input.organizationId);
   }
 
   const tenant = validateTenantBoundaryConsistency({
@@ -269,17 +362,20 @@ export async function recordClaimReviewDecision(input, dependencies = {}) {
     return buildKaiError("tenant_boundary_violation", { blockers: [tenant] });
   }
 
-  const decidedByRole = resolveAuthorizedHumanRole({
-    actorContext,
-    auth,
-    allowedRoles: RECORD_CLAIM_REVIEW_DECISION_ALLOWED_ROLES,
-  });
+  const decidedByRole = organizationReview
+    ? ORGANIZATION_DECISION_ROLE
+    : resolveAuthorizedHumanRole({
+      actorContext,
+      auth,
+      allowedRoles: RECORD_CLAIM_REVIEW_DECISION_ALLOWED_ROLES,
+    });
   if (!decidedByRole) {
     return buildKaiError("authorization_denied");
   }
 
   const repository = dependencies.humanReviewRepository || createPostgresHumanReviewRepository();
   const result = await repository.recordClaimReviewDecision({
+    ...(organizationReview ? { reviewAdmission: organizationReviewAdmission(input.organizationId) } : {}),
     organizationId: input.organizationId,
     claimId: input.claimId,
     reviewQueueItemId: input.reviewQueueItemId,
@@ -300,7 +396,7 @@ export async function recordClaimReviewDecision(input, dependencies = {}) {
     // blocker, not a state-transition denial or a system error).
     const publicCode =
       result.error.code === "governance_ceiling_exceeded" ? "validation_blocker" : result.error.code;
-    return buildKaiError(publicCode, { status: result.error.status });
+    return repositoryError({ ...result, error: { ...result.error, code: publicCode } });
   }
   return { ok: true, data: result.data, error: null };
 }
@@ -312,6 +408,8 @@ export const __humanReviewServiceContract = Object.freeze({
   RECORD_CLAIM_REVIEW_DECISION_ALLOWED_ROLES,
   RECORD_EVIDENCE_REVIEW_DECISION_OPERATION,
   RECORD_CLAIM_REVIEW_DECISION_OPERATION,
+  ORGANIZATION_DECISION_ROLE,
+  ORGANIZATION_APPROVED_AUDIENCES,
 });
 
 export const __humanReviewServiceTestables = Object.freeze({

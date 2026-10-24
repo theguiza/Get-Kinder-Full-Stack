@@ -1465,7 +1465,7 @@ async function runSuite() {
     assert.match(received.body, /Missing values: a known limitation of this source, recorded and not removed\./);
     assert.match(received.body, /Exact-duplicate records are included in the count; they were not removed or merged, so the count is not of distinct events\./);
     assert.match(received.body, /The reporting period was stated in that definition; it was not checked against dates in the records\./);
-    assert.match(received.body, /Small-number \(small-cell\) risk: not resolved; Get Kinder accepted it as a limitation for internal use only\./);
+    assert.match(received.body, /Small-number \(small-cell\) risk: not resolved; accepted as a limitation for internal use only\./);
 
     const [otherEngagement] = await query("INSERT INTO kai.engagements (organization_id, engagement_code) VALUES ($1::uuid, 'p2-01m-second') RETURNING engagement_id::text", [ORG]);
     for (const [label, organizationId, engagementId, manifestId, actor, status] of [

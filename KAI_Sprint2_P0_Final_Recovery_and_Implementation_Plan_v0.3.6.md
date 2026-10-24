@@ -44103,3 +44103,174 @@ administrator retries the internal read. Production is unchanged.
 **Status:** CLIENT_ADMIN_INTERNAL_TRACEABILITY_DIAGNOSTIC_LOCALLY_VERIFIED. No
 push, deploy, production access, database mutation, flag change, or real
 client data. Rollout needs separate owner authorization.
+
+### Plan A Step E1: organization-admin internal factual review authority (2026-10-24)
+
+**Authorization (USER_CONFIRMED):** the owner's 2026-10-24 prompt authorized a
+narrow exception to Operating Model v0.2 §11, consistent with Governance
+Simplification and Remediation Strategy §§2.2–2.5. An authenticated, active,
+verified `client_admin` may make accountable human factual-review decisions
+for their own organization's ordinary, supported, internal source-record-count
+measurement evidence and its claim. Three decisions are covered: the evidence
+factual review, the internal claim review, and acceptance of supportable
+internal coverage limitations. The prompt authorized local service, frontend,
+test and migration work, with ephemeral local PostgreSQL. It did not authorize
+any production schema or claim change, push, deploy, flag change, or real
+client data.
+
+**Root cause of the three Step E1 403s (TOOL_VERIFIED at 96653f8):**
+- Evidence review: `kaiHumanReviewService.recordEvidenceReviewDecision` used
+  `RECORD_EVIDENCE_REVIEW_DECISION_ALLOWED_ROLES = {gk_reviewer, gk_admin}`.
+- Claim review: `recordClaimReviewDecision` used `{gk_reviewer, gk_admin}`.
+- Coverage: `kaiCoverageReviewDecisionService` used `{gk_reviewer}`, and
+  `postgresCoverageReviewDecisionRepository` required
+  `actorRole === "gk_reviewer"`.
+- The database repeated each one:
+  - `evidence_review_decisions_p2_12_role_check` and
+    `claim_review_decisions_p2_12_role_check` were `IN ('gk_reviewer','gk_admin')`.
+  - `coverage_review_decisions_p2_10_decided_by_role_check` was
+    `= 'gk_reviewer'`.
+  - No later migration in the chain changed them.
+- Consumer finding: P2-06 counted the evidence-review head for every audience.
+  A customer evidence decision would therefore also have counted as evidence
+  review for funder and public use.
+
+**Change (TOOL_VERIFIED):**
+- Migration `kai_sprint2_plan_a_organization_internal_factual_review_authority`
+  (+ rollback), commit 1c10b87. It widens the three role CHECKs by
+  `client_admin` and keeps their names:
+  - Coverage admits `client_admin` only for `accepted_internal_with_limitation`
+    on `small_cell_risk`, `conflicting_source_indicators` and
+    `requirement_alignment`.
+  - New `claim_review_decisions_organization_internal_audience_check`: a
+    `client_admin` claim approval may only have `{internal}`.
+  - Three BEFORE INSERT triggers pin a `client_admin` row to P2-01M measurement
+    evidence (an `evidence_measurements` row). They also refuse a
+    `client_admin` evidence or claim decision that supersedes a GK decision.
+    This follows the migration 04 precedent.
+  - The rollback refuses while any `client_admin` decision exists. Otherwise
+    it restores the definitions exactly.
+- Services. The GK check runs first and is unchanged. Only when it fails does
+  `validateActorIsOrganizationAdministrator` admit the
+  organization path (`kaiHumanReviewService`, `kaiCoverageReviewDecisionService`):
+  - `decided_by_role` is set to `client_admin`.
+  - The repository runs an in-transaction admission before its
+    compare-and-set: `postgresOrganizationFactualReviewRepository.js`.
+  - Admission requires measurement evidence with a human-confirmed definition
+    for the same source version, and a current source version.
+  - It also requires the current Phase-5 decision to permit use and AI, with
+    every §7.2 category `absent`. This uses `classifySourceVersionInTransaction`,
+    extracted unchanged from the Prompt 10 draft review.
+  - There must be no GK head on the lineage being decided.
+  - For coverage, the dimension must be one of the three, and the claim and
+    evidence must both be `reviewed_supported`.
+  - Refusal is 422 `blocked`, with reasons and nothing written. A funder or
+    public approval is 403 `audience_requires_get_kinder_review`.
+  - Funder and public coverage acceptance stay `gk_reviewer` only.
+  - All P2-12 outcomes are supported: positive, negative, and
+    `needs_more_information`.
+- P2-06: for funder and public, a `client_admin` evidence head counts as
+  `evidence_review_unresolved`. Internal behaviour is unchanged.
+- Read: `GET .../claims/:claimId/organization-factual-review`
+  (`kaiOrganizationFactualReviewService`, `client_admin` only). It returns the
+  measurement, definition, source, limitations, the current decisions
+  (organization or Get Kinder, never an identity), what may be decided now,
+  and the authoritative P2-06 internal eligibility.
+- Capability `reviewMeasuredClaimFactualContent` is true exactly when the
+  organization path would be used. The GK `recordEvidenceReview`,
+  `recordClaimReview` and `acceptCoverageLimitation` flags are unchanged.
+- UI: a "Review measurement" panel in the existing Data Sources claim list
+  (`ClientMeasuredClaimReviewPanel.jsx`, `clientMeasuredClaimReviewLogic.js`).
+  - Each judgment lists the decisions it will record before it is chosen.
+    "Confirm" records the evidence review (supported), the claim review
+    (approved, internal), and each acceptable limitation.
+    "Not supported" records not_supported and rejected.
+    "Needs more information" records the evidence decision only.
+  - Each decision goes through its own existing route under the
+    administrator's session.
+  - It shows only judgments the server admits, then the resulting eligibility
+    and any remaining blockers.
+  - Rebuilt `public/js/bundles/entry.js`.
+- Truthfulness fixes:
+  - The `coverage.*.accepted_internal_limitation` description no longer says
+    "Get Kinder accepted it"; the code does not record who accepted it.
+  - Evidence and measurement UI wording no longer says every review is
+    Get Kinder's.
+- Pre-existing defect fixed: `evidence_review_unresolved` (a claim review
+  before a terminal evidence review) was missing from `KAI_ERROR_STATUS`, so
+  the route returned 500. It is now a 409.
+
+**P2-04 (TOOL_VERIFIED):** unchanged. The measured claim's gap snapshot is
+identical before and after E1, with 0 client follow-ups. No P2-04 defect was
+found.
+
+**Verification (TOOL_VERIFIED; sentinel `DATABASE_URL`):**
+- `node scripts/kai-sprint2-plan-a-assembled-file-to-report-local-postgres.js`:
+  25 passed, 0 failed (baseline at 96653f8: 23/23).
+  - New E1: the administrator records all three decisions in the UI. The rows
+    are evidence `supported`, claim `approved {internal}`, and three coverage
+    rows. Each has `decided_by` = the administrator's KAI user,
+    `decided_by_role` = `client_admin`, `created_by_type` = `human`, with
+    matching lifecycle audits.
+  - No GK actor wrote anything. Internal eligibility is
+    `eligible: true, blockerCodes: []`. Funder and public are ineligible
+    (`evidence_review_unresolved`, `claim_not_approved_for_requested_audience`).
+  - E2/E3/F are unchanged: five sessions from bytes to the released Markdown,
+    reviewed and released by the same `client_admin`.
+  - The governance test confirmed no `gk_reviewer` audit from upload to
+    release. A stale source gives 409 on read, claim decision and coverage
+    acceptance. A source re-reviewed with minors `present` gives 422
+    `minor_information_not_cleared`.
+  - Negative reviews: needs_more_information and rejected leave the claim
+    ineligible, and no limitation is acceptable for a rejected claim.
+  - A GK reviewer superseded the organization's evidence decision, and the
+    organization's override was refused (`get_kinder_decision_recorded`).
+  - The boundaries test: contributor, client_reviewer, the inactive
+    administrator and another organization's administrator got 403 on all
+    four routes. Funder approval and funder/public acceptance gave 403.
+    Invalid dimensions were refused. Replays wrote nothing.
+- `node scripts/kai-sprint2-plan-a-normal-migration-chain-local-postgres.js`:
+  passed.
+  - Migration: forward, replay, rollback and forward converged.
+  - Direct inserts: 13 out-of-scope inserts were rejected (field-presence,
+    GK supersession, funder/public audience, funder/public/measurement-decided
+    coverage, client_reviewer, gk_operator, gk_admin coverage). GK inserts
+    were accepted.
+  - The rollback then refused with a `client_admin` row present.
+  - The new `kai-organization-factual-review-authority.integration.spec.js`
+    (real services and DB): 4 passed. Field-presence evidence gave
+    `evidence_type_requires_get_kinder_review`, GK heads gave
+    `get_kinder_decision_recorded`, and nothing was written.
+  - The P2-01M proof (GK path) passed.
+- `scripts/kai-client-knowledge-studio-browser-acceptance-local-postgres.js`:
+  - evidence-to-draft 21/21. D is updated: customer decisions on field-presence
+    evidence now get 422/409 instead of 403.
+  - source-to-impact 16/16.
+  - measurement-to-released-report 13/13 (GK E1 path).
+  - internal-factual-review 15/15.
+  - source-preparation-continuation 12/12.
+- `npm test`: 5876 tests, 5756 passed, 0 failed, 120 skipped.
+  - New `kai-organization-factual-review-authority.spec.js`.
+  - Updated for the new policy: `kai-client-admin-evidence-to-draft-workflow`,
+    `kai-client-admin-traceability-diagnostic`,
+    `kai-sprint2-cross-organization-provisioning-authorization` (readback now
+    separates the organization path), and the pass2 route list.
+- `npm run verify:kai-sprint2-api-contract`: 71 passed.
+- `npm run test:kai-plan-a-production-canary`: 13 passed.
+- `git diff --check`: passed.
+
+**Open (NOT_CONFIRMED):**
+- The production migration packet (`KAI_PGADMIN_PRODUCTION_MIGRATION_PACKET`)
+  does not include this migration. The rehearsal's chain-minus-packet baseline
+  now includes it, although none of its captured tables change.
+- Cross-engagement denial does not apply: evidence and claim lineage carry no
+  engagement binding, and these decisions are organization-scoped.
+- The console canary's stage is still named `gk_review` and its hint is
+  `KAI_CANARY.gk(`.
+- The evidence-review route's claim-proposal handoff result for a customer
+  decision was not inspected.
+- The original production claims are not repaired.
+
+**Status:** ORGANIZATION_INTERNAL_FACTUAL_REVIEW_AUTHORITY_LOCALLY_VERIFIED. No
+push, deploy, production access, production schema change, flag change, or
+real client data. Rollout needs separate owner authorization.

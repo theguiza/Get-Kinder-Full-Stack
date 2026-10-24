@@ -58,7 +58,7 @@ export default function ClientSourceMeasurementPanel({ organizationId, sourceVer
       load();
       return;
     }
-    setNotice({ kind: "success", text: result.body.data.replayed ? "This definition was already recorded." : "Definition and measurement recorded. The measurement awaits Get Kinder evidence review." });
+    setNotice({ kind: "success", text: result.body.data.replayed ? "This definition was already recorded." : "Definition and measurement recorded. The measurement awaits evidence review." });
     onRecorded?.();
     load();
   };
@@ -115,7 +115,7 @@ export default function ClientSourceMeasurementPanel({ organizationId, sourceVer
           </div>
           {recorded.measurement ? (
             <div className="mt-1" data-client-source-measurement-value={recorded.measurement.measuredValue}>
-              Measurement: <strong>{recorded.measurement.measuredValue} {recorded.measurement.unitLabel}</strong> (awaits Get Kinder evidence review).
+              Measurement: <strong>{recorded.measurement.measuredValue} {recorded.measurement.unitLabel}</strong> (awaits evidence review).
             </div>
           ) : null}
           {recorded.limitations.length > 0 ? (

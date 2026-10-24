@@ -34,6 +34,9 @@ const WORKFLOW_OPERATION_KEYS = Object.freeze([
   // Owner authorization 2026-10-24: the client-safe internal traceability
   // diagnostic that explains a refused internal draft.
   "readClaimTraceabilityDiagnostics",
+  // Owner authorization 2026-10-24: the organization administrator's own
+  // factual review of an ordinary measured claim.
+  "reviewMeasuredClaimFactualContent",
 ]);
 
 // Terminal claim review outcome the generation repository always rejects

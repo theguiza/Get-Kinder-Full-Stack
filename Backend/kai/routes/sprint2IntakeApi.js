@@ -3179,6 +3179,41 @@ router.get(
   },
 );
 
+let organizationFactualReviewServicePromise = null;
+async function getOrganizationFactualReviewService() {
+  if (intakeServiceOverride?.getOrganizationFactualReview) return intakeServiceOverride;
+  organizationFactualReviewServicePromise ||= import("../services/kaiOrganizationFactualReviewService.js");
+  return organizationFactualReviewServicePromise;
+}
+
+/**
+ * The organization administrator's factual-review view of one claim (owner
+ * authorization 2026-10-24): the measurement, its source and limitations,
+ * the current evidence/claim decisions, which of the three organization
+ * decisions may be recorded now, and the authoritative internal eligibility.
+ * Read-only; the same path identity as the traceability route above.
+ */
+router.get(
+  "/admin/organizations/:organizationId/claims/:claimId/organization-factual-review",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    const identifiers = claimGapFollowupIdentifiers(req);
+    if (!identifiers || Object.keys(req.query || {}).length !== 0) {
+      return sendKaiError(res, "validation_blocker", {
+        blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id_or_claim_id")],
+      });
+    }
+    return invokeService(res, async () => {
+      const service = await getOrganizationFactualReviewService();
+      return service.getOrganizationFactualReview({
+        organizationId: identifiers.organizationId,
+        claimId: identifiers.claimId,
+        actorContext: sprint2MappedActorContext(req),
+      });
+    });
+  },
+);
+
 let eligibleClaimsForAudienceServicePromise = null;
 async function getEligibleClaimsForAudienceService() {
   if (intakeServiceOverride?.listEligibleClaimsForAudience) return intakeServiceOverride;

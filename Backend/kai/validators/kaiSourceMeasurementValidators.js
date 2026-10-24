@@ -488,7 +488,9 @@ const COVERAGE_DIMENSION_LABELS = Object.freeze({
 const COVERAGE_STATUS_DESCRIPTIONS = Object.freeze({
   resolved_risk_flagged: "a known limitation of this source, recorded and not removed",
   unresolved: "not yet resolved",
-  accepted_internal_limitation: "not resolved; Get Kinder accepted it as a limitation for internal use only",
+  // Accepted by Get Kinder or by the organization's own administrator; the
+  // code does not say which, so the description does not either.
+  accepted_internal_limitation: "not resolved; accepted as a limitation for internal use only",
 });
 
 /** The plain-language description of a measurement./coverage. limitation code, or null. */

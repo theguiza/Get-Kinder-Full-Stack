@@ -89,6 +89,33 @@ export function classifyDraftPacket(packet) {
   };
 }
 
+// One source version -> reasons: its currentness and its current Phase-5
+// sensitivity decision (classifySourceDecision). Shared with the
+// organization's evidence and claim factual review
+// (postgresOrganizationFactualReviewRepository.js).
+export async function classifySourceVersionInTransaction(tx, { organizationId, sourceVersionId }) {
+  const version = await getScopedSourceVersionById({ organizationId, sourceVersionId }, tx);
+  if (!version) return { getKinderReviewReasons: ["sensitivity_review_not_complete"], blockedReasons: [] };
+  let decision = null;
+  try {
+    decision = UUID_PATTERN.test(version.intake_sensitivity_profile_id ?? "")
+      ? await findCurrentSensitivityAllowedUseDecision(tx, {
+        organizationId,
+        intakeSensitivityProfileId: version.intake_sensitivity_profile_id,
+      })
+      : null;
+  } catch (error) {
+    if (!(error instanceof AmbiguousSensitivityDecisionLineageError)) throw error;
+    decision = null;
+  }
+  if (decision && decision.organization_id !== organizationId) decision = null;
+  const source = classifySourceDecision(decision);
+  return {
+    getKinderReviewReasons: source.getKinderReviewReasons,
+    blockedReasons: version.is_current === true ? source.blockedReasons : ["source_version_not_current", ...source.blockedReasons],
+  };
+}
+
 function ordered(reasons, vocabulary) {
   const present = new Set(reasons);
   return vocabulary.filter((reason) => present.has(reason));
@@ -104,26 +131,7 @@ export async function evaluateOrganizationInternalReviewInTransaction(tx, { orga
   const sourceVersionIds = [...new Set(packet.blocks.flatMap((block) => block.citations.map((citation) => citation.sourceVersionId)))];
   if (sourceVersionIds.length === 0) getKinder.push("sensitivity_review_not_complete");
   for (const sourceVersionId of sourceVersionIds) {
-    const version = await getScopedSourceVersionById({ organizationId, sourceVersionId }, tx);
-    if (!version) {
-      getKinder.push("sensitivity_review_not_complete");
-      continue;
-    }
-    if (version.is_current !== true) blocked.push("source_version_not_current");
-    let decision = null;
-    try {
-      decision = UUID_PATTERN.test(version.intake_sensitivity_profile_id ?? "")
-        ? await findCurrentSensitivityAllowedUseDecision(tx, {
-          organizationId,
-          intakeSensitivityProfileId: version.intake_sensitivity_profile_id,
-        })
-        : null;
-    } catch (error) {
-      if (!(error instanceof AmbiguousSensitivityDecisionLineageError)) throw error;
-      decision = null;
-    }
-    if (decision && decision.organization_id !== organizationId) decision = null;
-    const source = classifySourceDecision(decision);
+    const source = await classifySourceVersionInTransaction(tx, { organizationId, sourceVersionId });
     getKinder.push(...source.getKinderReviewReasons);
     blocked.push(...source.blockedReasons);
   }
