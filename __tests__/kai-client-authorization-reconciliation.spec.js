@@ -621,8 +621,15 @@ test("assembled journey, client_admin: GK-internal, client-reviewer, and high-ri
       { organizationId: ORG, requestedAudience: "internal", limit: 25, afterClaimId: null, actorContext },
       { env: ENV, eligibleClaimsForAudienceRepository: { listEligibleClaimsForAudience: throwingRead("eligible claims") } },
     ),
-    "claims/:id/traceability": await getClaimTraceabilitySummary(
-      { organizationId: ORG, claimId: CLAIM_ELIGIBLE, requestedAudience: "internal", actorContext },
+    // Owner authorization 2026-10-24: the internal audience returns only the
+    // client-safe diagnostic (kai-client-admin-traceability-diagnostic.spec.js);
+    // funder and public traceability stay GK-only.
+    "claims/:id/traceability (funder)": await getClaimTraceabilitySummary(
+      { organizationId: ORG, claimId: CLAIM_ELIGIBLE, requestedAudience: "funder", actorContext },
+      { env: ENV, claimTraceabilityRepository: { getClaimTraceabilitySummary: throwingRead("traceability") } },
+    ),
+    "claims/:id/traceability (public)": await getClaimTraceabilitySummary(
+      { organizationId: ORG, claimId: CLAIM_ELIGIBLE, requestedAudience: "public", actorContext },
       { env: ENV, claimTraceabilityRepository: { getClaimTraceabilitySummary: throwingRead("traceability") } },
     ),
     "review-queue": await listOrganizationReviewQueue(

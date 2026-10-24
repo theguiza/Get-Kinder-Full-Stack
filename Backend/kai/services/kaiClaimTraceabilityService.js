@@ -1,10 +1,22 @@
 import { isKaiSprint2Enabled } from "../config/kaiSprint2Config.js";
 import { buildKaiError } from "../errors/kaiErrors.js";
-import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationService.js";
+import {
+  validateActorCanPerformOperation,
+  validateActorIsOrganizationAdministrator,
+} from "../auth/kaiAuthorizationService.js";
 import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
 
 const CLAIM_TRACEABILITY_ALLOWED_ROLES = new Set(["gk_admin", "gk_operator", "gk_reviewer"]);
 const CLAIM_TRACEABILITY_OPERATION = "get_claim_traceability_summary";
+// Owner authorization 2026-10-24: an active organization administrator
+// (client_admin, stored or binding-derived; validateActorIsOrganizationAdministrator)
+// may read a client-safe INTERNAL traceability diagnostic for a claim of that
+// exact organization, so a refused internal draft can be explained. Only the
+// "internal" audience; never the full GK DTO; GK roles and the Review Queue
+// keep CLAIM_TRACEABILITY_ALLOWED_ROLES unchanged.
+const ORGANIZATION_TRACEABILITY_DIAGNOSTIC_OPERATION = "get_organization_claim_traceability_diagnostic";
+const ORGANIZATION_TRACEABILITY_DIAGNOSTIC_AUDIENCE = "internal";
+const ORGANIZATION_TRACEABILITY_DIAGNOSTIC_VIEW = "organization_internal_traceability_diagnostic";
 // Review Queue rollup: read-only, organization-scope, same privilege as
 // reading one claim's traceability - it discloses nothing a caller who can
 // already call getClaimTraceabilitySummary per-claim could not already
@@ -79,12 +91,7 @@ export async function getClaimTraceabilitySummary(input, dependencies = {}) {
     return buildKaiError("authorization_denied");
   }
 
-  const auth = validateActorCanPerformOperation(
-    actorContext,
-    CLAIM_TRACEABILITY_OPERATION,
-    input.organizationId,
-    { allowedRoles: CLAIM_TRACEABILITY_ALLOWED_ROLES, combineGlobalRoles: true },
-  );
+  const auth = authorizeClaimTraceabilityRead(actorContext, input.organizationId, input.requestedAudience);
   if (!auth.ok) {
     return buildKaiError(auth.error_code || "authorization_denied", { blockers: auth.blockers });
   }
@@ -124,7 +131,59 @@ export async function getClaimTraceabilitySummary(input, dependencies = {}) {
         : {}),
     });
   }
+  if (auth.organizationTraceabilityDiagnostic === true) {
+    return { ok: true, data: organizationTraceabilityDiagnostic(result.data, input.claimId), error: null };
+  }
   return { ok: true, data: result.data, error: null };
+}
+
+/**
+ * Who may read a claim's traceability, and in which shape. GK roles keep the
+ * full DTO for every audience, exactly as before. Otherwise only an
+ * organization administrator of this exact organization, and only for the
+ * internal audience, is admitted to the client-safe diagnostic; every other
+ * actor (and an administrator asking for funder/public) receives the
+ * unchanged GK refusal.
+ */
+export function authorizeClaimTraceabilityRead(actorContext, organizationId, requestedAudience) {
+  const gkAuth = validateActorCanPerformOperation(
+    actorContext,
+    CLAIM_TRACEABILITY_OPERATION,
+    organizationId,
+    { allowedRoles: CLAIM_TRACEABILITY_ALLOWED_ROLES, combineGlobalRoles: true },
+  );
+  if (gkAuth.ok || requestedAudience !== ORGANIZATION_TRACEABILITY_DIAGNOSTIC_AUDIENCE) return gkAuth;
+  if (!isMappedHumanActor(actorContext)) return gkAuth;
+  const adminAuth = validateActorIsOrganizationAdministrator(
+    actorContext,
+    ORGANIZATION_TRACEABILITY_DIAGNOSTIC_OPERATION,
+    organizationId,
+  );
+  if (!adminAuth.ok) return gkAuth;
+  return { ...adminAuth, organizationTraceabilityDiagnostic: true };
+}
+
+// The organization administrator's projection of a SUCCESSFUL internal
+// traceability evaluation: status and the existing ordered blocker codes
+// only. No evidence or claim text, source, version, locator, candidate,
+// profile, dictionary, review-queue or decision identifiers, reviewer
+// outcomes, dimensions, gaps, follow-ups, conflict groups, or graph lineage.
+// A failed evaluation never reaches here: it keeps the GK error shape, whose
+// only data is the allowlisted traceability_conflict_reason.
+function organizationTraceabilityDiagnostic(data, claimId) {
+  const blockerCodes = Array.isArray(data?.blockerCodes)
+    ? data.blockerCodes.filter((code) => typeof code === "string" && /^[a-z0-9_]{1,64}$/.test(code))
+    : [];
+  return {
+    view: ORGANIZATION_TRACEABILITY_DIAGNOSTIC_VIEW,
+    claim_id: claimId,
+    requested_audience: ORGANIZATION_TRACEABILITY_DIAGNOSTIC_AUDIENCE,
+    traceability_passed: true,
+    eligible: data?.eligible === true && blockerCodes.length === 0,
+    blocked: blockerCodes.length > 0,
+    blocker_codes: blockerCodes,
+    traceability_conflict_reason: null,
+  };
 }
 
 function isListOrganizationReviewQueueInput(value) {
@@ -189,6 +248,9 @@ export async function listOrganizationReviewQueue(input, dependencies = {}) {
 export const __claimTraceabilityServiceContract = Object.freeze({
   CLAIM_TRACEABILITY_ALLOWED_ROLES,
   CLAIM_TRACEABILITY_OPERATION,
+  ORGANIZATION_TRACEABILITY_DIAGNOSTIC_OPERATION,
+  ORGANIZATION_TRACEABILITY_DIAGNOSTIC_AUDIENCE,
+  ORGANIZATION_TRACEABILITY_DIAGNOSTIC_VIEW,
   REQUESTED_AUDIENCES,
   TRACEABILITY_CONFLICT_REASONS,
   REVIEW_QUEUE_ALLOWED_ROLES,

@@ -6,6 +6,7 @@ import { __sourceMeasurementServiceContract } from "./kaiSourceMeasurementServic
 import { __evidenceCoverageAssessmentServiceContract } from "./kaiEvidenceCoverageAssessmentService.js";
 import { __claimProposalServiceContract } from "./kaiClaimProposalService.js";
 import { __claimGapFollowupServiceContract } from "./kaiClaimGapFollowupService.js";
+import { authorizeClaimTraceabilityRead } from "./kaiClaimTraceabilityService.js";
 import { __conflictReviewCandidateServiceContract } from "./kaiConflictReviewCandidateService.js";
 import { __coverageReviewDecisionServiceContract } from "./kaiCoverageReviewDecisionService.js";
 import { __requirementAssessmentServiceContract } from "./kaiRequirementAssessmentService.js";
@@ -215,6 +216,11 @@ function workflowOperations(actorContext, organizationId) {
       actorContext, __claimGapFollowupServiceContract.CLAIM_GAP_FOLLOWUP_OPERATION, organizationId,
       { allowedRoles: __claimGapFollowupServiceContract.CLAIM_GAP_FOLLOWUP_ALLOWED_ROLES },
     ).ok === true,
+    // Owner authorization 2026-10-24: getClaimTraceabilitySummary's own
+    // check for the internal audience (GK roles: the full DTO; an
+    // organization administrator: the client-safe diagnostic only).
+    readClaimTraceabilityDiagnostics: actorContext?.actorType === "human"
+      && authorizeClaimTraceabilityRead(actorContext, organizationId, "internal").ok === true,
     recordConflict: validateActorCanPerformOperation(
       actorContext, __conflictReviewCandidateServiceContract.CONFLICT_REVIEW_CANDIDATE_OPERATION, organizationId,
       { allowedRoles: __conflictReviewCandidateServiceContract.CONFLICT_REVIEW_CANDIDATE_ALLOWED_ROLES },

@@ -43988,3 +43988,118 @@ Otherwise the verdict is `LOCAL_SIMULATION_ONLY`.
 **Status:** PLAN_A_PRODUCTION_BROWSER_CONSOLE_CANARY_LOCALLY_VERIFIED. The
 production run was not executed. No production login, upload, database access,
 mutation, flag change, deploy, push, or real client data.
+
+### client_admin internal traceability diagnostic for refused internal drafts (2026-10-24)
+
+**Authorization (USER_CONFIRMED):** the owner's 2026-10-24 prompt authorized
+one local code change. An active `client_admin` may read client-safe
+INTERNAL traceability diagnostics for claims of an organization in which that
+actor has active, authorized membership. The prompt did not authorize
+deployment, production access, or any change to generation eligibility.
+
+**Production evidence (USER_CONFIRMED, not re-run):** the organization
+`client_admin` got 422 `VAL-GEN-TRACE-P0-001` /
+`traceability_result_contract_invalid` from both internal generation
+endpoints. The same actor's `GET .../claims/:claimId/traceability?requested_audience=internal`
+returned 403 `VAL-AUT-004` `role_not_allowed`
+(`object_code: get_claim_traceability_summary`) for all four claims.
+
+**Root cause (TOOL_VERIFIED):**
+- `kaiGeneratedContentService.js` admits `client_admin` to create internal
+  `evidence_summary` and `impact_narrative` drafts (`CLIENT_ADMIN_DRAFT_ALLOWED_ROLES`).
+- `kaiClaimTraceabilityService.js` `getClaimTraceabilitySummary` admitted only
+  `CLAIM_TRACEABILITY_ALLOWED_ROLES` (GK roles, `combineGlobalRoles`).
+- `postgresGeneratedContentRepository.js` maps every failed per-claim P2-06
+  evaluation to the same `traceability_result_contract_invalid` blocker.
+- So the actor could trigger the refusal but could not learn which claim failed
+  or why. `clientEvidenceWorkflowLogic.js` then always suggested gap
+  follow-ups without establishing that cause.
+
+**Change (TOOL_VERIFIED):**
+- `kaiClaimTraceabilityService.js`: new exported `authorizeClaimTraceabilityRead`.
+  - The GK check runs first and is unchanged, so GK roles and the platform
+    superuser keep the full DTO for every audience.
+  - Only when that check fails and `requestedAudience === "internal"`,
+    `validateActorIsOrganizationAdministrator` (operation
+    `get_organization_claim_traceability_diagnostic`) admits an active
+    `client_admin` membership with verified provenance (stored or
+    binding-derived) in that exact organization.
+  - Otherwise the original GK refusal is returned unchanged.
+  - `CLAIM_TRACEABILITY_ALLOWED_ROLES`, and the Review Queue that aliases it,
+    are unchanged. No shared helper or P0 role table was widened.
+- A successful evaluation for the administrator is projected server-side to
+  `{view: "organization_internal_traceability_diagnostic", claim_id,
+  requested_audience: "internal", traceability_passed, eligible, blocked,
+  blocker_codes, traceability_conflict_reason: null}`.
+- Failed evaluations keep the existing GK error shape: 409 with only the
+  allowlisted `traceability_conflict_reason`, and 404/422/500 with no data.
+- Same route, same `requested_audience` query contract. No new endpoint, no
+  route change, no new reason codes.
+- Capabilities: `workflowOperations.readClaimTraceabilityDiagnostics` projects
+  the same check for the internal audience.
+- UI (`ClientEvidenceWorkflow.jsx`, `clientEvidenceWorkflowLogic.js`): after a
+  `traceability_result_contract_invalid` refusal, and only with that flag, it
+  GETs each selected claim's internal diagnostic. Nothing is generated,
+  approved, or retried.
+  - It names the first claim the reads establish as failing (409 with an
+    allowlisted reason, or 404).
+  - "Generate gap follow-ups" is recommended only for
+    `gap_dimension_requires_missing_p204_state`.
+  - Other known reasons are explained, with "Ask Get Kinder to reconcile it".
+  - Anything else gets a neutral "did not pass its traceability checks, so no
+    draft was created".
+- Console canary `gk()`: a customer session receiving the diagnostic view is
+  still reported BLOCKED (GK view only).
+- Rebuilt `public/js/bundles/entry.js`.
+
+**Boundary kept (TOOL_VERIFIED by tests):**
+- `client_admin` still cannot read funder or public traceability.
+- `client_admin` still cannot record GK evidence or claim review decisions,
+  accept coverage limitations, or list the GK Review Queue.
+- `client_contributor`, `client_reviewer`, an unverified-provenance or global
+  `client_admin`, an inactive membership, and another organization stay denied
+  before any repository read. The `KAI_SPRINT2_ENABLED` gate is unchanged.
+- The diagnostic carries no evidence or claim text, source/version/locator/
+  candidate/profile/dictionary ids, review-queue or decision ids or outcomes,
+  dimensions, gaps, follow-ups, conflict groups, or graph lineage.
+- Generation is unchanged. A failing P2-06 evaluation (missing P2-04, stale
+  version, missing record) still returns `VAL-GEN-TRACE-P0-001` before the
+  generator runs, for both internal types, and persists nothing.
+
+**Verification (TOOL_VERIFIED; sentinel `DATABASE_URL`):**
+- `node --test __tests__/kai-client-admin-traceability-diagnostic.spec.js`
+  (new): 12 passed, 0 failed. Includes positive and negative HTTP requests
+  through the mounted route with the real service.
+- `__tests__/kai-sprint2-p14-09-generated-content-validation-blocker-diagnostic-propagation.spec.js`:
+  9 passed (1 new).
+- `__tests__/kai-client-admin-evidence-to-draft-workflow.spec.js`: 22 passed.
+  It was updated for the new capability flag, the neutral undiagnosed message,
+  and the funder/public-only denial.
+- `__tests__/kai-client-authorization-reconciliation.spec.js`: 30 passed
+  (internal denial replaced by funder and public denials).
+- `npm test`: 5864 tests, 5745 passed, 0 failed, 119 skipped.
+- `npm run verify:kai-sprint2-api-contract`: 71 passed.
+- `npm run test:kai-production-console-canary`: 6 passed.
+- `npm run test:kai-plan-a-production-canary`: 13 passed.
+- `node scripts/kai-client-knowledge-studio-browser-acceptance-local-postgres.js
+  __tests__/kai-client-admin-evidence-to-draft-browser-acceptance.integration.spec.js`:
+  21 passed, 0 failed.
+  - B5a now requires the real UI message "...its coverage gap follow-ups have
+    not been generated yet. Use "Generate gap follow-ups"..." after two
+    internal-diagnostic GETs returning 409
+    `gap_dimension_requires_missing_p204_state`.
+  - D observed funder traceability `role_not_allowed`, and the internal read
+    returned the diagnostic view only.
+- Same runner, `kai-client-admin-source-preparation-continuation-browser-acceptance`:
+  12 passed.
+- `node scripts/kai-sprint2-plan-a-assembled-file-to-report-local-postgres.js`:
+  23 passed. The customer `gk()` is still BLOCKED.
+- `git diff --check`: passed.
+
+**Open (NOT_CONFIRMED):** the claim-level reason for the production 422 is
+still unknown. It becomes readable only after this change is deployed and the
+administrator retries the internal read. Production is unchanged.
+
+**Status:** CLIENT_ADMIN_INTERNAL_TRACEABILITY_DIAGNOSTIC_LOCALLY_VERIFIED. No
+push, deploy, production access, database mutation, flag change, or real
+client data. Rollout needs separate owner authorization.

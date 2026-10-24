@@ -528,10 +528,11 @@ test("F: capabilities - client_admin gets extraction, proposal, gap follow-ups, 
     // readReleasedInternalReports (read-only receipt of a GK-released internal report): Plan A Prompt 8.
     // reviewInternalDraftFactualContent (factual review of an ordinary internal evidence summary) and
     // releaseInternalReports (its separate final release): owner amendment 2026-10-23.
+    // readClaimTraceabilityDiagnostics (the client-safe internal traceability diagnostic): owner authorization 2026-10-24.
     {
       reviewSensitivity: true, promoteSource: true, generateDrafts: true, readInternalDrafts: true, extractEvidence: true, proposeClaim: true,
       generateClaimGapFollowups: true, recordSourceMeasurement: true, readReleasedInternalReports: true, reviewInternalDraftFactualContent: true,
-      releaseInternalReports: true,
+      releaseInternalReports: true, readClaimTraceabilityDiagnostics: true,
     },
   );
   assert.equal(capabilities.data.internalKnowledgeWorkspace, false);
@@ -554,7 +555,7 @@ test("F: capabilities - client_admin gets extraction, proposal, gap follow-ups, 
   assert.deepEqual(clientEvidenceWorkflowAccess(projected), {
     visible: true, reviewSensitivity: true, promoteSource: true, extractEvidence: true, proposeClaim: true, generateClaimGapFollowups: true, generateDrafts: true,
     readInternalDrafts: true, recordSourceMeasurement: true, readReleasedInternalReports: true, reviewInternalDraftFactualContent: true,
-    releaseInternalReports: true,
+    releaseInternalReports: true, readClaimTraceabilityDiagnostics: true,
   });
 });
 
@@ -597,9 +598,13 @@ test("F: authorization and input readiness stay distinct; internal selection adm
   assert.ok(!JSON.stringify(summary).includes(QUEUE), "the browser summary keeps no review queue id");
   assert.equal(internalDraftResultSummary({ generatedContentDraftId: "nope" }, "evidence_summary"), null);
   // An authorized request refused for content readiness is explained, never shown as success.
+  // Without a diagnosis the reason is not assumed (owner authorization 2026-10-24;
+  // the diagnosed messages are proven in kai-client-admin-traceability-diagnostic.spec.js).
   const traceabilityRefusal = { statusCode: 422, body: { error: { code: "validation_blocker", message: "Request failed KAI validation." }, blockers: [{ blocking_reason: "traceability_result_contract_invalid" }] } };
-  assert.match(internalDraftFailureMessage(traceabilityRefusal), /cannot be drafted from yet: Get Kinder has not completed.*Nothing was created\./);
-  assert.match(internalDraftFailureMessage(traceabilityRefusal, { canGenerateGapFollowups: true }), /cannot be drafted from yet: its traceability checks did not pass\. .*"Generate gap follow-ups".*Nothing was created\./);
+  for (const options of [undefined, { canGenerateGapFollowups: true }]) {
+    assert.equal(internalDraftFailureMessage(traceabilityRefusal, options),
+      "A selected claim did not pass its traceability checks, so no draft was created. The reason is not available here.");
+  }
   assert.match(internalDraftFailureMessage({ statusCode: 422, body: { error: { code: "claim_reviewed_not_supported", message: "x" } } }), /not supported by Get Kinder review/);
   assert.equal(internalDraftFailureMessage({ statusCode: 403, body: { error: { code: "authorization_denied", message: "Denied." } } }), "Denied.");
 });
@@ -635,17 +640,27 @@ test("G: P2-04 on a claim that is not organization X's passes the repository's n
   assert.deepEqual([result.ok, result.error.code, result.data ?? null], [false, "not_found", null]);
 });
 
-test("G: P2-04 authority opens no follow-up answer or list, no GK traceability read, and no coverage acceptance for client_admin", async () => {
+test("G: P2-04 authority opens no follow-up answer or list, no GK traceability DTO, and no coverage acceptance for client_admin", async () => {
   const actor = await bindingDerivedClientAdmin();
   const tripwire = new Proxy({}, { get: (_target, property) => (property === "then" ? undefined : async () => assert.fail(`repository ${String(property)} reached`)) });
   const never = async () => assert.fail("read reached");
   const results = {
     completeFollowup: await completeClientFollowup({ organizationId: ORG_X, claimId: CLAIM, clientFollowupItemId: FOLLOWUP, expectedUpdatedAt: NOW, actorContext: actor, now: NOW }, { env: ENV, clientFollowupCompletionRepository: tripwire, metadataOnlyAudit: noAudit() }),
     listFollowups: await listClientFollowupWorkflows({ organizationId: ORG_X, actorContext: actor }, { env: ENV, listClientFollowupWorkflowsForOrganization: never }),
-    traceability: await getClaimTraceabilitySummary({ organizationId: ORG_X, claimId: CLAIM, requestedAudience: "internal", actorContext: actor }, { env: ENV, claimTraceabilityRepository: tripwire }),
+    // Owner authorization 2026-10-24 admits only the client-safe INTERNAL
+    // diagnostic (kai-client-admin-traceability-diagnostic.spec.js); funder
+    // and public traceability stay GK-only.
+    funderTraceability: await getClaimTraceabilitySummary({ organizationId: ORG_X, claimId: CLAIM, requestedAudience: "funder", actorContext: actor }, { env: ENV, claimTraceabilityRepository: tripwire }),
+    publicTraceability: await getClaimTraceabilitySummary({ organizationId: ORG_X, claimId: CLAIM, requestedAudience: "public", actorContext: actor }, { env: ENV, claimTraceabilityRepository: tripwire }),
     acceptCoverage: await acceptInternalCoverageLimitation({ organizationId: ORG_X, claimId: CLAIM, dimensionKey: "definition_clarity", actorContext: actor, now: NOW }, { env: ENV, coverageReviewDecisionRepository: tripwire, metadataOnlyAudit: noAudit() }),
   };
   for (const [label, result] of Object.entries(results)) assertDenied(result, "role_not_allowed", label);
+  const internal = await getClaimTraceabilitySummary({ organizationId: ORG_X, claimId: CLAIM, requestedAudience: "internal", actorContext: actor }, {
+    env: ENV,
+    claimTraceabilityRepository: { async getClaimTraceabilitySummary() { return { ok: true, data: { claim: { claim_id: CLAIM, statement: "GK only" }, eligible: false, blockerCodes: ["claim_review_unresolved"] }, error: null }; } },
+  });
+  assert.equal(internal.data.view, "organization_internal_traceability_diagnostic");
+  assert.equal(JSON.stringify(internal).includes("GK only"), false);
 });
 
 test("G: the P2-04 client messages report counts only, and refusals name the server's reason without detail", () => {

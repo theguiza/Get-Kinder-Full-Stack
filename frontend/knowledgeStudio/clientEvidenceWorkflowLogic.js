@@ -31,6 +31,9 @@ const WORKFLOW_OPERATION_KEYS = Object.freeze([
   // review and final release of an ordinary internal evidence summary.
   "reviewInternalDraftFactualContent",
   "releaseInternalReports",
+  // Owner authorization 2026-10-24: the client-safe internal traceability
+  // diagnostic that explains a refused internal draft.
+  "readClaimTraceabilityDiagnostics",
 ]);
 
 // Terminal claim review outcome the generation repository always rejects
@@ -138,18 +141,72 @@ export function gapFollowupFailureMessage(result) {
   return errorText(result);
 }
 
+// Generation's VAL-GEN-TRACE-P0-001 refusal: a selected claim's traceability
+// revalidation did not pass. The refusal itself never says which claim or why.
+export function isInternalDraftTraceabilityRefusal(result) {
+  return result?.body?.blockers?.[0]?.blocking_reason === "traceability_result_contract_invalid";
+}
+
+// The server's allowlisted traceability_conflict_reason codes, explained.
+// Only a missing P2-04 state is fixed by generating gap follow-ups.
+const TRACEABILITY_CONFLICT_EXPLANATIONS = Object.freeze({
+  gap_dimension_requires_missing_p204_state: "its coverage gap follow-ups have not been generated yet",
+  source_version_not_current: "the source version its evidence comes from has been replaced by a newer version",
+  gap_followup_queue_mismatch: "its recorded gap follow-ups no longer match its current evidence",
+  claim_evidence_link_mismatch: "its link to its evidence is not consistent",
+  conflict_queue_count_mismatch: "its potential-conflict review records are not consistent",
+  conflict_group_validation_failed: "its potential-conflict review records are not consistent",
+});
+
+/**
+ * Which selected claim the client-safe internal traceability reads
+ * (`reads`: [{ claimId, result }] in selection order) establish as failing,
+ * and why. Only a 409 with an allowlisted traceability_conflict_reason names
+ * a reason; a 404 establishes the failure without one. Any other read
+ * failure, or every claim passing now, establishes nothing ("unknown").
+ */
+export function internalDraftTraceabilityDiagnosis(reads) {
+  for (const read of Array.isArray(reads) ? reads : []) {
+    const result = read?.result;
+    if (result?.statusCode === 200 && result.body?.ok === true && result.body.data?.traceability_passed === true) continue;
+    const reason = result?.body?.data?.traceability_conflict_reason;
+    if (result?.statusCode === 409 && result.body?.error?.code === "conflict_current_state_changed"
+      && Object.hasOwn(TRACEABILITY_CONFLICT_EXPLANATIONS, reason)) {
+      return { status: "blocked", claimId: read.claimId, reason };
+    }
+    if (result?.statusCode === 404 && result.body?.error?.code === "not_found") {
+      return { status: "blocked", claimId: read.claimId, reason: null };
+    }
+  }
+  return { status: "unknown", claimId: null, reason: null };
+}
+
 // Why an authorized internal-draft request created nothing, from the
-// server's own refusal. Generation revalidates each claim's traceability,
-// which fails until the claim's gap follow-ups exist (or for another
-// traceability reason the server does not detail here).
-export function internalDraftFailureMessage(result, { canGenerateGapFollowups = false } = {}) {
-  const blockingReason = result?.body?.blockers?.[0]?.blocking_reason;
-  if (blockingReason === "traceability_result_contract_invalid") {
-    return canGenerateGapFollowups
-      ? "A selected claim cannot be drafted from yet: its traceability checks did not pass. If you have not generated "
-        + "its gap follow-ups, use \"Generate gap follow-ups\" on the claim, then try again. Nothing was created."
-      : "A selected claim cannot be drafted from yet: Get Kinder has not completed its traceability checks "
-        + "(such as generating its coverage gap follow-ups). Nothing was created.";
+// server's own refusal. A traceability refusal is explained from the
+// diagnosis above when one is available, and neutrally otherwise; only a
+// missing P2-04 state is answered with "Generate gap follow-ups".
+export function internalDraftFailureMessage(result, { canGenerateGapFollowups = false, diagnosis = null, claimLabel = "" } = {}) {
+  if (isInternalDraftTraceabilityRefusal(result)) {
+    if (diagnosis?.status !== "blocked") {
+      return "A selected claim did not pass its traceability checks, so no draft was created. "
+        + "The reason is not available here.";
+    }
+    const label = typeof claimLabel === "string" && claimLabel.trim()
+      ? `The selected claim "${claimLabel.trim().slice(0, 120)}"`
+      : "A selected claim";
+    if (diagnosis.reason === "gap_dimension_requires_missing_p204_state") {
+      return `${label} cannot be drafted from yet: ${TRACEABILITY_CONFLICT_EXPLANATIONS[diagnosis.reason]}. `
+        + (canGenerateGapFollowups
+          ? "Use \"Generate gap follow-ups\" on that claim, then try again. "
+          : "Get Kinder must generate them first. ")
+        + "Nothing was created.";
+    }
+    if (diagnosis.reason) {
+      return `${label} cannot be drafted from: ${TRACEABILITY_CONFLICT_EXPLANATIONS[diagnosis.reason]} `
+        + `(${diagnosis.reason}). Ask Get Kinder to reconcile it. Nothing was created.`;
+    }
+    return `${label} cannot be drafted from: part of its evidence lineage could not be found in this organization. `
+      + "Nothing was created.";
   }
   if (result?.body?.error?.code === "claim_reviewed_not_supported") {
     return "A selected claim was found not supported by Get Kinder review and cannot be used in a draft. Nothing was created.";

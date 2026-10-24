@@ -925,6 +925,12 @@
         console.table([{ Check: "Traceability", Status: failure.status, Observed: failure.observed, "Next action": failure.next }]);
         return { status: failure.status };
       }
+      // An organization administrator receives only the client-safe internal
+      // diagnostic, never the GK traceability view this helper reports.
+      if (trace.data?.view === "organization_internal_traceability_diagnostic") {
+        console.table([{ Check: "Traceability", Status: S.BLOCKED, Observed: "client-safe diagnostic only", "Next action": "Run this helper in the Get Kinder reviewer's own session." }]);
+        return { status: S.BLOCKED };
+      }
       const t = trace.data || {};
       const outstanding = Object.entries(t.dimensions || {})
         .filter(([, value]) => value?.assessment_status === "unresolved" && value?.internal_limitation_accepted !== true)

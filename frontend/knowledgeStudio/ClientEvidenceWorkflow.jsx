@@ -4,6 +4,7 @@ import {
   claimGapFollowupsPath,
   claimLibraryCandidatesPath,
   claimProposalPath,
+  claimTraceabilityPath,
   createEvidenceSummaryPath,
   createImpactNarrativePath,
   errorText,
@@ -34,6 +35,8 @@ import {
   internalDraftReadiness,
   internalDraftRequestBody,
   internalDraftResultSummary,
+  internalDraftTraceabilityDiagnosis,
+  isInternalDraftTraceabilityRefusal,
   isUseForImpactCandidate,
   processingPermissionReviewFiles,
   retainSelectableClaimIds,
@@ -94,7 +97,11 @@ function useOrganizationRead(organizationId, path, project, refreshToken) {
  * gap follow-up writes; and the internal evidence-summary and
  * impact-narrative generation writes. Never the funder or any other
  * generator, an evidence or claim review decision, a follow-up answer, the
- * GK traceability read, or a GK review packet.
+ * full GK traceability DTO, or a GK review packet. After a draft refused for
+ * traceability (VAL-GEN-TRACE-P0-001), and only with
+ * readClaimTraceabilityDiagnostics, it reads each selected claim's client-safe
+ * internal traceability diagnostic (owner authorization 2026-10-24) to say
+ * which claim failed and why; it generates, approves, and retries nothing.
  *
  * Source preparation (owner decision 2026-10-18): for the selected Project,
  * the files the client evidence pipeline (`pipeline`, the parent's read) puts
@@ -168,7 +175,9 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
     if (contextRef.current !== requestContext) return;
     setPending("");
     if ((result.statusCode !== 200 && result.statusCode !== 201) || !result.body?.ok) {
-      setNotice({ kind: "warning", text: failureText(result) });
+      const text = await failureText(result);
+      if (contextRef.current !== requestContext) return;
+      setNotice({ kind: "warning", text });
       return;
     }
     onSuccess(result.body.data);
@@ -193,6 +202,24 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
   };
   const readiness = internalDraftReadiness({ canGenerate: access.generateDrafts, engagementId, selectedClaimIds });
   const [draftsRefreshToken, setDraftsRefreshToken] = useState(0);
+  // Read-only: one client-safe internal traceability GET per selected claim.
+  const explainDraftFailure = async (result, claimIds) => {
+    const canGenerateGapFollowups = access.generateClaimGapFollowups;
+    if (!isInternalDraftTraceabilityRefusal(result) || access.readClaimTraceabilityDiagnostics !== true) {
+      return internalDraftFailureMessage(result, { canGenerateGapFollowups });
+    }
+    const reads = [];
+    for (const claimId of claimIds) {
+      reads.push({ claimId, result: await getJson(claimTraceabilityPath(organizationId, claimId, "internal")) });
+    }
+    const diagnosis = internalDraftTraceabilityDiagnosis(reads);
+    const claim = claims.items.find((item) => item.claimId === diagnosis.claimId);
+    return internalDraftFailureMessage(result, {
+      canGenerateGapFollowups,
+      diagnosis,
+      claimLabel: claim?.claimStatement || claim?.evidenceStatement || "",
+    });
+  };
   const generate = (contentType, pathBuilder) => {
     if (!readiness.ready) return;
     // One idempotency key per selection and content type: a repeated click
@@ -206,7 +233,7 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
         // The persisted draft is read back and opened below, never shown from this response.
         setDraftsRefreshToken((value) => value + 1);
       },
-      (result) => internalDraftFailureMessage(result, { canGenerateGapFollowups: access.generateClaimGapFollowups }));
+      (result) => explainDraftFailure(result, [...selectedClaimIds]));
   };
 
   const proposedByEvidence = claimIdsByEvidenceItem(claims.items);

@@ -518,3 +518,39 @@ test("P14-09 diagnostic propagation CASE I: funder eligibility loss still return
   assert.equal(result.error.code, "funder_use_not_currently_eligible");
   assert.equal(Object.hasOwn(result, "blockers"), false);
 });
+
+// --- Owner authorization 2026-10-24: the client-safe traceability diagnostic
+// changes no generation eligibility. A claim whose P2-06 evaluation fails
+// (missing P2-04 state, stale source version, or a missing record) is still
+// refused with VAL-GEN-TRACE-P0-001 before the generator (the model provider)
+// is invoked, for both internal draft types, and nothing is persisted. ---
+
+test("traceability failures stay blocked before provider execution for evidence_summary and impact_narrative", async () => {
+  const failures = [
+    { ok: false, data: null, error: { code: "conflict_current_state_changed", status: 409, reason: "gap_dimension_requires_missing_p204_state" } },
+    { ok: false, data: null, error: { code: "conflict_current_state_changed", status: 409, reason: "source_version_not_current" } },
+    { ok: false, data: null, error: { code: "not_found", status: 404 } },
+  ];
+  for (const method of ["createEvidenceSummaryDraft", "createImpactNarrativeDraft"]) {
+    for (const failure of failures) {
+      const label = `${method} ${failure.error.reason || failure.error.code}`;
+      const state = makeState();
+      const repository = makeRepository(state, async () => failure);
+      let generatorCalls = 0;
+      const result = await repository[method](evidenceSummaryInput({ idempotencyKey: `trace-diag-${method}-${failure.error.reason || "nf"}` }), {
+        draftGenerator: async (input) => { generatorCalls += 1; return goodGenerator()(input); },
+        metadataOnlyAudit: auditRecorder(),
+      });
+      assert.equal(result.ok, false, label);
+      assert.equal(result.error.code, "validation_blocker", label);
+      assert.equal(result.error.status, 422, label);
+      assert.deepEqual(result.blockers, [{
+        validator_key: TRACEABILITY_RESULT_CONTRACT_VALIDATOR_KEY,
+        severity: "blocker",
+        blocking_reason: "traceability_result_contract_invalid",
+      }], label);
+      assert.equal(generatorCalls, 0, `${label}: provider never invoked`);
+      assert.deepEqual([state.generationRuns.length, state.generatedContentDrafts.length, state.reviewQueueItems.length], [0, 0, 0], label);
+    }
+  }
+});

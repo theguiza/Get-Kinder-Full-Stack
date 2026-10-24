@@ -620,12 +620,20 @@ async function runBrowserAcceptance() {
       const before = await counts(ORG_X);
       const mark = adminPage.mark();
       await adminPage.clickButton("Generate internal evidence summary");
-      await adminPage.waitForText("A selected claim cannot be drafted from yet: its traceability checks did not pass. If you have not generated its gap follow-ups, use \"Generate gap follow-ups\" on the claim, then try again. Nothing was created.");
+      // Owner authorization 2026-10-24: the refusal is diagnosed from the
+      // claim's client-safe internal traceability read (409, missing P2-04 state).
+      await adminPage.waitForText("cannot be drafted from yet: its coverage gap follow-ups have not been generated yet. Use \"Generate gap follow-ups\" on that claim, then try again. Nothing was created.");
       await adminPage.idle();
       await adminPage.clickButton("Generate internal impact narrative");
       await adminPage.idle();
-      assert.deepEqual(adminPage.requestsSince(mark).filter((r) => r.method === "POST").map((r) => [new URL(r.url).pathname, r.status]),
+      const requests = adminPage.requestsSince(mark);
+      assert.deepEqual(requests.filter((r) => r.method === "POST").map((r) => [new URL(r.url).pathname, r.status]),
         [[createEvidenceSummaryPath(ORG_X), 422], [createImpactNarrativePath(ORG_X), 422]]);
+      const diagnosticReads = requests.filter((r) => new URL(r.url).pathname.endsWith("/traceability"));
+      assert.deepEqual(diagnosticReads.map((r) => [r.method, new URL(r.url).pathname + new URL(r.url).search, r.status]),
+        [0, 1].map(() => ["GET", claimTraceabilityPath(ORG_X, ids.x.usableClaimId, "internal"), 409]));
+      const diagnostic = await adminPage.api("GET", claimTraceabilityPath(ORG_X, ids.x.usableClaimId, "internal"));
+      assert.deepEqual([diagnostic.status, diagnostic.body.data], [409, { traceability_conflict_reason: "gap_dimension_requires_missing_p204_state" }]);
       for (const [path, key] of [[createEvidenceSummaryPath(ORG_X), "client-admin-before-p204-summary"], [createImpactNarrativePath(ORG_X), "client-admin-before-p204-narrative"]]) {
         const direct = await adminPage.api("POST", path, DRAFT_BODY([ids.x.usableClaimId], key));
         assert.deepEqual([direct.status, direct.body.error.code, direct.body.blockers[0].blocking_reason], [422, "validation_blocker", "traceability_result_contract_invalid"], path);
@@ -815,7 +823,7 @@ async function runBrowserAcceptance() {
       ];
       const gapFollowupPost = new RegExp(`^/api/kai/sprint2/intake/admin/organizations/${ORG_X}/claims/[0-9a-f-]{36}/claim-gap-followups$`);
       const forbidden = ["/evidence-summary/funder", "/readiness-assessment", "/data-gap-memo", "/review-packet", "/review-queue", "/eligible-claims",
-        "/traceability", "/review-cockpit", "/evidence-review/", "/claim-review/", "/start", "/complete", "/client-followups", "/coverage-dimensions"];
+        "/review-cockpit", "/evidence-review/", "/claim-review/", "/start", "/complete", "/client-followups", "/coverage-dimensions"];
       // The shell's existing Needs Attention reads for the bound organization
       // administrator's sensitivity review (owner decision 2026-10-12) are not
       // part of this workflow: review-cockpit capabilities and its queue GET.
@@ -823,6 +831,11 @@ async function runBrowserAcceptance() {
       for (const request of adminPage.requests()) {
         const path = new URL(request.url).pathname;
         if (shellReads.has(path) && request.method === "GET") continue;
+        // Owner authorization 2026-10-24: only the client-safe internal diagnostic GET.
+        if (path.includes("/traceability")) {
+          assert.ok(request.method === "GET" && new RegExp(`^/api/kai/sprint2/intake/admin/organizations/${ORG_X}/claims/[0-9a-f-]{36}/traceability$`).test(path)
+            && new URL(request.url).search === "?requested_audience=internal", `forbidden request ${request.method} ${path}`);
+        }
         for (const fragment of forbidden) assert.ok(!path.includes(fragment), `forbidden request ${request.method} ${path}`);
         if (request.method === "POST") assert.ok(allowedPrefixes.some((prefix) => path.startsWith(prefix)) || gapFollowupPost.test(path), `unexpected POST ${path}`);
         assert.ok(!path.includes(ORG_Y), `organization Y request ${path}`);
@@ -905,7 +918,7 @@ async function runBrowserAcceptance() {
     });
 
     // --- D. protected operations ---------------------------------------------
-    await test("D: the client_admin cannot reach funder or other generators, GK review decisions, review packets, the GK source review list, P2-06 traceability, follow-up answers, or coverage acceptance", async () => {
+    await test("D: the client_admin cannot reach funder or other generators, GK review decisions, review packets, the GK source review list, funder P2-06 traceability or the GK traceability DTO, follow-up answers, or coverage acceptance", async () => {
       const before = await counts(ORG_X);
       const evidenceQueue = (await query("SELECT review_queue_item_id::text, updated_at FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = 'evidence_review' AND target_object_id = $2::uuid", [ORG_X, ids.x.usableEvidenceId]))[0];
       const claimQueue = (await query("SELECT review_queue_item_id::text, updated_at FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = 'claim_review' AND target_object_id = $2::uuid", [ORG_X, ids.x.usableClaimId]))[0];
@@ -922,7 +935,8 @@ async function runBrowserAcceptance() {
         // (owner decision 2026-10-18; kai-client-admin-source-promotion acceptance);
         // the GK source review list stays GK-only.
         ["GK source review queue", "GET", `/api/kai/sprint2/intake/admin/review-cockpit/queue?organization_id=${ORG_X}&queue_type=source_candidate_review&queue_status=open`],
-        ["P2-06 traceability read", "GET", claimTraceabilityPath(ORG_X, ids.x.usableClaimId, "internal")],
+        // Owner authorization 2026-10-24: internal reads return only the client-safe diagnostic (below).
+        ["P2-06 funder traceability read", "GET", claimTraceabilityPath(ORG_X, ids.x.usableClaimId, "funder")],
         ["client follow-up list", "GET", `/api/kai/sprint2/intake/admin/organizations/${ORG_X}/client-followups`],
         ["P2-10 internal coverage limitation acceptance", "POST", coverageInternalAcceptancePath(ORG_X, ids.x.usableClaimId, ids.x.gapDimensionKey), {}],
       ];
@@ -939,6 +953,18 @@ async function runBrowserAcceptance() {
         assert.equal(response.body.error.code, "authorization_denied", label);
         outcomes[label] = response.body.blockers?.[0]?.blocking_reason || response.body.error.code;
       }
+      const diagnostic = await adminPage.api("GET", claimTraceabilityPath(ORG_X, ids.x.usableClaimId, "internal"));
+      if (diagnostic.status === 200) {
+        assert.equal(diagnostic.body.data.view, "organization_internal_traceability_diagnostic", JSON.stringify(diagnostic.body));
+        assert.deepEqual(Object.keys(diagnostic.body.data).sort(), ["blocked", "blocker_codes", "claim_id", "eligible", "requested_audience", "traceability_conflict_reason", "traceability_passed", "view"]);
+      } else {
+        assert.equal(diagnostic.status, 409, JSON.stringify(diagnostic.body));
+        assert.deepEqual(Object.keys(diagnostic.body.data || {}), ["traceability_conflict_reason"]);
+      }
+      for (const field of ["graph_relationships", "evidence", "source_version", "claim_review_decision", "potential_conflict_groups", "statement"]) {
+        assert.equal(JSON.stringify(diagnostic.body).includes(`"${field}"`), false, field);
+      }
+      outcomes["P2-06 internal traceability diagnostic"] = diagnostic.status === 200 ? diagnostic.body.data.view : diagnostic.body.data.traceability_conflict_reason;
       assert.deepEqual(await counts(ORG_X), before, "no protected write");
       const followupStates = await query("SELECT DISTINCT queue_status, review_status FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = 'client_followup'", [ORG_X]);
       assert.deepEqual(followupStates, [{ queue_status: "waiting_on_client", review_status: "proposed" }], "every follow-up is still open");
