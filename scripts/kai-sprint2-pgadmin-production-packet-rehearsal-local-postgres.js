@@ -120,7 +120,11 @@ function buildChainWithout(excluded) {
   psqlExec("ALTER TABLE kai.engagements ADD CONSTRAINT kai_plan_a_engagements_id_org_unique UNIQUE (engagement_id, organization_id);");
   psqlFile("scripts/kai-sprint2-join-1-organization-join-requests-bootstrap-synthetic-schema.sql");
   psqlFile("scripts/kai-sprint2-gate-a-bootstrap-synthetic-schema.sql");
-  for (const migration of MIGRATION_CHAIN) {
+  // Migrations introduced after the packet's last one build on the packet
+  // (migration 05 requires 03's evidence_measurements) and ship in their own
+  // delta packets, so the chain stops there.
+  const last = Math.max(...PACKET_MIGRATIONS.map((migration) => MIGRATION_CHAIN.indexOf(migration)));
+  for (const migration of MIGRATION_CHAIN.slice(0, last + 1)) {
     if (excluded.includes(migration) || PRODUCTION_HISTORY_ONLY.has(migration)) continue;
     psqlFile(`migrations/${migration}.sql`);
   }
