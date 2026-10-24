@@ -44274,3 +44274,51 @@ found.
 **Status:** ORGANIZATION_INTERNAL_FACTUAL_REVIEW_AUTHORITY_LOCALLY_VERIFIED. No
 push, deploy, production access, production schema change, flag change, or
 real client data. Rollout needs separate owner authorization.
+
+### Plan A Step E1: migration 05 pgAdmin delta packet (2026-10-24)
+
+**Owner authorization (USER_CONFIRMED):** the owner's "Prepare and Verify Step E1 Migration 05 Production pgAdmin Packet" prompt. It authorizes creating the migration 05 delta packet and proving it locally. It does not authorize executing production SQL, pushing, deploying, changing flags or data, or reopening 01–04.
+
+**Start (TOOL_VERIFIED):** `main` at `e0022aa`. The owner's unstaged edits to this ExecPlan and to `__tests__/kai-sprint2-plan-a-production-synthetic-canary.spec.js` were preserved and left out of the commit. Ancestry is `96653f8` → `1c10b87` → `e0022aa`. The schema delta `96653f8..e0022aa` is migration 05 and its rollback only.
+
+**Packet:** `KAI_PGADMIN_PRODUCTION_MIGRATION_05_DELTA_PACKET/`. It is separate from the accepted 01–04 packet, which is unchanged and has no `05` file.
+- `05_MIGRATION_…` and `rollback/R05_…`: byte-identical to the `1c10b87` sources (SHA-256 `b0be8053…` and `2460931b…`).
+- `00` preflight: a single classification, `REQUIRED` / `ALREADY_APPLIED` / `STOP_INCOMPATIBLE`. It checks the post-04 state (B01.1–B01.4), 05's dependencies, the six dependent tables against the 2026-09-16 capture, and each of 05's eight objects.
+- `05V`: exact definitions, enabled triggers and function bodies, plus 378 role/outcome/audience/decision/dimension combinations evaluated through the live CHECKs.
+- `99`: the final schema.
+- `RP05`: rollback precheck.
+- `RUN_IN_PGADMIN.md`, `ROLLOUT_AND_ACCEPTANCE.md`, `SOURCE_MANIFEST.md`.
+- Every `OVERALL` checks its own row count.
+- Generator: `scripts/kai-sprint2-pgadmin-migration-05-packet-build.js` (deterministic). Capture, rehearsal and compatibility: `scripts/kai-sprint2-pgadmin-migration-05-packet-rehearsal-local-postgres.js`.
+
+**Committed SQL compared with the reported requirements:** no discrepancy, and the migration was not amended. Two things are worth knowing:
+- "ordinary" (§7.2 categories absent, current version, permitted use and AI) is enforced only by the application's in-transaction admission, as the migration's comment states;
+- the P2-12 root-per-lineage indexes already prevent a parallel `client_admin` root beside a GK lineage.
+
+**Verification (TOOL_VERIFIED; sentinel `DATABASE_URL`; disposable loopback PostgreSQL 16.14 only):**
+
+| Command | Pass | Fail |
+| --- | --- | --- |
+| 05 rehearsal on the post-04 replica (2026-09-16 capture + accepted 01–04 files; the 01–04 `99` PASSES on it). Covers: REQUIRED → apply → 05V/99 PASS → ALREADY_APPLIED → replay converges → RP05 SAFE → synthetic rows → RP05 UNSAFE → R05 refuses and preserves → exact rollback → forward; plus 9 STOP cases and the repository chain | 49 | 0 |
+| compat: `96653f8` GK review-to-Markdown proof on the packet-migrated chain (30/30; no `client_admin` row). Then on the same database: HEAD refusals 4/4, the direct-insert matrix (15 rejected, 8 accepted), real `client_admin` rows giving RP05 UNSAFE and R05 refusal, and the P2-06 comparison. Then a fresh database: HEAD P2-01M 30/30, refusals 4/4, 99 PASS | 45 | 0 |
+| `96653f8` assembled file-to-report browser acceptance on the 05 schema (GK E1; temporary `git clone --shared`, commit in the clone only) | 23 | 0 |
+| `e0022aa` assembled file-to-report browser acceptance on the 05 schema (organization E1, no GK reviewer) | 25 | 0 |
+| Plan A normal chain | 30 + 4 | 0 |
+| `kai-organization-factual-review-authority.spec.js` | 11 | 0 |
+| 01–04 packet rehearsal | 29 | 0 |
+| `git diff --check` | ok | |
+
+**Findings:**
+- After 05, the 01–04 packet's `99` FAILS on the three changed decision tables by design. `99_MIGRATION_05_…` replaces it, and RUN_IN_PGADMIN.md says so.
+- **Application rollback** to `96653f8` while organization decisions exist removes one safeguard: its P2-06 counts a `client_admin` evidence head for funder use, whereas HEAD adds `evidence_review_unresolved`. In the test the claim stayed funder-ineligible under both revisions for other reasons.
+- **Database rollback** is guarded. R05 refuses while any `client_admin` decision exists, so once the first organization decision exists, migration 05 is not reversible.
+- **01–04 rehearsal repair:** it had failed in scenario 6 since `1c10b87`. The shared chain now includes 05, which needs 03, and that scenario builds the chain without 01–04. The script now stops that chain at its packet's last migration. No 01–04 packet file changed.
+
+**Remaining (NOT_CONFIRMED):**
+- production's current schema, until the owner's `00` CSV;
+- the production PostgreSQL version (the expected definitions are PostgreSQL 16 renderings);
+- the deployed revision, which is reported as `96653f8`;
+- the workflow flags;
+- deployed acceptance.
+
+**Status:** MIGRATION_05_PGADMIN_DELTA_PACKET_PREPARED_LOCAL. It is ready for separately authorized owner execution in pgAdmin. No production SQL, push, deployment, flag, tenant, credential, real client data, or `00_KAI_CURRENT_STATE.md` change.

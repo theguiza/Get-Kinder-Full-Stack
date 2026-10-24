@@ -1,0 +1,556 @@
+{
+  "description": "PostgreSQL-rendered definitions of the three decision tables' constraints and user triggers, and of the organization_factual_review_* functions, before and after migration 05, captured from a disposable loopback cluster built from the repository's normal migration chain (every migration before 05, in introduction order).",
+  "migration": "kai_sprint2_plan_a_organization_internal_factual_review_authority",
+  "before": {
+    "postgresql_version": "PostgreSQL 16.14 (Homebrew) on aarch64-apple-darwin25.6.0, compiled by Apple clang version 21.0.0 (clang-2100.1.1.101), 64-bit",
+    "constraints": [
+      {
+        "table_name": "claim_review_decisions",
+        "name": "claim_review_decisions_p2_12_audience_scope_check",
+        "type": "c",
+        "definition": "CHECK ((decision_outcome = ANY (ARRAY['approved'::text, 'approved_with_limitation'::text])) AND approved_audiences IS NOT NULL AND cardinality(approved_audiences) > 0 AND approved_audiences <@ ARRAY['internal'::text, 'funder'::text, 'public'::text] OR (decision_outcome <> ALL (ARRAY['approved'::text, 'approved_with_limitation'::text])) AND approved_audiences IS NULL)",
+        "validated": true
+      },
+      {
+        "table_name": "claim_review_decisions",
+        "name": "claim_review_decisions_p2_12_claim_fk",
+        "type": "f",
+        "definition": "FOREIGN KEY (claim_id, organization_id) REFERENCES kai.claims(claim_id, organization_id) ON DELETE RESTRICT",
+        "validated": true
+      },
+      {
+        "table_name": "claim_review_decisions",
+        "name": "claim_review_decisions_p2_12_created_by_type_check",
+        "type": "c",
+        "definition": "CHECK (created_by_type = 'human'::text)",
+        "validated": true
+      },
+      {
+        "table_name": "claim_review_decisions",
+        "name": "claim_review_decisions_p2_12_id_org_claim_unique",
+        "type": "u",
+        "definition": "UNIQUE (decision_id, organization_id, claim_id)",
+        "validated": true
+      },
+      {
+        "table_name": "claim_review_decisions",
+        "name": "claim_review_decisions_p2_12_id_org_unique",
+        "type": "u",
+        "definition": "UNIQUE (decision_id, organization_id)",
+        "validated": true
+      },
+      {
+        "table_name": "claim_review_decisions",
+        "name": "claim_review_decisions_p2_12_limitation_notes_check",
+        "type": "c",
+        "definition": "CHECK (decision_outcome = 'approved_with_limitation'::text AND limitation_notes IS NOT NULL AND cardinality(limitation_notes) > 0 AND kai.p2_12_all_array_entries_non_blank(limitation_notes) OR decision_outcome <> 'approved_with_limitation'::text AND limitation_notes IS NULL)",
+        "validated": true
+      },
+      {
+        "table_name": "claim_review_decisions",
+        "name": "claim_review_decisions_p2_12_not_self_superseding",
+        "type": "c",
+        "definition": "CHECK (supersedes_decision_id IS DISTINCT FROM decision_id)",
+        "validated": true
+      },
+      {
+        "table_name": "claim_review_decisions",
+        "name": "claim_review_decisions_p2_12_outcome_check",
+        "type": "c",
+        "definition": "CHECK (decision_outcome = ANY (ARRAY['approved'::text, 'approved_with_limitation'::text, 'rejected'::text, 'needs_more_information'::text]))",
+        "validated": true
+      },
+      {
+        "table_name": "claim_review_decisions",
+        "name": "claim_review_decisions_p2_12_role_check",
+        "type": "c",
+        "definition": "CHECK (decided_by_role = ANY (ARRAY['gk_reviewer'::text, 'gk_admin'::text]))",
+        "validated": true
+      },
+      {
+        "table_name": "claim_review_decisions",
+        "name": "claim_review_decisions_p2_12_supersedes_fk",
+        "type": "f",
+        "definition": "FOREIGN KEY (supersedes_decision_id, organization_id, claim_id) REFERENCES kai.claim_review_decisions(decision_id, organization_id, claim_id) ON DELETE RESTRICT",
+        "validated": true
+      },
+      {
+        "table_name": "claim_review_decisions",
+        "name": "claim_review_decisions_pkey",
+        "type": "p",
+        "definition": "PRIMARY KEY (decision_id)",
+        "validated": true
+      },
+      {
+        "table_name": "coverage_review_decisions",
+        "name": "coverage_review_decisions_p2_10_claim_fk",
+        "type": "f",
+        "definition": "FOREIGN KEY (claim_id, organization_id) REFERENCES kai.claims(claim_id, organization_id) ON DELETE RESTRICT",
+        "validated": true
+      },
+      {
+        "table_name": "coverage_review_decisions",
+        "name": "coverage_review_decisions_p2_10_created_by_type_check",
+        "type": "c",
+        "definition": "CHECK (created_by_type = 'human'::text)",
+        "validated": true
+      },
+      {
+        "table_name": "coverage_review_decisions",
+        "name": "coverage_review_decisions_p2_10_decided_by_role_check",
+        "type": "c",
+        "definition": "CHECK (decided_by_role = 'gk_reviewer'::text)",
+        "validated": true
+      },
+      {
+        "table_name": "coverage_review_decisions",
+        "name": "coverage_review_decisions_p2_10_decision_check",
+        "type": "c",
+        "definition": "CHECK (decision = ANY (ARRAY['accepted_internal_with_limitation'::text, 'accepted_funder_with_limitation'::text, 'accepted_public_with_limitation'::text]))",
+        "validated": true
+      },
+      {
+        "table_name": "coverage_review_decisions",
+        "name": "coverage_review_decisions_p2_10_dimension_key_check",
+        "type": "c",
+        "definition": "CHECK (dimension_key = ANY (ARRAY['missingness'::text, 'duplicates'::text, 'definition_clarity'::text, 'denominator_clarity'::text, 'time_period_clarity'::text, 'entity_level_clarity'::text, 'small_cell_risk'::text, 'conflicting_source_indicators'::text, 'requirement_alignment'::text, 'coverage_gaps'::text]))",
+        "validated": true
+      },
+      {
+        "table_name": "coverage_review_decisions",
+        "name": "coverage_review_decisions_p2_10_gap_fk",
+        "type": "f",
+        "definition": "FOREIGN KEY (organization_id, claim_id, dimension_key) REFERENCES kai.gap_log_items(organization_id, claim_id, dimension_key) ON DELETE RESTRICT",
+        "validated": true
+      },
+      {
+        "table_name": "coverage_review_decisions",
+        "name": "coverage_review_decisions_p2_10_id_org_unique",
+        "type": "u",
+        "definition": "UNIQUE (coverage_review_decision_id, organization_id)",
+        "validated": true
+      },
+      {
+        "table_name": "coverage_review_decisions",
+        "name": "coverage_review_decisions_p2_10_identity_fingerprint_unique",
+        "type": "u",
+        "definition": "UNIQUE (organization_id, claim_id, dimension_key, state_fingerprint, decision)",
+        "validated": true
+      },
+      {
+        "table_name": "coverage_review_decisions",
+        "name": "coverage_review_decisions_p2_10_state_fingerprint_check",
+        "type": "c",
+        "definition": "CHECK (state_fingerprint ~ '^[0-9a-f]{64}$'::text)",
+        "validated": true
+      },
+      {
+        "table_name": "coverage_review_decisions",
+        "name": "coverage_review_decisions_pkey",
+        "type": "p",
+        "definition": "PRIMARY KEY (coverage_review_decision_id)",
+        "validated": true
+      },
+      {
+        "table_name": "evidence_review_decisions",
+        "name": "evidence_review_decisions_p2_12_created_by_type_check",
+        "type": "c",
+        "definition": "CHECK (created_by_type = 'human'::text)",
+        "validated": true
+      },
+      {
+        "table_name": "evidence_review_decisions",
+        "name": "evidence_review_decisions_p2_12_id_org_item_unique",
+        "type": "u",
+        "definition": "UNIQUE (decision_id, organization_id, evidence_item_id)",
+        "validated": true
+      },
+      {
+        "table_name": "evidence_review_decisions",
+        "name": "evidence_review_decisions_p2_12_id_org_unique",
+        "type": "u",
+        "definition": "UNIQUE (decision_id, organization_id)",
+        "validated": true
+      },
+      {
+        "table_name": "evidence_review_decisions",
+        "name": "evidence_review_decisions_p2_12_item_fk",
+        "type": "f",
+        "definition": "FOREIGN KEY (evidence_item_id, organization_id) REFERENCES kai.evidence_items(evidence_item_id, organization_id) ON DELETE RESTRICT",
+        "validated": true
+      },
+      {
+        "table_name": "evidence_review_decisions",
+        "name": "evidence_review_decisions_p2_12_limitation_notes_check",
+        "type": "c",
+        "definition": "CHECK (decision_outcome = 'supported_with_limitation'::text AND limitation_notes IS NOT NULL AND cardinality(limitation_notes) > 0 AND kai.p2_12_all_array_entries_non_blank(limitation_notes) OR decision_outcome <> 'supported_with_limitation'::text AND limitation_notes IS NULL)",
+        "validated": true
+      },
+      {
+        "table_name": "evidence_review_decisions",
+        "name": "evidence_review_decisions_p2_12_not_self_superseding",
+        "type": "c",
+        "definition": "CHECK (supersedes_decision_id IS DISTINCT FROM decision_id)",
+        "validated": true
+      },
+      {
+        "table_name": "evidence_review_decisions",
+        "name": "evidence_review_decisions_p2_12_outcome_check",
+        "type": "c",
+        "definition": "CHECK (decision_outcome = ANY (ARRAY['supported'::text, 'supported_with_limitation'::text, 'not_supported'::text, 'needs_more_information'::text]))",
+        "validated": true
+      },
+      {
+        "table_name": "evidence_review_decisions",
+        "name": "evidence_review_decisions_p2_12_role_check",
+        "type": "c",
+        "definition": "CHECK (decided_by_role = ANY (ARRAY['gk_reviewer'::text, 'gk_admin'::text]))",
+        "validated": true
+      },
+      {
+        "table_name": "evidence_review_decisions",
+        "name": "evidence_review_decisions_p2_12_supersedes_fk",
+        "type": "f",
+        "definition": "FOREIGN KEY (supersedes_decision_id, organization_id, evidence_item_id) REFERENCES kai.evidence_review_decisions(decision_id, organization_id, evidence_item_id) ON DELETE RESTRICT",
+        "validated": true
+      },
+      {
+        "table_name": "evidence_review_decisions",
+        "name": "evidence_review_decisions_pkey",
+        "type": "p",
+        "definition": "PRIMARY KEY (decision_id)",
+        "validated": true
+      }
+    ],
+    "triggers": [
+      {
+        "table_name": "claim_review_decisions",
+        "name": "claim_review_decisions_p2_12_append_only",
+        "definition": "CREATE TRIGGER claim_review_decisions_p2_12_append_only BEFORE DELETE OR UPDATE ON kai.claim_review_decisions FOR EACH ROW EXECUTE FUNCTION kai.p2_12_reject_claim_review_decision_mutation()",
+        "enabled": "O"
+      },
+      {
+        "table_name": "coverage_review_decisions",
+        "name": "trg_p2_10_coverage_review_decisions_append_only",
+        "definition": "CREATE TRIGGER trg_p2_10_coverage_review_decisions_append_only BEFORE DELETE OR UPDATE ON kai.coverage_review_decisions FOR EACH ROW EXECUTE FUNCTION kai.p2_10_reject_coverage_decision_mutation()",
+        "enabled": "O"
+      },
+      {
+        "table_name": "evidence_review_decisions",
+        "name": "evidence_review_decisions_p2_12_append_only",
+        "definition": "CREATE TRIGGER evidence_review_decisions_p2_12_append_only BEFORE DELETE OR UPDATE ON kai.evidence_review_decisions FOR EACH ROW EXECUTE FUNCTION kai.p2_12_reject_evidence_review_decision_mutation()",
+        "enabled": "O"
+      }
+    ],
+    "functions": []
+  },
+  "after": {
+    "postgresql_version": "PostgreSQL 16.14 (Homebrew) on aarch64-apple-darwin25.6.0, compiled by Apple clang version 21.0.0 (clang-2100.1.1.101), 64-bit",
+    "constraints": [
+      {
+        "table_name": "claim_review_decisions",
+        "name": "claim_review_decisions_organization_internal_audience_check",
+        "type": "c",
+        "definition": "CHECK (decided_by_role <> 'client_admin'::text OR approved_audiences IS NULL OR approved_audiences = ARRAY['internal'::text])",
+        "validated": true
+      },
+      {
+        "table_name": "claim_review_decisions",
+        "name": "claim_review_decisions_p2_12_audience_scope_check",
+        "type": "c",
+        "definition": "CHECK ((decision_outcome = ANY (ARRAY['approved'::text, 'approved_with_limitation'::text])) AND approved_audiences IS NOT NULL AND cardinality(approved_audiences) > 0 AND approved_audiences <@ ARRAY['internal'::text, 'funder'::text, 'public'::text] OR (decision_outcome <> ALL (ARRAY['approved'::text, 'approved_with_limitation'::text])) AND approved_audiences IS NULL)",
+        "validated": true
+      },
+      {
+        "table_name": "claim_review_decisions",
+        "name": "claim_review_decisions_p2_12_claim_fk",
+        "type": "f",
+        "definition": "FOREIGN KEY (claim_id, organization_id) REFERENCES kai.claims(claim_id, organization_id) ON DELETE RESTRICT",
+        "validated": true
+      },
+      {
+        "table_name": "claim_review_decisions",
+        "name": "claim_review_decisions_p2_12_created_by_type_check",
+        "type": "c",
+        "definition": "CHECK (created_by_type = 'human'::text)",
+        "validated": true
+      },
+      {
+        "table_name": "claim_review_decisions",
+        "name": "claim_review_decisions_p2_12_id_org_claim_unique",
+        "type": "u",
+        "definition": "UNIQUE (decision_id, organization_id, claim_id)",
+        "validated": true
+      },
+      {
+        "table_name": "claim_review_decisions",
+        "name": "claim_review_decisions_p2_12_id_org_unique",
+        "type": "u",
+        "definition": "UNIQUE (decision_id, organization_id)",
+        "validated": true
+      },
+      {
+        "table_name": "claim_review_decisions",
+        "name": "claim_review_decisions_p2_12_limitation_notes_check",
+        "type": "c",
+        "definition": "CHECK (decision_outcome = 'approved_with_limitation'::text AND limitation_notes IS NOT NULL AND cardinality(limitation_notes) > 0 AND kai.p2_12_all_array_entries_non_blank(limitation_notes) OR decision_outcome <> 'approved_with_limitation'::text AND limitation_notes IS NULL)",
+        "validated": true
+      },
+      {
+        "table_name": "claim_review_decisions",
+        "name": "claim_review_decisions_p2_12_not_self_superseding",
+        "type": "c",
+        "definition": "CHECK (supersedes_decision_id IS DISTINCT FROM decision_id)",
+        "validated": true
+      },
+      {
+        "table_name": "claim_review_decisions",
+        "name": "claim_review_decisions_p2_12_outcome_check",
+        "type": "c",
+        "definition": "CHECK (decision_outcome = ANY (ARRAY['approved'::text, 'approved_with_limitation'::text, 'rejected'::text, 'needs_more_information'::text]))",
+        "validated": true
+      },
+      {
+        "table_name": "claim_review_decisions",
+        "name": "claim_review_decisions_p2_12_role_check",
+        "type": "c",
+        "definition": "CHECK (decided_by_role = ANY (ARRAY['gk_reviewer'::text, 'gk_admin'::text, 'client_admin'::text]))",
+        "validated": true
+      },
+      {
+        "table_name": "claim_review_decisions",
+        "name": "claim_review_decisions_p2_12_supersedes_fk",
+        "type": "f",
+        "definition": "FOREIGN KEY (supersedes_decision_id, organization_id, claim_id) REFERENCES kai.claim_review_decisions(decision_id, organization_id, claim_id) ON DELETE RESTRICT",
+        "validated": true
+      },
+      {
+        "table_name": "claim_review_decisions",
+        "name": "claim_review_decisions_pkey",
+        "type": "p",
+        "definition": "PRIMARY KEY (decision_id)",
+        "validated": true
+      },
+      {
+        "table_name": "coverage_review_decisions",
+        "name": "coverage_review_decisions_p2_10_claim_fk",
+        "type": "f",
+        "definition": "FOREIGN KEY (claim_id, organization_id) REFERENCES kai.claims(claim_id, organization_id) ON DELETE RESTRICT",
+        "validated": true
+      },
+      {
+        "table_name": "coverage_review_decisions",
+        "name": "coverage_review_decisions_p2_10_created_by_type_check",
+        "type": "c",
+        "definition": "CHECK (created_by_type = 'human'::text)",
+        "validated": true
+      },
+      {
+        "table_name": "coverage_review_decisions",
+        "name": "coverage_review_decisions_p2_10_decided_by_role_check",
+        "type": "c",
+        "definition": "CHECK (decided_by_role = 'gk_reviewer'::text OR decided_by_role = 'client_admin'::text AND decision = 'accepted_internal_with_limitation'::text AND (dimension_key = ANY (ARRAY['small_cell_risk'::text, 'conflicting_source_indicators'::text, 'requirement_alignment'::text])))",
+        "validated": true
+      },
+      {
+        "table_name": "coverage_review_decisions",
+        "name": "coverage_review_decisions_p2_10_decision_check",
+        "type": "c",
+        "definition": "CHECK (decision = ANY (ARRAY['accepted_internal_with_limitation'::text, 'accepted_funder_with_limitation'::text, 'accepted_public_with_limitation'::text]))",
+        "validated": true
+      },
+      {
+        "table_name": "coverage_review_decisions",
+        "name": "coverage_review_decisions_p2_10_dimension_key_check",
+        "type": "c",
+        "definition": "CHECK (dimension_key = ANY (ARRAY['missingness'::text, 'duplicates'::text, 'definition_clarity'::text, 'denominator_clarity'::text, 'time_period_clarity'::text, 'entity_level_clarity'::text, 'small_cell_risk'::text, 'conflicting_source_indicators'::text, 'requirement_alignment'::text, 'coverage_gaps'::text]))",
+        "validated": true
+      },
+      {
+        "table_name": "coverage_review_decisions",
+        "name": "coverage_review_decisions_p2_10_gap_fk",
+        "type": "f",
+        "definition": "FOREIGN KEY (organization_id, claim_id, dimension_key) REFERENCES kai.gap_log_items(organization_id, claim_id, dimension_key) ON DELETE RESTRICT",
+        "validated": true
+      },
+      {
+        "table_name": "coverage_review_decisions",
+        "name": "coverage_review_decisions_p2_10_id_org_unique",
+        "type": "u",
+        "definition": "UNIQUE (coverage_review_decision_id, organization_id)",
+        "validated": true
+      },
+      {
+        "table_name": "coverage_review_decisions",
+        "name": "coverage_review_decisions_p2_10_identity_fingerprint_unique",
+        "type": "u",
+        "definition": "UNIQUE (organization_id, claim_id, dimension_key, state_fingerprint, decision)",
+        "validated": true
+      },
+      {
+        "table_name": "coverage_review_decisions",
+        "name": "coverage_review_decisions_p2_10_state_fingerprint_check",
+        "type": "c",
+        "definition": "CHECK (state_fingerprint ~ '^[0-9a-f]{64}$'::text)",
+        "validated": true
+      },
+      {
+        "table_name": "coverage_review_decisions",
+        "name": "coverage_review_decisions_pkey",
+        "type": "p",
+        "definition": "PRIMARY KEY (coverage_review_decision_id)",
+        "validated": true
+      },
+      {
+        "table_name": "evidence_review_decisions",
+        "name": "evidence_review_decisions_p2_12_created_by_type_check",
+        "type": "c",
+        "definition": "CHECK (created_by_type = 'human'::text)",
+        "validated": true
+      },
+      {
+        "table_name": "evidence_review_decisions",
+        "name": "evidence_review_decisions_p2_12_id_org_item_unique",
+        "type": "u",
+        "definition": "UNIQUE (decision_id, organization_id, evidence_item_id)",
+        "validated": true
+      },
+      {
+        "table_name": "evidence_review_decisions",
+        "name": "evidence_review_decisions_p2_12_id_org_unique",
+        "type": "u",
+        "definition": "UNIQUE (decision_id, organization_id)",
+        "validated": true
+      },
+      {
+        "table_name": "evidence_review_decisions",
+        "name": "evidence_review_decisions_p2_12_item_fk",
+        "type": "f",
+        "definition": "FOREIGN KEY (evidence_item_id, organization_id) REFERENCES kai.evidence_items(evidence_item_id, organization_id) ON DELETE RESTRICT",
+        "validated": true
+      },
+      {
+        "table_name": "evidence_review_decisions",
+        "name": "evidence_review_decisions_p2_12_limitation_notes_check",
+        "type": "c",
+        "definition": "CHECK (decision_outcome = 'supported_with_limitation'::text AND limitation_notes IS NOT NULL AND cardinality(limitation_notes) > 0 AND kai.p2_12_all_array_entries_non_blank(limitation_notes) OR decision_outcome <> 'supported_with_limitation'::text AND limitation_notes IS NULL)",
+        "validated": true
+      },
+      {
+        "table_name": "evidence_review_decisions",
+        "name": "evidence_review_decisions_p2_12_not_self_superseding",
+        "type": "c",
+        "definition": "CHECK (supersedes_decision_id IS DISTINCT FROM decision_id)",
+        "validated": true
+      },
+      {
+        "table_name": "evidence_review_decisions",
+        "name": "evidence_review_decisions_p2_12_outcome_check",
+        "type": "c",
+        "definition": "CHECK (decision_outcome = ANY (ARRAY['supported'::text, 'supported_with_limitation'::text, 'not_supported'::text, 'needs_more_information'::text]))",
+        "validated": true
+      },
+      {
+        "table_name": "evidence_review_decisions",
+        "name": "evidence_review_decisions_p2_12_role_check",
+        "type": "c",
+        "definition": "CHECK (decided_by_role = ANY (ARRAY['gk_reviewer'::text, 'gk_admin'::text, 'client_admin'::text]))",
+        "validated": true
+      },
+      {
+        "table_name": "evidence_review_decisions",
+        "name": "evidence_review_decisions_p2_12_supersedes_fk",
+        "type": "f",
+        "definition": "FOREIGN KEY (supersedes_decision_id, organization_id, evidence_item_id) REFERENCES kai.evidence_review_decisions(decision_id, organization_id, evidence_item_id) ON DELETE RESTRICT",
+        "validated": true
+      },
+      {
+        "table_name": "evidence_review_decisions",
+        "name": "evidence_review_decisions_pkey",
+        "type": "p",
+        "definition": "PRIMARY KEY (decision_id)",
+        "validated": true
+      }
+    ],
+    "triggers": [
+      {
+        "table_name": "claim_review_decisions",
+        "name": "claim_review_decisions_p2_12_append_only",
+        "definition": "CREATE TRIGGER claim_review_decisions_p2_12_append_only BEFORE DELETE OR UPDATE ON kai.claim_review_decisions FOR EACH ROW EXECUTE FUNCTION kai.p2_12_reject_claim_review_decision_mutation()",
+        "enabled": "O"
+      },
+      {
+        "table_name": "claim_review_decisions",
+        "name": "trg_organization_factual_review_claim_scope",
+        "definition": "CREATE TRIGGER trg_organization_factual_review_claim_scope BEFORE INSERT ON kai.claim_review_decisions FOR EACH ROW EXECUTE FUNCTION kai.organization_factual_review_enforce_claim_scope()",
+        "enabled": "O"
+      },
+      {
+        "table_name": "coverage_review_decisions",
+        "name": "trg_organization_factual_review_coverage_scope",
+        "definition": "CREATE TRIGGER trg_organization_factual_review_coverage_scope BEFORE INSERT ON kai.coverage_review_decisions FOR EACH ROW EXECUTE FUNCTION kai.organization_factual_review_enforce_coverage_scope()",
+        "enabled": "O"
+      },
+      {
+        "table_name": "coverage_review_decisions",
+        "name": "trg_p2_10_coverage_review_decisions_append_only",
+        "definition": "CREATE TRIGGER trg_p2_10_coverage_review_decisions_append_only BEFORE DELETE OR UPDATE ON kai.coverage_review_decisions FOR EACH ROW EXECUTE FUNCTION kai.p2_10_reject_coverage_decision_mutation()",
+        "enabled": "O"
+      },
+      {
+        "table_name": "evidence_review_decisions",
+        "name": "evidence_review_decisions_p2_12_append_only",
+        "definition": "CREATE TRIGGER evidence_review_decisions_p2_12_append_only BEFORE DELETE OR UPDATE ON kai.evidence_review_decisions FOR EACH ROW EXECUTE FUNCTION kai.p2_12_reject_evidence_review_decision_mutation()",
+        "enabled": "O"
+      },
+      {
+        "table_name": "evidence_review_decisions",
+        "name": "trg_organization_factual_review_evidence_scope",
+        "definition": "CREATE TRIGGER trg_organization_factual_review_evidence_scope BEFORE INSERT ON kai.evidence_review_decisions FOR EACH ROW EXECUTE FUNCTION kai.organization_factual_review_enforce_evidence_scope()",
+        "enabled": "O"
+      }
+    ],
+    "functions": [
+      {
+        "name": "organization_factual_review_enforce_claim_scope",
+        "identity_arguments": "",
+        "prosrc_md5": "cc47c3efa66933ae7305d96f13d830c0",
+        "language": "plpgsql",
+        "volatility": "v",
+        "result_type": "trigger",
+        "security_definer": false,
+        "nargs": 0
+      },
+      {
+        "name": "organization_factual_review_enforce_coverage_scope",
+        "identity_arguments": "",
+        "prosrc_md5": "5389a02820cf48bd6ea464cb1c219d0b",
+        "language": "plpgsql",
+        "volatility": "v",
+        "result_type": "trigger",
+        "security_definer": false,
+        "nargs": 0
+      },
+      {
+        "name": "organization_factual_review_enforce_evidence_scope",
+        "identity_arguments": "",
+        "prosrc_md5": "ae7e4f3ef6bd212eb547b9903bc0c61c",
+        "language": "plpgsql",
+        "volatility": "v",
+        "result_type": "trigger",
+        "security_definer": false,
+        "nargs": 0
+      },
+      {
+        "name": "organization_factual_review_is_measurement_evidence",
+        "identity_arguments": "target_organization_id uuid, target_evidence_item_id uuid",
+        "prosrc_md5": "104e95b6bcef3df676b48086e1054e15",
+        "language": "sql",
+        "volatility": "s",
+        "result_type": "boolean",
+        "security_definer": false,
+        "nargs": 2
+      }
+    ]
+  }
+}
