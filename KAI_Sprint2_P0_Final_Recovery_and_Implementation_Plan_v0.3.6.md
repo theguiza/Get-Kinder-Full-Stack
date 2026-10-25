@@ -44503,3 +44503,56 @@ The real-path P3-01/P13-01, P2-06, Phase 13 Case A, P14-09, and Step E1 browser 
 **Remaining limitation:** generated internal text is no longer required to restate every current limitation. Limitations remain in the authoritative P2-06 projection, the provider input (`limitationCodes`), the review packet, and the factual-review blockers. Factual approval and release still refuse cited claims that are not currently eligible.
 
 **Status:** VAL_GEN_009_REGRESSION_CORRECTED_LOCALLY. Not pushed, deployed, or retested in production.
+
+### Ordinary internal factual reuse: redundant approvals removed, internal report download (2026-10-25)
+
+**Owner authorization (USER_CONFIRMED):** the owner prompt "KAI — Remove Redundant Approvals and Deliver Working Impact Report Generation". Ordinary, adequately supported impact information already authorized for internal use is reusable in evidence, claims, generation and internal report downloads with no further human approval, and no replacement approval is added. It authorizes local code, synthetic tests and local commits only: no push, deployment, production access, migration, schema, flag (`KAI_SPRINT2_ENABLED` unchanged), tenant, credential, or `00_KAI_CURRENT_STATE.md` change.
+
+**Starting state (TOOL_VERIFIED):** `main` at `3829539`, clean working tree.
+
+**What "ordinary" means (shared rule, `Backend/kai/dictionary/postgresOrdinaryInternalFactAuthority.js`):** P2-01M source-record-count measurement evidence whose measurement still matches its basis under a human-confirmed definition of the same source version; a `finding` claim whose statement is exactly the composed restatement of that measurement; a current source version whose current Phase-5 sensitivity decision is complete, permits the use and AI processing, and records each section 7.2 category as `absent`. The source classification moved here unchanged from `postgresOrganizationInternalReviewRepository.js` (re-exported for existing callers).
+
+**Removed approvals (TOOL_VERIFIED):**
+
+| Approval | Original dependency (at `3829539`) | Change |
+| --- | --- | --- |
+| A. GK/organization evidence review | P2-06 `evidence_review_unresolved` without a decision head (`postgresClaimTraceabilityRepository.js:768-775`) | Internal audience, ordinary claim, no evidence head: not added (`:789-795`). A recorded head still governs. |
+| B. Claim review | P2-06 `claim_review_unresolved` (`:754-760`) and `support_strength_unassessed` for `unassessed` strengths (`:782-783`) | Same rule for the claim head (`:776-780`); an `unassessed` strength with no head is supported by the deterministic count (`:805-809`); `reviewed_not_supported` still blocks. The stored `needs_gk_review` status and queue item are not rewritten; no decision row is created. |
+| C. Repeated measurement confirmation | "Confirm: the count is supported" (`ClientMeasuredClaimReviewPanel.jsx:18`, `clientMeasuredClaimReviewLogic.js:103`), which recorded the evidence/claim/coverage decisions for an already-defined measurement | Not offered for an eligible measurement (`clientMeasuredClaimReviewLogic.js:106`); the backend no longer needs it (A, B, D). The definition is recorded once per source version and reused by every report (`postgresSourceMeasurementRepository.js:208`, unchanged); no per-report confirmation existed in the backend. |
+| D. Coverage/limitation acceptance | `blocksRequestedAudience` for unresolved, unaccepted dimensions (`:708-711`, blocker `:789`) | The three source-level dimensions are carried, unresolved, as limitations of an ordinary measurement for internal use (`:726-730`); they are never recorded as accepted. They reach every report as `coverage.<dimension>.unresolved`, and Impact Facts lists them (`kaiClientImpactFactsService.js:62`). |
+| E. "Approve factual content" | The only Markdown route (`getClientReleasedReportMarkdown`, `kaiClientGeneratedContentService.js:790`) needed a manifest, which needed a completed factual review (`postgresOrganizationInternalReviewRepository.js:180`, `approveClientInternalDraftFactualReview` `:614`) | New `getClientInternalReportMarkdown` (`:609`) needs no review state. Content checks stay automatic: the draft's recorded validator results (VAL-GEN-001..005, 008) must all pass, and current P2-06 eligibility is re-read. The detail stops offering approval when the report is available (`:581`). |
+| F. "Release internal report" | `releaseClientInternalReport` (`:876`): export review, `limitations_confirmed`, snapshot, candidate, `export_authority_granted`, manifest, behind `KAI_PUBLIC_EXPORT_ENABLED` (`:880-881`) | Not needed for internal Markdown; the new route `GET .../client-internal-drafts/:draftId/markdown` (`sprint2IntakeApi.js:3691`) is not an export and is not gated by the export flag. No release, candidate, snapshot or manifest row is written. External/funder/public release is unchanged. |
+| G. Preparation ceremonies | Export review request/start/complete, limitation snapshot confirmation, candidate and manifest preparation (`:938-1003`) | Not executed for internal reports (not run behind the scenes). P2-04 gap reconciliation was already automatic at generation (`fa87ece`). Claim proposal ("Propose a claim") remains a single creation click, not an approval. |
+
+The optional organization review/release routes and GK routes are unchanged and still refuse everyone they refused; the UI no longer presents them (`ClientInternalDrafts.jsx` `InternalReport`, `:229`).
+
+**Internal report (Report 1 / Report 2):** `postgresClientInternalReportRepository.js` reads, in one REPEATABLE READ READ ONLY transaction, the review packet (P2-06 per cited claim; stale is 409), availability (`evaluateInternalReportAvailabilityInTransaction`: evidence summary or impact narrative, eligible claims, ordinary sources), validator results, context and per-claim facts. `kaiInternalReportMarkdownSerializer.js` writes context, purpose, key finding, period, definition and arithmetic, duplicates, limitations, what it establishes and does not, analysis, the validated generated narrative, traceability, authority basis, conclusion and references. A high-risk or unreviewed source keeps Get Kinder's review (422 with reasons). The client_admin role set is unchanged; `board_update` is not available to the organization, so Report 2 is the internal impact narrative.
+
+**Canaries:** the console canary and the CLI/browser-terminal canaries now run workspace → upload → sensitivity → measurement → automatic internal eligibility → generation → internal report download, with no GK-review, factual-review or release stage and no export-flag dependency.
+
+**Verification (TOOL_VERIFIED; `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel` for every Node/npm command; disposable loopback PostgreSQL):**
+
+| Command or suite | Result |
+| --- | --- |
+| Full `npm test` | 5,764 passed, 0 failed, 120 skipped (5,884) |
+| `kai-ordinary-internal-report.spec.js` (new) | 8/8 |
+| P2-04 / P2-06 / P2-08 runners | 18/18, 34/34, 20/20 |
+| P2-01M runner (adds: ordinary claim internally eligible with 0 evidence/claim/coverage decisions) | 56 passed, 0 failed, 8 skipped |
+| P3-01 / P13-01 runners | 22/22, 33/33 |
+| Plan A normal migration chain | 2/2, 30/30, 4/4 |
+| Internal report browser acceptance (rewritten E1 spec) | 16/16 |
+| Assembled customer file-to-report acceptance (two reports, zero approvals) | 23/23 |
+| Measurement-to-released-report, source-to-impact, client Knowledge Studio browser acceptance | 13/13, 16/16, 6/6 |
+| `verify:kai-sprint2-api-contract` | 71/71 |
+| `npm run build` | passed |
+| `git diff --check` | passed |
+
+Assembled acceptance outcome (real upload bytes → P1 → client_admin sensitivity/promotion → measurement → claim): independent count 5 = profile 5 = measurement 5 = claim 5 = generated 5 = Report 1 Markdown 5 = Report 2 Markdown 5; successful internal reports 2; complete Markdown artifacts 2; new evidence/claim/coverage/draft-review decisions 0; export-review queues, follow-ups and resolved review queues 0; limitation confirmations 0; release decisions 0; manifests 0. Refusals proven: other roles, inactive or other-organization administrators, other Projects, GK staff on the customer route, AI/assistant/system actors (read, approve, release), a fabricated metric and a causal assertion (VAL-GEN-004, nothing persisted), funder generation and every customer export step, a stale source (409), minors recorded present (422), AI permission revoked, a later "not supported" decision (ineligible, 422), and Get Kinder superseding the organization's decision.
+
+**Attributable failures repaired during the package:** the internal report read queried `kai.evidence_measurements` for non-measurement evidence (500 on schemas without P2-01M); it now reads a measurement only for measurement evidence.
+
+**Pre-existing, not attributable:** `kai-client-admin-evidence-to-draft-browser-acceptance` fails the same 6 tests at `3829539` (verified in a clean worktree; it expects generation to be refused before P2-04, which `fa87ece` changed).
+
+**Remaining (NOT_CONFIRMED):** real model prose (the provider is a deterministic SDK stub in every local run, so the two reports' narrative sections are identical); production schema, deployment and live acceptance; P2-01M is not confirmed applied in production.
+
+**Status:** ORDINARY_INTERNAL_FACTUAL_REUSE_IMPLEMENTED_AND_VERIFIED_LOCALLY. Not pushed, deployed, or retested in production.
