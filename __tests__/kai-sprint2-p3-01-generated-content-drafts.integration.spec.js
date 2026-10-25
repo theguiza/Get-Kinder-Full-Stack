@@ -113,36 +113,62 @@ async function runP301IntegrationSuite() {
     };
   }
 
+  // The stub provider deliberately writes no provisional designation or
+  // limitation disclosure: it returns only the cited claim statements, as a
+  // real provider may. VAL-GEN-009 compliance must come from the server.
   function generator({ calls = [] } = {}) {
     return async (input) => {
       calls.push(input);
-      const disclosureByCode = {
-        evidence_gap_unresolved: "Evidence gaps remain unresolved",
-        claim_review_unresolved: "Claim review remains unresolved",
-        claim_review_missing: "Claims need review",
-        evidence_review_unresolved: "Evidence review remains unresolved",
-        support_strength_unassessed: "Claim support is unassessed",
-        coverage_dimension_unresolved: "Coverage gaps remain unresolved",
-        client_followup_unresolved: "Client follow-ups remain unanswered",
-        potential_conflict_review_unresolved: "Potential conflict remains unresolved",
-        claim_not_approved_for_requested_audience: `Claim is not approved for ${input.requestedAudience}`,
-        audience_gate_closed: "Audience gate is closed",
-        requirement_authority_absent: "Requirement authority is absent",
-        traceability_incomplete: "Traceability is incomplete",
-      };
-      const limitationDisclosure = input.claims[0].limitationCodes
-        .map((code) => disclosureByCode[code] || `Unresolved limitation ${code}`)
-        .join("; ");
       return {
         blocks: [{
           ordinal: 1,
-          text: limitationDisclosure
-            ? `Provisional internal draft: ${limitationDisclosure}. ${input.claims[0].claimStatement}`
-            : input.claims[0].claimStatement,
-          citations: [{ claimId: input.claims[0].claimId, evidenceItemId: input.claims[0].evidenceItemId }],
+          text: input.claims.map((claim) => claim.claimStatement).join(" "),
+          citations: input.claims.map((claim) => ({ claimId: claim.claimId, evidenceItemId: claim.evidenceItemId })),
         }],
       };
     };
+  }
+
+  // The server-authored designation the repository must prepend for the
+  // given authoritative limitation codes, written out here as literals so
+  // this proof does not reuse the production mapping.
+  const EXPECTED_INTERNAL_DISCLOSURE = {
+    evidence_gap_unresolved: "An evidence gap is unresolved.",
+    claim_review_unresolved: "Claim review is unresolved.",
+    claim_review_missing: "The claim requires review.",
+    evidence_review_unresolved: "Evidence review is unresolved.",
+    support_strength_unassessed: "Support strength has not yet been assessed.",
+    coverage_dimension_unresolved: "A coverage dimension is unresolved.",
+    client_followup_unresolved: "A client follow-up is unanswered.",
+    potential_conflict_review_unresolved: "A potential conflict is under review.",
+    claim_not_approved_for_requested_audience: "The claim is not approved for the internal audience.",
+    audience_gate_closed: "The audience gate is closed: this audience is not authorized for current use.",
+    requirement_authority_absent: "Requirement authority is not established.",
+    traceability_incomplete: "Traceability is incomplete.",
+  };
+  function expectedProvisionalText(codes, body) {
+    const statements = codes.map((code) => {
+      assert.ok(EXPECTED_INTERNAL_DISCLOSURE[code], `no expected disclosure for ${code}`);
+      return EXPECTED_INTERNAL_DISCLOSURE[code];
+    });
+    return `Provisional internal draft: ${statements.join(" ")} ${body}`;
+  }
+
+  async function persistedBlockTexts(generatedContentDraftId) {
+    return (await query(
+      `SELECT text FROM kai.generated_content_blocks WHERE generated_content_draft_id = $1::uuid ORDER BY ordinal`,
+      [generatedContentDraftId],
+    )).map((row) => row.text);
+  }
+
+  async function currentTraceability(claimId) {
+    const result = await withRunnerOwnedTransaction((tx) => evaluateClaimTraceabilityInTransaction(tx, {
+      organizationId: ORG,
+      claimId,
+      requestedAudience: "internal",
+    }));
+    assert.equal(result.ok, true);
+    return result.data;
   }
 
   const evidenceRepo = createPostgresEvidenceLineageRepository({ runInTransaction: withRunnerOwnedTransaction });
@@ -206,6 +232,42 @@ async function runP301IntegrationSuite() {
     );
     preparedClaim = rows[0];
     return preparedClaim;
+  }
+
+  // A second real governed claim, proposed through the same path from the
+  // next extracted evidence item, for multi-claim blocks.
+  let preparedSecondClaim = null;
+  async function prepareSecondClaim() {
+    if (preparedSecondClaim) return preparedSecondClaim;
+    await prepareClaim();
+    const evidenceRows = await query(
+      `SELECT evidence_item_id
+         FROM kai.evidence_items
+        WHERE organization_id = $1::uuid
+        ORDER BY evidence_item_id
+        OFFSET 1 LIMIT 1`,
+      [ORG],
+    );
+    assert.equal(evidenceRows.length, 1, "the runner fixture must extract a second evidence item");
+    const claimResult = await proposeClaim(
+      { organizationId: ORG, evidenceItemId: evidenceRows[0].evidence_item_id, actorContext, now: NOW },
+      { env: { KAI_SPRINT2_ENABLED: "true" }, claimProposalRepository: claimRepo, metadataOnlyAudit: auditRecorder() },
+    );
+    assert.equal(claimResult.ok, true, JSON.stringify(claimResult.error));
+    const gapResult = await generateClaimGapFollowups(
+      { organizationId: ORG, claimId: claimResult.data.claim.claim_id, actorContext, now: NOW },
+      { env: { KAI_SPRINT2_ENABLED: "true" }, claimGapFollowupRepository: gapRepo, metadataOnlyAudit: auditRecorder() },
+    );
+    assert.equal(gapResult.ok, true);
+    const rows = await query(
+      `SELECT claim_id::text AS claim_id, evidence_item_id::text AS evidence_item_id, statement
+         FROM kai.claims
+        WHERE organization_id = $1::uuid
+          AND claim_id = $2::uuid`,
+      [ORG, claimResult.data.claim.claim_id],
+    );
+    preparedSecondClaim = rows[0];
+    return preparedSecondClaim;
   }
 
   function serviceInput(claim, idempotencyKey) {
@@ -315,6 +377,13 @@ async function runP301IntegrationSuite() {
     assert.deepEqual(await countsForKey(key), { runs: 1, drafts: 1, blocks: 1, citations: 1, queues: 1, audits: 1 });
     assert.deepEqual(published, [true]);
 
+    // VAL-GEN-009: the provider wrote only the claim statement; the persisted
+    // block carries the server-authored designation and every authoritative
+    // limitation before the provider's unchanged text.
+    assert.deepEqual(await persistedBlockTexts(result.data.generatedContentDraftId), [
+      expectedProvisionalText(calls[0].claims[0].limitationCodes, calls[0].claims[0].claimStatement),
+    ]);
+
     // AFTER CREATION: re-evaluate current traceability directly -- generation
     // must not itself alter review/eligibility state.
     const postEligibility = await withRunnerOwnedTransaction((tx) => evaluateClaimTraceabilityInTransaction(tx, {
@@ -405,6 +474,106 @@ async function runP301IntegrationSuite() {
     ]);
     assert.deepEqual(await countsForKey("fresh-ok-1"), { runs: 1, drafts: 1, blocks: 1, citations: 1, queues: 1, audits: 1 });
     assert.deepEqual(published, [true]);
+    // An eligible claim's block is persisted exactly as the provider wrote it.
+    assert.deepEqual(await persistedBlockTexts(result.data.generatedContentDraftId), [calls[0].claims[0].claimStatement]);
+  });
+
+  function realRepo() {
+    return createPostgresGeneratedContentRepository({ runInTransaction: withRunnerOwnedTransaction });
+  }
+
+  function realServiceDependencies(draftGenerator) {
+    return {
+      env: { KAI_SPRINT2_ENABLED: "true", KAI_GENERATION_ENABLED: "true" },
+      getEngagementForOrganization: engagementLookup,
+      ...p204ReplayDependencies,
+      generatedContentRepository: realRepo(),
+      draftGenerator,
+      metadataOnlyAudit: auditRecorder(),
+    };
+  }
+
+  test("VAL-GEN-009 repair: one block citing two currently ineligible claims receives every limitation of each claim, with both citations preserved", async () => {
+    const first = await prepareClaim();
+    const second = await prepareSecondClaim();
+    const key = "val-gen-009-multi-ineligible";
+    const calls = [];
+    const result = await createEvidenceSummaryDraft(
+      { ...serviceInput(first, key), claimIds: [first.claim_id, second.claim_id].sort() },
+      realServiceDependencies(generator({ calls })),
+    );
+    assert.equal(result.ok, true, JSON.stringify(result));
+    const traces = [await currentTraceability(first.claim_id), await currentTraceability(second.claim_id)];
+    assert.ok(traces.every((trace) => trace.eligible === false));
+    const claims = calls[0].claims;
+    assert.equal(claims.length, 2);
+    const codes = [...new Set(claims.flatMap((claim) => claim.limitationCodes))];
+    for (const trace of traces) {
+      for (const code of trace.blockerCodes) assert.ok(codes.includes(code), `${code} must be disclosed`);
+    }
+    assert.deepEqual(await persistedBlockTexts(result.data.generatedContentDraftId), [
+      expectedProvisionalText(codes, claims.map((claim) => claim.claimStatement).join(" ")),
+    ]);
+    assert.deepEqual(await countsForKey(key), { runs: 1, drafts: 1, blocks: 1, citations: 2, queues: 1, audits: 1 });
+    assert.deepEqual(
+      (await query(
+        `SELECT c.claim_id::text AS claim_id, c.evidence_item_id::text AS evidence_item_id
+           FROM kai.generated_content_citations c
+           JOIN kai.generated_content_blocks b ON b.generated_content_block_id = c.generated_content_block_id
+          WHERE b.generated_content_draft_id = $1::uuid
+          ORDER BY c.claim_id`,
+        [result.data.generatedContentDraftId],
+      )),
+      [first, second].map(({ claim_id, evidence_item_id }) => ({ claim_id, evidence_item_id }))
+        .sort((a, b) => a.claim_id.localeCompare(b.claim_id)),
+    );
+  });
+
+  test("VAL-GEN-009 repair: the provisional designation does not make an unsupported assertion acceptable for an ineligible claim", async () => {
+    const claim = await prepareClaim();
+    for (const [suffix, text] of [
+      ["plain", "This program caused a 42% increase not present in any cited claim."],
+      ["self-labelled", "Provisional internal draft: claim review is unresolved. This program caused a 42% increase."],
+    ]) {
+      const key = `val-gen-009-unsupported-${suffix}`;
+      const result = await createEvidenceSummaryDraft(
+        serviceInput(claim, key),
+        realServiceDependencies(async (input) => ({
+          blocks: [{
+            ordinal: 1,
+            text,
+            citations: [{ claimId: input.claims[0].claimId, evidenceItemId: input.claims[0].evidenceItemId }],
+          }],
+        })),
+      );
+      assert.equal(result.ok, false);
+      assert.equal(result.error.code, "validation_blocker");
+      assert.deepEqual(result.blockers.map((blocker) => blocker.validator_key), ["VAL-GEN-004"]);
+      assert.deepEqual(await countsForKey(key), { runs: 0, drafts: 0, blocks: 0, citations: 0, queues: 0, audits: 0 });
+    }
+  });
+
+  test("VAL-GEN-009 repair: a provider-written designation is not repeated, and the server disclosure still lists every limitation", async () => {
+    const claim = await prepareClaim();
+    const key = "val-gen-009-provider-label";
+    const calls = [];
+    const result = await createEvidenceSummaryDraft(
+      serviceInput(claim, key),
+      realServiceDependencies(async (input) => {
+        calls.push(input);
+        return {
+          blocks: [{
+            ordinal: 1,
+            text: `Provisional internal draft: ${input.claims[0].claimStatement}`,
+            citations: [{ claimId: input.claims[0].claimId, evidenceItemId: input.claims[0].evidenceItemId }],
+          }],
+        };
+      }),
+    );
+    assert.equal(result.ok, true, JSON.stringify(result));
+    const [text] = await persistedBlockTexts(result.data.generatedContentDraftId);
+    assert.equal(text, expectedProvisionalText(calls[0].claims[0].limitationCodes, calls[0].claims[0].claimStatement));
+    assert.equal(text.match(/provisional internal draft/gi).length, 1);
   });
 
   test("P3-01 identical replay returns replayed with zero generator calls, writes, and audit", async () => {
@@ -665,6 +834,35 @@ async function runP301IntegrationSuite() {
     assert.equal(result.ok, false);
     assert.equal(result.error.code, "validation_blocker");
     assert.deepEqual(await countsForKey(key), { runs: 0, drafts: 0, blocks: 0, citations: 0, queues: 0, audits: 0 });
+  });
+
+  test("VAL-GEN-009 repair: a real-path impact narrative for a currently ineligible claim succeeds from undisclosed provider prose and stays an unapproved provisional draft", async () => {
+    const claim = await prepareClaim();
+    const key = "val-gen-009-impact-narrative-ineligible";
+    const calls = [];
+    const result = await createImpactNarrativeDraft(serviceInput(claim, key), realServiceDependencies(generator({ calls })));
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(calls[0].contentType, "impact_narrative");
+    const trace = await currentTraceability(claim.claim_id);
+    assert.equal(trace.eligible, false, "generation must not change eligibility");
+    assert.deepEqual(calls[0].claims[0].limitationCodes, [...new Set(trace.blockerCodes)].sort());
+    assert.deepEqual(await persistedBlockTexts(result.data.generatedContentDraftId), [
+      expectedProvisionalText(calls[0].claims[0].limitationCodes, calls[0].claims[0].claimStatement),
+    ]);
+    const [draftRow] = await query(
+      `SELECT draft_status, review_status, validator_results FROM kai.generated_content_drafts WHERE generated_content_draft_id = $1::uuid`,
+      [result.data.generatedContentDraftId],
+    );
+    assert.equal(draftRow.draft_status, "draft");
+    assert.equal(draftRow.review_status, "needs_gk_review");
+    assert.ok(draftRow.validator_results.some((entry) => entry.validator_key === "VAL-GEN-009" && entry.severity === "pass"));
+    const packet = await realRepo().getGeneratedDraftReviewPacket({
+      organizationId: ORG,
+      generatedContentDraftId: result.data.generatedContentDraftId,
+    });
+    assert.equal(packet.ok, true, packet.error?.code);
+    assert.equal(packet.data.currentUseEligible, false);
+    assert.equal(packet.data.blocks[0].citations[0].currentEligible, false);
   });
   }
 }

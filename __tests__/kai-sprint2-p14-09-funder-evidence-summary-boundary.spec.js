@@ -483,7 +483,8 @@ function makeEvaluator({ eligibleForClaim = () => true } = {}) {
         evidence: { evidence_item_id: EVIDENCE },
         requestedAudience,
         eligible: eligibleForClaim(claimId, n),
-        blockerCodes: [],
+        // As in P2-06, an ineligible claim always carries a blocker code.
+        blockerCodes: eligibleForClaim(claimId, n) ? [] : ["claim_review_unresolved"],
         affectedDimensionKeys: [],
         affectedObjectIds: [],
       },
@@ -632,10 +633,13 @@ test("P14-09 an internal request is never subject to the funder eligibility gate
     { ...funderInput(), requestedAudience: "internal", idempotencyKey: "p14-09-internal-ineligible" },
     { draftGenerator: funderGenerator({ calls: generatorCalls }), metadataOnlyAudit: auditRecorder() },
   );
-  assert.equal(result.ok, true);
+  assert.equal(result.ok, true, JSON.stringify(result));
   assert.equal(generatorCalls.length, 1);
   assert.equal(state.generatedContentDrafts.length, 1);
   assert.equal(state.generatedContentDrafts[0].requested_audience, "internal");
+  assert.deepEqual(state.generatedContentBlocks.map((block) => block.text), [
+    "Provisional internal draft: Claim review is unresolved. current eligibility remains unresolved. Enrollment increased by 12% in 2025.",
+  ]);
 });
 
 // --- Generator adapter: funder audience is accepted, internal wording is unchanged ---

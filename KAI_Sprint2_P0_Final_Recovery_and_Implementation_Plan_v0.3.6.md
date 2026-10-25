@@ -44400,3 +44400,44 @@ The isolated P14-09/P14-11/P3-18 generation-service fixtures and the traceabilit
 **Release handoff boundary (NOT_CONFIRMED):** no repository script, workflow, platform manifest, or documented application publish/deploy command was found. The local remote target is `origin/main`, but this repository inspection does not establish the remote's deployment automation or an application health endpoint. The exact production publish mechanism and health/revision check must therefore be obtained from the authorized deployment operator before publication. The repaired candidate has a new local commit and is not authorized under the prior `fa87ece` candidate reference.
 
 **Status:** P2_04_P2_06_GENERATION_SAFETY_CORRECTION_VERIFIED_LOCALLY; RELEASE_CANDIDATE_CHANGED; DEPLOYMENT_MECHANISM_AND_NEW_CANDIDATE_AUTHORIZATION_NOT_CONFIRMED. No push, deployment, production retest, or canary was performed.
+
+### VAL-GEN-009 producer repair: server-authored provisional disclosure (2026-10-25)
+
+**Scope (USER_CONFIRMED):** owner execution prompt to repair the producer/validator mismatch introduced by `c1a1137`, inside the shared generated-content assembly path only. `VAL-GEN-009` stays enabled and unchanged in what it accepts. No P2-04, administrator-permission, Migration 05, authentication, API-sanitizer, eligibility, or approval change. No push, deployment, production access, flag change, or `00_KAI_CURRENT_STATE.md` update.
+
+**Defect (TOOL_VERIFIED):** the production impact-narrative request returned HTTP 422 `VAL-GEN-009` `ineligible_claim_context_not_disclosed`. `VAL-GEN-009` requires every block citing a claim with `currentEligible === false` to start with `Provisional internal draft` and to match a fixed pattern for each limitation code, but none of the nine production generators was told the designation, and the generator input carries only raw codes. The `c1a1137` proofs used stub providers that already wrote compliant text, so the real path was never proven.
+
+**Repair (TOOL_VERIFIED):** `Backend/kai/validators/kaiGeneratedContentValidators.js` now keeps, per limitation code, the `VAL-GEN-009` pattern and the server-authored statement that satisfies it side by side (one mapping, no drift). The new `qualifyIneligibleClaimBlocks` prefixes each block citing a currently ineligible claim with `Provisional internal draft:` and one statement per authoritative limitation code of every such cited claim (de-duplicated, in claim order). The provider body is kept unchanged; only a leading designation the provider wrote is dropped to avoid repetition. Eligible-only blocks are returned untouched, and citations are never altered. It fails closed if an ineligible cited claim has no limitation code (`ineligible_claim_limitations_unavailable`) or one with no statement (`ineligible_claim_limitation_not_disclosable`). In `createGeneratedContentDraft` (`postgresGeneratedContentRepository.js`), shared by all nine content types, the provider's unqualified blocks must first pass every validator other than `VAL-GEN-009`, so the prefix cannot mask an unsupported numeric, causal, readiness, or gap assertion. The qualified blocks are then rechecked against the block/text limits (`provisional_disclosure_exceeds_text_limit` on overflow), validated in full, and persisted.
+
+**Proof with non-compliant provider output (TOOL_VERIFIED):** the P3-01, P2-06, Phase 13 horizontal, P14-09, and Step E1 browser fixtures now return only the bare claim statement. Persisted text is asserted against literal expected statements:
+- P3-01 real path: Evidence Summary for an ineligible claim succeeds with every real P2-06 blocker disclosed.
+- P13-01: Impact Narrative for an ineligible claim succeeds as a `draft` / `needs_gk_review` draft with `VAL-GEN-009` passing and the packet still `currentUseEligible=false`.
+- Two ineligible claims in one block: every limitation of both is disclosed and both citations persist.
+- Eligible claims persist exactly as written.
+- Unsupported assertions stay blocked by `VAL-GEN-004` alone, both plain and provider-self-labelled, with zero rows written.
+- A provider-written designation is not repeated.
+- Missing or unknown authoritative limitations fail closed.
+- The Phase 13 Case A loop proves the same server disclosure through the real repository for all eight internal content types. `funder_outcome_table` remains funder-only and eligibility-gated.
+- The P14-09 fake evaluator previously returned `eligible:false` with no blocker codes, which P2-06 cannot produce. It now carries `claim_review_unresolved`.
+- The three DB-backed P3-01 checks for other content types were dropped. The P3-01 runner schema rejects those content types at persistence (`VAL-GEN-PERSIST-P0-001`), a pre-existing fixture limit; they are covered by Phase 13.
+
+**Verification (TOOL_VERIFIED; loopback sentinel `DATABASE_URL` for every Node/npm command, disposable local PostgreSQL):**
+
+| Command or suite | Result |
+| --- | --- |
+| Baseline at `c1a1137`: P3-01 / P2-06 runners | 19/19, 34/34 passed |
+| P3-01 generated-content drafts runner | 24/24 passed |
+| P13-01 impact-narrative runner (P3-01 + P13-01 specs) | 35/35 passed |
+| P2-06 traceability (P2-04 reconciliation on a legacy claim) | 34/34 passed |
+| P2-04 lifecycle and replay | 18/18 passed |
+| P2-08 audience eligibility | 20/20 passed |
+| P2-01M measurement | 56 passed, 0 failed, 8 skipped |
+| Plan A normal migration chain | 2/2, 30/30, 4/4 passed |
+| Step E1 internal factual-review browser acceptance | 17/17 passed |
+| Five-record assembled customer file-to-report acceptance | 25/25 passed |
+| API contract verification | 71/71 passed |
+| Full `npm test` | 5,758 passed, 0 failed, 120 skipped (5,878 total) |
+
+**Remaining limitations:** a provider block within about 600 characters of the 4,000-character limit, cited to many-limitation ineligible claims, is refused rather than truncated. The disclosure is a fixed server sentence per code, not prose tailored to the claim. Factual approval and release still block ineligible cited claims; this repair grants no approval or funder/public authority.
+
+**Status:** VAL_GEN_009_PRODUCER_REPAIR_VERIFIED_LOCALLY. Not pushed, deployed, or retested in production.

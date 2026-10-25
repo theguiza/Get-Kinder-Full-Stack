@@ -776,6 +776,9 @@ for (const contentType of CONTENT_TYPES.filter((type) => type !== "funder_outcom
 
     assert.equal(result.ok, true, JSON.stringify(result));
     assert.equal(result.data.draftStatus, "draft");
+    assert.deepEqual(state.generatedContentBlocks.map((block) => block.text), [
+      `Provisional internal draft: Support strength has not yet been assessed. ${SAFE_STATEMENT}`,
+    ]);
   });
 }
 
@@ -1122,35 +1125,17 @@ function auditRecorder() {
   return { prepareMetadataOnlyAudit() { return { ok: true, async publish() {} }; } };
 }
 
+// The provider writes no provisional designation or limitation disclosure,
+// only the cited claim statement: VAL-GEN-009 compliance for an ineligible
+// claim must come from the shared repository path, not the provider.
 function goodGenerator() {
-  return async (generatorInput) => {
-    const disclosures = {
-      evidence_gap_unresolved: "Evidence gaps remain unresolved",
-      claim_review_unresolved: "Claim review remains unresolved",
-      claim_review_missing: "Claims need review",
-      evidence_review_unresolved: "Evidence review remains unresolved",
-      support_strength_unassessed: "Claim support is unassessed",
-      coverage_dimension_unresolved: "Coverage gaps remain unresolved",
-      client_followup_unresolved: "Client follow-ups remain unanswered",
-      potential_conflict_review_unresolved: "Potential conflict remains unresolved",
-      claim_not_approved_for_requested_audience: `Claim is not approved for ${generatorInput.requestedAudience}`,
-      audience_gate_closed: "Audience gate is closed",
-      requirement_authority_absent: "Requirement authority is absent",
-      traceability_incomplete: "Traceability is incomplete",
-    };
-    const limitationText = generatorInput.claims[0].limitationCodes
-      .map((code) => disclosures[code] || `Unresolved limitation ${code}`)
-      .join("; ");
-    return {
-      blocks: [{
-        ordinal: 1,
-        text: limitationText
-          ? `Provisional internal draft: current claim limitations remain unresolved: ${limitationText}. ${generatorInput.claims[0].claimStatement}`
-          : generatorInput.claims[0].claimStatement,
-        citations: [{ claimId: generatorInput.claims[0].claimId, evidenceItemId: generatorInput.claims[0].evidenceItemId }],
-      }],
-    };
-  };
+  return async (generatorInput) => ({
+    blocks: [{
+      ordinal: 1,
+      text: generatorInput.claims[0].claimStatement,
+      citations: [{ claimId: generatorInput.claims[0].claimId, evidenceItemId: generatorInput.claims[0].evidenceItemId }],
+    }],
+  });
 }
 
 function creationDependenciesFor(contentType) {
@@ -1202,6 +1187,9 @@ for (const contentType of CONTENT_TYPES) {
     });
 
     assert.equal(result.ok, true, JSON.stringify(result));
+
+    // An eligible claim's block is persisted exactly as the provider wrote it.
+    assert.deepEqual(state.generatedContentBlocks.map((block) => block.text), [SAFE_STATEMENT]);
 
     // Predicate 8: successful output remains a `draft`.
     assert.equal(result.data.draftStatus, "draft");

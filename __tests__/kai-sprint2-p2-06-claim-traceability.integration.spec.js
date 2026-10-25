@@ -1312,7 +1312,8 @@ async function runP206IntegrationSuite() {
         return {
           blocks: [{
             ordinal: 1,
-            text: `Provisional internal draft: coverage gaps remain unresolved and client follow-ups remain unanswered. ${claims[0].claimStatement}`,
+            // The provider writes no disclosure; the server must add it.
+            text: claims[0].claimStatement,
             citations: [{ claimId: claims[0].claimId, evidenceItemId: claims[0].evidenceItemId }],
           }],
         };
@@ -1325,6 +1326,10 @@ async function runP206IntegrationSuite() {
     assert.equal(generated.data.requestedAudience, "internal");
     assert.equal(generated.data.blocks.length, 1);
     assert.match(generated.data.blocks[0].text, /^Provisional internal draft:/);
+    assert.ok(generated.data.blocks[0].text.endsWith(` ${providerCalls[0].claimStatement}`));
+    assert.ok(providerCalls[0].limitationCodes.length > 0);
+    assert.match(generated.data.blocks[0].text, /A coverage dimension is unresolved\./);
+    assert.match(generated.data.blocks[0].text, /A client follow-up is unanswered\./);
     assert.deepEqual(generated.data.blocks[0].citations.map(({ claimId, evidenceItemId }) => ({ claimId, evidenceItemId })), [
       { claimId: legacy.claimId, evidenceItemId: providerCalls[0].evidenceItemId },
     ]);
