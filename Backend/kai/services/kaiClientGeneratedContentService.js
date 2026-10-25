@@ -12,6 +12,7 @@ import { __generatedContentReviewPacketServiceTestables } from "./kaiGeneratedCo
 import { __testables as generatedDraftLibraryTestables } from "./kaiGeneratedDraftLibraryService.js";
 import { serializeExportManifestRenderModelToMarkdown, __exportManifestMarkdownSerializerTestables } from "./kaiExportManifestMarkdownSerializer.js";
 import { BOARD_REPORTING_PACKET_AUDIENCE } from "./kaiBoardReportingPacketService.js";
+import { serializeInternalReportToMarkdown, __internalReportMarkdownSerializerTestables } from "./kaiInternalReportMarkdownSerializer.js";
 
 /**
  * Client-safe Generated Drafts, Grant Response Packet preview, and Board
@@ -427,26 +428,31 @@ function isInternalDraftSummary(summary) {
   return CLIENT_INTERNAL_DRAFT_CONTENT_TYPES.has(summary.contentType) && summary.requestedAudience === INTERNAL_AUDIENCE;
 }
 
-function internalDraftLimitations(packet, reviewState) {
+// A draft available as an internal report (owner decision 2026-10-25) needs
+// no further review for internal use, so a pending review is not listed as a
+// limitation of it; the review state itself is reported unchanged.
+function internalDraftLimitations(packet, reviewState, internalReportAvailable = false) {
   return [
     "internal_use_only",
     "not_approved_for_external_use",
-    ...(reviewState === CLIENT_INTERNAL_REVIEW_STATE.AWAITING_GET_KINDER || reviewState === CLIENT_INTERNAL_REVIEW_STATE.IN_GET_KINDER
+    ...(!internalReportAvailable
+      && (reviewState === CLIENT_INTERNAL_REVIEW_STATE.AWAITING_GET_KINDER || reviewState === CLIENT_INTERNAL_REVIEW_STATE.IN_GET_KINDER)
       ? ["awaiting_get_kinder_review"]
       : []),
-    ...(reviewState === CLIENT_INTERNAL_REVIEW_STATE.AWAITING_ORGANIZATION ? ["awaiting_organization_review"] : []),
+    ...(!internalReportAvailable && reviewState === CLIENT_INTERNAL_REVIEW_STATE.AWAITING_ORGANIZATION ? ["awaiting_organization_review"] : []),
     ...(packet.currentUseEligible === true ? [] : ["cited_claims_not_currently_eligible"]),
   ];
 }
 
-function toClientInternalDraft(packet, reviewState) {
+function toClientInternalDraft(packet, reviewState, internalReportAvailable = false) {
   return {
     generatedContentDraftId: packet.generatedContentDraftId,
     contentType: packet.contentType,
     audience: INTERNAL_AUDIENCE,
     reviewState,
     citedClaimsCurrentlyEligible: packet.currentUseEligible === true,
-    limitations: internalDraftLimitations(packet, reviewState),
+    internalReportAvailable,
+    limitations: internalDraftLimitations(packet, reviewState, internalReportAvailable),
     blocks: packet.blocks.map((block) => ({
       ordinal: block.ordinal,
       text: block.text,
@@ -505,11 +511,13 @@ export async function listClientInternalDrafts(input, dependencies = {}) {
       if (!packet) return buildKaiError("system_error");
       const view = await internalReviewView({ organizationId, packet }, dependencies);
       if (!view) continue;
+      const internalUse = await (await organizationReviewRepository(dependencies)).evaluateInternalReport({ organizationId, packet });
       items.push({
         generatedContentDraftId: packet.generatedContentDraftId,
         contentType: packet.contentType,
         audience: INTERNAL_AUDIENCE,
         reviewState: view.reviewState,
+        internalReportAvailable: internalUse.available === true,
         createdAt: summary.createdAt,
         blockCount: packet.blocks.length,
       });
@@ -547,21 +555,90 @@ export async function getClientInternalDraft(input, dependencies = {}) {
     return buildKaiError("not_found");
   }
   const { reviewState, evaluation } = await internalReviewView({ organizationId, packet }, dependencies);
+  const report = await (await internalReportRepository(dependencies)).readInternalReport({ organizationId, generatedContentDraftId });
+  if (!report.ok) {
+    return buildKaiError(DRAFT_NOT_PRESENTABLE_CODES.has(report.error?.code) ? "not_found" : report.error?.code || "system_error");
+  }
+  const internalReport = {
+    available: report.data.available === true,
+    getKinderReviewReasons: [...report.data.getKinderReviewReasons],
+    blockedReasons: [...report.data.blockedReasons],
+  };
   const release = await clientReleaseState({
     organizationId, generatedContentDraftId, reviewState, actorContext: input.actorContext,
   }, dependencies);
   if (release.error) return release.error;
+  // An available internal report needs no factual approval or release
+  // decision for internal use, so neither is offered as a next action.
+  const factualReview = clientFactualReviewView({ reviewState, evaluation, actorContext: input.actorContext, organizationId });
+  const organizationRelease = clientOrganizationReleaseView({ release, actorContext: input.actorContext, organizationId });
   return {
     ok: true,
     data: {
-      ...toClientInternalDraft(packet, reviewState),
+      ...toClientInternalDraft(packet, reviewState, internalReport.available),
+      internalReport,
       release: release.value,
-      factualReview: clientFactualReviewView({ reviewState, evaluation, actorContext: input.actorContext, organizationId }),
-      organizationRelease: clientOrganizationReleaseView({ release, actorContext: input.actorContext, organizationId }),
+      factualReview: internalReport.available ? { ...factualReview, actorMayApprove: false } : factualReview,
+      organizationRelease: internalReport.available ? { ...organizationRelease, actorMayRelease: false } : organizationRelease,
     },
     error: null,
   };
 }
+
+async function internalReportRepository(dependencies) {
+  return dependencies.internalReportRepository
+    || (await import("../dictionary/postgresClientInternalReportRepository.js")).createPostgresClientInternalReportRepository();
+}
+
+/**
+ * The organization's internal report as Markdown (owner decision 2026-10-25):
+ * ordinary internal factual content needs no factual approval, release
+ * decision, limitation confirmation, candidate or manifest for internal use.
+ *
+ * Admission: mapped human, client_admin with an active same-organization
+ * membership, tenant validation, the Project in this organization and the
+ * draft generated under it, before any read. The repository then re-reads,
+ * in one read-only transaction, the draft and every cited claim's current
+ * P2-06 internal eligibility, every cited source's currentness, permission
+ * and section 7.2 classification, and the recorded validator results; any
+ * failure refuses the download with structured blockers (a high-risk source
+ * still needs Get Kinder's review), a stale claim or source is
+ * conflict_current_state_changed. Writes nothing; grants no funder or public
+ * use. Not behind KAI_PUBLIC_EXPORT_ENABLED: this is no export or release.
+ */
+export async function getClientInternalReportMarkdown(input, dependencies = {}) {
+  const denied = admit(input, ["organizationId", "engagementId", "generatedContentDraftId", "actorContext"], dependencies, INTERNAL_DRAFT_ADMISSION);
+  if (denied) return denied;
+  const { organizationId, engagementId, generatedContentDraftId } = input;
+  const engagementError = await resolveEngagement({ organizationId, engagementId }, dependencies);
+  if (engagementError) return engagementError;
+  const readDraftEngagement = dependencies.readGeneratedDraftEngagementId || readGeneratedDraftEngagementId;
+  if ((await readDraftEngagement(organizationId, generatedContentDraftId)) !== engagementId) return buildKaiError("not_found");
+  const report = await (await internalReportRepository(dependencies)).readInternalReport({ organizationId, generatedContentDraftId });
+  if (!report.ok) return buildKaiError(report.error?.code || "system_error");
+  const model = report.data;
+  if (model.report.audience !== INTERNAL_AUDIENCE || !CLIENT_INTERNAL_DRAFT_CONTENT_TYPES.has(model.report.contentType)) return buildKaiError("not_found");
+  if (!model.available) {
+    return buildKaiError("blocked", {
+      blockers: [...model.getKinderReviewReasons, ...model.blockedReasons].map((reason) => ({
+        validator_key: INTERNAL_REPORT_VALIDATOR_KEY,
+        severity: "blocker",
+        blocking_reason: reason,
+      })),
+    });
+  }
+  return {
+    ok: true,
+    data: {
+      markdownContractVersion: __internalReportMarkdownSerializerTestables.MARKDOWN_CONTRACT_VERSION,
+      contentType: model.report.contentType,
+      markdown: serializeInternalReportToMarkdown(model),
+    },
+    error: null,
+  };
+}
+
+const INTERNAL_REPORT_VALIDATOR_KEY = "VAL-KAI-INTERNAL-REPORT-001";
 
 // What the detail shows about the factual review: whether this actor may
 // approve it now, and the reason codes that hold it for Get Kinder or block

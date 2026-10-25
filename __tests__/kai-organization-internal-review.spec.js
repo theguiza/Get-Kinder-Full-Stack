@@ -81,6 +81,16 @@ function actor(roleName, { organizationId = ORG, status = "active", actorType = 
   };
 }
 
+function internalReportAvailability(evaluation, p) {
+  const getKinderReviewReasons = evaluation.getKinderReviewReasons
+    .filter((reason) => reason !== "content_type_requires_get_kinder_review" || !["evidence_summary", "impact_narrative"].includes(p.contentType));
+  return {
+    available: getKinderReviewReasons.length === 0 && evaluation.blockedReasons.length === 0,
+    getKinderReviewReasons,
+    blockedReasons: evaluation.blockedReasons,
+  };
+}
+
 // A review lifecycle stand-in: state, the admission hook run "in the
 // transaction" before any write, and a write log.
 function harness({ initial = packet(), decision = CLEARED, reviewer = null } = {}) {
@@ -120,7 +130,15 @@ function harness({ initial = packet(), decision = CLEARED, reviewer = null } = {
     readGeneratedDraftEngagementId: async (organizationId, draftId) => (organizationId === ORG && draftId === id("d", 1) ? ENGAGEMENT : null),
     organizationReviewRepository: {
       evaluate: async ({ packet: p }) => evaluateInTransaction("TX", { packet: p }),
+      evaluateInternalReport: async ({ packet: p }) => internalReportAvailability(await evaluateInTransaction("TX", { packet: p }), p),
       readCompletedReviewer: async () => state.reviewer,
+    },
+    // The internal report read over the same classifiers (owner decision
+    // 2026-10-25): available with no review once ordinary and eligible.
+    internalReportRepository: {
+      async readInternalReport() {
+        return { ok: true, data: internalReportAvailability(await evaluateInTransaction("TX", { packet: state.packet }), state.packet) };
+      },
     },
     generatedContentRepository: {
       async getGeneratedDraftReviewPacket() {
@@ -267,18 +285,21 @@ test("approval: only an active client_admin of this organization, for its Projec
   assert.deepEqual([...__clientGeneratedContentServiceContract.CLIENT_INTERNAL_FACTUAL_REVIEW_ROLES], ["client_admin"]);
 });
 
-test("detail: an ordinary unreviewed summary is awaiting the organization's review with the action offered; a held one shows Get Kinder's reasons; a completed one says who reviewed it", async () => {
+test("detail: an ordinary unreviewed summary is the organization's internal report with no approval offered; a held one shows Get Kinder's reasons; a completed one says who reviewed it", async () => {
   const read = (dependencies) => getClientInternalDraft({ organizationId: ORG, engagementId: ENGAGEMENT, generatedContentDraftId: id("d", 1), actorContext: actor("client_admin") }, dependencies);
   const ordinary = harness();
   const detail = await read(ordinary.dependencies);
   assert.equal(detail.ok, true, JSON.stringify(detail));
-  assert.equal(detail.data.reviewState, "awaiting_organization_review");
-  assert.equal(internalDraftFactualReviewHeading(detail.data.reviewState, detail.data.factualReview), "Awaiting your factual review");
-  assert.deepEqual(detail.data.limitations, ["internal_use_only", "not_approved_for_external_use", "awaiting_organization_review"]);
+  assert.equal(detail.data.reviewState, "awaiting_organization_review", "the review lifecycle itself is reported unchanged");
+  // Owner decision 2026-10-25: no factual approval is required for internal use.
+  assert.deepEqual(detail.data.internalReport, { available: true, getKinderReviewReasons: [], blockedReasons: [] });
+  assert.equal(detail.data.internalReportAvailable, true);
+  assert.deepEqual(detail.data.limitations, ["internal_use_only", "not_approved_for_external_use"]);
   assert.deepEqual(detail.data.release, { state: "awaiting_organization_review", releasedReportId: null });
-  assert.deepEqual(detail.data.factualReview, { actorMayApprove: true, getKinderReviewReasons: [], blockedReasons: [] });
+  assert.deepEqual(detail.data.factualReview, { actorMayApprove: false, getKinderReviewReasons: [], blockedReasons: [] }, "no approval is offered");
   const projected = projectClientInternalDraft(detail.data);
-  assert.equal(projected.factualReview.actorMayApprove, true);
+  assert.equal(projected.factualReview.actorMayApprove, false);
+  assert.equal(projected.internalReport.available, true);
   assert.equal(projectClientInternalDraft({ ...detail.data, factualReview: { actorMayApprove: true, getKinderReviewReasons: ["invented"], blockedReasons: [] } })
     .factualReview.actorMayApprove, false, "a malformed view offers no approval");
 

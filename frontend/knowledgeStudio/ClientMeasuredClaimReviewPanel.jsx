@@ -16,8 +16,8 @@ import {
 
 const JUDGMENTS = Object.freeze([
   ["supported", "Confirm: the count is supported", "btn-primary"],
-  ["not_supported", "Not supported", "btn-outline-danger"],
-  ["needs_more_information", "Needs more information", "btn-outline-secondary"],
+  ["not_supported", "Report a problem: not supported", "btn-outline-danger"],
+  ["needs_more_information", "Report a problem: needs more information", "btn-outline-secondary"],
 ]);
 
 /**
@@ -31,6 +31,10 @@ const JUDGMENTS = Object.freeze([
  * existing route (evidence review, internal claim review, internal coverage
  * acceptance), stopping at the first refusal. A judgment the server does not
  * admit is not offered.
+ *
+ * Owner decision 2026-10-25: an ordinary measurement is usable for internal
+ * reports without any of these decisions, so for an eligible claim the panel
+ * only shows the measurement and offers a way to report a problem.
  */
 export default function ClientMeasuredClaimReviewPanel({ organizationId, claimId, onClose, onRecorded }) {
   const [state, setState] = useState({ status: "loading", review: null, error: "" });
@@ -74,7 +78,7 @@ export default function ClientMeasuredClaimReviewPanel({ organizationId, claimId
   return (
     <div className="border rounded p-2 mt-2" data-client-measured-claim-review={claimId}>
       <div className="d-flex justify-content-between align-items-center">
-        <div className="fw-semibold">Review this measurement</div>
+        <div className="fw-semibold">Measurement</div>
         <button type="button" className="btn btn-sm btn-link" onClick={onClose}>Close</button>
       </div>
       {state.status === "loading" ? <div className="text-muted">Loading the review...</div> : null}
@@ -109,12 +113,20 @@ export default function ClientMeasuredClaimReviewPanel({ organizationId, claimId
               </ul>
             </div>
           ) : null}
+          {review.internalEligibility.eligible && !review.evidenceReview.decisionOutcome && !review.claimReview.decisionOutcome ? (
+            <div className="mt-1" data-client-measured-claim-no-review-required="">
+              No evidence, claim or limitation review is required for internal use: the count comes from the authorized source under your
+              organization&apos;s recorded definition, and its limitations are carried into every report.
+            </div>
+          ) : null}
           <div className="mt-1" data-client-measured-claim-review-decisions="">
             <div>Evidence review: {decisionStateText(review.evidenceReview)}</div>
             <div>Claim review: {decisionStateText(review.claimReview)}</div>
             {review.coverageLimitations.filter((row) => row.assessmentStatus === "unresolved").map((row) => (
               <div key={row.dimensionKey}>
-                {COVERAGE_DIMENSION_LABELS[row.dimensionKey] || row.dimensionKey}: {row.internalLimitationAccepted ? "accepted as a limitation for internal use only" : "unresolved"}
+                {COVERAGE_DIMENSION_LABELS[row.dimensionKey] || row.dimensionKey}: {row.internalLimitationAccepted
+                  ? "accepted as a limitation for internal use only"
+                  : review.internalEligibility.eligible ? "unresolved; carried as a limitation for internal use" : "unresolved"}
               </div>
             ))}
           </div>
@@ -143,7 +155,7 @@ export default function ClientMeasuredClaimReviewPanel({ organizationId, claimId
           ) : null}
           <div className="mt-2" data-client-measured-claim-eligibility={review.internalEligibility.eligible ? "eligible" : "blocked"}>
             {review.internalEligibility.eligible
-              ? "Eligible for internal use. This does not approve it for funders or the public."
+              ? "Usable in internal reports now. This does not approve it for funders or the public."
               : `Not yet eligible for internal use: ${review.internalEligibility.blockerCodes.map(eligibilityBlockerText).join(" ")}`}
           </div>
         </>

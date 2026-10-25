@@ -3,7 +3,10 @@
  *
  * Run this module in the browser terminal after it has attached to the user's
  * current signed-in tab. It uses only same-origin GET reads; every workflow
- * write and every approval remains a human action in the product UI.
+ * write remains a human action in the product UI. Owner decision 2026-10-25:
+ * an ordinary measured fact needs no GK review, factual approval or release
+ * for internal use, so the journey is measurement -> automatic internal
+ * eligibility -> generation -> internal report download.
  */
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
@@ -25,11 +28,9 @@ const STAGES = [
   { key: "upload_processing", role: "customer", instruction: "In the customer Files UI, upload the generated synthetic CSV. Wait for the real scan and P1 profile to complete." },
   { key: "sensitivity_source", role: "customer", instruction: "Review the synthetic source in Data Sources. Record only human-attested sensitivity, allowed-use, AI-use, and promotion findings." },
   { key: "measurement", role: "customer", instruction: "In Count records, define one nonblank data row as one programme session; include exact duplicate rows; exclude the header and empty rows. Enter only a reporting period the organization can genuinely attest, then record the definition, measurement, and claim." },
-  { key: "gk_review", role: "gk", instruction: "As the authorized GK reviewer, review the evidence, claim, and every applicable coverage dimension. Do not skip unresolved blockers." },
+  { key: "internal_eligibility", role: "customer", instruction: "No human action: the runner verifies the measured claim is eligible for internal use (Impact Facts). Nobody reviews or approves it." },
   { key: "generation", role: "customer", instruction: "As the customer administrator, create a live internal Evidence Summary in the product UI." },
-  { key: "factual_review", role: "customer", instruction: "Inspect the generated text, citations, and limitations. Approve factual content only if accurate." },
-  { key: "release", role: "customer", instruction: "Use the separate Release internal report action and confirm limitations only after review." },
-  { key: "download_validation", role: "customer", instruction: "Open the released report receipt in the customer UI. The runner will retrieve and validate that authorized Markdown." },
+  { key: "download_validation", role: "customer", instruction: "In \"Your internal drafts\", open the draft and use \"Open report\" / \"Download Markdown\". The runner will retrieve and validate that authorized internal report Markdown." },
 ];
 
 function fail(code) { throw new Error(code); }
@@ -74,9 +75,9 @@ function requireCaps(caps, role) {
   const ops = caps.workflowOperations || {};
   const needed = role === "gk"
     ? { evidenceReview: ops.recordEvidenceReview, claimReview: ops.recordClaimReview, coverageReview: ops.assessEvidenceCoverage }
-    : { intake: caps.intakeContribution, promoteSource: ops.promoteSource, measurement: ops.recordSourceMeasurement, generation: ops.generateDrafts, factualReview: ops.reviewInternalDraftFactualContent, internalRelease: ops.releaseInternalReports };
+    : { intake: caps.intakeContribution, promoteSource: ops.promoteSource, measurement: ops.recordSourceMeasurement, generation: ops.generateDrafts, readInternalDrafts: ops.readInternalDrafts };
   const absent = Object.entries(needed).filter(([, value]) => value !== true).map(([key]) => key);
-  if (absent.length) fail(needed.internalRelease === false ? "feature_disabled:KAI_PUBLIC_EXPORT_ENABLED" : `required_capability_missing:${absent.join(",")}`);
+  if (absent.length) fail(`required_capability_missing:${absent.join(",")}`);
 }
 async function poll(read, accept, label, timeoutMs = 120000) {
   const until = Date.now() + timeoutMs; let delay = 500; let last;
@@ -169,7 +170,7 @@ export async function resume({ tab = globalThis.tab, runId, role = "customer", s
   requireCaps(caps, role);
   const pipelinePath = `${API}/admin/organizations/${state.organizationId}/engagements/${state.engagementId}/client-evidence-pipeline`;
   const measurementPath = (version) => `${API}/admin/organizations/${state.organizationId}/source-versions/${version}/record-count-measurement`;
-  const tracePath = `${API}/admin/organizations/${state.organizationId}/claims/${state.ids.claimId}/traceability?requested_audience=internal`;
+  const impactFactsPath = `${API}/admin/organizations/${state.organizationId}/impact-facts`;
   const draftPath = (id) => `${API}/admin/organizations/${state.organizationId}/engagements/${state.engagementId}/client-internal-drafts/${id}`;
   let result;
   try {
@@ -217,11 +218,10 @@ export async function resume({ tab = globalThis.tab, runId, role = "customer", s
       result = { measured: 5, rows: 6, blank: 1, duplicatesIncluded: 2, unit: d.counted_unit, period: [periodStart, periodEnd], evidenceAndClaimLinked: true };
       break;
     }
-    case "gk_review": {
-      const response = await pageFetch(tab, tracePath); const trace = bodyOf(response);
-      const dimensions = Object.values(trace?.dimensions || {});
-      if (response.status !== 200 || trace?.eligible !== true || !Array.isArray(trace.blockerCodes) || trace.blockerCodes.length || !dimensions.length || dimensions.some((d) => d.assessment_status === "unresolved" && d.internal_limitation_accepted !== true)) fail(`GK_review_or_current_use_eligibility_blocked:${apiCode(response)}`);
-      result = { eligible: true, applicableCoverageDimensions: dimensions.length, blockers: 0 };
+    case "internal_eligibility": {
+      const response = await pageFetch(tab, impactFactsPath);
+      if (response.status !== 200 || !(bodyOf(response)?.items || []).some((item) => item.claimId === state.ids.claimId)) fail(`internal_eligibility_blocked:${apiCode(response)}`);
+      result = { internalEligibility: "eligible_without_review", source: "impact_facts" };
       break;
     }
     case "generation": {
@@ -229,26 +229,12 @@ export async function resume({ tab = globalThis.tab, runId, role = "customer", s
       const response = await pageFetch(tab, draftPath(state.ids.draftId)); const draft = bodyOf(response);
       const generated = (draft?.blocks || []).map((b) => b.text || "").join("\n");
       const citations = new Set((draft?.blocks || []).flatMap((b) => b.supportingClaimIds || []));
-      if (response.status !== 200 || draft?.contentType !== "evidence_summary" || draft?.audience !== "internal" || draft?.citedClaimsCurrentlyEligible !== true || citations.size !== 1 || !citations.has(state.ids.claimId) || !/(?:5|five)\s+(?:nonblank\s+)?(?:source records?|programme sessions?)/i.test(generated) || !generated.includes(state.period.start) || !generated.includes(state.period.end) || /\b(?:participants?|outcomes?|attendance rates?|percentages?|caused|resulted in|led to|impact)\b/i.test(generated)) fail(`live_draft_or_citations_unverified:${apiCode(response)}`);
+      if (response.status !== 200 || draft?.contentType !== "evidence_summary" || draft?.audience !== "internal" || draft?.citedClaimsCurrentlyEligible !== true || citations.size !== 1 || !citations.has(state.ids.claimId) || !/(?:5|five)\s+(?:nonblank\s+)?(?:source records?|programme sessions?)/i.test(generated) || !generated.includes(state.period.start) || !generated.includes(state.period.end) || /\b(?:participants?|outcomes?|attendance rates?|percentages?|caused|resulted in|led to|impact)\b/i.test(generated) || draft?.internalReport?.available !== true) fail(`live_draft_or_citations_unverified:${apiCode(response)}`);
       result = { draftId: state.ids.draftId, type: draft.contentType, audience: draft.audience, eligibleClaimCited: true, provider: "NOT_CONFIRMED_BY_CUSTOMER_READ" };
       break;
     }
-    case "factual_review": {
-      const response = await pageFetch(tab, draftPath(state.ids.draftId)); const draft = bodyOf(response);
-      if (response.status !== 200 || draft?.reviewState !== "reviewed_by_your_organization" || draft?.citedClaimsCurrentlyEligible !== true) fail(`customer_factual_review_not_verified:${apiCode(response)}`);
-      result = { factualReview: draft.reviewState, claimEligibility: true };
-      break;
-    }
-    case "release": {
-      const response = await pageFetch(tab, draftPath(state.ids.draftId)); const draft = bodyOf(response);
-      if (response.status === 200 && draft?.release?.state === "unavailable") fail("feature_disabled:KAI_PUBLIC_EXPORT_ENABLED");
-      if (response.status !== 200 || draft?.contentType !== "evidence_summary" || draft?.audience !== "internal" || draft?.reviewState !== "reviewed_by_your_organization" || draft?.citedClaimsCurrentlyEligible !== true || draft?.release?.state !== "released_for_internal_use" || draft?.organizationRelease?.releasedBy !== "your_organization") fail(`customer_internal_release_not_verified:${apiCode(response)}`);
-      state.ids.manifestId = draft.release.releasedReportId;
-      result = { released: true, manifestId: state.ids.manifestId, actorScope: "customer_organization" };
-      break;
-    }
     case "download_validation": {
-      const response = await pageFetch(tab, `${API}/admin/organizations/${state.organizationId}/engagements/${state.engagementId}/client-released-reports/${state.ids.manifestId}/markdown`, "text/markdown");
+      const response = await pageFetch(tab, `${draftPath(state.ids.draftId)}/markdown`, "text/markdown");
       if (response.status !== 200 || !/attachment/i.test(response.disposition || "")) fail(`authorized_markdown_download_failed:${response.status}`);
       const validation = validateMarkdown(response.text, { periodStart: state.period.start, periodEnd: state.period.end, sourceVersionId: state.ids.sourceVersionId, claimId: state.ids.claimId, evidenceId: state.ids.evidenceId });
       if (!validation.ok) fail(`downloaded_markdown_assertions_failed:${Object.entries(validation.checks).filter(([, ok]) => !ok).map(([key]) => key).join(",")}`);

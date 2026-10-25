@@ -437,7 +437,7 @@ export const SOURCE_AUTHORIZATION_INTENDED_USE =
 export const INTERNAL_DRAFT_REVIEW_STATE_LABELS = Object.freeze({
   awaiting_get_kinder_review: "Awaiting Get Kinder review",
   in_get_kinder_review: "In Get Kinder review",
-  awaiting_organization_review: "Awaiting your factual review",
+  awaiting_organization_review: "Not yet usable for internal reports",
   reviewed_by_get_kinder: "Reviewed by Get Kinder",
   reviewed_by_your_organization: "Factual review completed by your organization",
 });
@@ -459,8 +459,17 @@ export const INTERNAL_DRAFT_FACTUAL_REVIEW_REASON_MESSAGES = Object.freeze({
   processing_permission_not_established: "A cited source no longer permits this use or AI processing.",
 });
 
+// Owner decision 2026-10-25: why a draft is not (yet) the organization's
+// internal report, from the server's internalReport reason codes.
+export const INTERNAL_REPORT_REASON_MESSAGES = Object.freeze({
+  ...INTERNAL_DRAFT_FACTUAL_REVIEW_REASON_MESSAGES,
+  content_type_requires_get_kinder_review: "Get Kinder reviews this type of draft.",
+  audience_requires_get_kinder_review: "Only internal drafts are available as internal reports.",
+  validator_results_not_passed: "This draft did not pass every automated check when it was generated.",
+});
+
 export const INTERNAL_DRAFT_FACTUAL_REVIEW_NEXT_ACTIONS = Object.freeze({
-  cited_claims_not_currently_eligible: "Ask Get Kinder to review the cited claims. Factual approval is unavailable until the claims are currently eligible for internal use.",
+  cited_claims_not_currently_eligible: "Ask Get Kinder to review the cited claims. The report becomes available once they are eligible for internal use.",
   source_version_not_current: "Ask Get Kinder to reconcile the cited source version, then reload this draft.",
   processing_permission_not_established: "Ask Get Kinder to review the cited source's current processing permission, then reload this draft.",
 });
@@ -493,7 +502,7 @@ export const INTERNAL_DRAFT_LIMITATION_MESSAGES = Object.freeze({
   internal_use_only: "Internal use only.",
   not_approved_for_external_use: "Not approved for funder or public use, export, or release.",
   awaiting_get_kinder_review: "Get Kinder has not reviewed this draft.",
-  awaiting_organization_review: "Nobody has completed the factual review of this draft yet.",
+  awaiting_organization_review: "At least one cited claim or source is not yet usable for internal reports.",
   cited_claims_not_currently_eligible: "At least one cited claim is not yet eligible for use (for example, it awaits Get Kinder claim review).",
 });
 

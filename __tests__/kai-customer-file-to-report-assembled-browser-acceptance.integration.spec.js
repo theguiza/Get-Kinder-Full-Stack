@@ -8,9 +8,11 @@ import { Readable } from "node:stream";
 import vm from "node:vm";
 
 /**
- * Plan A Prompt 9: the assembled customer journey from actual CSV upload
- * bytes to the released internal Evidence Summary Markdown, in a real
- * headless Chrome. Run only by
+ * Plan A Prompt 9, updated for the owner decision of 2026-10-25: the
+ * assembled customer journey from actual CSV upload bytes to two internal
+ * reports (an Evidence Summary and an impact narrative) as Markdown, in a
+ * real headless Chrome, with no evidence, claim or coverage review, no
+ * factual approval and no release decision. Run only by
  *   node scripts/kai-sprint2-plan-a-assembled-file-to-report-local-postgres.js
  * against that runner's ephemeral loopback PostgreSQL (production-shaped
  * intake tables, then the Plan A normal migration chain). Skipped otherwise.
@@ -24,12 +26,11 @@ import vm from "node:vm";
  * decision, and "Check security again"; the immediate P1 dispatch and the P1
  * worker (P1-03 parser on the stored bytes, P1-04, P1-05, the P1-06 handoff);
  * the administrator's sensitivity / allowed-use / AI decision, P1-07
- * candidate, P1-08 promotion, measurement, and claim; GK's evidence, claim,
- * and coverage review; the administrator's generation, factual review, final
- * release (owner amendment 2026-10-23: the existing export review, snapshot,
- * candidate, export_authority_granted and manifest, under the administrator's
- * own identity and client_admin role) and report receipt; GK's revocation and
- * re-grant.
+ * candidate, P1-08 promotion, measurement, and claim; the automatic internal
+ * eligibility of the ordinary measured claim (P2-06); the administrator's
+ * generation of both reports and their Markdown retrieval and download; the
+ * refusals of other actors, unsupported content, stale, sensitive and
+ * no-longer-permitted sources; and a later human or GK decision governing.
  * Simulated at external boundaries only (reported as such):
  * - session: the Get Kinder login (req.user from a harness cookie);
  * - object storage: an in-process stand-in for the GCS signed-PUT and
@@ -38,7 +39,8 @@ import vm from "node:vm";
  *   called by the real bounded assessor; no ClamAV service is contacted;
  * - model provider: the Anthropic SDK Messages prototype is patched in this
  *   process to a deterministic response (no network or model call);
- * - KAI_PUBLIC_EXPORT_ENABLED=true in this test process only.
+ * - KAI_PUBLIC_EXPORT_ENABLED=true in this test process only (and briefly
+ *   false, to show the internal report does not depend on it).
  * Injected state, labeled where used: only the stale-source refusal flips
  * source_versions.is_current, because no application operation supersedes
  * a source version.
@@ -274,7 +276,9 @@ async function runAssembledAcceptance() {
     + "This is a count of source records, each counted as one programme session under the human-confirmed definition; "
     + "the period is attested in that definition and not verified against record dates. "
     + "1 blank record was excluded and 2 exact-duplicate records were included. "
-    + "Internal limitations: small-cell risk, conflicting source indicators, and requirement alignment were accepted for internal use only.";
+    + "Internal limitations: small-cell risk, conflicting source indicators, and requirement alignment are unresolved and carried with the count for internal use only.";
+  // A boundary test sets modelOverride.text to an unsupported reply for one call.
+  const modelOverride = { text: null };
   messagesPrototype.create = async function deterministicCreate(payload) {
     const requestBody = JSON.parse(payload.messages[0].content);
     modelCalls.push({ system: payload.system, claims: requestBody.claims });
@@ -284,7 +288,7 @@ async function runAssembledAcceptance() {
         text: JSON.stringify({
           approved: true,
           draftStatus: "released",
-          blocks: requestBody.claims.map((claim) => ({ text: COMPLIANT_TEXT, citations: [{ claimId: claim.claimId, evidenceItemId: claim.evidenceItemId }] })),
+          blocks: requestBody.claims.map((claim) => ({ text: modelOverride.text ?? COMPLIANT_TEXT, citations: [{ claimId: claim.claimId, evidenceItemId: claim.evidenceItemId }] })),
         }),
       }],
     };
@@ -311,10 +315,7 @@ async function runAssembledAcceptance() {
     claimReviewCompletePath,
     claimReviewDecisionBody,
     claimTraceabilityPath,
-    clientInternalDraftFactualReviewPath,
-    clientInternalDraftReleasePath,
-    clientReleasedReportMarkdownPath,
-    coverageInternalAcceptancePath,
+    clientInternalReportMarkdownPath,
     evidenceReviewCompletePath,
     evidenceReviewDecisionBody,
     buildSensitivityDecisionRequestBody,
@@ -367,12 +368,14 @@ async function runAssembledAcceptance() {
     counted: independentRecordCount(CSV),
   };
   assert.deepEqual([independent.dataRecords, independent.blankRecords, independent.duplicateRecords, independent.counted], [6, 1, 2, 5]);
+  // No reviewer accepts the source-level limitations (owner decision
+  // 2026-10-25): they are carried, unresolved, into every report.
   const MEASURED_LIMITATION_CODES = [
-    "coverage.conflicting_source_indicators.accepted_internal_limitation",
+    "coverage.conflicting_source_indicators.unresolved",
     "coverage.duplicates.resolved_risk_flagged",
     "coverage.missingness.resolved_risk_flagged",
-    "coverage.requirement_alignment.accepted_internal_limitation",
-    "coverage.small_cell_risk.accepted_internal_limitation",
+    "coverage.requirement_alignment.unresolved",
+    "coverage.small_cell_risk.unresolved",
     "coverage.time_period_clarity.resolved_risk_flagged",
     "measurement.blank_records_excluded",
     "measurement.duplicate_records_included",
@@ -633,6 +636,33 @@ async function runAssembledAcceptance() {
     }
     return state;
   };
+  // A complete internal report: context, finding, period, method, duplicates,
+  // limitations, what it does and does not establish, analysis, narrative,
+  // traceability, authority, conclusion and references, all for the same
+  // five-record measurement.
+  const assertCompleteReport = (shown, heading) => {
+    assert.ok(shown.startsWith(`${heading}\n`), shown.slice(0, 80));
+    for (const section of ["Context", "Key findings", "Reporting period", "Measurement definition and counting method", "Duplicate records",
+      "Data quality and limitations", "What this evidence establishes", "What this evidence does not establish", "Analysis", "Generated narrative",
+      "Source and evidence traceability", "Authority for internal use", "Conclusion", "References"]) {
+      assert.ok(shown.includes(`\n## ${section}\n`), `section ${section}`);
+    }
+    assert.match(shown, /\*\*Organization:\*\* Harbourline Session Society/);
+    assert.match(shown, /\*\*Project \/ engagement:\*\* `Session Programme 2026`/);
+    assert.equal(Number((/records \*\*(\d+) programme sessions\*\*/.exec(shown) || [])[1]), independent.counted);
+    assert.match(shown, /for the reporting period 2026-09-01 to 2026-09-30/);
+    assert.match(shown, /6 data records after the header, minus 1 blank record excluded = \*\*5\*\* counted/);
+    assert.match(shown, /2 exact-duplicate records\. They are included in the count of 5, not removed or merged/);
+    assert.match(shown, /not checked against dates in the records/);
+    assert.match(shown, /## What this evidence does not establish[\s\S]*distinct people[\s\S]*distinct real-world sessions[\s\S]*outcome[\s\S]*caused any result/);
+    assert.match(shown, /## Conclusion\n\nOn the available evidence, the organization's promoted source records 5 programme sessions for 2026-09-01 to 2026-09-30\./);
+    for (const code of MEASURED_LIMITATION_CODES) assert.ok(shown.includes(`\`${code}\``), code);
+    for (const id of [ids.claimId, ids.evidenceItemId, ids.sourceVersionId]) assert.ok(shown.includes(`\`${id}\``), id);
+    assert.ok(shown.includes(COMPLIANT_TEXT), "the validated generated text");
+    assert.match(shown, /no further approval is required for internal use/);
+    assert.doesNotMatch(shown, /field_\d/, "never a field-presence claim in place of the measured result");
+    assert.doesNotMatch(shown, /literacy|mentoring|2026-09-16|programme-sessions-september|kc\d{12}/, "no row values, file names or run tags");
+  };
   const CANARY_START = `KAI_CANARY.start({ organizationId: ${J(ORG_X)}, engagementId: ${J(PROJECT_X)}, confirm: KAI_CANARY.confirmPhrase })`;
 
   const results = { simulatedBoundaries: ["session (harness cookie)", "object storage (in-process signed-PUT/exact-generation stand-in)", "malware scanner (deterministic adapter behind the real assessor)", "model provider (patched SDK Messages.create)"] };
@@ -659,7 +689,7 @@ async function runAssembledAcceptance() {
       assert.equal(byCheck["Customer workspace & capabilities"], "PASS", J(preflight.checks));
       assert.equal(byCheck["Synthetic CSV (in memory)"], "PASS");
       assert.equal(byCheck["Origin class"], "NOT_CONFIRMED", "a loopback origin can never yield a production pass");
-      assert.equal(byCheck["Internal release flag (KAI_PUBLIC_EXPORT_ENABLED)"], "NOT_CONFIRMED", "no reviewed draft yet, so the flag is not observable read-only");
+      assert.equal(byCheck["Internal release flag (KAI_PUBLIC_EXPORT_ENABLED)"], undefined, "internal reports need no release, so the export flag is not checked");
       assert.equal(await adminPage.evaluate(`KAI_CANARY._test.fixtureText(${J(CANARY_TAG)})`), CSV, "the browser generates exactly the bytes the customer uploads");
       const fixture = await adminPage.evaluate(`(() => { const f = KAI_CANARY.makeFixture({ download: false }); return { name: f.name, bytes: f.bytes, counts: f.counts, type: f.file.type }; })()`);
       assert.deepEqual(fixture.counts, { dataRecords: 6, blankRecords: 1, duplicateRecords: 2, counted: 5 });
@@ -672,7 +702,7 @@ async function runAssembledAcceptance() {
       assert.match(refused, /explicit authorization/);
       assert.equal(await canaryState(adminPage), null, "no run without the owner's phrase");
       const started = await canaryCall(adminPage, CANARY_START);
-      const state = await expectCanary(adminPage, started, { workspace: "PASS", fixture: "PASS", upload_processing: "WAITING_FOR_HUMAN", gk_review: "NOT_CONFIRMED" });
+      const state = await expectCanary(adminPage, started, { workspace: "PASS", fixture: "PASS", upload_processing: "WAITING_FOR_HUMAN", internal_eligibility: "NOT_CONFIRMED" });
       assert.equal(state.tag, CANARY_TAG);
       assert.match(started.verdict, /^IN_PROGRESS at 3 Upload/);
       assert.match(state.stages.upload_processing.next, /Upload the selected file/);
@@ -1107,13 +1137,36 @@ async function runAssembledAcceptance() {
     });
 
     // -----------------------------------------------------------------------
-    // Step E: GK review, generation, release.
+    // Step E (owner decision 2026-10-25): the measured fact is reusable for
+    // internal reports with no further human approval - no evidence, claim
+    // or coverage review, no factual approval, no release decision.
     // -----------------------------------------------------------------------
-    await test("Console canary: the measurement and claim pass; after a page reload the re-pasted canary reconnects without repeating anything and waits for GK, whose read-only helper lists what is outstanding", async () => {
+    // Every persisted row that would mean a human approval, review, queue
+    // resolution, limitation confirmation or release, for this organization.
+    const approvalState = async () => (await query(`SELECT
+        (SELECT count(*) FROM kai.evidence_review_decisions WHERE organization_id = $1::uuid)::int AS evidence_decisions,
+        (SELECT count(*) FROM kai.claim_review_decisions WHERE organization_id = $1::uuid)::int AS claim_decisions,
+        (SELECT count(*) FROM kai.coverage_review_decisions WHERE organization_id = $1::uuid)::int AS coverage_decisions,
+        (SELECT count(*) FROM kai.client_followup_items WHERE organization_id = $1::uuid)::int AS client_followups,
+        (SELECT count(*) FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = 'export_review')::int AS export_review_queues,
+        (SELECT count(*) FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_status <> 'open'
+           AND queue_type IN ('evidence_review', 'claim_review', 'generated_content_review'))::int AS resolved_review_queues,
+        (SELECT count(*) FROM kai.upload_lifecycle_audit WHERE organization_id = $1::uuid AND operation LIKE 'generated_content_review_%')::int AS draft_reviews,
+        (SELECT count(*) FROM kai.limitation_snapshots WHERE organization_id = $1::uuid)::int AS limitation_confirmations,
+        (SELECT count(*) FROM kai.export_candidates WHERE organization_id = $1::uuid)::int AS release_candidates,
+        (SELECT count(*) FROM kai.human_authority_decisions WHERE organization_id = $1::uuid)::int AS release_decisions,
+        (SELECT count(*) FROM kai.export_manifests WHERE organization_id = $1::uuid)::int AS manifests`, [ORG_X]))[0];
+    const NO_APPROVALS = Object.freeze({
+      evidence_decisions: 0, claim_decisions: 0, coverage_decisions: 0, client_followups: 0, export_review_queues: 0, resolved_review_queues: 0,
+      draft_reviews: 0, limitation_confirmations: 0, release_candidates: 0, release_decisions: 0, manifests: 0,
+    });
+
+    await test("Console canary: the measurement and claim pass and the claim is eligible for internal use automatically; after a page reload the re-pasted canary reconnects without repeating anything and waits only for the customer's generation", async () => {
       let summary = await canaryCall(adminPage, "KAI_CANARY.next()");
-      let state = await expectCanary(adminPage, summary, { measurement: "PASS", gk_review: "WAITING_FOR_HUMAN" });
+      let state = await expectCanary(adminPage, summary, { measurement: "PASS", internal_eligibility: "PASS", generation: "WAITING_FOR_HUMAN" });
       assert.deepEqual([state.ids.evidenceItemId, state.ids.claimId], [ids.evidenceItemId, ids.claimId]);
-      assert.match(state.stages.gk_review.next, /KAI_CANARY\.gk\(/);
+      assert.match(state.stages.internal_eligibility.observed, /eligible for internal use with no review step/);
+      assert.match(state.stages.generation.next, /Generate internal evidence summary/);
       const runId = state.runId;
       await adminPage.goto("/impact-library");
       assert.equal(await adminPage.evaluate("typeof window.KAI_CANARY"), "undefined", "the reload cleared the page");
@@ -1122,159 +1175,71 @@ async function runAssembledAcceptance() {
       const offline = await adminPage.evaluate("KAI_CANARY.status()");
       assert.deepEqual(offline.stages, summary.stages, "status() reads the saved run");
       summary = await canaryCall(adminPage, "KAI_CANARY.resume()");
-      state = await expectCanary(adminPage, summary, { workspace: "PASS", measurement: "PASS", gk_review: "WAITING_FOR_HUMAN" });
+      state = await expectCanary(adminPage, summary, { workspace: "PASS", measurement: "PASS", internal_eligibility: "PASS", generation: "WAITING_FOR_HUMAN" });
       assert.equal(state.runId, runId, "the same run, reconnected");
       assert.deepEqual(adminPage.requestsSince(mark).filter((r) => r.method !== "GET").map(pathOf), [], "re-paste and resume write nothing");
       const customerGk = await canaryCall(adminPage, `KAI_CANARY.gk({ organizationId: ${J(ORG_X)}, claimId: ${J(ids.claimId)} })`);
       assert.equal(customerGk.status, "BLOCKED", "the customer cannot read GK traceability");
       await gkReviewerPage.evaluate(CANARY_SOURCE);
       const gk = await canaryCall(gkReviewerPage, `KAI_CANARY.gk({ organizationId: ${J(ORG_X)}, claimId: ${J(ids.claimId)} })`);
-      assert.equal(gk.eligible, false);
-      assert.ok(gk.blockerCodes.length > 0, J(gk));
+      assert.deepEqual([gk.eligible, gk.blockerCodes], [true, []], J(gk));
       results.canary.reloadRecovery = "PASS: same run, no write";
-      results.canary.gkOutstanding = gk;
+      results.canary.internalEligibility = gk;
     });
 
-    await test("E1: in Knowledge Studio the administrator reviews the measurement and records, as itself, the evidence review, the internal claim review, and the supportable internal limitations; no Get Kinder reviewer acts", async () => {
-      const decisionCounts = async () => (await query(`SELECT
-          (SELECT count(*) FROM kai.evidence_review_decisions WHERE organization_id = $1::uuid)::int AS evidence,
-          (SELECT count(*) FROM kai.claim_review_decisions WHERE organization_id = $1::uuid)::int AS claim,
-          (SELECT count(*) FROM kai.coverage_review_decisions WHERE organization_id = $1::uuid)::int AS coverage`, [ORG_X]))[0];
-      assert.deepEqual(await decisionCounts(), { evidence: 0, claim: 0, coverage: 0 });
-      const gapsBefore = await query("SELECT dimension_key, assessment_status FROM kai.gap_log_items WHERE claim_id = $1::uuid ORDER BY dimension_key", [ids.claimId]);
-      const gkAuditsBefore = (await query("SELECT count(*)::int AS n FROM kai.audit_events a JOIN kai.users u ON u.user_id = a.actor_user_id WHERE u.legacy_public_userdata_id = ANY($1::int[])",
-        [[USERS.gkReviewer, USERS.gkAdmin]]))[0].n;
-      const before = await gkReviewerPage.api("GET", claimTraceabilityPath(ORG_X, ids.claimId, "internal"));
-      const unresolved = Object.entries(before.body.data.dimensions).filter(([, value]) => value.assessment_status === "unresolved").map(([key]) => key).sort();
-      assert.deepEqual(unresolved, ["conflicting_source_indicators", "requirement_alignment", "small_cell_risk"], "the three source-level dimensions");
-
-      await openStudioTab("Data Sources");
-      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `[data-client-open-measured-claim-review="${ids.claimId}"]`)), "review action");
-      await adminPage.clickIn(`[data-client-open-measured-claim-review="${ids.claimId}"]`, "Review measurement");
-      const panel = `[data-client-measured-claim-review="${ids.claimId}"]`;
-      await adminPage.waitFor(async () => /Confirm: the count is supported/.test(await textOf(adminPage, panel) || ""), "review panel");
-      await adminPage.idle();
-      const shown = await textOf(adminPage, panel);
-      assert.match(await textOf(adminPage, "[data-client-measured-claim-review-measurement]"), /Measured: 5 programme sessions/);
-      assert.match(shown, /Source: .+ \(current version\)/);
-      assert.match(shown, /Claim: .*5 programme sessions/);
-      for (const text of [/defined by a person at the organization/, /Blank records were excluded/, /Exact-duplicate records are included/, /not checked against dates/]) assert.match(shown, text);
-      assert.match(shown, /Evidence review: Not yet reviewed/);
-      assert.match(shown, /Claim review: Not yet reviewed/);
-      assert.equal(await adminPage.evaluate(`document.querySelector("[data-client-measured-claim-eligibility]").getAttribute("data-client-measured-claim-eligibility")`), "blocked");
-      const planText = await textOf(adminPage, '[data-client-measured-claim-judgment="supported"]');
-      for (const step of ["Evidence review: the count is supported by the source", "Claim review: approved for internal use only",
-        "Small-number (small-cell) risk", "Conflicting sources", "Alignment with funder requirements"]) assert.ok(planText.includes(step), `${step} in ${planText}`);
-      assert.ok(await textOf(adminPage, '[data-client-measured-claim-judgment="not_supported"]'), "a negative judgment is offered");
-      assert.ok(await textOf(adminPage, '[data-client-measured-claim-judgment="needs_more_information"]'), "needs more information is offered");
-
-      const mark = adminPage.mark();
-      await adminPage.clickIn(`[data-client-measured-claim-judgment="supported"] button`, "Confirm: the count is supported");
-      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, "[data-client-measured-claim-review-notice]")), "decision notice");
-      await adminPage.idle();
-      assert.equal(await adminPage.evaluate(`document.querySelector("[data-client-measured-claim-review-notice]").getAttribute("data-client-measured-claim-review-notice")`), "success",
-        await textOf(adminPage, "[data-client-measured-claim-review-notice]"));
-      const evidenceQueue = await queueOf("evidence_review", ids.evidenceItemId);
-      const claimQueue = await queueOf("claim_review", ids.claimId);
-      const posted = adminPage.requestsSince(mark).filter((r) => r.method === "POST").map((r) => [pathOf(r), r.status]);
-      assert.deepEqual(posted.slice(0, 2), [
-        [evidenceReviewCompletePath(ORG_X, ids.evidenceItemId, evidenceQueue.review_queue_item_id), 200],
-        [claimReviewCompletePath(ORG_X, ids.claimId, claimQueue.review_queue_item_id), 200],
-      ], "the evidence review, then the claim review, each through its own existing route");
-      assert.deepEqual(posted.slice(2).map(([path, status]) => `${path} ${status}`).sort(),
-        unresolved.map((key) => `${coverageInternalAcceptancePath(ORG_X, ids.claimId, key)} 201`).sort(), "then each limitation, separately");
-
-      // Every decision names the actual administrator and its actual role.
-      const [evidenceDecision] = await query(
-        `SELECT organization_id::text, evidence_item_id::text, review_queue_item_id::text, decision_outcome, decided_by::text, decided_by_role, created_by_type, supersedes_decision_id
-           FROM kai.evidence_review_decisions WHERE organization_id = $1::uuid`, [ORG_X]);
-      assert.deepEqual(evidenceDecision, { organization_id: ORG_X, evidence_item_id: ids.evidenceItemId, review_queue_item_id: evidenceQueue.review_queue_item_id,
-        decision_outcome: "supported", decided_by: ids.adminUserId, decided_by_role: "client_admin", created_by_type: "human", supersedes_decision_id: null });
-      const [claimDecision] = await query(
-        `SELECT organization_id::text, claim_id::text, review_queue_item_id::text, decision_outcome, approved_audiences, decided_by::text, decided_by_role, created_by_type
-           FROM kai.claim_review_decisions WHERE organization_id = $1::uuid`, [ORG_X]);
-      assert.deepEqual(claimDecision, { organization_id: ORG_X, claim_id: ids.claimId, review_queue_item_id: claimQueue.review_queue_item_id,
-        decision_outcome: "approved", approved_audiences: ["internal"], decided_by: ids.adminUserId, decided_by_role: "client_admin", created_by_type: "human" });
-      const coverage = await query(
-        `SELECT organization_id::text, claim_id::text, dimension_key, decision, decided_by::text, decided_by_role, created_by_type
-           FROM kai.coverage_review_decisions WHERE organization_id = $1::uuid ORDER BY dimension_key`, [ORG_X]);
-      assert.deepEqual(coverage, unresolved.map((dimension_key) => ({ organization_id: ORG_X, claim_id: ids.claimId, dimension_key,
-        decision: "accepted_internal_with_limitation", decided_by: ids.adminUserId, decided_by_role: "client_admin", created_by_type: "human" })));
-      const [claimRow] = await query("SELECT claim_review_status, claim_strength, funder_use_allowed, public_use_allowed, export_ready FROM kai.claims WHERE claim_id = $1::uuid", [ids.claimId]);
-      assert.deepEqual(claimRow, { claim_review_status: "reviewed", claim_strength: "reviewed_supported", funder_use_allowed: false, public_use_allowed: false, export_ready: false });
-      // Audit: each decision's own lifecycle audit, and the administrator as the only human actor of the three operations.
-      const lifecycle = await query(
-        `SELECT operation, metadata->>'decision_id' AS decision_id, metadata->>'decided_by_role' AS decided_by_role, metadata->>'dimension_key' AS dimension_key
-           FROM kai.upload_lifecycle_audit WHERE organization_id = $1::uuid AND operation IN ('evidence_review_completed', 'claim_review_completed_internal_approval',
-             'coverage_review_decision_accepted_internal_with_limitation') ORDER BY operation, dimension_key`, [ORG_X]);
-      assert.deepEqual(lifecycle.map((row) => [row.operation, row.dimension_key]), [
-        ["claim_review_completed_internal_approval", null],
-        ...unresolved.map((key) => ["coverage_review_decision_accepted_internal_with_limitation", key]),
-        ["evidence_review_completed", null],
-      ]);
-      assert.equal(lifecycle.find((row) => row.operation === "evidence_review_completed").decision_id, (await query("SELECT decision_id::text FROM kai.evidence_review_decisions WHERE organization_id = $1::uuid", [ORG_X]))[0].decision_id);
-      assert.ok(lifecycle.filter((row) => row.operation.startsWith("coverage")).every((row) => row.decided_by_role === "client_admin"));
-      const decisionAudits = await query(
-        `SELECT DISTINCT a.actor_user_id::text, a.actor_type::text FROM kai.audit_events a
-          WHERE a.organization_id = $1::uuid AND a.created_at >= (SELECT min(created_at) FROM kai.evidence_review_decisions WHERE organization_id = $1::uuid)`, [ORG_X]);
-      assert.deepEqual(decisionAudits, [{ actor_user_id: ids.adminUserId, actor_type: "human" }], "only the administrator acted");
-      assert.equal((await query("SELECT count(*)::int AS n FROM kai.audit_events a JOIN kai.users u ON u.user_id = a.actor_user_id WHERE u.legacy_public_userdata_id = ANY($1::int[])",
-        [[USERS.gkReviewer, USERS.gkAdmin]]))[0].n, gkAuditsBefore, "no Get Kinder actor wrote anything");
-
-      // Authoritative recalculation: P2-06 internal eligibility, with no validator bypassed; the panel shows it.
-      const eligible = await gkReviewerPage.api("GET", claimTraceabilityPath(ORG_X, ids.claimId, "internal"));
-      assert.deepEqual([eligible.body.data.eligible, eligible.body.data.blockerCodes], [true, []], JSON.stringify(eligible.body.data.blockerCodes));
-      assert.deepEqual(unresolved.map((key) => eligible.body.data.dimensions[key].internal_limitation_accepted), [true, true, true]);
-      const diagnostic = await adminPage.api("GET", claimTraceabilityPath(ORG_X, ids.claimId, "internal"));
-      assert.deepEqual([diagnostic.status, diagnostic.body.data.eligible, diagnostic.body.data.blocker_codes], [200, true, []]);
-      await adminPage.waitFor(async () => (await adminPage.evaluate(`document.querySelector("[data-client-measured-claim-eligibility]")?.getAttribute("data-client-measured-claim-eligibility")`)) === "eligible", "eligible in the panel");
-      assert.match(await textOf(adminPage, panel), /Evidence review: supported \(recorded by your organization\)/);
-      assert.match(await textOf(adminPage, panel), /Claim review: approved \(recorded by your organization\)/);
-      assert.equal(await textOf(adminPage, `[data-client-measured-claim-judgment="supported"]`), null, "nothing left to confirm");
-      // Funder and public stay closed: the administrator's evidence review is not Get Kinder's.
+    await test("E1: with zero human decisions the measured claim is usable impact evidence for internal use; Knowledge Studio shows the measurement as usable with no review action; funder and public stay closed", async () => {
+      assert.deepEqual(await approvalState(), NO_APPROVALS, "no approval, review, queue resolution, follow-up or release exists");
+      ids.approvalsBeforeReports = await approvalState();
+      const traced = await gkReviewerPage.api("GET", claimTraceabilityPath(ORG_X, ids.claimId, "internal"));
+      assert.deepEqual([traced.body.data.eligible, traced.body.data.blockerCodes], [true, []], J(traced.body.data.blockerCodes));
+      assert.deepEqual([traced.body.data.evidence_review_decision, traced.body.data.claim_review_decision], [null, null], "no reviewer is implied");
+      assert.deepEqual([traced.body.data.claim.claim_review_status, traced.body.data.claim.claim_strength, traced.body.data.evidence.support_strength],
+        ["needs_gk_review", "unassessed", "unassessed"], "the stored review state is not rewritten");
+      const carried = Object.entries(traced.body.data.dimensions).filter(([, value]) => value.assessment_status === "unresolved").map(([key]) => key).sort();
+      assert.deepEqual(carried, ["conflicting_source_indicators", "requirement_alignment", "small_cell_risk"]);
+      assert.ok(carried.every((key) => traced.body.data.dimensions[key].internal_limitation_accepted === false && traced.body.data.dimensions[key].blocks_requested_audience === false),
+        "carried as limitations, never recorded as accepted");
       for (const audience of ["funder", "public"]) {
         const external = await gkReviewerPage.api("GET", claimTraceabilityPath(ORG_X, ids.claimId, audience));
         assert.equal(external.body.data.eligible, false, audience);
-        for (const code of ["claim_not_approved_for_requested_audience", "evidence_review_unresolved"]) assert.ok(external.body.data.blockerCodes.includes(code), `${audience}: ${code}`);
+        for (const code of ["claim_not_approved_for_requested_audience", "evidence_review_unresolved", "coverage_dimension_unresolved"]) {
+          assert.ok(external.body.data.blockerCodes.includes(code), `${audience}: ${code}`);
+        }
       }
-      // P2-04 unchanged: the measured claim's gap snapshot, and still no follow-up.
-      assert.deepEqual(await query("SELECT dimension_key, assessment_status FROM kai.gap_log_items WHERE claim_id = $1::uuid ORDER BY dimension_key", [ids.claimId]), gapsBefore);
-      const [followups] = await query("SELECT count(*)::int AS n FROM kai.client_followup_items WHERE claim_id = $1::uuid", [ids.claimId]);
-      assert.equal(followups.n, 0);
-      assert.deepEqual(await decisionCounts(), { evidence: 1, claim: 1, coverage: 3 });
-      results.e1 = { decidedBy: "client_admin (the administrator)", evidence: "supported", claim: "approved [internal]", acceptedDimensions: unresolved, eligibleInternal: true,
-        funderPublic: "ineligible (evidence_review_unresolved, claim_not_approved_for_requested_audience)" };
+      // Usable impact evidence: the client-safe Impact Facts read lists it, with its limitations.
+      const facts = await adminPage.api("GET", `${orgPath()}/impact-facts`);
+      const fact = facts.body.data.items.find((item) => item.claimId === ids.claimId);
+      assert.ok(fact, J(facts.body.data.items));
+      assert.match(fact.statement, /^The promoted source records 5 programme sessions for the reporting period 2026-09-01 to 2026-09-30/);
+      assert.deepEqual(fact.limitationDimensionKeys, carried);
+      assert.ok(!facts.body.data.items.some((item) => /field_\d/.test(item.statement || "")), "no field-presence claim is offered as an impact fact");
+
+      await openStudioTab("Data Sources");
+      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `[data-client-open-measured-claim-review="${ids.claimId}"]`)), "the measurement action");
+      assert.match(await textOf(adminPage, `[data-client-open-measured-claim-review="${ids.claimId}"]`), /View measurement/);
+      await adminPage.clickIn(`[data-client-open-measured-claim-review="${ids.claimId}"]`, "View measurement");
+      const panel = `[data-client-measured-claim-review="${ids.claimId}"]`;
+      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, "[data-client-measured-claim-eligibility]")), "the eligibility line");
+      assert.match(await textOf(adminPage, "[data-client-measured-claim-review-measurement]"), /Measured: 5 programme sessions/);
+      assert.match(await textOf(adminPage, "[data-client-measured-claim-no-review-required]"), /No evidence, claim or limitation review is required for internal use/);
+      assert.equal(await adminPage.evaluate(`document.querySelector("[data-client-measured-claim-eligibility]").getAttribute("data-client-measured-claim-eligibility")`), "eligible");
+      assert.match(await textOf(adminPage, "[data-client-measured-claim-eligibility]"), /Usable in internal reports now/);
+      assert.equal(await textOf(adminPage, '[data-client-measured-claim-judgment="supported"]'), null, "no confirmation is offered");
+      assert.doesNotMatch(await textOf(adminPage, panel), /Confirm: the count is supported/);
+      assert.deepEqual(await approvalState(), NO_APPROVALS, "viewing writes nothing");
+      results.e1 = { internal: "eligible with 0 human decisions", carriedLimitations: carried, funderPublic: "ineligible", impactFact: true };
     });
 
-    await test("E1 boundaries: other roles, the inactive administrator, and another organization are refused; the administrator gets no Get Kinder authority, approves no external audience, and accepts no invalid limitation; replays write nothing", async () => {
-      const evidenceQueue = await queueOf("evidence_review", ids.evidenceItemId);
-      const claimQueue = await queueOf("claim_review", ids.claimId);
-      const evidencePath = evidenceReviewCompletePath(ORG_X, ids.evidenceItemId, evidenceQueue.review_queue_item_id);
-      const claimPath = claimReviewCompletePath(ORG_X, ids.claimId, claimQueue.review_queue_item_id);
-      const evidenceBody = evidenceReviewDecisionBody({ expectedUpdatedAt: new Date(evidenceQueue.updated_at).toISOString(), decision: "not_supported" });
-      const claimBody = claimReviewDecisionBody({ expectedUpdatedAt: new Date(claimQueue.updated_at).toISOString(), decision: "rejected" });
+    await test("E1 boundaries: the administrator gets no Get Kinder authority and approves no external audience; other roles and organizations cannot use the measurement view", async () => {
       const reviewPath = organizationFactualReviewPath(ORG_X, ids.claimId);
-      const counts = async () => (await query(`SELECT
-          (SELECT count(*) FROM kai.evidence_review_decisions)::int AS evidence, (SELECT count(*) FROM kai.claim_review_decisions)::int AS claim,
-          (SELECT count(*) FROM kai.coverage_review_decisions)::int AS coverage, (SELECT count(*) FROM kai.upload_lifecycle_audit)::int AS lifecycle`))[0];
-      const before = await counts();
       const outcomes = {};
       for (const [label, page] of [["client_contributor", contributorPage], ["client_reviewer", reviewerPage], ["inactive organization administrator", inactiveAdminPage],
         ["another organization's administrator", adminYPage]]) {
-        const statuses = [
-          (await page.api("GET", reviewPath)).status,
-          (await page.api("POST", evidencePath, evidenceBody)).status,
-          (await page.api("POST", claimPath, claimBody)).status,
-          (await page.api("POST", coverageInternalAcceptancePath(ORG_X, ids.claimId, "small_cell_risk"), {})).status,
-        ];
-        assert.deepEqual(statuses, [403, 403, 403, 403], label);
-        outcomes[label] = statuses;
+        outcomes[label] = (await page.api("GET", reviewPath)).status;
+        assert.equal(outcomes[label], 403, label);
       }
-      // The administrator acting on another organization's claim path.
-      assert.equal((await adminPage.api("GET", organizationFactualReviewPath(ORG_Y, ids.claimId))).status, 403);
-      assert.equal((await adminPage.api("POST", evidenceReviewCompletePath(ORG_Y, ids.evidenceItemId, evidenceQueue.review_queue_item_id), evidenceBody)).status, 403);
-      // No external audience, and no Get Kinder-only operation.
-      const funderClaim = await adminPage.api("POST", claimPath, claimReviewDecisionBody({
+      const claimQueue = await queueOf("claim_review", ids.claimId);
+      const funderClaim = await adminPage.api("POST", claimReviewCompletePath(ORG_X, ids.claimId, claimQueue.review_queue_item_id), claimReviewDecisionBody({
         expectedUpdatedAt: new Date(claimQueue.updated_at).toISOString(), decision: "approved", approvedAudiences: ["internal", "funder"] }));
       assert.deepEqual([funderClaim.status, funderClaim.body.blockers?.map((b) => b.blocking_reason)], [403, ["audience_requires_get_kinder_review"]]);
       for (const audience of ["funder", "public"]) {
@@ -1283,39 +1248,13 @@ async function runAssembledAcceptance() {
       assert.equal((await adminPage.api("GET", claimTraceabilityPath(ORG_X, ids.claimId, "funder"))).status, 403, "no GK traceability");
       assert.equal((await adminPage.api("GET", `${BASE_PATH}/admin/organizations/${ORG_X}/review-queue`)).status, 403, "no GK Review Queue");
       const capabilities = await adminPage.api("GET", `${orgPath()}/access-capabilities`);
-      assert.equal(capabilities.status, 200, JSON.stringify(capabilities.body));
       const operations = capabilities.body.data.workflowOperations;
-      assert.deepEqual([operations.recordEvidenceReview, operations.recordClaimReview, operations.acceptCoverageLimitation, operations.reviewMeasuredClaimFactualContent],
-        [false, false, false, true], "GK reviewer authority stays GK's; the organization review is its own flag");
-      outcomes.capabilities = "recordEvidenceReview/recordClaimReview/acceptCoverageLimitation false; reviewMeasuredClaimFactualContent true";
-      assert.equal((await gkReviewerPage.api("GET", reviewPath)).status, 403, "the organization view is the organization's");
-      // Invalid limitations: a measurement-decided dimension, a risk-flagged one, and an unknown key.
-      const invalid = {};
-      for (const key of ["missingness", "time_period_clarity", "coverage_gaps"]) {
-        invalid[key] = (await adminPage.api("POST", coverageInternalAcceptancePath(ORG_X, ids.claimId, key), {})).status;
-        assert.ok([409, 422].includes(invalid[key]), `${key}: ${invalid[key]}`);
-      }
-      assert.equal((await adminPage.api("POST", coverageInternalAcceptancePath(ORG_X, ids.claimId, "not_a_dimension"), {})).status, 422);
-      outcomes.invalidLimitations = invalid;
-      // Replays: the same decisions again write nothing.
-      const [head] = await query("SELECT target_updated_at FROM kai.evidence_review_decisions WHERE organization_id = $1::uuid", [ORG_X]);
-      const replayEvidence = await adminPage.api("POST", evidencePath, evidenceReviewDecisionBody({ expectedUpdatedAt: new Date(head.target_updated_at).toISOString(), decision: "supported" }));
-      assert.deepEqual([replayEvidence.status, replayEvidence.body.data?.replayed], [200, true], JSON.stringify(replayEvidence.body));
-      const replayCoverage = await adminPage.api("POST", coverageInternalAcceptancePath(ORG_X, ids.claimId, "small_cell_risk"), {});
-      assert.deepEqual([replayCoverage.status, replayCoverage.body.data?.replayed], [201, true], JSON.stringify(replayCoverage.body));
-      assert.deepEqual(await counts(), before, "no refused or replayed request wrote anything");
+      assert.deepEqual([operations.recordEvidenceReview, operations.recordClaimReview, operations.acceptCoverageLimitation], [false, false, false]);
+      assert.deepEqual(await approvalState(), NO_APPROVALS, "refusals write nothing");
       results.e1Boundaries = outcomes;
     });
 
-    await test("Console canary: once the administrator's reviews make the claim eligible it passes and waits for the customer's generation", async () => {
-      const gk = await canaryCall(gkReviewerPage, `KAI_CANARY.gk({ organizationId: ${J(ORG_X)}, claimId: ${J(ids.claimId)} })`);
-      assert.equal(gk.eligible, true, J(gk));
-      const summary = await canaryCall(adminPage, "KAI_CANARY.next()");
-      const state = await expectCanary(adminPage, summary, { gk_review: "PASS", generation: "WAITING_FOR_HUMAN" });
-      assert.match(state.stages.generation.next, /Generate internal evidence summary/);
-    });
-
-    await test("E2: the administrator generates the internal Evidence Summary in the UI; the generator receives the measured claim and its limitations; the model's 'approval' changes nothing", async () => {
+    await test("E2: the administrator generates the internal Evidence Summary in the UI; the generator receives the measured claim and its limitations; the draft is ready for internal use with no approval or release action", async () => {
       await openStudioTab("Data Sources");
       await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `[data-client-claim="${ids.claimId}"]`)), "the measured claim");
       await adminPage.clickIn(`[data-client-claim="${ids.claimId}"] input[type=checkbox]`, "Use in an internal draft");
@@ -1334,207 +1273,207 @@ async function runAssembledAcceptance() {
       assert.deepEqual([draft.draft_status, draft.review_status], ["draft", "needs_gk_review"], "the model's approval/release fields are not authoritative");
       ids.draftId = draft.generated_content_draft_id;
       ids.generatedValue = Number(/records (\d+) programme sessions/.exec(draft.block_text)[1]);
-      await adminPage.waitFor(async () => (await textOf(adminPage, "[data-client-internal-draft-release-state]")) !== null, "release state");
-      assert.equal(await adminPage.evaluate(`document.querySelector("[data-client-internal-draft-release-state]").getAttribute("data-client-internal-draft-release-state")`), "awaiting_organization_review");
-      assert.equal(await textOf(adminPage, "[data-client-open-released-report]"), null, "nothing to open before review");
-      assert.equal(await textOf(adminPage, "[data-client-internal-release-action]"), null, "no release before the factual review");
+      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `[data-client-open-internal-report="${ids.draftId}"]`)), "the internal report action");
+      assert.match(await textOf(adminPage, "[data-client-internal-draft-detail-review-state]"), /Ready for internal use/);
+      for (const selector of ["[data-client-factual-review-action]", "[data-client-factual-review-approve]", "[data-client-internal-release-action]",
+        "[data-client-internal-release-submit]", "[data-client-internal-draft-release-state]", "[data-client-open-released-report]"]) {
+        assert.equal(await textOf(adminPage, selector), null, `${selector} is not offered`);
+      }
+      assert.doesNotMatch(await textOf(adminPage, `[data-client-internal-draft-detail="${ids.draftId}"]`), /Approve factual content|Release internal report|awaiting your release|factual review is completed before/i);
+      const { approvalsBeforeReports } = ids;
+      assert.deepEqual(await approvalState(), approvalsBeforeReports, "generation records no approval");
       results.e2 = { modelCalls: modelCalls.length, generatedValue: ids.generatedValue, draft: [draft.draft_status, draft.review_status] };
     });
 
-    await test("Console canary: the generated draft is validated for count, unit, period, citation and disclosures, and it waits for the human factual review", async () => {
+    await test("Console canary: the generated draft is validated for count, unit, period, citation and disclosures, and its internal report download is validated with no review or release stage; a loopback run is never a production pass", async () => {
       const summary = await canaryCall(adminPage, "KAI_CANARY.next()");
-      const state = await expectCanary(adminPage, summary, { generation: "PASS", factual_review: "WAITING_FOR_HUMAN" });
+      const state = await expectCanary(adminPage, summary, { generation: "PASS", download_validation: "PASS" });
       assert.equal(state.ids.draftId, ids.draftId);
       assert.ok(Object.values(state.generation.checks).every(Boolean), J(state.generation));
-      assert.match(state.stages.factual_review.next, /Approve factual content/);
-    });
-
-    await test("E3: the same administrator completes the factual review in the UI, then makes the separate final-release decision there; the existing chain records both under the administrator's identity, with no Get Kinder actor; GK's release routes still refuse the customer", async () => {
-      const [decisionRow] = await query(
-        `SELECT reviewed_personal_data_status, reviewed_minor_data_status, reviewed_health_housing_justice_immigration_status, reviewed_indigenous_governance_status,
-                reviewed_story_testimonial_status, reviewed_small_cell_risk_status FROM kai.intake_sensitivity_review_decisions WHERE intake_sensitivity_profile_id = $1::uuid`,
-        [ids.sensitivityProfileId]);
-      assert.ok(Object.values(decisionRow).every((value) => value === "absent"), `ordinary source: ${JSON.stringify(decisionRow)}`);
-      await adminPage.clickIn(`[data-client-internal-draft="${ids.draftId}"] button`, "Read draft");
-      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, "[data-client-factual-review-action]")), "the factual review action");
-      await adminPage.clickIn("[data-client-factual-review-confirm]", "confirm reading");
-      await adminPage.waitFor(async () => adminPage.evaluate(`!document.querySelector("[data-client-factual-review-approve]").disabled`), "approve enabled");
-      let mark = adminPage.mark();
-      await adminPage.clickIn("[data-client-factual-review-approve]", "Approve factual content");
-      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, "[data-client-factual-review-recorded]")), "approval recorded");
-      await adminPage.idle();
-      assert.deepEqual(adminPage.requestsSince(mark).filter((r) => r.method === "POST").map((r) => [pathOf(r), r.status]),
-        [[clientInternalDraftFactualReviewPath(ORG_X, PROJECT_X, ids.draftId), 200]]);
-      await adminPage.waitForText("Reviewed; awaiting your release decision");
-      assert.equal(await textOf(adminPage, "[data-client-open-released-report]"), null, "approval releases nothing");
-      const [beforeRelease] = await query("SELECT count(*)::int AS n FROM kai.human_authority_decisions WHERE organization_id = $1::uuid", [ORG_X]);
-      assert.equal(beforeRelease.n, 0, "the factual approval is not a release decision");
-
-      // GK's release routes still refuse the customer, for every step.
-      const draftPath = `${orgPath()}/generated-content-drafts/${ids.draftId}`;
-      for (const audience of ["internal", "funder", "public"]) {
-        assert.equal((await adminPage.api("POST", `${draftPath}/export-review-request`, { requested_export_audience: audience })).status, 403, audience);
-      }
-      assert.equal((await adminPage.api("POST", `${draftPath}/limitation-snapshot`, {})).status, 403);
-      assert.equal((await adminPage.api("POST", `${draftPath}/export-candidates`, {})).status, 403);
-
-      // The release decision.
-      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, "[data-client-internal-release-action]")), "the release action");
-      await adminPage.clickIn("[data-client-internal-release-confirm]", "confirm the limitations");
-      await adminPage.waitFor(async () => adminPage.evaluate(`!document.querySelector("[data-client-internal-release-submit]").disabled`), "release enabled");
-      mark = adminPage.mark();
-      await adminPage.clickIn("[data-client-internal-release-submit]", "Release internal report");
-      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, "[data-client-internal-release-recorded]")), "release recorded");
-      await adminPage.idle();
-      assert.deepEqual(adminPage.requestsSince(mark).filter((r) => r.method === "POST").map((r) => [pathOf(r), r.status]),
-        [[clientInternalDraftReleasePath(ORG_X, PROJECT_X, ids.draftId), 200]]);
-      await adminPage.waitForText("Released by your organization");
-
-      const [row] = await query(
-        `SELECT m.export_manifest_id::text, m.created_by::text AS manifest_by, m.export_review_queue_item_id::text,
-                d.decided_by::text, d.decided_by_role, d.decision_type, d.decision_action,
-                c.export_candidate_id::text, c.created_by::text AS candidate_by, c.requested_audience, c.content_type,
-                s.confirmed_by::text, s.confirmed_by_role
-           FROM kai.export_manifests m
-           JOIN kai.human_authority_decisions d ON d.decision_id = m.effective_authority_decision_id
-           JOIN kai.export_candidates c ON c.export_candidate_id = m.export_candidate_id
-           JOIN kai.limitation_snapshots s ON s.limitation_snapshot_id = c.limitation_snapshot_id
-          WHERE m.organization_id = $1::uuid`, [ORG_X]);
-      assert.deepEqual([row.decided_by, row.decided_by_role, row.decision_type, row.decision_action], [ids.adminUserId, "client_admin", "export_authority_granted", "grant"]);
-      assert.deepEqual([row.confirmed_by, row.confirmed_by_role, row.candidate_by, row.manifest_by, row.requested_audience, row.content_type],
-        [ids.adminUserId, "client_admin", ids.adminUserId, ids.adminUserId, "internal", "evidence_summary"]);
-      ids.exportManifestId = row.export_manifest_id;
-      ids.exportCandidateId = row.export_candidate_id;
-      ids.exportReviewQueueItemId = row.export_review_queue_item_id;
-      const [entry] = await query("SELECT limitation_codes FROM kai.limitation_snapshot_entries WHERE organization_id = $1::uuid", [ORG_X]);
-      assert.deepEqual(entry.limitation_codes, MEASURED_LIMITATION_CODES);
-      const reviewAndRelease = await query(
-        `SELECT action, actor_user_id::text AS actor FROM kai.audit_events WHERE organization_id = $1::uuid
-            AND action IN ('generated_content_review_started', 'generated_content_review_completed', 'export_review_requested', 'export_review_started',
-                           'export_review_completed', 'limitation_snapshot_confirmed', 'export_candidate_created', 'human_authority_decision_recorded', 'export_manifest_created')
-          ORDER BY audit_event_id`, [ORG_X]);
-      assert.deepEqual(reviewAndRelease.map((r) => r.action), [
-        "generated_content_review_started", "generated_content_review_completed", "export_review_requested", "export_review_started", "export_review_completed",
-        "limitation_snapshot_confirmed", "export_candidate_created", "human_authority_decision_recorded", "export_manifest_created",
-      ]);
-      assert.deepEqual([...new Set(reviewAndRelease.map((r) => r.actor))], [ids.adminUserId], "every review and release step is the administrator's own");
-      const gkMarkdown = await fetchText(gkAdminPage, `${orgPath()}/export-manifests/${ids.exportManifestId}/markdown`);
-      assert.equal(gkMarkdown.status, 200, gkMarkdown.body);
-      ids.gkMarkdown = gkMarkdown.body;
-      results.e3 = {
-        factualReviewBy: "client_admin", releasedBy: row.decided_by_role, snapshotConfirmedBy: row.confirmed_by_role,
-        sameCustomer: row.decided_by === ids.adminUserId, reviewAndReleaseActors: [...new Set(reviewAndRelease.map((r) => r.actor))],
-      };
-    });
-
-    // -----------------------------------------------------------------------
-    // Step F: the administrator obtains the released Markdown.
-    // -----------------------------------------------------------------------
-    await test("Console canary: after the human review and release it validates the actual Markdown download; a loopback run is never a production pass; a disabled export flag is reported, not bypassed", async () => {
-      const summary = await canaryCall(adminPage, "KAI_CANARY.next()");
-      const state = await expectCanary(adminPage, summary, { factual_review: "PASS", release: "PASS", download_validation: "PASS" });
-      assert.equal(state.ids.exportManifestId, ids.exportManifestId);
       assert.ok(Object.values(state.validation.checks).every(Boolean), J(state.validation));
+      assert.deepEqual(Object.keys(summary.stages), ["workspace", "fixture", "upload_processing", "sensitivity_source", "measurement", "internal_eligibility", "generation", "download_validation"],
+        "no GK review, factual review or release stage");
       assert.match(summary.verdict, /^LOCAL_SIMULATION_ONLY/);
       assert.ok(!/END_TO_END_PASS/.test(summary.verdict));
       const report = await canaryCall(adminPage, "KAI_CANARY.report()");
       assert.deepEqual(new Set(Object.values(report.stages)), new Set(["PASS"]));
+      // The internal report is not an export: the export flag does not gate it.
       process.env.KAI_PUBLIC_EXPORT_ENABLED = "false";
       try {
-        const preflight = await canaryCall(adminPage, "KAI_CANARY.preflight()");
-        const flag = preflight.checks.find((check) => check.Check === "Internal release flag (KAI_PUBLIC_EXPORT_ENABLED)");
-        assert.equal(flag.Status, "BLOCKED", J(flag));
-        assert.match(flag.Observed, /feature_disabled/);
+        const flagOff = await fetchText(adminPage, clientInternalReportMarkdownPath(ORG_X, PROJECT_X, ids.draftId));
+        assert.equal(flagOff.status, 200, flagOff.body.slice(0, 300));
       } finally {
         process.env.KAI_PUBLIC_EXPORT_ENABLED = "true";
       }
-      results.canary.final = { verdict: summary.verdict, markdownChecks: Object.keys(state.validation.checks).length, coverageCodes: state.validation.coverageCodes, disabledFlag: "BLOCKED feature_disabled" };
+      results.canary.final = { verdict: summary.verdict, markdownChecks: Object.keys(state.validation.checks).length, coverageCodes: state.validation.coverageCodes };
     });
 
-    await test("F: the administrator sees the release, opens it (HTTP 200), and receives exactly the released Markdown with the five-session measurement, citations, and limitations", async () => {
+    await test("E3: Report 1 - the administrator opens and downloads the complete internal Evidence Summary Markdown in the UI; nothing is approved, reviewed, confirmed or released", async () => {
       await adminPage.clickIn(`[data-client-internal-draft="${ids.draftId}"] button`, "Read draft");
-      await adminPage.waitForText("Released by your organization");
+      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `[data-client-open-internal-report="${ids.draftId}"]`)), "the report action");
       const mark = adminPage.mark();
-      await adminPage.clickIn(`[data-client-open-released-report="${ids.exportManifestId}"]`, "Open released report");
-      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, "[data-client-released-report-markdown]")), "the released Markdown");
+      await adminPage.clickIn(`[data-client-open-internal-report="${ids.draftId}"]`, "Open report");
+      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, "[data-client-internal-report-markdown]")), "the report");
       await adminPage.idle();
-      const receipt = adminPage.requestsSince(mark).filter((entry) => entry.url.includes("/client-released-reports/"));
-      assert.deepEqual(receipt.map((entry) => [entry.method, entry.status]), [["GET", 200]]);
-      const shown = await textOf(adminPage, "[data-client-released-report-markdown]");
-      assert.equal(shown, ids.gkMarkdown, "the organization receives exactly the manifest's document, as the GK route renders it");
-      const download = await adminPage.evaluate(`document.querySelector("[data-client-download-released-report]").getAttribute("href")`);
-      assert.equal(download, clientReleasedReportMarkdownPath(ORG_X, PROJECT_X, ids.exportManifestId));
+      const requests = adminPage.requestsSince(mark);
+      assert.deepEqual(requests.filter((r) => r.method !== "GET").map(pathOf), [], "opening the report writes nothing");
+      assert.deepEqual(requests.filter((r) => r.url.includes("/markdown")).map((r) => [pathOf(r), r.status]), [[clientInternalReportMarkdownPath(ORG_X, PROJECT_X, ids.draftId), 200]]);
+      const shown = await textOf(adminPage, "[data-client-internal-report-markdown]");
+      const download = await adminPage.evaluate(`document.querySelector("[data-client-download-internal-report]").getAttribute("href")`);
+      assert.equal(download, clientInternalReportMarkdownPath(ORG_X, PROJECT_X, ids.draftId));
       const fetched = await fetchText(adminPage, download);
-      assert.deepEqual([fetched.status, Buffer.from(fetched.body).equals(Buffer.from(ids.gkMarkdown))], [200, true]);
-      assert.match(fetched.disposition, /attachment/);
-      ids.markdownValue = Number((/records (\d+) programme sessions/.exec(shown) || [])[1]);
-      assert.equal(ids.markdownValue, independent.counted);
-      assert.match(shown, /Organization: Harbourline Session Society/);
-      assert.match(shown, /Engagement: `Session Programme 2026`/);
-      assert.match(shown, /1 blank record was excluded and 2 exact-duplicate records were included/);
-      assert.match(shown, /period is attested in that definition and not verified against record dates/);
-      assert.match(shown, /2026-09-01 to 2026-09-30/);
-      assert.ok(shown.includes(`Claim \`${ids.claimId}\`; evidence \`${ids.evidenceItemId}\`;`), "claim and evidence citation");
-      assert.ok(shown.includes(`source version \`${ids.sourceVersionId}\``), "source version citation");
-      for (const code of MEASURED_LIMITATION_CODES) assert.ok(shown.includes(`\`${code}\``), code);
-      assert.match(shown, /Missing values: a known limitation of this source, recorded and not removed\./);
-      assert.match(shown, /not of distinct events/);
-      assert.doesNotMatch(shown.split("## Citation Appendix")[0], /\b(participants?|attendees|rate|outcomes?|because|caused?|improv\w*|impact\w*)\b|%/i,
-        "no rate, participant, outcome, or causal finding");
-      assert.doesNotMatch(shown, /literacy|mentoring|2026-09-16|programme-sessions-september/, "no row values or file names");
-      results.f = { status: 200, bytes: Buffer.byteLength(shown), identicalToGkRoute: true };
+      assert.deepEqual([fetched.status, fetched.body], [200, shown], "the download is the report shown");
+      assert.match(fetched.disposition, /attachment; filename="kai-internal-evidence-summary\.md"/);
+      assertCompleteReport(shown, "# Internal Evidence Summary");
+      ids.markdownValue = Number((/records \*\*(\d+) programme sessions\*\*/.exec(shown) || [])[1]);
+      ids.reportMarkdown = { evidenceSummary: shown };
+      writeFileSync(join(WORKDIR, "report-1-internal-evidence-summary.md"), shown);
+      console.log(`[internal-report:evidence_summary:begin]\n${shown}[internal-report:end]`);
+      assert.deepEqual(await approvalState(), ids.approvalsBeforeReports, "report 1: zero new approvals of any kind");
+      results.e3 = { status: 200, bytes: Buffer.byteLength(shown), value: ids.markdownValue };
     });
 
-    await test("F boundaries: other roles, organizations, Projects, and the GK route are refused; a revoked release and a stale source block retrieval and the UI says so", async () => {
-      const clientPath = clientReleasedReportMarkdownPath(ORG_X, PROJECT_X, ids.exportManifestId);
+    await test("E4: Report 2 - an internal impact narrative from the same claim reuses the same factual authority; it is generated, opened and downloaded with no second approval", async () => {
+      await openStudioTab("Data Sources");
+      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `[data-client-claim="${ids.claimId}"]`)), "the measured claim");
+      await adminPage.clickIn(`[data-client-claim="${ids.claimId}"] input[type=checkbox]`, "Use in an internal draft");
+      await adminPage.clickButton("Generate internal impact narrative");
+      await adminPage.waitForText("Internal impact narrative created");
+      await adminPage.idle();
+      assert.equal(modelCalls.length, 2);
+      const [narrative] = await query("SELECT generated_content_draft_id::text, review_status FROM kai.generated_content_drafts WHERE organization_id = $1::uuid AND content_type = 'impact_narrative'", [ORG_X]);
+      ids.narrativeId = narrative.generated_content_draft_id;
+      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `[data-client-open-internal-report="${ids.narrativeId}"]`)), "the narrative's report action");
+      assert.equal(await textOf(adminPage, "[data-client-factual-review-action]"), null);
+      await adminPage.clickIn(`[data-client-open-internal-report="${ids.narrativeId}"]`, "Open report");
+      await adminPage.waitFor(async () => /^# Internal Impact Narrative/.test((await textOf(adminPage, "[data-client-internal-report-markdown]")) || ""), "the narrative report");
+      const shown = await textOf(adminPage, "[data-client-internal-report-markdown]");
+      const fetched = await fetchText(adminPage, clientInternalReportMarkdownPath(ORG_X, PROJECT_X, ids.narrativeId));
+      assert.deepEqual([fetched.status, fetched.body], [200, shown]);
+      assert.match(fetched.disposition, /attachment; filename="kai-internal-impact-narrative\.md"/);
+      assertCompleteReport(shown, "# Internal Impact Narrative");
+      ids.reportMarkdown.impactNarrative = shown;
+      writeFileSync(join(WORKDIR, "report-2-internal-impact-narrative.md"), shown);
+      console.log(`[internal-report:impact_narrative:begin]\n${shown}[internal-report:end]`);
+      const after = await approvalState();
+      assert.deepEqual(after, ids.approvalsBeforeReports, "report 2: zero new approvals of any kind");
+      const [drafts] = await query("SELECT count(*)::int AS n FROM kai.generated_content_drafts WHERE organization_id = $1::uuid", [ORG_X]);
+      results.e4 = {
+        successfulInternalReports: drafts.n,
+        completeMarkdownArtifacts: Object.keys(ids.reportMarkdown).length,
+        newHumanApprovalDecisions: after.evidence_decisions + after.claim_decisions + after.coverage_decisions + after.draft_reviews,
+        newMandatoryApprovalQueueItems: after.export_review_queues + after.client_followups + after.resolved_review_queues,
+        newHumanReleaseDecisions: after.release_decisions,
+        manualAcknowledgmentSteps: after.limitation_confirmations,
+      };
+      assert.deepEqual(results.e4, { successfulInternalReports: 2, completeMarkdownArtifacts: 2, newHumanApprovalDecisions: 0, newMandatoryApprovalQueueItems: 0, newHumanReleaseDecisions: 0, manualAcknowledgmentSteps: 0 });
+    });
+
+    await test("F boundaries: other roles, organizations, Projects and non-human actors are refused; an unsupported metric or causal assertion is never persisted; a stale source, a sensitive source and revoked permission make the report unavailable; funder and public disclosure stay Get Kinder's", async () => {
+      const path = clientInternalReportMarkdownPath(ORG_X, PROJECT_X, ids.draftId);
       const outcomes = {};
-      for (const [label, page, path, status] of [
-        ["client_contributor", contributorPage, clientPath, 403],
-        ["client_reviewer", reviewerPage, clientPath, 403],
-        ["inactive organization administrator", inactiveAdminPage, clientPath, 403],
-        ["GK reviewer on the customer route", gkReviewerPage, clientPath, 403],
-        ["another organization's administrator", adminYPage, clientPath, 403],
-        ["another organization's path", adminPage, clientReleasedReportMarkdownPath(ORG_Y, PROJECT_Y, ids.exportManifestId), 403],
-        ["another Project of the organization", adminPage, clientReleasedReportMarkdownPath(ORG_X, PROJECT_X2, ids.exportManifestId), 404],
-        ["the GK delivery route", adminPage, `${orgPath()}/export-manifests/${ids.exportManifestId}/markdown`, 403],
+      for (const [label, page, target, status] of [
+        ["client_contributor", contributorPage, path, 403],
+        ["client_reviewer", reviewerPage, path, 403],
+        ["inactive organization administrator", inactiveAdminPage, path, 403],
+        ["GK reviewer on the customer route", gkReviewerPage, path, 403],
+        ["another organization's administrator", adminYPage, path, 403],
+        ["another organization's path", adminPage, clientInternalReportMarkdownPath(ORG_Y, PROJECT_Y, ids.draftId), 403],
+        ["another Project of the organization", adminPage, clientInternalReportMarkdownPath(ORG_X, PROJECT_X2, ids.draftId), 404],
       ]) {
-        const response = await fetchText(page, path);
+        const response = await fetchText(page, target);
         assert.equal(response.status, status, `${label}: ${response.body.slice(0, 300)}`);
         assert.doesNotMatch(response.body, /programme sessions/, label);
         outcomes[label] = response.status;
       }
-      const authorityPath = `${orgPath()}/export-candidates/${ids.exportCandidateId}/final-release-authority`;
-      created(await gkAdminPage.api("POST", authorityPath, { requested_audience: "internal", decision_action: "revoke" }), "revoke");
-      const afterRevoke = await fetchText(adminPage, clientPath);
-      assert.equal(afterRevoke.status, 409, afterRevoke.body);
-      await adminPage.clickIn(`[data-client-internal-draft="${ids.draftId}"] button`, "Read draft");
-      await adminPage.waitForText("Released earlier; no longer available");
-      assert.equal(await textOf(adminPage, "[data-client-open-released-report]"), null);
-      const reRelease = await adminPage.api("POST", clientInternalDraftReleasePath(ORG_X, PROJECT_X, ids.draftId), { decision: "release_for_internal_use", limitations_confirmed: true });
-      assert.deepEqual([reRelease.status, reRelease.body.blockers?.map((b) => b.blocking_reason)], [422, ["release_withdrawn_by_get_kinder"]], "only Get Kinder re-grants what it withdrew");
-      outcomes.organizationReGrantAfterRevoke = reRelease.status;
-      created(await gkAdminPage.api("POST", authorityPath, { requested_audience: "internal", decision_action: "grant" }), "re-grant");
-      assert.equal((await fetchText(adminPage, clientPath)).status, 200);
-      // INJECTED STATE (labeled): no application operation supersedes a source
-      // version, so currentness is flipped directly to prove the refusal.
+      const { getClientInternalReportMarkdown, approveClientInternalDraftFactualReview, releaseClientInternalReport } = await import("../Backend/kai/services/kaiClientGeneratedContentService.js");
+      const scope = { organizationId: ORG_X, engagementId: PROJECT_X, generatedContentDraftId: ids.draftId };
+      for (const actorType of ["ai", "assistant", "system"]) {
+        const actorContext = { actorType, actorUserId: ids.adminUserId, organizationMemberships: [{ organization_id: ORG_X, role_name: "client_admin", membership_status: "active" }] };
+        const read = await getClientInternalReportMarkdown({ ...scope, actorContext });
+        const approve = await approveClientInternalDraftFactualReview({ ...scope, decision: "approved", actorContext }, { createReviewAudit: () => ({}) });
+        const release = await releaseClientInternalReport({ ...scope, decision: "release_for_internal_use", limitationsConfirmed: true, actorContext }, { createReleaseAudit: () => ({}) });
+        assert.deepEqual([read.error?.code, approve.error?.code, release.error?.code], ["authorization_denied", "authorization_denied", "authorization_denied"], actorType);
+        outcomes[`${actorType} read/approve/release`] = "authorization_denied";
+      }
+
+      // Unsupported or fabricated content: VAL-GEN-004 refuses it before anything is persisted.
+      const draftsBefore = (await query("SELECT count(*)::int AS n FROM kai.generated_content_drafts WHERE organization_id = $1::uuid", [ORG_X]))[0].n;
+      for (const [label, text] of [
+        ["fabricated metric", "The promoted source records 12 programme sessions for the reporting period 2026-09-01 to 2026-09-30, reaching 40 participants."],
+        ["causal outcome", COMPLIANT_TEXT.replace("This is a count", "The programme improves literacy because of these sessions. This is a count")],
+      ]) {
+        modelOverride.text = text;
+        try {
+          const refused = await adminPage.api("POST", `${orgPath()}/generated-content-drafts/evidence-summary`,
+            { claim_ids: [ids.claimId], idempotency_key: `refused-${label.replace(/\W+/g, "-")}`, engagement_id: PROJECT_X });
+          assert.equal(refused.status, 422, `${label}: ${JSON.stringify(refused.body)}`);
+          assert.ok(refused.body.blockers.some((b) => b.validator_key === "VAL-GEN-004" && b.blocking_reason === "unsupported_numeric_or_causal_assertion"), J(refused.body.blockers));
+          outcomes[label] = "VAL-GEN-004 422";
+        } finally {
+          modelOverride.text = null;
+        }
+      }
+      assert.equal((await query("SELECT count(*)::int AS n FROM kai.generated_content_drafts WHERE organization_id = $1::uuid", [ORG_X]))[0].n, draftsBefore, "nothing persisted");
+
+      // Funder and public disclosure keep their own authority: the customer cannot generate a funder summary or start any GK export step.
+      const funder = await adminPage.api("POST", `${orgPath()}/generated-content-drafts/evidence-summary/funder`,
+        { claim_ids: [ids.claimId], idempotency_key: "refused-funder", engagement_id: PROJECT_X });
+      assert.ok([403, 422].includes(funder.status), `funder generation: ${funder.status} ${JSON.stringify(funder.body)}`);
+      const draftPath = `${orgPath()}/generated-content-drafts/${ids.draftId}`;
+      for (const audience of ["internal", "funder", "public"]) {
+        assert.equal((await adminPage.api("POST", `${draftPath}/export-review-request`, { requested_export_audience: audience })).status, 403, audience);
+      }
+      outcomes.funderGeneration = funder.status;
+
+      // INJECTED STATE (labeled): no application operation supersedes a source version.
       await query("UPDATE kai.source_versions SET is_current = false WHERE source_version_id = $1::uuid", [ids.sourceVersionId]);
       try {
-        const stale = await fetchText(adminPage, clientPath);
+        const stale = await fetchText(adminPage, path);
         assert.equal(stale.status, 409, stale.body);
         assert.doesNotMatch(stale.body, /programme sessions/);
         outcomes.stale = stale.status;
       } finally {
         await query("UPDATE kai.source_versions SET is_current = true WHERE source_version_id = $1::uuid", [ids.sourceVersionId]);
       }
-      outcomes.revoked = afterRevoke.status;
-      outcomes.regranted = 200;
+
+      // Sensitive content and revoked permission: the administrator's own corrective sensitivity review.
+      const recordSensitivity = async (overrides) => {
+        const detail = projectSensitivityDetail((await adminPage.api("GET", sensitivityProfilePath(ORG_X, ids.sensitivityProfileId))).body.data);
+        const formState = { ...sensitivityReviewFormStateFromDecision(detail.currentDecision), reviewed_llm_processing_allowed: true, ...overrides };
+        const response = await adminPage.api("POST", sensitivityDecisionPath(ORG_X, ids.sensitivityProfileId), buildSensitivityDecisionRequestBody({
+          decision: "reviewed", expectedUpdatedAt: detail.reviewQueueItem.updated_at, reviewQueueItemId: detail.reviewQueueItem.review_queue_item_id, formState }));
+        assert.equal(response.status, 200, JSON.stringify(response.body));
+      };
+      const internalEligibility = async () => {
+        const traced = await gkReviewerPage.api("GET", claimTraceabilityPath(ORG_X, ids.claimId, "internal"));
+        return [traced.body.data.eligible, traced.body.data.blockerCodes];
+      };
+      await recordSensitivity({ reviewed_minor_data_status: "present" });
+      try {
+        assert.equal((await internalEligibility())[0], false, "a sensitive source is not ordinary");
+        const sensitive = await fetchText(adminPage, path);
+        assert.equal(sensitive.status, 422, sensitive.body);
+        assert.deepEqual(JSON.parse(sensitive.body).blockers.map((b) => b.blocking_reason), ["minor_information_not_cleared", "cited_claims_not_currently_eligible"]);
+        outcomes.sensitive = sensitive.status;
+      } finally {
+        await recordSensitivity({ reviewed_minor_data_status: "absent" });
+      }
+      await recordSensitivity({ reviewed_llm_processing_allowed: false });
+      try {
+        const revoked = await fetchText(adminPage, path);
+        assert.ok([409, 422].includes(revoked.status), `${revoked.status} ${revoked.body}`);
+        assert.doesNotMatch(revoked.body, /programme sessions/);
+        outcomes.revokedPermission = revoked.status;
+      } finally {
+        await recordSensitivity({ reviewed_llm_processing_allowed: true });
+      }
+      assert.deepEqual(await internalEligibility(), [true, []], "the ordinary decision restored");
+      assert.equal((await fetchText(adminPage, path)).status, 200);
       results.fBoundaries = outcomes;
     });
 
-    await test("E1 governance after the journey: no Get Kinder reviewer acted from upload to release; a stale or sensitive source blocks the organization's review; a negative review is not approval; Get Kinder's own decision supersedes the organization's, which cannot override it", async () => {
-      const gkReviewerWrites = await query("SELECT count(*)::int AS n FROM kai.audit_events a JOIN kai.users u ON u.user_id = a.actor_user_id WHERE u.legacy_public_userdata_id = $1",
-        [USERS.gkReviewer]);
-      assert.equal(gkReviewerWrites[0].n, 0, "no gk_reviewer action anywhere in the ordinary internal journey");
+    await test("Governance after the journey: a recorded human decision still governs - a negative review makes the claim ineligible, and Get Kinder's decision supersedes the organization's, which cannot override it", async () => {
       const reviewPath = organizationFactualReviewPath(ORG_X, ids.claimId);
       const reviewNow = async () => (await adminPage.api("GET", reviewPath)).body.data;
       const claimDecision = async (decision, page = adminPage) => {
@@ -1552,71 +1491,31 @@ async function runAssembledAcceptance() {
         return [traced.body.data.eligible, traced.body.data.blockerCodes];
       };
       const outcomes = {};
-
-      // Stale (INJECTED STATE, labeled, as in F): no application operation supersedes a source version.
-      await query("UPDATE kai.source_versions SET is_current = false WHERE source_version_id = $1::uuid", [ids.sourceVersionId]);
-      try {
-        outcomes.staleRead = (await adminPage.api("GET", reviewPath)).status;
-        outcomes.staleClaimDecision = (await claimDecision("needs_more_information")).status;
-        outcomes.staleCoverage = (await adminPage.api("POST", coverageInternalAcceptancePath(ORG_X, ids.claimId, "small_cell_risk"), {})).status;
-        assert.deepEqual([outcomes.staleRead, outcomes.staleClaimDecision, outcomes.staleCoverage], [409, 409, 409]);
-      } finally {
-        await query("UPDATE kai.source_versions SET is_current = true WHERE source_version_id = $1::uuid", [ids.sourceVersionId]);
-      }
-
-      // Sensitive: the administrator's own re-review records minors as present; the measurement is no longer ordinary.
-      const recordSensitivity = async (overrides) => {
-        const detail = projectSensitivityDetail((await adminPage.api("GET", sensitivityProfilePath(ORG_X, ids.sensitivityProfileId))).body.data);
-        const formState = { ...sensitivityReviewFormStateFromDecision(detail.currentDecision), reviewed_llm_processing_allowed: true, ...overrides };
-        const response = await adminPage.api("POST", sensitivityDecisionPath(ORG_X, ids.sensitivityProfileId), buildSensitivityDecisionRequestBody({
-          decision: "reviewed", expectedUpdatedAt: detail.reviewQueueItem.updated_at, reviewQueueItemId: detail.reviewQueueItem.review_queue_item_id, formState }));
-        assert.equal(response.status, 200, JSON.stringify(response.body));
-      };
-      await recordSensitivity({ reviewed_minor_data_status: "present" });
-      try {
-        const sensitive = await reviewNow();
-        assert.deepEqual([sensitive.claim_review.organization_may_decide, sensitive.claim_review.get_kinder_review_reasons], [false, ["minor_information_not_cleared"]]);
-        const refused = await claimDecision("needs_more_information");
-        assert.deepEqual([refused.status, refused.body.blockers?.map((b) => b.blocking_reason)], [422, ["minor_information_not_cleared"]]);
-        outcomes.sensitive = refused.status;
-      } finally {
-        await recordSensitivity({ reviewed_minor_data_status: "absent" });
-      }
-      assert.deepEqual(await internalEligibility(), [true, []], "the ordinary decision restored");
-
-      // A negative review is not approval: the administrator's own needs-more-information reopens the claim.
-      const reopened = await claimDecision("needs_more_information");
-      assert.equal(reopened.status, 200, JSON.stringify(reopened.body));
-      const [blockedEligible, blockedCodes] = await internalEligibility();
-      assert.equal(blockedEligible, false);
-      assert.ok(blockedCodes.includes("claim_review_unresolved"), blockedCodes.join(","));
-      const rejected = await claimDecision("rejected");
-      assert.equal(rejected.status, 200, JSON.stringify(rejected.body));
-      const [rejectedEligible, rejectedCodes] = await internalEligibility();
-      assert.equal(rejectedEligible, false);
-      assert.ok(rejectedCodes.includes("support_strength_unassessed"), rejectedCodes.join(","));
-      const afterReject = await reviewNow();
-      assert.ok(afterReject.coverage_limitations.every((row) => row.organization_may_accept === false), "no limitation can be accepted for a rejected claim");
-      assert.equal((await adminPage.api("POST", coverageInternalAcceptancePath(ORG_X, ids.claimId, "small_cell_risk"), {})).status, 422);
-      outcomes.negativeReview = "needs_more_information and rejected both leave the claim ineligible";
+      // Reporting a problem: the administrator's own "not supported".
+      const notSupported = await evidenceDecision("not_supported", adminPage);
+      assert.equal(notSupported.status, 200, JSON.stringify(notSupported.body));
+      const [ineligible, codes] = await internalEligibility();
+      assert.equal(ineligible, false);
+      assert.ok(codes.includes("support_strength_unassessed"), codes.join(","));
+      const refused = await fetchText(adminPage, clientInternalReportMarkdownPath(ORG_X, PROJECT_X, ids.draftId));
+      assert.equal(refused.status, 422);
+      outcomes.notSupported = "claim ineligible; report 422";
+      // The administrator corrects it; the recorded decisions govern again.
+      assert.equal((await evidenceDecision("supported", adminPage)).status, 200);
+      assert.equal((await claimDecision("rejected")).status, 200);
+      assert.equal((await internalEligibility())[0], false, "a rejected claim is not eligible");
       assert.equal((await claimDecision("approved")).status, 200);
-      assert.deepEqual(await internalEligibility(), [true, []], "the organization's approval, with its earlier limitation acceptances, is current again");
-
+      assert.deepEqual(await internalEligibility(), [true, []]);
       // Get Kinder supersedes the organization's evidence decision; the organization cannot override it.
       const gkDecision = await evidenceDecision("needs_more_information", gkReviewerPage);
       assert.equal(gkDecision.status, 200, JSON.stringify(gkDecision.body));
-      const [gkHead] = await query(
-        `SELECT d.decided_by_role, p.decided_by_role AS superseded_role FROM kai.evidence_review_decisions d
-           JOIN kai.evidence_review_decisions p ON p.decision_id = d.supersedes_decision_id
-          WHERE d.organization_id = $1::uuid AND NOT EXISTS (SELECT 1 FROM kai.evidence_review_decisions s WHERE s.supersedes_decision_id = d.decision_id)`, [ORG_X]);
-      assert.deepEqual(gkHead, { decided_by_role: "gk_reviewer", superseded_role: "client_admin" });
       assert.equal((await internalEligibility())[0], false);
       const override = await evidenceDecision("supported", adminPage);
       assert.deepEqual([override.status, override.body.blockers?.map((b) => b.blocking_reason)], [422, ["get_kinder_decision_recorded"]]);
       const view = await reviewNow();
       assert.deepEqual([view.evidence_review.decided_by, view.evidence_review.organization_may_decide], ["get_kinder", false]);
-      outcomes.gkSupersedes = "gk_reviewer superseded the organization's evidence decision; the organization's override was refused (get_kinder_decision_recorded)";
-      results.e1Governance = outcomes;
+      outcomes.gkSupersedes = "gk_reviewer superseded the organization's evidence decision; the organization's override was refused";
+      results.governance = outcomes;
     });
 
     await test("summary: one value from bytes to report, one customer identity, no hidden step", async () => {
@@ -1628,7 +1527,8 @@ async function runAssembledAcceptance() {
         governedMeasurement: ids.measuredValue,
         claimStatement: ids.claimValue,
         generatedContent: ids.generatedValue,
-        releasedMarkdown: ids.markdownValue,
+        internalReportMarkdown: ids.markdownValue,
+        secondReportMarkdown: Number((/records \*\*(\d+) programme sessions\*\*/.exec(ids.reportMarkdown.impactNarrative) || [])[1]),
       };
       assert.deepEqual(new Set(Object.values(chain)), new Set([5]), JSON.stringify(chain));
       results.byteToReport = { ...chain, checksum: independent.checksum, profileCounts: ids.profileCounts };
@@ -1638,20 +1538,23 @@ async function runAssembledAcceptance() {
       const humanActors = await query(
         `SELECT DISTINCT a.actor_user_id::text, u.legacy_public_userdata_id FROM kai.audit_events a JOIN kai.users u ON u.user_id = a.actor_user_id
           WHERE a.organization_id = $1::uuid AND a.actor_type::text = 'human' ORDER BY u.legacy_public_userdata_id`, [ORG_X]);
-      assert.deepEqual(humanActors.map((row) => row.legacy_public_userdata_id).sort(), [USERS.gkReviewer, USERS.gkAdmin, USERS.clientAdmin].sort());
-      // What Get Kinder did: only the boundary tests after the journey - the
-      // revocation and re-grant (gk_admin), and superseding the
-      // organization's evidence decision (gk_reviewer). The evidence, claim
-      // and coverage reviews were the administrator's (E1); no GK actor
-      // reviewed or released the draft.
+      assert.deepEqual(humanActors.map((row) => row.legacy_public_userdata_id).sort(), [USERS.gkReviewer, USERS.clientAdmin].sort());
+      // What Get Kinder did: only the governance test after the journey,
+      // superseding the organization's evidence decision (gk_reviewer). No
+      // evidence, claim, coverage, draft review or release decision was made
+      // by anyone before both reports were retrieved (E1-E4).
       const gkActions = await query(
         `SELECT DISTINCT a.action, u.legacy_public_userdata_id FROM kai.audit_events a JOIN kai.users u ON u.user_id = a.actor_user_id
           WHERE a.organization_id = $1::uuid AND u.legacy_public_userdata_id = ANY($2::int[]) ORDER BY 2, 1`, [ORG_X, [USERS.gkReviewer, USERS.gkAdmin]]);
       results.gkActions = gkActions.map((row) => `${row.legacy_public_userdata_id === USERS.gkAdmin ? "gk_admin" : "gk_reviewer"}:${row.action}`);
       for (const action of ["generated_content_review_started", "generated_content_review_completed", "export_review_requested", "export_review_started",
-        "export_review_completed", "limitation_snapshot_confirmed", "export_candidate_created", "export_manifest_created"]) {
+        "export_review_completed", "limitation_snapshot_confirmed", "export_candidate_created", "human_authority_decision_recorded", "export_manifest_created"]) {
         assert.ok(!gkActions.some((row) => row.action === action), `no GK ${action}`);
       }
+      const [releaseRows] = await query(`SELECT (SELECT count(*) FROM kai.human_authority_decisions WHERE organization_id = $1::uuid)::int AS decisions,
+        (SELECT count(*) FROM kai.export_manifests WHERE organization_id = $1::uuid)::int AS manifests,
+        (SELECT count(*) FROM kai.limitation_snapshots WHERE organization_id = $1::uuid)::int AS snapshots`, [ORG_X]);
+      assert.deepEqual(releaseRows, { decisions: 0, manifests: 0, snapshots: 0 }, "no release, manifest or limitation confirmation exists at all");
       console.log(`[plan-a-assembled-file-to-report] ${JSON.stringify(results, null, 2)}`);
       for (const page of allPages) assert.deepEqual(page.exceptions, []);
     });

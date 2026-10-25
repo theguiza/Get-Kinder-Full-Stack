@@ -225,6 +225,30 @@ export const CLIENT_INTERNAL_DRAFT_FACTUAL_REVIEW_REASONS = Object.freeze([
   "processing_permission_not_established",
 ]);
 
+// Owner decision 2026-10-25: the organization's internal report, available
+// with no factual approval or release step, and why one is not available.
+export const CLIENT_INTERNAL_REPORT_REASONS = Object.freeze([
+  ...CLIENT_INTERNAL_DRAFT_FACTUAL_REVIEW_REASONS,
+  "validator_results_not_passed",
+]);
+
+export function clientInternalReportMarkdownPath(organizationId, engagementId, generatedContentDraftId) {
+  return `${clientInternalDraftPath(organizationId, engagementId, generatedContentDraftId)}/markdown`;
+}
+
+// Fails closed: a missing or malformed view is not available.
+function projectClientInternalReport(view) {
+  const reasons = (value) => Array.isArray(value) && value.every((code) => CLIENT_INTERNAL_REPORT_REASONS.includes(code));
+  if (!isPlainClientObject(view) || !reasons(view.getKinderReviewReasons) || !reasons(view.blockedReasons)) {
+    return { available: false, getKinderReviewReasons: [], blockedReasons: [] };
+  }
+  return {
+    available: view.available === true,
+    getKinderReviewReasons: [...view.getKinderReviewReasons],
+    blockedReasons: [...view.blockedReasons],
+  };
+}
+
 export function clientInternalDraftFactualReviewPath(organizationId, engagementId, generatedContentDraftId) {
   return `${clientInternalDraftPath(organizationId, engagementId, generatedContentDraftId)}/factual-review`;
 }
@@ -320,6 +344,7 @@ export function projectClientInternalDraftList(dto) {
       contentType: item.contentType,
       audience: item.audience,
       reviewState: item.reviewState,
+      internalReportAvailable: item.internalReportAvailable === true,
       createdAt: typeof item.createdAt === "string" ? item.createdAt : null,
       blockCount: item.blockCount,
     });
@@ -346,6 +371,7 @@ export function projectClientInternalDraft(dto) {
     citedClaimsCurrentlyEligible: dto.citedClaimsCurrentlyEligible,
     limitations: [...dto.limitations],
     blocks,
+    internalReport: projectClientInternalReport(dto.internalReport),
     release: projectClientInternalDraftRelease(dto.release),
     factualReview: projectClientInternalDraftFactualReview(dto.factualReview),
     organizationRelease: projectClientInternalDraftOrganizationRelease(dto.organizationRelease),

@@ -1,5 +1,4 @@
 import { withTransaction } from "../db/kaiDb.js";
-import { getScopedSourceVersionById } from "../db/kaiIntakeQueries.js";
 import { evaluateClaimTraceabilityInTransaction } from "./postgresClaimTraceabilityRepository.js";
 import { GENERATED_CONTENT_REVIEW_LIFECYCLE_PROFILES } from "./generatedContentReviewQueueContract.js";
 import {
@@ -7,9 +6,15 @@ import {
   evaluateGeneratedDraftReviewPacketInTransaction,
 } from "./postgresGeneratedContentRepository.js";
 import {
-  AmbiguousSensitivityDecisionLineageError,
-  findCurrentSensitivityAllowedUseDecision,
-} from "./postgresSensitivityAllowedUseDecisionRepository.js";
+  HIGH_RISK_SENSITIVITY_FIELDS,
+  classifySourceDecision,
+  classifySourceVersionInTransaction,
+} from "./postgresOrdinaryInternalFactAuthority.js";
+
+// The source classification is shared with P2-06's ordinary internal factual
+// authority (postgresOrdinaryInternalFactAuthority.js) and re-exported here
+// for the existing callers.
+export { HIGH_RISK_SENSITIVITY_FIELDS, classifySourceDecision, classifySourceVersionInTransaction };
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
@@ -41,15 +46,6 @@ export const ORGANIZATION_REVIEW_COMPLETION_AUDIT_CONTRACT = "kai_organization_i
 export const ORGANIZATION_REVIEWABLE_CONTENT_TYPE = "evidence_summary";
 export const ORGANIZATION_REVIEWABLE_AUDIENCE = "internal";
 
-export const HIGH_RISK_SENSITIVITY_FIELDS = Object.freeze({
-  reviewed_personal_data_status: "personal_information_not_cleared",
-  reviewed_minor_data_status: "minor_information_not_cleared",
-  reviewed_health_housing_justice_immigration_status: "sensitive_information_not_cleared",
-  reviewed_indigenous_governance_status: "indigenous_governance_not_cleared",
-  reviewed_story_testimonial_status: "story_testimonial_not_cleared",
-  reviewed_small_cell_risk_status: "small_cell_risk_not_cleared",
-});
-
 export const GET_KINDER_REVIEW_REASONS = Object.freeze([
   "content_type_requires_get_kinder_review",
   "audience_requires_get_kinder_review",
@@ -63,21 +59,6 @@ export const BLOCKED_REASONS = Object.freeze([
   "processing_permission_not_established",
 ]);
 
-// One source version's current decision (or null when it has none) ->
-// reasons. Pure; exported for the unit contract.
-export function classifySourceDecision(decision) {
-  if (!decision || decision.decision_outcome !== "reviewed") {
-    return { getKinderReviewReasons: ["sensitivity_review_not_complete"], blockedReasons: [] };
-  }
-  const blockedReasons = decision.reviewed_allowed_use_status === "allowed" && decision.reviewed_llm_processing_allowed === true
-    ? []
-    : ["processing_permission_not_established"];
-  const getKinderReviewReasons = Object.entries(HIGH_RISK_SENSITIVITY_FIELDS)
-    .filter(([field]) => decision[field] !== "absent")
-    .map(([, reason]) => reason);
-  return { getKinderReviewReasons, blockedReasons };
-}
-
 // The draft-level reasons from the review packet alone. Pure.
 export function classifyDraftPacket(packet) {
   const getKinderReviewReasons = [];
@@ -86,33 +67,6 @@ export function classifyDraftPacket(packet) {
   return {
     getKinderReviewReasons,
     blockedReasons: packet.currentUseEligible === true ? [] : ["cited_claims_not_currently_eligible"],
-  };
-}
-
-// One source version -> reasons: its currentness and its current Phase-5
-// sensitivity decision (classifySourceDecision). Shared with the
-// organization's evidence and claim factual review
-// (postgresOrganizationFactualReviewRepository.js).
-export async function classifySourceVersionInTransaction(tx, { organizationId, sourceVersionId }) {
-  const version = await getScopedSourceVersionById({ organizationId, sourceVersionId }, tx);
-  if (!version) return { getKinderReviewReasons: ["sensitivity_review_not_complete"], blockedReasons: [] };
-  let decision = null;
-  try {
-    decision = UUID_PATTERN.test(version.intake_sensitivity_profile_id ?? "")
-      ? await findCurrentSensitivityAllowedUseDecision(tx, {
-        organizationId,
-        intakeSensitivityProfileId: version.intake_sensitivity_profile_id,
-      })
-      : null;
-  } catch (error) {
-    if (!(error instanceof AmbiguousSensitivityDecisionLineageError)) throw error;
-    decision = null;
-  }
-  if (decision && decision.organization_id !== organizationId) decision = null;
-  const source = classifySourceDecision(decision);
-  return {
-    getKinderReviewReasons: source.getKinderReviewReasons,
-    blockedReasons: version.is_current === true ? source.blockedReasons : ["source_version_not_current", ...source.blockedReasons],
   };
 }
 
@@ -142,6 +96,29 @@ export async function evaluateOrganizationInternalReviewInTransaction(tx, { orga
     getKinderReviewReasons,
     blockedReasons,
     organizationMayReview: getKinderReviewReasons.length === 0 && blockedReasons.length === 0,
+  };
+}
+
+/**
+ * Ordinary internal report availability (owner decision 2026-10-25): an
+ * internal evidence summary or impact narrative whose every cited claim is
+ * currently eligible for internal use (P2-06, which already admits ordinary
+ * measured facts without further review) and whose every cited source is
+ * current, permitted and free of the section 7.2 categories is the
+ * organization's internal report. No factual approval or release decision is
+ * required for internal use; a high-risk source still keeps Get Kinder's
+ * review, and nothing here grants funder or public use. Read-only.
+ */
+export const INTERNAL_REPORT_CONTENT_TYPES = Object.freeze(["evidence_summary", "impact_narrative"]);
+
+export async function evaluateInternalReportAvailabilityInTransaction(tx, { organizationId, packet }) {
+  const evaluation = await evaluateOrganizationInternalReviewInTransaction(tx, { organizationId, packet });
+  const getKinderReviewReasons = evaluation.getKinderReviewReasons
+    .filter((reason) => reason !== "content_type_requires_get_kinder_review" || !INTERNAL_REPORT_CONTENT_TYPES.includes(packet.contentType));
+  return {
+    getKinderReviewReasons,
+    blockedReasons: evaluation.blockedReasons,
+    available: getKinderReviewReasons.length === 0 && evaluation.blockedReasons.length === 0,
   };
 }
 
@@ -204,6 +181,10 @@ export function createPostgresOrganizationInternalReviewRepository({ runInTransa
   return Object.freeze({
     async evaluate({ organizationId, packet }) {
       return readOnly((tx) => evaluateOrganizationInternalReviewInTransaction(tx, { organizationId, packet }));
+    },
+
+    async evaluateInternalReport({ organizationId, packet }) {
+      return readOnly((tx) => evaluateInternalReportAvailabilityInTransaction(tx, { organizationId, packet }));
     },
 
     async evaluateRelease({ organizationId, generatedContentDraftId }) {

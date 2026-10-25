@@ -56,12 +56,16 @@ function isClientImpactFactsInput(value) {
   );
 }
 
+// The unresolved dimensions an eligible claim carries into internal use as
+// limitations: accepted by a reviewer, or carried by an ordinary measurement
+// (P2-06 owner decision 2026-10-25). Either way it no longer blocks.
 function acceptedLimitationDimensionKeys(dimensions) {
   if (!isPlainObject(dimensions)) return [];
   return Object.keys(dimensions)
     .filter((dimensionKey) => (
       dimensions[dimensionKey]?.assessment_status === "unresolved"
-      && dimensions[dimensionKey]?.internal_limitation_accepted === true
+      && (dimensions[dimensionKey]?.internal_limitation_accepted === true
+        || dimensions[dimensionKey]?.blocks_requested_audience === false)
     ))
     .sort();
 }

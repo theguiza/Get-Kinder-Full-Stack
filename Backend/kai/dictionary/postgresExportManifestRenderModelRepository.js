@@ -241,6 +241,8 @@ export function createPostgresExportManifestRenderModelRepository({
   });
 }
 
+export { loadReportContextInTransaction };
+
 export const __exportManifestRenderModelRepositoryTestables = Object.freeze({
   RENDER_MODEL_CONTRACT_VERSION,
   isComposeExportManifestRenderModelInput,

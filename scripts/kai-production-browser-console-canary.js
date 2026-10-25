@@ -7,13 +7,16 @@
  * The canary only ever sends same-origin GET requests to the KAI intake API
  * with the page's own session cookie. It performs no upload, decision,
  * generation, review or release: every write is a human action in the
- * product UI. It stores only a run tag, workspace ids and stage outcomes in
+ * product UI. Owner decision 2026-10-25: an ordinary measured fact needs no
+ * GK review, factual approval or release for internal use, so the journey is
+ * measurement -> automatic internal eligibility -> generation -> internal
+ * report download. It stores only a run tag, workspace ids and stage outcomes in
  * localStorage, never tokens, cookies, signed URLs or report content.
  */
 (() => {
   "use strict";
   const W = typeof window !== "undefined" ? window : globalThis;
-  const VERSION = "kai-console-canary-2026-10-23.1";
+  const VERSION = "kai-console-canary-2026-10-25.1";
   const API = "/api/kai/sprint2/intake";
   const STORE_KEY = "kai.productionConsoleCanary.v1";
   const CONFIRM_PHRASE = "I AUTHORIZE A SYNTHETIC PRODUCTION RUN";
@@ -33,8 +36,9 @@
     "measurement.blank_records_excluded",
     "measurement.duplicate_records_included",
   ]);
-  // Operating Model 7.2 categories: all 'absent' makes the draft ordinary
-  // (organization review and release); anything else keeps it with Get Kinder.
+  // Operating Model 7.2 categories: all 'absent' makes the measured fact
+  // ordinary (usable internally with no further review); anything else keeps
+  // it with Get Kinder.
   const ORDINARY_CATEGORIES = Object.freeze([
     "reviewed_personal_data_status",
     "reviewed_minor_data_status",
@@ -51,9 +55,6 @@
     proposeClaim: (c) => c.workflowOperations?.proposeClaim,
     generateDrafts: (c) => c.workflowOperations?.generateDrafts,
     readInternalDrafts: (c) => c.workflowOperations?.readInternalDrafts,
-    reviewInternalDraftFactualContent: (c) => c.workflowOperations?.reviewInternalDraftFactualContent,
-    releaseInternalReports: (c) => c.workflowOperations?.releaseInternalReports,
-    readReleasedInternalReports: (c) => c.workflowOperations?.readReleasedInternalReports,
   });
   const STAGES = Object.freeze([
     { key: "workspace", name: "1 Workspace", expected: "Signed-in customer administrator with every workflow capability, in the authorized synthetic organization and Project" },
@@ -61,11 +62,9 @@
     { key: "upload_processing", name: "3 Upload, scan, P1", expected: "Exactly one uploaded file for this run; stored size matches; security policy passed; parse, dictionary and sensitivity profile complete" },
     { key: "sensitivity_source", name: "4 Sensitivity & promotion", expected: "Human 'reviewed' decision (allowed use allowed, AI permitted); source promoted; current version profiled 6/1/2/5" },
     { key: "measurement", name: "5 Measurement & claim", expected: "Human definition with attested period; measured value 5 (6 rows - 1 blank, 2 duplicates kept); evidence and claim linked" },
-    { key: "gk_review", name: "6 GK review", expected: "GK evidence, claim and coverage review complete; claim eligible for internal use" },
+    { key: "internal_eligibility", name: "6 Internal eligibility", expected: "Claim eligible for internal use automatically (ordinary measured fact); no evidence, claim or limitation review required" },
     { key: "generation", name: "7 AI generation", expected: "New internal Evidence Summary generated in this run, citing only the measured claim, with count, unit, period and limitations, and no invented findings" },
-    { key: "factual_review", name: "8 Factual review", expected: "reviewState reviewed_by_your_organization" },
-    { key: "release", name: "9 Internal release", expected: "released_for_internal_use, released by your organization, manifest id present" },
-    { key: "download_validation", name: "10 Markdown report", expected: "Authorized Markdown download with count 5, period, citations, limitations, no raw rows or invented findings" },
+    { key: "download_validation", name: "8 Internal report", expected: "Internal report Markdown download, with no factual approval or release step: count 5, period, method, duplicates, limitations, citations, no raw rows or invented findings" },
   ]);
 
   // ---------------------------------------------------------------- utilities
@@ -92,7 +91,7 @@
     traceability: (o, c) => `${API}/admin/organizations/${enc(o)}/claims/${enc(c)}/traceability?requested_audience=internal`,
     drafts: (o, e, cursor) => `${API}/admin/organizations/${enc(o)}/engagements/${enc(e)}/client-internal-drafts${cursor ? `?cursor=${enc(cursor)}` : ""}`,
     draft: (o, e, d) => `${API}/admin/organizations/${enc(o)}/engagements/${enc(e)}/client-internal-drafts/${enc(d)}`,
-    markdown: (o, e, m) => `${API}/admin/organizations/${enc(o)}/engagements/${enc(e)}/client-released-reports/${enc(m)}/markdown`,
+    markdown: (o, e, d) => `${API}/admin/organizations/${enc(o)}/engagements/${enc(e)}/client-internal-drafts/${enc(d)}/markdown`,
   };
 
   function classify(status, contentType) {
@@ -444,22 +443,24 @@
       return result(S.FAIL, `${observed}; claim ${claim.claim_id}: "${short(claim.statement, 160)}"`, "The claim does not state the measured value and period; do not continue.");
     }
     state.ids.claimId = claim.claim_id;
-    return result(S.PASS, `${observed}; claim ${claim.claim_id} (${claim.claim_review_status}): "${short(claim.statement, 160)}"; limitations ${codes.join(", ")}`, "Ask the GK reviewer to review.");
+    return result(S.PASS, `${observed}; claim ${claim.claim_id} (${claim.claim_review_status}): "${short(claim.statement, 160)}"; limitations ${codes.join(", ")}`,
+      "Internal eligibility is checked automatically; run KAI_CANARY.next().");
   }
 
-  function gkInstruction(state) {
-    return `Get Kinder reviewer (separate GK account) pastes this canary and runs KAI_CANARY.gk({ organizationId: "${state.organizationId}", claimId: "${state.ids.claimId}" }) to see what is outstanding, then in the Impact Evidence Library for this organization: Evidence tab > Claims > select claim ${state.ids.claimId} > Traceability > "Record Evidence Review Decision" and "Record Claim Review Decision" (approved audience internal) as their genuine judgment; Files tab > "Claim & evidence workflow" > for each unresolved dimension "Accept internal limitation for selected dimension" only where accepted. Then the customer runs KAI_CANARY.next().`;
-  }
-
-  async function evalGkReview(state) {
+  // Owner decision 2026-10-25: nobody reviews an ordinary measured fact for
+  // internal use. A claim that is not eligible has a real reason (a high-risk
+  // or unknown sensitivity category, a stale source, an open conflict); the
+  // canary reports it and bypasses nothing.
+  async function evalInternalEligibility(state) {
     const facts = await get(pathOf.impactFacts(state.organizationId));
-    if (!facts.ok) return apiFailure("Reviewed Impact Facts", facts);
+    if (!facts.ok) return apiFailure("Impact Facts", facts);
     const fact = (facts.data?.items || []).find((item) => item.claimId === state.ids.claimId);
     if (!fact) {
-      if (facts.data?.truncated) return result(S.NOT_CONFIRMED, "Impact Facts list is truncated and the claim is not on the first page", gkInstruction(state));
-      return result(S.WAITING, `Claim ${state.ids.claimId} is not yet eligible for internal use (GK evidence, claim or coverage review outstanding)`, gkInstruction(state));
+      if (facts.data?.truncated) return result(S.NOT_CONFIRMED, "Impact Facts list is truncated and the claim is not on the first page", "Investigate with the Get Kinder team.");
+      return result(S.BLOCKED, `Claim ${state.ids.claimId} is not eligible for internal use${state.ordinary === false ? " (the source records a high-risk or unknown sensitivity category, so Get Kinder reviews it)" : ""}`,
+        `Data Sources tab > "View measurement" on claim ${state.ids.claimId} shows the server's reasons. The canary will not bypass them.`);
     }
-    return result(S.PASS, `Claim ${state.ids.claimId} is eligible for internal use; accepted limitation dimensions: ${(fact.limitationDimensionKeys || []).join(", ") || "none"}`, "Generate the internal Evidence Summary.");
+    return result(S.PASS, `Claim ${state.ids.claimId} is eligible for internal use with no review step; limitations carried: ${(fact.limitationDimensionKeys || []).join(", ") || "none"}`, "Generate the internal Evidence Summary.");
   }
 
   async function listDrafts(state) {
@@ -533,80 +534,38 @@
     if (findings.violations.length) failed.push(`unsupported findings: ${findings.violations.join(" | ")}`);
     state.generation = { checks, negatedMentions: findings.negated, limitations: draft.limitations };
     const observed = `draft ${draft.generatedContentDraftId} (${draft.reviewState}); ${draft.blocks?.length || 0} blocks; cites only claim ${state.ids.claimId}: ${cited.size === 1 && cited.has(state.ids.claimId)}; provider metadata is not exposed to the customer role, so provider use is shown only by a new draft created after this run started${note}`;
-    if (failed.length) return result(S.FAIL, `${observed}. Failed: ${failed.join("; ")}`, "Do not approve this draft. Record the failure; KAI_CANARY.report() shows the details.");
-    return result(S.PASS, `${observed}. Count, unit, period, blank/duplicate and attestation disclosures present${findings.negated.length ? `; negated mentions: ${findings.negated.length}` : ""}`, "Read the draft, then do the factual review.");
+    if (draft.internalReport?.available !== true) failed.push(`internal report not available: ${[...(draft.internalReport?.getKinderReviewReasons || []), ...(draft.internalReport?.blockedReasons || [])].join(", ") || "no reason given"}`);
+    if (failed.length) return result(S.FAIL, `${observed}. Failed: ${failed.join("; ")}`, "Do not use this draft. Record the failure; KAI_CANARY.report() shows the details.");
+    return result(S.PASS, `${observed}. Count, unit, period, blank/duplicate and attestation disclosures present${findings.negated.length ? `; negated mentions: ${findings.negated.length}` : ""}; ready for internal use`,
+      `"Your internal drafts" > "Read draft" on ${draft.generatedContentDraftId}, then "Open report" and "Download Markdown"; then KAI_CANARY.next().`);
   }
 
-  async function readRunDraft(state) {
-    const detail = await get(pathOf.draft(state.organizationId, state.engagementId, state.ids.draftId));
-    return detail.ok ? { draft: detail.data } : { failure: apiFailure(`Draft ${state.ids.draftId}`, detail) };
-  }
-
-  async function evalFactualReview(state) {
-    const { draft, failure } = await readRunDraft(state);
-    if (failure) return failure;
-    const review = draft.factualReview || {};
-    const base = `draft ${draft.generatedContentDraftId}: reviewState ${draft.reviewState}; cited claims currently eligible ${draft.citedClaimsCurrentlyEligible}`;
-    if (draft.citedClaimsCurrentlyEligible !== true) return result(S.BLOCKED, `${base}; limitations ${(draft.limitations || []).join(", ")}`, "The cited claim is no longer eligible (stale or changed); regenerate only after the cause is understood.");
-    if (draft.reviewState === "reviewed_by_your_organization") return result(S.PASS, `${base}; factual review recorded by your organization`, "Continue to release.");
-    if (draft.reviewState === "reviewed_by_get_kinder") return result(S.NOT_CONFIRMED, `${base}; reviewed by Get Kinder, not by the customer`, "This run did not exercise the customer factual review.");
-    if (draft.reviewState === "awaiting_organization_review") {
-      if (review.actorMayApprove === true) {
-        return result(S.WAITING, `${base}; you may approve`,
-          `Data Sources tab > "Your internal drafts" > "Read draft" on ${draft.generatedContentDraftId} ([data-client-internal-draft]). Read the text, citations and limitations. Only if accurate: tick the confirmation ([data-client-factual-review-confirm]) and click "Approve factual content" ([data-client-factual-review-approve]); then KAI_CANARY.next(). If inaccurate, do not approve (there is no reject action) and report it.`);
-      }
-      return result(S.BLOCKED, `${base}; approval not available: blocked ${review.blockedReasons?.join(", ") || "none"}, GK reasons ${review.getKinderReviewReasons?.join(", ") || "none"}`, "Resolve the listed blocker; the canary will not bypass it.");
-    }
-    return result(S.BLOCKED, `${base}; Get Kinder review required: ${review.getKinderReviewReasons?.join(", ") || "reason not listed"}`, "This draft is not ordinary (high-risk or unknown categories); only Get Kinder can review it.");
-  }
-
-  async function evalRelease(state) {
-    const { draft, failure } = await readRunDraft(state);
-    if (failure) return failure;
-    const release = draft.release || {};
-    const org = draft.organizationRelease || {};
-    const base = `draft ${draft.generatedContentDraftId}: release state ${release.state}; released by ${org.releasedBy || "nobody"}; report ${release.releasedReportId || "none"}`;
-    if (release.state === "released_for_internal_use") {
-      if (org.releasedBy !== "your_organization") return result(S.NOT_CONFIRMED, base, "This run did not exercise the customer release.");
-      if (!isUuid(release.releasedReportId)) return result(S.FAIL, `${base}; no manifest id`, "Investigate.");
-      state.ids.exportManifestId = release.releasedReportId;
-      return result(S.PASS, `${base}; manifest ${release.releasedReportId}`, "Validate the Markdown download.");
-    }
-    if (release.state === "awaiting_organization_release") {
-      if (org.actorMayRelease === true) {
-        return result(S.WAITING, base,
-          `In the same draft: read the limitations, tick the limitation confirmation ([data-client-internal-release-confirm]), click "Release internal report" ([data-client-internal-release-submit]) once, then KAI_CANARY.next().`);
-      }
-      return result(S.BLOCKED, `${base}; release not available: blocked ${org.blockedReasons?.join(", ") || "none"}, GK reasons ${org.getKinderReleaseReasons?.join(", ") || "none"}`, "Resolve the listed blocker; the canary will not bypass it.");
-    }
-    if (release.state === "release_status_unavailable") {
-      const caps = state.caps || {};
-      const roleOk = caps.workflowOperations?.readReleasedInternalReports === true;
-      return result(S.BLOCKED, `${base}; ${roleOk ? "feature_disabled: KAI_PUBLIC_EXPORT_ENABLED is off on this deployment (it also gates internal release)" : "this account lacks read_client_released_internal_report"}`,
-        "The canary does not change feature flags. The owner decides whether to enable KAI_PUBLIC_EXPORT_ENABLED; then KAI_CANARY.next().");
-    }
-    if (release.state === "awaiting_get_kinder_release") return result(S.BLOCKED, `${base}; Get Kinder release required: ${org.getKinderReleaseReasons?.join(", ") || "reason not listed"}`, "Only Get Kinder can release this draft.");
-    if (release.state === "release_no_longer_valid") return result(S.FAIL, `${base}; the earlier release is no longer valid (revoked or stale)`, "Investigate the release or source currentness.");
-    return result(S.WAITING, `${base}; factual review not complete`, "Complete the factual review first.");
-  }
-
+  // The internal report (kaiInternalReportMarkdownSerializer.js): its
+  // generated narrative is the only model-written section, so only it is
+  // scanned for unsupported findings.
   function validateMarkdown(markdown, state) {
     const text = String(markdown || "");
-    const body = text.split("## Citation Appendix")[0];
-    const contentSection = body.split("## Content")[1] || "";
+    const section = (heading) => (text.split(`\n## ${heading}\n`)[1] || "").split("\n## ")[0];
+    const contentSection = section("Generated narrative");
     const escaped = (value) => String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     const findings = scanFindings(contentSection);
     const checks = {
-      organizationLine: new RegExp(`^Organization: .*\\(\`${escaped(state.organizationId)}\`\\)$`, "m").test(text),
-      engagementLine: new RegExp(`^Engagement: .*\\(\`${escaped(state.engagementId)}\`\\)$`, "m").test(text),
-      internalEvidenceSummary: /Content type: `evidence_summary`/.test(text) && /Requested audience: `internal`/.test(text),
-      countAndUnit: new RegExp(`\\b(?:5|five)\\s+${escaped(state.unit.unitLabel)}\\b`, "i").test(contentSection),
+      organizationLine: new RegExp(`^- \\*\\*Organization:\\*\\* .*\\(\`${escaped(state.organizationId)}\`\\)$`, "m").test(text),
+      engagementLine: new RegExp(`^- \\*\\*Project / engagement:\\*\\* .*\\(\`${escaped(state.engagementId)}\`\\)$`, "m").test(text),
+      internalEvidenceSummary: text.startsWith("# Internal Evidence Summary\n") && /internal use by this organization only/.test(text),
+      countAndUnit: new RegExp(`\\*\\*(?:5|five)\\s+${escaped(state.unit.unitLabel)}\\*\\*`, "i").test(section("Key findings")),
+      methodAndArithmetic: /minus 1 blank record excluded = \*\*5\*\* counted/.test(section("Measurement definition and counting method")),
+      duplicatesIncluded: /2 exact-duplicate records\. They are included in the count of 5/.test(section("Duplicate records")),
+      doesNotEstablish: /distinct people/.test(section("What this evidence does not establish")),
+      conclusion: /records 5 /.test(section("Conclusion")),
       reportingPeriod: text.includes(state.period.start) && text.includes(state.period.end),
-      claimEvidenceCitation: text.includes(`Claim \`${state.ids.claimId}\`; evidence \`${state.ids.evidenceItemId}\`;`),
-      sourceVersionCitation: text.includes(`source version \`${state.ids.sourceVersionId}\``),
+      claimEvidenceCitation: text.includes(`Claim \`${state.ids.claimId}\``) && text.includes(`Evidence \`${state.ids.evidenceItemId}\``),
+      sourceVersionCitation: text.includes(`version \`${state.ids.sourceVersionId}\``),
       measurementLimitations: MEASUREMENT_LIMITATION_CODES.every((code) => text.includes(`\`${code}\``)),
-      periodNotRowVerified: /not verified against record dates/.test(text),
-      noRawRowsOrFileNames: !/literacy|mentoring|\d{4}-\d{2}-\d{2},/.test(text) && !text.includes(state.tag),
+      periodNotRowVerified: /not checked against dates in the records/.test(text),
+      // A raw CSV row starts "date,programme"; a governed statement may put a
+      // comma after the period's end date ("... 2026-09-30, counting ...").
+      noRawRowsOrFileNames: !/literacy|mentoring|\d{4}-\d{2}-\d{2},[A-Za-z]/.test(text) && !text.includes(state.tag),
       noUnsupportedFindings: findings.violations.length === 0,
     };
     const coverageCodes = [...new Set(text.match(/`coverage\.[a-z_.]+`/g) || [])].map((code) => code.slice(1, -1));
@@ -614,14 +573,14 @@
   }
 
   async function evalDownload(state) {
-    const path = pathOf.markdown(state.organizationId, state.engagementId, state.ids.exportManifestId);
+    const path = pathOf.markdown(state.organizationId, state.engagementId, state.ids.draftId);
     const response = await get(path, { markdown: true });
     if (!response.ok) {
-      if (response.code === "feature_disabled") return result(S.BLOCKED, `Markdown download ${response.label}`, "KAI_PUBLIC_EXPORT_ENABLED is off; the canary will not change it.");
-      if (response.status === 409) return result(S.FAIL, `Markdown download ${response.label}: release revoked or a cited source is no longer current`, "Investigate currentness; do not re-release automatically.");
+      if (response.status === 409) return result(S.FAIL, `Markdown download ${response.label}: a cited source is no longer current`, "Investigate currentness; nothing is re-generated automatically.");
+      if (response.status === 422) return result(S.BLOCKED, `Markdown download ${response.label}: the draft is not usable as an internal report now`, "Read the draft's reasons in Internal Drafts; the canary bypasses nothing.");
       return apiFailure("Markdown download", response);
     }
-    const link = W.document?.querySelector?.(`[data-client-download-released-report="${state.ids.exportManifestId}"]`);
+    const link = W.document?.querySelector?.(`[data-client-download-internal-report="${state.ids.draftId}"]`);
     const linkNote = link ? `; UI download link ${link.getAttribute("href") === path ? "matches" : "DIFFERS"}` : "; UI download link not on screen";
     const validation = validateMarkdown(response.text, state);
     if (!/attachment/i.test(response.disposition)) validation.checks.attachmentDisposition = false;
@@ -635,7 +594,6 @@
   const EVALUATORS = {
     workspace: async (state) => {
       const r = await evaluateWorkspace(state.organizationId, state.engagementId);
-      if (r.caps) state.caps = { workflowOperations: { readReleasedInternalReports: r.caps.workflowOperations?.readReleasedInternalReports === true } };
       if (r.engagementCode) state.engagementCode = r.engagementCode;
       return r;
     },
@@ -643,10 +601,8 @@
     upload_processing: evalUpload,
     sensitivity_source: evalSensitivitySource,
     measurement: evalMeasurement,
-    gk_review: evalGkReview,
+    internal_eligibility: evalInternalEligibility,
     generation: evalGeneration,
-    factual_review: evalFactualReview,
-    release: evalRelease,
     download_validation: evalDownload,
   };
 
@@ -727,17 +683,7 @@
           if (drafts.failure) {
             push("Internal drafts read", S.BLOCKED, drafts.failure.label);
           } else {
-            const reviewed = drafts.items.find((item) => /^reviewed_/.test(item.reviewState));
-            let flag = [S.NOT_CONFIRMED, "No reviewed internal draft exists yet, so the release flag cannot be observed read-only; the release stage will report it"];
-            if (reviewed) {
-              const detail = await get(pathOf.draft(resolvedOrg, engagementId, reviewed.generatedContentDraftId));
-              const state = detail.data?.release?.state;
-              flag = state === "release_status_unavailable"
-                ? [S.BLOCKED, `Existing reviewed draft shows release_status_unavailable: feature_disabled (KAI_PUBLIC_EXPORT_ENABLED off)`, "Internal release will be blocked until the owner enables the flag."]
-                : [S.PASS, `Existing reviewed draft shows release state ${state || detail.label}; the release flag is on`];
-            }
-            push("Internal release flag (KAI_PUBLIC_EXPORT_ENABLED)", flag[0], flag[1], flag[2] || "");
-            push("Existing internal drafts (Project)", S.PASS, `${drafts.items.length} draft(s) visible`);
+            push("Existing internal drafts (Project)", S.PASS, `${drafts.items.length} draft(s) visible; ${drafts.items.filter((item) => item.internalReportAvailable === true).length} ready for internal use`);
           }
         }
       }
@@ -834,7 +780,6 @@
         authorizedPhrase: true,
         baselineDraftIds: drafts.items.map((item) => item.generatedContentDraftId),
         fixture: pendingTag ? { generatedAt: nowIso() } : null,
-        caps: { workflowOperations: { readReleasedInternalReports: workspace.caps?.workflowOperations?.readReleasedInternalReports === true } },
         ids: {},
         stages: { workspace: { status: S.PASS, observed: workspace.observed, next: "", at: nowIso() } },
       };
@@ -940,7 +885,7 @@
         { Item: "Blocker codes", Value: (t.blockerCodes || []).join(", ") || "none" },
         { Item: "Evidence review decision", Value: t.evidence_review_decision?.decision_outcome || "NOT RECORDED" },
         { Item: "Claim review decision", Value: t.claim_review_decision ? `${t.claim_review_decision.decision_outcome} (${(t.claim_review_decision.approved_audiences || []).join(", ")})` : "NOT RECORDED" },
-        { Item: "Unresolved dimensions without internal acceptance", Value: outstanding.join(", ") || "none" },
+        { Item: "Unresolved dimensions blocking internal use", Value: outstanding.filter((key) => t.dimensions[key]?.blocks_requested_audience === true).join(", ") || "none" },
       ];
       console.log(`%c[KAI canary] GK read-only check for claim ${claimId} - no write was made`, "font-weight:bold");
       console.table(table);

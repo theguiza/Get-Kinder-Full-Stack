@@ -117,8 +117,19 @@ function harness({ initial = packet(), evaluation = ORDINARY, refuseAt = null, r
     getEngagementForOrganization: async ({ organizationId, engagementId }) => (organizationId === ORG && [ENGAGEMENT, OTHER_ENGAGEMENT].includes(engagementId)
       ? { engagement_id: engagementId, organization_id: organizationId } : null),
     readGeneratedDraftEngagementId: async (organizationId, draftId) => (organizationId === ORG && draftId === DRAFT ? ENGAGEMENT : null),
+    // The internal report read (owner decision 2026-10-25): available when
+    // nothing holds the draft for Get Kinder or blocks it; the release
+    // chain's own factual_review_not_complete is no condition of it.
+    internalReportRepository: {
+      async readInternalReport() {
+        const blockedReasons = state.evaluation.blockedReasons.filter((reason) => reason !== "factual_review_not_complete");
+        const getKinderReviewReasons = [...state.evaluation.getKinderReviewReasons];
+        return { ok: true, data: { available: getKinderReviewReasons.length === 0 && blockedReasons.length === 0, getKinderReviewReasons, blockedReasons } };
+      },
+    },
     organizationReviewRepository: {
       evaluate: async () => ({ getKinderReviewReasons: [], blockedReasons: [], organizationMayReview: true }),
+      evaluateInternalReport: async () => ({ available: true, getKinderReviewReasons: [], blockedReasons: [] }),
       evaluateRelease: async () => state.evaluation,
       readCompletedReviewer: async () => "organization",
       readExportReviewState: async ({ exportReviewQueueItemId }) => (state.exportReview && exportReviewQueueItemId === EXPORT_QUEUE
@@ -295,17 +306,20 @@ test("release: only an active client_admin of this organization, for its Project
   assert.deepEqual([...__clientGeneratedContentServiceContract.CLIENT_INTERNAL_RELEASE_ROLES], ["client_admin"]);
 });
 
-test("detail: a reviewed ordinary summary awaits the organization's release with the action offered; a held one names Get Kinder's reasons; a released one says who released it", async () => {
+test("detail: a reviewed ordinary summary is the organization's internal report with no release decision offered; a held one names Get Kinder's reasons; a released one says who released it", async () => {
   const read = (dependencies, actorContext = actor("client_admin")) => getClientInternalDraft(
     { organizationId: ORG, engagementId: ENGAGEMENT, generatedContentDraftId: DRAFT, actorContext }, dependencies);
   const ordinary = harness();
   const detail = await read(ordinary.dependencies);
   assert.deepEqual(detail.data.release, { state: "awaiting_organization_release", releasedReportId: null });
-  assert.deepEqual(detail.data.organizationRelease, { actorMayRelease: true, getKinderReleaseReasons: [], blockedReasons: [], releasedBy: null });
+  // Owner decision 2026-10-25: no release decision is required for internal use.
+  assert.equal(detail.data.internalReport.available, true);
+  assert.deepEqual(detail.data.organizationRelease, { actorMayRelease: false, getKinderReleaseReasons: [], blockedReasons: [], releasedBy: null });
   assert.deepEqual(projectClientInternalDraft(detail.data).organizationRelease, detail.data.organizationRelease);
 
   const held = harness({ evaluation: { getKinderReviewReasons: ["story_testimonial_not_cleared"], blockedReasons: [], organizationMayRelease: false } });
   const heldDetail = await read(held.dependencies);
+  assert.deepEqual(heldDetail.data.internalReport, { available: false, getKinderReviewReasons: ["story_testimonial_not_cleared"], blockedReasons: [] });
   assert.deepEqual(heldDetail.data.release, { state: "awaiting_get_kinder_release", releasedReportId: null });
   assert.deepEqual(heldDetail.data.organizationRelease, { actorMayRelease: false, getKinderReleaseReasons: ["story_testimonial_not_cleared"], blockedReasons: [], releasedBy: null });
 

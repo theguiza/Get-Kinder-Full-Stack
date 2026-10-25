@@ -53,14 +53,14 @@ test("browser-terminal canary uses the selected signed-in tab and stops when aut
   await assert.rejects(browserTerminalPreflight({ tab }), /authentication_required/);
 });
 
-test("browser-terminal preflight verifies the authorized synthetic workspace and fails closed on disabled release", async () => {
+test("browser-terminal preflight verifies the authorized synthetic workspace and fails closed on a missing capability", async () => {
   const organizationId = "11111111-1111-4111-8111-111111111111";
   const engagementId = "22222222-2222-4222-8222-222222222222";
-  const makeTab = (releaseAllowed) => ({
+  const makeTab = (readInternalDrafts) => ({
     url: async () => "https://app.example.test/customer",
     playwright: { evaluate: async (_fn, arg) => {
       if (arg.path.endsWith("/admin/organizations")) return { status: 200, body: { data: [] } };
-      if (arg.path.endsWith("/access-capabilities")) return { status: 200, body: { data: { intakeContribution: true, workflowOperations: { promoteSource: true, recordSourceMeasurement: true, generateDrafts: true, reviewInternalDraftFactualContent: true, releaseInternalReports: releaseAllowed } } } };
+      if (arg.path.endsWith("/access-capabilities")) return { status: 200, body: { data: { intakeContribution: true, workflowOperations: { promoteSource: true, recordSourceMeasurement: true, generateDrafts: true, readInternalDrafts } } } };
       if (arg.path.endsWith("/engagements")) return { status: 200, body: { data: [{ engagementId }] } };
       return { status: 404, body: { error: { code: "not_found" } } };
     } },
@@ -69,15 +69,17 @@ test("browser-terminal preflight verifies the authorized synthetic workspace and
   assert.equal(result.capabilities, "PASS");
   assert.equal(result.engagement, "PASS");
   assert.deepEqual(result.fixture, { totalDataRows: 6, blankDataRows: 1, countedRecords: 5, duplicateNonblankRowsIncluded: 2 });
-  await assert.rejects(browserTerminalPreflight({ tab: makeTab(false), organizationId, engagementId }), /feature_disabled:KAI_PUBLIC_EXPORT_ENABLED/);
+  await assert.rejects(browserTerminalPreflight({ tab: makeTab(false), organizationId, engagementId }), /required_capability_missing:readInternalDrafts/);
 });
 
-test("browser-terminal execution requires owner authorization and keeps approval actions in the UI", async () => {
+test("browser-terminal execution requires owner authorization, keeps every write in the UI, and has no review or release stage", async () => {
   await assert.rejects(browserTerminalStart({ ownerAuthorized: false }), /separate_owner_authorization/);
   const source = await readFile(new URL("../scripts/kai-sprint2-plan-a-production-synthetic-canary.browser-terminal.mjs", import.meta.url), "utf8");
   assert.match(source, /credentials: "same-origin"/);
   assert.match(source, /every workflow[\s\S]*human action in the product UI/i);
   assert.doesNotMatch(source, /\.post\(|\.put\(|\.patch\(|\.delete\(|Browser\.close|remote-debugging|spawn\(/i);
+  assert.doesNotMatch(source, /gk_review|factual_review|key: "release"|client-released-reports|KAI_PUBLIC_EXPORT_ENABLED/);
+  assert.match(source, /client-internal-drafts\/\$\{id\}|\/markdown`/);
 });
 
 test("initial execution without the separate owner-authorization attestation stops before browser launch", () => {
@@ -90,13 +92,13 @@ test("initial execution without the separate owner-authorization attestation sto
   assert.doesNotMatch(run.stderr, /DevTools|Chrome/);
 });
 
-test("missing authentication and unavailable release gates fail closed", () => {
+test("missing authentication and missing capabilities fail closed", () => {
   assert.equal(authenticationBlocker(200), null);
   assert.match(authenticationBlocker(401), /authentication_required/);
   assert.match(authenticationBlocker(403), /authentication_required/);
-  assert.equal(capabilityBlocker({ intake: true, internalRelease: true }), null);
-  assert.match(capabilityBlocker({ intake: true, internalRelease: false }), /feature_disabled/);
-  assert.match(capabilityBlocker({ intake: false, internalRelease: true }), /required_role_capability_missing/);
+  assert.equal(capabilityBlocker({ intake: true, readInternalDrafts: true }), null);
+  assert.equal(capabilityBlocker({ intake: true, readInternalDrafts: false }), "required_role_capability_missing:readInternalDrafts");
+  assert.equal(capabilityBlocker({ intake: false, readInternalDrafts: true }), "required_role_capability_missing:intake");
 });
 
 test("resume re-reads a human-completed action instead of prompting the canary to repeat it", () => {
@@ -109,21 +111,62 @@ test("the live runner has no login, scanner, storage, or generation mocks", asyn
   assert.doesNotMatch(source, /kai_harness_user|deterministicCreate|Messages\.create\s*=|synthetic-storage|ANTHROPIC_API_KEY/);
 });
 
-test("Markdown validation fails for incorrect count semantics, stale or absent citations, and missing content", () => {
+test("Markdown validation accepts the internal report and fails for incorrect count semantics, stale or absent citations, missing content, and unsupported narrative findings", () => {
   const identifiers = { periodStart: "2026-09-01", periodEnd: "2026-09-30", sourceVersionId: "source-version-current", claimId: "claim-current", evidenceId: "evidence-current" };
   assert.equal(validateMarkdown("Downloaded draft says 4 participant outcomes.", identifiers).ok, false);
   const validShape = [
-    "5 source records for 2026-09-01 to 2026-09-30.",
-    "1 blank record excluded; 2 duplicate records included.",
-    "source-version-current claim-current evidence-current",
+    "# Internal Evidence Summary",
+    "",
+    "## Key findings",
+    "",
+    "- The promoted source records **5 programme sessions** for the reporting period 2026-09-01 to 2026-09-30. [CIT-001]",
+    "",
+    "## Measurement definition and counting method",
+    "",
+    "- **Arithmetic:** 6 data records after the header, minus 1 blank record excluded = **5** counted.",
+    "",
+    "## Duplicate records",
+    "",
+    "- [CIT-001] The profiler reported 2 exact-duplicate records. They are included in the count of 5, not removed or merged.",
+    "",
+    "## Data quality and limitations",
+    "",
     "measurement.blank_records_excluded measurement.duplicate_records_included measurement.period_human_attested_not_row_verified measurement.record_meaning_human_defined",
-    "coverage.conflicting_source_indicators.accepted_internal_limitation coverage.duplicates.resolved_risk_flagged coverage.missingness.resolved_risk_flagged coverage.requirement_alignment.accepted_internal_limitation coverage.small_cell_risk.accepted_internal_limitation coverage.time_period_clarity.resolved_risk_flagged",
+    "coverage.conflicting_source_indicators.unresolved coverage.duplicates.resolved_risk_flagged coverage.missingness.resolved_risk_flagged coverage.requirement_alignment.unresolved coverage.small_cell_risk.unresolved coverage.time_period_clarity.resolved_risk_flagged",
+    "",
+    "## What this evidence does not establish",
+    "",
+    "- How many distinct people took part: no participant count was measured.",
+    "- Any outcome for participants, or that the programme caused any result or impact.",
+    "",
+    "## Generated narrative",
+    "",
+    "The promoted source records 5 programme sessions for the reporting period 2026-09-01 to 2026-09-30; 1 blank record was excluded and 2 exact-duplicate records were included. [CIT-001]",
+    "",
+    "## Source and evidence traceability",
+    "",
+    "| CIT-001 | `claim-current` | `evidence-current` | `source-version-current` |",
+    "",
+    "## Conclusion",
+    "",
+    "It is not evidence of the number of people reached, of outcomes, or of impact.",
+    "",
+    "## References",
+    "",
+    "- Evidence: \"Source version record count: 5 programme sessions for the reporting period 2026-09-01 to 2026-09-30, counting each CSV data record as one session.\"",
+    "",
   ].join("\n");
-  assert.equal(validateMarkdown(validShape, identifiers).ok, true);
+  const result = validateMarkdown(validShape, identifiers);
+  assert.equal(result.ok, true, JSON.stringify(result.checks));
+  assert.equal(validateMarkdown(validShape.replace("**5 programme sessions**", "**6 programme sessions**"), identifiers).ok, false, "wrong count");
   assert.equal(validateMarkdown(validShape.replace("claim-current", "claim-stale"), identifiers).ok, false);
   assert.equal(validateMarkdown(validShape.replace("evidence-current", ""), identifiers).ok, false);
-  const noDuplicateLimitation = validShape.replaceAll("duplicate_records_included", "duplicate_records_removed").replace("2 duplicate records included", "2 duplicate records removed");
+  const noDuplicateLimitation = validShape.replaceAll("duplicate_records_included", "duplicate_records_removed").replace("They are included in the count", "They are removed from the count");
   assert.equal(validateMarkdown(noDuplicateLimitation, identifiers).ok, false);
+  const unsupported = validShape.replace("2 exact-duplicate records were included. [CIT-001]", "2 exact-duplicate records were included, reaching 40 participants. [CIT-001]");
+  assert.equal(validateMarkdown(unsupported, identifiers).checks.unsupportedClaimsAbsent, false, "an unsupported finding in the generated narrative");
+  assert.equal(validateMarkdown(validShape.replace("## Generated narrative", "## Other"), identifiers).ok, false, "the narrative must be present");
+  assert.equal(validateMarkdown(`${validShape}\n2026-09-16,mentoring,8\n`, identifiers).checks.noRawCsvRows, false, "a raw CSV row");
 });
 
 test("production PASS requires live authorized reads and validated downloaded Markdown", async () => {
@@ -131,7 +174,8 @@ test("production PASS requires live authorized reads and validated downloaded Ma
   assert.match(source, /NOT_CONFIRMED/);
   assert.match(source, /credentials:'same-origin'/);
   assert.match(source, /resume_prior_source_state_stale_or_unverified/);
-  assert.match(source, /feature_disabled:KAI_PUBLIC_EXPORT_ENABLED/);
+  assert.match(source, /internal_eligibility_blocked/);
+  assert.doesNotMatch(source, /KAI_PUBLIC_EXPORT_ENABLED|client-released-reports|"gk_review"|"factual_review"|\["release"/);
   assert.match(source, /downloaded_markdown_assertions_failed/);
   assert.match(source, /CANARY PASS: \$\{state\.canaryId\}/);
   assert.doesNotMatch(source, /authoritative stage-specific verification is not implemented/);

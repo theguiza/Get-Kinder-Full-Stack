@@ -100,6 +100,10 @@ export function measuredClaimReviewPlan(review, judgment) {
   const steps = [];
   const evidence = review.evidenceReview;
   const claim = review.claimReview;
+  // Owner decision 2026-10-25: an ordinary measurement that is already
+  // eligible for internal use needs no confirmation, so none is offered.
+  // Reporting a problem (not supported, needs more information) still is.
+  if (judgment === "supported" && review.internalEligibility?.eligible === true) return steps;
   if (judgment === "supported") {
     if (evidence.organizationMayDecide && !POSITIVE_EVIDENCE.has(evidence.decisionOutcome)) {
       steps.push({ kind: "evidence", decision: "supported" });

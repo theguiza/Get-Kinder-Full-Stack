@@ -1,28 +1,30 @@
 import React, { useEffect, useRef, useState } from "react";
 
 import {
-  clientInternalDraftFactualReviewPath,
   clientInternalDraftPath,
-  clientInternalDraftReleasePath,
   clientInternalDraftsPath,
+  clientInternalReportMarkdownPath,
   clientReleasedReportMarkdownPath,
   errorText,
   getJson,
-  postJson,
   projectClientInternalDraft,
   projectClientInternalDraftList,
 } from "../impactEvidenceLibraryLogic.js";
 import {
-  INTERNAL_DRAFT_FACTUAL_REVIEW_REASON_MESSAGES,
   INTERNAL_DRAFT_LIMITATION_MESSAGES,
-  INTERNAL_DRAFT_RELEASE_REASON_MESSAGES,
   INTERNAL_DRAFT_RELEASED_BY_LABELS,
   INTERNAL_DRAFT_RELEASE_STATE_LABELS,
   INTERNAL_DRAFT_RELEASE_STATE_MESSAGES,
   INTERNAL_DRAFT_REVIEW_STATE_LABELS,
-  internalDraftFactualReviewHeading,
+  INTERNAL_REPORT_REASON_MESSAGES,
   internalDraftFactualReviewNextActions,
 } from "./clientEvidenceWorkflowLogic.js";
+
+const READY_FOR_INTERNAL_USE = "Ready for internal use";
+// Release states that named the organization's own factual review or release
+// decision as the next step; neither is required for internal use any more
+// (owner decision 2026-10-25), so they are not shown.
+const ORGANIZATION_RELEASE_STEPS = new Set(["awaiting_organization_review", "awaiting_organization_release"]);
 
 const DRAFT_LABELS = Object.freeze({
   evidence_summary: "Internal evidence summary",
@@ -38,35 +40,24 @@ const DRAFT_LABELS = Object.freeze({
  * and its limitations. Reading a draft approves, releases, or exports nothing.
  * `focusDraftId` opens that draft once it is listed (after generation).
  *
- * Release (Plan A Prompt 8): the detail carries the server's release state.
- * Only when Get Kinder has released the report and it is still valid, and
- * the actor holds readReleasedInternalReports, can it be opened or downloaded
- * through the client-released-reports route, which re-checks the release on
- * every request. Opening it grants no review or release authority.
+ * Internal report (owner decision 2026-10-25): when the server reports
+ * internalReport.available - every cited claim usable for internal use, every
+ * cited source cleared for internal use, every automated check passed - the
+ * draft is the organization's internal report. It is opened or downloaded
+ * as Markdown through the client-internal-drafts .../markdown route, which
+ * re-checks all of it on every request. No factual approval, limitation
+ * confirmation or release decision is asked for. Otherwise the server's
+ * reasons say why Get Kinder reviews it or why it is not usable now.
  *
- * Factual review (owner amendment 2026-10-23): for an ordinary internal
- * evidence summary the server marks actorMayApprove, and an actor holding
- * reviewInternalDraftFactualContent may record the factual approval after
- * confirming they read the text, citations and limitations. Otherwise the
- * server's reasons say why Get Kinder reviews it or why it is blocked.
- * Approval releases nothing.
- *
- * Release (owner amendment 2026-10-23): final release is a separate decision.
- * For a reviewed ordinary internal evidence summary the server marks
- * organizationRelease.actorMayRelease, and an actor holding
- * releaseInternalReports may release it for internal use after confirming the
- * limitations; the server then runs the existing release chain under that
- * human's identity. Otherwise the server's reasons say why Get Kinder
- * releases it or why nobody may release it now.
+ * Release (Plan A Prompt 8): a report Get Kinder released (for a draft that
+ * is not available as an internal report, for example from a high-risk
+ * source) can still be opened through the client-released-reports route
+ * while that release is valid.
  */
 export default function ClientInternalDrafts({
-  organizationId, engagementId, claims, refreshToken, focusDraftId, canReadReleasedReports = false, canReviewFactualContent = false,
-  canReleaseReports = false,
+  organizationId, engagementId, claims, refreshToken, focusDraftId, canReadReleasedReports = false, canReadInternalReports = false,
 }) {
   const [list, setList] = useState({ status: "idle", items: [], error: "" });
-  const [listRefresh, setListRefresh] = useState(0);
-  const [approval, setApproval] = useState({ status: "idle", draftId: "", confirmed: false, error: "" });
-  const [releaseDecision, setReleaseDecision] = useState({ status: "idle", draftId: "", confirmed: false, error: "" });
   const [detail, setDetail] = useState({ status: "idle", draft: null, error: "" });
   const [report, setReport] = useState({ status: "idle", draftId: "", markdown: "", error: "" });
   const keyRef = useRef("");
@@ -75,9 +66,9 @@ export default function ClientInternalDrafts({
   // (for example after an approval) must not switch the open draft back.
   const focusedRef = useRef("");
 
-  const openReleasedReport = async (draftId, releasedReportId) => {
+  const openMarkdown = async (draftId, path) => {
     setReport({ status: "loading", draftId, markdown: "", error: "" });
-    const response = await fetch(clientReleasedReportMarkdownPath(organizationId, engagementId, releasedReportId), {
+    const response = await fetch(path, {
       method: "GET",
       credentials: "same-origin",
       headers: { Accept: "text/markdown" },
@@ -88,37 +79,10 @@ export default function ClientInternalDrafts({
     }
     let body = null;
     try { body = await response.json(); } catch { body = null; }
-    setReport({ status: "error", draftId, markdown: "", error: errorText({ statusCode: response.status, body }) });
-  };
-
-  const approveFactualContent = async (generatedContentDraftId) => {
-    setApproval({ status: "saving", draftId: generatedContentDraftId, confirmed: true, error: "" });
-    const result = await postJson(clientInternalDraftFactualReviewPath(organizationId, engagementId, generatedContentDraftId), { decision: "approved" });
-    if (result.statusCode === 200 && result.body?.ok) {
-      setApproval({ status: "success", draftId: generatedContentDraftId, confirmed: false, error: "" });
-      setListRefresh((value) => value + 1);
-      await openDraft(generatedContentDraftId);
-      return;
-    }
-    const reasons = Array.isArray(result.body?.blockers)
-      ? result.body.blockers.map((blocker) => INTERNAL_DRAFT_FACTUAL_REVIEW_REASON_MESSAGES[blocker?.blocking_reason]).filter(Boolean)
+    const reasons = Array.isArray(body?.blockers)
+      ? body.blockers.map((blocker) => INTERNAL_REPORT_REASON_MESSAGES[blocker?.blocking_reason]).filter(Boolean)
       : [];
-    setApproval({ status: "error", draftId: generatedContentDraftId, confirmed: false, error: [errorText(result), ...reasons].join(" ") });
-  };
-
-  const releaseReport = async (generatedContentDraftId) => {
-    setReleaseDecision({ status: "saving", draftId: generatedContentDraftId, confirmed: true, error: "" });
-    const result = await postJson(clientInternalDraftReleasePath(organizationId, engagementId, generatedContentDraftId),
-      { decision: "release_for_internal_use", limitations_confirmed: true });
-    if (result.statusCode === 200 && result.body?.ok) {
-      setReleaseDecision({ status: "success", draftId: generatedContentDraftId, confirmed: false, error: "" });
-      await openDraft(generatedContentDraftId);
-      return;
-    }
-    const reasons = Array.isArray(result.body?.blockers)
-      ? result.body.blockers.map((blocker) => INTERNAL_DRAFT_RELEASE_REASON_MESSAGES[blocker?.blocking_reason]).filter(Boolean)
-      : [];
-    setReleaseDecision({ status: "error", draftId: generatedContentDraftId, confirmed: false, error: [errorText(result), ...reasons].join(" ") });
+    setReport({ status: "error", draftId, markdown: "", error: [errorText({ statusCode: response.status, body }), ...reasons].join(" ") });
   };
 
   const openDraft = async (generatedContentDraftId) => {
@@ -142,13 +106,11 @@ export default function ClientInternalDrafts({
       setList(projected ? { status: "success", items: projected.items, error: "" } : { status: "error", items: [], error: errorText(result) });
     });
     return () => { keyRef.current = ""; };
-  }, [organizationId, engagementId, refreshToken, listRefresh]);
+  }, [organizationId, engagementId, refreshToken]);
 
   useEffect(() => {
     setDetail({ status: "idle", draft: null, error: "" });
     setReport({ status: "idle", draftId: "", markdown: "", error: "" });
-    setApproval({ status: "idle", draftId: "", confirmed: false, error: "" });
-    setReleaseDecision({ status: "idle", draftId: "", confirmed: false, error: "" });
   }, [organizationId, engagementId]);
 
   useEffect(() => {
@@ -176,8 +138,9 @@ export default function ClientInternalDrafts({
             <li key={item.generatedContentDraftId} className="list-group-item small d-flex flex-wrap align-items-center gap-2"
               data-client-internal-draft={item.generatedContentDraftId}>
               <span className="fw-semibold">{DRAFT_LABELS[item.contentType]}</span>
-              <span className="badge text-bg-light" data-client-internal-draft-review-state={item.reviewState}>
-                {INTERNAL_DRAFT_REVIEW_STATE_LABELS[item.reviewState]}
+              <span className="badge text-bg-light" data-client-internal-draft-review-state={item.reviewState}
+                data-client-internal-draft-report-available={item.internalReportAvailable ? "true" : "false"}>
+                {item.internalReportAvailable ? READY_FOR_INTERNAL_USE : INTERNAL_DRAFT_REVIEW_STATE_LABELS[item.reviewState]}
               </span>
               <span className="text-muted">{item.createdAt ? new Date(item.createdAt).toLocaleDateString() : ""} · {item.blockCount} block(s)</span>
               <button type="button" className="btn btn-sm btn-outline-primary ms-auto" onClick={() => openDraft(item.generatedContentDraftId)}>
@@ -193,11 +156,15 @@ export default function ClientInternalDrafts({
         <div className="border rounded p-2" data-client-internal-draft-detail={draft.generatedContentDraftId}>
           <div className="d-flex flex-wrap align-items-center gap-2 mb-1">
             <span className="fw-semibold">{DRAFT_LABELS[draft.contentType]}</span>
-            <span className="badge text-bg-warning" data-client-internal-draft-detail-review-state={draft.reviewState}>
-              {internalDraftFactualReviewHeading(draft.reviewState, draft.factualReview)}
+            <span className={`badge ${draft.internalReport.available ? "text-bg-success" : "text-bg-warning"}`}
+              data-client-internal-draft-detail-review-state={draft.reviewState}>
+              {draft.internalReport.available ? READY_FOR_INTERNAL_USE : INTERNAL_DRAFT_REVIEW_STATE_LABELS[draft.reviewState] || "Review state unavailable"}
             </span>
           </div>
-          {draft.release ? (
+          <InternalReport draft={draft} canRead={canReadInternalReports} report={report}
+            onOpen={() => openMarkdown(draft.generatedContentDraftId, clientInternalReportMarkdownPath(organizationId, engagementId, draft.generatedContentDraftId))}
+            downloadPath={clientInternalReportMarkdownPath(organizationId, engagementId, draft.generatedContentDraftId)} />
+          {!draft.internalReport.available && draft.release && !ORGANIZATION_RELEASE_STEPS.has(draft.release.state) ? (
             <div className="small mb-2" data-client-internal-draft-release-state={draft.release.state}>
               <span className="badge text-bg-light me-2">{INTERNAL_DRAFT_RELEASE_STATE_LABELS[draft.release.state]}</span>
               {draft.organizationRelease.releasedBy ? (
@@ -210,7 +177,8 @@ export default function ClientInternalDrafts({
                 <div className="d-flex flex-wrap gap-2 mt-1">
                   <button type="button" className="btn btn-sm btn-primary" data-client-open-released-report={draft.release.releasedReportId}
                     disabled={report.status === "loading"}
-                    onClick={() => openReleasedReport(draft.generatedContentDraftId, draft.release.releasedReportId)}>
+                    onClick={() => openMarkdown(draft.generatedContentDraftId,
+                      clientReleasedReportMarkdownPath(organizationId, engagementId, draft.release.releasedReportId))}>
                     {report.status === "loading" ? "Opening..." : "Open released report"}
                   </button>
                   <a className="btn btn-sm btn-outline-primary" data-client-download-released-report={draft.release.releasedReportId}
@@ -222,15 +190,12 @@ export default function ClientInternalDrafts({
             </div>
           ) : null}
           {report.draftId === draft.generatedContentDraftId && report.status === "error" ? (
-            <div className="alert alert-warning py-2 small" data-client-released-report-error="">The released report could not be opened. {report.error}</div>
+            <div className="alert alert-warning py-2 small" data-client-released-report-error="">The report could not be opened. {report.error}</div>
           ) : null}
           {report.draftId === draft.generatedContentDraftId && report.status === "success" ? (
-            <pre className="small border rounded p-2 mb-2" style={{ whiteSpace: "pre-wrap" }} data-client-released-report-markdown="">{report.markdown}</pre>
+            <pre className="small border rounded p-2 mb-2" style={{ whiteSpace: "pre-wrap" }} data-client-released-report-markdown=""
+              data-client-internal-report-markdown="">{report.markdown}</pre>
           ) : null}
-          <FactualReview draft={draft} approval={approval} setApproval={setApproval}
-            canReview={canReviewFactualContent} onApprove={() => approveFactualContent(draft.generatedContentDraftId)} />
-          <OrganizationRelease draft={draft} decision={releaseDecision} setDecision={setReleaseDecision}
-            canRelease={canReleaseReports} onRelease={() => releaseReport(draft.generatedContentDraftId)} />
           <ul className="small mb-2" data-client-internal-draft-limitations="">
             {draft.limitations.map((code) => <li key={code}>{INTERNAL_DRAFT_LIMITATION_MESSAGES[code]}</li>)}
           </ul>
@@ -259,112 +224,50 @@ export default function ClientInternalDrafts({
   );
 }
 
-function FactualReview({ draft, approval, setApproval, canReview, onApprove }) {
-  const view = draft.factualReview;
-  const mine = approval.draftId === draft.generatedContentDraftId;
-  const held = view.getKinderReviewReasons.length > 0;
-  const blocked = view.blockedReasons.length > 0;
+// The organization's internal report: open or download it when the server
+// reports it available; otherwise the server's reasons and next steps.
+function InternalReport({ draft, canRead, report, onOpen, downloadPath }) {
+  const view = draft.internalReport;
+  if (view.available) {
+    return (
+      <div className="small mb-2" data-client-internal-report="available">
+        <div className="mb-1">
+          This is your organization&apos;s internal report. Every cited claim is usable for internal use and every automated check
+          passed, so no further review or release step is needed. Internal use only: it is not approved for funders or the public.
+        </div>
+        {canRead ? (
+          <div className="d-flex flex-wrap gap-2">
+            <button type="button" className="btn btn-sm btn-primary" data-client-open-internal-report={draft.generatedContentDraftId}
+              disabled={report.status === "loading"} onClick={onOpen}>
+              {report.status === "loading" ? "Opening..." : "Open report"}
+            </button>
+            <a className="btn btn-sm btn-outline-primary" data-client-download-internal-report={draft.generatedContentDraftId}
+              href={downloadPath} download={draft.contentType === "impact_narrative" ? "kai-internal-impact-narrative.md" : "kai-internal-evidence-summary.md"}>
+              Download Markdown
+            </a>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
   const nextActions = internalDraftFactualReviewNextActions(view.blockedReasons);
   return (
-    <div className="small mb-2" data-client-internal-draft-factual-review="">
-      {mine && approval.status === "success" ? (
-        <div className="alert alert-success py-1 mb-1" data-client-factual-review-recorded="">
-          Your factual approval is recorded. Nothing has been released yet.
-        </div>
-      ) : null}
-      {mine && approval.status === "error" ? (
-        <div className="alert alert-warning py-1 mb-1" data-client-factual-review-error="">The approval was not recorded. {approval.error}</div>
-      ) : null}
-      {held ? (
-        <div data-client-factual-review-get-kinder-required="">
+    <div className="small mb-2" data-client-internal-report="unavailable">
+      {view.getKinderReviewReasons.length > 0 ? (
+        <div data-client-internal-report-get-kinder-required="">
           Get Kinder reviews this draft:
           <ul className="mb-1">
-            {view.getKinderReviewReasons.map((code) => <li key={code}>{INTERNAL_DRAFT_FACTUAL_REVIEW_REASON_MESSAGES[code]}</li>)}
+            {view.getKinderReviewReasons.map((code) => <li key={code}>{INTERNAL_REPORT_REASON_MESSAGES[code]}</li>)}
           </ul>
         </div>
       ) : null}
-      {blocked ? (
-        <div data-client-factual-review-blocked="">
-          This draft cannot be approved now:
+      {view.blockedReasons.length > 0 ? (
+        <div data-client-internal-report-blocked="">
+          This draft is not usable as an internal report now:
           <ul className="mb-1">
-            {view.blockedReasons.map((code) => <li key={code}>{INTERNAL_DRAFT_FACTUAL_REVIEW_REASON_MESSAGES[code]}</li>)}
+            {view.blockedReasons.map((code) => <li key={code}>{INTERNAL_REPORT_REASON_MESSAGES[code]}</li>)}
           </ul>
-          {nextActions.map((message) => <p key={message} className="mb-1" data-client-factual-review-next-action="">{message}</p>)}
-        </div>
-      ) : null}
-      {canReview && view.actorMayApprove ? (
-        <div className="border rounded p-2" data-client-factual-review-action="">
-          <div className="mb-1">
-            Read the draft text below, each cited claim and its review status, and the limitations. Approve only if every statement
-            is supported by the cited claims and states their limitations. Approval records your factual review; it does not release the report.
-            If something is wrong, do not approve it: generate a corrected draft from the claims instead.
-          </div>
-          <label className="form-check mb-1">
-            <input type="checkbox" className="form-check-input" data-client-factual-review-confirm=""
-              checked={mine && approval.confirmed}
-              onChange={(event) => setApproval({ status: "idle", draftId: draft.generatedContentDraftId, confirmed: event.target.checked, error: "" })} />
-            <span className="form-check-label">I have read the text, the cited claims and the limitations, and the facts are supported.</span>
-          </label>
-          <button type="button" className="btn btn-sm btn-primary" data-client-factual-review-approve=""
-            disabled={!(mine && approval.confirmed) || approval.status === "saving"} onClick={onApprove}>
-            {mine && approval.status === "saving" ? "Recording..." : "Approve factual content"}
-          </button>
-        </div>
-      ) : null}
-    </div>
-  );
-}
-
-function OrganizationRelease({ draft, decision, setDecision, canRelease, onRelease }) {
-  const view = draft.organizationRelease;
-  const mine = decision.draftId === draft.generatedContentDraftId;
-  const reviewed = draft.reviewState === "reviewed_by_get_kinder" || draft.reviewState === "reviewed_by_your_organization";
-  const unreleased = draft.release?.state === "awaiting_get_kinder_release" || draft.release?.state === "awaiting_organization_release";
-  const held = reviewed && unreleased && view.getKinderReleaseReasons.length > 0;
-  const blocked = reviewed && unreleased && view.blockedReasons.length > 0;
-  return (
-    <div className="small mb-2" data-client-internal-draft-release-decision="">
-      {mine && decision.status === "success" ? (
-        <div className="alert alert-success py-1 mb-1" data-client-internal-release-recorded="">
-          Your release decision is recorded. The report is released for your organization's internal use only.
-        </div>
-      ) : null}
-      {mine && decision.status === "error" ? (
-        <div className="alert alert-warning py-1 mb-1" data-client-internal-release-error="">The report was not released. {decision.error}</div>
-      ) : null}
-      {held ? (
-        <div data-client-internal-release-get-kinder-required="">
-          Get Kinder releases this report:
-          <ul className="mb-1">
-            {view.getKinderReleaseReasons.map((code) => <li key={code}>{INTERNAL_DRAFT_RELEASE_REASON_MESSAGES[code]}</li>)}
-          </ul>
-        </div>
-      ) : null}
-      {blocked ? (
-        <div data-client-internal-release-blocked="">
-          This report cannot be released now:
-          <ul className="mb-1">
-            {view.blockedReasons.map((code) => <li key={code}>{INTERNAL_DRAFT_RELEASE_REASON_MESSAGES[code]}</li>)}
-          </ul>
-        </div>
-      ) : null}
-      {canRelease && view.actorMayRelease ? (
-        <div className="border rounded p-2" data-client-internal-release-action="">
-          <div className="mb-1">
-            Releasing makes this reviewed draft your organization's internal report, recorded under your name, with every limitation
-            listed below carried into it. It is for internal use only: it is not approved for funders or the public. Release only if
-            the limitations are the ones the report must state.
-          </div>
-          <label className="form-check mb-1">
-            <input type="checkbox" className="form-check-input" data-client-internal-release-confirm=""
-              checked={mine && decision.confirmed}
-              onChange={(event) => setDecision({ status: "idle", draftId: draft.generatedContentDraftId, confirmed: event.target.checked, error: "" })} />
-            <span className="form-check-label">I have read the limitations, and I decide to release this report for internal use.</span>
-          </label>
-          <button type="button" className="btn btn-sm btn-primary" data-client-internal-release-submit=""
-            disabled={!(mine && decision.confirmed) || decision.status === "saving"} onClick={onRelease}>
-            {mine && decision.status === "saving" ? "Releasing..." : "Release internal report"}
-          </button>
+          {nextActions.map((message) => <p key={message} className="mb-1" data-client-internal-report-next-action="">{message}</p>)}
         </div>
       ) : null}
     </div>

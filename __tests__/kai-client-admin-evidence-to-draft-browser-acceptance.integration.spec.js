@@ -780,7 +780,8 @@ async function runBrowserAcceptance() {
       assert.deepEqual(actors.map((row) => row.actor_user_id), [ids.adminKaiUser], "every audited action since the proposal is the client_admin's");
       ids.x.draftIds = drafts.map((row) => row.generated_content_draft_id);
       const body = await adminPage.text();
-      assert.ok(body.includes("Internal use only; it awaits Get Kinder review. It is opened from your saved drafts below."), "owner decision 2026-10-19: the persisted draft is read back");
+      assert.ok(body.includes("Internal use only. It is opened from your saved drafts below; when every cited claim is usable for internal use it is ready to read and download there."),
+        "owner decisions 2026-10-19 and 2026-10-25: the persisted draft is read back, and no review is announced as required");
       // Owner decision 2026-10-19: the administrator reads its own persisted
       // draft back, only inside the internal-draft view with its true review
       // state and limitations.

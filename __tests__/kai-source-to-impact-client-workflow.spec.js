@@ -114,7 +114,7 @@ const CLEARED_DECISION = Object.freeze({
 function dependencies(calls = []) {
   const engagementOf = (draftId) => (draftId === D_OTHER_PROJECT ? ENGAGEMENT_B : ENGAGEMENT);
   const ids = Object.keys(PACKETS).sort();
-  return {
+  const deps = {
     env: ENV,
     getEngagementForOrganization: async ({ organizationId, engagementId }) => (organizationId === ORG && [ENGAGEMENT, ENGAGEMENT_B].includes(engagementId)
       ? { engagement_id: engagementId, organization_id: organizationId } : null),
@@ -138,6 +138,16 @@ function dependencies(calls = []) {
         return { getKinderReviewReasons, blockedReasons, organizationMayReview: getKinderReviewReasons.length + blockedReasons.length === 0 };
       },
       async readCompletedReviewer() { return "get_kinder"; },
+      async evaluateInternalReport({ packet: p }) {
+        const evaluation = await this.evaluate({ packet: p });
+        const getKinderReviewReasons = evaluation.getKinderReviewReasons.filter((reason) => reason !== "content_type_requires_get_kinder_review");
+        return { available: getKinderReviewReasons.length === 0 && evaluation.blockedReasons.length === 0, getKinderReviewReasons, blockedReasons: evaluation.blockedReasons };
+      },
+    },
+    internalReportRepository: {
+      async readInternalReport({ generatedContentDraftId }) {
+        return { ok: true, data: await deps.organizationReviewRepository.evaluateInternalReport({ packet: PACKETS[generatedContentDraftId] }) };
+      },
     },
     generatedContentRepository: {
       async getGeneratedDraftReviewPacket({ organizationId, generatedContentDraftId }) {
@@ -149,6 +159,7 @@ function dependencies(calls = []) {
       },
     },
   };
+  return deps;
 }
 
 function actor(roleName, { organizationId = ORG, kaiRoles = [], source = STORED_ORGANIZATION_MEMBERSHIP_SOURCE } = {}) {
@@ -195,6 +206,10 @@ test("internal drafts: the detail is the persisted text with cited claim ids, th
     factualReview: { actorMayApprove: false, getKinderReviewReasons: ["personal_information_not_cleared"], blockedReasons: ["cited_claims_not_currently_eligible"] },
     // Unreviewed: nothing to release, and no release decision is offered.
     organizationRelease: { actorMayRelease: false, getKinderReleaseReasons: [], blockedReasons: [], releasedBy: null },
+    // Owner decision 2026-10-25: personal information and ineligible claims
+    // keep it from being the organization's internal report.
+    internalReportAvailable: false,
+    internalReport: { available: false, getKinderReviewReasons: ["personal_information_not_cleared"], blockedReasons: ["cited_claims_not_currently_eligible"] },
   });
   assertNoHidden(detail, "detail");
   assert.deepEqual(projectClientInternalDraft(detail.data).limitations, detail.data.limitations);

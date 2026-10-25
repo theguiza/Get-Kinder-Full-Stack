@@ -458,6 +458,20 @@ function sendMarkdownAttachment(res, result) {
   return res.send(markdown);
 }
 
+// The organization's internal report (owner decision 2026-10-25), named by
+// its content type.
+function sendInternalReportMarkdownAttachment(res, result) {
+  if (!result?.ok) return sendServiceResult(res, result);
+  const markdown = typeof result.data?.markdown === "string" ? result.data.markdown : null;
+  if (markdown == null) return sendKaiError(res, "system_error");
+  const filename = result.data.contentType === "impact_narrative" ? "kai-internal-impact-narrative.md" : "kai-internal-evidence-summary.md";
+
+  res.status(200);
+  res.setHeader("Content-Type", EXPORT_MANIFEST_MARKDOWN_CONTENT_TYPE);
+  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+  return res.send(markdown);
+}
+
 function sendGrantResponsePacketMarkdownAttachment(res, result) {
   if (!result?.ok) return sendServiceResult(res, result);
   const markdown = typeof result.data?.markdown === "string" ? result.data.markdown : null;
@@ -3662,6 +3676,31 @@ router.get(
     try {
       const service = await getClientGeneratedContentService();
       return sendMarkdownAttachment(res, await service.getClientReleasedReportMarkdown({ ...ids, actorContext: sprint2MappedActorContext(req) }));
+    } catch (error) {
+      console.error("[kai-sprint2-intake] system_error", error);
+      return sendKaiError(res, "system_error");
+    }
+  },
+);
+
+// The organization's internal report as Markdown (owner decision
+// 2026-10-25; getClientInternalReportMarkdown): no factual approval or
+// release decision is required for internal use. The service re-checks
+// eligibility, sources and validators on every request. No SQL here.
+router.get(
+  "/admin/organizations/:organizationId/engagements/:engagementId/client-internal-drafts/:generatedContentDraftId/markdown",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    const keys = ["organizationId", "engagementId", "generatedContentDraftId"];
+    const ids = clientContentPathIds(req, keys);
+    if (!ids) {
+      return sendKaiError(res, "validation_blocker", {
+        blockers: [routeValidationBlocker("invalid_uuid_field", keys.join("_or_"))],
+      });
+    }
+    try {
+      const service = await getClientGeneratedContentService();
+      return sendInternalReportMarkdownAttachment(res, await service.getClientInternalReportMarkdown({ ...ids, actorContext: sprint2MappedActorContext(req) }));
     } catch (error) {
       console.error("[kai-sprint2-intake] system_error", error);
       return sendKaiError(res, "system_error");

@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import vm from "node:vm";
 
+import { serializeInternalReportToMarkdown } from "../Backend/kai/services/kaiInternalReportMarkdownSerializer.js";
+
 /**
  * Focused checks of the paste-ready browser-console canary
  * (scripts/kai-production-browser-console-canary.js) without a browser or a
@@ -91,11 +93,16 @@ test("a signed-out session and a missing capability are reported, not bypassed",
   const signedOut = loadCanary({ "/admin/organizations": [401, { ok: false, error: { code: "authentication_required" } }] });
   const out = await signedOut.canary.preflight({ organizationId: ORG, engagementId: ENG });
   assert.equal(out.checks.find((check) => check.Check === "Signed-in session").Status, "BLOCKED");
-  const noRelease = loadCanary(signedInRoutes({ ...CUSTOMER_CAPABILITIES, workflowOperations: { ...CUSTOMER_CAPABILITIES.workflowOperations, releaseInternalReports: false } }));
-  const blocked = await noRelease.canary.preflight({ organizationId: ORG, engagementId: ENG });
+  const noDrafts = loadCanary(signedInRoutes({ ...CUSTOMER_CAPABILITIES, workflowOperations: { ...CUSTOMER_CAPABILITIES.workflowOperations, readInternalDrafts: false } }));
+  const blocked = await noDrafts.canary.preflight({ organizationId: ORG, engagementId: ENG });
   const workspace = blocked.checks.find((check) => check.Check === "Customer workspace & capabilities");
   assert.equal(workspace.Status, "BLOCKED");
-  assert.match(workspace.Observed, /releaseInternalReports/);
+  assert.match(workspace.Observed, /readInternalDrafts/);
+  // Owner decision 2026-10-25: no review or release capability is required.
+  const noRelease = loadCanary(signedInRoutes({ ...CUSTOMER_CAPABILITIES, workflowOperations: {
+    ...CUSTOMER_CAPABILITIES.workflowOperations, reviewInternalDraftFactualContent: false, releaseInternalReports: false, readReleasedInternalReports: false } }));
+  const passed = await noRelease.canary.preflight({ organizationId: ORG, engagementId: ENG });
+  assert.equal(passed.checks.find((check) => check.Check === "Customer workspace & capabilities").Status, "PASS");
 });
 
 test("start requires the owner's exact phrase and writes nothing to the server", async () => {
@@ -121,27 +128,41 @@ test("the synthetic fixture has six data rows, one blank, two exact duplicates, 
   assert.throws(() => canary._test.fixtureText("../x"), /invalid_canary_tag/);
 });
 
-test("report validation accepts the deployed Markdown contract and rejects raw rows and unsupported findings", () => {
+test("report validation accepts the internal report Markdown contract and rejects raw rows and unsupported findings", () => {
   const { canary } = loadCanary();
   const ids = { claimId: "33333333-3333-4333-8333-333333333333", evidenceItemId: "44444444-4444-4444-8444-444444444444", sourceVersionId: "55555555-5555-4555-8555-555555555555" };
   const state = { organizationId: ORG, engagementId: ENG, tag: "kc202610231200abcdef", ids, period: { start: "2026-09-01", end: "2026-09-30" }, unit: { unitLabel: "programme sessions" } };
-  const markdown = [
-    "# Export Manifest", "", "Content type: `evidence_summary`", "Requested audience: `internal`",
-    `Organization: Synthetic Org (\`${ORG}\`)`, `Engagement: \`SYNTH\` (\`${ENG}\`)`, "", "## Content", "", "### Block 1", "",
-    "The promoted source records 5 programme sessions for the reporting period 2026-09-01 to 2026-09-30. 1 blank record was excluded and 2 exact-duplicate records were included, so this is not a count of distinct events or of participants. [1]",
-    "", "## Citation Appendix", "", `- [1] Claim \`${ids.claimId}\`; evidence \`${ids.evidenceItemId}\`; source \`x\`; source version \`${ids.sourceVersionId}\`.`,
-    "", "## Limitations and Method Notes", "",
-    "- [1] limitation codes: `measurement.record_meaning_human_defined`, `measurement.period_human_attested_not_row_verified`, `measurement.blank_records_excluded`, `measurement.duplicate_records_included`, `coverage.duplicates.resolved_risk_flagged`.",
-    "  - `measurement.period_human_attested_not_row_verified`: The reporting period is attested in the human definition; it is not verified against record dates.",
-  ].join("\n");
+  const codes = ["coverage.duplicates.resolved_risk_flagged", "measurement.blank_records_excluded", "measurement.duplicate_records_included",
+    "measurement.period_human_attested_not_row_verified", "measurement.record_meaning_human_defined"];
+  // The real serializer's output (kaiInternalReportMarkdownSerializer.js).
+  const markdown = serializeInternalReportToMarkdown({
+    available: true,
+    report: { generatedContentDraftId: "66666666-6666-4666-8666-666666666666", contentType: "evidence_summary", audience: "internal", createdAt: "2026-10-25T10:00:00.000Z", validatorKeys: ["VAL-GEN-004"] },
+    context: { organizationId: ORG, organizationName: "Synthetic Org", engagementId: ENG, engagementCode: "SYNTH", engagementType: null },
+    blocks: [{ ordinal: 1, citationRefs: ["CIT-001"], text: "The promoted source records 5 programme sessions for the reporting period 2026-09-01 to 2026-09-30. "
+      + "1 blank record was excluded and 2 exact-duplicate records were included, so this is not a count of distinct events or of participants." }],
+    citations: [],
+    facts: [{
+      citationRefs: ["CIT-001"], claimId: ids.claimId, evidenceItemId: ids.evidenceItemId, sourceId: "77777777-7777-4777-8777-777777777777", sourceCode: null,
+      sourceVersionId: ids.sourceVersionId, sourceVersionCreatedAt: null, sourceVersionCurrent: true, profileCanonicalSha256: null,
+      claimStatement: "The promoted source records 5 programme sessions for the reporting period 2026-09-01 to 2026-09-30.",
+      evidenceStatement: "Source version record count: 5 programme sessions for the reporting period 2026-09-01 to 2026-09-30, counting each CSV data record after the header row as one programme session.",
+      currentlyEligible: true, blockerCodes: [], evidenceReviewOutcome: null, claimReviewOutcome: null, limitationCodes: codes,
+      measurement: { measuredValue: 5, unitLabel: "programme sessions", countedUnit: "programme session", totalRecordCount: 6, blankRecordCount: 1, duplicateRecordCount: 2,
+        calculationMethod: "p1_csv_profile_data_records_excluding_blank_v1", periodStart: "2026-09-01", periodEnd: "2026-09-30",
+        definitionText: "Each row records one delivered programme session.", inclusionRule: "Non-empty rows.", exclusionRule: "Empty rows.", definitionRecordedAt: null },
+    }],
+  });
   const ok = canary._test.validateMarkdown(markdown, state);
   assert.equal(ok.ok, true, JSON.stringify(ok.checks));
   assert.deepEqual(plain(ok.coverageCodes), ["coverage.duplicates.resolved_risk_flagged"]);
-  assert.equal(ok.negated.length, 1, "a negated mention is reported, not failed");
+  assert.equal(ok.negated.length, 1, "a negated mention in the narrative is reported, not failed");
   const leaked = canary._test.validateMarkdown(`${markdown}\n2026-09-16,mentoring,8`, state);
   assert.equal(leaked.checks.noRawRowsOrFileNames, false);
-  const invented = canary._test.validateMarkdown(markdown.replace("[1]\n", "Attendance improved by 40%. [1]\n"), state);
+  const invented = canary._test.validateMarkdown(markdown.replace("or of participants. [CIT-001]", "or of participants. Attendance improved by 40%. [CIT-001]"), state);
   assert.equal(invented.checks.noUnsupportedFindings, false);
   const otherOrg = canary._test.validateMarkdown(markdown.replace(`(\`${ORG}\`)`, "(`99999999-9999-4999-8999-999999999999`)"), state);
   assert.equal(otherOrg.checks.organizationLine, false);
+  const released = canary._test.validateMarkdown(markdown.replace("# Internal Evidence Summary", "# Export Manifest"), state);
+  assert.equal(released.checks.internalEvidenceSummary, false, "only the internal report contract");
 });

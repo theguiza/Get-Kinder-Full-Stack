@@ -45,6 +45,10 @@ import {
 } from "./postgresHumanReviewDecisionRepository.js";
 import { resolveEffectiveFunderAuthority } from "./postgresEffectiveFunderAuthorityResolver.js";
 import { resolveEffectivePublicAuthority } from "./postgresEffectivePublicAuthorityResolver.js";
+import {
+  ORDINARY_SOURCE_LIMITATION_DIMENSION_KEYS,
+  evaluateOrdinaryMeasurementAuthorityInTransaction,
+} from "./postgresOrdinaryInternalFactAuthority.js";
 
 const CLAIM_TRACEABILITY_RESULT_STATUS = Object.freeze({
   validation_blocker: 422,
@@ -653,6 +657,17 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
     });
   }
 
+  // Owner decision 2026-10-25: ordinary, adequately supported internal
+  // factual information needs no further human approval for internal use. An
+  // ordinary measured claim (postgresOrdinaryInternalFactAuthority.js) takes
+  // its internal authority from the source's recorded sensitivity decision,
+  // the human measurement definition and the deterministic count; nothing is
+  // written and no reviewer is implied. Funder and public are unchanged.
+  const ordinaryInternal = requestedAudience === "internal"
+    && (await evaluateOrdinaryMeasurementAuthorityInTransaction(tx, {
+      organizationId, evidenceItemRow, locatorRow, sourceVersionRow, claimRow,
+    })).ordinary;
+
   // KAI P2-10: read every accepted_internal_with_limitation decision already
   // recorded for this claim, then determine - per dimension, using the exact
   // shared fingerprint function P2-10's own writer used - whether each one
@@ -705,9 +720,14 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
         (requestedAudience === "internal" && internalAccepted)
         || (requestedAudience === "funder" && funderAccepted)
         || (requestedAudience === "public" && publicAccepted);
+      // An ordinary measurement carries its source-level limitations into
+      // internal use as limitations (never as accepted or resolved), so they
+      // need no per-claim acceptance.
+      const carriedInternalLimitation = ordinaryInternal && ORDINARY_SOURCE_LIMITATION_DIMENSION_KEYS.includes(dimensionKey);
       const blocksRequestedAudience =
         dimension.evidence.assessment_status === "unresolved" &&
-        !currentAudienceAccepted;
+        !currentAudienceAccepted &&
+        !carriedInternalLimitation;
       return [dimensionKey, { internalAccepted, funderAccepted, publicAccepted, blocksRequestedAudience }];
     }),
   );
@@ -751,10 +771,13 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
   if (!audienceApproval.approved) addOrderedBlocker(blockers, "claim_not_approved_for_requested_audience");
   if (!audienceApproval.gateOpen) addOrderedBlocker(blockers, "audience_gate_closed");
   if (!audienceApproval.authorityPresent) addOrderedBlocker(blockers, "requirement_authority_absent");
+  // A recorded review decision always governs its own lineage; only the
+  // absence of one is answered by the ordinary internal authority (the open
+  // needs_gk_review queue item stays as it is).
   if (
-    unresolvedReviewStatus(claimReviewQueueItemRow.review_status) ||
-    !claimReviewHead ||
-    claimReviewHead.decision_outcome === "needs_more_information"
+    (unresolvedReviewStatus(claimReviewQueueItemRow.review_status) || !claimReviewHead
+      || claimReviewHead.decision_outcome === "needs_more_information")
+    && !(ordinaryInternal && !claimReviewHead)
   ) {
     addOrderedBlocker(blockers, "claim_review_unresolved");
     affectedObjectIds.add(claimReviewQueueItemRow.review_queue_item_id);
@@ -766,10 +789,10 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
   // claim_review_decisions organization audience CHECK), so approvalForAudience
   // already refuses it.
   if (
-    unresolvedReviewStatus(evidenceReviewQueueItemRow.review_status) ||
-    !evidenceReviewHead ||
-    evidenceReviewHead.decision_outcome === "needs_more_information" ||
-    (requestedAudience !== "internal" && evidenceReviewHead.decided_by_role === "client_admin")
+    (unresolvedReviewStatus(evidenceReviewQueueItemRow.review_status) || !evidenceReviewHead
+      || evidenceReviewHead.decision_outcome === "needs_more_information"
+      || (requestedAudience !== "internal" && evidenceReviewHead.decided_by_role === "client_admin"))
+    && !(ordinaryInternal && !evidenceReviewHead)
   ) {
     addOrderedBlocker(blockers, "evidence_review_unresolved");
     affectedObjectIds.add(evidenceReviewQueueItemRow.review_queue_item_id);
@@ -779,7 +802,11 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
   // ('reviewed_not_supported') decision must both remain permanently
   // ineligible here. Same blocker code as before (support_strength_unassessed)
   // - only the triggering condition is broadened.
-  if (claimRow.claim_strength !== "reviewed_supported" || evidenceItemRow.support_strength !== "reviewed_supported") {
+  // The deterministic count supports an ordinary measured claim that no
+  // review has assessed; a recorded negative assessment still blocks.
+  const supported = (strength, head) => strength === "reviewed_supported"
+    || (ordinaryInternal && !head && strength === "unassessed");
+  if (!supported(claimRow.claim_strength, claimReviewHead) || !supported(evidenceItemRow.support_strength, evidenceReviewHead)) {
     addOrderedBlocker(blockers, "support_strength_unassessed");
     affectedObjectIds.add(claimId);
     affectedObjectIds.add(evidenceItemRow.evidence_item_id);

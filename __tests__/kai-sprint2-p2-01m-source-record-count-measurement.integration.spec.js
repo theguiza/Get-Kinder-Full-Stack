@@ -85,6 +85,7 @@ async function runSuite() {
   const audits = await import("../Backend/kai/services/kaiMetadataOnlyAuditComposition.js");
   const { getClientInternalDraft, getClientReleasedReportMarkdown, approveClientInternalDraftFactualReview, releaseClientInternalReport } = await import("../Backend/kai/services/kaiClientGeneratedContentService.js");
   const { createPostgresOrganizationInternalReviewRepository, ORGANIZATION_REVIEW_COMPLETION_AUDIT_CONTRACT } = await import("../Backend/kai/dictionary/postgresOrganizationInternalReviewRepository.js");
+  const { createPostgresClientInternalReportRepository } = await import("../Backend/kai/dictionary/postgresClientInternalReportRepository.js");
   const { createPostgresClientReleasedReportRepository } = await import("../Backend/kai/dictionary/postgresClientReleasedReportRepository.js");
   const { readGeneratedDraftEngagementId } = await import("../Backend/kai/db/kaiGeneratedDraftLibraryReadModels.js");
   const { insertRequiredSuccessfulAuditEvent } = await import("../Backend/kai/db/kaiAuditQueries.js");
@@ -1191,6 +1192,7 @@ async function runSuite() {
     releasedReportRepository: createPostgresClientReleasedReportRepository({ runInTransaction: withTx }),
     renderModelRepository: renderRepository(),
     organizationReviewRepository: createPostgresOrganizationInternalReviewRepository({ runInTransaction: withTx }),
+    internalReportRepository: createPostgresClientInternalReportRepository({ runInTransaction: withTx }),
   });
   const clientDraft = (actor, target = ids) => getClientInternalDraft(
     { organizationId: ORG, engagementId: ENGAGEMENT, generatedContentDraftId: target.measuredDraftId, actorContext: actor }, clientDependencies());
@@ -1529,7 +1531,17 @@ async function runSuite() {
     const ordinary = { ...ids.ordinary };
     assert.ok(ordinary.claimId, "the AI-permitted, all-absent source's measured claim exists");
     const exportCountsAtStart = await exportCounts();
-    // The claim becomes eligible through the same GK steps as the measured claim.
+    // Owner decision 2026-10-25: the ordinary measured claim is eligible for
+    // internal use before any evidence, claim or coverage decision exists,
+    // and stays ineligible for funder and public use.
+    const decisionsBefore = await query(`SELECT
+        (SELECT count(*) FROM kai.evidence_review_decisions WHERE evidence_item_id = $1::uuid)::int AS evidence,
+        (SELECT count(*) FROM kai.claim_review_decisions WHERE claim_id = $2::uuid)::int AS claim,
+        (SELECT count(*) FROM kai.coverage_review_decisions WHERE claim_id = $2::uuid)::int AS coverage`, [ordinary.evidenceItemId, ordinary.claimId]);
+    assert.deepEqual(decisionsBefore, [{ evidence: 0, claim: 0, coverage: 0 }]);
+    const unreviewed = await trace(ordinary.claimId);
+    assert.deepEqual([unreviewed.data.eligible, unreviewed.data.blockerCodes], [true, []], JSON.stringify(unreviewed.data.blockerCodes));
+    // The same claim then also takes the existing GK steps; a recorded decision governs its lineage.
     const reviewDeps = { env: ENV, humanReviewRepository: createPostgresHumanReviewRepository({ runInTransaction: withTx }), metadataOnlyAudit: noAudit() };
     const evidenceQueue = await queueRow("evidence_review", ordinary.evidenceItemId);
     assert.equal((await recordEvidenceReviewDecision({
@@ -1570,11 +1582,15 @@ async function runSuite() {
     assert.equal(detail.data.blocks[0].text, COMPLIANT_TEXT);
     assert.deepEqual(detail.data.blocks[0].supportingClaimIds, [ordinary.claimId]);
     assert.equal(detail.data.reviewState, "awaiting_organization_review");
-    assert.deepEqual(detail.data.factualReview, { actorMayApprove: true, getKinderReviewReasons: [], blockedReasons: [] });
+    // No factual approval is required for internal use, so none is offered;
+    // the optional existing review below still works when called.
+    assert.deepEqual(detail.data.internalReport, { available: true, getKinderReviewReasons: [], blockedReasons: [] });
+    assert.deepEqual(detail.data.factualReview, { actorMayApprove: false, getKinderReviewReasons: [], blockedReasons: [] });
     assert.deepEqual(detail.data.release, { state: "awaiting_organization_review", releasedReportId: null });
     const heldDetail = await clientDraft(ADMIN, held);
     assert.equal(heldDetail.data.reviewState, "awaiting_get_kinder_review");
     assert.deepEqual(heldDetail.data.factualReview, { actorMayApprove: false, getKinderReviewReasons: ["sensitivity_review_not_complete"], blockedReasons: [] });
+    assert.equal(heldDetail.data.internalReport.available, false, "a source without a completed sensitivity review keeps Get Kinder's review");
 
     const lifecycleAudits = async (draftId) => query(
       `SELECT operation, metadata->>'actor_id' AS actor_id, metadata->>'contract' AS contract FROM kai.upload_lifecycle_audit
@@ -1635,7 +1651,8 @@ async function runSuite() {
     assert.equal(reviewedDetail.data.reviewState, "reviewed_by_your_organization");
     // Reviewed is not released: release is the separate decision below.
     assert.deepEqual(reviewedDetail.data.release, { state: "awaiting_organization_release", releasedReportId: null });
-    assert.deepEqual(reviewedDetail.data.organizationRelease, { actorMayRelease: true, getKinderReleaseReasons: [], blockedReasons: [], releasedBy: null });
+    assert.deepEqual(reviewedDetail.data.organizationRelease, { actorMayRelease: false, getKinderReleaseReasons: [], blockedReasons: [], releasedBy: null },
+      "no release decision is required for internal use, so none is offered");
     assert.deepEqual(await exportCounts(), exportCountsAtStart, "the factual review writes no release record");
     console.log(`[p2-01m] organization review: ${JSON.stringify(approved.data)}; held draft blockers=${JSON.stringify(refusedHeld.blockers.map((b) => b.blocking_reason))}`);
 

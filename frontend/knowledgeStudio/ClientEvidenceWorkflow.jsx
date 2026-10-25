@@ -618,7 +618,7 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
                   {access.reviewMeasuredClaimFactualContent && openReview !== claim.claimId && isRouteUuid(claim.claimId) ? (
                     <button type="button" className="btn btn-sm btn-outline-primary mt-1 ms-1" data-client-open-measured-claim-review={claim.claimId}
                       onClick={() => setReviewing({ contextKey, claimId: claim.claimId })}>
-                      Review measurement
+                      View measurement
                     </button>
                   ) : null}
                   {!selectability.selectable ? <div className="mt-1">{claimSelectabilityMessage(selectability.reason)}</div> : null}
@@ -654,8 +654,8 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
                 {DRAFT_LABELS[lastDraft.contentType]} {lastDraft.replayed ? "already created" : "created"}: {lastDraft.blockCount} block(s) citing {lastDraft.citedClaimCount} claim(s).
               </div>
               <div>
-                Internal use only; it awaits Get Kinder review. {access.readInternalDrafts
-                  ? "It is opened from your saved drafts below."
+                Internal use only. {access.readInternalDrafts
+                  ? "It is opened from your saved drafts below; when every cited claim is usable for internal use it is ready to read and download there."
                   : "It appears under Generated Drafts once Get Kinder has reviewed it."}
               </div>
             </div>
@@ -667,16 +667,14 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
         <div className="admin-card mb-3" data-client-internal-drafts="">
           <h5 className="mb-2">Your internal drafts</h5>
           <div className="small text-muted mb-2">
-            Drafts generated for this Project, with their actual review and release state. You can complete the factual review of an
-            ordinary internal evidence summary and then decide to release it for internal use; Get Kinder reviews and releases the rest.
-            Internal use only: nothing here approves a draft for funders or the public. A released internal report can be opened here
-            while that release is valid.
+            Drafts generated for this Project. A draft whose cited claims are usable for internal use, from sources cleared for internal
+            use, is your organization&apos;s internal report: open or download it here, with no further review or release step. Drafts
+            from high-risk sources wait for Get Kinder. Internal use only: nothing here approves a draft for funders or the public.
           </div>
           <ClientInternalDrafts organizationId={organizationId} engagementId={engagementId} claims={claims.items}
             refreshToken={draftsRefreshToken} focusDraftId={lastDraft?.generatedContentDraftId || null}
             canReadReleasedReports={access.readReleasedInternalReports === true}
-            canReviewFactualContent={access.reviewInternalDraftFactualContent === true}
-            canReleaseReports={access.releaseInternalReports === true} />
+            canReadInternalReports={access.readInternalDrafts === true} />
         </div>
       ) : null}
     </div>

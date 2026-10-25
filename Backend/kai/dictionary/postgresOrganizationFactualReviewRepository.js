@@ -2,14 +2,19 @@ import { withTransaction } from "../db/kaiDb.js";
 import { getScopedEvidenceItemById, getScopedEvidenceMeasurementByEvidenceItemId } from "../db/kaiIntakeQueries.js";
 import { evaluateClaimTraceabilityInTransaction } from "./postgresClaimTraceabilityRepository.js";
 import { findCurrentClaimReviewDecision, findCurrentEvidenceReviewDecision } from "./postgresHumanReviewDecisionRepository.js";
-import { HIGH_RISK_SENSITIVITY_FIELDS, classifySourceVersionInTransaction } from "./postgresOrganizationInternalReviewRepository.js";
 import {
-  MEASUREMENT_DEFINITION_STATUS,
+  HIGH_RISK_SENSITIVITY_FIELDS,
+  ORDINARY_SOURCE_LIMITATION_DIMENSION_KEYS,
+  classifySourceVersionInTransaction,
+  isConfirmedMeasurement,
+} from "./postgresOrdinaryInternalFactAuthority.js";
+import {
   MEASUREMENT_EVIDENCE_TYPE,
-  MEASUREMENT_TYPE_RECORD_COUNT,
   describeMeasurementLimitationCode,
   measurementLimitationCodes,
 } from "../validators/kaiSourceMeasurementValidators.js";
+
+export { isConfirmedMeasurement };
 
 /**
  * Organization-owned factual review of an ordinary internal measurement
@@ -39,11 +44,7 @@ import {
  */
 export const ORGANIZATION_FACTUAL_REVIEW_VALIDATOR_KEY = "VAL-KAI-ORG-FACTUAL-REVIEW-001";
 export const ORGANIZATION_DECISION_ROLE = "client_admin";
-export const ORGANIZATION_ACCEPTABLE_LIMITATION_DIMENSION_KEYS = Object.freeze([
-  "small_cell_risk",
-  "conflicting_source_indicators",
-  "requirement_alignment",
-]);
+export const ORGANIZATION_ACCEPTABLE_LIMITATION_DIMENSION_KEYS = ORDINARY_SOURCE_LIMITATION_DIMENSION_KEYS;
 
 export const GET_KINDER_REVIEW_REASONS = Object.freeze([
   "evidence_type_requires_get_kinder_review",
@@ -75,16 +76,6 @@ function verdict(getKinder, blocked) {
     blockedReasons,
     organizationMayReview: getKinderReviewReasons.length === 0 && blockedReasons.length === 0,
   };
-}
-
-// A measurement row backing this evidence item under a human-confirmed
-// record-count definition of the same source version. Pure.
-export function isConfirmedMeasurement(measurementRow, evidenceItemRow) {
-  return Boolean(measurementRow)
-    && measurementRow.measurement_type === MEASUREMENT_TYPE_RECORD_COUNT
-    && measurementRow.definition_status === MEASUREMENT_DEFINITION_STATUS
-    && measurementRow.source_version_id === evidenceItemRow.source_version_id
-    && measurementRow.definition_source_version_id === evidenceItemRow.source_version_id;
 }
 
 /**

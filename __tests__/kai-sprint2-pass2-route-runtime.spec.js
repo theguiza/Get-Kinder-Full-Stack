@@ -263,6 +263,9 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     "/admin/organizations/:organizationId/engagements/:engagementId/client-internal-drafts/:generatedContentDraftId",
     // Plan A Prompt 8: read-only receipt of a GK-released internal report (Markdown).
     "/admin/organizations/:organizationId/engagements/:engagementId/client-internal-drafts/:generatedContentDraftId/factual-review",
+    // Owner decision 2026-10-25: the organization's internal report as
+    // Markdown, with no factual approval or release step.
+    "/admin/organizations/:organizationId/engagements/:engagementId/client-internal-drafts/:generatedContentDraftId/markdown",
     // Owner amendment 2026-10-23: the organization's own final release of an ordinary internal evidence summary.
     "/admin/organizations/:organizationId/engagements/:engagementId/client-internal-drafts/:generatedContentDraftId/release",
     "/admin/organizations/:organizationId/engagements/:engagementId/client-released-reports/:exportManifestId/markdown",

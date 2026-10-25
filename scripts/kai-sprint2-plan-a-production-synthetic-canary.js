@@ -23,19 +23,19 @@ export const STAGES = [
   ["upload_processing", "In the customer Files UI, upload the supplied synthetic CSV. Wait for the deployed scan and P1 processing to finish."],
   ["sensitivity_source", "In Data Sources, inspect the source and record the human sensitivity, allowed-use, AI-use, and promotion decisions."],
   ["measurement", "Use Count records and attest the human-defined unit and reporting period; record the measurement through the UI."],
-  ["gk_review", "Switch to the separately authorized GK reviewer account. Review evidence, claim, and all applicable coverage dimensions."],
-  ["generation", "Return to the customer administrator and generate an internal Evidence Summary using the live application."],
-  ["factual_review", "Inspect the generated text, citations, and limitations; approve factual content only if accurate."],
-  ["release", "Use Release internal report and separately confirm the limitations as the customer administrator."],
-  ["download_validation", "Open the customer receipt and download the actual Markdown report to the path supplied at start."]
+  ["internal_eligibility", "Automatic: the ordinary measured claim is eligible for internal use with no review (owner decision 2026-10-25); the runner verifies it in Impact Facts."],
+  ["generation", "Generate an internal Evidence Summary as the customer administrator using the live application."],
+  ["download_validation", "Open the draft's internal report and download the Markdown; no factual approval or release step exists for internal use."]
 ];
 
+// The three source-level coverage limitations are carried, unresolved, into
+// every internal report (owner decision 2026-10-25); nobody accepts them.
 export const MEASURED_LIMITATION_CODES = [
-  "coverage.conflicting_source_indicators.accepted_internal_limitation",
+  "coverage.conflicting_source_indicators.unresolved",
   "coverage.duplicates.resolved_risk_flagged",
   "coverage.missingness.resolved_risk_flagged",
-  "coverage.requirement_alignment.accepted_internal_limitation",
-  "coverage.small_cell_risk.accepted_internal_limitation",
+  "coverage.requirement_alignment.unresolved",
+  "coverage.small_cell_risk.unresolved",
   "coverage.time_period_clarity.resolved_risk_flagged",
   "measurement.blank_records_excluded",
   "measurement.duplicate_records_included",
@@ -43,11 +43,11 @@ export const MEASURED_LIMITATION_CODES = [
   "measurement.record_meaning_human_defined",
 ];
 const REQUIRED_LIMITATION_WORDING = [
-  /conflicting source indicators[^\n]*(accepted|limitation)/i,
+  /conflicting sources?[^\n]*(unresolved|not yet resolved|limitation)/i,
   /duplicates?[^\n]*(risk flagged|limitation)/i,
   /missingness[^\n]*(risk flagged|limitation)/i,
-  /requirement alignment[^\n]*(accepted|limitation)/i,
-  /small.cell risk[^\n]*(accepted|limitation)/i,
+  /alignment with funder requirements[^\n]*(unresolved|not yet resolved|limitation)/i,
+  /small.cell[^\n]*(unresolved|not yet resolved|limitation)/i,
   /time period clarity[^\n]*(risk flagged|limitation)/i,
   /blank records?[^\n]*(excluded|exclude)/i,
   /duplicate records?[^\n]*(included|include)/i,
@@ -67,19 +67,32 @@ export function countCsvRecords(text) {
   return { totalDataRows: data.length, blankDataRows: blank, countedRecords: nonblank.length, duplicateNonblankRowsIncluded: duplicateRows };
 }
 
+// The internal report (Backend/kai/services/kaiInternalReportMarkdownSerializer.js).
+// Its "does not establish" and conclusion sections deliberately negate
+// participants, outcomes and impact, so unsupported findings are looked for
+// only in the model-written narrative and the key findings.
+function markdownSection(content, heading) {
+  return (content.split(`\n## ${heading}\n`)[1] || "").split("\n## ")[0];
+}
+
 export function validateMarkdown(markdown, { periodStart, periodEnd, sourceVersionId, claimId, evidenceId } = {}) {
   const content = String(markdown || "");
+  const findings = `${markdownSection(content, "Key findings")}\n${markdownSection(content, "Generated narrative")}`;
   const checks = {
-    countFive: /(?:5|five)\s+(?:nonblank\s+)?(?:source records?|programme sessions?)/i.test(content),
+    internalReport: /^# Internal (?:Evidence Summary|Impact Narrative)\n/.test(content),
+    countFive: /\*\*(?:5|five)\s+programme sessions?\*\*/i.test(markdownSection(content, "Key findings")),
     blankExcluded: /blank record[^\n]*(excluded|exclude)/i.test(content),
-    duplicatesIncluded: /duplicate[^\n]*(included|include)/i.test(content),
+    duplicatesIncluded: /duplicate[^\n]*(included|include)/i.test(markdownSection(content, "Duplicate records")),
     sourceRecordUnit: /source records?/i.test(content),
     attestedPeriod: Boolean(periodStart && periodEnd && content.includes(periodStart) && content.includes(periodEnd)),
     sourceVersionCitation: Boolean(sourceVersionId && content.includes(sourceVersionId)),
     claimCitation: Boolean(claimId && content.includes(claimId)),
     evidenceCitation: Boolean(evidenceId && content.includes(evidenceId)),
-    noRawCsvRows: !/^\d{4}-\d{2}-\d{2},[^\n]*$/m.test(content),
-    unsupportedClaimsAbsent: !/\b(?:participants?|outcomes?|attendance rates?|percentages?|caused|resulted in|led to|impact)\b/i.test(content),
+    // A raw CSV row starts "date,word"; a governed statement may put a comma
+    // after the period's end date ("... 2026-09-30, counting ...").
+    noRawCsvRows: !/\d{4}-\d{2}-\d{2},[A-Za-z]/.test(content),
+    generatedNarrativePresent: markdownSection(content, "Generated narrative").trim().length > 0,
+    unsupportedClaimsAbsent: !/\b(?:participants?|outcomes?|attendance rates?|percentages?|caused|resulted in|led to|impact)\b/i.test(findings),
     limitationsPresent: MEASURED_LIMITATION_CODES.every((code, index) => content.includes(code) || REQUIRED_LIMITATION_WORDING[index].test(content))
   };
   return { ok: Object.values(checks).every(Boolean), checks };
@@ -342,10 +355,7 @@ export function authenticationBlocker(status) {
 }
 export function capabilityBlocker(capabilities) {
   const absent = Object.entries(capabilities || {}).filter(([, allowed]) => allowed !== true).map(([name]) => name);
-  if (absent.length === 0) return null;
-  return capabilities?.internalRelease === false
-    ? "feature_disabled:KAI_PUBLIC_EXPORT_ENABLED_or_internal_release_capability"
-    : `required_role_capability_missing:${absent.join(",")}`;
+  return absent.length === 0 ? null : `required_role_capability_missing:${absent.join(",")}`;
 }
 export function shouldRepeatHumanAction(pendingHumanAction) { return pendingHumanAction !== "awaiting_verification"; }
 
@@ -367,14 +377,15 @@ const WORKFLOW_STAGE_TEXT = [
   ["upload_processing", "In the customer UI, create an intake batch named with this canary ID and upload the supplied synthetic CSV file. Do not re-upload if the row already appears. The runner will verify the exact canary filename, clean security result, P1 processing/profile stages, and the file checksum."],
   ["sensitivity_source", "In Data Sources, inspect the profile and complete the customer sensitivity, allowed-use, AI-use, and promotion decisions. Do not infer absence; record only the findings you can attest. Then provide the promoted current source-version UUID shown by the app."],
   ["measurement", "Use Count records. For this accepted synthetic fixture, define each nonblank data row as one programme session (header/blank excluded; exact duplicate nonblank rows retained). Enter only the synthetic reporting period your organization can genuinely attest; do not infer a period from row dates. Record the definition/measurement and propose the claim through the UI."],
-  ["gk_review", "As the separately authorized GK reviewer, review the pending evidence and claim and every applicable source-level coverage dimension in the UI. The canary will verify the current internal traceability result; it does not approve anything."],
+  ["internal_eligibility", "No human action: the runner verifies that the measured claim is eligible for internal use (Impact Facts). Nobody reviews or approves it."],
   ["generation", "As the customer administrator, create the internal Evidence Summary in the UI using the live generation action. Then provide the generated draft UUID shown by the application."],
-  ["factual_review", "Inspect the full generated text, citations, and limitations in Internal Drafts. Use the customer factual approval action only if the content is accurate. Do not approve inaccurate content."],
-  ["release", "Use the separate Release internal report action as the customer administrator and confirm the limitations only after reading them."],
-  ["download_validation", "Open the released report in the customer receipt interface. The runner will fetch the same authorized Markdown receipt route and validate its content and attachment response."]
+  ["download_validation", "In \"Your internal drafts\", open the draft and use \"Open report\" / \"Download Markdown\". The runner will fetch the same authorized internal report route and validate its content and attachment response."]
 ];
+// Stages with no human action: the runner only verifies.
+const AUTOMATIC_STAGES = new Set([4]);
 
-function stageRole(index) { return index === 4 ? "gk" : "customer"; }
+// Owner decision 2026-10-25: no stage waits for a Get Kinder reviewer.
+function stageRole() { return "customer"; }
 function stageName(index) { return index === 0 ? "workspace" : WORKFLOW_STAGE_TEXT[index - 1][0]; }
 
 async function interactive(args) {
@@ -450,7 +461,7 @@ async function interactive(args) {
         if (capabilitiesResponse.status !== 200 || !isPlainObject(capabilities)) throw new Error(`organization_capabilities:${apiCode(capabilitiesResponse)}`);
         const operationCaps = capabilities.workflowOperations || {};
         roleCapabilities = role === "customer"
-          ? { intakeContribution: capabilities.intakeContribution, promoteSource: operationCaps.promoteSource, recordSourceMeasurement: operationCaps.recordSourceMeasurement, generateDrafts: operationCaps.generateDrafts, factualReview: operationCaps.reviewInternalDraftFactualContent, internalRelease: operationCaps.releaseInternalReports }
+          ? { intakeContribution: capabilities.intakeContribution, promoteSource: operationCaps.promoteSource, recordSourceMeasurement: operationCaps.recordSourceMeasurement, generateDrafts: operationCaps.generateDrafts, readInternalDrafts: operationCaps.readInternalDrafts }
           : { evidenceReview: operationCaps.recordEvidenceReview, claimReview: operationCaps.recordClaimReview, coverage: operationCaps.assessEvidenceCoverage };
         absent = Object.entries(roleCapabilities).filter(([, allowed]) => allowed !== true).map(([name]) => name);
       }
@@ -464,7 +475,7 @@ async function interactive(args) {
         roleCapabilities: roleCapabilities || "NOT_CHECKED",
         selectedEngagement: args["engagement-id"] && state.organizationId ? "PASS" : "NOT_CHECKED",
         fixture: counts,
-        runtime: { storage: "NOT_CONFIRMED", malwareScanner: "NOT_CONFIRMED", P1Worker: "NOT_CONFIRMED", modelProvider: "NOT_CONFIRMED", KAI_PUBLIC_EXPORT_ENABLED: roleCapabilities?.internalRelease === false ? "feature_disabled_or_unavailable" : "NOT_CONFIRMED" },
+        runtime: { storage: "NOT_CONFIRMED", malwareScanner: "NOT_CONFIRMED", P1Worker: "NOT_CONFIRMED", modelProvider: "NOT_CONFIRMED" },
         blocker: absent.length ? `required_role_capability_missing:${absent.join(",")}` : null
       }, null, 2));
       return;
@@ -476,14 +487,18 @@ async function interactive(args) {
     if (capabilitiesResponse.status !== 200 || !isPlainObject(capabilities)) throw new Error(`organization_capabilities:${apiCode(capabilitiesResponse)}`);
     const operationCaps = capabilities.workflowOperations || {};
     const roleCapabilities = role === "customer"
-      ? { intakeContribution: capabilities.intakeContribution, promoteSource: operationCaps.promoteSource, recordSourceMeasurement: operationCaps.recordSourceMeasurement, generateDrafts: operationCaps.generateDrafts, factualReview: operationCaps.reviewInternalDraftFactualContent, internalRelease: operationCaps.releaseInternalReports }
+      ? { intakeContribution: capabilities.intakeContribution, promoteSource: operationCaps.promoteSource, recordSourceMeasurement: operationCaps.recordSourceMeasurement, generateDrafts: operationCaps.generateDrafts, readInternalDrafts: operationCaps.readInternalDrafts }
       : { evidenceReview: operationCaps.recordEvidenceReview, claimReview: operationCaps.recordClaimReview, coverage: operationCaps.assessEvidenceCoverage };
     const blocker = capabilityBlocker(roleCapabilities);
     if (blocker) throw new Error(blocker);
 
     const pipelinePath = `/admin/organizations/${state.organizationId}/engagements/${state.engagementId}/client-evidence-pipeline`;
     const measurementPath = (sourceVersionId) => `/admin/organizations/${state.organizationId}/source-versions/${sourceVersionId}/record-count-measurement`;
-    const traceabilityPath = (claimId) => `/admin/organizations/${state.organizationId}/claims/${claimId}/traceability?requested_audience=internal`;
+    const impactFactsPath = `/admin/organizations/${state.organizationId}/impact-facts`;
+    const claimIsImpactFact = async () => {
+      const facts = await browser.probe(impactFactsPath);
+      return facts.status === 200 && (dataOf(facts)?.items || []).some((item) => item.claimId === state.ids.claimId);
+    };
     const draftPath = (draftId) => `/admin/organizations/${state.organizationId}/engagements/${state.engagementId}/client-internal-drafts/${draftId}`;
 
     if (mode === "resume" && state.stageIndex > 0) {
@@ -502,19 +517,13 @@ async function interactive(args) {
       const recorded = dataOf(recordedResponse)?.recorded;
       if (recordedResponse.status !== 200 || Number(recorded?.measurement?.measured_value) !== 5 || Number(recorded?.measurement?.total_record_count) !== 6 || Number(recorded?.measurement?.blank_record_count) !== 1 || Number(recorded?.measurement?.duplicate_record_count) !== 2 || recorded?.definition?.period_start !== state.attestedPeriod?.start || recorded?.definition?.period_end !== state.attestedPeriod?.end || recorded?.claim?.claim_id !== state.ids.claimId) throw new Error("resume_prior_measurement_or_claim_stale_or_unverified");
     }
-    if (mode === "resume" && state.stageIndex >= 5) {
-      const traceResponse = await browser.probe(traceabilityPath(state.ids.claimId));
-      const trace = dataOf(traceResponse);
-      if (traceResponse.status !== 200 || trace?.eligible !== true || !Array.isArray(trace.blockerCodes) || trace.blockerCodes.length !== 0) throw new Error("resume_prior_GK_eligibility_stale_or_unverified");
-    }
+    if (mode === "resume" && state.stageIndex >= 5 && !(await claimIsImpactFact())) throw new Error("resume_prior_internal_eligibility_stale_or_unverified");
     if (mode === "resume" && state.stageIndex >= 6) {
       const draftResponse = await browser.probe(draftPath(state.ids.draftId));
       const draft = dataOf(draftResponse);
       const citedClaimIds = new Set((draft?.blocks || []).flatMap((block) => block.supportingClaimIds || []));
       if (draftResponse.status !== 200 || draft.contentType !== "evidence_summary" || draft.audience !== "internal" || draft.citedClaimsCurrentlyEligible !== true || citedClaimIds.size !== 1 || !citedClaimIds.has(state.ids.claimId)) throw new Error("resume_prior_draft_or_citation_stale_or_unverified");
-      if (state.stageIndex >= 7 && draft.reviewState !== "reviewed_by_your_organization") throw new Error("resume_customer_factual_review_missing_or_stale");
-      if (state.stageIndex >= 8 && draft.release?.state === "unavailable") throw new Error("feature_disabled:KAI_PUBLIC_EXPORT_ENABLED_or_release_authority_unavailable");
-      if (state.stageIndex >= 8 && (draft.release?.state !== "released_for_internal_use" || draft.organizationRelease?.releasedBy !== "your_organization")) throw new Error("resume_customer_internal_release_missing_or_stale");
+      if (draft.internalReport?.available !== true) throw new Error("resume_prior_internal_report_unavailable");
     }
 
     while (state.stageIndex < STAGES.length) {
@@ -536,7 +545,9 @@ async function interactive(args) {
         result = { organizationCapabilities: "verified", engagement: "verified", role };
       } else {
         const [_, instruction] = WORKFLOW_STAGE_TEXT[index - 1];
-        if (shouldRepeatHumanAction(state.pendingHumanAction)) {
+        if (AUTOMATIC_STAGES.has(index)) {
+          console.log(`\nSTAGE ${index}/${STAGES.length - 1}: ${stageId}\n${instruction}`);
+        } else if (shouldRepeatHumanAction(state.pendingHumanAction)) {
           console.log(`\nSTAGE ${index}/${STAGES.length - 1}: ${stageId}\n${instruction}`);
           if (index === 1) console.log(`Select this exact local synthetic CSV in the UI: ${state.fixturePath}`);
           if (index === 3) {
@@ -601,36 +612,20 @@ async function interactive(args) {
           state.ids.claimId = claim.claim_id;
           result = { measurement: 5, totalRows: 6, blankRows: 1, duplicateRowsIncluded: 2, evidenceLinked: true, claimLinked: true, countedUnit: definition.counted_unit, metricMeaning: "source records; each row human-defined as one programme session", period: [definition.period_start, definition.period_end], periodHumanAttested: state.attestedPeriod.attestedByOperator };
         } else if (index === 4) {
-          const traceResponse = await browser.probe(traceabilityPath(state.ids.claimId));
-          const trace = dataOf(traceResponse);
-          const dimensions = Object.values(trace?.dimensions || {});
-          if (traceResponse.status !== 200 || trace?.eligible !== true || !Array.isArray(trace.blockerCodes) || trace.blockerCodes.length !== 0 || dimensions.length === 0 || dimensions.some((dimension) => dimension.assessment_status === "unresolved" && dimension.internal_limitation_accepted !== true)) throw new Error(`GK_evidence_claim_or_coverage_eligibility_not_verified:${apiCode(traceResponse)}`);
-          result = { evidenceClaimAndInternalCoverage: "accepted_and_eligible", applicableDimensions: dimensions.length, blockers: 0 };
+          if (!(await claimIsImpactFact())) throw new Error("internal_eligibility_blocked: the measured claim is not eligible for internal use; the canary bypasses nothing");
+          result = { internalEligibility: "eligible_without_review", source: "impact_facts" };
         } else if (index === 5) {
           const draftResponse = await browser.probe(draftPath(state.ids.draftId));
           const draft = dataOf(draftResponse);
           const generated = (draft?.blocks || []).map((block) => block.text || "").join("\n");
           const citedClaimIds = new Set((draft?.blocks || []).flatMap((block) => block.supportingClaimIds || []));
-          if (draftResponse.status !== 200 || draft.contentType !== "evidence_summary" || draft.audience !== "internal" || draft.citedClaimsCurrentlyEligible !== true || citedClaimIds.size !== 1 || !citedClaimIds.has(state.ids.claimId) || !/(?:5|five)\s+(?:nonblank\s+)?(?:source records?|programme sessions?)/i.test(generated) || !/source records?/i.test(generated) || !generated.includes(state.attestedPeriod?.start) || !generated.includes(state.attestedPeriod?.end) || /\b(?:participants?|outcomes?|attendance rates?|percentages?|caused|resulted in|led to|impact)\b/i.test(generated)) throw new Error(`live_internal_draft_or_citations_not_verified:${apiCode(draftResponse)}`);
+          if (draftResponse.status !== 200 || draft.contentType !== "evidence_summary" || draft.audience !== "internal" || draft.citedClaimsCurrentlyEligible !== true || citedClaimIds.size !== 1 || !citedClaimIds.has(state.ids.claimId) || !/(?:5|five)\s+(?:nonblank\s+)?(?:source records?|programme sessions?)/i.test(generated) || !/source records?/i.test(generated) || !generated.includes(state.attestedPeriod?.start) || !generated.includes(state.attestedPeriod?.end) || /\b(?:participants?|outcomes?|attendance rates?|percentages?|caused|resulted in|led to|impact)\b/i.test(generated) || draft.internalReport?.available !== true) throw new Error(`live_internal_draft_or_citations_not_verified:${apiCode(draftResponse)}`);
           result = { draftId: state.ids.draftId, contentType: draft.contentType, audience: draft.audience, eligibleClaimCited: true, providerMetadata: "NOT_EXPOSED_BY_CUSTOMER_READ" };
         } else if (index === 6) {
-          const draftResponse = await browser.probe(draftPath(state.ids.draftId));
-          const draft = dataOf(draftResponse);
-          if (draftResponse.status !== 200 || draft.reviewState !== "reviewed_by_your_organization" || draft.citedClaimsCurrentlyEligible !== true) throw new Error(`customer_factual_review_not_verified:${apiCode(draftResponse)}`);
-          result = { factualReview: draft.reviewState, claimEligibility: true };
-        } else if (index === 7) {
-          const draftResponse = await browser.probe(draftPath(state.ids.draftId));
-          const draft = dataOf(draftResponse);
-          if (draftResponse.status === 200 && draft.release?.state === "unavailable") throw new Error("feature_disabled:KAI_PUBLIC_EXPORT_ENABLED_or_release_authority_unavailable");
-          if (draftResponse.status !== 200 || draft.contentType !== "evidence_summary" || draft.audience !== "internal" || draft.reviewState !== "reviewed_by_your_organization" || draft.citedClaimsCurrentlyEligible !== true || draft.release?.state !== "released_for_internal_use" || !draft.release?.releasedReportId || draft.organizationRelease?.releasedBy !== "your_organization") throw new Error(`customer_internal_release_not_verified:${apiCode(draftResponse)}`);
-          state.ids.manifestId = draft.release.releasedReportId;
-          result = { release: draft.release.state, manifestId: state.ids.manifestId, releasedBy: draft.organizationRelease.releasedBy };
-        } else if (index === 8) {
-          const markdownResponse = await browser.probeText(`/admin/organizations/${state.organizationId}/engagements/${state.engagementId}/client-released-reports/${state.ids.manifestId}/markdown`);
+          const markdownResponse = await browser.probeText(`${draftPath(state.ids.draftId)}/markdown`);
           if (markdownResponse.status !== 200) {
             let errorCode;
             try { errorCode = JSON.parse(markdownResponse.text)?.error?.code; } catch {}
-            if (errorCode === "feature_disabled") throw new Error("feature_disabled:KAI_PUBLIC_EXPORT_ENABLED");
             throw new Error(`authorized_markdown_download_failed:${errorCode || `http_${markdownResponse.status}`}`);
           }
           if (!/attachment/i.test(markdownResponse.disposition || "")) throw new Error("authorized_markdown_download_missing_attachment_disposition");
@@ -653,8 +648,8 @@ async function interactive(args) {
       state.roleRequired = stageRole(Math.min(state.stageIndex, STAGES.length - 1));
       await saveState(state);
       console.log(`${stageId}: PASS ${JSON.stringify(result)}`);
-      if (index === 8) {
-        console.log(`CANARY PASS: ${state.canaryId}; report retrieved through the authorized receipt route. Provider identity is not exposed by the client read and remains NOT_CONFIRMED.`);
+      if (index === 6) {
+        console.log(`CANARY PASS: ${state.canaryId}; report retrieved through the authorized internal report route. Provider identity is not exposed by the client read and remains NOT_CONFIRMED.`);
         return;
       }
     }
