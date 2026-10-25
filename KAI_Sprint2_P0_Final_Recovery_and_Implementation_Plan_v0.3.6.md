@@ -44441,3 +44441,65 @@ The isolated P14-09/P14-11/P3-18 generation-service fixtures and the traceabilit
 **Remaining limitations:** a provider block within about 600 characters of the 4,000-character limit, cited to many-limitation ineligible claims, is refused rather than truncated. The disclosure is a fixed server sentence per code, not prose tailored to the claim. Factual approval and release still block ineligible cited claims; this repair grants no approval or funder/public authority.
 
 **Status:** VAL_GEN_009_PRODUCER_REPAIR_VERIFIED_LOCALLY. Not pushed, deployed, or retested in production.
+
+### VAL-GEN-009 regression correction: remove the mandatory provisional wording and its server rewrite (2026-10-25)
+
+**Scope (USER_CONFIRMED):** owner prompt "Correct the VAL-GEN-009 regression and prove the customer workflow". It authorizes local edits, synthetic tests, and a local commit only. It does not authorize a push, deployment, production access, migration, permission, flag, or `00_KAI_CURRENT_STATE.md` change.
+
+**Starting state (TOOL_VERIFIED):** `main` at `5633934490dd2d361767052e1ea3446e2f1f84fa`, clean working tree. `c1a1137` and `5633934` are the two commits directly after `fa87ece`. Between them, they changed only `kaiGeneratedContentValidators.js` and `postgresGeneratedContentRepository.js` in the backend.
+
+**Correction (TOOL_VERIFIED):** both backend files are now byte-identical to `fa87ece` (`git diff fa87ece -- Backend/` is empty). This removes all of the following:
+- `VAL-GEN-009` and its registration in `VALIDATOR_KEYS`.
+- The `CURRENT_LIMITATION_DISCLOSURE` patterns and statements.
+- The required `Provisional internal draft` opening.
+- The `ineligible_claim_context_not_disclosed` blocker.
+- `qualifyIneligibleClaimBlocks`.
+- The pre-qualification validation pass that filtered out `VAL-GEN-009`.
+- The post-insertion length recheck.
+- `VAL-GEN-009` in new `generated_content_draft_created` audit `validator_keys`.
+
+`createGeneratedContentDraft` again runs one full validation and persists the provider's blocks unchanged. The `fa87ece` P2-04 generation handoff (`kaiGeneratedContentService.js`) is untouched. No active code references `VAL-GEN-009` or `qualifyIneligibleClaimBlocks`. Previously recorded audit and draft rows that contain `VAL-GEN-009` stay readable: `validator_keys` and `validator_results` are only generically normalized, never matched by key.
+
+**Tests (TOOL_VERIFIED):** only assertions and fixtures that existed solely for the wording rule were removed or reverted:
+- the boundary tests for the server statement and the qualifier;
+- the Phase 13 `VAL-GEN-009` predicate tests (restored to the documented variance);
+- the provider fixtures that wrote compliant wording;
+- the assertions on the server-written prefix.
+
+These additions were kept:
+- the realistic evaluator `blockerCodes`;
+- P2-04 commit-before-downstream-failure, lineage, and replay-audit assertions;
+- `reconcileClaimGapsForGeneration` test dependencies;
+- multi-claim citation persistence;
+- the `VAL-GEN-004` refusal of unsupported assertions (plain and self-labelled provisional).
+
+The real-path P3-01/P13-01, P2-06, Phase 13 Case A, P14-09, and Step E1 browser fixtures now prove the following for currently ineligible claims:
+- ordinary provider text, including limitations described in the provider's own words, is persisted exactly as written;
+- the recorded validators are `VAL-GEN-001`–`005` only;
+- eligibility and blocker codes are unchanged by generation;
+- the draft remains `draft` / `needs_gk_review` with `currentUseEligible=false`.
+
+**Independent five-record count (TOOL_VERIFIED):** the canary fixture bytes contain 6 data lines after the header. 1 blank line is excluded, and the 2 identical 2026-09-16 rows are both counted under the recorded definition. That gives 5 counted programme sessions (4 distinct), all within the attested 2026-09-01 to 2026-09-30 period. This matches the assembled acceptance value.
+
+**Verification (TOOL_VERIFIED; `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel` for every Node/npm command, disposable loopback PostgreSQL):**
+
+| Command or suite | Result |
+| --- | --- |
+| Affected boundary specs (P3-01, P13-01, Phase 13, P14-09, readiness, diagnostic, P14-11, P3-18, organization review) | 200/200 passed |
+| `npm run verify:kai-sprint2-p2-04-claim-gap-followup` | 18/18 passed |
+| `npm run verify:kai-sprint2-p2-06-claim-traceability` | 34/34 passed |
+| `npm run verify:kai-sprint2-p2-08-eligible-claims-for-audience` | 20/20 passed |
+| P2-01M measurement runner | 56 passed, 0 failed, 8 skipped |
+| P3-01 generated-content drafts runner | 22/22 passed |
+| `npm run verify:kai-sprint2-p13-01-impact-narrative-content-type` | 33/33 passed |
+| Plan A normal migration chain | 2/2, 30/30, 4/4 passed |
+| Step E1 internal factual-review browser acceptance | 17/17 passed |
+| Measurement-to-released-report browser acceptance | 13/13 passed |
+| Five-record assembled customer file-to-report acceptance | 25/25 passed |
+| `npm run verify:kai-sprint2-api-contract` | 71/71 passed |
+| `npm run build` | passed; tracked bundle unchanged |
+| Full `npm test` | 5,756 passed, 0 failed, 120 skipped (5,876 total; the 2 fewer tests are the removed `VAL-GEN-009` boundary tests) |
+
+**Remaining limitation:** generated internal text is no longer required to restate every current limitation. Limitations remain in the authoritative P2-06 projection, the provider input (`limitationCodes`), the review packet, and the factual-review blockers. Factual approval and release still refuse cited claims that are not currently eligible.
+
+**Status:** VAL_GEN_009_REGRESSION_CORRECTED_LOCALLY. Not pushed, deployed, or retested in production.

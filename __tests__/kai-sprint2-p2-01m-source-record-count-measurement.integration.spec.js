@@ -1116,7 +1116,7 @@ async function runSuite() {
   });
 
   test("generation: a field-presence claim keeps today's internal generation exactly (prompt, limitation codes, validators)", async () => {
-    const provider = replying({ text: "Provisional internal draft: claim review is pending; evidence review is pending; support has not yet been assessed; coverage gaps remain unresolved; client follow-ups remain unanswered. The promoted source contains a committed data-dictionary field.", citations: [{ claimId: ids.legacyFieldClaimId, evidenceItemId: ids.legacyFieldEvidenceId }] });
+    const provider = replying({ text: "The promoted source contains a committed data-dictionary field.", citations: [{ claimId: ids.legacyFieldClaimId, evidenceItemId: ids.legacyFieldEvidenceId }] });
     const result = await generate([ids.legacyFieldClaimId], provider);
     assert.equal(result.ok, true, JSON.stringify(result));
     const [payload] = provider.calls;

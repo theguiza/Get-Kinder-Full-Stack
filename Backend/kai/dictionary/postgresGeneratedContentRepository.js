@@ -7,7 +7,7 @@ import {
   evaluateClaimTraceabilityInTransaction,
   AUDIENCE_AUTHORITY_BLOCKER_CODES,
 } from "./postgresClaimTraceabilityRepository.js";
-import { qualifyIneligibleClaimBlocks, validateGeneratedContentDraft } from "../validators/kaiGeneratedContentValidators.js";
+import { validateGeneratedContentDraft } from "../validators/kaiGeneratedContentValidators.js";
 import { getScopedEvidenceMeasurementByEvidenceItemId } from "../db/kaiIntakeQueries.js";
 import { MEASUREMENT_EVIDENCE_TYPE, measurementLimitationCodes } from "../validators/kaiSourceMeasurementValidators.js";
 import {
@@ -1332,7 +1332,7 @@ async function insertAudit(tx, { input, persisted, projections }) {
         requested_audience: input.requestedAudience,
         claim_count: projections.length,
         block_count: persisted.blocks.length,
-        validator_keys: ["VAL-GEN-001", "VAL-GEN-002", "VAL-GEN-003", "VAL-GEN-004", "VAL-GEN-005", "VAL-GEN-009"],
+        validator_keys: ["VAL-GEN-001", "VAL-GEN-002", "VAL-GEN-003", "VAL-GEN-004", "VAL-GEN-005"],
       }),
       input.now,
     ],
@@ -1539,39 +1539,20 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
         );
       }
 
-      const generationClaims = projections.map((projection) => ({
-        ...projection,
-        revalidatedForGeneration: true,
-        currentEligible: traceabilityByClaimId.get(projection.claimId)?.eligible === true,
-      }));
-      const validationContext = {
+      const validation = validateGeneratedContentDraft({
         requestedAudience: input.requestedAudience,
-        generationClaims,
+        generationClaims: projections.map((projection) => ({
+          ...projection,
+          revalidatedForGeneration: true,
+          currentEligible: traceabilityByClaimId.get(projection.claimId)?.eligible === true,
+        })),
+        blocks: generatorResult.blocks,
         draftAudience: input.requestedAudience,
         contentType,
         authoritativeReadiness: contentType === DATA_GAP_MEMO_CONTENT_TYPE
           ? dependencies.authoritativeDataGaps
           : dependencies.authoritativeReadiness,
-      };
-      // The provider's own text must pass every other validator before the
-      // server adds the VAL-GEN-009 provisional disclosure, so the disclosure
-      // can never mask an unsupported assertion in the body.
-      const providerValidation = validateGeneratedContentDraft({ ...validationContext, blocks: generatorResult.blocks });
-      const providerBlockers = providerValidation.blockers.filter((result) => result.validator_key !== "VAL-GEN-009");
-      if (providerBlockers.length > 0) rollbackFailure("validation_blocker", providerBlockers);
-
-      const qualification = qualifyIneligibleClaimBlocks({
-        requestedAudience: input.requestedAudience,
-        generationClaims,
-        blocks: generatorResult.blocks,
       });
-      if (!qualification.ok) rollbackFailure("validation_blocker", stageBlocker("VAL-GEN-009", qualification.reason));
-      const qualifiedResult = { blocks: qualification.blocks };
-      if (!classifyGeneratorResult(qualifiedResult).ok) {
-        rollbackFailure("validation_blocker", stageBlocker("VAL-GEN-009", "provisional_disclosure_exceeds_text_limit"));
-      }
-
-      const validation = validateGeneratedContentDraft({ ...validationContext, blocks: qualifiedResult.blocks });
       if (!validation.ok) rollbackFailure("validation_blocker", validation.blockers);
 
       // Post-generation revalidation remains a current-state/lineage
@@ -1605,7 +1586,7 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
       const persisted = await persistCompleteSet(tx, {
         input,
         runId: reservation.generation_run_id,
-        generatorResult: qualifiedResult,
+        generatorResult,
         validation,
         projections,
         contentType,

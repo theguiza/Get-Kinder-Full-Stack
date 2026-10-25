@@ -3,12 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import { createEvidenceSummaryDraft } from "../Backend/kai/services/kaiGeneratedContentService.js";
-import {
-  __generatedContentValidatorContract,
-  qualifyIneligibleClaimBlocks,
-  validateGeneratedContentDraft,
-} from "../Backend/kai/validators/kaiGeneratedContentValidators.js";
-import { __claimTraceabilityRepositoryContract } from "../Backend/kai/dictionary/postgresClaimTraceabilityRepository.js";
+import { validateGeneratedContentDraft } from "../Backend/kai/validators/kaiGeneratedContentValidators.js";
 import {
   __generatedContentRepositoryTestables,
   fingerprintEvidenceSummaryRequest,
@@ -179,104 +174,28 @@ test("P3-01 validators VAL-GEN-001 through VAL-GEN-005 enforce generation revali
   }).blockers.map((blocker) => blocker.validator_key), ["VAL-GEN-005"]);
 
   // Package 14-05: a governed claim's current audience/use eligibility being
-  // currentEligible remains a separate fact from traceability, and internal
-  // drafting remains possible when the output labels itself provisional and
-  // discloses the current limitation.
-  const qualifiedIneligible = validateGeneratedContentDraft({
+  // false must not, by itself, produce a blocker. currentEligible is
+  // preserved as a separate truthful fact, and ordinary provider text needs
+  // no mandated provisional opening or limitation wording.
+  const ineligibleClaim = eligibleClaim({ currentEligible: false, limitationCodes: ["claim_review_unresolved", "coverage_dimension_unresolved"] });
+  const ordinaryIneligible = validateGeneratedContentDraft({
     requestedAudience: "internal",
-    generationClaims: [eligibleClaim({ currentEligible: false, limitationCodes: ["evidence_gap_unresolved"] })],
-    blocks: [{
-      ...blocks()[0],
-      text: "Provisional internal draft: evidence gaps remain unresolved.",
-    }],
+    generationClaims: [ineligibleClaim],
+    blocks: blocks(),
   });
-  assert.equal(qualifiedIneligible.ok, true, JSON.stringify(qualifiedIneligible.blockers));
-});
-
-test("VAL-GEN-009 repair: every server-authored limitation statement satisfies its own VAL-GEN-009 pattern and no other generated-content rule", () => {
-  const { CURRENT_LIMITATION_DISCLOSURE, NUMERIC_LITERAL_PATTERN, CAUSAL_PATTERN } = __generatedContentValidatorContract;
-  assert.deepEqual(Object.keys(CURRENT_LIMITATION_DISCLOSURE).sort(), [...__claimTraceabilityRepositoryContract.BLOCKER_ORDER, "claim_review_missing", "evidence_gap_unresolved"].sort());
-  for (const audience of ["internal", "funder", "public"]) {
-    for (const [code, { pattern, statement }] of Object.entries(CURRENT_LIMITATION_DISCLOSURE)) {
-      const text = statement(audience);
-      assert.match(text, pattern, code);
-      assert.equal(text.match(NUMERIC_LITERAL_PATTERN), null, code);
-      assert.equal(text.match(CAUSAL_PATTERN), null, code);
-    }
-  }
-});
-
-test("VAL-GEN-009 repair: undisclosed provider prose for ineligible claims is qualified by the server, eligible blocks are untouched, and missing limitations fail closed", () => {
-  const SECOND_CLAIM = "00000000-0000-4000-8000-000000000102";
-  const SECOND_EVIDENCE = "00000000-0000-4000-8000-000000000202";
-  const ineligible = eligibleClaim({ currentEligible: false, limitationCodes: ["claim_review_unresolved", "coverage_dimension_unresolved"] });
-  const secondIneligible = eligibleClaim({
-    claimId: SECOND_CLAIM,
-    evidenceItemId: SECOND_EVIDENCE,
-    claimStatement: "Volunteers logged program hours.",
-    currentEligible: false,
-    limitationCodes: ["claim_review_unresolved", "client_followup_unresolved", "claim_not_approved_for_requested_audience"],
-  });
-  const eligible = eligibleClaim({ claimId: SECOND_CLAIM, evidenceItemId: SECOND_EVIDENCE, claimStatement: "Volunteers logged program hours.", currentEligible: true });
-  const providerBlocks = [
-    { ordinal: 1, text: "Enrollment increased by 12% in 2025. Volunteers logged program hours.", citations: [{ claimId: CLAIM, evidenceItemId: EVIDENCE }, { claimId: SECOND_CLAIM, evidenceItemId: SECOND_EVIDENCE }] },
-  ];
-
-  // The unqualified provider output is exactly what production rejected.
-  const unqualified = validateGeneratedContentDraft({ requestedAudience: "internal", generationClaims: [ineligible, secondIneligible], blocks: providerBlocks });
-  assert.deepEqual(unqualified.blockers.map((blocker) => blocker.validator_key), ["VAL-GEN-009"]);
-
-  const multi = qualifyIneligibleClaimBlocks({ requestedAudience: "internal", generationClaims: [ineligible, secondIneligible], blocks: providerBlocks });
-  assert.equal(multi.ok, true);
-  assert.equal(
-    multi.blocks[0].text,
-    "Provisional internal draft: Claim review is unresolved. A coverage dimension is unresolved. A client follow-up is unanswered. The claim is not approved for the internal audience. Enrollment increased by 12% in 2025. Volunteers logged program hours.",
-  );
-  assert.deepEqual(multi.blocks[0].citations, providerBlocks[0].citations);
-  const validated = validateGeneratedContentDraft({ requestedAudience: "internal", generationClaims: [ineligible, secondIneligible], blocks: multi.blocks });
-  assert.equal(validated.ok, true, JSON.stringify(validated.blockers));
-
-  // Only blocks citing an ineligible claim change; eligible-only blocks are
-  // returned as the same object.
-  const mixedBlocks = [
-    { ordinal: 1, text: "Volunteers logged program hours.", citations: [{ claimId: SECOND_CLAIM, evidenceItemId: SECOND_EVIDENCE }] },
-    { ordinal: 2, text: "Enrollment increased by 12% in 2025.", citations: [{ claimId: CLAIM, evidenceItemId: EVIDENCE }] },
-  ];
-  const mixed = qualifyIneligibleClaimBlocks({ requestedAudience: "internal", generationClaims: [ineligible, eligible], blocks: mixedBlocks });
-  assert.equal(mixed.blocks[0], mixedBlocks[0]);
-  assert.equal(mixed.blocks[1].text, "Provisional internal draft: Claim review is unresolved. A coverage dimension is unresolved. Enrollment increased by 12% in 2025.");
-  const allEligible = qualifyIneligibleClaimBlocks({ requestedAudience: "internal", generationClaims: [eligibleClaim({ currentEligible: true })], blocks: blocks() });
-  assert.deepEqual(allEligible.blocks, blocks());
-
-  // A provider-written designation is replaced, not repeated.
-  const relabelled = qualifyIneligibleClaimBlocks({
-    requestedAudience: "internal",
-    generationClaims: [ineligible],
-    blocks: blocks({ text: "Provisional internal draft — Enrollment increased by 12% in 2025." }),
-  });
-  assert.equal(relabelled.blocks[0].text, "Provisional internal draft: Claim review is unresolved. A coverage dimension is unresolved. Enrollment increased by 12% in 2025.");
-
-  // No authoritative limitation to disclose: fail closed, qualify nothing.
+  assert.equal(ordinaryIneligible.ok, true, JSON.stringify(ordinaryIneligible.blockers));
   assert.deepEqual(
-    qualifyIneligibleClaimBlocks({ requestedAudience: "internal", generationClaims: [eligibleClaim({ currentEligible: false, limitationCodes: [] })], blocks: blocks() }),
-    { ok: false, reason: "ineligible_claim_limitations_unavailable" },
-  );
-  assert.deepEqual(
-    qualifyIneligibleClaimBlocks({ requestedAudience: "internal", generationClaims: [eligibleClaim({ currentEligible: false, limitationCodes: ["unknown_limitation"] })], blocks: blocks() }),
-    { ok: false, reason: "ineligible_claim_limitation_not_disclosable" },
+    ordinaryIneligible.results.map((result) => result.validator_key),
+    ["VAL-GEN-001", "VAL-GEN-002", "VAL-GEN-003", "VAL-GEN-004", "VAL-GEN-005"],
   );
 
-  // The designation never masks an unsupported body assertion: the provider
-  // body is still blocked by VAL-GEN-004 after qualification.
-  const unsupported = qualifyIneligibleClaimBlocks({
+  // The substantive validators still apply: an unsupported number or causal
+  // claim citing the same ineligible claim is blocked by VAL-GEN-004.
+  assert.deepEqual(validateGeneratedContentDraft({
     requestedAudience: "internal",
-    generationClaims: [ineligible],
+    generationClaims: [ineligibleClaim],
     blocks: blocks({ text: "Enrollment caused 13% growth in 2025." }),
-  });
-  assert.deepEqual(
-    validateGeneratedContentDraft({ requestedAudience: "internal", generationClaims: [ineligible], blocks: unsupported.blocks }).blockers.map((blocker) => blocker.validator_key),
-    ["VAL-GEN-004"],
-  );
+  }).blockers.map((blocker) => blocker.validator_key), ["VAL-GEN-004"]);
 });
 
 test("P3-01 request fingerprint is deterministic and sensitive only to content type, audience, ordered claim ids, and engagement", () => {

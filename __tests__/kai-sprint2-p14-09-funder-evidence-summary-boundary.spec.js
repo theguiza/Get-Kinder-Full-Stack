@@ -504,7 +504,7 @@ function funderGenerator({ calls = [] } = {}) {
   return async (input) => {
     calls.push(input);
     return {
-      blocks: [{ ordinal: 1, text: "Provisional internal draft: current eligibility remains unresolved. Enrollment increased by 12% in 2025.", citations: [{ claimId: CLAIM, evidenceItemId: EVIDENCE }] }],
+      blocks: [{ ordinal: 1, text: "Enrollment increased by 12% in 2025.", citations: [{ claimId: CLAIM, evidenceItemId: EVIDENCE }] }],
     };
   };
 }
@@ -637,8 +637,9 @@ test("P14-09 an internal request is never subject to the funder eligibility gate
   assert.equal(generatorCalls.length, 1);
   assert.equal(state.generatedContentDrafts.length, 1);
   assert.equal(state.generatedContentDrafts[0].requested_audience, "internal");
+  // The provider's text is persisted as written, with no server-added wording.
   assert.deepEqual(state.generatedContentBlocks.map((block) => block.text), [
-    "Provisional internal draft: Claim review is unresolved. current eligibility remains unresolved. Enrollment increased by 12% in 2025.",
+    "Enrollment increased by 12% in 2025.",
   ]);
 });
 

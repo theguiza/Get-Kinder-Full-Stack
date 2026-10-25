@@ -702,9 +702,9 @@ async function runBrowserAcceptance() {
       await adminPage.waitFor(async () => (await textOf(adminPage, `[data-client-internal-draft-detail="${ids.blockedDraftId}"]`)) !== null, "the ineligible draft opens");
       await adminPage.idle();
       const blockedDetail = await textOf(adminPage, `[data-client-internal-draft-detail="${ids.blockedDraftId}"]`);
-      assert.match(blockedDetail, /Provisional internal draft: Claim review is unresolved\./);
-      assert.match(blockedDetail, /A coverage dimension is unresolved\./);
-      assert.match(blockedDetail, /A client follow-up is unanswered\./);
+      // The provider's text is persisted as written: the server adds no
+      // provisional designation or limitation sentence of its own.
+      assert.doesNotMatch(blockedDetail, /Provisional internal draft/i);
       assert.match(blockedDetail, /Factual approval blocked/);
       assert.match(blockedDetail, /At least one cited claim is not currently eligible for internal use/);
       assert.match(blockedDetail, /Ask Get Kinder to review the cited claims/);

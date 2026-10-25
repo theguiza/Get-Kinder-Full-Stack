@@ -189,7 +189,7 @@ test("readiness validator retains blockers/gaps and blocks unsupported positive 
     generationClaims: [baseClaim({ limitationCodes: ["claim_review_missing"], currentEligible: false })],
     blocks: [{
       ordinal: 1,
-      text: "Provisional internal draft: the readiness draft identifies a gap; some claims need review before a positive readiness assertion can be made.",
+      text: "The readiness draft identifies a gap: some claims need review before a positive readiness assertion can be made.",
       citations: [{ claimId: CLAIM, evidenceItemId: EVIDENCE }],
     }],
   });

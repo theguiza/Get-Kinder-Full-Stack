@@ -9,65 +9,7 @@ const VALIDATOR_KEYS = Object.freeze([
   "VAL-GEN-006",
   "VAL-GEN-007",
   "VAL-GEN-008",
-  "VAL-GEN-009",
 ]);
-
-// Each current limitation code carries the pattern VAL-GEN-009 requires and
-// the server-authored statement that satisfies it, kept side by side so the
-// disclosure the server writes and the disclosure the validator accepts
-// cannot drift. Statements carry no numbers or causal wording (VAL-GEN-004).
-const CURRENT_LIMITATION_DISCLOSURE = Object.freeze({
-  evidence_gap_unresolved: Object.freeze({
-    pattern: /\bevidence\b.*\b(gap|unresolved|incomplete)\b/i,
-    statement: () => "An evidence gap is unresolved.",
-  }),
-  claim_review_unresolved: Object.freeze({
-    pattern: /\bclaim review\b.*\b(unresolved|incomplete|pending|under review)\b/i,
-    statement: () => "Claim review is unresolved.",
-  }),
-  claim_review_missing: Object.freeze({
-    pattern: /\bclaim(s)?\b.*\b(needs? review|requires? review|awaiting review|not reviewed)\b/i,
-    statement: () => "The claim requires review.",
-  }),
-  evidence_review_unresolved: Object.freeze({
-    pattern: /\bevidence review\b.*\b(unresolved|incomplete|pending|under review)\b/i,
-    statement: () => "Evidence review is unresolved.",
-  }),
-  support_strength_unassessed: Object.freeze({
-    pattern: /\b(support|claim strength)\b.*\b(not yet assessed|not yet been assessed|not been assessed|unassessed|unverified)\b/i,
-    statement: () => "Support strength has not yet been assessed.",
-  }),
-  coverage_dimension_unresolved: Object.freeze({
-    pattern: /\bcoverage\b.*\b(gap|unresolved|incomplete|not cleared)\b/i,
-    statement: () => "A coverage dimension is unresolved.",
-  }),
-  client_followup_unresolved: Object.freeze({
-    pattern: /\bclient follow[- ]?ups?\b.*\b(unanswered|unresolved|pending|open)\b/i,
-    statement: () => "A client follow-up is unanswered.",
-  }),
-  potential_conflict_review_unresolved: Object.freeze({
-    pattern: /\bpotential conflict\b.*\b(unresolved|under review|pending)\b/i,
-    statement: () => "A potential conflict is under review.",
-  }),
-  claim_not_approved_for_requested_audience: Object.freeze({
-    pattern: /\bclaim\b.*\bnot approved for (the )?(internal|funder|public)\b/i,
-    statement: (requestedAudience) => `The claim is not approved for the ${requestedAudience} audience.`,
-  }),
-  audience_gate_closed: Object.freeze({
-    pattern: /\baudience\b.*\b(gate closed|not authorized|not approved)\b/i,
-    statement: () => "The audience gate is closed: this audience is not authorized for current use.",
-  }),
-  requirement_authority_absent: Object.freeze({
-    pattern: /\b(requirement|authority)\b.*\b(absent|not established|not linked)\b/i,
-    statement: () => "Requirement authority is not established.",
-  }),
-  traceability_incomplete: Object.freeze({
-    pattern: /\btraceability\b.*\b(incomplete|not established)\b/i,
-    statement: () => "Traceability is incomplete.",
-  }),
-});
-const PROVISIONAL_INTERNAL_DRAFT_LABEL = /^\s*provisional internal draft\b/i;
-const PROVIDER_PROVISIONAL_LABEL_PREFIX = /^\s*provisional internal draft\b[\s:.,;\-–—]*/i;
 
 const NUMERIC_LITERAL_PATTERN = /(?<![A-Za-z0-9_])[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:%|\b)/g;
 const CAUSAL_PATTERN = /\b(causes?|caused|causing|because|due to|drives?|driven by|leads? to|led to|results? in|resulted in|attribut(?:e|ed|able) to|impact(?:s|ed)?|increases?|decreases?|reduces?|improves?|worsens?)\b/gi;
@@ -229,38 +171,6 @@ export function validateGeneratedContentDraft({
       : blocker("VAL-GEN-005", "draft_audience_exceeds_authority"),
   );
 
-  // Package 14-05 allows internal drafting from a governed claim whose
-  // current-use eligibility is false. The provider instruction is not an
-  // output guarantee: each cited block must name every current limitation so
-  // an ineligible claim is not persisted as an unconditional assertion.
-  const limitationDisclosureViolations = [];
-  const missingProvisionalDraftLabels = [];
-  for (const block of blocks || []) {
-    for (const citation of block.citations || []) {
-      const claim = claimById.get(citation.claimId);
-      if (!claim || claim.currentEligible !== false) continue;
-      if (!PROVISIONAL_INTERNAL_DRAFT_LABEL.test(block.text || "")) {
-        missingProvisionalDraftLabels.push(block.ordinal);
-      }
-      for (const code of claim.limitationCodes || []) {
-        const disclosure = CURRENT_LIMITATION_DISCLOSURE[code];
-        if (!disclosure || !disclosure.pattern.test(block.text || "")) {
-          limitationDisclosureViolations.push({ block_ordinal: block.ordinal, limitation_code: code });
-        }
-      }
-    }
-  }
-  results.push(
-    limitationDisclosureViolations.length === 0 && missingProvisionalDraftLabels.length === 0
-      ? pass("VAL-GEN-009")
-      : blocker("VAL-GEN-009", "ineligible_claim_context_not_disclosed", {
-          violation_count: limitationDisclosureViolations.length + missingProvisionalDraftLabels.length,
-          limitation_codes: unique(limitationDisclosureViolations.map((violation) => violation.limitation_code)).sort(),
-          block_ordinals: unique(limitationDisclosureViolations.map((violation) => violation.block_ordinal).filter(Number.isInteger)).sort((a, b) => a - b),
-          missing_provisional_label_block_ordinals: unique(missingProvisionalDraftLabels.filter(Number.isInteger)).sort((a, b) => a - b),
-        }),
-  );
-
   if (contentType === "readiness_assessment") {
     const readinessBlocksPositive =
       blocksContainPositiveReadinessAssertion(blocks)
@@ -291,52 +201,6 @@ export function validateGeneratedContentDraft({
     results: Object.freeze(results),
     blockers: Object.freeze(results.filter((result) => result.severity === "blocker")),
   });
-}
-
-// VAL-GEN-009 producer side: a provider cannot be relied on to word the
-// provisional designation and every current limitation the way VAL-GEN-009
-// requires, so the server writes them. Each block citing a currently
-// ineligible claim is prefixed with the exact designation and one statement
-// per authoritative limitation code of every such cited claim. The provider's
-// own text is kept as the body; only a leading designation it already wrote is
-// dropped so it is not repeated. Blocks citing only eligible claims are
-// returned unchanged. Fails closed, qualifying nothing, when an ineligible
-// cited claim carries no limitation code or a code with no statement: there is
-// then no authoritative limitation to disclose. Callers must still validate
-// the provider's unqualified text, so the prefix can never mask an unsupported
-// assertion in the body.
-export function qualifyIneligibleClaimBlocks({ requestedAudience, generationClaims, blocks } = {}) {
-  const claimById = generationClaimsById(generationClaims || []);
-  const qualified = [];
-  for (const block of blocks || []) {
-    const codes = [];
-    let citesIneligibleClaim = false;
-    for (const citation of block.citations || []) {
-      const claim = claimById.get(citation.claimId);
-      if (!claim || claim.currentEligible !== false) continue;
-      citesIneligibleClaim = true;
-      const claimCodes = Array.isArray(claim.limitationCodes) ? claim.limitationCodes : [];
-      if (claimCodes.length === 0) return Object.freeze({ ok: false, reason: "ineligible_claim_limitations_unavailable" });
-      for (const code of claimCodes) {
-        if (!Object.hasOwn(CURRENT_LIMITATION_DISCLOSURE, code)) {
-          return Object.freeze({ ok: false, reason: "ineligible_claim_limitation_not_disclosable" });
-        }
-        if (!codes.includes(code)) codes.push(code);
-      }
-    }
-    if (!citesIneligibleClaim) {
-      qualified.push(block);
-      continue;
-    }
-    const statements = codes.map((code) => CURRENT_LIMITATION_DISCLOSURE[code].statement(requestedAudience));
-    const body = String(block.text || "").replace(PROVIDER_PROVISIONAL_LABEL_PREFIX, "");
-    qualified.push({
-      ordinal: block.ordinal,
-      text: `Provisional internal draft: ${statements.join(" ")}${body ? ` ${body}` : ""}`,
-      citations: block.citations,
-    });
-  }
-  return Object.freeze({ ok: true, blocks: qualified });
 }
 
 function blocksContainPositiveGapInversion(blocks = []) {
@@ -382,5 +246,4 @@ export const __generatedContentValidatorContract = Object.freeze({
   VALIDATOR_KEYS,
   NUMERIC_LITERAL_PATTERN,
   CAUSAL_PATTERN,
-  CURRENT_LIMITATION_DISCLOSURE,
 });
