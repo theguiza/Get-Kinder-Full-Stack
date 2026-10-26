@@ -404,7 +404,11 @@ function deriveFileStages(row, reviewedImpactFactCount, clientAuthority = NO_CLI
   if (stages.at(-1).status !== STAGE_STATUS.complete) return stages;
 
   const evidenceNeedsReview = count(row.evidence_needs_review_count);
-  stages.push(evidenceNeedsReview > 0
+  // Owner prompt 2026-10-26: once a claim from this file is currently
+  // governed-eligible (for example an ordinary measured fact, which needs no
+  // evidence review), the file's other unreviewed evidence (such as its
+  // structural column facts) no longer holds it at Get Kinder's evidence review.
+  stages.push(evidenceNeedsReview > 0 && reviewedImpactFactCount === 0
     ? stage("evidence_review", STAGE_STATUS.waitingForGetKinder, RESPONSIBLE.getKinder, { count: evidenceNeedsReview })
     : stage("evidence_review", STAGE_STATUS.complete, RESPONSIBLE.none, { count: count(row.evidence_reviewed_count) }));
   if (stages.at(-1).status !== STAGE_STATUS.complete) return stages;

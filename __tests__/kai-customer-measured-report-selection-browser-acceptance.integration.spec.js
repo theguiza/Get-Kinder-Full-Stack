@@ -139,6 +139,40 @@ async function openPage(browser, { baseUrl, legacyUserId }) {
       byId.get(params.requestId).done = true;
     } else if (method === "Runtime.exceptionThrown") {
       exceptions.push(params.exceptionDetails?.exception?.description || params.exceptionDetails?.text);
+    } else if (method === "Fetch.requestPaused") {
+      handlePaused(params);
+    }
+  };
+  // Labeled request/response substitution (CDP Fetch), used only to reach the
+  // client's paging bounds and truncated reads against the real server.
+  let interceptor = null;
+  const handlePaused = async (params) => {
+    const { requestId } = params;
+    try {
+      const atResponse = params.responseStatusCode !== undefined;
+      const original = atResponse ? await browser.send("Fetch.getResponseBody", { requestId }, sessionId) : null;
+      const action = interceptor ? await interceptor({
+        url: params.request.url,
+        atResponse,
+        status: params.responseStatusCode,
+        json: () => JSON.parse(original.base64Encoded ? Buffer.from(original.body, "base64").toString("utf8") : original.body),
+      }) : null;
+      if (action?.json !== undefined || action?.status !== undefined) {
+        await browser.send("Fetch.fulfillRequest", {
+          requestId,
+          responseCode: action.status ?? params.responseStatusCode ?? 200,
+          responseHeaders: [{ name: "Content-Type", value: "application/json; charset=utf-8" }],
+          body: Buffer.from(JSON.stringify(action.json ?? { ok: false, error: { code: "system_error" } })).toString("base64"),
+        }, sessionId);
+      } else if (atResponse) {
+        await browser.send("Fetch.fulfillRequest", {
+          requestId, responseCode: params.responseStatusCode, responseHeaders: params.responseHeaders, body: original.base64Encoded ? original.body : Buffer.from(original.body).toString("base64"),
+        }, sessionId);
+      } else {
+        await browser.send("Fetch.continueRequest", { requestId, ...(action?.url ? { url: action.url } : {}) }, sessionId);
+      }
+    } catch (error) {
+      exceptions.push(`interception: ${error.message}`);
     }
   };
   browser.listeners.add(listener);
@@ -158,7 +192,7 @@ async function openPage(browser, { baseUrl, legacyUserId }) {
       if (requests.some((request) => !request.done)) quietSince = Date.now();
       else if (Date.now() - quietSince > 500) return;
     }
-    const recent = requests.slice(-12).map((request) => `${request.method} ${new URL(request.url).pathname}${new URL(request.url).search} ${request.status} ${request.done ? "done" : "pending"}`);
+    const recent = [...requests.filter((request) => !request.done), ...requests.slice(-6)].map((request) => `${request.method} ${new URL(request.url).pathname}${new URL(request.url).search} ${request.status} ${request.done ? "done" : "pending"}`);
     throw new Error(`network never went idle (${requests.length} requests):\n${recent.join("\n")}`);
   };
   const waitFor = async (predicate, description, { timeout = 15000 } = {}) => {
@@ -222,7 +256,18 @@ async function openPage(browser, { baseUrl, legacyUserId }) {
     tabLabels,
     selectProject,
     api,
+    async intercept(patterns, handler) {
+      interceptor = handler;
+      await browser.send("Fetch.enable", { patterns }, sessionId);
+    },
+    async stopIntercepting() {
+      interceptor = null;
+      await browser.send("Fetch.disable", {}, sessionId);
+    },
     async goto(path) {
+      // A request the previous document left in flight is cancelled by the
+      // navigation; Chrome does not always report it finished, so it is retired here.
+      for (const request of requests) request.done = true;
       await browser.send("Page.navigate", { url: `${baseUrl}${path}` }, sessionId);
       await idle();
     },
@@ -283,14 +328,25 @@ async function runBrowserAcceptance() {
   const { requireKaiSprint2Authenticated } = await import("../Backend/kai/middleware/kaiSprint2Authentication.js");
   const {
     BASE_PATH,
+    claimGapFollowupsPath,
+    claimReviewCompletePath,
+    claimReviewDecisionBody,
     claimTraceabilityPath,
     clientInternalDraftPath,
+    clientInternalDraftsPath,
     clientInternalReportMarkdownPath,
+    coverageInternalAcceptancePath,
+    generatedDraftReviewPacketPath,
     createEvidenceSummaryPath,
+    createImpactNarrativePath,
     evidenceExtractionPath,
+    evidenceReviewCompletePath,
+    evidenceReviewDecisionBody,
     claimProposalPath,
   } = await import("../frontend/impactEvidenceLibraryLogic.js");
-  const { sourceRecordCountMeasurementPath } = await import("../frontend/knowledgeStudio/clientSourceMeasurementLogic.js");
+  const { measurementDefinitionBody, sourceRecordCountMeasurementPath } = await import("../frontend/knowledgeStudio/clientSourceMeasurementLogic.js");
+  const { clientFollowupCompletePath, clientFollowupsPath, projectClientFollowupWorkflows } = await import("../frontend/kaiClientFollowupReviewLogic.js");
+  const { clientEvidencePipelinePath } = await import("../frontend/knowledgeStudio/clientEvidencePipelineLogic.js");
   const query = async (sql, params = []) => (await seedPool.query(sql, params)).rows;
   const ENV = { KAI_SPRINT2_ENABLED: "true" };
   const noAudit = () => ({ prepareMetadataOnlyAudit() { return { ok: true, async publish() {} }; } });
@@ -319,6 +375,7 @@ async function runBrowserAcceptance() {
   // its legacy field-presence claims take the organization past one Claim
   // Library page (25). Values are synthetic placeholders.
   const FILE_WIDE = "21000000-0000-4000-8000-0000000000e2";
+  const FILE_RISK = "21000000-0000-4000-8000-0000000000e3";
   const WIDE_COLUMNS = Array.from({ length: 30 }, (_, index) => `attribute_${index + 1}`);
   const WIDE_CSV = [WIDE_COLUMNS.join(","), WIDE_COLUMNS.map((_, index) => String(index)).join(","), ""].join("\n");
   // Independent verifier over the same bytes: non-empty lines after the header.
@@ -416,7 +473,7 @@ async function runBrowserAcceptance() {
   }
 
   /** Real P1-06 work and the real GK sensitivity 'reviewed' decision (AI permitted; every section 7.2 high-risk category absent) with its P1-07 handoff (audit stubbed). */
-  async function reachReviewableSourceCandidate(intakeSensitivityProfileId) {
+  async function reachReviewableSourceCandidate(intakeSensitivityProfileId, snapshotOverrides = {}) {
     const ensured = await ensureSensitivityReviewQueueItem(
       { organizationId: ORG_X, intakeSensitivityProfileId, actorContext: gkReviewerService, now: new Date().toISOString() },
       { env: ENV, metadataOnlyAudit: noAudit() });
@@ -436,6 +493,7 @@ async function runBrowserAcceptance() {
           reviewed_staff_notes_status: "absent", reviewed_story_testimonial_status: "absent", reviewed_small_cell_risk_status: "absent",
           reviewed_financial_records_status: "absent", reviewed_consent_basis_status: "unknown", reviewed_allowed_use_status: "allowed",
           reviewed_llm_processing_allowed: true, reviewed_product_learning_allowed: false, reviewed_public_use_allowed: false, reviewed_funder_use_allowed: false,
+          ...snapshotOverrides,
         },
       },
     }, { env: ENV });
@@ -488,7 +546,7 @@ async function runBrowserAcceptance() {
     "SELECT review_queue_item_id::text, updated_at FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = $2 AND target_object_id = $3::uuid",
     [ORG_X, queueType, targetId]))[0];
   // Knowledge Studio > Data Sources for the Project, as the existing client acceptance opens it.
-  const openDataSources = async () => {
+  const openDataSources = async (engagementId = PROJECT_X) => {
     await adminPage.goto("/impact-library");
     await adminPage.waitForText("Knowledge Studio");
     await adminPage.clickNav("Knowledge Studio");
@@ -496,7 +554,7 @@ async function runBrowserAcceptance() {
     await adminPage.idle();
     await adminPage.clickTab("Data Sources");
     await adminPage.idle();
-    await adminPage.selectProject(PROJECT_X);
+    await adminPage.selectProject(engagementId);
     await adminPage.idle();
   };
   const created = (response, label) => assert.ok([200, 201].includes(response.status), `${label}: ${response.status} ${JSON.stringify(response.body)}`);
@@ -538,13 +596,17 @@ async function runBrowserAcceptance() {
   });
   const attr = (page, selector, name) => page.evaluate(`(() => { const el = document.querySelector(${JSON.stringify(selector)}); return el ? el.getAttribute(${JSON.stringify(name)}) : null; })()`);
   const listedDraftIds = () => adminPage.evaluate(`[...document.querySelectorAll("[data-client-internal-draft]")].map((el) => el.getAttribute("data-client-internal-draft"))`);
-  const assertSubstantiveReport = (shown, heading) => {
+  const assertSubstantiveReport = (shown, heading, projectCode = "Session Programme 2026") => {
     assert.ok(shown.startsWith(heading), shown.slice(0, 80));
     assert.match(shown, /\*\*Organization:\*\* Harbourline Session Society/);
-    assert.match(shown, /\*\*Project \/ engagement:\*\* `Session Programme 2026`/);
+    assert.ok(shown.includes(`**Project / engagement:** \`${projectCode}\``), "the report's own Project");
     assert.equal(Number((/records \*\*(\d+) programme sessions\*\*/.exec(shown) || [])[1]), independentRecordCount(CSV));
     assert.match(shown, /for the reporting period 2026-09-01 to 2026-09-30/);
     assert.match(shown, /6 data records after the header, minus 1 blank record excluded = \*\*5\*\* counted/);
+    assert.match(shown, /\*\*What one record represents:\*\* one programme session, as defined by a person at the organization\./, "counted unit");
+    assert.match(shown, /\*\*Definition:\*\* Each row of the session log records one delivered programme session\./);
+    assert.match(shown, /The period is stated in the organization's recorded definition; it was not checked against dates in the records\./, "human-attested period");
+    assert.match(shown, /\| CIT-001 \| `[0-9a-f-]{36}` \| `[0-9a-f-]{36}` \| `[0-9a-f]{64}` `[0-9a-f-]{36}` \| `[0-9a-f-]{36}` \(/, "claim / evidence / source / version lineage");
     assert.match(shown, /2 exact-duplicate records\. They are included in the count of 5, not removed or merged/);
     assert.match(shown, /## What this evidence does not establish[\s\S]*distinct people[\s\S]*distinct real-world sessions[\s\S]*caused any result/);
     for (const code of MEASURED_LIMITATION_CODES) assert.ok(shown.includes(`\`${code}\``), code);
@@ -571,6 +633,28 @@ async function runBrowserAcceptance() {
     assert.deepEqual([fetched.status, fetched.body], [200, shown], "the download is the report shown");
     return shown;
   };
+  // The open draft detail's internal report, opened and downloaded (the draft
+  // need not be on any loaded list page).
+  const openOpenReport = async (draftId, label, engagementId = PROJECT_X) => {
+    await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `[data-client-open-internal-report="${draftId}"]`)), `${label}: report action`);
+    const mark = adminPage.mark();
+    await adminPage.clickIn(`[data-client-open-internal-report="${draftId}"]`, "Open report");
+    await adminPage.waitFor(async () => Boolean(await textOf(adminPage, "[data-client-internal-report-markdown]")), `${label}: Markdown`);
+    await adminPage.idle();
+    assert.deepEqual(adminPage.requestsSince(mark).filter((entry) => entry.method !== "GET"), [], "opening a report sends no write");
+    const shown = await textOf(adminPage, "[data-client-internal-report-markdown]");
+    const download = await attr(adminPage, `[data-client-download-internal-report="${draftId}"]`, "href");
+    assert.equal(download, clientInternalReportMarkdownPath(ORG_X, engagementId, draftId));
+    const fetched = await fetchText(adminPage, download);
+    assert.deepEqual([fetched.status, fetched.body], [200, shown], "the download is the report shown");
+    return shown;
+  };
+  const listedClaimIds = () => adminPage.evaluate(`[...document.querySelectorAll("[data-client-claim]")].map((el) => el.getAttribute("data-client-claim"))`);
+  const projectDraftCount = async (engagementId) => (await query(
+    `SELECT count(*)::int AS n FROM kai.generated_content_drafts d
+       JOIN kai.generation_runs r ON r.generation_run_id = d.generation_run_id AND r.organization_id = d.organization_id
+      WHERE d.organization_id = $1::uuid AND r.engagement_id = $2::uuid AND d.requested_audience = 'internal'
+        AND d.content_type IN ('evidence_summary', 'impact_narrative')`, [ORG_X, engagementId]))[0].n;
   const generateInUi = async (buttonLabel, createdText) => {
     const before = await draftIds();
     await adminPage.clickButton(buttonLabel);
@@ -717,7 +801,16 @@ async function runBrowserAcceptance() {
       assert.match(await textOf(adminPage, "[data-client-internal-draft-detail-review-state]"), /Ready for internal use/);
       assert.equal((await listedDraftIds())[0], newDraft, "the newest draft is listed first");
       assert.deepEqual(await draftState(ids.historicalDraftId), ids.historicalState, "the historical draft keeps its citations and status");
-      results.test1 = { listedClaims: listed.length, cited: state.cited_claim_ids, historicalUnchanged: true };
+      // The file's status no longer tells the customer it waits for Get Kinder's evidence review once its measured claim is usable.
+      const pipeline = await adminPage.api("GET", clientEvidencePipelinePath(ORG_X, PROJECT_X));
+      assert.equal(pipeline.status, 200, JSON.stringify(pipeline.body));
+      const sessionFile = pipeline.body.data.files.find((file) => file.intakeFileId === FILE_X);
+      assert.equal(sessionFile.reviewedImpactFactCount, 1);
+      assert.equal(sessionFile.stages.find((stage) => stage.key === "evidence_review").status, "complete", "not held at Get Kinder's evidence review");
+      // What remains is the client's own work: the follow-up questions P2-04 opened for the historical field_2 claim.
+      assert.deepEqual([sessionFile.currentStage, sessionFile.responsibleParty, sessionFile.nextAction], ["impact_fact_review", "client", "answer_client_followups"], JSON.stringify(sessionFile));
+      assert.notEqual(sessionFile.reason, "evidence_awaiting_review");
+      results.test1 = { listedClaims: listed.length, cited: state.cited_claim_ids, historicalUnchanged: true, sessionFile: sessionFile.reason };
     });
 
     await test("Test 2 + 4: the first Evidence Summary opens and downloads as complete Markdown with the 5-session measurement, methodology, period, citations and limitations; no approval of any kind", async () => {
@@ -833,6 +926,383 @@ async function runBrowserAcceptance() {
       assert.equal(await textOf(adminPage, "[data-client-internal-draft-metadata-only]"), null);
       assert.ok(await textOf(adminPage, '[data-client-internal-report="available"]'), "the newest report is ready");
       assert.equal(await textOf(adminPage, "[data-client-internal-report-get-kinder-required]"), null, "no Get Kinder review blocker on a usable report");
+      for (const page of [gkReviewerPage, gkAdminPage, adminPage, contributorPage, reviewerPage, inactiveAdminPage]) assert.deepEqual(page.exceptions, []);
+    });
+
+    // -----------------------------------------------------------------------
+    // Connected correction (owner prompt "FIX KAI'S COMPLETE CUSTOMER
+    // SOURCE-TO-INTERNAL-REPORT FAILURE", 2026-10-26): discovery limits,
+    // mixed eligibility, a new draft beyond the first list page, the
+    // historical draft's classification without its claim loaded, and the
+    // structural-only report boundary on the server.
+    // -----------------------------------------------------------------------
+
+    await test("setup C: a third synthetic source whose recorded decision marks small-cell risk present (a genuinely restricted source), with its 10 structural claims and its own measured claim", async () => {
+      const RISK_COLUMNS = Array.from({ length: 10 }, (_, index) => `measure_${index + 1}`);
+      const RISK_CSV = [RISK_COLUMNS.join(","), RISK_COLUMNS.map(() => "1").join(","), RISK_COLUMNS.map(() => "2").join(","), ""].join("\n");
+      const risk = await seedProfiledFile({ fileId: FILE_RISK, csv: RISK_CSV, filename: "risk.csv", checksumChar: "e" });
+      const candidate = await reachReviewableSourceCandidate(risk.sensitivityProfileId, { reviewed_small_cell_risk_status: "present" });
+      const promoted = await gkReviewerPage.api("POST", decisionPath(candidate), { outcome: "promoted", reviewed_source_type: "organization_primary_record" });
+      assert.equal(promoted.status, 200, JSON.stringify(promoted.body));
+      const [version] = await query("SELECT source_version_id::text FROM kai.source_versions WHERE organization_id = $1::uuid AND is_current AND NOT (source_version_id = ANY($2::uuid[]))",
+        [ORG_X, [ids.sourceVersionId, ids.wideSourceVersionId]]);
+      ids.riskSourceVersionId = version.source_version_id;
+      const extracted = await adminPage.api("POST", evidenceExtractionPath(ORG_X, ids.riskSourceVersionId), {});
+      created(extracted, "risk extraction");
+      for (const item of extracted.body.data.evidenceItems) created(await adminPage.api("POST", claimProposalPath(ORG_X, item.evidence_item_id), {}), "risk structural claim");
+      const measured = await adminPage.api("POST", sourceRecordCountMeasurementPath(ORG_X, ids.riskSourceVersionId), measurementDefinitionBody({
+        countedUnit: "programme session", unitLabel: "programme sessions", definitionText: "Each row records one delivered programme session.",
+        inclusionRule: "Every data row after the header row that has at least one value.", exclusionRule: "The header row and empty rows.",
+        periodStart: "2026-09-01", periodEnd: "2026-09-30",
+      }));
+      created(measured, "risk measurement");
+      const [measurement] = await query("SELECT evidence_item_id::text FROM kai.evidence_measurements WHERE organization_id = $1::uuid AND evidence_item_id <> $2::uuid", [ORG_X, ids.evidenceItemId]);
+      const proposed = await adminPage.api("POST", claimProposalPath(ORG_X, measurement.evidence_item_id), {});
+      created(proposed, "risk measured claim");
+      ids.riskClaimId = proposed.body.data.claim.claim_id;
+      const traced = await gkReviewerPage.api("GET", claimTraceabilityPath(ORG_X, ids.riskClaimId, "internal"));
+      assert.equal(traced.body.data.eligible, false, "a measurement from a source with small-cell risk recorded is outside the ordinary rule");
+      ids.riskBlockers = traced.body.data.blockerCodes;
+      assert.ok(ids.riskBlockers.includes("claim_review_unresolved") || ids.riskBlockers.includes("evidence_review_unresolved"), JSON.stringify(ids.riskBlockers));
+      assert.equal((await claimRows()).length, 43);
+      assert.deepEqual(await approvalCounts(), NO_APPROVALS);
+    });
+
+    await test("Scenario B1: claims and evidence beyond the client's per-load bound are reported as incomplete, never as 'no measured finding', and every remaining one is reached from the kept cursor", async () => {
+      // Injected (labeled): the page size the browser requests is rewritten
+      // from 25 to 1, so the organization's 43 claims and its evidence items
+      // exceed the client's 40-page load against the real server and cursors.
+      await adminPage.intercept([
+        { urlPattern: "*claim-library/candidates*", requestStage: "Request" },
+        { urlPattern: "*evidence-library/candidates*", requestStage: "Request" },
+      ], ({ url }) => ({ url: url.replace("limit=25", "limit=1") }));
+      try {
+        await openDataSources();
+        await adminPage.waitFor(async () => Boolean(await textOf(adminPage, '[data-client-library-load-more="claims"]')), "Load more claims");
+        await adminPage.idle();
+        const stored = (await claimRows()).map((row) => row.claim_id);
+        const measuredIds = (await claimRows()).filter((row) => row.evidence_type === "source_record_count_measurement").map((row) => row.claim_id);
+        assert.equal(stored.length, 43);
+        const firstLoad = await listedClaimIds();
+        assert.equal(firstLoad.length, 40, "one load reads 40 pages");
+        assert.deepEqual([...firstLoad].sort(), stored.slice(0, 40), "the first 40 claims in the server's order, each page from the previous page's cursor");
+        assert.match(await textOf(adminPage, '[data-client-library-incomplete="claims"]'), /40 claims loaded; your organization has more/);
+        const readiness = await attr(adminPage, "[data-client-draft-readiness]", "data-client-draft-readiness");
+        assert.notEqual(readiness, "no_measured_claim", "an incomplete read never says there is no measured finding");
+        if (!measuredIds.some((claimId) => firstLoad.includes(claimId))) assert.equal(readiness, "claims_not_all_loaded");
+        await adminPage.clickIn('[data-client-library-load-more="claims"]', "Load more claims");
+        await adminPage.waitFor(async () => (await listedClaimIds()).length === stored.length, "every claim");
+        await adminPage.idle();
+        assert.deepEqual([...await listedClaimIds()].sort(), stored, "the rest is reached from the kept cursor, none repeated or skipped");
+        assert.equal(await textOf(adminPage, '[data-client-library-incomplete="claims"]'), null, "complete");
+        assert.equal(await attr(adminPage, `[data-client-claim="${ids.claimId}"]`, "data-client-claim-internal-use"), "usable");
+        const evidenceCount = (await query("SELECT count(*)::int AS n FROM kai.evidence_items WHERE organization_id = $1::uuid", [ORG_X]))[0].n;
+        assert.ok(evidenceCount > 40, String(evidenceCount));
+        assert.ok(await textOf(adminPage, '[data-client-library-load-more="evidence items"]'), "evidence is incomplete too");
+        await adminPage.clickIn('[data-client-library-load-more="evidence items"]', "Load more evidence");
+        await adminPage.waitFor(async () => (await adminPage.evaluate(`document.querySelectorAll("[data-client-evidence]").length`)) === evidenceCount, "every evidence item");
+        assert.equal(await textOf(adminPage, '[data-client-library-incomplete="evidence items"]'), null);
+        assert.doesNotMatch(await adminPage.text(), /needs_gk_review/, "no stored review status is shown as a pending step");
+        results.b1 = { claims: stored.length, firstLoad: firstLoad.length, readiness, evidence: evidenceCount };
+      } finally {
+        await adminPage.stopIntercepting();
+      }
+    });
+
+    await test("Scenario B2: a measured claim omitted from a truncated impact-facts read is unknown, then resolved by its own P2-06 evaluation; if that also fails it stays unknown, never adverse", async () => {
+      // Injected (labeled): the impact-facts response is replaced by a
+      // truncated one that omits the measured claim, as a server holding more
+      // eligible facts than its 100-fact bound returns it.
+      const truncate = ({ url, json }) => {
+        if (!url.includes("/impact-facts")) return null;
+        const body = json();
+        body.data.items = body.data.items.filter((item) => item.claimId !== ids.claimId);
+        body.data.truncated = true;
+        return { status: 200, json: body };
+      };
+      await adminPage.intercept([{ urlPattern: "*/impact-facts*", requestStage: "Response" }], truncate);
+      try {
+        const mark = adminPage.mark();
+        await openDataSources();
+        const row = `[data-client-claim="${ids.claimId}"]`;
+        await adminPage.waitFor(async () => (await attr(adminPage, row, "data-client-claim-internal-use")) === "usable", "resolved as usable");
+        await adminPage.idle();
+        const diagnosed = adminPage.requestsSince(mark).filter((entry) => entry.url.includes(`/claims/${ids.claimId}/traceability?requested_audience=internal`));
+        assert.equal(diagnosed.length, 1, "the claim's own client-safe P2-06 diagnostic decided it");
+        assert.ok(diagnosed.every((entry) => entry.method === "GET"));
+        assert.match(await textOf(adminPage, row), /Usable in internal reports now/);
+        const riskRow = `[data-client-claim="${ids.riskClaimId}"]`;
+        assert.equal(await attr(adminPage, riskRow, "data-client-claim-internal-use"), "not_usable");
+        assert.match(await textOf(adminPage, riskRow), /Not usable in internal reports now: .*the ordinary record-count rule does not cover it/);
+      } finally {
+        await adminPage.stopIntercepting();
+      }
+      // Injected (labeled): the measured claim's diagnostic also fails.
+      await adminPage.intercept([
+        { urlPattern: "*/impact-facts*", requestStage: "Response" },
+        { urlPattern: `*/claims/${ids.claimId}/traceability*`, requestStage: "Request" },
+      ], (request) => (request.atResponse ? truncate(request) : { status: 503, json: { ok: false, error: { code: "system_error" } } }));
+      try {
+        await openDataSources();
+        const row = `[data-client-claim="${ids.claimId}"]`;
+        await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `${row} [data-client-claim-use-unknown]`)), "unknown");
+        await adminPage.idle();
+        const shown = await textOf(adminPage, row);
+        assert.match(shown, /not confirmed here/);
+        assert.doesNotMatch(shown, /Not usable|Get Kinder|needs_gk_review/, "an unknown answer is neither adverse nor a review request");
+        await adminPage.clickIn(`${row} input[type=checkbox]`, "Use the measured claim");
+        await adminPage.idle();
+        assert.equal(await textOf(adminPage, "[data-client-draft-readiness]"), null, "the selection is ready: generation re-checks it");
+        assert.equal(await attr(adminPage, "[data-client-draft-selection-usability]", "data-client-draft-selection-usability"), "unknown");
+        results.b2 = { omittedResolved: "usable", diagnosticFailed: "unknown" };
+      } finally {
+        await adminPage.stopIntercepting();
+      }
+    });
+
+    await test("Scenario C: an ordinary measured claim beside genuinely restricted ones: generation, internal-report availability and the next actions each follow their own rule, and nothing ineligible becomes report-usable", async () => {
+      await openDataSources(PROJECT_X2);
+      const row = `[data-client-claim="${ids.claimId}"]`;
+      const riskRow = `[data-client-claim="${ids.riskClaimId}"]`;
+      await adminPage.waitFor(async () => (await attr(adminPage, riskRow, "data-client-claim-internal-use")) === "not_usable", "the restricted claim's condition");
+      await adminPage.idle();
+      assert.equal(await attr(adminPage, row, "data-client-claim-internal-use"), "usable");
+      assert.equal(await attr(adminPage, riskRow, "data-client-claim-kind"), "measurement");
+      const riskText = await textOf(adminPage, riskRow);
+      assert.match(riskText, /the ordinary record-count rule does not cover it/);
+      assert.match(riskText, /no sensitive category recorded/, "names the rule that does not apply");
+      assert.doesNotMatch(riskText, /needs_gk_review/);
+      const before = await approvalCounts();
+      const draftsBefore = await projectDraftCount(PROJECT_X2);
+      // C1 generation rule: a measured claim is drafted from only while eligible (VAL-GEN-MEASURED-P2-01M-001), said before any request.
+      await adminPage.clickIn(`${row} input[type=checkbox]`, "Use the measured claim");
+      await adminPage.clickIn(`${riskRow} input[type=checkbox]`, "Use the restricted claim");
+      await adminPage.idle();
+      assert.equal(await attr(adminPage, "[data-client-draft-readiness]", "data-client-draft-readiness"), "measured_claim_not_usable");
+      assert.match(await textOf(adminPage, "[data-client-draft-readiness]"), /deselect it to draft from the others/);
+      assert.equal(await adminPage.evaluate(`[...document.querySelectorAll("button")].find((el) => el.innerText.trim() === "Generate internal evidence summary").disabled`), true);
+      const refusedGeneration = await adminPage.api("POST", createEvidenceSummaryPath(ORG_X), {
+        claim_ids: [ids.claimId, ids.riskClaimId].sort(), idempotency_key: "customer-mixed-restricted-0001", engagement_id: PROJECT_X2,
+      });
+      assert.equal(refusedGeneration.status, 422);
+      assert.deepEqual(refusedGeneration.body.blockers.map((blocker) => [blocker.validator_key, blocker.blocking_reason]),
+        [["VAL-GEN-MEASURED-P2-01M-001", "measured_claim_not_currently_eligible"]]);
+      assert.equal(await projectDraftCount(PROJECT_X2), draftsBefore, "the refused request wrote nothing");
+      await adminPage.clickIn(`${riskRow} input[type=checkbox]`, "Drop the restricted claim");
+      await adminPage.idle();
+      // C2 when the claim's condition cannot be read here, the server's refusal is explained, not shown as a bare validation error.
+      // Injected (labeled): the restricted claim's diagnostic fails.
+      await adminPage.intercept([{ urlPattern: `*/claims/${ids.riskClaimId}/traceability*`, requestStage: "Request" }],
+        () => ({ status: 503, json: { ok: false, error: { code: "system_error" } } }));
+      try {
+        await openDataSources(PROJECT_X2);
+        // The complete impact-facts read still says it is not usable; only the reason is unavailable.
+        await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `${riskRow} [data-client-claim-not-usable]`)), "the impact-facts answer");
+        await adminPage.idle();
+        assert.equal((await textOf(adminPage, `${riskRow} [data-client-claim-not-usable]`)).trim(), "Not usable in internal reports now.");
+        await adminPage.clickIn(`${row} input[type=checkbox]`, "Use the measured claim");
+        await adminPage.clickIn(`${riskRow} input[type=checkbox]`, "Use the restricted claim");
+        await adminPage.idle();
+        assert.equal(await textOf(adminPage, "[data-client-draft-readiness]"), null, "without a determinate evaluation the server decides");
+        assert.equal(await attr(adminPage, "[data-client-draft-selection-usability]", "data-client-draft-selection-usability"), "not_usable");
+        const warning = await textOf(adminPage, "[data-client-draft-selection-usability]");
+        assert.match(warning, /this request will be refused unless that has changed/);
+        assert.doesNotMatch(warning, /will be prepared/, "a measured finding that is not usable is never promised a draft");
+        await adminPage.clickButton("Generate internal evidence summary");
+        await adminPage.waitForText("A selected measured finding is not usable in internal reports now, so no draft was created.");
+        await adminPage.idle();
+        assert.equal(await projectDraftCount(PROJECT_X2), draftsBefore, "still nothing written");
+      } finally {
+        await adminPage.stopIntercepting();
+      }
+      // C3 availability rule: a draft prepared from a usable measured claim and an unreviewed structural one (generation admits
+      // the structural claim) is saved, and is not an internal report until every cited claim is usable.
+      const prepared = await adminPage.api("POST", createEvidenceSummaryPath(ORG_X), {
+        claim_ids: [ids.claimId, ids.legacyClaimId].sort(), idempotency_key: "customer-mixed-structural-0001", engagement_id: PROJECT_X2,
+      });
+      created(prepared, "prepared mixed draft");
+      const preparedId = prepared.body.data.generatedContentDraftId;
+      await openDataSources(PROJECT_X2);
+      await adminPage.waitFor(async () => (await listedDraftIds()).includes(preparedId), "the prepared draft is listed");
+      assert.equal(await attr(adminPage, `[data-client-internal-draft="${preparedId}"] [data-client-internal-draft-report-available]`, "data-client-internal-draft-report-available"), "false");
+      await adminPage.clickIn(`[data-client-internal-draft="${preparedId}"] button`, "Read the prepared draft");
+      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `[data-client-internal-draft-detail="${preparedId}"]`)), "the prepared draft opens");
+      await adminPage.idle();
+      const detail = await textOf(adminPage, `[data-client-internal-draft-detail="${preparedId}"]`);
+      assert.equal(await textOf(adminPage, `[data-client-open-internal-report="${preparedId}"]`), null, "not immediately usable");
+      assert.match(detail, /At least one cited claim is not currently eligible for internal use/);
+      assert.match(detail, /A new draft from claims marked "Usable in internal reports now" is usable immediately/);
+      assert.doesNotMatch(detail, /Ask Get Kinder to review the cited claims|Structural facts only|needs_gk_review/, "a mixed draft is not structural-only, and no blanket review request");
+      const refused = await fetchText(adminPage, clientInternalReportMarkdownPath(ORG_X, PROJECT_X2, preparedId));
+      assert.equal(refused.status, 422, refused.body);
+      assert.deepEqual(JSON.parse(refused.body).blockers.map((blocker) => blocker.blocking_reason), ["cited_claims_not_currently_eligible"]);
+      // C4 the usable claim alone: an internal report at once.
+      await adminPage.waitFor(async () => (await textOf(adminPage, `${row} input[type=checkbox]`)) !== null, "the measured claim");
+      await adminPage.clickIn(`${row} input[type=checkbox]`, "Use the measured claim");
+      await adminPage.idle();
+      assert.equal(await textOf(adminPage, "[data-client-draft-selection-usability]"), null);
+      const [usable] = await generateInUi("Generate internal evidence summary", "Internal evidence summary created");
+      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `[data-client-internal-draft-detail="${usable}"]`)), "the usable draft opens");
+      assertSubstantiveReport(await openOpenReport(usable, "the X2 Evidence Summary", PROJECT_X2), "# Internal Evidence Summary", "Second Project");
+      const after = await approvalCounts();
+      assert.deepEqual(after, before, "no decision was recorded for any of it");
+      assert.deepEqual(after, NO_APPROVALS);
+      results.c = { restrictedGeneration: 422, preparedMixed: "saved, not a report (422)", usable: 200, riskBlockers: ids.riskBlockers };
+    });
+
+    await test("Scenario D: with 100 earlier drafts in the Project, a report generated in the UI outside the first server page is opened and downloaded by its generated id; the list pages truthfully and a reload never swaps the open draft", async () => {
+      for (let index = 0; index < 100; index += 1) {
+        created(await adminPage.api("POST", createEvidenceSummaryPath(ORG_X), {
+          claim_ids: [ids.claimId], idempotency_key: `customer-earlier-draft-${String(index).padStart(4, "0")}`, engagement_id: PROJECT_X,
+        }), "earlier draft");
+      }
+      const firstPage = await adminPage.api("GET", clientInternalDraftsPath(ORG_X, PROJECT_X));
+      assert.equal(firstPage.status, 200);
+      assert.ok(firstPage.body.data.nextCursor, "the server has more than one page");
+      await openDataSources();
+      await adminPage.waitFor(async () => (await textOf(adminPage, `[data-client-claim="${ids.claimId}"] input[type=checkbox]`)) !== null, "the measured claim");
+      await adminPage.clickIn(`[data-client-claim="${ids.claimId}"] input[type=checkbox]`, "Use the measured claim");
+      let outside = null;
+      let attempts = 0;
+      while (!outside && attempts < 12) {
+        attempts += 1;
+        const [generated] = await generateInUi("Generate internal evidence summary", "Internal evidence summary created");
+        assert.equal(await attr(adminPage, "[data-client-generated-draft]", "data-client-generated-draft"), generated);
+        const page = await adminPage.api("GET", clientInternalDraftsPath(ORG_X, PROJECT_X));
+        if (!page.body.data.items.some((item) => item.generatedContentDraftId === generated)) outside = generated;
+      }
+      assert.ok(outside, `a generated draft fell outside the first page within ${attempts} attempts`);
+      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `[data-client-internal-draft-detail="${outside}"]`)), "the exact generated draft opens");
+      await adminPage.idle();
+      assert.equal((await listedDraftIds()).includes(outside), false, "opened by its id although no loaded list page includes it");
+      assert.match(await textOf(adminPage, "[data-client-internal-drafts-incomplete]"), /This Project has more saved drafts/);
+      assert.match(await textOf(adminPage, "[data-client-internal-draft-detail-review-state]"), /Ready for internal use/);
+      const shown = await openOpenReport(outside, "the generated report");
+      assertSubstantiveReport(shown, "# Internal Evidence Summary");
+      assert.ok(shown.includes(`draft \`${outside}\``), "the Markdown is that draft's own report");
+      // Every older page loads from the server's cursor; the open draft stays open.
+      while (await textOf(adminPage, "[data-client-internal-drafts-load-more]")) {
+        await adminPage.clickIn("[data-client-internal-drafts-load-more]", "Load more drafts");
+        await adminPage.idle();
+      }
+      const listed = await listedDraftIds();
+      assert.equal(new Set(listed).size, listed.length, "no draft listed twice");
+      assert.equal(listed.length, await projectDraftCount(PROJECT_X), "every saved draft of the Project is listed once all pages are loaded");
+      assert.ok(listed.includes(outside) && listed.includes(ids.historicalDraftId));
+      assert.equal(listed.at(-1), ids.historicalDraftId, "the oldest (historical field_2) draft is last");
+      assert.ok(await textOf(adminPage, `[data-client-internal-draft-detail="${outside}"]`), "loading pages never replaces the open draft");
+      assert.equal(await textOf(adminPage, `[data-client-internal-draft-detail="${ids.historicalDraftId}"]`), null);
+      assert.deepEqual(await approvalCounts(), NO_APPROVALS);
+      results.d = { earlierDrafts: 100, attempts, listed: listed.length };
+    });
+
+    await test("Scenario E: the historical field_2 draft, opened while its cited claim is absent from the loaded Claim Library, is classified by the server as structural-only; the next action is a new report; the saved record and its review history are unchanged", async () => {
+      const reviewRows = () => query(
+        `SELECT queue_type, queue_status, review_status, updated_at FROM kai.review_queue_items
+          WHERE organization_id = $1::uuid AND target_object_id = $2::uuid ORDER BY queue_type`, [ORG_X, ids.historicalDraftId]);
+      const auditRows = async () => (await query(
+        "SELECT count(*)::int AS n FROM kai.upload_lifecycle_audit WHERE organization_id = $1::uuid AND metadata->>'generated_content_draft_id' = $2",
+        [ORG_X, ids.historicalDraftId]))[0].n;
+      const reviewsBefore = await reviewRows();
+      const auditBefore = await auditRows();
+      // Injected (labeled): the Claim Library responses omit the field_2 claim.
+      await adminPage.intercept([{ urlPattern: "*claim-library/candidates*", requestStage: "Response" }], ({ json }) => {
+        const body = json();
+        body.data.items = body.data.items.filter((item) => item.claimId !== ids.legacyClaimId);
+        return { status: 200, json: body };
+      });
+      try {
+        await openDataSources();
+        await adminPage.waitFor(async () => (await listedClaimIds()).length > 0, "the claim list");
+        await adminPage.idle();
+        assert.equal((await listedClaimIds()).includes(ids.legacyClaimId), false, "the cited claim is not loaded");
+        while (!(await listedDraftIds()).includes(ids.historicalDraftId)) {
+          assert.ok(await textOf(adminPage, "[data-client-internal-drafts-load-more]"), "the historical draft is reachable");
+          await adminPage.clickIn("[data-client-internal-drafts-load-more]", "Load more drafts");
+          await adminPage.idle();
+        }
+        await adminPage.clickIn(`[data-client-internal-draft="${ids.historicalDraftId}"] button`, "Read the historical draft");
+        await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `[data-client-internal-draft-detail="${ids.historicalDraftId}"]`)), "the historical draft");
+        await adminPage.idle();
+        const detail = await textOf(adminPage, `[data-client-internal-draft-detail="${ids.historicalDraftId}"]`);
+        assert.match(await textOf(adminPage, "[data-client-internal-draft-metadata-only]"), /^Structural facts only: .*a review would not make it one.*generate a new draft/);
+        assert.match(detail, /documents source structure, not a programme result/, "the server's reason");
+        assert.match(detail, /field_2/, "its original text is kept");
+        assert.match(await textOf(adminPage, `[data-client-internal-draft-citation="${ids.legacyClaimId}"]`), /A claim of this organization/, "its citation id is kept");
+        assert.doesNotMatch(detail, /Ask Get Kinder|needs_gk_review|Measured finding/, "no review request as the remedy, and no upgrade to a measurement");
+        assert.equal(await textOf(adminPage, `[data-client-open-internal-report="${ids.historicalDraftId}"]`), null);
+      } finally {
+        await adminPage.stopIntercepting();
+      }
+      const refused = await fetchText(adminPage, clientInternalReportMarkdownPath(ORG_X, PROJECT_X, ids.historicalDraftId));
+      assert.equal(refused.status, 422);
+      assert.deepEqual(JSON.parse(refused.body).blockers.map((blocker) => blocker.blocking_reason), ["cited_claims_not_currently_eligible", "structural_facts_only"]);
+      assert.deepEqual(await draftState(ids.historicalDraftId), ids.historicalState, "content, citations and status unchanged");
+      assert.deepEqual(await reviewRows(), reviewsBefore, "its review records unchanged");
+      assert.equal(await auditRows(), auditBefore, "no audit written by reading it");
+      results.e = { classification: "structural_facts_only", markdown: 422, unchanged: true };
+    });
+
+    await test("Scenario H: after a legitimate Get Kinder review makes a structural claim eligible, a draft citing only it is still not presented as the organization's impact report; one with a measured result still is; Get Kinder's own use is unchanged", async () => {
+      const [wide] = await query(
+        `SELECT c.claim_id::text, c.evidence_item_id::text FROM kai.claims c JOIN kai.evidence_items e ON e.evidence_item_id = c.evidence_item_id
+          WHERE c.organization_id = $1::uuid AND e.source_version_id = $2::uuid ORDER BY c.claim_id LIMIT 1`, [ORG_X, ids.wideSourceVersionId]);
+      // Drafts saved while the structural claim was unreviewed, as the historical field_2 draft was.
+      const structuralOnly = await adminPage.api("POST", createEvidenceSummaryPath(ORG_X), {
+        claim_ids: [wide.claim_id], idempotency_key: "customer-structural-only-before-review-0001", engagement_id: PROJECT_X2,
+      });
+      created(structuralOnly, "structural-only draft");
+      const structuralOnlyId = structuralOnly.body.data.generatedContentDraftId;
+      const combined = await adminPage.api("POST", createImpactNarrativePath(ORG_X), {
+        claim_ids: [ids.claimId, wide.claim_id].sort(), idempotency_key: "customer-measured-plus-structural-0001", engagement_id: PROJECT_X2,
+      });
+      created(combined, "measured plus structural narrative");
+      const combinedId = combined.body.data.generatedContentDraftId;
+      assert.equal((await adminPage.api("GET", clientInternalDraftPath(ORG_X, PROJECT_X2, combinedId))).body.data.internalReport.available, false,
+        "unavailable while the structural claim is not eligible");
+      // Legitimate Get Kinder review: evidence and claim decisions, internal coverage acceptance, and the follow-ups completed.
+      const evidenceQueue = await queueOf("evidence_review", wide.evidence_item_id);
+      created(await gkReviewerPage.api("POST", evidenceReviewCompletePath(ORG_X, wide.evidence_item_id, evidenceQueue.review_queue_item_id),
+        evidenceReviewDecisionBody({ expectedUpdatedAt: new Date(evidenceQueue.updated_at).toISOString(), decision: "supported" })), "GK evidence review");
+      const claimQueue = await queueOf("claim_review", wide.claim_id);
+      created(await gkReviewerPage.api("POST", claimReviewCompletePath(ORG_X, wide.claim_id, claimQueue.review_queue_item_id),
+        claimReviewDecisionBody({ expectedUpdatedAt: new Date(claimQueue.updated_at).toISOString(), decision: "approved", approvedAudiences: ["internal"] })), "GK claim review");
+      let traced = await gkReviewerPage.api("GET", claimTraceabilityPath(ORG_X, wide.claim_id, "internal"));
+      for (const [dimensionKey, dimension] of Object.entries(traced.body.data.dimensions || {})) {
+        if (dimension?.assessment_status !== "unresolved" || dimension?.blocks_requested_audience === false) continue;
+        created(await gkReviewerPage.api("POST", coverageInternalAcceptancePath(ORG_X, wide.claim_id, dimensionKey), {}), `GK coverage ${dimensionKey}`);
+      }
+      const listed = await reviewerPage.api("GET", clientFollowupsPath(ORG_X));
+      for (const followup of projectClientFollowupWorkflows(listed.body?.data).filter((item) => item.claimId === wide.claim_id)) {
+        created(await reviewerPage.api("POST", clientFollowupCompletePath(ORG_X, wide.claim_id, followup.clientFollowupItemId), { expected_updated_at: followup.updatedAt }), "follow-up completed");
+      }
+      traced = await gkReviewerPage.api("GET", claimTraceabilityPath(ORG_X, wide.claim_id, "internal"));
+      assert.deepEqual([traced.body.data.eligible, traced.body.data.blockerCodes], [true, []], "the structural claim is legitimately eligible for internal use");
+      // The server boundary: every cited claim eligible, yet a structural-only draft is not the organization's impact report.
+      const detail = await adminPage.api("GET", clientInternalDraftPath(ORG_X, PROJECT_X2, structuralOnlyId));
+      assert.equal(detail.status, 200);
+      assert.equal(detail.body.data.citedClaimsCurrentlyEligible, true, "every cited claim is eligible");
+      assert.deepEqual(detail.body.data.internalReport, { available: false, getKinderReviewReasons: [], blockedReasons: ["structural_facts_only"] });
+      const refused = await fetchText(adminPage, clientInternalReportMarkdownPath(ORG_X, PROJECT_X2, structuralOnlyId));
+      assert.equal(refused.status, 422);
+      assert.deepEqual(JSON.parse(refused.body).blockers.map((blocker) => blocker.blocking_reason), ["structural_facts_only"]);
+      const list = await adminPage.api("GET", clientInternalDraftsPath(ORG_X, PROJECT_X2));
+      assert.equal(list.body.data.items.find((item) => item.generatedContentDraftId === structuralOnlyId)?.internalReportAvailable, false);
+      // A measured result alongside the reviewed structural fact keeps the report usable.
+      const combinedDetail = await adminPage.api("GET", clientInternalDraftPath(ORG_X, PROJECT_X2, combinedId));
+      assert.deepEqual(combinedDetail.body.data.internalReport, { available: true, getKinderReviewReasons: [], blockedReasons: [] });
+      assert.equal((await fetchText(adminPage, clientInternalReportMarkdownPath(ORG_X, PROJECT_X2, combinedId))).status, 200);
+      // Get Kinder's own review packet of the structural-only draft still reads it.
+      const packet = await gkReviewerPage.api("GET", generatedDraftReviewPacketPath(ORG_X, structuralOnlyId));
+      assert.equal(packet.status, 200, JSON.stringify(packet.body));
+      // Observation only (outside this package): a new generation from the reviewed claim re-runs P2-04, recorded here as it is.
+      const regenerated = await adminPage.api("POST", createEvidenceSummaryPath(ORG_X), {
+        claim_ids: [wide.claim_id], idempotency_key: "customer-structural-after-review-0001", engagement_id: PROJECT_X2,
+      });
+      results.h = {
+        reviewedStructuralOnly: refused.status, measuredPlusStructural: "available", gkPacket: packet.status,
+        observedGenerationAfterGkCoverageAcceptance: `${regenerated.status} ${regenerated.body?.error?.code || ""}`.trim(),
+      };
       for (const page of [gkReviewerPage, gkAdminPage, adminPage, contributorPage, reviewerPage, inactiveAdminPage]) assert.deepEqual(page.exceptions, []);
       console.log(`[customer-measured-report-selection] ${JSON.stringify(results)}`);
     });

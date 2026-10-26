@@ -111,14 +111,40 @@ export async function evaluateOrganizationInternalReviewInTransaction(tx, { orga
  */
 export const INTERNAL_REPORT_CONTENT_TYPES = Object.freeze(["evidence_summary", "impact_narrative"]);
 
+// Owner prompt 2026-10-26: a draft whose every cited claim restates a
+// dictionary field-presence fact (which columns a source has) documents
+// source structure, not a programme result, so it is not the organization's
+// internal impact report - whatever review its claims have. The structural
+// facts stay valid, and Get Kinder's own review, export and release paths
+// are unchanged; a draft citing at least one other fact is not affected.
+export const STRUCTURAL_EVIDENCE_TYPE = "dictionary_field_presence_fact";
+export const STRUCTURAL_FACTS_ONLY_REASON = "structural_facts_only";
+
+async function citesOnlyStructuralFacts(tx, { organizationId, packet }) {
+  const evidenceItemIds = [...new Set(packet.blocks.flatMap((block) => block.citations.map((citation) => citation.evidenceItemId)))]
+    .filter((id) => UUID_PATTERN.test(id ?? ""));
+  if (evidenceItemIds.length === 0) return false;
+  const { rows } = await tx.query(
+    `SELECT evidence_item_id::text, evidence_type
+       FROM kai.evidence_items
+      WHERE organization_id = $1::uuid AND evidence_item_id = ANY($2::uuid[])`,
+    [organizationId, evidenceItemIds],
+  );
+  return rows.length === evidenceItemIds.length && rows.every((row) => row.evidence_type === STRUCTURAL_EVIDENCE_TYPE);
+}
+
 export async function evaluateInternalReportAvailabilityInTransaction(tx, { organizationId, packet }) {
   const evaluation = await evaluateOrganizationInternalReviewInTransaction(tx, { organizationId, packet });
   const getKinderReviewReasons = evaluation.getKinderReviewReasons
     .filter((reason) => reason !== "content_type_requires_get_kinder_review" || !INTERNAL_REPORT_CONTENT_TYPES.includes(packet.contentType));
+  const blockedReasons = [
+    ...evaluation.blockedReasons,
+    ...(await citesOnlyStructuralFacts(tx, { organizationId, packet }) ? [STRUCTURAL_FACTS_ONLY_REASON] : []),
+  ];
   return {
     getKinderReviewReasons,
-    blockedReasons: evaluation.blockedReasons,
-    available: getKinderReviewReasons.length === 0 && evaluation.blockedReasons.length === 0,
+    blockedReasons,
+    available: getKinderReviewReasons.length === 0 && blockedReasons.length === 0,
   };
 }
 

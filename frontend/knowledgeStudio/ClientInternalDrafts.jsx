@@ -18,8 +18,10 @@ import {
   INTERNAL_DRAFT_REVIEW_STATE_LABELS,
   INTERNAL_REPORT_REASON_MESSAGES,
   STRUCTURAL_ONLY_DRAFT_MESSAGE,
+  claimKind,
   internalDraftFactualReviewNextActions,
   isStructuralOnlyDraft,
+  mergeInternalDraftPages,
 } from "./clientEvidenceWorkflowLogic.js";
 
 const READY_FOR_INTERNAL_USE = "Ready for internal use";
@@ -32,6 +34,9 @@ const DRAFT_LABELS = Object.freeze({
   evidence_summary: "Internal evidence summary",
   impact_narrative: "Internal impact narrative",
 });
+// What a cited claim restates; its stored review status is not shown as a
+// pending step (the draft's own internal-report state says whether it is usable).
+const CITED_CLAIM_KIND_LABELS = Object.freeze({ measurement: "measured finding", structural: "structural fact" });
 
 /**
  * The organization administrator's own internal drafts for the selected
@@ -40,10 +45,14 @@ const DRAFT_LABELS = Object.freeze({
  * draft's true Get Kinder review state, its text, the claims each block cites
  * (statement and review status from the organization's Claim Library read),
  * and its limitations. Reading a draft approves, releases, or exports nothing.
- * `focusDraftId` opens that draft once it is listed (after generation). The
- * newest draft is listed first. A draft citing only structural facts (which
- * columns a source has) is shown as such: it is kept as generated, and the
- * next step is a new draft from a measured finding, not a review request.
+ * `focusDraftId` (the id a successful generation returned) opens that exact
+ * draft through the authorized detail read, whether or not it is on a loaded
+ * list page: the server pages drafts in id order, so a new draft can be on
+ * any page. Older pages load from the server's nextCursor; loaded drafts are
+ * shown newest first, and the list says when more exist. A draft the server
+ * reports as citing only structural facts (which columns a source has) is
+ * shown as such: it is kept as generated, and the next step is a new draft
+ * from a measured finding, not a review request.
  *
  * Internal report (owner decision 2026-10-25): when the server reports
  * internalReport.available - every cited claim usable for internal use, every
@@ -62,13 +71,13 @@ const DRAFT_LABELS = Object.freeze({
 export default function ClientInternalDrafts({
   organizationId, engagementId, claims, refreshToken, focusDraftId, canReadReleasedReports = false, canReadInternalReports = false,
 }) {
-  const [list, setList] = useState({ status: "idle", items: [], error: "" });
+  const [list, setList] = useState({ status: "idle", items: [], error: "", nextCursor: null, key: "" });
   const [detail, setDetail] = useState({ status: "idle", draft: null, error: "" });
   const [report, setReport] = useState({ status: "idle", draftId: "", markdown: "", error: "" });
   const keyRef = useRef("");
   const detailSeqRef = useRef(0);
   // The generated draft opened once after generation; a later list reload
-  // (for example after an approval) must not switch the open draft back.
+  // must not switch the open draft back.
   const focusedRef = useRef("");
 
   const openMarkdown = async (draftId, path) => {
@@ -100,47 +109,63 @@ export default function ClientInternalDrafts({
     setDetail(draft ? { status: "success", draft, error: "" } : { status: "error", draft: null, error: errorText(result) });
   };
 
+  // One page of the list, from `cursor` (null: the first page). A page read
+  // for an older organization, Project or refresh is discarded.
+  const readPage = async (key, cursor) => {
+    const result = await getJson(clientInternalDraftsPath(organizationId, engagementId, cursor));
+    if (keyRef.current !== key) return;
+    const projected = result.statusCode === 200 && result.body?.ok ? projectClientInternalDraftList(result.body.data) : null;
+    setList((current) => (projected
+      ? { status: "success", items: mergeInternalDraftPages(cursor ? current.items : [], projected.items), error: "", nextCursor: projected.nextCursor, key }
+      : { ...current, status: cursor ? "success" : "error", items: cursor ? current.items : [], error: errorText(result), key }));
+  };
+
   useEffect(() => {
     if (!organizationId || !engagementId) return undefined;
     const key = `${organizationId}:${engagementId}:${refreshToken}`;
     keyRef.current = key;
-    setList((current) => ({ ...current, status: "loading" }));
-    getJson(clientInternalDraftsPath(organizationId, engagementId)).then((result) => {
-      if (keyRef.current !== key) return;
-      const projected = result.statusCode === 200 && result.body?.ok ? projectClientInternalDraftList(result.body.data) : null;
-      // Newest first (the server lists in id order).
-      const items = projected ? [...projected.items].sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || ""))) : [];
-      setList(projected ? { status: "success", items, error: "" } : { status: "error", items: [], error: errorText(result) });
-    });
+    setList((current) => ({ ...current, status: "loading", error: "" }));
+    readPage(key, null);
     return () => { keyRef.current = ""; };
+    // readPage is recreated each render; the ids and refresh are the triggers.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [organizationId, engagementId, refreshToken]);
+
+  const loadOlder = () => {
+    if (list.status !== "success" || !list.nextCursor || list.key !== keyRef.current) return;
+    setList((current) => ({ ...current, status: "loading_more" }));
+    readPage(list.key, list.nextCursor);
+  };
 
   useEffect(() => {
     setDetail({ status: "idle", draft: null, error: "" });
     setReport({ status: "idle", draftId: "", markdown: "", error: "" });
+    focusedRef.current = "";
   }, [organizationId, engagementId]);
 
+  // A newly generated draft is opened by its own id, never only when a list
+  // page happens to include it.
   useEffect(() => {
-    if (focusDraftId && focusDraftId !== focusedRef.current && list.status === "success"
-      && list.items.some((item) => item.generatedContentDraftId === focusDraftId)) {
+    if (focusDraftId && focusDraftId !== focusedRef.current && organizationId && engagementId) {
       focusedRef.current = focusDraftId;
       openDraft(focusDraftId);
     }
-    // openDraft is recreated each render; the focus id and list are the triggers.
+    // openDraft is recreated each render; the focus id is the trigger.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focusDraftId, list.status, list.items]);
+  }, [focusDraftId, organizationId, engagementId]);
 
   if (!engagementId) return <div className="text-muted small">Select a Project to see its internal drafts.</div>;
   const claimById = new Map((Array.isArray(claims) ? claims : []).map((claim) => [claim.claimId, claim]));
   const draft = detail.draft;
-  const structuralOnly = Boolean(draft) && !draft.internalReport.available && isStructuralOnlyDraft(draft, claimById);
+  const structuralOnly = Boolean(draft) && !draft.internalReport.available && isStructuralOnlyDraft(draft);
+  const listShown = list.status === "success" || list.status === "loading_more";
 
   return (
     <div data-client-internal-draft-list="">
       {list.status === "loading" ? <div className="text-muted small">Loading internal drafts...</div> : null}
       {list.status === "error" ? <div className="alert alert-warning py-2 small">Internal drafts could not be loaded. {list.error}</div> : null}
-      {list.status === "success" && list.items.length === 0 ? <div className="text-muted small">No internal drafts for this Project yet.</div> : null}
-      {list.status === "success" && list.items.length > 0 ? (
+      {listShown && list.items.length === 0 && !list.nextCursor ? <div className="text-muted small">No internal drafts for this Project yet.</div> : null}
+      {listShown && list.items.length > 0 ? (
         <ul className="list-group mb-2">
           {list.items.map((item) => (
             <li key={item.generatedContentDraftId} className="list-group-item small d-flex flex-wrap align-items-center gap-2"
@@ -158,6 +183,18 @@ export default function ClientInternalDrafts({
           ))}
         </ul>
       ) : null}
+      {listShown && list.nextCursor ? (
+        <div className="small mb-2" data-client-internal-drafts-incomplete="">
+          <span className="me-2">
+            {list.items.length} draft(s) loaded, newest first among them. This Project has more saved drafts, which may include newer ones.
+          </span>
+          <button type="button" className="btn btn-sm btn-outline-secondary" data-client-internal-drafts-load-more=""
+            disabled={list.status === "loading_more"} onClick={loadOlder}>
+            {list.status === "loading_more" ? "Loading..." : "Load more drafts"}
+          </button>
+        </div>
+      ) : null}
+      {listShown && list.error ? <div className="alert alert-warning py-2 small">More drafts could not be loaded. {list.error}</div> : null}
       {detail.status === "loading" ? <div className="text-muted small">Loading draft...</div> : null}
       {detail.status === "error" ? <div className="alert alert-warning py-2 small">This draft could not be read. {detail.error}</div> : null}
       {draft ? (
@@ -221,7 +258,7 @@ export default function ClientInternalDrafts({
                     return (
                       <li key={claimId} data-client-internal-draft-citation={claimId}>
                         {claim ? (claim.claimStatement || claim.evidenceStatement || "Claim") : "A claim of this organization"}
-                        {claim ? ` (claim review: ${claim.claimReviewStatus || "unknown"})` : ""}
+                        {claim && CITED_CLAIM_KIND_LABELS[claimKind(claim)] ? ` (${CITED_CLAIM_KIND_LABELS[claimKind(claim)]})` : ""}
                       </li>
                     );
                   })}

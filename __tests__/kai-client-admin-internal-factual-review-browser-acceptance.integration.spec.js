@@ -737,11 +737,12 @@ async function runBrowserAcceptance() {
       assert.doesNotMatch(blockedDetail, /Approve factual content|Release internal report|factual review is completed before/i);
       assert.equal(await textOf(adminPage, '[data-client-internal-report="available"]'), null);
       const detail = await adminPage.api("GET", clientInternalDraftPath(ORG_X, PROJECT_X, ids.blockedDraftId));
-      assert.deepEqual(detail.body.data.internalReport, { available: false, getKinderReviewReasons: [], blockedReasons: ["cited_claims_not_currently_eligible"] });
+      // Owner prompt 2026-10-26: the server also names the structural-only citation set.
+      assert.deepEqual(detail.body.data.internalReport, { available: false, getKinderReviewReasons: [], blockedReasons: ["cited_claims_not_currently_eligible", "structural_facts_only"] });
       assert.equal(detail.body.data.factualReview.actorMayApprove, false);
       const refused = await fetchText(adminPage, clientInternalReportMarkdownPath(ORG_X, PROJECT_X, ids.blockedDraftId));
       assert.equal(refused.status, 422, refused.body);
-      assert.deepEqual(JSON.parse(refused.body).blockers.map((blocker) => blocker.blocking_reason), ["cited_claims_not_currently_eligible"]);
+      assert.deepEqual(JSON.parse(refused.body).blockers.map((blocker) => blocker.blocking_reason), ["cited_claims_not_currently_eligible", "structural_facts_only"]);
       results.c2 = { available: false, blocker: "cited_claims_not_currently_eligible", download: 422 };
     });
 

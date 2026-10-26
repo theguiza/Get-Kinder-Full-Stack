@@ -232,6 +232,9 @@ export const CLIENT_INTERNAL_DRAFT_FACTUAL_REVIEW_REASONS = Object.freeze([
 export const CLIENT_INTERNAL_REPORT_REASONS = Object.freeze([
   ...CLIENT_INTERNAL_DRAFT_FACTUAL_REVIEW_REASONS,
   "validator_results_not_passed",
+  // Owner prompt 2026-10-26: every cited claim is a structural fact (which
+  // columns a source has), so the draft is not an impact report.
+  "structural_facts_only",
 ]);
 
 export function clientInternalReportMarkdownPath(organizationId, engagementId, generatedContentDraftId) {

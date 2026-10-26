@@ -23,13 +23,18 @@ import {
   sourceCandidateDetailPath,
 } from "../impactEvidenceLibraryLogic.js";
 import {
+  CLAIM_USE_UNKNOWN_MESSAGE,
   INTERNAL_DRAFT_READINESS_MESSAGES,
   USE_FOR_IMPACT_MAX_STEPS,
   USE_FOR_IMPACT_MESSAGES,
   claimIdsByEvidenceItem,
   claimInternalDraftSelectability,
+  claimDraftAdmitted,
   claimInternalUse,
   claimKind,
+  claimNotUsableMessage,
+  claimUseDiagnosis,
+  claimsToDiagnose,
   claimProposalResultMessage,
   claimSelectabilityMessage,
   extractionResultMessage,
@@ -44,7 +49,10 @@ import {
   isUseForImpactCandidate,
   orderClaimsForReports,
   processingPermissionReviewFiles,
+  readLibraryPages,
   retainSelectableClaimIds,
+  selectionReportUsability,
+  selectionReportUsabilityMessage,
   sourcePreparationContinuationFailureMessage,
   sourcePreparationContinuationMessage,
   sourcePreparationFiles,
@@ -70,48 +78,78 @@ const DRAFT_LABELS = Object.freeze({
 });
 
 // The organization-wide Evidence and Claim Library reads are paged (25 per
-// page, in id order). Every page is read, up to this bound, so a measured
-// claim is never hidden behind earlier structural ones.
-const LIBRARY_MAX_PAGES = 40;
-const nextClaimPage = (data) => (data?.truncated === true ? data.nextAfterClaimId : null);
-const nextEvidencePage = (data) => (data?.truncated === true ? data.nextAfterEvidenceItemId : null);
+// page, in id order). One load reads up to this many pages; when the server
+// still reports more, the read is marked incomplete, its continuation cursor
+// is kept, and "Load more" continues from it. A claim not loaded yet is
+// unknown, never absent.
+const LIBRARY_PAGES_PER_LOAD = 40;
+const CLAIM_CURSOR = "nextAfterClaimId";
+const EVIDENCE_CURSOR = "nextAfterEvidenceItemId";
+// Per-claim P2-06 diagnostics read automatically per refresh; any further
+// claim offers its own "Check internal use".
+const CLAIM_DIAGNOSES_PER_REFRESH = 25;
 const projectInternalUse = (data) => {
   const facts = projectClientImpactFacts(data);
   return facts ? { claimIds: new Set(facts.items.map((item) => item.claimId)), truncated: facts.truncated } : null;
 };
 
-function useOrganizationRead(organizationId, path, project, refreshToken, nextCursor = null) {
-  const [state, setState] = useState({ organizationId: "", status: "idle", items: [] });
+function useOrganizationRead(organizationId, path, project, refreshToken, cursorKey = null) {
+  const [state, setState] = useState({ organizationId: "", status: "idle", items: [], complete: false, nextCursor: null });
   const keyRef = useRef("");
+  // `cursorKey` null: one unpaged read, projected as a whole.
+  const pagesFrom = useCallback(async (requestKey, cursor) => {
+    if (cursorKey === null) {
+      const result = await getJson(path(organizationId, null));
+      if (keyRef.current !== requestKey) return { status: "superseded" };
+      if (result.statusCode !== 200 || !result.body?.ok) return { status: "error", result };
+      return { status: "success", items: project(result.body.data), complete: true, nextCursor: null };
+    }
+    return readLibraryPages({
+      fetchPage: (after) => getJson(path(organizationId, after)),
+      project,
+      cursorKey,
+      cursor,
+      maxPages: LIBRARY_PAGES_PER_LOAD,
+      isCurrent: () => keyRef.current === requestKey,
+    });
+  }, [organizationId, path, project, cursorKey]);
   useEffect(() => {
     if (!organizationId) return undefined;
     const requestKey = `${organizationId}:${refreshToken}`;
     keyRef.current = requestKey;
-    setState((current) => ({ organizationId, status: "loading", items: current.organizationId === organizationId ? current.items : [] }));
+    setState((current) => ({
+      organizationId, status: "loading", items: current.organizationId === organizationId ? current.items : [], complete: false, nextCursor: null,
+    }));
     (async () => {
-      let items = [];
-      let cursor = null;
-      for (let page = 0; page < LIBRARY_MAX_PAGES; page += 1) {
-        const result = await getJson(path(organizationId, cursor));
-        if (keyRef.current !== requestKey) return;
-        if (result.statusCode !== 200 || !result.body?.ok) {
-          setState({ organizationId, status: "error", items: [], message: errorText(result) });
-          return;
-        }
-        const projected = project(result.body.data);
-        if (!nextCursor) {
-          setState({ organizationId, status: "success", items: projected });
-          return;
-        }
-        items = items.concat(projected);
-        cursor = nextCursor(result.body.data);
-        if (!isRouteUuid(cursor)) break;
+      const read = await pagesFrom(requestKey, null);
+      if (read.status === "superseded") return;
+      if (read.status === "error") {
+        setState({ organizationId, status: "error", items: [], complete: false, nextCursor: null, message: errorText(read.result) });
+        return;
       }
-      setState({ organizationId, status: "success", items });
+      setState({ organizationId, status: "success", items: read.items, complete: read.complete, nextCursor: read.nextCursor, requestKey });
     })();
     return () => { keyRef.current = ""; };
-  }, [organizationId, path, project, refreshToken, nextCursor]);
-  return state.organizationId === organizationId ? state : { organizationId, status: "loading", items: [] };
+  }, [organizationId, refreshToken, pagesFrom]);
+  // Continues an incomplete read from its kept cursor, within the same
+  // organization and refresh; a newer read discards the result.
+  const loadMore = useCallback(async () => {
+    const requestKey = keyRef.current;
+    if (state.status !== "success" || state.complete || !isRouteUuid(state.nextCursor) || state.requestKey !== requestKey) return;
+    setState((current) => ({ ...current, status: "loading_more" }));
+    const read = await pagesFrom(requestKey, state.nextCursor);
+    if (read.status === "superseded") return;
+    if (read.status === "error") {
+      setState((current) => ({ ...current, status: "success", message: errorText(read.result) }));
+      return;
+    }
+    setState((current) => ({
+      ...current, status: "success", items: current.items.concat(read.items), complete: read.complete, nextCursor: read.nextCursor, message: "",
+    }));
+  }, [state, pagesFrom]);
+  const visible = state.organizationId === organizationId ? state : { organizationId, status: "loading", items: [], complete: false, nextCursor: null };
+  // "loading_more" keeps the loaded items on screen.
+  return { ...visible, status: visible.status === "loading_more" ? "success" : visible.status, loadingMore: visible.status === "loading_more", loadMore };
 }
 
 /**
@@ -173,8 +211,8 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
   const [refreshToken, setRefreshToken] = useState(0);
   const refresh = () => setRefreshToken((value) => value + 1);
   const sources = useOrganizationRead(organizationId, organizationSourcesPath, projectOrganizationSources, refreshToken);
-  const evidence = useOrganizationRead(organizationId, evidenceLibraryCandidatesPath, projectEvidenceLibraryItems, refreshToken, nextEvidencePage);
-  const claims = useOrganizationRead(organizationId, claimLibraryCandidatesPath, projectCandidateClaims, refreshToken, nextClaimPage);
+  const evidence = useOrganizationRead(organizationId, evidenceLibraryCandidatesPath, projectEvidenceLibraryItems, refreshToken, EVIDENCE_CURSOR);
+  const claims = useOrganizationRead(organizationId, claimLibraryCandidatesPath, projectCandidateClaims, refreshToken, CLAIM_CURSOR);
   // Authoritative internal usability of each claim (P2-08 / P2-06, internal audience).
   const internalUse = useOrganizationRead(organizationId, clientImpactFactsPath, projectInternalUse, refreshToken);
   const internalUseIndex = internalUse.status === "success" ? internalUse.items : null;
@@ -197,6 +235,45 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
     setGapFollowupsByClaim({});
     setNotice(null);
   }, [organizationId, engagementId]);
+
+  // Each claim's own P2-06 internal evaluation (the client-safe traceability
+  // diagnostic), for the claims the impact-facts read does not establish as
+  // usable: a claim it left out of a truncated read, or one it reports as not
+  // usable (to say why). Read-only; cleared on every refresh and organization.
+  const [diagnostics, setDiagnostics] = useState({ key: "", byClaim: new Map() });
+  const diagnosticsKey = `${organizationId}:${refreshToken}`;
+  const claimDiagnostics = diagnostics.key === diagnosticsKey ? diagnostics.byClaim : new Map();
+  const diagnoseClaims = useCallback(async (claimIds) => {
+    const key = diagnosticsKey;
+    for (const claimId of claimIds) {
+      const result = await getJson(claimTraceabilityPath(organizationId, claimId, "internal"));
+      const diagnosis = claimUseDiagnosis(result);
+      setDiagnostics((current) => {
+        if (current.key !== key && current.key !== "") return current;
+        const byClaim = new Map(current.key === key ? current.byClaim : []);
+        byClaim.set(claimId, diagnosis);
+        return { key, byClaim };
+      });
+    }
+  }, [organizationId, diagnosticsKey]);
+  const diagnosedOnceRef = useRef(new Set());
+  useEffect(() => {
+    diagnosedOnceRef.current = new Set();
+    setDiagnostics({ key: diagnosticsKey, byClaim: new Map() });
+  }, [diagnosticsKey]);
+  useEffect(() => {
+    if (access.readClaimTraceabilityDiagnostics !== true || claims.status !== "success" || internalUse.status === "loading") return;
+    const pending = claimsToDiagnose({
+      claims: claims.items, impactFacts: internalUseIndex, diagnostics: claimDiagnostics, selectedClaimIds,
+      limit: CLAIM_DIAGNOSES_PER_REFRESH - diagnosedOnceRef.current.size,
+    }).filter((claimId) => !diagnosedOnceRef.current.has(claimId));
+    if (pending.length === 0) return;
+    for (const claimId of pending) diagnosedOnceRef.current.add(claimId);
+    diagnoseClaims(pending);
+    // claimDiagnostics/internalUseIndex are derived from the listed state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [access.readClaimTraceabilityDiagnostics, claims.status, claims.items, internalUse.status, selectedClaimIds, diagnoseClaims]);
+  const useOfClaim = (claimId) => claimInternalUse(claimId, internalUseIndex, claimDiagnostics);
   useEffect(() => {
     if (claims.status === "success") setSelectedClaimIds((current) => retainSelectableClaimIds(current, claims.items));
   }, [claims.status, claims.items]);
@@ -234,9 +311,15 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
     setDraftKeys({});
     setSelectedClaimIds((current) => (current.includes(claimId) ? current.filter((id) => id !== claimId) : [...current, claimId]));
   };
+  const unadmittedClaimIds = claims.items
+    .filter((claim) => !claimDraftAdmitted(claim, claimDiagnostics.get(claim.claimId)))
+    .map((claim) => claim.claimId);
   const readiness = internalDraftReadiness({
-    canGenerate: access.generateDrafts, engagementId, selectedClaimIds, claims: claims.status === "success" ? claims.items : undefined,
+    canGenerate: access.generateDrafts, engagementId, selectedClaimIds,
+    claims: claims.status === "success" ? claims.items : undefined, claimsComplete: claims.complete, unadmittedClaimIds,
   });
+  const kindOfClaim = (claimId) => claimKind(claims.items.find((claim) => claim.claimId === claimId));
+  const selectionUse = selectionReportUsability(selectedClaimIds, useOfClaim, kindOfClaim);
   const [draftsRefreshToken, setDraftsRefreshToken] = useState(0);
   // Read-only: one client-safe internal traceability GET per selected claim.
   const explainDraftFailure = async (result, claimIds) => {
@@ -586,13 +669,13 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
       <div className="admin-card mb-3">
         <h5 className="mb-2">Evidence</h5>
         <div className="small text-muted mb-2">
-          Evidence from your sources. A record count you defined with Count records, from a source cleared for internal use, needs
-          no review for internal use; structural facts (which columns a source has) and everything else wait for Get Kinder&rsquo;s
-          review. Proposing a claim approves nothing for funders or the public.
+          Evidence from your sources: record counts you defined with Count records, and structural facts (which columns a source
+          has). Whether a claim can be used in internal reports now is shown on each claim below, from its current eligibility.
+          Proposing a claim approves nothing for funders or the public.
         </div>
         {evidence.status === "loading" ? <div className="text-muted small">Loading evidence...</div> : null}
         {evidence.status === "error" ? <div className="alert alert-warning py-2 small">Evidence could not be loaded. {evidence.message}</div> : null}
-        {evidence.status === "success" && evidence.items.length === 0 ? <div className="text-muted small">No evidence yet.</div> : null}
+        {evidence.status === "success" && evidence.items.length === 0 && evidence.complete ? <div className="text-muted small">No evidence yet.</div> : null}
         {evidence.status === "success" && evidence.items.length > 0 ? (
           <ul className="list-group">
             {evidence.items.map((item) => {
@@ -600,8 +683,10 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
               return (
                 <li key={item.evidenceItemId} className="list-group-item small" data-client-evidence={item.evidenceItemId}>
                   <div className="text-break">{item.statement || "Statement not available"}</div>
-                  <div className="text-muted mt-1">
-                    Review: {item.evidenceReviewStatus || "unknown"} · Support: {item.supportStrength || "unknown"}
+                  <div className="text-muted mt-1" data-client-evidence-kind={claimKind(item)}>
+                    {claimKind(item) === "measurement" ? "Record-count measurement" : null}
+                    {claimKind(item) === "structural" ? "Structural fact (which columns a source has)" : null}
+                    {claimKind(item) === "other" ? `Recorded review status: ${item.evidenceReviewStatus || "unknown"}` : null}
                     {item.sensitivityLevel ? ` · Sensitivity: ${item.sensitivityLevel}` : ""}
                   </div>
                   {proposed.length > 0 ? <div className="mt-1">Claim proposed</div> : null}
@@ -616,6 +701,7 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
             })}
           </ul>
         ) : null}
+        <LibraryCompleteness read={evidence} noun="evidence items" />
       </div>
 
       <div className="admin-card mb-3">
@@ -629,13 +715,14 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
         </div>
         {claims.status === "loading" ? <div className="text-muted small">Loading claims...</div> : null}
         {claims.status === "error" ? <div className="alert alert-warning py-2 small">Claims could not be loaded. {claims.message}</div> : null}
-        {claims.status === "success" && claims.items.length === 0 ? <div className="text-muted small">No claims yet. Propose one from evidence above.</div> : null}
+        {claims.status === "success" && claims.items.length === 0 && claims.complete ? <div className="text-muted small">No claims yet. Propose one from evidence above.</div> : null}
         {claims.status === "success" && claims.items.length > 0 ? (
           <ul className="list-group">
             {orderedClaims.map((claim) => {
               const selectability = claimInternalDraftSelectability(claim);
               const kind = claimKind(claim);
-              const use = claimInternalUse(claim.claimId, internalUseIndex);
+              const use = useOfClaim(claim.claimId);
+              const diagnosis = claimDiagnostics.get(claim.claimId);
               return (
                 <li key={claim.claimId} className="list-group-item small" data-client-claim={claim.claimId}
                   data-client-claim-kind={kind} data-client-claim-internal-use={use}>
@@ -644,15 +731,25 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
                     {kind === "structural" ? <span className="badge text-bg-light me-1">Structural fact</span> : null}
                     {claim.claimStatement || claim.evidenceStatement || "Statement not available"}
                   </div>
-                  {use === "usable" ? (
-                    // The server's current internal eligibility; the stored review
-                    // status is not shown as a pending step it no longer is.
+                  {/* The server's current internal eligibility; the stored review
+                      status is not shown as a pending step it may no longer be. */}
+                  {kind !== "structural" && use === "usable" ? (
                     <div className="text-success mt-1" data-client-claim-usable="">Usable in internal reports now. No further review is needed for internal use.</div>
-                  ) : (
-                    <div className="text-muted mt-1">
-                      Status: {claim.claimStatus} · Review: {claim.claimReviewStatus} · Strength: {claim.claimStrength}
+                  ) : null}
+                  {kind !== "structural" && use === "not_usable" ? (
+                    <div className="mt-1" data-client-claim-not-usable="">{claimNotUsableMessage(diagnosis)}</div>
+                  ) : null}
+                  {kind !== "structural" && use === "unknown" ? (
+                    <div className="text-muted mt-1" data-client-claim-use-unknown="">
+                      {CLAIM_USE_UNKNOWN_MESSAGE}
+                      {access.readClaimTraceabilityDiagnostics && !diagnosedOnceRef.current.has(claim.claimId) ? (
+                        <button type="button" className="btn btn-sm btn-link p-0 ms-1 align-baseline" data-client-check-claim-use={claim.claimId}
+                          onClick={() => { diagnosedOnceRef.current.add(claim.claimId); diagnoseClaims([claim.claimId]); }}>
+                          Check internal use
+                        </button>
+                      ) : null}
                     </div>
-                  )}
+                  ) : null}
                   {access.generateDrafts && selectability.selectable ? (
                     <label className="form-check mt-1">
                       <input className="form-check-input" type="checkbox" checked={selectedClaimIds.includes(claim.claimId)}
@@ -679,6 +776,7 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
             })}
           </ul>
         ) : null}
+        <LibraryCompleteness read={claims} noun="claims" />
         {openReview ? (
           // Outside the list, so the list's own refresh after a decision does not unmount it.
           <ClientMeasuredClaimReviewPanel key={`${contextKey}:${openReview}`} organizationId={organizationId} claimId={openReview}
@@ -690,6 +788,11 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
         <div className="admin-card mb-3">
           <h5 className="mb-2">Internal drafts</h5>
           {!readiness.ready ? <div className="small mb-2" data-client-draft-readiness={readiness.reason}>{INTERNAL_DRAFT_READINESS_MESSAGES[readiness.reason]}</div> : null}
+          {readiness.ready && !selectionUse.immediatelyUsable ? (
+            <div className="small mb-2" data-client-draft-selection-usability={selectionUse.notUsable.length > 0 ? "not_usable" : "unknown"}>
+              {selectionReportUsabilityMessage(selectionUse)}
+            </div>
+          ) : null}
           <div className="d-flex flex-wrap gap-2">
             <button type="button" className="btn btn-sm btn-primary" disabled={!readiness.ready || Boolean(pending)}
               onClick={() => generate("evidence_summary", createEvidenceSummaryPath)}>
@@ -728,6 +831,26 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
             canReadReleasedReports={access.readReleasedInternalReports === true}
             canReadInternalReports={access.readInternalDrafts === true} />
         </div>
+      ) : null}
+    </div>
+  );
+}
+
+// Whether an organization library read holds everything the server has; an
+// incomplete read keeps its cursor and continues on request.
+function LibraryCompleteness({ read, noun }) {
+  if (read.status !== "success" || (read.complete && !read.message)) return null;
+  return (
+    <div className="small mt-2" data-client-library-incomplete={noun}>
+      {read.message ? <div className="alert alert-warning py-2 small mb-1">More {noun} could not be loaded. {read.message}</div> : null}
+      {!read.complete ? (
+        <>
+          <span className="me-2">{read.items.length} {noun} loaded; your organization has more.</span>
+          <button type="button" className="btn btn-sm btn-outline-secondary" data-client-library-load-more={noun}
+            disabled={read.loadingMore} onClick={read.loadMore}>
+            {read.loadingMore ? "Loading..." : `Load more ${noun}`}
+          </button>
+        </>
       ) : null}
     </div>
   );

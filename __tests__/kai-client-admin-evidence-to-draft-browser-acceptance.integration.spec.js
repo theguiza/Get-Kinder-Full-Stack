@@ -608,7 +608,10 @@ async function runBrowserAcceptance() {
       await adminPage.idle();
       for (const claimId of [ids.x.usableClaimId, ids.x.secondClaimId]) {
         const entry = await adminPage.evaluate(`document.querySelector('[data-client-claim="${claimId}"]').innerText`);
-        assert.match(entry, /Review: needs_gk_review · Strength: unassessed/, "actual status shown, not promoted");
+        // A structural fact is named as such; its stored review status is not
+        // shown as a pending approval step (owner prompt 2026-10-26).
+        assert.match(entry, /Structural fact: it says a source has this column/, "actual kind shown, not promoted");
+        assert.doesNotMatch(entry, /needs_gk_review|Usable in internal reports now/);
         assert.equal(await adminPage.evaluate(`Boolean(document.querySelector('[data-client-claim-gap-followups="${claimId}"]'))`), true, "Generate gap follow-ups offered");
         assert.equal(await adminPage.evaluate(`document.querySelector('[data-client-claim="${claimId}"]').getAttribute("data-client-claim-kind")`), "structural");
         assert.equal(await adminPage.evaluate(`Boolean(document.querySelector('[data-client-claim="${claimId}"] input'))`), false, "not offered as an impact finding (owner prompt 2026-10-26)");
@@ -879,7 +882,8 @@ async function runBrowserAcceptance() {
       await adminPage.waitFor(async () => adminPage.evaluate(`Boolean(document.querySelector('[data-client-claim="${ids.x.rejectedClaimId}"]'))`), "claims listed");
       await adminPage.idle();
       const rejectedEntry = await adminPage.evaluate(`document.querySelector('[data-client-claim="${ids.x.rejectedClaimId}"]').innerText`);
-      assert.match(rejectedEntry, /Strength: reviewed_not_supported/);
+      // The stored status line is no longer shown (owner prompt 2026-10-26); the not-supported outcome is.
+      assert.doesNotMatch(rejectedEntry, /Usable in internal reports now/);
       assert.match(rejectedEntry, /Get Kinder review found this claim not supported, so it cannot be used in a draft\./);
       assert.equal(await adminPage.evaluate(`Boolean(document.querySelector('[data-client-claim="${ids.x.rejectedClaimId}"] input'))`), false);
       assert.equal(await adminPage.evaluate(`Boolean(document.querySelector('[data-client-claim-gap-followups="${ids.x.rejectedClaimId}"]'))`), false);

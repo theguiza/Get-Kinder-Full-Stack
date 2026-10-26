@@ -234,7 +234,11 @@ test("stages: automatic processing, failures, and every human gate map to the re
     row(20, { ...reviewed, claim_count: 1, claim_ids: [claimId(20)] }),
     row(21, { ...reviewed, claim_count: 2, claim_ids: [claimId(21), claimId(22)] }),
     row(23, { ...reviewed, claim_count: 2, claim_ids: [claimId(23), claimId(24)], open_client_followup_count: 1 }),
-  ], { facts: [fact(21), fact(23)] });
+    // An ordinary measured claim is usable while the file's structural evidence is unreviewed (owner prompt 2026-10-26).
+    row(25, { ...extracted, evidence_item_count: 4, claim_count: 2, claim_needs_review_count: 2, claim_ids: [claimId(25), claimId(26)] }),
+    // The same file with no usable claim still waits for Get Kinder's evidence review.
+    row(27, { ...extracted, evidence_item_count: 4, claim_count: 2, claim_needs_review_count: 2, claim_ids: [claimId(27), claimId(28)] }),
+  ], { facts: [fact(21), fact(23), fact(25)] });
   assert.equal(result.ok, true, JSON.stringify(result));
   const expected = {
     1: ["upload", "in_progress", "client", "none", "processing"],
@@ -261,6 +265,8 @@ test("stages: automatic processing, failures, and every human gate map to the re
     21: [null, "complete", "none", "none", "complete"],
     // Open client follow-ups outrank an already-usable sibling claim.
     23: ["impact_fact_review", "waiting_for_client", "client", "answer_client_followups", "waiting_for_client"],
+    25: [null, "complete", "none", "none", "complete"],
+    27: ["evidence_review", "waiting_for_get_kinder", "get_kinder", "none_waiting_for_get_kinder", "evidence_awaiting_review"],
   };
   for (const [n, [stage, status, responsible, next, reason]] of Object.entries(expected)) {
     assert.deepEqual(Object.values(currentOf(result, Number(n))).slice(0, 5), [stage, status, responsible, next, reason], `file ${n}`);
@@ -273,6 +279,8 @@ test("stages: automatic processing, failures, and every human gate map to the re
   assert.deepEqual(currentOf(result, 10).file.stages.slice(6).map((s) => s.status), ["not_started", "not_started", "not_started", "not_started"]);
   assert.equal(currentOf(result, 21).file.reviewedImpactFactCount, 1);
   assert.equal(currentOf(result, 23).file.reviewedImpactFactCount, 1);
+  assert.equal(currentOf(result, 25).file.reviewedImpactFactCount, 1);
+  assert.equal(currentOf(result, 25).file.stages.find((s) => s.key === "evidence_review").status, "complete");
   // Summary reasons are counted in the canonical order.
   assert.deepEqual(result.data.summary.reasons.map((r) => r.reason), PIPELINE_REASONS.filter((r) => result.data.summary.reasons.some((x) => x.reason === r)));
   assert.equal(result.data.summary.reasons.find((r) => r.reason === "failed").fileCount, 4);

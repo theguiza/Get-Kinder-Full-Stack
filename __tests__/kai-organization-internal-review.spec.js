@@ -316,7 +316,11 @@ test("detail: an ordinary unreviewed summary is the organization's internal repo
   assert.deepEqual(internalDraftFactualReviewNextActions(blockedDetail.data.factualReview.blockedReasons), [
     INTERNAL_DRAFT_FACTUAL_REVIEW_NEXT_ACTIONS.cited_claims_not_currently_eligible,
   ]);
-  assert.match(INTERNAL_DRAFT_FACTUAL_REVIEW_NEXT_ACTIONS.cited_claims_not_currently_eligible, /Ask Get Kinder/);
+  // Owner prompt 2026-10-26: the next step names where each claim's actual
+  // condition is shown and the usable path, not a blanket review request.
+  assert.match(INTERNAL_DRAFT_FACTUAL_REVIEW_NEXT_ACTIONS.cited_claims_not_currently_eligible, /current condition is shown on it under Claims for internal drafts/);
+  assert.match(INTERNAL_DRAFT_FACTUAL_REVIEW_NEXT_ACTIONS.cited_claims_not_currently_eligible, /A new draft from claims marked "Usable in internal reports now" is usable immediately/);
+  assert.doesNotMatch(INTERNAL_DRAFT_FACTUAL_REVIEW_NEXT_ACTIONS.cited_claims_not_currently_eligible, /Ask Get Kinder/);
   assert.equal(blockedDetail.data.factualReview.actorMayApprove, false, "no approval action is exposed for the blocked draft");
 
   assert.equal((await approve(ordinary.dependencies)).ok, true);

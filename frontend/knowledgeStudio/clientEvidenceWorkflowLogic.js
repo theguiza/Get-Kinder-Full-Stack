@@ -75,17 +75,33 @@ export function claimInternalDraftSelectability(claim) {
 }
 
 // `claims` (the organization's loaded claims) adds the substantive-finding
-// rule: a report needs at least one measured claim, and when none exists the
-// customer is sent to Count records instead of drafting from metadata.
-export function internalDraftReadiness({ canGenerate, engagementId, selectedClaimIds, claims }) {
+// rule: a report needs at least one claim that is not a structural fact, and
+// when none exists the customer is sent to Count records instead of drafting
+// from metadata. "None exists" is concluded only from a complete read
+// (`claimsComplete`); claims not loaded yet are unknown, never absent.
+export function internalDraftReadiness({ canGenerate, engagementId, selectedClaimIds, claims, claimsComplete = true, unadmittedClaimIds = [] }) {
   if (canGenerate !== true) return { ready: false, reason: "not_authorized" };
   if (!isRouteUuid(engagementId)) return { ready: false, reason: "no_project" };
-  const measured = Array.isArray(claims) ? new Set(claims.filter((claim) => claimKind(claim) === "measurement").map((claim) => claim.claimId)) : null;
-  if (measured && measured.size === 0) return { ready: false, reason: "no_measured_claim" };
+  const substantive = Array.isArray(claims)
+    ? new Set(claims.filter((claim) => claimKind(claim) !== "structural").map((claim) => claim.claimId))
+    : null;
+  if (substantive && substantive.size === 0) {
+    return { ready: false, reason: claimsComplete === true ? "no_measured_claim" : "claims_not_all_loaded" };
+  }
   if (!Array.isArray(selectedClaimIds) || selectedClaimIds.length === 0) return { ready: false, reason: "no_claims_selected" };
-  if (measured && !selectedClaimIds.some((claimId) => measured.has(claimId))) return { ready: false, reason: "no_measured_claim_selected" };
+  if (substantive && !selectedClaimIds.some((claimId) => substantive.has(claimId))) return { ready: false, reason: "no_measured_claim_selected" };
   if (selectedClaimIds.length > 20) return { ready: false, reason: "too_many_claims" };
+  if (selectedClaimIds.some((claimId) => unadmittedClaimIds.includes(claimId))) return { ready: false, reason: "measured_claim_not_usable" };
   return { ready: true, reason: null };
+}
+
+// Generation drafts from a measured claim only while it is currently eligible
+// for the audience (VAL-GEN-MEASURED-P2-01M-001); a claim's own determinate
+// P2-06 evaluation says in advance that it is not. A missing P2-04 state is
+// not determinate: generation records it itself before evaluating.
+export function claimDraftAdmitted(claim, diagnosis) {
+  if (claimKind(claim) !== "measurement" || diagnosis?.status !== "not_usable") return true;
+  return diagnosis.blockerCodes.length === 0 && diagnosis.conflictReason === "gap_dimension_requires_missing_p204_state";
 }
 
 export const INTERNAL_DRAFT_READINESS_MESSAGES = Object.freeze({
@@ -93,9 +109,13 @@ export const INTERNAL_DRAFT_READINESS_MESSAGES = Object.freeze({
   no_project: "Select a Project above: each draft belongs to one Project.",
   no_measured_claim: "No measured finding yet. In Data Sources, use Count records on your source to record what one record represents and its "
     + "reporting period, then propose the claim from the measurement. Structural facts about a file's columns are not impact findings.",
+  claims_not_all_loaded: "Not every claim of your organization is loaded yet, and none of the loaded ones is a measured finding. "
+    + "Use \"Load more claims\" below to find your measured findings.",
   no_claims_selected: "Select at least one claim below to draft from.",
   no_measured_claim_selected: "Select at least one measured finding below: a report needs a measured result, not only structural facts.",
   too_many_claims: "Select at most 20 claims for one draft.",
+  measured_claim_not_usable: "A selected measured finding is not usable in internal reports now, and a draft is generated from a measured finding "
+    + "only while it is usable. Its condition is shown on the claim below; deselect it to draft from the others.",
 });
 
 export function claimSelectabilityMessage(reason) {
@@ -117,20 +137,151 @@ export function orderClaimsForReports(claims) {
     .map(({ claim }) => claim);
 }
 
-// The authoritative internal-use answer for one claim, from the client-safe
-// impact-facts read (P2-08 / P2-06 for the internal audience): "usable",
-// "not_usable", or "unknown" when that read failed or was truncated.
-export function claimInternalUse(claimId, impactFacts) {
+// The authoritative internal-use answer for one claim: "usable",
+// "not_usable", or "unknown". `diagnostics` (claimId -> claimUseDiagnosis)
+// is that claim's own P2-06 internal evaluation and is preferred when it is
+// determinate; otherwise the client-safe impact-facts read (P2-08 / P2-06,
+// internal audience) answers, and a claim missing from a failed or truncated
+// impact-facts read is unknown, never "not usable".
+export function claimInternalUse(claimId, impactFacts, diagnostics = null) {
+  const diagnosed = diagnostics instanceof Map ? diagnostics.get(claimId) : undefined;
+  if (diagnosed && diagnosed.status !== "unknown") return diagnosed.status;
   if (!impactFacts || !(impactFacts.claimIds instanceof Set)) return "unknown";
   if (impactFacts.claimIds.has(claimId)) return "usable";
   return impactFacts.truncated ? "unknown" : "not_usable";
 }
 
-// A saved draft whose every cited claim is a structural fact: kept as it was
-// generated, but it holds no measured result (historical metadata-only draft).
-export function isStructuralOnlyDraft(draft, claimById) {
-  const cited = (Array.isArray(draft?.blocks) ? draft.blocks : []).flatMap((block) => block.supportingClaimIds || []);
-  return cited.length > 0 && cited.every((claimId) => claimKind(claimById.get(claimId)) === "structural");
+// One claim's client-safe internal traceability diagnostic (owner
+// authorization 2026-10-24), as an internal-use answer and the server's own
+// blocker codes. Any other outcome establishes nothing ("unknown").
+export function claimUseDiagnosis(result) {
+  const data = result?.body?.data;
+  if (result?.statusCode === 200 && result.body?.ok === true && data?.traceability_passed === true) {
+    const blockerCodes = Array.isArray(data.blocker_codes) ? data.blocker_codes.filter((code) => Object.hasOwn(CLAIM_USE_BLOCKER_MESSAGES, code)) : [];
+    return { status: data.eligible === true ? "usable" : "not_usable", blockerCodes, conflictReason: null };
+  }
+  const reason = data?.traceability_conflict_reason;
+  if (result?.statusCode === 409 && result.body?.error?.code === "conflict_current_state_changed"
+    && Object.hasOwn(TRACEABILITY_CONFLICT_EXPLANATIONS, reason)) {
+    return { status: "not_usable", blockerCodes: [], conflictReason: reason };
+  }
+  return { status: "unknown", blockerCodes: [], conflictReason: null };
+}
+
+// The claims whose internal use is diagnosed one by one: every substantive
+// (non-structural) loaded claim the impact-facts read does not establish as
+// usable, plus any selected claim, up to `limit`.
+export function claimsToDiagnose({ claims, impactFacts, diagnostics, selectedClaimIds = [], limit = 25 }) {
+  const known = diagnostics instanceof Map ? diagnostics : new Map();
+  const wanted = (Array.isArray(claims) ? claims : [])
+    .filter((claim) => isRouteUuid(claim?.claimId) && !known.has(claim.claimId))
+    .filter((claim) => (claimKind(claim) !== "structural" || selectedClaimIds.includes(claim.claimId))
+      && claimInternalUse(claim.claimId, impactFacts) !== "usable")
+    .map((claim) => claim.claimId);
+  return wanted.slice(0, Math.max(0, limit));
+}
+
+// What a P2-06 blocker means to the organization administrator.
+export const CLAIM_USE_BLOCKER_MESSAGES = Object.freeze({
+  claim_not_approved_for_requested_audience: "it is not approved for internal use",
+  audience_gate_closed: "its evidence is not cleared for internal use",
+  claim_review_unresolved: "the ordinary record-count rule does not cover it and its claim has no completed review",
+  evidence_review_unresolved: "the ordinary record-count rule does not cover it and its evidence has no completed review",
+  support_strength_unassessed: "how well its evidence supports it has not been assessed",
+  coverage_dimension_unresolved: "a coverage question about its evidence is unresolved",
+  client_followup_unresolved: "a follow-up question about it is unanswered",
+  potential_conflict_review_unresolved: "a possible conflict with other evidence is unresolved",
+  requirement_authority_absent: "a requirement it depends on has no recorded authority",
+  traceability_incomplete: "its evidence lineage is incomplete",
+});
+
+const REVIEW_BLOCKERS = new Set(["claim_review_unresolved", "evidence_review_unresolved"]);
+export const ORDINARY_RULE_NOTE = "The ordinary rule covers a record count you defined with Count records and the claim proposed from it, "
+  + "from a current source whose recorded permissions allow internal use and AI processing with no sensitive category recorded. "
+  + "Check the source under Processing permissions if one of those is wrong; claims outside the rule are reviewed by Get Kinder.";
+
+// The one line shown on a claim that is not usable now, from its diagnosis.
+export function claimNotUsableMessage(diagnosis) {
+  if (diagnosis?.conflictReason) return `Not usable in internal reports now: ${TRACEABILITY_CONFLICT_EXPLANATIONS[diagnosis.conflictReason]}.`;
+  const codes = Array.isArray(diagnosis?.blockerCodes) ? diagnosis.blockerCodes : [];
+  if (codes.length === 0) return "Not usable in internal reports now.";
+  const reasons = codes.map((code) => CLAIM_USE_BLOCKER_MESSAGES[code]).join("; ");
+  return `Not usable in internal reports now: ${reasons}.${codes.some((code) => REVIEW_BLOCKERS.has(code)) ? ` ${ORDINARY_RULE_NOTE}` : ""}`;
+}
+
+export const CLAIM_USE_UNKNOWN_MESSAGE = "Its current internal use is not confirmed here. A draft is still checked when it is generated and opened.";
+
+// Whether a draft from the selection would be immediately usable as an
+// internal report. Preparing the draft is still allowed: generation keeps
+// its own rules, and the saved draft says whether it is usable.
+export function selectionReportUsability(selectedClaimIds, useOf, kindOf = () => "other") {
+  const selected = Array.isArray(selectedClaimIds) ? selectedClaimIds : [];
+  const notUsable = selected.filter((claimId) => useOf(claimId) === "not_usable");
+  const unknown = selected.filter((claimId) => useOf(claimId) === "unknown");
+  return {
+    immediatelyUsable: notUsable.length === 0 && unknown.length === 0,
+    notUsable,
+    unknown,
+    notUsableMeasured: notUsable.filter((claimId) => kindOf(claimId) === "measurement"),
+  };
+}
+
+export function selectionReportUsabilityMessage({ notUsable, unknown, notUsableMeasured = [] }) {
+  const parts = [];
+  const notUsableOther = notUsable.filter((claimId) => !notUsableMeasured.includes(claimId));
+  if (notUsableMeasured.length > 0) {
+    parts.push(`${notUsableMeasured.length} selected measured finding(s) are not usable in internal reports now. A draft is generated from a `
+      + "measured finding only while it is usable, so this request will be refused unless that has changed. The condition is shown on the claim.");
+  }
+  if (notUsableOther.length > 0) {
+    parts.push(`${notUsableOther.length} selected claim(s) are not usable in internal reports now, so a draft from this selection will be prepared but `
+      + "will not be immediately usable as an internal report. The reason is shown on each claim.");
+  }
+  if (unknown.length > 0) parts.push(`${unknown.length} selected claim(s) have an internal use that is not confirmed here; the saved draft will say whether it is usable.`);
+  if (notUsable.length > 0) parts.push("For a report you can open and download now, select only claims marked \"Usable in internal reports now\".");
+  return parts.join(" ");
+}
+
+// A saved draft whose every cited claim is a structural fact, from the
+// server's own internal-report evaluation of its actual citations (never from
+// the claims this page happened to load): kept as it was generated, but it
+// holds no measured result.
+export function isStructuralOnlyDraft(draft) {
+  return Array.isArray(draft?.internalReport?.blockedReasons) && draft.internalReport.blockedReasons.includes("structural_facts_only");
+}
+
+/**
+ * Reads a paged organization library (Claim or Evidence Library) from
+ * `cursor`, up to `maxPages` pages. `fetchPage(cursor)` returns the route
+ * result; `cursorKey` names the server's continuation field. Returns
+ * { status: "superseded" } once `isCurrent()` is false after any read (a newer
+ * organization, Project, or refresh owns the state), { status: "error" } on
+ * a refused read or a truncated page without a valid continuation, and
+ * otherwise { status: "success", items, complete, nextCursor }: `complete` only
+ * when the server reported the last page, else the cursor to continue from.
+ */
+export async function readLibraryPages({ fetchPage, project, cursorKey, cursor = null, maxPages, isCurrent = () => true }) {
+  let items = [];
+  let next = cursor;
+  for (let page = 0; page < maxPages; page += 1) {
+    const result = await fetchPage(next);
+    if (!isCurrent()) return { status: "superseded" };
+    if (result?.statusCode !== 200 || !result.body?.ok) return { status: "error", result };
+    items = items.concat(project(result.body.data));
+    if (result.body.data?.truncated !== true) return { status: "success", items, complete: true, nextCursor: null };
+    next = result.body.data[cursorKey];
+    if (!isRouteUuid(next)) return { status: "error", result: { statusCode: 502, body: null } };
+  }
+  return { status: "success", items, complete: false, nextCursor: next };
+}
+
+// Saved drafts from every page loaded so far, newest first. The server pages
+// in id order, so the order is complete only once every page is loaded.
+export function mergeInternalDraftPages(current, items) {
+  const byId = new Map((Array.isArray(current) ? current : []).map((item) => [item.generatedContentDraftId, item]));
+  for (const item of Array.isArray(items) ? items : []) byId.set(item.generatedContentDraftId, item);
+  return [...byId.values()].sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || ""))
+    || a.generatedContentDraftId.localeCompare(b.generatedContentDraftId));
 }
 
 // Claims already proposed for an evidence item, from the loaded Claim Library page.
@@ -165,7 +316,7 @@ export function extractionResultMessage(data) {
 export function claimProposalResultMessage(data) {
   return data?.replayed === true
     ? "A claim was already proposed for this evidence. Nothing new was written."
-    : "Claim proposed. It is internal-only and awaits Get Kinder claim review.";
+    : "Claim proposed. It is internal-only; whether it is usable in internal reports now is shown on the claim below.";
 }
 
 // P2-04 outcome: counts only. Generation records open gaps and open client
@@ -262,6 +413,10 @@ export function internalDraftFailureMessage(result, { canGenerateGapFollowups = 
     }
     return `${label} cannot be drafted from: part of its evidence lineage could not be found in this organization. `
       + "Nothing was created.";
+  }
+  if (result?.body?.blockers?.[0]?.blocking_reason === "measured_claim_not_currently_eligible") {
+    return "A selected measured finding is not usable in internal reports now, so no draft was created. Its current condition is shown "
+      + "on the claim under Claims for internal drafts. Nothing was created.";
   }
   if (result?.body?.error?.code === "claim_reviewed_not_supported") {
     return "A selected claim was found not supported by Get Kinder review and cannot be used in a draft. Nothing was created.";
@@ -518,14 +673,17 @@ export const INTERNAL_REPORT_REASON_MESSAGES = Object.freeze({
   content_type_requires_get_kinder_review: "Get Kinder reviews this type of draft.",
   audience_requires_get_kinder_review: "Only internal drafts are available as internal reports.",
   validator_results_not_passed: "This draft did not pass every automated check when it was generated.",
+  structural_facts_only: "Every claim it cites is a structural fact (which columns a source has), so it documents source structure, not a programme result.",
 });
 
-export const STRUCTURAL_ONLY_DRAFT_MESSAGE = "Structural facts only: this saved draft cites facts about which columns a source has, "
-  + "not a measured result, so it is not an impact report. It is kept as it was generated. To produce a usable internal report, "
-  + "select a measured finding under Claims for internal drafts and generate a new draft (use Count records in Data Sources first if there is none).";
+export const STRUCTURAL_ONLY_DRAFT_MESSAGE = "Structural facts only: this saved draft documents which columns a source has, "
+  + "not a measured programme result, so it is not an impact report, and a review would not make it one. It is kept exactly as it was "
+  + "generated, with its citations and history. To produce a usable internal report, select a measured finding under Claims for internal "
+  + "drafts and generate a new draft (use Count records in Data Sources first if there is none).";
 
 export const INTERNAL_DRAFT_FACTUAL_REVIEW_NEXT_ACTIONS = Object.freeze({
-  cited_claims_not_currently_eligible: "Ask Get Kinder to review the cited claims. The report becomes available once they are eligible for internal use.",
+  cited_claims_not_currently_eligible: "Each cited claim's current condition is shown on it under Claims for internal drafts. A new draft from claims "
+    + "marked \"Usable in internal reports now\" is usable immediately; this draft becomes available only once every claim it cites is usable.",
   source_version_not_current: "Ask Get Kinder to reconcile the cited source version, then reload this draft.",
   processing_permission_not_established: "Ask Get Kinder to review the cited source's current processing permission, then reload this draft.",
 });
@@ -559,7 +717,7 @@ export const INTERNAL_DRAFT_LIMITATION_MESSAGES = Object.freeze({
   not_approved_for_external_use: "Not approved for funder or public use, export, or release.",
   awaiting_get_kinder_review: "Get Kinder has not reviewed this draft.",
   awaiting_organization_review: "At least one cited claim or source is not yet usable for internal reports.",
-  cited_claims_not_currently_eligible: "At least one cited claim is not yet eligible for use (for example, it awaits Get Kinder claim review).",
+  cited_claims_not_currently_eligible: "At least one cited claim is not usable for internal use now.",
 });
 
 // Plan A Prompt 8: the server's release state for a reviewed internal draft.

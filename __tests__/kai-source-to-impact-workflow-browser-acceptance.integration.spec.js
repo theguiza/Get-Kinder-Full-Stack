@@ -957,7 +957,10 @@ async function runBrowserAcceptance() {
       assert.ok(rendered.includes("Awaiting Get Kinder review"), rendered);
       assert.ok(rendered.includes("Internal draft text for:"), rendered);
       assert.ok(rendered.includes("Not approved for funder or public use, export, or release."), rendered);
-      assert.ok(rendered.includes("claim review: needs_gk_review"), rendered);
+      // The cited claim is named by what it restates; its stored review status
+      // is not shown as a pending step (owner prompt 2026-10-26).
+      assert.ok(rendered.includes("(structural fact)"), rendered);
+      assert.ok(!rendered.includes("needs_gk_review"), rendered);
       assert.deepEqual(adminBPage.exceptions, []);
       results.steps7_8 = "PASS: claim -> P2-04 -> evidence summary 201 + impact narrative 201 (2 model calls) -> Admin B lists and reads both persisted drafts (awaiting review, cited claim, limitations) via the routes and the page";
     });
