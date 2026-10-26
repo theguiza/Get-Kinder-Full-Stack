@@ -44711,3 +44711,86 @@ Unchanged: generation routes and idempotency, P2-04, P2-06/P2-08, the ordinary a
 Anything beyond a record count (rates, outcomes, sums) is a new evidence type and contract, which the threat model's raw-data-to-claim prohibition governs.
 
 **Status:** SOURCE_TO_IMPACT_FAILURE_CLASSIFIED_COPY_CORRECTED_LOCALLY. Not pushed, deployed, or verified in production.
+
+### Native XLSX record count to internal reports: worksheet basis, legacy continuation, story-present route (2026-10-26)
+
+**Owner authorization (USER_CONFIRMED):** owner prompt "CODEX — COMPLETE NATIVE XLSX-TO-INTERNAL-REPORT IMPLEMENTATION". It authorizes repository-local implementation, migration-file preparation and validation on disposable local synthetic PostgreSQL, and local commits. It does not authorize push, deployment, production reads or writes, applying migrations to any shared database, reprofiling the production workbook, flag/tenant/credential changes, rewriting the historical `field_2` draft, or `00_KAI_CURRENT_STATE.md`.
+
+**Starting state (TOOL_VERIFIED):** `main` at `4e41090`, clean working tree.
+
+**Implemented (TOOL_VERIFIED, code and tests):**
+- **P1 worksheet basis** (`localProfilingKernel.js`, `summarizeXlsxRecordCountBasis`): each XLSX sheet now carries `record_count_basis` (`kai_xlsx_worksheet_record_basis_v1`). Cell values are read from shared strings, inline strings and stored values only in memory; none is stored. Worksheet row 1 is the header row, and it is established only when every non-blank header cell is text. Data records are rows 2 through the last row with a value. A row with no non-whitespace value, whether stored or absent, is a blank record. Zero and FALSE count as values. Exact duplicates compare every column's value, including blank rows, as the CSV profile does. Per-column missing counts are stored. Formula cells, merged ranges, hidden rows or columns, values in unheaded columns and unresolved shared strings are counted, never resolved. Every existing profile field is unchanged.
+- **P2-01M derivation** (`deriveRecordCountMeasurement`): it now has an XLSX branch under the new method `p1_xlsx_single_worksheet_data_rows_excluding_blank_v1`, on a `source_data_records` locator `{scope, sheet_key}`.
+  - Refusals: more than one worksheet (`measurement_xlsx_not_single_worksheet`); a profile without the basis (`measurement_xlsx_record_basis_not_committed`, which names the new-intake-version continuation and never reads the workbook `row_count`); a header that is not established; each ambiguity (`…formula_cells_present`, `…merged_cells_present`, `…hidden_rows_or_columns_present`, `…not_single_table`, `…values_unresolved`); and inconsistent counts. Other formats get `measurement_source_not_single_table`.
+  - CSV derivation, statement wording, locator identity and method are byte-identical.
+  - Format-aware statements say "worksheet data row" and follow `calculation_method`. So does `validateMeasurementClaimBasis`, which also requires the locator to match the method. The ordinary authority's exact restatement check therefore moves with them unchanged.
+  - The Markdown calculation line (`describeMeasurementCalculationMethod`) and the missingness dimension (the worksheet's own per-column counts) follow the method as well.
+- **Migration** `kai_sprint2_p2_01m_xlsx_worksheet_record_count_method` (+ rollback). It widens only `evidence_measurements_p2_01m_method_check` (CSV + XLSX) and `source_locators_p2_01_coordinates_check` (adds the one-worksheet shape). No row is touched, and it re-applies cleanly.
+  - The rollback refuses while any XLSX measurement or worksheet locator exists. After the first workbook count, roll back the application first and keep the rows. The previous application fails closed on XLSX rows: its basis validator rejects the method.
+  - The read-only verifier `scripts/kai-sprint2-p2-01m-xlsx-worksheet-method-verify-read-only.sql` is a single `SELECT`. It evaluates the live CHECKs against literal vectors and matches the other four P2-01M CHECKs against the 03V packet fingerprints. It is registered in the shared chain, the P2-01M runner and the Knowledge Studio runner.
+- **Customer:** the Count records panel states the worksheet scope, and the guidance no longer says CSV only.
+
+**Continuation of an already-promoted workbook (TOOL_VERIFIED):**
+- **Path A (reprofile in place) is not supported by the contract.** A source version's FK binds its candidate's `profile_canonical_sha256`. `sources.source_code` derives from the sensitivity profile and the profile hash, and file profiles are immutable.
+- **Path B is the existing contract.** In Files, the customer chooses the same workbook and selects "Upload again as a new intake version" (`force_new_version`, `original_`/`supersedes_intake_file_id`). The new intake file is quarantined, scanned and profiled with the worksheet basis. The administrator records its Phase-5 sensitivity decision, which existing rules bind per sensitivity profile, and promotes it. Count records follows.
+- No evidence, claim or coverage approval is added. The old file, profile, version (still current; no operation supersedes a version), promotion, sensitivity decision, structural evidence and claim are unchanged.
+- Reusing the prior sensitivity/promotion decision for the new version is not implemented: no rule permits it.
+
+**Connected acceptance** (`kai-customer-xlsx-file-to-report-browser-acceptance`, 16/16 on two runs after the C5 addition; 15/15 twice before it). It uses real Chrome, real upload bytes, the real P1 worker and every mounted route on the normal chain, and the verifier reports OVERALL PASS:
+- **A (ordinary, six §7.2 categories absent):**
+  - Files upload; basis 6 data rows, 1 blank, 2 duplicates, missing counts `[1,1,1,1]`. Count records shows "Excel workbook…" and 6/1/2/5.
+  - The measurement is 5 under the XLSX method on `{scope, sheet_1}`. The evidence and claim say "worksheet data row".
+  - P2-06 internal eligibility holds with no approval; funder and public are closed. An Evidence Summary and an Impact Narrative are generated in the drafting UI, and both Markdown reports open and download (200).
+  - The reports state 6 − 1 = 5, the duplicates included, the attested period, the worksheet method and their lineage, and assert nothing about participants, outcomes or causes. Zero approvals.
+- **B (legacy):** the previous revision `4e41090` runs in the same process from a temporary `git clone --shared` checkout and uploads, profiles and promotes the workbook.
+  - Its persisted profile is exactly the old kernel's output: `row_count` 7, no header flag, no blank count, no basis. It extracts 4 structural evidence items and a claim.
+  - The current Count records refuses it (`measurement_xlsx_record_basis_not_committed`) and the panel names the continuation.
+  - "Upload again as a new intake version" in Files, then the decision and promotion, give a new current version (the legacy one stays current), a measurement of 5, an ordinary report (200) and a same-key replay. Zero approvals; the legacy snapshot is unchanged.
+- **C (story/testimonial `present`; allowed; AI permitted; five other categories absent):**
+  - Measured (5) and claimed. P2-06 internal: not eligible, `[claim_review_unresolved, evidence_review_unresolved, support_strength_unassessed, coverage_dimension_unresolved]`.
+  - The organization's review view shows `organization_may_decide: false` (`story_testimonial_not_cleared`), and generation is refused with `measured_claim_not_currently_eligible`.
+  - `gk_reviewer` then records evidence `supported`, claim `approved` (internal), and internal coverage acceptance of `conflicting_source_indicators`, `requirement_alignment` and `small_cell_risk`. P2-06 internal becomes eligible with no blockers, and generation succeeds.
+  - The ordinary client download stays 422 `story_testimonial_not_cleared`.
+  - Get Kinder's route then delivers it. `gk_reviewer` does the content review, `gk_admin` the export review, `gk_reviewer` the limitation snapshot, and `gk_admin` the candidate, internal release grant and manifest. The administrator's read-only released-report delivery returns 200 with the 5-session count, cited.
+  - The administrator cannot start that review or request the release. Funder and public stay closed. The recorded `present` decision is unchanged.
+- **E:** a two-worksheet workbook is refused. Contributor, reviewer and other-organization administrator get 403, another Project 404, replay is `replayed`, a definition conflict 409, and an unsupported or causal model reply 422.
+
+**Authority comparison (TOOL_VERIFIED in code; USER_CONFIRMED policy text):**
+- Operating Model §7.2 applies GK release review to *public* story/testimonial use and says the control applies to release, not to drafting or analysis.
+- §11's implemented organization-owned scope requires all six categories to be `absent` per cited *source*, and allows a client administrator to receive a GK-released internal report.
+- The implementation follows §11. A story-present source's count has a legitimate internal report through Get Kinder (9 GK decisions/actions above), not self-serve.
+- Open owner decision (not a blocker): may a properly supported, non-identifying, non-story measurement derived from a story-containing source receive evidence-scoped internal-use authority, and if so through which human-review mechanism? Not implemented.
+
+**Verification (TOOL_VERIFIED; `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel`):**
+
+| Command or suite | Result |
+| --- | --- |
+| Full `npm test` | 5,783 passed, 0 failed, 122 skipped (5,905; the extra skip is the new runner-only acceptance) |
+| P1 kernel + P2-01M unit + measured-report selection specs | 41/41 |
+| P2-01M runner (with P2-06 traceability; verifier FAIL before / PASS after; both rollbacks refuse) | 57 passed, 8 skipped, 0 failed (baseline 56/8) |
+| Plan A normal migration chain (82 listed, 80 applied, 2 refuse as designed) | passed; proofs 31/31, 4/4 |
+| XLSX connected acceptance (A–C, E) | 16/16 (twice 15/15 before C5) |
+| CSV assembled file-to-report acceptance (unchanged) | 23/23 |
+| Measured-report selection, measurement-to-released-report, source-to-impact, evidence-to-draft browser acceptances | 17, 13, 16, 21 (0 failed) |
+| P2-04 / P2-08 / P3-01 / P13-01 runners | 18, 20, 22, 33 (0 failed; same as baseline) |
+| `verify:kai-sprint2-api-contract` | 71/71 |
+| `npm run build` | passed; bundle reproducible (`entry.js` sha256 `34a79005…6386a`) |
+| `git diff --check` | passed |
+
+**Affected test updates:** the XLSX refusals in the P1 kernel spec and the P2-01M unit/integration specs now assert the new contract (fresh workbook measured; legacy, multi-sheet and ambiguous workbooks refused). CSV assertions are unchanged except for the added `calculationMethod`/`locatorCoordinates`/`sheetKey` and `source_format`/`worksheet` fields. The customer measurement-form projection expects `worksheet: null` for CSV.
+
+**Production release order (prepared, NOT executed; each step separately authorized):**
+1. Authorize the exact migration `kai_sprint2_p2_01m_xlsx_worksheet_record_count_method.sql`.
+2. Apply it in production pgAdmin (one transaction).
+3. Run `scripts/kai-sprint2-p2-01m-xlsx-worksheet-method-verify-read-only.sql`. OVERALL must be PASS, and X4 is expected to be `none` (production P2-01M tables reportedly empty, USER_CONFIRMED).
+4. Authorize the push/deploy of the exact verified revision.
+5. Push only after step 3 passes: a push to `main` is observed to auto-deploy. An application deployed before the migration would fail only a workbook Count records, in one rolled-back transaction.
+6. Verify the deployed bundle and the Count records basis on a workbook.
+7. Authorize the production synthetic writes separately.
+8. For workbook `f001bc59…`: choose the same file in Files, then "Upload again as a new intake version". The worksheet must have text headers in row 1 and no formulas, merged cells, hidden rows or columns, or unheaded columns (NOT_CONFIRMED for the live workbook).
+9. Record the client_admin sensitivity decision exactly as determined by a human (story/testimonial was recorded `present`), promote, record the definition and propose the claim.
+10. Follow the C route: Get Kinder evidence, claim and coverage reviews; generation; Get Kinder content review and internal release; the administrator's released-report delivery.
+11. Verify citations and Markdown.
+12. The production workbook is not fixed until these are done and observed.
+
+**Status:** NATIVE_XLSX_MEASUREMENT_AND_LEGACY_CONTINUATION_VERIFIED_LOCALLY; STORY_PRESENT_INTERNAL_REPORT_VIA_GK_RELEASE_VERIFIED_LOCALLY. Not pushed, migrated, deployed, or verified in production.
