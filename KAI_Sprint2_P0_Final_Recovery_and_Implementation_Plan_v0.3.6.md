@@ -44556,3 +44556,41 @@ Assembled acceptance outcome (real upload bytes → P1 → client_admin sensitiv
 **Remaining (NOT_CONFIRMED):** real model prose (the provider is a deterministic SDK stub in every local run, so the two reports' narrative sections are identical); production schema, deployment and live acceptance; P2-01M is not confirmed applied in production.
 
 **Status:** ORDINARY_INTERNAL_FACTUAL_REUSE_IMPLEMENTED_AND_VERIFIED_LOCALLY. Not pushed, deployed, or retested in production.
+
+### Customer source-to-report correction: measured claim selection (2026-10-26)
+
+**Owner authorization (USER_CONFIRMED):** the owner prompt "CODEX — COMPLETE KAI'S CUSTOMER SOURCE-TO-REPORT CORRECTION". After `d4fc0da` was reported deployed, the customer still saw an Evidence Summary citing a legacy `field_2` dictionary-field-presence claim with `needs_gk_review`. Authorizes inspection, reproduction, local implementation, synthetic tests and local commits only: no push, deployment, production or database access, migration, schema, flag, tenant, credential, or `00_KAI_CURRENT_STATE.md` change.
+
+**Starting state (TOOL_VERIFIED):** `main` at `d4fc0da`, clean working tree.
+
+**Reproduced cause (TOOL_VERIFIED, local synthetic):** Data Sources (`ClientEvidenceWorkflow.jsx`) read only the first page of `claim-library/candidates?limit=25` and `evidence-library/candidates?limit=25`; both are organization-wide and ordered by random UUID (`kaiClaimLibraryReadModels.js` `ORDER BY claim_id`). Every claim showed the stored `Review: needs_gk_review` (not rewritten by the ordinary authority), and structural and measured claims were indistinguishable and equally selectable. With 31 legacy structural claims and the measured claim in one organization, the UI listed 25 of 32 claims and the measured claim had no selection control; the only selectable claims were `field_N` claims, whose drafts P2-06 correctly refuses as internal reports ("Ask Get Kinder to review the cited claims"). Secondary: the per-content-type idempotency key was kept after success, so a deliberate second Generate click replayed the previous draft; the draft list was in random id order.
+
+**Confirmed working, not changed:** P2-01M measurement, ordinary internal authority, P2-06/P2-08 eligibility, generation (the generator received exactly the selected measured claim), `getClientInternalReportMarkdown`, historical drafts.
+
+**NOT_CONFIRMED:** the live organization's claim count and order, whether the live measured claim exists and is current, and how the live `field_2` draft was selected (no production evidence was read).
+
+**Correction (`36c6588`):** the Claim Library candidate read carries `evidenceType`; Data Sources reads every Claim/Evidence Library page (bounded at 40), lists measured findings first, labels structural facts and does not offer them for report generation (gap follow-ups still offered), and shows the impact-facts (P2-08/P2-06 internal) answer "Usable in internal reports now" instead of the stored review status; readiness needs a selected measured finding (`no_measured_claim` sends the customer to Count records); the idempotency key is retired once a draft is returned (a failed request still replays); drafts are listed newest first; a structural-only draft is marked "Structural facts only", kept unchanged, and points to a new draft from a measured finding. Generation routes, eligibility and the Markdown route are unchanged.
+
+**Acceptance (`kai-customer-measured-report-selection-browser-acceptance`, 10/10; deterministic SDK stub, not live-model):** established fixture independently checked (6 data records, 1 blank, 2 identical included, 5 counted; September 2026 attested); a second synthetic 30-column source gives 31 structural claims; historical `field_2` Evidence Summary unchanged in citations and status throughout. Without a measurement: Count records guidance, generation disabled, historical draft shown as structural-only. Test 1: all 32 claims listed, measured first and "usable"; the new summary cites only the measured claim and opens (not the `field_2` draft). Tests 2/4: complete Markdown, 5 programme sessions, arithmetic 6 − 1 = 5, period, duplicates, limitations, does-not-establish, traceability, no `field_N`. Test 3: second summary (deliberate repeat click) and impact narrative are new drafts; a same-key retry replays (`replayed: true`, no write); additional human approvals 0. Test 5: contributor/reviewer/inactive admin/GK 403, other organization 403, other Project 404, AI/assistant/system actors denied, structural draft 422, funder generation 403, stale source 409. Test 6: after reload, newest usable report first, structural draft last and marked, no Get Kinder review state on the usable claim.
+
+**Verification (TOOL_VERIFIED; `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel`):**
+
+| Command or suite | Result |
+| --- | --- |
+| Full `npm test` | 5,773 passed, 0 failed, 121 skipped |
+| `kai-customer-measured-report-selection.spec.js` (new) | 8/8 |
+| P2-01M / P2-04 / P2-06 / P2-08 / P2-01 handoff runners | 56 passed 8 skipped; 18/18; 34/34; 20/20; 7/7 |
+| P3-01 / P13-01 runners | 22/22, 33/33 |
+| Assembled customer file-to-report acceptance | 23/23 |
+| Internal report (E1), source-preparation continuation, source-to-impact, measurement-to-released-report, Knowledge Studio, evidence pipeline, reviewed-evidence claim proposal browser acceptance | 16/16, 12/12, 16/16, 13/13, 6/6, 8/8, 12/12 |
+| `verify:kai-sprint2-api-contract` | 71/71 |
+| `npm run build` | passed |
+| `git diff --check` | passed |
+
+**Affected test updates:** browser specs that drafted from structural claims through the UI now assert the claim is not offered and create those drafts through the unchanged routes (factual-review C2, source-preparation DOWNSTREAM, source-to-impact 7-8/8c/8d, evidence-to-draft B1/B4/B5). Protected negatives unchanged.
+
+**Pre-existing, not attributable (verified in a clean `d4fc0da` worktree):** `kai-client-admin-source-promotion` "protected operations" (1 failure, same at baseline); `kai-client-admin-evidence-to-draft` B5a (baseline failed 6: B5a, B5b, B5c, B5, B6, D; now only B5a).
+
+**Remaining production customer-acceptance action:** after a separately authorized deployment of `36c6588`, the organization administrator reloads Data Sources for the Project, confirms the "Measured finding … Usable in internal reports now" claim is listed (or, if none, uses Count records → Record definition and count → Propose a claim), selects it, generates an Evidence Summary, and opens/downloads its Markdown; production is not fixed until that live synthetic test passes.
+
+**Status:** CUSTOMER_MEASURED_REPORT_SELECTION_CORRECTED_LOCALLY. Not pushed, deployed, or retested in production.
