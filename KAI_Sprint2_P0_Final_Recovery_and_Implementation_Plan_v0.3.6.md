@@ -44657,3 +44657,38 @@ Unchanged: generation routes and idempotency, P2-04, P2-06/P2-08, the ordinary a
 **Release status:** local only. Pushing `36c6588`, `beb5982`, `454f811` and this entry is a fast-forward of the local `origin/main` ref (`d4fc0da`). No migration in this package. The production P2-01M schema, the live measured claim and the live organization's claim count remain NOT_CONFIRMED. Push, deploy and the live synthetic customer acceptance need separate explicit owner authorization.
 
 **Status:** CUSTOMER_SOURCE_TO_INTERNAL_REPORT_COMPLETED_AND_VERIFIED_LOCALLY. Not pushed, deployed, or retested in production.
+
+### Source-to-impact-evidence failure: workbook source has no measurable basis (2026-10-26)
+
+**Owner authorization (USER_CONFIRMED):** owner prompt "KAI — ESTABLISH AND CORRECT THE SOURCE-TO-IMPACT-EVIDENCE FAILURE". It authorizes inspection, proven local repair, synthetic local tests and local commits. It does not authorize push, deployment, production reads or writes, migrations, a new evidence type or AI extraction pathway, or `00_KAI_CURRENT_STATE.md`.
+
+**Starting state (TOOL_VERIFIED):** `main` at `8802dce`, clean working tree.
+
+**Implemented capability (TOOL_VERIFIED, code):**
+- P1 profiles `.csv`, `.xlsx`, `.md`, `.txt` and PDF. Only the CSV profile commits `structural_metadata.header_row_assumed` and `counts.blank_record_count`. The XLSX profile has `format: "xlsx"`, per-sheet counts, and a workbook `row_count` that sums every sheet's rows, header rows included. It records cell types only, never values.
+- The `kai.evidence_items.evidence_type` CHECK allows only `dictionary_field_presence_fact` (structural) and `source_record_count_measurement` (P2-01M). No other substantive evidence type or extraction path exists.
+- In P2-01M, `deriveRecordCountMeasurement` refuses any profile whose `format !== "csv"` with `measurement_source_not_single_table_csv`. `evidence_measurements_p2_01m_method_check` pins `calculation_method` to `p1_csv_profile_data_records_excluding_blank_v1`, and the evidence and claim statements say "CSV data record". The existing integration acceptance asserts the XLSX refusal for both the write and the basis read.
+- The ordinary internal authority (P2-06 internal) admits only a confirmed P2-01M measurement `finding` claim from a current version. That version's current Phase-5 decision must be `reviewed` and allowed with AI processing, and must record all six §7.2 categories as `absent`.
+
+**First missing transition (TOOL_VERIFIED in code and synthetic reproduction; live identity NOT_CONFIRMED):** a source version promoted from an XLSX profile cannot produce a P2-01M measurement. Its measurement basis is `measurable: false` (`measurement_source_not_single_table_csv`), so it can never have a measurement evidence item, measured claim or substantive internal report. This is an unimplemented capability, not a review issue or an Excel-processing defect. Code alone cannot establish from service reads whether the live promoted version is the workbook's or whether any of the organization's other current versions is a CSV, so that remains NOT_CONFIRMED. The read-only pgAdmin reconciliation for it was prepared but not run.
+
+**Correction (`283093e`, local):** customer guidance sent every organization to Count records, and the measurement panel dropped the server's `required_fix`. The panel now shows the server's reason with its required fix. The `no_measured_claim` and structural-only draft guidance now state that Count records works only on a single-table CSV source. No server, schema or eligibility change was made. The historical `field_2` draft and every protected refusal are untouched.
+
+**Verification (TOOL_VERIFIED; `DATABASE_URL` loopback sentinel):**
+
+| Command or suite | Result |
+| --- | --- |
+| P1 local profiling kernel (new: real synthetic XLSX → P2-01M derivation → customer projection) | passed, 0 failed |
+| Customer measured-report selection, Plan A customer measurement/receipt, P2-01M unit specs (with the kernel spec) | 48/48 |
+| `npm run build` | passed; `entry.js` sha256 `1c6b9f6a…c021` |
+| `git diff --check` | passed |
+
+**Minimum XLSX measurement contract delta (decision required, not implemented):**
+1. **P1 XLSX profile:** commit, per sheet, a header-row assertion, the data-record count after the header, and a blank-record count. The blank-record count needs value-presence inspection, which today's type-only scan does not do. Existing profiles are immutable, so the workbook must be uploaded again as a new intake version.
+2. **Sheet scope:** a single-sheet-only rule needs no locator change. A sheet-scoped count needs a `sheet_key` in the definition and locator, and so a change to `source_locators_p2_01_coordinates_check`.
+3. **Migration plus rollback:** widen `evidence_measurements_p2_01m_method_check` with an XLSX sheet method, and the locator CHECK if sheets are scoped.
+4. **Validators:** add an XLSX branch to `deriveRecordCountMeasurement`. Make the evidence and claim statements format-aware. The ordinary authority compares the claim statement exactly, so it moves with them.
+
+Anything beyond a record count (rates, outcomes, sums) is a new evidence type and contract, which the threat model's raw-data-to-claim prohibition governs.
+
+**Status:** SOURCE_TO_IMPACT_FAILURE_CLASSIFIED_COPY_CORRECTED_LOCALLY. Not pushed, deployed, or verified in production.
