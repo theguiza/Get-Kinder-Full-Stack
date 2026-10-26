@@ -8,6 +8,9 @@ import {
   profileLocalTrustedFile,
 } from "../Backend/kai/profiling/localProfilingKernel.js";
 import { KAI_SPRINT2_P0_CSV_LIMITS } from "../Backend/kai/config/kaiSprint2P0Contract.js";
+import { deriveRecordCountMeasurement } from "../Backend/kai/validators/kaiSourceMeasurementValidators.js";
+import { projectMeasurementBasis } from "../frontend/knowledgeStudio/clientSourceMeasurementLogic.js";
+import { INTERNAL_DRAFT_READINESS_MESSAGES, STRUCTURAL_ONLY_DRAFT_MESSAGE } from "../frontend/knowledgeStudio/clientEvidenceWorkflowLogic.js";
 
 const CSV_MIME = "text/csv";
 const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
@@ -269,6 +272,24 @@ test("P1-01 XLSX profiling exposes per-sheet names, counts, headers, hints, miss
   assert.equal(result.sheets[0].sample_records.length, 2);
   assert.equal(result.draft_dictionary_fields.length, 2);
   assertNoRawSentinels(result);
+});
+
+test("an XLSX profile is not a P2-01M record-count basis, and the customer sees the server's reason and required fix", async () => {
+  const result = await profile({ extension: ".xlsx", declaredMime: XLSX_MIME, body: xlsxBytes({ duplicate: true }) });
+  assert.equal(result.status, "profiled");
+  assert.equal(result.format, "xlsx");
+  assert.equal(result.structural_metadata.header_row_assumed, undefined, "no committed header row");
+  assert.equal(result.counts.blank_record_count, undefined, "no committed blank-record count");
+  const derived = deriveRecordCountMeasurement(result);
+  assert.equal(derived.ok, false);
+  assert.equal(derived.blockers[0].blocking_reason, "measurement_source_not_single_table_csv");
+  const projected = projectMeasurementBasis({
+    sourceVersion: { source_version_id: "11111111-1111-4111-8111-111111111111", is_current: true },
+    basis: { measurable: false, blockers: derived.blockers },
+  });
+  assert.deepEqual(projected.counts, { measurable: false, reasons: [`${derived.blockers[0].message} ${derived.blockers[0].required_fix}`] });
+  assert.match(INTERNAL_DRAFT_READINESS_MESSAGES.no_measured_claim, /only on a single-table CSV source; an Excel workbook cannot be counted yet/);
+  assert.match(STRUCTURAL_ONLY_DRAFT_MESSAGE, /only on a single-table CSV source, not an Excel workbook/);
 });
 
 test("P1-01 XLSX profiling enforces sheet limits and does not disclose cell, formula, or prompt text", async () => {

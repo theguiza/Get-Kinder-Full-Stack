@@ -21,7 +21,10 @@ function projectBasisCounts(basis) {
     return {
       measurable: false,
       reasons: (Array.isArray(basis?.blockers) ? basis.blockers : [])
-        .map((blocker) => (isText(blocker?.message) ? blocker.message : null))
+        .map((blocker) => {
+          if (!isText(blocker?.message)) return null;
+          return isText(blocker.required_fix) ? `${blocker.message} ${blocker.required_fix}` : blocker.message;
+        })
         .filter(Boolean),
     };
   }
