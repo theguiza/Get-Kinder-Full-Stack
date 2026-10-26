@@ -543,6 +543,32 @@ async function runBrowserAcceptance() {
     await page.selectProject(PROJECT_X);
     await page.idle();
   }
+  // Owner prompt 2026-10-26: a structural field-presence claim is not offered
+  // as an impact finding in Data Sources, which sends the customer to Count
+  // records when there is no measured claim. The generation routes are
+  // unchanged and still accept it (drafts that wait for Get Kinder): both
+  // drafts are generated through them, and the summary is opened from the
+  // page's draft list.
+  async function generateStructuralDrafts(page, claimId, keyPrefix) {
+    assert.equal(await page.evaluate(`document.querySelector('[data-client-claim="${claimId}"]').getAttribute("data-client-claim-kind")`), "structural");
+    assert.equal(await has(page, `[data-client-claim="${claimId}"] input`), false, "a structural fact is not offered as an impact finding");
+    assert.equal(await page.evaluate(`document.querySelector("[data-client-draft-readiness]").getAttribute("data-client-draft-readiness")`), "no_measured_claim");
+    for (const [path, suffix] of [[createEvidenceSummaryPath(ORG_X), "summary"], [createImpactNarrativePath(ORG_X), "narrative"]]) {
+      const response = await page.api("POST", path, DRAFT_BODY([claimId], `${keyPrefix}-${suffix}`));
+      assert.equal(response.status, 201, JSON.stringify(response.body));
+    }
+    const [summary] = await query(
+      `SELECT d.generated_content_draft_id::text AS id FROM kai.generated_content_drafts d
+         JOIN kai.generated_content_citations c ON c.organization_id = d.organization_id AND c.generated_content_block_id IN (
+           SELECT generated_content_block_id FROM kai.generated_content_blocks WHERE generated_content_draft_id = d.generated_content_draft_id)
+        WHERE d.organization_id = $1::uuid AND d.content_type = 'evidence_summary' AND c.claim_id = $2::uuid
+        ORDER BY d.created_at DESC LIMIT 1`, [ORG_X, claimId]);
+    await openDataSources(page);
+    await page.waitFor(() => has(page, `[data-client-internal-draft="${summary.id}"] button`), "the saved summary listed");
+    await page.clickIn(`[data-client-internal-draft="${summary.id}"] button`, "Read draft");
+    await page.waitFor(() => has(page, `[data-client-internal-draft-detail="${summary.id}"]`), "summary read back");
+    await page.idle();
+  }
   const setPanelSelect = (page, labelText, value) => page.evaluate(`(() => {
     const panel = document.querySelector("[data-client-source-promotion-panel]");
     const label = panel && [...panel.querySelectorAll("label")].find((el) => el.innerText.trim().startsWith(${JSON.stringify(labelText)}));
@@ -893,18 +919,10 @@ async function runBrowserAcceptance() {
       await adminBPage.waitForText("Gap follow-ups generated:");
       await adminBPage.idle();
       assert.ok([200, 201].includes(postsSince(adminBPage, mark)[0][1]));
-      await adminBPage.clickIn(`[data-client-claim="${claim.claim_id}"] input`, "Use in an internal draft");
-      await adminBPage.waitFor(async () => !(await adminBPage.text()).includes("Select at least one claim below to draft from."), "draft readiness");
       const callsBefore = modelCalls.length;
       mark = adminBPage.mark();
-      await adminBPage.clickButton("Generate internal evidence summary");
-      await adminBPage.waitForText("Internal evidence summary created: 1 block(s) citing 1 claim(s).");
       // The persisted draft is read back and rendered.
-      await adminBPage.waitFor(() => has(adminBPage, "[data-client-internal-draft-detail]"), "summary read back");
-      await adminBPage.idle();
-      await adminBPage.clickButton("Generate internal impact narrative");
-      await adminBPage.waitForText("Internal impact narrative created: 1 block(s) citing 1 claim(s).");
-      await adminBPage.idle();
+      await generateStructuralDrafts(adminBPage, claim.claim_id, "hist-structural");
       const posts = postsSince(adminBPage, mark);
       assert.deepEqual(posts, [[createEvidenceSummaryPath(ORG_X), 201], [createImpactNarrativePath(ORG_X), 201]]);
       assert.equal(modelCalls.length - callsBefore, 2);
@@ -1069,20 +1087,13 @@ async function runBrowserAcceptance() {
         [ORG_X, profileId]);
       assert.deepEqual(actorAudits.map((a) => a.actor), [ids.adminA, kai.adminB], "each decision's actor audited once");
 
-      // Continuation: Admin B selects the corrected file's claim in Data Sources and generates both internal drafts.
+      // Continuation: Admin B finds the corrected file's claim in Data Sources and generates both internal drafts.
       await openDataSources(adminBPage);
-      await adminBPage.waitFor(() => has(adminBPage, `[data-client-claim="${legacyClaim}"] input`), "the corrected file's claim offered for drafting");
-      await adminBPage.clickIn(`[data-client-claim="${legacyClaim}"] input`, "Use in an internal draft");
-      await adminBPage.waitFor(async () => !(await adminBPage.text()).includes("Select at least one claim below to draft from."), "draft readiness");
+      await adminBPage.waitFor(() => has(adminBPage, `[data-client-claim="${legacyClaim}"]`), "the corrected file's claim listed");
       callsBefore = modelCalls.length;
       const draftsBefore = new Set((await query("SELECT generated_content_draft_id::text AS id FROM kai.generated_content_drafts WHERE organization_id = $1::uuid", [ORG_X])).map((d) => d.id));
       const mark = adminBPage.mark();
-      await adminBPage.clickButton("Generate internal evidence summary");
-      await adminBPage.waitForText("Internal evidence summary created: 1 block(s) citing 1 claim(s).");
-      await adminBPage.idle();
-      await adminBPage.clickButton("Generate internal impact narrative");
-      await adminBPage.waitForText("Internal impact narrative created: 1 block(s) citing 1 claim(s).");
-      await adminBPage.idle();
+      await generateStructuralDrafts(adminBPage, legacyClaim, "legacy-corrected");
       assert.deepEqual(postsSince(adminBPage, mark), [[createEvidenceSummaryPath(ORG_X), 201], [createImpactNarrativePath(ORG_X), 201]]);
       assert.deepEqual(modelCalls.slice(callsBefore).map((call) => call.claimIds), [[legacyClaim], [legacyClaim]]);
       draftCounts.afterCorrection = modelCalls.length - callsBefore;
@@ -1125,7 +1136,7 @@ async function runBrowserAcceptance() {
       assert.deepEqual((await decisionsOf(ORG_X, profileId)).map((d) => [d.decision_outcome, d.is_head]), [["reviewed", false], ["reviewed", false], ["needs_more_information", true]]);
       assert.deepEqual(adminBPage.exceptions, []);
       console.log(`[source-to-impact-workflow-browser] 8c model calls ${JSON.stringify(draftCounts)}`);
-      results.step8c = `PASS: historical reviewed-unknown preserved and refused (0 calls); 4 unauthorized/cross-tenant reviewers 403; Admin B's correction superseded it (history + audits preserved, replay idempotent, stale 409); UI drafts 201 x2 (${draftCounts.afterCorrection} calls) read back with citations; mixed with the explicit prohibition 422 (0 calls); needs-more-information 422 (0 calls) with non-AI proposal 200`;
+      results.step8c = `PASS: historical reviewed-unknown preserved and refused (0 calls); 4 unauthorized/cross-tenant reviewers 403; Admin B's correction superseded it (history + audits preserved, replay idempotent, stale 409); drafts 201 x2 (${draftCounts.afterCorrection} calls) read back with citations; mixed with the explicit prohibition 422 (0 calls); needs-more-information 422 (0 calls) with non-AI proposal 200`;
     });
 
     // --- 8d: client self-service re-review from Data Sources ----------------------
@@ -1367,18 +1378,10 @@ async function runBrowserAcceptance() {
       await adminBPage.waitForText("Gap follow-ups generated:");
       await adminBPage.idle();
       assert.ok([200, 201].includes(postsSince(adminBPage, mark)[0][1]));
-      await adminBPage.clickIn(`[data-client-claim="${claim.claim_id}"] input`, "Use in an internal draft");
-      await adminBPage.waitFor(async () => !(await adminBPage.text()).includes("Select at least one claim below to draft from."), "draft readiness");
       const callsBeforeDrafts = modelCalls.length;
       const draftsBefore = new Set((await query("SELECT generated_content_draft_id::text AS id FROM kai.generated_content_drafts WHERE organization_id = $1::uuid", [ORG_X])).map((row) => row.id));
       mark = adminBPage.mark();
-      await adminBPage.clickButton("Generate internal evidence summary");
-      await adminBPage.waitForText("Internal evidence summary created: 1 block(s) citing 1 claim(s).");
-      await adminBPage.waitFor(() => has(adminBPage, "[data-client-internal-draft-detail]"), "summary read back");
-      await adminBPage.idle();
-      await adminBPage.clickButton("Generate internal impact narrative");
-      await adminBPage.waitForText("Internal impact narrative created: 1 block(s) citing 1 claim(s).");
-      await adminBPage.idle();
+      await generateStructuralDrafts(adminBPage, claim.claim_id, "rereview-structural");
       assert.deepEqual(postsSince(adminBPage, mark), [[createEvidenceSummaryPath(ORG_X), 201], [createImpactNarrativePath(ORG_X), 201]]);
       assert.deepEqual(modelCalls.slice(callsBeforeDrafts).map((call) => call.claimIds), [[claim.claim_id], [claim.claim_id]], "each model call carries only the corrected file's claim");
       draftCounts.afterUiCorrection = modelCalls.length - callsBeforeDrafts;

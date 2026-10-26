@@ -702,13 +702,16 @@ async function runBrowserAcceptance() {
       results.c = { summary: "ready for internal use", narrative: "ready for internal use" };
     });
 
-    await test("C2: a legacy field-presence draft is not usable as an internal report: its eligibility blocker and next action, and no approval control", async () => {
+    await test("C2: a legacy field-presence draft is not usable as an internal report: the UI no longer offers the structural claim, and a saved one is shown as metadata-only with its eligibility blocker and no approval control", async () => {
       await openDataSources();
       await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `[data-client-claim="${ids.legacyClaimId}"]`)), "the legacy field-presence claim");
-      await adminPage.clickIn(`[data-client-claim="${ids.legacyClaimId}"] input[type=checkbox]`, "Use the legacy claim in an internal draft");
-      await adminPage.clickButton("Generate internal evidence summary");
-      await adminPage.waitForText("Internal evidence summary created");
-      await adminPage.idle();
+      assert.equal(await adminPage.evaluate(`document.querySelector('[data-client-claim="${ids.legacyClaimId}"]').getAttribute("data-client-claim-kind")`), "structural");
+      assert.equal(await adminPage.evaluate(`document.querySelector('[data-client-claim="${ids.legacyClaimId}"] input[type=checkbox]')`), null, "not offered as an impact finding");
+      // A draft saved from it earlier (the route the earlier UI used; the server still accepts it).
+      created(await adminPage.api("POST", `${BASE_PATH}/admin/organizations/${ORG_X}/generated-content-drafts/evidence-summary`, {
+        claim_ids: [ids.legacyClaimId], idempotency_key: "legacy-field-presence-summary", engagement_id: PROJECT_X,
+      }), "legacy field-presence draft");
+      await openDataSources();
       const [blockedDraft] = await query(
         `SELECT d.generated_content_draft_id::text
            FROM kai.generated_content_drafts d
@@ -721,13 +724,16 @@ async function runBrowserAcceptance() {
       );
       assert.ok(blockedDraft, "the legacy claim's generated draft is persisted");
       ids.blockedDraftId = blockedDraft.generated_content_draft_id;
+      await adminPage.waitFor(async () => (await textOf(adminPage, `[data-client-internal-draft="${ids.blockedDraftId}"]`)) !== null, "the saved draft is listed");
+      await adminPage.clickIn(`[data-client-internal-draft="${ids.blockedDraftId}"] button`, "Read the legacy draft");
       await adminPage.waitFor(async () => (await textOf(adminPage, `[data-client-internal-draft-detail="${ids.blockedDraftId}"]`)) !== null, "the ineligible draft opens");
       await adminPage.idle();
       const blockedDetail = await textOf(adminPage, `[data-client-internal-draft-detail="${ids.blockedDraftId}"]`);
       assert.doesNotMatch(blockedDetail, /Provisional internal draft/i);
       assert.match(blockedDetail, /Not yet usable for internal reports/);
       assert.match(blockedDetail, /At least one cited claim is not currently eligible for internal use/);
-      assert.match(blockedDetail, /Ask Get Kinder to review the cited claims/);
+      assert.match(await textOf(adminPage, "[data-client-internal-draft-metadata-only]"), /^Structural facts only/);
+      assert.doesNotMatch(blockedDetail, /Ask Get Kinder to review the cited claims/, "the next step is a new draft from a measured finding");
       assert.doesNotMatch(blockedDetail, /Approve factual content|Release internal report|factual review is completed before/i);
       assert.equal(await textOf(adminPage, '[data-client-internal-report="available"]'), null);
       const detail = await adminPage.api("GET", clientInternalDraftPath(ORG_X, PROJECT_X, ids.blockedDraftId));

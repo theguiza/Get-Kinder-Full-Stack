@@ -542,7 +542,8 @@ async function runBrowserAcceptance() {
       if (!projectValue) await adminPage.waitForText("Select a Project above: each draft belongs to one Project.");
       await adminPage.selectProject(PROJECT_X);
       await adminPage.idle();
-      await adminPage.waitForText("Select at least one claim below to draft from.");
+      // Owner prompt 2026-10-26: with no measured finding the customer is sent to Count records.
+      await adminPage.waitForText("No measured finding yet.");
       assert.ok(!(await adminPage.text()).includes(ids.y.statements[0]), "no organization-Y data");
       results.b1 = "PASS";
     });
@@ -598,7 +599,7 @@ async function runBrowserAcceptance() {
       results.b3 = "PASS";
     });
 
-    await test("B4: claim selection - both fresh claims are selectable, each offers Generate gap follow-ups, and the first is selected", async () => {
+    await test("B4: claim selection - both fresh structural claims are listed as structural facts, each offers Generate gap follow-ups, and neither is offered as an impact finding", async () => {
       ids.x.usableClaimId = ids.x.claims[0].claim_id;
       ids.x.usableEvidenceId = ids.x.claims[0].evidence_item_id;
       ids.x.secondClaimId = ids.x.claims[1].claim_id;
@@ -609,10 +610,10 @@ async function runBrowserAcceptance() {
         const entry = await adminPage.evaluate(`document.querySelector('[data-client-claim="${claimId}"]').innerText`);
         assert.match(entry, /Review: needs_gk_review · Strength: unassessed/, "actual status shown, not promoted");
         assert.equal(await adminPage.evaluate(`Boolean(document.querySelector('[data-client-claim-gap-followups="${claimId}"]'))`), true, "Generate gap follow-ups offered");
-        assert.equal(await adminPage.evaluate(`Boolean(document.querySelector('[data-client-claim="${claimId}"] input'))`), true, "selectable");
+        assert.equal(await adminPage.evaluate(`document.querySelector('[data-client-claim="${claimId}"]').getAttribute("data-client-claim-kind")`), "structural");
+        assert.equal(await adminPage.evaluate(`Boolean(document.querySelector('[data-client-claim="${claimId}"] input'))`), false, "not offered as an impact finding (owner prompt 2026-10-26)");
       }
-      await adminPage.clickIn(`[data-client-claim="${ids.x.usableClaimId}"] input`, "Use in an internal draft");
-      await adminPage.waitFor(async () => !(await adminPage.text()).includes("Select at least one claim below to draft from."), "draft readiness satisfied");
+      assert.equal(await adminPage.evaluate(`document.querySelector("[data-client-draft-readiness]").getAttribute("data-client-draft-readiness")`), "no_measured_claim");
       results.b4 = "PASS";
     });
 
@@ -743,11 +744,12 @@ async function runBrowserAcceptance() {
     await test("B5: with no GK action since the claim was proposed, both internal drafts persist for project X citing the fresh claim", async () => {
       const before = await counts(ORG_X);
       const mark = adminPage.mark();
-      await adminPage.clickButton("Generate internal evidence summary");
-      await adminPage.waitForText("Internal evidence summary created: 1 block(s) citing 1 claim(s).");
-      await adminPage.idle();
-      await adminPage.clickButton("Generate internal impact narrative");
-      await adminPage.waitForText("Internal impact narrative created: 1 block(s) citing 1 claim(s).");
+      // Owner prompt 2026-10-26: the structural claim is not offered in Data
+      // Sources (B4); the unchanged generation routes still accept it.
+      for (const [path, key] of [[createEvidenceSummaryPath(ORG_X), "client-admin-structural-summary"], [createImpactNarrativePath(ORG_X), "client-admin-structural-narrative"]]) {
+        const response = await adminPage.api("POST", path, DRAFT_BODY([ids.x.usableClaimId], key));
+        assert.equal(response.status, 201, JSON.stringify(response.body));
+      }
       await adminPage.idle();
       assert.deepEqual(adminPage.requestsSince(mark).filter((r) => r.method === "POST").map((r) => [new URL(r.url).pathname, r.status]), [
         [createEvidenceSummaryPath(ORG_X), 201],
@@ -779,9 +781,19 @@ async function runBrowserAcceptance() {
       const actors = await query("SELECT DISTINCT actor_user_id::text FROM kai.audit_events WHERE audit_event_id > $1 AND organization_id = $2::uuid", [ids.x.auditMarkBeforeProposal, ORG_X]);
       assert.deepEqual(actors.map((row) => row.actor_user_id), [ids.adminKaiUser], "every audited action since the proposal is the client_admin's");
       ids.x.draftIds = drafts.map((row) => row.generated_content_draft_id);
-      const body = await adminPage.text();
-      assert.ok(body.includes("Internal use only. It is opened from your saved drafts below; when every cited claim is usable for internal use it is ready to read and download there."),
-        "owner decisions 2026-10-19 and 2026-10-25: the persisted draft is read back, and no review is announced as required");
+      // The drafts were generated through the routes (B4), so the page is
+      // reloaded and the saved draft opened from the Project's draft list.
+      await adminPage.goto("/impact-library");
+      await adminPage.waitForText("Knowledge Studio");
+      await adminPage.clickNav("Knowledge Studio");
+      await adminPage.waitFor(async () => adminPage.evaluate(`Boolean(document.getElementById("gk-shell-project-select"))`), "project selector");
+      await adminPage.idle();
+      await adminPage.clickTab("Data Sources");
+      await adminPage.selectProject(PROJECT_X);
+      await adminPage.idle();
+      const summaryId = drafts.find((row) => row.content_type === "evidence_summary").generated_content_draft_id;
+      await adminPage.waitFor(async () => adminPage.evaluate(`Boolean(document.querySelector('[data-client-internal-draft="${summaryId}"] button'))`), "the saved draft listed");
+      await adminPage.clickIn(`[data-client-internal-draft="${summaryId}"] button`, "Read draft");
       // Owner decision 2026-10-19: the administrator reads its own persisted
       // draft back, only inside the internal-draft view with its true review
       // state and limitations.

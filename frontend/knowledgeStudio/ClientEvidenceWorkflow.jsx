@@ -5,6 +5,7 @@ import {
   claimLibraryCandidatesPath,
   claimProposalPath,
   claimTraceabilityPath,
+  clientImpactFactsPath,
   createEvidenceSummaryPath,
   createImpactNarrativePath,
   errorText,
@@ -16,6 +17,7 @@ import {
   organizationSourcesPath,
   postJson,
   projectCandidateClaims,
+  projectClientImpactFacts,
   projectEvidenceLibraryItems,
   projectOrganizationSources,
   sourceCandidateDetailPath,
@@ -26,6 +28,8 @@ import {
   USE_FOR_IMPACT_MESSAGES,
   claimIdsByEvidenceItem,
   claimInternalDraftSelectability,
+  claimInternalUse,
+  claimKind,
   claimProposalResultMessage,
   claimSelectabilityMessage,
   extractionResultMessage,
@@ -38,6 +42,7 @@ import {
   internalDraftTraceabilityDiagnosis,
   isInternalDraftTraceabilityRefusal,
   isUseForImpactCandidate,
+  orderClaimsForReports,
   processingPermissionReviewFiles,
   retainSelectableClaimIds,
   sourcePreparationContinuationFailureMessage,
@@ -64,7 +69,18 @@ const DRAFT_LABELS = Object.freeze({
   impact_narrative: "Internal impact narrative",
 });
 
-function useOrganizationRead(organizationId, path, project, refreshToken) {
+// The organization-wide Evidence and Claim Library reads are paged (25 per
+// page, in id order). Every page is read, up to this bound, so a measured
+// claim is never hidden behind earlier structural ones.
+const LIBRARY_MAX_PAGES = 40;
+const nextClaimPage = (data) => (data?.truncated === true ? data.nextAfterClaimId : null);
+const nextEvidencePage = (data) => (data?.truncated === true ? data.nextAfterEvidenceItemId : null);
+const projectInternalUse = (data) => {
+  const facts = projectClientImpactFacts(data);
+  return facts ? { claimIds: new Set(facts.items.map((item) => item.claimId)), truncated: facts.truncated } : null;
+};
+
+function useOrganizationRead(organizationId, path, project, refreshToken, nextCursor = null) {
   const [state, setState] = useState({ organizationId: "", status: "idle", items: [] });
   const keyRef = useRef("");
   useEffect(() => {
@@ -72,16 +88,29 @@ function useOrganizationRead(organizationId, path, project, refreshToken) {
     const requestKey = `${organizationId}:${refreshToken}`;
     keyRef.current = requestKey;
     setState((current) => ({ organizationId, status: "loading", items: current.organizationId === organizationId ? current.items : [] }));
-    getJson(path(organizationId)).then((result) => {
-      if (keyRef.current !== requestKey) return;
-      if (result.statusCode !== 200 || !result.body?.ok) {
-        setState({ organizationId, status: "error", items: [], message: errorText(result) });
-        return;
+    (async () => {
+      let items = [];
+      let cursor = null;
+      for (let page = 0; page < LIBRARY_MAX_PAGES; page += 1) {
+        const result = await getJson(path(organizationId, cursor));
+        if (keyRef.current !== requestKey) return;
+        if (result.statusCode !== 200 || !result.body?.ok) {
+          setState({ organizationId, status: "error", items: [], message: errorText(result) });
+          return;
+        }
+        const projected = project(result.body.data);
+        if (!nextCursor) {
+          setState({ organizationId, status: "success", items: projected });
+          return;
+        }
+        items = items.concat(projected);
+        cursor = nextCursor(result.body.data);
+        if (!isRouteUuid(cursor)) break;
       }
-      setState({ organizationId, status: "success", items: project(result.body.data) });
-    });
+      setState({ organizationId, status: "success", items });
+    })();
     return () => { keyRef.current = ""; };
-  }, [organizationId, path, project, refreshToken]);
+  }, [organizationId, path, project, refreshToken, nextCursor]);
   return state.organizationId === organizationId ? state : { organizationId, status: "loading", items: [] };
 }
 
@@ -144,8 +173,12 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
   const [refreshToken, setRefreshToken] = useState(0);
   const refresh = () => setRefreshToken((value) => value + 1);
   const sources = useOrganizationRead(organizationId, organizationSourcesPath, projectOrganizationSources, refreshToken);
-  const evidence = useOrganizationRead(organizationId, evidenceLibraryCandidatesPath, projectEvidenceLibraryItems, refreshToken);
-  const claims = useOrganizationRead(organizationId, claimLibraryCandidatesPath, projectCandidateClaims, refreshToken);
+  const evidence = useOrganizationRead(organizationId, evidenceLibraryCandidatesPath, projectEvidenceLibraryItems, refreshToken, nextEvidencePage);
+  const claims = useOrganizationRead(organizationId, claimLibraryCandidatesPath, projectCandidateClaims, refreshToken, nextClaimPage);
+  // Authoritative internal usability of each claim (P2-08 / P2-06, internal audience).
+  const internalUse = useOrganizationRead(organizationId, clientImpactFactsPath, projectInternalUse, refreshToken);
+  const internalUseIndex = internalUse.status === "success" ? internalUse.items : null;
+  const orderedClaims = orderClaimsForReports(claims.items);
 
   const [pending, setPending] = useState("");
   const [notice, setNotice] = useState(null);
@@ -201,7 +234,9 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
     setDraftKeys({});
     setSelectedClaimIds((current) => (current.includes(claimId) ? current.filter((id) => id !== claimId) : [...current, claimId]));
   };
-  const readiness = internalDraftReadiness({ canGenerate: access.generateDrafts, engagementId, selectedClaimIds });
+  const readiness = internalDraftReadiness({
+    canGenerate: access.generateDrafts, engagementId, selectedClaimIds, claims: claims.status === "success" ? claims.items : undefined,
+  });
   const [draftsRefreshToken, setDraftsRefreshToken] = useState(0);
   // Read-only: one client-safe internal traceability GET per selected claim.
   const explainDraftFailure = async (result, claimIds) => {
@@ -223,13 +258,18 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
   };
   const generate = (contentType, pathBuilder) => {
     if (!readiness.ready) return;
-    // One idempotency key per selection and content type: a repeated click
-    // replays the same draft instead of creating another.
+    // One idempotency key per request: a retry after a failed or interrupted
+    // request replays it, and the key is retired once a draft is returned, so
+    // the next click is an intentionally new draft.
     const idempotencyKey = draftKeys[contentType] || `client-${contentType}-${globalThis.crypto.randomUUID()}`;
     setDraftKeys((current) => ({ ...current, [contentType]: idempotencyKey }));
     return runWrite(`generate:${contentType}`, pathBuilder(organizationId),
       internalDraftRequestBody({ claimIds: selectedClaimIds, idempotencyKey, engagementId }),
       (data) => {
+        setDraftKeys((current) => {
+          const { [contentType]: _retired, ...rest } = current;
+          return rest;
+        });
         setLastDraft(internalDraftResultSummary(data, contentType));
         // The persisted draft is read back and opened below, never shown from this response.
         setDraftsRefreshToken((value) => value + 1);
@@ -546,10 +586,9 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
       <div className="admin-card mb-3">
         <h5 className="mb-2">Evidence</h5>
         <div className="small text-muted mb-2">
-          Evidence extracted from your sources. Every item awaits evidence review; proposing a claim does not approve it.
-          {access.reviewMeasuredClaimFactualContent
-            ? " You review an ordinary record-count measurement yourself, for internal use, from its claim below; Get Kinder reviews everything else."
-            : " Get Kinder reviews it."}
+          Evidence from your sources. A record count you defined with Count records, from a source cleared for internal use, needs
+          no review for internal use; structural facts (which columns a source has) and everything else wait for Get Kinder&rsquo;s
+          review. Proposing a claim approves nothing for funders or the public.
         </div>
         {evidence.status === "loading" ? <div className="text-muted small">Loading evidence...</div> : null}
         {evidence.status === "error" ? <div className="alert alert-warning py-2 small">Evidence could not be loaded. {evidence.message}</div> : null}
@@ -582,8 +621,8 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
       <div className="admin-card mb-3">
         <h5 className="mb-2">Claims for internal drafts</h5>
         <div className="small text-muted mb-2">
-          Internal drafts may use claims still awaiting review. Using a claim here does not approve it for funders
-          or the public.
+          Measured findings come first: a report needs at least one. Structural facts only say which columns a source has and are not
+          offered as impact findings. Using a claim here does not approve it for funders or the public.
           {access.generateClaimGapFollowups
             ? " Generate a claim's gap follow-ups before drafting from it; they record open questions and resolve nothing."
             : null}
@@ -593,14 +632,27 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
         {claims.status === "success" && claims.items.length === 0 ? <div className="text-muted small">No claims yet. Propose one from evidence above.</div> : null}
         {claims.status === "success" && claims.items.length > 0 ? (
           <ul className="list-group">
-            {claims.items.map((claim) => {
+            {orderedClaims.map((claim) => {
               const selectability = claimInternalDraftSelectability(claim);
+              const kind = claimKind(claim);
+              const use = claimInternalUse(claim.claimId, internalUseIndex);
               return (
-                <li key={claim.claimId} className="list-group-item small" data-client-claim={claim.claimId}>
-                  <div className="text-break">{claim.claimStatement || claim.evidenceStatement || "Statement not available"}</div>
-                  <div className="text-muted mt-1">
-                    Status: {claim.claimStatus} · Review: {claim.claimReviewStatus} · Strength: {claim.claimStrength}
+                <li key={claim.claimId} className="list-group-item small" data-client-claim={claim.claimId}
+                  data-client-claim-kind={kind} data-client-claim-internal-use={use}>
+                  <div className="text-break">
+                    {kind === "measurement" ? <span className="badge text-bg-primary me-1">Measured finding</span> : null}
+                    {kind === "structural" ? <span className="badge text-bg-light me-1">Structural fact</span> : null}
+                    {claim.claimStatement || claim.evidenceStatement || "Statement not available"}
                   </div>
+                  {use === "usable" ? (
+                    // The server's current internal eligibility; the stored review
+                    // status is not shown as a pending step it no longer is.
+                    <div className="text-success mt-1" data-client-claim-usable="">Usable in internal reports now. No further review is needed for internal use.</div>
+                  ) : (
+                    <div className="text-muted mt-1">
+                      Status: {claim.claimStatus} · Review: {claim.claimReviewStatus} · Strength: {claim.claimStrength}
+                    </div>
+                  )}
                   {access.generateDrafts && selectability.selectable ? (
                     <label className="form-check mt-1">
                       <input className="form-check-input" type="checkbox" checked={selectedClaimIds.includes(claim.claimId)}
@@ -608,14 +660,14 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
                       <span className="form-check-label">Use in an internal draft</span>
                     </label>
                   ) : null}
-                  {access.generateClaimGapFollowups && selectability.selectable ? (
+                  {access.generateClaimGapFollowups && (selectability.selectable || selectability.reason === "structural_fact") ? (
                     <button type="button" className="btn btn-sm btn-outline-secondary mt-1" disabled={Boolean(pending)}
                       data-client-claim-gap-followups={claim.claimId} onClick={() => generateGapFollowups(claim.claimId)}>
                       {pending === `gaps:${claim.claimId}` ? "Generating..." : "Generate gap follow-ups"}
                     </button>
                   ) : null}
                   {gapFollowupsByClaim[claim.claimId] ? <div className="mt-1 text-muted">{gapFollowupsByClaim[claim.claimId]}</div> : null}
-                  {access.reviewMeasuredClaimFactualContent && openReview !== claim.claimId && isRouteUuid(claim.claimId) ? (
+                  {access.reviewMeasuredClaimFactualContent && kind !== "structural" && openReview !== claim.claimId && isRouteUuid(claim.claimId) ? (
                     <button type="button" className="btn btn-sm btn-outline-primary mt-1 ms-1" data-client-open-measured-claim-review={claim.claimId}
                       onClick={() => setReviewing({ contextKey, claimId: claim.claimId })}>
                       View measurement

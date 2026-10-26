@@ -921,15 +921,18 @@ async function runBrowserAcceptance() {
       assert.equal(p204[0][0], claimGapFollowupsPath(ORG_X, claim.claim_id));
       assert.ok([200, 201].includes(p204[0][1]), JSON.stringify(p204));
 
-      await adminPage.clickIn(`[data-client-claim="${claim.claim_id}"] input`, "Use in an internal draft");
-      await adminPage.waitFor(async () => !(await adminPage.text()).includes("Select at least one claim below to draft from."), "draft readiness");
+      // Owner prompt 2026-10-26: a structural field-presence claim is not
+      // offered as an impact finding; with no measured claim the customer is
+      // sent to Count records. The generation routes are unchanged and still
+      // accept it (a draft that waits for Get Kinder), exercised directly.
+      assert.equal(await adminPage.evaluate(`Boolean(document.querySelector('[data-client-claim="${claim.claim_id}"] input'))`), false, "not offered as an impact finding");
+      assert.equal(await adminPage.evaluate(`document.querySelector("[data-client-draft-readiness]").getAttribute("data-client-draft-readiness")`), "no_measured_claim");
       const before = await counts(ORG_X);
       mark = adminPage.mark();
-      await adminPage.clickButton("Generate internal evidence summary");
-      await adminPage.waitForText("Internal evidence summary created: 1 block(s) citing 1 claim(s).");
-      await adminPage.idle();
-      await adminPage.clickButton("Generate internal impact narrative");
-      await adminPage.waitForText("Internal impact narrative created: 1 block(s) citing 1 claim(s).");
+      for (const [path, key] of [[createEvidenceSummaryPath(ORG_X), "structural-recovered-summary"], [createImpactNarrativePath(ORG_X), "structural-recovered-narrative"]]) {
+        const response = await adminPage.api("POST", path, { claim_ids: [claim.claim_id], idempotency_key: key, engagement_id: PROJECT_X });
+        assert.equal(response.status, 201, JSON.stringify(response.body));
+      }
       await adminPage.idle();
       assert.deepEqual(postsSince(adminPage, mark), [[createEvidenceSummaryPath(ORG_X), 201], [createImpactNarrativePath(ORG_X), 201]]);
       assert.equal(delta(await counts(ORG_X), before).drafts, 2);

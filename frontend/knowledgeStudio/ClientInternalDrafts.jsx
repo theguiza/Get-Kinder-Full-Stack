@@ -17,7 +17,9 @@ import {
   INTERNAL_DRAFT_RELEASE_STATE_MESSAGES,
   INTERNAL_DRAFT_REVIEW_STATE_LABELS,
   INTERNAL_REPORT_REASON_MESSAGES,
+  STRUCTURAL_ONLY_DRAFT_MESSAGE,
   internalDraftFactualReviewNextActions,
+  isStructuralOnlyDraft,
 } from "./clientEvidenceWorkflowLogic.js";
 
 const READY_FOR_INTERNAL_USE = "Ready for internal use";
@@ -38,7 +40,10 @@ const DRAFT_LABELS = Object.freeze({
  * draft's true Get Kinder review state, its text, the claims each block cites
  * (statement and review status from the organization's Claim Library read),
  * and its limitations. Reading a draft approves, releases, or exports nothing.
- * `focusDraftId` opens that draft once it is listed (after generation).
+ * `focusDraftId` opens that draft once it is listed (after generation). The
+ * newest draft is listed first. A draft citing only structural facts (which
+ * columns a source has) is shown as such: it is kept as generated, and the
+ * next step is a new draft from a measured finding, not a review request.
  *
  * Internal report (owner decision 2026-10-25): when the server reports
  * internalReport.available - every cited claim usable for internal use, every
@@ -103,7 +108,9 @@ export default function ClientInternalDrafts({
     getJson(clientInternalDraftsPath(organizationId, engagementId)).then((result) => {
       if (keyRef.current !== key) return;
       const projected = result.statusCode === 200 && result.body?.ok ? projectClientInternalDraftList(result.body.data) : null;
-      setList(projected ? { status: "success", items: projected.items, error: "" } : { status: "error", items: [], error: errorText(result) });
+      // Newest first (the server lists in id order).
+      const items = projected ? [...projected.items].sort((a, b) => String(b.createdAt || "").localeCompare(String(a.createdAt || ""))) : [];
+      setList(projected ? { status: "success", items, error: "" } : { status: "error", items: [], error: errorText(result) });
     });
     return () => { keyRef.current = ""; };
   }, [organizationId, engagementId, refreshToken]);
@@ -126,6 +133,7 @@ export default function ClientInternalDrafts({
   if (!engagementId) return <div className="text-muted small">Select a Project to see its internal drafts.</div>;
   const claimById = new Map((Array.isArray(claims) ? claims : []).map((claim) => [claim.claimId, claim]));
   const draft = detail.draft;
+  const structuralOnly = Boolean(draft) && !draft.internalReport.available && isStructuralOnlyDraft(draft, claimById);
 
   return (
     <div data-client-internal-draft-list="">
@@ -161,7 +169,10 @@ export default function ClientInternalDrafts({
               {draft.internalReport.available ? READY_FOR_INTERNAL_USE : INTERNAL_DRAFT_REVIEW_STATE_LABELS[draft.reviewState] || "Review state unavailable"}
             </span>
           </div>
-          <InternalReport draft={draft} canRead={canReadInternalReports} report={report}
+          {structuralOnly ? (
+            <div className="alert alert-secondary py-2 small mb-2" data-client-internal-draft-metadata-only="">{STRUCTURAL_ONLY_DRAFT_MESSAGE}</div>
+          ) : null}
+          <InternalReport draft={draft} canRead={canReadInternalReports} report={report} structuralOnly={structuralOnly}
             onOpen={() => openMarkdown(draft.generatedContentDraftId, clientInternalReportMarkdownPath(organizationId, engagementId, draft.generatedContentDraftId))}
             downloadPath={clientInternalReportMarkdownPath(organizationId, engagementId, draft.generatedContentDraftId)} />
           {!draft.internalReport.available && draft.release && !ORGANIZATION_RELEASE_STEPS.has(draft.release.state) ? (
@@ -226,7 +237,7 @@ export default function ClientInternalDrafts({
 
 // The organization's internal report: open or download it when the server
 // reports it available; otherwise the server's reasons and next steps.
-function InternalReport({ draft, canRead, report, onOpen, downloadPath }) {
+function InternalReport({ draft, canRead, report, onOpen, downloadPath, structuralOnly = false }) {
   const view = draft.internalReport;
   if (view.available) {
     return (
@@ -250,7 +261,9 @@ function InternalReport({ draft, canRead, report, onOpen, downloadPath }) {
       </div>
     );
   }
-  const nextActions = internalDraftFactualReviewNextActions(view.blockedReasons);
+  // A structural-only draft's next step is a new draft from a measured finding
+  // (shown above), not a review of the structural claims it cites.
+  const nextActions = structuralOnly ? [] : internalDraftFactualReviewNextActions(view.blockedReasons);
   return (
     <div className="small mb-2" data-client-internal-report="unavailable">
       {view.getKinderReviewReasons.length > 0 ? (

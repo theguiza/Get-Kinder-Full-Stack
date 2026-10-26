@@ -11,8 +11,10 @@ export function eligibleClaimsPath(organizationId, audience) {
   return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/eligible-claims?${params.toString()}`;
 }
 
-export function claimLibraryCandidatesPath(organizationId) {
-  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/claim-library/candidates?limit=25`;
+// afterClaimId: the previous page's nextAfterClaimId (the server's cursor).
+export function claimLibraryCandidatesPath(organizationId, afterClaimId = null) {
+  const path = `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/claim-library/candidates?limit=25`;
+  return afterClaimId ? `${path}&after_claim_id=${encodeURIComponent(afterClaimId)}` : path;
 }
 
 // Client-safe Impact Home summary (aggregates only). Home and the Needs
@@ -480,8 +482,10 @@ export function projectClientImpactFacts(dto) {
 // KAI Impact Library redesign, E1 correction: evidence is enumerated
 // directly from kai.evidence_items, never through kai.claims - an evidence
 // item can exist before any claim is proposed for it.
-export function evidenceLibraryCandidatesPath(organizationId) {
-  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/evidence-library/candidates?limit=25`;
+// afterEvidenceItemId: the previous page's nextAfterEvidenceItemId.
+export function evidenceLibraryCandidatesPath(organizationId, afterEvidenceItemId = null) {
+  const path = `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/evidence-library/candidates?limit=25`;
+  return afterEvidenceItemId ? `${path}&after_evidence_item_id=${encodeURIComponent(afterEvidenceItemId)}` : path;
 }
 
 export function projectEvidenceLibraryItems(dto) {
@@ -2568,6 +2572,7 @@ export function projectCandidateClaims(dto) {
     // governed evidence item behind this claim (statement/strength/review
     // status/source lineage/use-authority) - never a claim field relabeled.
     evidenceStatement: claim.evidenceStatement ?? null,
+    evidenceType: claim.evidenceType ?? null,
     evidenceSupportStrength: claim.evidenceSupportStrength ?? null,
     evidenceReviewStatus: claim.evidenceReviewStatus ?? null,
     evidenceSourceId: claim.evidenceSourceId ?? null,

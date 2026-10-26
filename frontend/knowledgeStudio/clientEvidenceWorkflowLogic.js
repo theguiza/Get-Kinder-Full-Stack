@@ -52,18 +52,38 @@ export function clientEvidenceWorkflowAccess(capabilities) {
   return { visible, ...access };
 }
 
+// What a claim restates, from the server's evidence type (owner prompt
+// 2026-10-26): a source-derived measurement is a substantive finding; a
+// dictionary field-presence fact only says a source has a column. Structural
+// facts stay valid for what they say, but are not impact findings.
+export const MEASUREMENT_EVIDENCE_TYPE = "source_record_count_measurement";
+export const STRUCTURAL_EVIDENCE_TYPE = "dictionary_field_presence_fact";
+
+export function claimKind(claim) {
+  if (claim?.evidenceType === MEASUREMENT_EVIDENCE_TYPE) return "measurement";
+  if (claim?.evidenceType === STRUCTURAL_EVIDENCE_TYPE) return "structural";
+  return "other";
+}
+
 export function claimInternalDraftSelectability(claim) {
   if (!isRouteUuid(claim?.claimId) || !isRouteUuid(claim?.evidenceItemId)) {
     return { selectable: false, reason: "invalid_claim" };
   }
   if (claim.claimStrength === TERMINAL_NOT_SUPPORTED) return { selectable: false, reason: "reviewed_not_supported" };
+  if (claimKind(claim) === "structural") return { selectable: false, reason: "structural_fact" };
   return { selectable: true, reason: null };
 }
 
-export function internalDraftReadiness({ canGenerate, engagementId, selectedClaimIds }) {
+// `claims` (the organization's loaded claims) adds the substantive-finding
+// rule: a report needs at least one measured claim, and when none exists the
+// customer is sent to Count records instead of drafting from metadata.
+export function internalDraftReadiness({ canGenerate, engagementId, selectedClaimIds, claims }) {
   if (canGenerate !== true) return { ready: false, reason: "not_authorized" };
   if (!isRouteUuid(engagementId)) return { ready: false, reason: "no_project" };
+  const measured = Array.isArray(claims) ? new Set(claims.filter((claim) => claimKind(claim) === "measurement").map((claim) => claim.claimId)) : null;
+  if (measured && measured.size === 0) return { ready: false, reason: "no_measured_claim" };
   if (!Array.isArray(selectedClaimIds) || selectedClaimIds.length === 0) return { ready: false, reason: "no_claims_selected" };
+  if (measured && !selectedClaimIds.some((claimId) => measured.has(claimId))) return { ready: false, reason: "no_measured_claim_selected" };
   if (selectedClaimIds.length > 20) return { ready: false, reason: "too_many_claims" };
   return { ready: true, reason: null };
 }
@@ -71,14 +91,46 @@ export function internalDraftReadiness({ canGenerate, engagementId, selectedClai
 export const INTERNAL_DRAFT_READINESS_MESSAGES = Object.freeze({
   not_authorized: "Your role does not include internal draft generation for this organization.",
   no_project: "Select a Project above: each draft belongs to one Project.",
+  no_measured_claim: "No measured finding yet. In Data Sources, use Count records on your source to record what one record represents and its "
+    + "reporting period, then propose the claim from the measurement. Structural facts about a file's columns are not impact findings.",
   no_claims_selected: "Select at least one claim below to draft from.",
+  no_measured_claim_selected: "Select at least one measured finding below: a report needs a measured result, not only structural facts.",
   too_many_claims: "Select at most 20 claims for one draft.",
 });
 
 export function claimSelectabilityMessage(reason) {
   if (reason === "reviewed_not_supported") return "Get Kinder review found this claim not supported, so it cannot be used in a draft.";
+  if (reason === "structural_fact") {
+    return "Structural fact: it says a source has this column, not a measured result, so it is not offered as an impact finding.";
+  }
   if (reason === "invalid_claim") return "This claim cannot be selected.";
   return "";
+}
+
+// Measured findings first, then other claims, then structural facts; the
+// server's order within each group is kept.
+export function orderClaimsForReports(claims) {
+  const rank = { measurement: 0, other: 1, structural: 2 };
+  return (Array.isArray(claims) ? claims : [])
+    .map((claim, index) => ({ claim, index }))
+    .sort((a, b) => rank[claimKind(a.claim)] - rank[claimKind(b.claim)] || a.index - b.index)
+    .map(({ claim }) => claim);
+}
+
+// The authoritative internal-use answer for one claim, from the client-safe
+// impact-facts read (P2-08 / P2-06 for the internal audience): "usable",
+// "not_usable", or "unknown" when that read failed or was truncated.
+export function claimInternalUse(claimId, impactFacts) {
+  if (!impactFacts || !(impactFacts.claimIds instanceof Set)) return "unknown";
+  if (impactFacts.claimIds.has(claimId)) return "usable";
+  return impactFacts.truncated ? "unknown" : "not_usable";
+}
+
+// A saved draft whose every cited claim is a structural fact: kept as it was
+// generated, but it holds no measured result (historical metadata-only draft).
+export function isStructuralOnlyDraft(draft, claimById) {
+  const cited = (Array.isArray(draft?.blocks) ? draft.blocks : []).flatMap((block) => block.supportingClaimIds || []);
+  return cited.length > 0 && cited.every((claimId) => claimKind(claimById.get(claimId)) === "structural");
 }
 
 // Claims already proposed for an evidence item, from the loaded Claim Library page.
@@ -467,6 +519,10 @@ export const INTERNAL_REPORT_REASON_MESSAGES = Object.freeze({
   audience_requires_get_kinder_review: "Only internal drafts are available as internal reports.",
   validator_results_not_passed: "This draft did not pass every automated check when it was generated.",
 });
+
+export const STRUCTURAL_ONLY_DRAFT_MESSAGE = "Structural facts only: this saved draft cites facts about which columns a source has, "
+  + "not a measured result, so it is not an impact report. It is kept as it was generated. To produce a usable internal report, "
+  + "select a measured finding under Claims for internal drafts and generate a new draft (use Count records in Data Sources first if there is none).";
 
 export const INTERNAL_DRAFT_FACTUAL_REVIEW_NEXT_ACTIONS = Object.freeze({
   cited_claims_not_currently_eligible: "Ask Get Kinder to review the cited claims. The report becomes available once they are eligible for internal use.",
