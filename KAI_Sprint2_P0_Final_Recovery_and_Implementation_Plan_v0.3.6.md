@@ -44594,3 +44594,64 @@ Assembled acceptance outcome (real upload bytes → P1 → client_admin sensitiv
 **Remaining production customer-acceptance action:** after a separately authorized deployment of `36c6588`, the organization administrator reloads Data Sources for the Project, confirms the "Measured finding … Usable in internal reports now" claim is listed (or, if none, uses Count records → Record definition and count → Propose a claim), selects it, generates an Evidence Summary, and opens/downloads its Markdown; production is not fixed until that live synthetic test passes.
 
 **Status:** CUSTOMER_MEASURED_REPORT_SELECTION_CORRECTED_LOCALLY. Not pushed, deployed, or retested in production.
+
+### Customer source-to-internal-report completion: discovery, draft identity, structural-only boundary (2026-10-26)
+
+**Owner authorization (USER_CONFIRMED):** owner prompt "CODEX — FIX KAI'S COMPLETE CUSTOMER SOURCE-TO-INTERNAL-REPORT FAILURE". It authorizes local repair, synthetic local tests and local commits. It does not authorize push, deployment, production database access or writes, migrations, schema, flag, tenant or credential changes, or `00_KAI_CURRENT_STATE.md`.
+
+**Starting state (TOOL_VERIFIED):** `main` at `beb59826d2a3f64ee3e10fe18668cc0a1a3cea91`, clean working tree, 2 commits ahead of the local `origin/main` ref (`d4fc0da`); no fetch was made.
+
+**Residual defects reproduced (TOOL_VERIFIED, local synthetic):**
+1. **Claim and evidence reads.** Data Sources read up to 40 pages and then reported success, discarding the continuation cursor. Past that bound, a measured claim not yet read could produce "No measured finding yet".
+2. **Truncated impact facts.** A claim missing from a truncated impact-facts read showed the stored `Review: needs_gk_review`.
+3. **Generated draft identity.** `ClientInternalDrafts` opened the generated draft only when it was in the loaded first list page (UUID-ordered, 50-row scan), and older pages were never read.
+4. **Historical draft classification.** `isStructuralOnlyDraft` classified from whichever claims the page had loaded.
+5. **Server boundary.** A draft citing only a GK-reviewed, eligible structural claim was `internalReport.available: true`, so it could be downloaded as the organization's internal report.
+6. **Customer copy.** Blanket statements said all non-measurement evidence waits for Get Kinder, and the draft next step said "Ask Get Kinder to review the cited claims".
+7. **File pipeline.** A file whose measured claim was eligible was still shown as waiting for Get Kinder evidence review because of its unreviewed structural evidence.
+
+**Correction (`454f811`):**
+- **Library reads:** `readLibraryPages` keeps completeness and the cursor, and "Load more" continues from it. `claims_not_all_loaded` replaces `no_measured_claim` when a read is incomplete.
+- **Per-claim eligibility:** each claim's existing client-safe P2-06 diagnostic resolves claims that impact-facts does not show as usable (up to 25 per refresh, plus a per-claim "Check internal use"). A failed diagnostic stays unknown and is never treated as adverse. A not-usable claim shows its actual blocker or conflict and the ordinary-rule note.
+- **Generation admission:** a determinate "not usable" evaluation of a measured claim blocks readiness (`measured_claim_not_usable`), matching the existing `VAL-GEN-MEASURED-P2-01M-001`, and that refusal is explained to the customer.
+- **Draft identity:** the generated draft opens by its returned id through the authorized detail read. Draft pages load with `nextCursor`, and the list says when more exist.
+- **Server boundary:** `evaluateInternalReportAvailabilityInTransaction` adds `structural_facts_only` when every cited evidence item is `dictionary_field_presence_fact` (`kai.evidence_items.evidence_type`, which exists since P2-01, so no schema dependency). GK review, export and release paths are unchanged. The client classifies structural-only drafts from this reason.
+- **File pipeline:** `evidence_review` does not hold a file that has a currently eligible claim.
+- **Copy:** customer copy was corrected and the stored review status is no longer shown on claims or citations.
+
+Unchanged: generation routes and idempotency, P2-04, P2-06/P2-08, the ordinary authority, the Markdown route, and drafts and review records.
+
+**Acceptance (`kai-customer-measured-report-selection-browser-acceptance`, 17/17 on 5 consecutive runs; deterministic SDK stub, not live-model):**
+- **A:** 31 structural claims plus the measured claim. The measured claim is listed first and usable; a new Evidence Summary cites only it.
+- **B1:** labelled injected condition: the request page size was rewritten from 25 to 1. 43 claims and 45 evidence items exceed the 40-page load. The first 40 are loaded in server order, the list is marked incomplete, readiness is never `no_measured_claim`, and "Load more" reaches all of them with none repeated.
+- **B2:** labelled injected condition: impact facts were truncated and the measured claim omitted. Its P2-06 diagnostic resolves it to usable. When the diagnostic also fails, it stays unknown with no review request.
+- **C:** a measured claim from a source recording small-cell risk is not usable, with its condition named. Readiness blocks it, and the route refuses it (422 `VAL-GEN-MEASURED-P2-01M-001`, nothing written). A prepared draft from the usable measured claim plus an unreviewed structural claim is saved but is not a report (422 `cited_claims_not_currently_eligible`). The usable claim alone gives a report.
+- **D:** with 100 earlier drafts, the UI-generated draft outside the first server page opens by id, and its Markdown opens and downloads identically. Loading all pages lists 107 drafts once each, historical last, and the open draft is never replaced.
+- **E:** labelled injected condition: the `field_2` claim was removed from the Claim Library responses. The historical draft is still classified `structural_facts_only`, with no "Ask Get Kinder" and no Open report. Its content, citations, status, review rows and audit count are unchanged, and the Markdown route returns 422 `[cited_claims_not_currently_eligible, structural_facts_only]`.
+- **F:** the report states 6 data records, 1 blank excluded, 5 counted, 2 exact duplicates included, the attested period 2026-09-01 to 2026-09-30, the counted unit and definition, claim/evidence/source/version lineage, limitations, what the evidence does not establish, and no unsupported conclusion.
+- **G:** further intentional summaries and a narrative are new drafts; a same-key retry is `replayed: true` with no write; additional human approvals are 0.
+- **H:** existing negatives (roles, organization, Project, AI/assistant/system actors, funder, stale source) still hold. After GK evidence review, claim review, coverage acceptance and completed follow-ups make a structural claim eligible, its structural-only draft is still 422 `structural_facts_only`. A narrative from that claim plus the measured claim is available, and GK's review packet still returns 200.
+
+**Observation, not changed (outside this package):** after GK accepts a claim's coverage dimensions, a new generation from that claim returns 409 `conflict_current_state_changed`. This is consistent with the automatic P2-04 replay no longer matching the recorded snapshot, but that cause is NOT_CONFIRMED. The customer's ordinary measured path is unaffected.
+
+**Verification (TOOL_VERIFIED; `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel`):**
+
+| Command or suite | Result |
+| --- | --- |
+| Full `npm test` | 5,780 passed, 0 failed, 121 skipped |
+| `kai-customer-measured-report-selection.spec.js` | 15/15 |
+| Customer measured-report browser acceptance | 17/17 |
+| Assembled file-to-report acceptance | 23/23 |
+| P2-01M / P2-04 / P2-06 / P2-08 / P2-01 handoff / P3-01 / P13-01 runners | 56 passed 8 skipped; 18; 34; 20; 7; 22; 33 (0 failed) |
+| Internal factual review (E1), source-preparation continuation, source-to-impact, measurement-to-released-report, Knowledge Studio, evidence pipeline, reviewed-evidence claim proposal, P2-01 handoff browser | 16, 12, 16, 13, 6, 8, 12, 7 (0 failed) |
+| `verify:kai-sprint2-api-contract` | 71/71 |
+| `npm run build` | passed; bundle reproducible (sha256 `9c70c671…7eb6`) |
+| `git diff --check` | passed |
+
+**Affected test updates (assertions moved to the corrected behaviour, none removed):** evidence-to-draft B4/E-setup and source-to-impact no longer expect the stored status line; internal factual review C2 expects the additional `structural_facts_only` reason; organization-internal-review expects the specific next action rather than "Ask Get Kinder". The browser harness's `goto` now retires requests that the previous document left in flight.
+
+**Pre-existing, not attributable:** `kai-client-admin-source-promotion` "protected operations" still refuses the administrator's evidence review, but with 422 `evidence_type_requires_get_kinder_review` where the spec expects 403. `kai-client-admin-evidence-to-draft` B5a still expects the pre-P2-04 refusal that `fa87ece` made obsolete. Both match the earlier recorded baselines.
+
+**Release status:** local only. Pushing `36c6588`, `beb5982`, `454f811` and this entry is a fast-forward of the local `origin/main` ref (`d4fc0da`). No migration in this package. The production P2-01M schema, the live measured claim and the live organization's claim count remain NOT_CONFIRMED. Push, deploy and the live synthetic customer acceptance need separate explicit owner authorization.
+
+**Status:** CUSTOMER_SOURCE_TO_INTERNAL_REPORT_COMPLETED_AND_VERIFIED_LOCALLY. Not pushed, deployed, or retested in production.
