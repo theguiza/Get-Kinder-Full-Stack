@@ -235,11 +235,18 @@ try {
   // Re-applying the migration is a no-op (every DDL statement is idempotent).
   psqlFile("migrations/kai_sprint2_p2_01m_source_record_count_measurement.sql");
   if (psqlExec(legacySnapshotSql) !== legacyBefore) throw new Error("P2-01M migration is not idempotent");
-  // The XLSX worksheet method only widens two CHECKs; it changes no row and re-applies cleanly.
+  // The XLSX worksheet method only widens two CHECKs; it changes no row and
+  // re-applies cleanly. Its read-only verifier fails before it and passes after.
+  const xlsxVerifier = () => run(psql, ["-v", "ON_ERROR_STOP=1", "-d", dbName, "-tA", "-F", "|", "-f",
+    "scripts/kai-sprint2-p2-01m-xlsx-worksheet-method-verify-read-only.sql"], { capture: true }).stdout.trim().split("\n");
+  const overall = (rows) => rows.find((row) => row.startsWith("99|OVERALL|"))?.split("|")[2];
+  if (overall(xlsxVerifier()) !== "FAIL") throw new Error("P2-01M XLSX verifier did not fail before its migration");
   psqlFile("migrations/kai_sprint2_p2_01m_xlsx_worksheet_record_count_method.sql");
   psqlFile("migrations/kai_sprint2_p2_01m_xlsx_worksheet_record_count_method.sql");
   if (psqlExec(legacySnapshotSql) !== legacyBefore) throw new Error("P2-01M XLSX worksheet method migration changed an existing evidence or locator row");
-  console.log("P2-01M XLSX worksheet method: applied twice; existing evidence/locator rows unchanged.");
+  const verified = xlsxVerifier();
+  if (overall(verified) !== "PASS") throw new Error(`P2-01M XLSX verifier failed after its migration:\n${verified.join("\n")}`);
+  console.log(`P2-01M XLSX worksheet method: applied twice; existing evidence/locator rows unchanged; read-only verifier FAIL before, PASS after:\n${verified.join("\n")}`);
 
   const testResult = spawnSync("node", [
     "--test",
@@ -278,6 +285,7 @@ try {
     xlsxRollbackRefused = /rollback refused: workbook record-count measurements exist/.test(String(error.message));
   }
   if (!xlsxRollbackRefused) throw new Error("P2-01M XLSX worksheet method rollback did not refuse with a workbook measurement present");
+  if (overall(xlsxVerifier()) !== "PASS") throw new Error("the refused XLSX rollback changed the verified CHECKs");
   let rollbackRefused = false;
   try {
     psqlFile("migrations/kai_sprint2_p2_01m_source_record_count_measurement.rollback.sql");
