@@ -303,6 +303,9 @@ async function runXlsxAcceptance() {
     evidenceReviewDecisionBody,
     evidenceExtractionPath,
     claimProposalPath,
+    clientReleasedReportMarkdownPath,
+    generatedContentReviewCompletePath,
+    generatedContentReviewStartPath,
     sourceCandidateDecisionPath,
   } = await import("../frontend/impactEvidenceLibraryLogic.js");
   const { batchFilesPath, confirmUploadPath, createBatchPath, fileReservationsPath, requestUploadUrlPath } = await import("../frontend/kaiWebIntakeLogic.js");
@@ -485,6 +488,7 @@ async function runXlsxAcceptance() {
   const legacyAdmin = client(legacyBaseUrl, USERS.clientAdmin);
   const adminApi = client(baseUrl, USERS.clientAdmin);
   const gkApi = client(baseUrl, USERS.gkReviewer);
+  const gkAdminApi = client(baseUrl, USERS.gkAdmin);
   const contributorApi = client(baseUrl, USERS.contributor);
   const reviewerApi = client(baseUrl, USERS.clientReviewer);
   const adminYApi = client(baseUrl, USERS.adminY);
@@ -948,7 +952,53 @@ async function runXlsxAcceptance() {
         `SELECT reviewed_story_testimonial_status FROM kai.intake_sensitivity_review_decisions WHERE intake_sensitivity_profile_id = $1::uuid`,
         [ids.story.intake_sensitivity_profile_id]);
       assert.equal(decision.reviewed_story_testimonial_status, "present");
+      ids.story.draftId = draftId;
       results.c4 = { generated: draftId, markdownStatus: report.status, reason: "story_testimonial_not_cleared" };
+    });
+
+    await test("C5: the existing Get Kinder route for that draft - GK content review, export review, limitation snapshot, candidate, internal release and manifest - delivers it to the administrator read-only; funder and public stay closed", async () => {
+      const draftId = ids.story.draftId;
+      const queue = await queueOf("generated_content_review", draftId);
+      const adminStart = await adminApi("POST", generatedContentReviewStartPath(ORG_X, draftId, queue.review_queue_item_id), { expected_updated_at: new Date(queue.updated_at).toISOString() });
+      assert.equal(adminStart.status, 403, "the administrator cannot review a story-present draft");
+      const started = await gkApi("POST", generatedContentReviewStartPath(ORG_X, draftId, queue.review_queue_item_id), { expected_updated_at: new Date(queue.updated_at).toISOString() });
+      assert.equal(started.status, 200, J(started.body));
+      const inProgress = await queueOf("generated_content_review", draftId);
+      const completed = await gkApi("POST", generatedContentReviewCompletePath(ORG_X, draftId, inProgress.review_queue_item_id), { expected_updated_at: new Date(inProgress.updated_at).toISOString() });
+      assert.equal(completed.status, 200, J(completed.body));
+      const draftPath = `${orgPath()}/generated-content-drafts/${draftId}`;
+      assert.equal((await adminApi("POST", `${draftPath}/export-review-request`, { requested_export_audience: "internal" })).status, 403, "the administrator cannot release it");
+      const requested = await gkAdminApi("POST", `${draftPath}/export-review-request`, { requested_export_audience: "internal" });
+      assert.ok([200, 201].includes(requested.status), J(requested.body));
+      for (const step of ["start", "complete"]) {
+        const exportQueue = await queueOf("export_review", draftId);
+        const moved = await gkAdminApi("POST", `${draftPath}/export-review-queue/${exportQueue.review_queue_item_id}/${step}`, { expected_updated_at: new Date(exportQueue.updated_at).toISOString() });
+        assert.equal(moved.status, 200, `${step}: ${J(moved.body)}`);
+      }
+      const exportReviewQueueItemId = (await queueOf("export_review", draftId)).review_queue_item_id;
+      const snapshot = await gkApi("POST", `${draftPath}/limitation-snapshot`, {});
+      assert.ok([200, 201].includes(snapshot.status), J(snapshot.body));
+      const candidate = await gkAdminApi("POST", `${draftPath}/export-candidates`, {});
+      assert.ok([200, 201].includes(candidate.status), J(candidate.body));
+      const [candidateRow] = await query("SELECT export_candidate_id::text FROM kai.export_candidates WHERE organization_id = $1::uuid AND generated_content_draft_id = $2::uuid", [ORG_X, draftId]);
+      const granted = await gkAdminApi("POST", `${orgPath()}/export-candidates/${candidateRow.export_candidate_id}/final-release-authority`, { requested_audience: "internal", decision_action: "grant" });
+      assert.ok([200, 201].includes(granted.status), J(granted.body));
+      const manifest = await gkAdminApi("POST", `${orgPath()}/export-candidates/${candidateRow.export_candidate_id}/export-manifests`, { export_review_queue_item_id: exportReviewQueueItemId });
+      assert.ok([200, 201].includes(manifest.status), J(manifest.body));
+      const [manifestRow] = await query("SELECT export_manifest_id::text FROM kai.export_manifests WHERE organization_id = $1::uuid AND export_candidate_id = $2::uuid", [ORG_X, candidateRow.export_candidate_id]);
+      const delivered = await adminApi("GET", clientReleasedReportMarkdownPath(ORG_X, PROJECT_X, manifestRow.export_manifest_id));
+      assert.equal(delivered.status, 200, J(delivered.body).slice(0, 400));
+      assert.equal(Number((/records (\d+) programme sessions/.exec(delivered.body) || [])[1]), independent.counted);
+      assert.ok(delivered.body.includes(ids.story.claimId), "the released report cites the workbook claim");
+      assert.doesNotMatch(delivered.body, /literacy|mentoring|facilitator|programme-sessions-/, "no cell values or file names");
+      // Still internal only: the ordinary download stays refused and funder/public eligibility stays closed.
+      assert.equal((await adminApi("GET", clientInternalReportMarkdownPath(ORG_X, PROJECT_X, draftId))).status, 422);
+      for (const audience of ["funder", "public"]) assert.equal((await internalEligibility(ids.story.claimId, audience)).eligible, false, audience);
+      writeFileSync(join(WORKDIR, "xlsx-c-released-internal-evidence-summary.md"), delivered.body);
+      results.c5 = {
+        route: "GK content review (gk_reviewer) -> export review request/start/complete (gk_admin) -> limitation snapshot (gk_reviewer) -> candidate, internal release grant, manifest (gk_admin) -> client read-only released-report delivery",
+        manifest: manifestRow.export_manifest_id, delivered: delivered.status,
+      };
     });
 
     // -----------------------------------------------------------------------

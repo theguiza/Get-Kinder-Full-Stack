@@ -171,7 +171,12 @@ test("measurement form: the server's counts are shown as given, the definition i
     basis: { measurable: true, data_record_count: 6, blank_record_count: 1, duplicate_record_count: 2, counted_record_count: 5 },
     recorded: null,
   });
-  assert.deepEqual(projected.counts, { measurable: true, dataRecordCount: 6, blankRecordCount: 1, duplicateRecordCount: 2, countedRecordCount: 5 });
+  assert.deepEqual(projected.counts, { measurable: true, dataRecordCount: 6, blankRecordCount: 1, duplicateRecordCount: 2, countedRecordCount: 5, worksheet: null });
+  const workbook = projectMeasurementBasis({
+    sourceVersion: { source_version_id: VERSION, is_current: true },
+    basis: { measurable: true, source_format: "xlsx", worksheet: { sheet_key: "sheet_1" }, data_record_count: 6, blank_record_count: 1, duplicate_record_count: 2, counted_record_count: 5 },
+  });
+  assert.equal(workbook.counts.worksheet, "sheet_1", "a workbook count names its worksheet");
   assert.equal(projectMeasurementBasis({ sourceVersion: { source_version_id: VERSION }, basis: { measurable: true, data_record_count: -1 } }), null, "malformed counts fail closed");
   assert.deepEqual(projectMeasurementBasis({ sourceVersion: { source_version_id: VERSION }, basis: { measurable: false, blockers: [{ message: "Not a CSV." }] } }).counts,
     { measurable: false, reasons: ["Not a CSV."] });
