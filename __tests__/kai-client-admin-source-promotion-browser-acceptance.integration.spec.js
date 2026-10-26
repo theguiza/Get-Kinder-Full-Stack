@@ -831,7 +831,15 @@ async function runBrowserAcceptance() {
       const [first] = ids.evidence;
       const evidenceDecision = await adminPage.api("POST", evidenceReviewCompletePath(ORG_X, first.evidence_item_id, first.review_queue_item_id),
         evidenceReviewDecisionBody({ expectedUpdatedAt: new Date(first.updated_at).toISOString(), decision: "supported" }));
-      assert.deepEqual([evidenceDecision.status, evidenceDecision.body.error.code, evidenceDecision.body.blockers?.[0]?.blocking_reason], [403, "authorization_denied", "role_not_allowed"]);
+      // Owner authorization 2026-10-24 (e0022aa): an active client_admin is admitted to the decision route only for
+      // their own ordinary measurement; this structural (field-presence) evidence is refused inside the decision's
+      // transaction as Get Kinder's to review, and nothing is written (counts below).
+      assert.deepEqual([evidenceDecision.status, evidenceDecision.body.error.code, evidenceDecision.body.blockers?.map((blocker) => blocker.blocking_reason)],
+        [422, "blocked", ["evidence_type_requires_get_kinder_review"]]);
+      assert.equal(evidenceDecision.body.data, null, "no decision is returned");
+      const [evidenceRow] = await query("SELECT evidence_review_status FROM kai.evidence_items WHERE organization_id = $1::uuid AND evidence_item_id = $2::uuid",
+        [ORG_X, first.evidence_item_id]);
+      assert.equal(evidenceRow.evidence_review_status, "needs_gk_review", "the evidence is not reviewed");
       const capabilities = await adminPage.api("GET", organizationAccessCapabilitiesPath(ORG_X));
       const operations = capabilities.body.data.workflowOperations;
       assert.deepEqual([operations.readGeneratedDrafts, operations.recordEvidenceReview, operations.recordClaimReview, operations.reviewGeneratedDrafts, operations.generateAllDraftTypes],
@@ -840,7 +848,7 @@ async function runBrowserAcceptance() {
       const queue = await adminPage.api("GET", `${COCKPIT}/queue?organization_id=${ORG_X}&queue_type=source_candidate_review&queue_status=open`);
       assert.equal(queue.status, 403);
       assert.deepEqual(await counts(ORG_X), before);
-      results.protected = "PASS: evidence review 403 role_not_allowed; readGeneratedDrafts false; review/release capabilities false; GK source queue 403";
+      results.protected = "PASS: structural evidence review refused 422 evidence_type_requires_get_kinder_review, nothing written; readGeneratedDrafts false; review/release capabilities false; GK source queue 403";
     });
 
     await test("failed file policy remains blocked in the pipeline and the candidate lookup", async () => {

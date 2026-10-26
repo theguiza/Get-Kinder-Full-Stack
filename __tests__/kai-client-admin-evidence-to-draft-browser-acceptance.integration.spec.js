@@ -620,31 +620,24 @@ async function runBrowserAcceptance() {
       results.b4 = "PASS";
     });
 
-    await test("B5a (before P2-04): both internal draft requests for the fresh claim are refused at traceability revalidation and create nothing", async () => {
+    await test("B5a (before P2-04): the fresh structural claim is not offered for an internal draft, its read-only diagnostic still reports the missing P2-04 state, and nothing is written", async () => {
+      // Since 36c6588 a structural (field-presence) claim is not an impact finding, so the UI offers no
+      // draft from it; since fa87ece generation records P2-04 itself (proven by its own suites), so the
+      // former direct-request refusal no longer applies and is not exercised here (it would write).
       const before = await counts(ORG_X);
       const mark = adminPage.mark();
-      await adminPage.clickButton("Generate internal evidence summary");
-      // Owner authorization 2026-10-24: the refusal is diagnosed from the
-      // claim's client-safe internal traceability read (409, missing P2-04 state).
-      await adminPage.waitForText("cannot be drafted from yet: its coverage gap follow-ups have not been generated yet. Use \"Generate gap follow-ups\" on that claim, then try again. Nothing was created.");
-      await adminPage.idle();
-      await adminPage.clickButton("Generate internal impact narrative");
-      await adminPage.idle();
-      const requests = adminPage.requestsSince(mark);
-      assert.deepEqual(requests.filter((r) => r.method === "POST").map((r) => [new URL(r.url).pathname, r.status]),
-        [[createEvidenceSummaryPath(ORG_X), 422], [createImpactNarrativePath(ORG_X), 422]]);
-      const diagnosticReads = requests.filter((r) => new URL(r.url).pathname.endsWith("/traceability"));
-      assert.deepEqual(diagnosticReads.map((r) => [r.method, new URL(r.url).pathname + new URL(r.url).search, r.status]),
-        [0, 1].map(() => ["GET", claimTraceabilityPath(ORG_X, ids.x.usableClaimId, "internal"), 409]));
+      assert.equal(await adminPage.evaluate(`document.querySelector("[data-client-draft-readiness]").getAttribute("data-client-draft-readiness")`), "no_measured_claim");
+      for (const label of ["Generate internal evidence summary", "Generate internal impact narrative"]) {
+        assert.equal(await adminPage.evaluate(`[...document.querySelectorAll("button")].find((el) => el.innerText.trim() === ${JSON.stringify(label)}).disabled`), true, label);
+      }
+      assert.equal(await adminPage.evaluate(`Boolean(document.querySelector('[data-client-claim="${ids.x.usableClaimId}"] input'))`), false, "no selection control");
       const diagnostic = await adminPage.api("GET", claimTraceabilityPath(ORG_X, ids.x.usableClaimId, "internal"));
       assert.deepEqual([diagnostic.status, diagnostic.body.data], [409, { traceability_conflict_reason: "gap_dimension_requires_missing_p204_state" }]);
-      for (const [path, key] of [[createEvidenceSummaryPath(ORG_X), "client-admin-before-p204-summary"], [createImpactNarrativePath(ORG_X), "client-admin-before-p204-narrative"]]) {
-        const direct = await adminPage.api("POST", path, DRAFT_BODY([ids.x.usableClaimId], key));
-        assert.deepEqual([direct.status, direct.body.error.code, direct.body.blockers[0].blocking_reason], [422, "validation_blocker", "traceability_result_contract_invalid"], path);
-      }
+      await adminPage.idle();
+      assert.deepEqual(adminPage.requestsSince(mark).filter((r) => r.method !== "GET"), [], "nothing is sent");
       assert.equal(modelCalls.length, 0, "no generator call");
       assert.deepEqual(await counts(ORG_X), before);
-      results.b5a = "OBSERVED: evidence summary 422 + impact narrative 422 traceability_result_contract_invalid before P2-04; nothing written";
+      results.b5a = "PASS: structural claim not offered (no_measured_claim, generate disabled); diagnostic 409 missing P2-04; nothing written";
     });
 
     await test("B5b (refused P2-04): a synthetic gap-insert fault returns a real 422 the UI explains, and writes nothing", async () => {
