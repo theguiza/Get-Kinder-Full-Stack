@@ -15,6 +15,7 @@ import {
   validateRecordCountDefinition,
 } from "../Backend/kai/validators/kaiSourceMeasurementValidators.js";
 import { recordSourceRecordCountMeasurement } from "../Backend/kai/services/kaiSourceMeasurementService.js";
+import { programmeSessionWorkbook, syntheticXlsxWorkbook, SYNTHETIC_XLSX_MIME } from "./support/kaiSyntheticXlsxWorkbook.js";
 import {
   MEASUREMENT_ANSWERED_DIMENSION_KEYS,
   applyMeasurementCoverageDimensions,
@@ -88,11 +89,19 @@ test("the definition is required, complete, plain text, and its optional period 
 
 test("the measurement is the committed record count minus blank records; duplicates are counted and reported; anything uncommitted is refused", async () => {
   const derived = deriveRecordCountMeasurement(await profile("d,p\n1,a\n\n2,b\n2,b\n"));
-  assert.deepEqual(derived.measurement, { totalRecordCount: 4, blankRecordCount: 1, duplicateRecordCount: 2, measuredValue: 3 });
+  assert.deepEqual(derived.measurement, {
+    calculationMethod: "p1_csv_profile_data_records_excluding_blank_v1",
+    locatorCoordinates: { scope: "data_records_after_header" },
+    sheetKey: null,
+    totalRecordCount: 4,
+    blankRecordCount: 1,
+    duplicateRecordCount: 2,
+    measuredValue: 3,
+  });
   const csv = { status: "profiled", format: "csv", structural_metadata: { header_row_assumed: true } };
   for (const [candidate, reason] of [
-    [{ ...csv, format: "xlsx" }, "measurement_source_not_single_table_csv"],
-    [{ ...csv, status: "failed" }, "measurement_source_not_single_table_csv"],
+    [{ ...csv, format: "markdown" }, "measurement_source_not_single_table"],
+    [{ ...csv, status: "failed" }, "measurement_source_not_single_table"],
     [{ ...csv, structural_metadata: {} , counts: { row_count: 1, duplicate_row_count: 0, blank_record_count: 0 } }, "measurement_header_not_established"],
     [{ ...csv, counts: { row_count: 3, duplicate_row_count: 0 } }, "measurement_blank_record_count_not_committed"],
     [{ ...csv, counts: { row_count: 2.5, duplicate_row_count: 0, blank_record_count: 0 } }, "measurement_counts_not_committed"],
@@ -102,6 +111,61 @@ test("the measurement is the committed record count minus blank records; duplica
     assert.equal(result.ok, false, reason);
     assert.equal(result.blockers[0].blocking_reason, reason);
   }
+});
+
+async function workbookProfile(bytes) {
+  return profileLocalTrustedFile({ extension: ".xlsx", declaredMime: SYNTHETIC_XLSX_MIME, byteSize: bytes.byteLength, bytes });
+}
+
+test("XLSX: one worksheet's data rows after the header row, minus blank rows; never the workbook row_count, never two worksheets", async () => {
+  for (const styledBlank of [true, false]) {
+    const profile = await workbookProfile(programmeSessionWorkbook({ styledBlank }));
+    assert.equal(profile.counts.row_count, styledBlank ? 7 : 6, "the workbook row_count includes the header (and a stored blank row)");
+    const derived = deriveRecordCountMeasurement(profile);
+    assert.equal(derived.ok, true, JSON.stringify(derived.blockers));
+    assert.deepEqual(derived.measurement, {
+      calculationMethod: "p1_xlsx_single_worksheet_data_rows_excluding_blank_v1",
+      locatorCoordinates: { scope: "data_records_after_header", sheet_key: "sheet_1" },
+      sheetKey: "sheet_1",
+      totalRecordCount: 6,
+      blankRecordCount: 1,
+      duplicateRecordCount: 2,
+      measuredValue: 5,
+    }, `styled blank row: ${styledBlank}`);
+  }
+  // A legacy workbook profile (profiled before the worksheet basis existed)
+  // is refused, not read from its row_count.
+  const current = await workbookProfile(programmeSessionWorkbook());
+  const legacy = { ...current, sheets: current.sheets.map(({ record_count_basis: _omitted, ...sheet }) => sheet) };
+  const header = (rows) => [["session_date", "programme"], ...rows];
+  const one = (rows, extra = {}) => syntheticXlsxWorkbook({ sheets: [{ rows, ...extra }] });
+  const cases = [
+    [legacy, "measurement_xlsx_record_basis_not_committed"],
+    [await workbookProfile(programmeSessionWorkbook({ extraSheet: true })), "measurement_xlsx_not_single_worksheet"],
+    [await workbookProfile(one([[null, null], ["2026-09-02", "literacy"]])), "measurement_header_not_established"],
+    [await workbookProfile(one([[2026, 7], [1, 2]])), "measurement_header_not_established"],
+    [await workbookProfile(one(header([["2026-09-02", { formula: "UPPER(\"x\")", value: "X" }]]))), "measurement_xlsx_formula_cells_present"],
+    [await workbookProfile(one(header([["2026-09-02", "literacy"]]), { merged: ["A2:B2"] })), "measurement_xlsx_merged_cells_present"],
+    [await workbookProfile(one([["session_date", "programme"], { cells: ["2026-09-02", "literacy"], hidden: true }])), "measurement_xlsx_hidden_rows_or_columns_present"],
+    [await workbookProfile(one(header([["2026-09-02", "literacy"]]), { hiddenColumns: [2] })), "measurement_xlsx_hidden_rows_or_columns_present"],
+    [await workbookProfile(one(header([["2026-09-02", "literacy", "stray"]]))), "measurement_xlsx_not_single_table"],
+    [{ ...current, sheets: [{ ...current.sheets[0], record_count_basis: { ...current.sheets[0].record_count_basis, blank_record_count: 9 } }] }, "measurement_counts_inconsistent"],
+    [{ ...current, sheets: [{ ...current.sheets[0], record_count_basis: { ...current.sheets[0].record_count_basis, formula_cell_count: "0" } }] }, "measurement_counts_not_committed"],
+  ];
+  for (const [candidate, reason] of cases) {
+    const result = deriveRecordCountMeasurement(candidate);
+    assert.equal(result.ok, false, reason);
+    assert.equal(result.blockers[0].blocking_reason, reason);
+    assert.ok(result.blockers[0].required_fix.length > 0, reason);
+  }
+  assert.match(deriveRecordCountMeasurement(legacy).blockers[0].required_fix, /Upload again as a new intake version/);
+  // Zero and FALSE are values; whitespace-only and empty strings are not;
+  // inline and shared strings compare equal for duplicates.
+  const values = await workbookProfile(syntheticXlsxWorkbook({ sheets: [{ rows: header([[0, false], ["   ", ""], ["a", "b"], ["a", "b"]]) }] }));
+  assert.deepEqual(deriveRecordCountMeasurement(values).measurement.measuredValue, 3);
+  const inline = await workbookProfile(syntheticXlsxWorkbook({ inline: true, sheets: [{ rows: header([[0, false], ["   ", ""], ["a", "b"], ["a", "b"]]) }] }));
+  assert.deepEqual(inline.sheets[0].record_count_basis, values.sheets[0].record_count_basis);
+  assert.doesNotMatch(JSON.stringify([current, values, inline]), /literacy|mentoring|2026-09-0|"a","b"/, "no cell value is stored in the profile");
 });
 
 test("statements state only the counted value, its definition, period, and arithmetic", () => {
@@ -114,7 +178,15 @@ test("statements state only the counted value, its definition, period, and arith
     definitionRow: { unit_label: "programme sessions", counted_unit: "programme session", period_start: null, period_end: null },
   });
   assert.equal(claim, "The promoted source records 3 programme sessions with no reporting period defined (record count: one programme session per CSV data record; 1 blank record excluded, 0 exact-duplicate records included).");
-  for (const statement of [evidence, claim]) {
+  // A workbook count names worksheet rows; the CSV wording above is unchanged.
+  const xlsxEvidence = composeMeasurementEvidenceStatement({ measurement: { ...measurement, calculationMethod: "p1_xlsx_single_worksheet_data_rows_excluding_blank_v1" }, definition });
+  assert.equal(xlsxEvidence, "Source version record count: 3 programme sessions for the reporting period 2026-09-01 to 2026-09-30, counting each worksheet data row after the header row as one programme session; 1 blank record excluded; 0 exact-duplicate records included.");
+  const xlsxClaim = composeMeasurementClaimStatement({
+    measurementRow: { measured_value: 3, blank_record_count: 1, duplicate_record_count: 0, calculation_method: "p1_xlsx_single_worksheet_data_rows_excluding_blank_v1" },
+    definitionRow: { unit_label: "programme sessions", counted_unit: "programme session", period_start: null, period_end: null },
+  });
+  assert.equal(xlsxClaim, "The promoted source records 3 programme sessions with no reporting period defined (record count: one programme session per worksheet data row; 1 blank record excluded, 0 exact-duplicate records included).");
+  for (const statement of [evidence, claim, xlsxEvidence, xlsxClaim]) {
     assert.equal(validateComposedStatement(statement).ok, true);
     assert.doesNotMatch(statement, /because|caused|improv|impact|increase|%|per cent|rate|participants/i);
   }
@@ -136,6 +208,12 @@ test("a measurement claim needs an exactly matching persisted measurement, defin
     profile_canonical_sha256: "a".repeat(64),
   };
   assert.equal(validateMeasurementClaimBasis({ evidenceItemRow, locatorRow, sourceVersionRow, measurementRow }).ok, true);
+  assert.equal(validateMeasurementClaimBasis({
+    evidenceItemRow,
+    locatorRow: { ...locatorRow, coordinates: { scope: "data_records_after_header", sheet_key: "sheet_1" } },
+    sourceVersionRow,
+    measurementRow: { ...measurementRow, calculation_method: "p1_xlsx_single_worksheet_data_rows_excluding_blank_v1" },
+  }).ok, true, "a workbook count on its worksheet locator");
   for (const [label, change] of [
     ["missing measurement", { measurementRow: null }],
     ["another evidence item", { measurementRow: { ...measurementRow, evidence_item_id: "e2" } }],
@@ -144,6 +222,13 @@ test("a measurement claim needs an exactly matching persisted measurement, defin
     ["profile changed", { sourceVersionRow: { profile_canonical_sha256: "b".repeat(64) } }],
     ["column locator", { locatorRow: { locator_type: "column", coordinates: { column_name: "x" } } }],
     ["field-presence evidence", { evidenceItemRow: { ...evidenceItemRow, evidence_type: "dictionary_field_presence_fact" } }],
+    ["unknown calculation method", { measurementRow: { ...measurementRow, calculation_method: "p1_csv_profile_data_records_v0" } }],
+    ["CSV count on a worksheet locator", { locatorRow: { ...locatorRow, coordinates: { scope: "data_records_after_header", sheet_key: "sheet_1" } } }],
+    ["XLSX count on the whole-version locator", { measurementRow: { ...measurementRow, calculation_method: "p1_xlsx_single_worksheet_data_rows_excluding_blank_v1" } }],
+    ["XLSX count on a malformed worksheet locator", {
+      measurementRow: { ...measurementRow, calculation_method: "p1_xlsx_single_worksheet_data_rows_excluding_blank_v1" },
+      locatorRow: { ...locatorRow, coordinates: { scope: "data_records_after_header", sheet_key: "Sessions" } },
+    }],
   ]) {
     const result = validateMeasurementClaimBasis({ evidenceItemRow, locatorRow, sourceVersionRow, measurementRow, ...change });
     assert.equal(result.ok, false, label);

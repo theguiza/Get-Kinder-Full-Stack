@@ -1375,8 +1375,9 @@ export async function listClientFollowupWorkflowsForOrganization({ organizationI
  * (P2-01M), read on the caller's transaction (P2-03 claim composition and the
  * P2-04/P2-06 measurement-aware coverage assessment). profile_field_missing_counts
  * is each field's committed missing_count from the exact P1 profile the
- * measurement was derived from (null when that profile is no longer the one
- * bound to the version, so the assessment stays unknown).
+ * measurement was derived from - for an XLSX count, its worksheet's
+ * per-column data-record missing counts - (null when that profile is no
+ * longer the one bound to the version, so the assessment stays unknown).
  */
 export async function listScopedEvidenceMeasurementsByEvidenceItemIds({ organizationId, evidenceItemIds }, db = pool) {
   if (!Array.isArray(evidenceItemIds) || evidenceItemIds.length === 0) return [];
@@ -1391,8 +1392,11 @@ export async function listScopedEvidenceMeasurementsByEvidenceItemIds({ organiza
             d.counted_unit, d.unit_label AS definition_unit_label, d.definition_status,
             d.source_version_id::text AS definition_source_version_id,
             d.period_start::text AS period_start, d.period_end::text AS period_end,
-            (SELECT jsonb_agg(field->'missing_count' ORDER BY ordinality)
-               FROM jsonb_array_elements(p.profile->'fields') WITH ORDINALITY AS fields(field, ordinality)) AS profile_field_missing_counts
+            CASE WHEN m.calculation_method = 'p1_xlsx_single_worksheet_data_rows_excluding_blank_v1'
+              THEN p.profile->'sheets'->0->'record_count_basis'->'field_missing_counts'
+              ELSE (SELECT jsonb_agg(field->'missing_count' ORDER BY ordinality)
+                      FROM jsonb_array_elements(p.profile->'fields') WITH ORDINALITY AS fields(field, ordinality))
+            END AS profile_field_missing_counts
        FROM kai.evidence_measurements m
        JOIN kai.source_measurement_definitions d
          ON d.source_measurement_definition_id = m.source_measurement_definition_id

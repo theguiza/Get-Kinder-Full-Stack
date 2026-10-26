@@ -550,6 +550,160 @@ function parseWorkbookRelationships(relsBytes) {
   return relationships;
 }
 
+// The P2-01M worksheet record-count basis (one sheet, one table). Cell values
+// are read only to decide whether a cell is blank and whether two data rows
+// are identical; they are held in memory for one call and never stored,
+// returned, or logged. Formulas are never evaluated.
+export const XLSX_RECORD_COUNT_BASIS_VERSION = "kai_xlsx_worksheet_record_basis_v1";
+const XML_ENTITY_PATTERN = /&(?:#x([0-9a-fA-F]+)|#([0-9]+)|(amp|lt|gt|quot|apos));/g;
+const XML_NAMED_ENTITIES = Object.freeze({ amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'" });
+const XLSX_TEXT_CELL_TYPES = Object.freeze(new Set(["s", "inlineStr"]));
+
+function decodeXmlText(value) {
+  return value.replace(XML_ENTITY_PATTERN, (_, hex, decimal, named) => {
+    if (named) return XML_NAMED_ENTITIES[named];
+    const codePoint = Number.parseInt(hex ?? decimal, hex ? 16 : 10);
+    return Number.isSafeInteger(codePoint) && codePoint <= 0x10ffff ? String.fromCodePoint(codePoint) : "";
+  });
+}
+
+// The text of a shared or inline string: every <t> run, without phonetic runs.
+function xmlStringItemText(fragment) {
+  const withoutPhonetic = fragment.replace(/<(?:\w+:)?rPh\b[\s\S]*?<\/(?:\w+:)?rPh>/g, "");
+  let text = "";
+  for (const match of withoutPhonetic.matchAll(/<(?:\w+:)?t\b[^>]*?(?:\/>|>([\s\S]*?)<\/(?:\w+:)?t>)/g)) {
+    text += decodeXmlText(match[1] ?? "");
+  }
+  return text;
+}
+
+function parseSharedStrings(sharedStringsBytes) {
+  const xml = TEXT_DECODER.decode(sharedStringsBytes);
+  return [...xml.matchAll(/<(?:\w+:)?si\b[^>]*?(?:\/>|>([\s\S]*?)<\/(?:\w+:)?si>)/g)].map((match) => xmlStringItemText(match[1] ?? ""));
+}
+
+function xmlAttribute(attributesText, name) {
+  const match = new RegExp(`(?:^|\\s)${name}\\s*=\\s*(["'])(.*?)\\1`).exec(attributesText);
+  return match ? match[2] : null;
+}
+
+function isTrueXmlFlag(value) {
+  return value === "1" || value === "true";
+}
+
+/**
+ * One worksheet's record-count basis: worksheet row 1 is the header row, and
+ * it is established only when it has a value and every header value is text.
+ * Data records are the worksheet rows after it, through the last row that has
+ * a value; a row (stored or not) none of whose cells has a non-whitespace
+ * value is a blank record. Zero and FALSE are values. Exact duplicates compare
+ * every column's stored value, blank rows included, as the CSV profile does.
+ * Anything that makes the table's meaning ambiguous is counted, not resolved:
+ * formula cells, merged ranges, hidden rows or columns, values in a column
+ * with no header, and shared-string references that do not resolve.
+ */
+function summarizeXlsxRecordCountBasis(xmlBytes, sharedStrings) {
+  const xml = TEXT_DECODER.decode(xmlBytes);
+  const rows = new Map();
+  const hiddenRows = new Set();
+  let formula_cell_count = 0;
+  let unresolved_value_count = 0;
+  let previousRowIndex = 0;
+  for (const rowMatch of xml.matchAll(/<(?:\w+:)?row\b([^>]*?)(?:\/>|>([\s\S]*?)<\/(?:\w+:)?row>)/g)) {
+    const declaredRow = Number.parseInt(xmlAttribute(rowMatch[1], "r") ?? "", 10);
+    const rowIndex = Number.isSafeInteger(declaredRow) && declaredRow > 0 ? declaredRow : previousRowIndex + 1;
+    previousRowIndex = rowIndex;
+    if (isTrueXmlFlag(xmlAttribute(rowMatch[1], "hidden"))) hiddenRows.add(rowIndex);
+    const cells = rows.get(rowIndex) ?? new Map();
+    let previousColumn = 0;
+    for (const cellMatch of (rowMatch[2] ?? "").matchAll(/<(?:\w+:)?c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/(?:\w+:)?c>)/g)) {
+      const columnIndex = cellColumnIndex(xmlAttribute(cellMatch[1], "r")) ?? previousColumn + 1;
+      previousColumn = columnIndex;
+      const type = xmlAttribute(cellMatch[1], "t") ?? "n";
+      const content = cellMatch[2] ?? "";
+      if (/<(?:\w+:)?f\b/.test(content)) formula_cell_count += 1;
+      let value = "";
+      if (type === "inlineStr") {
+        const inline = /<(?:\w+:)?is\b[^>]*>([\s\S]*?)<\/(?:\w+:)?is>/.exec(content);
+        value = inline ? xmlStringItemText(inline[1]) : "";
+      } else {
+        const stored = /<(?:\w+:)?v\b[^>]*?(?:\/>|>([\s\S]*?)<\/(?:\w+:)?v>)/.exec(content);
+        const raw = stored ? decodeXmlText(stored[1] ?? "") : "";
+        if (type === "s" && raw.trim().length > 0) {
+          const index = Number(raw.trim());
+          if (Number.isSafeInteger(index) && index >= 0 && index < sharedStrings.length) {
+            value = sharedStrings[index];
+          } else {
+            unresolved_value_count += 1;
+          }
+        } else {
+          value = raw;
+        }
+      }
+      cells.set(columnIndex, { type, value, present: value.trim().length > 0 });
+    }
+    rows.set(rowIndex, cells);
+  }
+  const hidden_column_count = [...xml.matchAll(/<(?:\w+:)?col\b([^>]*?)\/?>/g)]
+    .filter((match) => isTrueXmlFlag(xmlAttribute(match[1], "hidden"))).length;
+  const merged_range_count = [...xml.matchAll(/<(?:\w+:)?mergeCell\b/g)].length;
+
+  let lastValueRow = 0;
+  let lastValueColumn = 0;
+  for (const [rowIndex, cells] of rows) {
+    for (const [columnIndex, cell] of cells) {
+      if (!cell.present) continue;
+      lastValueRow = Math.max(lastValueRow, rowIndex);
+      lastValueColumn = Math.max(lastValueColumn, columnIndex);
+    }
+  }
+  const headerCells = [...(rows.get(1) ?? new Map()).entries()].filter(([, cell]) => cell.present);
+  const headerColumns = new Set(headerCells.map(([columnIndex]) => columnIndex));
+  const header_row_established = headerCells.length > 0 && headerCells.every(([, cell]) => XLSX_TEXT_CELL_TYPES.has(cell.type));
+
+  let blank_record_count = 0;
+  let values_outside_header_columns_count = 0;
+  const rowSignatures = new Map();
+  // Per column, the data records with no value there (blank records included).
+  const field_missing_counts = Array.from({ length: lastValueColumn }, () => 0);
+  for (let rowIndex = 2; rowIndex <= lastValueRow; rowIndex += 1) {
+    const cells = rows.get(rowIndex) ?? new Map();
+    let recordHasValue = false;
+    for (let columnIndex = 1; columnIndex <= lastValueColumn; columnIndex += 1) {
+      if (!cells.get(columnIndex)?.present) field_missing_counts[columnIndex - 1] += 1;
+    }
+    for (const [columnIndex, cell] of cells) {
+      if (!cell.present) continue;
+      recordHasValue = true;
+      if (!headerColumns.has(columnIndex)) values_outside_header_columns_count += 1;
+    }
+    if (!recordHasValue) blank_record_count += 1;
+    const signature = JSON.stringify(Array.from({ length: lastValueColumn }, (_, index) => {
+      const cell = cells.get(index + 1);
+      return cell?.present ? cell.value : "";
+    }));
+    rowSignatures.set(signature, (rowSignatures.get(signature) ?? 0) + 1);
+  }
+  const duplicate_record_count = [...rowSignatures.values()]
+    .filter((count) => count > 1)
+    .reduce((total, count) => total + count, 0);
+  return Object.freeze({
+    basis_version: XLSX_RECORD_COUNT_BASIS_VERSION,
+    header_row_position: 1,
+    header_row_established,
+    data_record_count: Math.max(lastValueRow - 1, 0),
+    blank_record_count,
+    duplicate_record_count,
+    field_missing_counts: Object.freeze(field_missing_counts),
+    formula_cell_count,
+    merged_range_count,
+    hidden_row_count: [...hiddenRows].filter((rowIndex) => rowIndex <= lastValueRow).length,
+    hidden_column_count,
+    values_outside_header_columns_count,
+    unresolved_value_count,
+  });
+}
+
 function createXlsxSheetSummary(sheet_key, sheetName) {
   return {
     sheet_key,
@@ -590,11 +744,14 @@ async function profileXlsx({ extension, declaredMime, bytes }) {
         entry_name,
       }));
 
+    const sharedStringsEntry = entries.get("xl/sharedStrings.xml");
+    const sharedStrings = sharedStringsEntry ? parseSharedStrings(inflateEntry(bytes, sharedStringsEntry)) : [];
     const sheetSummaries = [];
 
     for (const worksheetRef of worksheetRefs) {
       const sheetSummary = createXlsxSheetSummary(worksheetRef.sheet_key, worksheetRef.sheet_name);
       const xmlBytes = inflateEntry(bytes, entries.get(worksheetRef.entry_name));
+      sheetSummary.recordCountBasis = summarizeXlsxRecordCountBasis(xmlBytes, sharedStrings);
       scanXmlElements(xmlBytes, ({ localName, attributes }) => {
         if (localName === "row") {
           const rowIndex = Number.parseInt(attributes.get("r") ?? `${sheetSummary.rowIndices.size + 1}`, 10);
@@ -714,6 +871,7 @@ async function profileXlsx({ extension, declaredMime, bytes }) {
           duplicate_row_count,
         }),
         draft_dictionary_fields: Object.freeze(sheetFields),
+        record_count_basis: sheet.recordCountBasis,
       });
     });
 

@@ -108,8 +108,8 @@ export const INTERNAL_DRAFT_READINESS_MESSAGES = Object.freeze({
   not_authorized: "Your role does not include internal draft generation for this organization.",
   no_project: "Select a Project above: each draft belongs to one Project.",
   no_measured_claim: "No measured finding yet. In Data Sources, use Count records on your source to record what one record represents and its "
-    + "reporting period, then propose the claim from the measurement. Count records works only on a single-table CSV source; an Excel "
-    + "workbook cannot be counted yet. Structural facts about a file's columns are not impact findings.",
+    + "reporting period, then propose the claim from the measurement. Count records works on a single-table CSV file or an Excel "
+    + "workbook with one worksheet. Structural facts about a file's columns are not impact findings.",
   claims_not_all_loaded: "Not every claim of your organization is loaded yet, and none of the loaded ones is a measured finding. "
     + "Use \"Load more claims\" below to find your measured findings.",
   no_claims_selected: "Select at least one claim below to draft from.",
@@ -680,8 +680,8 @@ export const INTERNAL_REPORT_REASON_MESSAGES = Object.freeze({
 export const STRUCTURAL_ONLY_DRAFT_MESSAGE = "Structural facts only: this saved draft documents which columns a source has, "
   + "not a measured programme result, so it is not an impact report, and a review would not make it one. It is kept exactly as it was "
   + "generated, with its citations and history. To produce a usable internal report, select a measured finding under Claims for internal "
-  + "drafts and generate a new draft (use Count records in Data Sources first if there is none; it works only on a single-table CSV "
-  + "source, not an Excel workbook).";
+  + "drafts and generate a new draft (use Count records in Data Sources first if there is none; it works on a single-table CSV file "
+  + "or an Excel workbook with one worksheet).";
 
 export const INTERNAL_DRAFT_FACTUAL_REVIEW_NEXT_ACTIONS = Object.freeze({
   cited_claims_not_currently_eligible: "Each cited claim's current condition is shown on it under Claims for internal drafts. A new draft from claims "

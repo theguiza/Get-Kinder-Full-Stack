@@ -21,7 +21,6 @@ import {
   MEASUREMENT_DATA_CLASS,
   MEASUREMENT_LOCATOR_TYPE,
   MEASUREMENT_LOCATOR_COORDINATES,
-  MEASUREMENT_CALCULATION_METHOD,
   MEASUREMENT_DEFINITION_STATUS,
   MEASUREMENT_VALIDATOR_KEY,
   computeDefinitionFingerprint,
@@ -71,9 +70,12 @@ function asIso(value) {
   return value ?? null;
 }
 
-function locatorFingerprint({ organizationId, sourceVersionId }) {
+// The CSV whole-version locator keeps its original identity; a worksheet
+// locator adds the worksheet it is scoped to.
+function locatorFingerprint({ organizationId, sourceVersionId, sheetKey }) {
+  const scope = sheetKey ? `${MEASUREMENT_LOCATOR_COORDINATES.scope}|${sheetKey}` : MEASUREMENT_LOCATOR_COORDINATES.scope;
   return createHash("sha256")
-    .update(`${organizationId}|${sourceVersionId}|${MEASUREMENT_LOCATOR_TYPE}|${MEASUREMENT_LOCATOR_COORDINATES.scope}`)
+    .update(`${organizationId}|${sourceVersionId}|${MEASUREMENT_LOCATOR_TYPE}|${scope}`)
     .digest("hex");
 }
 
@@ -148,7 +150,7 @@ async function readDefinition(tx, { organizationId, sourceVersionId }) {
   return rows[0] || null;
 }
 
-async function insertLocatorIfAbsent(tx, { organizationId, sourceVersionId, fingerprint }) {
+async function insertLocatorIfAbsent(tx, { organizationId, sourceVersionId, coordinates, fingerprint }) {
   const { rows } = await tx.query(
     `INSERT INTO kai.source_locators (
        organization_id, source_version_id, locator_type, coordinates, locator_fingerprint, created_by_type
@@ -156,7 +158,7 @@ async function insertLocatorIfAbsent(tx, { organizationId, sourceVersionId, fing
      ON CONFLICT (organization_id, source_version_id, locator_fingerprint) DO NOTHING
      RETURNING source_locator_id, organization_id, source_version_id, locator_type,
                coordinates, locator_fingerprint, created_by_type, created_at`,
-    [organizationId, sourceVersionId, MEASUREMENT_LOCATOR_TYPE, JSON.stringify(MEASUREMENT_LOCATOR_COORDINATES), fingerprint],
+    [organizationId, sourceVersionId, MEASUREMENT_LOCATOR_TYPE, JSON.stringify(coordinates), fingerprint],
   );
   return rows[0] || null;
 }
@@ -188,7 +190,7 @@ async function insertMeasurementIfAbsent(tx, { organizationId, sourceVersionId, 
      RETURNING ${MEASUREMENT_COLUMNS}`,
     [
       evidenceItemId, organizationId, sourceVersionId, definitionId, MEASUREMENT_TYPE_RECORD_COUNT,
-      measurement.measuredValue, unitLabel, MEASUREMENT_CALCULATION_METHOD, profileCanonicalSha256,
+      measurement.measuredValue, unitLabel, measurement.calculationMethod, profileCanonicalSha256,
       measurement.totalRecordCount, measurement.blankRecordCount, measurement.duplicateRecordCount,
     ],
   );
@@ -222,6 +224,7 @@ function definitionConflict(sourceVersionId) {
 function sameMeasurement(row, { evidenceItemId, definitionId, measurement, profileCanonicalSha256 }) {
   return row.evidence_item_id === evidenceItemId
     && row.source_measurement_definition_id === definitionId
+    && row.calculation_method === measurement.calculationMethod
     && row.measured_value === measurement.measuredValue
     && row.total_record_count === measurement.totalRecordCount
     && row.blank_record_count === measurement.blankRecordCount
@@ -282,7 +285,8 @@ async function resolveDefaultRunInTransaction() {
  * KAI P2-01M record-count measurement repository: in one transaction, the
  * human definition of what a record is, the measurement derived from the
  * committed P1 profile of the exact promoted, current source version, its
- * whole-version locator, the measurement evidence item, the evidence-review
+ * data-records locator (the whole CSV version, or a workbook's one worksheet),
+ * the measurement evidence item, the evidence-review
  * queue item, and one required actor-attributed audit. Lineage, currentness,
  * and the effective allowed use are the unchanged P2-01 validators. Idempotent:
  * the same definition replays with zero writes; a different definition for a
@@ -324,7 +328,9 @@ export function createPostgresSourceMeasurementRepository({ runInTransaction, in
             basis: derived.ok
               ? {
                   measurable: true,
-                  calculation_method: MEASUREMENT_CALCULATION_METHOD,
+                  calculation_method: derived.measurement.calculationMethod,
+                  source_format: derived.measurement.sheetKey ? "xlsx" : "csv",
+                  worksheet: derived.measurement.sheetKey ? { sheet_key: derived.measurement.sheetKey } : null,
                   data_record_count: derived.measurement.totalRecordCount,
                   blank_record_count: derived.measurement.blankRecordCount,
                   duplicate_record_count: derived.measurement.duplicateRecordCount,
@@ -370,8 +376,13 @@ export function createPostgresSourceMeasurementRepository({ runInTransaction, in
           }
           if (definitionRow.definition_fingerprint !== fingerprint) return definitionConflict(sourceVersionId);
 
-          const locatorPrint = locatorFingerprint({ organizationId, sourceVersionId });
-          let locatorRow = await insertLocatorIfAbsent(tx, { organizationId, sourceVersionId, fingerprint: locatorPrint });
+          const locatorPrint = locatorFingerprint({ organizationId, sourceVersionId, sheetKey: measurement.sheetKey });
+          let locatorRow = await insertLocatorIfAbsent(tx, {
+            organizationId,
+            sourceVersionId,
+            coordinates: measurement.locatorCoordinates,
+            fingerprint: locatorPrint,
+          });
           if (!locatorRow) {
             locatorRow = await getScopedSourceLocatorByFingerprint({ organizationId, sourceVersionId, locatorFingerprint: locatorPrint }, tx);
             if (!locatorRow) throw new MalformedInsertedRowError("source_locators");

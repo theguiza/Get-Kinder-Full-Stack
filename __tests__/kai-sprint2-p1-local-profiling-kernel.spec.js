@@ -274,22 +274,47 @@ test("P1-01 XLSX profiling exposes per-sheet names, counts, headers, hints, miss
   assertNoRawSentinels(result);
 });
 
-test("an XLSX profile is not a P2-01M record-count basis, and the customer sees the server's reason and required fix", async () => {
+test("an XLSX profile commits a worksheet record-count basis without values; a legacy one is refused and the customer sees the reason and required fix", async () => {
   const result = await profile({ extension: ".xlsx", declaredMime: XLSX_MIME, body: xlsxBytes({ duplicate: true }) });
   assert.equal(result.status, "profiled");
   assert.equal(result.format, "xlsx");
-  assert.equal(result.structural_metadata.header_row_assumed, undefined, "no committed header row");
-  assert.equal(result.counts.blank_record_count, undefined, "no committed blank-record count");
-  const derived = deriveRecordCountMeasurement(result);
+  assert.equal(result.structural_metadata.header_row_assumed, undefined, "the workbook-level fields are unchanged");
+  assert.equal(result.counts.blank_record_count, undefined, "the workbook-level counts are unchanged");
+  const basis = result.sheets[0].record_count_basis;
+  assert.deepEqual(basis, {
+    basis_version: "kai_xlsx_worksheet_record_basis_v1",
+    header_row_position: 1,
+    // A1 refers to a shared string the fixture does not contain; B1 is a number.
+    header_row_established: false,
+    data_record_count: 2,
+    blank_record_count: 0,
+    duplicate_record_count: 2,
+    field_missing_counts: [0, 2],
+    formula_cell_count: 0,
+    merged_range_count: 0,
+    hidden_row_count: 0,
+    hidden_column_count: 0,
+    values_outside_header_columns_count: 2,
+    unresolved_value_count: 1,
+  });
+  assertNoRawSentinels(result);
+  const legacy = { ...result, sheets: result.sheets.map(({ record_count_basis: _omitted, ...sheet }) => sheet) };
+  const derived = deriveRecordCountMeasurement(legacy);
   assert.equal(derived.ok, false);
-  assert.equal(derived.blockers[0].blocking_reason, "measurement_source_not_single_table_csv");
+  assert.equal(derived.blockers[0].blocking_reason, "measurement_xlsx_record_basis_not_committed");
   const projected = projectMeasurementBasis({
     sourceVersion: { source_version_id: "11111111-1111-4111-8111-111111111111", is_current: true },
     basis: { measurable: false, blockers: derived.blockers },
   });
   assert.deepEqual(projected.counts, { measurable: false, reasons: [`${derived.blockers[0].message} ${derived.blockers[0].required_fix}`] });
-  assert.match(INTERNAL_DRAFT_READINESS_MESSAGES.no_measured_claim, /only on a single-table CSV source; an Excel workbook cannot be counted yet/);
-  assert.match(STRUCTURAL_ONLY_DRAFT_MESSAGE, /only on a single-table CSV source, not an Excel workbook/);
+  assert.match(projected.counts.reasons[0], /profiled before worksheet records were counted[\s\S]*Upload again as a new intake version/);
+  assert.match(INTERNAL_DRAFT_READINESS_MESSAGES.no_measured_claim, /a single-table CSV file or an Excel workbook with one worksheet/);
+  assert.match(STRUCTURAL_ONLY_DRAFT_MESSAGE, /a single-table CSV file or an Excel workbook with one worksheet/);
+  const measurable = projectMeasurementBasis({
+    sourceVersion: { source_version_id: "11111111-1111-4111-8111-111111111111", is_current: true },
+    basis: { measurable: true, source_format: "xlsx", worksheet: { sheet_key: "sheet_1" }, data_record_count: 6, blank_record_count: 1, duplicate_record_count: 2, counted_record_count: 5 },
+  });
+  assert.equal(measurable.counts.worksheet, "sheet_1");
 });
 
 test("P1-01 XLSX profiling enforces sheet limits and does not disclose cell, formula, or prompt text", async () => {

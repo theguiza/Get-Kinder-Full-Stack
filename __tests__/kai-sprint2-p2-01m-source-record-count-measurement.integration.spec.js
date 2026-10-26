@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import http from "node:http";
 import express from "express";
+import { programmeSessionWorkbook, SYNTHETIC_XLSX_MIME } from "./support/kaiSyntheticXlsxWorkbook.js";
 
 /**
  * KAI P2-01M real-PostgreSQL proof, run only by
@@ -171,6 +172,10 @@ async function runSuite() {
   // non-empty lines after the header.
   function independentRecordCount(text) {
     return text.split(/\r?\n/).slice(1).filter((line) => line.split(",").some((cell) => cell.trim() !== "")).length;
+  }
+
+  async function workbookProfile(bytes) {
+    return profileLocalTrustedFile({ extension: ".xlsx", declaredMime: SYNTHETIC_XLSX_MIME, byteSize: bytes.byteLength, bytes });
   }
 
   async function kernelProfile(text) {
@@ -433,7 +438,7 @@ async function runSuite() {
     assert.deepEqual(await measurementCounts(), before);
   });
 
-  test("prohibited use, a superseded version, a profile without blank counting, and a non-CSV profile are refused", async () => {
+  test("prohibited use, a superseded version, a profile without blank counting, a legacy or multi-worksheet workbook profile, and a non-tabular profile are refused", async () => {
     const before = await measurementCounts();
     const prohibited = await seedPromotedSource({ profile: ids.profile, allowedUse: "not_allowed" });
     const refusedUse = await record(prohibited.sourceVersionId);
@@ -448,13 +453,57 @@ async function runSuite() {
 
     const sheet = await seedPromotedSource({ profile: { status: "profiled", format: "xlsx", sheets: [], fields: [{ field_key: "field_1" }] } });
     const refusedSheet = await record(sheet.sourceVersionId);
-    assert.equal(refusedSheet.blockers[0].blocking_reason, "measurement_source_not_single_table_csv");
+    assert.equal(refusedSheet.blockers[0].blocking_reason, "measurement_xlsx_not_single_worksheet");
+    const workbook = await workbookProfile(programmeSessionWorkbook({ tag: "legacy" }));
+    const legacyWorkbook = await seedPromotedSource({
+      profile: { ...workbook, sheets: workbook.sheets.map(({ record_count_basis: _omitted, ...rest }) => rest) },
+    });
+    const refusedLegacyWorkbook = await record(legacyWorkbook.sourceVersionId);
+    assert.equal(refusedLegacyWorkbook.blockers[0].blocking_reason, "measurement_xlsx_record_basis_not_committed");
+    const twoSheets = await seedPromotedSource({ profile: await workbookProfile(programmeSessionWorkbook({ tag: "two", extraSheet: true })) });
+    assert.equal((await record(twoSheets.sourceVersionId)).blockers[0].blocking_reason, "measurement_xlsx_not_single_worksheet");
+    const text = await seedPromotedSource({ profile: { status: "profiled", format: "txt", counts: { row_count: 3 }, fields: [] } });
+    assert.equal((await record(text.sourceVersionId)).blockers[0].blocking_reason, "measurement_source_not_single_table");
 
     const stale = await seedPromotedSource({ profile: ids.profile });
     await query("UPDATE kai.source_versions SET is_current = false WHERE source_version_id = $1::uuid", [stale.sourceVersionId]);
     const refusedStale = await record(stale.sourceVersionId);
     assert.deepEqual([refusedStale.ok, refusedStale.error.code], [false, "conflict_current_state_changed"]);
     assert.deepEqual(await measurementCounts(), before);
+  });
+
+  test("XLSX: a one-worksheet workbook profile is measured on its worksheet locator under the XLSX method, its claim names worksheet rows, and it replays", async () => {
+    const workbook = await workbookProfile(programmeSessionWorkbook({ tag: "measured" }));
+    const promoted = await seedPromotedSource({ profile: workbook });
+    const basis = await getSourceRecordCountMeasurementBasis(
+      { organizationId: ORG, sourceVersionId: promoted.sourceVersionId, actorContext: ADMIN }, { env: ENV, sourceMeasurementRepository: measurementRepository });
+    assert.deepEqual(basis.data.basis, {
+      measurable: true, calculation_method: "p1_xlsx_single_worksheet_data_rows_excluding_blank_v1", source_format: "xlsx", worksheet: { sheet_key: "sheet_1" },
+      data_record_count: 6, blank_record_count: 1, duplicate_record_count: 2, counted_record_count: 5,
+    });
+    const result = await record(promoted.sourceVersionId);
+    assert.equal(result.ok, true, JSON.stringify(result));
+    const { measurement, sourceLocator, evidenceItem } = result.data;
+    assert.deepEqual([measurement.calculation_method, measurement.measured_value, measurement.total_record_count, measurement.blank_record_count, measurement.duplicate_record_count],
+      ["p1_xlsx_single_worksheet_data_rows_excluding_blank_v1", 5, 6, 1, 2]);
+    assert.deepEqual([sourceLocator.locator_type, sourceLocator.coordinates], ["source_data_records", { scope: "data_records_after_header", sheet_key: "sheet_1" }]);
+    assert.match(evidenceItem.statement, /counting each worksheet data row after the header row as one programme session; 1 blank record excluded; 2 exact-duplicate records included\.$/);
+    assert.doesNotMatch(JSON.stringify(result.data), /literacy|mentoring|2026-09-16|measured"/, "no cell value");
+    const replay = await record(promoted.sourceVersionId);
+    assert.deepEqual([replay.ok, replay.data.replayed, replay.data.evidenceItem.evidence_item_id], [true, true, evidenceItem.evidence_item_id]);
+    const proposal = await propose(evidenceItem.evidence_item_id);
+    assert.equal(proposal.ok, true, JSON.stringify(proposal));
+    assert.equal(proposal.data.claim.statement,
+      "The promoted source records 5 programme sessions for the reporting period 2026-09-01 to 2026-09-30 (record count: one programme session per worksheet data row; 1 blank record excluded, 2 exact-duplicate records included).");
+    // Missingness comes from the worksheet's own per-column counts: the
+    // workbook's only empty cells are in its blank row, so it is clear (no gap).
+    assert.deepEqual(await gapStateOf(proposal.data.claim.claim_id), {
+      gaps: [
+        ["conflicting_source_indicators", "unresolved"], ["duplicates", "resolved_risk_flagged"],
+        ["requirement_alignment", "unresolved"], ["small_cell_risk", "unresolved"], ["time_period_clarity", "resolved_risk_flagged"],
+      ],
+      followups: [],
+    });
   });
 
   // Measured-claim gap state as P2-04 records it at proposal (Prompt 5): the
@@ -505,7 +554,7 @@ async function runSuite() {
     assert.equal(basis.ok, true, JSON.stringify(basis));
     const { basis: counts, recorded } = basis.data;
     assert.deepEqual(counts, {
-      measurable: true, calculation_method: "p1_csv_profile_data_records_excluding_blank_v1",
+      measurable: true, calculation_method: "p1_csv_profile_data_records_excluding_blank_v1", source_format: "csv", worksheet: null,
       data_record_count: 6, blank_record_count: 1, duplicate_record_count: 2, counted_record_count: independentRecordCount(CSV),
     });
     assert.equal(recorded.definition.counted_unit, DEFINITION.counted_unit);
@@ -524,7 +573,7 @@ async function runSuite() {
     const sheet = await seedPromotedSource({ profile: { status: "profiled", format: "xlsx", sheets: [], fields: [{ field_key: "field_1" }] } });
     const unmeasurable = await basisOf(sheet.sourceVersionId);
     assert.equal(unmeasurable.data.basis.measurable, false);
-    assert.equal(unmeasurable.data.basis.blockers[0].blocking_reason, "measurement_source_not_single_table_csv");
+    assert.equal(unmeasurable.data.basis.blockers[0].blocking_reason, "measurement_xlsx_not_single_worksheet");
 
     const before = await measurementCounts();
     for (const [label, options, code] of [

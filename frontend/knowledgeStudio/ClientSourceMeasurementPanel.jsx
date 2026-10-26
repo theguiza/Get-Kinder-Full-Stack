@@ -94,6 +94,11 @@ export default function ClientSourceMeasurementPanel({ organizationId, sourceVer
       ) : null}
       {data && data.counts.measurable ? (
         <div className="small mb-2" data-client-source-measurement-counts="">
+          {data.counts.worksheet ? (
+            <div data-client-source-measurement-worksheet={data.counts.worksheet}>
+              Excel workbook: the rows of its only worksheet, with its first row as the header row.
+            </div>
+          ) : null}
           <div>Data records after the header row: <strong>{data.counts.dataRecordCount}</strong></div>
           <div>Blank records (not counted): <strong>{data.counts.blankRecordCount}</strong></div>
           <div>Exact-duplicate records (still counted): <strong>{data.counts.duplicateRecordCount}</strong></div>

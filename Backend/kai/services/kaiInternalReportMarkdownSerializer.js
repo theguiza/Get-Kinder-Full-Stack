@@ -1,4 +1,4 @@
-import { describeMeasurementLimitationCode } from "../validators/kaiSourceMeasurementValidators.js";
+import { describeMeasurementCalculationMethod, describeMeasurementLimitationCode } from "../validators/kaiSourceMeasurementValidators.js";
 
 /**
  * Markdown for the organization's internal report (owner decision
@@ -100,7 +100,7 @@ function methodLines(model) {
       `- **Definition:** ${text(m.definitionText)}`,
       `- **Included:** ${text(m.inclusionRule)}`,
       `- **Excluded:** ${text(m.exclusionRule)}`,
-      `- **Calculation:** ${code(m.calculationMethod)}: every CSV data record after the header row of the exact promoted source version is one record; records whose every field is empty are excluded.`,
+      `- **Calculation:** ${code(m.calculationMethod)}: ${describeMeasurementCalculationMethod(m.calculationMethod)}`,
       `- **Arithmetic:** ${plural(m.totalRecordCount, "data record")} after the header, minus ${plural(m.blankRecordCount, "blank record")} excluded = **${m.measuredValue}** counted.`,
       `- **Definition recorded:** ${m.definitionRecordedAt || "time not recorded"}. The definition is fixed for this source version and reused for every report; a new source version is measured again under its own definition.`,
       "",

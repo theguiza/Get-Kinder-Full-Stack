@@ -17,6 +17,12 @@ export const MEASUREMENT_DATA_CLASS = "source_derived_aggregate";
 export const MEASUREMENT_LOCATOR_TYPE = "source_data_records";
 export const MEASUREMENT_LOCATOR_COORDINATES = Object.freeze({ scope: "data_records_after_header" });
 export const MEASUREMENT_CALCULATION_METHOD = "p1_csv_profile_data_records_excluding_blank_v1";
+// The XLSX method: the data rows after the header row of the workbook's only
+// worksheet, from the P1 worksheet record-count basis (localProfilingKernel).
+export const MEASUREMENT_XLSX_CALCULATION_METHOD = "p1_xlsx_single_worksheet_data_rows_excluding_blank_v1";
+export const MEASUREMENT_XLSX_RECORD_COUNT_BASIS_VERSION = "kai_xlsx_worksheet_record_basis_v1";
+export const MEASUREMENT_CALCULATION_METHODS = Object.freeze([MEASUREMENT_CALCULATION_METHOD, MEASUREMENT_XLSX_CALCULATION_METHOD]);
+const SHEET_KEY_RE = /^sheet_[1-9][0-9]{0,3}$/;
 export const MEASUREMENT_DEFINITION_STATUS = "human_confirmed";
 export const MEASUREMENT_VALIDATOR_KEY = "VAL-KAI-P2-01M-001";
 
@@ -159,24 +165,32 @@ function isCount(value) {
   return Number.isSafeInteger(value) && value >= 0;
 }
 
-/**
- * The record count from one committed P1 profile: data records after the
- * header row, as parsed by the deterministic P1 profiler from the exact
- * confirmed bytes, minus records whose every field is empty. Exact-duplicate
- * records are counted (no rule identifies them as invalid) and reported.
- * Only a single-table CSV profile that states every count qualifies; a profile
- * that lacks the blank-record count (profiled before it existed) is refused
- * rather than assumed to have none.
- */
-export function deriveRecordCountMeasurement(profile) {
-  if (!isPlainObject(profile) || profile.status !== "profiled" || profile.format !== "csv") {
-    return refuse(
-      "measurement_source_not_single_table_csv",
-      "A record count is available only for a profiled single-table CSV source.",
-      "Use a CSV source; other formats have no committed record count.",
-      { objectType: "source_version" },
-    );
-  }
+function isCountAtMost(value, total) {
+  return isCount(value) && value <= total;
+}
+
+const UNCOUNTABLE_WORKSHEET_CONDITIONS = Object.freeze([
+  ["formula_cell_count", "measurement_xlsx_formula_cells_present",
+    "The worksheet has formula cells; KAI does not evaluate formulas, so it cannot tell which rows hold values.",
+    "Replace the formulas with their values in a copy of the workbook and upload that copy."],
+  ["merged_range_count", "measurement_xlsx_merged_cells_present",
+    "The worksheet has merged cells, so where one record ends and the next begins is ambiguous.",
+    "Unmerge the cells in a copy of the workbook and upload that copy."],
+  ["hidden_row_count", "measurement_xlsx_hidden_rows_or_columns_present",
+    "The worksheet has hidden rows, which would be counted without being seen.",
+    "Unhide or delete the hidden rows in a copy of the workbook and upload that copy."],
+  ["hidden_column_count", "measurement_xlsx_hidden_rows_or_columns_present",
+    "The worksheet has hidden columns, which would be counted without being seen.",
+    "Unhide or delete the hidden columns in a copy of the workbook and upload that copy."],
+  ["values_outside_header_columns_count", "measurement_xlsx_not_single_table",
+    "The worksheet has values in columns with no header, so it may hold more than one table.",
+    "Keep one table with a header for every column on the worksheet, then upload the workbook again."],
+  ["unresolved_value_count", "measurement_xlsx_values_unresolved",
+    "Some worksheet cells refer to text the workbook does not contain.",
+    "Save the workbook again from the spreadsheet application and upload it again."],
+]);
+
+function deriveCsvRecordCount(profile) {
   const counts = profile.counts;
   if (profile.structural_metadata?.header_row_assumed !== true) {
     return refuse("measurement_header_not_established", "The profile does not establish a header row.", "Re-profile the source.", { objectType: "source_version" });
@@ -198,12 +212,92 @@ export function deriveRecordCountMeasurement(profile) {
   return {
     ok: true,
     measurement: Object.freeze({
+      calculationMethod: MEASUREMENT_CALCULATION_METHOD,
+      locatorCoordinates: MEASUREMENT_LOCATOR_COORDINATES,
+      sheetKey: null,
       totalRecordCount: counts.row_count,
       blankRecordCount: counts.blank_record_count,
       duplicateRecordCount: counts.duplicate_row_count,
       measuredValue: counts.row_count - counts.blank_record_count,
     }),
   };
+}
+
+// A workbook profile qualifies only with exactly one worksheet whose committed
+// record-count basis establishes the header row and records none of the
+// conditions that make the table ambiguous. A workbook profiled before the
+// basis existed states no header row or blank rows and is refused, never
+// read from its workbook-wide row_count (which includes header rows).
+function deriveXlsxRecordCount(profile) {
+  const sheets = profile.sheets;
+  if (!Array.isArray(sheets) || sheets.length !== 1 || profile.counts?.sheet_count !== 1) {
+    return refuse(
+      "measurement_xlsx_not_single_worksheet",
+      "A workbook record count is available only for a workbook with exactly one worksheet; worksheets are never combined.",
+      "Keep the one table to be counted on its own worksheet, remove the other worksheets in a copy of the workbook, and upload that copy.",
+      { objectType: "source_version" },
+    );
+  }
+  const [sheet] = sheets;
+  const basis = sheet?.record_count_basis;
+  if (!isPlainObject(basis) || basis.basis_version !== MEASUREMENT_XLSX_RECORD_COUNT_BASIS_VERSION || !SHEET_KEY_RE.test(sheet.sheet_key ?? "")) {
+    return refuse(
+      "measurement_xlsx_record_basis_not_committed",
+      "This workbook was profiled before worksheet records were counted, so it states no header row or blank rows to count from.",
+      "In Files, choose the same workbook again and select \"Upload again as a new intake version\"; the new version is profiled with worksheet record counting.",
+      { objectType: "source_version" },
+    );
+  }
+  if (basis.header_row_established !== true || basis.header_row_position !== 1) {
+    return refuse(
+      "measurement_header_not_established",
+      "The worksheet's first row is not a header row of text column names, so KAI cannot tell headers from records.",
+      "Put one header row of column names in the worksheet's first row, then upload the workbook again.",
+      { objectType: "source_version" },
+    );
+  }
+  for (const [key, blockingReason, message, requiredFix] of UNCOUNTABLE_WORKSHEET_CONDITIONS) {
+    if (!isCount(basis[key])) {
+      return refuse("measurement_counts_not_committed", "The committed profile does not state the record counts.", "Upload the workbook again.", { objectType: "source_version" });
+    }
+    if (basis[key] > 0) return refuse(blockingReason, message, requiredFix, { objectType: "source_version" });
+  }
+  const total = basis.data_record_count;
+  if (!isCount(total) || !isCountAtMost(basis.blank_record_count, total) || !isCountAtMost(basis.duplicate_record_count, total)) {
+    return refuse("measurement_counts_inconsistent", "The committed profile counts are inconsistent.", "Upload the workbook again.", { objectType: "source_version" });
+  }
+  return {
+    ok: true,
+    measurement: Object.freeze({
+      calculationMethod: MEASUREMENT_XLSX_CALCULATION_METHOD,
+      locatorCoordinates: Object.freeze({ scope: MEASUREMENT_LOCATOR_COORDINATES.scope, sheet_key: sheet.sheet_key }),
+      sheetKey: sheet.sheet_key,
+      totalRecordCount: total,
+      blankRecordCount: basis.blank_record_count,
+      duplicateRecordCount: basis.duplicate_record_count,
+      measuredValue: total - basis.blank_record_count,
+    }),
+  };
+}
+
+/**
+ * The record count from one committed P1 profile: data records after the
+ * header row, as parsed by the deterministic P1 profiler from the exact
+ * confirmed bytes, minus records whose every field is empty. Exact-duplicate
+ * records are counted (no rule identifies them as invalid) and reported.
+ * A single-table CSV profile, or a one-worksheet XLSX profile with a committed
+ * worksheet record-count basis, qualifies; a profile that lacks the counts
+ * (profiled before they existed) is refused rather than assumed to have none.
+ */
+export function deriveRecordCountMeasurement(profile) {
+  if (isPlainObject(profile) && profile.status === "profiled" && profile.format === "csv") return deriveCsvRecordCount(profile);
+  if (isPlainObject(profile) && profile.status === "profiled" && profile.format === "xlsx") return deriveXlsxRecordCount(profile);
+  return refuse(
+    "measurement_source_not_single_table",
+    "A record count is available only for a profiled single-table CSV file or one-worksheet Excel workbook.",
+    "Use a CSV file or an Excel workbook with one worksheet; other formats have no committed record count.",
+    { objectType: "source_version" },
+  );
 }
 
 function periodPhrase(definition) {
@@ -220,9 +314,27 @@ function plural(count, singular) {
  * Evidence statement: the value, unit, counted unit, period, and the
  * arithmetic, composed only from the measurement and the human definition.
  */
+// What one counted record is, by calculation method. The CSV wording is the
+// wording every existing measured evidence item and claim was composed with.
+const RECORD_NOUN = Object.freeze({
+  [MEASUREMENT_CALCULATION_METHOD]: "CSV data record",
+  [MEASUREMENT_XLSX_CALCULATION_METHOD]: "worksheet data row",
+});
+
+function recordNoun(calculationMethod) {
+  return RECORD_NOUN[calculationMethod] ?? RECORD_NOUN[MEASUREMENT_CALCULATION_METHOD];
+}
+
+/** The calculation a method names, in the words the internal report uses. */
+export function describeMeasurementCalculationMethod(calculationMethod) {
+  return calculationMethod === MEASUREMENT_XLSX_CALCULATION_METHOD
+    ? "every data row after the header row of the only worksheet of the exact promoted source version is one record; rows none of whose cells has a value are excluded."
+    : "every CSV data record after the header row of the exact promoted source version is one record; records whose every field is empty are excluded.";
+}
+
 export function composeMeasurementEvidenceStatement({ measurement, definition }) {
   return `Source version record count: ${measurement.measuredValue} ${definition.unitLabel} ${periodPhrase(definition)}, `
-    + `counting each CSV data record after the header row as one ${definition.countedUnit}; `
+    + `counting each ${recordNoun(measurement.calculationMethod)} after the header row as one ${definition.countedUnit}; `
     + `${plural(measurement.blankRecordCount, "blank record")} excluded; `
     + `${plural(measurement.duplicateRecordCount, "exact-duplicate record")} included.`;
 }
@@ -238,7 +350,7 @@ export function composeMeasurementClaimStatement({ measurementRow, definitionRow
     periodEnd: definitionRow.period_end,
   };
   return `The promoted source records ${measurementRow.measured_value} ${definitionRow.unit_label} ${periodPhrase(definition)} `
-    + `(record count: one ${definitionRow.counted_unit} per CSV data record; `
+    + `(record count: one ${definitionRow.counted_unit} per ${recordNoun(measurementRow.calculation_method)}; `
     + `${plural(Number(measurementRow.blank_record_count), "blank record")} excluded, `
     + `${plural(Number(measurementRow.duplicate_record_count), "exact-duplicate record")} included).`;
 }
@@ -262,6 +374,14 @@ export function validateComposedStatement(statement) {
  * bound to the profile the source version was promoted from. Anything else
  * fails closed; a claim is never composed from the evidence statement text.
  */
+// A CSV count sits on the whole-version data-records locator; an XLSX count
+// on the data records of exactly one named worksheet.
+function locatorMatchesCalculationMethod(coordinates, calculationMethod) {
+  const keys = Object.keys(coordinates).sort().join(",");
+  if (calculationMethod === MEASUREMENT_XLSX_CALCULATION_METHOD) return keys === "scope,sheet_key" && SHEET_KEY_RE.test(coordinates.sheet_key);
+  return keys === "scope";
+}
+
 export function validateMeasurementClaimBasis({ evidenceItemRow, locatorRow, sourceVersionRow, measurementRow }) {
   const ok = Boolean(measurementRow)
     && evidenceItemRow?.evidence_type === MEASUREMENT_EVIDENCE_TYPE
@@ -272,12 +392,13 @@ export function validateMeasurementClaimBasis({ evidenceItemRow, locatorRow, sou
     && measurementRow.definition_source_version_id === evidenceItemRow.source_version_id
     && measurementRow.measurement_type === MEASUREMENT_TYPE_RECORD_COUNT
     && measurementRow.definition_status === MEASUREMENT_DEFINITION_STATUS
-    && measurementRow.calculation_method === MEASUREMENT_CALCULATION_METHOD
+    && MEASUREMENT_CALCULATION_METHODS.includes(measurementRow.calculation_method)
     && measurementRow.unit_label === measurementRow.definition_unit_label
     && isCount(measurementRow.measured_value)
     && measurementRow.measured_value === measurementRow.total_record_count - measurementRow.blank_record_count
     && locatorRow?.locator_type === MEASUREMENT_LOCATOR_TYPE
     && locatorRow?.coordinates?.scope === MEASUREMENT_LOCATOR_COORDINATES.scope
+    && locatorMatchesCalculationMethod(locatorRow.coordinates, measurementRow.calculation_method)
     && measurementRow.profile_canonical_sha256 === sourceVersionRow?.profile_canonical_sha256;
   if (!ok) {
     return refuse(

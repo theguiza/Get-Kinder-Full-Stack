@@ -235,6 +235,11 @@ try {
   // Re-applying the migration is a no-op (every DDL statement is idempotent).
   psqlFile("migrations/kai_sprint2_p2_01m_source_record_count_measurement.sql");
   if (psqlExec(legacySnapshotSql) !== legacyBefore) throw new Error("P2-01M migration is not idempotent");
+  // The XLSX worksheet method only widens two CHECKs; it changes no row and re-applies cleanly.
+  psqlFile("migrations/kai_sprint2_p2_01m_xlsx_worksheet_record_count_method.sql");
+  psqlFile("migrations/kai_sprint2_p2_01m_xlsx_worksheet_record_count_method.sql");
+  if (psqlExec(legacySnapshotSql) !== legacyBefore) throw new Error("P2-01M XLSX worksheet method migration changed an existing evidence or locator row");
+  console.log("P2-01M XLSX worksheet method: applied twice; existing evidence/locator rows unchanged.");
 
   const testResult = spawnSync("node", [
     "--test",
@@ -264,8 +269,15 @@ try {
   });
   if (testResult.status !== 0) throw new Error("P2-01M measurement and P2-06 traceability tests failed");
 
-  // The rollback refuses while measurement evidence exists and changes nothing.
+  // Both rollbacks refuse while measurement evidence exists and change nothing.
   const measurementRows = psqlExec("SELECT count(*) FROM kai.evidence_measurements;");
+  let xlsxRollbackRefused = false;
+  try {
+    psqlFile("migrations/kai_sprint2_p2_01m_xlsx_worksheet_record_count_method.rollback.sql");
+  } catch (error) {
+    xlsxRollbackRefused = /rollback refused: workbook record-count measurements exist/.test(String(error.message));
+  }
+  if (!xlsxRollbackRefused) throw new Error("P2-01M XLSX worksheet method rollback did not refuse with a workbook measurement present");
   let rollbackRefused = false;
   try {
     psqlFile("migrations/kai_sprint2_p2_01m_source_record_count_measurement.rollback.sql");
@@ -274,7 +286,7 @@ try {
   }
   if (!rollbackRefused) throw new Error("P2-01M rollback did not refuse with measurement evidence present");
   if (psqlExec("SELECT count(*) FROM kai.evidence_measurements;") !== measurementRows) throw new Error("refused rollback changed measurement rows");
-  console.log("P2-01M rollback refused while measurement evidence exists; nothing changed.");
+  console.log("P2-01M and XLSX worksheet method rollbacks refused while measurement evidence exists; nothing changed.");
   console.log("P2-01M record-count measurement and P2-06 traceability tests passed.");
 } finally {
   if (started) spawnSync(pgCtl, ["-D", dataDir, "stop", "-m", "fast"], { encoding: "utf8", stdio: "ignore" });

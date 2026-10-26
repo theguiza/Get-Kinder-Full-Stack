@@ -36,6 +36,8 @@ function projectBasisCounts(basis) {
     blankRecordCount: basis.blank_record_count,
     duplicateRecordCount: basis.duplicate_record_count,
     countedRecordCount: basis.counted_record_count,
+    // A workbook count is of the data rows of its only worksheet.
+    worksheet: basis.source_format === "xlsx" && isText(basis.worksheet?.sheet_key) ? basis.worksheet.sheet_key : null,
   };
 }
 
