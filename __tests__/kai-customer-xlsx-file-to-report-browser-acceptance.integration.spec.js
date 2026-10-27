@@ -832,11 +832,11 @@ async function runXlsxAcceptance() {
       assert.match(sourceRow, new RegExp(ids.legacy.source_version_id));
       assert.match(sourceRow, /XLSX measurement basis missing/);
       assert.ok(await textOf(adminPage, `[data-client-continue-xlsx="${ids.legacy.source_version_id}"]`), "the old source offers its supported continuation");
-      await adminPage.clickIn(`[data-client-continue-xlsx="${ids.legacy.source_version_id}"]`, "Continue in Files");
+      await adminPage.clickIn(`[data-client-continue-xlsx="${ids.legacy.source_version_id}"]`, "Prepare workbook for counting");
       await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `[data-xlsx-continuation-source="${ids.legacy.source_version_id}"]`)), "the focused Files continuation");
       const continuation = await textOf(adminPage, `[data-xlsx-continuation-source="${ids.legacy.source_version_id}"]`);
       assert.ok(continuation.includes(`Historical profile for ${visibleLegacyFilename} is unchanged`));
-      assert.match(continuation, /Select the same workbook below.*Upload again as a new intake version/);
+      assert.match(continuation, /Select the same workbook below and upload it.*Upload again as a new intake version/);
       assert.deepEqual(await legacySnapshot(), ids.legacySnapshot, "nothing changed");
     });
 

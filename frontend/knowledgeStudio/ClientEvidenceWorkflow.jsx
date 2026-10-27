@@ -652,7 +652,7 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
                       && version.engagementId === engagementId && canUploadNewIntakeVersion && typeof onContinueXlsxInFiles === "function" ? (
                       <button type="button" className="btn btn-sm btn-outline-primary" data-client-continue-xlsx={version.sourceVersionId}
                         onClick={() => onContinueXlsxInFiles({ sourceVersionId: version.sourceVersionId, safeFilename: version.safeFilename })}>
-                        Continue in Files
+                        Prepare workbook for counting
                       </button>
                     ) : null}
                     {access.extractEvidence && isRouteUuid(version.sourceVersionId) ? (

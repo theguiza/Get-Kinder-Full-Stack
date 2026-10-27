@@ -44829,3 +44829,34 @@ Anything beyond a record count (rates, outcomes, sums) is a new evidence type an
 **Prohibited operations not performed:** no actual-client workbook or production record was read; no production/shared database was accessed or changed; no migration was applied outside the disposable synthetic database; no flag, tenant, credential, deployment, push, or production configuration was changed; no historical profile, structural evidence, old claim, or draft was overwritten; no review, approval, eligibility or release was invented; `00_KAI_CURRENT_STATE.md` was not updated.
 
 **Status:** CUSTOMER_XLSX_CONTINUATION_DISCOVERABLE_AND_SYNTHETICALLY_VERIFIED_LOCALLY. Not pushed, deployed, or verified in production. The original customer issue remains unverified in production.
+
+### Legacy XLSX measurement continuation: retained-byte capability check and customer action (2026-10-27)
+
+**Owner authorization (USER_CONFIRMED):** the owner prompt "CODEX — FIX LEGACY XLSX MEASUREMENT CONTINUATION IN THE PRODUCT" authorizes repository inspection, the smallest supported local implementation, synthetic connected acceptance, affected and broader tests, frontend build, and a local commit. Production, customer files/data, deployment, feature flags, cloud or shared database access, and Current State remain excluded.
+
+**Starting state (TOOL_VERIFIED):** `main` at `9620a4a`, clean working tree. The accepted preceding entry establishes the legacy continuation, worksheet-based counting, measurement-to-report workflow, and separate story-present Get Kinder review route.
+
+**Root cause (TOOL_VERIFIED):** a promoted legacy XLSX profile has no `record_count_basis`, while `deriveRecordCountMeasurement` requires that committed worksheet basis and refuses the old profile with `measurement_xlsx_record_basis_not_committed`. The immutable profile is bound to its source version; it cannot be amended in place.
+
+**Retained-byte capability decision (TOOL_VERIFIED):** exact-version storage reads exist for the P1 profiler, but there is no approved service that creates a fresh intake object version from an already-retained object. The accepted upload lifecycle requires a fresh reserved intake file to create and confirm its own object version; production GCS creation is through the signed customer upload path. Rebinding the old object identity to a new intake row or adding an unapproved server-side storage copy would bypass those contracts. Retained-byte reprofiling was therefore not implemented. The authorized route remains a customer-selected re-upload into a new immutable intake version, with the original profile and promotion preserved.
+
+**Customer continuation UI (TOOL_VERIFIED):** Data Sources now labels the action "Prepare workbook for counting". Its Files continuation states the complete path: select and upload the same workbook, choose "Upload again as a new intake version" when the governed duplicate resolver offers it, record the new version's human sensitivity/allowed-use decision, then promote it before Count records. This does not approve, promote, count, or release anything automatically.
+
+**Preserved measurement and report workflow (TOOL_VERIFIED in code and synthetic acceptance):** the new intake uses the existing upload confirmation, security assessment, P1 parser/profile, sensitivity review and promotion services. The existing worksheet calculator persists its measurement and source locator, creates measured evidence and a proposed claim, then uses authoritative P2-06 internal eligibility. Ordinary qualifying internal facts require no repeated approvals. The acceptance verified new Evidence Summary and Impact Narrative retrieval and separately verified the story-present Get Kinder review/release path; reports cite their version and worksheet and do not invent participant outcomes. No calculator, approval rule, story restriction, or evidence/claim authority changed.
+
+**Verification (TOOL_VERIFIED; all Node/npm commands used `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel`):**
+
+| Command or suite | Result |
+| --- | --- |
+| Data Sources + measured-report selection focused specs | 29/29 passed |
+| Synthetic connected XLSX file-to-report acceptance | 16/16 passed; disposable loopback database, read-only verifier OVERALL PASS |
+| Full `npm test` | 5,786 passed, 0 failed, 122 skipped (5,908 total) |
+| `npm run build` | passed |
+
+**Changed files:** `frontend/knowledgeStudio/ClientEvidenceWorkflow.jsx`; `frontend/KaiWebIntake.jsx`; `public/js/bundles/entry.js`; `__tests__/kai-customer-xlsx-file-to-report-browser-acceptance.integration.spec.js`.
+
+**Remaining limitation (NOT_CONFIRMED):** retained-byte reprofiling is unsupported. The authenticated customer must still select and upload the same workbook, confirm the new intake version, make a truthful sensitivity/allowed-use decision, promote the source, and complete the measurement/report workflow. Historical customer source production behavior and a usable report remain NOT_CONFIRMED.
+
+**Prohibited operations not performed:** no actual customer file or production record was read; no production/shared database or cloud service was accessed; no migration was applied outside the disposable synthetic database; no flag, tenant, credential, deployment, push, or production configuration was changed; `00_KAI_CURRENT_STATE.md` was not updated.
+
+**Status:** LEGACY_XLSX_REUPLOAD_CONTINUATION_SYNTHETICALLY_VERIFIED_LOCALLY; retained-byte preparation is NOT_IMPLEMENTED. Not pushed, deployed, or verified in production.

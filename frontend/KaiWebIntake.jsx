@@ -621,9 +621,9 @@ export default function KaiWebIntake({
       )}
       {continuationSource?.safeFilename ? (
         <div className="alert alert-info py-2 small" data-xlsx-continuation-source={continuationSource.sourceVersionId || ""}>
-          <div className="fw-semibold">Continue the workbook as a new intake version</div>
+          <div className="fw-semibold">Prepare this workbook for counting</div>
           <div>Source version: {continuationSource.sourceVersionId}. Historical profile for {continuationSource.safeFilename} is unchanged.</div>
-          <div>Select the same workbook below. When KAI recognizes it, choose “Upload again as a new intake version”. The new version will be quarantined, checked and profiled; it still needs the authorized sensitivity decision and source promotion before Count records.</div>
+          <div>Select the same workbook below and upload it. When KAI recognizes the existing file, choose “Upload again as a new intake version”. KAI will quarantine, check and profile the new version. You must then record its sensitivity and allowed-use decision and promote it before Count records is available.</div>
         </div>
       ) : null}
       {message ? <div className="alert alert-warning py-2">{message}</div> : null}
