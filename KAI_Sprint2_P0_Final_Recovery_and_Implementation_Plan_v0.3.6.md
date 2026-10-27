@@ -44794,3 +44794,36 @@ Anything beyond a record count (rates, outcomes, sums) is a new evidence type an
 12. The production workbook is not fixed until these are done and observed.
 
 **Status:** NATIVE_XLSX_MEASUREMENT_AND_LEGACY_CONTINUATION_VERIFIED_LOCALLY; STORY_PRESENT_INTERNAL_REPORT_VIA_GK_RELEASE_VERIFIED_LOCALLY. Not pushed, migrated, deployed, or verified in production.
+
+### Existing customer workbook continuation handoff (2026-10-27)
+
+**Owner authorization (USER_CONFIRMED):** the owner prompt "CODEX — FIX THE EXISTING CUSTOMER'S DATA-TO-REPORT WORKFLOW" authorizes repository inspection, the smallest local UI/service repair, synthetic connected acceptance, and local commits. It explicitly excludes production or actual-client-data access, feature flags, deployment, and production records. No customer issue closure is claimed without production workflow completion and retrieved reports.
+
+**Starting state (TOOL_VERIFIED):** `main` at `cd0c965`, clean working tree. No `00_KAI_CURRENT_STATE.md` update.
+
+**Existing path confirmed (TOOL_VERIFIED):** the legacy XLSX measurement validator already refuses a profile without `record_count_basis`, naming the supported Files action "Upload again as a new intake version". The upload reservation preserves original/supersedes lineage, quarantines the new version, and reruns the normal scan/profile worker. The existing sensitivity decision and source-promotion workflow then lead to Count records. Measurement, claim proposal, internal eligibility, Evidence Summary and Impact Narrative, report retrieval, and the story-present GK internal release route were already implemented and exercised by the preceding `NATIVE_XLSX_MEASUREMENT_AND_LEGACY_CONTINUATION` acceptance.
+
+**Gap reproduced in repository code:** Data Sources omitted the source version's uploaded filename, Project lineage, and XLSX basis-presence state. Its refused Count records panel named the continuation, but the customer had to find Files and select the source workbook without a direct handoff.
+
+**Correction (local):**
+- The organization-scoped Sources read now joins each source version to its exact immutable source candidate, intake file and file profile. It projects only source version id, Project id, KAI's safe filename, profile format, and a boolean for XLSX `record_count_basis` presence. It returns no profile contents, row values, checksums, storage location, intake file id, candidate id, or sensitivity id.
+- Data Sources displays filename, source-version id, currentness and XLSX basis state. A missing basis is labeled as a historical profile that cannot be changed. The "Continue in Files" control appears only for a source in the selected Project and an actor whose existing capability permits intake contribution.
+- Files opens with the exact source version and filename, explains that the old profile remains unchanged, and directs the customer to select the same workbook and choose the existing "Upload again as a new intake version" action. Sensitivity review and promotion remain required. No decision, approval, eligibility or source lineage is inferred or written by the handoff.
+- The existing measurement, claim, eligibility, report-generation, report-retrieval and GK review/release rules are unchanged. Structural field-presence evidence remains ineligible as an impact finding; report citation selection remains measured-claim-only.
+
+**Synthetic connected acceptance:** `kai-customer-xlsx-file-to-report-browser-acceptance`, 16/16. It verified the displayed safe filename, source version and missing-basis state; the direct Data Sources-to-Files handoff; the unchanged historical snapshot; new-version reservation/profile; new sensitivity decision and source promotion; measured finding; story-present claim's exact review blockers; the authorized GK evidence, claim, coverage, content, export, limitation, candidate, release and delivery path; and substantive report citations and Markdown retrieval. All records and workbook bytes were synthetic in an ephemeral loopback PostgreSQL database. This is implementation evidence, not customer closure.
+
+**Verification (TOOL_VERIFIED; `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel` for Node/npm invocations):**
+
+| Command or suite | Result |
+| --- | --- |
+| Focused Data Sources, client-admin projection and Files rehydration specs | 48/48 |
+| Synthetic XLSX connected browser acceptance | 16/16; ephemeral database verifier OVERALL PASS |
+| Full `npm test` | 5,785 passed, 0 failed, 122 skipped (5,907 total) |
+| `npm run build` | passed |
+
+**Remaining customer-facing production verification:** NOT_CONFIRMED. Production application release `cd0c965eb1e99265cdb1bdee36a5c97ac20dea4d` was reported live, but this local change is not pushed or deployed. The live source version, customer screen, intake version, measured finding, GK review state, and report retrieval were not read or changed. Existing production authorization and readiness gates still apply.
+
+**Prohibited operations not performed:** no actual-client workbook or production record was read; no production/shared database was accessed or changed; no migration was applied outside the disposable synthetic database; no flag, tenant, credential, deployment, push, or production configuration was changed; no historical profile, structural evidence, old claim, or draft was overwritten; no review, approval, eligibility or release was invented; `00_KAI_CURRENT_STATE.md` was not updated.
+
+**Status:** CUSTOMER_XLSX_CONTINUATION_DISCOVERABLE_AND_SYNTHETICALLY_VERIFIED_LOCALLY. Not pushed, deployed, or verified in production. The original customer issue remains unverified in production.

@@ -154,7 +154,11 @@ test("listOrganizationSources: groups each source with only its own governed sou
       async listScopedSourceVersionsForSourceIds(input) {
         calls.push(["versions", input]);
         return [
-          sourceVersionRow({ source_version_id: sourceVersionIdA1, source_id: sourceIdA, is_current: false }),
+          sourceVersionRow({
+            source_version_id: sourceVersionIdA1, source_id: sourceIdA, is_current: false,
+            engagement_id: "00000000-0000-4000-8000-000000000601",
+            safe_filename: "legacy.xlsx", profile_format: "xlsx", has_xlsx_record_count_basis: false,
+          }),
           sourceVersionRow({ source_version_id: sourceVersionIdA2, source_id: sourceIdA, is_current: true }),
           sourceVersionRow({ source_version_id: sourceVersionIdB1, source_id: sourceIdB, is_current: true }),
         ];
@@ -174,8 +178,16 @@ test("listOrganizationSources: groups each source with only its own governed sou
   ]);
   assert.deepEqual(result.data.sources[1].source_versions.map((v) => v.source_version_id), [sourceVersionIdB1]);
   for (const version of result.data.sources[0].source_versions) {
-    assert.deepEqual(Object.keys(version).sort(), ["created_at", "is_current", "source_id", "source_version_id"].sort());
+    assert.deepEqual(Object.keys(version).sort(), [
+      "created_at", "engagement_id", "has_xlsx_record_count_basis", "is_current",
+      "profile_format", "safe_filename", "source_id", "source_version_id",
+    ].sort());
   }
+  assert.deepEqual(result.data.sources[0].source_versions[0], {
+    source_version_id: sourceVersionIdA1, source_id: sourceIdA, is_current: false, created_at: createdAt,
+    engagement_id: "00000000-0000-4000-8000-000000000601",
+    safe_filename: "legacy.xlsx", profile_format: "xlsx", has_xlsx_record_count_basis: false,
+  });
 });
 
 // --- safe-field allowlist: no lineage id, no storage location, no raw content ---
@@ -320,8 +332,16 @@ test("projectOrganizationSources projects the safe DTO into camelCase without in
         reviewed_source_type: "organization_primary_record",
         created_at: createdAt,
         source_versions: [
-          { source_version_id: sourceVersionIdA1, source_id: sourceIdA, is_current: false, created_at: createdAt },
-          { source_version_id: sourceVersionIdA2, source_id: sourceIdA, is_current: true, created_at: createdAt },
+          {
+            source_version_id: sourceVersionIdA1, source_id: sourceIdA, is_current: false, created_at: createdAt,
+            engagement_id: "00000000-0000-4000-8000-000000000601",
+            safe_filename: "legacy.xlsx", profile_format: "xlsx", has_xlsx_record_count_basis: false,
+          },
+          {
+            source_version_id: sourceVersionIdA2, source_id: sourceIdA, is_current: true, created_at: createdAt,
+            engagement_id: "00000000-0000-4000-8000-000000000601",
+            safe_filename: "current.xlsx", profile_format: "xlsx", has_xlsx_record_count_basis: true,
+          },
         ],
       },
     ],
@@ -332,8 +352,16 @@ test("projectOrganizationSources projects the safe DTO into camelCase without in
     reviewedSourceType: "organization_primary_record",
     createdAt,
     sourceVersions: [
-      { sourceVersionId: sourceVersionIdA1, sourceId: sourceIdA, isCurrent: false, createdAt },
-      { sourceVersionId: sourceVersionIdA2, sourceId: sourceIdA, isCurrent: true, createdAt },
+      {
+        sourceVersionId: sourceVersionIdA1, sourceId: sourceIdA, isCurrent: false, createdAt,
+        engagementId: "00000000-0000-4000-8000-000000000601",
+        safeFilename: "legacy.xlsx", profileFormat: "xlsx", hasXlsxRecordCountBasis: false,
+      },
+      {
+        sourceVersionId: sourceVersionIdA2, sourceId: sourceIdA, isCurrent: true, createdAt,
+        engagementId: "00000000-0000-4000-8000-000000000601",
+        safeFilename: "current.xlsx", profileFormat: "xlsx", hasXlsxRecordCountBasis: true,
+      },
     ],
   }]);
 });
@@ -344,6 +372,23 @@ test("projectOrganizationSources returns an empty array for a missing/malformed 
   assert.deepEqual(projectOrganizationSources({ sources: "not-an-array" }), []);
 });
 
+test("source-version readiness is a metadata-only signal and only true for XLSX basis presence", async () => {
+  const result = await listOrganizationSources(
+    { organizationId, actorContext },
+    {
+      env: { KAI_SPRINT2_ENABLED: "true" },
+      listScopedSourcesForOrganization: async () => [sourceRow()],
+      listScopedSourceVersionsForSourceIds: async () => [
+        sourceVersionRow({ profile_format: "xlsx", has_xlsx_record_count_basis: true, safe_filename: "ready.xlsx" }),
+        sourceVersionRow({ source_version_id: sourceVersionIdA2, profile_format: "csv", has_xlsx_record_count_basis: true, safe_filename: "data.csv" }),
+        sourceVersionRow({ source_version_id: sourceVersionIdB1, profile_format: "xlsx", has_xlsx_record_count_basis: false, safe_filename: "legacy.xlsx" }),
+      ],
+    },
+  );
+  assert.deepEqual(result.data.sources[0].source_versions.map((version) => version.has_xlsx_record_count_basis), [true, false, false]);
+  assert.equal(JSON.stringify(result).includes('"record_count_basis":'), false, "only basis presence is projected; profile fields stay private");
+});
+
 // --- kaiIntakeQueries organization-scoped reads are additive only ---
 
 test("listScopedSourcesForOrganization and listScopedSourceVersionsForSourceIds are exported additively (do not throw on an empty sourceIds array)", async () => {
@@ -351,6 +396,31 @@ test("listScopedSourcesForOrganization and listScopedSourceVersionsForSourceIds 
   assert.equal(typeof listScopedSourceVersionsForSourceIds, "function");
   const emptyVersions = await listScopedSourceVersionsForSourceIds({ organizationId, sourceIds: [] });
   assert.deepEqual(emptyVersions, []);
+});
+
+test("source-version lineage read joins the exact immutable profile and returns only filename, Project and XLSX basis presence", async () => {
+  let observed;
+  const rows = await listScopedSourceVersionsForSourceIds(
+    { organizationId, sourceIds: [sourceIdA] },
+    { query: async (text, values) => {
+      observed = { text, values };
+      return { rows: [{
+        source_version_id: sourceVersionIdA1, source_id: sourceIdA, is_current: true, created_at: createdAt,
+        engagement_id: "00000000-0000-4000-8000-000000000601",
+        safe_filename: "legacy.xlsx", profile_format: "xlsx", has_xlsx_record_count_basis: false,
+      }] };
+    } },
+  );
+  assert.deepEqual(observed.values, [organizationId, [sourceIdA]]);
+  assert.match(observed.text, /p\.profile->>'format'/);
+  assert.match(observed.text, /p\.profile \? 'record_count_basis'/);
+  assert.match(observed.text, /p\.profile_canonical_sha256 = c\.profile_canonical_sha256/);
+  assert.doesNotMatch(observed.text, /profile->'sheets'|storage_uri|signed_url/i);
+  assert.deepEqual(rows[0], {
+    source_version_id: sourceVersionIdA1, source_id: sourceIdA, is_current: true, created_at: createdAt,
+    engagement_id: "00000000-0000-4000-8000-000000000601",
+    safe_filename: "legacy.xlsx", profile_format: "xlsx", has_xlsx_record_count_basis: false,
+  });
 });
 
 test("kaiSourceLibraryService role/operation contract matches the same role set already governing evidence-extraction/coverage-assessment on this surface", () => {

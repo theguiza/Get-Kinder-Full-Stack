@@ -1556,6 +1556,10 @@ export function projectOrganizationSources(dto) {
       sourceId: version.source_id,
       isCurrent: version.is_current === true,
       createdAt: version.created_at,
+      engagementId: version.engagement_id,
+      safeFilename: version.safe_filename,
+      profileFormat: version.profile_format,
+      hasXlsxRecordCountBasis: version.has_xlsx_record_count_basis === true,
     })),
   }));
 }

@@ -121,7 +121,11 @@ function memberActor(roleName, { organizationId = ORG_X, kaiRoles = [], extra = 
 }
 
 const sourceRow = (organizationId = ORG_X) => ({ source_id: SOURCE, source_code: "harbourline-households", reviewed_source_type: "organization_primary_record", created_at: new Date(NOW), organization_id: organizationId });
-const versionRow = () => ({ source_version_id: SOURCE_VERSION, source_id: SOURCE, is_current: true, created_at: new Date(NOW) });
+const versionRow = () => ({
+  source_version_id: SOURCE_VERSION, source_id: SOURCE, is_current: true, created_at: new Date(NOW),
+  engagement_id: ENGAGEMENT_X,
+  safe_filename: "harbourline-households.xlsx", profile_format: "xlsx", has_xlsx_record_count_basis: false,
+});
 const evidenceRow = (organizationId = ORG_X) => ({
   evidence_item_id: EVIDENCE,
   organization_id: organizationId,
@@ -406,7 +410,11 @@ test("read safety: Sources returns ids, code, reviewed type, currentness, and ti
   assert.deepEqual(result.data, {
     sources: [{
       source_id: SOURCE, source_code: "harbourline-households", reviewed_source_type: "organization_primary_record", created_at: NOW,
-      source_versions: [{ source_version_id: SOURCE_VERSION, source_id: SOURCE, is_current: true, created_at: NOW }],
+      source_versions: [{
+        source_version_id: SOURCE_VERSION, source_id: SOURCE, is_current: true, created_at: NOW,
+        engagement_id: ENGAGEMENT_X,
+        safe_filename: "harbourline-households.xlsx", profile_format: "xlsx", has_xlsx_record_count_basis: false,
+      }],
     }],
   });
 });

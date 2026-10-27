@@ -207,7 +207,7 @@ function useOrganizationRead(organizationId, path, project, refreshToken, cursor
  * persisted internal drafts with their true review state; a draft just
  * generated is opened from that read.
  */
-export default function ClientEvidenceWorkflow({ organizationId, engagementId, access, pipeline, onPipelineRefresh }) {
+export default function ClientEvidenceWorkflow({ organizationId, engagementId, access, pipeline, onPipelineRefresh, canUploadNewIntakeVersion, onContinueXlsxInFiles }) {
   const [refreshToken, setRefreshToken] = useState(0);
   const refresh = () => setRefreshToken((value) => value + 1);
   const sources = useOrganizationRead(organizationId, organizationSourcesPath, projectOrganizationSources, refreshToken);
@@ -638,7 +638,23 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
                 <div className="small text-muted">{String(source.reviewedSourceType || "").replace(/_/g, " ")}</div>
                 {source.sourceVersions.map((version) => (
                   <div key={version.sourceVersionId} className="d-flex flex-wrap align-items-center gap-2 mt-1 small" data-client-source-version={version.sourceVersionId}>
+                    <span className="text-break">Source version: {version.sourceVersionId}</span>
+                    {version.safeFilename ? <span className="text-muted">File: {version.safeFilename}</span> : null}
                     <span>{version.isCurrent ? "Current version" : "Earlier version"}</span>
+                    {version.profileFormat === "xlsx" ? (
+                      <span data-client-xlsx-measurement-readiness={version.hasXlsxRecordCountBasis ? "basis_recorded" : "new_version_required"}>
+                        {version.hasXlsxRecordCountBasis
+                          ? "XLSX worksheet basis recorded; Count records will check whether this workbook is measurable."
+                          : "XLSX measurement basis missing; this historical profile cannot be changed."}
+                      </span>
+                    ) : null}
+                    {version.profileFormat === "xlsx" && !version.hasXlsxRecordCountBasis && version.safeFilename
+                      && version.engagementId === engagementId && canUploadNewIntakeVersion && typeof onContinueXlsxInFiles === "function" ? (
+                      <button type="button" className="btn btn-sm btn-outline-primary" data-client-continue-xlsx={version.sourceVersionId}
+                        onClick={() => onContinueXlsxInFiles({ sourceVersionId: version.sourceVersionId, safeFilename: version.safeFilename })}>
+                        Continue in Files
+                      </button>
+                    ) : null}
                     {access.extractEvidence && isRouteUuid(version.sourceVersionId) ? (
                       <button type="button" className="btn btn-sm btn-outline-primary" disabled={Boolean(pending)}
                         onClick={() => extract(version.sourceVersionId)}>

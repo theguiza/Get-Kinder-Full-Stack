@@ -135,11 +135,11 @@ test("Case 2 (wiring): the retained batch lives in each parent outside the tab-g
     assert.match(source, /const \[filesIntakeBatchId, setFilesIntakeBatchId\] = useState\(""\);/);
     assert.match(
       source,
-      /useEffect\(\(\) => \{\s*\n\s*setFilesIntakeBatchId\(""\);\s*\n\s*\}, \[organizationId, engagementId\]\);/,
+      /useEffect\(\(\) => \{\s*\n\s*setFilesIntakeBatchId\(""\);\s*\n(?:\s*setFilesContinuation\(null\);\s*\n)?\s*\}, \[organizationId, engagementId\]\);/,
     );
     assert.match(
       source,
-      /intakeBatchId=\{filesIntakeBatchId\}\s*\n\s*onIntakeBatchIdChange=\{setFilesIntakeBatchId\}\s*\n\s*embedded/,
+      /intakeBatchId=\{filesIntakeBatchId\}\s*\n\s*onIntakeBatchIdChange=\{setFilesIntakeBatchId\}\s*\n(?:\s*continuationSource=\{filesContinuation\}\s*\n)?\s*embedded/,
     );
   }
   // The retained state is declared before (outside) the Files-tab conditional mount.

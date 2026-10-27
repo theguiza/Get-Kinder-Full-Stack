@@ -70,6 +70,7 @@ export default function KaiWebIntake({
   // engagement, and is replaced otherwise. Standalone callers pass neither.
   intakeBatchId: retainedIntakeBatchId = "",
   onIntakeBatchIdChange,
+  continuationSource = null,
   // KAI B1A-3B-R2: explicit opt-in seam only. When a parent passes this
   // callback, KaiWebIntake reports the ONE server-grounded fact a Phase-5
   // caller needs - the current selected file's P1-05
@@ -618,6 +619,13 @@ export default function KaiWebIntake({
       ) : (
         <h1 className="admin-title mb-3">KAI Web Intake</h1>
       )}
+      {continuationSource?.safeFilename ? (
+        <div className="alert alert-info py-2 small" data-xlsx-continuation-source={continuationSource.sourceVersionId || ""}>
+          <div className="fw-semibold">Continue the workbook as a new intake version</div>
+          <div>Source version: {continuationSource.sourceVersionId}. Historical profile for {continuationSource.safeFilename} is unchanged.</div>
+          <div>Select the same workbook below. When KAI recognizes it, choose “Upload again as a new intake version”. The new version will be quarantined, checked and profiled; it still needs the authorized sensitivity decision and source promotion before Count records.</div>
+        </div>
+      ) : null}
       {message ? <div className="alert alert-warning py-2">{message}</div> : null}
 
       <div className="admin-card mb-3">

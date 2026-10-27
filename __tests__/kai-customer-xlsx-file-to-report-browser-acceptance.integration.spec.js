@@ -826,11 +826,21 @@ async function runXlsxAcceptance() {
       const shown = await textOf(adminPage, "[data-client-source-measurement-unmeasurable]");
       assert.match(shown, /profiled before worksheet records were counted/);
       assert.match(shown, /choose the same workbook again and select "Upload again as a new intake version"/);
+      const sourceRow = await textOf(adminPage, `[data-client-source-version="${ids.legacy.source_version_id}"]`);
+      const visibleLegacyFilename = LEGACY.name.replaceAll("-", "_");
+      assert.ok(sourceRow.includes(visibleLegacyFilename));
+      assert.match(sourceRow, new RegExp(ids.legacy.source_version_id));
+      assert.match(sourceRow, /XLSX measurement basis missing/);
+      assert.ok(await textOf(adminPage, `[data-client-continue-xlsx="${ids.legacy.source_version_id}"]`), "the old source offers its supported continuation");
+      await adminPage.clickIn(`[data-client-continue-xlsx="${ids.legacy.source_version_id}"]`, "Continue in Files");
+      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `[data-xlsx-continuation-source="${ids.legacy.source_version_id}"]`)), "the focused Files continuation");
+      const continuation = await textOf(adminPage, `[data-xlsx-continuation-source="${ids.legacy.source_version_id}"]`);
+      assert.ok(continuation.includes(`Historical profile for ${visibleLegacyFilename} is unchanged`));
+      assert.match(continuation, /Select the same workbook below.*Upload again as a new intake version/);
       assert.deepEqual(await legacySnapshot(), ids.legacySnapshot, "nothing changed");
     });
 
     await test("B3: in Files the customer selects the same workbook, KAI recognizes it, and 'Upload again as a new intake version' creates a linked intake version the current worker profiles", async () => {
-      await openStudioTab("Files");
       await adminPage.waitForText("Upload the selected file");
       await adminPage.waitFor(async () => /Batch id: /.test(await adminPage.text()), "the Project's batch is selected");
       await adminPage.chooseFile(LEGACY.path);

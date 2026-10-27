@@ -53,6 +53,10 @@ function toSafeSourceVersion(row) {
     source_id: row.source_id,
     is_current: row.is_current,
     created_at: row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at,
+    engagement_id: row.engagement_id,
+    safe_filename: row.safe_filename,
+    profile_format: row.profile_format,
+    has_xlsx_record_count_basis: row.profile_format === "xlsx" && row.has_xlsx_record_count_basis === true,
   };
 }
 

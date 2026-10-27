@@ -1328,19 +1328,34 @@ export async function listScopedSourcesForOrganization({ organizationId }, db = 
  * KAI Data Sources completion package companion read: every `kai.source_versions`
  * row (current and historical - `is_current` is already a governed,
  * server-authoritative field this read discloses rather than hides) for the
- * given already-scoped source_id set. Selects only source_version_id,
- * source_id, is_current, created_at - never the intake_source_candidate_id/
- * intake_sensitivity_profile_id/profile_canonical_sha256 lineage identifiers
- * a browse/select surface has no need for.
+ * given already-scoped source_id set. Includes a minimal file identity and
+ * metadata-only XLSX readiness projection so the client administrator can
+ * continue an immutable historical profile from Data Sources. Never returns
+ * profile contents, checksums, candidate ids, sensitivity ids, or intake
+ * bytes.
  */
 export async function listScopedSourceVersionsForSourceIds({ organizationId, sourceIds }, db = pool) {
   if (!Array.isArray(sourceIds) || sourceIds.length === 0) return [];
   const { rows } = await db.query(
-    `SELECT source_version_id, source_id, is_current, created_at
-       FROM kai.source_versions
-      WHERE organization_id = $1
-        AND source_id = ANY($2::uuid[])
-      ORDER BY source_id ASC, created_at DESC, source_version_id ASC`,
+    `SELECT sv.source_version_id, sv.source_id, sv.is_current, sv.created_at,
+            f.engagement_id, f.safe_filename,
+            p.profile->>'format' AS profile_format,
+            (p.profile ? 'record_count_basis') AS has_xlsx_record_count_basis
+       FROM kai.source_versions sv
+       JOIN kai.intake_source_candidates c
+         ON c.organization_id = sv.organization_id
+        AND c.intake_source_candidate_id = sv.intake_source_candidate_id
+       JOIN kai.intake_files f
+         ON f.organization_id = c.organization_id
+        AND f.intake_file_id = c.intake_file_id
+       JOIN kai.intake_file_profiles p
+         ON p.organization_id = c.organization_id
+        AND p.file_profile_id = c.file_profile_id
+        AND p.intake_file_id = c.intake_file_id
+        AND p.profile_canonical_sha256 = c.profile_canonical_sha256
+      WHERE sv.organization_id = $1
+        AND sv.source_id = ANY($2::uuid[])
+      ORDER BY sv.source_id ASC, sv.created_at DESC, sv.source_version_id ASC`,
     [organizationId, sourceIds],
   );
   return rows;

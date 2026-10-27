@@ -140,8 +140,10 @@ export default function ClientKnowledgeStudio({
   // KaiWebIntake against a fresh server read) and cleared whenever the
   // organization or Project changes.
   const [filesIntakeBatchId, setFilesIntakeBatchId] = useState("");
+  const [filesContinuation, setFilesContinuation] = useState(null);
   useEffect(() => {
     setFilesIntakeBatchId("");
+    setFilesContinuation(null);
   }, [organizationId, engagementId]);
   const [pipelineRefresh, setPipelineRefresh] = useState(0);
   const pipeline = useClientEvidencePipeline(organizationId, engagementId, pipelineRefresh);
@@ -164,6 +166,10 @@ export default function ClientKnowledgeStudio({
     if (key !== "reviews") setSensitivityReviewSelection(null);
     if (key !== tab && PIPELINE_TABS.has(key)) refreshPipeline();
     if (key !== tab && key === "evidence") onRefreshFacts?.();
+  };
+  const continueXlsxInFiles = (source) => {
+    setFilesContinuation(source);
+    selectTab("files");
   };
   // Returning to the page re-reads the selected project's pipeline while a
   // tab that shows it is open, so a review completed meanwhile is reflected.
@@ -206,6 +212,7 @@ export default function ClientKnowledgeStudio({
           onEngagementIdChange={onEngagementIdChange}
           intakeBatchId={filesIntakeBatchId}
           onIntakeBatchIdChange={setFilesIntakeBatchId}
+          continuationSource={filesContinuation}
           embedded
           canContribute={canContribute}
           processingStatus={pipeline}
@@ -229,6 +236,8 @@ export default function ClientKnowledgeStudio({
           access={workflowAccess}
           pipeline={pipeline}
           onPipelineRefresh={refreshPipeline}
+          canUploadNewIntakeVersion={canContribute}
+          onContinueXlsxInFiles={continueXlsxInFiles}
         />
       ) : null}
 
