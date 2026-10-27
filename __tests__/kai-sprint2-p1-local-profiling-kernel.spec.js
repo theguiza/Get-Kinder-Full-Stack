@@ -306,8 +306,13 @@ test("an XLSX profile commits a worksheet record-count basis without values; a l
     sourceVersion: { source_version_id: "11111111-1111-4111-8111-111111111111", is_current: true },
     basis: { measurable: false, blockers: derived.blockers },
   });
-  assert.deepEqual(projected.counts, { measurable: false, reasons: [`${derived.blockers[0].message} ${derived.blockers[0].required_fix}`] });
-  assert.match(projected.counts.reasons[0], /profiled before worksheet records were counted[\s\S]*Upload again as a new intake version/);
+  assert.deepEqual(projected.counts, { measurable: false, blockers: [{
+    blockingReason: "measurement_xlsx_record_basis_not_committed",
+    message: derived.blockers[0].message,
+    requiredFix: derived.blockers[0].required_fix,
+  }] });
+  assert.match(`${projected.counts.blockers[0].message} ${projected.counts.blockers[0].requiredFix}`,
+    /profiled before worksheet records were counted[\s\S]*Upload again as a new intake version/);
   assert.match(INTERNAL_DRAFT_READINESS_MESSAGES.no_measured_claim, /a single-table CSV file or an Excel workbook with one worksheet/);
   assert.match(STRUCTURAL_ONLY_DRAFT_MESSAGE, /a single-table CSV file or an Excel workbook with one worksheet/);
   const measurable = projectMeasurementBasis({

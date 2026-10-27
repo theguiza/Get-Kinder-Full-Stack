@@ -20,12 +20,13 @@ function projectBasisCounts(basis) {
   if (basis?.measurable !== true) {
     return {
       measurable: false,
-      reasons: (Array.isArray(basis?.blockers) ? basis.blockers : [])
-        .map((blocker) => {
-          if (!isText(blocker?.message)) return null;
-          return isText(blocker.required_fix) ? `${blocker.message} ${blocker.required_fix}` : blocker.message;
-        })
-        .filter(Boolean),
+      blockers: (Array.isArray(basis?.blockers) ? basis.blockers : [])
+        .filter((blocker) => isText(blocker?.message))
+        .map((blocker) => ({
+          blockingReason: isText(blocker.blocking_reason) ? blocker.blocking_reason : null,
+          message: blocker.message,
+          requiredFix: isText(blocker.required_fix) ? blocker.required_fix : null,
+        })),
     };
   }
   const counts = [basis.data_record_count, basis.blank_record_count, basis.duplicate_record_count, basis.counted_record_count];

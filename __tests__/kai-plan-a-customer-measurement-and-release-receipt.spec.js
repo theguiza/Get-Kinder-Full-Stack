@@ -179,7 +179,12 @@ test("measurement form: the server's counts are shown as given, the definition i
   assert.equal(workbook.counts.worksheet, "sheet_1", "a workbook count names its worksheet");
   assert.equal(projectMeasurementBasis({ sourceVersion: { source_version_id: VERSION }, basis: { measurable: true, data_record_count: -1 } }), null, "malformed counts fail closed");
   assert.deepEqual(projectMeasurementBasis({ sourceVersion: { source_version_id: VERSION }, basis: { measurable: false, blockers: [{ message: "Not a CSV." }] } }).counts,
-    { measurable: false, reasons: ["Not a CSV."] });
+    { measurable: false, blockers: [{ blockingReason: null, message: "Not a CSV.", requiredFix: null }] });
+  assert.deepEqual(projectMeasurementBasis({ sourceVersion: { source_version_id: VERSION }, basis: { measurable: false, blockers: [{
+    blocking_reason: "measurement_xlsx_formula_cells_present", message: "Formulas are not evaluated.", required_fix: "Replace them with values.",
+  }] } }).counts.blockers, [{
+    blockingReason: "measurement_xlsx_formula_cells_present", message: "Formulas are not evaluated.", requiredFix: "Replace them with values.",
+  }], "the customer projection preserves the structured blocker and safe explanation");
 
   const filled = { ...EMPTY_MEASUREMENT_FORM, countedUnit: "programme session", unitLabel: "programme sessions", definitionText: "One row is one session.",
     inclusionRule: "Rows with a value.", exclusionRule: "Empty rows." };

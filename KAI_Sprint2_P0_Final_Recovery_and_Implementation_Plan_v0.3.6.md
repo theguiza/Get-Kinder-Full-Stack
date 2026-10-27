@@ -44860,3 +44860,40 @@ Anything beyond a record count (rates, outcomes, sums) is a new evidence type an
 **Prohibited operations not performed:** no actual customer file or production record was read; no production/shared database or cloud service was accessed; no migration was applied outside the disposable synthetic database; no flag, tenant, credential, deployment, push, or production configuration was changed; `00_KAI_CURRENT_STATE.md` was not updated.
 
 **Status:** LEGACY_XLSX_REUPLOAD_CONTINUATION_SYNTHETICALLY_VERIFIED_LOCALLY; retained-byte preparation is NOT_IMPLEMENTED. Not pushed, deployed, or verified in production.
+
+### CSV/XLSX count-to-evidence usability verification (2026-10-27)
+
+**Owner authorization (USER_CONFIRMED):** the owner prompt "CODEX — IMPROVE CSV/XLSX COUNTING AND MEASURED-EVIDENCE USABILITY" authorizes repository-local implementation, synthetic connected acceptance on the authorized local PostgreSQL/browser infrastructure, affected and broader tests, a frontend rebuild when needed, and local commits. Production, actual-client data, deployment, shared databases/cloud services, feature flags, migration application outside disposable local databases, and `00_KAI_CURRENT_STATE.md` are excluded.
+
+**Starting state (TOOL_VERIFIED):** `main` at `22395dc424f807a9a7b519df790158972bb5b9c9`, clean working tree. The reported P1/P2 measurement, authority, evidence/report, single-sheet XLSX and legacy continuation commits were present.
+
+**Capability confirmed and preserved (TOOL_VERIFIED):** P1 profiles CSV and XLSX separately. CSV counts records after its assumed header, blank records and exact duplicates. XLSX commits `kai_xlsx_worksheet_record_basis_v1` per sheet from stored parsed values in memory; the existing `p1_xlsx_single_worksheet_data_rows_excluding_blank_v1` counts rows after row 1, subtracts wholly blank records and retains exact duplicates. Formula, merged-cell, hidden-row/column, unheaded-value, unresolved-value, header and inconsistent-count blockers remain specific. File/worksheet limits and malformed parser inputs retain safe refusal. PDF remains `not_profilable`; MD and TXT retain narrative profiling and are not given spreadsheet record-count semantics.
+
+**Small usability correction:** `frontend/knowledgeStudio/clientSourceMeasurementLogic.js` and `ClientSourceMeasurementPanel.jsx` now preserve the server's structured blocker code, safe explanation, and required fix in the uncountable-source panel. The code is available as `data-blocking-reason`; the customer sees the validator-authored explanation and next action. No count, validator, or authority changed. Connected CSV and XLSX acceptance now make a fresh authorized basis read after saving and verify the persisted measurement definition, method, source version, locator and claim.
+
+**Connected local acceptance (TOOL_VERIFIED; synthetic bytes, real parser/service/repository/browser routes, disposable loopback PostgreSQL):**
+- CSV: independently expected `6 data records - 1 blank = 5`; both identical rows remain included. The persisted measurement is 5 under `p1_csv_profile_data_records_excluding_blank_v1`. A fresh authorized service read returned 5, the definition and period; the measured claim and both Markdown reports cite 5. `node scripts/kai-sprint2-plan-a-assembled-file-to-report-local-postgres.js`: 23/23.
+- One-sheet XLSX: independently expected `6 data records - 1 blank = 5`; both exact duplicates remain included. The persisted measurement is 5 under unchanged method `p1_xlsx_single_worksheet_data_rows_excluding_blank_v1`, locator `{scope: "data_records_after_header", sheet_key: "sheet_1"}`. A fresh authorized service read returned 5, its definition and period, then the claim. Evidence Summary and Impact Narrative Markdown cite 5 and the worksheet method. `node scripts/kai-customer-xlsx-file-to-report-local-postgres.js`: 16/16; read-only method verifier OVERALL PASS.
+- Multi-sheet XLSX (dataset plus notes): actual uploaded bytes were refused with `measurement_xlsx_not_single_worksheet`; the safe UI explanation states worksheets are never combined, and no measurement row was written. The historical workbook profile lacking worksheet basis still returned `measurement_xlsx_record_basis_not_committed` and the new-intake-version continuation. The synthetic legacy re-upload preserved old lineage and measured 5 on the new version.
+- Story/testimonial-present XLSX: recorded classification remained `present`. Self-serve eligibility and report retrieval stayed blocked; the existing GK evidence, claim, coverage, content and release route produced a read-only delivered internal report citing 5. Funder and public remained ineligible.
+- Ordinary CSV/XLSX internal reports created without new evidence, claim, coverage, factual-review or release approvals; answered measurement dimensions created no client follow-up. Unsupported generated participant/outcome/causal assertions remained refused.
+
+**Worksheet-selection boundary (TOOL_VERIFIED; NOT_IMPLEMENTED):** the current measurement CHECK accepts only the preserved single-worksheet XLSX method, although the locator CHECK can identify `{scope, sheet_key}`. Current derivation intentionally refuses every workbook with more than one sheet. Safe per-sheet selection therefore requires owner approval for a new versioned calculation method, matching validator/statement/ordinary-authority support, an additive method CHECK migration and rollback, plus an explicit service/UI selection contract using safe worksheet metadata. Until that decision is authorized, multi-sheet and ambiguous workbooks fail closed and no sheet is counted by default. The single-sheet method and historical meaning remain unchanged.
+
+**Ordinary versus restricted internal use (TOOL_VERIFIED):** the accepted `8bca105` ordinary authority remains in force, with no repeated evidence, claim, coverage or factual approvals and no internal-report release/manifest requirement. Operating Model §11 still requires every listed sensitivity category to be `absent` for an organization-owned ordinary internal report; `present` or `unknown` retains Get Kinder review. §7.2 specifically places story/testimonial controls on release, not drafting or analysis, while §11's implemented exception still classifies ordinary use source-wide. No bypass or reviewer decision was introduced. Any broader evidence-scoped internal authority for non-story aggregate facts from a source marked story/testimonial-present remains an owner policy decision.
+
+**Verification (TOOL_VERIFIED; Node/npm commands used `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel`):**
+
+| Command or suite | Result |
+| --- | --- |
+| Focused P1 kernel, P2-01M validators, measurement UI projection | passed |
+| P2-01M local PostgreSQL runner, including migration verifier and rollback refusal | 57 passed, 8 skipped, 0 failed; verifier OVERALL PASS |
+| CSV connected file-to-report acceptance | 23/23 |
+| XLSX connected file-to-report acceptance | 16/16 |
+| Full `npm test` | 5,786 passed, 0 failed, 122 skipped (5,908 total) |
+| `npm run build` | passed; tracked bundle rebuilt |
+| `git diff --check` | passed |
+
+**Production status (NOT_CONFIRMED):** no production website, database, cloud service, customer file, or production configuration was accessed or changed. No migration was applied outside disposable synthetic PostgreSQL. Nothing was pushed or deployed. The original customer's workbook and production report remain NOT_CONFIRMED; this local proof does not close that issue.
+
+**Status:** CSV_AND_SINGLE_WORKSHEET_XLSX_MEASUREMENT_TO_INTERNAL_REPORT_VERIFIED_LOCALLY; MULTI_WORKSHEET_SELECTION_REQUIRES_OWNER_CONTRACT_DECISION. Local commit only; not pushed, deployed, or verified in production.

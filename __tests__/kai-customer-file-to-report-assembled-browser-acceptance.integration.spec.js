@@ -1094,6 +1094,19 @@ async function runAssembledAcceptance() {
           WHERE m.organization_id = $1::uuid`, [ORG_X]);
       assert.equal(Number(measurement.measured_value), independent.counted);
       assert.deepEqual([measurement.definition_by, measurement.period_start, measurement.period_end], ["human", "2026-09-01", "2026-09-30"]);
+      const freshRead = await adminPage.api("GET", sourceRecordCountMeasurementPath(ORG_X, ids.sourceVersionId));
+      assert.equal(freshRead.status, 200, JSON.stringify(freshRead.body));
+      assert.deepEqual([
+        freshRead.body.data.recorded.measurement.measured_value,
+        freshRead.body.data.recorded.measurement.calculation_method,
+        freshRead.body.data.recorded.measurement.total_record_count,
+        freshRead.body.data.recorded.measurement.blank_record_count,
+        freshRead.body.data.recorded.measurement.duplicate_record_count,
+        freshRead.body.data.recorded.definition.counted_unit,
+        freshRead.body.data.recorded.definition.period_start,
+        freshRead.body.data.recorded.definition.period_end,
+      ], [independent.counted, "p1_csv_profile_data_records_excluding_blank_v1", independent.dataRecords, independent.blankRecords,
+        independent.duplicateRecords, "programme session", "2026-09-01", "2026-09-30"], "fresh service read returns the saved CSV measurement and definition");
       ids.evidenceItemId = measurement.evidence_item_id;
       ids.measuredValue = Number(measurement.measured_value);
 

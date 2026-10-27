@@ -89,7 +89,11 @@ export default function ClientSourceMeasurementPanel({ organizationId, sourceVer
       {notice ? <div className={`alert alert-${notice.kind} py-2 small`} data-client-source-measurement-notice={notice.kind}>{notice.text}</div> : null}
       {data && !data.counts.measurable ? (
         <div className="small" data-client-source-measurement-unmeasurable="">
-          This source version cannot be counted this way. {data.counts.reasons.join(" ")}
+          This source version cannot be counted this way. {data.counts.blockers.map((blocker, index) => (
+            <div key={`${blocker.blockingReason || "blocker"}-${index}`} data-client-source-measurement-blocker="" data-blocking-reason={blocker.blockingReason || undefined}>
+              {blocker.message}{blocker.requiredFix ? ` ${blocker.requiredFix}` : ""}
+            </div>
+          ))}
         </div>
       ) : null}
       {data && data.counts.measurable ? (

@@ -636,11 +636,27 @@ async function runXlsxAcceptance() {
          FROM kai.evidence_measurements m JOIN kai.evidence_items e ON e.evidence_item_id = m.evidence_item_id
          JOIN kai.source_locators l ON l.source_locator_id = e.source_locator_id
         WHERE m.organization_id = $1::uuid AND m.source_version_id = $2::uuid`, [ORG_X, sourceVersionId]);
+    const freshRead = await adminApi("GET", sourceRecordCountMeasurementPath(ORG_X, sourceVersionId));
+    assert.equal(freshRead.status, 200, J(freshRead.body));
+    assert.deepEqual([
+      freshRead.body.data.recorded.measurement.measured_value,
+      freshRead.body.data.recorded.measurement.calculation_method,
+      freshRead.body.data.recorded.measurement.total_record_count,
+      freshRead.body.data.recorded.measurement.blank_record_count,
+      freshRead.body.data.recorded.measurement.duplicate_record_count,
+      freshRead.body.data.basis.worksheet.sheet_key,
+      freshRead.body.data.recorded.definition.counted_unit,
+      freshRead.body.data.recorded.definition.period_start,
+      freshRead.body.data.recorded.definition.period_end,
+    ], [independent.counted, XLSX_METHOD, independent.dataRecords, independent.blankRecords, independent.duplicateRecords,
+      "sheet_1", DEFINITION.counted_unit, DEFINITION.period_start, DEFINITION.period_end], "a fresh authorized service read returns the saved measurement and definition");
     await adminPage.clickIn(`[data-client-source-measurement-propose-claim="${measurement.evidence_item_id}"]`, "Propose a claim");
     await adminPage.waitForText(`Claim: The promoted source records ${independent.counted} programme sessions`);
     const [claim] = await query("SELECT claim_id::text, statement FROM kai.claims WHERE organization_id = $1::uuid AND evidence_item_id = $2::uuid",
       [ORG_X, measurement.evidence_item_id]);
-    return { measurement, claim };
+    const freshClaimRead = await adminApi("GET", sourceRecordCountMeasurementPath(ORG_X, sourceVersionId));
+    assert.deepEqual([freshClaimRead.status, freshClaimRead.body.data.recorded.claim.statement], [200, claim.statement], "a fresh read returns the proposed measured claim");
+    return { measurement, claim, freshRead: freshRead.body.data };
   };
   const assertWorkbookMeasurement = ({ measurement, claim }) => {
     assert.deepEqual([measurement.measured_value, measurement.total_record_count, measurement.blank_record_count, measurement.duplicate_record_count],
@@ -1020,6 +1036,13 @@ async function runXlsxAcceptance() {
       const promoted = await decideAndPromote(adminApi, fileId);
       const twoSheets = await adminApi("POST", sourceRecordCountMeasurementPath(ORG_X, promoted.source_version_id), DEFINITION);
       assert.deepEqual([twoSheets.status, twoSheets.body.blockers?.[0]?.blocking_reason], [422, "measurement_xlsx_not_single_worksheet"]);
+      const twoSheetBasis = await adminApi("GET", sourceRecordCountMeasurementPath(ORG_X, promoted.source_version_id));
+      assert.deepEqual([twoSheetBasis.status, twoSheetBasis.body.data.basis.blockers[0].blocking_reason], [200, "measurement_xlsx_not_single_worksheet"]);
+      assert.match(twoSheetBasis.body.data.basis.blockers[0].message, /exactly one worksheet; worksheets are never combined/);
+      assert.deepEqual(await query("SELECT count(*)::int AS n FROM kai.evidence_measurements WHERE source_version_id = $1::uuid", [promoted.source_version_id]), [{ n: 0 }]);
+      await openCountRecords(promoted.source_version_id);
+      const blockerNode = await adminPage.evaluate(`(() => { const node = document.querySelector('[data-blocking-reason="measurement_xlsx_not_single_worksheet"]'); return node ? node.textContent : null; })()`);
+      assert.match(blockerNode || "", /exactly one worksheet; worksheets are never combined/);
       const basisPath = sourceRecordCountMeasurementPath(ORG_X, ids.ordinary.source_version_id);
       for (const [label, api, status] of [["client_contributor", contributorApi, 403], ["client_reviewer", reviewerApi, 403], ["another organization's administrator", adminYApi, 403]]) {
         assert.equal((await api("GET", basisPath)).status, status, label);
