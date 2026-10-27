@@ -657,7 +657,11 @@ export function createPostgresClaimProposalRepository({
           const measurementRow = await getScopedEvidenceMeasurementByEvidenceItemId({ organizationId, evidenceItemId }, tx);
           const basis = validateMeasurementClaimBasis({ evidenceItemRow, locatorRow, sourceVersionRow, measurementRow });
           if (!basis.ok) return continuationFailure(basis);
-          statement = composeMeasurementClaimStatement({ measurementRow, definitionRow: measurementRow });
+          statement = composeMeasurementClaimStatement({
+            measurementRow,
+            definitionRow: measurementRow,
+            locatorCoordinates: locatorRow.coordinates,
+          });
           const composable = validateComposedStatement(statement);
           if (!composable.ok) return continuationFailure(composable);
         } else {

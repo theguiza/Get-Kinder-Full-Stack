@@ -261,6 +261,7 @@ function sha256(bytes) {
 async function runXlsxAcceptance() {
   const J = JSON.stringify;
   const XLSX_METHOD = "p1_xlsx_single_worksheet_data_rows_excluding_blank_v1";
+  const SELECTED_XLSX_METHOD = "p1_xlsx_selected_worksheet_data_rows_excluding_blank_v1";
   process.env.KAI_PUBLIC_EXPORT_ENABLED = "true";
   process.env.ANTHROPIC_API_KEY = "sk-ant-test-unused-dummy-key";
   const Anthropic = (await import("@anthropic-ai/sdk")).default;
@@ -616,7 +617,7 @@ async function runXlsxAcceptance() {
       || Boolean(await textOf(adminPage, "[data-client-source-measurement-unmeasurable]")), "the measurement basis");
     await adminPage.idle();
   };
-  const recordCountInUi = async (sourceVersionId) => {
+  const recordCountInUi = async (sourceVersionId, worksheetKey = null) => {
     for (const [field, value] of [
       ["countedUnit", DEFINITION.counted_unit], ["unitLabel", DEFINITION.unit_label], ["definitionText", DEFINITION.definition_text],
       ["inclusionRule", DEFINITION.inclusion_rule], ["exclusionRule", DEFINITION.exclusion_rule],
@@ -628,15 +629,18 @@ async function runXlsxAcceptance() {
     await adminPage.clickIn("[data-client-source-measurement-submit]", "Record definition and count");
     await adminPage.waitForText(`Measurement: ${independent.counted} programme sessions`);
     await adminPage.idle();
-    assert.deepEqual(adminPage.requestsSince(mark).filter((r) => r.method === "POST").map((r) => [pathOf(r), r.status]),
-      [[sourceRecordCountMeasurementPath(ORG_X, sourceVersionId).split("?")[0], 200]]);
+    assert.deepEqual(adminPage.requestsSince(mark).filter((r) => r.method === "POST").map((r) => {
+      const url = new URL(r.url);
+      return [url.pathname + url.search, r.status];
+    }),
+      [[sourceRecordCountMeasurementPath(ORG_X, sourceVersionId, worksheetKey).replace(/\?.*$/, "") + (worksheetKey ? `?worksheet_key=${worksheetKey}` : ""), 200]]);
     const [measurement] = await query(
       `SELECT m.evidence_item_id::text, m.measured_value::int, m.total_record_count::int, m.blank_record_count::int, m.duplicate_record_count::int,
               m.calculation_method, l.coordinates, e.statement, e.source_locator_id::text
          FROM kai.evidence_measurements m JOIN kai.evidence_items e ON e.evidence_item_id = m.evidence_item_id
          JOIN kai.source_locators l ON l.source_locator_id = e.source_locator_id
         WHERE m.organization_id = $1::uuid AND m.source_version_id = $2::uuid`, [ORG_X, sourceVersionId]);
-    const freshRead = await adminApi("GET", sourceRecordCountMeasurementPath(ORG_X, sourceVersionId));
+    const freshRead = await adminApi("GET", sourceRecordCountMeasurementPath(ORG_X, sourceVersionId, worksheetKey));
     assert.equal(freshRead.status, 200, J(freshRead.body));
     assert.deepEqual([
       freshRead.body.data.recorded.measurement.measured_value,
@@ -648,31 +652,44 @@ async function runXlsxAcceptance() {
       freshRead.body.data.recorded.definition.counted_unit,
       freshRead.body.data.recorded.definition.period_start,
       freshRead.body.data.recorded.definition.period_end,
-    ], [independent.counted, XLSX_METHOD, independent.dataRecords, independent.blankRecords, independent.duplicateRecords,
+    ], [independent.counted, worksheetKey ? SELECTED_XLSX_METHOD : XLSX_METHOD, independent.dataRecords, independent.blankRecords, independent.duplicateRecords,
       "sheet_1", DEFINITION.counted_unit, DEFINITION.period_start, DEFINITION.period_end], "a fresh authorized service read returns the saved measurement and definition");
     await adminPage.clickIn(`[data-client-source-measurement-propose-claim="${measurement.evidence_item_id}"]`, "Propose a claim");
     await adminPage.waitForText(`Claim: The promoted source records ${independent.counted} programme sessions`);
     const [claim] = await query("SELECT claim_id::text, statement FROM kai.claims WHERE organization_id = $1::uuid AND evidence_item_id = $2::uuid",
       [ORG_X, measurement.evidence_item_id]);
-    const freshClaimRead = await adminApi("GET", sourceRecordCountMeasurementPath(ORG_X, sourceVersionId));
+    const freshClaimRead = await adminApi("GET", sourceRecordCountMeasurementPath(ORG_X, sourceVersionId, worksheetKey));
     assert.deepEqual([freshClaimRead.status, freshClaimRead.body.data.recorded.claim.statement], [200, claim.statement], "a fresh read returns the proposed measured claim");
     return { measurement, claim, freshRead: freshRead.body.data };
   };
-  const assertWorkbookMeasurement = ({ measurement, claim }) => {
+  const assertWorkbookMeasurement = ({ measurement, claim }, { selected = false } = {}) => {
     assert.deepEqual([measurement.measured_value, measurement.total_record_count, measurement.blank_record_count, measurement.duplicate_record_count],
       [independent.counted, independent.dataRecords, independent.blankRecords, independent.duplicateRecords]);
-    assert.equal(measurement.calculation_method, XLSX_METHOD);
+    assert.equal(measurement.calculation_method, selected ? SELECTED_XLSX_METHOD : XLSX_METHOD);
     assert.deepEqual(measurement.coordinates, { scope: "data_records_after_header", sheet_key: "sheet_1" }, "the worksheet locator");
-    assert.match(measurement.statement, /counting each worksheet data row after the header row as one programme session; 1 blank record excluded; 2 exact-duplicate records included\.$/);
-    assert.equal(claim.statement, "The promoted source records 5 programme sessions for the reporting period 2026-09-01 to 2026-09-30 "
-      + "(record count: one programme session per worksheet data row; 1 blank record excluded, 2 exact-duplicate records included).");
+    if (selected) {
+      assert.match(measurement.statement, /from selected worksheet sheet_1, counting each selected worksheet data row/);
+      assert.match(claim.statement, /in selected worksheet sheet_1/);
+    } else {
+      assert.match(measurement.statement, /counting each worksheet data row after the header row as one programme session; 1 blank record excluded; 2 exact-duplicate records included\.$/);
+      assert.equal(claim.statement, "The promoted source records 5 programme sessions for the reporting period 2026-09-01 to 2026-09-30 "
+        + "(record count: one programme session per worksheet data row; 1 blank record excluded, 2 exact-duplicate records included).");
+    }
   };
   // A complete internal report of the workbook count, with no unsupported conclusion.
-  const assertWorkbookReport = (shown, heading, { claimId, evidenceItemId, sourceVersionId }) => {
+  const assertWorkbookReport = (shown, heading, { claimId, evidenceItemId, sourceVersionId, selected = false }) => {
     assert.ok(shown.startsWith(`${heading}\n`), shown.slice(0, 80));
     assert.equal(Number((/records \*\*(\d+) programme sessions\*\*/.exec(shown) || [])[1]), independent.counted);
     assert.match(shown, /for the reporting period 2026-09-01 to 2026-09-30/);
-    assert.match(shown, new RegExp(`\`${XLSX_METHOD}\`: every data row after the header row of the only worksheet of the exact promoted source version is one record`));
+    const method = selected ? SELECTED_XLSX_METHOD : XLSX_METHOD;
+    const methodDescription = selected
+      ? "every data row after the header row of the explicitly selected worksheet of the exact promoted source version is one record"
+      : "every data row after the header row of the only worksheet of the exact promoted source version is one record";
+    assert.ok(shown.includes(`\`${method}\`: ${methodDescription}`));
+    if (selected) {
+      assert.match(shown, /Selected worksheet:\*\* Sessions \(`sheet_1`\)/);
+      assert.match(shown, /Worksheet citation: Sessions \(`sheet_1`\)/);
+    }
     assert.match(shown, /6 data records after the header, minus 1 blank record excluded = \*\*5\*\* counted/);
     assert.match(shown, /2 exact-duplicate records\. They are included in the count of 5, not removed or merged/);
     assert.match(shown, /## What this evidence does not establish[\s\S]*distinct people[\s\S]*outcome[\s\S]*caused any result/);
@@ -778,7 +795,7 @@ async function runXlsxAcceptance() {
       const promoted = await decideAndPromote(adminApi, ids.ordinary.fileId);
       Object.assign(ids.ordinary, promoted);
       await openCountRecords(promoted.source_version_id);
-      assert.match(await textOf(adminPage, "[data-client-source-measurement-worksheet]"), /Excel workbook: the rows of its only worksheet/);
+      assert.match(await textOf(adminPage, "[data-client-source-measurement-worksheet]"), /Excel workbook worksheet Sessions/);
       const counts = await textOf(adminPage, "[data-client-source-measurement-counts]");
       assert.match(counts, /Data records after the header row: 6/);
       assert.match(counts, /Blank records \(not counted\): 1/);
@@ -1030,19 +1047,57 @@ async function runXlsxAcceptance() {
     // -----------------------------------------------------------------------
     // E: protected negatives on the workbook path.
     // -----------------------------------------------------------------------
-    await test("E: a two-worksheet workbook is never combined; other roles, organizations and Projects are refused; a definition conflict and a replay write nothing", async () => {
+    await test("E: an explicitly selected worksheet is counted, measured, reported and retrievable; omission, invalid selection and restricted roles are refused", async () => {
       const fileId = await apiUpload(adminApi, TWO_SHEETS, ids.batchId);
       await dispatcher.whenIdle();
       const promoted = await decideAndPromote(adminApi, fileId);
-      const twoSheets = await adminApi("POST", sourceRecordCountMeasurementPath(ORG_X, promoted.source_version_id), DEFINITION);
-      assert.deepEqual([twoSheets.status, twoSheets.body.blockers?.[0]?.blocking_reason], [422, "measurement_xlsx_not_single_worksheet"]);
       const twoSheetBasis = await adminApi("GET", sourceRecordCountMeasurementPath(ORG_X, promoted.source_version_id));
-      assert.deepEqual([twoSheetBasis.status, twoSheetBasis.body.data.basis.blockers[0].blocking_reason], [200, "measurement_xlsx_not_single_worksheet"]);
-      assert.match(twoSheetBasis.body.data.basis.blockers[0].message, /exactly one worksheet; worksheets are never combined/);
+      assert.deepEqual([twoSheetBasis.status, twoSheetBasis.body.data.basis.blockers[0].blocking_reason], [200, "measurement_xlsx_worksheet_selection_required"]);
+      assert.deepEqual(twoSheetBasis.body.data.basis.worksheet_options.map(({ sheet_key, sheet_name }) => [sheet_key, sheet_name]), [["sheet_1", "Sessions"], ["sheet_2", "Notes"]]);
+      const omitted = await adminApi("POST", sourceRecordCountMeasurementPath(ORG_X, promoted.source_version_id), DEFINITION);
+      assert.deepEqual([omitted.status, omitted.body.blockers?.[0]?.blocking_reason], [422, "measurement_xlsx_worksheet_selection_required"]);
+      const invalid = await adminApi("POST", sourceRecordCountMeasurementPath(ORG_X, promoted.source_version_id, "sheet_99"), DEFINITION);
+      assert.deepEqual([invalid.status, invalid.body.blockers?.[0]?.blocking_reason], [422, "measurement_xlsx_worksheet_selection_invalid"]);
       assert.deepEqual(await query("SELECT count(*)::int AS n FROM kai.evidence_measurements WHERE source_version_id = $1::uuid", [promoted.source_version_id]), [{ n: 0 }]);
       await openCountRecords(promoted.source_version_id);
-      const blockerNode = await adminPage.evaluate(`(() => { const node = document.querySelector('[data-blocking-reason="measurement_xlsx_not_single_worksheet"]'); return node ? node.textContent : null; })()`);
-      assert.match(blockerNode || "", /exactly one worksheet; worksheets are never combined/);
+      assert.ok(await textOf(adminPage, '[data-client-source-measurement-worksheet-select=""]'), "the UI requires explicit worksheet selection");
+      const selectorOptions = await adminPage.evaluate(`Array.from(document.querySelectorAll('[data-client-source-measurement-worksheet-select] option')).map((option) => [option.value, option.textContent])`);
+      assert.deepEqual(selectorOptions, [["", "Choose one worksheet"], ["sheet_1", "Sessions"], ["sheet_2", "Notes"]]);
+      assert.match(await textOf(adminPage, '[data-client-source-measurement-worksheet-option="sheet_1"]'), /data rows 6, blank rows 1, exact duplicates 2/);
+      assert.match(await textOf(adminPage, '[data-client-source-measurement-worksheet-option="sheet_2"]'), /Notes: data rows 1, blank rows 0, exact duplicates 0/);
+      await adminPage.evaluate(`(() => { const node = document.querySelector('[data-client-source-measurement-worksheet-select]'); node.value = 'sheet_1'; node.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, '[data-client-source-measurement-counts]')), "selected worksheet counts");
+      assert.match(await textOf(adminPage, '[data-client-source-measurement-worksheet]'), /Sessions/);
+      assert.equal(await textOf(adminPage, '[data-client-source-measurement-counted]'), "5", "the notes worksheet does not contribute");
+      const approvalBefore = await approvalState();
+      const recorded = await recordCountInUi(promoted.source_version_id, "sheet_1");
+      assertWorkbookMeasurement(recorded, { selected: true });
+      ids.selected = { ...promoted, evidenceItemId: recorded.measurement.evidence_item_id, claimId: recorded.claim.claim_id };
+      const internal = await internalEligibility(ids.selected.claimId);
+      assert.deepEqual([internal.eligible, internal.blockerCodes], [true, []], J(internal.blockerCodes));
+      assert.deepEqual(await approvalState(), approvalBefore, "ordinary selected-sheet eligibility requires no repeated evidence, claim, coverage or release approvals");
+      for (const [button, created, contentType, heading] of [
+        ["Generate internal evidence summary", "Internal evidence summary created", "evidence_summary", "# Internal Evidence Summary"],
+        ["Generate internal impact narrative", "Internal impact narrative created", "impact_narrative", "# Internal Impact Narrative"],
+      ]) {
+        await openStudioTab("Data Sources");
+        await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `[data-client-claim="${ids.selected.claimId}"]`)), "selected-sheet measured claim");
+        await adminPage.clickIn(`[data-client-claim="${ids.selected.claimId}"] input[type=checkbox]`, "Use in an internal draft");
+        await adminPage.clickButton(button);
+        await adminPage.waitForText(created);
+        await adminPage.idle();
+        const [draft] = await query("SELECT generated_content_draft_id::text FROM kai.generated_content_drafts WHERE organization_id = $1::uuid AND content_type = $2 ORDER BY created_at DESC LIMIT 1", [ORG_X, contentType]);
+        await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `[data-client-open-internal-report="${draft.generated_content_draft_id}"]`)), "selected-sheet report action");
+        await adminPage.clickIn(`[data-client-open-internal-report="${draft.generated_content_draft_id}"]`, "Open selected-sheet report");
+        await adminPage.waitFor(async () => ((await textOf(adminPage, "[data-client-internal-report-markdown]")) || "").startsWith(heading), "selected-sheet report");
+        const shown = await textOf(adminPage, "[data-client-internal-report-markdown]");
+        const fetched = await fetchText(adminPage, clientInternalReportMarkdownPath(ORG_X, PROJECT_X, draft.generated_content_draft_id));
+        assert.deepEqual([fetched.status, fetched.body], [200, shown]);
+        assertWorkbookReport(shown, heading, { claimId: ids.selected.claimId, evidenceItemId: ids.selected.evidenceItemId,
+          sourceVersionId: ids.selected.source_version_id, selected: true });
+        ids.selected[contentType] = draft.generated_content_draft_id;
+      }
+      assert.deepEqual(await approvalState(), approvalBefore);
       const basisPath = sourceRecordCountMeasurementPath(ORG_X, ids.ordinary.source_version_id);
       for (const [label, api, status] of [["client_contributor", contributorApi, 403], ["client_reviewer", reviewerApi, 403], ["another organization's administrator", adminYApi, 403]]) {
         assert.equal((await api("GET", basisPath)).status, status, label);
@@ -1063,7 +1118,8 @@ async function runXlsxAcceptance() {
       } finally {
         modelOverride.text = null;
       }
-      results.e = { twoSheets: "measurement_xlsx_not_single_worksheet", roles: 403, otherProject: 404, replay: "replayed", conflict: 409, unsupportedAssertion: 422 };
+      results.e = { selectedWorksheet: "sheet_1", method: SELECTED_XLSX_METHOD, count: 5, reports: ["evidence_summary", "impact_narrative"], noRepeatedApprovals: true,
+        omission: "measurement_xlsx_worksheet_selection_required", invalid: "measurement_xlsx_worksheet_selection_invalid", roles: 403, otherProject: 404, replay: "replayed", conflict: 409, unsupportedAssertion: 422 };
     });
 
     await test("summary", async () => {

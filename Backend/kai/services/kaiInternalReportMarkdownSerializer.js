@@ -101,6 +101,7 @@ function methodLines(model) {
       `- **Included:** ${text(m.inclusionRule)}`,
       `- **Excluded:** ${text(m.exclusionRule)}`,
       `- **Calculation:** ${code(m.calculationMethod)}: ${describeMeasurementCalculationMethod(m.calculationMethod)}`,
+      ...(m.worksheetKey ? [`- **Selected worksheet:** ${text(m.worksheetName || "Worksheet")} (${code(m.worksheetKey)}).`] : []),
       `- **Arithmetic:** ${plural(m.totalRecordCount, "data record")} after the header, minus ${plural(m.blankRecordCount, "blank record")} excluded = **${m.measuredValue}** counted.`,
       `- **Definition recorded:** ${m.definitionRecordedAt || "time not recorded"}. The definition is fixed for this source version and reused for every report; a new source version is measured again under its own definition.`,
       "",
@@ -232,8 +233,13 @@ function conclusionLines(model) {
 }
 
 function referenceLines(model) {
-  return model.facts.map((fact) => `- [${fact.citationRefs.join("] [")}] Claim ${code(fact.claimId)}: "${text(fact.claimStatement)}" `
-    + `Evidence ${code(fact.evidenceItemId)}: "${text(fact.evidenceStatement)}" Source ${fact.sourceCode ? code(fact.sourceCode) : code(fact.sourceId)}, version ${code(fact.sourceVersionId)}.`);
+  return model.facts.map((fact) => {
+    const worksheet = fact.measurement?.worksheetKey
+      ? ` Worksheet citation: ${text(fact.measurement.worksheetName || "Worksheet")} (${code(fact.measurement.worksheetKey)}).`
+      : "";
+    return `- [${fact.citationRefs.join("] [")}] Claim ${code(fact.claimId)}: "${text(fact.claimStatement)}" `
+      + `Evidence ${code(fact.evidenceItemId)}: "${text(fact.evidenceStatement)}" Source ${fact.sourceCode ? code(fact.sourceCode) : code(fact.sourceId)}, version ${code(fact.sourceVersionId)}.${worksheet}`;
+  });
 }
 
 export function serializeInternalReportToMarkdown(model) {

@@ -237,7 +237,7 @@ function sameMeasurement(row, { evidenceItemId, definitionId, measurement, profi
 // effective allowed use, the committed P1 profile the version was derived
 // from, and the deterministic derivation. Shared by the write and the
 // read-only basis so both answer from the same rules.
-async function loadMeasurableSourceVersion(tx, { organizationId, sourceVersionId }) {
+async function loadMeasurableSourceVersion(tx, { organizationId, sourceVersionId, worksheetKey = null }) {
   const refuse = (code, blockers) => ({ ok: false, failure: failure(code, blockers) });
   const sourceVersionRow = await getScopedSourceVersionById({ organizationId, sourceVersionId }, tx);
   if (!sourceVersionRow) return refuse("not_found");
@@ -273,7 +273,18 @@ async function loadMeasurableSourceVersion(tx, { organizationId, sourceVersionId
   if (fileProfileRow.profile_canonical_sha256 !== sourceVersionRow.profile_canonical_sha256) {
     return refuse("conflict_current_state_changed");
   }
-  return { ok: true, sourceVersionRow, sourceRow, fileProfileRow, derived: deriveRecordCountMeasurement(fileProfileRow.profile) };
+  return { ok: true, sourceVersionRow, sourceRow, fileProfileRow, derived: deriveRecordCountMeasurement(fileProfileRow.profile, worksheetKey) };
+}
+
+function worksheetOptions(profile) {
+  if (profile?.format !== "xlsx" || !Array.isArray(profile.sheets) || profile.sheets.length < 2) return [];
+  return profile.sheets.map((sheet) => ({
+    sheet_key: sheet.sheet_key,
+    sheet_name: sheet.safe_sheet_name ?? `Worksheet ${String(sheet.sheet_key).replace("sheet_", "")}`,
+    data_record_count: sheet.record_count_basis?.data_record_count ?? null,
+    blank_record_count: sheet.record_count_basis?.blank_record_count ?? null,
+    duplicate_record_count: sheet.record_count_basis?.duplicate_record_count ?? null,
+  }));
 }
 
 async function resolveDefaultRunInTransaction() {
@@ -299,14 +310,14 @@ export function createPostgresSourceMeasurementRepository({ runInTransaction, in
     // to define the count - the authoritative profile counts and the
     // calculation, or why this version cannot be measured - and whatever is
     // already recorded for it, with the measured claim's status.
-    async readSourceRecordCountMeasurementBasis({ organizationId, sourceVersionId }) {
+    async readSourceRecordCountMeasurementBasis({ organizationId, sourceVersionId, worksheetKey = null }) {
       const run = runInTransaction || (await resolveDefaultRunInTransaction());
       try {
         // Writes nothing. Not a READ ONLY transaction: the shared loader takes
         // the same source-candidate row lock the write serializes on, so the
         // basis is read in the write's own order.
         return await run(async (tx) => {
-          const measurable = await loadMeasurableSourceVersion(tx, { organizationId, sourceVersionId });
+          const measurable = await loadMeasurableSourceVersion(tx, { organizationId, sourceVersionId, worksheetKey });
           if (!measurable.ok) return measurable.failure;
           const { sourceVersionRow, sourceRow, derived } = measurable;
           const definitionRow = await readDefinition(tx, { organizationId, sourceVersionId });
@@ -330,13 +341,14 @@ export function createPostgresSourceMeasurementRepository({ runInTransaction, in
                   measurable: true,
                   calculation_method: derived.measurement.calculationMethod,
                   source_format: derived.measurement.sheetKey ? "xlsx" : "csv",
-                  worksheet: derived.measurement.sheetKey ? { sheet_key: derived.measurement.sheetKey } : null,
+                  worksheet: derived.measurement.sheetKey ? { sheet_key: derived.measurement.sheetKey, sheet_name: derived.measurement.sheetName } : null,
                   data_record_count: derived.measurement.totalRecordCount,
                   blank_record_count: derived.measurement.blankRecordCount,
                   duplicate_record_count: derived.measurement.duplicateRecordCount,
                   counted_record_count: derived.measurement.measuredValue,
+                  worksheet_options: worksheetOptions(measurable.fileProfileRow.profile),
                 }
-              : { measurable: false, blockers: derived.blockers || [] },
+              : { measurable: false, blockers: derived.blockers || [], worksheet_options: worksheetOptions(measurable.fileProfileRow.profile) },
             recorded: definitionRow
               ? {
                   definition: rowToDefinitionRecord(definitionRow),
@@ -352,11 +364,11 @@ export function createPostgresSourceMeasurementRepository({ runInTransaction, in
         return failure(shaped.error.code);
       }
     },
-    async recordSourceRecordCountMeasurement({ organizationId, sourceVersionId, definition, actorUserId, now }) {
+    async recordSourceRecordCountMeasurement({ organizationId, sourceVersionId, definition, worksheetKey = null, actorUserId, now }) {
       const run = runInTransaction || (await resolveDefaultRunInTransaction());
       try {
         return await run(async (tx) => {
-          const measurable = await loadMeasurableSourceVersion(tx, { organizationId, sourceVersionId });
+          const measurable = await loadMeasurableSourceVersion(tx, { organizationId, sourceVersionId, worksheetKey });
           if (!measurable.ok) return measurable.failure;
           const { sourceVersionRow, sourceRow, fileProfileRow, derived } = measurable;
           if (!derived.ok) return failure(derived.code, derived.blockers);

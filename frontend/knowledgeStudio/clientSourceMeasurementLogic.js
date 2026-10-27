@@ -8,9 +8,10 @@ import { BASE_PATH, errorText, isRouteUuid } from "../impactEvidenceLibraryLogic
  * currentness, and the effective allowed use. Nothing here computes a count,
  * proposes a definition, or reads a record.
  */
-export function sourceRecordCountMeasurementPath(organizationId, sourceVersionId) {
-  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}`
+export function sourceRecordCountMeasurementPath(organizationId, sourceVersionId, worksheetKey = null) {
+  const path = `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}`
     + `/source-versions/${encodeURIComponent(sourceVersionId)}/record-count-measurement`;
+  return worksheetKey ? `${path}?worksheet_key=${encodeURIComponent(worksheetKey)}` : path;
 }
 
 const isCount = (value) => Number.isInteger(value) && value >= 0;
@@ -27,6 +28,15 @@ function projectBasisCounts(basis) {
           message: blocker.message,
           requiredFix: isText(blocker.required_fix) ? blocker.required_fix : null,
         })),
+      worksheetOptions: Array.isArray(basis?.worksheet_options) ? basis.worksheet_options
+        .filter((sheet) => isText(sheet?.sheet_key) && isText(sheet?.sheet_name))
+        .map((sheet) => ({
+          sheetKey: sheet.sheet_key,
+          sheetName: sheet.sheet_name,
+          dataRecordCount: isCount(sheet.data_record_count) ? sheet.data_record_count : null,
+          blankRecordCount: isCount(sheet.blank_record_count) ? sheet.blank_record_count : null,
+          duplicateRecordCount: isCount(sheet.duplicate_record_count) ? sheet.duplicate_record_count : null,
+        })) : [],
     };
   }
   const counts = [basis.data_record_count, basis.blank_record_count, basis.duplicate_record_count, basis.counted_record_count];
@@ -39,6 +49,16 @@ function projectBasisCounts(basis) {
     countedRecordCount: basis.counted_record_count,
     // A workbook count is of the data rows of its only worksheet.
     worksheet: basis.source_format === "xlsx" && isText(basis.worksheet?.sheet_key) ? basis.worksheet.sheet_key : null,
+    worksheetName: basis.source_format === "xlsx" && isText(basis.worksheet?.sheet_name) ? basis.worksheet.sheet_name : null,
+    worksheetOptions: Array.isArray(basis.worksheet_options) ? basis.worksheet_options
+      .filter((sheet) => isText(sheet?.sheet_key) && isText(sheet?.sheet_name))
+      .map((sheet) => ({
+        sheetKey: sheet.sheet_key,
+        sheetName: sheet.sheet_name,
+        dataRecordCount: isCount(sheet.data_record_count) ? sheet.data_record_count : null,
+        blankRecordCount: isCount(sheet.blank_record_count) ? sheet.blank_record_count : null,
+        duplicateRecordCount: isCount(sheet.duplicate_record_count) ? sheet.duplicate_record_count : null,
+      })) : [],
   };
 }
 

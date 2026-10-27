@@ -34,24 +34,25 @@ export default function ClientSourceMeasurementPanel({ organizationId, sourceVer
   const [form, setForm] = useState(EMPTY_MEASUREMENT_FORM);
   const [pending, setPending] = useState("");
   const [notice, setNotice] = useState(null);
+  const [selectedWorksheetKey, setSelectedWorksheetKey] = useState("");
   const seqRef = useRef(0);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (worksheetKey = selectedWorksheetKey) => {
     seqRef.current += 1;
     const seq = seqRef.current;
-    const result = await getJson(sourceRecordCountMeasurementPath(organizationId, sourceVersionId));
+    const result = await getJson(sourceRecordCountMeasurementPath(organizationId, sourceVersionId, worksheetKey || null));
     if (seqRef.current !== seq) return;
     const data = result.statusCode === 200 && result.body?.ok ? projectMeasurementBasis(result.body.data) : null;
     setBasis(data ? { status: "success", data, error: "" } : { status: "error", data: null, error: measurementFailureMessage(result) });
-  }, [organizationId, sourceVersionId]);
-  useEffect(() => { load(); }, [load]);
+  }, [organizationId, selectedWorksheetKey, sourceVersionId]);
+  useEffect(() => { load(""); }, [organizationId, sourceVersionId]);
 
   const readiness = measurementFormReadiness(form);
   const submit = async () => {
     if (!readiness.ready) return;
     setPending("record");
     setNotice(null);
-    const result = await postJson(sourceRecordCountMeasurementPath(organizationId, sourceVersionId), measurementDefinitionBody(form));
+    const result = await postJson(sourceRecordCountMeasurementPath(organizationId, sourceVersionId, selectedWorksheetKey || null), measurementDefinitionBody(form));
     setPending("");
     if ((result.statusCode !== 200 && result.statusCode !== 201) || !result.body?.ok) {
       setNotice({ kind: "warning", text: measurementFailureMessage(result) });
@@ -87,6 +88,29 @@ export default function ClientSourceMeasurementPanel({ organizationId, sourceVer
       {basis.status === "loading" ? <div className="text-muted small">Loading the source's counts...</div> : null}
       {basis.status === "error" ? <div className="alert alert-warning py-2 small" data-client-source-measurement-error="">{basis.error}</div> : null}
       {notice ? <div className={`alert alert-${notice.kind} py-2 small`} data-client-source-measurement-notice={notice.kind}>{notice.text}</div> : null}
+      {data?.counts.worksheetOptions.length > 1 ? (
+        <div className="small mb-2" data-client-source-measurement-worksheet-selector="">
+          <label className="d-block mb-1">
+            Worksheet to count
+            <select className="form-select form-select-sm" value={selectedWorksheetKey} data-client-source-measurement-worksheet-select=""
+              onChange={(event) => {
+                const key = event.target.value;
+                setSelectedWorksheetKey(key);
+                load(key);
+              }}>
+              <option value="">Choose one worksheet</option>
+              {data.counts.worksheetOptions.map((sheet) => <option key={sheet.sheetKey} value={sheet.sheetKey}>{sheet.sheetName}</option>)}
+            </select>
+          </label>
+          <div>Each worksheet is assessed separately. Notes and other worksheets are never added to the selected count.</div>
+          {data.counts.worksheetOptions.map((sheet) => (
+            <div key={sheet.sheetKey} data-client-source-measurement-worksheet-option={sheet.sheetKey}>
+              {sheet.sheetName}: data rows {sheet.dataRecordCount ?? "unavailable"}, blank rows {sheet.blankRecordCount ?? "unavailable"},
+              exact duplicates {sheet.duplicateRecordCount ?? "unavailable"}.
+            </div>
+          ))}
+        </div>
+      ) : null}
       {data && !data.counts.measurable ? (
         <div className="small" data-client-source-measurement-unmeasurable="">
           This source version cannot be counted this way. {data.counts.blockers.map((blocker, index) => (
@@ -100,7 +124,7 @@ export default function ClientSourceMeasurementPanel({ organizationId, sourceVer
         <div className="small mb-2" data-client-source-measurement-counts="">
           {data.counts.worksheet ? (
             <div data-client-source-measurement-worksheet={data.counts.worksheet}>
-              Excel workbook: the rows of its only worksheet, with its first row as the header row.
+              Excel workbook worksheet {data.counts.worksheetName || data.counts.worksheet}, with its first row as the header row.
             </div>
           ) : null}
           <div>Data records after the header row: <strong>{data.counts.dataRecordCount}</strong></div>

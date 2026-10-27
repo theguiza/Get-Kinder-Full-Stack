@@ -146,6 +146,13 @@ function redactedName(value) {
   });
 }
 
+function safeWorksheetDisplayName(value, sheetKey) {
+  const candidate = typeof value === "string" ? value.normalize("NFKC").trim() : "";
+  if (/^[\p{L}\p{N}][\p{L}\p{N} _()'-]{0,30}$/u.test(candidate)) return candidate;
+  const position = /^sheet_([1-9][0-9]{0,3})$/.exec(sheetKey ?? "")?.[1];
+  return `Worksheet ${position || "?"}`;
+}
+
 function createColumnProfiles(columnCount) {
   return Array.from({ length: columnCount }, (_, index) => ({
     field_key: `field_${index + 1}`,
@@ -855,6 +862,7 @@ async function profileXlsx({ extension, declaredMime, bytes }) {
       return Object.freeze({
         sheet_key: sheet.sheet_key,
         sheet_name: sheet.sheet_name,
+        safe_sheet_name: safeWorksheetDisplayName(worksheetRefs.find((ref) => ref.sheet_key === sheet.sheet_key)?.sheet_name, sheet.sheet_key),
         counts: Object.freeze({
           header_count: headers.filter((headerShape) => headerShape.present).length,
           row_count: sheet.rowIndices.size,

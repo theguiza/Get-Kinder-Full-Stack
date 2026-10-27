@@ -1,5 +1,5 @@
--- KAI P2-01M XLSX worksheet method: verification after
---   migrations/kai_sprint2_p2_01m_xlsx_worksheet_record_count_method.sql
+-- KAI P2-01M XLSX worksheet methods: verification after
+--   migrations/kai_sprint2_p2_01m_xlsx_selected_worksheet_record_count_method.sql
 -- READ-ONLY. One SELECT statement; it changes nothing and inserts nothing.
 -- The two widened CHECKs are proven by evaluating the live CHECK expressions
 -- against literal values (query_to_xml), not by inserting rows; the four other
@@ -17,6 +17,7 @@ method_vectors(vector, calculation_method, expected) AS (
   VALUES
     ('CSV method', 'p1_csv_profile_data_records_excluding_blank_v1', true),
     ('XLSX worksheet method', 'p1_xlsx_single_worksheet_data_rows_excluding_blank_v1', true),
+    ('XLSX selected worksheet method', 'p1_xlsx_selected_worksheet_data_rows_excluding_blank_v1', true),
     ('unknown method', 'p1_xlsx_single_worksheet_data_rows_excluding_blank_v2', false),
     ('empty method', '', false)
 ),
@@ -52,8 +53,8 @@ unchanged(name, md5) AS (
 ),
 checks(seq, check_id, status, expected, observed, detail) AS (
   SELECT 10, 'X1.method_vectors',
-         CASE WHEN (SELECT count(*) FROM method_results) = 4 AND (SELECT bool_and(observed IS NOT DISTINCT FROM expected) FROM method_results) THEN 'PASS' ELSE 'FAIL' END,
-         'CSV and XLSX methods admitted; any other refused',
+         CASE WHEN (SELECT count(*) FROM method_results) = 5 AND (SELECT bool_and(observed IS NOT DISTINCT FROM expected) FROM method_results) THEN 'PASS' ELSE 'FAIL' END,
+         'CSV, single-worksheet XLSX and selected-worksheet XLSX methods admitted; any other refused',
          coalesce((SELECT string_agg(vector || '=' || coalesce(observed::text, 'absent'), '; ' ORDER BY vector) FROM method_results), '(constraint absent)'),
          'evidence_measurements_p2_01m_method_check evaluated against literal values'
   UNION ALL

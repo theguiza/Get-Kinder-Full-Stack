@@ -44897,3 +44897,36 @@ Anything beyond a record count (rates, outcomes, sums) is a new evidence type an
 **Production status (NOT_CONFIRMED):** no production website, database, cloud service, customer file, or production configuration was accessed or changed. No migration was applied outside disposable synthetic PostgreSQL. Nothing was pushed or deployed. The original customer's workbook and production report remain NOT_CONFIRMED; this local proof does not close that issue.
 
 **Status:** CSV_AND_SINGLE_WORKSHEET_XLSX_MEASUREMENT_TO_INTERNAL_REPORT_VERIFIED_LOCALLY; MULTI_WORKSHEET_SELECTION_REQUIRES_OWNER_CONTRACT_DECISION. Local commit only; not pushed, deployed, or verified in production.
+
+### Selected-worksheet XLSX record counting (2026-10-27)
+
+**Owner authorization (USER_CONFIRMED):** the owner request `CODEX — ADD SELECTED-WORKSHEET XLSX COUNTING WITHOUT BREAKING EXISTING MEASUREMENTS` authorizes this bounded local package, including authoring an additive method migration and rollback, applying them only to disposable local PostgreSQL, synthetic browser acceptance, affected and shared-impact checks, bundle rebuild if needed, and a local commit. It does not authorize production SQL/migration, push, deployment, customer-data access, cloud/shared database access, feature-flag or tenant changes, or editing `00_KAI_CURRENT_STATE.md`.
+
+**Starting state (TOOL_VERIFIED):** branch `main`, HEAD `21619b87264efc1ea3458a6940a63db7afd6f575`, clean working tree, three commits ahead. The existing method CHECK admitted CSV and `p1_xlsx_single_worksheet_data_rows_excluding_blank_v1`; worksheet locators already used stable `sheet_N` keys. The prior worksheet-selection boundary below is superseded by this authorized implementation. Historical CSV and single-worksheet definitions and saved measurements were left intact.
+
+**Method and supported structures (TOOL_VERIFIED):** added `p1_xlsx_selected_worksheet_data_rows_excluding_blank_v1` for a profiled XLSX with at least two worksheets and one explicit stable `sheet_key` selection. It reads only that worksheet's committed `kai_xlsx_worksheet_record_basis_v1`, requires the existing header/structure restrictions to pass, counts data rows minus blank rows, and retains exact duplicates. No worksheet is automatically combined; a notes worksheet is not presumed to be programme data. The locator, method, source version, human-confirmed definition, unit and period are persisted. Count evidence and claims state record counts only and do not imply unique participants, outcomes or causation. Safe worksheet labels are allowlisted; worksheet values are not sent to the frontend.
+
+**Schema (TOOL_VERIFIED):** added `kai_sprint2_p2_01m_xlsx_selected_worksheet_record_count_method.sql` and `.rollback.sql`, registered after P2-01M in the migration chain. Forward migration preserves both old method values and existing worksheet locator shape, admits the new method, and adds a database trigger validating that a selected-method measurement references a `sheet_N` locator present in the matching committed multi-sheet XLSX profile. No records are rewritten. Rollback refuses before changing schema if any persisted measurement uses the selected method; otherwise it removes the trigger/function and restores the prior method CHECK. Both migrations were exercised only on disposable loopback PostgreSQL.
+
+**Connected proof (TOOL_VERIFIED; synthetic bytes, real XLSX parser, validator, governed service/repository, persistence, browser routes and disposable PostgreSQL):**
+- Multi-sheet Sessions + Notes workbook: independently expected 6 data rows - 1 blank = **5**; two identical rows remain included. Explicit selection of Sessions persisted measured value **5**, method `p1_xlsx_selected_worksheet_data_rows_excluding_blank_v1`, and locator `{scope: "data_records_after_header", sheet_key: "sheet_1"}`. The Notes sheet's 1 row did not contribute. UI displayed safe names and per-sheet row/blank/duplicate counts before the definition was submitted.
+- Missing/invalid worksheet selections returned structured blockers and wrote no measurement. The connected measurement suite also exercised unsupported formula structure and confirmed refusal without a write. The database trigger rejected a selected-method measurement with a mismatched/invalid locator.
+- A fresh authorized read returned the selected-sheet measurement. Its evidence remained `source_record_count_measurement`, its proposal remained a measured `finding` rather than `field_N` structural evidence, and both a newly generated Evidence Summary and Impact Narrative were retrieved from their report routes with method, selected worksheet, definition, arithmetic and limitations cited. No participant/outcome/causal results were invented.
+- The ordinary selected-sheet claim was internally eligible without new evidence, claim, coverage or release approvals. Existing story/testimonial-present restrictions remained blocked and their separate GK route was not changed.
+
+**Preservation (TOOL_VERIFIED):** CSV and historical one-worksheet XLSX method branches were not changed. Connected legacy cases continued to assert CSV and one-sheet counts of **5**, under their original calculation methods. No historical method value or saved measurement was reinterpreted.
+
+**Verification (TOOL_VERIFIED; every Node/npm command used `DATABASE_URL=postgresql://127.0.0.1:1/kai_non_listening_sentinel`, with runners directing actual work only to disposable loopback PostgreSQL):**
+
+| Command or suite | Result |
+| --- | --- |
+| Focused selected-measurement, internal report and existing ordinary-authority specs | passed |
+| P2-01M disposable PostgreSQL runner, method verifier, migration reapplication and rollback refusal | 59 passed, 8 skipped, 0 failed; verifier OVERALL PASS |
+| Synthetic multi-sheet XLSX file-to-report browser acceptance (including existing CSV/single-sheet and story-present cases) | 16/16 passed |
+| Full `npm test` | 5,786 passed, 0 failed, 122 skipped (5,908 total) |
+| `npm run build` | passed; tracked frontend bundle rebuilt |
+| `git diff --check` | passed |
+
+**Remaining status (NOT_CONFIRMED):** the historical customer workbook's actual worksheet structure and any production processing remain unconfirmed. No actual-client workbook, production record, cloud service, shared database, production config, or credential was accessed. No production migration, push, or deployment occurred. `00_KAI_CURRENT_STATE.md` was not changed.
+
+**Status:** SELECTED_WORKSHEET_XLSX_MEASUREMENT_TO_INTERNAL_REPORT_VERIFIED_LOCALLY. Local implementation commit only; not pushed, deployed, or verified in production.

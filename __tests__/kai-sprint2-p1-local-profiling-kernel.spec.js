@@ -310,7 +310,7 @@ test("an XLSX profile commits a worksheet record-count basis without values; a l
     blockingReason: "measurement_xlsx_record_basis_not_committed",
     message: derived.blockers[0].message,
     requiredFix: derived.blockers[0].required_fix,
-  }] });
+  }], worksheetOptions: [] });
   assert.match(`${projected.counts.blockers[0].message} ${projected.counts.blockers[0].requiredFix}`,
     /profiled before worksheet records were counted[\s\S]*Upload again as a new intake version/);
   assert.match(INTERNAL_DRAFT_READINESS_MESSAGES.no_measured_claim, /a single-table CSV file or an Excel workbook with one worksheet/);

@@ -20,8 +20,9 @@ export const MEASUREMENT_CALCULATION_METHOD = "p1_csv_profile_data_records_exclu
 // The XLSX method: the data rows after the header row of the workbook's only
 // worksheet, from the P1 worksheet record-count basis (localProfilingKernel).
 export const MEASUREMENT_XLSX_CALCULATION_METHOD = "p1_xlsx_single_worksheet_data_rows_excluding_blank_v1";
+export const MEASUREMENT_XLSX_SELECTED_CALCULATION_METHOD = "p1_xlsx_selected_worksheet_data_rows_excluding_blank_v1";
 export const MEASUREMENT_XLSX_RECORD_COUNT_BASIS_VERSION = "kai_xlsx_worksheet_record_basis_v1";
-export const MEASUREMENT_CALCULATION_METHODS = Object.freeze([MEASUREMENT_CALCULATION_METHOD, MEASUREMENT_XLSX_CALCULATION_METHOD]);
+export const MEASUREMENT_CALCULATION_METHODS = Object.freeze([MEASUREMENT_CALCULATION_METHOD, MEASUREMENT_XLSX_CALCULATION_METHOD, MEASUREMENT_XLSX_SELECTED_CALCULATION_METHOD]);
 const SHEET_KEY_RE = /^sheet_[1-9][0-9]{0,3}$/;
 export const MEASUREMENT_DEFINITION_STATUS = "human_confirmed";
 export const MEASUREMENT_VALIDATOR_KEY = "VAL-KAI-P2-01M-001";
@@ -223,22 +224,37 @@ function deriveCsvRecordCount(profile) {
   };
 }
 
-// A workbook profile qualifies only with exactly one worksheet whose committed
+// A workbook profile qualifies only when the selected worksheet's committed
 // record-count basis establishes the header row and records none of the
-// conditions that make the table ambiguous. A workbook profiled before the
-// basis existed states no header row or blank rows and is refused, never
-// read from its workbook-wide row_count (which includes header rows).
-function deriveXlsxRecordCount(profile) {
+// conditions that make the table ambiguous. Workbook-wide row counts are
+// never used for worksheet measurements.
+function deriveXlsxRecordCount(profile, selectedWorksheetKey = null) {
   const sheets = profile.sheets;
-  if (!Array.isArray(sheets) || sheets.length !== 1 || profile.counts?.sheet_count !== 1) {
+  if (!Array.isArray(sheets) || sheets.length === 0 || profile.counts?.sheet_count !== sheets.length) {
     return refuse(
-      "measurement_xlsx_not_single_worksheet",
-      "A workbook record count is available only for a workbook with exactly one worksheet; worksheets are never combined.",
-      "Keep the one table to be counted on its own worksheet, remove the other worksheets in a copy of the workbook, and upload that copy.",
+      "measurement_xlsx_worksheet_profile_invalid",
+      "The workbook does not have a complete committed worksheet profile.",
+      "Upload the workbook again so KAI can profile each worksheet.",
       { objectType: "source_version" },
     );
   }
-  const [sheet] = sheets;
+  if (sheets.length > 1 && !SHEET_KEY_RE.test(selectedWorksheetKey ?? "")) {
+    return refuse(
+      "measurement_xlsx_worksheet_selection_required",
+      "Choose one worksheet to count. KAI never combines worksheets.",
+      "Select the intended worksheet from this workbook.",
+      { objectType: "source_version" },
+    );
+  }
+  if (selectedWorksheetKey !== null && !sheets.some((sheet) => sheet.sheet_key === selectedWorksheetKey)) {
+    return refuse(
+      "measurement_xlsx_worksheet_selection_invalid",
+      "The selected worksheet is not part of this workbook profile.",
+      "Select one of the listed worksheets.",
+      { objectType: "source_version" },
+    );
+  }
+  const sheet = sheets.length === 1 ? sheets[0] : sheets.find((candidate) => candidate.sheet_key === selectedWorksheetKey);
   const basis = sheet?.record_count_basis;
   if (!isPlainObject(basis) || basis.basis_version !== MEASUREMENT_XLSX_RECORD_COUNT_BASIS_VERSION || !SHEET_KEY_RE.test(sheet.sheet_key ?? "")) {
     return refuse(
@@ -269,9 +285,10 @@ function deriveXlsxRecordCount(profile) {
   return {
     ok: true,
     measurement: Object.freeze({
-      calculationMethod: MEASUREMENT_XLSX_CALCULATION_METHOD,
+      calculationMethod: sheets.length > 1 ? MEASUREMENT_XLSX_SELECTED_CALCULATION_METHOD : MEASUREMENT_XLSX_CALCULATION_METHOD,
       locatorCoordinates: Object.freeze({ scope: MEASUREMENT_LOCATOR_COORDINATES.scope, sheet_key: sheet.sheet_key }),
       sheetKey: sheet.sheet_key,
+      sheetName: sheet.safe_sheet_name ?? `Worksheet ${sheet.sheet_key.replace("sheet_", "")}`,
       totalRecordCount: total,
       blankRecordCount: basis.blank_record_count,
       duplicateRecordCount: basis.duplicate_record_count,
@@ -284,18 +301,16 @@ function deriveXlsxRecordCount(profile) {
  * The record count from one committed P1 profile: data records after the
  * header row, as parsed by the deterministic P1 profiler from the exact
  * confirmed bytes, minus records whose every field is empty. Exact-duplicate
- * records are counted (no rule identifies them as invalid) and reported.
- * A single-table CSV profile, or a one-worksheet XLSX profile with a committed
- * worksheet record-count basis, qualifies; a profile that lacks the counts
- * (profiled before they existed) is refused rather than assumed to have none.
+ * records remain counted and reported. Multi-worksheet XLSX requires one
+ * explicitly selected stable worksheet key; worksheets are never combined.
  */
-export function deriveRecordCountMeasurement(profile) {
+export function deriveRecordCountMeasurement(profile, selectedWorksheetKey = null) {
   if (isPlainObject(profile) && profile.status === "profiled" && profile.format === "csv") return deriveCsvRecordCount(profile);
-  if (isPlainObject(profile) && profile.status === "profiled" && profile.format === "xlsx") return deriveXlsxRecordCount(profile);
+  if (isPlainObject(profile) && profile.status === "profiled" && profile.format === "xlsx") return deriveXlsxRecordCount(profile, selectedWorksheetKey);
   return refuse(
     "measurement_source_not_single_table",
-    "A record count is available only for a profiled single-table CSV file or one-worksheet Excel workbook.",
-    "Use a CSV file or an Excel workbook with one worksheet; other formats have no committed record count.",
+    "A record count is available only for a profiled single-table CSV file or a supported Excel worksheet.",
+    "Use a CSV file or an Excel workbook with a committed worksheet record-count basis.",
     { objectType: "source_version" },
   );
 }
@@ -319,6 +334,7 @@ function plural(count, singular) {
 const RECORD_NOUN = Object.freeze({
   [MEASUREMENT_CALCULATION_METHOD]: "CSV data record",
   [MEASUREMENT_XLSX_CALCULATION_METHOD]: "worksheet data row",
+  [MEASUREMENT_XLSX_SELECTED_CALCULATION_METHOD]: "selected worksheet data row",
 });
 
 function recordNoun(calculationMethod) {
@@ -327,13 +343,19 @@ function recordNoun(calculationMethod) {
 
 /** The calculation a method names, in the words the internal report uses. */
 export function describeMeasurementCalculationMethod(calculationMethod) {
-  return calculationMethod === MEASUREMENT_XLSX_CALCULATION_METHOD
+  return calculationMethod === MEASUREMENT_XLSX_SELECTED_CALCULATION_METHOD
+    ? "every data row after the header row of the explicitly selected worksheet of the exact promoted source version is one record; rows none of whose cells has a value are excluded."
+    : calculationMethod === MEASUREMENT_XLSX_CALCULATION_METHOD
     ? "every data row after the header row of the only worksheet of the exact promoted source version is one record; rows none of whose cells has a value are excluded."
     : "every CSV data record after the header row of the exact promoted source version is one record; records whose every field is empty are excluded.";
 }
 
 export function composeMeasurementEvidenceStatement({ measurement, definition }) {
-  return `Source version record count: ${measurement.measuredValue} ${definition.unitLabel} ${periodPhrase(definition)}, `
+  const sheetCitation = measurement.calculationMethod === MEASUREMENT_XLSX_SELECTED_CALCULATION_METHOD
+    ? ` from selected worksheet ${measurement.sheetKey}, `
+    : " ";
+  return `Source version record count: ${measurement.measuredValue} ${definition.unitLabel} ${periodPhrase(definition)},`
+    + `${sheetCitation}`
     + `counting each ${recordNoun(measurement.calculationMethod)} after the header row as one ${definition.countedUnit}; `
     + `${plural(measurement.blankRecordCount, "blank record")} excluded; `
     + `${plural(measurement.duplicateRecordCount, "exact-duplicate record")} included.`;
@@ -344,12 +366,16 @@ export function composeMeasurementEvidenceStatement({ measurement, definition })
  * rows - never from the evidence statement text. States only the counted
  * value and its definition; no outcome, cause, participant, or rate.
  */
-export function composeMeasurementClaimStatement({ measurementRow, definitionRow }) {
+export function composeMeasurementClaimStatement({ measurementRow, definitionRow, locatorCoordinates = null }) {
   const definition = {
     periodStart: definitionRow.period_start,
     periodEnd: definitionRow.period_end,
   };
-  return `The promoted source records ${measurementRow.measured_value} ${definitionRow.unit_label} ${periodPhrase(definition)} `
+  const sheetCitation = measurementRow.calculation_method === MEASUREMENT_XLSX_SELECTED_CALCULATION_METHOD
+    ? ` in selected worksheet ${locatorCoordinates?.sheet_key ?? "(unavailable)"}`
+    : "";
+  return `The promoted source records ${measurementRow.measured_value} ${definitionRow.unit_label} ${periodPhrase(definition)}`
+    + `${sheetCitation} `
     + `(record count: one ${definitionRow.counted_unit} per ${recordNoun(measurementRow.calculation_method)}; `
     + `${plural(Number(measurementRow.blank_record_count), "blank record")} excluded, `
     + `${plural(Number(measurementRow.duplicate_record_count), "exact-duplicate record")} included).`;
@@ -378,7 +404,7 @@ export function validateComposedStatement(statement) {
 // on the data records of exactly one named worksheet.
 function locatorMatchesCalculationMethod(coordinates, calculationMethod) {
   const keys = Object.keys(coordinates).sort().join(",");
-  if (calculationMethod === MEASUREMENT_XLSX_CALCULATION_METHOD) return keys === "scope,sheet_key" && SHEET_KEY_RE.test(coordinates.sheet_key);
+  if ([MEASUREMENT_XLSX_CALCULATION_METHOD, MEASUREMENT_XLSX_SELECTED_CALCULATION_METHOD].includes(calculationMethod)) return keys === "scope,sheet_key" && SHEET_KEY_RE.test(coordinates.sheet_key);
   return keys === "scope";
 }
 

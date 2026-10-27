@@ -151,7 +151,7 @@ test("measurement basis service: the extraction authority only, exact input keys
   const call = (input, env = ENV) => getSourceRecordCountMeasurementBasis(input, { env, sourceMeasurementRepository: repository });
   const base = { organizationId: ORG, sourceVersionId: VERSION, actorContext: actor("client_admin") };
   assert.deepEqual(await call(base), { ok: true, data: { ok: "basis" }, error: null });
-  assert.deepEqual(calls, [{ organizationId: ORG, sourceVersionId: VERSION }]);
+  assert.deepEqual(calls, [{ organizationId: ORG, sourceVersionId: VERSION, worksheetKey: null }]);
   for (const [label, input] of [
     ["client_reviewer", { ...base, actorContext: actor("client_reviewer") }],
     ["client_contributor", { ...base, actorContext: actor("client_contributor") }],
@@ -171,7 +171,7 @@ test("measurement form: the server's counts are shown as given, the definition i
     basis: { measurable: true, data_record_count: 6, blank_record_count: 1, duplicate_record_count: 2, counted_record_count: 5 },
     recorded: null,
   });
-  assert.deepEqual(projected.counts, { measurable: true, dataRecordCount: 6, blankRecordCount: 1, duplicateRecordCount: 2, countedRecordCount: 5, worksheet: null });
+  assert.deepEqual(projected.counts, { measurable: true, dataRecordCount: 6, blankRecordCount: 1, duplicateRecordCount: 2, countedRecordCount: 5, worksheet: null, worksheetName: null, worksheetOptions: [] });
   const workbook = projectMeasurementBasis({
     sourceVersion: { source_version_id: VERSION, is_current: true },
     basis: { measurable: true, source_format: "xlsx", worksheet: { sheet_key: "sheet_1" }, data_record_count: 6, blank_record_count: 1, duplicate_record_count: 2, counted_record_count: 5 },
@@ -179,7 +179,7 @@ test("measurement form: the server's counts are shown as given, the definition i
   assert.equal(workbook.counts.worksheet, "sheet_1", "a workbook count names its worksheet");
   assert.equal(projectMeasurementBasis({ sourceVersion: { source_version_id: VERSION }, basis: { measurable: true, data_record_count: -1 } }), null, "malformed counts fail closed");
   assert.deepEqual(projectMeasurementBasis({ sourceVersion: { source_version_id: VERSION }, basis: { measurable: false, blockers: [{ message: "Not a CSV." }] } }).counts,
-    { measurable: false, blockers: [{ blockingReason: null, message: "Not a CSV.", requiredFix: null }] });
+    { measurable: false, blockers: [{ blockingReason: null, message: "Not a CSV.", requiredFix: null }], worksheetOptions: [] });
   assert.deepEqual(projectMeasurementBasis({ sourceVersion: { source_version_id: VERSION }, basis: { measurable: false, blockers: [{
     blocking_reason: "measurement_xlsx_formula_cells_present", message: "Formulas are not evaluated.", required_fix: "Replace them with values.",
   }] } }).counts.blockers, [{
@@ -248,7 +248,7 @@ test("routes: the basis GET and the receipt GET forward only path ids and the se
   assert.match(receipt.headers["content-disposition"], /attachment; filename="kai-export-manifest\.md"/);
   assert.equal(receipt.body, "# Export Manifest\n");
   assert.deepEqual(calls.map(([kind, input]) => [kind, Object.keys(input).sort()]), [
-    ["basis", ["actorContext", "organizationId", "sourceVersionId"]],
+    ["basis", ["actorContext", "organizationId", "sourceVersionId", "worksheetKey"]],
     ["receipt", ["actorContext", "engagementId", "exportManifestId", "organizationId"]],
   ]);
   assert.equal((await get(`/admin/organizations/${ORG}/engagements/${ENGAGEMENT}/client-released-reports/NOT-A-UUID/markdown`)).statusCode, 422);

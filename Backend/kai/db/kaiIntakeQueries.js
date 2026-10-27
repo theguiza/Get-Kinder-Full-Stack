@@ -1404,11 +1404,22 @@ export async function listScopedEvidenceMeasurementsByEvidenceItemIds({ organiza
             m.measurement_type, m.measured_value::int AS measured_value, m.unit_label, m.calculation_method,
             m.profile_canonical_sha256, m.total_record_count::int AS total_record_count,
             m.blank_record_count::int AS blank_record_count, m.duplicate_record_count::int AS duplicate_record_count,
+            sl.coordinates->>'sheet_key' AS worksheet_key,
+    (SELECT sheet->>'safe_sheet_name'
+               FROM jsonb_array_elements(p.profile->'sheets') AS sheet
+              WHERE sheet->>'sheet_key' = sl.coordinates->>'sheet_key'
+              LIMIT 1) AS worksheet_name,
             d.counted_unit, d.unit_label AS definition_unit_label, d.definition_status,
             d.source_version_id::text AS definition_source_version_id,
             d.period_start::text AS period_start, d.period_end::text AS period_end,
-            CASE WHEN m.calculation_method = 'p1_xlsx_single_worksheet_data_rows_excluding_blank_v1'
-              THEN p.profile->'sheets'->0->'record_count_basis'->'field_missing_counts'
+            CASE WHEN m.calculation_method IN (
+              'p1_xlsx_single_worksheet_data_rows_excluding_blank_v1',
+              'p1_xlsx_selected_worksheet_data_rows_excluding_blank_v1'
+            )
+              THEN (SELECT sheet->'record_count_basis'->'field_missing_counts'
+                      FROM jsonb_array_elements(p.profile->'sheets') AS sheet
+                     WHERE sheet->>'sheet_key' = sl.coordinates->>'sheet_key'
+                     LIMIT 1)
               ELSE (SELECT jsonb_agg(field->'missing_count' ORDER BY ordinality)
                       FROM jsonb_array_elements(p.profile->'fields') WITH ORDINALITY AS fields(field, ordinality))
             END AS profile_field_missing_counts
@@ -1416,6 +1427,12 @@ export async function listScopedEvidenceMeasurementsByEvidenceItemIds({ organiza
        JOIN kai.source_measurement_definitions d
          ON d.source_measurement_definition_id = m.source_measurement_definition_id
         AND d.organization_id = m.organization_id
+      JOIN kai.evidence_items e
+        ON e.organization_id = m.organization_id
+       AND e.evidence_item_id = m.evidence_item_id
+      JOIN kai.source_locators sl
+        ON sl.organization_id = e.organization_id
+       AND sl.source_locator_id = e.source_locator_id
        LEFT JOIN kai.source_versions sv
          ON sv.organization_id = m.organization_id
         AND sv.source_version_id = m.source_version_id

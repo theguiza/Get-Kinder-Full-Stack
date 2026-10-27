@@ -235,18 +235,23 @@ try {
   // Re-applying the migration is a no-op (every DDL statement is idempotent).
   psqlFile("migrations/kai_sprint2_p2_01m_source_record_count_measurement.sql");
   if (psqlExec(legacySnapshotSql) !== legacyBefore) throw new Error("P2-01M migration is not idempotent");
-  // The XLSX worksheet method only widens two CHECKs; it changes no row and
-  // re-applies cleanly. Its read-only verifier fails before it and passes after.
+  // The XLSX worksheet migrations only widen the existing method/locator
+  // checks; they change no row. The combined verifier fails until the selected
+  // worksheet method is admitted, then passes with both XLSX methods intact.
   const xlsxVerifier = () => run(psql, ["-v", "ON_ERROR_STOP=1", "-d", dbName, "-tA", "-F", "|", "-f",
     "scripts/kai-sprint2-p2-01m-xlsx-worksheet-method-verify-read-only.sql"], { capture: true }).stdout.trim().split("\n");
   const overall = (rows) => rows.find((row) => row.startsWith("99|OVERALL|"))?.split("|")[2];
-  if (overall(xlsxVerifier()) !== "FAIL") throw new Error("P2-01M XLSX verifier did not fail before its migration");
+  if (overall(xlsxVerifier()) !== "FAIL") throw new Error("P2-01M selected-worksheet verifier did not fail before its migration");
   psqlFile("migrations/kai_sprint2_p2_01m_xlsx_worksheet_record_count_method.sql");
   psqlFile("migrations/kai_sprint2_p2_01m_xlsx_worksheet_record_count_method.sql");
   if (psqlExec(legacySnapshotSql) !== legacyBefore) throw new Error("P2-01M XLSX worksheet method migration changed an existing evidence or locator row");
+  if (overall(xlsxVerifier()) !== "FAIL") throw new Error("P2-01M selected-worksheet verifier passed before the selected method migration");
+  psqlFile("migrations/kai_sprint2_p2_01m_xlsx_selected_worksheet_record_count_method.sql");
+  psqlFile("migrations/kai_sprint2_p2_01m_xlsx_selected_worksheet_record_count_method.sql");
+  if (psqlExec(legacySnapshotSql) !== legacyBefore) throw new Error("P2-01M selected-worksheet migration changed an existing evidence or locator row");
   const verified = xlsxVerifier();
-  if (overall(verified) !== "PASS") throw new Error(`P2-01M XLSX verifier failed after its migration:\n${verified.join("\n")}`);
-  console.log(`P2-01M XLSX worksheet method: applied twice; existing evidence/locator rows unchanged; read-only verifier FAIL before, PASS after:\n${verified.join("\n")}`);
+  if (overall(verified) !== "PASS") throw new Error(`P2-01M selected-worksheet verifier failed after its migration:\n${verified.join("\n")}`);
+  console.log(`P2-01M selected-worksheet method: applied twice; existing evidence/locator rows unchanged; read-only verifier FAIL before, PASS after:\n${verified.join("\n")}`);
 
   const testResult = spawnSync("node", [
     "--test",
@@ -285,6 +290,13 @@ try {
     xlsxRollbackRefused = /rollback refused: workbook record-count measurements exist/.test(String(error.message));
   }
   if (!xlsxRollbackRefused) throw new Error("P2-01M XLSX worksheet method rollback did not refuse with a workbook measurement present");
+  let selectedRollbackRefused = false;
+  try {
+    psqlFile("migrations/kai_sprint2_p2_01m_xlsx_selected_worksheet_record_count_method.rollback.sql");
+  } catch (error) {
+    selectedRollbackRefused = /selected-worksheet method rollback refused: persisted measurements depend on the method/.test(String(error.message));
+  }
+  if (!selectedRollbackRefused) throw new Error("P2-01M selected-worksheet rollback did not refuse with a selected measurement present");
   if (overall(xlsxVerifier()) !== "PASS") throw new Error("the refused XLSX rollback changed the verified CHECKs");
   let rollbackRefused = false;
   try {
@@ -294,7 +306,7 @@ try {
   }
   if (!rollbackRefused) throw new Error("P2-01M rollback did not refuse with measurement evidence present");
   if (psqlExec("SELECT count(*) FROM kai.evidence_measurements;") !== measurementRows) throw new Error("refused rollback changed measurement rows");
-  console.log("P2-01M and XLSX worksheet method rollbacks refused while measurement evidence exists; nothing changed.");
+  console.log("P2-01M, XLSX worksheet, and selected-worksheet method rollbacks refused while dependent measurements exist; nothing changed.");
   console.log("P2-01M record-count measurement and P2-06 traceability tests passed.");
 } finally {
   if (started) spawnSync(pgCtl, ["-D", dataDir, "stop", "-m", "fast"], { encoding: "utf8", stdio: "ignore" });

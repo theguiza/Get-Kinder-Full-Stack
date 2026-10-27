@@ -139,7 +139,11 @@ export async function evaluateOrdinaryMeasurementAuthorityInTransaction(tx, {
     } else if (claimRow && (
       claimRow.claim_type !== "finding"
       || claimRow.evidence_item_id !== evidenceItemRow.evidence_item_id
-      || claimRow.statement !== composeMeasurementClaimStatement({ measurementRow, definitionRow: measurementRow })
+      || claimRow.statement !== composeMeasurementClaimStatement({
+        measurementRow,
+        definitionRow: measurementRow,
+        locatorCoordinates: locatorRow?.coordinates ?? null,
+      })
     )) {
       reasons.push("claim_not_measurement_restatement");
     }

@@ -2842,6 +2842,7 @@ router.post(
       return service.recordSourceRecordCountMeasurement({
         organizationId: identifiers.organizationId,
         sourceVersionId: identifiers.sourceVersionId,
+        worksheetKey: typeof req.query.worksheet_key === "string" ? req.query.worksheet_key : null,
         definition: requestPayload(req),
         actorContext,
         now,
@@ -2869,6 +2870,7 @@ router.get(
       return service.getSourceRecordCountMeasurementBasis({
         organizationId: identifiers.organizationId,
         sourceVersionId: identifiers.sourceVersionId,
+        worksheetKey: typeof req.query.worksheet_key === "string" ? req.query.worksheet_key : null,
         actorContext,
       });
     });

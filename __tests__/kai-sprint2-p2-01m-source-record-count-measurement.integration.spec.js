@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import http from "node:http";
 import express from "express";
-import { programmeSessionWorkbook, SYNTHETIC_XLSX_MIME } from "./support/kaiSyntheticXlsxWorkbook.js";
+import { programmeSessionWorkbook, syntheticXlsxWorkbook, SYNTHETIC_XLSX_MIME } from "./support/kaiSyntheticXlsxWorkbook.js";
 
 /**
  * KAI P2-01M real-PostgreSQL proof, run only by
@@ -291,9 +291,9 @@ async function runSuite() {
     return;
   }
 
-  const record = (sourceVersionId, { actor = ADMIN, organizationId = ORG, definition = DEFINITION, env = ENV } = {}) =>
+  const record = (sourceVersionId, { actor = ADMIN, organizationId = ORG, definition = DEFINITION, worksheetKey = null, env = ENV } = {}) =>
     recordSourceRecordCountMeasurement(
-      { organizationId, sourceVersionId, definition, actorContext: actor, now: NOW },
+      { organizationId, sourceVersionId, definition, worksheetKey, actorContext: actor, now: NOW },
       { env, sourceMeasurementRepository: measurementRepository },
     );
   const propose = (evidenceItemId, actor = ADMIN) =>
@@ -438,7 +438,7 @@ async function runSuite() {
     assert.deepEqual(await measurementCounts(), before);
   });
 
-  test("prohibited use, a superseded version, a profile without blank counting, a legacy or multi-worksheet workbook profile, and a non-tabular profile are refused", async () => {
+  test("prohibited use, a superseded version, uncommitted counts, missing/invalid worksheet selection, and a non-tabular profile are refused", async () => {
     const before = await measurementCounts();
     const prohibited = await seedPromotedSource({ profile: ids.profile, allowedUse: "not_allowed" });
     const refusedUse = await record(prohibited.sourceVersionId);
@@ -451,9 +451,9 @@ async function runSuite() {
     const refusedLegacy = await record(legacy.sourceVersionId);
     assert.equal(refusedLegacy.blockers[0].blocking_reason, "measurement_blank_record_count_not_committed");
 
-    const sheet = await seedPromotedSource({ profile: { status: "profiled", format: "xlsx", sheets: [], fields: [{ field_key: "field_1" }] } });
+    const sheet = await seedPromotedSource({ profile: { status: "profiled", format: "xlsx", counts: { sheet_count: 0 }, sheets: [], fields: [{ field_key: "field_1" }] } });
     const refusedSheet = await record(sheet.sourceVersionId);
-    assert.equal(refusedSheet.blockers[0].blocking_reason, "measurement_xlsx_not_single_worksheet");
+    assert.equal(refusedSheet.blockers[0].blocking_reason, "measurement_xlsx_worksheet_profile_invalid");
     const workbook = await workbookProfile(programmeSessionWorkbook({ tag: "legacy" }));
     const legacyWorkbook = await seedPromotedSource({
       profile: { ...workbook, sheets: workbook.sheets.map(({ record_count_basis: _omitted, ...rest }) => rest) },
@@ -461,7 +461,9 @@ async function runSuite() {
     const refusedLegacyWorkbook = await record(legacyWorkbook.sourceVersionId);
     assert.equal(refusedLegacyWorkbook.blockers[0].blocking_reason, "measurement_xlsx_record_basis_not_committed");
     const twoSheets = await seedPromotedSource({ profile: await workbookProfile(programmeSessionWorkbook({ tag: "two", extraSheet: true })) });
-    assert.equal((await record(twoSheets.sourceVersionId)).blockers[0].blocking_reason, "measurement_xlsx_not_single_worksheet");
+    assert.equal((await record(twoSheets.sourceVersionId)).blockers[0].blocking_reason, "measurement_xlsx_worksheet_selection_required");
+    assert.equal((await record(twoSheets.sourceVersionId, { worksheetKey: "sheet_99" })).blockers[0].blocking_reason, "measurement_xlsx_worksheet_selection_invalid");
+    assert.deepEqual(await measurementCounts(), before, "omission and invalid selection write no measurement");
     const text = await seedPromotedSource({ profile: { status: "profiled", format: "txt", counts: { row_count: 3 }, fields: [] } });
     assert.equal((await record(text.sourceVersionId)).blockers[0].blocking_reason, "measurement_source_not_single_table");
 
@@ -472,14 +474,80 @@ async function runSuite() {
     assert.deepEqual(await measurementCounts(), before);
   });
 
+  test("selected-worksheet measurement: real parser and persistence use only the selected dataset, then a measured claim cites its sheet key", async () => {
+    const workbookBytes = syntheticXlsxWorkbook({ sheets: [
+      { name: "Roster", rows: [["name", "group"], ["A", "one"], ["B", "two"]] },
+      { name: "Attendance", rows: [["date", "group"], ["2026-09-01", "one"], ["2026-09-02", "two"], ["2026-09-02", "two"]] },
+      { name: "Notes", rows: [["notes"], ["not programme data"]] },
+    ] });
+    const workbook = await workbookProfile(workbookBytes);
+    const independentlyCounted = 3; // three non-empty data rows on Attendance; the header is excluded
+    const promoted = await seedPromotedSource({ profile: workbook });
+    const before = await measurementCounts();
+    const omitted = await getSourceRecordCountMeasurementBasis(
+      { organizationId: ORG, sourceVersionId: promoted.sourceVersionId, actorContext: ADMIN }, { env: ENV, sourceMeasurementRepository: measurementRepository });
+    assert.deepEqual([omitted.data.basis.measurable, omitted.data.basis.blockers[0].blocking_reason], [false, "measurement_xlsx_worksheet_selection_required"]);
+    assert.deepEqual(omitted.data.basis.worksheet_options.map(({ sheet_key, sheet_name }) => [sheet_key, sheet_name]), [
+      ["sheet_1", "Roster"], ["sheet_2", "Attendance"], ["sheet_3", "Notes"],
+    ]);
+    const invalid = await record(promoted.sourceVersionId, { worksheetKey: "sheet_9" });
+    assert.equal(invalid.blockers[0].blocking_reason, "measurement_xlsx_worksheet_selection_invalid");
+    const selected = await getSourceRecordCountMeasurementBasis(
+      { organizationId: ORG, sourceVersionId: promoted.sourceVersionId, worksheetKey: "sheet_2", actorContext: ADMIN },
+      { env: ENV, sourceMeasurementRepository: measurementRepository });
+    assert.deepEqual([selected.data.basis.measurable, selected.data.basis.worksheet.sheet_key, selected.data.basis.worksheet.sheet_name,
+      selected.data.basis.data_record_count, selected.data.basis.blank_record_count, selected.data.basis.duplicate_record_count,
+      selected.data.basis.counted_record_count], [true, "sheet_2", "Attendance", 3, 0, 2, independentlyCounted]);
+    const result = await record(promoted.sourceVersionId, { worksheetKey: "sheet_2" });
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.deepEqual([result.data.measurement.calculation_method, result.data.measurement.measured_value,
+      result.data.measurement.total_record_count, result.data.measurement.blank_record_count, result.data.measurement.duplicate_record_count],
+    ["p1_xlsx_selected_worksheet_data_rows_excluding_blank_v1", independentlyCounted, 3, 0, 2]);
+    assert.deepEqual(result.data.sourceLocator.coordinates, { scope: "data_records_after_header", sheet_key: "sheet_2" });
+    assert.match(result.data.evidenceItem.statement, /from selected worksheet sheet_2/);
+    await assert.rejects(withTx(async (tx) => {
+      const [wholeVersionLocator] = (await tx.query(
+        `INSERT INTO kai.source_locators (organization_id, source_version_id, locator_type, coordinates, locator_fingerprint)
+         VALUES ($1::uuid, $2::uuid, 'source_data_records', '{"scope":"data_records_after_header"}'::jsonb, $3)
+         RETURNING source_locator_id::text`, [ORG, promoted.sourceVersionId, "f".repeat(64)])).rows;
+      await tx.query("UPDATE kai.evidence_items SET source_locator_id = $1::uuid WHERE evidence_item_id = $2::uuid", [wholeVersionLocator.source_locator_id, result.data.evidenceItem.evidence_item_id]);
+      await tx.query("UPDATE kai.evidence_measurements SET calculation_method = $1 WHERE evidence_item_id = $2::uuid",
+        ["p1_xlsx_selected_worksheet_data_rows_excluding_blank_v1", result.data.evidenceItem.evidence_item_id]);
+    }), /selected-worksheet measurement requires its matching worksheet data-record locator/,
+    "the database trigger refuses a selected-worksheet method on a whole-version locator");
+    assert.deepEqual((await measurementCounts()).measurements, before.measurements + 1);
+    const fresh = await getSourceRecordCountMeasurementBasis(
+      { organizationId: ORG, sourceVersionId: promoted.sourceVersionId, worksheetKey: "sheet_2", actorContext: ADMIN },
+      { env: ENV, sourceMeasurementRepository: measurementRepository });
+    assert.deepEqual([fresh.data.recorded.measurement.measured_value, fresh.data.recorded.measurement.calculation_method,
+      fresh.data.basis.worksheet.sheet_key], [independentlyCounted, "p1_xlsx_selected_worksheet_data_rows_excluding_blank_v1", "sheet_2"]);
+    const proposal = await propose(result.data.evidenceItem.evidence_item_id);
+    assert.equal(proposal.ok, true, JSON.stringify(proposal));
+    assert.match(proposal.data.claim.statement, /in selected worksheet sheet_2/);
+    assert.doesNotMatch(JSON.stringify(result.data), /not programme data|2026-09-02/);
+  });
+
+  test("a selected worksheet with formulas is refused before any measurement write", async () => {
+    const profile = await workbookProfile(syntheticXlsxWorkbook({ sheets: [
+      { name: "Data", rows: [["date", "group"], ["2026-09-01", "one"]] },
+      { name: "Formula", rows: [["note"], [{ formula: "1+1", value: "2" }]] },
+    ] }));
+    const promoted = await seedPromotedSource({ profile });
+    const before = await measurementCounts();
+    const refused = await record(promoted.sourceVersionId, { worksheetKey: "sheet_2" });
+    assert.deepEqual([refused.ok, refused.blockers[0].blocking_reason], [false, "measurement_xlsx_formula_cells_present"]);
+    assert.deepEqual(await measurementCounts(), before);
+  });
+
   test("XLSX: a one-worksheet workbook profile is measured on its worksheet locator under the XLSX method, its claim names worksheet rows, and it replays", async () => {
     const workbook = await workbookProfile(programmeSessionWorkbook({ tag: "measured" }));
     const promoted = await seedPromotedSource({ profile: workbook });
     const basis = await getSourceRecordCountMeasurementBasis(
       { organizationId: ORG, sourceVersionId: promoted.sourceVersionId, actorContext: ADMIN }, { env: ENV, sourceMeasurementRepository: measurementRepository });
     assert.deepEqual(basis.data.basis, {
-      measurable: true, calculation_method: "p1_xlsx_single_worksheet_data_rows_excluding_blank_v1", source_format: "xlsx", worksheet: { sheet_key: "sheet_1" },
+      measurable: true, calculation_method: "p1_xlsx_single_worksheet_data_rows_excluding_blank_v1", source_format: "xlsx", worksheet: { sheet_key: "sheet_1", sheet_name: "Sessions" },
       data_record_count: 6, blank_record_count: 1, duplicate_record_count: 2, counted_record_count: 5,
+      worksheet_options: [],
     });
     const result = await record(promoted.sourceVersionId);
     assert.equal(result.ok, true, JSON.stringify(result));
@@ -556,6 +624,7 @@ async function runSuite() {
     assert.deepEqual(counts, {
       measurable: true, calculation_method: "p1_csv_profile_data_records_excluding_blank_v1", source_format: "csv", worksheet: null,
       data_record_count: 6, blank_record_count: 1, duplicate_record_count: 2, counted_record_count: independentRecordCount(CSV),
+      worksheet_options: [],
     });
     assert.equal(recorded.definition.counted_unit, DEFINITION.counted_unit);
     assert.deepEqual([recorded.measurement.measured_value, recorded.measurement.evidence_item_id], [5, ids.measurementEvidenceId]);
@@ -573,7 +642,7 @@ async function runSuite() {
     const sheet = await seedPromotedSource({ profile: { status: "profiled", format: "xlsx", sheets: [], fields: [{ field_key: "field_1" }] } });
     const unmeasurable = await basisOf(sheet.sourceVersionId);
     assert.equal(unmeasurable.data.basis.measurable, false);
-    assert.equal(unmeasurable.data.basis.blockers[0].blocking_reason, "measurement_xlsx_not_single_worksheet");
+    assert.equal(unmeasurable.data.basis.blockers[0].blocking_reason, "measurement_xlsx_worksheet_profile_invalid");
 
     const before = await measurementCounts();
     for (const [label, options, code] of [

@@ -28,7 +28,7 @@ function isNormalizedNow(value) {
 }
 
 function isRecordInput(value) {
-  const allowedKeys = new Set(["organizationId", "sourceVersionId", "definition", "actorContext", "now"]);
+  const allowedKeys = new Set(["organizationId", "sourceVersionId", "definition", "worksheetKey", "actorContext", "now"]);
   return isPlainObject(value)
     && Object.keys(value).every((key) => allowedKeys.has(key))
     && isNonEmptyString(value.organizationId)
@@ -86,6 +86,7 @@ export async function recordSourceRecordCountMeasurement(input, dependencies = {
     organizationId: input.organizationId,
     sourceVersionId: input.sourceVersionId,
     definition: definition.definition,
+    worksheetKey: input.worksheetKey ?? null,
     actorUserId: actorContext.actorUserId,
     now: input.now,
   });
@@ -107,8 +108,9 @@ export async function recordSourceRecordCountMeasurement(input, dependencies = {
  */
 export async function getSourceRecordCountMeasurementBasis(input, dependencies = {}) {
   if (!isKaiSprint2Enabled(dependencies.env || process.env)) return buildKaiError("feature_disabled");
-  const allowedKeys = new Set(["organizationId", "sourceVersionId", "actorContext"]);
-  if (!isPlainObject(input) || Object.keys(input).length !== allowedKeys.size || !Object.keys(input).every((key) => allowedKeys.has(key))
+  const allowedKeys = new Set(["organizationId", "sourceVersionId", "worksheetKey", "actorContext"]);
+  if (!isPlainObject(input) || !Object.keys(input).every((key) => allowedKeys.has(key))
+    || !["organizationId", "sourceVersionId", "actorContext"].every((key) => Object.hasOwn(input, key))
     || !isNonEmptyString(input.organizationId) || !isNonEmptyString(input.sourceVersionId) || !isPlainObject(input.actorContext)) {
     return buildKaiError("validation_blocker");
   }
@@ -118,6 +120,7 @@ export async function getSourceRecordCountMeasurementBasis(input, dependencies =
   const result = await repository.readSourceRecordCountMeasurementBasis({
     organizationId: input.organizationId,
     sourceVersionId: input.sourceVersionId,
+    worksheetKey: input.worksheetKey ?? null,
   });
   if (!result.ok) {
     return buildKaiError(result.error.code, {
