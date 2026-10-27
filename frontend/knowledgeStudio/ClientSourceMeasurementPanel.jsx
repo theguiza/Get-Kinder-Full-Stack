@@ -58,7 +58,7 @@ export default function ClientSourceMeasurementPanel({ organizationId, sourceVer
       load();
       return;
     }
-    setNotice({ kind: "success", text: result.body.data.replayed ? "This definition was already recorded." : "Definition and measurement recorded. The measurement awaits evidence review." });
+    setNotice({ kind: "success", text: result.body.data.replayed ? "This definition was already recorded." : "Definition and measurement recorded." });
     onRecorded?.();
     load();
   };
@@ -120,7 +120,7 @@ export default function ClientSourceMeasurementPanel({ organizationId, sourceVer
           </div>
           {recorded.measurement ? (
             <div className="mt-1" data-client-source-measurement-value={recorded.measurement.measuredValue}>
-              Measurement: <strong>{recorded.measurement.measuredValue} {recorded.measurement.unitLabel}</strong> (awaits evidence review).
+              Measurement: <strong>{recorded.measurement.measuredValue} {recorded.measurement.unitLabel}</strong>.
             </div>
           ) : null}
           {recorded.limitations.length > 0 ? (
@@ -131,7 +131,7 @@ export default function ClientSourceMeasurementPanel({ organizationId, sourceVer
           {recorded.claim ? (
             <div className="mt-1" data-client-source-measurement-claim={recorded.claim.claimId}>
               Claim: {recorded.claim.statement} <span className="text-muted">(status: {recorded.claim.claimStatus}; review: {recorded.claim.claimReviewStatus})</span>
-              <div className="text-muted">Next: Get Kinder reviews the evidence and the claim before it can be used beyond internal drafts.</div>
+              <div className="text-muted">Check current internal-use eligibility under Claims for internal drafts. Review requirements depend on the source and claim.</div>
             </div>
           ) : null}
           {!recorded.claim && recorded.measurement && canProposeClaim ? (

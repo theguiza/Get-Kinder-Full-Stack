@@ -127,6 +127,14 @@ test("readiness needs a substantive finding: none yet sends the customer to Coun
   assert.deepEqual(internalDraftReadiness({ ...base, selectedClaimIds: [FIELD_2.claimId] }), { ready: true, reason: null });
 });
 
+test("the measurement panel reports persistence without implying every measurement awaits Get Kinder review", () => {
+  const panel = readFileSync(new URL("../frontend/knowledgeStudio/ClientSourceMeasurementPanel.jsx", import.meta.url), "utf8");
+  assert.match(panel, /Definition and measurement recorded\./);
+  assert.doesNotMatch(panel, /awaits evidence review/);
+  assert.match(panel, /Check current internal-use eligibility under Claims for internal drafts/);
+  assert.doesNotMatch(panel, /before it can be used beyond internal drafts/);
+});
+
 test("measured findings are listed first, then other claims, then structural facts, each group in the server's order", () => {
   const ordered = orderClaimsForReports([FIELD_2, UNKNOWN, claim(4, "dictionary_field_presence_fact"), MEASURED, claim(5, "source_record_count_measurement")]);
   assert.deepEqual(ordered.map((item) => item.claimId), [MEASURED.claimId, id(5), UNKNOWN.claimId, FIELD_2.claimId, id(4)]);
