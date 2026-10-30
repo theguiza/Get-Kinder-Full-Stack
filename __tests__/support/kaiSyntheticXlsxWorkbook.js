@@ -162,11 +162,12 @@ export function syntheticXlsxWorkbook({ sheets, inline = false }) {
  * workbook: one header row, six data rows after it - one genuinely blank
  * (a formatted but empty row) - so five countable records, two of which are
  * exact duplicates. `tag` is an extra value making each workbook's bytes
- * distinct; it never reaches a profile.
+ * distinct; it never reaches a profile. programmeSessionRows is that
+ * worksheet's row list, for workbooks that place it among other worksheets.
  */
-export function programmeSessionWorkbook({ tag = "w1", styledBlank = true, extraSheet = false } = {}) {
+export function programmeSessionRows({ tag = "w1", styledBlank = true } = {}) {
   const header = ["session_date", "programme", "facilitator_code", "run_tag"];
-  const rows = [
+  return [
     header,
     ["2026-09-02", "literacy", "F1", tag],
     ["2026-09-09", "literacy", "F1", tag],
@@ -175,6 +176,10 @@ export function programmeSessionWorkbook({ tag = "w1", styledBlank = true, extra
     ["2026-09-16", "mentoring", "F2", tag],
     ["2026-09-23", "literacy", 0, tag],
   ];
+}
+
+export function programmeSessionWorkbook({ tag = "w1", styledBlank = true, extraSheet = false } = {}) {
+  const rows = programmeSessionRows({ tag, styledBlank });
   const sheets = [{ name: "Sessions", rows }];
   if (extraSheet) sheets.push({ name: "Notes", rows: [["note"], ["second table"]] });
   return syntheticXlsxWorkbook({ sheets });

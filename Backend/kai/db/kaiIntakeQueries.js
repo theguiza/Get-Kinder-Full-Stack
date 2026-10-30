@@ -1,5 +1,6 @@
 import pool from "./kaiDb.js";
 import { __parserRunRepositoryContract } from "../parsing/postgresParserRunRepository.js";
+import { MEASUREMENT_XLSX_RECORD_COUNT_BASIS_VERSION } from "../validators/kaiSourceMeasurementValidators.js";
 
 export async function findIntakeBatchByIdempotencyKey({ organizationId, idempotencyKey }, db = pool) {
   if (!organizationId || !idempotencyKey) return null;
@@ -1325,6 +1326,32 @@ export async function listScopedSourcesForOrganization({ organizationId }, db = 
 }
 
 /**
+ * Whether an XLSX profile commits a worksheet record-count basis, as the
+ * P2-01M validator reads one: a complete worksheet list (`sheets` matching
+ * `counts.sheet_count`) with at least one worksheet whose stable key carries
+ * a `record_count_basis` object of the current basis version. The P1 profiler
+ * writes the basis on each entry of `profile.sheets`, never at the top level.
+ * Presence only: each selected worksheet's own blockers (header, formulas,
+ * merged cells, ...) are still decided by the validator when it is counted.
+ * CASE keeps every jsonb function off values of the wrong JSON type.
+ */
+export function xlsxWorksheetRecordCountBasisPresentSql(profile) {
+  return `(CASE WHEN ${profile}->>'format' = 'xlsx'
+                 AND jsonb_typeof(${profile}->'sheets') = 'array'
+                 AND jsonb_typeof(${profile}->'counts'->'sheet_count') = 'number'
+            THEN jsonb_array_length(${profile}->'sheets') > 0
+             AND (${profile}->'counts'->'sheet_count') = to_jsonb(jsonb_array_length(${profile}->'sheets'))
+             AND EXISTS (
+               SELECT 1 FROM jsonb_array_elements(${profile}->'sheets') AS sheet
+                WHERE jsonb_typeof(sheet) = 'object'
+                  AND jsonb_typeof(sheet->'sheet_key') = 'string'
+                  AND sheet->>'sheet_key' ~ '^sheet_[1-9][0-9]{0,3}$'
+                  AND jsonb_typeof(sheet->'record_count_basis') = 'object'
+                  AND sheet->'record_count_basis'->'basis_version' = to_jsonb('${MEASUREMENT_XLSX_RECORD_COUNT_BASIS_VERSION}'::text))
+            ELSE false END)`;
+}
+
+/**
  * KAI Data Sources completion package companion read: every `kai.source_versions`
  * row (current and historical - `is_current` is already a governed,
  * server-authoritative field this read discloses rather than hides) for the
@@ -1340,7 +1367,7 @@ export async function listScopedSourceVersionsForSourceIds({ organizationId, sou
     `SELECT sv.source_version_id, sv.source_id, sv.is_current, sv.created_at,
             f.engagement_id, f.safe_filename,
             p.profile->>'format' AS profile_format,
-            (p.profile ? 'record_count_basis') AS has_xlsx_record_count_basis
+            ${xlsxWorksheetRecordCountBasisPresentSql("p.profile")} AS has_xlsx_record_count_basis
        FROM kai.source_versions sv
        JOIN kai.intake_source_candidates c
          ON c.organization_id = sv.organization_id

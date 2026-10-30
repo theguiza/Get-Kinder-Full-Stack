@@ -313,8 +313,10 @@ test("an XLSX profile commits a worksheet record-count basis without values; a l
   }], worksheetOptions: [] });
   assert.match(`${projected.counts.blockers[0].message} ${projected.counts.blockers[0].requiredFix}`,
     /profiled before worksheet records were counted[\s\S]*Upload again as a new intake version/);
-  assert.match(INTERNAL_DRAFT_READINESS_MESSAGES.no_measured_claim, /a single-table CSV file or an Excel workbook with one worksheet/);
-  assert.match(STRUCTURAL_ONLY_DRAFT_MESSAGE, /a single-table CSV file or an Excel workbook with one worksheet/);
+  assert.match(INTERNAL_DRAFT_READINESS_MESSAGES.no_measured_claim, /a single-table CSV file, or on one worksheet you select in an Excel workbook \(one worksheet per record-count definition; worksheets are never added together\)/);
+  assert.match(INTERNAL_DRAFT_READINESS_MESSAGES.no_measured_claim, /not a count of unique participants or a programme outcome/);
+  assert.match(STRUCTURAL_ONLY_DRAFT_MESSAGE, /a single-table CSV file or on one worksheet you select in an Excel workbook, never adding worksheets together/);
+  assert.doesNotMatch(`${INTERNAL_DRAFT_READINESS_MESSAGES.no_measured_claim} ${STRUCTURAL_ONLY_DRAFT_MESSAGE}`, /workbook with one worksheet/);
   const measurable = projectMeasurementBasis({
     sourceVersion: { source_version_id: "11111111-1111-4111-8111-111111111111", is_current: true },
     basis: { measurable: true, source_format: "xlsx", worksheet: { sheet_key: "sheet_1" }, data_record_count: 6, blank_record_count: 1, duplicate_record_count: 2, counted_record_count: 5 },

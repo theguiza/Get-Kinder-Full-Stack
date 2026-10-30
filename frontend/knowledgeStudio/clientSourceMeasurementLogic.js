@@ -107,6 +107,13 @@ export function projectMeasurementBasis(dto) {
   };
 }
 
+// A workbook with several worksheets and none chosen yet: the server's only
+// blocker asks for a worksheet, which is the next step, not a refusal.
+export function isWorksheetSelectionRequired(counts) {
+  return counts?.measurable === false && counts.worksheetOptions.length > 1 && counts.blockers.length > 0
+    && counts.blockers.every((blocker) => blocker.blockingReason === "measurement_xlsx_worksheet_selection_required");
+}
+
 export const EMPTY_MEASUREMENT_FORM = Object.freeze({
   countedUnit: "",
   unitLabel: "",

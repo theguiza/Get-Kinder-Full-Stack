@@ -6,7 +6,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 
-import { programmeSessionWorkbook, SYNTHETIC_XLSX_MIME } from "./support/kaiSyntheticXlsxWorkbook.js";
+import { programmeSessionRows, programmeSessionWorkbook, syntheticXlsxWorkbook, SYNTHETIC_XLSX_MIME } from "./support/kaiSyntheticXlsxWorkbook.js";
 
 /**
  * The customer's Excel workbook journey to internal reports, in a real
@@ -307,8 +307,11 @@ async function runXlsxAcceptance() {
     clientReleasedReportMarkdownPath,
     generatedContentReviewCompletePath,
     generatedContentReviewStartPath,
+    organizationSourcesPath,
     sourceCandidateDecisionPath,
   } = await import("../frontend/impactEvidenceLibraryLogic.js");
+  const { listScopedSourceVersionsForSourceIds, xlsxWorksheetRecordCountBasisPresentSql } = await import("../Backend/kai/db/kaiIntakeQueries.js");
+  const { deriveRecordCountMeasurement } = await import("../Backend/kai/validators/kaiSourceMeasurementValidators.js");
   const { batchFilesPath, confirmUploadPath, createBatchPath, fileReservationsPath, requestUploadUrlPath } = await import("../frontend/kaiWebIntakeLogic.js");
   const { sourceRecordCountMeasurementPath } = await import("../frontend/knowledgeStudio/clientSourceMeasurementLogic.js");
   const { organizationFactualReviewPath } = await import("../frontend/knowledgeStudio/clientMeasuredClaimReviewLogic.js");
@@ -365,6 +368,17 @@ async function runXlsxAcceptance() {
   const LEGACY = customerFile("programme-sessions-legacy.xlsx", programmeSessionWorkbook({ tag: "legacy" }));
   const STORY = customerFile("programme-sessions-stories.xlsx", programmeSessionWorkbook({ tag: "story" }));
   const TWO_SHEETS = customerFile("programme-sessions-two-sheets.xlsx", programmeSessionWorkbook({ tag: "two", extraSheet: true }));
+  // Five worksheets, as a customer's register workbook is laid out: notes, a
+  // four-row register, the programme-session log as its third worksheet, a
+  // worksheet with a formula and one with a merged range.
+  const FIVE_SHEETS = customerFile("programme-register-five-sheets.xlsx", syntheticXlsxWorkbook({ sheets: [
+    { name: "Read_Me", rows: [["note"], ["synthetic acceptance workbook"]] },
+    { name: "Participant_Register", rows: [["participant_code", "enrolled_on", "cohort"], ["P01", "2026-09-01", "A"], ["P02", "2026-09-01", "A"],
+      ["P03", "2026-09-08", "B"], ["P04", "2026-09-08", "B"]] },
+    { name: "Service_Events", rows: programmeSessionRows({ tag: "five" }) },
+    { name: "Lookups", rows: [["code", "label"], ["L1", { formula: "UPPER(\"x\")", value: "X" }]] },
+    { name: "Summary", rows: [["metric", "value"], ["rows", 3]], merged: ["A2:B2"] },
+  ] }));
   // Independent count of the workbook's rows, sharing no code with KAI: the
   // fixture's own row list (header, 6 data rows, row 4 blank, rows 5 and 6 identical).
   const independent = { dataRecords: 6, blankRecords: 1, duplicateRecords: 2, counted: 5 };
@@ -614,7 +628,8 @@ async function runXlsxAcceptance() {
     await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `[data-client-open-source-measurement="${sourceVersionId}"]`)), `Count records for ${sourceVersionId}`);
     await adminPage.clickIn(`[data-client-open-source-measurement="${sourceVersionId}"]`, "Count records");
     await adminPage.waitFor(async () => Boolean(await textOf(adminPage, "[data-client-source-measurement-counts]"))
-      || Boolean(await textOf(adminPage, "[data-client-source-measurement-unmeasurable]")), "the measurement basis");
+      || Boolean(await textOf(adminPage, "[data-client-source-measurement-unmeasurable]"))
+      || Boolean(await textOf(adminPage, "[data-client-source-measurement-selection-required]")), "the measurement basis");
     await adminPage.idle();
   };
   const recordCountInUi = async (sourceVersionId, worksheetKey = null) => {
@@ -653,7 +668,7 @@ async function runXlsxAcceptance() {
       freshRead.body.data.recorded.definition.period_start,
       freshRead.body.data.recorded.definition.period_end,
     ], [independent.counted, worksheetKey ? SELECTED_XLSX_METHOD : XLSX_METHOD, independent.dataRecords, independent.blankRecords, independent.duplicateRecords,
-      "sheet_1", DEFINITION.counted_unit, DEFINITION.period_start, DEFINITION.period_end], "a fresh authorized service read returns the saved measurement and definition");
+      worksheetKey ?? "sheet_1", DEFINITION.counted_unit, DEFINITION.period_start, DEFINITION.period_end], "a fresh authorized service read returns the saved measurement and definition");
     await adminPage.clickIn(`[data-client-source-measurement-propose-claim="${measurement.evidence_item_id}"]`, "Propose a claim");
     await adminPage.waitForText(`Claim: The promoted source records ${independent.counted} programme sessions`);
     const [claim] = await query("SELECT claim_id::text, statement FROM kai.claims WHERE organization_id = $1::uuid AND evidence_item_id = $2::uuid",
@@ -677,7 +692,7 @@ async function runXlsxAcceptance() {
     }
   };
   // A complete internal report of the workbook count, with no unsupported conclusion.
-  const assertWorkbookReport = (shown, heading, { claimId, evidenceItemId, sourceVersionId, selected = false }) => {
+  const assertWorkbookReport = (shown, heading, { claimId, evidenceItemId, sourceVersionId, selected = false, worksheet = ["Sessions", "sheet_1"] }) => {
     assert.ok(shown.startsWith(`${heading}\n`), shown.slice(0, 80));
     assert.equal(Number((/records \*\*(\d+) programme sessions\*\*/.exec(shown) || [])[1]), independent.counted);
     assert.match(shown, /for the reporting period 2026-09-01 to 2026-09-30/);
@@ -687,8 +702,8 @@ async function runXlsxAcceptance() {
       : "every data row after the header row of the only worksheet of the exact promoted source version is one record";
     assert.ok(shown.includes(`\`${method}\`: ${methodDescription}`));
     if (selected) {
-      assert.match(shown, /Selected worksheet:\*\* Sessions \(`sheet_1`\)/);
-      assert.match(shown, /Worksheet citation: Sessions \(`sheet_1`\)/);
+      assert.ok(shown.includes(`Selected worksheet:** ${worksheet[0]} (\`${worksheet[1]}\`)`), "the selected worksheet");
+      assert.ok(shown.includes(`Worksheet citation: ${worksheet[0]} (\`${worksheet[1]}\`)`), "the worksheet citation");
     }
     assert.match(shown, /6 data records after the header, minus 1 blank record excluded = \*\*5\*\* counted/);
     assert.match(shown, /2 exact-duplicate records\. They are included in the count of 5, not removed or merged/);
@@ -1120,6 +1135,194 @@ async function runXlsxAcceptance() {
       }
       results.e = { selectedWorksheet: "sheet_1", method: SELECTED_XLSX_METHOD, count: 5, reports: ["evidence_summary", "impact_narrative"], noRepeatedApprovals: true,
         omission: "measurement_xlsx_worksheet_selection_required", invalid: "measurement_xlsx_worksheet_selection_invalid", roles: 403, otherProject: 404, replay: "replayed", conflict: 409, unsupportedAssertion: 422 };
+    });
+
+    // -----------------------------------------------------------------------
+    // F: a five-worksheet workbook with worksheet record-count bases, from
+    // the real P1 profile through the Data Sources readiness read and the
+    // built UI to a recorded selected-worksheet count, a fresh reload and an
+    // internal report.
+    // -----------------------------------------------------------------------
+    await test("F: a five-worksheet workbook's worksheet bases read as recorded from profile, readiness SQL, Data Sources API and the built UI; one selected worksheet is counted, recorded, reloaded and reported", async () => {
+      const fileId = await apiUpload(adminApi, FIVE_SHEETS, ids.batchId);
+      await dispatcher.whenIdle();
+      const promoted = await decideAndPromote(adminApi, fileId);
+      const sv = promoted.source_version_id;
+      const { profile } = await profileRowOf((await sensitivityOf(fileId)).file_profile_id);
+      ids.fiveSheetProfile = profile;
+      const [sqlRow] = (await listScopedSourceVersionsForSourceIds({ organizationId: ORG_X, sourceIds: [promoted.source_id] }))
+        .filter((row) => row.source_version_id === sv);
+      const sourcesRead = await adminApi("GET", organizationSourcesPath(ORG_X));
+      assert.equal(sourcesRead.status, 200, J(sourcesRead.body));
+      const apiVersion = sourcesRead.body.data.sources.flatMap((source) => source.source_versions).find((version) => version.source_version_id === sv);
+      const unselected = await adminApi("GET", sourceRecordCountMeasurementPath(ORG_X, sv));
+      const selected = await adminApi("GET", sourceRecordCountMeasurementPath(ORG_X, sv, "sheet_3"));
+      const row = `[data-client-source-version="${sv}"]`;
+      await openStudioTab("Data Sources");
+      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, row)), "the five-worksheet source version row");
+      const rowText = await textOf(adminPage, row);
+      const rowReadiness = await adminPage.evaluate(`document.querySelector(${J(`${row} [data-client-xlsx-measurement-readiness]`)})?.getAttribute("data-client-xlsx-measurement-readiness") ?? null`);
+      const reuploadOffered = Boolean(await textOf(adminPage, `[data-client-continue-xlsx="${sv}"]`));
+      await openCountRecords(sv);
+      const panelText = await textOf(adminPage, `[data-client-source-measurement="${sv}"]`);
+      const observed = {
+        profileSheetBases: profile.sheets.map((sheet) => [sheet.sheet_key, sheet.safe_sheet_name, sheet.record_count_basis?.basis_version ?? null]),
+        profileTopLevelBasis: Object.hasOwn(profile, "record_count_basis"),
+        readinessSql: sqlRow?.has_xlsx_record_count_basis,
+        dataSourcesApi: apiVersion?.has_xlsx_record_count_basis,
+        unselectedGet: [unselected.status, unselected.body.data?.basis.measurable, unselected.body.data?.basis.blockers?.map((blocker) => blocker.blocking_reason)],
+        selectedGet: [selected.status, selected.body.data?.basis.measurable, selected.body.data?.basis.worksheet?.sheet_key, selected.body.data?.basis.worksheet?.sheet_name,
+          selected.body.data?.basis.calculation_method, selected.body.data?.basis.data_record_count, selected.body.data?.basis.blank_record_count,
+          selected.body.data?.basis.duplicate_record_count, selected.body.data?.basis.counted_record_count],
+        uiRowReadiness: rowReadiness,
+        uiRowSaysBasisMissing: /XLSX measurement basis missing/.test(rowText),
+        uiOffersReupload: reuploadOffered,
+        uiPanelSaysCannotBeCounted: /cannot be counted this way/.test(panelText),
+        uiPanelSelectionRequired: Boolean(await textOf(adminPage, "[data-client-source-measurement-selection-required]")),
+      };
+      console.log(`[kai-customer-xlsx-file-to-report] F observed ${J(observed)}`);
+      const basisVersion = "kai_xlsx_worksheet_record_basis_v1";
+      assert.deepEqual(observed, {
+        profileSheetBases: [["sheet_1", "Read_Me", basisVersion], ["sheet_2", "Participant_Register", basisVersion], ["sheet_3", "Service_Events", basisVersion],
+          ["sheet_4", "Lookups", basisVersion], ["sheet_5", "Summary", basisVersion]],
+        profileTopLevelBasis: false,
+        readinessSql: true,
+        dataSourcesApi: true,
+        unselectedGet: [200, false, ["measurement_xlsx_worksheet_selection_required"]],
+        selectedGet: [200, true, "sheet_3", "Service_Events", SELECTED_XLSX_METHOD, independent.dataRecords, independent.blankRecords, independent.duplicateRecords, independent.counted],
+        uiRowReadiness: "basis_recorded",
+        uiRowSaysBasisMissing: false,
+        uiOffersReupload: false,
+        uiPanelSaysCannotBeCounted: false,
+        uiPanelSelectionRequired: true,
+      }, "every boundary agrees that the worksheet bases are recorded and a worksheet must be chosen");
+
+      // The selector lists every worksheet with its own counts; a worksheet
+      // with its own blocker names that blocker, not a missing basis.
+      const selectorOptions = await adminPage.evaluate(`Array.from(document.querySelectorAll('[data-client-source-measurement-worksheet-select] option')).map((option) => [option.value, option.textContent])`);
+      assert.deepEqual(selectorOptions, [["", "Choose one worksheet"], ["sheet_1", "Read_Me"], ["sheet_2", "Participant_Register"], ["sheet_3", "Service_Events"],
+        ["sheet_4", "Lookups"], ["sheet_5", "Summary"]]);
+      assert.match(await textOf(adminPage, '[data-client-source-measurement-worksheet-option="sheet_2"]'), /Participant_Register: data rows 4, blank rows 0, exact duplicates 0/);
+      assert.match(await textOf(adminPage, '[data-client-source-measurement-worksheet-option="sheet_3"]'), /Service_Events: data rows 6, blank rows 1, exact duplicates 2/);
+      const selectWorksheet = (key) => adminPage.evaluate(`(() => { const node = document.querySelector('[data-client-source-measurement-worksheet-select]'); node.value = ${J(key)}; node.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+      for (const [key, reason] of [["sheet_4", "measurement_xlsx_formula_cells_present"], ["sheet_5", "measurement_xlsx_merged_cells_present"]]) {
+        await selectWorksheet(key);
+        await adminPage.waitFor(async () => (await adminPage.evaluate(`document.querySelector('[data-client-source-measurement-blocker]')?.getAttribute('data-blocking-reason') ?? null`)) === reason, `${key} blocker`);
+        const shown = await textOf(adminPage, "[data-client-source-measurement-unmeasurable]");
+        assert.match(shown, /The selected worksheet cannot be counted this way/);
+        assert.doesNotMatch(shown, /profiled before worksheet records were counted|Upload again as a new intake version/, "a worksheet blocker is not a missing basis");
+      }
+      const mark = adminPage.mark();
+      await selectWorksheet("sheet_3");
+      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, "[data-client-source-measurement-counts]")), "Service_Events counts");
+      await adminPage.idle();
+      assert.deepEqual(adminPage.requestsSince(mark).map((request) => {
+        const url = new URL(request.url);
+        return [request.method, url.pathname + url.search, request.status];
+      }), [["GET", sourceRecordCountMeasurementPath(ORG_X, sv, "sheet_3"), 200]], "the selection reads the existing P2-01M route with the worksheet key");
+      assert.match(await textOf(adminPage, "[data-client-source-measurement-worksheet]"), /Excel workbook worksheet Service_Events/);
+      assert.equal(await textOf(adminPage, "[data-client-source-measurement-counted]"), String(independent.counted), "two exact duplicates included, the blank row excluded");
+
+      // The organization administrator records the definition through the
+      // existing write; a fresh service read returns it.
+      const recorded = await recordCountInUi(sv, "sheet_3");
+      const [measurementRow] = await query(
+        `SELECT m.organization_id::text, m.source_version_id::text, m.measured_value::int, m.total_record_count::int, m.blank_record_count::int,
+                m.duplicate_record_count::int, m.calculation_method, l.coordinates, d.counted_unit, d.unit_label, d.period_start::text, d.period_end::text
+           FROM kai.evidence_measurements m JOIN kai.evidence_items e ON e.evidence_item_id = m.evidence_item_id
+           JOIN kai.source_locators l ON l.source_locator_id = e.source_locator_id
+           JOIN kai.source_measurement_definitions d ON d.source_measurement_definition_id = m.source_measurement_definition_id
+          WHERE m.source_version_id = $1::uuid`, [sv]);
+      assert.deepEqual(measurementRow, {
+        organization_id: ORG_X, source_version_id: sv, measured_value: independent.counted, total_record_count: independent.dataRecords,
+        blank_record_count: independent.blankRecords, duplicate_record_count: independent.duplicateRecords, calculation_method: SELECTED_XLSX_METHOD,
+        coordinates: { scope: "data_records_after_header", sheet_key: "sheet_3" }, counted_unit: DEFINITION.counted_unit, unit_label: DEFINITION.unit_label,
+        period_start: DEFINITION.period_start, period_end: DEFINITION.period_end,
+      });
+      assert.match(recorded.measurement.statement, /from selected worksheet sheet_3, counting each selected worksheet data row/);
+      assert.match(recorded.claim.statement, /in selected worksheet sheet_3/);
+      assert.doesNotMatch(recorded.claim.statement, /participant|people|unique|outcome/i, "worksheet rows are not people or outcomes");
+
+      // A fresh application load shows the same recorded measurement.
+      await openCountRecords(sv);
+      assert.equal(await adminPage.evaluate(`document.querySelector('[data-client-source-measurement-value]')?.getAttribute('data-client-source-measurement-value') ?? null`),
+        String(independent.counted), "the recorded measurement after reload");
+      assert.ok(await textOf(adminPage, "[data-client-source-measurement-selection-required]"), "the reloaded panel asks for a worksheet");
+      assert.doesNotMatch(await textOf(adminPage, `[data-client-source-measurement="${sv}"]`), /cannot be counted this way/);
+      assert.equal(await textOf(adminPage, "[data-client-source-measurement-form]"), null, "the recorded definition is immutable; no second form");
+      const reread = await adminApi("GET", sourceRecordCountMeasurementPath(ORG_X, sv, "sheet_3"));
+      assert.deepEqual([reread.status, reread.body.data.basis.worksheet.sheet_key, reread.body.data.recorded.measurement.measured_value,
+        reread.body.data.recorded.measurement.calculation_method, reread.body.data.recorded.definition.counted_unit],
+      [200, "sheet_3", independent.counted, SELECTED_XLSX_METHOD, DEFINITION.counted_unit]);
+
+      // Refusals: selection, immutability, roles, tenants; nothing written.
+      const measurementCount = async () => (await query("SELECT count(*)::int AS n FROM kai.evidence_measurements WHERE source_version_id = $1::uuid", [sv]))[0].n;
+      const invalid = await adminApi("GET", sourceRecordCountMeasurementPath(ORG_X, sv, "sheet_99"));
+      assert.deepEqual([invalid.status, invalid.body.data.basis.blockers[0].blocking_reason], [200, "measurement_xlsx_worksheet_selection_invalid"]);
+      const omitted = await adminApi("POST", sourceRecordCountMeasurementPath(ORG_X, sv), DEFINITION);
+      assert.deepEqual([omitted.status, omitted.body.blockers?.[0]?.blocking_reason], [422, "measurement_xlsx_worksheet_selection_required"]);
+      const replay = await adminApi("POST", sourceRecordCountMeasurementPath(ORG_X, sv, "sheet_3"), DEFINITION);
+      assert.deepEqual([replay.status, replay.body.data.replayed], [200, true]);
+      const conflict = await adminApi("POST", sourceRecordCountMeasurementPath(ORG_X, sv, "sheet_3"), { ...DEFINITION, counted_unit: "attendance record" });
+      assert.deepEqual([conflict.status, conflict.body.blockers?.[0]?.blocking_reason], [409, "measurement_definition_already_recorded"]);
+      const otherSheet = await adminApi("POST", sourceRecordCountMeasurementPath(ORG_X, sv, "sheet_2"), DEFINITION);
+      assert.ok(![200, 201].includes(otherSheet.status), `a second worksheet is not recorded under the same definition: ${J(otherSheet.body)}`);
+      const basisPath = sourceRecordCountMeasurementPath(ORG_X, sv, "sheet_3");
+      for (const [label, api] of [["client_contributor", contributorApi], ["client_reviewer", reviewerApi], ["another organization's administrator", adminYApi]]) {
+        assert.equal((await api("GET", basisPath)).status, 403, label);
+        assert.equal((await api("POST", basisPath, DEFINITION)).status, 403, label);
+      }
+      assert.equal(await measurementCount(), 1, "one measurement; worksheets are never combined or added");
+
+      // Downstream: the ordinary measured claim is internally eligible, and
+      // an internal Evidence Summary cites the selected worksheet.
+      const claimId = recorded.claim.claim_id;
+      const internal = await internalEligibility(claimId);
+      assert.deepEqual([internal.eligible, internal.blockerCodes], [true, []], J(internal.blockerCodes));
+      const generated = await generate(adminApi, "evidence-summary", [claimId], "f-evidence-summary");
+      assert.ok([200, 201].includes(generated.status), J(generated.body));
+      const [draft] = await query("SELECT generated_content_draft_id::text FROM kai.generated_content_drafts WHERE organization_id = $1::uuid AND content_type = 'evidence_summary' ORDER BY created_at DESC LIMIT 1", [ORG_X]);
+      const report = await fetchText(adminPage, clientInternalReportMarkdownPath(ORG_X, PROJECT_X, draft.generated_content_draft_id));
+      assert.equal(report.status, 200);
+      assertWorkbookReport(report.body, "# Internal Evidence Summary", { claimId, evidenceItemId: recorded.measurement.evidence_item_id, sourceVersionId: sv,
+        selected: true, worksheet: ["Service_Events", "sheet_3"] });
+      results.f = { observed, measurement: measurementRow, reloaded: true, otherWorksheetAttempt: otherSheet.status, conflict: 409, roles: 403,
+        internalEligible: internal.eligible, evidenceSummary: draft.generated_content_draft_id };
+    });
+
+    await test("G: the readiness predicate, evaluated by PostgreSQL, admits only a committed worksheet basis - not a legacy, malformed, incomplete or CSV profile - and agrees with the P2-01M validator", async () => {
+      const real = ids.fiveSheetProfile;
+      assert.ok(real, "F committed the real five-worksheet profile");
+      const withSheets = (map) => ({ ...real, sheets: real.sheets.map(map) });
+      const withoutBasis = ({ record_count_basis: _omitted, ...sheet }) => sheet;
+      const cases = [
+        ["real five-worksheet profile", real, true],
+        ["legacy: no worksheet basis", withSheets(withoutBasis), false],
+        ["only the third worksheet has a basis", withSheets((sheet) => (sheet.sheet_key === "sheet_3" ? sheet : withoutBasis(sheet))), true],
+        ["basis only at the top level", { ...withSheets(withoutBasis), record_count_basis: real.sheets[2].record_count_basis }, false],
+        ["unknown basis version", withSheets((sheet) => ({ ...sheet, record_count_basis: { ...sheet.record_count_basis, basis_version: "kai_xlsx_worksheet_record_basis_v2" } })), false],
+        ["basis is not an object", withSheets((sheet) => ({ ...sheet, record_count_basis: "kai_xlsx_worksheet_record_basis_v1" })), false],
+        ["worksheet keyed by name", withSheets((sheet) => ({ ...sheet, sheet_key: sheet.safe_sheet_name })), false],
+        ["worksheet list incomplete", { ...real, counts: { ...real.counts, sheet_count: real.sheets.length + 1 } }, false],
+        ["worksheet count is text", { ...real, counts: { ...real.counts, sheet_count: String(real.sheets.length) } }, false],
+        ["worksheets not a list", { ...real, sheets: Object.fromEntries(real.sheets.map((sheet) => [sheet.sheet_key, sheet])) }, false],
+        ["no worksheets", { ...real, sheets: [], counts: { ...real.counts, sheet_count: 0 } }, false],
+        ["CSV profile", { ...real, format: "csv" }, false],
+      ];
+      const basisAbsentReasons = new Set(["measurement_xlsx_record_basis_not_committed", "measurement_xlsx_worksheet_profile_invalid",
+        "measurement_xlsx_worksheet_selection_required", "measurement_xlsx_worksheet_selection_invalid", "measurement_source_not_single_table"]);
+      const observed = [];
+      for (const [label, profile, expected] of cases) {
+        const [{ present }] = await query(`SELECT ${xlsxWorksheetRecordCountBasisPresentSql("p.profile")} AS present FROM (VALUES ($1::jsonb)) AS p(profile)`, [J(profile)]);
+        const keys = Array.isArray(profile.sheets) ? profile.sheets.map((sheet) => sheet.sheet_key) : [];
+        const validatorFindsBasis = profile.format === "xlsx" && keys.some((key) => {
+          const derived = deriveRecordCountMeasurement(profile, key);
+          return derived.ok || !basisAbsentReasons.has(derived.blockers[0].blocking_reason);
+        });
+        observed.push([label, present, validatorFindsBasis]);
+        assert.deepEqual([label, present, validatorFindsBasis], [label, expected, expected], label);
+      }
+      results.g = observed;
     });
 
     await test("summary", async () => {

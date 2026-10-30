@@ -20,6 +20,7 @@ import {
 import {
   listScopedSourcesForOrganization,
   listScopedSourceVersionsForSourceIds,
+  xlsxWorksheetRecordCountBasisPresentSql,
 } from "../Backend/kai/db/kaiIntakeQueries.js";
 import {
   organizationSourcesPath,
@@ -413,14 +414,29 @@ test("source-version lineage read joins the exact immutable profile and returns 
   );
   assert.deepEqual(observed.values, [organizationId, [sourceIdA]]);
   assert.match(observed.text, /p\.profile->>'format'/);
-  assert.match(observed.text, /p\.profile \? 'record_count_basis'/);
+  assert.ok(observed.text.includes(`${xlsxWorksheetRecordCountBasisPresentSql("p.profile")} AS has_xlsx_record_count_basis`),
+    "basis presence is read from the profile's worksheets, where the P1 profiler commits it");
+  assert.doesNotMatch(observed.text, /p\.profile \? 'record_count_basis'/, "never a top-level key the profiler does not write");
   assert.match(observed.text, /p\.profile_canonical_sha256 = c\.profile_canonical_sha256/);
-  assert.doesNotMatch(observed.text, /profile->'sheets'|storage_uri|signed_url/i);
+  assert.doesNotMatch(observed.text, /storage_uri|signed_url/i);
+  assert.deepEqual(observed.text.replace(xlsxWorksheetRecordCountBasisPresentSql("p.profile"), "").match(/p\.profile\S*\s+AS\s+\w+/g),
+    ["p.profile->>'format' AS profile_format"],
+    "no profile contents are selected; worksheets are read only inside the presence predicate");
   assert.deepEqual(rows[0], {
     source_version_id: sourceVersionIdA1, source_id: sourceIdA, is_current: true, created_at: createdAt,
     engagement_id: "00000000-0000-4000-8000-000000000601",
     safe_filename: "legacy.xlsx", profile_format: "xlsx", has_xlsx_record_count_basis: false,
   });
+});
+
+test("XLSX basis presence follows the P2-01M validator's worksheet reading: a complete worksheet list with a current-version basis on a stable worksheet key", () => {
+  const predicate = xlsxWorksheetRecordCountBasisPresentSql("p.profile");
+  assert.match(predicate, /p\.profile->>'format' = 'xlsx'/);
+  assert.match(predicate, /jsonb_array_elements\(p\.profile->'sheets'\)/);
+  assert.match(predicate, /\(p\.profile->'counts'->'sheet_count'\) = to_jsonb\(jsonb_array_length\(p\.profile->'sheets'\)\)/);
+  assert.match(predicate, /sheet->'record_count_basis'->'basis_version' = to_jsonb\('kai_xlsx_worksheet_record_basis_v1'::text\)/);
+  assert.match(predicate, /sheet->>'sheet_key' ~ '\^sheet_\[1-9\]\[0-9\]\{0,3\}\$'/);
+  assert.match(predicate, /^\(CASE WHEN [\s\S]* ELSE false END\)$/, "never null; never applies a jsonb function to a value of another type");
 });
 
 test("kaiSourceLibraryService role/operation contract matches the same role set already governing evidence-extraction/coverage-assessment on this surface", () => {

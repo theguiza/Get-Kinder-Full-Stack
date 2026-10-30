@@ -644,7 +644,7 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
                     {version.profileFormat === "xlsx" ? (
                       <span data-client-xlsx-measurement-readiness={version.hasXlsxRecordCountBasis ? "basis_recorded" : "new_version_required"}>
                         {version.hasXlsxRecordCountBasis
-                          ? "XLSX worksheet basis recorded; Count records will check whether this workbook is measurable."
+                          ? "XLSX worksheet basis recorded; use Count records and choose the worksheet to count."
                           : "XLSX measurement basis missing; this historical profile cannot be changed."}
                       </span>
                     ) : null}

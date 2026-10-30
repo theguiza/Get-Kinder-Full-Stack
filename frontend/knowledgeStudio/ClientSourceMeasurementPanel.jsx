@@ -4,6 +4,7 @@ import { claimProposalPath, errorText, getJson, postJson } from "../impactEviden
 import { claimProposalResultMessage } from "./clientEvidenceWorkflowLogic.js";
 import {
   EMPTY_MEASUREMENT_FORM,
+  isWorksheetSelectionRequired,
   MEASUREMENT_FORM_READINESS_MESSAGES,
   measurementDefinitionBody,
   measurementFailureMessage,
@@ -79,6 +80,7 @@ export default function ClientSourceMeasurementPanel({ organizationId, sourceVer
 
   const data = basis.data;
   const recorded = data?.recorded;
+  const selectionRequired = isWorksheetSelectionRequired(data?.counts);
   return (
     <div className="border rounded p-2 mt-2" data-client-source-measurement={sourceVersionId}>
       <div className="d-flex align-items-center mb-2">
@@ -111,9 +113,15 @@ export default function ClientSourceMeasurementPanel({ organizationId, sourceVer
           ))}
         </div>
       ) : null}
-      {data && !data.counts.measurable ? (
+      {selectionRequired ? (
+        <div className="small" data-client-source-measurement-selection-required="">
+          Choose the worksheet to count. Each record-count definition counts one worksheet; KAI never adds worksheets together.
+        </div>
+      ) : null}
+      {data && !data.counts.measurable && !selectionRequired ? (
         <div className="small" data-client-source-measurement-unmeasurable="">
-          This source version cannot be counted this way. {data.counts.blockers.map((blocker, index) => (
+          {selectedWorksheetKey ? "The selected worksheet cannot be counted this way." : "This source version cannot be counted this way."}
+          {" "}{data.counts.blockers.map((blocker, index) => (
             <div key={`${blocker.blockingReason || "blocker"}-${index}`} data-client-source-measurement-blocker="" data-blocking-reason={blocker.blockingReason || undefined}>
               {blocker.message}{blocker.requiredFix ? ` ${blocker.requiredFix}` : ""}
             </div>
