@@ -42,7 +42,10 @@ const CONFIRMATION_REQUIRED = "Confirm the source authorization above before pro
  * the proposed source type, the intended internal use, and the restrictions
  * its current sensitivity decision records (read through the existing review
  * reads). A 'promoted' decision is never sent without that confirmation;
- * rejection and needs_more_information are unaffected.
+ * rejection and needs_more_information are unaffected. The authorization and
+ * its confirmation sit directly above the decision button they gate; an
+ * attempt without it marks and focuses the confirmation, and a different
+ * candidate, proposed type, or set of recorded restrictions clears it.
  */
 export default function ClientSourcePromotionPanel({ organizationId, engagementId, intakeFileId, safeFilename, onClose, onDecisionRecorded }) {
   const [lookup, setLookup] = useState({ status: "loading", candidateId: "", error: "" });
@@ -51,8 +54,10 @@ export default function ClientSourcePromotionPanel({ organizationId, engagementI
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
   const [confirmed, setConfirmed] = useState(false);
+  const [confirmationMissing, setConfirmationMissing] = useState(false);
   const [restrictions, setRestrictions] = useState({ status: "loading", lines: [] });
   const mountedRef = useRef(true);
+  const confirmRef = useRef(null);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -92,6 +97,15 @@ export default function ClientSourcePromotionPanel({ organizationId, engagementI
     })();
   }, [organizationId, intakeFileId]);
 
+  // A confirmation covers only the authorization it was given for.
+  const confirmedCandidateId = detail?.source_candidate?.intake_source_candidate_id || "";
+  const confirmedProposedType = detail?.source_candidate?.proposed_source_type || "";
+  const confirmedRestrictions = `${restrictions.status}:${restrictions.lines.join("\n")}`;
+  useEffect(() => {
+    setConfirmed(false);
+    setConfirmationMissing(false);
+  }, [confirmedCandidateId, confirmedProposedType, confirmedRestrictions]);
+
   useEffect(() => {
     (async () => {
       const response = await getJson(intakeFileSourceCandidatePath(organizationId, engagementId, intakeFileId));
@@ -114,7 +128,9 @@ export default function ClientSourcePromotionPanel({ organizationId, engagementI
     const candidateId = detail?.source_candidate?.intake_source_candidate_id;
     if (!candidateId || candidateId !== lookup.candidateId || busy) return;
     if (payload?.outcome === "promoted" && !confirmed) {
-      setResult({ kind: "warning", text: CONFIRMATION_REQUIRED });
+      setResult(null);
+      setConfirmationMissing(true);
+      confirmRef.current?.focus();
       return;
     }
     setBusy(true);
@@ -129,6 +145,45 @@ export default function ClientSourcePromotionPanel({ organizationId, engagementI
     await loadDetail(candidateId);
     if (recorded && mountedRef.current) onDecisionRecorded?.();
   }, [organizationId, detail, lookup.candidateId, busy, confirmed, loadDetail, onDecisionRecorded]);
+
+  const confirmId = `client-source-authorization-confirm-${intakeFileId}`;
+  const authorization = detail?.decision_controls_enabled ? (
+    <div className="border rounded p-2 my-2 small" data-client-source-authorization="">
+      <div className="fw-semibold mb-1">Source authorization (required to promote)</div>
+      <ul className="mb-1" id={`${confirmId}-statement`}>
+        <li>Source: {safeFilename} (this file&rsquo;s source candidate, proposed type &ldquo;{detail.source_candidate.proposed_source_type}&rdquo;; you choose the reviewed source type in this decision).</li>
+        <li>Intended use: {SOURCE_AUTHORIZATION_INTENDED_USE}</li>
+        <li>
+          Restrictions recorded by the sensitivity &amp; allowed-use review:
+          {restrictions.status === "loading" ? " loading..." : null}
+          {restrictions.status === "error" ? " could not be loaded; the server still applies them." : null}
+          {restrictions.status === "ready" ? (
+            <ul className="mb-0" data-client-source-restrictions="">
+              {restrictions.lines.map((line) => <li key={line}>{line}</li>)}
+            </ul>
+          ) : null}
+        </li>
+      </ul>
+      <div className="form-check">
+        <input ref={confirmRef} id={confirmId} className={`form-check-input${confirmationMissing ? " is-invalid" : ""}`} type="checkbox"
+          checked={confirmed} disabled={restrictions.status === "loading"} aria-invalid={confirmationMissing}
+          aria-describedby={`${confirmId}-statement${confirmationMissing ? ` ${confirmId}-required` : ""}`}
+          data-client-source-authorization-confirm=""
+          onChange={(event) => {
+            setConfirmed(event.target.checked);
+            if (event.target.checked) setConfirmationMissing(false);
+          }} />
+        <label className="form-check-label" htmlFor={confirmId}>
+          I confirm this file may become a governed source for the intended use above, under these restrictions.
+        </label>
+      </div>
+      {confirmationMissing ? (
+        <div className="text-danger mt-1" role="alert" id={`${confirmId}-required`} data-client-source-authorization-required="">
+          {CONFIRMATION_REQUIRED}
+        </div>
+      ) : null}
+    </div>
+  ) : null;
 
   return (
     <div className="admin-card mt-3" data-client-source-promotion-panel={intakeFileId}>
@@ -152,31 +207,10 @@ export default function ClientSourcePromotionPanel({ organizationId, engagementI
       {result ? (
         <div className={`alert alert-${result.kind} py-2 small`} role="status" data-client-source-promotion-result="">{result.text}</div>
       ) : null}
-      {detail?.decision_controls_enabled ? (
-        <div className="border rounded p-2 mb-2 small" data-client-source-authorization="">
-          <div className="fw-semibold mb-1">Source authorization</div>
-          <ul className="mb-1">
-            <li>Source: {safeFilename} (this file&rsquo;s source candidate, proposed type &ldquo;{detail.source_candidate.proposed_source_type}&rdquo;; you choose the reviewed source type below).</li>
-            <li>Intended use: {SOURCE_AUTHORIZATION_INTENDED_USE}</li>
-            <li>
-              Restrictions recorded by the sensitivity &amp; allowed-use review:
-              {restrictions.status === "loading" ? " loading..." : null}
-              {restrictions.status === "error" ? " could not be loaded; the server still applies them." : null}
-              {restrictions.status === "ready" ? (
-                <ul className="mb-0" data-client-source-restrictions="">
-                  {restrictions.lines.map((line) => <li key={line}>{line}</li>)}
-                </ul>
-              ) : null}
-            </li>
-          </ul>
-          <label className="form-check">
-            <input className="form-check-input" type="checkbox" checked={confirmed} data-client-source-authorization-confirm=""
-              onChange={(event) => setConfirmed(event.target.checked)} />
-            <span className="form-check-label">I confirm this file may become a governed source for the intended use above, under these restrictions.</span>
-          </label>
-        </div>
+      {detail ? (
+        <SourceCandidateDetail detail={detail} onSubmitDecision={submitDecision} busy={busy} decisionResult="" retryPayload={null}
+          decisionConfirmation={authorization} />
       ) : null}
-      {detail ? <SourceCandidateDetail detail={detail} onSubmitDecision={submitDecision} busy={busy} decisionResult="" retryPayload={null} /> : null}
     </div>
   );
 }

@@ -157,6 +157,17 @@ const EXPORT_PATH_MIGRATIONS = Object.freeze([
   "kai_sprint2_plan_a_organization_internal_factual_review_authority",
   "kai_sprint2_p2_01m_xlsx_worksheet_record_count_method",
 ]);
+// The client_admin source promotion acceptance opens Count records on the
+// source it promotes, so it also gets the P2-01M measurement schema (as
+// deployed, through the selected-worksheet method) without the export path.
+const MEASUREMENT_SCHEMA_SPECS = new Set([
+  "__tests__/kai-client-admin-source-promotion-browser-acceptance.integration.spec.js",
+]);
+const MEASUREMENT_SCHEMA_MIGRATIONS = Object.freeze([
+  "kai_sprint2_p2_01m_source_record_count_measurement",
+  "kai_sprint2_p2_01m_xlsx_worksheet_record_count_method",
+  "kai_sprint2_p2_01m_xlsx_selected_worksheet_record_count_method",
+]);
 const acceptanceSpec = process.argv[2] || ACCEPTANCE_SPECS[0];
 if (!ACCEPTANCE_SPECS.includes(acceptanceSpec)) {
   throw new Error(`browser acceptance runner refused an unlisted spec: ${acceptanceSpec}`);
@@ -288,6 +299,9 @@ try {
   }
   if (EXPORT_PATH_SPECS.has(acceptanceSpec)) {
     for (const migration of EXPORT_PATH_MIGRATIONS) psqlFile(`migrations/${migration}.sql`);
+  }
+  if (MEASUREMENT_SCHEMA_SPECS.has(acceptanceSpec)) {
+    for (const migration of MEASUREMENT_SCHEMA_MIGRATIONS) psqlFile(`migrations/${migration}.sql`);
   }
   // No repository migration creates kai.intake_batches (a pre-migration base
   // table, like kai.audit_events), and the synthetic kai.intake_files above

@@ -181,6 +181,25 @@ async function openPage(browser, { baseUrl, legacyUserId }) {
     const el = document.querySelector(${JSON.stringify(selector)});
     return el && el.offsetParent !== null && !el.disabled ? el : null;
   }`);
+  // A real pointer click (CDP mouse input at the element's on-screen centre),
+  // not el.click(): it proves the control is visible, not covered, and wired
+  // to the event a person's click produces.
+  const pointerClick = async (selector, description) => {
+    const point = await evaluate(`(() => {
+      const el = document.querySelector(${JSON.stringify(selector)});
+      if (!el || el.offsetParent === null) return null;
+      el.scrollIntoView({ block: "center" });
+      const rect = el.getBoundingClientRect();
+      const x = rect.left + rect.width / 2;
+      const y = rect.top + rect.height / 2;
+      const hit = document.elementFromPoint(x, y);
+      return rect.width > 0 && rect.height > 0 && (hit === el || el.contains(hit)) ? { x, y } : null;
+    })()`);
+    if (!point) throw new Error(`no clickable control: ${description}\n--- page ---\n${(await text()).slice(0, 3000)}`);
+    for (const type of ["mouseMoved", "mousePressed", "mouseReleased"]) {
+      await browser.send("Input.dispatchMouseEvent", { type, x: point.x, y: point.y, button: "left", clickCount: type === "mouseMoved" ? 0 : 1 }, sessionId);
+    }
+  };
   const tabLabels = () => evaluate(`[...document.querySelectorAll(".nav-tabs button")].map((el) => el.innerText.trim())`);
   const selectProject = async (engagementId) => {
     const ok = await evaluate(`(() => {
@@ -216,6 +235,7 @@ async function openPage(browser, { baseUrl, legacyUserId }) {
     clickTab,
     clickButton,
     clickIn,
+    pointerClick,
     tabLabels,
     selectProject,
     api,
@@ -749,16 +769,59 @@ async function runBrowserAcceptance() {
       await adminPage.waitForText("Reviewed source type");
       assert.ok(await setPanelSelect("Reviewed source type", "organization_primary_record"), "source type");
       // Without the explicit source authorization nothing is sent (owner decision 2026-10-19).
+      const CONFIRM = "[data-client-source-authorization-confirm]";
+      const PROMOTE_BUTTON = "[data-client-source-promotion-panel] form.kai-cockpit-decision button[type=submit]";
+      const confirmState = () => adminPage.evaluate(`(() => {
+        const el = document.querySelector(${JSON.stringify(CONFIRM)});
+        return { checked: el.checked, invalid: el.getAttribute("aria-invalid"), focused: document.activeElement === el,
+          required: Boolean(document.querySelector("[data-client-source-authorization-required]")) };
+      })()`);
+      assert.ok(await adminPage.evaluate(`Boolean(document.querySelector("form.kai-cockpit-decision [data-client-source-authorization] " + ${JSON.stringify(CONFIRM)}))`),
+        "the authorization and its confirmation are part of the decision form");
+      assert.ok((await adminPage.evaluate(`document.querySelector(${JSON.stringify(CONFIRM)}).labels[0].innerText`))
+        .startsWith("I confirm this file may become a governed source"), "the confirmation has its own label");
+      assert.deepEqual(await confirmState(), { checked: false, invalid: "false", focused: false, required: false }, "the confirmation starts unchecked");
       mark = adminPage.mark();
-      await adminPage.clickButton("Promote");
+      await adminPage.pointerClick(PROMOTE_BUTTON, "Promote");
       await adminPage.waitForText("Confirm the source authorization above before promoting. Nothing was sent.");
+      await adminPage.idle();
       assert.deepEqual(adminPage.requestsSince(mark).filter((r) => r.method === "POST"), []);
+      assert.deepEqual(await confirmState(), { checked: false, invalid: "true", focused: true, required: true }, "the missing confirmation is marked and focused");
       const authorization = await adminPage.evaluate(`document.querySelector("[data-client-source-authorization]").innerText`);
       assert.ok(authorization.includes("Intended use: Internal impact evidence for this organization"), authorization);
       assert.ok(authorization.includes("Allowed use: unknown; consent basis: unknown."), authorization);
-      await adminPage.clickIn("[data-client-source-authorization-confirm]", "source authorization confirmation");
+      results.confirmation_geometry = await adminPage.evaluate(`(() => {
+        const box = document.querySelector(${JSON.stringify(CONFIRM)}).getBoundingClientRect();
+        const button = document.querySelector(${JSON.stringify(PROMOTE_BUTTON)}).getBoundingClientRect();
+        return { checkbox: [Math.round(box.width), Math.round(box.height)], pixelsBetweenCheckboxAndPromote: Math.round(button.top - box.bottom) };
+      })()`);
+      assert.ok(results.confirmation_geometry.pixelsBetweenCheckboxAndPromote < 120, JSON.stringify(results.confirmation_geometry));
+      // A confirmation does not outlive its panel: closing and reopening requires a new one.
+      await adminPage.pointerClick(CONFIRM, "source authorization confirmation");
+      assert.equal((await confirmState()).checked, true, "a real click checks the confirmation");
+      await adminPage.clickButton("Close source review");
+      await adminPage.clickIn(`[data-client-open-source-review="${FILE.main}"]`, "Review & promote source");
+      await adminPage.waitForText("Decision outcome");
+      await adminPage.idle();
+      assert.equal((await confirmState()).checked, false, "a reopened panel starts unconfirmed");
+      assert.ok(await setPanelSelect("Decision outcome", "promoted"), "outcome");
+      await adminPage.waitForText("Reviewed source type");
+      assert.ok(await setPanelSelect("Reviewed source type", "organization_primary_record"), "source type");
       mark = adminPage.mark();
-      await adminPage.clickButton("Promote");
+      await adminPage.pointerClick(PROMOTE_BUTTON, "Promote");
+      await adminPage.waitForText("Confirm the source authorization above before promoting. Nothing was sent.");
+      await adminPage.idle();
+      assert.deepEqual(adminPage.requestsSince(mark).filter((r) => r.method === "POST"), [], "no promotion on an earlier confirmation");
+      await adminPage.pointerClick(CONFIRM, "source authorization confirmation");
+      assert.deepEqual(await confirmState(), { checked: true, invalid: "false", focused: true, required: false }, "confirming clears the marker");
+      // Re-choosing the reviewed source type keeps the confirmation.
+      assert.ok(await setPanelSelect("Reviewed source type", "public_record"), "source type change");
+      assert.ok(await setPanelSelect("Reviewed source type", "organization_primary_record"), "source type");
+      assert.equal((await confirmState()).checked, true, "a source type change does not clear the confirmation");
+      mark = adminPage.mark();
+      // A double click submits once.
+      await adminPage.pointerClick(PROMOTE_BUTTON, "Promote");
+      await adminPage.pointerClick(PROMOTE_BUTTON, "Promote").catch(() => { /* already disabled or replaced */ });
       await adminPage.waitForText("Source promoted. Evidence extraction created 2 evidence item(s)");
       await adminPage.idle();
       const posts = adminPage.requestsSince(mark).filter((r) => r.method === "POST").map((r) => [pathOf(r), r.status]);
@@ -777,6 +840,20 @@ async function runBrowserAcceptance() {
       assert.equal(version.source_version_id, promotion.source_version_id, "lineage: the decision is bound to the current version");
       ids.sourceVersionId = version.source_version_id;
       ids.sourceCode = version.source_code;
+      // A fresh authorized read agrees with what was persisted, and the panel shows it.
+      const fresh = await adminPage.api("GET", detailPath(ORG_X, ids.mainCandidate));
+      assert.equal(fresh.status, 200);
+      assert.deepEqual([
+        fresh.body.data.promotion_decision.decision_status, fresh.body.data.promotion_decision.reviewed_source_type,
+        fresh.body.data.source.reviewed_source_type, fresh.body.data.source.source_code,
+        fresh.body.data.source_version.source_version_id, fresh.body.data.source_version.is_current, fresh.body.data.decision_controls_enabled,
+      ], ["promoted", "organization_primary_record", "organization_primary_record", version.source_code, version.source_version_id, true, false]);
+      results.fresh_read_candidate_status = fresh.body.data.source_candidate.candidate_status;
+      const panelText = await adminPage.evaluate(`document.querySelector("[data-client-source-promotion-panel]")?.innerText || ""`);
+      if (panelText) {
+        assert.ok(panelText.includes(version.source_version_id), "the open panel shows the re-read source version");
+        assert.ok(!(await adminPage.evaluate(`Boolean(document.querySelector(${JSON.stringify(PROMOTE_BUTTON)}))`)), "no decision form after the final decision");
+      }
       const evidence = await query(
         `SELECT e.evidence_item_id::text, e.evidence_review_status, e.created_by::text, e.source_version_id::text, q.queue_status, q.review_queue_item_id::text, q.updated_at
            FROM kai.evidence_items e JOIN kai.review_queue_items q ON q.organization_id = e.organization_id
@@ -824,6 +901,30 @@ async function runBrowserAcceptance() {
       assert.deepEqual([replay.status, replay.body.data.replayed, replay.body.data.evidence_extraction_handoff.status], [200, true, "replayed"]);
       assert.deepEqual(await counts(ORG_X), before);
       results.pipeline_after = "PASS: evidence_review with 2 evidence items; P2-01 replay; promotion replay zero-write";
+    });
+
+    await test("reload: the promoted source survives a page reload, the file leaves Source preparation, and Count records opens for its current version", async () => {
+      await adminPage.goto("/impact-library");
+      await adminPage.waitForText("Knowledge Studio");
+      await adminPage.clickNav("Knowledge Studio");
+      await adminPage.waitFor(async () => adminPage.evaluate(`Boolean(document.getElementById("gk-shell-project-select"))`), "project selector");
+      await adminPage.clickTab("Data Sources");
+      await adminPage.selectProject(PROJECT_X);
+      await adminPage.idle();
+      const VERSION = `[data-client-source-version="${ids.sourceVersionId}"]`;
+      await adminPage.waitFor(async () => adminPage.evaluate(`Boolean(document.querySelector(${JSON.stringify(VERSION)}))`), "promoted source version listed after reload");
+      assert.ok((await adminPage.evaluate(`document.querySelector(${JSON.stringify(VERSION)}).innerText`)).includes("Current version"));
+      assert.ok((await adminPage.text()).includes(ids.sourceCode));
+      assert.ok(!(await adminPage.evaluate(`Boolean(document.querySelector('[data-client-open-source-review="${FILE.main}"]'))`)), "no promotion offered again");
+      const mark = adminPage.mark();
+      await adminPage.pointerClick(`[data-client-open-source-measurement="${ids.sourceVersionId}"]`, "Count records");
+      await adminPage.waitForText("Count the records in this source");
+      await adminPage.idle();
+      assert.equal(adminPage.requestsSince(mark).filter((r) => r.method !== "GET").length, 0, "opening Count records writes nothing");
+      const basisError = await adminPage.evaluate(`document.querySelector("[data-client-source-measurement-error]")?.innerText || ""`);
+      assert.equal(basisError, "", "the measurement basis read succeeds");
+      assert.deepEqual(adminPage.exceptions, []);
+      results.reload = "PASS: promoted source and current version listed after reload; Count records opens with no error and no write";
     });
 
     await test("protected operations: evidence review, claim review, generated-draft reads, and external release stay unavailable to the administrator", async () => {

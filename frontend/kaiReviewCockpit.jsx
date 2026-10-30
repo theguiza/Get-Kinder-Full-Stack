@@ -227,7 +227,10 @@ function decisionSubmitLabel(outcome) {
   return "Record decision";
 }
 
-function SourceDecisionControls({ detail, onSubmit, busy }) {
+// `confirmation` (optional) is rendered directly above the submit button, so a
+// surface that requires a human confirmation before deciding keeps it next to
+// the button it gates. The GK cockpit passes none.
+function SourceDecisionControls({ detail, onSubmit, busy, confirmation = null }) {
   const [outcome, setOutcome] = useState("needs_more_information");
   const [reviewedSourceType, setReviewedSourceType] = useState("");
 
@@ -273,6 +276,7 @@ function SourceDecisionControls({ detail, onSubmit, busy }) {
           </select>
         </label>
       ) : null}
+      {confirmation}
       <button type="submit" disabled={busy || (promotionSelected && !reviewedSourceType)}>
         {decisionSubmitLabel(outcome)}
       </button>
@@ -280,7 +284,7 @@ function SourceDecisionControls({ detail, onSubmit, busy }) {
   );
 }
 
-export function SourceCandidateDetail({ detail, onSubmitDecision, busy, decisionResult, retryPayload }) {
+export function SourceCandidateDetail({ detail, onSubmitDecision, busy, decisionResult, retryPayload, decisionConfirmation = null }) {
   if (!detail) return null;
   const candidate = detail.source_candidate;
   const decision = detail.promotion_decision;
@@ -335,7 +339,7 @@ export function SourceCandidateDetail({ detail, onSubmitDecision, busy, decision
       )}
 
       <h4>Source decision</h4>
-      <SourceDecisionControls detail={detail} onSubmit={onSubmitDecision} busy={busy} />
+      <SourceDecisionControls detail={detail} onSubmit={onSubmitDecision} busy={busy} confirmation={decisionConfirmation} />
       {decisionResult ? <p className="kai-cockpit-note">{decisionResult}</p> : null}
       {retryPayload ? (
         // Recovery only: re-sends the identical promotion, which P1-08 replays

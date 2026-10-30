@@ -422,7 +422,9 @@ test("source authorization: the recorded restrictions are shown from the current
 
 test("UI wiring: the promotion panel never sends 'promoted' without the explicit confirmation, and a generated draft is opened from the persisted read", () => {
   const panel = readFileSync(new URL("../frontend/knowledgeStudio/ClientSourcePromotionPanel.jsx", import.meta.url), "utf8");
-  assert.match(panel, /if \(payload\?\.outcome === "promoted" && !confirmed\) \{\s*setResult\(\{ kind: "warning", text: CONFIRMATION_REQUIRED \}\);\s*return;/);
+  assert.match(panel, /if \(payload\?\.outcome === "promoted" && !confirmed\) \{\s*setResult\(null\);\s*setConfirmationMissing\(true\);\s*confirmRef\.current\?\.focus\(\);\s*return;/);
+  // The confirmation is never set by code: only the person's own change event sets it.
+  assert.deepEqual(panel.match(/setConfirmed\([^)]*\)/g), ["setConfirmed(false)", "setConfirmed(event.target.checked)"]);
   const workflow = readFileSync(new URL("../frontend/knowledgeStudio/ClientEvidenceWorkflow.jsx", import.meta.url), "utf8");
   assert.match(workflow, /focusDraftId=\{lastDraft\?\.generatedContentDraftId \|\| null\}/);
   assert.match(workflow, /data-client-use-for-impact=/);

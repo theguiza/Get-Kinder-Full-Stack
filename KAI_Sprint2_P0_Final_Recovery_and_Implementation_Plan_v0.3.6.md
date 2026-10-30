@@ -44930,3 +44930,37 @@ Anything beyond a record count (rates, outcomes, sums) is a new evidence type an
 **Remaining status (NOT_CONFIRMED):** the historical customer workbook's actual worksheet structure and any production processing remain unconfirmed. No actual-client workbook, production record, cloud service, shared database, production config, or credential was accessed. No production migration, push, or deployment occurred. `00_KAI_CURRENT_STATE.md` was not changed.
 
 **Status:** SELECTED_WORKSHEET_XLSX_MEASUREMENT_TO_INTERNAL_REPORT_VERIFIED_LOCALLY. Local implementation commit only; not pushed, deployed, or verified in production.
+
+### Client-admin source promotion: confirmation next to Promote, persisted-success proof (2026-10-30)
+
+**Owner authorization (USER_CONFIRMED):** the owner prompt "REPAIR SOURCE PROMOTION AND PROVE PERSISTED SUCCESS" authorizes investigating the client-admin "Use for impact -> Review & promote source" failure, the smallest demonstrated repository correction, synthetic connected acceptance on disposable loopback PostgreSQL, affected and broader tests, a bundle rebuild, and a local commit. Push, deployment, production access, customer data, databases/cloud services, flags, tenants, role policy and `00_KAI_CURRENT_STATE.md` are excluded.
+
+**Starting state (TOOL_VERIFIED):** `main` at `fe0bf9b06fffc14c3680a41acb522d0b1f8528e4`, clean working tree; `npm run build` reproduced the tracked bundle byte-for-byte.
+
+**Owner-reported production facts (USER_CONFIRMED, not re-checked):** `fe0bf9b` deployed; selected-worksheet migration committed, verifier 7/7 PASS; candidate `needs_gk_review`; Promote shows "Confirm the source authorization above before promoting. Nothing was sent." Whether the owner's checkbox was checked in production: NOT_CONFIRMED.
+
+**Code path (TOOL_VERIFIED):** `ClientSourcePromotionPanel` (`confirmed` initialised `false`; set only by the checkbox `onChange`); `submitDecision` reads the current `confirmed` through its `useCallback` dependencies and refuses a `promoted` payload while it is false; the panel is keyed by organization + Project + file and its parent neither polls nor remounts it; a source-type change lives in `SourceDecisionControls` state and never touched `confirmed`. A `promoted` submission POSTs `{outcome, reviewed_source_type}` to the existing P1-08 decision route, then re-reads the candidate detail and refreshes the pipeline.
+
+**Reproduction and root cause (TOOL_VERIFIED, synthetic):** with real CDP pointer input (hit-tested at the element's centre) the unchanged control worked: unchecked -> Promote sent zero POSTs and showed the reported message; one click checked it; a source-type change kept it; Promote then sent exactly one P1-08 POST (200) and persisted. The reported message is produced only while the confirmation is unchecked; no state or submission defect exists. The demonstrated defect is usability: the 13x13 checkbox rendered 592 px above the Promote button, separated by the candidate's identifier/queue/decision rows, and the refusal appeared only at the top of the panel without identifying or focusing the control.
+
+**Correction:** `SourceCandidateDetail`/`SourceDecisionControls` (`frontend/kaiReviewCockpit.jsx`) accept an optional confirmation slot rendered directly above the submit button; the GK cockpit passes none and is unchanged. The client panel renders its unchanged authorization statement and confirmation there (now 40 px above Promote), with an explicit `<label htmlFor>`, `aria-describedby` to the statement, "required to promote" heading, and, on an unconfirmed attempt, `aria-invalid`/`is-invalid`, focus, and the inline message. The checkbox is disabled until the recorded restrictions finish loading, and the confirmation is cleared when the candidate, its proposed type, or the recorded restrictions change. Code never sets it true. No route, validator, policy, sensitivity decision, or role changed.
+
+**Connected acceptance (TOOL_VERIFIED; synthetic data, real bundle/routes/services, disposable loopback PostgreSQL, headless Chrome):** the existing client-admin source-promotion acceptance now uses real pointer clicks and proves: zero POSTs without confirmation, with the control marked and focused; a reopened panel requires a new confirmation (zero POSTs); a double click on Promote sends exactly one P1-08 POST (200) and creates 1 source, 1 current source_version, 2 evidence items; a fresh authorized detail read agrees with the persisted decision/source/version (`decision_status=promoted`, `candidate_status=promoted`, `decision_controls_enabled=false`); after a full page reload the source and current version are listed, promotion is no longer offered, and Count records opens with a successful basis read and no write. Existing negatives (contributor/reviewer 403, revoked membership/binding 403, other Project 404, cross-organization 403/404, GK source queue 403, structural evidence review 422) still pass. The runner now applies the three P2-01M measurement migrations to this spec only.
+
+**Verification (TOOL_VERIFIED; every Node/npm command used `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel`):**
+
+| Command or suite | Result |
+| --- | --- |
+| Client-admin source promotion browser acceptance | 13/13 |
+| Source-to-impact workflow browser acceptance | 16/16 |
+| Client-admin source preparation continuation browser acceptance | 12/12 |
+| P2-01 evidence extraction handoff (GK cockpit) browser acceptance | 7/7 |
+| Client-admin measurement to released report browser acceptance | 13/13 |
+| Assembled CSV file-to-report acceptance | 23/23 |
+| Full `npm test` | 5,786 passed, 0 failed, 122 skipped (5,908 total) |
+| `npm run build` | passed; tracked bundle rebuilt before browser runs |
+| `git diff --check` | passed |
+
+**Production status (NOT_CONFIRMED):** no production site, database, cloud service, customer file, or configuration was accessed or changed; nothing was pushed or deployed. The existing customer source was not promoted. Production acceptance requires an authorized deployment of this commit and an authorized human operator completing the workflow with an authorized synthetic source.
+
+**Status:** CLIENT_ADMIN_SOURCE_PROMOTION_CONFIRMATION_USABILITY_CORRECTED_AND_PERSISTED_SUCCESS_VERIFIED_LOCALLY. Local commit only; not pushed, deployed, or verified in production.
