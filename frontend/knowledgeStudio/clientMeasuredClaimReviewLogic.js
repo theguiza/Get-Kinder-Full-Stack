@@ -36,6 +36,8 @@ function projectDecision(dto) {
   return {
     reviewQueueItemId: dto?.review_queue_item_id ?? null,
     expectedUpdatedAt: dto?.expected_updated_at ?? null,
+    queueStatus: dto?.queue_status ?? null,
+    reviewStatus: dto?.review_status ?? null,
     decisionOutcome: dto?.decision_outcome ?? null,
     decidedBy: dto?.decided_by ?? null,
     organizationMayDecide: dto?.organization_may_decide === true,
@@ -56,6 +58,9 @@ export function projectOrganizationFactualReview(dto) {
     },
     measurement: dto?.measurement
       ? {
+        calculationMethod: dto.measurement.calculation_method ?? null,
+        worksheetKey: dto.measurement.worksheet_key ?? null,
+        worksheetName: dto.measurement.worksheet_name ?? null,
         measuredValue: dto.measurement.measured_value,
         unitLabel: dto.measurement.unit_label,
         countedUnit: dto.measurement.counted_unit,
@@ -83,7 +88,105 @@ export function projectOrganizationFactualReview(dto) {
       eligible: dto?.internal_eligibility?.eligible === true,
       blockerCodes: asArray(dto?.internal_eligibility?.blocker_codes),
     },
+    ordinaryRule: {
+      applies: dto?.ordinary_internal_rule?.applies === true,
+      reasons: asArray(dto?.ordinary_internal_rule?.reasons),
+    },
+    sourcePermissions: {
+      isCurrent: dto?.source_permissions?.is_current === true,
+      sensitivityReviewComplete: dto?.source_permissions?.sensitivity_review_complete === true,
+      allowedUseStatus: dto?.source_permissions?.allowed_use_status ?? null,
+      aiProcessingAllowed: dto?.source_permissions?.ai_processing_allowed === true,
+      categories: dto?.source_permissions?.categories && typeof dto.source_permissions.categories === "object"
+        ? { ...dto.source_permissions.categories }
+        : null,
+    },
+    reviewRequirement: dto?.review_requirement
+      ? { responsibleRole: dto.review_requirement.responsible_role ?? null, outstanding: asArray(dto.review_requirement.outstanding) }
+      : null,
+    viewer: dto?.viewer ?? null,
   };
+}
+
+// The counted worksheet as the organization knows it: its safe name and
+// stable key, or null for a CSV or single-worksheet count without one.
+export function measurementWorksheetText(measurement) {
+  if (!measurement?.worksheetKey) return null;
+  return measurement.worksheetName ? `${measurement.worksheetName} (${measurement.worksheetKey})` : measurement.worksheetKey;
+}
+
+const CALCULATION_METHOD_TEXT = Object.freeze({
+  p1_csv_profile_data_records_excluding_blank_v1: "CSV data records after the header row, blank records excluded",
+  p1_xlsx_single_worksheet_data_rows_excluding_blank_v1: "data rows after the header row of the only worksheet, blank rows excluded",
+  p1_xlsx_selected_worksheet_data_rows_excluding_blank_v1: "data rows after the header row of the one selected worksheet, blank rows excluded; worksheets are never combined",
+});
+
+export function calculationMethodText(calculationMethod) {
+  return CALCULATION_METHOD_TEXT[calculationMethod] || calculationMethod || "not recorded";
+}
+
+// Each Operating Model section 7.2 category, with what its recorded value
+// means. 'unknown' (not answered) is never presented as 'present'.
+export const SENSITIVITY_CATEGORY_LABELS = Object.freeze({
+  reviewed_personal_data_status: "Personal information",
+  reviewed_minor_data_status: "Information about minors",
+  reviewed_health_housing_justice_immigration_status: "Health, housing, justice or immigration information",
+  reviewed_indigenous_governance_status: "Indigenous or governance-sensitive information",
+  reviewed_story_testimonial_status: "Stories or testimonials",
+  reviewed_small_cell_risk_status: "Small-number (small-cell) re-identification risk",
+});
+
+const RECORDED_CATEGORY_VALUE_TEXT = Object.freeze({
+  present: "recorded as present",
+  unknown: "not determined (recorded as unknown)",
+  absent: "recorded as absent",
+});
+
+export function recordedCategoryText(field, value) {
+  return `${SENSITIVITY_CATEGORY_LABELS[field] || field}: ${RECORDED_CATEGORY_VALUE_TEXT[value] || "no value recorded"}`;
+}
+
+// The recorded source values that take the claim outside the ordinary rule,
+// as recorded - never inferred from a warning.
+export function ordinaryRuleConditions(review) {
+  const permissions = review.sourcePermissions;
+  const conditions = [];
+  if (!permissions.isCurrent) conditions.push("The source version is not current.");
+  if (!permissions.sensitivityReviewComplete) {
+    conditions.push("The source has no completed sensitivity & allowed-use review.");
+    return conditions;
+  }
+  if (permissions.allowedUseStatus !== "allowed") conditions.push(`Allowed use is recorded as ${permissions.allowedUseStatus || "not set"}.`);
+  if (!permissions.aiProcessingAllowed) conditions.push("AI processing is recorded as not permitted.");
+  for (const [field, value] of Object.entries(permissions.categories || {})) {
+    if (value !== "absent") conditions.push(`${recordedCategoryText(field, value)}.`);
+  }
+  return conditions;
+}
+
+const OUTSTANDING_STEP_TEXT = Object.freeze({
+  evidence_review: "evidence review",
+  claim_review: "claim review",
+  coverage_acceptance: "acceptance of unresolved coverage limitations",
+  client_followup: "a client follow-up answer",
+  conflict_review: "a conflict review",
+});
+
+const RESPONSIBLE_ROLE_TEXT = Object.freeze({ gk_reviewer: "a Get Kinder reviewer (gk_reviewer)" });
+
+// Who must act next, and on what, from the server's review requirement.
+export function reviewRequirementText(requirement) {
+  if (!requirement) return null;
+  const steps = requirement.outstanding.map((step) => OUTSTANDING_STEP_TEXT[step] || step.replace(/_/g, " "));
+  const who = RESPONSIBLE_ROLE_TEXT[requirement.responsibleRole] || null;
+  if (who) return `Get Kinder review required. Responsible: ${who}.${steps.length ? ` Outstanding: ${steps.join("; ")}.` : ""}`;
+  return steps.length ? `Outstanding before internal use: ${steps.join("; ")}.` : null;
+}
+
+// The review queue state of one lineage, as recorded.
+export function reviewQueueStateText(decision) {
+  if (!decision.queueStatus && !decision.reviewStatus) return "no review item";
+  return `${(decision.queueStatus || "unknown").replace(/_/g, " ")} / ${(decision.reviewStatus || "unknown").replace(/_/g, " ")}`;
 }
 
 /**

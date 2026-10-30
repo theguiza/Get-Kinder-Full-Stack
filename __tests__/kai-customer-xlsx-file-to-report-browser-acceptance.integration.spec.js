@@ -32,6 +32,12 @@ import { programmeSessionRows, programmeSessionWorkbook, syntheticXlsxWorkbook, 
  *     measurement, claim, the exact P2-06 reasons, Get Kinder's real evidence,
  *     claim and coverage reviews, eligibility again, generation, and the
  *     internal report download as the current authority answers it.
+ * H - a workbook shaped like the reported customer workbook (Service_Events
+ *     sheet_3: 364 data rows with one exact-duplicate pair; Data_Dictionary
+ *     sheet_5: 37 rows): ordinary versus restricted internal eligibility with
+ *     the recorded condition, the administrator's "View review status", Get
+ *     Kinder's "Review finding" in the built UI through the existing decision
+ *     forms, refusals, and generation from the reviewed claim.
  * Simulated at external boundaries only: the Get Kinder session (harness
  * cookie), object storage (in-process signed-PUT / exact-generation stand-in),
  * the malware scanner (deterministic clean adapter behind the real assessor),
@@ -299,6 +305,7 @@ async function runXlsxAcceptance() {
     claimReviewCompletePath,
     claimReviewDecisionBody,
     claimTraceabilityPath,
+    clientInternalDraftPath,
     clientInternalReportMarkdownPath,
     evidenceReviewCompletePath,
     evidenceReviewDecisionBody,
@@ -1323,6 +1330,382 @@ async function runXlsxAcceptance() {
         assert.deepEqual([label, present, validatorFindsBasis], [label, expected, expected], label);
       }
       results.g = observed;
+    });
+
+    // -----------------------------------------------------------------------
+    // H: measured-finding eligibility and Get Kinder's review of a finding,
+    // on a workbook shaped like the reported customer workbook (synthetic
+    // values only): Service_Events is sheet_3 with 364 data rows including
+    // one exact-duplicate pair, Data_Dictionary is sheet_5 with 37 data rows.
+    // -----------------------------------------------------------------------
+    const serviceEventRows = (tag) => {
+      const rows = [["event_ref", "event_date", "service_type", "run_tag"]];
+      for (let index = 1; index <= 362; index += 1) {
+        rows.push([`E${String(index).padStart(3, "0")}`, `2026-09-${String((index % 28) + 1).padStart(2, "0")}`, index % 2 ? "visit" : "call", tag]);
+      }
+      rows.push(["E900", "2026-09-30", "visit", tag], ["E900", "2026-09-30", "visit", tag]);
+      return rows;
+    };
+    const productionShapedWorkbook = (tag) => customerFile(`service-workbook-${tag}.xlsx`, syntheticXlsxWorkbook({ sheets: [
+      { name: "Read_Me", rows: [["note"], [`synthetic service workbook ${tag}`]] },
+      { name: "Participant_Register", rows: [["participant_code", "cohort"], ...Array.from({ length: 84 }, (_, index) => [`P${String(index + 1).padStart(3, "0")}`, index % 2 ? "A" : "B"])] },
+      { name: "Service_Events", rows: serviceEventRows(tag) },
+      { name: "Funder_Notes", rows: [["note"], ["synthetic notes"]] },
+      { name: "Data_Dictionary", rows: [["field_name", "description"], ...Array.from({ length: 37 }, (_, index) => [`field_${index + 1}`, `synthetic description ${index + 1}`])] },
+    ] }));
+    // The human definition the reported request supplied: service events.
+    const SERVICE_DEFINITION = Object.freeze({
+      counted_unit: "service event", unit_label: "service events",
+      definition_text: "Each row records one service event delivered to a participant.",
+      inclusion_rule: "Every data row after the header row that has at least one value.",
+      exclusion_rule: "The header row and empty rows.",
+    });
+    const H_INDEPENDENT = Object.freeze({ sheet_3: { name: "Service_Events", dataRecords: 364, blank: 0, duplicates: 2, counted: 364 }, sheet_5: { name: "Data_Dictionary", dataRecords: 37, blank: 0, duplicates: 0, counted: 37 } });
+    const gkPage = await openPage(browser, { baseUrl, legacyUserId: USERS.gkReviewer });
+    const decisionCounts = async (claimId, evidenceItemId) => (await query(`SELECT
+        (SELECT count(*) FROM kai.evidence_review_decisions WHERE evidence_item_id = $2::uuid)::int AS evidence,
+        (SELECT count(*) FROM kai.claim_review_decisions WHERE claim_id = $1::uuid)::int AS claim,
+        (SELECT count(*) FROM kai.coverage_review_decisions WHERE claim_id = $1::uuid)::int AS coverage`, [claimId, evidenceItemId]))[0];
+    const measurementRowsDigest = async () => (await query(
+      "SELECT md5(string_agg(row_to_json(m)::text, '|' ORDER BY m.evidence_item_id)) AS digest FROM kai.evidence_measurements m WHERE m.organization_id = $1::uuid", [ORG_X]))[0].digest;
+    const findingReview = async (api, claimId) => api("GET", organizationFactualReviewPath(ORG_X, claimId));
+    const measureAndClaim = async (file, worksheetKey, snapshot) => {
+      const fileId = await apiUpload(adminApi, file, ids.batchId);
+      await dispatcher.whenIdle();
+      const promoted = await decideAndPromote(adminApi, fileId, snapshot);
+      const measured = await adminApi("POST", sourceRecordCountMeasurementPath(ORG_X, promoted.source_version_id, worksheetKey), SERVICE_DEFINITION);
+      assert.equal(measured.status, 200, J(measured.body));
+      const evidenceItemId = measured.body.data.evidenceItem.evidence_item_id;
+      const proposed = await adminApi("POST", claimProposalPath(ORG_X, evidenceItemId), {});
+      assert.ok([200, 201].includes(proposed.status), J(proposed.body));
+      return { fileId, ...promoted, evidenceItemId, claimId: proposed.body.data.claim.claim_id, worksheetKey };
+    };
+
+    await test("H1 (A, B): worksheet counts keep their identity; an ordinary count is eligible with no approval; a count from a source with an undetermined category is restricted, and the exact recorded condition is explained", async () => {
+      // A historical structural-only draft, read before anything below runs.
+      const [structuralClaim] = await query(
+        `SELECT c.claim_id::text, c.statement FROM kai.claims c JOIN kai.evidence_items e ON e.evidence_item_id = c.evidence_item_id
+          WHERE c.organization_id = $1::uuid AND e.evidence_type = 'dictionary_field_presence_fact' ORDER BY c.created_at LIMIT 1`, [ORG_X]);
+      modelOverride.text = structuralClaim.statement;
+      const structuralDraft = await generate(adminApi, "evidence-summary", [structuralClaim.claim_id], "h-structural-only");
+      modelOverride.text = null;
+      assert.ok([200, 201].includes(structuralDraft.status), J(structuralDraft.body));
+      ids.h = { structuralDraftId: structuralDraft.body.data.generatedContentDraftId };
+      const draftDigest = async (draftId) => (await query(
+        `SELECT md5(row_to_json(d)::text || coalesce((SELECT string_agg(row_to_json(b)::text, '|' ORDER BY b.generated_content_block_id) FROM kai.generated_content_blocks b WHERE b.generated_content_draft_id = d.generated_content_draft_id), '')) AS digest
+           FROM kai.generated_content_drafts d WHERE d.generated_content_draft_id = $1::uuid`, [draftId]))[0].digest;
+      ids.h.draftDigest = draftDigest;
+      ids.h.structuralDigest = await draftDigest(ids.h.structuralDraftId);
+
+      // The restricted source: story/testimonial not determined ('unknown'), everything else ordinary.
+      const restrictedSnapshot = { ...SNAPSHOT, reviewed_story_testimonial_status: "unknown" };
+      const first = productionShapedWorkbook("h-restricted-a");
+      const bases = {};
+      {
+        const fileId = await apiUpload(adminApi, first, ids.batchId);
+        await dispatcher.whenIdle();
+        const promoted = await decideAndPromote(adminApi, fileId, restrictedSnapshot);
+        for (const key of ["sheet_3", "sheet_5"]) {
+          const basis = await adminApi("GET", sourceRecordCountMeasurementPath(ORG_X, promoted.source_version_id, key));
+          assert.equal(basis.status, 200, J(basis.body));
+          const b = basis.body.data.basis;
+          bases[key] = [b.measurable, b.worksheet?.sheet_key, b.worksheet?.sheet_name, b.data_record_count, b.blank_record_count, b.duplicate_record_count, b.counted_record_count];
+        }
+        assert.deepEqual(bases, {
+          sheet_3: [true, "sheet_3", "Service_Events", 364, 0, 2, 364],
+          sheet_5: [true, "sheet_5", "Data_Dictionary", 37, 0, 0, 37],
+        }, "each worksheet keeps its own identity and counts; exact duplicates are included");
+        // The reported request: sheet_5 selected under a service-event definition.
+        const measured = await adminApi("POST", sourceRecordCountMeasurementPath(ORG_X, promoted.source_version_id, "sheet_5"), SERVICE_DEFINITION);
+        assert.equal(measured.status, 200, J(measured.body));
+        const evidenceItemId = measured.body.data.evidenceItem.evidence_item_id;
+        const proposed = await adminApi("POST", claimProposalPath(ORG_X, evidenceItemId), {});
+        assert.ok([200, 201].includes(proposed.status), J(proposed.body));
+        ids.h.s5 = { fileId, ...promoted, evidenceItemId, claimId: proposed.body.data.claim.claim_id };
+      }
+      ids.h.s3Restricted = await measureAndClaim(productionShapedWorkbook("h-restricted-b"), "sheet_3", restrictedSnapshot);
+      ids.h.s3Ordinary = await measureAndClaim(productionShapedWorkbook("h-ordinary"), "sheet_3", SNAPSHOT);
+
+      const measurementOf = async (evidenceItemId) => (await query(
+        `SELECT m.measured_value::int, m.total_record_count::int, m.blank_record_count::int, m.duplicate_record_count::int, m.calculation_method, l.coordinates, c.statement AS claim_statement
+           FROM kai.evidence_measurements m JOIN kai.evidence_items e ON e.evidence_item_id = m.evidence_item_id
+           JOIN kai.source_locators l ON l.source_locator_id = e.source_locator_id JOIN kai.claims c ON c.evidence_item_id = e.evidence_item_id
+          WHERE m.evidence_item_id = $1::uuid`, [evidenceItemId]))[0];
+      for (const [label, entry, key] of [["sheet_5", ids.h.s5, "sheet_5"], ["sheet_3 restricted", ids.h.s3Restricted, "sheet_3"], ["sheet_3 ordinary", ids.h.s3Ordinary, "sheet_3"]]) {
+        const row = await measurementOf(entry.evidenceItemId);
+        const expected = H_INDEPENDENT[key];
+        assert.deepEqual([row.measured_value, row.total_record_count, row.blank_record_count, row.duplicate_record_count, row.calculation_method, row.coordinates],
+          [expected.counted, expected.dataRecords, expected.blank, expected.duplicates, SELECTED_XLSX_METHOD, { scope: "data_records_after_header", sheet_key: key }], label);
+        assert.match(row.claim_statement, new RegExp(`^The promoted source records ${expected.counted} service events .* in selected worksheet ${key} \\(record count: one service event per selected worksheet data row;`), label);
+        assert.doesNotMatch(row.claim_statement, /participant|people|unique|outcome|verified/i, `${label}: a record count, not participants or outcomes`);
+      }
+      ids.h.measurementDigest = await measurementRowsDigest();
+
+      // A: the ordinary count is eligible with no human decision.
+      const ordinary = await internalEligibility(ids.h.s3Ordinary.claimId);
+      assert.deepEqual([ordinary.eligible, ordinary.blockerCodes], [true, []]);
+      assert.deepEqual(await decisionCounts(ids.h.s3Ordinary.claimId, ids.h.s3Ordinary.evidenceItemId), { evidence: 0, claim: 0, coverage: 0 });
+      const ordinaryView = await findingReview(adminApi, ids.h.s3Ordinary.claimId);
+      assert.deepEqual([ordinaryView.status, ordinaryView.body.data.ordinary_internal_rule, ordinaryView.body.data.review_requirement],
+        [200, { applies: true, reasons: [] }, null]);
+      // A: the restricted counts are not eligible, for the recorded reason, which says 'unknown', not 'present'.
+      for (const entry of [ids.h.s5, ids.h.s3Restricted]) {
+        const restricted = await internalEligibility(entry.claimId);
+        assert.equal(restricted.eligible, false);
+        assert.ok(restricted.blockerCodes.includes("evidence_review_unresolved") && restricted.blockerCodes.includes("claim_review_unresolved"), J(restricted.blockerCodes));
+        const view = await findingReview(adminApi, entry.claimId);
+        assert.equal(view.status, 200, J(view.body));
+        assert.deepEqual(view.body.data.ordinary_internal_rule, { applies: false, reasons: ["story_testimonial_not_cleared"] });
+        assert.deepEqual([view.body.data.source_permissions.categories.reviewed_story_testimonial_status, view.body.data.source_permissions.allowed_use_status,
+          view.body.data.source_permissions.ai_processing_allowed, view.body.data.source_permissions.is_current], ["unknown", "allowed", true, true]);
+        assert.equal(view.body.data.review_requirement.responsible_role, "gk_reviewer");
+        assert.equal(view.body.data.viewer, "organization_administrator");
+      }
+      // B: the human meaning stays a disclosed, unverified limitation beside the machine count.
+      const s5View = (await findingReview(adminApi, ids.h.s5.claimId)).body.data;
+      assert.deepEqual([s5View.measurement.worksheet_key, s5View.measurement.worksheet_name, s5View.measurement.measured_value, s5View.measurement.counted_unit],
+        ["sheet_5", "Data_Dictionary", 37, "service event"]);
+      assert.ok(s5View.limitations.some((row) => row.code === "measurement.record_meaning_human_defined"
+        && /KAI counted the records but did not verify what they represent/.test(row.description)), J(s5View.limitations));
+      // The read-only pgAdmin query for the production facts, on this schema.
+      const productionSql = readFileSync(new URL("../scripts/kai-measured-finding-eligibility-read-only.sql", import.meta.url), "utf8");
+      assert.ok(productionSql.includes("'485b90cd-cdf3-470e-a308-fe75d5d4b5fe'::uuid, ''::text"), "the shipped parameters");
+      const runReadOnly = async (email) => {
+        const sql = productionSql.replace("'485b90cd-cdf3-470e-a308-fe75d5d4b5fe'::uuid, ''::text", `'${ids.h.s5.source_version_id}'::uuid, '${email}'::text`);
+        const client = await seedPool.connect();
+        try {
+          await client.query("BEGIN READ ONLY");
+          const { rows } = await client.query(sql);
+          await client.query("ROLLBACK");
+          return Object.fromEntries(rows.map((row) => [row.item.replace(/ [0-9a-f-]{36}$/, ""), row.value]));
+        } finally {
+          client.release();
+        }
+      };
+      const asAdmin = await runReadOnly(`user${USERS.clientAdmin}@harbourline.test`);
+      assert.deepEqual([asAdmin["R4 source_version.is_current"], asAdmin["sensitivity_decision.current_heads"], asAdmin["R5 sensitivity_decision.decision_outcome"],
+        asAdmin["R6 reviewed_allowed_use_status"], asAdmin["R6 reviewed_llm_processing_allowed"], asAdmin["R7 reviewed_story_testimonial_status"],
+        asAdmin["R7 reviewed_minor_data_status"], asAdmin["measurement.count"], asAdmin["A0 actor.found (params.actor_email)"],
+        asAdmin["A3 actor.may_record_gk_evidence_review (excluding platform superuser)"]],
+      ["true", "1", "reviewed", "allowed", "true", "unknown", "absent", "1", "1", "false"], J(asAdmin));
+      assert.match(asAdmin.measurement, /R1 evidence_type=source_record_count_measurement; R2 definition_status=human_confirmed, same_version=true; method=p1_xlsx_selected_worksheet_data_rows_excluding_blank_v1; sheet_key=sheet_5; measured=37 \(data 37, blank 0, duplicates 0\)/);
+      assert.match(asAdmin.claim, /R3 claim_type=finding; claim_review_status=needs_gk_review/);
+      assert.equal(asAdmin["evidence_review_decision.heads"], "none");
+      const asReviewer = await runReadOnly(`user${USERS.gkReviewer}@harbourline.test`);
+      assert.equal(asReviewer["A3 actor.may_record_gk_evidence_review (excluding platform superuser)"], "true", J(asReviewer));
+      results.h1 = { bases, ordinary: "eligible with 0 decisions", restricted: "story_testimonial_not_cleared (recorded unknown)", s5: [s5View.measurement.worksheet_name, s5View.measurement.measured_value],
+        readOnlySql: { story: asAdmin["R7 reviewed_story_testimonial_status"], adminMayRecordGkReview: false, gkReviewerMayRecordGkReview: true } };
+    });
+
+    await test("H2 (C): the organization administrator sees 'View review status' with the responsible Get Kinder role and the review items, and no approval", async () => {
+      await openStudioTab("Data Sources");
+      const action = `[data-client-open-measured-claim-review="${ids.h.s5.claimId}"]`;
+      await adminPage.waitFor(async () => /View review status/.test((await textOf(adminPage, action)) || ""), "View review status on the restricted claim");
+      const mark = adminPage.mark();
+      await adminPage.clickIn(action, "View review status");
+      const status = `[data-client-measured-claim-review="${ids.h.s5.claimId}"] [data-client-measured-claim-review-status]`;
+      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, status)), "the review status");
+      await adminPage.idle();
+      const shown = await textOf(adminPage, `[data-client-measured-claim-review="${ids.h.s5.claimId}"]`);
+      assert.match(shown, /Worksheet counted: Data_Dictionary \(sheet_5\)/);
+      assert.match(shown, /Stories or testimonials: not determined \(recorded as unknown\)/);
+      assert.doesNotMatch(shown, /recorded as present/);
+      assert.match(shown, /Get Kinder review required\. Responsible: a Get Kinder reviewer \(gk_reviewer\)\. Outstanding: [^.]*claim review[^.]*evidence review/);
+      assert.match(shown, /Evidence review item: open \/ needs gk review\. Claim review item: open \/ needs gk review\./);
+      assert.match(shown, /listed in Get Kinder's Review Queue; no separate request is needed/);
+      assert.match(shown, /KAI counted the records but did not verify what they represent/);
+      assert.doesNotMatch(shown, /Confirm: the count is supported|Report a problem/, "no organization decision is offered");
+      assert.deepEqual(adminPage.requestsSince(mark).filter((request) => request.method !== "GET"), [], "viewing writes nothing");
+      // The handoff is real: the claim is in Get Kinder's Review Queue.
+      const queue = await gkApi("GET", `${orgPath()}/review-queue`);
+      assert.equal(queue.status, 200, J(queue.body));
+      assert.ok(J(queue.body).includes(ids.h.s5.claimId), "the restricted claim is listed for Get Kinder");
+      // The organization administrator cannot decide it.
+      const evidenceQueue = await queueOf("evidence_review", ids.h.s5.evidenceItemId);
+      const refused = await adminApi("POST", evidenceReviewCompletePath(ORG_X, ids.h.s5.evidenceItemId, evidenceQueue.review_queue_item_id),
+        evidenceReviewDecisionBody({ expectedUpdatedAt: new Date(evidenceQueue.updated_at).toISOString(), decision: "supported" }));
+      assert.equal(refused.status, 422, J(refused.body));
+      assert.ok(J(refused.body).includes("story_testimonial_not_cleared"), J(refused.body));
+      results.h2 = { clientAction: "View review status", responsible: "gk_reviewer", organizationDecision: refused.status };
+    });
+
+    await test("H3 (C): Get Kinder's reviewer opens 'Review finding' in the Claims list, sees the finding, and records the evidence, claim and coverage decisions through the existing forms; they persist, are audited and re-read", async () => {
+      const entry = ids.h.s3Restricted;
+      await gkPage.goto("/impact-library");
+      await gkPage.waitForText("Knowledge Studio");
+      await gkPage.clickNav("Knowledge Studio");
+      await gkPage.idle();
+      const currentOrganization = await gkPage.evaluate(`document.querySelector(".gk-shell-org-switcher-btn")?.innerText || ""`);
+      if (!currentOrganization.includes("Harbourline Workbook Society")) {
+        assert.ok(await gkPage.evaluate(`(() => { const b = document.querySelector(".gk-shell-org-switcher-btn"); if (!b) return false; b.click(); return true; })()`), "organization switcher");
+        await gkPage.waitFor(async () => gkPage.evaluate(`[...document.querySelectorAll(".gk-shell-org-switcher-option")].some((el) => el.innerText.trim() === "Harbourline Workbook Society")`), "the organization option");
+        assert.ok(await gkPage.evaluate(`(() => { const o = [...document.querySelectorAll(".gk-shell-org-switcher-option")].find((el) => el.innerText.trim() === "Harbourline Workbook Society"); if (!o) return false; o.click(); return true; })()`));
+        await gkPage.idle();
+      }
+      const action = `[data-gk-review-finding="${entry.claimId}"]`;
+      await gkPage.waitFor(async () => Boolean(await textOf(gkPage, action)), "Review finding on the restricted Service_Events claim");
+      assert.equal(await textOf(gkPage, action), "Review finding");
+      assert.ok(await textOf(gkPage, `[data-gk-review-finding="${ids.h.s3Ordinary.claimId}"]`), "every measured finding offers it");
+      await gkPage.clickIn(action, "Review finding");
+      const panel = `[data-gk-finding-review="${entry.claimId}"]`;
+      await gkPage.waitFor(async () => /Service_Events \(sheet_3\)/.test((await textOf(gkPage, panel)) || ""), "the finding for the selected claim");
+      await gkPage.idle();
+      assert.equal(await gkPage.evaluate("document.activeElement?.innerText.includes('Traceability') ?? false"), true, "focus moves to the finding's Traceability panel");
+      const shown = await textOf(gkPage, panel);
+      assert.match(shown, /Counted: 364 service events/);
+      assert.match(shown, /364 data records; 0 blank excluded; 2 exact duplicates included/);
+      assert.match(shown, /Meaning, as defined by the organization \(not verified by KAI\): one record is one service event\./);
+      assert.match(shown, /Ordinary internal rule: does not apply[\s\S]*Stories or testimonials: not determined \(recorded as unknown\)/);
+      assert.match(shown, /Not eligible for internal use/);
+
+      // Evidence review, through the existing Traceability form.
+      const evidenceBefore = await queueOf("evidence_review", entry.evidenceItemId);
+      let mark = gkPage.mark();
+      await gkPage.clickIn("#evidence-review-decision-supported", "evidence decision: supported");
+      await gkPage.clickButton("Record Evidence Review Decision");
+      await gkPage.waitFor(async () => /Evidence review: supported \(recorded by Get Kinder\)/.test((await textOf(gkPage, panel)) || ""), "the re-read evidence decision");
+      await gkPage.idle();
+      const posts = () => gkPage.requestsSince(mark).filter((request) => request.method === "POST").map((request) => [new URL(request.url).pathname, request.status]);
+      assert.deepEqual(posts(), [[evidenceReviewCompletePath(ORG_X, entry.evidenceItemId, evidenceBefore.review_queue_item_id), 200]]);
+      // Stale: replaying the pre-decision version is refused and writes nothing.
+      const stale = await gkApi("POST", evidenceReviewCompletePath(ORG_X, entry.evidenceItemId, evidenceBefore.review_queue_item_id),
+        evidenceReviewDecisionBody({ expectedUpdatedAt: new Date(evidenceBefore.updated_at).toISOString(), decision: "not_supported" }));
+      assert.equal(stale.status, 409, J(stale.body));
+
+      // Claim review (internal only).
+      const claimBefore = await queueOf("claim_review", entry.claimId);
+      mark = gkPage.mark();
+      await gkPage.clickIn("#claim-review-decision-approved", "claim decision: approved");
+      await gkPage.clickIn("#claim-approved-audience-internal", "internal audience");
+      await gkPage.clickButton("Record Claim Review Decision");
+      await gkPage.waitFor(async () => /Claim review: approved \(recorded by Get Kinder\)/.test((await textOf(gkPage, panel)) || ""), "the re-read claim decision");
+      await gkPage.idle();
+      assert.deepEqual(posts(), [[claimReviewCompletePath(ORG_X, entry.claimId, claimBefore.review_queue_item_id), 200]]);
+      const afterReviews = await internalEligibility(entry.claimId);
+      assert.equal(afterReviews.eligible, false, "approving the evidence and claim does not clear coverage");
+      assert.deepEqual(afterReviews.blockerCodes, ["coverage_dimension_unresolved"], J(afterReviews.blockerCodes));
+
+      // Coverage: accept each unresolved limitation from the finding.
+      const unresolved = await gkPage.evaluate(`[...document.querySelectorAll(${J(`${panel} [data-gk-finding-accept-limitation]`)})].map((el) => el.getAttribute("data-gk-finding-accept-limitation"))`);
+      assert.deepEqual([...unresolved].sort(), ["conflicting_source_indicators", "requirement_alignment", "small_cell_risk"]);
+      for (const dimensionKey of unresolved) {
+        mark = gkPage.mark();
+        await gkPage.clickIn(`${panel} [data-gk-finding-accept-limitation="${dimensionKey}"]`, `accept ${dimensionKey}`);
+        await gkPage.waitFor(async () => !(await textOf(gkPage, `${panel} [data-gk-finding-accept-limitation="${dimensionKey}"]`)), `${dimensionKey} accepted`);
+        await gkPage.idle();
+        assert.deepEqual(posts(), [[`${orgPath()}/claims/${entry.claimId}/coverage-dimensions/${dimensionKey}/internal-acceptance`, 201]]);
+      }
+      await gkPage.waitFor(async () => (await gkPage.evaluate(`document.querySelector(${J(`${panel} [data-gk-finding-eligibility]`)})?.getAttribute("data-gk-finding-eligibility")`)) === "eligible", "eligible after the re-read");
+
+      // Persisted, attributed and audited; a fresh read agrees.
+      const [evidenceDecision] = await query("SELECT decision_id::text, decision_outcome, decided_by_role FROM kai.evidence_review_decisions WHERE evidence_item_id = $1::uuid", [entry.evidenceItemId]);
+      const [claimDecision] = await query("SELECT decision_id::text, decision_outcome, decided_by_role, approved_audiences FROM kai.claim_review_decisions WHERE claim_id = $1::uuid", [entry.claimId]);
+      assert.deepEqual([evidenceDecision.decision_outcome, evidenceDecision.decided_by_role], ["supported", "gk_reviewer"]);
+      assert.deepEqual([claimDecision.decision_outcome, claimDecision.decided_by_role, claimDecision.approved_audiences], ["approved", "gk_reviewer", ["internal"]]);
+      const audits = await query("SELECT metadata->>'decision_id' AS decision_id FROM kai.upload_lifecycle_audit WHERE organization_id = $1::uuid AND metadata->>'decision_id' = ANY($2::text[])",
+        [ORG_X, [evidenceDecision.decision_id, claimDecision.decision_id]]);
+      assert.deepEqual(audits.map((row) => row.decision_id).sort(), [evidenceDecision.decision_id, claimDecision.decision_id].sort(), "one audit row per decision");
+      assert.deepEqual(await decisionCounts(entry.claimId, entry.evidenceItemId), { evidence: 1, claim: 1, coverage: 3 });
+      const fresh = await internalEligibility(entry.claimId);
+      assert.deepEqual([fresh.eligible, fresh.blockerCodes], [true, []]);
+      const freshView = (await findingReview(gkApi, entry.claimId)).body.data;
+      assert.equal(freshView.viewer, "get_kinder_reviewer");
+      // Independent restrictions stay: the source's recorded category, the
+      // unverified meaning, unresolved coverage (accepted only as limitations),
+      // and funder/public eligibility.
+      assert.deepEqual(freshView.ordinary_internal_rule, { applies: false, reasons: ["story_testimonial_not_cleared"] });
+      assert.equal(freshView.source_permissions.categories.reviewed_story_testimonial_status, "unknown");
+      assert.ok(freshView.limitations.some((row) => row.code === "measurement.record_meaning_human_defined"));
+      assert.deepEqual(freshView.coverage_limitations.filter((row) => row.assessment_status === "unresolved").map((row) => [row.dimension_key, row.internal_limitation_accepted]).sort(),
+        [["conflicting_source_indicators", true], ["requirement_alignment", true], ["small_cell_risk", true]]);
+      for (const audience of ["funder", "public"]) assert.equal((await internalEligibility(entry.claimId, audience)).eligible, false, `${audience} stays closed`);
+      const queue = await gkApi("GET", `${orgPath()}/review-queue`);
+      assert.ok(!J(queue.body).includes(entry.claimId), "the reviewed claim leaves the Review Queue");
+      assert.ok(J(queue.body).includes(ids.h.s5.claimId), "the unreviewed claim stays");
+      results.h3 = { gkAction: "Review finding", evidence: evidenceDecision.decision_outcome, claim: claimDecision.decision_outcome, coverage: unresolved.length, eligible: true, stale: stale.status };
+    });
+
+    await test("H4 (C): Get Kinder's reviewer asks for more information on the Data_Dictionary count; no claim decision is offered and it stays restricted", async () => {
+      const entry = ids.h.s5;
+      const action = `[data-gk-review-finding="${entry.claimId}"]`;
+      await gkPage.clickIn(action, "Review finding");
+      const panel = `[data-gk-finding-review="${entry.claimId}"]`;
+      await gkPage.waitFor(async () => /Data_Dictionary \(sheet_5\)/.test((await textOf(gkPage, panel)) || ""), "the Data_Dictionary finding");
+      await gkPage.idle();
+      assert.match(await textOf(gkPage, panel), /Counted: 37 service events/);
+      await gkPage.clickIn("#evidence-review-decision-needs_more_information", "evidence decision: needs more information");
+      await gkPage.clickButton("Record Evidence Review Decision");
+      await gkPage.waitFor(async () => /Evidence review: needs more information \(recorded by Get Kinder\)/.test((await textOf(gkPage, panel)) || ""), "the re-read decision");
+      await gkPage.idle();
+      assert.equal(await gkPage.evaluate(`[...document.querySelectorAll("button")].some((el) => el.offsetParent !== null && el.innerText.trim() === "Record Claim Review Decision")`), false,
+        "a claim decision needs a terminal evidence decision");
+      const after = await internalEligibility(entry.claimId);
+      assert.equal(after.eligible, false);
+      assert.ok(after.blockerCodes.includes("evidence_review_unresolved"), J(after.blockerCodes));
+      assert.deepEqual(await decisionCounts(entry.claimId, entry.evidenceItemId), { evidence: 1, claim: 0, coverage: 0 });
+      results.h4 = { evidence: "needs_more_information", claimFormOffered: false, eligible: false };
+    });
+
+    await test("H5 (C): other roles, another organization and Get Kinder roles without decision authority are refused; nothing is written", async () => {
+      const entry = ids.h.s5;
+      const before = await decisionCounts(entry.claimId, entry.evidenceItemId);
+      const evidenceQueue = await queueOf("evidence_review", entry.evidenceItemId);
+      const claimQueue = await queueOf("claim_review", entry.claimId);
+      const evidenceBody = evidenceReviewDecisionBody({ expectedUpdatedAt: new Date(evidenceQueue.updated_at).toISOString(), decision: "supported" });
+      const claimBody = claimReviewDecisionBody({ expectedUpdatedAt: new Date(claimQueue.updated_at).toISOString(), decision: "approved", approvedAudiences: ["internal"] });
+      for (const [label, api] of [["client_contributor", contributorApi], ["client_reviewer", reviewerApi], ["another organization's administrator", adminYApi]]) {
+        assert.equal((await findingReview(api, entry.claimId)).status, 403, `${label}: finding read`);
+        assert.equal((await api("POST", evidenceReviewCompletePath(ORG_X, entry.evidenceItemId, evidenceQueue.review_queue_item_id), evidenceBody)).status, 403, `${label}: evidence`);
+        assert.equal((await api("POST", claimReviewCompletePath(ORG_X, entry.claimId, claimQueue.review_queue_item_id), claimBody)).status, 403, `${label}: claim`);
+      }
+      // Cross-tenant: Get Kinder's reviewer reading this claim through another organization's path.
+      const crossTenant = await gkApi("GET", organizationFactualReviewPath(ORG_Y, entry.claimId));
+      assert.ok([403, 404].includes(crossTenant.status), J(crossTenant.body));
+      assert.deepEqual(await decisionCounts(entry.claimId, entry.evidenceItemId), before);
+      results.h5 = { refused: ["client_contributor", "client_reviewer", "other organization admin", "cross-tenant path"] };
+    });
+
+    await test("H6 (D): the reviewed measured claim reaches internal Evidence Summary generation with its citation and limitations; an unreviewed claim is refused; historical records are unchanged", async () => {
+      const entry = ids.h.s3Restricted;
+      const [{ statement }] = await query("SELECT statement FROM kai.claims WHERE claim_id = $1::uuid", [entry.claimId]);
+      modelOverride.text = `${statement} This is a count of source records under the human-defined definition; no reporting period was defined. `
+        + "The exact-duplicate records are counted, not removed. Internal limitations: small-cell risk, conflicting source indicators and "
+        + "requirement alignment are accepted as limitations for internal use only.";
+      const callsBefore = modelCalls.length;
+      const generated = await generate(adminApi, "evidence-summary", [entry.claimId], "h-reviewed-summary");
+      assert.ok([200, 201].includes(generated.status), J(generated.body));
+      const draftId = generated.body.data.generatedContentDraftId;
+      const [input] = modelCalls.slice(callsBefore).map((call) => call.claims);
+      const cited = input.find((claim) => claim.claimId === entry.claimId);
+      assert.ok(cited, "the reviewed claim is in the generation input");
+      assert.ok(cited.limitationCodes.includes("measurement.record_meaning_human_defined"), J(cited.limitationCodes));
+      assert.ok(cited.limitationCodes.includes("measurement.duplicate_records_included"), J(cited.limitationCodes));
+      assert.ok(cited.limitationCodes.some((code) => code.startsWith("coverage.") && code.endsWith(".accepted_internal_limitation")), J(cited.limitationCodes));
+      const citations = await query(
+        `SELECT c.claim_id::text, c.evidence_item_id::text FROM kai.generated_content_citations c
+           JOIN kai.generated_content_blocks b ON b.generated_content_block_id = c.generated_content_block_id
+          WHERE b.generated_content_draft_id = $1::uuid`, [draftId]);
+      assert.deepEqual(citations, [{ claim_id: entry.claimId, evidence_item_id: entry.evidenceItemId }]);
+      const read = await adminApi("GET", clientInternalDraftPath(ORG_X, PROJECT_X, draftId));
+      assert.equal(read.status, 200, J(read.body));
+      assert.ok(J(read.body).includes(entry.claimId), "the persisted draft is read back with its citation");
+      // An unreviewed (ineligible) measured claim is excluded: the request is refused and nothing is persisted.
+      const draftsBefore = (await query("SELECT count(*)::int AS n FROM kai.generated_content_drafts WHERE organization_id = $1::uuid", [ORG_X]))[0].n;
+      const callsBeforeRefusal = modelCalls.length;
+      const refused = await generate(adminApi, "evidence-summary", [entry.claimId, ids.h.s5.claimId], "h-with-unreviewed");
+      modelOverride.text = null;
+      assert.equal(refused.status, 422, J(refused.body));
+      const refusalReasons = (refused.body.blockers || []).map((blocker) => blocker.blocking_reason);
+      console.log(`[kai-customer-xlsx-file-to-report] H6 unreviewed refusal ${J({ refusalReasons, modelCalled: modelCalls.length > callsBeforeRefusal })}`);
+      assert.ok(!refusalReasons.includes("unsupported_numeric_or_causal_assertion") && !refusalReasons.includes("material_limitation_not_disclosed"),
+        `refused for the claim's eligibility, not the stub's text: ${J(refusalReasons)}`);
+      assert.equal((await query("SELECT count(*)::int AS n FROM kai.generated_content_drafts WHERE organization_id = $1::uuid", [ORG_X]))[0].n, draftsBefore);
+      // Historical records unchanged: every measurement row, and the structural-only draft.
+      assert.equal(await measurementRowsDigest(), ids.h.measurementDigest, "no measurement row was rewritten by review or generation");
+      assert.equal(await ids.h.draftDigest(ids.h.structuralDraftId), ids.h.structuralDigest, "the structural-only draft is unchanged");
+      results.h6 = { draft: draftId, citations: citations.length, limitationCodes: cited.limitationCodes, unreviewedRefused: [refused.status, refusalReasons] };
+      assert.deepEqual(gkPage.exceptions, []);
+      await gkPage.close();
     });
 
     await test("summary", async () => {

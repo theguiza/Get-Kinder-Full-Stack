@@ -1,11 +1,18 @@
 import { withTransaction } from "../db/kaiDb.js";
-import { getScopedEvidenceItemById, getScopedEvidenceMeasurementByEvidenceItemId } from "../db/kaiIntakeQueries.js";
+import {
+  getScopedClaimById,
+  getScopedEvidenceItemById,
+  getScopedEvidenceMeasurementByEvidenceItemId,
+  getScopedSourceLocatorById,
+  getScopedSourceVersionById,
+} from "../db/kaiIntakeQueries.js";
 import { evaluateClaimTraceabilityInTransaction } from "./postgresClaimTraceabilityRepository.js";
 import { findCurrentClaimReviewDecision, findCurrentEvidenceReviewDecision } from "./postgresHumanReviewDecisionRepository.js";
 import {
   HIGH_RISK_SENSITIVITY_FIELDS,
   ORDINARY_SOURCE_LIMITATION_DIMENSION_KEYS,
   classifySourceVersionInTransaction,
+  evaluateOrdinaryMeasurementAuthorityInTransaction,
   isConfirmedMeasurement,
 } from "./postgresOrdinaryInternalFactAuthority.js";
 import {
@@ -62,6 +69,17 @@ export const BLOCKED_REASONS = Object.freeze([
 ]);
 
 const REVIEWED_SUPPORTED = "reviewed_supported";
+const GET_KINDER_REVIEWER_ROLE = "gk_reviewer";
+
+// The human step each P2-06 internal blocker waits on.
+const OUTSTANDING_REVIEW_STEP = Object.freeze({
+  evidence_review_unresolved: "evidence_review",
+  claim_review_unresolved: "claim_review",
+  claim_not_approved_for_requested_audience: "claim_review",
+  coverage_dimension_unresolved: "coverage_acceptance",
+  client_followup_unresolved: "client_followup",
+  potential_conflict_review_unresolved: "conflict_review",
+});
 
 function ordered(reasons, vocabulary) {
   const present = new Set(reasons);
@@ -160,6 +178,7 @@ function decisionState(head, queue, evaluation) {
   return {
     review_queue_item_id: queue.review_queue_item_id,
     expected_updated_at: queue.updated_at,
+    queue_status: queue.queue_status,
     review_status: queue.review_status,
     decision_outcome: head?.decision_outcome ?? null,
     decided_by: decidedBy(head),
@@ -216,6 +235,18 @@ export async function readOrganizationFactualReviewInTransaction(tx, { organizat
   }
 
   const limitationCodes = measurementRow ? measurementLimitationCodes({ measurementRow, dimensions: data.dimensions }) : [];
+  // The ordinary internal rule exactly as P2-06 applies it, with its reasons
+  // and the recorded source values it read (never re-derived here).
+  const claimRow = await getScopedClaimById({ organizationId, claimId }, tx);
+  const evidenceItemRow = await getScopedEvidenceItemById({ organizationId, evidenceItemId }, tx);
+  const ordinaryRule = await evaluateOrdinaryMeasurementAuthorityInTransaction(tx, {
+    organizationId,
+    evidenceItemRow,
+    locatorRow: await getScopedSourceLocatorById({ organizationId, sourceLocatorId: data.locator.source_locator_id }, tx),
+    sourceVersionRow: await getScopedSourceVersionById({ organizationId, sourceVersionId: data.source_version.source_version_id }, tx),
+    claimRow,
+  });
+  const outstanding = [...new Set(data.blockerCodes.map((code) => OUTSTANDING_REVIEW_STEP[code]).filter(Boolean))];
   return {
     ok: true,
     error: null,
@@ -231,6 +262,9 @@ export async function readOrganizationFactualReviewInTransaction(tx, { organizat
       },
       measurement: measurementRow
         ? {
+          calculation_method: measurementRow.calculation_method,
+          worksheet_key: measurementRow.worksheet_key || null,
+          worksheet_name: measurementRow.worksheet_name || null,
           measured_value: measurementRow.measured_value,
           unit_label: measurementRow.unit_label,
           counted_unit: measurementRow.counted_unit,
@@ -245,9 +279,22 @@ export async function readOrganizationFactualReviewInTransaction(tx, { organizat
         }
         : null,
       limitations: limitationCodes.map((code) => ({ code, description: describeMeasurementLimitationCode(code) })),
+      ordinary_internal_rule: { applies: ordinaryRule.ordinary, reasons: ordinaryRule.reasons },
+      source_permissions: {
+        is_current: ordinaryRule.sourcePermissions?.is_current === true,
+        sensitivity_review_complete: Boolean(ordinaryRule.sourcePermissions?.recorded),
+        ...(ordinaryRule.sourcePermissions?.recorded
+          ?? { allowed_use_status: null, ai_processing_allowed: false, categories: null }),
+      },
+      // Which human steps the authoritative internal evaluation still needs,
+      // and whose they are: Get Kinder's reviewer outside the ordinary rule.
+      review_requirement: data.eligible === true
+        ? null
+        : { responsible_role: ordinaryRule.ordinary ? null : GET_KINDER_REVIEWER_ROLE, outstanding },
       evidence_review: decisionState(evidenceHead, {
         review_queue_item_id: data.evidence.review_queue_item_id,
         updated_at: data.evidence.updated_at,
+        queue_status: data.evidence.review_queue_status,
         review_status: data.evidence.review_status,
       }, evidenceEvaluation),
       claim_review: {

@@ -2630,6 +2630,16 @@ export function annotateGovernedAvailability(mergedClaims, candidateClaims, elig
   }));
 }
 
+// Whether the GK Claims list offers "Review finding" for this claim: a
+// measured finding (P2-01M record-count evidence) and an actor whose access
+// capabilities admit recording this organization's evidence review. It grants
+// nothing; every decision is re-authorized by the server.
+export function canReviewMeasuredFinding(claim, workflowOperations) {
+  return workflowOperations?.recordEvidenceReview === true
+    && claim?.evidenceType === "source_record_count_measurement"
+    && isRouteUuid(claim?.claimId);
+}
+
 // Package 14-05: internal evidence-summary draft generation is gated on
 // governed internal availability (presence in the all-state Claim Library),
 // not on audience/use eligibility. A claim that is governed but currently

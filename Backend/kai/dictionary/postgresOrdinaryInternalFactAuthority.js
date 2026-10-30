@@ -78,11 +78,23 @@ export function classifySourceDecision(decision) {
   return { getKinderReviewReasons, blockedReasons };
 }
 
+// The recorded values classifySourceDecision reads, for display only: an
+// unanswered ('unknown') category stays distinguishable from one recorded
+// 'present'. null when no complete (reviewed) decision is recorded. Pure.
+export function recordedSourcePermissions(decision) {
+  if (!decision || decision.decision_outcome !== "reviewed") return null;
+  return {
+    allowed_use_status: decision.reviewed_allowed_use_status ?? null,
+    ai_processing_allowed: decision.reviewed_llm_processing_allowed === true,
+    categories: Object.fromEntries(Object.keys(HIGH_RISK_SENSITIVITY_FIELDS).map((field) => [field, decision[field] ?? null])),
+  };
+}
+
 // One source version -> reasons: its currentness and its current Phase-5
-// sensitivity decision (classifySourceDecision).
+// sensitivity decision (classifySourceDecision), with the recorded values.
 export async function classifySourceVersionInTransaction(tx, { organizationId, sourceVersionId }) {
   const version = await getScopedSourceVersionById({ organizationId, sourceVersionId }, tx);
-  if (!version) return { getKinderReviewReasons: ["sensitivity_review_not_complete"], blockedReasons: [] };
+  if (!version) return { getKinderReviewReasons: ["sensitivity_review_not_complete"], blockedReasons: [], recorded: null, isCurrent: false };
   let decision = null;
   try {
     decision = UUID_PATTERN.test(version.intake_sensitivity_profile_id ?? "")
@@ -100,6 +112,8 @@ export async function classifySourceVersionInTransaction(tx, { organizationId, s
   return {
     getKinderReviewReasons: source.getKinderReviewReasons,
     blockedReasons: version.is_current === true ? source.blockedReasons : ["source_version_not_current", ...source.blockedReasons],
+    recorded: recordedSourcePermissions(decision),
+    isCurrent: version.is_current === true,
   };
 }
 
@@ -129,6 +143,7 @@ export async function evaluateOrdinaryMeasurementAuthorityInTransaction(tx, {
 }) {
   const reasons = [];
   let measurementRow = null;
+  let source = null;
   if (!evidenceItemRow || evidenceItemRow.evidence_type !== MEASUREMENT_EVIDENCE_TYPE) {
     reasons.push("evidence_type_not_measurement");
   } else {
@@ -147,9 +162,14 @@ export async function evaluateOrdinaryMeasurementAuthorityInTransaction(tx, {
     )) {
       reasons.push("claim_not_measurement_restatement");
     }
-    const source = await classifySourceVersionInTransaction(tx, { organizationId, sourceVersionId: evidenceItemRow.source_version_id });
+    source = await classifySourceVersionInTransaction(tx, { organizationId, sourceVersionId: evidenceItemRow.source_version_id });
     reasons.push(...source.getKinderReviewReasons, ...source.blockedReasons);
   }
   const ordered = orderedReasons(reasons);
-  return { ordinary: ordered.length === 0, reasons: ordered, measurementRow };
+  return {
+    ordinary: ordered.length === 0,
+    reasons: ordered,
+    measurementRow,
+    sourcePermissions: source ? { is_current: source.isCurrent, recorded: source.recorded } : null,
+  };
 }

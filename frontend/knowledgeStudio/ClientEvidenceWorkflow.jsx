@@ -783,7 +783,7 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
                   {access.reviewMeasuredClaimFactualContent && kind !== "structural" && openReview !== claim.claimId && isRouteUuid(claim.claimId) ? (
                     <button type="button" className="btn btn-sm btn-outline-primary mt-1 ms-1" data-client-open-measured-claim-review={claim.claimId}
                       onClick={() => setReviewing({ contextKey, claimId: claim.claimId })}>
-                      View measurement
+                      {use === "not_usable" ? "View review status" : "View measurement"}
                     </button>
                   ) : null}
                   {!selectability.selectable ? <div className="mt-1">{claimSelectabilityMessage(selectability.reason)}</div> : null}

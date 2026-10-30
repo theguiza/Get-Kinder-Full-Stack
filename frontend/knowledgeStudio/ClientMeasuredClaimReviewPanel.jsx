@@ -3,15 +3,20 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 import { errorText, getJson, postJson } from "../impactEvidenceLibraryLogic.js";
 import {
   COVERAGE_DIMENSION_LABELS,
+  calculationMethodText,
   decisionStateText,
   eligibilityBlockerText,
   measuredClaimReviewFailureMessage,
   measuredClaimReviewPlan,
   measuredClaimReviewRequest,
   measuredClaimReviewStepLabel,
+  measurementWorksheetText,
+  ordinaryRuleConditions,
   organizationFactualReviewPath,
   projectOrganizationFactualReview,
+  reviewQueueStateText,
   reviewReasonText,
+  reviewRequirementText,
 } from "./clientMeasuredClaimReviewLogic.js";
 
 const JUDGMENTS = Object.freeze([
@@ -99,6 +104,12 @@ export default function ClientMeasuredClaimReviewPanel({ organizationId, claimId
                 {review.measurement.totalRecordCount} records in the file; {review.measurement.blankRecordCount} blank excluded;
                 {" "}{review.measurement.duplicateRecordCount} exact duplicates included.
               </div>
+              {measurementWorksheetText(review.measurement) ? (
+                <div data-client-measured-claim-review-worksheet={review.measurement.worksheetKey}>
+                  Worksheet counted: {measurementWorksheetText(review.measurement)}. Only this worksheet was counted.
+                </div>
+              ) : null}
+              <div>Counting method: {calculationMethodText(review.measurement.calculationMethod)}.</div>
             </div>
           ) : null}
           <div className="mt-1">
@@ -111,6 +122,31 @@ export default function ClientMeasuredClaimReviewPanel({ organizationId, claimId
               <ul className="mb-0" data-client-measured-claim-review-limitations="">
                 {review.limitations.map((limitation) => <li key={limitation.code}>{limitation.description}</li>)}
               </ul>
+            </div>
+          ) : null}
+          {!review.internalEligibility.eligible ? (
+            <div className="mt-1" data-client-measured-claim-review-status={review.reviewRequirement?.responsibleRole ? "get_kinder_review_required" : "outstanding"}>
+              <div className="fw-semibold">Review status</div>
+              {!review.ordinaryRule.applies ? (
+                <>
+                  <div>The ordinary internal record-count rule does not cover this claim, because of what is recorded for its source:</div>
+                  <ul className="mb-0" data-client-measured-claim-ordinary-conditions="">
+                    {ordinaryRuleConditions(review).map((condition) => <li key={condition}>{condition}</li>)}
+                  </ul>
+                </>
+              ) : null}
+              {reviewRequirementText(review.reviewRequirement) ? (
+                <div data-client-measured-claim-review-requirement="">{reviewRequirementText(review.reviewRequirement)}</div>
+              ) : null}
+              <div className="text-muted">
+                Evidence review item: {reviewQueueStateText(review.evidenceReview)}. Claim review item: {reviewQueueStateText(review.claimReview)}.
+              </div>
+              {review.reviewRequirement?.responsibleRole ? (
+                <div className="text-muted" data-client-measured-claim-review-handoff="">
+                  While these steps are outstanding the claim is listed in Get Kinder&apos;s Review Queue; no separate request is needed.
+                  Your organization cannot approve it here.
+                </div>
+              ) : null}
             </div>
           ) : null}
           {review.internalEligibility.eligible && !review.evidenceReview.decisionOutcome && !review.claimReview.decisionOutcome ? (

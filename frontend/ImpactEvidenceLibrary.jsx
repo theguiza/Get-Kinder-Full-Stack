@@ -6,6 +6,7 @@ import {
   CLAIM_REVIEW_DECISIONS,
   EVIDENCE_REVIEW_DECISIONS,
   annotateGovernedAvailability,
+  canReviewMeasuredFinding,
   canSelectClaimForInternalGeneration,
   canSelectClaimForFunderGeneration,
   canCompleteClaimReview,
@@ -151,6 +152,7 @@ import {
 } from "./impactEvidenceLibraryLogic.js";
 import SensitivityReviewCardBody from "./SensitivityReviewCardBody.jsx";
 import KaiSourceReviewPanel from "./KaiSourceReviewPanel.jsx";
+import GkFindingReviewPanel from "./GkFindingReviewPanel.jsx";
 import useRevalidateOnReturn from "./useRevalidateOnReturn.js";
 import {
   exportManifestCsvPath,
@@ -1133,6 +1135,17 @@ export default function ImpactEvidenceLibrary({
   useEffect(() => {
     if (selectedClaimId) loadTraceability(selectedClaimId);
   }, [audience, selectedClaimId, loadTraceability]);
+
+  // "Review finding" (Claims list): select the measured finding, re-read it
+  // even when already selected, and move to its Traceability panel, where the
+  // finding and the existing decision forms are.
+  const canReviewFinding = (claim) => canReviewMeasuredFinding(claim, workflowOperations);
+  const reviewFinding = (claimId) => {
+    if (claimId === selectedClaimId) loadTraceability(claimId);
+    else setSelectedClaimId(claimId);
+    traceabilityPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    traceabilityPanelRef.current?.focus();
+  };
 
   // A selected claim change must never carry over another claim's
   // in-progress evidence/claim review decision form state.
@@ -3589,9 +3602,9 @@ export default function ImpactEvidenceLibrary({
             ) : null}
             <div className="list-group">
               {claims.map((claim) => (
+                <React.Fragment key={claim.claimId}>
                 <button
                   type="button"
-                  key={claim.claimId}
                   className={`list-group-item list-group-item-action ${claim.claimId === selectedClaimId ? "active" : ""}`}
                   onClick={() => setSelectedClaimId(claim.claimId)}
                 >
@@ -3645,6 +3658,16 @@ export default function ImpactEvidenceLibrary({
                     </div>
                   ) : null}
                 </button>
+                {canReviewFinding(claim) ? (
+                  <div className="list-group-item py-1 d-flex align-items-center justify-content-between gap-2" data-gk-claim-finding={claim.claimId}>
+                    <span className="small text-muted">Measured finding</span>
+                    <button type="button" className="btn btn-sm btn-primary" data-gk-review-finding={claim.claimId}
+                      onClick={() => reviewFinding(claim.claimId)}>
+                      Review finding
+                    </button>
+                  </div>
+                ) : null}
+                </React.Fragment>
               ))}
             </div>
             {workflowOperations.generateDrafts && audience === "internal" ? (
@@ -4681,6 +4704,16 @@ export default function ImpactEvidenceLibrary({
             ) : null}
             {traceability ? (
               <>
+                {selectedClaim && canReviewFinding(selectedClaim) ? (
+                  <GkFindingReviewPanel
+                    key={`${organizationId}:${selectedClaimId}`}
+                    organizationId={organizationId}
+                    claimId={selectedClaimId}
+                    reloadKey={traceability}
+                    canAcceptCoverage={workflowOperations.acceptCoverageLimitation === true}
+                    onRecorded={() => loadTraceability(selectedClaimId)}
+                  />
+                ) : null}
                 <ValueRow label="Governed internal availability" value="internally available (governed)" />
                 <ValueRow
                   label={`${traceability.requestedAudience || audience} audience eligibility`}
