@@ -1,8 +1,10 @@
 import { getScopedEvidenceMeasurementByEvidenceItemId, getScopedSourceVersionById } from "../db/kaiIntakeQueries.js";
+import { findCurrentClaimReviewDecision, findCurrentEvidenceReviewDecision } from "./postgresHumanReviewDecisionRepository.js";
 import {
   AmbiguousSensitivityDecisionLineageError,
   findCurrentSensitivityAllowedUseDecision,
 } from "./postgresSensitivityAllowedUseDecisionRepository.js";
+import { COUNT_ONLY_LIMITATION_CODE } from "../validators/kaiGeneratedContentValidators.js";
 import {
   MEASUREMENT_DEFINITION_STATUS,
   MEASUREMENT_EVIDENCE_TYPE,
@@ -52,6 +54,57 @@ export const ORDINARY_SOURCE_LIMITATION_DIMENSION_KEYS = Object.freeze([
   "conflicting_source_indicators",
   "requirement_alignment",
 ]);
+
+/**
+ * Count-only internal authority for a story-present source (owner prompt
+ * 2026-10-30, "Implement Safe Internal Count-Only Authority for
+ * Story-Present Sources"). Operating Model section 7.2 keeps Get Kinder's
+ * release review for public story/testimonial use; a deterministic record
+ * count restated exactly from its measurement uses no story or testimonial
+ * content. So a source whose current decision records stories/testimonials
+ * 'present' - never 'unknown' - with every other category 'absent', the use
+ * allowed and AI processing permitted, gives an otherwise ordinary measured
+ * claim internal authority as a count only, while no current evidence or
+ * claim decision on its lineage is negative. The recorded category is not
+ * changed and story_testimonial_not_cleared still governs every other
+ * operation; the operations that accept this basis are the internal
+ * Evidence Summary's generation (story-free model input and VAL-GEN-010
+ * output) and its internal Markdown, re-checked when it is read.
+ */
+export const ORDINARY_AUTHORITY_BASIS = Object.freeze({
+  ALL_CATEGORIES_ABSENT: "all_sensitive_categories_absent",
+  COUNT_ONLY_STORY_TESTIMONIAL_PRESENT: "count_only_story_testimonial_present",
+});
+export const COUNT_ONLY_CONTENT_TYPE = "evidence_summary";
+// Carried in the governed generator input beside the measurement codes
+// (defined with VAL-GEN-010, which keys on it).
+export { COUNT_ONLY_LIMITATION_CODE };
+export const COUNT_ONLY_OPERATION_REASON = "story_testimonial_count_only_operation_not_permitted";
+// P2-06 attaches its ordinary basis to its result data under this key: not
+// enumerable, so every exact-key DTO contract, projection and JSON body is
+// unchanged. { basis, reliedOn } or absent (not the internal audience).
+export const ORDINARY_INTERNAL_AUTHORITY = Symbol("kai.ordinaryInternalAuthority");
+
+const POSITIVE_EVIDENCE_OUTCOMES = new Set(["supported", "supported_with_limitation"]);
+const POSITIVE_CLAIM_OUTCOMES = new Set(["approved", "approved_with_limitation"]);
+
+export function attachOrdinaryInternalAuthority(data, authority) {
+  Object.defineProperty(data, ORDINARY_INTERNAL_AUTHORITY, { value: Object.freeze({ ...authority }), enumerable: false });
+  return data;
+}
+
+export function ordinaryInternalAuthorityOf(data) {
+  return data?.[ORDINARY_INTERNAL_AUTHORITY] ?? null;
+}
+
+// Whether the source reasons leave only the recorded 'present' story
+// category: the one condition the count-only basis answers. Pure.
+export function isCountOnlyStoryTestimonialSource(source) {
+  return source?.getKinderReviewReasons?.length === 1
+    && source.getKinderReviewReasons[0] === HIGH_RISK_SENSITIVITY_FIELDS.reviewed_story_testimonial_status
+    && source.blockedReasons?.length === 0
+    && source.recorded?.categories?.reviewed_story_testimonial_status === "present";
+}
 
 export const ORDINARY_AUTHORITY_REASONS = Object.freeze([
   "evidence_type_not_measurement",
@@ -165,10 +218,24 @@ export async function evaluateOrdinaryMeasurementAuthorityInTransaction(tx, {
     source = await classifySourceVersionInTransaction(tx, { organizationId, sourceVersionId: evidenceItemRow.source_version_id });
     reasons.push(...source.getKinderReviewReasons, ...source.blockedReasons);
   }
-  const ordered = orderedReasons(reasons);
+  let ordered = orderedReasons(reasons);
+  let basis = ordered.length === 0 ? ORDINARY_AUTHORITY_BASIS.ALL_CATEGORIES_ABSENT : null;
+  // Only a claim that restates the measurement (checked above) can be a
+  // count-only use, and only while no recorded decision on its lineage is
+  // negative.
+  if (claimRow && ordered.length === 1 && isCountOnlyStoryTestimonialSource(source)) {
+    const evidenceHead = await findCurrentEvidenceReviewDecision(tx, { organizationId, evidenceItemId: evidenceItemRow.evidence_item_id });
+    const claimHead = await findCurrentClaimReviewDecision(tx, { organizationId, claimId: claimRow.claim_id });
+    if ((!evidenceHead || POSITIVE_EVIDENCE_OUTCOMES.has(evidenceHead.decision_outcome))
+      && (!claimHead || POSITIVE_CLAIM_OUTCOMES.has(claimHead.decision_outcome))) {
+      ordered = [];
+      basis = ORDINARY_AUTHORITY_BASIS.COUNT_ONLY_STORY_TESTIMONIAL_PRESENT;
+    }
+  }
   return {
     ordinary: ordered.length === 0,
     reasons: ordered,
+    basis,
     measurementRow,
     sourcePermissions: source ? { is_current: source.isCurrent, recorded: source.recorded } : null,
   };

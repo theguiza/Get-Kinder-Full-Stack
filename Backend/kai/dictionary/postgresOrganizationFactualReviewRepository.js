@@ -279,7 +279,9 @@ export async function readOrganizationFactualReviewInTransaction(tx, { organizat
         }
         : null,
       limitations: limitationCodes.map((code) => ({ code, description: describeMeasurementLimitationCode(code) })),
-      ordinary_internal_rule: { applies: ordinaryRule.ordinary, reasons: ordinaryRule.reasons },
+      // basis: all_sensitive_categories_absent, or count_only_story_testimonial_present
+      // (usable as a count in an internal Evidence Summary only); null when it does not apply.
+      ordinary_internal_rule: { applies: ordinaryRule.ordinary, reasons: ordinaryRule.reasons, basis: ordinaryRule.basis },
       source_permissions: {
         is_current: ordinaryRule.sourcePermissions?.is_current === true,
         sensitivity_review_complete: Boolean(ordinaryRule.sourcePermissions?.recorded),

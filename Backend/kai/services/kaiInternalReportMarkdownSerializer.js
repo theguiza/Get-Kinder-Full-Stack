@@ -1,4 +1,8 @@
+import { COUNT_ONLY_LIMITATION_CODE } from "../validators/kaiGeneratedContentValidators.js";
 import { describeMeasurementCalculationMethod, describeMeasurementLimitationCode } from "../validators/kaiSourceMeasurementValidators.js";
+
+const COUNT_ONLY_LIMITATION_TEXT = "The source is recorded as containing stories or testimonials. Only its record count is used here; "
+  + "no story or testimonial content is used, and Get Kinder's review still applies to any other use.";
 
 /**
  * Markdown for the organization's internal report (owner decision
@@ -46,6 +50,20 @@ function measuredFacts(model) {
   return model.facts.filter((fact) => fact.measurement);
 }
 
+// A count used under the count-only basis (its source is recorded as
+// containing stories or testimonials) is reported as a count of rows in its
+// worksheet: what a row represents is attributed to the person who defined
+// it and never stated as the counted thing itself.
+function countedRows(m) {
+  const worksheet = m.worksheetKey ? ` in worksheet ${text(m.worksheetName || "Worksheet")} (${code(m.worksheetKey)})` : "";
+  return `${plural(m.measuredValue, "non-blank data row")}${worksheet}`;
+}
+
+function humanMeaning(m) {
+  return `A person at the organization defined each row as one ${text(m.countedUnit)}; KAI did not verify that meaning, `
+    + `so this is a count of rows, not an established count of ${text(m.unitLabel)}.`;
+}
+
 function contextLines(model) {
   const context = model.context || {};
   const lines = [];
@@ -65,7 +83,12 @@ function contextLines(model) {
 function findingLines(model) {
   const lines = [];
   for (const fact of model.facts) {
-    if (fact.measurement) {
+    if (fact.measurement && fact.countOnly) {
+      const m = fact.measurement;
+      const period = periodText(m);
+      lines.push(`- The promoted source contains **${countedRows(m)}**${period ? ` for the stated reporting period ${period}` : ""}. `
+        + `${humanMeaning(m)} ${refs(fact.citationRefs)}`);
+    } else if (fact.measurement) {
       const m = fact.measurement;
       const period = periodText(m);
       lines.push(`- The promoted source records **${m.measuredValue} ${text(m.unitLabel)}**${period ? ` for the reporting period ${period}` : ""}: `
@@ -97,9 +120,13 @@ function methodLines(model) {
       `#### ${refs(fact.citationRefs)} ${text(m.unitLabel)}`,
       "",
       `- **What one record represents:** one ${text(m.countedUnit)}, as defined by a person at the organization.`,
-      `- **Definition:** ${text(m.definitionText)}`,
-      `- **Included:** ${text(m.inclusionRule)}`,
-      `- **Excluded:** ${text(m.exclusionRule)}`,
+      ...(fact.countOnly
+        ? ["- **Definition, inclusion and exclusion text:** not reproduced. The source is recorded as containing stories or testimonials, so this report uses its record count only and carries no free text from it or about it."]
+        : [
+          `- **Definition:** ${text(m.definitionText)}`,
+          `- **Included:** ${text(m.inclusionRule)}`,
+          `- **Excluded:** ${text(m.exclusionRule)}`,
+        ]),
       `- **Calculation:** ${code(m.calculationMethod)}: ${describeMeasurementCalculationMethod(m.calculationMethod)}`,
       ...(m.worksheetKey ? [`- **Selected worksheet:** ${text(m.worksheetName || "Worksheet")} (${code(m.worksheetKey)}).`] : []),
       `- **Arithmetic:** ${plural(m.totalRecordCount, "data record")} after the header, minus ${plural(m.blankRecordCount, "blank record")} excluded = **${m.measuredValue}** counted.`,
@@ -129,7 +156,7 @@ function limitationLines(model) {
     if (fact.limitationCodes.length === 0) continue;
     lines.push(`- ${refs(fact.citationRefs)}`);
     for (const limitation of fact.limitationCodes) {
-      const description = describeMeasurementLimitationCode(limitation);
+      const description = limitation === COUNT_ONLY_LIMITATION_CODE ? COUNT_ONLY_LIMITATION_TEXT : describeMeasurementLimitationCode(limitation);
       lines.push(`  - ${description ? text(description) : "Recorded limitation."} (${code(limitation)})`);
     }
   }
@@ -140,7 +167,9 @@ function limitationLines(model) {
 function establishesLines(model) {
   const lines = [];
   for (const fact of model.facts) {
-    if (fact.measurement) {
+    if (fact.measurement && fact.countOnly) {
+      lines.push(`- The promoted source version ${code(fact.sourceVersionId)} contains ${countedRows(fact.measurement)}. ${refs(fact.citationRefs)}`);
+    } else if (fact.measurement) {
       const m = fact.measurement;
       lines.push(`- The promoted source version ${code(fact.sourceVersionId)} contains ${plural(m.measuredValue, "non-blank data record")}, `
         + `each of which the organization's recorded definition treats as one ${text(m.countedUnit)}. ${refs(fact.citationRefs)}`);
@@ -163,6 +192,12 @@ function doesNotEstablishLines(model) {
       lines.push("- That each record is a distinct real-world session or event: KAI counted records; it did not verify what each record represents.");
     }
     lines.push("- That the reporting period is verified: it is stated in the definition, not checked against record dates.");
+  }
+  for (const fact of measured.filter((entry) => entry.countOnly)) {
+    lines.push(`- That each counted row is one ${text(fact.measurement.countedUnit)} ${refs(fact.citationRefs)}: a person at the organization defined that meaning, and KAI did not verify it.`);
+  }
+  if (measured.some((fact) => fact.countOnly)) {
+    lines.push("- Anything from the stories or testimonials the source is recorded as containing: none of that content is used in this report.");
   }
   lines.push(
     "- Any outcome for participants or the community, or any change over time.",
@@ -203,11 +238,17 @@ function traceabilityLines(model) {
 
 function authorityLines(model) {
   const lines = [
-    "- **Source authority:** every cited source has a completed sensitivity and allowed-use decision that permits this internal use and AI processing, and records none of the high-risk categories.",
+    model.facts.some((fact) => fact.countOnly)
+      ? "- **Source authority:** every cited source has a completed sensitivity and allowed-use decision that permits this internal use and AI processing. "
+        + "A source recorded as containing stories or testimonials is used for its record count only: no story or testimonial content is used, and its recorded category is unchanged. "
+        + "Every other high-risk category is recorded as absent."
+      : "- **Source authority:** every cited source has a completed sensitivity and allowed-use decision that permits this internal use and AI processing, and records none of the high-risk categories.",
   ];
   for (const fact of model.facts) {
     const basis = fact.evidenceReviewOutcome || fact.claimReviewOutcome
       ? `recorded review decisions (evidence: ${fact.evidenceReviewOutcome ? code(fact.evidenceReviewOutcome) : "none"}; claim: ${fact.claimReviewOutcome ? code(fact.claimReviewOutcome) : "none"})`
+      : fact.countOnly
+      ? "a count-only use of a source recorded as containing stories or testimonials: the record count restated from its source, with no story or testimonial content; no further approval is required for this internal Evidence Summary"
       : "an ordinary measured fact restated from its source; no further approval is required for internal use";
     lines.push(`- ${refs(fact.citationRefs)} Currently eligible for internal use: ${fact.currentlyEligible ? "yes" : "no"}; basis: ${basis}.`);
   }
@@ -220,9 +261,18 @@ function conclusionLines(model) {
   if (measured.length === 0) {
     return ["The cited claims are reported for internal use exactly as recorded, with the limitations above."];
   }
+  if (measured.every((fact) => fact.countOnly)) {
+    return [
+      `On the available evidence, the promoted source contains ${measured.map((fact) => countedRows(fact.measurement)).join("; ")}. `
+        + "Each figure is a count of rows. What a row represents was defined by a person at the organization and was not verified by KAI, "
+        + "so the figure is not an established count of what the definition names. It may be reported internally as a row count, with its limitations kept with it. "
+        + "It is not evidence of the number of people reached, of distinct sessions, of outcomes, or of impact.",
+    ];
+  }
   const parts = measured.map((fact) => {
     const m = fact.measurement;
     const period = periodText(m);
+    if (fact.countOnly) return `${countedRows(m)}, which a person defined as ${text(m.unitLabel)} (not verified)`;
     return `${m.measuredValue} ${text(m.unitLabel)}${period ? ` for ${period}` : ""}`;
   });
   return [

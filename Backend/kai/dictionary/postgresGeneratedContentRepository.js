@@ -11,6 +11,13 @@ import { validateGeneratedContentDraft } from "../validators/kaiGeneratedContent
 import { getScopedEvidenceMeasurementByEvidenceItemId } from "../db/kaiIntakeQueries.js";
 import { MEASUREMENT_EVIDENCE_TYPE, measurementLimitationCodes } from "../validators/kaiSourceMeasurementValidators.js";
 import {
+  COUNT_ONLY_CONTENT_TYPE,
+  COUNT_ONLY_LIMITATION_CODE,
+  COUNT_ONLY_OPERATION_REASON,
+  ORDINARY_AUTHORITY_BASIS,
+  ordinaryInternalAuthorityOf,
+} from "./postgresOrdinaryInternalFactAuthority.js";
+import {
   validateExportManifestEligibility,
   __exportManifestEligibilityValidatorContract,
 } from "../validators/kaiExportManifestEligibilityValidators.js";
@@ -1512,12 +1519,26 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
               stageBlocker(MEASURED_CLAIM_ELIGIBILITY_VALIDATOR_KEY, "measured_claim_not_currently_eligible"),
             );
           }
+          // A story-present source's count is usable under the count-only
+          // basis for an internal Evidence Summary only: where eligibility
+          // rests on that basis, every other content type is refused before
+          // the model. Under it the claim carries the count-only code, so
+          // the model is told and VAL-GEN-010 bounds the generated text.
+          const ordinaryAuthority = ordinaryInternalAuthorityOf(traceability);
+          const countOnly = ordinaryAuthority?.basis === ORDINARY_AUTHORITY_BASIS.COUNT_ONLY_STORY_TESTIMONIAL_PRESENT;
+          if (countOnly && ordinaryAuthority.reliedOn && contentType !== COUNT_ONLY_CONTENT_TYPE) {
+            rollbackFailure(
+              "validation_blocker",
+              stageBlocker(MEASURED_CLAIM_ELIGIBILITY_VALIDATOR_KEY, COUNT_ONLY_OPERATION_REASON),
+            );
+          }
           const measurementRow = await getScopedEvidenceMeasurementByEvidenceItemId(
             { organizationId: input.organizationId, evidenceItemId: projection.evidenceItemId },
             tx,
           );
           if (!measurementRow) rollbackFailure("conflict_current_state_changed");
           measurementCodes = measurementLimitationCodes({ measurementRow, dimensions: traceability.dimensions });
+          if (countOnly && contentType === COUNT_ONLY_CONTENT_TYPE) measurementCodes.push(COUNT_ONLY_LIMITATION_CODE);
         }
         projection.limitationCodes = [...new Set([...blockerCodes, ...measurementCodes])].sort();
       }

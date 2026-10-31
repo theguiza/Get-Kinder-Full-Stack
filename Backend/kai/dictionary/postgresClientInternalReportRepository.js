@@ -6,6 +6,7 @@ import { evaluateGeneratedDraftReviewPacketInTransaction } from "./postgresGener
 import { evaluateInternalReportAvailabilityInTransaction } from "./postgresOrganizationInternalReviewRepository.js";
 import { loadReportContextInTransaction } from "./postgresExportManifestRenderModelRepository.js";
 import { MEASUREMENT_EVIDENCE_TYPE, measurementLimitationCodes } from "../validators/kaiSourceMeasurementValidators.js";
+import { COUNT_ONLY_LIMITATION_CODE, ORDINARY_AUTHORITY_BASIS, ordinaryInternalAuthorityOf } from "./postgresOrdinaryInternalFactAuthority.js";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 export const INTERNAL_REPORT_MODEL_CONTRACT_VERSION = "kai-sprint2-internal-report-model-v1";
@@ -93,6 +94,10 @@ async function readClaimFacts(tx, { organizationId, citation, citationRefs }) {
     : null;
   const versionRow = await readSourceVersion(tx, { organizationId, sourceVersionId: citation.sourceVersionId });
   const decision = (head) => (head ? head.decision_outcome : null);
+  // A count used under the count-only basis (its source is recorded as
+  // containing stories or testimonials): the report carries the count, the
+  // defined unit and the method, never the free-text definition fields.
+  const countOnly = ordinaryInternalAuthorityOf(data)?.basis === ORDINARY_AUTHORITY_BASIS.COUNT_ONLY_STORY_TESTIMONIAL_PRESENT;
   return {
     citationRefs,
     claimId: citation.claimId,
@@ -107,6 +112,7 @@ async function readClaimFacts(tx, { organizationId, citation, citationRefs }) {
     evidenceStatement: data.evidence.statement,
     currentlyEligible: data.eligible === true,
     blockerCodes: [...data.blockerCodes],
+    countOnly,
     evidenceReviewOutcome: decision(data.evidence_review_decision),
     claimReviewOutcome: decision(data.claim_review_decision),
     measurement: measurementRow && definitionRow
@@ -122,13 +128,15 @@ async function readClaimFacts(tx, { organizationId, citation, citationRefs }) {
         worksheetName: measurementRow.worksheet_name || null,
         periodStart: definitionRow.period_start,
         periodEnd: definitionRow.period_end,
-        definitionText: definitionRow.definition_text,
-        inclusionRule: definitionRow.inclusion_rule,
-        exclusionRule: definitionRow.exclusion_rule,
+        definitionText: countOnly ? null : definitionRow.definition_text,
+        inclusionRule: countOnly ? null : definitionRow.inclusion_rule,
+        exclusionRule: countOnly ? null : definitionRow.exclusion_rule,
         definitionRecordedAt: iso(definitionRow.created_at),
       }
       : null,
-    limitationCodes: measurementRow ? measurementLimitationCodes({ measurementRow, dimensions: data.dimensions }) : [],
+    limitationCodes: measurementRow
+      ? [...measurementLimitationCodes({ measurementRow, dimensions: data.dimensions }), ...(countOnly ? [COUNT_ONLY_LIMITATION_CODE] : [])]
+      : [],
   };
 }
 

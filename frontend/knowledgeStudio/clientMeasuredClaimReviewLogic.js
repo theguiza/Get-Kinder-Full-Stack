@@ -91,6 +91,7 @@ export function projectOrganizationFactualReview(dto) {
     ordinaryRule: {
       applies: dto?.ordinary_internal_rule?.applies === true,
       reasons: asArray(dto?.ordinary_internal_rule?.reasons),
+      countOnly: dto?.ordinary_internal_rule?.basis === COUNT_ONLY_STORY_TESTIMONIAL_BASIS,
     },
     sourcePermissions: {
       isCurrent: dto?.source_permissions?.is_current === true,
@@ -107,6 +108,13 @@ export function projectOrganizationFactualReview(dto) {
     viewer: dto?.viewer ?? null,
   };
 }
+
+// The ordinary rule's count-only basis: the source is recorded as containing
+// stories or testimonials, so the claim is usable as a record count in an
+// internal Evidence Summary only.
+export const COUNT_ONLY_STORY_TESTIMONIAL_BASIS = "count_only_story_testimonial_present";
+export const COUNT_ONLY_RULE_TEXT = "applies as a count only: the source is recorded as containing stories or testimonials, so this finding "
+  + "is usable in an internal Evidence Summary as a record count, with no story or testimonial content. Any other use still needs Get Kinder's review.";
 
 // The counted worksheet as the organization knows it: its safe name and
 // stable key, or null for a CSV or single-worksheet count without one.

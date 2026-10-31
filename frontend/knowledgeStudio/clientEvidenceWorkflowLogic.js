@@ -417,6 +417,10 @@ export function internalDraftFailureMessage(result, { canGenerateGapFollowups = 
     return `${label} cannot be drafted from: part of its evidence lineage could not be found in this organization. `
       + "Nothing was created.";
   }
+  if (result?.body?.blockers?.[0]?.blocking_reason === "story_testimonial_count_only_operation_not_permitted") {
+    return "A selected measured finding comes from a source recorded as containing stories or testimonials. It is usable as a record "
+      + "count in an internal Evidence Summary only; other draft types need Get Kinder's review. Nothing was created.";
+  }
   if (result?.body?.blockers?.[0]?.blocking_reason === "measured_claim_not_currently_eligible") {
     return "A selected measured finding is not usable in internal reports now, so no draft was created. Its current condition is shown "
       + "on the claim under Claims for internal drafts. Nothing was created.";
@@ -677,6 +681,7 @@ export const INTERNAL_REPORT_REASON_MESSAGES = Object.freeze({
   audience_requires_get_kinder_review: "Only internal drafts are available as internal reports.",
   validator_results_not_passed: "This draft did not pass every automated check when it was generated.",
   structural_facts_only: "Every claim it cites is a structural fact (which columns a source has), so it documents source structure, not a programme result.",
+  count_only_content_boundary_exceeded: "It cites a count from a source recorded as containing stories or testimonials, and its text goes beyond that count.",
 });
 
 export const STRUCTURAL_ONLY_DRAFT_MESSAGE = "Structural facts only: this saved draft documents which columns a source has, "

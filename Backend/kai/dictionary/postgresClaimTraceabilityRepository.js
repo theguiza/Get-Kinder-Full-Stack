@@ -47,6 +47,7 @@ import { resolveEffectiveFunderAuthority } from "./postgresEffectiveFunderAuthor
 import { resolveEffectivePublicAuthority } from "./postgresEffectivePublicAuthorityResolver.js";
 import {
   ORDINARY_SOURCE_LIMITATION_DIMENSION_KEYS,
+  attachOrdinaryInternalAuthority,
   evaluateOrdinaryMeasurementAuthorityInTransaction,
 } from "./postgresOrdinaryInternalFactAuthority.js";
 
@@ -663,10 +664,12 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
   // its internal authority from the source's recorded sensitivity decision,
   // the human measurement definition and the deterministic count; nothing is
   // written and no reviewer is implied. Funder and public are unchanged.
-  const ordinaryInternal = requestedAudience === "internal"
-    && (await evaluateOrdinaryMeasurementAuthorityInTransaction(tx, {
+  const ordinaryAuthority = requestedAudience === "internal"
+    ? await evaluateOrdinaryMeasurementAuthorityInTransaction(tx, {
       organizationId, evidenceItemRow, locatorRow, sourceVersionRow, claimRow,
-    })).ordinary;
+    })
+    : null;
+  const ordinaryInternal = ordinaryAuthority?.ordinary === true;
 
   // KAI P2-10: read every accepted_internal_with_limitation decision already
   // recorded for this claim, then determine - per dimension, using the exact
@@ -833,7 +836,18 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
   if (!graphTraceCompleteness.complete) addOrderedBlocker(blockers, "traceability_incomplete");
 
   const blockerCodes = orderedBlockers(blockers);
-  return success({
+  // Whether internal eligibility rests on the ordinary authority: a lineage
+  // with no recorded decision, or a source-level limitation carried rather
+  // than accepted. Consumers that admit only some operations under a basis
+  // (the count-only basis) read it with ordinaryInternalAuthorityOf.
+  const ordinaryReliedOn = ordinaryInternal && (
+    !claimReviewHead
+    || !evidenceReviewHead
+    || ORDINARY_SOURCE_LIMITATION_DIMENSION_KEYS.some((dimensionKey) => (
+      dimensions[dimensionKey].evidence.assessment_status === "unresolved" && !limitationAcceptance[dimensionKey].internalAccepted
+    ))
+  );
+  const data = {
     claim: {
       claim_id: claimRow.claim_id,
       claim_type: claimRow.claim_type,
@@ -911,7 +925,14 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
     affectedDimensionKeys: [...affectedDimensionKeys].sort(),
     affectedObjectIds: [...affectedObjectIds].sort(),
     truncated,
-  });
+  };
+  if (ordinaryAuthority) {
+    attachOrdinaryInternalAuthority(data, {
+      basis: ordinaryInternal ? ordinaryAuthority.basis : null,
+      reliedOn: ordinaryReliedOn,
+    });
+  }
+  return success(data);
 }
 
 export function createPostgresClaimTraceabilityRepository({ runInTransaction } = {}) {

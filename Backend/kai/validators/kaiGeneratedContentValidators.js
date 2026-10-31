@@ -9,10 +9,50 @@ const VALIDATOR_KEYS = Object.freeze([
   "VAL-GEN-006",
   "VAL-GEN-007",
   "VAL-GEN-008",
+  "VAL-GEN-010",
 ]);
 
 const NUMERIC_LITERAL_PATTERN = /(?<![A-Za-z0-9_])[-+]?(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?(?:%|\b)/g;
 const CAUSAL_PATTERN = /\b(causes?|caused|causing|because|due to|drives?|driven by|leads? to|led to|results? in|resulted in|attribut(?:e|ed|able) to|impact(?:s|ed)?|increases?|decreases?|reduces?|improves?|worsens?)\b/gi;
+
+/**
+ * VAL-GEN-010: the output boundary of the count-only internal authority for
+ * a story-present source (postgresOrdinaryInternalFactAuthority.js). Its
+ * claims reach the model only as the composed record-count restatement, so
+ * no story or testimonial text can be copied from the input; this checks
+ * that a block citing such a claim adds none either. It is a closed lexical
+ * boundary, in the manner of VAL-GEN-004: no quotation, no story, testimony
+ * or first-person wording, no participant, outcome or completion assertion
+ * that the cited statements do not themselves contain (the human-defined
+ * unit label is part of the statement), and, for a selected-worksheet
+ * count, the worksheet the rows were counted in. It does not interpret
+ * meaning; it bounds what a count-only block may say.
+ */
+export const COUNT_ONLY_LIMITATION_CODE = "source.story_testimonial_present_count_only";
+const QUOTATION_PATTERN = /["\u201C\u201D\u201E\u00AB\u00BB]/;
+const FIRST_PERSON_PATTERN = /\bI\b|\b(?:me|my|mine|myself)\b/i;
+const STORY_PATTERN = /\b(stor(?:y|ies)|testimon(?:y|ies|ial|ials)|quot(?:e|es|ed|ing|ation|ations)|anecdot\w*|said|says|told|tells|recount\w*|shared|narrat\w*)\b/i;
+const COUNT_ONLY_ASSERTION_PATTERN = /\b(participants?|people|persons?|individuals?|clients?|famil(?:y|ies)|beneficiar(?:y|ies)|attendees?|unique|distinct|outcomes?|results?|success\w*|achiev\w*|complet(?:ed|ion|ions)|benefit\w*|helped|served|lives|life|transform\w*|satisf\w*|felt|feel(?:s|ing|ings)?|experienc\w*|well-?being|changed)\b/gi;
+const UNNEGATED_VERIFIED_PATTERN = /(?<!not |un|n't |not been |never )\bverified\b/i;
+const SELECTED_WORKSHEET_PATTERN = /\bin selected worksheet (sheet_[1-9][0-9]{0,3})\b/;
+
+export function countOnlyBlockViolations(text, citedStatements) {
+  const blockText = String(text || "");
+  const citedText = citedStatements.join("\n").toLowerCase();
+  const violations = [];
+  if (QUOTATION_PATTERN.test(blockText)) violations.push("quotation");
+  if (FIRST_PERSON_PATTERN.test(blockText)) violations.push("first_person");
+  if (STORY_PATTERN.test(blockText)) violations.push("story_or_testimonial_wording");
+  if (literals(blockText, COUNT_ONLY_ASSERTION_PATTERN).some((word) => !new RegExp(`\\b${word.toLowerCase()}\\b`).test(citedText))) {
+    violations.push("participant_or_outcome_assertion");
+  }
+  if (UNNEGATED_VERIFIED_PATTERN.test(blockText)) violations.push("meaning_presented_as_verified");
+  for (const statement of citedStatements) {
+    const worksheet = SELECTED_WORKSHEET_PATTERN.exec(statement)?.[1];
+    if (worksheet && !new RegExp(`\\b${worksheet}\\b`).test(blockText)) violations.push("counted_worksheet_not_named");
+  }
+  return unique(violations).sort();
+}
 
 function pass(validatorKey, evidence = {}) {
   return Object.freeze({ validator_key: validatorKey, severity: "pass", evidence: Object.freeze(evidence) });
@@ -155,6 +195,28 @@ export function validateGeneratedContentDraft({
             violation_count: disclosureViolations.length,
             violation_classes: unique(disclosureViolations.map((violation) => violation.type)).sort(),
             block_ordinals: unique(disclosureViolations.map((violation) => violation.block_ordinal).filter((ordinal) => Number.isInteger(ordinal))).sort((a, b) => a - b),
+          }),
+    );
+  }
+
+  // VAL-GEN-010: evaluated only when a generation claim is used under the
+  // count-only basis, so every other draft's validator set is unchanged.
+  if ((generationClaims || []).some((claim) => (claim.limitationCodes || []).includes(COUNT_ONLY_LIMITATION_CODE))) {
+    const countOnlyViolations = [];
+    for (const block of blocks || []) {
+      const cited = (block.citations || []).map((citation) => claimById.get(citation.claimId)).filter(Boolean);
+      if (!cited.some((claim) => (claim.limitationCodes || []).includes(COUNT_ONLY_LIMITATION_CODE))) continue;
+      for (const type of countOnlyBlockViolations(block.text, cited.map((claim) => claim.claimStatement || ""))) {
+        countOnlyViolations.push({ type, block_ordinal: block.ordinal });
+      }
+    }
+    results.push(
+      countOnlyViolations.length === 0
+        ? pass("VAL-GEN-010")
+        : blocker("VAL-GEN-010", "count_only_content_boundary_exceeded", {
+            violation_count: countOnlyViolations.length,
+            violation_classes: unique(countOnlyViolations.map((violation) => violation.type)).sort(),
+            block_ordinals: unique(countOnlyViolations.map((violation) => violation.block_ordinal).filter((ordinal) => Number.isInteger(ordinal))).sort((a, b) => a - b),
           }),
     );
   }
