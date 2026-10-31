@@ -7,7 +7,7 @@ import {
   evaluateClaimTraceabilityInTransaction,
   AUDIENCE_AUTHORITY_BLOCKER_CODES,
 } from "./postgresClaimTraceabilityRepository.js";
-import { validateGeneratedContentDraft } from "../validators/kaiGeneratedContentValidators.js";
+import { composeCountOnlyFindingText, validateGeneratedContentDraft } from "../validators/kaiGeneratedContentValidators.js";
 import { getScopedEvidenceMeasurementByEvidenceItemId } from "../db/kaiIntakeQueries.js";
 import { MEASUREMENT_EVIDENCE_TYPE, measurementLimitationCodes } from "../validators/kaiSourceMeasurementValidators.js";
 import {
@@ -1496,6 +1496,10 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
       if (!projections) rollbackFailure("conflict_current_state_changed");
       const projectionByClaim = new Map(projections.map((claim) => [claim.claimId, claim]));
       const traceabilityByClaimId = new Map(traceabilityResults.map((traceability) => [traceability.claim.claim_id, traceability]));
+      // The exact cited measurement of each claim used under the count-only
+      // basis in an internal Evidence Summary (claim -> its evidence item ->
+      // that item's measurement and worksheet locator), never the version's.
+      const countOnlyMeasurementByClaimId = new Map();
       for (const traceability of traceabilityResults) {
         const projection = projectionByClaim.get(traceability.claim.claim_id);
         if (!projection || projection.evidenceItemId !== traceability.evidence.evidence_item_id) {
@@ -1538,20 +1542,55 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
           );
           if (!measurementRow) rollbackFailure("conflict_current_state_changed");
           measurementCodes = measurementLimitationCodes({ measurementRow, dimensions: traceability.dimensions });
-          if (countOnly && contentType === COUNT_ONLY_CONTENT_TYPE) measurementCodes.push(COUNT_ONLY_LIMITATION_CODE);
+          if (countOnly && contentType === COUNT_ONLY_CONTENT_TYPE) {
+            measurementCodes.push(COUNT_ONLY_LIMITATION_CODE);
+            if (input.requestedAudience === "internal" && measurementRow.evidence_item_id === projection.evidenceItemId) {
+              countOnlyMeasurementByClaimId.set(projection.claimId, measurementRow);
+            }
+          }
         }
         projection.limitationCodes = [...new Set([...blockerCodes, ...measurementCodes])].sort();
       }
 
-      const generatorInput = toGeneratorInput({
-        requestedAudience: input.requestedAudience,
-        projections,
-        contentType,
-        authoritativeReadiness: contentType === DATA_GAP_MEMO_CONTENT_TYPE
-          ? dependencies.authoritativeDataGaps
-          : dependencies.authoritativeReadiness,
-      });
-      const generatorResult = await dependencies.draftGenerator(generatorInput);
+      // A count-only claim's block is composed by the server from its own
+      // measurement and is never asked of the model; the model drafts only
+      // the other claims' blocks, and is not called when there are none.
+      // The combined result then passes the same contract, validators,
+      // persistence and audit as any generated draft.
+      const modelProjections = projections.filter((projection) => !countOnlyMeasurementByClaimId.has(projection.claimId));
+      const generatorInput = modelProjections.length > 0
+        ? toGeneratorInput({
+            requestedAudience: input.requestedAudience,
+            projections: modelProjections,
+            contentType,
+            authoritativeReadiness: contentType === DATA_GAP_MEMO_CONTENT_TYPE
+              ? dependencies.authoritativeDataGaps
+              : dependencies.authoritativeReadiness,
+          })
+        : null;
+      let generatorResult = generatorInput ? await dependencies.draftGenerator(generatorInput) : null;
+      if (countOnlyMeasurementByClaimId.size > 0) {
+        let modelBlocks = [];
+        if (generatorResult) {
+          const modelClassification = classifyGeneratorResult(generatorResult);
+          if (!modelClassification.ok) {
+            rollbackFailure("validation_blocker", stageBlocker(GENERATOR_RESULT_CONTRACT_VALIDATOR_KEY, modelClassification.reason));
+          }
+          if (generatorResult.blocks.some((block) => block.citations.some((citation) => countOnlyMeasurementByClaimId.has(citation.claimId)))) {
+            rollbackFailure("validation_blocker", stageBlocker("VAL-GEN-010", "count_only_content_boundary_exceeded"));
+          }
+          modelBlocks = generatorResult.blocks;
+        }
+        const countOnlyBlocks = projections
+          .filter((projection) => countOnlyMeasurementByClaimId.has(projection.claimId))
+          .map((projection) => ({
+            text: composeCountOnlyFindingText(countOnlyMeasurementByClaimId.get(projection.claimId)),
+            citations: [{ claimId: projection.claimId, evidenceItemId: projection.evidenceItemId }],
+          }));
+        generatorResult = {
+          blocks: [...countOnlyBlocks, ...modelBlocks].map((block, index) => ({ ordinal: index + 1, text: block.text, citations: block.citations })),
+        };
+      }
       const generatorResultClassification = classifyGeneratorResult(generatorResult);
       if (!generatorResultClassification.ok) {
         rollbackFailure(

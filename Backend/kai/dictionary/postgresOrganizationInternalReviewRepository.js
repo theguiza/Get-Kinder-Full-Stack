@@ -14,7 +14,8 @@ import {
   isCountOnlyStoryTestimonialSource,
   ordinaryInternalAuthorityOf,
 } from "./postgresOrdinaryInternalFactAuthority.js";
-import { countOnlyBlockViolations } from "../validators/kaiGeneratedContentValidators.js";
+import { countOnlyBlockMatchesMeasurement, countOnlyBlockViolations } from "../validators/kaiGeneratedContentValidators.js";
+import { getScopedEvidenceMeasurementByEvidenceItemId } from "../db/kaiIntakeQueries.js";
 
 // The source classification is shared with P2-06's ordinary internal factual
 // authority (postgresOrdinaryInternalFactAuthority.js) and re-exported here
@@ -144,8 +145,11 @@ async function citesOnlyStructuralFacts(tx, { organizationId, packet }) {
 // review of this draft only when the draft is an internal Evidence Summary,
 // every claim it cites from that source is - re-evaluated now by P2-06 -
 // under the count-only basis, and every persisted block citing one of those
-// claims still passes the VAL-GEN-010 content boundary. One qualifying claim
-// never covers the draft. 'covered' is null when no such source is cited.
+// claims is exactly the server-composed finding of that claim's own current
+// measurement (and still passes VAL-GEN-010). Model prose stored before that
+// composition, including prose VAL-GEN-010 once passed, is not delivered;
+// a new draft composes the finding. One qualifying claim never covers the
+// draft. 'covered' is null when no such source is cited.
 export const COUNT_ONLY_CONTENT_REASON = "count_only_content_boundary_exceeded";
 const STORY_TESTIMONIAL_REASON = HIGH_RISK_SENSITIVITY_FIELDS.reviewed_story_testimonial_status;
 
@@ -168,10 +172,14 @@ async function evaluateCountOnlyStorySourcesInTransaction(tx, { organizationId, 
   for (const claimId of [...new Set(citations.map((citation) => citation.claimId))]) {
     const traceability = await evaluateClaimTraceabilityInTransaction(tx, { organizationId, claimId, requestedAudience: "internal" });
     if (!traceability.ok) return { covered: false, contentExceeded: false };
+    const countOnly = traceability.data.eligible === true
+      && ordinaryInternalAuthorityOf(traceability.data)?.basis === ORDINARY_AUTHORITY_BASIS.COUNT_ONLY_STORY_TESTIMONIAL_PRESENT;
     claims.set(claimId, {
       statement: traceability.data.claim.statement,
-      countOnly: traceability.data.eligible === true
-        && ordinaryInternalAuthorityOf(traceability.data)?.basis === ORDINARY_AUTHORITY_BASIS.COUNT_ONLY_STORY_TESTIMONIAL_PRESENT,
+      countOnly,
+      measurementRow: countOnly
+        ? await getScopedEvidenceMeasurementByEvidenceItemId({ organizationId, evidenceItemId: traceability.data.evidence.evidence_item_id }, tx)
+        : null,
     });
   }
   if (!citations.every((citation) => !countOnlySourceIds.has(citation.sourceVersionId) || claims.get(citation.claimId).countOnly)) {
@@ -179,7 +187,8 @@ async function evaluateCountOnlyStorySourcesInTransaction(tx, { organizationId, 
   }
   const contentExceeded = packet.blocks.some((block) => (
     block.citations.some((citation) => countOnlySourceIds.has(citation.sourceVersionId))
-    && countOnlyBlockViolations(block.text, block.citations.map((citation) => claims.get(citation.claimId).statement)).length > 0
+    && (!countOnlyBlockMatchesMeasurement(block, claims.get(block.citations[0].claimId).measurementRow)
+      || countOnlyBlockViolations(block.text, block.citations.map((citation) => claims.get(citation.claimId).statement)).length > 0)
   ));
   return { covered: !contentExceeded, contentExceeded };
 }

@@ -54,6 +54,48 @@ export function countOnlyBlockViolations(text, citedStatements) {
   return unique(violations).sort();
 }
 
+/**
+ * The count-only finding, composed by the server from the exact cited
+ * measurement (owner prompt "KAI — Package 3", 2026-10-31). VAL-GEN-010 is
+ * lexical: a word the cited statement uses, such as the human-defined unit
+ * label, is not an added assertion, so model prose could state "37 service
+ * events" for 37 rows of a data dictionary. Instead a count-only claim's
+ * block is this text: the parser-established numbers, the worksheet key of
+ * the measurement's own locator, and the reporting period as attested.
+ * It never contains the human label, the definition text, a worksheet or
+ * file name, or any other free text, and it depends only on immutable
+ * measurement and definition values, so the same measurement always
+ * composes the same text. It satisfies VAL-GEN-004, -008 and -010 on their
+ * own terms; they still run on it.
+ */
+const CSV_COUNT_ONLY_METHOD = "p1_csv_profile_data_records_excluding_blank_v1";
+
+export function composeCountOnlyFindingText(measurementRow) {
+  const where = measurementRow.calculation_method === CSV_COUNT_ONLY_METHOD || !measurementRow.worksheet_key
+    ? "in the CSV data records of the cited source version"
+    : `in worksheet ${measurementRow.worksheet_key}`;
+  const scope = measurementRow.calculation_method === CSV_COUNT_ONLY_METHOD || !measurementRow.worksheet_key ? "that source version" : "that one worksheet";
+  const period = measurementRow.period_start
+    ? `The reporting period ${measurementRow.period_start} to ${measurementRow.period_end} is attested in that definition and was not verified against dates in the rows.`
+    : "No reporting period was defined for the count.";
+  return `${measurementRow.measured_value} nonblank data rows were counted ${where}, `
+    + `with ${measurementRow.blank_record_count} blank rows excluded and ${measurementRow.duplicate_record_count} exact-duplicate rows included in the count. `
+    + `This is a count of data records in ${scope} only: what one record represents is human-defined by the organization and was not verified by KAI, `
+    + "so the number is a row count and nothing more. "
+    + `${period} Any coverage limitations recorded for the claim apply and are listed with the report's limitations.`;
+}
+
+// A persisted block citing a count-only claim is accepted only when it cites
+// exactly that claim's evidence item and is exactly the composed finding of
+// the measurement now recorded for it.
+export function countOnlyBlockMatchesMeasurement(block, measurementRow) {
+  return Boolean(measurementRow)
+    && Array.isArray(block?.citations)
+    && block.citations.length === 1
+    && block.citations[0].evidenceItemId === measurementRow.evidence_item_id
+    && block.text === composeCountOnlyFindingText(measurementRow);
+}
+
 function pass(validatorKey, evidence = {}) {
   return Object.freeze({ validator_key: validatorKey, severity: "pass", evidence: Object.freeze(evidence) });
 }

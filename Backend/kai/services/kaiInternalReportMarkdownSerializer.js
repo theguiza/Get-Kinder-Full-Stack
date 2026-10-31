@@ -51,17 +51,32 @@ function measuredFacts(model) {
 }
 
 // A count used under the count-only basis (its source is recorded as
-// containing stories or testimonials) is reported as a count of rows in its
-// worksheet: what a row represents is attributed to the person who defined
-// it and never stated as the counted thing itself.
+// containing stories or testimonials) is reported, in every section, as the
+// parser-established count of nonblank rows in the worksheet of its own cited
+// measurement. What a row represents is the human-defined label, quoted as
+// recorded and attributed to the person who defined it; it is never the
+// counted thing, and the label-bearing claim and evidence statements are not
+// reproduced as findings.
+function worksheetOf(m) {
+  return m.worksheetKey ? `${text(m.worksheetName || "Worksheet")} (${code(m.worksheetKey)})` : "the source version's CSV data records";
+}
+
 function countedRows(m) {
-  const worksheet = m.worksheetKey ? ` in worksheet ${text(m.worksheetName || "Worksheet")} (${code(m.worksheetKey)})` : "";
-  return `${plural(m.measuredValue, "non-blank data row")}${worksheet}`;
+  return `${plural(m.measuredValue, "nonblank data row")} in ${worksheetOf(m)}`;
+}
+
+function countOnlyFinding(m) {
+  const counted = `${plural(m.measuredValue, "nonblank data row")} ${m.measuredValue === 1 ? "was" : "were"} counted in ${worksheetOf(m)}`;
+  return m.duplicateRecordCount > 0 ? `${counted}, including ${plural(m.duplicateRecordCount, "exact-duplicate record")}` : counted;
+}
+
+function humanLabel(value) {
+  return code(value);
 }
 
 function humanMeaning(m) {
-  return `A person at the organization defined each row as one ${text(m.countedUnit)}; KAI did not verify that meaning, `
-    + `so this is a count of rows, not an established count of ${text(m.unitLabel)}.`;
+  return `A person at the organization defined each row as one ${humanLabel(m.countedUnit)}; KAI did not verify that meaning, `
+    + `so this is a count of rows, not an established count of ${humanLabel(m.unitLabel)}.`;
 }
 
 function contextLines(model) {
@@ -86,7 +101,8 @@ function findingLines(model) {
     if (fact.measurement && fact.countOnly) {
       const m = fact.measurement;
       const period = periodText(m);
-      lines.push(`- The promoted source contains **${countedRows(m)}**${period ? ` for the stated reporting period ${period}` : ""}. `
+      lines.push(`- **${countOnlyFinding(m)}**; ${plural(m.blankRecordCount, "blank row")} ${m.blankRecordCount === 1 ? "was" : "were"} excluded. `
+        + `${period ? `The organization states the reporting period ${period}; it was not checked against dates in the rows. ` : ""}`
         + `${humanMeaning(m)} ${refs(fact.citationRefs)}`);
     } else if (fact.measurement) {
       const m = fact.measurement;
@@ -117,9 +133,11 @@ function methodLines(model) {
   for (const fact of measuredFacts(model)) {
     const m = fact.measurement;
     lines.push(
-      `#### ${refs(fact.citationRefs)} ${text(m.unitLabel)}`,
+      fact.countOnly ? `#### ${refs(fact.citationRefs)} Row count of ${worksheetOf(m)}` : `#### ${refs(fact.citationRefs)} ${text(m.unitLabel)}`,
       "",
-      `- **What one record represents:** one ${text(m.countedUnit)}, as defined by a person at the organization.`,
+      fact.countOnly
+        ? `- **What one record represents (human-defined, not verified):** one ${humanLabel(m.countedUnit)}, as defined by a person at the organization; KAI counted rows only.`
+        : `- **What one record represents:** one ${text(m.countedUnit)}, as defined by a person at the organization.`,
       ...(fact.countOnly
         ? ["- **Definition, inclusion and exclusion text:** not reproduced. The source is recorded as containing stories or testimonials, so this report uses its record count only and carries no free text from it or about it."]
         : [
@@ -194,7 +212,7 @@ function doesNotEstablishLines(model) {
     lines.push("- That the reporting period is verified: it is stated in the definition, not checked against record dates.");
   }
   for (const fact of measured.filter((entry) => entry.countOnly)) {
-    lines.push(`- That each counted row is one ${text(fact.measurement.countedUnit)} ${refs(fact.citationRefs)}: a person at the organization defined that meaning, and KAI did not verify it.`);
+    lines.push(`- That each counted row is one ${humanLabel(fact.measurement.countedUnit)} ${refs(fact.citationRefs)}: a person at the organization defined that meaning, and KAI did not verify it.`);
   }
   if (measured.some((fact) => fact.countOnly)) {
     lines.push("- Anything from the stories or testimonials the source is recorded as containing: none of that content is used in this report.");
@@ -211,6 +229,13 @@ function analysisLines(model) {
   const lines = [];
   for (const fact of measuredFacts(model)) {
     const m = fact.measurement;
+    if (fact.countOnly) {
+      lines.push(`- ${refs(fact.citationRefs)} ${m.measuredValue} of the ${plural(m.totalRecordCount, "data row")} after the header in ${worksheetOf(m)} `
+        + `${m.measuredValue === 1 ? "was" : "were"} nonblank and counted; ${plural(m.blankRecordCount, "blank row")} ${m.blankRecordCount === 1 ? "was" : "were"} excluded`
+        + `${m.duplicateRecordCount > 0 ? `, and ${plural(m.duplicateRecordCount, "exact-duplicate row")} ${m.duplicateRecordCount === 1 ? "is" : "are"} included` : ""}. `
+        + "The figure is a number of rows in that worksheet only.");
+      continue;
+    }
     const share = m.totalRecordCount > 0 ? Math.round((m.measuredValue / m.totalRecordCount) * 100) : null;
     lines.push(`- ${refs(fact.citationRefs)} ${m.measuredValue} of the ${plural(m.totalRecordCount, "data record")} in the source qualified`
       + `${share === null ? "" : ` (${share}%)`}; ${plural(m.blankRecordCount, "blank record")} ${m.blankRecordCount === 1 ? "was" : "were"} excluded.`
@@ -219,7 +244,13 @@ function analysisLines(model) {
         : ""));
   }
   if (lines.length === 0) lines.push("- The cited claims are reported as recorded; no measured value is available for further analysis.");
-  lines.push("- This is a volume-of-activity figure from one source. Interpreting it as reach or results would need further evidence (for example attendance linked to people, or outcome measures).");
+  const measured = measuredFacts(model);
+  if (measured.some((fact) => fact.countOnly)) {
+    lines.push("- A count-only figure is a number of worksheet rows. It is not a measure of activity, reach or results, and what a row represents was not verified.");
+  }
+  if (measured.length === 0 || measured.some((fact) => !fact.countOnly)) {
+    lines.push(`- ${measured.some((fact) => fact.countOnly) ? "Each other measured figure" : "This"} is a volume-of-activity figure from one source. Interpreting it as reach or results would need further evidence (for example attendance linked to people, or outcome measures).`);
+  }
   return lines;
 }
 
@@ -269,27 +300,58 @@ function conclusionLines(model) {
         + "It is not evidence of the number of people reached, of distinct sessions, of outcomes, or of impact.",
     ];
   }
-  const parts = measured.map((fact) => {
+  const countOnly = measured.filter((fact) => fact.countOnly);
+  const ordinary = measured.filter((fact) => !fact.countOnly);
+  const ordinaryParts = ordinary.map((fact) => {
     const m = fact.measurement;
     const period = periodText(m);
-    if (fact.countOnly) return `${countedRows(m)}, which a person defined as ${text(m.unitLabel)} (not verified)`;
     return `${m.measuredValue} ${text(m.unitLabel)}${period ? ` for ${period}` : ""}`;
   });
+  if (countOnly.length === 0) {
+    return [
+      `On the available evidence, the organization's promoted source records ${ordinaryParts.join("; ")}. `
+        + "This is a count of qualifying records under the organization's own recorded definition. It is a sound basis for internal reporting of activity volume, "
+        + "provided it is described as records and its limitations are kept with it. It is not evidence of the number of people reached, of distinct sessions, of outcomes, or of impact.",
+    ];
+  }
   return [
-    `On the available evidence, the organization's promoted source records ${parts.join("; ")}. `
-      + "This is a count of qualifying records under the organization's own recorded definition. It is a sound basis for internal reporting of activity volume, "
-      + "provided it is described as records and its limitations are kept with it. It is not evidence of the number of people reached, of distinct sessions, of outcomes, or of impact.",
+    `On the available evidence, the organization's promoted source records ${ordinaryParts.join("; ")}. `
+      + "Each of these is a count of qualifying records under the organization's own recorded definition. It is a sound basis for internal reporting of activity volume, "
+      + "provided it is described as records and its limitations are kept with it. "
+      + `Separately, ${countOnly.map((fact) => countedRows(fact.measurement)).join("; ")} ${countOnly.length === 1 ? "is a row count" : "are row counts"} only, whose meaning was defined by a person and not verified; `
+      + "they are not activity figures. "
+      + "None of this is evidence of the number of people reached, of distinct sessions, of outcomes, or of impact.",
   ];
 }
 
 function referenceLines(model) {
   return model.facts.map((fact) => {
+    if (fact.measurement && fact.countOnly) {
+      return `- [${fact.citationRefs.join("] [")}] Claim ${code(fact.claimId)} and evidence ${code(fact.evidenceItemId)}: authoritative measurement `
+        + `${countedRows(fact.measurement)} (${plural(fact.measurement.blankRecordCount, "blank row")} excluded, ${plural(fact.measurement.duplicateRecordCount, "exact-duplicate row")} included). `
+        + "Their recorded wording is not reproduced, because it uses the human-defined label as the counted unit. "
+        + `Source ${fact.sourceCode ? code(fact.sourceCode) : code(fact.sourceId)}, version ${code(fact.sourceVersionId)}.`;
+    }
     const worksheet = fact.measurement?.worksheetKey
       ? ` Worksheet citation: ${text(fact.measurement.worksheetName || "Worksheet")} (${code(fact.measurement.worksheetKey)}).`
       : "";
     return `- [${fact.citationRefs.join("] [")}] Claim ${code(fact.claimId)}: "${text(fact.claimStatement)}" `
       + `Evidence ${code(fact.evidenceItemId)}: "${text(fact.evidenceStatement)}" Source ${fact.sourceCode ? code(fact.sourceCode) : code(fact.sourceId)}, version ${code(fact.sourceVersionId)}.${worksheet}`;
   });
+}
+
+// A block citing a count-only claim is the finding composed by the server
+// from that claim's persisted measurement (the read refuses any other); any
+// other block was drafted by KAI from its cited claims.
+function narrativeIntroduction(model) {
+  const countOnlyRefs = new Set(model.facts.filter((fact) => fact.countOnly).flatMap((fact) => fact.citationRefs));
+  const composed = model.blocks.filter((block) => (block.citationRefs || []).some((ref) => countOnlyRefs.has(ref)));
+  const checks = "passed the automated checks for citations, numbers, causal language and limitation disclosure.";
+  if (composed.length === 0) return `The text below was drafted by KAI from the cited claims only, and ${checks}`;
+  if (composed.length === model.blocks.length) {
+    return `The text below was composed by KAI from the persisted measurement of each cited claim, not written by a language model, and ${checks}`;
+  }
+  return `Text citing a count-only claim was composed by KAI from that claim's persisted measurement, not written by a language model; the other text was drafted by KAI from the cited claims only. All of it ${checks}`;
 }
 
 export function serializeInternalReportToMarkdown(model) {
@@ -338,7 +400,7 @@ export function serializeInternalReportToMarkdown(model) {
     "",
     "## Generated narrative",
     "",
-    "The text below was drafted by KAI from the cited claims only, and passed the automated checks for citations, numbers, causal language and limitation disclosure.",
+    narrativeIntroduction(model),
   ];
   for (const block of [...model.blocks].sort((a, b) => a.ordinal - b.ordinal)) {
     lines.push("", `${text(block.text)} ${refs(block.citationRefs)}`);

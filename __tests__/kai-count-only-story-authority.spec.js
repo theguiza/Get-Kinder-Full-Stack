@@ -180,16 +180,16 @@ test("report: a count-only fact is a row count in its worksheet, its meaning is 
   const markdown = serializeInternalReportToMarkdown(countOnlyModel());
   const section = (from, to) => markdown.slice(markdown.indexOf(`\n## ${from}\n`), markdown.indexOf(`\n## ${to}\n`));
   assert.match(section("Key findings", "Reporting period"),
-    /contains \*\*37 non-blank data rows in worksheet Data_Dictionary \(`sheet_5`\)\*\*\. A person at the organization defined each row as one service event; KAI did not verify that meaning, so this is a count of rows, not an established count of service events\./);
+    /\*\*37 nonblank data rows were counted in Data_Dictionary \(`sheet_5`\)\*\*; 0 blank rows were excluded\. A person at the organization defined each row as one `service event`; KAI did not verify that meaning, so this is a count of rows, not an established count of `service events`\./);
   assert.doesNotMatch(markdown, /\*\*37 service events\*\*/, "the human meaning is never the stated finding");
   assert.doesNotMatch(markdown, /SENTINEL-DEFINITION-TEXT/, "free-text definition fields are not reproduced");
   assert.match(markdown, /Definition, inclusion and exclusion text:\*\* not reproduced/);
-  assert.match(section("What this evidence does not establish", "Analysis"), /That each counted row is one service event \[CIT-001\]: a person at the organization defined that meaning, and KAI did not verify it\./);
+  assert.match(section("What this evidence does not establish", "Analysis"), /That each counted row is one `service event` \[CIT-001\]: a person at the organization defined that meaning, and KAI did not verify it\./);
   assert.match(section("What this evidence does not establish", "Analysis"), /stories or testimonials the source is recorded as containing: none of that content is used/);
   assert.match(section("Authority for internal use", "Conclusion"), /used for its record count only: no story or testimonial content is used, and its recorded category is unchanged/);
   assert.doesNotMatch(section("Authority for internal use", "Conclusion"), /records none of the high-risk categories/);
   assert.match(section("Data quality and limitations", "What this evidence establishes"), /recorded as containing stories or testimonials\. Only its record count is used here/);
-  assert.match(section("Conclusion", "References"), /the promoted source contains 37 non-blank data rows in worksheet Data_Dictionary \(`sheet_5`\)\. Each figure is a count of rows\./);
+  assert.match(section("Conclusion", "References"), /the promoted source contains 37 nonblank data rows in Data_Dictionary \(`sheet_5`\)\. Each figure is a count of rows\./);
   // An ordinary (all-absent) fact keeps its existing wording.
   const ordinary = countOnlyModel();
   ordinary.facts[0].countOnly = false;

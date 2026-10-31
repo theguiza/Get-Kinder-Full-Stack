@@ -30,6 +30,9 @@ const repoRoot = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
 const dbName = "kai_customer_xlsx_file_to_report_synthetic";
 // The last revision before the P1 worksheet record-count basis.
 const LEGACY_REVISION = "4e41090";
+// The last revision whose count-only Evidence Summary was model-drafted; its
+// own code writes the historical count-only draft case K must not deliver.
+const PRE_COMPOSED_FINDING_REVISION = "d3984e7";
 const defaultServerBin = "/opt/homebrew/opt/postgresql@16/bin";
 const fallbackBin = "/opt/homebrew/opt/libpq/bin";
 const binDir = process.env.PG_BIN_DIR || (existsSync(join(defaultServerBin, "postgres")) ? defaultServerBin : fallbackBin);
@@ -49,6 +52,7 @@ const chromePath = process.env.KAI_BROWSER_ACCEPTANCE_CHROME
   || "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const spec = "__tests__/kai-customer-xlsx-file-to-report-browser-acceptance.integration.spec.js";
 const legacyCheckout = join(workDir, `checkout-${LEGACY_REVISION}`);
+const preComposedCheckout = join(workDir, `checkout-${PRE_COMPOSED_FINDING_REVISION}`);
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
@@ -116,6 +120,9 @@ try {
   if (existsSync(join(legacyCheckout, "migrations", "kai_sprint2_p2_01m_xlsx_worksheet_record_count_method.sql"))) {
     throw new Error(`${LEGACY_REVISION} unexpectedly already has the XLSX worksheet method`);
   }
+  run("git", ["clone", "--quiet", "--shared", "--no-checkout", repoRoot, preComposedCheckout], { capture: true });
+  run("git", ["checkout", "--quiet", "--detach", PRE_COMPOSED_FINDING_REVISION], { cwd: preComposedCheckout, capture: true });
+  symlinkSync(join(repoRoot, "node_modules"), join(preComposedCheckout, "node_modules"));
   mkdirSync(socketDir, { recursive: true });
   run(initdb, ["-D", dataDir, "--no-locale", "--encoding=UTF8"], { capture: true });
   run(pgCtl, ["-D", dataDir, "-l", logFile, "-o", `-k ${socketDir} -h 127.0.0.1 -p ${port}`, "start"], { capture: true });
@@ -200,6 +207,8 @@ try {
       KAI_XLSX_ACCEPTANCE_WORKDIR: workDir,
       KAI_XLSX_ACCEPTANCE_LEGACY_CHECKOUT: legacyCheckout,
       KAI_XLSX_ACCEPTANCE_LEGACY_REVISION: LEGACY_REVISION,
+      KAI_XLSX_ACCEPTANCE_PRE_COMPOSED_CHECKOUT: preComposedCheckout,
+      KAI_XLSX_ACCEPTANCE_PRE_COMPOSED_REVISION: PRE_COMPOSED_FINDING_REVISION,
     },
   });
   if (testResult.status !== 0) throw new Error(`XLSX file-to-report acceptance failed: ${spec}`);
@@ -208,6 +217,7 @@ try {
   if (started) spawnSync(pgCtl, ["-D", dataDir, "stop", "-m", "fast"], { encoding: "utf8", stdio: "ignore" });
   // Unlink the checkout's node_modules symlink first so removal can never follow it.
   rmSync(join(legacyCheckout, "node_modules"), { force: true });
+  rmSync(join(preComposedCheckout, "node_modules"), { force: true });
   rmSync(workDir, { recursive: true, force: true });
   console.log(`XLSX acceptance ephemeral PostgreSQL workdir removed: ${workDir}`);
 }
