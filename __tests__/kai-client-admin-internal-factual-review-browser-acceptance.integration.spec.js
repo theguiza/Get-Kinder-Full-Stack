@@ -746,6 +746,21 @@ async function runBrowserAcceptance() {
       results.c2 = { available: false, blocker: "cited_claims_not_currently_eligible", download: 422 };
     });
 
+    await test("C3: the authorized administrator's factual approval cannot make the ineligible structural-only draft usable: the route refuses it in its transaction and nothing is written", async () => {
+      const before = await queueOf("generated_content_review", ids.blockedDraftId);
+      const refused = await adminPage.api("POST", clientInternalDraftFactualReviewPath(ORG_X, PROJECT_X, ids.blockedDraftId), { decision: "approved" });
+      assert.equal(refused.status, 422, JSON.stringify(refused.body));
+      assert.ok(refused.body.blockers.some((blocker) => blocker.blocking_reason === "cited_claims_not_currently_eligible"
+        && blocker.validator_key === "VAL-KAI-ORG-REVIEW-001"), JSON.stringify(refused.body.blockers));
+      assert.deepEqual(await queueOf("generated_content_review", ids.blockedDraftId), before, "the draft's review queue is unchanged");
+      assert.deepEqual(await approvalCounts(), NO_APPROVALS);
+      const detail = await adminPage.api("GET", clientInternalDraftPath(ORG_X, PROJECT_X, ids.blockedDraftId));
+      assert.equal(detail.body.data.reviewState, "awaiting_organization_review");
+      assert.deepEqual(detail.body.data.internalReport, { available: false, getKinderReviewReasons: [], blockedReasons: ["cited_claims_not_currently_eligible", "structural_facts_only"] });
+      assert.equal((await fetchText(adminPage, clientInternalReportMarkdownPath(ORG_X, PROJECT_X, ids.blockedDraftId))).status, 422);
+      results.c3 = { approval: 422, blocker: "cited_claims_not_currently_eligible", written: 0 };
+    });
+
     await test("D1: the optional factual-review route still refuses other roles, inactive or other-organization administrators, GK staff, other Projects, other decisions, and a Get Kinder-only draft, writing nothing", async () => {
       const path = clientInternalDraftFactualReviewPath(ORG_X, PROJECT_X, ids.draftId);
       const before = await queueOf("generated_content_review", ids.draftId);
