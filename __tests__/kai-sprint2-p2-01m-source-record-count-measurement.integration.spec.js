@@ -184,7 +184,7 @@ async function runSuite() {
   }
 
   // Distinct id ranges per phase (the two phases are separate processes).
-  let seedIndex = PHASE === "legacy_seed" ? 900 : 0;
+  let seedIndex = PHASE === "legacy_seed" ? 900 : PHASE === "worksheet_legacy_seed" ? 950 : 0;
   async function seedPromotedSource({ organizationId = ORG, profile, allowedUse = "unknown" }) {
     seedIndex += 1;
     const n = String(seedIndex).padStart(12, "0");
@@ -287,6 +287,102 @@ async function runSuite() {
       assert.equal(proposal.ok, true, JSON.stringify(proposal));
       await query("CREATE TABLE IF NOT EXISTS public.p2_01m_legacy_fixture (source_version_id uuid PRIMARY KEY)");
       await query("INSERT INTO public.p2_01m_legacy_fixture VALUES ($1::uuid)", [legacy.sourceVersionId]);
+    });
+    return;
+  }
+
+  // A workbook shaped like the reported customer workbook (synthetic values
+  // only): Service_Events is sheet_3 with 364 data rows including one
+  // exact-duplicate pair; Data_Dictionary is sheet_5 with 37 data rows.
+  const serviceWorkbookSheets = (tag) => {
+    const events = [["event_ref", "event_date", "service_type", "run_tag"]];
+    for (let index = 1; index <= 362; index += 1) {
+      events.push([`E${String(index).padStart(3, "0")}`, `2026-09-${String((index % 28) + 1).padStart(2, "0")}`, index % 2 ? "visit" : "call", tag]);
+    }
+    events.push(["E900", "2026-09-30", "visit", tag], ["E900", "2026-09-30", "visit", tag]);
+    return [
+      { name: "Read_Me", rows: [["note"], [`synthetic service workbook ${tag}`]] },
+      { name: "Participant_Register", rows: [["participant_code", "cohort"], ...Array.from({ length: 84 }, (_, index) => [`P${String(index + 1).padStart(3, "0")}`, index % 2 ? "A" : "B"])] },
+      { name: "Service_Events", rows: events },
+      { name: "Funder_Notes", rows: [["note"], ["synthetic notes"]] },
+      { name: "Data_Dictionary", rows: [["field_name", "description"], ...Array.from({ length: 37 }, (_, index) => [`field_${index + 1}`, `synthetic description ${index + 1}`])] },
+    ];
+  };
+  const serviceWorkbookProfile = (tag) => workbookProfile(syntheticXlsxWorkbook({ sheets: serviceWorkbookSheets(tag) }));
+  // Independent of KAI: non-empty data rows after the header, and the rows
+  // that repeat another row exactly.
+  function independentWorksheetCounts(rows) {
+    const data = rows.slice(1).filter((row) => row.some((cell) => String(cell).trim() !== ""));
+    const seen = new Map();
+    for (const row of data) seen.set(JSON.stringify(row), (seen.get(JSON.stringify(row)) || 0) + 1);
+    return { counted: data.length, duplicates: [...seen.values()].filter((n) => n > 1).reduce((sum, n) => sum + n, 0) };
+  }
+  // The human definition the reported request supplied, used unchanged for
+  // both worksheets: identical definition text on two worksheets.
+  const SERVICE_DEFINITION = Object.freeze({
+    counted_unit: "service event",
+    unit_label: "service events",
+    definition_text: "Each row records one service event delivered to a participant.",
+    inclusion_rule: "Every data row after the header row that has at least one value.",
+    exclusion_rule: "The header row and empty rows.",
+  });
+  const WORKSHEET_ORG = "0e000000-0000-4000-8000-000000000d01";
+  const WORKSHEET_ADMIN = human(WORKSHEET_ORG, "client_admin", "09");
+
+  if (PHASE === "worksheet_legacy_seed") {
+    test("worksheet legacy seed (the last revision before worksheet identity, on its schema): sheet_5, a CSV, and a one-worksheet count are recorded and claimed; that revision refuses sheet_3", async () => {
+      const checkout = process.env.KAI_P2_01M_LEGACY_CHECKOUT;
+      assert.ok(checkout, "the runner supplies the legacy checkout");
+      const legacy = {
+        service: await import(`${checkout}/Backend/kai/services/kaiSourceMeasurementService.js`),
+        repository: await import(`${checkout}/Backend/kai/dictionary/postgresSourceMeasurementRepository.js`),
+        claims: await import(`${checkout}/Backend/kai/services/kaiClaimProposalService.js`),
+        claimRepository: await import(`${checkout}/Backend/kai/dictionary/postgresClaimProposalRepository.js`),
+        gapRepository: await import(`${checkout}/Backend/kai/dictionary/postgresClaimGapFollowupRepository.js`),
+      };
+      const repository = legacy.repository.createPostgresSourceMeasurementRepository({ runInTransaction: withTx });
+      const legacyRecord = (sourceVersionId, worksheetKey, definition) => legacy.service.recordSourceRecordCountMeasurement(
+        { organizationId: WORKSHEET_ORG, sourceVersionId, definition, worksheetKey, actorContext: WORKSHEET_ADMIN, now: NOW },
+        { env: ENV, sourceMeasurementRepository: repository },
+      );
+      const legacyPropose = (evidenceItemId) => legacy.claims.proposeClaim(
+        { organizationId: WORKSHEET_ORG, evidenceItemId, actorContext: WORKSHEET_ADMIN, now: NOW },
+        { env: ENV, claimProposalRepository: legacy.claimRepository.createPostgresClaimProposalRepository({ runInTransaction: withTx }),
+          metadataOnlyAudit: noAudit(), claimGapFollowupRepository: legacy.gapRepository.createPostgresClaimGapFollowupRepository({ runInTransaction: withTx }),
+          claimGapFollowupMetadataOnlyAudit: noAudit() },
+      );
+      const fixtures = [];
+      const workbook = await seedPromotedSource({ organizationId: WORKSHEET_ORG, profile: await serviceWorkbookProfile("legacy") });
+      const csv = await seedPromotedSource({ organizationId: WORKSHEET_ORG, profile: await kernelProfile(CSV) });
+      const oneSheet = await seedPromotedSource({ organizationId: WORKSHEET_ORG, profile: await workbookProfile(programmeSessionWorkbook({ tag: "worksheet-legacy" })) });
+      for (const [label, seeded, worksheetKey, definition] of [
+        ["sheet_5", workbook, "sheet_5", SERVICE_DEFINITION], ["csv", csv, null, DEFINITION], ["one_sheet", oneSheet, null, DEFINITION],
+      ]) {
+        const recorded = await legacyRecord(seeded.sourceVersionId, worksheetKey, definition);
+        assert.equal(recorded.ok, true, `${label}: ${JSON.stringify(recorded)}`);
+        const proposal = await legacyPropose(recorded.data.evidenceItem.evidence_item_id);
+        assert.equal(proposal.ok, true, `${label}: ${JSON.stringify(proposal)}`);
+        fixtures.push([label, seeded.sourceVersionId, recorded.data.evidenceItem.evidence_item_id, proposal.data.claim.claim_id,
+          recorded.data.definition.source_measurement_definition_id, recorded.data.definition.definition_fingerprint]);
+      }
+      assert.equal((await query("SELECT measured_value::int FROM kai.evidence_measurements WHERE evidence_item_id = $1::uuid", [fixtures[0][2]]))[0].measured_value, 37);
+      // The original restriction: one record-count measurement per source
+      // version. The identical definition passes the definition check (its
+      // fingerprint has no worksheet) and collides on the version-wide
+      // measurement identity, a bare conflict; another definition is refused
+      // as already recorded.
+      const second = await legacyRecord(workbook.sourceVersionId, "sheet_3", SERVICE_DEFINITION);
+      assert.deepEqual([second.ok, second.error.code, second.error.status, second.blockers],
+        [false, "conflict_current_state_changed", 409, undefined], JSON.stringify(second));
+      const differing = await legacyRecord(workbook.sourceVersionId, "sheet_3", { ...SERVICE_DEFINITION, counted_unit: "service visit" });
+      assert.deepEqual([differing.ok, differing.error.code, differing.blockers?.[0]?.blocking_reason],
+        [false, "conflict_current_state_changed", "measurement_definition_already_recorded"], JSON.stringify(differing));
+      assert.equal((await query("SELECT count(*)::int AS n FROM kai.evidence_measurements WHERE source_version_id = $1::uuid", [workbook.sourceVersionId]))[0].n, 1);
+      await query(`CREATE TABLE IF NOT EXISTS public.p2_01m_worksheet_legacy_fixture (
+        label text PRIMARY KEY, source_version_id uuid, evidence_item_id uuid, claim_id uuid, definition_id uuid, definition_fingerprint text)`);
+      for (const row of fixtures) {
+        await query("INSERT INTO public.p2_01m_worksheet_legacy_fixture VALUES ($1, $2::uuid, $3::uuid, $4::uuid, $5::uuid, $6)", row);
+      }
     });
     return;
   }
@@ -537,6 +633,284 @@ async function runSuite() {
     const refused = await record(promoted.sourceVersionId, { worksheetKey: "sheet_2" });
     assert.deepEqual([refused.ok, refused.blockers[0].blocking_reason], [false, "measurement_xlsx_formula_cells_present"]);
     assert.deepEqual(await measurementCounts(), before);
+  });
+
+  // Worksheet identity: each selected worksheet of one promoted version has
+  // its own definition and measurement.
+  const recordIn = (organizationId, actor, sourceVersionId, worksheetKey, definition = SERVICE_DEFINITION, repository = measurementRepository) =>
+    recordSourceRecordCountMeasurement(
+      { organizationId, sourceVersionId, definition, worksheetKey, actorContext: actor, now: NOW },
+      { env: ENV, sourceMeasurementRepository: repository },
+    );
+  const basisIn = (organizationId, actor, sourceVersionId, worksheetKey, repository = measurementRepository) =>
+    getSourceRecordCountMeasurementBasis(
+      { organizationId, sourceVersionId, actorContext: actor, ...(worksheetKey ? { worksheetKey } : {}) },
+      { env: ENV, sourceMeasurementRepository: repository },
+    );
+  const proposeIn = (organizationId, actor, evidenceItemId) =>
+    proposeClaim({ organizationId, evidenceItemId, actorContext: actor, now: NOW },
+      { env: ENV, claimProposalRepository: claimRepository, metadataOnlyAudit: noAudit(), claimGapFollowupRepository: gapRepository, claimGapFollowupMetadataOnlyAudit: noAudit() });
+  const versionMeasurements = (sourceVersionId) => query(
+    `SELECT m.evidence_item_id::text, m.source_measurement_definition_id::text AS definition_id, m.measured_value::int, m.total_record_count::int,
+            m.blank_record_count::int, m.duplicate_record_count::int, m.calculation_method, m.worksheet_key, d.worksheet_key AS definition_worksheet_key,
+            d.definition_fingerprint, l.coordinates
+       FROM kai.evidence_measurements m
+       JOIN kai.source_measurement_definitions d ON d.source_measurement_definition_id = m.source_measurement_definition_id
+       JOIN kai.evidence_items e ON e.evidence_item_id = m.evidence_item_id
+       JOIN kai.source_locators l ON l.source_locator_id = e.source_locator_id
+      WHERE m.source_version_id = $1::uuid ORDER BY m.worksheet_key`, [sourceVersionId]);
+  // Every pre-existing column of the rows recorded by the previous revision
+  // (worksheet_key is the migration's only addition).
+  const worksheetLegacyRows = () => query(
+    `SELECT f.label, row_to_json(d)::text AS definition, row_to_json(m)::text AS measurement, row_to_json(e)::text AS evidence,
+            row_to_json(l)::text AS locator, row_to_json(c)::text AS claim
+       FROM public.p2_01m_worksheet_legacy_fixture f
+       JOIN (SELECT source_measurement_definition_id, organization_id, source_version_id, measurement_type, counted_unit, unit_label, definition_text,
+                    inclusion_rule, exclusion_rule, period_start, period_end, definition_fingerprint, definition_status, created_by, created_by_type, created_at
+               FROM kai.source_measurement_definitions) d ON d.source_measurement_definition_id = f.definition_id
+       JOIN (SELECT evidence_item_id, organization_id, source_version_id, source_measurement_definition_id, measurement_type, measured_value, unit_label,
+                    calculation_method, profile_canonical_sha256, total_record_count, blank_record_count, duplicate_record_count, created_at
+               FROM kai.evidence_measurements) m ON m.evidence_item_id = f.evidence_item_id
+       JOIN kai.evidence_items e ON e.evidence_item_id = f.evidence_item_id
+       JOIN kai.source_locators l ON l.source_locator_id = e.source_locator_id
+       JOIN kai.claims c ON c.claim_id = f.claim_id
+      ORDER BY f.label`);
+  const worksheetCounts = async (organizationId) => (await query(`SELECT
+      (SELECT count(*) FROM kai.source_measurement_definitions WHERE organization_id = $1::uuid)::int AS definitions,
+      (SELECT count(*) FROM kai.evidence_measurements WHERE organization_id = $1::uuid)::int AS measurements,
+      (SELECT count(*) FROM kai.evidence_items WHERE organization_id = $1::uuid AND evidence_type = 'source_record_count_measurement')::int AS evidence,
+      (SELECT count(*) FROM kai.source_locators WHERE organization_id = $1::uuid AND locator_type = 'source_data_records')::int AS locators,
+      (SELECT count(*) FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = 'evidence_review')::int AS evidence_queue,
+      (SELECT count(*) FROM kai.audit_events WHERE organization_id = $1::uuid AND action = 'record_source_record_count_measurement')::int AS audits`, [organizationId]))[0];
+  // The previous revision's worksheet rows exist only where the P2-01M runner
+  // ran its worksheet_legacy_seed phase before the identity migration.
+  const onWorksheetLegacySeed = { skip: process.env.KAI_P2_01M_WORKSHEET_LEGACY_SEEDED === "1" ? false : "needs the P2-01M runner's previous-revision worksheet seed" };
+  const SHEETS = Object.fromEntries(serviceWorkbookSheets("independent").map((sheet, index) => [`sheet_${index + 1}`, { name: sheet.name, ...independentWorksheetCounts(sheet.rows) }]));
+
+  test("worksheet identity: on a version whose sheet_5 count was recorded by the previous revision, sheet_3 is recorded beside it; both coexist, read back independently, replay, and refuse a conflicting definition", onWorksheetLegacySeed, async (t) => {
+    assert.deepEqual([SHEETS.sheet_3.counted, SHEETS.sheet_3.duplicates, SHEETS.sheet_5.counted, SHEETS.sheet_5.duplicates], [364, 2, 37, 0], "independent counts");
+    const fixture = Object.fromEntries((await query(
+      "SELECT label, source_version_id::text, evidence_item_id::text, claim_id::text, definition_id::text, definition_fingerprint FROM public.p2_01m_worksheet_legacy_fixture",
+    )).map((row) => [row.label, row]));
+    const sv = fixture.sheet_5.source_version_id;
+    const legacyBefore = await worksheetLegacyRows();
+    assert.equal(legacyBefore.length, 3);
+
+    // Before sheet_3: the version's only recorded count is still found without a worksheet.
+    const unnamed = await basisIn(WORKSHEET_ORG, WORKSHEET_ADMIN, sv, null);
+    assert.deepEqual([unnamed.ok, unnamed.data.basis.blockers[0].blocking_reason, unnamed.data.recorded.definition.source_measurement_definition_id],
+      [true, "measurement_xlsx_worksheet_selection_required", fixture.sheet_5.definition_id]);
+
+    // The previous revision's sheet_5 request replays under the new identity.
+    const before = await worksheetCounts(WORKSHEET_ORG);
+    const replay5 = await recordIn(WORKSHEET_ORG, WORKSHEET_ADMIN, sv, "sheet_5");
+    assert.equal(replay5.ok, true, JSON.stringify(replay5));
+    assert.deepEqual([replay5.data.replayed, replay5.data.evidenceItem.evidence_item_id, replay5.data.definition.source_measurement_definition_id,
+      replay5.data.definition.definition_fingerprint, replay5.data.measurement.measured_value],
+    [true, fixture.sheet_5.evidence_item_id, fixture.sheet_5.definition_id, fixture.sheet_5.definition_fingerprint, 37]);
+    assert.equal(Object.hasOwn(replay5.data.measurement, "worksheet_key") || Object.hasOwn(replay5.data.definition, "worksheet_key"), false, "response records keep their shape");
+    assert.deepEqual(await worksheetCounts(WORKSHEET_ORG), before);
+
+    // sheet_3 under the identical definition text.
+    const s3 = await recordIn(WORKSHEET_ORG, WORKSHEET_ADMIN, sv, "sheet_3");
+    assert.equal(s3.ok, true, JSON.stringify(s3));
+    assert.deepEqual([s3.data.replayed, s3.data.measurement.calculation_method, s3.data.measurement.measured_value, s3.data.measurement.total_record_count,
+      s3.data.measurement.blank_record_count, s3.data.measurement.duplicate_record_count, s3.data.sourceLocator.coordinates],
+    [false, "p1_xlsx_selected_worksheet_data_rows_excluding_blank_v1", SHEETS.sheet_3.counted, 364, 0, SHEETS.sheet_3.duplicates,
+      { scope: "data_records_after_header", sheet_key: "sheet_3" }]);
+    assert.match(s3.data.evidenceItem.statement, /^Source version record count: 364 service events .* from selected worksheet sheet_3, /);
+    assert.notEqual(s3.data.evidenceItem.evidence_item_id, fixture.sheet_5.evidence_item_id);
+    assert.notEqual(s3.data.definition.source_measurement_definition_id, fixture.sheet_5.definition_id);
+    assert.equal(s3.data.definition.definition_fingerprint, fixture.sheet_5.definition_fingerprint,
+      "identical definition content has the same content fingerprint; the worksheet is in the identity, so nothing collides");
+    const after = await worksheetCounts(WORKSHEET_ORG);
+    assert.deepEqual(after, { definitions: before.definitions + 1, measurements: before.measurements + 1, evidence: before.evidence + 1,
+      locators: before.locators + 1, evidence_queue: before.evidence_queue + 1, audits: before.audits + 1 }, "one of each, and one required audit");
+    const [audit] = await query(
+      `SELECT actor_user_id::text, actor_type, reason_code FROM kai.audit_events WHERE organization_id = $1::uuid AND action = 'record_source_record_count_measurement'
+        ORDER BY audit_event_id DESC LIMIT 1`, [WORKSHEET_ORG]);
+    assert.deepEqual(audit, { actor_user_id: WORKSHEET_ADMIN.actorUserId, actor_type: "human", reason_code: "source_record_count_measured" });
+
+    // Both coexist in persistence, each on its own worksheet.
+    const persisted = await versionMeasurements(sv);
+    t.diagnostic(`persisted on source version ${sv}: ${JSON.stringify(persisted.map((row) => ({ worksheet_key: row.worksheet_key,
+      locator: row.coordinates, measured_value: row.measured_value, total: row.total_record_count, blank: row.blank_record_count,
+      duplicates: row.duplicate_record_count, evidence_item_id: row.evidence_item_id, definition_id: row.definition_id })))}`);
+    assert.deepEqual(persisted.map((row) => [row.worksheet_key, row.definition_worksheet_key, row.coordinates.sheet_key, row.measured_value,
+      row.total_record_count, row.blank_record_count, row.duplicate_record_count, row.evidence_item_id]), [
+      ["sheet_3", "sheet_3", "sheet_3", 364, 364, 0, 2, s3.data.evidenceItem.evidence_item_id],
+      ["sheet_5", "sheet_5", "sheet_5", 37, 37, 0, 0, fixture.sheet_5.evidence_item_id],
+    ]);
+
+    // A fresh repository and service read returns each one independently.
+    const freshRepository = createPostgresSourceMeasurementRepository({ runInTransaction: withTx });
+    const read3 = await basisIn(WORKSHEET_ORG, WORKSHEET_ADMIN, sv, "sheet_3", freshRepository);
+    const read5 = await basisIn(WORKSHEET_ORG, WORKSHEET_ADMIN, sv, "sheet_5", freshRepository);
+    assert.deepEqual([read3.data.basis.worksheet.sheet_name, read3.data.recorded.measurement.measured_value, read3.data.recorded.measurement.evidence_item_id,
+      read3.data.recorded.definition.source_measurement_definition_id, read3.data.recorded.claim],
+    ["Service_Events", 364, s3.data.evidenceItem.evidence_item_id, s3.data.definition.source_measurement_definition_id, null]);
+    assert.deepEqual([read5.data.basis.worksheet.sheet_name, read5.data.recorded.measurement.measured_value, read5.data.recorded.measurement.evidence_item_id,
+      read5.data.recorded.definition.source_measurement_definition_id, read5.data.recorded.claim.claim_id],
+    ["Data_Dictionary", 37, fixture.sheet_5.evidence_item_id, fixture.sheet_5.definition_id, fixture.sheet_5.claim_id]);
+    // With two, a read that names no worksheet chooses neither.
+    const ambiguous = await basisIn(WORKSHEET_ORG, WORKSHEET_ADMIN, sv, null, freshRepository);
+    assert.deepEqual([ambiguous.ok, ambiguous.data.basis.measurable, ambiguous.data.recorded], [true, false, null]);
+    const invalidName = await basisIn(WORKSHEET_ORG, WORKSHEET_ADMIN, sv, "sheet_99", freshRepository);
+    assert.deepEqual([invalidName.data.basis.blockers[0].blocking_reason, invalidName.data.recorded], ["measurement_xlsx_worksheet_selection_invalid", null]);
+    const unrecorded = await basisIn(WORKSHEET_ORG, WORKSHEET_ADMIN, sv, "sheet_2", freshRepository);
+    assert.deepEqual([unrecorded.data.basis.counted_record_count, unrecorded.data.recorded], [84, null]);
+
+    // Replay is idempotent; a conflicting definition on either worksheet is refused.
+    const settled = await worksheetCounts(WORKSHEET_ORG);
+    const replay3 = await recordIn(WORKSHEET_ORG, WORKSHEET_ADMIN, sv, "sheet_3", SERVICE_DEFINITION, freshRepository);
+    assert.deepEqual([replay3.ok, replay3.data.replayed, replay3.data.evidenceItem.evidence_item_id], [true, true, s3.data.evidenceItem.evidence_item_id]);
+    for (const key of ["sheet_3", "sheet_5"]) {
+      const conflict = await recordIn(WORKSHEET_ORG, WORKSHEET_ADMIN, sv, key, { ...SERVICE_DEFINITION, counted_unit: "service visit" });
+      assert.deepEqual([conflict.ok, conflict.error.code, conflict.error.status, conflict.blockers[0].blocking_reason],
+        [false, "conflict_current_state_changed", 409, "measurement_definition_already_recorded"], key);
+      assert.match(conflict.blockers[0].message, new RegExp(`worksheet ${key} of this source version`));
+    }
+    assert.deepEqual(await worksheetCounts(WORKSHEET_ORG), settled, "replay and refusals write nothing");
+
+    // sheet_3 is claimed on its own; the previous revision's claim and rows are unchanged.
+    const proposal = await proposeIn(WORKSHEET_ORG, WORKSHEET_ADMIN, s3.data.evidenceItem.evidence_item_id);
+    assert.equal(proposal.ok, true, JSON.stringify(proposal));
+    assert.match(proposal.data.claim.statement, /^The promoted source records 364 service events .* in selected worksheet sheet_3 /);
+    assert.notEqual(proposal.data.claim.claim_id, fixture.sheet_5.claim_id);
+    const replayClaim5 = await proposeIn(WORKSHEET_ORG, WORKSHEET_ADMIN, fixture.sheet_5.evidence_item_id);
+    assert.deepEqual([replayClaim5.ok, replayClaim5.data.replayed, replayClaim5.data.claim.claim_id], [true, true, fixture.sheet_5.claim_id]);
+    assert.deepEqual(await worksheetLegacyRows(), legacyBefore, "every historical definition, measurement, evidence, locator, and claim column is unchanged");
+  });
+
+  test("worksheet identity: CSV and one-worksheet counts recorded by the previous revision stay whole-version, replay unchanged, and still refuse a second definition", onWorksheetLegacySeed, async () => {
+    const fixtures = await query("SELECT label, source_version_id::text, evidence_item_id::text, definition_id::text FROM public.p2_01m_worksheet_legacy_fixture WHERE label <> 'sheet_5' ORDER BY label");
+    assert.deepEqual(fixtures.map((row) => row.label), ["csv", "one_sheet"]);
+    const before = await worksheetCounts(WORKSHEET_ORG);
+    for (const fixture of fixtures) {
+      const [row] = await versionMeasurements(fixture.source_version_id);
+      assert.deepEqual([row.worksheet_key, row.definition_worksheet_key, row.measured_value], [null, null, 5], fixture.label);
+      const replay = await recordIn(WORKSHEET_ORG, WORKSHEET_ADMIN, fixture.source_version_id, null, DEFINITION);
+      assert.deepEqual([replay.ok, replay.data.replayed, replay.data.evidenceItem.evidence_item_id, replay.data.definition.source_measurement_definition_id],
+        [true, true, fixture.evidence_item_id, fixture.definition_id], fixture.label);
+      const conflict = await recordIn(WORKSHEET_ORG, WORKSHEET_ADMIN, fixture.source_version_id, null, { ...DEFINITION, counted_unit: "attendance record" });
+      assert.deepEqual([conflict.error.code, conflict.blockers[0].blocking_reason, conflict.blockers[0].message],
+        ["conflict_current_state_changed", "measurement_definition_already_recorded", "A different record-count definition is already recorded for this source version."], fixture.label);
+      const basis = await basisIn(WORKSHEET_ORG, WORKSHEET_ADMIN, fixture.source_version_id, null);
+      assert.equal(basis.data.recorded.measurement.evidence_item_id, fixture.evidence_item_id, fixture.label);
+    }
+    // A one-worksheet workbook names its only worksheet and still has one whole-version count.
+    const oneSheet = fixtures.find((row) => row.label === "one_sheet");
+    const named = await recordIn(WORKSHEET_ORG, WORKSHEET_ADMIN, oneSheet.source_version_id, "sheet_1", DEFINITION);
+    assert.deepEqual([named.ok, named.data.replayed, named.data.evidenceItem.evidence_item_id], [true, true, oneSheet.evidence_item_id]);
+    assert.deepEqual(await worksheetCounts(WORKSHEET_ORG), before);
+  });
+
+  test("worksheet identity: concurrent duplicate submissions for two worksheets converge to one record each, and concurrent conflicting definitions on one worksheet leave exactly one", async () => {
+    const promoted = await seedPromotedSource({ organizationId: WORKSHEET_ORG, profile: await serviceWorkbookProfile("raced") });
+    const before = await worksheetCounts(WORKSHEET_ORG);
+    const raced = await Promise.all(["sheet_3", "sheet_5", "sheet_3", "sheet_5", "sheet_3", "sheet_5"]
+      .map((key) => recordIn(WORKSHEET_ORG, WORKSHEET_ADMIN, promoted.sourceVersionId, key)));
+    assert.ok(raced.every((result) => result.ok), JSON.stringify(raced.filter((result) => !result.ok)));
+    for (const [index, key] of [[0, "sheet_3"], [1, "sheet_5"]]) {
+      const forKey = raced.filter((_, position) => position % 2 === index);
+      assert.equal(forKey.filter((result) => result.data.replayed === false).length, 1, key);
+      assert.equal(new Set(forKey.map((result) => result.data.evidenceItem.evidence_item_id)).size, 1, key);
+    }
+    assert.deepEqual((await versionMeasurements(promoted.sourceVersionId)).map((row) => [row.worksheet_key, row.measured_value]), [["sheet_3", 364], ["sheet_5", 37]]);
+    const mid = await worksheetCounts(WORKSHEET_ORG);
+    assert.deepEqual([mid.definitions, mid.measurements, mid.evidence, mid.audits], [before.definitions + 2, before.measurements + 2, before.evidence + 2, before.audits + 2]);
+
+    const contested = await Promise.all([
+      recordIn(WORKSHEET_ORG, WORKSHEET_ADMIN, promoted.sourceVersionId, "sheet_2", { ...SERVICE_DEFINITION, counted_unit: "participant record", unit_label: "participant records" }),
+      recordIn(WORKSHEET_ORG, WORKSHEET_ADMIN, promoted.sourceVersionId, "sheet_2", { ...SERVICE_DEFINITION, counted_unit: "register row", unit_label: "register rows" }),
+    ]);
+    assert.deepEqual(contested.map((result) => result.ok).sort(), [false, true], JSON.stringify(contested));
+    assert.equal(contested.find((result) => !result.ok).blockers[0].blocking_reason, "measurement_definition_already_recorded");
+    const sheet2 = (await versionMeasurements(promoted.sourceVersionId)).filter((row) => row.worksheet_key === "sheet_2");
+    assert.deepEqual(sheet2.map((row) => [row.measured_value, row.evidence_item_id]), [[84, contested.find((result) => result.ok).data.evidenceItem.evidence_item_id]]);
+  });
+
+  test("worksheet identity: unauthorized actors, another tenant, a stale version, invalid selections, and an invalid count basis are refused for a second worksheet with zero writes", async () => {
+    const promoted = await seedPromotedSource({ organizationId: WORKSHEET_ORG, profile: await serviceWorkbookProfile("refusals") });
+    assert.equal((await recordIn(WORKSHEET_ORG, WORKSHEET_ADMIN, promoted.sourceVersionId, "sheet_5")).ok, true);
+    const before = await worksheetCounts(WORKSHEET_ORG);
+    const actors = [
+      ["client_reviewer", human(WORKSHEET_ORG, "client_reviewer", "10"), "authorization_denied"],
+      ["client_contributor", human(WORKSHEET_ORG, "client_contributor", "11"), "authorization_denied"],
+      ["another organization's administrator", OTHER_ADMIN, "authorization_denied"],
+      ["system actor", { ...WORKSHEET_ADMIN, actorType: "system" }, "authorization_denied"],
+    ];
+    for (const [label, actor, code] of actors) {
+      const refused = await recordIn(WORKSHEET_ORG, actor, promoted.sourceVersionId, "sheet_3");
+      assert.deepEqual([refused.ok, refused.error.code], [false, code], label);
+      assert.deepEqual([(await basisIn(WORKSHEET_ORG, actor, promoted.sourceVersionId, "sheet_5")).error.code], [code], `${label} basis`);
+    }
+    const otherScope = await recordIn(OTHER_ORG, OTHER_ADMIN, promoted.sourceVersionId, "sheet_3");
+    assert.deepEqual([otherScope.ok, otherScope.error.code], [false, "not_found"], "another organization's version is never found");
+    const omitted = await recordIn(WORKSHEET_ORG, WORKSHEET_ADMIN, promoted.sourceVersionId, null);
+    assert.equal(omitted.blockers[0].blocking_reason, "measurement_xlsx_worksheet_selection_required");
+    for (const key of ["sheet_99", "Service_Events", "sheet_0"]) {
+      const invalid = await recordIn(WORKSHEET_ORG, WORKSHEET_ADMIN, promoted.sourceVersionId, key);
+      assert.equal(invalid.ok, false, key);
+      assert.ok(["measurement_xlsx_worksheet_selection_invalid", "measurement_xlsx_worksheet_selection_required"].includes(invalid.blockers[0].blocking_reason), key);
+    }
+    // Invalid count bases: a worksheet without a committed basis, and one whose committed basis is inconsistent.
+    const profile = await serviceWorkbookProfile("bases");
+    const withSheet3Basis = (basis) => ({ ...profile, sheets: profile.sheets.map((sheet) => (sheet.sheet_key === "sheet_3" ? basis(sheet) : sheet)) });
+    const missing = await seedPromotedSource({ organizationId: WORKSHEET_ORG, profile: withSheet3Basis(({ record_count_basis: _omitted, ...sheet }) => sheet) });
+    assert.equal((await recordIn(WORKSHEET_ORG, WORKSHEET_ADMIN, missing.sourceVersionId, "sheet_3")).blockers[0].blocking_reason, "measurement_xlsx_record_basis_not_committed");
+    assert.equal((await recordIn(WORKSHEET_ORG, WORKSHEET_ADMIN, missing.sourceVersionId, "sheet_5")).ok, true, "the other worksheet's own basis still counts");
+    const inconsistent = await seedPromotedSource({ organizationId: WORKSHEET_ORG,
+      profile: withSheet3Basis((sheet) => ({ ...sheet, record_count_basis: { ...sheet.record_count_basis, blank_record_count: 9999 } })) });
+    assert.equal((await recordIn(WORKSHEET_ORG, WORKSHEET_ADMIN, inconsistent.sourceVersionId, "sheet_3")).blockers[0].blocking_reason, "measurement_counts_inconsistent");
+    const afterBases = await worksheetCounts(WORKSHEET_ORG);
+    assert.equal(afterBases.measurements, before.measurements + 1, "only the valid sheet_5 basis wrote");
+    // A stale version refuses a second worksheet, and its existing count stays.
+    await query("UPDATE kai.source_versions SET is_current = false WHERE source_version_id = $1::uuid", [promoted.sourceVersionId]);
+    const stale = await recordIn(WORKSHEET_ORG, WORKSHEET_ADMIN, promoted.sourceVersionId, "sheet_3");
+    assert.deepEqual([stale.ok, stale.error.code], [false, "conflict_current_state_changed"]);
+    assert.deepEqual(await worksheetCounts(WORKSHEET_ORG), afterBases);
+    assert.deepEqual((await versionMeasurements(promoted.sourceVersionId)).map((row) => row.worksheet_key), ["sheet_5"]);
+  });
+
+  test("worksheet identity: the database refuses a duplicate worksheet identity, a worksheet key that disagrees with its definition or locator, and a key on a whole-version method", async () => {
+    const promoted = await seedPromotedSource({ organizationId: WORKSHEET_ORG, profile: await serviceWorkbookProfile("database") });
+    const s3 = await recordIn(WORKSHEET_ORG, WORKSHEET_ADMIN, promoted.sourceVersionId, "sheet_3");
+    const s5 = await recordIn(WORKSHEET_ORG, WORKSHEET_ADMIN, promoted.sourceVersionId, "sheet_5");
+    assert.ok(s3.ok && s5.ok);
+    const csvSource = await seedPromotedSource({ organizationId: WORKSHEET_ORG, profile: await kernelProfile(CSV) });
+    const csv = await recordIn(WORKSHEET_ORG, WORKSHEET_ADMIN, csvSource.sourceVersionId, null, DEFINITION);
+    assert.equal(csv.ok, true, JSON.stringify(csv));
+    const before = await worksheetCounts(WORKSHEET_ORG);
+    const definition = (await query("SELECT * FROM kai.source_measurement_definitions WHERE source_measurement_definition_id = $1::uuid", [s3.data.definition.source_measurement_definition_id]))[0];
+    const insertDefinition = (worksheetKey) => query(
+      `INSERT INTO kai.source_measurement_definitions (organization_id, source_version_id, measurement_type, counted_unit, unit_label, definition_text,
+         inclusion_rule, exclusion_rule, definition_fingerprint, definition_status, created_by, created_by_type, worksheet_key)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'human', $12)`,
+      [definition.organization_id, definition.source_version_id, definition.measurement_type, definition.counted_unit, definition.unit_label,
+        definition.definition_text, definition.inclusion_rule, definition.exclusion_rule, "a".repeat(64), definition.definition_status, definition.created_by, worksheetKey],
+    );
+    await assert.rejects(insertDefinition("sheet_3"), /source_measurement_definitions_p2_01m_worksheet_identity_unique/);
+    await assert.rejects(insertDefinition("Sheet 3"), /source_measurement_definitions_p2_01m_worksheet_key_check/);
+    await assert.rejects(query("UPDATE kai.evidence_measurements SET worksheet_key = 'sheet_5' WHERE evidence_item_id = $1::uuid", [s3.data.evidenceItem.evidence_item_id]),
+      /evidence_measurements_p2_01m_worksheet_identity_unique|must equal its definition's worksheet_key/);
+    await assert.rejects(query("UPDATE kai.evidence_measurements SET source_measurement_definition_id = $1::uuid WHERE evidence_item_id = $2::uuid",
+      [s5.data.definition.source_measurement_definition_id, s3.data.evidenceItem.evidence_item_id]), /must equal its definition's worksheet_key/);
+    await assert.rejects(query("UPDATE kai.source_measurement_definitions SET worksheet_key = 'sheet_4' WHERE source_measurement_definition_id = $1::uuid",
+      [s3.data.definition.source_measurement_definition_id]), /definition worksheet_key must equal its measurement's worksheet_key/);
+    await assert.rejects(query("UPDATE kai.evidence_measurements SET evidence_item_id = $1::uuid WHERE evidence_item_id = $2::uuid",
+      [s5.data.evidenceItem.evidence_item_id, s3.data.evidenceItem.evidence_item_id]), /must equal its locator's sheet_key/);
+    await assert.rejects(query("UPDATE kai.evidence_measurements SET worksheet_key = NULL WHERE evidence_item_id = $1::uuid", [s3.data.evidenceItem.evidence_item_id]),
+      /evidence_measurements_p2_01m_worksheet_key_check|must equal its definition's worksheet_key/);
+    await assert.rejects(query("UPDATE kai.evidence_measurements SET worksheet_key = 'sheet_1' WHERE evidence_item_id = $1::uuid", [csv.data.evidenceItem.evidence_item_id]),
+      /evidence_measurements_p2_01m_worksheet_key_check|must equal its definition's worksheet_key/);
+    assert.deepEqual(await worksheetCounts(WORKSHEET_ORG), before);
+    assert.deepEqual((await versionMeasurements(promoted.sourceVersionId)).map((row) => [row.worksheet_key, row.definition_worksheet_key, row.coordinates.sheet_key]),
+      [["sheet_3", "sheet_3", "sheet_3"], ["sheet_5", "sheet_5", "sheet_5"]]);
+    const [{ n }] = await query(
+      `SELECT count(*)::int AS n FROM kai.evidence_measurements
+        WHERE (calculation_method = 'p1_xlsx_selected_worksheet_data_rows_excluding_blank_v1') <> (worksheet_key IS NOT NULL)`);
+    assert.equal(n, 0, "only selected-worksheet measurements carry a worksheet identity");
   });
 
   test("XLSX: a one-worksheet workbook profile is measured on its worksheet locator under the XLSX method, its claim names worksheet rows, and it replays", async () => {

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -20,10 +20,14 @@ const logFile = join(workDir, "postgres.log");
 const port = String(62000 + Math.floor(Math.random() * 1000));
 const user = process.env.USER || "postgres";
 const targetUrl = `postgresql://${user}@127.0.0.1:${port}/${dbName}`;
+// The last revision before the worksheet measurement identity. Its own code
+// records the historical worksheet measurements on the schema as it stood.
+const WORKSHEET_LEGACY_REVISION = "6f34c40";
+const legacyCheckout = join(workDir, `checkout-${WORKSHEET_LEGACY_REVISION}`);
 
 function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
-    cwd: repoRoot,
+    cwd: options.cwd || repoRoot,
     encoding: "utf8",
     stdio: options.capture ? ["ignore", "pipe", "pipe"] : "inherit",
     env: {
@@ -253,6 +257,55 @@ try {
   if (overall(verified) !== "PASS") throw new Error(`P2-01M selected-worksheet verifier failed after its migration:\n${verified.join("\n")}`);
   console.log(`P2-01M selected-worksheet method: applied twice; existing evidence/locator rows unchanged; read-only verifier FAIL before, PASS after:\n${verified.join("\n")}`);
 
+  // Worksheet measurement identity. The previous revision, loaded from a
+  // shared clone, records sheet_5 (37 rows), a CSV, and a one-worksheet
+  // count with claims on the pre-migration schema, and is refused sheet_3.
+  // The migration may write only the new worksheet_key of those rows.
+  run("git", ["clone", "--quiet", "--shared", "--no-checkout", repoRoot, legacyCheckout], { capture: true });
+  run("git", ["checkout", "--quiet", "--detach", WORKSHEET_LEGACY_REVISION], { cwd: legacyCheckout, capture: true });
+  if (existsSync(join(legacyCheckout, "migrations", "kai_sprint2_p2_01m_worksheet_measurement_identity.sql"))) {
+    throw new Error(`${WORKSHEET_LEGACY_REVISION} unexpectedly already has the worksheet measurement identity`);
+  }
+  symlinkSync(join(repoRoot, "node_modules"), join(legacyCheckout, "node_modules"));
+  const worksheetSeed = spawnSync("node", ["--test", "__tests__/kai-sprint2-p2-01m-source-record-count-measurement.integration.spec.js"], {
+    cwd: repoRoot,
+    encoding: "utf8",
+    stdio: "inherit",
+    env: { ...testEnv, KAI_P2_01M_PHASE: "worksheet_legacy_seed", KAI_P2_01M_LEGACY_CHECKOUT: legacyCheckout },
+  });
+  if (worksheetSeed.status !== 0) throw new Error("P2-01M worksheet legacy seed phase failed");
+  const measurementSnapshotSql = `SELECT md5(coalesce((SELECT string_agg(row_to_json(d)::text, '|' ORDER BY d.source_measurement_definition_id) FROM (
+      SELECT source_measurement_definition_id, organization_id, source_version_id, measurement_type, counted_unit, unit_label, definition_text,
+             inclusion_rule, exclusion_rule, period_start, period_end, definition_fingerprint, definition_status, created_by, created_by_type, created_at
+        FROM kai.source_measurement_definitions) d), '')
+      || coalesce((SELECT string_agg(row_to_json(m)::text, '|' ORDER BY m.evidence_item_id) FROM (
+      SELECT evidence_item_id, organization_id, source_version_id, source_measurement_definition_id, measurement_type, measured_value, unit_label,
+             calculation_method, profile_canonical_sha256, total_record_count, blank_record_count, duplicate_record_count, created_at
+        FROM kai.evidence_measurements) m), ''))`;
+  const identityVerifier = () => run(psql, ["-v", "ON_ERROR_STOP=1", "-d", dbName, "-tA", "-F", "|", "-f",
+    "scripts/kai-sprint2-p2-01m-worksheet-measurement-identity-verify-read-only.sql"], { capture: true }).stdout.trim().split("\n");
+  const evidenceBefore = psqlExec(legacySnapshotSql);
+  const measurementsBefore = psqlExec(measurementSnapshotSql);
+  if (overall(identityVerifier()) !== "FAIL") throw new Error("worksheet measurement identity verifier did not fail before its migration");
+  psqlFile("migrations/kai_sprint2_p2_01m_worksheet_measurement_identity.sql");
+  psqlFile("migrations/kai_sprint2_p2_01m_worksheet_measurement_identity.sql");
+  if (psqlExec(legacySnapshotSql) !== evidenceBefore) throw new Error("worksheet measurement identity migration changed an evidence, locator, or claim row");
+  if (psqlExec(measurementSnapshotSql) !== measurementsBefore) throw new Error("worksheet measurement identity migration changed a historical definition or measurement column");
+  const backfilled = run(psql, ["-v", "ON_ERROR_STOP=1", "-d", dbName, "-tA", "-F", "|", "-c",
+    `SELECT m.calculation_method, coalesce(m.worksheet_key, '-'), coalesce(d.worksheet_key, '-'), m.measured_value
+       FROM kai.evidence_measurements m JOIN kai.source_measurement_definitions d ON d.source_measurement_definition_id = m.source_measurement_definition_id
+      ORDER BY 1, 2`], { capture: true }).stdout.trim();
+  const expectedBackfill = [
+    "p1_csv_profile_data_records_excluding_blank_v1|-|-|5",
+    "p1_xlsx_selected_worksheet_data_rows_excluding_blank_v1|sheet_5|sheet_5|37",
+    "p1_xlsx_single_worksheet_data_rows_excluding_blank_v1|-|-|5",
+  ].join("\n");
+  if (backfilled !== expectedBackfill) throw new Error(`worksheet measurement identity backfill differs:\n${backfilled}`);
+  const identityVerified = identityVerifier();
+  if (overall(identityVerified) !== "PASS") throw new Error(`worksheet measurement identity verifier failed after its migration:\n${identityVerified.join("\n")}`);
+  if (overall(xlsxVerifier()) !== "PASS") throw new Error("the worksheet measurement identity migration changed the verified XLSX method CHECKs");
+  console.log(`P2-01M worksheet measurement identity: applied twice; previous-revision rows unchanged except their new worksheet_key:\n${backfilled}\nread-only verifier FAIL before, PASS after:\n${identityVerified.join("\n")}`);
+
   const testResult = spawnSync("node", [
     "--test",
     "--test-concurrency=1",
@@ -276,13 +329,22 @@ try {
       DB_USER: user,
       DB_PASSWORD: "",
       KAI_P2_01M_MEASUREMENT_DATABASE_URL: targetUrl,
+      KAI_P2_01M_WORKSHEET_LEGACY_SEEDED: "1",
       KAI_P2_06_CLAIM_TRACEABILITY_DATABASE_URL: targetUrl,
     },
   });
   if (testResult.status !== 0) throw new Error("P2-01M measurement and P2-06 traceability tests failed");
 
-  // Both rollbacks refuse while measurement evidence exists and change nothing.
+  // Every rollback refuses while dependent measurements exist and changes nothing.
   const measurementRows = psqlExec("SELECT count(*) FROM kai.evidence_measurements;");
+  let identityRollbackRefused = false;
+  try {
+    psqlFile("migrations/kai_sprint2_p2_01m_worksheet_measurement_identity.rollback.sql");
+  } catch (error) {
+    identityRollbackRefused = /worksheet measurement identity rollback refused: a source version has measurements for more than one worksheet/.test(String(error.message));
+  }
+  if (!identityRollbackRefused) throw new Error("worksheet measurement identity rollback did not refuse with two worksheets of one version measured");
+  if (overall(identityVerifier()) !== "PASS") throw new Error("the refused worksheet identity rollback changed the verified schema");
   let xlsxRollbackRefused = false;
   try {
     psqlFile("migrations/kai_sprint2_p2_01m_xlsx_worksheet_record_count_method.rollback.sql");
@@ -306,10 +368,11 @@ try {
   }
   if (!rollbackRefused) throw new Error("P2-01M rollback did not refuse with measurement evidence present");
   if (psqlExec("SELECT count(*) FROM kai.evidence_measurements;") !== measurementRows) throw new Error("refused rollback changed measurement rows");
-  console.log("P2-01M, XLSX worksheet, and selected-worksheet method rollbacks refused while dependent measurements exist; nothing changed.");
+  console.log("P2-01M, XLSX worksheet, selected-worksheet method, and worksheet identity rollbacks refused while dependent measurements exist; nothing changed.");
   console.log("P2-01M record-count measurement and P2-06 traceability tests passed.");
 } finally {
   if (started) spawnSync(pgCtl, ["-D", dataDir, "stop", "-m", "fast"], { encoding: "utf8", stdio: "ignore" });
+  rmSync(join(legacyCheckout, "node_modules"), { force: true });
   rmSync(workDir, { recursive: true, force: true });
   console.log(`P2-01M ephemeral PostgreSQL workdir removed: ${workDir}`);
 }

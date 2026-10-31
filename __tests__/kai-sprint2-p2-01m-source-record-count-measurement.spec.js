@@ -357,6 +357,20 @@ test("migration: additive only - widens three vocabularies, keeps every other go
   assert.match(selectedRollback, /p1_xlsx_selected_worksheet_data_rows_excluding_blank_v1/);
   assert.match(selectedRollback, /rollback refused: persisted measurements depend on the method/);
   assert.match(selectedRollback, /DROP TRIGGER IF EXISTS evidence_measurements_selected_worksheet_locator_check/);
+  // Worksheet identity: new unique identities before the one-per-version
+  // constraints are dropped; only the new column is written.
+  const identity = readFileSync("migrations/kai_sprint2_p2_01m_worksheet_measurement_identity.sql", "utf8");
+  for (const table of ["source_measurement_definitions", "evidence_measurements"]) {
+    assert.match(identity, new RegExp(`CREATE UNIQUE INDEX IF NOT EXISTS ${table}_p2_01m_worksheet_identity_unique\\s+ON kai\\.${table} \\(organization_id, source_version_id, measurement_type, \\(COALESCE\\(worksheet_key, ''\\)\\)\\)`));
+    assert.ok(identity.indexOf(`${table}_p2_01m_worksheet_identity_unique`) < identity.indexOf(`DROP CONSTRAINT IF EXISTS ${table}_p2_01m_identity_unique`), `${table}: new identity first`);
+  }
+  const writes = [...identity.matchAll(/\bUPDATE\s+kai\.(\w+)\s+\w+\s+SET\s+(\w+)/gi)].map((match) => `${match[1]}.${match[2]}`);
+  assert.deepEqual(writes, ["evidence_measurements.worksheet_key", "source_measurement_definitions.worksheet_key"]);
+  assert.doesNotMatch(identity, /\bDELETE\b/i);
+  const identityRollback = readFileSync("migrations/kai_sprint2_p2_01m_worksheet_measurement_identity.rollback.sql", "utf8");
+  assert.match(identityRollback, /rollback refused: a source version has measurements for more than one worksheet/);
+  assert.match(identityRollback, /UNIQUE \(organization_id, source_version_id, measurement_type\)/);
+  assert.doesNotMatch(identityRollback, /\bDELETE\b/i);
 });
 
 test("measured-claim dimensions: zero counts clear, positive counts flagged, unknown counts unresolved; definition, entity, denominator, and coverage answered; period an attested limitation", () => {

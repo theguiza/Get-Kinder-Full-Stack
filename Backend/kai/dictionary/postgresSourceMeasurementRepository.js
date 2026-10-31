@@ -17,6 +17,7 @@ import { validateEffectiveAllowedUsePermitsOperation } from "../validators/kaiEf
 import { __evidenceLineageRepositorySharedWrites } from "./postgresEvidenceLineageRepository.js";
 import {
   MEASUREMENT_TYPE_RECORD_COUNT,
+  MEASUREMENT_XLSX_SELECTED_CALCULATION_METHOD,
   MEASUREMENT_EVIDENCE_TYPE,
   MEASUREMENT_DATA_CLASS,
   MEASUREMENT_LOCATOR_TYPE,
@@ -103,11 +104,20 @@ const MEASUREMENT_COLUMNS = `
   profile_canonical_sha256, total_record_count::int AS total_record_count,
   blank_record_count::int AS blank_record_count, duplicate_record_count::int AS duplicate_record_count, created_at`;
 
-function rowToDefinitionRecord(row) {
+// The worksheet a measurement's identity is scoped to: the selected worksheet
+// of a multi-worksheet workbook. A CSV or one-worksheet count is of the whole
+// version (null), exactly as before worksheets had their own identity.
+function measurementWorksheetKey(measurement) {
+  return measurement.calculationMethod === MEASUREMENT_XLSX_SELECTED_CALCULATION_METHOD ? measurement.sheetKey : null;
+}
+
+// worksheet_key is read for identity only; the response records keep their
+// existing shape (the worksheet is already on the locator and the basis).
+function rowToDefinitionRecord({ worksheet_key: _identity, ...row }) {
   return { ...row, created_at: asIso(row.created_at) };
 }
 
-function rowToMeasurementRecord(row) {
+function rowToMeasurementRecord({ worksheet_key: _identity, ...row }) {
   return { ...row, created_at: asIso(row.created_at) };
 }
 
@@ -122,32 +132,51 @@ async function readFileProfile(tx, { organizationId, fileProfileId }) {
   return rows[0] || null;
 }
 
-async function insertDefinitionIfAbsent(tx, { organizationId, sourceVersionId, definition, fingerprint, actorUserId }) {
+// The identity conflict target: one definition and one measurement per
+// organization, source version, measurement type, and worksheet.
+const WORKSHEET_IDENTITY = "(organization_id, source_version_id, measurement_type, (COALESCE(worksheet_key, '')))";
+
+async function insertDefinitionIfAbsent(tx, { organizationId, sourceVersionId, worksheetKey, definition, fingerprint, actorUserId }) {
   const { rows } = await tx.query(
     `INSERT INTO kai.source_measurement_definitions (
        organization_id, source_version_id, measurement_type, counted_unit, unit_label, definition_text,
        inclusion_rule, exclusion_rule, period_start, period_end, definition_fingerprint, definition_status,
-       created_by, created_by_type
-     ) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9::date, $10::date, $11, $12, $13::uuid, 'human')
-     ON CONFLICT (organization_id, source_version_id, measurement_type) DO NOTHING
-     RETURNING ${DEFINITION_COLUMNS}`,
+       created_by, created_by_type, worksheet_key
+     ) VALUES ($1::uuid, $2::uuid, $3, $4, $5, $6, $7, $8, $9::date, $10::date, $11, $12, $13::uuid, 'human', $14)
+     ON CONFLICT ${WORKSHEET_IDENTITY} DO NOTHING
+     RETURNING ${DEFINITION_COLUMNS}, worksheet_key`,
     [
       organizationId, sourceVersionId, MEASUREMENT_TYPE_RECORD_COUNT, definition.countedUnit, definition.unitLabel,
       definition.definitionText, definition.inclusionRule, definition.exclusionRule, definition.periodStart,
-      definition.periodEnd, fingerprint, MEASUREMENT_DEFINITION_STATUS, actorUserId,
+      definition.periodEnd, fingerprint, MEASUREMENT_DEFINITION_STATUS, actorUserId, worksheetKey,
     ],
   );
   return rows[0] || null;
 }
 
-async function readDefinition(tx, { organizationId, sourceVersionId }) {
+async function readDefinition(tx, { organizationId, sourceVersionId, worksheetKey }) {
   const { rows } = await tx.query(
-    `SELECT ${DEFINITION_COLUMNS}
+    `SELECT ${DEFINITION_COLUMNS}, worksheet_key
        FROM kai.source_measurement_definitions
-      WHERE organization_id = $1::uuid AND source_version_id = $2::uuid AND measurement_type = $3`,
-    [organizationId, sourceVersionId, MEASUREMENT_TYPE_RECORD_COUNT],
+      WHERE organization_id = $1::uuid AND source_version_id = $2::uuid AND measurement_type = $3
+        AND COALESCE(worksheet_key, '') = COALESCE($4::text, '')`,
+    [organizationId, sourceVersionId, MEASUREMENT_TYPE_RECORD_COUNT, worksheetKey],
   );
   return rows[0] || null;
+}
+
+// Without an identifiable worksheet, the version's definition is returned only
+// when it is the version's only one; with several, the caller must name the
+// worksheet, and none is chosen for it.
+async function readOnlyDefinitionOfVersion(tx, { organizationId, sourceVersionId }) {
+  const { rows } = await tx.query(
+    `SELECT ${DEFINITION_COLUMNS}, worksheet_key
+       FROM kai.source_measurement_definitions
+      WHERE organization_id = $1::uuid AND source_version_id = $2::uuid AND measurement_type = $3
+      LIMIT 2`,
+    [organizationId, sourceVersionId, MEASUREMENT_TYPE_RECORD_COUNT],
+  );
+  return rows.length === 1 ? rows[0] : null;
 }
 
 async function insertLocatorIfAbsent(tx, { organizationId, sourceVersionId, coordinates, fingerprint }) {
@@ -179,46 +208,60 @@ async function insertMeasurementEvidenceIfAbsent(tx, { organizationId, sourceId,
   return rows[0] || null;
 }
 
-async function insertMeasurementIfAbsent(tx, { organizationId, sourceVersionId, evidenceItemId, definitionId, measurement, unitLabel, profileCanonicalSha256 }) {
+async function insertMeasurementIfAbsent(tx, { organizationId, sourceVersionId, worksheetKey, evidenceItemId, definitionId, measurement, unitLabel, profileCanonicalSha256 }) {
   const { rows } = await tx.query(
     `INSERT INTO kai.evidence_measurements (
        evidence_item_id, organization_id, source_version_id, source_measurement_definition_id, measurement_type,
        measured_value, unit_label, calculation_method, profile_canonical_sha256, total_record_count,
-       blank_record_count, duplicate_record_count
-     ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, $10, $11, $12)
-     ON CONFLICT (organization_id, source_version_id, measurement_type) DO NOTHING
-     RETURNING ${MEASUREMENT_COLUMNS}`,
+       blank_record_count, duplicate_record_count, worksheet_key
+     ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4::uuid, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+     ON CONFLICT ${WORKSHEET_IDENTITY} DO NOTHING
+     RETURNING ${MEASUREMENT_COLUMNS}, worksheet_key`,
     [
       evidenceItemId, organizationId, sourceVersionId, definitionId, MEASUREMENT_TYPE_RECORD_COUNT,
       measurement.measuredValue, unitLabel, measurement.calculationMethod, profileCanonicalSha256,
-      measurement.totalRecordCount, measurement.blankRecordCount, measurement.duplicateRecordCount,
+      measurement.totalRecordCount, measurement.blankRecordCount, measurement.duplicateRecordCount, worksheetKey,
     ],
   );
   return rows[0] || null;
 }
 
-async function readMeasurement(tx, { organizationId, sourceVersionId }) {
+async function readMeasurement(tx, { organizationId, sourceVersionId, worksheetKey }) {
   const { rows } = await tx.query(
-    `SELECT ${MEASUREMENT_COLUMNS}
+    `SELECT ${MEASUREMENT_COLUMNS}, worksheet_key
        FROM kai.evidence_measurements
-      WHERE organization_id = $1::uuid AND source_version_id = $2::uuid AND measurement_type = $3`,
-    [organizationId, sourceVersionId, MEASUREMENT_TYPE_RECORD_COUNT],
+      WHERE organization_id = $1::uuid AND source_version_id = $2::uuid AND measurement_type = $3
+        AND COALESCE(worksheet_key, '') = COALESCE($4::text, '')`,
+    [organizationId, sourceVersionId, MEASUREMENT_TYPE_RECORD_COUNT, worksheetKey],
   );
   return rows[0] || null;
 }
 
-function definitionConflict(sourceVersionId) {
+function definitionConflict(sourceVersionId, worksheetKey) {
   return failure("conflict_current_state_changed", [{
     validator_key: MEASUREMENT_VALIDATOR_KEY,
     severity: "blocker",
     object_type: "source_measurement_definition",
     object_code: "record_source_record_count_measurement",
     object_id: sourceVersionId,
-    message: "A different record-count definition is already recorded for this source version.",
+    message: worksheetKey
+      ? `A different record-count definition is already recorded for worksheet ${worksheetKey} of this source version.`
+      : "A different record-count definition is already recorded for this source version.",
     blocking_reason: "measurement_definition_already_recorded",
     required_fix: "A recorded definition is immutable for its source version; upload a new intake version to measure it under another definition.",
     evidence: {},
   }]);
+}
+
+// The worksheet whose recorded definition the basis reports: the measured
+// worksheet when the selection derives a measurement, else a listed worksheet
+// the caller named (it may be refused for its own structure), else none.
+function basisWorksheetIdentity(profile, derived, worksheetKey) {
+  if (derived.ok) return { worksheetKey: measurementWorksheetKey(derived.measurement) };
+  const multiWorksheet = profile?.format === "xlsx" && Array.isArray(profile.sheets) && profile.sheets.length > 1;
+  if (!multiWorksheet) return { worksheetKey: null };
+  if (worksheetKey !== null && profile.sheets.some((sheet) => sheet?.sheet_key === worksheetKey)) return { worksheetKey };
+  return { ambiguous: true };
 }
 
 function sameMeasurement(row, { evidenceItemId, definitionId, measurement, profileCanonicalSha256 }) {
@@ -299,10 +342,13 @@ async function resolveDefaultRunInTransaction() {
  * data-records locator (the whole CSV version, or a workbook's one worksheet),
  * the measurement evidence item, the evidence-review
  * queue item, and one required actor-attributed audit. Lineage, currentness,
- * and the effective allowed use are the unchanged P2-01 validators. Idempotent:
+ * and the effective allowed use are the unchanged P2-01 validators. Each
+ * selected worksheet of a multi-worksheet workbook has its own definition and
+ * measurement; a CSV or one-worksheet count is one per version. Idempotent:
  * the same definition replays with zero writes; a different definition for a
- * version that already has one is a conflict. Concurrent calls serialize on
- * the source candidate row lock and converge on the unique constraints.
+ * version (or worksheet) that already has one is a conflict. Concurrent calls
+ * serialize on the source candidate row lock and converge on the unique
+ * worksheet identity indexes.
  */
 export function createPostgresSourceMeasurementRepository({ runInTransaction, insertAuditEvent = insertRequiredSuccessfulAuditEvent } = {}) {
   return Object.freeze({
@@ -320,8 +366,13 @@ export function createPostgresSourceMeasurementRepository({ runInTransaction, in
           const measurable = await loadMeasurableSourceVersion(tx, { organizationId, sourceVersionId, worksheetKey });
           if (!measurable.ok) return measurable.failure;
           const { sourceVersionRow, sourceRow, derived } = measurable;
-          const definitionRow = await readDefinition(tx, { organizationId, sourceVersionId });
-          const measurementRow = definitionRow ? await readMeasurement(tx, { organizationId, sourceVersionId }) : null;
+          const identity = basisWorksheetIdentity(measurable.fileProfileRow.profile, derived, worksheetKey);
+          const definitionRow = identity.ambiguous
+            ? await readOnlyDefinitionOfVersion(tx, { organizationId, sourceVersionId })
+            : await readDefinition(tx, { organizationId, sourceVersionId, worksheetKey: identity.worksheetKey });
+          const measurementRow = definitionRow
+            ? await readMeasurement(tx, { organizationId, sourceVersionId, worksheetKey: definitionRow.worksheet_key })
+            : null;
           const claimRow = measurementRow ? (await tx.query(
             `SELECT claim_id::text AS claim_id, statement, claim_status, claim_review_status, claim_strength
                FROM kai.claims
@@ -378,15 +429,20 @@ export function createPostgresSourceMeasurementRepository({ runInTransaction, in
           const composable = validateComposedStatement(statement);
           if (!composable.ok) return failure(composable.code, composable.blockers);
 
+          // The fingerprint is the definition's content, compared within its
+          // worksheet identity; it is unchanged so every recorded one stays valid.
+          const worksheetIdentity = measurementWorksheetKey(measurement);
           const fingerprint = computeDefinitionFingerprint({ organizationId, sourceVersionId, definition });
-          let definitionRow = await insertDefinitionIfAbsent(tx, { organizationId, sourceVersionId, definition, fingerprint, actorUserId });
+          let definitionRow = await insertDefinitionIfAbsent(tx, {
+            organizationId, sourceVersionId, worksheetKey: worksheetIdentity, definition, fingerprint, actorUserId,
+          });
           let definitionFresh = Boolean(definitionRow);
           if (!definitionRow) {
-            definitionRow = await readDefinition(tx, { organizationId, sourceVersionId });
+            definitionRow = await readDefinition(tx, { organizationId, sourceVersionId, worksheetKey: worksheetIdentity });
             if (!definitionRow) throw new MalformedInsertedRowError("source_measurement_definitions");
             definitionFresh = false;
           }
-          if (definitionRow.definition_fingerprint !== fingerprint) return definitionConflict(sourceVersionId);
+          if (definitionRow.definition_fingerprint !== fingerprint) return definitionConflict(sourceVersionId, worksheetIdentity);
 
           const locatorPrint = locatorFingerprint({ organizationId, sourceVersionId, sheetKey: measurement.sheetKey });
           let locatorRow = await insertLocatorIfAbsent(tx, {
@@ -428,6 +484,7 @@ export function createPostgresSourceMeasurementRepository({ runInTransaction, in
           let measurementRow = await insertMeasurementIfAbsent(tx, {
             organizationId,
             sourceVersionId,
+            worksheetKey: worksheetIdentity,
             evidenceItemId: evidenceRow.evidence_item_id,
             definitionId: definitionRow.source_measurement_definition_id,
             measurement,
@@ -436,7 +493,7 @@ export function createPostgresSourceMeasurementRepository({ runInTransaction, in
           });
           const measurementFresh = Boolean(measurementRow);
           if (!measurementRow) {
-            measurementRow = await readMeasurement(tx, { organizationId, sourceVersionId });
+            measurementRow = await readMeasurement(tx, { organizationId, sourceVersionId, worksheetKey: worksheetIdentity });
             if (!measurementRow) throw new MalformedInsertedRowError("evidence_measurements");
           }
           if (!sameMeasurement(measurementRow, measurementFacts)) throw new ConcurrentStateChangedError("evidence_measurement");

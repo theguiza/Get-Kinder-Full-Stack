@@ -1313,14 +1313,25 @@ async function runXlsxAcceptance() {
       assert.deepEqual([replay.status, replay.body.data.replayed], [200, true]);
       const conflict = await adminApi("POST", sourceRecordCountMeasurementPath(ORG_X, sv, "sheet_3"), { ...DEFINITION, counted_unit: "attendance record" });
       assert.deepEqual([conflict.status, conflict.body.blockers?.[0]?.blocking_reason], [409, "measurement_definition_already_recorded"]);
-      const otherSheet = await adminApi("POST", sourceRecordCountMeasurementPath(ORG_X, sv, "sheet_2"), DEFINITION);
-      assert.ok(![200, 201].includes(otherSheet.status), `a second worksheet is not recorded under the same definition: ${J(otherSheet.body)}`);
       const basisPath = sourceRecordCountMeasurementPath(ORG_X, sv, "sheet_3");
       for (const [label, api] of [["client_contributor", contributorApi], ["client_reviewer", reviewerApi], ["another organization's administrator", adminYApi]]) {
         assert.equal((await api("GET", basisPath)).status, 403, label);
         assert.equal((await api("POST", basisPath, DEFINITION)).status, 403, label);
       }
-      assert.equal(await measurementCount(), 1, "one measurement; worksheets are never combined or added");
+      assert.equal(await measurementCount(), 1, "refusals write nothing");
+      // Another worksheet of the same version is its own measurement, under
+      // its own definition identity; the sheet_3 measurement is untouched.
+      const sheet3Row = async () => (await query("SELECT row_to_json(m)::text AS row FROM kai.evidence_measurements m WHERE evidence_item_id = $1::uuid", [recorded.measurement.evidence_item_id]))[0].row;
+      const sheet3Before = await sheet3Row();
+      const otherSheet = await adminApi("POST", sourceRecordCountMeasurementPath(ORG_X, sv, "sheet_2"), DEFINITION);
+      assert.deepEqual([otherSheet.status, otherSheet.body.data?.replayed, otherSheet.body.data?.measurement?.measured_value, otherSheet.body.data?.sourceLocator?.coordinates?.sheet_key],
+        [200, false, 4, "sheet_2"], J(otherSheet.body));
+      assert.notEqual(otherSheet.body.data.evidenceItem.evidence_item_id, recorded.measurement.evidence_item_id);
+      assert.equal(await measurementCount(), 2, "one measurement per worksheet; worksheets are never combined");
+      assert.equal(await sheet3Row(), sheet3Before, "the sheet_3 measurement is unchanged");
+      const reread3 = await adminApi("GET", sourceRecordCountMeasurementPath(ORG_X, sv, "sheet_3"));
+      assert.deepEqual([reread3.body.data.recorded.measurement.measured_value, reread3.body.data.recorded.measurement.evidence_item_id],
+        [independent.counted, recorded.measurement.evidence_item_id]);
 
       // Downstream: the ordinary measured claim is internally eligible, and
       // an internal Evidence Summary cites the selected worksheet.
