@@ -45045,3 +45045,106 @@ Anything beyond a record count (rates, outcomes, sums) is a new evidence type an
 **Remaining (NOT_CONFIRMED):** the production predicate values and the observed actor's roles (run the read-only SQL in pgAdmin); deployment and production acceptance of Review finding / View review status; whether a GK reviewer with active membership exists for the organization. Repository acceptance is not production acceptance.
 
 **Status:** MEASURED_FINDING_REVIEW_ACTION_AND_REVIEW_STATUS_IMPLEMENTED_AND_VERIFIED_LOCALLY. Local commits only; not pushed, deployed, or verified in production.
+
+### Count-only internal authority for story-present sources (2026-10-30)
+
+**Owner authorization (USER_CONFIRMED):** the owner prompt "KAI — Implement Safe Internal Count-Only Authority for Story-Present Sources" authorizes one bounded repository package. It covers a deterministic, count-only finding from an authorized source recorded with stories/testimonials `present`: ordinary internal eligibility, Evidence Summary generation and the direct internal Markdown read, with no added GK approval. The authorization includes synthetic connected acceptance on disposable loopback PostgreSQL and local commits. It excludes push, deployment, production records, migrations or schema, roles, flags, tenants, credentials, real client data and `00_KAI_CURRENT_STATE.md`. This answers the open owner decision recorded in the 2026-10-26 XLSX entry.
+
+**Starting state (TOOL_VERIFIED):** `main` at `a2e8089`, clean working tree.
+
+**Original predicates (TOOL_VERIFIED, at `a2e8089`):**
+- Eligibility: P2-06 internal (`postgresClaimTraceabilityRepository.js`) used `evaluateOrdinaryMeasurementAuthorityInTransaction` (R1–R7).
+  - R7 requires all six §7.2 categories `absent`, so `present` and `unknown` both failed with `story_testimonial_not_cleared`.
+  - Without the rule, eligibility needed GK evidence and claim decisions plus acceptance of the three source-level coverage dimensions.
+- Generation: a measured claim must be P2-06 eligible (`measured_claim_not_currently_eligible`).
+- Markdown: `evaluateInternalReportAvailabilityInTransaction` classified every cited source; `story_testimonial_not_cleared` was a GK reason, so the read returned 422 even after GK review (case C4).
+- R3 is exact string equality with `composeMeasurementClaimStatement`.
+
+**Governing basis:**
+- Operating Model §7.2 requires GK release review for *public* story/testimonial use and applies to release, not drafting or analysis.
+- The §11 "all six `absent`" text is the implemented scope of the organization's factual-review/release exception. That operation is unchanged and still refuses story-present drafts (C5 administrator start 403).
+- No controlling text prohibits internal count-only use; no material conflict was found.
+
+**Data boundary (TOOL_VERIFIED):**
+- The serialized model request is the system text plus `JSON.stringify({contentType, requestedAudience, claims})`. `validateGeneratorInput` restricts each claim to exactly `claimId, claimStatement, claimType, evidenceItemId, sourceId, sourceVersionId, limitationCodes`.
+- Under R3, `claimStatement` is the composed restatement: the count, the human labels (`LABEL_RE`, at most 80 characters), the period dates, the sheet key, and the blank and duplicate counts.
+- No cell value, column name, worksheet name, file name, definition/inclusion/exclusion text or decision note reaches the model.
+- Residual: the two short human labels can carry arbitrary words. They are always disclosed as human-defined (`measurement.record_meaning_human_defined`) and never verified.
+
+**Implemented (commit `c1fa7b3`):**
+1. **Shared decision** (`postgresOrdinaryInternalFactAuthority.js`): basis `count_only_story_testimonial_present`.
+   - Requires R1–R6, the exact R3 restatement (a claim must be given), story `present` (never `unknown`), the other five categories `absent`, and no current negative evidence head (`not_supported`, `needs_more_information`) or claim head (`rejected`, `needs_more_information`).
+   - `classifySourceDecision` and the recorded category are unchanged.
+2. **P2-06** applies the basis to internal eligibility. It attaches `{basis, reliedOn}` under a non-enumerable Symbol (the `GENERATOR_RESULT_REASON` idiom), so no DTO key, exact-key contract or JSON body changes.
+3. **Generation:** a measured claim whose eligibility relies on the basis is refused for every content type except internal `evidence_summary` (`story_testimonial_count_only_operation_not_permitted`).
+   - Under the basis, the claim carries `source.story_testimonial_present_count_only`, and the generator adds a count-only instruction. Every other prompt is byte-identical.
+   - **VAL-GEN-010** rejects blocks citing such a claim when they contain any of:
+     - quotation marks;
+     - first-person, story or testimony wording;
+     - participant, outcome or completion words absent from the cited statements;
+     - an un-negated "verified";
+     - a missing selected-worksheet key.
+   - It is a closed lexical boundary. Actual testimonial text cannot be copied because it is never in the input.
+4. **Markdown read:** the story reason is cleared for a draft only when:
+   - it is an internal Evidence Summary;
+   - every citation of that source is a currently eligible claim under the basis;
+   - no other cited source has a story reason;
+   - every persisted block citing the source re-passes VAL-GEN-010 (otherwise `count_only_content_boundary_exceeded`).
+
+   The report states "N non-blank data rows in worksheet X (`sheet_N`)". It attributes the meaning to a person as unverified, says it is "not an established count of <label>", omits the free-text definition fields from the model, and states the count-only source authority.
+5. **Review read and UI:** `ordinary_internal_rule.basis`; count-only text in Review finding and View measurement; words for the new refusals.
+
+**Semantic integrity:** the `Data_Dictionary`/`sheet_5`/37 "service events" reading becomes usable only as "37 non-blank data rows in worksheet Data_Dictionary (`sheet_5`)", with "service event" as an unverified human definition. Unqualified model replies ("delivered 37 service events to participants", "verified service completions", no worksheet key) are refused. The measurement, claim and decisions are unchanged.
+
+**Connected acceptance (TOOL_VERIFIED; XLSX runner 30/30 on two runs; real parser, services, routes, built bundle, headless Chrome):**
+- **I1:** a five-worksheet story-present workbook with sentinels in cells, a header, the file name and every definition text field.
+  - `Service_Events` (`sheet_3`) measures 364 / 0 blank / 2 duplicates, and the claim is exactly the composed restatement.
+  - It is internally eligible with 0 decisions and basis count-only. P2-08 lists it internal: yes, funder: no.
+  - Queues stay `open`/`needs_gk_review`; the category stays `present`.
+- **I2:** View measurement shows the basis. The administrator generates in the drafting UI.
+  - The model request has the seven keys and the governed statement, with no sentinel, cell value, column or worksheet name.
+  - Validators 001/002/003/004/008/010/005 pass.
+  - Markdown is 200 through the normal client route and equals the UI. It carries no sentinel or source text and no person/outcome/completion/causal claim.
+  - 0 approvals, coverage acceptances, release decisions or manifests.
+- **I3:** Impact Narrative 422 (count-only operation); funder 422; six adversarial replies refused by VAL-GEN-010 (two also by VAL-GEN-008) with nothing persisted.
+  - Contributor, reviewer, other-organization admin and GK reviewer on the customer route: 403.
+  - Cross-tenant and other-Project paths: 404.
+- **I4:** the 37-row Data_Dictionary case as above.
+- **I5:** these stay ineligible with basis null, and the model is never called:
+  - minors `present`;
+  - personal information `unknown`;
+  - AI denied (`ai_processing_not_permitted`).
+
+  Story `unknown` (H) Markdown stays 422 even after GK review. A stale version gives generation 409 and report 409.
+- **I6:** a mixed draft (count-only claim plus an unreviewed structural claim from the same source) returns 422 (`story_testimonial_not_cleared`, `cited_claims_not_currently_eligible`). A GK `not_supported` evidence decision defeats the basis: the earlier report becomes 422 and regeneration 422.
+- **Superseded expectations updated:**
+  - C2 is now eligible as a count only, and Impact Narrative is refused.
+  - C3: GK still records evidence, claim and three coverage acceptances.
+  - C4: Evidence Summary Markdown 200; GK-reviewed Impact Narrative generated, its Markdown 422.
+  - C5: the GK release route still delivers.
+  - H1–H6 unchanged, apart from the added `basis` key.
+
+**Verification (TOOL_VERIFIED; `DATABASE_URL=postgres://127.0.0.1:9/kai_sentinel` for every Node/npm command):**
+
+| Command or suite | Result |
+| --- | --- |
+| `kai-count-only-story-authority.spec.js` (new) | 7/7 |
+| Full `npm test` | 5,800 passed, 0 failed, 122 skipped (5,922) |
+| XLSX file-to-report browser acceptance (A–I) | 30/30, twice |
+| P2-01M / P2-06 / P2-08 / P2-04 / P3-01 runners | 59 (+2), 34, 20, 18, 22; 0 failed |
+| Plan A normal migration chain | 2/2, 33/33, 4/4 |
+| Assembled CSV file-to-report / client Knowledge Studio browser acceptance | 23/23, 6/6 |
+| `verify:kai-sprint2-api-contract` | 71/71 |
+| `npm run build` | passed; tracked bundle rebuilt |
+| `git diff --check` | passed |
+
+**Not tested connected:** internal use `not_allowed` (the unit verdict covers it).
+
+**Remaining (NOT_CONFIRMED):**
+- Production R3 equality for `485b90cd…`.
+- Real model prose: the provider is a stub locally.
+- Deployment and production acceptance.
+
+Under this rule the production 37-row claim, if R3 holds, would be usable only as "37 rows of Data_Dictionary"; a `Service_Events` count still needs a new intake version.
+
+**Status:** COUNT_ONLY_STORY_PRESENT_INTERNAL_AUTHORITY_IMPLEMENTED_AND_VERIFIED_LOCALLY. Local commits only; not pushed, deployed, or verified in production.
