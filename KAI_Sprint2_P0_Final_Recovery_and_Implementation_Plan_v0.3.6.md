@@ -45410,3 +45410,54 @@ No frontend file changed and the tracked bundle was not rebuilt.
 - Real model prose for non-count-only claims in mixed drafts, which is bounded only by the existing validators.
 
 **Status:** ASSEMBLED_XLSX_TO_TRUTHFUL_INTERNAL_REPORT_VERIFIED_LOCALLY; PRODUCTION_MIGRATION_HANDOFF_PREPARED_NOT_EXECUTED. Local commits only; not pushed, deployed, migrated, or verified in production.
+
+### KAI_INTERNAL_REPORT_INELIGIBLE_INPUT: structural-only input and the measured path (2026-10-31)
+
+**Owner authorization (USER_CONFIRMED):** owner prompt "Complete the KAI_INTERNAL_REPORT_INELIGIBLE_INPUT repair". It authorizes inspection, repository repair, synthetic local tests and local commits. It excludes push, deployment, production database, schema or flag changes, real client data and secrets. pgAdmin is the production SQL surface.
+
+**Observed (USER_CONFIRMED):** production draft `d479ccad-f541-47a7-acc9-3e8f65f394bc` cites one `dictionary_field_presence_fact` claim (`03fe3285-…`). It returns `citedClaimsCurrentlyEligible: false` and `internalReport.blockedReasons: [cited_claims_not_currently_eligible, structural_facts_only]`.
+
+**Starting state (TOOL_VERIFIED):** `main` at `fd13edf`, clean. The local `origin/main` ref is `fd13edf`, set by `update by push` at 2026-10-31 09:24:38 -0700. The previous entry's "local only" is therefore superseded for `4c18c46..fd13edf`.
+
+**Root cause (TOOL_VERIFIED, from code):**
+- The response is the designed fail-closed result, identical to acceptance C2's local reproduction.
+- The P2-06 ordinary authority refuses non-measurement evidence (`evaluateOrdinaryMeasurementAuthorityInTransaction`, `evidence_type_not_measurement`). An unreviewed field-presence claim is therefore ineligible.
+- `evaluateInternalReportAvailabilityInTransaction` adds `structural_facts_only` whenever every cited evidence item is a field-presence fact.
+- The input-selection defect was closed by `36c6588` and `454f811`, which are in `origin/main`:
+  - `claimInternalDraftSelectability` gives a structural claim no selection control.
+  - `internalDraftReadiness` refuses a structural-only selection (`no_measured_claim` / `no_measured_claim_selected`).
+  - `ClientInternalDrafts` shows `STRUCTURAL_ONLY_DRAFT_MESSAGE`, with no Open report and no next action.
+- Whether `d479ccad` predates that deployment is NOT_CONFIRMED. GK Knowledge Studio internal generation (`canSelectClaimForInternalGeneration`, Package 14-05) still admits any governed claim, by design: it feeds Get Kinder's review path, which the 2026-10-26 owner decision leaves unchanged, and it never shows internal-report availability.
+
+**Change (`7a131f5`, test only):** client-admin internal factual review acceptance C3. The authorized administrator's approval of the structural-only, ineligible draft through the real route is refused with 422 `cited_claims_not_currently_eligible` (`VAL-KAI-ORG-REVIEW-001`). The review queue is unchanged, there are 0 approval records, the draft stays `structural_facts_only`, and its Markdown returns 422. No product code changed.
+
+**Regression mapping:**
+- A (structural input not representable as report-eligible): measured-report selection 4, 6, 9; factual review C2.
+- B (historical draft stays blocked): selection E, 10; factual review C2.
+- C (approval cannot bypass eligibility): factual review C3 (new); `kai-organization-internal-review.spec.js` approval refusal.
+- D (measured count-only report available): XLSX A1–A4, I1–I2, L1–L2; selection 6–7.
+
+**Verification (TOOL_VERIFIED; `DATABASE_URL=postgresql://127.0.0.1:1/kai_non_listening_sentinel`):**
+
+| Command or suite | Result |
+| --- | --- |
+| `npm run build` | passed; bundle `5adb88a3…7be135`, equal to the tracked `fd13edf` bundle |
+| Selection, organization review, count-only authority, truthful summary unit specs | 35/35 |
+| Client-admin internal factual review browser acceptance | 17/17 (with C3) |
+| Customer measured report selection browser acceptance | 17/17 |
+| XLSX file-to-report browser acceptance (A–L) | 37/37 |
+| P2-01M runner | 2/2, 2/2, 64 passed + 8 skipped, 0 failed; identity verifier `OVERALL PASS` 10/10 |
+| Full `npm test` | 5,807 passed, 0 failed, 122 skipped (5,929) |
+| `verify:kai-sprint2-api-contract` | 71/71 |
+| `git diff --check` | passed |
+
+**Production risk (TOOL_VERIFIED code fact; runtime NOT_CONFIRMED):** `postgresSourceMeasurementRepository.js` inserts, selects and deduplicates on `worksheet_key` from `5f2cc84` onward. The pushed `fd13edf` contains it. If Render auto-deployed `fd13edf` and `kai_sprint2_p2_01m_worksheet_measurement_identity.sql` was not applied first, every Count records definition or measurement write fails in production. The owner's 2026-10-31 inspection (time not recorded) found the column absent. The production bundle fingerprint is `5adb88a3…7be135` for `dae7fe7`..`fd13edf`, `204ba107…` for `5f2cc84`, and `4cfe33e5…` for `60f7bd2`.
+
+**Production order (unchanged from the previous entry):**
+1. Run `scripts/kai-sprint2-p2-01m-xlsx-worksheet-method-verify-read-only.sql` and `scripts/kai-sprint2-p2-01m-worksheet-measurement-identity-verify-read-only.sql` in pgAdmin.
+2. Apply `kai_sprint2_p2_01m_xlsx_selected_worksheet_record_count_method.sql` only if the first verifier is not `PASS`.
+3. Apply `kai_sprint2_p2_01m_worksheet_measurement_identity.sql`.
+4. Confirm the identity verifier `OVERALL PASS` (10 checks) and the predecessor verifier still `PASS`.
+5. Never re-run `kai_sprint2_p2_01m_xlsx_worksheet_record_count_method.sql`.
+
+**Status:** KAI_INTERNAL_REPORT_INELIGIBLE_INPUT_VERIFIED_LOCALLY. The historical draft is correctly blocked and cannot be repaired. Production is not fixed until the migration is verified in pgAdmin and a live synthetic Count records → measured claim → Evidence Summary → Open report run passes.
