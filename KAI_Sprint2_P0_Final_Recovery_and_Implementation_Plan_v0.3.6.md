@@ -45344,3 +45344,69 @@ No frontend file changed and the tracked bundle was not rebuilt.
 - Real model prose for non-count-only claims in a mixed draft is still bounded only by the existing validators (unchanged).
 
 **Status:** TRUTHFUL_COUNT_ONLY_EVIDENCE_SUMMARY_VERIFIED_LOCALLY. Local commits only; not pushed, deployed, or verified in production.
+
+### Assembled XLSX-to-truthful-internal-report verification and production migration handoff (2026-10-31)
+
+**Owner authorization (USER_CONFIRMED):** the owner prompt "KAI — Package 4: Final Assembled XLSX-to-Truthful-Internal-Report Verification and Production Migration Handoff" authorizes local assembled acceptance of Packages 1–3 on one promoted synthetic workbook version, attributable integration repairs only, local commits, and a pgAdmin migration handoff that is prepared but not executed. It excludes production database access or migration, push, deployment, flags, tenants, credentials, real client data, new approval mechanisms and `00_KAI_CURRENT_STATE.md`.
+
+**Starting state (TOOL_VERIFIED):** `main` at `0713fe7`, clean, 10 commits ahead of the local `origin/main` ref (`60f7bd2`, not fetched). The Package 1–3 commits are `5f2cc84`/`347d4a7`, `dae7fe7`/`d3984e7`, `f580d6e`/`0713fe7`, after `c1fa7b3`/`6f34c40`. Baseline XLSX acceptance at `0713fe7`: 34/34.
+
+**Coverage gap found:** J exercised the Count records UI on a story-absent version, and K exercised reports on a separate story-present version whose measurements were recorded through the API. No case ran the whole journey on one version.
+
+**Implemented (commit `d233136`, test only; no product code changed):** XLSX acceptance L1–L3. J's Count records helpers, I1's eligible-claims lookup and K2's pre-fix draft writer are shared instead of copied.
+- **Latent test defect (Package 3, test only):** K1's `/\b37\b/` and `/\b364\b/` checks for the other worksheet ran over the whole Markdown, which contains three ISO timestamps. A `:37` minute or second matches, so the test failed intermittently. A deterministic check reproduced the match. The checks now skip timestamps (`withoutTimestamps`). Product output is unaffected.
+
+**Connected proof (TOOL_VERIFIED; XLSX acceptance L; real parser, services, routes, built bundle, headless Chrome, disposable PostgreSQL; synthetic data):**
+- **L1:** one five-worksheet workbook with testimonial sentinels, recorded `reviewed`, allowed, AI permitted, story `present` and the other five high-risk categories absent, is uploaded and promoted once.
+  - In Count records, `Data_Dictionary (sheet_5)` 37/0/0 under the misleading service-event definition and `Service_Events (sheet_3)` 364/0/2 under a sentinel-bearing row definition are each recorded (one keyed POST) and claimed through the UI. The sheet_3 claim equals the governed restatement exactly.
+  - Both measurements, their definitions, locators and evidence are on the one source version, with distinct evidence and claim ids.
+  - A delayed sheet_5 read arriving after sheet_3 is selected is not shown. Switching, a full reload and switching again write nothing (lineage digest unchanged). Fresh service reads return each worksheet's own value, definition, evidence and claim.
+  - File and version counts are unchanged. Audits: 2 measurement, 2 claim proposal and 2 claim-gap audits, none carrying source text. The 37-row rows are unchanged. No approval or follow-up was recorded and the model was not called.
+- **L2:** both claims are P2-06 internally eligible on `count_only_story_testimonial_present` with 0 evidence, claim or coverage decisions, each evaluated against its own measurement. P2-08 lists them for internal use and not for funder use; public is ineligible; Impact Narrative is refused.
+  - The drafting UI generated three Evidence Summaries: sheet_3 alone, sheet_5 alone, and both. Each makes one POST; the run and draft are evidence_summary/internal; all seven validators ran and passed. Each draft stores one composed block per claim, citing its own evidence. The model was called 0 times.
+  - The report opened in the UI equals the direct Markdown read, which returned 200 for all three.
+  - Every section was checked: own count, worksheet, method, arithmetic, duplicate treatment, attributed unverified meaning, limitation codes, traceability, conclusion and references. Every single-citation line names nothing of the other worksheet. There is no "401", no event, participant, completion or outcome count, no unquoted label in an affirming section, no sentinel and no cell value.
+  - A mixed draft (sheet_3 plus a structural claim from the same version) asked the model for the structural claim only; nothing of sheet_3 reached the request. It stored the composed block plus the model block, and its read returned 422 (`story_testimonial_not_cleared`, `cited_claims_not_currently_eligible`). Its claim proposal routed P2-04 follow-ups for the structural claim only.
+- **L3:** `d3984e7`'s own code stored the I4 sentence for the sheet_5 claim. The direct read returned 422 with `count_only_content_boundary_exceeded`, carrying no draft text, and the draft, blocks and citations are byte-identical.
+  - A GK `not_supported` evidence decision on sheet_5 changes the reads: sheet_5 and the combined report become 422; sheet_3 stays 200, byte-identical; sheet_5 regeneration is refused.
+  - Only the one evidence decision was added. Drafts are unmodified; the measurement, definition and claim are unchanged apart from the evidence item's review projection; the category stays `present`.
+
+**Verification (TOOL_VERIFIED; `DATABASE_URL=postgresql://127.0.0.1:1/kai_non_listening_sentinel` for every Node/npm command after the first build, which used `postgresql://kai_sentinel@127.0.0.1:9/kai_sentinel`):**
+
+| Command or suite | Result |
+| --- | --- |
+| XLSX file-to-report browser acceptance (A–L) | 37/37 |
+| Truthful summary, count-only authority, P2-01M unit, measurement/receipt view, AI-processing and allowed-use enforcement | 6/6, 7/7, 15/15, 9/9, 7/7, 7/7 |
+| P2-01M disposable PostgreSQL runner (migrations applied twice, verifiers FAIL before / PASS after, rollbacks refused) | 2/2, 2/2, 64 passed + 8 skipped, 0 failed; identity verifier 10/10 PASS |
+| Plan A normal migration chain | 82 applied in order; 2/2, 36 + 2 skipped, 4/4 |
+| Assembled CSV file-to-report browser acceptance | 23/23 |
+| Knowledge Studio: measurement-to-released-report, factual review, measured report selection, source promotion | 13/13, 16/16, 17/17, 13/13 |
+| Full `npm test` | 5,807 passed, 0 failed, 122 skipped (5,929) |
+| `verify:kai-sprint2-api-contract` | 71/71 |
+| `npm run build` | passed; tracked bundle unchanged |
+| `git diff --check` | passed |
+
+**Production migration handoff (prepared, NOT executed):**
+- Owner read-only pgAdmin inspection, 2026-10-31 (USER_CONFIRMED):
+  - `kai.evidence_measurements`: exists, no `worksheet_key`, 0 worksheet-key indexes, 1 user-defined trigger.
+  - `kai.source_measurement_definitions`: exists, no `worksheet_key`, 0 indexes, 0 triggers.
+  - The Package 1 identity schema is therefore absent.
+- Committed dependency chain, in Plan A order (TOOL_VERIFIED): `kai_sprint2_p2_01m_source_record_count_measurement` (27ba167) → `kai_sprint2_p2_01m_xlsx_worksheet_record_count_method` (738accd) → `kai_sprint2_p2_01m_xlsx_selected_worksheet_record_count_method` (fe0bf9b) → `kai_sprint2_p2_01m_worksheet_measurement_identity` (5f2cc84).
+  - The identity migration aborts unless `kai.enforce_selected_worksheet_measurement_locator()` exists.
+  - Its verifier's W5 requires the `fe0bf9b` trigger `evidence_measurements_selected_worksheet_locator_check`, and `kai-sprint2-p2-01m-xlsx-worksheet-method-verify-read-only.sql` (7 checks) covers `fe0bf9b`'s widened CHECKs.
+  - `738accd` must never be re-run after `fe0bf9b`: it would narrow `evidence_measurements_p2_01m_method_check` and remove the selected method.
+- The repository defines no other trigger on `kai.evidence_measurements` before the identity migration. The owner's count of 1 therefore fits `fe0bf9b` having been applied, but the trigger's identity is NOT_CONFIRMED.
+- Verifier coverage: for a database where the committed migration has run in full, no critical gap. The CHECK, triggers and functions are dropped and recreated unconditionally in its transaction, and the verifier checks columns, exact index definitions, removal of the old constraints, CHECK vectors, trigger presence and row agreement. Non-critical residuals: it checks only the presence of the definition-side CHECK, and does not check trigger timing or function binding.
+- Required order: separate owner authorization → run the predecessor verifier and the identity verifier read-only (the identity verifier reports FAIL safely before the migration) → apply `fe0bf9b`'s migration only if the predecessor verifier is not PASS → apply `kai_sprint2_p2_01m_worksheet_measurement_identity.sql` → identity verifier `OVERALL PASS` (10 checks) and predecessor verifier still PASS → only then consider a separately authorized push (push to `main` auto-deploys).
+
+**Production status at closure:** production worksheet-identity schema: NOT READY, based on the owner-supplied read-only inspection. Production migration execution: NOT PERFORMED in this package. Production verifier result: NOT_CONFIRMED. Push and deployment: prohibited in this package and not performed.
+
+**Remaining (NOT_CONFIRMED):**
+- Whether production has `fe0bf9b`'s migration and which trigger it holds.
+- The production PostgreSQL version.
+- The complete migration history.
+- Which revision production runs (the local `origin/main` ref is `60f7bd2`).
+- Production count-only drafts holding model prose (they will read 422 after deploy and need regeneration).
+- Real model prose for non-count-only claims in mixed drafts, which is bounded only by the existing validators.
+
+**Status:** ASSEMBLED_XLSX_TO_TRUTHFUL_INTERNAL_REPORT_VERIFIED_LOCALLY; PRODUCTION_MIGRATION_HANDOFF_PREPARED_NOT_EXECUTED. Local commits only; not pushed, deployed, migrated, or verified in production.
