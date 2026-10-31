@@ -15,6 +15,7 @@ import {
   measurementFailureMessage,
   measurementFormReadiness,
   projectMeasurementBasis,
+  selectedWorksheetView,
   sourceRecordCountMeasurementPath,
 } from "../frontend/knowledgeStudio/clientSourceMeasurementLogic.js";
 
@@ -253,4 +254,46 @@ test("routes: the basis GET and the receipt GET forward only path ids and the se
   ]);
   assert.equal((await get(`/admin/organizations/${ORG}/engagements/${ENGAGEMENT}/client-released-reports/NOT-A-UUID/markdown`)).statusCode, 422);
   assert.equal(calls.length, 2, "a malformed path never reaches the service");
+});
+
+test("Count records view: a workbook's recorded count is shown only under the worksheet it was read for, and a read naming no worksheet is never treated as unmeasured", () => {
+  const OPTIONS = [["sheet_3", "Service_Events", 364, 0, 2], ["sheet_5", "Data_Dictionary", 37, 0, 0]]
+    .map(([sheet_key, sheet_name, data_record_count, blank_record_count, duplicate_record_count]) => ({ sheet_key, sheet_name, data_record_count, blank_record_count, duplicate_record_count }));
+  const recorded = (value, evidenceItemId) => ({
+    definition: { counted_unit: "service event", unit_label: "service events", definition_text: "One row.", inclusion_rule: "Rows.", exclusion_rule: "None." },
+    measurement: { measured_value: value, unit_label: "service events", evidence_item_id: evidenceItemId }, claim: null, limitations: [],
+  });
+  const EVIDENCE_3 = "0f000000-0000-4000-8000-0000000e0003";
+  const EVIDENCE_5 = "0f000000-0000-4000-8000-0000000e0005";
+  const read = (worksheetKey, body) => ({ status: "success", error: "", worksheetKey, data: projectMeasurementBasis({ sourceVersion: { source_version_id: VERSION, is_current: true }, ...body }) });
+  const keyed = (key, counted, rec) => read(key, { basis: { measurable: true, source_format: "xlsx", worksheet: { sheet_key: key, sheet_name: key }, data_record_count: counted,
+    blank_record_count: 0, duplicate_record_count: 0, counted_record_count: counted, worksheet_options: OPTIONS }, recorded: rec });
+  const unkeyed = (rec) => read("", { basis: { measurable: false, blockers: [{ blocking_reason: "measurement_xlsx_worksheet_selection_required", message: "Choose one worksheet." }],
+    worksheet_options: OPTIONS }, recorded: rec });
+
+  // Unkeyed: one recorded count (any worksheet) or none (several recorded) is not attributed, and no form is offered.
+  for (const rec of [recorded(37, EVIDENCE_5), null]) {
+    const view = selectedWorksheetView(unkeyed(rec), "");
+    assert.deepEqual([view.status, view.recorded, view.selectionRequired, view.showForm], ["success", null, true, false]);
+  }
+  // Keyed: each worksheet shows only its own count; an unrecorded worksheet offers the form.
+  const s5 = selectedWorksheetView(keyed("sheet_5", 37, recorded(37, EVIDENCE_5)), "sheet_5");
+  const s3 = selectedWorksheetView(keyed("sheet_3", 364, recorded(364, EVIDENCE_3)), "sheet_3");
+  assert.deepEqual([s5.recorded.measurement.measuredValue, s5.recorded.measurement.evidenceItemId, s5.showForm], [37, EVIDENCE_5, false]);
+  assert.deepEqual([s3.recorded.measurement.measuredValue, s3.recorded.measurement.evidenceItemId, s3.showForm], [364, EVIDENCE_3, false]);
+  assert.deepEqual([selectedWorksheetView(keyed("sheet_3", 364, null), "sheet_3").showForm], [true]);
+  // A read for another worksheet (an out-of-order or in-flight response) is never shown under the selection.
+  for (const [state, selected] of [[keyed("sheet_5", 37, recorded(37, EVIDENCE_5)), "sheet_3"], [keyed("sheet_3", 364, recorded(364, EVIDENCE_3)), "sheet_5"],
+    [unkeyed(recorded(37, EVIDENCE_5)), "sheet_3"], [{ status: "loading", data: null, error: "", worksheetKey: "sheet_3" }, "sheet_3"]]) {
+    assert.deepEqual([selectedWorksheetView(state, selected).status, selectedWorksheetView(state, selected).recorded, selectedWorksheetView(state, selected).showForm], ["loading", null, false]);
+  }
+  // A response claiming a different worksheet than its request is not attributed either.
+  assert.equal(selectedWorksheetView({ ...keyed("sheet_5", 37, recorded(37, EVIDENCE_5)), worksheetKey: "sheet_3" }, "sheet_3").recorded, null);
+  // CSV keeps its whole-version view.
+  const csv = selectedWorksheetView(read("", { basis: { measurable: true, data_record_count: 6, blank_record_count: 1, duplicate_record_count: 2, counted_record_count: 5 },
+    recorded: recorded(5, EVIDENCE_5) }), "");
+  assert.deepEqual([csv.recorded.measurement.measuredValue, csv.showForm, csv.selectionRequired], [5, false, false]);
+  // The same-worksheet conflict names the worksheet.
+  assert.match(measurementFailureMessage({ statusCode: 409, body: { blockers: [{ blocking_reason: "measurement_definition_already_recorded" }] } }, { worksheetKey: "sheet_3" }),
+    /^A different definition is already recorded for worksheet sheet_3 of this source version, and a recorded definition cannot be changed\./);
 });

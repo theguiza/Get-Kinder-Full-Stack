@@ -671,6 +671,8 @@ export default function ClientEvidenceWorkflow({ organizationId, engagementId, a
                       <div className="w-100">
                         <ClientSourceMeasurementPanel key={`${contextKey}:${version.sourceVersionId}`} organizationId={organizationId}
                           sourceVersionId={version.sourceVersionId} canProposeClaim={access.proposeClaim}
+                          initialWorksheetKey={measuring.worksheetKey || ""}
+                          onWorksheetChange={(worksheetKey) => setMeasuring((current) => (current ? { ...current, worksheetKey } : current))}
                           onClose={() => setMeasuring(null)} onRecorded={refresh} />
                       </div>
                     ) : null}

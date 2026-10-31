@@ -4,12 +4,12 @@ import { claimProposalPath, errorText, getJson, postJson } from "../impactEviden
 import { claimProposalResultMessage } from "./clientEvidenceWorkflowLogic.js";
 import {
   EMPTY_MEASUREMENT_FORM,
-  isWorksheetSelectionRequired,
   MEASUREMENT_FORM_READINESS_MESSAGES,
   measurementDefinitionBody,
   measurementFailureMessage,
   measurementFormReadiness,
   projectMeasurementBasis,
+  selectedWorksheetView,
   sourceRecordCountMeasurementPath,
 } from "./clientSourceMeasurementLogic.js";
 
@@ -29,85 +29,118 @@ const FIELDS = Object.freeze([
  * through the existing measurement route, and then shows what was recorded,
  * its limitations, and the claim step that follows. A recorded definition is
  * immutable: a conflicting one is refused and the recorded one is shown.
+ * In a workbook each selected worksheet has its own definition, measurement
+ * and claim; every read, write and claim proposal names the worksheet, and a
+ * response is shown only under the worksheet it was loaded for. The selection
+ * is kept by the parent (initialWorksheetKey/onWorksheetChange), because a
+ * refresh of the Data Sources list remounts this panel; a remount re-reads
+ * that worksheet from the server.
  */
-export default function ClientSourceMeasurementPanel({ organizationId, sourceVersionId, canProposeClaim, onClose, onRecorded }) {
-  const [basis, setBasis] = useState({ status: "loading", data: null, error: "" });
+export default function ClientSourceMeasurementPanel({
+  organizationId, sourceVersionId, canProposeClaim, initialWorksheetKey = "", onWorksheetChange, onClose, onRecorded,
+}) {
+  // Every basis state names the worksheet it was read for ("" = none).
+  const [basis, setBasis] = useState({ status: "loading", data: null, error: "", worksheetKey: initialWorksheetKey });
   const [form, setForm] = useState(EMPTY_MEASUREMENT_FORM);
   const [pending, setPending] = useState("");
   const [notice, setNotice] = useState(null);
-  const [selectedWorksheetKey, setSelectedWorksheetKey] = useState("");
+  const [selectedWorksheetKey, setSelectedWorksheetKey] = useState(initialWorksheetKey);
+  // The committed profile's worksheets (the same in every read), kept while
+  // another worksheet's read is in flight.
+  const [worksheetOptions, setWorksheetOptions] = useState([]);
   const seqRef = useRef(0);
+  const selectedRef = useRef(initialWorksheetKey);
+  const inFlightRef = useRef(false);
 
-  const load = useCallback(async (worksheetKey = selectedWorksheetKey) => {
+  // Reads the authoritative basis for one worksheet. Only the newest read for
+  // the worksheet still selected is applied.
+  const load = useCallback(async (worksheetKey) => {
     seqRef.current += 1;
     const seq = seqRef.current;
+    setBasis((current) => (current.worksheetKey === worksheetKey ? current : { status: "loading", data: null, error: "", worksheetKey }));
     const result = await getJson(sourceRecordCountMeasurementPath(organizationId, sourceVersionId, worksheetKey || null));
-    if (seqRef.current !== seq) return;
+    if (seqRef.current !== seq || selectedRef.current !== worksheetKey) return;
     const data = result.statusCode === 200 && result.body?.ok ? projectMeasurementBasis(result.body.data) : null;
-    setBasis(data ? { status: "success", data, error: "" } : { status: "error", data: null, error: measurementFailureMessage(result) });
-  }, [organizationId, selectedWorksheetKey, sourceVersionId]);
-  useEffect(() => { load(""); }, [organizationId, sourceVersionId]);
+    if (data) setWorksheetOptions(data.counts.worksheetOptions);
+    setBasis(data
+      ? { status: "success", data, error: "", worksheetKey }
+      : { status: "error", data: null, error: measurementFailureMessage(result, { worksheetKey: worksheetKey || null }), worksheetKey });
+  }, [organizationId, sourceVersionId]);
+  useEffect(() => { load(selectedRef.current); }, [load]);
+
+  const selectWorksheet = (worksheetKey) => {
+    selectedRef.current = worksheetKey;
+    setSelectedWorksheetKey(worksheetKey);
+    setNotice(null);
+    setForm(EMPTY_MEASUREMENT_FORM);
+    onWorksheetChange?.(worksheetKey);
+    load(worksheetKey);
+  };
+
+  // A write or claim proposal belongs to the worksheet selected when it was
+  // sent; its outcome is shown only while that worksheet is still selected.
+  const runForSelection = async (kind, send, describe) => {
+    if (inFlightRef.current) return;
+    inFlightRef.current = true;
+    const worksheetKey = selectedRef.current;
+    setPending(kind);
+    setNotice(null);
+    let result;
+    try {
+      result = await send(worksheetKey);
+    } finally {
+      inFlightRef.current = false;
+      setPending("");
+    }
+    const ok = (result.statusCode === 200 || result.statusCode === 201) && result.body?.ok;
+    if (ok) onRecorded?.();
+    if (selectedRef.current !== worksheetKey) return;
+    setNotice(describe(ok, result, worksheetKey));
+    load(worksheetKey);
+  };
 
   const readiness = measurementFormReadiness(form);
-  const submit = async () => {
+  const submit = () => {
     if (!readiness.ready) return;
-    setPending("record");
-    setNotice(null);
-    const result = await postJson(sourceRecordCountMeasurementPath(organizationId, sourceVersionId, selectedWorksheetKey || null), measurementDefinitionBody(form));
-    setPending("");
-    if ((result.statusCode !== 200 && result.statusCode !== 201) || !result.body?.ok) {
-      setNotice({ kind: "warning", text: measurementFailureMessage(result) });
-      load();
-      return;
-    }
-    setNotice({ kind: "success", text: result.body.data.replayed ? "This definition was already recorded." : "Definition and measurement recorded." });
-    onRecorded?.();
-    load();
+    const body = measurementDefinitionBody(form);
+    runForSelection("record",
+      (worksheetKey) => postJson(sourceRecordCountMeasurementPath(organizationId, sourceVersionId, worksheetKey || null), body),
+      (ok, result, worksheetKey) => (ok
+        ? { kind: "success", text: result.body.data.replayed ? "This definition was already recorded." : "Definition and measurement recorded." }
+        : { kind: "warning", text: measurementFailureMessage(result, { worksheetKey: worksheetKey || null }) }));
   };
-  const proposeClaim = async (evidenceItemId) => {
-    setPending("propose");
-    setNotice(null);
-    const result = await postJson(claimProposalPath(organizationId, evidenceItemId), {});
-    setPending("");
-    if ((result.statusCode !== 200 && result.statusCode !== 201) || !result.body?.ok) {
-      setNotice({ kind: "warning", text: errorText(result) });
-      return;
-    }
-    setNotice({ kind: "success", text: claimProposalResultMessage(result.body.data) });
-    onRecorded?.();
-    load();
+  const proposeClaim = (evidenceItemId) => {
+    runForSelection("propose",
+      () => postJson(claimProposalPath(organizationId, evidenceItemId), {}),
+      (ok, result) => (ok ? { kind: "success", text: claimProposalResultMessage(result.body.data) } : { kind: "warning", text: errorText(result) }));
   };
 
-  const data = basis.data;
-  const recorded = data?.recorded;
-  const selectionRequired = isWorksheetSelectionRequired(data?.counts);
+  const view = selectedWorksheetView(basis, selectedWorksheetKey);
+  const { data, recorded, selectionRequired } = view;
+  const worksheetLabel = data?.counts.worksheet ? `${data.counts.worksheetName || data.counts.worksheet} (${data.counts.worksheet})` : null;
   return (
     <div className="border rounded p-2 mt-2" data-client-source-measurement={sourceVersionId}>
       <div className="d-flex align-items-center mb-2">
         <h6 className="mb-0">Count the records in this source</h6>
         <button type="button" className="btn btn-sm btn-link ms-auto" onClick={onClose}>Close</button>
       </div>
-      {basis.status === "loading" ? <div className="text-muted small">Loading the source's counts...</div> : null}
-      {basis.status === "error" ? <div className="alert alert-warning py-2 small" data-client-source-measurement-error="">{basis.error}</div> : null}
+      {view.status === "loading" ? <div className="text-muted small" data-client-source-measurement-loading={selectedWorksheetKey}>Loading the source's counts...</div> : null}
+      {view.status === "error" ? <div className="alert alert-warning py-2 small" data-client-source-measurement-error="">{view.error}</div> : null}
       {notice ? <div className={`alert alert-${notice.kind} py-2 small`} data-client-source-measurement-notice={notice.kind}>{notice.text}</div> : null}
-      {data?.counts.worksheetOptions.length > 1 ? (
+      {worksheetOptions.length > 1 ? (
         <div className="small mb-2" data-client-source-measurement-worksheet-selector="">
           <label className="d-block mb-1">
             Worksheet to count
             <select className="form-select form-select-sm" value={selectedWorksheetKey} data-client-source-measurement-worksheet-select=""
-              onChange={(event) => {
-                const key = event.target.value;
-                setSelectedWorksheetKey(key);
-                load(key);
-              }}>
+              onChange={(event) => selectWorksheet(event.target.value)}>
               <option value="">Choose one worksheet</option>
-              {data.counts.worksheetOptions.map((sheet) => <option key={sheet.sheetKey} value={sheet.sheetKey}>{sheet.sheetName}</option>)}
+              {worksheetOptions.map((sheet) => <option key={sheet.sheetKey} value={sheet.sheetKey}>{`${sheet.sheetName} (${sheet.sheetKey})`}</option>)}
             </select>
           </label>
           <div>Each worksheet is assessed separately. Notes and other worksheets are never added to the selected count.</div>
-          {data.counts.worksheetOptions.map((sheet) => (
+          {worksheetOptions.map((sheet) => (
             <div key={sheet.sheetKey} data-client-source-measurement-worksheet-option={sheet.sheetKey}>
-              {sheet.sheetName}: data rows {sheet.dataRecordCount ?? "unavailable"}, blank rows {sheet.blankRecordCount ?? "unavailable"},
+              {sheet.sheetName} ({sheet.sheetKey}): data rows {sheet.dataRecordCount ?? "unavailable"}, blank rows {sheet.blankRecordCount ?? "unavailable"},
               exact duplicates {sheet.duplicateRecordCount ?? "unavailable"}.
             </div>
           ))}
@@ -132,7 +165,7 @@ export default function ClientSourceMeasurementPanel({ organizationId, sourceVer
         <div className="small mb-2" data-client-source-measurement-counts="">
           {data.counts.worksheet ? (
             <div data-client-source-measurement-worksheet={data.counts.worksheet}>
-              Excel workbook worksheet {data.counts.worksheetName || data.counts.worksheet}, with its first row as the header row.
+              Excel workbook worksheet {worksheetLabel}, with its first row as the header row.
             </div>
           ) : null}
           <div>Data records after the header row: <strong>{data.counts.dataRecordCount}</strong></div>
@@ -146,7 +179,9 @@ export default function ClientSourceMeasurementPanel({ organizationId, sourceVer
       ) : null}
       {recorded ? (
         <div className="small" data-client-source-measurement-recorded="">
+          {worksheetLabel ? <div data-client-source-measurement-recorded-worksheet={data.counts.worksheet}>Worksheet counted: {worksheetLabel}</div> : null}
           <div className="fw-semibold">Recorded definition</div>
+          <div className="text-muted">Your organization's definition of one record. KAI counted the rows; it did not verify what they represent.</div>
           <div>One record is one {recorded.definition.countedUnit}: {recorded.definition.definitionText}</div>
           <div>Counts: {recorded.definition.inclusionRule} Excludes: {recorded.definition.exclusionRule}</div>
           <div data-client-source-measurement-period="">
@@ -157,6 +192,10 @@ export default function ClientSourceMeasurementPanel({ organizationId, sourceVer
           {recorded.measurement ? (
             <div className="mt-1" data-client-source-measurement-value={recorded.measurement.measuredValue}>
               Measurement: <strong>{recorded.measurement.measuredValue} {recorded.measurement.unitLabel}</strong>.
+              <div className="text-muted" data-client-source-measurement-evidence={recorded.measurement.evidenceItemId}>
+                {recorded.measurement.measuredValue} non-blank data records counted; that each is one {recorded.definition.countedUnit} is your
+                organization's definition. Evidence item: {recorded.measurement.evidenceItemId}
+              </div>
             </div>
           ) : null}
           {recorded.limitations.length > 0 ? (
@@ -179,7 +218,7 @@ export default function ClientSourceMeasurementPanel({ organizationId, sourceVer
           ) : null}
         </div>
       ) : null}
-      {data && data.counts.measurable && !recorded && data.isCurrent ? (
+      {view.showForm ? (
         <form className="small" onSubmit={(event) => { event.preventDefault(); submit(); }} data-client-source-measurement-form="">
           <div className="text-muted mb-1">
             Only your organization can say what one record represents. KAI counts the records; it does not infer their meaning.

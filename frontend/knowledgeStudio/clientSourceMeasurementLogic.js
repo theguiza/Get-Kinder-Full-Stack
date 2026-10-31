@@ -165,13 +165,44 @@ export function measurementDefinitionBody(form) {
 }
 
 /** The server's own reason a measurement request was refused, and what to do. */
-export function measurementFailureMessage(result) {
+export function measurementFailureMessage(result, { worksheetKey = null } = {}) {
   const blocker = Array.isArray(result?.body?.blockers) ? result.body.blockers[0] : null;
   if (blocker?.blocking_reason === "measurement_definition_already_recorded") {
-    return "A different definition is already recorded for this source version, and a recorded definition cannot be changed. "
+    const scope = worksheetKey ? `worksheet ${worksheetKey} of this source version` : "this source version";
+    return `A different definition is already recorded for ${scope}, and a recorded definition cannot be changed. `
       + "To count this data under another definition, upload a corrected file as a new version of the source; the definition "
       + "already recorded is shown below.";
   }
   if (isText(blocker?.message)) return isText(blocker.required_fix) ? `${blocker.message} ${blocker.required_fix}` : blocker.message;
   return errorText(result);
+}
+
+/**
+ * What the panel may show for the worksheet now selected. A measurement's
+ * identity is organization + source version + worksheet, so in a workbook
+ * with several worksheets nothing recorded is shown until a worksheet is
+ * chosen: a read that names none returns the version's only count, or no
+ * count once several are recorded, and neither says which worksheet it is.
+ * A read loaded for another worksheet is never shown under this one.
+ */
+export function selectedWorksheetView(basisState, selectedWorksheetKey) {
+  const selected = selectedWorksheetKey || "";
+  if (!basisState || (basisState.worksheetKey || "") !== selected || basisState.status === "loading") {
+    return { status: "loading", data: null, error: "", recorded: null, selectionRequired: false, showForm: false };
+  }
+  if (basisState.status !== "success" || !basisState.data) {
+    return { status: "error", data: null, error: basisState.error || "", recorded: null, selectionRequired: false, showForm: false };
+  }
+  const data = basisState.data;
+  const multiWorksheet = data.counts.worksheetOptions.length > 1;
+  const attributable = !multiWorksheet || (selected !== "" && (!data.counts.measurable || data.counts.worksheet === selected));
+  const recorded = attributable ? data.recorded : null;
+  return {
+    status: "success",
+    data,
+    error: "",
+    recorded,
+    selectionRequired: isWorksheetSelectionRequired(data.counts),
+    showForm: data.counts.measurable && !recorded && data.isCurrent && (!multiWorksheet || data.counts.worksheet === selected),
+  };
 }

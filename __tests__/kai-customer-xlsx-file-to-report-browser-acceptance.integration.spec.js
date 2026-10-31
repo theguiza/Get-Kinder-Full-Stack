@@ -1125,9 +1125,9 @@ async function runXlsxAcceptance() {
       await openCountRecords(promoted.source_version_id);
       assert.ok(await textOf(adminPage, '[data-client-source-measurement-worksheet-select=""]'), "the UI requires explicit worksheet selection");
       const selectorOptions = await adminPage.evaluate(`Array.from(document.querySelectorAll('[data-client-source-measurement-worksheet-select] option')).map((option) => [option.value, option.textContent])`);
-      assert.deepEqual(selectorOptions, [["", "Choose one worksheet"], ["sheet_1", "Sessions"], ["sheet_2", "Notes"]]);
+      assert.deepEqual(selectorOptions, [["", "Choose one worksheet"], ["sheet_1", "Sessions (sheet_1)"], ["sheet_2", "Notes (sheet_2)"]]);
       assert.match(await textOf(adminPage, '[data-client-source-measurement-worksheet-option="sheet_1"]'), /data rows 6, blank rows 1, exact duplicates 2/);
-      assert.match(await textOf(adminPage, '[data-client-source-measurement-worksheet-option="sheet_2"]'), /Notes: data rows 1, blank rows 0, exact duplicates 0/);
+      assert.match(await textOf(adminPage, '[data-client-source-measurement-worksheet-option="sheet_2"]'), /Notes \(sheet_2\): data rows 1, blank rows 0, exact duplicates 0/);
       await adminPage.evaluate(`(() => { const node = document.querySelector('[data-client-source-measurement-worksheet-select]'); node.value = 'sheet_1'; node.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
       await adminPage.waitFor(async () => Boolean(await textOf(adminPage, '[data-client-source-measurement-counts]')), "selected worksheet counts");
       assert.match(await textOf(adminPage, '[data-client-source-measurement-worksheet]'), /Sessions/);
@@ -1248,10 +1248,10 @@ async function runXlsxAcceptance() {
       // The selector lists every worksheet with its own counts; a worksheet
       // with its own blocker names that blocker, not a missing basis.
       const selectorOptions = await adminPage.evaluate(`Array.from(document.querySelectorAll('[data-client-source-measurement-worksheet-select] option')).map((option) => [option.value, option.textContent])`);
-      assert.deepEqual(selectorOptions, [["", "Choose one worksheet"], ["sheet_1", "Read_Me"], ["sheet_2", "Participant_Register"], ["sheet_3", "Service_Events"],
-        ["sheet_4", "Lookups"], ["sheet_5", "Summary"]]);
-      assert.match(await textOf(adminPage, '[data-client-source-measurement-worksheet-option="sheet_2"]'), /Participant_Register: data rows 4, blank rows 0, exact duplicates 0/);
-      assert.match(await textOf(adminPage, '[data-client-source-measurement-worksheet-option="sheet_3"]'), /Service_Events: data rows 6, blank rows 1, exact duplicates 2/);
+      assert.deepEqual(selectorOptions, [["", "Choose one worksheet"], ["sheet_1", "Read_Me (sheet_1)"], ["sheet_2", "Participant_Register (sheet_2)"],
+        ["sheet_3", "Service_Events (sheet_3)"], ["sheet_4", "Lookups (sheet_4)"], ["sheet_5", "Summary (sheet_5)"]], "each worksheet name with its stable key");
+      assert.match(await textOf(adminPage, '[data-client-source-measurement-worksheet-option="sheet_2"]'), /Participant_Register \(sheet_2\): data rows 4, blank rows 0, exact duplicates 0/);
+      assert.match(await textOf(adminPage, '[data-client-source-measurement-worksheet-option="sheet_3"]'), /Service_Events \(sheet_3\): data rows 6, blank rows 1, exact duplicates 2/);
       const selectWorksheet = (key) => adminPage.evaluate(`(() => { const node = document.querySelector('[data-client-source-measurement-worksheet-select]'); node.value = ${J(key)}; node.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
       for (const [key, reason] of [["sheet_4", "measurement_xlsx_formula_cells_present"], ["sheet_5", "measurement_xlsx_merged_cells_present"]]) {
         await selectWorksheet(key);
@@ -1268,7 +1268,7 @@ async function runXlsxAcceptance() {
         const url = new URL(request.url);
         return [request.method, url.pathname + url.search, request.status];
       }), [["GET", sourceRecordCountMeasurementPath(ORG_X, sv, "sheet_3"), 200]], "the selection reads the existing P2-01M route with the worksheet key");
-      assert.match(await textOf(adminPage, "[data-client-source-measurement-worksheet]"), /Excel workbook worksheet Service_Events/);
+      assert.match(await textOf(adminPage, "[data-client-source-measurement-worksheet]"), /Excel workbook worksheet Service_Events \(sheet_3\)/);
       assert.equal(await textOf(adminPage, "[data-client-source-measurement-counted]"), String(independent.counted), "two exact duplicates included, the blank row excluded");
 
       // The organization administrator records the definition through the
@@ -1291,12 +1291,18 @@ async function runXlsxAcceptance() {
       assert.match(recorded.claim.statement, /in selected worksheet sheet_3/);
       assert.doesNotMatch(recorded.claim.statement, /participant|people|unique|outcome/i, "worksheet rows are not people or outcomes");
 
-      // A fresh application load shows the same recorded measurement.
+      // A fresh application load asks for a worksheet and attributes nothing
+      // until one is chosen; choosing sheet_3 shows its recorded measurement.
       await openCountRecords(sv);
+      assert.ok(await textOf(adminPage, "[data-client-source-measurement-selection-required]"), "the reloaded panel asks for a worksheet");
+      assert.equal(await textOf(adminPage, "[data-client-source-measurement-recorded]"), null, "no worksheet's count is shown before a worksheet is chosen");
+      assert.doesNotMatch(await textOf(adminPage, `[data-client-source-measurement="${sv}"]`), /cannot be counted this way/);
+      assert.equal(await textOf(adminPage, "[data-client-source-measurement-form]"), null, "no form before a worksheet is chosen");
+      await selectWorksheet("sheet_3");
+      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, "[data-client-source-measurement-recorded]")), "sheet_3's recorded measurement after reload");
       assert.equal(await adminPage.evaluate(`document.querySelector('[data-client-source-measurement-value]')?.getAttribute('data-client-source-measurement-value') ?? null`),
         String(independent.counted), "the recorded measurement after reload");
-      assert.ok(await textOf(adminPage, "[data-client-source-measurement-selection-required]"), "the reloaded panel asks for a worksheet");
-      assert.doesNotMatch(await textOf(adminPage, `[data-client-source-measurement="${sv}"]`), /cannot be counted this way/);
+      assert.match(await textOf(adminPage, "[data-client-source-measurement-recorded-worksheet]"), /Worksheet counted: Service_Events \(sheet_3\)/);
       assert.equal(await textOf(adminPage, "[data-client-source-measurement-form]"), null, "the recorded definition is immutable; no second form");
       const reread = await adminApi("GET", sourceRecordCountMeasurementPath(ORG_X, sv, "sheet_3"));
       assert.deepEqual([reread.status, reread.body.data.basis.worksheet.sheet_key, reread.body.data.recorded.measurement.measured_value,
@@ -2127,6 +2133,241 @@ async function runXlsxAcceptance() {
       // The source category is still recorded as present.
       assert.equal(await storyCategoryOf(entry.intake_sensitivity_profile_id), "present");
       results.i6 = { mixed: [mixedReport.status, mixedReasons], afterNegativeDecision: { rule, earlierReport: withdrawn.status, reasons: withdrawnReasons, regeneration: regenerated.status } };
+    });
+
+    // -----------------------------------------------------------------------
+    // J: one promoted workbook version, two worksheets, through the existing
+    // Count records panel - each worksheet recorded, claimed, revisited and
+    // reloaded independently (sheet_5 Data_Dictionary 37; sheet_3
+    // Service_Events 364 with two exact duplicates).
+    // -----------------------------------------------------------------------
+    await test("J: in Count records the administrator records and claims Data_Dictionary (sheet_5) and Service_Events (sheet_3) on one source version, switches between them and reloads; each keeps its own count, definition, evidence and claim", async () => {
+      const DICTIONARY_DEFINITION = Object.freeze({
+        counted_unit: "dictionary entry", unit_label: "dictionary entries",
+        definition_text: "Each row describes one field of the service workbook.",
+        inclusion_rule: "Every data row after the header row that has at least one value.",
+        exclusion_rule: "The header row and empty rows.",
+      });
+      const EVENTS_DEFINITION = Object.freeze({ ...SERVICE_DEFINITION, period_start: "2026-09-01", period_end: "2026-09-30" });
+      const EXPECTED = Object.freeze({
+        sheet_5: { name: "Data_Dictionary", counted: 37, blank: 0, duplicates: 0, definition: DICTIONARY_DEFINITION },
+        sheet_3: { name: "Service_Events", counted: 364, blank: 0, duplicates: 2, definition: EVENTS_DEFINITION },
+      });
+      const auditCount = async () => (await query(
+        "SELECT count(*)::int AS n FROM kai.audit_events WHERE organization_id = $1::uuid AND action = 'record_source_record_count_measurement'", [ORG_X]))[0].n;
+      const fileCount = async () => (await query("SELECT count(*)::int AS n FROM kai.intake_files WHERE organization_id = $1::uuid", [ORG_X]))[0].n;
+      const versionCount = async () => (await query("SELECT count(*)::int AS n FROM kai.source_versions WHERE organization_id = $1::uuid", [ORG_X]))[0].n;
+
+      // Uploaded and promoted once.
+      const fileId = await apiUpload(adminApi, productionShapedWorkbook("j-two-worksheets"), ids.batchId);
+      await dispatcher.whenIdle();
+      const promoted = await decideAndPromote(adminApi, fileId, SNAPSHOT);
+      const sv = promoted.source_version_id;
+      const [filesAfterPromotion, versionsAfterPromotion, auditsBefore] = [await fileCount(), await versionCount(), await auditCount()];
+      assert.equal((await query("SELECT count(*)::int AS n FROM kai.source_versions WHERE source_version_id = $1::uuid", [sv]))[0].n, 1);
+
+      const panel = `[data-client-source-measurement="${sv}"]`;
+      const selectWorksheet = (key) => adminPage.evaluate(`(() => { const node = document.querySelector('[data-client-source-measurement-worksheet-select]'); node.value = ${J(key)}; node.dispatchEvent(new Event('change', { bubbles: true })); return true; })()`);
+      const attr = (selector, name) => adminPage.evaluate(`document.querySelector(${J(selector)})?.getAttribute(${J(name)}) ?? null`);
+      const requestsOf = (mark) => adminPage.requestsSince(mark).filter((request) => request.url.includes("/record-count-measurement") || request.url.includes("/claim-proposal"))
+        .map((request) => { const url = new URL(request.url); return [request.method, url.pathname + url.search, request.status]; });
+      // What the panel shows for the selected worksheet, once its own read has arrived.
+      const shownFor = async (key) => {
+        await adminPage.waitFor(async () => (await attr("[data-client-source-measurement-worksheet]", "data-client-source-measurement-worksheet")) === key
+          && !(await textOf(adminPage, "[data-client-source-measurement-loading]")), `${key} basis`);
+        await adminPage.idle();
+        return {
+          counted: await textOf(adminPage, "[data-client-source-measurement-counted]"),
+          counts: await textOf(adminPage, "[data-client-source-measurement-counts]"),
+          recordedWorksheet: await attr("[data-client-source-measurement-recorded-worksheet]", "data-client-source-measurement-recorded-worksheet"),
+          value: await attr("[data-client-source-measurement-value]", "data-client-source-measurement-value"),
+          evidence: await attr("[data-client-source-measurement-evidence]", "data-client-source-measurement-evidence"),
+          claim: await attr("[data-client-source-measurement-claim]", "data-client-source-measurement-claim"),
+          proposeFor: await attr("[data-client-source-measurement-propose-claim]", "data-client-source-measurement-propose-claim"),
+          form: Boolean(await textOf(adminPage, "[data-client-source-measurement-form]")),
+          text: await textOf(adminPage, panel),
+        };
+      };
+      const fillDefinition = async (definition) => {
+        for (const [field, key] of [["countedUnit", "counted_unit"], ["unitLabel", "unit_label"], ["definitionText", "definition_text"],
+          ["inclusionRule", "inclusion_rule"], ["exclusionRule", "exclusion_rule"], ["periodStart", "period_start"], ["periodEnd", "period_end"]]) {
+          if (definition[key]) assert.ok(await setInput(adminPage, `[data-client-source-measurement-field="${field}"]`, definition[key]), field);
+        }
+        if (definition.period_start) {
+          await adminPage.waitForText("Confirm that the reporting period is your organization's statement.");
+          await adminPage.clickIn('[data-client-source-measurement-field="periodAttested"]', "attest period");
+        }
+      };
+      const measurementRowOf = async (key) => (await query(
+        `SELECT m.evidence_item_id::text, m.source_measurement_definition_id::text AS definition_id, m.measured_value::int, m.total_record_count::int,
+                m.blank_record_count::int, m.duplicate_record_count::int, m.calculation_method, m.worksheet_key, l.coordinates, d.counted_unit, d.definition_text,
+                d.period_start::text, e.source_version_id::text
+           FROM kai.evidence_measurements m JOIN kai.evidence_items e ON e.evidence_item_id = m.evidence_item_id
+           JOIN kai.source_locators l ON l.source_locator_id = e.source_locator_id
+           JOIN kai.source_measurement_definitions d ON d.source_measurement_definition_id = m.source_measurement_definition_id
+          WHERE m.source_version_id = $1::uuid AND m.worksheet_key = $2`, [sv, key]))[0] || null;
+
+      // Scenario A: record and claim each worksheet through the UI.
+      await openCountRecords(sv);
+      assert.ok(await textOf(adminPage, "[data-client-source-measurement-selection-required]"), "a worksheet must be chosen");
+      assert.deepEqual([await textOf(adminPage, "[data-client-source-measurement-form]"), await textOf(adminPage, "[data-client-source-measurement-recorded]")], [null, null]);
+      const optionLabels = await adminPage.evaluate(`Array.from(document.querySelectorAll('[data-client-source-measurement-worksheet-select] option')).map((option) => option.textContent)`);
+      assert.ok(optionLabels.includes("Data_Dictionary (sheet_5)") && optionLabels.includes("Service_Events (sheet_3)"), J(optionLabels));
+      const recordedIds = {};
+      for (const [index, key] of ["sheet_5", "sheet_3"].entries()) {
+        const expected = EXPECTED[key];
+        if (index > 0) await openCountRecords(sv); // return to Count records for the same source version
+        let mark = adminPage.mark();
+        await selectWorksheet(key);
+        const before = await shownFor(key);
+        assert.deepEqual([before.counted, before.value, before.evidence, before.claim, before.form], [String(expected.counted), null, null, null, true], `${key}: unrecorded, with the form`);
+        assert.match(before.counts, new RegExp(`Excel workbook worksheet ${expected.name} \\(${key}\\).*Data records after the header row: ${expected.counted}.*Blank records \\(not counted\\): ${expected.blank}.*Exact-duplicate records \\(still counted\\): ${expected.duplicates}`));
+        await fillDefinition(expected.definition);
+        mark = adminPage.mark();
+        await adminPage.clickIn("[data-client-source-measurement-submit]", "Record definition and count");
+        await adminPage.waitForText(`Measurement: ${expected.counted} ${expected.definition.unit_label}`);
+        const after = await shownFor(key);
+        const row = await measurementRowOf(key);
+        const written = requestsOf(mark);
+        assert.deepEqual(written.filter(([method]) => method === "POST"), [["POST", sourceRecordCountMeasurementPath(ORG_X, sv, key), 200]], `${key}: one write, naming the worksheet`);
+        assert.ok(written.some(([method]) => method === "GET") && written.filter(([method]) => method === "GET").every(([, path, status]) => path === sourceRecordCountMeasurementPath(ORG_X, sv, key) && status === 200),
+          `${key}: every refresh reads the same worksheet: ${J(written)}`);
+        assert.deepEqual([row.measured_value, row.total_record_count, row.blank_record_count, row.duplicate_record_count, row.calculation_method, row.coordinates, row.counted_unit, row.source_version_id],
+          [expected.counted, expected.counted, expected.blank, expected.duplicates, SELECTED_XLSX_METHOD, { scope: "data_records_after_header", sheet_key: key }, expected.definition.counted_unit, sv]);
+        assert.deepEqual([after.value, after.evidence, after.recordedWorksheet, after.form, after.proposeFor], [String(expected.counted), row.evidence_item_id, key, false, row.evidence_item_id],
+          `${key}: the recorded measurement and its own evidence item`);
+        assert.match(after.text, /KAI counted the rows; it did not verify what they represent/);
+        recordedIds[key] = { evidenceItemId: row.evidence_item_id, definitionId: row.definition_id };
+        if (key === "sheet_3") break; // sheet_3's claim is proposed after the switching race below
+        mark = adminPage.mark();
+        await adminPage.clickIn(`[data-client-source-measurement-propose-claim="${row.evidence_item_id}"]`, "Propose a claim");
+        await adminPage.waitFor(async () => Boolean(await attr("[data-client-source-measurement-claim]", "data-client-source-measurement-claim")), `${key} claim`);
+        await adminPage.idle();
+        const [claim] = await query("SELECT claim_id::text, statement FROM kai.claims WHERE evidence_item_id = $1::uuid", [row.evidence_item_id]);
+        const claimPosts = requestsOf(mark).filter(([method]) => method === "POST");
+        assert.deepEqual(claimPosts.map(([method, path]) => [method, path]), [["POST", claimProposalPath(ORG_X, row.evidence_item_id)]],
+          `${key}: the claim names the selected measurement's evidence item`);
+        assert.ok([200, 201].includes(claimPosts[0][2]), J(claimPosts));
+        assert.equal(await attr("[data-client-source-measurement-claim]", "data-client-source-measurement-claim"), claim.claim_id);
+        recordedIds[key].claimId = claim.claim_id;
+      }
+
+      // Scenario D (async): sheet_3 is recorded but not yet claimed. A slow
+      // sheet_5 read answered after sheet_3 is selected must not be shown, and
+      // the only claim action offered is for sheet_3's evidence item.
+      await adminPage.evaluate(`(() => {
+        window.__kaiOriginalFetch = window.fetch;
+        window.fetch = (input, init) => {
+          const url = String(typeof input === "string" ? input : input.url);
+          const delayed = url.includes("worksheet_key=sheet_5") ? new Promise((resolve) => setTimeout(resolve, 1500)) : Promise.resolve();
+          return delayed.then(() => window.__kaiOriginalFetch(input, init));
+        };
+        return true;
+      })()`);
+      await selectWorksheet("sheet_5");
+      await selectWorksheet("sheet_3");
+      await shownFor("sheet_3");
+      await new Promise((resolve) => setTimeout(resolve, 2500)); // the slow sheet_5 response has now arrived
+      const raced = await shownFor("sheet_3");
+      await adminPage.evaluate("(() => { window.fetch = window.__kaiOriginalFetch; return true; })()");
+      assert.deepEqual([raced.value, raced.evidence, raced.recordedWorksheet, raced.proposeFor, raced.claim],
+        ["364", recordedIds.sheet_3.evidenceItemId, "sheet_3", recordedIds.sheet_3.evidenceItemId, null], "the late sheet_5 response is not shown under sheet_3");
+      assert.equal(await textOf(adminPage, `[data-client-source-measurement-propose-claim="${recordedIds.sheet_5.evidenceItemId}"]`), null, "no claim action for the other worksheet's evidence");
+      let mark = adminPage.mark();
+      await adminPage.clickIn(`[data-client-source-measurement-propose-claim="${recordedIds.sheet_3.evidenceItemId}"]`, "Propose a claim");
+      await adminPage.waitFor(async () => Boolean(await attr("[data-client-source-measurement-claim]", "data-client-source-measurement-claim")), "sheet_3 claim");
+      await adminPage.idle();
+      const posted = requestsOf(mark).filter(([method]) => method === "POST");
+      assert.deepEqual(posted.map(([method, path]) => [method, path]), [["POST", claimProposalPath(ORG_X, recordedIds.sheet_3.evidenceItemId)]]);
+      recordedIds.sheet_3.claimId = (await query("SELECT claim_id::text FROM kai.claims WHERE evidence_item_id = $1::uuid", [recordedIds.sheet_3.evidenceItemId]))[0].claim_id;
+      assert.notEqual(recordedIds.sheet_3.claimId, recordedIds.sheet_5.claimId);
+
+      // Scenario B: switching, then a full reload, then switching again.
+      const persistedDigest = async () => (await query(
+        `SELECT md5(string_agg(t.row, '|' ORDER BY t.row)) AS digest FROM (
+           SELECT row_to_json(m)::text AS row FROM kai.evidence_measurements m WHERE m.source_version_id = $1::uuid
+           UNION ALL SELECT row_to_json(d)::text FROM kai.source_measurement_definitions d WHERE d.source_version_id = $1::uuid
+           UNION ALL SELECT row_to_json(e)::text FROM kai.evidence_items e WHERE e.source_version_id = $1::uuid
+           UNION ALL SELECT row_to_json(c)::text FROM kai.claims c JOIN kai.evidence_items e ON e.evidence_item_id = c.evidence_item_id WHERE e.source_version_id = $1::uuid
+         ) t`, [sv]))[0].digest;
+      const digestBefore = await persistedDigest();
+      const switching = [];
+      for (const reload of [false, true]) {
+        if (reload) await openCountRecords(sv);
+        mark = adminPage.mark();
+        for (const key of ["sheet_5", "sheet_3", "sheet_5"]) {
+          await selectWorksheet(key);
+          const shown = await shownFor(key);
+          const expected = EXPECTED[key];
+          assert.deepEqual([shown.value, shown.evidence, shown.claim, shown.recordedWorksheet, shown.form, shown.proposeFor],
+            [String(expected.counted), recordedIds[key].evidenceItemId, recordedIds[key].claimId, key, false, null], `${key}${reload ? " after reload" : ""}`);
+          assert.match(shown.text, new RegExp(`One record is one ${expected.definition.counted_unit}: ${expected.definition.definition_text.replace(/\./g, "\\.")}`));
+          const other = EXPECTED[key === "sheet_5" ? "sheet_3" : "sheet_5"];
+          assert.doesNotMatch(shown.text, new RegExp(`Measurement: ${other.counted} |${other.definition.counted_unit}:|${recordedIds[key === "sheet_5" ? "sheet_3" : "sheet_5"].evidenceItemId}`),
+            `${key}: nothing of the other worksheet`);
+          switching.push([reload ? "reloaded" : "live", key, shown.value]);
+        }
+        const reads = requestsOf(mark);
+        assert.deepEqual(reads.filter(([method]) => method !== "GET"), [], "switching writes nothing");
+        assert.deepEqual(reads.filter(([, path]) => path.includes("worksheet_key=")).map(([, path]) => new URLSearchParams(path.split("?")[1]).get("worksheet_key")),
+          ["sheet_5", "sheet_3", "sheet_5"], "each read names the selected worksheet");
+      }
+      assert.equal(await persistedDigest(), digestBefore, "switching and reloading mutate nothing");
+
+      // Scenario C: authoritative persistence through a fresh service read and the database.
+      const rows = await query(
+        `SELECT m.worksheet_key, m.evidence_item_id::text, m.source_measurement_definition_id::text AS definition_id, m.measured_value::int,
+                m.blank_record_count::int, m.duplicate_record_count::int, l.coordinates->>'sheet_key' AS locator_key, c.claim_id::text, c.evidence_item_id::text AS claim_evidence
+           FROM kai.evidence_measurements m JOIN kai.evidence_items e ON e.evidence_item_id = m.evidence_item_id
+           JOIN kai.source_locators l ON l.source_locator_id = e.source_locator_id
+           LEFT JOIN kai.claims c ON c.evidence_item_id = m.evidence_item_id
+          WHERE m.source_version_id = $1::uuid ORDER BY m.worksheet_key`, [sv]);
+      assert.deepEqual(rows, ["sheet_3", "sheet_5"].map((key) => ({
+        worksheet_key: key, evidence_item_id: recordedIds[key].evidenceItemId, definition_id: recordedIds[key].definitionId, measured_value: EXPECTED[key].counted,
+        blank_record_count: EXPECTED[key].blank, duplicate_record_count: EXPECTED[key].duplicates, locator_key: key, claim_id: recordedIds[key].claimId,
+        claim_evidence: recordedIds[key].evidenceItemId,
+      })));
+      for (const key of ["sheet_3", "sheet_5"]) {
+        const fresh = await adminApi("GET", sourceRecordCountMeasurementPath(ORG_X, sv, key));
+        assert.deepEqual([fresh.status, fresh.body.data.basis.worksheet.sheet_key, fresh.body.data.recorded.measurement.evidence_item_id,
+          fresh.body.data.recorded.definition.source_measurement_definition_id, fresh.body.data.recorded.claim.claim_id],
+        [200, key, recordedIds[key].evidenceItemId, recordedIds[key].definitionId, recordedIds[key].claimId], `${key}: fresh service read`);
+        const [claim] = await query("SELECT statement FROM kai.claims WHERE claim_id = $1::uuid", [recordedIds[key].claimId]);
+        assert.match(claim.statement, new RegExp(`^The promoted source records ${EXPECTED[key].counted} ${EXPECTED[key].definition.unit_label} .* in selected worksheet ${key} \\(record count: one ${EXPECTED[key].definition.counted_unit} per selected worksheet data row; 0 blank records excluded, ${EXPECTED[key].duplicates} exact-duplicate records? included\\)\\.$`));
+        assert.doesNotMatch(claim.statement, /participant|people|unique|outcome|verified/i);
+      }
+      assert.deepEqual([await fileCount(), await versionCount(), await auditCount()], [filesAfterPromotion, versionsAfterPromotion, auditsBefore + 2],
+        "no second upload or promotion; one required audit per measurement");
+
+      // Scenario D: refusals, with nothing written.
+      const settled = await persistedDigest();
+      const unkeyed = await adminApi("GET", sourceRecordCountMeasurementPath(ORG_X, sv));
+      assert.deepEqual([unkeyed.status, unkeyed.body.data.basis.blockers[0].blocking_reason, unkeyed.body.data.recorded], [200, "measurement_xlsx_worksheet_selection_required", null]);
+      await openCountRecords(sv);
+      const ambiguous = await textOf(adminPage, panel);
+      assert.ok(await textOf(adminPage, "[data-client-source-measurement-selection-required]"));
+      assert.doesNotMatch(ambiguous, /cannot be counted this way/, "two recorded worksheets are not shown as an unmeasured source");
+      assert.equal(await textOf(adminPage, "[data-client-source-measurement-form]"), null, "no form offers to record over a worksheet");
+      const omitted = await adminApi("POST", sourceRecordCountMeasurementPath(ORG_X, sv), EVENTS_DEFINITION);
+      assert.deepEqual([omitted.status, omitted.body.blockers?.[0]?.blocking_reason], [422, "measurement_xlsx_worksheet_selection_required"]);
+      const invalid = await adminApi("POST", sourceRecordCountMeasurementPath(ORG_X, sv, "sheet_99"), EVENTS_DEFINITION);
+      assert.deepEqual([invalid.status, invalid.body.blockers?.[0]?.blocking_reason], [422, "measurement_xlsx_worksheet_selection_invalid"]);
+      for (const key of ["sheet_3", "sheet_5"]) {
+        const replay = await adminApi("POST", sourceRecordCountMeasurementPath(ORG_X, sv, key), EXPECTED[key].definition);
+        assert.deepEqual([replay.status, replay.body.data.replayed, replay.body.data.evidenceItem.evidence_item_id], [200, true, recordedIds[key].evidenceItemId], `${key} replay`);
+        const conflict = await adminApi("POST", sourceRecordCountMeasurementPath(ORG_X, sv, key), { ...EXPECTED[key].definition, counted_unit: "visit record" });
+        assert.deepEqual([conflict.status, conflict.body.blockers?.[0]?.blocking_reason], [409, "measurement_definition_already_recorded"], `${key} conflict`);
+        assert.match(conflict.body.blockers[0].message, new RegExp(`worksheet ${key} of this source version`));
+        for (const [label, api] of [["client_contributor", contributorApi], ["client_reviewer", reviewerApi], ["another organization's administrator", adminYApi]]) {
+          assert.equal((await api("GET", sourceRecordCountMeasurementPath(ORG_X, sv, key))).status, 403, `${label} ${key} read`);
+          assert.equal((await api("POST", sourceRecordCountMeasurementPath(ORG_X, sv, key), EXPECTED[key].definition)).status, 403, `${label} ${key} write`);
+        }
+      }
+      assert.equal(await persistedDigest(), settled, "replays and refusals write nothing");
+      assert.deepEqual([await auditCount(), (await query("SELECT count(*)::int AS n FROM kai.evidence_measurements WHERE source_version_id = $1::uuid", [sv]))[0].n],
+        [auditsBefore + 2, 2]);
+      results.j = { sourceVersionId: sv, measurements: rows.map((row) => [row.worksheet_key, row.measured_value, row.duplicate_record_count, row.evidence_item_id, row.claim_id]), switching };
+      console.log(`[kai-customer-xlsx-file-to-report] J ${J(results.j)}`);
     });
 
     await test("summary", async () => {

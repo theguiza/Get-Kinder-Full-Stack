@@ -881,6 +881,9 @@ async function runSuite() {
     const csvSource = await seedPromotedSource({ organizationId: WORKSHEET_ORG, profile: await kernelProfile(CSV) });
     const csv = await recordIn(WORKSHEET_ORG, WORKSHEET_ADMIN, csvSource.sourceVersionId, null, DEFINITION);
     assert.equal(csv.ok, true, JSON.stringify(csv));
+    const otherCsvSource = await seedPromotedSource({ organizationId: WORKSHEET_ORG, profile: await kernelProfile(CSV) });
+    const otherCsv = await recordIn(WORKSHEET_ORG, WORKSHEET_ADMIN, otherCsvSource.sourceVersionId, null, DEFINITION);
+    assert.equal(otherCsv.ok, true, JSON.stringify(otherCsv));
     const before = await worksheetCounts(WORKSHEET_ORG);
     const definition = (await query("SELECT * FROM kai.source_measurement_definitions WHERE source_measurement_definition_id = $1::uuid", [s3.data.definition.source_measurement_definition_id]))[0];
     const insertDefinition = (worksheetKey) => query(
@@ -891,6 +894,20 @@ async function runSuite() {
         definition.definition_text, definition.inclusion_rule, definition.exclusion_rule, "a".repeat(64), definition.definition_status, definition.created_by, worksheetKey],
     );
     await assert.rejects(insertDefinition("sheet_3"), /source_measurement_definitions_p2_01m_worksheet_identity_unique/);
+    // Whole-version (NULL worksheet) identities are unique too: the index is
+    // over COALESCE(worksheet_key, ''), not the nullable column itself.
+    const csvDefinition = (await query("SELECT * FROM kai.source_measurement_definitions WHERE source_measurement_definition_id = $1::uuid",
+      [csv.data.definition.source_measurement_definition_id]))[0];
+    await assert.rejects(query(
+      `INSERT INTO kai.source_measurement_definitions (organization_id, source_version_id, measurement_type, counted_unit, unit_label, definition_text,
+         inclusion_rule, exclusion_rule, definition_fingerprint, definition_status, created_by, created_by_type, worksheet_key)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'human', NULL)`,
+      [csvDefinition.organization_id, csvDefinition.source_version_id, csvDefinition.measurement_type, "attendance record", csvDefinition.unit_label,
+        csvDefinition.definition_text, csvDefinition.inclusion_rule, csvDefinition.exclusion_rule, "b".repeat(64), csvDefinition.definition_status, csvDefinition.created_by],
+    ), /source_measurement_definitions_p2_01m_worksheet_identity_unique/, "a second whole-version definition is refused");
+    await assert.rejects(query("UPDATE kai.evidence_measurements SET source_version_id = $1::uuid WHERE evidence_item_id = $2::uuid",
+      [csvSource.sourceVersionId, otherCsv.data.evidenceItem.evidence_item_id]),
+    /evidence_measurements_p2_01m_worksheet_identity_unique/, "a second whole-version measurement is refused");
     await assert.rejects(insertDefinition("Sheet 3"), /source_measurement_definitions_p2_01m_worksheet_key_check/);
     await assert.rejects(query("UPDATE kai.evidence_measurements SET worksheet_key = 'sheet_5' WHERE evidence_item_id = $1::uuid", [s3.data.evidenceItem.evidence_item_id]),
       /evidence_measurements_p2_01m_worksheet_identity_unique|must equal its definition's worksheet_key/);
