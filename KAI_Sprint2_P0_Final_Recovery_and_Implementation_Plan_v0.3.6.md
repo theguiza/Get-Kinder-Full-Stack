@@ -45216,3 +45216,62 @@ No frontend file changed and the tracked bundle was not rebuilt.
 - UI: whether the Count records panel offers a second worksheet after one is recorded was not exercised. With one recorded count its no-worksheet read still shows that count with no form (acceptance F). Package 2 covers presentation; the API accepts the second worksheet.
 
 **Status:** INDEPENDENT_WORKSHEET_MEASUREMENTS_IMPLEMENTED_AND_VERIFIED_LOCALLY. Local commits only; not pushed, deployed, migrated, or verified in production.
+
+### Count records UI for several worksheets of one source version (2026-10-31)
+
+**Owner authorization (USER_CONFIRMED):** the owner prompt "KAI — Package 2: Complete the Existing Multi-Worksheet Count Records and Claim Workflow" authorizes the existing Data Sources → Count records UI, its service integration and the associated claim proposal, with synthetic connected browser acceptance and a local commit. It excludes report generation, Markdown, generation validators, Impact Narrative authority, new APIs or pages, migrations, push, deployment, production SQL and `00_KAI_CURRENT_STATE.md`. Package 3 was not started.
+
+**Starting state (TOOL_VERIFIED):** `main` at `347d4a7`, clean working tree.
+
+**Package 1 NULL identity check (TOOL_VERIFIED):** both identity indexes are over the expression `COALESCE(worksheet_key, '')`, so whole-version (NULL) rows collapse to one key and are unique. A new database regression refuses a second NULL-key definition and a second NULL-key measurement for one version. No migration correction was needed.
+
+**Original UI behaviour (TOOL_VERIFIED at `347d4a7`):**
+1. With one worksheet recorded, the unkeyed read on opening showed that worksheet's definition and value without naming the worksheet.
+2. A worksheet switch left the previous worksheet's data on screen until the new read arrived.
+3. `submit`/`proposeClaim` reloaded the worksheet captured at click time, so a switch during the request could reload the old worksheet under the new selection; the sequence guard could not catch it.
+4. A switch kept the form draft and notice.
+5. Every successful write calls `onRecorded={refresh}`, which unmounts and remounts the panel and drops the selection. The unkeyed re-read had masked this while it returned the only count.
+6. Options showed names without keys, and no evidence identity was shown.
+
+**Implemented (commit `dae7fe7`):**
+- `selectedWorksheetView` (`clientSourceMeasurementLogic.js`): a read is shown only under the worksheet it was loaded for. In a multi-worksheet workbook nothing recorded is attributed and no form is offered until a worksheet is chosen, and the form appears only for a measurable selected worksheet with no recorded count.
+- `ClientSourceMeasurementPanel.jsx`:
+  - Every basis state carries its worksheet key, and a read applies only if it is the newest and still selected.
+  - Write and claim outcomes are scoped to the worksheet they were sent for, with an in-flight ref guard; the server-side idempotency is unchanged.
+  - A switch resets the form and notice.
+  - The selection survives the refresh remount through the parent's existing `measuring` state (`ClientEvidenceWorkflow.jsx`). A remount re-reads the server; a full page reload starts unselected.
+- Labels show `Name (sheet_N)`, "Worksheet counted", the evidence item id, and that the definition is the organization's own and unverified. A same-worksheet conflict message names the worksheet.
+- No API, route, service, validator, migration or claim logic changed.
+
+**Connected proof (TOOL_VERIFIED; XLSX acceptance J; real parser, services, routes, built bundle, headless Chrome, disposable PostgreSQL):**
+- **A:** one five-worksheet workbook is uploaded and promoted once.
+  - Through the panel, `Data_Dictionary (sheet_5)` shows 37/0/0; it is recorded (POST `?worksheet_key=sheet_5`, refresh GETs keyed `sheet_5`) and claimed (POST `/evidence-items/<sheet_5 evidence>/claim-proposal`).
+  - After returning to Count records, `Service_Events (sheet_3)` shows 364/0/2 and an unrecorded form, not `sheet_5`'s count. It is recorded and claimed the same way.
+  - Same source version; file and version counts are unchanged after promotion.
+- **D (async):** with `sheet_5` reads delayed 1.5 s in the page, selecting `sheet_5` then `sheet_3` leaves the `sheet_3` view (364, its evidence, its claim action only) after the late response, and the claim is proposed for `sheet_3`'s evidence.
+- **B:** `sheet_5` → `sheet_3` → `sheet_5`, then a full reload and the same again. Each shows its own value, definition, evidence and claim and nothing of the other; every GET names the selected key; no write; the persisted digest is unchanged.
+- **C:** a fresh service read and the database give two measurements, definitions, evidence items, locators and claims, with values 364/0/2 and 37/0/0. Each claim names its own evidence and states "in selected worksheet sheet_N" with no participant or outcome wording. Audits +2.
+- **D:** the unkeyed API read returns `recorded: null`, and the UI shows the selection-required state, not "cannot be counted", with no form. Omitted selection 422; `sheet_99` 422; replays 200 `replayed`; conflicting definitions 409 naming the worksheet; contributor, reviewer and other-organization admin 403; nothing written.
+- The invalid count bases (formula/merged worksheets, F), stale versions (I5) and cross-tenant/other-Project paths (E, I3) stay covered by the existing cases.
+- **Superseded expectations:** E/F option labels now include keys. F's reload shows nothing until a worksheet is chosen, then `sheet_3`'s count.
+
+**Verification (TOOL_VERIFIED; `DATABASE_URL=postgresql://127.0.0.1:1/kai_non_listening_sentinel` for every Node/npm command):**
+
+| Command or suite | Result |
+| --- | --- |
+| `kai-plan-a-customer-measurement-and-release-receipt.spec.js` (view/state) | 9/9 |
+| P2-01M disposable PostgreSQL runner | 64 passed, 8 skipped, 0 failed |
+| XLSX file-to-report browser acceptance (A–J) | 31/31 |
+| Knowledge Studio: measurement-to-released-report, factual review, measured report selection, source promotion | 13/13, 16/16, 17/17, 13/13 |
+| Assembled CSV file-to-report browser acceptance | 23/23 |
+| Plan A normal migration chain | 2/2, 36 + 2 skipped, 4/4 |
+| Full `npm test` | 5,801 passed, 0 failed, 122 skipped (5,923) |
+| `verify:kai-sprint2-api-contract` | 71/71 |
+| `npm run build` | passed; tracked bundle rebuilt |
+| `git diff --check` | passed |
+
+**Remaining (NOT_CONFIRMED):**
+- All production facts in the 2026-10-31 Package 1 entry. The Package 1 migration remains unapplied and must be verified in pgAdmin before any push.
+- A success notice is not kept across the refresh remount; the recorded state is re-read and shown.
+
+**Status:** MULTI_WORKSHEET_COUNT_RECORDS_UI_VERIFIED_LOCALLY. Local commits only; not pushed, deployed, or verified in production.
