@@ -45275,3 +45275,72 @@ No frontend file changed and the tracked bundle was not rebuilt.
 - A success notice is not kept across the refresh remount; the recorded state is re-read and shown.
 
 **Status:** MULTI_WORKSHEET_COUNT_RECORDS_UI_VERIFIED_LOCALLY. Local commits only; not pushed, deployed, or verified in production.
+
+### Truthful count-only Evidence Summary and Markdown (2026-10-31)
+
+**Owner authorization (USER_CONFIRMED):** the owner prompt "KAI — Package 3: Truthful Count-Only Evidence Summary and Markdown" authorizes a bounded local correction of count-only Evidence Summary generation and its direct Markdown read, with synthetic tests and local commits. It excludes measurement schema, migrations, the worksheet UI, claim proposal, approvals, push, deployment, production access and `00_KAI_CURRENT_STATE.md`. Package 4 was not started.
+
+**Starting state (TOOL_VERIFIED):** `main` at `d3984e7`, clean working tree.
+
+**Original defect (TOOL_VERIFIED; reproduced first in `kai-count-only-truthful-summary.spec.js`, failing before the fix):**
+- For a count-only claim the model drafted the block from the composed claim statement, which carries the human label ("records 37 service events … in selected worksheet sheet_5").
+- VAL-GEN-010 is lexical: a word the cited statement uses is not an added assertion. "In selected worksheet sheet_5 the promoted source records 37 service events." therefore passed VAL-GEN-004/-008/-010, was persisted, and the read-time check (the same lexical check) delivered it.
+- The serializer also quoted the label-bearing claim and evidence statements in References, and Analysis called every measured count "a volume-of-activity figure".
+
+**Authoritative projection:** claim → its evidence item (P2-06, re-evaluated in the transaction) → `getScopedEvidenceMeasurementByEvidenceItemId` for that evidence item → measured, blank and duplicate counts, calculation method, the locator's `worksheet_key`, and the definition's period. It is never selected by source version. The worksheet name, the definition status and the limitations come from the existing report model.
+
+**Implemented (commit `f580d6e`):**
+1. `composeCountOnlyFindingText` and `countOnlyBlockMatchesMeasurement` (`kaiGeneratedContentValidators.js`) compose "N nonblank data rows were counted in worksheet sheet_N, with B blank rows excluded and D exact-duplicate rows included in the count …", plus a human-defined/not-verified sentence, the attested or absent period, and the coverage-limitations sentence.
+   - The text contains no label, definition, worksheet or file name, or other free text, and depends only on immutable values.
+   - It passes VAL-GEN-004/-008/-010 on their own terms.
+2. Generation (`postgresGeneratedContentRepository.js`): for each claim under the count-only basis in an internal Evidence Summary, the block is the composition of its own measurement, citing exactly that claim and evidence item.
+   - The model receives only the other claims at the single `draftGenerator` boundary, and is not called when there are none. A model block citing a count-only claim is refused (VAL-GEN-010).
+   - The combined result runs the same generator-result contract, VAL-GEN validators, persistence, review queue, idempotency and audit.
+   - No validator result is fabricated, and no model or provider is recorded on the run.
+3. Read (`postgresOrganizationInternalReviewRepository.js`): a block citing a count-only source is delivered only if it cites one claim and equals the composition of that claim's current measurement (VAL-GEN-010 is kept as well). Otherwise the existing `count_only_content_boundary_exceeded` blocker fails it closed. No draft, block, citation, decision or audit is changed.
+4. Markdown (`kaiInternalReportMarkdownSerializer.js`), for count-only facts only:
+   - Key findings: "**N nonblank data rows were counted in Name (`sheet_N`)[, including D exact-duplicate records]**; B blank rows were excluded", the attested period stated as unverified, and the label quoted (`code`) as the person's unverified definition.
+   - The method heading names the worksheet. Analysis is a row count, "not a measure of activity, reach or results".
+   - References give the ids and the authoritative measurement, and say the label-bearing wording is not reproduced.
+   - The Generated narrative introduction says the finding was composed from the persisted measurement, not by a language model.
+   - Ordinary reports are byte-identical.
+
+**Connected proof (TOOL_VERIFIED; XLSX acceptance case K; real parser, services, routes, built bundle, headless Chrome, disposable PostgreSQL):**
+- **K1 (A–D):** one story-present version (story `present` throughout) with `sheet_3` Service_Events 364/0/2, `sheet_5` Data_Dictionary 37/0/0 under the service-event label, and `sheet_2` 84 under the adversarial label "verified distinct participants".
+  - Each claim is eligible count-only with 0 decisions.
+  - Each single-claim draft and the `sheet_3`+`sheet_5` draft persist one composed block per claim citing its own evidence, with all seven validators run and passing. The model was called 0 times.
+  - Every direct Markdown read is 200. The whole report has no "N service events/participants/completions/outcomes" assertion, no activity-volume wording, no sentinel, cell value or column name, and nothing of the other worksheet; the combined report has two separate findings and references and no "401".
+  - Measurement, definition, evidence and claim rows, approvals and the category are unchanged.
+- **K2 (E):** the previous revision `d3984e7`, run in-process from a shared clone, accepts and stores the I4 sentence for `sheet_5` (model called once). The corrected direct read returns 422 with `count_only_content_boundary_exceeded`, carries no draft text, and leaves the draft, blocks and citations byte-identical. The composed draft and a new one read 200.
+- **K3 (F):** Impact Narrative 422 `story_testimonial_count_only_operation_not_permitted`; funder 422; public ineligible; contributor, reviewer, other-organization admin, GK reviewer on the customer route and cross-tenant path 403/404. A GK `not_supported` decision on `sheet_5` withdraws its report and the two-worksheet report (422) while `sheet_3`'s stays 200, and regeneration is refused.
+- **Superseded expectations:**
+  - C4: no model call; the stored block is the composition.
+  - C5: the released manifest states "5 nonblank data rows were counted".
+  - I2: no model request; the composed text and new key finding.
+  - I3: adversarial replies are never asked for, and each request stores only the composition.
+  - I4: misleading replies are never asked for, and the report states 37 nonblank rows of Data_Dictionary.
+  - C1–C3, H, I1, I5, I6 and J are unchanged and pass.
+
+**Verification (TOOL_VERIFIED; `DATABASE_URL=postgresql://127.0.0.1:1/kai_non_listening_sentinel` for every Node/npm command):**
+
+| Command or suite | Result |
+| --- | --- |
+| `kai-count-only-truthful-summary.spec.js` (new; tests 2–3 failed before the fix) | 6/6 |
+| `kai-count-only-story-authority.spec.js` | 7/7 |
+| `kai-effective-ai-processing-enforcement` / `-allowed-use-enforcement` (single generation boundary) | 14/14 |
+| XLSX file-to-report browser acceptance (A–K) | 34/34 |
+| P2-01M disposable PostgreSQL runner | 64 passed, 8 skipped, 0 failed |
+| Plan A normal migration chain | 2/2, 36 + 2 skipped, 4/4 |
+| Knowledge Studio: measurement-to-released-report, factual review, measured report selection | 13/13, 16/16, 17/17 |
+| Assembled CSV file-to-report browser acceptance | 23/23 |
+| Full `npm test` | 5,807 passed, 0 failed, 122 skipped (5,929) |
+| `verify:kai-sprint2-api-contract` | 71/71 |
+| `npm run build` | passed; tracked bundle unchanged |
+| `git diff --check` | passed |
+
+**Remaining (NOT_CONFIRMED):**
+- Production facts, including whether any production count-only draft holds model prose. After deployment such drafts read 422 and need regeneration.
+- The Package 1 migration remains unapplied and must be verified in pgAdmin before any push.
+- Real model prose for non-count-only claims in a mixed draft is still bounded only by the existing validators (unchanged).
+
+**Status:** TRUTHFUL_COUNT_ONLY_EVIDENCE_SUMMARY_VERIFIED_LOCALLY. Local commits only; not pushed, deployed, or verified in production.
