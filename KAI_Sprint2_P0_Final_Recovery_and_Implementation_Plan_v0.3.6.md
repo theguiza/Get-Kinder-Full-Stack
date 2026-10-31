@@ -45148,3 +45148,71 @@ Anything beyond a record count (rates, outcomes, sums) is a new evidence type an
 Under this rule the production 37-row claim, if R3 holds, would be usable only as "37 rows of Data_Dictionary"; a `Service_Events` count still needs a new intake version.
 
 **Status:** COUNT_ONLY_STORY_PRESENT_INTERNAL_AUTHORITY_IMPLEMENTED_AND_VERIFIED_LOCALLY. Local commits only; not pushed, deployed, or verified in production.
+
+### Independent XLSX worksheet measurements on one source version (2026-10-31)
+
+**Owner authorization (USER_CONFIRMED):** the owner prompt "KAI — Package 1: Independent XLSX Worksheet Measurements" authorizes one bounded backend package. It covers separate record-count measurements for different worksheets of the same promoted XLSX source version, the minimum compatible forward migration, disposable synthetic PostgreSQL verification and a local commit. It excludes report generation, Markdown, frontend presentation, production SQL or migration, push, deployment, flags, tenants, credentials, real client data and `00_KAI_CURRENT_STATE.md`. Package 2 was not started.
+
+**Starting state (TOOL_VERIFIED):** `main` at `6f34c40`, clean working tree.
+
+**Contract check:**
+- No controlling text forbids several measurements per version. The P2-01M entry's "one immutable definition per version and type" describes that pre-workbook implementation, and the 2026-10-30 entry calls the restriction "unchanged existing behavior". This package supersedes it for the selected-worksheet method only.
+
+**Original restriction (TOOL_VERIFIED at `6f34c40`):**
+- `kai.source_measurement_definitions`: `source_measurement_definitions_p2_01m_identity_unique UNIQUE (organization_id, source_version_id, measurement_type)`.
+- `kai.evidence_measurements`: `evidence_measurements_p2_01m_identity_unique UNIQUE (organization_id, source_version_id, measurement_type)`.
+- The repository's `ON CONFLICT` targets and its `readDefinition`/`readMeasurement` were keyed by version only.
+- `computeDefinitionFingerprint()` has no worksheet. With identical definition text, the previous revision passed the definition check for `sheet_3` and then collided on the version-wide measurement. It returned a bare 409 `conflict_current_state_changed` with no blocker, and a different definition returned `measurement_definition_already_recorded`. Both were reproduced in the runner.
+- Every other reader (`kaiIntakeQueries` measurement list, factual review, internal report, eligibility SQL, factual-review DB function) is keyed by evidence item or definition id and was already multi-measurement safe.
+
+**Implemented (commit `5f2cc84`):**
+1. **Migration** `kai_sprint2_p2_01m_worksheet_measurement_identity.sql` (and rollback, read-only verifier):
+   - Adds a nullable `worksheet_key` to both tables. It is set only for `p1_xlsx_selected_worksheet_data_rows_excluding_blank_v1`. CSV and one-worksheet XLSX stay NULL (whole version).
+   - Backfills existing selected-method measurements from their own locator's `sheet_key`, and their definitions from the measurement. Only this new column is written.
+   - Adds CHECKs: the key is present and `^sheet_[1-9][0-9]{0,3}$` exactly for the selected method; the definition key matches the same pattern.
+   - Creates unique indexes `*_p2_01m_worksheet_identity_unique` on `(organization_id, source_version_id, measurement_type, COALESCE(worksheet_key, ''))`, then drops the two one-per-version constraints.
+   - Adds triggers so that the measurement key equals its definition's key and its locator's `sheet_key`, and a definition's key cannot move away from its measurement.
+   - The rollback refuses while any version holds more than one measurement or definition; otherwise it restores the original constraints.
+2. **Repository** (`postgresSourceMeasurementRepository.js`): writes and reads use the worksheet identity. The definition fingerprint is unchanged, so every historical fingerprint and identifier stays valid; the worksheet is in the identity, not the content fingerprint.
+   - A conflicting definition on a worksheet is 409 `measurement_definition_already_recorded` and names the worksheet.
+   - The basis read is scoped to the derived or named worksheet. With no identifiable worksheet, it returns the version's only definition; with several, it returns `recorded: null` and chooses none.
+   - Response records keep their exact shape (no new keys). Route, service, validators, roles and audit are unchanged.
+3. **Runners:** the new migration is registered in the Plan A chain and in the Knowledge Studio export-path and measurement lists. The export path also gains the selected-worksheet method, its prerequisite. The P2-01M runner loads `6f34c40` from a shared clone (`worksheet_legacy_seed` phase).
+
+**Connected proof (TOOL_VERIFIED; synthetic bytes, real XLSX profiler, services, repository, PostgreSQL; disposable loopback only):**
+- **Previous revision, pre-migration schema:** `sheet_5` (Data_Dictionary) recorded 37, a CSV recorded 5 and a one-worksheet workbook recorded 5, each with a claim. `sheet_3` was refused (see above).
+- **Migration** (applied twice): evidence, locator and claim rows are byte-identical. Definition and measurement rows are identical in every pre-existing column. The backfill is exactly `selected/sheet_5/sheet_5/37`, with CSV and one-worksheet rows NULL. Verifier OVERALL FAIL before, 10/10 PASS after. The XLSX method verifier still PASSes.
+- **One version, both worksheets:** `sheet_5` replays with its historical evidence, definition and fingerprint. `sheet_3` (Service_Events) records 364 (364 data, 0 blank, 2 exact duplicates included; independent count 364/2) under the identical definition text, with the same content fingerprint and new definition, evidence and locator ids.
+  - Writes are 1 definition, measurement, evidence item, locator, evidence-review queue item and actor-attributed audit each.
+  - Persisted rows: `sheet_3` 364, `sheet_5` 37, each with matching definition and locator keys.
+  - A fresh repository and service read returns each worksheet independently, with the `sheet_5` claim intact.
+- **Behaviour:** replay is idempotent. Conflicting definitions on either worksheet are 409 with zero writes. A `sheet_3` claim is proposed, the `sheet_5` claim replays, and every historical column is unchanged.
+- **Concurrency:** 6 concurrent submissions (3× `sheet_3`, 3× `sheet_5`) leave exactly one fresh record per worksheet. Two concurrent conflicting definitions on `sheet_2` leave one success, one `measurement_definition_already_recorded` and one measurement (84).
+- **Refusals with zero writes:** client reviewer, contributor, another organization's administrator and system actor (403-class); another tenant `not_found`; omitted, `sheet_99`, name and `sheet_0` selections; missing and inconsistent worksheet bases; a stale version.
+- **Database guards:** a duplicate worksheet identity, a measurement or definition key that disagrees with its counterpart or locator, a key on a CSV measurement, and a malformed key are all refused.
+- **CSV and one-worksheet:** previous-revision rows replay unchanged and still refuse a second definition. A one-worksheet workbook named as `sheet_1` replays its single count.
+- **Superseded expectation:** XLSX acceptance F asserted that a second worksheet was refused. It now records `sheet_2` (4) beside `sheet_3` (5), and the `sheet_3` row is unchanged.
+
+**Verification (TOOL_VERIFIED; `DATABASE_URL=postgresql://127.0.0.1:1/kai_non_listening_sentinel` for every Node/npm command):**
+
+| Command or suite | Result |
+| --- | --- |
+| `kai-sprint2-p2-01m-source-record-count-measurement.spec.js` | 15/15 |
+| P2-01M disposable PostgreSQL runner (seeds, migrations, verifiers, rollback refusals) | 2/2, 2/2, 64 passed, 8 skipped (normal-chain only), 0 failed |
+| Plan A normal migration chain | 84 ordered, 82 applied (2 production-history refusals by design); 2/2, 36 passed + 2 skipped (runner-seeded only), 4/4 |
+| XLSX file-to-report browser acceptance (A–I) | 30/30 |
+| Knowledge Studio browser acceptances: measurement-to-released-report, internal factual review, measured report selection, source promotion | 13/13, 16/16, 17/17, 13/13 |
+| Full `npm test` | 5,800 passed, 0 failed, 122 skipped (5,922) |
+| `verify:kai-sprint2-api-contract` | 71/71 |
+| `git diff --check` | passed |
+
+No frontend file changed and the tracked bundle was not rebuilt.
+
+**Unapplied production delta:** apply `migrations/kai_sprint2_p2_01m_worksheet_measurement_identity.sql` after the selected-worksheet method migration, then run `scripts/kai-sprint2-p2-01m-worksheet-measurement-identity-verify-read-only.sql` (OVERALL must be PASS). The migration must be applied **before** this code is deployed, because the repository now inserts `worksheet_key` and pushing to `main` auto-deploys. Rollback: `kai_sprint2_p2_01m_worksheet_measurement_identity.rollback.sql`, which refuses once any version has two worksheet measurements.
+
+**Remaining (NOT_CONFIRMED):**
+- Whether production has the selected-worksheet migration and the `485b90cd…` `sheet_5` measurement as recorded.
+- The production PostgreSQL version (the index uses `COALESCE`, not PG15 `NULLS NOT DISTINCT`, for that reason).
+- UI: whether the Count records panel offers a second worksheet after one is recorded was not exercised. With one recorded count its no-worksheet read still shows that count with no form (acceptance F). Package 2 covers presentation; the API accepts the second worksheet.
+
+**Status:** INDEPENDENT_WORKSHEET_MEASUREMENTS_IMPLEMENTED_AND_VERIFIED_LOCALLY. Local commits only; not pushed, deployed, migrated, or verified in production.
