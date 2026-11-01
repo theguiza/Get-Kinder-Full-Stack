@@ -1618,6 +1618,16 @@ async function runSuite() {
     assert.deepEqual([adminReview.ok, adminReview.error?.code], [false, "authorization_denied"]);
     const rejected = await recordClaimReviewDecision(reviewInput(GK_REVIEWER, "rejected"), { env: ENV, humanReviewRepository, metadataOnlyAudit: noAudit() });
     assert.equal(rejected.ok, true, JSON.stringify(rejected));
+    // Queue completion is not approval: the real rejection resolves the
+    // queue while retaining the terminal unsupported strength.
+    const [resolvedRejection] = await query(
+      `SELECT q.queue_status, q.review_status, c.claim_strength
+         FROM kai.review_queue_items q
+         JOIN kai.claims c ON c.claim_id = q.target_object_id AND c.organization_id = q.organization_id
+        WHERE q.review_queue_item_id = $1::uuid`, [claimQueue.review_queue_item_id]);
+    assert.deepEqual(resolvedRejection, {
+      queue_status: "resolved", review_status: "resolved", claim_strength: "reviewed_not_supported",
+    });
     const rejectedProvider = replying(measuredBlock(COMPLIANT_TEXT, claimId, evidenceItemId));
     const refused = await generate([claimId], rejectedProvider);
     assert.deepEqual([refused.ok, refused.error?.code], [false, "claim_reviewed_not_supported"], JSON.stringify(refused));
