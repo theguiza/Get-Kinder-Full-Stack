@@ -7,7 +7,11 @@ import {
   evaluateClaimTraceabilityInTransaction,
   AUDIENCE_AUTHORITY_BLOCKER_CODES,
 } from "./postgresClaimTraceabilityRepository.js";
-import { composeCountOnlyFindingText, validateGeneratedContentDraft } from "../validators/kaiGeneratedContentValidators.js";
+import {
+  composeCountOnlyFindingText,
+  composeEvidenceSummaryMeasurementDisclosures,
+  validateGeneratedContentDraft,
+} from "../validators/kaiGeneratedContentValidators.js";
 import { getScopedEvidenceMeasurementByEvidenceItemId } from "../db/kaiIntakeQueries.js";
 import { MEASUREMENT_EVIDENCE_TYPE, measurementLimitationCodes } from "../validators/kaiSourceMeasurementValidators.js";
 import {
@@ -1500,6 +1504,7 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
       // basis in an internal Evidence Summary (claim -> its evidence item ->
       // that item's measurement and worksheet locator), never the version's.
       const countOnlyMeasurementByClaimId = new Map();
+      const measuredValueByClaimId = new Map();
       for (const traceability of traceabilityResults) {
         const projection = projectionByClaim.get(traceability.claim.claim_id);
         if (!projection || projection.evidenceItemId !== traceability.evidence.evidence_item_id) {
@@ -1541,6 +1546,7 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
             tx,
           );
           if (!measurementRow) rollbackFailure("conflict_current_state_changed");
+          measuredValueByClaimId.set(projection.claimId, measurementRow.measured_value);
           measurementCodes = measurementLimitationCodes({ measurementRow, dimensions: traceability.dimensions });
           if (countOnly && contentType === COUNT_ONLY_CONTENT_TYPE) {
             measurementCodes.push(COUNT_ONLY_LIMITATION_CODE);
@@ -1569,6 +1575,21 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
           })
         : null;
       let generatorResult = generatorInput ? await dependencies.draftGenerator(generatorInput) : null;
+      // An Evidence Summary block citing an ordinary measured claim carries
+      // that claim's server-composed disclosure after the model's own text
+      // (composeEvidenceSummaryMeasurementDisclosures). The model result
+      // passes the result contract first; the combined result passes it
+      // again below, so a disclosure that does not fit is refused, never
+      // truncated, and the validators then run on exactly what persists.
+      if (contentType === CONTENT_TYPE && generatorResult && measuredValueByClaimId.size > 0) {
+        const modelClassification = classifyGeneratorResult(generatorResult);
+        if (!modelClassification.ok) {
+          rollbackFailure("validation_blocker", stageBlocker(GENERATOR_RESULT_CONTRACT_VALIDATOR_KEY, modelClassification.reason));
+        }
+        const composed = composeEvidenceSummaryMeasurementDisclosures({ blocks: generatorResult.blocks, claims: modelProjections, measuredValueByClaimId });
+        if (!composed.ok) rollbackFailure("validation_blocker", stageBlocker("VAL-GEN-008", "material_limitation_not_disclosed"));
+        generatorResult = { blocks: composed.blocks };
+      }
       if (countOnlyMeasurementByClaimId.size > 0) {
         let modelBlocks = [];
         if (generatorResult) {

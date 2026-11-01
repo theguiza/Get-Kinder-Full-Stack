@@ -71,6 +71,7 @@ async function runSuite() {
   const { createEvidenceSummaryDraft } = await import("../Backend/kai/services/kaiGeneratedContentService.js");
   const { createPostgresGeneratedContentRepository } = await import("../Backend/kai/dictionary/postgresGeneratedContentRepository.js");
   const { createProductionEvidenceSummaryDraftGenerator } = await import("../Backend/kai/services/kaiEvidenceSummaryDraftGenerator.js");
+  const { composeMeasurementDisclosure } = await import("../Backend/kai/validators/kaiSourceMeasurementValidators.js");
   const { getEngagementForOrganization } = await import("../Backend/kai/db/kaiQueries.js");
   const { default: sprint2IntakeApiRouter, __testables: routeTestables } = await import("../Backend/kai/routes/sprint2IntakeApi.js");
   const { startGeneratedContentReview, completeGeneratedContentReview, getGeneratedDraftReviewPacket } = await import("../Backend/kai/services/kaiGeneratedContentService.js");
@@ -1406,6 +1407,10 @@ async function runSuite() {
     + "the period is attested in that definition and not verified against record dates. "
     + "1 blank record was excluded and 2 exact-duplicate records were included. "
     + "Internal limitations: small-cell risk, conflicting source indicators, and requirement alignment were accepted for internal use only.";
+  // The server appends the measured claim's composed disclosure to the
+  // model's text; this is what is validated and persisted.
+  const MEASURED_DISCLOSURE = `Measurement disclosure for the cited count: ${composeMeasurementDisclosure(MEASURED_LIMITATION_CODES)}`;
+  const PERSISTED_TEXT = `${COMPLIANT_TEXT} ${MEASURED_DISCLOSURE}`;
   const LEGACY_SYSTEM_PROMPT = [
     "You generate internal evidence summaries for Get Kinder.",
     "Use only the supplied governed claim projection.",
@@ -1483,7 +1488,7 @@ async function runSuite() {
     assert.equal(data.requestedAudience, "internal");
     assert.equal(data.replayed, false);
     assert.equal(data.blocks.length, 1);
-    assert.equal(data.blocks[0].text, COMPLIANT_TEXT);
+    assert.equal(data.blocks[0].text, PERSISTED_TEXT);
     assert.deepEqual(data.blocks[0].citations.map((citation) => [citation.claimId, citation.evidenceItemId]), [[ids.measurementClaimId, ids.measurementEvidenceId]]);
     const [draft] = await query(
       `SELECT d.content_type, d.draft_status, d.review_status, d.requested_audience, d.validator_results, q.queue_type, q.queue_status, q.review_status AS queue_review_status
@@ -1500,19 +1505,17 @@ async function runSuite() {
       `SELECT b.text, c.claim_id::text, c.evidence_item_id::text FROM kai.generated_content_blocks b
          JOIN kai.generated_content_citations c ON c.generated_content_block_id = b.generated_content_block_id
         WHERE b.generated_content_draft_id = $1::uuid`, [data.generatedContentDraftId]);
-    assert.deepEqual(persistedBlock, { text: COMPLIANT_TEXT, claim_id: ids.measurementClaimId, evidence_item_id: ids.measurementEvidenceId });
+    assert.deepEqual(persistedBlock, { text: PERSISTED_TEXT, claim_id: ids.measurementClaimId, evidence_item_id: ids.measurementEvidenceId });
     assert.deepEqual(await generationCounts(), { runs: before.runs + 1, drafts: before.drafts + 1, blocks: before.blocks + 1, citations: before.citations + 1 });
     ids.measuredDraftId = data.generatedContentDraftId;
   });
 
-  test("generation: fabricated numbers, causal language, missing citations, undisclosed limitations, and 'distinct'/'verified' wording are rejected with nothing persisted", async () => {
+  test("generation: fabricated numbers, causal language, missing citations, and 'distinct'/'verified' wording are rejected with nothing persisted", async () => {
     const before = await generationCounts();
     const cases = [
       ["fabricated count", COMPLIANT_TEXT.replace("records 5 programme", "records 6 programme"), ["VAL-GEN-004"]],
       ["fabricated rate", `${COMPLIANT_TEXT} That is 83% of planned sessions.`, ["VAL-GEN-004"]],
       ["causal language", `${COMPLIANT_TEXT} The programme improves literacy.`, ["VAL-GEN-004"]],
-      ["no blank or duplicate disclosure", COMPLIANT_TEXT.replace("1 blank record was excluded and 2 exact-duplicate records were included. ", ""), ["VAL-GEN-008"]],
-      ["no coverage limitation", COMPLIANT_TEXT.replace(/ Internal limitations:.*$/, ""), ["VAL-GEN-008"]],
       ["period called verified", COMPLIANT_TEXT.replace("is attested in that definition and not verified against record dates", "was verified against the record dates"), ["VAL-GEN-008"]],
       ["records called distinct sessions", `${COMPLIANT_TEXT} These are 5 distinct sessions delivered.`, ["VAL-GEN-008"]],
     ];
@@ -1533,6 +1536,29 @@ async function runSuite() {
     assert.equal(wrongPair.ok, false);
     assert.ok(blockerKeys(wrongPair).includes("VAL-GEN-003"), JSON.stringify(wrongPair.blockers));
     assert.deepEqual(await generationCounts(), before, "no rejected draft is persisted");
+  });
+
+  test("generation: truthful text that omits or paraphrases the disclosure wording persists with the server-composed disclosure", async () => {
+    const before = await generationCounts();
+    const cases = [
+      ["no blank or duplicate disclosure", COMPLIANT_TEXT.replace("1 blank record was excluded and 2 exact-duplicate records were included. ", "")],
+      ["no coverage limitation", COMPLIANT_TEXT.replace(/ Internal limitations:.*$/, "")],
+      ["paraphrase, negated wording", "The promoted source records 5 programme sessions for the reporting period 2026-09-01 to 2026-09-30. "
+        + "The organization decided what one row stands for; the period was not independently verified, and the rows are not unique."],
+    ];
+    for (const [label, text] of cases) {
+      const result = await generate([ids.measurementClaimId], replying(measuredBlock(text)));
+      assert.equal(result.ok, true, `${label}: ${JSON.stringify(result)}`);
+      const [persisted] = await query(
+        `SELECT b.text, d.validator_results FROM kai.generated_content_blocks b JOIN kai.generated_content_drafts d ON d.generated_content_draft_id = b.generated_content_draft_id
+          WHERE b.generated_content_draft_id = $1::uuid`, [result.data.generatedContentDraftId]);
+      assert.equal(persisted.text, `${text} ${MEASURED_DISCLOSURE}`, label);
+      assert.equal(result.data.blocks[0].text, persisted.text, label);
+      const results = persisted.validator_results.results || persisted.validator_results;
+      assert.equal(results.find((item) => item.validator_key === "VAL-GEN-008").severity, "pass", label);
+    }
+    const after = await generationCounts();
+    assert.deepEqual([after.drafts - before.drafts, after.blocks - before.blocks], [cases.length, cases.length]);
   });
 
   test("generation: unauthorized roles, another tenant, and disabled flags never reach the provider", async () => {
@@ -1753,7 +1779,7 @@ async function runSuite() {
       { env: EXPORT_ENV, generatedContentRepository: generatedRepository() });
     assert.equal(packet.ok, true, JSON.stringify(packet));
     assert.equal(packet.data.blocks.length, 1);
-    assert.equal(packet.data.blocks[0].text, COMPLIANT_TEXT);
+    assert.equal(packet.data.blocks[0].text, PERSISTED_TEXT);
     assert.deepEqual(packet.data.blocks[0].citations.map((citation) => [citation.claimId, citation.evidenceItemId]), [[ids.measurementClaimId, ids.measurementEvidenceId]]);
     const [draftRow] = await query("SELECT validator_results FROM kai.generated_content_drafts WHERE generated_content_draft_id = $1::uuid", [ids.measuredDraftId]);
     const vals = draftRow.validator_results.results || draftRow.validator_results;
@@ -1786,6 +1812,42 @@ async function runSuite() {
     assert.deepEqual([completed.data.queueStatus, completed.data.reviewStatus], ["resolved", "resolved"]);
     assert.deepEqual((await clientDraft(ADMIN)).data.release, { state: "awaiting_get_kinder_release", releasedReportId: null }, "reviewed but not released");
     assert.ok((await auditEvents()).length > 0, "metadata-only audit events were written");
+  });
+
+  test("review: a count-only model sentence persists with the server-composed disclosure, and the client draft read and GK review packet return exactly that text and citation with the review open", onNormalChain, async () => {
+    // Owner prompt "KAI — Complete the existing VAL-GEN-008 repair" (2026-11-01):
+    // the model supplies no disclosure; the server composes it from the claim's codes.
+    const MODEL_TEXT = "The promoted source records 5 programme sessions for the reporting period 2026-09-01 to 2026-09-30.";
+    const underlying = async () => (await query(`SELECT
+        (SELECT to_jsonb(c) FROM kai.claims c WHERE c.claim_id = $1::uuid) AS claim,
+        (SELECT to_jsonb(e) FROM kai.evidence_items e WHERE e.evidence_item_id = $2::uuid) AS evidence,
+        (SELECT to_jsonb(m) FROM kai.evidence_measurements m WHERE m.evidence_item_id = $2::uuid) AS measurement`, [ids.measurementClaimId, ids.measurementEvidenceId]))[0];
+    const before = await underlying();
+    const generated = await generate([ids.measurementClaimId], replying(measuredBlock(MODEL_TEXT)));
+    assert.equal(generated.ok, true, JSON.stringify(generated));
+    const expected = `${MODEL_TEXT} ${MEASURED_DISCLOSURE}`;
+    assert.equal(generated.data.blocks[0].text, expected);
+    const draftId = generated.data.generatedContentDraftId;
+    const [persisted] = await query(
+      `SELECT b.text, c.claim_id::text, c.evidence_item_id::text, d.draft_status, d.review_status, d.validator_results, q.queue_status, q.review_status AS queue_review_status
+         FROM kai.generated_content_blocks b
+         JOIN kai.generated_content_citations c ON c.generated_content_block_id = b.generated_content_block_id
+         JOIN kai.generated_content_drafts d ON d.generated_content_draft_id = b.generated_content_draft_id
+         JOIN kai.review_queue_items q ON q.target_object_id = d.generated_content_draft_id AND q.queue_type = 'generated_content_review'
+        WHERE b.generated_content_draft_id = $1::uuid`, [draftId]);
+    assert.deepEqual([persisted.text, persisted.claim_id, persisted.evidence_item_id], [expected, ids.measurementClaimId, ids.measurementEvidenceId]);
+    assert.equal((persisted.validator_results.results || persisted.validator_results).find((item) => item.validator_key === "VAL-GEN-008").severity, "pass");
+    assert.deepEqual([persisted.draft_status, persisted.review_status, persisted.queue_status, persisted.queue_review_status], ["draft", "needs_gk_review", "open", "needs_gk_review"]);
+    const detail = await clientDraft(ADMIN, { measuredDraftId: draftId });
+    assert.equal(detail.ok, true, JSON.stringify(detail));
+    assert.deepEqual(detail.data.blocks.map((item) => [item.text, item.supportingClaimIds]), [[expected, [ids.measurementClaimId]]]);
+    const packet = await getGeneratedDraftReviewPacket(
+      { organizationId: ORG, generatedContentDraftId: draftId, actorContext: GK_REVIEWER },
+      { env: EXPORT_ENV, generatedContentRepository: generatedRepository() });
+    assert.equal(packet.ok, true, JSON.stringify(packet));
+    assert.deepEqual(packet.data.blocks.map((item) => [item.text, item.citations.map((citation) => [citation.claimId, citation.evidenceItemId])]),
+      [[expected, [[ids.measurementClaimId, ids.measurementEvidenceId]]]]);
+    assert.deepEqual(await underlying(), before, "generation and review reads leave the claim, evidence and measurement unchanged");
   });
 
   test("export review: only a GK administrator requests, starts, and completes it, for the draft's own audience only", onNormalChain, async () => {
@@ -2098,7 +2160,7 @@ async function runSuite() {
     // Read back: the actual text, its citation and limitations, and who may review.
     const detail = await clientDraft(ADMIN, ordinary);
     assert.equal(detail.ok, true, JSON.stringify(detail));
-    assert.equal(detail.data.blocks[0].text, COMPLIANT_TEXT);
+    assert.ok(detail.data.blocks[0].text.startsWith(`${COMPLIANT_TEXT} Measurement disclosure for the cited count: `), detail.data.blocks[0].text);
     assert.deepEqual(detail.data.blocks[0].supportingClaimIds, [ordinary.claimId]);
     assert.equal(detail.data.reviewState, "awaiting_organization_review");
     // No factual approval is required for internal use, so none is offered;

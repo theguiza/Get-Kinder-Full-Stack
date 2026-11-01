@@ -1,4 +1,18 @@
-import { MEASUREMENT_DISCLOSURE_RULES, isMeasurementLimitationCode } from "./kaiSourceMeasurementValidators.js";
+import {
+  MEASUREMENT_DISCLOSURE_RULES,
+  MEASUREMENT_LIMITATION_CODES,
+  MEASUREMENT_UNIQUENESS_PATTERN,
+  REPORTING_PERIOD_ASSERTION_PATTERNS,
+  SERVICE_DELIVERY_PATTERN,
+  affirmativeMatches,
+  composeMeasurementDisclosure,
+  coverageStatusClearedPattern,
+  isMeasurementLimitationCode,
+  namesCoverageDimension,
+  parseMeasuredCountStatement,
+} from "./kaiSourceMeasurementValidators.js";
+
+const EVIDENCE_SUMMARY_CONTENT_TYPE = "evidence_summary";
 
 const VALIDATOR_KEYS = Object.freeze([
   "VAL-GEN-001",
@@ -94,6 +108,119 @@ export function countOnlyBlockMatchesMeasurement(block, measurementRow) {
     && block.citations.length === 1
     && block.citations[0].evidenceItemId === measurementRow.evidence_item_id
     && block.text === composeCountOnlyFindingText(measurementRow);
+}
+
+/**
+ * Evidence Summary blocks citing ordinary measured claims (owner prompt
+ * "KAI — Reproduce and repair Evidence Summary VAL-GEN-008", 2026-11-01):
+ * the server appends each cited measured claim's composed disclosure
+ * (composeMeasurementDisclosure) to the model's text, which is kept verbatim,
+ * so a truthful draft never depends on the model choosing wording VAL-GEN-008
+ * accepts. Every validator still runs on the combined text, so a model
+ * contradiction or unsupported assertion is never hidden. One cited measured
+ * claim, or several with the same disclosure, get one disclosure; several
+ * with different disclosures are each attributed by their measured value,
+ * which their own statements carry. A count-only claim keeps the exact
+ * composed block (composeCountOnlyFindingText). Idempotent: an existing
+ * trailing disclosure is not appended again. Returns { ok: false } when a
+ * disclosure cannot be composed or attributed.
+ */
+export function composeEvidenceSummaryMeasurementDisclosures({ blocks, claims, measuredValueByClaimId = new Map() }) {
+  const claimById = generationClaimsById(claims || []);
+  const composed = [];
+  for (const block of blocks || []) {
+    // Only an exact projected claim/evidence pair is attributed a disclosure.
+    const measured = unique((block.citations || [])
+      .filter((citation) => claimById.get(citation.claimId)?.evidenceItemId === citation.evidenceItemId)
+      .map((citation) => claimById.get(citation.claimId)))
+      .filter((claim) => claim
+        && !(claim.limitationCodes || []).includes(COUNT_ONLY_LIMITATION_CODE)
+        && (claim.limitationCodes || []).some(isMeasurementLimitationCode));
+    if (measured.length === 0) {
+      composed.push(block);
+      continue;
+    }
+    const bodies = measured.map((claim) => composeMeasurementDisclosure(claim.limitationCodes.filter(isMeasurementLimitationCode)));
+    if (bodies.includes(null)) return Object.freeze({ ok: false });
+    let disclosure;
+    if (bodies.every((body) => body === bodies[0])) {
+      disclosure = `Measurement disclosure for ${measured.length === 1 ? "the cited count" : "each cited count"}: ${bodies[0]}`;
+    } else {
+      const values = measured.map((claim) => measuredValueByClaimId.get(claim.claimId));
+      const attributable = new Set(values).size === values.length
+        && values.every((value, index) => Number.isSafeInteger(value)
+          && literals(measured[index].claimStatement, NUMERIC_LITERAL_PATTERN).includes(String(value)));
+      if (!attributable) return Object.freeze({ ok: false });
+      disclosure = measured.map((claim, index) => `Measurement disclosure for the cited count of ${values[index]}: ${bodies[index]}`).join(" ");
+    }
+    const text = String(block.text ?? "");
+    composed.push({
+      ...block,
+      text: text.endsWith(disclosure) ? text : `${text}${text.length === 0 || /\s$/.test(text) ? "" : " "}${disclosure}`,
+    });
+  }
+  return Object.freeze({ ok: true, blocks: composed });
+}
+
+// The model-authored text of an Evidence Summary block: the block without the
+// server's exact composed disclosure (composeEvidenceSummaryMeasurementDisclosures).
+// Removing only that authoritative text can hide nothing the model wrote, and
+// the disclosure can then neither satisfy nor mask a contradiction check.
+const DISCLOSURE_PREFIX_PATTERN = /Measurement disclosure for (?:the cited count|each cited count|the cited count of \d+): /g;
+
+function modelAuthoredText(text, citedClaims) {
+  let model = String(text || "");
+  for (const claim of citedClaims) {
+    const body = composeMeasurementDisclosure((claim.limitationCodes || []).filter(isMeasurementLimitationCode));
+    if (body) model = model.split(body).join(" ");
+  }
+  return model.replace(DISCLOSURE_PREFIX_PATTERN, " ");
+}
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Evidence Summary (owner prompt "KAI VAL-GEN-008 — Final local safety
+ * acceptance", 2026-11-01): whether the model-authored text contradicts a
+ * cited measured claim. A reporting period is asserted for a claim with none;
+ * a coverage concern that is not clear is asserted resolved or cleared; or,
+ * for a human-defined record meaning, the measured value is stated as a count
+ * of anything other than the claim's own counted unit or records ("112
+ * participants"), or the sentence stating it asserts a service or outcome the
+ * cited statement does not. The literal value appearing in the claim never
+ * authorizes a different counted entity.
+ */
+function evidenceSummaryContradicts(modelText, codes, citedClaims) {
+  if (codes.has(MEASUREMENT_LIMITATION_CODES.NO_REPORTING_PERIOD)
+    && REPORTING_PERIOD_ASSERTION_PATTERNS.some((pattern) => pattern.test(modelText))) {
+    return true;
+  }
+  if ([...codes].some((code) => code.startsWith("coverage.") && coverageStatusClearedPattern(code).test(modelText))) return true;
+  if (!codes.has(MEASUREMENT_LIMITATION_CODES.RECORD_MEANING_HUMAN_DEFINED)) return false;
+  const citedText = citedClaims.map((claim) => claim.claimStatement || "").join("\n").toLowerCase();
+  for (const claim of citedClaims) {
+    const measured = parseMeasuredCountStatement(claim.claimStatement);
+    if (!measured) continue;
+    const words = measured.unitLabel.split(/\s+/);
+    const units = words.map((_, index) => escapeRegExp(words.slice(index).join(" "))).join("|");
+    const countedUnit = new RegExp(`^(?:\\s*(?:[.,;:)]|$)|\\s+(?:${units}|(?:counted\\s+)?(?:non-?blank\\s+)?(?:source\\s+|data\\s+)?(?:records?|rows?))\\b)`, "i");
+    // "The source does not establish that 112 participants were served" denies
+    // that statement rather than making it, so the clause it governs (to the
+    // next clause break) is not read as an assertion of the value; any other
+    // statement of the value is still checked.
+    const denied = new RegExp(`\\b(?:does|do|did)(?:\\s+not|n't)\\s+establish\\s+(?:that|whether)\\s+${measured.value}\\b[^.!?;,]*`, "gi");
+    const asserted = modelText.replace(denied, " ");
+    const sentences = asserted.split(/(?<=[.!?;])\s+/);
+    const statesValue = (text) => [...text.matchAll(NUMERIC_LITERAL_PATTERN)].filter((match) => match[0] === measured.value);
+    if (statesValue(asserted).some((match) => !countedUnit.test(asserted.slice(match.index + match[0].length)))) return true;
+    if (sentences.some((sentence) => statesValue(sentence).length > 0
+      && affirmativeMatches(sentence, SERVICE_DELIVERY_PATTERN).some((word) => !new RegExp(`\\b${word.toLowerCase()}\\b`).test(citedText)))) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function pass(validatorKey, evidence = {}) {
@@ -217,17 +344,41 @@ export function validateGeneratedContentDraft({
   // present the period as verified or the records as distinct. Evaluated
   // only when a generation claim carries measurement limitation codes, so
   // every other draft's validator set is unchanged.
+  // In an Evidence Summary block that cites no count-only claim (owner prompt,
+  // 2026-11-01), a forbidden word counts only when asserted, not negated
+  // ("not independently verified", "not unique"); the records are never
+  // asserted to be distinct/unique unless a cited statement itself says so;
+  // and every coverage dimension that is not clear must be named, not merely
+  // "limitations". The model-authored text must also not contradict the
+  // period, coverage or counted-unit state (evidenceSummaryContradicts).
+  // Every other block keeps exactly the rules above.
   if ((generationClaims || []).some((claim) => (claim.limitationCodes || []).some(isMeasurementLimitationCode))) {
     const disclosureViolations = [];
     for (const block of blocks || []) {
-      const codes = new Set((block.citations || []).flatMap((citation) => (
-        (claimById.get(citation.claimId)?.limitationCodes || []).filter(isMeasurementLimitationCode)
-      )));
+      const cited = (block.citations || []).map((citation) => claimById.get(citation.claimId)).filter(Boolean);
+      const codes = new Set(cited.flatMap((claim) => (claim.limitationCodes || []).filter(isMeasurementLimitationCode)));
+      const text = block.text || "";
+      const evidenceSummaryRules = contentType === EVIDENCE_SUMMARY_CONTENT_TYPE
+        && !cited.some((claim) => (claim.limitationCodes || []).includes(COUNT_ONLY_LIMITATION_CODE));
+      const contradicts = (pattern) => (evidenceSummaryRules ? affirmativeMatches(text, pattern).length > 0 : pattern.test(text));
       for (const rule of MEASUREMENT_DISCLOSURE_RULES) {
         const applies = rule.code ? codes.has(rule.code) : [...codes].some((code) => code.startsWith(rule.codePrefix));
-        if (!applies) continue;
-        if (![rule.requires].flat().every((pattern) => pattern.test(block.text || ""))) disclosureViolations.push({ type: "limitation_not_disclosed", block_ordinal: block.ordinal });
-        if (rule.forbids && rule.forbids.test(block.text || "")) disclosureViolations.push({ type: "limitation_contradicted", block_ordinal: block.ordinal });
+        if (!applies || (evidenceSummaryRules && rule.codePrefix === "coverage.")) continue;
+        if (![rule.requires].flat().every((pattern) => pattern.test(text))) disclosureViolations.push({ type: "limitation_not_disclosed", block_ordinal: block.ordinal });
+        if (rule.forbids && contradicts(rule.forbids)) disclosureViolations.push({ type: "limitation_contradicted", block_ordinal: block.ordinal });
+      }
+      if (evidenceSummaryRules) {
+        if ([...codes].some((code) => code.startsWith("coverage.") && !namesCoverageDimension(text, code))) {
+          disclosureViolations.push({ type: "limitation_not_disclosed", block_ordinal: block.ordinal });
+        }
+        const citedText = cited.map((claim) => claim.claimStatement || "").join("\n").toLowerCase();
+        if (codes.has(MEASUREMENT_LIMITATION_CODES.RECORD_MEANING_HUMAN_DEFINED)
+          && affirmativeMatches(text, MEASUREMENT_UNIQUENESS_PATTERN).some((word) => !new RegExp(`\\b${word.toLowerCase()}\\b`).test(citedText))) {
+          disclosureViolations.push({ type: "limitation_contradicted", block_ordinal: block.ordinal });
+        }
+        if (evidenceSummaryContradicts(modelAuthoredText(text, cited), codes, cited)) {
+          disclosureViolations.push({ type: "limitation_contradicted", block_ordinal: block.ordinal });
+        }
       }
     }
     results.push(

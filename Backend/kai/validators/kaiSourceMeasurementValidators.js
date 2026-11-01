@@ -648,3 +648,129 @@ export function describeMeasurementLimitationCode(code) {
   if (!match || !COVERAGE_DIMENSION_LABELS[match[1]] || !COVERAGE_STATUS_DESCRIPTIONS[match[2]]) return null;
   return `${COVERAGE_DIMENSION_LABELS[match[1]]}: ${COVERAGE_STATUS_DESCRIPTIONS[match[2]]}.`;
 }
+
+// Evidence Summary disclosure (owner prompt "KAI — Reproduce and repair
+// Evidence Summary VAL-GEN-008", 2026-11-01). The server appends this to a
+// block citing an ordinary measured claim, so the model never has to guess
+// wording VAL-GEN-008 accepts. Composed only from the claim's limitation
+// codes: no numbers, worksheet, label, or other free text, and none of the
+// words a released document's prose must not use, even negated (distinct,
+// unique, participants, outcomes, ...).
+const EVIDENCE_SUMMARY_DISCLOSURES = Object.freeze({
+  [MEASUREMENT_LIMITATION_CODES.RECORD_MEANING_HUMAN_DEFINED]:
+    "It is a count of source records only, and one record is not necessarily one separate person, event or result; "
+    + "what one counted record represents is human-defined by the organization and was not verified by KAI.",
+  [MEASUREMENT_LIMITATION_CODES.PERIOD_HUMAN_ATTESTED]:
+    "The reporting period is attested in the record definition and was not verified against dates in the records.",
+  [MEASUREMENT_LIMITATION_CODES.NO_REPORTING_PERIOD]: "No reporting period was defined for the count.",
+  [MEASUREMENT_LIMITATION_CODES.BLANK_RECORDS_EXCLUDED]: "Blank records were excluded from the count.",
+  [MEASUREMENT_LIMITATION_CODES.DUPLICATE_RECORDS_INCLUDED]:
+    "Exact-duplicate records are included in the count; they were not removed or merged.",
+});
+
+/**
+ * The Evidence Summary disclosure for one measured claim's measurement./
+ * coverage. codes, or null when it cannot be composed safely: the record
+ * meaning and exactly one period state are required, and every code must
+ * have a known description.
+ */
+export function composeMeasurementDisclosure(codes) {
+  const present = new Set(codes);
+  const known = new Set(Object.values(MEASUREMENT_LIMITATION_CODES));
+  if (!present.has(MEASUREMENT_LIMITATION_CODES.RECORD_MEANING_HUMAN_DEFINED)
+    || present.has(MEASUREMENT_LIMITATION_CODES.PERIOD_HUMAN_ATTESTED) === present.has(MEASUREMENT_LIMITATION_CODES.NO_REPORTING_PERIOD)
+    || [...present].some((code) => code.startsWith("measurement.") && !known.has(code))) {
+    return null;
+  }
+  const coverage = [...present].filter((code) => code.startsWith("coverage.")).sort().map(describeMeasurementLimitationCode);
+  if (coverage.includes(null)) return null;
+  const sentences = Object.keys(EVIDENCE_SUMMARY_DISCLOSURES).filter((code) => present.has(code)).map((code) => EVIDENCE_SUMMARY_DISCLOSURES[code]);
+  if (coverage.length > 0) sentences.push(`Coverage limitations: ${coverage.join(" ")}`);
+  return sentences.join(" ");
+}
+
+// Evidence Summary VAL-GEN-008: a forbidden word is a contradiction only when
+// asserted. It is negated when directly preceded by not/never/n't/non-,
+// optionally through these few qualifiers ("not independently verified",
+// "not necessarily unique"); anything else ("not only verified") asserts it.
+const NEGATED_PREFIX = /(?:\bnot|\bnever|n't|\bnon-)(?:\s+(?:been|be|yet|independently|necessarily|formally|separately|externally))*\s*$/i;
+
+/** The words of `pattern` that `text` asserts rather than negates. */
+export function affirmativeMatches(text, pattern) {
+  const source = String(text || "");
+  const global = new RegExp(pattern.source, pattern.flags.includes("g") ? pattern.flags : `${pattern.flags}g`);
+  return [...source.matchAll(global)]
+    .filter((match) => !NEGATED_PREFIX.test(source.slice(Math.max(0, match.index - 80), match.index)))
+    .map((match) => match[0]);
+}
+
+// A measured count is of source records; it never establishes that they are
+// distinct people, events, or outcomes.
+export const MEASUREMENT_UNIQUENESS_PATTERN = /\b(distinct|unique|deduplicated)\b/i;
+
+// How an Evidence Summary block names each coverage dimension; each matches
+// its COVERAGE_DIMENSION_LABELS wording.
+const COVERAGE_DIMENSION_NAME_PATTERNS = Object.freeze({
+  missingness: /\bmissing values?\b/i,
+  duplicates: /\bduplicate/i,
+  definition_clarity: /\brecord definition\b/i,
+  denominator_clarity: /\bdenominator\b/i,
+  time_period_clarity: /\breporting[- ]period\b/i,
+  entity_level_clarity: /\bwhat is counted\b|\bcounted unit\b/i,
+  small_cell_risk: /\bsmall[- ](?:cell|number)\b/i,
+  conflicting_source_indicators: /\bconflicting sources?\b/i,
+  requirement_alignment: /\brequirements? alignment\b|\balignment with (?:\w+ )?requirements\b/i,
+  coverage_gaps: /\bfield coverage\b/i,
+});
+
+/** Whether `text` names the dimension of a coverage.<dimension>.<status> code. */
+export function namesCoverageDimension(text, code) {
+  const dimensionKey = String(code).split(".")[1] || "";
+  const pattern = COVERAGE_DIMENSION_NAME_PATTERNS[dimensionKey]
+    ?? new RegExp(`\\b${dimensionKey.split("_").join("[ -]")}\\b`, "i");
+  return dimensionKey.length > 0 && pattern.test(String(text || ""));
+}
+
+// Evidence Summary VAL-GEN-008 contradiction checks (owner prompt "KAI
+// VAL-GEN-008 — Final local safety acceptance", 2026-11-01). They read only
+// the model-authored text, so the appended disclosure can never neutralize
+// them, and each matches an affirmative form only: a negated statement
+// ("was not defined", "has not been resolved") does not fit the pattern.
+
+// A reporting period asserted to exist, for a claim with no reporting period.
+export const REPORTING_PERIOD_ASSERTION_PATTERNS = Object.freeze([
+  /\b(?:a|the|its)\s+(?:formal\s+)?reporting[- ]period\s+(?:was|is|has been|had been)(?:\s+(?:formally|clearly|already|explicitly))*\s+(?:defined|established|set|specified|stated|attested|provided|recorded|identified|given|confirmed|verified)\b/i,
+  /\b(?:defined|established|specified|attested)\s+(?:a|the)\s+reporting[- ]period\b/i,
+]);
+
+const COVERAGE_CLEARED_VERBS = "resolved|cleared|established|addressed|removed|mitigated|eliminated|reconciled|confirmed|satisfied|met|fixed|closed|verified|corrected";
+
+/**
+ * A coverage dimension asserted to be resolved or cleared ("Conflicting
+ * sources have been resolved"), for a coverage.<dimension>.<status> code. Every
+ * such code a claim carries is not clear (unresolved, flagged, or accepted
+ * only as an internal limitation), so the assertion contradicts it.
+ */
+export function coverageStatusClearedPattern(code) {
+  const dimensionKey = String(code).split(".")[1] || "";
+  const name = COVERAGE_DIMENSION_NAME_PATTERNS[dimensionKey]?.source ?? `\\b${dimensionKey.split("_").join("[ -]")}\\b`;
+  return new RegExp(
+    // "No reporting period is established" negates the dimension itself.
+    `(?<!\\b(?:no|not|nor)\\s+(?:formal\\s+)?)(?:${name})(?:[\\s-]+[\\w()]+){0,3}?\\s+(?:has|have|had|is|are|was|were)`
+    + `(?:\\s+(?:been|now|fully|since|already|all|largely|successfully|completely|properly))*\\s+(?:${COVERAGE_CLEARED_VERBS})\\b`,
+    "i",
+  );
+}
+
+// The measured value and human-defined unit label of a composed measurement
+// claim statement (composeMeasurementClaimStatement), or null.
+const MEASURED_COUNT_STATEMENT_PATTERN = /^The promoted source records (\d+) (.+?) (?:for the reporting period |with no reporting period defined)/;
+
+export function parseMeasuredCountStatement(statement) {
+  const match = MEASURED_COUNT_STATEMENT_PATTERN.exec(String(statement || ""));
+  return match ? Object.freeze({ value: match[1], unitLabel: match[2] }) : null;
+}
+
+// A service or outcome asserted of the counted records. A source record
+// count never establishes one.
+export const SERVICE_DELIVERY_PATTERN = /\b(served|helped|reached|supported|benefit(?:ed|ted|s)?|enrolled|attended|completed|delivered|assisted|treated|graduated|achieved)\b/i;
