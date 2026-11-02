@@ -45727,3 +45727,102 @@ The P2-01M integration spec now expects the server-composed disclosure in the pe
 **Minimum sequence to the Free Assessment:** (1) value-access decision → (2) paired-outcome persistence migration and write path, then claim basis, P2-06 and VAL-GEN projection → (3) single-source filtered, distinct and categorical counts with the engagement period → (4) cross-source reach and unmatched-ID review → (5) narrative and source-reported evidence with page locators, then conflict candidates → (6) delivery authority for personal-information aggregates → (7) Free Assessment composition over these.
 
 **Status:** CEDAR_BRIDGE_SIX_SOURCE_BASELINE_ESTABLISHED_LOCALLY. One attributable defect was repaired (XLSX duplicate hint). Local commits only; not pushed, deployed, migrated, or verified in production.
+
+### Measurement MVP: shared derived measurements and Impact Evidence (Packages A and B) (2026-11-02)
+
+**Owner authorization (USER_CONFIRMED):** owner prompt "KAI Measurement MVP — Complete Shared Derived Measurements and Impact Evidence". It authorizes local code and tests for Package A (persist the paired outcomes as Impact Evidence) and Package B (reusable content-aware tabular measurements), the minimum additive migration, applying it only to new disposable synthetic PostgreSQL, and local commits. Excluded: production or shared databases, deployment, pushes, cloud/tenant/credential/environment changes, persistent flags, destructive actions, real client data, `00_KAI_CURRENT_STATE.md`, a new generator, cross-source joins, the corrected-version challenge, PDF/TXT/MD semantic extraction, the Free Assessment and the Improvement Plan.
+
+**Start (TOOL_VERIFIED):** `main` at `e926adb`, clean. DATABASE_URL was the non-listening loopback sentinel for every Node/npm command.
+
+**Value-access decision taken (owner prompt §4):** the authorized P1 profiler, which already holds the bytes, commits governed aggregates; nothing downstream re-reads raw uploads. No measurement-time byte read was added.
+
+**Implemented (commits `3482953`, `eb40a1f`, `cacebef`, `395e92c`, `b3a806f`, `21e866b`):**
+1. `Backend/kai/profiling/tabularMeasurementBasis.js` (new): `tabular_measurement_basis` (`kai_tabular_measurement_basis_v1`) for a CSV and for each worksheet whose record-count basis establishes one table.
+   - It proposes roles from value shapes only: identifier, category (at most 12 short letter-only labels) and ISO date.
+   - It keeps exact-duplicate groups, members and excess copies separately. Identifier fields keep only their distinct, repeated-key and blank counts.
+   - It keeps joint category×category and category×month tables, with distinct keys per identifier, so a combined condition is calculated rather than taken from independent histograms. `single_valued_in` marks whether a distinct count summed across months is exact.
+   - **Profile contract change:** the profile now keeps listed category labels (each needs at least 2 records and must be admitted by `kai.gate_a_p0_jsonb_metadata_only`; "Email and forms coaching" is withheld, for example). It keeps dates only as calendar months. Identifiers, headers and free text are still not stored. Existing profiles are unchanged; a source needs a new intake version to get the basis.
+2. `migrations/kai_sprint2_measurement_mvp_source_derived_measurements.sql` + rollback (Plan A chain position 85). It widens the evidence type, the type/class pairing and the locator type by one value each, adds a fields locator, and adds three append-only tables:
+   - `source_derived_measurements`: arithmetic, method/family/basis CHECKs, paired and rate count CHECKs, `round(numerator*100/denominator,2)`, profile sha, and a unique (version, worksheet, measurement key);
+   - `source_derived_measurement_interpretations`: a linear history (one root, each superseded at most once), with `human_stated`, label, meaning, score direction and evidence basis `self_reported|organization_record|not_established`. Nothing can be recorded as verified;
+   - `evidence_derived_measurements`: one evidence item per (measurement, interpretation).
+
+   `evidence_measurements` and the record-count definitions are untouched.
+3. `Backend/kai/validators/kaiDerivedMeasurementValidators.js` (new, shared by both families):
+   - Persistable paired outcomes come from the unchanged paired derivation with no definition. The numerator is always the numeric increase.
+   - The tabular count unit is records, or each identifier value once (`count_each_key_once`). A count takes at most one category and one period condition. A rate takes a numerator category and a population of all records or one category.
+   - The period is the engagement's recorded `reporting_period_*` applied to a chosen date field, in whole months. Anything else is refused (`tabular_period_not_whole_months`); typed dates are refused.
+   - It composes statements, checks the claim basis (arithmetic, locator, profile sha, current interpretation, exact evidence statement), assigns the coverage dimensions, the `derived.*` limitation codes and their descriptions, composes the server disclosure, and defines the VAL-GEN-008 rules.
+4. `postgresDerivedMeasurementRepository.js` and the service and routes:
+   - Routes: `GET …/source-versions/:id/derived-measurements`, `POST …/paired-outcome-measurements`, `POST …/tabular-measurements`, `POST …/derived-measurements/:id/interpretations`.
+   - They reuse the record count's loader (`loadMeasurableSourceVersion`), its admission (flag, mapped human, P2-01 roles, tenant), its transaction and its one metadata-only audit per fresh write. A replay writes nothing.
+5. Downstream, the same pathways:
+   - claim proposal, including the same-command P2-04 gap state, with no client follow-ups;
+   - P2-06: coverage, ordinary authority (never the count-only story basis), and a new 409 reason `derived_measurement_interpretation_superseded`;
+   - the organization gap state, which is batched;
+   - the generation projection: the claim must be eligible and current, its codes are carried, and its value is attributed;
+   - VAL-GEN-008, the Evidence Summary disclosure and an extra instruction in the existing generator;
+   - the internal report, the export limitation snapshot, and both Markdown serializers.
+6. UI: `ClientDerivedMeasurementSection.jsx` inside the existing Count records panel. It can keep the proposed paired results, define a count or rate from the listed fields and values, show limitations and the meaning state, propose the claim, and clarify meaning.
+
+**Cedar Bridge results on the uploaded original bytes (TOOL_VERIFIED, runner 19/19: baseline 12 unchanged plus 7 new):**
+- **Package A, persisted:**
+  - `field_6`: 38 pairs, 25 higher, 10 unchanged, 3 lower, 65.79%.
+  - `field_7`: 40 pairs, 23 higher, 13 unchanged, 4 lower, 57.50%.
+  - Method `p1_xlsx_paired_baseline_followup_numeric_change_v1`, `sheet_1`. The profile sha equals the source version's. The locator is `{scope, sheet_key, field_keys}`.
+  - 8 version-mismatch participants are excluded from each field. Rows 15/31/61/77 are excluded from digital only and rows 18/62 from readiness only.
+  - The 112 assessment record count is byte-identical. The replay wrote nothing and no audit.
+  - The meanings "Digital confidence"/"Employment readiness" are **human-supplied by the acceptance**. For `field_7`, `not_established` was corrected to `higher_is_better`; the measurement row is unchanged and the earlier evidence and claim are superseded (409).
+- **Package B, persisted** (field and value chosen by column position and listed label, as a person would):
+  - Events: 246 records; 244 distinct `field_1`; 228 completed; 10 cancelled; 6 no-show (7 rows); 5 completed outside the 2025-04-01..2026-03-31 period; 223 within it.
+  - Duplicates: 2 repeated identifiers (4 records), and separately 2 exact-duplicate groups, 4 members, 2 excess copies.
+  - Followups: 38 attempts; 29 answered; 9 nonresponse; 29/38 = 76.32% (population `field_4 = yes`); 9 self-reported paid work; 9/29 = 31.03% among answered; 7/10/3 for the other steps.
+- **Seven derived claims** (two paired, distinct events, completed events, completed outside the period, response rate, self-reported paid work):
+  - Initially ineligible (personal information present). After Get Kinder's existing evidence, claim and coverage review they are internally eligible; funder and public stay false.
+  - The internal Evidence Summary is 201 with 7 blocks. Each cites its own current evidence item, carries its numbers, and has the server disclosure ("…not independently verified", "comparable…not every participant", "measured population").
+  - No CB/EV/FU identifier reached the model.
+- **Refused through the same generation path:**
+  - an invented "412" (VAL-GEN-004);
+  - "improves … because" (VAL-GEN-004);
+  - "verified employment outcomes" (VAL-GEN-008);
+  - "all participants" (VAL-GEN-008);
+  - the superseded-meaning claim (409).
+- **Delivery:**
+  - The client's internal Markdown is 422 `personal_information_not_cleared`, and the client's own release is 422 (`personal_information_not_cleared`, `factual_review_not_complete`). The rule is unchanged.
+  - Get Kinder's existing chain then ran with `KAI_PUBLIC_EXPORT_ENABLED` set in the test process only: content review 200/200, export review 201/200/200, limitation snapshot 201 (entries equal the generation codes), candidate 201, final release (gk_admin) 201, manifest 201.
+  - The client route `client-released-reports/:id/markdown` is **200**, and all 7 derived claims are in the released document.
+- **Answer key** (after KAI's results; baseline comparison preserved at 18 match / 1 different definition / 53 unavailable / 1 out of scope): with derived capability, **32 match / 0 different / 40 unavailable / 1 out of scope**.
+  - The 14 new matches are each method-checked (method, unit, condition labels, period scope and dates, population, persistence): E_UNIQUE_EVENTS, E_EXACT_DUPLICATE_ROWS (as excess copies), E_COMPLETED_ALL_DATES, E_CANCELLED, E_NO_SHOW, E_COMPLETED_OUT_OF_PERIOD, F_ANSWERED, F_NO_RESPONSE, F_FOLLOWUP_RESPONSE_PERCENT, F_SELF_REPORTED_PAID_WORK, and F_ENTERED_TRAINING / STILL_SEEKING / UNKNOWN / PAID_WORK_AMONG_ANSWERS.
+  - The paired matches are now persisted.
+
+**Verification (TOOL_VERIFIED):**
+- Cedar six-source runner: 19/19. The migration is applied, rolled back to the prior schema fingerprint, and re-applied identically.
+- `__tests__/kai-derived-measurement.spec.js`: 8/8. Results agree with an independent calculation; the refusals, statements and arithmetic tamper are covered; shared generator conformance covers record-count and both derived families.
+- P2-01M runner:
+  - main run 77 tests (68 pass, 0 fail, 9 normal-chain skips);
+  - the migration is applied twice with no evidence, locator, claim or record-count row changed;
+  - every record-count method/locator vector PASS, and only the three widened CHECKs differ from the XLSX verifier's pinned md5;
+  - every rollback, including the derived one, is refused with data present.
+- Plan A normal chain: 85 migrations in order, 2/2, 43 (40 pass, 3 skipped), 4/4, "proof passed".
+- Customer XLSX file-to-report (built UI): 37/37.
+- Knowledge-studio browser runner: source promotion 13/13, measurement-to-released-report 13/13, internal factual review 17/17, measured report selection 17/17. Plan A assembled file-to-report: 23/23.
+- P1-04 data-dictionary runner: 12/12. Paired, kernel and derived specs with the Cedar workbook: 30/30.
+- `npm test`: 5,980 tests, 5,856 passed, 0 failed, 124 skipped. API contract: 71/71. `npm run build` passed (bundle committed). `git diff --check` passed.
+
+**What the local tests do not show (NOT_CONFIRMED):** semantic quality of a real AI provider. The model is a deterministic stub that repeats each claim statement, and the negative cases replace its text. Production migration and behaviour. The pgAdmin XLSX verifier (`kai-sprint2-p2-01m-xlsx-worksheet-method-verify-read-only.sql`) will report X3 FAIL for the three widened CHECKs after this migration. It needs an updated pinned md5 before any production verification.
+
+**Remaining before the six-source assessment (not implemented):**
+1. Cross-source joins: eligible encounters (222), distinct served people (80), the unmatched ID, and program overlap (P02–P04, E_DISTINCT_*).
+2. Duration sums and the month grouping operation (E_MONTH_*, minutes). The basis already keeps months; no grouping operation exists.
+3. Means of paired scores.
+4. Subtotals A_PEOPLE_WITH_BASELINE_AND_FOLLOWUP, A_SAME_TOOL_VERSION_PAIRS and A_NO_ASSESSMENT_PEOPLE.
+5. F_INDEPENDENTLY_VERIFIED_PAID_WORK: KAI never records verification.
+6. Planning targets (T_*).
+7. Narrative/PDF evidence with page locators.
+8. The challenge version.
+9. Paired outcomes when KAI proposes several pairings: the record is refused (`paired_outcome_pairing_selection_required`).
+10. Rates in distinct units; more than one category condition.
+11. Client delivery for personal-information sources still requires Get Kinder's release.
+12. Organization (client_admin) factual review remains record-count-only (a trigger scopes it).
+
+**Status:** MEASUREMENT_MVP_DERIVED_MEASUREMENTS_IMPLEMENTED_AND_VERIFIED_LOCALLY. Local commits only; not pushed, deployed, migrated or verified in production.
