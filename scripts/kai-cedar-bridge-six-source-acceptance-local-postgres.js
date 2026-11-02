@@ -128,8 +128,13 @@ try {
     submitted_at timestamptz DEFAULT now(), reviewed_at timestamptz, reviewed_by text);`);
   psqlFile("scripts/kai-sprint2-intake-duplicate-resolution-production-shape-synthetic-schema.sql");
 
+  // The Measurement MVP migration is additive: the schema it is applied to is
+  // exactly what its rollback restores on an unused installation.
+  const derivedMigration = "kai_sprint2_measurement_mvp_source_derived_measurements";
+  let beforeDerived = null;
   for (const migration of MIGRATION_CHAIN) {
     const refusal = PRODUCTION_HISTORY_ONLY.get(migration);
+    if (migration === derivedMigration) beforeDerived = (await catalog(schemaFingerprintSql))[0].fingerprint;
     if (!refusal) {
       psqlFile(`migrations/${migration}.sql`);
       continue;
@@ -146,6 +151,13 @@ try {
     if ((await catalog(schemaFingerprintSql))[0].fingerprint !== before) throw new Error(`${migration} refusal changed the schema`);
   }
   console.log(`Cedar Bridge acceptance: applied ${MIGRATION_CHAIN.length - PRODUCTION_HISTORY_ONLY.size} migrations in introduction order with no schema adjustment.`);
+  if (!beforeDerived) throw new Error(`${derivedMigration} is not in the migration chain`);
+  const afterDerived = (await catalog(schemaFingerprintSql))[0].fingerprint;
+  psqlFile(`migrations/${derivedMigration}.rollback.sql`);
+  if ((await catalog(schemaFingerprintSql))[0].fingerprint !== beforeDerived) throw new Error(`${derivedMigration} rollback did not restore the prior schema`);
+  psqlFile(`migrations/${derivedMigration}.sql`);
+  if ((await catalog(schemaFingerprintSql))[0].fingerprint !== afterDerived) throw new Error(`${derivedMigration} re-apply changed the schema`);
+  console.log(`Cedar Bridge acceptance: ${derivedMigration} applied, rolled back to the prior schema fingerprint, and re-applied identically.`);
   console.log(`Cedar Bridge acceptance schema fingerprint: ${(await catalog(schemaFingerprintSql))[0].fingerprint}`);
 
   const testResult = spawnSync("node", ["--test", "--test-concurrency=1", "--test-timeout=600000", spec], {
