@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from "react";
 
 import { claimProposalPath, errorText, getJson, postJson } from "../impactEvidenceLibraryLogic.js";
 import { claimProposalResultMessage } from "./clientEvidenceWorkflowLogic.js";
+import ClientDerivedMeasurementSection from "./ClientDerivedMeasurementSection.jsx";
 import {
   EMPTY_MEASUREMENT_FORM,
   MEASUREMENT_FORM_READINESS_MESSAGES,
@@ -258,6 +259,11 @@ export default function ClientSourceMeasurementPanel({
           </button>
         </form>
       ) : null}
+      {/* Measurement MVP: field-value measurements of the same version (and selected worksheet). */}
+      {worksheetOptions.length > 1 && !selectedWorksheetKey ? null : (
+        <ClientDerivedMeasurementSection organizationId={organizationId} sourceVersionId={sourceVersionId} worksheetKey={selectedWorksheetKey}
+          canProposeClaim={canProposeClaim} onRecorded={onRecorded} />
+      )}
     </div>
   );
 }
