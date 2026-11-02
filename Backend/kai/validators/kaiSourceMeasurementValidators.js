@@ -82,6 +82,10 @@ function isSafeRuleText(value) {
     && !UNSAFE_TEXT_RE.test(value);
 }
 
+// The same label, plain-text, and calendar-date rules for every human
+// measurement definition (the paired-outcome definition reuses them).
+export const __measurementDefinitionTextRules = Object.freeze({ LABEL_RE, isSafeRuleText, isCalendarDate, MAX_RULE_LENGTH });
+
 /**
  * The human definition of one counted record. Every meaning-bearing field is
  * required: without an explicit statement of what one record is, a count is

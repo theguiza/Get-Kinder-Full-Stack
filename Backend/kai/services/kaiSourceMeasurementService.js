@@ -3,6 +3,7 @@ import { buildKaiError } from "../errors/kaiErrors.js";
 import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationService.js";
 import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
 import { validateRecordCountDefinition } from "../validators/kaiSourceMeasurementValidators.js";
+import { validatePairedOutcomeDefinition } from "../validators/kaiPairedOutcomeMeasurementValidators.js";
 import { __evidenceLineageServiceContract } from "./kaiEvidenceLineageService.js";
 
 // The P2-01 evidence-extraction authority (organization membership only):
@@ -121,6 +122,48 @@ export async function getSourceRecordCountMeasurementBasis(input, dependencies =
     organizationId: input.organizationId,
     sourceVersionId: input.sourceVersionId,
     worksheetKey: input.worksheetKey ?? null,
+  });
+  if (!result.ok) {
+    return buildKaiError(result.error.code, {
+      status: result.error.status,
+      ...(Array.isArray(result.error.blockers) ? { blockers: result.error.blockers } : {}),
+    });
+  }
+  return { ok: true, data: result.data, error: null };
+}
+
+/**
+ * Read-only paired baseline/follow-up measurements (Measurement MVP) of one
+ * worksheet of a promoted, current, permitted version: KAI's proposed fields
+ * and the numeric change of every proposed outcome field, under the same
+ * admission as the record count. A definition of what a field measures and
+ * its scoring direction is accepted only from an admitted person, who holds
+ * the authority that records a record-count definition. It is applied to
+ * this answer and is not recorded (the schema has no paired-outcome
+ * definition yet).
+ */
+export async function getPairedOutcomeMeasurementBasis(input, dependencies = {}) {
+  if (!isKaiSprint2Enabled(dependencies.env || process.env)) return buildKaiError("feature_disabled");
+  const allowedKeys = new Set(["organizationId", "sourceVersionId", "worksheetKey", "definitions", "actorContext"]);
+  if (!isPlainObject(input) || !Object.keys(input).every((key) => allowedKeys.has(key))
+    || !isNonEmptyString(input.organizationId) || !isNonEmptyString(input.sourceVersionId) || !isPlainObject(input.actorContext)
+    || (input.definitions !== undefined && !Array.isArray(input.definitions))) {
+    return buildKaiError("validation_blocker");
+  }
+  const denied = admitMeasurementActor(input.actorContext, input.organizationId);
+  if (denied) return denied;
+  const definitions = [];
+  for (const candidate of input.definitions ?? []) {
+    const definition = validatePairedOutcomeDefinition(candidate);
+    if (!definition.ok) return buildKaiError(definition.code, { blockers: definition.blockers });
+    definitions.push(definition.definition);
+  }
+  const repository = dependencies.sourceMeasurementRepository || (await createDefaultRepository());
+  const result = await repository.readPairedOutcomeMeasurementBasis({
+    organizationId: input.organizationId,
+    sourceVersionId: input.sourceVersionId,
+    worksheetKey: input.worksheetKey ?? null,
+    definitions,
   });
   if (!result.ok) {
     return buildKaiError(result.error.code, {

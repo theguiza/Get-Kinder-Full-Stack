@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
+import { existsSync, readFileSync } from "node:fs";
 import http from "node:http";
 import express from "express";
 import { programmeSessionWorkbook, syntheticXlsxWorkbook, SYNTHETIC_XLSX_MIME } from "./support/kaiSyntheticXlsxWorkbook.js";
@@ -43,7 +44,7 @@ if (!DATABASE_URL) {
 async function runSuite() {
   const { Pool } = await import("pg");
   const { profileLocalTrustedFile } = await import("../Backend/kai/profiling/localProfilingKernel.js");
-  const { recordSourceRecordCountMeasurement, getSourceRecordCountMeasurementBasis } = await import("../Backend/kai/services/kaiSourceMeasurementService.js");
+  const { recordSourceRecordCountMeasurement, getSourceRecordCountMeasurementBasis, getPairedOutcomeMeasurementBasis } = await import("../Backend/kai/services/kaiSourceMeasurementService.js");
   const { createPostgresSourceMeasurementRepository } = await import("../Backend/kai/dictionary/postgresSourceMeasurementRepository.js");
   const { proposeClaim } = await import("../Backend/kai/services/kaiClaimProposalService.js");
   const { createPostgresClaimProposalRepository } = await import("../Backend/kai/dictionary/postgresClaimProposalRepository.js");
@@ -569,6 +570,108 @@ async function runSuite() {
     const refusedStale = await record(stale.sourceVersionId);
     assert.deepEqual([refusedStale.ok, refusedStale.error.code], [false, "conflict_current_state_changed"]);
     assert.deepEqual(await measurementCounts(), before);
+  });
+
+  // Measurement MVP: invented observations with two numeric outcome fields, a
+  // missing follow-up score, a changed survey version and a repeated baseline.
+  // Expected counts are worked out by hand from these rows.
+  const PAIRED_ROWS = [
+    ["obs_ref", "learner_id", "phase", "survey_version", "confidence_score", "readiness_rating"],
+    ["O01", "L1", "pre", "A", 2, 3], ["O02", "L1", "post", "A", 4, 3],
+    ["O03", "L2", "pre", "A", 3, 4], ["O04", "L2", "post", "A", 2, null],
+    ["O05", "L3", "pre", "A", 1, 2], ["O06", "L3", "post", "B", 3, 4],
+    ["O07", "L4", "pre", "A", 2, 2], ["O08", "L4", "pre", "A", 3, 2], ["O09", "L4", "post", "A", 3, 3],
+    ["O10", "L5", "pre", "A", 3, 1], ["O11", "L5", "post", "A", 3, 2],
+    ["O12", "L6", "pre", "A", 1, 1], ["O13", "L6", "post", "A", 2, 2],
+  ];
+  const pairedRead = (sourceVersionId, { actor = ADMIN, organizationId = ORG, worksheetKey = "sheet_1", definitions } = {}) =>
+    getPairedOutcomeMeasurementBasis(
+      { organizationId, sourceVersionId, worksheetKey, actorContext: actor, ...(definitions ? { definitions } : {}) },
+      { env: ENV, sourceMeasurementRepository: measurementRepository },
+    );
+  const pairedField = (read, fieldKey) => read.data.paired.measurements.find((measurement) => measurement.outcomeFieldKey === fieldKey);
+
+  test("Measurement MVP: paired outcomes come from the promoted version's committed profile through the governed read, keep lineage and locators, write nothing, and stay separate from the record count", async () => {
+    const bytes = syntheticXlsxWorkbook({ sheets: [{ name: "Observations", rows: PAIRED_ROWS }, { name: "Notes", rows: [["note"], ["planning only"]] }] });
+    const promoted = await seedPromotedSource({ profile: await workbookProfile(bytes) });
+    const before = await measurementCounts();
+
+    const read = await pairedRead(promoted.sourceVersionId);
+    assert.equal(read.ok, true, JSON.stringify(read.error));
+    assert.deepEqual(read.data.lineage, {
+      organization_id: ORG,
+      source_id: promoted.sourceId,
+      source_version_id: promoted.sourceVersionId,
+      file_profile_id: promoted.fileProfileId,
+      profile_canonical_sha256: promoted.profileSha,
+    });
+    assert.deepEqual([read.data.recorded, read.data.paired.measurable, read.data.paired.status, read.data.paired.worksheet.sheetKey],
+      [false, true, "available", "sheet_1"]);
+    const confidence = pairedField(read, "field_5");
+    const readiness = pairedField(read, "field_6");
+    assert.deepEqual([confidence.increasedCount, confidence.unchangedCount, confidence.decreasedCount, confidence.denominator, confidence.participantCount, confidence.rate],
+      [2, 1, 1, 4, 6, "50.00"]);
+    assert.deepEqual([readiness.increasedCount, readiness.unchangedCount, readiness.decreasedCount, readiness.denominator, readiness.participantCount, readiness.rate],
+      [2, 1, 0, 3, 6, "66.67"], "L2's missing follow-up removes it from readiness only");
+    assert.deepEqual(confidence.exclusions.map((exclusion) => [exclusion.reason, exclusion.participantCount, exclusion.rows]), [
+      ["instrument_version_mismatch", 1, [6, 7]],
+      ["multiple_observations_ambiguous", 1, [8, 9, 10]],
+    ]);
+    assert.deepEqual(readiness.exclusions.map((exclusion) => exclusion.reason), ["instrument_version_mismatch", "multiple_observations_ambiguous", "missing_followup_value"]);
+    assert.deepEqual(confidence.cellLocators, [{ baseline: "E2", followup: "E3" }, { baseline: "E4", followup: "E5" }, { baseline: "E11", followup: "E12" }, { baseline: "E13", followup: "E14" }]);
+    assert.equal(confidence.numeratorMeaning, "numeric_increase");
+    assert.match(confidence.evidenceStatement, /worksheet sheet_1 with no reporting period defined: 2 of 4 comparable participant pairs \(50\.00%\) have a numerically higher follow-up value/);
+    assert.deepEqual(await measurementCounts(), before, "the read writes nothing");
+
+    // A person's definition applies to its own field; the other keeps its numeric meaning.
+    const defined = await pairedRead(promoted.sourceVersionId, { definitions: [{
+      outcome_field_key: "field_5", indicator_label: "Confidence self-rating", definition_text: "A self-rating where a higher score is more confidence.", score_direction: "higher_is_better",
+    }] });
+    assert.deepEqual([pairedField(defined, "field_5").numeratorMeaning, pairedField(defined, "field_5").interpretation.status, pairedField(defined, "field_6").numeratorMeaning],
+      ["improvement", "human_defined", "numeric_increase"]);
+    assert.deepEqual(await measurementCounts(), before, "a definition given to the read is not recorded");
+
+    // Refusals use the same admission and loader as the record count.
+    for (const actor of [REVIEWER, CONTRIBUTOR, OTHER_ADMIN]) assert.equal((await pairedRead(promoted.sourceVersionId, { actor })).ok, false);
+    assert.equal((await pairedRead(promoted.sourceVersionId, { actor: OTHER_ADMIN, organizationId: OTHER_ORG })).error.code, "not_found", "another tenant cannot read it");
+    const unselected = await pairedRead(promoted.sourceVersionId, { worksheetKey: null });
+    assert.equal(unselected.data.paired.blockers[0].blocking_reason, "paired_outcome_worksheet_selection_required");
+    assert.equal((await pairedRead(promoted.sourceVersionId, { worksheetKey: "sheet_2" })).data.paired.blockers[0].blocking_reason, "paired_outcome_participant_identifier_not_found");
+    const unproposed = await pairedRead(promoted.sourceVersionId, { definitions: [{
+      outcome_field_key: "field_1", indicator_label: "Reference", definition_text: "Not an outcome.", score_direction: "not_established",
+    }] });
+    assert.equal(unproposed.blockers[0].blocking_reason, "paired_outcome_field_not_proposed");
+    const prohibited = await seedPromotedSource({ profile: await workbookProfile(bytes), allowedUse: "not_allowed" });
+    assert.equal((await pairedRead(prohibited.sourceVersionId)).blockers[0].blocking_reason, "allowed_use_not_allowed");
+    const stale = await seedPromotedSource({ profile: await workbookProfile(bytes) });
+    await query("UPDATE kai.source_versions SET is_current = false WHERE source_version_id = $1::uuid", [stale.sourceVersionId]);
+    assert.equal((await pairedRead(stale.sourceVersionId)).error.code, "conflict_current_state_changed");
+
+    // The worksheet's record count is its own measurement; recording it leaves the outcome result unchanged.
+    const counted = await record(promoted.sourceVersionId, { worksheetKey: "sheet_1", definition: {
+      counted_unit: "survey observation", unit_label: "survey observations",
+      definition_text: "Each row records one survey observation.", inclusion_rule: "Every data row after the header row that has at least one value.", exclusion_rule: "The header row and empty rows.",
+    } });
+    assert.equal(counted.ok, true, JSON.stringify(counted));
+    assert.equal(counted.data.measurement.measured_value, PAIRED_ROWS.length - 1);
+    const after = await pairedRead(promoted.sourceVersionId);
+    assert.deepEqual(after.data.paired.measurements, read.data.paired.measurements);
+  });
+
+  const CEDAR_WORKBOOK = process.env.KAI_CEDAR_BRIDGE_WORKBOOK;
+  test("Measurement MVP: the original Cedar Bridge workbook's two paired outcomes through the governed read", {
+    skip: CEDAR_WORKBOOK && existsSync(CEDAR_WORKBOOK) ? false : "set KAI_CEDAR_BRIDGE_WORKBOOK to the original 04_Assessments_and_Followups.xlsx",
+  }, async () => {
+    const bytes = new Uint8Array(readFileSync(CEDAR_WORKBOOK));
+    assert.equal(createHash("sha256").update(bytes).digest("hex"), "23d00f791dc8c980c0a2966df552d4ac14246047339270e344ccf26ab076c705");
+    const promoted = await seedPromotedSource({ profile: await workbookProfile(bytes) });
+    const read = await pairedRead(promoted.sourceVersionId);
+    assert.equal(read.data.lineage.source_version_id, promoted.sourceVersionId);
+    const digital = pairedField(read, "field_6");
+    const employment = pairedField(read, "field_7");
+    assert.deepEqual([digital.denominator, digital.increasedCount, digital.unchangedCount, digital.decreasedCount, digital.rate], [38, 25, 10, 3, "65.79"]);
+    assert.deepEqual([employment.denominator, employment.increasedCount, employment.unchangedCount, employment.decreasedCount, employment.rate], [40, 23, 13, 4, "57.50"]);
+    assert.equal(digital.calculationMethod, employment.calculationMethod);
   });
 
   test("selected-worksheet measurement: real parser and persistence use only the selected dataset, then a measured claim cites its sheet key", async () => {

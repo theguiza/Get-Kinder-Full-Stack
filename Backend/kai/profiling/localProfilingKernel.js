@@ -9,6 +9,7 @@ import { detectCsvRowLimitPolicy } from "../validators/csvRowLimitDetector.js";
 import { detectP0FileTypeAgreement } from "../validators/p0FileTypeAgreementDetector.js";
 import { detectOoxmlArchiveResourceLimitPolicy } from "../validators/ooxmlArchiveResourceLimitDetector.js";
 import { detectXlsxSheetCellLimitPolicy } from "../validators/xlsxSheetCellLimitDetector.js";
+import { summarizePairedOutcomeBasis } from "./pairedOutcomeBasis.js";
 
 const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 export const MAX_REDACTED_SAMPLE_RECORDS = 20;
@@ -598,18 +599,10 @@ function isTrueXmlFlag(value) {
   return value === "1" || value === "true";
 }
 
-/**
- * One worksheet's record-count basis: worksheet row 1 is the header row, and
- * it is established only when it has a value and every header value is text.
- * Data records are the worksheet rows after it, through the last row that has
- * a value; a row (stored or not) none of whose cells has a non-whitespace
- * value is a blank record. Zero and FALSE are values. Exact duplicates compare
- * every column's stored value, blank rows included, as the CSV profile does.
- * Anything that makes the table's meaning ambiguous is counted, not resolved:
- * formula cells, merged ranges, hidden rows or columns, values in a column
- * with no header, and shared-string references that do not resolve.
- */
-function summarizeXlsxRecordCountBasis(xmlBytes, sharedStrings) {
+// One worksheet's cells, in memory for one call: rows by worksheet row number,
+// each a map of column number to { type, value, present }. Shared by the
+// record-count basis and the paired-outcome basis; never stored or returned.
+function readXlsxWorksheetTable(xmlBytes, sharedStrings) {
   const xml = TEXT_DECODER.decode(xmlBytes);
   const rows = new Map();
   const hiddenRows = new Set();
@@ -654,7 +647,21 @@ function summarizeXlsxRecordCountBasis(xmlBytes, sharedStrings) {
   const hidden_column_count = [...xml.matchAll(/<(?:\w+:)?col\b([^>]*?)\/?>/g)]
     .filter((match) => isTrueXmlFlag(xmlAttribute(match[1], "hidden"))).length;
   const merged_range_count = [...xml.matchAll(/<(?:\w+:)?mergeCell\b/g)].length;
+  return { rows, hiddenRows, formula_cell_count, unresolved_value_count, hidden_column_count, merged_range_count };
+}
 
+/**
+ * One worksheet's record-count basis: worksheet row 1 is the header row, and
+ * it is established only when it has a value and every header value is text.
+ * Data records are the worksheet rows after it, through the last row that has
+ * a value; a row (stored or not) none of whose cells has a non-whitespace
+ * value is a blank record. Zero and FALSE are values. Exact duplicates compare
+ * every column's stored value, blank rows included, as the CSV profile does.
+ * Anything that makes the table's meaning ambiguous is counted, not resolved:
+ * formula cells, merged ranges, hidden rows or columns, values in a column
+ * with no header, and shared-string references that do not resolve.
+ */
+function summarizeXlsxRecordCountBasis({ rows, hiddenRows, formula_cell_count, unresolved_value_count, hidden_column_count, merged_range_count }) {
   let lastValueRow = 0;
   let lastValueColumn = 0;
   for (const [rowIndex, cells] of rows) {
@@ -758,7 +765,9 @@ async function profileXlsx({ extension, declaredMime, bytes }) {
     for (const worksheetRef of worksheetRefs) {
       const sheetSummary = createXlsxSheetSummary(worksheetRef.sheet_key, worksheetRef.sheet_name);
       const xmlBytes = inflateEntry(bytes, entries.get(worksheetRef.entry_name));
-      sheetSummary.recordCountBasis = summarizeXlsxRecordCountBasis(xmlBytes, sharedStrings);
+      const worksheetTable = readXlsxWorksheetTable(xmlBytes, sharedStrings);
+      sheetSummary.recordCountBasis = summarizeXlsxRecordCountBasis(worksheetTable);
+      sheetSummary.pairedOutcomeBasis = summarizePairedOutcomeBasis({ rows: worksheetTable.rows, recordCountBasis: sheetSummary.recordCountBasis });
       scanXmlElements(xmlBytes, ({ localName, attributes }) => {
         if (localName === "row") {
           const rowIndex = Number.parseInt(attributes.get("r") ?? `${sheetSummary.rowIndices.size + 1}`, 10);
@@ -880,6 +889,7 @@ async function profileXlsx({ extension, declaredMime, bytes }) {
         }),
         draft_dictionary_fields: Object.freeze(sheetFields),
         record_count_basis: sheet.recordCountBasis,
+        paired_outcome_basis: sheet.pairedOutcomeBasis,
       });
     });
 

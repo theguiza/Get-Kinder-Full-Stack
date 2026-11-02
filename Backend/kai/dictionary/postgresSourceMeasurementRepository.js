@@ -31,6 +31,7 @@ import {
   measurementLimitationCodes,
   validateComposedStatement,
 } from "../validators/kaiSourceMeasurementValidators.js";
+import { derivePairedOutcomeMeasurements } from "../validators/kaiPairedOutcomeMeasurementValidators.js";
 
 const {
   insertEvidenceReviewQueueItemIfAbsent,
@@ -44,6 +45,7 @@ const {
 } = __evidenceLineageRepositorySharedWrites;
 
 const MEASUREMENT_AUDIT_OPERATION = "record_source_record_count_measurement";
+const PAIRED_OUTCOME_READ_OPERATION = "read_paired_outcome_measurement_basis";
 const RESULT_STATUS = Object.freeze({
   validation_blocker: 422,
   conflict_current_state_changed: 409,
@@ -280,7 +282,7 @@ function sameMeasurement(row, { evidenceItemId, definitionId, measurement, profi
 // effective allowed use, the committed P1 profile the version was derived
 // from, and the deterministic derivation. Shared by the write and the
 // read-only basis so both answer from the same rules.
-async function loadMeasurableSourceVersion(tx, { organizationId, sourceVersionId, worksheetKey = null }) {
+async function loadMeasurableSourceVersion(tx, { organizationId, sourceVersionId, worksheetKey = null, operation = MEASUREMENT_AUDIT_OPERATION }) {
   const refuse = (code, blockers) => ({ ok: false, failure: failure(code, blockers) });
   const sourceVersionRow = await getScopedSourceVersionById({ organizationId, sourceVersionId }, tx);
   if (!sourceVersionRow) return refuse("not_found");
@@ -306,7 +308,7 @@ async function loadMeasurableSourceVersion(tx, { organizationId, sourceVersionId
 
   const allowedUse = validateEffectiveAllowedUsePermitsOperation(
     await readEffectiveAllowedUseProhibition(tx, { organizationId, intakeSensitivityProfileId: profileRow.intake_sensitivity_profile_id }),
-    { operation: "record_source_record_count_measurement", objectType: "source_version", objectId: sourceVersionId },
+    { operation, objectType: "source_version", objectId: sourceVersionId },
   );
   if (!allowedUse.ok) return refuse(allowedUse.code, allowedUse.blockers);
 
@@ -408,6 +410,54 @@ export function createPostgresSourceMeasurementRepository({ runInTransaction, in
                   limitations: limitationCodes.map((code) => ({ code, description: describeMeasurementLimitationCode(code) })),
                 }
               : null,
+          });
+        });
+      } catch (error) {
+        const shaped = shapeEvidenceLineageError(error);
+        return failure(shaped.error.code);
+      }
+    },
+    // Read-only (Measurement MVP): the paired baseline/follow-up measurements
+    // of one worksheet of the exact promoted, current, permitted version,
+    // derived from its committed profile under the same loader as the record
+    // count, with any person's definitions applied. Writes nothing; a
+    // definition given here is applied to this answer and is not recorded.
+    async readPairedOutcomeMeasurementBasis({ organizationId, sourceVersionId, worksheetKey = null, definitions = [] }) {
+      const run = runInTransaction || (await resolveDefaultRunInTransaction());
+      try {
+        return await run(async (tx) => {
+          const measurable = await loadMeasurableSourceVersion(tx, {
+            organizationId, sourceVersionId, worksheetKey, operation: PAIRED_OUTCOME_READ_OPERATION,
+          });
+          if (!measurable.ok) return measurable.failure;
+          const { sourceVersionRow, sourceRow, fileProfileRow } = measurable;
+          const derived = derivePairedOutcomeMeasurements(fileProfileRow.profile, worksheetKey, { definitions });
+          // A definition the caller sent that cannot apply is the caller's
+          // error; a worksheet with nothing to pair is an answer.
+          if (!derived.ok && derived.blockers.some((item) => item.object_type === "paired_outcome_definition")) {
+            return failure(derived.code, derived.blockers);
+          }
+          return success({
+            sourceVersion: rowToSourceVersionRecord(sourceVersionRow),
+            source: { source_id: sourceRow.source_id, source_code: sourceRow.source_code, reviewed_source_type: sourceRow.reviewed_source_type },
+            lineage: {
+              organization_id: organizationId,
+              source_id: sourceRow.source_id,
+              source_version_id: sourceVersionRow.source_version_id,
+              file_profile_id: fileProfileRow.file_profile_id,
+              profile_canonical_sha256: fileProfileRow.profile_canonical_sha256,
+            },
+            paired: derived.ok
+              ? {
+                  measurable: true,
+                  status: derived.status,
+                  worksheet: derived.worksheet,
+                  candidates: derived.candidates,
+                  proposed_pairings: derived.proposedPairings,
+                  measurements: derived.measurements,
+                }
+              : { measurable: false, blockers: derived.blockers },
+            recorded: false,
           });
         });
       } catch (error) {
