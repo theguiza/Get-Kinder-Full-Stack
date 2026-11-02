@@ -566,7 +566,11 @@ export function describeTabularMeasurementOptions(profile, worksheetKey) {
       present_count: field.present_count,
       blank_count: field.blank_count,
       ...(field.identifier ? { identifier: field.identifier } : {}),
-      ...(field.categorical ? { values: field.categorical.values, withheld_record_count: field.categorical.withheld_record_count } : {}),
+      ...(field.categorical ? {
+        values: field.categorical.values,
+        withheld_record_count: field.categorical.withheld_record_count,
+        ...(field.categorical.vocabulary_withheld ? { vocabulary_withheld: field.categorical.vocabulary_withheld } : {}),
+      } : {}),
       ...(field.date ? { date: field.date } : {}),
     })),
   };

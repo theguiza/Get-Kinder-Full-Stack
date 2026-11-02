@@ -13,7 +13,12 @@
  * - Categorical fields: the vocabulary (a label is kept only when at least
  *   MIN_CATEGORY_VALUE_RECORDS records carry it and the profile's
  *   metadata-only rule admits it) with record counts; the rest are withheld
- *   and counted.
+ *   and counted. A label's shape and frequency never make it safe to keep:
+ *   when the field's header (read here, never stored) names a person, a
+ *   special-category or sensitive personal attribute, or free text, the whole
+ *   vocabulary is withheld (VAL-INT-004: no unredacted personal value in a
+ *   committed profile), as it is when any of its labels names such an
+ *   attribute; the field can then be counted only as a whole.
  * - Exact-duplicate rows: groups, member records and excess copies, kept
  *   apart so neither is reported as "the" duplicate count.
  * - Dates are kept by calendar month only (YYYY-MM), never as a day, so no
@@ -43,6 +48,41 @@ const CATEGORY_LABEL_RE = /^[A-Za-z][A-Za-z _'()&/-]{0,39}$/;
 // is withheld from the vocabulary like any other unlisted value.
 const METADATA_ONLY_REFUSED_RE = /(raw_bytes|raw_text|raw_content|prompt|signed_url|credential|secret|token|password|private_path|pii|email|phone|address)/i;
 const ISO_DATE_RE = /^(\d{4}-\d{2}-\d{2})(?:[Tt ][0-2]\d:[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|[+-][0-2]\d:?[0-5]\d)?)?$/;
+// Header words marking a field whose category values would describe a person
+// rather than the organization's own operations: who someone is (names, the
+// people who recorded or delivered a service), the P1-05 sensitivity
+// dimensions (minor/age, health, housing, justice, immigration, Indigenous
+// identity, finances) and the protected personal attributes, and free text.
+const PERSONAL_ATTRIBUTE_HEADER_WORDS = new Set([
+  "name", "names", "firstname", "lastname", "surname", "fullname", "nickname",
+  "staff", "worker", "caseworker", "coach", "facilitator", "mentor", "counsellor", "counselor", "volunteer",
+  "employee", "instructor", "trainer", "advisor", "adviser", "therapist", "clinician", "nurse", "doctor",
+  "age", "birth", "dob", "birthdate", "birthday", "minor", "guardian",
+  "gender", "sex", "pronoun", "pronouns", "ethnicity", "ethnic", "race", "racial", "religion", "religious", "faith",
+  "disability", "disabilities", "disabled", "health", "medical", "diagnosis", "illness", "medication", "mental",
+  "sexual", "orientation", "lgbtq", "marital", "pregnancy", "pregnant",
+  "immigration", "citizenship", "refugee", "newcomer", "nationality",
+  "criminal", "justice", "offence", "offense", "conviction", "probation", "parole",
+  "housing", "homeless", "homelessness", "shelter",
+  "indigenous", "aboriginal", "metis", "inuit",
+  "income", "salary", "wage", "wages", "welfare", "debt",
+  "note", "notes", "comment", "comments", "description", "story", "quote", "testimonial", "feedback", "narrative", "remark", "remarks",
+]);
+// Value words that make a vocabulary a special-category or sensitive personal
+// attribute whatever its header: one such label withholds the whole field,
+// because its other labels (for example "Citizen" beside "Refugee") describe
+// the same attribute.
+const SENSITIVE_CATEGORY_VALUE_WORDS = new Set([
+  "refugee", "refugees", "asylum", "immigrant", "immigrants", "newcomer", "newcomers", "undocumented",
+  "disabled", "disability", "homeless", "unhoused", "shelter",
+  "female", "male", "nonbinary", "transgender", "gay", "lesbian", "bisexual", "queer", "lgbtq",
+  "muslim", "christian", "jewish", "hindu", "sikh", "buddhist",
+  "indigenous", "aboriginal", "metis", "inuit",
+  "hiv", "diabetes", "cancer", "depression", "anxiety", "addiction", "pregnant",
+  "convicted", "incarcerated", "probation", "parole", "welfare",
+]);
+// A header ending in "by" (recorded by, entered by, referred by) names a person.
+const PERSON_ROLE_HEADER_SUFFIX = "by";
 // Worksheet cell types whose stored value is text (CSV values are all text).
 const TEXT_CELL_TYPES = new Set(["s", "inlineStr", "str", "text"]);
 
@@ -73,7 +113,23 @@ function addKey(map, key, value) {
   map.set(key, set);
 }
 
-function classifyField(records, position) {
+// The header's words: split on every non-letter and on lower-to-upper case changes.
+function headerWords(header) {
+  return String(header ?? "")
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .toLowerCase()
+    .split(/[^a-z]+/)
+    .filter(Boolean);
+}
+
+/** Whether a header names a personal or free-text attribute, so its values may not be kept. */
+export function headerIndicatesPersonalAttribute(header) {
+  const words = headerWords(header);
+  return words.some((word) => PERSONAL_ATTRIBUTE_HEADER_WORDS.has(word))
+    || (words.length > 1 && words[words.length - 1] === PERSON_ROLE_HEADER_SUFFIX);
+}
+
+function classifyField(records, position, header) {
   const values = [];
   let blank = 0;
   for (const record of records) {
@@ -111,6 +167,16 @@ function classifyField(records, position) {
     const counts = new Map();
     for (const text of texts) increment(counts, text);
     if (counts.size <= MAX_CATEGORY_VALUES && counts.size * 2 <= values.length) {
+      if (headerIndicatesPersonalAttribute(header)) {
+        result.roles.push("categorical");
+        result.categorical = { values: [], withheld_record_count: values.length, vocabulary_withheld: "personal_attribute_field" };
+        return result;
+      }
+      if ([...counts.keys()].some((label) => headerWords(label).some((word) => SENSITIVE_CATEGORY_VALUE_WORDS.has(word)))) {
+        result.roles.push("categorical");
+        result.categorical = { values: [], withheld_record_count: values.length, vocabulary_withheld: "sensitive_category_value" };
+        return result;
+      }
       const listed = [...counts.entries()]
         .filter(([label, count]) => count >= MIN_CATEGORY_VALUE_RECORDS && !METADATA_ONLY_REFUSED_RE.test(label))
         .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
@@ -149,7 +215,12 @@ export function summarizeTabularMeasurementBasis({ rows, headerRow = 1, lastRow,
   }
   if (records.length === 0 || columnCount < 1) return notAssessed("no_data_records");
 
-  const fields = Array.from({ length: columnCount }, (_, index) => classifyField(records, index + 1));
+  const headerCells = rows.get(headerRow) ?? new Map();
+  const headerOf = (position) => {
+    const cell = headerCells.get(position);
+    return cell?.present ? String(cell.value).replace(/^\uFEFF/, "") : "";
+  };
+  const fields = Array.from({ length: columnCount }, (_, index) => classifyField(records, index + 1, headerOf(index + 1)));
   const identifiers = fields.filter((field) => field.roles.includes("identifier"));
   const categoricals = fields.filter((field) => field.roles.includes("categorical"));
   const dates = fields.filter((field) => field.roles.includes("date"));

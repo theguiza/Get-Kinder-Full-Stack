@@ -161,6 +161,87 @@ test("definition refusals: unsupported units, combinations, unlisted values, rol
   assert.equal(D.deriveTabularMeasurement({ status: "profiled", format: "txt" }, null, validated.definition).blockers[0].blocking_reason, "tabular_source_not_supported");
 });
 
+// Integration gap A: category labels that pass the same letter-only,
+// frequency (>= 2 records) and cardinality (<= 12) rules. Ordinary
+// operational categories are kept; values naming a person, a protected or
+// sensitive attribute, or free text are withheld field by field, whatever
+// their shape, and never reach the options a person reads, a definition, a
+// statement or the committed profile.
+const SENSITIVE_ROWS = [
+  ["session_ref", "status", "programme", "coach", "Gender", "recorded_by", "cohort_group", "quality_note", "session_date"],
+  ...Array.from({ length: 8 }, (_, index) => [
+    `S${index + 10}`,
+    ["done", "missed"][index % 2],
+    ["Digital", "Careers"][index % 2],
+    ["Priya", "Daniel"][index % 2],
+    ["Female", "Male"][index % 2],
+    ["Maria", "Ahmed"][index % 2],
+    ["Refugee", "Citizen"][index % 2],
+    ["Good", "Late start"][index % 2],
+    `2025-0${(index % 8) + 1}-15`,
+  ]),
+];
+
+test("profile category retention: ordinary labels are kept; personal, sensitive and free-text vocabularies are withheld at every boundary", async () => {
+  const profile = await csvProfile(`${SENSITIVE_ROWS.map((row) => row.join(",")).join("\n")}\n`);
+  const basis = profile.tabular_measurement_basis;
+  const field = (key) => basis.fields.find((candidate) => candidate.field_key === key);
+  assert.deepEqual(field("field_2").categorical.values.map((value) => value.label), ["done", "missed"]);
+  assert.deepEqual(field("field_3").categorical.values.map((value) => value.label), ["Careers", "Digital"]);
+  const withheld = {
+    field_4: "personal_attribute_field", // a person (coach)
+    field_5: "personal_attribute_field", // a protected attribute (gender)
+    field_6: "personal_attribute_field", // who recorded it
+    field_7: "sensitive_category_value", // an innocuous header with a sensitive vocabulary
+    field_8: "personal_attribute_field", // free text
+  };
+  for (const [key, reasonCode] of Object.entries(withheld)) {
+    assert.deepEqual(field(key).roles, ["categorical"], key);
+    assert.deepEqual(field(key).categorical, { values: [], withheld_record_count: 8, vocabulary_withheld: reasonCode }, key);
+    assert.deepEqual(basis.category_cells[key], {}, `${key} keeps no joint aggregates`);
+  }
+  // Committed profile: no withheld label anywhere, while the kept ones remain.
+  const committed = JSON.stringify(profile);
+  for (const label of ["Priya", "Daniel", "Female", "Male", "Maria", "Ahmed", "Refugee", "Citizen", "Late start", "Good"]) {
+    assert.ok(!committed.includes(label), `committed profile holds ${label}`);
+  }
+  for (const label of ["done", "missed", "Careers", "Digital"]) assert.ok(committed.includes(`"${label}"`), label);
+  // The read model a person sees: the field is listed with its withheld reason and no value to choose.
+  const options = D.describeTabularMeasurementOptions(profile, null);
+  assert.deepEqual(options.fields.find((entry) => entry.field_key === "field_4"), {
+    field_key: "field_4", column_position: 4, role: "categorical", present_count: 8, blank_count: 0, values: [], withheld_record_count: 8, vocabulary_withheld: "personal_attribute_field",
+  });
+  // No definition can select a withheld value, so no statement, claim or model input can carry one.
+  const refused = D.validateTabularMeasurementDefinition({ operation: "count", conditions: [category("field_4", "value_1")] });
+  assert.equal(D.deriveTabularMeasurement(profile, null, refused.definition, { reportingPeriod: PERIOD }).blockers[0].blocking_reason, "tabular_category_value_not_listed");
+  // The withheld field still counts as a whole, and the kept category still measures exactly.
+  const kept = derive(profile, { operation: "count", conditions: [category("field_2", "value_1")] });
+  assert.equal(kept.measurement.measuredValue, 4);
+  const statement = D.composeDerivedMeasurementEvidenceStatement({ measurementRow: asRow(kept.measurement), interpretation: null });
+  assert.match(statement, /field_2 = done/);
+});
+
+test("date precision: a month-level basis applies only whole-month periods; every period needing day-level dates is refused", async () => {
+  const profile = await csvProfile();
+  const within = { kind: "period", field_key: "field_3", period_source: "engagement_reporting_period", scope: "within" };
+  const reason = (period) => {
+    const derived = derive(profile, { operation: "count", conditions: [within] }, null, period);
+    return derived.ok ? "ok" : derived.blockers[0].blocking_reason;
+  };
+  assert.equal(reason({ start: "2025-04-01", end: "2026-03-31" }), "ok");
+  assert.equal(reason({ start: "2024-02-01", end: "2024-02-29" }), "ok", "a leap-year February is a whole month");
+  assert.equal(reason({ start: "2025-02-01", end: "2025-02-28" }), "ok");
+  for (const partial of [
+    { start: "2025-04-15", end: "2026-03-31" }, // starts mid-month
+    { start: "2025-04-01", end: "2026-03-30" }, // ends a day early
+    { start: "2025-02-01", end: "2025-02-27" },
+    { start: "2023-02-01", end: "2023-02-29" }, // not a real date
+  ]) assert.equal(reason(partial), "tabular_period_not_whole_months", JSON.stringify(partial));
+  // The whole-month result equals a day-level calculation over the same rows.
+  const derived = derive(profile, { operation: "count", conditions: [within] });
+  assert.equal(derived.measurement.measuredValue, records.filter(independent.inPeriod).length);
+});
+
 const PAIRED_ROWS = [
   ["obs_ref", "learner_id", "phase", "survey_version", "confidence_score", "readiness_rating"],
   ["O01", "L1", "pre", "A", 2, 3], ["O02", "L1", "post", "A", 4, 3],
