@@ -315,8 +315,19 @@ try {
   psqlFile("migrations/kai_sprint2_measurement_mvp_source_derived_measurements.sql");
   if (psqlExec(legacySnapshotSql) !== derivedEvidenceBefore) throw new Error("source-derived measurement migration changed an evidence, locator, or claim row");
   if (psqlExec(measurementSnapshotSql) !== derivedMeasurementsBefore) throw new Error("source-derived measurement migration changed a record-count definition or measurement");
-  if (overall(identityVerifier()) !== "PASS" || overall(xlsxVerifier()) !== "PASS") throw new Error("the source-derived measurement migration changed the verified record-count CHECKs");
-  console.log("Measurement MVP source-derived measurements: applied twice; every existing evidence, locator, claim and record-count row unchanged; record-count verifiers PASS.");
+  // The XLSX verifier pins the exact text of three vocabulary CHECKs this
+  // migration widens by one value each (evidence type, type/class pairing,
+  // locator type); its behavioural checks of every record-count method and
+  // locator vector, and every other CHECK, must still pass.
+  const xlsxAfterDerived = xlsxVerifier();
+  const xlsxStatus = (checkId) => xlsxAfterDerived.find((row) => row.split("|")[1] === checkId)?.split("|")[2];
+  const widened = ["X3.unchanged_evidence_items_p2_01_evidence_type_check", "X3.unchanged_evidence_items_p2_01m_type_class_pairing_check", "X3.unchanged_source_locators_p2_01_locator_type_check"];
+  if (overall(identityVerifier()) !== "PASS"
+    || ["X1.method_vectors", "X2.locator_vectors", "X3.unchanged_evidence_items_p2_01_data_class_check"].some((checkId) => xlsxStatus(checkId) !== "PASS")
+    || widened.some((checkId) => xlsxStatus(checkId) !== "FAIL")) {
+    throw new Error(`the source-derived measurement migration changed the verified record-count behaviour:\n${xlsxAfterDerived.join("\n")}`);
+  }
+  console.log("Measurement MVP source-derived measurements: applied twice; every existing evidence, locator, claim and record-count row unchanged; worksheet identity verifier PASS; every record-count method and locator vector unchanged; only the three widened vocabulary CHECKs differ.");
 
   const testResult = spawnSync("node", [
     "--test",
@@ -380,7 +391,11 @@ try {
     selectedRollbackRefused = /selected-worksheet method rollback refused: persisted measurements depend on the method/.test(String(error.message));
   }
   if (!selectedRollbackRefused) throw new Error("P2-01M selected-worksheet rollback did not refuse with a selected measurement present");
-  if (overall(xlsxVerifier()) !== "PASS") throw new Error("the refused XLSX rollback changed the verified CHECKs");
+  // The refused rollbacks change no CHECK (the informational row counts differ only by the tests' rows).
+  const checksOnly = (rows) => JSON.stringify(rows.filter((row) => !row.includes("X4.measurement_rows_by_method")));
+  if (checksOnly(xlsxVerifier()) !== checksOnly(xlsxAfterDerived)) {
+    throw new Error("the refused XLSX rollback changed the verified CHECKs");
+  }
   let rollbackRefused = false;
   try {
     psqlFile("migrations/kai_sprint2_p2_01m_source_record_count_measurement.rollback.sql");

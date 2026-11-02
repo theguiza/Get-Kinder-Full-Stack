@@ -528,7 +528,10 @@ export function createPostgresDerivedMeasurementRepository({ runInTransaction, i
         const measurable = await loadMeasurableSourceVersion(tx, { organizationId, sourceVersionId, worksheetKey, operation: DERIVED_MEASUREMENT_RECORD_OPERATION });
         if (!measurable.ok) return measurable.failure;
         const { sourceVersionRow, sourceRow, fileProfileRow } = measurable;
-        const reportingPeriod = await readReportingPeriod(tx, { organizationId, sourceVersionId });
+        // The engagement's period is read only when the definition applies one.
+        const reportingPeriod = definition.conditions.some((condition) => condition.kind === "period")
+          ? await readReportingPeriod(tx, { organizationId, sourceVersionId })
+          : null;
         const derived = deriveTabularMeasurement(fileProfileRow.profile, worksheetKey, definition, { reportingPeriod });
         if (!derived.ok) return failure(derived.code, derived.blockers);
         const recorded = await recordMeasurements(tx, {

@@ -1547,7 +1547,9 @@ export async function listScopedDerivedMeasurementRowsBySourceVersion({ organiza
 /**
  * The reporting period recorded on the engagement a promoted source version
  * was uploaded to (its intake file's engagement), tenant-scoped, or null.
- * Read-only.
+ * The intake file's engagement is read through to_jsonb so an installation
+ * whose intake_files has no engagement_id column answers "no period" rather
+ * than failing. Read-only.
  */
 export async function getScopedSourceVersionEngagementReportingPeriod({ organizationId, sourceVersionId }, db = pool) {
   const { rows } = await db.query(
@@ -1563,7 +1565,7 @@ export async function getScopedSourceVersionEngagementReportingPeriod({ organiza
         AND f.intake_file_id = c.intake_file_id
        JOIN kai.engagements e
          ON e.organization_id = f.organization_id
-        AND e.engagement_id = f.engagement_id
+        AND e.engagement_id::text = to_jsonb(f)->>'engagement_id'
       WHERE sv.organization_id = $1::uuid
         AND sv.source_version_id = $2::uuid`,
     [organizationId, sourceVersionId],

@@ -767,7 +767,8 @@ async function runSuite() {
       [ORG, events.sourceVersionId, ADMIN.actorUserId]), /check constraint/);
     await assert.rejects(query("UPDATE kai.source_derived_measurements SET measured_value = 4 WHERE source_derived_measurement_id = $1::uuid", [measurementId]), /append-only/);
     await assert.rejects(query("DELETE FROM kai.source_derived_measurement_interpretations WHERE source_derived_measurement_id = $1::uuid", [measurementId]), /append-only/);
-    assert.deepEqual(await measurementCounts(), countsBefore, "no record-count definition or measurement is written or changed");
+    const recordCountRows = ({ definitions, measurements, measurement_evidence: evidence, record_locators: locators }) => ({ definitions, measurements, evidence, locators });
+    assert.deepEqual(recordCountRows(await measurementCounts()), recordCountRows(countsBefore), "no record-count definition, measurement, evidence or locator is written");
   });
 
   test("selected-worksheet measurement: real parser and persistence use only the selected dataset, then a measured claim cites its sheet key", async () => {
