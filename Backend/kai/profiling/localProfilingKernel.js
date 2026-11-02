@@ -826,14 +826,9 @@ async function profileXlsx({ extension, declaredMime, bytes }) {
       const sortedRows = [...sheet.rows.entries()].sort(([a], [b]) => a - b);
       const headerTypes = sortedRows[0]?.[1] ?? [];
       const dataRows = sortedRows.slice(1);
-      const rowSignatures = new Map();
-      for (const [, row] of dataRows) {
-        const signature = JSON.stringify(Array.from({ length: fieldCount }, (_, index) => row[index] ?? ""));
-        rowSignatures.set(signature, (rowSignatures.get(signature) ?? 0) + 1);
-      }
-      const duplicate_row_count = [...rowSignatures.values()]
-        .filter((count) => count > 1)
-        .reduce((total, count) => total + count, 0);
+      // `sheet.rows` holds cell types only, so exact duplicates are the
+      // value-compared rows of the worksheet's record-count basis.
+      const duplicate_row_count = sheet.recordCountBasis.duplicate_record_count;
       const headers = Array.from({ length: fieldCount }, (_, index) => Object.freeze({
         field_key: `field_${index + 1}`,
         position: index + 1,

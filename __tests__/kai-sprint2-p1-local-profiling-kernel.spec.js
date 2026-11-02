@@ -11,6 +11,8 @@ import { KAI_SPRINT2_P0_CSV_LIMITS } from "../Backend/kai/config/kaiSprint2P0Con
 import { deriveRecordCountMeasurement } from "../Backend/kai/validators/kaiSourceMeasurementValidators.js";
 import { projectMeasurementBasis } from "../frontend/knowledgeStudio/clientSourceMeasurementLogic.js";
 import { INTERNAL_DRAFT_READINESS_MESSAGES, STRUCTURAL_ONLY_DRAFT_MESSAGE } from "../frontend/knowledgeStudio/clientEvidenceWorkflowLogic.js";
+import { __dataDictionaryRepositoryTestables } from "../Backend/kai/dictionary/postgresDataDictionaryRepository.js";
+import { syntheticXlsxWorkbook } from "./support/kaiSyntheticXlsxWorkbook.js";
 
 const CSV_MIME = "text/csv";
 const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
@@ -272,6 +274,18 @@ test("P1-01 XLSX profiling exposes per-sheet names, counts, headers, hints, miss
   assert.equal(result.sheets[0].sample_records.length, 2);
   assert.equal(result.draft_dictionary_fields.length, 2);
   assertNoRawSentinels(result);
+});
+
+test("XLSX duplicate rows compare cell values, not cell types, so distinct rows of one shape are not reported as duplicates", async () => {
+  const rows = [["participant", "stage", "score"], ["P01", "baseline", 2], ["P01", "followup", 3], ["P02", "baseline", 4], ["P02", "baseline", 4]];
+  const result = await profile({ extension: ".xlsx", declaredMime: XLSX_MIME, body: syntheticXlsxWorkbook({ sheets: [
+    { name: "Observations", rows }, { name: "Plans", rows: [["target", "value"], ["reach", 10], ["sessions", 20]] },
+  ] }) });
+  assert.deepEqual(result.sheets.map((sheet) => [sheet.counts.duplicate_row_count, sheet.duplicate_row_hints.duplicate_row_count, sheet.record_count_basis.duplicate_record_count]),
+    [[2, 2, 2], [0, 0, 0]], "only the two identical P02 rows; the Plans rows share a shape but not values");
+  assert.equal(result.counts.duplicate_row_count, 2);
+  assert.deepEqual(__dataDictionaryRepositoryTestables.deriveQualityFindings(result, []).filter((finding) => finding.findingType === "duplicate_rows")
+    .map((finding) => finding.findingDetailSafe), ["2 duplicate rows detected"], "the P1-04 data-quality finding states the value-compared count");
 });
 
 test("an XLSX profile commits a worksheet record-count basis without values; a legacy one is refused and the customer sees the reason and required fix", async () => {
