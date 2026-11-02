@@ -158,10 +158,12 @@ const EXPORT_PATH_MIGRATIONS = Object.freeze([
   "kai_sprint2_p2_01m_xlsx_worksheet_record_count_method",
   "kai_sprint2_p2_01m_xlsx_selected_worksheet_record_count_method",
   "kai_sprint2_p2_01m_worksheet_measurement_identity",
+  "kai_sprint2_measurement_mvp_source_derived_measurements",
 ]);
 // The client_admin source promotion acceptance opens Count records on the
 // source it promotes, so it also gets the P2-01M measurement schema (through
-// the worksheet measurement identity) without the export path.
+// the worksheet measurement identity, and the Measurement MVP derived
+// measurements the same panel reads) without the export path.
 const MEASUREMENT_SCHEMA_SPECS = new Set([
   "__tests__/kai-client-admin-source-promotion-browser-acceptance.integration.spec.js",
 ]);
@@ -170,6 +172,7 @@ const MEASUREMENT_SCHEMA_MIGRATIONS = Object.freeze([
   "kai_sprint2_p2_01m_xlsx_worksheet_record_count_method",
   "kai_sprint2_p2_01m_xlsx_selected_worksheet_record_count_method",
   "kai_sprint2_p2_01m_worksheet_measurement_identity",
+  "kai_sprint2_measurement_mvp_source_derived_measurements",
 ]);
 const acceptanceSpec = process.argv[2] || ACCEPTANCE_SPECS[0];
 if (!ACCEPTANCE_SPECS.includes(acceptanceSpec)) {

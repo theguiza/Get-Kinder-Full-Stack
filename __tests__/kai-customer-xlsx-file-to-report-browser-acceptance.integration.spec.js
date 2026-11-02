@@ -345,6 +345,7 @@ async function runXlsxAcceptance() {
   const { deriveRecordCountMeasurement } = await import("../Backend/kai/validators/kaiSourceMeasurementValidators.js");
   const { batchFilesPath, confirmUploadPath, createBatchPath, fileReservationsPath, requestUploadUrlPath } = await import("../frontend/kaiWebIntakeLogic.js");
   const { sourceRecordCountMeasurementPath } = await import("../frontend/knowledgeStudio/clientSourceMeasurementLogic.js");
+  const { derivedMeasurementBasisPath } = await import("../frontend/knowledgeStudio/clientDerivedMeasurementLogic.js");
   const { organizationFactualReviewPath } = await import("../frontend/knowledgeStudio/clientMeasuredClaimReviewLogic.js");
   const query = async (sql, params = []) => (await seedPool.query(sql, params)).rows;
 
@@ -841,7 +842,11 @@ async function runXlsxAcceptance() {
         formula_cell_count: 0, merged_range_count: 0, hidden_row_count: 0, hidden_column_count: 0,
         values_outside_header_columns_count: 0, unresolved_value_count: 0,
       });
-      assert.doesNotMatch(J(profile.profile), /literacy|mentoring|facilitator|2026-09-0|"a"/, "no cell value is stored");
+      // Measurement MVP: only the tabular measurement basis keeps source
+      // values - listed category labels, and dates by month.
+      const withoutTabularBasis = { ...profile.profile, sheets: profile.profile.sheets.map(({ tabular_measurement_basis: _basis, ...sheet }) => sheet) };
+      assert.doesNotMatch(J(withoutTabularBasis), /literacy|mentoring|facilitator|2026-09|"a"/, "no cell value is stored");
+      assert.doesNotMatch(J(profile.profile.sheets[0].tabular_measurement_basis), /facilitator|2026-09-0|"F1"|"F2"/, "the basis keeps listed labels and months only");
       ids.ordinary = { fileId: file.intake_file_id };
     });
 
@@ -1290,7 +1295,11 @@ async function runXlsxAcceptance() {
       assert.deepEqual(adminPage.requestsSince(mark).map((request) => {
         const url = new URL(request.url);
         return [request.method, url.pathname + url.search, request.status];
-      }), [["GET", sourceRecordCountMeasurementPath(ORG_X, sv, "sheet_3"), 200]], "the selection reads the existing P2-01M route with the worksheet key");
+      }), [
+        ["GET", sourceRecordCountMeasurementPath(ORG_X, sv, "sheet_3"), 200],
+        // Measurement MVP: the same panel reads that worksheet's field-value measurement basis.
+        ["GET", derivedMeasurementBasisPath(ORG_X, sv, "sheet_3"), 200],
+      ], "the selection reads the existing P2-01M route and the derived-measurement basis with the worksheet key");
       assert.match(await textOf(adminPage, "[data-client-source-measurement-worksheet]"), /Excel workbook worksheet Service_Events \(sheet_3\)/);
       assert.equal(await textOf(adminPage, "[data-client-source-measurement-counted]"), String(independent.counted), "two exact duplicates included, the blank row excluded");
 

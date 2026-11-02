@@ -175,8 +175,17 @@ try {
   console.log(`XLSX acceptance: kai.intake_files storage/lifecycle columns: ${storageColumns}`);
   console.log(`XLSX acceptance schema fingerprint: ${(await catalog(schemaFingerprintSql))[0].fingerprint}`);
   const verifier = run(psql, ["-v", "ON_ERROR_STOP=1", "-d", dbName, "-tA", "-F", "|", "-f", "scripts/kai-sprint2-p2-01m-xlsx-worksheet-method-verify-read-only.sql"], { capture: true }).stdout.trim();
-  if (!/^99\|OVERALL\|PASS\|/m.test(verifier)) throw new Error(`P2-01M XLSX worksheet method verifier failed:\n${verifier}`);
-  console.log(`XLSX acceptance: read-only method verifier OVERALL PASS`);
+  // The Measurement MVP migration widens three vocabulary CHECKs this
+  // verifier pins by text (evidence type, type/class pairing, locator type)
+  // by one value each; every record-count method and locator vector and
+  // every other CHECK must still pass.
+  const status = (checkId) => verifier.split("\n").find((row) => row.split("|")[1] === checkId)?.split("|")[2];
+  const widened = ["X3.unchanged_evidence_items_p2_01_evidence_type_check", "X3.unchanged_evidence_items_p2_01m_type_class_pairing_check", "X3.unchanged_source_locators_p2_01_locator_type_check"];
+  if (["X1.method_vectors", "X2.locator_vectors", "X3.unchanged_evidence_items_p2_01_data_class_check"].some((checkId) => status(checkId) !== "PASS")
+    || widened.some((checkId) => status(checkId) !== "FAIL")) {
+    throw new Error(`P2-01M XLSX worksheet method verifier failed:\n${verifier}`);
+  }
+  console.log("XLSX acceptance: read-only method verifier - every record-count method and locator vector PASS; only the three CHECKs the Measurement MVP migration widens differ");
 
   const testResult = spawnSync("node", ["--test", "--test-timeout=600000", spec], {
     cwd: repoRoot,
