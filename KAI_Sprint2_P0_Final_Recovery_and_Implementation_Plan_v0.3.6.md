@@ -45570,3 +45570,79 @@ The P2-01M integration spec now expects the server-composed disclosure in the pe
 **Residual (bounded lexical, not a truthfulness engine):** an unsupported participant/service assertion that does not state the measured value and is not a coverage/period contradiction (e.g. "The records show participants were served.") is not refused by these rules; Impact Narrative and other generators keep the prior rules.
 
 **Status:** VAL_GEN_008_LOCAL_SAFETY_ACCEPTED; PRODUCTION_NOT_VERIFIED. Uncommitted by owner instruction. Stop at this package boundary.
+
+### Measurement MVP: first reusable paired baseline/follow-up outcome measurement (2026-11-02)
+
+**Owner authorization (USER_CONFIRMED):** owner prompt "KAI Measurement MVP — Implement and Prove the First Reusable Outcome Measurement" authorizes local implementation and safe synthetic testing of paired baseline/follow-up outcome measurement only. Excluded: production deployment, schema/database mutation, flags, infrastructure, destructive work, real client data, remote pushes, credentials, the Free Assessment, a new generator, and `00_KAI_CURRENT_STATE.md`.
+
+**Start (TOOL_VERIFIED):** `main` at `30fef71` (the owner's commit of the VAL-GEN-008 repair), clean. DATABASE_URL was the non-listening loopback sentinel for every Node/npm command. The disposable runners create their own loopback clusters.
+
+**Test inputs (TOOL_VERIFIED):** the original Cedar Bridge package exists outside the repository (`~/Downloads/Cedar Bridge synthetic data/…`). All six `01_UPLOAD_TO_KAI` files match `File_Integrity_Manifest.json` sha256. `04_Assessments_and_Followups.xlsx` (`23d00f79…c705`) has worksheets Assessments (112 rows, long format with participant, stage, tool-version and two 1-to-5 score columns), Followups (38 contacts, no stage) and Targets (4 planning targets). The answer key was read only to confirm the expected values; nothing from it or the workbook is in runtime code or the repository.
+
+**Gap found (TOOL_VERIFIED):**
+- The only measurement is the P2-01M record count. Its derivation reads committed P1 profile aggregates.
+- The P1 profile redacts every header name and cell value, so nothing downstream can pair observations.
+- The data dictionary is draft-only and never infers meaning from field names, so no human-confirmed field mappings exist to reuse.
+- Persisting a paired result is blocked by the schema. `evidence_items` type/class CHECKs allow only `dictionary_field_presence_fact`/`source_record_count_measurement`. `source_locators` coordinates allow only a column name or `data_records_after_header`. `evidence_measurements` and `source_measurement_definitions` pin `measurement_type = 'source_record_count'`, the method CHECK and `measured_value = total_record_count - blank_record_count`, and have no numerator, denominator, change, outcome-field or direction columns. `validateMeasurementClaimBasis`, P2-06 coverage, measured-claim limitation codes and VAL-GEN-008 are record-count-specific.
+
+**Implemented:**
+1. `Backend/kai/profiling/pairedOutcomeBasis.js` (new, pure): per worksheet, the P1 profiler commits `paired_outcome_basis` (`kai_xlsx_paired_outcome_basis_v1`) from the cells it already holds in memory.
+   - It proposes participant-identifier, stage (baseline/follow-up value vocabulary), instrument-version and numeric score/rating fields from header words and value shapes, with no customer field names.
+   - It computes every combination when roles are ambiguous (at most 8) and chooses none.
+   - One function, `calculatePairedOutcome`, computes increased/unchanged/decreased per outcome field. A pair needs exactly one baseline and one follow-up of the same participant and, when a version field exists, the same version.
+   - Exclusion reasons, with participant counts and row locators: no baseline, no follow-up, version mismatch, multiple observations (ambiguous), missing baseline/follow-up/both values (this field only), non-numeric. Row-level reasons: exact duplicate row (collapsed), missing identifier, unclassified stage, missing version.
+   - It stores only field keys, row numbers and counts, never header text or cell values. It is computed only when the record-count basis establishes one unambiguous table.
+2. `localProfilingKernel.js`: the worksheet cell reading is split out (`readXlsxWorksheetTable`) and shared by the unchanged record-count basis and the new basis.
+3. `Backend/kai/validators/kaiPairedOutcomeMeasurementValidators.js` (new):
+   - `validatePairedOutcomeDefinition`: a person's indicator label, definition text and `score_direction` (`higher_is_better`/`lower_is_better`/`not_established`), with optional pairing-field selection and optional period. It reuses the record-count text, label and date rules, now exported as `__measurementDefinitionTextRules`.
+   - `derivePairedOutcomeMeasurements`: worksheet selection; earlier profiles are refused with re-upload guidance; a field that cannot be stated or has inconsistent counts is unavailable on its own while the others stay available.
+   - Without a direction, the numerator is a numeric increase and the statement says the direction is not established. With one, it is an improvement (decreases for lower-is-better).
+   - Each measurement carries numerator, denominator, rate (2 dp), cell locators per pair, exclusions and `paired.*` limitation codes with descriptions. No reporting period is ever invented, and its absence blocks nothing.
+4. Repository `readPairedOutcomeMeasurementBasis` and service `getPairedOutcomeMeasurementBasis` (read-only):
+   - They reuse `loadMeasurableSourceVersion` (P2-01 lineage, currentness, effective allowed use, exact bound profile; the operation label is now a parameter with the same default) and `admitMeasurementActor` (flag, human actor, P2-01 roles, tenant).
+   - They return lineage (organization, source, version, file profile, profile sha) and `recorded: false`. Definitions are validated before the repository is called, applied to the answer, and not persisted.
+   - No route, migration, frontend or bundle change.
+
+**Verification (TOOL_VERIFIED):**
+- `__tests__/kai-paired-outcome-measurement.spec.js`: 10/10 with `KAI_CEDAR_BRIDGE_WORKBOOK` set, 9 pass + 1 skip without it. A synthetic workbook with generic field names checks:
+  - counts against an independent in-test calculation;
+  - missing values that affect one field only;
+  - version mismatch, exact duplicates and repeated observations that do not inflate denominators;
+  - that swapping the columns swaps the results;
+  - the no-version-field limitation;
+  - direction (unresolved, higher, lower, not established) and definition refusals;
+  - that ambiguous participant fields require selection;
+  - per-field unavailability, legacy, CSV and merged refusals;
+  - service gates (flag; assistant, system, reviewer and contributor actors; another tenant; invalid definition; normalized definition handed to the repository);
+  - that no header or value is stored in the profile.
+- **Cedar Bridge, real profiler on the original bytes:** digital confidence (`field_6`) 38 comparable, 25 increased, 10 unchanged, 3 decreased, 65.79%. Employment readiness (`field_7`) 40/23/13/4, 57.50%. One method, no field-specific code.
+  - Version drift CB043–CB050 (rows 86–101) is excluded from both.
+  - Missing digital follow-ups at rows 15, 31, 61 and 77 exclude only digital; missing readiness baselines at rows 18 and 62 exclude only readiness.
+  - Followups and Targets propose nothing. The assessment row count stays a separate 112.
+  - A person's higher-is-better definition turns digital into "improvement 25/38" and leaves readiness numeric.
+- `kai-sprint2-p2-01m-source-record-count-measurement.integration.spec.js`, two new real-PostgreSQL tests through the governed read:
+  - Synthetic workbook: exact lineage equals the seeded rows; counts 2/1/1 of 4 and 2/1/0 of 3; locators and exclusions; zero writes; a human definition is not recorded.
+  - Refusals: reviewer, contributor and other-organization actors; another tenant `not_found`; allowed use `allowed_use_not_allowed`; stale version `conflict_current_state_changed`; worksheet selection; unproposed field.
+  - Recording that worksheet's record count (13) leaves the paired measurements identical.
+  - The Cedar workbook through PostgreSQL gives 38/25/10/3 and 40/23/13/4.
+- P2-01M runner: seeds 2/2 and 2/2, main 76 tests (67 passed, 0 failed, 9 normal-chain-only skips), verifiers OVERALL PASS 7/7 and 10/10.
+- Plan A normal chain: 2/2, 42 tests (39 passed, 0 failed, 3 skipped: two runner-seeded plus Cedar without the env var), 4/4, "Plan A normal-chain proof passed".
+- Customer XLSX file-to-report (after `npm run build`, no tracked change): 37/37, method verifier PASS.
+- `npm test`: 5,969 tests, 5,846 passed, 0 failed, 123 skipped. `npm run verify:kai-sprint2-api-contract`: 71/71. `git diff --check` passed.
+
+**Remaining before complete Cedar Bridge acceptance (NOT_CONFIRMED / not implemented):**
+- **Persistence.** The smallest schema change is one additive migration:
+  - an `evidence_items` type/class pair `paired_outcome_measurement`/`source_derived_aggregate`;
+  - a `source_locators` type for a worksheet column with pair rows, e.g. `{scope, sheet_key, field_key}`;
+  - a new `kai.paired_outcome_definitions` table (immutable, `human_confirmed`, outcome field, label, direction, pairing fields, optional period);
+  - a new `kai.evidence_paired_outcome_measurements` table (method, numerator, denominator, increased/unchanged/decreased, excluded count, profile sha, worksheet and field keys, with arithmetic CHECKs) rather than widening `evidence_measurements`, whose counts CHECK encodes the record count;
+  - plus a write path mirroring `recordSourceRecordCountMeasurement` (evidence item, locator, review queue, audit).
+
+  Not written or applied here.
+- **Downstream.** Claim basis, P2-06 coverage and limitation codes, and VAL-GEN/Evidence Summary projection for the paired type follow that migration. No internal cited finding can be produced for a paired measurement today.
+- **No route or UI.**
+- **Correcting pairing fields** beyond KAI's proposals needs a new intake version; only meaning and direction, or a choice among proposed pairings, apply on the committed basis.
+- **Supported layouts:** XLSX long format (stage column) only; not CSV, wide-format or cross-worksheet layouts.
+- **Not yet profiled.** Existing workbook profiles have no paired basis until the workbook is uploaded again as a new intake version.
+
+**Status:** PAIRED_OUTCOME_MEASUREMENT_IMPLEMENTED_AND_VERIFIED_LOCALLY_READ_ONLY; persistence and report projection blocked on an unauthorized schema change. Local commits only; not pushed, deployed, migrated, or verified in production.
