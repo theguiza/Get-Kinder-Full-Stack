@@ -12,8 +12,14 @@ import {
   composeEvidenceSummaryMeasurementDisclosures,
   validateGeneratedContentDraft,
 } from "../validators/kaiGeneratedContentValidators.js";
-import { getScopedEvidenceMeasurementByEvidenceItemId } from "../db/kaiIntakeQueries.js";
+import { getScopedDerivedMeasurementByEvidenceItemId, getScopedEvidenceMeasurementByEvidenceItemId } from "../db/kaiIntakeQueries.js";
 import { MEASUREMENT_EVIDENCE_TYPE, measurementLimitationCodes } from "../validators/kaiSourceMeasurementValidators.js";
+import {
+  DERIVED_MEASUREMENT_EVIDENCE_TYPE,
+  derivedEvidenceIsCurrent,
+  derivedMeasurementArithmeticHolds,
+  derivedMeasurementLimitationCodes,
+} from "../validators/kaiDerivedMeasurementValidators.js";
 import {
   COUNT_ONLY_CONTENT_TYPE,
   COUNT_ONLY_LIMITATION_CODE,
@@ -1554,6 +1560,33 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
               countOnlyMeasurementByClaimId.set(projection.claimId, measurementRow);
             }
           }
+        }
+        // Measurement MVP: a derived measurement (paired outcome, tabular
+        // count or rate) is generated from on the same terms: currently
+        // eligible, its material limitations carried beside the claim, and
+        // its measured value attributed for the server disclosure.
+        if (projection.evidenceType === DERIVED_MEASUREMENT_EVIDENCE_TYPE) {
+          if (traceability.eligible !== true) {
+            rollbackFailure(
+              "validation_blocker",
+              stageBlocker(MEASURED_CLAIM_ELIGIBILITY_VALIDATOR_KEY, "measured_claim_not_currently_eligible"),
+            );
+          }
+          const derivedRow = await getScopedDerivedMeasurementByEvidenceItemId(
+            { organizationId: input.organizationId, evidenceItemId: projection.evidenceItemId },
+            tx,
+          );
+          if (!derivedRow) rollbackFailure("conflict_current_state_changed");
+          // Evidence stated under a corrected interpretation, or arithmetic
+          // that no longer holds, never reaches the model.
+          if (!derivedEvidenceIsCurrent(derivedRow) || !derivedMeasurementArithmeticHolds(derivedRow)) {
+            rollbackFailure(
+              "validation_blocker",
+              stageBlocker(MEASURED_CLAIM_ELIGIBILITY_VALIDATOR_KEY, "derived_measurement_not_current"),
+            );
+          }
+          measuredValueByClaimId.set(projection.claimId, derivedRow.measured_value);
+          measurementCodes = derivedMeasurementLimitationCodes({ measurementRow: derivedRow, dimensions: traceability.dimensions });
         }
         projection.limitationCodes = [...new Set([...blockerCodes, ...measurementCodes])].sort();
       }

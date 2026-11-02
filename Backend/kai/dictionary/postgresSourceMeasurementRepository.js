@@ -603,3 +603,13 @@ export function createPostgresSourceMeasurementRepository({ runInTransaction, in
 export const __sourceMeasurementRepositoryContract = Object.freeze({
   MEASUREMENT_AUDIT_OPERATION,
 });
+
+// The shared measurable-version loader and result shapes, reused unchanged by
+// the source-derived measurement repository (Measurement MVP).
+export const __sourceMeasurementRepositoryShared = Object.freeze({
+  loadMeasurableSourceVersion,
+  failure,
+  success,
+  resolveDefaultRunInTransaction,
+  RequiredMeasurementAuditRejectedError,
+});

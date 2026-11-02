@@ -1482,3 +1482,105 @@ export async function getScopedEvidenceMeasurementByEvidenceItemId({ organizatio
   const rows = await listScopedEvidenceMeasurementsByEvidenceItemIds({ organizationId, evidenceItemIds: [evidenceItemId] }, db);
   return rows[0] || null;
 }
+
+const DERIVED_MEASUREMENT_ROW_COLUMNS = `
+            l.evidence_item_id::text AS evidence_item_id,
+            l.organization_id::text AS organization_id,
+            l.source_version_id::text AS source_version_id,
+            l.interpretation_id::text AS interpretation_id,
+            m.source_derived_measurement_id::text AS source_derived_measurement_id,
+            m.source_version_id::text AS measurement_source_version_id,
+            m.worksheet_key, m.measurement_family, m.calculation_method, m.basis_version, m.measurement_key,
+            m.definition, m.field_keys, m.measured_value::int AS measured_value, m.numerator::int AS numerator,
+            m.denominator::int AS denominator, m.percentage::text AS percentage,
+            m.component_counts, m.exclusions, m.row_locators, m.profile_canonical_sha256, m.created_at AS measured_at,
+            i.indicator_label, i.meaning_text, i.score_direction, i.evidence_basis,
+            (SELECT c.interpretation_id::text
+               FROM kai.source_derived_measurement_interpretations c
+              WHERE c.organization_id = m.organization_id
+                AND c.source_derived_measurement_id = m.source_derived_measurement_id
+                AND NOT EXISTS (
+                  SELECT 1 FROM kai.source_derived_measurement_interpretations n
+                   WHERE n.source_derived_measurement_id = c.source_derived_measurement_id
+                     AND n.supersedes_interpretation_id = c.interpretation_id
+                )) AS current_interpretation_id`;
+
+const DERIVED_MEASUREMENT_ROW_FROM = `
+       FROM kai.evidence_derived_measurements l
+       JOIN kai.source_derived_measurements m
+         ON m.organization_id = l.organization_id
+        AND m.source_derived_measurement_id = l.source_derived_measurement_id
+       LEFT JOIN kai.source_derived_measurement_interpretations i
+         ON i.organization_id = l.organization_id
+        AND i.interpretation_id = l.interpretation_id`;
+
+/**
+ * Measurement MVP: the source-derived measurement an evidence item states,
+ * with the interpretation it is stated under (or none) and the measurement's
+ * current interpretation, tenant-scoped. Null when the evidence item states
+ * no derived measurement. Read-only.
+ */
+export async function getScopedDerivedMeasurementByEvidenceItemId({ organizationId, evidenceItemId }, db = pool) {
+  const { rows } = await db.query(
+    `SELECT ${DERIVED_MEASUREMENT_ROW_COLUMNS}
+     ${DERIVED_MEASUREMENT_ROW_FROM}
+      WHERE l.organization_id = $1::uuid
+        AND l.evidence_item_id = $2::uuid`,
+    [organizationId, evidenceItemId],
+  );
+  return rows[0] || null;
+}
+
+/** Every derived-measurement evidence row of one source version, tenant-scoped. Read-only. */
+export async function listScopedDerivedMeasurementRowsBySourceVersion({ organizationId, sourceVersionId }, db = pool) {
+  const { rows } = await db.query(
+    `SELECT ${DERIVED_MEASUREMENT_ROW_COLUMNS}
+     ${DERIVED_MEASUREMENT_ROW_FROM}
+      WHERE l.organization_id = $1::uuid
+        AND l.source_version_id = $2::uuid
+      ORDER BY m.created_at ASC, m.source_derived_measurement_id ASC, l.created_at ASC`,
+    [organizationId, sourceVersionId],
+  );
+  return rows;
+}
+
+/**
+ * The reporting period recorded on the engagement a promoted source version
+ * was uploaded to (its intake file's engagement), tenant-scoped, or null.
+ * Read-only.
+ */
+export async function getScopedSourceVersionEngagementReportingPeriod({ organizationId, sourceVersionId }, db = pool) {
+  const { rows } = await db.query(
+    `SELECT e.engagement_id::text AS engagement_id,
+            e.project_metadata->'engagement_requirement_target'->>'reporting_period_start' AS period_start,
+            e.project_metadata->'engagement_requirement_target'->>'reporting_period_end' AS period_end
+       FROM kai.source_versions sv
+       JOIN kai.intake_source_candidates c
+         ON c.organization_id = sv.organization_id
+        AND c.intake_source_candidate_id = sv.intake_source_candidate_id
+       JOIN kai.intake_files f
+         ON f.organization_id = c.organization_id
+        AND f.intake_file_id = c.intake_file_id
+       JOIN kai.engagements e
+         ON e.organization_id = f.organization_id
+        AND e.engagement_id = f.engagement_id
+      WHERE sv.organization_id = $1::uuid
+        AND sv.source_version_id = $2::uuid`,
+    [organizationId, sourceVersionId],
+  );
+  return rows[0] || null;
+}
+
+/** The derived-measurement rows of many evidence items in one read, tenant-scoped. Read-only. */
+export async function listScopedDerivedMeasurementRowsByEvidenceItemIds({ organizationId, evidenceItemIds }, db = pool) {
+  if (!Array.isArray(evidenceItemIds) || evidenceItemIds.length === 0) return [];
+  const { rows } = await db.query(
+    `SELECT ${DERIVED_MEASUREMENT_ROW_COLUMNS}
+     ${DERIVED_MEASUREMENT_ROW_FROM}
+      WHERE l.organization_id = $1::uuid
+        AND l.evidence_item_id = ANY($2::uuid[])
+      ORDER BY l.evidence_item_id`,
+    [organizationId, evidenceItemIds],
+  );
+  return rows;
+}

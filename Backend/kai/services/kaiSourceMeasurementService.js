@@ -4,6 +4,11 @@ import { validateActorCanPerformOperation } from "../auth/kaiAuthorizationServic
 import { validateTenantBoundaryConsistency } from "../validators/tenantValidators.js";
 import { validateRecordCountDefinition } from "../validators/kaiSourceMeasurementValidators.js";
 import { validatePairedOutcomeDefinition } from "../validators/kaiPairedOutcomeMeasurementValidators.js";
+import {
+  DERIVED_MEASUREMENT_FAMILIES,
+  validateDerivedMeasurementInterpretation,
+  validateTabularMeasurementDefinition,
+} from "../validators/kaiDerivedMeasurementValidators.js";
 import { __evidenceLineageServiceContract } from "./kaiEvidenceLineageService.js";
 
 // The P2-01 evidence-extraction authority (organization membership only):
@@ -172,6 +177,123 @@ export async function getPairedOutcomeMeasurementBasis(input, dependencies = {})
     });
   }
   return { ok: true, data: result.data, error: null };
+}
+
+async function createDefaultDerivedRepository() {
+  const { createPostgresDerivedMeasurementRepository } = await import("../dictionary/postgresDerivedMeasurementRepository.js");
+  return createPostgresDerivedMeasurementRepository();
+}
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+function hasOnly(input, keys, required) {
+  return isPlainObject(input)
+    && Object.keys(input).every((key) => keys.includes(key))
+    && required.every((key) => Object.hasOwn(input, key));
+}
+
+function repositoryResult(result) {
+  if (!result.ok) {
+    return buildKaiError(result.error.code, {
+      status: result.error.status,
+      ...(Array.isArray(result.error.blockers) ? { blockers: result.error.blockers } : {}),
+    });
+  }
+  return { ok: true, data: result.data, error: null };
+}
+
+// Measurement MVP: the same admission as the record count - the feature flag,
+// a mapped human with the P2-01 extraction authority in this organization,
+// and the tenant - before any read. Calculating and retaining a measurement
+// approves nothing: its evidence and claim stay review-gated.
+function admitDerivedInput(input, keys, required, dependencies) {
+  if (!isKaiSprint2Enabled(dependencies.env || process.env)) return buildKaiError("feature_disabled");
+  if (!hasOnly(input, keys, required) || !isNonEmptyString(input.organizationId) || !isPlainObject(input.actorContext)) {
+    return buildKaiError("validation_blocker");
+  }
+  if (input.now !== undefined && !isNormalizedNow(input.now)) return buildKaiError("validation_blocker");
+  return admitMeasurementActor(input.actorContext, input.organizationId);
+}
+
+/** Read-only: what can be measured on a version and what is recorded for it. */
+export async function getDerivedMeasurementBasis(input, dependencies = {}) {
+  const denied = admitDerivedInput(input, ["organizationId", "sourceVersionId", "worksheetKey", "actorContext"], ["organizationId", "sourceVersionId", "actorContext"], dependencies);
+  if (denied) return denied;
+  if (!isNonEmptyString(input.sourceVersionId)) return buildKaiError("validation_blocker");
+  const repository = dependencies.derivedMeasurementRepository || (await createDefaultDerivedRepository());
+  return repositoryResult(await repository.readDerivedMeasurementBasis({
+    organizationId: input.organizationId,
+    sourceVersionId: input.sourceVersionId,
+    worksheetKey: input.worksheetKey ?? null,
+  }));
+}
+
+/**
+ * Package A: retain every available paired baseline/follow-up outcome of one
+ * worksheet as a proposed numerical result - no meaning, direction or other
+ * human definition is required - with its evidence under no interpretation.
+ */
+export async function recordPairedOutcomeMeasurements(input, dependencies = {}) {
+  const denied = admitDerivedInput(input, ["organizationId", "sourceVersionId", "worksheetKey", "actorContext", "now"], ["organizationId", "sourceVersionId", "actorContext", "now"], dependencies);
+  if (denied) return denied;
+  if (!isNonEmptyString(input.sourceVersionId)) return buildKaiError("validation_blocker");
+  const repository = dependencies.derivedMeasurementRepository || (await createDefaultDerivedRepository());
+  return repositoryResult(await repository.recordPairedOutcomeMeasurements({
+    organizationId: input.organizationId,
+    sourceVersionId: input.sourceVersionId,
+    worksheetKey: input.worksheetKey ?? null,
+    actorUserId: input.actorContext.actorUserId,
+    now: input.now,
+  }));
+}
+
+/**
+ * Package B: one content-aware tabular count or rate under a person's
+ * selection of fields, values and the engagement reporting period, with an
+ * optional interpretation of what it means.
+ */
+export async function recordTabularMeasurement(input, dependencies = {}) {
+  const denied = admitDerivedInput(input, ["organizationId", "sourceVersionId", "worksheetKey", "definition", "interpretation", "actorContext", "now"], ["organizationId", "sourceVersionId", "definition", "actorContext", "now"], dependencies);
+  if (denied) return denied;
+  if (!isNonEmptyString(input.sourceVersionId)) return buildKaiError("validation_blocker");
+  const definition = validateTabularMeasurementDefinition(input.definition);
+  if (!definition.ok) return buildKaiError(definition.code, { blockers: definition.blockers });
+  let interpretation = null;
+  if (input.interpretation !== undefined && input.interpretation !== null) {
+    const family = definition.definition.operation === "rate" ? DERIVED_MEASUREMENT_FAMILIES.TABULAR_RATE : DERIVED_MEASUREMENT_FAMILIES.TABULAR_COUNT;
+    const validated = validateDerivedMeasurementInterpretation(input.interpretation, { family });
+    if (!validated.ok) return buildKaiError(validated.code, { blockers: validated.blockers });
+    interpretation = validated.interpretation;
+  }
+  const repository = dependencies.derivedMeasurementRepository || (await createDefaultDerivedRepository());
+  return repositoryResult(await repository.recordTabularMeasurement({
+    organizationId: input.organizationId,
+    sourceVersionId: input.sourceVersionId,
+    worksheetKey: input.worksheetKey ?? null,
+    definition: definition.definition,
+    interpretation,
+    actorUserId: input.actorContext.actorUserId,
+    now: input.now,
+  }));
+}
+
+/**
+ * A person's clarification or correction of what a recorded measurement
+ * means. It supersedes the current interpretation and states the unchanged
+ * measurement under the new one; no count is recalculated or rewritten.
+ */
+export async function recordDerivedMeasurementInterpretation(input, dependencies = {}) {
+  const denied = admitDerivedInput(input, ["organizationId", "measurementId", "interpretation", "actorContext", "now"], ["organizationId", "measurementId", "interpretation", "actorContext", "now"], dependencies);
+  if (denied) return denied;
+  if (!UUID_RE.test(input.measurementId ?? "") || !isPlainObject(input.interpretation)) return buildKaiError("validation_blocker");
+  const repository = dependencies.derivedMeasurementRepository || (await createDefaultDerivedRepository());
+  return repositoryResult(await repository.recordDerivedMeasurementInterpretation({
+    organizationId: input.organizationId,
+    measurementId: input.measurementId,
+    interpretationInput: input.interpretation,
+    actorUserId: input.actorContext.actorUserId,
+    now: input.now,
+  }));
 }
 
 export const __sourceMeasurementServiceContract = Object.freeze({

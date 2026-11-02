@@ -1,5 +1,6 @@
 import { COUNT_ONLY_LIMITATION_CODE } from "../validators/kaiGeneratedContentValidators.js";
-import { describeMeasurementCalculationMethod, describeMeasurementLimitationCode } from "../validators/kaiSourceMeasurementValidators.js";
+import { describeMeasurementCalculationMethod } from "../validators/kaiSourceMeasurementValidators.js";
+import { describeDerivedLimitationCode } from "../validators/kaiDerivedMeasurementValidators.js";
 
 const COUNT_ONLY_LIMITATION_TEXT = "The source is recorded as containing stories or testimonials. Only its record count is used here; "
   + "no story or testimonial content is used, and Get Kinder's review still applies to any other use.";
@@ -174,7 +175,7 @@ function limitationLines(model) {
     if (fact.limitationCodes.length === 0) continue;
     lines.push(`- ${refs(fact.citationRefs)}`);
     for (const limitation of fact.limitationCodes) {
-      const description = limitation === COUNT_ONLY_LIMITATION_CODE ? COUNT_ONLY_LIMITATION_TEXT : describeMeasurementLimitationCode(limitation);
+      const description = limitation === COUNT_ONLY_LIMITATION_CODE ? COUNT_ONLY_LIMITATION_TEXT : describeDerivedLimitationCode(limitation);
       lines.push(`  - ${description ? text(description) : "Recorded limitation."} (${code(limitation)})`);
     }
   }

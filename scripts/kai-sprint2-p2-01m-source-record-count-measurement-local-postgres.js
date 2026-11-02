@@ -306,6 +306,18 @@ try {
   if (overall(xlsxVerifier()) !== "PASS") throw new Error("the worksheet measurement identity migration changed the verified XLSX method CHECKs");
   console.log(`P2-01M worksheet measurement identity: applied twice; previous-revision rows unchanged except their new worksheet_key:\n${backfilled}\nread-only verifier FAIL before, PASS after:\n${identityVerified.join("\n")}`);
 
+  // Measurement MVP: the source-derived measurement migration is additive. It
+  // changes no evidence, locator, claim, record-count definition or
+  // measurement row, and leaves the record-count CHECKs verified.
+  const derivedEvidenceBefore = psqlExec(legacySnapshotSql);
+  const derivedMeasurementsBefore = psqlExec(measurementSnapshotSql);
+  psqlFile("migrations/kai_sprint2_measurement_mvp_source_derived_measurements.sql");
+  psqlFile("migrations/kai_sprint2_measurement_mvp_source_derived_measurements.sql");
+  if (psqlExec(legacySnapshotSql) !== derivedEvidenceBefore) throw new Error("source-derived measurement migration changed an evidence, locator, or claim row");
+  if (psqlExec(measurementSnapshotSql) !== derivedMeasurementsBefore) throw new Error("source-derived measurement migration changed a record-count definition or measurement");
+  if (overall(identityVerifier()) !== "PASS" || overall(xlsxVerifier()) !== "PASS") throw new Error("the source-derived measurement migration changed the verified record-count CHECKs");
+  console.log("Measurement MVP source-derived measurements: applied twice; every existing evidence, locator, claim and record-count row unchanged; record-count verifiers PASS.");
+
   const testResult = spawnSync("node", [
     "--test",
     "--test-concurrency=1",
@@ -337,6 +349,15 @@ try {
 
   // Every rollback refuses while dependent measurements exist and changes nothing.
   const measurementRows = psqlExec("SELECT count(*) FROM kai.evidence_measurements;");
+  const derivedRows = psqlExec("SELECT count(*) FROM kai.source_derived_measurements;");
+  let derivedRollbackRefused = false;
+  try {
+    psqlFile("migrations/kai_sprint2_measurement_mvp_source_derived_measurements.rollback.sql");
+  } catch (error) {
+    derivedRollbackRefused = /source-derived measurement rollback refused/.test(String(error.message));
+  }
+  if (!derivedRollbackRefused) throw new Error("source-derived measurement rollback did not refuse with derived measurements present");
+  if (psqlExec("SELECT count(*) FROM kai.source_derived_measurements;") !== derivedRows) throw new Error("refused derived rollback changed rows");
   let identityRollbackRefused = false;
   try {
     psqlFile("migrations/kai_sprint2_p2_01m_worksheet_measurement_identity.rollback.sql");

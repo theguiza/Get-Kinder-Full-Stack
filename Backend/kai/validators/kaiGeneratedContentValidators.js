@@ -11,6 +11,28 @@ import {
   namesCoverageDimension,
   parseMeasuredCountStatement,
 } from "./kaiSourceMeasurementValidators.js";
+import {
+  DERIVED_DISCLOSURE_RULES,
+  DERIVED_LIMITATION_CODES,
+  composeDerivedMeasurementDisclosure,
+  isDerivedLimitationCode,
+} from "./kaiDerivedMeasurementValidators.js";
+
+// A record-count (measurement./coverage.) or source-derived (derived.) code:
+// either makes a claim a measured claim for VAL-GEN-008.
+function isMeasuredClaimCode(code) {
+  return isMeasurementLimitationCode(code) || isDerivedLimitationCode(code);
+}
+
+function isDerivedMeasuredClaim(claim) {
+  return (claim?.limitationCodes || []).some(isDerivedLimitationCode);
+}
+
+// The server-composed disclosure body of one measured claim's codes, or null.
+function measuredClaimDisclosure(claim) {
+  const codes = (claim.limitationCodes || []).filter(isMeasuredClaimCode);
+  return isDerivedMeasuredClaim(claim) ? composeDerivedMeasurementDisclosure(codes) : composeMeasurementDisclosure(codes);
+}
 
 const EVIDENCE_SUMMARY_CONTENT_TYPE = "evidence_summary";
 
@@ -135,23 +157,25 @@ export function composeEvidenceSummaryMeasurementDisclosures({ blocks, claims, m
       .map((citation) => claimById.get(citation.claimId)))
       .filter((claim) => claim
         && !(claim.limitationCodes || []).includes(COUNT_ONLY_LIMITATION_CODE)
-        && (claim.limitationCodes || []).some(isMeasurementLimitationCode));
+        && (claim.limitationCodes || []).some(isMeasuredClaimCode));
     if (measured.length === 0) {
       composed.push(block);
       continue;
     }
-    const bodies = measured.map((claim) => composeMeasurementDisclosure(claim.limitationCodes.filter(isMeasurementLimitationCode)));
+    const bodies = measured.map(measuredClaimDisclosure);
     if (bodies.includes(null)) return Object.freeze({ ok: false });
+    // A source-derived measurement is named as a measurement, not a count.
+    const noun = measured.some(isDerivedMeasuredClaim) ? "measurement" : "count";
     let disclosure;
     if (bodies.every((body) => body === bodies[0])) {
-      disclosure = `Measurement disclosure for ${measured.length === 1 ? "the cited count" : "each cited count"}: ${bodies[0]}`;
+      disclosure = `Measurement disclosure for ${measured.length === 1 ? `the cited ${noun}` : `each cited ${noun}`}: ${bodies[0]}`;
     } else {
       const values = measured.map((claim) => measuredValueByClaimId.get(claim.claimId));
       const attributable = new Set(values).size === values.length
         && values.every((value, index) => Number.isSafeInteger(value)
           && literals(measured[index].claimStatement, NUMERIC_LITERAL_PATTERN).includes(String(value)));
       if (!attributable) return Object.freeze({ ok: false });
-      disclosure = measured.map((claim, index) => `Measurement disclosure for the cited count of ${values[index]}: ${bodies[index]}`).join(" ");
+      disclosure = measured.map((claim, index) => `Measurement disclosure for the cited ${isDerivedMeasuredClaim(claim) ? "measurement" : "count"} of ${values[index]}: ${bodies[index]}`).join(" ");
     }
     const text = String(block.text ?? "");
     composed.push({
@@ -166,12 +190,12 @@ export function composeEvidenceSummaryMeasurementDisclosures({ blocks, claims, m
 // server's exact composed disclosure (composeEvidenceSummaryMeasurementDisclosures).
 // Removing only that authoritative text can hide nothing the model wrote, and
 // the disclosure can then neither satisfy nor mask a contradiction check.
-const DISCLOSURE_PREFIX_PATTERN = /Measurement disclosure for (?:the cited count|each cited count|the cited count of \d+): /g;
+const DISCLOSURE_PREFIX_PATTERN = /Measurement disclosure for (?:the cited (?:count|measurement)|each cited (?:count|measurement)|the cited (?:count|measurement) of \d+): /g;
 
 function modelAuthoredText(text, citedClaims) {
   let model = String(text || "");
   for (const claim of citedClaims) {
-    const body = composeMeasurementDisclosure((claim.limitationCodes || []).filter(isMeasurementLimitationCode));
+    const body = measuredClaimDisclosure(claim);
     if (body) model = model.split(body).join(" ");
   }
   return model.replace(DISCLOSURE_PREFIX_PATTERN, " ");
@@ -193,7 +217,7 @@ function escapeRegExp(value) {
  * authorizes a different counted entity.
  */
 function evidenceSummaryContradicts(modelText, codes, citedClaims) {
-  if (codes.has(MEASUREMENT_LIMITATION_CODES.NO_REPORTING_PERIOD)
+  if ((codes.has(MEASUREMENT_LIMITATION_CODES.NO_REPORTING_PERIOD) || codes.has(DERIVED_LIMITATION_CODES.NO_REPORTING_PERIOD))
     && REPORTING_PERIOD_ASSERTION_PATTERNS.some((pattern) => pattern.test(modelText))) {
     return true;
   }
@@ -352,16 +376,16 @@ export function validateGeneratedContentDraft({
   // "limitations". The model-authored text must also not contradict the
   // period, coverage or counted-unit state (evidenceSummaryContradicts).
   // Every other block keeps exactly the rules above.
-  if ((generationClaims || []).some((claim) => (claim.limitationCodes || []).some(isMeasurementLimitationCode))) {
+  if ((generationClaims || []).some((claim) => (claim.limitationCodes || []).some(isMeasuredClaimCode))) {
     const disclosureViolations = [];
     for (const block of blocks || []) {
       const cited = (block.citations || []).map((citation) => claimById.get(citation.claimId)).filter(Boolean);
-      const codes = new Set(cited.flatMap((claim) => (claim.limitationCodes || []).filter(isMeasurementLimitationCode)));
+      const codes = new Set(cited.flatMap((claim) => (claim.limitationCodes || []).filter(isMeasuredClaimCode)));
       const text = block.text || "";
       const evidenceSummaryRules = contentType === EVIDENCE_SUMMARY_CONTENT_TYPE
         && !cited.some((claim) => (claim.limitationCodes || []).includes(COUNT_ONLY_LIMITATION_CODE));
       const contradicts = (pattern) => (evidenceSummaryRules ? affirmativeMatches(text, pattern).length > 0 : pattern.test(text));
-      for (const rule of MEASUREMENT_DISCLOSURE_RULES) {
+      for (const rule of [...MEASUREMENT_DISCLOSURE_RULES, ...DERIVED_DISCLOSURE_RULES]) {
         const applies = rule.code ? codes.has(rule.code) : [...codes].some((code) => code.startsWith(rule.codePrefix));
         if (!applies || (evidenceSummaryRules && rule.codePrefix === "coverage.")) continue;
         if (![rule.requires].flat().every((pattern) => pattern.test(text))) disclosureViolations.push({ type: "limitation_not_disclosed", block_ordinal: block.ordinal });

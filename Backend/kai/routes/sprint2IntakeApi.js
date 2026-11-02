@@ -298,7 +298,7 @@ function sanitizeServiceData(data) {
   }
   if (
     typeof data.traceability_conflict_reason === "string"
-    && /^(claim_evidence_link_mismatch|source_version_not_current|gap_dimension_requires_missing_p204_state|gap_followup_queue_mismatch|conflict_queue_count_mismatch|conflict_group_validation_failed)$/.test(data.traceability_conflict_reason)
+    && /^(claim_evidence_link_mismatch|source_version_not_current|derived_measurement_interpretation_superseded|gap_dimension_requires_missing_p204_state|gap_followup_queue_mismatch|conflict_queue_count_mismatch|conflict_group_validation_failed)$/.test(data.traceability_conflict_reason)
   ) {
     sanitized.traceability_conflict_reason = data.traceability_conflict_reason;
   }
@@ -2873,6 +2873,96 @@ router.get(
         worksheetKey: typeof req.query.worksheet_key === "string" ? req.query.worksheet_key : null,
         actorContext,
       });
+    });
+  },
+);
+
+// Measurement MVP: source-derived measurements (paired outcomes and
+// content-aware tabular counts and rates) of a promoted source version, and a
+// person's interpretation of what one means. Same path, JSON-only bodies and
+// server-resolved actorContext/now as the record-count routes; the service
+// validates every field.
+function worksheetKeyQuery(req) {
+  return typeof req.query.worksheet_key === "string" ? req.query.worksheet_key : null;
+}
+
+function sendInvalidSourceVersionIdentifiers(res) {
+  return sendKaiError(res, "validation_blocker", {
+    blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id_or_source_version_id")],
+  });
+}
+
+router.get(
+  "/admin/organizations/:organizationId/source-versions/:sourceVersionId/derived-measurements",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    const identifiers = sourceVersionEvidenceExtractionIdentifiers(req);
+    if (!identifiers) return sendInvalidSourceVersionIdentifiers(res);
+    const actorContext = sprint2MappedActorContext(req);
+    return invokeService(res, async () => {
+      const service = await getSourceMeasurementService();
+      return service.getDerivedMeasurementBasis({ ...identifiers, worksheetKey: worksheetKeyQuery(req), actorContext });
+    });
+  },
+);
+
+router.post(
+  "/admin/organizations/:organizationId/source-versions/:sourceVersionId/paired-outcome-measurements",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    if (!metadataContentTypeIsSupported(req)) return sendKaiError(res, "unsupported_media_type");
+    const identifiers = sourceVersionEvidenceExtractionIdentifiers(req);
+    if (!identifiers) return sendInvalidSourceVersionIdentifiers(res);
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    return invokeService(res, async () => {
+      const service = await getSourceMeasurementService();
+      return service.recordPairedOutcomeMeasurements({ ...identifiers, worksheetKey: worksheetKeyQuery(req), actorContext, now });
+    });
+  },
+);
+
+router.post(
+  "/admin/organizations/:organizationId/source-versions/:sourceVersionId/tabular-measurements",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    if (!metadataContentTypeIsSupported(req)) return sendKaiError(res, "unsupported_media_type");
+    const identifiers = sourceVersionEvidenceExtractionIdentifiers(req);
+    if (!identifiers) return sendInvalidSourceVersionIdentifiers(res);
+    const payload = requestPayload(req);
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    return invokeService(res, async () => {
+      const service = await getSourceMeasurementService();
+      return service.recordTabularMeasurement({
+        ...identifiers,
+        worksheetKey: worksheetKeyQuery(req),
+        definition: payload?.definition,
+        ...(payload && Object.hasOwn(payload, "interpretation") ? { interpretation: payload.interpretation } : {}),
+        actorContext,
+        now,
+      });
+    });
+  },
+);
+
+router.post(
+  "/admin/organizations/:organizationId/derived-measurements/:measurementId/interpretations",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    if (!metadataContentTypeIsSupported(req)) return sendKaiError(res, "unsupported_media_type");
+    const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
+    const measurementId = typeof req.params?.measurementId === "string" ? req.params.measurementId : "";
+    if (![organizationId, measurementId].every((value) => KAI_SPRINT2_P0_PATTERNS.uuid.test(value) && value === value.toLowerCase())) {
+      return sendKaiError(res, "validation_blocker", {
+        blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id_or_measurement_id")],
+      });
+    }
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    return invokeService(res, async () => {
+      const service = await getSourceMeasurementService();
+      return service.recordDerivedMeasurementInterpretation({ organizationId, measurementId, interpretation: requestPayload(req), actorContext, now });
     });
   },
 );

@@ -6,6 +6,7 @@ import {
 } from "../dictionary/postgresGeneratedContentRepository.js";
 import { COUNT_ONLY_LIMITATION_CODE } from "../validators/kaiGeneratedContentValidators.js";
 import { isMeasurementLimitationCode } from "../validators/kaiSourceMeasurementValidators.js";
+import { isDerivedLimitationCode } from "../validators/kaiDerivedMeasurementValidators.js";
 
 const CONTENT_TYPE = "evidence_summary";
 const REQUESTED_AUDIENCE = "internal";
@@ -78,6 +79,20 @@ const COUNT_ONLY_INSTRUCTION = [
   "name the selected worksheet key when the claim gives one; use no quotation marks, no first person,",
   "and no words about stories, testimonials, people, participants, clients, outcomes, completions or results unless the claim statement uses them.",
 ].join(" ");
+
+// The generator-side counterpart of VAL-GEN-008 for a source-derived
+// measurement (paired outcome change, tabular count or rate).
+const DERIVED_MEASUREMENT_INSTRUCTION = [
+  "For a claim whose limitationCodes include derived. codes:",
+  "use only the numbers, fields, values and population the claim statement gives;",
+  "a numerically higher follow-up value is not an improvement unless the claim says the organization states higher is better;",
+  "never say a value was verified, and never extend a result beyond its comparable pairs or measured population;",
+  "say whether the meaning was stated by a person at the organization or not yet stated.",
+].join(" ");
+
+function hasDerivedMeasurementClaims(claims) {
+  return Array.isArray(claims) && claims.some((claim) => Array.isArray(claim?.limitationCodes) && claim.limitationCodes.some(isDerivedLimitationCode));
+}
 
 function hasCountOnlyClaims(claims) {
   return Array.isArray(claims) && claims.some((claim) => Array.isArray(claim?.limitationCodes) && claim.limitationCodes.includes(COUNT_ONLY_LIMITATION_CODE));
@@ -160,6 +175,7 @@ export function createProductionEvidenceSummaryDraftGenerator({
         // byte-for-byte unchanged.
         ...(hasMeasurementLimitations(generatorInput.claims) ? [MEASUREMENT_INSTRUCTION] : []),
         ...(hasCountOnlyClaims(generatorInput.claims) ? [COUNT_ONLY_INSTRUCTION] : []),
+        ...(hasDerivedMeasurementClaims(generatorInput.claims) ? [DERIVED_MEASUREMENT_INSTRUCTION] : []),
       ].join(" "),
       messages: [{
         role: "user",

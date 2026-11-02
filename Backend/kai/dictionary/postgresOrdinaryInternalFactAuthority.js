@@ -1,4 +1,13 @@
-import { getScopedEvidenceMeasurementByEvidenceItemId, getScopedSourceVersionById } from "../db/kaiIntakeQueries.js";
+import {
+  getScopedDerivedMeasurementByEvidenceItemId,
+  getScopedEvidenceMeasurementByEvidenceItemId,
+  getScopedSourceVersionById,
+} from "../db/kaiIntakeQueries.js";
+import {
+  DERIVED_MEASUREMENT_EVIDENCE_TYPE,
+  composeDerivedClaimStatementFromRow,
+  validateDerivedMeasurementClaimBasis,
+} from "../validators/kaiDerivedMeasurementValidators.js";
 import { findCurrentClaimReviewDecision, findCurrentEvidenceReviewDecision } from "./postgresHumanReviewDecisionRepository.js";
 import {
   AmbiguousSensitivityDecisionLineageError,
@@ -197,6 +206,32 @@ export async function evaluateOrdinaryMeasurementAuthorityInTransaction(tx, {
   const reasons = [];
   let measurementRow = null;
   let source = null;
+  if (evidenceItemRow?.evidence_type === DERIVED_MEASUREMENT_EVIDENCE_TYPE) {
+    // Measurement MVP: a source-derived measurement is ordinary on the same
+    // terms - its arithmetic still matches its basis under its current
+    // interpretation, and the claim restates exactly that measurement. It
+    // never uses the record-count-only story basis.
+    const derivedRow = await getScopedDerivedMeasurementByEvidenceItemId({ organizationId, evidenceItemId: evidenceItemRow.evidence_item_id }, tx);
+    if (!validateDerivedMeasurementClaimBasis({ evidenceItemRow, locatorRow, sourceVersionRow, measurementRow: derivedRow }).ok) {
+      reasons.push("measurement_definition_not_confirmed");
+    } else if (claimRow && (
+      claimRow.claim_type !== "finding"
+      || claimRow.evidence_item_id !== evidenceItemRow.evidence_item_id
+      || claimRow.statement !== composeDerivedClaimStatementFromRow(derivedRow)
+    )) {
+      reasons.push("claim_not_measurement_restatement");
+    }
+    source = await classifySourceVersionInTransaction(tx, { organizationId, sourceVersionId: evidenceItemRow.source_version_id });
+    reasons.push(...source.getKinderReviewReasons, ...source.blockedReasons);
+    const ordered = orderedReasons(reasons);
+    return {
+      ordinary: ordered.length === 0,
+      reasons: ordered,
+      basis: ordered.length === 0 ? ORDINARY_AUTHORITY_BASIS.ALL_CATEGORIES_ABSENT : null,
+      measurementRow: null,
+      sourcePermissions: { is_current: source.isCurrent, recorded: source.recorded },
+    };
+  }
   if (!evidenceItemRow || evidenceItemRow.evidence_type !== MEASUREMENT_EVIDENCE_TYPE) {
     reasons.push("evidence_type_not_measurement");
   } else {

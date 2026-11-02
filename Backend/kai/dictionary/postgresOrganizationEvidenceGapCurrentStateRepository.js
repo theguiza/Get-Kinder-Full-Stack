@@ -5,8 +5,9 @@ import {
 import { validateConflictGroupCompleteness } from "../validators/kaiConflictGroupValidators.js";
 import { readEffectiveAllowedUseProhibitions } from "./postgresEffectiveAllowedUseResolver.js";
 import { __claimGapFollowupRepositoryTestables } from "./postgresClaimGapFollowupRepository.js";
-import { listScopedEvidenceMeasurementsByEvidenceItemIds } from "../db/kaiIntakeQueries.js";
+import { listScopedDerivedMeasurementRowsByEvidenceItemIds, listScopedEvidenceMeasurementsByEvidenceItemIds } from "../db/kaiIntakeQueries.js";
 import { MEASUREMENT_EVIDENCE_TYPE } from "../validators/kaiSourceMeasurementValidators.js";
+import { DERIVED_MEASUREMENT_EVIDENCE_TYPE } from "../validators/kaiDerivedMeasurementValidators.js";
 import {
   __claimTraceabilityRepositoryTestables,
   __claimTraceabilityRepositoryContract,
@@ -133,6 +134,7 @@ const {
   buildExpectedGapPlans,
   buildExpectedFollowupDimensionKeys,
   measurementCoverageDimensions,
+  derivedMeasurementCoverageDimensions,
   gapRowsMatchExpectation,
   followupRowsMatchExpectation,
   queueRowsMatchExpectation,
@@ -205,6 +207,11 @@ async function loadCurrentStateBatches(tx, { organizationId, claimIds }) {
     evidenceItemIds: evidenceItems.filter((row) => row.evidence_type === MEASUREMENT_EVIDENCE_TYPE).map((row) => row.evidence_item_id),
   }, tx);
   const measurementsByEvidenceItemId = toMapByKey(measurementRows, "evidence_item_id");
+  const derivedMeasurementRows = await listScopedDerivedMeasurementRowsByEvidenceItemIds({
+    organizationId,
+    evidenceItemIds: evidenceItems.filter((row) => row.evidence_type === DERIVED_MEASUREMENT_EVIDENCE_TYPE).map((row) => row.evidence_item_id),
+  }, tx);
+  const derivedMeasurementsByEvidenceItemId = toMapByKey(derivedMeasurementRows, "evidence_item_id");
 
   const locatorIds = distinctDefined(evidenceItems.map((row) => row.source_locator_id));
   const sourceIds = distinctDefined(evidenceItems.map((row) => row.source_id));
@@ -429,6 +436,7 @@ async function loadCurrentStateBatches(tx, { organizationId, claimIds }) {
     claimEvidenceLinksByClaimId,
     evidenceItemsById,
     measurementsByEvidenceItemId,
+    derivedMeasurementsByEvidenceItemId,
     sourceLocatorsById,
     sourcesById,
     sourceVersionsById,
@@ -511,7 +519,9 @@ function claimIsCurrentForGapExposure(claimId, batches) {
   const baseDimensions = computeDimensions({ dictionaryFieldRows, qualityFindingRows, profileRow, evidenceFieldKeys });
   const { dimensions, answeredDimensionKeys } = evidenceItemRow.evidence_type === MEASUREMENT_EVIDENCE_TYPE
     ? measurementCoverageDimensions(baseDimensions, batches.measurementsByEvidenceItemId.get(evidenceItemRow.evidence_item_id) || null)
-    : { dimensions: baseDimensions, answeredDimensionKeys: [] };
+    : evidenceItemRow.evidence_type === DERIVED_MEASUREMENT_EVIDENCE_TYPE
+      ? derivedMeasurementCoverageDimensions(baseDimensions, batches.derivedMeasurementsByEvidenceItemId.get(evidenceItemRow.evidence_item_id) || null)
+      : { dimensions: baseDimensions, answeredDimensionKeys: [] };
   const expectedGapPlans = buildExpectedGapPlans(dimensions);
   const expectedFollowupDimensionKeys = buildExpectedFollowupDimensionKeys(expectedGapPlans, answeredDimensionKeys);
 

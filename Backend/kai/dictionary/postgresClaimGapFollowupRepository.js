@@ -11,12 +11,18 @@ import {
   getScopedEvidenceReviewQueueItemByEvidenceItemId,
   getScopedDataDictionaryById,
   getScopedEvidenceMeasurementByEvidenceItemId,
+  getScopedDerivedMeasurementByEvidenceItemId,
 } from "../db/kaiIntakeQueries.js";
 import {
   MEASUREMENT_ANSWERED_DIMENSION_KEYS,
   MEASUREMENT_EVIDENCE_TYPE,
   applyMeasurementCoverageDimensions,
 } from "../validators/kaiSourceMeasurementValidators.js";
+import {
+  DERIVED_ANSWERED_DIMENSION_KEYS,
+  DERIVED_MEASUREMENT_EVIDENCE_TYPE,
+  applyDerivedMeasurementCoverageDimensions,
+} from "../validators/kaiDerivedMeasurementValidators.js";
 import {
   assessMissingness,
   assessDuplicates,
@@ -241,6 +247,13 @@ function buildExpectedFollowupDimensionKeys(expectedGapPlans, answeredDimensionK
  * recomputation agree. Field-presence claims are unchanged.
  */
 async function claimCoverageDimensions(tx, { organizationId, evidenceItemRow, baseDimensions }) {
+  if (evidenceItemRow?.evidence_type === DERIVED_MEASUREMENT_EVIDENCE_TYPE) {
+    const derivedRow = await getScopedDerivedMeasurementByEvidenceItemId(
+      { organizationId, evidenceItemId: evidenceItemRow.evidence_item_id },
+      tx,
+    );
+    return derivedMeasurementCoverageDimensions(baseDimensions, derivedRow);
+  }
   if (evidenceItemRow?.evidence_type !== MEASUREMENT_EVIDENCE_TYPE) {
     return { dimensions: baseDimensions, answeredDimensionKeys: [] };
   }
@@ -249,6 +262,16 @@ async function claimCoverageDimensions(tx, { organizationId, evidenceItemRow, ba
     tx,
   );
   return measurementCoverageDimensions(baseDimensions, measurementRow);
+}
+
+// Measurement MVP: a derived measurement's method and its interpretation
+// state answer the same client-answerable dimensions a record-count
+// definition does; a proposed meaning stays a recorded limitation.
+function derivedMeasurementCoverageDimensions(baseDimensions, derivedRow) {
+  return {
+    dimensions: applyDerivedMeasurementCoverageDimensions(baseDimensions, derivedRow),
+    answeredDimensionKeys: derivedRow ? [...DERIVED_ANSWERED_DIMENSION_KEYS] : [],
+  };
 }
 
 function measurementCoverageDimensions(baseDimensions, measurementRow) {
@@ -1111,6 +1134,7 @@ export const __claimGapFollowupRepositoryTestables = Object.freeze({
   buildExpectedFollowupDimensionKeys,
   claimCoverageDimensions,
   measurementCoverageDimensions,
+  derivedMeasurementCoverageDimensions,
   extractSafeCounts,
   safeSummaryFor,
   gapRowsMatchExpectation,

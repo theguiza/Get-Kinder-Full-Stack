@@ -9,6 +9,7 @@ import {
   getScopedEvidenceReviewQueueItemByEvidenceItemId,
   getScopedClaimReviewQueueItemByClaimId,
   getScopedDataDictionaryById,
+  getScopedDerivedMeasurementByEvidenceItemId,
 } from "../db/kaiIntakeQueries.js";
 import {
   assessMissingness,
@@ -27,6 +28,7 @@ import {
   dimensionResultRequiresGap,
 } from "../validators/kaiClaimGapFollowupValidators.js";
 import { __claimGapFollowupRepositoryTestables } from "./postgresClaimGapFollowupRepository.js";
+import { DERIVED_MEASUREMENT_EVIDENCE_TYPE, derivedEvidenceIsCurrent } from "../validators/kaiDerivedMeasurementValidators.js";
 import { __evidenceCoverageAssessmentRepositoryTestables } from "./postgresEvidenceCoverageAssessmentRepository.js";
 import { validateConflictGroupCompleteness } from "../validators/kaiConflictGroupValidators.js";
 import {
@@ -528,6 +530,13 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
   if (!sourceVersionRow) return failure("not_found");
   if (sourceVersionRow.is_current !== true) {
     return failureWithReason("source_version_not_current");
+  }
+  // Measurement MVP: evidence stating a derived measurement under an
+  // interpretation a person has since corrected is no longer current, exactly
+  // as evidence of a superseded source version is not.
+  if (evidenceItemRow.evidence_type === DERIVED_MEASUREMENT_EVIDENCE_TYPE
+    && !derivedEvidenceIsCurrent(await getScopedDerivedMeasurementByEvidenceItemId({ organizationId, evidenceItemId: evidenceItemRow.evidence_item_id }, tx))) {
+    return failureWithReason("derived_measurement_interpretation_superseded");
   }
   const candidateRow = await readSourceCandidate(
     tx,

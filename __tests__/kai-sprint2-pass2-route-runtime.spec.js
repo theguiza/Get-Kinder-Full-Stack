@@ -170,6 +170,9 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // KAI data-dictionary entries: read-only safe DTO surface over governed
     // dictionary fields, additive, and every prior entry preserved verbatim.
     "/admin/organizations/:organizationId/data-dictionaries/:dataDictionaryId/entries",
+    // Measurement MVP: a person's interpretation of a source-derived
+    // measurement (additive; every prior entry preserved verbatim).
+    "/admin/organizations/:organizationId/derived-measurements/:measurementId/interpretations",
     // KAI P2-08 human eligible-claims-for-audience read surface (additive;
     // every prior entry preserved verbatim).
     "/admin/organizations/:organizationId/eligible-claims",
@@ -433,13 +436,22 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     "/admin/organizations/:organizationId/review-queue",
     // KAI P2-02 evidence-coverage-assessment surface (additive; every prior
     // entry preserved verbatim).
+    // Measurement MVP: what can be measured on a source version and what is
+    // recorded for it (additive; every prior entry preserved verbatim).
+    "/admin/organizations/:organizationId/source-versions/:sourceVersionId/derived-measurements",
     "/admin/organizations/:organizationId/source-versions/:sourceVersionId/evidence-coverage-assessment",
     // KAI P2-01 evidence-lineage extraction surface (additive; every prior
     // entry preserved verbatim).
     "/admin/organizations/:organizationId/source-versions/:sourceVersionId/evidence-extraction",
+    // Measurement MVP: paired baseline/follow-up outcomes retained as
+    // evidence (additive; every prior entry preserved verbatim).
+    "/admin/organizations/:organizationId/source-versions/:sourceVersionId/paired-outcome-measurements",
     // KAI P2-01M record-count measurement surface (additive; every prior
     // entry preserved verbatim).
     "/admin/organizations/:organizationId/source-versions/:sourceVersionId/record-count-measurement",
+    // Measurement MVP: content-aware tabular counts and rates (additive;
+    // every prior entry preserved verbatim).
+    "/admin/organizations/:organizationId/source-versions/:sourceVersionId/tabular-measurements",
     // KAI Data Sources completion package: organization-scoped browse read of
     // governed sources/source versions (additive; every prior entry
     // preserved verbatim).

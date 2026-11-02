@@ -1,11 +1,12 @@
 import { withTransaction } from "../db/kaiDb.js";
-import { getScopedEvidenceItemById, getScopedEvidenceMeasurementByEvidenceItemId } from "../db/kaiIntakeQueries.js";
+import { getScopedEvidenceItemById, getScopedEvidenceMeasurementByEvidenceItemId, getScopedDerivedMeasurementByEvidenceItemId } from "../db/kaiIntakeQueries.js";
 import { evaluateClaimTraceabilityInTransaction } from "./postgresClaimTraceabilityRepository.js";
 import { GENERATED_CONTENT_REVIEW_LIFECYCLE_PROFILES } from "./generatedContentReviewQueueContract.js";
 import { evaluateGeneratedDraftReviewPacketInTransaction } from "./postgresGeneratedContentRepository.js";
 import { evaluateInternalReportAvailabilityInTransaction } from "./postgresOrganizationInternalReviewRepository.js";
 import { loadReportContextInTransaction } from "./postgresExportManifestRenderModelRepository.js";
 import { MEASUREMENT_EVIDENCE_TYPE, measurementLimitationCodes } from "../validators/kaiSourceMeasurementValidators.js";
+import { DERIVED_MEASUREMENT_EVIDENCE_TYPE, derivedMeasurementLimitationCodes } from "../validators/kaiDerivedMeasurementValidators.js";
 import { COUNT_ONLY_LIMITATION_CODE, ORDINARY_AUTHORITY_BASIS, ordinaryInternalAuthorityOf } from "./postgresOrdinaryInternalFactAuthority.js";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -89,6 +90,10 @@ async function readClaimFacts(tx, { organizationId, citation, citationRefs }) {
   const measurementRow = evidenceItemRow?.evidence_type === MEASUREMENT_EVIDENCE_TYPE
     ? await getScopedEvidenceMeasurementByEvidenceItemId({ organizationId, evidenceItemId: citation.evidenceItemId }, tx)
     : null;
+  // A source-derived measurement (Measurement MVP) carries its limitations.
+  const derivedRow = evidenceItemRow?.evidence_type === DERIVED_MEASUREMENT_EVIDENCE_TYPE
+    ? await getScopedDerivedMeasurementByEvidenceItemId({ organizationId, evidenceItemId: citation.evidenceItemId }, tx)
+    : null;
   const definitionRow = measurementRow
     ? await readDefinition(tx, { organizationId, sourceMeasurementDefinitionId: measurementRow.source_measurement_definition_id })
     : null;
@@ -136,7 +141,7 @@ async function readClaimFacts(tx, { organizationId, citation, citationRefs }) {
       : null,
     limitationCodes: measurementRow
       ? [...measurementLimitationCodes({ measurementRow, dimensions: data.dimensions }), ...(countOnly ? [COUNT_ONLY_LIMITATION_CODE] : [])]
-      : [],
+      : derivedRow ? derivedMeasurementLimitationCodes({ measurementRow: derivedRow, dimensions: data.dimensions }) : [],
   };
 }
 

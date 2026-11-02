@@ -46,6 +46,8 @@ async function runSuite() {
   const { profileLocalTrustedFile } = await import("../Backend/kai/profiling/localProfilingKernel.js");
   const { recordSourceRecordCountMeasurement, getSourceRecordCountMeasurementBasis, getPairedOutcomeMeasurementBasis } = await import("../Backend/kai/services/kaiSourceMeasurementService.js");
   const { createPostgresSourceMeasurementRepository } = await import("../Backend/kai/dictionary/postgresSourceMeasurementRepository.js");
+  const { recordPairedOutcomeMeasurements, recordTabularMeasurement, recordDerivedMeasurementInterpretation, getDerivedMeasurementBasis } = await import("../Backend/kai/services/kaiSourceMeasurementService.js");
+  const { createPostgresDerivedMeasurementRepository } = await import("../Backend/kai/dictionary/postgresDerivedMeasurementRepository.js");
   const { proposeClaim } = await import("../Backend/kai/services/kaiClaimProposalService.js");
   const { createPostgresClaimProposalRepository } = await import("../Backend/kai/dictionary/postgresClaimProposalRepository.js");
   const { generateClaimGapFollowups } = await import("../Backend/kai/services/kaiClaimGapFollowupService.js");
@@ -125,6 +127,7 @@ async function runSuite() {
   }
   const query = async (sql, params = []) => (await pool.query(sql, params)).rows;
   const measurementRepository = createPostgresSourceMeasurementRepository({ runInTransaction: withTx });
+  const derivedRepository = createPostgresDerivedMeasurementRepository({ runInTransaction: withTx });
   const claimRepository = createPostgresClaimProposalRepository({ runInTransaction: withTx });
   const gapRepository = createPostgresClaimGapFollowupRepository({ runInTransaction: withTx });
   const traceRepository = createPostgresClaimTraceabilityRepository({ runInTransaction: withTx });
@@ -672,6 +675,99 @@ async function runSuite() {
     assert.deepEqual([digital.denominator, digital.increasedCount, digital.unchangedCount, digital.decreasedCount, digital.rate], [38, 25, 10, 3, "65.79"]);
     assert.deepEqual([employment.denominator, employment.increasedCount, employment.unchangedCount, employment.decreasedCount, employment.rate], [40, 23, 13, 4, "57.50"]);
     assert.equal(digital.calculationMethod, employment.calculationMethod);
+  });
+
+  // Measurement MVP: source-derived measurements on real PostgreSQL. Invented
+  // events with a repeated identifier, two statuses and dates; expected values
+  // are worked out by hand from these rows.
+  const EVENT_CSV = [
+    "event_ref,status,event_date",
+    "E1,done,2026-01-05", "E1,done,2026-01-05", "E2,done,2026-02-01",
+    "E3,missed,2026-02-02", "E4,missed,2026-03-03", "E5,done,2025-12-01",
+  ].join("\n") + "\n";
+  const derivedDeps = { env: ENV, derivedMeasurementRepository: derivedRepository };
+  const derivedCounts = async () => (await query(`SELECT
+      (SELECT count(*) FROM kai.source_derived_measurements WHERE organization_id = ANY($1::uuid[]))::int AS measurements,
+      (SELECT count(*) FROM kai.source_derived_measurement_interpretations WHERE organization_id = ANY($1::uuid[]))::int AS interpretations,
+      (SELECT count(*) FROM kai.evidence_derived_measurements WHERE organization_id = ANY($1::uuid[]))::int AS evidence`, [[ORG, OTHER_ORG]]))[0];
+
+  test("Measurement MVP: derived measurements persist through the record count's loader; every refusal writes nothing; CHECKs and append-only rows hold the arithmetic", async () => {
+    const workbook = await seedPromotedSource({ profile: await workbookProfile(syntheticXlsxWorkbook({ sheets: [{ name: "Observations", rows: PAIRED_ROWS }] })) });
+    const events = await seedPromotedSource({ profile: await kernelProfile(EVENT_CSV) });
+    const countsBefore = await measurementCounts();
+    const before = await derivedCounts();
+
+    // Refusals: actors without the P2-01 authority, another tenant, a prohibited source, a stale version, the flag.
+    const pairedFor = (sourceVersionId, actor = ADMIN, organizationId = ORG, env = ENV) =>
+      recordPairedOutcomeMeasurements({ organizationId, sourceVersionId, worksheetKey: null, actorContext: actor, now: NOW }, { ...derivedDeps, env });
+    for (const actor of [REVIEWER, CONTRIBUTOR, OTHER_ADMIN]) assert.equal((await pairedFor(workbook.sourceVersionId, actor)).ok, false);
+    assert.equal((await pairedFor(workbook.sourceVersionId, OTHER_ADMIN, OTHER_ORG)).error.code, "not_found");
+    assert.equal((await pairedFor(workbook.sourceVersionId, ADMIN, ORG, {})).error.code, "feature_disabled");
+    const prohibited = await seedPromotedSource({ profile: await kernelProfile(EVENT_CSV), allowedUse: "not_allowed" });
+    const tabularFor = (sourceVersionId, definition, { interpretation, actor = ADMIN } = {}) => recordTabularMeasurement(
+      { organizationId: ORG, sourceVersionId, definition, ...(interpretation ? { interpretation } : {}), actorContext: actor, now: NOW }, derivedDeps);
+    assert.equal((await tabularFor(prohibited.sourceVersionId, { operation: "count" })).blockers[0].blocking_reason, "allowed_use_not_allowed");
+    const stale = await seedPromotedSource({ profile: await kernelProfile(EVENT_CSV) });
+    await query("UPDATE kai.source_versions SET is_current = false WHERE source_version_id = $1::uuid", [stale.sourceVersionId]);
+    assert.equal((await tabularFor(stale.sourceVersionId, { operation: "count" })).error.code, "conflict_current_state_changed");
+    // No engagement reporting period is recorded for this source, so a period condition cannot be applied.
+    const periodRefused = await tabularFor(events.sourceVersionId, { operation: "count", conditions: [{ kind: "period", field_key: "field_3", period_source: "engagement_reporting_period", scope: "within" }] });
+    assert.equal(periodRefused.blockers[0].blocking_reason, "tabular_reporting_period_not_recorded");
+    // A source profiled before the tabular basis existed is refused, never re-read.
+    const legacyProfile = await kernelProfile(EVENT_CSV);
+    const { tabular_measurement_basis: _basis, ...withoutBasis } = legacyProfile;
+    const legacy = await seedPromotedSource({ profile: withoutBasis });
+    assert.equal((await tabularFor(legacy.sourceVersionId, { operation: "count" })).blockers[0].blocking_reason, "tabular_basis_not_committed");
+    assert.deepEqual(await derivedCounts(), before, "every refusal writes nothing");
+
+    // Paired outcomes retained without a definition; the same numbers as the read-only basis.
+    const paired = await pairedFor(workbook.sourceVersionId);
+    assert.equal(paired.ok, true, JSON.stringify(paired));
+    const byField = Object.fromEntries(paired.data.measurements.map((entry) => [entry.measurement.definition.outcome_field_key, entry]));
+    assert.deepEqual([byField.field_5.measurement.numerator, byField.field_5.measurement.denominator, byField.field_5.measurement.percentage], [2, 4, "50.00"]);
+    assert.deepEqual([byField.field_6.measurement.numerator, byField.field_6.measurement.denominator, byField.field_6.measurement.percentage], [2, 3, "66.67"]);
+    assert.equal(byField.field_5.interpretation, null);
+
+    // Tabular: 6 records; 5 distinct references (E1 twice); 3 distinct done events over 4 records.
+    const basis = await getDerivedMeasurementBasis({ organizationId: ORG, sourceVersionId: events.sourceVersionId, actorContext: ADMIN }, derivedDeps);
+    const statusField = basis.data.tabular.fields.find((field) => field.field_key === "field_2");
+    assert.deepEqual(statusField.values.map((value) => [value.label, value.record_count]), [["done", 4], ["missed", 2]]);
+    const done = { kind: "category", field_key: "field_2", value_key: statusField.values.find((value) => value.label === "done").value_key };
+    const eachRef = { kind: "distinct_key", field_key: "field_1", duplicate_policy: "count_each_key_once" };
+    const distinctDone = await tabularFor(events.sourceVersionId, { operation: "count", unit: eachRef, conditions: [done] });
+    assert.equal(distinctDone.ok, true, JSON.stringify(distinctDone));
+    assert.deepEqual([distinctDone.data.measurement.measured_value, distinctDone.data.measurement.component_counts.matching_record_count], [3, 4]);
+    const distinctAll = await tabularFor(events.sourceVersionId, { operation: "count", unit: eachRef });
+    assert.deepEqual([distinctAll.data.measurement.measured_value, distinctAll.data.measurement.component_counts.exact_duplicate_excess_copies], [5, 1]);
+    const rate = await tabularFor(events.sourceVersionId, { operation: "rate", conditions: [done] });
+    assert.deepEqual([rate.data.measurement.numerator, rate.data.measurement.denominator, rate.data.measurement.percentage], [4, 6, "66.67"]);
+
+    // An interpretation on another tenant's measurement is not found; on this one it changes no arithmetic.
+    const measurementId = distinctDone.data.measurement.source_derived_measurement_id;
+    const interpretation = { indicator_label: "Completed events", meaning_text: "Events delivered as planned." };
+    assert.equal((await recordDerivedMeasurementInterpretation({ organizationId: OTHER_ORG, measurementId, interpretation, actorContext: OTHER_ADMIN, now: NOW }, derivedDeps)).error.code, "not_found");
+    const [rowBefore] = await query("SELECT * FROM kai.source_derived_measurements WHERE source_derived_measurement_id = $1::uuid", [measurementId]);
+    const interpreted = await recordDerivedMeasurementInterpretation({ organizationId: ORG, measurementId, interpretation, actorContext: ADMIN, now: NOW }, derivedDeps);
+    assert.equal(interpreted.ok, true, JSON.stringify(interpreted));
+    assert.deepEqual((await query("SELECT * FROM kai.source_derived_measurements WHERE source_derived_measurement_id = $1::uuid", [measurementId]))[0], rowBefore);
+    // A claim from the interpreted evidence gets its P2-04 gap state in the same command and traces.
+    const claim = await propose(interpreted.data.evidenceItem.evidence_item_id);
+    assert.equal(claim.ok, true, JSON.stringify(claim));
+    assert.equal(claim.data.claim_gap_state.status, "generated", JSON.stringify(claim.data.claim_gap_state));
+    assert.deepEqual((await gapStateOf(claim.data.claim.claim_id)).followups, [], "the method answers every client question");
+    const traced = await trace(claim.data.claim.claim_id);
+    assert.equal(traced.ok, true, JSON.stringify(traced.error));
+
+    // The database holds the arithmetic and refuses rewrites.
+    await assert.rejects(query(
+      `INSERT INTO kai.source_derived_measurements (organization_id, source_version_id, measurement_family, calculation_method, basis_version, measurement_key,
+         definition, field_keys, measured_value, numerator, denominator, percentage, component_counts, exclusions, profile_canonical_sha256, created_by, created_by_type)
+       VALUES ($1::uuid, $2::uuid, 'tabular_rate', 'kai_tabular_conditional_record_rate_v1', 'kai_tabular_measurement_basis_v1', repeat('a', 64),
+         '{}'::jsonb, '[]'::jsonb, 5, 5, 4, 125.00, '{"population_record_count": 4, "numerator_record_count": 5, "other_population_record_count": -1}'::jsonb, '{}'::jsonb, repeat('b', 64), $3::uuid, 'human')`,
+      [ORG, events.sourceVersionId, ADMIN.actorUserId]), /check constraint/);
+    await assert.rejects(query("UPDATE kai.source_derived_measurements SET measured_value = 4 WHERE source_derived_measurement_id = $1::uuid", [measurementId]), /append-only/);
+    await assert.rejects(query("DELETE FROM kai.source_derived_measurement_interpretations WHERE source_derived_measurement_id = $1::uuid", [measurementId]), /append-only/);
+    assert.deepEqual(await measurementCounts(), countsBefore, "no record-count definition or measurement is written or changed");
   });
 
   test("selected-worksheet measurement: real parser and persistence use only the selected dataset, then a measured claim cites its sheet key", async () => {

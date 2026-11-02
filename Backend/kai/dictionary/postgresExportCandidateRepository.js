@@ -16,8 +16,9 @@ import {
 import { GENERATED_CONTENT_REVIEW_LIFECYCLE_PROFILES } from "./generatedContentReviewQueueContract.js";
 import { EXPORT_REVIEW_LIFECYCLE_PROFILES } from "./exportReviewQueueContract.js";
 import { evaluateClaimTraceabilityInTransaction } from "./postgresClaimTraceabilityRepository.js";
-import { getScopedEvidenceMeasurementByEvidenceItemId } from "../db/kaiIntakeQueries.js";
+import { getScopedEvidenceMeasurementByEvidenceItemId, getScopedDerivedMeasurementByEvidenceItemId } from "../db/kaiIntakeQueries.js";
 import { MEASUREMENT_EVIDENCE_TYPE, measurementLimitationCodes } from "../validators/kaiSourceMeasurementValidators.js";
+import { DERIVED_MEASUREMENT_EVIDENCE_TYPE, derivedMeasurementLimitationCodes } from "../validators/kaiDerivedMeasurementValidators.js";
 
 const RESULT_STATUS = Object.freeze({
   validation_blocker: 422,
@@ -170,17 +171,28 @@ async function loadCitedPairs(tx, { organizationId, generatedContentDraftId }) {
 // the claim's current P2-06 dimensions), so a snapshot built from cited pairs
 // carries them instead of an empty list. Field-presence pairs keep [].
 async function loadCitedPairLimitationCodes(tx, { organizationId, requestedAudience }, citedPairs) {
-  const { rows } = await tx.query(
-    `SELECT evidence_item_id::text AS evidence_item_id
-       FROM kai.evidence_items
-      WHERE organization_id = $1::uuid AND evidence_item_id = ANY($2::uuid[]) AND evidence_type = $3`,
-    [organizationId, citedPairs.map((pair) => pair.evidence_item_id), MEASUREMENT_EVIDENCE_TYPE],
-  );
-  const measured = new Set(rows.map((row) => row.evidence_item_id));
+  const measured = new Map();
+  // One read per measurement evidence type: the record count's, then the
+  // source-derived measurement's (Measurement MVP).
+  for (const evidenceType of [MEASUREMENT_EVIDENCE_TYPE, DERIVED_MEASUREMENT_EVIDENCE_TYPE]) {
+    const { rows } = await tx.query(
+      `SELECT evidence_item_id::text AS evidence_item_id
+         FROM kai.evidence_items
+        WHERE organization_id = $1::uuid AND evidence_item_id = ANY($2::uuid[]) AND evidence_type = $3`,
+      [organizationId, citedPairs.map((pair) => pair.evidence_item_id), evidenceType],
+    );
+    for (const row of rows) measured.set(row.evidence_item_id, evidenceType);
+  }
   const codesByPair = new Map();
   for (const pair of citedPairs) {
     if (!measured.has(pair.evidence_item_id)) continue;
     const traceability = await evaluateClaimTraceabilityInTransaction(tx, { organizationId, claimId: pair.claim_id, requestedAudience });
+    if (measured.get(pair.evidence_item_id) === DERIVED_MEASUREMENT_EVIDENCE_TYPE) {
+      const derivedRow = await getScopedDerivedMeasurementByEvidenceItemId({ organizationId, evidenceItemId: pair.evidence_item_id }, tx);
+      if (!traceability.ok || traceability.data?.evidence?.evidence_item_id !== pair.evidence_item_id || !derivedRow) return null;
+      codesByPair.set(pairKey(pair.claim_id, pair.evidence_item_id), derivedMeasurementLimitationCodes({ measurementRow: derivedRow, dimensions: traceability.data.dimensions }));
+      continue;
+    }
     const measurementRow = await getScopedEvidenceMeasurementByEvidenceItemId({ organizationId, evidenceItemId: pair.evidence_item_id }, tx);
     if (!traceability.ok || traceability.data?.evidence?.evidence_item_id !== pair.evidence_item_id || !measurementRow) return null;
     codesByPair.set(pairKey(pair.claim_id, pair.evidence_item_id), measurementLimitationCodes({ measurementRow, dimensions: traceability.data.dimensions }));

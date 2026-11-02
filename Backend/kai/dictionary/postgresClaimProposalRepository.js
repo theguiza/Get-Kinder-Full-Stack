@@ -11,6 +11,7 @@ import {
   getScopedClaimEvidenceLinkByClaimId,
   getScopedClaimReviewQueueItemByClaimId,
   getScopedEvidenceMeasurementByEvidenceItemId,
+  getScopedDerivedMeasurementByEvidenceItemId,
 } from "../db/kaiIntakeQueries.js";
 import {
   validateClaimHasLoadBearingEvidence,
@@ -30,6 +31,11 @@ import {
   validateComposedStatement,
   validateMeasurementClaimBasis,
 } from "../validators/kaiSourceMeasurementValidators.js";
+import {
+  DERIVED_MEASUREMENT_EVIDENCE_TYPE,
+  composeDerivedClaimStatementFromRow,
+  validateDerivedMeasurementClaimBasis,
+} from "../validators/kaiDerivedMeasurementValidators.js";
 
 /**
  * KAI P2-03 deterministic claim-proposal repository adapter: server-derived-only
@@ -653,6 +659,9 @@ export function createPostgresClaimProposalRepository({
         // field-presence composition (and so its existing claim identity).
         let statement;
         const isMeasurementClaim = evidenceItemRow.evidence_type === MEASUREMENT_EVIDENCE_TYPE;
+        // A derived measurement's claim gets the same same-command P2-04 gap
+        // state: its method answers every client-answerable coverage question.
+        const isDerivedMeasurementClaim = evidenceItemRow.evidence_type === DERIVED_MEASUREMENT_EVIDENCE_TYPE;
         if (isMeasurementClaim) {
           const measurementRow = await getScopedEvidenceMeasurementByEvidenceItemId({ organizationId, evidenceItemId }, tx);
           const basis = validateMeasurementClaimBasis({ evidenceItemRow, locatorRow, sourceVersionRow, measurementRow });
@@ -662,6 +671,16 @@ export function createPostgresClaimProposalRepository({
             definitionRow: measurementRow,
             locatorCoordinates: locatorRow.coordinates,
           });
+          const composable = validateComposedStatement(statement);
+          if (!composable.ok) return continuationFailure(composable);
+        } else if (isDerivedMeasurementClaim) {
+          // Measurement MVP: a derived measurement's claim restates its
+          // persisted arithmetic under the interpretation its evidence is
+          // stated in, which must be the measurement's current one.
+          const measurementRow = await getScopedDerivedMeasurementByEvidenceItemId({ organizationId, evidenceItemId }, tx);
+          const basis = validateDerivedMeasurementClaimBasis({ evidenceItemRow, locatorRow, sourceVersionRow, measurementRow });
+          if (!basis.ok) return continuationFailure(basis);
+          statement = composeDerivedClaimStatementFromRow(measurementRow);
           const composable = validateComposedStatement(statement);
           if (!composable.ok) return continuationFailure(composable);
         } else {
@@ -762,7 +781,7 @@ export function createPostgresClaimProposalRepository({
             reviewQueueItem: queueRecord,
             warnings,
             replayed: true,
-            ...(isMeasurementClaim ? { measurementClaim: true } : {}),
+            ...(isMeasurementClaim || isDerivedMeasurementClaim ? { measurementClaim: true } : {}),
           });
         }
 
@@ -793,7 +812,7 @@ export function createPostgresClaimProposalRepository({
           reviewQueueItem: queueRecord,
           warnings,
           replayed: false,
-          ...(isMeasurementClaim ? { measurementClaim: true } : {}),
+          ...(isMeasurementClaim || isDerivedMeasurementClaim ? { measurementClaim: true } : {}),
         });
       });
     } catch (error) {
