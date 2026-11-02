@@ -130,7 +130,11 @@ test("discovery: KAI proposes the participant, stage, version and numeric outcom
     ["missing_participant_identifier", [26]],
     ["stage_not_classified", [27]],
   ]);
-  assert.doesNotMatch(JSON.stringify(profile), /P0\d|R\d\d|"pre"|"post"|"v1"|wellbeing|skills|client_code|timepoint|n\/a|re-entered/, "no header text or cell value is stored");
+  // Measurement MVP: the tabular measurement basis keeps listed category
+  // labels (here the stage values) and nothing else from the cells.
+  const { tabular_measurement_basis: tabularBasis, ...sheetWithoutBasis } = profile.sheets[0];
+  assert.doesNotMatch(JSON.stringify({ ...profile, sheets: [sheetWithoutBasis] }), /P0\d|R\d\d|"pre"|"post"|"v1"|wellbeing|skills|client_code|timepoint|n\/a|re-entered/, "no header text or cell value is stored");
+  assert.doesNotMatch(JSON.stringify(tabularBasis), /P0\d|R\d\d|"v1"|wellbeing|skills|client_code|timepoint|n\/a|re-entered/, "the tabular basis holds no identifier, header or free text");
   // The record-count basis of the same worksheet is unchanged by the refactor.
   assert.deepEqual(deriveRecordCountMeasurement(profile).measurement.measuredValue, ROWS.length);
 });

@@ -10,6 +10,7 @@ import { detectP0FileTypeAgreement } from "../validators/p0FileTypeAgreementDete
 import { detectOoxmlArchiveResourceLimitPolicy } from "../validators/ooxmlArchiveResourceLimitDetector.js";
 import { detectXlsxSheetCellLimitPolicy } from "../validators/xlsxSheetCellLimitDetector.js";
 import { summarizePairedOutcomeBasis } from "./pairedOutcomeBasis.js";
+import { csvRecordsAsRows, summarizeTabularMeasurementBasis } from "./tabularMeasurementBasis.js";
 
 const XLSX_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 export const MAX_REDACTED_SAMPLE_RECORDS = 20;
@@ -361,6 +362,12 @@ async function profileCsv({ extension, declaredMime, bytes }) {
     const text = decodeTrustedUtf8(bytes);
     const records = parseCsvRecords(text);
     const summary = summarizeTabularRecords(records);
+    const tabularMeasurementBasis = summarizeTabularMeasurementBasis({
+      rows: csvRecordsAsRows(records),
+      lastRow: records.length,
+      columnCount: summary.column_count,
+      established: summary.headers.length > 0 && summary.headers.every((header) => header.present),
+    });
     return okProfile("csv", {
       structural_metadata: Object.freeze({
         byte_size: bytes.byteLength,
@@ -386,6 +393,7 @@ async function profileCsv({ extension, declaredMime, bytes }) {
         duplicate_row_count: summary.duplicate_row_count,
       }),
       draft_dictionary_fields: Object.freeze(summary.draft_dictionary_fields),
+      tabular_measurement_basis: tabularMeasurementBasis,
       quality_findings: Object.freeze([]),
       proposals: Object.freeze({
         sensitivity: "unknown",
@@ -718,6 +726,13 @@ function summarizeXlsxRecordCountBasis({ rows, hiddenRows, formula_cell_count, u
   });
 }
 
+// One unambiguous table: the same conditions the record-count method refuses.
+function worksheetTableIsEstablished(basis) {
+  return basis?.header_row_established === true
+    && ["formula_cell_count", "merged_range_count", "hidden_row_count", "hidden_column_count", "values_outside_header_columns_count", "unresolved_value_count"]
+      .every((key) => basis[key] === 0);
+}
+
 function createXlsxSheetSummary(sheet_key, sheetName) {
   return {
     sheet_key,
@@ -768,6 +783,12 @@ async function profileXlsx({ extension, declaredMime, bytes }) {
       const worksheetTable = readXlsxWorksheetTable(xmlBytes, sharedStrings);
       sheetSummary.recordCountBasis = summarizeXlsxRecordCountBasis(worksheetTable);
       sheetSummary.pairedOutcomeBasis = summarizePairedOutcomeBasis({ rows: worksheetTable.rows, recordCountBasis: sheetSummary.recordCountBasis });
+      sheetSummary.tabularMeasurementBasis = summarizeTabularMeasurementBasis({
+        rows: worksheetTable.rows,
+        lastRow: sheetSummary.recordCountBasis.data_record_count + 1,
+        columnCount: sheetSummary.recordCountBasis.field_missing_counts.length,
+        established: worksheetTableIsEstablished(sheetSummary.recordCountBasis),
+      });
       scanXmlElements(xmlBytes, ({ localName, attributes }) => {
         if (localName === "row") {
           const rowIndex = Number.parseInt(attributes.get("r") ?? `${sheetSummary.rowIndices.size + 1}`, 10);
@@ -885,6 +906,7 @@ async function profileXlsx({ extension, declaredMime, bytes }) {
         draft_dictionary_fields: Object.freeze(sheetFields),
         record_count_basis: sheet.recordCountBasis,
         paired_outcome_basis: sheet.pairedOutcomeBasis,
+        tabular_measurement_basis: sheet.tabularMeasurementBasis,
       });
     });
 

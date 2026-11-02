@@ -186,7 +186,13 @@ test("XLSX: single-worksheet compatibility and explicit selection for multi-work
   assert.deepEqual(deriveRecordCountMeasurement(values).measurement.measuredValue, 3);
   const inline = await workbookProfile(syntheticXlsxWorkbook({ inline: true, sheets: [{ rows: header([[0, false], ["   ", ""], ["a", "b"], ["a", "b"]]) }] }));
   assert.deepEqual(inline.sheets[0].record_count_basis, values.sheets[0].record_count_basis);
-  assert.doesNotMatch(JSON.stringify([current, values, inline]), /literacy|mentoring|2026-09-0|"a","b"/, "no cell value is stored in the profile");
+  // Measurement MVP: the only source values a profile keeps are the listed
+  // category labels of its tabular measurement basis (dates by month only);
+  // everything else stays redacted.
+  const withoutTabularBasis = (profile) => ({ ...profile, sheets: profile.sheets.map(({ tabular_measurement_basis: _basis, ...sheet }) => sheet) });
+  assert.doesNotMatch(JSON.stringify([current, values, inline].map(withoutTabularBasis)), /literacy|mentoring|2026-09|"a","b"/, "no cell value is stored in the profile");
+  assert.deepEqual(current.sheets[0].tabular_measurement_basis.fields.find((field) => field.field_key === "field_2").categorical.values.map((value) => value.label), ["literacy", "mentoring"]);
+  assert.doesNotMatch(JSON.stringify(current.sheets[0].tabular_measurement_basis), /2026-09-|"a","b"/, "the basis keeps months and listed labels only");
 });
 
 test("statements state only the counted value, its definition, period, and arithmetic", () => {
