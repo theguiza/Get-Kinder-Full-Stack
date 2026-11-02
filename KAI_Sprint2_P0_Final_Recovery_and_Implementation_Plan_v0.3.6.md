@@ -45646,3 +45646,84 @@ The P2-01M integration spec now expects the server-composed disclosure in the pe
 - **Not yet profiled.** Existing workbook profiles have no paired basis until the workbook is uploaded again as a new intake version.
 
 **Status:** PAIRED_OUTCOME_MEASUREMENT_IMPLEMENTED_AND_VERIFIED_LOCALLY_READ_ONLY; persistence and report projection blocked on an unauthorized schema change. Local commits only; not pushed, deployed, migrated, or verified in production.
+
+### Cedar Bridge six-source assembled impact-evidence acceptance (2026-11-02)
+
+**Owner authorization (USER_CONFIRMED):** owner prompt "KAI — Cedar Bridge Six-Source Assembled Impact Evidence Acceptance". It authorizes one executable assembled acceptance of the six baseline synthetic files through the existing local processing, plus small attributable repairs with regression tests. Excluded: production, migrations, deployment, pushes, flags, credentials, destructive actions, real client data, a parallel pipeline, rebuilding the paired calculator, the Free Assessment, and `00_KAI_CURRENT_STATE.md`.
+
+**Start (TOOL_VERIFIED):** `main` at `74ab39d`, clean. The paired-outcome commits `3bfe7a2` and `74ab39d` are preserved unchanged. DATABASE_URL was the non-listening loopback sentinel for every Node/npm command.
+
+**Inputs (TOOL_VERIFIED):** the six `01_UPLOAD_TO_KAI` files match `File_Integrity_Manifest.json` (sha256 and bytes); the spec re-checks them each run. The corrected service-events version, README, runbook and answer key are never uploaded. The answer key is read only in the comparison step, after KAI's results exist. Nothing from the package is in the repository.
+
+**Implemented:**
+1. `scripts/kai-cedar-bridge-six-source-acceptance-local-postgres.js` (new): the customer XLSX runner's disposable cluster and Plan A normal chain (82 migrations applied, two production-history repairs refused), without Chrome or older-revision checkouts. Run as `KAI_CEDAR_BRIDGE_PACKAGE=<package root> [KAI_CEDAR_BRIDGE_REPORT=<path>] node scripts/kai-cedar-bridge-six-source-acceptance-local-postgres.js`.
+2. `__tests__/kai-cedar-bridge-six-source-assembled-acceptance.integration.spec.js` (new, 12 tests). It writes a JSON boundary report: each file's stages; each measurement with source version, worksheet, method, locator and limitation codes; claims and traceability; generation; the expected → actual comparison of all 73 answer-key metrics; and KAI's observed posture for EB01–EB20.
+   - Real: intake API upload (reserve, signed PUT, confirm), bounded security assessment, the P1 worker and profiler on the original bytes, P1-04 dictionary and quality findings, the administrator's sensitivity decision and promotion routes, P2-01 extraction, the P2-01M basis and write routes, the paired governed read (service; it has no route), P2-03 claim, P2-06 traceability, Get Kinder's evidence, claim and coverage routes, Evidence Summary generation, client internal Markdown, and the GK review packet.
+   - Simulated: session cookie, object storage, the clean scanner adapter, and the model, which repeats each cited claim statement.
+   - Nothing is seeded directly.
+3. **Repair:** `Backend/kai/profiling/localProfilingKernel.js`. Each XLSX worksheet's `counts.duplicate_row_count` and `duplicate_row_hints` compared cell *types*, because `sheet.rows` holds types only. Distinct rows of one shape counted as duplicates: on the Cedar workbook, 154 of 157 rows, while each worksheet's value-compared `record_count_basis.duplicate_record_count` was 0.
+   - The P1-04 dictionary repository reads that count, so KAI stored the data-quality finding "154 duplicate rows detected".
+   - The hint is now the value-compared basis count. A regression test was added in `kai-sprint2-p1-local-profiling-kernel.spec.js`; it fails on the previous kernel. The assembled test 10 also fails on the previous kernel.
+   - Effect: new XLSX profiles only. Existing profiles and their sha are unchanged; already-stored findings stay as written.
+
+**Observed boundary per source (TOOL_VERIFIED, all six accepted, scanned, profiled and promoted):**
+- `01_Project_Context.md`: Markdown structural profile (9 headings, 23 paragraphs).
+  - P2-01 turns each heading into a `dictionary_field_presence_fact` with a `column` locator and type `unknown`.
+  - Record count refused (`measurement_source_not_single_table`).
+  - No content, outcome, period or score meaning reaches KAI. KAI cannot associate it with the workbook.
+- `02_Participant_Register.csv`: 10 draft fields, no quality findings, 10 field-presence items. Recorded count: 80 register records (`p1_csv_profile_data_records_excluding_blank_v1`).
+- `03_Service_Events.csv`:
+  - P1-04 findings: "4 duplicate rows detected", plus one missingness finding.
+  - Recorded count: 246 records, 4 exact-duplicate records included (`measurement.duplicate_records_included`).
+  - No status, date, period, key-deduplication or roster join.
+- `04_Assessments_and_Followups.xlsx`:
+  - Three worksheets, with record-count bases of 112, 38 and 4. Each worksheet needs a selection.
+  - Recorded counts: Assessments (`sheet_1`) 112, Followups (`sheet_2`) 38.
+  - The paired read on the uploaded and promoted version: `sheet_1` available, with `field_6` 38/25/10/3 (65.79%) and `field_7` 40/23/13/4 (57.50%), and nothing persisted. `sheet_2`: `paired_outcome_baseline_followup_stage_not_found`. `sheet_3`: `paired_outcome_participant_identifier_not_found`.
+  - Targets: nothing is proposed and nothing is counted as an achievement.
+- `05_Operations_Notes.txt`: TXT structural profile (41 lines, 19 paragraphs); 0 evidence; record count refused.
+- `06_Programme_Review.pdf`: profiled by the governed PDF worker (3 pages, all with extractable text, 96 text blocks); 0 evidence; record count refused. No page or section locator exists, and the estimate cannot become evidence.
+- Claims (all four counts):
+  - Initially ineligible: `evidence_review_unresolved`, `claim_review_unresolved`, `support_strength_unassessed` and coverage. The truthful decision "personal information present" removes ordinary internal authority.
+  - After GK's existing evidence (supported), claim (internal) and three coverage acceptances: internally eligible. Funder and public stay closed.
+  - Each statement says "with no reporting period defined". The engagement target stores 2025-04-01..2026-03-31 through `PUT requirement-target` (client_admin; gk_reviewer is refused `role_not_allowed`), but no measurement reads it.
+- Generation:
+  - The Evidence Summary persists 4 blocks (201), each citing one count with the server-composed measurement disclosure.
+  - The client internal Markdown is 422 `personal_information_not_cleared` (the existing rule); the GK review packet is 200.
+  - No participant or event identifier reaches the model.
+
+**Answer-key comparison (TOOL_VERIFIED; 73 metrics): 18 match, 1 different definition, 53 unavailable, 1 out of scope.**
+- Match:
+  - Counts: P01 80 (a row count, not a distinct-ID count), E_ROWS 246, A_TOTAL_ASSESSMENT_ROWS 112, F_ATTEMPTED_CONTACTS 38.
+  - Paired results: A_DIG and A_EMP pairs, increased, unchanged, decreased and percent (10).
+  - From the paired exclusions: A_PEOPLE_WITH_ANY_ASSESSMENT 62, A_VERSION_DRIFT_PAIRS 8, A_BASELINE_ONLY 7, A_FOLLOWUP_ONLY 5.
+- Different definition: E_EXACT_DUPLICATE_ROWS, expected 2 and KAI 4. KAI counts every member of a repeated group and keeps them in the count; the key counts the extra copies.
+- Unavailable (no incorrect value was produced):
+  - E_*: completed, cancelled and no-show counts, the period filter, key deduplication, the unmatched ID, and the 222/80/118/104/10 reach figures, durations and months.
+  - P02–P04: enrolment categories and overlap.
+  - Subtotals: A_PEOPLE_WITH_BASELINE_AND_FOLLOWUP, A_SAME_TOOL_VERSION_PAIRS, A_NO_ASSESSMENT_PEOPLE.
+  - Means.
+  - F_*: answered, nonresponse and self-reported categories.
+  - T_*: planning targets, by design.
+- Out of scope: V2.
+- EB13, the PDF "at least 100" estimate: not detectable, because the PDF yields no evidence.
+
+**Verification (TOOL_VERIFIED):**
+- Cedar six-source runner: 12/12.
+- Kernel spec 12/12; P1-04 data-dictionary runner 12/12; paired spec plus P1-04 boundary spec 29/29 (with `KAI_CEDAR_BRIDGE_WORKBOOK`).
+- P2-01M runner: seeds 2/2 and 2/2, main 76 tests (67 passed, 0 failed, 9 skipped), verifiers 7/7 and 10/10.
+- Plan A normal chain: 2/2, 42 tests (40 passed, 0 failed, 2 skipped), 4/4, "Plan A normal-chain proof passed".
+- Customer XLSX file-to-report, after `npm run build` (no tracked change): 37/37, method verifier PASS.
+- `npm test`: 5,972 tests, 5,848 passed, 0 failed, 124 skipped. `npm run verify:kai-sprint2-api-contract`: 71/71. `git diff --check` passed.
+
+**Remaining shared measurement/evidence requirements (NOT_CONFIRMED / not implemented):**
+1. **Value access is the governing dependency.** The P1 profile redacts every value, so a condition on a value (status = completed, date in period, program code, response status), a distinct-key count or a join cannot be computed after profiling. The paired basis avoided this by committing value-free aggregates at profile time, but a human cannot choose a value they cannot see. Owner decision needed: profile-time committed vocabularies or aggregates, versus a governed re-read of the retained bytes at measurement time.
+2. **Persistence for derived measurements.** The paired-outcome migration and write path already specified, generalized to filtered, distinct and categorical counts: method, numerator/denominator, condition fields, definition fingerprint, profile sha, field and row locators. `evidence_measurements` stays record-count only.
+3. **Period application.** Read the engagement's `reporting_period_*` in the measurement definition and filter on a human-selected date field (depends on 1).
+4. **Cross-source lineage.** Distinct reach (events ↔ register) and unmatched IDs need one measurement that cites two source versions. `evidence_items` has one `source_version_id`.
+5. **Narrative and source-reported evidence.** Excerpt evidence with page/section/line locators for PDF, TXT and MD, so the PDF estimate can enter the existing two-claim potential-conflict route. Markdown headings are currently reported as `column` fields; correcting that changes existing P2-01 evidence identities, so it needs a decision.
+6. **Client delivery for personal-information sources.** Either the existing GK release route, or an owner decision on aggregate-only internal authority (as was decided for story-present counts).
+
+**Minimum sequence to the Free Assessment:** (1) value-access decision → (2) paired-outcome persistence migration and write path, then claim basis, P2-06 and VAL-GEN projection → (3) single-source filtered, distinct and categorical counts with the engagement period → (4) cross-source reach and unmatched-ID review → (5) narrative and source-reported evidence with page locators, then conflict candidates → (6) delivery authority for personal-information aggregates → (7) Free Assessment composition over these.
+
+**Status:** CEDAR_BRIDGE_SIX_SOURCE_BASELINE_ESTABLISHED_LOCALLY. One attributable defect was repaired (XLSX duplicate hint). Local commits only; not pushed, deployed, migrated, or verified in production.
