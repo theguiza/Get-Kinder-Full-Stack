@@ -1554,18 +1554,25 @@ async function runCedarBridgeAcceptance() {
       const interpret = async () => (await adminApi("POST", derivedMeasurementInterpretationPath(ORG, CROSS.reach_people.measurementId),
         { indicator_label: "People served again", meaning_text: "Human-stated for this synthetic acceptance: a later restatement.", evidence_basis: "organization_record" })).status;
       const negative = {};
-      // Allowed use: no route revises a promoted file's decision, so the
-      // register's current decision gets a successor directly in this
-      // disposable database (simulated governance change), then a restoring one.
+      // Allowed use: the administrator reviews the register's processing
+      // permissions again through the existing Review Cockpit routes
+      // (review-work, then a decision that supersedes the current one).
+      const reviewAgain = async (allowed) => {
+        const profileId = state.register.sensitivity.intake_sensitivity_profile_id;
+        const work = await adminApi("POST", `${COCKPIT}/sensitivity-profiles/${profileId}/review-work?organization_id=${ORG}`, {});
+        const [queue] = await query(
+          `SELECT review_queue_item_id::text, updated_at FROM kai.review_queue_items
+            WHERE organization_id = $1::uuid AND queue_type = 'sensitivity_review' AND target_object_id = $2::uuid ORDER BY created_at DESC LIMIT 1`, [ORG, profileId]);
+        const decided = await adminApi("POST", `${COCKPIT}/sensitivity-profiles/${profileId}/decision?organization_id=${ORG}`, {
+          expected_updated_at: new Date(queue.updated_at).toISOString(), review_queue_item_id: queue.review_queue_item_id, decision: "reviewed",
+          reviewed_snapshot: { ...DECISIONS.register, reviewed_allowed_use_status: allowed ? "allowed" : "not_allowed", reviewed_llm_processing_allowed: allowed },
+        });
+        return [work.status, decided.status, blockersOf(decided)];
+      };
       const successor = async (allowed) => {
-        const [head] = await query(
-          `SELECT d.* FROM kai.intake_sensitivity_review_decisions d WHERE d.intake_sensitivity_profile_id = $1::uuid
-              AND NOT EXISTS (SELECT 1 FROM kai.intake_sensitivity_review_decisions s WHERE s.supersedes_decision_id = d.decision_id)`,
-          [state.register.sensitivity.intake_sensitivity_profile_id]);
-        const { decision_id: headId, created_at: _c, ...copy } = head;
-        Object.assign(copy, { supersedes_decision_id: headId, reviewed_allowed_use_status: allowed ? "allowed" : "not_allowed", reviewed_llm_processing_allowed: allowed });
-        const columns = Object.keys(copy);
-        await query(`INSERT INTO kai.intake_sensitivity_review_decisions (${columns.join(", ")}) VALUES (${columns.map((_, i) => `$${i + 1}`).join(", ")})`, columns.map((c) => copy[c]));
+        const result = await reviewAgain(allowed);
+        negative[`review_${allowed ? "allowed" : "not_allowed"}`] = result;
+        assert.ok([200, 201].includes(result[0]) && result[1] === 200, `review processing permissions again: ${J(result)}`);
       };
       await successor(false);
       negative.register_not_allowed = { traceability: await trace(claimId), generation: await generate([claimId]), record: await recordAgain(), interpret: await interpret(),
