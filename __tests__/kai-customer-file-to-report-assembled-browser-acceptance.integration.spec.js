@@ -369,13 +369,14 @@ async function runAssembledAcceptance() {
   };
   assert.deepEqual([independent.dataRecords, independent.blankRecords, independent.duplicateRecords, independent.counted], [6, 1, 2, 5]);
   // No reviewer accepts the source-level limitations (owner decision
-  // 2026-10-25): they are carried, unresolved, into every report.
+  // 2026-10-25): they are carried, unresolved, into every report. The
+  // administrator's reviewed small-cell 'absent' clears that dimension, so it
+  // carries no code (small-cell Package 1, 7e8247f).
   const MEASURED_LIMITATION_CODES = [
     "coverage.conflicting_source_indicators.unresolved",
     "coverage.duplicates.resolved_risk_flagged",
     "coverage.missingness.resolved_risk_flagged",
     "coverage.requirement_alignment.unresolved",
-    "coverage.small_cell_risk.unresolved",
     "coverage.time_period_clarity.resolved_risk_flagged",
     "measurement.blank_records_excluded",
     "measurement.duplicate_records_included",
@@ -1209,7 +1210,8 @@ async function runAssembledAcceptance() {
       assert.deepEqual([traced.body.data.claim.claim_review_status, traced.body.data.claim.claim_strength, traced.body.data.evidence.support_strength],
         ["needs_gk_review", "unassessed", "unassessed"], "the stored review state is not rewritten");
       const carried = Object.entries(traced.body.data.dimensions).filter(([, value]) => value.assessment_status === "unresolved").map(([key]) => key).sort();
-      assert.deepEqual(carried, ["conflicting_source_indicators", "requirement_alignment", "small_cell_risk"]);
+      assert.equal(traced.body.data.dimensions.small_cell_risk.assessment_status, "resolved_clear", "the reviewed small-cell 'absent' is in effect");
+      assert.deepEqual(carried, ["conflicting_source_indicators", "requirement_alignment"]);
       assert.ok(carried.every((key) => traced.body.data.dimensions[key].internal_limitation_accepted === false && traced.body.data.dimensions[key].blocks_requested_audience === false),
         "carried as limitations, never recorded as accepted");
       for (const audience of ["funder", "public"]) {

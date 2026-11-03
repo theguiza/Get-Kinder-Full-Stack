@@ -6,6 +6,17 @@ import { createPostgresSensitivityAllowedUseReviewRepository } from "../Backend/
 import { findCurrentSensitivityAllowedUseDecision } from "../Backend/kai/dictionary/postgresSensitivityAllowedUseDecisionRepository.js";
 import { createPostgresEvidenceCoverageAssessmentRepository } from "../Backend/kai/dictionary/postgresEvidenceCoverageAssessmentRepository.js";
 import { assessEvidenceCoverageForSourceVersion } from "../Backend/kai/services/kaiEvidenceCoverageAssessmentService.js";
+import { sendServiceResult } from "../Backend/kai/routes/sprint2IntakeApi.js";
+import { projectSensitivityDecisionResult } from "../frontend/impactEvidenceLibraryLogic.js";
+
+// The HTTP envelope the sensitivity decision route sends for a service result
+// (invokeService -> sendServiceResult), read the way the browser's postJson
+// does: { statusCode, body }.
+function httpResponseOf(result) {
+  const res = { statusCode: null, body: null, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
+  sendServiceResult(res, result);
+  return { statusCode: res.statusCode, body: JSON.parse(JSON.stringify(res.body)) };
+}
 
 /**
  * Package 2B connected synthetic handoff: the real review service, the real
@@ -289,6 +300,8 @@ test("Package 2B: a human-reviewed small-cell decision written by the real write
   const first = await review(T0, T1, "absent");
   assert.equal(first.ok, true, JSON.stringify(first));
   assert.equal(first.data.replayed, false);
+  const firstUi = projectSensitivityDecisionResult(httpResponseOf(first), "reviewed");
+  assert.deepEqual([firstUi.status, firstUi.replayed], ["recorded", false], "the UI reports a newly recorded decision");
   assert.equal(first.data.reviewQueueItem.queue_status, "resolved");
   assert.equal(first.data.reviewQueueItem.updated_at, T1);
   assert.equal(state.queueItems[0].updated_at.toISOString(), T1, "the conditional queue update was applied");
@@ -337,6 +350,9 @@ test("Package 2B: a human-reviewed small-cell decision written by the real write
   const stale = await review(T1, T3, "absent");
   assert.equal(stale.ok, false);
   assert.equal(stale.error.code, "conflict_current_state_changed");
+  const staleHttp = httpResponseOf(stale);
+  assert.equal(staleHttp.statusCode, 409);
+  assert.deepEqual(projectSensitivityDecisionResult(staleHttp, "reviewed"), { status: "conflict" }, "the UI shows the stale-state refresh, not a recorded decision");
   assert.equal(inserts().length, 2, "no new decision INSERT");
   assert.equal(state.decisions.length, 2, "no new authority");
   assert.equal(state.uploadAudits.length, 2);
@@ -347,6 +363,8 @@ test("Package 2B: a human-reviewed small-cell decision written by the real write
   const replay = await review(T1, T3, "present");
   assert.equal(replay.ok, true, JSON.stringify(replay));
   assert.equal(replay.data.replayed, true);
+  const replayUi = projectSensitivityDecisionResult(httpResponseOf(replay), "reviewed");
+  assert.deepEqual([replayUi.status, replayUi.replayed], ["recorded", true], "the UI reports that nothing new was recorded");
   assert.equal(replay.data.decision.decision_id, presentRow.decision_id);
   assert.equal(inserts().length, 2);
 

@@ -6,6 +6,10 @@ import { evaluateClaimTraceabilityInTransaction } from "../Backend/kai/dictionar
 import { listOrganizationEvidenceGapsForImpactLibrary } from "../Backend/kai/services/kaiOrganizationEvidenceGapReadService.js";
 import { computeCoverageReviewDecisionFingerprint } from "../Backend/kai/validators/kaiCoverageReviewDecisionValidators.js";
 import { createPostgresCoverageReviewDecisionRepository } from "../Backend/kai/dictionary/postgresCoverageReviewDecisionRepository.js";
+import { classifySourceDecision, recordedSourcePermissions } from "../Backend/kai/dictionary/postgresOrdinaryInternalFactAuthority.js";
+import { composeMeasurementDisclosure, measurementLimitationCodes } from "../Backend/kai/validators/kaiSourceMeasurementValidators.js";
+import { projectOrganizationGapsAndRisks, projectReviewQueue } from "../frontend/impactEvidenceLibraryLogic.js";
+import { ordinaryRuleConditions } from "../frontend/knowledgeStudio/clientMeasuredClaimReviewLogic.js";
 
 /**
  * KAI Package 4 semantic-parity regression.
@@ -468,6 +472,76 @@ test("traceability keeps historical small-cell gaps and binds acceptance to the 
   state.head = { ...snapshot, decision_outcome: "needs_more_information", decision_id: "00000000-0000-4000-8000-000000009906" };
   result = await runTraceability(tx);
   assert.equal(result.data.dimensions.small_cell_risk.internal_limitation_accepted, true, "no applicable review retains legacy behavior");
+});
+
+// Final local acceptance (2026-11-03): the customer XLSX scenario's C1
+// decision shape - an organization administrator's reviewed decision with
+// small-cell 'absent' and story/testimonial 'present' - over a machine profile
+// that still says 'unknown' and a historical unresolved small-cell gap. The
+// actual traceability and organization-gap responses are read the way the
+// browser reads them (JSON), then projected by the real UI logic.
+test("final acceptance: a reviewed small-cell 'absent' reaches traceability, organization gaps and the UI projection; the story restriction stays", async () => {
+  const smallGapId = "00000000-0000-4000-8000-000000009999";
+  const head = {
+    organization_id: ORG, intake_sensitivity_profile_id: PROFILE_ID, decision_id: "00000000-0000-4000-8000-000000009911",
+    decision_outcome: "reviewed", decided_by: "00000000-0000-4000-8000-000000009912", decided_by_role: "client_admin", created_by_type: "human",
+    reviewed_personal_data_status: "absent", reviewed_minor_data_status: "absent", reviewed_health_housing_justice_immigration_status: "absent",
+    reviewed_indigenous_governance_status: "absent", reviewed_staff_notes_status: "absent", reviewed_story_testimonial_status: "present",
+    reviewed_small_cell_risk_status: "absent", reviewed_financial_records_status: "absent", reviewed_consent_basis_status: "unknown",
+    reviewed_allowed_use_status: "allowed", reviewed_llm_processing_allowed: true, reviewed_product_learning_allowed: false,
+    reviewed_public_use_allowed: false, reviewed_funder_use_allowed: false,
+  };
+  const state = { head, acceptances: [], reviewed: true };
+  const tx = buildFakeTx({ qualityFindingRows: [], smallCellState: state });
+  const persistedWithSmallCell = [...persistedGapRows(), { ...persistedGapRows()[0], gap_log_item_id: smallGapId,
+    dimension_key: "small_cell_risk", validator_key: "VAL-KAI-P2-02-small_cell_risk" }];
+
+  const traced = await runTraceability(tx);
+  assert.equal(traced.ok, true, JSON.stringify(traced));
+  const response = JSON.parse(JSON.stringify(traced.data));
+  assert.equal(response.dimensions.small_cell_risk.assessment_status, "resolved_clear");
+  assert.equal(response.dimensions.small_cell_risk.blocks_requested_audience, false);
+  assert.equal(response.gap_items.some((row) => row.dimension_key === "small_cell_risk"), false, "the superseded original risk yields no active gap");
+  assert.equal(response.gap_items.some((row) => row.dimension_key === "missingness"), true, "independent gaps are kept");
+
+  const orgGaps = await listOrganizationEvidenceGapsForImpactLibrary(
+    { organizationId: ORG, limit: 25, afterGapLogItemId: null, actorContext: actorContext() },
+    { env: { KAI_SPRINT2_ENABLED: "true" }, runInTransaction: (callback) => callback(tx),
+      listOrganizationEvidenceGaps: async () => persistedWithSmallCell.map((row) => ({ gap_log_item_id: row.gap_log_item_id,
+        claim_id: row.claim_id, dimension_key: row.dimension_key, assessment_status: row.assessment_status, validator_key: row.validator_key })) },
+  );
+  assert.equal(orgGaps.ok, true, JSON.stringify(orgGaps));
+  const orgKeys = orgGaps.data.items.map((item) => item.dimension_key).sort();
+  assert.deepEqual(orgKeys, response.gap_items.map((item) => item.dimension_key).sort(), "organization gaps agree with traceability");
+  assert.equal(orgKeys.includes("small_cell_risk"), false);
+
+  // UI: the Review Queue item and the Gaps and Risks card, from the response.
+  const [queueItem] = projectReviewQueue({ items: [response] });
+  const smallCell = queueItem.dimensions.find((row) => row.dimensionKey === "small_cell_risk");
+  assert.deepEqual([smallCell.displayStatus, smallCell.blocksRequestedAudience], ["resolved_clear", false]);
+  const gapsAndRisks = projectOrganizationGapsAndRisks([queueItem]);
+  assert.equal([...gapsAndRisks.gapItems, ...gapsAndRisks.coverageFindings].some((row) => row.dimensionKey === "small_cell_risk"), false,
+    "the Gaps card shows no small-cell gap or finding");
+
+  // Downstream limitation codes and the composed disclosure carry no small-cell limitation.
+  const codes = measurementLimitationCodes({ measurementRow: { period_start: "2026-09-01", blank_record_count: 0, duplicate_record_count: 0 },
+    dimensions: response.dimensions });
+  assert.equal(codes.some((code) => code.startsWith("coverage.small_cell_risk.")), false, JSON.stringify(codes));
+  assert.doesNotMatch(composeMeasurementDisclosure(codes) || "", /small/i);
+
+  // The independent story/testimonial restriction is untouched.
+  assert.deepEqual(classifySourceDecision(head), { getKinderReviewReasons: ["story_testimonial_not_cleared"], blockedReasons: [] });
+  const conditions = ordinaryRuleConditions({ sourcePermissions: { isCurrent: true, sensitivityReviewComplete: true, allowedUseStatus: "allowed",
+    aiProcessingAllowed: true, categories: recordedSourcePermissions(head).categories } });
+  assert.equal(conditions.length, 1, JSON.stringify(conditions));
+  assert.doesNotMatch(conditions[0], /small/i);
+
+  // Reviewed 'unknown' keeps the dimension unresolved (and blocking) end to end.
+  state.head = { ...head, decision_id: "00000000-0000-4000-8000-000000009913", reviewed_small_cell_risk_status: "unknown" };
+  const unknown = JSON.parse(JSON.stringify((await runTraceability(tx)).data));
+  assert.equal(unknown.dimensions.small_cell_risk.assessment_status, "unresolved");
+  const [unknownItem] = projectReviewQueue({ items: [unknown] });
+  assert.equal(projectOrganizationGapsAndRisks([unknownItem]).coverageFindings.some((row) => row.dimensionKey === "small_cell_risk"), true);
 });
 
 test("real acceptance writer and traceability reader share the small-cell decision fingerprint", async () => {

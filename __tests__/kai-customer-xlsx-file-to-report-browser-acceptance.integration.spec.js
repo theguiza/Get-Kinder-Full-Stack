@@ -1049,9 +1049,14 @@ async function runXlsxAcceptance() {
       assert.equal(claim.status, 200, J(claim.body));
       // The source-level limitations no longer block (they are carried under
       // the count-only basis); Get Kinder still accepts them explicitly here.
-      const unresolved = Object.entries((await internalEligibility(ids.story.claimId)).dimensions)
+      // Superseded expectation (small-cell Package 1, 7e8247f): C1 records
+      // small-cell 'absent', so that dimension is resolved_clear and is not an
+      // unresolved limitation to accept.
+      const c3Dimensions = (await internalEligibility(ids.story.claimId)).dimensions;
+      assert.equal(c3Dimensions.small_cell_risk.assessment_status, "resolved_clear");
+      const unresolved = Object.entries(c3Dimensions)
         .filter(([, value]) => value.assessment_status === "unresolved").map(([key]) => key).sort();
-      assert.deepEqual(unresolved, ["conflicting_source_indicators", "requirement_alignment", "small_cell_risk"]);
+      assert.deepEqual(unresolved, ["conflicting_source_indicators", "requirement_alignment"]);
       for (const dimensionKey of unresolved) {
         const accepted = await gkApi("POST", `${orgPath()}/claims/${ids.story.claimId}/coverage-dimensions/${dimensionKey}/internal-acceptance`, {});
         assert.equal(accepted.status, 201, `${dimensionKey}: ${J(accepted.body)}`);
@@ -1684,9 +1689,11 @@ async function runXlsxAcceptance() {
       assert.equal(afterReviews.eligible, false, "approving the evidence and claim does not clear coverage");
       assert.deepEqual(afterReviews.blockerCodes, ["coverage_dimension_unresolved"], J(afterReviews.blockerCodes));
 
-      // Coverage: accept each unresolved limitation from the finding.
+      // Coverage: accept each unresolved limitation from the finding. The
+      // source's reviewed small-cell 'absent' (restrictedSnapshot) is clear, so
+      // no small-cell acceptance is offered (small-cell Package 1, 7e8247f).
       const unresolved = await gkPage.evaluate(`[...document.querySelectorAll(${J(`${panel} [data-gk-finding-accept-limitation]`)})].map((el) => el.getAttribute("data-gk-finding-accept-limitation"))`);
-      assert.deepEqual([...unresolved].sort(), ["conflicting_source_indicators", "requirement_alignment", "small_cell_risk"]);
+      assert.deepEqual([...unresolved].sort(), ["conflicting_source_indicators", "requirement_alignment"]);
       for (const dimensionKey of unresolved) {
         mark = gkPage.mark();
         await gkPage.clickIn(`${panel} [data-gk-finding-accept-limitation="${dimensionKey}"]`, `accept ${dimensionKey}`);
@@ -1716,7 +1723,8 @@ async function runXlsxAcceptance() {
       assert.equal(freshView.source_permissions.categories.reviewed_story_testimonial_status, "unknown");
       assert.ok(freshView.limitations.some((row) => row.code === "measurement.record_meaning_human_defined"));
       assert.deepEqual(freshView.coverage_limitations.filter((row) => row.assessment_status === "unresolved").map((row) => [row.dimension_key, row.internal_limitation_accepted]).sort(),
-        [["conflicting_source_indicators", true], ["requirement_alignment", true], ["small_cell_risk", true]]);
+        [["conflicting_source_indicators", true], ["requirement_alignment", true]]);
+      assert.equal(freshView.coverage_limitations.some((row) => row.dimension_key === "small_cell_risk"), false, "a clear small-cell dimension is not a limitation");
       for (const audience of ["funder", "public"]) assert.equal((await internalEligibility(entry.claimId, audience)).eligible, false, `${audience} stays closed`);
       const queue = await gkApi("GET", `${orgPath()}/review-queue`);
       assert.ok(!J(queue.body).includes(entry.claimId), "the reviewed claim leaves the Review Queue");
