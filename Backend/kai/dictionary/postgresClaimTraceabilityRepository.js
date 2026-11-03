@@ -32,6 +32,7 @@ import { DERIVED_MEASUREMENT_EVIDENCE_TYPE, derivedContributingSourcesCurrent,
   derivedMeasurementLabelsAdmitted, derivedEvidenceIsCurrent } from "../validators/kaiDerivedMeasurementValidators.js";
 import { readEffectiveAllowedUseProhibitions } from "./postgresEffectiveAllowedUseResolver.js";
 import { __evidenceCoverageAssessmentRepositoryTestables } from "./postgresEvidenceCoverageAssessmentRepository.js";
+import { SMALL_CELL_DECISION_ID } from "./postgresSensitivityAllowedUseDecisionRepository.js";
 import { validateConflictGroupCompleteness } from "../validators/kaiConflictGroupValidators.js";
 import {
   COVERAGE_REVIEW_DECISION_TYPE,
@@ -97,6 +98,7 @@ const {
 
 const {
   buildExpectedGapPlans,
+  projectSmallCellGapRows,
   buildExpectedFollowupDimensionKeys,
   claimCoverageDimensions,
   gapRowsMatchExpectation,
@@ -620,7 +622,11 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
   });
   const expectedGapPlans = buildExpectedGapPlans(dimensions);
   const expectedFollowupDimensionKeys = buildExpectedFollowupDimensionKeys(expectedGapPlans, answeredDimensionKeys);
-  const gapRows = await readGapRows(tx, { organizationId, claimId });
+  const storedGapRows = await readGapRows(tx, { organizationId, claimId });
+  const gapRows = projectSmallCellGapRows(storedGapRows, expectedGapPlans, profileRow, {
+    evidenceItemId: evidenceItemRow.evidence_item_id, sourceVersionId: evidenceItemRow.source_version_id,
+  });
+  if (!gapRows) return failureWithReason("gap_followup_queue_mismatch");
   const followupRows = await readFollowupRows(tx, { organizationId, claimId });
   const followupQueueRows = await readFollowupQueueRows(tx, {
     organizationId,
@@ -730,6 +736,7 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
           evidenceReviewStatus: evidenceReviewQueueItemRow.review_status,
           claimStrength: claimRow.claim_strength,
           supportStrength: evidenceItemRow.support_strength,
+          smallCellDecisionId: profileRow.small_cell_review_decision_id,
         });
         internalAccepted = coverageReviewDecisionRows.some((row) => (
           row.dimension_key === dimensionKey
@@ -954,6 +961,7 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
     affectedObjectIds: [...affectedObjectIds].sort(),
     truncated,
   };
+  Object.defineProperty(data, SMALL_CELL_DECISION_ID, { value: profileRow.small_cell_review_decision_id ?? null });
   if (ordinaryAuthority) {
     attachOrdinaryInternalAuthority(data, {
       basis: ordinaryInternal ? ordinaryAuthority.basis : null,

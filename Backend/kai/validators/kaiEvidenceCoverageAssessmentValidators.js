@@ -201,19 +201,18 @@ export function assessEntityLevelClarity(dictionaryFieldRows) {
 
 /**
  * small_cell_risk: `kai.intake_sensitivity_profiles.small_cell_risk_status`
- * is the only committed fact this dimension ever assesses - a 3-state
- * ('unknown' | 'present' | 'absent') CHECK-enforced column already
- * authoritative for this exact question.
+ * is supplied as the effective profile/review determination: a 3-state
+ * ('unknown' | 'present' | 'absent') fact.
  */
 export function assessSmallCellRisk(profileRow) {
   const status = profileRow?.small_cell_risk_status;
   if (status === "present") {
-    return dimensionResult("small_cell_risk", "resolved_risk_flagged", "The committed sensitivity profile declares small-cell risk present.");
+    return dimensionResult("small_cell_risk", "resolved_risk_flagged", "The current sensitivity determination records small-cell risk present.");
   }
   if (status === "absent") {
-    return dimensionResult("small_cell_risk", "resolved_clear", "The committed sensitivity profile declares small-cell risk absent.");
+    return dimensionResult("small_cell_risk", "resolved_clear", "The current sensitivity determination records small-cell risk absent.");
   }
-  return dimensionResult("small_cell_risk", "unresolved", "The committed sensitivity profile does not yet resolve small-cell risk.");
+  return dimensionResult("small_cell_risk", "unresolved", "The current sensitivity determination does not resolve small-cell risk.");
 }
 
 /**

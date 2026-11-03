@@ -9,6 +9,7 @@ import {
 } from "../db/kaiIntakeQueries.js";
 import { findCurrentEvidenceReviewDecision } from "./postgresHumanReviewDecisionRepository.js";
 import { readEffectiveAllowedUseProhibition } from "./postgresEffectiveAllowedUseResolver.js";
+import { findCurrentSensitivityAllowedUseDecision, effectiveSmallCellRiskStatus, applicableSmallCellReview } from "./postgresSensitivityAllowedUseDecisionRepository.js";
 
 /**
  * KAI P2-02 deterministic evidence-coverage-assessment repository adapter:
@@ -96,8 +97,15 @@ async function readSensitivityProfileForAssessment({ organizationId, intakeSensi
   );
   const profileRow = rows[0] || null;
   if (!profileRow) return null;
+  const currentDecision = await findCurrentSensitivityAllowedUseDecision(db, {
+    organizationId: profileRow.organization_id,
+    intakeSensitivityProfileId: profileRow.intake_sensitivity_profile_id,
+  });
   return {
     ...profileRow,
+    small_cell_risk_status: effectiveSmallCellRiskStatus(profileRow, currentDecision),
+    small_cell_review_head_id: currentDecision?.decision_id ?? null,
+    small_cell_review_decision_id: applicableSmallCellReview(profileRow, currentDecision)?.decision_id ?? null,
     effective_allowed_use_prohibition: await readEffectiveAllowedUseProhibition(db, {
       organizationId: profileRow.organization_id,
       intakeSensitivityProfileId: profileRow.intake_sensitivity_profile_id,
@@ -192,6 +200,9 @@ export function createPostgresEvidenceCoverageAssessmentRepository({ runInTransa
       const run = runInTransaction || (await resolveDefaultRunInTransaction());
       try {
         return await run(async (tx) => {
+          // The review head and allowed-use facts must come from the same
+          // snapshot as the source lineage and profile.
+          await tx.query("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ");
           const sourceVersionRow = await getScopedSourceVersionById({ organizationId, sourceVersionId }, tx);
 
           const sourceRow = sourceVersionRow

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import { createPostgresClaimGapFollowupRepository } from "../Backend/kai/dictionary/postgresClaimGapFollowupRepository.js";
 import { createProductionMetadataOnlyAuditForClaimGapFollowup } from "../Backend/kai/services/kaiMetadataOnlyAuditComposition.js";
+import { assessSmallCellRisk } from "../Backend/kai/validators/kaiEvidenceCoverageAssessmentValidators.js";
 
 /**
  * P2-04 operational-audit correction proof. Mirrors the existing proven
@@ -344,6 +345,84 @@ function computeDimensionsForTesting() {
     coverage_gaps: resolvedClear,
   };
 }
+
+test("P2-04 refresh projects historical small-cell gap through successive reviewed decisions", async () => {
+  const other = { gap_log_item_id: "d1000000-0000-4000-8000-000000000002", organization_id: ORG, claim_id: CLAIM,
+    evidence_item_id: EVIDENCE_ITEM, source_version_id: SOURCE_VERSION, dimension_key: "conflicting_source_indicators",
+    assessment_status: "unresolved", validator_key: "VAL-KAI-P2-02-conflicting_source_indicators",
+    safe_summary: "Claim gap requires review for dimension: conflicting_source_indicators.", open_finding_count: null,
+    field_count: null, undefined_field_count: null, uncovered_field_count: null, created_by_type: "system", created_at: NOW };
+  const small = { ...other, gap_log_item_id: GAP_ID, dimension_key: "small_cell_risk", validator_key: "VAL-KAI-P2-02-small_cell_risk",
+    safe_summary: "Claim gap requires review for dimension: small_cell_risk." };
+  const gaps = [other, small];
+  let head = null;
+  let concurrentInsert = false;
+  const snapshot = {
+    organization_id: ORG, intake_sensitivity_profile_id: SENSITIVITY_PROFILE, decision_id: "head-a", decision_outcome: "reviewed",
+    decided_by: "90000000-0000-4000-8000-000000000001", decided_by_role: "gk_reviewer", created_by_type: "human", created_at: NOW,
+    reviewed_personal_data_status: "unknown", reviewed_minor_data_status: "unknown", reviewed_health_housing_justice_immigration_status: "unknown",
+    reviewed_indigenous_governance_status: "unknown", reviewed_staff_notes_status: "unknown", reviewed_story_testimonial_status: "unknown",
+    reviewed_small_cell_risk_status: "absent", reviewed_financial_records_status: "unknown", reviewed_consent_basis_status: "unknown",
+    reviewed_allowed_use_status: "allowed", reviewed_llm_processing_allowed: false, reviewed_product_learning_allowed: false,
+    reviewed_public_use_allowed: false, reviewed_funder_use_allowed: false,
+  };
+  const provider = createFakeTransactionProvider((sql, params) => {
+    if (sql.includes("FROM kai.intake_sensitivity_review_decisions")) return { rows: head ? [head] : [] };
+    if (sql.includes("FROM kai.gap_log_items")) return { rows: gaps.map((row) => ({ ...row })) };
+    if (sql.startsWith("INSERT INTO kai.gap_log_items")) {
+      if (concurrentInsert) return { rows: [], rowCount: 0 };
+      const created = { ...small, assessment_status: params[5] };
+      gaps.push(created);
+      return { rows: [created], rowCount: 1 };
+    }
+    if (sql.includes("FROM kai.intake_sensitivity_profiles")) {
+      const result = fakeQueryHandler(sql, params);
+      return { ...result, rows: result.rows.map((row) => ({ ...row, small_cell_risk_status: "unknown" })) };
+    }
+    return fakeQueryHandler(sql, params);
+  });
+  const repository = createPostgresClaimGapFollowupRepository({ runInTransaction: runInTransactionFor(provider), computeDimensions: ({ profileRow }) => {
+    const clear = { validator_key: "VAL-KAI-P2-02-clear", evidence: { assessment_status: "resolved_clear" } };
+    return { missingness: clear, duplicates: clear, definition_clarity: clear, denominator_clarity: clear,
+      time_period_clarity: clear, entity_level_clarity: clear, small_cell_risk: assessSmallCellRisk(profileRow),
+      conflicting_source_indicators: { validator_key: other.validator_key, evidence: { assessment_status: "unresolved" } },
+      requirement_alignment: clear, coverage_gaps: clear };
+  } });
+  const metadataOnlyAudit = { prepareMetadataOnlyAudit: () => ({ ok: true, publish: async () => {} }) };
+  const refresh = () => repository.generateClaimGapsAndFollowups({ organizationId: ORG, claimId: CLAIM, actorUserId: "user-1", now: NOW, metadataOnlyAudit });
+  let result = await refresh();
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.data.gapItems.length, 2);
+  head = snapshot;
+  result = await refresh();
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.deepEqual(result.data.gapItems.map((row) => row.dimension_key), ["conflicting_source_indicators"]);
+  assert.equal(gaps.length, 2);
+  head = { ...snapshot, decision_id: "head-b", reviewed_small_cell_risk_status: "present" };
+  result = await refresh();
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.data.gapItems.find((row) => row.dimension_key === "small_cell_risk").assessment_status, "resolved_risk_flagged");
+  head = { ...snapshot, decision_id: "head-c", reviewed_small_cell_risk_status: "unknown" };
+  result = await refresh();
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.data.gapItems.find((row) => row.dimension_key === "small_cell_risk").assessment_status, "unresolved");
+  gaps.pop();
+  head = { ...snapshot, decision_id: "head-d", reviewed_small_cell_risk_status: "present" };
+  result = await refresh();
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.data.replayed, false);
+  assert.equal(gaps.find((row) => row.dimension_key === "small_cell_risk").assessment_status, "resolved_risk_flagged");
+  assert.equal((await refresh()).data.replayed, true);
+  gaps.pop();
+  concurrentInsert = true;
+  result = await refresh();
+  assert.equal(result.error.code, "conflict_current_state_changed");
+  assert.deepEqual(gaps, [other]);
+  concurrentInsert = false;
+  gaps[0] = { ...other, source_version_id: "stale" };
+  result = await refresh();
+  assert.equal(result.error.code, "conflict_current_state_changed");
+});
 
 test("P2-04 generateClaimGapsAndFollowups: required metadata-only audit uses the SAME tx/connection as the domain mutation (fresh write)", async () => {
   const provider = createFakeTransactionProvider(fakeQueryHandler);

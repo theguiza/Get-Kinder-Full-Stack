@@ -4,6 +4,8 @@ import assert from "node:assert/strict";
 import { getClaimTraceabilitySummary } from "../Backend/kai/services/kaiClaimTraceabilityService.js";
 import { evaluateClaimTraceabilityInTransaction } from "../Backend/kai/dictionary/postgresClaimTraceabilityRepository.js";
 import { listOrganizationEvidenceGapsForImpactLibrary } from "../Backend/kai/services/kaiOrganizationEvidenceGapReadService.js";
+import { computeCoverageReviewDecisionFingerprint } from "../Backend/kai/validators/kaiCoverageReviewDecisionValidators.js";
+import { createPostgresCoverageReviewDecisionRepository } from "../Backend/kai/dictionary/postgresCoverageReviewDecisionRepository.js";
 
 /**
  * KAI Package 4 semantic-parity regression.
@@ -154,7 +156,7 @@ function persistedFollowupQueueRows() {
  * authoritative input that differs between the matching and mismatched cases
  * below.
  */
-function buildFakeTx({ qualityFindingRows }) {
+function buildFakeTx({ qualityFindingRows, smallCellState = null }) {
   const claimRow = {
     claim_id: CLAIM_ID,
     organization_id: ORG,
@@ -162,7 +164,7 @@ function buildFakeTx({ qualityFindingRows }) {
     claim_type: "outcome",
     claim_status: "draft",
     claim_review_status: "unassessed",
-    claim_strength: "unassessed",
+    claim_strength: smallCellState?.reviewed ? "reviewed_supported" : "unassessed",
     internal_only: true,
     public_use_allowed: false,
     funder_use_allowed: false,
@@ -181,7 +183,7 @@ function buildFakeTx({ qualityFindingRows }) {
     source_version_id: SOURCE_VERSION_ID,
     source_locator_id: LOCATOR_ID,
     evidence_review_status: "unassessed",
-    support_strength: "unassessed",
+    support_strength: smallCellState?.reviewed ? "reviewed_supported" : "unassessed",
     sensitivity_level: "internal",
   };
   const locatorRow = {
@@ -263,7 +265,7 @@ function buildFakeTx({ qualityFindingRows }) {
     llm_processing_allowed: false,
     product_learning_allowed: false,
     retention_posture: "restricted_pending_review",
-    small_cell_risk_status: "absent",
+    small_cell_risk_status: smallCellState ? "unknown" : "absent",
     allowed_use_status: "allowed",
   };
   const dictionaryRow = {
@@ -287,6 +289,9 @@ function buildFakeTx({ qualityFindingRows }) {
   ];
   const evidenceFieldKeyRows = [{ source_version_id: SOURCE_VERSION_ID, profile_field_key: "field_a" }];
   const gapRows = persistedGapRows();
+  if (smallCellState) gapRows.push({ ...gapRows[0], gap_log_item_id: "00000000-0000-4000-8000-000000009999",
+    dimension_key: "small_cell_risk", validator_key: "VAL-KAI-P2-02-small_cell_risk",
+    safe_summary: "Claim gap requires review for dimension: small_cell_risk." });
   const followupRows = persistedFollowupRows();
   const followupQueueRows = persistedFollowupQueueRows();
 
@@ -312,12 +317,12 @@ function buildFakeTx({ qualityFindingRows }) {
       if (sql.includes("kai.review_queue_items") && sql.includes("queue_type = 'conflict_resolution'")) {
         return { rows: [] };
       }
-      if (sql.includes("FROM kai.coverage_review_decisions")) return { rows: [] };
+      if (sql.includes("FROM kai.coverage_review_decisions")) return { rows: smallCellState?.acceptances ?? [] };
       if (sql.includes("kai.conflict_groups")) return { rows: [] };
       if (sql.includes("FROM kai.intake_source_candidates")) return { rows: [candidateRow] };
       if (sql.includes("FROM kai.intake_promotion_decisions")) return { rows: [decisionRow] };
       // VAL-KAI-B1A-02-003: no human sensitivity decision is recorded in this fixture.
-      if (sql.includes("FROM kai.intake_sensitivity_review_decisions")) return { rows: [] };
+      if (sql.includes("FROM kai.intake_sensitivity_review_decisions")) return { rows: smallCellState?.head ? [smallCellState.head] : [] };
       if (sql.includes("FROM kai.intake_sensitivity_profiles")) return { rows: [profileRow] };
       if (sql.includes("FROM kai.evidence_items e")) return { rows: evidenceFieldKeyRows };
       if (sql.includes("FROM kai.data_dictionary_fields")) return { rows: dictionaryFieldRows };
@@ -329,8 +334,8 @@ function buildFakeTx({ qualityFindingRows }) {
       if (sql.includes("FROM kai.source_versions")) return { rows: [sourceVersionRow] };
       if (sql.includes("FROM kai.sources")) return { rows: [sourceRow] };
       if (sql.includes("FROM kai.claims")) return { rows: [claimRow] };
-      if (sql.includes("FROM kai.evidence_review_decisions")) return { rows: [] };
-      if (sql.includes("FROM kai.claim_review_decisions")) return { rows: [] };
+      if (sql.includes("FROM kai.evidence_review_decisions")) return { rows: smallCellState?.reviewed ? [{ decision_outcome: "supported", decided_by_role: "gk_reviewer" }] : [] };
+      if (sql.includes("FROM kai.claim_review_decisions")) return { rows: smallCellState?.reviewed ? [{ decision_outcome: "approved", approved_audiences: ["internal"], decided_by_role: "gk_reviewer" }] : [] };
 
       throw new Error(`Unhandled fake-tx query in semantic-parity test: ${sql}`);
     },
@@ -410,6 +415,97 @@ test("Case A (current/matching): traceability accepts the persisted gap and the 
   const orgMissingnessGap = orgGaps.data.items.find((item) => item.gap_log_item_id === GAP_IDS.missingness);
   assert.ok(orgMissingnessGap, "list_organization_evidence_gaps returns the same current gap");
   assert.equal(orgMissingnessGap.claim_id, CLAIM_ID);
+});
+
+test("traceability keeps historical small-cell gaps and binds acceptance to the current sensitivity decision", async () => {
+  const smallGapId = "00000000-0000-4000-8000-000000009999";
+  const snapshot = {
+    organization_id: ORG, intake_sensitivity_profile_id: PROFILE_ID, decision_id: "00000000-0000-4000-8000-000000009901",
+    decision_outcome: "reviewed", decided_by: "00000000-0000-4000-8000-000000009902", decided_by_role: "gk_reviewer", created_by_type: "human",
+    reviewed_personal_data_status: "unknown", reviewed_minor_data_status: "unknown", reviewed_health_housing_justice_immigration_status: "unknown",
+    reviewed_indigenous_governance_status: "unknown", reviewed_staff_notes_status: "unknown", reviewed_story_testimonial_status: "present",
+    reviewed_small_cell_risk_status: "absent", reviewed_financial_records_status: "unknown", reviewed_consent_basis_status: "unknown",
+    reviewed_allowed_use_status: "allowed", reviewed_llm_processing_allowed: false, reviewed_product_learning_allowed: false,
+    reviewed_public_use_allowed: false, reviewed_funder_use_allowed: false,
+  };
+  const state = { head: null, acceptances: [] };
+  const tx = buildFakeTx({ qualityFindingRows: [], smallCellState: state });
+  const fingerprint = (dimensionKey, gapId, head) => computeCoverageReviewDecisionFingerprint({
+    claimId: CLAIM_ID, dimensionKey, evidenceItemId: EVIDENCE_ITEM_ID, sourceVersionId: SOURCE_VERSION_ID,
+    dimensionAssessmentStatus: "unresolved", dimensionValidatorKey: `VAL-KAI-P2-02-${dimensionKey}`,
+    gapLogItemId: gapId, gapAssessmentStatus: "unresolved", claimReviewStatus: "resolved", evidenceReviewStatus: "resolved",
+    claimStrength: "unassessed", supportStrength: "unassessed", smallCellDecisionId: head,
+  });
+  state.acceptances.push({ dimension_key: "small_cell_risk", decision: "accepted_internal_with_limitation", state_fingerprint: fingerprint("small_cell_risk", smallGapId) });
+  state.acceptances.push({ dimension_key: "missingness", decision: "accepted_internal_with_limitation", state_fingerprint: fingerprint("missingness", GAP_IDS.missingness) });
+  let result = await runTraceability(tx);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.data.dimensions.small_cell_risk.internal_limitation_accepted, true, "legacy applies when no review exists");
+  assert.equal(result.data.dimensions.missingness.internal_limitation_accepted, true);
+  state.head = snapshot;
+  result = await runTraceability(tx);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.data.dimensions.small_cell_risk.assessment_status, "resolved_clear");
+  assert.equal(result.data.gap_items.some((row) => row.dimension_key === "small_cell_risk"), false);
+  assert.equal(result.data.dimensions.small_cell_risk.internal_limitation_accepted, false);
+  assert.equal(result.data.dimensions.small_cell_risk.blocks_requested_audience, false, "clearance needs no coverage acceptance");
+  assert.equal(result.data.dimensions.missingness.internal_limitation_accepted, true);
+  state.head = { ...snapshot, decision_id: "00000000-0000-4000-8000-000000009903", reviewed_small_cell_risk_status: "present" };
+  result = await runTraceability(tx);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.data.dimensions.small_cell_risk.assessment_status, "resolved_risk_flagged");
+  state.head = { ...snapshot, decision_id: "00000000-0000-4000-8000-000000009904", reviewed_small_cell_risk_status: "unknown" };
+  result = await runTraceability(tx);
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.data.dimensions.small_cell_risk.assessment_status, "unresolved");
+  assert.equal(result.data.dimensions.small_cell_risk.internal_limitation_accepted, false, "legacy must not revive");
+  state.acceptances.push({ dimension_key: "small_cell_risk", decision: "accepted_internal_with_limitation", state_fingerprint: fingerprint("small_cell_risk", smallGapId, state.head.decision_id) });
+  result = await runTraceability(tx);
+  assert.equal(result.data.dimensions.small_cell_risk.internal_limitation_accepted, true);
+  state.head = { ...state.head, decision_id: "00000000-0000-4000-8000-000000009905" };
+  result = await runTraceability(tx);
+  assert.equal(result.data.dimensions.small_cell_risk.internal_limitation_accepted, false, "superseded head invalidates acceptance");
+  state.head = { ...snapshot, decision_outcome: "needs_more_information", decision_id: "00000000-0000-4000-8000-000000009906" };
+  result = await runTraceability(tx);
+  assert.equal(result.data.dimensions.small_cell_risk.internal_limitation_accepted, true, "no applicable review retains legacy behavior");
+});
+
+test("real acceptance writer and traceability reader share the small-cell decision fingerprint", async () => {
+  const head = {
+    organization_id: ORG, intake_sensitivity_profile_id: PROFILE_ID, decision_id: "00000000-0000-4000-8000-000000009901",
+    decision_outcome: "reviewed", decided_by: "00000000-0000-4000-8000-000000009902", decided_by_role: "gk_reviewer", created_by_type: "human",
+    reviewed_personal_data_status: "unknown", reviewed_minor_data_status: "unknown", reviewed_health_housing_justice_immigration_status: "unknown",
+    reviewed_indigenous_governance_status: "unknown", reviewed_staff_notes_status: "unknown", reviewed_story_testimonial_status: "present",
+    reviewed_small_cell_risk_status: "unknown", reviewed_financial_records_status: "unknown", reviewed_consent_basis_status: "unknown",
+    reviewed_allowed_use_status: "allowed", reviewed_llm_processing_allowed: false, reviewed_product_learning_allowed: false,
+    reviewed_public_use_allowed: false, reviewed_funder_use_allowed: false,
+  };
+  const state = { head, acceptances: [], reviewed: true };
+  const base = buildFakeTx({ qualityFindingRows: [], smallCellState: state });
+  const tx = { async query(sql, params) {
+    if (sql.includes("FOR SHARE OF p")) return { rows: [{ intake_sensitivity_profile_id: PROFILE_ID }] };
+    if (sql.includes("INSERT INTO kai.coverage_review_decisions")) {
+      const row = { coverage_review_decision_id: "00000000-0000-4000-8000-000000009910", organization_id: params[0], claim_id: params[1],
+        dimension_key: params[2], decision: params[3], state_fingerprint: params[4], decided_by_role: params[6], created_at: params[7] };
+      state.acceptances.push(row);
+      return { rows: [row] };
+    }
+    if (sql.includes("SELECT upload_state")) return { rows: [{ upload_state: "confirmed" }] };
+    if (sql.includes("INSERT INTO kai.upload_lifecycle_audit")) return { rows: [], rowCount: 1 };
+    return base.query(sql, params);
+  } };
+  const repository = createPostgresCoverageReviewDecisionRepository({ runInTransaction: (callback) => callback(tx) });
+  const acceptance = await repository.acceptInternalCoverageLimitation({ organizationId: ORG, claimId: CLAIM_ID,
+    dimensionKey: "small_cell_risk", actorUserId: head.decided_by, actorRole: "gk_reviewer", now: "2026-08-01T00:00:00.000Z",
+    metadataOnlyAudit: { prepareMetadataOnlyAudit: () => ({ ok: true, publish: async () => {} }) } });
+  assert.equal(acceptance.ok, true, JSON.stringify(acceptance));
+  let result = await evaluateClaimTraceabilityInTransaction(tx, { organizationId: ORG, claimId: CLAIM_ID, requestedAudience: "internal" });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.data.dimensions.small_cell_risk.internal_limitation_accepted, true);
+  state.head = { ...head, decision_id: "00000000-0000-4000-8000-000000009903" };
+  result = await evaluateClaimTraceabilityInTransaction(tx, { organizationId: ORG, claimId: CLAIM_ID, requestedAudience: "internal" });
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.data.dimensions.small_cell_risk.internal_limitation_accepted, false);
 });
 
 test("Case B (persisted-but-mismatched, REPAIRED): a new open kai.data_quality_findings row (no write to gap_log_items) makes traceability reject the persisted gap as stale, and list_organization_evidence_gaps now omits it too", async () => {

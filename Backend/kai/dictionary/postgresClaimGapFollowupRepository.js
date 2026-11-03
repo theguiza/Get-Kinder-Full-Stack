@@ -73,9 +73,10 @@ import {
  *
  * Fresh-write-vs-replay-vs-conflict decision is made from a synchronous
  * precheck read of every already-committed gap/follow-up/queue row for this
- * claim, BEFORE any insert is attempted - partial or mismatched existing state
- * is rejected as `conflict_current_state_changed` with zero mutation, never
- * silently repaired. When the precheck finds a totally empty prior state, every
+ * claim, BEFORE any insert is attempted. Mismatched independent state is
+ * rejected as `conflict_current_state_changed`; only a small-cell change
+ * backed by a current sensitivity decision is projected or refreshed. When
+ * the precheck finds a totally empty prior state, every
  * expected row is written via a single multi-row `INSERT ... ON CONFLICT ...
  * DO NOTHING RETURNING` statement per table, so two genuinely concurrent
  * identical calls converge cleanly: whichever transaction commits first wins
@@ -398,6 +399,23 @@ function gapRowsMatchExpectation(existingGapRows, expectedGapPlans, { evidenceIt
       row.uncovered_field_count === plan.uncovered_field_count
     );
   });
+}
+
+/** Project the one historical small-cell row against a current human decision.
+ * All other rows retain their exact P2-04 currentness contract. */
+function projectSmallCellGapRows(gapRows, expectedGapPlans, profileRow, { evidenceItemId, sourceVersionId }) {
+  if (!profileRow?.small_cell_review_head_id && !profileRow?.small_cell_review_decision_id) return gapRows;
+  const row = gapRows.find((item) => item.dimension_key === "small_cell_risk");
+  if (!row) return gapRows;
+  if (row.evidence_item_id !== evidenceItemId || row.source_version_id !== sourceVersionId
+    || !["unresolved", "resolved_risk_flagged"].includes(row.assessment_status)
+    || row.validator_key !== "VAL-KAI-P2-02-small_cell_risk"
+    || row.safe_summary !== safeSummaryFor("small_cell_risk")
+    || [row.open_finding_count, row.field_count, row.undefined_field_count, row.uncovered_field_count].some((value) => value != null)) return null;
+  const expected = expectedGapPlans.find((plan) => plan.dimension_key === "small_cell_risk");
+  return expected
+    ? gapRows.map((item) => item === row ? { ...row, assessment_status: expected.assessment_status } : item)
+    : gapRows.filter((item) => item !== row);
 }
 
 function followupRowsMatchExpectation(existingFollowupRows, expectedFollowupDimensionKeys, existingGapRows, { claimId }) {
@@ -855,6 +873,15 @@ export function createPostgresClaimGapFollowupRepository({
           );
           if (!candidateRow) return claimGapFollowupFailure("not_found");
 
+          // Serialize this gap refresh with sensitivity decisions, which lock
+          // the same scoped profile before appending a new decision head.
+          const lockedProfile = await tx.query(
+            `SELECT intake_sensitivity_profile_id FROM kai.intake_sensitivity_profiles
+              WHERE organization_id = $1::uuid AND intake_sensitivity_profile_id = $2::uuid FOR UPDATE`,
+            [organizationId, candidateRow.intake_sensitivity_profile_id],
+          );
+          if (lockedProfile.rows.length !== 1) return claimGapFollowupFailure("not_found");
+
           const decisionRow = await getScopedPromotionDecisionBySourceVersionId(
             { organizationId, sourceVersionId: evidenceItemRow.source_version_id },
             tx,
@@ -940,9 +967,15 @@ export function createPostgresClaimGapFollowupRepository({
           }
 
           if (!existingIsTotallyEmpty) {
-            const gapsMatch = gapRowsMatchExpectation(existingGapRows, expectedGapPlans, { evidenceItemId, sourceVersionId });
+            let currentGapRows = projectSmallCellGapRows(existingGapRows, expectedGapPlans, profileRow, { evidenceItemId, sourceVersionId });
+            if (!currentGapRows) return claimGapFollowupFailure("conflict_current_state_changed");
+            const missingSmallCell = (profileRow.small_cell_review_head_id || profileRow.small_cell_review_decision_id)
+              && expectedGapPlans.find((plan) => plan.dimension_key === "small_cell_risk")
+              && !existingGapRows.some((row) => row.dimension_key === "small_cell_risk");
+            const otherPlans = missingSmallCell ? expectedGapPlans.filter((plan) => plan.dimension_key !== "small_cell_risk") : expectedGapPlans;
+            const gapsMatch = gapRowsMatchExpectation(currentGapRows, otherPlans, { evidenceItemId, sourceVersionId });
             const followupsMatch =
-              gapsMatch && followupRowsMatchExpectation(existingFollowupRows, expectedFollowupDimensionKeys, existingGapRows, { claimId });
+              gapsMatch && followupRowsMatchExpectation(existingFollowupRows, expectedFollowupDimensionKeys, currentGapRows, { claimId });
             const queuesMatch = followupsMatch && queueRowsMatchExpectation(existingQueueRows, existingFollowupRows);
 
             if (gapsMatch && followupsMatch && queuesMatch) {
@@ -960,11 +993,26 @@ export function createPostgresClaimGapFollowupRepository({
                 }
                 throw error;
               }
+              if (missingSmallCell) {
+                const plan = expectedGapPlans.find((item) => item.dimension_key === "small_cell_risk");
+                const inserted = await insertGapRowsBulk(tx, { organizationId, claimId, evidenceItemId, sourceVersionId, plans: [plan] });
+                if (inserted.length !== 1) throw new ConcurrentStateChangedError("gap_log_items");
+                verifyPostWriteContract({ gapRecords: inserted, followupRecords: [], queueRecords: [], organizationId, claimId,
+                  evidenceItemId, sourceVersionId, expectedGapPlans: [plan], expectedFollowupDimensionKeys: [] });
+                const uploadState = await readScopedUploadState(tx, organizationId, candidateRow.intake_file_id);
+                if (!uploadState) throw new MalformedInsertedRowError("intake_files");
+                const auditContext = { claimId, evidenceItemId, sourceVersionId, gapDimensionKeys: ["small_cell_risk"], followupDimensionKeys: [], freshWriteCount: 1 };
+                const preparedAudit = prepareRequiredAudit(metadataOnlyAudit, tx, auditContext);
+                await insertAudit(tx, { organizationId, intakeFileId: candidateRow.intake_file_id, uploadState,
+                  metadata: buildClaimGapFollowupAuditMetadata(auditContext), now });
+                await preparedAudit.publish();
+                currentGapRows = [...currentGapRows, ...inserted];
+              }
               return claimGapFollowupSuccess({
-                gapItems: existingGapRows.map(rowToGapRecord),
+                gapItems: currentGapRows.map(rowToGapRecord),
                 clientFollowupItems: existingFollowupRows.map(rowToFollowupRecord),
                 reviewQueueItems: existingQueueRows.map(rowToQueueRecord),
-                replayed: true,
+                replayed: !missingSmallCell,
               });
             }
             return claimGapFollowupFailure("conflict_current_state_changed");
@@ -1138,6 +1186,7 @@ export const __claimGapFollowupRepositoryTestables = Object.freeze({
   extractSafeCounts,
   safeSummaryFor,
   gapRowsMatchExpectation,
+  projectSmallCellGapRows,
   followupRowsMatchExpectation,
   queueRowsMatchExpectation,
   RequiredAuditRejectedError,

@@ -46182,3 +46182,17 @@ The final synthetic run used logical source `fb199f6f-fbe0-435a-9f81-07e12933636
 3. Nothing was pushed, deployed or verified in production.
 
 **Status:** A3_COMPLETE_LOCALLY; PRODUCTION_NOT_VERIFIED. Stop at this package boundary.
+
+### Small-cell Package 1: reviewed determination and gap currentness (2026-11-03)
+
+**Authorization (USER_CONFIRMED):** owner requested completion and a local commit of the existing Package 1 candidate, including effective reviewed small-cell state, gap currentness, legacy acceptance behavior and synthetic verification. Production, shared databases, schema changes, migrations, deployment, push, flags, credentials, real client data and Current State changes remain excluded.
+
+**Start (TOOL_VERIFIED):** `main` at `63c46a37470dae0055ac8dfc286a4e8efdc44864`, with the earlier Package 1 candidate uncommitted. Every Node/npm command used a non-listening loopback database sentinel.
+
+**Implementation (TOOL_VERIFIED):** direct coverage and the organization batch read project the current, complete, tenant/profile-scoped, human sensitivity decision over the original profile for small-cell coverage only. An incomplete or missing reviewed decision retains profile behavior and the original legacy fingerprint. Small-cell gaps are projected from their historical row against the effective result, without deletion or update; independent gaps retain their exact currentness checks. The existing authorized P2-04 transaction serializes with sensitivity review and may insert an absent small-cell gap when a later determination requires one, using its existing same-transaction audit and conflict handling. Claim traceability and the organization gap projection share the projection. For small-cell only, new acceptance fingerprints include the applicable reviewed decision identity, so supersession invalidates their applicability; legacy unbound acceptances do not apply to a current reviewed decision. A clear dimension requires no acceptance. Acceptance writes take a scoped profile lock; other dimensions and their fingerprints are unchanged. Sensitivity decisions, gap history and original profile rows remain intact.
+
+**Verification (TOOL_VERIFIED):** focused decision, traceability, batch-gap, refresh, acceptance and boundary suites: 155/155 passed. The synthetic service/repository tests cover reviewed absence, present, unknown, legacy behavior, decision-bound acceptance and supersession, independent gaps, repeat refresh and simulated conflicts; the synthetic transaction is an in-memory query fixture, not PostgreSQL. API contract: 71/71 passed. Full `npm test`: 6,017 tests, 5,893 passed, 0 failed, 124 skipped. The direct coverage snapshot remains compatible with its existing `FOR UPDATE` lookup. `git diff --check` and complete package diff inspection precede local commit.
+
+**Limitations (NOT_CONFIRMED):** no PostgreSQL-backed lifecycle, actual lock contention, production runtime or deployed behavior was exercised. Legacy small-cell acceptances without a reviewed-decision identity are not automatically current when an applicable reviewed decision exists; their history remains unchanged. No push or deployment was performed.
+
+**Status:** SMALL_CELL_PACKAGE_1_IMPLEMENTED_AND_SYNTHETICALLY_VERIFIED_LOCALLY; POSTGRESQL_AND_PRODUCTION_NOT_VERIFIED. Stop at this package boundary.

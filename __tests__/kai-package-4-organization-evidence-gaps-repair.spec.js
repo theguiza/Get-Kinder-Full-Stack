@@ -355,7 +355,7 @@ function buildBatchFakeTx(fixtures) {
       }
       if (sql.includes("queue_type = 'conflict_resolution'")) return { rows: [] };
       // VAL-KAI-B1A-02-003: no human sensitivity decision is recorded in this fixture.
-      if (sql.includes("FROM kai.intake_sensitivity_review_decisions")) return { rows: [] };
+      if (sql.includes("FROM kai.intake_sensitivity_review_decisions")) return { rows: scoped(singles("sensitivityDecision"), organizationId, "intake_sensitivity_profile_id", ids) };
       if (sql.includes("FROM kai.intake_sensitivity_profiles")) {
         return { rows: scoped(singles("profile"), organizationId, "intake_sensitivity_profile_id", ids) };
       }
@@ -379,6 +379,33 @@ function buildBatchFakeTx(fixtures) {
     },
   };
 }
+
+test("batched current gaps respect reviewed small-cell state and retain independent gaps", async () => {
+  const fixture = buildClaimFixture(ORG, claimId(91));
+  fixture.profile.small_cell_risk_status = "unknown";
+  const small = { ...fixture.gapRows[0], gap_log_item_id: uid("aa", 91), dimension_key: "small_cell_risk",
+    validator_key: "VAL-KAI-P2-02-small_cell_risk", safe_summary: "Claim gap requires review for dimension: small_cell_risk." };
+  fixture.gapRows.push(small);
+  fixture.sensitivityDecision = {
+    decision_id: uid("ab", 91), organization_id: ORG, intake_sensitivity_profile_id: fixture.profile.intake_sensitivity_profile_id,
+    decision_outcome: "reviewed", decided_by: uid("ac", 91), decided_by_role: "gk_reviewer", created_by_type: "human",
+    reviewed_personal_data_status: "unknown", reviewed_minor_data_status: "unknown", reviewed_health_housing_justice_immigration_status: "unknown",
+    reviewed_indigenous_governance_status: "unknown", reviewed_staff_notes_status: "unknown", reviewed_story_testimonial_status: "unknown",
+    reviewed_small_cell_risk_status: "absent", reviewed_financial_records_status: "unknown", reviewed_consent_basis_status: "unknown",
+    reviewed_allowed_use_status: "unknown", reviewed_llm_processing_allowed: false, reviewed_product_learning_allowed: false,
+    reviewed_public_use_allowed: false, reviewed_funder_use_allowed: false,
+  };
+  const fakeTx = buildBatchFakeTx([fixture]);
+  const candidatePage = [candidateRowFromGap(small), candidateRowFromGap(fixture.gapRows[0])];
+  const absent = await runOrgGaps({ organizationId: ORG, limit: 10, candidatePage, fakeTx });
+  assert.equal(absent.ok, true, JSON.stringify(absent));
+  assert.deepEqual(absent.data.items.map((item) => item.gap_log_item_id), [fixture.gapRows[0].gap_log_item_id]);
+  assert.equal(small.assessment_status, "unresolved");
+  fixture.sensitivityDecision = { ...fixture.sensitivityDecision, decision_id: uid("ab", 92), reviewed_small_cell_risk_status: "present" };
+  const present = await runOrgGaps({ organizationId: ORG, limit: 10, candidatePage, fakeTx });
+  assert.equal(present.ok, true, JSON.stringify(present));
+  assert.equal(present.data.items.find((item) => item.gap_log_item_id === small.gap_log_item_id)?.assessment_status, "resolved_risk_flagged");
+});
 
 function candidateRowFromGap(gapRow) {
   return {

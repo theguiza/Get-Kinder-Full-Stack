@@ -1,4 +1,5 @@
 import { getScopedSourceCandidateByIdentity } from "../db/kaiIntakeQueries.js";
+import { SMALL_CELL_DECISION_ID } from "./postgresSensitivityAllowedUseDecisionRepository.js";
 import { evaluateClaimTraceabilityInTransaction } from "./postgresClaimTraceabilityRepository.js";
 import {
   COVERAGE_REVIEW_DECISION_ROLE,
@@ -233,6 +234,21 @@ export function createPostgresCoverageReviewDecisionRepository({
 
     try {
       return await run(async (tx) => {
+        if (dimensionKey === "small_cell_risk") {
+          // Sensitivity review writers lock this same profile FOR UPDATE.
+          // Keep the head fixed until the acceptance and audit commit.
+          const locked = await tx.query(
+            `SELECT p.intake_sensitivity_profile_id
+               FROM kai.claims c
+               JOIN kai.evidence_items e ON e.organization_id = c.organization_id AND e.evidence_item_id = c.evidence_item_id
+               JOIN kai.source_versions v ON v.organization_id = e.organization_id AND v.source_version_id = e.source_version_id
+               JOIN kai.intake_source_candidates sc ON sc.organization_id = v.organization_id AND sc.intake_source_candidate_id = v.intake_source_candidate_id
+               JOIN kai.intake_sensitivity_profiles p ON p.organization_id = sc.organization_id AND p.intake_sensitivity_profile_id = sc.intake_sensitivity_profile_id
+              WHERE c.organization_id = $1::uuid AND c.claim_id = $2::uuid
+              FOR SHARE OF p`, [organizationId, claimId],
+          );
+          if (locked.rows.length !== 1) return failure("conflict_current_state_changed");
+        }
         const traceability = await evaluate(tx, {
           organizationId,
           claimId,
@@ -283,6 +299,7 @@ export function createPostgresCoverageReviewDecisionRepository({
           evidenceReviewStatus: data.evidence.review_status,
           claimStrength: data.claim.claim_strength,
           supportStrength: data.evidence.support_strength,
+          smallCellDecisionId: data[SMALL_CELL_DECISION_ID],
         });
 
         const insertedRow = await insertDecisionRow(tx, {

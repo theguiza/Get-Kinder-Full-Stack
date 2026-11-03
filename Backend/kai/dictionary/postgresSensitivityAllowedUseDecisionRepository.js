@@ -13,7 +13,14 @@
  * own unique/FK constraints.
  */
 
+import {
+  SENSITIVITY_DECISION_ALLOWED_ROLES,
+  SENSITIVITY_REVIEWED_SNAPSHOT_FIELDS,
+  validateSensitivityReviewedSnapshot,
+} from "./sensitivityAllowedUseDecisionContract.js";
+
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export const SMALL_CELL_DECISION_ID = Symbol("kai.smallCellDecisionId");
 
 const DECISION_COLUMNS = `d.decision_id, d.organization_id, d.intake_sensitivity_profile_id,
             d.review_queue_item_id, d.decision_outcome,
@@ -93,6 +100,58 @@ export async function findCurrentSensitivityAllowedUseDecision(tx, { organizatio
   );
   if (rows.length > 1) throw new AmbiguousSensitivityDecisionLineageError();
   return rows[0] || null;
+}
+
+/** Read the same lineage heads as the single-profile reader in one scoped query. */
+export async function findCurrentSensitivityAllowedUseDecisions(tx, { organizationId, intakeSensitivityProfileIds }) {
+  if (!isUuid(organizationId) || !Array.isArray(intakeSensitivityProfileIds)
+    || !intakeSensitivityProfileIds.every(isUuid)) {
+    throw new TypeError("findCurrentSensitivityAllowedUseDecisions requires scoped UUIDs.");
+  }
+  const ids = [...new Set(intakeSensitivityProfileIds.map((id) => id.toLowerCase()))];
+  const heads = new Map(ids.map((id) => [id, null]));
+  if (ids.length === 0) return heads;
+  const { rows } = await tx.query(
+    `SELECT ${DECISION_COLUMNS}
+       FROM kai.intake_sensitivity_review_decisions d
+      WHERE d.organization_id = $1::uuid
+        AND d.intake_sensitivity_profile_id = ANY($2::uuid[])
+        AND NOT EXISTS (
+              SELECT 1 FROM kai.intake_sensitivity_review_decisions s
+               WHERE s.supersedes_decision_id = d.decision_id
+            )`,
+    [organizationId, ids],
+  );
+  for (const row of rows) {
+    const id = String(row.intake_sensitivity_profile_id).toLowerCase();
+    if (!heads.has(id) || String(row.organization_id).toLowerCase() !== organizationId.toLowerCase()) {
+      throw new TypeError("Sensitivity decision outside requested scope.");
+    }
+    if (heads.get(id)) throw new AmbiguousSensitivityDecisionLineageError();
+    heads.set(id, row);
+  }
+  return heads;
+}
+
+/** Only a complete authorized head is an applicable reviewed determination. */
+export function applicableSmallCellReview(profile, decision) {
+  if (!profile || !decision || decision.decision_outcome !== "reviewed") {
+    return null;
+  }
+  if (decision.organization_id !== profile.organization_id
+    || decision.intake_sensitivity_profile_id !== profile.intake_sensitivity_profile_id
+    || decision.created_by_type !== "human"
+    || !decision.decided_by
+    || !SENSITIVITY_DECISION_ALLOWED_ROLES.includes(decision.decided_by_role)) {
+    return null;
+  }
+  const snapshot = Object.fromEntries(SENSITIVITY_REVIEWED_SNAPSHOT_FIELDS.map((field) => [field, decision[field]]));
+  return validateSensitivityReviewedSnapshot(snapshot).ok ? decision : null;
+}
+
+/** Project a scoped current decision without changing the committed profile. */
+export function effectiveSmallCellRiskStatus(profile, decision) {
+  return applicableSmallCellReview(profile, decision)?.reviewed_small_cell_risk_status ?? profile?.small_cell_risk_status;
 }
 
 const INSERT_INPUT_ALLOWED_KEYS = new Set([

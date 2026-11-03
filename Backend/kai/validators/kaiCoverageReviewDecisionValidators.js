@@ -71,6 +71,7 @@ export function computeCoverageReviewDecisionFingerprint({
   evidenceReviewStatus,
   claimStrength,
   supportStrength,
+  smallCellDecisionId,
 }) {
   const canonical = JSON.stringify({
     claim_id: claimId,
@@ -85,6 +86,7 @@ export function computeCoverageReviewDecisionFingerprint({
     evidence_review_status: evidenceReviewStatus,
     claim_strength: claimStrength,
     support_strength: supportStrength,
+    ...(dimensionKey === "small_cell_risk" && smallCellDecisionId ? { small_cell_decision_id: smallCellDecisionId } : {}),
   });
   return createHash("sha256").update(canonical).digest("hex");
 }

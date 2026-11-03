@@ -4,6 +4,7 @@ import {
 } from "../validators/kaiClaimGapFollowupValidators.js";
 import { validateConflictGroupCompleteness } from "../validators/kaiConflictGroupValidators.js";
 import { readEffectiveAllowedUseProhibitions } from "./postgresEffectiveAllowedUseResolver.js";
+import { findCurrentSensitivityAllowedUseDecisions, effectiveSmallCellRiskStatus, applicableSmallCellReview } from "./postgresSensitivityAllowedUseDecisionRepository.js";
 import { __claimGapFollowupRepositoryTestables } from "./postgresClaimGapFollowupRepository.js";
 import { listScopedDerivedMeasurementRowsByEvidenceItemIds, listScopedEvidenceMeasurementsByEvidenceItemIds } from "../db/kaiIntakeQueries.js";
 import { MEASUREMENT_EVIDENCE_TYPE } from "../validators/kaiSourceMeasurementValidators.js";
@@ -56,12 +57,9 @@ import {
  * semantic rule is introduced anywhere in this file; every judgment is made by
  * the same functions traceability itself calls.
  *
- * Because evaluateClaimTraceabilityInTransaction returns either its complete
- * safeGapRows(gapRows) set for a claim (all of that claim's persisted gaps)
- * or a hard failure (none of them), the unit of classification here is the
- * CLAIM, not the individual gap row: every persisted gap for a claim that
- * reaches success() is current; every persisted gap for a claim that fails any
- * gate is stale and is omitted.
+ * The claim-level lineage and currentness gates still apply to every row.
+ * A historical small-cell row is additionally projected against the current
+ * sensitivity determination, just as the single-claim evaluator does.
  *
  * Row-volume bounds for every batch read below, relative to a candidate page
  * of N distinct claim ids:
@@ -115,7 +113,7 @@ import {
  *     on (organization_id, target_object_id) -> at most 101*N rows (bounded by
  *     the conflict-group id set already bounded above).
  *
- * Query count is fixed at up to 20 batched reads (claims,
+ * Query count is fixed for each candidate page (claims,
  * claim_evidence_links, evidence_items, source_locators, sources,
  * source_versions, intake_source_candidates, intake_promotion_decisions,
  * evidence_review queue, claim_review queue, sensitivity profiles,
@@ -132,6 +130,7 @@ import {
 
 const {
   buildExpectedGapPlans,
+  projectSmallCellGapRows,
   buildExpectedFollowupDimensionKeys,
   measurementCoverageDimensions,
   derivedMeasurementCoverageDimensions,
@@ -304,9 +303,16 @@ async function loadCurrentStateBatches(tx, { organizationId, claimIds }) {
     organizationId,
     intakeSensitivityProfileIds: profiles.map((row) => row.intake_sensitivity_profile_id),
   });
+  const sensitivityDecisions = await findCurrentSensitivityAllowedUseDecisions(tx, {
+    organizationId,
+    intakeSensitivityProfileIds: profiles.map((row) => row.intake_sensitivity_profile_id),
+  });
   const profilesById = toMapByKey(
     profiles.map((row) => ({
       ...row,
+      small_cell_risk_status: effectiveSmallCellRiskStatus(row, sensitivityDecisions.get(row.intake_sensitivity_profile_id.toLowerCase())),
+      small_cell_review_head_id: sensitivityDecisions.get(row.intake_sensitivity_profile_id.toLowerCase())?.decision_id ?? null,
+      small_cell_review_decision_id: applicableSmallCellReview(row, sensitivityDecisions.get(row.intake_sensitivity_profile_id.toLowerCase()))?.decision_id ?? null,
       effective_allowed_use_prohibition: prohibitions.has(row.intake_sensitivity_profile_id)
         ? prohibitions.get(row.intake_sensitivity_profile_id)
         : "sensitivity_profile_missing",
@@ -465,7 +471,7 @@ async function loadCurrentStateBatches(tx, { organizationId, claimIds }) {
  * reach evaluateClaimTraceabilityInTransaction's own success() return right
  * now; false the moment any gate fails (fail closed).
  */
-function claimIsCurrentForGapExposure(claimId, batches) {
+function claimIsCurrentForGapExposure(claimId, batches, currentGapsByClaimId) {
   const claimRow = batches.claimsById.get(claimId);
   if (!claimRow) return false;
 
@@ -525,7 +531,10 @@ function claimIsCurrentForGapExposure(claimId, batches) {
   const expectedGapPlans = buildExpectedGapPlans(dimensions);
   const expectedFollowupDimensionKeys = buildExpectedFollowupDimensionKeys(expectedGapPlans, answeredDimensionKeys);
 
-  const gapRows = batches.gapRowsByClaimId.get(claimId) || [];
+  const gapRows = projectSmallCellGapRows(batches.gapRowsByClaimId.get(claimId) || [], expectedGapPlans, profileRow, {
+    evidenceItemId: evidenceItemRow.evidence_item_id, sourceVersionId: evidenceItemRow.source_version_id,
+  });
+  if (!gapRows) return false;
   const followupRows = batches.followupRowsByClaimId.get(claimId) || [];
   const followupQueueRows = followupRows
     .map((row) => batches.followupQueueByFollowupId.get(row.client_followup_item_id))
@@ -561,6 +570,7 @@ function claimIsCurrentForGapExposure(claimId, batches) {
     if (validation?.severity !== "pass") return false;
   }
 
+  currentGapsByClaimId?.set(claimId, gapRows);
   return true;
 }
 
@@ -578,7 +588,12 @@ export async function filterCurrentOrganizationEvidenceGaps(tx, { organizationId
   if (candidateGapRows.length === 0) return [];
   const claimIds = distinctDefined(candidateGapRows.map((row) => row.claim_id));
   const batches = await loadCurrentStateBatches(tx, { organizationId, claimIds });
-  return candidateGapRows.filter((row) => claimIsCurrentForGapExposure(row.claim_id, batches));
+  const current = new Map();
+  for (const claimId of claimIds) claimIsCurrentForGapExposure(claimId, batches, current);
+  return candidateGapRows.flatMap((row) => {
+    const active = current.get(row.claim_id)?.find((item) => item.gap_log_item_id === row.gap_log_item_id);
+    return active ? [{ ...row, assessment_status: active.assessment_status }] : [];
+  });
 }
 
 export const __organizationEvidenceGapCurrentStateRepositoryTestables = Object.freeze({
