@@ -353,6 +353,7 @@ async function runXlsxAcceptance() {
   const { sourceRecordCountMeasurementPath } = await import("../frontend/knowledgeStudio/clientSourceMeasurementLogic.js");
   const {
     derivedMeasurementBasisPath, derivedMeasurementInterpretationPath, pairedOutcomeMeasurementsPath, tabularMeasurementPath,
+    crossSourceMeasurementsPath, crossSourceReconciliationJobPath, crossSourceReconciliationJobsPath,
   } = await import("../frontend/knowledgeStudio/clientDerivedMeasurementLogic.js");
   const { organizationFactualReviewPath } = await import("../frontend/knowledgeStudio/clientMeasuredClaimReviewLogic.js");
   const query = async (sql, params = []) => (await seedPool.query(sql, params)).rows;
@@ -3225,6 +3226,189 @@ async function runXlsxAcceptance() {
       results.measurementControls = { sourceVersionId: sv, paired: [pairedMeasurement.numerator, pairedMeasurement.denominator], rate: [rateMeasurement.numerator, rateMeasurement.denominator, rateMeasurement.percentage],
         claimId, refusedBy, invalid: { form: invalidProblem, server: [refused.status, refused.response.blockers?.[0]?.blocking_reason] } };
     });
+    await test("N: in Count records the administrator links a participant register, follows the queued job and reloads; a corrected register promoted as its successor marks the linked results not current; refusals", async () => {
+      // Synthetic sessions and register: S-ids, learners L01-L15, L16 registered with no session, one unmatched learner L99.
+      const sessionRows = [["session_ref", "learner_ref", "track", "held_on", "state"]];
+      for (let index = 0; index < 30; index += 1) {
+        const learner = index === 29 ? "L99" : `L${String((index % 15) + 1).padStart(2, "0")}`;
+        sessionRows.push([`S${String(index + 1).padStart(3, "0")}`, learner, index % 2 ? "EN" : "DS", `2025-${String((index % 9) + 4).padStart(2, "0")}-15`, index % 5 === 0 ? "cancelled" : "completed"]);
+      }
+      sessionRows.push([...sessionRows[2]]); // an exact duplicate export row
+      const registerRows = [["learner_ref", "joined_on", "standing"], ...Array.from({ length: 16 }, (_, index) => [`L${String(index + 1).padStart(2, "0")}`, "2025-03-01", index % 2 ? "active" : "exited"])];
+      const csv = (rows) => Buffer.from(`${rows.map((row) => row.join(",")).join("\n")}\n`);
+      // Independent arithmetic, sharing no code with KAI.
+      const firsts = [...new Map(sessionRows.slice(1).map((row) => [row[0], row])).values()];
+      const registered = new Set(registerRows.slice(1).map((row) => row[0]));
+      const eligible = firsts.filter((row) => row[4] === "completed" && row[3] >= "2025-04-01" && row[3] <= "2026-03-31" && registered.has(row[1]));
+      const expected = { encounters: eligible.length, people: new Set(eligible.map((row) => row[1])).size, registered: registered.size };
+      const uploadCsv = async (name, bytes) => {
+        const file = customerFile(name, bytes);
+        const reserved = await adminApi("POST", fileReservationsPath(ids.batchId), {
+          organization_id: ORG_X, engagement_id: PROJECT_X, original_filename: file.name, file_extension: ".csv", mime_type: "text/csv",
+          file_size_bytes: file.bytes.byteLength, checksum: file.checksum, hash_algorithm: "sha256", idempotency_key: `file-${randomUUID()}`,
+        });
+        assert.ok([200, 201].includes(reserved.status), J(reserved.body));
+        const intakeFileId = reserved.body.data.intake_file_id;
+        const signed = await adminApi("POST", requestUploadUrlPath(ids.batchId), { organization_id: ORG_X, engagement_id: PROJECT_X, intake_file_id: intakeFileId });
+        assert.equal((await fetch(signed.body.data.upload_url, { method: signed.body.data.upload_method, headers: signed.body.data.upload_headers, body: file.bytes })).status, 200);
+        assert.equal((await adminApi("POST", confirmUploadPath(ORG_X, intakeFileId), { organization_id: ORG_X })).status, 200);
+        await dispatcher.whenIdle();
+        return intakeFileId;
+      };
+      const target = await adminApi("PUT", `${orgPath()}/engagements/${PROJECT_X}/requirement-target`,
+        { target: { reporting_period_start: "2025-04-01", reporting_period_end: "2026-03-31", report_identity: "Synthetic learning reach" } });
+      assert.ok([200, 201].includes(target.status), J(target.body));
+      const eventsSv = (await decideAndPromote(adminApi, await uploadCsv("learning-sessions.csv", csv(sessionRows)))).source_version_id;
+      const registerSv = (await decideAndPromote(adminApi, await uploadCsv("learner-register.csv", csv(registerRows)))).source_version_id;
+
+      const section = `[data-client-cross-source="${eventsSv}"]`;
+      const setSelect = (selector, value) => adminPage.evaluate(`(() => {
+        const el = document.querySelector(${J(selector)});
+        if (!el || ![...el.options].some((option) => option.value === ${J(value)})) return false;
+        Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set.call(el, ${J(value)});
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+        return true;
+      })()`);
+      const optionValueFor = (selector, text) => adminPage.evaluate(`(() => {
+        const el = document.querySelector(${J(selector)});
+        const option = el && [...el.options].find((candidate) => candidate.textContent.includes(${J(text)}));
+        return option ? option.value : null;
+      })()`);
+      const field = (key) => `${section} [data-client-cross-source-field="${key}"]`;
+
+      await openCountRecords(eventsSv);
+      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `${section} [data-client-cross-source-form]`)), "the linkage form");
+      assert.match(await textOf(adminPage, `${section} [data-client-cross-source-period]`), /2025-04-01 to 2026-03-31/);
+      assert.match(await textOf(adminPage, `${section} [data-client-cross-source-problem]`), /participant register/);
+      assert.ok(await setSelect(field("referenceSourceVersionId"), registerSv), "choose the register version");
+      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, field("registerParticipantFieldKey"))), "the register's fields");
+      for (const [key, value] of [["eventIdentifierFieldKey", "field_1"], ["participantIdentifierFieldKey", "field_2"], ["statusFieldKey", "field_5"], ["dateFieldKey", "field_4"], ["groupFieldKey", "field_3"], ["registerParticipantFieldKey", "field_1"]]) {
+        assert.ok(await setSelect(field(key), value), key);
+      }
+      const completedKey = await optionValueFor(field("completedValueKey"), "completed");
+      assert.ok(completedKey, "the listed completed value");
+      assert.ok(await setSelect(field("completedValueKey"), completedKey));
+      await adminPage.waitFor(async () => !(await textOf(adminPage, `${section} [data-client-cross-source-problem]`)), "the form is complete");
+      const page = await adminPage.evaluate(`document.querySelector(${J(section)}).innerText`);
+      assert.doesNotMatch(page, /L0\d|L99|S0\d\d/, "no identifier is shown");
+
+      let mark = adminPage.mark();
+      await adminPage.clickIn(`${section} [data-client-cross-source-submit]`, "Reconcile and record");
+      await adminPage.waitFor(async () => (await adminPage.evaluate(`document.querySelector('${section} [data-client-cross-source-job]')?.getAttribute("data-client-cross-source-job-state")`)) === "succeeded", "the job settles", { timeout: 30000 });
+      await adminPage.idle();
+      const requests = adminPage.requestsSince(mark);
+      const [posted] = requests.filter((r) => r.method === "POST");
+      assert.deepEqual([new URL(posted.url).pathname, posted.status], [crossSourceMeasurementsPath(ORG_X), 202]);
+      assert.deepEqual(JSON.parse(posted.postData), {
+        primary_source_version_id: eventsSv, reference_source_version_id: registerSv,
+        mapping: { events: { event_identifier_field_key: "field_1", participant_identifier_field_key: "field_2", status_field_key: "field_5", completed_value_key: completedKey, date_field_key: "field_4", group_field_key: "field_3" },
+          register: { participant_identifier_field_key: "field_1" } },
+      });
+      const queued = await adminPage.responseBody(posted);
+      assert.deepEqual(Object.keys(queued.data.reconciliationJob).sort(), ["attempt_count", "completed_at", "created_at", "error_code", "job_state", "measurement_ids", "next_eligible_at",
+        "primary_source_version_id", "reconciliation_job_id", "reference_source_version_id"]);
+      const jobId = queued.data.reconciliationJob.reconciliation_job_id;
+      const polls = requests.filter((r) => r.method === "GET" && new URL(r.url).pathname === crossSourceReconciliationJobPath(ORG_X, jobId));
+      assert.ok(polls.length >= 1 && polls.every((r) => r.status === 200), "the job is read until it settles");
+      const settled = await adminPage.responseBody(polls.at(-1));
+      assert.doesNotMatch(J(settled), /L0\d|L99|S0\d\d|claim_token|requested_by/);
+      assert.equal(await textOf(adminPage, `${section} [data-client-cross-source-result="eligible_linked_encounters"]`), `Eligible service encounters (events, not people): ${expected.encounters}`);
+      assert.equal(await textOf(adminPage, `${section} [data-client-cross-source-result="distinct_people_served"]`), `Distinct registered people served: ${expected.people}`);
+      assert.match(await textOf(adminPage, `${section} [data-client-cross-source-exclusions]`), new RegExp(`1 duplicate copies.*1 with no register match.*Register: ${expected.registered} distinct registered participants`, "s"));
+
+      // Reload: the recorded measurements are read back with both contributing versions, current.
+      await openCountRecords(eventsSv);
+      const recordedOf = async (metric) => adminPage.evaluate(`(() => {
+        const rows = [...document.querySelectorAll('[data-client-derived-measurements="${eventsSv}"] [data-client-derived-recorded]')];
+        const row = rows.find((el) => el.innerText.includes(${J(metric)}));
+        return row ? { id: row.getAttribute("data-client-derived-recorded"), current: row.getAttribute("data-client-derived-current"), text: row.innerText,
+          sources: [...row.querySelectorAll("[data-client-derived-contributing-source]")].map((el) => [el.getAttribute("data-client-derived-contributing-source"), el.getAttribute("data-client-derived-contributing-current")]) } : null;
+      })()`);
+      await adminPage.waitFor(async () => Boolean(await recordedOf("Eligible service encounters")), "recorded linked reach after reload");
+      const encounters = await recordedOf("Eligible service encounters");
+      assert.deepEqual([encounters.current, encounters.sources], ["current", [["primary", "current"], ["reference", "current"]]]);
+      assert.ok(encounters.text.includes(eventsSv) && encounters.text.includes(registerSv), "both versions are inspectable");
+      assert.match(await textOf(adminPage, `${section} [data-client-cross-source-history]`), /succeeded: register learner_register\.csv \(current version\)/);
+      // Retention and claim proposal through the existing controls: propose the encounters claim from its current evidence.
+      const [evidenceRow] = await query("SELECT evidence_item_id::text FROM kai.evidence_derived_measurements WHERE source_derived_measurement_id = $1::uuid", [encounters.id]);
+      mark = adminPage.mark();
+      await adminPage.clickIn(`[data-client-derived-recorded="${encounters.id}"] [data-client-derived-propose-claim="${evidenceRow.evidence_item_id}"]`, "Propose a claim");
+      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `[data-client-derived-recorded="${encounters.id}"] [data-client-derived-claim]`)), "claim shown");
+      const [proposed] = adminPage.requestsSince(mark).filter((r) => r.method === "POST");
+      assert.ok([200, 201].includes(proposed.status));
+      const claimId = (await adminPage.responseBody(proposed)).data.claim.claim_id;
+
+      // Unauthorized roles: a contributor and another organization's administrator cannot request or read reconciliation jobs.
+      const jobsBefore = (await query("SELECT count(*)::int AS n FROM kai.cross_source_reconciliation_jobs WHERE organization_id = $1::uuid", [ORG_X]))[0].n;
+      const refusedBy = {};
+      for (const [label, legacyUserId] of [["contributor", USERS.contributor], ["other_organization_admin", USERS.adminY]]) {
+        const other = await openPage(browser, { baseUrl, legacyUserId });
+        try {
+          await other.goto("/impact-library");
+          refusedBy[label] = {
+            request: (await other.api("POST", crossSourceMeasurementsPath(ORG_X), JSON.parse(posted.postData))).status,
+            read: (await other.api("GET", crossSourceReconciliationJobPath(ORG_X, jobId))).status,
+            list: (await other.api("GET", crossSourceReconciliationJobsPath(ORG_X))).status,
+          };
+        } finally {
+          await other.close();
+        }
+      }
+      for (const [label, statuses] of Object.entries(refusedBy)) for (const [action, code] of Object.entries(statuses)) assert.ok(code === 403 || code === 404, `${label} ${action}: ${code}`);
+      assert.equal((await query("SELECT count(*)::int AS n FROM kai.cross_source_reconciliation_jobs WHERE organization_id = $1::uuid", [ORG_X]))[0].n, jobsBefore, "nothing was queued");
+
+      // A corrected register promoted, in the source review panel, as the next version of the register.
+      const correctedRegisterRows = [...registerRows, ["L99", "2025-03-01", "active"]];
+      const correctedFileId = await uploadCsv("learner-register-corrected.csv", csv(correctedRegisterRows));
+      const sensitivity = await sensitivityOf(correctedFileId);
+      assert.equal((await adminApi("POST", sensitivityDecisionPath(ORG_X, sensitivity.intake_sensitivity_profile_id), {
+        expected_updated_at: new Date(sensitivity.updated_at).toISOString(), review_queue_item_id: sensitivity.review_queue_item_id, decision: "reviewed", reviewed_snapshot: SNAPSHOT,
+      })).status, 200);
+      await openStudioTab("Data Sources");
+      await adminPage.waitFor(async () => adminPage.evaluate(`Boolean(document.querySelector('[data-client-open-source-review="${correctedFileId}"]'))`), "promotion action");
+      await adminPage.clickIn(`[data-client-open-source-review="${correctedFileId}"]`, "Review & promote source");
+      await adminPage.waitForText("Decision outcome");
+      await adminPage.idle();
+      const setPanelSelect = (labelText, value) => adminPage.evaluate(`(() => {
+        const panelEl = document.querySelector("[data-client-source-promotion-panel]");
+        const label = panelEl && [...panelEl.querySelectorAll("label")].find((el) => el.innerText.trim().startsWith(${J(labelText)}));
+        const el = label && label.querySelector("select");
+        if (!el) return false;
+        Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set.call(el, ${J(value)});
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+        return el.value === ${J(value)};
+      })()`);
+      assert.ok(await setPanelSelect("Decision outcome", "promoted"));
+      await adminPage.waitForText("Reviewed source type");
+      assert.ok(await setPanelSelect("Reviewed source type", "organization_primary_record"));
+      assert.ok(await setSelect("[data-client-source-supersedes]", registerSv), "choose the register this file corrects");
+      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, "[data-client-source-supersedes-statement]")), "the succession statement");
+      await adminPage.clickIn("[data-client-source-authorization-confirm]", "source authorization confirmation");
+      mark = adminPage.mark();
+      await adminPage.clickButton("Promote");
+      await adminPage.waitForText("as the new current version");
+      await adminPage.idle();
+      const [decided] = adminPage.requestsSince(mark).filter((r) => r.method === "POST");
+      assert.deepEqual(JSON.parse(decided.postData), { outcome: "promoted", reviewed_source_type: "organization_primary_record", supersedes_source_version_id: registerSv });
+      const decidedBody = await adminPage.responseBody(decided);
+      assert.deepEqual([decided.status, decidedBody.data.superseded_source_version_id], [200, registerSv]);
+      const versions = await query("SELECT source_version_id::text, is_current FROM kai.source_versions WHERE source_id = (SELECT source_id FROM kai.source_versions WHERE source_version_id = $1::uuid) ORDER BY created_at", [registerSv]);
+      assert.deepEqual(versions.map((v) => [v.source_version_id === registerSv, v.is_current]), [[true, false], [false, true]], "one logical source, its earlier and current version");
+
+      // Stale source: the linked measurements say they are no longer current, and their claim is refused.
+      await openCountRecords(eventsSv);
+      await adminPage.waitFor(async () => (await recordedOf("Eligible service encounters"))?.current === "not_current", "the stale indication");
+      const stale = await recordedOf("Eligible service encounters");
+      assert.deepEqual(stale.sources, [["primary", "current"], ["reference", "not_current"]]);
+      assert.match(await textOf(adminPage, `[data-client-derived-recorded="${encounters.id}"] [data-client-derived-not-current]`), /No longer current/);
+      assert.match(await textOf(adminPage, `${section} [data-client-cross-source-history]`), /register learner_register\.csv \(earlier version, replaced\)/);
+      const traced = await adminApi("GET", claimTraceabilityPath(ORG_X, claimId, "internal"));
+      assert.deepEqual([traced.status, traced.body.data?.traceability_conflict_reason], [409, "derived_measurement_contributing_source_not_current"]);
+      // The superseded register is no longer offered as a linkable version.
+      assert.equal(await adminPage.evaluate(`[...document.querySelector(${J(field("referenceSourceVersionId"))}).options].some((o) => o.value === ${J(registerSv)})`), false);
+      results.crossSourceControls = { eventsSv, registerSv, expected, jobId, refusedBy, polls: polls.length, claimId, successor: decidedBody.data.source_version.source_version_id };
+    });
+
 
     await test("summary", async () => {
       results.story = ids.story && {

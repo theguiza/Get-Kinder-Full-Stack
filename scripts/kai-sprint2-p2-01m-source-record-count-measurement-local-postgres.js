@@ -348,6 +348,13 @@ try {
   if (overall(derivedAfterCross) !== "PASS" || stateOf(derivedAfterCross, "D0.schema_state") !== "after the cross-source reach migration" || overall(xlsxVerifier()) !== "PASS") {
     throw new Error(`verifiers failed after the cross-source migration:\n${derivedAfterCross.join("\n")}`);
   }
+  // The reconciliation job table: additive over the cross-source tables; applied twice, no existing row changes.
+  psqlFile("migrations/kai_sprint2_measurement_mvp_cross_source_reconciliation_jobs.sql");
+  psqlFile("migrations/kai_sprint2_measurement_mvp_cross_source_reconciliation_jobs.sql");
+  if (psqlExec(derivedRowsSql) !== derivedRowsBeforeCross || psqlExec(legacySnapshotSql) !== evidenceBeforeCross
+    || overall(derivedVerifier()) !== "PASS" || overall(xlsxVerifier()) !== "PASS") {
+    throw new Error("the cross-source reconciliation job migration changed an existing row or a verified constraint");
+  }
 
   // Each verifier rejects a deliberately missing or weakened constraint. Every
   // change runs inside a transaction that is rolled back.
