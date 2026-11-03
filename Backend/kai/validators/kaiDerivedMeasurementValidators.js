@@ -575,6 +575,12 @@ export function describeTabularMeasurementOptions(profile, worksheetKey) {
     available: true,
     record_count: basis.record_count,
     exact_duplicates: basis.exact_duplicates,
+    // The profiler does not infer duration semantics. These field positions
+    // are available for a person to identify as recorded minutes; no cell
+    // values or inferred meaning are exposed here.
+    ...(profile.format === "csv" ? { duration_field_candidates: basis.fields.filter((field) => field.roles.length === 0).map((field) => ({
+      field_key: field.field_key, column_position: Number(field.field_key.slice(6)), present_count: field.present_count, blank_count: field.blank_count,
+    })) } : {}),
     fields: basis.fields.filter((field) => field.roles.length > 0).map(screenedField).map((field) => ({
       field_key: field.field_key,
       column_position: Number(field.field_key.slice(6)),
@@ -605,6 +611,8 @@ export const CROSS_SOURCE_METRICS = Object.freeze({
   GROUP_ENCOUNTERS: "group_linked_encounters",
   GROUP_DISTINCT_PEOPLE: "group_distinct_people_served",
   MULTI_GROUP_PEOPLE: "people_in_more_than_one_group",
+  MONTHLY_ACTIVITY: "monthly_eligible_encounters",
+  RECORDED_DURATION: "known_recorded_service_minutes",
 });
 const METRIC_COMPONENT = Object.freeze({
   [CROSS_SOURCE_METRICS.ELIGIBLE_ENCOUNTERS]: "eligible_encounter_count",
@@ -612,6 +620,8 @@ const METRIC_COMPONENT = Object.freeze({
   [CROSS_SOURCE_METRICS.GROUP_ENCOUNTERS]: "group_encounter_count",
   [CROSS_SOURCE_METRICS.GROUP_DISTINCT_PEOPLE]: "group_distinct_person_count",
   [CROSS_SOURCE_METRICS.MULTI_GROUP_PEOPLE]: "multi_group_person_count",
+  [CROSS_SOURCE_METRICS.MONTHLY_ACTIVITY]: "eligible_encounter_count",
+  [CROSS_SOURCE_METRICS.RECORDED_DURATION]: "duration_known_count",
 });
 export const CROSS_SOURCE_IDENTIFIER_MATCH = "exact_after_trim";
 const EVENT_MAPPING_KEYS = Object.freeze([
@@ -628,7 +638,7 @@ function isIsoDay(value) {
 /** The shape of a person's cross-source mapping: field keys and one listed value key, nothing else. */
 export function validateCrossSourceReachMapping(input) {
   const invalid = (reason, message, fix) => refuse(reason, message, fix, { objectType: "cross_source_mapping" });
-  if (!isPlainObject(input) || !Object.keys(input).every((key) => ["events", "register"].includes(key))
+  if (!isPlainObject(input) || !Object.keys(input).every((key) => ["events", "register", "duration", "monthly_activity"].includes(key))
     || !isPlainObject(input.events) || !isPlainObject(input.register)) {
     return invalid("cross_source_mapping_invalid", "The mapping needs an events part and a register part.", "Send {events: {...}, register: {participant_identifier_field_key}}.");
   }
@@ -647,11 +657,23 @@ export function validateCrossSourceReachMapping(input) {
   if (!Object.keys(input.register).every((key) => key === "participant_identifier_field_key") || !FIELD_KEY_RE.test(input.register.participant_identifier_field_key ?? "")) {
     return invalid("cross_source_mapping_invalid", "The register mapping names its participant identifier field only.", "Select the register's participant identifier field.");
   }
+  if (input.duration !== undefined && (!isPlainObject(input.duration)
+    || Object.keys(input.duration).sort().join(",") !== "field_key,meaning,unit"
+    || !FIELD_KEY_RE.test(input.duration.field_key ?? "") || input.duration.unit !== "minutes"
+    || input.duration.meaning !== "recorded_service_duration"
+    || fieldKeys.some((key) => events[key] === input.duration.field_key))) {
+    return invalid("cross_source_duration_mapping_invalid", "The duration mapping must identify a separate field as recorded service duration in minutes.", "Provide a distinct duration field, meaning recorded_service_duration and unit minutes.");
+  }
+  if (input.monthly_activity !== undefined && input.monthly_activity !== true) {
+    return invalid("cross_source_monthly_mapping_invalid", "Monthly activity must be explicitly selected.", "Set monthly_activity to true or omit it.");
+  }
   return {
     ok: true,
     mapping: Object.freeze({
       events: Object.freeze(Object.fromEntries(EVENT_MAPPING_KEYS.map((key) => [key, events[key] ?? null]))),
       register: Object.freeze({ participant_identifier_field_key: input.register.participant_identifier_field_key }),
+      ...(input.duration ? { duration: Object.freeze({ ...input.duration }) } : {}),
+      ...((input.monthly_activity || input.duration) ? { monthly_activity: true } : {}),
     }),
   };
 }
@@ -696,6 +718,12 @@ export function resolveCrossSourceReachMapping({ eventsProfile, registerProfile,
   if (!roleOf(registerBasis.basis, mapping.register.participant_identifier_field_key, "identifier")) {
     return notProposed("participant register", mapping.register.participant_identifier_field_key, "identifier");
   }
+  if (mapping.duration) {
+    const durationField = fieldOf(eventsBasis.basis, mapping.duration.field_key);
+    if (!durationField || durationField.roles.length !== 0) {
+      return refuse("cross_source_duration_field_invalid", "The duration field must be an existing unclassified field of the service-event source.", "Select the separate field containing recorded numeric service minutes.", { objectType: "cross_source_mapping" });
+    }
+  }
   const status = roleOf(eventsBasis.basis, events.status_field_key, "categorical");
   if (!status) return notProposed("service-event", events.status_field_key, "categorical");
   const completed = status.categorical.values.find((value) => value.value_key === events.completed_value_key);
@@ -719,11 +747,15 @@ export function resolveCrossSourceReachMapping({ eventsProfile, registerProfile,
   }
   const eventFieldKeys = [...new Set(EVENT_MAPPING_KEYS.filter((key) => key.endsWith("_field_key")).map((key) => events[key]).filter(Boolean))]
     .sort((a, b) => Number(a.slice(6)) - Number(b.slice(6)));
+  if (mapping.duration) eventFieldKeys.push(mapping.duration.field_key);
+  eventFieldKeys.sort((a, b) => Number(a.slice(6)) - Number(b.slice(6)));
   return {
     ok: true,
     resolved: Object.freeze({
       events: Object.freeze({ ...events, completed_value_label: completed.label, groups: Object.freeze(groups) }),
       register: mapping.register,
+      ...(mapping.duration ? { duration: mapping.duration } : {}),
+      ...(mapping.monthly_activity ? { monthly_activity: true } : {}),
       identifier_match: CROSS_SOURCE_IDENTIFIER_MATCH,
       period: Object.freeze({ period_source: PERIOD_SOURCE_ENGAGEMENT, period_start: reportingPeriod.start, period_end: reportingPeriod.end, precision: "day" }),
     }),
@@ -736,6 +768,8 @@ export function crossSourceWorkerMapping(resolved) {
   return {
     events: resolved.events,
     register: resolved.register,
+    ...(resolved.duration ? { duration: resolved.duration } : {}),
+    ...(resolved.monthly_activity ? { monthly_activity: true } : {}),
     period: { start: resolved.period.period_start, end: resolved.period.period_end },
   };
 }
@@ -762,9 +796,15 @@ export function deriveCrossSourceReachMeasurements({ resolved, eventFieldKeys, r
     const componentCounts = {
       ...counts,
       groups: groupTable,
+      ...((resolved.duration || resolved.monthly_activity) ? { monthly_activity: reconciliation.monthly_activity } : {}),
+      ...(resolved.duration ? { duration_known_count: reconciliation.recorded_duration.known_count,
+        duration_missing_count: reconciliation.recorded_duration.missing_count, duration_invalid_count: reconciliation.recorded_duration.invalid_count,
+        known_recorded_minutes: reconciliation.recorded_duration.known_minutes } : {}),
       ...(group ? { group_encounter_count: group.encounter_count, group_distinct_person_count: group.distinct_person_count } : {}),
     };
-    const definition = { metric, measured_component: METRIC_COMPONENT[metric], group: group ? { field_key: resolved.events.group_field_key, value_key: group.value_key, value_label: group.label } : null, ...base };
+    const definition = { metric, measured_component: METRIC_COMPONENT[metric], group: group ? { field_key: resolved.events.group_field_key, value_key: group.value_key, value_label: group.label } : null, ...base,
+      ...(resolved.duration ? { duration: resolved.duration, duration_method: "eligible_event_known_recorded_minutes_v1" } : {}),
+      ...(resolved.monthly_activity ? { monthly_activity: true, monthly_method: "eligible_event_service_month_v1" } : {}) };
     const value = componentCounts[METRIC_COMPONENT[metric]];
     return Object.freeze({
       family: DERIVED_MEASUREMENT_FAMILIES.CROSS_SOURCE_REACH,
@@ -779,10 +819,14 @@ export function deriveCrossSourceReachMeasurements({ resolved, eventFieldKeys, r
       denominator: null,
       percentage: null,
       componentCounts: Object.freeze(componentCounts),
-      exclusions: reconciliation.row_exclusions,
+      exclusions: resolved.duration ? { ...reconciliation.row_exclusions, duration: reconciliation.duration_exclusions } : reconciliation.row_exclusions,
       rowLocators: null,
     });
   };
+  // The optional activity request adds two findings to the existing reach
+  // reconciliation. Do not create duplicate reach evidence with a different
+  // locator: those statements already belong to the original measurements.
+  if (resolved.duration || resolved.monthly_activity) return [make(CROSS_SOURCE_METRICS.MONTHLY_ACTIVITY), ...(resolved.duration ? [make(CROSS_SOURCE_METRICS.RECORDED_DURATION)] : [])];
   const measurements = [make(CROSS_SOURCE_METRICS.ELIGIBLE_ENCOUNTERS), make(CROSS_SOURCE_METRICS.DISTINCT_PEOPLE)];
   if (resolved.events.group_field_key) {
     for (const group of groupTable) {
@@ -806,6 +850,25 @@ function crossSourceFunnelHolds(row) {
   const component = row.definition?.measured_component;
   if (METRIC_COMPONENT[row.definition?.metric] !== component || c[component] !== row.measured_value) return false;
   const groupsHold = c.groups.every((group) => isCount(group.encounter_count) && isCount(group.distinct_person_count) && group.distinct_person_count <= group.encounter_count);
+  if (row.definition?.duration || row.definition?.monthly_activity) {
+    if (row.definition.monthly_activity !== true || row.definition.monthly_method !== "eligible_event_service_month_v1"
+      || !isIsoDay(row.definition.period?.period_start) || !isIsoDay(row.definition.period?.period_end)
+      || !Array.isArray(c.monthly_activity) || !c.monthly_activity.every((item) => isPlainObject(item) && /^\d{4}-(?:0[1-9]|1[0-2])$/.test(item.month) && isCount(item.encounter_count) && item.encounter_count > 0
+        && item.month >= row.definition.period.period_start.slice(0, 7) && item.month <= row.definition.period.period_end.slice(0, 7))
+      || new Set(c.monthly_activity.map((item) => item.month)).size !== c.monthly_activity.length
+      || c.monthly_activity.some((item, index) => index > 0 && c.monthly_activity[index - 1].month >= item.month)
+      || c.monthly_activity.reduce((sum, item) => sum + item.encounter_count, 0) !== c.eligible_encounter_count) return false;
+    if (row.definition.duration) {
+      const duration = row.definition.duration;
+      if (row.definition.duration_method !== "eligible_event_known_recorded_minutes_v1"
+      || !isPlainObject(duration) || Object.keys(duration).sort().join(",") !== "field_key,meaning,unit"
+      || !FIELD_KEY_RE.test(duration.field_key ?? "") || duration.unit !== "minutes" || duration.meaning !== "recorded_service_duration"
+      || !row.field_keys?.includes(duration.field_key) || ![c.duration_known_count, c.duration_missing_count, c.duration_invalid_count].every(isCount)
+      || c.duration_known_count + c.duration_missing_count + c.duration_invalid_count !== c.eligible_encounter_count
+      || (c.duration_known_count === 0 ? c.known_recorded_minutes !== null
+        : typeof c.known_recorded_minutes !== "string" || !/^(?:0|[1-9]\d*)(?:\.\d*[1-9])?$/.test(c.known_recorded_minutes))) return false;
+    } else if (row.definition.metric === CROSS_SOURCE_METRICS.RECORDED_DURATION) return false;
+  } else if ([CROSS_SOURCE_METRICS.MONTHLY_ACTIVITY, CROSS_SOURCE_METRICS.RECORDED_DURATION].includes(row.definition?.metric)) return false;
   const grouped = c.groups.reduce((total, group) => total + group.encounter_count, 0);
   return row.denominator === null && row.percentage === null && groupsHold
     && c.excess_copy_record_count === c.duplicate_member_record_count - c.duplicate_group_count
@@ -981,6 +1044,10 @@ function crossSourceBody(row) {
     + `${c.unmatched_event_count} unmatched, ${c.conflicting_event_identity_count} conflicting`;
   const scope = d.group ? ` in ${d.group.field_key} = ${d.group.value_label}` : "";
   switch (d.metric) {
+    case CROSS_SOURCE_METRICS.MONTHLY_ACTIVITY:
+      return `${plural(c.eligible_encounter_count, "eligible service encounter")} grouped by actual service month (encounters, not people), reporting period ${d.period.period_start} to ${d.period.period_end}; linked to register ${d.reference_source_version_id}. The breakdown and exclusions are recorded with the measurement.${d.duration ? ` Duration field ${d.duration.field_key} was also mapped.` : ""}`;
+    case CROSS_SOURCE_METRICS.RECORDED_DURATION:
+      return `${c.duration_known_count ? `${c.known_recorded_minutes} known recorded minutes subtotal` : "No known recorded minutes subtotal is available"}, from ${c.duration_known_count} of ${c.eligible_encounter_count} eligible encounters; ${c.duration_missing_count} missing and ${c.duration_invalid_count} invalid or conflicting durations. This is not a complete service-time total. Reporting period ${d.period.period_start} to ${d.period.period_end}; linked to register ${d.reference_source_version_id}.`;
     case CROSS_SOURCE_METRICS.ELIGIBLE_ENCOUNTERS:
     case CROSS_SOURCE_METRICS.GROUP_ENCOUNTERS:
       return `${plural(row.measured_value, "eligible service encounter")}${scope} (encounters, not people): ${linkage}; ${exclusions}.`;
@@ -1219,6 +1286,7 @@ export const DERIVED_LIMITATION_CODES = Object.freeze({
   CONFLICTING_EVENTS_EXCLUDED: "derived.conflicting_event_identities_excluded",
   ENCOUNTERS_NOT_PEOPLE: "derived.encounters_not_people",
   PEOPLE_COUNTED_ONCE: "derived.people_counted_once_across_groups",
+  RECORDED_MINUTES_SUBTOTAL: "derived.known_recorded_minutes_subtotal",
 });
 const C = DERIVED_LIMITATION_CODES;
 
@@ -1237,8 +1305,9 @@ export function derivedMeasurementLimitationCodes({ measurementRow: row, dimensi
     if (counts.conflicting_event_identity_count > 0) codes.push(C.CONFLICTING_EVENTS_EXCLUDED);
     if (counts.completed_without_date_count > 0) codes.push(C.RECORDS_WITHOUT_DATE_EXCLUDED);
     const metric = row.definition?.metric;
-    if ([CROSS_SOURCE_METRICS.ELIGIBLE_ENCOUNTERS, CROSS_SOURCE_METRICS.GROUP_ENCOUNTERS].includes(metric)) codes.push(C.ENCOUNTERS_NOT_PEOPLE);
-    else codes.push(C.EACH_KEY_ONCE, C.PEOPLE_COUNTED_ONCE);
+    if (metric === CROSS_SOURCE_METRICS.RECORDED_DURATION) codes.push(C.RECORDED_MINUTES_SUBTOTAL);
+    if ([CROSS_SOURCE_METRICS.ELIGIBLE_ENCOUNTERS, CROSS_SOURCE_METRICS.GROUP_ENCOUNTERS, CROSS_SOURCE_METRICS.MONTHLY_ACTIVITY].includes(metric)) codes.push(C.ENCOUNTERS_NOT_PEOPLE);
+    else if (metric !== CROSS_SOURCE_METRICS.RECORDED_DURATION) codes.push(C.EACH_KEY_ONCE, C.PEOPLE_COUNTED_ONCE);
   } else if (row.measurement_family === DERIVED_MEASUREMENT_FAMILIES.PAIRED_OUTCOME) {
     codes.push(C.MATCHED_SUBSET_ONLY, C.NO_REPORTING_PERIOD);
     codes.push(["higher_is_better", "lower_is_better"].includes(interpretation?.score_direction) ? C.DIRECTION_HUMAN_STATED : C.DIRECTION_NOT_ESTABLISHED);
@@ -1295,6 +1364,7 @@ const DERIVED_DISCLOSURES = Object.freeze({
   [C.CONFLICTING_EVENTS_EXCLUDED]: "Event identifiers whose repeated records disagree were excluded rather than resolved by choosing one record.",
   [C.ENCOUNTERS_NOT_PEOPLE]: "This counts service encounters, not people; one person can have many encounters.",
   [C.PEOPLE_COUNTED_ONCE]: "A person with encounters in more than one programme group is counted once in an organization-wide total.",
+  [C.RECORDED_MINUTES_SUBTOTAL]: "This is a known recorded minutes subtotal, not a complete service-time total; missing, invalid or conflicting durations are not included.",
 });
 
 export function describeDerivedLimitationCode(code) {
@@ -1336,6 +1406,8 @@ export const DERIVED_DISCLOSURE_RULES = Object.freeze([
   Object.freeze({ code: C.DUPLICATE_ROWS_COUNTED, requires: /\bduplicate/i }),
   Object.freeze({ code: C.EACH_KEY_ONCE, requires: /\bcounted once\b/i }),
   Object.freeze({ code: C.CROSS_SOURCE_LINKED, requires: /\bregister\b/i }),
+  Object.freeze({ code: C.RECORDED_MINUTES_SUBTOTAL, requires: /\bsubtotal\b/i,
+    forbids: /(?<!not )(?<!not a )(?<!not the )\b(?:all|complete|full|entire|total) (?:recorded )?service[- ]time\b/i }),
   Object.freeze({ code: C.UNMATCHED_IDENTIFIERS_EXCLUDED, requires: /\bunmatched\b|\bno match\b/i }),
   Object.freeze({ code: C.ENCOUNTERS_NOT_PEOPLE, requires: /\bencounters?\b/i, forbids: /\b\d[\d,]*\s+(?:distinct\s+)?(?:people|persons|individuals|participants)\b/i }),
 ]);

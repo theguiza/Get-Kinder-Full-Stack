@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { getScopedIntakeFileParserProfileEligibilityFacts, lockKaiP1EligibleIntakeFileForShare } from "../db/kaiIntakeQueries.js";
 import { readTrustedCsvRecords } from "../profiling/localProfilingKernel.js";
 import { createP1ObjectVersionByteSource } from "./p1ObjectVersionByteSource.js";
-import { reconcileLinkedReach } from "./crossSourceReachReconciliation.js";
+import { CrossSourceDurationPrecisionError, reconcileLinkedReach } from "./crossSourceReachReconciliation.js";
 
 /**
  * KAI cross-source reconciliation worker: the one place a cross-source
@@ -81,7 +81,12 @@ export function createCrossSourceReconciliationWorker({
       if (!eventRead.ok) return eventRead;
       const registerRead = await readRecords(tx, { organizationId, ...register });
       if (!registerRead.ok) return registerRead;
-      return { ok: true, reconciliation: reconcileLinkedReach({ eventRecords: eventRead.records, registerRecords: registerRead.records, mapping }) };
+      try {
+        return { ok: true, reconciliation: reconcileLinkedReach({ eventRecords: eventRead.records, registerRecords: registerRead.records, mapping }) };
+      } catch (error) {
+        if (error instanceof CrossSourceDurationPrecisionError) return refusal("cross_source_duration_precision_unsupported");
+        throw error;
+      }
     },
   });
 }

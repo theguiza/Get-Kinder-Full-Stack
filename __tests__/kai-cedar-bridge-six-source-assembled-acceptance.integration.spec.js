@@ -1428,6 +1428,86 @@ async function runCedarBridgeAcceptance() {
       stage("register", "cross_source_reach:reference", "linked by the service events", { primary_source_version_id: state.events.sourceVersionId });
     });
 
+    await test("18b: original-source monthly activity and recorded duration are persisted with both-source lineage", async () => {
+      const basis = await adminApi("GET", derivedMeasurementBasisPath(ORG, state.events.sourceVersionId));
+      assert.equal(basis.status, 200);
+      assert.ok(basis.body.data.tabular.duration_field_candidates.some((field) => field.field_key === "field_7" && field.column_position === 7));
+      const mapping = { ...crossMapping, duration: { field_key: "field_7", meaning: "recorded_service_duration", unit: "minutes" } };
+      const body = { primary_source_version_id: state.events.sourceVersionId, reference_source_version_id: state.register.sourceVersionId, mapping };
+      const bad = await adminApi("POST", crossSourceMeasurementsPath(ORG), { ...body, mapping: { ...mapping, duration: { ...mapping.duration, unit: "hours" } } });
+      assert.equal(bad.status, 422);
+      const queued = await adminApi("POST", crossSourceMeasurementsPath(ORG), body);
+      assert.equal(queued.status, 202, J(queued.body));
+      const recorded = await settleReconciliation(queued);
+      assert.deepEqual([recorded.status, recorded.job.job_state, recorded.job.error_code], [200, "succeeded", null], J(recorded));
+      const monthly = recorded.measurements.find((m) => m.definition.metric === "monthly_eligible_encounters");
+      const duration = recorded.measurements.find((m) => m.definition.metric === "known_recorded_service_minutes");
+      assert.ok(monthly && duration, J(recorded));
+      const monthlyOnlyJob = await adminApi("POST", crossSourceMeasurementsPath(ORG), { ...body, mapping: { ...crossMapping, monthly_activity: true } });
+      assert.equal(monthlyOnlyJob.status, 202, J(monthlyOnlyJob.body));
+      const monthlyOnly = await settleReconciliation(monthlyOnlyJob);
+      assert.equal(monthlyOnly.job.job_state, "succeeded", J(monthlyOnly));
+      assert.equal(monthlyOnly.measurements.length, 1);
+      assert.deepEqual(monthlyOnly.measurements[0].component_counts.monthly_activity, monthly.component_counts.monthly_activity);
+      // An independent reading of the original bytes, before comparison to the supplied expectations.
+      const events = parseCsv(byKey.events.bytes.toString("utf8"));
+      const register = new Set(parseCsv(byKey.register.bytes.toString("utf8")).map((r) => r.participant_id));
+      const copies = new Map();
+      for (const event of events) copies.set(event.event_id, [...(copies.get(event.event_id) || []), event]);
+      const eligible = [...copies.values()].filter((list) => new Set(list.map((r) => JSON.stringify([r.participant_id, r.delivery_status, r.service_date, r.program_code]))).size === 1)
+        .map((list) => list[0]).filter((r) => r.delivery_status === "completed" && r.service_date >= "2025-04-01" && r.service_date <= "2026-03-31" && register.has(r.participant_id));
+      const byMonth = new Map();
+      for (const event of eligible) byMonth.set(event.service_date.slice(0, 7), (byMonth.get(event.service_date.slice(0, 7)) || 0) + 1);
+      const independentMonths = [...byMonth].sort(([a], [b]) => a.localeCompare(b)).map(([month, encounter_count]) => ({ month, encounter_count }));
+      const known = eligible.filter((event) => event.duration_minutes.trim() !== "");
+      const independentMinutes = known.reduce((sum, event) => sum + Number(event.duration_minutes), 0);
+      assert.deepEqual(monthly.component_counts.monthly_activity, independentMonths);
+      assert.deepEqual([monthly.measured_value, duration.measured_value, duration.component_counts.duration_missing_count, duration.component_counts.duration_invalid_count, duration.component_counts.known_recorded_minutes],
+        [eligible.length, known.length, eligible.length - known.length, 0, String(independentMinutes)]);
+      assert.equal(monthly.measured_value, report.derived_measurements.reach_encounters.measured_value);
+      assert.deepEqual(independentMonths.map((m) => [m.month, m.encounter_count]), [["2025-04", 1], ["2025-05", 5], ["2025-06", 1], ["2025-07", 7], ["2025-08", 12], ["2025-09", 14], ["2025-10", 18], ["2025-11", 20], ["2025-12", 36], ["2026-01", 31], ["2026-02", 35], ["2026-03", 42]]);
+      assert.deepEqual([eligible.length, known.length, independentMinutes], [222, 219, 16755]);
+      for (const entry of [monthly, duration]) {
+        const [row] = (await derivedRows(state.events.sourceVersionId)).filter((r) => r.source_derived_measurement_id === entry.source_derived_measurement_id);
+        const sources = await query("SELECT source_role, source_version_id::text, field_keys FROM kai.source_derived_measurement_sources WHERE source_derived_measurement_id = $1::uuid ORDER BY source_role", [entry.source_derived_measurement_id]);
+        const [evidence] = await evidenceOf(entry.source_derived_measurement_id);
+        assert.deepEqual(sources.map((s) => [s.source_role, s.source_version_id]), [["primary", state.events.sourceVersionId], ["reference", state.register.sourceVersionId]]);
+        assert.ok(sources[0].field_keys.includes("field_7"));
+        assert.equal(evidence.evidence_type, "source_derived_measurement");
+        assert.ok(evidence.statement.includes(state.register.sourceVersionId));
+        assert.deepEqual(row.definition.period, { period_source: "engagement_reporting_period", period_start: "2025-04-01", period_end: "2026-03-31", precision: "day" });
+        const stated = await adminApi("POST", derivedMeasurementInterpretationPath(ORG, entry.source_derived_measurement_id),
+          { indicator_label: entry === monthly ? "Monthly eligible encounters" : "Known recorded minutes", meaning_text: "Human-stated recorded service activity in the reporting period.", evidence_basis: "organization_record" });
+        assert.equal(stated.status, 200, J(stated.body));
+        const proposed = await adminApi("POST", claimProposalPath(ORG, stated.body.data.evidenceItem.evidence_item_id), {});
+        assert.ok([200, 201].includes(proposed.status), J(proposed.body));
+        const traced = await gkApi("GET", claimTraceabilityPath(ORG, proposed.body.data.claim.claim_id, "internal"));
+        assert.equal(traced.body?.data?.eligible, false, "ordinary review and both-source sensitivity still apply");
+        const evidenceId = stated.body.data.evidenceItem.evidence_item_id;
+        const claimId = proposed.body.data.claim.claim_id;
+        const queue = async (kind, id) => (await query("SELECT review_queue_item_id::text, updated_at FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = $2 AND target_object_id = $3::uuid", [ORG, kind, id]))[0];
+        const evidenceQueue = await queue("evidence_review", evidenceId);
+        const evidenceReview = await gkApi("POST", evidenceReviewCompletePath(ORG, evidenceId, evidenceQueue.review_queue_item_id), evidenceReviewDecisionBody({ expectedUpdatedAt: new Date(evidenceQueue.updated_at).toISOString(), decision: "supported" }));
+        assert.equal(evidenceReview.status, 200, J(evidenceReview.body));
+        const claimQueue = await queue("claim_review", claimId);
+        const claimReview = await gkApi("POST", claimReviewCompletePath(ORG, claimId, claimQueue.review_queue_item_id), claimReviewDecisionBody({ expectedUpdatedAt: new Date(claimQueue.updated_at).toISOString(), decision: "approved", approvedAudiences: ["internal"] }));
+        assert.equal(claimReview.status, 200, J(claimReview.body));
+        let after = await gkApi("GET", claimTraceabilityPath(ORG, claimId, "internal"));
+        for (const [key, dimension] of Object.entries(after.body?.data?.dimensions || {})) if (dimension.assessment_status === "unresolved") await gkApi("POST", coverageInternalAcceptancePath(ORG, claimId, key), {});
+        after = await gkApi("GET", claimTraceabilityPath(ORG, claimId, "internal"));
+        assert.equal(after.body?.data?.eligible, true, J(after.body));
+        const funder = await gkApi("GET", claimTraceabilityPath(ORG, claimId, "funder"));
+        assert.equal(funder.body?.data?.eligible, false);
+      }
+      const before = await writeCounts();
+      const replay = await adminApi("POST", crossSourceMeasurementsPath(ORG), body);
+      assert.deepEqual([replay.status, replay.body.data.fresh, replay.body.data.reconciliationJob.reconciliation_job_id], [202, false, queued.body.data.reconciliationJob.reconciliation_job_id]);
+      await reconciliationDispatcher.whenIdle();
+      assert.deepEqual(await writeCounts(), before);
+      report.derived_measurements.monthly_activity = { months: independentMonths, total: eligible.length, measurement_id: monthly.source_derived_measurement_id };
+      report.derived_measurements.recorded_duration = { known: known.length, missing: eligible.length - known.length, invalid: 0, minutes: independentMinutes, measurement_id: duration.source_derived_measurement_id };
+    });
+
     const crossClaims = {};
     await test("19: cross-source claims, P2-06 traceability and Get Kinder's existing review; both sources' sensitivity decisions govern", async () => {
       const trace = async (claimId, audience = "internal") => {

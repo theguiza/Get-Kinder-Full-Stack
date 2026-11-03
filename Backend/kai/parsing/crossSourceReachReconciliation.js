@@ -33,6 +33,7 @@ export const CROSS_SOURCE_REACH_METHOD = "kai_cross_source_linked_reach_v1";
 export const CROSS_SOURCE_REACH_BASIS_VERSION = "kai_cross_source_reconciliation_v1";
 const ISO_DAY_RE = /^(\d{4}-\d{2}-\d{2})(?:[Tt ][0-2]\d:[0-5]\d(?::[0-5]\d(?:\.\d+)?)?(?:Z|[+-][0-2]\d:?[0-5]\d)?)?$/;
 const MAX_ROW_LOCATORS = 200;
+export class CrossSourceDurationPrecisionError extends RangeError {}
 
 function position(fieldKey) {
   return Number(String(fieldKey).slice("field_".length));
@@ -59,6 +60,26 @@ function dataRecords(records) {
 
 function rows(list) {
   return { count: list.length, rows: list.slice(0, MAX_ROW_LOCATORS), complete: list.length <= MAX_ROW_LOCATORS };
+}
+
+// Parse a non-negative decimal (including scientific notation) without
+// floating-point rounding. Refuse a job whose precision is beyond the
+// bounded representation; never silently classify an enormous number as a
+// missing or invalid observation.
+function decimalMinutes(value) {
+  const match = /^\+?(?:(\d+)(?:\.(\d*))?|\.(\d+))(?:[eE]([+-]?\d+))?$/.exec(value);
+  if (!match) return null;
+  const fraction = match[2] ?? match[3] ?? "";
+  const exponent = Number(match[4] ?? 0);
+  const digits = `${match[1] ?? "0"}${fraction}`;
+  if (!Number.isSafeInteger(exponent) || Math.abs(exponent) > 1000 || digits.length > 1000) throw new CrossSourceDurationPrecisionError("duration numeric precision exceeds the supported bound");
+  let scale = fraction.length - exponent;
+  let units = BigInt(digits);
+  if (scale < 0) {
+    units *= 10n ** BigInt(-scale);
+    scale = 0;
+  }
+  return { units, scale };
 }
 
 /**
@@ -151,8 +172,44 @@ export function reconcileLinkedReach({ eventRecords, registerRecords, mapping })
   const groupsOfPerson = new Map();
   let ungrouped = 0;
   const people = new Set();
+  const months = new Map();
+  const duration = mapping.duration;
+  let known = 0;
+  let missing = 0;
+  let invalid = 0;
+  let units = 0n;
+  let scale = 0;
+  const durationInvalidRows = [];
+  const durationMissingRows = [];
   for (const { record, id } of eligible) {
     people.add(id);
+    if (mapping.monthly_activity || duration) {
+      const month = isoDay(cell(record, events.date_field_key)).slice(0, 7);
+      months.set(month, (months.get(month) ?? 0) + 1);
+    }
+    if (duration) {
+      const copies = byIdentity.get(cell(record, events.event_identifier_field_key));
+      const values = copies.map((copy) => cell(copy, duration.field_key));
+      const value = values[0];
+      if (new Set(values).size > 1) {
+        invalid += 1;
+        durationInvalidRows.push(record.row);
+      } else if (!value) {
+        missing += 1;
+        durationMissingRows.push(record.row);
+      } else {
+        const parsed = decimalMinutes(value);
+        if (!parsed) {
+          invalid += 1;
+          durationInvalidRows.push(record.row);
+        } else {
+          const nextScale = Math.max(scale, parsed.scale);
+          units = units * 10n ** BigInt(nextScale - scale) + parsed.units * 10n ** BigInt(nextScale - parsed.scale);
+          scale = nextScale;
+          known += 1;
+        }
+      }
+    }
     if (!events.group_field_key) continue;
     const valueKey = groupLabels.get(cell(record, events.group_field_key));
     if (!valueKey) {
@@ -193,6 +250,8 @@ export function reconcileLinkedReach({ eventRecords, registerRecords, mapping })
     register_blank_identifier_record_count: registerBlank,
     register_repeated_identifier_count: [...registerIds.values()].filter((count) => count > 1).length,
   };
+  let subtotal = units.toString().padStart(scale + 1, "0");
+  if (scale) subtotal = `${subtotal.slice(0, -scale)}.${subtotal.slice(-scale)}`.replace(/0+$/, "").replace(/\.$/, "");
   return Object.freeze({
     counts: Object.freeze(counts),
     groups: Object.freeze((events.groups || []).map((group) => Object.freeze({
@@ -201,6 +260,13 @@ export function reconcileLinkedReach({ eventRecords, registerRecords, mapping })
       encounter_count: groupCells.get(group.value_key).encounters,
       distinct_person_count: groupCells.get(group.value_key).people.size,
     }))),
+    ...((mapping.monthly_activity || duration) ? {
+      monthly_activity: [...months].sort(([a], [b]) => a.localeCompare(b)).map(([month, encounter_count]) => ({ month, encounter_count })),
+    } : {}),
+    ...(duration ? {
+      recorded_duration: { known_count: known, missing_count: missing, invalid_count: invalid, known_minutes: known ? subtotal : null, unit: "minutes" },
+      duration_exclusions: { missing: rows(durationMissingRows), invalid_or_conflicting: rows(durationInvalidRows) },
+    } : {}),
     row_exclusions: Object.freeze({
       excess_duplicate_copies: rows(excessRows),
       conflicting_event_identities: rows(conflictingRows),

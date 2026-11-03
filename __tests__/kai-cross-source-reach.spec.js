@@ -224,6 +224,83 @@ test("mapping refusals: shape, roles KAI did not propose, unlisted or withheld v
   assert.equal(reason(MAPPING, { register: legacy }), "cross_source_basis_not_committed");
 });
 
+test("monthly activity and recorded duration preserve the eligible population, missingness, invalidity and exact decimal minutes", async () => {
+  const { eventsProfile, registerProfile } = await resolvedMapping();
+  const duration = { field_key: "field_6", unit: "minutes", meaning: "recorded_service_duration" };
+  const checked = D.validateCrossSourceReachMapping({ ...MAPPING, duration });
+  assert.equal(checked.ok, true);
+  const resolved = D.resolveCrossSourceReachMapping({ eventsProfile, registerProfile, mapping: checked.mapping, reportingPeriod: PERIOD });
+  assert.equal(resolved.ok, true, JSON.stringify(resolved));
+  const source = EVENT_ROWS.map((row) => [...row]);
+  source.find((r) => r[0] === "E04")[5] = "";
+  source.find((r) => r[0] === "E10")[5] = "bad";
+  source.find((r) => r[0] === "E11")[5] = "0.1";
+  source.find((r) => r[0] === "E12")[5] = "0.2";
+  const reconciliation = reconcileLinkedReach({ eventRecords: source, registerRecords: REGISTER_ROWS, mapping: D.crossSourceWorkerMapping(resolved.resolved) });
+  assert.deepEqual(reconciliation.monthly_activity, [
+    { month: "2025-04", encounter_count: 1 }, { month: "2025-09", encounter_count: 2 },
+    { month: "2025-10", encounter_count: 1 }, { month: "2026-03", encounter_count: 1 },
+  ]);
+  assert.deepEqual(reconciliation.recorded_duration, { known_count: 3, missing_count: 1, invalid_count: 1, known_minutes: "30.3", unit: "minutes" });
+  assert.deepEqual(reconciliation.duration_exclusions, { missing: { count: 1, rows: [8], complete: true }, invalid_or_conflicting: { count: 1, rows: [14], complete: true } });
+  const list = D.deriveCrossSourceReachMeasurements({ resolved: resolved.resolved, eventFieldKeys: resolved.eventFieldKeys, reconciliation, reference: REFERENCE });
+  for (const name of ["monthly_eligible_encounters", "known_recorded_service_minutes"]) {
+    const row = rowOf(metric(list, name));
+    assert.equal(D.derivedMeasurementArithmeticHolds(row), true);
+    assert.equal(D.derivedContributingSourcesCurrent(row), true);
+    assert.equal(D.validateDerivedStatements({ measurementRow: row }).ok, true);
+    assert.equal(D.derivedMeasurementArithmeticHolds({ ...row, component_counts: { ...row.component_counts, duration_missing_count: 0 } }), false);
+    assert.equal(D.derivedMeasurementArithmeticHolds({ ...row, component_counts: { ...row.component_counts, monthly_activity: [] } }), false);
+    const stale = row.contributing_sources.map((item) => item.source_role === "reference" ? { ...item, is_current: false } : item);
+    assert.equal(D.derivedContributingSourcesCurrent({ ...row, contributing_sources: stale }), false);
+  }
+  const durationRow = rowOf(metric(list, "known_recorded_service_minutes"));
+  assert.match(D.composeDerivedMeasurementEvidenceStatement({ measurementRow: durationRow }), /30\.3 known recorded minutes subtotal/);
+  assert.ok(D.derivedMeasurementLimitationCodes({ measurementRow: durationRow }).includes("derived.known_recorded_minutes_subtotal"));
+  for (const bad of [
+    { ...duration, unit: "hours" }, { ...duration, meaning: "time" }, { ...duration, field_key: "field_4" },
+  ]) assert.equal(D.validateCrossSourceReachMapping({ ...MAPPING, duration: bad }).ok, false);
+  const nonexistent = D.validateCrossSourceReachMapping({ ...MAPPING, duration: { ...duration, field_key: "field_99" } });
+  assert.equal(D.resolveCrossSourceReachMapping({ eventsProfile, registerProfile, mapping: nonexistent.mapping, reportingPeriod: PERIOD }).ok, false);
+  const monthlyOnly = D.validateCrossSourceReachMapping({ ...MAPPING, monthly_activity: true });
+  const onlyResolved = D.resolveCrossSourceReachMapping({ eventsProfile, registerProfile, mapping: monthlyOnly.mapping, reportingPeriod: PERIOD });
+  const onlyResult = reconcileLinkedReach({ eventRecords: source, registerRecords: REGISTER_ROWS, mapping: D.crossSourceWorkerMapping(onlyResolved.resolved) });
+  const onlyMeasurements = D.deriveCrossSourceReachMeasurements({ resolved: onlyResolved.resolved, eventFieldKeys: onlyResolved.eventFieldKeys, reconciliation: onlyResult, reference: REFERENCE });
+  assert.equal(onlyMeasurements.length, 1);
+  assert.equal(D.derivedMeasurementArithmeticHolds(rowOf(onlyMeasurements[0])), true);
+  assert.equal(onlyResult.recorded_duration, undefined);
+  // A duplicate with disagreement on duration remains an eligible encounter, but is not assigned either value.
+  source[2][5] = "31";
+  const conflict = reconcileLinkedReach({ eventRecords: source, registerRecords: REGISTER_ROWS, mapping: D.crossSourceWorkerMapping(resolved.resolved) });
+  assert.equal(conflict.counts.eligible_encounter_count, 5);
+  assert.deepEqual(conflict.recorded_duration, { known_count: 2, missing_count: 1, invalid_count: 2, known_minutes: "0.3", unit: "minutes" });
+  const allMissing = source.map((record, index) => index === 0 ? record : [...record.slice(0, 5), ""]);
+  const none = reconcileLinkedReach({ eventRecords: allMissing, registerRecords: REGISTER_ROWS, mapping: D.crossSourceWorkerMapping(resolved.resolved) });
+  assert.deepEqual(none.recorded_duration, { known_count: 0, missing_count: 5, invalid_count: 0, known_minutes: null, unit: "minutes" });
+  const noneRow = rowOf(metric(D.deriveCrossSourceReachMeasurements({ resolved: resolved.resolved, eventFieldKeys: resolved.eventFieldKeys, reconciliation: none, reference: REFERENCE }), "known_recorded_service_minutes"));
+  assert.equal(D.derivedMeasurementArithmeticHolds(noneRow), true);
+  assert.match(D.composeDerivedMeasurementEvidenceStatement({ measurementRow: noneRow }), /No known recorded minutes subtotal is available/);
+  allMissing.find((r) => r[0] === "E11")[5] = "0";
+  const zero = reconcileLinkedReach({ eventRecords: allMissing, registerRecords: REGISTER_ROWS, mapping: D.crossSourceWorkerMapping(resolved.resolved) });
+  assert.deepEqual(zero.recorded_duration, { known_count: 1, missing_count: 4, invalid_count: 0, known_minutes: "0", unit: "minutes" });
+  allMissing.find((r) => r[0] === "E11")[5] = "+1e-1";
+  const exponent = reconcileLinkedReach({ eventRecords: allMissing, registerRecords: REGISTER_ROWS, mapping: D.crossSourceWorkerMapping(resolved.resolved) });
+  assert.equal(exponent.recorded_duration.known_minutes, "0.1");
+  allMissing.find((r) => r[0] === "E11")[5] = "1e1001";
+  assert.throws(() => reconcileLinkedReach({ eventRecords: allMissing, registerRecords: REGISTER_ROWS, mapping: D.crossSourceWorkerMapping(resolved.resolved) }), /precision exceeds/);
+
+  const interpreted = rowOf(metric(list, "known_recorded_service_minutes"), { interpretation: { indicator_label: "Recorded minutes", meaning_text: "Recorded service duration.", evidence_basis: "organization_record" } });
+  const claim = { claimId: "c1000000-0000-4000-8000-000000000001", evidenceItemId: "e1000000-0000-4000-8000-000000000001",
+    claimStatement: D.composeDerivedClaimStatementFromRow(interpreted), limitationCodes: D.derivedMeasurementLimitationCodes({ measurementRow: interpreted }), requestedAudience: "internal", revalidatedForGeneration: true, audienceAuthority: { internal: true } };
+  const validate = (text) => {
+    const composed = composeEvidenceSummaryMeasurementDisclosures({ blocks: [{ ordinal: 1, text, citations: [{ claimId: claim.claimId, evidenceItemId: claim.evidenceItemId }] }], claims: [claim] });
+    return validateGeneratedContentDraft({ requestedAudience: "internal", generationClaims: [claim], blocks: composed.blocks, contentType: "evidence_summary" }).blockers;
+  };
+  assert.deepEqual(validate(claim.claimStatement), []);
+  assert.ok(validate(`${claim.claimStatement} This is the complete service-time total.`).some((blocker) => blocker.validator_key === "VAL-GEN-008"));
+  assert.ok(validate(`${claim.claimStatement} All service time totalled 30.3 minutes.`).some((blocker) => blocker.validator_key === "VAL-GEN-008"));
+});
+
 test("statements say encounters are not people, cite both versions and every exclusion; contributing-source currentness fails closed", async () => {
   const { measurements: list } = await measurements();
   for (const m of list) {
@@ -322,6 +399,14 @@ test("the reconciliation worker reads only verified, eligible bytes and returns 
   assert.equal((await make({ bytes: (key) => (key === "events" ? bytesOf(EVENT_ROWS.slice(0, 5)) : files.get(key).bytes) }).reconcile(null, input)).reason, "cross_source_checksum_mismatch");
   assert.equal((await make({ bytes: (key) => (key === "events" ? null : files.get(key).bytes) }).reconcile(null, input)).reason, "cross_source_bytes_unavailable");
   assert.equal((await make({ factOverrides: { events: { file_extension: ".xlsx" } } }).reconcile(null, input)).reason, "cross_source_upload_not_eligible");
+  const extreme = EVENT_ROWS.map((row) => [...row]);
+  extreme.find((row) => row[0] === "E10")[5] = "1e1001";
+  const extremeBytes = bytesOf(extreme);
+  const durationMapping = { ...input.mapping, duration: { field_key: "field_6", meaning: "recorded_service_duration", unit: "minutes" }, monthly_activity: true };
+  const extremeInput = { ...input, events: { ...input.events, checksum: sha256(extremeBytes) }, mapping: durationMapping };
+  const extremeWorker = make({ bytes: (key) => key === "events" ? extremeBytes : files.get(key).bytes,
+    factOverrides: { events: { verified_checksum: sha256(extremeBytes), verified_size_bytes: extremeBytes.byteLength } } });
+  assert.equal((await extremeWorker.reconcile(null, extremeInput)).reason, "cross_source_duration_precision_unsupported");
 });
 
 test("only the reconciliation worker reads source bytes: the measurement repository, service and validators never do", () => {

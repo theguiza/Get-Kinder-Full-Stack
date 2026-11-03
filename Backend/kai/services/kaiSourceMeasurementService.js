@@ -295,6 +295,15 @@ export async function recordTabularMeasurement(input, dependencies = {}) {
  * value, date, optional group) and the register's participant identifier,
  * applied to two promoted CSV versions of this organization with the events
  * engagement's recorded reporting period.
+ * A mapping may additionally set `monthly_activity: true` to retain a monthly
+ * breakdown, or supply `duration: {field_key, meaning:
+ * "recorded_service_duration", unit: "minutes"}` to retain that breakdown
+ * and the known recorded duration subtotal. The duration measurement's
+ * measured_value is the count of encounters with a valid recorded value;
+ * its exact decimal subtotal (or null when no value is known), missing and
+ * invalid counts, and eligible denominator are in component_counts. This
+ * preserves the existing integer measurement schema and makes the unit and
+ * incomplete nature of the subtotal explicit to API consumers.
  *
  * This request reads no source byte. It admits the person, checks both
  * versions (lineage, currentness, effective allowed use, bound profile) and

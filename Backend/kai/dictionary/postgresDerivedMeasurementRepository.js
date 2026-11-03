@@ -414,6 +414,7 @@ const WORKER_REFUSALS = Object.freeze({
   cross_source_bytes_unavailable: ["KAI could not read a linked source version's verified bytes.", "Try again; if it persists, upload the file again as a new intake version."],
   cross_source_csv_not_readable: ["A linked source version could not be read as the CSV table KAI profiled.", "Upload the file again as a new intake version."],
   cross_source_checksum_mismatch: ["A linked source version's stored bytes do not match the file KAI profiled.", "Upload the file again as a new intake version."],
+  cross_source_duration_precision_unsupported: ["A duration value exceeds the supported numeric precision.", "Correct the source value and upload a new source version."],
 });
 
 function withCaught(run, body) {
