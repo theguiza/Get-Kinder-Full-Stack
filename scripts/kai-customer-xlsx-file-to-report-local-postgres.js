@@ -18,6 +18,10 @@
  * Then it runs
  * __tests__/kai-customer-xlsx-file-to-report-browser-acceptance.integration.spec.js
  * in a child Node process whose ambient pool points only at this cluster.
+ * Test O (monthly activity and recorded duration in the built application)
+ * reads the Cedar Bridge synthetic sources from outside the repository and is
+ * skipped unless KAI_CEDAR_BRIDGE_PACKAGE=<.../KAI_Synthetic_Impact_Evidence_Project>
+ * is set; the child inherits it.
  */
 import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";

@@ -1855,6 +1855,92 @@ async function runCedarBridgeAcceptance() {
     const V1 = () => state.events.sourceVersionId;
     const CORRECTED_STATE = {};
 
+    // B4: the monthly activity and recorded duration claims through the
+    // existing generation, review and release path. `expected` is the
+    // independent calculation from the uploaded bytes (tests 18b and 28b).
+    const COMPLETE_TIME = /(?<!not )(?<!not a )(?<!not the )\b(?:all|complete|full|entire|total) (?:recorded )?service[- ]time\b/i;
+    const deliverActivity = async ({ claims, evidence, primaryVersionId, expected, tag }) => {
+      const monthlyText = expected.months.map((m) => `${m.month} ${m.encounter_count}`).join(", ");
+      // A model reply asserting complete service time, or an invented minutes total, is refused.
+      const refused = {};
+      for (const [name, text] of [["complete_time", (claim) => `${claim.claimStatement} This is the complete service-time total.`],
+        ["invented_minutes", (claim) => `${claim.claimStatement} In total 20000 minutes were delivered.`]]) {
+        modelBlockText = (claim) => (claim.claimId === claims.duration ? text(claim) : claim.claimStatement);
+        try {
+          const attempt = await adminApi("POST", `${orgPath}/generated-content-drafts/evidence-summary`, { claim_ids: [claims.monthly, claims.duration], idempotency_key: `cedar-activity-negative-${randomUUID()}`, engagement_id: PROJECT });
+          refused[name] = [attempt.status, (attempt.body?.blockers || attempt.body?.error?.blockers || []).map((b) => b.validator_key)];
+        } finally { modelBlockText = null; }
+      }
+      assert.equal(refused.complete_time[0], 422, J(refused));
+      assert.ok(refused.complete_time[1].includes("VAL-GEN-008"), J(refused));
+      assert.equal(refused.invented_minutes[0], 422, J(refused));
+      const created = await adminApi("POST", `${orgPath}/generated-content-drafts/evidence-summary`, { claim_ids: [claims.monthly, claims.duration], idempotency_key: `cedar-activity-${tag}-${randomUUID()}`, engagement_id: PROJECT });
+      assert.equal(created.status, 201, J(created.body));
+      const draftId = created.body.data.generatedContentDraftId;
+      const blocks = await query(
+        `SELECT b.ordinal, b.text, c.claim_id::text, c.evidence_item_id::text FROM kai.generated_content_blocks b
+           JOIN kai.generated_content_citations c ON c.generated_content_block_id = b.generated_content_block_id
+          WHERE b.generated_content_draft_id = $1::uuid ORDER BY b.ordinal`, [draftId]);
+      const monthlyBlock = blocks.find((b) => b.claim_id === claims.monthly);
+      const durationBlock = blocks.find((b) => b.claim_id === claims.duration);
+      assert.deepEqual([monthlyBlock?.evidence_item_id, durationBlock?.evidence_item_id], [evidence.monthly, evidence.duration]);
+      assert.ok(monthlyBlock.text.includes(`${expected.total} eligible service encounters by actual service month`), monthlyBlock.text);
+      assert.ok(monthlyBlock.text.includes(monthlyText), `every month's count: ${monthlyBlock.text}`);
+      assert.match(monthlyBlock.text, /reporting period 2025-04-01 to 2026-03-31/);
+      assert.match(monthlyBlock.text, /This counts service encounters, not people/);
+      assert.ok(durationBlock.text.includes(`${expected.minutes} known recorded minutes subtotal, from ${expected.known} of ${expected.total} eligible encounters; ${expected.missing} missing and ${expected.invalid} invalid or conflicting durations`), durationBlock.text);
+      assert.match(durationBlock.text, /This is a known recorded minutes subtotal, not a complete service-time total; missing, invalid or conflicting durations are not included\./);
+      for (const block of [monthlyBlock, durationBlock]) {
+        assert.match(block.text, /linked to the participant register by matching identifier values exactly/);
+        assert.ok(block.text.includes(state.register.sourceVersionId), "the register version is cited");
+        assert.doesNotMatch(block.text, COMPLETE_TIME);
+      }
+      const sent = modelCalls.at(-1).claims;
+      assert.ok(sent.find((c) => c.claimId === claims.duration).limitationCodes.includes("derived.known_recorded_minutes_subtotal"));
+      assert.ok(sent.find((c) => c.claimId === claims.monthly).limitationCodes.includes("derived.encounters_not_people"));
+      for (const c of modelCalls) assert.doesNotMatch(c.serialized, /CB0\d\d|EV0\d\d|FU0\d\d/);
+      const packet = await gkApi("GET", `${orgPath}/generated-content-drafts/${draftId}/review-packet`);
+      assert.equal(packet.status, 200, J(packet.body));
+      for (const claimId of [claims.monthly, claims.duration]) {
+        const citation = packet.body.data.blocks.flatMap((block) => block.citations).find((c) => c.claimId === claimId);
+        assert.deepEqual(citation.contributingSources.map((c) => [c.sourceRole, c.sourceVersionId, c.isCurrent]),
+          [["primary", primaryVersionId, true], ["reference", state.register.sourceVersionId, true]]);
+      }
+      // Personal-information-derived output stays with Get Kinder's release authority.
+      const own = await adminApi("GET", clientInternalReportMarkdownPath(ORG, PROJECT, draftId));
+      assert.deepEqual([own.status, blockersOf(own)], [422, ["personal_information_not_cleared"]]);
+      const delivery = await releaseThroughGetKinder(draftId);
+      const { released, entries, ...statuses } = delivery;
+      assert.deepEqual([delivery.gk_content_review, delivery.export_review_request, delivery.export_review_start, delivery.export_review_complete,
+        delivery.limitation_snapshot, delivery.export_candidate, delivery.final_release_authority, delivery.export_manifest, delivery.client_released_markdown],
+        [[200, 200], 201, 200, 200, 201, 201, 201, 201, 200], J(statuses));
+      for (const claimId of [claims.monthly, claims.duration]) assert.ok(released.includes(claimId), `${claimId} is in the released document`);
+      assert.ok(released.includes(monthlyText), "the released document states every month's count");
+      assert.ok(released.includes(`${expected.minutes} known recorded minutes subtotal`) && released.includes(`${expected.missing} missing`), "minutes, unit and missing durations");
+      assert.match(released, /not a complete service-time total/);
+      assert.doesNotMatch(released, COMPLETE_TIME);
+      assert.doesNotMatch(released, /CB0\d\d|EV0\d\d/);
+      const contributingLines = released.split("\n").filter((line) => line.includes("Contributing "));
+      assert.equal(contributingLines.filter((line) => line.includes("Contributing primary source") && line.includes(primaryVersionId)).length, 2, J(contributingLines));
+      assert.equal(contributingLines.filter((line) => line.includes("Contributing reference source") && line.includes(state.register.sourceVersionId)).length, 2, J(contributingLines));
+      const codes = Object.fromEntries(entries.map((entry) => [entry.claim_id, entry.limitation_codes]));
+      assert.ok(codes[claims.duration].includes("derived.known_recorded_minutes_subtotal") && codes[claims.duration].includes("derived.cross_source_linked"), J(codes));
+      assert.ok(codes[claims.monthly].includes("derived.encounters_not_people") && codes[claims.monthly].includes("derived.cross_source_linked"), J(codes));
+      return { summary: { draft_id: draftId, refused, blocks: [monthlyBlock.text, durationBlock.text], ...statuses, released_excerpt: released.slice(0, 4000) }, released };
+    };
+
+    await test("23b: B4 - the original monthly activity and recorded duration claims are generated, reviewed and released with both contributing versions and the subtotal limitation", async () => {
+      const claims = { monthly: activityOriginal.monthly_eligible_encounters.claimId, duration: activityOriginal.known_recorded_service_minutes.claimId };
+      const evidence = { monthly: activityOriginal.monthly_eligible_encounters.evidenceId, duration: activityOriginal.known_recorded_service_minutes.evidenceId };
+      for (const claimId of Object.values(claims)) assert.equal((await traceOf(claimId)).eligible, true, "reviewed in 18b");
+      const m = report.derived_measurements;
+      const expected = { months: m.monthly_activity.months, total: m.monthly_activity.total, known: m.recorded_duration.known, missing: m.recorded_duration.missing,
+        invalid: m.recorded_duration.invalid, minutes: String(m.recorded_duration.minutes) };
+      report.generation.activity_original = (await deliverActivity({ claims, evidence, primaryVersionId: V1(), expected, tag: "original" })).summary;
+      state.activityOriginalManifestId = report.generation.activity_original.export_manifest_id;
+      console.log(`Cedar Bridge original activity release: ${J({ ...report.generation.activity_original, released_excerpt: undefined })}`);
+    });
+
     await test("24: Stage B - the corrected service-events file is uploaded through the intake API, scanned, profiled and reviewed like any upload", async () => {
       const manifest = JSON.parse(readFileSync(join(PACKAGE, "03_ANSWER_KEY_DO_NOT_UPLOAD", "File_Integrity_Manifest.json"), "utf8"));
       const entry = manifest.find((candidate) => candidate.disposition === "CHALLENGE_UPLOAD_ONLY_AFTER_BASELINE");
@@ -2295,6 +2381,22 @@ async function runCedarBridgeAcceptance() {
       assert.deepEqual([historical.status, historical.body.data.released_report_state], [409, "historical"]);
       assert.equal((await readReleased(delivery.export_manifest_id)).status, 200);
       report.corrected_version.releases = { historical: state.stageAReleasedManifestId, current: delivery.export_manifest_id };
+    });
+
+    await test("30b: B4 - the corrected monthly activity and duration claims are generated, reviewed and released; the original activity release is historical", async () => {
+      const activity = report.corrected_version.activity;
+      const claims = { monthly: activity.measurements.monthly_eligible_encounters.claim_id, duration: activity.measurements.known_recorded_service_minutes.claim_id };
+      const evidence = { monthly: activity.measurements.monthly_eligible_encounters.evidence_id, duration: activity.measurements.known_recorded_service_minutes.evidence_id };
+      const expected = { months: activity.months, total: activity.eligible, known: activity.known, missing: activity.missing, invalid: activity.invalid, minutes: activity.minutes };
+      const { summary: delivery, released } = await deliverActivity({ claims, evidence, primaryVersionId: CORRECTED_STATE.sourceVersionId, expected, tag: "corrected" });
+      assert.ok(!released.includes(V1()), "the corrected release cites only the corrected service-events version");
+      for (const old of Object.values(activityOriginal)) assert.ok(!released.includes(old.claimId), "no superseded activity claim");
+      const historical = await readReleased(state.activityOriginalManifestId);
+      assert.deepEqual([historical.status, historical.body.data.released_report_state], [409, "historical"], J(historical.body));
+      assert.equal((await readReleased(delivery.export_manifest_id)).status, 200);
+      report.generation.activity_corrected = delivery;
+      report.corrected_version.activity_releases = { historical: state.activityOriginalManifestId, current: delivery.export_manifest_id };
+      console.log(`Cedar Bridge corrected activity release: ${J({ ...delivery, released_excerpt: undefined })}`);
     });
 
     await test("31: the answer-key comparison after the correction: the challenge metric by method, P01's population, and the final tally", () => {

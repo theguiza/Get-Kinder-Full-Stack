@@ -3226,6 +3226,36 @@ async function runXlsxAcceptance() {
       results.measurementControls = { sourceVersionId: sv, paired: [pairedMeasurement.numerator, pairedMeasurement.denominator], rate: [rateMeasurement.numerator, rateMeasurement.denominator, rateMeasurement.percentage],
         claimId, refusedBy, invalid: { form: invalidProblem, server: [refused.status, refused.response.blockers?.[0]?.blocking_reason] } };
     });
+    // Shared by the cross-source browser tests (N, O): a CSV uploaded through the
+    // intake API exactly as the bundle sends it, and a select set as a person would.
+    const csv = (rows) => Buffer.from(`${rows.map((row) => row.join(",")).join("\n")}\n`);
+    const uploadCsv = async (name, bytes) => {
+      const file = customerFile(name, bytes);
+      const reserved = await adminApi("POST", fileReservationsPath(ids.batchId), {
+        organization_id: ORG_X, engagement_id: PROJECT_X, original_filename: file.name, file_extension: ".csv", mime_type: "text/csv",
+        file_size_bytes: file.bytes.byteLength, checksum: file.checksum, hash_algorithm: "sha256", idempotency_key: `file-${randomUUID()}`,
+      });
+      assert.ok([200, 201].includes(reserved.status), J(reserved.body));
+      const intakeFileId = reserved.body.data.intake_file_id;
+      const signed = await adminApi("POST", requestUploadUrlPath(ids.batchId), { organization_id: ORG_X, engagement_id: PROJECT_X, intake_file_id: intakeFileId });
+      assert.equal((await fetch(signed.body.data.upload_url, { method: signed.body.data.upload_method, headers: signed.body.data.upload_headers, body: file.bytes })).status, 200);
+      assert.equal((await adminApi("POST", confirmUploadPath(ORG_X, intakeFileId), { organization_id: ORG_X })).status, 200);
+      await dispatcher.whenIdle();
+      return intakeFileId;
+    };
+    const setSelect = (selector, value) => adminPage.evaluate(`(() => {
+      const el = document.querySelector(${J(selector)});
+      if (!el || ![...el.options].some((option) => option.value === ${J(value)})) return false;
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set.call(el, ${J(value)});
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+      return true;
+    })()`);
+    const optionValueFor = (selector, text) => adminPage.evaluate(`(() => {
+      const el = document.querySelector(${J(selector)});
+      const option = el && [...el.options].find((candidate) => candidate.textContent.includes(${J(text)}));
+      return option ? option.value : null;
+    })()`);
+
     await test("N: in Count records the administrator links a participant register, follows the queued job and reloads; a corrected register promoted as its successor marks the linked results not current; refusals", async () => {
       // Synthetic sessions and register: S-ids, learners L01-L15, L16 registered with no session, one unmatched learner L99.
       const sessionRows = [["session_ref", "learner_ref", "track", "held_on", "state"]];
@@ -3235,26 +3265,11 @@ async function runXlsxAcceptance() {
       }
       sessionRows.push([...sessionRows[2]]); // an exact duplicate export row
       const registerRows = [["learner_ref", "joined_on", "standing"], ...Array.from({ length: 16 }, (_, index) => [`L${String(index + 1).padStart(2, "0")}`, "2025-03-01", index % 2 ? "active" : "exited"])];
-      const csv = (rows) => Buffer.from(`${rows.map((row) => row.join(",")).join("\n")}\n`);
       // Independent arithmetic, sharing no code with KAI.
       const firsts = [...new Map(sessionRows.slice(1).map((row) => [row[0], row])).values()];
       const registered = new Set(registerRows.slice(1).map((row) => row[0]));
       const eligible = firsts.filter((row) => row[4] === "completed" && row[3] >= "2025-04-01" && row[3] <= "2026-03-31" && registered.has(row[1]));
       const expected = { encounters: eligible.length, people: new Set(eligible.map((row) => row[1])).size, registered: registered.size };
-      const uploadCsv = async (name, bytes) => {
-        const file = customerFile(name, bytes);
-        const reserved = await adminApi("POST", fileReservationsPath(ids.batchId), {
-          organization_id: ORG_X, engagement_id: PROJECT_X, original_filename: file.name, file_extension: ".csv", mime_type: "text/csv",
-          file_size_bytes: file.bytes.byteLength, checksum: file.checksum, hash_algorithm: "sha256", idempotency_key: `file-${randomUUID()}`,
-        });
-        assert.ok([200, 201].includes(reserved.status), J(reserved.body));
-        const intakeFileId = reserved.body.data.intake_file_id;
-        const signed = await adminApi("POST", requestUploadUrlPath(ids.batchId), { organization_id: ORG_X, engagement_id: PROJECT_X, intake_file_id: intakeFileId });
-        assert.equal((await fetch(signed.body.data.upload_url, { method: signed.body.data.upload_method, headers: signed.body.data.upload_headers, body: file.bytes })).status, 200);
-        assert.equal((await adminApi("POST", confirmUploadPath(ORG_X, intakeFileId), { organization_id: ORG_X })).status, 200);
-        await dispatcher.whenIdle();
-        return intakeFileId;
-      };
       const target = await adminApi("PUT", `${orgPath()}/engagements/${PROJECT_X}/requirement-target`,
         { target: { reporting_period_start: "2025-04-01", reporting_period_end: "2026-03-31", report_identity: "Synthetic learning reach" } });
       assert.ok([200, 201].includes(target.status), J(target.body));
@@ -3262,18 +3277,6 @@ async function runXlsxAcceptance() {
       const registerSv = (await decideAndPromote(adminApi, await uploadCsv("learner-register.csv", csv(registerRows)))).source_version_id;
 
       const section = `[data-client-cross-source="${eventsSv}"]`;
-      const setSelect = (selector, value) => adminPage.evaluate(`(() => {
-        const el = document.querySelector(${J(selector)});
-        if (!el || ![...el.options].some((option) => option.value === ${J(value)})) return false;
-        Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value").set.call(el, ${J(value)});
-        el.dispatchEvent(new Event("change", { bubbles: true }));
-        return true;
-      })()`);
-      const optionValueFor = (selector, text) => adminPage.evaluate(`(() => {
-        const el = document.querySelector(${J(selector)});
-        const option = el && [...el.options].find((candidate) => candidate.textContent.includes(${J(text)}));
-        return option ? option.value : null;
-      })()`);
       const field = (key) => `${section} [data-client-cross-source-field="${key}"]`;
 
       await openCountRecords(eventsSv);
@@ -3407,6 +3410,254 @@ async function runXlsxAcceptance() {
       // The superseded register is no longer offered as a linkable version.
       assert.equal(await adminPage.evaluate(`[...document.querySelector(${J(field("referenceSourceVersionId"))}).options].some((o) => o.value === ${J(registerSv)})`), false);
       results.crossSourceControls = { eventsSv, registerSv, expected, jobId, refusedBy, polls: polls.length, claimId, successor: decidedBody.data.source_version.source_version_id };
+    });
+
+    const CEDAR_PACKAGE = process.env.KAI_CEDAR_BRIDGE_PACKAGE;
+    const cedarAvailable = Boolean(CEDAR_PACKAGE) && existsSync(join(CEDAR_PACKAGE, "01_UPLOAD_TO_KAI"));
+    await test("O: on the Cedar Bridge sources the administrator maps duration and monthly activity, follows the queued job, reloads and proposes claims; the corrected successor's results are current and the original's historical; refusals",
+      { skip: cedarAvailable ? false : "requires KAI_CEDAR_BRIDGE_PACKAGE (the Cedar Bridge synthetic sources, outside the repository)" }, async () => {
+      const readCedar = (dir, name) => readFileSync(join(CEDAR_PACKAGE, dir, name));
+      const registerBytes = readCedar("01_UPLOAD_TO_KAI", "02_Participant_Register.csv");
+      const eventsBytes = readCedar("01_UPLOAD_TO_KAI", "03_Service_Events.csv");
+      const correctedBytes = readCedar("02_CHALLENGE_UPLOAD_LATER", "03_Service_Events_CORRECTED_VERSION.csv");
+      // Independent arithmetic from the files' bytes, sharing no code with KAI.
+      const rowsOf = (bytes) => {
+        const [header, ...lines] = bytes.toString("utf8").replace(/^﻿/, "").split(/\r?\n/).filter(Boolean);
+        const keys = header.split(",");
+        return lines.map((line) => Object.fromEntries(line.split(",").map((value, index) => [keys[index], value])));
+      };
+      const independentActivity = (events, register) => {
+        const registered = new Set(rowsOf(register).map((row) => row.participant_id));
+        const copies = new Map();
+        for (const row of rowsOf(events)) copies.set(row.event_id, [...(copies.get(row.event_id) || []), row]);
+        const eligible = [...copies.values()].filter((list) => new Set(list.map((r) => J([r.participant_id, r.delivery_status, r.service_date, r.program_code]))).size === 1)
+          .filter(([r]) => r.delivery_status === "completed" && r.service_date >= "2025-04-01" && r.service_date <= "2026-03-31" && registered.has(r.participant_id));
+        const months = new Map();
+        let known = 0, missing = 0, invalid = 0, minutes = 0n;
+        for (const list of eligible) {
+          months.set(list[0].service_date.slice(0, 7), (months.get(list[0].service_date.slice(0, 7)) || 0) + 1);
+          const values = new Set(list.map((r) => r.duration_minutes.trim()));
+          const [value] = values;
+          if (values.size > 1 || (value && !/^\d+$/.test(value))) invalid += 1;
+          else if (!value) missing += 1;
+          else { known += 1; minutes += BigInt(value); }
+        }
+        return { months: [...months].sort(([a], [b]) => a.localeCompare(b)).map(([month, encounter_count]) => ({ month, encounter_count })),
+          total: eligible.length, known, missing, invalid, minutes: String(minutes) };
+      };
+      const original = independentActivity(eventsBytes, registerBytes);
+      const correctedExpected = independentActivity(correctedBytes, registerBytes);
+      // The established B1/B2 and B3 acceptance values, as oracles for the independent calculation only.
+      const FY = ["2025-04", "2025-05", "2025-06", "2025-07", "2025-08", "2025-09", "2025-10", "2025-11", "2025-12", "2026-01", "2026-02", "2026-03"];
+      assert.deepEqual(original.months, FY.map((month, i) => ({ month, encounter_count: [1, 5, 1, 7, 12, 14, 18, 20, 36, 31, 35, 42][i] })));
+      assert.deepEqual([original.total, original.known, original.missing, original.invalid, original.minutes], [222, 219, 3, 0, "16755"]);
+      assert.deepEqual(correctedExpected.months, FY.map((month, i) => ({ month, encounter_count: [1, 5, 1, 6, 12, 15, 18, 21, 36, 31, 35, 42][i] })));
+      assert.deepEqual([correctedExpected.total, correctedExpected.known, correctedExpected.missing, correctedExpected.invalid, correctedExpected.minutes], [223, 220, 3, 0, "16815"]);
+
+      const target = await adminApi("PUT", `${orgPath()}/engagements/${PROJECT_X}/requirement-target`,
+        { target: { reporting_period_start: "2025-04-01", reporting_period_end: "2026-03-31", report_identity: "Synthetic learning reach" } });
+      assert.ok([200, 201].includes(target.status), J(target.body));
+      // The truthful decision for participant-level files: pseudonymous identifiers, so personal information present.
+      const PARTICIPANT_LEVEL = Object.freeze({ ...SNAPSHOT, reviewed_personal_data_status: "present" });
+      const registerSv = (await decideAndPromote(adminApi, await uploadCsv("02_Participant_Register.csv", registerBytes), PARTICIPANT_LEVEL)).source_version_id;
+      const eventsSv = (await decideAndPromote(adminApi, await uploadCsv("03_Service_Events.csv", eventsBytes), PARTICIPANT_LEVEL)).source_version_id;
+      const IDENTIFIERS = /CB\d{3}|EV\d{4}/;
+      const MAPPING = {
+        events: { event_identifier_field_key: "field_1", participant_identifier_field_key: "field_2", status_field_key: "field_6", completed_value_key: null, date_field_key: "field_4", group_field_key: "field_3" },
+        register: { participant_identifier_field_key: "field_1" },
+        duration: { field_key: "field_7", meaning: "recorded_service_duration", unit: "minutes" },
+      };
+      const grouped = (value) => Number(value).toLocaleString("en-US");
+      const activityIn = (scope) => adminPage.evaluate(`(() => {
+        const scope = document.querySelector(${J(scope)});
+        if (!scope) return null;
+        const table = scope.querySelector('[data-client-cross-source-activity="monthly_eligible_encounters"]');
+        const duration = scope.querySelector('[data-client-cross-source-activity="known_recorded_service_minutes"]');
+        return {
+          months: table ? [...table.querySelectorAll("[data-client-cross-source-month]")].map((tr) => [tr.getAttribute("data-client-cross-source-month"), tr.cells[0].textContent, tr.cells[1].textContent]) : null,
+          total: table?.querySelector("[data-client-cross-source-month-total]")?.textContent ?? null,
+          minutes: duration?.querySelector("[data-client-cross-source-duration-minutes]")?.textContent ?? null,
+          counts: duration?.querySelector("[data-client-cross-source-duration-counts]")?.textContent ?? null,
+          subtotal: duration?.querySelector("[data-client-cross-source-duration-subtotal]")?.textContent ?? null,
+        };
+      })()`);
+      const assertActivityShown = (shown, expected, label) => {
+        assert.deepEqual(shown.months.map(([month, , count]) => [month, Number(count.replace(/,/g, ""))]), expected.months.map((m) => [m.month, m.encounter_count]), `${label}: all 12 months`);
+        assert.deepEqual([shown.months[0][1], shown.months.at(-1)[1]], ["Apr 2025", "Mar 2026"], label);
+        assert.equal(shown.total, `Eligible encounters in the reporting period (2025-04-01 to 2026-03-31)${expected.total}`, label);
+        assert.equal(shown.minutes, `Known recorded minutes: ${grouped(expected.minutes)} minutes (2025-04-01 to 2026-03-31)`, label);
+        assert.equal(shown.counts, `${expected.known} of ${expected.total} eligible encounters have a recorded duration; ${expected.missing} missing; ${expected.invalid} invalid or conflicting.`, label);
+        assert.equal(shown.subtotal, `Subtotal only: ${expected.missing + expected.invalid} eligible encounters have no usable recorded duration and are not included, so this is not the complete service time.`, label);
+      };
+
+      // Choose the sources and confirm each field's meaning in the form, then request and follow the queued job.
+      const requestInUi = async (sv, expected) => {
+        const section = `[data-client-cross-source="${sv}"]`;
+        const field = (key) => `${section} [data-client-cross-source-field="${key}"]`;
+        await openCountRecords(sv);
+        await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `${section} [data-client-cross-source-form]`)), "the linkage form");
+        assert.match(await textOf(adminPage, `${section} [data-client-cross-source-period]`), /2025-04-01 to 2026-03-31/);
+        assert.ok(await setSelect(field("referenceSourceVersionId"), registerSv), "choose the participant register");
+        await adminPage.waitFor(async () => Boolean(await textOf(adminPage, field("registerParticipantFieldKey"))), "the register's fields");
+        for (const [key, value] of [["eventIdentifierFieldKey", "field_1"], ["participantIdentifierFieldKey", "field_2"], ["statusFieldKey", "field_6"], ["dateFieldKey", "field_4"], ["groupFieldKey", "field_3"], ["registerParticipantFieldKey", "field_1"]]) {
+          assert.ok(await setSelect(field(key), value), key);
+        }
+        const completedKey = await adminPage.evaluate(`[...document.querySelector(${J(field("completedValueKey"))}).options].find((o) => o.textContent.startsWith("completed ("))?.value ?? null`);
+        assert.ok(completedKey && await setSelect(field("completedValueKey"), completedKey), "the listed completed value");
+        // Duration: only columns KAI did not classify are offered, by position; the person states the meaning and unit.
+        const offered = await adminPage.evaluate(`[...document.querySelector(${J(field("durationFieldKey"))}).options].map((o) => [o.value, o.textContent])`);
+        assert.ok(offered.some(([value, text]) => value === "field_7" && text.startsWith("Column 7 (field_7, ")), J(offered));
+        assert.ok(!offered.some(([value]) => ["field_1", "field_2", "field_3", "field_4", "field_6"].includes(value)), "classified fields are not offered as a duration");
+        assert.ok(await setSelect(field("durationFieldKey"), "field_7"));
+        await adminPage.waitFor(async () => /Confirm that the duration column/.test((await textOf(adminPage, `${section} [data-client-cross-source-problem]`)) || ""), "unconfirmed duration is refused in the form");
+        const blocked = await adminPage.evaluate(`({ submit: document.querySelector(${J(`${section} [data-client-cross-source-submit]`)}).disabled,
+          monthly: [document.querySelector(${J(field("monthlyActivity"))}).checked, document.querySelector(${J(field("monthlyActivity"))}).disabled] })`);
+        assert.deepEqual(blocked, { submit: true, monthly: [true, true] }, "nothing can be sent until the meaning is confirmed; a duration also records the months");
+        await adminPage.clickIn(field("durationConfirmed"), "confirm the duration column records minutes");
+        await adminPage.waitFor(async () => !(await textOf(adminPage, `${section} [data-client-cross-source-problem]`)), "the form is complete");
+        assert.doesNotMatch(await adminPage.evaluate(`document.querySelector(${J(section)}).innerText`), IDENTIFIERS, "no identifier is shown");
+
+        const mark = adminPage.mark();
+        await adminPage.clickIn(`${section} [data-client-cross-source-submit]`, "Reconcile and record");
+        await adminPage.waitFor(async () => (await adminPage.evaluate(`document.querySelector('${section} [data-client-cross-source-job]')?.getAttribute("data-client-cross-source-job-state")`)) === "succeeded", "the job settles", { timeout: 30000 });
+        await adminPage.idle();
+        const requests = adminPage.requestsSince(mark);
+        const [posted] = requests.filter((r) => r.method === "POST");
+        assert.deepEqual([new URL(posted.url).pathname, posted.status], [crossSourceMeasurementsPath(ORG_X), 202]);
+        const sent = JSON.parse(posted.postData);
+        assert.deepEqual(sent, { primary_source_version_id: sv, reference_source_version_id: registerSv,
+          mapping: { ...MAPPING, events: { ...MAPPING.events, completed_value_key: completedKey } } }, "exactly the person's selections and confirmed duration meaning");
+        const queued = (await adminPage.responseBody(posted)).data.reconciliationJob;
+        assert.equal(queued.job_state, "queued", "the request only queues; the worker reads the files");
+        const polls = requests.filter((r) => r.method === "GET" && new URL(r.url).pathname === crossSourceReconciliationJobPath(ORG_X, queued.reconciliation_job_id));
+        assert.ok(polls.length >= 1 && polls.every((r) => r.status === 200), "the job is read until it settles");
+        const states = [queued.job_state];
+        for (const poll of polls) states.push((await adminPage.responseBody(poll)).data.reconciliationJob.job_state);
+        const settled = await adminPage.responseBody(polls.at(-1));
+        assert.doesNotMatch(J(settled), /CB\d{3}|EV\d{4}|claim_token|requested_by/);
+        const byMetric = Object.fromEntries(settled.data.measurements.map((m) => [m.definition.metric, m]));
+        assert.deepEqual(Object.keys(byMetric).sort(), ["known_recorded_service_minutes", "monthly_eligible_encounters"]);
+        assert.deepEqual(byMetric.monthly_eligible_encounters.component_counts.monthly_activity, expected.months, "the returned months equal the independent calculation");
+        const d = byMetric.known_recorded_service_minutes.component_counts;
+        assert.deepEqual([byMetric.monthly_eligible_encounters.measured_value, d.duration_known_count, d.duration_missing_count, d.duration_invalid_count, d.known_recorded_minutes, byMetric.known_recorded_service_minutes.definition.duration.unit],
+          [expected.total, expected.known, expected.missing, expected.invalid, expected.minutes, "minutes"]);
+        // What the person sees once it settles.
+        const job = `${section} [data-client-cross-source-job]`;
+        assert.equal(await textOf(adminPage, `${job} [data-client-cross-source-result="monthly_eligible_encounters"]`), `Eligible service encounters by month (events, not people): ${expected.total}`);
+        assert.equal(await textOf(adminPage, `${job} [data-client-cross-source-result="known_recorded_service_minutes"]`), `Known recorded service minutes (subtotal): ${grouped(expected.minutes)} minutes`);
+        assertActivityShown(await activityIn(job), expected, "settled job");
+        assert.match(await textOf(adminPage, `${section} [data-client-cross-source-exclusions]`), /duplicate copies.*completed outside the period.*no register match/s);
+        return { section, sent, jobId: queued.reconciliation_job_id, states, byMetric };
+      };
+      // A reload reads the recorded measurement back from the server.
+      const recordedRow = (id) => adminPage.evaluate(`(() => {
+        const row = document.querySelector('[data-client-derived-recorded="${id}"]');
+        return row ? { current: row.getAttribute("data-client-derived-current"), text: row.innerText,
+          sources: [...row.querySelectorAll("[data-client-derived-contributing-source]")].map((el) => [el.getAttribute("data-client-derived-contributing-source"), el.getAttribute("data-client-derived-contributing-current")]),
+          limitations: [...row.querySelectorAll("[data-client-derived-limitation]")].map((el) => el.getAttribute("data-client-derived-limitation")) } : null;
+      })()`);
+      const assertReloaded = async (sv, run, expected) => {
+        const mark = adminPage.mark();
+        await openCountRecords(sv);
+        const ids = [run.byMetric.monthly_eligible_encounters.source_derived_measurement_id, run.byMetric.known_recorded_service_minutes.source_derived_measurement_id];
+        await adminPage.waitFor(async () => Boolean(await recordedRow(ids[1])), "the recorded results after reload");
+        await adminPage.idle();
+        assert.ok(adminPage.requestsSince(mark).some((r) => r.method === "GET" && new URL(r.url).pathname === derivedMeasurementBasisPath(ORG_X, sv) && r.status === 200), "read from the server");
+        const [monthly, duration] = [await recordedRow(ids[0]), await recordedRow(ids[1])];
+        for (const row of [monthly, duration]) {
+          assert.deepEqual([row.current, row.sources], ["current", [["primary", "current"], ["reference", "current"]]]);
+          assert.ok(row.text.includes(sv) && row.text.includes(registerSv), "both contributing versions are shown");
+          assert.ok(row.limitations.includes("derived.cross_source_linked"), J(row.limitations));
+        }
+        assert.ok(monthly.text.includes(`Eligible service encounters by month (events, not people): ${expected.total}`));
+        assert.ok(monthly.limitations.includes("derived.encounters_not_people"), J(monthly.limitations));
+        assert.ok(duration.text.includes(`Known recorded service minutes (subtotal): ${grouped(expected.minutes)} minutes`), duration.text);
+        assert.ok(duration.limitations.includes("derived.known_recorded_minutes_subtotal"), J(duration.limitations));
+        assert.match(duration.text, /This is a known recorded minutes subtotal, not a complete service-time total/);
+        assertActivityShown({ ...(await activityIn(`[data-client-derived-recorded="${ids[0]}"]`)), ...Object.fromEntries(Object.entries(await activityIn(`[data-client-derived-recorded="${ids[1]}"]`)).filter(([k]) => !["months", "total"].includes(k))) }, expected, "after reload");
+        assert.match(await textOf(adminPage, `${run.section} [data-client-cross-source-history]`), /succeeded: register 02_participant_register\.csv \(current version\)/i);
+        return ids;
+      };
+      const proposeInUi = async (measurementId) => {
+        const [evidenceRow] = await query("SELECT evidence_item_id::text FROM kai.evidence_derived_measurements WHERE source_derived_measurement_id = $1::uuid", [measurementId]);
+        const mark = adminPage.mark();
+        await adminPage.clickIn(`[data-client-derived-recorded="${measurementId}"] [data-client-derived-propose-claim="${evidenceRow.evidence_item_id}"]`, "Propose a claim");
+        await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `[data-client-derived-recorded="${measurementId}"] [data-client-derived-claim]`)), "claim shown");
+        await adminPage.idle();
+        const [proposed] = adminPage.requestsSince(mark).filter((r) => r.method === "POST");
+        assert.ok([200, 201].includes(proposed.status));
+        const { claim } = (await adminPage.responseBody(proposed)).data;
+        assert.equal((await textOf(adminPage, `[data-client-derived-recorded="${measurementId}"] [data-client-derived-claim]`)), `Claim: ${claim.statement}`);
+        return claim;
+      };
+
+      // 1. The original versions.
+      const first = await requestInUi(eventsSv, original);
+      const originalIds = await assertReloaded(eventsSv, first, original);
+      const monthlyClaim = await proposeInUi(originalIds[0]);
+      const durationClaim = await proposeInUi(originalIds[1]);
+      assert.ok(monthlyClaim.statement.includes(original.months.map((m) => `${m.month} ${m.encounter_count}`).join(", ")), monthlyClaim.statement);
+      assert.ok(durationClaim.statement.includes(`${original.minutes} known recorded minutes subtotal, from ${original.known} of ${original.total} eligible encounters; ${original.missing} missing`), durationClaim.statement);
+      assert.match(durationClaim.statement, /This is not a complete service-time total/);
+      // Both are proposals: Get Kinder's existing review still governs them (participant-level sources).
+      for (const claim of [monthlyClaim, durationClaim]) assert.equal((await internalEligibility(claim.claim_id)).eligible, false);
+
+      // 2. Refusals: other roles and organizations, and mappings that do not state minutes of a separate field.
+      const jobsBefore = (await query("SELECT count(*)::int AS n FROM kai.cross_source_reconciliation_jobs WHERE organization_id = $1::uuid", [ORG_X]))[0].n;
+      const refusedBy = {};
+      for (const [label, api] of [["contributor", contributorApi], ["client_reviewer", reviewerApi], ["other_organization_admin", adminYApi]]) {
+        refusedBy[label] = [(await api("POST", crossSourceMeasurementsPath(ORG_X), first.sent)).status, (await api("GET", crossSourceReconciliationJobPath(ORG_X, first.jobId))).status];
+      }
+      for (const [label, statuses] of Object.entries(refusedBy)) for (const code of statuses) assert.ok(code === 403 || code === 404, `${label}: ${code}`);
+      const invalid = {};
+      for (const [label, duration] of [["hours", { ...MAPPING.duration, unit: "hours" }], ["unstated_meaning", { field_key: "field_7", unit: "minutes" }], ["mapped_date_field", { ...MAPPING.duration, field_key: "field_4" }], ["categorical_field", { ...MAPPING.duration, field_key: "field_5" }]]) {
+        const response = await adminApi("POST", crossSourceMeasurementsPath(ORG_X), { ...first.sent, mapping: { ...first.sent.mapping, duration } });
+        invalid[label] = [response.status, response.body?.blockers?.[0]?.blocking_reason ?? response.body?.error?.blockers?.[0]?.blocking_reason];
+      }
+      assert.deepEqual(invalid, { hours: [422, "cross_source_duration_mapping_invalid"], unstated_meaning: [422, "cross_source_duration_mapping_invalid"],
+        mapped_date_field: [422, "cross_source_duration_mapping_invalid"], categorical_field: [422, "cross_source_duration_field_invalid"] }, J(invalid));
+      assert.equal((await query("SELECT count(*)::int AS n FROM kai.cross_source_reconciliation_jobs WHERE organization_id = $1::uuid", [ORG_X]))[0].n, jobsBefore, "nothing was queued");
+
+      // 3. The corrected service events, promoted as the successor of the same source.
+      const correctedFileId = await uploadCsv("03_Service_Events_CORRECTED_VERSION.csv", correctedBytes);
+      const sensitivity = await sensitivityOf(correctedFileId);
+      assert.equal((await adminApi("POST", sensitivityDecisionPath(ORG_X, sensitivity.intake_sensitivity_profile_id), {
+        expected_updated_at: new Date(sensitivity.updated_at).toISOString(), review_queue_item_id: sensitivity.review_queue_item_id, decision: "reviewed", reviewed_snapshot: PARTICIPANT_LEVEL,
+      })).status, 200);
+      const promoted = await adminApi("POST", sourceCandidateDecisionPath(ORG_X, (await candidateOf(sensitivity.intake_sensitivity_profile_id)).intake_source_candidate_id),
+        { outcome: "promoted", reviewed_source_type: "organization_primary_record", supersedes_source_version_id: eventsSv });
+      assert.deepEqual([promoted.status, promoted.body.data?.superseded_source_version_id], [200, eventsSv], J(promoted.body));
+      const correctedSv = (await versionOf(sensitivity.intake_sensitivity_profile_id)).source_version_id;
+      await openStudioTab("Data Sources");
+      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `[data-client-open-source-measurement="${correctedSv}"]`)), "the corrected version is current");
+      assert.match(await textOf(adminPage, `[data-client-source-version="${eventsSv}"]`), /Earlier version/);
+      assert.equal(await textOf(adminPage, `[data-client-open-source-measurement="${eventsSv}"]`), null, "the replaced version is not offered for new results");
+      // Its claims are no longer current; its results are kept, identified as historical, and not shown as current.
+      for (const claim of [monthlyClaim, durationClaim]) {
+        const traced = await gkApi("GET", claimTraceabilityPath(ORG_X, claim.claim_id, "internal"));
+        assert.deepEqual([traced.status, traced.body.data?.traceability_conflict_reason], [409, "source_version_not_current"]);
+      }
+      await openCountRecords(correctedSv);
+      const correctedSection = `[data-client-cross-source="${correctedSv}"]`;
+      await adminPage.waitFor(async () => Boolean(await textOf(adminPage, `${correctedSection} [data-client-cross-source-history-earlier]`)), "the earlier version's reconciliation");
+      const earlier = await textOf(adminPage, `${correctedSection} [data-client-cross-source-history-earlier]`);
+      assert.match(earlier, /Historical: reconciliations of earlier, replaced versions of this source/);
+      assert.match(earlier, /succeeded: service events 03_service_events\.csv \(earlier version, replaced\)/i);
+      assert.ok(await textOf(adminPage, `${correctedSection} [data-client-cross-source-history-job="${first.jobId}"][data-client-cross-source-history-historical]`), "the original job is marked historical");
+      for (const id of originalIds) assert.equal(await recordedRow(id), null, "an earlier version's result is never shown as current");
+      const historicalRows = await query("SELECT source_derived_measurement_id::text, component_counts FROM kai.source_derived_measurements WHERE source_derived_measurement_id = ANY($1::uuid[]) ORDER BY source_derived_measurement_id", [originalIds]);
+      assert.equal(historicalRows.length, 2, "the original results are retained");
+
+      // 4. The corrected versions, through the same controls.
+      const second = await requestInUi(correctedSv, correctedExpected);
+      const correctedIds = await assertReloaded(correctedSv, second, correctedExpected);
+      assert.ok(!correctedIds.some((id) => originalIds.includes(id)));
+      assert.match(await textOf(adminPage, `${correctedSection} [data-client-cross-source-history-earlier]`), /earlier version, replaced/);
+      const correctedClaim = await proposeInUi(correctedIds[1]);
+      assert.ok(correctedClaim.statement.includes(`${correctedExpected.minutes} known recorded minutes subtotal, from ${correctedExpected.known} of ${correctedExpected.total} eligible encounters`), correctedClaim.statement);
+      assert.equal((await query("SELECT component_counts FROM kai.source_derived_measurements WHERE source_derived_measurement_id = $1::uuid", [originalIds[1]]))[0].component_counts.known_recorded_minutes, original.minutes, "the historical result is unchanged");
+      results.activityControls = { eventsSv, registerSv, correctedSv, original, corrected: correctedExpected, jobStates: { original: first.states, corrected: second.states },
+        sent: first.sent, refusedBy, invalid, claims: { monthly: monthlyClaim.claim_id, duration: durationClaim.claim_id, correctedDuration: correctedClaim.claim_id } };
     });
 
 
