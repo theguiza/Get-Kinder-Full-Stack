@@ -17,7 +17,10 @@ import {
 } from "../Backend/kai/dictionary/sensitivityAllowedUseDecisionContract.js";
 import { validateSensitivityProfileDecisionRequest } from "../Backend/kai/validators/kaiSprint2RequestSchemas.js";
 import { __sensitivityAllowedUseDecisionRepositoryTestables } from "../Backend/kai/dictionary/postgresSensitivityAllowedUseDecisionRepository.js";
-import { __sensitivityAllowedUseReviewRepositoryTestables } from "../Backend/kai/dictionary/postgresSensitivityAllowedUseReviewRepository.js";
+import {
+  __sensitivityAllowedUseReviewRepositoryTestables,
+  createPostgresSensitivityAllowedUseReviewRepository,
+} from "../Backend/kai/dictionary/postgresSensitivityAllowedUseReviewRepository.js";
 import { __sensitivityAllowedUseReviewServiceContract } from "../Backend/kai/services/kaiSensitivityAllowedUseReviewService.js";
 import { recordSensitivityAllowedUseDecision } from "../Backend/kai/services/kaiSensitivityAllowedUseReviewService.js";
 import { getReviewCockpitCapabilities } from "../Backend/kai/services/kaiReviewCockpitService.js";
@@ -445,6 +448,117 @@ test("B1A-2 orchestration repository: replay requires matching outcome, matching
     currentHead: head, decisionOutcome: "reviewed", expectedUpdatedAt: "2020-01-01T00:00:00.000Z",
     existingQueueRow: { queue_status: "resolved", review_status: "resolved" }, isTerminal: true,
   }), false);
+});
+
+test("B1A-2 orchestration repository: replay also requires every reviewed snapshot value to match the head", () => {
+  const { isReplayOfSensitivityDecision } = __sensitivityAllowedUseReviewRepositoryTestables;
+  const resolvedRow = { queue_status: "resolved", review_status: "resolved" };
+  const head = { decision_outcome: "reviewed", target_updated_at: new Date(NOW), ...internalOnlySnapshot() };
+  const replay = (reviewedSnapshot) => isReplayOfSensitivityDecision({
+    currentHead: head, decisionOutcome: "reviewed", reviewedSnapshot, expectedUpdatedAt: NOW,
+    existingQueueRow: resolvedRow, isTerminal: true,
+  });
+  assert.equal(replay(internalOnlySnapshot()), true);
+  assert.equal(replay(internalOnlySnapshot({ reviewed_small_cell_risk_status: "present" })), false);
+  assert.equal(replay(internalOnlySnapshot({ reviewed_small_cell_risk_status: "absent" })), false);
+  assert.equal(replay(internalOnlySnapshot({ reviewed_minor_data_status: "present" })), false);
+  assert.equal(replay(internalOnlySnapshot({ reviewed_allowed_use_status: "allowed" })), false);
+  assert.equal(replay(internalOnlySnapshot({
+    reviewed_allowed_use_status: "allowed", reviewed_llm_processing_allowed: true,
+  })), false);
+
+  // needs_more_information carries no snapshot; its head has every reviewed value null.
+  const nullHead = { decision_outcome: "needs_more_information", target_updated_at: new Date(NOW) };
+  for (const field of Object.keys(internalOnlySnapshot())) nullHead[field] = null;
+  assert.equal(isReplayOfSensitivityDecision({
+    currentHead: nullHead, decisionOutcome: "needs_more_information", reviewedSnapshot: null, expectedUpdatedAt: NOW,
+    existingQueueRow: { queue_status: "open", review_status: "needs_gk_review" }, isTerminal: false,
+  }), true);
+});
+
+/**
+ * Drives the real recordSensitivityAllowedUseDecision orchestration through a
+ * scripted transaction in which the queue compare-and-set always misses, as it
+ * does after the first copy of a request has already moved the OCC stamp.
+ */
+function compareAndSetMissScenario(headSnapshot) {
+  const ORG = "00000000-0000-4000-8000-000000000001";
+  const PROFILE = "80000000-0000-4000-8000-000000000001";
+  const ACTOR = "90000000-0000-4000-8000-000000000001";
+  const statements = [];
+  const head = {
+    decision_id: "a0000000-0000-4000-8000-000000000001",
+    organization_id: ORG,
+    intake_sensitivity_profile_id: PROFILE,
+    review_queue_item_id: QUEUE_ITEM,
+    decision_outcome: "reviewed",
+    ...headSnapshot,
+    decided_by: ACTOR,
+    decided_by_role: "gk_reviewer",
+    supersedes_decision_id: null,
+    created_by_type: "human",
+    target_updated_at: new Date(NOW),
+    created_at: new Date("2026-08-31T10:00:01.000Z"),
+  };
+  const tx = {
+    async query(sql) {
+      statements.push(sql);
+      if (/^\s*SELECT[\s\S]*FROM kai\.intake_sensitivity_profiles/.test(sql)) {
+        return { rows: [{ organization_id: ORG, intake_sensitivity_profile_id: PROFILE, intake_file_id: "b0000000-0000-4000-8000-000000000001" }] };
+      }
+      if (/^\s*SELECT[\s\S]*FROM kai\.review_queue_items/.test(sql)) {
+        return { rows: [{
+          review_queue_item_id: QUEUE_ITEM, organization_id: ORG, queue_type: "sensitivity_review",
+          target_object_type: "intake_sensitivity_profile", target_object_id: PROFILE,
+          queue_status: "resolved", review_status: "resolved", updated_at: new Date("2026-08-31T10:00:01.000Z"),
+        }] };
+      }
+      if (/^\s*SELECT[\s\S]*FROM kai\.intake_sensitivity_review_decisions/.test(sql)) return { rows: [head] };
+      if (/^\s*UPDATE kai\.review_queue_items/.test(sql)) return { rows: [] };
+      throw new Error(`unexpected statement in a compare-and-set miss: ${sql.trim().slice(0, 60)}`);
+    },
+  };
+  const repository = createPostgresSensitivityAllowedUseReviewRepository({ runInTransaction: (work) => work(tx) });
+  const record = (reviewedSnapshot) => repository.recordSensitivityAllowedUseDecision({
+    organizationId: ORG,
+    intakeSensitivityProfileId: PROFILE,
+    reviewQueueItemId: QUEUE_ITEM,
+    expectedUpdatedAt: NOW,
+    decisionOutcome: "reviewed",
+    reviewedSnapshot,
+    actorUserId: ACTOR,
+    actorRole: "gk_reviewer",
+    now: "2026-08-31T10:05:00.000Z",
+    metadataOnlyAudit: { prepareMetadataOnlyAudit() { throw new Error("no audit on a compare-and-set miss"); } },
+  });
+  return { record, statements, head };
+}
+
+test("B1A-2 orchestration repository: an identical re-sent decision replays the existing head after a compare-and-set miss", async () => {
+  const { record, statements, head } = compareAndSetMissScenario(internalOnlySnapshot());
+  const result = await record(internalOnlySnapshot());
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.data.replayed, true);
+  assert.equal(result.data.decision.decision_id, head.decision_id);
+  assert.equal(result.data.decision.reviewed_small_cell_risk_status, "unknown");
+  assert.equal(statements.some((sql) => /INSERT/.test(sql)), false);
+});
+
+test("B1A-2 orchestration repository: a stale submission changing only a reviewed value is a conflict, not a replay", async () => {
+  for (const changed of [
+    { reviewed_small_cell_risk_status: "present" },
+    { reviewed_small_cell_risk_status: "absent" },
+    { reviewed_story_testimonial_status: "present" },
+    { reviewed_allowed_use_status: "allowed", reviewed_funder_use_allowed: true },
+  ]) {
+    const { record, statements } = compareAndSetMissScenario(internalOnlySnapshot());
+    const result = await record(internalOnlySnapshot(changed));
+    assert.equal(result.ok, false, JSON.stringify(changed));
+    assert.equal(result.error.code, "conflict_current_state_changed");
+    assert.equal(result.error.status, 409);
+    assert.equal(statements.some((sql) => /INSERT|DELETE/.test(sql)), false, "a conflict writes nothing");
+    assert.equal(statements.filter((sql) => /^\s*UPDATE/.test(sql)).length, 1, "only the missed compare-and-set");
+  }
 });
 
 test("B1A-2 orchestration repository: a needs_more_information input carrying a snapshot is rejected before any transaction", () => {

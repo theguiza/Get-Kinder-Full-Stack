@@ -46196,3 +46196,19 @@ The final synthetic run used logical source `fb199f6f-fbe0-435a-9f81-07e12933636
 **Limitations (NOT_CONFIRMED):** no PostgreSQL-backed lifecycle, actual lock contention, production runtime or deployed behavior was exercised. Legacy small-cell acceptances without a reviewed-decision identity are not automatically current when an applicable reviewed decision exists; their history remains unchanged. No push or deployment was performed.
 
 **Status:** SMALL_CELL_PACKAGE_1_IMPLEMENTED_AND_SYNTHETICALLY_VERIFIED_LOCALLY; POSTGRESQL_AND_PRODUCTION_NOT_VERIFIED. Stop at this package boundary.
+
+### Small-cell Package 2A: sensitivity decision replay classification (2026-11-03)
+
+**Authorization (USER_CONFIRMED):** owner prompt "KAI — Package 2A" authorizes correcting `isReplayOfSensitivityDecision` with regression tests and one local commit. Frontend, coverage, exports, production, databases, schema, deployment, push, flags, credentials, real data and Current State remain excluded.
+
+**Start (TOOL_VERIFIED):** `main` at `7e8247f831cfbae18c89cc430758245e1bb13daa` (Package 1), clean. Every Node command used a non-listening loopback database sentinel.
+
+**Defect (TOOL_VERIFIED):** after a compare-and-set miss, `isReplayOfSensitivityDecision` (`Backend/kai/dictionary/postgresSensitivityAllowedUseReviewRepository.js`) compared only outcome, OCC stamp and queue state, never the reviewed snapshot. A stale request with the same outcome and `expectedUpdatedAt` but a different `reviewed_small_cell_risk_status` (or any other reviewed value) returned `replayed: true` with the old head, so the changed determination was silently reported as recorded. Two new regressions failed on the unfixed code.
+
+**Correction (TOOL_VERIFIED):** the predicate now also requires every `SENSITIVITY_REVIEWED_SNAPSHOT_FIELDS` value on the head to equal the request's (all null for `needs_more_information`); otherwise the existing 409 `conflict_current_state_changed` is returned with no write. The successful compare-and-set path, decision fields, idempotency identity, supersession, audit and authorization are unchanged.
+
+**Verification (TOOL_VERIFIED):** B1A-2 boundary 23/23 (new: predicate per-field comparison; identical retry replays through the real orchestration after a scripted compare-and-set miss; changed small-cell, story/testimonial and allowed-use/permission values return 409 with no INSERT and no UPDATE beyond the missed compare-and-set); small-cell effective decision 7/7; P2-04 audit transaction propagation 4/4; P1-09 review cockpit 45/45; client authorization reconciliation 30/30; organization administrator authority 7/7. `git diff --check` clean.
+
+**Limitations (NOT_CONFIRMED):** the PostgreSQL decision-ledger and review-work integration suites were skipped (runner-owned database not authorized); the scripted transaction is not PostgreSQL. No production or deployed behavior was exercised; no push.
+
+**Status:** SMALL_CELL_PACKAGE_2A_IMPLEMENTED_AND_SYNTHETICALLY_VERIFIED_LOCALLY; POSTGRESQL_AND_PRODUCTION_NOT_VERIFIED. Stop at this package boundary.

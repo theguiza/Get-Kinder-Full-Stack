@@ -5,6 +5,7 @@ import {
 } from "./postgresSensitivityAllowedUseDecisionRepository.js";
 import {
   isSensitivityAllowedUseTerminalOutcome,
+  SENSITIVITY_REVIEWED_SNAPSHOT_FIELDS,
   sensitivityReviewedSnapshotRequired,
   sensitivityQueueStatusForOutcome,
   sensitivityQueueReviewStatusForOutcome,
@@ -331,13 +332,28 @@ function isQueueRowInState(row, queueStatus, reviewStatus) {
  * this exact decisionOutcome AND was recorded against this exact
  * expectedUpdatedAt (the optimistic-concurrency stamp this request targeted -
  * proof this is the same request re-sent, not a new or different one) AND the
- * queue row is currently in the state this decisionOutcome projects. Any other
- * post-CAS-miss state is a genuine conflict. Mirrors P2-12's isReplayOfDecision
- * exactly.
+ * queue row is currently in the state this decisionOutcome projects AND the head
+ * stores exactly this request's reviewed snapshot (every
+ * SENSITIVITY_REVIEWED_SNAPSHOT_FIELDS value; all null for
+ * 'needs_more_information'). A stale request that changes any reviewed value -
+ * including reviewed_small_cell_risk_status - is not the same request. Any other
+ * post-CAS-miss state is a genuine conflict. Otherwise mirrors P2-12's
+ * isReplayOfDecision.
  */
-function isReplayOfSensitivityDecision({ currentHead, decisionOutcome, expectedUpdatedAt, existingQueueRow, isTerminal }) {
+function isReplayOfSensitivityDecision({
+  currentHead,
+  decisionOutcome,
+  reviewedSnapshot,
+  expectedUpdatedAt,
+  existingQueueRow,
+  isTerminal,
+}) {
   if (!currentHead) return false;
   if (currentHead.decision_outcome !== decisionOutcome) return false;
+  const requested = isTerminal && isPlainObject(reviewedSnapshot) ? reviewedSnapshot : {};
+  for (const field of SENSITIVITY_REVIEWED_SNAPSHOT_FIELDS) {
+    if ((currentHead[field] ?? null) !== (requested[field] ?? null)) return false;
+  }
   const headTargetMs = Date.parse(new Date(currentHead.target_updated_at).toISOString());
   const expectedMs = Date.parse(expectedUpdatedAt);
   if (!Number.isFinite(headTargetMs) || !Number.isFinite(expectedMs) || headTargetMs !== expectedMs) return false;
@@ -505,6 +521,7 @@ export function createPostgresSensitivityAllowedUseReviewRepository({ runInTrans
             if (isReplayOfSensitivityDecision({
               currentHead,
               decisionOutcome,
+              reviewedSnapshot,
               expectedUpdatedAt,
               existingQueueRow,
               isTerminal,
