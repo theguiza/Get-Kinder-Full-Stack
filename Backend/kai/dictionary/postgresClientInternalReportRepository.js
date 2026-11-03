@@ -139,6 +139,17 @@ async function readClaimFacts(tx, { organizationId, citation, citationRefs }) {
         definitionRecordedAt: iso(definitionRow.created_at),
       }
       : null,
+    // Every other source version a cross-source measurement combines, cited
+    // beside the evidence's own version with its currentness and profile.
+    linkedSources: (derivedRow?.contributing_sources || [])
+      .filter((source) => source.source_role === "reference")
+      .map((source) => ({
+        sourceId: source.source_id,
+        sourceVersionId: source.source_version_id,
+        sourceVersionCurrent: source.is_current === true,
+        profileCanonicalSha256: source.profile_canonical_sha256,
+        fieldKeys: [...source.field_keys],
+      })),
     limitationCodes: measurementRow
       ? [...measurementLimitationCodes({ measurementRow, dimensions: data.dimensions }), ...(countOnly ? [COUNT_ONLY_LIMITATION_CODE] : [])]
       : derivedRow ? derivedMeasurementLimitationCodes({ measurementRow: derivedRow, dimensions: data.dimensions }) : [],

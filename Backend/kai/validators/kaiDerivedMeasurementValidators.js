@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { CROSS_SOURCE_REACH_BASIS_VERSION, CROSS_SOURCE_REACH_METHOD } from "../parsing/crossSourceReachReconciliation.js";
 import { PAIRED_OUTCOME_CALCULATION_METHOD } from "../profiling/pairedOutcomeBasis.js";
 import { TABULAR_MEASUREMENT_BASIS_VERSION } from "../profiling/tabularMeasurementBasis.js";
 import { __evidenceCoverageAssessmentValidatorsTestables } from "./kaiEvidenceCoverageAssessmentValidators.js";
@@ -42,18 +43,21 @@ export const DERIVED_MEASUREMENT_FAMILIES = Object.freeze({
   PAIRED_OUTCOME: "paired_outcome_change",
   TABULAR_COUNT: "tabular_count",
   TABULAR_RATE: "tabular_rate",
+  CROSS_SOURCE_REACH: "cross_source_reach",
 });
 export const DERIVED_MEASUREMENT_METHODS = Object.freeze({
   PAIRED_OUTCOME: PAIRED_OUTCOME_CALCULATION_METHOD,
   RECORD_COUNT: "kai_tabular_conditional_record_count_v1",
   DISTINCT_KEY_COUNT: "kai_tabular_conditional_distinct_key_count_v1",
   RECORD_RATE: "kai_tabular_conditional_record_rate_v1",
+  CROSS_SOURCE_REACH: CROSS_SOURCE_REACH_METHOD,
 });
 const METHOD_FAMILY = Object.freeze({
   [DERIVED_MEASUREMENT_METHODS.PAIRED_OUTCOME]: DERIVED_MEASUREMENT_FAMILIES.PAIRED_OUTCOME,
   [DERIVED_MEASUREMENT_METHODS.RECORD_COUNT]: DERIVED_MEASUREMENT_FAMILIES.TABULAR_COUNT,
   [DERIVED_MEASUREMENT_METHODS.DISTINCT_KEY_COUNT]: DERIVED_MEASUREMENT_FAMILIES.TABULAR_COUNT,
   [DERIVED_MEASUREMENT_METHODS.RECORD_RATE]: DERIVED_MEASUREMENT_FAMILIES.TABULAR_RATE,
+  [DERIVED_MEASUREMENT_METHODS.CROSS_SOURCE_REACH]: DERIVED_MEASUREMENT_FAMILIES.CROSS_SOURCE_REACH,
 });
 export const SCORE_DIRECTIONS = Object.freeze(["higher_is_better", "lower_is_better", "not_established"]);
 // What the organization says about where the values come from. KAI never
@@ -577,6 +581,259 @@ export function describeTabularMeasurementOptions(profile, worksheetKey) {
 }
 
 // ---------------------------------------------------------------------------
+// Cross-source linked reach: service events of one CSV source version linked
+// to the participant register of another. The mapping is a person's
+// confirmation of which proposed fields and listed values mean what; it is
+// validated against both committed profiles before any byte is read, and the
+// reconciliation worker calculates from both versions' verified bytes.
+
+export const CROSS_SOURCE_METRICS = Object.freeze({
+  ELIGIBLE_ENCOUNTERS: "eligible_linked_encounters",
+  DISTINCT_PEOPLE: "distinct_people_served",
+  GROUP_ENCOUNTERS: "group_linked_encounters",
+  GROUP_DISTINCT_PEOPLE: "group_distinct_people_served",
+  MULTI_GROUP_PEOPLE: "people_in_more_than_one_group",
+});
+const METRIC_COMPONENT = Object.freeze({
+  [CROSS_SOURCE_METRICS.ELIGIBLE_ENCOUNTERS]: "eligible_encounter_count",
+  [CROSS_SOURCE_METRICS.DISTINCT_PEOPLE]: "distinct_person_count",
+  [CROSS_SOURCE_METRICS.GROUP_ENCOUNTERS]: "group_encounter_count",
+  [CROSS_SOURCE_METRICS.GROUP_DISTINCT_PEOPLE]: "group_distinct_person_count",
+  [CROSS_SOURCE_METRICS.MULTI_GROUP_PEOPLE]: "multi_group_person_count",
+});
+export const CROSS_SOURCE_IDENTIFIER_MATCH = "exact_after_trim";
+const EVENT_MAPPING_KEYS = Object.freeze([
+  "event_identifier_field_key", "participant_identifier_field_key", "status_field_key", "completed_value_key", "date_field_key", "group_field_key",
+]);
+const ISO_DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+function isIsoDay(value) {
+  if (typeof value !== "string" || !ISO_DAY_RE.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
+/** The shape of a person's cross-source mapping: field keys and one listed value key, nothing else. */
+export function validateCrossSourceReachMapping(input) {
+  const invalid = (reason, message, fix) => refuse(reason, message, fix, { objectType: "cross_source_mapping" });
+  if (!isPlainObject(input) || !Object.keys(input).every((key) => ["events", "register"].includes(key))
+    || !isPlainObject(input.events) || !isPlainObject(input.register)) {
+    return invalid("cross_source_mapping_invalid", "The mapping needs an events part and a register part.", "Send {events: {...}, register: {participant_identifier_field_key}}.");
+  }
+  const events = input.events;
+  if (!Object.keys(events).every((key) => EVENT_MAPPING_KEYS.includes(key))
+    || !EVENT_MAPPING_KEYS.filter((key) => key !== "group_field_key").every((key) => key in events)) {
+    return invalid("cross_source_mapping_invalid", "The events mapping names the event identifier, participant identifier, status, completed value, date and optional group fields.", "Select each field from the service-event source's listed fields.");
+  }
+  const fieldKeys = EVENT_MAPPING_KEYS.filter((key) => key.endsWith("_field_key") && events[key] !== undefined && events[key] !== null);
+  if (!fieldKeys.every((key) => FIELD_KEY_RE.test(events[key])) || !VALUE_KEY_RE.test(events.completed_value_key ?? "")) {
+    return invalid("cross_source_mapping_invalid", "Every mapped field must be a listed field key and the completed value a listed value key.", "Select fields and values KAI lists.");
+  }
+  if (new Set(fieldKeys.map((key) => events[key])).size !== fieldKeys.length) {
+    return invalid("cross_source_mapping_fields_not_distinct", "Each mapped role needs a different field.", "Select a different field for each role.");
+  }
+  if (!Object.keys(input.register).every((key) => key === "participant_identifier_field_key") || !FIELD_KEY_RE.test(input.register.participant_identifier_field_key ?? "")) {
+    return invalid("cross_source_mapping_invalid", "The register mapping names its participant identifier field only.", "Select the register's participant identifier field.");
+  }
+  return {
+    ok: true,
+    mapping: Object.freeze({
+      events: Object.freeze(Object.fromEntries(EVENT_MAPPING_KEYS.map((key) => [key, events[key] ?? null]))),
+      register: Object.freeze({ participant_identifier_field_key: input.register.participant_identifier_field_key }),
+    }),
+  };
+}
+
+function csvBasisOf(profile, sourceRole) {
+  if (!isPlainObject(profile) || profile.status !== "profiled" || profile.format !== "csv") {
+    return refuse("cross_source_source_not_csv", `The ${sourceRole} source must be a profiled CSV file.`, "Link two promoted CSV source versions.");
+  }
+  const basis = profile.tabular_measurement_basis;
+  if (!isPlainObject(basis) || basis.basis_version !== TABULAR_MEASUREMENT_BASIS_VERSION || basis.status !== "assessed") {
+    return refuse("cross_source_basis_not_committed", `The ${sourceRole} source was profiled before KAI listed the fields a linkage needs.`, "In Files, choose the same file again and select \"Upload again as a new intake version\".");
+  }
+  return { ok: true, basis };
+}
+
+/**
+ * The mapping resolved against both committed profiles and the engagement's
+ * recorded period: every field has the role KAI proposed, the completed
+ * value and the group values are listed labels, the group vocabulary is not
+ * withheld, and the period is two real ISO days. The reconciliation applies
+ * the period by day from the source bytes, so no whole-month rule applies.
+ */
+export function resolveCrossSourceReachMapping({ eventsProfile, registerProfile, mapping, reportingPeriod }) {
+  const eventsBasis = csvBasisOf(eventsProfile, "service-event");
+  if (!eventsBasis.ok) return eventsBasis;
+  const registerBasis = csvBasisOf(registerProfile, "participant register");
+  if (!registerBasis.ok) return registerBasis;
+  const notProposed = (sourceRole, fieldKey, role) => refuse(
+    "cross_source_field_role_not_proposed",
+    `KAI did not find ${fieldKey} of the ${sourceRole} source to be ${role === "identifier" ? "an identifier" : role === "date" ? "a date" : "a category"} field.`,
+    `Select a field KAI lists as ${role === "identifier" ? "an identifier" : role === "date" ? "a date" : "a category"} field.`,
+    { objectType: "cross_source_mapping" },
+  );
+  const events = mapping.events;
+  const roleOf = (basis, fieldKey, role) => {
+    const field = fieldOf(basis, fieldKey);
+    return field?.roles?.includes(role) ? field : null;
+  };
+  for (const [key, role] of [["event_identifier_field_key", "identifier"], ["participant_identifier_field_key", "identifier"], ["date_field_key", "date"]]) {
+    if (!roleOf(eventsBasis.basis, events[key], role)) return notProposed("service-event", events[key], role);
+  }
+  if (!roleOf(registerBasis.basis, mapping.register.participant_identifier_field_key, "identifier")) {
+    return notProposed("participant register", mapping.register.participant_identifier_field_key, "identifier");
+  }
+  const status = roleOf(eventsBasis.basis, events.status_field_key, "categorical");
+  if (!status) return notProposed("service-event", events.status_field_key, "categorical");
+  const completed = status.categorical.values.find((value) => value.value_key === events.completed_value_key);
+  if (!completed) {
+    return refuse("cross_source_value_not_listed", `${events.completed_value_key} is not a listed value of ${events.status_field_key}.`, "Select the listed value that means a completed service.", { objectType: "cross_source_mapping" });
+  }
+  let groups = [];
+  if (events.group_field_key) {
+    const group = roleOf(eventsBasis.basis, events.group_field_key, "categorical");
+    if (!group) return notProposed("service-event", events.group_field_key, "categorical");
+    if (group.categorical.vocabulary_withheld || group.categorical.values.length === 0) {
+      return refuse("cross_source_group_vocabulary_withheld", "KAI withheld this field's values, so it cannot group people by them.", "Group by a field whose values KAI lists, or measure without a group.", { objectType: "cross_source_mapping" });
+    }
+    groups = group.categorical.values.map((value) => ({ value_key: value.value_key, label: value.label }));
+  }
+  if (!reportingPeriod?.start || !reportingPeriod?.end) {
+    return refuse("cross_source_reporting_period_not_recorded", "The service-event source's engagement has no recorded reporting period to apply.", "Record the engagement's reporting period (Project target), then link the sources again.", { objectType: "cross_source_mapping" });
+  }
+  if (!isIsoDay(reportingPeriod.start) || !isIsoDay(reportingPeriod.end) || reportingPeriod.start > reportingPeriod.end) {
+    return refuse("cross_source_reporting_period_invalid", "The engagement's reporting period is not two real dates in order.", "Record the engagement's reporting period again.", { objectType: "cross_source_mapping" });
+  }
+  const eventFieldKeys = [...new Set(EVENT_MAPPING_KEYS.filter((key) => key.endsWith("_field_key")).map((key) => events[key]).filter(Boolean))]
+    .sort((a, b) => Number(a.slice(6)) - Number(b.slice(6)));
+  return {
+    ok: true,
+    resolved: Object.freeze({
+      events: Object.freeze({ ...events, completed_value_label: completed.label, groups: Object.freeze(groups) }),
+      register: mapping.register,
+      identifier_match: CROSS_SOURCE_IDENTIFIER_MATCH,
+      period: Object.freeze({ period_source: PERIOD_SOURCE_ENGAGEMENT, period_start: reportingPeriod.start, period_end: reportingPeriod.end, precision: "day" }),
+    }),
+    eventFieldKeys,
+  };
+}
+
+/** The reconciliation worker's mapping input, from a resolved mapping. */
+export function crossSourceWorkerMapping(resolved) {
+  return {
+    events: resolved.events,
+    register: resolved.register,
+    period: { start: resolved.period.period_start, end: resolved.period.period_end },
+  };
+}
+
+/**
+ * The persistable cross-source measurements of one reconciliation: eligible
+ * encounters and distinct people organization-wide, and, with a group field,
+ * encounters and distinct people per listed group value and the people in
+ * more than one group. Each carries the whole reconciliation funnel, the
+ * group table and the row exclusions, and names the reference source version
+ * and profile it was linked to, so its identity changes with either source.
+ */
+export function deriveCrossSourceReachMeasurements({ resolved, eventFieldKeys, reconciliation, reference }) {
+  const counts = reconciliation.counts;
+  const groupTable = reconciliation.groups.map((group) => ({ ...group }));
+  const base = {
+    mapping: { events: resolved.events, register: resolved.register, identifier_match: resolved.identifier_match },
+    period: resolved.period,
+    reference_source_version_id: reference.sourceVersionId,
+    reference_profile_canonical_sha256: reference.profileCanonicalSha256,
+    reference_field_keys: [resolved.register.participant_identifier_field_key],
+  };
+  const make = (metric, group = null) => {
+    const componentCounts = {
+      ...counts,
+      groups: groupTable,
+      ...(group ? { group_encounter_count: group.encounter_count, group_distinct_person_count: group.distinct_person_count } : {}),
+    };
+    const definition = { metric, measured_component: METRIC_COMPONENT[metric], group: group ? { field_key: resolved.events.group_field_key, value_key: group.value_key, value_label: group.label } : null, ...base };
+    const value = componentCounts[METRIC_COMPONENT[metric]];
+    return Object.freeze({
+      family: DERIVED_MEASUREMENT_FAMILIES.CROSS_SOURCE_REACH,
+      calculationMethod: DERIVED_MEASUREMENT_METHODS.CROSS_SOURCE_REACH,
+      basisVersion: CROSS_SOURCE_REACH_BASIS_VERSION,
+      sheetKey: null,
+      measurementKey: computeMeasurementKey({ family: DERIVED_MEASUREMENT_FAMILIES.CROSS_SOURCE_REACH, calculationMethod: CROSS_SOURCE_REACH_METHOD, definition }),
+      definition: Object.freeze(definition),
+      fieldKeys: Object.freeze([...eventFieldKeys]),
+      measuredValue: value,
+      numerator: value,
+      denominator: null,
+      percentage: null,
+      componentCounts: Object.freeze(componentCounts),
+      exclusions: reconciliation.row_exclusions,
+      rowLocators: null,
+    });
+  };
+  const measurements = [make(CROSS_SOURCE_METRICS.ELIGIBLE_ENCOUNTERS), make(CROSS_SOURCE_METRICS.DISTINCT_PEOPLE)];
+  if (resolved.events.group_field_key) {
+    for (const group of groupTable) {
+      measurements.push(make(CROSS_SOURCE_METRICS.GROUP_ENCOUNTERS, group), make(CROSS_SOURCE_METRICS.GROUP_DISTINCT_PEOPLE, group));
+    }
+    if (groupTable.length > 1) measurements.push(make(CROSS_SOURCE_METRICS.MULTI_GROUP_PEOPLE));
+  }
+  return measurements;
+}
+
+// The reconciliation funnel every cross-source row keeps (mirrors the CHECK).
+function crossSourceFunnelHolds(row) {
+  const c = row.component_counts;
+  const keys = [
+    "physical_record_count", "blank_event_identifier_record_count", "duplicate_group_count", "duplicate_member_record_count", "excess_copy_record_count",
+    "conflicting_event_identity_count", "conflicting_record_count", "distinct_event_count", "consistent_event_count", "completed_event_count",
+    "completed_without_date_count", "completed_outside_period_count", "in_period_completed_event_count", "blank_participant_identifier_event_count",
+    "unmatched_event_count", "unmatched_identity_count", "eligible_encounter_count", "distinct_person_count", "multi_group_person_count", "ungrouped_encounter_count",
+  ];
+  if (!keys.every((key) => isCount(c[key])) || !Array.isArray(c.groups)) return false;
+  const component = row.definition?.measured_component;
+  if (METRIC_COMPONENT[row.definition?.metric] !== component || c[component] !== row.measured_value) return false;
+  const groupsHold = c.groups.every((group) => isCount(group.encounter_count) && isCount(group.distinct_person_count) && group.distinct_person_count <= group.encounter_count);
+  const grouped = c.groups.reduce((total, group) => total + group.encounter_count, 0);
+  return row.denominator === null && row.percentage === null && groupsHold
+    && c.excess_copy_record_count === c.duplicate_member_record_count - c.duplicate_group_count
+    && c.distinct_event_count === c.physical_record_count - c.blank_event_identifier_record_count - c.excess_copy_record_count
+    && c.consistent_event_count === c.distinct_event_count - c.conflicting_event_identity_count
+    && c.completed_event_count <= c.consistent_event_count
+    && c.in_period_completed_event_count === c.completed_event_count - c.completed_without_date_count - c.completed_outside_period_count
+    && c.eligible_encounter_count === c.in_period_completed_event_count - c.blank_participant_identifier_event_count - c.unmatched_event_count
+    && c.unmatched_identity_count <= c.unmatched_event_count
+    && c.distinct_person_count <= c.eligible_encounter_count
+    && c.multi_group_person_count <= c.distinct_person_count
+    && (c.groups.length === 0 || grouped + c.ungrouped_encounter_count === c.eligible_encounter_count)
+    // With every encounter grouped in two groups, people overall = people per group - people in both.
+    && (c.groups.length !== 2 || c.ungrouped_encounter_count !== 0
+      || c.distinct_person_count === c.groups[0].distinct_person_count + c.groups[1].distinct_person_count - c.multi_group_person_count)
+    && (!row.definition.group || (c.groups.some((group) => group.value_key === row.definition.group.value_key
+      && group.encounter_count === c.group_encounter_count && group.distinct_person_count === c.group_distinct_person_count)));
+}
+
+/**
+ * Whether every source a measurement combines is still the current version
+ * it was calculated from: for a cross-source measurement, exactly its
+ * primary and its reference version, each current and still bound to the
+ * profile recorded with the measurement; a single-source measurement names
+ * no other source.
+ */
+export function derivedContributingSourcesCurrent(row) {
+  if (!isPlainObject(row)) return false;
+  const sources = Array.isArray(row.contributing_sources) ? row.contributing_sources : [];
+  if (row.measurement_family !== DERIVED_MEASUREMENT_FAMILIES.CROSS_SOURCE_REACH) return sources.length === 0;
+  const primary = sources.filter((source) => source.source_role === "primary");
+  const reference = sources.filter((source) => source.source_role === "reference");
+  return sources.length === 2 && primary.length === 1 && reference.length === 1
+    && primary[0].source_version_id === row.measurement_source_version_id
+    && reference[0].source_version_id === row.definition?.reference_source_version_id
+    && reference[0].profile_canonical_sha256 === row.definition?.reference_profile_canonical_sha256
+    && sources.every((source) => source.is_current === true && source.bound_profile_canonical_sha256 === source.profile_canonical_sha256);
+}
+
+// ---------------------------------------------------------------------------
 // Statements, composed only from a persisted measurement row and the
 // interpretation its evidence is stated under.
 
@@ -655,7 +912,32 @@ function tabularRateBody(row) {
     + `${row.numerator} of ${row.denominator} (${row.percentage}%); ${counts.other_population_record_count} of the ${row.denominator} do not.`;
 }
 
+function crossSourceBody(row) {
+  const c = row.component_counts;
+  const d = row.definition;
+  const events = d.mapping.events;
+  const linkage = `${events.event_identifier_field_key} events, ${events.status_field_key} = ${events.completed_value_label}, `
+    + `${events.date_field_key} in reporting period ${d.period.period_start} to ${d.period.period_end} by day, `
+    + `${events.participant_identifier_field_key} in register ${d.reference_source_version_id} ${d.mapping.register.participant_identifier_field_key}`;
+  const exclusions = `${c.excess_copy_record_count} duplicate copies counted once; excluded ${c.completed_outside_period_count} outside period, `
+    + `${c.unmatched_event_count} unmatched, ${c.conflicting_event_identity_count} conflicting`;
+  const scope = d.group ? ` in ${d.group.field_key} = ${d.group.value_label}` : "";
+  switch (d.metric) {
+    case CROSS_SOURCE_METRICS.ELIGIBLE_ENCOUNTERS:
+    case CROSS_SOURCE_METRICS.GROUP_ENCOUNTERS:
+      return `${plural(row.measured_value, "eligible service encounter")}${scope} (encounters, not people): ${linkage}; ${exclusions}.`;
+    case CROSS_SOURCE_METRICS.MULTI_GROUP_PEOPLE:
+      return `${plural(row.measured_value, "register participant")} served in more than one ${events.group_field_key} value, each counted once, among ${c.eligible_encounter_count} eligible encounters: ${linkage}.`;
+    default: {
+      const among = d.group ? c.group_encounter_count : c.eligible_encounter_count;
+      const overlap = d.group ? "" : `; ${c.multi_group_person_count} in several ${events.group_field_key ?? "groups"} counted once`;
+      return `${plural(row.measured_value, "distinct register participant")} served${scope}, each counted once, among ${among} eligible encounters: ${linkage}${overlap}; ${exclusions}.`;
+    }
+  }
+}
+
 function measurementBody(row, interpretation) {
+  if (row.measurement_family === DERIVED_MEASUREMENT_FAMILIES.CROSS_SOURCE_REACH) return crossSourceBody(row);
   if (row.measurement_family === DERIVED_MEASUREMENT_FAMILIES.PAIRED_OUTCOME) return pairedBody(row, interpretation);
   if (row.measurement_family === DERIVED_MEASUREMENT_FAMILIES.TABULAR_RATE) return tabularRateBody(row);
   return tabularCountBody(row);
@@ -697,6 +979,7 @@ export function derivedMeasurementArithmeticHolds(row) {
   if (!isPlainObject(row) || METHOD_FAMILY[row.calculation_method] !== row.measurement_family) return false;
   const counts = row.component_counts;
   if (!isPlainObject(counts) || !isCount(row.measured_value) || !isCount(row.numerator) || row.measured_value !== row.numerator) return false;
+  if (row.measurement_family === DERIVED_MEASUREMENT_FAMILIES.CROSS_SOURCE_REACH) return crossSourceFunnelHolds(row);
   if (row.measurement_family === DERIVED_MEASUREMENT_FAMILIES.TABULAR_COUNT) {
     return row.denominator === null && row.percentage === null
       && isCount(counts.matching_record_count) && row.measured_value <= counts.matching_record_count
@@ -750,12 +1033,13 @@ export function validateDerivedMeasurementClaimBasis({ evidenceItemRow, locatorR
     && derivedMeasurementArithmeticHolds(measurementRow)
     && locatorMatches(locatorRow, measurementRow)
     && derivedEvidenceIsCurrent(measurementRow)
+    && derivedContributingSourcesCurrent(measurementRow)
     && measurementRow.profile_canonical_sha256 === sourceVersionRow?.profile_canonical_sha256
     && evidenceItemRow.statement === composeDerivedMeasurementEvidenceStatement({ measurementRow, interpretation: interpretationOf(measurementRow) });
   if (!ok) {
     return refuse(
       "derived_measurement_claim_basis_invalid",
-      "This evidence item's measurement is missing, no longer matches its source version, or is stated under a superseded interpretation.",
+      "This evidence item's measurement is missing, no longer matches its source versions, or is stated under a superseded interpretation.",
       "Use the measurement's current evidence item.",
       { objectType: "evidence_item", objectId: evidenceItemRow?.evidence_item_id ?? null },
     );
@@ -801,11 +1085,13 @@ export function derivedEvidenceIsCurrent(row) {
 }
 
 export function applyDerivedMeasurementCoverageDimensions(dimensions, row) {
-  const valid = isPlainObject(row) && derivedMeasurementArithmeticHolds(row) && derivedEvidenceIsCurrent(row);
+  const valid = isPlainObject(row) && derivedMeasurementArithmeticHolds(row) && derivedEvidenceIsCurrent(row) && derivedContributingSourcesCurrent(row);
   if (!valid) {
     const unresolved = (key) => dimensionResult(key, "unresolved", isPlainObject(row) && !derivedEvidenceIsCurrent(row)
       ? "The evidence states the measurement under an interpretation that has since been corrected."
-      : "The derived measurement is not available.");
+      : isPlainObject(row) && !derivedContributingSourcesCurrent(row)
+        ? "A source this measurement combines is no longer the current version it was calculated from."
+        : "The derived measurement is not available.");
     return {
       ...dimensions,
       coverage_gaps: unresolved("coverage_gaps"),
@@ -818,13 +1104,16 @@ export function applyDerivedMeasurementCoverageDimensions(dimensions, row) {
     };
   }
   const paired = row.measurement_family === DERIVED_MEASUREMENT_FAMILIES.PAIRED_OUTCOME;
+  const cross = row.measurement_family === DERIVED_MEASUREMENT_FAMILIES.CROSS_SOURCE_REACH;
   const counts = row.component_counts;
   const excluded = paired
     ? counts.excluded_participant_count > 0
-    : (counts.records_without_date ?? 0) > 0 || (row.definition.unit?.kind === "distinct_key" && (counts.source_records_without_key ?? 0) > 0);
+    : cross
+      ? counts.completed_without_date_count + counts.unmatched_event_count + counts.blank_participant_identifier_event_count + counts.conflicting_event_identity_count + counts.blank_event_identifier_record_count > 0
+      : (counts.records_without_date ?? 0) > 0 || (row.definition.unit?.kind === "distinct_key" && (counts.source_records_without_key ?? 0) > 0);
   const duplicateRows = paired
     ? (row.exclusions?.rows || []).some((item) => item.reason === "exact_duplicate_row" && item.row_count > 0)
-    : (counts.exact_duplicate_member_records ?? 0) > 0;
+    : cross ? counts.duplicate_group_count > 0 : (counts.exact_duplicate_member_records ?? 0) > 0;
   return {
     ...dimensions,
     missingness: excluded
@@ -839,7 +1128,7 @@ export function applyDerivedMeasurementCoverageDimensions(dimensions, row) {
     denominator_clarity: row.denominator === null
       ? dimensionResult("denominator_clarity", "resolved_clear", "The measurement is a count; it states no rate, so no denominator applies.")
       : dimensionResult("denominator_clarity", "resolved_clear", "The method states the denominator and the population it covers.", { field_count: 1 }),
-    time_period_clarity: hasPeriod(row)
+    time_period_clarity: hasPeriod(row) || cross
       ? dimensionResult("time_period_clarity", "resolved_clear", "The engagement's recorded reporting period is applied to the dates in the selected date field.")
       : dimensionResult("time_period_clarity", "resolved_risk_flagged", "No reporting period is applied to this measurement."),
     entity_level_clarity: dimensionResult("entity_level_clarity", "resolved_clear", "The method states what is counted.", { field_count: 1 }),
@@ -865,6 +1154,12 @@ export const DERIVED_LIMITATION_CODES = Object.freeze({
   SELF_REPORTED: "derived.self_reported",
   ORGANIZATION_RECORDS: "derived.organization_records",
   VALUES_NOT_VERIFIED: "derived.values_not_verified",
+  CROSS_SOURCE_LINKED: "derived.cross_source_linked",
+  DUPLICATE_EVENT_COPIES_COLLAPSED: "derived.duplicate_event_copies_counted_once",
+  UNMATCHED_IDENTIFIERS_EXCLUDED: "derived.unmatched_identifiers_excluded",
+  CONFLICTING_EVENTS_EXCLUDED: "derived.conflicting_event_identities_excluded",
+  ENCOUNTERS_NOT_PEOPLE: "derived.encounters_not_people",
+  PEOPLE_COUNTED_ONCE: "derived.people_counted_once_across_groups",
 });
 const C = DERIVED_LIMITATION_CODES;
 
@@ -876,7 +1171,16 @@ export function derivedMeasurementLimitationCodes({ measurementRow: row, dimensi
   if (interpretation?.evidence_basis === "self_reported") codes.push(C.SELF_REPORTED);
   if (interpretation?.evidence_basis === "organization_record") codes.push(C.ORGANIZATION_RECORDS);
   const counts = row.component_counts || {};
-  if (row.measurement_family === DERIVED_MEASUREMENT_FAMILIES.PAIRED_OUTCOME) {
+  if (row.measurement_family === DERIVED_MEASUREMENT_FAMILIES.CROSS_SOURCE_REACH) {
+    codes.push(C.CROSS_SOURCE_LINKED, C.ENGAGEMENT_PERIOD_APPLIED);
+    if (counts.excess_copy_record_count > 0) codes.push(C.DUPLICATE_EVENT_COPIES_COLLAPSED);
+    if (counts.unmatched_event_count + counts.blank_participant_identifier_event_count > 0) codes.push(C.UNMATCHED_IDENTIFIERS_EXCLUDED);
+    if (counts.conflicting_event_identity_count > 0) codes.push(C.CONFLICTING_EVENTS_EXCLUDED);
+    if (counts.completed_without_date_count > 0) codes.push(C.RECORDS_WITHOUT_DATE_EXCLUDED);
+    const metric = row.definition?.metric;
+    if ([CROSS_SOURCE_METRICS.ELIGIBLE_ENCOUNTERS, CROSS_SOURCE_METRICS.GROUP_ENCOUNTERS].includes(metric)) codes.push(C.ENCOUNTERS_NOT_PEOPLE);
+    else codes.push(C.EACH_KEY_ONCE, C.PEOPLE_COUNTED_ONCE);
+  } else if (row.measurement_family === DERIVED_MEASUREMENT_FAMILIES.PAIRED_OUTCOME) {
     codes.push(C.MATCHED_SUBSET_ONLY, C.NO_REPORTING_PERIOD);
     codes.push(["higher_is_better", "lower_is_better"].includes(interpretation?.score_direction) ? C.DIRECTION_HUMAN_STATED : C.DIRECTION_NOT_ESTABLISHED);
     if (!row.definition?.instrument_version_field_key) codes.push(C.VERSION_NOT_RECORDED);
@@ -926,6 +1230,12 @@ const DERIVED_DISCLOSURES = Object.freeze({
   [C.SELF_REPORTED]: "The recorded values are self-reported and were not independently verified.",
   [C.ORGANIZATION_RECORDS]: "The recorded values are the organization's own records and were not independently verified.",
   [C.VALUES_NOT_VERIFIED]: "KAI did not check the recorded values against any other source.",
+  [C.CROSS_SOURCE_LINKED]: "The measurement combines two source versions: service records were linked to the participant register by matching identifier values exactly, and it stays current only while both versions do.",
+  [C.DUPLICATE_EVENT_COPIES_COLLAPSED]: "Repeated records of one event identifier were counted as one event.",
+  [C.UNMATCHED_IDENTIFIERS_EXCLUDED]: "Service records whose participant identifier has no match in the register were excluded from linked reach and counted; the records themselves are kept.",
+  [C.CONFLICTING_EVENTS_EXCLUDED]: "Event identifiers whose repeated records disagree were excluded rather than resolved by choosing one record.",
+  [C.ENCOUNTERS_NOT_PEOPLE]: "This counts service encounters, not people; one person can have many encounters.",
+  [C.PEOPLE_COUNTED_ONCE]: "A person with encounters in more than one programme group is counted once in an organization-wide total.",
 });
 
 export function describeDerivedLimitationCode(code) {
@@ -966,4 +1276,7 @@ export const DERIVED_DISCLOSURE_RULES = Object.freeze([
   Object.freeze({ code: C.ENGAGEMENT_PERIOD_APPLIED, requires: /\breporting period\b/i }),
   Object.freeze({ code: C.DUPLICATE_ROWS_COUNTED, requires: /\bduplicate/i }),
   Object.freeze({ code: C.EACH_KEY_ONCE, requires: /\bcounted once\b/i }),
+  Object.freeze({ code: C.CROSS_SOURCE_LINKED, requires: /\bregister\b/i }),
+  Object.freeze({ code: C.UNMATCHED_IDENTIFIERS_EXCLUDED, requires: /\bunmatched\b|\bno match\b/i }),
+  Object.freeze({ code: C.ENCOUNTERS_NOT_PEOPLE, requires: /\bencounters?\b/i, forbids: /\b\d[\d,]*\s+(?:distinct\s+)?(?:people|persons|individuals|participants)\b/i }),
 ]);

@@ -28,7 +28,8 @@ import {
   dimensionResultRequiresGap,
 } from "../validators/kaiClaimGapFollowupValidators.js";
 import { __claimGapFollowupRepositoryTestables } from "./postgresClaimGapFollowupRepository.js";
-import { DERIVED_MEASUREMENT_EVIDENCE_TYPE, derivedEvidenceIsCurrent } from "../validators/kaiDerivedMeasurementValidators.js";
+import { DERIVED_MEASUREMENT_EVIDENCE_TYPE, derivedContributingSourcesCurrent, derivedEvidenceIsCurrent } from "../validators/kaiDerivedMeasurementValidators.js";
+import { readEffectiveAllowedUseProhibitions } from "./postgresEffectiveAllowedUseResolver.js";
 import { __evidenceCoverageAssessmentRepositoryTestables } from "./postgresEvidenceCoverageAssessmentRepository.js";
 import { validateConflictGroupCompleteness } from "../validators/kaiConflictGroupValidators.js";
 import {
@@ -534,9 +535,22 @@ export async function evaluateClaimTraceabilityInTransaction(tx, input) {
   // Measurement MVP: evidence stating a derived measurement under an
   // interpretation a person has since corrected is no longer current, exactly
   // as evidence of a superseded source version is not.
-  if (evidenceItemRow.evidence_type === DERIVED_MEASUREMENT_EVIDENCE_TYPE
-    && !derivedEvidenceIsCurrent(await getScopedDerivedMeasurementByEvidenceItemId({ organizationId, evidenceItemId: evidenceItemRow.evidence_item_id }, tx))) {
-    return failureWithReason("derived_measurement_interpretation_superseded");
+  // A cross-source measurement is current only while every source version it
+  // combines is current, still bound to the profile it was calculated from,
+  // and permitted by its effective allowed use.
+  if (evidenceItemRow.evidence_type === DERIVED_MEASUREMENT_EVIDENCE_TYPE) {
+    const derivedRow = await getScopedDerivedMeasurementByEvidenceItemId({ organizationId, evidenceItemId: evidenceItemRow.evidence_item_id }, tx);
+    if (!derivedEvidenceIsCurrent(derivedRow)) return failureWithReason("derived_measurement_interpretation_superseded");
+    if (!derivedContributingSourcesCurrent(derivedRow)) return failureWithReason("derived_measurement_contributing_source_not_current");
+    const referenceProfileIds = (derivedRow.contributing_sources || [])
+      .filter((source) => source.source_role === "reference")
+      .map((source) => source.intake_sensitivity_profile_id);
+    if (referenceProfileIds.length > 0) {
+      const prohibitions = await readEffectiveAllowedUseProhibitions(tx, { organizationId, intakeSensitivityProfileIds: referenceProfileIds });
+      if (referenceProfileIds.some((id) => !prohibitions.has(id) || prohibitions.get(id) !== null)) {
+        return failureWithReason("derived_measurement_contributing_source_not_permitted");
+      }
+    }
   }
   const candidateRow = await readSourceCandidate(
     tx,

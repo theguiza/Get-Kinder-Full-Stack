@@ -128,7 +128,8 @@ async function readClaimProhibitions(tx, { organizationId, claimIds }, readProfi
 
   const lineage = await tx.query(
     `SELECT c.claim_id::text AS claim_id,
-            sv.intake_sensitivity_profile_id::text AS intake_sensitivity_profile_id
+            sv.intake_sensitivity_profile_id::text AS intake_sensitivity_profile_id,
+            e.evidence_type
        FROM kai.claims c
        JOIN kai.claim_evidence_links l
          ON l.organization_id = c.organization_id
@@ -150,15 +151,47 @@ async function readClaimProhibitions(tx, { organizationId, claimIds }, readProfi
     // More than one lineage row for one claim is not a single lineage.
     profileByClaim.set(key, profileByClaim.has(key) ? null : row.intake_sensitivity_profile_id);
   }
-  const profileIds = [...profileByClaim.values()].filter(isUuid);
+  // A cross-source measurement's claim also carries the lineage of every
+  // other source version it combines: any one of them prohibits the claim.
+  const referenceProfilesByClaim = new Map();
+  const derivedClaimIds = lineage.rows.filter((row) => row.evidence_type === "source_derived_measurement").map((row) => row.claim_id);
+  if (derivedClaimIds.length > 0) {
+    const references = await tx.query(
+      `SELECT c.claim_id::text AS claim_id, sv.intake_sensitivity_profile_id::text AS intake_sensitivity_profile_id
+         FROM kai.claims c
+         JOIN kai.evidence_derived_measurements l
+           ON l.organization_id = c.organization_id
+          AND l.evidence_item_id = c.evidence_item_id
+         JOIN kai.source_derived_measurement_sources s
+           ON s.organization_id = l.organization_id
+          AND s.source_derived_measurement_id = l.source_derived_measurement_id
+          AND s.source_role = 'reference'
+         JOIN kai.source_versions sv
+           ON sv.organization_id = s.organization_id
+          AND sv.source_version_id = s.source_version_id
+        WHERE c.organization_id = $1::uuid
+          AND c.claim_id = ANY($2::uuid[])`,
+      [organizationId, derivedClaimIds],
+    );
+    for (const row of references.rows) {
+      const key = String(row.claim_id).toLowerCase();
+      referenceProfilesByClaim.set(key, [...(referenceProfilesByClaim.get(key) || []), row.intake_sensitivity_profile_id]);
+    }
+  }
+  const profileIds = [...profileByClaim.values(), ...[...referenceProfilesByClaim.values()].flat()].filter(isUuid);
   const prohibitions = await readProfiles(tx, {
     organizationId,
     intakeSensitivityProfileIds: profileIds,
   });
+  const prohibitionOf = (profileId) => (isUuid(profileId) ? (prohibitions.has(profileId) ? prohibitions.get(profileId) : "sensitivity_profile_missing") : "claim_lineage_missing");
   for (const id of ids) {
     const profileId = profileByClaim.get(id.toLowerCase());
-    if (!isUuid(profileId)) result.set(id, "claim_lineage_missing");
-    else result.set(id, prohibitions.has(profileId) ? prohibitions.get(profileId) : "sensitivity_profile_missing");
+    if (!isUuid(profileId)) {
+      result.set(id, "claim_lineage_missing");
+      continue;
+    }
+    const all = [profileId, ...(referenceProfilesByClaim.get(id.toLowerCase()) || [])].map(prohibitionOf);
+    result.set(id, all.find((prohibition) => prohibition !== null) ?? null);
   }
   return result;
 }
@@ -166,7 +199,8 @@ async function readClaimProhibitions(tx, { organizationId, claimIds }, readProfi
 /**
  * The claim form, for generation: every claim's own lineage
  * (claim -> claim_evidence_link -> evidence item -> source version ->
- * intake_sensitivity_profile_id), read in one query, then the profile form.
+ * intake_sensitivity_profile_id), read in one query, plus the reference
+ * version of a cross-source measurement's claim, then the profile form.
  * Returns a Map of claim_id -> prohibition reason; a claim whose lineage
  * cannot be walked maps to 'claim_lineage_missing'.
  */

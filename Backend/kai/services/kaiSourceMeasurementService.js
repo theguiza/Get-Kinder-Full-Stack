@@ -7,6 +7,7 @@ import { validatePairedOutcomeDefinition } from "../validators/kaiPairedOutcomeM
 import {
   DERIVED_MEASUREMENT_FAMILIES,
   validateDerivedMeasurementInterpretation,
+  validateCrossSourceReachMapping,
   validateTabularMeasurementDefinition,
 } from "../validators/kaiDerivedMeasurementValidators.js";
 import { __evidenceLineageServiceContract } from "./kaiEvidenceLineageService.js";
@@ -184,6 +185,19 @@ async function createDefaultDerivedRepository() {
   return createPostgresDerivedMeasurementRepository();
 }
 
+// The cross-source write path's repository carries the reconciliation worker,
+// composed from the P1 parser-reader dependencies only; no other path gets it.
+async function createDefaultCrossSourceRepository() {
+  const [{ createPostgresDerivedMeasurementRepository }, { createCrossSourceReconciliationWorker }, { getKaiIntakeParserReadDependencies }] = await Promise.all([
+    import("../dictionary/postgresDerivedMeasurementRepository.js"),
+    import("../parsing/crossSourceReconciliationWorker.js"),
+    import("./kaiIntakeRuntimeService.js"),
+  ]);
+  return createPostgresDerivedMeasurementRepository({
+    crossSourceReconciliationWorker: createCrossSourceReconciliationWorker(getKaiIntakeParserReadDependencies()),
+  });
+}
+
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
 function hasOnly(input, keys, required) {
@@ -272,6 +286,31 @@ export async function recordTabularMeasurement(input, dependencies = {}) {
     worksheetKey: input.worksheetKey ?? null,
     definition: definition.definition,
     interpretation,
+    actorUserId: input.actorContext.actorUserId,
+    now: input.now,
+  }));
+}
+
+/**
+ * Cross-source linked reach: a person's confirmed mapping of the service-event
+ * fields (event identifier, participant identifier, status and its completed
+ * value, date, optional group) and the register's participant identifier,
+ * applied to two promoted CSV versions of this organization with the events
+ * engagement's recorded reporting period. KAI calculates and retains the
+ * linked encounters and distinct people; their evidence stays review-gated.
+ */
+export async function recordCrossSourceReachMeasurements(input, dependencies = {}) {
+  const denied = admitDerivedInput(input, ["organizationId", "primarySourceVersionId", "referenceSourceVersionId", "mapping", "actorContext", "now"], ["organizationId", "primarySourceVersionId", "referenceSourceVersionId", "mapping", "actorContext", "now"], dependencies);
+  if (denied) return denied;
+  if (!UUID_RE.test(input.primarySourceVersionId ?? "") || !UUID_RE.test(input.referenceSourceVersionId ?? "")) return buildKaiError("validation_blocker");
+  const mapping = validateCrossSourceReachMapping(input.mapping);
+  if (!mapping.ok) return buildKaiError(mapping.code, { blockers: mapping.blockers });
+  const repository = dependencies.derivedMeasurementRepository || (await createDefaultCrossSourceRepository());
+  return repositoryResult(await repository.recordCrossSourceReachMeasurements({
+    organizationId: input.organizationId,
+    primarySourceVersionId: input.primarySourceVersionId,
+    referenceSourceVersionId: input.referenceSourceVersionId,
+    mapping: mapping.mapping,
     actorUserId: input.actorContext.actorUserId,
     now: input.now,
   }));

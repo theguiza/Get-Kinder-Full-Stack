@@ -16,6 +16,7 @@ import { getScopedDerivedMeasurementByEvidenceItemId, getScopedEvidenceMeasureme
 import { MEASUREMENT_EVIDENCE_TYPE, measurementLimitationCodes } from "../validators/kaiSourceMeasurementValidators.js";
 import {
   DERIVED_MEASUREMENT_EVIDENCE_TYPE,
+  derivedContributingSourcesCurrent,
   derivedEvidenceIsCurrent,
   derivedMeasurementArithmeticHolds,
   derivedMeasurementLimitationCodes,
@@ -1579,7 +1580,7 @@ async function createGeneratedContentDraft(contentType, fingerprintRequest, inpu
           if (!derivedRow) rollbackFailure("conflict_current_state_changed");
           // Evidence stated under a corrected interpretation, or arithmetic
           // that no longer holds, never reaches the model.
-          if (!derivedEvidenceIsCurrent(derivedRow) || !derivedMeasurementArithmeticHolds(derivedRow)) {
+          if (!derivedEvidenceIsCurrent(derivedRow) || !derivedContributingSourcesCurrent(derivedRow) || !derivedMeasurementArithmeticHolds(derivedRow)) {
             rollbackFailure(
               "validation_blocker",
               stageBlocker(MEASURED_CLAIM_ELIGIBILITY_VALIDATOR_KEY, "derived_measurement_not_current"),

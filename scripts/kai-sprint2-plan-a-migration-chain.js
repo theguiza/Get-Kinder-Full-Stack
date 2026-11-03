@@ -98,6 +98,7 @@ export const MIGRATION_CHAIN = [
   "kai_sprint2_p2_01m_xlsx_selected_worksheet_record_count_method",
   "kai_sprint2_p2_01m_worksheet_measurement_identity",
   "kai_sprint2_measurement_mvp_source_derived_measurements",
+  "kai_sprint2_measurement_mvp_cross_source_reach",
 ];
 
 export const PRODUCTION_HISTORY_ONLY = new Map([

@@ -264,6 +264,10 @@ function traceabilityLines(model) {
     lines.push(`| ${fact.citationRefs.join(", ")} | ${code(fact.claimId)} | ${code(fact.evidenceItemId)} | ${fact.sourceCode ? `${code(fact.sourceCode)} ` : ""}${code(fact.sourceId)} | `
       + `${code(fact.sourceVersionId)}${fact.sourceVersionCreatedAt ? ` (${fact.sourceVersionCreatedAt})` : ""} | ${fact.sourceVersionCurrent ? "yes" : "no"} | `
       + `${fact.profileCanonicalSha256 ? code(fact.profileCanonicalSha256) : "not recorded"} |`);
+    for (const linked of fact.linkedSources || []) {
+      lines.push(`| ${fact.citationRefs.join(", ")} | ${code(fact.claimId)} | linked source | ${code(linked.sourceId)} | ${code(linked.sourceVersionId)} | `
+        + `${linked.sourceVersionCurrent ? "yes" : "no"} | ${code(linked.profileCanonicalSha256)} |`);
+    }
   }
   return lines;
 }
@@ -337,7 +341,8 @@ function referenceLines(model) {
       ? ` Worksheet citation: ${text(fact.measurement.worksheetName || "Worksheet")} (${code(fact.measurement.worksheetKey)}).`
       : "";
     return `- [${fact.citationRefs.join("] [")}] Claim ${code(fact.claimId)}: "${text(fact.claimStatement)}" `
-      + `Evidence ${code(fact.evidenceItemId)}: "${text(fact.evidenceStatement)}" Source ${fact.sourceCode ? code(fact.sourceCode) : code(fact.sourceId)}, version ${code(fact.sourceVersionId)}.${worksheet}`;
+      + `Evidence ${code(fact.evidenceItemId)}: "${text(fact.evidenceStatement)}" Source ${fact.sourceCode ? code(fact.sourceCode) : code(fact.sourceId)}, version ${code(fact.sourceVersionId)}.${worksheet}`
+      + (fact.linkedSources || []).map((linked) => ` Linked source ${code(linked.sourceId)}, version ${code(linked.sourceVersionId)} (fields ${linked.fieldKeys.map(code).join(", ")}).`).join("");
   });
 }
 

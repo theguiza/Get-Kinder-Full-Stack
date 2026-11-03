@@ -680,6 +680,15 @@ export function createPostgresClaimProposalRepository({
           const measurementRow = await getScopedDerivedMeasurementByEvidenceItemId({ organizationId, evidenceItemId }, tx);
           const basis = validateDerivedMeasurementClaimBasis({ evidenceItemRow, locatorRow, sourceVersionRow, measurementRow });
           if (!basis.ok) return continuationFailure(basis);
+          // Every other source version a cross-source measurement combines
+          // must permit the claim exactly as its own version does.
+          for (const source of (measurementRow.contributing_sources || []).filter((entry) => entry.source_role === "reference")) {
+            const referenceAllowedUse = validateEffectiveAllowedUsePermitsOperation(
+              await readEffectiveAllowedUseProhibition(tx, { organizationId, intakeSensitivityProfileId: source.intake_sensitivity_profile_id }),
+              { operation: "propose_claim", objectType: "source_version", objectId: source.source_version_id },
+            );
+            if (!referenceAllowedUse.ok) return continuationFailure(referenceAllowedUse);
+          }
           statement = composeDerivedClaimStatementFromRow(measurementRow);
           const composable = validateComposedStatement(statement);
           if (!composable.ok) return continuationFailure(composable);

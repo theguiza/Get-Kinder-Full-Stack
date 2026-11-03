@@ -38,6 +38,21 @@ function mergeRuntimeDependencies(dependencies = {}, { gcsProviderKey = "gcsProv
   };
 }
 
+/**
+ * The parser-reader composition only (the exact-generation reader, the upload
+ * lifecycle repository and env), for a worker that reads a confirmed
+ * object version's verified bytes exactly as P1 does. No signer is exposed.
+ */
+export function getKaiIntakeParserReadDependencies() {
+  const runtime = getRuntimeDependencies();
+  return Object.freeze({
+    env: runtime.env,
+    gcsParserReaderProvider: runtime.gcsParserReaderProvider || runtime.gcsProvider,
+    uploadLifecycleRepository: runtime.uploadLifecycleRepository,
+    ...(runtime.storageAdapter ? { storageAdapter: runtime.storageAdapter } : {}),
+  });
+}
+
 export function resetKaiIntakeRuntimeDependenciesForTest() {
   runtimeDependencies = null;
 }

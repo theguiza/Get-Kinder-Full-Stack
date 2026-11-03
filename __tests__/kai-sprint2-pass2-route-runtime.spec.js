@@ -167,6 +167,9 @@ test("Pass 2 router exposes metadata intake plus real P0 upload confirmation sur
     // MVP UAT final completion: P2-11 client-reviewer-facing read (additive;
     // every prior entry preserved verbatim).
     "/admin/organizations/:organizationId/client-followups",
+    // Measurement MVP: cross-source linked reach of two promoted source
+    // versions (additive; every prior entry preserved verbatim).
+    "/admin/organizations/:organizationId/cross-source-measurements",
     // KAI data-dictionary entries: read-only safe DTO surface over governed
     // dictionary fields, additive, and every prior entry preserved verbatim.
     "/admin/organizations/:organizationId/data-dictionaries/:dataDictionaryId/entries",

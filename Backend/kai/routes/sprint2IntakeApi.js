@@ -298,7 +298,7 @@ function sanitizeServiceData(data) {
   }
   if (
     typeof data.traceability_conflict_reason === "string"
-    && /^(claim_evidence_link_mismatch|source_version_not_current|derived_measurement_interpretation_superseded|gap_dimension_requires_missing_p204_state|gap_followup_queue_mismatch|conflict_queue_count_mismatch|conflict_group_validation_failed)$/.test(data.traceability_conflict_reason)
+    && /^(claim_evidence_link_mismatch|source_version_not_current|derived_measurement_interpretation_superseded|derived_measurement_contributing_source_not_current|derived_measurement_contributing_source_not_permitted|gap_dimension_requires_missing_p204_state|gap_followup_queue_mismatch|conflict_queue_count_mismatch|conflict_group_validation_failed)$/.test(data.traceability_conflict_reason)
   ) {
     sanitized.traceability_conflict_reason = data.traceability_conflict_reason;
   }
@@ -2942,6 +2942,32 @@ router.post(
         actorContext,
         now,
       });
+    });
+  },
+);
+
+// Cross-source linked reach: the service-event version and the participant
+// register version are named in the JSON body with the person's mapping.
+router.post(
+  "/admin/organizations/:organizationId/cross-source-measurements",
+  sprint2ActorContextMiddleware,
+  async (req, res) => {
+    if (!metadataContentTypeIsSupported(req)) return sendKaiError(res, "unsupported_media_type");
+    const organizationId = typeof req.params?.organizationId === "string" ? req.params.organizationId : "";
+    const payload = requestPayload(req);
+    const primarySourceVersionId = typeof payload?.primary_source_version_id === "string" ? payload.primary_source_version_id : "";
+    const referenceSourceVersionId = typeof payload?.reference_source_version_id === "string" ? payload.reference_source_version_id : "";
+    if (![organizationId, primarySourceVersionId, referenceSourceVersionId].every((value) => KAI_SPRINT2_P0_PATTERNS.uuid.test(value) && value === value.toLowerCase())
+      || !Object.keys(payload || {}).every((key) => ["primary_source_version_id", "reference_source_version_id", "mapping"].includes(key))) {
+      return sendKaiError(res, "validation_blocker", {
+        blockers: [routeValidationBlocker("invalid_uuid_field", "organization_id_or_source_version_ids")],
+      });
+    }
+    const actorContext = sprint2MappedActorContext(req);
+    const now = new Date().toISOString();
+    return invokeService(res, async () => {
+      const service = await getSourceMeasurementService();
+      return service.recordCrossSourceReachMeasurements({ organizationId, primarySourceVersionId, referenceSourceVersionId, mapping: payload?.mapping, actorContext, now });
     });
   },
 );

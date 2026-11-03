@@ -16,6 +16,8 @@ import {
   DERIVED_MEASUREMENT_LOCATOR_TYPE,
   DERIVED_MEASUREMENT_VALIDATOR_KEY,
   composeDerivedMeasurementEvidenceStatement,
+  crossSourceWorkerMapping,
+  deriveCrossSourceReachMeasurements,
   derivePersistablePairedOutcomes,
   deriveTabularMeasurement,
   derivedMeasurementArithmeticHolds,
@@ -23,6 +25,7 @@ import {
   derivedMeasurementLocatorCoordinates,
   describeDerivedLimitationCode,
   describeTabularMeasurementOptions,
+  resolveCrossSourceReachMapping,
   validateDerivedMeasurementInterpretation,
   validateDerivedStatements,
 } from "../validators/kaiDerivedMeasurementValidators.js";
@@ -355,6 +358,46 @@ function measurementRecord(row) {
   return { ...row, created_at: asIso(row.created_at) };
 }
 
+const CONTRIBUTING_SOURCE_COLUMNS = `
+  source_version_id::text AS source_version_id, source_role, profile_canonical_sha256, field_keys`;
+
+async function insertContributingSourceIfAbsent(tx, { organizationId, measurementId, source }) {
+  await tx.query(
+    `INSERT INTO kai.source_derived_measurement_sources (
+       source_derived_measurement_id, organization_id, source_version_id, source_role, profile_canonical_sha256, field_keys
+     ) VALUES ($1::uuid, $2::uuid, $3::uuid, $4, $5, $6::jsonb)
+     ON CONFLICT DO NOTHING`,
+    [measurementId, organizationId, source.sourceVersionId, source.role, source.profileCanonicalSha256, JSON.stringify(source.fieldKeys)],
+  );
+}
+
+async function readContributingSources(tx, { organizationId, measurementId }) {
+  const { rows } = await tx.query(
+    `SELECT ${CONTRIBUTING_SOURCE_COLUMNS}
+       FROM kai.source_derived_measurement_sources
+      WHERE organization_id = $1::uuid AND source_derived_measurement_id = $2::uuid
+      ORDER BY source_role`,
+    [organizationId, measurementId],
+  );
+  return rows;
+}
+
+// The contributing sources a cross-source measurement must hold, exactly.
+function sameContributingSources(rows, sources) {
+  const expected = [...sources].sort((a, b) => (a.role < b.role ? -1 : 1));
+  return rows.length === expected.length && rows.every((row, index) => row.source_version_id === expected[index].sourceVersionId
+    && row.source_role === expected[index].role
+    && row.profile_canonical_sha256 === expected[index].profileCanonicalSha256
+    && canonicalJson(row.field_keys) === canonicalJson(expected[index].fieldKeys));
+}
+
+// Maps a reconciliation worker refusal to the shared blocker shape.
+const WORKER_REFUSALS = Object.freeze({
+  cross_source_upload_not_eligible: ["A linked source's upload is no longer a confirmed, passed upload of the profiled file.", "Upload the file again as a new intake version."],
+  cross_source_bytes_unavailable: ["KAI could not read a linked source version's verified bytes.", "Try again; if it persists, upload the file again as a new intake version."],
+  cross_source_csv_not_readable: ["A linked source version could not be read as the CSV table KAI profiled.", "Upload the file again as a new intake version."],
+});
+
 function withCaught(run, body) {
   return run(body).catch((error) => {
     if (error instanceof RequiredMeasurementAuditRejectedError) return failure("validation_blocker");
@@ -372,8 +415,12 @@ function withCaught(run, body) {
  * interpretation, its link, its review queue item, and one actor-attributed
  * metadata-only audit when anything was written. A replay writes nothing.
  */
-export function createPostgresDerivedMeasurementRepository({ runInTransaction, insertAuditEvent = insertRequiredSuccessfulAuditEvent } = {}) {
-  async function recordMeasurements(tx, { organizationId, sourceVersionId, measurements, sourceRow, profileCanonicalSha256, interpretation, actorUserId, now }) {
+export function createPostgresDerivedMeasurementRepository({
+  runInTransaction,
+  insertAuditEvent = insertRequiredSuccessfulAuditEvent,
+  crossSourceReconciliationWorker = null,
+} = {}) {
+  async function recordMeasurements(tx, { organizationId, sourceVersionId, measurements, sourceRow, profileCanonicalSha256, interpretation, actorUserId, now, contributingSources = null }) {
     const results = [];
     let fresh = 0;
     let auditObjectId = null;
@@ -388,6 +435,21 @@ export function createPostgresDerivedMeasurementRepository({ runInTransaction, i
         if (!measurementRow) throw new MalformedInsertedRowError("source_derived_measurements");
       }
       if (!sameArithmetic(measurementRow, measurement, profileCanonicalSha256)) throw new ConcurrentStateChangedError("source_derived_measurement");
+      // A cross-source measurement records every source version it combines
+      // in the same transaction; a replay finds exactly the same sources.
+      let sourcesFresh = false;
+      if (contributingSources) {
+        let sourceRows = await readContributingSources(tx, { organizationId, measurementId: measurementRow.source_derived_measurement_id });
+        if (sourceRows.length === 0) {
+          for (const source of contributingSources) {
+            await insertContributingSourceIfAbsent(tx, { organizationId, measurementId: measurementRow.source_derived_measurement_id, source });
+          }
+          sourceRows = await readContributingSources(tx, { organizationId, measurementId: measurementRow.source_derived_measurement_id });
+          sourcesFresh = true;
+        }
+        if (!sameContributingSources(sourceRows, contributingSources)) throw new ConcurrentStateChangedError("source_derived_measurement_sources");
+        measurementRow = { ...measurementRow, contributing_sources: sourceRows };
+      }
 
       let interpretationRow = await readCurrentInterpretation(tx, { organizationId, measurementId: measurementRow.source_derived_measurement_id });
       let interpretationFresh = false;
@@ -401,7 +463,7 @@ export function createPostgresDerivedMeasurementRepository({ runInTransaction, i
       }
       const evidence = await ensureCurrentEvidence(tx, { organizationId, sourceRow, sourceVersionId, measurementRow, interpretationRow, actorUserId });
       if (evidence.refused) return evidence;
-      const writes = [measurementFresh, interpretationFresh, evidence.evidenceFresh].filter(Boolean).length;
+      const writes = [measurementFresh, sourcesFresh, interpretationFresh, evidence.evidenceFresh].filter(Boolean).length;
       fresh += writes;
       if (writes > 0 && !auditObjectId) auditObjectId = evidence.evidenceRow.evidence_item_id;
       results.push({
@@ -455,6 +517,7 @@ export function createPostgresDerivedMeasurementRepository({ runInTransaction, i
             percentage: row.percentage,
             component_counts: row.component_counts,
             exclusions: row.exclusions,
+            contributing_sources: row.contributing_sources ?? [],
             current_interpretation_id: row.current_interpretation_id,
             evidence: [],
           };
@@ -542,6 +605,68 @@ export function createPostgresDerivedMeasurementRepository({ runInTransaction, i
       });
     },
 
+    // Cross-source linked reach: the service events of one promoted CSV
+    // version linked to the participant register of another, under a
+    // person's confirmed field mapping and the events engagement's recorded
+    // period. Both versions pass the same loader as every measurement; the
+    // reconciliation worker alone reads their verified bytes and returns
+    // counts only. Every resulting measurement records both versions.
+    async recordCrossSourceReachMeasurements({ organizationId, primarySourceVersionId, referenceSourceVersionId, mapping, actorUserId, now }) {
+      const run = runInTransaction || (await resolveDefaultRunInTransaction());
+      if (!crossSourceReconciliationWorker) return failure("validation_blocker");
+      if (primarySourceVersionId === referenceSourceVersionId) {
+        return refusal("validation_blocker", "cross_source_same_version", "A cross-source measurement links two different source versions.", "Select the service-event version and the participant register version.", "cross_source_mapping");
+      }
+      return withCaught(run, async (tx) => {
+        const primary = await loadMeasurableSourceVersion(tx, { organizationId, sourceVersionId: primarySourceVersionId, operation: DERIVED_MEASUREMENT_RECORD_OPERATION });
+        if (!primary.ok) return primary.failure;
+        const reference = await loadMeasurableSourceVersion(tx, { organizationId, sourceVersionId: referenceSourceVersionId, operation: DERIVED_MEASUREMENT_RECORD_OPERATION });
+        if (!reference.ok) return reference.failure;
+        const reportingPeriod = await readReportingPeriod(tx, { organizationId, sourceVersionId: primarySourceVersionId });
+        const resolved = resolveCrossSourceReachMapping({
+          eventsProfile: primary.fileProfileRow.profile, registerProfile: reference.fileProfileRow.profile, mapping, reportingPeriod,
+        });
+        if (!resolved.ok) return failure(resolved.code, resolved.blockers);
+        const reconciled = await crossSourceReconciliationWorker.reconcile(tx, {
+          organizationId,
+          events: { intakeFileId: primary.fileProfileRow.intake_file_id, checksum: primary.fileProfileRow.checksum },
+          register: { intakeFileId: reference.fileProfileRow.intake_file_id, checksum: reference.fileProfileRow.checksum },
+          mapping: crossSourceWorkerMapping(resolved.resolved),
+        });
+        if (!reconciled.ok) {
+          const [message, fix] = WORKER_REFUSALS[reconciled.reason] ?? ["The linked sources could not be reconciled.", "Upload the files again as new intake versions."];
+          return refusal("conflict_current_state_changed", reconciled.reason, message, fix, "cross_source_mapping");
+        }
+        const measurements = deriveCrossSourceReachMeasurements({
+          resolved: resolved.resolved,
+          eventFieldKeys: resolved.eventFieldKeys,
+          reconciliation: reconciled.reconciliation,
+          reference: { sourceVersionId: referenceSourceVersionId, profileCanonicalSha256: reference.fileProfileRow.profile_canonical_sha256 },
+        });
+        const recorded = await recordMeasurements(tx, {
+          organizationId,
+          sourceVersionId: primarySourceVersionId,
+          measurements,
+          sourceRow: primary.sourceRow,
+          profileCanonicalSha256: primary.fileProfileRow.profile_canonical_sha256,
+          interpretation: null,
+          actorUserId,
+          now,
+          contributingSources: [
+            { role: "primary", sourceVersionId: primarySourceVersionId, profileCanonicalSha256: primary.fileProfileRow.profile_canonical_sha256, fieldKeys: resolved.eventFieldKeys },
+            { role: "reference", sourceVersionId: referenceSourceVersionId, profileCanonicalSha256: reference.fileProfileRow.profile_canonical_sha256, fieldKeys: [mapping.register.participant_identifier_field_key] },
+          ],
+        });
+        if (recorded.refused) return recorded.refused;
+        return success({
+          sourceVersion: rowToSourceVersionRecord(primary.sourceVersionRow),
+          referenceSourceVersion: rowToSourceVersionRecord(reference.sourceVersionRow),
+          measurements: recorded.results,
+          replayed: recorded.replayed,
+        });
+      });
+    },
+
     // A person's clarification or correction of what a measurement means: a
     // new interpretation superseding the current one, and the measurement's
     // evidence under it. The measurement row is never changed.
@@ -561,6 +686,20 @@ export function createPostgresDerivedMeasurementRepository({ runInTransaction, i
         const { sourceVersionRow, sourceRow, fileProfileRow } = measurable;
         if (fileProfileRow.profile_canonical_sha256 !== measurementRow.profile_canonical_sha256 || !derivedMeasurementArithmeticHolds(measurementRow)) {
           return failure("conflict_current_state_changed");
+        }
+        // A cross-source measurement is interpreted only while its reference
+        // version still passes the same loader and is bound to its profile.
+        if (measurementRow.measurement_family === DERIVED_MEASUREMENT_FAMILIES.CROSS_SOURCE_REACH) {
+          const reference = (await readContributingSources(tx, { organizationId, measurementId })).find((row) => row.source_role === "reference");
+          if (!reference) return failure("conflict_current_state_changed");
+          const referenceMeasurable = await loadMeasurableSourceVersion(tx, {
+            organizationId, sourceVersionId: reference.source_version_id, operation: DERIVED_MEASUREMENT_INTERPRETATION_OPERATION,
+          });
+          if (!referenceMeasurable.ok) return referenceMeasurable.failure;
+          if (referenceMeasurable.sourceVersionRow.is_current !== true
+            || referenceMeasurable.fileProfileRow.profile_canonical_sha256 !== reference.profile_canonical_sha256) {
+            return failure("conflict_current_state_changed");
+          }
         }
         const current = await readCurrentInterpretation(tx, { organizationId, measurementId });
         let interpretationRow = current;

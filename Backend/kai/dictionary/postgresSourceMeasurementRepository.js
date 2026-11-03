@@ -125,7 +125,7 @@ function rowToMeasurementRecord({ worksheet_key: _identity, ...row }) {
 
 async function readFileProfile(tx, { organizationId, fileProfileId }) {
   const { rows } = await tx.query(
-    `SELECT file_profile_id::text AS file_profile_id, profile, profile_canonical_sha256
+    `SELECT file_profile_id::text AS file_profile_id, intake_file_id::text AS intake_file_id, checksum, profile, profile_canonical_sha256
        FROM kai.intake_file_profiles
       WHERE organization_id = $1::uuid
         AND file_profile_id = $2::uuid`,

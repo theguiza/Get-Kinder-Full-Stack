@@ -1495,6 +1495,24 @@ const DERIVED_MEASUREMENT_ROW_COLUMNS = `
             m.denominator::int AS denominator, m.percentage::text AS percentage,
             m.component_counts, m.exclusions, m.row_locators, m.profile_canonical_sha256, m.created_at AS measured_at,
             i.indicator_label, i.meaning_text, i.score_direction, i.evidence_basis,
+            -- Every source version a cross-source measurement combines, with its
+            -- currentness and the profile its version is bound to now (none for
+            -- a single-source measurement).
+            coalesce((SELECT jsonb_agg(jsonb_build_object(
+                       'source_version_id', s.source_version_id::text,
+                       'source_role', s.source_role,
+                       'profile_canonical_sha256', s.profile_canonical_sha256,
+                       'field_keys', s.field_keys,
+                       'source_id', csv.source_id::text,
+                       'is_current', csv.is_current,
+                       'bound_profile_canonical_sha256', csv.profile_canonical_sha256,
+                       'intake_sensitivity_profile_id', csv.intake_sensitivity_profile_id::text) ORDER BY s.source_role)
+                FROM kai.source_derived_measurement_sources s
+                JOIN kai.source_versions csv
+                  ON csv.organization_id = s.organization_id
+                 AND csv.source_version_id = s.source_version_id
+               WHERE s.organization_id = m.organization_id
+                 AND s.source_derived_measurement_id = m.source_derived_measurement_id), '[]'::jsonb) AS contributing_sources,
             (SELECT c.interpretation_id::text
                FROM kai.source_derived_measurement_interpretations c
               WHERE c.organization_id = m.organization_id
@@ -1531,13 +1549,21 @@ export async function getScopedDerivedMeasurementByEvidenceItemId({ organization
   return rows[0] || null;
 }
 
-/** Every derived-measurement evidence row of one source version, tenant-scoped. Read-only. */
+/**
+ * Every derived-measurement evidence row of one source version, including a
+ * cross-source measurement that combines it as its reference version,
+ * tenant-scoped. Read-only.
+ */
 export async function listScopedDerivedMeasurementRowsBySourceVersion({ organizationId, sourceVersionId }, db = pool) {
   const { rows } = await db.query(
     `SELECT ${DERIVED_MEASUREMENT_ROW_COLUMNS}
      ${DERIVED_MEASUREMENT_ROW_FROM}
       WHERE l.organization_id = $1::uuid
-        AND l.source_version_id = $2::uuid
+        AND (l.source_version_id = $2::uuid
+          OR EXISTS (SELECT 1 FROM kai.source_derived_measurement_sources s
+                      WHERE s.organization_id = l.organization_id
+                        AND s.source_derived_measurement_id = l.source_derived_measurement_id
+                        AND s.source_version_id = $2::uuid))
       ORDER BY m.created_at ASC, m.source_derived_measurement_id ASC, l.created_at ASC`,
     [organizationId, sourceVersionId],
   );

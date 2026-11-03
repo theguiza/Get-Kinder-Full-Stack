@@ -1054,6 +1054,22 @@ function profilePdf({ extension, declaredMime, bytes }) {
   }
 }
 
+/**
+ * The records (header first) of trusted CSV bytes, decoded and parsed exactly
+ * as the profiler reads them, or null when the profiler would refuse them
+ * (row limit, malformed quoting). Only a worker that already holds a source
+ * version's verified bytes calls this; nothing it returns is persisted.
+ */
+export function readTrustedCsvRecords({ bytes, extension = ".csv", declaredMime = "text/csv" } = {}) {
+  if (!(bytes instanceof Uint8Array)) return null;
+  if (detectCsvRowLimitPolicy({ extension, declaredMime, bytes })) return null;
+  try {
+    return parseCsvRecords(decodeTrustedUtf8(bytes));
+  } catch {
+    return null;
+  }
+}
+
 export async function profileLocalTrustedFile(input = {}) {
   const inputFailure = assertProfilingInput(input);
   if (inputFailure) return inputFailure;

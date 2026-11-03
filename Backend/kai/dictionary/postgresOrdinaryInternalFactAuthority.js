@@ -223,6 +223,12 @@ export async function evaluateOrdinaryMeasurementAuthorityInTransaction(tx, {
     }
     source = await classifySourceVersionInTransaction(tx, { organizationId, sourceVersionId: evidenceItemRow.source_version_id });
     reasons.push(...source.getKinderReviewReasons, ...source.blockedReasons);
+    // A cross-source measurement is ordinary only when every version it
+    // combines is: the reference version's recorded categories count too.
+    for (const linked of (derivedRow?.contributing_sources || []).filter((entry) => entry.source_role === "reference")) {
+      const reference = await classifySourceVersionInTransaction(tx, { organizationId, sourceVersionId: linked.source_version_id });
+      reasons.push(...reference.getKinderReviewReasons, ...reference.blockedReasons);
+    }
     const ordered = orderedReasons(reasons);
     return {
       ordinary: ordered.length === 0,
