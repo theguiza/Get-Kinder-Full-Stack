@@ -45826,3 +45826,99 @@ The P2-01M integration spec now expects the server-composed disclosure in the pe
 12. Organization (client_admin) factual review remains record-count-only (a trigger scopes it).
 
 **Status:** MEASUREMENT_MVP_DERIVED_MEASUREMENTS_IMPLEMENTED_AND_VERIFIED_LOCALLY. Local commits only; not pushed, deployed, migrated or verified in production.
+
+### Measurement integration repairs and cross-source service reach (2026-11-02)
+
+**Owner authorization (USER_CONFIRMED):** owner prompt "KAI — Close Measurement Integration and Implement Cross-Source Service Reach". It authorizes bounded local implementation, local commits, additive migration files applied only to disposable synthetic PostgreSQL, and this entry. Excluded: pushes, deployment, production or shared databases, persistent flags, credentials, cloud/tenant/environment changes, destructive actions, real client data, `00_KAI_CURRENT_STATE.md`, PDF/TXT/MD narrative extraction, the corrected-version challenge and Free Assessment composition.
+
+**Start (TOOL_VERIFIED):** `main` at `6ed009c`, clean. DATABASE_URL was the non-listening loopback sentinel for every Node/npm command; runners used their own disposable loopback clusters, one at a time.
+
+**Commits:** `ddcefb3` (A), `12e9779` (cross-source core), `7471075` (B), `2bf4218` (Cedar), `4c6dfe6` (C), `a65293e` (Cedar allowed-use via the real route).
+
+**A. Profile category retention (TOOL_VERIFIED).**
+- Before: the tabular basis was the only place a committed profile held cell values (every sample value is `[redacted]`). Labels passing letter-only, ≥2 records and ≤12 values were kept whatever they described. A coach-name, gender, recorded-by or `group = Refugee/Citizen` column was listed, reached the options read and could become a claim statement and model input. Audit rows carry no label. No route returns the profile JSON. The options read is admitted only for P2-01 roles after promotion.
+- Governing rule: Storage contract VAL-INT-004 (no unredacted personal value in parser output); DP Operating Model §7/§14 (processing is allowed, unnecessary identifiable duplication is avoided).
+- Repair (`tabularMeasurementBasis.js`): the profiler reads each header in memory and never stores it. It withholds a field's whole vocabulary (`vocabulary_withheld`) when the header names a person (names, staff/coach roles, "… by"), a P1-05 dimension or protected attribute (age, gender, health, housing, justice, immigration, Indigenous identity, income …) or free text (note, comment, story …). It also withholds the vocabulary when any label names a sensitive attribute. The field still counts as a whole. Ordinary categories are unchanged; on Cedar, events fields 9–10 and register field 9 are withheld, and every earlier Cedar measurement is unchanged.
+- Date precision: the month-level basis refuses every period that is not whole months, including a real-date check (2023-02-29) and leap-year February. Cross-source reach applies the period by day from the bytes.
+- Limitation: the screen is lexical. A sensitive vocabulary under a neutral header, with no listed sensitive word (for example personal names in a `group` column), is still listed. Existing profiles keep their basis until re-uploaded as a new intake version.
+
+**B. Historical SQL verifier (TOOL_VERIFIED).**
+- The three incompatible CHECKs: `evidence_items_p2_01_evidence_type_check`, `evidence_items_p2_01m_type_class_pairing_check` and `source_locators_p2_01_locator_type_check`.
+- `kai-sprint2-p2-01m-xlsx-worksheet-method-verify-read-only.sql` is now version-aware (X0, 8 checks):
+  - Before the derived migration it keeps the four pinned md5 values and also proves the derived values are refused.
+  - After it, the three widened CHECKs are verified by literal vectors: record-count and derived values admitted, every other value or pairing refused. The data-class CHECK keeps its pinned text. No pinned string was replaced.
+- New `kai-measurement-mvp-derived-measurements-verify-read-only.sql` (12 checks) covers the family/method, arithmetic (including the cross-source funnel), paired and rate counts, interpretation, locator and contributing-source CHECKs, append-only and admission triggers, and identity indexes. It is version-aware for the cross-source migration.
+- P2-01M runner: 12 deliberately missing or weakened constraints, each inside a rolled-back transaction, are each reported FAIL. The customer XLSX runner again requires OVERALL PASS.
+
+**C. Browser interactions (TOOL_VERIFIED).** Customer XLSX acceptance test M, on a newly uploaded one-worksheet learning log in the built bundle:
+- "Keep these results as evidence": POST `…/paired-outcome-measurements` with `{}` → 200, 7/14.
+- Clarify meaning, then correct the direction: the interpretation POST bodies are asserted; the measurement id, numerator, denominator and percentage are identical; the correction supersedes the stated meaning and creates new evidence.
+- A rate (23/28, 82.14%) with its meaning: the exact definition and interpretation body is asserted.
+- Reload: both measurements, their meanings and their limitation codes are read back.
+- "Propose a claim" from the current evidence; the traceability read returns 200; superseded evidence is refused.
+- Refusals: the form refuses a same-field population and the server returns 422 `tabular_rate_population_same_field`. A contributor and another organization's administrator get 403 on the paired, tabular, interpretation and basis routes, and nothing is written.
+- Two defects found and repaired:
+  - A derived write refreshed Data Sources through a loading state that unmounted the open panel, losing its confirmation and form state.
+  - Recorded paired outcomes of a one-worksheet workbook were filtered out of the panel.
+
+**Cross-source reach (TOOL_VERIFIED).**
+- **Processing path:** the reconciliation worker in `Backend/kai/parsing/` reads source bytes only through the P1 exact-version byte source (`createP1ObjectVersionByteSource`), under the P1 eligibility share lock. It also re-checks sha256 against the profiled checksum and parses with the profiler's own CSV reader (`readTrustedCsvRecords`). It returns counts and row numbers only. Both versions first pass the shared measurement loader (lineage, currentness, effective allowed use, bound profile). The repository, service and validators never import a byte or storage primitive (a static test enforces this), and the worker is composed in one place from the parser-reader dependencies.
+- **Method `kai_cross_source_linked_reach_v1`:**
+  - Event identity by trimmed identifier: excess copies collapsed; conflicting copies excluded whole.
+  - Completed events: the listed status value.
+  - Inclusive day-level engagement period.
+  - Exact trimmed register match: unmatched and blank identifiers are excluded and counted.
+  - Grouping by the listed group values.
+  - Distinct people organization-wide, per group, and in more than one group.
+- **Mapping:** a person's field and value selection is checked against both committed profiles. Refusals: role not proposed, value not listed, withheld group vocabulary, period missing or invalid, non-CSV source, same version, unexpected keys.
+- **Persistence:** migration `kai_sprint2_measurement_mvp_cross_source_reach` (+ rollback; Plan A chain position 86).
+  - It admits `cross_source_reach` in `source_derived_measurements`, with its funnel identities in the arithmetic CHECK. Earlier branches are verbatim.
+  - It adds an append-only `kai.source_derived_measurement_sources` table: primary and reference version, profile sha and fields, with an admission trigger.
+  - Evidence uses the existing type and fields locator on the events version. Each definition names the reference version and profile, so its identity changes with either source.
+- **Route:** POST `…/admin/organizations/:id/cross-source-measurements`.
+- **Downstream:** both versions' currentness, bound profile and allowed use are required by claim proposal, P2-06 (new 409 reasons `derived_measurement_contributing_source_not_current` and `…_not_permitted`), ordinary internal authority (the reference version's categories count), generation and the claim allowed-use resolver. Six `derived.*` limitation codes, disclosures and VAL-GEN-008 rules were added (encounters are not people; unmatched excluded; linked by register). The internal report cites the linked version.
+
+**Cedar Bridge, original uploaded bytes (runner 25/25: baseline 19 unchanged plus 6 new):**
+- Funnel: 246 physical rows, 2 duplicate groups, 4 members, 2 excess copies, 244 distinct events, 228 completed, 5 outside FY, 223 in FY, 1 unmatched, 0 conflicting.
+- **222 eligible encounters, 80 people, DS 118/51, EN 104/39, 10 in both.**
+- The excess-copy, outside-period and unmatched row numbers equal an independent reading of the files.
+- Lineage: two contributing-source rows per measurement, each sha equal to its version's.
+- Replay writes nothing. No `CB…`/`EV…` value appears in responses, audit rows or model requests.
+- Meanings were stated by the acceptance's author through the interpretation route.
+- Seven claims: ineligible until Get Kinder's review, then internal-eligible; funder and public stay closed.
+- The Evidence Summary (7 cross-source + 2 regression findings) returns 201 with the linkage disclosures. The client internal Markdown is 422 `personal_information_not_cleared` (existing rule).
+- Get Kinder's release path delivers the document to the client route with 200; it contains all 7 claims and both version ids, and the snapshot codes equal the generation codes.
+- Invalidation:
+  - The register's allowed use set to not allowed through the existing review-work + decision routes: P2-06 409 `…_not_permitted`; generation 422 `allowed_use_not_allowed`; recording and interpretation 422. A single-source events claim stays eligible. Restored through the same route.
+  - Register or events marked not current (direct UPDATE in the disposable DB; no application path supersedes a version): P2-06 409 (`…_contributing_source_not_current` / `source_version_not_current`); generation, recording and interpretation 409. After restore: eligible, and generation returns 201.
+- **Answer key: 40 match / 0 different definition / 32 unavailable / 1 out of scope.** The 8 new matches are E_COMPLETED_IN_PERIOD_UNMATCHED, E_ELIGIBLE_FY_COMPLETED_ENCOUNTERS, E_DISTINCT_SERVED_PEOPLE, E_ELIGIBLE_DS/EN_ENCOUNTERS, E_DISTINCT_DS/EN_SERVED and E_DISTINCT_SERVED_BOTH. P01 is now matched by the register's distinct-identifier count rather than a row count. Still unavailable: P02–P04 (the `DS;EN` multi-value field), durations and minutes, months, means, subtotals, verification and targets.
+
+**Verification (TOOL_VERIFIED):**
+- `npm test`: 5,989 tests, 5,865 passed, 0 failed, 124 skipped. API contract: 71/71.
+- New pure spec 7/7. Derived, kernel, paired and cross-source specs with the Cedar workbook: 39/39.
+- P2-01M runner: 2/2, 2/2, then 77 tests (67 passed, 0 failed, 10 skipped: 9 normal-chain + 1 Cedar workbook env var); both verifiers PASS; 12/12 weakenings rejected.
+- Plan A normal chain: 86 migrations, 2/2, 43 (41 passed, 2 runner-seed skips), 4/4, "proof passed".
+- Customer XLSX: 38/38. Knowledge-studio runners: source promotion 13/13, measurement-to-released-report 13/13, internal factual review 17/17, measured report selection 17/17. Plan A assembled 23/23. P1-04 runner 12/12.
+- `npm run build` passed (bundle committed). `git diff --check` passed.
+
+**Open decisions and limitations (NOT_CONFIRMED):**
+1. The reconciliation byte read is a new consumer of the parser-reader path. It runs synchronously inside the measurement request, bounded by the P0 file limits (25 MB, 100,000 rows). The owner should confirm it satisfies the Storage contract's "parser worker" read context and "long-running work cannot block HTTP request", or require a queued worker job.
+2. There is no cross-source UI; the mapping is API-only.
+3. The released manifest's structured citation lists the primary version. The reference version appears in each claim statement and in the internal report's linked-source row.
+4. No application path supersedes a promoted source version; currentness invalidation was simulated.
+5. The lexical gap A screen (above).
+6. Production needs both Measurement MVP migrations and the two verifiers; nothing was applied.
+
+**Remaining toward the Free Impact Assessment:**
+1. Owner decisions 1 and 6, then migration and deploy.
+2. Durations, minutes and month grouping on the linked encounters (E_KNOWN_*, E_MONTH_*).
+3. Multi-value enrolment categories (P02–P04).
+4. Paired-score means and assessment subtotals.
+5. A cross-source UI.
+6. PDF/TXT/MD narrative evidence with page locators and the conflict route (EB13).
+7. The corrected-version challenge (a supersession path for source versions).
+8. Planning targets.
+9. Delivery authority for personal-information aggregates.
+10. Free Assessment composition.
+
+**Status:** MEASUREMENT_INTEGRATION_REPAIRED_AND_CROSS_SOURCE_REACH_IMPLEMENTED_AND_VERIFIED_LOCALLY. Local commits only; not pushed, deployed, migrated or verified in production.
