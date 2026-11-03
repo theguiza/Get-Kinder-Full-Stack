@@ -110,7 +110,7 @@ async function runCedarBridgeAcceptance() {
   const { confirmUploadPath, createBatchPath, fileReservationsPath, requestUploadUrlPath } = await import("../frontend/kaiWebIntakeLogic.js");
   const { sourceRecordCountMeasurementPath } = await import("../frontend/knowledgeStudio/clientSourceMeasurementLogic.js");
   const {
-    derivedMeasurementBasisPath, derivedMeasurementInterpretationPath, pairedOutcomeMeasurementsPath, tabularMeasurementPath,
+    crossSourceMeasurementsPath, derivedMeasurementBasisPath, derivedMeasurementInterpretationPath, pairedOutcomeMeasurementsPath, tabularMeasurementPath,
   } = await import("../frontend/knowledgeStudio/clientDerivedMeasurementLogic.js");
   const { clientInternalDraftReleasePath, clientReleasedReportMarkdownPath, coverageInternalAcceptancePath, generatedContentReviewCompletePath, generatedContentReviewStartPath } = await import("../frontend/impactEvidenceLibraryLogic.js");
   const router = (await import("../Backend/kai/routes/sprint2IntakeApi.js")).default;
@@ -1247,6 +1247,402 @@ async function runCedarBridgeAcceptance() {
       assert.equal(report.comparison.find((c) => c.metric_id === "E_EXACT_DUPLICATE_ROWS").difference, "different_definition");
       // Not claimed here: eligible encounters and distinct served people need the register join.
       for (const id of ["E_ELIGIBLE_FY_COMPLETED_ENCOUNTERS", "E_DISTINCT_SERVED_PEOPLE"]) assert.equal(report.comparison_derived.find((c) => c.metric_id === id).difference, "unavailable");
+    });
+
+    // -------------------------------------------------------------------------
+    // Cross-source linked reach: the uploaded service events linked to the
+    // uploaded participant register, through the authorized reconciliation
+    // worker, persisted as governed derived measurements with both versions.
+    const CROSS = {};
+    const crossLabels = ["reach_encounters", "reach_people", "reach_DS_encounters", "reach_DS_people", "reach_EN_encounters", "reach_EN_people", "reach_both"];
+    const labelOf = (m) => {
+      const d = m.definition;
+      if (d.metric === "eligible_linked_encounters") return "reach_encounters";
+      if (d.metric === "distinct_people_served") return "reach_people";
+      if (d.metric === "people_in_more_than_one_group") return "reach_both";
+      return `reach_${d.group.value_label}_${d.metric === "group_linked_encounters" ? "encounters" : "people"}`;
+    };
+    let crossMapping = null;
+    await test("18: cross-source reach - the administrator maps both uploaded sources' fields; KAI reconciles their bytes and persists both-source measurements", async () => {
+      const eventsBasis = await adminApi("GET", derivedMeasurementBasisPath(ORG, state.events.sourceVersionId));
+      const registerBasis = await adminApi("GET", derivedMeasurementBasisPath(ORG, state.register.sourceVersionId));
+      assert.deepEqual([eventsBasis.status, registerBasis.status], [200, 200]);
+      const fieldAt = (basis, position, role) => {
+        const field = basis.body.data.tabular.fields.find((candidate) => candidate.column_position === position);
+        assert.equal(field?.role, role, `column ${position} is proposed as ${role}`);
+        return field;
+      };
+      const status = fieldAt(eventsBasis, 6, "categorical");
+      const programme = fieldAt(eventsBasis, 3, "categorical");
+      assert.deepEqual(programme.values.map((v) => v.label), ["DS", "EN"]);
+      // A person's confirmation of what each field means; no answer-key value is an input.
+      crossMapping = {
+        events: {
+          event_identifier_field_key: fieldAt(eventsBasis, 1, "identifier").field_key,
+          participant_identifier_field_key: fieldAt(eventsBasis, 2, "identifier").field_key,
+          status_field_key: status.field_key,
+          completed_value_key: status.values.find((v) => v.label === "completed").value_key,
+          date_field_key: fieldAt(eventsBasis, 4, "date").field_key,
+          group_field_key: programme.field_key,
+        },
+        register: { participant_identifier_field_key: fieldAt(registerBasis, 1, "identifier").field_key },
+      };
+      report.human_supplied_semantics.cross_source_mapping = {
+        mapping: crossMapping,
+        meaning: "Human-stated for this synthetic acceptance: event_id identifies one service event; participant_id is the register's participant identifier; "
+          + "delivery_status completed means the service was delivered; service_date is the event date; program_code is the event's programme.",
+      };
+      // Gap A on the real sources: fields whose headers name a person or free text keep no labels.
+      const withheld = eventsBasis.body.data.tabular.fields.filter((f) => f.vocabulary_withheld).map((f) => [f.column_position, f.vocabulary_withheld]);
+      report.derived_measurements.cross_source_withheld_vocabularies = { events: withheld,
+        register: registerBasis.body.data.tabular.fields.filter((f) => f.vocabulary_withheld).map((f) => [f.column_position, f.vocabulary_withheld]) };
+
+      const post = (body, api = adminApi) => api("POST", crossSourceMeasurementsPath(ORG), body);
+      const body = (patch = {}) => ({ primary_source_version_id: state.events.sourceVersionId, reference_source_version_id: state.register.sourceVersionId, mapping: crossMapping, ...patch });
+      const withEvents = (patch) => body({ mapping: { ...crossMapping, events: { ...crossMapping.events, ...patch } } });
+      const refusals = {
+        outsider: await post(body(), outsiderApi),
+        same_version: await post(body({ reference_source_version_id: state.events.sourceVersionId })),
+        workbook_as_register: await post(body({ reference_source_version_id: state.workbook.sourceVersionId })),
+        category_as_event_identifier: await post(withEvents({ event_identifier_field_key: fieldAt(eventsBasis, 8, "categorical").field_key })),
+        unlisted_completed_value: await post(withEvents({ completed_value_key: "value_99" })),
+        typed_answer: await post(body({ mapping: { ...crossMapping, expected_people: 80 } })),
+        ...(withheld.length > 0 ? { withheld_group: await post(withEvents({ group_field_key: eventsBasis.body.data.tabular.fields.find((f) => f.column_position === withheld[0][0]).field_key })) } : {}),
+      };
+      report.derived_measurements.cross_source_refusals = Object.fromEntries(Object.entries(refusals).map(([k, v]) => [k, [v.status, blockersOf(v)]]));
+      assert.ok(refusals.outsider.status >= 400 && refusals.outsider.status < 500);
+      assert.deepEqual(report.derived_measurements.cross_source_refusals.same_version, [422, ["cross_source_same_version"]]);
+      assert.deepEqual(report.derived_measurements.cross_source_refusals.workbook_as_register, [422, ["cross_source_source_not_csv"]]);
+      assert.deepEqual(report.derived_measurements.cross_source_refusals.category_as_event_identifier, [422, ["cross_source_field_role_not_proposed"]]);
+      assert.deepEqual(report.derived_measurements.cross_source_refusals.unlisted_completed_value, [422, ["cross_source_value_not_listed"]]);
+      assert.deepEqual(report.derived_measurements.cross_source_refusals.typed_answer, [422, ["cross_source_mapping_invalid"]]);
+      if (refusals.withheld_group) assert.deepEqual(report.derived_measurements.cross_source_refusals.withheld_group, [422, ["cross_source_group_vocabulary_withheld"]]);
+
+      const recorded = await post(body());
+      assert.equal(recorded.status, 200, J(recorded.body));
+      assert.equal(recorded.body.data.measurements.length, 7);
+      assert.doesNotMatch(J(recorded.body), /CB\d{3}|EV\d{4}/, "no participant or event identifier in the response");
+
+      // Independent decisions from the original bytes, sharing no code with KAI.
+      const events = parseCsv(byKey.events.bytes.toString("utf8"));
+      const registerIds = new Set(parseCsv(byKey.register.bytes.toString("utf8")).map((r) => r.participant_id));
+      const rowsById = new Map();
+      events.forEach((r, index) => rowsById.set(r.event_id, [...(rowsById.get(r.event_id) || []), { ...r, row: index + 2 }]));
+      const firsts = [...rowsById.values()].map((copies) => copies[0]);
+      const completed = firsts.filter((r) => r.delivery_status === "completed");
+      const inFy = completed.filter((r) => r.service_date >= "2025-04-01" && r.service_date <= "2026-03-31");
+      const eligible = inFy.filter((r) => registerIds.has(r.participant_id));
+      const independent = {
+        excess_rows: [...rowsById.values()].flatMap((copies) => copies.slice(1).map((r) => r.row)),
+        outside_rows: completed.filter((r) => !inFy.includes(r)).map((r) => r.row),
+        unmatched_rows: inFy.filter((r) => !registerIds.has(r.participant_id)).map((r) => r.row),
+        people: new Set(eligible.map((r) => r.participant_id)).size,
+      };
+      for (const entry of recorded.body.data.measurements) {
+        const label = labelOf(entry.measurement);
+        CROSS[label] = { measurementId: entry.measurement.source_derived_measurement_id, evidenceItemId: entry.evidenceItem.evidence_item_id };
+        const [row] = (await derivedRows(state.events.sourceVersionId)).filter((r) => r.source_derived_measurement_id === CROSS[label].measurementId);
+        const sources = await query(
+          `SELECT source_role, source_version_id::text, profile_canonical_sha256, field_keys FROM kai.source_derived_measurement_sources
+            WHERE source_derived_measurement_id = $1::uuid ORDER BY source_role`, [CROSS[label].measurementId]);
+        const [evidence] = await evidenceOf(CROSS[label].measurementId);
+        report.derived_measurements[label] = { kind: row.measurement_family, persisted: true, source: `${byKey.events.name} + ${byKey.register.name}`,
+          source_version_id: state.events.sourceVersionId, contributing_sources: sources, ...row, evidence };
+        // Both versions, each bound to the profile it was promoted from.
+        assert.deepEqual(sources.map((s) => [s.source_role, s.source_version_id]), [["primary", state.events.sourceVersionId], ["reference", state.register.sourceVersionId]]);
+        assert.equal(sources[0].profile_canonical_sha256, await versionSha(state.events.sourceVersionId));
+        assert.equal(sources[1].profile_canonical_sha256, await versionSha(state.register.sourceVersionId));
+        assert.equal(row.definition.reference_source_version_id, state.register.sourceVersionId);
+        assert.deepEqual([evidence.evidence_type, evidence.data_class, evidence.locator_type], ["source_derived_measurement", "source_derived_aggregate", "source_derived_measurement_fields"]);
+        assert.ok(evidence.statement.includes(state.register.sourceVersionId), `${label}: the statement cites the register version`);
+        // Inclusion and exclusion decisions, not just totals.
+        assert.deepEqual(row.exclusions.excess_duplicate_copies.rows, independent.excess_rows, label);
+        assert.deepEqual(row.exclusions.completed_outside_period.rows, independent.outside_rows, label);
+        assert.deepEqual(row.exclusions.unmatched_participant_identifier.rows, independent.unmatched_rows, label);
+        assert.deepEqual(row.definition.period, { period_source: "engagement_reporting_period", period_start: "2025-04-01", period_end: "2026-03-31", precision: "day" });
+      }
+      const value = (label) => report.derived_measurements[label].measured_value;
+      const funnel = report.derived_measurements.reach_people.component_counts;
+      report.derived_measurements.cross_source_funnel = funnel;
+      // The required independent acceptance values, as test oracles only.
+      assert.deepEqual([funnel.distinct_event_count, funnel.completed_event_count, funnel.completed_outside_period_count, funnel.in_period_completed_event_count, funnel.unmatched_event_count],
+        [244, 228, 5, 223, 1]);
+      assert.deepEqual(crossLabels.map(value), [222, 80, 118, 51, 104, 39, 10]);
+      assert.equal(value("reach_people"), independent.people);
+      assert.deepEqual([funnel.physical_record_count, funnel.duplicate_group_count, funnel.duplicate_member_record_count, funnel.excess_copy_record_count, funnel.conflicting_event_identity_count],
+        [246, 2, 4, 2, 0]);
+
+      // Replay writes nothing; the audit is metadata-only.
+      const before = await writeCounts();
+      const replay = await post(body());
+      assert.deepEqual([replay.status, replay.body.data.replayed], [200, true]);
+      assert.deepEqual(await writeCounts(), before);
+      // No audit row of the organization holds an identifier or a cell value.
+      const audits = await query("SELECT * FROM kai.audit_events WHERE organization_id = $1::uuid", [ORG]);
+      assert.ok(audits.some((row) => J(row).includes("record_source_derived_measurement")), "the cross-source write is audited");
+      assert.doesNotMatch(J(audits), /CB\d{3}|EV\d{4}|"completed"|participant_id/);
+
+      // The meaning of each measurement is stated by a person through the existing interpretation route.
+      const MEANINGS = {
+        reach_encounters: ["Eligible service encounters", "completed, deduplicated service events in the reporting period linked to a registered participant; encounters, not people."],
+        reach_people: ["People served", "distinct registered participants with at least one eligible service encounter."],
+        reach_DS_encounters: ["Digital Skills encounters", "eligible service encounters recorded under programme DS."],
+        reach_DS_people: ["Digital Skills people served", "distinct registered participants with an eligible DS encounter."],
+        reach_EN_encounters: ["Employment Navigation encounters", "eligible service encounters recorded under programme EN."],
+        reach_EN_people: ["Employment Navigation people", "distinct registered participants with an eligible EN encounter."],
+        reach_both: ["People served in both programmes", "registered participants with eligible encounters in both DS and EN."],
+      };
+      for (const label of crossLabels) {
+        const [indicatorLabel, meaning] = MEANINGS[label];
+        const stated = await adminApi("POST", derivedMeasurementInterpretationPath(ORG, CROSS[label].measurementId),
+          { indicator_label: indicatorLabel, meaning_text: `Human-stated for this synthetic acceptance: ${meaning}`, evidence_basis: "organization_record" });
+        assert.equal(stated.status, 200, `${label}: ${J(stated.body)}`);
+        CROSS[label].evidenceItemId = stated.body.data.evidenceItem.evidence_item_id;
+        report.derived_measurements[label].interpretation = stated.body.data.interpretation;
+        report.derived_measurements[label].evidence = (await evidenceOf(CROSS[label].measurementId)).at(-1);
+        assert.equal(report.derived_measurements[label].measured_value, stated.body.data.measurement.measured_value, "a meaning never changes the count");
+      }
+      report.human_supplied_semantics.cross_source = MEANINGS;
+      stage("events", "cross_source_reach", "7 measurements persisted with the register", { reference_source_version_id: state.register.sourceVersionId });
+      stage("register", "cross_source_reach:reference", "linked by the service events", { primary_source_version_id: state.events.sourceVersionId });
+    });
+
+    const crossClaims = {};
+    await test("19: cross-source claims, P2-06 traceability and Get Kinder's existing review; both sources' sensitivity decisions govern", async () => {
+      const trace = async (claimId, audience = "internal") => {
+        const traced = await gkApi("GET", claimTraceabilityPath(ORG, claimId, audience));
+        return { status: traced.status, eligible: traced.body?.data?.eligible ?? null, reason: traced.body?.data?.traceability_conflict_reason ?? null,
+          blockerCodes: traced.body?.data?.blockerCodes ?? blockersOf(traced),
+          unresolved: Object.entries(traced.body?.data?.dimensions || {}).filter(([, v]) => v.assessment_status === "unresolved").map(([k]) => k).sort() };
+      };
+      const queueOf = async (queueType, targetId) => (await query(
+        "SELECT review_queue_item_id::text, updated_at FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = $2 AND target_object_id = $3::uuid",
+        [ORG, queueType, targetId]))[0];
+      for (const label of crossLabels) {
+        const proposed = await adminApi("POST", claimProposalPath(ORG, CROSS[label].evidenceItemId), {});
+        assert.ok([200, 201].includes(proposed.status), `${label}: ${J(proposed.body)}`);
+        const claimId = proposed.body.data.claim.claim_id;
+        const initial = await trace(claimId);
+        assert.equal(initial.eligible, false, `${label}: personal information present in both sources needs Get Kinder review first`);
+        const evidenceQueue = await queueOf("evidence_review", CROSS[label].evidenceItemId);
+        const evidence = await gkApi("POST", evidenceReviewCompletePath(ORG, CROSS[label].evidenceItemId, evidenceQueue.review_queue_item_id),
+          evidenceReviewDecisionBody({ expectedUpdatedAt: new Date(evidenceQueue.updated_at).toISOString(), decision: "supported" }));
+        const claimQueue = await queueOf("claim_review", claimId);
+        const claim = await gkApi("POST", claimReviewCompletePath(ORG, claimId, claimQueue.review_queue_item_id),
+          claimReviewDecisionBody({ expectedUpdatedAt: new Date(claimQueue.updated_at).toISOString(), decision: "approved", approvedAudiences: ["internal"] }));
+        for (const dimensionKey of (await trace(claimId)).unresolved) await gkApi("POST", coverageInternalAcceptancePath(ORG, claimId, dimensionKey), {});
+        const after = await trace(claimId);
+        assert.equal(after.eligible, true, `${label}: ${J(after)}`);
+        const funder = await trace(claimId, "funder");
+        const pub = await trace(claimId, "public");
+        assert.deepEqual([funder.eligible, pub.eligible], [false, false]);
+        const [row] = await query("SELECT statement FROM kai.claims WHERE claim_id = $1::uuid", [claimId]);
+        assert.ok(row.statement.includes(String(report.derived_measurements[label].measured_value)) && row.statement.includes(state.register.sourceVersionId), row.statement);
+        if (label.endsWith("encounters")) assert.match(row.statement, /\(encounters, not people\)/);
+        crossClaims[label] = claimId;
+        report.claims[`cross:${label}`] = { claim_id: claimId, evidence_item_id: CROSS[label].evidenceItemId, statement: row.statement,
+          traceability_initial: initial, gk_review: [evidence.status, claim.status], traceability_after_review: after };
+      }
+      // The existing single-source and paired claims are unchanged and still eligible.
+      for (const label of DERIVED_CLAIM_LABELS) assert.equal((await trace(derivedClaims[label])).eligible, true, label);
+    });
+
+    let crossDraftId = null;
+    await test("20: an internal Evidence Summary cites the cross-source and existing derived findings; Get Kinder's review packet cites both source versions", async () => {
+      // The existing findings re-cited for regression; the generator's total text limit bounds one draft.
+      const REGRESSION_LABELS = ["paired_field_6", "events_completed"];
+      const labels = [...crossLabels, ...REGRESSION_LABELS];
+      const claimIds = labels.map((label) => crossClaims[label] ?? derivedClaims[label]);
+      const created = await adminApi("POST", `${orgPath}/generated-content-drafts/evidence-summary`, { claim_ids: claimIds, idempotency_key: `cedar-cross-${randomUUID()}`, engagement_id: PROJECT });
+      assert.equal(created.status, 201, J(created.body));
+      crossDraftId = created.body.data.generatedContentDraftId;
+      const blocks = await query(
+        `SELECT b.ordinal, b.text, c.claim_id::text, c.evidence_item_id::text FROM kai.generated_content_blocks b
+           JOIN kai.generated_content_citations c ON c.generated_content_block_id = b.generated_content_block_id
+          WHERE b.generated_content_draft_id = $1::uuid ORDER BY b.ordinal`, [crossDraftId]);
+      assert.equal(blocks.length, labels.length);
+      const call = modelCalls.at(-1);
+      for (const label of crossLabels) {
+        const block = blocks.find((b) => b.claim_id === crossClaims[label]);
+        assert.equal(block.evidence_item_id, CROSS[label].evidenceItemId);
+        assert.ok(block.text.includes(String(report.derived_measurements[label].measured_value)), block.text);
+        assert.match(block.text, /linked to the participant register by matching identifier values exactly/);
+        if (label.endsWith("encounters")) assert.match(block.text, /This counts service encounters, not people/);
+        else assert.match(block.text, /counted once/);
+        const sent = call.claims.find((c) => c.claimId === crossClaims[label]);
+        assert.ok(sent.limitationCodes.includes("derived.cross_source_linked") && sent.limitationCodes.includes("derived.unmatched_identifiers_excluded"), J(sent.limitationCodes));
+        Object.assign(report.derived_measurements[label], { claim_id: crossClaims[label], limitation_codes: sent.limitationCodes, generated_finding: block.text });
+      }
+      // The existing findings keep their numbers and citations.
+      for (const label of REGRESSION_LABELS) {
+        const block = blocks.find((b) => b.claim_id === derivedClaims[label]);
+        assert.ok(block.text.includes(String(report.derived_measurements[label].measured_value)), label);
+        assert.equal(block.evidence_item_id, derivedEvidenceItemId(label), label);
+      }
+      for (const c of modelCalls) assert.doesNotMatch(c.serialized, /CB0\d\d|EV0\d\d|FU0\d\d/, "no participant, event or follow-up identifier reaches the model");
+      const packet = await gkApi("GET", `${orgPath}/generated-content-drafts/${crossDraftId}/review-packet`);
+      assert.equal(packet.status, 200, J(packet.body));
+      const clientMarkdown = await adminApi("GET", clientInternalReportMarkdownPath(ORG, PROJECT, crossDraftId));
+      report.generation.cross_source_evidence_summary = { status: created.status, draft_id: crossDraftId, blocks, review_packet: packet.status, client_internal_markdown: [clientMarkdown.status, blockersOf(clientMarkdown)] };
+      assert.deepEqual(report.generation.cross_source_evidence_summary.client_internal_markdown, [422, ["personal_information_not_cleared"]]);
+    });
+
+    await test("21: delivery of the cross-source findings through Get Kinder's existing review and release path to the client route", async () => {
+      const draftPath = `${orgPath}/generated-content-drafts/${crossDraftId}`;
+      const delivery = { draft_id: crossDraftId };
+      const exportFlag = process.env.KAI_PUBLIC_EXPORT_ENABLED;
+      process.env.KAI_PUBLIC_EXPORT_ENABLED = "true";
+      try {
+        const queueOf = async (queueType) => (await query(
+          "SELECT review_queue_item_id::text, updated_at FROM kai.review_queue_items WHERE organization_id = $1::uuid AND queue_type = $2 AND target_object_id = $3::uuid ORDER BY created_at DESC",
+          [ORG, queueType, crossDraftId]))[0];
+        const contentQueue = await queueOf("generated_content_review");
+        const started = await gkApi("POST", generatedContentReviewStartPath(ORG, crossDraftId, contentQueue.review_queue_item_id), { expected_updated_at: new Date(contentQueue.updated_at).toISOString() });
+        const inProgress = await queueOf("generated_content_review");
+        const completed = await gkApi("POST", generatedContentReviewCompletePath(ORG, crossDraftId, inProgress.review_queue_item_id), { expected_updated_at: new Date(inProgress.updated_at).toISOString() });
+        delivery.gk_content_review = [started.status, completed.status];
+        const requested = await gkAdminApi("POST", `${draftPath}/export-review-request`, { requested_export_audience: "internal" });
+        delivery.export_review_request = requested.status;
+        for (const step of ["start", "complete"]) {
+          const queue = await queueOf("export_review");
+          delivery[`export_review_${step}`] = (await gkAdminApi("POST", `${draftPath}/export-review-queue/${queue.review_queue_item_id}/${step}`, { expected_updated_at: new Date(queue.updated_at).toISOString() })).status;
+        }
+        const exportReviewQueueItemId = (await queueOf("export_review")).review_queue_item_id;
+        delivery.limitation_snapshot = (await gkApi("POST", `${draftPath}/limitation-snapshot`, {})).status;
+        const entries = await query(
+          `SELECT e.claim_id::text, e.limitation_codes FROM kai.limitation_snapshot_entries e
+             JOIN kai.limitation_snapshots s ON s.limitation_snapshot_id = e.limitation_snapshot_id
+            WHERE s.organization_id = $1::uuid AND s.generated_content_draft_id = $2::uuid`, [ORG, crossDraftId]);
+        delivery.export_candidate = (await gkAdminApi("POST", `${draftPath}/export-candidates`, {})).status;
+        const [candidateRow] = await query("SELECT export_candidate_id::text FROM kai.export_candidates WHERE organization_id = $1::uuid AND generated_content_draft_id = $2::uuid", [ORG, crossDraftId]);
+        delivery.final_release_authority = (await gkAdminApi("POST", `${orgPath}/export-candidates/${candidateRow.export_candidate_id}/final-release-authority`, { requested_audience: "internal", decision_action: "grant" })).status;
+        delivery.export_manifest = (await gkAdminApi("POST", `${orgPath}/export-candidates/${candidateRow.export_candidate_id}/export-manifests`, { export_review_queue_item_id: exportReviewQueueItemId })).status;
+        const [manifestRow] = await query("SELECT export_manifest_id::text FROM kai.export_manifests WHERE organization_id = $1::uuid AND export_candidate_id = $2::uuid", [ORG, candidateRow.export_candidate_id]);
+        const released = await adminApi("GET", clientReleasedReportMarkdownPath(ORG, PROJECT, manifestRow.export_manifest_id));
+        delivery.client_released_markdown = released.status;
+        assert.equal(released.status, 200, J(delivery));
+        for (const label of crossLabels) {
+          assert.ok(released.body.includes(crossClaims[label]), `${label} is in the released document`);
+          const entry = entries.find((candidate) => candidate.claim_id === crossClaims[label]);
+          assert.deepEqual(entry?.limitation_codes, report.derived_measurements[label].limitation_codes, `${label}: the released snapshot carries the generation codes`);
+        }
+        assert.ok(released.body.includes(state.register.sourceVersionId), "the released document cites the register version through each claim");
+        assert.ok(released.body.includes(state.events.sourceVersionId), "and the service-event version");
+        assert.doesNotMatch(released.body, /CB0\d\d|EV0\d\d/);
+        delivery.released_excerpt = released.body.slice(0, 3000);
+      } finally {
+        if (exportFlag === undefined) delete process.env.KAI_PUBLIC_EXPORT_ENABLED; else process.env.KAI_PUBLIC_EXPORT_ENABLED = exportFlag;
+      }
+      report.generation.cross_source_delivery = delivery;
+      assert.deepEqual([delivery.gk_content_review, delivery.export_review_request, delivery.export_review_start, delivery.export_review_complete,
+        delivery.limitation_snapshot, delivery.export_candidate, delivery.final_release_authority, delivery.export_manifest], [[200, 200], 201, 200, 200, 201, 201, 201, 201], J(delivery));
+    });
+
+    await test("22: changing either source's effective allowed use or currentness blocks continued use; restoring it restores use", async () => {
+      const claimId = crossClaims.reach_people;
+      const singleSource = derivedClaims.events_distinct;
+      const trace = async (id) => {
+        const traced = await gkApi("GET", claimTraceabilityPath(ORG, id, "internal"));
+        return [traced.status, traced.body?.data?.traceability_conflict_reason ?? null, traced.body?.data?.eligible ?? null];
+      };
+      const generate = async (ids) => {
+        const created = await adminApi("POST", `${orgPath}/generated-content-drafts/evidence-summary`, { claim_ids: ids, idempotency_key: `cedar-stale-${randomUUID()}`, engagement_id: PROJECT });
+        return [created.status, blockersOf(created)];
+      };
+      const recordAgain = async () => (await adminApi("POST", crossSourceMeasurementsPath(ORG), {
+        primary_source_version_id: state.events.sourceVersionId, reference_source_version_id: state.register.sourceVersionId, mapping: crossMapping })).status;
+      const interpret = async () => (await adminApi("POST", derivedMeasurementInterpretationPath(ORG, CROSS.reach_people.measurementId),
+        { indicator_label: "People served again", meaning_text: "Human-stated for this synthetic acceptance: a later restatement.", evidence_basis: "organization_record" })).status;
+      const negative = {};
+      // Allowed use: no route revises a promoted file's decision, so the
+      // register's current decision gets a successor directly in this
+      // disposable database (simulated governance change), then a restoring one.
+      const successor = async (allowed) => {
+        const [head] = await query(
+          `SELECT d.* FROM kai.intake_sensitivity_review_decisions d WHERE d.intake_sensitivity_profile_id = $1::uuid
+              AND NOT EXISTS (SELECT 1 FROM kai.intake_sensitivity_review_decisions s WHERE s.supersedes_decision_id = d.decision_id)`,
+          [state.register.sensitivity.intake_sensitivity_profile_id]);
+        const { decision_id: headId, created_at: _c, ...copy } = head;
+        Object.assign(copy, { supersedes_decision_id: headId, reviewed_allowed_use_status: allowed ? "allowed" : "not_allowed", reviewed_llm_processing_allowed: allowed });
+        const columns = Object.keys(copy);
+        await query(`INSERT INTO kai.intake_sensitivity_review_decisions (${columns.join(", ")}) VALUES (${columns.map((_, i) => `$${i + 1}`).join(", ")})`, columns.map((c) => copy[c]));
+      };
+      await successor(false);
+      negative.register_not_allowed = { traceability: await trace(claimId), generation: await generate([claimId]), record: await recordAgain(), interpret: await interpret(),
+        single_source_events_claim: await trace(singleSource) };
+      await successor(true);
+      negative.register_allowed_again = { traceability: await trace(claimId) };
+      // Currentness: no application path supersedes a promoted version yet,
+      // so each version is marked not current in this disposable database
+      // (as the existing acceptances do), then restored.
+      for (const key of ["register", "events"]) {
+        await query("UPDATE kai.source_versions SET is_current = false WHERE source_version_id = $1::uuid", [state[key].sourceVersionId]);
+        negative[`${key}_not_current`] = { traceability: await trace(claimId), generation: await generate([claimId]), record: await recordAgain(), interpret: await interpret() };
+        if (key === "register") negative.register_not_current.single_source_events_claim = await trace(singleSource);
+        await query("UPDATE kai.source_versions SET is_current = true WHERE source_version_id = $1::uuid", [state[key].sourceVersionId]);
+      }
+      negative.restored = { traceability: await trace(claimId), generation: (await generate([claimId]))[0] };
+      report.derived_measurements.cross_source_invalidation = negative;
+      console.log(`Cedar Bridge cross-source invalidation: ${J(negative)}`);
+      assert.deepEqual(negative.register_not_allowed.traceability.slice(0, 2), [409, "derived_measurement_contributing_source_not_permitted"]);
+      assert.ok(negative.register_not_allowed.generation[0] >= 400, J(negative.register_not_allowed.generation));
+      assert.ok(negative.register_not_allowed.record >= 400 && negative.register_not_allowed.interpret >= 400);
+      assert.equal(negative.register_not_allowed.single_source_events_claim[2], true, "a single-source events claim does not depend on the register");
+      assert.equal(negative.register_allowed_again.traceability[2], true);
+      assert.deepEqual(negative.register_not_current.traceability.slice(0, 2), [409, "derived_measurement_contributing_source_not_current"]);
+      assert.deepEqual(negative.events_not_current.traceability.slice(0, 2), [409, "source_version_not_current"]);
+      for (const key of ["register_not_current", "events_not_current"]) {
+        assert.ok(negative[key].generation[0] >= 400 && negative[key].record >= 400 && negative[key].interpret >= 400, `${key}: ${J(negative[key])}`);
+      }
+      assert.equal(negative.register_not_current.single_source_events_claim[2], true);
+      assert.deepEqual([negative.restored.traceability[2], negative.restored.generation], [true, 201]);
+    });
+
+    await test("23: the comparison with the answer key including cross-source reach, by method, both-source lineage, persistence, claim and finding", () => {
+      const expected = Object.fromEntries(parseCsv(readFileSync(join(PACKAGE, "03_ANSWER_KEY_DO_NOT_UPLOAD", "Expected_Metrics.csv"), "utf8")).map((row) => [row.metric_id, row]));
+      const d = report.derived_measurements;
+      const linked = (m) => m.calculation_method === "kai_cross_source_linked_reach_v1" && J(m.contributing_sources.map((s) => s.source_version_id)) === J([state.events.sourceVersionId, state.register.sourceVersionId])
+        && m.definition.period.precision === "day" && m.definition.period.period_start === "2025-04-01" && m.definition.period.period_end === "2026-03-31";
+      const isMetric = (m, metric, group = null) => linked(m) && m.definition.metric === metric && (m.definition.group?.value_label ?? null) === group;
+      const crossActuals = {
+        E_COMPLETED_IN_PERIOD_UNMATCHED: [d.reach_encounters, d.reach_encounters.component_counts.unmatched_event_count, linked(d.reach_encounters), "in-period completed events excluded for an unmatched identifier (persisted funnel component)"],
+        E_ELIGIBLE_FY_COMPLETED_ENCOUNTERS: [d.reach_encounters, d.reach_encounters.measured_value, isMetric(d.reach_encounters, "eligible_linked_encounters"), "eligible linked encounters"],
+        E_DISTINCT_SERVED_PEOPLE: [d.reach_people, d.reach_people.measured_value, isMetric(d.reach_people, "distinct_people_served"), "distinct register-linked participants"],
+        E_ELIGIBLE_DS_ENCOUNTERS: [d.reach_DS_encounters, d.reach_DS_encounters.measured_value, isMetric(d.reach_DS_encounters, "group_linked_encounters", "DS"), "eligible encounters, programme DS"],
+        E_ELIGIBLE_EN_ENCOUNTERS: [d.reach_EN_encounters, d.reach_EN_encounters.measured_value, isMetric(d.reach_EN_encounters, "group_linked_encounters", "EN"), "eligible encounters, programme EN"],
+        E_DISTINCT_DS_SERVED: [d.reach_DS_people, d.reach_DS_people.measured_value, isMetric(d.reach_DS_people, "group_distinct_people_served", "DS"), "distinct people, programme DS"],
+        E_DISTINCT_EN_SERVED: [d.reach_EN_people, d.reach_EN_people.measured_value, isMetric(d.reach_EN_people, "group_distinct_people_served", "EN"), "distinct people, programme EN"],
+        E_DISTINCT_SERVED_BOTH: [d.reach_both, d.reach_both.measured_value, isMetric(d.reach_both, "people_in_more_than_one_group"), "people in both programmes, counted once"],
+        // P01 was a register row count in the baseline; the reconciliation now persists the register's distinct identifiers.
+        P01: [d.reach_people, d.reach_people.component_counts.register_distinct_identifier_count, linked(d.reach_people), "distinct register participant identifiers (persisted funnel component)"],
+      };
+      const blocks = report.generation.cross_source_evidence_summary.blocks;
+      report.comparison_cross_source = Object.entries(expected).map(([id, row]) => {
+        const previous = report.comparison_derived.find((c) => c.metric_id === id);
+        const actual = crossActuals[id];
+        if (!actual) return { ...previous };
+        const [m, value, methodValid, how] = actual;
+        const block = m.claim_id ? blocks.find((b) => b.claim_id === m.claim_id) : null;
+        const expectedValue = Number(row.expected_value);
+        return {
+          metric_id: id, expected: expectedValue, actual: value, difference: value === expectedValue && methodValid ? "match" : value === expectedValue ? "number_matches_method_differs" : "incorrect",
+          previous_difference: previous?.difference ?? null, capability: "cross_source_reach", calculation: how, method_valid: methodValid, calculation_method: m.calculation_method,
+          contributing_sources: m.contributing_sources, period: m.definition.period, persisted: m.persisted === true, evidence_item_id: m.evidence?.evidence_item_id ?? null,
+          claim_id: m.claim_id ?? null, cited_finding: block ? block.text.includes(String(m.measured_value)) : null, limitation_codes: m.limitation_codes ?? null,
+        };
+      });
+      const tally = (rows) => rows.reduce((acc, c) => ({ ...acc, [c.difference]: (acc[c.difference] ?? 0) + 1 }), {});
+      report.comparison_tally.cross_source = tally(report.comparison_cross_source);
+      console.log(`Cedar Bridge comparison tally with cross-source reach: ${J(report.comparison_tally)}`);
+      for (const id of Object.keys(crossActuals)) {
+        const row = report.comparison_cross_source.find((c) => c.metric_id === id);
+        assert.equal(row.difference, "match", `${id}: ${J(row)}`);
+        assert.equal(row.persisted, true, id);
+      }
+      // Still unavailable: enrolment categories, durations, months (no grouping operation), means.
+      for (const id of ["P02", "P03", "P04", "E_KNOWN_MINUTES_ELIGIBLE_EVENTS", "E_MONTH_2025-04"]) {
+        assert.equal(report.comparison_cross_source.find((c) => c.metric_id === id).difference, "unavailable", id);
+      }
     });
 
   } finally {

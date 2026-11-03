@@ -152,12 +152,26 @@ try {
   }
   console.log(`Cedar Bridge acceptance: applied ${MIGRATION_CHAIN.length - PRODUCTION_HISTORY_ONLY.size} migrations in introduction order with no schema adjustment.`);
   if (!beforeDerived) throw new Error(`${derivedMigration} is not in the migration chain`);
+  // The cross-source migration builds on the derived one, so both roll back
+  // in reverse order: each rollback restores the schema before it, and both
+  // re-apply identically.
+  const crossMigration = "kai_sprint2_measurement_mvp_cross_source_reach";
+  if (!MIGRATION_CHAIN.includes(crossMigration)) throw new Error(`${crossMigration} is not in the migration chain`);
+  const afterCross = (await catalog(schemaFingerprintSql))[0].fingerprint;
+  psqlFile(`migrations/${crossMigration}.rollback.sql`);
   const afterDerived = (await catalog(schemaFingerprintSql))[0].fingerprint;
   psqlFile(`migrations/${derivedMigration}.rollback.sql`);
   if ((await catalog(schemaFingerprintSql))[0].fingerprint !== beforeDerived) throw new Error(`${derivedMigration} rollback did not restore the prior schema`);
   psqlFile(`migrations/${derivedMigration}.sql`);
   if ((await catalog(schemaFingerprintSql))[0].fingerprint !== afterDerived) throw new Error(`${derivedMigration} re-apply changed the schema`);
-  console.log(`Cedar Bridge acceptance: ${derivedMigration} applied, rolled back to the prior schema fingerprint, and re-applied identically.`);
+  psqlFile(`migrations/${crossMigration}.sql`);
+  if ((await catalog(schemaFingerprintSql))[0].fingerprint !== afterCross) throw new Error(`${crossMigration} re-apply changed the schema`);
+  console.log(`Cedar Bridge acceptance: ${crossMigration} and ${derivedMigration} rolled back to the prior schema fingerprints and re-applied identically.`);
+  for (const verifier of ["scripts/kai-sprint2-p2-01m-xlsx-worksheet-method-verify-read-only.sql", "scripts/kai-measurement-mvp-derived-measurements-verify-read-only.sql"]) {
+    const rows = run(psql, ["-v", "ON_ERROR_STOP=1", "-d", dbName, "-tA", "-F", "|", "-f", verifier], { capture: true }).stdout.trim().split("\n");
+    if (rows.find((row) => row.startsWith("99|OVERALL|"))?.split("|")[2] !== "PASS") throw new Error(`${verifier} failed:\n${rows.join("\n")}`);
+  }
+  console.log("Cedar Bridge acceptance: XLSX method and derived-measurement verifiers OVERALL PASS.");
   console.log(`Cedar Bridge acceptance schema fingerprint: ${(await catalog(schemaFingerprintSql))[0].fingerprint}`);
 
   const testResult = spawnSync("node", ["--test", "--test-concurrency=1", "--test-timeout=600000", spec], {

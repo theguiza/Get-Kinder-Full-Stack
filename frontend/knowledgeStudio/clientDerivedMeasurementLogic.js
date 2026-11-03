@@ -32,6 +32,11 @@ export function derivedMeasurementInterpretationPath(organizationId, measurement
     + `/derived-measurements/${encodeURIComponent(measurementId)}/interpretations`;
 }
 
+// Cross-source linked reach: both source versions and the mapping go in the body.
+export function crossSourceMeasurementsPath(organizationId) {
+  return `${BASE_PATH}/admin/organizations/${encodeURIComponent(organizationId)}/cross-source-measurements`;
+}
+
 export const EMPTY_TABULAR_FORM = Object.freeze({
   operation: "count",
   identifierFieldKey: "",
