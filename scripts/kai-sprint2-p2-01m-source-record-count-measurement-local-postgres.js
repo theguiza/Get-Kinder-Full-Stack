@@ -348,6 +348,9 @@ try {
   if (overall(derivedAfterCross) !== "PASS" || stateOf(derivedAfterCross, "D0.schema_state") !== "after the cross-source reach migration" || overall(xlsxVerifier()) !== "PASS") {
     throw new Error(`verifiers failed after the cross-source migration:\n${derivedAfterCross.join("\n")}`);
   }
+  const JOB_VERIFIER = "scripts/kai-measurement-mvp-cross-source-reconciliation-jobs-verify-read-only.sql";
+  const jobVerifier = () => run(psql, ["-v", "ON_ERROR_STOP=1", "-d", dbName, "-tA", "-F", "|", "-f", JOB_VERIFIER], { capture: true }).stdout.trim().split("\n");
+  if (overall(jobVerifier()) !== "FAIL") throw new Error("job verifier passed before its migration");
   // The reconciliation job table: additive over the cross-source tables; applied twice, no existing row changes.
   psqlFile("migrations/kai_sprint2_measurement_mvp_cross_source_reconciliation_jobs.sql");
   psqlFile("migrations/kai_sprint2_measurement_mvp_cross_source_reconciliation_jobs.sql");
@@ -355,6 +358,10 @@ try {
     || overall(derivedVerifier()) !== "PASS" || overall(xlsxVerifier()) !== "PASS") {
     throw new Error("the cross-source reconciliation job migration changed an existing row or a verified constraint");
   }
+
+  const jobVerified = jobVerifier();
+  if (overall(jobVerified) !== "PASS") throw new Error(`job verifier failed after migration:\n${jobVerified.join("\n")}`);
+  console.log(`Reconciliation job verifier: FAIL before migration, PASS after replay:\n${jobVerified.join("\n")}`);
 
   // Each verifier rejects a deliberately missing or weakened constraint. Every
   // change runs inside a transaction that is rolled back.
@@ -391,12 +398,37 @@ try {
     ["identity index missing", DERIVED_VERIFIER, "D6.unique_identity_indexes",
       "DROP INDEX kai.source_derived_measurement_interpretations_history_unique;"],
   ];
+  const jobConstraints = [
+    "pkey", "id_org_unique", "request_unique", "primary_version_fk", "reference_version_fk",
+    "distinct_versions_check", "profile_sha_check", "fingerprint_check", "mapping_check", "state_check",
+    "attempt_count_check", "error_code_check", "measurement_ids_check", "state_fact_consistency_check",
+  ];
+  for (const suffix of jobConstraints) {
+    const constraint = `cross_source_reconciliation_jobs_${suffix}`;
+    weakenings.push([`job constraint ${suffix} missing`, JOB_VERIFIER, `J3.constraint:${constraint}`,
+      `ALTER TABLE kai.cross_source_reconciliation_jobs DROP CONSTRAINT ${constraint};`]);
+  }
+  weakenings.push(
+    ["job state facts weakened", JOB_VERIFIER, "J3.constraint:cross_source_reconciliation_jobs_state_fact_consistency_check",
+      "ALTER TABLE kai.cross_source_reconciliation_jobs DROP CONSTRAINT cross_source_reconciliation_jobs_state_fact_consistency_check, ADD CONSTRAINT cross_source_reconciliation_jobs_state_fact_consistency_check CHECK (true);"],
+    ["job attempt budget weakened", JOB_VERIFIER, "J3.constraint:cross_source_reconciliation_jobs_attempt_count_check",
+      "ALTER TABLE kai.cross_source_reconciliation_jobs DROP CONSTRAINT cross_source_reconciliation_jobs_attempt_count_check, ADD CONSTRAINT cross_source_reconciliation_jobs_attempt_count_check CHECK (attempt_count >= 0);"],
+    ["job foreign key unvalidated", JOB_VERIFIER, "J3.constraint:cross_source_reconciliation_jobs_primary_version_fk",
+      "ALTER TABLE kai.cross_source_reconciliation_jobs DROP CONSTRAINT cross_source_reconciliation_jobs_primary_version_fk, ADD CONSTRAINT cross_source_reconciliation_jobs_primary_version_fk FOREIGN KEY (primary_source_version_id, organization_id) REFERENCES kai.source_versions (source_version_id, organization_id) ON DELETE RESTRICT NOT VALID;"],
+    ["job foreign key points at another schema", JOB_VERIFIER, "J3.constraint:cross_source_reconciliation_jobs_primary_version_fk",
+      "CREATE TABLE public.source_versions (source_version_id uuid, organization_id uuid, UNIQUE (source_version_id, organization_id)); ALTER TABLE kai.cross_source_reconciliation_jobs DROP CONSTRAINT cross_source_reconciliation_jobs_primary_version_fk, ADD CONSTRAINT cross_source_reconciliation_jobs_primary_version_fk FOREIGN KEY (primary_source_version_id, organization_id) REFERENCES public.source_versions (source_version_id, organization_id) ON DELETE RESTRICT;"],
+    ["job mapping calls another schema's function", JOB_VERIFIER, "J3.constraint:cross_source_reconciliation_jobs_mapping_check",
+      "CREATE FUNCTION public.gate_a_p0_jsonb_metadata_only(jsonb) RETURNS boolean LANGUAGE sql IMMUTABLE AS 'SELECT true'; ALTER TABLE kai.cross_source_reconciliation_jobs DROP CONSTRAINT cross_source_reconciliation_jobs_mapping_check, ADD CONSTRAINT cross_source_reconciliation_jobs_mapping_check CHECK (jsonb_typeof(mapping) = 'object' AND public.gate_a_p0_jsonb_metadata_only(mapping));"],
+    ["job required organization nullable", JOB_VERIFIER, "J2.columns",
+      "ALTER TABLE kai.cross_source_reconciliation_jobs ALTER COLUMN organization_id DROP NOT NULL;"],
+    ["job due index missing", JOB_VERIFIER, "J4.indexes", "DROP INDEX kai.ix_cross_source_reconciliation_jobs_due;"],
+  );
   for (const [name, verifierPath, checkId, statements] of weakenings) {
     const rows = verifyWith(statements, verifierPath);
     const status = (id) => rows.find((row) => row.split("|")[1] === id)?.split("|")[2];
     if (status(checkId) !== "FAIL" || status("OVERALL") !== "FAIL") throw new Error(`verifier did not reject ${name}:\n${rows.join("\n")}`);
   }
-  if (overall(derivedVerifier()) !== "PASS" || overall(xlsxVerifier()) !== "PASS") throw new Error("a rolled-back weakening changed the schema");
+  if (overall(derivedVerifier()) !== "PASS" || overall(xlsxVerifier()) !== "PASS" || overall(jobVerifier()) !== "PASS") throw new Error("a rolled-back weakening changed the schema");
   console.log(`Cross-source reach: applied twice with no existing row changed; derived-measurement verifier OVERALL PASS after it; ${weakenings.length} deliberately missing or weakened constraints each rejected (FAIL) and rolled back.`);
 
   const testResult = spawnSync("node", [

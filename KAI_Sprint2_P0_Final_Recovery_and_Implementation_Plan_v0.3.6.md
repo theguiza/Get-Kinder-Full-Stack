@@ -46065,3 +46065,21 @@ The P2-01M integration spec now expects the server-composed disclosure in the pe
 8. **Model quality:** the model remains a deterministic stub, so semantic quality of a real provider is unverified.
 
 **Status:** CROSS_SOURCE_CORRECTION_LIFECYCLE_IMPLEMENTED_AND_VERIFIED_LOCALLY. Local commits only; not pushed, deployed, migrated or verified in production.
+
+### A5: cross-source reconciliation job migration verification (2026-11-03)
+
+**Authorization (USER_CONFIRMED):** the owner requested A5 only: a read-only verifier for the existing job migration, disposable synthetic PostgreSQL verification, normal chain verification, and local commits; no new measurement schema or product work, remote actions, production/shared data, or Current State update.
+
+**Starting state (TOOL_VERIFIED):** `main` at `306864b307a9ced45250a22ce120140410fc1f46`, clean, 29 commits ahead of `origin/main`. Node commands used the non-listening loopback `DATABASE_URL` sentinel. All PostgreSQL changes were confined to disposable loopback clusters.
+
+**Implementation (TOOL_VERIFIED):** `scripts/kai-measurement-mvp-cross-source-reconciliation-jobs-verify-read-only.sql` is one independently executable SELECT with a final `OVERALL` result. It pins the migration's 20 column definitions, primary/unique keys, both organization-scoped source-version foreign keys, all nine CHECKs, and two supporting indexes. It checks validation, nondeferrability, index health, foreign-key target identity and the mapping function identity. It checks the schema actually defined by the migration; it does not assume independent organization or measurement foreign keys. The historical record-count and Measurement MVP verifiers are unchanged. The P2-01M disposable runner and Plan A normal-chain runner now execute the job verifier.
+
+**Verification (TOOL_VERIFIED):**
+- Job verifier FAIL before migration, PASS after applying it twice, and PASS after transactional negative cases were rolled back. All 21 job-specific missing/weakened cases failed both their own result and `OVERALL`: each of the 14 constraints missing; weakened state facts and attempt bounds; an unvalidated foreign key; wrong-schema foreign key and mapping function; nullable organization; and a missing due index. The 12 historical negative cases also failed as expected; historical verifiers remained PASS.
+- P2-01M disposable runner: two 2/2 seed phases, then 77 tests: 67 passed, 0 failed, 10 skipped. Nine skips need the normal-chain export schema (covered by the normal chain); one needs the original Cedar Bridge workbook, not supplied.
+- Plan A normal chain: 85 migrations applied in order; two production-history-only migrations refused the fresh synthetic schema as designed with no change. Job verifier PASS; seed 2/2; main proof 40/43 passed, 3 skipped; factual review 4/4; normal-chain proof passed. Two main-proof skips require the focused runner's previous-revision seed (covered there); the third needs the unavailable workbook.
+- Cross-source job unit tests: 6/6 passed. `git diff --check` passed. Complete package diff reviewed; local commit records this entry and implementation.
+
+**Limitations (NOT_CONFIRMED):** no production or shared schema was inspected, verified, or changed. The verifier pins PostgreSQL catalog definitions observed on local PostgreSQL 16: semantically equivalent rewrites or catalog formatting changes can fail closed and require review. It verifies the mapping CHECK references the existing metadata function, not that function's implementation. The external Cedar Bridge workbook case was not run. No push, deployment, feature flag, credentials, or Current State update was performed.
+
+**Status:** A5_RECONCILIATION_JOB_MIGRATION_VERIFIER_IMPLEMENTED_AND_VERIFIED_LOCALLY. Stop at this package boundary.

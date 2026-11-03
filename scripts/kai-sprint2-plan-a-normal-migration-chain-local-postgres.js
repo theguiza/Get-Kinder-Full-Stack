@@ -434,6 +434,12 @@ try {
     console.log(`Plan A chain: ${migration} refused the fresh canonical state as designed; schema unchanged.`);
   }
   console.log(`Plan A chain: applied ${MIGRATION_CHAIN.length - PRODUCTION_HISTORY_ONLY.size} migrations in order with no schema adjustment.`);
+  const jobVerifierRows = run(psql, ["-v", "ON_ERROR_STOP=1", "-d", dbName, "-tA", "-F", "|", "-f",
+    "scripts/kai-measurement-mvp-cross-source-reconciliation-jobs-verify-read-only.sql"], { capture: true }).stdout.trim().split("\n");
+  if (jobVerifierRows.find((row) => row.startsWith("99|OVERALL|"))?.split("|")[2] !== "PASS") {
+    throw new Error(`Plan A reconciliation job verifier failed:\n${jobVerifierRows.join("\n")}`);
+  }
+  console.log("Plan A reconciliation job verifier: OVERALL PASS.");
   await printCatalog();
   console.log(`Plan A chain schema fingerprint: ${(await catalog(schemaFingerprintSql))[0].fingerprint}`);
 
