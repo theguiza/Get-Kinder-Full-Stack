@@ -51,7 +51,8 @@ const REVIEW_COCKPIT_QUEUE_QUERY_KEYS = new Set([
   "queue_type",
   "queue_status",
 ]);
-const REVIEW_COCKPIT_DECISION_REQUEST_KEYS = new Set(["outcome", "reviewed_source_type"]);
+// supersedes_source_version_id: the current version a promoted successor replaces (optional).
+const REVIEW_COCKPIT_DECISION_REQUEST_KEYS = new Set(["outcome", "reviewed_source_type", "supersedes_source_version_id"]);
 
 const REVIEW_COCKPIT_QUEUE_TYPE_SET = new Set(REVIEW_COCKPIT_QUEUE_TYPES);
 const REVIEW_COCKPIT_QUEUE_STATUS_SET = new Set(REVIEW_COCKPIT_QUEUE_STATUSES);
@@ -256,6 +257,14 @@ export function validateSourceCandidateDecisionRequest(payload) {
       ok: false,
       blockers: [requestBlocker("reviewed_source_type_not_allowed_for_outcome", "body.reviewed_source_type")],
     };
+  }
+  if (Object.hasOwn(payload, "supersedes_source_version_id")) {
+    if (payload.outcome !== "promoted") {
+      return { ok: false, blockers: [requestBlocker("supersedes_source_version_not_allowed_for_outcome", "body.supersedes_source_version_id")] };
+    }
+    if (!KAI_SPRINT2_P0_PATTERNS.uuid.test(payload.supersedes_source_version_id) || payload.supersedes_source_version_id !== payload.supersedes_source_version_id.toLowerCase()) {
+      return { ok: false, blockers: [requestBlocker("invalid_uuid_field", "body.supersedes_source_version_id")] };
+    }
   }
 
   return { ok: true, blockers: [] };

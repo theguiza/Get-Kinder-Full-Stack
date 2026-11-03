@@ -47,9 +47,10 @@ function isReviewedSourceTypeShapeValidForOutcome(outcome, reviewedSourceType) {
 }
 
 function isCreateSourcePromotionDecisionInput(value) {
-  const allowedKeys = new Set(["organizationId", "intakeSourceCandidateId", "outcome", "reviewedSourceType", "actorContext", "now"]);
+  const allowedKeys = new Set(["organizationId", "intakeSourceCandidateId", "outcome", "reviewedSourceType", "supersedesSourceVersionId", "actorContext", "now"]);
   if (!isPlainObject(value) || !Object.keys(value).every((key) => allowedKeys.has(key))) return false;
   if (!ALLOWED_DECISION_OUTCOMES.has(value.outcome)) return false;
+  if (value.supersedesSourceVersionId !== undefined && (value.outcome !== "promoted" || !isNonEmptyString(value.supersedesSourceVersionId))) return false;
   return (
     isNonEmptyString(value.organizationId) &&
     isNonEmptyString(value.intakeSourceCandidateId) &&
@@ -164,6 +165,7 @@ export async function createSourcePromotionDecision(input, dependencies = {}) {
     },
     outcome: input.outcome,
     ...(input.outcome === "promoted" ? { reviewedSourceType: input.reviewedSourceType } : {}),
+    ...(input.supersedesSourceVersionId !== undefined ? { supersedesSourceVersionId: input.supersedesSourceVersionId } : {}),
     actorUserId: actorContext.actorUserId,
     now: input.now,
     metadataOnlyAudit: dependencies.metadataOnlyAudit,

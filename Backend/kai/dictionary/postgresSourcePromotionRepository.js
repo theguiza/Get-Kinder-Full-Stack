@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { withTransaction } from "../db/kaiDb.js";
+import { insertRequiredSuccessfulAuditEvent } from "../db/kaiAuditQueries.js";
 import { readEffectiveAllowedUseProhibition } from "./postgresEffectiveAllowedUseResolver.js";
 import { validateEffectiveAllowedUsePermitsOperation } from "../validators/kaiEffectiveAllowedUseValidators.js";
 import {
@@ -117,6 +118,9 @@ const SOURCE_PROMOTION_VALIDATOR_KEY = "VAL-KAI-P1-08-001";
 const SOURCE_PROMOTION_PERMISSION_VALIDATOR_KEY = "VAL-KAI-P1-08-002";
 const SOURCE_PROMOTION_TYPE_VALIDATOR_KEY = "VAL-KAI-P1-08-003";
 const SOURCE_PROMOTION_AUDIT_OPERATION = "source_promotion_decision_persisted";
+// The extra required audit of a successor promotion (kai.audit_events), naming
+// the logical source, the new current version and the version it replaced.
+const SOURCE_VERSION_SUPERSESSION_AUDIT_OPERATION = "source_version_superseded";
 
 /**
  * Diagnostic-only exact_verification_phase tokens: non-sensitive, stable labels
@@ -135,6 +139,7 @@ const SOURCE_PROMOTION_EXACT_VERIFICATION_PHASE = Object.freeze({
   PERMISSION_PREDICATE_FAILED: "source_promotion_permission_predicate_failed",
   ALLOWED_USE_NOT_ALLOWED: "source_promotion_allowed_use_not_allowed",
   CANDIDATE_REVIEW_INCOMPLETE: "source_promotion_candidate_review_incomplete",
+  SUCCESSOR_INVALID: "source_promotion_successor_invalid",
 });
 
 /**
@@ -157,6 +162,9 @@ const SOURCE_PROMOTION_QUERY_STAGE = Object.freeze({
   REVIEW_QUEUE_RESOLVE: "review_queue_resolve",
   REVIEW_QUEUE_WAITING_ON_CLIENT: "review_queue_waiting_on_client",
   AUDIT_INSERT: "audit_insert",
+  PREDECESSOR_VERSION_READ: "predecessor_version_read",
+  SUCCESSOR_FILE_FORMAT_READ: "successor_file_format_read",
+  PREDECESSOR_VERSION_RETIRE: "predecessor_version_retire",
 });
 
 const SOURCE_PROMOTION_SQLSTATE_TOKEN = Object.freeze({
@@ -274,9 +282,12 @@ function isReviewedSourceTypeShapeValidForOutcome(outcome, reviewedSourceType) {
 }
 
 function validateCreateInput(input) {
-  const allowedKeys = new Set(["identity", "outcome", "reviewedSourceType", "actorUserId", "now", "metadataOnlyAudit"]);
+  const allowedKeys = new Set(["identity", "outcome", "reviewedSourceType", "supersedesSourceVersionId", "actorUserId", "now", "metadataOnlyAudit"]);
   if (!isPlainObject(input) || !hasOnlyKeys(input, allowedKeys)) return false;
   if (!ALLOWED_DECISION_OUTCOMES.has(input.outcome)) return false;
+  // A successor names the current version it replaces, and only a promotion can.
+  if (input.supersedesSourceVersionId !== undefined
+    && (input.outcome !== DECISION_STATUS_PROMOTED || !isNonEmptyString(input.supersedesSourceVersionId))) return false;
   return (
     isSourcePromotionIdentity(input.identity) &&
     isReviewedSourceTypeShapeValidForOutcome(input.outcome, input.reviewedSourceType) &&
@@ -518,6 +529,52 @@ async function insertSourceIfAbsent(tx, source) {
        DO NOTHING
      RETURNING source_id, organization_id, source_code, reviewed_source_type, created_at`,
     [source.organizationId, source.sourceCode, source.reviewedSourceType, source.createdBy || null, source.createdByType || "human"],
+  );
+  return result.rows[0] ?? null;
+}
+
+/**
+ * Source-version supersession: the predecessor a successor promotion names,
+ * locked FOR UPDATE in this organization. Its currentness is re-read under the
+ * lock, so of two promotions naming the same predecessor only the first can
+ * retire it; the second observes it no longer current.
+ */
+async function readPredecessorVersionForUpdate(tx, { organizationId, sourceVersionId }) {
+  const result = await taggedQuery(
+    tx,
+    SOURCE_PROMOTION_QUERY_STAGE.PREDECESSOR_VERSION_READ,
+    `SELECT source_version_id::text AS source_version_id, organization_id::text AS organization_id, source_id::text AS source_id,
+            intake_source_candidate_id::text AS intake_source_candidate_id, is_current
+       FROM kai.source_versions
+      WHERE organization_id = $1::uuid AND source_version_id = $2::uuid
+      FOR UPDATE`,
+    [organizationId, sourceVersionId],
+  );
+  return result.rows[0] ?? null;
+}
+
+// The two uploads' extensions: a successor replaces a source with the same kind of file.
+async function readIntakeFileExtensions(tx, { organizationId, intakeFileIds }) {
+  const result = await taggedQuery(
+    tx,
+    SOURCE_PROMOTION_QUERY_STAGE.SUCCESSOR_FILE_FORMAT_READ,
+    `SELECT intake_file_id::text AS intake_file_id, lower(file_extension) AS file_extension
+       FROM kai.intake_files
+      WHERE organization_id = $1::uuid AND intake_file_id = ANY($2::uuid[])`,
+    [organizationId, intakeFileIds],
+  );
+  return new Map(result.rows.map((row) => [row.intake_file_id, row.file_extension]));
+}
+
+async function retirePredecessorVersionIfCurrent(tx, { organizationId, sourceVersionId }) {
+  const result = await taggedQuery(
+    tx,
+    SOURCE_PROMOTION_QUERY_STAGE.PREDECESSOR_VERSION_RETIRE,
+    `UPDATE kai.source_versions
+        SET is_current = false
+      WHERE organization_id = $1::uuid AND source_version_id = $2::uuid AND is_current = true
+      RETURNING source_version_id::text AS source_version_id`,
+    [organizationId, sourceVersionId],
   );
   return result.rows[0] ?? null;
 }
@@ -904,6 +961,7 @@ async function buildReplayPayload(tx, identity, decisionRecord) {
 export function createPostgresSourcePromotionRepository({
   runInTransaction = withTransaction,
   beforeInsert = async () => {},
+  insertAuditEvent = insertRequiredSuccessfulAuditEvent,
 } = {}) {
   /**
    * Shared 'promoted' work: validates the reviewed-source-type predicate and the
@@ -916,7 +974,7 @@ export function createPostgresSourcePromotionRepository({
    * `{ blocker: code }` for a validator failure, or `{ sourceRecord,
    * sourceVersionRecord }` on success.
    */
-  async function performPromotionSourceWork(tx, { candidateRow, reviewedSourceType, actorUserId }) {
+  async function performPromotionSourceWork(tx, { candidateRow, reviewedSourceType, supersedesSourceVersionId, actorUserId }) {
     if (!satisfiesReviewedSourceTypePredicate(reviewedSourceType)) {
       return {
         blocker: "validation_blocker",
@@ -956,6 +1014,10 @@ export function createPostgresSourcePromotionRepository({
           ? SOURCE_PROMOTION_EXACT_VERIFICATION_PHASE.ALLOWED_USE_NOT_ALLOWED
           : null,
       };
+    }
+
+    if (supersedesSourceVersionId !== undefined) {
+      return performSuccessorPromotionSourceWork(tx, { candidateRow, reviewedSourceType, supersedesSourceVersionId, actorUserId });
     }
 
     const sourceCode = computeSourceCode({
@@ -1031,7 +1093,79 @@ export function createPostgresSourcePromotionRepository({
     return { sourceRecord, sourceVersionRecord };
   }
 
-  async function writeRequiredAuditAndReturn(tx, { metadataOnlyAudit, candidateRow, decisionRecord, candidateRecord, reviewQueueRecord, now, sourceRecord, sourceVersionRecord }) {
+  /**
+   * A successor promotion: the reviewed candidate becomes the new current
+   * version of the logical source its named predecessor belongs to, in this
+   * same transaction. The predecessor must be this organization's current
+   * version of a source of the same reviewed type, from the same kind of file;
+   * its candidate is locked first (the lock every measurement and evidence
+   * write on that version takes), so no write on the predecessor commits after
+   * it stops being current. The predecessor row stays as it was, except that
+   * it is no longer current; every evidence item, measurement and released
+   * output that cites it keeps citing it.
+   */
+  async function performSuccessorPromotionSourceWork(tx, { candidateRow, reviewedSourceType, supersedesSourceVersionId, actorUserId }) {
+    const invalid = { blocker: "validation_blocker", exactVerificationPhase: SOURCE_PROMOTION_EXACT_VERIFICATION_PHASE.SUCCESSOR_INVALID };
+    const organizationId = candidateRow.organization_id;
+    const unlockedPredecessor = await getScopedSourceVersionById({ organizationId, sourceVersionId: supersedesSourceVersionId }, tx);
+    if (!unlockedPredecessor) return { blocker: "not_found" };
+    if (unlockedPredecessor.intake_source_candidate_id === candidateRow.intake_source_candidate_id) return invalid;
+    const predecessorCandidateRow = await getScopedSourceCandidateByIdentity(
+      { organizationId, intakeSourceCandidateId: unlockedPredecessor.intake_source_candidate_id },
+      tx,
+    );
+    if (!predecessorCandidateRow) return { blocker: "not_found" };
+    const predecessor = await readPredecessorVersionForUpdate(tx, { organizationId, sourceVersionId: supersedesSourceVersionId });
+    if (!predecessor || predecessor.source_id !== unlockedPredecessor.source_id) throw new ConcurrentStateChangedError("source_version");
+    if (predecessor.is_current !== true) return { blocker: "conflict_current_state_changed" };
+    const sourceRow = await getScopedSourceById({ organizationId, sourceId: predecessor.source_id }, tx);
+    if (!sourceRow) return { blocker: "not_found" };
+    if (sourceRow.reviewed_source_type !== reviewedSourceType) return invalid;
+    const extensions = await readIntakeFileExtensions(tx, { organizationId, intakeFileIds: [candidateRow.intake_file_id, predecessorCandidateRow.intake_file_id] });
+    const successorExtension = extensions.get(candidateRow.intake_file_id);
+    if (!successorExtension || successorExtension !== extensions.get(predecessorCandidateRow.intake_file_id)) return invalid;
+
+    const retired = await retirePredecessorVersionIfCurrent(tx, { organizationId, sourceVersionId: supersedesSourceVersionId });
+    if (!retired) return { blocker: "conflict_current_state_changed" };
+    const insertedSourceVersionRow = await insertSourceVersionIfAbsent(tx, {
+      organizationId,
+      sourceId: predecessor.source_id,
+      intakeSourceCandidateId: candidateRow.intake_source_candidate_id,
+      intakeSensitivityProfileId: candidateRow.intake_sensitivity_profile_id,
+      profileCanonicalSha256: candidateRow.profile_canonical_sha256,
+      createdBy: actorUserId,
+      createdByType: "human",
+    });
+    if (!insertedSourceVersionRow) throw new ConcurrentStateChangedError("source_version");
+    const sourceVersionRecord = rowToSourceVersionRecord(insertedSourceVersionRow);
+    if (sourceVersionRecord.source_id !== predecessor.source_id || sourceVersionRecord.is_current !== true
+      || sourceVersionRecord.intake_source_candidate_id !== candidateRow.intake_source_candidate_id) {
+      throw new MalformedInsertedRowError("source_versions");
+    }
+    return { sourceRecord: rowToSourceRecord(sourceRow), sourceVersionRecord, supersededSourceVersionId: predecessor.source_version_id };
+  }
+
+  async function writeSupersessionAudit(tx, { organizationId, actorUserId, now, sourceId, sourceVersionId, supersededSourceVersionId }) {
+    const audit = await insertAuditEvent({
+      operation: SOURCE_VERSION_SUPERSESSION_AUDIT_OPERATION,
+      operation_type: SOURCE_VERSION_SUPERSESSION_AUDIT_OPERATION,
+      actor_user_id: actorUserId,
+      actor_type: "human",
+      organization_id: organizationId,
+      object_type: "source_version",
+      target_object_type: "source_version",
+      object_id: sourceVersionId,
+      source_id: sourceId,
+      source_version_id: sourceVersionId,
+      superseded_source_version_id: supersededSourceVersionId,
+      reason_code: "source_version_superseded",
+      validator_key: SOURCE_PROMOTION_VALIDATOR_KEY,
+      created_at: now,
+    }, tx);
+    if (audit?.ok !== true) throw new RequiredAuditRejectedError();
+  }
+
+  async function writeRequiredAuditAndReturn(tx, { metadataOnlyAudit, candidateRow, decisionRecord, candidateRecord, reviewQueueRecord, now, sourceRecord, sourceVersionRecord, supersededSourceVersionId = null, actorUserId = null }) {
     const uploadState = await readScopedUploadState(tx, candidateRow.organization_id, candidateRow.intake_file_id);
     if (!uploadState) return sourcePromotionFailure("not_found");
 
@@ -1048,6 +1182,16 @@ export function createPostgresSourcePromotionRepository({
       now,
     });
     await preparedAudit.publish();
+    if (supersededSourceVersionId) {
+      await writeSupersessionAudit(tx, {
+        organizationId: candidateRow.organization_id,
+        actorUserId,
+        now,
+        sourceId: sourceRecord.source_id,
+        sourceVersionId: sourceVersionRecord.source_version_id,
+        supersededSourceVersionId,
+      });
+    }
 
     return sourcePromotionSuccess({
       promotionDecision: decisionRecord,
@@ -1055,8 +1199,27 @@ export function createPostgresSourcePromotionRepository({
       reviewQueueItem: reviewQueueRecord,
       source: sourceRecord ?? null,
       sourceVersion: sourceVersionRecord ?? null,
+      supersededSourceVersionId,
       replayed: false,
     });
+  }
+
+  /**
+   * A replay naming a predecessor must find the decision bound to that
+   * predecessor's logical source; otherwise it is a different request for an
+   * already-decided candidate. Reads only; nothing is written.
+   */
+  async function confirmReplayedSuccession(decided, { identity, supersedesSourceVersionId }) {
+    const { source, sourceVersion } = decided.data;
+    // A replay naming no predecessor returns the recorded decision as it is
+    // (it writes nothing), including one that recorded a succession.
+    if (supersedesSourceVersionId === undefined) return decided;
+    if (!source || !sourceVersion) return sourcePromotionFailure("conflict_current_state_changed");
+    const predecessor = await runInTransaction((tx) => getScopedSourceVersionById({ organizationId: identity.organizationId, sourceVersionId: supersedesSourceVersionId }, tx));
+    if (!predecessor || predecessor.source_id !== source.source_id || predecessor.source_version_id === sourceVersion.source_version_id) {
+      return sourcePromotionFailure("conflict_current_state_changed");
+    }
+    return sourcePromotionSuccess({ ...decided.data, supersededSourceVersionId: predecessor.source_version_id });
   }
 
   return Object.freeze({
@@ -1081,9 +1244,9 @@ export function createPostgresSourcePromotionRepository({
           exact_verification_phase: SOURCE_PROMOTION_EXACT_VERIFICATION_PHASE.REPOSITORY_INPUT_SHAPE,
         });
       }
-      const { identity, outcome, reviewedSourceType, actorUserId, now, metadataOnlyAudit } = input;
+      const { identity, outcome, reviewedSourceType, supersedesSourceVersionId, actorUserId, now, metadataOnlyAudit } = input;
       try {
-        return await runInTransaction(async (tx) => {
+        const decided = await runInTransaction(async (tx) => {
           const existingDecisionRow = await getScopedSourcePromotionDecisionByIdentity(identity, tx);
 
           if (existingDecisionRow) {
@@ -1180,7 +1343,7 @@ export function createPostgresSourcePromotionRepository({
             }
 
             // outcome === DECISION_STATUS_PROMOTED
-            const promotionWork = await performPromotionSourceWork(tx, { candidateRow, reviewedSourceType, actorUserId });
+            const promotionWork = await performPromotionSourceWork(tx, { candidateRow, reviewedSourceType, supersedesSourceVersionId, actorUserId });
             if (promotionWork.blocker) {
               return sourcePromotionFailure(
                 promotionWork.blocker,
@@ -1188,7 +1351,7 @@ export function createPostgresSourcePromotionRepository({
                 promotionWork.blockers || null,
               );
             }
-            const { sourceRecord, sourceVersionRecord } = promotionWork;
+            const { sourceRecord, sourceVersionRecord, supersededSourceVersionId = null } = promotionWork;
 
             const promotedCandidateRow = await setCandidateStatusIfCurrent(tx, {
               organizationId: candidateRow.organization_id,
@@ -1227,6 +1390,8 @@ export function createPostgresSourcePromotionRepository({
               now,
               sourceRecord,
               sourceVersionRecord,
+              supersededSourceVersionId,
+              actorUserId,
             });
           }
 
@@ -1367,7 +1532,7 @@ export function createPostgresSourcePromotionRepository({
           }
 
           // outcome === DECISION_STATUS_PROMOTED
-          const promotionWork = await performPromotionSourceWork(tx, { candidateRow, reviewedSourceType, actorUserId });
+          const promotionWork = await performPromotionSourceWork(tx, { candidateRow, reviewedSourceType, supersedesSourceVersionId, actorUserId });
           if (promotionWork.blocker) {
             return sourcePromotionFailure(
               promotionWork.blocker,
@@ -1375,7 +1540,7 @@ export function createPostgresSourcePromotionRepository({
               promotionWork.blockers || null,
             );
           }
-          const { sourceRecord, sourceVersionRecord } = promotionWork;
+          const { sourceRecord, sourceVersionRecord, supersededSourceVersionId = null } = promotionWork;
 
           const promotedCandidateRow = await setCandidateStatusIfCurrent(tx, {
             organizationId: candidateRow.organization_id,
@@ -1422,8 +1587,13 @@ export function createPostgresSourcePromotionRepository({
             now,
             sourceRecord,
             sourceVersionRecord,
+            supersededSourceVersionId,
+            actorUserId,
           });
         });
+        return decided.ok === true && decided.data?.replayed === true && outcome === DECISION_STATUS_PROMOTED
+          ? await confirmReplayedSuccession(decided, { identity, supersedesSourceVersionId })
+          : decided;
       } catch (error) {
         return shapeSourcePromotionError(error);
       }

@@ -594,6 +594,10 @@ test("P1-08 repository: every whitelisted query-stage x grouped-SQLSTATE combina
     "review_queue_resolve",
     "review_queue_waiting_on_client",
     "audit_insert",
+    // Source-version supersession (a successor promotion).
+    "predecessor_version_read",
+    "successor_file_format_read",
+    "predecessor_version_retire",
   ];
   assert.deepEqual(Object.keys(byStage).sort(), [...expectedStages].sort());
 
