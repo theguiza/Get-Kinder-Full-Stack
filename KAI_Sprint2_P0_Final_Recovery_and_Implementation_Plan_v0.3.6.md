@@ -46212,3 +46212,19 @@ The final synthetic run used logical source `fb199f6f-fbe0-435a-9f81-07e12933636
 **Limitations (NOT_CONFIRMED):** the PostgreSQL decision-ledger and review-work integration suites were skipped (runner-owned database not authorized); the scripted transaction is not PostgreSQL. No production or deployed behavior was exercised; no push.
 
 **Status:** SMALL_CELL_PACKAGE_2A_IMPLEMENTED_AND_SYNTHETICALLY_VERIFIED_LOCALLY; POSTGRESQL_AND_PRODUCTION_NOT_VERIFIED. Stop at this package boundary.
+
+### Small-cell Package 2B: review-write-to-coverage connected synthetic handoff (2026-11-03)
+
+**Authorization (USER_CONFIRMED):** owner prompt "KAI — Package 2B" authorizes one connected synthetic regression test, bounded repair only if that test demonstrates an attributable defect, and one local commit. Production, databases, schema, deployment, push, flags, credentials, real data, Package 2C and Current State remain excluded.
+
+**Start (TOOL_VERIFIED):** `main` at `0b905e7301fdab79f4d61d3b720abc745b3a0912` (Package 2A), clean; Package 1 `7e8247f8` is an ancestor. Every Node command used a non-listening loopback database sentinel.
+
+**Test (TOOL_VERIFIED):** `__tests__/kai-small-cell-review-coverage-handoff.spec.js` runs the real `recordSensitivityAllowedUseDecision` service, real sensitivity-review repository, real decision INSERT, real `findCurrentSensitivityAllowedUseDecision`, and the real `createPostgresEvidenceCoverageAssessmentRepository` through `assessEvidenceCoverageForSourceVersion`, all over one stateful synthetic transaction adapter. Decision state changes only when the real INSERT executes (values bound by the INSERT's own column list); head SELECTs are derived from that state by the no-successor rule; the queue compare-and-set applies the real status/OCC predicate; root/single-successor/FK lineage constraints are modelled; unknown statements throw. Sequence: unknown profile → `unresolved`; reviewed `absent` (one INSERT, queue resolved at T1, audit prepared/published/recorded) → same head read by coverage → `resolved_clear`; fresh review on T1 inserts `present` superseding it → `resolved_risk_flagged`; stale changed submission on obsolete T1 → 409 `conflict_current_state_changed`, no INSERT, head and coverage unchanged; identical re-send still replays (2A preserved); second profile in the same organization stays `unresolved`; machine profile stays `unknown` throughout. A temporary mutation of `effectiveSmallCellRiskStatus` to ignore the decision made the test fail; the mutation was reverted.
+
+**Production defect:** none found; no production code changed.
+
+**Verification (TOOL_VERIFIED):** new handoff 2/2; together with B1A-2 boundary, B1A-2 integration, small-cell effective decision, P2-02 boundary/route/integration and P2-10 boundary: 113 tests, 111 pass, 0 fail, 2 skipped (the B1A-2 and P2-02 PostgreSQL integration suites, runner-owned database not authorized). `git diff --check` clean.
+
+**Limitations (NOT_CONFIRMED):** the synthetic adapter is not PostgreSQL persistence; real lock contention, REPEATABLE READ snapshot semantics, production, browser and the original user-visible small-cell interference were not exercised. No push.
+
+**Status:** SMALL_CELL_PACKAGE_2B_CONNECTED_SYNTHETIC_HANDOFF_VERIFIED_LOCALLY; POSTGRESQL_AND_PRODUCTION_NOT_VERIFIED. Stop at this package boundary.
