@@ -1,4 +1,5 @@
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -315,19 +316,81 @@ try {
   psqlFile("migrations/kai_sprint2_measurement_mvp_source_derived_measurements.sql");
   if (psqlExec(legacySnapshotSql) !== derivedEvidenceBefore) throw new Error("source-derived measurement migration changed an evidence, locator, or claim row");
   if (psqlExec(measurementSnapshotSql) !== derivedMeasurementsBefore) throw new Error("source-derived measurement migration changed a record-count definition or measurement");
-  // The XLSX verifier pins the exact text of three vocabulary CHECKs this
-  // migration widens by one value each (evidence type, type/class pairing,
-  // locator type); its behavioural checks of every record-count method and
-  // locator vector, and every other CHECK, must still pass.
+  // The XLSX verifier is version-aware: after the derived-measurement
+  // migration it verifies the three vocabulary CHECKs that migration widens by
+  // behaviour, and every record-count method, locator and the data-class
+  // CHECK exactly as before.
+  const derivedVerifier = () => run(psql, ["-v", "ON_ERROR_STOP=1", "-d", dbName, "-tA", "-F", "|", "-f",
+    "scripts/kai-measurement-mvp-derived-measurements-verify-read-only.sql"], { capture: true }).stdout.trim().split("\n");
+  const stateOf = (rows, checkId) => rows.find((row) => row.split("|")[1] === checkId)?.split("|")[4];
   const xlsxAfterDerived = xlsxVerifier();
-  const xlsxStatus = (checkId) => xlsxAfterDerived.find((row) => row.split("|")[1] === checkId)?.split("|")[2];
-  const widened = ["X3.unchanged_evidence_items_p2_01_evidence_type_check", "X3.unchanged_evidence_items_p2_01m_type_class_pairing_check", "X3.unchanged_source_locators_p2_01_locator_type_check"];
-  if (overall(identityVerifier()) !== "PASS"
-    || ["X1.method_vectors", "X2.locator_vectors", "X3.unchanged_evidence_items_p2_01_data_class_check"].some((checkId) => xlsxStatus(checkId) !== "PASS")
-    || widened.some((checkId) => xlsxStatus(checkId) !== "FAIL")) {
+  if (overall(identityVerifier()) !== "PASS" || overall(xlsxAfterDerived) !== "PASS"
+    || stateOf(xlsxAfterDerived, "X0.schema_state") !== "after the derived-measurement migration") {
     throw new Error(`the source-derived measurement migration changed the verified record-count behaviour:\n${xlsxAfterDerived.join("\n")}`);
   }
-  console.log("Measurement MVP source-derived measurements: applied twice; every existing evidence, locator, claim and record-count row unchanged; worksheet identity verifier PASS; every record-count method and locator vector unchanged; only the three widened vocabulary CHECKs differ.");
+  const derivedBeforeCross = derivedVerifier();
+  if (overall(derivedBeforeCross) !== "PASS" || stateOf(derivedBeforeCross, "D0.schema_state") !== "before the cross-source reach migration") {
+    throw new Error(`derived-measurement verifier failed before the cross-source migration:\n${derivedBeforeCross.join("\n")}`);
+  }
+  console.log("Measurement MVP source-derived measurements: applied twice; every existing evidence, locator, claim and record-count row unchanged; worksheet identity verifier PASS; XLSX method verifier OVERALL PASS (widened CHECKs verified by behaviour); derived-measurement verifier OVERALL PASS before the cross-source migration.");
+
+  // Cross-source reach: additive over the derived tables; applied twice, no
+  // existing row changes, and both verifiers pass in the new state.
+  const derivedRowsSql = "SELECT md5(coalesce(string_agg(row_to_json(m)::text, '|' ORDER BY m.source_derived_measurement_id), '')) FROM kai.source_derived_measurements m;";
+  const derivedRowsBeforeCross = psqlExec(derivedRowsSql);
+  const evidenceBeforeCross = psqlExec(legacySnapshotSql);
+  psqlFile("migrations/kai_sprint2_measurement_mvp_cross_source_reach.sql");
+  psqlFile("migrations/kai_sprint2_measurement_mvp_cross_source_reach.sql");
+  if (psqlExec(derivedRowsSql) !== derivedRowsBeforeCross || psqlExec(legacySnapshotSql) !== evidenceBeforeCross) {
+    throw new Error("cross-source reach migration changed an existing row");
+  }
+  const derivedAfterCross = derivedVerifier();
+  if (overall(derivedAfterCross) !== "PASS" || stateOf(derivedAfterCross, "D0.schema_state") !== "after the cross-source reach migration" || overall(xlsxVerifier()) !== "PASS") {
+    throw new Error(`verifiers failed after the cross-source migration:\n${derivedAfterCross.join("\n")}`);
+  }
+
+  // Each verifier rejects a deliberately missing or weakened constraint. Every
+  // change runs inside a transaction that is rolled back.
+  const verifyWith = (statements, verifierPath) => {
+    const file = join(workDir, `weakened-${randomUUID()}.sql`);
+    writeFileSync(file, `BEGIN;\n${statements}\n\\i ${join(repoRoot, verifierPath)}\nROLLBACK;\n`);
+    return run(psql, ["-q", "-v", "ON_ERROR_STOP=1", "-d", dbName, "-tA", "-F", "|", "-f", file], { capture: true }).stdout.trim().split("\n");
+  };
+  const XLSX_VERIFIER = "scripts/kai-sprint2-p2-01m-xlsx-worksheet-method-verify-read-only.sql";
+  const DERIVED_VERIFIER = "scripts/kai-measurement-mvp-derived-measurements-verify-read-only.sql";
+  const weakenings = [
+    ["evidence type CHECK missing", XLSX_VERIFIER, "X3.unchanged_evidence_items_p2_01_evidence_type_check",
+      "ALTER TABLE kai.evidence_items DROP CONSTRAINT evidence_items_p2_01_evidence_type_check;"],
+    ["evidence type CHECK admits any value", XLSX_VERIFIER, "X3.unchanged_evidence_items_p2_01_evidence_type_check",
+      "ALTER TABLE kai.evidence_items DROP CONSTRAINT evidence_items_p2_01_evidence_type_check, ADD CONSTRAINT evidence_items_p2_01_evidence_type_check CHECK (evidence_type IS NOT NULL) NOT VALID;"],
+    ["type/class pairing admits a derived fact as metadata", XLSX_VERIFIER, "X3.unchanged_evidence_items_p2_01m_type_class_pairing_check",
+      "ALTER TABLE kai.evidence_items DROP CONSTRAINT evidence_items_p2_01m_type_class_pairing_check, ADD CONSTRAINT evidence_items_p2_01m_type_class_pairing_check CHECK (evidence_type IN ('dictionary_field_presence_fact', 'source_record_count_measurement', 'source_derived_measurement')) NOT VALID;"],
+    ["data-class CHECK text changed", XLSX_VERIFIER, "X3.unchanged_evidence_items_p2_01_data_class_check",
+      "ALTER TABLE kai.evidence_items DROP CONSTRAINT evidence_items_p2_01_data_class_check, ADD CONSTRAINT evidence_items_p2_01_data_class_check CHECK (data_class IS NOT NULL) NOT VALID;"],
+    ["arithmetic CHECK missing", DERIVED_VERIFIER, "D2.measurement:source_derived_measurements_arithmetic_check",
+      "ALTER TABLE kai.source_derived_measurements DROP CONSTRAINT source_derived_measurements_arithmetic_check;"],
+    ["cross-source funnel removed from the arithmetic CHECK", DERIVED_VERIFIER, "D2.measurement:source_derived_measurements_arithmetic_check",
+      "ALTER TABLE kai.source_derived_measurements DROP CONSTRAINT source_derived_measurements_arithmetic_check, ADD CONSTRAINT source_derived_measurements_arithmetic_check CHECK (measured_value >= 0 AND numerator = measured_value) NOT VALID;"],
+    ["paired counts CHECK missing", DERIVED_VERIFIER, "D2.measurement:source_derived_measurements_paired_counts_check",
+      "ALTER TABLE kai.source_derived_measurements DROP CONSTRAINT source_derived_measurements_paired_counts_check;"],
+    ["interpretation basis admits verified", DERIVED_VERIFIER, "D3.interpretation_vectors",
+      "ALTER TABLE kai.source_derived_measurement_interpretations DROP CONSTRAINT source_derived_measurement_interpretations_basis_check, ADD CONSTRAINT source_derived_measurement_interpretations_basis_check CHECK (evidence_basis IS NOT NULL) NOT VALID;"],
+    ["append-only trigger missing", DERIVED_VERIFIER, "D5.append_only_triggers",
+      "DROP TRIGGER trg_source_derived_measurement_interpretations_append_only ON kai.source_derived_measurement_interpretations;"],
+    ["contributing-source role CHECK missing", DERIVED_VERIFIER, "D7.contributing_sources",
+      "ALTER TABLE kai.source_derived_measurement_sources DROP CONSTRAINT source_derived_measurement_sources_role_check;"],
+    ["contributing-source admission trigger missing", DERIVED_VERIFIER, "D7.contributing_sources",
+      "DROP TRIGGER trg_source_derived_measurement_sources_admitted ON kai.source_derived_measurement_sources;"],
+    ["identity index missing", DERIVED_VERIFIER, "D6.unique_identity_indexes",
+      "DROP INDEX kai.source_derived_measurement_interpretations_history_unique;"],
+  ];
+  for (const [name, verifierPath, checkId, statements] of weakenings) {
+    const rows = verifyWith(statements, verifierPath);
+    const status = (id) => rows.find((row) => row.split("|")[1] === id)?.split("|")[2];
+    if (status(checkId) !== "FAIL" || status("OVERALL") !== "FAIL") throw new Error(`verifier did not reject ${name}:\n${rows.join("\n")}`);
+  }
+  if (overall(derivedVerifier()) !== "PASS" || overall(xlsxVerifier()) !== "PASS") throw new Error("a rolled-back weakening changed the schema");
+  console.log(`Cross-source reach: applied twice with no existing row changed; derived-measurement verifier OVERALL PASS after it; ${weakenings.length} deliberately missing or weakened constraints each rejected (FAIL) and rolled back.`);
 
   const testResult = spawnSync("node", [
     "--test",
