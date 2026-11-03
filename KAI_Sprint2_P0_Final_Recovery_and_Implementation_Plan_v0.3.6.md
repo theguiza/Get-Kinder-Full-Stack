@@ -46157,3 +46157,28 @@ The final synthetic run used logical source `fb199f6f-fbe0-435a-9f81-07e12933636
 6. Nothing was pushed, deployed, migrated or verified in production.
 
 **Status:** B4_COMPLETE_LOCALLY; PRODUCTION_NOT_VERIFIED. Stop at this package boundary.
+
+### A3: backward-compatible CSV multi-source citations (2026-11-03)
+
+**Owner authorization (USER_CONFIRMED):** the owner prompt "KAI — A3: Backward-Compatible CSV Multi-Source Citations" authorizes a small, compatible CSV serializer correction, focused tests, synthetic disposable loopback acceptance and local commits. Excluded: measurement arithmetic, supersession, currentness, claim eligibility, reviewer authority, a new citation system, UI, A1/A2/A4, migrations, push, deploy, production or shared databases, real client data and `00_KAI_CURRENT_STATE.md`.
+
+**Start (TOOL_VERIFIED):** `main` at `0c88ecf`, clean. Every Node/npm command used the non-listening loopback `DATABASE_URL` sentinel; the Cedar runner created and removed its own loopback PostgreSQL cluster.
+
+**Cause (TOOL_VERIFIED):** the structured lineage reaches the CSV serializer intact. The export candidate representation adds `contributingSources` (primary and reference, from `kai.source_derived_measurement_sources`) to each multi-source measurement citation, and the render model copies it; Markdown, PDF and DOCX already print it. `serializeExportManifestRenderModelToCsv` wrote only `citation.sourceId` and `citation.sourceVersionId` (the primary) and never read `contributingSources`. This was limitation 6 of the cross-source correction lifecycle package.
+
+**Contract constraints (TOOL_VERIFIED, CSV evidence appendix section above):** the six-column header is fixed, there is one row per render-model citation, no new field is invented, and the CSV exposes the same citation relationship as the Markdown appendix. A new column would change the header, and extra rows would break the one-row-per-citation rule, so neither was used.
+
+**Correction (TOOL_VERIFIED):** `Backend/kai/services/kaiExportManifestCsvSerializer.js` writes, for a multi-source citation, the citation's own source first and then each other contributing source. The values are `;`-joined in the existing `source_id` and `source_version_id` cells, the list idiom `limitation_codes` already uses, with pairs aligned by position. Duplicates are removed by version, and the values come only from structured citations, never from claim text. A single-source citation's bytes are unchanged (golden test), and the header, row count, ordering, RFC-4180 and formula escaping, contract version `kai-sprint2-export-manifest-csv-v1`, route and render model are unchanged. Markdown, PDF and DOCX are untouched.
+
+**Verification (TOOL_VERIFIED):**
+- CSV boundary and route specs: 26/26. The new multi-source, corrected-version and route-consumer tests fail on the previous serializer (3 failures) and pass after the fix. The golden single-source and block-text tests pass on both.
+- Markdown/PDF/DOCX/render-model/CSV/route/formula/P14-11/cross-source specs: 175/175.
+- Cedar runner with `KAI_CEDAR_BRIDGE_PACKAGE`: 37/37. Test 21 reads the original cross-source release's CSV through the GK route: header pinned, 6 fields per row, each of the 7 cross-source claims cites `<events version>;<register version>`, and the 2 single-source claims cite one version. Test 30 reads the corrected release's CSV: each cross-source claim cites `<corrected events version>;<register version>`, the single-source claim cites one version, and no cell cites the replaced version.
+- `npm test`: 6,006 tests, 5,882 passed, 0 failed, 124 skipped. `git diff --check` passed.
+
+**Limitations (NOT_CONFIRMED):**
+1. A consumer that reads `source_id`/`source_version_id` as exactly one identifier sees a `;`-separated list on multi-source rows. Its first entry is the value the cell carried before. Repository consumers (the route and the download links) pass the bytes through unchanged. No external CSV consumer was inspected.
+2. The CSV does not carry each contributor's role. Role remains in Markdown, PDF, DOCX and the review packet; adding it to the CSV would need a new column (contract change).
+3. Nothing was pushed, deployed or verified in production.
+
+**Status:** A3_COMPLETE_LOCALLY; PRODUCTION_NOT_VERIFIED. Stop at this package boundary.
